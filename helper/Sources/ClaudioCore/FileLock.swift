@@ -1,6 +1,18 @@
 import Darwin
 import Foundation
 
+/// The outcome of a single non-blocking ``FileLock/attemptLock()`` call.
+public enum LockAttempt: Sendable, Equatable {
+    /// The lock is now held (or was already held by this instance).
+    case acquired
+    /// Another holder currently has the lock — a non-blocking skip (the expected
+    /// contended path for `play`'s debounce). Corresponds to `flock`'s `EWOULDBLOCK`.
+    case busy
+    /// A real system error prevented the attempt (`open`/`flock` failed for a reason
+    /// other than contention). Carries the POSIX `errno` for logging/reporting.
+    case failed(errno: Int32)
+}
+
 /// A non-blocking, exclusive `flock(2)` lock over a single path.
 ///
 /// `claudio play` runs on a synchronous hook call path, so it must **never block**
@@ -26,17 +38,42 @@ public final class FileLock {
         self.path = path
     }
 
-    /// Attempts to acquire the exclusive lock without blocking. Returns `true` if the
-    /// lock was acquired (or already held by this instance), `false` if another holder
-    /// currently has it — in which case this call returns immediately (no blocking).
+    /// Attempts to acquire the exclusive lock without blocking, distinguishing the three
+    /// outcomes that matter to `play`'s skip-style debounce:
+    ///
+    /// - ``LockAttempt/acquired`` — the lock is now held (or was already held by this
+    ///   instance); the caller may run its critical section.
+    /// - ``LockAttempt/busy`` — another holder currently has it (`flock` reported
+    ///   `EWOULDBLOCK`); the caller should skip. This is the *expected* contended path.
+    /// - ``LockAttempt/failed`` — a real system error (`open`/`flock` failed for any
+    ///   reason other than contention, e.g. `~/.claudio` was deleted or is unwritable).
+    ///
+    /// Collapsing `failed` into `busy` would make `play` silently treat a broken
+    /// filesystem as a debounce skip, so a real failure never surfaces (T1 review P1).
     @discardableResult
-    public func tryLock() -> Bool {
+    public func attemptLock() -> LockAttempt {
         if descriptor == -1 {
             let opened = open(path, O_CREAT | O_RDWR, 0o600)
-            guard opened != -1 else { return false }
+            guard opened != -1 else { return .failed(errno: errno) }
             descriptor = opened
         }
-        return flock(descriptor, LOCK_EX | LOCK_NB) == 0
+        if flock(descriptor, LOCK_EX | LOCK_NB) == 0 {
+            return .acquired
+        }
+        // Capture errno immediately: any intervening libc call would clobber it.
+        let flockErrno = errno
+        // `EWOULDBLOCK` (== `EAGAIN` on Darwin) is the one errno that means "held by
+        // someone else" — the only true contention signal. Everything else is a real
+        // error and must not be conflated with a debounce skip.
+        return flockErrno == EWOULDBLOCK ? .busy : .failed(errno: flockErrno)
+    }
+
+    /// Convenience over ``attemptLock()``: `true` iff the lock was acquired. Callers that
+    /// must tell contention (`busy`) apart from a real system error (`failed`) — as
+    /// `play` does — should use ``attemptLock()`` instead.
+    @discardableResult
+    public func tryLock() -> Bool {
+        attemptLock() == .acquired
     }
 
     /// Releases the lock (if held) and closes the underlying file descriptor. Safe to
@@ -55,15 +92,36 @@ public final class FileLock {
     }
 }
 
+/// The outcome of a ``withNonBlockingLock(path:_:)`` call.
+public enum LockedRun<T> {
+    /// The lock was acquired and `body` ran, producing this value.
+    case ran(T)
+    /// Another holder currently held the lock — `body` did **not** run (skip-style
+    /// debounce). Non-blocking: this returns immediately (ENGINEERING.md 决议 5).
+    case skipped
+    /// A real system error (not contention) prevented acquiring the lock — `body` did
+    /// **not** run. Carries the POSIX `errno` so the caller can log/report the broken
+    /// filesystem instead of silently treating it as a debounce skip (T1 review P1).
+    case failed(errno: Int32)
+}
+
 /// Runs `body` while holding a non-blocking exclusive lock on `path`.
 ///
-/// If the lock cannot be acquired immediately, returns `nil` **without** running
-/// `body` and **without blocking** — this is the "跳过式去抖" primitive `play` builds
-/// its debounce on (ENGINEERING.md 决议 5).
+/// Returns ``LockedRun/ran(_:)`` with the body's value when the lock was acquired,
+/// ``LockedRun/skipped`` when another holder currently has it (the "跳过式去抖" primitive
+/// `play` builds its debounce on), or ``LockedRun/failed(errno:)`` when a real system
+/// error stopped the attempt. Never blocks; never runs `body` unless the lock was
+/// actually acquired.
 @discardableResult
-public func withNonBlockingLock<T>(path: String, _ body: () throws -> T) rethrows -> T? {
+public func withNonBlockingLock<T>(path: String, _ body: () throws -> T) rethrows -> LockedRun<T> {
     let lock = FileLock(path: path)
-    guard lock.tryLock() else { return nil }
-    defer { lock.unlock() }
-    return try body()
+    switch lock.attemptLock() {
+    case .acquired:
+        defer { lock.unlock() }
+        return .ran(try body())
+    case .busy:
+        return .skipped
+    case .failed(let code):
+        return .failed(errno: code)
+    }
 }

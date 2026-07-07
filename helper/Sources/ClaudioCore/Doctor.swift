@@ -35,8 +35,15 @@ public func probeSettingsWritable(settingsFile: URL) -> SettingsWritability {
     }
 
     let parentDirectory = settingsFile.deletingLastPathComponent()
-    guard fileManager.fileExists(atPath: parentDirectory.path) else {
+    var parentIsDirectory: ObjCBool = false
+    guard fileManager.fileExists(atPath: parentDirectory.path, isDirectory: &parentIsDirectory)
+    else {
         return .notWritable(reason: "settings.json 所在目录不存在：\(parentDirectory.path)")
+    }
+    // A writable *file* where the parent directory should be still can't hold a new
+    // `settings.json`, so `install` would fail — require an actual directory.
+    guard parentIsDirectory.boolValue else {
+        return .notWritable(reason: "settings.json 所在父路径不是目录：\(parentDirectory.path)")
     }
     return fileManager.isWritableFile(atPath: parentDirectory.path)
         ? .writable
@@ -110,13 +117,39 @@ public func checkPackIntegrity(
 
     let missingFiles =
         manifest.events.values
-        .filter { !fileManager.fileExists(atPath: packDirectory.appendingPathComponent($0).path) }
+        .filter { eventFile in
+            // An event value must resolve to a file *inside* the pack directory. A
+            // manifest that points at `../shared/stop.mp3` (a third-party pack escaping
+            // its own directory) must be treated as missing, never as a satisfied file —
+            // otherwise `doctor` would falsely report the pack `.complete` off an
+            // out-of-pack file (T1 review P2).
+            guard let resolved = safePackFileURL(eventFile, in: packDirectory) else { return true }
+            return !fileManager.fileExists(atPath: resolved.path)
+        }
         .sorted()
 
     if missingFiles.isEmpty {
         return .complete(packID: config.selectedPack, events: manifest.events.keys.sorted())
     }
     return .incomplete(packID: config.selectedPack, missingFiles: missingFiles)
+}
+
+/// Resolves `relativeFile` (a manifest event's audio filename) against `packDirectory`,
+/// returning the URL only if it stays strictly inside `packDirectory`. Rejects empty,
+/// absolute, NUL-bearing, and `../`-escaping paths by lexically standardizing the joined
+/// URL and requiring the result to be contained by the pack root. Symlink escape is out
+/// of scope here (an install-time concern); this is the lexical guard for manifest strings.
+private func safePackFileURL(_ relativeFile: String, in packDirectory: URL) -> URL? {
+    // Scalar-level checks (mirroring `isSafePackID`): a leading `/` fused with a combining
+    // mark would slip a grapheme-level `hasPrefix("/")`. `isContained` already backstops
+    // this, but keep the fast-path reject symmetric so a future refactor can't reopen it.
+    if relativeFile.isEmpty || relativeFile.unicodeScalars.first == "/"
+        || relativeFile.unicodeScalars.contains("\0")
+    {
+        return nil
+    }
+    let candidate = packDirectory.appendingPathComponent(relativeFile)
+    return isContained(candidate, inside: packDirectory) ? candidate.standardizedFileURL : nil
 }
 
 // MARK: - Combined report

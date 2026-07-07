@@ -92,29 +92,89 @@ func runFileLockSuites() {
         }
     }
 
-    suite("withNonBlockingLock runs the body and returns its value when uncontended") {
+    suite("withNonBlockingLock runs the body and returns .ran(value) when uncontended") {
         withTempDirectory { directory in
             let lockPath = directory.appendingPathComponent("play.lock").path
-            let result = withNonBlockingLock(path: lockPath) { 42 }
-            expect(result == 42, "withNonBlockingLock should return the body's value")
+            let outcome = withNonBlockingLock(path: lockPath) { 42 }
+            if case .ran(let value) = outcome {
+                expect(value == 42, "withNonBlockingLock should carry the body's value")
+            } else {
+                expect(false, "uncontended withNonBlockingLock should be .ran, got \(outcome)")
+            }
         }
     }
 
-    suite("withNonBlockingLock returns nil without running the body when contended") {
+    suite("withNonBlockingLock returns .skipped without running the body when contended") {
         withTempDirectory { directory in
             let lockPath = directory.appendingPathComponent("play.lock").path
             let holder = FileLock(path: lockPath)
             expect(holder.tryLock(), "holder should acquire the lock first")
 
             var bodyRan = false
-            let result = withNonBlockingLock(path: lockPath) { () -> Int in
+            let outcome = withNonBlockingLock(path: lockPath) { () -> Int in
                 bodyRan = true
                 return 1
             }
 
-            expect(result == nil, "withNonBlockingLock must return nil when contended")
+            if case .skipped = outcome {
+                // expected
+            } else {
+                expect(false, "contended withNonBlockingLock must be .skipped, got \(outcome)")
+            }
             expect(!bodyRan, "withNonBlockingLock must not run the body when contended")
             holder.unlock()
+        }
+    }
+
+    suite("attemptLock reports .busy (not .failed) under real contention") {
+        withTempDirectory { directory in
+            let lockPath = directory.appendingPathComponent("play.lock").path
+            let first = FileLock(path: lockPath)
+            let second = FileLock(path: lockPath)
+            expect(first.tryLock(), "first tryLock should succeed")
+            expect(
+                second.attemptLock() == .busy,
+                "a contended attemptLock must be .busy, never .failed")
+            first.unlock()
+        }
+    }
+
+    suite("attemptLock reports .failed (not .busy) when the lock file can't be opened") {
+        withTempDirectory { directory in
+            // Parent directory does not exist → open(O_CREAT) fails with ENOENT. This is
+            // the real production failure mode: `~/.claudio` deleted or unwritable. It
+            // must NOT be mistaken for contention.
+            let unreachable =
+                directory
+                .appendingPathComponent("does-not-exist", isDirectory: true)
+                .appendingPathComponent("play.lock").path
+            let lock = FileLock(path: unreachable)
+            if case .failed = lock.attemptLock() {
+                // expected
+            } else {
+                expect(false, "open() failure must be .failed, not .busy/.acquired")
+            }
+            expect(!lock.tryLock(), "tryLock must be false when the lock file can't be opened")
+        }
+    }
+
+    suite("withNonBlockingLock surfaces .failed (never .skipped) on a real system error") {
+        withTempDirectory { directory in
+            let unreachable =
+                directory
+                .appendingPathComponent("does-not-exist", isDirectory: true)
+                .appendingPathComponent("play.lock").path
+            var bodyRan = false
+            let outcome = withNonBlockingLock(path: unreachable) { () -> Int in
+                bodyRan = true
+                return 1
+            }
+            if case .failed = outcome {
+                // expected — a broken filesystem must not masquerade as a debounce skip.
+            } else {
+                expect(false, "system error must be .failed, got \(outcome)")
+            }
+            expect(!bodyRan, "withNonBlockingLock must not run the body on a system error")
         }
     }
 

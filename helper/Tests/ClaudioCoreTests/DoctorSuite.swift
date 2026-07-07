@@ -94,6 +94,45 @@ func runDoctorSuites() {
         }
     }
 
+    suite("isSafePackID rejects traversal / separators / empty, accepts plain ids") {
+        expect(isSafePackID("minimal-chime"), "a plain pack id is safe")
+        expect(isSafePackID("pack_v2.1"), "dots and underscores in one component are safe")
+        expect(!isSafePackID(""), "empty id is unsafe")
+        expect(!isSafePackID("."), "`.` is unsafe")
+        expect(!isSafePackID(".."), "`..` is unsafe")
+        expect(!isSafePackID("../evil"), "parent traversal is unsafe")
+        expect(!isSafePackID("a/b"), "a path separator is unsafe")
+        expect(!isSafePackID("/abs"), "an absolute path is unsafe")
+    }
+
+    suite("isSafePackID is not fooled by a combining mark fused onto the separator") {
+        // "/" (U+002F) immediately followed by a combining accent (U+0301) fuses into ONE
+        // grapheme cluster, so a grapheme-level `contains("/")` misses it — but the kernel
+        // still honors the raw 0x2F and would escape the pack root one level up. The guard
+        // must reject at the Unicode-scalar level (T1 review P2, adversarial verify).
+        let sneaky = "..\u{2F}\u{301}x"  // "../" + combining mark + "x", raw 0x2F present
+        expect(sneaky.contains("/") == false, "sanity: grapheme-level contains is fooled here")
+        expect(
+            !isSafePackID(sneaky),
+            "a `/` hidden under a combining mark must still be rejected (scalar-level check)")
+    }
+
+    suite("resolvePackDirectory refuses a `../` pack id even when the target exists") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            // A real directory OUTSIDE the pack root that `../evil` would reach if the
+            // guard weren't there.
+            let escaped = root.appendingPathComponent("evil", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: escaped, withIntermediateDirectories: true)
+            let resolved = resolvePackDirectory(
+                id: "../evil", userPacksDirectory: userPacks, bundledPacksDirectory: nil)
+            expect(
+                resolved == nil,
+                "a `../` pack id must resolve to nil, never escape the pack root")
+        }
+    }
+
     suite("checkPackIntegrity: no config.json at all → .noConfig (fresh install, not an error)") {
         withTempDirectory { root in
             let status = checkPackIntegrity(
@@ -173,6 +212,27 @@ func runDoctorSuites() {
         }
     }
 
+    suite("checkPackIntegrity: a manifest event escaping the pack dir is missing, not complete") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            // Manifest points `stop` at a file OUTSIDE the pack directory via `../`.
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "../evil.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            // That external file really exists (under packsDir, outside the pack dir):
+            // a naive fileExists would find it and falsely report the pack .complete.
+            writeFixture("fake-audio", to: packsDir.appendingPathComponent("evil.mp3"))
+
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: packsDir, bundledPacksDirectory: nil)
+            expect(
+                status == .incomplete(packID: "minimal-chime", missingFiles: ["../evil.mp3"]),
+                "an escaping event path must be reported missing, not complete — got \(status)")
+        }
+    }
+
     suite("checkPackIntegrity: all declared audio files present → .complete") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -242,6 +302,22 @@ func runDoctorSuites() {
             expect(
                 !FileManager.default.fileExists(atPath: settingsFile.path),
                 "probing writability must never create/touch the real file")
+        }
+    }
+
+    suite("probeSettingsWritable: parent path exists but is a regular file → .notWritable") {
+        withTempDirectory { root in
+            // `notADir` is a writable file, not a directory. `install` still can't create
+            // `settings.json` under it, so the probe must report .notWritable rather than
+            // be fooled into .writable by the parent being writable (T1 review P2).
+            let notADir = root.appendingPathComponent("notADir")
+            writeFixture("i am a file", to: notADir)
+            let settingsFile = notADir.appendingPathComponent("settings.json")
+            if case .notWritable = probeSettingsWritable(settingsFile: settingsFile) {
+                // expected
+            } else {
+                expect(false, "a non-directory parent must report .notWritable")
+            }
         }
     }
 
