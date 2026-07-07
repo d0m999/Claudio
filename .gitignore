@@ -1,0 +1,11 @@
+# gstack local tool artifacts (browse logs, session state) — not project source
+.gstack/
+
+# macOS
+.DS_Store
+
+# Xcode / Swift (for when helper/ and gui/ land)
+.build/
+DerivedData/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
