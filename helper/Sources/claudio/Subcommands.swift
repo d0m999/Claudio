@@ -3,18 +3,24 @@ import ClaudioCore
 import Foundation
 
 extension Claudio {
-    /// `claudio doctor` — self-check. Base skeleton reports afplay + the known event set.
-    /// Full checks (settings.json writable, pack integrity) land with T2/T6.
+    /// `claudio doctor` — self-check: afplay 在位、settings.json 可写（只读探测，绝不真
+    /// 写）、当前声音包完整（无配置/无包 → warning，不判红）。硬问题（afplay 缺 /
+    /// settings.json 不可写）才让退出码非 0；日志滚动汇总留 T6。
     struct Doctor: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "自检：afplay 是否在位、已知事件集（完整自检见 T2/T6）。"
+            abstract: "自检：afplay 在位、settings.json 可写、声音包完整（只读探测，不写入/不播放）。"
         )
 
         func run() throws {
-            let afplay = FileManager.default.isExecutableFile(atPath: "/usr/bin/afplay")
+            let report = runDoctorChecks()
             print("claudio doctor")
-            print("  afplay : \(afplay ? "✓ /usr/bin/afplay" : "✗ 未找到")")
+            for result in report.results {
+                print("  \(result.message)")
+            }
             print("  events : \(Event.allCases.map(\.cliName).joined(separator: ", "))")
+            if report.hasFailure {
+                throw ExitCode.failure
+            }
         }
     }
 

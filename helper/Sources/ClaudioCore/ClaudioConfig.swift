@@ -1,0 +1,52 @@
+import Foundation
+
+/// The `~/.claudio/config.json` model — the single source of truth for user settings
+/// (ENGINEERING.md 决议 6: the GUI writes it, `claudio play` only reads it).
+///
+/// v1 fields only: `selected_pack` / `master_volume` / per-event `enabled` (决议 3).
+/// **No `night_dim`** — deferred to v2 (Outside Voice T2).
+public struct ClaudioConfig: Codable, Equatable, Sendable {
+    /// `afplay -v` default when `master_volume` is absent from the file (Design
+    /// Review 待解 ⑤: 倾向默认 0.8).
+    public static let defaultMasterVolume = 0.8
+
+    public var selectedPack: String
+    public var masterVolume: Double
+    /// Per-event mute state, keyed by ``Event/cliName``. An event absent from this map
+    /// defaults to **enabled** — the control is opt-out ("静音钮"), not opt-in.
+    public var eventsEnabled: [String: Bool]
+
+    public init(
+        selectedPack: String,
+        masterVolume: Double = ClaudioConfig.defaultMasterVolume,
+        eventsEnabled: [String: Bool] = [:]
+    ) {
+        self.selectedPack = selectedPack
+        self.masterVolume = masterVolume
+        self.eventsEnabled = eventsEnabled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case selectedPack = "selected_pack"
+        case masterVolume = "master_volume"
+        case eventsEnabled = "events"
+    }
+
+    /// Decodes leniently: `selected_pack` is the only required field. A missing or
+    /// malformed `master_volume` / `events` falls back to the documented default
+    /// rather than failing the whole decode — full "config 缺失/损坏 → 默认" recovery
+    /// policy is owned by `claudio use`/install (T2); this is `doctor`'s read path.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        selectedPack = try container.decode(String.self, forKey: .selectedPack)
+        masterVolume =
+            (try? container.decode(Double.self, forKey: .masterVolume))
+            ?? ClaudioConfig.defaultMasterVolume
+        eventsEnabled = (try? container.decode([String: Bool].self, forKey: .eventsEnabled)) ?? [:]
+    }
+
+    /// Whether `event` should play, honoring the opt-out default described above.
+    public func isEnabled(_ event: Event) -> Bool {
+        eventsEnabled[event.cliName] ?? true
+    }
+}
