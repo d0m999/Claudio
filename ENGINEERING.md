@@ -100,6 +100,7 @@ app 不在任务时运行，实际播放由 hook 触发。选 **helper-CLI**：a
 minimal-chime/
   manifest.json
   stop.mp3
+  stop_failure.mp3
   notification.mp3
   subagent_stop.mp3
 ```
@@ -114,6 +115,7 @@ minimal-chime/
   "version": "1.0.0",
   "events": {                     // key ∈ 合法 event 集；缺失的 event → 静默（fallback）
     "stop": "stop.mp3",
+    "stop_failure": "stop_failure.mp3",
     "notification": "notification.mp3",
     "subagent_stop": "subagent_stop.mp3"
   }
@@ -291,7 +293,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 ## Next Steps（下一步 · 具体建造任务）
 
-1. **验证核心赌注（写代码前）**：从 Freesound(CC0) 下 5-8 个候选音，给 `stop`/`notification`/`subagent_stop` 配上，连续播放、闭眼测试能不能"听声辨状态"。声音本身不成立，UI 再美也白搭。
+1. **验证核心赌注（写代码前）**：从 Freesound(CC0) 下 5-8 个候选音，给 `stop`/`stop_failure`/`notification`/`subagent_stop` 配上，连续播放、闭眼测试能不能"听声辨状态"。声音本身不成立，UI 再美也白搭。
 2. **spike 声音链路**：手写 `claudio play <event>` 脚本 + 手动挂 `Stop` hook，验证链路通。
 3. **定死格式**：manifest.json schema（SPDX license）+ `~/.claude/claudio/config.json` schema。
 4. **【独立工作项】CC0 音源采集 + 台账**：逐文件核验为 CC0-1.0、记录来源 URL + 授权快照；"萌系生物叫声"需原创声音设计（人力/预算另估）。这是项目核心价值，不是"顺手精选"。
@@ -393,6 +395,8 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - **代码签名 / 公证**（v1 先发未签名 → 面向非技术用户前再上）
 - B 阶段 marketplace / GitHub 一键装包（包格式按 B 设计，但客户端后做）
 - `session_start/end`、`user_prompt_submit`、`subagent_start`、`permission_request` 等非核心事件（v1 只做 4 个核心事件：stop / stop_failure / notification / subagent_stop）
+- **pack 路径 containment 的 TOCTOU 加固**（`/codex review acd6c87` P2，2026-07-08）—— `isReallyContained` 是"realpath 检查后再按路径读取"，判定与 `fileExists` / `Data(contentsOf:)` 之间有 check-to-use 窗口。当前威胁模型 = 同用户自有 `~/.claudio/` 声音包，能并发替换 symlink 者本已有写权限、不构成提权，故 v1 不做；**仅当** helper 未来提权运行或处理不可信可写目录，才改为基于目录/文件 fd 打开 + 打开后重校验真实路径（→ v2）。符号链接逃逸主路径的 realpath containment 已在 acd6c87 修复并测试覆盖，此条只针对残留的 TOCTOU 竞态。
+- **单 event 多音频/轮替播放**（`/plan-eng-review` 2026-07-08 评审，原 Follow-ups 占位条已迁入此处）—— 一个 event 支持配置 2 个音频文件、触发时轮替/随机播放以避免高频事件听觉疲劳，本次评审后维持不进 v1 → v2。理由：会同时触碰 `PackManifest.events`（需从 `[String: String]` 改为支持数组/对象的自定义 `Decodable`，很可能需要 bump `schema_version`）、尚未实现的 T5 `play` 选择逻辑（真轮替需要持久化游标，与决议#5"删状态文件、简化并发"的方向相反；退而求其次的无状态随机挑选仍要改 schema）、尚未实现的 T16 GUI 事件行三态与拖入绑定流程、以及 T11 CC0 音源采集量翻倍——跨越的面比"随手记"暗示的大得多，不该在 v1 已锁定范围内顺手加。
 
 ### What already exists（复用现状，未重造）
 - `afplay`（系统自带播放，复用）、Claude Code hooks（复用，不改机制）
