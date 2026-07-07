@@ -41,7 +41,10 @@ public func isSafePackID(_ id: String) -> Bool {
 /// (so any `..` in `url` is collapsed first)? The shared guard behind pack-id and
 /// manifest-event resolution against `../` escape. The trailing-slash `basePrefix` keeps
 /// a sibling like `.../packs/chime-evil` from matching `.../packs/chime`. Symlinks are
-/// **not** resolved here (out of scope; an install-time concern).
+/// **not** resolved here (out of scope; an install-time concern). Because this check is
+/// purely lexical, a symlink whose *target* lies outside `base` still satisfies it —
+/// callers that read file contents (not just compare path strings) should also use
+/// ``isReallyContained(_:inside:)`` (T1 review P2, second pass).
 func isContained(_ url: URL, inside base: URL) -> Bool {
     let urlPath = url.standardizedFileURL.path
     let basePath = base.standardizedFileURL.path
@@ -49,11 +52,36 @@ func isContained(_ url: URL, inside base: URL) -> Bool {
     return urlPath.hasPrefix(basePrefix)
 }
 
+/// Symlink-aware containment: is `url` strictly inside `base` once symlinks on **both**
+/// sides have been resolved to their real, on-disk targets?
+///
+/// ``isContained(_:inside:)`` only compares standardized path *strings*. A pack directory
+/// (or a file inside an otherwise-legitimate pack directory, e.g. `manifest.json` or a
+/// declared event audio file) that is, or sits behind, a symlink pointing outside the
+/// pack root still satisfies that lexical check — the unresolved path string reads as
+/// "under the root" even though the target does not live there. Meanwhile the OS calls
+/// that actually read pack content (`FileManager.fileExists`, `Data(contentsOf:)`)
+/// transparently follow symlinks regardless of what the unresolved path string says, so
+/// the lexical check alone leaves a real containment bypass. Resolving symlinks on both
+/// `url` and `base` before the prefix check closes that gap.
+///
+/// `URL.resolvingSymlinksInPath()` gracefully degrades to lexical standardization for
+/// path components that don't exist on disk yet, so this stays correct (and agrees with
+/// ``isContained(_:inside:)``) even when one side hasn't been created yet — e.g. when
+/// probing a candidate pack directory before confirming it exists (T1 review P2, second
+/// pass).
+func isReallyContained(_ url: URL, inside base: URL) -> Bool {
+    isContained(url.resolvingSymlinksInPath(), inside: base.resolvingSymlinksInPath())
+}
+
 /// Resolves a pack id to its on-disk directory, checking the **user pack root first**
 /// (so a user pack can override a same-id bundled pack), then the bundled pack root.
 /// Returns `nil` if `id` is unsafe (see ``isSafePackID(_:)``) or the pack exists in
 /// neither location. Each candidate is additionally required to stay inside its pack
-/// root (``isContained(_:inside:)``) as defense in depth behind ``isSafePackID(_:)``.
+/// root both lexically (``isContained(_:inside:)``) as defense in depth behind
+/// ``isSafePackID(_:)``, and by real path (``isReallyContained(_:inside:)``) so a pack
+/// directory that is, or sits behind, a symlink escaping the root is rejected too (T1
+/// review P2, second pass).
 public func resolvePackDirectory(
     id: String,
     userPacksDirectory: URL,
@@ -65,6 +93,7 @@ public func resolvePackDirectory(
 
     let userDirectory = userPacksDirectory.appendingPathComponent(id, isDirectory: true)
     if isContained(userDirectory, inside: userPacksDirectory),
+        isReallyContained(userDirectory, inside: userPacksDirectory),
         fileManager.fileExists(atPath: userDirectory.path)
     {
         return userDirectory
@@ -73,6 +102,7 @@ public func resolvePackDirectory(
     if let bundledPacksDirectory {
         let bundledDirectory = bundledPacksDirectory.appendingPathComponent(id, isDirectory: true)
         if isContained(bundledDirectory, inside: bundledPacksDirectory),
+            isReallyContained(bundledDirectory, inside: bundledPacksDirectory),
             fileManager.fileExists(atPath: bundledDirectory.path)
         {
             return bundledDirectory

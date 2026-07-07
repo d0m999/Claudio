@@ -22,3 +22,24 @@ func writeFixture(_ contents: String, to url: URL) {
         at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     try? contents.write(to: url, atomically: true, encoding: .utf8)
 }
+
+/// Creates `linkURL` as a symbolic link pointing at `targetURL`, creating `linkURL`'s
+/// parent directory if needed. Exists solely so tests can construct symlink-escape
+/// fixtures (a pack directory, or a file inside one, that resolves outside its pack
+/// root) to exercise ``isReallyContained(_:inside:)`` and friends. Production code must
+/// never itself create symlinks — this helper is test-only.
+///
+/// Verifies the link was actually created (rather than swallowing a `createSymbolicLink`
+/// failure via `try?`), since a silently-missing symlink would let a caller's "resolves to
+/// nil / missing" assertion pass for the wrong reason — never having exercised a symlink
+/// at all — and quietly stop testing what it claims to test (Codex review, second pass).
+@MainActor
+func createSymlink(at linkURL: URL, pointingTo targetURL: URL) {
+    try? FileManager.default.createDirectory(
+        at: linkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: targetURL)
+    expect(
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: linkURL.path)) != nil,
+        "createSymlink: no real symlink exists at \(linkURL.path) after creation — a test"
+            + " relying on this fixture would silently not be testing a symlink escape at all")
+}

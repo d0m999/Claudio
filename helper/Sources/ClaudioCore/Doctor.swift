@@ -102,7 +102,13 @@ public func checkPackIntegrity(
     }
 
     let manifestFile = packDirectory.appendingPathComponent("manifest.json")
-    guard let manifestData = try? Data(contentsOf: manifestFile) else {
+    // `packDirectory` itself is already symlink-safe (`resolvePackDirectory` runs
+    // `isReallyContained`), but `manifest.json` is a leaf entry inside it and could
+    // independently be a symlink escaping the pack directory — require real containment
+    // here too, not just a successful read.
+    guard isReallyContained(manifestFile, inside: packDirectory),
+        let manifestData = try? Data(contentsOf: manifestFile)
+    else {
         return .manifestUnreadable(
             packID: config.selectedPack, reason: "manifest.json 不存在或不可读：\(manifestFile.path)")
     }
@@ -137,8 +143,9 @@ public func checkPackIntegrity(
 /// Resolves `relativeFile` (a manifest event's audio filename) against `packDirectory`,
 /// returning the URL only if it stays strictly inside `packDirectory`. Rejects empty,
 /// absolute, NUL-bearing, and `../`-escaping paths by lexically standardizing the joined
-/// URL and requiring the result to be contained by the pack root. Symlink escape is out
-/// of scope here (an install-time concern); this is the lexical guard for manifest strings.
+/// URL and requiring the result to be contained by the pack root. Symlink escape is now
+/// also rejected the same way as a `../` escape — treated as "missing", never satisfied
+/// (T1 review P2, second pass).
 private func safePackFileURL(_ relativeFile: String, in packDirectory: URL) -> URL? {
     // Scalar-level checks (mirroring `isSafePackID`): a leading `/` fused with a combining
     // mark would slip a grapheme-level `hasPrefix("/")`. `isContained` already backstops
@@ -149,7 +156,12 @@ private func safePackFileURL(_ relativeFile: String, in packDirectory: URL) -> U
         return nil
     }
     let candidate = packDirectory.appendingPathComponent(relativeFile)
-    return isContained(candidate, inside: packDirectory) ? candidate.standardizedFileURL : nil
+    guard isContained(candidate, inside: packDirectory),
+        isReallyContained(candidate, inside: packDirectory)
+    else {
+        return nil
+    }
+    return candidate.standardizedFileURL
 }
 
 // MARK: - Combined report

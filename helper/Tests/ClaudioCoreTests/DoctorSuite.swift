@@ -133,6 +133,90 @@ func runDoctorSuites() {
         }
     }
 
+    suite("resolvePackDirectory refuses a pack directory that is a symlink escaping the pack root")
+    {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("userPacks", isDirectory: true)
+            // A real directory OUTSIDE the pack root, with its own manifest.json, that an
+            // escaping symlink named `evil` would reach if the guard weren't there.
+            let outside = root.appendingPathComponent("outside-secret", isDirectory: true)
+            writeFixture(
+                #"{ "id": "evil", "events": {} }"#,
+                to: outside.appendingPathComponent("manifest.json"))
+            createSymlink(
+                at: userPacks.appendingPathComponent("evil", isDirectory: true), pointingTo: outside
+            )
+
+            let resolved = resolvePackDirectory(
+                id: "evil", userPacksDirectory: userPacks, bundledPacksDirectory: nil)
+            expect(
+                resolved == nil,
+                "a pack directory that is a symlink resolving outside the pack root must never resolve"
+            )
+        }
+    }
+
+    suite(
+        "resolvePackDirectory refuses a CHAINED symlink pack directory (symlink -> symlink -> outside)"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("userPacks", isDirectory: true)
+            // A real directory OUTSIDE the pack root, reachable only via TWO hops of
+            // symlink indirection: `userPacks/evil` -> `link2` -> `outside-secret`. Each
+            // hop is individually a valid, existing path, but the final target still
+            // lies outside the pack root. `URL.resolvingSymlinksInPath()` is documented
+            // as realpath(3)-based and should already walk the *entire* chain (not just
+            // the first hop) — this proves that empirically rather than trusting the docs.
+            let outside = root.appendingPathComponent("outside-secret", isDirectory: true)
+            writeFixture(
+                #"{ "id": "evil", "events": {} }"#,
+                to: outside.appendingPathComponent("manifest.json"))
+            let link2 = root.appendingPathComponent("link2", isDirectory: true)
+            createSymlink(at: link2, pointingTo: outside)
+            createSymlink(
+                at: userPacks.appendingPathComponent("evil", isDirectory: true), pointingTo: link2)
+
+            let resolved = resolvePackDirectory(
+                id: "evil", userPacksDirectory: userPacks, bundledPacksDirectory: nil)
+            expect(
+                resolved == nil,
+                "a pack directory reached via a chain of symlinks ending outside the pack root"
+                    + " must never resolve"
+            )
+        }
+    }
+
+    suite(
+        "resolvePackDirectory still finds a real bundled pack when the user pack is an escaping symlink"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("userPacks", isDirectory: true)
+            let bundledPacks = root.appendingPathComponent("bundledPacks", isDirectory: true)
+            let outside = root.appendingPathComponent("outside-secret", isDirectory: true)
+            // The symlink target must actually exist on disk (same pattern as the
+            // preceding test), just without a manifest.json inside it — otherwise a
+            // dangling symlink would already fail `fileExists` on its own, and this test
+            // wouldn't be exercising the escape guard at all.
+            try? FileManager.default.createDirectory(
+                at: outside, withIntermediateDirectories: true)
+            createSymlink(
+                at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true),
+                pointingTo: outside)
+            let bundledPackDir = bundledPacks.appendingPathComponent(
+                "minimal-chime", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: bundledPackDir, withIntermediateDirectories: true)
+
+            let resolved = resolvePackDirectory(
+                id: "minimal-chime", userPacksDirectory: userPacks,
+                bundledPacksDirectory: bundledPacks)
+            expect(
+                resolved?.path == bundledPackDir.path,
+                "an escaping user-pack symlink must not block falling through to a real bundled pack"
+            )
+        }
+    }
+
     suite("checkPackIntegrity: no config.json at all → .noConfig (fresh install, not an error)") {
         withTempDirectory { root in
             let status = checkPackIntegrity(
@@ -190,6 +274,32 @@ func runDoctorSuites() {
         }
     }
 
+    suite(
+        "checkPackIntegrity: manifest.json itself being a symlink escaping the pack dir → .manifestUnreadable"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            // A real manifest.json OUTSIDE the pack directory — this must never be read as
+            // if it were `minimal-chime`'s own manifest.json just because a symlink of
+            // that name sits inside a real pack directory.
+            let outsideManifest = root.appendingPathComponent("secret-manifest.json")
+            writeFixture(#"{ "id": "minimal-chime", "events": {} }"#, to: outsideManifest)
+            createSymlink(
+                at: packsDir.appendingPathComponent("minimal-chime/manifest.json"),
+                pointingTo: outsideManifest)
+
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: packsDir, bundledPacksDirectory: nil)
+            if case .manifestUnreadable(let packID, _) = status {
+                expect(packID == "minimal-chime", "manifestUnreadable should carry the pack id")
+            } else {
+                expect(false, "expected .manifestUnreadable, got \(status)")
+            }
+        }
+    }
+
     suite("checkPackIntegrity: manifest present but declared audio file missing → .incomplete") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -233,6 +343,78 @@ func runDoctorSuites() {
         }
     }
 
+    suite(
+        "checkPackIntegrity: a declared event file that is a symlink escaping the pack dir is missing, not complete"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            // A real file OUTSIDE the pack directory that the symlink below points at.
+            let outsideFile = root.appendingPathComponent("secret.mp3")
+            writeFixture("fake-audio", to: outsideFile)
+            // `stop.mp3` inside the pack directory is a symlink resolving to that outside
+            // file — the lexical path string still looks contained, but the bytes read
+            // would come from outside the pack.
+            createSymlink(
+                at: packsDir.appendingPathComponent("minimal-chime/stop.mp3"),
+                pointingTo: outsideFile)
+
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: packsDir, bundledPacksDirectory: nil)
+            expect(
+                status == .incomplete(packID: "minimal-chime", missingFiles: ["stop.mp3"]),
+                "an event file resolving outside the pack dir via symlink must be reported missing, got \(status)"
+            )
+        }
+    }
+
+    suite(
+        "checkPackIntegrity: NFC/NFD Unicode-normalization mismatch between the manifest-declared"
+            + " filename and the on-disk symlink name does not bypass the escape guard"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            // The manifest declares the event file using the PRECOMPOSED (NFC) form of "é"
+            // (U+00E9, a single scalar).
+            let nfcName = "caf\u{00E9}.mp3"
+            // The on-disk symlink is created using the CANONICALLY EQUIVALENT but
+            // byte-different DECOMPOSED (NFD) form: "e" (U+0065) followed by COMBINING
+            // ACUTE ACCENT (U+0301) — two scalars, not one.
+            let nfdName = "cafe\u{0301}.mp3"
+            expect(
+                !nfcName.unicodeScalars.elementsEqual(nfdName.unicodeScalars),
+                "sanity: NFC and NFD spellings of \"café.mp3\" are different scalar sequences")
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "\#(nfcName)" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            // A real file OUTSIDE the pack directory that the escaping symlink below points at.
+            let outsideFile = root.appendingPathComponent("secret.mp3")
+            writeFixture("fake-audio", to: outsideFile)
+            // The on-disk symlink uses the NFD spelling, while the manifest declared the NFC
+            // spelling — an attacker's attempt to have `isContained`'s lexical / grapheme-level
+            // string comparison see two "different" paths while both sides actually name the
+            // same underlying directory entry. macOS (Foundation + APFS) resolves lookups
+            // normalization-insensitively, so this must NOT let the escaping symlink be missed
+            // by `isReallyContained`.
+            createSymlink(
+                at: packsDir.appendingPathComponent("minimal-chime/\(nfdName)"),
+                pointingTo: outsideFile)
+
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: packsDir, bundledPacksDirectory: nil)
+            expect(
+                status == .incomplete(packID: "minimal-chime", missingFiles: [nfcName]),
+                "an NFC-declared event file resolved by an NFD-named on-disk symlink escaping"
+                    + " the pack dir must be reported missing, never complete — got \(status)")
+        }
+    }
+
     suite("checkPackIntegrity: all declared audio files present → .complete") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -254,6 +436,73 @@ func runDoctorSuites() {
                 status
                     == .complete(packID: "minimal-chime", events: ["notification", "stop"]),
                 "expected .complete with both events, got \(status)")
+        }
+    }
+
+    suite(
+        "checkPackIntegrity: a fully legitimate real (non-symlink) pack resolved via the"
+            + " bundled fallback still reports .complete"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacksDir = root.appendingPathComponent("packs")
+            let bundledPacksDir = root.appendingPathComponent("bundled-packs")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            // No user pack exists at all — only a real, plain (non-symlink) bundled pack
+            // directory with a real manifest.json and real audio files. The symlink-escape
+            // guard (`isReallyContained`, layered onto `resolvePackDirectory` and
+            // `safePackFileURL`) must only reject symlink escapes, never an entirely
+            // ordinary real pack resolved through the real bundled fallback path.
+            writeFixture(
+                #"""
+                { "id": "minimal-chime", "events": { "stop": "stop.mp3", "notification": "notification.mp3" } }
+                """#,
+                to: bundledPacksDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: bundledPacksDir.appendingPathComponent("minimal-chime/stop.mp3")
+            )
+            writeFixture(
+                "fake-audio",
+                to: bundledPacksDir.appendingPathComponent("minimal-chime/notification.mp3"))
+
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: userPacksDir,
+                bundledPacksDirectory: bundledPacksDir)
+            expect(
+                status
+                    == .complete(packID: "minimal-chime", events: ["notification", "stop"]),
+                "a legitimate real pack resolved through the real bundled fallback must still"
+                    + " report .complete, got \(status)")
+        }
+    }
+
+    suite(
+        "resolvePackDirectory refuses a pack directory that is a DANGLING symlink (target never existed)"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("userPacks", isDirectory: true)
+            // Unlike the earlier escaping-symlink tests, `neverExisted` is never created —
+            // this is a dangling symlink, not merely an out-of-root one. Empirically,
+            // `URL.resolvingSymlinksInPath()` does NOT resolve a dangling symlink to its
+            // (nonexistent) target; it silently falls back to the lexical, unresolved
+            // path of the symlink itself (still lexically under `userPacks`), so
+            // `isReallyContained` alone would call this "contained". The guard still
+            // holds end to end only because `resolvePackDirectory`'s final
+            // `fileManager.fileExists(atPath:)` check follows the symlink for real and
+            // correctly reports `false` for a target that isn't there — this test pins
+            // that combination so a future refactor that drops the trailing `fileExists`
+            // gate (e.g. trusting `isReallyContained` alone) would be caught.
+            let neverExisted = root.appendingPathComponent("never-existed", isDirectory: true)
+            createSymlink(
+                at: userPacks.appendingPathComponent("evil", isDirectory: true),
+                pointingTo: neverExisted)
+
+            let resolved = resolvePackDirectory(
+                id: "evil", userPacksDirectory: userPacks, bundledPacksDirectory: nil)
+            expect(
+                resolved == nil,
+                "a pack directory that is a dangling symlink (target never existed) must never"
+                    + " resolve, got \(String(describing: resolved))")
         }
     }
 
