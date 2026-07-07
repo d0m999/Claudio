@@ -85,6 +85,24 @@ func runDoctorSuites() {
         }
     }
 
+    suite("resolvePackDirectory rejects a pack id occupied by a plain file, not a directory") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("user-packs", isDirectory: true)
+            // `minimal-chime` exists at the expected path, but as a regular file — not a
+            // directory. `fileExists(atPath:)` alone would return true here and let this
+            // resolve, only to fail later (with a confusing error) when something tries to
+            // read `manifest.json` inside what it assumed was a directory (`/codex review`
+            // 2026-07-08).
+            writeFixture("i am a file, not a pack directory", to: userPacks.appendingPathComponent("minimal-chime"))
+
+            let resolved = resolvePackDirectory(
+                id: "minimal-chime", userPacksDirectory: userPacks, bundledPacksDirectory: nil)
+            expect(
+                resolved == nil,
+                "a plain file occupying the pack-id path must not resolve as a pack directory")
+        }
+    }
+
     suite("resolvePackDirectory returns nil when the pack exists nowhere") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("user-packs", isDirectory: true)

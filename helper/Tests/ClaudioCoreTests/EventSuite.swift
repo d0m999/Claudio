@@ -24,6 +24,15 @@ func runEventSuites() {
         }
     }
 
+    suite("rawValue is pinned to cliName, never Swift's default camelCase derivation") {
+        for event in Event.allCases {
+            expect(
+                event.rawValue == event.cliName,
+                "rawValue must equal cliName (not a default-derived spelling like"
+                    + " 'stopFailure'/'subagentStop'): \(event)")
+        }
+    }
+
     suite("SubagentStop is never lowercased into subagentstop") {
         expect(Event.subagentStop.settingsName == "SubagentStop", "settingsName")
         expect(Event.subagentStop.cliName == "subagent_stop", "cliName")

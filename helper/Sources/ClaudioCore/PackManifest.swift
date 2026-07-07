@@ -82,6 +82,17 @@ func isReallyContained(_ url: URL, inside base: URL) -> Bool {
 /// ``isSafePackID(_:)``, and by real path (``isReallyContained(_:inside:)``) so a pack
 /// directory that is, or sits behind, a symlink escaping the root is rejected too (T1
 /// review P2, second pass).
+/// Whether `directory` exists on disk **as a directory** — `FileManager.fileExists(atPath:)`
+/// alone returns `true` for a plain file too, which would let a stray regular file sitting
+/// at a pack-id's expected path be mistaken for that pack's directory (`/codex review`
+/// 2026-07-08).
+private func directoryExists(at directory: URL) -> Bool {
+    var isDirectory: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory)
+    else { return false }
+    return isDirectory.boolValue
+}
+
 public func resolvePackDirectory(
     id: String,
     userPacksDirectory: URL,
@@ -89,12 +100,10 @@ public func resolvePackDirectory(
 ) -> URL? {
     guard isSafePackID(id) else { return nil }
 
-    let fileManager = FileManager.default
-
     let userDirectory = userPacksDirectory.appendingPathComponent(id, isDirectory: true)
     if isContained(userDirectory, inside: userPacksDirectory),
         isReallyContained(userDirectory, inside: userPacksDirectory),
-        fileManager.fileExists(atPath: userDirectory.path)
+        directoryExists(at: userDirectory)
     {
         return userDirectory
     }
@@ -103,7 +112,7 @@ public func resolvePackDirectory(
         let bundledDirectory = bundledPacksDirectory.appendingPathComponent(id, isDirectory: true)
         if isContained(bundledDirectory, inside: bundledPacksDirectory),
             isReallyContained(bundledDirectory, inside: bundledPacksDirectory),
-            fileManager.fileExists(atPath: bundledDirectory.path)
+            directoryExists(at: bundledDirectory)
         {
             return bundledDirectory
         }

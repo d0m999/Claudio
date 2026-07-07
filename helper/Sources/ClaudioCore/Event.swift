@@ -11,10 +11,15 @@ import Foundation
 /// `SubagentStop` into `subagentstop` and fail to match the manifest key
 /// `subagent_stop`. See ``Event/init(settingsName:)`` and the `Event` tests.
 public enum Event: String, CaseIterable, Sendable {
-    case stop
-    case stopFailure
-    case notification
-    case subagentStop
+    // Raw values are pinned to `cliName` explicitly (rather than left to Swift's default
+    // camelCase-derived rawValue, which would give `stopFailure`/`subagentStop`) — anyone
+    // who later reaches for `Event(rawValue:)` or `.rawValue` (e.g. in a config/log/test
+    // fixture) must not get a third, undocumented spelling alongside `cliName`/`manifestKey`
+    // (`/codex review` 2026-07-08).
+    case stop = "stop"
+    case stopFailure = "stop_failure"
+    case notification = "notification"
+    case subagentStop = "subagent_stop"
 
     /// Event name as written in Claude Code's `settings.json` hooks (camelCase).
     public var settingsName: String {
