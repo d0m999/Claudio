@@ -9,3 +9,6 @@
 DerivedData/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
+
+# Personal/IP-protected sound packs (e.g. game character cries) — never commit or distribute
+local-packs/
