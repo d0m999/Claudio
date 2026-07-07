@@ -66,7 +66,7 @@ Claude Code 在任务完成、或卡住等待用户确认时，默认不出声�
 
 ### 运行时架构：helper-CLI（已选）
 
-app 不在任务时运行，实际播放由 hook 触发。选 **helper-CLI**：app 安装一个小命令 `claudio`，hook 里只调 `claudio play <event>`；helper 读配置文件决定播哪个包的哪个音、要不要因深夜降音量。**切声音包 = 改配置文件，不用重写 settings.json。**
+app 不在任务时运行，实际播放由 hook 触发。选 **helper-CLI**：app 安装一个小命令 `claudio`，hook 里只调 `claudio play <event>`；helper 读配置文件决定播哪个包的哪个音。**切声音包 = 改配置文件，不用重写 settings.json。**
 
 **helper-CLI 契约（v1）：**
 | 命令 | 作用 | 退出码 |
@@ -79,17 +79,16 @@ app 不在任务时运行，实际播放由 hook 触发。选 **helper-CLI**：a
 
 - `<event>` 合法值：`stop` `notification` `subagent_stop`（v1）；`session_start` `session_end` `user_prompt_submit`（可选）。
 - **config.json 文件本身是唯一真相源**：app(GUI) 写、helper `play` 只读（消歧详见下方"工程落地细节"）。
-- 配置文件：`~/.claude/claudio/config.json`
+- 配置文件：`~/.claudio/config.json`
   ```json
   {
     "selected_pack": "minimal-chime",
-    "master_volume": 0.8,
-    "night_dim": { "enabled": true, "start": "22:00", "end": "08:00", "factor": 0.3 }
+    "master_volume": 0.8
   }
   ```
 
 **并发 / 进程堆积处理（评审 1.1 / 1.3）：**
-- `afplay` 同步阻塞、一次一进程。helper 每次播放前，杀掉上一个由 claudio 拉起的 afplay（pid 记在 `~/.claude/claudio/last.pid`），避免堆叠。
+- `afplay` 同步阻塞、一次一进程。helper 每次播放前，杀掉上一个由 claudio 拉起的 afplay（pid 记在 `~/.claudio/last.pid`），避免堆叠。
 - 同一 `<event>` 设最小间隔（默认 1.5s）去抖，防止多会话 / 高频 `subagent_stop` 声音打架。
 - 已知取舍：v1 不区分"是哪个会话在响"（多会话时只保证不叠不炸）。会话级区分列入 v2 Open Question。
 
@@ -154,19 +153,19 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 `SubagentStop` 直接 lowercase 会得到 `subagentstop`，对不上——必须查表。**v1 只做这 3 个核心事件**；helper 契约里列的 `session_start/end`、`user_prompt_submit` 一律标 v2。
 
 **② 声音包存储根 + 查找顺序：**
-- 用户包根：`~/.claude/claudio/packs/<pack-id>/`
+- 用户包根：`~/.claudio/packs/<pack-id>/`
 - 内置包：随 app bundle 只读分发（`Claudio.app/Contents/Resources/packs/<pack-id>/`）
 - helper `play` 解析：先查用户包根（命中即用，允许覆盖同名内置包），否则查 bundle。config 的 `selected_pack` 只存 id，路径由此规则解析。
 
 **③ helper 固定安装路径 + 幂等标记：**
-- helper 固定装到 `~/.claude/claudio/bin/claudio`（路径恒定是幂等 + 精准卸载的前提）。
-- settings.json 幂等/卸载标记 = 命令**精确等于** `~/.claude/claudio/bin/claudio play <event>`（精确匹配，非子串）。路径漂移 → 重复挂（响两声）+ 漏删僵尸条目，所以路径必须钉死。
+- helper 固定装到 `~/.claudio/bin/claudio`（路径恒定是幂等 + 精准卸载的前提）。
+- settings.json 幂等/卸载标记 = 命令**精确等于** `~/.claudio/bin/claudio play <event>`（精确匹配，非子串）。路径漂移 → 重复挂（响两声）+ 漏删僵尸条目，所以路径必须钉死。
 
 **④ 播放必须异步，绝不卡住 Claude Code：**
 - hook 是同步调用、`afplay` 又阻塞数秒。helper 必须**后台 spawn afplay、记 pid 后立即 `exit 0`**。"绝不阻断"从退出码语义扩展到**时延**——Claude Code 不该为一次响声等几秒。
 
 **⑤ 跨进程并发（多会话正是要解决的场景）：**
-- 每次 `claudio play` 是独立短命进程。去抖（共享上次时间戳）+ 杀旧进程（`last.pid`）必须用**文件锁** `flock ~/.claude/claudio/play.lock` 串行化关键区，否则多进程同时放行 = 去抖失效、last.pid 互踩。
+- 每次 `claudio play` 是独立短命进程。去抖（共享上次时间戳）+ 杀旧进程（`last.pid`）必须用**文件锁** `flock ~/.claudio/play.lock` 串行化关键区，否则多进程同时放行 = 去抖失效、last.pid 互踩。
 - `kill` 前**校验** last.pid 确为 claudio 拉起的 afplay（比对进程命令行），防 PID 复用误杀。
 - settings.json 读-改-写也走这把锁（原子写只防读到半截，防不了丢更新）。原子写临时文件须**与 settings.json 同目录**（`~/.claude/`），跨卷 rename 会失去原子性。
 - UI 试听 ▶ 用**独立 pid 槽**（不写 `last.pid`），避免试听和真实事件互杀 / 叠播。
@@ -253,7 +252,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 ## Open Questions（待解问题）
 
-- 运行时形态已定 helper-CLI；配置文件路径 `~/.claude/claudio/` 是否 OK？
+- 运行时形态已定 helper-CLI；配置文件路径 `~/.claudio/` 是否 OK？
 - 首个内置包"极简铃音"的 3 个音：从 Freesound 按 CC0 精选，还是找人做原创？（合规工作量见 Next Steps 独立工作项）
 - 产品名 **Claudio** 是否确定？（做一次商标 / 现有项目重名检索）
 - （v2）会话级声音区分怎么做？从 GitHub 一键装包何时上？
@@ -269,7 +268,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 - **v1 一句话**：`brew install --cask claudio`（或下载 DMG 按指引打开）→ 开 app → 选内置包 → Claude Code 干完活自动响对应的音，**全程不碰 settings.json**。
 - 内置 **1-2 个**包，每个音效逐文件核验为 `CC0-1.0`，有 license 台账文件。
-- `Stop` / `Notification` / `SubagentStop` 三个事件声音有明显区分度（能"听声辨状态"）。
+- `Stop` / `StopFailure` / `Notification` / `SubagentStop` 四个事件声音有明显区分度（能"听声辨状态"）。
 - 多会话同跑时声音不叠、不炸（节流 + 杀旧进程生效）。
 - `claudio install` 幂等、不破坏用户已有 hook；`claudio uninstall` 精准摘除、保留其它 hook。
 - 社区能照着 README + manifest schema 做出自己的包。
@@ -295,10 +294,10 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 1. **验证核心赌注（写代码前）**：从 Freesound(CC0) 下 5-8 个候选音，给 `stop`/`stop_failure`/`notification`/`subagent_stop` 配上，连续播放、闭眼测试能不能"听声辨状态"。声音本身不成立，UI 再美也白搭。
 2. **spike 声音链路**：手写 `claudio play <event>` 脚本 + 手动挂 `Stop` hook，验证链路通。
-3. **定死格式**：manifest.json schema（SPDX license）+ `~/.claude/claudio/config.json` schema。
+3. **定死格式**：manifest.json schema（SPDX license）+ `~/.claudio/config.json` schema。
 4. **【独立工作项】CC0 音源采集 + 台账**：逐文件核验为 CC0-1.0、记录来源 URL + 授权快照；"萌系生物叫声"需原创声音设计（人力/预算另估）。这是项目核心价值，不是"顺手精选"。
 5. **写"接管"逻辑**：`claudio install/uninstall`——读容错、备份、幂等追加、原子写、精准摘除。这是最核心最易错的一步，先写测试。
-6. **搭 SwiftUI menubar 骨架**：读包列表、逐事件下拉、试听、切包、主音量、深夜降音量（纯时钟）。
+6. **搭 SwiftUI menubar 骨架**：读包列表、逐事件下拉、试听、切包、主音量。
 7. **打包分发**：GitHub Actions 出 DMG + 建 Homebrew tap + 写新系统绕过指引。
 8. **（v2 探索）** 真·勿扰检测、ducking（需评估重写播放层为 CoreAudio/AVAudioEngine）、会话级区分、从 GitHub 一键装包。
 
@@ -395,8 +394,8 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - **代码签名 / 公证**（v1 先发未签名 → 面向非技术用户前再上）
 - B 阶段 marketplace / GitHub 一键装包（包格式按 B 设计，但客户端后做）
 - `session_start/end`、`user_prompt_submit`、`subagent_start`、`permission_request` 等非核心事件（v1 只做 4 个核心事件：stop / stop_failure / notification / subagent_stop）
-- **pack 路径 containment 的 TOCTOU 加固**（`/codex review acd6c87` P2，2026-07-08）—— `isReallyContained` 是"realpath 检查后再按路径读取"，判定与 `fileExists` / `Data(contentsOf:)` 之间有 check-to-use 窗口。当前威胁模型 = 同用户自有 `~/.claudio/` 声音包，能并发替换 symlink 者本已有写权限、不构成提权，故 v1 不做；**仅当** helper 未来提权运行或处理不可信可写目录，才改为基于目录/文件 fd 打开 + 打开后重校验真实路径（→ v2）。符号链接逃逸主路径的 realpath containment 已在 acd6c87 修复并测试覆盖，此条只针对残留的 TOCTOU 竞态。
-- **单 event 多音频/轮替播放**（`/plan-eng-review` 2026-07-08 评审，原 Follow-ups 占位条已迁入此处）—— 一个 event 支持配置 2 个音频文件、触发时轮替/随机播放以避免高频事件听觉疲劳，本次评审后维持不进 v1 → v2。理由：会同时触碰 `PackManifest.events`（需从 `[String: String]` 改为支持数组/对象的自定义 `Decodable`，很可能需要 bump `schema_version`）、尚未实现的 T5 `play` 选择逻辑（真轮替需要持久化游标，与决议#5"删状态文件、简化并发"的方向相反；退而求其次的无状态随机挑选仍要改 schema）、尚未实现的 T16 GUI 事件行三态与拖入绑定流程、以及 T11 CC0 音源采集量翻倍——跨越的面比"随手记"暗示的大得多，不该在 v1 已锁定范围内顺手加。
+- **pack 路径 containment 的 TOCTOU 加固**（`/codex review acd6c87` P2，2026-07-08）—— `isReallyContained` 是"realpath 检查后再按路径读取"，判定与 `fileExists` / `Data(contentsOf:)` 之间有 check-to-use 窗口。当前威胁模型 = 同用户自有 `~/.claudio/` 声音包，能并发替换 symlink 者本已有写权限、不构成提权，故 v1 不做；**仅当** helper 未来提权运行或处理不可信可写目录，才改为基于目录/文件 fd 打开 + 打开后重校验真实路径（→ v2）。符号链接逃逸主路径的 realpath containment 已在 acd6c87 修复并测试覆盖，此条只针对残留的 TOCTOU 竞态。**范围边界（`/codex review` 2026-07-08 复核，经代码复查后修正）**：这条讲的是 pack **目录本身**的 containment，与 manifest.json 里每个 event 值（如 `"stop": "stop.mp3"`，**音频文件路径**）的 containment 是两个独立校验点。后者其实**已经实现并测试**：`Doctor.swift` 的 `safePackFileURL`（拒绝 `../`、绝对路径、NUL、指向包外的 symlink，含 NFC/NFD 规范化攻击的回归测试）已被 `checkPackIntegrity` 用于 `doctor` 的只读存在性检查。**缺口在于它目前是 `private`**，只有同文件的 `checkPackIntegrity` 能调；尚未实现的 T5 `play`（要真正打开/播放文件，不只是查存在性）与 T16 GUI 解析必须**复用**这个已验证的实现（需先把它从 `private` 提升为 module 内可见），而不是重新发明一套未经对抗测试的路径校验。
+- **单 event 多音频/轮替播放**（`/plan-eng-review` 2026-07-08 评审，原 Follow-ups 占位条已迁入此处；`/codex review` 同日复核，字段命名与遗漏点已修正）—— 一个 event 支持配置 2 个音频文件、触发时轮替/随机播放以避免高频事件听觉疲劳，本次评审后维持不进 v1 → v2。理由：会同时触碰 `PackManifest.events`（现为 `[String: String]`，需改为支持数组/对象的自定义 `Decodable`；manifest 现有字段是 `"schema": 1`，`PackManifest.swift` 目前尚未 decode 该字段——若 v2 要靠版本号区分新旧 schema，需先落实 `schema` 字段的 decode/校验，而不是凭空引入一个不存在的 `schema_version` 名字）、尚未实现的 T5 `play` 选择逻辑（可靠轮替/去重复才需要持久化游标，与决议#5"删状态文件、简化并发"的方向相反；退而求其次的无状态随机挑选虽不需要游标，仍要改 schema）、尚未实现的 T16 GUI 事件行三态（present/unmapped/broken 需扩展为按文件计数或部分可用）与拖入绑定流程、`doctor`/`claudio.log` 需能报告"数组中哪个文件坏"而不只是单文件级别、测试 fixture 数量翻倍、以及 T11 CC0 音源采集量翻倍。**新 schema 必须是新增式（additive）而非替换式**：v2 decoder 必须仍能读 v1 遗留的单字符串格式 `"stop": "stop.mp3"`，不能要求所有旧 pack 一次性迁移。跨越的面比"随手记"暗示的大得多，不该在 v1 已锁定范围内顺手加。
 
 ### What already exists（复用现状，未重造）
 - `afplay`（系统自带播放，复用）、Claude Code hooks（复用，不改机制）
@@ -416,7 +415,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 | 去抖取锁 | 锁被占/超时 | ✅(整合) | ✅ LOCK_NB 拿不到即跳过 | 静默(设计如此) |
 | 拖入音频 | 超大/损坏/路径遍历 | ✅ | ✅ 白名单+上限+拒遍历 | ✅ 提示 |
 
-**critical gaps（无测 + 无处理 + 静默）= 0**：上述决议已把每条静默失败面补上日志/处理/提示。
+**critical gaps（无测 + 无处理 + 静默）= 0**：上述决议已把每条静默失败面补上日志/处理/提示。**范围声明（`/codex review` 2026-07-08 复核）**：此结论只覆盖表中已列出的、已实现/已决议的代码路径，不代表整个项目无待办风险——T3 spike 仍有 cwd/PATH/stderr/超时/并发待验、真实 settings.json `hooks.<Event>` schema 仍待固化、CC0 校验尚未落地（manifest 音频路径 containment 其实已在 `Doctor.swift` 的 `safePackFileURL` 实现并测试，见上方 NOT-in-scope"单 event 多音频"条目旁的范围边界说明——这条不算待办，但该函数目前 `private`，T5 `play` 落地时需先提升可见性以复用）；这些不在本表统计范围内，各自的待办状态见文中对应小节。
 
 ### 并行化策略（worktree lanes）
 
@@ -491,15 +490,15 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 |--------|---------|-----|------|--------|----------|
 | CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | — |
 | Codex Review | `/codex review` | Independent 2nd opinion | 2 | issues_found | 初评 20 gaps(已解) + 重跑 10 条(设计 delta,全折入 D3-D6) |
-| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 2 | clean | 初评 6 issues(clean) + 重跑:1 测试-DoD 缺口 + 吸收 codex 10 条(T16 三态/GUI-only、a11y popover owner、测试下沉 fixture、T14 state gallery),0 critical gaps |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 3 | clean | 第 3 轮(2026-07-08)：评审"单 event 多音频/轮替播放"Follow-up，Step 0 复杂度检查触发 → 维持移出 v1→v2（跨 PackManifest schema/未建 T5+T16/CC0 采集量翻倍）；outside voice(codex) 复核修正 4 处不准确表述（schema 字段名、v2 向后兼容缺失、containment 范围边界、"critical gaps=0"过度乐观）；顺手修复 2 个已实现 Swift 代码里的真实 bug（`resolvePackDirectory` 缺 isDirectory 检查、`Event` rawValue 未显式钉死为 cliName），均已加回归测试，103/103 单测通过。0 critical gaps。 |
 | Design Review | `/plan-design-review` | UI/UX gaps | 1 | issues_open | score 6/10 → 9/10, 8 decisions；补线框/交互状态表/旅程/无障碍/状态组件；4 交互项待定 |
 | DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | — |
 
-- **CODEX:** 初评 20 条(3 跨模型分歧已解);重跑 10 条聚焦设计 delta —— T16 无修复路径/双 resolver/无声≠文件丢失、T15 popover 焦点未定/Dynamic Type 无降级/静音半透明破对比度、测试快照过脆、T14 非 CI-可验;**全部经 D3-D6 折入计划**。
-- **CROSS-MODEL:** 三轮一致:settings.json 接管是最高风险面、须 test-first;a11y 与"状态可知"魂强相关。复用 learning `menubar-color-semantic-no-vibrancy`(cross-model)。Eng 重跑与 Codex 一致把"外部 artifact 真相源"改为"仓库内 code-as-truth"(T14 state gallery)。
-- **VERDICT:** ENG CLEARED(重跑仍 clean,0 critical gaps)—— v1 范围锁定,可实现。Design Review 完成(6/10 → 9/10);4 项交互细节待定(下,附推荐倾向,不阻断)。
+- **CODEX:** 本轮 outside voice（codex-plan-review，2026-07-08）：同意"多音频移出 v1"的核心判断，但指出注释本身 4 处不准确/不完整（schema vs schema_version 字段名错配、遗漏 v2 向后兼容 decoder 约束、pack-目录 containment 与音频文件路径 containment 范围混淆、Failure modes 表"critical gaps=0"结论过度乐观）+ 2 处已实现代码的真实正确性问题（`resolvePackDirectory` isDirectory 检查缺失、`Event` 默认 rawValue 拼写不一致）。**全部当场修正/修复**（含 2026-07-07 早前 `/codex review` 遗留的 20+10 条，已在此前两轮 Eng Review 折入）。
+- **CROSS-MODEL:** 本轮无 cross-model tension——codex 认同"移出 v1"的结论，找到的是我方注释自身的不准确处，非方向分歧。复查还发现我给 codex 的上下文不完整（只给了 PackManifest.swift，漏了 Doctor.swift），导致其误判"音频路径 containment 尚未实现"——实际 `Doctor.swift` 的 `safePackFileURL` 已实现并测试覆盖（含 NFC/NFD 规范化攻击），只是目前 `private`；已在文档中修正为准确表述。
+- **VERDICT:** ENG CLEARED（第 3 轮仍 clean，0 critical gaps）—— v1 范围维持锁定，多音频功能确认延后 v2；两处 Swift 正确性 bug 已修复并测试；Design Review 仍是 2026-07-07 的结果，本轮未触及 UI，无需重跑。
 
-**UNRESOLVED DECISIONS:**（Design Review 交互细节，均附推荐倾向，非阻断）
+**UNRESOLVED DECISIONS:**（沿用 Design Review 交互细节，均附推荐倾向，非阻断；本轮 Eng Review 自身 0 项未决）
 - ② 切包画廊：选中即应用 vs 二次确认（倾向选中即应用）
 - ③ 第一次响后轻确认形态：toast / 角标 / 不做（倾向一次性 toast）
 - ④ 视觉回放触发范围与配色（倾向仅当前事件按其色重放一次）
