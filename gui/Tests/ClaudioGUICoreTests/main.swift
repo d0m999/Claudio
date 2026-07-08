@@ -11,7 +11,8 @@ import Foundation
 // thin orchestrator: shared `expect`/`suite` primitives + calls into per-area suite
 // functions defined in sibling files (`OnboardingStateSuite.swift`,
 // `OnboardingCopySuite.swift`, `OnboardingDetectorSuite.swift`,
-// `OnboardingViewModelSuite.swift`).
+// `OnboardingViewModelSuite.swift`, `AudioFormatSniffSuite.swift`, `AudioImportSuite.swift`,
+// `AudioImportBatchSuite.swift`, `AudioImportViewModelSuite.swift`).
 
 var totalChecks = 0
 var failures = 0
@@ -36,10 +37,24 @@ func suite(_ name: String, _ body: @MainActor () -> Void) {
     body()
 }
 
+/// Async overload of ``suite(_:_:)`` — for suites whose body must `await` (the
+/// `AudioImportViewModel` drop handlers became `async` so their import pipeline runs off
+/// the `@MainActor`, a T8 swift-review follow-up). Sync suites keep using the overload
+/// above; the presence/absence of `await` at the call site selects the overload.
+@MainActor
+func suite(_ name: String, _ body: @MainActor () async -> Void) async {
+    print("• \(name)")
+    await body()
+}
+
 runOnboardingStateSuites()
 runOnboardingCopySuites()
 runOnboardingDetectorSuites()
 runOnboardingViewModelSuites()
+runAudioFormatSniffSuites()
+runAudioImportSuites()
+runAudioImportBatchSuites()
+await runAudioImportViewModelSuites()
 
 // MARK: - Summary
 

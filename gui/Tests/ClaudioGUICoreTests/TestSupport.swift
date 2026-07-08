@@ -18,12 +18,50 @@ func withTempDirectory<T>(_ body: (URL) throws -> T) rethrows -> T {
     return try body(directory)
 }
 
+/// Async overload of ``withTempDirectory(_:)`` — identical setup/teardown, but for suites
+/// whose body must `await` (the `AudioImportViewModel` drop handlers are `async`, T8). The
+/// sync overload above stays for every non-async suite; an async closure at the call site
+/// selects this one.
+@MainActor
+func withTempDirectory<T>(_ body: (URL) async throws -> T) async rethrows -> T {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("claudio-gui-tests-\(UUID().uuidString)", isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    return try await body(directory)
+}
+
 /// Writes `contents` to `url`, creating the parent directory if needed.
 @MainActor
 func writeFixture(_ contents: String, to url: URL) {
     try? FileManager.default.createDirectory(
         at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     try? contents.write(to: url, atomically: true, encoding: .utf8)
+}
+
+/// Writes raw `data` to `url`, creating the parent directory if needed — the binary
+/// counterpart to the `String` overload above, used by ``AudioImportSuite`` to plant
+/// fixture files with real magic-byte headers (T8).
+@MainActor
+func writeFixture(_ data: Data, to url: URL) {
+    try? FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? data.write(to: url, options: .atomic)
+}
+
+/// Creates a real symlink at `linkURL` pointing to `targetURL`, asserting it actually
+/// took — mirrors `helper/Tests/ClaudioCoreTests/TestSupport.swift`'s `createSymlink`
+/// exactly (duplicated per this package's established "duplicate rather than share test
+/// helpers across packages" convention, see the header comment above).
+@MainActor
+func createSymlink(at linkURL: URL, pointingTo targetURL: URL) {
+    try? FileManager.default.createDirectory(
+        at: linkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: targetURL)
+    expect(
+        (try? FileManager.default.destinationOfSymbolicLink(atPath: linkURL.path)) != nil,
+        "createSymlink: no real symlink exists at \(linkURL.path) after creation — a test"
+            + " relying on this fixture would silently not be testing a symlink escape at all")
 }
 
 /// Creates an empty **non-executable** regular file at `url` (default perms, no execute

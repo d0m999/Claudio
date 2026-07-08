@@ -151,12 +151,16 @@ public func checkPackIntegrity(
 /// also rejected the same way as a `../` escape — treated as "missing", never satisfied
 /// (T1 review P2, second pass).
 ///
-/// Module-internal (not `private`) so `play` (T5, `Play.swift`) can reuse this exact,
-/// adversarially-tested containment check to resolve the audio file it's about to open —
-/// rather than reinventing a second, unaudited path-containment implementation
-/// (ENGINEERING.md NOT-in-scope note on `safePackFileURL` visibility). Still not `public`:
-/// no callers outside `ClaudioCore` need it.
-func safePackFileURL(_ relativeFile: String, in packDirectory: URL) -> URL? {
+/// `public` (promoted from module-internal by T8) so both in-module callers (`play`, T5,
+/// `Play.swift`) and cross-module callers (`gui`'s `ClaudioGUICore`, T8's drag-in import
+/// pipeline, which resolves a dropped file's destination filename against the target
+/// user-pack directory) reuse this exact, adversarially-tested containment check —
+/// rather than each reinventing its own, unaudited path-containment implementation
+/// (ENGINEERING.md NOT-in-scope note on `safePackFileURL` visibility, and T8's explicit
+/// "REUSE, do not reinvent" instruction). `gui` depends on `ClaudioCore` as a package
+/// product (see `helper/Package.swift`), so only `public` symbols are visible to it —
+/// module-internal was no longer sufficient once a second module needed this.
+public func safePackFileURL(_ relativeFile: String, in packDirectory: URL) -> URL? {
     // Scalar-level checks (mirroring `isSafePackID`): a leading `/` fused with a combining
     // mark would slip a grapheme-level `hasPrefix("/")`. `isContained` already backstops
     // this, but keep the fast-path reject symmetric so a future refactor can't reopen it.
