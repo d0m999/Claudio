@@ -51,8 +51,10 @@ public struct AudioImportRequest: Sendable, Equatable {
 /// safety, built-in-pack collision, size, content-sniffed format, and duration — in that
 /// order — then copies it in only once every check passes (ENGINEERING.md T8, the
 /// complete "drag-in hardening" pipeline). Never references or reads from the original
-/// `sourceURL` again after a successful import — the copy is the only thing anything
-/// downstream ever touches (acceptance criterion 1: "never reference the original path").
+/// `sourceURL` again after step 4 reads its bytes — every check from there on (duration in
+/// step 5, the write in step 6) operates on that already-read `Data`, so the copy is the
+/// only thing anything downstream ever touches (acceptance criterion 1: "never reference
+/// the original path").
 ///
 /// ## Order of checks (and why)
 /// 1. **Destination-name/path safety** (``DropRejectionReason/pathTraversal``) — reused,
@@ -61,21 +63,29 @@ public struct AudioImportRequest: Sendable, Equatable {
 ///    concern independent of what the file contains.
 /// 2. **Built-in-pack collision** (``DropRejectionReason/overwritesBuiltin(packID:)``) —
 ///    still no content I/O; see that case's doc comment for the exact semantics.
-/// 3. **Symlink-source refusal, then size cap** (``DropRejectionReason/copyFailed(reason:)``
-///    for the former, ``DropRejectionReason/oversize(actualBytes:maxBytes:)`` for the
-///    latter) — both checked via filesystem metadata only, *before* reading the file's
-///    bytes into memory. A symlink source is refused outright rather than dereferenced:
-///    its metadata `.size` is the link's own target-path-string length, not the real
-///    size of whatever it points to, so trusting it would silently bypass the size cap
-///    for a symlink pointing at an arbitrarily large file. Once that's ruled out, an
-///    oversized file is rejected without ever being fully loaded.
+/// 3. **Symlink-source refusal, regular-file whitelist, then size cap**
+///    (``DropRejectionReason/copyFailed(reason:)`` for the first two,
+///    ``DropRejectionReason/oversize(actualBytes:maxBytes:)`` for the last) — all checked
+///    via filesystem metadata only, *before* reading the file's bytes into memory. A
+///    symlink source is refused outright rather than dereferenced: its metadata `.size` is
+///    the link's own target-path-string length, not the real size of whatever it points
+///    to, so trusting it would silently bypass the size cap for a symlink pointing at an
+///    arbitrarily large file. Every other non-regular entry (directory, FIFO, socket,
+///    character/block device) is then refused by an explicit `.typeRegular` whitelist —
+///    reading a FIFO in step 4 could block forever or read unbounded bytes past the cap,
+///    and such special files report a meaningless `.size` the cap can't catch. Only once a
+///    plain regular file is confirmed is the size cap applied and an oversized file
+///    rejected without ever being fully loaded.
 /// 4. **Content-sniffed format whitelist** (``DropRejectionReason/nonWhitelistFormat``) —
 ///    only now do we read the file's bytes, once we know they're small enough to be worth
 ///    reading. This exact `Data` is what step 6 persists — `sourceURL` is never read a
 ///    second time.
 /// 5. **Duration cap** (``DropRejectionReason/overDuration(actualSeconds:maxSeconds:)``)
-///    — probed on the *original* `sourceURL`, before copying, so a too-long file is never
-///    written into the user's pack directory at all.
+///    — probed on the validated bytes already read in step 4 (written to a throwaway temp
+///    file for the AVFoundation probe, never re-reading `sourceURL`), before copying, so a
+///    too-long file is never written into the user's pack directory at all — and the bytes
+///    measured are exactly the bytes step 6 persists, closing the TOCTOU gap a second read
+///    of `sourceURL` here would open.
 /// 6. Only if all five pass: write the `Data` already read in step 4 → the validated
 ///    destination (never `FileManager.copyItem`, which would copy a symlink source as a
 ///    symlink rather than its content — moot now that step 3 refuses symlink sources,
@@ -121,10 +131,29 @@ public func importAudioFile(
     guard let sourceAttributes = try? fileManager.attributesOfItem(atPath: sourceURL.path) else {
         return .rejected(.copyFailed(reason: "读不到这个文件"))
     }
-    guard (sourceAttributes[.type] as? FileAttributeType) != .typeSymbolicLink else {
+    let sourceType = sourceAttributes[.type] as? FileAttributeType
+    guard sourceType != .typeSymbolicLink else {
         return .rejected(
             .copyFailed(
                 reason: "这个文件是个链接（symlink），Claudio 只收音频文件本身，请直接拖入真正的文件再试一次"))
+    }
+    // Whitelist regular files only. The symlink case is refused just above with its own
+    // specific message; every other non-regular entry — a directory, a FIFO/named pipe, a
+    // socket, or a character/block device — is refused here, still via metadata only,
+    // before a single byte is read. Reading such a source with `Data(contentsOf:)` in
+    // step 4 could block indefinitely (a FIFO with no writer) or read unbounded bytes (a
+    // FIFO fed faster than the cap can catch — the size cap is only re-checked *after* the
+    // full read returns, so it can't bound a stream that never ends), hanging this
+    // background import task or exhausting memory. `attributesOfItem` also reports a
+    // meaningless small `.size` (often 0) for such special files, so the metadata size cap
+    // below cannot reject them either. Requiring `.typeRegular` closes both holes at their
+    // root, matching the same explicit-allow-list stance the destination-path (step 1) and
+    // content-format (step 4) checks already take — nothing gets in except by matching a
+    // whitelist, never merely by failing to match one blacklisted shape.
+    guard sourceType == .typeRegular else {
+        return .rejected(
+            .copyFailed(
+                reason: "这个不是普通文件（可能是文件夹或特殊文件），Claudio 只收音频文件本身，请直接拖入真正的音频文件再试一次"))
     }
     guard let sourceSize = sourceAttributes[.size] as? Int else {
         return .rejected(.copyFailed(reason: "读不到这个文件"))
@@ -167,8 +196,32 @@ public func importAudioFile(
         return .rejected(.nonWhitelistFormat)
     }
 
-    // 5. Duration cap — probed on the original source, before ever copying.
-    let duration = environment.durationProbe.probeDuration(of: sourceURL)
+    // 5. Duration cap — probed on the *validated bytes already read in step 4*, never by
+    // re-reading `sourceURL` a second time. Duration probing (AVFoundation, injected) needs
+    // a file URL, so the already-read `data` is written to a throwaway temp file *outside*
+    // the user pack directory, probed there, and removed (via `defer`, on every exit path).
+    // Two properties fall out of this that probing `sourceURL` directly did not have:
+    //   • This function truly never touches `sourceURL` again after step 4 read it — the
+    //     header/criterion-1 invariant ("never reference the original path") now holds for
+    //     the *whole* remaining pipeline, not just after a successful return.
+    //   • The bytes whose duration is measured are byte-for-byte the bytes step 6 persists.
+    //     Probing `sourceURL` reopened the original path, leaving a same-user TOCTOU window:
+    //     a short, in-cap file swapped in for the probe could pass the duration gate while
+    //     the longer bytes already read in step 4 — the ones actually written in step 6 —
+    //     sailed into the pack unmeasured.
+    // The temp file is named with the validated destination's basename so AVFoundation gets
+    // the same extension hint it would for the real file.
+    let probeDirectory = fileManager.temporaryDirectory.appendingPathComponent(
+        "claudio-duration-probe-\(UUID().uuidString)", isDirectory: true)
+    let probeURL = probeDirectory.appendingPathComponent(destinationURL.lastPathComponent)
+    defer { try? fileManager.removeItem(at: probeDirectory) }
+    do {
+        try fileManager.createDirectory(at: probeDirectory, withIntermediateDirectories: true)
+        try data.write(to: probeURL, options: .atomic)
+    } catch {
+        return .rejected(.copyFailed(reason: error.localizedDescription))
+    }
+    let duration = environment.durationProbe.probeDuration(of: probeURL)
     guard let duration, duration <= environment.limits.maxDurationSeconds else {
         return .rejected(
             .overDuration(actualSeconds: duration, maxSeconds: environment.limits.maxDurationSeconds))

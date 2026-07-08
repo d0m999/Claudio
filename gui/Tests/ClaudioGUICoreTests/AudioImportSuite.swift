@@ -36,10 +36,11 @@ func runAudioImportSuites() {
         "importAudioFile: a source that can't actually be read (a directory) is reported as .copyFailed, not misreported as .nonWhitelistFormat"
     ) {
         withTempDirectory { root in
-            // A directory passes the metadata size/symlink checks (it's a real,
-            // non-symlink filesystem entry with a small `.size`), but `Data(contentsOf:)`
-            // genuinely throws trying to read one as bytes — the real-world shape of "a
-            // read failure discovered after every earlier check already passed".
+            // A directory is not a regular file, so the regular-file whitelist (step 3)
+            // refuses it as `.copyFailed` before any content read — still the real cause,
+            // never misreported as `.nonWhitelistFormat`. (Before the whitelist landed this
+            // fell through to `Data(contentsOf:)` throwing on the directory; the observable
+            // outcome — `.copyFailed`, not `.nonWhitelistFormat` — is unchanged.)
             let sourceURL = root.appendingPathComponent("source/not-a-file.wav")
             try? FileManager.default.createDirectory(
                 at: sourceURL, withIntermediateDirectories: true)
@@ -54,6 +55,42 @@ func runAudioImportSuites() {
                 { if case .rejected(.copyFailed) = outcome { return true } else { return false } }(),
                 "an unreadable source must be reported as .copyFailed (the real cause), not"
                     + " .nonWhitelistFormat, got \(outcome)")
+        }
+    }
+
+    suite(
+        "importAudioFile: a SPECIAL (non-regular) source — a FIFO/named pipe — is refused via metadata, never opened for reading (no hang, no unbounded read)"
+    ) {
+        withTempDirectory { root in
+            // A FIFO is the sharp edge: `attributesOfItem` reports a meaningless small
+            // `.size` (so the size cap can't catch it) and it is not a symlink (so the
+            // symlink guard doesn't either), yet `Data(contentsOf:)` on a FIFO with no
+            // writer blocks forever — a background-task hang / DoS. The `.typeRegular`
+            // whitelist must refuse it on metadata alone, before any read. This test would
+            // itself HANG on the pre-whitelist code, which is exactly the bug.
+            let sourceDirectory = root.appendingPathComponent("source", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: sourceDirectory, withIntermediateDirectories: true)
+            let fifoURL = sourceDirectory.appendingPathComponent("pipe.wav")
+            let mkfifoResult = fifoURL.path.withCString { mkfifo($0, 0o644) }
+            expect(
+                mkfifoResult == 0,
+                "setup: mkfifo must succeed to model a special (non-regular) source file")
+
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
+            let outcome = importAudioFile(
+                sourceURL: fifoURL, suggestedFileName: "pipe.wav", packID: "my-pack",
+                environment: environment)
+
+            guard case .rejected(.copyFailed) = outcome else {
+                expect(false, "a FIFO/special-file source must be rejected as .copyFailed, got \(outcome)")
+                return
+            }
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: userPacksDirectory.appendingPathComponent("my-pack/pipe.wav").path),
+                "a refused special-file source must never have written anything into the pack")
         }
     }
 
@@ -229,6 +266,48 @@ func runAudioImportSuites() {
                 !message.isEmpty && !message.lowercased().contains("inf"),
                 "an unmeasurable-duration message must be a real sentence, not print 'inf': \(message)"
             )
+        }
+    }
+
+    suite(
+        "importAudioFile: duration is probed on the validated copy's bytes, never by re-opening the original source"
+    ) {
+        withTempDirectory { root in
+            let sourceURL = root.appendingPathComponent("source/chime.wav")
+            let sourceBytes = validWAVData()
+            writeFixture(sourceBytes, to: sourceURL)
+
+            let probe = RecordingDurationProbe(fixedDuration: 1.0)
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: userPacksDirectory, durationProbe: probe,
+                limits: AudioImportLimits())
+            let outcome = importAudioFile(
+                sourceURL: sourceURL, suggestedFileName: "chime.wav", packID: "my-pack",
+                environment: environment)
+
+            guard case .success = outcome else {
+                expect(false, "expected .success for a legal file, got \(outcome)")
+                return
+            }
+            // The probe must NOT have been handed the original source path — proving the
+            // duration was measured on a separate validated copy, closing the same-user
+            // TOCTOU window where `sourceURL` could be swapped between the content read and
+            // the probe.
+            expect(
+                probe.probedURL != nil && probe.probedURL?.path != sourceURL.path,
+                "duration must be probed on a copy, not by re-opening the original sourceURL"
+                    + " (probedURL=\(String(describing: probe.probedURL?.path)))")
+            // ...and the bytes it measured must equal exactly the bytes that were persisted
+            // (== the bytes read from source in step 4).
+            expect(
+                probe.probedBytes == sourceBytes,
+                "the bytes handed to duration probing must equal the validated/persisted bytes")
+            // The temp file used for probing must not leak — nothing survives outside the
+            // pack once import returns.
+            expect(
+                probe.probedURL.map { !FileManager.default.fileExists(atPath: $0.path) } ?? false,
+                "the throwaway duration-probe temp file must be cleaned up after import")
         }
     }
 

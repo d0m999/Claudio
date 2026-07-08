@@ -72,6 +72,29 @@ struct StubDurationProbe: AudioDurationProbing {
     func probeDuration(of fileURL: URL) -> TimeInterval? { fixedDuration }
 }
 
+/// A stub that additionally *records* which URL (and its on-disk bytes) it was handed, so a
+/// test can assert the import pipeline probes duration on a validated copy of the bytes it
+/// will persist — never by re-opening the original `sourceURL` (T8 codex P2: closes the
+/// same-user TOCTOU window between the content read and the duration probe).
+///
+/// `@unchecked Sendable`: it carries mutable recorded state, but the suites that use it call
+/// `importAudioFile` **synchronously** on the `@MainActor` (unlike `AudioImportViewModel`,
+/// which hops the pipeline onto a `Task.detached`), so the recording is only ever written
+/// and read from that one actor — no actual cross-thread access occurs.
+final class RecordingDurationProbe: AudioDurationProbing, @unchecked Sendable {
+    let fixedDuration: TimeInterval?
+    private(set) var probedURL: URL?
+    private(set) var probedBytes: Data?
+
+    init(fixedDuration: TimeInterval?) { self.fixedDuration = fixedDuration }
+
+    func probeDuration(of fileURL: URL) -> TimeInterval? {
+        probedURL = fileURL
+        probedBytes = try? Data(contentsOf: fileURL)
+        return fixedDuration
+    }
+}
+
 @MainActor
 func makeAudioImportEnvironment(
     userPacksDirectory: URL,
