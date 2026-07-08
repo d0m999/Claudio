@@ -1,0 +1,259 @@
+import Foundation
+
+// `claudio play <event>` — hook entry (ENGINEERING.md 决议 1 + 5 + 16, T5).
+//
+// A hook is a synchronous call in Claude Code's response path, so this whole chain must
+// never block and never fail loudly: unknown event, muted event, incomplete/missing pack,
+// or a contended debounce lock all resolve silently (no throw, no stderr) — only the
+// caller (`claudio play`'s `run()`) decides to ignore the returned ``PlayOutcome``
+// entirely and exit 0 regardless (ENGINEERING.md "绝不阻断 Claude Code").
+//
+// The critical section (resolve → spawn) runs under `play.lock`'s non-blocking
+// `flock` (``withNonBlockingLock(path:_:)``, already implemented in `FileLock.swift`) —
+// this is the "跳过式去抖" primitive: if another `claudio play` currently holds the lock,
+// this call skips instantly rather than queuing or blocking.
+
+// MARK: - Background process spawning (injectable for tests)
+
+/// Starts a process in the background and returns immediately — never waits for it to
+/// exit. Injectable so tests can verify `play` *attempted* the right spawn (executable +
+/// arguments) without ever launching the real system `afplay` (see `PlaySuite.swift`).
+public protocol ProcessSpawning: Sendable {
+    func spawn(executablePath: String, arguments: [String])
+}
+
+/// Production spawner: launches `executablePath` via `Process`, deliberately never
+/// calling `waitUntilExit()` — `claudio play` must return to the hook caller immediately
+/// while the audio keeps playing (ENGINEERING.md: "绝不阻断"从退出码语义扩展到时延).
+public struct SystemProcessSpawner: ProcessSpawning {
+    public init() {}
+
+    public func spawn(executablePath: String, arguments: [String]) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executablePath)
+        process.arguments = arguments
+        // Detach stdio: the child must not inherit (and keep alive) claudio's own
+        // stdin/stdout/stderr file descriptors after this short-lived process exits.
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        // Installing a termination handler (even a no-op one) makes `Process` reap the
+        // child via its internal SIGCHLD-driven waiter once it exits. Without this, a
+        // fire-and-forget launch that nobody `waitUntilExit()`s on would leave a zombie
+        // once `afplay` finishes.
+        process.terminationHandler = { _ in }
+        // `afplay`/the executable may not exist, or launching may fail for any other
+        // reason — silently swallowed, matching "缺音/缺 afplay → 静默不报错" (T5 scope).
+        try? process.run()
+    }
+}
+
+// MARK: - Environment (injectable, mirrors `DoctorEnvironment`)
+
+/// Everything `play` needs, injectable for tests so they never touch the real
+/// `~/.claudio` config/packs or spawn the real system `afplay` (see `PlaySuite.swift`).
+/// Defaults point at the real machine paths via ``ClaudioPaths``.
+public struct PlayEnvironment: Sendable {
+    public let afplayPath: String
+    public let lockFile: URL
+    public let configFile: URL
+    public let userPacksDirectory: URL
+    public let bundledPacksDirectory: URL?
+    public let spawner: any ProcessSpawning
+    /// Where the single shared "last played" timestamp lives (ENGINEERING.md 决议 5: "一把
+    /// 锁 + 一个共享时间戳" — deliberately one event-agnostic timestamp, not a per-event
+    /// map). Always read, compared, and overwritten from *inside* `play.lock`'s critical
+    /// section in ``playSoundEvent(_:environment:)`` — never on its own, which would
+    /// reopen the exact cross-process TOCTOU race decision 5 exists to close
+    /// (ENGINEERING.md 168: "否则多进程同时放行 = 去抖失效").
+    public let debounceStateFile: URL
+    /// Minimum spacing between two plays (any event — see ``debounceStateFile``) before
+    /// the second is skipped as ``PlayOutcome/skippedRecentPlay(event:)``. ENGINEERING.md
+    /// 92: 默认 1.5s.
+    public let debounceInterval: TimeInterval
+    /// Injectable clock so tests can simulate elapsed time deterministically instead of
+    /// real `Thread.sleep`s spanning the full debounce window.
+    public let now: @Sendable () -> Date
+
+    public init(
+        afplayPath: String = "/usr/bin/afplay",
+        lockFile: URL = ClaudioPaths.lockFile,
+        configFile: URL = ClaudioPaths.configFile,
+        userPacksDirectory: URL = ClaudioPaths.packsDirectory,
+        bundledPacksDirectory: URL? = nil,
+        spawner: any ProcessSpawning = SystemProcessSpawner(),
+        debounceStateFile: URL = ClaudioPaths.debounceStateFile,
+        debounceInterval: TimeInterval = 1.5,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
+        self.afplayPath = afplayPath
+        self.lockFile = lockFile
+        self.configFile = configFile
+        self.userPacksDirectory = userPacksDirectory
+        self.bundledPacksDirectory = bundledPacksDirectory
+        self.spawner = spawner
+        self.debounceStateFile = debounceStateFile
+        self.debounceInterval = debounceInterval
+        self.now = now
+    }
+}
+
+// MARK: - Outcome
+
+/// What happened for one `playSoundEvent` call. Every case except ``played`` and
+/// ``lockFailed`` is an expected, silent "don't play" path — never a hard error
+/// (ENGINEERING.md T5 scope: hook 调用绝不能因为用户未配置声音包而失败).
+public enum PlayOutcome: Sendable, Equatable {
+    /// The full chain resolved; a background spawn of `afplay filePath` was attempted.
+    /// (The spawn itself may still silently fail inside `ProcessSpawning` — e.g. a
+    /// missing `afplay` binary — but that failure is not observable here by design: T5
+    /// scope stops at "attempted the spawn", real spawn-failure logging is T6.)
+    case played(event: Event, filePath: String)
+    /// `eventName` didn't match any of the four v1 events (`Event(cliName:)` → `nil`).
+    case unknownEvent
+    /// `ClaudioConfig.isEnabled(event) == false` — the user muted this event.
+    case disabled(event: Event)
+    /// Config missing/unreadable, pack unresolved, manifest unreadable/unmapped, or the
+    /// declared audio file missing on disk — all silent "nothing to play yet" states
+    /// (fresh install / incomplete pack), collapsed into one case because `play` reacts
+    /// to every one of them identically: don't play, don't error.
+    case notReady
+    /// Another `claudio play` currently holds `play.lock` — the *lock-contention* skip
+    /// path: two calls truly overlapped in time. This is a safety net for the rare
+    /// literal race, not the debounce ENGINEERING.md 92 asks for — see
+    /// ``skippedRecentPlay(event:)`` for the actual "距上次播放 < N ms 就跳过" time window.
+    case skippedDebounce
+    /// The shared timestamp (``PlayEnvironment/debounceStateFile``) shows *some* event
+    /// (any event — decision 5's timestamp is deliberately event-agnostic) played more
+    /// recently than ``PlayEnvironment/debounceInterval`` ago. This is the actual
+    /// time-based "跳过式去抖" ENGINEERING.md 92 + 决议 5 specify, distinct from the mere
+    /// lock-contention race covered by ``skippedDebounce``.
+    case skippedRecentPlay(event: Event)
+    /// A real filesystem error (not lock contention) prevented acquiring `play.lock`.
+    /// Deliberately a distinct case from ``skippedDebounce`` — collapsing the two would
+    /// silently mask a broken filesystem as an ordinary debounce skip (mirrors
+    /// `LockedRun`'s `.failed` vs `.skipped` distinction in `FileLock.swift`).
+    case lockFailed(errno: Int32)
+}
+
+// MARK: - Entry point
+
+/// `claudio play <event>`'s entire pipeline: parse the event → load config → check
+/// per-event `enabled` → resolve the selected pack's manifest → resolve+validate the
+/// declared audio file (via ``safePackFileURL(_:in:)``, the same adversarially-tested
+/// containment check `doctor` uses — never a second, unaudited implementation) → run the
+/// spawn under `play.lock`'s non-blocking debounce.
+///
+/// Never throws. Callers (the `claudio play` CLI subcommand) are expected to ignore the
+/// returned outcome and exit 0 unconditionally — this return value exists for tests and
+/// any future diagnostic logging (T6), not for the hook caller to branch on.
+public func playSoundEvent(
+    _ eventName: String,
+    environment: PlayEnvironment = PlayEnvironment()
+) -> PlayOutcome {
+    guard let event = Event(cliName: eventName) else { return .unknownEvent }
+    guard let config = loadPlayConfig(from: environment.configFile) else { return .notReady }
+    guard config.isEnabled(event) else { return .disabled(event: event) }
+    guard let audioFile = resolveAudioFile(for: event, config: config, environment: environment)
+    else { return .notReady }
+
+    // The read-compare-write of the shared timestamp happens entirely inside
+    // `play.lock`'s non-blocking critical section: `withNonBlockingLock` guarantees at
+    // most one process's `body` is ever running at a time, so there is no TOCTOU window
+    // between "read last-played" and "write now" across concurrent `claudio play`
+    // processes (ENGINEERING.md 168's exact race decision 5 calls out).
+    let lockResult = withNonBlockingLock(path: environment.lockFile.path) { () -> PlayOutcome in
+        let now = environment.now()
+        if let lastPlayed = readLastPlayedTimestamp(from: environment.debounceStateFile),
+            now.timeIntervalSince(lastPlayed) < environment.debounceInterval
+        {
+            return .skippedRecentPlay(event: event)
+        }
+        writeLastPlayedTimestamp(now, to: environment.debounceStateFile)
+        environment.spawner.spawn(
+            executablePath: environment.afplayPath, arguments: [audioFile.path])
+        return .played(event: event, filePath: audioFile.path)
+    }
+
+    switch lockResult {
+    case .ran(let outcome):
+        return outcome
+    case .skipped:
+        return .skippedDebounce
+    case .failed(let code):
+        return .lockFailed(errno: code)
+    }
+}
+
+/// Resolves `event`'s audio file inside the currently-selected pack, or `nil` if any step
+/// of the chain (pack resolution → manifest → event mapping → containment → on-disk
+/// existence) fails — every failure here is one more "not ready to play yet" case that
+/// `playSoundEvent` reports as ``PlayOutcome/notReady``.
+private func resolveAudioFile(
+    for event: Event,
+    config: ClaudioConfig,
+    environment: PlayEnvironment
+) -> URL? {
+    guard
+        let packDirectory = resolvePackDirectory(
+            id: config.selectedPack,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory),
+        let manifest = loadPlayManifest(from: packDirectory),
+        let relativeFile = manifest.events[event.manifestKey],
+        let audioFile = safePackFileURL(relativeFile, in: packDirectory),
+        FileManager.default.fileExists(atPath: audioFile.path)
+    else { return nil }
+    return audioFile
+}
+
+/// Reads and decodes `configFile`. `nil` on any read/parse failure — `ClaudioConfig`'s own
+/// lenient decoder (see `ClaudioConfig.swift`) already recovers from a malformed
+/// `master_volume`/`events`; only a missing `selected_pack` or unreadable file lands here.
+private func loadPlayConfig(from configFile: URL) -> ClaudioConfig? {
+    guard let data = try? Data(contentsOf: configFile) else { return nil }
+    return try? JSONDecoder().decode(ClaudioConfig.self, from: data)
+}
+
+/// Reads and decodes `packDirectory`'s `manifest.json`, requiring it to actually resolve
+/// *inside* `packDirectory` (symlink-safe, via ``isReallyContained(_:inside:)``) — the
+/// same guard `doctor`'s pack-integrity check applies to this exact file.
+private func loadPlayManifest(from packDirectory: URL) -> PackManifest? {
+    let manifestFile = packDirectory.appendingPathComponent("manifest.json")
+    guard isReallyContained(manifestFile, inside: packDirectory),
+        let manifestData = try? Data(contentsOf: manifestFile)
+    else { return nil }
+    return try? JSONDecoder().decode(PackManifest.self, from: manifestData)
+}
+
+// MARK: - Shared debounce timestamp (ENGINEERING.md 92 + 决议 5)
+
+/// Reads the "last played" timestamp another (or this) `claudio play` process previously
+/// wrote, or `nil` if the state file is missing/corrupt (fresh install, or the very first
+/// play ever) — either way, `nil` means "never debounced yet", not an error.
+///
+/// Must only ever be called from inside `play.lock`'s critical section (see
+/// ``playSoundEvent(_:environment:)``): the mutual exclusion `withNonBlockingLock`
+/// guarantees is what makes this read-then-``writeLastPlayedTimestamp(_:to:)`` pair
+/// TOCTOU-safe across processes, not anything about this function itself.
+private func readLastPlayedTimestamp(from stateFile: URL) -> Date? {
+    guard let data = try? Data(contentsOf: stateFile),
+        let text = String(data: data, encoding: .utf8),
+        let epochSeconds = TimeInterval(text.trimmingCharacters(in: .whitespacesAndNewlines))
+    else { return nil }
+    return Date(timeIntervalSince1970: epochSeconds)
+}
+
+/// Persists `date` as the shared "last played" timestamp the next `claudio play`
+/// invocation (this process or another) will compare itself against. Best-effort: a
+/// write failure (e.g. `~/.claudio` deleted mid-run) is silently swallowed — the worst
+/// consequence is the next call isn't debounced, which is strictly safer for a
+/// synchronous hook than throwing or blocking (ENGINEERING.md "绝不阻断 Claude Code").
+///
+/// Must only ever be called from inside `play.lock`'s critical section — see
+/// ``readLastPlayedTimestamp(from:)``.
+private func writeLastPlayedTimestamp(_ date: Date, to stateFile: URL) {
+    try? FileManager.default.createDirectory(
+        at: stateFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? String(date.timeIntervalSince1970).write(to: stateFile, atomically: true, encoding: .utf8)
+}

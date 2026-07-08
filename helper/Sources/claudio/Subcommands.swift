@@ -24,20 +24,23 @@ extension Claudio {
         }
     }
 
-    /// `claudio play <event>` — hook entry. Base skeleton validates the event and exits 0;
-    /// the debounced background-spawn playback pipeline lands in T5.
+    /// `claudio play <event>` — hook entry: debounced background-spawn playback
+    /// (跳过式去抖 + 后台 spawn afplay + 立即 exit 0 + 逐事件 enabled). The entire pipeline
+    /// lives in `ClaudioCore.playSoundEvent` (see `Play.swift`); every non-happy path
+    /// (unknown event, muted event, incomplete pack, contended/broken lock) resolves
+    /// silently there, and this subcommand ignores the returned outcome and always
+    /// returns success — a hook must never fail or block Claude Code (ENGINEERING.md
+    /// 决议 5 + 10 + 16).
     struct Play: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "hook 调用：播放某事件的声音（v1 播放链路见 T5）。"
+            abstract: "hook 调用：播放某事件的声音（跳过式去抖 + 后台 spawn afplay，立即 exit 0）。"
         )
 
         @Argument(help: "事件：stop / stop_failure / notification / subagent_stop")
         var event: String
 
         func run() throws {
-            // 未知事件 → 静默、退出 0，绝不阻断 Claude Code（ENGINEERING.md 退出码语义）。
-            guard Event(cliName: event) != nil else { throw ExitCode.success }
-            // TODO(T5): 跳过式去抖 + 后台 spawn afplay + 立即 exit 0。
+            _ = playSoundEvent(event)
         }
     }
 

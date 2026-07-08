@@ -63,6 +63,16 @@ public enum ClaudioPaths {
         root.appendingPathComponent("play.lock")
     }
 
+    /// `~/.claudio/play.state` — the single shared "last played" timestamp `play`'s
+    /// time-based debounce reads and overwrites (ENGINEERING.md 92: 同一事件默认最小间隔
+    /// 1.5s；决议 5: "一把锁 + 一个共享时间戳", deliberately event-agnostic, not a per-event
+    /// map). Always read/written from *inside* `play.lock`'s critical section — see
+    /// ``FileLock`` and `Play.swift` — never on its own, which would reopen the exact
+    /// cross-process TOCTOU race decision 5 calls out (ENGINEERING.md 168).
+    public static var debounceStateFile: URL {
+        root.appendingPathComponent("play.state")
+    }
+
     /// `~/.claude/settings.json` — the only Claudio-relevant path outside `~/.claudio/`.
     public static var claudeSettingsFile: URL {
         home

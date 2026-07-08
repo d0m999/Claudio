@@ -12,8 +12,8 @@ import Foundation
 // `main.swift` is the only file allowed top-level executable statements, so it stays a
 // thin orchestrator: shared `expect`/`suite` primitives + calls into per-area suite
 // functions defined in sibling files (`EventSuite.swift`, `FileLockSuite.swift`,
-// `DoctorSuite.swift`, `PathsSuite.swift`), matching the project's "many small files"
-// convention.
+// `DoctorSuite.swift`, `PathsSuite.swift`, `PlaySuite.swift`), matching the project's
+// "many small files" convention.
 
 var totalChecks = 0
 var failures = 0
@@ -43,6 +43,7 @@ runFileLockSuites()
 runDoctorSuites()
 runSettingsInstallerSuites()
 runPathsSuites()
+runPlaySuites()
 
 // MARK: - Summary
 
