@@ -481,6 +481,67 @@ func runSettingsInstallerSuites() {
         }
     }
 
+    suite(
+        "installClaudioHooks: first-run production topology — settings.json's directory exists but"
+            + " the lock file's directory (~/.claudio/ equivalent) never has, and install must still succeed"
+    ) {
+        withTempDirectory { root in
+            // Real first-run shape (T4 review HIGH): `~/.claude/` (settings.json's parent)
+            // already exists because Claude Code itself created it, but `~/.claudio/`
+            // (the lock file's parent) has never been created by anything — this repo has
+            // no code path that creates it up front. Modeled here as two *separate*
+            // sibling roots so the settings.json parent pre-exists while the lock file's
+            // parent starts out completely missing.
+            let claudeDir = root.appendingPathComponent("dot-claude", isDirectory: true)
+            try? FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+            let settingsFile = claudeDir.appendingPathComponent("settings.json")
+
+            let claudioDir = root.appendingPathComponent("dot-claudio", isDirectory: true)
+            expect(
+                !FileManager.default.fileExists(atPath: claudioDir.path),
+                "sanity: the lock file's parent directory must not exist before install runs"
+                    + " — this is exactly the never-run-before-onboarding gap (T4 review HIGH)")
+            let lockFile = claudioDir.appendingPathComponent("play.lock")
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.installed),
+                "first-run install must succeed (not .lockFailed) even when the lock file's"
+                    + " directory has never been created, got \(result)")
+            expect(
+                FileManager.default.fileExists(atPath: claudioDir.path),
+                "installing must have self-healed the lock file's missing parent directory")
+        }
+    }
+
+    suite(
+        "uninstallClaudioHooks: first-run production topology — never-created lock directory"
+            + " must not cause .lockFailed even when there's nothing to uninstall"
+    ) {
+        withTempDirectory { root in
+            let claudeDir = root.appendingPathComponent("dot-claude", isDirectory: true)
+            try? FileManager.default.createDirectory(at: claudeDir, withIntermediateDirectories: true)
+            let settingsFile = claudeDir.appendingPathComponent("settings.json")
+
+            let claudioDir = root.appendingPathComponent("dot-claudio", isDirectory: true)
+            let lockFile = claudioDir.appendingPathComponent("play.lock")
+
+            // Uninstall in a "never installed before" scenario is expected to report
+            // .notInstalled — the point of this test is that it must reach that outcome
+            // via the normal path, not fail earlier with .lockFailed just because
+            // ~/.claudio/ was never created.
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.notInstalled),
+                "uninstall with a never-created lock directory must reach .notInstalled,"
+                    + " not .lockFailed, got \(result)")
+        }
+    }
+
     suite("install then uninstall round-trips: pre-existing hooks and unrelated keys survive both operations") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")

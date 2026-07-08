@@ -50,10 +50,31 @@ public final class FileLock {
     ///
     /// Collapsing `failed` into `busy` would make `play` silently treat a broken
     /// filesystem as a debounce skip, so a real failure never surfaces (T1 review P1).
+    ///
+    /// A missing *parent* directory (`errno == ENOENT`) is self-healed by creating it and
+    /// retrying `open` once — see the first-run onboarding rationale inline below.
     @discardableResult
     public func attemptLock() -> LockAttempt {
         if descriptor == -1 {
-            let opened = open(path, O_CREAT | O_RDWR, 0o600)
+            var opened = open(path, O_CREAT | O_RDWR, 0o600)
+            if opened == -1 && errno == ENOENT {
+                // Self-heal: `O_CREAT` only ever creates the leaf file, never a missing
+                // *parent* directory — and nothing else in Claudio proactively creates
+                // `~/.claudio/` up front. Without this, `claudio install` on a brand-new
+                // machine (no `~/.claudio/` yet) would fail its very first `play.lock`
+                // acquisition with a misleading "retry later" error that could never
+                // actually succeed on retry. Only ENOENT triggers this: any other errno
+                // (e.g. `EACCES`) is a real failure that a directory creation wouldn't
+                // fix, and must fall straight through to `.failed` below.
+                let parentDirectory = URL(fileURLWithPath: path).deletingLastPathComponent()
+                try? FileManager.default.createDirectory(
+                    at: parentDirectory, withIntermediateDirectories: true)
+                opened = open(path, O_CREAT | O_RDWR, 0o600)
+            }
+            // If the directory creation above failed too (e.g. permission denied, or a
+            // path component collides with an existing file), this retried `open` fails
+            // again and its real errno surfaces via `.failed` below — never silently
+            // treated as success.
             guard opened != -1 else { return .failed(errno: errno) }
             descriptor = opened
         }

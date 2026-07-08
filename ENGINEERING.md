@@ -443,8 +443,9 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - 已验(2026-07-06)：✅ schema 形状、✅ hook 经 `/bin/sh -c` 走 shell、✅ 共存 hook 真实存在、✅ StopFailure=API 错误中断(限流/欠费/过载/认证,非任务失败)、✅ 本机 Claude Code 2.1.201
   - 剩余(实现 T1 时用 scratch hook 补验)：cwd / PATH / stderr 去向 / 默认超时 / 是否并发调用
   - Surfaced by: Codex#3/#4 + spike 发现并核实 StopFailure(决议2) · Files: `docs/spike-hooks.md`
-- [ ] **T4 (P1, human: ~1h / CC: ~10min)** — helper — 全部落 `~/.claudio/`(无空格),命令路径天然安全
+- [x] **T4 (P1, human: ~1h / CC: ~10min)** — helper — 全部落 `~/.claudio/`(无空格),命令路径天然安全
   - Surfaced by: Outside Voice T1 · Files: `helper/paths`
+  - 已完成(2026-07-08，tdd-guide + swift-reviewer 链)：`ClaudioPaths`（已在 T2 期间落地）补齐专门单测 `PathsSuite.swift`(6 组 suite，无空格/`~/.claudio` 归属/`packDirectory(id:)` 拼接/纯函数无崩溃全覆盖，210 项全绿)；swift-reviewer 顺着测试覆盖发现 1 个 HIGH（全新机器 `~/.claudio/` 从未被任何代码创建，`FileLock.attemptLock` 首次 `install`/`uninstall` 时因 `ENOENT` 永久性失败，CLI 误导性提示"请稍后重试"）已修复（`attemptLock` 遇 `ENOENT` 自愈 `createDirectory(withIntermediateDirectories:)` 后重试一次 `open`，仅限 `ENOENT`，其它 errno 原样透传）并二次核实关闭。非阻塞遗留（留后续小任务）：① `FileLockSuite.swift` 中"自愈本身也失败"用例实际触发 errno 是 `ENOTDIR` 而非 `ENOENT`，没有真正走到自愈重试失败分支，需要改名/改注释或另加一条只读父目录构造的用例；② 正文第 139/334/335 行仍是决议 4 作废前的旧路径 `~/.claude/claudio/...`，尚未逐字回改成 `~/.claudio/...`。
 - [ ] **T5 (P1, human: ~0.5d / CC: ~40min)** — helper — play 跳过式去抖(单锁+时间戳,`LOCK_NB`)+ 后台 spawn afplay+立即 exit0 + 逐事件 enabled
   - Surfaced by: CQ#1 + 架构#3 + 性能指令 · Files: `helper/play`
 - [ ] **T6 (P1, human: ~2h / CC: ~15min)** — helper — 带上限 `claudio.log` + doctor 读尾部

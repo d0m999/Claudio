@@ -139,14 +139,41 @@ func runFileLockSuites() {
         }
     }
 
-    suite("attemptLock reports .failed (not .busy) when the lock file can't be opened") {
+    suite("attemptLock self-heals a missing parent directory (first-run onboarding) and acquires") {
         withTempDirectory { directory in
-            // Parent directory does not exist → open(O_CREAT) fails with ENOENT. This is
-            // the real production failure mode: `~/.claudio` deleted or unwritable. It
-            // must NOT be mistaken for contention.
-            let unreachable =
-                directory
-                .appendingPathComponent("does-not-exist", isDirectory: true)
+            // Parent directory does not exist yet — the real production shape on a
+            // brand-new machine that has never run `claudio install`/`play` before:
+            // nothing creates `~/.claudio/` up front (ENGINEERING.md T4 review HIGH).
+            // `attemptLock` must self-heal by creating the missing directory chain and
+            // retrying `open`, rather than permanently failing with a "retry later"
+            // error that could never actually succeed.
+            let missingParent = directory.appendingPathComponent(
+                "does-not-exist-yet", isDirectory: true)
+            let lockPath = missingParent.appendingPathComponent("play.lock").path
+            expect(
+                !FileManager.default.fileExists(atPath: missingParent.path),
+                "sanity: the parent directory must not exist before attemptLock runs")
+
+            let lock = FileLock(path: lockPath)
+            expect(
+                lock.attemptLock() == .acquired,
+                "attemptLock must self-heal the missing parent directory and acquire the lock")
+            expect(
+                FileManager.default.fileExists(atPath: missingParent.path),
+                "attemptLock's self-heal must have actually created the missing parent directory")
+            lock.unlock()
+        }
+    }
+
+    suite("attemptLock reports .failed (not .busy) when self-heal itself cannot fix the real error") {
+        withTempDirectory { directory in
+            // A regular *file* occupies the path where a parent directory needs to be —
+            // self-heal's `createDirectory` cannot turn a file into a directory, so the
+            // retried `open` must still fail, and that real errno must surface as
+            // `.failed`, never mistaken for contention or silently treated as success.
+            let blockingFile = directory.appendingPathComponent("blocking-file")
+            writeFixture("not a directory", to: blockingFile)
+            let unreachable = blockingFile.appendingPathComponent("subdir")
                 .appendingPathComponent("play.lock").path
             let lock = FileLock(path: unreachable)
             if case .failed = lock.attemptLock() {
@@ -160,9 +187,9 @@ func runFileLockSuites() {
 
     suite("withNonBlockingLock surfaces .failed (never .skipped) on a real system error") {
         withTempDirectory { directory in
-            let unreachable =
-                directory
-                .appendingPathComponent("does-not-exist", isDirectory: true)
+            let blockingFile = directory.appendingPathComponent("blocking-file")
+            writeFixture("not a directory", to: blockingFile)
+            let unreachable = blockingFile.appendingPathComponent("subdir")
                 .appendingPathComponent("play.lock").path
             var bodyRan = false
             let outcome = withNonBlockingLock(path: unreachable) { () -> Int in
