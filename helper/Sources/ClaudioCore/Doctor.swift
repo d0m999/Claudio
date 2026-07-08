@@ -6,9 +6,13 @@ import Foundation
 //                              files exist; missing config/pack/manifest are WARNINGS,
 //                              not crashes (a fresh install has no pack yet).
 //   (c) afplay 在位.
+//   (d) claudio.log 尾部汇总 — read the last few `claudio.log` lines `play` appended on a
+//                              real failure (spawn failure, broken `play.lock`); always a
+//                              WARNING at worst (a missing/corrupt log is itself not a
+//                              reason to hard-fail doctor), see T6.
 //
-// Hard failures (→ non-zero exit) are ONLY (a) and (c). Everything pack-related is a
-// warning in v1 doctor, per the orchestrator's scope note for T1.
+// Hard failures (→ non-zero exit) are ONLY (a) and (c). Everything pack- and log-related is
+// a warning in v1 doctor, per the orchestrator's scope note for T1/T6.
 
 // MARK: - (a) settings.json writability probe
 
@@ -203,19 +207,23 @@ public struct DoctorEnvironment: Sendable {
     public let configFile: URL
     public let userPacksDirectory: URL
     public let bundledPacksDirectory: URL?
+    /// Where check (d) reads its tail from — see ``summarizeRecentLogFailures(logFile:maxEntries:)``.
+    public let logFile: URL
 
     public init(
         afplayPath: String = "/usr/bin/afplay",
         settingsFile: URL = ClaudioPaths.claudeSettingsFile,
         configFile: URL = ClaudioPaths.configFile,
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
-        bundledPacksDirectory: URL? = nil
+        bundledPacksDirectory: URL? = nil,
+        logFile: URL = ClaudioPaths.logFile
     ) {
         self.afplayPath = afplayPath
         self.settingsFile = settingsFile
         self.configFile = configFile
         self.userPacksDirectory = userPacksDirectory
         self.bundledPacksDirectory = bundledPacksDirectory
+        self.logFile = logFile
     }
 }
 
@@ -258,7 +266,30 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
     )
     results.append(packStatus.doctorCheckResult)
 
+    // (d) claudio.log 尾部汇总 — always a warning at worst, never a hard failure (T6).
+    results.append(summarizeRecentLogFailures(logFile: environment.logFile))
+
     return DoctorReport(results: results)
+}
+
+/// Reads the last `maxEntries` `claudio.log` lines and summarizes them for `doctor`.
+/// `.ok` when nothing has ever failed (the common case); `.warning` — never `.failure` — when
+/// recent failures exist, since the log itself is diagnostic, not authoritative (ENGINEERING.md
+/// 决议 6, T6).
+public func summarizeRecentLogFailures(logFile: URL, maxEntries: Int = 5) -> DoctorCheckResult {
+    let entries = readRecentLogEntries(from: logFile, maxLines: maxEntries)
+    guard !entries.isEmpty else {
+        return DoctorCheckResult(
+            name: "log", severity: .ok, message: "✓ 最近无失败记录：\(logFile.path)")
+    }
+
+    let formatter = ISO8601DateFormatter()
+    let summary = entries.map { entry in
+        "\(formatter.string(from: entry.timestamp)) [\(entry.event)] \(entry.reason)"
+    }.joined(separator: "; ")
+    return DoctorCheckResult(
+        name: "log", severity: .warning,
+        message: "⚠ 最近 \(entries.count) 条失败记录：\(summary)")
 }
 
 extension PackIntegrityStatus {

@@ -26,10 +26,33 @@ private final class RecordingSpawner: ProcessSpawning, @unchecked Sendable {
 
     var callCount: Int { calls.count }
 
-    func spawn(executablePath: String, arguments: [String]) {
+    func spawn(executablePath: String, arguments: [String]) -> Bool {
         lock.lock()
         _calls.append((executablePath, arguments))
         lock.unlock()
+        return true
+    }
+}
+
+/// Simulates a spawn whose launch itself fails (e.g. a missing/broken `afplay` binary) —
+/// `spawn` always reports failure without ever touching the real filesystem/process table.
+/// Used to prove `playSoundEvent` appends a `claudio.log` diagnostic line on spawn failure
+/// (ENGINEERING.md T6) while still returning `.played` (T5's outcome contract is unchanged).
+private final class FailingSpawner: ProcessSpawning, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _callCount = 0
+
+    var callCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _callCount
+    }
+
+    func spawn(executablePath: String, arguments: [String]) -> Bool {
+        lock.lock()
+        _callCount += 1
+        lock.unlock()
+        return false
     }
 }
 
@@ -52,11 +75,12 @@ private final class SlowRecordingSpawner: ProcessSpawning, @unchecked Sendable {
         return _callCount
     }
 
-    func spawn(executablePath: String, arguments: [String]) {
+    func spawn(executablePath: String, arguments: [String]) -> Bool {
         lock.lock()
         _callCount += 1
         lock.unlock()
         Thread.sleep(forTimeInterval: holdDuration)
+        return true
     }
 }
 
@@ -79,13 +103,14 @@ private final class DelayedSignalSpawner: ProcessSpawning, @unchecked Sendable {
         return _finished
     }
 
-    func spawn(executablePath: String, arguments: [String]) {
+    func spawn(executablePath: String, arguments: [String]) -> Bool {
         DispatchQueue.global().asyncAfter(deadline: .now() + delay) {
             self.lock.lock()
             self._finished = true
             self.lock.unlock()
         }
         // Returns immediately — never waits for the `asyncAfter` block above.
+        return true
     }
 }
 
@@ -143,7 +168,9 @@ func runPlaySuites() {
                 userPacksDirectory: root.appendingPathComponent("packs"),
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("not_a_real_event", environment: env)
             expect(
@@ -163,7 +190,9 @@ func runPlaySuites() {
                 userPacksDirectory: root.appendingPathComponent("packs"),
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             expect(
@@ -184,7 +213,9 @@ func runPlaySuites() {
                 userPacksDirectory: root.appendingPathComponent("packs"),
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             expect(
@@ -205,7 +236,9 @@ func runPlaySuites() {
                 userPacksDirectory: root.appendingPathComponent("packs"),
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             expect(
@@ -233,7 +266,9 @@ func runPlaySuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("notification", environment: env)
             expect(
@@ -260,7 +295,9 @@ func runPlaySuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             expect(
@@ -294,7 +331,9 @@ func runPlaySuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             expect(
@@ -321,7 +360,9 @@ func runPlaySuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             expect(
@@ -355,7 +396,9 @@ func runPlaySuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             expect(
@@ -401,7 +444,9 @@ func runPlaySuites() {
                     // Each event gets its own debounce state file: this test's purpose is
                     // the event -> manifestKey mapping, not debounce timing, so isolate it
                     // from the (separately tested) shared-timestamp debounce entirely.
-                    debounceStateFile: root.appendingPathComponent("play-\(event.cliName).state"))
+                    debounceStateFile: root.appendingPathComponent("play-\(event.cliName).state"),
+                    logFile: root.appendingPathComponent("claudio.log"),
+                    logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
                 let outcome = playSoundEvent(event.cliName, environment: env)
                 let expectedFile =
@@ -447,7 +492,9 @@ func runPlaySuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             expect(
@@ -487,7 +534,9 @@ func runPlaySuites() {
                 spawner: firstSpawner,
                 debounceStateFile: root.appendingPathComponent("play.state"),
                 debounceInterval: 1.5,
-                now: clock.now)
+                now: clock.now,
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let firstOutcome = playSoundEvent("stop", environment: firstEnv)
             expect(
@@ -511,7 +560,9 @@ func runPlaySuites() {
                 spawner: secondSpawner,
                 debounceStateFile: root.appendingPathComponent("play.state"),
                 debounceInterval: 1.5,
-                now: clock.now)
+                now: clock.now,
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let secondOutcome = playSoundEvent("stop", environment: secondEnv)
             expect(
@@ -534,7 +585,9 @@ func runPlaySuites() {
                 spawner: thirdSpawner,
                 debounceStateFile: root.appendingPathComponent("play.state"),
                 debounceInterval: 1.5,
-                now: clock.now)
+                now: clock.now,
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let thirdOutcome = playSoundEvent("stop", environment: thirdEnv)
             if case .played = thirdOutcome {
@@ -582,7 +635,9 @@ func runPlaySuites() {
                 spawner: stopSpawner,
                 debounceStateFile: sharedStateFile,
                 debounceInterval: 1.5,
-                now: clock.now)
+                now: clock.now,
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
             let stopOutcome = playSoundEvent("stop", environment: stopEnv)
             expect(stopOutcome == .played(
                 event: .stop,
@@ -599,7 +654,9 @@ func runPlaySuites() {
                 spawner: notificationSpawner,
                 debounceStateFile: sharedStateFile,
                 debounceInterval: 1.5,
-                now: clock.now)
+                now: clock.now,
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
             let notificationOutcome = playSoundEvent("notification", environment: notificationEnv)
             expect(
                 notificationOutcome == .skippedRecentPlay(event: .notification),
@@ -637,13 +694,17 @@ func runPlaySuites() {
                 .appendingPathComponent("play.lock")
 
             let spawner = RecordingSpawner()
+            let logFile = root.appendingPathComponent("claudio.log")
+            let logLockFile = root.appendingPathComponent("claudio.log.lock")
             let env = PlayEnvironment(
                 lockFile: unreachableLockFile,
                 configFile: configFile,
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: logFile,
+                logLockFile: logLockFile)
 
             let outcome = playSoundEvent("stop", environment: env)
             if case .lockFailed = outcome {
@@ -652,6 +713,96 @@ func runPlaySuites() {
                 expect(false, "expected .lockFailed, got \(outcome)")
             }
             expect(spawner.callCount == 0, "a real lock error must never spawn afplay")
+
+            let entries = readRecentLogEntries(from: logFile)
+            expect(
+                entries.count == 1 && entries.first?.event == "stop",
+                "a real .lockFailed must append exactly one claudio.log line for the event,"
+                    + " got \(entries)")
+        }
+    }
+
+    suite(
+        "playSoundEvent: a spawn failure (e.g. missing/broken afplay) still reports .played"
+            + " (T5 outcome contract unchanged) but appends a claudio.log diagnostic line (T6)"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let spawner = FailingSpawner()
+            let logFile = root.appendingPathComponent("claudio.log")
+            let logLockFile = root.appendingPathComponent("claudio.log.lock")
+            let env = PlayEnvironment(
+                afplayPath: "/usr/bin/afplay",
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: logFile,
+                logLockFile: logLockFile)
+
+            let outcome = playSoundEvent("stop", environment: env)
+            expect(
+                outcome
+                    == .played(
+                        event: .stop,
+                        filePath: packsDir.appendingPathComponent("minimal-chime/stop.mp3")
+                            .standardizedFileURL.path),
+                "a spawn failure must NOT change the reported outcome — still .played, got"
+                    + " \(outcome)")
+            expect(spawner.callCount == 1, "the spawn must still have been attempted exactly once")
+
+            let entries = readRecentLogEntries(from: logFile)
+            expect(
+                entries.count == 1 && entries.first?.event == "stop",
+                "a spawn failure must append exactly one claudio.log line naming the event,"
+                    + " got \(entries)")
+            expect(
+                entries.first?.reason.contains("afplay") == true,
+                "the logged reason should mention afplay, got"
+                    + " \(String(describing: entries.first?.reason))")
+        }
+    }
+
+    suite(
+        "playSoundEvent: a successful spawn never appends a claudio.log line"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let spawner = RecordingSpawner()
+            let logFile = root.appendingPathComponent("claudio.log")
+            let logLockFile = root.appendingPathComponent("claudio.log.lock")
+            let env = PlayEnvironment(
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: logFile,
+                logLockFile: logLockFile)
+
+            _ = playSoundEvent("stop", environment: env)
+            expect(
+                readRecentLogEntries(from: logFile).isEmpty,
+                "a healthy, successful play must never write a claudio.log line")
         }
     }
 
@@ -680,7 +831,9 @@ func runPlaySuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let iterations = 6
             let collector = OutcomeCollector()
@@ -734,7 +887,9 @@ func runPlaySuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 spawner: spawner,
-                debounceStateFile: root.appendingPathComponent("play.state"))
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
 
             let outcome = playSoundEvent("stop", environment: env)
             if case .played = outcome {

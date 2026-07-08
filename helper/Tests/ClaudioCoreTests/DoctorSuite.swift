@@ -597,7 +597,8 @@ func runDoctorSuites() {
                 settingsFile: settingsFile,
                 configFile: root.appendingPathComponent("config.json"),
                 userPacksDirectory: root.appendingPathComponent("packs"),
-                bundledPacksDirectory: nil)
+                bundledPacksDirectory: nil,
+                logFile: root.appendingPathComponent("claudio.log"))
             let report = runDoctorChecks(environment: env)
             expect(report.hasFailure, "missing afplay must set hasFailure (exit non-zero)")
         }
@@ -618,7 +619,8 @@ func runDoctorSuites() {
                 settingsFile: settingsFile,
                 configFile: root.appendingPathComponent("config.json"),
                 userPacksDirectory: root.appendingPathComponent("packs"),
-                bundledPacksDirectory: nil)
+                bundledPacksDirectory: nil,
+                logFile: root.appendingPathComponent("claudio.log"))
             let report = runDoctorChecks(environment: env)
             expect(report.hasFailure, "unwritable settings.json must set hasFailure")
         }
@@ -635,7 +637,8 @@ func runDoctorSuites() {
                 settingsFile: settingsFile,
                 configFile: root.appendingPathComponent("config.json"),
                 userPacksDirectory: root.appendingPathComponent("packs"),
-                bundledPacksDirectory: nil)
+                bundledPacksDirectory: nil,
+                logFile: root.appendingPathComponent("claudio.log"))
             let report = runDoctorChecks(environment: env)
             expect(
                 !report.hasFailure,
@@ -665,12 +668,75 @@ func runDoctorSuites() {
                 settingsFile: settingsFile,
                 configFile: root.appendingPathComponent("config.json"),
                 userPacksDirectory: packsDir,
-                bundledPacksDirectory: nil)
+                bundledPacksDirectory: nil,
+                logFile: root.appendingPathComponent("claudio.log"))
             let report = runDoctorChecks(environment: env)
             expect(!report.hasFailure, "fully healthy environment must not fail")
             expect(
                 !report.results.contains { $0.severity == .warning },
                 "fully healthy environment should have no warnings either")
+        }
+    }
+
+    suite("summarizeRecentLogFailures: no claudio.log at all (fresh install) → .ok, never a hard failure") {
+        withTempDirectory { root in
+            let result = summarizeRecentLogFailures(logFile: root.appendingPathComponent("claudio.log"))
+            expect(result.severity == .ok, "a log that was never written must report .ok, not a warning")
+        }
+    }
+
+    suite("summarizeRecentLogFailures: recent failures are surfaced as a warning, never .failure") {
+        withTempDirectory { root in
+            let logFile = root.appendingPathComponent("claudio.log")
+            appendLogLine(
+                event: "stop", reason: "afplay 启动失败：/usr/bin/afplay", to: logFile,
+                lockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let result = summarizeRecentLogFailures(logFile: logFile)
+            expect(
+                result.severity == .warning,
+                "a recent failure must be a warning (never .failure — the log itself is"
+                    + " diagnostic, not authoritative), got \(result.severity)")
+            expect(
+                result.message.contains("stop") && result.message.contains("afplay"),
+                "the summary message should name the event and mention the reason, got"
+                    + " \(result.message)")
+        }
+    }
+
+    suite("runDoctorChecks: a recent claudio.log failure surfaces as a warning, not hasFailure") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let packsDir = root.appendingPathComponent("packs")
+            let logFile = root.appendingPathComponent("claudio.log")
+            writeFixture("{}", to: settingsFile)
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime" }"#,
+                to: root.appendingPathComponent("config.json"))
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+            appendLogLine(
+                event: "stop", reason: "afplay 启动失败：/usr/bin/afplay", to: logFile,
+                lockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let env = DoctorEnvironment(
+                afplayPath: "/usr/bin/afplay",
+                settingsFile: settingsFile,
+                configFile: root.appendingPathComponent("config.json"),
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                logFile: logFile)
+            let report = runDoctorChecks(environment: env)
+            expect(
+                !report.hasFailure,
+                "a recent claudio.log failure must NOT set hasFailure — otherwise every"
+                    + " app currently in a warning state would look hard-broken")
+            expect(
+                report.results.contains { $0.name == "log" && $0.severity == .warning },
+                "the log check must surface a warning result when recent failures exist")
         }
     }
 }

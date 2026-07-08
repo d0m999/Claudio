@@ -18,8 +18,12 @@ import Foundation
 /// Starts a process in the background and returns immediately — never waits for it to
 /// exit. Injectable so tests can verify `play` *attempted* the right spawn (executable +
 /// arguments) without ever launching the real system `afplay` (see `PlaySuite.swift`).
+/// Returns `true` iff the launch itself succeeded (`Process.run()` didn't throw) — this is
+/// the one bit `playSoundEvent` needs to decide whether to append a `claudio.log` line
+/// (T6); it does not, and cannot, reflect whether the spawned process later exits non-zero.
 public protocol ProcessSpawning: Sendable {
-    func spawn(executablePath: String, arguments: [String])
+    @discardableResult
+    func spawn(executablePath: String, arguments: [String]) -> Bool
 }
 
 /// Production spawner: launches `executablePath` via `Process`, deliberately never
@@ -28,7 +32,8 @@ public protocol ProcessSpawning: Sendable {
 public struct SystemProcessSpawner: ProcessSpawning {
     public init() {}
 
-    public func spawn(executablePath: String, arguments: [String]) {
+    @discardableResult
+    public func spawn(executablePath: String, arguments: [String]) -> Bool {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
@@ -43,8 +48,10 @@ public struct SystemProcessSpawner: ProcessSpawning {
         // once `afplay` finishes.
         process.terminationHandler = { _ in }
         // `afplay`/the executable may not exist, or launching may fail for any other
-        // reason — silently swallowed, matching "缺音/缺 afplay → 静默不报错" (T5 scope).
-        try? process.run()
+        // reason — never thrown onward (matching "缺音/缺 afplay → 静默不报错", T5 scope),
+        // but the caller still learns whether the launch itself succeeded so it can log a
+        // diagnostic line (T6) without ever turning this into a thrown error.
+        return (try? process.run()) != nil
     }
 }
 
@@ -74,6 +81,16 @@ public struct PlayEnvironment: Sendable {
     /// Injectable clock so tests can simulate elapsed time deterministically instead of
     /// real `Thread.sleep`s spanning the full debounce window.
     public let now: @Sendable () -> Date
+    /// Where `playSoundEvent` appends a diagnostic line on a real failure (spawn failure,
+    /// a broken `play.lock`) — see ``appendLogLine(event:reason:timestamp:to:lockFile:maxBytes:)``
+    /// (ENGINEERING.md 决议 6, T6). Every other outcome (unknown/muted event, incomplete
+    /// pack, debounce skip) stays silent by design; only the two "real error" branches log.
+    public let logFile: URL
+    /// The lock `appendLogLine` takes while rotating/appending to ``logFile``. Kept
+    /// injectable here — rather than left to `appendLogLine`'s own default parameter —
+    /// so tests that redirect `logFile` to a temp directory can never fall through to the
+    /// real `ClaudioPaths.logLockFile` on the host machine.
+    public let logLockFile: URL
 
     public init(
         afplayPath: String = "/usr/bin/afplay",
@@ -84,7 +101,9 @@ public struct PlayEnvironment: Sendable {
         spawner: any ProcessSpawning = SystemProcessSpawner(),
         debounceStateFile: URL = ClaudioPaths.debounceStateFile,
         debounceInterval: TimeInterval = 1.5,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        logFile: URL = ClaudioPaths.logFile,
+        logLockFile: URL = ClaudioPaths.logLockFile
     ) {
         self.afplayPath = afplayPath
         self.lockFile = lockFile
@@ -95,6 +114,8 @@ public struct PlayEnvironment: Sendable {
         self.debounceStateFile = debounceStateFile
         self.debounceInterval = debounceInterval
         self.now = now
+        self.logFile = logFile
+        self.logLockFile = logLockFile
     }
 }
 
@@ -145,8 +166,10 @@ public enum PlayOutcome: Sendable, Equatable {
 /// spawn under `play.lock`'s non-blocking debounce.
 ///
 /// Never throws. Callers (the `claudio play` CLI subcommand) are expected to ignore the
-/// returned outcome and exit 0 unconditionally — this return value exists for tests and
-/// any future diagnostic logging (T6), not for the hook caller to branch on.
+/// returned outcome and exit 0 unconditionally — this return value exists for tests, not
+/// for the hook caller to branch on. A real failure (spawn failure, a broken `play.lock`)
+/// additionally appends one `claudio.log` line as a side effect before returning (T6); every
+/// other outcome stays silent by design.
 public func playSoundEvent(
     _ eventName: String,
     environment: PlayEnvironment = PlayEnvironment()
@@ -170,8 +193,14 @@ public func playSoundEvent(
             return .skippedRecentPlay(event: event)
         }
         writeLastPlayedTimestamp(now, to: environment.debounceStateFile)
-        environment.spawner.spawn(
+        let spawned = environment.spawner.spawn(
             executablePath: environment.afplayPath, arguments: [audioFile.path])
+        if !spawned {
+            appendLogLine(
+                event: event.cliName,
+                reason: "afplay 启动失败：\(environment.afplayPath)",
+                timestamp: now, to: environment.logFile, lockFile: environment.logLockFile)
+        }
         return .played(event: event, filePath: audioFile.path)
     }
 
@@ -181,6 +210,10 @@ public func playSoundEvent(
     case .skipped:
         return .skippedDebounce
     case .failed(let code):
+        appendLogLine(
+            event: event.cliName,
+            reason: "play.lock 获取失败（errno \(code)）",
+            timestamp: environment.now(), to: environment.logFile, lockFile: environment.logLockFile)
         return .lockFailed(errno: code)
     }
 }

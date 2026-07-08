@@ -44,6 +44,7 @@ runDoctorSuites()
 runSettingsInstallerSuites()
 runPathsSuites()
 runPlaySuites()
+runLogSuites()
 
 // MARK: - Summary
 

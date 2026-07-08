@@ -4,8 +4,8 @@ import Foundation
 
 extension Claudio {
     /// `claudio doctor` — self-check: afplay 在位、settings.json 可写（只读探测，绝不真
-    /// 写）、当前声音包完整（无配置/无包 → warning，不判红）。硬问题（afplay 缺 /
-    /// settings.json 不可写）才让退出码非 0；日志滚动汇总留 T6。
+    /// 写）、当前声音包完整（无配置/无包 → warning，不判红）、claudio.log 尾部近期失败汇总
+    /// （T6）。硬问题（afplay 缺 / settings.json 不可写）才让退出码非 0。
     struct Doctor: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "自检：afplay 在位、settings.json 可写、声音包完整（只读探测，不写入/不播放）。"

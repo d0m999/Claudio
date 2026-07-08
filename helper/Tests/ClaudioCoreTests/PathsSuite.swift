@@ -46,6 +46,7 @@ func runPathsSuites() {
             ("binDirectory", ClaudioPaths.binDirectory.path),
             ("claudioBinary", ClaudioPaths.claudioBinary.path),
             ("logFile", ClaudioPaths.logFile.path),
+            ("logLockFile", ClaudioPaths.logLockFile.path),
             ("lockFile", ClaudioPaths.lockFile.path),
             ("claudeSettingsFile", ClaudioPaths.claudeSettingsFile.path),
         ]
@@ -77,6 +78,7 @@ func runPathsSuites() {
             ("binDirectory", ClaudioPaths.binDirectory.path),
             ("claudioBinary", ClaudioPaths.claudioBinary.path),
             ("logFile", ClaudioPaths.logFile.path),
+            ("logLockFile", ClaudioPaths.logLockFile.path),
             ("lockFile", ClaudioPaths.lockFile.path),
         ]
         for (name, path) in owned {

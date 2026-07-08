@@ -57,6 +57,15 @@ public enum ClaudioPaths {
         root.appendingPathComponent("claudio.log")
     }
 
+    /// `~/.claudio/claudio.log.lock` — the non-blocking lock guarding `claudio.log`'s
+    /// rotate-then-append sequence against concurrent tearing across processes
+    /// (ENGINEERING.md 决议 6, T6; see ``FileLock``). Deliberately a **separate** lock from
+    /// ``lockFile`` (`play.lock`) — logging must never contend with, or be gated by,
+    /// `play`'s own debounce lock.
+    public static var logLockFile: URL {
+        root.appendingPathComponent("claudio.log.lock")
+    }
+
     /// `~/.claudio/play.lock` — the non-blocking lock guarding `play`'s skip-style
     /// debounce (ENGINEERING.md 决议 1 + 5, T5). See ``FileLock``.
     public static var lockFile: URL {
