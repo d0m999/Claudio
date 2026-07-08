@@ -113,6 +113,58 @@ public func uninstallClaudioHooks(
     }
 }
 
+// MARK: - Read-only hook-install detection (GUI onboarding, T7)
+
+/// Whether Claudio's hook command is present, for every one of the four core events, in
+/// `settings.json` — a **read-only** query, never a write. GUI onboarding (T7) needs to
+/// tell "已接管" (already taken over) from "未接管" without ever calling
+/// ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)`` — which has the real
+/// side effect of writing the file — just to answer that question (ENGINEERING.md T7
+/// note: "判定'是否已接管'要用只读方式").
+public enum HookInstallStatus: Sendable, Equatable {
+    /// Every core event already carries claudio's exact-match hook command.
+    case installed
+    /// `settings.json` is absent, or at least one core event is missing claudio's hook
+    /// command — this covers both "never installed" and "partially installed" (e.g. a
+    /// user manually removed one event's entry): onboarding treats anything short of
+    /// full coverage as "not yet taken over", since a fresh ``installClaudioHooks`` call
+    /// would still have real, visible work to do.
+    case notInstalled
+    /// `settings.json` exists but couldn't be read or parsed, or its `hooks` section has
+    /// an unexpected shape — the exact same classification `install`/`uninstall` would
+    /// abort on. Carries the same ``SettingsUpdateError`` so callers can reuse its
+    /// `description` verbatim instead of re-deriving their own copy.
+    case settingsUnreadable(SettingsUpdateError)
+}
+
+/// Read-only counterpart to ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``.
+/// Parses `settingsFile` exactly the same way — reusing ``loadRoot(from:)``,
+/// ``validateHooksShape(_:)``, and ``groupContainsCommand(_:command:)``, the very same
+/// private helpers `install`/`uninstall` use — so "is it installed?" can never silently
+/// drift out of sync with what a real `install`/`uninstall` call would actually see.
+/// Never takes ``ClaudioPaths/lockFile``: there is nothing to serialize against
+/// concurrent writers for a pure read that never writes anything back.
+public func detectHookInstallStatus(
+    settingsFile: URL = ClaudioPaths.claudeSettingsFile,
+    claudioBinaryPath: String = ClaudioPaths.claudioBinary.path
+) -> HookInstallStatus {
+    switch loadRoot(from: settingsFile) {
+    case .failure(let error):
+        return .settingsUnreadable(error)
+    case .success(let root):
+        if let shapeError = validateHooksShape(root) {
+            return .settingsUnreadable(shapeError)
+        }
+        let hooksSection = (root[hooksKey] as? [String: Any]) ?? [:]
+        let allEventsInstalled = Event.allCases.allSatisfy { event in
+            let command = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
+            let eventArray = (hooksSection[event.settingsName] as? [Any]) ?? []
+            return eventArray.contains { groupContainsCommand($0, command: command) }
+        }
+        return allEventsInstalled ? .installed : .notInstalled
+    }
+}
+
 // MARK: - Locked critical sections
 
 private func performInstall(

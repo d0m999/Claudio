@@ -7,6 +7,16 @@ import PackageDescription
 let package = Package(
     name: "claudio",
     platforms: [.macOS(.v12)],  // ENGINEERING.md: macOS 12+
+    // Explicit `products` (SwiftPM 6 no longer auto-vends every target as a product):
+    // only `ClaudioCore` is exposed, so the `gui/` package (T7+, a sibling local-path
+    // dependency) can reuse its read-only detection APIs (`probeSettingsWritable`,
+    // `detectHookInstallStatus`, `ClaudioPaths`, ...) instead of reimplementing them —
+    // "single source of truth" per this repo's existing convention. The `claudio` CLI
+    // executable and `claudio-tests` harness are intentionally NOT products: nothing
+    // outside this package needs to link against either.
+    products: [
+        .library(name: "ClaudioCore", targets: ["ClaudioCore"])
+    ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.3.0")
     ],
