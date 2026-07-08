@@ -93,6 +93,55 @@ func runHookStatusSuites() {
         }
     }
 
+    suite("detectHookInstallStatus: an entry with our command but a missing \"type\" → .notInstalled (not a runnable command hook)") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            // All four events carry our exact command string, but SubagentStop's entry is
+            // missing its `"type": "command"` — Claude Code would NOT fire it as a command
+            // hook, so a read-only "已接管?" probe must not count it as installed. If it
+            // did, onboarding would show "已接好" for a config that never actually plays a
+            // sound on subagent-stop.
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ],
+                  "StopFailure": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stopFailure, claudioBinaryPath: testClaudioBinaryPath))" } ] } ],
+                  "Notification": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .notification, claudioBinaryPath: testClaudioBinaryPath))" } ] } ],
+                  "SubagentStop": [ { "hooks": [ { "command": "\#(claudioHookCommand(for: .subagentStop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ]
+                } }
+                """#, to: settingsFile)
+
+            let status = detectHookInstallStatus(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath)
+            expect(
+                status == .notInstalled,
+                "an entry matching only on command (no \"type\": \"command\") must not read as .installed, got \(status)")
+        }
+    }
+
+    suite("detectHookInstallStatus: an entry with our command but a non-command \"type\" → .notInstalled") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            // Same command string, but `"type"` is something other than "command" — again
+            // not a runnable command hook, so it must not count as installed.
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [ { "hooks": [ { "type": "prompt", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ],
+                  "StopFailure": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stopFailure, claudioBinaryPath: testClaudioBinaryPath))" } ] } ],
+                  "Notification": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .notification, claudioBinaryPath: testClaudioBinaryPath))" } ] } ],
+                  "SubagentStop": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .subagentStop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ]
+                } }
+                """#, to: settingsFile)
+
+            let status = detectHookInstallStatus(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath)
+            expect(
+                status == .notInstalled,
+                "an entry with a non-\"command\" type must not read as .installed, got \(status)")
+        }
+    }
+
     suite("detectHookInstallStatus: corrupt JSON syntax → .settingsUnreadable(.parseFailure), never writes") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")

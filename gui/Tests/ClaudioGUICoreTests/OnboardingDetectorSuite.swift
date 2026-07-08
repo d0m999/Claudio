@@ -23,7 +23,7 @@ private func makeReadyEnvironment(in root: URL) -> OnboardingEnvironment {
     let settingsFile = claudeDirectory.appendingPathComponent("settings.json")
 
     let binaryPath = root.appendingPathComponent("dot-claudio/bin/claudio")
-    writeEmptyFile(at: binaryPath)
+    writeExecutableFile(at: binaryPath)
 
     return OnboardingEnvironment(settingsFile: settingsFile, claudioBinaryPath: binaryPath)
 }
@@ -79,6 +79,49 @@ func runOnboardingDetectorSuites() {
             expect(
                 detectOnboardingState(environment: environment) == .helperMissing,
                 "Claude Code present but no installed helper binary must read as helperMissing")
+        }
+    }
+
+    suite("2a. helper path exists but is a directory → .helperMissing (not a runnable binary)") {
+        withTempDirectory { root in
+            let claudeDirectory = root.appendingPathComponent("dot-claude", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: claudeDirectory, withIntermediateDirectories: true)
+            // A directory sitting where the binary should be: `fileExists` is true and a
+            // 0o755 directory is even "executable" (searchable), so only the explicit
+            // not-a-directory guard keeps this from being mistaken for an installed helper.
+            let binaryPath = root.appendingPathComponent("dot-claudio/bin/claudio", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: binaryPath, withIntermediateDirectories: true)
+            let environment = OnboardingEnvironment(
+                settingsFile: claudeDirectory.appendingPathComponent("settings.json"),
+                claudioBinaryPath: binaryPath)
+
+            expect(
+                detectOnboardingState(environment: environment) == .helperMissing,
+                "a directory at the helper binary's path must read as helperMissing, not installed")
+        }
+    }
+
+    suite("2b. helper path exists but is a non-executable file → .helperMissing (broken install)") {
+        withTempDirectory { root in
+            let claudeDirectory = root.appendingPathComponent("dot-claude", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: claudeDirectory, withIntermediateDirectories: true)
+            // A present-but-non-executable file models a half-finished / corrupted install
+            // (e.g. a truncated download, or the execute bit lost). Claude Code could not
+            // run it, so onboarding must not claim the helper is installed.
+            let binaryPath = root.appendingPathComponent("dot-claudio/bin/claudio")
+            writeEmptyFile(at: binaryPath)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: binaryPath.path)
+            let environment = OnboardingEnvironment(
+                settingsFile: claudeDirectory.appendingPathComponent("settings.json"),
+                claudioBinaryPath: binaryPath)
+
+            expect(
+                detectOnboardingState(environment: environment) == .helperMissing,
+                "a non-executable file at the helper binary's path must read as helperMissing")
         }
     }
 
@@ -240,7 +283,7 @@ func runOnboardingDetectorSuites() {
                 detectOnboardingState(environment: environment) == .helperMissing,
                 "before the binary exists, state must be helperMissing")
 
-            writeEmptyFile(at: binaryPath)
+            writeExecutableFile(at: binaryPath)
             expect(
                 detectOnboardingState(environment: environment) == .notInstalled,
                 "once the binary appears (no settings.json yet), state must transition to notInstalled")

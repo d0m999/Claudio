@@ -38,8 +38,9 @@ public enum ClaudioPaths {
         packsDirectory.appendingPathComponent(id, isDirectory: true)
     }
 
-    /// `~/.claudio/bin/` — where `claudio install` places the helper binary at a fixed,
-    /// idempotency-friendly path (ENGINEERING.md 决议 3, T2/T4).
+    /// `~/.claudio/bin/` — the fixed, idempotency-friendly path the helper binary lives at,
+    /// placed by the app install (`claudio install` itself only writes `settings.json`
+    /// hooks; running it already requires this binary to exist). ENGINEERING.md 决议 3, T2/T4.
     public static var binDirectory: URL {
         root.appendingPathComponent("bin", isDirectory: true)
     }

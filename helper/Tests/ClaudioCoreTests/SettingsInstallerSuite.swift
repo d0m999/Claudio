@@ -327,6 +327,80 @@ func runSettingsInstallerSuites() {
         }
     }
 
+    suite("installClaudioHooks: a leftover entry with our command but no \"type\" is not counted as installed — install self-heals with a real command hook") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            // A pre-existing Stop entry carries claudio's exact command string but is
+            // missing its "type": "command" — Claude Code would never fire it. The
+            // idempotency check (strict `groupContainsCommand`) must treat Stop as
+            // not-yet-ours and append a proper, runnable entry (a real write → .installed),
+            // rather than seeing the bare command string and skipping the fix.
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [ { "hooks": [ { "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ]
+                } }
+                """#, to: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.installed),
+                "install must self-heal past a typeless leftover (a real write, not .alreadyInstalled), got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let stopGroups = hooksArray(json, event: "Stop") ?? []
+            expect(
+                stopGroups.count == 2,
+                "Stop should keep the malformed leftover group and gain a freshly-appended proper one, got \(stopGroups.count)")
+            let hasRunnableStop = stopGroups.contains { group in
+                guard let inner = group["hooks"] as? [[String: Any]] else { return false }
+                return inner.contains {
+                    ($0["type"] as? String) == "command"
+                        && ($0["command"] as? String)
+                            == claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath)
+                }
+            }
+            expect(hasRunnableStop, "install must have appended a real { type: command } hook for Stop")
+
+            expect(
+                detectHookInstallStatus(
+                    settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath) == .installed,
+                "after self-heal, all four events must read back as .installed")
+        }
+    }
+
+    suite("uninstallClaudioHooks: still removes a leftover entry carrying our command even without a \"type\" (loose, command-only match)") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            // The detect/install tightening must NOT make uninstall leave malformed cruft
+            // behind: `removeHookEntries` matches on `command` alone, so a typeless leftover
+            // carrying our command still gets cleaned up.
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [ { "hooks": [ { "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ]
+                } }
+                """#, to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.uninstalled(count: 1)),
+                "uninstall must remove the typeless leftover carrying our command, got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let hooksSection = json?["hooks"] as? [String: Any]
+            expect(
+                hooksSection?["Stop"] == nil,
+                "Stop key must be removed once its only (malformed) claudio entry is gone")
+        }
+    }
+
     suite("corrupt JSON syntax: install and uninstall both abort without writing or backing up") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")

@@ -15,7 +15,8 @@ public struct OnboardingEnvironment: Sendable {
     /// `~/.claude/settings.json` (``ClaudioPaths/claudeSettingsFile``).
     public var settingsFile: URL
 
-    /// Where `claudio install` places the helper binary. Defaults to the real
+    /// Where the installed `claudio` helper binary lives — placed by the app install, not by
+    /// `claudio install` (which only writes `settings.json` hooks). Defaults to the real
     /// `~/.claudio/bin/claudio` (``ClaudioPaths/claudioBinary``).
     public var claudioBinaryPath: URL
 

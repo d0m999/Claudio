@@ -35,7 +35,7 @@ func runOnboardingViewModelSuites() {
                 viewModel.copy == onboardingCopy(for: viewModel.state),
                 "copy must equal onboardingCopy(for: state) right after init")
 
-            writeEmptyFile(at: environment.claudioBinaryPath)
+            writeExecutableFile(at: environment.claudioBinaryPath)
             viewModel.refresh()
             expect(
                 viewModel.state == .notInstalled,
@@ -52,7 +52,7 @@ func runOnboardingViewModelSuites() {
             let viewModel = OnboardingViewModel(environment: environment)
             expect(viewModel.state == .helperMissing, "setup: must start as helperMissing")
 
-            writeEmptyFile(at: environment.claudioBinaryPath)
+            writeExecutableFile(at: environment.claudioBinaryPath)
             viewModel.refresh()
             expect(
                 viewModel.state == .notInstalled,
@@ -81,7 +81,7 @@ func runOnboardingViewModelSuites() {
             // A completely different fixture, already fully installed.
             let secondRoot = root.appendingPathComponent("second-fixture", isDirectory: true)
             let secondEnvironment = makeReadyEnvironment(in: secondRoot)
-            writeEmptyFile(at: secondEnvironment.claudioBinaryPath)
+            writeExecutableFile(at: secondEnvironment.claudioBinaryPath)
             let path = secondEnvironment.claudioBinaryPath.path
             let entries = Event.allCases.map { event in
                 #"""
@@ -108,7 +108,7 @@ func runOnboardingViewModelSuites() {
             viewModel.onPrimaryAction = {
                 invoked = true
                 // Simulate "the fix landed": create the missing helper binary.
-                writeEmptyFile(at: environment.claudioBinaryPath)
+                writeExecutableFile(at: environment.claudioBinaryPath)
             }
 
             viewModel.performPrimaryAction()
@@ -123,7 +123,7 @@ func runOnboardingViewModelSuites() {
     suite("performSecondaryAction(): invokes onSecondaryAction, then refreshes against its effect") {
         withTempDirectory { root in
             let environment = makeReadyEnvironment(in: root)
-            writeEmptyFile(at: environment.claudioBinaryPath)
+            writeExecutableFile(at: environment.claudioBinaryPath)
             let path = environment.claudioBinaryPath.path
             let entries = Event.allCases.map { event in
                 #"""

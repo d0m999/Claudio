@@ -297,13 +297,26 @@ private func appendHookEntry(
     return (root, true)
 }
 
+/// Whether `group` contains a **real command hook** — an entry whose `"type"` is
+/// `"command"` *and* whose `"command"` exactly matches. The `type == "command"`
+/// requirement is deliberate and load-bearing for the two callers that use this:
+/// `appendHookEntry` (install idempotency) and `detectHookInstallStatus` (the read-only
+/// "已接管?" probe). An entry that carries our command string but a missing or different
+/// `type` is one Claude Code will NOT execute as a command hook, so treating it as "ours,
+/// already installed" would (a) make onboarding claim `.installed` for a config that never
+/// actually fires, and (b) make `install` skip appending the real, runnable entry that
+/// would fix it. Requiring the type instead lets `install` self-heal past such a leftover.
+///
+/// `uninstall` intentionally does NOT go through here — `removeHookEntries` matches on
+/// `command` alone, so a malformed leftover carrying our command still gets cleaned up.
 private func groupContainsCommand(_ group: Any, command: String) -> Bool {
     guard let groupDict = group as? [String: Any],
         let innerHooks = groupDict[hooksKey] as? [Any]
     else { return false }
     return innerHooks.contains { entry in
         guard let entryDict = entry as? [String: Any] else { return false }
-        return (entryDict[hookCommandKey] as? String) == command
+        return (entryDict[hookTypeKey] as? String) == commandHookType
+            && (entryDict[hookCommandKey] as? String) == command
     }
 }
 
