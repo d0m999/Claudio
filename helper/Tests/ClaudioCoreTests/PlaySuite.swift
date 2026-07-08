@@ -462,11 +462,157 @@ func runPlaySuites() {
                 expect(
                     spawner.calls.first?.executablePath == "/usr/bin/afplay",
                     "spawn must use the configured afplay path for \(event.cliName)")
+                // No `master_volume` in this fixture's config.json, so `ClaudioConfig`'s own
+                // lenient decoder falls back to `ClaudioConfig.defaultMasterVolume` (T9) —
+                // the spawn must carry that mapped default as `-v <value>`, not omit it.
+                let expectedDefaultVolumeArgument =
+                    AfplayVolume.afplayArgument(forMasterVolume: ClaudioConfig.defaultMasterVolume)
                 expect(
-                    spawner.calls.first?.arguments == [expectedFile],
-                    "spawn arguments must be exactly [audio file path] for \(event.cliName), got"
+                    spawner.calls.first?.arguments == [
+                        "-v", expectedDefaultVolumeArgument, expectedFile,
+                    ],
+                    "spawn arguments must be exactly [-v, <default volume>, audio file path]"
+                        + " for \(event.cliName), got"
                         + " \(String(describing: spawner.calls.first?.arguments))")
             }
+        }
+    }
+
+    suite(
+        "playSoundEvent: a custom in-range config.json master_volume is threaded through to"
+            + " the afplay spawn as -v <mapped value> (T9)"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": 0.35 }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let spawner = RecordingSpawner()
+            let env = PlayEnvironment(
+                afplayPath: "/usr/bin/afplay",
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let expectedFile =
+                packsDir.appendingPathComponent("minimal-chime/stop.mp3").standardizedFileURL.path
+            let outcome = playSoundEvent("stop", environment: env)
+            expect(
+                outcome == .played(event: .stop, filePath: expectedFile),
+                "expected .played, got \(outcome)")
+            expect(
+                spawner.calls.first?.arguments == ["-v", "0.35", expectedFile],
+                "a 0.35 master_volume must spawn afplay with [-v, 0.35, audio file path], got"
+                    + " \(String(describing: spawner.calls.first?.arguments))")
+        }
+    }
+
+    suite(
+        "playSoundEvent: an out-of-range config.json master_volume is clamped before reaching"
+            + " the afplay -v argument (T9) — never passed through raw"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+            let expectedFile =
+                packsDir.appendingPathComponent("minimal-chime/stop.mp3").standardizedFileURL.path
+
+            // Above 1.0 -> clamps to 1.0.
+            let tooLoudConfig = root.appendingPathComponent("too-loud.json")
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": 1.8 }"#, to: tooLoudConfig)
+            let tooLoudSpawner = RecordingSpawner()
+            let tooLoudEnv = PlayEnvironment(
+                lockFile: root.appendingPathComponent("too-loud.lock"),
+                configFile: tooLoudConfig,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: tooLoudSpawner,
+                debounceStateFile: root.appendingPathComponent("too-loud.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+            _ = playSoundEvent("stop", environment: tooLoudEnv)
+            expect(
+                tooLoudSpawner.calls.first?.arguments == ["-v", "1.0", expectedFile],
+                "master_volume 1.8 must clamp to -v 1.0, got"
+                    + " \(String(describing: tooLoudSpawner.calls.first?.arguments))")
+
+            // Below 0.0 -> clamps to 0.0.
+            let negativeConfig = root.appendingPathComponent("negative.json")
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": -0.4 }"#, to: negativeConfig)
+            let negativeSpawner = RecordingSpawner()
+            let negativeEnv = PlayEnvironment(
+                lockFile: root.appendingPathComponent("negative.lock"),
+                configFile: negativeConfig,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: negativeSpawner,
+                debounceStateFile: root.appendingPathComponent("negative.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+            _ = playSoundEvent("stop", environment: negativeEnv)
+            expect(
+                negativeSpawner.calls.first?.arguments == ["-v", "0.0", expectedFile],
+                "master_volume -0.4 must clamp to -v 0.0, got"
+                    + " \(String(describing: negativeSpawner.calls.first?.arguments))")
+        }
+    }
+
+    suite(
+        "playSoundEvent: a corrupt/wrong-type config.json master_volume falls back to"
+            + " ClaudioConfig.defaultMasterVolume's mapped -v argument, never spawns with a"
+            + " raw/garbage value"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            // `master_volume` is a string, not a number — ClaudioConfig's lenient decoder
+            // (ClaudioConfig.swift) already recovers this to the documented default; this
+            // test proves that recovery reaches all the way through to the afplay spawn.
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let spawner = RecordingSpawner()
+            let env = PlayEnvironment(
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let expectedFile =
+                packsDir.appendingPathComponent("minimal-chime/stop.mp3").standardizedFileURL.path
+            let expectedDefaultVolumeArgument =
+                AfplayVolume.afplayArgument(forMasterVolume: ClaudioConfig.defaultMasterVolume)
+            _ = playSoundEvent("stop", environment: env)
+            expect(
+                spawner.calls.first?.arguments == ["-v", expectedDefaultVolumeArgument, expectedFile],
+                "a corrupt master_volume must spawn with the mapped default volume, got"
+                    + " \(String(describing: spawner.calls.first?.arguments))")
         }
     }
 

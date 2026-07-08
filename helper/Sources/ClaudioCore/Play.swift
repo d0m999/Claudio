@@ -193,8 +193,14 @@ public func playSoundEvent(
             return .skippedRecentPlay(event: event)
         }
         writeLastPlayedTimestamp(now, to: environment.debounceStateFile)
+        // `-v` and its value are two separate argv elements (never one concatenated
+        // string) — `Process.arguments` passes each array element through as its own argv
+        // entry, so `["-v value", path]` would make afplay see `-v value` as a single
+        // malformed argument instead of a flag + its value (T9).
+        let volumeArgument = AfplayVolume.afplayArgument(forMasterVolume: config.masterVolume)
         let spawned = environment.spawner.spawn(
-            executablePath: environment.afplayPath, arguments: [audioFile.path])
+            executablePath: environment.afplayPath,
+            arguments: ["-v", volumeArgument, audioFile.path])
         if !spawned {
             appendLogLine(
                 event: event.cliName,
