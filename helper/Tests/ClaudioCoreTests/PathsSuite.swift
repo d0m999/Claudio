@@ -23,13 +23,17 @@ import Foundation
 // calls `FileManager` against the paths it computes, so the real `~/.claudio` / `~/.claude`
 // on this machine is never created, read, or written by running this suite.
 //
-// No `ensureDirectoryExists`-style helper is added here: nothing in `Sources/` currently
-// creates any of these directories (confirmed via `grep -rn createDirectory Sources/` —
-// zero hits), so there is no present call site for it. `FileLock.attemptLock` already has
-// well-defined, tested `.failed` behavior when a parent directory is missing
-// (`FileLockSuite.swift`), and directory-creation-on-first-use is a decision that belongs
-// to whichever future task (`install`, `play`, or `log`) first needs it — adding the
-// abstraction here now, unused, would be speculative.
+// No `ensureDirectoryExists`-style helper is added here in `ClaudioPaths` itself: the one
+// case that actually needed eager directory creation — a brand-new machine's very first
+// `play.lock` acquisition, whose parent `~/.claudio` doesn't exist yet — is already handled
+// by `FileLock.attemptLock` itself, not by `ClaudioPaths`. On `ENOENT` it self-heals by
+// calling `createDirectory(withIntermediateDirectories:)` on the missing parent and
+// retrying `open` once; only a *different* errno (e.g. `EACCES`) still surfaces as
+// `.failed` (see `FileLock.swift`, tested in `FileLockSuite.swift`). Any *other*
+// `ClaudioPaths` location that might need the same eager-creation treatment (e.g.
+// `packsDirectory` before `install` writes into it) is still a decision that belongs to
+// whichever future task first needs it — adding the abstraction here now, unused, would be
+// speculative.
 
 @MainActor
 func runPathsSuites() {
