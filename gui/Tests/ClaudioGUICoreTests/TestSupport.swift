@@ -36,14 +36,27 @@ func writeEmptyFile(at url: URL) {
     FileManager.default.createFile(atPath: url.path, contents: Data())
 }
 
-/// Creates an empty **executable** (`0o755`) regular file at `url` — the realistic stand-in
-/// for the installed `claudio` binary, which ships executable alongside the app (the app
-/// places it; `claudio install` itself only writes `settings.json` hooks, and could not run
-/// at all unless this binary already existed and were executable). `detectOnboardingState`
-/// requires a runnable file, so every fixture that means "the helper is installed" must use
-/// this, not ``writeEmptyFile(at:)``.
+/// Creates a small, **non-empty executable** (`0o755`) regular file at `url` — the realistic
+/// stand-in for the installed `claudio` binary, which ships executable alongside the app (the
+/// app places it; `claudio install` itself only writes `settings.json` hooks, and could not
+/// run at all unless this binary already existed and were executable). `detectOnboardingState`
+/// requires a runnable *non-empty* regular file, so every fixture that means "the helper is
+/// installed" must use this, not ``writeEmptyFile(at:)`` or ``writeEmptyExecutableFile(at:)``.
 @MainActor
 func writeExecutableFile(at url: URL) {
+    try? FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    FileManager.default.createFile(
+        atPath: url.path, contents: Data("#!/bin/sh\nexit 0\n".utf8),
+        attributes: [.posixPermissions: 0o755])
+}
+
+/// Creates an empty (0-byte) but **executable** (`0o755`) regular file at `url` — models a
+/// truncated / half-copied install where the execute bit is set but no real binary was ever
+/// written. `detectOnboardingState` must still treat this as ``OnboardingState/helperMissing``,
+/// since Claude Code could not actually run an empty file.
+@MainActor
+func writeEmptyExecutableFile(at url: URL) {
     try? FileManager.default.createDirectory(
         at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
     FileManager.default.createFile(

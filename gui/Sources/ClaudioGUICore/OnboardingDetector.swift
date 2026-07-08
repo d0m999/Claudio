@@ -8,9 +8,9 @@ import Foundation
 /// 1. Is `~/.claude/` there at all? If not, nothing else matters — Claude Code itself
 ///    isn't installed (``OnboardingState/claudeCodeNotInstalled``).
 /// 2. Is the helper binary installed *and runnable*? A missing binary — or a path that's
-///    a directory, or a non-executable regular file (a broken / half-finished install) —
-///    makes "already taken over" or "not yet taken over" both moot, since Claude Code
-///    could never actually invoke it (``OnboardingState/helperMissing``).
+///    a directory, a non-executable regular file, or an empty 0-byte stub (all broken /
+///    half-finished installs) — makes "already taken over" or "not yet taken over" both
+///    moot, since Claude Code could never actually invoke it (``OnboardingState/helperMissing``).
 /// 3. Can we even write `settings.json`? (``probeSettingsWritable(settingsFile:)``,
 ///    reused verbatim — single source of truth with `installClaudioHooks` itself.)
 /// 4. Can we read/parse it? (``detectHookInstallStatus(settingsFile:claudioBinaryPath:)``,
@@ -36,15 +36,17 @@ public func detectOnboardingState(
         return .claudeCodeNotInstalled
     }
 
-    var binaryIsDirectory: ObjCBool = false
-    let binaryExists = fileManager.fileExists(
-        atPath: environment.claudioBinaryPath.path, isDirectory: &binaryIsDirectory)
-    // A bare `fileExists` here would green-light a directory, a 0-byte placeholder, or a
-    // non-executable file at the binary's path — all of which Claude Code would fail to
-    // actually run. Require a *runnable* regular file: present, not a directory, and
-    // executable by us. (`isExecutableFile` alone is insufficient — it returns true for a
-    // searchable directory — hence the explicit `!isDirectory` guard.)
-    guard binaryExists, !binaryIsDirectory.boolValue,
+    // A bare `fileExists` here would green-light a directory, an empty 0-byte placeholder,
+    // or a non-executable file at the binary's path — all of which Claude Code would fail
+    // to actually run. Require a *runnable* binary: a regular file (so not a directory, and
+    // not some other special file), non-empty, and executable by us. `isRegularFile`
+    // subsumes the not-a-directory check (`isExecutableFile` alone returns true for a
+    // searchable directory), and the non-zero size rejects the 0-byte stub a truncated /
+    // half-finished install can leave behind with its execute bit already set.
+    let binaryResourceValues = try? environment.claudioBinaryPath.resourceValues(
+        forKeys: [.isRegularFileKey, .fileSizeKey])
+    guard binaryResourceValues?.isRegularFile == true,
+        (binaryResourceValues?.fileSize ?? 0) > 0,
         fileManager.isExecutableFile(atPath: environment.claudioBinaryPath.path)
     else {
         return .helperMissing

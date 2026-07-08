@@ -125,6 +125,27 @@ func runOnboardingDetectorSuites() {
         }
     }
 
+    suite("2c. helper path exists, executable, but is a 0-byte stub → .helperMissing (truncated install)") {
+        withTempDirectory { root in
+            let claudeDirectory = root.appendingPathComponent("dot-claude", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: claudeDirectory, withIntermediateDirectories: true)
+            // A 0-byte file that already carries the execute bit models a truncated / half-copied
+            // install (execute bit set, real bytes never written). It passes `fileExists` *and*
+            // `isExecutableFile`, so only the non-zero-size guard keeps it from being mistaken for
+            // an installed helper — Claude Code could never actually run an empty file.
+            let binaryPath = root.appendingPathComponent("dot-claudio/bin/claudio")
+            writeEmptyExecutableFile(at: binaryPath)
+            let environment = OnboardingEnvironment(
+                settingsFile: claudeDirectory.appendingPathComponent("settings.json"),
+                claudioBinaryPath: binaryPath)
+
+            expect(
+                detectOnboardingState(environment: environment) == .helperMissing,
+                "a 0-byte executable at the helper binary's path must read as helperMissing, not installed")
+        }
+    }
+
     suite("4. both prerequisites present, no settings.json at all → .notInstalled") {
         withTempDirectory { root in
             let environment = makeReadyEnvironment(in: root)
