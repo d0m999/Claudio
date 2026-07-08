@@ -51,7 +51,7 @@ public struct AudioImportRequest: Sendable, Equatable {
 /// safety, built-in-pack collision, size, content-sniffed format, and duration — in that
 /// order — then copies it in only once every check passes (ENGINEERING.md T8, the
 /// complete "drag-in hardening" pipeline). Never references or reads from the original
-/// `sourceURL` again after step 4 reads its bytes — every check from there on (duration in
+/// `sourceURL` again after step 3 reads its bytes — every check from there on (duration in
 /// step 5, the write in step 6) operates on that already-read `Data`, so the copy is the
 /// only thing anything downstream ever touches (acceptance criterion 1: "never reference
 /// the original path").
@@ -63,30 +63,31 @@ public struct AudioImportRequest: Sendable, Equatable {
 ///    concern independent of what the file contains.
 /// 2. **Built-in-pack collision** (``DropRejectionReason/overwritesBuiltin(packID:)``) —
 ///    still no content I/O; see that case's doc comment for the exact semantics.
-/// 3. **Symlink-source refusal, regular-file whitelist, then size cap**
-///    (``DropRejectionReason/copyFailed(reason:)`` for the first two,
-///    ``DropRejectionReason/oversize(actualBytes:maxBytes:)`` for the last) — all checked
-///    via filesystem metadata only, *before* reading the file's bytes into memory. A
-///    symlink source is refused outright rather than dereferenced: its metadata `.size` is
-///    the link's own target-path-string length, not the real size of whatever it points
-///    to, so trusting it would silently bypass the size cap for a symlink pointing at an
-///    arbitrarily large file. Every other non-regular entry (directory, FIFO, socket,
-///    character/block device) is then refused by an explicit `.typeRegular` whitelist —
-///    reading a FIFO in step 4 could block forever or read unbounded bytes past the cap,
-///    and such special files report a meaningless `.size` the cap can't catch. Only once a
-///    plain regular file is confirmed is the size cap applied and an oversized file
-///    rejected without ever being fully loaded.
+/// 3. **Bound source acquisition — symlink refusal, regular-file whitelist, size cap, and
+///    the byte read, all against one file descriptor**
+///    (``DropRejectionReason/copyFailed(reason:)`` for a symlink or non-regular source,
+///    ``DropRejectionReason/oversize(actualBytes:maxBytes:)`` for an oversized one).
+///    ``readRegularFileSource(at:maxBytes:)`` opens `sourceURL` exactly once with
+///    `O_NOFOLLOW` (a symlink source fails the open, never dereferenced — its target could
+///    be arbitrarily large, a size-cap bypass) and `O_NONBLOCK` (a FIFO/device never blocks
+///    the open), `fstat`s *that descriptor* to require a real regular file (a directory,
+///    FIFO, socket, or device is refused before any read — reading a FIFO could block
+///    forever or stream unbounded bytes), and reads at most `maxFileSizeBytes + 1` bytes
+///    from it. Binding the type/size checks and the read to the same descriptor is the
+///    point: a `stat`-then-reopen pair left a metadata-to-read TOCTOU window (a validated
+///    small regular file swapped for a FIFO/symlink/grown file before the reopen); one open
+///    closes it, and the bounded read means a still-growing source can neither exhaust
+///    memory nor slip past the cap.
 /// 4. **Content-sniffed format whitelist** (``DropRejectionReason/nonWhitelistFormat``) —
-///    only now do we read the file's bytes, once we know they're small enough to be worth
-///    reading. This exact `Data` is what step 6 persists — `sourceURL` is never read a
-///    second time.
+///    the bytes acquired in step 3 must be one of the whitelisted audio containers. This
+///    exact `Data` is what step 6 persists — `sourceURL` is never read a second time.
 /// 5. **Duration cap** (``DropRejectionReason/overDuration(actualSeconds:maxSeconds:)``)
-///    — probed on the validated bytes already read in step 4 (written to a throwaway temp
+///    — probed on the validated bytes already read in step 3 (written to a throwaway temp
 ///    file for the AVFoundation probe, never re-reading `sourceURL`), before copying, so a
 ///    too-long file is never written into the user's pack directory at all — and the bytes
 ///    measured are exactly the bytes step 6 persists, closing the TOCTOU gap a second read
 ///    of `sourceURL` here would open.
-/// 6. Only if all five pass: write the `Data` already read in step 4 → the validated
+/// 6. Only if all five pass: write the `Data` already read in step 3 → the validated
 ///    destination (never `FileManager.copyItem`, which would copy a symlink source as a
 ///    symlink rather than its content — moot now that step 3 refuses symlink sources,
 ///    but writing the already-validated bytes is the stronger invariant regardless).
@@ -114,100 +115,72 @@ public func importAudioFile(
         return .rejected(.overwritesBuiltin(packID: packID))
     }
 
-    // 3. Reject a symlink source outright, then apply the size cap — metadata only,
-    // before reading any bytes.
-    //
-    // `FileManager.attributesOfItem(atPath:)` does **not** dereference symlinks — for a
-    // symlink it reports `.type == .typeSymbolicLink` and a `.size` equal to the byte
-    // length of the link's *target path string* (typically tens of bytes), never the
-    // real size of whatever it points to (verified empirically: a symlink to a 2MB file
-    // reported `.size == 129`). Trusting that value here would silently bypass the size
-    // cap for any symlink pointing at an arbitrarily large file, and would let step 4
-    // below fully read that arbitrarily large target into memory before any cap could
-    // ever reject it (defeating the documented "reject via metadata before loading
-    // bytes" ordering below). Refusing a symlink source here, before any of that, closes
-    // the size-cap bypass at its root rather than trying to make every later step
-    // symlink-aware individually.
-    guard let sourceAttributes = try? fileManager.attributesOfItem(atPath: sourceURL.path) else {
-        return .rejected(.copyFailed(reason: "读不到这个文件"))
-    }
-    let sourceType = sourceAttributes[.type] as? FileAttributeType
-    guard sourceType != .typeSymbolicLink else {
+    // 3. Acquire the source bytes safely — a SINGLE `open()` whose file descriptor every
+    // subsequent check is bound to, so nothing swapped in at `sourceURL` between checks can
+    // change what gets validated versus what gets read. This is the whole ballgame for the
+    // drag-in threat model. A `stat`-then-reopen pair (what this used to be) left a
+    // metadata-to-read TOCTOU window: a source validated as a small regular file could be
+    // swapped — by a same-user concurrent writer, this codebase's established threat model —
+    // for a FIFO (`Data(contentsOf:)` then blocks the read forever), a symlink (bypasses the
+    // size cap via its target), or a grown file (slips past the cap) before the reopen. See
+    // ``readRegularFileSource(at:maxBytes:)``: one `open(O_NOFOLLOW | O_NONBLOCK)`, one
+    // `fstat` of *that* descriptor requiring a real regular file, and a read bounded to
+    // `maxFileSizeBytes + 1` bytes — check and read now inseparable, and the read can neither
+    // hang, exhaust memory, nor overrun the cap. The returned bytes are the only bytes
+    // anything downstream touches: `sourceURL` is opened exactly once for this function's
+    // whole lifetime (acceptance criterion 1: never reference the original path once
+    // validation starts consuming its content).
+    let data: Data
+    switch readRegularFileSource(at: sourceURL, maxBytes: environment.limits.maxFileSizeBytes) {
+    case .success(let bytes):
+        data = bytes
+    case .symbolicLink:
+        // A symlink source is refused outright, never dereferenced — its target could be
+        // arbitrarily large (a size-cap bypass) or point anywhere. `O_NOFOLLOW` made the
+        // open itself fail, so this is caught before a single target byte is read.
         return .rejected(
             .copyFailed(
                 reason: "这个文件是个链接（symlink），Claudio 只收音频文件本身，请直接拖入真正的文件再试一次"))
-    }
-    // Whitelist regular files only. The symlink case is refused just above with its own
-    // specific message; every other non-regular entry — a directory, a FIFO/named pipe, a
-    // socket, or a character/block device — is refused here, still via metadata only,
-    // before a single byte is read. Reading such a source with `Data(contentsOf:)` in
-    // step 4 could block indefinitely (a FIFO with no writer) or read unbounded bytes (a
-    // FIFO fed faster than the cap can catch — the size cap is only re-checked *after* the
-    // full read returns, so it can't bound a stream that never ends), hanging this
-    // background import task or exhausting memory. `attributesOfItem` also reports a
-    // meaningless small `.size` (often 0) for such special files, so the metadata size cap
-    // below cannot reject them either. Requiring `.typeRegular` closes both holes at their
-    // root, matching the same explicit-allow-list stance the destination-path (step 1) and
-    // content-format (step 4) checks already take — nothing gets in except by matching a
-    // whitelist, never merely by failing to match one blacklisted shape.
-    guard sourceType == .typeRegular else {
+    case .notRegularFile:
+        // A directory, FIFO/named pipe, socket, or character/block device — everything that
+        // is not a plain regular file, refused by an explicit whitelist (`fstat` said the
+        // opened descriptor is not `S_IFREG`), matching the same allow-list stance the
+        // destination-path (step 1) and content-format (step 4) checks take. Reading such a
+        // source could block forever (a FIFO with no writer) or stream unbounded bytes;
+        // `O_NONBLOCK` on the open plus this `fstat` gate rule it out before any read.
         return .rejected(
             .copyFailed(
                 reason: "这个不是普通文件（可能是文件夹或特殊文件），Claudio 只收音频文件本身，请直接拖入真正的音频文件再试一次"))
-    }
-    guard let sourceSize = sourceAttributes[.size] as? Int else {
+    case .oversize(let actualBytes):
+        return .rejected(
+            .oversize(actualBytes: actualBytes, maxBytes: environment.limits.maxFileSizeBytes))
+    case .unreadable:
+        // A genuine open/stat/read failure (vanished, permission revoked, or an unopenable
+        // special file such as a socket). Reported as its real cause — `.copyFailed`, never
+        // folded into `.nonWhitelistFormat`, which is a different failure with a different
+        // cause (never silently misreport the real cause).
         return .rejected(.copyFailed(reason: "读不到这个文件"))
     }
-    guard sourceSize <= environment.limits.maxFileSizeBytes else {
-        return .rejected(
-            .oversize(actualBytes: sourceSize, maxBytes: environment.limits.maxFileSizeBytes))
-    }
 
-    // 4. Content-sniffed format whitelist — first point bytes are actually read. `data`
-    // is also exactly what step 6 persists below — never re-read from `sourceURL` again
-    // after this point (acceptance criterion 1: never reference the original path once
-    // validation has started consuming its content).
-    //
-    // A real read failure here (source vanished/became unreadable in the window since
-    // step 3's metadata check, permission revoked, etc.) is deliberately reported as
-    // ``DropRejectionReason/copyFailed(reason:)``, not folded into `.nonWhitelistFormat`
-    // — those are different failures with different causes, and misreporting one as the
-    // other would contradict `copyFailed`'s own reason for existing (never silently
-    // misreport the real cause).
-    let data: Data
-    do {
-        data = try Data(contentsOf: sourceURL)
-    } catch {
-        return .rejected(.copyFailed(reason: error.localizedDescription))
-    }
-    // Belt-and-suspenders re-check against the *actually-read* byte count: step 3's cap
-    // was enforced against filesystem metadata a moment earlier, so a source that grows
-    // between that stat and this read (same-user TOCTOU — the concurrent-writer would
-    // have to be the same account, matching this codebase's already-established
-    // same-user threat model for pack-directory races) would otherwise slip an oversized
-    // file past the cap and into step 6's write. This does not avoid transiently holding
-    // the grown file's bytes in memory for this one check — `Data(contentsOf:)` above
-    // already read them — but it does guarantee an oversized result is never persisted.
-    guard data.count <= environment.limits.maxFileSizeBytes else {
-        return .rejected(
-            .oversize(actualBytes: data.count, maxBytes: environment.limits.maxFileSizeBytes))
-    }
+    // 4. Content-sniffed format whitelist — the bytes acquired in step 3 must be one of the
+    // whitelisted audio containers. This exact `data` is what step 6 persists; `sourceURL`
+    // is never read again after step 3.
     guard let format = sniffAudioFormat(data) else {
         return .rejected(.nonWhitelistFormat)
     }
 
-    // 5. Duration cap — probed on the *validated bytes already read in step 4*, never by
+    // 5. Duration cap — probed on the *validated bytes already read in step 3*, never by
     // re-reading `sourceURL` a second time. Duration probing (AVFoundation, injected) needs
     // a file URL, so the already-read `data` is written to a throwaway temp file *outside*
     // the user pack directory, probed there, and removed (via `defer`, on every exit path).
     // Two properties fall out of this that probing `sourceURL` directly did not have:
-    //   • This function truly never touches `sourceURL` again after step 4 read it — the
+    //   • This function truly never touches `sourceURL` again after step 3 read it — the
     //     header/criterion-1 invariant ("never reference the original path") now holds for
     //     the *whole* remaining pipeline, not just after a successful return.
     //   • The bytes whose duration is measured are byte-for-byte the bytes step 6 persists.
     //     Probing `sourceURL` reopened the original path, leaving a same-user TOCTOU window:
     //     a short, in-cap file swapped in for the probe could pass the duration gate while
-    //     the longer bytes already read in step 4 — the ones actually written in step 6 —
+    //     the longer bytes already read in step 3 — the ones actually written in step 6 —
     //     sailed into the pack unmeasured.
     // The temp file is named with the validated destination's basename so AVFoundation gets
     // the same extension hint it would for the real file.
@@ -227,8 +200,8 @@ public func importAudioFile(
             .overDuration(actualSeconds: duration, maxSeconds: environment.limits.maxDurationSeconds))
     }
 
-    // 6. Persist. Deliberately `data.write(to:options:.atomic)` — the exact bytes already
-    // read and content-sniffed in step 4 — rather than `FileManager.copyItem(at:to:)`.
+    // 6. Persist. Deliberately `data.write(to:options:.atomic)` — the exact bytes read in
+    // step 3 and content-sniffed in step 4 — rather than `FileManager.copyItem(at:to:)`.
     // `copyItem` was verified empirically to copy a symlink *as a symlink* (its link
     // target string, not the referenced content) rather than duplicating the target's
     // bytes; since step 3 above already refuses a symlink `sourceURL`, this can no
@@ -266,9 +239,112 @@ public func importAudioFile(
             destinationURL: destinationURL,
             fileName: destinationURL.lastPathComponent,
             format: format,
-            fileSizeBytes: sourceSize,
+            // The exact byte count read in step 3 and persisted in step 6 — more accurate
+            // than the pre-read `fstat` size (which a mid-read grow could have made stale).
+            fileSizeBytes: data.count,
             duration: duration
         ))
+}
+
+// MARK: - Bound source read
+
+/// The outcome of ``readRegularFileSource(at:maxBytes:)`` — either the source's bytes or the
+/// specific reason it was refused before/while reading. Every non-`.success` case maps to a
+/// ``DropRejectionReason`` at the call site in
+/// ``importAudioFile(sourceURL:suggestedFileName:packID:environment:)``.
+private enum RegularFileSourceOutcome {
+    /// A plain regular file, fully read — at most `maxBytes` bytes.
+    case success(Data)
+    /// The source's final path component is a symbolic link; the open refused to follow it.
+    case symbolicLink
+    /// The opened descriptor is not a regular file (directory, FIFO, socket, or device).
+    case notRegularFile
+    /// The source is larger than `maxBytes` — carries the observed byte count.
+    case oversize(actualBytes: Int)
+    /// The source could not be opened/`fstat`'d/read for any other reason.
+    case unreadable
+}
+
+/// Opens `url` exactly once and returns its bytes only if it is a regular file no larger than
+/// `maxBytes` — with the symlink refusal, the regular-file whitelist, the size cap, and the
+/// byte read all bound to the *same* file descriptor. Nothing swapped in at the path after the
+/// open can change what is validated versus what is read, closing the metadata-to-read TOCTOU
+/// that a `stat`-then-reopen pair leaves open (T8 codex review of 9b6fedb).
+///
+/// - `O_NOFOLLOW`: a final-component symlink fails the open with `ELOOP` (`.symbolicLink`),
+///   never dereferenced — a symlink's target could be arbitrarily large (a size-cap bypass) or
+///   point anywhere.
+/// - `O_NONBLOCK`: opening a FIFO with no writer, or a device, returns immediately instead of
+///   blocking this background import task forever; such sources are then refused by the
+///   `fstat` regular-file gate (`.notRegularFile`) before any byte is read.
+/// - Bounded read: at most `maxBytes + 1` bytes are ever held in memory. One byte past the cap
+///   is enough to prove a source is oversized (`.oversize`) without loading an arbitrarily
+///   large — or still-growing — file, so a same-user mid-read grow can neither exhaust memory
+///   nor slip past the cap.
+private func readRegularFileSource(at url: URL, maxBytes: Int) -> RegularFileSourceOutcome {
+    var openErrno: Int32 = 0
+    let fd: Int32 = url.withUnsafeFileSystemRepresentation { pathPointer in
+        guard let pathPointer else { openErrno = EINVAL; return -1 }
+        let result = open(pathPointer, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        if result < 0 { openErrno = errno }
+        return result
+    }
+    if fd < 0 {
+        if openErrno == ELOOP { return .symbolicLink }
+        // open() failed for a non-symlink reason. A socket (and any other special file whose
+        // open() fails outright — unlike a FIFO/directory/device, whose open succeeds and is
+        // caught by the `fstat` gate below) would otherwise fall to `.unreadable`'s generic
+        // message, losing the specific "not a regular file" guidance the old metadata path
+        // gave it. One `lstat` here — cold error path only, used solely to pick the rejection
+        // MESSAGE and never to gate the read (both branches still reject; nothing is ever read
+        // or written either way) — restores that guidance for a genuinely non-regular source,
+        // while a vanished or permission-denied *regular* file stays `.unreadable` (the honest
+        // "can't read this file").
+        var linkStatus = stat()
+        let isNonRegular = url.withUnsafeFileSystemRepresentation { pathPointer -> Bool in
+            guard let pathPointer else { return false }
+            return lstat(pathPointer, &linkStatus) == 0 && (linkStatus.st_mode & S_IFMT) != S_IFREG
+        }
+        return isNonRegular ? .notRegularFile : .unreadable
+    }
+    defer { close(fd) }
+
+    var status = stat()
+    guard fstat(fd, &status) == 0 else { return .unreadable }
+    guard (status.st_mode & S_IFMT) == S_IFREG else { return .notRegularFile }
+    // Metadata oversize fast-path — bound to the opened regular file, so the size tested is
+    // the size of the exact object the read below consumes.
+    if status.st_size > maxBytes {
+        return .oversize(actualBytes: Int(clamping: status.st_size))
+    }
+
+    // Read the descriptor in bounded chunks, never holding more than `maxBytes + 1` bytes.
+    // `maxBytes + 1` would trap if `maxBytes` were `Int.max` (an "effectively unlimited" cap a
+    // public caller could set); saturate instead — at `Int.max` no file can exceed the cap, so
+    // reading to EOF is the whole intent. Reaching here means `status.st_size <= maxBytes` (the
+    // fast-path above didn't fire), so the reserve hint is `<= maxBytes` and never overflows.
+    let readCap = maxBytes == Int.max ? Int.max : maxBytes + 1
+    var data = Data()
+    data.reserveCapacity(Int(clamping: status.st_size))
+    let chunkSize = 1 << 16  // 64 KiB
+    var buffer = [UInt8](repeating: 0, count: chunkSize)
+    while data.count < readCap {
+        let want = min(chunkSize, readCap - data.count)
+        let bytesRead = buffer.withUnsafeMutableBytes { raw -> Int in
+            var result = read(fd, raw.baseAddress, want)
+            while result < 0 && errno == EINTR { result = read(fd, raw.baseAddress, want) }
+            return result
+        }
+        if bytesRead < 0 { return .unreadable }
+        if bytesRead == 0 { break }  // EOF
+        data.append(contentsOf: buffer[0..<bytesRead])
+    }
+    // A source that grew past the cap between the `fstat` above and here is caught by the
+    // one-byte-over read — never fully loaded, never persisted.
+    if data.count > maxBytes {
+        return .oversize(actualBytes: data.count)
+    }
+    return .success(data)
 }
 
 /// Whether `packID` currently resolves to a pack directory **only** via the bundled

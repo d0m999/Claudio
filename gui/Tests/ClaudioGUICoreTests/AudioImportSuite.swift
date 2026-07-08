@@ -33,6 +33,86 @@ func runAudioImportSuites() {
     }
 
     suite(
+        "importAudioFile: a source EXACTLY at the size cap imports; one byte over is rejected — the bounded read's cap edge"
+    ) {
+        withTempDirectory { root in
+            // The bound read caps memory at `maxFileSizeBytes + 1` bytes and rejects anything
+            // that reaches that ceiling. Its sharp edge is the boundary: a file of exactly
+            // `maxFileSizeBytes` bytes must still import, while `maxFileSizeBytes + 1` must be
+            // rejected. The general oversize test above is far over the cap; this pins the
+            // off-by-one at the cap itself.
+            let atCap = validWAVData()
+            let capBytes = atCap.count
+
+            // Exactly at the cap: passes the size gate, imports.
+            let atCapSource = root.appendingPathComponent("source/at-cap.wav")
+            writeFixture(atCap, to: atCapSource)
+            let atCapOutcome = importAudioFile(
+                sourceURL: atCapSource, suggestedFileName: "at-cap.wav", packID: "my-pack",
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: root.appendingPathComponent("packs-at-cap"),
+                    maxFileSizeBytes: capBytes))
+            expect(
+                { if case .success = atCapOutcome { return true } else { return false } }(),
+                "a source exactly at the size cap must import, got \(atCapOutcome)")
+
+            // One byte over the cap: rejected as oversize.
+            var overCap = validWAVData()
+            overCap.append(Data([0x00]))
+            let overCapSource = root.appendingPathComponent("source/over-cap.wav")
+            writeFixture(overCap, to: overCapSource)
+            let overCapOutcome = importAudioFile(
+                sourceURL: overCapSource, suggestedFileName: "over-cap.wav", packID: "my-pack",
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: root.appendingPathComponent("packs-over-cap"),
+                    maxFileSizeBytes: capBytes))
+            guard case .rejected(.oversize(let actualBytes, let maxBytes)) = overCapOutcome else {
+                expect(false, "one byte over the cap must be rejected as .oversize, got \(overCapOutcome)")
+                return
+            }
+            expect(maxBytes == capBytes, "maxBytes must echo the injected cap")
+            expect(
+                actualBytes > maxBytes,
+                "actualBytes (\(actualBytes)) must exceed the cap (\(maxBytes))")
+        }
+    }
+
+    suite(
+        "importAudioFile: a valid file larger than the 64 KiB read chunk imports byte-for-byte — exercises the multi-iteration bounded read"
+    ) {
+        withTempDirectory { root in
+            // Every other fixture is tiny (tens of bytes), so the helper's chunked read loop
+            // only ever runs a single partial 64 KiB iteration. A real audio file under the
+            // 5 MB cap runs it 3+ times — the actual production path. Pad a valid WAV well past
+            // one chunk and assert the persisted bytes equal the source exactly, so any
+            // accumulation/boundary regression (mis-sliced buffer, off-by-one in `want`) that
+            // silently corrupts large imports is caught.
+            var big = validWAVData()
+            big.append(Data(repeating: 0xAB, count: 200_000))  // ~195 KiB, spans ~4 chunks
+            let sourceURL = root.appendingPathComponent("source/large.wav")
+            writeFixture(big, to: sourceURL)
+
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs"))
+            let outcome = importAudioFile(
+                sourceURL: sourceURL, suggestedFileName: "large.wav", packID: "my-pack",
+                environment: environment)
+
+            guard case .success(let imported) = outcome else {
+                expect(false, "a valid >64 KiB file must import, got \(outcome)")
+                return
+            }
+            expect(
+                imported.fileSizeBytes == big.count,
+                "fileSizeBytes must equal the full source length (\(big.count)), got \(imported.fileSizeBytes)"
+            )
+            expect(
+                (try? Data(contentsOf: imported.destinationURL)) == big,
+                "the persisted bytes must equal the source byte-for-byte across chunk boundaries")
+        }
+    }
+
+    suite(
         "importAudioFile: a source that can't actually be read (a directory) is reported as .copyFailed, not misreported as .nonWhitelistFormat"
     ) {
         withTempDirectory { root in
@@ -59,15 +139,15 @@ func runAudioImportSuites() {
     }
 
     suite(
-        "importAudioFile: a SPECIAL (non-regular) source — a FIFO/named pipe — is refused via metadata, never opened for reading (no hang, no unbounded read)"
+        "importAudioFile: a SPECIAL (non-regular) source — a FIFO/named pipe — is opened without blocking (O_NONBLOCK) and refused by the fstat regular-file gate, never read (no hang, no unbounded read)"
     ) {
         withTempDirectory { root in
-            // A FIFO is the sharp edge: `attributesOfItem` reports a meaningless small
-            // `.size` (so the size cap can't catch it) and it is not a symlink (so the
-            // symlink guard doesn't either), yet `Data(contentsOf:)` on a FIFO with no
-            // writer blocks forever — a background-task hang / DoS. The `.typeRegular`
-            // whitelist must refuse it on metadata alone, before any read. This test would
-            // itself HANG on the pre-whitelist code, which is exactly the bug.
+            // A FIFO is the sharp edge: it is not a symlink (so O_NOFOLLOW doesn't catch it)
+            // and `Data(contentsOf:)` on a FIFO with no writer blocks forever — a
+            // background-task hang / DoS. The bound-read path opens it with `O_NONBLOCK` (so
+            // the open itself never blocks) and then `fstat`s the descriptor, refusing it as
+            // a non-regular file before a single byte is read. This test would itself HANG on
+            // a naive open/`Data(contentsOf:)` path, which is exactly the bug.
             let sourceDirectory = root.appendingPathComponent("source", isDirectory: true)
             try? FileManager.default.createDirectory(
                 at: sourceDirectory, withIntermediateDirectories: true)
@@ -91,6 +171,54 @@ func runAudioImportSuites() {
                 !FileManager.default.fileExists(
                     atPath: userPacksDirectory.appendingPathComponent("my-pack/pipe.wav").path),
                 "a refused special-file source must never have written anything into the pack")
+        }
+    }
+
+    suite(
+        "importAudioFile: a SPECIAL source that opens fine but is not a regular file — a character device (/dev/null) — is refused on the descriptor's real type, never read"
+    ) {
+        withTempDirectory { root in
+            // Companion to the FIFO case: a FIFO models "the open would block / the read
+            // hangs"; /dev/null models "the open succeeds but the descriptor is still not a
+            // regular file" (a character device). The single `open` + `fstat` whitelist must
+            // refuse it on the descriptor's real type, before any read — proving the
+            // regular-file gate covers devices, not just FIFOs. `/dev/null` is a stable,
+            // always-present char device on every macOS host, so no fixture setup is needed.
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
+            let outcome = importAudioFile(
+                sourceURL: URL(fileURLWithPath: "/dev/null"), suggestedFileName: "null.wav",
+                packID: "my-pack", environment: environment)
+
+            guard case .rejected(.copyFailed) = outcome else {
+                expect(false, "a character-device source must be rejected as .copyFailed, got \(outcome)")
+                return
+            }
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: userPacksDirectory.appendingPathComponent("my-pack/null.wav").path),
+                "a refused device source must never have written anything into the pack")
+        }
+    }
+
+    suite(
+        "importAudioFile: a source that does not exist at import time (e.g. a vanished NSItemProvider temp file) is rejected as .copyFailed, never crashes"
+    ) {
+        withTempDirectory { root in
+            // The `.unreadable` branch: open() fails with ENOENT (not ELOOP), the path is
+            // neither a symlink nor an openable special file — a real case when the dropped
+            // temp file is cleaned up between drop and processing. Must reject cleanly, never
+            // trap or misreport as .nonWhitelistFormat.
+            let missing = root.appendingPathComponent("source/never-created.wav")
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs"))
+            let outcome = importAudioFile(
+                sourceURL: missing, suggestedFileName: "never-created.wav", packID: "my-pack",
+                environment: environment)
+
+            expect(
+                { if case .rejected(.copyFailed) = outcome { return true } else { return false } }(),
+                "a nonexistent source must be rejected as .copyFailed, got \(outcome)")
         }
     }
 
@@ -188,10 +316,16 @@ func runAudioImportSuites() {
                 sourceURL: symlinkSource, suggestedFileName: "chime.wav", packID: "my-pack",
                 environment: environment)
 
-            guard case .rejected(.copyFailed) = outcome else {
+            guard case .rejected(.copyFailed(let reason)) = outcome else {
                 expect(false, "a symlink source must be rejected as .copyFailed, got \(outcome)")
                 return
             }
+            // Pin the ELOOP→.symbolicLink classification: a symlink source must carry the
+            // symlink-specific guidance, not the generic '读不到这个文件' read-failure copy
+            // (both surface as .copyFailed, so matching the case alone can't tell them apart).
+            expect(
+                reason.contains("链接") || reason.lowercased().contains("symlink"),
+                "a symlink source must carry the symlink-specific message, got: \(reason)")
             let destination = userPacksDirectory.appendingPathComponent("my-pack/chime.wav")
             expect(
                 !FileManager.default.fileExists(atPath: destination.path),
