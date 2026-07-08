@@ -44,6 +44,14 @@ public enum ClaudioPaths {
         root.appendingPathComponent("bin", isDirectory: true)
     }
 
+    /// `~/.claudio/bin/claudio` — the fixed install path whose absolute string is the
+    /// exact-match token every `settings.json` hook command keys off (ENGINEERING.md
+    /// 工程落地细节 ③: idempotent install / precise uninstall both compare against this
+    /// exact path, never a substring).
+    public static var claudioBinary: URL {
+        binDirectory.appendingPathComponent("claudio")
+    }
+
     /// `~/.claudio/claudio.log` — rolling diagnostic log (ENGINEERING.md 决议 6, T6).
     public static var logFile: URL {
         root.appendingPathComponent("claudio.log")

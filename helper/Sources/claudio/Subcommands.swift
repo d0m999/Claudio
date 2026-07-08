@@ -41,20 +41,42 @@ extension Claudio {
         }
     }
 
-    /// `claudio install` — take over settings.json hooks (idempotent). Lands in T2.
+    /// `claudio install` — take over settings.json hooks (idempotent追加，见 ENGINEERING.md
+    /// "settings.json 接管：追加而非覆盖").
     struct Install: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "把 hook 写进 settings.json（幂等追加，见 T2）。"
+            abstract: "把 hook 写进 settings.json（幂等追加，不覆盖已有配置）。"
         )
-        func run() throws { throw NotYetImplemented(command: "install", task: "T2") }
+        func run() throws {
+            switch installClaudioHooks() {
+            case .success(.installed):
+                print("✓ 已接管 settings.json（追加 hook，未覆盖已有配置；备份见 settings.json.claudio.bak）")
+            case .success(.alreadyInstalled):
+                print("✓ settings.json 已接管过，无需重复操作")
+            case .failure(let error):
+                print("✗ \(error.description)")
+                throw ExitCode.failure
+            }
+        }
     }
 
-    /// `claudio uninstall` — precisely remove claudio's hook entries. Lands in T2.
+    /// `claudio uninstall` — precisely remove claudio's hook entries, preserving every
+    /// other hook (ENGINEERING.md 工程落地细节 ③: 命令精确等值匹配，非子串)。
     struct Uninstall: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "精准摘除 claudio 的 hook 条目、保留其它 hook（见 T2）。"
+            abstract: "精准摘除 claudio 的 hook 条目、保留其它 hook。"
         )
-        func run() throws { throw NotYetImplemented(command: "uninstall", task: "T2") }
+        func run() throws {
+            switch uninstallClaudioHooks() {
+            case .success(.uninstalled(let count)):
+                print("✓ 已从 settings.json 摘除 \(count) 条 claudio hook，其它 hook 保持不变")
+            case .success(.notInstalled):
+                print("✓ settings.json 中没有 claudio hook，无需操作")
+            case .failure(let error):
+                print("✗ \(error.description)")
+                throw ExitCode.failure
+            }
+        }
     }
 
     /// `claudio use <pack-id>` — switch the active sound pack. Lands with config (T5).

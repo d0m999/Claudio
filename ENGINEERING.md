@@ -436,8 +436,9 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - [ ] **T1 (P1, human: ~1d / CC: ~1-2h)** — helper — Swift 编译二进制,`flock(2)`/`O_EXLOCK` + Foundation JSON
   - Surfaced by: 架构#1 — macOS 无 `flock(1)`,JSON 读改写最易错
   - Files: `helper/` · Verify: `claudio doctor` 跑通 + 单测通过
-- [ ] **T2 (P1, human: ~2d / CC: ~2h)** — helper — install/uninstall 幂等/精确卸载/原子写/读容错,先写 fixture 测试
+- [x] **T2 (P1, human: ~2d / CC: ~2h)** — helper — install/uninstall 幂等/精确卸载/原子写/读容错,先写 fixture 测试
   - Surfaced by: 测试#1 + settings.json 是最大破坏面 · Files: `helper/install`,`helper/tests/`
+  - 已完成(2026-07-08，tdd-guide + swift-reviewer 链)：`SettingsInstaller.swift` + `SettingsInstallerSuite.swift`（172 fixture 全绿）。swift-reviewer 发现 1 个 HIGH（`backupOriginalIfNeeded` 用 `try?` 吞掉备份失败，导致 install 可能在零备份情况下覆盖 settings.json）已修复并二次核实关闭；1 个 MEDIUM（`loadRoot` 读失败丢真实 errno 原因）已顺手修复。非阻塞遗留（留后续小任务）：uninstall 缺 `probeSettingsWritable` 前置探测的对称性、group-shape 校验"外层 abort / 内层跳过"不对称策略缺专门 fixture。
 - [ ] **T3 (P1, human: ~0.5d / CC: ~30min)** — spike — hook 执行环境 + 真实 settings.json schema + StopFailure 语义
   - 已验(2026-07-06)：✅ schema 形状、✅ hook 经 `/bin/sh -c` 走 shell、✅ 共存 hook 真实存在、✅ StopFailure=API 错误中断(限流/欠费/过载/认证,非任务失败)、✅ 本机 Claude Code 2.1.201
   - 剩余(实现 T1 时用 scratch hook 补验)：cwd / PATH / stderr 去向 / 默认超时 / 是否并发调用

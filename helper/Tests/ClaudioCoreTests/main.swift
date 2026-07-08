@@ -40,6 +40,7 @@ func suite(_ name: String, _ body: @MainActor () -> Void) {
 runEventSuites()
 runFileLockSuites()
 runDoctorSuites()
+runSettingsInstallerSuites()
 
 // MARK: - Summary
 
