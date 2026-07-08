@@ -62,7 +62,21 @@ func runVolumeSuites() {
             "-inf must fall back to ClaudioConfig.defaultMasterVolume")
     }
 
-    suite("AfplayVolume.afplayArgument: renders the clamped value as a locale-independent string") {
+    // `afplayArgument` renders via `String(Double)` (see `Volume.swift`), which is
+    // locale-independent *by construction*: on macOS it ignores both `setlocale(LC_NUMERIC)`
+    // and `Locale.current`, always emitting '.' as the decimal separator. afplay's argv parser
+    // is not locale-aware, so a ',' separator would silently break volume control.
+    //
+    // We deliberately do NOT flip the process locale to "prove" this. On macOS neither
+    // `String(Double)` nor the realistic regression path (`NumberFormatter` /
+    // `String(format:locale:)`, which key off `Locale.current`, not `LC_NUMERIC`) responds to
+    // `setlocale`, so a locale-switch test would stay green no matter what the renderer does —
+    // false confidence. The guard against a dot->comma regression is the string contract
+    // itself: the exact-value assertions plus the explicit no-comma check below. Those fail on
+    // any comma-locale developer machine if someone swaps in a `Locale.current`-sensitive
+    // renderer (a dot-locale CI can't observe that flip, which is exactly why the contract —
+    // not a locale switch — is the thing under test).
+    suite("AfplayVolume.afplayArgument: renders the clamped value with a '.' decimal separator") {
         expect(
             AfplayVolume.afplayArgument(forMasterVolume: 0.5) == "0.5",
             "0.5 must render as \"0.5\" — got"
