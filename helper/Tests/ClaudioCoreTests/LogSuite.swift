@@ -224,4 +224,58 @@ func runLogSuites() {
                     + " mean a torn/retried write, got \(eventIndices)")
         }
     }
+
+    suite(
+        "readRecentLogEntries: a garbled trailing line doesn't shrink the maxLines budget"
+            + " of well-formed entries (codex review of ea08eca, P2)"
+    ) {
+        withTempDirectory { root in
+            let logFile = root.appendingPathComponent("claudio.log")
+            let lockFile = root.appendingPathComponent("claudio.log.lock")
+            for index in 0..<3 {
+                appendLogLine(
+                    event: "evt-\(index)", reason: "reason-\(index)",
+                    timestamp: Date(timeIntervalSince1970: 1_700_000_000 + Double(index)),
+                    to: logFile, lockFile: lockFile)
+            }
+            // Simulate a corrupted/partial trailing write by appending a line with no
+            // parseable timestamp/event/reason fields directly (bypassing appendLogLine).
+            if let handle = try? FileHandle(forWritingTo: logFile) {
+                handle.seekToEndOfFile()
+                handle.write(Data("garbled-not-a-real-line\n".utf8))
+                try? handle.close()
+            }
+
+            let entries = readRecentLogEntries(from: logFile, maxLines: 3)
+            expect(
+                entries.count == 3,
+                "a malformed trailing line must not shrink the valid-entry budget, got"
+                    + " \(entries.count)")
+            expect(
+                entries.map(\.event) == ["evt-0", "evt-1", "evt-2"],
+                "must still return the 3 real entries in oldest-to-newest order, got"
+                    + " \(entries.map(\.event))")
+        }
+    }
+
+    suite(
+        "appendLogLine reports failure (not success) when the underlying write fails"
+            + " (codex review of ea08eca, P2)"
+    ) {
+        withTempDirectory { root in
+            let logFile = root.appendingPathComponent("claudio.log")
+            let lockFile = root.appendingPathComponent("claudio.log.lock")
+            // Force the write to fail: `logFile` is itself a directory, so `open(2)`
+            // with O_WRONLY on it fails (EISDIR) even though the parent exists fine.
+            try? FileManager.default.createDirectory(
+                at: logFile, withIntermediateDirectories: true)
+
+            let wrote = appendLogLine(
+                event: "stop", reason: "test", to: logFile, lockFile: lockFile)
+            expect(
+                !wrote,
+                "appendLogLine must report failure when the underlying write fails, not"
+                    + " silently claim success")
+        }
+    }
 }

@@ -58,12 +58,12 @@ public func appendLogLine(
     let line =
         "\(formatter.string(from: timestamp))\(logFieldSeparator)\(event)\(logFieldSeparator)\(reason)\n"
 
-    let result = withNonBlockingLock(path: lockFile.path) {
+    let result = withNonBlockingLock(path: lockFile.path) { () -> Bool in
         rotateIfNeeded(logFile: logFile, maxBytes: maxBytes)
-        rawAppend(line, to: logFile)
+        return rawAppend(line, to: logFile)
     }
-    if case .ran = result {
-        return true
+    if case .ran(let wrote) = result {
+        return wrote
     }
     return false
 }
@@ -102,17 +102,20 @@ private func rotateIfNeeded(logFile: URL, maxBytes: Int) {
 /// `write(2)` call (not just at `open`) — so even a rotation that just truncated the file
 /// concurrently is still safe to append after: this call's `open` happens after the lock in
 /// ``appendLogLine`` is held, so no rotation can be in flight while this runs. Best-effort:
-/// silently no-ops if the parent directory can't be created or the file can't be opened.
-private func rawAppend(_ line: String, to logFile: URL) {
+/// returns `false` (rather than throwing) if the parent directory can't be created, the file
+/// can't be opened, or the write is short/fails — callers treat that as "line not written"
+/// rather than silently reporting success.
+private func rawAppend(_ line: String, to logFile: URL) -> Bool {
     try? FileManager.default.createDirectory(
         at: logFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-    guard let data = line.data(using: .utf8) else { return }
+    guard let data = line.data(using: .utf8) else { return false }
     let fd = open(logFile.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
-    guard fd != -1 else { return }
+    guard fd != -1 else { return false }
     defer { close(fd) }
-    data.withUnsafeBytes { buffer in
-        _ = write(fd, buffer.baseAddress, buffer.count)
+    let written = data.withUnsafeBytes { buffer in
+        write(fd, buffer.baseAddress, buffer.count)
     }
+    return written == data.count
 }
 
 /// Reads the last `maxLines` well-formed entries from `logFile`, tolerating a missing file
@@ -125,12 +128,18 @@ public func readRecentLogEntries(from logFile: URL, maxLines: Int = 5) -> [LogEn
 
     let formatter = makeLogTimestampFormatter()
     let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
-    return lines.suffix(maxLines).compactMap { line -> LogEntry? in
+
+    // Scan tail-to-head so a garbled trailing line can't eat into the `maxLines` budget
+    // of well-formed entries and hide genuinely recent failures further back.
+    var entries: [LogEntry] = []
+    for line in lines.reversed() {
+        guard entries.count < maxLines else { break }
         let fields = line.components(separatedBy: logFieldSeparator)
         guard fields.count >= 3, let timestamp = formatter.date(from: fields[0]) else {
-            return nil
+            continue
         }
         let reason = fields[2...].joined(separator: logFieldSeparator)
-        return LogEntry(timestamp: timestamp, event: fields[1], reason: reason)
+        entries.append(LogEntry(timestamp: timestamp, event: fields[1], reason: reason))
     }
+    return Array(entries.reversed())
 }
