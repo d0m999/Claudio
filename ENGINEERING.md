@@ -385,8 +385,8 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 > 缘起：`/codex review 08009d6` 指出 08009d6 自称「仅注释」却动了一处测试标题字符串，且 `Paths.swift` 的 `决议 3` 误引未被那轮的「决议 6」审计覆盖。顺藤摸瓜发现同类 rot 共 19 处。
 
 31. **半角「决议 N」越界（N>6）三处**：`Play.swift:3` / `PlaySuite.swift:5` 的 `决议 1 + 5 + 16`、`Subcommands.swift:33` 的 `决议 5 + 10 + 16`。**权威决议表只到 6**；`10`/`16` 出自修订记录第 1/2 轮，两节段首都写着「历史快照，勿据此实现」。正主是「工程落地细节 ④ 播放必须异步」。三处已同修（并就地注明「不是决议 16」，防再犯）。
-32. **半角「决议 N」语义错位三处**：`Paths.swift:43`、`gui/OnboardingState.swift:19` 把 `~/.claudio/bin/` 固定安装路径记成 `决议 3`（实为逐事件 on/off）；`docs/spike-hooks.md:154` 把「立即 exit 0」记成 `决议#4`（实为 `~/.claudio/` 路径）。正主分别是**工程落地细节 ③ / ④**。三处均与同文件邻近的正确引用自相矛盾（`Paths.swift:50`、`spike-hooks.md:253`）。
-33. **`claudio use` 的归属被错标为 T5 两处**：`Subcommands.swift:85`（doc-comment）与 `:88`（`--help` 文案）。T5 是 `play` 去抖任务，对 config **只读**；写 config 的 `use` 归**工程落地细节 ⑥**。`:88` 顺带把 spec 指针请出用户可见文案（对齐 `Install`/`Uninstall` 的写法）——**这是本轮唯一的用户可见输出改动**。
+32. **半角「决议 N」语义错位三处**：`Paths.swift:43`、`OnboardingState.helperMissing`（doc-comment）把 `~/.claudio/bin/` 固定安装路径记成 `决议 3`（实为逐事件 on/off）；`docs/spike-hooks.md:154` 把「立即 exit 0」记成 `决议#4`（实为 `~/.claudio/` 路径）。正主分别是**工程落地细节 ③ / ④**。三处均与同文件邻近的正确引用自相矛盾（`Paths.swift:50`、`spike-hooks.md:253`）。
+33. **`claudio use` 的归属被错标为 T5 两处**：`Claudio.Use` 的 doc-comment 与 `Claudio.Use.configuration.abstract`（`--help` 文案）。T5 是 `play` 去抖任务，对 config **只读**；写 config 的 `use` 归**工程落地细节 ⑥**。`abstract` 顺带把 spec 指针请出用户可见文案（对齐 `Install`/`Uninstall` 的写法）——**这是本轮唯一的用户可见输出改动**。
 34. **裸行号清剿（item 28 的未竟部分）**：`DESIGN.md 125` 共 7 处（`gui/OnboardingState.swift` ×3、`DesignTokens.swift` ×1、`OnboardingStateSuite.swift` ×3）—— DESIGN.md 那一行**当时已是空行**，被引内容在「错误态用色（关键约束）」。`§157-158` 共 3 处（`AudioImport.swift`、`DropZoneState.swift`、**本文件 T8 完成记录的自引**）—— 那两行早已落进工程落地细节 ①，被引内容在**工程落地细节 ②**。另 `docs/pack-standard.md` 两处指向源码的裸行号（其一引 `ClaudioConfig.defaultMasterVolume` 时已 off-by-one，指到了它上方的文档注释行），改为只引符号名。
 35. **item 30 自己留的行号已经漂了**：它写 `` `:413` `` 指「四事件差异原则」，而那个行号早已滑到「### 前置 spike」标题上。已改为小节名「v1 新增/加固决议 · 客观声音质量标准」。**立下禁行号规矩的那一轮，自己用了行号，且在下一个 commit 前就 rot 了**——这是 item 28 最好的注脚，也是本条记录刻意不写任何本文件行号的原因。
 
