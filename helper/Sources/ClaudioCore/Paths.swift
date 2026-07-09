@@ -40,7 +40,8 @@ public enum ClaudioPaths {
 
     /// `~/.claudio/bin/` — the fixed, idempotency-friendly path the helper binary lives at,
     /// placed by the app install (`claudio install` itself only writes `settings.json`
-    /// hooks; running it already requires this binary to exist). ENGINEERING.md 决议 3, T2/T4.
+    /// hooks; running it already requires this binary to exist). ENGINEERING.md「工程落地细节 ③
+    /// helper 固定安装路径 + 幂等标记」, T2/T4 — *not* 决议 3, which is the per-event on/off switch.
     public static var binDirectory: URL {
         root.appendingPathComponent("bin", isDirectory: true)
     }

@@ -30,7 +30,8 @@ extension Claudio {
     /// (unknown event, muted event, incomplete pack, contended/broken lock) resolves
     /// silently there, and this subcommand ignores the returned outcome and always
     /// returns success — a hook must never fail or block Claude Code (ENGINEERING.md
-    /// 决议 5 + 10 + 16).
+    /// 决议 5 +「工程落地细节 ④ 播放必须异步，绝不卡住 Claude Code」—— *not* 决议 10 / 16,
+    /// which don't exist: 权威决议表只到 6，10/16 是修订记录的历史快照条目).
     struct Play: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "hook 调用：播放某事件的声音（跳过式去抖 + 后台 spawn afplay，立即 exit 0）。"
@@ -82,10 +83,12 @@ extension Claudio {
         }
     }
 
-    /// `claudio use <pack-id>` — switch the active sound pack. Lands with config (T5).
+    /// `claudio use <pack-id>` — switch the active sound pack by *writing* config
+    /// (ENGINEERING.md「工程落地细节 ⑥ config.json 归属」—— *not* T5, which is `play` and
+    /// only ever *reads* config).
     struct Use: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "切换当前声音包（改配置文件，见 T5/config）。"
+            abstract: "切换当前声音包（写入 ~/.claudio/config.json）。"
         )
         @Argument(help: "声音包 id") var packID: String
         func run() throws {

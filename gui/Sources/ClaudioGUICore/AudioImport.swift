@@ -351,11 +351,12 @@ private func readRegularFileSource(at url: URL, maxBytes: Int) -> RegularFileSou
 /// (built-in) root — i.e. the user has no pack of their own at this id yet. This is the
 /// exact case ``DropRejectionReason/overwritesBuiltin(packID:)`` blocks.
 ///
-/// **Reconciling with ENGINEERING.md §157-158** (which explicitly *allows* a user pack to
-/// override a same-id bundled pack at *selection* time — `resolvePackDirectory` checks
-/// the user root first, by design): that decision is about which directory `claudio play`
-/// resolves to once a user copy already exists. It says nothing about whether drag-and-
-/// drop may *silently create* that user copy's very first file in the first place. T8's
+/// **Reconciling with ENGINEERING.md「工程落地细节 ②（声音包存储根 + 查找顺序）」** (which
+/// explicitly *allows* a user pack to override a same-id bundled pack at *selection* time —
+/// `resolvePackDirectory` checks the user root first, by design): that decision is about
+/// which directory `claudio play` resolves to once a user copy already exists. It says
+/// nothing about whether drag-and-drop may *silently create* that user copy's very first
+/// file in the first place. T8's
 /// "拒同名覆盖内置" scopes to exactly that gap: importing into a pack id that is currently
 /// *only* a built-in identity is refused, so a casual drop can't accidentally start
 /// shadowing a built-in pack's contents without the user having explicitly done something

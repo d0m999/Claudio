@@ -13,13 +13,14 @@ import Foundation
 public enum OnboardingState: Sendable, Equatable {
     /// `~/.claude/` itself doesn't exist — Claude Code isn't installed (or isn't the
     /// version that creates that directory). Not an app error — a neutral, non-blocking
-    /// prerequisite (DESIGN.md 125: "非阻断提示...用中性 surface-2 + text-2，不上真红").
+    /// prerequisite (DESIGN.md「错误态用色（关键约束）」: "非阻断提示...用中性 surface-2 +
+    /// text-2，不上真红").
     case claudeCodeNotInstalled
 
-    /// `~/.claudio/bin/claudio` — the fixed install path (ENGINEERING.md 决议 3/T4) —
-    /// doesn't exist on disk. A real app self-error (DESIGN.md 125 lists "helper 缺失"
-    /// alongside "settings 不可写/解析失败" as the three cases that get **真红
-    /// `#FF453A`**).
+    /// `~/.claudio/bin/claudio` — the fixed install path (ENGINEERING.md「工程落地细节 ③」/T4;
+    /// *not* 决议 3, which is the per-event on/off switch) — doesn't exist on disk. A real
+    /// app self-error (DESIGN.md「错误态用色（关键约束）」lists "helper 缺失" alongside
+    /// "settings 不可写/解析失败" as the three cases that get **真红 `#FF453A`**).
     case helperMissing
 
     /// ``probeSettingsWritable(settingsFile:)`` reports `.notWritable`. A real app
@@ -63,9 +64,9 @@ extension OnboardingState {
 
     /// Whether this state represents a real app self-error (真红 `#FF453A`), as opposed
     /// to a neutral prerequisite (``claudeCodeNotInstalled``) or an actionable-but-normal
-    /// state (``notInstalled``/``installed``). Mirrors DESIGN.md 125 exactly: "app 自身
-    /// 错误（settings 不可写 / 解析失败 / helper 缺失）用 UI 语义 error #FF453A...非阻断
-    /// 提示（如 Claude Code 未装）用中性...不上真红".
+    /// state (``notInstalled``/``installed``). Mirrors DESIGN.md「错误态用色（关键约束）」
+    /// exactly: "app 自身错误（settings 不可写 / 解析失败 / helper 缺失）用 UI 语义
+    /// error #FF453A...非阻断提示（如 Claude Code 未装）用中性...不上真红".
     public var isAppSelfError: Bool {
         switch self {
         case .helperMissing, .settingsNotWritable, .settingsParseFailure: true

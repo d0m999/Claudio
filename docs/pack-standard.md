@@ -78,7 +78,7 @@ StopFailure = 下沉且保持、Notification = 双击、SubagentStop = 单 blip*
 
 ## 7. 已知偏差（非本次范围，留待后续对齐）
 
-拖入通道（T8, `AudioImportLimits.maxDurationSeconds`，`gui/Sources/ClaudioGUICore/AudioImportEnvironment.swift:34`）当前时长上限是
+拖入通道（T8, `AudioImportLimits.maxDurationSeconds`，`gui/Sources/ClaudioGUICore/AudioImportEnvironment.swift`）当前时长上限是
 **3.0s**，是 T9 之前定的占位值（ENGINEERING.md T8 非阻断遗留②已标注）。本文档 §1 把策展包的硬顶定为 **2.0s**，两者不一致。**本次 T9
 范围只产出本文档 + `master_volume` 映射，不改动 `AudioImportLimits` 那个常量**——是否把拖入通道也收紧到 2.0s（或维持两条通道各自
 独立的上限，因为拖入通道是"用户自带音频的技术兜底"而非"策展音质标准"）是一个独立的小任务，留给后续 `/plan-eng-review` 或专门
@@ -92,7 +92,7 @@ task 决定，此处仅记录偏差，不擅自变更该代码路径。
   （`helper/Sources/ClaudioCore/ClaudioConfig.swift`），`afplay -v <value>` 原生就取同一个 `[0.0, 1.0]` 区间（`1.0` = 正常音量，更低值
   线性衰减，见 `man afplay`）——因此这个映射是**恒等函数 + 钳制**，不做任何倍数/对数缩放。
 - **默认值单一来源**：**0.8**，定义于 `ClaudioConfig.defaultMasterVolume`
-  （`helper/Sources/ClaudioCore/ClaudioConfig.swift:11`）。`master_volume` 字段缺失/类型错误时的 JSON 解码回退，以及映射层遇到
+  （`helper/Sources/ClaudioCore/ClaudioConfig.swift`）。`master_volume` 字段缺失/类型错误时的 JSON 解码回退，以及映射层遇到
   非有限值时的回退，**均复用这同一个常量**，全仓库不存在第二处硬编码的 `0.8` 字面量。
 - **越界钳制规则**（`helper/Sources/ClaudioCore/Volume.swift` 的 `AfplayVolume`）：
   - 有限值 `< 0.0` → 钳到 `0.0`；`> 1.0` → 钳到 `1.0`。

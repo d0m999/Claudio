@@ -51,9 +51,9 @@ func runOnboardingStateSuites() {
         }
     }
 
-    suite("accent: neutral/error/error/error/brand/success, matching DESIGN.md 125 exactly") {
-        expect(OnboardingState.claudeCodeNotInstalled.accent == .neutral, "claudeCodeNotInstalled must be .neutral (non-blocking, DESIGN.md 125)")
-        expect(OnboardingState.helperMissing.accent == .error, "helperMissing must be .error (DESIGN.md 125 lists it alongside settings errors)")
+    suite("accent: neutral/error/error/error/brand/success, matching DESIGN.md「错误态用色（关键约束）」exactly") {
+        expect(OnboardingState.claudeCodeNotInstalled.accent == .neutral, "claudeCodeNotInstalled must be .neutral (non-blocking, DESIGN.md「错误态用色（关键约束）」)")
+        expect(OnboardingState.helperMissing.accent == .error, "helperMissing must be .error (DESIGN.md「错误态用色（关键约束）」lists it alongside settings errors)")
         expect(OnboardingState.settingsNotWritable(reason: "x").accent == .error, "settingsNotWritable must be .error")
         expect(OnboardingState.settingsParseFailure(reason: "x").accent == .error, "settingsParseFailure must be .error")
         expect(OnboardingState.notInstalled.accent == .brand, "notInstalled must be .brand (actionable, not an error)")

@@ -2,7 +2,7 @@ import ClaudioCore
 import Dispatch
 import Foundation
 
-// MARK: - play: debounced background-spawn playback (ENGINEERING.md 决议 1 + 5 + 16, T5)
+// MARK: - play: debounced background-spawn playback (ENGINEERING.md 决议 1 + 5 +「工程落地细节 ④」, T5)
 //
 // `playSoundEvent` must never block the hook caller and must never surface a hard error
 // for any "not configured yet" state (unknown event, muted event, incomplete pack). These

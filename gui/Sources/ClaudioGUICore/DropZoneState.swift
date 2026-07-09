@@ -45,7 +45,8 @@ public enum DropRejectionReason: Sendable, Equatable {
     case overDuration(actualSeconds: TimeInterval?, maxSeconds: TimeInterval)
     /// `packID` currently resolves to a pack directory **only** via the bundled
     /// (built-in) root — see `importAudioFile`'s doc comment for the exact semantics
-    /// this repo settled on for reconciling this with ENGINEERING.md §157-158.
+    /// this repo settled on for reconciling this with
+    /// ENGINEERING.md「工程落地细节 ②（声音包存储根 + 查找顺序）」.
     case overwritesBuiltin(packID: String)
     /// A real I/O failure after every validation check already passed.
     case copyFailed(reason: String)

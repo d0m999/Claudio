@@ -69,9 +69,9 @@ enum ClaudioColor {
         scheme == .dark ? Color(hex: "34C759") : Color(hex: "2FA24E")
     }
 
-    /// UI-semantic `error` (真红) — **only** for app self-errors (DESIGN.md 125), never
-    /// the four-event semantic layer (`StopFailure` stays amber, out of this file's
-    /// scope entirely).
+    /// UI-semantic `error` (真红) — **only** for app self-errors
+    /// (DESIGN.md「错误态用色（关键约束）」), never the four-event semantic layer
+    /// (`StopFailure` stays amber, out of this file's scope entirely).
     static func error(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color(hex: "FF453A") : Color(hex: "E0453A")
     }

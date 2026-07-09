@@ -151,7 +151,7 @@ Hook 脚本执行**没有观察到默认强制超时限制**。经测试，脚�
 
 ### 影响 T1 的含义
 - `claudio play` 后台 spawn afplay 时不需要担心被强制超时
-- 立即 `exit 0` 的设计（决议#4）确保 hook 本身不会阻塞 Claude Code，即使实际上没有强制超时
+- 立即 `exit 0` 的设计（工程落地细节 ④，**不是**决议 4——那条是 `~/.claudio/` 路径）确保 hook 本身不会阻塞 Claude Code，即使实际上没有强制超时
 - 如果将来需要处理超时，应该在 settings.json 中的 hook 条目级别配置 `timeout` 字段
 
 ---

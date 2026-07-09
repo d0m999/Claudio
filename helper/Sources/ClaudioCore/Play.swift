@@ -1,6 +1,8 @@
 import Foundation
 
-// `claudio play <event>` — hook entry (ENGINEERING.md 决议 1 + 5 + 16, T5).
+// `claudio play <event>` — hook entry (ENGINEERING.md 决议 1 + 5 +「工程落地细节 ④ 播放必须
+// 异步，绝不卡住 Claude Code」, T5). 不是「决议 16」—— 权威决议表只到 6，16 出自修订记录
+// 第 2 轮，那节明写「历史快照，勿据此实现」。
 //
 // A hook is a synchronous call in Claude Code's response path, so this whole chain must
 // never block and never fail loudly: unknown event, muted event, incomplete/missing pack,
