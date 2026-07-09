@@ -8,6 +8,7 @@
 
 - **是什么**：Claudio —— 一个 macOS 菜单栏 app，给 Claude Code 的每个事件播一个语义化的声音；主打开箱即用、版权干净（CC0）的策展声音包，可切换。
 - **给谁**：Claude Code 重度用户 = 开发者（长在终端里、用 AI 编码 agent）。
+- **v1 受众与安装摩擦（与 ENGINEERING T3 对齐）**：v1 **不签名、未公证**，面向能自绕 Gatekeeper 的技术用户 —— 定位是**技术用户低摩擦**，**不是「零摩擦安装」**。签名 + 公证是**面向非技术用户 / 广泛发布前**的硬门槛。因此 onboarding 视觉须诚实交代「未签名 + 绕过步骤」（见下方 State Components onboarding 卡与 ENGINEERING 用户旅程步骤 1），不作零摩擦承诺。
 - **空间 / 同类**：macOS 菜单栏工具 · 开发者工具 · 音频类 app。参照：`claude-sounds`、`claudecodenotify`、Bartender、Ice、Rogue Amoeba SoundSource、Raycast、Linear、Warp、CleanShot、Notion Calendar、Amie。
 - **项目类型**：原生 macOS SwiftUI 菜单栏 app + 落地页 / GitHub README。
 - **记忆点（唯一）**：**不回头也知道状态** —— 光靠声音就知道 Claude 现在什么状态。所有设计决策服务于这一句。
@@ -96,7 +97,7 @@
 - **面板材质（关键决策）**：**近实心暖表面（`panel`）+ 1px `hairline-strong` 描边 + 柔和阴影**，**不用**满毛玻璃 vibrancy —— 因为 vibrancy 会被壁纸「染色」，而 Claudio 是颜色即语义的产品，事件色必须显示为真色（参照 Itsycal 的实心表面做法）。
 - **圆角阶梯**：控件 / 芯片 6px · 卡片 / 行 10px · 面板 14–16px · 开关 / 声音芯片 pill(999)。
 - **最大内容宽（营销）**：~1060px。
-- **行结构（每事件行）**：`[事件字形 tile 24pt, 事件色, 圆角6] · [事件名 SF Pro 13 + 原始 id JetBrains Mono 10] · [声音文件名 mono] · [波形] · [圆形试听键 speaker.wave.2, 事件色]`。
+- **行结构（每事件行）**：`[事件字形 tile 24pt, 事件色, 圆角6] · [事件名 SF Pro 13 + 原始 id JetBrains Mono 10] · [声音文件名 mono] · [波形] · [圆形试听键 speaker.wave.2, 事件色]`。此为 `present` 态的完整结构；事件行共有三态 `CoverageState{present | unmapped | broken}`，`unmapped` / `broken` 收起文件名 / 波形、试听禁用、行尾出「导入绑定」入口（详见 State Components 的「事件行三态」条）。
 
 ## Motion（动效）
 
@@ -115,6 +116,7 @@
 - **声音包卡片 Pack Card**：2×2 四事件字形网格 + 等宽包名（+ CC0 标）；切包用**卡片画廊**（像 macOS 壁纸选择器），语义色固定、只换音色 / 质感。
 - **事件字形**：优先用 SF Symbols（`checkmark.circle.fill` / `pause.circle.fill` / `bell.badge.fill` / `checkmark.circle`），保原生、自动亮暗。
 - **包指纹（可选）**：一排 4 段波形签名 = 声音包的可视「条码」。
+- **包卡片数据来源 / manifest 版本字段**：Pack Card 的包名、CC0 标、2×2 事件网格全部来自该包的 `manifest.json`（`id` / `name` / `license` / `events`）。manifest 顶层带一个**整数兼容标记字段 `schema`（v1 现值 `1`）** —— 它是「向前兼容读取」的格式版本锚点，字段名就是这一个整数键 `schema` 本身，manifest 里**并没有**另立一个带版本后缀的独立版本字段（2026-07-08 codex 复核已纠正此前的误命名）。当前 helper 端只读视图 `PackManifest` **尚未 decode 该字段**，靠 `Decodable` 忽略未知键保持前向兼容；install 校验 / GUI 共享 manifest（ENGINEERING T16）落地时再正式读取。视觉层不渲染 `schema`，仅在此登记为包格式演进的契约锚点。
 
 ## State Components（状态组件 · /plan-design-review 2026-07-07 补入）
 
@@ -122,6 +124,7 @@
 > 这些是 `/design-consultation` 首版未覆盖、由设计评审补入词汇表的组件。**全部由既有 token 派生，勿另立新色 / 新圆角。**
 
 - **onboarding 卡 / 空态卡**：面板内居中列 —— 44px（radius 12）图标块（态色 15% 底 + 态色字形）→ 标题 SF Pro semibold 15 → 正文 `text-2` 12.5 → 主 CTA（黏土实心 pill radius 9 全宽）+ 次 CTA（ghost：透明 + `hairline-strong` 描边）。**空态三要素：温度 + 主行动 + 上下文。**
+- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：每个事件行按 `CoverageState = present | unmapped | broken` 呈现 —— **GUI 从 manifest + 文件存在性算，helper 不改播放行为**。`present`（配了且文件在）= 上述完整行（名 + id + 文件名 + 波形 + 试听 ▶）；`unmapped`（manifest 没配此 event）= 行显「未配置」、试听 ▶ 禁用；`broken`（配了但文件丢 / 坏）= 行显「文件丢失」并入 `doctor`、试听 ▶ 禁用。`unmapped` 与 `broken` 两态都在**行尾提供逐事件导入绑定**（拖入 / 选文件 → 绑到该 event）去补。区分二者 = **真打包错误不被伪装成正常静默**。禁用观感用**显式禁用样式（控件置灰 + 图标降饱和），不整行降 opacity**（行内文字始终保 ≥ 4.5:1 对比度）。此三态与正交的**静音态**（`enabled=false`：控件区弱化 + 静音钮点亮）叠加，互不取代。
 - **错误态用色（关键约束）**：app 自身错误（settings 不可写 / 解析失败 / helper 缺失）用 UI 语义 `error #FF453A`（真红）；**绝不用于四事件层**（StopFailure 永远琥珀）。非阻断提示（如 Claude Code 未装）用中性 `surface-2` + `text-2`，不上真红。
 - **拖入 drop-zone**：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → 边框 / 文字转黏土 + `clay-soft` 底。
 - **拒绝行**：真红 `circle-x` 字形 + `text-2` 说明，`原因`（真红）+「怎么修」一句；不道歉、不含糊。
@@ -155,3 +158,7 @@
 | 2026-07-06 | 面板近实心表面 + 1px 描边，不用满毛玻璃 | 颜色即语义的产品，vibrancy 会被壁纸染色，事件色须真色（参照 Itsycal） |
 | 2026-07-06 | 动效声音同步（跟随音高轮廓 + 视觉回放）为招牌 | 把音频灵魂变可见；个性来自时序而非视觉噪音 |
 | 2026-07-06 | 落地页 / hero 用 Fraunces 斜体衬线（risk） | 跳出清一色无衬线，给「精心设计的作品」信号 |
+| 2026-07-09 | 事件行改为三态 `CoverageState{present\|unmapped\|broken}` | 对齐 ENGINEERING 决议① / T16 与 GUI 状态测 DoD；`unmapped`（静默正常）vs `broken`（打包错误）须可分，不把真错误伪装成正常静默（T10） |
+| 2026-07-09 | 去「零摩擦安装」措辞 → 「技术用户低摩擦」 | 对齐 ENGINEERING T3：v1 不签名、未公证，面向能自绕 Gatekeeper 的技术用户；签名 + 公证是面向非技术用户 / 广泛发布前的硬门槛（T10） |
+| 2026-07-09 | manifest 版本字段用现有整数 `schema`（现值 1），而非另立独立版本号字段 | 2026-07-08 codex 复核纠正字段名；`PackManifest` 尚未 decode，靠 `Decodable` 忽略未知键前向兼容（T10） |
+| 2026-07-09 | 确认 night_dim 在 DESIGN.md 只作 v2、无 v1 特性叙述 | 深夜降音量已由 ENGINEERING T2 移出 v1；DESIGN.md 仅余展柜漂移诚实注记与「深夜音频硬件」美学隐喻，均非 v1 特性（T10） |

@@ -463,7 +463,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - 非阻断遗留（留后续）：① `overwritesBuiltin` 触发语义（"拒同名覆盖内置" vs §157-158 选择期允许覆盖的调和）已在 `isBuiltinOnlyPackID` 文档化且结构安全，但建议 `/plan-eng-review` 就产品意图独立确认一次；② `AudioImportLimits.maxDurationSeconds`(3.0s) 是 T9 前占位，单点可调；③ `AudioDropZoneView` 已编译就绪但**尚未接入** `ClaudioGUIApp.swift`（T15/T16 挂入真实面板时，需就真实 `NSItemProvider` 拖放重跑这套 5 面对抗探测——Finder 真实拖放的临时文件/别名行为可能异于合成 fixture）；④ 决议#5 same-user TOCTOU 的"读入内存那一瞬"未闭合（需流式读，与同用户威胁模型不成比例，与既有立场一致）。
 - [ ] **T9 (P2, human: ~0.5d / CC: ~30min)** — audio — 客观声音标准 + volume→afplay -v 映射
   - Surfaced by: TODO#3 / Codex#10/#11 · Files: `docs/pack-standard.md`,`helper/volume`
-- [ ] **T10 (P2, human: ~0.5d / CC: ~20min)** — docs — 改 DESIGN:诚实三态、去"零摩擦"、night_dim 移 v2、加 schema_version
+- [ ] **T10 (P2, human: ~0.5d / CC: ~20min)** — docs — 改 DESIGN:诚实三态、去"零摩擦"、night_dim 移 v2、manifest 版本字段用现有整数 `schema` 描述（非另立版本号字段，2026-07-08 codex 复核已纠正此前误命名）
   - Surfaced by: 架构#2 + T2 + T3 + Codex#18 · Files: `DESIGN.md`
 - [ ] **T11 (P2, human: ~0.5d / CC: ~30min)** — compliance — CC0 台账加哈希+快照+下架策略
   - Surfaced by: Codex#12 · Files: `packs/LICENSES.md`

@@ -5,7 +5,8 @@ import Foundation
 /// files actually exist on disk?
 ///
 /// This intentionally does **not** model `name` / `author` / `license` / `version` /
-/// `schema` — those are validated (SPDX enum, `schema_version` compat) when `install`
+/// `schema` — those are validated (SPDX enum for `license`, and the integer `schema`
+/// field as the format's forward-compat marker) when `install`
 /// (T2) and the GUI-shared `PackManifest` (T16, "共享 PackManifest 模块与运行时查找顺序
 /// 同源") land. Unknown JSON keys are simply ignored by `Decodable`'s keyed container,
 /// so this type stays forward-compatible with the fuller schema.
