@@ -288,6 +288,8 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - **CI/CD**：GitHub Actions —— push tag → 编译 universal 二进制（Intel + Apple Silicon）→ 打 DMG →（有证书则签名公证）→ 传 Release → 自动更新 tap 的 cask formula。
 - **接管机制**：helper-CLI 随 app 安装；app 首次运行调 `claudio install`（备份 + 幂等 + 原子写）。
 
+**→ 用户安装指南见 [docs/distribution.md](./docs/distribution.md)，包含 macOS 26+ 系统设置绕过指引、Homebrew / DMG 手动安装步骤、旧系统右键打开说明、未签名 v1 诚实标注、及未来签名公证计划。**
+
 ## Dependencies（依赖 / 前置）
 
 - macOS 12+，`afplay`（系统自带）。
