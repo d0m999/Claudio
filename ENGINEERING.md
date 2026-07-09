@@ -520,8 +520,9 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - Surfaced by: TODO#3 / Codex#10/#11 · Files: `docs/pack-standard.md`,`helper/volume`
 - [ ] **T10 (P2, human: ~0.5d / CC: ~20min)** — docs — 改 DESIGN:诚实三态、去"零摩擦"、night_dim 移 v2、manifest 版本字段用现有整数 `schema` 描述（非另立版本号字段，2026-07-08 codex 复核已纠正此前误命名）
   - Surfaced by: 架构#2 + T2 + T3 + Codex#18 · Files: `DESIGN.md`
-- [ ] **T11 (P2, human: ~0.5d / CC: ~30min)** — compliance — CC0 台账加哈希+快照+下架策略
+- [x] **T11 (P2, human: ~0.5d / CC: ~30min)** — compliance — CC0 台账加哈希+快照+下架策略
   - Surfaced by: Codex#12 · Files: `packs/LICENSES.md`
+  - 已完成(2026-07-10)：首个内置包 `packs/minimal-chime/`（四事件 mp3）落地，音源全部来自 Kenney *Interface Sounds*（CC0-1.0，`/browse` 核验来源页 + 包内 License.txt + CC0 官方文本三重快照存 `packs/license-snapshots/`），逐文件按 `docs/pack-standard.md` 客观标准处理（裁静音/峰值归一化-1.15dBFS/真峰值≤-1.0dBTP/淡入淡出/四事件 f0 两两差≥407 cents 远超1半音门槛/单声道44.1kHz192kbps mp3）并记录 SHA256。`packs/LICENSES.md` 含三重核验方法说明 + 逐文件哈希表 + 客观标准核验结果表 + 来源下架/改证/哈希不匹配三类应急处理策略。非阻断遗留：四事件"双击/单blip/上扬两音/下沉且保持"的时序包络定性判据（`docs/pack-standard.md` §5 定性锚点）未经真人试听确认，为 best-effort 选配，已在 LICENSES.md 注明并列出同 CC0 包内备选文件；manifest.json 的 `name`/`author`/`license`/`version`/`schema` 字段目前 Swift `PackManifest.Decodable` 尚未建模（按 T2/T16 既定计划，未知键被 `Decodable` 静默忽略，不影响现有 decode）。
 - [ ] **T12 (P2, human: ~1d / CC: ~1h)** — dist — 未签名 universal DMG + Homebrew tap + macOS 26 绕过指引
   - Surfaced by: 分发 + T3 · Files: `.github/workflows/`,`Casks/`
 - [ ] **T13 (P3, human: ~0.5d / CC: ~30min)** — helper — 版本兼容记录 + uninstall 识别历史命令格式
