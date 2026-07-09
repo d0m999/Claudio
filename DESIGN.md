@@ -124,7 +124,7 @@
 > 这些是 `/design-consultation` 首版未覆盖、由设计评审补入词汇表的组件。**全部由既有 token 派生，勿另立新色 / 新圆角。**
 
 - **onboarding 卡 / 空态卡**：面板内居中列 —— 44px（radius 12）图标块（态色 15% 底 + 态色字形）→ 标题 SF Pro semibold 15 → 正文 `text-2` 12.5 → 主 CTA（黏土实心 pill radius 9 全宽）+ 次 CTA（ghost：透明 + `hairline-strong` 描边）。**空态三要素：温度 + 主行动 + 上下文。**
-- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：每个事件行按 `CoverageState = present | unmapped | broken` 呈现 —— **GUI 从 manifest + 文件存在性算，helper 不改播放行为**。`present`（配了且文件在）= 上述完整行（名 + id + 文件名 + 波形 + 试听 ▶）；`unmapped`（manifest 没配此 event）= 行显「未配置」、试听 ▶ 禁用；`broken`（配了但文件丢 / 坏）= 行显「文件丢失」并入 `doctor`、试听 ▶ 禁用。`unmapped` 与 `broken` 两态都在**行尾提供逐事件导入绑定**（拖入 / 选文件 → 绑到该 event）去补。区分二者 = **真打包错误不被伪装成正常静默**。禁用观感用**显式禁用样式（控件置灰 + 图标降饱和），不整行降 opacity**（行内文字始终保 ≥ 4.5:1 对比度）。此三态与正交的**静音态**（`enabled=false`：控件区弱化 + 静音钮点亮）叠加，互不取代。
+- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：每个事件行按 `CoverageState = present | unmapped | broken` 呈现 —— **GUI 从 manifest + 文件存在性算，helper 不改播放行为**。`present`（配了且文件在）= 上述完整行（名 + id + 文件名 + 波形 + 试听 ▶）；`unmapped`（manifest 没配此 event）= 行显「未配置」、试听 ▶ 禁用；`broken`（配了，但目标文件不存在 / 路径未通过包目录 containment）= 行显「文件丢失」并入 `doctor`、试听 ▶ 禁用。**`broken` 只判「文件缺失 / 路径无效」，不含「音频内容损坏」**：`doctor` 现只做 `fileExists` + containment，`play` 是 fire-and-forget（刻意不 `waitUntilExit()`，见 `Play.swift`），`afplay` 拒绝坏文件的信号回不到进程里。「文件在、但解不出声」要另立状态，须先给 doctor 或播放层加音频 lint —— v1 不做。`unmapped` 与 `broken` 两态都在**行尾提供逐事件导入绑定**（拖入 / 选文件 → 绑到该 event）去补。区分二者 = **真打包错误不被伪装成正常静默**。禁用观感用**显式禁用样式（控件置灰 + 图标降饱和），不整行降 opacity**（行内文字始终保 ≥ 4.5:1 对比度）。此三态与正交的**静音态**（`enabled=false`：控件区弱化 + 静音钮点亮）叠加，互不取代。
 - **错误态用色（关键约束）**：app 自身错误（settings 不可写 / 解析失败 / helper 缺失）用 UI 语义 `error #FF453A`（真红）；**绝不用于四事件层**（StopFailure 永远琥珀）。非阻断提示（如 Claude Code 未装）用中性 `surface-2` + `text-2`，不上真红。
 - **拖入 drop-zone**：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → 边框 / 文字转黏土 + `clay-soft` 底。
 - **拒绝行**：真红 `circle-x` 字形 + `text-2` 说明，`原因`（真红）+「怎么修」一句；不道歉、不含糊。
@@ -162,3 +162,4 @@
 | 2026-07-09 | 去「零摩擦安装」措辞 → 「技术用户低摩擦」 | 对齐 ENGINEERING T3：v1 不签名、未公证，面向能自绕 Gatekeeper 的技术用户；签名 + 公证是面向非技术用户 / 广泛发布前的硬门槛（T10） |
 | 2026-07-09 | manifest 版本字段用现有整数 `schema`（现值 1），而非另立独立版本号字段 | 2026-07-08 codex 复核纠正字段名；`PackManifest` 尚未 decode，靠 `Decodable` 忽略未知键前向兼容（T10） |
 | 2026-07-09 | 确认 night_dim 在 DESIGN.md 只作 v2、无 v1 特性叙述 | 深夜降音量已由 ENGINEERING T2 移出 v1；DESIGN.md 仅余展柜漂移诚实注记与「深夜音频硬件」美学隐喻，均非 v1 特性（T10） |
+| 2026-07-09 | `broken` 收窄为「文件缺失 / 路径无效」，剔除「音频内容损坏」 | `/codex review 78e19c2`：doctor 只 `fileExists` + containment，`play` fire-and-forget 不 `waitUntilExit()`，坏文件的播放失败信号结构上拿不到。设计真相源不得承诺代码无从判定的状态 |
