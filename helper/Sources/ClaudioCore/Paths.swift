@@ -23,7 +23,7 @@ public enum ClaudioPaths {
     }
 
     /// `~/.claudio/config.json` — the single source of truth for user settings (GUI
-    /// writes, `claudio play` only reads; see ENGINEERING.md 决议 6).
+    /// writes, `claudio play` only reads; see ENGINEERING.md「工程落地细节 ⑥ config.json 归属」).
     public static var configFile: URL {
         root.appendingPathComponent("config.json")
     }
@@ -74,11 +74,12 @@ public enum ClaudioPaths {
     }
 
     /// `~/.claudio/play.state` — the single shared "last played" timestamp `play`'s
-    /// time-based debounce reads and overwrites (ENGINEERING.md 92: 同一事件默认最小间隔
-    /// 1.5s；决议 5: "一把锁 + 一个共享时间戳", deliberately event-agnostic, not a per-event
-    /// map). Always read/written from *inside* `play.lock`'s critical section — see
-    /// ``FileLock`` and `Play.swift` — never on its own, which would reopen the exact
-    /// cross-process TOCTOU race decision 5 calls out (ENGINEERING.md 168).
+    /// time-based debounce reads and overwrites (ENGINEERING.md「并发 / 进程堆积处理」:
+    /// 距上次播放（**任意**事件）< 1.5s 就跳过；决议 5: "一把锁 + 一个共享时间戳",
+    /// deliberately event-agnostic, not a per-event map). Always read/written from *inside*
+    /// `play.lock`'s critical section — see ``FileLock`` and `Play.swift` — never on its own,
+    /// which would reopen the exact cross-process TOCTOU race decision 5 calls out
+    /// (ENGINEERING.md「工程落地细节 ⑤ 跨进程并发」).
     public static var debounceStateFile: URL {
         root.appendingPathComponent("play.state")
     }

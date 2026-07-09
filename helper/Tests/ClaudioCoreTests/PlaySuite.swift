@@ -115,7 +115,7 @@ private final class DelayedSignalSpawner: ProcessSpawning, @unchecked Sendable {
 }
 
 /// An injectable, manually-advanced clock for deterministic debounce tests — avoids real
-/// `Thread.sleep`s spanning the full 1.5s debounce window (ENGINEERING.md 92) just to prove
+/// `Thread.sleep`s spanning the full 1.5s debounce window (ENGINEERING.md「并发 / 进程堆积处理」) just to prove
 /// "elapsed >= interval" vs "elapsed < interval" behavior.
 private final class FixedClock: @unchecked Sendable {
     private let lock = NSLock()
@@ -655,7 +655,7 @@ func runPlaySuites() {
         "playSoundEvent: a second call for the SAME event inside the debounce window is"
             + " skipped as .skippedRecentPlay — even with zero lock contention (sequential,"
             + " non-overlapping calls), proving the debounce is a real time window and not"
-            + " merely 'did two calls literally race on the lock' (ENGINEERING.md 92 + 决议 5)"
+            + " merely 'did two calls literally race on the lock' (ENGINEERING.md「并发 / 进程堆积处理」+ 决议 5)"
     ) {
         withTempDirectory { root in
             let packsDir = root.appendingPathComponent("packs")

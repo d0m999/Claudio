@@ -2,7 +2,7 @@ import Foundation
 
 /// Pure mapping from ``ClaudioConfig/masterVolume`` (a user-facing 0.0–1.0 dial, see
 /// `ClaudioConfig.swift`) to the exact `afplay -v <value>` argument (T9,
-/// ENGINEERING.md 384/465: "`master_volume`(0.0–1.0)→`afplay -v` 映射含默认值与越界钳制").
+/// ENGINEERING.md「v1 新增/加固决议 · 客观声音质量标准」+ T9: "`master_volume`(0.0–1.0)→`afplay -v` 映射含默认值与越界钳制").
 ///
 /// `afplay -v` uses the identical `[0.0, 1.0]` scale (`1.0` = normal volume, lower values
 /// attenuate) — see `man afplay` — so there is no unit conversion here, only **clamping**.

@@ -72,11 +72,11 @@ public struct PlayEnvironment: Sendable {
     /// map). Always read, compared, and overwritten from *inside* `play.lock`'s critical
     /// section in ``playSoundEvent(_:environment:)`` — never on its own, which would
     /// reopen the exact cross-process TOCTOU race decision 5 exists to close
-    /// (ENGINEERING.md 168: "否则多进程同时放行 = 去抖失效").
+    /// (ENGINEERING.md「工程落地细节 ⑤ 跨进程并发」: "否则多进程同时放行 = 去抖失效").
     public let debounceStateFile: URL
     /// Minimum spacing between two plays (any event — see ``debounceStateFile``) before
-    /// the second is skipped as ``PlayOutcome/skippedRecentPlay(event:)``. ENGINEERING.md
-    /// 92: 默认 1.5s.
+    /// the second is skipped as ``PlayOutcome/skippedRecentPlay(event:)``.
+    /// ENGINEERING.md「并发 / 进程堆积处理」: 距上次播放（任意事件）< 1.5s 就跳过.
     public let debounceInterval: TimeInterval
     /// Injectable clock so tests can simulate elapsed time deterministically instead of
     /// real `Thread.sleep`s spanning the full debounce window.
@@ -141,13 +141,13 @@ public enum PlayOutcome: Sendable, Equatable {
     case notReady
     /// Another `claudio play` currently holds `play.lock` — the *lock-contention* skip
     /// path: two calls truly overlapped in time. This is a safety net for the rare
-    /// literal race, not the debounce ENGINEERING.md 92 asks for — see
+    /// literal race, not the debounce ENGINEERING.md「并发 / 进程堆积处理」asks for — see
     /// ``skippedRecentPlay(event:)`` for the actual "距上次播放 < N ms 就跳过" time window.
     case skippedDebounce
     /// The shared timestamp (``PlayEnvironment/debounceStateFile``) shows *some* event
     /// (any event — decision 5's timestamp is deliberately event-agnostic) played more
     /// recently than ``PlayEnvironment/debounceInterval`` ago. This is the actual
-    /// time-based "跳过式去抖" ENGINEERING.md 92 + 决议 5 specify, distinct from the mere
+    /// time-based "跳过式去抖" ENGINEERING.md「并发 / 进程堆积处理」+ 决议 5 specify, distinct from the mere
     /// lock-contention race covered by ``skippedDebounce``.
     case skippedRecentPlay(event: Event)
     /// A real filesystem error (not lock contention) prevented acquiring `play.lock`.
@@ -184,7 +184,7 @@ public func playSoundEvent(
     // `play.lock`'s non-blocking critical section: `withNonBlockingLock` guarantees at
     // most one process's `body` is ever running at a time, so there is no TOCTOU window
     // between "read last-played" and "write now" across concurrent `claudio play`
-    // processes (ENGINEERING.md 168's exact race decision 5 calls out).
+    // processes (ENGINEERING.md「工程落地细节 ⑤ 跨进程并发」's exact race decision 5 calls out).
     let lockResult = withNonBlockingLock(path: environment.lockFile.path) { () -> PlayOutcome in
         let now = environment.now()
         if let lastPlayed = readLastPlayedTimestamp(from: environment.debounceStateFile),
@@ -265,7 +265,7 @@ private func loadPlayManifest(from packDirectory: URL) -> PackManifest? {
     return try? JSONDecoder().decode(PackManifest.self, from: manifestData)
 }
 
-// MARK: - Shared debounce timestamp (ENGINEERING.md 92 + 决议 5)
+// MARK: - Shared debounce timestamp (ENGINEERING.md「并发 / 进程堆积处理」+ 决议 5)
 
 /// Reads the "last played" timestamp another (or this) `claudio play` process previously
 /// wrote, or `nil` if the state file is missing/corrupt (fresh install, or the very first
