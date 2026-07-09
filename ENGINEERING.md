@@ -77,19 +77,22 @@ app 不在任务时运行，实际播放由 hook 触发。选 **helper-CLI**：a
 | `claudio use <pack-id>` | 切当前包（改配置文件） | 0/非0 |
 | `claudio doctor` | 自检：settings.json 可写、包完整、afplay 在位 | 0/非0 |
 
-- `<event>` 合法值：`stop` `notification` `subagent_stop`（v1）；`session_start` `session_end` `user_prompt_submit`（可选）。
+- `<event>` 合法值 = **v1 四事件**（决议 2，映射表见下方"工程落地细节 ①"）：`stop` `stop_failure` `notification` `subagent_stop`；`session_start` `session_end` `user_prompt_submit` 一律 v2。
 - **config.json 文件本身是唯一真相源**：app(GUI) 写、helper `play` 只读（消歧详见下方"工程落地细节"）。
 - 配置文件：`~/.claudio/config.json`
   ```json
   {
     "selected_pack": "minimal-chime",
-    "master_volume": 0.8
+    "master_volume": 0.8,
+    "events": { "stop": true, "stop_failure": true, "notification": true, "subagent_stop": false }
   }
   ```
+  `events` = 逐事件静音位（决议 3），key 用 CLI `<event>` 名；**缺省即启用**（opt-out，不是 opt-in）。只有 `selected_pack` 必填，`master_volume` / `events` 缺失或损坏各自退回默认值而不使整个 decode 失败（`ClaudioConfig.swift`）。
 
-**并发 / 进程堆积处理（评审 1.1 / 1.3）：**
-- `afplay` 同步阻塞、一次一进程。helper 每次播放前，杀掉上一个由 claudio 拉起的 afplay（pid 记在 `~/.claudio/last.pid`），避免堆叠。
-- 同一 `<event>` 设最小间隔（默认 1.5s）去抖，防止多会话 / 高频 `subagent_stop` 声音打架。
+**并发 / 进程堆积处理（评审 1.1 / 1.3 提出的方案已由决议 5 推翻；以本段为准）：**
+- `afplay` 自身阻塞数秒，但 helper **后台 spawn 且从不 `waitUntilExit()`**，所以 helper 进程自己不会被拖住，也就不存在"上一个 afplay 还没退"的堆叠需要处理。
+- **跳过式去抖**：一把非阻塞锁（`~/.claudio/play.lock`，`LOCK_NB`）+ 一个**事件无关的共享时间戳**；距上次播放（任意事件）< 1.5s 就跳过本次。**不 kill 任何进程、不记 pid。**
+- 时间戳刻意是单个全局值而非 per-event 映射（决议 5：「一把锁 + 一个共享时间戳」）——多会话高频 `subagent_stop` 与 `stop` 互相之间也要去抖，per-event 映射反而放行叠播。
 - 已知取舍：v1 不区分"是哪个会话在响"（多会话时只保证不叠不炸）。会话级区分列入 v2 Open Question。
 
 ### 声音包格式（朝 B 设计，第一天定死）
@@ -136,7 +139,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 接管后 `Stop` 片段示例：
 ```json
 { "hooks": { "Stop": [
-  { "hooks": [ { "type": "command", "command": "/Users/you/.claude/claudio/bin/claudio play stop" } ] }
+  { "hooks": [ { "type": "command", "command": "/Users/you/.claudio/bin/claudio play stop" } ] }
 ] } }
 ```
 
@@ -147,10 +150,11 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 | settings.json 事件 | CLI `<event>` | manifest key |
 |---|---|---|
 | `Stop` | `stop` | `stop` |
+| `StopFailure` | `stop_failure` | `stop_failure` |
 | `Notification` | `notification` | `notification` |
 | `SubagentStop` | `subagent_stop` | `subagent_stop` |
 
-`SubagentStop` 直接 lowercase 会得到 `subagentstop`，对不上——必须查表。**v1 只做这 3 个核心事件**；helper 契约里列的 `session_start/end`、`user_prompt_submit` 一律标 v2。
+`SubagentStop` 直接 lowercase 会得到 `subagentstop`，对不上——必须查表。**v1 锁定这 4 个核心事件**（决议 2；`StopFailure` 由 spike 实测 + 双源交叉验证确认真实存在）；helper 契约里列的 `session_start/end`、`user_prompt_submit` 一律标 v2。代码侧的唯一真相源是 `Event.swift` 的 `enum Event`——本表与它必须逐字一致，改一处就改两处。
 
 **② 声音包存储根 + 查找顺序：**
 - 用户包根：`~/.claudio/packs/<pack-id>/`
@@ -162,17 +166,19 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - settings.json 幂等/卸载标记 = 命令**精确等于** `~/.claudio/bin/claudio play <event>`（精确匹配，非子串）。路径漂移 → 重复挂（响两声）+ 漏删僵尸条目，所以路径必须钉死。
 
 **④ 播放必须异步，绝不卡住 Claude Code：**
-- hook 是同步调用、`afplay` 又阻塞数秒。helper 必须**后台 spawn afplay、记 pid 后立即 `exit 0`**。"绝不阻断"从退出码语义扩展到**时延**——Claude Code 不该为一次响声等几秒。
+- hook 是同步调用、`afplay` 又阻塞数秒。helper 必须**后台 spawn afplay（刻意不 `waitUntilExit()`）后立即 `exit 0`**。"绝不阻断"从退出码语义扩展到**时延**——Claude Code 不该为一次响声等几秒。
+- 代价（明码标价）：spawn 之后 afplay 的退出码**结构上拿不到**。helper 只知道"启动成功与否"（`Process.run()` 是否抛错），据此写一行 `claudio.log`。afplay 启动后才发现文件解不出声 → helper 永远不会知道。见下方 Failure modes 的已知盲区。
 
-**⑤ 跨进程并发（多会话正是要解决的场景）：**
-- 每次 `claudio play` 是独立短命进程。去抖（共享上次时间戳）+ 杀旧进程（`last.pid`）必须用**文件锁** `flock ~/.claudio/play.lock` 串行化关键区，否则多进程同时放行 = 去抖失效、last.pid 互踩。
-- `kill` 前**校验** last.pid 确为 claudio 拉起的 afplay（比对进程命令行），防 PID 复用误杀。
-- settings.json 读-改-写也走这把锁（原子写只防读到半截，防不了丢更新）。原子写临时文件须**与 settings.json 同目录**（`~/.claude/`），跨卷 rename 会失去原子性。
-- UI 试听 ▶ 用**独立 pid 槽**（不写 `last.pid`），避免试听和真实事件互杀 / 叠播。
+**⑤ 跨进程并发（多会话正是要解决的场景 · 决议 5 简化后）：**
+- 每次 `claudio play` 是独立短命进程。共享时间戳的**读-比较-写整段**必须跑在 `~/.claudio/play.lock` 的临界区内，否则多进程同时放行 = 去抖失效。锁走 `flock(2)` / `open(O_EXLOCK)` **系统调用**（决议 1；**不是** shell 的 `flock(1)`，macOS 不自带）。
+- 锁必须**非阻塞**（`LOCK_NB`）：`play` 在 hook 同步路径上，绝不排队等锁——拿不到锁 = 有人正在响 = 本次跳过。
+- settings.json 读-改-写也走文件锁（原子写只防读到半截，防不了丢更新）。原子写临时文件须**与 settings.json 同目录**（`~/.claude/`），跨卷 rename 会失去原子性。
+- UI 试听 ▶ **绕过去抖**（显式用户动作），不读也不写共享时间戳。
+- 不再有 `last.pid`、不再 kill 上一个 afplay、不再校验 pid 命令行、UI 也没有独立 pid 槽——决议 5 连带消除了 pid 复用误杀与 kill 竞态整类 bug。
 
 **⑥ config.json 归属（消除"真相源"歧义）：**
 - config.json 文件本身是唯一真相源。**app(GUI) 是写入者，helper `play` 只读。**
-- `claudio use <pack>` / `claudio set volume|night ...` 是等价 CLI 便捷入口，与 GUI 写同一份 config，都走上面那把文件锁 + 原子写。
+- `claudio use <pack>`（已实现）/ 计划中的 `claudio set volume <0.0–1.0>` 是等价 CLI 便捷入口，与 GUI 写同一份 config，都走上面那把文件锁 + 原子写。**没有 `set night`**——`night_dim` 已由 T2 移出 v1 → v2。
 
 ### 内置包（v1）
 
@@ -212,11 +218,12 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 | **试听 ▶** | 该事件未配音 → ▶ 置灰禁用 + tooltip「未指定声音」 | 按下即播（后台 spawn），按钮转播放态 | 文件损坏 / afplay 缺失 → ▶ 抖动 + 行内一次性「播放失败」（同时写 log） | EQ 条弹跳 + 菜单栏字形视觉回放 | — |
 | **拖入导入** | idle → 虚线 drop-zone「+ 拖入你自己的声音」 | 大文件复制中显进度；小文件瞬时 | 超 5MB / 非白名单格式 / 路径遍历 / 超时长 → 各自一句人话（线框 §4） | 复制进用户包 + 行内文件名更新 + 自动试听确认 | 多文件部分合格 → 合格收下 + 逐条列被拒原因 |
 | **onboarding 接管** | 未接管 →「接管 Claude Code」CTA（线框 §3①） | 检测 settings/helper/CC → 瞬时 | settings 不可写 / 解析失败 / helper 缺失 → 各态人话 + 修复行动（线框 §3②，**真红 `#FF453A`**） | hook 已接管 → 头部 ● 绿点 + 正常事件列表 | Claude Code 未装 →「重新检测」+ 安装指引（线框 §3③） |
-| **事件行** | `unmapped` → 「未配置」+ ▶ 禁用（行尾可导入绑定） | — | `broken`（文件丢/坏）→ 「文件丢失」+ doctor 可查 + ▶ 禁用 | 显 名+id+文件+波形+▶ | 静音（`enabled=false`）→ **控件区弱化 + 静音钮点亮**（不整行降 opacity，保文字对比度） |
+| **事件行** | `unmapped` → 「未配置」+ ▶ 禁用（行尾可导入绑定） | — | `broken`（配了，但目标文件不存在 / 路径未通过包目录 containment）→ 「文件丢失」+ doctor 可查 + ▶ 禁用 | 显 名+id+文件+波形+▶ | 静音（`enabled=false`）→ **控件区弱化 + 静音钮点亮**（不整行降 opacity，保文字对比度） |
 | **主音量** | — | — | 越界值 → 钳制到 0.0–1.0 | 拖动即时改 config，映射 `afplay -v`（含默认值） | — |
 
 - **空态三要素**（切包 / onboarding）：温度（产品语言"听声辨状态"，非系统冷提示）+ 主行动（一眼可点）+ 上下文（装好后会发生什么）。
-- **"缺文件→静默"的用户可见性（评审决议① · codex 精修为三态）**：`CoverageState = present | unmapped | broken`（GUI 从 manifest + 文件存在性算，helper 不改行为）——`unmapped`（manifest 没配此 event）行显「未配置」、`broken`（配了但文件丢/坏）显「文件丢失」并入 doctor，两者试听禁用；行尾提供**逐事件导入绑定**去补。区分二者 = 真打包错误不被伪装成正常静默。
+- **"缺文件→静默"的用户可见性（评审决议① · codex 精修为三态）**：`CoverageState = present | unmapped | broken`（GUI 从 manifest + 文件存在性算，helper 不改行为）——`unmapped`（manifest 没配此 event）行显「未配置」、`broken`（配了，但目标文件不存在 / 路径未通过 containment）显「文件丢失」并入 doctor，两者试听禁用；行尾提供**逐事件导入绑定**去补。区分二者 = 真打包错误不被伪装成正常静默。
+  - **`broken` 只判「文件缺失 / 路径无效」，不含「音频内容损坏」**（2026-07-09 收窄，与 DESIGN.md 同源）：`doctor` 现只做 `fileExists` + containment，`play` 是 fire-and-forget，afplay 拒绝坏文件的信号回不到进程里。「文件在、但解不出声」的文件今天会被判成 `present`。要区分它须先给 doctor 或播放层加音频 lint —— v1 不做。
 
 ### 用户旅程 storyboard（评审补 · 情感弧是本产品核心价值）
 
@@ -258,7 +265,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - （v2）会话级声音区分怎么做？从 GitHub 一键装包何时上？
 
 **设计待解（/plan-design-review 2026-07-07 补，附推荐倾向）：**
-- ① 包缺音的事件行可见性 → **已决（codex 精修为三态）**：GUI-only `CoverageState = present | unmapped | broken`——`unmapped`（manifest 没配此 event）显「未配置」、`broken`（配了但文件丢/坏）显「文件丢失」入 doctor，两者试听禁用；**新增逐事件导入绑定**（行尾拖入/选文件 → 绑到该 event）。helper 不改行为，抽共享 `PackManifest` 模块与运行时查找顺序同源（见 T16）。
+- ① 包缺音的事件行可见性 → **已决（codex 精修为三态）**：GUI-only `CoverageState = present | unmapped | broken`——`unmapped`（manifest 没配此 event）显「未配置」、`broken`（配了，但目标文件不存在 / 路径未通过 containment；**不含音频内容损坏**，2026-07-09 收窄）显「文件丢失」入 doctor，两者试听禁用；**新增逐事件导入绑定**（行尾拖入/选文件 → 绑到该 event）。helper 不改行为，抽共享 `PackManifest` 模块与运行时查找顺序同源（见 T16）。
 - ② 切包画廊选中即应用 vs 二次确认 → 倾向**选中即应用**（可逆、低风险，配"壁纸选择器"即时感）。
 - ③ 第一次响后轻确认形态 → 倾向**一次性 toast**「刚刚：{事件名}」，建立映射后不再出现（非常驻角标，避免打扰）。
 - ④ 视觉回放触发范围 → 倾向**仅当前触发事件按其事件色重放一次**波形（非重放所有事件，防菜单栏太闹）；单色模板图标下用 alpha 强弱表现。
@@ -269,7 +276,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - **v1 一句话**：`brew install --cask claudio`（或下载 DMG 按指引打开）→ 开 app → 选内置包 → Claude Code 干完活自动响对应的音，**全程不碰 settings.json**。
 - 内置 **1-2 个**包，每个音效逐文件核验为 `CC0-1.0`，有 license 台账文件。
 - `Stop` / `StopFailure` / `Notification` / `SubagentStop` 四个事件声音有明显区分度（能"听声辨状态"）。
-- 多会话同跑时声音不叠、不炸（节流 + 杀旧进程生效）。
+- 多会话同跑时声音不叠、不炸（跳过式去抖生效：非阻塞锁 + 共享时间戳，见决议 5）。
 - `claudio install` 幂等、不破坏用户已有 hook；`claudio uninstall` 精准摘除、保留其它 hook。
 - 社区能照着 README + manifest schema 做出自己的包。
 
@@ -305,7 +312,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 - **勿扰/Focus 检测**：macOS 无公开 API，高风险实验项，v1 不做。
 - **音量 ducking（压低其它 app）**：`afplay -v` 只能设自身音量，无法 duck 其它音频；真做需弃用 afplay、改写 CoreAudio/AVAudioEngine 播放层，违背零依赖约束。v1 不做。
-- 站得住的部分：helper-CLI 用绝对路径挂 hook、`afplay` 播放本身、自建 Homebrew tap、纯时钟深夜降音量——均可行。
+- 站得住的部分：helper-CLI 用绝对路径挂 hook、`afplay` 播放本身、自建 Homebrew tap——均可行。（「纯时钟深夜降音量」技术上同样可行，但已由 Outside Voice T2 移出 v1 → v2，不再是 v1 特性。）
 
 ## What I noticed about how you think（我注意到你怎么想事情）
 
@@ -316,6 +323,9 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 ---
 
 ### 修订记录（Spec Review 第 1 轮，6/10 → 已修复）
+
+> **历史快照，勿据此实现。** 下列第 2 条末尾的「仅留纯时钟深夜降音量」已被 Outside Voice **T2 撤销**——`night_dim` 整体移出 v1 → v2。以正文 + 决议层为准。
+
 1. CC0 硬伤：移除 Pixabay/Mixkit 做内置源，改 Freesound(CC0)+原创+逐文件台账。
 2. 勿扰/ducking 移出 v1（无公开 API / 需重写播放层），仅留纯时钟深夜降音量。
 3. 包数量统一：v1 目标 1-2 个，首里程碑 1 个。
@@ -330,6 +340,13 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 12. 明确多会话 v1 取舍（不叠不炸，会话级区分留 v2）。
 
 ### 修订记录（Spec Review 第 2 轮，8/10 → 再补 8 处工程落地细节）
+
+> **历史快照，勿据此实现。** 下列 4 条已被 2026-07-06「评审后决议」推翻，正文已按决议改写：
+> - 第 13 条「v1 锁定 3 核心事件」→ **四事件**（决议 2 补 `StopFailure`↔`stop_failure`）。
+> - 第 14 / 15 条的 `~/.claude/claudio/...` 路径 → **`~/.claudio/...`**（决议 4）。
+> - 第 17 条「`flock` 串行化去抖/杀进程；kill 前校验 pid」→ **删掉整套 kill / `last.pid` / pid 校验**，改为一把非阻塞锁 + 一个共享时间戳的跳过式去抖（决议 5）；锁是 `flock(2)` 系统调用而非 shell `flock(1)`（决议 1）。
+> - 第 19 条「UI 试听用独立 pid 槽」→ **无 pid 槽**，试听直接绕过去抖（决议 5）。
+
 13. 补事件名映射表（驼峰↔下划线，禁 lowercase）+ v1 锁定 3 核心事件。
 14. 定义声音包存储根（用户包 `~/.claude/claudio/packs/`、内置包 bundle）+ 查找顺序。
 15. helper 固定安装路径 `~/.claude/claudio/bin/claudio` + 精确匹配标记。
@@ -338,6 +355,26 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 18. settings.json 读-改-写纳入同一文件锁；临时文件同目录。
 19. UI 试听用独立 pid 槽，不与真实事件互杀。
 20. config.json 归属定死：GUI 写、helper 读，CLI set/use 走同锁。
+
+### 修订记录（`/codex review cd25686`，2026-07-09 → 叙述层对齐决议层 + 代码）
+
+> 本轮**零 Swift 改动**。改的全是「决议早已拍板、正文从没跟上」的漂移——spec 是本仓库 agent 实现的真相源，错的 spec 就是 production bug。
+
+21. **`broken` 态收窄贯穿到 ENGINEERING**（cd25686 只改了 DESIGN.md 一半）：交互状态表 / 可见性条目 / 设计待解① 三处的「配了但文件丢/坏」统一改为「文件不存在 / 路径未通过 containment」，并显式声明不含音频内容损坏。
+22. **Failure modes 表纠正两处假陈述**：原「play spawn afplay | afplay 缺失/文件损坏 | 日志+exit≠0 | log/doctor」——`play` 无条件 `exit 0`，且 fire-and-forget 拿不到 afplay 退出码。拆成「启动失败（可观察，写 log）」+「内容损坏（结构上不可观察，静默）」两行。
+23. **`critical gaps` 由 0 改为 1（知情接受）**：上一条拆行后暴露出「音频内容损坏」是真·无测+无处理+静默。它是"绝不阻断"的架构代价，非疏漏；消除它需 v2 音频 lint。
+24. **补 `StopFailure` 到事件名映射表 + CLI `<event>` 合法值**：决议 2 亲口下令「映射表加一行」，从未执行；`Event.swift` 早已是四事件。
+25. **删净决议 5 已废弃的并发方案**：`last.pid`、kill 上一个 afplay、pid 命令行校验、UI 独立 pid 槽、shell `flock(1)` 字样（决议 1）。并纠正「同一 `<event>` 设最小间隔」——`Play.swift` 的时间戳刻意是**事件无关**的单个值。
+26. **`config.json` 示例补 `events` 逐事件静音位**（决议 3，`ClaudioConfig.swift` 早已实现）；settings.json 示例路径 `~/.claude/claudio/` → `~/.claudio/`（决议 4）。
+27. **`night_dim` 残留清理**：Feasibility 注记不再把「纯时钟深夜降音量」列为 v1 站得住的部分；两段历史修订记录加 superseded 标记（不改写历史）。
+
+以下 3 条由本轮的**对抗性复查**（4 棱镜独立扫 + 逐条反驳 + 完整性 critic）追加，其中 30 是本轮编辑自己制造的：
+
+28. **跨文档引用一律用「小节名」锚点，禁用行号**（新约定）。行号会随任何编辑漂移，且 rot 时无声。已把 `Play.swift` / `Paths.swift` / `Volume.swift` / `PlaySuite.swift` / `docs/pack-standard.md` 里全部 `ENGINEERING.md <行号>` 换成小节名。
+29. **修正两处 `决议 6` 误引**：`ClaudioConfig.swift` 与 `Paths.swift` 把「config 归属 = GUI 写 / helper 读」记成决议 6，但决议 6 是「静默失败要有诊断轨迹」；正主是**工程落地细节 ⑥**。（同 codebase 另 5 处 `决议 6` 引用均正确指向日志。）
+30. **`三事件差异原则` → 四事件**（`:413` + `docs/pack-standard.md` 引文与 §5 标题）。`pack-standard.md` 正文早已按四事件写「C(4,2)=6 对」，只有标题和摘要还停在三。另清掉工程落地细节 ⑥ 里 `claudio set ... night` 的 `night_dim` 残留——上一条 item 27 声称清完了，它活下来了。
+
+> 有意**未改**的两处：(a) 文末 GSTACK REVIEW REPORT 里的 "0 critical gaps" —— 那是 2026-07-08 第 3 轮 Eng Review 的**带日期的历史结论**，不是当前断言；下一轮 review 自会刷新。(b) `ORCHESTRATION.md` —— 其文件头自称 "Generated by `/plan-orchestrate` · point-in-time，随实现推进会过期"，是生成物快照。改写二者都等于伪造记录。
 
 ---
 
@@ -381,7 +418,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 ### v1 新增/加固决议
 - **拖入自带音频（保留 + 加固）**：拖入即**复制**进用户包（不引用原路径）+ 格式白名单（wav/mp3/aiff/m4a）+ 大小上限（如 5MB）+ 时长上限 + 拒路径遍历/同名覆盖内置。这是"合法皮卡丘"的唯一通道。
 - **完整 onboarding 状态机**：首次运行六状态各给人话 + 下一步——未装/已装 hook、helper 缺失、settings 不可写、Claude Code 未装、settings 解析失败。与 claudio.log + 原子写失败策略合流。
-- **客观声音质量标准**：单音时长上限（≤~2s）、响度归一化目标（峰值 -1 dBFS 或 -16 LUFS）、峰值限制、静音头尾裁剪、三事件差异原则（音色/音高有别）；`master_volume`(0.0–1.0)→`afplay -v` 映射含默认值与越界钳制。
+- **客观声音质量标准**：单音时长上限（≤~2s）、响度归一化目标（峰值 -1 dBFS 或 -16 LUFS）、峰值限制、静音头尾裁剪、**四事件**差异原则（音色/音高有别，任两两之间共 C(4,2)=6 对）；`master_volume`(0.0–1.0)→`afplay -v` 映射含默认值与越界钳制。
 - **其它折进计划**：manifest 版本字段落实 decode + 校验（用现有整数键 `schema`，现值 1；承诺兼容读取,不"永不变"。**不是** `schema_version` —— 该名字不存在，2026-07-08 codex 复核已纠正）；CC0 台账加文件哈希 + license 页快照 + 来源下架/改证处理；记录最低 macOS/Claude Code 版本 + 检测;uninstall 识别历史命令格式（为将来路径变更）。
 
 ### NOT in scope（v1 明确不做）
@@ -411,11 +448,12 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 | install 写 settings.json | 解析失败/不可写/磁盘满 | ✅(fixture) | ✅ 中止不覆盖 + onboarding 提示 | ✅ 人话 |
 | uninstall 精确匹配 | 路径漂移漏删残条 | ✅ | ✅ 精确等值匹配 | ✅ doctor |
 | play 读 config | 缺失/损坏 | ✅ | ✅ 默认/跳过+日志 | ✅ log/doctor |
-| play spawn afplay | afplay 缺失/文件损坏 | ✅ | ✅ 日志+exit≠0 | ✅ log/doctor |
+| play spawn afplay | afplay 缺失 / 不可执行（**启动**失败） | ✅ | ✅ 写 claudio.log（`play` 仍无条件 exit 0，绝不阻断 hook） | ✅ log/doctor |
+| play spawn afplay | **音频文件内容损坏**（文件在、afplay 启动成功、但解不出声） | ❌ | ❌ **结构上不可观察**：fire-and-forget，不 `waitUntilExit()`，afplay 的非零退出回不到 helper | ❌ 静默 |
 | 去抖取锁 | 锁被占/超时 | ✅(整合) | ✅ LOCK_NB 拿不到即跳过 | 静默(设计如此) |
 | 拖入音频 | 超大/损坏/路径遍历 | ✅ | ✅ 白名单+上限+拒遍历 | ✅ 提示 |
 
-**critical gaps（无测 + 无处理 + 静默）= 0**：上述决议已把每条静默失败面补上日志/处理/提示。**范围声明（`/codex review` 2026-07-08 复核）**：此结论只覆盖表中已列出的、已实现/已决议的代码路径，不代表整个项目无待办风险——T3 spike 仍有 cwd/PATH/stderr/超时/并发待验、真实 settings.json `hooks.<Event>` schema 仍待固化、CC0 校验尚未落地（manifest 音频路径 containment 其实已在 `Doctor.swift` 的 `safePackFileURL` 实现并测试，见上方 NOT-in-scope"单 event 多音频"条目旁的范围边界说明——这条不算待办，但该函数目前 `private`，T5 `play` 落地时需先提升可见性以复用）；这些不在本表统计范围内，各自的待办状态见文中对应小节。
+**critical gaps（无测 + 无处理 + 静默）= 1，且是知情接受的**（2026-07-09 修正；此前记为 0，是把"音频内容损坏"和"afplay 启动失败"混成一行所致）：唯一一条是上表最后一行**「音频文件内容损坏」**。它无测、无处理、对用户静默，但**不是疏漏而是架构后果**——"绝不阻断 Claude Code"要求 `play` fire-and-forget，代价就是 afplay 的退出码永远拿不到。要消除它须给 doctor 或播放层加音频 lint（解码校验），**v1 明确不做 → v2**。这也正是 `broken` 态收窄为「文件缺失 / 路径无效」的原因：设计真相源不得承诺代码无从判定的状态。**其余每条**静默失败面都已由上述决议补上日志/处理/提示。**范围声明（`/codex review` 2026-07-08 复核）**：此结论只覆盖表中已列出的、已实现/已决议的代码路径，不代表整个项目无待办风险——T3 spike 仍有 cwd/PATH/stderr/超时/并发待验、真实 settings.json `hooks.<Event>` schema 仍待固化、CC0 校验尚未落地（manifest 音频路径 containment 其实已在 `Doctor.swift` 的 `safePackFileURL` 实现并测试，见上方 NOT-in-scope"单 event 多音频"条目旁的范围边界说明——这条不算待办，但该函数目前 `private`，T5 `play` 落地时需先提升可见性以复用）；这些不在本表统计范围内，各自的待办状态见文中对应小节。
 
 ### 并行化策略（worktree lanes）
 
@@ -445,7 +483,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - Surfaced by: Codex#3/#4 + spike 发现并核实 StopFailure(决议2) · Files: `docs/spike-hooks.md`
 - [x] **T4 (P1, human: ~1h / CC: ~10min)** — helper — 全部落 `~/.claudio/`(无空格),命令路径天然安全
   - Surfaced by: Outside Voice T1 · Files: `helper/paths`
-  - 已完成(2026-07-08，tdd-guide + swift-reviewer 链)：`ClaudioPaths`（已在 T2 期间落地）补齐专门单测 `PathsSuite.swift`(6 组 suite，无空格/`~/.claudio` 归属/`packDirectory(id:)` 拼接/纯函数无崩溃全覆盖，210 项全绿)；swift-reviewer 顺着测试覆盖发现 1 个 HIGH（全新机器 `~/.claudio/` 从未被任何代码创建，`FileLock.attemptLock` 首次 `install`/`uninstall` 时因 `ENOENT` 永久性失败，CLI 误导性提示"请稍后重试"）已修复（`attemptLock` 遇 `ENOENT` 自愈 `createDirectory(withIntermediateDirectories:)` 后重试一次 `open`，仅限 `ENOENT`，其它 errno 原样透传）并二次核实关闭。非阻塞遗留（留后续小任务）：① `FileLockSuite.swift` 中"自愈本身也失败"用例实际触发 errno 是 `ENOTDIR` 而非 `ENOENT`，没有真正走到自愈重试失败分支，需要改名/改注释或另加一条只读父目录构造的用例；② 正文第 139/334/335 行仍是决议 4 作废前的旧路径 `~/.claude/claudio/...`，尚未逐字回改成 `~/.claudio/...`。
+  - 已完成(2026-07-08，tdd-guide + swift-reviewer 链)：`ClaudioPaths`（已在 T2 期间落地）补齐专门单测 `PathsSuite.swift`(6 组 suite，无空格/`~/.claudio` 归属/`packDirectory(id:)` 拼接/纯函数无崩溃全覆盖，210 项全绿)；swift-reviewer 顺着测试覆盖发现 1 个 HIGH（全新机器 `~/.claudio/` 从未被任何代码创建，`FileLock.attemptLock` 首次 `install`/`uninstall` 时因 `ENOENT` 永久性失败，CLI 误导性提示"请稍后重试"）已修复（`attemptLock` 遇 `ENOENT` 自愈 `createDirectory(withIntermediateDirectories:)` 后重试一次 `open`，仅限 `ENOENT`，其它 errno 原样透传）并二次核实关闭。非阻塞遗留（留后续小任务）：① `FileLockSuite.swift` 中"自愈本身也失败"用例实际触发 errno 是 `ENOTDIR` 而非 `ENOENT`，没有真正走到自愈重试失败分支，需要改名/改注释或另加一条只读父目录构造的用例；② ~~正文第 139/334/335 行仍是决议 4 作废前的旧路径 `~/.claude/claudio/...`~~ **已于 2026-07-09 清除**：settings.json 示例改 `~/.claudio/bin/claudio`；修订记录第 2 轮的 14/15 条属历史快照，改为在段首加 superseded 标记而非改写历史。
 - [ ] **T5 (P1, human: ~0.5d / CC: ~40min)** — helper — play 跳过式去抖(单锁+时间戳,`LOCK_NB`)+ 后台 spawn afplay+立即 exit0 + 逐事件 enabled
   - Surfaced by: CQ#1 + 架构#3 + 性能指令 · Files: `helper/play`
 - [x] **T6 (P1, human: ~2h / CC: ~15min)** — helper — 带上限 `claudio.log` + doctor 读尾部
