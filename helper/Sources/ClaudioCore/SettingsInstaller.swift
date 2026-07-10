@@ -31,9 +31,16 @@ private let commandHookType = "command"
 /// The exact `settings.json` hook `command` string Claudio installs/matches for `event`.
 /// Single source of truth for the install idempotency check and the read-only
 /// ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` probe. **Not** used by
-/// `uninstall`'s removal sweep anymore (T13) — see ``matchedClaudioEvent(inHookCommand:)``.
+/// `uninstall`'s removal sweep anymore (T13) — see
+/// ``matchedClaudioEvent(inHookCommand:claudioRoot:)``.
+///
+/// The path goes through ``shellQuotedPath(_:)`` because Claude Code executes this string via
+/// `/bin/sh -c`: `~/.claudio/` is space-free by design (决议 4), but the `~` it hangs off is
+/// the user's home directory, which claudio does not control. For every path that already
+/// works unquoted, `shellQuotedPath` is the identity function, so the emitted string — and
+/// therefore install's idempotency and `detectHookInstallStatus`'s answer — is unchanged.
 public func claudioHookCommand(for event: Event, claudioBinaryPath: String) -> String {
-    "\(claudioBinaryPath) play \(event.cliName)"
+    "\(shellQuotedPath(claudioBinaryPath)) play \(event.cliName)"
 }
 
 // MARK: - Public result types
@@ -104,15 +111,15 @@ public func installClaudioHooks(
 
 /// Removes every hook entry claudio itself could plausibly have written, for any of the
 /// four core events, preserving everything else untouched — see
-/// ``matchedClaudioEvent(inHookCommand:)`` for the exact structural match this keys off
-/// (T13: a match on argv shape + claudio's own path namespace, NOT an exact-string compare
+/// ``matchedClaudioEvent(inHookCommand:claudioRoot:)`` for the exact structural match this
+/// keys off (T13: a match on trailing argv + claudio's own root, NOT an exact-string compare
 /// against `claudioBinaryPath` — the whole point is still finding a stale entry after a
 /// binary relocation this call was never told the old path for).
 ///
-/// `claudioBinaryPath` is kept as a parameter here purely for call-site symmetry with
-/// ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)`` (a caller doing
-/// "reinstall to a new path" already has this value in scope, and the two functions have
-/// always shared a signature) — it does **not** participate in the removal match itself.
+/// `claudioBinaryPath` does not have to equal the stale entry's path, but it *does* pin the
+/// namespace: ``claudioNamespaceRoot(forBinaryPath:)`` derives `~/.claudio` from it, and only
+/// entries under that exact root are swept. A binary path outside any `.claudio` directory
+/// yields no root and therefore removes nothing (fail-closed; unreachable in production).
 public func uninstallClaudioHooks(
     settingsFile: URL = ClaudioPaths.claudeSettingsFile,
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
@@ -215,10 +222,9 @@ private func performInstall(
     }
 }
 
-/// `claudioBinaryPath` is intentionally unused below — see the doc comment on
-/// ``uninstallClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)`` for why it is kept on
-/// the public signature (symmetry with `install`) without driving the actual match, which
-/// is now structural (``matchedClaudioEvent(inHookCommand:)``) rather than path-exact.
+/// `claudioBinaryPath` drives the removal match only through the `.claudio` root it names —
+/// see ``uninstallClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``. A path naming no
+/// root is fail-closed: nothing matches, nothing is written, `.notInstalled`.
 private func performUninstall(
     settingsFile: URL, claudioBinaryPath: String
 ) -> Result<UninstallOutcome, SettingsUpdateError> {
@@ -233,11 +239,18 @@ private func performUninstall(
         if let shapeError = validateHooksShape(originalRoot) {
             return .failure(shapeError)
         }
+        // Deliberately AFTER load+validate: a corrupt `settings.json` must still surface its
+        // error rather than be masked as "nothing installed" just because the caller handed us
+        // a binary path that names no root.
+        guard let claudioRoot = claudioNamespaceRoot(forBinaryPath: claudioBinaryPath) else {
+            return .success(.notInstalled)
+        }
 
         var root = originalRoot
         var totalRemoved = 0
         for event in Event.allCases {
-            let (nextRoot, removed) = removeHookEntries(root: root, event: event)
+            let (nextRoot, removed) = removeHookEntries(
+                root: root, event: event, claudioRoot: claudioRoot)
             root = nextRoot
             totalRemoved += removed
         }
@@ -342,11 +355,12 @@ private func groupContainsCommand(_ group: Any, command: String) -> Bool {
 }
 
 /// Removes every hook entry under `event`'s array whose `"command"` is structurally
-/// claudio's own — see ``matchedClaudioEvent(inHookCommand:)``. Matches on `command` alone
-/// (ignoring `"type"`, mirroring the pre-T13 exact-match behavior this replaces), so a
-/// malformed leftover missing `"type": "command"` still gets swept.
+/// claudio's own, inside `claudioRoot` — see
+/// ``matchedClaudioEvent(inHookCommand:claudioRoot:)``. Matches on `command` alone (ignoring
+/// `"type"`, mirroring the pre-T13 exact-match behavior this replaces), so a malformed
+/// leftover missing `"type": "command"` still gets swept.
 private func removeHookEntries(
-    root: [String: Any], event: Event
+    root: [String: Any], event: Event, claudioRoot: String
 ) -> (root: [String: Any], removed: Int) {
     var root = root
     guard var hooksSection = root[hooksKey] as? [String: Any],
@@ -370,7 +384,7 @@ private func removeHookEntries(
         let filteredInner = innerHooks.filter { entry in
             guard let entryDict = entry as? [String: Any],
                 let command = entryDict[hookCommandKey] as? String,
-                matchedClaudioEvent(inHookCommand: command) == event
+                matchedClaudioEvent(inHookCommand: command, claudioRoot: claudioRoot) == event
             else { return true }
             removed += 1
             return false

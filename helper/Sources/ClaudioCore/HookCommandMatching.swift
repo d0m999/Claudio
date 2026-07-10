@@ -14,110 +14,214 @@ import Foundation
 // is no second historical form to enumerate — claudio has never written any command shape
 // other than the canonical one — so a literal registry of past strings would either be empty
 // (pointless) or fabricated purely to make a test look thorough. Instead,
-// `matchedClaudioEvent(inHookCommand:)` recognizes any command that has claudio's shape,
-// which covers the one form we have written AND any future relocation, without needing to
-// know its exact path in advance.
+// `matchedClaudioEvent(inHookCommand:claudioRoot:)` recognizes any command that has claudio's
+// shape *inside claudio's own root*, which covers the one form we have written AND any future
+// relocation, without needing to know its exact path in advance.
 //
-// Lives in its own file rather than inside `SettingsInstaller.swift` for the same reason
-// `VersionCompatibility.swift` does: it is a self-contained predicate with its own
-// adversarial argument, and folding it in pushed that file past the project's file-size
-// convention.
+// This file also owns `shellQuotedPath(_:)` — the writer-side inverse of the unquoting the
+// matcher performs. They are a round-trip pair (pinned by a test), which is the only reason
+// the matcher can be sure what shapes it must accept.
 
-/// Whether `command` is a hook command claudio itself could plausibly have written, for any
-/// of the four core events — returns the matched ``Event``, or `nil` if it doesn't look like
-/// one of ours. This is the single source of truth `removeHookEntries` (uninstall's removal
-/// sweep) keys off; `install`/``detectHookInstallStatus(settingsFile:claudioBinaryPath:)``
-/// deliberately do NOT use this — they compare against the one exact, current
-/// ``claudioHookCommand(for:claudioBinaryPath:)`` string, because onboarding/self-heal need
-/// to know "does *today's* exact hook exist", not "does something claudio-shaped exist".
+// MARK: - Writer-side quoting
+
+/// Characters that change how `/bin/sh -c` parses a bare word, and therefore force the path
+/// to be quoted before it is interpolated into a hook command.
+///
+/// Deliberately **minimal**. Every path that works unquoted right now must keep producing a
+/// **byte-identical** command string, because `install`'s idempotency check and
+/// ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` both compare that string for
+/// exact equality against what is already in `settings.json` — widening this set would make an
+/// upgraded claudio fail to recognize its own previously-installed hook and append a duplicate.
+/// So membership is decided by one question only: *does `/bin/sh -c` mangle a bare word
+/// containing this character?* Each entry below was checked against the real `/bin/sh`
+/// (bash 3.2 in POSIX mode) on 2026-07-10, as was each deliberate omission:
+///
+/// - **Omitted, verified literal mid-word**: `#` and `!` (comment / history expansion only
+///   apply at word start, and history expansion is off non-interactively), `~` (tilde
+///   expansion only at word start, and every path here begins with `/`), `]`, `=`, `%`, `+`,
+///   `,`, and every non-ASCII scalar — so `/Users/张三/.claudio/bin/claudio` stays unquoted.
+/// - **Included, verified to mangle**: whitespace and the classic metacharacters, plus:
+///   - `{` `}` — brace expansion fires on `a{c,d}e` even in POSIX mode. Verified:
+///     `sh -c '/tmp/a{c,d}e/prog'` execs `/tmp/ace/prog`, so the hook **silently never runs**.
+///   - `*` `?` `[` — globbing does not merely "risk" the wrong path, it *takes* it. Verified:
+///     with siblings `a!b` and `a*b` both present, `sh -c '/tmp/a*b/prog'` executed
+///     `/tmp/a!b/prog` — **a different binary**. Quoting these is why they are here even
+///     though a lucky unquoted path (no sibling matches, so the glob yields itself) would have
+///     appeared to work, and will therefore pick up a duplicate hook entry on upgrade. Running
+///     the wrong program is the worse failure; the duplicate is recoverable with
+///     `claudio uninstall && claudio install` (the structural matcher sweeps both forms).
+///
+/// Net: quoting only ever engages for a path whose hook was already broken (space, `$`, `{`)
+/// or already wrong (`*`), never for one that was silently fine.
+private let shellUnsafeCharacters: Set<Character> = [
+    " ", "\t", "\n", "\r",
+    "\"", "'", "\\", "`", "$", "&", ";", "|", "<", ">", "(", ")", "*", "?", "[", "{", "}",
+]
+
+/// Renders `path` as a single `/bin/sh` word: returned unchanged when it is already
+/// shell-word-safe, otherwise wrapped in POSIX single quotes with any embedded `'` escaped as
+/// `'\''` (the standard idiom — close the quote, emit an escaped literal quote, reopen).
+///
+/// `ClaudioPaths`'s whole design (决议 4) is to keep this a no-op: `~/.claudio/` was chosen
+/// over `Application Support` precisely because it has no space. But `~` expands to
+/// `/Users/<user>`, and **that** segment is outside claudio's control — a home directory
+/// carrying a space (AD/network accounts, `dscl`-created accounts) made
+/// `claudioHookCommand(for:claudioBinaryPath:)` emit a command the shell splits into pieces:
+/// the hook never fired, and (before this) `uninstall` could not even recognize it to clean
+/// it up. Quoting is what makes the T4 concern structurally impossible rather than merely
+/// asserted about the happy path.
+public func shellQuotedPath(_ path: String) -> String {
+    guard path.isEmpty || path.contains(where: { shellUnsafeCharacters.contains($0) }) else {
+        return path
+    }
+    return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+}
+
+// MARK: - Matcher
+
+/// Whether `command` is a hook command claudio itself could plausibly have written **from the
+/// `claudioRoot` namespace**, for any of the four core events — returns the matched ``Event``,
+/// or `nil` if it doesn't look like one of ours. This is the single source of truth
+/// `removeHookEntries` (uninstall's removal sweep) keys off;
+/// `install`/``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` deliberately do NOT
+/// use this — they compare against the one exact, current
+/// ``claudioHookCommand(for:claudioBinaryPath:)`` string, because onboarding/self-heal need to
+/// know "does *today's* exact hook exist", not "does something claudio-shaped exist".
+///
+/// `claudioRoot` is claudio's own `.claudio` directory (``ClaudioPaths/root``), passed in
+/// rather than read from the environment so this stays a pure predicate. `uninstall` derives
+/// it from the binary path it was handed, via ``claudioNamespaceRoot(forBinaryPath:)``.
 ///
 /// **Why this can never misfire on a third-party hook** (adversarial argument, not just an
 /// assertion — every clause below is pinned by a case in `HookCommandMatchingSuite.swift`):
-/// 1. **Exact argv shape**: `command`, tokenized by ``tokenizeSimpleShellCommand(_:)``, must
-///    be EXACTLY 3 tokens — `<path> play <event>`. Two tokens, four tokens, or anything
-///    whose shell metacharacters would change the token count (pipes, `&&`, redirection) is
-///    rejected outright. A third-party tool's hook would need to coincidentally have this
-///    *exact* 3-token `X play Y` shape just to reach the next two checks.
-/// 2. **`<event>` must be one of the 4 real ``Event/cliName`` values** (`Event(cliName:)`) —
-///    `mytool play deploy` fails here even if `mytool` were somehow named `claudio`.
-/// 3. **`basename(<path>)` must be exactly `"claudio"` AND `<path>` must be absolute,
-///    traversal-free, and carry a path component exactly equal to `".claudio"`**
-///    (``isClaudioNamespacedBinaryPath(_:)``) — claudio's own dotfolder namespace
-///    (``ClaudioPaths/root``, ENGINEERING.md 决议 4). `/usr/local/bin/claudio play stop` (a
-///    look-alike third-party tool) fails: no `.claudio` path component. `~/bin/claudio play
-///    stop` (a user's own unrelated script, coincidentally named `claudio`) fails the same
-///    way.
+/// 1. **Exact trailing argv**: `command` must end with the literal ` play <event>`, where
+///    `<event>` is one of the 4 real ``Event/cliName`` values. `mytool play deploy` fails; so
+///    does anything with a trailing operator or extra argument (` play stop --verbose`,
+///    ` play stop && rm -rf ~`), because that text is no longer the suffix.
+/// 2. **Everything before that suffix must be a single shell word** (unquoted, or POSIX
+///    single-quoted) — see ``shellQuotedPath(_:)``, whose escaping this reverses.
+/// 3. **That word must be `<claudioRoot>/…/claudio`**: literally prefixed by claudio's own
+///    root, free of `..`, with a basename of exactly `claudio`. It is *not* enough for some
+///    component to be named `.claudio` — `/tmp/.claudio/bin/claudio play stop` and
+///    `/Users/someone-else/.claudio/bin/claudio play stop` both fail, because neither is under
+///    *this* user's root. That is the difference between "looks like claudio's namespace" and
+///    "is claudio's namespace", and `uninstall` is the one destructive path in this codebase
+///    that (unlike `install`) takes **no backup** before rewriting `settings.json`.
 ///
-/// Combined: a false positive requires a third-party tool that is ITSELF named exactly
-/// `claudio`, ITSELF installed under a directory literally named `.claudio`, AND ITSELF
-/// implements a `play <one-of-our-4-event-names>` subcommand taking no other arguments — not
-/// a realistic accident, and not narrower than necessary either (it still accepts any
-/// subdirectory under `.claudio/`, which is exactly what survives a relocation from `bin/`
-/// to some other future layout).
+/// Combined, a false positive requires an entry whose command is literally
+/// `<this user's ~/.claudio>/<anything>/claudio play <one of our 4 events>` — i.e. claudio's
+/// own binary, under claudio's own directory. Sweeping that is the job, not a misfire. The
+/// match stays deliberately loose about *which subdirectory* under the root (`bin/`, a future
+/// `libexec/`, the root itself), which is exactly what survives a relocation.
+///
+/// **The `..` rejection is load-bearing, not hygiene.** `<root>/../claudio` is literally
+/// prefixed by the root yet lexically resolves outside it. Rejecting `..` outright rather than
+/// normalizing and re-checking is the conservative direction, and matches the existing
+/// precedent in ``safePackFileURL(_:in:)``: claudio has never written a `..` into a hook
+/// command, so a residue containing one is definitionally not ours, and refusing to sweep it
+/// merely leaves a harmless leftover instead of risking someone else's hook.
 ///
 /// **What this deliberately does NOT recognize** (documented limitations, not silent gaps):
-/// - **No shell variable expansion** (`$HOME`, `~`): ``claudioHookCommand(for:claudioBinaryPath:)``
-///   always writes claudio's fully-resolved absolute path — never a `$HOME`-relative string
-///   — so there is no real historical form using a variable to recognize. A command
-///   literally containing the four characters `$HOME` is not an absolute path (does not
-///   start with `/`) and simply falls through as "not ours" — never misidentified, just not
-///   specially handled, because this string-level check never invokes a shell to expand it.
-/// - **No quote-stripping**: `~/.claudio/`'s entire reason for existing (决议 4) is having no
-///   space in its path, so claudio's own writer has never needed to quote it — there is no
-///   real historical quoted form (`"$HOME/.claudio/bin/claudio" play stop`) to recognize.
-///   Handling it would only widen the match surface for a form we never actually produced,
-///   so a quoted command is left unmatched (pinned by a test) until a real future version
-///   actually starts quoting.
-/// - **No trailing shell operators** (`>`, `|`, `&&`): these change the token count away from
-///   exactly 3, so they structurally fail to match — the conservative direction on purpose:
-///   a real residue we fail to sweep is merely unswept (harmless leftover), whereas a false
-///   match risks deleting someone else's hook entirely.
-public func matchedClaudioEvent(inHookCommand command: String) -> Event? {
-    let tokens = tokenizeSimpleShellCommand(command)
-    guard tokens.count == 3, tokens[1] == "play" else { return nil }
-    guard let event = Event(cliName: tokens[2]) else { return nil }
-    guard isClaudioNamespacedBinaryPath(tokens[0]) else { return nil }
-    return event
+/// - **No shell variable expansion** (`$HOME`, `~`): claudio always writes a fully-resolved
+///   absolute path, so there is no real historical form using a variable. `$HOME/.claudio/…`
+///   is not prefixed by the resolved root and simply falls through as "not ours".
+/// - **No double quotes, no backslash escapes other than `\'`**: ``shellQuotedPath(_:)`` emits
+///   neither, so accepting them would only widen the destructive match surface for a form we
+///   have never produced.
+/// - **No internal-whitespace collapsing**: `<path>␣␣play␣␣stop` does not match. Tolerating
+///   repeated inner spaces is *unrepresentable* alongside supporting a real path that contains
+///   a space — the two are the same character. Leading/trailing whitespace is still trimmed,
+///   since that cannot be part of a path claudio wrote.
+public func matchedClaudioEvent(inHookCommand command: String, claudioRoot: String) -> Event? {
+    let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return nil }
+
+    for event in Event.allCases {
+        let suffix = " play \(event.cliName)"
+        guard trimmed.hasSuffix(suffix) else { continue }
+        // No two `cliName`s can both suffix-match (none is a ` play `-preceded suffix of
+        // another), so the first hit is the only candidate — a bad path here is a rejection,
+        // not a reason to keep scanning.
+        let rawWord = String(trimmed.dropLast(suffix.count))
+        guard let path = shellWordContents(rawWord),
+            isClaudioBinaryPath(path, claudioRoot: claudioRoot)
+        else { return nil }
+        return event
+    }
+    return nil
 }
 
-/// Splits `command` on runs of ASCII space/tab. Deliberately NOT a full shell grammar — no
-/// quoting, no variable expansion, no operator awareness; see
-/// ``matchedClaudioEvent(inHookCommand:)``'s doc comment for exactly why each of those is
-/// out of scope. Collapsing repeated/extra whitespace is a purely cosmetic tolerance
-/// `claudioHookCommand` itself never produces, but accepting it costs nothing and risks
-/// nothing (it cannot widen a false match — the argv-count and per-token checks downstream
-/// are unaffected by how much whitespace separated the tokens).
-private func tokenizeSimpleShellCommand(_ command: String) -> [String] {
-    command.split(whereSeparator: { $0 == " " || $0 == "\t" }).map(String.init)
+/// The `.claudio` namespace root that `binaryPath` lives in — the prefix up to and including
+/// its first `.claudio` component (`/Users/x/.claudio/bin/claudio` → `/Users/x/.claudio`), or
+/// `nil` when `binaryPath` is relative, carries a `..`, or has no `.claudio` component at all.
+///
+/// `uninstall` calls this on the `claudioBinaryPath` it was handed rather than reading
+/// ``ClaudioPaths/root`` directly, so the removal sweep is anchored to the *same* installation
+/// the caller is talking about (and so every test can point it at a fixture root). A `nil`
+/// return is fail-closed: `uninstall` then matches nothing rather than falling back to a
+/// wider rule. It is unreachable in production, where the path defaults to
+/// ``ClaudioPaths/claudioBinary``.
+public func claudioNamespaceRoot(forBinaryPath binaryPath: String) -> String? {
+    guard binaryPath.hasPrefix("/") else { return nil }
+    let components = binaryPath.split(separator: "/", omittingEmptySubsequences: true)
+        .map(String.init)
+    guard !components.contains(".."), let index = components.firstIndex(of: ".claudio")
+    else { return nil }
+    return "/" + components[...index].joined(separator: "/")
 }
 
-/// Whether `path` is claudio's own binary-namespace shape (``ClaudioPaths/root``): absolute,
-/// free of `..` traversal, with a basename of exactly `"claudio"` and some path component
-/// exactly equal to `".claudio"` — independent of which subdirectory under `.claudio/` a
-/// given release places the binary in (today: `.claudio/bin/`, see
-/// ``ClaudioPaths/binDirectory``).
+/// Reverses ``shellQuotedPath(_:)``: decodes a single `/bin/sh` word into the literal string
+/// the shell would pass as `argv[0]`, or `nil` when the word is not a shape claudio's writer
+/// can emit (an unterminated quote, or a backslash escaping anything but `'`).
 ///
-/// **The `..` rejection is load-bearing, not hygiene.** A component scan alone asks only
-/// "does the string contain a `.claudio` component", which is NOT the same question as "does
-/// this path resolve inside `.claudio/`" the moment a `..` can cancel that component out:
-/// `/Users/x/.claudio/../claudio` lexically resolves to `/Users/x/claudio`, comfortably
-/// outside the namespace, yet still literally contains a `.claudio` component. Accepting it
-/// would hand `uninstall` — the single destructive path in this file, and the one that
-/// (unlike `install`) takes **no backup** before rewriting `settings.json` — a hook entry
-/// that is provably not ours. Rejecting `..` outright, rather than lexically normalizing and
-/// re-checking, is the conservative direction and matches the existing precedent in
-/// ``safePackFileURL(_:in:)``: claudio has never written a `..` into a hook command, so a
-/// residue containing one is definitionally not one of ours, and refusing to sweep it merely
-/// leaves a harmless leftover instead of risking someone else's hook.
-///
-/// A relative path is rejected outright for the same reason — every path claudio itself has
-/// ever written here is absolute (``ClaudioPaths`` is anchored at
-/// `FileManager.default.homeDirectoryForCurrentUser`), so a relative string is definitionally
-/// not one we wrote.
-private func isClaudioNamespacedBinaryPath(_ path: String) -> Bool {
-    guard path.hasPrefix("/") else { return false }
-    let components = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-    guard !components.contains("..") else { return false }
-    guard components.last == "claudio" else { return false }
-    return components.contains(".claudio")
+/// Unquoted whitespace is *kept*, not rejected: a legacy entry written before
+/// ``shellQuotedPath(_:)`` existed embeds a space-carrying path bare
+/// (`/Users/John Smith/.claudio/bin/claudio play stop`). That command never worked — the shell
+/// split it — but it is unambiguously ours, and `uninstall` should still sweep it. Nothing is
+/// widened by allowing it: the decoded word must still be literally prefixed by claudio's own
+/// root and end in `/claudio`, so `rm -rf / ; <root>/bin/claudio play stop` decodes to a word
+/// starting with `rm` and is rejected.
+private func shellWordContents(_ rawWord: String) -> String? {
+    var contents = ""
+    var inSingleQuotes = false
+    var index = rawWord.startIndex
+
+    while index < rawWord.endIndex {
+        let character = rawWord[index]
+        if character == "'" {
+            inSingleQuotes.toggle()
+            index = rawWord.index(after: index)
+            continue
+        }
+        if character == "\\" && !inSingleQuotes {
+            // The only backslash `shellQuotedPath` ever emits is the `'\''` idiom's.
+            let next = rawWord.index(after: index)
+            guard next < rawWord.endIndex, rawWord[next] == "'" else { return nil }
+            contents.append("'")
+            index = rawWord.index(after: next)
+            continue
+        }
+        contents.append(character)
+        index = rawWord.index(after: index)
+    }
+
+    return inSingleQuotes ? nil : contents
+}
+
+/// Whether `path` is claudio's own binary inside `claudioRoot`: literally prefixed by
+/// `claudioRoot/`, free of `..` traversal, with a basename of exactly `claudio` — independent
+/// of which subdirectory under the root a given release places the binary in (today:
+/// `bin/`, see ``ClaudioPaths/binDirectory``).
+private func isClaudioBinaryPath(_ path: String, claudioRoot: String) -> Bool {
+    guard claudioRoot.hasPrefix("/"), !claudioRoot.hasSuffix("/"),
+        !claudioRoot.split(separator: "/").contains("..")
+    else { return false }
+    // The trailing slash matters: without it, a sibling `~/.claudio-backup/…/claudio` would
+    // pass as "inside the root".
+    guard path.hasPrefix(claudioRoot + "/") else { return false }
+
+    let relative = path.dropFirst(claudioRoot.count + 1)
+    let components = relative.split(separator: "/", omittingEmptySubsequences: true)
+    guard !components.contains(".."), components.last == "claudio" else { return false }
+    return true
 }

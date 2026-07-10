@@ -359,6 +359,8 @@ func runSettingsInstallerSuites() {
                     { "hooks": [ { "type": "command", "command": "/Users/tester/.claudio/bin/mytool play stop" } ] },
                     { "hooks": [ { "type": "command", "command": "\#(testClaudioBinaryPath) play stop --verbose" } ] },
                     { "hooks": [ { "type": "command", "command": "/usr/local/bin/claudio play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "/tmp/.claudio/bin/claudio play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "/Users/someone-else/.claudio/bin/claudio play stop" } ] },
                     { "hooks": [ { "type": "command", "command": "\#(testClaudioBinaryPath) play deploy" } ] }
                   ]
                 } }
@@ -381,10 +383,109 @@ func runSettingsInstallerSuites() {
                     "/Users/tester/.claudio/bin/mytool play stop",
                     "\(testClaudioBinaryPath) play stop --verbose",
                     "/usr/local/bin/claudio play stop",
+                    // A `.claudio` directory that is not THIS installation's root. Sweeping
+                    // these would mean `uninstall` — the one destructive path here, and the
+                    // only one that takes no backup — deleting an entry it cannot prove is
+                    // ours, on the strength of a directory *name*.
+                    "/tmp/.claudio/bin/claudio play stop",
+                    "/Users/someone-else/.claudio/bin/claudio play stop",
                     "\(testClaudioBinaryPath) play deploy",
                 ],
                 "every look-alike and the unrelated third-party hook must survive untouched,"
                     + " got \(survivingCommands)")
+        }
+    }
+
+    suite(
+        "uninstallClaudioHooks: a home directory with a space — sweeps BOTH today's quoted"
+            + " entry and the legacy bare one a pre-quoting claudio left behind, and still"
+            + " spares an identically-shaped entry under a different root"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let spacedBinary = "/Users/John Smith/.claudio/bin/claudio"
+
+            // What today's `install` writes (quoted, actually runnable under `/bin/sh -c`)...
+            let quoted = claudioHookCommand(for: .stop, claudioBinaryPath: spacedBinary)
+            expect(
+                quoted == "'/Users/John Smith/.claudio/bin/claudio' play stop",
+                "premise: install must quote a space-carrying path, got \(quoted)")
+            // ...versus what a pre-quoting claudio wrote: never runnable (the shell split it
+            // at the space), but unambiguously ours, so uninstall must still remove it.
+            let legacyBare = "/Users/John Smith/.claudio/bin/claudio play notification"
+
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [
+                    { "hooks": [ { "type": "command", "command": "\#(quoted)" } ] }
+                  ],
+                  "Notification": [
+                    { "hooks": [ { "type": "command", "command": "\#(legacyBare)" } ] },
+                    { "hooks": [ { "type": "command", "command": "/Users/Jane Doe/.claudio/bin/claudio play notification" } ] }
+                  ]
+                } }
+                """#, to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: spacedBinary, lockFile: lockFile)
+            expect(
+                result == .success(.uninstalled(count: 2)),
+                "expected the quoted entry + the legacy bare one, got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let surviving = Set((hooksArray(json, event: "Notification") ?? []).flatMap {
+                commands(inGroup: $0)
+            })
+            expect(
+                surviving == ["/Users/Jane Doe/.claudio/bin/claudio play notification"],
+                "another user's identically-shaped hook must survive, got \(surviving)")
+        }
+    }
+
+    suite(
+        "uninstallClaudioHooks: a claudioBinaryPath naming no .claudio root removes nothing and"
+            + " never writes (fail-closed; unreachable in production, where the path defaults"
+            + " to ClaudioPaths.claudioBinary)"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"""
+                { "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "/Users/tester/.claudio/bin/claudio play stop" } ] } ] } }
+                """#
+            writeFixture(original, to: settingsFile)
+            let before = try? String(contentsOf: settingsFile, encoding: .utf8)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: "/usr/local/bin/claudio",
+                lockFile: lockFile)
+            expect(
+                result == .success(.notInstalled),
+                "a rootless binary path anchors nothing, so nothing matches, got \(result)")
+            expect(
+                (try? String(contentsOf: settingsFile, encoding: .utf8)) == before,
+                "the file must be left byte-identical when nothing matched")
+        }
+
+        // ...but a rootless path must not MASK a real error: load + shape validation still run
+        // first, so a corrupt settings.json reports the corruption instead of "nothing
+        // installed". (The guard's position in performUninstall is what this pins.)
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture("{ not json at all", to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: "/usr/local/bin/claudio",
+                lockFile: lockFile)
+            var surfacedParseFailure = false
+            if case .failure(.parseFailure) = result { surfacedParseFailure = true }
+            expect(
+                surfacedParseFailure,
+                "a corrupt settings.json must surface .parseFailure even when the binary path"
+                    + " names no root, got \(result)")
         }
     }
 
