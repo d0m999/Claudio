@@ -168,6 +168,14 @@ public struct SystemCommandRunner: CommandRunning {
         process.standardError = FileHandle.nullDevice
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
+        // The parent's read end is ours to close, on every exit path — `.completed`, `.timedOut`,
+        // and the `catch` below alike. A `Pipe`'s `FileHandle`s do NOT close their descriptor when
+        // the `Pipe` goes out of scope here (measured: one fd leaked per call, two per failed
+        // launch), so without this each `run()` permanently costs a descriptor. `claudio doctor` is
+        // one-shot and the OS reclaims them at exit, but this type is slated for in-process reuse
+        // by the menu-bar app, where an unbounded leak would eventually exhaust the process's
+        // descriptor table and fail every subsequent open — not just the next spawn.
+        defer { try? outputPipe.fileHandleForReading.close() }
 
         // Installed before `run()` so no exit can be missed. Kept installed (never nil-ed) on
         // every path: `Process` reaps the child through its SIGCHLD-driven waiter only while a
@@ -180,9 +188,12 @@ public struct SystemCommandRunner: CommandRunning {
         do {
             try process.run()
         } catch {
-            // No child was ever created, so nothing holds either pipe end but us; `outputPipe`
-            // is released with this frame and its `FileHandle`s close on dealloc. Nothing to
-            // unwind — there is no reader thread anymore.
+            // No child was ever created, so BOTH ends are still ours. There is no reader thread to
+            // unwind anymore (the drain below runs on this thread), but the descriptors do not free
+            // themselves: the `defer` above closes the read end, and the write end — which a
+            // successful `run()` would have closed on our behalf when it handed the child its copy
+            // — has to be closed here, or a failed launch costs two descriptors instead of zero.
+            try? outputPipe.fileHandleForWriting.close()
             return .launchFailed
         }
 

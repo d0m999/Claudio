@@ -403,13 +403,16 @@ func runVersionCompatibilitySuites() {
 
     suite("SystemCommandRunner.run: a failed launch leaks neither the stdout reader nor its pipe")
     {
-        // `.launchFailed` is the branch that fires whenever `claude` isn't on PATH — the most
-        // likely real-world one. A successful `run()` closes the parent's copy of the pipe's
-        // write end, which is what EOFs the background reader; a throwing `run()` never does,
-        // so before this was fixed each failed launch wedged one reader thread on
-        // `readDataToEndOfFile()` forever and pinned both pipe fds with it. `claudio doctor`
-        // is one-shot so the OS reclaimed it at exit, but the menu-bar app is slated to reuse
-        // this API in-process, where it would grow without bound.
+        // `.launchFailed` fires only when the *executable itself* is missing. It is NOT the branch
+        // that fires when `claude` isn't on PATH: `checkClaudeCodeVersion` spawns `/usr/bin/env`,
+        // which exists, so a missing `claude` makes `env` exit 127 and lands in `.completed`. (An
+        // earlier comment here claimed otherwise; the fd suites below cover both branches for that
+        // reason.) A successful `run()` closes the parent's copy of the pipe's write end, which is
+        // what EOFs the background reader; a throwing `run()` never does, so before this was fixed
+        // each failed launch wedged one reader thread on `readDataToEndOfFile()` forever and pinned
+        // both pipe fds with it. `claudio doctor` is one-shot so the OS reclaimed it at exit, but
+        // the menu-bar app is slated to reuse this API in-process, where it would grow without
+        // bound.
         //
         // Measured via the process's own mach thread count. GCD may legitimately keep a few
         // worker threads warm, so this asserts "no growth proportional to the call count"
@@ -436,6 +439,90 @@ func runVersionCompatibilitySuites() {
             "\(iterations) failed launches must not each strand a reader thread:"
                 + " thread count went \(before) → \(after) (delta \(after - before))")
     }
+
+    // MARK: - fd leaks. The thread-count suites above are blind to these: a `Pipe`'s `FileHandle`s
+    // do not close their descriptor when the `Pipe` leaves scope, so every `run()` used to cost one
+    // descriptor (two on a failed launch, where nothing closed the write end either) while the
+    // thread count stayed flat and every assertion on `run`'s return value stayed green. A one-shot
+    // `claudio doctor` never noticed; the menu-bar app that is slated to reuse this API in-process
+    // would exhaust its descriptor table and then fail every open(2), not just the next spawn.
+    //
+    // Slack of 5 against 40 calls asserts "no growth proportional to the call count" rather than an
+    // exact figure, matching the thread suites: Foundation may legitimately hold a descriptor or
+    // two of its own. Before the fix the delta was exactly `iterations` (2 × `iterations` for the
+    // failed-launch branch).
+
+    suite("SystemCommandRunner.run: a completed run leaks no file descriptor") {
+        let iterations = 40
+        let runner = SystemCommandRunner()
+        _ = runner.run(executablePath: "/bin/echo", arguments: ["warmup"], timeout: 2.0)
+        let before = openFileDescriptorCount()
+        for _ in 0..<iterations {
+            _ = runner.run(executablePath: "/bin/echo", arguments: ["hi"], timeout: 2.0)
+        }
+        let after = openFileDescriptorCount()
+
+        expect(
+            before > 0,
+            "premise: openFileDescriptorCount() must actually work, got before=\(before)")
+        expect(
+            after - before < 5,
+            "\(iterations) successful runs must not each leak the pipe's read end:"
+                + " fd count went \(before) → \(after) (delta \(after - before))")
+    }
+
+    suite("SystemCommandRunner.run: a failed launch leaks neither end of the pipe") {
+        let iterations = 40
+        let runner = SystemCommandRunner()
+        _ = runner.run(executablePath: "/no/such/executable-claudio-test", arguments: [], timeout: 2.0)
+        let before = openFileDescriptorCount()
+        for _ in 0..<iterations {
+            _ = runner.run(
+                executablePath: "/no/such/executable-claudio-test", arguments: [], timeout: 2.0)
+        }
+        let after = openFileDescriptorCount()
+
+        expect(
+            before > 0,
+            "premise: openFileDescriptorCount() must actually work, got before=\(before)")
+        expect(
+            after - before < 5,
+            "\(iterations) failed launches must leak neither the read nor the write end:"
+                + " fd count went \(before) → \(after) (delta \(after - before))")
+    }
+
+    suite("SystemCommandRunner.run: a timed-out run leaks no file descriptor") {
+        let iterations = 20
+        let runner = SystemCommandRunner()
+        let before = openFileDescriptorCount()
+        for _ in 0..<iterations {
+            _ = runner.run(
+                executablePath: "/bin/sh", arguments: ["-c", "sleep 2 & echo hi"], timeout: 0.05)
+        }
+        let after = openFileDescriptorCount()
+
+        expect(
+            before > 0,
+            "premise: openFileDescriptorCount() must actually work, got before=\(before)")
+        expect(
+            after - before < 5,
+            "\(iterations) grandchild-holds-stdout timeouts must not each leak the read end:"
+                + " fd count went \(before) → \(after) (delta \(after - before))")
+    }
+}
+
+/// Number of descriptors currently open in this process, by probing the fd table directly. Used
+/// only by the leak regressions above — a leaked pipe end is invisible to any assertion on `run`'s
+/// return value, exactly like the stranded reader thread `liveThreadCount()` exists to catch, so
+/// it too has to be observed directly. Probing with `fcntl(F_GETFD)` rather than listing `/dev/fd`
+/// avoids opening a descriptor of its own to answer the question.
+@MainActor
+private func openFileDescriptorCount() -> Int {
+    var count = 0
+    for descriptor in Int32(0)..<Int32(1024) where fcntl(descriptor, F_GETFD) != -1 {
+        count += 1
+    }
+    return count
 }
 
 /// Number of threads currently live in this process, via the mach task API. Used only by the
