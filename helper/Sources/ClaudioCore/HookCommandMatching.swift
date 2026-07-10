@@ -58,6 +58,15 @@ private let shellUnsafeCharacters: Set<Character> = [
     "\"", "'", "\\", "`", "$", "&", ";", "|", "<", ">", "(", ")", "*", "?", "[", "{", "}",
 ]
 
+/// ``shellUnsafeCharacters`` flattened to Unicode scalars, so the matcher can scan a path's
+/// below-root portion at *scalar* granularity. A `Character`-level membership test would miss a
+/// `\r\n` pair: Swift fuses CR+LF into a single extended grapheme cluster that is present in the
+/// set under neither bare `\r` nor bare `\n`, yet `/bin/sh` still reads that byte pair as a line
+/// break that splits the command. Scanning scalars closes that gap — and is a superset check, so
+/// every other unsafe character is still caught exactly as before.
+private let shellUnsafeScalars: Set<Unicode.Scalar> = Set(
+    shellUnsafeCharacters.flatMap { $0.unicodeScalars })
+
 /// Renders `path` as a single `/bin/sh` word: returned unchanged when it is already
 /// shell-word-safe, otherwise wrapped in POSIX single quotes with any embedded `'` escaped as
 /// `'\''` (the standard idiom — close the quote, emit an escaped literal quote, reopen).
@@ -103,8 +112,9 @@ public func shellQuotedPath(_ path: String) -> String {
 ///    text (a legacy entry whose path carries `'` or `\`), the raw text is tried too — see
 ///    ``shellWordContents(_:)``. Clause 3, not this one, is what makes the match safe.
 /// 3. **That word must be `<claudioRoot>/…/claudio`**: literally prefixed by claudio's own
-///    root, free of `..`, with a basename of exactly `claudio`. It is *not* enough for some
-///    component to be named `.claudio` — `/tmp/.claudio/bin/claudio play stop` and
+///    root, free of `..`, with a basename of exactly `claudio`, and — below that root — free of
+///    any shell metacharacter (see ``isClaudioBinaryPath(_:claudioRoot:)``). It is *not* enough
+///    for some component to be named `.claudio` — `/tmp/.claudio/bin/claudio play stop` and
 ///    `/Users/someone-else/.claudio/bin/claudio play stop` both fail, because neither is under
 ///    *this* user's root. That is the difference between "looks like claudio's namespace" and
 ///    "is claudio's namespace", and `uninstall` is the one destructive path in this codebase
@@ -124,14 +134,22 @@ public func shellQuotedPath(_ path: String) -> String {
 /// merely leaves a harmless leftover instead of risking someone else's hook.
 ///
 /// **What this deliberately does NOT recognize** (documented limitations, not silent gaps):
+/// - **No shell metacharacter below the root**: claudio's own subtree is always plain segments
+///   (`bin/claudio`, a future `libexec/claudio`). A quote, backslash, `$`, backtick, whitespace,
+///   or newline *below* the root is rejected outright, because on the raw-text candidate such a
+///   character can hide a `..` traversal or a command substitution that resolves outside the root
+///   (`…/.claudio/'..'/bin/claudio`, `…/.claudio/$(echo ..)/claudio`), or — a newline — split the
+///   command so `/bin/sh` execs a different `argv[0]` entirely. Metacharacters in the *home*
+///   segment are unaffected: that segment must match the root literally, so a legacy bare entry
+///   under a `$`- or space-carrying home still sweeps.
 /// - **No shell variable expansion** (`$HOME`, `~`): claudio always writes a fully-resolved
 ///   absolute path, so there is no real historical form using a variable. `$HOME/.claudio/…`
 ///   is not prefixed by the resolved root and simply falls through as "not ours".
 /// - **No double quotes, and no backslash escape other than `\'`, are ever *decoded***:
 ///   ``shellQuotedPath(_:)`` emits neither, so interpreting them would only widen the
 ///   destructive match surface for a form we have never produced. Such a word is still matched
-///   *literally* if it is prefixed by the root (that is the legacy fallback), never by giving
-///   the escape its shell meaning.
+///   *literally* if it is prefixed by the root **and** carries no metacharacter below it (the
+///   legacy fallback), never by giving the escape its shell meaning.
 /// - **No internal-whitespace collapsing**: `<path>␣␣play␣␣stop` does not match. Tolerating
 ///   repeated inner spaces is *unrepresentable* alongside supporting a real path that contains
 ///   a space — the two are the same character. Leading/trailing whitespace is still trimmed,
@@ -151,9 +169,12 @@ public func matchedClaudioEvent(inHookCommand command: String, claudioRoot: Stri
         // what a pre-quoting claudio literally wrote. A legacy path carrying `'` or `\` either
         // fails to decode (unbalanced quote) *or* decodes to the wrong string (`/Users/o'b'rien`
         // → `/Users/obrien`), and in both cases only the raw text is prefixed by the real root.
-        // Trying the raw text cannot widen the match: `isClaudioBinaryPath` still demands a
-        // literal `<claudioRoot>/` prefix, and everything under that prefix is a file inside
-        // claudio's own directory — the tree `uninstall` owns outright.
+        // Both candidates are checked by the SAME `isClaudioBinaryPath`, whose below-root
+        // metacharacter guard is what keeps the raw text from widening the match: neither a
+        // quoted `..`, a `$`/backtick command substitution, nor an embedded newline can survive
+        // below the root, on either candidate (the decoder strips none of the latter three). See
+        // that function — this is *not* "the raw text is inherently safe because it is
+        // root-prefixed", a claim that quoting and command substitution both falsify.
         let candidates = [shellWordContents(rawWord), rawWord].compactMap { $0 }
         guard candidates.contains(where: { isClaudioBinaryPath($0, claudioRoot: claudioRoot) })
         else { return nil }
@@ -242,6 +263,23 @@ private func isClaudioBinaryPath(_ path: String, claudioRoot: String) -> Bool {
     guard path.hasPrefix(claudioRoot + "/") else { return false }
 
     let relative = path.dropFirst(claudioRoot.count + 1)
+    // Below its own root, claudio's subtree is only ever plain path segments (`bin/claudio`, a
+    // future `libexec/claudio`, or the bare `claudio`) — it has NEVER written a quote, backslash,
+    // whitespace, newline, or shell metacharacter there. So any such character below the root
+    // means this string is not one claudio wrote, and it is rejected *before* the `..`/basename
+    // checks are trusted. This guard is load-bearing precisely because a candidate reaching here
+    // can be the raw source text (not just the shell-decoded word): in the raw text a `'`, `"`,
+    // `\`, `$`, or backtick can hide a `..` traversal or a command substitution that makes
+    // `/bin/sh` exec a binary *outside* the root (`…/.claudio/'..'/bin/claudio` execs
+    // `…/bin/claudio`; `…/.claudio/$(echo ..)/claudio` likewise), and an embedded newline splits
+    // the command so `/bin/sh` runs an entirely separate, attacker-chosen `argv[0]`. The decoder
+    // strips neither `$`/backtick nor a newline, so the decoded candidate is no safer here than
+    // the raw one — which is why this lives in the shared predicate rather than on one branch.
+    // The root segment itself is exempt: it had to match `claudioRoot` byte-for-byte to clear the
+    // prefix guard, so an attacker has no freedom there (a `$` or space in the *home* directory
+    // of a legacy bare entry is fine — it is above the root, not below it).
+    guard !relative.unicodeScalars.contains(where: { shellUnsafeScalars.contains($0) })
+    else { return false }
     let components = relative.split(separator: "/", omittingEmptySubsequences: true)
     guard !components.contains(".."), components.last == "claudio" else { return false }
     return true

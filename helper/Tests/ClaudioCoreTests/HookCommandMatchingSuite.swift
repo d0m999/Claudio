@@ -219,6 +219,83 @@ func runHookCommandMatchingSuites() {
                 + " \(String(describing: matched(staysInside)))")
     }
 
+    suite(
+        "matchedClaudioEvent: rejects a QUOTE-HIDDEN `..` — a component that is not literally"
+            + " `..` but whose /bin/sh quote-removal yields one, so argv[0] resolves OUTSIDE the"
+            + " root. The raw-word fallback must not let quoting smuggle a traversal past the `..`"
+            + " guard (both the raw candidate AND a lossy decode are checked, so both must fail)"
+    ) {
+        // Each below-root component would quote-remove to `..`; the shell then execs
+        // `/Users/tester/bin/claudio` (or deeper), outside `testRoot`. Premise-checked so this
+        // can never pass for the wrong reason: the quote-stripped form really is a `..` escape.
+        let hidden = [
+            "\(testRoot)/'..'/bin/claudio play stop",
+            "\(testRoot)/\"..\"/bin/claudio play stop",
+            "\(testRoot)/..''/bin/claudio play stop",
+            "\(testRoot)/''..''/bin/claudio play stop",
+            "\(testRoot)/\\.\\./bin/claudio play stop",
+        ]
+        for command in hidden {
+            expect(
+                matched(command) == nil,
+                "a quote/backslash-hidden `..` must never match, got"
+                    + " \(String(describing: matched(command))) for \"\(command)\"")
+        }
+
+        // Non-widening guard: a metacharacter in the HOME segment (above the root) is fine — a
+        // legacy bare entry under an apostrophe home still sweeps. Only *below-root*
+        // metacharacters are rejected, so the fix cannot have over-corrected into refusing R4.
+        let apostropheHome = "/Users/o'brien/.claudio"
+        expect(
+            matched("\(apostropheHome)/bin/claudio play stop", root: apostropheHome) == .stop,
+            "a metachar in the HOME segment must not block a legitimate legacy sweep")
+    }
+
+    suite(
+        "matchedClaudioEvent: rejects a COMMAND SUBSTITUTION / variable below the root —"
+            + " `$(…)`, backticks, `$VAR`. The decoder strips neither, so the decoded candidate is"
+            + " no safer than the raw one; /bin/sh would expand these and exec an out-of-root"
+            + " binary. claudio never writes a `$` or backtick below its own root"
+    ) {
+        let substitutions = [
+            "\(testRoot)/$(echo ..)/claudio play stop",
+            "\(testRoot)/`echo ..`/bin/claudio play stop",
+            "\(testRoot)/$X/bin/claudio play stop",
+        ]
+        for command in substitutions {
+            expect(
+                matched(command) == nil,
+                "a command substitution / variable below the root must never match, got"
+                    + " \(String(describing: matched(command))) for \"\(command)\"")
+        }
+
+        // Non-widening guard: a `$` in the HOME segment of a LEGACY bare entry is above the root
+        // and must still sweep — the scan is deliberately below-root-only.
+        let dollarHome = "/Users/a$b/.claudio"
+        expect(
+            matched("\(dollarHome)/bin/claudio play stop", root: dollarHome) == .stop,
+            "a `$` in the home directory (above the root) must not block a legacy sweep")
+    }
+
+    suite(
+        "matchedClaudioEvent: rejects an embedded NEWLINE that /bin/sh reads as a command"
+            + " separator — a `\\r\\n` pair fuses into one Swift grapheme cluster that a"
+            + " Set<Character> scan would miss, so the below-root guard scans Unicode scalars."
+            + " The second, attacker-chosen command's argv[0] is fully outside the root"
+    ) {
+        let split = [
+            "\(testRoot)/x\r\n/tmp/evil/claudio play stop",  // CRLF: the grapheme-fusion case
+            "\(testRoot)/x\n/tmp/evil/claudio play stop",  // bare LF
+            "\(testRoot)/x\r/tmp/evil/claudio play stop",  // bare CR
+        ]
+        for command in split {
+            expect(
+                matched(command) == nil,
+                "an embedded newline must never match, got"
+                    + " \(String(describing: matched(command))) for \"\(command)\"")
+        }
+    }
+
     suite("matchedClaudioEvent: rejects an unrecognized event name") {
         expect(
             matched("\(canonicalPath) play deploy") == nil,
