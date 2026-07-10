@@ -265,6 +265,47 @@ func runSetupSuites() {
         }
     }
 
+    suite(
+        "performFirstRunSetup: a dot-prefixed directory in the user pack root (a killed setup's"
+            + " `.<id>.tmp-<pid>` leftover, or any hidden dir) is NEVER eligible as the default"
+            + " selection — even though it sorts BEFORE a real pack id, the real pack is chosen"
+    ) {
+        withTempDirectory { root in
+            // alreadyInstalled path (executablePath == destination) so the copy step is skipped
+            // and default selection runs against whatever is already on disk.
+            let claudioRoot = root.appendingPathComponent("claudio-root", isDirectory: true)
+            let destination = claudioRoot.appendingPathComponent("bin/claudio")
+            let environment = SetupEnvironment(
+                executablePath: destination,
+                claudioBinaryDestination: destination,
+                userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
+                configFile: claudioRoot.appendingPathComponent("config.json"),
+                settingsFile: root.appendingPathComponent("settings.json"),
+                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+            // A dot-prefixed leftover that sorts before the real pack ('.' 0x2E < 'z'): without
+            // the `!hasPrefix(".")` filter it would be scanned first and either be selected or
+            // fail selection outright. With the filter it is skipped and `zeta-chime` wins.
+            writeFixture(
+                #"{ "schema": 1, "id": ".aaa-tmp", "events": {} }"#,
+                to: environment.userPacksDirectory.appendingPathComponent(".aaa-tmp/manifest.json"))
+            writeFixture(
+                #"{ "schema": 1, "id": "zeta-chime", "events": {} }"#,
+                to: environment.userPacksDirectory.appendingPathComponent(
+                    "zeta-chime/manifest.json"))
+
+            let result = performFirstRunSetup(environment: environment)
+            guard case .success(.completed(_, _, let selectedPack, _)) = result else {
+                expect(false, "expected success, got \(result)")
+                return
+            }
+            expect(
+                selectedPack == "zeta-chime",
+                "the dot-prefixed leftover must be excluded from default selection despite sorting"
+                    + " first; the real pack must be chosen, got \(String(describing: selectedPack))"
+            )
+        }
+    }
+
     suite("performFirstRunSetup: multiple bundled packs default-select the alphabetically-first one") {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(

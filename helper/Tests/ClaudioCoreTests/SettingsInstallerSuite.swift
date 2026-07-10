@@ -519,6 +519,48 @@ func runSettingsInstallerSuites() {
         }
     }
 
+    suite(
+        "uninstallClaudioHooks: preserves a third-party group that was ALREADY empty before the"
+            + " sweep — it must drop only a group WE emptied, never collaterally delete someone"
+            + " else's empty `{ \"hooks\": [] }` artifact in this no-backup path"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            // The Stop array holds a pre-existing EMPTY group (a third-party artifact) next to
+            // claudio's own group. Sweeping must remove claudio's and leave the empty one exactly
+            // as it was: `removeHookEntries` only drops a group whose inner array it just emptied
+            // (innerHooks non-empty → filtered empty), never one that was empty to begin with.
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [
+                    { "hooks": [] },
+                    { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] }
+                  ]
+                } }
+                """#, to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.uninstalled(count: 1)),
+                "expected exactly claudio's 1 entry removed, got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let stopGroups = hooksArray(json, event: "Stop") ?? []
+            expect(
+                stopGroups.count == 1,
+                "the already-empty third-party group must survive (only claudio's group dropped),"
+                    + " got \(stopGroups.count) groups")
+            expect(
+                commands(inGroup: stopGroups.first ?? [:]).isEmpty,
+                "the surviving group must still be the empty one, got"
+                    + " \(commands(inGroup: stopGroups.first ?? [:]))")
+        }
+    }
+
     suite("installClaudioHooks: a leftover entry with our command but no \"type\" is not counted as installed — install self-heals with a real command hook") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
@@ -1099,9 +1141,12 @@ func runSettingsInstallerSuites() {
             expect(
                 readRawString(at: settingsFile) == intruder,
                 "the concurrent writer's bytes must survive verbatim — install must not clobber")
-            // The backup was taken before the intruder struck, so it holds the pre-intruder bytes.
-            // Pinned because a failed install leaves this artifact behind and the backup is
-            // one-shot: a later successful install will not overwrite it.
+            // The intruder now strikes in the read→backup window (the seam fires before the
+            // backup), so this pins that `.claudio.bak` holds the bytes install READ, not a
+            // fresh re-read of disk that would have captured the intruder's write. Revert the
+            // backup to re-reading the file and this assertion goes RED. Pinned too because a
+            // failed install leaves this artifact behind and the backup is one-shot: a later
+            // successful install will not overwrite it.
             expect(
                 readRawString(at: settingsFile.appendingPathExtension("claudio.bak")) == original,
                 "the backup snapshots what install read, not what the intruder wrote")

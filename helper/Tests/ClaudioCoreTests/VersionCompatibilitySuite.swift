@@ -53,6 +53,14 @@ func runVersionCompatibilitySuites() {
         expect(
             SemanticVersion(parsing: "2.1.201.5") == nil,
             "more than 3 components must fail rather than silently truncating")
+        // `Int("+2") == 2`, so a bare parse would accept a leading `+` the "non-numeric" contract
+        // rejects. Pins the ASCII-digit guard: revert it and these go RED.
+        expect(
+            SemanticVersion(parsing: "+2.1.201") == nil,
+            "a leading + on a component must fail — Int(_:) would otherwise accept it")
+        expect(
+            SemanticVersion(parsing: "2.+1.0") == nil,
+            "a + on an interior component must fail too, not just the first")
     }
 
     suite(

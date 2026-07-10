@@ -48,7 +48,13 @@ public struct SemanticVersion: Sendable, Equatable, Comparable, CustomStringConv
         guard !components.isEmpty, components.count <= 3 else { return nil }
         var parts: [Int] = []
         for component in components {
-            guard let value = Int(component), value >= 0 else { return nil }
+            // `Int("+2")` succeeds (== 2), so a bare `Int(_:)` would accept a leading `+` — a
+            // "non-numeric" shape the doc above promises to reject. Require ASCII digits only
+            // (also rejects a `-`, Unicode digits, and the empty component a doubled/trailing
+            // dot produces) BEFORE parsing, so the contract and the code agree.
+            guard component.unicodeScalars.allSatisfy({ ("0"..."9").contains($0) }),
+                let value = Int(component)
+            else { return nil }
             parts.append(value)
         }
         while parts.count < 3 { parts.append(0) }

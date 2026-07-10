@@ -14,7 +14,7 @@ import Foundation
 /// - **Structural-match uninstall (T13)**: `uninstall` does NOT use the exact-match above —
 ///   it must still find and remove a claudio hook entry after a *future* binary relocation
 ///   it was never told the exact old path for. See
-///   ``matchedClaudioEvent(inHookCommand:)`` for the argv-shape + namespace predicate this
+///   ``matchedClaudioEvent(inHookCommand:claudioRoot:)`` for the argv-shape + namespace predicate this
 ///   keys off instead, and why it can never misfire on a third-party hook.
 /// - **Install never writes what uninstall cannot sweep**: `install` refuses a
 ///   `claudioBinaryPath` that names a `.claudio` namespace it would not itself match back out
@@ -125,9 +125,9 @@ public func installClaudioHooks(
 
 #if DEBUG
 /// Test-only overload driving the ``SettingsUpdateError/concurrentModification(path:)`` window.
-/// `betweenReadAndWrite` runs once after `settings.json` has been read and immediately before
-/// ``atomicWrite(root:to:expectedCurrentData:)``'s re-read — the only way to hit that path
-/// deterministically, since the window a real external writer has to land in is microseconds
+/// `betweenReadAndWrite` runs once after `settings.json` has been read and before the one-shot
+/// backup and ``atomicWrite(root:to:expectedCurrentData:)``'s re-read — the only way to hit that
+/// path deterministically, since the window a real external writer has to land in is microseconds
 /// wide and racing it from the outside would be flaky rather than a regression net. Compiled
 /// out of release builds (`#if DEBUG`), so the shipped ``ClaudioCore`` library surface — the
 /// one the GUI links — stays exactly the production 3-argument signature. Injected for the same
@@ -303,10 +303,16 @@ private func performInstall(
 
         guard anyChanged else { return .success(.alreadyInstalled) }
 
-        if case .failure(let error) = backupOriginalIfNeeded(settingsFile: settingsFile) {
+        // Seam fires immediately after the read (before the backup), so a test can model an
+        // external writer landing anywhere in the read-modify-write window — the widest, and
+        // therefore strictest, placement. It exercises BOTH the backup's fidelity (below) and
+        // `atomicWrite`'s optimistic abort in one deterministic net.
+        betweenReadAndWrite?()
+        if case .failure(let error) = backupOriginalIfNeeded(
+            settingsFile: settingsFile, originalData: loaded.rawData)
+        {
             return .failure(error)
         }
-        betweenReadAndWrite?()
         if case .failure(let error) = atomicWrite(
             root: root, to: settingsFile, expectedCurrentData: loaded.rawData)
         {
@@ -444,7 +450,7 @@ private func appendHookEntry(
 /// would fix it. Requiring the type instead lets `install` self-heal past such a leftover.
 ///
 /// `uninstall` intentionally does NOT go through here — `removeHookEntries` matches
-/// structurally via ``matchedClaudioEvent(inHookCommand:)`` (ignoring `"type"` entirely, and
+/// structurally via ``matchedClaudioEvent(inHookCommand:claudioRoot:)`` (ignoring `"type"` entirely, and
 /// not comparing against any single expected path), so a malformed or relocated-binary
 /// leftover carrying a claudio-shaped command still gets cleaned up.
 private func groupContainsCommand(_ group: Any, command: String) -> Bool {
@@ -521,23 +527,32 @@ private func removeHookEntries(
 
 // MARK: - Backup + atomic write
 
-/// Copies the pre-claudio original to `settings.json.claudio.bak`, but only the first
-/// time (an existing backup is left alone — "一次性备份"). A failed copy (e.g. the
-/// directory isn't writable even though the file itself is — creating a new sibling
-/// entry needs directory write permission, not just file write permission) must abort
-/// the whole install rather than being silently swallowed: proceeding to overwrite
-/// `settings.json` without a successful backup defeats the entire safety net.
-private func backupOriginalIfNeeded(settingsFile: URL) -> Result<Void, SettingsUpdateError> {
+/// Snapshots the pre-claudio original to `settings.json.claudio.bak`, but only the first time
+/// (an existing backup is left alone — "一次性备份"). Writes `originalData` — the exact bytes
+/// ``loadRoot(from:)`` read, and the same baseline ``atomicWrite(root:to:expectedCurrentData:)``
+/// compares against — rather than RE-READING the file here. A re-read could snapshot bytes an
+/// external writer changed between the load and this call; `atomicWrite` would then reject the
+/// write as `.concurrentModification`, but this one-shot backup would already hold content claudio
+/// never operated on and would never refresh it. Backing up the read bytes keeps `.claudio.bak`
+/// byte-identical to what install actually saw, whatever an outside writer does in the window.
+/// `nil` means the file didn't exist at load time — a fresh install has no original to preserve.
+/// A symlinked `settings.json` needs no special-casing: `loadRoot` already read through the link
+/// to the target's content, exactly what a dotfiles backup should capture.
+///
+/// A failed write (e.g. the directory isn't writable even though the file itself is — creating a
+/// new sibling entry needs directory write permission, not just file write permission) must abort
+/// the whole install rather than being silently swallowed: proceeding to overwrite `settings.json`
+/// without a successful backup defeats the entire safety net.
+private func backupOriginalIfNeeded(
+    settingsFile: URL, originalData: Data?
+) -> Result<Void, SettingsUpdateError> {
+    guard let originalData else { return .success(()) }
     let fileManager = FileManager.default
-    guard fileManager.fileExists(atPath: settingsFile.path) else { return .success(()) }
     let backupFile = settingsFile.deletingLastPathComponent()
         .appendingPathComponent(settingsFile.lastPathComponent + ".claudio.bak")
     guard !fileManager.fileExists(atPath: backupFile.path) else { return .success(()) }
     do {
-        // Resolve symlinks so the backup captures the target's CONTENT, not a fresh symlink to
-        // the same target (copyItem on a symlink copies the link itself). A dotfiles settings.json
-        // — a symlink into a repo — must be backed up as a real content snapshot.
-        try fileManager.copyItem(at: settingsFile.resolvingSymlinksInPath(), to: backupFile)
+        try originalData.write(to: backupFile)
         return .success(())
     } catch {
         return .failure(.backupFailure(reason: error.localizedDescription))
