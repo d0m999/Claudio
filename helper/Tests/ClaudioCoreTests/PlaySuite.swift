@@ -278,6 +278,50 @@ func runPlaySuites() {
         }
     }
 
+    suite(
+        "playSoundEvent: stop_failure absent from an old/incomplete manifest -> .notReady,"
+            + " never spawns, never writes a claudio.log line (T13 acceptance 3b — regression"
+            + " pin: an old Claude Code without StopFailure support, or a pack that simply"
+            + " never mapped stop_failure, both fall through this exact existing silent path;"
+            + " this test pins that Play.swift already behaves this way, it is not new"
+            + " behavior)"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            let logFile = root.appendingPathComponent("claudio.log")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            // The manifest only declares `stop` — never `stop_failure` — mirroring a pack
+            // (or a moment in time) that predates StopFailure support entirely.
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let spawner = RecordingSpawner()
+            let env = PlayEnvironment(
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: logFile,
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let outcome = playSoundEvent("stop_failure", environment: env)
+            expect(
+                outcome == .notReady,
+                "stop_failure missing from the manifest must report .notReady, got \(outcome)")
+            expect(spawner.callCount == 0, "a manifest without stop_failure must never spawn afplay")
+            expect(
+                readRecentLogEntries(from: logFile).isEmpty,
+                "a missing-from-manifest event is a silent 'not ready yet' state, not a real"
+                    + " failure — it must never append a claudio.log line")
+        }
+    }
+
     suite("playSoundEvent: declared audio file missing on disk -> .notReady, never spawns") {
         withTempDirectory { root in
             let packsDir = root.appendingPathComponent("packs")

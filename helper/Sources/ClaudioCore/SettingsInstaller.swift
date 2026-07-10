@@ -7,9 +7,15 @@ import Foundation
 /// Invariants enforced here (see `SettingsInstallerSuite.swift`):
 /// - **Append, never overwrite**: existing hook groups belonging to other tools are left
 ///   structurally untouched.
-/// - **Idempotent install / exact-match uninstall**: both key off
+/// - **Idempotent install, exact-match**: both `install`'s idempotency check and the
+///   read-only ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` probe key off
 ///   ``claudioHookCommand(for:claudioBinaryPath:)`` compared for exact equality, never a
 ///   substring (ENGINEERING.md 工程落地细节 ③).
+/// - **Structural-match uninstall (T13)**: `uninstall` does NOT use the exact-match above —
+///   it must still find and remove a claudio hook entry after a *future* binary relocation
+///   it was never told the exact old path for. See
+///   ``matchedClaudioEvent(inHookCommand:)`` for the argv-shape + namespace predicate this
+///   keys off instead, and why it can never misfire on a third-party hook.
 /// - **Abort, never clobber**: an unreadable/unparsable/unexpected-shape `settings.json`
 ///   aborts with an error and never touches the file.
 /// - **One-time backup**: the pre-claudio original is copied to `settings.json.claudio.bak`
@@ -23,8 +29,9 @@ private let hookCommandKey = "command"
 private let commandHookType = "command"
 
 /// The exact `settings.json` hook `command` string Claudio installs/matches for `event`.
-/// Single source of truth for both the install idempotency check and the uninstall
-/// exact-match removal.
+/// Single source of truth for the install idempotency check and the read-only
+/// ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` probe. **Not** used by
+/// `uninstall`'s removal sweep anymore (T13) — see ``matchedClaudioEvent(inHookCommand:)``.
 public func claudioHookCommand(for event: Event, claudioBinaryPath: String) -> String {
     "\(claudioBinaryPath) play \(event.cliName)"
 }
@@ -95,8 +102,17 @@ public func installClaudioHooks(
     }
 }
 
-/// Removes every hook entry whose command exactly matches
-/// ``claudioHookCommand(for:claudioBinaryPath:)``, preserving everything else untouched.
+/// Removes every hook entry claudio itself could plausibly have written, for any of the
+/// four core events, preserving everything else untouched — see
+/// ``matchedClaudioEvent(inHookCommand:)`` for the exact structural match this keys off
+/// (T13: a match on argv shape + claudio's own path namespace, NOT an exact-string compare
+/// against `claudioBinaryPath` — the whole point is still finding a stale entry after a
+/// binary relocation this call was never told the old path for).
+///
+/// `claudioBinaryPath` is kept as a parameter here purely for call-site symmetry with
+/// ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)`` (a caller doing
+/// "reinstall to a new path" already has this value in scope, and the two functions have
+/// always shared a signature) — it does **not** participate in the removal match itself.
 public func uninstallClaudioHooks(
     settingsFile: URL = ClaudioPaths.claudeSettingsFile,
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
@@ -199,6 +215,10 @@ private func performInstall(
     }
 }
 
+/// `claudioBinaryPath` is intentionally unused below — see the doc comment on
+/// ``uninstallClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)`` for why it is kept on
+/// the public signature (symmetry with `install`) without driving the actual match, which
+/// is now structural (``matchedClaudioEvent(inHookCommand:)``) rather than path-exact.
 private func performUninstall(
     settingsFile: URL, claudioBinaryPath: String
 ) -> Result<UninstallOutcome, SettingsUpdateError> {
@@ -217,8 +237,7 @@ private func performUninstall(
         var root = originalRoot
         var totalRemoved = 0
         for event in Event.allCases {
-            let command = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
-            let (nextRoot, removed) = removeHookEntries(root: root, event: event, command: command)
+            let (nextRoot, removed) = removeHookEntries(root: root, event: event)
             root = nextRoot
             totalRemoved += removed
         }
@@ -307,8 +326,10 @@ private func appendHookEntry(
 /// actually fires, and (b) make `install` skip appending the real, runnable entry that
 /// would fix it. Requiring the type instead lets `install` self-heal past such a leftover.
 ///
-/// `uninstall` intentionally does NOT go through here — `removeHookEntries` matches on
-/// `command` alone, so a malformed leftover carrying our command still gets cleaned up.
+/// `uninstall` intentionally does NOT go through here — `removeHookEntries` matches
+/// structurally via ``matchedClaudioEvent(inHookCommand:)`` (ignoring `"type"` entirely, and
+/// not comparing against any single expected path), so a malformed or relocated-binary
+/// leftover carrying a claudio-shaped command still gets cleaned up.
 private func groupContainsCommand(_ group: Any, command: String) -> Bool {
     guard let groupDict = group as? [String: Any],
         let innerHooks = groupDict[hooksKey] as? [Any]
@@ -320,8 +341,12 @@ private func groupContainsCommand(_ group: Any, command: String) -> Bool {
     }
 }
 
+/// Removes every hook entry under `event`'s array whose `"command"` is structurally
+/// claudio's own — see ``matchedClaudioEvent(inHookCommand:)``. Matches on `command` alone
+/// (ignoring `"type"`, mirroring the pre-T13 exact-match behavior this replaces), so a
+/// malformed leftover missing `"type": "command"` still gets swept.
 private func removeHookEntries(
-    root: [String: Any], event: Event, command: String
+    root: [String: Any], event: Event
 ) -> (root: [String: Any], removed: Int) {
     var root = root
     guard var hooksSection = root[hooksKey] as? [String: Any],
@@ -344,7 +369,8 @@ private func removeHookEntries(
 
         let filteredInner = innerHooks.filter { entry in
             guard let entryDict = entry as? [String: Any],
-                (entryDict[hookCommandKey] as? String) == command
+                let command = entryDict[hookCommandKey] as? String,
+                matchedClaudioEvent(inHookCommand: command) == event
             else { return true }
             removed += 1
             return false

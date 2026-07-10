@@ -86,6 +86,41 @@ func runSettingsInstallerSuites() {
         }
     }
 
+    suite(
+        "installClaudioHooks: writes StopFailure unconditionally alongside the other three"
+            + " events — install has NO Claude Code version awareness of any kind, so an old"
+            + " client that doesn't understand StopFailure simply never fires that hook key,"
+            + " harmlessly (T13 acceptance 3a — regression pin for existing behavior, not new)"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(result == .success(.installed), "install should succeed, got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let stopFailureGroups = hooksArray(json, event: "StopFailure") ?? []
+            expect(
+                stopFailureGroups.count == 1
+                    && commands(inGroup: stopFailureGroups.first ?? [:])
+                        == [
+                            claudioHookCommand(
+                                for: .stopFailure, claudioBinaryPath: testClaudioBinaryPath)
+                        ],
+                "StopFailure must be written just like the other 3 events — install performs"
+                    + " no Claude Code version check whatsoever, got \(stopFailureGroups)")
+            for event in Event.allCases {
+                let groups = hooksArray(json, event: event.settingsName) ?? []
+                expect(
+                    groups.count == 1,
+                    "\(event.settingsName) must also be written, got \(groups.count)")
+            }
+        }
+    }
+
     suite("installClaudioHooks: appends alongside an existing other-tool hook without overwriting it") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
@@ -294,6 +329,62 @@ func runSettingsInstallerSuites() {
             expect(
                 (preToolUse.first?["matcher"] as? String) == "Bash",
                 "PreToolUse matcher must survive untouched")
+        }
+    }
+
+    suite(
+        "uninstallClaudioHooks: sweeps a relocated/historical claudio binary path (T13"
+            + " acceptance 1: survives a future binary move) while never touching structural"
+            + " look-alikes (basename mismatch / extra argv segment / outside .claudio"
+            + " namespace / unknown event name) or an unrelated third-party hook — all in ONE"
+            + " fixture"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            // Simulates exactly the scenario T13 exists for: a PAST (or future) claudio
+            // release placed the binary at a different subdirectory under the SAME
+            // `.claudio/` namespace (`libexec/` instead of today's `bin/`). This
+            // settings.json entry was written back then; `claudioBinaryPath` passed to
+            // `uninstallClaudioHooks` below is TODAY's path, which does not textually equal
+            // this stale entry at all — only the structural match can find it.
+            let historicalPath = "/Users/tester/.claudio/libexec/claudio"
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [
+                    { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "\#(historicalPath) play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] },
+                    { "hooks": [ { "type": "command", "command": "/Users/tester/.claudio/bin/mytool play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "\#(testClaudioBinaryPath) play stop --verbose" } ] },
+                    { "hooks": [ { "type": "command", "command": "/usr/local/bin/claudio play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "\#(testClaudioBinaryPath) play deploy" } ] }
+                  ]
+                } }
+                """#, to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.uninstalled(count: 2)),
+                "expected exactly 2 removed (the historical relocated path + today's canonical"
+                    + " path), got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let stopGroups = hooksArray(json, event: "Stop") ?? []
+            let survivingCommands = Set(stopGroups.flatMap { commands(inGroup: $0) })
+            expect(
+                survivingCommands == [
+                    "vibe-island stop",
+                    "/Users/tester/.claudio/bin/mytool play stop",
+                    "\(testClaudioBinaryPath) play stop --verbose",
+                    "/usr/local/bin/claudio play stop",
+                    "\(testClaudioBinaryPath) play deploy",
+                ],
+                "every look-alike and the unrelated third-party hook must survive untouched,"
+                    + " got \(survivingCommands)")
         }
     }
 

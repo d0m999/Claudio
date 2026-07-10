@@ -13,7 +13,8 @@ import Foundation
 // thin orchestrator: shared `expect`/`suite` primitives + calls into per-area suite
 // functions defined in sibling files (`EventSuite.swift`, `FileLockSuite.swift`,
 // `DoctorSuite.swift`, `PathsSuite.swift`, `PlaySuite.swift`, `LogSuite.swift`,
-// `HookStatusSuite.swift`, `VolumeSuite.swift`, `UseSuite.swift`, `SetupSuite.swift`),
+// `HookStatusSuite.swift`, `VolumeSuite.swift`, `UseSuite.swift`, `SetupSuite.swift`,
+// `VersionCompatibilitySuite.swift`, `HookCommandMatchingSuite.swift`),
 // matching the project's "many small files" convention.
 
 var totalChecks = 0
@@ -50,6 +51,8 @@ runHookStatusSuites()
 runVolumeSuites()
 runUseSuites()
 runSetupSuites()
+runVersionCompatibilitySuites()
+runHookCommandMatchingSuites()
 
 // MARK: - Summary
 

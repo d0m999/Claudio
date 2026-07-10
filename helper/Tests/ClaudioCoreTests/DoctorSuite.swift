@@ -27,6 +27,20 @@ private func makeExecutableFixture(at url: URL) {
     try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
 }
 
+/// A canned ``CommandRunning`` double for doctor-level tests that don't care about version
+/// detection specifics (e.g. "everything healthy") but must NOT let check (f)'s Claude Code
+/// half depend on whatever `claude` install (if any) happens to be on the machine actually
+/// running these tests — without this, that check would use the real
+/// ``SystemCommandRunner`` default and make the test's pass/fail outcome silently
+/// machine-dependent (T13).
+private struct FakeCommandRunner: CommandRunning {
+    let result: CommandRunResult
+    func run(executablePath: String, arguments: [String], timeout: TimeInterval) -> CommandRunResult
+    {
+        result
+    }
+}
+
 @MainActor
 func runDoctorSuites() {
     suite("ClaudioConfig decodes required + optional fields with graceful defaults") {
@@ -719,12 +733,18 @@ func runDoctorSuites() {
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
                 logFile: root.appendingPathComponent("claudio.log"),
-                claudioBinaryPath: claudioBinaryPath.path)
+                claudioBinaryPath: claudioBinaryPath.path,
+                // Deterministic, machine-independent stand-ins for check (f) — otherwise
+                // this test's "no warnings at all" assertion would silently depend on
+                // whether/which `claude` is installed on whatever machine runs the tests.
+                commandRunner: FakeCommandRunner(
+                    result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")),
+                currentMacOSVersion: { SemanticVersion(major: 15, minor: 0, patch: 0) })
             let report = runDoctorChecks(environment: env)
             expect(!report.hasFailure, "fully healthy environment must not fail")
             expect(
                 !report.results.contains { $0.severity == .warning },
-                "fully healthy environment should have no warnings either")
+                "fully healthy environment should have no warnings either, got \(report.results)")
         }
     }
 
@@ -790,6 +810,112 @@ func runDoctorSuites() {
             expect(
                 report.results.contains { $0.name == "log" && $0.severity == .warning },
                 "the log check must surface a warning result when recent failures exist")
+        }
+    }
+
+    // MARK: - (f) 版本兼容 (T13): doctor-level integration — see `VersionCompatibilitySuite.swift`
+    // for the pure `checkClaudeCodeVersion`/`SemanticVersion` unit tests this builds on.
+
+    func healthyDoctorEnvironment(
+        root: URL, commandRunner: any CommandRunning,
+        currentMacOSVersion: @escaping @Sendable () -> SemanticVersion = { .currentMacOS() }
+    ) -> DoctorEnvironment {
+        let settingsFile = root.appendingPathComponent("settings.json")
+        let packsDir = root.appendingPathComponent("packs")
+        writeFixture("{}", to: settingsFile)
+        writeFixture(
+            #"{ "selected_pack": "minimal-chime" }"#, to: root.appendingPathComponent("config.json"))
+        writeFixture(
+            #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+            to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+        writeFixture("fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+        let claudioBinaryPath = root.appendingPathComponent("claudio")
+        makeExecutableFixture(at: claudioBinaryPath)
+        return DoctorEnvironment(
+            afplayPath: "/usr/bin/afplay",
+            settingsFile: settingsFile,
+            configFile: root.appendingPathComponent("config.json"),
+            userPacksDirectory: packsDir,
+            bundledPacksDirectory: nil,
+            logFile: root.appendingPathComponent("claudio.log"),
+            claudioBinaryPath: claudioBinaryPath.path,
+            commandRunner: commandRunner,
+            currentMacOSVersion: currentMacOSVersion)
+    }
+
+    suite(
+        "runDoctorChecks: a Claude Code version below the verified minimum surfaces a"
+            + " human warning — never hasFailure, exit code stays 0 (T13 acceptance 2)"
+    ) {
+        withTempDirectory { root in
+            let env = healthyDoctorEnvironment(
+                root: root,
+                commandRunner: FakeCommandRunner(
+                    result: .completed(exitCode: 0, stdout: "2.1.99 (Claude Code)")))
+            let report = runDoctorChecks(environment: env)
+            expect(
+                !report.hasFailure,
+                "a below-minimum Claude Code version must never set hasFailure (exit code 0)")
+            let versionResult = report.results.first { $0.name == "claude-code-version" }
+            expect(
+                versionResult?.severity == .warning,
+                "expected a .warning claude-code-version result, got \(String(describing: versionResult))"
+            )
+            expect(
+                versionResult?.message.contains("StopFailure") == true,
+                "the warning should explain the StopFailure implication in plain language, got"
+                    + " \(String(describing: versionResult?.message))")
+        }
+    }
+
+    suite(
+        "runDoctorChecks: an undetectable Claude Code version (claude not on PATH) is a"
+            + " warning too, never hasFailure"
+    ) {
+        withTempDirectory { root in
+            let env = healthyDoctorEnvironment(
+                root: root,
+                commandRunner: FakeCommandRunner(result: .completed(exitCode: 127, stdout: "")))
+            let report = runDoctorChecks(environment: env)
+            expect(!report.hasFailure, "an undetectable Claude Code version must never fail doctor")
+            expect(
+                report.results.contains { $0.name == "claude-code-version" && $0.severity == .warning },
+                "expected a .warning claude-code-version result, got \(report.results)")
+        }
+    }
+
+    suite(
+        "runDoctorChecks: a Claude Code version at/above the verified minimum reports .ok"
+    ) {
+        withTempDirectory { root in
+            let env = healthyDoctorEnvironment(
+                root: root,
+                commandRunner: FakeCommandRunner(
+                    result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")))
+            let report = runDoctorChecks(environment: env)
+            expect(
+                report.results.contains { $0.name == "claude-code-version" && $0.severity == .ok },
+                "expected an .ok claude-code-version result, got \(report.results)")
+        }
+    }
+
+    suite(
+        "runDoctorChecks: macos-version check is always .ok, even when the injected current"
+            + " version is below the documented floor (anchor 3: informational, never a real"
+            + " gate — this branch is provably unreachable on a real machine)"
+    ) {
+        withTempDirectory { root in
+            let env = healthyDoctorEnvironment(
+                root: root,
+                commandRunner: FakeCommandRunner(
+                    result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")),
+                currentMacOSVersion: { SemanticVersion(major: 10, minor: 15, patch: 0) })
+            let report = runDoctorChecks(environment: env)
+            expect(!report.hasFailure, "an injected below-floor macOS version must never fail doctor")
+            expect(
+                report.results.contains { $0.name == "macos-version" && $0.severity == .ok },
+                "macos-version must report .ok regardless of the comparison result — it is"
+                    + " purely informational by design, got \(report.results)")
         }
     }
 }
