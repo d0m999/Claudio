@@ -58,14 +58,36 @@ private let shellUnsafeCharacters: Set<Character> = [
     "\"", "'", "\\", "`", "$", "&", ";", "|", "<", ">", "(", ")", "*", "?", "[", "{", "}",
 ]
 
-/// ``shellUnsafeCharacters`` flattened to Unicode scalars, so the matcher can scan a path's
-/// below-root portion at *scalar* granularity. A `Character`-level membership test would miss a
-/// `\r\n` pair: Swift fuses CR+LF into a single extended grapheme cluster that is present in the
-/// set under neither bare `\r` nor bare `\n`, yet `/bin/sh` still reads that byte pair as a line
-/// break that splits the command. Scanning scalars closes that gap — and is a superset check, so
-/// every other unsafe character is still caught exactly as before.
+/// ``shellUnsafeCharacters`` flattened to Unicode scalars. **Every** shell-word decision in this
+/// file — the writer's quote-or-not in ``shellQuotedPath(_:)`` and the matcher's below-root scan
+/// in ``isClaudioBinaryPath(_:claudioRoot:)`` — is taken at *scalar* granularity, because
+/// `/bin/sh` reads bytes and a `Character` is not a byte.
+///
+/// A `Character`-level membership test silently misses every unsafe scalar that fuses with what
+/// follows it into one extended grapheme cluster, and such a cluster equals none of the single-
+/// scalar `Character`s in the set:
+/// - `\r\n` — Swift fuses CR+LF into one `Character`, present in the set under neither bare `\r`
+///   nor bare `\n`, yet `/bin/sh` still reads that byte pair as a line break that splits the
+///   command.
+/// - **any metacharacter followed by a combining mark** — `*` + U+0301 is one `Character` that is
+///   not `*`, while `/bin/sh` still sees the `*` byte and globs. Verified 2026-07-10 against the
+///   real `/bin/sh`: with siblings `a!<U+0301>b` and `a*<U+0301>b` present, an unquoted
+///   `…/a*<U+0301>b/.claudio/bin/claudio play stop` **execs the binary under `a!<U+0301>b`** —
+///   a different program. The same fusion hides a backtick (unterminated command substitution:
+///   `sh` aborts with a syntax error and the hook never runs) and a `'` (which would otherwise
+///   break the writer's own `'\''` escape).
+///
+/// Scanning scalars closes all of it at once, and is a strict superset of the `Character` check,
+/// so every path that quoted before still quotes and — the invariant that actually matters —
+/// every path that was **already shell-word-safe** still contains no unsafe scalar and is still
+/// emitted verbatim. See ``shellQuotedPath(_:)``'s identity requirement.
 private let shellUnsafeScalars: Set<Unicode.Scalar> = Set(
     shellUnsafeCharacters.flatMap { $0.unicodeScalars })
+
+/// The two scalars the quoting round-trip is written in terms of, spelled in the scalar view the
+/// writer and the decoder both operate on.
+private let singleQuoteScalar: Unicode.Scalar = "'"
+private let backslashScalar: Unicode.Scalar = "\\"
 
 /// Scalar-view spellings of the three literals ``isClaudioBinaryPath(_:claudioRoot:)`` compares
 /// against. That function decides path structure on Unicode *scalars* rather than `Character`s
@@ -87,11 +109,35 @@ private let claudioBasenameScalars = Array("claudio".unicodeScalars)
 /// the hook never fired, and (before this) `uninstall` could not even recognize it to clean
 /// it up. Quoting is what makes the T4 concern structurally impossible rather than merely
 /// asserted about the happy path.
+///
+/// **Identity requirement.** For every path that already works unquoted — plain ASCII, CJK,
+/// anything carrying no unsafe scalar — this must return `path` byte-for-byte, because `install`'s
+/// idempotency check and ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` compare the
+/// emitted command for exact equality against what is already in `settings.json`. Widening the
+/// quoted set beyond ``shellUnsafeScalars`` would make an upgraded claudio fail to recognize its
+/// own hook and append a duplicate; narrowing it re-opens the mangling above.
+///
+/// Both the unsafe scan and the `'\''` escape run on ``String/unicodeScalars``, never on
+/// `Character`s: a `'` fused with a following combining mark is one `Character` that is not `'`,
+/// so a `Character`-level escape would emit the quote unescaped and produce a word `/bin/sh`
+/// cannot parse — and a `Character`-level scan would not have quoted the path at all. See
+/// ``shellUnsafeScalars``.
 public func shellQuotedPath(_ path: String) -> String {
-    guard path.isEmpty || path.contains(where: { shellUnsafeCharacters.contains($0) }) else {
-        return path
+    guard path.isEmpty || path.unicodeScalars.contains(where: { shellUnsafeScalars.contains($0) })
+    else { return path }
+
+    var quoted = String.UnicodeScalarView()
+    quoted.append(singleQuoteScalar)
+    for scalar in path.unicodeScalars {
+        guard scalar == singleQuoteScalar else {
+            quoted.append(scalar)
+            continue
+        }
+        // The standard idiom: close the quote, emit an escaped literal quote, reopen.
+        quoted.append(contentsOf: "'\\''".unicodeScalars)
     }
-    return "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    quoted.append(singleQuoteScalar)
+    return String(quoted)
 }
 
 // MARK: - Matcher
@@ -259,31 +305,40 @@ public func binaryPathContradictsItsNamespace(_ binaryPath: String) -> Bool {
 /// file's first draft tokenized on whitespace alone, and `'`/`\` are neither. So
 /// ``matchedClaudioEvent(inHookCommand:claudioRoot:)`` tries the raw word alongside whatever
 /// this returns, rather than treating `nil` (or a lossy decode) as "not ours".
+///
+/// Scans ``String/unicodeScalars`` because ``shellQuotedPath(_:)`` *emits* scalars, and the two
+/// are only a round-trip pair if they agree on what a quote is. On `Character`s they do not: in
+/// the encoding of a path whose `'` is followed by a combining mark, the idiom's final quote fuses
+/// with that mark into one cluster that compares unequal to `'`, so a `Character`-level scan would
+/// leave the word's quote nesting unbalanced and hand back a string with a stray `'` in it. Every
+/// all-ASCII word — i.e. every word this decoder has ever actually seen — decodes identically
+/// under both views.
 private func shellWordContents(_ rawWord: String) -> String? {
-    var contents = ""
+    var contents = String.UnicodeScalarView()
     var inSingleQuotes = false
-    var index = rawWord.startIndex
+    let scalars = Array(rawWord.unicodeScalars)
+    var index = 0
 
-    while index < rawWord.endIndex {
-        let character = rawWord[index]
-        if character == "'" {
+    while index < scalars.count {
+        let scalar = scalars[index]
+        if scalar == singleQuoteScalar {
             inSingleQuotes.toggle()
-            index = rawWord.index(after: index)
+            index += 1
             continue
         }
-        if character == "\\" && !inSingleQuotes {
+        if scalar == backslashScalar && !inSingleQuotes {
             // The only backslash `shellQuotedPath` ever emits is the `'\''` idiom's.
-            let next = rawWord.index(after: index)
-            guard next < rawWord.endIndex, rawWord[next] == "'" else { return nil }
-            contents.append("'")
-            index = rawWord.index(after: next)
+            let next = index + 1
+            guard next < scalars.count, scalars[next] == singleQuoteScalar else { return nil }
+            contents.append(singleQuoteScalar)
+            index = next + 1
             continue
         }
-        contents.append(character)
-        index = rawWord.index(after: index)
+        contents.append(scalar)
+        index += 1
     }
 
-    return inSingleQuotes ? nil : contents
+    return inSingleQuotes ? nil : String(contents)
 }
 
 /// Whether `path` is claudio's own binary inside `claudioRoot`: literally prefixed by

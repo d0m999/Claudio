@@ -494,6 +494,107 @@ func runHookCommandMatchingSuites() {
     }
 
     suite(
+        "shellQuotedPath: decides on Unicode SCALARS, not Characters — a metacharacter fused with"
+            + " a following combining mark (or a CR+LF pair) is ONE Character equal to no member of"
+            + " the unsafe set, while /bin/sh still reads the underlying byte and mangles the word"
+    ) {
+        // Each row: a path whose only unsafe scalar is invisible at Character granularity, and the
+        // damage `/bin/sh` does to it unquoted. A `Character`-level scan emitted every one of these
+        // verbatim — the glob row then execs a *different binary* (pinned live, next suite).
+        let fused: [(path: String, scalar: Unicode.Scalar, damage: String)] = [
+            ("/Users/a*\u{0301}b/.claudio/bin/claudio", "*", "globs, and execs a different binary"),
+            ("/Users/a`\u{0301}b/.claudio/bin/claudio", "`", "unterminated command substitution"),
+            ("/Users/a'\u{0301}b/.claudio/bin/claudio", "'", "breaks the writer's own '\\'' escape"),
+            ("/Users/a\r\nb/.claudio/bin/claudio", "\r", "CR+LF splits the command in two"),
+        ]
+        for (path, scalar, damage) in fused {
+            expect(
+                path.unicodeScalars.contains(scalar),
+                "premise: \(path.debugDescription) must really carry the \(scalar.debugDescription)"
+                    + " scalar — otherwise this row pins nothing")
+            expect(
+                !path.contains(Character(scalar)),
+                "premise: \(scalar.debugDescription) must be INVISIBLE at Character granularity in"
+                    + " \(path.debugDescription) — that fusion is the whole bug; if this fails the"
+                    + " row would pass for the wrong reason")
+            expect(
+                shellQuotedPath(path).hasPrefix("'") && shellQuotedPath(path).hasSuffix("'"),
+                "unquoted, /bin/sh \(damage): \(path.debugDescription) must be quoted, got"
+                    + " \(shellQuotedPath(path).debugDescription)")
+        }
+    }
+
+    suite(
+        "shellQuotedPath: a REAL /bin/sh execs the intended binary even when the glob character is"
+            + " fused with a combining mark — the Character-level scan left this path unquoted, so"
+            + " the hook silently ran a DIFFERENT program under a sibling directory"
+    ) {
+        withTempDirectory { root in
+            // `a!<U+0301>b` sorts before `a*<U+0301>b` (0x21 < 0x2A), so the glob `a*<U+0301>b`
+            // expands to the decoy first and /bin/sh execs *that*.
+            let decoyPath = root.path + "/a!\u{0301}b"
+            let realPath = root.path + "/a*\u{0301}b"
+            for directory in [decoyPath, realPath] {
+                try? FileManager.default.createDirectory(
+                    atPath: directory, withIntermediateDirectories: true)
+                let script = directory + "/claudio"
+                writeFixture("#!/bin/sh\necho \"$0\"\n", to: URL(fileURLWithPath: script))
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755], ofItemAtPath: script)
+            }
+            let target = realPath + "/claudio"
+            let runner = SystemCommandRunner()
+
+            let bare = runner.run(
+                executablePath: "/bin/sh", arguments: ["-c", target], timeout: 5.0)
+            let quoted = runner.run(
+                executablePath: "/bin/sh", arguments: ["-c", shellQuotedPath(target)], timeout: 5.0)
+
+            guard case .completed(_, let bareOut) = bare, case .completed(_, let quotedOut) = quoted
+            else {
+                expect(false, "premise: both invocations must complete, got \(bare) / \(quoted)")
+                return
+            }
+            expect(
+                bareOut.trimmingCharacters(in: .whitespacesAndNewlines) == decoyPath + "/claudio",
+                "premise: unquoted, the fused glob must run the DECOY binary — that is the bug being"
+                    + " fixed, and if the shell did not glob here the next assertion proves nothing."
+                    + " got \(bareOut)")
+            expect(
+                quotedOut.trimmingCharacters(in: .whitespacesAndNewlines) == target,
+                "quoted, /bin/sh must exec exactly the path we named, got \(quotedOut)")
+        }
+    }
+
+    suite(
+        "claudioHookCommand → matchedClaudioEvent round-trips a path whose metacharacter is fused"
+            + " with a combining mark: the writer quotes it on scalars and the decoder unquotes it"
+            + " on scalars, so uninstall can still sweep the entry install just wrote"
+    ) {
+        let roots = [
+            "/Users/a*\u{0301}b/.claudio",
+            "/Users/a'\u{0301}b/.claudio",  // the `'\''` escape only balances on scalars
+            "/Users/a\r\nb/.claudio",
+        ]
+        for root in roots {
+            let binary = "\(root)/bin/claudio"
+            expect(
+                !binaryPathContradictsItsNamespace(binary),
+                "premise: install must accept \(binary.debugDescription) — if it refused, the"
+                    + " round-trip below would be vacuous")
+            for event in Event.allCases {
+                let written = claudioHookCommand(for: event, claudioBinaryPath: binary)
+                expect(
+                    matchedClaudioEvent(inHookCommand: written, claudioRoot: root) == event,
+                    "uninstall must recognize the entry install wrote for \(event) at"
+                        + " \(binary.debugDescription), got"
+                        + " \(String(describing: matchedClaudioEvent(inHookCommand: written, claudioRoot: root)))"
+                )
+            }
+        }
+    }
+
+    suite(
         "shellWordContents (via the matcher): rejects a backslash escaping anything but a single"
             + " quote — shellQuotedPath emits no other backslash, so accepting one would widen"
             + " the destructive match surface for a shape we never produced"
