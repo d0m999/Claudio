@@ -307,6 +307,100 @@ func runVersionCompatibilitySuites() {
             "expected .completed(exitCode: 3, stdout: \"\"), got \(result)")
     }
 
+    suite(
+        "SystemCommandRunner.run: stdout larger than the ~64KB pipe buffer is drained without"
+            + " deadlocking the child — the property the original background reader existed to"
+            + " provide, which the single-threaded poll(2) drain must not give up"
+    ) {
+        let runner = SystemCommandRunner()
+        let result = runner.run(
+            executablePath: "/bin/sh",
+            arguments: ["-c", "head -c 200000 /dev/zero | tr '\\0' 'a'"], timeout: 10.0)
+        guard case .completed(let exitCode, let stdout) = result else {
+            expect(false, "expected .completed, got \(result)")
+            return
+        }
+        expect(exitCode == 0, "expected exit 0, got \(exitCode)")
+        expect(
+            stdout.count == 200_000,
+            "all 200000 bytes must be read; a reader that stopped early would let the child"
+                + " block on a full pipe forever, got \(stdout.count)")
+    }
+
+    suite(
+        "SystemCommandRunner.run: retained stdout is capped at 1 MiB, and the child is still"
+            + " drained to EOF past the cap so it never blocks and never becomes a timeout"
+    ) {
+        // Without the cap this returns ~4 MiB and a runaway child grows the menu-bar app's
+        // memory without bound; with a cap that STOPS reading instead of dropping, the child
+        // would wedge on a full pipe and this would report .timedOut.
+        let runner = SystemCommandRunner()
+        let result = runner.run(
+            executablePath: "/bin/sh",
+            arguments: ["-c", "head -c 4194304 /dev/zero | tr '\\0' 'a'"], timeout: 20.0)
+        guard case .completed(let exitCode, let stdout) = result else {
+            expect(false, "the cap must not turn a well-behaved child into a timeout, got \(result)")
+            return
+        }
+        expect(exitCode == 0, "the child must still exit cleanly, got \(exitCode)")
+        expect(
+            stdout.count == 1 << 20,
+            "retained output must be capped at exactly 1 MiB, got \(stdout.count)")
+    }
+
+    suite(
+        "SystemCommandRunner.run: the timeout covers READING stdout, not just waiting for exit"
+            + " — a child that exits while a grandchild still holds its stdout never EOFs the"
+            + " pipe, and must not be able to block run() past the deadline"
+    ) {
+        // The regression this pins: the original implementation waited for the process's
+        // termination semaphore with the timeout, then did an UNBOUNDED `readQueue.sync {}` to
+        // collect a background `readDataToEndOfFile()`. EOF arrives only when *every* copy of
+        // the write end closes, so `sh` exiting while its backgrounded `sleep` keeps stdout
+        // open satisfied the semaphore instantly and then hung on the collect — measured 4.02s
+        // against a 0.5s timeout, with the whole budget already spent. `claude --version`
+        // happens not to daemonize today, but this type is slated for in-process reuse by the
+        // menu-bar app, and "绝不能挂住" is the contract regardless of the callee.
+        let runner = SystemCommandRunner()
+        let start = Date()
+        let result = runner.run(
+            executablePath: "/bin/sh", arguments: ["-c", "sleep 3 & echo hi"], timeout: 0.3)
+        let elapsed = Date().timeIntervalSince(start)
+
+        expect(
+            result == .timedOut,
+            "stdout never reached EOF within the deadline, so the honest answer is .timedOut,"
+                + " not a .completed carrying output we could not finish reading; got \(result)")
+        expect(
+            elapsed < 1.5,
+            "run() must honor its deadline even though the child exited immediately and only a"
+                + " grandchild holds the pipe open (took \(elapsed)s, timeout was 0.3s)")
+    }
+
+    suite(
+        "SystemCommandRunner.run: repeated grandchild-holds-stdout timeouts strand no threads"
+            + " — the deadline-bounded drain runs on the caller's thread, so there is no reader"
+            + " to leak in the first place"
+    ) {
+        let iterations = 20
+        let runner = SystemCommandRunner()
+        let before = liveThreadCount()
+        for _ in 0..<iterations {
+            _ = runner.run(
+                executablePath: "/bin/sh", arguments: ["-c", "sleep 2 & echo hi"], timeout: 0.05)
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        let after = liveThreadCount()
+
+        expect(
+            before > 0 && after > 0,
+            "premise: liveThreadCount() must actually work, got before=\(before) after=\(after)")
+        expect(
+            after - before < 5,
+            "\(iterations) unreadable-stdout timeouts must not each strand a reader thread:"
+                + " thread count went \(before) → \(after) (delta \(after - before))")
+    }
+
     suite("SystemCommandRunner.run: a failed launch leaks neither the stdout reader nor its pipe")
     {
         // `.launchFailed` is the branch that fires whenever `claude` isn't on PATH — the most

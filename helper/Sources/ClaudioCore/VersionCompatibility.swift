@@ -133,12 +133,29 @@ public protocol CommandRunning: Sendable {
     func run(executablePath: String, arguments: [String], timeout: TimeInterval) -> CommandRunResult
 }
 
-/// Production ``CommandRunning``: launches via `Process`, reads stdout on a background queue
-/// concurrently with waiting for exit (reading and waiting on the same thread would risk a
-/// classic deadlock if a child ever wrote enough output to fill the pipe buffer before
-/// exiting — irrelevant for `claude --version`'s tiny output today, but this must be correct
-/// regardless), and actively terminates the child if `timeout` elapses first.
+/// Production ``CommandRunning``: launches via `Process`, drains stdout with a **deadline-
+/// bounded `poll(2)` loop on the calling thread**, and actively terminates the child if
+/// `timeout` elapses first.
+///
+/// **Why not a background `readDataToEndOfFile()` reader.** The obvious shape — spawn a queue
+/// to read stdout, wait on the process's `terminationHandler` semaphore with the timeout, then
+/// `readQueue.sync {}` to collect — is wrong in a way that only shows up off the happy path.
+/// `readDataToEndOfFile()` returns at EOF, and EOF arrives only when **every** copy of the
+/// pipe's write end is closed. A child that exits while leaving a grandchild holding its
+/// stdout (`sh -c 'sleep 4 & echo hi'`, and any real command that daemonizes) satisfies the
+/// termination semaphore immediately but never EOFs the pipe: the `readQueue.sync {}` after it
+/// then waits **unbounded**, with the whole timeout budget already spent. Measured: 4.02s for
+/// a 0.5s timeout. That silently breaks this type's one documented promise — and doctor's
+/// anchor, "绝不能挂住" — for exactly the callers (`claude --version`, later the menu-bar
+/// app's in-process reuse) it exists to protect. Draining with `poll(2)` against an absolute
+/// deadline makes the timeout cover the read, not just the wait, and needs no second thread,
+/// so it also retires the `.launchFailed` reader-leak this replaces rather than patching it.
 public struct SystemCommandRunner: CommandRunning {
+    /// Ceiling on retained stdout. `claude --version` emits ~22 bytes; a runaway child cannot
+    /// grow this process's memory while we drain it to EOF. Bytes past the cap are read (so
+    /// the child never blocks on a full pipe, and EOF still arrives) and dropped.
+    private static let maximumOutputBytes = 1 << 20
+
     public init() {}
 
     public func run(
@@ -152,77 +169,101 @@ public struct SystemCommandRunner: CommandRunning {
         let outputPipe = Pipe()
         process.standardOutput = outputPipe
 
-        let output = CommandOutputBox()
-        let readQueue = DispatchQueue(label: "claudio.command-runner.stdout-read")
-        readQueue.async {
-            // Blocks until the child's end of the pipe closes (it exits, or is terminated
-            // below) — never until `timeout`, since this runs on its own queue, not the one
-            // `semaphore.wait(timeout:)` below blocks.
-            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            output.set(data)
-        }
-
-        let semaphore = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in semaphore.signal() }
+        // Installed before `run()` so no exit can be missed. Kept installed (never nil-ed) on
+        // every path: `Process` reaps the child through its SIGCHLD-driven waiter only while a
+        // handler is present, and dropping it would leave a zombie behind once a terminated
+        // child actually exits (mirrors `SystemProcessSpawner`'s reaping rationale in
+        // `Play.swift`).
+        let exited = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in exited.signal() }
 
         do {
             try process.run()
         } catch {
-            // A successful `run()` hands the pipe's write end to the child and closes the
-            // parent's own copy — that close is what later delivers EOF to the background
-            // `readDataToEndOfFile()` above. When `run()` *throws* (the executable doesn't
-            // exist — i.e. `claude` isn't on PATH, the single most likely real-world branch
-            // here) no child ever existed, nothing closed the write end, and that reader
-            // would block on it forever: one wedged thread plus both pipe fds, retained for
-            // the calling process's whole lifetime. Harmless for a one-shot `claudio doctor`,
-            // unbounded the moment a long-lived caller (the menu-bar app) reuses this.
-            // Closing the write end here hands the reader its EOF so the thread unwinds.
-            try? outputPipe.fileHandleForWriting.close()
+            // No child was ever created, so nothing holds either pipe end but us; `outputPipe`
+            // is released with this frame and its `FileHandle`s close on dealloc. Nothing to
+            // unwind — there is no reader thread anymore.
             return .launchFailed
         }
 
-        if semaphore.wait(timeout: .now() + timeout) == .timedOut {
-            // Real enforcement, not "assume it's fast": actively stop the still-running
-            // child rather than leaving it to run indefinitely in the background just
-            // because we gave up waiting on it. Keep a (now no-op) terminationHandler
-            // installed rather than `nil` — `Process` reaps the child via its
-            // SIGCHLD-driven waiter only while a handler is installed (mirrors
-            // `SystemProcessSpawner`'s identical reaping rationale in `Play.swift`); nil-ing
-            // it out here would leak a zombie once the terminated child actually exits.
-            process.terminationHandler = { _ in }
-            if process.isRunning {
-                process.terminate()
-            }
-            return .timedOut
-        }
+        // `Process.run()` has already closed the parent's copy of the write end, so the only
+        // remaining holders are the child and anything it hands the descriptor to. EOF here
+        // therefore means "nobody can write to us again" — the precondition for the exit wait
+        // below to be short rather than open-ended.
+        let deadline = Date().addingTimeInterval(timeout)
+        let (stdout, sawEOF) = drainToEOF(outputPipe.fileHandleForReading, deadline: deadline)
 
-        // The process has exited, which closes its end of the pipe and unblocks the
-        // background `readDataToEndOfFile()` above. `readQueue` is serial, so `sync {}`
-        // submitted after that `.async` block only runs once it has finished — this is what
-        // guarantees `output` is fully populated before it's read back below.
-        readQueue.sync {}
-        let stdout = String(data: output.data, encoding: .utf8) ?? ""
+        if !sawEOF {
+            return terminate(process, returning: .timedOut)
+        }
+        let remaining = max(deadline.timeIntervalSinceNow, 0)
+        guard exited.wait(timeout: .now() + remaining) == .success else {
+            // stdout closed but the child is still running past the deadline.
+            return terminate(process, returning: .timedOut)
+        }
         return .completed(exitCode: process.terminationStatus, stdout: stdout)
     }
-}
 
-/// Thread-safe holder for `SystemCommandRunner`'s asynchronously-read stdout — written from
-/// the background read queue, read back on the calling thread after `readQueue.sync {}`
-/// establishes the happens-before ordering between them.
-private final class CommandOutputBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var _data = Data()
+    /// Reads `handle` until EOF or `deadline`, whichever comes first. Returns what was read
+    /// (capped at ``maximumOutputBytes``) and whether EOF was actually reached — a `false`
+    /// there means some descriptor still holds the write end, and the caller must not wait on
+    /// it any further.
+    private func drainToEOF(_ handle: FileHandle, deadline: Date) -> (String, Bool) {
+        let descriptor = handle.fileDescriptor
+        let flags = fcntl(descriptor, F_GETFL, 0)
+        guard flags != -1, fcntl(descriptor, F_SETFL, flags | O_NONBLOCK) != -1 else {
+            // Without O_NONBLOCK a `read` could block past the deadline; refuse to read at all
+            // rather than risk the hang this whole design exists to prevent.
+            return ("", false)
+        }
 
-    func set(_ newData: Data) {
-        lock.lock()
-        _data = newData
-        lock.unlock()
+        var collected = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+
+        while true {
+            let remaining = deadline.timeIntervalSinceNow
+            guard remaining > 0 else { return (decode(collected), false) }
+
+            var descriptors = pollfd(fd: descriptor, events: Int16(POLLIN), revents: 0)
+            // `remaining > 0` guarantees this rounds up to at least 1ms, so `poll` always
+            // sleeps rather than spinning; the 1s ceiling just bounds each slice so the
+            // deadline is re-checked regularly.
+            let milliseconds = Int32(min(remaining * 1000, 1000).rounded(.up))
+            let ready = withUnsafeMutablePointer(to: &descriptors) { poll($0, 1, milliseconds) }
+            let pollFailure = errno
+            if ready < 0 {
+                if pollFailure == EINTR { continue }
+                return (decode(collected), false)
+            }
+            if ready == 0 { continue }  // slice expired; re-check the deadline
+
+            // POLLHUP/POLLERR/POLLNVAL need no special case: each makes the `read` below
+            // return 0 (EOF) or -1 with a terminal errno, both of which exit the loop.
+            // `errno` is captured immediately, before `decode`/`append` can clobber it.
+            let count = buffer.withUnsafeMutableBytes { read(descriptor, $0.baseAddress, $0.count) }
+            let readFailure = errno
+            if count > 0 {
+                let headroom = Self.maximumOutputBytes - collected.count
+                if headroom > 0 { collected.append(contentsOf: buffer[0..<min(count, headroom)]) }
+                continue  // keep draining past the cap so the child never blocks and EOF arrives
+            }
+            if count == 0 { return (decode(collected), true) }  // EOF: no writer remains
+            if readFailure == EINTR || readFailure == EAGAIN || readFailure == EWOULDBLOCK {
+                continue
+            }
+            return (decode(collected), false)
+        }
     }
 
-    var data: Data {
-        lock.lock()
-        defer { lock.unlock() }
-        return _data
+    private func decode(_ data: Data) -> String { String(decoding: data, as: UTF8.self) }
+
+    /// Real enforcement, not "assume it's fast": actively stop a child we have stopped waiting
+    /// on, rather than leaving it running in the background because we gave up.
+    private func terminate(_ process: Process, returning result: CommandRunResult)
+        -> CommandRunResult
+    {
+        if process.isRunning { process.terminate() }
+        return result
     }
 }
 
