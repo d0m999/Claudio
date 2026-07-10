@@ -1,7 +1,8 @@
 import Foundation
 
 /// The `~/.claudio/config.json` model — the single source of truth for user settings
-/// (ENGINEERING.md 决议 6: the GUI writes it, `claudio play` only reads it).
+/// (ENGINEERING.md「工程落地细节 ⑥ config.json 归属」: the GUI writes it, `claudio play`
+/// only reads it — *not* 决议 6, which is the diagnostic-log decision).
 ///
 /// v1 fields only: `selected_pack` / `master_volume` / per-event `enabled` (决议 3).
 /// **No `night_dim`** — deferred to v2 (Outside Voice T2).

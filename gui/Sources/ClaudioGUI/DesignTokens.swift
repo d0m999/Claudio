@@ -55,14 +55,23 @@ enum ClaudioColor {
         scheme == .dark ? Color(hex: "D97757") : Color(hex: "C4633C")
     }
 
+    /// `clay-soft` — DESIGN.md gives this as `rgba(...)`, not a plain hex (same reason as
+    /// ``hairlineStrong(_:)``). Used only by the drop-zone's hover background (T8; DESIGN.md
+    /// "拖入 drop-zone": "hover 命中 → 边框 / 文字转黏土 + `clay-soft` 底").
+    static func claySoft(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 217 / 255, green: 119 / 255, blue: 87 / 255, opacity: 0.15)
+            : Color(red: 196 / 255, green: 99 / 255, blue: 60 / 255, opacity: 0.12)
+    }
+
     /// UI-semantic `success` — used only for the "已接管" header dot in T7's scope.
     static func success(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color(hex: "34C759") : Color(hex: "2FA24E")
     }
 
-    /// UI-semantic `error` (真红) — **only** for app self-errors (DESIGN.md 125), never
-    /// the four-event semantic layer (`StopFailure` stays amber, out of this file's
-    /// scope entirely).
+    /// UI-semantic `error` (真红) — **only** for app self-errors
+    /// (DESIGN.md「错误态用色（关键约束）」), never the four-event semantic layer
+    /// (`StopFailure` stays amber, out of this file's scope entirely).
     static func error(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color(hex: "FF453A") : Color(hex: "E0453A")
     }

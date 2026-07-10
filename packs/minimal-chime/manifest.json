@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "minimal-chime",
+  "name": "极简铃音",
+  "author": "Claudio",
+  "license": "CC0-1.0",
+  "version": "1.0.0",
+  "events": {
+    "stop": "stop.mp3",
+    "stop_failure": "stop_failure.mp3",
+    "notification": "notification.mp3",
+    "subagent_stop": "subagent_stop.mp3"
+  }
+}

@@ -10,6 +10,6 @@ struct Claudio: ParsableCommand {
         commandName: "claudio",
         abstract: "Claudio — Claude Code 的语义化提示音 helper。",
         version: "0.0.1",
-        subcommands: [Doctor.self, Play.self, Install.self, Uninstall.self, Use.self]
+        subcommands: [Doctor.self, Play.self, Install.self, Uninstall.self, Use.self, Setup.self]
     )
 }

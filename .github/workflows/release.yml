@@ -1,0 +1,241 @@
+name: Release
+
+# 触发：push 一个形如 vX.Y.Z 的 tag（例如 `git tag v1.0.0 && git push origin v1.0.0`）。
+# 链路：build 出 universal（arm64 + x86_64）的 `claudio` CLI 与 `ClaudioGUI` 可执行文件
+#   → 各自两个架构分别 `swift build`，再手动 `lipo -create` 合并
+#   → 组装未签名 ad-hoc `Claudio.app`
+#   → 打 DMG
+#   → 建 GitHub Release 并上传 DMG
+#   → 更新自建 Homebrew tap（`<owner>/homebrew-tap`）里的 cask formula。
+#
+# v1 范围（ENGINEERING.md Distribution Plan）：未签名 ad-hoc 分发，不做代码签名 / 公证。
+# 参考了 narlei/claudecodenotify 的 release.yml / homebrew.yml 结构（只读查看，未 fork）。
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+# 同一 tag/ref 不并发跑两份 release。
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  APP_NAME: Claudio
+  CASK_NAME: claudio
+  BUNDLE_ID: com.claudio.app
+  MACOS_DEPLOYMENT_TARGET: "12.0" # 对齐 helper/Package.swift · gui/Package.swift 的 .macOS(.v12)
+
+jobs:
+  build:
+    name: Build universal binary + DMG
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      tag: ${{ steps.ver.outputs.tag }}
+      dmg_name: ${{ steps.dmg.outputs.dmg_name }}
+      sha256: ${{ steps.dmg.outputs.sha256 }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Derive version from tag
+        id: ver
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION="${TAG#v}"
+          if [ -z "$VERSION" ]; then
+            echo "::error::empty version parsed from tag '$TAG'"
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building ${{ env.APP_NAME }} $VERSION (tag $TAG)"
+
+      - name: Toolchain
+        run: swift --version
+
+      # --- helper (claudio CLI)：两个架构各自单独 `swift build`，再手动 lipo 合并 ---
+      - name: Build helper (claudio CLI) — arm64
+        working-directory: helper
+        run: swift build -c release --arch arm64
+
+      - name: Build helper (claudio CLI) — x86_64
+        working-directory: helper
+        run: swift build -c release --arch x86_64
+
+      - name: Lipo-merge helper into universal `claudio`
+        run: |
+          set -euo pipefail
+          mkdir -p dist/bin
+          lipo -create \
+            helper/.build/arm64-apple-macosx/release/claudio \
+            helper/.build/x86_64-apple-macosx/release/claudio \
+            -output dist/bin/claudio
+          chmod +x dist/bin/claudio
+          echo "claudio archs: $(lipo -archs dist/bin/claudio)"
+
+      # --- gui (ClaudioGUI 菜单栏 app)：同样两个架构各自单独 `swift build`，再手动 lipo 合并 ---
+      - name: Build gui (ClaudioGUI) — arm64
+        working-directory: gui
+        run: swift build -c release --arch arm64
+
+      - name: Build gui (ClaudioGUI) — x86_64
+        working-directory: gui
+        run: swift build -c release --arch x86_64
+
+      - name: Lipo-merge gui into universal `ClaudioGUI`
+        run: |
+          set -euo pipefail
+          mkdir -p dist/app-bin
+          lipo -create \
+            gui/.build/arm64-apple-macosx/release/ClaudioGUI \
+            gui/.build/x86_64-apple-macosx/release/ClaudioGUI \
+            -output dist/app-bin/ClaudioGUI
+          chmod +x dist/app-bin/ClaudioGUI
+          echo "ClaudioGUI archs: $(lipo -archs dist/app-bin/ClaudioGUI)"
+
+      - name: Assemble Claudio.app
+        run: |
+          set -euo pipefail
+          APP="dist/${{ env.APP_NAME }}.app"
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/packs"
+
+          cp dist/app-bin/ClaudioGUI "$APP/Contents/MacOS/${{ env.APP_NAME }}"
+
+          # 内置 helper CLI 随 app bundle 分发；app 首次运行调 `claudio install` 把它
+          # 装到固定路径 ~/.claudio/bin/claudio（ENGINEERING.md 工程落地细节③：固定安装路径 + 幂等标记）。
+          cp dist/bin/claudio "$APP/Contents/Resources/bin/claudio"
+
+          # 内置声音包只读随 app bundle 分发（ENGINEERING.md 工程落地细节②：声音包存储根 + 查找顺序）。
+          cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
+
+          cat > "$APP/Contents/Info.plist" <<PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleName</key><string>${{ env.APP_NAME }}</string>
+            <key>CFBundleDisplayName</key><string>${{ env.APP_NAME }}</string>
+            <key>CFBundleIdentifier</key><string>${{ env.BUNDLE_ID }}</string>
+            <key>CFBundleVersion</key><string>${{ steps.ver.outputs.version }}</string>
+            <key>CFBundleShortVersionString</key><string>${{ steps.ver.outputs.version }}</string>
+            <key>CFBundleExecutable</key><string>${{ env.APP_NAME }}</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>${{ env.MACOS_DEPLOYMENT_TARGET }}</string>
+            <key>LSUIElement</key><true/>
+          </dict>
+          </plist>
+          PLIST
+
+          printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+      - name: Ad-hoc codesign (v1 未签名/无公证 — 见 ENGINEERING.md Distribution Plan)
+        run: |
+          set -euo pipefail
+          codesign --force --deep --sign - "dist/${{ env.APP_NAME }}.app"
+          codesign --verify --verbose "dist/${{ env.APP_NAME }}.app"
+
+      - name: Verify universal binaries (arm64 + x86_64)
+        run: |
+          set -euo pipefail
+          for BIN in "dist/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}" \
+                     "dist/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio"; do
+            ARCHS="$(lipo -archs "$BIN")"
+            echo "$BIN archs: $ARCHS"
+            echo "$ARCHS" | grep -q x86_64 && echo "$ARCHS" | grep -q arm64 \
+              || { echo "::error::$BIN is not a universal binary: $ARCHS"; exit 1; }
+          done
+
+      - name: Build DMG
+        id: dmg
+        run: |
+          set -euo pipefail
+          DMG_NAME="${{ env.APP_NAME }}-${{ steps.ver.outputs.version }}.dmg"
+          STAGE="$(mktemp -d)"
+          cp -R "dist/${{ env.APP_NAME }}.app" "$STAGE/"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "${{ env.APP_NAME }}" -srcfolder "$STAGE" -ov -format UDZO "dist/$DMG_NAME"
+          rm -rf "$STAGE"
+
+          SHA256="$(shasum -a 256 "dist/$DMG_NAME" | awk '{print $1}')"
+          echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+          echo "DMG: dist/$DMG_NAME  sha256=$SHA256"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.ver.outputs.tag }}" \
+            "dist/${{ steps.dmg.outputs.dmg_name }}" \
+            --title "${{ env.APP_NAME }} ${{ steps.ver.outputs.version }}" \
+            --notes "未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点\"仍要打开\"。首次安装后菜单栏面板暂不会自动接管，需在 Terminal 跑一次 \`/Applications/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio setup\`（详见 docs/distribution.md）才能真正听到声音。"
+
+  update-cask:
+    name: Update Homebrew tap cask
+    needs: build
+    runs-on: macos-14
+    steps:
+      # 需自建 ${{ github.repository_owner }}/homebrew-tap 仓库（v1 尚未创建 —— 该仓库就绪前，
+      # 本 job 会在 checkout 这一步因仓库不存在 / token 缺失而失败，这是预期行为，不影响上面
+      # build job 的 Release 发布）。并在本仓库 Settings > Secrets and variables > Actions 里
+      # 配置一个对 homebrew-tap 仓库有 push 权限的 secret：HOMEBREW_TAP_TOKEN（PAT 或
+      # fine-grained token，scope 只给 homebrew-tap 一个仓库的 contents:write）。
+      - name: Checkout tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository_owner }}/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Write cask formula
+        run: |
+          set -euo pipefail
+          mkdir -p homebrew-tap/Casks
+          cat > "homebrew-tap/Casks/${{ env.CASK_NAME }}.rb" <<CASK
+          cask "${{ env.CASK_NAME }}" do
+            version "${{ needs.build.outputs.version }}"
+            sha256 "${{ needs.build.outputs.sha256 }}"
+
+            url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${{ env.APP_NAME }}-#{version}.dmg"
+            name "${{ env.APP_NAME }}"
+            desc "Claude Code 语义化提示音 · 策展声音包"
+            homepage "https://github.com/${{ github.repository }}"
+
+            depends_on macos: ">= :monterey"
+
+            app "${{ env.APP_NAME }}.app"
+
+            postflight do
+              system_command "/usr/bin/xattr",
+                             args: ["-d", "com.apple.quarantine", "#{appdir}/${{ env.APP_NAME }}.app"],
+                             must_succeed: false
+            end
+
+            caveats do
+              <<~EOS
+                未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：
+                系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点"仍要打开"。
+
+                首次安装后菜单栏面板暂不会自动接管 Claude Code 的 settings.json，
+                需在 Terminal 跑一次 #{appdir}/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio setup
+                （追加、不覆盖、自动备份；详见 docs/distribution.md）才能真正听到声音。
+              EOS
+            end
+          end
+          CASK
+
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "Casks/${{ env.CASK_NAME }}.rb"
+          git commit -m "Update ${{ env.CASK_NAME }} cask to ${{ needs.build.outputs.version }}" || echo "No changes to commit"
+          git push

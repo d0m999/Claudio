@@ -5,7 +5,8 @@ import Foundation
 /// files actually exist on disk?
 ///
 /// This intentionally does **not** model `name` / `author` / `license` / `version` /
-/// `schema` — those are validated (SPDX enum, `schema_version` compat) when `install`
+/// `schema` — those are validated (SPDX enum for `license`, and the integer `schema`
+/// field as the format's forward-compat marker) when `install`
 /// (T2) and the GUI-shared `PackManifest` (T16, "共享 PackManifest 模块与运行时查找顺序
 /// 同源") land. Unknown JSON keys are simply ignored by `Decodable`'s keyed container,
 /// so this type stays forward-compatible with the fuller schema.
@@ -85,8 +86,9 @@ func isReallyContained(_ url: URL, inside base: URL) -> Bool {
 /// Whether `directory` exists on disk **as a directory** — `FileManager.fileExists(atPath:)`
 /// alone returns `true` for a plain file too, which would let a stray regular file sitting
 /// at a pack-id's expected path be mistaken for that pack's directory (`/codex review`
-/// 2026-07-08).
-private func directoryExists(at directory: URL) -> Bool {
+/// 2026-07-08). Module-visible (not `private`) so `Setup.swift`'s bundle-adjacent-packs
+/// discovery (T17) reuses this exact check instead of a second, unaudited copy.
+func directoryExists(at directory: URL) -> Bool {
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory)
     else { return false }
