@@ -18,9 +18,14 @@ import Foundation
 //                              没真正落地二进制的情况下就把 hooks 装好——这个检查是那个
 //                              bug 修好之后的第二道防线，用来在 bug 复发或用户手动删了
 //                              二进制时也能被 `doctor` 抓到，而不是只能靠事件静默无声去猜）。
+//   (f) 版本兼容（T13）       — macOS 版本对照部署下限，纯信息性上报（真实机器上不可达的
+//                              分支，见 `VersionCompatibility.swift`）；Claude Code 版本
+//                              对照「已验证下限」2.1.201，低于/无法探测都只是 warning，
+//                              绝不硬失败、绝不挂住（子进程带真实超时）。
 //
-// Hard failures (→ non-zero exit) are ONLY (a)、(c)、(e)。Everything pack- and log-related is
-// a warning in v1 doctor, per the orchestrator's scope note for T1/T6.
+// Hard failures (→ non-zero exit) are ONLY (a)、(c)、(e)。Everything pack-、log- and
+// version-compatibility-related is a warning in v1 doctor, per the orchestrator's scope
+// note for T1/T6, extended to (f) by T13.
 
 // MARK: - (a) settings.json writability probe
 
@@ -225,6 +230,19 @@ public struct DoctorEnvironment: Sendable {
     /// invoke. Defaults to ``ClaudioPaths/claudioBinary``, injectable so tests never touch
     /// the real path.
     public let claudioBinaryPath: String
+    /// Check (f)'s Claude Code half — injectable subprocess runner, defaulting to the real,
+    /// subprocess-spawning ``SystemCommandRunner``. Tests inject a fake ``CommandRunning``
+    /// double (see `VersionCompatibilitySuite.swift`) so no test ever spawns a real `claude`
+    /// process or depends on whether/which version is installed on the machine running the
+    /// tests.
+    public let commandRunner: any CommandRunning
+    /// How long check (f) waits for `claude --version` before giving up — never blocks
+    /// longer (see ``checkClaudeCodeVersion(commandRunner:envPath:timeout:)``).
+    public let claudeVersionTimeout: TimeInterval
+    /// Injectable "what macOS version are we on" for check (f)'s macOS half — tests
+    /// simulate both above- and below-floor versions without needing to run on that actual
+    /// OS. Defaults to the real ``SemanticVersion/currentMacOS()``.
+    public let currentMacOSVersion: @Sendable () -> SemanticVersion
 
     public init(
         afplayPath: String = "/usr/bin/afplay",
@@ -233,7 +251,10 @@ public struct DoctorEnvironment: Sendable {
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         bundledPacksDirectory: URL? = nil,
         logFile: URL = ClaudioPaths.logFile,
-        claudioBinaryPath: String = ClaudioPaths.claudioBinary.path
+        claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
+        commandRunner: any CommandRunning = SystemCommandRunner(),
+        claudeVersionTimeout: TimeInterval = 2.0,
+        currentMacOSVersion: @escaping @Sendable () -> SemanticVersion = { .currentMacOS() }
     ) {
         self.afplayPath = afplayPath
         self.settingsFile = settingsFile
@@ -242,6 +263,9 @@ public struct DoctorEnvironment: Sendable {
         self.bundledPacksDirectory = bundledPacksDirectory
         self.logFile = logFile
         self.claudioBinaryPath = claudioBinaryPath
+        self.commandRunner = commandRunner
+        self.claudeVersionTimeout = claudeVersionTimeout
+        self.currentMacOSVersion = currentMacOSVersion
     }
 }
 
@@ -305,6 +329,13 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
 
     // (d) claudio.log 尾部汇总 — always a warning at worst, never a hard failure (T6).
     results.append(summarizeRecentLogFailures(logFile: environment.logFile))
+
+    // (f) 版本兼容（T13）— macOS 半信息性上报（永远 .ok），Claude Code 半对照已验证下限，
+    // 低于/无法探测都只是 warning，从不 failure。见 `VersionCompatibility.swift`。
+    results.append(macOSVersionDoctorResult(current: environment.currentMacOSVersion()))
+    results.append(
+        claudeCodeVersionDoctorResult(
+            commandRunner: environment.commandRunner, timeout: environment.claudeVersionTimeout))
 
     return DoctorReport(results: results)
 }

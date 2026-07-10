@@ -86,6 +86,41 @@ func runSettingsInstallerSuites() {
         }
     }
 
+    suite(
+        "installClaudioHooks: writes StopFailure unconditionally alongside the other three"
+            + " events — install has NO Claude Code version awareness of any kind, so an old"
+            + " client that doesn't understand StopFailure simply never fires that hook key,"
+            + " harmlessly (T13 acceptance 3a — regression pin for existing behavior, not new)"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(result == .success(.installed), "install should succeed, got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let stopFailureGroups = hooksArray(json, event: "StopFailure") ?? []
+            expect(
+                stopFailureGroups.count == 1
+                    && commands(inGroup: stopFailureGroups.first ?? [:])
+                        == [
+                            claudioHookCommand(
+                                for: .stopFailure, claudioBinaryPath: testClaudioBinaryPath)
+                        ],
+                "StopFailure must be written just like the other 3 events — install performs"
+                    + " no Claude Code version check whatsoever, got \(stopFailureGroups)")
+            for event in Event.allCases {
+                let groups = hooksArray(json, event: event.settingsName) ?? []
+                expect(
+                    groups.count == 1,
+                    "\(event.settingsName) must also be written, got \(groups.count)")
+            }
+        }
+    }
+
     suite("installClaudioHooks: appends alongside an existing other-tool hook without overwriting it") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
@@ -297,6 +332,163 @@ func runSettingsInstallerSuites() {
         }
     }
 
+    suite(
+        "uninstallClaudioHooks: sweeps a relocated/historical claudio binary path (T13"
+            + " acceptance 1: survives a future binary move) while never touching structural"
+            + " look-alikes (basename mismatch / extra argv segment / outside .claudio"
+            + " namespace / unknown event name) or an unrelated third-party hook — all in ONE"
+            + " fixture"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            // Simulates exactly the scenario T13 exists for: a PAST (or future) claudio
+            // release placed the binary at a different subdirectory under the SAME
+            // `.claudio/` namespace (`libexec/` instead of today's `bin/`). This
+            // settings.json entry was written back then; `claudioBinaryPath` passed to
+            // `uninstallClaudioHooks` below is TODAY's path, which does not textually equal
+            // this stale entry at all — only the structural match can find it.
+            let historicalPath = "/Users/tester/.claudio/libexec/claudio"
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [
+                    { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "\#(historicalPath) play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] },
+                    { "hooks": [ { "type": "command", "command": "/Users/tester/.claudio/bin/mytool play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "\#(testClaudioBinaryPath) play stop --verbose" } ] },
+                    { "hooks": [ { "type": "command", "command": "/usr/local/bin/claudio play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "/tmp/.claudio/bin/claudio play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "/Users/someone-else/.claudio/bin/claudio play stop" } ] },
+                    { "hooks": [ { "type": "command", "command": "\#(testClaudioBinaryPath) play deploy" } ] }
+                  ]
+                } }
+                """#, to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.uninstalled(count: 2)),
+                "expected exactly 2 removed (the historical relocated path + today's canonical"
+                    + " path), got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let stopGroups = hooksArray(json, event: "Stop") ?? []
+            let survivingCommands = Set(stopGroups.flatMap { commands(inGroup: $0) })
+            expect(
+                survivingCommands == [
+                    "vibe-island stop",
+                    "/Users/tester/.claudio/bin/mytool play stop",
+                    "\(testClaudioBinaryPath) play stop --verbose",
+                    "/usr/local/bin/claudio play stop",
+                    // A `.claudio` directory that is not THIS installation's root. Sweeping
+                    // these would mean `uninstall` — the one destructive path here, and the
+                    // only one that takes no backup — deleting an entry it cannot prove is
+                    // ours, on the strength of a directory *name*.
+                    "/tmp/.claudio/bin/claudio play stop",
+                    "/Users/someone-else/.claudio/bin/claudio play stop",
+                    "\(testClaudioBinaryPath) play deploy",
+                ],
+                "every look-alike and the unrelated third-party hook must survive untouched,"
+                    + " got \(survivingCommands)")
+        }
+    }
+
+    suite(
+        "uninstallClaudioHooks: a home directory with a space — sweeps BOTH today's quoted"
+            + " entry and the legacy bare one a pre-quoting claudio left behind, and still"
+            + " spares an identically-shaped entry under a different root"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let spacedBinary = "/Users/John Smith/.claudio/bin/claudio"
+
+            // What today's `install` writes (quoted, actually runnable under `/bin/sh -c`)...
+            let quoted = claudioHookCommand(for: .stop, claudioBinaryPath: spacedBinary)
+            expect(
+                quoted == "'/Users/John Smith/.claudio/bin/claudio' play stop",
+                "premise: install must quote a space-carrying path, got \(quoted)")
+            // ...versus what a pre-quoting claudio wrote: never runnable (the shell split it
+            // at the space), but unambiguously ours, so uninstall must still remove it.
+            let legacyBare = "/Users/John Smith/.claudio/bin/claudio play notification"
+
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [
+                    { "hooks": [ { "type": "command", "command": "\#(quoted)" } ] }
+                  ],
+                  "Notification": [
+                    { "hooks": [ { "type": "command", "command": "\#(legacyBare)" } ] },
+                    { "hooks": [ { "type": "command", "command": "/Users/Jane Doe/.claudio/bin/claudio play notification" } ] }
+                  ]
+                } }
+                """#, to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: spacedBinary, lockFile: lockFile)
+            expect(
+                result == .success(.uninstalled(count: 2)),
+                "expected the quoted entry + the legacy bare one, got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let surviving = Set((hooksArray(json, event: "Notification") ?? []).flatMap {
+                commands(inGroup: $0)
+            })
+            expect(
+                surviving == ["/Users/Jane Doe/.claudio/bin/claudio play notification"],
+                "another user's identically-shaped hook must survive, got \(surviving)")
+        }
+    }
+
+    suite(
+        "uninstallClaudioHooks: a claudioBinaryPath naming no .claudio root removes nothing and"
+            + " never writes (fail-closed; unreachable in production, where the path defaults"
+            + " to ClaudioPaths.claudioBinary)"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"""
+                { "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "/Users/tester/.claudio/bin/claudio play stop" } ] } ] } }
+                """#
+            writeFixture(original, to: settingsFile)
+            let before = try? String(contentsOf: settingsFile, encoding: .utf8)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: "/usr/local/bin/claudio",
+                lockFile: lockFile)
+            expect(
+                result == .success(.notInstalled),
+                "a rootless binary path anchors nothing, so nothing matches, got \(result)")
+            expect(
+                (try? String(contentsOf: settingsFile, encoding: .utf8)) == before,
+                "the file must be left byte-identical when nothing matched")
+        }
+
+        // ...but a rootless path must not MASK a real error: load + shape validation still run
+        // first, so a corrupt settings.json reports the corruption instead of "nothing
+        // installed". (The guard's position in performUninstall is what this pins.)
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture("{ not json at all", to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: "/usr/local/bin/claudio",
+                lockFile: lockFile)
+            var surfacedParseFailure = false
+            if case .failure(.parseFailure) = result { surfacedParseFailure = true }
+            expect(
+                surfacedParseFailure,
+                "a corrupt settings.json must surface .parseFailure even when the binary path"
+                    + " names no root, got \(result)")
+        }
+    }
+
     suite("uninstallClaudioHooks: removes only claudio's entry from a group shared with another tool") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
@@ -324,6 +516,48 @@ func runSettingsInstallerSuites() {
             expect(
                 commands(inGroup: stopGroups.first ?? [:]) == ["vibe-island stop"],
                 "only claudio's entry must be removed from the shared inner hooks array")
+        }
+    }
+
+    suite(
+        "uninstallClaudioHooks: preserves a third-party group that was ALREADY empty before the"
+            + " sweep — it must drop only a group WE emptied, never collaterally delete someone"
+            + " else's empty `{ \"hooks\": [] }` artifact in this no-backup path"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            // The Stop array holds a pre-existing EMPTY group (a third-party artifact) next to
+            // claudio's own group. Sweeping must remove claudio's and leave the empty one exactly
+            // as it was: `removeHookEntries` only drops a group whose inner array it just emptied
+            // (innerHooks non-empty → filtered empty), never one that was empty to begin with.
+            writeFixture(
+                #"""
+                { "hooks": {
+                  "Stop": [
+                    { "hooks": [] },
+                    { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] }
+                  ]
+                } }
+                """#, to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.uninstalled(count: 1)),
+                "expected exactly claudio's 1 entry removed, got \(result)")
+
+            let json = readJSONObject(at: settingsFile)
+            let stopGroups = hooksArray(json, event: "Stop") ?? []
+            expect(
+                stopGroups.count == 1,
+                "the already-empty third-party group must survive (only claudio's group dropped),"
+                    + " got \(stopGroups.count) groups")
+            expect(
+                commands(inGroup: stopGroups.first ?? [:]).isEmpty,
+                "the surviving group must still be the empty one, got"
+                    + " \(commands(inGroup: stopGroups.first ?? [:]))")
         }
     }
 
@@ -670,6 +904,406 @@ func runSettingsInstallerSuites() {
 
             let env = afterUninstall?["env"] as? [String: String]
             expect(env == ["FOO": "bar"], "unrelated top-level 'env' key must survive the round trip untouched")
+        }
+    }
+
+    suite(
+        "installClaudioHooks: refuses a binary path that lives inside a .claudio namespace but is"
+            + " not a shape that namespace's own uninstall could sweep, and writes NOTHING —"
+            + " shellQuotedPath is strictly more permissive than matchedClaudioEvent, so without"
+            + " this guard a future relocation into `lib exec/` would append a hook entry no"
+            + " uninstall could ever remove, to the one file uninstall takes no backup of"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
+            let before = try? String(contentsOf: settingsFile, encoding: .utf8)
+
+            let unsweepable = "/Users/tester/.claudio/lib exec/claudio"
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: unsweepable, lockFile: lockFile)
+
+            expect(
+                result == .failure(.unsweepableBinaryPath(path: unsweepable)),
+                "expected .unsweepableBinaryPath, got \(result)")
+            expect(
+                (try? String(contentsOf: settingsFile, encoding: .utf8)) == before,
+                "settings.json must be left byte-identical when install refuses the path")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: settingsFile.path + ".claudio.bak"),
+                "no backup may be created when install never writes")
+        }
+    }
+
+    suite(
+        "installClaudioHooks: still accepts a binary path that names NO .claudio namespace at all."
+            + " uninstall fail-closes on such a path rather than claiming it could sweep it, so"
+            + " there is no contradiction to refuse — and HookStatusSuite's stale-namespace /"
+            + " self-heal coverage installs a `.claudio-OLD` entry through this very branch"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: "/Users/tester/.claudio-OLD/bin/claudio", lockFile: lockFile)
+            expect(result == .success(.installed), "expected .installed, got \(result)")
+        }
+    }
+
+    suite(
+        "installClaudioHooks x uninstallClaudioHooks: the round trip holds for every home segment"
+            + " shape claudio does not control — whatever install is willing to write for a path"
+            + " inside our namespace, uninstall anchored at that same namespace must remove again."
+            + " This is the invariant binaryPathContradictsItsNamespace exists to keep true"
+    ) {
+        let homes = [
+            "/Users/tester",  // the plain case
+            "/Users/John Smith",  // space: the AD/network-account case
+            "/Users/o'brien",  // apostrophe: quoted, and lossily decoded
+            "/Users/a$b",  // `$`: quoted, never expanded
+            "/Users/张三",  // non-ASCII, unquoted
+            "/Users/e\u{301}dith",  // NFD (e + COMBINING ACUTE): the scalar rewrite's raison d'être,
+            //                          exercised end-to-end through settings.json, not just the predicate
+        ]
+        for home in homes {
+            let binary = "\(home)/.claudio/bin/claudio"
+            expect(
+                !binaryPathContradictsItsNamespace(binary),
+                "sanity: install must be willing to write \(binary)")
+
+            withTempDirectory { root in
+                let settingsFile = root.appendingPathComponent("settings.json")
+                let lockFile = root.appendingPathComponent("play.lock")
+                writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
+
+                let installed = installClaudioHooks(
+                    settingsFile: settingsFile, claudioBinaryPath: binary, lockFile: lockFile)
+                expect(
+                    installed == .success(.installed),
+                    "install must succeed for home \(home), got \(installed)")
+
+                let removed = uninstallClaudioHooks(
+                    settingsFile: settingsFile, claudioBinaryPath: binary, lockFile: lockFile)
+                expect(
+                    removed == .success(.uninstalled(count: Event.allCases.count)),
+                    "uninstall must sweep all \(Event.allCases.count) entries install wrote for"
+                        + " home \(home), got \(removed)")
+            }
+        }
+    }
+
+    suite(
+        "SettingsUpdateError.unsweepableBinaryPath: its user-facing description names the offending"
+            + " path verbatim, so a future release that trips the guard gives an actionable message"
+            + " rather than an opaque failure"
+    ) {
+        let path = "/Users/tester/.claudio/lib exec/claudio"
+        let description = SettingsUpdateError.unsweepableBinaryPath(path: path).description
+        expect(
+            description.contains(path),
+            "the description must echo the offending path, got: \(description)")
+        expect(
+            description.contains("claudio") && !description.isEmpty,
+            "the description must be a non-empty human message, got: \(description)")
+    }
+
+    suite(
+        "installClaudioHooks: the unsweepable-path guard is a pre-I/O precondition — it fires"
+            + " BEFORE any read/write/lock, so an unsweepable path is refused as such even when"
+            + " settings.json is absent or its directory is unwritable, never masked as a"
+            + " write/probe failure. This pins the guard's POSITION, which the error-precedence a"
+            + " caller sees depends on"
+    ) {
+        let unsweepable = "/Users/tester/.claudio/lib exec/claudio"
+
+        // (a) settings.json ABSENT: a normal install would succeed here (loadRoot yields [:]),
+        // so getting .unsweepableBinaryPath proves the guard ran before the load.
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: unsweepable, lockFile: lockFile)
+            expect(
+                result == .failure(.unsweepableBinaryPath(path: unsweepable)),
+                "an absent settings.json must still surface .unsweepableBinaryPath, got \(result)")
+            expect(
+                !FileManager.default.fileExists(atPath: settingsFile.path),
+                "the guard must not have created settings.json")
+        }
+
+        // (b) settings.json in a NON-EXISTENT directory (its write/probe would fail): the guard
+        // must still win, so the caller sees the real cause (bad binary path) not a probe failure.
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("no-such-dir/settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: unsweepable, lockFile: lockFile)
+            expect(
+                result == .failure(.unsweepableBinaryPath(path: unsweepable)),
+                "an unwritable target must still surface .unsweepableBinaryPath (guard precedes the"
+                    + " writability probe), got \(result)")
+        }
+    }
+
+    suite(
+        "installClaudioHooks: refuses a `..` path INSIDE our own namespace, and the refusal is not"
+            + " academic — the entry it would have written survives every uninstall anchored at the"
+            + " true root. `claudioNamespaceRoot` returns nil for a `..` path exactly as it does for"
+            + " `/usr/local/bin/claudio`, but only the latter is the no-namespace carve-out: this"
+            + " one resolves back into `.claudio` through /bin/sh, so the hook fires"
+    ) {
+        let traversing = "/Users/tester/.claudio/bin/../bin/claudio"
+
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
+            let before = readRawString(at: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: traversing, lockFile: lockFile)
+            expect(
+                result == .failure(.unsweepableBinaryPath(path: traversing)),
+                "expected .unsweepableBinaryPath for a `..` path in our namespace, got \(result)")
+            expect(
+                readRawString(at: settingsFile) == before,
+                "settings.json must be left byte-identical when install refuses the path")
+            expect(
+                !FileManager.default.fileExists(atPath: settingsFile.path + ".claudio.bak"),
+                "no backup may be created when install never writes")
+        }
+
+        // Why the refusal has to happen at the writer: had install written this entry, NOTHING
+        // could take it back out. Seed it by hand and let a normal uninstall — anchored at the
+        // real production path, the only one a user ever passes — try.
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let stranded = claudioHookCommand(for: .stop, claudioBinaryPath: traversing)
+            let fixture = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(stranded)" } ] } ] } }"#
+            writeFixture(fixture, to: settingsFile)
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.notInstalled),
+                "uninstall cannot even see the `..` entry, got \(result)")
+            expect(
+                readRawString(at: settingsFile)?.contains(stranded) == true,
+                "the `..` entry outlives uninstall — which is why install must never write it")
+        }
+    }
+
+    // MARK: - Optimistic concurrency ([9]) and settings.json-as-symlink ([D])
+    //
+    // Both are load-bearing behaviors of `atomicWrite` that shipped with no regression net: a
+    // change that dropped the re-read, or that stopped resolving the symlink, would have left
+    // every other suite green. `betweenReadAndWrite` is the seam that makes the first one
+    // deterministic (see `installClaudioHooks`'s doc comment).
+    //
+    // These three suites are the seam's only users; the seam is `#if DEBUG` (so the shipped
+    // library keeps the 3-argument production signature), so they compile only in DEBUG too —
+    // the harness always runs in DEBUG, and a bare `swift build -c release` (which also builds
+    // this executable test target) must not trip over an API that release does not vend.
+    #if DEBUG
+    suite(
+        "installClaudioHooks: aborts with .concurrentModification when another writer changes"
+            + " settings.json between the read and the write, and leaves that writer's bytes"
+            + " exactly as they were — this file has no restore path, so clobbering is permanent"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"{ "hooks": {} }"#
+            writeFixture(original, to: settingsFile)
+
+            // What Claude Code / the GUI / an editor does: a plain atomic overwrite that honors
+            // no lock of ours.
+            let intruder = #"{ "hooks": {}, "model": "opus" }"#
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile,
+                betweenReadAndWrite: {
+                    try? intruder.write(to: settingsFile, atomically: true, encoding: .utf8)
+                })
+
+            expect(
+                result == .failure(.concurrentModification(path: settingsFile.path)),
+                "expected .concurrentModification, got \(result)")
+            // Byte-equality to the intruder's exact content fully pins "no hook appended": the
+            // intruder JSON carries no claudio command, so any appended hook would break this.
+            expect(
+                readRawString(at: settingsFile) == intruder,
+                "the concurrent writer's bytes must survive verbatim — install must not clobber")
+            // The intruder now strikes in the read→backup window (the seam fires before the
+            // backup), so this pins that `.claudio.bak` holds the bytes install READ, not a
+            // fresh re-read of disk that would have captured the intruder's write. Revert the
+            // backup to re-reading the file and this assertion goes RED. Pinned too because a
+            // failed install leaves this artifact behind and the backup is one-shot: a later
+            // successful install will not overwrite it.
+            expect(
+                readRawString(at: settingsFile.appendingPathExtension("claudio.bak")) == original,
+                "the backup snapshots what install read, not what the intruder wrote")
+        }
+    }
+
+    suite(
+        "uninstallClaudioHooks: aborts with .concurrentModification too — it takes no backup at"
+            + " all, so a clobber here is strictly worse than on the install path"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let stop = claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath)
+            writeFixture(
+                #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(stop)" } ] } ] } }"#,
+                to: settingsFile)
+
+            let intruder = #"{ "hooks": {}, "permissions": { "allow": [] } }"#
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile,
+                betweenReadAndWrite: {
+                    try? intruder.write(to: settingsFile, atomically: true, encoding: .utf8)
+                })
+
+            expect(
+                result == .failure(.concurrentModification(path: settingsFile.path)),
+                "expected .concurrentModification, got \(result)")
+            expect(
+                readRawString(at: settingsFile) == intruder,
+                "uninstall must not clobber a concurrent write in a file it never backs up")
+        }
+    }
+
+    suite(
+        "installClaudioHooks: an unchanged settings.json is NOT a concurrent modification — the"
+            + " guard compares bytes, so a writer that rewrites identical content (or no writer at"
+            + " all) must not turn a normal install into a spurious abort the user has to retry"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"{ "hooks": {} }"#
+            writeFixture(original, to: settingsFile)
+
+            // Assert the seam actually ran, so this test also pins that the seam is WIRED — a
+            // refactor that silently stopped invoking it would flip `ran` and fail here, rather
+            // than passing as an ordinary install would.
+            var ran = false
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile,
+                betweenReadAndWrite: {
+                    ran = true
+                    try? original.write(to: settingsFile, atomically: true, encoding: .utf8)
+                })
+            expect(ran, "the betweenReadAndWrite seam must have been invoked")
+            expect(result == .success(.installed), "a byte-identical rewrite must not abort, got \(result)")
+        }
+    }
+    #endif  // DEBUG — seam-driven suites
+
+    suite(
+        "installClaudioHooks: a settings.json that IS a symlink (dotfiles: stow/chezmoi) has its"
+            + " TARGET rewritten in place — the link survives, so the dotfiles repo keeps tracking"
+            + " the file. Writing the link path with .atomic would temp+rename ON the link and"
+            + " silently replace it with a regular file, diverging from the repo forever"
+    ) {
+        withTempDirectory { root in
+            let target = root.appendingPathComponent("dotfiles/settings.json")
+            let settingsFile = root.appendingPathComponent("claude/settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"{ "hooks": {} }"#
+            writeFixture(original, to: target)
+            createSymlink(at: settingsFile, pointingTo: target)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(result == .success(.installed), "expected .installed, got \(result)")
+
+            expect(
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: settingsFile.path))
+                    != nil,
+                "settings.json must still BE a symlink after install, not a regular file")
+            expect(
+                readRawString(at: target)?.contains("claudio") == true,
+                "the symlink's target — the file the dotfiles repo tracks — must carry the hooks")
+            for event in Event.allCases {
+                let expected = claudioHookCommand(
+                    for: event, claudioBinaryPath: testClaudioBinaryPath)
+                let groups = hooksArray(readJSONObject(at: target), event: event.settingsName)
+                expect(
+                    groups?.contains { commands(inGroup: $0).contains(expected) } == true,
+                    "\(event.settingsName) must be installed in the target")
+            }
+
+            // The backup sits next to the LINK but must be a real content snapshot, not a second
+            // symlink to the same target — otherwise it would track every later edit and back up
+            // nothing.
+            let backup = settingsFile.appendingPathExtension("claudio.bak")
+            expect(
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: backup.path)) == nil,
+                "the backup must be a regular file, not a symlink to the target")
+            expect(
+                readRawString(at: backup) == original,
+                "the backup must hold the target's pre-install CONTENT, got"
+                    + " \(String(describing: readRawString(at: backup)))")
+
+            // And the round trip: uninstall rewrites the target too, link still intact.
+            let removed = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                removed == .success(.uninstalled(count: Event.allCases.count)),
+                "uninstall must sweep through the symlink, got \(removed)")
+            expect(
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: settingsFile.path))
+                    != nil,
+                "settings.json must still be a symlink after uninstall")
+            expect(
+                readRawString(at: target)?.contains("claudio") != true,
+                "the target must have the hooks removed")
+        }
+    }
+
+    suite(
+        "installClaudioHooks: a DANGLING settings.json symlink still installs. loadRoot's"
+            + " fileExists follows the link and reports absent, so this is the ordinary fresh-install"
+            + " path — pinned because the obvious hardening of atomicWrite's nil re-read (an `lstat`"
+            + " that does NOT follow the link, and so sees the link node and calls it a concurrent"
+            + " creation) would silently turn this into a permanent .concurrentModification"
+    ) {
+        withTempDirectory { root in
+            let target = root.appendingPathComponent("dotfiles/settings.json")
+            let settingsFile = root.appendingPathComponent("claude/settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            try? FileManager.default.createDirectory(
+                at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
+            createSymlink(at: settingsFile, pointingTo: target)
+            expect(
+                !FileManager.default.fileExists(atPath: settingsFile.path),
+                "premise: the link dangles, so fileExists (which follows it) says absent")
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(
+                result == .success(.installed),
+                "a dangling settings.json symlink is an absent file, not a concurrent"
+                    + " modification, got \(result)")
+            expect(
+                detectHookInstallStatus(
+                    settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath)
+                    == .installed,
+                "the hooks must be readable back through the same path install was given")
         }
     }
 }

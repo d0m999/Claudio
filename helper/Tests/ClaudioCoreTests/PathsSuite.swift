@@ -59,9 +59,12 @@ func runPathsSuites() {
 
     suite("claudioBinary is the exact path a settings.json hook command embeds") {
         // This is the sharpest instance of the T4 concern: `claudioHookCommand(for:
-        // claudioBinaryPath:)` interpolates this path directly into a raw shell command
-        // string with no quoting. A space here is the literal bug T4 was opened to
-        // prevent.
+        // claudioBinaryPath:)` interpolates this path into a raw shell command string. It now
+        // routes it through `shellQuotedPath`, so a space here is *survivable* rather than the
+        // silent breakage T4 was opened to prevent — but keeping the assertion is still worth
+        // it: an unquoted path is what every already-installed hook on every existing machine
+        // contains, and `~/.claudio/` staying space-free is what keeps `install` idempotent
+        // across an upgrade instead of appending a re-quoted duplicate.
         let path = ClaudioPaths.claudioBinary.path
         expect(!path.contains(" "), "claudioBinary path must be shell-word-safe: \(path)")
         expect(path.hasSuffix("/claudio"), "claudioBinary should resolve to a file named claudio")
