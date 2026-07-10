@@ -519,15 +519,18 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - swift-reviewer 提两个非安全项，**orchestrator 已修**：① **HIGH**——导入管道（FS I/O + 同步 `AVURLAsset.duration`）跑在 `@MainActor` 无卸载 → 拖入会冻结菜单栏 UI；修法：保持纯校验自由函数同步（直接可单测），在 view-model 边界用 `Task.detached` 把两个 `handleDrop` 卸到后台执行，仅 `@Published state` 变更 hop 回主 actor（macOS 12 floor 用不了 macOS 13+ 的 async `load(.duration)`，故只是卸载既有同步探针而非改 API；`.duration` 在 macOS 12 部署目标下无弃用警告）；测试 harness 补 async `suite`/`withTempDirectory` 重载，view-model suite 串 `await`。② **MEDIUM**——`NSSoundAudioPreviewPlayer` struct 未持有 `NSSound`，ARC 立即释放 → 自动试听被切断；修法：改 `final class` 持有 `currentSound`。
   - 验证：helper `swift run claudio-tests` = **328** 绿（仅 `safePackFileURL` 可见性变更，零行为回归）；gui `swift run --package-path gui claudio-gui-tests` = **212** 绿（115 T7 基线 + 88 T8 + 9 security 回归）；两包 `swift build` 清理重建 0 warning/0 error。
   - 非阻断遗留（留后续）：① `overwritesBuiltin` 触发语义（"拒同名覆盖内置" vs「工程落地细节 ②（声音包存储根 + 查找顺序）」选择期允许覆盖的调和）已在 `isBuiltinOnlyPackID` 文档化且结构安全，但建议 `/plan-eng-review` 就产品意图独立确认一次；② `AudioImportLimits.maxDurationSeconds`(3.0s) 是 T9 前占位，单点可调；③ `AudioDropZoneView` 已编译就绪但**尚未接入** `ClaudioGUIApp.swift`（T15/T16 挂入真实面板时，需就真实 `NSItemProvider` 拖放重跑这套 5 面对抗探测——Finder 真实拖放的临时文件/别名行为可能异于合成 fixture）；④ 决议#5 same-user TOCTOU 的"读入内存那一瞬"未闭合（需流式读，与同用户威胁模型不成比例，与既有立场一致）。
-- [ ] **T9 (P2, human: ~0.5d / CC: ~30min)** — audio — 客观声音标准 + volume→afplay -v 映射
+- [x] **T9 (P2, human: ~0.5d / CC: ~30min)** — audio — 客观声音标准 + volume→afplay -v 映射
   - Surfaced by: TODO#3 / Codex#10/#11 · Files: `docs/pack-standard.md`,`helper/volume`
-- [ ] **T10 (P2, human: ~0.5d / CC: ~20min)** — docs — 改 DESIGN:诚实三态、去"零摩擦"、night_dim 移 v2、manifest 版本字段用现有整数 `schema` 描述（非另立版本号字段，2026-07-08 codex 复核已纠正此前误命名）
+  - 已完成（`be67d29` 落地 `docs/pack-standard.md` 客观标准 + `Volume.swift` 的 `afplay -v` 恒等映射+越界钳制；`59cad75` 补音量 locale suite）；本次交叉引用穷尽审计（`1e2be4b`/`08009d6`/`f67ba6c`）顺带把 `docs/pack-standard.md`/`Volume.swift`/`Play.swift` 里指向本文件的裸行号引用换成小节名锚点，零行为改动。
+- [x] **T10 (P2, human: ~0.5d / CC: ~20min)** — docs — 改 DESIGN:诚实三态、去"零摩擦"、night_dim 移 v2、manifest 版本字段用现有整数 `schema` 描述（非另立版本号字段，2026-07-08 codex 复核已纠正此前误命名）
   - Surfaced by: 架构#2 + T2 + T3 + Codex#18 · Files: `DESIGN.md`
+  - 已完成（`78e19c2` DESIGN.md 同步 spec，`cd25686` codex review 收窄 `broken` 态 + `schema_version` 正名）；本分支（`docs/t10-narrative-alignment`）是收口轮——`2fb6e1b`/`08009d6`/`1e2be4b`/`f67ba6c` 把叙述层继续对齐到决议层与代码（裸行号改符号名锚点、19+2 处误引修正、含 `gui/` 首次受审），DESIGN.md 本身在 T10 原始两轮已改完，本分支零 DESIGN.md 改动。
 - [x] **T11 (P2, human: ~0.5d / CC: ~30min)** — compliance — CC0 台账加哈希+快照+下架策略
   - Surfaced by: Codex#12 · Files: `packs/LICENSES.md`
   - 已完成(2026-07-10)：首个内置包 `packs/minimal-chime/`（四事件 mp3）落地，音源全部来自 Kenney *Interface Sounds*（CC0-1.0，`/browse` 核验来源页 + 包内 License.txt + CC0 官方文本三重快照存 `packs/license-snapshots/`），逐文件按 `docs/pack-standard.md` 客观标准处理（裁静音/峰值归一化-1.15dBFS/真峰值≤-1.0dBTP/淡入淡出/四事件 f0 两两差≥407 cents 远超1半音门槛/单声道44.1kHz192kbps mp3）并记录 SHA256。`packs/LICENSES.md` 含三重核验方法说明 + 逐文件哈希表 + 客观标准核验结果表 + 来源下架/改证/哈希不匹配三类应急处理策略。非阻断遗留：四事件"双击/单blip/上扬两音/下沉且保持"的时序包络定性判据（`docs/pack-standard.md` §5 定性锚点）未经真人试听确认，为 best-effort 选配，已在 LICENSES.md 注明并列出同 CC0 包内备选文件；manifest.json 的 `name`/`author`/`license`/`version`/`schema` 字段目前 Swift `PackManifest.Decodable` 尚未建模（按 T2/T16 既定计划，未知键被 `Decodable` 静默忽略，不影响现有 decode）。
-- [ ] **T12 (P2, human: ~1d / CC: ~1h)** — dist — 未签名 universal DMG + Homebrew tap + macOS 26 绕过指引
+- [x] **T12 (P2, human: ~1d / CC: ~1h)** — dist — 未签名 universal DMG + Homebrew tap + macOS 26 绕过指引
   - Surfaced by: 分发 + T3 · Files: `.github/workflows/`,`Casks/`
+  - 已完成(2026-07-09，`f31987b`)：`.github/workflows/release.yml`（push tag → 编译 universal 二进制 → 打未签名 ad-hoc DMG → 传 Release → 更新 Homebrew tap cask）+ `Casks/claudio.rb`（仓库内参考模板，真正生效的副本活在独立 `homebrew-<tap>` 仓库）+ `docs/distribution.md`（macOS 26 系统设置绕过指引、Homebrew/DMG 手动安装、旧系统右键打开、未签名诚实标注）。非阻断遗留：`release.yml` 硬编码单个包名（`packs/minimal-chime`）+ CI 表达式注入模式，已记入 `TODOS.md`（P3/P4，加第二个内置包前应处理）。
 - [ ] **T13 (P3, human: ~0.5d / CC: ~30min)** — helper — 版本兼容记录 + uninstall 识别历史命令格式
   - Surfaced by: Codex#5/#16 · Files: `helper/doctor`,`helper/uninstall`
 - [ ] **T14 (P2, human: ~0.5d / CC: ~40min)** — gui — 仓库内 state gallery（SwiftUI Preview 目录），从状态测试同一批 fixtures 渲染所有状态，作视觉真相源

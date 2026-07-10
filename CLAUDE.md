@@ -6,6 +6,7 @@ Claude Code 的语义化提示音 · 策展声音包（macOS 菜单栏 app）。
 
 - **[DESIGN.md](./DESIGN.md)** —— 视觉设计系统（美学 / 字体 / 配色 / 间距 / 布局 / 动效 / 声音视觉语言 / App 图标）。
 - **[ENGINEERING.md](./ENGINEERING.md)** —— 产品 + 工程 spec（架构、helper-CLI 契约、settings.json 接管、声音包格式、实现任务、评审决议）。
+- **[TODOS.md](./TODOS.md)** —— 已知遗留问题台账（red-team / review 发现但暂不阻断发布的项，含 Effort / Priority / 依赖）。
 
 ## Design System
 

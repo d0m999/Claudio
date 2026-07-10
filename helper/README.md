@@ -2,9 +2,17 @@
 
 The `claudio` CLI invoked by Claude Code hooks — see [`../ENGINEERING.md`](../ENGINEERING.md).
 
-This directory is the **v1 base skeleton**: it builds, lints, and tests green so the
-work in T1–T16 has a green foundation to grow on. Real subcommand bodies (install /
-uninstall / play / doctor internals) land in later tasks.
+All six subcommands are implemented (see [`../ENGINEERING.md`](../ENGINEERING.md) for the
+full contract, exit codes, and config schema):
+
+| Command | What it does |
+|---|---|
+| `claudio doctor` | Self-check: afplay in place, settings.json writable, packs intact (read-only, no writes/no playback) |
+| `claudio play <event>` | Hook entry point: debounced, backgrounded `afplay` spawn, always exits 0 |
+| `claudio install` | Idempotent append of the claudio hook into `settings.json` (never overwrites existing hooks) |
+| `claudio uninstall` | Precisely removes only claudio's hook entries, preserves everything else |
+| `claudio use <pack-id>` | Switches the active pack (writes `~/.claudio/config.json`) |
+| `claudio setup` | v1 first-install bootstrap (T17): copies the binary + bundled packs to `~/.claudio/`, picks a default pack, and calls `install` — see [`../docs/distribution.md`](../docs/distribution.md) |
 
 ## Layout
 
@@ -12,9 +20,10 @@ uninstall / play / doctor internals) land in later tasks.
 helper/
   Package.swift                     # SwiftPM manifest (macOS 12+, Swift 6)
   Sources/
-    ClaudioCore/Event.swift         # shared domain: the 4-event name mapping (single source of truth)
+    ClaudioCore/                    # shared domain: Event mapping, config, paths, play, doctor,
+                                     # pack manifest, install/uninstall, use, setup (see ENGINEERING.md)
     claudio/Claudio.swift           # @main CLI entry (swift-argument-parser)
-    claudio/Subcommands.swift       # doctor / play / install / uninstall / use (skeleton)
+    claudio/Subcommands.swift       # doctor / play / install / uninstall / use / setup
   Tests/
     ClaudioCoreTests/main.swift     # dependency-free test harness (see note below)
 ```
