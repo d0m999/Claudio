@@ -52,6 +52,29 @@ func runAudioImportViewModelSuites() async {
     }
 
     await suite(
+        "AudioImportViewModel: hover() does NOT clobber an existing .reject/.success (mirrors cancelHover()'s guard)"
+    ) {
+        await withTempDirectory { root in
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs"))
+            let viewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
+
+            let sourceURL = root.appendingPathComponent("source/evil.mp3")
+            writeFixture(evilShellScriptData(), to: sourceURL)
+            await viewModel.handleDrop(sourceURL: sourceURL, suggestedFileName: "evil.mp3")
+            expect(
+                { if case .reject = viewModel.state { return true } else { return false } }(),
+                "setup: handleDrop of a bad file must set .reject")
+
+            viewModel.hover()
+            expect(
+                { if case .reject = viewModel.state { return true } else { return false } }(),
+                "hover() must not clobber a .reject state left by a real drop result — only .idle should transition to .hover"
+            )
+        }
+    }
+
+    await suite(
         "AudioImportViewModel: handleDrop() on a legal file sets .success and invokes onImportSucceeded"
     ) {
         await withTempDirectory { root in
@@ -149,6 +172,20 @@ func runAudioImportViewModelSuites() async {
                 viewModel.state == .reject(.nonWhitelistFormat),
                 "expected .reject(.nonWhitelistFormat) reflecting the first rejection, got \(viewModel.state)"
             )
+        }
+    }
+
+    await suite("AudioImportViewModel: an empty batch handleDrop([]) is a no-op — no state change") {
+        await withTempDirectory { root in
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs"))
+            let viewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
+
+            let result = await viewModel.handleDrop(requests: [])
+
+            expect(result.accepted.isEmpty, "an empty batch must accept nothing")
+            expect(result.rejected.isEmpty, "an empty batch must reject nothing")
+            expect(viewModel.state == .idle, "an empty batch must never move state off .idle")
         }
     }
 }

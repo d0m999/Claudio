@@ -134,6 +134,20 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
                 ((try? FileManager.default.contentsOfDirectory(atPath: bundledPacksDirectory.path))
                     ?? []
                 ).sorted()
+            if !packIDs.isEmpty {
+                // Hoisted out of the per-pack loop below: the destination directory never
+                // changes across iterations, so creating it once (idempotent — `createDirectory`
+                // no-ops if it already exists) does the same work as calling it once per pack,
+                // minus the redundant mkdir/stat syscalls.
+                do {
+                    try FileManager.default.createDirectory(
+                        at: environment.userPacksDirectory, withIntermediateDirectories: true)
+                } catch {
+                    return .failure(
+                        .packCopyFailure(reason: "创建 ~/.claudio/packs 失败：\(error.localizedDescription)")
+                    )
+                }
+            }
             for id in packIDs {
                 let source = bundledPacksDirectory.appendingPathComponent(id, isDirectory: true)
                 guard directoryExists(at: source) else { continue }
@@ -144,8 +158,6 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
                 // rule by simply not overwriting it in the first place.
                 guard !FileManager.default.fileExists(atPath: destination.path) else { continue }
                 do {
-                    try FileManager.default.createDirectory(
-                        at: environment.userPacksDirectory, withIntermediateDirectories: true)
                     try FileManager.default.copyItem(at: source, to: destination)
                     copiedPackIDs.append(id)
                 } catch {

@@ -53,10 +53,8 @@ extension Claudio {
         )
         func run() throws {
             switch installClaudioHooks() {
-            case .success(.installed):
-                print("✓ 已接管 settings.json（追加 hook，未覆盖已有配置；备份见 settings.json.claudio.bak）")
-            case .success(.alreadyInstalled):
-                print("✓ settings.json 已接管过，无需重复操作")
+            case .success(let outcome):
+                print("✓ \(hooksOutcomeMessage(outcome))")
             case .failure(let error):
                 print("✗ \(error.description)")
                 throw ExitCode.failure
@@ -139,11 +137,18 @@ private func printSetupSummary(_ outcome: SetupOutcome) {
         if let selectedPack {
             print("  · 已默认选中声音包 \"\(selectedPack)\"")
         }
-        switch hooksOutcome {
-        case .installed:
-            print("  · 已接管 settings.json（追加 hook，未覆盖已有配置；备份见 settings.json.claudio.bak）")
-        case .alreadyInstalled:
-            print("  · settings.json 已接管过，无需重复操作")
-        }
+        print("  · \(hooksOutcomeMessage(hooksOutcome))")
+    }
+}
+
+/// Shared between `claudio install` and `claudio setup`'s summary — both report the same
+/// hooks-install outcome, just under a different line prefix (`✓ ` vs `  · `). Kept as one
+/// switch so the two user-facing messages can't silently drift out of sync.
+private func hooksOutcomeMessage(_ outcome: InstallOutcome) -> String {
+    switch outcome {
+    case .installed:
+        "已接管 settings.json（追加 hook，未覆盖已有配置；备份见 settings.json.claudio.bak）"
+    case .alreadyInstalled:
+        "settings.json 已接管过，无需重复操作"
     }
 }

@@ -36,8 +36,12 @@ public final class AudioImportViewModel: ObservableObject {
 
     /// Called while a drag is hovering the zone — no filesystem work happens here, just
     /// the visual "hover" state (DESIGN.md "拖入 drop-zone": "hover 命中 → 边框/文字转
-    /// 黏土 + `clay-soft` 底").
+    /// 黏土 + `clay-soft` 底"). Mirrors ``cancelHover()``'s guard: a drag merely passing
+    /// back over the zone must not clobber a `.reject`/`.success` result that's still
+    /// meant to stay visible until the *next* drop (see ``cancelHover()``'s doc comment) —
+    /// only `.idle` (or an already-active `.hover`) actually transitions.
     public func hover() {
+        guard state == .idle || state == .hover else { return }
         state = .hover
     }
 

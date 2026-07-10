@@ -35,8 +35,9 @@ cask "claudio" do
       未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：
       系统设置 > 隐私与安全性 > 下滑找到被拦的 Claudio > 点"仍要打开"。
 
-      首次打开后，Claudio 会自动把 hook 接入 Claude Code 的
-      settings.json（追加、不覆盖，自动备份），全程无需手动编辑配置文件。
+      首次安装后菜单栏面板暂不会自动接管 Claude Code 的 settings.json，
+      需在 Terminal 跑一次 #{appdir}/Claudio.app/Contents/Resources/bin/claudio setup
+      （追加、不覆盖、自动备份；详见 docs/distribution.md）才能真正听到声音。
     EOS
   end
 end
