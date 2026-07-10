@@ -279,8 +279,30 @@ public func claudioNamespaceRoot(forBinaryPath binaryPath: String) -> String? {
 /// ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)``'s stale-namespace coverage
 /// installs through on purpose. The invariant pinned here is the exact one, no wider: *if* a path
 /// names a namespace, it must be a shape that namespace's own sweep accepts.
+///
+/// A `nil` root is therefore **not** by itself a licence to install.
+/// ``claudioNamespaceRoot(forBinaryPath:)`` returns `nil` for three different shapes and only the
+/// last is that carve-out: a relative path, a path carrying a `..` component, and a path with no
+/// `.claudio` component. The first two *do* name this namespace — `/bin/sh` resolves
+/// `<root>/bin/../bin/claudio` back to the real binary at exec time, so the hook they write really
+/// fires — while ``matchedClaudioEvent(inHookCommand:claudioRoot:)`` rejects both outright (`..` is
+/// refused fail-closed even when it resolves back *inside* the root; a relative path can never
+/// clear the absolute-root prefix gate). Reading `nil` as "nothing to contradict" would install a
+/// live hook that no `uninstall` — not even one anchored at the true root — could ever match back
+/// out, which is the precise leak this guard exists to prevent.
+///
+/// This predicate is purely **lexical** — it neither resolves symlinks nor collapses `.` segments,
+/// so two shapes slip past it, both unreachable in production and unclosable without touching the
+/// filesystem at install time: a path reaching `.claudio` through a symlinked component
+/// (`/Users/x/link/bin/claudio`, `link → .claudio`), and a `.`-decorated spelling above the
+/// namespace (`/Users/x/./.claudio/bin/claudio`) whose derived root is non-canonical. Production
+/// only ever passes the literal canonical path ``ClaudioPaths`` builds, so neither arises — the same
+/// lexical limit the NFC/NFD normalization caveat on ``isClaudioBinaryPath(_:claudioRoot:)`` documents.
 public func binaryPathContradictsItsNamespace(_ binaryPath: String) -> Bool {
-    guard let claudioRoot = claudioNamespaceRoot(forBinaryPath: binaryPath) else { return false }
+    guard let claudioRoot = claudioNamespaceRoot(forBinaryPath: binaryPath) else {
+        return binaryPath.split(separator: "/", omittingEmptySubsequences: true)
+            .contains(".claudio")
+    }
     return !isClaudioBinaryPath(binaryPath, claudioRoot: claudioRoot)
 }
 

@@ -796,6 +796,9 @@ func runHookCommandMatchingSuites() {
             "/usr/local/bin/claudio",
             "/Users/tester/.claudio-OLD/bin/claudio",
             "/Users/tester/bin/claudio",
+            // A `..` ABOVE any namespace: still no `.claudio` component, so still the carve-out.
+            // Pins that the guard keys off naming the namespace, not off `..` alone.
+            "/usr/local/../bin/claudio",
         ] {
             expect(
                 claudioNamespaceRoot(forBinaryPath: path) == nil,
@@ -804,5 +807,58 @@ func runHookCommandMatchingSuites() {
                 !binaryPathContradictsItsNamespace(path),
                 "\(path) names no namespace, so there is nothing for it to contradict")
         }
+    }
+
+    suite(
+        "binaryPathContradictsItsNamespace: a path that NAMES our namespace but whose root"
+            + " claudioNamespaceRoot refuses to derive — a `..` component, or a relative path — is a"
+            + " contradiction, not the no-namespace carve-out. Both shapes reach a real binary"
+            + " through /bin/sh, so the hook they write FIRES; both are rejected outright by"
+            + " isClaudioBinaryPath, so no uninstall can ever sweep them back out"
+    ) {
+        // The carve-out's justification is "uninstall fail-closes and never claimed it could sweep
+        // this entry" — true for `/usr/local/bin/claudio`, which lives outside every namespace.
+        // It does NOT hold for a path that lexically contains `.claudio`: uninstall is *supposed*
+        // to own that subtree, and here it silently cannot.
+        let contradictions = [
+            // Resolves back INSIDE the root — the exact shape matchedClaudioEvent rejects
+            // fail-closed (see "any `..` component is rejected outright" above), which is what
+            // makes the entry unsweepable rather than merely unusual.
+            "\(testRoot)/bin/../bin/claudio",
+            // Resolves OUTSIDE the root, via a `..` that lands back on `.claudio` by name.
+            "\(testRoot)/../.claudio/bin/claudio",
+            // `..` before the basename: `/Users/tester/claudio`, outside the namespace entirely.
+            "\(testRoot)/../claudio",
+            // Relative paths name the namespace too, and are equally unsweepable: the matcher's
+            // root gate requires an absolute root, so nothing anchored at one can ever match them.
+            ".claudio/bin/claudio",
+            "Users/tester/.claudio/bin/claudio",
+        ]
+        for path in contradictions {
+            expect(
+                claudioNamespaceRoot(forBinaryPath: path) == nil,
+                "premise: claudioNamespaceRoot bails on \(path), which is why the old guard read it"
+                    + " as the no-namespace carve-out")
+            expect(
+                binaryPathContradictsItsNamespace(path),
+                "\(path) names our namespace but no uninstall can sweep it; install must refuse it")
+            // The stranding is real, not theoretical: the writer WOULD emit a working command...
+            let written = claudioHookCommand(for: .stop, claudioBinaryPath: path)
+            expect(
+                written.contains(path),
+                "premise: the writer emits \(path) verbatim (no metacharacter to quote), got"
+                    + " \"\(written)\"")
+            // ...and uninstall, anchored at the REAL production root, refuses to match it — so the
+            // entry outlives every `claudio uninstall` the user will ever run.
+            expect(
+                matchedClaudioEvent(inHookCommand: written, claudioRoot: testRoot) == nil,
+                "the guard's premise: \"\(written)\" is unmatchable even from the true root")
+        }
+
+        // `..` inside the root only ever *widens* the unsweepable set, never narrows it: the
+        // canonical path stays acceptable.
+        expect(
+            !binaryPathContradictsItsNamespace(canonicalPath),
+            "the canonical path must remain installable")
     }
 }
