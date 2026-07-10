@@ -263,6 +263,29 @@ func runAudioImportSuites() {
         }
     }
 
+    suite(
+        "importAudioFile: an unsafe packID (path traversal) is rejected before any pack directory is even touched"
+    ) {
+        withTempDirectory { root in
+            let sourceURL = root.appendingPathComponent("source/chime.mp3")
+            writeFixture(validMP3ID3Data(), to: sourceURL)
+
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
+            let outcome = importAudioFile(
+                sourceURL: sourceURL, suggestedFileName: "chime.mp3", packID: "../evil",
+                environment: environment)
+
+            expect(
+                outcome == .rejected(.pathTraversal),
+                "an unsafe packID must be rejected as .pathTraversal before any content check, got \(outcome)"
+            )
+            expect(
+                !FileManager.default.fileExists(atPath: userPacksDirectory.path),
+                "an unsafe packID must never even create the user packs root directory")
+        }
+    }
+
     suite("importAudioFile: a destination that is a symlink escaping the pack directory is rejected")
     {
         withTempDirectory { root in

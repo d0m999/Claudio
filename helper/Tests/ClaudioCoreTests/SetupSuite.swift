@@ -196,6 +196,74 @@ func runSetupSuites() {
         }
     }
 
+    suite(
+        "currentExecutablePath: an absolute argv[0] behind a symlink resolves to the real target"
+    ) {
+        withTempDirectory { root in
+            let realTarget = root.appendingPathComponent("real/claudio")
+            writeFixture("#!fake-binary-fixture", to: realTarget)
+            let symlinkPath = root.appendingPathComponent("link/claudio")
+            createSymlink(at: symlinkPath, pointingTo: realTarget)
+
+            let result = currentExecutablePath(arguments: [symlinkPath.path], currentDirectory: "/")
+            expect(
+                result == realTarget.resolvingSymlinksInPath(),
+                "an absolute argv[0] behind a symlink must resolve to the real target, got \(result)"
+            )
+        }
+    }
+
+    suite(
+        "currentExecutablePath: a bare/relative argv[0] resolves against the given currentDirectory, not the real process cwd"
+    ) {
+        withTempDirectory { root in
+            let subdirectory = root.appendingPathComponent("subdir", isDirectory: true)
+            let executablePath = subdirectory.appendingPathComponent("claudio")
+            writeFixture("#!fake-binary-fixture", to: executablePath)
+
+            let result = currentExecutablePath(
+                arguments: ["claudio"], currentDirectory: subdirectory.path)
+            expect(
+                result == executablePath.resolvingSymlinksInPath(),
+                "a relative argv[0] must resolve against the passed-in currentDirectory, got \(result)"
+            )
+        }
+    }
+
+    suite(
+        "performFirstRunSetup: a binary destination whose parent directory is blocked by a regular file fails with .binaryCopyFailure"
+    ) {
+        withTempDirectory { root in
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            // A regular file occupies the path where the binary destination's containing
+            // directory needs to be created — `createDirectory` cannot turn a file into a
+            // directory, so `copySelfToFixedLocation` surfaces a real error via
+            // `.binaryCopyFailure` (mirrors `PlaySuite`'s equivalent blocking-file fixture
+            // for `.lockFailed`). Every other suite in this file only exercises
+            // `performFirstRunSetup`'s `.success` side — this is its top-level `.failure`
+            // passthrough at the binary-copy step.
+            let blockingFile = root.appendingPathComponent("blocking-file")
+            writeFixture("not a directory", to: blockingFile)
+            let claudioRoot = root.appendingPathComponent("claudio-root", isDirectory: true)
+            let environment = SetupEnvironment(
+                executablePath: executablePath,
+                claudioBinaryDestination: blockingFile.appendingPathComponent("subdir/bin/claudio"),
+                userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
+                configFile: claudioRoot.appendingPathComponent("config.json"),
+                settingsFile: root.appendingPathComponent("settings.json"),
+                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+
+            let result = performFirstRunSetup(environment: environment)
+            guard case .failure(.binaryCopyFailure) = result else {
+                expect(
+                    false,
+                    "a blocked binary destination parent must fail with .binaryCopyFailure, got \(result)"
+                )
+                return
+            }
+        }
+    }
+
     suite("performFirstRunSetup: re-running from inside the bundle a second time is idempotent") {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))

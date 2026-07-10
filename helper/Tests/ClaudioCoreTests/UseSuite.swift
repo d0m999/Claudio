@@ -110,6 +110,34 @@ func runUseSuites() {
         }
     }
 
+    suite(
+        "selectPack: a configFile whose parent directory is blocked by a regular file fails with .configWriteFailure"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true))
+
+            // A regular file occupies the path where config.json's parent directory needs
+            // to be created — `createDirectory` cannot turn a file into a directory, so the
+            // write step surfaces a real error via `.configWriteFailure` (mirrors
+            // `PlaySuite`'s equivalent blocking-file fixture for `.lockFailed`). No existing
+            // suite in this file exercises `selectPack`'s write-failure path at all.
+            let blockingFile = root.appendingPathComponent("blocking-file")
+            writeFixture("not a directory", to: blockingFile)
+            let configFile = blockingFile.appendingPathComponent("subdir/config.json")
+
+            let result = selectPack(
+                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks)
+            guard case .failure(.configWriteFailure) = result else {
+                expect(
+                    false,
+                    "a blocked config parent directory must fail with .configWriteFailure, got \(result)"
+                )
+                return
+            }
+        }
+    }
+
     suite("selectPack: a corrupt existing config.json aborts without overwriting it") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
