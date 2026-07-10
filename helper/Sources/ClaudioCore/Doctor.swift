@@ -1,17 +1,25 @@
 import Foundation
 
-// `claudio doctor` — three real self-checks (ENGINEERING.md v1 helper-CLI 契约):
+// `claudio doctor` — self-checks (ENGINEERING.md v1 helper-CLI 契约):
 //   (a) settings.json 可写   — read-only probe, NEVER writes.
 //   (b) 包完整               — parse selected pack's manifest + verify declared audio
 //                              files exist; missing config/pack/manifest are WARNINGS,
 //                              not crashes (a fresh install has no pack yet).
 //   (c) afplay 在位.
 //   (d) claudio.log 尾部汇总 — read the last few `claudio.log` lines `play` appended on a
-//                              real failure (spawn failure, broken `play.lock`); always a
+//                              real失败 (spawn failure, broken `play.lock`); always a
 //                              WARNING at worst (a missing/corrupt log is itself not a
 //                              reason to hard-fail doctor), see T6.
+//   (e) claudio 固定路径二进制在位 — settings.json 的 hooks 命令始终指向
+//                              `ClaudioPaths.claudioBinary`（T17）；如果这条路径上什么都
+//                              没有，每一次 Claude Code 事件都会静默失败，跟 (c) afplay
+//                              缺失是同一严重程度，所以同样是硬失败（/ship pre-landing
+//                              review 的对抗审查发现：`claudio setup` 有可能在这个路径还
+//                              没真正落地二进制的情况下就把 hooks 装好——这个检查是那个
+//                              bug 修好之后的第二道防线，用来在 bug 复发或用户手动删了
+//                              二进制时也能被 `doctor` 抓到，而不是只能靠事件静默无声去猜）。
 //
-// Hard failures (→ non-zero exit) are ONLY (a) and (c). Everything pack- and log-related is
+// Hard failures (→ non-zero exit) are ONLY (a)、(c)、(e)。Everything pack- and log-related is
 // a warning in v1 doctor, per the orchestrator's scope note for T1/T6.
 
 // MARK: - (a) settings.json writability probe
@@ -213,6 +221,10 @@ public struct DoctorEnvironment: Sendable {
     public let bundledPacksDirectory: URL?
     /// Where check (d) reads its tail from — see ``summarizeRecentLogFailures(logFile:maxEntries:)``.
     public let logFile: URL
+    /// Check (e)'s target — the fixed-path helper binary settings.json's hooks actually
+    /// invoke. Defaults to ``ClaudioPaths/claudioBinary``, injectable so tests never touch
+    /// the real path.
+    public let claudioBinaryPath: String
 
     public init(
         afplayPath: String = "/usr/bin/afplay",
@@ -220,7 +232,8 @@ public struct DoctorEnvironment: Sendable {
         configFile: URL = ClaudioPaths.configFile,
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         bundledPacksDirectory: URL? = nil,
-        logFile: URL = ClaudioPaths.logFile
+        logFile: URL = ClaudioPaths.logFile,
+        claudioBinaryPath: String = ClaudioPaths.claudioBinary.path
     ) {
         self.afplayPath = afplayPath
         self.settingsFile = settingsFile
@@ -228,6 +241,7 @@ public struct DoctorEnvironment: Sendable {
         self.userPacksDirectory = userPacksDirectory
         self.bundledPacksDirectory = bundledPacksDirectory
         self.logFile = logFile
+        self.claudioBinaryPath = claudioBinaryPath
     }
 }
 
@@ -246,6 +260,25 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
             DoctorCheckResult(
                 name: "afplay", severity: .failure,
                 message: "✗ 未找到 afplay（\(environment.afplayPath)），无法播放")
+        )
+    }
+
+    // (e) claudio 固定路径二进制在位 — hard failure if missing, same severity as (c) afplay:
+    // settings.json's hooks always invoke this exact path (T17), so nothing existing there
+    // means every future Claude Code event silently fails to play.
+    if FileManager.default.isExecutableFile(atPath: environment.claudioBinaryPath) {
+        results.append(
+            DoctorCheckResult(
+                name: "claudio-binary", severity: .ok,
+                message: "✓ claudio 二进制在位：\(environment.claudioBinaryPath)")
+        )
+    } else {
+        results.append(
+            DoctorCheckResult(
+                name: "claudio-binary", severity: .failure,
+                message:
+                    "✗ 未找到 claudio 二进制（\(environment.claudioBinaryPath)），hooks 会静默失效——重跑一次 claudio setup"
+            )
         )
     }
 

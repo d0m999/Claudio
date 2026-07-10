@@ -105,8 +105,15 @@ func runSetupSuites() {
         }
     }
 
-    suite("performFirstRunSetup: not running from a bundle (no sibling packs/) skips copy, still installs hooks") {
+    suite(
+        "performFirstRunSetup: not running from a bundle (no sibling packs/) still copies the binary, but skips packs"
+    ) {
         withTempDirectory { root in
+            // Regression test (Codex + Claude adversarial review, /ship pre-landing:
+            // three independent passes, one verified empirically): the binary copy must
+            // NOT be gated on a sibling packs/ directory existing. A dev build (or a
+            // corrupted bundle missing Resources/packs/) still needs the binary copied to
+            // the fixed destination — otherwise hooks get installed pointing at nothing.
             let executablePath = root.appendingPathComponent("some-random-place/claudio")
             try? FileManager.default.createDirectory(
                 at: executablePath.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -118,9 +125,13 @@ func runSetupSuites() {
                 result
                     == .success(
                         .completed(
-                            copiedBinary: false, copiedPacks: [], selectedPack: nil,
+                            copiedBinary: true, copiedPacks: [], selectedPack: nil,
                             hooksOutcome: .installed)),
-                "running with no sibling packs/ directory must not attempt any copy, got \(result)")
+                "running with no sibling packs/ directory must still copy the binary (just skip packs), got \(result)"
+            )
+            expect(
+                FileManager.default.fileExists(atPath: environment.claudioBinaryDestination.path),
+                "the binary must actually exist at the fixed destination even with no sibling packs/")
         }
     }
 

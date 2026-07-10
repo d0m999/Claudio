@@ -46,9 +46,20 @@ public struct SetupEnvironment: Sendable {
 }
 
 /// Resolves the absolute, symlink-resolved path of the currently-running executable from
-/// `argv[0]` — relative if invoked as `./claudio` or a bare name found via `PATH`,
-/// absolute if invoked with a full path (the common case when a user pastes the path
-/// printed by `docs/distribution.md`'s Terminal instructions).
+/// `argv[0]` — absolute if invoked with a full path (the common case when a user pastes
+/// the path printed by `docs/distribution.md`'s Terminal instructions; also true once
+/// re-invoked from the fixed `~/.claudio/bin/claudio` destination), relative-to-`currentDirectory`
+/// if invoked as `./claudio` or `../some/dir/claudio`.
+///
+/// **Known gap (Codex adversarial review, `/ship` pre-landing, tracked in TODOS.md):**
+/// a bare name with no `/` at all (e.g. plain `claudio`, found via a `$PATH` lookup the
+/// *shell* performed) is NOT actually resolved against `PATH` here — it falls into the
+/// same branch as `./claudio` and gets treated as relative to `currentDirectory`, which is
+/// wrong: the shell may have found the real binary somewhere else on `PATH` entirely. This
+/// only misresolves when Claudio isn't invoked with a `/` in the command at all, which
+/// `docs/distribution.md`'s own instructions never do — but it's still a latent bug for
+/// anyone who's added `~/.claudio/bin` to their own `PATH` and runs bare `claudio setup`
+/// from an unrelated directory.
 public func currentExecutablePath(
     arguments: [String] = CommandLine.arguments,
     currentDirectory: String = FileManager.default.currentDirectoryPath
@@ -110,12 +121,34 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
     var copiedPackIDs: [String] = []
 
     if !alreadyInstalled {
+        // Copying the binary must NOT be gated on whether a sibling `packs/` exists
+        // (Codex + Claude adversarial review, /ship pre-landing: three independent passes
+        // converged on this — one verified it empirically in an isolated scratch package).
+        // The earlier version nested this inside `if directoryExists(at: bundledPacksDirectory)`,
+        // so any invocation that isn't literally running from inside a fully-assembled app
+        // bundle (a raw dev build, or a bundle whose Resources/packs/ is missing/corrupted)
+        // would skip the binary copy ENTIRELY yet still fall through to
+        // `installClaudioHooks` below — writing real hook entries pointing at a
+        // `claudioBinaryDestination` that doesn't exist, returning `.success`, and (per
+        // `printSetupSummary`) printing a message claiming the binary is "already there."
+        // Every subsequent Claude Code event would then silently fail to play a sound with
+        // zero signal anything was wrong — the exact "install completes but stays broken"
+        // failure class T17 exists to eliminate. Unconditionally attempting the copy here
+        // means a real failure now surfaces as a real `SetupError`, never a false success.
+        switch copySelfToFixedLocation(
+            from: environment.executablePath, to: environment.claudioBinaryDestination
+        ) {
+        case .success: copiedBinary = true
+        case .failure(let error): return .failure(error)
+        }
+
         // Bundled packs ship as a sibling of the binary's containing directory:
         // `Contents/Resources/bin/claudio` ↔ `Contents/Resources/packs/` (release.yml).
         // Its mere presence is also how `setup` tells "running from inside a bundle" apart
         // from "running some other copy of this binary from an arbitrary directory" — if
-        // there's no sibling `packs/`, there's nothing bundle-specific to do here, and
-        // `setup` degrades to just ensuring hooks are installed.
+        // there's no sibling `packs/`, there's no bundled pack to copy, but (unlike the
+        // binary above) that's genuinely fine: the user's existing/future packs are
+        // untouched either way.
         let bundledPacksDirectory =
             environment.executablePath
             .deletingLastPathComponent()  // .../Contents/Resources/bin
@@ -123,13 +156,6 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
             .appendingPathComponent("packs", isDirectory: true)  // .../Contents/Resources/packs
 
         if directoryExists(at: bundledPacksDirectory) {
-            switch copySelfToFixedLocation(
-                from: environment.executablePath, to: environment.claudioBinaryDestination
-            ) {
-            case .success: copiedBinary = true
-            case .failure(let error): return .failure(error)
-            }
-
             let packIDs =
                 ((try? FileManager.default.contentsOfDirectory(atPath: bundledPacksDirectory.path))
                     ?? []

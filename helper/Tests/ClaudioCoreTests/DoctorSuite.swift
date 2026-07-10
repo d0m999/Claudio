@@ -10,8 +10,22 @@ import Foundation
 //     expected and must not fail doctor.
 // (c) afplay 在位.
 //
-// Hard failures (→ non-zero exit) are ONLY: afplay missing, settings.json not writable.
-// Everything pack-related is a warning in v1 doctor.
+// (e) claudio 固定路径二进制在位 — same hard-failure severity as (c) afplay.
+//
+// Hard failures (→ non-zero exit) are ONLY: afplay missing, settings.json not writable,
+// claudio 固定路径二进制缺失. Everything pack-related is a warning in v1 doctor.
+
+/// A stand-in for the fixed-path claudio binary check (e) — there's no always-present
+/// real system binary to point at (unlike `/usr/bin/afplay` for check (c)), so tests that
+/// need check (e) to report healthy create one of these instead of relying on
+/// `DoctorEnvironment`'s default (the real machine path, which doesn't exist on a test
+/// runner that's never actually run `claudio setup`).
+private func makeExecutableFixture(at url: URL) {
+    try? FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? Data("#!fake-claudio-binary-fixture".utf8).write(to: url)
+    try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+}
 
 @MainActor
 func runDoctorSuites() {
@@ -604,6 +618,36 @@ func runDoctorSuites() {
         }
     }
 
+    suite(
+        "runDoctorChecks: missing claudio binary at the fixed hooks path is a hard failure (non-zero exit)"
+    ) {
+        withTempDirectory { root in
+            // Regression test (Claude adversarial review, /ship pre-landing, T17): the
+            // fixed-path binary settings.json's hooks actually invoke was never checked by
+            // doctor at all — a state where `claudio setup` skipped the binary copy (the
+            // bug fixed in the same commit as this test) would report a healthy doctor
+            // while every hook silently failed. Same severity class as afplay missing.
+            let settingsFile = root.appendingPathComponent("settings.json")
+            writeFixture("{}", to: settingsFile)
+            let env = DoctorEnvironment(
+                afplayPath: "/usr/bin/afplay",
+                settingsFile: settingsFile,
+                configFile: root.appendingPathComponent("config.json"),
+                userPacksDirectory: root.appendingPathComponent("packs"),
+                bundledPacksDirectory: nil,
+                logFile: root.appendingPathComponent("claudio.log"),
+                claudioBinaryPath: root.appendingPathComponent("no-such-claudio").path)
+            let report = runDoctorChecks(environment: env)
+            expect(
+                report.hasFailure,
+                "a missing claudio binary at the fixed hooks path must set hasFailure (exit non-zero)"
+            )
+            expect(
+                report.results.contains { $0.name == "claudio-binary" && $0.severity == .failure },
+                "the claudio-binary check must specifically report .failure, got \(report.results)")
+        }
+    }
+
     suite("runDoctorChecks: unwritable settings.json is a hard failure (non-zero exit)") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
@@ -632,13 +676,16 @@ func runDoctorSuites() {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             writeFixture("{}", to: settingsFile)
+            let claudioBinaryPath = root.appendingPathComponent("claudio")
+            makeExecutableFixture(at: claudioBinaryPath)
             let env = DoctorEnvironment(
                 afplayPath: "/usr/bin/afplay",
                 settingsFile: settingsFile,
                 configFile: root.appendingPathComponent("config.json"),
                 userPacksDirectory: root.appendingPathComponent("packs"),
                 bundledPacksDirectory: nil,
-                logFile: root.appendingPathComponent("claudio.log"))
+                logFile: root.appendingPathComponent("claudio.log"),
+                claudioBinaryPath: claudioBinaryPath.path)
             let report = runDoctorChecks(environment: env)
             expect(
                 !report.hasFailure,
@@ -663,13 +710,16 @@ func runDoctorSuites() {
             writeFixture(
                 "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
 
+            let claudioBinaryPath = root.appendingPathComponent("claudio")
+            makeExecutableFixture(at: claudioBinaryPath)
             let env = DoctorEnvironment(
                 afplayPath: "/usr/bin/afplay",
                 settingsFile: settingsFile,
                 configFile: root.appendingPathComponent("config.json"),
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
-                logFile: root.appendingPathComponent("claudio.log"))
+                logFile: root.appendingPathComponent("claudio.log"),
+                claudioBinaryPath: claudioBinaryPath.path)
             let report = runDoctorChecks(environment: env)
             expect(!report.hasFailure, "fully healthy environment must not fail")
             expect(
@@ -722,13 +772,16 @@ func runDoctorSuites() {
                 event: "stop", reason: "afplay 启动失败：/usr/bin/afplay", to: logFile,
                 lockFile: root.appendingPathComponent("claudio.log.lock"))
 
+            let claudioBinaryPath = root.appendingPathComponent("claudio")
+            makeExecutableFixture(at: claudioBinaryPath)
             let env = DoctorEnvironment(
                 afplayPath: "/usr/bin/afplay",
                 settingsFile: settingsFile,
                 configFile: root.appendingPathComponent("config.json"),
                 userPacksDirectory: packsDir,
                 bundledPacksDirectory: nil,
-                logFile: logFile)
+                logFile: logFile,
+                claudioBinaryPath: claudioBinaryPath.path)
             let report = runDoctorChecks(environment: env)
             expect(
                 !report.hasFailure,
