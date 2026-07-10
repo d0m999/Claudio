@@ -864,4 +864,147 @@ func runSettingsInstallerSuites() {
             expect(env == ["FOO": "bar"], "unrelated top-level 'env' key must survive the round trip untouched")
         }
     }
+
+    suite(
+        "installClaudioHooks: refuses a binary path that lives inside a .claudio namespace but is"
+            + " not a shape that namespace's own uninstall could sweep, and writes NOTHING —"
+            + " shellQuotedPath is strictly more permissive than matchedClaudioEvent, so without"
+            + " this guard a future relocation into `lib exec/` would append a hook entry no"
+            + " uninstall could ever remove, to the one file uninstall takes no backup of"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
+            let before = try? String(contentsOf: settingsFile, encoding: .utf8)
+
+            let unsweepable = "/Users/tester/.claudio/lib exec/claudio"
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: unsweepable, lockFile: lockFile)
+
+            expect(
+                result == .failure(.unsweepableBinaryPath(path: unsweepable)),
+                "expected .unsweepableBinaryPath, got \(result)")
+            expect(
+                (try? String(contentsOf: settingsFile, encoding: .utf8)) == before,
+                "settings.json must be left byte-identical when install refuses the path")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: settingsFile.path + ".claudio.bak"),
+                "no backup may be created when install never writes")
+        }
+    }
+
+    suite(
+        "installClaudioHooks: still accepts a binary path that names NO .claudio namespace at all."
+            + " uninstall fail-closes on such a path rather than claiming it could sweep it, so"
+            + " there is no contradiction to refuse — and HookStatusSuite's stale-namespace /"
+            + " self-heal coverage installs a `.claudio-OLD` entry through this very branch"
+    ) {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: "/Users/tester/.claudio-OLD/bin/claudio", lockFile: lockFile)
+            expect(result == .success(.installed), "expected .installed, got \(result)")
+        }
+    }
+
+    suite(
+        "installClaudioHooks x uninstallClaudioHooks: the round trip holds for every home segment"
+            + " shape claudio does not control — whatever install is willing to write for a path"
+            + " inside our namespace, uninstall anchored at that same namespace must remove again."
+            + " This is the invariant binaryPathContradictsItsNamespace exists to keep true"
+    ) {
+        let homes = [
+            "/Users/tester",  // the plain case
+            "/Users/John Smith",  // space: the AD/network-account case
+            "/Users/o'brien",  // apostrophe: quoted, and lossily decoded
+            "/Users/a$b",  // `$`: quoted, never expanded
+            "/Users/张三",  // non-ASCII, unquoted
+            "/Users/e\u{301}dith",  // NFD (e + COMBINING ACUTE): the scalar rewrite's raison d'être,
+            //                          exercised end-to-end through settings.json, not just the predicate
+        ]
+        for home in homes {
+            let binary = "\(home)/.claudio/bin/claudio"
+            expect(
+                !binaryPathContradictsItsNamespace(binary),
+                "sanity: install must be willing to write \(binary)")
+
+            withTempDirectory { root in
+                let settingsFile = root.appendingPathComponent("settings.json")
+                let lockFile = root.appendingPathComponent("play.lock")
+                writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
+
+                let installed = installClaudioHooks(
+                    settingsFile: settingsFile, claudioBinaryPath: binary, lockFile: lockFile)
+                expect(
+                    installed == .success(.installed),
+                    "install must succeed for home \(home), got \(installed)")
+
+                let removed = uninstallClaudioHooks(
+                    settingsFile: settingsFile, claudioBinaryPath: binary, lockFile: lockFile)
+                expect(
+                    removed == .success(.uninstalled(count: Event.allCases.count)),
+                    "uninstall must sweep all \(Event.allCases.count) entries install wrote for"
+                        + " home \(home), got \(removed)")
+            }
+        }
+    }
+
+    suite(
+        "SettingsUpdateError.unsweepableBinaryPath: its user-facing description names the offending"
+            + " path verbatim, so a future release that trips the guard gives an actionable message"
+            + " rather than an opaque failure"
+    ) {
+        let path = "/Users/tester/.claudio/lib exec/claudio"
+        let description = SettingsUpdateError.unsweepableBinaryPath(path: path).description
+        expect(
+            description.contains(path),
+            "the description must echo the offending path, got: \(description)")
+        expect(
+            description.contains("claudio") && !description.isEmpty,
+            "the description must be a non-empty human message, got: \(description)")
+    }
+
+    suite(
+        "installClaudioHooks: the unsweepable-path guard is a pre-I/O precondition — it fires"
+            + " BEFORE any read/write/lock, so an unsweepable path is refused as such even when"
+            + " settings.json is absent or its directory is unwritable, never masked as a"
+            + " write/probe failure. This pins the guard's POSITION, which the error-precedence a"
+            + " caller sees depends on"
+    ) {
+        let unsweepable = "/Users/tester/.claudio/lib exec/claudio"
+
+        // (a) settings.json ABSENT: a normal install would succeed here (loadRoot yields [:]),
+        // so getting .unsweepableBinaryPath proves the guard ran before the load.
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: unsweepable, lockFile: lockFile)
+            expect(
+                result == .failure(.unsweepableBinaryPath(path: unsweepable)),
+                "an absent settings.json must still surface .unsweepableBinaryPath, got \(result)")
+            expect(
+                !FileManager.default.fileExists(atPath: settingsFile.path),
+                "the guard must not have created settings.json")
+        }
+
+        // (b) settings.json in a NON-EXISTENT directory (its write/probe would fail): the guard
+        // must still win, so the caller sees the real cause (bad binary path) not a probe failure.
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("no-such-dir/settings.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let result = installClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: unsweepable, lockFile: lockFile)
+            expect(
+                result == .failure(.unsweepableBinaryPath(path: unsweepable)),
+                "an unwritable target must still surface .unsweepableBinaryPath (guard precedes the"
+                    + " writability probe), got \(result)")
+        }
+    }
 }

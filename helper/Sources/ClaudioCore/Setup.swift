@@ -210,9 +210,14 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
             )
             .sorted()
             .filter {
-                directoryExists(
-                    at: environment.userPacksDirectory.appendingPathComponent(
-                        $0, isDirectory: true))
+                // Exclude dot-prefixed entries: a killed `setup` can leave a `.<id>.tmp-<pid>`
+                // temp pack dir behind (see the atomic pack copy above), and it must never be
+                // eligible as the default selection — nor any hidden dir a user parked here.
+                // Real pack ids are never dot-prefixed.
+                !$0.hasPrefix(".")
+                    && directoryExists(
+                        at: environment.userPacksDirectory.appendingPathComponent(
+                            $0, isDirectory: true))
             }
         if let firstAvailable = availablePackIDs.first {
             switch selectPack(

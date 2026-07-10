@@ -16,6 +16,11 @@ import Foundation
 ///   it was never told the exact old path for. See
 ///   ``matchedClaudioEvent(inHookCommand:)`` for the argv-shape + namespace predicate this
 ///   keys off instead, and why it can never misfire on a third-party hook.
+/// - **Install never writes what uninstall cannot sweep**: `install` refuses a
+///   `claudioBinaryPath` that names a `.claudio` namespace it would not itself match back out
+///   of (``binaryPathContradictsItsNamespace(_:)``). The writer (``shellQuotedPath(_:)``) can
+///   quote strictly more paths than the matcher accepts, and the gap opens the day the helper
+///   binary relocates or is renamed.
 /// - **Abort, never clobber**: an unreadable/unparsable/unexpected-shape `settings.json`
 ///   aborts with an error and never touches the file.
 /// - **One-time backup**: the pre-claudio original is copied to `settings.json.claudio.bak`
@@ -68,6 +73,18 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
     case writeFailure(reason: String)
     case lockBusy
     case lockFailed(errno: Int32)
+    /// `install` was handed a binary path that lives inside a `.claudio` namespace but does not
+    /// have a shape that namespace's own `uninstall` sweep recognizes — see
+    /// ``binaryPathContradictsItsNamespace(_:)``. Writing the hook would leak an entry no
+    /// `uninstall` could ever remove, so nothing is written at all. Unreachable in production
+    /// (the path is always `<root>/bin/claudio`); reachable the day a release relocates or
+    /// renames the helper binary, which is precisely when it must be loud.
+    case unsweepableBinaryPath(path: String)
+    /// The on-disk `settings.json` changed between when this operation read it and when it was
+    /// about to write, so another writer (Claude Code itself, the GUI, an editor) edited it
+    /// concurrently. Rather than clobber that edit in a file `uninstall` keeps no backup of, the
+    /// write is aborted so the caller can retry against the fresh contents.
+    case concurrentModification(path: String)
 
     public var description: String {
         switch self {
@@ -79,6 +96,13 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
         case .writeFailure(let reason): "settings.json 写入失败：\(reason)"
         case .lockBusy: "settings.json 当前被占用（另一个 claudio 进程正在读写），请稍后重试"
         case .lockFailed(let errno): "无法获取文件锁（errno \(errno)），请稍后重试"
+        case .unsweepableBinaryPath(let path):
+            "claudio 二进制路径位于自己的 .claudio 命名空间内，却不是 uninstall 能识别并清除的形状"
+                + "（根之下只允许不含 shell 元字符的普通路径段，且文件名必须正好是 claudio）："
+                + "\(path)——已中止，未修改 settings.json"
+        case .concurrentModification(let path):
+            "settings.json 在本次读取与写入之间被其他程序修改（Claude Code / GUI / 编辑器），"
+                + "为避免覆盖对方的改动已中止（未修改文件），请重试：\(path)"
         }
     }
 }
@@ -94,6 +118,13 @@ public func installClaudioHooks(
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
     lockFile: URL = ClaudioPaths.lockFile
 ) -> Result<InstallOutcome, SettingsUpdateError> {
+    // Writer-side half of the matcher's contract, checked before any I/O: never append a hook
+    // entry this build's own `uninstall` would refuse to recognize. `shellQuotedPath` is strictly
+    // more permissive than `matchedClaudioEvent`, so without this a relocation into a
+    // metacharacter-carrying subdirectory would install a permanently unsweepable entry.
+    guard !binaryPathContradictsItsNamespace(claudioBinaryPath) else {
+        return .failure(.unsweepableBinaryPath(path: claudioBinaryPath))
+    }
     if case .notWritable(let reason) = probeSettingsWritable(settingsFile: settingsFile) {
         return .failure(.notWritable(reason: reason))
     }
@@ -174,11 +205,11 @@ public func detectHookInstallStatus(
     switch loadRoot(from: settingsFile) {
     case .failure(let error):
         return .settingsUnreadable(error)
-    case .success(let root):
-        if let shapeError = validateHooksShape(root) {
+    case .success(let loaded):
+        if let shapeError = validateHooksShape(loaded.root) {
             return .settingsUnreadable(shapeError)
         }
-        let hooksSection = (root[hooksKey] as? [String: Any]) ?? [:]
+        let hooksSection = (loaded.root[hooksKey] as? [String: Any]) ?? [:]
         let allEventsInstalled = Event.allCases.allSatisfy { event in
             let command = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
             let eventArray = (hooksSection[event.settingsName] as? [Any]) ?? []
@@ -196,7 +227,8 @@ private func performInstall(
     switch loadRoot(from: settingsFile) {
     case .failure(let error):
         return .failure(error)
-    case .success(let originalRoot):
+    case .success(let loaded):
+        let originalRoot = loaded.root
         if let shapeError = validateHooksShape(originalRoot) {
             return .failure(shapeError)
         }
@@ -215,7 +247,9 @@ private func performInstall(
         if case .failure(let error) = backupOriginalIfNeeded(settingsFile: settingsFile) {
             return .failure(error)
         }
-        if case .failure(let error) = atomicWrite(root: root, to: settingsFile) {
+        if case .failure(let error) = atomicWrite(
+            root: root, to: settingsFile, expectedCurrentData: loaded.rawData)
+        {
             return .failure(error)
         }
         return .success(.installed)
@@ -235,7 +269,8 @@ private func performUninstall(
     switch loadRoot(from: settingsFile) {
     case .failure(let error):
         return .failure(error)
-    case .success(let originalRoot):
+    case .success(let loaded):
+        let originalRoot = loaded.root
         if let shapeError = validateHooksShape(originalRoot) {
             return .failure(shapeError)
         }
@@ -257,7 +292,9 @@ private func performUninstall(
 
         guard totalRemoved > 0 else { return .success(.notInstalled) }
 
-        if case .failure(let error) = atomicWrite(root: root, to: settingsFile) {
+        if case .failure(let error) = atomicWrite(
+            root: root, to: settingsFile, expectedCurrentData: loaded.rawData)
+        {
             return .failure(error)
         }
         return .success(.uninstalled(count: totalRemoved))
@@ -266,9 +303,15 @@ private func performUninstall(
 
 // MARK: - Read / validate
 
-private func loadRoot(from settingsFile: URL) -> Result<[String: Any], SettingsUpdateError> {
+/// Also returns the exact bytes it read (`rawData`, `nil` when the file doesn't exist yet), so
+/// the caller can hand them to ``atomicWrite(root:to:expectedCurrentData:)`` as an
+/// optimistic-concurrency baseline: the write aborts if the on-disk bytes changed underneath a
+/// read-modify-write that no cross-process lock protects (see that function).
+private func loadRoot(
+    from settingsFile: URL
+) -> Result<(root: [String: Any], rawData: Data?), SettingsUpdateError> {
     guard FileManager.default.fileExists(atPath: settingsFile.path) else {
-        return .success([:])
+        return .success((root: [:], rawData: nil))
     }
     let data: Data
     do {
@@ -280,7 +323,7 @@ private func loadRoot(from settingsFile: URL) -> Result<[String: Any], SettingsU
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return .failure(.parseFailure(reason: "顶层必须是 JSON object：\(settingsFile.path)"))
         }
-        return .success(root)
+        return .success((root: root, rawData: data))
     } catch {
         return .failure(.parseFailure(reason: error.localizedDescription))
     }
@@ -390,7 +433,16 @@ private func removeHookEntries(
             return false
         }
 
-        guard !filteredInner.isEmpty else { continue }
+        if filteredInner.isEmpty {
+            // Filtered down to empty. Only DROP the group if WE emptied it (it held entries
+            // before, all of which were ours). A group that was ALREADY empty before this sweep
+            // is a third-party artifact — preserve it byte-for-byte rather than collaterally
+            // deleting someone else's (empty) group in this no-backup path.
+            if innerHooks.isEmpty {
+                newEventArray.append(group)
+            }
+            continue
+        }
         if filteredInner.count != innerHooks.count {
             groupDict[hooksKey] = filteredInner
         }
@@ -421,7 +473,10 @@ private func backupOriginalIfNeeded(settingsFile: URL) -> Result<Void, SettingsU
         .appendingPathComponent(settingsFile.lastPathComponent + ".claudio.bak")
     guard !fileManager.fileExists(atPath: backupFile.path) else { return .success(()) }
     do {
-        try fileManager.copyItem(at: settingsFile, to: backupFile)
+        // Resolve symlinks so the backup captures the target's CONTENT, not a fresh symlink to
+        // the same target (copyItem on a symlink copies the link itself). A dotfiles settings.json
+        // — a symlink into a repo — must be backed up as a real content snapshot.
+        try fileManager.copyItem(at: settingsFile.resolvingSymlinksInPath(), to: backupFile)
         return .success(())
     } catch {
         return .failure(.backupFailure(reason: error.localizedDescription))
@@ -432,12 +487,27 @@ private func backupOriginalIfNeeded(settingsFile: URL) -> Result<Void, SettingsU
 /// temp file **in the same directory** and `rename(2)`s it into place, which is exactly
 /// the "临时文件同目录 + rename" contract (ENGINEERING.md 工程落地细节 ⑤).
 private func atomicWrite(
-    root: [String: Any], to settingsFile: URL
+    root: [String: Any], to settingsFile: URL, expectedCurrentData: Data?
 ) -> Result<Void, SettingsUpdateError> {
+    // Optimistic-concurrency check ([9]): settings.json has writers that do NOT honor claudio's
+    // play.lock — Claude Code itself, the GUI, the user's editor. Re-read the bytes immediately
+    // before writing; if they no longer match what this operation loaded, another writer changed
+    // the file mid read-modify-write, so abort rather than clobber it — this file has no uninstall
+    // backup. This shrinks the race to the microseconds between this re-read and the rename; it
+    // cannot be closed fully without a lock every external writer respects (none exists).
+    let currentData = try? Data(contentsOf: settingsFile)
+    guard currentData == expectedCurrentData else {
+        return .failure(.concurrentModification(path: settingsFile.path))
+    }
     do {
         let data = try JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: settingsFile, options: .atomic)
+        // Resolve symlinks so a settings.json that IS a symlink (dotfiles: stow/chezmoi) has its
+        // TARGET rewritten in place ([D]). Writing the raw path with .atomic does temp+rename ON
+        // the symlink, replacing the link itself with a regular file and silently diverging from
+        // the dotfiles repo. A non-symlink path resolves to itself, so the common case is unchanged.
+        let realFile = settingsFile.resolvingSymlinksInPath()
+        try data.write(to: realFile, options: .atomic)
         return .success(())
     } catch {
         return .failure(.writeFailure(reason: error.localizedDescription))

@@ -67,6 +67,14 @@ private let shellUnsafeCharacters: Set<Character> = [
 private let shellUnsafeScalars: Set<Unicode.Scalar> = Set(
     shellUnsafeCharacters.flatMap { $0.unicodeScalars })
 
+/// Scalar-view spellings of the three literals ``isClaudioBinaryPath(_:claudioRoot:)`` compares
+/// against. That function decides path structure on Unicode *scalars* rather than `Character`s
+/// or `String`s — see its doc comment for why `String` equality is the wrong tool here — so its
+/// separator and its component literals have to live in the same view.
+private let pathSeparatorScalar: Unicode.Scalar = "/"
+private let parentDirectoryScalars = Array("..".unicodeScalars)
+private let claudioBasenameScalars = Array("claudio".unicodeScalars)
+
 /// Renders `path` as a single `/bin/sh` word: returned unchanged when it is already
 /// shell-word-safe, otherwise wrapped in POSIX single quotes with any embedded `'` escaped as
 /// `'\''` (the standard idiom — close the quote, emit an escaped literal quote, reopen).
@@ -202,6 +210,34 @@ public func claudioNamespaceRoot(forBinaryPath binaryPath: String) -> String? {
     return "/" + components[...index].joined(separator: "/")
 }
 
+/// Whether a hook command written for `binaryPath` would be an entry that this build's
+/// `uninstall` — anchored at the very namespace `binaryPath` itself names — could never sweep
+/// back out. `install` refuses such a path outright; see
+/// ``SettingsUpdateError/unsweepableBinaryPath(path:)``.
+///
+/// The writer and the matcher are meant to be a pair, but they are not symmetric.
+/// ``shellQuotedPath(_:)`` renders *any* path as one valid `/bin/sh` word — including
+/// `<root>/lib exec/claudio` — while ``matchedClaudioEvent(inHookCommand:claudioRoot:)`` rejects
+/// a below-root space, quote, or `$` (see ``isClaudioBinaryPath(_:claudioRoot:)``). Nothing in
+/// production reaches that gap today: the path is always `<root>/bin/claudio`. But this file
+/// exists so that a *future* relocation keeps working, and a relocation into `libexec dir/` — or
+/// one that renames the binary to anything but `claudio` — would silently append a hook entry no
+/// later `uninstall` could ever remove, to a file `uninstall` takes no backup of. Checking the
+/// invariant at the writer turns a silent, permanent leak into a loud failure at the one moment
+/// it could be introduced.
+///
+/// A `binaryPath` naming **no** `.claudio` namespace at all (`/usr/local/bin/claudio`, or a past
+/// release's `.claudio-OLD/`) is not a contradiction and returns `false`.
+/// ``claudioNamespaceRoot(forBinaryPath:)`` yields `nil` for it, so `uninstall` fail-closes and
+/// never claimed it would sweep such an entry — the pre-existing, documented behavior that
+/// ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)``'s stale-namespace coverage
+/// installs through on purpose. The invariant pinned here is the exact one, no wider: *if* a path
+/// names a namespace, it must be a shape that namespace's own sweep accepts.
+public func binaryPathContradictsItsNamespace(_ binaryPath: String) -> Bool {
+    guard let claudioRoot = claudioNamespaceRoot(forBinaryPath: binaryPath) else { return false }
+    return !isClaudioBinaryPath(binaryPath, claudioRoot: claudioRoot)
+}
+
 /// Reverses ``shellQuotedPath(_:)``: decodes a single `/bin/sh` word into the literal string
 /// the shell would pass as `argv[0]`, or `nil` when the word is not a shape claudio's writer
 /// can emit (an unterminated quote, or a backslash escaping anything but `'`).
@@ -254,15 +290,46 @@ private func shellWordContents(_ rawWord: String) -> String? {
 /// `claudioRoot/`, free of `..` traversal, with a basename of exactly `claudio` — independent
 /// of which subdirectory under the root a given release places the binary in (today:
 /// `bin/`, see ``ClaudioPaths/binDirectory``).
+///
+/// **Every comparison below is on Unicode scalars, never `Character`s or `String`s**, and that
+/// is what makes the word "literally" above true rather than merely intended. Swift's
+/// `String`/`Character` equality is Unicode *canonical equivalence*, so `hasPrefix` answers
+/// `true` for a path that is not bytewise under the root at all: spell the root NFD
+/// (`/Users/e` + U+0301 + `/.claudio`) and the command NFC (`/Users/é/.claudio/bin/claudio`)
+/// and `path.hasPrefix(claudioRoot + "/")` is `true` while `path.utf8.starts(with:)` is `false`.
+/// On a normalization-*insensitive* volume (APFS, HFS+) those two spellings name the same
+/// directory and sweeping the entry is correct; on a normalization-*sensitive* home — an NFS/SMB
+/// network home, i.e. exactly the AD-account case ``shellQuotedPath(_:)`` exists for — they are
+/// two different directories, and `uninstall` would delete a `settings.json` hook belonging to a
+/// root that is not this one. A `String`'s scalar sequence is in bijection with its UTF-8 bytes,
+/// so comparing on ``String/unicodeScalars`` is byte comparison, spelled in the view the
+/// below-root metacharacter scan already needed.
+///
+/// The scalar view closes a second, subtler gap the `Character` view carried: a combining mark
+/// immediately after the root's trailing `/` fuses with it into ONE grapheme cluster, so the old
+/// `path.dropFirst(claudioRoot.count + 1)` silently ate that mark along with the slash — slicing
+/// a different view than the one the prefix was checked on. Nothing exploitable rode on it (a
+/// combining mark is never a shell metacharacter, and grapheme-wise `hasPrefix` rejected the
+/// fused cluster anyway), but slicing the view you compared is the only version of this that
+/// stays correct by construction instead of by argument.
+///
+/// **Fail-closed on a normalization mismatch is deliberate, and costs nothing real.** `install`
+/// compares hook commands for *exact string* equality, so a release whose derived binary path
+/// changed normalization would already be appending a duplicate entry rather than recognizing
+/// its own — the divergence surfaces there, loudly, not here. A refused sweep leaves a harmless
+/// leftover; a canonical-equivalence sweep deletes someone else's hook. Same direction as the
+/// `..` rejection above, for the same reason.
 private func isClaudioBinaryPath(_ path: String, claudioRoot: String) -> Bool {
     guard claudioRoot.hasPrefix("/"), !claudioRoot.hasSuffix("/"),
         !claudioRoot.split(separator: "/").contains("..")
     else { return false }
     // The trailing slash matters: without it, a sibling `~/.claudio-backup/…/claudio` would
     // pass as "inside the root".
-    guard path.hasPrefix(claudioRoot + "/") else { return false }
+    let rootPrefix = Array((claudioRoot + "/").unicodeScalars)
+    let pathScalars = Array(path.unicodeScalars)
+    guard pathScalars.starts(with: rootPrefix) else { return false }
 
-    let relative = path.dropFirst(claudioRoot.count + 1)
+    let relative = pathScalars.dropFirst(rootPrefix.count)
     // Below its own root, claudio's subtree is only ever plain path segments (`bin/claudio`, a
     // future `libexec/claudio`, or the bare `claudio`) — it has NEVER written a quote, backslash,
     // whitespace, newline, or shell metacharacter there. So any such character below the root
@@ -275,12 +342,18 @@ private func isClaudioBinaryPath(_ path: String, claudioRoot: String) -> Bool {
     // the command so `/bin/sh` runs an entirely separate, attacker-chosen `argv[0]`. The decoder
     // strips neither `$`/backtick nor a newline, so the decoded candidate is no safer here than
     // the raw one — which is why this lives in the shared predicate rather than on one branch.
-    // The root segment itself is exempt: it had to match `claudioRoot` byte-for-byte to clear the
-    // prefix guard, so an attacker has no freedom there (a `$` or space in the *home* directory
-    // of a legacy bare entry is fine — it is above the root, not below it).
-    guard !relative.unicodeScalars.contains(where: { shellUnsafeScalars.contains($0) })
+    // The root segment itself is exempt, and now genuinely is: it had to match `claudioRoot`
+    // scalar-for-scalar — i.e. UTF-8 byte-for-byte — to clear the prefix guard above, and
+    // canonical equivalence (the one way two *different* scalar sequences compare equal in Swift,
+    // and the reason that guard is not `hasPrefix`) never rewrites an ASCII scalar, so it cannot
+    // smuggle a metacharacter into the root segment either. An attacker has no freedom there. A
+    // `$` or space in the *home* directory of a legacy bare entry is still fine — it is above the
+    // root, not below it.
+    guard !relative.contains(where: { shellUnsafeScalars.contains($0) }) else { return false }
+    let components = relative.split(
+        separator: pathSeparatorScalar, omittingEmptySubsequences: true)
+    guard !components.contains(where: { $0.elementsEqual(parentDirectoryScalars) }),
+        let basename = components.last, basename.elementsEqual(claudioBasenameScalars)
     else { return false }
-    let components = relative.split(separator: "/", omittingEmptySubsequences: true)
-    guard !components.contains(".."), components.last == "claudio" else { return false }
     return true
 }

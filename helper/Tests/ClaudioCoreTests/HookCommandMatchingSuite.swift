@@ -569,4 +569,139 @@ func runHookCommandMatchingSuites() {
                 + " \(String(describing: claudioNamespaceRoot(forBinaryPath: ClaudioPaths.claudioBinary.path)))"
         )
     }
+
+    suite(
+        "matchedClaudioEvent: the root gate compares Unicode SCALARS, not Characters. Swift's"
+            + " String equality is canonical equivalence, so a `hasPrefix` gate answers TRUE for"
+            + " an NFC-spelled command under an NFD-spelled root even though the two are not the"
+            + " same bytes. On a normalization-INsensitive volume (APFS) they name one directory;"
+            + " on a normalization-sensitive home (NFS/SMB — the AD-account case) they are two,"
+            + " and sweeping across them deletes a settings.json hook out of a root that is not"
+            + " ours, from a file uninstall takes no backup of"
+    ) {
+        let nfdRoot = "/Users/e\u{301}/.claudio"  // "e" + COMBINING ACUTE ACCENT
+        let nfcRoot = "/Users/\u{00E9}/.claudio"  // precomposed "é" (U+00E9)
+        expect(
+            !nfdRoot.unicodeScalars.elementsEqual(nfcRoot.unicodeScalars),
+            "sanity: the two spellings must be different scalar sequences")
+        expect(
+            nfdRoot == nfcRoot,
+            "sanity: ...yet Swift's String == calls them equal. That is the whole trap: a"
+                + " String/Character-level prefix gate cannot tell these apart")
+
+        // The bug this gate exists to stop: canonically equivalent, byte-different.
+        expect(
+            matched("\(nfcRoot)/bin/claudio play stop", root: nfdRoot) == nil,
+            "an NFC-spelled command under an NFD-spelled root must NOT match")
+        expect(
+            matched("\(nfdRoot)/bin/claudio play stop", root: nfcRoot) == nil,
+            "an NFD-spelled command under an NFC-spelled root must NOT match")
+
+        // ...while each spelling still sweeps its own entry, so a non-ASCII home is not bricked.
+        for root in [nfdRoot, nfcRoot] {
+            expect(
+                matched("\(root)/bin/claudio play stop", root: root) == .stop,
+                "a non-ASCII home must still sweep its own entry, root \(root)")
+        }
+    }
+
+    suite(
+        "matchedClaudioEvent: slices the same view it compared. A combining mark right after the"
+            + " root's trailing `/` fuses with it into ONE grapheme cluster, so a Character-level"
+            + " `dropFirst(root.count + 1)` would eat the mark along with the slash — slicing a"
+            + " different view than the prefix was checked on. On scalars the mark survives into"
+            + " the below-root scan, where it belongs: it names a real subdirectory INSIDE our own"
+            + " root, carries no metacharacter, and sweeping it is the job"
+    ) {
+        expect(
+            matched("\(testRoot)/\u{301}bin/claudio play stop") == .stop,
+            "a combining mark below the root names a subdirectory of ours and must still sweep")
+        // But it is scanned, not swallowed: a metacharacter behind it is still caught.
+        expect(
+            matched("\(testRoot)/\u{301}$X/claudio play stop") == nil,
+            "a metacharacter after a leading combining mark must still be rejected")
+        // And it can never fake the basename: `\u{301}claudio` is not `claudio`.
+        expect(
+            matched("\(testRoot)/bin/\u{301}claudio play stop") == nil,
+            "a combining mark must not let a different basename pass as `claudio`")
+        // Same at the TRAILING edge: `claudio` + a combining mark is one scalar longer than the
+        // literal, so the scalar `elementsEqual` basename check rejects it — a Character-level
+        // check that folded the mark into the last grapheme could have waved it through.
+        expect(
+            matched("\(testRoot)/bin/claudio\u{301} play stop") == nil,
+            "a trailing combining mark must not let `claudioX` pass as the basename `claudio`")
+        // And a combining mark on the root's OWN final character makes a *sibling* directory:
+        // `<root>` + U+0301 is not scalar-prefixed by `<root>/`, so it is outside the root, the
+        // same way `.claudio-backup` is. The trailing-slash + scalar-exact prefix guard catches it.
+        expect(
+            matched("\(testRoot)\u{301}x/bin/claudio play stop", root: testRoot) == nil,
+            "a combining mark on the root's final char names a sibling dir, not our root")
+    }
+
+    suite(
+        "binaryPathContradictsItsNamespace: install's writer-side guard. shellQuotedPath will"
+            + " quote ANY path into one valid /bin/sh word, but matchedClaudioEvent refuses a"
+            + " below-root metacharacter or a basename that is not `claudio` — so a path inside a"
+            + " .claudio namespace must be a shape that namespace's own sweep matches back out,"
+            + " or install would append an entry no uninstall could ever remove"
+    ) {
+        let sweepable = [
+            "\(testRoot)/bin/claudio",  // today's canonical path
+            "\(testRoot)/libexec/claudio",  // a future relocation
+            "\(testRoot)/claudio",  // the root itself
+            "/Users/John Smith/.claudio/bin/claudio",  // space ABOVE the root
+            "/Users/o'brien/.claudio/bin/claudio",  // quote ABOVE the root
+            "/Users/a$b/.claudio/bin/claudio",  // `$` ABOVE the root
+            "/Users/张三/.claudio/bin/claudio",  // non-ASCII home
+            ClaudioPaths.claudioBinary.path,  // the real production path
+        ]
+        for path in sweepable {
+            expect(
+                !binaryPathContradictsItsNamespace(path),
+                "\(path) is sweepable and install must accept it")
+        }
+
+        let unsweepable = [
+            "\(testRoot)/lib exec/claudio",  // space BELOW the root
+            "\(testRoot)/bin/claudio-helper",  // basename is not exactly `claudio`
+            "\(testRoot)/$X/claudio",  // variable BELOW the root
+            "\(testRoot)/'..'/bin/claudio",  // quote-hidden traversal
+            "\(testRoot)/$(echo x)/claudio",  // command substitution BELOW the root
+            "\(testRoot)/`echo x`/bin/claudio",  // backtick substitution BELOW the root
+            "\(testRoot)/x\n/claudio",  // embedded NEWLINE below the root
+        ]
+        for path in unsweepable {
+            expect(
+                binaryPathContradictsItsNamespace(path),
+                "\(path) could never be swept back out; install must refuse it")
+            // The exact asymmetry the guard exists for: the writer WOULD emit a command for it...
+            let written = claudioHookCommand(for: .stop, claudioBinaryPath: path)
+            let derivedRoot = claudioNamespaceRoot(forBinaryPath: path)
+            expect(derivedRoot != nil, "sanity: \(path) does name a namespace")
+            // ...which this matcher then refuses, stranding the entry in settings.json forever.
+            expect(
+                matchedClaudioEvent(inHookCommand: written, claudioRoot: derivedRoot ?? "") == nil,
+                "the guard's premise: \"\(written)\" is unmatchable, so it must never be written")
+        }
+    }
+
+    suite(
+        "binaryPathContradictsItsNamespace: a path naming NO .claudio namespace is not a"
+            + " contradiction. claudioNamespaceRoot yields nil for it, so uninstall fail-closes and"
+            + " never claimed it could sweep such an entry — and HookStatusSuite's stale-namespace"
+            + " coverage installs a `.claudio-OLD` hook through the real API on purpose"
+    ) {
+        for path in [
+            "/usr/local/bin/claudio",
+            "/Users/tester/.claudio-OLD/bin/claudio",
+            "/Users/tester/bin/claudio",
+        ] {
+            expect(
+                claudioNamespaceRoot(forBinaryPath: path) == nil,
+                "sanity: \(path) names no root")
+            expect(
+                !binaryPathContradictsItsNamespace(path),
+                "\(path) names no namespace, so there is nothing for it to contradict")
+        }
+    }
 }
