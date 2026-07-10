@@ -118,6 +118,36 @@ public func installClaudioHooks(
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
     lockFile: URL = ClaudioPaths.lockFile
 ) -> Result<InstallOutcome, SettingsUpdateError> {
+    installClaudioHooksLocked(
+        settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath, lockFile: lockFile,
+        betweenReadAndWrite: nil)
+}
+
+#if DEBUG
+/// Test-only overload driving the ``SettingsUpdateError/concurrentModification(path:)`` window.
+/// `betweenReadAndWrite` runs once after `settings.json` has been read and immediately before
+/// ``atomicWrite(root:to:expectedCurrentData:)``'s re-read — the only way to hit that path
+/// deterministically, since the window a real external writer has to land in is microseconds
+/// wide and racing it from the outside would be flaky rather than a regression net. Compiled
+/// out of release builds (`#if DEBUG`), so the shipped ``ClaudioCore`` library surface — the
+/// one the GUI links — stays exactly the production 3-argument signature. Injected for the same
+/// reason ``PlayEnvironment``'s `now` is, rather than read from the world.
+public func installClaudioHooks(
+    settingsFile: URL = ClaudioPaths.claudeSettingsFile,
+    claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
+    lockFile: URL = ClaudioPaths.lockFile,
+    betweenReadAndWrite: (() -> Void)?
+) -> Result<InstallOutcome, SettingsUpdateError> {
+    installClaudioHooksLocked(
+        settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath, lockFile: lockFile,
+        betweenReadAndWrite: betweenReadAndWrite)
+}
+#endif
+
+private func installClaudioHooksLocked(
+    settingsFile: URL, claudioBinaryPath: String, lockFile: URL,
+    betweenReadAndWrite: (() -> Void)?
+) -> Result<InstallOutcome, SettingsUpdateError> {
     // Writer-side half of the matcher's contract, checked before any I/O: never append a hook
     // entry this build's own `uninstall` would refuse to recognize. `shellQuotedPath` is strictly
     // more permissive than `matchedClaudioEvent`, so without this a relocation into a
@@ -130,7 +160,9 @@ public func installClaudioHooks(
     }
 
     let outcome = withNonBlockingLock(path: lockFile.path) {
-        performInstall(settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath)
+        performInstall(
+            settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath,
+            betweenReadAndWrite: betweenReadAndWrite)
     }
 
     switch outcome {
@@ -156,8 +188,35 @@ public func uninstallClaudioHooks(
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
     lockFile: URL = ClaudioPaths.lockFile
 ) -> Result<UninstallOutcome, SettingsUpdateError> {
+    uninstallClaudioHooksLocked(
+        settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath, lockFile: lockFile,
+        betweenReadAndWrite: nil)
+}
+
+#if DEBUG
+/// Test-only overload — the uninstall counterpart of
+/// ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:betweenReadAndWrite:)``'s seam,
+/// compiled out of release builds.
+public func uninstallClaudioHooks(
+    settingsFile: URL = ClaudioPaths.claudeSettingsFile,
+    claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
+    lockFile: URL = ClaudioPaths.lockFile,
+    betweenReadAndWrite: (() -> Void)?
+) -> Result<UninstallOutcome, SettingsUpdateError> {
+    uninstallClaudioHooksLocked(
+        settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath, lockFile: lockFile,
+        betweenReadAndWrite: betweenReadAndWrite)
+}
+#endif
+
+private func uninstallClaudioHooksLocked(
+    settingsFile: URL, claudioBinaryPath: String, lockFile: URL,
+    betweenReadAndWrite: (() -> Void)?
+) -> Result<UninstallOutcome, SettingsUpdateError> {
     let outcome = withNonBlockingLock(path: lockFile.path) {
-        performUninstall(settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath)
+        performUninstall(
+            settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath,
+            betweenReadAndWrite: betweenReadAndWrite)
     }
 
     switch outcome {
@@ -222,7 +281,7 @@ public func detectHookInstallStatus(
 // MARK: - Locked critical sections
 
 private func performInstall(
-    settingsFile: URL, claudioBinaryPath: String
+    settingsFile: URL, claudioBinaryPath: String, betweenReadAndWrite: (() -> Void)? = nil
 ) -> Result<InstallOutcome, SettingsUpdateError> {
     switch loadRoot(from: settingsFile) {
     case .failure(let error):
@@ -247,6 +306,7 @@ private func performInstall(
         if case .failure(let error) = backupOriginalIfNeeded(settingsFile: settingsFile) {
             return .failure(error)
         }
+        betweenReadAndWrite?()
         if case .failure(let error) = atomicWrite(
             root: root, to: settingsFile, expectedCurrentData: loaded.rawData)
         {
@@ -260,7 +320,7 @@ private func performInstall(
 /// see ``uninstallClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``. A path naming no
 /// root is fail-closed: nothing matches, nothing is written, `.notInstalled`.
 private func performUninstall(
-    settingsFile: URL, claudioBinaryPath: String
+    settingsFile: URL, claudioBinaryPath: String, betweenReadAndWrite: (() -> Void)? = nil
 ) -> Result<UninstallOutcome, SettingsUpdateError> {
     guard FileManager.default.fileExists(atPath: settingsFile.path) else {
         return .success(.notInstalled)
@@ -292,6 +352,7 @@ private func performUninstall(
 
         guard totalRemoved > 0 else { return .success(.notInstalled) }
 
+        betweenReadAndWrite?()
         if case .failure(let error) = atomicWrite(
             root: root, to: settingsFile, expectedCurrentData: loaded.rawData)
         {
