@@ -98,8 +98,10 @@ public func shellQuotedPath(_ path: String) -> String {
 ///    `<event>` is one of the 4 real ``Event/cliName`` values. `mytool play deploy` fails; so
 ///    does anything with a trailing operator or extra argument (` play stop --verbose`,
 ///    ` play stop && rm -rf ~`), because that text is no longer the suffix.
-/// 2. **Everything before that suffix must be a single shell word** (unquoted, or POSIX
-///    single-quoted) — see ``shellQuotedPath(_:)``, whose escaping this reverses.
+/// 2. **Everything before that suffix is read as one word**, decoded via
+///    ``shellQuotedPath(_:)``'s inverse. When that decoding fails or disagrees with the raw
+///    text (a legacy entry whose path carries `'` or `\`), the raw text is tried too — see
+///    ``shellWordContents(_:)``. Clause 3, not this one, is what makes the match safe.
 /// 3. **That word must be `<claudioRoot>/…/claudio`**: literally prefixed by claudio's own
 ///    root, free of `..`, with a basename of exactly `claudio`. It is *not* enough for some
 ///    component to be named `.claudio` — `/tmp/.claudio/bin/claudio play stop` and
@@ -125,9 +127,11 @@ public func shellQuotedPath(_ path: String) -> String {
 /// - **No shell variable expansion** (`$HOME`, `~`): claudio always writes a fully-resolved
 ///   absolute path, so there is no real historical form using a variable. `$HOME/.claudio/…`
 ///   is not prefixed by the resolved root and simply falls through as "not ours".
-/// - **No double quotes, no backslash escapes other than `\'`**: ``shellQuotedPath(_:)`` emits
-///   neither, so accepting them would only widen the destructive match surface for a form we
-///   have never produced.
+/// - **No double quotes, and no backslash escape other than `\'`, are ever *decoded***:
+///   ``shellQuotedPath(_:)`` emits neither, so interpreting them would only widen the
+///   destructive match surface for a form we have never produced. Such a word is still matched
+///   *literally* if it is prefixed by the root (that is the legacy fallback), never by giving
+///   the escape its shell meaning.
 /// - **No internal-whitespace collapsing**: `<path>␣␣play␣␣stop` does not match. Tolerating
 ///   repeated inner spaces is *unrepresentable* alongside supporting a real path that contains
 ///   a space — the two are the same character. Leading/trailing whitespace is still trimmed,
@@ -143,8 +147,15 @@ public func matchedClaudioEvent(inHookCommand command: String, claudioRoot: Stri
         // another), so the first hit is the only candidate — a bad path here is a rejection,
         // not a reason to keep scanning.
         let rawWord = String(trimmed.dropLast(suffix.count))
-        guard let path = shellWordContents(rawWord),
-            isClaudioBinaryPath(path, claudioRoot: claudioRoot)
+        // Two candidates, not one. The decoded word is what today's writer meant; `rawWord` is
+        // what a pre-quoting claudio literally wrote. A legacy path carrying `'` or `\` either
+        // fails to decode (unbalanced quote) *or* decodes to the wrong string (`/Users/o'b'rien`
+        // → `/Users/obrien`), and in both cases only the raw text is prefixed by the real root.
+        // Trying the raw text cannot widen the match: `isClaudioBinaryPath` still demands a
+        // literal `<claudioRoot>/` prefix, and everything under that prefix is a file inside
+        // claudio's own directory — the tree `uninstall` owns outright.
+        let candidates = [shellWordContents(rawWord), rawWord].compactMap { $0 }
+        guard candidates.contains(where: { isClaudioBinaryPath($0, claudioRoot: claudioRoot) })
         else { return nil }
         return event
     }
@@ -181,6 +192,16 @@ public func claudioNamespaceRoot(forBinaryPath binaryPath: String) -> String? {
 /// widened by allowing it: the decoded word must still be literally prefixed by claudio's own
 /// root and end in `/claudio`, so `rm -rf / ; <root>/bin/claudio play stop` decodes to a word
 /// starting with `rm` and is rejected.
+///
+/// **Whitespace is not the only legacy character this must survive, and a `nil` here is not a
+/// rejection.** `'` and `\` are the two members of ``shellUnsafeCharacters`` that this decoder
+/// cannot round-trip out of a *bare* legacy word: an odd number of `'` leaves the scan inside a
+/// quote (`nil`), and an even number silently *deletes* them (`/Users/o'b'rien` → `/Users/obrien`,
+/// a path that is no longer prefixed by the real root). Both shapes were removable before the
+/// writer started quoting — `main` compared hook commands for exact string equality, and this
+/// file's first draft tokenized on whitespace alone, and `'`/`\` are neither. So
+/// ``matchedClaudioEvent(inHookCommand:claudioRoot:)`` tries the raw word alongside whatever
+/// this returns, rather than treating `nil` (or a lossy decode) as "not ours".
 private func shellWordContents(_ rawWord: String) -> String? {
     var contents = ""
     var inSingleQuotes = false

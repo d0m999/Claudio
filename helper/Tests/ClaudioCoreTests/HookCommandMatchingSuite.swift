@@ -61,6 +61,59 @@ func runHookCommandMatchingSuites() {
     }
 
     suite(
+        "matchedClaudioEvent: sweeps a LEGACY unquoted command whose home carries an APOSTROPHE."
+            + " `'` is the character shellWordContents cannot round-trip out of a bare word: one"
+            + " leaves the scan inside a quote, two are silently deleted. Both were removable"
+            + " before the writer started quoting (exact string equality on main; whitespace"
+            + " tokenizing in this file's first draft), so failing to sweep them is a regression,"
+            + " not an unimplemented tolerance"
+    ) {
+        // One `'`: shellWordContents ends inSingleQuotes and returns nil.
+        let oddRoot = "/Users/o'brien/.claudio"
+        let oddLegacy = "/Users/o'brien/.claudio/bin/claudio play stop"
+        expect(
+            matched(oddLegacy, root: oddRoot) == .stop,
+            "an unbalanced-quote legacy command must still match, got"
+                + " \(String(describing: matched(oddLegacy, root: oddRoot)))")
+
+        // Two `'`: shellWordContents *succeeds*, but strips them — `/Users/o'b'rien` decodes to
+        // `/Users/obrien`, which is not prefixed by the real root. Pins that the matcher tries
+        // the raw word too, rather than trusting a decode that happened to return non-nil.
+        let evenRoot = "/Users/o'b'rien/.claudio"
+        let evenLegacy = "/Users/o'b'rien/.claudio/bin/claudio play notification"
+        expect(
+            matched(evenLegacy, root: evenRoot) == .notification,
+            "a lossily-decoded legacy command must still match its real root, got"
+                + " \(String(describing: matched(evenLegacy, root: evenRoot)))")
+
+        // The fallback must not widen the destructive surface: the raw word still has to be
+        // literally prefixed by *our* root. Another user's apostrophe home stays untouched.
+        expect(
+            matched(oddLegacy) == nil,
+            "the raw-word fallback must not match outside our own root, got"
+                + " \(String(describing: matched(oddLegacy)))")
+    }
+
+    suite(
+        "matchedClaudioEvent: sweeps a LEGACY unquoted command whose home carries a BACKSLASH."
+            + " `\\` is the other character shellWordContents refuses (it only ever decodes the"
+            + " `'\\''` idiom's), so a bare legacy path containing one used to strand an orphan"
+            + " hook in settings.json that uninstall could never remove"
+    ) {
+        let root = "/Users/a\\b/.claudio"
+        let legacy = "/Users/a\\b/.claudio/bin/claudio play stop"
+        expect(
+            matched(legacy, root: root) == .stop,
+            "a legacy bare backslash-carrying command must still match, got"
+                + " \(String(describing: matched(legacy, root: root)))")
+
+        expect(
+            matched(legacy) == nil,
+            "the raw-word fallback must not match outside our own root, got"
+                + " \(String(describing: matched(legacy)))")
+    }
+
+    suite(
         "matchedClaudioEvent: an apostrophe in the home directory round-trips through the"
             + " '\\'' single-quote idiom"
     ) {
