@@ -86,8 +86,9 @@ func isReallyContained(_ url: URL, inside base: URL) -> Bool {
 /// Whether `directory` exists on disk **as a directory** — `FileManager.fileExists(atPath:)`
 /// alone returns `true` for a plain file too, which would let a stray regular file sitting
 /// at a pack-id's expected path be mistaken for that pack's directory (`/codex review`
-/// 2026-07-08).
-private func directoryExists(at directory: URL) -> Bool {
+/// 2026-07-08). Module-visible (not `private`) so `Setup.swift`'s bundle-adjacent-packs
+/// discovery (T17) reuses this exact check instead of a second, unaudited copy.
+func directoryExists(at directory: URL) -> Bool {
     var isDirectory: ObjCBool = false
     guard FileManager.default.fileExists(atPath: directory.path, isDirectory: &isDirectory)
     else { return false }

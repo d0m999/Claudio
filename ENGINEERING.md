@@ -76,6 +76,7 @@ app 不在任务时运行，实际播放由 hook 触发。选 **helper-CLI**：a
 | `claudio uninstall` | 精准摘除 claudio 的 hook 条目 | 0/非0 |
 | `claudio use <pack-id>` | 切当前包（改配置文件） | 0/非0 |
 | `claudio doctor` | 自检：settings.json 可写、包完整、afplay 在位 | 0/非0 |
+| `claudio setup` | v1 过渡：从 app bundle 内把二进制+内置包复制到 `~/.claudio/`、首次默认选包、调 `claudio install`（见 T17；T15 真身面板落地后由 CTA 直接调同一逻辑，这条 CLI 入口不再是唯一途径） | 0/非0 |
 
 - `<event>` 合法值 = **v1 四事件**（决议 2，映射表见下方"工程落地细节 ①"）：`stop` `stop_failure` `notification` `subagent_stop`；`session_start` `session_end` `user_prompt_submit` 一律 v2。
 - **config.json 文件本身是唯一真相源**：app(GUI) 写、helper `play` 只读（消歧详见下方"工程落地细节"）。
@@ -178,7 +179,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 **⑥ config.json 归属（消除"真相源"歧义）：**
 - config.json 文件本身是唯一真相源。**app(GUI) 是写入者，helper `play` 只读。**
-- `claudio use <pack>`（已实现）/ 计划中的 `claudio set volume <0.0–1.0>` 是等价 CLI 便捷入口，与 GUI 写同一份 config，都走上面那把文件锁 + 原子写。**没有 `set night`**——`night_dim` 已由 T2 移出 v1 → v2。
+- `claudio use <pack>`（**T17 实现**——此前正文这句长期误标"已实现"，实际代码是 `NotYetImplemented` 占位符，由 `/codex review 10f00cf+f31987b` 顺带牵出，见 T17 完成记录）/ 计划中的 `claudio set volume <0.0–1.0>` 是等价 CLI 便捷入口，与 GUI 写同一份 config，都走上面那把文件锁 + 原子写。**没有 `set night`**——`night_dim` 已由 T2 移出 v1 → v2。
 
 ### 内置包（v1）
 
@@ -286,7 +287,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - **绕过指引（已按新系统更新）**：macOS Sequoia(15) 起，"右键→打开"已不再直接绕过 Gatekeeper。指引须写：**系统设置 > 隐私与安全性 > 下滑找到被拦的 Claudio > 点"仍要打开"**。旧系统才用右键打开。
 - **尽早签名公证**：鉴于新系统绕过越来越烦，有第一批用户就上 Apple Developer（99 美元/年）签名 + 公证，彻底去掉摩擦。
 - **CI/CD**：GitHub Actions —— push tag → 编译 universal 二进制（Intel + Apple Silicon）→ 打 DMG →（有证书则签名公证）→ 传 Release → 自动更新 tap 的 cask formula。
-- **接管机制**：helper-CLI 随 app 安装；app 首次运行调 `claudio install`（备份 + 幂等 + 原子写）。
+- **接管机制**：helper-CLI 随 app 安装；app 首次运行调 `claudio install`（备份 + 幂等 + 原子写）。**v1 过渡（T17）**：真身菜单栏面板（T15）落地前，onboarding CTA 未接线到任何真实动作（`OnboardingViewModel` 文档注释明确写着接线是 T8/T15 的活），这一步靠用户在 Terminal 手动跑一次 `claudio setup`（从 app bundle 内把二进制 + 内置包复制到 `~/.claudio/`、首次默认选包、再调 `claudio install`）；T15 落地后，onboarding CTA 应直接调用同一套 `performFirstRunSetup`/`installClaudioHooks` 逻辑，用户不必碰 Terminal。
 
 **→ 用户安装指南见 [docs/distribution.md](./docs/distribution.md)，包含 macOS 26+ 系统设置绕过指引、Homebrew / DMG 手动安装步骤、旧系统右键打开说明、未签名 v1 诚实标注、及未来签名公证计划。**
 
@@ -478,7 +479,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 | Lane | 步骤 | 说明 |
 |---|---|---|
-| A (helper 核心,串行,共享 helper/) | T3 spike → T1 Swift 骨架 → T4 路径 → T2 install/uninstall → T5 play → T6 日志 → T13 | 全触 helper/,串行 |
+| A (helper 核心,串行,共享 helper/) | T3 spike → T1 Swift 骨架 → T4 路径 → T2 install/uninstall → T5 play → T6 日志 → T13 → T17 | 全触 helper/,串行 |
 | B (GUI,依赖 helper 契约 + 共享 PackManifest) | T7 onboarding 状态机 → T8 拖入(逐事件绑定) → T16 事件行三态 → T15 面板 a11y(先落 popover owner) → T14 仓库内 state gallery | 触 gui/;**内部有序**（见下），待 A 的 T1/T2 API 稳定后起 |
 | C (音频/文档/合规,独立) | T9 声音标准、T10 改文档、T11 CC0 台账 | 触 docs/、packs/,与 A 基本无冲突 |
 | D (分发,最后) | T12 DMG+tap+CI | 依赖 T1 可构建二进制 + app |
@@ -541,6 +542,12 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - Surfaced by: Design Review 决议① + Eng re-run D3（codex 1+2+3）— 无声无修复路径 / helper 双 resolver / 无声≠文件丢失
   - Files: `gui/`（事件行 + 逐事件导入）,共享 `PackManifest`（GUI 读，与运行时查找顺序同源，helper 不改行为）
   - Verify: unmapped 包→「未配置」；broken 包→「文件丢失」入 doctor；行尾导入→绑到该 event；两态试听禁用
+
+- [x] **T17 (P1, human: ~2-3h / CC: ~30min)** — helper — v1 首次安装自举（`claudio use` 真实现 + 新增 `claudio setup`）
+  - Surfaced by: `/codex review 10f00cf+f31987b`（T11 CC0 台账 + T12 CI/分发骨架）—— 两处 [P1]：release.yml 把二进制 + 内置包塞进 app bundle，但 (a) onboarding CTA 故意未接线（T8/T15 留白）、(b) `claudio use` 其实是 `NotYetImplemented` 占位符（正文「工程落地细节 ⑥」曾误标"已实现"）、(c) 没有任何代码把 bundle 内容复制到 `~/.claudio/`——"app 安装"这一步压根不存在。三者叠加 = 首个 DMG 装完后是哑的，装了但听不到声音。
+  - Files: `helper/Sources/ClaudioCore/{Use,Setup}.swift`、`helper/Sources/claudio/{Subcommands,Claudio}.swift`、`helper/Tests/ClaudioCoreTests/{UseSuite,SetupSuite}.swift`、`docs/distribution.md`、`.github/workflows/release.yml`
+  - 决议：T15 真身菜单栏面板落地前，v1 走 **Terminal 手动自举**过渡方案——不在占位 `ClaudioGUIApp.swift`（其文档注释明确"不是真正的 menu bar app"）里硬接 CTA，那会绑定一个将被 T15 替换的临时外壳。`claudio use <pack-id>` 补齐真实现（复用 `resolvePackDirectory` 校验 + 原子写 config.json；未选过包的 config 缺省新建，已选过的只更新 `selected_pack`，`master_volume`/`events` 不动）。新增 `claudio setup`：从当前运行二进制所在目录探测同级 `../packs`（判定"是否运行自 app bundle 内"的依据），复制自身到 `~/.claudio/bin/claudio`、把内置包逐个复制进 `~/.claudio/packs/<id>/`（已存在同名用户包则跳过，不覆盖）、若 config 尚不存在则用首个复制到的包调 `claudio use` 建立默认选择、最后调 `installClaudioHooks` 写 hooks——全程幂等（已在 `~/.claudio/bin/` 下运行时跳过复制步骤，只补 hooks）。`docs/distribution.md`「首次安装后」章节 + `release.yml` 的 Release notes 补一句 Terminal 命令，不再暗示"开 app 就活"。
+  - 非阻断遗留：① `PlayEnvironment.bundledPacksDirectory` 仍保持 `nil` 默认，不做"从 bundle 直接播放"的旁路——v1 只走"复制进用户包"这一条路径，两套路径并存会制造第二个查找顺序，故意不做；② `claudio setup` 只识别单层 `packs/<id>/` 铺开，多包同时内置时的确定性选择顺序（当前 = 目录名字典序取第一个）留作 T15 真身实现选包 UI 时的天然替代；③ T15 落地后 `claudio setup` 的逻辑函数 `performFirstRunSetup` 应被 onboarding CTA 直接调用而非继续要求用户开 Terminal——这条决议已写进 Distribution Plan，留 T15 收口。
 
 ## Approved Mockups（视觉参照）
 

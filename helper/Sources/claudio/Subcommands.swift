@@ -85,23 +85,65 @@ extension Claudio {
 
     /// `claudio use <pack-id>` — switch the active sound pack by *writing* config
     /// (ENGINEERING.md「工程落地细节 ⑥ config.json 归属」—— *not* T5, which is `play` and
-    /// only ever *reads* config).
+    /// only ever *reads* config; 真实实现见 T17）。
     struct Use: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "切换当前声音包（写入 ~/.claudio/config.json）。"
         )
         @Argument(help: "声音包 id") var packID: String
         func run() throws {
-            _ = packID
-            throw NotYetImplemented(command: "use", task: "config")
+            switch selectPack(packID) {
+            case .success(.selected(let id)):
+                print("✓ 已切换到声音包 \"\(id)\"")
+            case .failure(let error):
+                print("✗ \(error.description)")
+                throw ExitCode.failure
+            }
+        }
+    }
+
+    /// `claudio setup` — v1 Terminal 首次安装自举（ENGINEERING.md T17）：真身菜单栏面板
+    /// （T15）落地前的过渡方案，把随 app bundle 分发的二进制 + 内置声音包复制到
+    /// `~/.claudio/`、建立首次默认选包、再调 `claudio install` 写 hooks。只在从 app bundle
+    /// 内运行时才有实质工作可做；已经装到 `~/.claudio/bin/` 后重复运行只会幂等地补 hooks。
+    struct Setup: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "v1 首次安装自举：复制二进制 + 内置声音包到 ~/.claudio/、默认选包、写 hooks（见 ENGINEERING.md T17）。"
+        )
+        func run() throws {
+            let environment = SetupEnvironment(executablePath: currentExecutablePath())
+            switch performFirstRunSetup(environment: environment) {
+            case .success(let outcome):
+                printSetupSummary(outcome)
+            case .failure(let error):
+                print("✗ \(error.description)")
+                throw ExitCode.failure
+            }
         }
     }
 }
 
-/// Placeholder error for base-skeleton subcommands whose bodies land in later tasks.
-/// Compiling green today; running one of these prints a clear pointer and exits non-zero.
-struct NotYetImplemented: Error, CustomStringConvertible {
-    let command: String
-    let task: String
-    var description: String { "`claudio \(command)` 尚未实现（见 \(task)）。" }
+private func printSetupSummary(_ outcome: SetupOutcome) {
+    switch outcome {
+    case .completed(let copiedBinary, let copiedPacks, let selectedPack, let hooksOutcome):
+        print("✓ Claudio 首次安装自举完成")
+        print(
+            copiedBinary
+                ? "  · 二进制已复制到 ~/.claudio/bin/claudio"
+                : "  · 二进制已在 ~/.claudio/bin/claudio（跳过复制）")
+        if copiedPacks.isEmpty {
+            print("  · 没有发现需要复制的新内置声音包")
+        } else {
+            print("  · 已复制内置声音包：\(copiedPacks.joined(separator: ", "))")
+        }
+        if let selectedPack {
+            print("  · 已默认选中声音包 \"\(selectedPack)\"")
+        }
+        switch hooksOutcome {
+        case .installed:
+            print("  · 已接管 settings.json（追加 hook，未覆盖已有配置；备份见 settings.json.claudio.bak）")
+        case .alreadyInstalled:
+            print("  · settings.json 已接管过，无需重复操作")
+        }
+    }
 }

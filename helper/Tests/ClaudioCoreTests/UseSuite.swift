@@ -1,0 +1,132 @@
+import ClaudioCore
+import Foundation
+
+// MARK: - claudio use: config.json 归属 (ENGINEERING.md「工程落地细节 ⑥」, T17)
+//
+// `selectPack` validates the pack the exact same way `play` resolves it
+// (`resolvePackDirectory`), then writes `config.json`: fresh-create when absent, or
+// update-only-`selected_pack`-preserve-the-rest when one already exists.
+
+private func makePackDirectory(at url: URL) {
+    try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+}
+
+@MainActor
+func runUseSuites() {
+    suite("selectPack: rejects an unsafe pack id without touching the filesystem") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+
+            let result = selectPack("../evil", configFile: configFile, userPacksDirectory: userPacks)
+            expect(
+                result == .failure(.invalidPackID("../evil")),
+                "path-traversal-shaped id must be rejected before any pack lookup, got \(result)")
+            expect(
+                !FileManager.default.fileExists(atPath: configFile.path),
+                "an invalid id must never create config.json")
+        }
+    }
+
+    suite("selectPack: fails when the pack doesn't exist in either root") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+
+            let result = selectPack("ghost-pack", configFile: configFile, userPacksDirectory: userPacks)
+            expect(
+                result == .failure(.packNotFound("ghost-pack")),
+                "a pack id that resolves nowhere must fail with .packNotFound, got \(result)")
+            expect(
+                !FileManager.default.fileExists(atPath: configFile.path),
+                "a not-found pack must never create config.json")
+        }
+    }
+
+    suite("selectPack: fresh install creates config.json with defaults + the selected pack") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true))
+
+            let result = selectPack(
+                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks)
+            expect(
+                result == .success(.selected(packID: "minimal-chime")),
+                "selecting an existing pack on a fresh install should succeed, got \(result)")
+
+            let data = try? Data(contentsOf: configFile)
+            let config = data.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
+            expect(config?.selectedPack == "minimal-chime", "written config.json selects the pack")
+            expect(
+                config?.masterVolume == ClaudioConfig.defaultMasterVolume,
+                "a fresh config.json gets the documented default master_volume")
+            expect(config?.eventsEnabled.isEmpty == true, "a fresh config.json has no per-event overrides")
+        }
+    }
+
+    suite("selectPack: an existing config.json keeps master_volume/events, only selected_pack changes") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("old-pack", isDirectory: true))
+            makePackDirectory(at: userPacks.appendingPathComponent("new-pack", isDirectory: true))
+            writeFixture(
+                #"""
+                { "selected_pack": "old-pack", "master_volume": 0.3, "events": { "stop": false } }
+                """#, to: configFile)
+
+            let result = selectPack("new-pack", configFile: configFile, userPacksDirectory: userPacks)
+            expect(
+                result == .success(.selected(packID: "new-pack")),
+                "switching to another existing pack should succeed, got \(result)")
+
+            let data = try? Data(contentsOf: configFile)
+            let config = data.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
+            expect(config?.selectedPack == "new-pack", "selected_pack updated to the new pack")
+            expect(
+                config?.masterVolume == 0.3,
+                "pre-existing master_volume must survive a pack switch untouched")
+            expect(
+                config?.isEnabled(.stop) == false,
+                "pre-existing per-event overrides must survive a pack switch untouched")
+        }
+    }
+
+    suite("selectPack: a pack that only exists in the bundled root still resolves") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            let bundledPacks = root.appendingPathComponent("bundled-packs", isDirectory: true)
+            makePackDirectory(at: bundledPacks.appendingPathComponent("minimal-chime", isDirectory: true))
+
+            let result = selectPack(
+                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
+                bundledPacksDirectory: bundledPacks)
+            expect(
+                result == .success(.selected(packID: "minimal-chime")),
+                "a pack that only exists in the bundled fallback root must still be selectable, got \(result)"
+            )
+        }
+    }
+
+    suite("selectPack: a corrupt existing config.json aborts without overwriting it") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true))
+            writeFixture("{ not valid json", to: configFile)
+
+            let result = selectPack(
+                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks)
+            guard case .failure(.configReadFailure) = result else {
+                expect(false, "corrupt config.json must fail with .configReadFailure, got \(result)")
+                return
+            }
+            let rawContents = try? String(contentsOf: configFile, encoding: .utf8)
+            expect(
+                rawContents == "{ not valid json",
+                "a read failure must leave the corrupt file byte-for-byte untouched")
+        }
+    }
+}

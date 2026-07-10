@@ -83,19 +83,24 @@ brew install --cask claudio
 
 ---
 
-## 首次安装后
+## 首次安装后（v1 当前需要一步 Terminal 命令）
 
-打开 Claudio 后，会看到"接管 Claude Code"的提示：
+> **诚实说明**：Claudio 的菜单栏面板目前还是早期骨架，"接管 Claude Code"的按钮暂时**没有接上任何真实动作**（真身面板是 ENGINEERING.md T15，尚未完工）。所以 v1 打开 app 后，还需要手动跑一条 Terminal 命令才能真正听到声音——这不是操作失误，是当前版本的真实限制，下面这步就是修复它。
 
-1. **选择要使用的声音包**（目前内置"极简铃音"）
-2. **点"接管 Claude Code"**  
-   这会把 Claudio 的声音播放 hook 写进 `~/.claude/settings.json`
+1. **打开 Terminal，跑一次自举命令**（只需跑一次）：
+   ```bash
+   /Applications/Claudio.app/Contents/Resources/bin/claudio setup
+   ```
+   这会一次性完成：把 helper 复制到 `~/.claudio/bin/claudio`、把内置声音包"极简铃音"复制到 `~/.claudio/packs/`、首次默认选中它、并把 hook 写进 `~/.claude/settings.json`
    - 不会覆盖你的其他 hook
    - 后续可随时卸载（`claudio uninstall`）
-   - 自动备份原文件到 `settings.json.claudio.bak`
+   - 自动备份原 settings.json 到 `settings.json.claudio.bak`
+   - 命令是幂等的，重复运行不会重复安装或出错
 
-3. **完成**  
-   下次 Claude Code 的任务完成、中断或需要确认时，就会自动播放相应的声音了
+2. **完成**  
+   下次 Claude Code 的任务完成、中断或需要确认时，就会自动播放相应的声音了。以后想换别的内置包，用 `~/.claudio/bin/claudio use <pack-id>` 切换。
+
+3. **T15 之后**：真身菜单栏面板落地后，"接管 Claude Code"按钮会直接触发这一整套逻辑，不再需要碰 Terminal——这份指引届时会更新。
 
 ---
 
@@ -136,8 +141,9 @@ brew uninstall --cask claudio
 
 ### Claudio 打开了但没发声
 
-1. 确认系统音量没有静音
-2. 在 Claudio 面板里找到你选的声音包，点旁边的试听按钮 ▶ 测试一下
+1. 确认你已经跑过[「首次安装后」](#首次安装后v1-当前需要一步-terminal-命令)那条 `claudio setup` 命令——v1 光打开 app 本身不会自动接管，这是目前最常见的原因
+2. 确认系统音量没有静音
+3. 在 Claudio 面板里找到你选的声音包，点旁边的试听按钮 ▶ 测试一下
 
 ### 需要诊断日志
 
