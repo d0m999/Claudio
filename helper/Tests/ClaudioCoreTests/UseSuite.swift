@@ -18,7 +18,9 @@ func runUseSuites() {
             let configFile = root.appendingPathComponent("config.json")
             let userPacks = root.appendingPathComponent("packs", isDirectory: true)
 
-            let result = selectPack("../evil", configFile: configFile, userPacksDirectory: userPacks)
+            let result = selectPack(
+                "../evil", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
             expect(
                 result == .failure(.invalidPackID("../evil")),
                 "path-traversal-shaped id must be rejected before any pack lookup, got \(result)")
@@ -33,7 +35,9 @@ func runUseSuites() {
             let configFile = root.appendingPathComponent("config.json")
             let userPacks = root.appendingPathComponent("packs", isDirectory: true)
 
-            let result = selectPack("ghost-pack", configFile: configFile, userPacksDirectory: userPacks)
+            let result = selectPack(
+                "ghost-pack", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
             expect(
                 result == .failure(.packNotFound("ghost-pack")),
                 "a pack id that resolves nowhere must fail with .packNotFound, got \(result)")
@@ -50,7 +54,8 @@ func runUseSuites() {
             makePackDirectory(at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true))
 
             let result = selectPack(
-                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks)
+                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
             expect(
                 result == .success(.selected(packID: "minimal-chime")),
                 "selecting an existing pack on a fresh install should succeed, got \(result)")
@@ -76,7 +81,9 @@ func runUseSuites() {
                 { "selected_pack": "old-pack", "master_volume": 0.3, "events": { "stop": false } }
                 """#, to: configFile)
 
-            let result = selectPack("new-pack", configFile: configFile, userPacksDirectory: userPacks)
+            let result = selectPack(
+                "new-pack", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
             expect(
                 result == .success(.selected(packID: "new-pack")),
                 "switching to another existing pack should succeed, got \(result)")
@@ -102,7 +109,8 @@ func runUseSuites() {
 
             let result = selectPack(
                 "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
-                bundledPacksDirectory: bundledPacks)
+                bundledPacksDirectory: bundledPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
             expect(
                 result == .success(.selected(packID: "minimal-chime")),
                 "a pack that only exists in the bundled fallback root must still be selectable, got \(result)"
@@ -127,7 +135,8 @@ func runUseSuites() {
             let configFile = blockingFile.appendingPathComponent("subdir/config.json")
 
             let result = selectPack(
-                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks)
+                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
             guard case .failure(.configWriteFailure) = result else {
                 expect(
                     false,
@@ -146,7 +155,8 @@ func runUseSuites() {
             writeFixture("{ not valid json", to: configFile)
 
             let result = selectPack(
-                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks)
+                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
             guard case .failure(.configReadFailure) = result else {
                 expect(false, "corrupt config.json must fail with .configReadFailure, got \(result)")
                 return
@@ -155,6 +165,42 @@ func runUseSuites() {
             expect(
                 rawContents == "{ not valid json",
                 "a read failure must leave the corrupt file byte-for-byte untouched")
+        }
+    }
+
+    suite(
+        "selectPack: a contended lock fails with .lockBusy instead of silently losing the write (Codex + red team, T17)"
+    ) {
+        withTempDirectory { root in
+            // Regression test: before this fix, selectPack had no lock at all — two
+            // concurrent writers could race on config.json's read-modify-write and one
+            // update would silently vanish. Now it shares `play.lock`/`settings.json`'s
+            // lock (same pattern as `installClaudioHooks`); contention must surface as a
+            // real, distinct error, never a silent no-op reported as success.
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            let lockFile = root.appendingPathComponent("play.lock")
+            makePackDirectory(at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true))
+            writeFixture(
+                #"{ "selected_pack": "old-pack", "master_volume": 0.3 }"#, to: configFile)
+
+            let holder = FileLock(path: lockFile.path)
+            expect(holder.tryLock(), "test setup: holder must acquire play.lock first")
+
+            let result = selectPack(
+                "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: lockFile)
+            expect(
+                result == .failure(.lockBusy),
+                "a contended lock must report .lockBusy, not silently succeed, got \(result)")
+
+            holder.unlock()
+
+            let rawContents = try? String(contentsOf: configFile, encoding: .utf8)
+            expect(
+                rawContents?.contains("old-pack") == true,
+                "a lock-contended call must never touch config.json — the prior selection must survive untouched"
+            )
         }
     }
 }

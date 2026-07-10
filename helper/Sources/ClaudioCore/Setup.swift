@@ -169,15 +169,34 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
     }
 
     var selectedPack: String?
-    if !FileManager.default.fileExists(atPath: environment.configFile.path),
-        let firstCopied = copiedPackIDs.first
-    {
-        switch selectPack(
-            firstCopied, configFile: environment.configFile,
-            userPacksDirectory: environment.userPacksDirectory)
-        {
-        case .success(.selected(let id)): selectedPack = id
-        case .failure(let error): return .failure(.useFailure(error))
+    if !FileManager.default.fileExists(atPath: environment.configFile.path) {
+        // Deliberately scans `userPacksDirectory` fresh rather than reusing `copiedPackIDs`
+        // (red team / `/ship` pre-landing review finding): `copiedPackIDs` only reflects
+        // packs copied *this* invocation, so a pack that already exists from an earlier —
+        // possibly interrupted — `setup` run (or one the user placed there manually) would
+        // never get selected, and `alreadyInstalled` re-runs (which skip the copy step
+        // entirely) could never establish a default pack at all. Scanning disk directly
+        // fixes both: any pack that's actually there and resolvable is eligible, regardless
+        // of which run put it there.
+        let availablePackIDs =
+            ((try? FileManager.default.contentsOfDirectory(
+                atPath: environment.userPacksDirectory.path)) ?? []
+            )
+            .sorted()
+            .filter {
+                directoryExists(
+                    at: environment.userPacksDirectory.appendingPathComponent(
+                        $0, isDirectory: true))
+            }
+        if let firstAvailable = availablePackIDs.first {
+            switch selectPack(
+                firstAvailable, configFile: environment.configFile,
+                userPacksDirectory: environment.userPacksDirectory,
+                lockFile: environment.lockFile)
+            {
+            case .success(.selected(let id)): selectedPack = id
+            case .failure(let error): return .failure(.useFailure(error))
+            }
         }
     }
 

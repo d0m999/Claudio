@@ -150,6 +150,85 @@ func runSetupSuites() {
         }
     }
 
+    suite(
+        "performFirstRunSetup: a pack that already exists (not copied this run) still gets selected when config.json is missing"
+    ) {
+        withTempDirectory { root in
+            // Regression test (red team / `/ship` pre-landing review, T17): a pack surviving
+            // from an earlier — possibly interrupted — `setup` run must still become the
+            // default once config.json is missing, even though `copiedPackIDs` (this run)
+            // never touched it. Simulated here the same way the sibling test above does: a
+            // pre-existing user pack, no config.json yet.
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            let userPackDirectory = environment.userPacksDirectory.appendingPathComponent(
+                "minimal-chime", isDirectory: true)
+            writeFixture(
+                #"{ "schema": 1, "id": "minimal-chime", "events": {} }"#,
+                to: userPackDirectory.appendingPathComponent("manifest.json"))
+
+            let result = performFirstRunSetup(environment: environment)
+            guard case .success(.completed(_, let copiedPacks, let selectedPack, _)) = result else {
+                expect(false, "expected success, got \(result)")
+                return
+            }
+            expect(
+                copiedPacks.isEmpty,
+                "setup: the pre-existing pack must not be reported as copied this run")
+            expect(
+                selectedPack == "minimal-chime",
+                "a pack that already exists on disk must still be selected as default when config.json is missing, got \(String(describing: selectedPack))"
+            )
+        }
+    }
+
+    suite(
+        "performFirstRunSetup: re-running from the already-installed location selects a default pack that exists but has no config.json yet"
+    ) {
+        withTempDirectory { root in
+            // Regression test for the exact failure red team traced through
+            // docs/distribution.md's troubleshooting flow: a user re-runs `claudio setup`
+            // from the INSTALLED binary (`~/.claudio/bin/claudio setup`, `alreadyInstalled ==
+            // true`) after an earlier run left a pack on disk but never wrote config.json
+            // (e.g. that earlier run failed between the pack-copy and config-selection
+            // steps). Before this fix, `alreadyInstalled` skipped the copy block entirely,
+            // `copiedPackIDs` stayed empty, and default-pack selection — gated on
+            // `copiedPackIDs.first` — could never fire again on any future re-run.
+            let claudioRoot = root.appendingPathComponent("claudio-root", isDirectory: true)
+            let destination = claudioRoot.appendingPathComponent("bin/claudio")
+            let environment = SetupEnvironment(
+                executablePath: destination,
+                claudioBinaryDestination: destination,
+                userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
+                configFile: claudioRoot.appendingPathComponent("config.json"),
+                settingsFile: root.appendingPathComponent("settings.json"),
+                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+            writeFixture(
+                #"{ "schema": 1, "id": "minimal-chime", "events": {} }"#,
+                to: environment.userPacksDirectory.appendingPathComponent(
+                    "minimal-chime/manifest.json"))
+
+            let result = performFirstRunSetup(environment: environment)
+            guard case .success(.completed(let copiedBinary, let copiedPacks, let selectedPack, _)) =
+                result
+            else {
+                expect(false, "expected success, got \(result)")
+                return
+            }
+            expect(
+                !copiedBinary && copiedPacks.isEmpty,
+                "alreadyInstalled must still skip the copy steps entirely, got copiedBinary=\(copiedBinary) copiedPacks=\(copiedPacks)"
+            )
+            expect(
+                selectedPack == "minimal-chime",
+                "an alreadyInstalled re-run must still be able to select a pack that already exists on disk, got \(String(describing: selectedPack))"
+            )
+            expect(
+                FileManager.default.fileExists(atPath: environment.configFile.path),
+                "config.json must actually get created by this recovery path, not just reported")
+        }
+    }
+
     suite("performFirstRunSetup: an existing config.json's selected_pack is left untouched") {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))

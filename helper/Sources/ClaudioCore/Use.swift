@@ -18,6 +18,8 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
     case packNotFound(String)
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
+    case lockBusy
+    case lockFailed(errno: Int32)
 
     public var description: String {
         switch self {
@@ -29,6 +31,10 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
             "config.json 读取失败，已中止（未修改文件）：\(reason)"
         case .configWriteFailure(let reason):
             "config.json 写入失败：\(reason)"
+        case .lockBusy:
+            "config.json 当前被占用（另一个 claudio 进程正在读写），请稍后重试"
+        case .lockFailed(let errno):
+            "无法获取文件锁（errno \(errno)），请稍后重试"
         }
     }
 }
@@ -38,11 +44,21 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
 /// doesn't exist yet, a fresh ``ClaudioConfig`` is created with defaults for everything
 /// else (T17: this is also the path ``performFirstRunSetup(environment:)`` uses to
 /// establish a first-run default pack selection).
+///
+/// The read-modify-write runs under ``ClaudioPaths/lockFile``'s non-blocking `flock` —
+/// the same lock `install`/`play` already serialize on — so two concurrent `claudio use`
+/// (or `use` racing `setup`) invocations can't silently lose one write (Codex review of
+/// 3d09bf5, confirmed again by `/ship`'s pre-landing review red team pass: unlike
+/// `settings.json`'s write path, this one had never been brought under the lock). Because
+/// the lock is non-blocking, contention surfaces as ``UseError/lockBusy`` — a real,
+/// distinct error the caller sees and can retry — never a silent no-op reported as
+/// success (project rule: never silently swallow an error).
 public func selectPack(
     _ packID: String,
     configFile: URL = ClaudioPaths.configFile,
     userPacksDirectory: URL = ClaudioPaths.packsDirectory,
-    bundledPacksDirectory: URL? = nil
+    bundledPacksDirectory: URL? = nil,
+    lockFile: URL = ClaudioPaths.lockFile
 ) -> Result<UseOutcome, UseError> {
     guard isSafePackID(packID) else { return .failure(.invalidPackID(packID)) }
     guard
@@ -53,6 +69,20 @@ public func selectPack(
         return .failure(.packNotFound(packID))
     }
 
+    let outcome = withNonBlockingLock(path: lockFile.path) {
+        performSelectPack(packID, configFile: configFile)
+    }
+
+    switch outcome {
+    case .ran(let result): return result
+    case .skipped: return .failure(.lockBusy)
+    case .failed(let errno): return .failure(.lockFailed(errno: errno))
+    }
+}
+
+private func performSelectPack(
+    _ packID: String, configFile: URL
+) -> Result<UseOutcome, UseError> {
     var config: ClaudioConfig
     if FileManager.default.fileExists(atPath: configFile.path) {
         guard let data = try? Data(contentsOf: configFile) else {
