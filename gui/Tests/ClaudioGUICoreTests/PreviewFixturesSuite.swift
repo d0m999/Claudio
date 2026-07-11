@@ -24,9 +24,30 @@ import Foundation
 
 @MainActor
 func runPreviewFixturesSuites() {
-    suite("PreviewFixtures.assertExhaustive() runs without crashing (compile-time guard sanity)") {
-        PreviewFixtures.assertExhaustive()
-        expect(true, "assertExhaustive() must return normally for the shipped fixtures")
+    // Replaces the former `expect(true, ...)` tautology (T14 review 修复②), which could never
+    // fail yet still counted as a check. `assertExhaustive()` now RETURNS the `family.case`
+    // labels its four exhaustive `switch`es actually visited, so this compares that set against
+    // the complete expected roster: a fixture array that stops covering one of its enum's cases
+    // (a case whose `switch` branch exists but is never REACHED — which compiles perfectly)
+    // turns this red.
+    suite("PreviewFixtures.assertExhaustive() visits every case of all four state families") {
+        let visited = PreviewFixtures.assertExhaustive()
+        let expected: Set<String> = [
+            "onboarding.claudeCodeNotInstalled", "onboarding.helperMissing",
+            "onboarding.settingsNotWritable", "onboarding.settingsParseFailure",
+            "onboarding.notInstalled", "onboarding.installed",
+            "dropZone.idle", "dropZone.hover", "dropZone.success",
+            "dropZone.reject.oversize", "dropZone.reject.nonWhitelistFormat",
+            "dropZone.reject.pathTraversal", "dropZone.reject.overDuration",
+            "dropZone.reject.overwritesBuiltin", "dropZone.reject.copyFailed",
+            "coverage.present", "coverage.unmapped", "coverage.broken",
+            "packCard.complete", "packCard.partial", "packCard.broken",
+        ]
+        expect(
+            visited == expected,
+            "the shipped fixtures must exercise every case of all four state families;"
+                + " missing \(expected.subtracting(visited)), unexpected \(visited.subtracting(expected))"
+        )
     }
 
     // MARK: - OnboardingState: all 6 cases
@@ -102,7 +123,44 @@ func runPreviewFixturesSuites() {
             "eventRows must cover every CoverageState × enabled combination exactly, got \(combos)")
     }
 
-    // MARK: - PackCard: PackCardState × isSelected, every combination
+    // MARK: - EventRow: the SECOND axis — every Event (T14 review 修复①)
+    //
+    // `CoverageState × enabled` was the only axis anything pinned, and `Event` — the axis this
+    // app is ABOUT — was never checked at all: the shipped fixtures used only stop/stopFailure/
+    // notification, so SubagentStop's indigo glyph, its display name and its tile color were
+    // rendered exactly zero times by the repo's "exhaustive visual truth source". Driven off
+    // `Event.allCases` (compiler-synthesized), not a hand-written list, so a fifth event turns
+    // this red without anyone needing to remember this file exists.
+
+    suite("PreviewFixtures.eventRows covers every Event case (the gallery is the EXHAUSTIVE visual truth source — an unrendered event is an unreviewed event)") {
+        let events = Set(PreviewFixtures.eventRows.map(\.event))
+        expect(
+            events == Set(Event.allCases),
+            "eventRows must render every Event at least once; missing"
+                + " \(Set(Event.allCases).subtracting(events).map(\.cliName).sorted())")
+    }
+
+    // MARK: - PackCard: PackCardState × isSelected, every combination — plus the 2×2 glyph grid's
+    // own event axis (`PackGalleryView` renders Event.allCases on EVERY card, styled
+    // present-or-absent, so each event must appear in BOTH styles across the fixture set).
+
+    suite("PreviewFixtures.packCards' 2×2 glyph grid renders every Event in BOTH present and absent styles") {
+        let present = PreviewFixtures.packCards.reduce(into: Set<Event>()) {
+            $0.formUnion($1.presentEvents)
+        }
+        expect(
+            present == Set(Event.allCases),
+            "every event must appear PRESENT on at least one card (the .complete cards), missing"
+                + " \(Set(Event.allCases).subtracting(present).map(\.cliName).sorted())")
+
+        let absent = PreviewFixtures.packCards.reduce(into: Set<Event>()) { accumulated, card in
+            accumulated.formUnion(Set(Event.allCases).subtracting(card.presentEvents))
+        }
+        expect(
+            absent == Set(Event.allCases),
+            "every event must appear ABSENT on at least one card (the .broken/.partial cards),"
+                + " missing \(Set(Event.allCases).subtracting(absent).map(\.cliName).sorted())")
+    }
 
     suite("PreviewFixtures.packCards covers every PackCardState case × isSelected (true and false)") {
         let combos = Set(

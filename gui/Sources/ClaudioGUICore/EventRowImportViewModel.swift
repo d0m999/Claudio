@@ -48,6 +48,28 @@ public final class EventRowImportViewModel: ObservableObject {
     /// `Task.detached`; this function just awaits that, then performs the (fast, local-disk)
     /// bind synchronously back on the main actor once the outcome is known.
     ///
+    /// ## Never re-read mutable state across the `await` (T16 review 修复③)
+    /// Both the import OUTCOME and the pack the bind writes into come from values this call
+    /// OWNS — the batch overload's returned ``AudioImportBatchResult`` and, inside it, the
+    /// imported file's own ``ImportedAudioFile/packID`` (stamped by
+    /// ``importAudioFile(sourceURL:suggestedFileName:packID:environment:)`` at the moment the
+    /// bytes were actually copied). Neither is re-read off ``importViewModel`` after the
+    /// suspension, and that is the entire point:
+    ///
+    /// - `importViewModel.packID` is MUTABLE and really does change mid-flight —
+    ///   `PanelView.refresh()` repoints every row's `packID` on a pack switch. A user who
+    ///   switches packs while an import is in flight would otherwise have the file copied into
+    ///   pack A (where the pipeline started) but the manifest binding written into pack B —
+    ///   silently editing a DIFFERENT pack than the one that received the file.
+    /// - `importViewModel.state` is likewise mutable and shared across every drop on this row;
+    ///   deciding "did MY drop succeed?" by reading whatever `state` happens to hold after the
+    ///   await would let a sibling drop's outcome answer for this one (leaving this drop's
+    ///   already-copied file bound to nothing — an orphan, with no error surfaced anywhere).
+    ///
+    /// Uses ``AudioImportViewModel/handleDrop(requests:)`` (the one-element batch) precisely
+    /// because it RETURNS the per-file outcome; the single-file overload only publishes it to
+    /// `state`. State transitions/`onImportSucceeded` are identical for a one-element batch.
+    ///
     /// ## Concurrency invariant (no lock needed today — do not silently break this)
     /// The raw manifest read-modify-write inside ``bindEventToManifest(event:fileName:packID:environment:)``
     /// is safe against concurrent per-row binds ONLY because that function is fully
@@ -63,11 +85,18 @@ public final class EventRowImportViewModel: ObservableObject {
     /// MUST be added at that point — this note is the tripwire for that future refactor, not
     /// a claim that the current synchronous/`@MainActor` structure needs one now.
     public func handleDrop(sourceURL: URL, suggestedFileName: String) async {
-        await importViewModel.handleDrop(
-            sourceURL: sourceURL, suggestedFileName: suggestedFileName)
-        guard case .success(let file) = importViewModel.state else { return }
+        // 在 await 之前捕获环境（与 packID 同理：它也是 `var`，绝不跨挂起点重读可变状态）。
+        let environment = importViewModel.environment
+        let result = await importViewModel.handleDrop(
+            requests: [
+                AudioImportRequest(sourceURL: sourceURL, suggestedFileName: suggestedFileName)
+            ])
+        // 只认这一笔导入自己的返回值 —— 不读 importViewModel.state。
+        guard let file = result.accepted.first else { return }
+        // packID 用 file.packID：字节真正被复制进去的那个包，而不是此刻 importViewModel 指向的包
+        // （用户可能已经切了包）。
         bindResult = bindEventToManifest(
-            event: event, fileName: file.fileName, packID: importViewModel.packID,
-            environment: importViewModel.environment)
+            event: event, fileName: file.fileName, packID: file.packID,
+            environment: environment)
     }
 }

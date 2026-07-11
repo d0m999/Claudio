@@ -76,6 +76,33 @@ extension EventRow {
         if case .present = coverage { return enabled }
         return true
     }
+
+    /// Whether this row's 试听 ▶ preview button is the control that OWNS the row's
+    /// ``PanelFocusTarget/eventAction(_:)`` focus identity — i.e. what `EventRowView` passes as
+    /// `previewButton(claimsActionFocus:)`.
+    ///
+    /// `true` for `.present` and ONLY `.present`: there the preview button is the row's sole
+    /// action control. On `.unmapped`/`.broken` the row co-renders BOTH the (always-operable)
+    /// import affordance and a disabled preview button; the import affordance owns
+    /// `.eventAction` there, and the preview must NOT also bind it — two simultaneously-rendered
+    /// `.focused(_:equals:)` on one value make SwiftUI's focus resolution undefined, and would
+    /// let opening focus land on the dead preview instead of the operable import affordance
+    /// (a11y-architect FIX 4 dedup; ``PanelFocusTarget/eventAction(_:)``'s "a SINGLE slot per
+    /// row" contract).
+    ///
+    /// Deliberately independent of `enabled`: a MUTED `.present` row still renders its preview
+    /// button as the row's action slot — just a disabled one. That "present-but-disabled action
+    /// slot" is exactly what ``eventActionOperable`` (the OTHER axis) reports as non-operable so
+    /// opening focus skips it. The two are different questions about the same slot: *who owns
+    /// it* vs *can it be used right now*.
+    ///
+    /// A pure function so this mapping is TESTABLE (T16 review 修复⑥): it used to exist only as
+    /// three hand-written `true`/`false` literals inside `EventRowView`'s coverage `switch`,
+    /// where nothing constrained them and flipping one broke no test.
+    public var previewClaimsActionFocus: Bool {
+        if case .present = coverage { return true }
+        return false
+    }
 }
 
 /// Computes every ``Event/allCases``' ``EventRow`` for `packID` — the state gallery (T14)
@@ -113,7 +140,26 @@ public func packCoverage(
         }
     }
 
-    return Event.allCases.map { event in
+    return packCoverage(manifest: manifest, packDirectory: packDirectory, config: config)
+}
+
+/// ``packCoverage(packID:config:environment:)`` 的下层：给一份**已经解析好的** pack 目录 + **已经
+/// 解码好的** manifest，算出四条 ``EventRow``。上面那个按 `packID` 的入口现在只是它的薄包装
+/// （解析目录 → 读 manifest → 委托给这里），coverage 逻辑本身仍然只有这一份实现。
+///
+/// 存在的理由（/ship 评审修复④，性能）：`PackGallery` 的每张卡片都要 (a) 每事件覆盖状态、
+/// (b)「manifest 能不能解码」这个 broken 判定、(c) manifest 的原始 JSON（`name`/`license`）。
+/// 只有按 `packID` 的入口时，这三个消费者各自触发一次「解析目录 + 读 manifest」——每个包
+/// **3 次 manifest 读 + 2 次 realpath 目录解析**，而这一切由 `PanelView.refresh()` 在**主线程**、
+/// 每次开面板和每次静音点击时跑一遍。有了这个下层入口，`PackGallery` 只解析一次目录、只读一次
+/// manifest bytes，把同一份 `packDirectory` / `PackManifest` / `Data` 喂给三个消费者——同时**不**
+/// 复制任何 coverage 逻辑（这正是它必须存在这里、而不是在 `PackGallery` 里另写一份的原因）。
+public func packCoverage(
+    manifest: PackManifest,
+    packDirectory: URL,
+    config: ClaudioConfig
+) -> [EventRow] {
+    Event.allCases.map { event in
         EventRow(
             event: event,
             coverage: coverageState(for: event, manifest: manifest, packDirectory: packDirectory),
@@ -124,7 +170,18 @@ public func packCoverage(
 /// The single-event coverage computation described in ``CoverageState``'s doc comment:
 /// unmapped when the manifest has no key for `event`; otherwise present/broken depending on
 /// whether ``safePackFileURL(_:in:)`` resolves the declared filename to a real, contained,
-/// on-disk file.
+/// on-disk **regular file**.
+///
+/// 「正规文件」这三个字是负重的，且必须和 helper 侧**逐字一致**：`doctor`（`Doctor.swift`）和
+/// `play`（`Play.swift`）判的是 ``regularFileExists(at:)``（`stat(2)` + `S_IFREG`），而这里曾经用的是
+/// `FileManager.fileExists(atPath:)` —— 它对**目录**、FIFO、socket、设备一律回答 `true`。两边于是
+/// 互相打架：一个名叫 `stop.mp3` 的**目录**，面板显示 `.present`（文件名照常、试听键可点），而
+/// `doctor` 说它缺失、`play` 拒播。用户看到的是一个「配好了却不响、而且 doctor 骂你」的包。
+/// 现在两边同一个谓词，同一个答案。
+///
+/// `regularFileExists` 刻意用 `stat` 而非 `lstat`：**包内指向包内真实文件的合法符号链接仍然算在位**
+/// （`safePackFileURL` 的 containment 检查已经放行了它，逃出包目录的链接更早一步就被挡掉了）——
+/// 被拒的只是「链接的目标不是正规文件」。`CoverageStateSuite` 两头都钉了用例。
 private func coverageState(
     for event: Event,
     manifest: PackManifest,
@@ -132,7 +189,7 @@ private func coverageState(
 ) -> CoverageState {
     guard let fileName = manifest.events[event.manifestKey] else { return .unmapped }
     guard let resolved = safePackFileURL(fileName, in: packDirectory),
-        FileManager.default.fileExists(atPath: resolved.path)
+        regularFileExists(at: resolved)
     else {
         return .broken(fileName: fileName)
     }

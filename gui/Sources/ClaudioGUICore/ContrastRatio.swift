@@ -25,7 +25,16 @@ public func contrastRatio(_ hexA: String, _ hexB: String) -> Double {
 private func relativeLuminance(of hex: String) -> Double? {
     var hexString = hex
     if hexString.hasPrefix("#") { hexString.removeFirst() }
-    guard hexString.count == 6, let value = UInt32(hexString, radix: 16) else { return nil }
+    // The `isHexDigit` sweep is NOT redundant with the `UInt32(_:radix:)` parse (T15 review
+    // 修复⑤): Swift's `FixedWidthInteger(_:radix:)` accepts a leading SIGN, so `"+FFFFF"` is
+    // exactly 6 characters, parses cleanly as `0x0FFFFF`, and would hand back a perfectly
+    // plausible — and completely WRONG — luminance for a token that is not a color at all.
+    // That silently defeats this function's whole fail-closed contract (see the type doc:
+    // a malformed token must never be treated as passing). Every character must be a real hex
+    // digit before the parse is trusted.
+    guard hexString.count == 6, hexString.allSatisfy(\.isHexDigit),
+        let value = UInt32(hexString, radix: 16)
+    else { return nil }
     let red = Double((value & 0xFF0000) >> 16) / 255
     let green = Double((value & 0x00FF00) >> 8) / 255
     let blue = Double(value & 0x0000FF) / 255

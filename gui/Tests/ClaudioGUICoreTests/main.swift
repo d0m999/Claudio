@@ -15,6 +15,7 @@ import Foundation
 // `AudioImportBatchSuite.swift`, `AudioImportViewModelSuite.swift`,
 // `CoverageStateSuite.swift`, `ManifestBindingSuite.swift`, `PackGallerySuite.swift`,
 // `EventMuteControllerSuite.swift`, `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
+// `ContrastHexParsingSuite.swift`,
 // `PanelTypeSizeSuite.swift`, `PanelConfigSuite.swift`, `PanelFocusCoordinatorSuite.swift`,
 // `PreviewFixturesSuite.swift`).
 
@@ -65,6 +66,7 @@ runPackGallerySuites()
 runEventMuteControllerSuites()
 runPanelFocusOrderSuites()
 runContrastSuites()
+runContrastHexParsingSuites()
 runPanelTypeSizeSuites()
 runPanelConfigSuites()
 runPanelFocusCoordinatorSuites()

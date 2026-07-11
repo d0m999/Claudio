@@ -167,6 +167,104 @@ func runPackGallerySuites() {
         }
     }
 
+    // Distinct from the corrupt-manifest suite above: that one exercises `loadPackManifest`'s
+    // `.decodeFailed`; a pack directory with NO manifest.json at all exercises `.unreadable`.
+    // Both must land on `.broken`, but via different reasons — and a directory with no manifest
+    // is the shape a killed/partial import or a hand-made pack folder really leaves behind.
+    suite("availablePacks: a pack directory with NO manifest.json at all reports .broken") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            // A pack directory holding only an audio file — no manifest.json.
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("orphan-pack/stop.mp3"))
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "minimal-chime"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+
+            expect(cards.count == 1, "the directory must still be LISTED as a pack, got \(cards.count)")
+            guard case .broken(let reason) = cards.first?.state else {
+                expect(
+                    false,
+                    "a manifest-less pack directory must report .broken, got"
+                        + " \(String(describing: cards.first?.state))")
+                return
+            }
+            expect(
+                reason.contains("不存在或不可读"),
+                "the reason must be the unreadable-manifest one (not a decode failure), got \(reason)")
+            expect(cards.first?.presentEvents.isEmpty == true, "a broken card must light no glyphs")
+        }
+    }
+
+    suite("availablePacks: a manifest with no `name` field falls back to nil (the view renders the id)") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            // A perfectly valid, COMPLETE pack that simply omits the optional `name` key —
+            // `PackCardView` renders `card.name ?? card.id`, so `name == nil` is a supported
+            // shape, not a defect: it must NOT make the card `.broken`.
+            writeFixture(
+                #"""
+                { "id": "nameless-pack", "license": "CC0-1.0", "events": {
+                    "stop": "stop.mp3", "stop_failure": "fail.mp3",
+                    "notification": "ping.mp3", "subagent_stop": "sub.mp3" } }
+                """#,
+                to: userPacks.appendingPathComponent("nameless-pack/manifest.json"))
+            for file in ["stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"] {
+                writeFixture("fake-audio", to: userPacks.appendingPathComponent("nameless-pack/\(file)"))
+            }
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "nameless-pack"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+
+            expect(cards.first?.name == nil, "an absent `name` key must read as nil, got \(String(describing: cards.first?.name))")
+            expect(
+                cards.first?.state == .complete,
+                "a missing OPTIONAL name must never downgrade a complete pack, got"
+                    + " \(String(describing: cards.first?.state))")
+            expect(cards.first?.isCC0 == true, "the license must still be read")
+        }
+    }
+
+    suite("availablePacks: a manifest declaring ZERO events reports .partial(present: 0, total: 4), never .complete") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "id": "silent-pack", "name": "全静默", "events": {} }"#,
+                to: userPacks.appendingPathComponent("silent-pack/manifest.json"))
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "silent-pack"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+
+            expect(
+                cards.first?.state == .partial(present: 0, total: 4),
+                "a readable manifest that maps nothing is a legal, fully-silent pack — .partial"
+                    + " with a zero count, never .complete and never .broken, got"
+                    + " \(String(describing: cards.first?.state))")
+            expect(cards.first?.presentEvents.isEmpty == true, "no event may light up")
+        }
+    }
+
+    suite("availablePacks: a stray regular FILE in the packs root is never listed as a pack") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeCompletePack(named: "real-pack", at: userPacks)
+            // A non-dot-prefixed regular file sitting in the packs root (a stray README, a
+            // downloaded archive) — `packDirectoryIDs`'s isDirectory check must exclude it, or
+            // the gallery would render a phantom `.broken` card for it.
+            writeFixture("i am not a pack", to: userPacks.appendingPathComponent("README.md"))
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "real-pack"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+
+            expect(
+                cards.map(\.id) == ["real-pack"],
+                "only real subdirectories may be listed as packs, got \(cards.map(\.id))")
+        }
+    }
+
     suite("availablePacks: a user pack shadows a same-id bundled pack (user wins), only one card") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
@@ -246,6 +344,103 @@ func runPackGallerySuites() {
                 config: ClaudioConfig(selectedPack: "minimal-chime"),
                 environment: makeEnvironment(userPacksDirectory: userPacks))
             expect(cards.isEmpty, "an empty pack root must report zero cards, got \(cards.count)")
+        }
+    }
+
+    // MARK: - /ship 评审修复④（性能）：每个包只解析一次目录、只读一次 manifest bytes
+    //
+    // `buildPackCard` 过去对每个包读三遍 manifest（`packCoverage(packID:)` 一遍、broken 判定
+    // 一遍、`packMetadata` 一遍）+ 解析两遍目录（每遍一轮 realpath），而 `PanelView.refresh()`
+    // 在**主线程**、每次开面板和每次静音点击都会跑一次。现在只读一次、解析一次，同一份
+    // `packDirectory` / `Data` / `PackManifest` 喂给三个消费者。
+    //
+    // 读的**次数**在这个无依赖 harness 里不可直接观测（没有可注入的文件系统），所以下面钉的是
+    // 这次优化真正有可能破坏的那两条**不变量**——上面那一整套 `availablePacks` 行为断言（complete /
+    // partial / broken / name / license / 去重 / 排序）则原样保留，作为「行为一个字都没变」的回归网。
+
+    suite("packCoverage: 按 packID 的入口 == 按已解码 manifest 的下层入口（薄包装，不是第二套逻辑）") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            // 三态齐全的包：stop 存在、stop_failure 声明了但文件不在（broken）、另两个未声明（unmapped）。
+            writeFixture(
+                #"""
+                { "id": "tri-state", "name": "三态", "events": {
+                    "stop": "stop.mp3", "stop_failure": "missing.mp3" } }
+                """#,
+                to: userPacks.appendingPathComponent("tri-state/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("tri-state/stop.mp3"))
+
+            // stop 被静音——正交的 `enabled` 位必须原样穿过下层入口（不是被它「顺手」重算成默认值）。
+            let config = ClaudioConfig(
+                selectedPack: "tri-state", eventsEnabled: [Event.stop.cliName: false])
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let viaPackID = packCoverage(packID: "tri-state", config: config, environment: environment)
+
+            guard
+                let packDirectory = resolvePackDirectory(
+                    id: "tri-state", userPacksDirectory: userPacks, bundledPacksDirectory: nil),
+                case .success(let manifest) = loadPackManifest(in: packDirectory)
+            else {
+                expect(false, "fixture 自己就该解析得开——测试前提不成立")
+                return
+            }
+            let viaManifest = packCoverage(
+                manifest: manifest, packDirectory: packDirectory, config: config)
+
+            expect(
+                viaPackID == viaManifest,
+                "两个入口必须给出逐条相同的 EventRow（含 coverage 三态与正交的 enabled 位）——"
+                    + "下层入口一旦长出第二套 coverage 逻辑，这条就红。got \(viaPackID) vs \(viaManifest)")
+            // 顺带钉住这份 fixture 真的三态齐全，否则上面那条相等断言可能只是在比两个平凡结果。
+            expect(
+                viaPackID.first(where: { $0.event == .stop })?.coverage == .present(fileName: "stop.mp3"),
+                "stop 必须是 .present")
+            expect(
+                viaPackID.first(where: { $0.event == .stopFailure })?.coverage
+                    == .broken(fileName: "missing.mp3"),
+                "stop_failure 必须是 .broken（声明了但文件不在）")
+            expect(
+                viaPackID.first(where: { $0.event == .notification })?.coverage == .unmapped,
+                "notification 必须是 .unmapped（manifest 里没这个 key）")
+            expect(
+                viaManifest.first(where: { $0.event == .stop })?.enabled == false,
+                "静音位必须原样穿过下层入口（stop 在 config 里被静音）")
+        }
+    }
+
+    suite("availablePacks: 卡片的 presentEvents 仍逐个来自 packCoverage —— 不是 PackGallery 自己重算的一套") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeFixture(
+                #"""
+                { "id": "tri-state", "name": "三态", "events": {
+                    "stop": "stop.mp3", "stop_failure": "missing.mp3", "notification": "ping.mp3" } }
+                """#,
+                to: userPacks.appendingPathComponent("tri-state/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("tri-state/stop.mp3"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("tri-state/ping.mp3"))
+
+            let config = ClaudioConfig(selectedPack: "tri-state")
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let card = availablePacks(config: config, environment: environment).first
+            let coverageTruth = Set(
+                packCoverage(packID: "tri-state", config: config, environment: environment)
+                    .compactMap { row -> Event? in
+                        if case .present = row.coverage { return row.event }
+                        return nil
+                    })
+
+            expect(
+                card?.presentEvents == coverageTruth,
+                "卡片点亮的字形集合必须**恒等于** packCoverage 判定的 .present 集合（badge / 2×2 网格 /"
+                    + " VoiceOver「缺少：…」三处同一个真相源）——got \(String(describing: card?.presentEvents))"
+                    + " vs \(coverageTruth)")
+            expect(coverageTruth == [.stop, .notification], "fixture 前提：恰好两个事件真的存在")
+            expect(
+                card?.state == .partial(present: 2, total: 4),
+                "badge 计数必须仍等于 presentEvents.count，got \(String(describing: card?.state))")
         }
     }
 }

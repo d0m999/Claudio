@@ -90,22 +90,50 @@ public enum PreviewFixtures {
 
     // MARK: - EventRow / CoverageState (ENGINEERING.md T16 D2, DESIGN.md "事件行三态")
 
-    /// Every ``CoverageState`` case × `enabled` (true/false) — six rows, one representative
-    /// ``Event`` per coverage case (kept distinct across the pair so a reader can tell them
-    /// apart in the gallery at a glance; the ×enabled combination is what's under test, not
-    /// event identity).
+    /// Every ``CoverageState`` case × `enabled` (true/false) — six rows — AND every ``Event``,
+    /// on both axes at once: the four events are ROTATED across the six coverage×enabled
+    /// combinations (in ``Event/allCases`` declaration order), so the combination grid stays
+    /// exhaustive while no event is left un-rendered.
+    ///
+    /// The event axis is load-bearing, not decoration (T14 review 修复①): this catalog is the
+    /// repo's ONLY exhaustive visual truth source, and an event that never appears in it has
+    /// its display name, its glyph, and its ``ClaudioColor/event(_:_:)`` tile color rendered
+    /// exactly zero times — nobody has ever LOOKED at it. That is precisely how `night_dim`
+    /// drifted before. `SubagentStop`'s indigo was missing here until this fix.
+    ///
+    /// Each row's event is visible in FULL color regardless of `enabled`/coverage
+    /// (`EventRowView`'s `glyphTile` never dims — DESIGN.md 硬约束 "不整行降 opacity"), so one
+    /// appearance per event is genuinely enough to see its true color; the rotation doesn't
+    /// need to also pair every event with every coverage state.
+    ///
+    /// ``PreviewFixturesSuite`` pins BOTH axes at runtime: the six coverage×enabled
+    /// combinations, and `Set(eventRows.map(\.event)) == Set(Event.allCases)` — the latter
+    /// driven straight off ``Event``'s compiler-synthesized `allCases`, so adding a fifth
+    /// event turns that check red without anyone having to remember to update a hand-written
+    /// list.
     public static let eventRows: [EventRow] = [
         EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: true),
-        EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: false),
-        EventRow(event: .stopFailure, coverage: .unmapped, enabled: true),
-        EventRow(event: .stopFailure, coverage: .unmapped, enabled: false),
-        EventRow(event: .notification, coverage: .broken(fileName: "ping.mp3"), enabled: true),
+        EventRow(
+            event: .stopFailure, coverage: .present(fileName: "stop-failure.mp3"), enabled: false),
+        EventRow(event: .notification, coverage: .unmapped, enabled: true),
+        EventRow(event: .subagentStop, coverage: .unmapped, enabled: false),
+        EventRow(
+            event: .subagentStop, coverage: .broken(fileName: "subagent-stop.mp3"), enabled: true),
         EventRow(event: .notification, coverage: .broken(fileName: "ping.mp3"), enabled: false),
     ]
 
     // MARK: - PackCard / PackCardState (ENGINEERING.md T15 D3)
 
     /// Every ``PackCardState`` case × `isSelected` (true/false) — six cards.
+    ///
+    /// The `presentEvents` sets carry a SECOND exhaustiveness obligation, for the same reason
+    /// ``eventRows`` does (T14 review 修复①): `PackGalleryView`'s 2×2 glyph grid renders
+    /// ``Event/allCases`` on EVERY card, styling each glyph present-or-absent. So a card fixture
+    /// set must show each of the four events in BOTH styles somewhere, or one of the eight
+    /// (event × present/absent) glyph renderings never gets looked at. The `.complete` cards
+    /// (`presentEvents == Set(Event.allCases)`) supply all four PRESENT glyphs; the two
+    /// `.broken` cards (`presentEvents == []`) supply all four ABSENT ones. ``PreviewFixturesSuite``
+    /// pins both halves off ``Event/allCases`` directly.
     public static let packCards: [PackCard] = [
         PackCard(
             id: "minimal-chime", name: "极简铃", isCC0: true, presentEvents: Set(Event.allCases),
@@ -129,16 +157,30 @@ public enum PreviewFixtures {
 
     // MARK: - Compile-time exhaustiveness guards
 
-    /// Calls every `_coverage(_:)` guard below against its matching fixture array — exists
-    /// so the guards are demonstrably live code (not an unreferenced private function a
-    /// future cleanup could silently delete, which would quietly remove the whole
-    /// enforcement mechanism), and so ``PreviewFixturesSuite`` (T14 D3) has one call site to
-    /// exercise for its own "this compiles" sanity check.
-    public static func assertExhaustive() {
-        for state in onboardingStates { _ = onboardingStateCoverage(state) }
-        for state in dropZoneStates { _ = dropZoneStateCoverage(state) }
-        for row in eventRows { _ = coverageStateCoverage(row.coverage) }
-        for card in packCards { _ = packCardStateCoverage(card.state) }
+    /// Runs every `_coverage(_:)` guard below against its matching fixture array and RETURNS
+    /// the set of `family.case` labels those guards actually visited — e.g.
+    /// `"onboarding.installed"`, `"dropZone.reject.oversize"`, `"coverage.broken"`,
+    /// `"packCard.partial"`. Labels are family-qualified because the bare ones collide
+    /// (`broken` belongs to both ``CoverageState`` and ``PackCardState``).
+    ///
+    /// It RETURNS a value rather than merely running (T14 review 修复②): the previous
+    /// `-> Void` version could only ever be "tested" by calling it and asserting `true`, a
+    /// tautology that could never fail while still occupying a line in the check count. The
+    /// returned set is a real, falsifiable observation of WHICH cases the shipped fixtures
+    /// exercise, so ``PreviewFixturesSuite`` can compare it against the full expected roster and
+    /// go RED the moment a fixture array stops covering one of its enum's cases — the compiler's
+    /// own exhaustive-`switch` guarantee (a branch EXISTS for every case) never covered that: a
+    /// branch nothing ever reaches compiles perfectly.
+    ///
+    /// Still also serves its original purpose: it keeps the four `switch`es below demonstrably
+    /// live code, so a future cleanup can't delete the enforcement mechanism as unreferenced.
+    public static func assertExhaustive() -> Set<String> {
+        var visited: Set<String> = []
+        for state in onboardingStates { visited.insert("onboarding.\(onboardingStateCoverage(state))") }
+        for state in dropZoneStates { visited.insert("dropZone.\(dropZoneStateCoverage(state))") }
+        for row in eventRows { visited.insert("coverage.\(coverageStateCoverage(row.coverage))") }
+        for card in packCards { visited.insert("packCard.\(packCardStateCoverage(card.state))") }
+        return visited
     }
 
     /// Exhaustive over every ``OnboardingState`` case — no `default:`. Adding a 7th case

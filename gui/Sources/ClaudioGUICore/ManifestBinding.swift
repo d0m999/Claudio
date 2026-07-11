@@ -18,10 +18,14 @@ public enum ManifestBindError: Error, Sendable, Equatable {
     /// bind, which must never happen.
     case fileNotFound(fileName: String)
     /// `manifest.json` couldn't be read at all (see ``PackManifestLoadError``), its
-    /// content isn't a top-level JSON *object*, or its `events` field is present but isn't
-    /// itself a JSON object (e.g. an array or string) — every shape this read-modify-write
-    /// requires to safely operate without silently coercing a malformed manifest into a
-    /// fabricated one.
+    /// content isn't a top-level JSON *object*, its `events` field is present but isn't
+    /// itself a JSON object (e.g. an array or string), its `events` object holds a
+    /// non-string value (e.g. `{"stop": 1}`), or it has no valid top-level `id` (missing /
+    /// not a string / empty) — every shape this read-modify-write requires to safely operate
+    /// without silently coercing a malformed manifest into a fabricated one, PLUS every shape
+    /// ``PackManifest`` itself must be able to decode afterwards (T16 review 修复④: a bind
+    /// that "succeeds" into a manifest nothing can decode would leave the row rendering
+    /// 「未配置」 with no error shown anywhere).
     case manifestUnreadable(reason: String)
     /// The updated JSON couldn't be serialized or written back to disk.
     case writeFailed(reason: String)
@@ -137,6 +141,29 @@ public func bindEventToManifest(
     } else {
         events = [:]
     }
+
+    // Fail CLOSED on any shape ``PackManifest`` itself could not decode (T16 review 修复④).
+    // Without these two guards, a manifest whose `events` is an object of NON-string values
+    // (`{"stop": 1}`), or whose top-level `id` is missing / not a string / empty, would be
+    // written back and reported as a SUCCESSFUL bind — yet the very next
+    // ``loadPackManifest(in:)`` / ``packCoverage(packID:config:environment:)`` would fail to
+    // decode it into ``PackManifest`` and the just-bound row would still render 「未配置」
+    // (`CoverageState.unmapped`). A "success" the UI immediately contradicts is worse than an
+    // honest refusal — and refusing is what this whole path's fail-closed design already
+    // intends (see the non-object `events` guard directly above). Both checks run BEFORE the
+    // write, so a malformed manifest is left byte-for-byte untouched.
+    //
+    // Only the EXISTING sibling values need checking: the value about to be inserted is
+    // `fileName`, already a `String`.
+    guard events.values.allSatisfy({ $0 is String }) else {
+        return .failure(
+            .manifestUnreadable(reason: "manifest.json 的 events 存在非字符串取值，无法安全改写"))
+    }
+    guard let id = json["id"] as? String, !id.isEmpty else {
+        return .failure(
+            .manifestUnreadable(reason: "manifest.json 缺少有效的顶层 id 字段（必须是非空字符串）"))
+    }
+
     events[event.manifestKey] = fileName
     json["events"] = events
 

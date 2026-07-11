@@ -119,3 +119,29 @@ public func panelFirstFocusTarget(
         return true
     }
 }
+
+/// The control an OPERATIONAL panel opens focused on, computed from the panel's actual rows —
+/// the whole composition ``PanelView`` performs when it opens: build the ``PanelFocusScope`` from
+/// the rows' events, derive `nonOperableActionEvents` from each row's own
+/// ``EventRow/eventActionOperable`` decision, and resolve through
+/// ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` — never through plain
+/// `panelFocusOrder(_:).first`, which would park the opening keyboard caret on a muted first
+/// row's disabled 试听 ▶ (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项" — 可操作 is
+/// load-bearing).
+///
+/// Exists as a pure function so that composition is TESTABLE (T16 review 修复⑥). Its three
+/// steps were previously private members of `PanelView`, i.e. inside SwiftUI, i.e. unreachable
+/// from this machine's dependency-free harness: `panelFirstFocusTarget` had thorough tests while
+/// the code that DECIDES WHAT TO PASS IT had none, so reverting the view to `order.first` — the
+/// exact bug — left every test green. `PanelView` now delegates here, and
+/// ``PanelFocusOrderSuite`` pins the muted-first-row case (including the assertion that the
+/// result must NOT equal `panelFocusOrder(_:).first`).
+///
+/// Onboarding is deliberately out of scope: it has no rows, so it has no `.eventAction` targets
+/// to filter — ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` handles that scope directly.
+public func panelOpeningFocus(rows: [EventRow], packCardIDs: [String]) -> PanelFocusTarget? {
+    let scope = PanelFocusScope.operational(
+        events: rows.map(\.event), packCardIDs: packCardIDs)
+    let nonOperableActionEvents = Set(rows.filter { !$0.eventActionOperable }.map(\.event))
+    return panelFirstFocusTarget(scope, nonOperableActionEvents: nonOperableActionEvents)
+}
