@@ -1,3 +1,4 @@
+import AppKit
 import ClaudioCore
 import ClaudioGUICore
 import SwiftUI
@@ -166,6 +167,7 @@ public struct PanelView: View {
         // focus and report the panel's width.
         .onAppear {
             applyFirstFocus()
+            announcePanel()
             onPanelWidthChange(layoutAdaptation.panelWidth)
         }
         // a11y-architect FIX 4: `MenuBarController.popoverDidShow` bumps
@@ -174,16 +176,43 @@ public struct PanelView: View {
         .onChange(of: focusCoordinator.showCount) { _ in
             refresh()
             applyFirstFocus()
+            announcePanel()
         }
         // T15 D5 「极大 → 加宽 popover」: SwiftUI already widened ITSELF (`.frame(width:)` above);
         // this tells the AppKit popover around it to follow (see ``onPanelWidthChange``).
         .onChange(of: layoutAdaptation.panelWidth) { newWidth in
             onPanelWidthChange(newWidth)
         }
-        // ENGINEERING.md「无障碍规格」: "VoiceOver 进入先播报面板标题 + 当前包" — a single
-        // combined announcement for the header, mirroring `EventRowView`'s own row-level
-        // combine pattern.
+        // `.contain` keeps every control individually reachable by the VoiceOver cursor; the
+        // label names the container itself, which otherwise reads as an anonymous group. It is
+        // NOT what delivers 「VoiceOver 进入先播报面板标题 + 当前包」 — a label is read when the
+        // cursor lands on the element, and the cursor lands on a control, not on the group.
+        // ``announcePanel()`` is what actually says the sentence on open.
         .accessibilityElement(children: .contain)
+        .accessibilityLabel(headerAccessibilityLabel)
+    }
+
+    /// 「VoiceOver 进入先播报面板标题 + 当前包」 (ENGINEERING.md「无障碍规格」), which nothing in this
+    /// view used to implement: the sentence lives in ``headerAccessibilityLabel``, hung on a
+    /// static `Text` header that the VoiceOver cursor never lands on by itself. `@FocusState`
+    /// doesn't help — that is the KEYBOARD focus, not the VoiceOver cursor. The only way to
+    /// make VoiceOver *say* something on open is to ask it to.
+    ///
+    /// AppKit's `.announcementRequested` rather than SwiftUI's `AccessibilityNotification`
+    /// (macOS 14+, above this package's macOS 12 floor). Async so it lands after the popover's
+    /// window is key and in the AX tree — VoiceOver drops announcements aimed at an app that
+    /// isn't there yet. A no-op when VoiceOver is off.
+    private func announcePanel() {
+        let message = headerAccessibilityLabel
+        DispatchQueue.main.async {
+            NSAccessibility.post(
+                element: NSApp as Any,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: message,
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                ])
+        }
     }
 
     // MARK: - Header

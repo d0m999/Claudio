@@ -158,17 +158,47 @@
 **Priority:** P3
 **Depends on:** None
 
-### T15 真身面板的交互 a11y / 播放 / 接线需真机手验，多项收尾未接线
+### T15 真身面板的交互 a11y / 播放 / 接线仍需真机走查（**「需要一台装 Xcode 的 Mac」这个前提是错的，已推翻**）
 
-**What:** 本机只有 CommandLineTools（无 Xcode / 显示），T15 的 AppKit 层只编译验证，多项行为无法在此自动测：`NSStatusItem` 点击↔popover 开关、`.transient` 点外/Esc 关闭、开时首焦点落首个可操作项 + VoiceOver 播报面板标题/当前包、关后焦点回状态项、Tab/Shift+Tab 走 action→mute 序、VoiceOver 逐控件（行 `.contain` 后）导航、切包画廊滚动/点选、Dynamic Type 三级真实布局、reduce-transparency、真实 `NSSound` 试听、静音/切包后 SwiftUI refresh、`NSOpenPanel` 选择器端到端喂进导入管线。此外 onboarding CTA（接管/修复/断开）仍未端到端接线（no-op，属 T17 遗留：需先解决 GUI-bundled `claudio` 的 `executablePath` 语义），状态栏用占位 SF Symbol（`waveform.circle`）非最终定制单色字形。
+**What:** 原条目说这些只能在「一台装 Xcode 的 Mac」上验 —— **不对**。2026-07-11 在本机（CommandLineTools，无 Xcode）用 `swift build -c release` 出来的二进制手工组了一个 ad-hoc 签名的 `Claudio.app`（跟 release.yml 一模一样的做法：`LSUIElement` Info.plist + `Resources/bin/claudio` + `Resources/packs/` + `codesign --sign -`），双击就跑起来了，菜单栏图标、面板、真机 AX 探针全都能用。**没有 Xcode 也能做完整真机走查**，此前所有「等一台有 Xcode 的 Mac」的等待都是自缚。
 
-**Why:** 面板核心逻辑（状态派生 / 写回 / 焦点顺序 / 对比度 / Dynamic Type 表）已下沉 `ClaudioGUICore` 并单测覆盖（helper 769 / gui 372），但交互真身只在真机成立。
+已由那次走查验掉的：`NSStatusItem` 点击 ↔ popover 开关 ✅；`.transient` Esc 关闭 ✅（**并非白来的** —— 见下方 `NSApp.activate` 那笔账）；面板渲染 ✅。
 
-**Context:** T15 tdd-guide + a11y-architect + swift-reviewer（2026-07-11）。修法：一台装 Xcode 的 Mac 上做一次 VoiceOver + 键盘走查，按上表逐项确认/修；补最终状态栏图标；T17 收口 onboarding CTA 接线。
+**仍未验、且必须在 state 到 `.installed` 之后才够得着的**（本机当前 `~/.claudio/bin/` 不存在、settings.json 无 claudio hooks，所以第一屏永远是 `.helperMissing`，运行态面板根本进不去）：Tab/Shift+Tab 走 action→mute 序（**注意：默认系统设置下这条根本不成立，见下一条 TODO**）、VoiceOver 逐控件导航 + 进入播报、切包画廊滚动/点选、Dynamic Type 三级真实布局、reduce-transparency、真实 `NSSound` 试听、静音/切包后 SwiftUI refresh、`NSOpenPanel` 端到端喂进导入管线。
+
+此外仍未接线：onboarding CTA（接管/修复/断开）**全是 no-op**（T17 遗留：需先解决 GUI-bundled `claudio` 的 `executablePath` 语义）—— 真机确认过：点「修复」后 `~/.claude/settings.json` 的 shasum 不变、`~/.claudio/bin` 仍不存在。状态栏仍用占位 SF Symbol（`waveform.circle`）非最终定制单色字形。
+
+**Why:** 面板核心逻辑（状态派生 / 写回 / 焦点顺序 / 对比度 / Dynamic Type 表）已下沉 `ClaudioGUICore` 并单测覆盖（helper 945 / gui 543），但交互真身只在真机成立 —— 而真机走查现在**随时可做**，不再有硬前提。
+
+**Context:** T15 tdd-guide + a11y-architect + swift-reviewer（2026-07-11）；同日真机走查推翻了「需要 Xcode」的前提。修法：把剩余项在真机走完 —— 但先得让 state 进 `.installed`（要么跑 `claudio setup` 真接管，要么接完 T17 的 CTA）。
 
 **Effort:** M
 **Priority:** P2
-**Depends on:** 一台装 Xcode 的 Mac + T17
+**Depends on:** state 到 `.installed`（`claudio setup` 或 T17）
+
+### 面板的 Tab 遍历 / 首焦点在**默认系统设置**下是死的（macOS「键盘导航」默认关闭）
+
+**What:** 面板里所有可聚焦控件都是 SwiftUI `Button`（`EventRowView` 试听/导入/静音、`PackGalleryView` 卡片、`OnboardingView` CTA），全 `gui/Sources/` 里 `.focusable()` 出现 **0 次**。而 macOS 的「键盘导航 / Full Keyboard Access」**系统默认是关的**，关闭时 Button 不进 key view loop —— `applyFirstFocus()` 那次 `@FocusState` 赋值直接落空，Tab 在面板里也无处可去。
+
+**Why:** ENGINEERING.md 的无障碍规格已按实际行为改写（分成「无条件成立」和「仅 FKA 开启时成立」两档），所以**文档不再撒谎**；但产品缺口还在：一个没开 FKA 的纯键盘用户（非 VoiceOver）操作不了这个面板。VoiceOver 用户不受影响（VO 光标独立于 FKA），Esc 与鼠标也不受影响。
+
+**Context:** T15 a11y 对抗评审（2026-07-11）。Apple WWDC23 “The SwiftUI cookbook for focus” 原文：「macOS and iPadOS don't give focus to buttons when you tap them, and the only way to reach them with the Tab key is to turn on keyboard navigation system-wide.」**别指望 `.focusable()`**：它的默认 interactions 就是 `.activate`，纯 no-op；`.focusable(interactions:)` 还是 macOS 14+ API，超出本包 macOS 12 floor。真要在不开 FKA 时也能纯键盘操作，唯一出路是**自建焦点系统**：`focusedTarget` 从 `@FocusState` 换成普通 `@State` + 自绘焦点环（DESIGN.md 需补 focus-ring token），并在 `MenuBarController` 里挂 `NSEvent.addLocalMonitorForEvents(matching: .keyDown)` 拦 Tab/Shift+Tab/空格/回车，用已有的纯模型函数 `panelFocusOrder(_:)` / `panelOpeningFocus(rows:packCardIDs:)` 推进焦点并派发 action（这些函数已有单测，自建路径照样可测）。
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** None
+
+### 逃生路线：若真实用户反馈「点 Claudio 图标丢字」，唯一出路是丢掉 NSPopover 改 NSPanel
+
+**What:** `MenuBarController.showPopover()` 里的 `NSApp.activate(ignoringOtherApps:)` 是无障碍的**必要代价**（无它 popover 的 window 永远不是 key，整节无障碍规格一条都不成立；替代 API 已按 AppKit 头文件逐条证伪 —— 见 ENGINEERING.md「T15 决议」）。但它有一笔**修不掉**的账：用户正用输入法**组字**时点图标 → 宿主 app 失活 → 组字缓冲被强制上屏或直接丢弃。这条**无法**靠 `popoverDidClose` 的「交还前台」兜底，它发生在**打开**的瞬间。
+
+**Why:** 今天不动它 —— 中文用户在终端/编辑器里组字**同时**去点菜单栏图标，是个不常见的时序。但这是本 app 面向中文用户的一条真实体验裂缝，触发条件驱动：**有人报「点一下丢字」就启动。**
+
+**Context:** T15 对抗评审（2026-07-11，ux-regression lens）。修法只有一条：丢掉 `NSPopover`，自建 `NSPanel` + `.nonactivatingPanel`（公开 API 里唯一「window 能拿 key 而 app 不激活」的机制）。代价：① 丢掉 popover 的尖角与自动锚定（DESIGN.md / T15 明写「NSPopover 带尖角」→ **属未授权设计偏离，须重新拍板**）；② `.transient` 的点外/切 app 自动关闭要用全局事件监视器自己重写；③ **「非激活 panel 在 inactive app 下会不会进 AX 树」在本机无法静态断言 —— 必须先用真机 AX 探针验证再决定**，否则可能原样复现「拿不到 key」的老问题，白改一场。
+
+**Effort:** L
+**Priority:** P4（触发条件驱动，不主动做）
+**Depends on:** 真机 AX 探针先验证 nonactivating panel 能进 AX 树
 
 ### 主音量滑块 spec 写了、代码里根本没有（面板 UI 唯一的静默漂移）
 
