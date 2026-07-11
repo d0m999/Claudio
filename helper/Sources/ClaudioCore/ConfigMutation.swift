@@ -2,7 +2,9 @@ import Foundation
 
 /// `config.json` 的**外科式读-改-写**：把文件当成一张原始 JSON 表（`[String: Any]`）读进来，
 /// 只覆盖调用方真正拥有的那一个键，其余每一个顶层键——**包括这份 v1 模型根本不认识的键**——
-/// 逐字保留后原样写回。`claudio use`（``selectPack``）与「静音钮」（``setEventEnabled``）是它
+/// 的**键与值**一律保留后写回。保的是**键与值，不是字节**：输出是规范化的（键排序、`prettyPrinted`
+/// 缩进、数字最短渲染），不是原文件的字节级复刻——两条边界各有一节说明，见下与「数字规范化」。
+/// `claudio use`（``selectPack``）与「静音钮」（``setEventEnabled``）是它
 /// 仅有的两个调用方，共用这一条代码路径，而不是各写一遍。
 ///
 /// ## 「保真」保的是键与值，不是**键顺序**（`/codex review` [P2]，判定为按现状）
@@ -106,8 +108,8 @@ public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> 
 ///     `selectPack` 传它正要选中的 pack id；`setEventEnabled` 传空串——它没有任何 pack 上下文，
 ///     凭空编一个默认值等于伪造一次谁也没做过的选择。
 ///   - mutate: 只允许改调用方自己拥有的那个键。进来的 `[String: Any]` 要么是磁盘上那份文件的
-///     **完整**顶层键集合（已通过下面的校验），要么是新建的最小 config；没被 `mutate` 碰过的键
-///     会被逐字写回。
+///     **完整**顶层键集合（已通过下面的校验），要么是新建的最小 config；没被 `mutate` 碰过的键，
+///     其**键与值**都会原封不动写回（**渲染**不保证逐字：键会排序、数字会被规范化，见类型注释）。
 func updateConfigJSON(
     at configFile: URL,
     freshSelectedPack: String,
