@@ -93,12 +93,19 @@ public struct OnboardingView: View {
                 detailText(detail)
             }
 
-            // T17：一次 CTA **动作**失败必须说出来。与 `PanelView.errorNotice` /
-            // `AudioDropZoneView.rejectRow` 同一个形状 —— 面板里每一种失败都长得像同一种东西。
-            if case .failed(let message, let detail) = viewModel.actionState {
+            // T17：一次 CTA **动作**失败必须说出来。只渲染**接管**的失败 —— 断开的失败发生在
+            // `.installed`，那一刻这张卡根本不在屏幕上（`PanelView` 渲染的是 operationalPanel），
+            // 它由那边的 `disconnectRow` 负责（``onboardingFailureBelongsHere(actionState:branch:)``）。
+            if let failure = onboardingFailureBelongsHere(
+                actionState: viewModel.actionState, branch: .takeOver)
+            {
                 ActionFailureRow(
-                    message: message, detail: detail,
-                    isShowingDetail: viewModel.isShowingDetail, typeScale: typeScale)
+                    message: failure.message, detail: failure.detail,
+                    isShowingDetail: viewModel.isShowingDetail,
+                    showsDetailToggle: onboardingShowsFailureDetailToggle(
+                        state: viewModel.state, actionState: viewModel.actionState),
+                    onToggleDetail: { viewModel.toggleDetail() },
+                    focusedTarget: focusedTarget, typeScale: typeScale)
             }
 
             if let primaryTitle = copy.primaryActionTitle {
@@ -111,7 +118,15 @@ public struct OnboardingView: View {
                 .tint(ClaudioColor.clay(colorScheme))
             }
 
-            if let secondaryTitle = secondaryCTATitle(copy: copy) {
+            // 次 CTA 直接来自 copy —— **不再合成**任何按钮。
+            //
+            // T17 第一版在这里合成过一颗「查看原因」（当 `copy.secondaryActionTitle == nil` 且动作
+            // 失败带 detail 时）。它的 action 走 `performSecondaryAction()`，而
+            // `onboardingSecondaryIntent(.notInstalled)` 是 **nil** → `perform(nil)` → 只 refresh。
+            // **点了什么都不会发生** —— 一颗真正的死按钮，正是这次提交要杀死的那一类 bug，在杀死它的
+            // 那次提交里以另一种形状回来了。现在「查看原因」是失败行**自己**的一部分（见
+            // ``ActionFailureRow``），有自己的焦点身份与自己的入口（``OnboardingViewModel/toggleDetail()``）。
+            if let secondaryTitle = copy.secondaryActionTitle {
                 ctaButton(
                     title: secondaryTitle, intent: secondaryIntent,
                     focusTarget: .onboardingSecondaryAction,
@@ -120,22 +135,6 @@ public struct OnboardingView: View {
                 .buttonStyle(.bordered)
             }
         }
-    }
-
-    /// 次 CTA 的标题。
-    ///
-    /// 多出来的那一支：一次**动作**失败可能带 technical detail（`SetupError` 的原话），而
-    /// `.notInstalled` / `.helperMissing` 这两个状态的 `copy.secondaryActionTitle` 本来是 `nil`、
-    /// 根本没有次按钮 —— 于是那条失败原因**没有任何入口可以展开**。这里给它一个。
-    ///
-    /// 判据是 ``OnboardingActionState``（一个被穷尽测试钉住的模型值），不是视图自己的猜测。
-    private func secondaryCTATitle(copy: OnboardingCopy) -> String? {
-        if case .failed(_, let detail) = viewModel.actionState, detail != nil,
-            copy.secondaryActionTitle == nil
-        {
-            return "查看原因"
-        }
-        return copy.secondaryActionTitle
     }
 
     /// 一颗 CTA。`Button` 的 action 是同步的，而 view-model 的动作是 `async`（harness 要能 await
@@ -215,21 +214,30 @@ struct ActionFailureRow: View {
     let message: String
     let detail: String?
     let isShowingDetail: Bool
+    /// 这条失败行自己该不该长出一颗「查看原因」—— 由纯函数
+    /// ``onboardingShowsFailureDetailToggle(state:actionState:)`` 决定，**不是视图猜的**。
+    /// `false` 的两种情形：没有 detail 可看；或这个 state 的次 CTA 本身就是「查看原因」。
+    let showsDetailToggle: Bool
+    let onToggleDetail: () -> Void
+    let focusedTarget: FocusState<PanelFocusTarget?>.Binding
     let typeScale: CGFloat
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11 * typeScale))
-                    .foregroundColor(ClaudioColor.error(colorScheme))
-                Text(message)
-                    .font(.system(size: 11 * typeScale))
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
+            if showsDetailToggle {
+                // 整条行就是那颗按钮 —— 一个控件、一个焦点身份。键盘 / VoiceOver 用户能够到它
+                // （WCAG 2.1.1：一条本该键盘可完成的操作，不能退化成仅指针可用）。
+                Button(action: onToggleDetail) {
+                    messageRow
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(message)
+                .accessibilityHint(isShowingDetail ? "收起原因" : "展开原因")
+                .focused(focusedTarget, equals: .revealDetail)
+            } else {
+                messageRow
             }
-            .accessibilityElement(children: .combine)
 
             if isShowingDetail, let detail {
                 Text(detail)
@@ -239,5 +247,27 @@ struct ActionFailureRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    private var messageRow: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.error(colorScheme))
+            Text(message)
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+            if showsDetailToggle {
+                Spacer(minLength: 4)
+                Image(systemName: isShowingDetail ? "chevron.up" : "chevron.down")
+                    .font(.system(size: 9 * typeScale))
+                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            }
+        }
+        // ≥24×24 命中区（a11y-architect FIX 6）。
+        .frame(minHeight: 24)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
     }
 }

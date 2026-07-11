@@ -90,9 +90,46 @@ public func onboardingSecondaryIntent(for state: OnboardingState) -> OnboardingA
 public enum OnboardingActionState: Sendable, Equatable {
     case idle
     case running(OnboardingDiskAction)
+    /// `action` = **是哪个动作失败了**。它不是装饰：一次失败的「接管」与一次失败的「断开」渲染在
+    /// **面板的两个不同分支里**（前者在 onboarding 卡，后者在运行态面板底部 —— 因为 `.installed`
+    /// 根本不渲染 onboarding 卡）。不带这个标签的话，一次接管失败会在用户后来（用别的办法）装好之后，
+    /// 永久挂在一张已经装好的面板底部；而一次断开失败会同时出现在两个地方。
+    ///
     /// `message` 是安心叙事的人话（渲染在卡片正文，必须过 T7 禁词表）；`detail` 是工程原文
     /// （`SetupError` / `SettingsUpdateError` 的 `description`），只出现在「查看原因」披露之后。
-    case failed(message: String, detail: String?)
+    case failed(action: OnboardingDiskAction, message: String, detail: String?)
+}
+
+/// 这个 (state, actionState) 组合下，失败行自己该不该长出一颗「查看原因」。
+///
+/// **它必须是一个纯函数，而不是视图里的一个 `if`** —— T17 第一版正是在视图里合成了这颗按钮，
+/// 而它的 action 走 `performSecondaryAction()` → `onboardingSecondaryIntent(.notInstalled)` = `nil`
+/// → `perform(nil)` → 只 refresh。**点了什么都不会发生**：一颗真正的死按钮，正是这次提交要杀死的
+/// 那一类 bug，在杀死它的那次提交里以另一种形状回来了。
+///
+/// 返回 `false` 的两种情形：① 压根没失败、或失败没带 detail（没有原因可看）；② 这个 state 的**次
+/// CTA 本身就是**「查看原因」（`.settingsNotWritable` / `.settingsParseFailure`）—— 再长一颗就是
+/// 两颗按钮做同一件事。
+public func onboardingShowsFailureDetailToggle(
+    state: OnboardingState, actionState: OnboardingActionState
+) -> Bool {
+    guard case .failed(_, _, let detail) = actionState, detail != nil else { return false }
+    return onboardingSecondaryIntent(for: state) != .revealDetail
+}
+
+/// 一次失败的动作，该由面板的**哪个分支**渲染。
+///
+/// `.installed` 时 `PanelView` 渲染 `operationalPanel`（onboarding 卡根本不出现），所以断开失败
+/// 只能画在那里；其余状态渲染 onboarding 卡，接管失败画在那里。一次**接管**失败绝不能漏进一张
+/// 已经装好的面板 —— 用户可能在失败之后用别的办法（Terminal / 另一台机器同步）装好了，那条陈旧的
+/// 「这一步没能完成」会永久挂在一张一切正常的面板上。
+public func onboardingFailureBelongsHere(
+    actionState: OnboardingActionState, branch: OnboardingDiskAction
+) -> (message: String, detail: String?)? {
+    guard case .failed(let action, let message, let detail) = actionState, action == branch else {
+        return nil
+    }
+    return (message, detail)
 }
 
 /// 动作进行中时，那颗按钮上显示的字（VoiceOver 也播报它）。

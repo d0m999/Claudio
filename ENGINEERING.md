@@ -699,6 +699,47 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
   **评审**：动手前先跑了一轮 5 棱镜 × 对抗验证的设计评审（40 个 agent，35 条发现，28 条经对抗验证确认，其中 11 条 blocker）。**我的原设计有四处会原样复刻 T17 要修的那个 bug**（可选 runner / `init` 里给 `@StateObject` 赋值 / CTA 落地后不重读磁盘 / Bundle 查找留在 AppKit 层导致 e2e 测试抓不到真 bug）。quarantine 那条由 red-team 与我各自独立实测命中。
 
+  **落地之后的第二轮对抗评审（审真代码，不是设计稿）—— 又逮到 3 条，其中一条是我自己刚犯的同一个错：**
+
+  - **【BLOCKER】我合成的那颗「查看原因」是一颗死按钮。** `OnboardingView` 在「动作失败且带 detail、
+    且该 state 的 `copy.secondaryActionTitle == nil`」时合成一颗次按钮，而它的 action 走
+    `performSecondaryAction()` → `onboardingSecondaryIntent(.notInstalled)` = **nil** →
+    `perform(nil)` → 只 refresh。**点了什么都不会发生。** 面板正文写着「看看下面的原因」，下面给一颗
+    按钮，按了没反应 —— **在杀死「有按钮但没动作」的那次提交里，把它以另一种形状复刻了。**
+    原来那条不变式抓不到它，因为它断的是「**copy 里**的按钮 ↔ intent」，而这颗按钮压根不在 copy 里，
+    是视图自己变出来的。修法：删掉合成；「查看原因」成为**失败行自己**的一部分（整条行即按钮，有自己的
+    焦点身份 `.revealDetail` 与自己的入口 `toggleDetail()` —— **不能复用次 CTA**，`.installed` 下那个
+    intent 是 `.disconnect`，会再跑一次断开）。不变式同步升级为「遍历 **state × actionState** 的全部
+    组合，此刻会被渲染出来的每一颗控件都必须有一个真的去处」。
+  - **【MAJOR】`ReleaseLayoutSuite` 抓不到它专门为之而生的那次变异。** 它 grep 整份 release.yml 找
+    `Contents/Resources/bin/claudio` —— 而那条路径**也印在 Release notes 与 cask caveats 的散文里**。
+    把真正的 `cp` 目标改成 `Resources/helper/`，散文照样让 grep 命中，**652 全绿**。修法：只看真正的
+    `cp` 命令行。（讽刺的是 `ViewWiringSuite` 第一版立刻翻了同一次车 —— 它被 `MenuBarController` 里
+    那段解释「为什么这里不该有 `Bundle.main`」的**注释**判红。一次文本断言若不区分「代码」与「谈论
+    代码的文字」，它断的就不是代码。）
+  - **【MAJOR】整个 `ClaudioGUI` target 零测试覆盖，实测两次变异全绿**：删掉 `PanelView` 里让「接管
+    成功」兑现的那句 `.onChange(of: state)` → 652 全绿、release 零告警；把 `actionRunner` 改回可选 +
+    静默 guard（= 逐字重建 T17 之前那个死 CTA）→ 652 全绿。`claudio-gui-tests` 只依赖
+    `ClaudioGUICore`，而 `ClaudioGUI` 是带 `@main` 的 executableTarget，Swift 里 import 不了。
+    真正的结构修法是把视图层拆成可 import 的 library target（或引入 ViewInspector）—— 独立重构，
+    已记入 TODOS。在那之前新增 `ViewWiringSuite`：**读源码文本**的绊线（诚实标注：它证明不了那行代码
+    做**对**了，只能证明它**还在**；它挡的是「顺手删掉 / 重构漏掉」，而那恰恰是上面两次变异的形状）。
+  - **【MAJOR】被隔离的 helper 会让面板报 `.installed`** —— `doctor` 已经把它报成硬失败了，面板还在说
+    「已经接好了」。`detectOnboardingState` 现在也拦它，回落 `.helperMissing`（而不是新开一个 state：
+    那样它的 CTA 就是「修复」，点一下正好走 `performFirstRunSetup` 的无条件解除隔离把它治好）。
+    ⚠️ 这个检查**只针对 destination**，绝不能下沉进 `isRunnableHelperBinary` —— app bundle 里那份
+    helper 在真实下载路径上**本来就带着章**，拿同一把尺子量它会让 CTA 直接拒绝安装。
+  - 另修：失败态带上 `action:` 标签（接管失败与断开失败渲染在面板的两个不同分支，不带标签的话一次接管
+    失败会永久挂在一张后来装好了的面板底部）；运行态「断开连接」补上 DESIGN.md 要求的 ghost 1px 描边
+    （裸 `.plain` 让一条全宽的、破坏性的点击区在视觉上彻底消失）；删掉 `copySelfToFixedLocation` 里那次
+    **多余且无测试**的解除隔离（实测：删掉它零行为改变、零测试变红 —— 那正是「纵深防御」在没人核查时
+    退化成的东西：一行假装自己是安全网的、没被测过的代码）。
+
+  **7 条变异逐条实测过真的会红**（M1 `bundledHelperBinary` → `bundle.executableURL` = T17 的整个 bug →
+  3 红；M2 删 `.onChange` → 1 红；M3 release.yml 的 `cp` 目标 → 1 红；M4 拿掉「查看原因」入口 → 3 红；
+  M5 失败不记动作 → 2 红；M6 detector 不拦隔离 → 1 红；M7 拿掉无条件解除隔离 → 2 红）。M2 / M3 / M6
+  在修复前**全都是绿的**。
+
 ## Approved Mockups（视觉参照）
 
 | 屏 / 节 | Mockup Path | 方向 | 备注 |

@@ -575,3 +575,165 @@ func runOnboardingActionsSuites() {
             "technicalDetail 必须承载底层原因，否则用户永远查不出为什么")
     }
 }
+
+// MARK: - T17 修复批：死按钮 / 失败归属 / 隔离态（由 diff 对抗评审逼出来的）
+
+@MainActor
+func runOnboardingActionsFixSuites() {
+
+    suite("【死按钮回归】面板上渲染出来的每一颗 CTA，都必须映射到一个非 nil 的 intent") {
+        // T17 第一版在 `OnboardingView` 里**合成**了一颗「查看原因」：当 `copy.secondaryActionTitle`
+        // 是 nil 且动作失败带 detail 时。而它的 action 走 `performSecondaryAction()` →
+        // `onboardingSecondaryIntent(.notInstalled)` = **nil** → `perform(nil)` → 只 refresh。
+        // **点了什么都不会发生。** 在杀死「有按钮但没动作」的那次提交里，把它以另一种形状复刻了。
+        //
+        // 原来那条不变式抓不到它，因为它断的是「**copy 里**的按钮 ↔ intent」—— 而这颗按钮压根不在
+        // copy 里，是视图自己变出来的。所以这条断言升级为：遍历 **state × actionState** 的全部组合，
+        // 断言此刻**会被渲染出来的每一颗控件**都有一个真的去处。
+        let actionStates: [OnboardingActionState] = [
+            .idle,
+            .running(.takeOver),
+            .failed(action: .takeOver, message: "m", detail: "d"),
+            .failed(action: .takeOver, message: "m", detail: nil),
+            .failed(action: .disconnect, message: "m", detail: "d"),
+        ]
+        for state in PreviewFixtures.onboardingStates {
+            let copy = onboardingCopy(for: state)
+            for actionState in actionStates {
+                // 视图渲染的次按钮**只来自 copy** —— 不再合成。
+                if copy.secondaryActionTitle != nil {
+                    expect(
+                        onboardingSecondaryIntent(for: state) != nil,
+                        "\(state) × \(actionState)：copy 给了一颗次按钮，它必须有 intent")
+                }
+                if copy.primaryActionTitle != nil {
+                    expect(
+                        onboardingPrimaryIntent(for: state) != nil,
+                        "\(state) × \(actionState)：copy 给了一颗主按钮，它必须有 intent")
+                }
+                // 而「查看原因」现在是**失败行自己**的一部分，有自己的入口（`toggleDetail()`）——
+                // 它出现的条件由一个纯函数决定，且必须与「真的有原因可看」一致。
+                let showsToggle = onboardingShowsFailureDetailToggle(
+                    state: state, actionState: actionState)
+                if showsToggle {
+                    guard case .failed(_, _, let detail) = actionState, detail != nil else {
+                        expect(false, "\(state) × \(actionState)：长出了一颗「查看原因」，却没有原因可看")
+                        continue
+                    }
+                    expect(
+                        onboardingSecondaryIntent(for: state) != .revealDetail,
+                        "\(state)：次 CTA 本身就是「查看原因」了，失败行不该再长一颗 —— 两颗按钮做同一件事")
+                }
+            }
+        }
+    }
+
+    suite("失败带 detail 时，「查看原因」必须出现 —— 否则文案在骗人（正文写着「看看下面的原因」）") {
+        for state in [OnboardingState.notInstalled, .helperMissing, .installed] {
+            expect(
+                onboardingShowsFailureDetailToggle(
+                    state: state,
+                    actionState: .failed(action: .takeOver, message: "m", detail: "写不进去")),
+                "\(state)：一次带 detail 的失败必须有办法展开它")
+            expect(
+                !onboardingShowsFailureDetailToggle(
+                    state: state, actionState: .failed(action: .takeOver, message: "m", detail: nil)),
+                "\(state)：没有 detail 就别长按钮")
+            expect(
+                !onboardingShowsFailureDetailToggle(state: state, actionState: .idle),
+                "\(state)：没失败就别长按钮")
+        }
+        // 这两个态的次 CTA 本来就是「查看原因」，不重复给。
+        for state in [
+            OnboardingState.settingsNotWritable(reason: "x"), .settingsParseFailure(reason: "x"),
+        ] {
+            expect(
+                !onboardingShowsFailureDetailToggle(
+                    state: state,
+                    actionState: .failed(action: .takeOver, message: "m", detail: "d")),
+                "\(state)：次 CTA 已经是「查看原因」了，失败行不该再长一颗")
+        }
+    }
+
+    suite("失败归属：接管的失败画在 onboarding 卡，断开的失败画在运行态面板 —— 绝不串台") {
+        let takeOverFailure = OnboardingActionState.failed(
+            action: .takeOver, message: "接管失败了", detail: "d")
+        let disconnectFailure = OnboardingActionState.failed(
+            action: .disconnect, message: "断开失败了", detail: "d")
+
+        expect(
+            onboardingFailureBelongsHere(actionState: takeOverFailure, branch: .takeOver)?.message
+                == "接管失败了",
+            "接管失败必须画在 onboarding 卡里")
+        expect(
+            onboardingFailureBelongsHere(actionState: takeOverFailure, branch: .disconnect) == nil,
+            "一次**接管**失败绝不能漏进运行态面板 —— 用户可能事后用别的办法装好了，"
+                + "那条陈旧的「这一步没能完成」会永久挂在一张一切正常的面板底部")
+        expect(
+            onboardingFailureBelongsHere(actionState: disconnectFailure, branch: .disconnect)?.message
+                == "断开失败了",
+            "断开失败必须画在运行态面板里 —— 那一刻 onboarding 卡根本不在屏幕上")
+        expect(
+            onboardingFailureBelongsHere(actionState: disconnectFailure, branch: .takeOver) == nil,
+            "断开失败不该同时出现在两个地方")
+        expect(
+            onboardingFailureBelongsHere(actionState: .idle, branch: .takeOver) == nil, "")
+        expect(
+            onboardingFailureBelongsHere(actionState: .running(.takeOver), branch: .takeOver) == nil,
+            "正在跑不是失败")
+    }
+
+    suite("焦点：「查看原因」是一个真控件，必须在焦点序里（WCAG 2.1.1）") {
+        let onboarding = panelFocusOrder(
+            .onboarding(hasPrimaryAction: true, hasSecondaryAction: false, hasDetailToggle: true))
+        expect(
+            onboarding == [.revealDetail, .onboardingPrimaryAction],
+            "失败行画在按钮上方，焦点序跟随视觉序。得到 \(onboarding)")
+
+        let operational = panelFocusOrder(
+            .operational(events: [], packCardIDs: [], hasDetailToggle: true))
+        expect(
+            operational == [.dropZone, .revealDetail, .disconnect],
+            "运行态：失败行在「断开连接」之上。得到 \(operational)")
+
+        let withoutToggle = panelFocusOrder(
+            .operational(events: [], packCardIDs: [], hasDetailToggle: false))
+        expect(
+            !withoutToggle.contains(.revealDetail),
+            "没有失败行时不该凭空多一个焦点位。得到 \(withoutToggle)")
+    }
+
+    suite("被隔离的 helper：面板绝不能报 .installed（doctor 已经硬失败了，面板不能继续撒谎）") {
+        withTempDirectory { root in
+            let fixture = FixtureBundle(in: root)
+            let targets = FixtureTargets(in: root)
+            _ = performOnboardingDiskAction(
+                .takeOver, environment: targets.environment(bundledHelperBinary: fixture.helperBinary))
+            expect(
+                detectOnboardingState(environment: targets.onboarding) == .installed,
+                "setup: 干净安装之后必须是 .installed")
+
+            // 模拟一次「修复前的旧安装」留下的被隔离二进制。
+            let value = "0083;68713a00;Safari;\(UUID().uuidString)"
+            _ = value.withCString { pointer in
+                setxattr(
+                    targets.onboarding.claudioBinaryPath.path, "com.apple.quarantine", pointer,
+                    strlen(pointer), 0, 0)
+            }
+
+            expect(
+                detectOnboardingState(environment: targets.onboarding) == .helperMissing,
+                "一个带 com.apple.quarantine 的二进制会被 Gatekeeper 在每次 hook 执行时 SIGKILL"
+                    + "（实测 exit=137，零 stderr）。面板绝不能说「已经接好了」—— 那是撒谎，而且是最静默的"
+                    + "那一种：用户永远听不到一声响，也永远不知道为什么。回落 .helperMissing 让「修复」"
+                    + "这颗 CTA 出现，点它就会解除隔离。")
+
+            // 而「修复」确实治得好它。
+            _ = performOnboardingDiskAction(
+                .takeOver, environment: targets.environment(bundledHelperBinary: fixture.helperBinary))
+            expect(
+                detectOnboardingState(environment: targets.onboarding) == .installed,
+                "点一下「修复」必须真的把它治好（performFirstRunSetup 的无条件解除隔离那一步）")
+        }
+    }
+}

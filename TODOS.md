@@ -408,3 +408,27 @@
 **Priority:** P3
 **Depends on:** 线 173 的 T15 真机手验同批（若引入 ViewInspector 则可本机）
 **Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+### `ClaudioGUI` 整个 target 在 harness 里一行都跑不到（视图层接线零回归网）
+
+**What:** `claudio-gui-tests` 只依赖 `ClaudioGUICore` + `ClaudioCore`。`ClaudioGUI` 是带 `@main` 的 **executableTarget**，Swift 里 import 不了。于是整棵 SwiftUI 视图树上的每一行接线，对这套测试都是不可见的。
+
+**Why:** T17 的 diff 评审实测了两次变异，**两次都全绿**：① 删掉 `PanelView` 里那句 `.onChange(of: onboardingViewModel.state) { refresh(); … }` —— 也就是让「接管成功」真正兑现的那一行（没有它，用户在成功的那一秒看到的是四行「未配置」+ 空画廊）—— 652 项测试全绿、release 构建零告警；② 把 `actionRunner` 改回可选 + 静默 guard（= 逐字重建 T17 之前那个死 CTA）—— 652 项全绿，唯一信号是一条无关的 unused-variable 警告。**两次变异都重新制造了 T17 要修的那个 bug，绿灯一次都没灭。**
+
+**Context:** 2026-07-12 T17b diff 对抗评审。当前的缓解是 `ViewWiringSuite`（读源码文本的绊线）—— 它挡得住「顺手删掉 / 重构漏掉」，但**证明不了那行代码做对了，只能证明它还在**。真正的修法：把 `ClaudioGUI` 的视图拆进一个可被 import 的 library target（`ClaudioGUIViews`），executable 只剩 `@main` + AppDelegate；或引入 ViewInspector。前者不需要新依赖，且与本仓库「视图里不留判定逻辑」的既有纪律同向。
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** None
+
+### state gallery 给「断开连接」画的是一帧 app 里不存在的画面
+
+**What:** `.running(.disconnect)` 那一帧用 `.installed` 承载，渲染的是 `OnboardingView`。但真实 app 在 `.installed` 时渲染的是 `operationalPanel`（`OnboardingView` 根本不出现）——真正 ship 的那颗「断开连接」按钮（在 `PanelView.disconnectRow` 里）**一帧都没有**。
+
+**Why:** T14 的意义是「仓库内 gallery = 视觉真相源」。这条不是新引入的（`.installed` 的 onboarding fixture 本来就渲染一个 app 里不出现的界面），但 T17 把一个**真的会 ship** 的控件加进了 operational 面板，于是这个缺口第一次有了实际代价：没有人看过那颗按钮长什么样，明暗两主题都没有。
+
+**Context:** 2026-07-12 T17b diff 评审。修法：给 gallery 加一个能 pin 状态的 `PanelView` 帧（需要 `PanelView` 支持 `#if DEBUG` 的 preview init），或把 `disconnectRow` 抽成一个独立的可预览小组件。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None

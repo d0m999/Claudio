@@ -272,7 +272,7 @@ public struct PanelView: View {
             break
         case .running(let action):
             announce(onboardingActionRunningTitle(action))
-        case .failed(let message, _):
+        case .failed(_, let message, _):
             announce(message)
         }
     }
@@ -368,10 +368,19 @@ public struct PanelView: View {
     /// 所以 `OnboardingView` 里那条 `ActionFailureRow` 够不着它。
     @ViewBuilder
     private var disconnectRow: some View {
-        if case .failed(let message, let detail) = onboardingViewModel.actionState {
+        // 只渲染**断开**的失败。一次**接管**失败绝不能漏进这里：用户可能在那次失败之后用别的办法
+        // （Terminal / 另一台机器同步）把它装好了，那条陈旧的「这一步没能完成」会永久挂在一张
+        // 一切正常的面板底部（``onboardingFailureBelongsHere(actionState:branch:)``）。
+        if let failure = onboardingFailureBelongsHere(
+            actionState: onboardingViewModel.actionState, branch: .disconnect)
+        {
             ActionFailureRow(
-                message: message, detail: detail,
-                isShowingDetail: onboardingViewModel.isShowingDetail, typeScale: typeScale)
+                message: failure.message, detail: failure.detail,
+                isShowingDetail: onboardingViewModel.isShowingDetail,
+                showsDetailToggle: onboardingShowsFailureDetailToggle(
+                    state: onboardingViewModel.state, actionState: onboardingViewModel.actionState),
+                onToggleDetail: { onboardingViewModel.toggleDetail() },
+                focusedTarget: $focusedTarget, typeScale: typeScale)
         }
 
         let intent = onboardingSecondaryIntent(for: onboardingViewModel.state)
@@ -396,10 +405,18 @@ public struct PanelView: View {
             .frame(maxWidth: .infinity)
             // ≥24×24 命中区（a11y-architect FIX 6）。
             .frame(minHeight: 24)
-            .contentShape(Rectangle())
+            .padding(.vertical, 4)
+            .contentShape(RoundedRectangle(cornerRadius: 8))
         }
+        // DESIGN.md「次 CTA = ghost」：**必须有 1px 描边**。裸 `.plain` 会让这条全宽的、破坏性的
+        // 点击区在视觉上彻底消失 —— 用户看到的只是一行灰字，既不知道它是个按钮，也不知道它有多大。
+        // 只用既有 token（`hairline-strong` 描边 + `text-2` 文字），不新造颜色。
         .buttonStyle(.plain)
         .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(ClaudioColor.hairlineStrong(colorScheme), lineWidth: 1)
+        )
         .disabled(onboardingViewModel.isPerformingAction)
         .accessibilityLabel(title)
         .accessibilityHint("摘掉 Claudio 的声音，Claude Code 的其它设置都保留")
@@ -478,18 +495,24 @@ public struct PanelView: View {
         // nowhere to go. Same 可操作 rule the muted-row's disabled 试听 ▶ already obeys, applied
         // to a transition that happens INSIDE the panel rather than at open.
         let ctaOperable = !onboardingViewModel.isPerformingAction
+        // 失败行上那颗「查看原因」是一个真控件，所以它必须在焦点序里 —— 而渲染它的判据与算焦点序的
+        // 判据是**同一个纯函数**，两者不可能各自漂移。
+        let hasDetailToggle = onboardingShowsFailureDetailToggle(
+            state: onboardingViewModel.state, actionState: onboardingViewModel.actionState)
 
         guard onboardingViewModel.state == .installed else {
             let copy = onboardingViewModel.copy
             focusedTarget = panelFirstFocusTarget(
                 .onboarding(
                     hasPrimaryAction: copy.primaryActionTitle != nil,
-                    hasSecondaryAction: copy.secondaryActionTitle != nil),
+                    hasSecondaryAction: copy.secondaryActionTitle != nil,
+                    hasDetailToggle: hasDetailToggle),
                 ctaOperable: ctaOperable)
             return
         }
         focusedTarget = panelOpeningFocus(
-            rows: eventRows, packCardIDs: packCards.map(\.id), ctaOperable: ctaOperable)
+            rows: eventRows, packCardIDs: packCards.map(\.id), ctaOperable: ctaOperable,
+            hasDetailToggle: hasDetailToggle)
     }
 
     // MARK: - Actions

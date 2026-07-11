@@ -29,6 +29,9 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case eventAction(Event)
     case dropZone
     case packCard(id: String)
+    /// 一条失败行上的「查看原因」（T17）—— 它是一个**可聚焦控件**，不是装饰：WCAG 2.1.1 要求
+    /// 键盘用户也能展开那条原因，而这个仓库已经为「成功/拒绝之后只剩鼠标可用」记过一条 P3 账。
+    case revealDetail
     /// 运行态面板尾部的「断开连接」（T17，**授权的设计变更**）。
     ///
     /// 它此前是 `OnboardingCopy(.installed).secondaryActionTitle`，而 `.installed` 状态下
@@ -47,13 +50,13 @@ public enum PanelFocusScope: Sendable, Equatable {
     /// `hasPrimaryAction`/`hasSecondaryAction` mirror ``OnboardingCopy/primaryActionTitle``/
     /// ``OnboardingCopy/secondaryActionTitle`` being non-`nil` — a state like `.installed`
     /// has no primary action (`nil` title) but does have a secondary one ("断开连接").
-    case onboarding(hasPrimaryAction: Bool, hasSecondaryAction: Bool)
+    case onboarding(hasPrimaryAction: Bool, hasSecondaryAction: Bool, hasDetailToggle: Bool = false)
     /// The operational panel is showing: `events` is normally ``Event/allCases`` in its
     /// declared order (kept as an explicit parameter, not hardcoded, so a test can pin
     /// "exactly `Event.allCases`'s order" as its own assertion rather than baking that
     /// assumption into this function); `packCardIDs` mirrors ``PackCard/id``'s gallery order
     /// (``availablePacks(config:environment:)``'s sorted-by-id output).
-    case operational(events: [Event], packCardIDs: [String])
+    case operational(events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false)
 }
 
 /// The panel's Tab/Shift+Tab traversal order for its current ``PanelFocusScope`` —
@@ -68,13 +71,15 @@ public enum PanelFocusScope: Sendable, Equatable {
 /// 焦点落首个可操作项").
 public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
     switch scope {
-    case .onboarding(let hasPrimaryAction, let hasSecondaryAction):
+    case .onboarding(let hasPrimaryAction, let hasSecondaryAction, let hasDetailToggle):
         var order: [PanelFocusTarget] = []
+        // 失败行画在按钮**上方** —— 焦点序跟随视觉序（a11y-architect FIX 5）。
+        if hasDetailToggle { order.append(.revealDetail) }
         if hasPrimaryAction { order.append(.onboardingPrimaryAction) }
         if hasSecondaryAction { order.append(.onboardingSecondaryAction) }
         return order
 
-    case .operational(let events, let packCardIDs):
+    case .operational(let events, let packCardIDs, let hasDetailToggle):
         var order: [PanelFocusTarget] = []
         for event in events {
             order.append(.eventAction(event))
@@ -82,7 +87,8 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         }
         order.append(.dropZone)
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
-        // 「断开连接」在面板最底部 —— 焦点序跟随视觉序（a11y-architect FIX 5）。
+        // 面板最底部：失败行（若有）在「断开连接」之上 —— 焦点序跟随视觉序。
+        if hasDetailToggle { order.append(.revealDetail) }
         order.append(.disconnect)
         return order
     }
@@ -136,6 +142,11 @@ public func panelFirstFocusTarget(
             return !nonOperableActionEvents.contains(event)
         case .onboardingPrimaryAction, .onboardingSecondaryAction, .disconnect:
             return ctaOperable
+        case .revealDetail:
+            // 动作跑到一半时失败行不存在（`runDiskAction` 一开跑就把 actionState 换成 `.running`），
+            // 所以这个 target 压根不会在 in-flight 的 order 里 —— 但仍显式跟随 `ctaOperable`，
+            // 免得未来某次改动让它悄悄留在一个全禁用的面板上。
+            return ctaOperable
         case .eventMute, .dropZone, .packCard:
             return true
         }
@@ -162,10 +173,11 @@ public func panelFirstFocusTarget(
 /// Onboarding is deliberately out of scope: it has no rows, so it has no `.eventAction` targets
 /// to filter — ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` handles that scope directly.
 public func panelOpeningFocus(
-    rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true
+    rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true,
+    hasDetailToggle: Bool = false
 ) -> PanelFocusTarget? {
     let scope = PanelFocusScope.operational(
-        events: rows.map(\.event), packCardIDs: packCardIDs)
+        events: rows.map(\.event), packCardIDs: packCardIDs, hasDetailToggle: hasDetailToggle)
     let nonOperableActionEvents = Set(rows.filter { !$0.eventActionOperable }.map(\.event))
     return panelFirstFocusTarget(
         scope, nonOperableActionEvents: nonOperableActionEvents, ctaOperable: ctaOperable)

@@ -122,6 +122,16 @@ public final class OnboardingViewModel: ObservableObject {
         await perform(onboardingSecondaryIntent(for: state))
     }
 
+    /// 展开 / 收起「查看原因」。
+    ///
+    /// **一个独立的公开入口，不能复用 `performSecondaryAction()`**：`.installed` 态下次 CTA 是
+    /// `.disconnect`，把失败行的「查看原因」接到它上面会**再跑一次断开**。
+    /// （`.revealDetail` intent 也走这里，所以「翻这个 flag」全仓只有一个实现。）
+    public func toggleDetail() {
+        guard !isPreviewPinned, !isPerformingAction else { return }
+        isShowingDetail.toggle()
+    }
+
     /// 每一颗 CTA 最终都走这里。`switch` 穷尽、无 `default:` —— 加一个 intent 会编译红。
     private func perform(_ intent: OnboardingActionIntent?) async {
         // 画廊里 pin 死的实例：点一下什么都不该发生。
@@ -139,7 +149,7 @@ public final class OnboardingViewModel: ObservableObject {
 
         switch intent {
         case .revealDetail:
-            isShowingDetail.toggle()
+            toggleDetail()
 
         case .reDetect:
             // 一个字节都不写：用户的 Claude Code 没装 / 配置文件没权限 / 格式坏了 —— 都不是
@@ -165,7 +175,8 @@ public final class OnboardingViewModel: ObservableObject {
         case .success:
             actionState = .idle
         case .failure(let error):
-            actionState = .failed(message: error.message, detail: error.technicalDetail)
+            actionState = .failed(
+                action: action, message: error.message, detail: error.technicalDetail)
         }
         // 无论成败都重新探测：成功 → `.installed`；失败 → 可能变成 `.settingsNotWritable`，也可能
         // 原地不动。面板必须反映磁盘**此刻**的真相，而不是我们以为自己写成功了什么。

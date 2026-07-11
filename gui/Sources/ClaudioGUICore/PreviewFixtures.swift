@@ -84,9 +84,11 @@ public enum PreviewFixtures {
         .running(.takeOver),
         .running(.disconnect),
         .failed(
+            action: .takeOver,
             message: "这一步没能完成，Claudio 已经停下、没有留下半成品。看看下面的原因，或者稍后再试一次。",
             detail: "写 settings.json hooks 失败：settings.json 存在但不可写：/Users/demo/.claude/settings.json"),
         .failed(
+            action: .takeOver,
             message: "没找到 Claudio 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 Claudio 再试一次。",
             detail: nil),
     ]
@@ -227,7 +229,7 @@ public enum PreviewFixtures {
         switch state {
         case .idle: "idle"
         case .running(let action): "running.\(onboardingDiskActionCoverage(action))"
-        case .failed(_, let detail): detail == nil ? "failed.noDetail" : "failed.withDetail"
+        case .failed(_, _, let detail): detail == nil ? "failed.noDetail" : "failed.withDetail"
         }
     }
 

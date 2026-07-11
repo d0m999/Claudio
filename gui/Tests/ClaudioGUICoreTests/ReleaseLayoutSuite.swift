@@ -41,25 +41,39 @@ func runReleaseLayoutSuites() {
             return
         }
 
-        // ``bundledHelperBinary(in:)`` 用 `subdirectory: "bin"` 在 `Contents/Resources/` 里找，
-        // 名字是 `claudio`（``claudioHelperBinaryName``）。生产者必须往同一个地方放。
+        // **只看真正的 `cp` 命令行，不看散文。**
+        //
+        // 第一版这条断言是 `yaml.contains("Contents/Resources/bin/claudio")` —— 而 release.yml 的
+        // Release notes 与 cask caveats 里**也**印着这条路径。把真正的 `cp` 目标改成
+        // `Resources/helper/`（也就是这条 suite 存在的全部理由那次变异），那两处散文照样让 grep 命中，
+        // **652 全绿**。一条不可能失败的测试比没有测试更坏：它宣称自己在守着一件事。
+        let copyLines = yaml.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("cp ") || $0.hasPrefix("cp -") }
+
+        expect(!copyLines.isEmpty, "release.yml 里一条 `cp` 都没有？「Assemble Claudio.app」那步没了？")
+
         let helperDestination = "Contents/Resources/\(bundledHelperSubdirectory)/\(claudioHelperBinaryName)"
         expect(
-            yaml.contains(helperDestination),
-            "release.yml 里找不到 \"\(helperDestination)\" —— GUI 会去那里找 helper，生产者却把它放到了别处。"
-                + "所有测试都会绿、CI 会绿、DMG 会照常签发，然后 CTA 在每一台用户机器上报「找不到小助手」。")
+            copyLines.contains { $0.contains(helperDestination) },
+            "release.yml 里没有任何一条 `cp` 把 helper 复制到 \"\(helperDestination)\"。"
+                + "GUI 会去那里找它（`bundledHelperBinary(in:)`），生产者却把它放到了别处 —— "
+                + "所有测试会绿、CI 会绿、DMG 会照常签发，然后 CTA 在每一台用户机器上报「找不到小助手」。"
+                + "实际的 cp 行：\(copyLines)")
 
         // `performFirstRunSetup` 从 helper 路径去掉两级、拼 `packs` 反推内置包目录。
         expect(
-            yaml.contains("Contents/Resources/packs"),
-            "release.yml 里找不到 \"Contents/Resources/packs\" —— 内置包目录是从 helper 路径反推的"
-                + "（去掉两级 + packs），放错地方会让 setup 一个包都复制不出来，而且**不报错**。")
+            copyLines.contains { $0.contains("Contents/Resources/packs") },
+            "release.yml 里没有任何一条 `cp` 把内置包复制进 \"Contents/Resources/packs\" —— 包目录是从"
+                + "helper 路径反推出来的（去掉两级 + packs），放错地方会让 setup 一个包都复制不出来，"
+                + "而且**不报错**。实际的 cp 行：\(copyLines)")
 
-        // GUI 自己的可执行文件在 Contents/MacOS/ —— 这条断言钉住的是「两者确实是两个不同的东西」，
-        // 也就是 T17 那个 bug 的前提。
+        // GUI 自己的可执行文件在 Contents/MacOS/ —— 钉住「两者确实是两个不同的文件」，也就是 T17
+        // 那个 bug 的前提。
         expect(
-            yaml.contains("Contents/MacOS/"),
-            "release.yml 里找不到 Contents/MacOS/ —— GUI 可执行文件与 helper 必须是两个不同的文件")
+            copyLines.contains { $0.contains("Contents/MacOS/") },
+            "release.yml 里没有任何一条 `cp` 往 Contents/MacOS/ 放 GUI 可执行文件 —— GUI 与 helper 必须"
+                + "是两个不同的文件。实际的 cp 行：\(copyLines)")
     }
 
     suite("Casks/claudio.rb 递归解除隔离（-r），否则 bundle 里的 helper 仍带着章") {

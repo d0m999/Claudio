@@ -115,10 +115,10 @@
         case .idle: ".idle"
         case .running(.takeOver): ".running(.takeOver) × .notInstalled"
         case .running(.disconnect): ".running(.disconnect) × .installed"
-        case .failed(_, let detail):
+        case .failed(let action, _, let detail):
             detail == nil
-                ? ".failed(detail: nil) × .notInstalled"
-                : ".failed(detail: …) × .notInstalled"
+                ? ".failed(\(action), detail: nil) × .notInstalled"
+                : ".failed(\(action), detail: …) × .notInstalled（可展开）"
         }
     }
 

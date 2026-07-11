@@ -321,12 +321,12 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
         }
         try fileManager.copyItem(at: source, to: destination)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
-        // `copyItem` brings `com.apple.quarantine` along with it, and a quarantined binary is
-        // SIGKILLed by Gatekeeper the instant Claude Code's hook execs it — silently, with no
-        // exit code anyone can observe. See Quarantine.swift for the measurements. The
-        // VERIFICATION that this actually worked lives in `performFirstRunSetup` (one place,
-        // covering the re-run path this function never even runs on).
-        stripQuarantineAttribute(at: destination)
+        // NO quarantine strip here — deliberately. `copyItem` DOES carry `com.apple.quarantine`
+        // across (see Quarantine.swift), but the strip AND the verification that it actually worked
+        // both live in ``performFirstRunSetup``, in ONE place, unconditionally. A second strip here
+        // is dead code: removing it changes no behavior and breaks no test (measured) — which is
+        // exactly what "defense in depth" degenerates into when nobody checks: an untested line
+        // pretending to be a safety net.
         return .success(())
     } catch {
         return .failure(.binaryCopyFailure(reason: error.localizedDescription))

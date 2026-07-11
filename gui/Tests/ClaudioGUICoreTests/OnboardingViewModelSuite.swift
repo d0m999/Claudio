@@ -172,7 +172,7 @@ func runOnboardingViewModelSuites() async {
 
             await viewModel.performPrimaryAction()
 
-            guard case .failed(let message, let detail) = viewModel.actionState else {
+            guard case .failed(let action, let message, let detail) = viewModel.actionState else {
                 expect(
                     false,
                     "失败必须落进 actionState —— 这个 codebase 已经被「写了但没有任何视图读」的静默失败"
@@ -180,6 +180,10 @@ func runOnboardingViewModelSuites() async {
                 return
             }
             expect(!message.isEmpty, "必须有一句人话")
+            expect(
+                action == .takeOver,
+                "失败必须记住**是哪个动作**失败的 —— 接管失败与断开失败渲染在面板的两个不同分支里，"
+                    + "不带这个标签的话，一次接管失败会永久挂在一张后来装好了的面板底部。得到 \(action)")
             expect(
                 detail?.contains("boom") == true,
                 "工程原话必须留在 detail 里，否则用户永远查不出为什么。得到 \(String(describing: detail))")
@@ -299,8 +303,57 @@ func runOnboardingViewModelSuites() async {
             expect(!running.isRunning(.disconnect), "断开那颗不该转")
 
             let failed = OnboardingViewModel(
-                previewState: .notInstalled, actionState: .failed(message: "m", detail: "d"))
+                previewState: .notInstalled,
+                actionState: .failed(action: .takeOver, message: "m", detail: "d"))
             expect(!failed.isPerformingAction, "pin 成 .failed 不是 in-flight")
         }
     #endif
+}
+
+// MARK: - T17 修复批：toggleDetail 是一个独立入口（复用次 CTA 会再跑一次断开）
+
+@MainActor
+func runOnboardingViewModelDetailSuites() async {
+    await suite("toggleDetail(): .installed 下展开断开失败的原因，绝不再跑一次断开") {
+        await withTempDirectory { root in
+            let claudeDirectory = root.appendingPathComponent("dot-claude", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: claudeDirectory, withIntermediateDirectories: true)
+            let environment = OnboardingEnvironment(
+                settingsFile: claudeDirectory.appendingPathComponent("settings.json"),
+                claudioBinaryPath: root.appendingPathComponent(".claudio/bin/claudio"))
+            writeExecutableFile(at: environment.claudioBinaryPath)
+            let path = environment.claudioBinaryPath.path
+            let entries = Event.allCases.map { event in
+                #"""
+                "\#(event.settingsName)": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: event, claudioBinaryPath: path))" } ] } ]
+                """#
+            }.joined(separator: ",\n")
+            writeFixture("{ \"hooks\": { \(entries) } }", to: environment.settingsFile)
+
+            let runner = ScriptedRunner()
+            runner.result = .failure(.disconnectFailed(.lockBusy))
+            let viewModel = OnboardingViewModel(environment: environment, actionRunner: runner)
+            expect(viewModel.state == .installed, "setup: 得到 \(viewModel.state)")
+
+            await viewModel.performSecondaryAction()  // 断开 → 失败
+            guard case .failed(let action, _, let detail) = viewModel.actionState else {
+                expect(false, "断开必须失败，得到 \(viewModel.actionState)")
+                return
+            }
+            expect(action == .disconnect, "失败必须记住是断开失败的，得到 \(action)")
+            expect(detail?.isEmpty == false, "锁被占用这条必须带上可执行的 detail（「请稍后重试」）")
+            expect(!viewModel.isShowingDetail, "初始收起")
+
+            viewModel.toggleDetail()
+            expect(viewModel.isShowingDetail, "「查看原因」必须能展开")
+            expect(
+                runner.calls == [.disconnect],
+                "toggleDetail() 绝不能再跑一次断开 —— 这正是为什么它不能复用 performSecondaryAction()："
+                    + "在 .installed 下那个 intent 是 .disconnect。得到 \(runner.calls)")
+
+            viewModel.toggleDetail()
+            expect(!viewModel.isShowingDetail, "再点一次收起")
+        }
+    }
 }
