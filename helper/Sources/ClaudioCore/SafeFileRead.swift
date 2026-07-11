@@ -49,10 +49,18 @@ import Foundation
 /// 任何越过它的东西都不是 manifest，是攻击载荷或事故。
 let maxPackManifestBytes = 1 << 20
 
+/// `config.json` 的大小上限：64 KiB。一份真实 config（三个 v1 键 + 用户自定义字段）是几百字节；
+/// 64 KiB 已经宽出两个数量级，任何越过它的东西都不是 config。
+///
+/// 这道上限**必须存在**，理由与 manifest 那道一模一样，而且更硬：`config.json` 被读的地方比 manifest
+/// 多得多，且每一处都在最不能出事的路径上——`claudio play` 的**同步 hook 路径**（每一次 Claude Code
+/// 事件都读一次）、菜单栏 app 的**主线程**（每一次开面板都读一次）。见 ``loadClaudioConfig(from:)``。
+public let maxConfigFileBytes = 1 << 16
+
 /// ``readRegularFileBounded(at:maxBytes:)`` 的结果：要么是文件的字节，要么是它被拒读的**具体**原因
 /// （拒读原因分开带出来，是为了让调用方能把「这不是个正规文件」和「文件根本不存在」讲成不同的话，
 /// 而不是糊成一句「读取失败」）。
-enum BoundedFileRead: Equatable {
+public enum BoundedFileRead: Equatable {
     /// 一个普通文件，完整读完——不超过 `maxBytes` 字节。
     case success(Data)
     /// 打开的描述符不是正规文件：目录 / FIFO / socket / 设备（`followSymlink: false` 时，末段是一个
@@ -63,6 +71,56 @@ enum BoundedFileRead: Equatable {
     case oversize
     /// 其他任何原因打不开 / `fstat` / 读失败（不存在、没权限、符号链接成环……）。
     case unreadable
+}
+
+/// 读 `configFile` 的**唯一**入口：有界 + 正规文件闸门。返回它的字节，或它被拒读的具体原因。
+///
+/// ## 为什么 `config.json` 也必须走这道门（本轮 /ship 评审：三路独立命中）
+///
+/// 这个 diff 建了 ``readRegularFileBounded(at:maxBytes:followSymlink:)``，并用大段论证说明「无大小上限
+/// 的读是已证实、今天就能触发的洞」——然后只把它用在了 `manifest.json` 上。`config.json` 的五处读全是
+/// 裸的 `Data(contentsOf:)`：`play` 的 hook 路径、`doctor`、config 的读-改-写、以及 `gui` 面板。
+///
+/// 信任边界因此在同一个文件上自相矛盾：**写**路径把 `config.json` 当不可信输入（整套 fail-closed 闸门
+/// 都是为它建的），**读**路径却完全信任它。
+///
+/// ### 真实的那一半：**读取无大小上限**
+///
+/// 一个 500MB 形状的 `config.json` 会被**整份读进内存**，而这两条路径是这个仓库最不能出事的地方：
+/// `claudio play` 跑在 Claude Code 的**同步 hook 路径**上（每个事件一次），`gui` 的 `loadPanelConfig`
+/// 跑在**主线程**上（每次开面板一次）。这条今天就能触发，`maxConfigFileBytes` 这道上限是它的正解。
+///
+/// ### 被证伪的那一半：FIFO **不会**让 `Data(contentsOf:)` 挂死
+///
+/// 本轮有两路评审（红队 / Codex 对抗）都断言「FIFO 形状的 config.json → `Data(contentsOf:)` 永久阻塞
+/// → hook / 菜单栏挂死」。**实测：不成立**——Darwin 上 `Data(contentsOf: FIFO)` 在 0.0001s 内抛
+/// `EACCES`，目录抛 `EISDIR`，都不阻塞。这与本文件顶部记录的、上一轮对 `manifest.json` 的**同一条**
+/// 结论完全一致（那次也是评审说会挂、实测不挂）。**同一个伪命题被独立提出了两次，所以它值得在这里
+/// 再钉一遍。**
+///
+/// 那为什么还要正规文件闸门？理由和上一轮一字不差：**不把安全性押在一个未文档化的 Foundation 实现
+/// 细节上**。`Data(contentsOf:)` 今天恰好帮我们挡住了 FIFO，但这不是它的契约；一旦有人把读法重构成
+/// `FileHandle(forReadingFrom:)` / `InputStream`（那**真的**会挂在 `open(2)` 上等一个永远不来的写端），
+/// 洞就当场重开。`O_NONBLOCK` + `fstat` 判 `S_IFREG` 把「绝不阻塞、绝不读非正规文件」变成**我们自己
+/// 的、有测试钉死的契约**，而不是一个借来的巧合。
+///
+/// 上限与闸门必须只有一个定义、两个模块共用（ENGINEERING.md T16「REUSE, do not reinvent」）——所以它
+/// `public`，和 ``regularFileExists(at:)``、``loadPackManifestData(in:)`` 同理。
+///
+/// `followSymlink: true`：`config.json` 被指成一个符号链接是合法的（dotfile 管理器常这么干），且大小
+/// 上限绑在**已打开的那个 fd** 上，跟随之后照样管用——被拒的是链接目标不是正规文件（FIFO / 目录）。
+public func readConfigFileBounded(at configFile: URL) -> BoundedFileRead {
+    readRegularFileBounded(at: configFile, maxBytes: maxConfigFileBytes, followSymlink: true)
+}
+
+/// 读 + 解码 `configFile` 成一份 ``ClaudioConfig``；任何一步失败都折叠成 `nil`。
+///
+/// `play`（hook 路径）、`doctor`、以及 `gui` 的面板共用这一个函数——三边对「这份 config 能不能用」的
+/// 答案因此不可能分叉。各自的**兜底策略**仍归各自：`play` 把 `nil` 折成静默不播，面板把 `nil` 折成
+/// 一份「未选中任何包」的默认 config。见 ``readConfigFileBounded(at:)`` 讲的那两条硬契约。
+public func loadClaudioConfig(from configFile: URL) -> ClaudioConfig? {
+    guard case .success(let data) = readConfigFileBounded(at: configFile) else { return nil }
+    return try? JSONDecoder().decode(ClaudioConfig.self, from: data)
 }
 
 /// 只打开 `url` 一次，且只在它确实是一个不大于 `maxBytes` 的**正规文件**时返回它的字节。正规文件

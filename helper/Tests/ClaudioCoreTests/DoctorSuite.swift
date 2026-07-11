@@ -288,6 +288,79 @@ func runDoctorSuites() {
         }
     }
 
+    // MARK: - checkPackIntegrity's config.json read must go through the same bounded,
+    // regular-file-gated door as `play` and `probeConfigRewritable` (`readConfigFileBounded`,
+    // SafeFileRead.swift) — `doctor` is precisely the tool a user reaches for to diagnose a
+    // hostile/oversized config.json, so it must never itself hang or crash on one.
+
+    suite("checkPackIntegrity: config.json is a DIRECTORY → .configUnreadable, not a crash") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            try? FileManager.default.createDirectory(
+                at: configFile, withIntermediateDirectories: true)
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: root.appendingPathComponent("packs"),
+                bundledPacksDirectory: nil)
+            guard case .configUnreadable = status else {
+                expect(false, "a directory-shaped config.json must report .configUnreadable, got \(status)")
+                return
+            }
+        }
+    }
+
+    suite("checkPackIntegrity: config.json is a FIFO → .configUnreadable, doctor still returns (never hangs)") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            makeFIFO(at: configFile)
+
+            let started = Date()
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: root.appendingPathComponent("packs"),
+                bundledPacksDirectory: nil)
+            let elapsed = Date().timeIntervalSince(started)
+
+            guard case .configUnreadable = status else {
+                expect(false, "a FIFO-shaped config.json must report .configUnreadable, got \(status)")
+                return
+            }
+            expect(elapsed < 5, "doctor must never hang reading a FIFO-shaped config.json, took \(elapsed)s")
+        }
+    }
+
+    suite(
+        "checkPackIntegrity: a VALID (fully decodable) but oversize (> 64 KiB) config.json is"
+            + " rejected by the size gate → .configUnreadable, even though the pack it names is"
+            + " otherwise complete (proving the size bound is what's rejecting it, not a"
+            + " coincidental decode failure — a raw, unbounded Data(contentsOf:) would read and"
+            + " decode this exact file successfully and report .complete instead)"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            let padding = String(repeating: "x", count: (1 << 16) + 100)
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "padding": "\#(padding)" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: packsDir, bundledPacksDirectory: nil)
+            guard case .configUnreadable(let reason) = status else {
+                expect(
+                    false,
+                    "an oversize config.json must report .configUnreadable even though the pack"
+                        + " it names is otherwise complete, got \(status)")
+                return
+            }
+            expect(
+                reason.contains("\(maxConfigFileBytes)"),
+                "the reason should mention the byte bound so a user can act on it, got \(reason)")
+        }
+    }
+
     suite("checkPackIntegrity: selected pack missing from disk → .packNotFound") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")

@@ -1,4 +1,5 @@
 import ClaudioCore
+import Dispatch
 import Foundation
 
 // MARK: - setEventEnabled: per-event mute write-back (ENGINEERING.md 决议③, T15 D4)
@@ -6,6 +7,26 @@ import Foundation
 // Mirrors `UseSuite.swift`'s structure exactly — `setEventEnabled` mirrors `selectPack`'s
 // shape (flock + read-or-create + atomic write), so its test coverage mirrors `selectPack`'s
 // too: flip, field preservation, fresh-create, corrupt-abort, lock contention.
+
+/// Thread-safe collector for outcomes produced by concurrent `setEventEnabled` calls.
+/// Mirrors `PlaySuite.swift`'s `OutcomeCollector` — that one is file-scope `private` there,
+/// so this file needs its own copy over `Result<SetEventEnabledOutcome, SetEventEnabledError>`.
+private final class SetEventEnabledOutcomeCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _outcomes: [Result<SetEventEnabledOutcome, SetEventEnabledError>] = []
+
+    func append(_ outcome: Result<SetEventEnabledOutcome, SetEventEnabledError>) {
+        lock.lock()
+        _outcomes.append(outcome)
+        lock.unlock()
+    }
+
+    var outcomes: [Result<SetEventEnabledOutcome, SetEventEnabledError>] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _outcomes
+    }
+}
 
 @MainActor
 func runEventEnabledSuites() {
@@ -251,6 +272,80 @@ func runEventEnabledSuites() {
                 config?.selectedPack == "minimal-chime",
                 "the pack selection from the first call must survive the second call untouched")
             expect(config?.isEnabled(.subagentStop) == false, "the mute flip must be reflected")
+        }
+    }
+
+    // MARK: - 真并发写：这条 read-modify-write 新近才被纳入 play.lock（本轮 /ship 覆盖率审计 #1）
+    //
+    // 之前只测过「1 个持有者 + 1 个等待者」这种锁竞争，从没有一条测试真正证明过并发写不会撕裂
+    // config.json。1:1 镜像 `PlaySuite.swift` 里那条 `DispatchQueue.concurrentPerform` 压力测试
+    // 的写法（那条证明的是「恰好一次真正播放」；这条证明的是「文件永远不撕裂、旧键永远不丢」）。
+
+    suite(
+        "setEventEnabled: N 个并发写者打在同一个 config.json 上——写完之后文件仍是合法 JSON、三个 v1"
+            + " 键与一个未知顶层键全都还在，且每一次调用要么真的成功要么 .lockBusy，绝不静默损坏"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture(
+                #"""
+                { "selected_pack": "minimal-chime", "master_volume": 0.5, "night_dim": true, "events": { "stop": true } }
+                """#, to: configFile)
+
+            let collector = SetEventEnabledOutcomeCollector()
+            let iterations = 50
+            DispatchQueue.concurrentPerform(iterations: iterations) { index in
+                let event = Event.allCases[index % Event.allCases.count]
+                let enabled = index % 2 == 0
+                let result = setEventEnabled(
+                    event, enabled: enabled, configFile: configFile, lockFile: lockFile)
+                collector.append(result)
+            }
+
+            let outcomes = collector.outcomes
+            expect(
+                outcomes.count == iterations,
+                "every concurrent call must produce an outcome, got \(outcomes.count) of \(iterations)"
+            )
+
+            for (index, outcome) in outcomes.enumerated() {
+                switch outcome {
+                case .success, .failure(.lockBusy):
+                    break
+                default:
+                    expect(
+                        false,
+                        "call \(index) must be either a real success or .lockBusy — never a"
+                            + " torn/corrupted write, got \(outcome)")
+                }
+            }
+
+            // (a) 文件必须仍然是合法、可解析的 JSON——撕裂的写在这里会直接解析失败。
+            guard let data = try? Data(contentsOf: configFile),
+                let parsed = try? JSONSerialization.jsonObject(with: data),
+                let json = parsed as? [String: Any]
+            else {
+                expect(
+                    false,
+                    "经过 \(iterations) 个并发写者之后，config.json 必须仍是一份合法、可解析的 JSON")
+                return
+            }
+            // (b) + (c) 三个 v1 键与那个未知顶层键必须一个不少——并发写绝不能让任何一方的键集合丢失。
+            expect(
+                Set(json.keys) == Set(["selected_pack", "master_volume", "events", "night_dim"]),
+                "并发写之后顶层键集合必须逐一保留（已知键 + 未知键），got \(json.keys.sorted())")
+            expect(
+                json["night_dim"] as? Bool == true,
+                "未知顶层键的值必须原样幸存，got \(String(describing: json["night_dim"]))")
+            expect(
+                json["selected_pack"] as? String == "minimal-chime",
+                "selected_pack 不归 setEventEnabled 拥有，必须纹丝不动，got"
+                    + " \(String(describing: json["selected_pack"]))")
+            let events = json["events"] as? [String: Any]
+            expect(
+                events != nil && !(events!.isEmpty),
+                "events 表必须仍然存在且非空——并发写不能把它写没了")
         }
     }
 }

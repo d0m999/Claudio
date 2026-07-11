@@ -717,4 +717,404 @@ func runConfigMutationSuites() {
                 "文件必须逐字保持原样")
         }
     }
+
+    // MARK: - 非有限数字（-1e400）绝不再让进程 abort（本轮 /ship 评审 P0，实测 exit 134）
+    //
+    // `{"selected_pack":"a","master_volume":-1e400}` 会被 `JSONSerialization` 解析成 `-inf`
+    // （正溢出 `1e400` 在**解析期**就被 Foundation 拒了，只有**负**溢出能穿进来——实测钉在
+    // `JSONSafeWrite.swift` 的注释里）。`-inf` 一路穿过既有闸门，直到 `JSONSerialization.data(withJSONObject:)`
+    // 抛出**不可捕获**的 Objective-C `NSInvalidArgumentException`——`do/catch` 接不住，进程 `abort()`
+    // （本机实测：exit 134）。见 `firstUnwritableJSONValue(in:keyPath:depth:path:)`。
+
+    suite("setEventEnabled: master_volume 是 -1e400（解析成 -inf）→ fail closed，绝不 abort，文件逐字未动") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"{ "selected_pack": "pika", "master_volume": -1e400 }"#
+            writeFixture(original, to: configFile)
+
+            // 到达这一行本身就是这条测试的第一重断言：如果 fail-closed 闸门没接住，
+            // `JSONSerialization.data(withJSONObject:)` 会抛出不可捕获的 ObjC 异常，
+            // 整个测试进程会 SIGABRT（exit 134），这条 suite 后面的每一行、乃至同一次
+            // `swift run` 里排在它之后的所有 suite 都不会再执行——「跑到这里」就是「没有 abort」。
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "-1e400（解析成 -inf）必须 fail closed，got \(result)")
+                return
+            }
+            expect(
+                reason.contains("master_volume"),
+                "失败原因必须点名是 master_volume 这个键，got \(reason)")
+            expect(
+                reason.contains("有限数字"),
+                "失败原因必须说清楚它该是一个有限数字，got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "fail closed 的含义是一个字节都不写——文件必须逐字保持原样")
+        }
+    }
+
+    suite("selectPack: master_volume 是 -1e400（解析成 -inf）→ fail closed，绝不 abort，文件逐字未动") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("psyduck", isDirectory: true))
+            let original = #"{ "selected_pack": "pika", "master_volume": -1e400 }"#
+            writeFixture(original, to: configFile)
+
+            let result = selectPack(
+                "psyduck", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "-1e400（解析成 -inf）必须让切包 fail closed，got \(result)")
+                return
+            }
+            expect(reason.contains("master_volume"), "got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "两个写路径共用同一份实现 → 同样一个字节都不写")
+        }
+    }
+
+    suite(
+        "setEventEnabled: -1e400 藏在一个未知顶层键的**对象**里（night_dim.level）→ 同样 fail closed"
+    ) {
+        withTempDirectory { root in
+            // `night_dim` 是 v1 模型完全不认识的键——这条证明 firstUnwritableJSONValue 的递归
+            // 会钻进未知键的嵌套对象里，而不是只查顶层的 master_volume。
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"{ "selected_pack": "pika", "night_dim": { "level": -1e400 } }"#
+            writeFixture(original, to: configFile)
+
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "嵌套在未知键对象里的 -1e400 必须 fail closed，got \(result)")
+                return
+            }
+            expect(
+                reason.contains("night_dim.level"),
+                "失败原因必须点名到具体的嵌套路径 night_dim.level，而不是只说「某处有问题」，got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "文件必须逐字保持原样")
+        }
+    }
+
+    suite(
+        "setEventEnabled: -1e400 藏在一个未知顶层键的**数组**里（x[0]）→ 同样 fail closed"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"{ "selected_pack": "pika", "x": [-1e400] }"#
+            writeFixture(original, to: configFile)
+
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "嵌套在未知键数组里的 -1e400 必须 fail closed，got \(result)")
+                return
+            }
+            expect(
+                reason.contains("x[0]"),
+                "失败原因必须点名到具体的数组下标 x[0]，got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "文件必须逐字保持原样")
+        }
+    }
+
+    suite(
+        "probeConfigRewritable: master_volume 是 -1e400 → .malformed（这是 doctor 假绿的另一半：写下去会 abort 的文件不能被诊断为可安全重写）"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(
+                #"{ "selected_pack": "pika", "master_volume": -1e400 }"#, to: configFile)
+
+            guard case .malformed(let reason) = probeConfigRewritable(configFile: configFile) else {
+                expect(
+                    false,
+                    "-1e400 的 config 必须被探测为 .malformed，绝不能是 .rewritable，got"
+                        + " \(probeConfigRewritable(configFile: configFile))")
+                return
+            }
+            expect(reason.contains("master_volume"), "got \(reason)")
+            expect(reason.contains("有限数字"), "got \(reason)")
+        }
+    }
+
+    suite(
+        "probeConfigRewritable 与 setEventEnabled 对 -1e400 给出的 reason 逐字相同（doctor 与写路径必须说同一句话）"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            writeFixture(
+                #"{ "selected_pack": "pika", "master_volume": -1e400 }"#, to: configFile)
+
+            guard case .malformed(let probedReason) = probeConfigRewritable(configFile: configFile)
+            else {
+                expect(false, "-1e400 的 config 必须探测为 .malformed")
+                return
+            }
+            let writeResult = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(.configReadFailure(let writeReason)) = writeResult else {
+                expect(false, "got \(writeResult)")
+                return
+            }
+            expect(
+                probedReason == writeReason,
+                "探针与写路径必须给出同一句话，got 探针=\(probedReason) / 写路径=\(writeReason)")
+        }
+    }
+
+    suite(
+        "setEventEnabled: JSON 嵌套超过 maxJSONNestingDepth（64）层 → fail closed，不炸栈"
+    ) {
+        withTempDirectory { root in
+            // 一份病态嵌套的未知键（`x`）：真实文件的嵌套深度是 2（顶层 -> events），64 层给
+            // 未来 schema 留了三十倍余量。这里刻意远超边界（100 层），只要证明「fail closed」，
+            // 不需要钉死恰好第几层触发——递归函数本身如果没有深度闸门，这个层数足以在调试构建下
+            // 观察到明显的调用栈增长，即便不一定真的 SIGSEGV。
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            var nested = "1"
+            for _ in 0..<100 { nested = "{\"a\":\(nested)}" }
+            let original = #"{ "selected_pack": "pika", "x": \#(nested) }"#
+            writeFixture(original, to: configFile)
+
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "深度超限的 JSON 必须 fail closed（不是崩溃/挂起），got \(result)")
+                return
+            }
+            expect(
+                reason.contains("嵌套") && reason.contains("64"),
+                "失败原因必须点明是嵌套深度问题，且提到具体的层数上限，got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "文件必须逐字保持原样")
+        }
+    }
+
+    // MARK: - config.json 的有界 + 正规文件闸门：probeConfigRewritable 一侧
+    //
+    // `readConfigFileBounded` 用同一道 `O_NONBLOCK` + `fstat` 正规文件闸门 + 64 KiB 上限同时守着
+    // `play` / `doctor` / `probeConfigRewritable` 三个读入口。`play`（PlaySuite.swift）与
+    // `checkPackIntegrity`（DoctorSuite.swift）各有自己的一组；这里补上第三个读入口。
+
+    suite("probeConfigRewritable: config.json 是一个目录 → .malformed，不是 .rewritable") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            try? FileManager.default.createDirectory(
+                at: configFile, withIntermediateDirectories: true)
+
+            guard case .malformed = probeConfigRewritable(configFile: configFile) else {
+                expect(
+                    false,
+                    "目录形状的 config.json 必须探测为 .malformed，got"
+                        + " \(probeConfigRewritable(configFile: configFile))")
+                return
+            }
+        }
+    }
+
+    suite("probeConfigRewritable: config.json 是一个 FIFO → .malformed，且绝不挂起") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            makeFIFO(at: configFile)
+
+            let started = Date()
+            let result = probeConfigRewritable(configFile: configFile)
+            let elapsed = Date().timeIntervalSince(started)
+
+            guard case .malformed = result else {
+                expect(false, "FIFO 形状的 config.json 必须探测为 .malformed，got \(result)")
+                return
+            }
+            expect(elapsed < 5, "探测一个 FIFO 形状的 config.json 绝不能挂起，耗时 \(elapsed)s")
+        }
+    }
+
+    suite(
+        "probeConfigRewritable: 一份**合法、可完整解析**但超过 64 KiB 上限的 config.json → .malformed"
+            + "（换一个不裸读大小上限的 Data(contentsOf:) 实现，这份文件会解析成功并报 .rewritable——"
+            + "这条要钉的正是「上限本身在起作用」，而不是巧合地读到一份读不懂的文件）"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            // 刻意用一份**合法**的、只是被填充到超限的 JSON——其余每一处校验（selected_pack 是
+            // 字符串、没有非有限数字……）都能过关。如果上限被拿掉，这份文件会被完整读入、解析成功、
+            // 一路通过 parseRewritableConfig，报出 .rewritable。
+            let padding = String(repeating: "x", count: (1 << 16) + 100)
+            writeFixture(
+                #"{ "selected_pack": "pika", "padding": "\#(padding)" }"#, to: configFile)
+
+            guard case .malformed = probeConfigRewritable(configFile: configFile) else {
+                expect(
+                    false,
+                    "超限的 config.json 必须探测为 .malformed（即使内容本身合法可解析），got"
+                        + " \(probeConfigRewritable(configFile: configFile))")
+                return
+            }
+        }
+    }
+
+    // MARK: - selected_pack 存在但类型不对（只测过「缺失」，没测过「类型错」）
+
+    suite("setEventEnabled: selected_pack 是数字 42（不是字符串）→ fail closed，文件逐字未动") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            let original = #"{ "selected_pack": 42 }"#
+            writeFixture(original, to: configFile)
+
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "数字形状的 selected_pack 必须 fail closed，got \(result)")
+                return
+            }
+            expect(reason.contains("selected_pack"), "失败原因必须点名 selected_pack，got \(reason)")
+            expect(reason.contains("字符串"), "失败原因必须说清它该是字符串，got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "文件必须逐字保持原样")
+        }
+    }
+
+    suite("selectPack: selected_pack 是数字 42（不是字符串）→ fail closed，文件逐字未动") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("psyduck", isDirectory: true))
+            let original = #"{ "selected_pack": 42 }"#
+            writeFixture(original, to: configFile)
+
+            let result = selectPack(
+                "psyduck", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "数字形状的 selected_pack 必须让切包 fail closed，got \(result)")
+                return
+            }
+            expect(reason.contains("selected_pack") && reason.contains("字符串"), "got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "文件必须逐字保持原样")
+        }
+    }
+
+    suite("setEventEnabled: selected_pack 是布尔 true（不是字符串）→ fail closed，文件逐字未动") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            // `true` 桥接成 NSNumber，一个天真的「不是字符串就当数字/别的」判断可能被它蒙混过去——
+            // `selected_pack` 校验必须明确拒绝布尔，同 `isJSONBoolean` 在别处挡的那类静默强转。
+            let original = #"{ "selected_pack": true }"#
+            writeFixture(original, to: configFile)
+
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "布尔形状的 selected_pack 必须 fail closed，got \(result)")
+                return
+            }
+            expect(reason.contains("selected_pack") && reason.contains("字符串"), "got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "文件必须逐字保持原样")
+        }
+    }
+
+    suite("selectPack: selected_pack 是布尔 true（不是字符串）→ fail closed，文件逐字未动") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("psyduck", isDirectory: true))
+            let original = #"{ "selected_pack": true }"#
+            writeFixture(original, to: configFile)
+
+            let result = selectPack(
+                "psyduck", configFile: configFile, userPacksDirectory: userPacks,
+                lockFile: root.appendingPathComponent("play.lock"))
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "布尔形状的 selected_pack 必须让切包 fail closed，got \(result)")
+                return
+            }
+            expect(reason.contains("selected_pack") && reason.contains("字符串"), "got \(reason)")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "文件必须逐字保持原样")
+        }
+    }
+
+    // MARK: - probeConfigRewritable 必须验证父目录可写（`.unwritable`，与 `.malformed` 分开）
+    //
+    // 内容合法，但父目录只读（只读卷 / 权限被改）：原子写要求父目录可写，少了这一问 doctor
+    // 会对着这种局面打印「✓ 可安全重写」，用户真去点静音钮时它一次次失败。
+
+    suite(
+        "probeConfigRewritable: 内容合法但父目录只读（chmod 0o500）→ .unwritable，不是 .rewritable；"
+            + "configRewritabilityResult 报 warning；真实写也确实失败（探针与写路径必须一致）"
+    ) {
+        guard geteuid() != 0 else {
+            print("  ⚠︎ 跳过：当前以 root 运行，chmod 只读目录挡不住 root 写入")
+            return
+        }
+        withTempDirectory { root in
+            let restrictedDirectory = root.appendingPathComponent("restricted", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: restrictedDirectory, withIntermediateDirectories: true)
+            let configFile = restrictedDirectory.appendingPathComponent("config.json")
+            writeFixture(
+                #"{ "selected_pack": "pika", "master_volume": 0.5 }"#, to: configFile)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o500], ofItemAtPath: restrictedDirectory.path)
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: restrictedDirectory.path)
+            }
+
+            guard case .unwritable(let probedReason) = probeConfigRewritable(configFile: configFile)
+            else {
+                expect(
+                    false,
+                    "内容合法但父目录只读的 config 必须探测为 .unwritable，got"
+                        + " \(probeConfigRewritable(configFile: configFile))")
+                return
+            }
+            expect(
+                probedReason.contains(restrictedDirectory.path),
+                "原因必须点名是哪个目录不可写，got \(probedReason)")
+
+            let doctorResult = configRewritabilityResult(configFile: configFile)
+            expect(
+                doctorResult.severity == .warning,
+                "目录不可写与内容畸形一样，都不该把一台声音一切正常的机器报成硬失败，got"
+                    + " \(doctorResult.severity)")
+            expect(
+                doctorResult.message.contains("写不进去")
+                    && doctorResult.message.contains(restrictedDirectory.path),
+                "doctor 的措辞必须讲清楚是「目录写不进去」而不是「文件本身有问题」，got"
+                    + " \(doctorResult.message)")
+
+            // 探针与真实写路径必须给出同一个判断：这份文件内容没问题，但真去写确实会失败。
+            let writeResult = setEventEnabled(
+                .stop, enabled: false, configFile: configFile,
+                lockFile: root.appendingPathComponent("play.lock"))
+            guard case .failure(.configWriteFailure) = writeResult else {
+                expect(
+                    false,
+                    "父目录只读时真去写也必须失败（探针与写路径必须一致），got \(writeResult)")
+                return
+            }
+        }
+    }
 }

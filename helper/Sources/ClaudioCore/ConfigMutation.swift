@@ -84,6 +84,12 @@ public enum ConfigRewritability: Sendable, Equatable {
     /// 注意这**不影响播放**：宽松读路径（`play` / `doctor` 的 `ClaudioConfig`）照常工作——坏的只是
     /// 「写」，也就是 App 里的静音钮与切包。
     case malformed(reason: String)
+    /// 内容没问题，**但写不进去**：父目录不可写（只读卷、权限被改、目录属于别的用户……）。
+    ///
+    /// 与 ``malformed(reason:)`` 分开，是因为这两件事该讲的话完全不同：畸形是「你的文件里第 N 个键
+    /// 写错了」，不可写是「你的文件没错，是它待的那个目录不让写」。把后者报成「畸形」会让用户去改一份
+    /// 根本没毛病的文件（本轮 /ship 评审：`/codex review` [P2]）。
+    case unwritable(reason: String)
 }
 
 /// 只读探针：`configFile` 现在能不能被写路径安全重写。**一个字节都不写**，走的是 `updateConfigJSON`
@@ -91,13 +97,31 @@ public enum ConfigRewritability: Sendable, Equatable {
 /// 真去写又失败（或反过来）的可能。
 public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> ConfigRewritability {
     guard FileManager.default.fileExists(atPath: configFile.path) else { return .absent }
-    guard let data = try? Data(contentsOf: configFile) else {
-        return .malformed(reason: "无法读取 \(configFile.path)。请检查该文件的权限，\(configRebuildHint)。")
+    guard case .success(let data) = readConfigFileBounded(at: configFile) else {
+        return .malformed(reason: unreadableConfigReason(path: configFile.path))
     }
     switch parseRewritableConfig(data, path: configFile.path) {
-    case .success: return .rewritable
     case .failure(let failure): return .malformed(reason: failure.reason)
+    case .success: break
     }
+
+    // 内容过关，还差最后一问：这份文件所在的目录**让不让写**。
+    //
+    // 「能不能写」的定义只有一个（见上面的类型注释），而「解析得通过」只是它的一半。原子写（先在同一个
+    // 目录里落一个临时文件、再 rename 盖上去）要的是**父目录**可写；父目录只读时，一份完全合法的
+    // config 照样一个字节也写不进去。少了这一问，`doctor` 会对着这种局面打印「✓ config.json 可安全
+    // 重写」，而用户真去点静音钮时它一次次失败——doctor 的整个存在意义就是不让用户遇到这种事
+    // （本轮 /ship 评审：`/codex review` [P2]）。
+    //
+    // `access(2)` 语义的只读探针，一个字节都不写（`isWritableFile(atPath:)` 底下就是它）。
+    let parentDirectory = configFile.deletingLastPathComponent()
+    guard FileManager.default.isWritableFile(atPath: parentDirectory.path) else {
+        return .unwritable(
+            reason: "\(configFile.path) 的内容没问题，但它所在的目录 \(parentDirectory.path) 不可写，"
+                + "所以 App 里的静音 / 切包一定会失败。请修正该目录的权限"
+                + "（例如 chmod u+w \(parentDirectory.path)）。")
+    }
+    return .rewritable
 }
 
 /// 读 `configFile` → 校验 → 交给 `mutate` 只改它拥有的键 → 原子写回。
@@ -118,10 +142,8 @@ func updateConfigJSON(
     var json: [String: Any]
 
     if FileManager.default.fileExists(atPath: configFile.path) {
-        guard let data = try? Data(contentsOf: configFile) else {
-            return .failure(
-                .unreadable(
-                    reason: "无法读取 \(configFile.path)。请检查该文件的权限，\(configRebuildHint)。"))
+        guard case .success(let data) = readConfigFileBounded(at: configFile) else {
+            return .failure(.unreadable(reason: unreadableConfigReason(path: configFile.path)))
         }
         switch parseRewritableConfig(data, path: configFile.path) {
         case .success(let parsed): json = parsed
@@ -139,11 +161,18 @@ func updateConfigJSON(
 
     mutate(&json)
 
+    // 规范化（不写脏数字）+ 校验（绝不 abort）+ 序列化，全在 ``encodeJSONForWriting(_:path:)`` 里，
+    // 与 `gui` 的 manifest 绑定路径共用同一份实现——「哪些值写得出去」只有一个定义。
+    let data: Data
+    switch encodeJSONForWriting(json, path: configFile.path) {
+    case .success(let encoded): data = encoded
+    case .failure(let rejection):
+        return .failure(.writeFailed(reason: "\(rejection.reason)\(configRebuildHint)。"))
+    }
+
     do {
         try FileManager.default.createDirectory(
             at: configFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let data = try JSONSerialization.data(
-            withJSONObject: normalizedJSONNumbers(json), options: [.prettyPrinted, .sortedKeys])
         try data.write(to: configFile, options: .atomic)
     } catch {
         return .failure(.writeFailed(reason: error.localizedDescription))
@@ -152,61 +181,6 @@ func updateConfigJSON(
     return .success(())
 }
 
-// MARK: - 数字规范化：不让「保真读改写」把干净的数字写脏
-
-/// 把 `value` 里每一个**非整数**的 JSON 数字换成一个渲染成**最短往返形式**的 `NSDecimalNumber`，
-/// 其余（布尔、整数、字符串、null、嵌套结构）原样递归穿过。
-///
-/// ## 为什么必须有这一步（本轮评审：我们自己引入的退化）
-///
-/// `JSONSerialization` 输出 `Double` 用 `%.17g`——实测：
-/// ```
-/// 新建     : "master_volume" : 0.80000000000000004   ← 旧的 JSONEncoder 路径写的是干净的 0.8
-/// 读-改-写 : "master_volume" : 0.80000000000000004   ← 连原本干净的 0.8 也被改写
-/// 0.35     : "master_volume" : 0.34999999999999998
-/// ```
-/// 于是「未被 mutate 碰过的键逐字保留」这句话对**数字键**是假的：每点一次静音，磁盘上的
-/// `master_volume` 就脏一次；`Setup.swift` 首次装机（走 `selectPack`）当场就写出脏的 0.8，而
-/// ENGINEERING.md 里写的是 `"master_volume": 0.8`。
-///
-/// 修法（实测）：`NSDecimalNumber(string:)` 会让 `JSONSerialization` 吐出干净的最短形式——
-/// `"0.8"` → `0.8`，`"0.35"` → `0.35`，`"1.0"` → `1`，`"0.123456789"` → `0.123456789`。
-/// 喂给它的字符串是 Swift 自己的 `Double` 描述，也就是**最短往返表示**。
-///
-/// ## 三条不容含糊的边界
-///
-/// - **绝不碰布尔。** JSON 里 `true`/`false` 桥成 `__NSCFBoolean`，而 `1`/`0` 桥成 `__NSCFNumber`；
-///   把 Bool 误转成 `NSDecimalNumber` 会把 `"stop": true` 写成 `"stop": 1`——那不是修好，那是一个新的
-///   数据损坏（而且正好是 ``isJSONBoolean(_:)`` 在读侧拼命要挡的那种）。复用同一个 `CFBoolean` 判定。
-/// - **绝不碰整数。** `JSONSerialization` 本来就把整数渲染得又干净又精确（实测：`1` → `1`，
-///   `9007199254740993` → 逐字不变）。而整数一旦走 `doubleValue`，超出 Double 精度的 Int64 就会当场
-///   丢精度。既然它们从来没被弄脏过，最安全的处理就是**一个字节都不动**。
-/// - **值永不改变，只改渲染。** 只有当 `NSDecimalNumber` 转回 `Double` 与原值**逐位相等**时才替换，
-///   否则原样保留。这一条同时兜住了 `Decimal` 表示不了的极端值（`1e300`、`1e-320`——实测
-///   `NSDecimalNumber(string:)` 对它们返回 NaN，而 `NaN == x` 恒假，所以自动落回原值，行为与规范化
-///   之前逐字一致）。
-///
-/// **必须递归**：未知顶层键里可以嵌套任意深的对象 / 数组，里面照样有数字（`{"night_dim":
-/// {"level": 0.35}}`）——只规范化 `master_volume` 等于承认「未知键会被写脏」，那正是要修的 bug。
-private func normalizedJSONNumbers(_ value: Any) -> Any {
-    if let object = value as? [String: Any] { return object.mapValues(normalizedJSONNumbers) }
-    if let array = value as? [Any] { return array.map(normalizedJSONNumbers) }
-    // 布尔优先：`__NSCFBoolean` 也能 `as? NSNumber` 成功，先判它才不会把 `true` 变成 `1`。
-    guard !isJSONBoolean(value), let number = value as? NSNumber else { return value }
-    guard isFloatingPointJSONNumber(number) else { return number }  // 整数原样保留（见上）
-
-    let decimal = NSDecimalNumber(string: "\(number.doubleValue)")  // Swift = 最短往返表示
-    guard decimal.doubleValue == number.doubleValue else { return number }  // 只改渲染，绝不改值
-    return decimal
-}
-
-/// 这个 `NSNumber` 装的是不是一个**浮点**数（而不是整数）。`JSONSerialization` 把 JSON 里的整数还原成
-/// 整型 `NSNumber`（`objCType` 为 `q` 等），把带小数点/指数的还原成 `d`；Swift 侧 `mutate` 塞进来的
-/// `Double`（`ClaudioConfig.defaultMasterVolume`）也桥成 `d`。
-private func isFloatingPointJSONNumber(_ number: NSNumber) -> Bool {
-    let objCType = String(cString: number.objCType)
-    return objCType == "d" || objCType == "f"
-}
 
 /// 把 `data` 解析成一张**可以被安全重写**的顶层 JSON 表，否则 fail closed。
 ///
@@ -277,12 +251,32 @@ private func parseRewritableConfig(
         }
     }
 
+    // 最后：整棵树里不能有「读得进来、却写不出去」的值。见 ``firstUnwritableJSONValue(in:keyPath:depth:)``。
+    // 这一条必须在**读侧**：写侧那道 `isValidJSONObject` 只能防崩，防不了假绿——`probeConfigRewritable`
+    // 走的正是这个函数，它要是放行了，`doctor` 就会对着一份写下去会失败的文件打印「✓ 可安全重写」。
+    if let reason = firstUnwritableJSONValue(in: json, keyPath: "", depth: 0, path: path) {
+        // 与其余每一条 fail-closed 原因一样，必须带上**第二条**出路（见 ``configRebuildHint``）。
+        return .failure(.unreadable(reason: "\(reason)\(configRebuildHint)。"))
+    }
+
     return .success(json)
 }
 
 /// 每条 fail-closed 原因共用的收尾：**第二条**出路。手工改值是第一条；删掉文件让 claudio 重建是第二
 /// 条——括号里那句代价（自定义字段会没）必须一起说，否则这就成了一句诱导用户丢数据的建议。
 private let configRebuildHint = "或删除该文件让 claudio 重建（会丢失自定义字段）"
+
+/// 「文件在那儿，但 ``readConfigFileBounded(at:)`` 不肯把它的字节交出来」这一类的统一说法：没权限、
+/// 它其实是个目录 / FIFO、或者它大得离谱（> ``maxConfigFileBytes``）。
+///
+/// 只有一份文案，是因为只读探针（``probeConfigRewritable(configFile:)``）与真正的写路径
+/// （``updateConfigJSON(at:freshSelectedPack:mutate:)``）**必须逐字说同一句话**——那正是「不存在
+/// doctor 说能、真去写又失败」这条契约的形状，也是 `ConfigMutationSuite` 里那条「reason 与真去写时
+/// 拿到的那一句逐字相同」断言钉住的东西。
+private func unreadableConfigReason(path: String) -> String {
+    "无法读取 \(path)。请检查它确实是一个可读的普通文件（不是目录 / FIFO / 符号链接指向它们），"
+        + "且不大于 \(maxConfigFileBytes) 字节，\(configRebuildHint)。"
+}
 
 /// 把一个 JSON 值描述成用户能在自己文件里认出来的样子（「当前是数字 1」而不是「当前是 __NSCFNumber」）。
 /// 布尔必须走在数字前面——`true` 桥成 `__NSCFBoolean`，而它 `as? NSNumber` 会成功（同 ``isJSONBoolean(_:)``）。
@@ -298,14 +292,6 @@ private func describeJSONValue(_ value: Any) -> String {
     return "一个无法识别的值"
 }
 
-/// 这个值是不是一个**真正的 JSON 布尔**（`true`/`false`），而不是一个恰好能桥接成 `Bool` 的数字。
-///
-/// `JSONSerialization` 把 `true` 和 `1` 都还原成 `NSNumber`，而 `NSNumber(1) as? Bool` 会成功——
-/// 于是一个天真的 `value as? Bool` 会把 `{"stop": 1}` 悄悄读成 `true`，正是这里要杜绝的那类静默
-/// 强转。只有 `CFBoolean`（`true`/`false` 的真实还原类型）才算布尔。
-private func isJSONBoolean(_ value: Any) -> Bool {
-    CFGetTypeID(value as CFTypeRef) == CFBooleanGetTypeID()
-}
 
 /// 这个值是不是一个 JSON 数字。刻意把布尔排除在外（见 ``isJSONBoolean(_:)``）：`master_volume:
 /// true` 不是「音量 1.0」，是一份坏文件。

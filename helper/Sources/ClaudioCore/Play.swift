@@ -251,12 +251,22 @@ private func resolveAudioFile(
     return audioFile
 }
 
-/// Reads and decodes `configFile`. `nil` on any read/parse failure — `ClaudioConfig`'s own
-/// lenient decoder (see `ClaudioConfig.swift`) already recovers from a malformed
-/// `master_volume`/`events`; only a missing `selected_pack` or unreadable file lands here.
+/// Reads and decodes `configFile` via the shared ``loadClaudioConfig(from:)`` — 同一道
+/// `O_NONBLOCK` + `fstat` 正规文件闸门、同一个 64 KiB 上限，与 `doctor` 和 `gui` 面板完全同源。
+/// `nil` on any read/parse failure — `ClaudioConfig`'s own lenient decoder (see `ClaudioConfig.swift`)
+/// already recovers from a malformed `master_volume`/`events`; only a missing `selected_pack` or
+/// unreadable file lands here.
+///
+/// 这里原本是裸的 `Data(contentsOf:)`——和 ``loadPlayManifest(from:)`` 修掉的那份复制品一模一样的洞，
+/// 只是漏在了 config 上（本轮 /ship 评审：Codex 对抗 + 红队 + Claude 对抗**三路独立命中**）。真实的
+/// 危害是**读取无大小上限**：一个 500MB 形状的 `~/.claudio/config.json` 会在这条**同步 hook 路径**上被
+/// 整份读进内存，而这条路径每一次 Claude Code 事件都要跑一遍。
+///
+/// （评审同时断言「FIFO 会让 `Data(contentsOf:)` 永久阻塞、挂死 hook」——**实测不成立**，Darwin 上它
+/// 立刻抛 `EACCES`。同一个伪命题上一轮已经在 `manifest.json` 上被证伪过一次。正规文件闸门保留的理由
+/// 是契约，不是「堵住今天的挂死」——详见 `SafeFileRead.swift` 的 ``readConfigFileBounded(at:)``。）
 private func loadPlayConfig(from configFile: URL) -> ClaudioConfig? {
-    guard let data = try? Data(contentsOf: configFile) else { return nil }
-    return try? JSONDecoder().decode(ClaudioConfig.self, from: data)
+    loadClaudioConfig(from: configFile)
 }
 
 /// Reads and decodes `packDirectory`'s `manifest.json` via the shared ``loadPackManifest(in:)``
@@ -283,8 +293,12 @@ private func loadPlayManifest(from packDirectory: URL) -> PackManifest? {
 /// ``playSoundEvent(_:environment:)``): the mutual exclusion `withNonBlockingLock`
 /// guarantees is what makes this read-then-``writeLastPlayedTimestamp(_:to:)`` pair
 /// TOCTOU-safe across processes, not anything about this function itself.
+///
+/// 有界读（同 ``loadPlayConfig(from:)``）：`play.state` 也躺在 `~/.claudio` 里，也在同步 hook 路径上，
+/// 也一样不该被无上限地读。它装的是一个 epoch 秒数，几十个字节；`maxConfigFileBytes` 这道 64 KiB 上限
+/// 对它宽得离谱，正好。任何拒读一律折成 `nil` = 「还没去抖过」，与原来的语义逐字相同。
 private func readLastPlayedTimestamp(from stateFile: URL) -> Date? {
-    guard let data = try? Data(contentsOf: stateFile),
+    guard case .success(let data) = readConfigFileBounded(at: stateFile),
         let text = String(data: data, encoding: .utf8),
         let epochSeconds = TimeInterval(text.trimmingCharacters(in: .whitespacesAndNewlines))
     else { return nil }

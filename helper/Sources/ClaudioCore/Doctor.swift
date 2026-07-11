@@ -106,8 +106,13 @@ public func checkPackIntegrity(
     let fileManager = FileManager.default
 
     guard fileManager.fileExists(atPath: configFile.path) else { return .noConfig }
-    guard let configData = try? Data(contentsOf: configFile) else {
-        return .configUnreadable(reason: "config.json 无法读取：\(configFile.path)")
+    // 有界 + 正规文件闸门（``readConfigFileBounded(at:)``），不是裸的 `Data(contentsOf:)`：一个目录 /
+    // FIFO 形状的 config.json 会让后者挂住或读出垃圾，而 `doctor` 恰恰是用户拿来诊断这种局面的工具，
+    // 它自己绝不能先挂在上面。与 `play` / `gui` 面板同一道门（本轮 /ship 评审）。
+    guard case .success(let configData) = readConfigFileBounded(at: configFile) else {
+        return .configUnreadable(
+            reason: "config.json 无法读取：\(configFile.path)"
+                + "（须是不大于 \(maxConfigFileBytes) 字节的普通文件）")
     }
 
     let config: ClaudioConfig
@@ -365,6 +370,11 @@ public func configRewritabilityResult(configFile: URL) -> DoctorCheckResult {
         return DoctorCheckResult(
             name: "config", severity: .warning,
             message: "⚠ config.json 畸形：App 内的静音 / 切包会一直失败（播放不受影响）。\(reason)")
+    case .unwritable(let reason):
+        // 与 .malformed 同为 .warning、同样不影响播放，但讲的是另一件事：文件没错，是目录不让写。
+        return DoctorCheckResult(
+            name: "config", severity: .warning,
+            message: "⚠ config.json 写不进去：App 内的静音 / 切包会一直失败（播放不受影响）。\(reason)")
     }
 }
 
