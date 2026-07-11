@@ -29,6 +29,13 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case eventAction(Event)
     case dropZone
     case packCard(id: String)
+    /// 运行态面板尾部的「断开连接」（T17，**授权的设计变更**）。
+    ///
+    /// 它此前是 `OnboardingCopy(.installed).secondaryActionTitle`，而 `.installed` 状态下
+    /// `PanelView` 渲染的是 `operationalPanel`、**根本不渲染 `OnboardingView`** —— 于是这颗按钮
+    /// 在整个 shipping app 里没有一个像素，只活在 state gallery 里。而 `.notInstalled` 的正文
+    /// 白纸黑字向用户承诺「随时可以一键撤销」。T17 给了它一个真入口，那句承诺才不是谎话。
+    case disconnect
 }
 
 /// Everything ``panelFocusOrder(_:)`` needs to know about the panel's CURRENT shape —
@@ -75,6 +82,8 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         }
         order.append(.dropZone)
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
+        // 「断开连接」在面板最底部 —— 焦点序跟随视觉序（a11y-architect FIX 5）。
+        order.append(.disconnect)
         return order
     }
 }
@@ -108,15 +117,28 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 ///
 /// Returns `nil` only for a genuinely empty order (e.g. onboarding with neither CTA); an
 /// operational panel always ends in ``PanelFocusTarget/dropZone``, so it never returns `nil`.
+/// `ctaOperable` (T17) names whether the onboarding CTA controls — the two onboarding buttons and
+/// the operational panel's 断开连接 — are currently ENABLED. They are not, for the whole duration
+/// of a `.takeOver`/`.disconnect` (``OnboardingActionState/running(_:)``): the view disables them
+/// so a second click cannot race the first. Without this, the caret keeps pointing at a control
+/// that is on screen but dead, and a keyboard user who presses 空格 on 「接管」 finds the focus
+/// simply gone — the panel's whole "打开焦点落首个可操作项" contract, but broken by a transition
+/// INSIDE the panel rather than at open. 可操作 is load-bearing here for exactly the same reason it
+/// is for a muted row's disabled 试听 ▶.
 public func panelFirstFocusTarget(
     _ scope: PanelFocusScope,
-    nonOperableActionEvents: Set<Event> = []
+    nonOperableActionEvents: Set<Event> = [],
+    ctaOperable: Bool = true
 ) -> PanelFocusTarget? {
     panelFocusOrder(scope).first { target in
-        if case .eventAction(let event) = target {
+        switch target {
+        case .eventAction(let event):
             return !nonOperableActionEvents.contains(event)
+        case .onboardingPrimaryAction, .onboardingSecondaryAction, .disconnect:
+            return ctaOperable
+        case .eventMute, .dropZone, .packCard:
+            return true
         }
-        return true
     }
 }
 
@@ -139,9 +161,12 @@ public func panelFirstFocusTarget(
 ///
 /// Onboarding is deliberately out of scope: it has no rows, so it has no `.eventAction` targets
 /// to filter — ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` handles that scope directly.
-public func panelOpeningFocus(rows: [EventRow], packCardIDs: [String]) -> PanelFocusTarget? {
+public func panelOpeningFocus(
+    rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true
+) -> PanelFocusTarget? {
     let scope = PanelFocusScope.operational(
         events: rows.map(\.event), packCardIDs: packCardIDs)
     let nonOperableActionEvents = Set(rows.filter { !$0.eventActionOperable }.map(\.event))
-    return panelFirstFocusTarget(scope, nonOperableActionEvents: nonOperableActionEvents)
+    return panelFirstFocusTarget(
+        scope, nonOperableActionEvents: nonOperableActionEvents, ctaOperable: ctaOperable)
 }

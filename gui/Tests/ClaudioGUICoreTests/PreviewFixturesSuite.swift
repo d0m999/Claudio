@@ -30,12 +30,18 @@ func runPreviewFixturesSuites() {
     // the complete expected roster: a fixture array that stops covering one of its enum's cases
     // (a case whose `switch` branch exists but is never REACHED — which compiles perfectly)
     // turns this red.
-    suite("PreviewFixtures.assertExhaustive() visits every case of all four state families") {
+    suite("PreviewFixtures.assertExhaustive() visits every case of all FIVE state families") {
         let visited = PreviewFixtures.assertExhaustive()
         let expected: Set<String> = [
             "onboarding.claudeCodeNotInstalled", "onboarding.helperMissing",
             "onboarding.settingsNotWritable", "onboarding.settingsParseFailure",
             "onboarding.notInstalled", "onboarding.installed",
+            // T17 —— 第五族：CTA 动作自身的状态。少了它，「进行中的 CTA」与「失败的 CTA」这两个
+            // 新视觉态**从来不会被任何一帧渲染**，而这条断言仍然全绿（因为 onboardingStates 依然
+            // 完美覆盖它自己那六个 case）——正是 /ship 收口记录 ③ 那次翻车的形状。
+            "onboardingAction.idle",
+            "onboardingAction.running.takeOver", "onboardingAction.running.disconnect",
+            "onboardingAction.failed.withDetail", "onboardingAction.failed.noDetail",
             "dropZone.idle", "dropZone.hover", "dropZone.success",
             "dropZone.reject.oversize", "dropZone.reject.nonWhitelistFormat",
             "dropZone.reject.pathTraversal", "dropZone.reject.overDuration",
@@ -45,7 +51,7 @@ func runPreviewFixturesSuites() {
         ]
         expect(
             visited == expected,
-            "the shipped fixtures must exercise every case of all four state families;"
+            "the shipped fixtures must exercise every case of all five state families;"
                 + " missing \(expected.subtracting(visited)), unexpected \(visited.subtracting(expected))"
         )
     }

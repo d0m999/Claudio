@@ -83,24 +83,34 @@ brew install --cask claudio
 
 ---
 
-## 首次安装后（v1 当前需要一步 Terminal 命令）
+## 首次安装后（点面板里的按钮就行）
 
-> **诚实说明**：Claudio 的菜单栏面板目前还是早期骨架，"接管 Claude Code"的按钮暂时**没有接上任何真实动作**（真身面板是 ENGINEERING.md T15，尚未完工）。所以 v1 打开 app 后，还需要手动跑一条 Terminal 命令才能真正听到声音——这不是操作失误，是当前版本的真实限制，下面这步就是修复它。
+1. **打开 Claudio**（菜单栏会出现一个波形图标），点它 → 面板打开。
+2. **点「接管 Claude Code」**（如果小助手还没装上，这颗按钮会显示为「修复」）。
 
-1. **打开 Terminal，跑一次自举命令**（只需跑一次）：
-   ```bash
-   /Applications/Claudio.app/Contents/Resources/bin/claudio setup
-   ```
-   这会一次性完成：把 helper 复制到 `~/.claudio/bin/claudio`、把内置声音包"极简铃音"复制到 `~/.claudio/packs/`、首次默认选中它、并把 hook 写进 `~/.claude/settings.json`
-   - 不会覆盖你的其他 hook
-   - 后续可随时卸载（`claudio uninstall`）
+   一次点击会完成全部四件事：把 helper 复制到 `~/.claudio/bin/claudio`、把内置声音包"极简铃音"复制到 `~/.claudio/packs/`、首次默认选中它、并把 hook 追加进 `~/.claude/settings.json`。
+   - **追加，不覆盖**你的其他 hook
    - 自动备份原 settings.json 到 `settings.json.claudio.bak`
-   - 命令是幂等的，重复运行不会重复安装或出错
+   - 幂等：重复点不会重复安装、也不会响两声
+   - 失败会**当场说出来**（面板上一句人话 + 可展开的原因），绝不会假装成功
+   - 面板底部的「断开连接」随时可以一键撤销
 
-2. **完成**  
-   下次 Claude Code 的任务完成、中断或需要确认时，就会自动播放相应的声音了。以后想换别的内置包，用 `~/.claudio/bin/claudio use <pack-id>` 切换。
+3. **完成**  
+   下次 Claude Code 的任务完成、中断或需要确认时，就会自动播放相应的声音了。换包直接点面板里的切包画廊。
 
-3. **T15 之后**：真身菜单栏面板落地后，"接管 Claude Code"按钮会直接触发这一整套逻辑，不再需要碰 Terminal——这份指引届时会更新。
+### 也可以走 Terminal（与上面完全等价）
+
+```bash
+/Applications/Claudio.app/Contents/Resources/bin/claudio setup
+```
+
+面板上那颗按钮调用的就是这条命令背后的同一个函数（`performFirstRunSetup`），两条路径没有任何行为差异。
+
+> **关于 Gatekeeper 隔离（macOS 会给下载来的文件盖一个 `com.apple.quarantine` 章）**：
+> 这个章如果留在 `~/.claudio/bin/claudio` 上，Claude Code 每次执行 hook 时都会被系统**直接杀掉**——
+> 没有任何报错，你只会觉得"装好了但就是不响"。所以 `setup`（以及面板上那颗按钮）在复制完成后会
+> **自动解除隔离并回头验证一次**；万一没解掉，它会**报错并且不写任何 hook**，而不是留给你一个
+> 看起来装好了、实际永远静音的安装。`claudio doctor` 也会把"被隔离的二进制"报成硬失败。
 
 ---
 
@@ -141,7 +151,7 @@ brew uninstall --cask claudio
 
 ### Claudio 打开了但没发声
 
-1. 确认你已经跑过[「首次安装后」](#首次安装后v1-当前需要一步-terminal-命令)那条 `claudio setup` 命令——v1 光打开 app 本身不会自动接管，这是目前最常见的原因
+1. 确认你已经点过面板里的「接管 Claude Code」（或跑过 `claudio setup`）——见[「首次安装后」](#首次安装后点面板里的按钮就行)
 2. 确认系统音量没有静音
 3. 在 Claudio 面板里找到你选的声音包，点旁边的试听按钮 ▶ 测试一下
 

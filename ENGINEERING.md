@@ -658,7 +658,46 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - Surfaced by: `/codex review 10f00cf+f31987b`（T11 CC0 台账 + T12 CI/分发骨架）—— 两处 [P1]：release.yml 把二进制 + 内置包塞进 app bundle，但 (a) onboarding CTA 故意未接线（T8/T15 留白）、(b) `claudio use` 其实是 `NotYetImplemented` 占位符（正文「工程落地细节 ⑥」曾误标"已实现"）、(c) 没有任何代码把 bundle 内容复制到 `~/.claudio/`——"app 安装"这一步压根不存在。三者叠加 = 首个 DMG 装完后是哑的，装了但听不到声音。
   - Files: `helper/Sources/ClaudioCore/{Use,Setup}.swift`、`helper/Sources/claudio/{Subcommands,Claudio}.swift`、`helper/Tests/ClaudioCoreTests/{UseSuite,SetupSuite}.swift`、`docs/distribution.md`、`.github/workflows/release.yml`
   - 决议：T15 真身菜单栏面板落地前，v1 走 **Terminal 手动自举**过渡方案——不在占位 `ClaudioGUIApp.swift`（其文档注释明确"不是真正的 menu bar app"）里硬接 CTA，那会绑定一个将被 T15 替换的临时外壳。`claudio use <pack-id>` 补齐真实现（复用 `resolvePackDirectory` 校验 + 原子写 config.json；未选过包的 config 缺省新建，已选过的只更新 `selected_pack`，`master_volume`/`events` 不动）。新增 `claudio setup`：从当前运行二进制所在目录探测同级 `../packs`（判定"是否运行自 app bundle 内"的依据），复制自身到 `~/.claudio/bin/claudio`、把内置包逐个复制进 `~/.claudio/packs/<id>/`（已存在同名用户包则跳过，不覆盖）、若 config 尚不存在则用首个复制到的包调 `claudio use` 建立默认选择、最后调 `installClaudioHooks` 写 hooks——全程幂等（已在 `~/.claudio/bin/` 下运行时跳过复制步骤，只补 hooks）。`docs/distribution.md`「首次安装后」章节 + `release.yml` 的 Release notes 补一句 Terminal 命令，不再暗示"开 app 就活"。
-  - 非阻断遗留：① `PlayEnvironment.bundledPacksDirectory` 仍保持 `nil` 默认，不做"从 bundle 直接播放"的旁路——v1 只走"复制进用户包"这一条路径，两套路径并存会制造第二个查找顺序，故意不做；② `claudio setup` 只识别单层 `packs/<id>/` 铺开，多包同时内置时的确定性选择顺序（当前 = 目录名字典序取第一个）留作 T15 真身实现选包 UI 时的天然替代；③ T15 落地后 `claudio setup` 的逻辑函数 `performFirstRunSetup` 应被 onboarding CTA 直接调用而非继续要求用户开 Terminal——这条决议已写进 Distribution Plan，留 T15 收口。
+  - 非阻断遗留：① `PlayEnvironment.bundledPacksDirectory` 仍保持 `nil` 默认，不做"从 bundle 直接播放"的旁路——v1 只走"复制进用户包"这一条路径，两套路径并存会制造第二个查找顺序，故意不做；② `claudio setup` 只识别单层 `packs/<id>/` 铺开，多包同时内置时的确定性选择顺序（当前 = 目录名字典序取第一个）留作 T15 真身实现选包 UI 时的天然替代；③ ~~T15 落地后 `performFirstRunSetup` 应被 onboarding CTA 直接调用~~ → **已于 2026-07-12 完成，见下方 T17b。**
+
+  ---
+
+  ### T17b — onboarding CTA 端到端接线（2026-07-12）
+
+  **卡点从来不是"接上就行"。** `OnboardingViewModel` 早就留好了 `onPrimaryAction` / `onSecondaryAction` 两个 `(@MainActor () -> Void)?` 挂钩点，默认 `nil` = no-op —— 而**生产代码里从来没有人给它们赋过值**（三路 grep 各自确认，赋值点只出现在测试里）。2026-07-11 真机实测坐实：点完「修复」后 `shasum ~/.claude/settings.json` 不变、`~/.claudio/bin` 仍不存在。而 PR #5 的 a11y 修复让这颗按钮拿到 key window 后变成**黏土色实心**——它看起来比以前**更像能用**了。一个 no-op。
+
+  它还卡着别的一切：state 进不了 `.installed`，运行态面板（事件行 / 切包画廊 / 静音 / 试听 / VoiceOver）在真机上**一条都验不了**。
+
+  **真正的技术卡点（TODOS 原话「需先解决 GUI-bundled `claudio` 的 `executablePath` 语义」）**：`SetupEnvironment.executablePath` 的语义是「正在执行 setup 的那个二进制**自己**」，而 `performFirstRunSetup` **靠这条路径反推内置包目录**（去掉两级 → `Contents/Resources` → 拼 `packs`）。GUI 进程的 `CommandLine.arguments[0]` 是 `Claudio.app/Contents/MacOS/Claudio`（**SwiftUI app 自己，不是 helper**）。直接塞进去会：① 把 GUI 复制成 `~/.claudio/bin/claudio` → 此后每个事件都去 exec 一个 SwiftUI app；② 包目录反推成 `Contents/packs`（不存在）→ 一个包都复制不出来，且**不报错**。
+
+  **落地（新增 `gui/Sources/ClaudioGUICore/OnboardingActions.swift`）**：
+
+  - **`bundledHelperBinary(in: Bundle)` 下沉进 `ClaudioGUICore`**，`MenuBarController` 只剩 `bundledHelperBinary(in: .main)` —— 一次无分支调用，AppKit 里不再有任何决定。**这一条是本任务最重要的结构决定**：把那次查找留在 AppKit 层，就等于把 T17 的**整个 bug** 留在 harness 够不到的地方 —— 把它改成 `Bundle.main.executableURL`（字面意义上的本 bug），整套测试会**照样全绿**。
+  - **`takeOverHelperSource(environment:)`**（纯函数）决定「哪个二进制会被复制」：bundle 里那份必须**叫 `claudio`**（GUI 自己叫 `Claudio`，大写 C —— 这是一条结构性绊线，**不满足就大声报错，绝不悄悄回落**）且是可执行正规文件；没有 bundle（`swift run ClaudioGUI` 开发构建）但 `~/.claudio/bin/claudio` 已在位 → 用它自己（`alreadyInstalled` 分支，零复制）；两条都不成立 → `.helperUnavailable` **一个真错误**，不是静默 no-op。
+  - **`actionRunner` 是构造注入的非可选值**。做成 `var runner: Runner?` 只是把同一个洞挪高一层：nil 时那句 `guard let runner else { refresh(); return }` 与今天的 no-op 一字不差。**忘了接线现在是编译错误。** 另：**绝不能在 `PanelView.init` 体里给 `@StateObject` 赋值** —— SwiftUI 未安装前读 `wrappedValue` 会**每次返回一个新实例**，runner 会落在一个 `body` 永远看不见的幽灵 view-model 上，而真身的 runner 仍是 nil ——「T17 的修复复刻 T17 的 bug」。正确解是把 runner 建在 `StateObject(wrappedValue:)` 的 autoclosure 里，与它所属的 view-model 同生。
+  - **动作态是枚举**（`OnboardingActionState { idle / running(action) / failed(message:detail:) }`），不是 `isPerforming: Bool` + `error: String?` 两个正交标量 —— 后者结构上进不了 `PreviewFixtures`，于是 in-flight 与 failed 这两个新视觉态会**从来没有任何一帧渲染过**而 `assertExhaustive()` 仍然全绿（与收口记录 ③ 是同一类错）。现在它是**第五族状态**，进画廊、进穷尽断言。
+  - **动作方法是 `async` 的**：harness 得能 `await` 到它真的跑完，否则「失败真的上报了吗 / `refresh()` 真的跑了吗」只是靠一个瞬时 fake 恰好在一个调度回合内跑完而侥幸全绿。
+  - **CTA 落地后必须重跑 `PanelView.refresh()`**（`.onChange(of: onboardingViewModel.state)`）。否则接管成功的那一秒，`operationalPanel` 渲染的是 `PanelView.init` 在 **app 启动时**读到的磁盘 —— 也就是 setup **之前**：四行「未配置 / 文件丢失」、试听全禁用、一个**空的**切包画廊。产品在它唯一一次庆祝时刻上撒谎。
+  - **焦点与 VoiceOver**：in-flight 期间 CTA 被禁用，`panelFirstFocusTarget(_:ctaOperable:)` 因此不能把首焦点交给它（否则键盘用户按完空格 caret 就搁浅了）；CTA 的开始 / 失败 / 成功三个时刻各自主动 `NSAccessibility.post(.announcementRequested)` —— 「光有 label 不会被播报」这条推理本仓库已经为「面板打开」付过一次账，T17 新增了三个同类时刻。
+  - **错误文案两个字段**：`message`（安心叙事，过 T7 禁词表）+ `technicalDetail`（`SetupError` / `SettingsUpdateError` 原话，只在「查看原因」披露之后）。直接渲染 `SetupError.description` 会一句话踩中禁词表两个词（「settings.json」「hook」）。
+
+  **【授权的设计变更】「断开连接」拿到一个真入口。** 它此前**在整个 shipping app 里没有一个像素**：`OnboardingCopy(.installed).secondaryActionTitle` 写着「断开连接」，但 `.installed` 时 `PanelView` 渲染的是 `operationalPanel`、**根本不渲染 `OnboardingView`** —— 那颗按钮只活在 state gallery 里。而 `.notInstalled` 的正文白纸黑字向用户承诺「随时可以**一键撤销**」。现在运行态面板底部有一行 ghost「断开连接」，进 `PanelFocusTarget` / `panelFocusOrder` 尾部 / 画廊。用户拍板通过。
+
+  **【P0，实测，非推理】`com.apple.quarantine` 会让每一个 hook 被 Gatekeeper SIGKILL —— 而面板报「已经接好了」。**（新增 `helper/Sources/ClaudioCore/Quarantine.swift`）
+
+  三段都是本机实测（Darwin 25.5），不是推断：
+
+  1. `FileManager.copyItem` **把 `com.apple.quarantine` 一起复制过去**（`copySelfToFixedLocation` 用的正是它）：`source ["com.apple.provenance","com.apple.quarantine"] → destination ["com.apple.provenance","com.apple.quarantine"]`。
+  2. 带这个章的二进制，经 hook 的真实执行路径 `/bin/sh -c '<abs>/claudio play stop'` → **`exit=137`（SIGKILL），零输出、零 stderr**。剥掉之后，同一个二进制、同一条命令 → 正常运行，`exit=0`。
+  3. v1 分发的是**未签名未公证** DMG（Outside Voice T3），所以下载来的 `Claudio.app` 全身带章；Homebrew cask 的 postflight 是 `xattr -d`（**非递归**，剥不到嵌套的 helper），DMG 拖拽路径**根本没有 postflight**。
+
+  合起来：CTA 报成功 → 面板亮绿点 → `doctor` 说「✓ 二进制在位」→ **用户永远听不到一声响**。`play` 是 fire-and-forget，这条失败链**一行 `claudio.log` 都不会留下**。它同时也是一条**今天就存在**的 bug（`docs/distribution.md` 教的 Terminal `claudio setup` 走同一个 `copyItem`），只是 T17 把它变成了主路径、并拿掉了用户唯一的信号（Terminal 里那次 Gatekeeper 拦截至少看得见）。
+
+  修法：`stripQuarantineAttribute` + **剥完回头验一次**（「剥了」和「剥干净了」是两回事 —— 本仓库已经为「断言断错了对象」交过一次学费）。验证失败 → 新增 `SetupError.binaryQuarantined`，**一条 hook 都不写**。剥离刻意放在 `if !alreadyInstalled` **之外**：重跑路径会跳过整个复制步骤，而「重跑 `claudio setup` 就能自愈」是 `docs/distribution.md` 对用户的承诺，对这条失败也得成立。`doctor` 把被隔离的二进制报成**硬失败**（与「二进制不在」同级 —— 对用户而言后果一字不差）。cask 的 postflight 同批改 `-dr`。
+
+  **`ReleaseLayoutSuite`（新）**：harness 真的去读 `.github/workflows/release.yml`，断言它把 helper 放在 `Contents/Resources/bin/claudio`、包放在 `Contents/Resources/packs`。这条生产者/消费者契约横跨一个 yml 和一个二进制，中间**没有任何编译期联系** —— 把 release.yml 的目标目录改个名，所有测试绿、CI 绿、DMG 照常签发，然后 CTA 在**每一台用户机器上**报「找不到小助手」。
+
+  **评审**：动手前先跑了一轮 5 棱镜 × 对抗验证的设计评审（40 个 agent，35 条发现，28 条经对抗验证确认，其中 11 条 blocker）。**我的原设计有四处会原样复刻 T17 要修的那个 bug**（可选 runner / `init` 里给 `@StateObject` 赋值 / CTA 落地后不重读磁盘 / Bundle 查找留在 AppKit 层导致 e2e 测试抓不到真 bug）。quarantine 那条由 red-team 与我各自独立实测命中。
 
 ## Approved Mockups（视觉参照）
 

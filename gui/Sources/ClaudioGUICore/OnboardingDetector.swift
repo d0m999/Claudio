@@ -38,17 +38,11 @@ public func detectOnboardingState(
 
     // A bare `fileExists` here would green-light a directory, an empty 0-byte placeholder,
     // or a non-executable file at the binary's path — all of which Claude Code would fail
-    // to actually run. Require a *runnable* binary: a regular file (so not a directory, and
-    // not some other special file), non-empty, and executable by us. `isRegularFile`
-    // subsumes the not-a-directory check (`isExecutableFile` alone returns true for a
-    // searchable directory), and the non-zero size rejects the 0-byte stub a truncated /
-    // half-finished install can leave behind with its execute bit already set.
-    let binaryResourceValues = try? environment.claudioBinaryPath.resourceValues(
-        forKeys: [.isRegularFileKey, .fileSizeKey])
-    guard binaryResourceValues?.isRegularFile == true,
-        (binaryResourceValues?.fileSize ?? 0) > 0,
-        fileManager.isExecutableFile(atPath: environment.claudioBinaryPath.path)
-    else {
+    // to actually run. The three-part predicate that decides "runnable" now lives in
+    // ``isRunnableHelperBinary(at:)`` (T17): DETECTION and INSTALLATION must agree on what a
+    // usable helper is, and two inlined copies of the same three checks are two things that
+    // can drift.
+    guard isRunnableHelperBinary(at: environment.claudioBinaryPath) else {
         return .helperMissing
     }
 

@@ -25,8 +25,16 @@ cask "claudio" do
   app "Claudio.app"
 
   postflight do
+    # `-dr`，不是 `-d`（T17）：非递归的 `-d` 只剥 .app 目录**自己**那一层，
+    # `Contents/Resources/bin/claudio` 上的 com.apple.quarantine 原样留着。而那个 helper 会被
+    # 复制成 ~/.claudio/bin/claudio，然后由 Claude Code 的 hook 经 /bin/sh -c 执行 —— 带着章的话
+    # Gatekeeper 会直接 SIGKILL 它（实测 exit=137，零 stderr，`play` 又是 fire-and-forget，
+    # 于是整条失败链一行日志都不留）。
+    #
+    # 真正 load-bearing 的那道闸在 `Setup.swift`（复制完自己剥、剥完回头验），因为 DMG 拖拽路径
+    # 根本没有 postflight。这一行是第二道：让 bundle 从一开始就是干净的。
     system_command "/usr/bin/xattr",
-                   args: ["-d", "com.apple.quarantine", "#{appdir}/Claudio.app"],
+                   args: ["-dr", "com.apple.quarantine", "#{appdir}/Claudio.app"],
                    must_succeed: false
   end
 
@@ -35,9 +43,10 @@ cask "claudio" do
       未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：
       系统设置 > 隐私与安全性 > 下滑找到被拦的 Claudio > 点"仍要打开"。
 
-      首次安装后菜单栏面板暂不会自动接管 Claude Code 的 settings.json，
-      需在 Terminal 跑一次 #{appdir}/Claudio.app/Contents/Resources/bin/claudio setup
-      （追加、不覆盖、自动备份；详见 docs/distribution.md）才能真正听到声音。
+      打开 Claudio，点菜单栏面板里的「接管 Claude Code」即可 —— 它会装好放声音的小助手、
+      复制内置声音包、并追加（不覆盖、自动备份）Claude Code 的 hook 配置。
+      也可以在 Terminal 里跑 #{appdir}/Claudio.app/Contents/Resources/bin/claudio setup，
+      两者做的是同一件事（详见 docs/distribution.md）。
     EOS
   end
 end

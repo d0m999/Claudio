@@ -298,19 +298,37 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
     // (e) claudio 固定路径二进制在位 — hard failure if missing, same severity as (c) afplay:
     // settings.json's hooks always invoke this exact path (T17), so nothing existing there
     // means every future Claude Code event silently fails to play.
-    if FileManager.default.isExecutableFile(atPath: environment.claudioBinaryPath) {
-        results.append(
-            DoctorCheckResult(
-                name: "claudio-binary", severity: .ok,
-                message: "✓ claudio 二进制在位：\(environment.claudioBinaryPath)")
-        )
-    } else {
+    if !FileManager.default.isExecutableFile(atPath: environment.claudioBinaryPath) {
         results.append(
             DoctorCheckResult(
                 name: "claudio-binary", severity: .failure,
                 message:
                     "✗ 未找到 claudio 二进制（\(environment.claudioBinaryPath)），hooks 会静默失效——重跑一次 claudio setup"
             )
+        )
+    } else if hasQuarantineAttribute(at: URL(fileURLWithPath: environment.claudioBinaryPath)) {
+        // 「在位」不等于「跑得起来」（T17，2026-07-12 实测）。一个带 `com.apple.quarantine` 的
+        // 二进制对上面那句 `isExecutableFile` 是完全合格的——正规文件、执行位也在——但 Claude Code
+        // 的 hook 用 `/bin/sh -c` 执行它时，Gatekeeper 会直接 SIGKILL（实测 exit=137，零 stderr）。
+        // 而 `play` 是 fire-and-forget，这条失败连一行 `claudio.log` 都不会留下。
+        //
+        // 所以它属于 doctor 的**硬失败**，与「二进制不在」同级：对用户而言两者的后果一字不差——
+        // 每一个事件都静默失声。doctor 存在的意义就是「静默失败必须有诊断轨迹」（决议 6），
+        // 而这正是本仓库能造出的最静默的一种失败。
+        results.append(
+            DoctorCheckResult(
+                name: "claudio-binary", severity: .failure,
+                message:
+                    "✗ claudio 二进制在位但被 macOS 隔离（\(environment.claudioBinaryPath)），"
+                    + "一执行就会被系统杀掉、每个事件都会静默失声——重跑一次 claudio setup（它会自动解除隔离），"
+                    + "或手动跑：xattr -dr com.apple.quarantine \(environment.claudioBinaryPath)"
+            )
+        )
+    } else {
+        results.append(
+            DoctorCheckResult(
+                name: "claudio-binary", severity: .ok,
+                message: "✓ claudio 二进制在位：\(environment.claudioBinaryPath)")
         )
     }
 

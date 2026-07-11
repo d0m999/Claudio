@@ -2,18 +2,24 @@ import Combine
 import Foundation
 
 /// Drives the onboarding panel: holds the current ``OnboardingState`` (detected from
-/// ``environment``), exposes its ``OnboardingCopy``, and re-detects on demand via
-/// ``refresh()`` — the state machine's one and only transition rule (see
-/// ``detectOnboardingState(environment:)``'s doc comment).
+/// ``environment``), exposes its ``OnboardingCopy``, re-detects on demand via ``refresh()``,
+/// and — since T17 — actually RUNS the state's call-to-action.
 ///
-/// Deliberately **does not** call `installClaudioHooks`/`uninstallClaudioHooks` (or spawn
-/// the `claudio` binary) itself. Wiring a CTA tap to an actual side-effecting action is
-/// the menu bar shell's job (ENGINEERING.md T8/T15) — this view-model exposes
-/// ``performPrimaryAction()``/``performSecondaryAction()`` as the seam that future work
-/// hooks into via ``onPrimaryAction``/``onSecondaryAction``, defaulting to a no-op so T7
-/// can ship the state machine + copy without prematurely committing to how that wiring
-/// happens. Every test in this module exercises transitions directly through
-/// ``refresh()`` against a fixture ``OnboardingEnvironment`` instead.
+/// ## T17：CTA 从「一个可选闭包」变成「一个构造注入的执行器」
+///
+/// T7 留下的接线口是两个 `(@MainActor () -> Void)?`，默认 `nil` = no-op。生产代码里**从来
+/// 没有人给它们赋过值**，所以「修复」按钮点下去磁盘一个字节都不变 —— 2026-07-11 真机实测确认
+/// （`shasum ~/.claude/settings.json` 不变、`~/.claudio/bin` 仍不存在）。这个类型现在从结构上
+/// 让那件事不可能再发生：
+///
+/// - ``actionRunner`` 是**非可选的、构造时必须给**。忘了接线 = **编译错误**，不是一次全绿的测试。
+///   （做成 `var runner: (any OnboardingActionRunning)?` 只是把同一个洞挪高一层：nil 时那句
+///   `guard let runner else { refresh(); return }` 与今天的 no-op 一字不差。）
+/// - 失败**必须说出来**：``actionState`` 变成 `.failed`，视图渲染它。这个 codebase 已经被
+///   「静默失败」咬过三次（`bindResult` / `EventMuteController.lastError` / `switchPack` 的
+///   `UseError` 全都写了但没有任何视图读），不能有第四次。
+/// - 动作方法是 `async` 的：harness 得能 `await` 到它真的跑完，否则那些「失败真的上报了吗 /
+///   `refresh()` 真的跑了吗」的测试只是靠一个瞬时 fake 恰好在一个调度回合内跑完而侥幸全绿。
 @MainActor
 public final class OnboardingViewModel: ObservableObject {
     /// Where on disk this view-model looks — injectable so previews/tests never touch
@@ -23,37 +29,53 @@ public final class OnboardingViewModel: ObservableObject {
 
     @Published public private(set) var state: OnboardingState
 
-    /// Invoked by ``performPrimaryAction()``, before ``refresh()`` re-detects state.
-    /// `nil` (no-op) by default.
-    public var onPrimaryAction: (@MainActor () -> Void)?
+    /// CTA 动作本身的状态 —— 与 ``state`` 正交的第五族状态（进 `PreviewFixtures` / state gallery）。
+    @Published public private(set) var actionState: OnboardingActionState = .idle
 
-    /// Invoked by ``performSecondaryAction()``, before ``refresh()`` re-detects state.
-    /// `nil` (no-op) by default.
-    public var onSecondaryAction: (@MainActor () -> Void)?
+    /// 「查看原因」是否展开。**在 view-model 里，不在视图里**：它此前是 `OnboardingView` 的一个
+    /// `@State private var isShowingDetail`，连带那句 `if copy.detail != nil { toggle() } else
+    /// { performSecondaryAction() }` 的分派 —— 两者都是 SwiftUI 里的判定逻辑，harness 够不到。
+    /// 这正是本仓库已经下沉过一次的形状（T16 修复⑥ 的 `previewClaimsActionFocus` /
+    /// `panelOpeningFocus`：测试证明函数算得对，却没人盯住视图是否调用它）。
+    @Published public private(set) var isShowingDetail: Bool = false
 
-    public init(environment: OnboardingEnvironment = OnboardingEnvironment()) {
+    /// 真实副作用的执行者。**非可选**（见类型文档）。
+    private let actionRunner: any OnboardingActionRunning
+
+    /// 这个实例是不是被 pin 死状态的预览实例。`true` 时 ``perform(_:)`` 完全不动作 —— 画廊里点一下
+    /// 按钮不该把 pin 住的状态重新探测掉。（`init(previewState:)` 的 doc comment 一直这么承诺，
+    /// 但此前并不成立：`performPrimaryAction()` 会走到 `refresh()`，对着 `/dev/null` 占位环境重新
+    /// 探测，把 pin 的状态静默改写成 `.claudeCodeNotInstalled`。）
+    private let isPreviewPinned: Bool
+
+    public init(
+        environment: OnboardingEnvironment = OnboardingEnvironment(),
+        actionRunner: any OnboardingActionRunning
+    ) {
         self.environment = environment
+        self.actionRunner = actionRunner
+        self.isPreviewPinned = false
         self.state = detectOnboardingState(environment: environment)
     }
 
     #if DEBUG
-        /// Preview-only initializer (ENGINEERING.md T14 D2): pins ``state`` directly to
-        /// `previewState`, without running ``detectOnboardingState(environment:)`` or
-        /// touching disk at all — the state gallery's only way to render a SPECIFIC
-        /// ``OnboardingState`` deterministically (a real `refresh()` would re-detect from
-        /// `environment` and overwrite whatever this pinned). `environment` is still set to
-        /// a harmless, never-resolved placeholder (not the real `~/.claude`/`~/.claudio`
-        /// paths — see ``OnboardingEnvironment``'s own warning about `$HOME`), purely so the
-        /// stored property has a value; nothing in the gallery ever calls ``refresh()`` on a
-        /// preview-pinned instance. `#if DEBUG`-gated so this never ships in release and
-        /// can't be misused in production; must live in THIS file (not a separate
-        /// extension) since ``state``'s setter is `private`, and Swift's `private` is
-        /// file-scoped, not module-scoped.
-        public init(previewState: OnboardingState) {
+        /// Preview-only initializer (ENGINEERING.md T14 D2): pins ``state`` — and, since T17,
+        /// ``actionState`` — directly, without running ``detectOnboardingState(environment:)`` or
+        /// touching disk at all: the state gallery's only way to render a SPECIFIC state
+        /// deterministically. `environment` is a harmless, never-resolved placeholder; the runner
+        /// is a ``NoopOnboardingActionRunner`` that DECLARES the gallery does not run real actions
+        /// (rather than accidentally not running them); and ``perform(_:)`` is a total no-op on a
+        /// pinned instance, so a live-Canvas tap can no longer rewrite the pin out from under the
+        /// frame. `#if DEBUG`-gated so this never ships in release, and it must live in THIS file
+        /// since ``state``'s setter is `private` and Swift's `private` is file-scoped.
+        public init(previewState: OnboardingState, actionState: OnboardingActionState = .idle) {
             self.environment = OnboardingEnvironment(
                 settingsFile: URL(fileURLWithPath: "/dev/null/claudio-preview-settings.json"),
                 claudioBinaryPath: URL(fileURLWithPath: "/dev/null/claudio-preview-binary"))
+            self.actionRunner = NoopOnboardingActionRunner()
+            self.isPreviewPinned = true
             self.state = previewState
+            self.actionState = actionState
         }
     #endif
 
@@ -63,23 +85,90 @@ public final class OnboardingViewModel: ObservableObject {
         onboardingCopy(for: state)
     }
 
+    /// 有没有一个写盘动作正在跑（视图据此禁用按钮 + 显示 spinner）。
+    public var isPerformingAction: Bool {
+        if case .running = actionState { return true }
+        return false
+    }
+
+    /// `intent` 这颗按钮此刻是不是正在跑 —— 视图用它决定把 spinner 画在哪一颗上。
+    public func isRunning(_ intent: OnboardingActionIntent?) -> Bool {
+        guard let action = intent?.diskAction, case .running(let running) = actionState else {
+            return false
+        }
+        return running == action
+    }
+
     /// Re-runs detection against the current ``environment`` and updates ``state``. The
-    /// state machine's entire transition rule: call this after anything that might have
-    /// changed the on-disk facts (a fix applied outside the app, the panel regaining
-    /// focus, an action completing).
+    /// state machine's entire transition rule: call this after anything that might have changed
+    /// the on-disk facts (a fix applied outside the app, the panel regaining focus, an action
+    /// completing).
+    ///
+    /// 刻意**不清** ``actionState``：`refresh()` 在一次失败的动作之后也会被调用（`runDiskAction`
+    /// 的最后一行），无条件清空会把用户刚触发的那条失败原因在他看见之前抹掉 —— 那等于把刚修好的
+    /// 「绝不静默吞错」又变回静默（`/ship` 收口记录 ⑬① 的 `retarget(to:)` 为一模一样的取舍交过学费）。
+    /// 清空只发生在**下一次动作真正开始时**（``runDiskAction(_:)`` / `.reDetect`）。
     public func refresh() {
         state = detectOnboardingState(environment: environment)
     }
 
-    /// Runs the state's primary CTA action (if any is wired), then refreshes.
-    public func performPrimaryAction() {
-        onPrimaryAction?()
-        refresh()
+    /// 跑当前状态的主 CTA。`async`：调用方（视图 / harness）能 await 到它真的跑完。
+    public func performPrimaryAction() async {
+        await perform(onboardingPrimaryIntent(for: state))
     }
 
-    /// Runs the state's secondary CTA action (if any is wired), then refreshes.
-    public func performSecondaryAction() {
-        onSecondaryAction?()
+    /// 跑当前状态的次 CTA。
+    public func performSecondaryAction() async {
+        await perform(onboardingSecondaryIntent(for: state))
+    }
+
+    /// 每一颗 CTA 最终都走这里。`switch` 穷尽、无 `default:` —— 加一个 intent 会编译红。
+    private func perform(_ intent: OnboardingActionIntent?) async {
+        // 画廊里 pin 死的实例：点一下什么都不该发生。
+        guard !isPreviewPinned else { return }
+        // 重入守卫：双击「接管」会让两个 `performFirstRunSetup` 抢同一把 `play.lock`，其中一个
+        // 必然拿到 `.lockBusy` —— 用户会看到一条**他自己制造出来的**假失败。视图侧的
+        // `.disabled(isPerformingAction)` 挡不住它：`@Published` 到按钮的传播不是同步的，
+        // 第二次点击可能已经在队列里了。
+        guard !isPerformingAction else { return }
+        guard let intent else {
+            // 这个状态没有这颗 CTA（视图本来也不会渲染它）。仍然重新探测一次，绝不崩。
+            refresh()
+            return
+        }
+
+        switch intent {
+        case .revealDetail:
+            isShowingDetail.toggle()
+
+        case .reDetect:
+            // 一个字节都不写：用户的 Claude Code 没装 / 配置文件没权限 / 格式坏了 —— 都不是
+            // Claudio 该替他动手的东西。只重新看一眼磁盘。
+            actionState = .idle
+            refresh()
+
+        case .takeOver:
+            await runDiskAction(.takeOver)
+
+        case .disconnect:
+            await runDiskAction(.disconnect)
+        }
+    }
+
+    private func runDiskAction(_ action: OnboardingDiskAction) async {
+        actionState = .running(action)
+        isShowingDetail = false
+
+        let result = await actionRunner.run(action)
+
+        switch result {
+        case .success:
+            actionState = .idle
+        case .failure(let error):
+            actionState = .failed(message: error.message, detail: error.technicalDetail)
+        }
+        // 无论成败都重新探测：成功 → `.installed`；失败 → 可能变成 `.settingsNotWritable`，也可能
+        // 原地不动。面板必须反映磁盘**此刻**的真相，而不是我们以为自己写成功了什么。
         refresh()
     }
 }

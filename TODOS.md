@@ -2,6 +2,18 @@
 
 ## Ship / CI
 
+### 「仍要打开」之后，bundle 里的嵌套 helper 还带不带 quarantine —— 未在真实下载路径上验证
+
+**What:** T17 实测确认了三件事：`FileManager.copyItem` 会传播 `com.apple.quarantine`；一个带章的二进制经 `/bin/sh -c` 执行会被 Gatekeeper SIGKILL（`exit=137`，零 stderr）；`setup` 现在会剥离 + 回头验证。**没验的是**：用户在「系统设置 > 隐私与安全性 > 仍要打开」里批准这个 app 之后，`Contents/Resources/bin/claudio` 上的章**是不是也跟着被清掉了**。
+
+**Why:** 如果是，那么 `setup` 的剥离在真实下载路径上是一次 no-op（无害）；如果不是，它就是唯一挡在「装完永远静音」前面的东西。**两种情况下修法都不变**（剥 + 验），所以这不阻断发布 —— 但它决定了这道闸门到底是保险丝还是主保险。真机复现需要一次真实的未签名 DMG 下载 + Gatekeeper 批准流程，本地 ad-hoc `.app` 造不出来（本地编译的二进制根本不带章）。
+
+**Context:** 2026-07-12 T17b。验法：打一个真 tag → 从 GitHub Releases 下载 DMG → 拖进 /Applications → 走「仍要打开」→ `xattr -lr /Applications/Claudio.app | grep quarantine`。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** 首个真实 tag release
+
 ### Setup.swift 的包复制不是原子的，中断后无法自愈
 
 **What:** `performFirstRunSetup` 的 dedupe guard（`guard !FileManager.default.fileExists(atPath: destination.path) else { continue }`）只看目标目录是否存在，不看它是否复制完整。`copyItem` 本身不是原子操作。
@@ -166,7 +178,7 @@
 
 **仍未验、且必须在 state 到 `.installed` 之后才够得着的**（本机当前 `~/.claudio/bin/` 不存在、settings.json 无 claudio hooks，所以第一屏永远是 `.helperMissing`，运行态面板根本进不去）：Tab/Shift+Tab 走 action→mute 序（**注意：默认系统设置下这条根本不成立，见下一条 TODO**）、VoiceOver 逐控件导航 + 进入播报、切包画廊滚动/点选、Dynamic Type 三级真实布局、reduce-transparency、真实 `NSSound` 试听、静音/切包后 SwiftUI refresh、`NSOpenPanel` 端到端喂进导入管线。
 
-此外仍未接线：onboarding CTA（接管/修复/断开）**全是 no-op**（T17 遗留：需先解决 GUI-bundled `claudio` 的 `executablePath` 语义）—— 真机确认过：点「修复」后 `~/.claude/settings.json` 的 shasum 不变、`~/.claudio/bin` 仍不存在。状态栏仍用占位 SF Symbol（`waveform.circle`）非最终定制单色字形。
+~~此外仍未接线：onboarding CTA（接管/修复/断开）**全是 no-op**~~ → **2026-07-12 已接线并真机验证通过（T17b）**：CTA 现在真的会复制二进制 + 内置包、选默认包、写 hooks，失败会当场说出来；「断开连接」在运行态面板底部有了真入口。仍未做：状态栏图标仍是占位 SF Symbol（`waveform.circle`），非最终定制单色字形。
 
 **Why:** 面板核心逻辑（状态派生 / 写回 / 焦点顺序 / 对比度 / Dynamic Type 表）已下沉 `ClaudioGUICore` 并单测覆盖（helper 945 / gui 543），但交互真身只在真机成立 —— 而真机走查现在**随时可做**，不再有硬前提。
 

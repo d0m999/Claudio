@@ -116,6 +116,13 @@ public enum SetupOutcome: Sendable, Equatable {
 public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
     case binaryCopyFailure(reason: String)
     case packCopyFailure(reason: String)
+    /// The installed `~/.claudio/bin/claudio` still carries `com.apple.quarantine` after we
+    /// tried to strip it (see ``Quarantine.swift``). Hooks are deliberately **not** written in
+    /// this case: every one of them would be SIGKILLed by Gatekeeper the moment Claude Code ran
+    /// it, and `play` is fire-and-forget, so the user would get an install that reports success,
+    /// shows a green dot, passes `doctor` — and never makes a sound. A loud failure here is the
+    /// only honest outcome.
+    case binaryQuarantined(reason: String)
     case useFailure(UseError)
     case installFailure(SettingsUpdateError)
 
@@ -125,6 +132,8 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
             "复制二进制到 ~/.claudio/bin/claudio 失败：\(reason)"
         case .packCopyFailure(let reason):
             "复制内置声音包失败：\(reason)"
+        case .binaryQuarantined(let reason):
+            "macOS 仍在隔离 ~/.claudio/bin/claudio，它一执行就会被系统杀掉（所以没有写入任何 hooks）：\(reason)"
         case .useFailure(let error):
             "首次默认选包失败：\(error.description)"
         case .installFailure(let error):
@@ -213,6 +222,12 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
                 guard !FileManager.default.fileExists(atPath: destination.path) else { continue }
                 do {
                     try FileManager.default.copyItem(at: source, to: destination)
+                    // `copyItem` carries `com.apple.quarantine` across (see Quarantine.swift).
+                    // Audio files aren't exec-gated the way the binary is, so this one is
+                    // hygiene rather than load-bearing — but leaving half the tree we just
+                    // wrote stamped 「从网上来的」 only invites someone to rediscover the same
+                    // xattr later, in a context where it DOES bite.
+                    stripQuarantineAttribute(at: destination)
                     copiedPackIDs.append(id)
                 } catch {
                     return .failure(
@@ -220,6 +235,25 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
                 }
             }
         }
+    }
+
+    // Unconditional — deliberately OUTSIDE the `if !alreadyInstalled` block above.
+    //
+    // The copy path strips quarantine itself (`copySelfToFixedLocation`), so on a fresh install
+    // this is a second look at an already-clean file. It is here for the case that branch can't
+    // reach: a re-run where `alreadyInstalled` is true skips the copy ENTIRELY, so a destination
+    // binary left quarantined by an earlier (pre-fix, or interrupted) install would never get
+    // cleaned — setup would keep cheerfully re-writing hooks pointing at a binary macOS kills on
+    // sight. "The bootstrap can always heal a broken install by re-running" is a promise this
+    // repo makes in `docs/distribution.md`; it has to be true for this failure too.
+    stripQuarantineAttribute(at: environment.claudioBinaryDestination)
+    if hasQuarantineAttribute(at: environment.claudioBinaryDestination) {
+        return .failure(
+            .binaryQuarantined(
+                reason:
+                    "已尝试解除隔离但没成功（\(environment.claudioBinaryDestination.path)）。"
+                    + "可以手动跑一次：xattr -dr com.apple.quarantine \(environment.claudioBinaryDestination.path)"
+            ))
     }
 
     var selectedPack: String?
@@ -287,6 +321,12 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
         }
         try fileManager.copyItem(at: source, to: destination)
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
+        // `copyItem` brings `com.apple.quarantine` along with it, and a quarantined binary is
+        // SIGKILLed by Gatekeeper the instant Claude Code's hook execs it — silently, with no
+        // exit code anyone can observe. See Quarantine.swift for the measurements. The
+        // VERIFICATION that this actually worked lives in `performFirstRunSetup` (one place,
+        // covering the re-run path this function never even runs on).
+        stripQuarantineAttribute(at: destination)
         return .success(())
     } catch {
         return .failure(.binaryCopyFailure(reason: error.localizedDescription))

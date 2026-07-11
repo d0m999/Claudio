@@ -29,6 +29,7 @@
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     OnboardingGalleryView()
+                    OnboardingActionGalleryView()
                     DropZoneGalleryView()
                     EventRowGalleryView()
                     PackCardGalleryView()
@@ -61,11 +62,63 @@
     /// mirroring `PanelView`'s real `focusedTarget` ownership at a per-frame scale.
     private struct OnboardingStateFrame: View {
         let state: OnboardingState
+        /// T17: the CTA's own state, pinned alongside `state` (both are `#if DEBUG` preview-init
+        /// parameters). `.idle` for the six plain ``OnboardingState`` frames.
+        var actionState: OnboardingActionState = .idle
         @FocusState private var focusedTarget: PanelFocusTarget?
 
         var body: some View {
-            OnboardingView(viewModel: OnboardingViewModel(previewState: state), focusedTarget: $focusedTarget)
-                .frame(width: CGFloat(standardPanelWidth))
+            OnboardingView(
+                viewModel: OnboardingViewModel(previewState: state, actionState: actionState),
+                focusedTarget: $focusedTarget
+            )
+            .frame(width: CGFloat(standardPanelWidth))
+        }
+    }
+
+    // MARK: - OnboardingActionState (T17: the CTA's own state — in-flight / failed)
+
+    /// The two visual states T17 introduces — a CTA that is RUNNING (disabled + spinner + a
+    /// changed label) and a CTA that FAILED (a rejection row, optionally with a 「查看原因」
+    /// disclosure). Without this section they would be the first states in the repo that no frame
+    /// of the 视觉真相源 has ever rendered — in either theme — while `assertExhaustive()` stayed
+    /// green, because `onboardingStates` still covers its own six cases perfectly.
+    ///
+    /// Rendered against `.notInstalled` (the state a first-run user actually presses 接管 from),
+    /// except `.running(.disconnect)` which only exists in `.installed`.
+    struct OnboardingActionGalleryView: View {
+        var body: some View {
+            GallerySection(
+                title: "OnboardingActionState (\(PreviewFixtures.onboardingActionStates.count))"
+            ) {
+                ForEach(
+                    Array(PreviewFixtures.onboardingActionStates.enumerated()), id: \.offset
+                ) { _, actionState in
+                    GalleryFrame(caption: onboardingActionStateCaption(actionState)) {
+                        OnboardingStateFrame(
+                            state: hostState(for: actionState), actionState: actionState)
+                    }
+                }
+            }
+        }
+
+        /// 哪个 ``OnboardingState`` 承载这一帧。`.running(.disconnect)` 只可能发生在 `.installed`
+        /// （断开是它的次 CTA）；其余都用 `.notInstalled` —— 新用户真正按下「接管」的那个状态。
+        private func hostState(for actionState: OnboardingActionState) -> OnboardingState {
+            if case .running(.disconnect) = actionState { return .installed }
+            return .notInstalled
+        }
+    }
+
+    private func onboardingActionStateCaption(_ state: OnboardingActionState) -> String {
+        switch state {
+        case .idle: ".idle"
+        case .running(.takeOver): ".running(.takeOver) × .notInstalled"
+        case .running(.disconnect): ".running(.disconnect) × .installed"
+        case .failed(_, let detail):
+            detail == nil
+                ? ".failed(detail: nil) × .notInstalled"
+                : ".failed(detail: …) × .notInstalled"
         }
     }
 

@@ -92,6 +92,12 @@ public struct PanelView: View {
 
     public init(
         audioEnvironment: AudioImportEnvironment,
+        /// `Claudio.app/Contents/Resources/bin/claudio` — the helper the 接管 CTA copies into
+        /// `~/.claudio/bin/claudio`. **No default on purpose**: a default would let a future call
+        /// site silently ship a panel whose CTA can never install anything, which is precisely the
+        /// bug T17 exists to close. `nil` is a legal, explicit answer ("this build has no bundle"),
+        /// and it surfaces as a real error in the panel — never as a dead button.
+        bundledHelperBinary: URL?,
         configFile: URL = ClaudioPaths.configFile,
         lockFile: URL = ClaudioPaths.lockFile,
         onboardingEnvironment: OnboardingEnvironment = OnboardingEnvironment(),
@@ -108,8 +114,29 @@ public struct PanelView: View {
         // same way rather than taking it as a public, overridable parameter.
         self.previewPlayer = NSSoundAudioPreviewPlayer()
 
+        // The runner is built INSIDE the `StateObject(wrappedValue:)` autoclosure, together with
+        // the view-model it belongs to — never assigned afterwards.
+        //
+        // Assigning it in this init's BODY (`onboardingViewModel.actionRunner = …`) would be the
+        // tempting answer and a silent disaster: reading a `@StateObject`'s `wrappedValue` before
+        // SwiftUI has installed the state re-evaluates this autoclosure and hands back a BRAND NEW
+        // instance every time ("Accessing StateObject's object without being installed on a View.
+        // This will create a new instance each time."). The runner would land on a phantom
+        // view-model that `body` never renders, the real one would keep a nil runner, and the CTA
+        // would be a no-op again — T17's own bug, reproduced by the fix for T17.
+        //
+        // Constructor injection removes the question entirely: there is no "when do we wire it",
+        // and deleting the wiring is a COMPILE ERROR rather than a green test suite.
+        let actionEnvironment = OnboardingActionEnvironment(
+            onboarding: onboardingEnvironment,
+            bundledHelperBinary: bundledHelperBinary,
+            userPacksDirectory: audioEnvironment.userPacksDirectory,
+            configFile: configFile,
+            lockFile: lockFile)
         _onboardingViewModel = StateObject(
-            wrappedValue: OnboardingViewModel(environment: onboardingEnvironment))
+            wrappedValue: OnboardingViewModel(
+                environment: onboardingEnvironment,
+                actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment)))
         _muteController = StateObject(
             wrappedValue: EventMuteController(configFile: configFile, lockFile: lockFile))
 
@@ -178,6 +205,31 @@ public struct PanelView: View {
             applyFirstFocus()
             announcePanel()
         }
+        // T17 —— **这一行是「接管成功」这件事真正被兑现的地方**，不是锦上添花。
+        //
+        // CTA 落地后 `onboardingViewModel.refresh()` 把 state 翻到 `.installed`，`body` 于是从
+        // onboarding 卡切到 `operationalPanel`。但 `config` / `eventRows` / `packCards` 是三个
+        // 独立的 `@State`，只在 `init` 里读过一次盘 —— 而 `init` 跑在 app 启动的那一刻，也就是
+        // setup **之前**：那时 `config.json` 还不存在（`loadPanelConfig` 回落到 `selectedPack: ""`）、
+        // 包一个都还没复制。于是用户在**接管成功的那一秒**看到的会是：四行「未配置 / 文件丢失」、
+        // 试听全禁用、一个空的切包画廊 —— 而真实的包和 config 明明已经躺在磁盘上了。他必须关掉
+        // 面板再打开一次才看得到真相。这个产品在它唯一一次庆祝时刻上撒谎。
+        //
+        // 不会递归：`refresh()` 内部第一行就是 `onboardingViewModel.refresh()`，而探测是磁盘的
+        // 纯函数 —— 第二遍得到同一个 state，`onChange` 不再触发。
+        .onChange(of: onboardingViewModel.state) { _ in
+            refresh()
+            applyFirstFocus()
+            announcePanel()
+        }
+        // 动作态变化（开始跑 / 失败）：① 播报——一颗变灰的按钮 + 一个 spinner 对 VoiceOver 是完全
+        // 无声的，而这个仓库自己已经论证过「光有 label 不会被播报，VO 只读它光标落上的元素」；
+        // ② 重新落焦——in-flight 期间 CTA 被禁用，持有焦点的那颗按钮当场作废，没人把焦点接走的话
+        // 键盘用户按完空格就无处可去了。
+        .onChange(of: onboardingViewModel.actionState) { newValue in
+            announceActionState(newValue)
+            applyFirstFocus()
+        }
         // T15 D5 「极大 → 加宽 popover」: SwiftUI already widened ITSELF (`.frame(width:)` above);
         // this tells the AppKit popover around it to follow (see ``onPanelWidthChange``).
         .onChange(of: layoutAdaptation.panelWidth) { newWidth in
@@ -203,7 +255,29 @@ public struct PanelView: View {
     /// window is key and in the AX tree — VoiceOver drops announcements aimed at an app that
     /// isn't there yet. A no-op when VoiceOver is off.
     private func announcePanel() {
-        let message = headerAccessibilityLabel
+        announce(headerAccessibilityLabel)
+    }
+
+    /// 一次 CTA 动作的开始 / 失败，也必须说出口（T17）。
+    ///
+    /// 与 ``announcePanel()`` 同一条推理，只是换了时刻：一个禁用的按钮 + 一个 spinner 对 VoiceOver
+    /// 完全无声；一条静态 `Text` 写的失败原因，VO 光标不会自己跑过去。而用户此刻正在等一次可能长达
+    /// 数百毫秒的磁盘复制，或者刚刚经历一次失败。
+    ///
+    /// 成功不在这里播报：成功会让 `state` 变成 `.installed`，由上面 `.onChange(of: state)` 里的
+    /// ``announcePanel()`` 说出「Claudio 面板，当前声音包 X」—— 那句话比「成功了」信息量大得多。
+    private func announceActionState(_ actionState: OnboardingActionState) {
+        switch actionState {
+        case .idle:
+            break
+        case .running(let action):
+            announce(onboardingActionRunningTitle(action))
+        case .failed(let message, _):
+            announce(message)
+        }
+    }
+
+    private func announce(_ message: String) {
         DispatchQueue.main.async {
             NSAccessibility.post(
                 element: NSApp as Any,
@@ -278,7 +352,58 @@ public struct PanelView: View {
             AudioDropZoneView(viewModel: dropZoneViewModel)
             PackGalleryView(
                 cards: packCards, focusedTarget: $focusedTarget, onSelect: { switchPack(to: $0.id) })
+            disconnectRow
         }
+    }
+
+    /// 「断开连接」——`.installed` 态的次 CTA（T17，**授权的设计变更**）。
+    ///
+    /// 它此前**在整个 shipping app 里没有一个像素**：`OnboardingCopy(.installed).secondaryActionTitle`
+    /// 确实写着「断开连接」，但 `.installed` 时 `body` 渲染的是这个 `operationalPanel`，
+    /// `OnboardingView` 压根不出现 —— 那颗按钮只活在 state gallery 里。而 `.notInstalled` 的正文
+    /// 白纸黑字向用户承诺「还会自动留一份备份，**随时可以一键撤销**」。那个「一键」到今天为止
+    /// 不存在。
+    ///
+    /// 失败也在这里渲染：断开失败的那一刻，onboarding 卡不在屏幕上（state 还是 `.installed`），
+    /// 所以 `OnboardingView` 里那条 `ActionFailureRow` 够不着它。
+    @ViewBuilder
+    private var disconnectRow: some View {
+        if case .failed(let message, let detail) = onboardingViewModel.actionState {
+            ActionFailureRow(
+                message: message, detail: detail,
+                isShowingDetail: onboardingViewModel.isShowingDetail, typeScale: typeScale)
+        }
+
+        let intent = onboardingSecondaryIntent(for: onboardingViewModel.state)
+        let isRunning = onboardingViewModel.isRunning(intent)
+        let title =
+            isRunning
+            ? onboardingActionRunningTitle(.disconnect)
+            : (onboardingViewModel.copy.secondaryActionTitle ?? "断开连接")
+
+        Button {
+            Task { await onboardingViewModel.performSecondaryAction() }
+        } label: {
+            HStack(spacing: 6) {
+                if isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityHidden(true)
+                }
+                Text(title)
+                    .font(.system(size: 11 * typeScale))
+            }
+            .frame(maxWidth: .infinity)
+            // ≥24×24 命中区（a11y-architect FIX 6）。
+            .frame(minHeight: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+        .disabled(onboardingViewModel.isPerformingAction)
+        .accessibilityLabel(title)
+        .accessibilityHint("摘掉 Claudio 的声音，Claude Code 的其它设置都保留")
+        .focused($focusedTarget, equals: .disconnect)
     }
 
     /// One panel-level failure line — the 「拒绝行」 shape DESIGN.md already defines ("真红
@@ -347,15 +472,24 @@ public struct PanelView: View {
     /// `MenuBarController.popoverDidShow`'s `makeFirstResponder` call, which always runs BEFORE
     /// this (via `focusCoordinator.requestFocus()`), never after.
     private func applyFirstFocus() {
+        // `ctaOperable` (T17): while a `.takeOver`/`.disconnect` is in flight, both CTAs are
+        // `.disabled(...)`, so the pure model must not hand focus to one — otherwise the caret
+        // sits on a dead control and the keyboard user who just pressed 空格 on 「接管」 has
+        // nowhere to go. Same 可操作 rule the muted-row's disabled 试听 ▶ already obeys, applied
+        // to a transition that happens INSIDE the panel rather than at open.
+        let ctaOperable = !onboardingViewModel.isPerformingAction
+
         guard onboardingViewModel.state == .installed else {
             let copy = onboardingViewModel.copy
             focusedTarget = panelFirstFocusTarget(
                 .onboarding(
                     hasPrimaryAction: copy.primaryActionTitle != nil,
-                    hasSecondaryAction: copy.secondaryActionTitle != nil))
+                    hasSecondaryAction: copy.secondaryActionTitle != nil),
+                ctaOperable: ctaOperable)
             return
         }
-        focusedTarget = panelOpeningFocus(rows: eventRows, packCardIDs: packCards.map(\.id))
+        focusedTarget = panelOpeningFocus(
+            rows: eventRows, packCardIDs: packCards.map(\.id), ctaOperable: ctaOperable)
     }
 
     // MARK: - Actions

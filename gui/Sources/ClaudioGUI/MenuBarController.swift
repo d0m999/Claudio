@@ -32,7 +32,20 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// no handback is owed.
     private var previousApp: NSRunningApplication?
 
-    init(audioEnvironment: AudioImportEnvironment) {
+    /// `bundledHelperBinary` is the helper CLI inside this app bundle
+    /// (`Claudio.app/Contents/Resources/bin/claudio`) — what the 接管 CTA copies to
+    /// `~/.claudio/bin/claudio`. It is a PARAMETER, resolved by ``bundledHelperBinary(in:)``
+    /// (`ClaudioGUICore`), not a `Bundle.main` lookup performed here.
+    ///
+    /// That is deliberate and it is the whole point of T17: the lookup is the ONE line that can
+    /// hand `performFirstRunSetup` the wrong binary — swap it for `Bundle.main.executableURL` and
+    /// it resolves to `Contents/MacOS/Claudio`, the SwiftUI app itself, which then gets copied
+    /// over the helper so every Claude Code event execs a GUI app, and the bundled-pack directory
+    /// (derived by dropping two components off that path) resolves to a `Contents/packs` that does
+    /// not exist. Left in this AppKit-only file, that line is unreachable by the test harness, and
+    /// the mutation above keeps the ENTIRE suite green. Sunk into `ClaudioGUICore`, it is pinned
+    /// by a real fixture bundle (`OnboardingActionsSuite`).
+    init(audioEnvironment: AudioImportEnvironment, bundledHelperBinary: URL?) {
         // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
         // capture `self` — we're still pre-`super.init()` here).
         let popover = NSPopover()
@@ -44,6 +57,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         let panel = PanelView(
             audioEnvironment: audioEnvironment,
+            bundledHelperBinary: bundledHelperBinary,
             focusCoordinator: focusCoordinator,
             // T15 D5「极大 → 加宽 popover」, now actually in effect (TODOS.md:257): `PanelView`
             // widens ITSELF to `widenedPanelWidth` (360pt) at the `.maximum` Dynamic Type tier,
