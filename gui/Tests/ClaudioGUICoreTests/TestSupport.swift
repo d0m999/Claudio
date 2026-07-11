@@ -64,6 +64,28 @@ func createSymlink(at linkURL: URL, pointingTo targetURL: URL) {
             + " relying on this fixture would silently not be testing a symlink escape at all")
 }
 
+/// Creates a real FIFO at `url` — 「路径上有东西，但它不是正规文件」这一族里
+/// `fileExists(atPath:isDirectory:)` 也挡不住的那个代表（目录还能靠 `isDirectory:` 排掉，
+/// FIFO / socket / 设备不能）。只有 ``regularFileExists(at:)``（`stat(2)` + `S_IFREG`）挡得住它，
+/// 所以每一个「正规文件闸门」用例都拿它当最硬的输入。
+///
+/// 起初是 `CoverageStateSuite` 的私有 helper（当时是本目标里唯一的用户）；`ManifestBindingSuite`
+/// 现在钉的是同一个谓词的**写**侧，两份 `mkfifo` 拷贝不值得，遂提到这里。仍不与 helper 侧的
+/// `TestSupport.makeFIFO` 共享——那是另一个包的测试目标，见本文件顶部的「按包复制而非跨包共享」约定。
+@MainActor
+func makePackFIFO(at url: URL) {
+    try? FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let created = url.withUnsafeFileSystemRepresentation { pathPointer -> Bool in
+        guard let pathPointer else { return false }
+        return mkfifo(pathPointer, 0o644) == 0
+    }
+    expect(
+        created,
+        "makePackFIFO: mkfifo 在 \(url.path) 失败 —— 依赖这个 fixture 的用例会在「其实什么都没测」"
+            + "的情况下变绿（路径上压根没有 FIFO，拒绝是因为文件不存在，不是因为闸门起作用了）")
+}
+
 /// Creates an empty **non-executable** regular file at `url` (default perms, no execute
 /// bit) — used to model a broken/partial helper install that `detectOnboardingState`
 /// must still treat as `.helperMissing`.

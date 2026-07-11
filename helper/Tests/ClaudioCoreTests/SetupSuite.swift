@@ -395,6 +395,122 @@ func runSetupSuites() {
         }
     }
 
+    // MARK: - 首次运行自举的判据是「还没有人选过包」，不是「config.json 不存在」
+    //
+    // 本轮 /ship 评审（Codex 对抗 + Claude 对抗独立命中）：hooks 装好但还没选包时，用户点一次
+    // 静音钮会创建一份 `selected_pack: ""` 的 config.json（`setEventEnabled` 没有 pack 上下文，
+    // 凭空编一个默认值等于伪造一次谁也没做过的选择）。旧判据 `!fileExists(configFile)` 从此永远
+    // 为假——自举再也不会挑默认包，`play` 永远解析不出 pack，**永久静音**，且没有任何东西会自愈。
+    // `noPackHasEverBeenSelected` 把判据换成「文件不存在 或 selected_pack 为空」修好了这个洞。
+
+    suite(
+        "performFirstRunSetup: 一份已存在、selected_pack 为空串的 config.json（旧判据下永久静音的现场）"
+            + " → 仍然选出默认包（regression pin：旧的 `!fileExists` 判据在这里必定失败）"
+    ) {
+        withTempDirectory { root in
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            // 模拟「hooks 已装好、用户点过一次静音，但从未选过包」的现场：`selected_pack` 是空串，
+            // 而不是文件缺失——旧判据 `!fileExists(configFile)` 在这里恒为 false，自举永远不会触发。
+            writeFixture(
+                #"{ "selected_pack": "", "master_volume": 0.8, "events": { "stop": false } }"#,
+                to: environment.configFile)
+
+            let result = performFirstRunSetup(environment: environment)
+            guard case .success(.completed(_, _, let selectedPack, _)) = result else {
+                expect(false, "expected success, got \(result)")
+                return
+            }
+            expect(
+                selectedPack == "minimal-chime",
+                "selected_pack 为空串必须被当成「还没有人选过包」，触发默认选包——旧判据下这里会"
+                    + " selectedPack == nil，got \(String(describing: selectedPack))")
+
+            let data = try? Data(contentsOf: environment.configFile)
+            let config = data.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
+            expect(
+                config?.selectedPack == "minimal-chime",
+                "磁盘上的 config.json 必须真的反映这次选包，got \(String(describing: config?.selectedPack))"
+            )
+            expect(
+                config?.masterVolume == 0.8,
+                "自举选包只拥有 selected_pack 这一个键——用户已经设过的 master_volume 必须原样保留")
+        }
+    }
+
+    suite(
+        "performFirstRunSetup: 完整回归序列——setEventEnabled 静音产生 selected_pack:\"\" →"
+            + " performFirstRunSetup 选出真实默认包，且用户此前设的静音状态必须原样保留（不能被自举覆盖）"
+    ) {
+        withTempDirectory { root in
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+
+            // 第一步：hooks 装好、还没有 config.json，用户点一次静音钮——这是 bug 报告里那个
+            // 完全正常的用户操作，不是构造出来的畸形 fixture。
+            let muteResult = setEventEnabled(
+                .stop, enabled: false, configFile: environment.configFile,
+                lockFile: environment.lockFile)
+            expect(muteResult == .success(.updated(event: .stop, enabled: false)), "setup: mute must succeed")
+
+            let afterMute = try? Data(contentsOf: environment.configFile)
+            let configAfterMute = afterMute.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
+            expect(
+                configAfterMute?.selectedPack == "",
+                "静音钮没有 pack 上下文，第一次写出的 config.json 的 selected_pack 必须是空串，got"
+                    + " \(String(describing: configAfterMute?.selectedPack))")
+            expect(
+                configAfterMute?.isEnabled(.stop) == false,
+                "静音必须真的生效，got \(String(describing: configAfterMute?.isEnabled(.stop)))")
+
+            // 第二步：（比如应用重启后）跑首次运行自举。
+            let result = performFirstRunSetup(environment: environment)
+            guard case .success(.completed(_, _, let selectedPack, _)) = result else {
+                expect(false, "expected success, got \(result)")
+                return
+            }
+            expect(
+                selectedPack == "minimal-chime",
+                "自举必须能看穿「selected_pack 是空串」这层假象，选出一个真实默认包，got"
+                    + " \(String(describing: selectedPack))")
+
+            let afterSetup = try? Data(contentsOf: environment.configFile)
+            let configAfterSetup = afterSetup.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
+            expect(
+                configAfterSetup?.selectedPack == "minimal-chime",
+                "磁盘上的 config.json 必须真的反映自举选出的包")
+            expect(
+                configAfterSetup?.isEnabled(.stop) == false,
+                "自举只拥有 selected_pack 这一个键——用户此前设的静音状态绝不能被覆盖，got"
+                    + " \(String(describing: configAfterSetup?.isEnabled(.stop)))")
+        }
+    }
+
+    suite(
+        "performFirstRunSetup: 一份读不出来 / 畸形的 config.json → 自举不会尝试选包（既有行为保持不变，不是新引入的放宽）"
+    ) {
+        withTempDirectory { root in
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            let original = "{ not valid json"
+            writeFixture(original, to: environment.configFile)
+
+            let result = performFirstRunSetup(environment: environment)
+            guard case .success(.completed(_, _, let selectedPack, let hooksOutcome)) = result else {
+                expect(false, "一份读不出来的 config 绝不能让整个 setup 报失败，got \(result)")
+                return
+            }
+            expect(
+                selectedPack == nil,
+                "读不出来的 config 不是「还没有人选过包」，自举必须放弃、不替用户做主，got"
+                    + " \(String(describing: selectedPack))")
+            expect(hooksOutcome == .installed, "hooks 安装本身与 config 是否可读无关，必须照常完成")
+            expect(
+                (try? String(contentsOf: environment.configFile, encoding: .utf8)) == original,
+                "自举没有能力修一份读不懂的 config，也绝不能把它当成新安装覆盖掉——必须逐字保持原样")
+        }
+    }
+
     suite("performFirstRunSetup: re-running from inside the bundle a second time is idempotent") {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))

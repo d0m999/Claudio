@@ -28,9 +28,18 @@ let package = Package(
         ),
         // The SwiftUI app shell. Minimal for T7 (just enough to host `OnboardingView`
         // for manual/visual verification) — the real menu bar skeleton lands in T8/T15.
+        //
+        // Depends on `ClaudioCore` directly (not just transitively via `ClaudioGUICore`,
+        // same reasoning as `claudio-gui-tests` below) since `EventRowView`/`DesignTokens`
+        // (T16) render off `Event` — a `ClaudioCore` type — directly, for the same
+        // event-color/glyph token mapping every other per-event surface in this codebase
+        // keys off ``Event/allCases``.
         .executableTarget(
             name: "ClaudioGUI",
-            dependencies: ["ClaudioGUICore"]
+            dependencies: [
+                "ClaudioGUICore",
+                .product(name: "ClaudioCore", package: "helper"),
+            ]
         ),
         // Tests run as a dependency-free executable harness, exactly like
         // `helper/Tests/ClaudioCoreTests`: this machine has CommandLineTools only (no

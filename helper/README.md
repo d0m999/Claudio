@@ -7,7 +7,7 @@ full contract, exit codes, and config schema):
 
 | Command | What it does |
 |---|---|
-| `claudio doctor` | Self-check: afplay in place, settings.json writable, packs intact (read-only, no writes/no playback) |
+| `claudio doctor` | Self-check, read-only (never writes, never plays): settings.json writable · `~/.claudio/bin/claudio` in place · afplay in place · selected pack intact · **config.json rewritable** · recent `claudio.log` failures · macOS + Claude Code version compat. Hard-fails (exit ≠ 0) only on the first three; everything else is a warning |
 | `claudio play <event>` | Hook entry point: debounced, backgrounded `afplay` spawn, always exits 0 |
 | `claudio install` | Idempotent append of the claudio hook into `settings.json` (never overwrites existing hooks) |
 | `claudio uninstall` | Precisely removes only claudio's hook entries, preserves everything else |

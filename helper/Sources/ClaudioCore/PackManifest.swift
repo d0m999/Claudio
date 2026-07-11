@@ -95,6 +95,105 @@ func directoryExists(at directory: URL) -> Bool {
     return isDirectory.boolValue
 }
 
+// MARK: - Shared manifest loading (T16: single source of truth for `helper` and `gui`)
+
+/// Why ``loadPackManifestData(in:)``/``loadPackManifest(in:)`` couldn't read/decode
+/// `manifest.json`. Carries the exact reason strings `checkPackIntegrity` has always
+/// surfaced (T1), now shared by every caller instead of re-derived per call site.
+public enum PackManifestLoadError: Error, Sendable, Equatable {
+    /// `manifest.json` doesn't exist at `packDirectory`, isn't readable, or is/sits behind
+    /// a symlink resolving outside `packDirectory` (``isReallyContained(_:inside:)``).
+    case unreadable(reason: String)
+    /// `manifest.json`'s bytes were read successfully, but don't decode as ``PackManifest``.
+    case decodeFailed(reason: String)
+
+    /// The human-readable reason, regardless of which case — the exact string
+    /// `checkPackIntegrity` has always attached to its own `.manifestUnreadable` result.
+    public var reason: String {
+        switch self {
+        case .unreadable(let reason): reason
+        case .decodeFailed(let reason): reason
+        }
+    }
+}
+
+/// Reads `manifest.json`'s raw bytes from `packDirectory`, gated by the same
+/// ``isReallyContained(_:inside:)`` symlink-escape guard every other manifest reader in
+/// this module uses. `isReallyContained` itself stays module-internal to `ClaudioCore`
+/// (a lexical/realpath primitive, not a public API surface on its own) — this narrower,
+/// `public` read primitive is what callers outside this module (`gui`'s `ClaudioGUICore`,
+/// T16's manifest-binding write path, which needs the *raw* JSON — not the narrower
+/// ``PackManifest`` model — to do a read-modify-write that preserves unknown top-level
+/// keys) actually get to reuse, rather than reinventing the containment check a second
+/// time (ENGINEERING.md T16: "REUSE, do not reinvent").
+public func loadPackManifestData(in packDirectory: URL) -> Result<Data, PackManifestLoadError> {
+    let manifestFile = packDirectory.appendingPathComponent("manifest.json")
+    // `packDirectory` itself is already symlink-safe by the time a caller has one in hand
+    // (e.g. via `resolvePackDirectory`, which runs `isReallyContained`), but `manifest.json`
+    // is a leaf entry inside it and could independently be a symlink escaping the pack
+    // directory — require real containment here too, not just a successful read.
+    guard isReallyContained(manifestFile, inside: packDirectory) else {
+        return .failure(
+            .unreadable(reason: "manifest.json 不存在或不可读：\(manifestFile.path)"))
+    }
+
+    // 声音包是第三方分发内容，`manifest.json` 是不可信输入：读它必须走
+    // ``readRegularFileBounded(at:maxBytes:followSymlink:)``（`fstat` 正规文件闸门 + 1 MiB 上限），
+    // 不能是裸的 `Data(contentsOf:)`——后者**没有任何大小上限**，一个 500MB 形状的 manifest 会被整份
+    // 读进来再原样喂给解码器（Codex [P1] + 对抗审查 F2）。非正规文件（目录 / FIFO / socket）今天恰好
+    // 也被 Foundation 顺手挡了下来，但那是它的实现细节、不是它的契约——见 `SafeFileRead.swift` 顶部
+    // 的实测结论：这里把「绝不阻塞、绝不读非正规文件」变成我们自己的、被测试钉死的契约，而不是一个
+    // 借来的巧合。
+    //
+    // `followSymlink: true`——**与音频文件（``regularFileExists(at:)``，刻意 `stat` 而非 `lstat`）
+    // 逐字同一句话**。这一条是本轮评审的修正：manifest 那条路曾用 `O_NOFOLLOW` 拒绝一切符号链接，而
+    // 音频那条路跟随它们，于是同一个「包内指向同包内真实文件的符号链接」被两条路给出**相反**的合法性
+    // 判断（包作者手工把 manifest 链到 repo 里的包，会莫名其妙变 broken，而它的音频文件却好好的）。
+    // 放开跟随在安全性上等价：逃逸早已被上面那道 `isReallyContained`（**解析符号链接后**再判包含）
+    // 挡死——`O_NOFOLLOW` 从来不是拦逃逸的那道门；而「链接目标可以任意大 / 可以是 FIFO」这两条，分别
+    // 由绑定在同一个 fd 上的大小上限与 `fstat` 正规文件闸门继续挡住。因此：**manifest.json 允许是包内
+    // 符号链接，只要它解析后仍在包内、目标是正规文件、且不超上限**——这是给包作者的契约，被
+    // `PackContentSafetySuite` 钉死。
+    switch readRegularFileBounded(
+        at: manifestFile, maxBytes: maxPackManifestBytes, followSymlink: true)
+    {
+    case .success(let manifestData):
+        return .success(manifestData)
+    case .notRegularFile:
+        return .failure(
+            .unreadable(
+                reason: "manifest.json 不是正规文件（目录 / FIFO / socket / 设备），"
+                    + "拒绝读取：\(manifestFile.path)"))
+    case .oversize:
+        return .failure(
+            .unreadable(
+                reason: "manifest.json 超过大小上限（\(maxPackManifestBytes) 字节），"
+                    + "拒绝读取：\(manifestFile.path)"))
+    case .unreadable:
+        return .failure(
+            .unreadable(reason: "manifest.json 不存在或不可读：\(manifestFile.path)"))
+    }
+}
+
+/// Loads and decodes `packDirectory`'s `manifest.json` into a ``PackManifest`` — the single
+/// shared loader behind both `helper`'s ``checkPackIntegrity(configFile:userPacksDirectory:bundledPacksDirectory:)``
+/// and `gui`'s `ClaudioGUICore` per-event coverage computation (T16: "共享 PackManifest
+/// 模块与运行时查找顺序同源"), so both sides parse exactly one, adversarially-tested
+/// manifest-reading code path rather than each growing its own.
+public func loadPackManifest(in packDirectory: URL) -> Result<PackManifest, PackManifestLoadError>
+{
+    switch loadPackManifestData(in: packDirectory) {
+    case .failure(let error):
+        return .failure(error)
+    case .success(let manifestData):
+        do {
+            return .success(try JSONDecoder().decode(PackManifest.self, from: manifestData))
+        } catch {
+            return .failure(.decodeFailed(reason: error.localizedDescription))
+        }
+    }
+}
+
 public func resolvePackDirectory(
     id: String,
     userPacksDirectory: URL,

@@ -1121,4 +1121,160 @@ func runPlaySuites() {
             expect(true, "reaching this line means spawn(missing executable) didn't crash or hang")
         }
     }
+
+    // MARK: - config.json / play.state must go through the bounded, regular-file-gated read
+    //
+    // `claudio play` runs on Claude Code's synchronous hook path, so a hostile/oversized
+    // `~/.claudio/config.json` (or `play.state`) must never hang or crash it — it must fold
+    // into the exact same silent `.notReady` every other "not configured yet" state already
+    // takes. `loadClaudioConfig`/`readConfigFileBounded` (SafeFileRead.swift) is the single
+    // gate `play`, `doctor`, and `probeConfigRewritable` all share (`ConfigMutationSuite.swift`
+    // and `DoctorSuite.swift` cover the other two read entry points).
+
+    suite(
+        "playSoundEvent: config.json is a DIRECTORY -> .notReady, never spawns, never hangs"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            try? FileManager.default.createDirectory(
+                at: configFile, withIntermediateDirectories: true)
+
+            let spawner = RecordingSpawner()
+            let env = PlayEnvironment(
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: root.appendingPathComponent("packs"),
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let started = Date()
+            let outcome = playSoundEvent("stop", environment: env)
+            let elapsed = Date().timeIntervalSince(started)
+            expect(
+                outcome == .notReady,
+                "a directory-shaped config.json must report .notReady, got \(outcome)")
+            expect(spawner.callCount == 0, "must never spawn afplay off an unreadable config")
+            expect(
+                elapsed < 5,
+                "must never hang reading a directory-shaped config.json, took \(elapsed)s")
+        }
+    }
+
+    suite("playSoundEvent: config.json is a FIFO -> .notReady, never spawns, never hangs") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            makeFIFO(at: configFile)
+
+            let spawner = RecordingSpawner()
+            let env = PlayEnvironment(
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: root.appendingPathComponent("packs"),
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let started = Date()
+            let outcome = playSoundEvent("stop", environment: env)
+            let elapsed = Date().timeIntervalSince(started)
+            expect(
+                outcome == .notReady, "a FIFO-shaped config.json must report .notReady, got \(outcome)"
+            )
+            expect(spawner.callCount == 0, "must never spawn afplay off an unreadable config")
+            expect(elapsed < 5, "must never hang reading a FIFO-shaped config.json, took \(elapsed)s")
+        }
+    }
+
+    suite(
+        "playSoundEvent: a VALID (fully decodable) but oversize (> 64 KiB) config.json is"
+            + " rejected by the size gate before ever resolving the pack it names -> .notReady,"
+            + " never spawns (the pack it names is otherwise complete and playable — proving"
+            + " this is the size bound doing the rejecting, not a coincidental decode failure)"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            // The named pack is fully real and playable — if the size gate were ever
+            // dropped in favor of a raw, unbounded `Data(contentsOf:)`, this exact file
+            // reads and decodes just fine (it's valid JSON, merely padded past 64 KiB via
+            // an unknown top-level key) and the pipeline would proceed all the way to a
+            // real spawn. That is what makes this a genuine regression pin rather than a
+            // fixture that would fail to decode either way.
+            let padding = String(repeating: "x", count: (1 << 16) + 100)
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "padding": "\#(padding)" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let spawner = RecordingSpawner()
+            let env = PlayEnvironment(
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let outcome = playSoundEvent("stop", environment: env)
+            expect(
+                outcome == .notReady,
+                "an oversize config.json must report .notReady even though the pack it names"
+                    + " is otherwise complete and playable, got \(outcome)")
+            expect(spawner.callCount == 0, "must never spawn afplay off an oversize config")
+        }
+    }
+
+    suite(
+        "playSoundEvent: play.state is a FIFO -> the debounce read never hangs, and the call"
+            + " still plays (an unreadable state file means 'never debounced yet', not an error)"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let debounceStateFile = root.appendingPathComponent("play.state")
+            makeFIFO(at: debounceStateFile)
+
+            let spawner = RecordingSpawner()
+            let env = PlayEnvironment(
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                spawner: spawner,
+                debounceStateFile: debounceStateFile,
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+
+            let started = Date()
+            let outcome = playSoundEvent("stop", environment: env)
+            let elapsed = Date().timeIntervalSince(started)
+            expect(
+                elapsed < 5,
+                "a FIFO-shaped play.state must never hang the debounce read, took \(elapsed)s")
+            let expectedFile =
+                packsDir.appendingPathComponent("minimal-chime/stop.mp3").standardizedFileURL.path
+            expect(
+                outcome == .played(event: .stop, filePath: expectedFile),
+                "an unreadable play.state must fold into 'never debounced yet', so this call"
+                    + " must still play, got \(outcome)")
+            expect(spawner.callCount == 1, "must actually spawn despite a FIFO-shaped play.state")
+        }
+    }
 }

@@ -69,18 +69,42 @@
 **四事件语义色**（固定语义 token，随模式微调对比度）
 | 事件 | 含义 | Dark | Light | 字形 |
 |---|---|---|---|---|
-| ✅ `Stop` 干完了 | 完成、落定 | `#34C759` | `#2FA24E` | 实心粗勾 `checkmark.circle.fill` |
-| ⏸ `StopFailure` 中断了 | 限流 / 欠费 / 过载 / 认证（**非代码 bug**） | `#FF9F0A` | `#E08600` | 暂停 `pause.circle.fill` · **琥珀，绝不用红** |
+| ✅ `Stop` 干完了 | 完成、落定 | `#34C759` | `#288B43` | 实心粗勾 `checkmark.circle.fill` |
+| ⏸ `StopFailure` 中断了 | 限流 / 欠费 / 过载 / 认证（**非代码 bug**） | `#FF9F0A` | `#AC6900` | 暂停 `pause.circle.fill` · **琥珀，绝不用红** |
 | ✋ `Notification` 要你确认 | 等你确认 | `#D97757`（=clay） | `#C4633C` | 铃 / 举手 `bell.badge.fill` · **品牌黏土** |
 | ◦ `SubagentStop` 子任务完成 | 从属完成 | `#5E5CE6` | `#5B59D6` | **空心**勾 `checkmark.circle` · 更暗 |
+
+> **`StopFailure` 亮色的两次调深（如实记录，因为第一次没达成目的）**：原 `#E08600` → `#C87A00` → 现 `#AC6900`。第一次调深（`#E08600 → #C87A00`）是**专为**过事件字形对表面的 **≥3:1**（WCAG 1.4.11 非文本对比）而授权的，但它**并没有达成目的**：当时 `ContrastSuite` 断的是「字形 vs 纯 `panel`」，而字形实际画在**事件色 @15% 自染**的 tile 上 —— **断言断错了那一对**。对纯 `panel` 它从 2.73:1 升到 3.31:1（看着过了），对**真实的自染 tile 底**却只从 2.36:1 升到 2.82:1，**依然不及格**。故本次进一步调深到 `#AC6900`（对真实 tile 底 **3.59:1**，见下注）。两次都只降明度、**不换色相** —— 仍为暖琥珀、绝不用红。UI 语义 `warning` token 是独立用途（校验提示，非事件字形），仍保留 `#E08600`；同理 UI 语义 `success` 亮色仍为 `#2FA24E`，不随 `Stop` 调深 —— 事件层与 UI 语义层**刻意分叉**。`gui` 侧由 `ContrastSuite.swift` 逐对数学断言钉死。
+
+> **事件字形 tile 保持事件色自染（15%），改为调深两个亮色事件色 —— 对比度硬约束，不是审美选择**（2026-07-11 授权；**同日第二次修正**，第一次修法已被推翻）
+> 事件行的 24pt 字形 tile（见「行结构」）是 `RoundedRectangle.fill(事件色.opacity(0.15))` —— **字形画在自己颜色的 15% 底上**。实测原色值下亮色字形对**真实**底色只有 `Stop` **2.75:1** / `StopFailure` **2.82:1**，双双不过 WCAG 1.4.11 对非文本图形的 **≥3:1**。（根因：旧 `ContrastSuite` 断的是「字形 vs 纯 `panel`」——**断错了那一对**，恰好是能过的那一对，所以一直假绿。）
+>
+> **同日的第一次修法（tile 底改中性 `surface-2`）已被独立评审推翻，不要再提。** 它的致命问题：亮色下 `surface-2` `#FFFDF7` 对 `panel` `#FFFDF8` = **1.0006:1** —— 它们**是同一个颜色**。所以 tile 在亮色下**整个消失了**：所谓「字形过了 ≥3:1」靠的是「tile 根本不存在、字形直接落在面板上」，而不是换了一块真的底。这与「行结构」白纸黑字的「事件字形 tile 24pt, **事件色**, 圆角6」直接冲突（tile 本该是事件色的），副作用还连带让试听键「已启用」的圆形底在亮色下一并消失，启用/禁用少一个视觉区分。**用对比度达标为名把一个设计元素变没，不是修复。**
+>
+> **决议（现行）**：**tile 保持事件色自染 15% 不变**；改为把**两个**亮色事件色调深 —— `Stop` `#2FA24E → #288B43`、`StopFailure` `#C87A00 → #AC6900`。`Notification` `#C4633C`（= clay 品牌招牌绑定）与 `SubagentStop` `#5B59D6` **不动**；**暗色四事件全部不动**（本来就宽裕）。**四事件语义一个不改：`StopFailure` 仍是琥珀，绝不用红** —— 调深的只是亮色明度，不是换色相。
+>
+> | 事件 | 亮色 hex | 字形 vs **真实 tile 底**（事件色 @15% 覆在 `panel` 上） | tile 对面板（可见性） |
+> |---|---|---|---|
+> | `Stop` | `#2FA24E` → **`#288B43`** | 2.75:1 ❌ → **3.53:1** ✅ | 1.20:1 看得见 |
+> | `StopFailure` | `#C87A00` → **`#AC6900`** | 2.82:1 ❌ → **3.59:1** ✅ | 1.21:1 |
+> | `Notification` | `#C4633C`（不变） | **3.32:1** ✅ | 1.20:1 |
+> | `SubagentStop` | `#5B59D6`（不变） | **4.37:1** ✅ | 1.23:1 |
+>
+> 全局最差 **3.06:1**（暗色 `SubagentStop`，未改），过 ≥3:1。
+>
+> **断言方式同批改掉（这是本次最该记住的部分）**：`ContrastSuite.swift` 现在直接对**真实复合底**求值 —— `compositedHex(事件色, over: panel, alpha: 0.15)`，断的就是屏幕上真正渲染的那一对；并**额外**钉住「**tile 自身对面板必须可见**（≥1.10:1）」。加后面这条的理由正是上面那次翻车：**只断言字形对比度是不够的 —— tile 存不存在也得钉住**，否则「把 tile 变没」会被测试判为通过。
 
 **UI 语义色（提示 / 校验，独立于事件层）**
 | 用途 | Dark | Light | 备注 |
 |---|---|---|---|
 | success | `#34C759` | `#2FA24E` | |
 | warning | `#FF9F0A` | `#E08600` | |
-| **error（真错误）** | `#FF453A` | `#E0453A` | **只**给 App 自身真错误（如写不进 settings.json）；**绝不**用于事件层 |
+| **error（真错误）** | `#FF453A` | `#E0453A` | **只**给 App 自身真错误（如写不进 settings.json）；**绝不**用于事件层；**且只做图标、不做正文**（见下注） |
 | info | `#0A84FF` | `#0A72D0` | |
+
+> **真红 `error` 只做图标，配套文案用 `text-2`**（2026-07-11 授权）
+> 实测亮色真红 `#E0453A` 对 `panel` / `surface-2` = **4.07:1 / 4.06:1** —— 过非文本图形的 ≥3:1，**不过**正文的 **≥4.5:1**。而它此前被当**正文**用（包卡的「文件丢失」9pt、onboarding 详情）。
+> **决议**：真红**只用于图标**（如 `xmark.circle.fill` / 拒绝行的 `circle-x` 字形），**配套的报错文案一律改用 `text-2`**（5.54:1，过 ≥4.5:1）。**品牌真红的色值不变**（它作为图标完全合格，问题只在用法）。`ContrastSuite.swift` 把这条钉成两句：真红只出现在 ≥3:1 那一组；同时正向断言「真红亮色 < 4.5:1」——哪天有人把真红调亮到够正文，这条会红并提醒回来重新决策。
 
 - **暗色模式策略**：暗色为主基调（「深夜音频硬件」）。非简单反相 —— 中性重新取暖色阶，事件色略降亮/升深保持在两底都可读；品牌黏土在亮底加深到 `#C4633C` 保对比。
 
@@ -124,9 +148,14 @@
 > 这些是 `/design-consultation` 首版未覆盖、由设计评审补入词汇表的组件。**全部由既有 token 派生，勿另立新色 / 新圆角。**
 
 - **onboarding 卡 / 空态卡**：面板内居中列 —— 44px（radius 12）图标块（态色 15% 底 + 态色字形）→ 标题 SF Pro semibold 15 → 正文 `text-2` 12.5 → 主 CTA（黏土实心 pill radius 9 全宽）+ 次 CTA（ghost：透明 + `hairline-strong` 描边）。**空态三要素：温度 + 主行动 + 上下文。**
-- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：每个事件行按 `CoverageState = present | unmapped | broken` 呈现 —— **GUI 从 manifest + 文件存在性算，helper 不改播放行为**。`present`（配了且文件在）= 上述完整行（名 + id + 文件名 + 波形 + 试听 ▶）；`unmapped`（manifest 没配此 event）= 行显「未配置」、试听 ▶ 禁用；`broken`（配了，但目标文件不存在 / 路径未通过包目录 containment）= 行显「文件丢失」并入 `doctor`、试听 ▶ 禁用。**`broken` 只判「文件缺失 / 路径无效」，不含「音频内容损坏」**：`doctor` 现只做 `fileExists` + containment，`play` 是 fire-and-forget（刻意不 `waitUntilExit()`，见 `Play.swift`），`afplay` 拒绝坏文件的信号回不到进程里。「文件在、但解不出声」要另立状态，须先给 doctor 或播放层加音频 lint —— v1 不做。`unmapped` 与 `broken` 两态都在**行尾提供逐事件导入绑定**（拖入 / 选文件 → 绑到该 event）去补。区分二者 = **真打包错误不被伪装成正常静默**。禁用观感用**显式禁用样式（控件置灰 + 图标降饱和），不整行降 opacity**（行内文字始终保 ≥ 4.5:1 对比度）。此三态与正交的**静音态**（`enabled=false`：控件区弱化 + 静音钮点亮）叠加，互不取代。
+- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：每个事件行按 `CoverageState = present | unmapped | broken` 呈现 —— **GUI 从 manifest + 文件存在性算，helper 不改播放行为**。`present`（配了且文件在）= 上述完整行（名 + id + 文件名 + 波形 + 试听 ▶）；`unmapped`（manifest 没配此 event）= 行显「未配置」、试听 ▶ 禁用；`broken`（配了，但目标文件不存在 / 路径未通过包目录 containment）= 行显「文件丢失」并入 `doctor`、试听 ▶ 禁用。**`broken` 只判「文件缺失 / 路径无效」，不含「音频内容损坏」**：`doctor` 现只做**正规文件**存在性 + containment（`regularFileExists` = `stat` + `S_IFREG`；2026-07-11 `/ship` 收口前是 `fileExists`，会把一个名叫 `stop.mp3` 的**目录**判成 present），`play` 是 fire-and-forget（刻意不 `waitUntilExit()`，见 `Play.swift`），`afplay` 拒绝坏文件的信号回不到进程里。「文件在、确是正规文件、但解不出声」要另立状态，须先给 doctor 或播放层加音频 lint —— v1 不做。`unmapped` 与 `broken` 两态都在**行尾提供逐事件导入绑定**（拖入 / 选文件 → 绑到该 event）去补。区分二者 = **真打包错误不被伪装成正常静默**。禁用观感用**显式禁用样式（控件置灰 + 图标降饱和），不整行降 opacity**（行内文字始终保 ≥ 4.5:1 对比度）。此三态与正交的**静音态**（`enabled=false`：控件区弱化 + 静音钮点亮）叠加，互不取代。
 - **错误态用色（关键约束）**：app 自身错误（settings 不可写 / 解析失败 / helper 缺失）用 UI 语义 `error #FF453A`（真红）；**绝不用于四事件层**（StopFailure 永远琥珀）。非阻断提示（如 Claude Code 未装）用中性 `surface-2` + `text-2`，不上真红。
-- **拖入 drop-zone**：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → 边框 / 文字转黏土 + `clay-soft` 底。
+- **拖入 drop-zone**：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → **边框** 转黏土 + `clay-soft` 底，**文案保持 `text-2` 不变**。
+  - ✅ **已拍板（2026-07-11 `/ship`）—— hover 反馈由边框 + 底色承载，文字不转黏土**。此前本条写的是「边框 / **文字**转黏土」，与上面「事件行三态」条的「行内文字始终保 ≥ 4.5:1 对比度」自相矛盾：实测亮色 `clay` `#C4633C` 对 `panel` `#FFFDF8` = **3.97:1** —— 过图标 / 边框的 ≥3:1，**不过**正文的 ≥4.5:1。曾列的三个解法中取**解法 1**（本条原本自己标的推荐项）：
+    1. ✅ **采纳**：hover 只让边框 + `clay-soft` 底转黏土，文案保持 `text-2`。零品牌成本，语义（「命中了」）由边框 + 底色照样说清。
+    2. ❌ 调深亮色 `clay` 到 ≥4.5:1（约 `#A8502F`）—— 会改品牌色 **且**改 `Notification` 的视觉身份，为一个 hover 态动两处，不划算。
+    3. ❌ 豁免 —— 不成立：hover 文案是 12.5pt 常规字重，够不上 WCAG 大字体豁免（≥18.66pt bold / ≥24pt）。
+    落地：`AudioDropZoneView.promptLabel` 的 `foregroundColor` 恒为 `textSecondary`（不再有 `isHovering` 三元）；`isHovering` 仍然驱动边框与底色，hover 观感不变。`ContrastSuite.swift` 里那条被注释掉的「clay ≥4.5:1」known-gap 断言随之作废——正文文字集合里已经没有 clay 了。**「品牌强调唯一 = 黏土 `#D97757`」这条不为任何单一状态开色值的口子。**
 - **拒绝行**：真红 `circle-x` 字形 + `text-2` 说明，`原因`（真红）+「怎么修」一句；不道歉、不含糊。
 - **内边距 / 圆角**：沿用面板 12–13pt、卡片 radius 10、控件 radius 6。
 - ⚠️ **展柜 artifact 现状**：DESIGN.md 顶部链接的「设计系统预览」artifact 仍画着已移至 v2 的深夜降音量，且不在仓库 / CI 不可验。视觉真相源改为**仓库内 state gallery**（SwiftUI Preview 目录，与状态测试共用 fixtures，见 ENGINEERING T14）；外部展柜降为可选快照。
@@ -163,3 +192,7 @@
 | 2026-07-09 | manifest 版本字段用现有整数 `schema`（现值 1），而非另立独立版本号字段 | 2026-07-08 codex 复核纠正字段名；`PackManifest` 尚未 decode，靠 `Decodable` 忽略未知键前向兼容（T10） |
 | 2026-07-09 | 确认 night_dim 在 DESIGN.md 只作 v2、无 v1 特性叙述 | 深夜降音量已由 ENGINEERING T2 移出 v1；DESIGN.md 仅余展柜漂移诚实注记与「深夜音频硬件」美学隐喻，均非 v1 特性（T10） |
 | 2026-07-09 | `broken` 收窄为「文件缺失 / 路径无效」，剔除「音频内容损坏」 | `/codex review 78e19c2`：doctor 只 `fileExists` + containment，`play` fire-and-forget 不 `waitUntilExit()`，坏文件的播放失败信号结构上拿不到。设计真相源不得承诺代码无从判定的状态 |
+| 2026-07-11 | 事件字形 tile **保持事件色自染 15%**；改为调深两个亮色事件色：`Stop` `#2FA24E→#288B43`、`StopFailure` `#C87A00→#AC6900`（`Notification`/`SubagentStop`/全部暗色不动） | 对比度硬约束，非审美：自染底让亮色 `Stop` 2.75:1 / `StopFailure` 2.82:1 不过 WCAG 1.4.11 的 ≥3:1（旧 `ContrastSuite` 断的是「字形 vs 纯 panel」，断错了那一对，故一直假绿——也使上次 `#E08600→#C87A00` 的调色没达成目的）。调深后对真实复合底 3.53 / 3.59 / 3.32 / 4.37，全局最差 3.06:1（暗色 SubagentStop，未改）。`ContrastSuite` 改对 `compositedHex(事件色, over: panel, alpha: 0.15)` 断言，并**额外**钉住 tile 对面板可见性 ≥1.10:1 |
+| 2026-07-11 | **（同日第一次修法，已推翻 · 存档）** 事件字形 tile 底 = 中性 `surface-2` | 推翻理由：亮色 `surface-2` `#FFFDF7` 对 `panel` `#FFFDF8` = **1.0006:1**，是同一个颜色 —— tile 在亮色下**整个消失**，「过了 ≥3:1」靠的是字形直接落在面板上，等于用「删掉 tile」通过对比度；与「行结构」的「事件字形 tile 24pt, **事件色**」冲突，并连带让试听键「已启用」的圆形底在亮色下消失。教训：**只断言字形对比度不够，tile 存不存在也得钉住** → 新增 tile 可见性断言 |
+| 2026-07-11 | 真红 `error` **只做图标**，配套文案改用 `text-2`；真红色值不变 | 亮色 `#E0453A` 对 `panel`/`surface-2` = 4.07:1/4.06:1：过非文本 ≥3:1、**不过**正文 ≥4.5:1，而它此前被当正文用（包卡「文件丢失」、onboarding 详情）。`text-2` 5.54:1 过 AA |
+| 2026-07-11 | **（待决 · 未改）** drop-zone hover「文字转黏土」与「行内文字 ≥4.5:1」冲突登记为 known gap | 亮色 `clay` `#C4633C` = 3.97:1（过 ≥3:1、不过 ≥4.5:1）。clay 同时是品牌唯一强调 + `Notification` 事件色，改动牵连品牌与事件身份，须用户拍板；已在 drop-zone 条列出三个候选解法，`ContrastSuite` 放 known-gap 断言（≥3:1 启用、≥4.5:1 注释 + 自毁提醒），`TODOS.md` P3 |

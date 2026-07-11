@@ -288,6 +288,79 @@ func runDoctorSuites() {
         }
     }
 
+    // MARK: - checkPackIntegrity's config.json read must go through the same bounded,
+    // regular-file-gated door as `play` and `probeConfigRewritable` (`readConfigFileBounded`,
+    // SafeFileRead.swift) — `doctor` is precisely the tool a user reaches for to diagnose a
+    // hostile/oversized config.json, so it must never itself hang or crash on one.
+
+    suite("checkPackIntegrity: config.json is a DIRECTORY → .configUnreadable, not a crash") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            try? FileManager.default.createDirectory(
+                at: configFile, withIntermediateDirectories: true)
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: root.appendingPathComponent("packs"),
+                bundledPacksDirectory: nil)
+            guard case .configUnreadable = status else {
+                expect(false, "a directory-shaped config.json must report .configUnreadable, got \(status)")
+                return
+            }
+        }
+    }
+
+    suite("checkPackIntegrity: config.json is a FIFO → .configUnreadable, doctor still returns (never hangs)") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            makeFIFO(at: configFile)
+
+            let started = Date()
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: root.appendingPathComponent("packs"),
+                bundledPacksDirectory: nil)
+            let elapsed = Date().timeIntervalSince(started)
+
+            guard case .configUnreadable = status else {
+                expect(false, "a FIFO-shaped config.json must report .configUnreadable, got \(status)")
+                return
+            }
+            expect(elapsed < 5, "doctor must never hang reading a FIFO-shaped config.json, took \(elapsed)s")
+        }
+    }
+
+    suite(
+        "checkPackIntegrity: a VALID (fully decodable) but oversize (> 64 KiB) config.json is"
+            + " rejected by the size gate → .configUnreadable, even though the pack it names is"
+            + " otherwise complete (proving the size bound is what's rejecting it, not a"
+            + " coincidental decode failure — a raw, unbounded Data(contentsOf:) would read and"
+            + " decode this exact file successfully and report .complete instead)"
+    ) {
+        withTempDirectory { root in
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            let padding = String(repeating: "x", count: (1 << 16) + 100)
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "padding": "\#(padding)" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: packsDir, bundledPacksDirectory: nil)
+            guard case .configUnreadable(let reason) = status else {
+                expect(
+                    false,
+                    "an oversize config.json must report .configUnreadable even though the pack"
+                        + " it names is otherwise complete, got \(status)")
+                return
+            }
+            expect(
+                reason.contains("\(maxConfigFileBytes)"),
+                "the reason should mention the byte bound so a user can act on it, got \(reason)")
+        }
+    }
+
     suite("checkPackIntegrity: selected pack missing from disk → .packNotFound") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -552,6 +625,112 @@ func runDoctorSuites() {
         }
     }
 
+    // MARK: - loadPackManifest / loadPackManifestData (T16 shared manifest loader)
+    //
+    // `checkPackIntegrity`'s manifest-reading block above was extracted into these two
+    // `public` functions verbatim (T16: "共享 PackManifest 模块与运行时查找顺序同源") so
+    // `gui`'s `ClaudioGUICore` can reuse the exact same `isReallyContained`-gated read/decode
+    // path instead of growing a second, unaudited one. The suites above already pin
+    // `checkPackIntegrity`'s observable behavior end-to-end (corrupt manifest / symlink
+    // escape / NFC-NFD); these pin the extracted functions directly.
+
+    suite("loadPackManifest: decodes a well-formed manifest.json") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("minimal-chime", isDirectory: true)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packDirectory.appendingPathComponent("manifest.json"))
+
+            let result = loadPackManifest(in: packDirectory)
+            guard case .success(let manifest) = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+            expect(manifest.id == "minimal-chime", "decoded manifest must carry the right id")
+            expect(
+                manifest.events == ["stop": "stop.mp3"],
+                "decoded manifest must carry the declared events map")
+        }
+    }
+
+    suite("loadPackManifest: missing manifest.json → .unreadable, not a crash") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("ghost-pack", isDirectory: true)
+            let result = loadPackManifest(in: packDirectory)
+            if case .failure(.unreadable(let reason)) = result {
+                expect(
+                    reason.contains("manifest.json"),
+                    "the .unreadable reason should name manifest.json, got \(reason)")
+            } else {
+                expect(false, "expected .failure(.unreadable), got \(result)")
+            }
+        }
+    }
+
+    suite("loadPackManifest: corrupt JSON → .decodeFailed") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("minimal-chime", isDirectory: true)
+            writeFixture("{ not valid json", to: packDirectory.appendingPathComponent("manifest.json"))
+
+            let result = loadPackManifest(in: packDirectory)
+            if case .failure(.decodeFailed(let reason)) = result {
+                expect(!reason.isEmpty, "the .decodeFailed reason must carry a real message")
+            } else {
+                expect(false, "expected .failure(.decodeFailed), got \(result)")
+            }
+        }
+    }
+
+    suite("loadPackManifest: manifest.json as a symlink escaping the pack dir → .unreadable") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("minimal-chime", isDirectory: true)
+            let outsideManifest = root.appendingPathComponent("secret-manifest.json")
+            writeFixture(#"{ "id": "minimal-chime", "events": {} }"#, to: outsideManifest)
+            createSymlink(
+                at: packDirectory.appendingPathComponent("manifest.json"), pointingTo: outsideManifest)
+
+            let result = loadPackManifest(in: packDirectory)
+            expect(
+                { if case .failure(.unreadable) = result { return true } else { return false } }(),
+                "a manifest.json symlink escaping the pack dir must be .unreadable, got \(result)")
+        }
+    }
+
+    suite("loadPackManifestData: returns the exact raw bytes on disk, unparsed") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("minimal-chime", isDirectory: true)
+            // Deliberately includes an unknown top-level key `loadPackManifest`'s decode to
+            // `PackManifest` would silently drop — `loadPackManifestData` must hand back the
+            // raw bytes untouched, preserving it, since `gui`'s manifest-binding write path
+            // (T16) needs exactly that to avoid data loss on unknown keys.
+            let rawJSON = #"{ "id": "minimal-chime", "name": "极简铃音", "events": { "stop": "stop.mp3" } }"#
+            writeFixture(rawJSON, to: packDirectory.appendingPathComponent("manifest.json"))
+
+            let result = loadPackManifestData(in: packDirectory)
+            guard case .success(let data) = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+            expect(
+                String(data: data, encoding: .utf8) == rawJSON,
+                "loadPackManifestData must return the exact on-disk bytes, unknown keys included")
+        }
+    }
+
+    suite("loadPackManifest: reason surfaces the same human message checkPackIntegrity always used") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("ghost-pack", isDirectory: true)
+            let result = loadPackManifest(in: packDirectory)
+            guard case .failure(let error) = result else {
+                expect(false, "expected .failure, got \(result)")
+                return
+            }
+            expect(
+                error.reason.contains("manifest.json") && error.reason.contains("不存在或不可读"),
+                "the .unreadable reason must keep the exact human message, got \(error.reason)")
+        }
+    }
+
     suite("probeSettingsWritable: existing writable file → .writable") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
@@ -613,6 +792,89 @@ func runDoctorSuites() {
             } else {
                 expect(false, "a non-directory parent must report .notWritable")
             }
+        }
+    }
+
+    // MARK: - (g) config.json 可重写：fail-closed 写路径唯一的可见性出口
+    //
+    // 写路径（静音钮 / 切包）对畸形 config **fail closed**，而宽松读路径（`play` / `doctor` 的
+    // `ClaudioConfig`）照常工作——于是一份 `{"events":{"stop":1}}` 的 config 会让 App 里所有写操作
+    // **永久失败**，声音却一切正常；`setup` 因为 config 已存在也不会重建它。用户唯一能观察到的现象是
+    // 「点静音没反应」。doctor 的职责就是诊断：这几条钉死它必须把那个隐形状态说出来、并给出可执行的
+    // 修复指令，同时**不**把一台声音一切正常的机器报成硬失败。
+
+    suite("runDoctorChecks: 畸形 config（旧读路径照常能读）→ config 检查报 warning，且指令可执行") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture("{}", to: settingsFile)
+            // 关键：这份 config 的 `selected_pack` 是好的，只有 `events.stop` 是数字 1。宽松读路径把
+            // 它读成「events 解不出来 → 空表」，于是包检查照样 .complete、声音照响——用户完全看不出
+            // 自己已经被锁死在一个写不进的 config 上。
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "events": { "stop": 1 } }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+            let claudioBinaryPath = root.appendingPathComponent("claudio")
+            makeExecutableFixture(at: claudioBinaryPath)
+
+            let env = DoctorEnvironment(
+                afplayPath: "/usr/bin/afplay",
+                settingsFile: settingsFile,
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                logFile: root.appendingPathComponent("claudio.log"),
+                claudioBinaryPath: claudioBinaryPath.path,
+                commandRunner: FakeCommandRunner(
+                    result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")),
+                currentMacOSVersion: { SemanticVersion(major: 15, minor: 0, patch: 0) })
+            let report = runDoctorChecks(environment: env)
+
+            guard let configResult = report.results.first(where: { $0.name == "config" }) else {
+                expect(false, "doctor 必须有一条 config 检查，got \(report.results.map(\.name))")
+                return
+            }
+            expect(
+                configResult.severity == .warning,
+                "畸形 config 必须被 doctor 看见（这是用户唯一的诊断途径），got \(configResult.severity)")
+            expect(
+                configResult.message.contains("events.stop")
+                    && configResult.message.contains("true/false")
+                    && configResult.message.contains("删除该文件"),
+                "doctor 报出来的必须是可执行的修复指令，而不是一句「config 有问题」，got"
+                    + " \(configResult.message)")
+            expect(
+                !report.hasFailure,
+                "声音一切正常的机器不该被报成硬失败——坏的只是写路径，doctor 不该非零退出")
+            // 「播放不受影响」不是一句安慰，它是这条 warning 存在的全部理由：证明给自己看。
+            expect(
+                report.results.contains { $0.name == "pack" && $0.severity == .ok },
+                "宽松读路径照常工作：包检查仍然是绿的——正因如此，畸形 config 才是**隐形**的，"
+                    + "也正因如此 doctor 必须主动报它")
+        }
+    }
+
+    suite("runDoctorChecks: 全新安装（还没有 config.json）→ config 检查是 .ok，绝不假报警") {
+        withTempDirectory { root in
+            let env = healthyDoctorEnvironment(
+                root: root,
+                commandRunner: FakeCommandRunner(
+                    result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")),
+                currentMacOSVersion: { SemanticVersion(major: 15, minor: 0, patch: 0) })
+            // `healthyDoctorEnvironment` 会写一份合法 config——删掉它，模拟「一次都还没写过」。
+            try? FileManager.default.removeItem(at: env.configFile)
+
+            let report = runDoctorChecks(environment: env)
+            let configResult = report.results.first { $0.name == "config" }
+            expect(
+                configResult?.severity == .ok,
+                "还没有 config.json 只是「还没写过」（写路径会新建它），不是畸形，got"
+                    + " \(String(describing: configResult))")
         }
     }
 

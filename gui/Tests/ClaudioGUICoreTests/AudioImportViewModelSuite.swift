@@ -188,4 +188,90 @@ func runAudioImportViewModelSuites() async {
             expect(viewModel.state == .idle, "an empty batch must never move state off .idle")
         }
     }
+
+    // MARK: - retarget(to:): the pack-switch state leak (/codex review [P2])
+    //
+    // `PanelView.refresh()` used to just assign `.packID = ...` directly on a pack switch,
+    // leaving whatever `state` the PREVIOUS pack's last drop produced (a success, a rejection)
+    // displayed on the newly-selected pack's panel — the user reads a message about a pack
+    // they've already left. `retarget(to:)` fixes this, but has a subtle, load-bearing
+    // condition: it resets ONLY when the packID actually CHANGES (`guard newPackID != packID
+    // else { return }`), because `refresh()` is ALSO called right after an import/bind
+    // completes on the SAME pack — an unconditional reset would erase the very result
+    // (especially a FAILURE reason) the user needs to see, re-introducing the silent-error-
+    // swallowing this whole branch exists to fix. The two suites below are exactly that pair:
+    // one proves the reset happens on a real switch, the other proves it's a no-op when the
+    // pack didn't change — an unconditional-reset mutant passes the first and fails the second.
+
+    await suite(
+        "AudioImportViewModel.retarget(to:): switching to a DIFFERENT pack clears a lingering .success OR .reject to .idle and repoints packID"
+    ) {
+        await withTempDirectory { root in
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs"))
+
+            // A .success left behind by pack-a.
+            let successViewModel = AudioImportViewModel(packID: "pack-a", environment: environment)
+            let goodSource = root.appendingPathComponent("source/chime.wav")
+            writeFixture(validWAVData(), to: goodSource)
+            await successViewModel.handleDrop(sourceURL: goodSource, suggestedFileName: "chime.wav")
+            guard case .success = successViewModel.state else {
+                expect(false, "setup: handleDrop must succeed, got \(successViewModel.state)")
+                return
+            }
+
+            successViewModel.retarget(to: "pack-b")
+            expect(
+                successViewModel.state == .idle,
+                "retargeting to a DIFFERENT pack must clear a lingering .success to .idle, got"
+                    + " \(successViewModel.state)")
+            expect(successViewModel.packID == "pack-b", "retarget must repoint packID to the new pack")
+
+            // A .reject left behind by pack-a.
+            let rejectViewModel = AudioImportViewModel(packID: "pack-a", environment: environment)
+            let evilSource = root.appendingPathComponent("source/evil.mp3")
+            writeFixture(evilShellScriptData(), to: evilSource)
+            await rejectViewModel.handleDrop(sourceURL: evilSource, suggestedFileName: "evil.mp3")
+            guard case .reject = rejectViewModel.state else {
+                expect(false, "setup: handleDrop must reject, got \(rejectViewModel.state)")
+                return
+            }
+
+            rejectViewModel.retarget(to: "pack-b")
+            expect(
+                rejectViewModel.state == .idle,
+                "retargeting to a DIFFERENT pack must clear a lingering .reject to .idle, got"
+                    + " \(rejectViewModel.state)")
+            expect(rejectViewModel.packID == "pack-b", "retarget must repoint packID to the new pack")
+        }
+    }
+
+    await suite(
+        "AudioImportViewModel.retarget(to:): retargeting to the SAME packID PRESERVES state — the mutation-killer for the `newPackID != packID` guard (an unconditional reset would pass the DIFFERENT-pack test above and only fail here)"
+    ) {
+        await withTempDirectory { root in
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs"))
+            let viewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
+
+            let sourceURL = root.appendingPathComponent("source/chime.wav")
+            writeFixture(validWAVData(), to: sourceURL)
+            await viewModel.handleDrop(sourceURL: sourceURL, suggestedFileName: "chime.wav")
+            guard case .success(let importedBeforeRetarget) = viewModel.state else {
+                expect(false, "setup: handleDrop must succeed, got \(viewModel.state)")
+                return
+            }
+
+            // This is exactly what `PanelView.refresh()` does right after THIS import completed:
+            // it re-asserts the pack the view-model is already pointed at.
+            viewModel.retarget(to: "my-pack")
+
+            expect(
+                viewModel.state == .success(importedBeforeRetarget),
+                "retargeting to the pack it's ALREADY on must PRESERVE the result — wiping it here"
+                    + " would erase the success the user just triggered before they ever saw it,"
+                    + " got \(viewModel.state)")
+            expect(viewModel.packID == "my-pack", "packID must stay unchanged")
+        }
+    }
 }

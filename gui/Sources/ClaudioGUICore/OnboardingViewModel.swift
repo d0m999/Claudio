@@ -36,6 +36,27 @@ public final class OnboardingViewModel: ObservableObject {
         self.state = detectOnboardingState(environment: environment)
     }
 
+    #if DEBUG
+        /// Preview-only initializer (ENGINEERING.md T14 D2): pins ``state`` directly to
+        /// `previewState`, without running ``detectOnboardingState(environment:)`` or
+        /// touching disk at all — the state gallery's only way to render a SPECIFIC
+        /// ``OnboardingState`` deterministically (a real `refresh()` would re-detect from
+        /// `environment` and overwrite whatever this pinned). `environment` is still set to
+        /// a harmless, never-resolved placeholder (not the real `~/.claude`/`~/.claudio`
+        /// paths — see ``OnboardingEnvironment``'s own warning about `$HOME`), purely so the
+        /// stored property has a value; nothing in the gallery ever calls ``refresh()`` on a
+        /// preview-pinned instance. `#if DEBUG`-gated so this never ships in release and
+        /// can't be misused in production; must live in THIS file (not a separate
+        /// extension) since ``state``'s setter is `private`, and Swift's `private` is
+        /// file-scoped, not module-scoped.
+        public init(previewState: OnboardingState) {
+            self.environment = OnboardingEnvironment(
+                settingsFile: URL(fileURLWithPath: "/dev/null/claudio-preview-settings.json"),
+                claudioBinaryPath: URL(fileURLWithPath: "/dev/null/claudio-preview-binary"))
+            self.state = previewState
+        }
+    #endif
+
     /// This state's presentation copy — recomputed from ``state``, never cached, so it
     /// can never drift out of sync with it.
     public var copy: OnboardingCopy {
