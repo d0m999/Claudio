@@ -75,7 +75,7 @@ app 不在任务时运行，实际播放由 hook 触发。选 **helper-CLI**：a
 | `claudio install` | 把 hook 写进 settings.json（幂等，见下） | 0/非0 |
 | `claudio uninstall` | 精准摘除 claudio 的 hook 条目 | 0/非0 |
 | `claudio use <pack-id>` | 切当前包（改配置文件） | 0/非0 |
-| `claudio doctor` | 自检：settings.json 可写、包完整、afplay 在位 | 0/非0 |
+| `claudio doctor` | 只读自检（绝不写、绝不播）：settings.json 可写 · `~/.claudio/bin/claudio` 二进制在位 · afplay 在位 · 当前包完整 · **config.json 可重写**（2026-07-11 `/ship` 新增，见收口记录 ①）· `claudio.log` 近期失败 · macOS / Claude Code 版本兼容（T13） | 硬失败（非 0）**只有**前三项；其余一律 warning |
 | `claudio setup` | v1 过渡：从 app bundle 内把二进制+内置包复制到 `~/.claudio/`、首次默认选包、调 `claudio install`（见 T17；T15 真身面板落地后由 CTA 直接调同一逻辑，这条 CLI 入口不再是唯一途径） | 0/非0 |
 
 - `<event>` 合法值 = **v1 四事件**（决议 2，映射表见下方"工程落地细节 ①"）：`stop` `stop_failure` `notification` `subagent_stop`；`session_start` `session_end` `user_prompt_submit` 一律 v2。

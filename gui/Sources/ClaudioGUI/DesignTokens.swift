@@ -140,9 +140,10 @@ extension ClaudioColor {
                 ? Color(hex: ClaudioColorHex.stopDark) : Color(hex: ClaudioColorHex.stopLight)
         case .stopFailure:
             // Amber — DESIGN.md: "限流 / 欠费 / 过载 / 认证（非代码 bug）...绝不用红".
-            // 亮色由 DESIGN.md 原 #E08600 调深为 #C87A00（对亮 tile ≈3.31:1，原 ~2.73:1）以过
-            // 项目自己的 ≥3:1 非文本对比（WCAG 1.4.11）——仍是琥珀，绝不用红。被授权的设计决议，
-            // DESIGN.md 的四事件语义色表已同步。
+            // 亮色从 DESIGN.md 原 #E08600 一路调深到 #AC6900（**不是** 中间那版 #C87A00——它量的是
+            // 「字形 vs 纯 panel」，断错了那一对；对字形真实站着的复合底只有 2.82:1）。现值对
+            // 「StopFailure @15% 覆在 panel 上」的真实底是 3.59:1，过 ≥3:1 非文本对比（WCAG 1.4.11）。
+            // 仍是琥珀，绝不用红。全部数值与真相源见 ``ClaudioColorHex/stopFailureLight``。
             scheme == .dark
                 ? Color(hex: ClaudioColorHex.stopFailureDark)
                 : Color(hex: ClaudioColorHex.stopFailureLight)
