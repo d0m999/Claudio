@@ -7,26 +7,6 @@ import Foundation
 // manifest.json + on-disk file presence — this is the state gallery's (T14) and the real
 // panel's (T15) shared render-ready fixture.
 
-/// 在 `url` 上造一个 FIFO —— 「路径上有东西，但它不是正规文件」这一族里 `fileExists(atPath:isDirectory:)`
-/// 也挡不住的那个代表（目录还能靠 `isDirectory:` 排掉，FIFO / socket / 设备不能）。
-///
-/// 刻意是本文件私有、而不是加进 `TestSupport.swift`：helper 侧的 `TestSupport` 已有同形状的 `makeFIFO`
-/// （`PackContentSafetySuite` 在用），但那是另一个包的测试目标；本次改动的文件所有权也不包含 GUI 的
-/// `TestSupport.swift`。造一个 FIFO 的 `mkfifo(2)` 调用不值得为它跨目标做抽象。
-@MainActor
-private func makeCoveragePackFIFO(at url: URL) {
-    try? FileManager.default.createDirectory(
-        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-    let created = url.withUnsafeFileSystemRepresentation { pathPointer -> Bool in
-        guard let pathPointer else { return false }
-        return mkfifo(pathPointer, 0o644) == 0
-    }
-    expect(
-        created,
-        "makeCoveragePackFIFO: mkfifo 在 \(url.path) 失败 —— 依赖这个 fixture 的用例会在「其实什么都没测」"
-            + "的情况下变绿（路径上压根没有 FIFO，`.broken` 是因为文件不存在，不是因为闸门起作用了）")
-}
-
 @MainActor
 private func makeEnvironment(
     userPacksDirectory: URL,
@@ -314,7 +294,7 @@ func runCoverageStateSuites() {
                 to: userPacks.appendingPathComponent("my-pack/manifest.json"))
             // FIFO 是那条「`fileExists(atPath:isDirectory:)` 也救不了你」的用例：它连目录都不是，
             // 只有 `S_IFMT == S_IFREG` 这个判断能挡住它（helper 的 doctor/play 钉的是同一个 fixture）。
-            makeCoveragePackFIFO(at: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            makePackFIFO(at: userPacks.appendingPathComponent("my-pack/stop.mp3"))
 
             let rows = packCoverage(
                 packID: "my-pack", config: ClaudioConfig(selectedPack: "my-pack"),

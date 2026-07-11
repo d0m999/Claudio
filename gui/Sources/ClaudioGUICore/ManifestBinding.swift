@@ -12,10 +12,18 @@ public enum ManifestBindError: Error, Sendable, Equatable {
     /// `fileName` failed ``safePackFileURL(_:in:)``'s containment check (empty / absolute /
     /// `..`-escaping / NUL-bearing / a symlink resolving outside the pack directory).
     case unsafeFileName
-    /// `fileName` passed the containment check but doesn't actually exist inside the pack
-    /// directory — binding an event to a file that isn't really there would make the row
-    /// recompute to ``CoverageState/broken(fileName:)`` immediately after a "successful"
+    /// `fileName` passed the containment check but doesn't exist inside the pack directory as
+    /// a **regular file** — binding an event to a file that isn't really there would make the
+    /// row recompute to ``CoverageState/broken(fileName:)`` immediately after a "successful"
     /// bind, which must never happen.
+    ///
+    /// 「正规文件」是负重的，判定是 ``regularFileExists(at:)``（`stat(2)` + `S_IFREG`），与
+    /// `coverageState`（`CoverageState.swift`）、`doctor`、`play` **逐字同一个谓词**。曾经这里用的是
+    /// `FileManager.fileExists(atPath:)`，它对**目录**、FIFO、socket、设备一律回答 `true`：于是把一个
+    /// 名叫 `stop.mp3` 的目录绑上去会**返回成功并写进 manifest**，而面板下一次刷新立刻把同一条路径判成
+    /// `.broken`、`doctor` 报缺失、`play` 拒播——「导入成功了却是坏的」，正是这一族谓词要消灭的矛盾
+    /// （`/codex review` [P2]）。绑定是**写**路径，必须在写进 manifest 之前就挡住，而不是写完再由读路径
+    /// 去发现。
     case fileNotFound(fileName: String)
     /// `manifest.json` couldn't be read at all (see ``PackManifestLoadError``), its
     /// content isn't a top-level JSON *object*, its `events` field is present but isn't
@@ -53,8 +61,10 @@ public enum ManifestBindError: Error, Sendable, Equatable {
 ///   fell through to it (mirrors ``importAudioFile``'s own confinement to
 ///   `environment.userPacksDirectory`, never `environment.bundledPacksDirectory`).
 /// - ``safePackFileURL(_:in:)`` to validate `fileName` before it's ever written into the
-///   manifest, plus a `fileExists` check so a bind can never point an event at a file that
-///   isn't really on disk.
+///   manifest, plus a ``regularFileExists(at:)`` check — the same `stat(2)`+`S_IFREG` gate
+///   `coverageState`/`doctor`/`play` use, never a bare `FileManager.fileExists` — so a bind
+///   can never point an event at something that isn't a real, playable file (see
+///   ``ManifestBindError/fileNotFound(fileName:)``).
 /// - ``loadPackManifestData(in:)`` (T16's shared loader) to read `manifest.json`'s raw
 ///   bytes, gated by the same `isReallyContained` symlink-escape guard `checkPackIntegrity`/
 ///   `loadPackManifest` use — never a second, unaudited manifest read.
@@ -107,7 +117,7 @@ public func bindEventToManifest(
     guard let resolvedFile = safePackFileURL(fileName, in: userPackDirectory) else {
         return .failure(.unsafeFileName)
     }
-    guard FileManager.default.fileExists(atPath: resolvedFile.path) else {
+    guard regularFileExists(at: resolvedFile) else {
         return .failure(.fileNotFound(fileName: fileName))
     }
 

@@ -5,6 +5,18 @@ import Foundation
 /// 逐字保留后原样写回。`claudio use`（``selectPack``）与「静音钮」（``setEventEnabled``）是它
 /// 仅有的两个调用方，共用这一条代码路径，而不是各写一遍。
 ///
+/// ## 「保真」保的是键与值，不是**键顺序**（`/codex review` [P2]，判定为按现状）
+///
+/// 写回走 `[.prettyPrinted, .sortedKeys]`，所以整份 JSON 的顶层与嵌套键都会被**排序**——未知键的
+/// **内容**逐字幸存，它们在文件里的**先后**不幸存。这不是本次引入的退化：`9b89650` 之前的
+/// `JSONEncoder` 写路径同样是 `[.prettyPrinted, .sortedKeys]`，只是它还会把未知键整个 DROP 掉；
+/// 换句话说这条路径在「保真」这件事上严格更好，只是没有好到字节级。
+///
+/// 刻意不修：JSON 对象本就无序，重排没有任何语义损失；确定性输出换来的是稳定 diff 与幂等写入，
+/// 也是本仓库既定的写法（``SettingsInstaller`` 与 `gui` 的 `ManifestBinding` 同样 `.sortedKeys`）。
+/// 真要保序，`JSONSerialization` 做不到（`[String: Any]` 无序），得手写一个 JSON 序列化器或对原始
+/// 文本做外科手术——为零语义收益背一整个新的、需要重新审计的写路径，不划算。
+///
 /// ## 为什么绝不能 round-trip `ClaudioConfig`（Codable）
 ///
 /// ``ClaudioConfig`` 只建模三个 v1 键（`selected_pack` / `master_volume` / `events`），而它的

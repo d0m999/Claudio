@@ -293,6 +293,61 @@ func runManifestBindingSuites() async {
         }
     }
 
+    // 正规文件闸门的**写**侧（`/codex review` [P2]）。`coverageState`（读侧）、`doctor`、`play` 早已
+    // 只认 ``regularFileExists(at:)``（`stat(2)` + `S_IFREG`），而绑定曾经用 `FileManager.fileExists(atPath:)`
+    // —— 它对目录 / FIFO / socket / 设备一律回答 `true`。于是一个名叫 `stop.mp3` 的**目录**能被绑成功、
+    // 写进 manifest，面板下一次刷新立刻把同一条路径判成 `.broken`：用户看到「导入成功」，拿到的是一条坏行。
+    // 写路径必须在**写进 manifest 之前**挡住它，而不是写完了再由读路径去发现。下面两条钉的是同一个闸门的
+    // 两个最硬输入：目录（`fileExists(atPath:isDirectory:)` 尚能排掉）与 FIFO（连它也排不掉）。
+    suite("bindEventToManifest: 一个名叫 stop.mp3 的**目录** → .fileNotFound，且一个字节都不写") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            let originalRawJSON = #"{ "id": "my-pack", "events": {} }"#
+            writeFixture(originalRawJSON, to: manifestFile)
+            // 这个目录**存在**、名字就叫 stop.mp3、路径**在包内**、containment 检查也**通过** ——
+            // 唯一能挡住它的就是正规文件闸门本身。
+            try? FileManager.default.createDirectory(
+                at: userPacks.appendingPathComponent("my-pack/stop.mp3"),
+                withIntermediateDirectories: true)
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let result = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+            expect(
+                failureError(result) == .fileNotFound(fileName: "stop.mp3"),
+                "一个目录不是可播放的文件 —— 绑定必须拒（否则报成功、写进 manifest，面板刷新立刻 .broken），"
+                    + "got \(result)")
+            expect(
+                (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
+                "被拒的绑定必须让 manifest.json 逐字节原封不动")
+        }
+    }
+
+    suite(
+        "bindEventToManifest: 一个名叫 stop.mp3 的 FIFO → .fileNotFound（`fileExists` 会说它在；`stat`+S_IFREG 不会）"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            let originalRawJSON = #"{ "id": "my-pack", "events": {} }"#
+            writeFixture(originalRawJSON, to: manifestFile)
+            // FIFO 是那条「`fileExists(atPath:isDirectory:)` 也救不了你」的用例：它连目录都不是，
+            // 只有 `stat` + `S_IFREG` 能判掉。
+            makePackFIFO(at: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let result = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+            expect(
+                failureError(result) == .fileNotFound(fileName: "stop.mp3"),
+                "FIFO 不是可播放的文件 —— 绑定必须拒，got \(result)")
+            expect(
+                (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
+                "被拒的绑定必须让 manifest.json 逐字节原封不动")
+        }
+    }
+
     // Distinct from the corrupt-manifest suite below: `{ not valid json` READS fine and only
     // fails `JSONSerialization`, so it exercises the "顶层不是 JSON 对象" guard. A manifest.json
     // that is ABSENT fails one step earlier — inside `loadPackManifestData` — the only
