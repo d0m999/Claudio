@@ -91,20 +91,14 @@ public struct AudioDropZoneView: View {
         .accessibilityLabel("拖入或点按添加你自己的声音")
     }
 
-    /// Opens an `NSOpenPanel` (multi-select — mirrors this zone's own multi-file `.onDrop`
-    /// batch semantics) scoped to the same wav/mp3/aiff/m4a whitelist ``AudioFormat``
-    /// documents, feeding every chosen file into the SAME hardened import pipeline a drop
-    /// already uses. `allowedContentTypes` is a picker-UX nicety only, never the actual
-    /// security boundary (see ``audioOpenPanelContentTypes``'s doc comment). AppKit —
-    /// compile-only here, manual-verify on a real Mac.
+    /// Opens the shared audio picker (``runAudioOpenPanel(allowsMultipleSelection:)`` —
+    /// multi-select here, mirroring this zone's own multi-file `.onDrop` batch semantics),
+    /// feeding every chosen file into the SAME hardened import pipeline a drop already uses.
+    /// The panel itself is constructed ONCE, in `AudioOpenPanel.swift`, shared with
+    /// ``EventRowView``'s row-end affordance — never a second, independently-configured
+    /// picker. AppKit — compile-only here, manual-verify on a real Mac.
     private func openImportPanel() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = audioOpenPanelContentTypes
-        panel.allowsMultipleSelection = true
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        guard panel.runModal() == .OK else { return }
-        let requests = panel.urls.map {
+        let requests = runAudioOpenPanel(allowsMultipleSelection: true).map {
             AudioImportRequest(sourceURL: $0, suggestedFileName: $0.lastPathComponent)
         }
         guard !requests.isEmpty else { return }

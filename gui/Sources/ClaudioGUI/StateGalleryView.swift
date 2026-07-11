@@ -23,6 +23,8 @@
     /// under CommandLineTools; only the classic `PreviewProvider` protocol form is used
     /// below).
     struct StateGalleryView: View {
+        @Environment(\.colorScheme) private var colorScheme
+
         var body: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
@@ -33,6 +35,10 @@
                 }
                 .padding(20)
             }
+            // The gallery's own chrome sits on a TOKENIZED surface too, never SwiftUI's
+            // untokenized default window background — see ``GalleryFrame``'s note for why that
+            // background was a correctness bug in a file DESIGN.md calls the 视觉真相源.
+            .background(ClaudioColor.panel(colorScheme))
         }
     }
 
@@ -218,6 +224,7 @@
     private struct GallerySection<Content: View>: View {
         let title: String
         let content: Content
+        @Environment(\.colorScheme) private var colorScheme
 
         init(title: String, @ViewBuilder content: () -> Content) {
             self.title = title
@@ -228,6 +235,9 @@
             VStack(alignment: .leading, spacing: 10) {
                 Text(title)
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
+                    // 既有 token，不是 SwiftUI 默认 `.primary`。
+                    .foregroundColor(ClaudioColor.text(colorScheme))
                 content
             }
         }
@@ -236,6 +246,7 @@
     private struct GalleryFrame<Content: View>: View {
         let caption: String
         let content: Content
+        @Environment(\.colorScheme) private var colorScheme
 
         init(caption: String, @ViewBuilder content: () -> Content) {
             self.caption = caption
@@ -246,13 +257,28 @@
             VStack(alignment: .leading, spacing: 4) {
                 Text(caption)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+                    // 既有 token（`text-2`），不是非 token 的 `.secondary`。
+                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                // LOAD-BEARING (`/ship` 评审): every framed view here — ``EventRowView``,
+                // ``AudioDropZoneView``, ``PackGalleryView``, ``OnboardingView`` — paints NO
+                // surface of its own; in production ``PanelView`` (the composition root) supplies
+                // it. Without this background, the gallery rendered all four event colors, every
+                // glyph tile and every reject row on SwiftUI's **untokenized default window
+                // background** — and that surface is precisely what every contrast assertion in
+                // `ContrastSuite` is talking about. A 视觉真相源 (DESIGN.md line 134) that shows
+                // the colors on the wrong surface is worse than no gallery: it makes a
+                // contrast failure look fine (which is exactly how the glyph-tile ≥3:1 failure
+                // this pass fixes survived review). `panel` in both schemes — the same token
+                // `PanelView` uses.
                 content
+                    .background(ClaudioColor.panel(colorScheme))
             }
             .padding(8)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.gray.opacity(0.2))
+                    // 既有 token，不是非 token 的 `Color.gray.opacity(0.2)`。
+                    .strokeBorder(ClaudioColor.hairlineStrong(colorScheme))
             )
         }
     }

@@ -17,6 +17,17 @@ import UniformTypeIdentifiers
 public struct EventRowView: View {
     public let row: EventRow
     @ObservedObject private var importViewModel: EventRowImportViewModel
+
+    /// The row's UNDERLYING drop-zone mechanics (``EventRowImportViewModel/importViewModel``),
+    /// observed SEPARATELY (`/ship` 评审 · 静默吞错修复): `@ObservedObject` on the outer
+    /// ``EventRowImportViewModel`` only republishes ITS OWN `@Published` members (`bindResult`) —
+    /// a nested `ObservableObject`'s changes do NOT propagate through its parent. So the
+    /// IMPORT-side failure surface (``AudioImportViewModel/state`` == `.reject`, i.e. 超大 /
+    /// 格式不对 / 时长超限) would never invalidate this view if we only observed the outer one,
+    /// and ``importErrorMessage`` below reads BOTH surfaces. Same instance either way — this is
+    /// an extra observation of the object the row was already handed, never a second view-model.
+    @ObservedObject private var dropState: AudioImportViewModel
+
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHoveringImportTarget = false
 
@@ -91,6 +102,9 @@ public struct EventRowView: View {
     ) {
         self.row = row
         self.importViewModel = importViewModel
+        // The SAME object `importViewModel` already owns — observed a second time so this view
+        // also re-renders on the IMPORT-side `.reject` surface (see `dropState`'s doc comment).
+        _dropState = ObservedObject(wrappedValue: importViewModel.importViewModel)
         self.focusedTarget = focusedTarget
         self.adaptation = adaptation
         self.onPreview = onPreview
@@ -99,31 +113,41 @@ public struct EventRowView: View {
     }
 
     public var body: some View {
-        Group {
-            if adaptation.rowWrapsToTwoLines {
-                // "更大" tier: 名/id 上、文件/控件下 — ENGINEERING.md's literal two-line
-                // degradation, applied here rather than letting the single HStack truncate
-                // or overflow at large Dynamic Type sizes.
-                VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 4) {
+            Group {
+                if adaptation.rowWrapsToTwoLines {
+                    // "更大" tier: 名/id 上、文件/控件下 — ENGINEERING.md's literal two-line
+                    // degradation, applied here rather than letting the single HStack truncate
+                    // or overflow at large Dynamic Type sizes.
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(spacing: 8) {
+                            glyphTile
+                            identity
+                            Spacer(minLength: 8)
+                        }
+                        HStack(spacing: 8) {
+                            trailing
+                        }
+                    }
+                } else {
                     HStack(spacing: 8) {
                         glyphTile
                         identity
                         Spacer(minLength: 8)
-                    }
-                    HStack(spacing: 8) {
                         trailing
                     }
                 }
-            } else {
-                HStack(spacing: 8) {
-                    glyphTile
-                    identity
-                    Spacer(minLength: 8)
-                    trailing
-                }
+            }
+            .frame(minHeight: adaptation.rowWrapsToTwoLines ? 44 : 28)
+
+            // 绝不静默吞错（项目规则原文: "never a silent no-op reported as success"）—— 一次被拒的
+            // 导入（超大 / 格式不对 / 时长超限）或一次失败的 manifest 绑定，此前在行上**什么都不显示**：
+            // 字节可能已经落进包里成了孤儿，`onImportCompleted()` 照常触发 `refresh()`，行原地闪一下
+            // 又回到「未配置」，用户只看到「拖进去没反应」。见 ``importErrorMessage``。
+            if let message = importErrorMessage {
+                importErrorRow(message)
             }
         }
-        .frame(minHeight: adaptation.rowWrapsToTwoLines ? 44 : 28)
         // LOAD-BEARING (DESIGN.md, verbatim): "禁用观感用显式禁用样式（控件置灰 + 图标降饱和），
         // 不整行降 opacity（行内文字始终保 ≥ 4.5:1 对比度）" — the row itself NEVER has its
         // opacity reduced, in ANY state (present/unmapped/broken, enabled/muted). Disabled
@@ -147,6 +171,15 @@ public struct EventRowView: View {
     private var glyphTile: some View {
         let color = ClaudioColor.event(row.event, colorScheme)
         return RoundedRectangle(cornerRadius: 6)
+            // 事件色自己的 15% 淡底 —— DESIGN.md 行结构「事件字形 tile 24pt, **事件色**, 圆角6」。
+            // 字形对这块**复合底色**（事件色 @15% 覆在 panel 上）必须过 WCAG 1.4.11 的 ≥3:1。
+            // `/ship` 评审实证：旧的亮色 Stop `#2FA24E` / StopFailure `#C87A00` 在这块真实底上
+            // 只有 2.75:1 / 2.82:1，**不及格**——而当时 `ContrastSuite` 断的是「字形 vs 纯 panel」，
+            // 断错了那一对，所以一直假绿。修法是**调深亮色事件色**（`#288B43` / `#AC6900`，
+            // 2026-07-11 授权，DESIGN.md 配色表已同步），而不是把 tile 改成中性色：
+            // `surface-2` 亮色 `#FFFDF7` 对 panel `#FFFDF8` 只有 1.0006:1 —— tile 会**整个消失**。
+            // 现在字形对真实 tile 底亮色 3.53/3.59/3.32/4.37、tile 对面板 1.20:1（看得见）。
+            // 这一对由 `ContrastSuite` 用 `compositedHex(事件色, over: panel, alpha: 0.15)` 钉死。
             .fill(color.opacity(0.15))
             .frame(width: 24, height: 24)
             .overlay(
@@ -173,6 +206,8 @@ public struct EventRowView: View {
                 .foregroundColor(ClaudioColor.text(colorScheme))
             Text(row.event.cliName)
                 .font(.system(size: 10 * typeScale, design: .monospaced))
+                // DESIGN.md 字体表：数据 / 事件 id = JetBrains Mono，**tabular-nums**。
+                .monospacedDigit()
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
         }
         .accessibilityElement(children: .combine)
@@ -188,17 +223,23 @@ public struct EventRowView: View {
             case .present(let fileName):
                 presentTrailing(fileName: fileName)
             case .unmapped:
-                // DESIGN.md line 127 specifies unmapped/broken rows as "试听 ▶ 禁用" — a
-                // PRESENT-but-disabled preview button, not an absent one; render it here
-                // too, not just for `.present`. `previewButton`'s own `enabled` already
-                // folds in `row.coverage.previewEnabled` (false for `.unmapped`), so it
-                // renders with its existing disabled styling automatically.
                 importAffordance(label: "未配置")
-                previewButton(claimsActionFocus: false)
             case .broken:
                 importAffordance(label: "文件丢失")
-                previewButton(claimsActionFocus: false)
             }
+            // DESIGN.md line 127 renders 试听 ▶ on EVERY row, just DISABLED on unmapped/broken
+            // ("试听 ▶ 禁用" — a present-but-disabled button, not an absent one);
+            // `previewButtonBody`'s own `enabled` already folds in `row.coverage.previewEnabled`,
+            // so the disabled styling applies automatically. Hence ONE call site, outside the
+            // switch.
+            //
+            // `claimsActionFocus` comes from ``EventRow/previewClaimsActionFocus`` (`ClaudioGUICore`,
+            // unit-tested) — NOT from three hand-written `true`/`false` literals inside the switch
+            // above, which is what this was (T16 review 修复⑥ sank the decision into a pure
+            // function precisely because nothing constrained those literals: flipping one broke no
+            // test, while it silently decides whether opening focus lands on a dead preview button
+            // or the operable import affordance).
+            previewButton(claimsActionFocus: row.previewClaimsActionFocus)
             muteIndicator
         }
     }
@@ -212,6 +253,8 @@ public struct EventRowView: View {
             // folds in `row.enabled`) — never by dimming this text's opacity.
             Text(fileName)
                 .font(.system(size: 11 * typeScale, design: .monospaced))
+                // DESIGN.md 字体表：数据 / 事件 id = JetBrains Mono，**tabular-nums**（等宽数字）。
+                .monospacedDigit()
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 // 长文件名截断到一行、留尾（ENGINEERING.md T15 D5: "长文件名截断带尾"；"不裁切、
                 // 不溢出" 指布局层面不裁掉整个控件，文本本身仍需截断以不撑爆行）。
@@ -233,7 +276,7 @@ public struct EventRowView: View {
                     // (e.g. "waveform") as an unlabeled-feeling extra `.contain` stop.
                     .accessibilityHidden(true)
             }
-            previewButton(claimsActionFocus: true)
+            // 试听 ▶ 由 `trailing` 统一渲染（每行恰好一次，见那里的注释）—— 这里不再各自铺一份。
         }
     }
 
@@ -253,6 +296,9 @@ public struct EventRowView: View {
         .frame(minWidth: 24, minHeight: 24)
         .background(
             Circle()
+                // 事件色 15% 自染底 —— 与 ``glyphTile`` 同一块复合底、同一条 ≥3:1 约束，
+                // 由调深后的亮色事件色（`#288B43` / `#AC6900`）满足；见 ``glyphTile`` 的注释。
+                // DESIGN.md「圆形试听键 speaker.wave.2, 事件色」不变。
                 .fill(enabled ? ClaudioColor.event(row.event, colorScheme).opacity(0.15) : Color.clear)
                 .frame(width: 22, height: 22)
         )
@@ -341,20 +387,16 @@ public struct EventRowView: View {
         .focused(focusedTarget, equals: .eventAction(row.event))
     }
 
-    /// Opens an `NSOpenPanel` scoped to the same wav/mp3/aiff/m4a whitelist
-    /// ``AudioFormat`` documents (ENGINEERING.md 决议 "拖入自带音频"), feeding the chosen
-    /// file into the SAME hardened import pipeline `.onDrop` already uses. The panel's
-    /// `allowedContentTypes` is a picker-UX nicety only, never the actual security
-    /// boundary — a mislabeled file still gets content-sniffed and can still be rejected by
-    /// `importAudioFile`'s real magic-byte check (``sniffAudioFormat(_:)``) exactly as a
-    /// drag-and-drop would be. AppKit — compile-only here, manual-verify on a real Mac.
+    /// Opens the shared audio picker (``runAudioOpenPanel(allowsMultipleSelection:)``,
+    /// single-select — a row binds to exactly one event), feeding the chosen file into the
+    /// SAME hardened import pipeline `.onDrop` already uses. The panel's `allowedContentTypes`
+    /// is a picker-UX nicety only, never the actual security boundary — a mislabeled file still
+    /// gets content-sniffed and can still be rejected by `importAudioFile`'s real magic-byte
+    /// check (``sniffAudioFormat(_:)``) exactly as a drag-and-drop would be, and that rejection
+    /// now actually SHOWS on the row (``importErrorMessage``). AppKit — compile-only here,
+    /// manual-verify on a real Mac.
     private func openImportPanel() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = audioOpenPanelContentTypes
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.canChooseFiles = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let url = runAudioOpenPanel(allowsMultipleSelection: false).first else { return }
         let suggestedFileName = url.lastPathComponent
         Task { @MainActor in
             await importViewModel.handleDrop(sourceURL: url, suggestedFileName: suggestedFileName)
@@ -400,6 +442,73 @@ public struct EventRowView: View {
             onImportCompleted()
         }
         return true
+    }
+
+    // MARK: - 导入 / 绑定失败的如实上报（绝不静默吞错）
+
+    /// The row's CURRENT import/bind failure, as one human Chinese sentence — or `nil` when the
+    /// last attempt (if any) went through cleanly.
+    ///
+    /// Reads BOTH failure surfaces ``EventRowImportViewModel`` deliberately keeps apart (its own
+    /// doc comment: "two different failure surfaces with two different causes, never folded into
+    /// one"), and reports whichever one the MOST RECENT attempt actually hit:
+    ///
+    /// 1. ``AudioImportViewModel/state`` == `.reject` — the import itself was refused (超大 /
+    ///    非白名单格式 / 时长超限 / 路径不安全 / 顶替内置包 / 拷贝失败). Checked FIRST because a
+    ///    rejected import never reaches the bind step at all, so `bindResult` is left holding
+    ///    whatever an EARLIER attempt put there — a stale value that must not outrank the
+    ///    rejection the user just triggered.
+    /// 2. ``EventRowImportViewModel/bindResult`` == `.failure` — the file WAS copied in, but
+    ///    writing it into `manifest.json` failed (manifest 不可读 / 写入失败 / …). This is the
+    ///    nastiest case and the reason this whole property exists: the bytes are already on disk
+    ///    (an orphan file inside the pack), yet the row would render 「未配置」 forever with no
+    ///    explanation anywhere.
+    ///
+    /// (`.success` on either surface yields `nil` — the row's own ``EventRow/coverage``, freshly
+    /// recomputed by `PanelView.refresh()` via `onImportCompleted`, IS the success feedback.)
+    private var importErrorMessage: String? {
+        if case .reject(let reason) = dropState.state { return reason.message }
+        if case .failure(let error) = importViewModel.bindResult { return bindErrorMessage(error) }
+        return nil
+    }
+
+    /// The 「拒绝行」 shape DESIGN.md already defines ("真红 `circle-x` 字形 + `text-2` 说明"),
+    /// reused verbatim from ``AudioDropZoneView``'s own `rejectRow(_:)` so a row-level failure and
+    /// a drop-zone-level failure look like the same thing — because they ARE the same thing.
+    ///
+    /// 真红只上**图标**（非文本，门槛 ≥3:1），文案走 `text-2`（5.54:1，过 ≥4.5:1 文本门槛）—
+    /// `/ship` 评审实证：真红当正文亮色下只有 4.07:1，不达标。
+    private func importErrorRow(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.error(colorScheme))
+            Text(message)
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    /// One human Chinese sentence per ``ManifestBindError`` case — presentation copy, so it lives
+    /// HERE rather than in `ClaudioGUICore` (exactly like ``eventDisplayName(_:)`` below, and
+    /// unlike `DropRejectionReason.message`, which `ClaudioGUICore` already owns). Exhaustive, no
+    /// `default:` — a new bind-error case fails this file to compile until it, too, gets told to
+    /// the user instead of being swallowed.
+    private func bindErrorMessage(_ error: ManifestBindError) -> String {
+        switch error {
+        case .packNotFound(let packID):
+            "声音已经存进来了，但「\(packID)」这个包现在找不到，没法把它绑到这个事件上——重开面板再试一次。"
+        case .unsafeFileName:
+            "这个文件名 Claudio 不敢写进声音包清单，换个正常一点的名字再拖一次。"
+        case .fileNotFound(let fileName):
+            "「\(fileName)」没能留在声音包里，绑定已中止（清单一个字节都没改），再拖一次试试。"
+        case .manifestUnreadable(let reason):
+            "这个声音包的 manifest.json 读不动，绑定已中止（没有改坏它）：\(reason)"
+        case .writeFailed(let reason):
+            "声音存进去了，但写不进声音包清单：\(reason)"
+        }
     }
 
     // MARK: - Accessibility (DESIGN.md「无障碍规格」: "事件行→「{事件名}，声音 {文件名}，

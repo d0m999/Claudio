@@ -2,16 +2,19 @@ import ClaudioCore
 import ClaudioGUICore
 import SwiftUI
 
-// MARK: - DESIGN.md token values (hand-maintained subset, grew across T7/T15/T16)
+// MARK: - DESIGN.md token values → SwiftUI `Color`
 //
-// This is **not** yet a canonical, generated design-token module — it remains a
-// hand-maintained subset of DESIGN.md's palette, extended in place across T7 (neutral/brand),
-// T15 (surface-2) and T16 (per-event colors/glyphs). Consolidating it into a canonical token
-// module was originally slated for T14 but was deliberately deferred there (out of scope —
-// would churn every shipped view for no state-gallery benefit); it is now tracked as a
-// non-blocking leftover in TODOS.md. Until then, every value below is copied verbatim from
-// DESIGN.md's color table so views render its exact hex values without inventing new ones
-// (project rule: "不经明确授权不得偏离 DESIGN.md"); do not add a color that isn't there.
+// 这个文件里**没有任何 hex 字面量**了（/ship 评审修复①）：每个颜色都从
+// ``ClaudioColorHex``（`ClaudioGUICore`，纯 Foundation）的常量构建。那里是 DESIGN.md 配色表在
+// gui/ 里的唯一真相源，`ContrastSuite.swift` 的对比度断言也直接对同一批常量求值——所以改一个
+// 颜色，视图渲染和对比度不变量**同时**改变，对比度测试能真的因此变红。
+//
+// （在这之前，DESIGN.md 的 hex 在本文件和 `ContrastSuite.swift` 各存一份手抄副本，改这里对断言
+// 毫无影响——一个在结构上不可能捕获它所针对的回归的断言。见 `ClaudioColorHex.swift` 的文件头。）
+//
+// 本文件负责的只剩「`Color` 层」的事：随 `ColorScheme` 选明/暗值，以及 DESIGN.md 用 `rgba(...)`
+// 表达的那几个 token 的透明度（`hairline-strong` / `clay-soft`）。不要在这里新增
+// DESIGN.md 里没有的颜色（项目规则：「不经明确授权不得偏离 DESIGN.md」）。
 
 extension Color {
     /// A `Color` from a `"RRGGBB"` (or `"#RRGGBB"`) hex string, as used throughout
@@ -34,58 +37,76 @@ extension Color {
 /// documented light-mode counterparts.
 enum ClaudioColor {
     static func text(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "F4EBDD") : Color(hex: "201D19")
+        scheme == .dark
+            ? Color(hex: ClaudioColorHex.textDark) : Color(hex: ClaudioColorHex.textLight)
     }
 
+    /// `text-2` 次要文字。也是每一处**报错文案**的用色（/ship 评审修复③的决议：真红 `error`
+    /// 只做图标、不做正文——亮色真红对面板只有 4.07:1，不过正文 ≥4.5:1；`text-2` 是 5.54:1）。
     static func textSecondary(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "B0AEA5") : Color(hex: "6F665B")
+        scheme == .dark
+            ? Color(hex: ClaudioColorHex.text2Dark) : Color(hex: ClaudioColorHex.text2Light)
     }
 
     static func panel(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "1A1815") : Color(hex: "FFFDF8")
+        scheme == .dark
+            ? Color(hex: ClaudioColorHex.panelDark) : Color(hex: ClaudioColorHex.panelLight)
     }
 
-    /// `surface-2` 抬升表面 (T15). Added for `PackGalleryView`'s pack-card background —
-    /// ⚠️ DESIGN.md 未定义 pack 卡背景色，这里用既有 token 派生（`surface-2` 是 DESIGN.md
-    /// 「配色」表里已有的「抬升」表面语义，最贴近 macOS 壁纸选择器式卡片的既有选项），而非
-    /// 新造一个颜色。见 `PackGalleryView`'s doc comment 与 `ContrastSuite.swift` 对
-    /// text/text-2 在 `surface-2` 上的对比度断言。
+    /// `surface-2` 抬升表面 (T15). `PackGalleryView` 的 pack 卡背景 —— ⚠️ DESIGN.md 未定义 pack
+    /// 卡背景色，这里用既有 token 派生（`surface-2` 是 DESIGN.md「配色」表里已有的「抬升」表面
+    /// 语义，最贴近 macOS 壁纸选择器式卡片的既有选项），而非新造一个颜色。
+    ///
+    /// ⚠️ **不要**拿它当 `EventRowView.glyphTile` 的 tile 底 —— 这条路走过、并被推翻：亮色
+    /// `surface-2` `#FFFDF7` 对 `panel` `#FFFDF8` 只有 **1.0006:1**，两者**是同一个颜色**，
+    /// tile 会在亮色下**整个消失**（"通过"对比度靠的是字形直接落在面板上，而 DESIGN.md 行结构
+    /// 要求 tile 是**事件色**）。tile 的 ≥3:1 现由**调深亮色事件色**满足（`#288B43` / `#AC6900`），
+    /// tile 保持事件色自染 15%。`ContrastSuite.swift` 对此正反双向钉死：既断言字形对真实复合底
+    /// ≥3:1，也断言 tile 底本身对 `panel` **可见**（≥1.10:1）—— 后者正是当初漏掉、导致 tile
+    /// 消失也能"全绿"的那把尺子。
     static func surface2(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "262320") : Color(hex: "FFFDF7")
+        scheme == .dark
+            ? Color(hex: ClaudioColorHex.surface2Dark) : Color(hex: ClaudioColorHex.surface2Light)
     }
 
-    /// `hairline-strong` — DESIGN.md gives this as `rgba(...)`, not a plain hex, hence
-    /// the explicit `red:green:blue:opacity:` form instead of ``Color/init(hex:)``.
+    /// `hairline-strong` — DESIGN.md 把它写成 `rgba(...)`：基色取自 ``ClaudioColorHex``，
+    /// 透明度（`.16`）是本层（`Color` 层）的事。
     static func hairlineStrong(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? Color(red: 245 / 255, green: 235 / 255, blue: 221 / 255, opacity: 0.16)
-            : Color(red: 20 / 255, green: 20 / 255, blue: 19 / 255, opacity: 0.16)
+            ? Color(hex: ClaudioColorHex.hairlineBaseDark).opacity(0.16)
+            : Color(hex: ClaudioColorHex.hairlineBaseLight).opacity(0.16)
     }
 
     /// `clay` — the sole brand accent.
     static func clay(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "D97757") : Color(hex: "C4633C")
+        scheme == .dark
+            ? Color(hex: ClaudioColorHex.clayDark) : Color(hex: ClaudioColorHex.clayLight)
     }
 
-    /// `clay-soft` — DESIGN.md gives this as `rgba(...)`, not a plain hex (same reason as
-    /// ``hairlineStrong(_:)``). Used only by the drop-zone's hover background (T8; DESIGN.md
-    /// "拖入 drop-zone": "hover 命中 → 边框 / 文字转黏土 + `clay-soft` 底").
+    /// `clay-soft` — DESIGN.md 写作 `rgba(217,119,87,.15)` / `rgba(196,99,60,.12)`，即 `clay`
+    /// 本身带透明度（通道值与 ``clay(_:)`` 逐位相同，不是另一个颜色），所以这里直接由 ``clay(_:)``
+    /// 派生，而不是抄一份通道数字。仅用于 drop-zone 的 hover 底（T8; DESIGN.md「拖入 drop-zone」:
+    /// "hover 命中 → 边框 / 文字转黏土 + `clay-soft` 底"）。
     static func claySoft(_ scheme: ColorScheme) -> Color {
-        scheme == .dark
-            ? Color(red: 217 / 255, green: 119 / 255, blue: 87 / 255, opacity: 0.15)
-            : Color(red: 196 / 255, green: 99 / 255, blue: 60 / 255, opacity: 0.12)
+        clay(scheme).opacity(scheme == .dark ? 0.15 : 0.12)
     }
 
     /// UI-semantic `success` — used only for the "已接管" header dot in T7's scope.
     static func success(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "34C759") : Color(hex: "2FA24E")
+        scheme == .dark
+            ? Color(hex: ClaudioColorHex.successDark) : Color(hex: ClaudioColorHex.successLight)
     }
 
-    /// UI-semantic `error` (真红) — **only** for app self-errors
-    /// (DESIGN.md「错误态用色（关键约束）」), never the four-event semantic layer
-    /// (`StopFailure` stays amber, out of this file's scope entirely).
+    /// UI-semantic `error` (真红) — **只**给 App 自身真错误（DESIGN.md「错误态用色（关键约束）」），
+    /// 绝不用于四事件层（`StopFailure` 永远琥珀，不在本 token 的射程内）。
+    ///
+    /// ⚠️ 且**只做图标**，不做正文（/ship 评审修复③）：亮色 `#E0453A` 对 `panel` / `surface-2`
+    /// 只有 4.07:1 / 4.06:1 —— 过非文本的 ≥3:1（WCAG 1.4.11），但**不过**正文的 ≥4.5:1
+    /// （WCAG 1.4.3）。报错**文案**一律用 ``textSecondary(_:)``。这条契约由 `ContrastSuite.swift`
+    /// 钉死：真红只出现在 ≥3:1 那一组断言里。
     static func error(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "FF453A") : Color(hex: "E0453A")
+        scheme == .dark
+            ? Color(hex: ClaudioColorHex.errorDark) : Color(hex: ClaudioColorHex.errorLight)
     }
 }
 
@@ -104,31 +125,33 @@ func stateAccentColor(_ accent: OnboardingAccent, _ scheme: ColorScheme) -> Colo
 
 // MARK: - T16: per-event color + glyph tokens
 //
-// Same scoping note as the block above — this is still the hand-maintained token subset,
-// not a canonical/generated module (that consolidation was deferred out of T14 and is
-// tracked as a non-blocking leftover in TODOS.md). Added here only so `EventRowView` can
-// render DESIGN.md's exact per-event hex values ("事件色" table) without inventing new ones.
-// Every value below is copied verbatim from DESIGN.md; do not add a shade that isn't there.
+// 同上：值全部来自 ``ClaudioColorHex``（DESIGN.md「四事件语义色」表的唯一真相源），
+// 这里只做「按 `ColorScheme` 选一个」这件事。不要在这里新增 DESIGN.md 里没有的色阶。
 extension ClaudioColor {
     /// DESIGN.md's per-event accent color (dark / light), keyed by ``Event``.
     /// `Notification`'s value is deliberately the same `clay(_:)` the rest of this file
     /// already defines — DESIGN.md calls this out as "一个招牌绑定": the ONE place the
     /// brand color doubles as a semantic event color, not a coincidence to re-derive.
+    /// （``ClaudioColorHex/notificationDark`` 同样是对 `clayDark` 的别名，不是复制一遍 hex。）
     static func event(_ event: Event, _ scheme: ColorScheme) -> Color {
         switch event {
         case .stop:
-            scheme == .dark ? Color(hex: "34C759") : Color(hex: "2FA24E")
+            scheme == .dark
+                ? Color(hex: ClaudioColorHex.stopDark) : Color(hex: ClaudioColorHex.stopLight)
         case .stopFailure:
             // Amber — DESIGN.md: "限流 / 欠费 / 过载 / 认证（非代码 bug）...绝不用红".
-            // Light-mode value darkened from DESIGN.md's original #E08600 to #C87A00
-            // (≈3.31:1 vs the light panel, up from ~2.73:1) so the glyph clears the project's
-            // own ≥3:1 non-text-contrast bar (WCAG 1.4.11) — still amber, never red. Authorized
-            // design decision; DESIGN.md's 四事件语义色 table was updated to match this value.
-            scheme == .dark ? Color(hex: "FF9F0A") : Color(hex: "C87A00")
+            // 亮色由 DESIGN.md 原 #E08600 调深为 #C87A00（对亮 tile ≈3.31:1，原 ~2.73:1）以过
+            // 项目自己的 ≥3:1 非文本对比（WCAG 1.4.11）——仍是琥珀，绝不用红。被授权的设计决议，
+            // DESIGN.md 的四事件语义色表已同步。
+            scheme == .dark
+                ? Color(hex: ClaudioColorHex.stopFailureDark)
+                : Color(hex: ClaudioColorHex.stopFailureLight)
         case .notification:
             clay(scheme)
         case .subagentStop:
-            scheme == .dark ? Color(hex: "5E5CE6") : Color(hex: "5B59D6")
+            scheme == .dark
+                ? Color(hex: ClaudioColorHex.subagentStopDark)
+                : Color(hex: ClaudioColorHex.subagentStopLight)
         }
     }
 }

@@ -28,12 +28,18 @@ public struct OnboardingView: View {
     }
 
     public var body: some View {
+        // NO `.padding(13)` / `.background(panel)` here (`/ship` 评审): ``PanelView`` is the
+        // composition root and ALREADY supplies the panel surface, the 13pt inset, the
+        // hairline-strong border and the 15pt corner clip around this view. Re-applying both
+        // here stacked a SECOND 13pt inset (26pt net — twice DESIGN.md「间距」's 12–13pt panel
+        // padding, on the very first screen a new user sees) and painted a square-cornered fill
+        // INSIDE that rounded clip. The gallery (`StateGalleryView`) now paints the same panel
+        // surface behind each frame, so the onboarding card still renders on its real surface
+        // there too — never on SwiftUI's untokenized default window background.
         VStack(alignment: .leading, spacing: 12) {
             header
             card
         }
-        .padding(13)
-        .background(ClaudioColor.panel(colorScheme))
     }
 
     private var header: some View {
@@ -77,7 +83,12 @@ public struct OnboardingView: View {
             if isShowingDetail, let detail = copy.detail {
                 Text(detail)
                     .font(.system(size: 11 * typeScale, design: .monospaced))
-                    .foregroundColor(ClaudioColor.error(colorScheme))
+                    .monospacedDigit()
+                    // `text-2`，**不是**真红（`/ship` 评审实证）：真红当正文，亮色下只有 4.07:1，
+                    // 达不到 WCAG ≥4.5:1 的文本门槛。真红只留给**图标**（非文本，门槛 ≥3:1）——
+                    // 这张卡的错误身份已经由上方 44pt 图标块的态色字形承担了（DESIGN.md「onboarding
+                    // 卡」: "态色 15% 底 + 态色字形"），正文不必再上一遍真红。DESIGN.md 品牌色未改。
+                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }
 

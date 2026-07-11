@@ -63,7 +63,15 @@ private struct PackCardView: View {
     /// own, so the panel's Dynamic-Type layout adaptation fired with no actual text growth).
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
-    private static let gridColumns = [GridItem(.fixed(20)), GridItem(.fixed(20))]
+    /// The 2×2 grid's column widths — an INSTANCE property scaled by `typeScale`, not the `static
+    /// let` of fixed 20pt columns this was (`/ship` 评审 · Dynamic Type): the glyphs inside grow
+    /// with `12 * typeScale` (~28pt at the largest accessibility size), so fixed 20pt columns —
+    /// and the fixed 84pt card below — would CLIP them, which is exactly the 「不裁切、不溢出」
+    /// T15 D5's degradation rules exist to prevent. The gallery scrolls horizontally, so a wider
+    /// card costs scroll distance, never truncation.
+    private var gridColumns: [GridItem] {
+        [GridItem(.fixed(20 * typeScale)), GridItem(.fixed(20 * typeScale))]
+    }
 
     var body: some View {
         Button(action: onSelect) {
@@ -71,13 +79,16 @@ private struct PackCardView: View {
                 eventGrid
                 Text(card.name ?? card.id)
                     .font(.system(size: 10 * typeScale, design: .monospaced))
+                    // DESIGN.md 字体表：数据 = JetBrains Mono，**tabular-nums**（包名常带版本号/数字，
+                    // 非等宽数字会让相邻卡片的宽度互相抖动）。
+                    .monospacedDigit()
                     .foregroundColor(ClaudioColor.text(colorScheme))
                     .lineLimit(1)
                     .truncationMode(.tail)
                 statusLine
             }
             .padding(8)
-            .frame(width: 84)
+            .frame(width: 84 * typeScale)
             .background(
                 // ⚠️ DESIGN.md 未定义 pack 卡背景 — 用既有 `surface-2`（「抬升」表面语义）
                 // 派生，贴近 macOS 壁纸选择器的卡片底色，不新造颜色。
@@ -107,7 +118,7 @@ private struct PackCardView: View {
     /// Distinguished by GLYPH SHAPE too, not color alone (ENGINEERING.md「无障碍规格」"不靠
     /// 颜色单独区分") — the four SF Symbols already differ in shape regardless of tint.
     private var eventGrid: some View {
-        LazyVGrid(columns: Self.gridColumns, spacing: 4) {
+        LazyVGrid(columns: gridColumns, spacing: 4) {
             ForEach(Event.allCases, id: \.self) { event in
                 let isPresent = card.presentEvents.contains(event)
                 Image(systemName: eventGlyphName(event))
@@ -125,32 +136,43 @@ private struct PackCardView: View {
         }
     }
 
+    // 字号阶梯（DESIGN.md「字号阶梯」）：此前这三行都用 9pt，低于阶梯的最小档。
+    // CC0 与 N/4 是**数据** → JetBrains Mono 10–12（取 10）；「文件丢失」是**状态** → SF Pro 11。
     @ViewBuilder
     private var statusLine: some View {
         switch card.state {
         case .complete:
             if card.isCC0 {
                 Text("CC0")
-                    .font(.system(size: 9 * typeScale, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 10 * typeScale, weight: .semibold, design: .monospaced))
+                    .monospacedDigit()
                     .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             }
         case .partial(let present, let total):
             // ⚠️ DESIGN.md 未定义 partial(部分可用) 视觉 — 用既有 `text-2` 呈现 "N/4"
             // 计数（既有 token，无新色），按 T15 D3 指令的推荐做法。
             Text("\(present)/\(total)")
-                .font(.system(size: 9 * typeScale, design: .monospaced))
+                .font(.system(size: 10 * typeScale, design: .monospaced))
+                // tabular-nums（DESIGN.md 字体表要求）：没有它，"1/4" 与 "3/4" 的字宽不同，
+                // 相邻卡片之间的计数会左右抖动。
+                .monospacedDigit()
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
         case .broken:
-            // ⚠️ DESIGN.md 未定义 broken(损坏) 卡片视觉 — 借用「拒绝行」既有的 error 语义色
-            // + `xmark.circle.fill` 字形（DESIGN.md「拒绝行」："真红 circle-x 字形"），是
-            // DESIGN.md 里唯一已定义的"文件缺失/错误"视觉语言，不新造态色。
+            // ⚠️ DESIGN.md 未定义 broken(损坏) 卡片视觉 — 借用「拒绝行」既有的视觉语言（DESIGN.md
+            // 「拒绝行」原文："真红 `circle-x` 字形 + `text-2` 说明"），是 DESIGN.md 里唯一已定义的
+            // "文件缺失/错误"语言，不新造态色。
+            //
+            // 真红**只**上图标（非文本，门槛 ≥3:1，实测 4.06 通过），文案走 `text-2`（5.54:1，过
+            // ≥4.5:1）—— 此前整个 HStack 都染真红，把 4.07:1 的真红当正文用，不达标（`/ship` 评审
+            // 实证）。DESIGN.md 的「拒绝行」本来就是这么写的：真红给字形，`text-2` 给说明。
             HStack(spacing: 2) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 9 * typeScale))
+                    .font(.system(size: 11 * typeScale))
+                    .foregroundColor(ClaudioColor.error(colorScheme))
                 Text("文件丢失")
-                    .font(.system(size: 9 * typeScale))
+                    .font(.system(size: 11 * typeScale))
+                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             }
-            .foregroundColor(ClaudioColor.error(colorScheme))
         }
     }
 

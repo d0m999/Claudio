@@ -28,12 +28,31 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let focusCoordinator = PanelFocusCoordinator()
 
     init(audioEnvironment: AudioImportEnvironment) {
-        let panel = PanelView(audioEnvironment: audioEnvironment, focusCoordinator: focusCoordinator)
+        // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
+        // capture `self` — we're still pre-`super.init()` here).
+        let popover = NSPopover()
+        // `standardPanelWidth` (`ClaudioGUICore`), never a second hardcoded `312`: DESIGN.md's
+        // 312pt panel width already exists as a constant, and `PanelLayoutAdaptation/panelWidth`
+        // — the value the SwiftUI side actually sizes itself to — is derived from it.
+        // Height is intrinsic-content-driven at runtime.
+        popover.contentSize = NSSize(width: standardPanelWidth, height: 400)
+
+        let panel = PanelView(
+            audioEnvironment: audioEnvironment,
+            focusCoordinator: focusCoordinator,
+            // T15 D5「极大 → 加宽 popover」, now actually in effect (TODOS.md:257): `PanelView`
+            // widens ITSELF to `widenedPanelWidth` (360pt) at the `.maximum` Dynamic Type tier,
+            // but this AppKit popover around it kept its hardcoded 312pt `contentSize` — so the
+            // widened panel was being rendered inside a container that never grew, which is
+            // exactly the 「不裁切、不溢出」 the degradation rule exists to prevent. `PanelView`
+            // reports its real width here (on appear and on every tier change) and the popover
+            // follows. Captures `popover` (a class), never `self`.
+            onPanelWidthChange: { width in popover.contentSize.width = CGFloat(width) }
+        )
         hostingController = NSHostingController(rootView: panel)
 
-        popover = NSPopover()
-        popover.contentSize = NSSize(width: 312, height: 400)  // height is intrinsic-content-driven at runtime.
         popover.contentViewController = hostingController
+        self.popover = popover
         // `.transient`: AppKit itself closes the popover on a click outside it OR on Esc —
         // this is the built-in behavior ENGINEERING.md's "Esc 关闭" requirement rides on,
         // not custom key-handling this controller adds itself.
