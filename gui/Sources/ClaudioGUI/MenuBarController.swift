@@ -27,6 +27,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// signal (a11y-architect FIX 4) — see ``PanelFocusCoordinator``'s doc comment.
     private let focusCoordinator = PanelFocusCoordinator()
 
+    /// Whoever was frontmost when the popover opened. `showPopover()` takes the foreground
+    /// away from them (it has to — see there); `popoverDidClose` gives it back. Nil whenever
+    /// no handback is owed.
+    private var previousApp: NSRunningApplication?
+
     init(audioEnvironment: AudioImportEnvironment) {
         // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
         // capture `self` — we're still pre-`super.init()` here).
@@ -60,9 +65,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         popover.contentViewController = hostingController
         self.popover = popover
-        // `.transient`: AppKit itself closes the popover on a click outside it OR on Esc —
-        // this is the built-in behavior ENGINEERING.md's "Esc 关闭" requirement rides on,
-        // not custom key-handling this controller adds itself.
+        // `.transient`: AppKit closes the popover on a click outside it, on an app switch,
+        // and — ONLY once the popover's window is key — on Esc. That last clause is the whole
+        // catch: `.transient` alone does NOT buy "Esc 关闭", because a status-item popover in
+        // an `.accessory` app is never key until someone activates the app. See `showPopover()`
+        // for the measurement and the fix; this line used to claim Esc came for free here.
         popover.behavior = .transient
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -90,7 +97,52 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     private func showPopover() {
         guard let button = statusItem.button else { return }
+
+        // Remember who we're about to take the foreground from, so `popoverDidClose` can give
+        // it back (AppKit will not: see there). Guarded on a real closed→open transition —
+        // a redundant `show` while already shown would otherwise overwrite this with Claudio.
+        if !popover.isShown {
+            let front = NSWorkspace.shared.frontmostApplication
+            if front?.processIdentifier != ProcessInfo.processInfo.processIdentifier {
+                previousApp = front
+            }
+        }
+
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+
+        // Everything T15 promises — first focus lands on the first operable control, Tab /
+        // Shift+Tab traversal, Space/Enter activation, Esc closes, VoiceOver announces the
+        // panel — rides on the popover's window being KEY. It never is, on its own: the app
+        // is `.accessory` (no Dock icon) and clicking a status item does NOT activate it, so
+        // `NSApp` stays inactive and the popover's window never becomes key.
+        //
+        // Measured on a real Mac (2026-07-11), popover visibly open on screen:
+        //     windows=0   frontmost=false   topLevelUIElements=2   (just the two menu bars)
+        // Zero AX windows means VoiceOver cannot reach a single control in the panel, and an
+        // inactive app means Esc/Tab/Space/Enter are delivered to whatever app IS frontmost.
+        // `popoverDidShow`'s `makeFirstResponder` is a no-op against a non-key window, and
+        // `.transient` only ever gave us click-outside dismissal — never Esc.
+        //
+        // Activating is what makes the window key, which puts it in the AX tree and in the
+        // key-event path. `.transient` still closes the popover when the user clicks away or
+        // switches apps (an app that deactivates dismisses its transient popover), so this
+        // does not trade Esc for a popover that will not go away.
+        //
+        // There is no way to have the key window without the activation, and it was checked
+        // one API at a time against the AppKit headers (ENGINEERING.md T15 决议): `NSPopover`
+        // exposes no non-activating switch; `.nonactivatingPanel` is documented as "only
+        // applicable for NSPanel"; `becomesKeyOnlyIfNeeded` points the other way; and a
+        // `makeKey()` without activation is the no-op that produced the windows=0 above (an
+        // inactive app has no key window at all). Escaping it means dropping NSPopover for a
+        // hand-built `NSPanel` — see TODOS.md, and don't start down that road casually.
+        //
+        // So opening the panel costs one app switch, every time, and one part of that bill
+        // cannot be refunded by `popoverDidClose`'s handback: if the user is mid-composition
+        // in an IME (Chinese/Japanese/Korean, characters not yet committed), deactivating
+        // their app forces the marked text to commit or drops it. That is the price of a
+        // keyboard/VoiceOver-operable panel on this architecture.
+        NSApp.activate(ignoringOtherApps: true)
+        popover.contentViewController?.view.window?.makeKey()
     }
 
     // MARK: - NSPopoverDelegate — focus owner (ENGINEERING.md「无障碍规格」, a11y-architect
@@ -110,10 +162,47 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         focusCoordinator.requestFocus()
     }
 
-    // "关闭后焦点回菜单栏 status item" — returns keyboard focus to the status item's own
-    // button once the popover dismisses, so Tab/VoiceOver users aren't left with focus
-    // pointing at a now-invisible view.
+    // The other half of `showPopover()`'s `NSApp.activate` — the two are a pair, and shipping
+    // the activate without this is a regression, not a partial fix.
+    //
+    // AppKit does not deactivate an app just because its last window went away. So without a
+    // handback: Esc closes the panel and leaves an `.accessory` app frontmost with ZERO
+    // windows. The menu bar on screen still belongs to the app the user is looking at, so
+    // nothing tells them the foreground moved — they keep typing and every keystroke is
+    // swallowed, and ⌘Q quits Claudio instead of their editor. That failure lands squarely on
+    // the keyboard/VoiceOver users the Esc path exists for.
+    //
+    // This replaces `makeFirstResponder(statusItem.button)`, which had been standing in for
+    // 「关闭后焦点回菜单栏 status item」 while doing nothing at all: `statusItem.button` lives in
+    // the system-owned `NSStatusBarWindow`, whose `canBecomeKeyWindow` is false, and AppKit
+    // delivers key events only to the KEY window's first responder — setting one on a window
+    // that can never be key changes nothing. (It isn't in the app's AX window tree either; it
+    // hangs off `AXExtrasMenuBar`, so the VoiceOver cursor doesn't follow a first responder
+    // there.) The contract cannot be met literally, and what it is actually for — "the panel
+    // closed, someone give the keyboard back" — is met by returning it to the only party that
+    // can hold it: the app the user came from. ENGINEERING.md's wording was corrected to say so.
     func popoverDidClose(_ notification: Notification) {
-        statusItem.button?.window?.makeFirstResponder(statusItem.button)
+        let previous = previousApp
+        previousApp = nil
+
+        // Not active ⇒ the popover closed BECAUSE the user went elsewhere (clicked another
+        // app, ⌘-Tabbed away). That app owns the foreground now, and it is not necessarily
+        // `previous` — pulling it back would be us overriding the user's own choice.
+        guard NSApp.isActive,
+            let previous,
+            !previous.isTerminated,
+            previous.processIdentifier != ProcessInfo.processInfo.processIdentifier
+        else { return }
+
+        if #available(macOS 14.0, *) {
+            // Cooperative activation (macOS 14+): consent to `previous` taking the foreground
+            // so its `activate()` isn't denied. Yielding resigns ours — no `deactivate()`
+            // needed, and adding one races the handoff.
+            NSApp.yieldActivation(to: previous)
+            previous.activate()
+        } else {
+            previous.activate(options: [])
+            NSApp.deactivate()
+        }
     }
 }

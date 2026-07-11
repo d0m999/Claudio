@@ -21,6 +21,24 @@ struct ClaudioGUIApp: App {
         Settings {
             EmptyView()
         }
+        // Take ⌘, back off the menu. `Settings` is only here because `App` demands a `Scene`,
+        // but SwiftUI still synthesizes a "Settings…" item with a ⌘, key equivalent for it —
+        // and `.accessory` only means the app's menu bar is not DISPLAYED, not that
+        // `NSApp.mainMenu` is absent: key equivalents are dispatched in-process regardless.
+        //
+        // That was harmless only for as long as the app never became active. Since
+        // ``MenuBarController/showPopover()`` started calling `NSApp.activate`, the panel
+        // being open means Claudio is frontmost while the menu bar on screen still belongs to
+        // the app the user was in — so a user reaching for ⌘, (meaning to open THAT app's
+        // preferences) instead opens a blank "Claudio Settings" window, which takes key and
+        // shoves the transient popover out of existence.
+        //
+        // Only this one item is removed. `NSApp.mainMenu = nil` would take ⌘C/⌘V/⌘X/⌘A down
+        // with it — AppKit text controls reach the pasteboard through those menu items' key
+        // equivalents.
+        .commands {
+            CommandGroup(replacing: .appSettings) {}
+        }
     }
 }
 

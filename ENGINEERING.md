@@ -252,7 +252,17 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 ### 无障碍规格（评审补 · 声音产品的视觉兜底）
 
 - **VoiceOver 逐控件 label**：事件行→「{事件名}，声音 {文件名}，{已启用/已静音}」；试听键→「试听 {事件名} 的声音」；静音钮→切换按钮「{事件名} 声音」+ on/off；切包 pill→「当前声音包 {包名}，点按切换」；drop-zone→「拖入或点按添加你自己的声音」。
-- **键盘导航 + NSPopover 焦点 owner（codex 精修）**：先定"谁拥有 popover + first responder"—— 打开焦点落首个可操作项；Tab / Shift+Tab 遍历；空格 / 回车触发；**Esc 关闭**；**关闭后焦点回菜单栏 status item**；VoiceOver 进入先播报面板标题 + 当前包。焦点态可见（系统焦点环，勿去除）。这是 AppKit 焦点桥接，非仅设 label —— T15 先落 owner / 桥接再写键盘 / VoiceOver 测试。
+- **键盘导航 + NSPopover 焦点 owner（codex 精修；2026-07-11 真机走查后按实际行为改写）**：先定"谁拥有 popover + first responder"。这是 AppKit 焦点桥接，非仅设 label。**全部条款的前置条件是 popover 的 window 拿到 key —— 见下条决议**。分两档，别混：
+  - **无条件成立**（与系统设置无关）：**Esc 关闭**；VoiceOver 可达面板内每个控件；**VoiceOver 进入先播报面板标题 + 当前包**（靠 `PanelView.announcePanel()` 主动 `NSAccessibility.post(.announcementRequested)` —— 光有 label 不会被播报，VO 只读它光标落上的元素）；鼠标可达。
+  - **仅当用户开启了系统「键盘导航 / Full Keyboard Access」时成立**：打开焦点落首个可操作项；Tab / Shift+Tab 遍历；空格 / 回车触发。**这不是可以靠代码兜底的事**：面板里所有可聚焦控件都是 SwiftUI `Button`（activate-focusable），而 macOS 默认不把键盘焦点给 Button，Apple 明说「唯一能用 Tab 够到它们的办法是全局打开键盘导航」。`.focusable()` 是 no-op（默认 interactions 就是 `.activate`）。原文把这两档写成一档，等于对默认设置下的用户撒谎。
+  - **~~关闭后焦点回菜单栏 status item~~ → 关闭后把前台交还给打开面板前的那个 app**。原条款按字面**实现不了**：`statusItem.button` 活在系统持有的 `NSStatusBarWindow` 里，它的 `canBecomeKeyWindow` 是 false，而 AppKit 只把键盘事件投给 key window 的 first responder —— 对一个永不 key 的 window 设 first responder 等于没设（它在 AX 里也不挂在 app 的 window 树下，挂在 `AXExtrasMenuBar`，VO 光标同样不跟）。这条契约真正要的是「面板关了，键盘得有人接着」，而唯一能接的是用户来的那个 app。见 `MenuBarController.popoverDidClose`。
+  - 焦点态可见（系统焦点环，勿去除）。
+
+- **T15 决议：菜单栏面板每次打开，必然抢一次前台（NSApp.activate），这是无障碍的必要代价**（2026-07-11 真机 + 对抗评审）。
+  - **为什么非抢不可**：app 是 `.accessory`，点 status item **不会**激活它，于是 popover 的 window 永远不是 key window。真机 AX 探针实测：popover 可见地开着，`windows=0 / frontmost=false`。非 key ⇒ VoiceOver 够不到面板里任何控件，Esc/Tab/空格/回车全被投递给当时真正 frontmost 的那个 app，`makeFirstResponder` 是 no-op。**上面整节无障碍规格，一条都不成立。**
+  - **替代路子已按 AppKit 头文件逐条证伪**：`NSPopover` 无 non-activating 开关（也不暴露它的 backing window 类型，`_NSPopoverWindow` 是私有的）；`.nonactivatingPanel` 头文件写明「Only applicable for NSPanel」；`becomesKeyOnlyIfNeeded` 语义相反（让拿 key 更难）；不 activate 的 `makeKey()` 是 no-op（非 active 的 app 没有 key window）。**只要还用 NSPopover，`NSApp.activate` 就是唯一解。**
+  - **代价，明码记账**：① 打开面板 = 一次完整 app 切换，用户当前 app 失去 key；② 若用户正用输入法**组字**（中日韩，字还没上屏），宿主 app 失活会强制上屏或丢弃组字缓冲 —— **这条无法靠「关闭即交还前台」兜底**，它发生在打开的瞬间。③ 关闭后必须显式把前台还回去，否则 Claudio 会以「active 且零窗口」的姿态霸着前台，键盘变黑洞、⌘Q 退的是 Claudio（已在 `popoverDidClose` 修）。
+  - **逃生路线**（仅当真实用户反馈「点 Claudio 图标丢字」才启动）：丢掉 NSPopover，自建 `NSPanel` + `.nonactivatingPanel`。代价见 TODOS.md —— 不是小改动，别顺手做。
 - **不靠颜色单独区分（硬要求）**：四事件除语义色外**必须**以字形形状区分（实心勾 / 暂停 / 铃 / 空心勾）—— 色盲及单色菜单栏模板图标下仍可分。DESIGN.md 原作"可读性"，此处升为 a11y 硬要求。
 - **对比度**：事件色字形对**它真正画在其上的那个表面** ≥ 3:1（非文本图形，WCAG 1.4.11）——**那个表面是自染 tile 底，即 `compositedHex(事件色, over: panel, alpha: 0.15)`，不是它背后的纯 `panel`**；这两者被混为一谈过一次，导致断言全绿而真实渲染不及格（2026-07-11 `/ship` 收口记录 ②）。**并且**：`tile` 自身对 `panel` 必须 **≥ 1.10:1**（tile 得看得见）——这条不是锦上添花，是防止「把 tile 变没」被测试判为达标（同批第一次修法正是这么翻的车，见收口记录 ②）。行内文字 ≥ 4.5:1；真红 `error` **只做图标**（≥3:1），报错**文案**用 `text-2`（≥4.5:1）。亮 / 暗两模式各验（亮底黏土加深到 `#C4633C` 即为保对比）。**做成 token / 数学断言**，不靠截图测抗锯齿后的 SF Symbols；**断言必须直接引用视图真正渲染的那份 token**（`ClaudioColorHex` 是 gui 侧唯一的 hex 字面量所在地），手抄一份副本去断言 = 改颜色测试照样绿。
 - **禁用 / 静音态样式（codex 精修 · 不用整行 opacity）**：静音 / unmapped / broken 的禁用观感用**显式禁用样式**（控件置灰 + 图标降饱和），**不整行降 opacity** —— 整行半透明会把文字 / 字形打到对比度阈值下。行内文字始终保 ≥ 4.5:1。
