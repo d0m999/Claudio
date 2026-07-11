@@ -12,7 +12,11 @@ import Foundation
 // functions defined in sibling files (`OnboardingStateSuite.swift`,
 // `OnboardingCopySuite.swift`, `OnboardingDetectorSuite.swift`,
 // `OnboardingViewModelSuite.swift`, `AudioFormatSniffSuite.swift`, `AudioImportSuite.swift`,
-// `AudioImportBatchSuite.swift`, `AudioImportViewModelSuite.swift`).
+// `AudioImportBatchSuite.swift`, `AudioImportViewModelSuite.swift`,
+// `CoverageStateSuite.swift`, `ManifestBindingSuite.swift`, `PackGallerySuite.swift`,
+// `EventMuteControllerSuite.swift`, `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
+// `PanelTypeSizeSuite.swift`, `PanelConfigSuite.swift`, `PanelFocusCoordinatorSuite.swift`,
+// `PreviewFixturesSuite.swift`).
 
 var totalChecks = 0
 var failures = 0
@@ -55,6 +59,16 @@ runAudioFormatSniffSuites()
 runAudioImportSuites()
 runAudioImportBatchSuites()
 await runAudioImportViewModelSuites()
+runCoverageStateSuites()
+await runManifestBindingSuites()
+runPackGallerySuites()
+runEventMuteControllerSuites()
+runPanelFocusOrderSuites()
+runContrastSuites()
+runPanelTypeSizeSuites()
+runPanelConfigSuites()
+runPanelFocusCoordinatorSuites()
+runPreviewFixturesSuites()
 
 // MARK: - Summary
 

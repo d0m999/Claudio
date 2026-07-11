@@ -34,6 +34,20 @@ public final class AudioImportViewModel: ObservableObject {
         self.environment = environment
     }
 
+    #if DEBUG
+        /// Preview-only initializer (ENGINEERING.md T14 D2): pins ``state`` directly to
+        /// `previewState`, without running any import pipeline. Mirrors
+        /// `OnboardingViewModel(previewState:)`'s exact reasoning: `#if DEBUG`-gated, and
+        /// must live in THIS file since ``state``'s setter is `private` (file-scoped, not
+        /// module-scoped).
+        public convenience init(
+            packID: String, environment: AudioImportEnvironment, previewState: DropZoneState
+        ) {
+            self.init(packID: packID, environment: environment)
+            self.state = previewState
+        }
+    #endif
+
     /// Called while a drag is hovering the zone — no filesystem work happens here, just
     /// the visual "hover" state (DESIGN.md "拖入 drop-zone": "hover 命中 → 边框/文字转
     /// 黏土 + `clay-soft` 底"). Mirrors ``cancelHover()``'s guard: a drag merely passing

@@ -95,6 +95,71 @@ func directoryExists(at directory: URL) -> Bool {
     return isDirectory.boolValue
 }
 
+// MARK: - Shared manifest loading (T16: single source of truth for `helper` and `gui`)
+
+/// Why ``loadPackManifestData(in:)``/``loadPackManifest(in:)`` couldn't read/decode
+/// `manifest.json`. Carries the exact reason strings `checkPackIntegrity` has always
+/// surfaced (T1), now shared by every caller instead of re-derived per call site.
+public enum PackManifestLoadError: Error, Sendable, Equatable {
+    /// `manifest.json` doesn't exist at `packDirectory`, isn't readable, or is/sits behind
+    /// a symlink resolving outside `packDirectory` (``isReallyContained(_:inside:)``).
+    case unreadable(reason: String)
+    /// `manifest.json`'s bytes were read successfully, but don't decode as ``PackManifest``.
+    case decodeFailed(reason: String)
+
+    /// The human-readable reason, regardless of which case — the exact string
+    /// `checkPackIntegrity` has always attached to its own `.manifestUnreadable` result.
+    public var reason: String {
+        switch self {
+        case .unreadable(let reason): reason
+        case .decodeFailed(let reason): reason
+        }
+    }
+}
+
+/// Reads `manifest.json`'s raw bytes from `packDirectory`, gated by the same
+/// ``isReallyContained(_:inside:)`` symlink-escape guard every other manifest reader in
+/// this module uses. `isReallyContained` itself stays module-internal to `ClaudioCore`
+/// (a lexical/realpath primitive, not a public API surface on its own) — this narrower,
+/// `public` read primitive is what callers outside this module (`gui`'s `ClaudioGUICore`,
+/// T16's manifest-binding write path, which needs the *raw* JSON — not the narrower
+/// ``PackManifest`` model — to do a read-modify-write that preserves unknown top-level
+/// keys) actually get to reuse, rather than reinventing the containment check a second
+/// time (ENGINEERING.md T16: "REUSE, do not reinvent").
+public func loadPackManifestData(in packDirectory: URL) -> Result<Data, PackManifestLoadError> {
+    let manifestFile = packDirectory.appendingPathComponent("manifest.json")
+    // `packDirectory` itself is already symlink-safe by the time a caller has one in hand
+    // (e.g. via `resolvePackDirectory`, which runs `isReallyContained`), but `manifest.json`
+    // is a leaf entry inside it and could independently be a symlink escaping the pack
+    // directory — require real containment here too, not just a successful read.
+    guard isReallyContained(manifestFile, inside: packDirectory),
+        let manifestData = try? Data(contentsOf: manifestFile)
+    else {
+        return .failure(
+            .unreadable(reason: "manifest.json 不存在或不可读：\(manifestFile.path)"))
+    }
+    return .success(manifestData)
+}
+
+/// Loads and decodes `packDirectory`'s `manifest.json` into a ``PackManifest`` — the single
+/// shared loader behind both `helper`'s ``checkPackIntegrity(configFile:userPacksDirectory:bundledPacksDirectory:)``
+/// and `gui`'s `ClaudioGUICore` per-event coverage computation (T16: "共享 PackManifest
+/// 模块与运行时查找顺序同源"), so both sides parse exactly one, adversarially-tested
+/// manifest-reading code path rather than each growing its own.
+public func loadPackManifest(in packDirectory: URL) -> Result<PackManifest, PackManifestLoadError>
+{
+    switch loadPackManifestData(in: packDirectory) {
+    case .failure(let error):
+        return .failure(error)
+    case .success(let manifestData):
+        do {
+            return .success(try JSONDecoder().decode(PackManifest.self, from: manifestData))
+        } catch {
+            return .failure(.decodeFailed(reason: error.localizedDescription))
+        }
+    }
+}
+
 public func resolvePackDirectory(
     id: String,
     userPacksDirectory: URL,

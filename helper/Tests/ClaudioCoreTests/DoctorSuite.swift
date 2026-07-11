@@ -552,6 +552,112 @@ func runDoctorSuites() {
         }
     }
 
+    // MARK: - loadPackManifest / loadPackManifestData (T16 shared manifest loader)
+    //
+    // `checkPackIntegrity`'s manifest-reading block above was extracted into these two
+    // `public` functions verbatim (T16: "共享 PackManifest 模块与运行时查找顺序同源") so
+    // `gui`'s `ClaudioGUICore` can reuse the exact same `isReallyContained`-gated read/decode
+    // path instead of growing a second, unaudited one. The suites above already pin
+    // `checkPackIntegrity`'s observable behavior end-to-end (corrupt manifest / symlink
+    // escape / NFC-NFD); these pin the extracted functions directly.
+
+    suite("loadPackManifest: decodes a well-formed manifest.json") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("minimal-chime", isDirectory: true)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packDirectory.appendingPathComponent("manifest.json"))
+
+            let result = loadPackManifest(in: packDirectory)
+            guard case .success(let manifest) = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+            expect(manifest.id == "minimal-chime", "decoded manifest must carry the right id")
+            expect(
+                manifest.events == ["stop": "stop.mp3"],
+                "decoded manifest must carry the declared events map")
+        }
+    }
+
+    suite("loadPackManifest: missing manifest.json → .unreadable, not a crash") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("ghost-pack", isDirectory: true)
+            let result = loadPackManifest(in: packDirectory)
+            if case .failure(.unreadable(let reason)) = result {
+                expect(
+                    reason.contains("manifest.json"),
+                    "the .unreadable reason should name manifest.json, got \(reason)")
+            } else {
+                expect(false, "expected .failure(.unreadable), got \(result)")
+            }
+        }
+    }
+
+    suite("loadPackManifest: corrupt JSON → .decodeFailed") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("minimal-chime", isDirectory: true)
+            writeFixture("{ not valid json", to: packDirectory.appendingPathComponent("manifest.json"))
+
+            let result = loadPackManifest(in: packDirectory)
+            if case .failure(.decodeFailed(let reason)) = result {
+                expect(!reason.isEmpty, "the .decodeFailed reason must carry a real message")
+            } else {
+                expect(false, "expected .failure(.decodeFailed), got \(result)")
+            }
+        }
+    }
+
+    suite("loadPackManifest: manifest.json as a symlink escaping the pack dir → .unreadable") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("minimal-chime", isDirectory: true)
+            let outsideManifest = root.appendingPathComponent("secret-manifest.json")
+            writeFixture(#"{ "id": "minimal-chime", "events": {} }"#, to: outsideManifest)
+            createSymlink(
+                at: packDirectory.appendingPathComponent("manifest.json"), pointingTo: outsideManifest)
+
+            let result = loadPackManifest(in: packDirectory)
+            expect(
+                { if case .failure(.unreadable) = result { return true } else { return false } }(),
+                "a manifest.json symlink escaping the pack dir must be .unreadable, got \(result)")
+        }
+    }
+
+    suite("loadPackManifestData: returns the exact raw bytes on disk, unparsed") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("minimal-chime", isDirectory: true)
+            // Deliberately includes an unknown top-level key `loadPackManifest`'s decode to
+            // `PackManifest` would silently drop — `loadPackManifestData` must hand back the
+            // raw bytes untouched, preserving it, since `gui`'s manifest-binding write path
+            // (T16) needs exactly that to avoid data loss on unknown keys.
+            let rawJSON = #"{ "id": "minimal-chime", "name": "极简铃音", "events": { "stop": "stop.mp3" } }"#
+            writeFixture(rawJSON, to: packDirectory.appendingPathComponent("manifest.json"))
+
+            let result = loadPackManifestData(in: packDirectory)
+            guard case .success(let data) = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+            expect(
+                String(data: data, encoding: .utf8) == rawJSON,
+                "loadPackManifestData must return the exact on-disk bytes, unknown keys included")
+        }
+    }
+
+    suite("loadPackManifest: reason surfaces the same human message checkPackIntegrity always used") {
+        withTempDirectory { root in
+            let packDirectory = root.appendingPathComponent("ghost-pack", isDirectory: true)
+            let result = loadPackManifest(in: packDirectory)
+            guard case .failure(let error) = result else {
+                expect(false, "expected .failure, got \(result)")
+                return
+            }
+            expect(
+                error.reason.contains("manifest.json") && error.reason.contains("不存在或不可读"),
+                "the .unreadable reason must keep the exact human message, got \(error.reason)")
+        }
+    }
+
     suite("probeSettingsWritable: existing writable file → .writable") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")

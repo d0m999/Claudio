@@ -118,24 +118,15 @@ public func checkPackIntegrity(
         return .packNotFound(packID: config.selectedPack)
     }
 
-    let manifestFile = packDirectory.appendingPathComponent("manifest.json")
-    // `packDirectory` itself is already symlink-safe (`resolvePackDirectory` runs
-    // `isReallyContained`), but `manifest.json` is a leaf entry inside it and could
-    // independently be a symlink escaping the pack directory — require real containment
-    // here too, not just a successful read.
-    guard isReallyContained(manifestFile, inside: packDirectory),
-        let manifestData = try? Data(contentsOf: manifestFile)
-    else {
-        return .manifestUnreadable(
-            packID: config.selectedPack, reason: "manifest.json 不存在或不可读：\(manifestFile.path)")
-    }
-
+    // Delegates to the shared ``loadPackManifest(in:)`` (T16: single manifest-loading
+    // source of truth for `helper` and `gui`) — same `isReallyContained` symlink-escape
+    // guard, same read, same decode, same error messages as before this was extracted.
     let manifest: PackManifest
-    do {
-        manifest = try JSONDecoder().decode(PackManifest.self, from: manifestData)
-    } catch {
-        return .manifestUnreadable(
-            packID: config.selectedPack, reason: error.localizedDescription)
+    switch loadPackManifest(in: packDirectory) {
+    case .success(let loaded):
+        manifest = loaded
+    case .failure(let error):
+        return .manifestUnreadable(packID: config.selectedPack, reason: error.reason)
     }
 
     let missingFiles =

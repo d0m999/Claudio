@@ -134,5 +134,65 @@
 **Priority:** P4
 **Depends on:** None
 
+### GUI 写/读路径的同用户 symlink TOCTOU 未闭合（manifest bind + import + config，v2）
+
+**What:** `bindEventToManifest` / `importAudioFile` 的最终 `Data.write(.atomic)` 与 `loadPackManifestData` 的读，都在 `resolvePackDirectory`/containment 校验之后隔若干 syscall 才操作路径。原子写的 `rename` 只保护**叶子**（`manifest.json`）——中间分量（`packID` 目录本身）被换成 symlink 会被内核跟随，把写重定向到包外。`config.json` 写路径（`selectPack`/`setEventEnabled`）则完全无 symlink 解析 / 乐观并发重读（不同于 `settings.json` 的 `atomicWrite`）。
+
+**Why:** 同用户威胁模型——能并发换 symlink 者本已有该用户的写权限、不构成提权，与 ENGINEERING.md「pack 路径 containment 的 TOCTOU 加固」既定立场一致，故 v1 不做。现在 T16/T15 把这些写路径接进真实面板，站点增至：manifest bind、`importAudioFile` 持久化、`config.json` 两个写者（CLI `use` + GUI 面板）。
+
+**Context:** T16 security-reviewer（2026-07-11）实证复现父目录 symlink 重定向（叶子 rename 语义只挡 `manifest.json` 自身被换，挡不住上层目录被换）；T15 swift-reviewer 指出 `config.json` 无 `settings.json` 那套加固。真修 = 校验后持有 `open(O_DIRECTORY|O_NOFOLLOW)` 目录 fd，后续全走 `openat`/`fstatat`/`renameat` 相对该 fd（`readRegularFileSource` 已对单文件这么做，缺的是**包目录级**）；config 侧补 symlink 解析 + 乐观并发重读。`ManifestBinding.swift` 的注释已修正为「原子写只保护叶子」。
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** helper 未来提权运行 / 处理不可信可写目录时才升级
+
+### CoverageState / checkPackIntegrity / Play 的 `fileExists` 不辨目录（3 站点共用）
+
+**What:** `coverageState`（T16 新增）、`checkPackIntegrity` 的 `missingFiles`、`Play` 的解析都用 `FileManager.fileExists(atPath:)` 判存在，不查 `isDirectory`。manifest 把某事件映射到一个**存在的同名目录**时，会报 `present`/`complete`，而 `afplay` 运行时静默失败。
+
+**Why:** 现实里 manifest 值都是文件名、且 `safePackFileURL` 已挡路径逃逸；「存在的同名目录」需用户手动造。纯健壮性，非 T16 引入（继承既有 `doctor`/`play` 语义），但现在多了 `CoverageState` 第三个站点。
+
+**Context:** T16 swift-reviewer（2026-07-11）。修法：三处统一改成「存在且是普通文件」判定，抽一个共享 helper 免第四次重犯。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+
+### DesignTokens 规范化 / 生成式 token 模块归并延后（原划归 T14，越界故未做）
+
+**What:** `gui/Sources/ClaudioGUI/DesignTokens.swift` 仍是跨 T7/T15/T16 手抄扩展的 DESIGN.md 调色子集（neutral/brand/surface-2/四事件色/glyph），非一个规范化（理想是从 DESIGN.md 生成）的 token 模块。
+
+**Why:** ENGINEERING.md「T7 非阻断遗留②」原把这项归并划给 T14；T14 落地时刻意不做——越出「state gallery」范围，且会 churn 四个已上线视图换 token 引用、对 gallery 无收益。当前手抄方式功能正常、值与 DESIGN.md 逐一对齐，故为非阻断。
+
+**Context:** T14 swift-reviewer（2026-07-11）+ 实现者自评。`DesignTokens.swift` 两处注释已更正为指向本条。修法：抽一个规范 token 模块（或从 DESIGN.md 生成），四视图改引用它。
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** None
+
+### T15 真身面板的交互 a11y / 播放 / 接线需真机手验，多项收尾未接线
+
+**What:** 本机只有 CommandLineTools（无 Xcode / 显示），T15 的 AppKit 层只编译验证，多项行为无法在此自动测：`NSStatusItem` 点击↔popover 开关、`.transient` 点外/Esc 关闭、开时首焦点落首个可操作项 + VoiceOver 播报面板标题/当前包、关后焦点回状态项、Tab/Shift+Tab 走 action→mute 序、VoiceOver 逐控件（行 `.contain` 后）导航、切包画廊滚动/点选、Dynamic Type 三级真实布局、reduce-transparency、真实 `NSSound` 试听、静音/切包后 SwiftUI refresh、`NSOpenPanel` 选择器端到端喂进导入管线。此外 onboarding CTA（接管/修复/断开）仍未端到端接线（no-op，属 T17 遗留：需先解决 GUI-bundled `claudio` 的 `executablePath` 语义），状态栏用占位 SF Symbol（`waveform.circle`）非最终定制单色字形。
+
+**Why:** 面板核心逻辑（状态派生 / 写回 / 焦点顺序 / 对比度 / Dynamic Type 表）已下沉 `ClaudioGUICore` 并单测覆盖（helper 769 / gui 372），但交互真身只在真机成立。
+
+**Context:** T15 tdd-guide + a11y-architect + swift-reviewer（2026-07-11）。修法：一台装 Xcode 的 Mac 上做一次 VoiceOver + 键盘走查，按上表逐项确认/修；补最终状态栏图标；T17 收口 onboarding CTA 接线。
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** 一台装 Xcode 的 Mac + T17
+
+### T16/T15 GUI 小项：绑定失败留孤儿文件 + doc-comment 的 D 编号引用不存在
+
+**What:** ① `EventRowImportViewModel`：导入成功但随后 `bindEventToManifest` 失败时，已复制进包目录的音频文件会留下、不被任何事件引用（孤儿文件）——已通过 `bindResult` 如实上报（非静默），非安全问题，纯整洁。② T15/T16 新文件里约 26 处 doc-comment 引用「ENGINEERING.md T15 D3/D4」等 D 编号，但 ENGINEERING.md 无此细分——溯源/可读性 nit，读者按 D 编号 grep 会落空。
+
+**Why:** 均无功能风险；两项都是「诚实但可更整洁」，攒到某次 GUI 收尾 pass 一起清。
+
+**Context:** T16 security-reviewer + T15/T14 swift-reviewer（2026-07-11）。修法：① 绑定失败时清掉刚复制的文件，或在 UI 上把孤儿文件也纳入下次 doctor/清理；② 把 D 编号软化为「T15/T16」或「(本任务 step D4)」。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+
 ## Completed
 </content>

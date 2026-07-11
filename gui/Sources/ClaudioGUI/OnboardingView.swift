@@ -11,8 +11,17 @@ public struct OnboardingView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isShowingDetail = false
 
-    public init(viewModel: OnboardingViewModel) {
+    /// The SHARED focus-state binding this view's primary/secondary CTA buttons report
+    /// into (a11y-architect FIX 4, T15): `PanelView` owns the actual `@FocusState` and
+    /// passes its projected binding down here, keyed off ``PanelFocusTarget/onboardingPrimaryAction``/
+    /// ``PanelFocusTarget/onboardingSecondaryAction`` — the SAME identities
+    /// ``panelFocusOrder(_:)`` (`ClaudioGUICore`) already names for this state. Required
+    /// (no default) since `PanelView` is this view's only real call site.
+    private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
+
+    public init(viewModel: OnboardingViewModel, focusedTarget: FocusState<PanelFocusTarget?>.Binding) {
         self.viewModel = viewModel
+        self.focusedTarget = focusedTarget
     }
 
     public var body: some View {
@@ -79,6 +88,7 @@ public struct OnboardingView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(ClaudioColor.clay(colorScheme))
                 .accessibilityLabel(primaryTitle)
+                .focused(focusedTarget, equals: .onboardingPrimaryAction)
             }
 
             if let secondaryTitle = copy.secondaryActionTitle {
@@ -94,6 +104,7 @@ public struct OnboardingView: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityLabel(secondaryTitle)
+                .focused(focusedTarget, equals: .onboardingSecondaryAction)
             }
         }
     }

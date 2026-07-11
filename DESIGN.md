@@ -70,9 +70,11 @@
 | 事件 | 含义 | Dark | Light | 字形 |
 |---|---|---|---|---|
 | ✅ `Stop` 干完了 | 完成、落定 | `#34C759` | `#2FA24E` | 实心粗勾 `checkmark.circle.fill` |
-| ⏸ `StopFailure` 中断了 | 限流 / 欠费 / 过载 / 认证（**非代码 bug**） | `#FF9F0A` | `#E08600` | 暂停 `pause.circle.fill` · **琥珀，绝不用红** |
+| ⏸ `StopFailure` 中断了 | 限流 / 欠费 / 过载 / 认证（**非代码 bug**） | `#FF9F0A` | `#C87A00` | 暂停 `pause.circle.fill` · **琥珀，绝不用红** |
 | ✋ `Notification` 要你确认 | 等你确认 | `#D97757`（=clay） | `#C4633C` | 铃 / 举手 `bell.badge.fill` · **品牌黏土** |
 | ◦ `SubagentStop` 子任务完成 | 从属完成 | `#5E5CE6` | `#5B59D6` | **空心**勾 `checkmark.circle` · 更暗 |
+
+> `StopFailure` 亮色由原 `#E08600`（对亮面板 ~2.73:1）调深为 `#C87A00`（≈3.31:1），以满足事件字形对表面 **≥3:1** 的非文本对比（WCAG 1.4.11）—— 仍为暖琥珀、绝不用红。UI 语义 `warning` token 是独立用途（校验提示，非事件字形），仍保留 `#E08600`，两者刻意分叉。`gui` 侧由 `ContrastSuite.swift` 逐对数学断言钉死。
 
 **UI 语义色（提示 / 校验，独立于事件层）**
 | 用途 | Dark | Light | 备注 |

@@ -8,14 +8,11 @@ import Foundation
 // state → {header dot, app-self-error, accent} mappings T7's acceptance criteria are
 // written against, independent of how a state was arrived at.
 
-private let allSixStates: [OnboardingState] = [
-    .claudeCodeNotInstalled,
-    .helperMissing,
-    .settingsNotWritable(reason: "settings.json 存在但不可写：/tmp/fixture/settings.json"),
-    .settingsParseFailure(reason: "settings.json 解析失败，已中止（未修改文件）：corrupt"),
-    .notInstalled,
-    .installed,
-]
+// Single-source (ENGINEERING.md T14 D1/D3): the exact same 6 states the state gallery
+// (`ClaudioGUI/StateGalleryView.swift`) renders, not a second, independently-maintained
+// hardcoded array — see `PreviewFixtures`'s own doc comment for why it's the one place
+// every fixture state VALUE in this repo is constructed.
+private let allSixStates: [OnboardingState] = PreviewFixtures.onboardingStates
 
 @MainActor
 func runOnboardingStateSuites() {

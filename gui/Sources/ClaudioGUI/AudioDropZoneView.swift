@@ -1,3 +1,4 @@
+import AppKit
 import ClaudioGUICore
 import SwiftUI
 import UniformTypeIdentifiers
@@ -70,11 +71,43 @@ public struct AudioDropZoneView: View {
         }
     }
 
+    /// A real `Button` (a11y-architect FIX 2, CRITICAL — WCAG 2.1.1): this control's own
+    /// accessibility label has always promised "拖入或点按" (drag OR TAP), but until this
+    /// fix it only ever handled `.onDrop` (attached to `body`, still preserved unchanged) —
+    /// a keyboard/VoiceOver/Switch Control user had no way to activate it. Tapping now opens
+    /// ``openImportPanel()`` (an `NSOpenPanel`, multi-select), feeding every chosen file into
+    /// the SAME ``AudioImportViewModel/handleDrop(requests:)`` batch pipeline a multi-file
+    /// drop already uses — never a second import path.
     private var promptLabel: some View {
-        Text("+ 拖入你自己的声音")
-            .font(.system(size: 12.5))
-            .foregroundColor(isHovering ? ClaudioColor.clay(colorScheme) : ClaudioColor.textSecondary(colorScheme))
-            .accessibilityLabel("拖入或点按添加你自己的声音")
+        Button(action: openImportPanel) {
+            Text("+ 拖入你自己的声音")
+                .font(.system(size: 12.5))
+                .foregroundColor(isHovering ? ClaudioColor.clay(colorScheme) : ClaudioColor.textSecondary(colorScheme))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("拖入或点按添加你自己的声音")
+    }
+
+    /// Opens an `NSOpenPanel` (multi-select — mirrors this zone's own multi-file `.onDrop`
+    /// batch semantics) scoped to the same wav/mp3/aiff/m4a whitelist ``AudioFormat``
+    /// documents, feeding every chosen file into the SAME hardened import pipeline a drop
+    /// already uses. `allowedContentTypes` is a picker-UX nicety only, never the actual
+    /// security boundary (see ``audioOpenPanelContentTypes``'s doc comment). AppKit —
+    /// compile-only here, manual-verify on a real Mac.
+    private func openImportPanel() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = audioOpenPanelContentTypes
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        guard panel.runModal() == .OK else { return }
+        let requests = panel.urls.map {
+            AudioImportRequest(sourceURL: $0, suggestedFileName: $0.lastPathComponent)
+        }
+        guard !requests.isEmpty else { return }
+        Task { @MainActor in
+            await viewModel.handleDrop(requests: requests)
+        }
     }
 
     private func rejectRow(_ reason: DropRejectionReason) -> some View {
@@ -137,8 +170,12 @@ public struct AudioDropZoneView: View {
 /// Drops (rather than failing the whole batch over) any single provider that couldn't
 /// hand back a URL at all — as opposed to resolving fine but then failing *validation*,
 /// which is `importAudioFile`'s job, not this extraction step's.
+///
+/// Module-internal (not `private`) so `EventRowView` (T16) reuses this exact
+/// `NSItemProvider` → `AudioImportRequest` extraction for its own row-level drop target,
+/// instead of a second, near-identical copy of the same AppKit plumbing.
 @MainActor
-private func loadDropRequest(from provider: NSItemProvider) async -> AudioImportRequest? {
+func loadDropRequest(from provider: NSItemProvider) async -> AudioImportRequest? {
     // Read the Sendable `String?` up front, synchronously, on whatever isolation this
     // function is already running under — the `loadObject` completion handler below runs
     // on an arbitrary (non-main-actor) queue and must not capture `provider` itself (a
