@@ -83,4 +83,100 @@ func runPanelFocusOrderSuites() {
         let order = panelFocusOrder(.operational(events: [], packCardIDs: []))
         expect(order == [.dropZone], "with zero rows and zero cards, only the drop zone remains, got \(order)")
     }
+
+    // MARK: - panelFirstFocusTarget (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项" — the
+    // OPERABLE half `panelFocusOrder(_:).first` alone does not honor: a muted `.present` row's
+    // 试听 ▶ is present-but-disabled, still first in the order, and must NOT get opening focus).
+
+    suite("panelFirstFocusTarget: nothing disabled → first focus is the first row's action (same as order.first)") {
+        let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [])
+        expect(
+            panelFirstFocusTarget(scope) == .eventAction(Event.allCases.first!),
+            "with every action operable, first focus is the first row's action, got \(String(describing: panelFirstFocusTarget(scope)))")
+        expect(
+            panelFirstFocusTarget(scope) == panelFocusOrder(scope).first,
+            "with nothing disabled the resolver must agree with plain order.first")
+    }
+
+    suite("panelFirstFocusTarget: first row's action disabled (muted present) → first focus falls to that row's mute, NOT the dead action") {
+        let first = Event.allCases[0]
+        let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [])
+        let target = panelFirstFocusTarget(scope, nonOperableActionEvents: [first])
+        expect(
+            target == .eventMute(first),
+            "first focus must skip the disabled action and land on the SAME row's (always-operable) mute, got \(String(describing: target))")
+        expect(
+            target != panelFocusOrder(scope).first,
+            "the whole point: the resolver must diverge from order.first when order.first is a disabled action")
+    }
+
+    suite("panelFirstFocusTarget: for the SAME disabled event, it stays a Tab stop in the full order YET is skipped for opening focus") {
+        let first = Event.allCases[0]
+        let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [])
+        // Half A — panelFocusOrder is deliberately UNCHANGED by the fix: the disabled action is
+        // still a Tab STOP in the full order (AppKit's key-loop skips disabled NSViews itself; the
+        // per-row stop count stays stable). Pin the exact order so a shrink would fail here.
+        let fullOrder = panelFocusOrder(scope)
+        let expected: [PanelFocusTarget] = Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.dropZone]
+        expect(fullOrder == expected, "the full order (incl. the disabled action) must be unchanged, got \(fullOrder)")
+        expect(fullOrder.contains(.eventAction(first)), "the disabled action must remain a Tab stop")
+        // Half B — the SAME event, marked non-operable, is skipped for OPENING focus only.
+        let firstFocus = panelFirstFocusTarget(scope, nonOperableActionEvents: [first])
+        expect(
+            firstFocus == .eventMute(first),
+            "opening focus must skip the disabled action to the row's mute, got \(String(describing: firstFocus))")
+    }
+
+    suite("panelFirstFocusTarget: a NON-first disabled action does not move opening focus (matches by event IDENTITY, not position)") {
+        let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [])
+        // Only the THIRD event's action is disabled — the first row's action is still operable,
+        // so opening focus must stay on it. Kills a mutant that skips index 0 whenever the set is
+        // non-empty (which every event[0]-based suite above would let through).
+        let target = panelFirstFocusTarget(scope, nonOperableActionEvents: [Event.allCases[2]])
+        expect(
+            target == .eventAction(Event.allCases.first!),
+            "a disabled action on a LATER row must not steal the first row's opening focus, got \(String(describing: target))")
+    }
+
+    suite("panelFirstFocusTarget: only the FIRST action is skipped, not the whole row — lands on mute(first), never mute(second)") {
+        let first = Event.allCases[0]
+        let second = Event.allCases[1]
+        let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [])
+        // Both first two rows muted: focus still stops at the first operable slot it reaches,
+        // which is the FIRST row's mute (one slot to the right of its disabled action).
+        let target = panelFirstFocusTarget(scope, nonOperableActionEvents: [first, second])
+        expect(
+            target == .eventMute(first),
+            "must land on the first row's mute, not skip ahead to a later row, got \(String(describing: target))")
+    }
+
+    suite("panelFirstFocusTarget: every action disabled → first focus is still the first row's mute (mute is always operable)") {
+        let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [])
+        let target = panelFirstFocusTarget(scope, nonOperableActionEvents: Set(Event.allCases))
+        expect(
+            target == .eventMute(Event.allCases.first!),
+            "with all actions disabled the first operable target is the first row's mute, got \(String(describing: target))")
+    }
+
+    suite("panelFirstFocusTarget: onboarding scope ignores nonOperableActionEvents (it has no action targets)") {
+        let scope = PanelFocusScope.onboarding(hasPrimaryAction: true, hasSecondaryAction: true)
+        let target = panelFirstFocusTarget(scope, nonOperableActionEvents: Set(Event.allCases))
+        expect(
+            target == .onboardingPrimaryAction,
+            "onboarding first focus is unaffected by action operability, got \(String(describing: target))")
+    }
+
+    suite("panelFirstFocusTarget: empty operational panel → first focus is the drop zone (never nil)") {
+        let scope = PanelFocusScope.operational(events: [], packCardIDs: [])
+        expect(
+            panelFirstFocusTarget(scope) == .dropZone,
+            "an operational panel always ends at the drop zone, so first focus is never nil, got \(String(describing: panelFirstFocusTarget(scope)))")
+    }
+
+    suite("panelFirstFocusTarget: onboarding with neither CTA → nil (nothing to focus)") {
+        let scope = PanelFocusScope.onboarding(hasPrimaryAction: false, hasSecondaryAction: false)
+        expect(
+            panelFirstFocusTarget(scope) == nil,
+            "an empty order has no operable first target, got \(String(describing: panelFirstFocusTarget(scope)))")
+    }
 }

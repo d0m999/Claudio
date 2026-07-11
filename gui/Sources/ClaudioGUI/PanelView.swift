@@ -238,14 +238,28 @@ public struct PanelView: View {
         return .operational(events: eventRows.map(\.event), packCardIDs: packCards.map(\.id))
     }
 
-    /// Sets ``focusedTarget`` to ``panelFocusOrder(_:)``'s current first item — called on
-    /// appear and every time ``focusCoordinator`` signals the popover just (re)showed. Note:
-    /// setting a SwiftUI `@FocusState` value only actually MOVES real AppKit keyboard focus
-    /// once the hosting view is already part of the window's responder chain — that half is
-    /// `MenuBarController.popoverDidShow`'s `makeFirstResponder` call, which always runs
-    /// BEFORE this (via `focusCoordinator.requestFocus()`), never after.
+    /// The events whose ``PanelFocusTarget/eventAction(_:)`` slot is currently NON-operable —
+    /// each row's own ``EventRow/eventActionOperable`` decision (the sole case being a `.present`
+    /// row that is muted; see there), inverted and collected. Fed to
+    /// ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` so opening focus skips a muted first
+    /// row's dead preview and lands on its (operable) mute toggle instead of parking the keyboard
+    /// caret on a dimmed control. Reads the stored `eventRows` state (no disk I/O); irrelevant to
+    /// the onboarding scope, whose order contains no `.eventAction` targets.
+    private var nonOperableActionEvents: Set<Event> {
+        Set(eventRows.filter { !$0.eventActionOperable }.map(\.event))
+    }
+
+    /// Sets ``focusedTarget`` to the panel's first OPERABLE control for its current
+    /// ``PanelFocusScope`` (``panelFirstFocusTarget(_:nonOperableActionEvents:)``, NOT plain
+    /// `panelFocusOrder(_:).first`, so a muted first row's disabled 试听 ▶ never receives
+    /// opening focus) — called on appear and every time ``focusCoordinator`` signals the
+    /// popover just (re)showed. Note: setting a SwiftUI `@FocusState` value only actually
+    /// MOVES real AppKit keyboard focus once the hosting view is already part of the window's
+    /// responder chain — that half is `MenuBarController.popoverDidShow`'s `makeFirstResponder`
+    /// call, which always runs BEFORE this (via `focusCoordinator.requestFocus()`), never after.
     private func applyFirstFocus() {
-        focusedTarget = panelFocusOrder(currentFocusScope).first
+        focusedTarget = panelFirstFocusTarget(
+            currentFocusScope, nonOperableActionEvents: nonOperableActionEvents)
     }
 
     // MARK: - Actions

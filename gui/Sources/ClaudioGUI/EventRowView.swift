@@ -194,10 +194,10 @@ public struct EventRowView: View {
                 // folds in `row.coverage.previewEnabled` (false for `.unmapped`), so it
                 // renders with its existing disabled styling automatically.
                 importAffordance(label: "未配置")
-                previewButton
+                previewButton(claimsActionFocus: false)
             case .broken:
                 importAffordance(label: "文件丢失")
-                previewButton
+                previewButton(claimsActionFocus: false)
             }
             muteIndicator
         }
@@ -233,11 +233,14 @@ public struct EventRowView: View {
                     // (e.g. "waveform") as an unlabeled-feeling extra `.contain` stop.
                     .accessibilityHidden(true)
             }
-            previewButton
+            previewButton(claimsActionFocus: true)
         }
     }
 
-    private var previewButton: some View {
+    /// The 试听 ▶ preview button's styled body, WITHOUT the `.eventAction` focus binding — the
+    /// binding is applied conditionally by ``previewButton(claimsActionFocus:)`` so that exactly
+    /// one control per row ever owns that focus identity (see there).
+    private var previewButtonBody: some View {
         let enabled = row.coverage.previewEnabled && row.enabled
         return Button(action: onPreview) {
             Image(systemName: "speaker.wave.2")
@@ -259,9 +262,28 @@ public struct EventRowView: View {
         .disabled(!enabled)
         .contentShape(Rectangle())
         .accessibilityLabel("试听 \(eventDisplayName(row.event)) 的声音")
-        // a11y-architect FIX 4: this is the row's `.eventAction` slot when coverage is
-        // `.present` — `panelFocusOrder(_:)`'s SAME identity, never a second one.
-        .focused(focusedTarget, equals: .eventAction(row.event))
+    }
+
+    /// The 试听 ▶ preview button. `claimsActionFocus` decides whether THIS control owns the
+    /// row's ``PanelFocusTarget/eventAction(_:)`` focus identity:
+    ///
+    /// - `.present` rows pass `true`: the preview button is the row's SOLE action control, so it
+    ///   owns `.eventAction` (`panelFocusOrder(_:)`'s SAME identity, never a second one).
+    /// - `.unmapped`/`.broken` rows pass `false`: DESIGN.md line 127 still renders a disabled
+    ///   "试听 ▶ 禁用" here, but the row's OPERABLE action is the always-enabled
+    ///   ``importAffordance(label:)``, which owns `.eventAction`. This disabled button must NOT
+    ///   also bind `.eventAction` — two simultaneously-rendered `.focused(_:equals:)` on one
+    ///   value make SwiftUI's focus resolution undefined (a11y-architect FIX 4 dedup), and in
+    ///   particular would let ``PanelView/applyFirstFocus()`` land opening focus on this dead
+    ///   preview instead of the operable import affordance. One row → exactly one `.eventAction`
+    ///   owner, honoring ``PanelFocusTarget/eventAction(_:)``'s "a SINGLE slot per row" contract.
+    @ViewBuilder
+    private func previewButton(claimsActionFocus: Bool) -> some View {
+        if claimsActionFocus {
+            previewButtonBody.focused(focusedTarget, equals: .eventAction(row.event))
+        } else {
+            previewButtonBody
+        }
     }
 
     /// The row-end drag-to-bind affordance for `unmapped`/`broken` rows (DESIGN.md: "行尾
@@ -309,9 +331,13 @@ public struct EventRowView: View {
         .buttonStyle(.plain)
         .onDrop(of: [UTType.fileURL], isTargeted: $isHoveringImportTarget, perform: handleDrop)
         .accessibilityLabel("拖入或点按，绑定声音到 \(eventDisplayName(row.event))")
-        // a11y-architect FIX 4: this is the row's `.eventAction` slot when coverage is
-        // `.unmapped`/`.broken` — the SAME identity `previewButton` uses for `.present`,
-        // since a row only ever renders ONE of the two at a time (never both).
+        // a11y-architect FIX 4: this is the row's `.eventAction` focus OWNER when coverage is
+        // `.unmapped`/`.broken` — the SAME identity `previewButton(claimsActionFocus:)` uses for
+        // `.present`. DESIGN.md still renders a disabled "试听 ▶ 禁用" alongside this on
+        // unmapped/broken rows, but that button passes `claimsActionFocus: false` so it does NOT
+        // also bind `.eventAction`: exactly one operable owner per row, never a disabled one
+        // racing this affordance for the same `@FocusState` value (which would make first focus
+        // land on the dead preview — the whole reason for the dedup).
         .focused(focusedTarget, equals: .eventAction(row.event))
     }
 

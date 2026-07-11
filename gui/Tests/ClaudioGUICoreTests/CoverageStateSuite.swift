@@ -43,6 +43,39 @@ func runCoverageStateSuites() {
             ".broken must have entersDoctor == true")
     }
 
+    // MARK: - EventRow.eventActionOperable (a11y-architect FIX 4 first-focus: the pure decision
+    // PanelView.nonOperableActionEvents inverts, feeding panelFirstFocusTarget). Non-operable
+    // ONLY for a .present-AND-muted row (its 试听 ▶ is the disabled .eventAction owner);
+    // unmapped/broken keep an operable action slot (the always-enabled import affordance).
+
+    suite("EventRow.eventActionOperable: .present + enabled is operable (the preview plays)") {
+        let row = EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: true)
+        expect(row.eventActionOperable, ".present not-muted must be operable")
+    }
+
+    suite("EventRow.eventActionOperable: .present + muted is the ONLY non-operable case (disabled 试听 ▶ owns .eventAction)") {
+        let row = EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: false)
+        expect(!row.eventActionOperable, ".present muted must be non-operable — this is the whole bug the resolver fixes")
+    }
+
+    suite("EventRow.eventActionOperable: .unmapped is operable regardless of mute (import affordance owns .eventAction, always enabled)") {
+        expect(
+            EventRow(event: .notification, coverage: .unmapped, enabled: true).eventActionOperable,
+            ".unmapped + enabled must be operable")
+        expect(
+            EventRow(event: .notification, coverage: .unmapped, enabled: false).eventActionOperable,
+            ".unmapped + muted must STILL be operable — muting doesn't disable the import affordance")
+    }
+
+    suite("EventRow.eventActionOperable: .broken is operable regardless of mute (import affordance owns .eventAction, always enabled)") {
+        expect(
+            EventRow(event: .stopFailure, coverage: .broken(fileName: "x.mp3"), enabled: true).eventActionOperable,
+            ".broken + enabled must be operable")
+        expect(
+            EventRow(event: .stopFailure, coverage: .broken(fileName: "x.mp3"), enabled: false).eventActionOperable,
+            ".broken + muted must STILL be operable — the import affordance is the action slot, not the disabled preview")
+    }
+
     // MARK: - packCoverage: per-event present/unmapped/broken
 
     suite("packCoverage: an event absent from the manifest reports .unmapped") {

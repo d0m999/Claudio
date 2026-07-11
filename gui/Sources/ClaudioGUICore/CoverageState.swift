@@ -59,6 +59,25 @@ public struct EventRow: Sendable, Equatable {
     }
 }
 
+extension EventRow {
+    /// Whether this row's ``PanelFocusTarget/eventAction(_:)`` slot currently renders as an
+    /// OPERABLE control — the pure decision behind ``PanelView``'s `nonOperableActionEvents`,
+    /// fed to ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` so a panel never opens with
+    /// keyboard focus parked on a dimmed control (ENGINEERING.md「无障碍规格」"打开焦点落首个
+    /// 可操作项" — 可操作 is load-bearing).
+    ///
+    /// The only non-operable case is a `.present` row that is MUTED: there the row's action
+    /// slot is the 试听 ▶ preview button, which `EventRowView` renders `.disabled(true)` when
+    /// `!enabled`. On `.unmapped`/`.broken` the action slot is instead the always-enabled
+    /// import affordance (the co-rendered disabled preview no longer owns `.eventAction` — see
+    /// ``EventRowView``'s `previewButton(claimsActionFocus:)` dedup), so the slot is operable
+    /// there regardless of `enabled`. `.present` + not muted is operable (the preview plays).
+    public var eventActionOperable: Bool {
+        if case .present = coverage { return enabled }
+        return true
+    }
+}
+
 /// Computes every ``Event/allCases``' ``EventRow`` for `packID` — the state gallery (T14)
 /// and the real event-row panel (T15) both render straight off this, no other place is
 /// allowed to recompute coverage independently (single source of truth, T16).

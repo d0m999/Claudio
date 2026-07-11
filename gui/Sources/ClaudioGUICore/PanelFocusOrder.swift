@@ -78,3 +78,44 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         return order
     }
 }
+
+/// The control focus lands on the instant the panel opens — the FIRST entry of
+/// ``panelFocusOrder(_:)`` that is actually OPERABLE.
+///
+/// ENGINEERING.md「无障碍规格」: "打开焦点落首个可操作项" — 可操作 (OPERABLE) is the
+/// load-bearing word, and `.first` alone does not honor it: an event row whose 试听 ▶ is
+/// present-but-disabled (its sound is MUTED, so ``EventRowView``'s preview `Button` renders
+/// `.disabled(true)`) is still the row's `.eventAction` slot and still sits FIRST in
+/// ``panelFocusOrder(_:)``'s list, so `panelFocusOrder(scope).first` would park the opening
+/// keyboard caret on a dimmed control that does nothing. This resolver skips those, landing
+/// focus on the first genuinely-operable target instead — for a muted first row that is its
+/// own (always-operable) mute toggle, one slot to the right.
+///
+/// `nonOperableActionEvents` names the events whose `.eventAction` slot is currently
+/// disabled. It is computed by the view layer (``PanelView``), which alone knows each row's
+/// ``CoverageState`` + muted state — deliberately kept OUT of this Foundation-only model, the
+/// same reason ``PanelFocusScope`` carries plain ``Event``s rather than `EventRow`s. Only the
+/// present-AND-muted case belongs here: `unmapped`/`broken` rows' action slot is the
+/// always-operable import affordance, not the (also-rendered, but no-longer-focus-owning)
+/// disabled preview button (see ``EventRowView``). Every non-action target — mute toggles,
+/// the drop zone, gallery cards — is operable and never filtered.
+///
+/// ``panelFocusOrder(_:)`` itself is intentionally NOT changed: it still lists every slot
+/// including disabled actions, so the per-row Tab-STOP count stays stable across coverage
+/// state (``PanelFocusTarget/eventAction(_:)``'s own invariant) and AppKit's real key-loop —
+/// which skips disabled `NSView`s on its own — keeps owning Tab traversal. This resolver
+/// governs only the ONE thing the pure model actually drives: which control opens focused.
+///
+/// Returns `nil` only for a genuinely empty order (e.g. onboarding with neither CTA); an
+/// operational panel always ends in ``PanelFocusTarget/dropZone``, so it never returns `nil`.
+public func panelFirstFocusTarget(
+    _ scope: PanelFocusScope,
+    nonOperableActionEvents: Set<Event> = []
+) -> PanelFocusTarget? {
+    panelFocusOrder(scope).first { target in
+        if case .eventAction(let event) = target {
+            return !nonOperableActionEvents.contains(event)
+        }
+        return true
+    }
+}
