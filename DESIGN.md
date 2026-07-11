@@ -150,12 +150,12 @@
 - **onboarding 卡 / 空态卡**：面板内居中列 —— 44px（radius 12）图标块（态色 15% 底 + 态色字形）→ 标题 SF Pro semibold 15 → 正文 `text-2` 12.5 → 主 CTA（黏土实心 pill radius 9 全宽）+ 次 CTA（ghost：透明 + `hairline-strong` 描边）。**空态三要素：温度 + 主行动 + 上下文。**
 - **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：每个事件行按 `CoverageState = present | unmapped | broken` 呈现 —— **GUI 从 manifest + 文件存在性算，helper 不改播放行为**。`present`（配了且文件在）= 上述完整行（名 + id + 文件名 + 波形 + 试听 ▶）；`unmapped`（manifest 没配此 event）= 行显「未配置」、试听 ▶ 禁用；`broken`（配了，但目标文件不存在 / 路径未通过包目录 containment）= 行显「文件丢失」并入 `doctor`、试听 ▶ 禁用。**`broken` 只判「文件缺失 / 路径无效」，不含「音频内容损坏」**：`doctor` 现只做**正规文件**存在性 + containment（`regularFileExists` = `stat` + `S_IFREG`；2026-07-11 `/ship` 收口前是 `fileExists`，会把一个名叫 `stop.mp3` 的**目录**判成 present），`play` 是 fire-and-forget（刻意不 `waitUntilExit()`，见 `Play.swift`），`afplay` 拒绝坏文件的信号回不到进程里。「文件在、确是正规文件、但解不出声」要另立状态，须先给 doctor 或播放层加音频 lint —— v1 不做。`unmapped` 与 `broken` 两态都在**行尾提供逐事件导入绑定**（拖入 / 选文件 → 绑到该 event）去补。区分二者 = **真打包错误不被伪装成正常静默**。禁用观感用**显式禁用样式（控件置灰 + 图标降饱和），不整行降 opacity**（行内文字始终保 ≥ 4.5:1 对比度）。此三态与正交的**静音态**（`enabled=false`：控件区弱化 + 静音钮点亮）叠加，互不取代。
 - **错误态用色（关键约束）**：app 自身错误（settings 不可写 / 解析失败 / helper 缺失）用 UI 语义 `error #FF453A`（真红）；**绝不用于四事件层**（StopFailure 永远琥珀）。非阻断提示（如 Claude Code 未装）用中性 `surface-2` + `text-2`，不上真红。
-- **拖入 drop-zone**：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → 边框 / 文字转黏土 + `clay-soft` 底。
-  - ⚠️ **KNOWN GAP · 待决策（2026-07-11 登记，未改）—— 「hover 文字转黏土」与「行内文字 ≥ 4.5:1」自相矛盾**：本条要求 hover 时**文字**转黏土，而上面「事件行三态」条同时要求「行内文字始终保 ≥ 4.5:1 对比度」。实测亮色 `clay` `#C4633C` 对 `panel` / `surface-2` = **3.97:1** —— 过图标 / 边框的 ≥3:1，**不过**正文的 ≥4.5:1。两条规则不能同时成立，**本次未擅自修改**（clay 同时是品牌唯一强调色 **和** `Notification` 的事件色，动它 = 动品牌 + 动一个事件的视觉身份，须用户拍板）。三个候选解法：
-    1. **（推荐）hover 只让边框 + `clay-soft` 底转黏土，文案保持 `text` / `text-2`** —— 只需从本条删掉「文字」二字，零品牌成本，语义（「命中了」）由边框 + 底色照样说清。
-    2. **调深亮色 `clay` 到 ≥4.5:1**（约 `#A8502F` 量级）—— 代价是改品牌色 **且**改 `Notification` 的视觉身份，两处连带。
-    3. **豁免** —— **不成立**：hover 文案是 12.5pt 常规字重，够不上 WCAG 大字体豁免（≥18.66pt bold / ≥24pt）。
-    现状：`ContrastSuite.swift` 已放 known-gap 断言 —— 启用「clay ≥3:1」（边框 / 字形这一半今天就必须成立），**注释掉**「clay ≥4.5:1」并附自毁提醒（若哪天 clay 被调到 ≥4.5:1，测试会红并要求取消注释、删掉本注记）。`TODOS.md` 记同一条（P3）。
+- **拖入 drop-zone**：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → **边框** 转黏土 + `clay-soft` 底，**文案保持 `text-2` 不变**。
+  - ✅ **已拍板（2026-07-11 `/ship`）—— hover 反馈由边框 + 底色承载，文字不转黏土**。此前本条写的是「边框 / **文字**转黏土」，与上面「事件行三态」条的「行内文字始终保 ≥ 4.5:1 对比度」自相矛盾：实测亮色 `clay` `#C4633C` 对 `panel` `#FFFDF8` = **3.97:1** —— 过图标 / 边框的 ≥3:1，**不过**正文的 ≥4.5:1。曾列的三个解法中取**解法 1**（本条原本自己标的推荐项）：
+    1. ✅ **采纳**：hover 只让边框 + `clay-soft` 底转黏土，文案保持 `text-2`。零品牌成本，语义（「命中了」）由边框 + 底色照样说清。
+    2. ❌ 调深亮色 `clay` 到 ≥4.5:1（约 `#A8502F`）—— 会改品牌色 **且**改 `Notification` 的视觉身份，为一个 hover 态动两处，不划算。
+    3. ❌ 豁免 —— 不成立：hover 文案是 12.5pt 常规字重，够不上 WCAG 大字体豁免（≥18.66pt bold / ≥24pt）。
+    落地：`AudioDropZoneView.promptLabel` 的 `foregroundColor` 恒为 `textSecondary`（不再有 `isHovering` 三元）；`isHovering` 仍然驱动边框与底色，hover 观感不变。`ContrastSuite.swift` 里那条被注释掉的「clay ≥4.5:1」known-gap 断言随之作废——正文文字集合里已经没有 clay 了。**「品牌强调唯一 = 黏土 `#D97757`」这条不为任何单一状态开色值的口子。**
 - **拒绝行**：真红 `circle-x` 字形 + `text-2` 说明，`原因`（真红）+「怎么修」一句；不道歉、不含糊。
 - **内边距 / 圆角**：沿用面板 12–13pt、卡片 radius 10、控件 radius 6。
 - ⚠️ **展柜 artifact 现状**：DESIGN.md 顶部链接的「设计系统预览」artifact 仍画着已移至 v2 的深夜降音量，且不在仓库 / CI 不可验。视觉真相源改为**仓库内 state gallery**（SwiftUI Preview 目录，与状态测试共用 fixtures，见 ENGINEERING T14）；外部展柜降为可选快照。

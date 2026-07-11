@@ -266,19 +266,61 @@
 **Priority:** P3
 **Depends on:** None
 
-### clay 当正文用够不到 4.5:1 —— DESIGN.md 自身冲突，待拍板
+### GUI 主线程一次性全量扫包（装几十个包后开面板会卡）
 
-**What:** DESIGN.md line 131 祝福「drop-zone hover 命中 → 边框 / **文字**转黏土」，line 127 又要求「行内文字 ≥ 4.5:1」。实测亮色 clay `#C4633C` 对 panel / surface-2 = **3.97:1**——过图标 / 边框的 ≥3:1，**不过正文的 ≥4.5:1**。两行规范互相矛盾，代码只能二选一。
+**What:** 每开一次面板，`availablePacks` 在主线程上把两个包根目录全量枚举一遍，对**每个**包解析目录 + 有界读 manifest + 解 JSON + 算 coverage，无缓存、无异步、无分页。
 
-**Why:** 这不是实现 bug，是规范内部冲突，得由用户拍板——因为两条出路都动 DESIGN.md，而 clay 是品牌唯一强调色，不该由实现者代为改动。当前状态：`ContrastSuite` 里已放一条 known-gap 断言（启用「clay ≥3:1」、注释掉「clay ≥4.5:1」，并附自毁提醒——拍板后要么删注释、要么删这条 suite）。
+**Why:** 1 MiB 的单份 manifest 上限挡不住「包很多」这一维：几十个包就开始线性变卡，几千个包能把菜单栏 app 冻住。今天用户手里通常只有 1–3 个包，所以是真实但尚未触发的问题。
 
-**Context:** T14/T15/T16 pre-landing 评审（2026-07-11 `/ship`，对比度审计）。三个选项：① **（推荐，零品牌成本）** hover 只让**边框 + clay-soft 底**转黏土，文案保持 text / text-2 ——只需删掉 DESIGN.md drop-zone 那条里的「文字」二字，配色表一个字不动；② 把亮色 clay 调深到 ≥4.5:1（约 `#A8502F`）——**但 clay 同时是 Notification 的事件色**（DESIGN.md「一个招牌绑定」），等于同时改品牌色 + 改一个事件的视觉身份，代价大；③ 走 WCAG 大字体豁免——**不成立**，hover 文案 12.5pt 常规字重够不上豁免门槛（≥18.66pt bold / ≥24pt）。**未经用户授权，本次没有动 clay 的色值、也没有删那两个字**——只在 DESIGN.md 里**登记**了 known-gap 注记 + 三个候选解法（决议表同日一行，标「待决 · 未改」），等用户拍板后再落地其一。
+**Context:** 2026-07-11 `/ship` 九路评审（Codex 对抗 [P2] + Claude 对抗独立命中）。修法：把画廊加载移出主 actor + 缓存结果（按目录 mtime 失效），必要时分页。
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** None
+
+### ManifestBindError 的两个失败态没有「怎么修」的出路，且绑定失败会留下孤儿文件
+
+**What:** `config.json` 的每一条 fail-closed 原因都带 `configRebuildHint`（「手工改这个键，或删掉文件让 claudio 重建」），而 `ManifestBindError.manifestUnreadable` / `.writeFailed` 的文案只说了「读不动 / 写不进」，没有任何下一步；代码里也没有任何路径能重建 / 修复一个用户包的 manifest.json。叠加已知的「绑定失败留孤儿文件」（音频已拷进去、manifest 没更新），用户在那个包上就被永久卡住，而且一旦那条 toast 消失，磁盘上再没有任何证据。
+
+**Why:** 与 config 侧「fail closed 必须给出路」是同一条原则，只是 manifest 侧没跟上。
+
+**Context:** 2026-07-11 `/ship` 九路评审（红队）。修法：给这两个 case 补可执行 hint（对齐 `configRebuildHint` 的形状），并让 doctor 或面板能提示「这个包的 manifest 坏了，重装 / 重建它」；孤儿文件在 `.writeFailed` 时回滚删除。（原「绑定失败留孤儿文件」P4 条目并入本条。）
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** None
+
+## Completed
+
+### clay 当正文用够不到 4.5:1 —— DESIGN.md 自身冲突
+
+**What:** DESIGN.md 一边祝福「drop-zone hover 命中 → 边框 / **文字**转黏土」，一边要求「行内文字 ≥ 4.5:1」。实测亮色 clay `#C4633C` 对 panel `#FFFDF8` = **3.97:1**——过图标 / 边框的 ≥3:1，**不过正文的 ≥4.5:1**。两行规范互相矛盾，代码只能二选一。
+
+**Why:** 不是实现 bug，是规范内部冲突，且两条出路都动 DESIGN.md，而 clay 是品牌唯一强调色，实现者不该代为改动——所以挂账等用户拍板。
+
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11 `/ship`，对比度审计）登记；同日 `/ship` 九路评审复现并量到同一个 3.97:1。
+
+**修复方式:** 用户拍板取 DESIGN.md 自己标的**解法 1**：hover 反馈只由**边框 + `clay-soft` 底**承载，**文案恒为 `text-2`**。`AudioDropZoneView.promptLabel` 的 `foregroundColor` 去掉 `isHovering` 三元（`isHovering` 仍驱动边框与底色，hover 观感不变）；DESIGN.md 的 known-gap 注记改成已拍板记录。零品牌成本——clay 的色值一个字没动，`Notification` 的视觉身份也没动。
 
 **Effort:** S
 **Priority:** P3
-**Depends on:** 用户在三个选项里拍板
+**Depends on:** None
+**Completed:** 2026-07-11（`/ship` 九路评审修复批，分支 `feat/t16-t15-t14-state-gallery`）
 
-## Completed
+### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂
+
+**What:** `setEventEnabled` 的 config 读-改-写在本分支里**新**被纳入 `play.lock`（此前无锁），但只测了锁竞争（1 持有者 + 1 等待者），没有任何 `DispatchQueue.concurrentPerform` 测试证明这条 RMW 在真并发写下不撕裂。
+
+**Why:** 「被本分支改掉行为、却没有覆盖变更后路径」的定义就是回归缺口——覆盖率审计把它列为整个 diff 里唯一的 REGRESSION GAP，优先级最高。`PlaySuite.swift` 里已有现成的同形状测试（真并发证明「恰好一个播放」）可以 1:1 照抄。
+
+**Context:** 2026-07-11 `/ship` 覆盖率审计（91%，唯一 REGRESSION GAP）。
+
+**修复方式:** 照 `PlaySuite` 的 `concurrentPerform` 形状补真并发写测试：N 个并发 `setEventEnabled` 打同一份 config，断言落地文件仍是合法 JSON、三个 v1 键都在、未知顶层键一个没丢、且每次调用要么成功要么 `.lockBusy`——绝无静默损坏。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+**Completed:** 2026-07-11（`/ship` 九路评审修复批，分支 `feat/t16-t15-t14-state-gallery`）
 
 ### CoverageState / checkPackIntegrity / Play 的 `fileExists` 不辨目录（3 站点共用）
 

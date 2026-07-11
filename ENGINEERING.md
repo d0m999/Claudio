@@ -613,6 +613,37 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
   （原列的「暗色下 tile 与包卡背景同为 `surface-2` 是否撞色」**已作废** —— 那是中性 tile 方案的副产物，方案已推翻，tile 现在是事件色自染，不存在这个问题。）
 
+  ---
+
+  **2026-07-11 第二轮 `/ship` 九路评审（同分支再跑一遍，因为上一轮之后又落了 2 个提交）**。阵容同上（checklist + 5 专家 + 红队 + Claude 对抗 + Codex 对抗 + Codex 结构化 + 覆盖率 + plan-completion）。Codex 结构化评审 **GATE: PASS（无 P1）**、覆盖率 **91%（273/300，过 80% 目标）**、plan-completion **scope CLEAN**——**然后 Claude 对抗子代理找到了一个会让菜单栏 app 硬崩的 P0**。这件事本身值得记：**三道绿灯挡不住一个没人往那个方向看过的洞**，而对抗评审的全部价值就在这里。
+
+  **⑩ 【P0，已实证 exit 134】一个负溢出浮点让「点静音」变成「进程 abort」，而 doctor 报「✓ 可安全重写」。**
+  `{"master_volume": -1e400}` —— `JSONSerialization` **解析期放行**（得到 `-inf`，`objCType` 为 `d`），然后穿过**每一道** fail-closed 闸门：`isJSONNumber` 只判「是 NSNumber 且不是布尔」，没有任何有限性检查；`normalizedJSONNumbers` 那条「只改渲染、绝不改值」的守卫（`decimal.doubleValue == number.doubleValue`）因为 `NSDecimalNumber(string: "-inf")` 是 NaN、而 `NaN == -inf` 恒假，**恰恰把 `-inf` 原样放行**。最后 `JSONSerialization.data(withJSONObject:)` 抛出 **Objective-C 的 `NSInvalidArgumentException`**——**Swift 的 `do/catch` 接不住**——进程 `abort()`。实测 exit 134。
+  - **爆炸半径**：GUI 点一下静音钮（`EventMuteController` → `setEventEnabled` → `updateConfigJSON`）→ 菜单栏 app 当场硬崩；`claudio use` 切包、以及给事件绑音频（`bindEventToManifest`，同一个形状的洞）同理。`claudio play` 不写 JSON，所以「hook 绝不阻断 Claude Code」这条硬契约**没被破**——唯一的好消息。
+  - **它同时证伪了这个 diff 自己写下的核心契约**：`ConfigMutation` 的类型注释白纸黑字写着「不存在 doctor 说能、真去写又失败的可能」。而 `probeConfigRewritable` 只解析、不模拟写，于是对这份文件返回 `.rewritable`，`doctor` 打印「✓ config.json 可安全重写」——真去写是**崩溃**。不是「说能、写失败」，是「说能、写崩」。**新增的检查 (g) 在这条输入上给出的是假绿。**
+  - **不对称**（值得记住的 Foundation 行为）：正溢出 `1e400` 在**解析期**就被拒了，只有**负**溢出能穿进来。所以闸门判的是 `isFinite`，不是「负数」。
+  - 修法（两层，缺一不可）：**读侧** `firstUnwritableJSONValue` 递归拒掉任何非有限数字（含未知键里嵌套的、数组里的）并给出可执行原因——这一层负责让 **doctor 说真话**；**写侧** `JSONSerialization.isValidJSONObject` 兜底——这一层负责让「任何我们还没想到的不可序列化值」也只是**一个可捕获的失败**，而不是 abort。顺带给两个递归函数加了 64 层深度上限（病态嵌套 config 会爆栈）。
+  - **两个调用方共用一个原语**（新增 `helper/Sources/ClaudioCore/JSONSafeWrite.swift` 的 `encodeJSONForWriting`）：`config.json` 与 `manifest.json` 做的是**同一件事**（外科式读-改-写），此前各写一遍，于是 manifest 那边**同时**漏了数字规范化（一次绑定就能把未知键里干净的 `0.8` 写成 `0.80000000000000004`）**和**这个 abort。现在「哪些值写得出去」只有一个定义，未来任何一次加固自动覆盖两边。
+
+  **⑪ 【CRIT，三路独立命中】`config.json` 的读全线无界，而同一个 diff 刚给 `manifest.json` 加完闸门。**
+  `SafeFileRead.swift` 用大段注释论证「无大小上限的读是已证实、今天就能触发的洞」——然后只用在了 manifest 上。`config.json` 的**五处**读全是裸 `Data(contentsOf:)`：`Play.loadPlayConfig`（**同步 hook 路径，每个 Claude Code 事件跑一次**）、`Play.readLastPlayedTimestamp`（`play.state`）、`ConfigMutation` 的两处、`Doctor.checkPackIntegrity`、以及 `gui` 的 `loadPanelConfig`（**主线程，每次开面板跑一次**，而它的 doc 自称「绝不崩溃**或挂起**」）。
+  - **信任边界在同一个文件上自相矛盾**：**写**路径把 `config.json` 当不可信输入（整套 fail-closed 闸门都是为它建的），**读**路径却完全信任它。真实危害是**读取无大小上限**——500MB 形状的 `config.json` 会在这两条路径上被整份读进内存。
+  - ⚠️ **评审这条判定里有一半是错的，而且是同一个伪命题的第二次出现**：红队与 Codex 对抗都断言「FIFO 形状的 config.json → `Data(contentsOf:)` 永久阻塞 → hook / 菜单栏挂死」。**实测不成立**：Darwin 上 `Data(contentsOf: FIFO)` 在 0.0001s 内抛 `EACCES`，目录抛 `EISDIR`，都不阻塞。这与上一轮对 `manifest.json` 的**同一条**结论逐字一致（见上面「两条被证伪的发现」——那次也是评审说会挂、实测不挂）。**同一个伪命题被不同模型独立提出了两次**，所以这次把它钉进了 `SafeFileRead.swift` 的 doc comment，而不只是记在这里。写注释时我自己也先原样信了它一遍，是补测试的子代理实测把它揪出来的——**教训：一条听起来很合理的失败模式，哪怕由三路评审独立命中，也仍然要自己跑一遍才能写进注释。**
+  - 那为什么仍然保留正规文件闸门？理由与上一轮一字不差：**不把安全性押在一个未文档化的 Foundation 实现细节上**。`Data(contentsOf:)` 今天恰好挡住了 FIFO，但那不是它的契约；一旦有人把读法重构成 `FileHandle` / `InputStream`（那**真的**会挂在 `open(2)` 上），洞当场重开。
+  - 修法：新增 `maxConfigFileBytes`（64 KiB）+ `readConfigFileBounded` + **单一** `loadClaudioConfig(from:)`，六处全部接上。`play` / `doctor` / 面板三边对「这份 config 能不能用」的答案从此不可能分叉；兜底策略仍归各自（`play` → 静默不播，面板 → 未选中任何包）。
+
+  **⑫ 【CRIT】「点一下静音」把可恢复状态变成永久静音，而且自举永不恢复。**
+  `Setup.performFirstRunSetup` 的自举门槛是 `if !fileExists(config.json)`。而 `setEventEnabled` 在 config 缺失时会新建一份 `selected_pack: ""` 的 config——**这是对的**（静音这个动作没有任何 pack 上下文，凭空编一个默认包等于伪造一次谁也没做过的选择）。两者叠加：hooks 已装但 config 缺失 → 用户点一次静音 → 磁盘上出现空 pack 的 config → 此后旧门槛**永远为假** → 自举**再也不会**挑默认包 → `play` 永远解析不出包 → **永久静音，没有任何东西会自愈**。
+  - 修法**不是**给 `setEventEnabled` 伪造默认包，而是把门槛改回它真正的语义：`noPackHasEverBeenSelected` = 「文件不存在 **或** `selected_pack` 为空」。「文件不存在」只是这个语义一个**碰巧在大多数时候成立**的近似。一份**读不出来 / 畸形**的 config 不在此列（返回 false）——那不是「没选过包」，那是一份坏文件，替用户做主只会把一次诚实的报错换成一次静默的数据丢失。
+
+  **⑬ 【P2 四修】** ① **切包状态泄漏**（Codex 结构化 [P2]）：`refresh()` 只改 `packID`、不清 `AudioImportViewModel.state` / `EventRowImportViewModel.bindResult`，于是包 A 的「已加入 stop.mp3」/「manifest 读不动」会原样留在包 B 的面板上。修法 `retarget(to:)`，且**只在包真的换了时才清**——`refresh()` 在一次绑定结束后也会被调用，无条件清空会把用户刚触发的失败原因在他看见之前抹掉，等于把上一轮刚修好的「绝不静默吞错」又变回静默。② **`probeConfigRewritable` 不验父目录可写**（Codex 结构化 [P2]）：内容合法但父目录只读时仍报「✓ 可安全重写」，而原子写要的正是父目录可写。新增 `ConfigRewritability.unwritable(reason:)`（与 `.malformed` 分开：「你的文件写错了」和「你的文件没错、是目录不让写」该讲的话完全不同）。③ **`playPreview` 静默 no-op**（Claude 对抗）：`.present` 是上次 `refresh()` 算的，文件在这中间被删掉后点试听**什么都不发生、也没有解释**。修法不是弹错误框，而是**让面板说实话**——重跑 `refresh()`，这一行当场从 `.present` 变成 `.broken`。④ **`MenuBarController` 保留环**（Claude 对抗）：`onPanelWidthChange` 强捕获 `popover`，而 `popover → hostingController → rootView → closure → popover` 成环。今天进程级生命周期掩盖了它，一旦将来有人重建 popover 就是真实泄漏。改 `[weak popover]`。
+
+  **⑭ 【设计 · 已拍板】** DESIGN.md 自己登记的「待拍板」冲突落地：亮色 clay `#C4633C` 对 panel `#FFFDF8` = **3.97:1**，过非文字的 ≥3:1、**不过**正文的 ≥4.5:1，而 drop-zone 那条又要求 hover 时**文字**转黏土。取 DESIGN.md 自己标的推荐解法：**hover 反馈只由边框 + `clay-soft` 底承载，文案恒为 `text-2`**。零品牌成本——clay 的色值一个字没动，`Notification` 的视觉身份也没动。**「品牌强调唯一 = 黏土」这条不为任何单一状态开色值的口子。**
+
+  **⑮ 【回归缺口】** 覆盖率审计点名整个 diff 唯一的 REGRESSION GAP：`setEventEnabled` 的读-改-写在本分支**新**被纳入 `play.lock`（此前无锁），却只测了锁竞争、没有真并发写测试。已照 `PlaySuite` 现成的 `concurrentPerform` 形状补上。
+
+  **这一轮的教训（写下来是为了下一轮不再交这个学费）**：一个 diff 建了一道闸门（`readRegularFileBounded`）、写了很长的注释论证它为什么必要——**然后只把它用在了发现问题的那一个文件上**。⑩⑪ 两条都是这个形状：正确的解法就在同一个 commit 里，只是没有被推到所有同类调用点。**下次给某个「形状」建闸门时，第一件事是 grep 出这个形状的全部调用点，而不是修好手头这一个。**
+
 - [x] **T17 (P1, human: ~2-3h / CC: ~30min)** — helper — v1 首次安装自举（`claudio use` 真实现 + 新增 `claudio setup`）
   - Surfaced by: `/codex review 10f00cf+f31987b`（T11 CC0 台账 + T12 CI/分发骨架）—— 两处 [P1]：release.yml 把二进制 + 内置包塞进 app bundle，但 (a) onboarding CTA 故意未接线（T8/T15 留白）、(b) `claudio use` 其实是 `NotYetImplemented` 占位符（正文「工程落地细节 ⑥」曾误标"已实现"）、(c) 没有任何代码把 bundle 内容复制到 `~/.claudio/`——"app 安装"这一步压根不存在。三者叠加 = 首个 DMG 装完后是哑的，装了但听不到声音。
   - Files: `helper/Sources/ClaudioCore/{Use,Setup}.swift`、`helper/Sources/claudio/{Subcommands,Claudio}.swift`、`helper/Tests/ClaudioCoreTests/{UseSuite,SetupSuite}.swift`、`docs/distribution.md`、`.github/workflows/release.yml`
