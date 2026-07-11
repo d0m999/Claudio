@@ -46,6 +46,34 @@ public struct SetupEnvironment: Sendable {
 }
 
 /// Resolves the absolute, symlink-resolved path of the currently-running executable from
+/// 首次装机自举该不该挑一个默认包：**还没有人选过包**吗？
+///
+/// ## 为什么这个判据不能是「config.json 不存在」（本轮 /ship 评审：Codex 对抗 + Claude 对抗独立命中）
+///
+/// 因为存在一条把「可恢复」变成「永久静音」的路径，而且它由一次完全正常的用户操作触发：
+///
+/// 1. hooks 装好了，但 `config.json` 还不在（`claudio install` 之后、自举选包之前；或用户把它删了）。
+/// 2. 面板此刻是 `.installed`，正常渲染四行事件与静音钮——它并不知道「还没选包」。
+/// 3. 用户点一下静音 → `setEventEnabled` → ``updateConfigJSON(at:freshSelectedPack:mutate:)``。它拿到的
+///    `freshSelectedPack` 是**空串**，而且那是**对的**：静音这个动作没有任何 pack 上下文，凭空编一个
+///    默认包等于伪造一次谁也没做过的选择（见 `ConfigMutation.swift` 那句注释）。
+/// 4. 于是磁盘上出现了一份 `selected_pack: ""` 的 config。
+/// 5. 从此以后，旧的判据（`!fileExists(configFile)`）永远为假 → 自举**再也不会**挑默认包 →
+///    `play` 永远解析不出 pack → **永久静音**，而且没有任何东西会自愈。
+///
+/// 修的是判据本身，不是第 3 步：自举真正的前提从来就是「还没有人选过包」，而「文件不存在」只是它
+/// 一个**碰巧在大多数时候成立**的近似。空的 `selected_pack` 与文件不存在，对自举来说是同一件事。
+///
+/// 一份**读不出来 / 畸形**的 config 不在此列，返回 `false`：那不是「没选过包」，那是一份坏文件。对它
+/// 自举什么都不该做——`selectPack` 的写路径本来就会 fail-closed 拒绝重写它（保住用户的自定义字段），
+/// 而 `doctor` 的 config 检查会把可执行的修复指令直接告诉用户。这里替他做主只会把一次诚实的报错换成
+/// 一次静默的数据丢失。
+private func noPackHasEverBeenSelected(configFile: URL) -> Bool {
+    guard FileManager.default.fileExists(atPath: configFile.path) else { return true }
+    guard let config = loadClaudioConfig(from: configFile) else { return false }
+    return config.selectedPack.isEmpty
+}
+
 /// `argv[0]` — absolute if invoked with a full path (the common case when a user pastes
 /// the path printed by `docs/distribution.md`'s Terminal instructions; also true once
 /// re-invoked from the fixed `~/.claudio/bin/claudio` destination), relative-to-`currentDirectory`
@@ -195,7 +223,7 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
     }
 
     var selectedPack: String?
-    if !FileManager.default.fileExists(atPath: environment.configFile.path) {
+    if noPackHasEverBeenSelected(configFile: environment.configFile) {
         // Deliberately scans `userPacksDirectory` fresh rather than reusing `copiedPackIDs`
         // (red team / `/ship` pre-landing review finding): `copiedPackIDs` only reflects
         // packs copied *this* invocation, so a pack that already exists from an earlier —
