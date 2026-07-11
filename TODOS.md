@@ -2,6 +2,28 @@
 
 ## Ship / CI
 
+### `play.lock` 被 config / settings 写者共用 —— 任何一次设置写都可能静默吞掉一声提示音
+
+**What:** `ClaudioPaths.lockFile`（`play.lock`）今天被**五个互不相干的临界区**共用：`Play.swift:190`（去抖时间戳 + spawn afplay —— 它唯一该保护的东西）、`EventEnabled.swift:63`（写 config.json）、`Use.swift:72`（写 config.json）、`SettingsInstaller.swift:162/216`（写 **settings.json**）。而 `claudio play` 拿不到这把锁时的行为是 `.skippedDebounce` —— **静默不放声音**（这是故意的：hook 绝不能阻断 Claude Code）。
+
+**Why:** 于是每一次「点静音 / 切包 / 跑 `claudio install`」都是一个**会吞掉提示音的窗口**：恰好落在窗口里的 Claude Code 事件，那声提示音直接消失，无任何错误、无任何日志。这打在产品的根上（「不回头也知道状态」）—— 用户在调设置的那几秒，恰好错过了他装这个 app 就是为了不错过的那声。
+
+反方向的那一半**项目已经知道了**，只是把它当成了 UI 问题而不是锁设计问题 —— `PanelView.swift` 的注释原文：「`.lockBusy` 尤其是**真会发生**的，不是理论值：`setEventEnabled`/`selectPack` 与 `claudio play` 抢同一把 `play.lock`…点静音正好撞上」。修法是给它显示一句「请稍后重试」，而不是让它不再发生。
+
+更讽刺的是**正确的原则早已写在仓库里**：`Paths.swift:64-66` 为 `logLockFile` 写着「Deliberately a **separate** lock from `lockFile`（`play.lock`）—— logging must never contend with, or be gated by, `play`'s own debounce lock.」闸门建了，只推开了日志那一格。这正是本仓库自己记下的 learning `gate-built-but-not-rolled-out`，同一形状第三次。
+
+**Context:** 2026-07-11 `/plan-eng-review`（主音量滑块）期间，Codex 外部声音（gpt-5.5 high）指出，Claude 侧逐条源码复核确认。**分离是安全的，三点源码实证**：① `play` 读 config 在**锁外**（`Play.swift:180` 的 `loadPlayConfig` 在 `withNonBlockingLock` 之前）—— 它从来不需要排斥 config 写者；② config 写走 `Data.write(options: .atomic)`（`ConfigMutation.swift:176`）即 `rename(2)`，并发读者只会看到旧的完整文件或新的完整文件，绝不撕裂 —— 读侧本来就不需要锁；③ `play` **从不读** settings.json。
+
+修法：新增 `ClaudioPaths.configLockFile`（`~/.claudio/config.lock`，串行三个 config 写者）与 `ClaudioPaths.settingsLockFile`（`~/.claudio/settings.lock`，串行 install/uninstall）；`play.lock` 退回只管 play 的去抖。回归测试钉住两条（**今天都会 RED，那正是 bug**）：持有 `play.lock` 时三个写者仍成功；持有 `config.lock` 时 `playSoundEvent` 仍发声。
+
+一份**未测试的**探索性实现在分支 `feat/master-volume-slider` @ `cbc02f0`（helper 能编译，零测试，勿直接信任）。
+
+**升级窗口注记**：旧二进制（拿 play.lock 写 config）与新二进制（拿 config.lock）并存时不互相串行。因为写是原子 rename，最坏是丢一次更新、绝不撕裂；且 GUI 是单进程、`claudio use` 是手动调用，实际不可达。
+
+**Effort:** M
+**Priority:** P1
+**Depends on:** None（与主音量滑块无关，强烈建议**单独一个 PR**）
+
 ### Setup.swift 的包复制不是原子的，中断后无法自愈
 
 **What:** `performFirstRunSetup` 的 dedupe guard（`guard !FileManager.default.fileExists(atPath: destination.path) else { continue }`）只看目标目录是否存在，不看它是否复制完整。`copyItem` 本身不是原子操作。
@@ -206,11 +228,26 @@
 
 **Why:** 这是本次 `/ship` plan-completion 审计发现的**唯一一处「spec 写了、代码没有、台账也没记」的静默漂移**——它此前既没有 TODOS 条目、也没有任何 T 编号认领，等于所有人都以为它做了。后果：用户能逐事件静音，但改不了整体音量，只能手改 `config.json`。（好消息：本次已把 `config.json` 改成保真读-改-写，所以用户手改的 `master_volume` **至少不会再被下一次点静音静默吃掉**——这正是本轮修复前的真实行为。）
 
-**Context:** 2026-07-11 `/ship` plan-completion 审计。修法：`PanelView` 加一个 Slider（DESIGN.md 已定义其视觉），值绑到 config 的 `master_volume`，拖动经 `ConfigMutation` 的外科式写回落盘（`setEventEnabled` / `selectPack` 已共用它，第三个写者照抄即可），越界钳制走 `Volume.swift` 现成的规则。
+**Context:** 2026-07-11 `/ship` plan-completion 审计发现；同日 `/plan-eng-review`（四段 + Codex 外部声音）产出锁死方案，**并推翻了本条原有的两句修法**：
+
+- ~~「DESIGN.md 已定义其视觉」~~ —— **假的**。DESIGN.md 全文 grep `滑块|slider|轨道|track|thumb|拨杆` **零命中**，滑块长什么样从来没人定过。而 macOS 原生 `Slider` 的填充色默认跟**系统强调色**（用户在系统设置里选的），会把一个设计系统外、且 claudio 控制不了的颜色带进面板 —— 直接违反 DESIGN.md「品牌强调只有一个（黏土）」与 `DesignTokens.swift:17`「不得新增 DESIGN.md 里没有的颜色」。
+- ~~「第三个写者照抄即可」~~ —— **照抄就是 bug**。`setEventEnabled` 拿的是 `play.lock`（见本文件第一条 P1），逐帧写盘会把「吞掉提示音的窗口」开成一片。
+
+**锁死的方案（14 项决议，全文见 `/plan-eng-review` 产出）要点：**
+- **松手才写**（`Slider(onEditingChanged:)`）—— 该值没有实时消费者（`claudio play` 每次 spawn 重读 config），拖动中间值无人可见，逐帧写盘是纯成本。ENGINEERING.md 交互状态覆盖表的「拖动即时改 config」需改为「松手即时落盘」并记理由。
+- **但「拖动不写」不能变成「丢数据」**：popover 中途关闭 / app 退出时 `onEditingChanged(false)` 未必补发 —— 必须有 `onDisappear` + `willTerminate` 的 dirty flush。绝不把正确性押在 SwiftUI 会补发回调上。
+- **不变不写**：`drag(to:)` 只在 `isDragging` 时接受（`onEditingChanged(true)` 才置位），使 SwiftUI 的 render-time 网格吸附**无法**触发写 —— 用户手改的 `master_volume: 0.42`（读路径合法、面板照常显示、但不在 0.05 网格上）不碰就永远活着。
+- **失败即回滚**：写失败 → 滑块弹回磁盘值 + 错误行。UI 绝不显示磁盘上没有的值。
+- **先钳制再写**：越界值绝不落盘（spec 要求）；非有限值绝不到达 `JSONSerialization`（否则 ObjC 异常穿透 Swift `do/catch`，进程 abort，exit 134）。
+- **`freshSelectedPack` 强制调用方给**，不像 `setEventEnabled` 那样传 `""` —— 一份 `selected_pack: ""` 的 config 会让 play 读得到却解析不到包，即一份看起来正常的**静音**配置。
+- **step 0.05**（21 档，默认 0.8 恰在网格上）；`.tint(ClaudioColor.clay(colorScheme))`（clay 亮色 3.97:1 过非文本 ≥3:1，合法）+ DESIGN.md 补登滑块视觉。
+- **把「一次拖动写几次盘」下沉成 `VolumeDragSession` 纯状态机**并单测 + 变异验证 —— 否则这条 P1 决策只活在注释里，而注释拦不住任何人（`PanelFocusOrder.swift:132-138` 记着本项目在同一形状上吃过的亏）。
+- 试听（`AudioPreviewPlayer`）**必须同批修**：它今天完全不理 `master_volume`（`NSSound` 默认满音量），滑块一上线就会「拖了没反应」。
+
+**Depends on:** 本文件第一条 P1（`play.lock` 分离）—— 不先修它，即使松手才写也仍留一个会吞提示音的窗口。
 
 **Effort:** M
 **Priority:** P2
-**Depends on:** None
 
 ### T16/T15 GUI 小项：绑定失败留孤儿文件 + doc-comment 的 D 编号引用不存在
 
@@ -319,6 +356,18 @@
 **Effort:** M
 **Priority:** P3
 **Depends on:** None
+
+### 试听（`NSSound.volume`）与真实播放（`afplay -v`）的增益曲线是否一致，未经证明
+
+**What:** 主音量滑块落地后，面板的「试听 ▶」会用 `NSSound.volume` 施加 `master_volume`，而真实 hook 播放走 `afplay -v`。两者**同为 0…1 标量**（`NSSound.h:65` 明确 `volume` 是单个 sound 的音量、范围 0…1、不影响系统音量；`afplay -h` 只说 `-v/--volume VOLUME set the volume`），但**没有任何文档说明二者的增益曲线（线性振幅 vs 感知/对数）相同**。
+
+**Why:** 如果曲线不同，同一个 `master_volume` 值下「试听听到的响度」与「真实提示音的响度」会有落差 —— 用户按试听调好的音量，实际用起来偏大或偏小。今天两者都极可能是线性振幅乘子（这是这类 API 的常规），所以风险低；但它是一个**未验证的假设**，不该被当成已知。
+
+**Context:** 2026-07-11 `/plan-eng-review` 的 Codex 外部声音提出（Claude 侧未想到）。修法两条，二选一：① 真机 A/B 实测两条路径在同一 `master_volume` 下的实际响度，一致则把结论写进 `Volume.swift` 的注释（把假设升级成事实）；② 若不一致，试听改走 `afplay -v` 本身（复用 `AfplayVolume.afplayArgument`，与真实播放路径逐字相同）—— 代价是引入进程 spawn 延迟与一个新失败模式（afplay 缺失），故不作为默认选项。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** 主音量滑块落地（在那之前这条不可观察）
 
 ## Completed
 
