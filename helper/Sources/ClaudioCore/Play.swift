@@ -243,7 +243,10 @@ private func resolveAudioFile(
         let manifest = loadPlayManifest(from: packDirectory),
         let relativeFile = manifest.events[event.manifestKey],
         let audioFile = safePackFileURL(relativeFile, in: packDirectory),
-        FileManager.default.fileExists(atPath: audioFile.path)
+        // 必须是**正规文件**：一个名叫 `stop.mp3` 的目录 / FIFO 会让 `fileExists` 回答 `true`，
+        // 于是 `play` 兴高采烈地去 spawn afplay，而事件触发时根本没有声音（`/codex review` [P2]）。
+        // 见 ``regularFileExists(at:)``。
+        regularFileExists(at: audioFile)
     else { return nil }
     return audioFile
 }
@@ -256,15 +259,18 @@ private func loadPlayConfig(from configFile: URL) -> ClaudioConfig? {
     return try? JSONDecoder().decode(ClaudioConfig.self, from: data)
 }
 
-/// Reads and decodes `packDirectory`'s `manifest.json`, requiring it to actually resolve
-/// *inside* `packDirectory` (symlink-safe, via ``isReallyContained(_:inside:)``) — the
-/// same guard `doctor`'s pack-integrity check applies to this exact file.
+/// Reads and decodes `packDirectory`'s `manifest.json` via the shared ``loadPackManifest(in:)``
+/// (T16 的单一 manifest 加载源) — 同一个 `isReallyContained` 符号链接逃逸闸门、同一个
+/// `O_NOFOLLOW` + `fstat` 正规文件闸门、同一个 1 MiB 上限、同一次解码，与 `doctor` 完全同源。
+///
+/// 这里原本是第二份手写的 `Data(contentsOf:)` 读取——而 `play` 恰恰是最不能有第二份的地方：它跑在
+/// Claude Code 的**同步 hook 路径**上（ENGINEERING.md「绝不阻断 Claude Code」），一个 500MB 形状的
+/// `manifest.json` 会被它整份读进内存。删掉这份复制品之后，`play` 与 `doctor` 共享同一道闸门，且
+/// 未来任何一次加固都自动同时覆盖两边。任何失败一律折叠成 `nil`，也就是 `playSoundEvent` 的
+/// ``PlayOutcome/notReady``——静默不播，绝不报错（T5 契约不变）。
 private func loadPlayManifest(from packDirectory: URL) -> PackManifest? {
-    let manifestFile = packDirectory.appendingPathComponent("manifest.json")
-    guard isReallyContained(manifestFile, inside: packDirectory),
-        let manifestData = try? Data(contentsOf: manifestFile)
-    else { return nil }
-    return try? JSONDecoder().decode(PackManifest.self, from: manifestData)
+    guard case .success(let manifest) = loadPackManifest(in: packDirectory) else { return nil }
+    return manifest
 }
 
 // MARK: - Shared debounce timestamp (ENGINEERING.md「并发 / 进程堆积处理」+ 决议 5)

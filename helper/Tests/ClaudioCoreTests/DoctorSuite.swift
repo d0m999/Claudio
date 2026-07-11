@@ -722,6 +722,89 @@ func runDoctorSuites() {
         }
     }
 
+    // MARK: - (g) config.json 可重写：fail-closed 写路径唯一的可见性出口
+    //
+    // 写路径（静音钮 / 切包）对畸形 config **fail closed**，而宽松读路径（`play` / `doctor` 的
+    // `ClaudioConfig`）照常工作——于是一份 `{"events":{"stop":1}}` 的 config 会让 App 里所有写操作
+    // **永久失败**，声音却一切正常；`setup` 因为 config 已存在也不会重建它。用户唯一能观察到的现象是
+    // 「点静音没反应」。doctor 的职责就是诊断：这几条钉死它必须把那个隐形状态说出来、并给出可执行的
+    // 修复指令，同时**不**把一台声音一切正常的机器报成硬失败。
+
+    suite("runDoctorChecks: 畸形 config（旧读路径照常能读）→ config 检查报 warning，且指令可执行") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let packsDir = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture("{}", to: settingsFile)
+            // 关键：这份 config 的 `selected_pack` 是好的，只有 `events.stop` 是数字 1。宽松读路径把
+            // 它读成「events 解不出来 → 空表」，于是包检查照样 .complete、声音照响——用户完全看不出
+            // 自己已经被锁死在一个写不进的 config 上。
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "events": { "stop": 1 } }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                "fake-audio", to: packsDir.appendingPathComponent("minimal-chime/stop.mp3"))
+            let claudioBinaryPath = root.appendingPathComponent("claudio")
+            makeExecutableFixture(at: claudioBinaryPath)
+
+            let env = DoctorEnvironment(
+                afplayPath: "/usr/bin/afplay",
+                settingsFile: settingsFile,
+                configFile: configFile,
+                userPacksDirectory: packsDir,
+                bundledPacksDirectory: nil,
+                logFile: root.appendingPathComponent("claudio.log"),
+                claudioBinaryPath: claudioBinaryPath.path,
+                commandRunner: FakeCommandRunner(
+                    result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")),
+                currentMacOSVersion: { SemanticVersion(major: 15, minor: 0, patch: 0) })
+            let report = runDoctorChecks(environment: env)
+
+            guard let configResult = report.results.first(where: { $0.name == "config" }) else {
+                expect(false, "doctor 必须有一条 config 检查，got \(report.results.map(\.name))")
+                return
+            }
+            expect(
+                configResult.severity == .warning,
+                "畸形 config 必须被 doctor 看见（这是用户唯一的诊断途径），got \(configResult.severity)")
+            expect(
+                configResult.message.contains("events.stop")
+                    && configResult.message.contains("true/false")
+                    && configResult.message.contains("删除该文件"),
+                "doctor 报出来的必须是可执行的修复指令，而不是一句「config 有问题」，got"
+                    + " \(configResult.message)")
+            expect(
+                !report.hasFailure,
+                "声音一切正常的机器不该被报成硬失败——坏的只是写路径，doctor 不该非零退出")
+            // 「播放不受影响」不是一句安慰，它是这条 warning 存在的全部理由：证明给自己看。
+            expect(
+                report.results.contains { $0.name == "pack" && $0.severity == .ok },
+                "宽松读路径照常工作：包检查仍然是绿的——正因如此，畸形 config 才是**隐形**的，"
+                    + "也正因如此 doctor 必须主动报它")
+        }
+    }
+
+    suite("runDoctorChecks: 全新安装（还没有 config.json）→ config 检查是 .ok，绝不假报警") {
+        withTempDirectory { root in
+            let env = healthyDoctorEnvironment(
+                root: root,
+                commandRunner: FakeCommandRunner(
+                    result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")),
+                currentMacOSVersion: { SemanticVersion(major: 15, minor: 0, patch: 0) })
+            // `healthyDoctorEnvironment` 会写一份合法 config——删掉它，模拟「一次都还没写过」。
+            try? FileManager.default.removeItem(at: env.configFile)
+
+            let report = runDoctorChecks(environment: env)
+            let configResult = report.results.first { $0.name == "config" }
+            expect(
+                configResult?.severity == .ok,
+                "还没有 config.json 只是「还没写过」（写路径会新建它），不是畸形，got"
+                    + " \(String(describing: configResult))")
+        }
+    }
+
     suite("runDoctorChecks: afplay missing is a hard failure (non-zero exit)") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")

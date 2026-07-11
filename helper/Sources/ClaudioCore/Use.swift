@@ -80,33 +80,27 @@ public func selectPack(
     }
 }
 
+/// 走 ``updateConfigJSON(at:freshSelectedPack:mutate:)`` 这条共用的外科式读-改-写——与
+/// `setEventEnabled` 的写路径**同一份实现**，不是两份各自推理出来的：两者编辑的是同一个文件，
+/// 「保真」的定义必须只有一个。只 set `selected_pack`，`master_volume` / `events` / 未知顶层键
+/// 逐字保留。
+///
+/// 这里同样**曾经**是 round-trip `ClaudioConfig`（Codable），带着和 `setEventEnabled` 一模一样
+/// 的数据丢失 bug（只写三个键 + 宽松解码把坏值静默换成默认值），只是触发频率低——切包比点静音少。
+/// 见 `ConfigMutation.swift` 的类型注释。
 private func performSelectPack(
     _ packID: String, configFile: URL
 ) -> Result<UseOutcome, UseError> {
-    var config: ClaudioConfig
-    if FileManager.default.fileExists(atPath: configFile.path) {
-        guard let data = try? Data(contentsOf: configFile) else {
-            return .failure(.configReadFailure(reason: "无法读取 \(configFile.path)"))
-        }
-        guard var existing = try? JSONDecoder().decode(ClaudioConfig.self, from: data) else {
-            return .failure(.configReadFailure(reason: "\(configFile.path) 解析失败"))
-        }
-        existing.selectedPack = packID
-        config = existing
-    } else {
-        config = ClaudioConfig(selectedPack: packID)
+    let result = updateConfigJSON(at: configFile, freshSelectedPack: packID) { json in
+        json["selected_pack"] = packID
     }
 
-    do {
-        try FileManager.default.createDirectory(
-            at: configFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(config)
-        try data.write(to: configFile, options: .atomic)
-    } catch {
-        return .failure(.configWriteFailure(reason: error.localizedDescription))
+    switch result {
+    case .success:
+        return .success(.selected(packID: packID))
+    case .failure(.unreadable(let reason)):
+        return .failure(.configReadFailure(reason: reason))
+    case .failure(.writeFailed(let reason)):
+        return .failure(.configWriteFailure(reason: reason))
     }
-
-    return .success(.selected(packID: packID))
 }

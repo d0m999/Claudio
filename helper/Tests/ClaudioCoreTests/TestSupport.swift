@@ -23,6 +23,38 @@ func writeFixture(_ contents: String, to url: URL) {
     try? contents.write(to: url, atomically: true, encoding: .utf8)
 }
 
+/// Creates a **FIFO** (named pipe) at `url` — the hostile-pack fixture for "this path has
+/// something at it, but that something is not a file". Sound packs are third-party-distributed
+/// content (ENGINEERING.md: 策展声音包), so a `manifest.json` / `stop.mp3` that is really a FIFO
+/// is reachable, not hypothetical.
+///
+/// Two different behaviors ride on this fixture, and they are NOT the same strength of claim:
+/// - `FileManager.fileExists(atPath:)` answers **`true`** for a FIFO — proven, and the whole
+///   reason `doctor`/`play` must require ``regularFileExists(at:)`` instead (a pack whose
+///   `stop.mp3` is a FIFO would otherwise report `.complete` and then play silence).
+/// - `Data(contentsOf:)` does **not** hang on a FIFO on Darwin (measured: it throws `EACCES`).
+///   `FileHandle(forReadingFrom:)` **does** hang forever (measured). So the manifest reader's
+///   `O_NONBLOCK` + `fstat` gate is what turns "never blocks on hostile pack content" into our
+///   own tested contract instead of a borrowed Foundation implementation detail — see
+///   `SafeFileRead.swift`'s header.
+///
+/// Verifies the FIFO was really created (rather than swallowing an `mkfifo` failure), since a
+/// silently-missing FIFO would let a caller's "rejected / notReady" assertion pass for the
+/// wrong reason — never having exercised a FIFO at all (same reasoning as ``createSymlink``).
+@MainActor
+func makeFIFO(at url: URL) {
+    try? FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let created = url.withUnsafeFileSystemRepresentation { pathPointer -> Bool in
+        guard let pathPointer else { return false }
+        return mkfifo(pathPointer, 0o644) == 0
+    }
+    expect(
+        created,
+        "makeFIFO: mkfifo failed at \(url.path) — a test relying on this fixture would silently"
+            + " not be testing a FIFO (hostile pack content) at all")
+}
+
 /// Creates `linkURL` as a symbolic link pointing at `targetURL`, creating `linkURL`'s
 /// parent directory if needed. Exists solely so tests can construct symlink-escape
 /// fixtures (a pack directory, or a file inside one, that resolves outside its pack

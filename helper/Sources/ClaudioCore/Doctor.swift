@@ -22,10 +22,19 @@ import Foundation
 //                              分支，见 `VersionCompatibility.swift`）；Claude Code 版本
 //                              对照「已验证下限」2.1.201，低于/无法探测都只是 warning，
 //                              绝不硬失败、绝不挂住（子进程带真实超时）。
+//   (g) config.json 可重写    — 只读探针（``probeConfigRewritable(configFile:)``），本轮评审新增。
+//                              写路径（静音钮 / 切包）对畸形 config **fail closed**，而宽松读路径
+//                              照常工作——于是一份 `{"events":{"stop":1}}` 的 config 会让 App 里
+//                              所有写操作永久失败，声音却一切正常，用户完全看不出发生了什么，且
+//                              `setup` 因为 config 已存在也不会重建它。doctor 的职责就是诊断：这条
+//                              检查把那个隐形状态摆到台面上，并直接给出可执行的修复指令。
 //
-// Hard failures (→ non-zero exit) are ONLY (a)、(c)、(e)。Everything pack-、log- and
-// version-compatibility-related is a warning in v1 doctor, per the orchestrator's scope
-// note for T1/T6, extended to (f) by T13.
+// Hard failures (→ non-zero exit) are ONLY (a)、(c)、(e)。Everything pack-、log-、
+// version-compatibility- and config-rewritability-related is a warning in v1 doctor, per the
+// orchestrator's scope note for T1/T6, extended to (f) by T13. (g) 刻意也是 warning 而不是
+// failure：一份畸形 config **不影响播放**（读路径宽松，hook 照响），坏的只是 App 内的写操作——把它
+// 报成 failure 会让「声音一切正常」的机器 doctor 非零退出，与 (a)/(c)/(e)「claudio 根本工作不了」
+// 不是同一量级。
 
 // MARK: - (a) settings.json writability probe
 
@@ -138,7 +147,10 @@ public func checkPackIntegrity(
             // otherwise `doctor` would falsely report the pack `.complete` off an
             // out-of-pack file (T1 review P2).
             guard let resolved = safePackFileURL(eventFile, in: packDirectory) else { return true }
-            return !fileManager.fileExists(atPath: resolved.path)
+            // 必须是**正规文件**，不能只是「路径上有东西」：`fileExists(atPath:)` 对一个名叫
+            // `stop.mp3` 的**目录**（以及 FIFO / socket / 设备）一律回答 `true`，于是 doctor 会把
+            // 一个根本发不出声的包报成 complete（`/codex review` [P2]）。见 ``regularFileExists(at:)``。
+            return !regularFileExists(at: resolved)
         }
         .sorted()
 
@@ -318,6 +330,9 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
     )
     results.append(packStatus.doctorCheckResult)
 
+    // (g) config.json 可重写 — always a warning at worst (see the module note above).
+    results.append(configRewritabilityResult(configFile: environment.configFile))
+
     // (d) claudio.log 尾部汇总 — always a warning at worst, never a hard failure (T6).
     results.append(summarizeRecentLogFailures(logFile: environment.logFile))
 
@@ -329,6 +344,28 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
             commandRunner: environment.commandRunner, timeout: environment.claudeVersionTimeout))
 
     return DoctorReport(results: results)
+}
+
+/// (g) 把 ``probeConfigRewritable(configFile:)`` 的判定讲成 `doctor` 的一行话。
+///
+/// 这是 fail-closed 写路径唯一的**可见性**出口：畸形 config 不影响播放（读路径宽松），所以用户唯一
+/// 的信号就是「点静音没反应」——除非 doctor 主动把它说出来，并把 `probeConfigRewritable` 已经带上的
+/// **可执行修复指令**（哪个键、必须是什么、当前是什么、怎么修）原样透出来。刻意 `.warning` 而非
+/// `.failure`：见文件头 (g) 的严重级说明。
+public func configRewritabilityResult(configFile: URL) -> DoctorCheckResult {
+    switch probeConfigRewritable(configFile: configFile) {
+    case .absent:
+        return DoctorCheckResult(
+            name: "config", severity: .ok,
+            message: "✓ 尚无 config.json（全新安装，首次选包 / 静音时会自动创建）")
+    case .rewritable:
+        return DoctorCheckResult(
+            name: "config", severity: .ok, message: "✓ config.json 可安全重写：\(configFile.path)")
+    case .malformed(let reason):
+        return DoctorCheckResult(
+            name: "config", severity: .warning,
+            message: "⚠ config.json 畸形：App 内的静音 / 切包会一直失败（播放不受影响）。\(reason)")
+    }
 }
 
 /// Reads the last `maxEntries` `claudio.log` lines and summarizes them for `doctor`.

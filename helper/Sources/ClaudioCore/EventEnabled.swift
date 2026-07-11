@@ -71,33 +71,35 @@ public func setEventEnabled(
     }
 }
 
+/// 走 ``updateConfigJSON(at:freshSelectedPack:mutate:)`` 这条共用的外科式读-改-写：只 set
+/// `events.<event.cliName>`，其余顶层键（`selected_pack` / `master_volume` / 兄弟事件的开关 /
+/// 我们根本不认识的键）逐字保留。
+///
+/// 这里**曾经**是 round-trip `ClaudioConfig`（Codable）：解码 → 改一个字段 → 重新编码。而
+/// `ClaudioConfig` 的合成 `Encodable` 只写三个键，它的解码器又是宽松的——于是点一次静音就会
+/// 悄悄抹掉未知键、把一个坏掉的 `master_volume` 换成默认值 0.8 再写回去，还报 SUCCESS
+/// （`/ship` pre-landing 评审实证复现）。见 `ConfigMutation.swift` 的类型注释。
+///
+/// 文件不存在时仍然新建一份最小 config，且**刻意**用空的 `selected_pack`——见上面
+/// ``setEventEnabled(_:enabled:configFile:lockFile:)`` 的注释。
 private func performSetEventEnabled(
     _ event: Event, enabled: Bool, configFile: URL
 ) -> Result<SetEventEnabledOutcome, SetEventEnabledError> {
-    var config: ClaudioConfig
-    if FileManager.default.fileExists(atPath: configFile.path) {
-        guard let data = try? Data(contentsOf: configFile) else {
-            return .failure(.configReadFailure(reason: "无法读取 \(configFile.path)"))
-        }
-        guard var existing = try? JSONDecoder().decode(ClaudioConfig.self, from: data) else {
-            return .failure(.configReadFailure(reason: "\(configFile.path) 解析失败"))
-        }
-        existing.eventsEnabled[event.cliName] = enabled
-        config = existing
-    } else {
-        config = ClaudioConfig(selectedPack: "", eventsEnabled: [event.cliName: enabled])
+    let result = updateConfigJSON(at: configFile, freshSelectedPack: "") { json in
+        // `updateConfigJSON` 的校验已经保证：`events` 要么不存在，要么就是一张**每个值都是布尔**
+        // 的 JSON 对象（否则整份文件早已按损坏中止，一个字节都不会写）。所以这里的 `as?` 落空
+        // 只可能是「`events` 键根本不存在」这一种合法情况。
+        var events = json["events"] as? [String: Any] ?? [:]
+        events[event.cliName] = enabled
+        json["events"] = events
     }
 
-    do {
-        try FileManager.default.createDirectory(
-            at: configFile.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(config)
-        try data.write(to: configFile, options: .atomic)
-    } catch {
-        return .failure(.configWriteFailure(reason: error.localizedDescription))
+    switch result {
+    case .success:
+        return .success(.updated(event: event, enabled: enabled))
+    case .failure(.unreadable(let reason)):
+        return .failure(.configReadFailure(reason: reason))
+    case .failure(.writeFailed(let reason)):
+        return .failure(.configWriteFailure(reason: reason))
     }
-
-    return .success(.updated(event: event, enabled: enabled))
 }

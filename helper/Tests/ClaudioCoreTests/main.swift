@@ -15,7 +15,7 @@ import Foundation
 // `DoctorSuite.swift`, `PathsSuite.swift`, `PlaySuite.swift`, `LogSuite.swift`,
 // `HookStatusSuite.swift`, `VolumeSuite.swift`, `UseSuite.swift`, `SetupSuite.swift`,
 // `VersionCompatibilitySuite.swift`, `HookCommandMatchingSuite.swift`,
-// `EventEnabledSuite.swift`),
+// `EventEnabledSuite.swift`, `ConfigMutationSuite.swift`, `PackContentSafetySuite.swift`),
 // matching the project's "many small files" convention.
 
 var totalChecks = 0
@@ -55,6 +55,8 @@ runSetupSuites()
 runVersionCompatibilitySuites()
 runHookCommandMatchingSuites()
 runEventEnabledSuites()
+runConfigMutationSuites()
+runPackContentSafetySuites()
 
 // MARK: - Summary
 

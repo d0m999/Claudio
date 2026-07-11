@@ -125,6 +125,106 @@ func runEventEnabledSuites() {
         }
     }
 
+    suite(
+        "setEventEnabled: a real lock filesystem error is reported as .lockFailed, never conflated with .lockBusy"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let original = #"{ "selected_pack": "minimal-chime" }"#
+            writeFixture(original, to: configFile)
+
+            // A regular *file* occupies the path where play.lock's parent directory needs to
+            // be — `FileLock`'s ENOENT self-heal (`createDirectory`) cannot turn a file into a
+            // directory, so `attemptLock` surfaces a real errno via `.failed` (mirrors
+            // `PlaySuite`/`FileLockSuite`'s equivalent fixtures). `.lockFailed` and `.lockBusy`
+            // must stay distinct: a broken filesystem is not a "someone else is writing, retry"
+            // debounce skip.
+            let blockingFile = root.appendingPathComponent("blocking-file")
+            writeFixture("not a directory", to: blockingFile)
+            let unreachableLockFile =
+                blockingFile.appendingPathComponent("subdir").appendingPathComponent("play.lock")
+
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: unreachableLockFile)
+            guard case .failure(.lockFailed) = result else {
+                expect(false, "a real lock system error must report .lockFailed, got \(result)")
+                return
+            }
+            expect(
+                result != .failure(.lockBusy),
+                "a filesystem failure must never be reported as mere contention")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "a lock-failed call must never touch config.json")
+        }
+    }
+
+    suite(
+        "setEventEnabled: an existing-but-unreadable config.json (a directory at its path) fails with .configReadFailure"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("play.lock")
+            // `FileManager.fileExists(atPath:)` answers `true` for a DIRECTORY too, so this
+            // takes the "file exists" branch and then fails the `Data(contentsOf:)` read —
+            // the read-failure path distinct from the decode-failure one above (they carry
+            // different reasons: "无法读取" vs "解析失败").
+            try? FileManager.default.createDirectory(at: configFile, withIntermediateDirectories: true)
+
+            let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(.configReadFailure(let reason)) = result else {
+                expect(false, "an unreadable config.json must fail with .configReadFailure, got \(result)")
+                return
+            }
+            expect(
+                reason.contains("无法读取"),
+                "an unreadable (not merely corrupt) config.json must carry the read-failure reason,"
+                    + " not the parse-failure one, got \(reason)")
+        }
+    }
+
+    suite("setEventEnabled: a write failure is reported as .configWriteFailure, never a silent success") {
+        withTempDirectory { root in
+            let lockFile = root.appendingPathComponent("play.lock")
+            // A regular file occupies the path where config.json's PARENT directory would have
+            // to be, so `createDirectory(withIntermediateDirectories:)` in the persist step
+            // throws — the `.configWriteFailure` branch (previously the only `setEventEnabled`
+            // outcome with no test at all).
+            let blockingFile = root.appendingPathComponent("blocking-file")
+            writeFixture("not a directory", to: blockingFile)
+            let unwritableConfigFile = blockingFile.appendingPathComponent("config.json")
+
+            let result = setEventEnabled(
+                .stop, enabled: false, configFile: unwritableConfigFile, lockFile: lockFile)
+            guard case .failure(.configWriteFailure) = result else {
+                expect(false, "an unwritable config.json must fail with .configWriteFailure, got \(result)")
+                return
+            }
+            expect(
+                !FileManager.default.fileExists(atPath: unwritableConfigFile.path),
+                "a failed write must not leave a config.json behind")
+        }
+    }
+
+    suite("SetEventEnabledError: every case carries a distinct, human-readable description") {
+        // `CustomStringConvertible` here is a user-facing surface (the same shape `selectPack`'s
+        // own errors take), so its four messages are behavior, not decoration.
+        let messages = [
+            SetEventEnabledError.configReadFailure(reason: "boom").description,
+            SetEventEnabledError.configWriteFailure(reason: "boom").description,
+            SetEventEnabledError.lockBusy.description,
+            SetEventEnabledError.lockFailed(errno: 13).description,
+        ]
+        expect(
+            Set(messages).count == 4, "each error case must render a distinct message, got \(messages)")
+        expect(
+            messages[0].contains("未修改文件"),
+            "a read failure must promise the file was left untouched, got \(messages[0])")
+        expect(messages[1].contains("写入失败"), "got \(messages[1])")
+        expect(messages[2].contains("请稍后重试"), "a busy lock must tell the user to retry, got \(messages[2])")
+        expect(messages[3].contains("13"), "a lock failure must surface the real errno, got \(messages[3])")
+    }
+
     suite("setEventEnabled: shares play.lock with selectPack — the two calls serialize on the same lock") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")

@@ -37,6 +37,14 @@ public struct ClaudioConfig: Codable, Equatable, Sendable {
     /// malformed `master_volume` / `events` falls back to the documented default
     /// rather than failing the whole decode — full "config 缺失/损坏 → 默认" recovery
     /// policy is owned by `claudio use`/install (T2); this is `doctor`'s read path.
+    ///
+    /// - Warning: **只读路径专用。任何写 `config.json` 的代码都绝不能 round-trip 这个类型。**
+    ///   宽松解码在读侧是对的（config 损坏也不该让 hook 失败），但在写侧是数据丢失：坏掉的
+    ///   `master_volume` 会被静默换成 0.8 再写回磁盘；而上面那个**合成的** `Encodable` 只会写
+    ///   这三个 v1 键，用户 config 里其余的顶层键（`night_dim`、未来字段……）会被整片抹掉——
+    ///   两件事都还报 SUCCESS。写路径一律走 `ConfigMutation.swift` 的
+    ///   ``updateConfigJSON(at:freshSelectedPack:mutate:)``（外科式 `JSONSerialization` 读-改-写，
+    ///   读不懂就 fail closed），`selectPack` / `setEventEnabled` 都已经在那上面。
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         selectedPack = try container.decode(String.self, forKey: .selectedPack)
