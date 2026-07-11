@@ -194,5 +194,65 @@
 **Priority:** P4
 **Depends on:** None
 
+### 事件行 `unmapped`/`broken` 态：禁用的 previewButton 与 importAffordance 共用同一 `.eventAction` 焦点身份
+
+**What:** `EventRowView` 的 `unmapped`/`broken` 分支**同时**渲染 `importAffordance`（导入绑定按钮）与一个禁用态 `previewButton`（DESIGN.md line 127「试听 ▶ 禁用」），两者都 `.focused(focusedTarget, equals: .eventAction(row.event))`（`EventRowView.swift` 两处）。`panelFocusOrder` 的 doc-comment 却写「每行只渲染其一（never both）、单 `.eventAction` 槽」——不变式为假。
+
+**Why:** 两个视图声明同一 `@FocusState` 身份，程序化设 `focusedTarget = .eventAction(event)` 时 SwiftUI 落到哪个未定义；且禁用的 previewButton 仍在 a11y 树里，VoiceOver 扫过 unmapped/broken 行会多念一个「试听 …（不可用）」冗余停靠。今天 `applyFirstFocus` 只设 `order.first`（永不是某行的 `.eventAction` 除非首事件、且首焦点问题属 T15 真机手验范畴），故无功能破坏，纯焦点模型一致性 + 一个冗余 VO 停靠。
+
+**Context:** T14/T15/T16 pre-landing 多模型评审（2026-07-11，a11y-architect）。修法：给禁用占位的 previewButton 与 importAffordance 各自不同的 `PanelFocusTarget` case（或禁用态那个不绑 `.focused`），并修正 `PanelFocusOrder` 的 doc-comment。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+
+### `.dropZone` 是 `panelFocusOrder` 的焦点位，但没有任何视图绑定它
+
+**What:** `PanelFocusTarget.dropZone` 出现在 `panelFocusOrder(...)`（`PanelFocusOrder.swift:76`），但没有任何视图 `.focused(_, equals: .dropZone)`——`AudioDropZoneView(viewModel:)` 不收 `focusedTarget` 参数。`PanelFocusOrder` 的 doc-comment 声称纯模型与实时 `@FocusState`「共享一个身份空间，绝不各自漂移」，对 `.dropZone` 而言恰恰漂了。
+
+**Why:** 今天低危：拖入区的 prompt 现在是真 `Button`（a11y FIX 2），仍能靠 SwiftUI 视图树顺序被 Tab / VoiceOver 到达；`.dropZone` 也永不是首焦点目标。缺口只是「程序化把焦点设到拖入区」是 no-op、且模型与接线不一致——将来若某次改动让 `.dropZone` 成为首焦点或引入基于 `panelFocusOrder` 的 Tab-key 处理，就会静默失效。
+
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，我 + a11y-architect 各自命中）。修法：给 `AudioDropZoneView` 加 `focusedTarget: FocusState<PanelFocusTarget?>.Binding`，把 `promptLabel` 的 Button `.focused(focusedTarget, equals: .dropZone)`，`PanelView` 传 `$focusedTarget`。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+
+### `DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:` 而非 `@unknown default:`
+
+**What:** `PanelView.swift` 的 `typeSizeTier` 用 `switch dynamicTypeSize { … default: .maximum }`。`DynamicTypeSize` 是非 frozen 的 SwiftUI 枚举，裸 `default:` 会把未来 SDK 新增的档位静默并进 `.maximum`，无编译期提示——与本仓库处处刻意穷尽 `switch`（`StateGalleryView`/`PreviewFixtures` 明确不写 `default:`）的自律不符。
+
+**Why:** 今天的回落（`.maximum`，最大/最安全档）本身合理，但是个未标注的假设而非被验证的选择。纯健壮性/一致性，无行为风险。
+
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，swift-reviewer）。**注意修法非一 token**：直接改 `@unknown default:` 会因 `.accessibility2…5` 是已知未列举 case 报 warning、破坏零 warning 线——正确修法要先显式列出 `.accessibility2, .accessibility3, .accessibility4, .accessibility5`（映射 `.maximum`），再补 `@unknown default: .maximum`。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+
+### PackCardView 的 statusLine 图标/文字未 `accessibilityHidden`，且 CC0 徽标 VoiceOver 听不到
+
+**What:** `PackCardView` 的 `eventGrid` 每个字形都 `.accessibilityHidden(true)`（已由卡片自身 `accessibilityLabel` 汇总），但 `statusLine` 的 `xmark.circle.fill` +「文件丢失」、`CC0` 徽标、`N/4` 计数都**未**隐藏，可能作为冗余/自动生成 label 的 VoiceOver 停靠泄漏；且 `CC0` 根本没进 `accessibilityLabel`，VoiceOver 用户完全听不到「这是 CC0 包」。
+
+**Why:** 均无功能风险，纯 VoiceOver 体验：要么冗余停靠、要么信息缺失（CC0）。
+
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，a11y-architect，confidence 5）。修法：给 `statusLine` 的图标/文字节点补 `.accessibilityHidden(true)`（镜像 `eventGrid` 的既有处理），并把 `CC0` 折进 `.complete` 分支的 `accessibilityLabel` 若需播报。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+
+### 补 GUI/helper 单测缺口（4 项 lake-not-ocean）
+
+**What:** ① `setEventEnabled` 的 `.configWriteFailure` 路径（父目录被普通文件挡住）——`selectPack`(`UseSuite`) 有此 fixture 测、镜像它的 `setEventEnabled` 没有；② `contrastRatio` 的 `#` 前缀分支（doc-comment 承诺支持 `#RRGGBB`，`ContrastSuite`/`DesignToken` 全用裸 6 位）；③ `bindEventToManifest` 顶层是合法 JSON 但非对象（数组/标量）的 fail-closed 分支（现只测了非法 JSON 语法 + `events` 字段非对象，没测顶层非对象）；④ `setEventEnabled` 真并发写（`DispatchQueue.concurrentPerform`）——现仅有「一个持锁者 + 一个等待者」的 lock-busy 测，未证真并发下 read-modify-write 不撕裂。
+
+**Why:** 四处都是「lake」：各自镜像已有 happy-path 测的结构、钉住一条当前未覆盖的分支。无功能风险，纯回归网加固。（T16 计数口径修复的混合态回归测已在本次落地补上，不在此列。）
+
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，pr-test-analyzer）。测试专家已给出每项的最小 `suite(...)/expect(...)` skeleton。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+
 ## Completed
 </content>

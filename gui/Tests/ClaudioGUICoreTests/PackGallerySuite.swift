@@ -84,6 +84,70 @@ func runPackGallerySuites() {
         }
     }
 
+    // Regression net for the T16 fix: a pack that BOTH leaves some events unmapped AND has a
+    // declared-but-missing file. Before the fix, `.partial(present:)` was `4 - (declared files
+    // missing)`, counted over declared keys, so it disagreed with `presentEvents` (counted over
+    // all four v1 events) — the badge said "3/4" while the grid lit 1 glyph and VoiceOver named
+    // 3 missing. `present` must now equal `presentEvents.count`, so badge, grid, and label are
+    // one source of truth. (Under the old formula this asserted 3; it now asserts 1.)
+    suite("availablePacks: an unmapped event + a declared-but-missing file — present == presentEvents.count") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            // Only stop + stop_failure declared (notification/subagent_stop UNMAPPED); of the
+            // two declared, only stop.mp3 exists — fail.mp3 is declared but never written.
+            writeFixture(
+                #"""
+                { "id": "mixed-pack", "name": "混合包", "events": {
+                    "stop": "stop.mp3", "stop_failure": "fail.mp3" } }
+                """#,
+                to: userPacks.appendingPathComponent("mixed-pack/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("mixed-pack/stop.mp3"))
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "minimal-chime"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+
+            expect(cards.count == 1, "expected exactly one card, got \(cards.count)")
+            expect(
+                cards.first?.presentEvents == [.stop],
+                "only stop truly resolves .present (stop_failure broken, the other two unmapped), got"
+                    + " \(String(describing: cards.first?.presentEvents))")
+            expect(
+                cards.first?.state == .partial(present: 1, total: 4),
+                "present must equal presentEvents.count (1), NOT 4 − declared-missing (which was 3),"
+                    + " so badge/grid/label agree — got \(String(describing: cards.first?.state))")
+        }
+    }
+
+    // Regression net: `manifest.events` is an unconstrained `[String: String]`, so a
+    // forward-compat manifest can carry event keys beyond the four v1 events. Extra keys
+    // pointing at missing files must NOT inflate the missing count (which once drove
+    // `present = 4 − missingCount` negative, e.g. "-1/4"). Counting present v1 events instead
+    // keeps `present` in `0...4` regardless of how many extra broken keys a manifest declares.
+    suite("availablePacks: extra forward-compat event keys with missing files never push present below 0") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            // stop present; five extra non-v1 keys all point at files that don't exist.
+            writeFixture(
+                #"""
+                { "id": "future-pack", "name": "未来包", "events": {
+                    "stop": "stop.mp3", "v2_a": "a.mp3", "v2_b": "b.mp3", "v2_c": "c.mp3",
+                    "v2_d": "d.mp3", "v2_e": "e.mp3" } }
+                """#,
+                to: userPacks.appendingPathComponent("future-pack/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("future-pack/stop.mp3"))
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "minimal-chime"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+
+            expect(
+                cards.first?.state == .partial(present: 1, total: 4),
+                "only the one present v1 event counts; five extra missing keys must not drive"
+                    + " present negative — got \(String(describing: cards.first?.state))")
+        }
+    }
+
     suite("availablePacks: a pack with a corrupt manifest.json reports .broken") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")

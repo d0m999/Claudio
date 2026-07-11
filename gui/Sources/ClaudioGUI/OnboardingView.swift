@@ -10,6 +10,9 @@ public struct OnboardingView: View {
     @ObservedObject private var viewModel: OnboardingViewModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var isShowingDetail = false
+    /// Dynamic-Type scale factor for this view's fixed `.system(size:)` text (a11y fix) — see
+    /// ``EventRowView``'s `typeScale` for the full rationale.
+    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     /// The SHARED focus-state binding this view's primary/secondary CTA buttons report
     /// into (a11y-architect FIX 4, T15): `PanelView` owns the actual `@FocusState` and
@@ -36,7 +39,7 @@ public struct OnboardingView: View {
     private var header: some View {
         HStack(spacing: 6) {
             Text("Claudio")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.text(colorScheme))
             if viewModel.state.showsHeaderTakenOverDot {
                 Circle()
@@ -63,17 +66,17 @@ public struct OnboardingView: View {
             .accessibilityHidden(true)
 
             Text(copy.title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.text(colorScheme))
 
             Text(copy.body)
-                .font(.system(size: 12.5))
+                .font(.system(size: 12.5 * typeScale))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
 
             if isShowingDetail, let detail = copy.detail {
                 Text(detail)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(.system(size: 11 * typeScale, design: .monospaced))
                     .foregroundColor(ClaudioColor.error(colorScheme))
                     .fixedSize(horizontal: false, vertical: true)
             }

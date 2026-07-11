@@ -14,6 +14,9 @@ public struct AudioDropZoneView: View {
     @ObservedObject private var viewModel: AudioImportViewModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHovering = false
+    /// Dynamic-Type scale factor for this zone's fixed `.system(size:)` text (a11y fix) — see
+    /// ``EventRowView``'s `typeScale` for the full rationale.
+    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     private let previewPlayer: AudioPreviewPlaying
 
@@ -81,7 +84,7 @@ public struct AudioDropZoneView: View {
     private var promptLabel: some View {
         Button(action: openImportPanel) {
             Text("+ 拖入你自己的声音")
-                .font(.system(size: 12.5))
+                .font(.system(size: 12.5 * typeScale))
                 .foregroundColor(isHovering ? ClaudioColor.clay(colorScheme) : ClaudioColor.textSecondary(colorScheme))
         }
         .buttonStyle(.plain)
@@ -115,7 +118,7 @@ public struct AudioDropZoneView: View {
             Image(systemName: "xmark.circle.fill")
                 .foregroundColor(ClaudioColor.error(colorScheme))
             Text(reason.message)
-                .font(.system(size: 11.5))
+                .font(.system(size: 11.5 * typeScale))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -127,7 +130,7 @@ public struct AudioDropZoneView: View {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundColor(ClaudioColor.success(colorScheme))
             Text(file.fileName)
-                .font(.system(size: 11.5, design: .monospaced))
+                .font(.system(size: 11.5 * typeScale, design: .monospaced))
                 .foregroundColor(ClaudioColor.text(colorScheme))
         }
         .accessibilityLabel("已导入 \(file.fileName)")

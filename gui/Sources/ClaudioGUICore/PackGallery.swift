@@ -1,30 +1,35 @@
 import ClaudioCore
 import Foundation
 
-/// One pack card's completeness — ENGINEERING.md T15 D3 (仓库内 pack 切换画廊), derived
-/// from the SAME shape ``checkPackIntegrity(configFile:userPacksDirectory:bundledPacksDirectory:)``
-/// already reports for the *selected* pack (`.complete`/`.incomplete`/`.manifestUnreadable`/
-/// `.packNotFound`), just recomputed per-card instead of only for `config.selectedPack` —
-/// `checkPackIntegrity` itself can't be called directly for an arbitrary pack id (it always
-/// re-reads `config.json` off disk to learn which pack to check), so ``availablePacks(config:environment:)``
-/// recomposes the exact same audited primitives (``resolvePackDirectory``, ``loadPackManifest``,
-/// ``safePackFileURL``) it's built from, rather than reinventing pack-safety logic a second
-/// time.
+/// One pack card's completeness — ENGINEERING.md T15 D3 (仓库内 pack 切换画廊). Its
+/// `broken`/`complete`/`partial` shape parallels ``checkPackIntegrity(configFile:userPacksDirectory:bundledPacksDirectory:)``'s
+/// own `.packNotFound`/`.manifestUnreadable`/`.complete`/`.incomplete`, recomputed per-card
+/// instead of only for `config.selectedPack` (``checkPackIntegrity`` can't be called directly
+/// for an arbitrary pack id — it always re-reads `config.json` to learn which pack to check),
+/// reusing the exact same audited primitives (``resolvePackDirectory``, ``loadPackManifest``,
+/// ``safePackFileURL``), never reinventing pack-safety logic. The `partial` count itself,
+/// though, is derived from the card's present-event set (see ``packCard``'s ``PackCard/presentEvents``)
+/// rather than `checkPackIntegrity`'s declared-file-missing list, so the badge count, the 2×2
+/// glyph grid, and the accessibility "缺少：…" list are one source of truth (see
+/// `packCompletionState`).
 ///
 /// ⚠️ DESIGN.md 未定义 pack 卡状态视觉（selected/broken/partial 的呈现方式）——
 /// `PackGalleryView`（`ClaudioGUI`）用既有 token 派生，见该文件的行内注释。
 public enum PackCardState: Sendable, Equatable {
-    /// Every event the manifest declares has its file present on disk (mirrors
-    /// ``checkPackIntegrity``'s `.complete` — note this only means "every *declared*
-    /// event's file exists", not "all four v1 events are mapped"; a manifest that legally
-    /// leaves some events `unmapped` per DESIGN.md's silent-fallback rule still reports
-    /// `.complete` here, exactly as `checkPackIntegrity` already does for the selected pack
-    /// today — this type does not redefine that meaning).
+    /// All four v1 events resolve to ``CoverageState/present(fileName:)`` for this pack —
+    /// i.e. ``PackCard/presentEvents`` == every ``Event/allCases``. A pack that legally leaves
+    /// some events `unmapped` (silent-fallback, per DESIGN.md) reads as ``partial(present:total:)``
+    /// with a "N/4" badge, matching DESIGN.md line 218 ("包缺某事件音 → 卡 2×2 网格显「2/4」") —
+    /// NOT `.complete`. (Note: `doctor`'s own ``PackIntegrityStatus/incomplete(packID:missingFiles:)``
+    /// still keys off *declared*-file presence for its diagnostic list; the pack CARD's
+    /// completeness deliberately keys off the same present-event set its glyph grid renders, so
+    /// the badge, the grid, and the accessibility label never disagree.)
     case complete
-    /// At least one declared event's file is missing. `present`/`total` mirror
-    /// ``PackIntegrityStatus/incomplete(packID:missingFiles:)``'s
-    /// `4 - missingFiles.count` / `4` derivation exactly (`total` is always
-    /// ``Event/allCases``'s count, `4` in v1).
+    /// Fewer than all four v1 events are ``CoverageState/present(fileName:)``. `present` is
+    /// exactly ``PackCard/presentEvents``'s count (the number of lit glyphs in the card's 2×2
+    /// grid), `total` is always ``Event/allCases``'s count (`4` in v1) — the two are derived
+    /// from ONE source, so `present` can never exceed `total` or go negative, and always agrees
+    /// with the grid and the "缺少：…" accessibility list.
     case partial(present: Int, total: Int)
     /// The pack directory doesn't resolve at all, or its `manifest.json` can't be
     /// read/decoded — mirrors ``PackIntegrityStatus/packNotFound(packID:)`` /
@@ -140,18 +145,21 @@ private func buildPackCard(
             state: .broken(reason: "声音包目录未找到"), isSelected: isSelected)
     }
 
-    let manifest: PackManifest
+    // Still load the manifest here purely to distinguish `.broken` (undecodable manifest)
+    // from a readable one — the decoded value itself is no longer needed for completeness,
+    // which now derives from `presentEvents` (below), the SAME set the card's glyph grid and
+    // accessibility label read from.
     switch loadPackManifest(in: packDirectory) {
     case .failure(let error):
         return PackCard(
             id: id, name: nil, isCC0: false, presentEvents: presentEvents,
             state: .broken(reason: error.reason), isSelected: isSelected)
-    case .success(let loaded):
-        manifest = loaded
+    case .success:
+        break
     }
 
     let (name, isCC0) = packMetadata(packDirectory: packDirectory)
-    let state = packCompletionState(packDirectory: packDirectory, manifest: manifest)
+    let state = packCompletionState(presentEventCount: presentEvents.count)
 
     return PackCard(
         id: id, name: name, isCC0: isCC0, presentEvents: presentEvents, state: state,
@@ -191,22 +199,22 @@ private func packMetadata(packDirectory: URL) -> (name: String?, isCC0: Bool) {
     return (name, license == "CC0-1.0")
 }
 
-/// Mirrors ``checkPackIntegrity(configFile:userPacksDirectory:bundledPacksDirectory:)``'s
-/// `.complete`/`.incomplete` derivation exactly (same ``safePackFileURL``-gated containment
-/// check, same `fileExists` probe), parameterized by an already-resolved `packDirectory` +
-/// `manifest` instead of re-reading `config.json` — see this file's header comment for why
-/// `checkPackIntegrity` itself can't be called directly here.
-private func packCompletionState(packDirectory: URL, manifest: PackManifest) -> PackCardState {
-    let missingCount = manifest.events.values.filter { fileName in
-        guard let resolved = safePackFileURL(fileName, in: packDirectory) else { return true }
-        return !FileManager.default.fileExists(atPath: resolved.path)
-    }.count
-
-    guard missingCount > 0 else { return .complete }
-    // Matches `checkPackIntegrity`'s own inherited quirk, not a new one introduced here:
-    // `missingCount` only counts *declared* events, so a manifest that legally leaves some
-    // events unmapped (silent fallback, not a defect) can still report fewer missing files
-    // than `4 - presentEvents.count` would suggest. `present` here is `4 - missingCount`,
-    // exactly the formula ENGINEERING.md T15 D3 specifies — not a recount of `presentEvents`.
-    return .partial(present: Event.allCases.count - missingCount, total: Event.allCases.count)
+/// Derives the card's completeness from `presentEventCount` — the number of ``Event/allCases``
+/// that resolve to ``CoverageState/present(fileName:)`` for this pack (``presentEventSet``, the
+/// SAME set the card's 2×2 glyph grid and its "缺少：…" VoiceOver list read from).
+///
+/// This deliberately counts over **all four v1 events**, NOT over `manifest.events.values`
+/// (the declared keys). An earlier version used `4 - (declared files missing)`, which made
+/// `present` disagree with `presentEvents` whenever a pack mixed an unmapped event with a
+/// declared-but-missing file (grid lit 1, badge said "3/4", VoiceOver listed 3 missing) — and,
+/// because `manifest.events` is an unconstrained `[String: String]`, a forward-compat manifest
+/// with several extra event keys pointing at missing files could even drive it negative
+/// ("-1/4"). Counting present events instead keeps the badge, the grid, and the label a single
+/// source of truth, always in `0...Event.allCases.count`, and matches DESIGN.md line 218
+/// ("包缺某事件音 → 卡 2×2 网格显「2/4」"): a pack that only maps some events reads as partial,
+/// with the badge count equal to the number of lit glyphs.
+private func packCompletionState(presentEventCount: Int) -> PackCardState {
+    let total = Event.allCases.count
+    guard presentEventCount < total else { return .complete }
+    return .partial(present: presentEventCount, total: total)
 }

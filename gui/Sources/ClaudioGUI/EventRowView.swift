@@ -20,6 +20,18 @@ public struct EventRowView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isHoveringImportTarget = false
 
+    /// Dynamic-Type scale factor for this row's text (a11y fix): every `Text`/glyph below uses
+    /// a fixed `.system(size:)` point size, which does NOT scale with the user's Content Size
+    /// Category on its own — so before this, `PanelView`'s `dynamicTypeSize`-driven layout
+    /// degradation (hide waveform / wrap rows / widen popover) fired while the text itself stayed
+    /// literally 10–13pt, delivering the layout cost with zero legibility gain. Multiplying each
+    /// fixed size by this `@ScaledMetric(relativeTo: .body)` value (1.0 at the default size, larger
+    /// at accessibility sizes) makes the text actually grow, preserving each base size exactly at
+    /// the default setting. `.lineLimit(1)`/`.truncationMode(.tail)` (already present) keep scaled
+    /// text from overflowing; the layout tiers reclaim room. Real-Mac walkthrough of the scaled
+    /// layout at each tier remains a manual-verify item (TODOS.md).
+    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
+
     /// Invoked when the 试听 (preview) button is tapped — only ever reachable while
     /// ``CoverageState/previewEnabled`` is `true`. This view never resolves the sound
     /// file's absolute path or plays it itself (`CoverageState.present` only carries a
@@ -36,6 +48,17 @@ public struct EventRowView: View {
     /// ``onPreview``'s split between "this view says a tap happened" and "the caller decides
     /// what that means."
     public let onToggleMute: () -> Void
+
+    /// Invoked after a row-end import attempt (drag OR pick) finishes — success or failure
+    /// (T16 fix: bind→refresh). ``EventRowImportViewModel/handleDrop(sourceURL:suggestedFileName:)``
+    /// only mutates its own `@Published bindResult`; the row itself renders purely off the
+    /// ``EventRow`` value ``PanelView`` passes down, which nothing recomputes on a bind. So a
+    /// successful bind wrote `manifest.json` but the row kept showing "未配置/文件丢失" until
+    /// an unrelated action (mute/switch-pack/reopen) happened to call ``PanelView``'s
+    /// `refresh()`. This seam lets the caller (``PanelView``) recompute ``EventRow``/``PackCard``
+    /// from disk the instant a bind lands, exactly like ``onToggleMute``'s tap→write→refresh
+    /// split. Fires on failure too (harmless: `refresh()` just recomputes the unchanged state).
+    public let onImportCompleted: () -> Void
 
     /// The Dynamic Type degradation this row currently renders under (ENGINEERING.md
     /// T15 D5「无障碍规格 · Dynamic Type + 降级规则」, ``panelLayoutAdaptation(for:)``) —
@@ -63,7 +86,8 @@ public struct EventRowView: View {
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
         adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
         onPreview: @escaping () -> Void = {},
-        onToggleMute: @escaping () -> Void = {}
+        onToggleMute: @escaping () -> Void = {},
+        onImportCompleted: @escaping () -> Void = {}
     ) {
         self.row = row
         self.importViewModel = importViewModel
@@ -71,6 +95,7 @@ public struct EventRowView: View {
         self.adaptation = adaptation
         self.onPreview = onPreview
         self.onToggleMute = onToggleMute
+        self.onImportCompleted = onImportCompleted
     }
 
     public var body: some View {
@@ -126,7 +151,7 @@ public struct EventRowView: View {
             .frame(width: 24, height: 24)
             .overlay(
                 Image(systemName: eventGlyphName(row.event))
-                    .font(.system(size: 12))
+                    .font(.system(size: 12 * typeScale))
                     .foregroundColor(color)
             )
             .accessibilityHidden(true)
@@ -144,10 +169,10 @@ public struct EventRowView: View {
     private var identity: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(eventDisplayName(row.event))
-                .font(.system(size: 13))
+                .font(.system(size: 13 * typeScale))
                 .foregroundColor(ClaudioColor.text(colorScheme))
             Text(row.event.cliName)
-                .font(.system(size: 10, design: .monospaced))
+                .font(.system(size: 10 * typeScale, design: .monospaced))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
         }
         .accessibilityElement(children: .combine)
@@ -186,7 +211,7 @@ public struct EventRowView: View {
             // `previewButton` (greyed + desaturated when muted, since its `enabled` already
             // folds in `row.enabled`) — never by dimming this text's opacity.
             Text(fileName)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 11 * typeScale, design: .monospaced))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 // 长文件名截断到一行、留尾（ENGINEERING.md T15 D5: "长文件名截断带尾"；"不裁切、
                 // 不溢出" 指布局层面不裁掉整个控件，文本本身仍需截断以不撑爆行）。
@@ -201,7 +226,7 @@ public struct EventRowView: View {
             // "较大" 及以上 Dynamic Type 档位隐藏（ENGINEERING.md T15 D5: "较大 → 隐波形"）。
             if !adaptation.hidesWaveform {
                 Image(systemName: "waveform")
-                    .font(.system(size: 10))
+                    .font(.system(size: 10 * typeScale))
                     .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                     // Decorative only (a11y-architect FIX 1): `Image(systemName:)` would
                     // otherwise surface an SF-Symbol-derived accessibility label of its own
@@ -216,7 +241,7 @@ public struct EventRowView: View {
         let enabled = row.coverage.previewEnabled && row.enabled
         return Button(action: onPreview) {
             Image(systemName: "speaker.wave.2")
-                .font(.system(size: 12))
+                .font(.system(size: 12 * typeScale))
         }
         .buttonStyle(.plain)
         // ≥24×24 hit target (a11y-architect FIX 6, WCAG 2.5.8) — the 22×22 background circle
@@ -256,10 +281,10 @@ public struct EventRowView: View {
         Button(action: openImportPanel) {
             HStack(spacing: 4) {
                 Text(label)
-                    .font(.system(size: 11))
+                    .font(.system(size: 11 * typeScale))
                     .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 Image(systemName: "square.and.arrow.down")
-                    .font(.system(size: 11))
+                    .font(.system(size: 11 * typeScale))
                     .foregroundColor(
                         isHoveringImportTarget
                             ? ClaudioColor.clay(colorScheme) : ClaudioColor.textSecondary(colorScheme))
@@ -307,6 +332,7 @@ public struct EventRowView: View {
         let suggestedFileName = url.lastPathComponent
         Task { @MainActor in
             await importViewModel.handleDrop(sourceURL: url, suggestedFileName: suggestedFileName)
+            onImportCompleted()
         }
     }
 
@@ -318,7 +344,7 @@ public struct EventRowView: View {
     private var muteIndicator: some View {
         Button(action: onToggleMute) {
             Image(systemName: row.enabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                .font(.system(size: 11))
+                .font(.system(size: 11 * typeScale))
         }
         .buttonStyle(.plain)
         // ≥24×24 hit target (a11y-architect FIX 6, WCAG 2.5.8) — previously unsized, so it
@@ -345,6 +371,7 @@ public struct EventRowView: View {
             guard let request = await loadDropRequest(from: provider) else { return }
             await importViewModel.handleDrop(
                 sourceURL: request.sourceURL, suggestedFileName: request.suggestedFileName)
+            onImportCompleted()
         }
         return true
     }

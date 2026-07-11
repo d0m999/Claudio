@@ -41,6 +41,10 @@ public struct PanelView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    /// Dynamic-Type scale factor for the header's fixed `.system(size:)` text (a11y fix) — see
+    /// ``EventRowView``'s `typeScale`. `dynamicTypeSize` above still drives the LAYOUT tier
+    /// (``typeSizeTier``); this makes the header TEXT actually scale alongside it.
+    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     // MARK: - Reduced motion / reduced transparency (ENGINEERING.md T15 D5)
     //
@@ -105,8 +109,14 @@ public struct PanelView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            header
+            // `header` is rendered ONLY in the operational (`.installed`) branch — NOT
+            // unconditionally above the `if` — because `OnboardingView` renders its OWN
+            // "Claudio" header (`OnboardingView.header`). Rendering both would stack two
+            // identical titles (and double the VoiceOver announcement) on every onboarding
+            // screen — the first thing a new user sees. Installed → PanelView owns the header
+            // (with the "当前声音包 …" a11y label); onboarding → OnboardingView owns it.
             if onboardingViewModel.state == .installed {
+                header
                 operationalPanel
             } else {
                 OnboardingView(viewModel: onboardingViewModel, focusedTarget: $focusedTarget)
@@ -144,7 +154,7 @@ public struct PanelView: View {
     private var header: some View {
         HStack(spacing: 6) {
             Text("Claudio")
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 15 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.text(colorScheme))
             if onboardingViewModel.state.showsHeaderTakenOverDot {
                 Circle()
@@ -177,7 +187,12 @@ public struct PanelView: View {
                         focusedTarget: $focusedTarget,
                         adaptation: layoutAdaptation,
                         onPreview: { playPreview(for: row) },
-                        onToggleMute: { toggleMute(row.event) }
+                        onToggleMute: { toggleMute(row.event) },
+                        // T16 fix: a successful row-end bind writes `manifest.json` but the
+                        // row renders off `eventRows`, which only `refresh()` recomputes —
+                        // without this the just-bound row keeps showing "未配置/文件丢失" and a
+                        // disabled 试听 until an unrelated mute/switch/reopen. Recompute now.
+                        onImportCompleted: { refresh() }
                     )
                 }
             }

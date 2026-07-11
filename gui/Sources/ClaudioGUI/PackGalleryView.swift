@@ -58,6 +58,10 @@ private struct PackCardView: View {
     let focusedTarget: FocusState<PanelFocusTarget?>.Binding
     let onSelect: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    /// Dynamic-Type scale factor for this card's fixed `.system(size:)` text (a11y fix) — see
+    /// ``EventRowView``'s `typeScale` for the full rationale (fixed sizes don't scale on their
+    /// own, so the panel's Dynamic-Type layout adaptation fired with no actual text growth).
+    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     private static let gridColumns = [GridItem(.fixed(20)), GridItem(.fixed(20))]
 
@@ -66,7 +70,7 @@ private struct PackCardView: View {
             VStack(spacing: 6) {
                 eventGrid
                 Text(card.name ?? card.id)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.system(size: 10 * typeScale, design: .monospaced))
                     .foregroundColor(ClaudioColor.text(colorScheme))
                     .lineLimit(1)
                     .truncationMode(.tail)
@@ -107,7 +111,7 @@ private struct PackCardView: View {
             ForEach(Event.allCases, id: \.self) { event in
                 let isPresent = card.presentEvents.contains(event)
                 Image(systemName: eventGlyphName(event))
-                    .font(.system(size: 12))
+                    .font(.system(size: 12 * typeScale))
                     .foregroundColor(
                         isPresent
                             ? ClaudioColor.event(event, colorScheme) : ClaudioColor.textSecondary(colorScheme)
@@ -127,14 +131,14 @@ private struct PackCardView: View {
         case .complete:
             if card.isCC0 {
                 Text("CC0")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(.system(size: 9 * typeScale, weight: .semibold, design: .monospaced))
                     .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             }
         case .partial(let present, let total):
             // ⚠️ DESIGN.md 未定义 partial(部分可用) 视觉 — 用既有 `text-2` 呈现 "N/4"
             // 计数（既有 token，无新色），按 T15 D3 指令的推荐做法。
             Text("\(present)/\(total)")
-                .font(.system(size: 9, design: .monospaced))
+                .font(.system(size: 9 * typeScale, design: .monospaced))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
         case .broken:
             // ⚠️ DESIGN.md 未定义 broken(损坏) 卡片视觉 — 借用「拒绝行」既有的 error 语义色
@@ -142,9 +146,9 @@ private struct PackCardView: View {
             // DESIGN.md 里唯一已定义的"文件缺失/错误"视觉语言，不新造态色。
             HStack(spacing: 2) {
                 Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9 * typeScale))
                 Text("文件丢失")
-                    .font(.system(size: 9))
+                    .font(.system(size: 9 * typeScale))
             }
             .foregroundColor(ClaudioColor.error(colorScheme))
         }
