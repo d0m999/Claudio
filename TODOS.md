@@ -146,18 +146,6 @@
 **Priority:** P3
 **Depends on:** helper 未来提权运行 / 处理不可信可写目录时才升级
 
-### CoverageState / checkPackIntegrity / Play 的 `fileExists` 不辨目录（3 站点共用）
-
-**What:** `coverageState`（T16 新增）、`checkPackIntegrity` 的 `missingFiles`、`Play` 的解析都用 `FileManager.fileExists(atPath:)` 判存在，不查 `isDirectory`。manifest 把某事件映射到一个**存在的同名目录**时，会报 `present`/`complete`，而 `afplay` 运行时静默失败。
-
-**Why:** 现实里 manifest 值都是文件名、且 `safePackFileURL` 已挡路径逃逸；「存在的同名目录」需用户手动造。纯健壮性，非 T16 引入（继承既有 `doctor`/`play` 语义），但现在多了 `CoverageState` 第三个站点。
-
-**Context:** T16 swift-reviewer（2026-07-11）。修法：三处统一改成「存在且是普通文件」判定，抽一个共享 helper 免第四次重犯。
-
-**Effort:** S
-**Priority:** P4
-**Depends on:** None
-
 ### DesignTokens 规范化 / 生成式 token 模块归并延后（原划归 T14，越界故未做）
 
 **What:** `gui/Sources/ClaudioGUI/DesignTokens.swift` 仍是跨 T7/T15/T16 手抄扩展的 DESIGN.md 调色子集（neutral/brand/surface-2/四事件色/glyph），非一个规范化（理想是从 DESIGN.md 生成）的 token 模块。
@@ -182,25 +170,25 @@
 **Priority:** P2
 **Depends on:** 一台装 Xcode 的 Mac + T17
 
+### 主音量滑块 spec 写了、代码里根本没有（面板 UI 唯一的静默漂移）
+
+**What:** ENGINEERING.md 的面板 UI 线框和「交互状态覆盖表」都明确列着「🔊 主音量 ●———————」一行（拖动即时改 `config.json` / 越界钳制），但 `PanelView` 里**零 Slider**——`grep` 全仓库无 `masterVolume` / `Slider` 命中。helper 侧的 `volume` → `afplay -v` 映射早在 T9 就做完了（`Volume.swift`），缺的只是面板里的 Slider 控件 + 写回 config。
+
+**Why:** 这是本次 `/ship` plan-completion 审计发现的**唯一一处「spec 写了、代码没有、台账也没记」的静默漂移**——它此前既没有 TODOS 条目、也没有任何 T 编号认领，等于所有人都以为它做了。后果：用户能逐事件静音，但改不了整体音量，只能手改 `config.json`。（好消息：本次已把 `config.json` 改成保真读-改-写，所以用户手改的 `master_volume` **至少不会再被下一次点静音静默吃掉**——这正是本轮修复前的真实行为。）
+
+**Context:** 2026-07-11 `/ship` plan-completion 审计。修法：`PanelView` 加一个 Slider（DESIGN.md 已定义其视觉），值绑到 config 的 `master_volume`，拖动经 `ConfigMutation` 的外科式写回落盘（`setEventEnabled` / `selectPack` 已共用它，第三个写者照抄即可），越界钳制走 `Volume.swift` 现成的规则。
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** None
+
 ### T16/T15 GUI 小项：绑定失败留孤儿文件 + doc-comment 的 D 编号引用不存在
 
-**What:** ① `EventRowImportViewModel`：导入成功但随后 `bindEventToManifest` 失败时，已复制进包目录的音频文件会留下、不被任何事件引用（孤儿文件）——已通过 `bindResult` 如实上报（非静默），非安全问题，纯整洁。② T15/T16 新文件里约 26 处 doc-comment 引用「ENGINEERING.md T15 D3/D4」等 D 编号，但 ENGINEERING.md 无此细分——溯源/可读性 nit，读者按 D 编号 grep 会落空。
+**What:** ① `EventRowImportViewModel`：导入成功但随后 `bindEventToManifest` 失败时，已复制进包目录的音频文件会留下、不被任何事件引用（孤儿文件）——**文件本身仍未清理**，非安全问题，纯整洁。② T15/T16 新文件里约 26 处 doc-comment 引用「ENGINEERING.md T15 D3/D4」等 D 编号，但 ENGINEERING.md 无此细分——溯源/可读性 nit，读者按 D 编号 grep 会落空。
 
 **Why:** 均无功能风险；两项都是「诚实但可更整洁」，攒到某次 GUI 收尾 pass 一起清。
 
-**Context:** T16 security-reviewer + T15/T14 swift-reviewer（2026-07-11）。修法：① 绑定失败时清掉刚复制的文件，或在 UI 上把孤儿文件也纳入下次 doctor/清理；② 把 D 编号软化为「T15/T16」或「(本任务 step D4)」。
-
-**Effort:** S
-**Priority:** P4
-**Depends on:** None
-
-### 事件行 `unmapped`/`broken` 态：禁用的 previewButton 与 importAffordance 共用同一 `.eventAction` 焦点身份
-
-**What:** `EventRowView` 的 `unmapped`/`broken` 分支**同时**渲染 `importAffordance`（导入绑定按钮）与一个禁用态 `previewButton`（DESIGN.md line 127「试听 ▶ 禁用」），两者都 `.focused(focusedTarget, equals: .eventAction(row.event))`（`EventRowView.swift` 两处）。`panelFocusOrder` 的 doc-comment 却写「每行只渲染其一（never both）、单 `.eventAction` 槽」——不变式为假。
-
-**Why:** 两个视图声明同一 `@FocusState` 身份，程序化设 `focusedTarget = .eventAction(event)` 时 SwiftUI 落到哪个未定义；且禁用的 previewButton 仍在 a11y 树里，VoiceOver 扫过 unmapped/broken 行会多念一个「试听 …（不可用）」冗余停靠。今天 `applyFirstFocus` 只设 `order.first`（永不是某行的 `.eventAction` 除非首事件、且首焦点问题属 T15 真机手验范畴），故无功能破坏，纯焦点模型一致性 + 一个冗余 VO 停靠。
-
-**Context:** T14/T15/T16 pre-landing 多模型评审（2026-07-11，a11y-architect）。修法：给禁用占位的 previewButton 与 importAffordance 各自不同的 `PanelFocusTarget` case（或禁用态那个不绑 `.focused`），并修正 `PanelFocusOrder` 的 doc-comment。
+**Context:** T16 security-reviewer + T15/T14 swift-reviewer（2026-07-11）。**本条此前记载不实，已更正**：原文写孤儿文件「已通过 `bindResult` 如实上报（非静默）」——事实是 `bindResult` 从未被任何视图读过（三个独立评审各自 grep 确认），它一直是静默的。**2026-07-11 `/ship` 这一批才真正接上上报**：`EventRowView` 现在会渲染 `bindResult` 的绑定失败与导入被拒（过程中发现内层 `AudioImportViewModel` 的 `@Published` 不会穿过外层 `EventRowImportViewModel` 自动传播，必须额外挂一个 `@ObservedObject` 才收得到）。所以「用户看不见失败」已解决，**留下的遗留只剩孤儿文件本身没被清掉**。修法：① 绑定失败时清掉刚复制进包的那个文件，或把孤儿文件纳入下次 doctor/清理；② 把 D 编号软化为「T15/T16」或「(本任务 step D4)」。
 
 **Effort:** S
 **Priority:** P4
@@ -242,28 +230,16 @@
 **Priority:** P4
 **Depends on:** None
 
-### 补 GUI/helper 单测缺口（4 项 lake-not-ocean）
+### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂（原 4 项 lake-not-ocean，只剩这 1 项）
 
-**What:** ① `setEventEnabled` 的 `.configWriteFailure` 路径（父目录被普通文件挡住）——`selectPack`(`UseSuite`) 有此 fixture 测、镜像它的 `setEventEnabled` 没有；② `contrastRatio` 的 `#` 前缀分支（doc-comment 承诺支持 `#RRGGBB`，`ContrastSuite`/`DesignToken` 全用裸 6 位）；③ `bindEventToManifest` 顶层是合法 JSON 但非对象（数组/标量）的 fail-closed 分支（现只测了非法 JSON 语法 + `events` 字段非对象，没测顶层非对象）；④ `setEventEnabled` 真并发写（`DispatchQueue.concurrentPerform`）——现仅有「一个持锁者 + 一个等待者」的 lock-busy 测，未证真并发下 read-modify-write 不撕裂。
+**What:** `setEventEnabled` 真并发写（`DispatchQueue.concurrentPerform` 多线程同时切同一/不同事件）——现仅有「一个持锁者 + 一个等待者」的 lock-busy 测（`EventEnabledSuite`「shares play.lock with selectPack」），未证真并发下 read-modify-write 不撕裂。`LogSuite` / `PlaySuite` 已有 `concurrentPerform` 的先例可照抄。
 
-**Why:** 四处都是「lake」：各自镜像已有 happy-path 测的结构、钉住一条当前未覆盖的分支。无功能风险，纯回归网加固。（T16 计数口径修复的混合态回归测已在本次落地补上，不在此列。）
+**Why:** 「lake」型补测：镜像已有 happy-path 结构、钉住一条当前未覆盖的分支。无功能风险，纯回归网加固。
 
-**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，pr-test-analyzer）。测试专家已给出每项的最小 `suite(...)/expect(...)` skeleton。
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，pr-test-analyzer）原列 4 项，2026-07-11 `/ship` 修复批已补掉其中 3 项，故本条收窄到只剩并发写：① `setEventEnabled` 的 `.configWriteFailure` 路径 → 已补（`EventEnabledSuite`，父目录被普通文件挡住的 fixture）；② `contrastRatio` 的 `#` 前缀分支 → 已补（`ContrastSuite`「a `#`-prefixed hex parses identically to the bare form」+ 新 `ContrastHexParsingSuite` 连带钉住 `#+FFFF` 的 fail-closed）；③ `bindEventToManifest` 顶层合法 JSON 但非对象 → 已补（`ManifestBindingSuite`「a VALID-JSON but non-object top level (a JSON array) fails closed」）。**并发写这一项没做，别当成做了。**
 
 **Effort:** S
 **Priority:** P4
-**Depends on:** None
-
-### popover 尺寸硬编码 312×400，最大 Dynamic Type 档下不跟随 PanelView 加宽
-
-**What:** `MenuBarController.swift` init 里把 `popover.contentSize = NSSize(width: 312, height: 400)` 写死。注释只声明 height 由 `NSHostingController` 的 intrinsic content 在运行时驱动，width 没有。而 `PanelView.body` 在 `.accessibility2…5` 档会把自身 `.frame(width: layoutAdaptation.panelWidth)` 提到 360pt。
-
-**Why:** 若 `NSHostingController` 没开 `.preferredContentSize` 之类的 sizing 传导，SwiftUI 想要的 360pt 宽不会反映到 popover 的 contentSize width，最大字号下"加宽 popover"落空、内容可能被裁。仅在最高 Dynamic Type 档触发，属边角，但确是未验证的假设。修法：把 `layoutAdaptation.panelWidth`（或实际内容尺寸）回传给 `MenuBarController` 更新 `contentSize`/`preferredContentSize`，不硬编码；或给 hostingController 开 intrinsic-size 传导后手动在真机上验一遍各档。
-
-**Context:** codex review（2026-07-11，commits e4dd25f/6b9cb66）P2。Claude 侧核验：硬编码属实，是否裁切取决于 `NSHostingController` sizing 行为，需真机各档验证。AppKit/SwiftUI 尺寸传导本任务无法单测，留真机手验。
-
-**Effort:** S
-**Priority:** P3
 **Depends on:** None
 
 ### 导入区（AudioDropZoneView）成功/拒绝后不再可键盘/VoiceOver 触发，只剩拖拽
@@ -290,5 +266,61 @@
 **Priority:** P3
 **Depends on:** None
 
+### clay 当正文用够不到 4.5:1 —— DESIGN.md 自身冲突，待拍板
+
+**What:** DESIGN.md line 131 祝福「drop-zone hover 命中 → 边框 / **文字**转黏土」，line 127 又要求「行内文字 ≥ 4.5:1」。实测亮色 clay `#C4633C` 对 panel / surface-2 = **3.97:1**——过图标 / 边框的 ≥3:1，**不过正文的 ≥4.5:1**。两行规范互相矛盾，代码只能二选一。
+
+**Why:** 这不是实现 bug，是规范内部冲突，得由用户拍板——因为两条出路都动 DESIGN.md，而 clay 是品牌唯一强调色，不该由实现者代为改动。当前状态：`ContrastSuite` 里已放一条 known-gap 断言（启用「clay ≥3:1」、注释掉「clay ≥4.5:1」，并附自毁提醒——拍板后要么删注释、要么删这条 suite）。
+
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11 `/ship`，对比度审计）。三个选项：① **（推荐，零品牌成本）** hover 只让**边框 + clay-soft 底**转黏土，文案保持 text / text-2 ——只需删掉 DESIGN.md drop-zone 那条里的「文字」二字，配色表一个字不动；② 把亮色 clay 调深到 ≥4.5:1（约 `#A8502F`）——**但 clay 同时是 Notification 的事件色**（DESIGN.md「一个招牌绑定」），等于同时改品牌色 + 改一个事件的视觉身份，代价大；③ 走 WCAG 大字体豁免——**不成立**，hover 文案 12.5pt 常规字重够不上豁免门槛（≥18.66pt bold / ≥24pt）。**未经用户授权，本次没有动 clay 的色值、也没有删那两个字**——只在 DESIGN.md 里**登记**了 known-gap 注记 + 三个候选解法（决议表同日一行，标「待决 · 未改」），等用户拍板后再落地其一。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** 用户在三个选项里拍板
+
 ## Completed
 
+### CoverageState / checkPackIntegrity / Play 的 `fileExists` 不辨目录（3 站点共用）
+
+**What:** `coverageState`（T16 新增）、`checkPackIntegrity` 的 `missingFiles`、`Play` 的解析都用 `FileManager.fileExists(atPath:)` 判存在，不查 `isDirectory`。manifest 把某事件映射到一个**存在的同名目录**时，会报 `present`/`complete`，而 `afplay` 运行时静默失败。
+
+**Why:** 现实里 manifest 值都是文件名、且 `safePackFileURL` 已挡路径逃逸；「存在的同名目录」需用户手动造。纯健壮性，非 T16 引入（继承既有 `doctor`/`play` 语义），但现在多了 `CoverageState` 第三个站点。
+
+**Context:** T16 swift-reviewer（2026-07-11）。修法：三处统一改成「存在且是普通文件」判定，抽一个共享 helper 免第四次重犯。
+
+**修复方式:** 新增 `helper/Sources/ClaudioCore/SafeFileRead.swift` 的 `regularFileExists`（`stat` + `S_IFREG` 门），三个站点统一改用它，不再各自 `fileExists`。变异测试实证了旧代码的完整失败链：一个**名为 `stop.mp3` 的目录**会被判为 `present`、`doctor` 报通过、`play` 报「已播放」——却什么声音都没有。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+### popover 尺寸硬编码 312×400，最大 Dynamic Type 档下不跟随 PanelView 加宽
+
+**What:** `MenuBarController.swift` init 里把 `popover.contentSize = NSSize(width: 312, height: 400)` 写死。注释只声明 height 由 `NSHostingController` 的 intrinsic content 在运行时驱动，width 没有。而 `PanelView.body` 在 `.accessibility2…5` 档会把自身 `.frame(width: layoutAdaptation.panelWidth)` 提到 360pt。
+
+**Why:** 若 `NSHostingController` 没开 `.preferredContentSize` 之类的 sizing 传导，SwiftUI 想要的 360pt 宽不会反映到 popover 的 contentSize width，最大字号下"加宽 popover"落空、内容可能被裁。仅在最高 Dynamic Type 档触发，属边角，但确是未验证的假设。
+
+**Context:** codex review（2026-07-11，commits e4dd25f/6b9cb66）P2。Claude 侧核验：硬编码属实，是否裁切取决于 `NSHostingController` sizing 行为。
+
+**修复方式:** 不再硬编码 312：popover 初始宽改用 `standardPanelWidth` 常量，并新增 `onPanelWidthChange` 回调，由 `PanelView` 把 `layoutAdaptation.panelWidth` 回传给 `MenuBarController` 更新 `contentSize`。`.maximum` Dynamic Type 档下 popover 真的加宽到 360，不再指望 `NSHostingController` 的隐式 sizing 传导。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+### 焦点契约修复（52f8913）只有纯逻辑测试，视图接线无回归护栏
+
+**What:** commit `52f8913` 修了两处视图层 bug：① `PanelView.applyFirstFocus()` 首焦点跳过 muted-present preview（改用 `nonOperableActionEvents`，不再 `panelFocusOrder(...).first`）；② `.unmapped`/`.broken` 行的禁用 preview 不再持有 `.eventAction` 焦点身份。但新增的 `CoverageStateSuite`（+33）/`PanelFocusOrderSuite`（+96）只覆盖 `panelFirstFocusTarget` 与 `EventRow.eventActionOperable` 两个**纯函数**——证明「函数算得对」，没有一根测试盯住「视图真的调用了它们」。谁把 `applyFirstFocus` 改回 `panelFocusOrder(...).first`、或把 `.focused(... .eventAction)` 加回 disabled 的 `previewButtonBody`，现有测试大概率仍绿，原 bug 悄悄回归。
+
+**Why:** 回归护栏缺口，非当前正确性缺陷——Codex 独立审查已确认 diff 本身逻辑自洽，故记账而非阻断。
+
+**Context:** codex review `52f8913`（2026-07-11，[P2]，无 P1）。原计划是引入 ViewInspector 或并入真机走查。
+
+**修复方式:** **比原计划更好，且不需要 ViewInspector、不需要真机。** 把判定从视图**下沉**进 `ClaudioGUICore`，成为两个纯函数——`EventRow.previewClaimsActionFocus` 与 `panelOpeningFocus(rows:packCardIDs:)`——视图侧只剩一次调用、没有可漂移的分支。护栏因此变成普通单测：变异验证把视图改回旧写法，两组断言分别 **5 红 / 3 红**（含「首焦点必须 ≠ `order.first`」那条关键断言）。原来「测试证明函数算得对，却没人盯住视图是否调用它」的缺口，通过消灭「视图里的判定逻辑」这个东西本身而关闭。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** 线 173 的 T15 真机手验同批（若引入 ViewInspector 则可本机）
+**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
