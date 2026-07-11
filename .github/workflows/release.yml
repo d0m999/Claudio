@@ -81,13 +81,18 @@ jobs:
           echo "claudio archs: $(lipo -archs dist/bin/claudio)"
 
       # --- gui (ClaudioGUI 菜单栏 app)：同样两个架构各自单独 `swift build`，再手动 lipo 合并 ---
+      #
+      # `--product ClaudioGUI` 不是可省的修饰：裸 `swift build -c release` 会连
+      # `claudio-gui-tests` 一起编，而那个 target 引用 `#if DEBUG` 门后的 `PreviewFixtures`，
+      # Release 下**编不过**（它本来也不该进 Release）。发版要的是 app，不是测试 harness。
+      # 见 gui/Package.swift 的 products 段与 PreviewFixtures.swift 顶部。
       - name: Build gui (ClaudioGUI) — arm64
         working-directory: gui
-        run: swift build -c release --arch arm64
+        run: swift build -c release --arch arm64 --product ClaudioGUI
 
       - name: Build gui (ClaudioGUI) — x86_64
         working-directory: gui
-        run: swift build -c release --arch x86_64
+        run: swift build -c release --arch x86_64 --product ClaudioGUI
 
       - name: Lipo-merge gui into universal `ClaudioGUI`
         run: |

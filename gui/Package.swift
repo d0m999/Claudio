@@ -14,6 +14,14 @@ import PackageDescription
 let package = Package(
     name: "claudio-gui",
     platforms: [.macOS(.v12)],  // ENGINEERING.md: macOS 12+ floor, matching helper/Package.swift.
+    // The shipped app is the ONLY product. Declaring it explicitly is what lets
+    // `.github/workflows/release.yml` build with `--product ClaudioGUI` instead of a bare
+    // `swift build -c release`: the bare form also builds `claudio-gui-tests`, and that
+    // target references `#if DEBUG`-gated symbols (`PreviewFixtures`), so it does not — and
+    // is not meant to — compile in Release. Release must build the app, not the harness.
+    products: [
+        .executable(name: "ClaudioGUI", targets: ["ClaudioGUI"])
+    ],
     dependencies: [
         .package(path: "../helper")
     ],

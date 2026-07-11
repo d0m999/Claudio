@@ -2,11 +2,19 @@ import ClaudioCore
 import Foundation
 
 // This entire catalog is DEBUG-only: its only consumers are the DEBUG-gated state gallery
-// (`ClaudioGUI/StateGalleryView.swift`) and the (always-debug) test harness, so it never
-// belongs in a Release build — matching the `#if DEBUG` gating on the `previewState`
-// view-model inits it renders through. Keeps this preview/test-only sample data off the
-// shipped `ClaudioGUICore` public surface entirely rather than relying on the linker to
-// dead-strip it (T14 swift-review nit).
+// (`ClaudioGUI/StateGalleryView.swift`) and the test harness, so it never belongs in a
+// Release build — matching the `#if DEBUG` gating on the `previewState` view-model inits it
+// renders through. Keeps this preview/test-only sample data off the shipped `ClaudioGUICore`
+// public surface entirely rather than relying on the linker to dead-strip it (T14
+// swift-review nit).
+//
+// The harness is NOT "always debug", despite what this comment used to claim: `claudio-gui-tests`
+// is an `executableTarget` (this repo has no Xcode, hence no XCTest — see Package.swift), so a
+// bare `swift build -c release` builds it too, and it does not compile without these symbols.
+// That is why `Package.swift` declares an explicit `ClaudioGUI` product and release.yml builds
+// `--product ClaudioGUI`. Verify with BOTH, never just the first:
+//     swift run claudio-gui-tests                        # debug: the green signal
+//     swift build -c release --product ClaudioGUI        # release: what CI actually ships
 #if DEBUG
 
 /// The **single canonical catalog** of concrete sample values for every case of all four
