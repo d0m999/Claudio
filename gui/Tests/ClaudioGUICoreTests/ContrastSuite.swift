@@ -185,29 +185,44 @@ func runContrastSuites() {
             "报错文案改用的 text-2 必须真的过正文门槛，got \(text2AsText)")
     }
 
-    // MARK: - known gap（待决策，**不阻断**）：clay 当正文用，亮色只有 3.97:1
+    // MARK: - 决议（2026-07-11）：drop-zone hover 文案不转黏土，正文恒为 text-2
     //
-    // DESIGN.md 第 131 行自己祝福了这个用法：「拖入 drop-zone ... hover 命中 → 边框 / **文字**转
+    // DESIGN.md 第 131 行原本祝福了这个用法：「拖入 drop-zone ... hover 命中 → 边框 / **文字**转
     // 黏土 + `clay-soft` 底」——而 DESIGN.md 第 127 行同时要求「行内文字 ≥ 4.5:1」。亮色黏土
     // `#C4633C` 对 `panel` / `surface-2` 都是 3.97:1：过图标/边框的 ≥3:1，**不过**正文的 ≥4.5:1。
-    // 这是 DESIGN.md 的**内部冲突**，不是代码 bug——修法（调深亮色黏土 / hover 文案改 `text`）
-    // 涉及改品牌色或改 DESIGN.md 祝福过的交互，超出本次 /ship 修复的授权范围，故只登记、不擅改。
+    // 这曾经是 DESIGN.md 的一处内部冲突（登记为 known gap、不擅自决定）。
     //
-    // 下面那条 ≥4.5:1 的断言**刻意保持注释状态**：等人决策后取消注释（或删掉这一整节）。
-    // 现在能钉的、也确实钉住的，是它至少过非文本门槛（边框/字形合格）。
-    suite("known-gap: clay 当 drop-zone hover 文案用，亮色 3.97:1 < 4.5:1（DESIGN.md 内部冲突，待决策）") {
+    // 现在冲突已经拍板：文字不动，hover 感交给边框 + `clay-soft` 底色——DESIGN.md 自己列出的
+    // option 1，零品牌代价（黏土仍是 hover 唯一强调色，只是不落在文字上）。`AudioDropZoneView.
+    // promptLabel` 已经照此改过：颜色恒为 `ClaudioColor.textSecondary`（对应这里的 `text2*`
+    // token），hover 时也不变。
+    //
+    // 下面这条断言把决议钉成一个会红的不变量，而不是一句会被忽略的注释——它断的是「为什么」，不是
+    // 「是否」：
+    //   1. clay 亮色必须够不到正文 ≥4.5:1——这不再是「待决策的缺口」，而是「promptLabel 为什么
+    //      不能用它」的事实依据。这个数字一旦变了（品牌色被调深），决议的前提就没了，需要回来重新
+    //      决策，而不是让这条断言默默失效。
+    //   2. text-2（promptLabel 真正使用的颜色）必须过 ≥4.5:1——上面 textPairs 那组已经钉住这一对
+    //      本身，这里再点名一次，把「为什么选它」的理由和数字绑在一起。
+    //   3. clay 至少仍要过非文本 ≥3:1——hover 的边框/`clay-soft` 底色仍然靠它。
+    suite(
+        "contract: clay 亮色够不到正文 ≥4.5:1，所以 drop-zone hover 文案改用 text-2（2026-07-11 决议，AudioDropZoneView.promptLabel 已落地，绝不回退到 clay）"
+    ) {
         let clayLightRatio = contrastRatio(ClaudioColorHex.clayLight, ClaudioColorHex.panelLight)
         expect(
             clayLightRatio >= 3.0,
-            "clay 亮色至少必须过非文本 ≥3:1（drop-zone 的边框/字形），got \(clayLightRatio)")
-        // ⬇︎ KNOWN GAP，待人决策后启用（今天会红：实测 3.97:1）：
-        // expect(
-        //     clayLightRatio >= 4.5,
-        //     "clay 当 hover 文案（DESIGN.md line 131）用时必须过正文 ≥4.5:1，got \(clayLightRatio)")
+            "clay 亮色至少必须过非文本 ≥3:1（drop-zone 的边框/字形仍然用它），got \(clayLightRatio)")
         expect(
             clayLightRatio < 4.5,
-            "如果 clay 亮色已经 ≥4.5:1（实测 \(clayLightRatio)），说明品牌色被调过了 —— known gap"
-                + " 已经自然消失，请取消上面那条注释掉的断言并删掉本节的 known-gap 注释")
+            "如果 clay 亮色已经 ≥4.5:1（实测 \(clayLightRatio)），说明品牌色被调过了 —— 「clay 够不到"
+                + "正文门槛，所以 promptLabel 改用 text-2」这条决议的前提没了，请回来重新决策，不要让"
+                + "这条断言自动失效")
+        let promptLabelRatio = contrastRatio(ClaudioColorHex.text2Light, ClaudioColorHex.panelLight)
+        expect(
+            promptLabelRatio >= 4.5,
+            "AudioDropZoneView.promptLabel 恒用的 text-2 必须真的过正文 ≥4.5:1 门槛，got"
+                + " \(promptLabelRatio) —— 这是决议能成立的另一半：不只是「clay 不行」，还得"
+                + "「换上的颜色真的行」")
     }
 
     runCompositedBackgroundSuites()

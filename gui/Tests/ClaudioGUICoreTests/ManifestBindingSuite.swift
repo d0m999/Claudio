@@ -419,6 +419,202 @@ func runManifestBindingSuites() async {
         }
     }
 
+    // MARK: - bindEventToManifest now routes its write through ClaudioCore's shared
+    // ``encodeJSONObjectForWriting(_:path:)`` (本轮 /ship 评审), the exact same primitive
+    // `config.json`'s read-modify-write already uses. This closes TWO holes at once — see
+    // `ManifestBinding.swift`'s own doc comment on the call site for the full story:
+    //   (a) float normalization: plain `JSONSerialization` renders non-integer Doubles with
+    //       `%.17g`, so a bind used to rewrite a clean `0.8` in some unknown top-level key as
+    //       `0.80000000000000004`.
+    //   (b) uncatchable abort: a manifest containing `-1e400` parses to `-inf`, and
+    //       `JSONSerialization.data(withJSONObject:)` throws an Objective-C
+    //       `NSInvalidArgumentException` that Swift's `do/catch` cannot catch — process abort
+    //       (empirically exit 134). Only NEGATIVE overflow reaches this point: `1e400`
+    //       (positive) is rejected by Foundation at PARSE time already.
+
+    suite(
+        "bindEventToManifest: an unknown top-level key holding a clean float (0.8) survives the RMW as raw bytes \"0.8\" — never JSONSerialization's dirty %.17g rendering"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            writeFixture(
+                #"{ "id": "my-pack", "events": {}, "night_dim": { "level": 0.8 } }"#,
+                to: manifestFile)
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let result = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+            guard case .success = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+
+            guard let rawBytes = try? String(contentsOf: manifestFile, encoding: .utf8) else {
+                expect(false, "rewritten manifest.json must still be readable as UTF-8")
+                return
+            }
+            expect(
+                !rawBytes.contains("0.80000000000000004"),
+                "raw bytes must NEVER contain JSONSerialization's dirty %.17g rendering of 0.8 — the"
+                    + " exact hole encodeJSONObjectForWriting closes, got:\n\(rawBytes)")
+            // `(?!\d)` rules out matching the "0.8" PREFIX of the dirty rendering above — this
+            // must find a whole "0.8" token, not just its first three characters.
+            expect(
+                rawBytes.range(of: #"0\.8(?!\d)"#, options: .regularExpression) != nil,
+                "raw bytes must still literally contain the clean float 0.8 for the unknown"
+                    + " `night_dim.level` key, got:\n\(rawBytes)")
+        }
+    }
+
+    suite(
+        "bindEventToManifest: an unknown top-level key holding a LARGE INTEGER survives the RMW byte-for-byte — never routed through Double, which would lose precision above 2^53"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            // 2^53 + 1 — the smallest integer a Double can no longer represent exactly. If
+            // normalization ever routed integers through `doubleValue` (it must not — only
+            // non-integer numbers are normalized), this exact literal would come back corrupted.
+            writeFixture(
+                #"{ "id": "my-pack", "events": {}, "schema_epoch": 9007199254740993 }"#,
+                to: manifestFile)
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let result = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+            guard case .success = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+
+            guard let rawBytes = try? String(contentsOf: manifestFile, encoding: .utf8) else {
+                expect(false, "rewritten manifest.json must still be readable as UTF-8")
+                return
+            }
+            expect(
+                rawBytes.contains("9007199254740993"),
+                "the large integer must survive byte-for-byte — routing it through Double would"
+                    + " silently lose precision, got:\n\(rawBytes)")
+        }
+    }
+
+    suite(
+        "bindEventToManifest: a float NESTED INSIDE AN ARRAY under an unknown top-level key is also normalized cleanly — the recursion must reach into arrays, not just objects"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            writeFixture(
+                #"{ "id": "my-pack", "events": {}, "fade_curve": [0.1, 0.35, 0.8] }"#,
+                to: manifestFile)
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let result = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+            guard case .success = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+
+            guard let rawBytes = try? String(contentsOf: manifestFile, encoding: .utf8) else {
+                expect(false, "rewritten manifest.json must still be readable as UTF-8")
+                return
+            }
+            expect(
+                !rawBytes.contains("0.34999999999999998"),
+                "an array element must be normalized too — %.17g's dirty rendering of 0.35 must"
+                    + " never appear, got:\n\(rawBytes)")
+            expect(
+                rawBytes.range(of: #"0\.35(?!\d)"#, options: .regularExpression) != nil,
+                "the array's middle element must survive as the clean 0.35, got:\n\(rawBytes)")
+        }
+    }
+
+    suite(
+        "bindEventToManifest: a manifest.json containing -1e400 (parses to -inf) is rejected as .failure(.writeFailed) WITHOUT aborting the process, and is left byte-for-byte untouched"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            // `x` is just an unknown sibling key — every read-side guard above (packID
+            // resolution, filename containment, regular-file check, `events`/`id` validation)
+            // passes without ever looking at it, so this reaches the write step, which is
+            // exactly the path that used to abort the process before this fix.
+            let originalRawJSON = #"{ "id": "my-pack", "events": {}, "x": -1e400 }"#
+            writeFixture(originalRawJSON, to: manifestFile)
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            // Reaching the assertions below at all (rather than the whole test process dying
+            // with exit 134 before this fix) IS the fix working.
+            let result = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+
+            guard case .failure(.writeFailed) = result else {
+                expect(false, "expected .failure(.writeFailed), got \(result)")
+                return
+            }
+            expect(
+                (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
+                "a manifest containing an unwritable -inf must be left byte-for-byte untouched on"
+                    + " disk")
+        }
+    }
+
+    // MARK: - .writeFailed: the one ManifestBindError case that had no test at all
+    //
+    // Every OTHER branch above is exercised: `.packNotFound`, `.unsafeFileName`,
+    // `.fileNotFound`, `.manifestUnreadable` (six different shapes), and now `.writeFailed`
+    // via the `-1e400` encode-side rejection just above. This suite hits the OTHER
+    // `.writeFailed` call site — the final `Data.write(to:options:.atomic)` throwing after
+    // `encodeJSONObjectForWriting` itself already succeeded.
+
+    suite(
+        "bindEventToManifest: a write that genuinely can't land (pack directory made unwritable AFTER every read-side guard passes) is reported as .failure(.writeFailed)"
+    ) {
+        guard geteuid() != 0 else {
+            print("  ⚠ skipped: running as root — chmod can't block root's own writes")
+            return
+        }
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let packDirectory = userPacks.appendingPathComponent("my-pack", isDirectory: true)
+            let manifestFile = packDirectory.appendingPathComponent("manifest.json")
+            writeFixture(#"{ "id": "my-pack", "events": {} }"#, to: manifestFile)
+            writeFixture("fake-audio", to: packDirectory.appendingPathComponent("stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            // Strip write permission from the pack DIRECTORY itself, not the file: every
+            // read-side guard (packID resolution, filename containment, regular-file check,
+            // manifest read, events/id validation, encodeJSONObjectForWriting's own validation)
+            // only needs read+execute and must still all pass — only the FINAL atomic write
+            // (which needs to create a sibling temp file in this directory before renaming it
+            // over manifest.json) can fail.
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o500], ofItemAtPath: packDirectory.path)
+            defer {
+                // Restore write access so the enclosing withTempDirectory's cleanup can remove it.
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: packDirectory.path)
+            }
+
+            let result = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+
+            guard case .failure(.writeFailed) = result else {
+                expect(
+                    false,
+                    "expected .failure(.writeFailed) when the pack directory can't be written to,"
+                        + " got \(result)")
+                return
+            }
+        }
+    }
+
     // MARK: - EventRowImportViewModel: import → bind, wired end to end
 
     await suite("EventRowImportViewModel: a successful drop imports AND binds to the row's event") {
@@ -526,6 +722,132 @@ func runManifestBindingSuites() async {
                     atPath: userPacks.appendingPathComponent("my-pack/chime.wav").path),
                 "the imported file must still be on disk — the failed bind rolls back nothing,"
                     + " which is exactly why the two surfaces stay distinguishable")
+        }
+    }
+
+    // MARK: - EventRowImportViewModel.retarget(to:) — the pack-switch state leak, one layer
+    // deeper than ``AudioImportViewModel/retarget(to:)`` (see AudioImportViewModelSuite.swift
+    // for that layer). This one has TWO things to clear on a REAL pack switch: the nested
+    // `importViewModel`'s `state` AND this row's own `bindResult` — a stale "绑定失败：
+    // manifest 读不动" left over from pack A displayed on pack B's row would be a pure
+    // misreport, since the row never even attempted to bind into B. Same load-bearing
+    // condition as the layer below: only clears when the packID actually changes, because
+    // `refresh()` also runs right after a bind on the SAME pack completes.
+
+    await suite(
+        "EventRowImportViewModel.retarget(to:): switching to a DIFFERENT pack clears bindResult to nil for BOTH a successful bind and a failed bind, and resets the nested importViewModel"
+    ) {
+        await withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            // pack-a HAS a manifest — a drop here binds successfully.
+            writeFixture(
+                #"{ "id": "pack-a", "events": {} }"#,
+                to: userPacks.appendingPathComponent("pack-a/manifest.json"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let successImportViewModel = AudioImportViewModel(
+                packID: "pack-a", environment: environment)
+            let successRowViewModel = EventRowImportViewModel(
+                event: .notification, importViewModel: successImportViewModel)
+            let goodSource = root.appendingPathComponent("source/chime.wav")
+            writeFixture(validWAVData(), to: goodSource)
+            await successRowViewModel.handleDrop(
+                sourceURL: goodSource, suggestedFileName: "chime.wav")
+            guard case .success = successRowViewModel.bindResult else {
+                expect(
+                    false,
+                    "setup: the bind must succeed, got"
+                        + " \(String(describing: successRowViewModel.bindResult))")
+                return
+            }
+
+            successRowViewModel.retarget(to: "pack-c")
+            expect(
+                successRowViewModel.bindResult == nil,
+                "retargeting to a DIFFERENT pack must clear a successful bindResult, got"
+                    + " \(String(describing: successRowViewModel.bindResult))")
+            expect(
+                successRowViewModel.importViewModel.state == .idle,
+                "retargeting to a DIFFERENT pack must also reset the nested importViewModel's"
+                    + " state, got \(successRowViewModel.importViewModel.state)")
+            expect(
+                successRowViewModel.importViewModel.packID == "pack-c",
+                "retargeting must repoint the nested importViewModel's packID too")
+
+            // pack-b has NO manifest.json — a drop here imports fine but the bind fails.
+            let failImportViewModel = AudioImportViewModel(
+                packID: "pack-b", environment: environment)
+            let failRowViewModel = EventRowImportViewModel(
+                event: .stop, importViewModel: failImportViewModel)
+            let goodSource2 = root.appendingPathComponent("source/chime2.wav")
+            writeFixture(validWAVData(), to: goodSource2)
+            await failRowViewModel.handleDrop(sourceURL: goodSource2, suggestedFileName: "chime2.wav")
+            guard case .failure = failRowViewModel.bindResult else {
+                expect(
+                    false,
+                    "setup: the bind must fail (no manifest.json in pack-b), got"
+                        + " \(String(describing: failRowViewModel.bindResult))")
+                return
+            }
+
+            failRowViewModel.retarget(to: "pack-c")
+            expect(
+                failRowViewModel.bindResult == nil,
+                "retargeting to a DIFFERENT pack must clear a FAILED bindResult too — a stale bind"
+                    + " failure from a pack the row no longer shows would be a pure misreport, got"
+                    + " \(String(describing: failRowViewModel.bindResult))")
+            expect(
+                failRowViewModel.importViewModel.state == .idle,
+                "retargeting to a DIFFERENT pack must reset the nested importViewModel's state even"
+                    + " when the LAST thing it recorded was a bind failure, got"
+                    + " \(failRowViewModel.importViewModel.state)")
+        }
+    }
+
+    await suite(
+        "EventRowImportViewModel.retarget(to:): retargeting to the SAME pack PRESERVES bindResult AND the nested importViewModel's state — the mutation-killer for the shared `packID != newPackID` guard"
+    ) {
+        await withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "id": "my-pack", "events": {} }"#,
+                to: userPacks.appendingPathComponent("my-pack/manifest.json"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
+            let rowViewModel = EventRowImportViewModel(
+                event: .notification, importViewModel: importViewModel)
+            let sourceURL = root.appendingPathComponent("source/chime.wav")
+            writeFixture(validWAVData(), to: sourceURL)
+            await rowViewModel.handleDrop(sourceURL: sourceURL, suggestedFileName: "chime.wav")
+            guard case .success = rowViewModel.bindResult else {
+                expect(
+                    false,
+                    "setup: the bind must succeed, got \(String(describing: rowViewModel.bindResult))")
+                return
+            }
+            guard case .success(let importedBeforeRetarget) = importViewModel.state else {
+                expect(false, "setup: the import must have succeeded, got \(importViewModel.state)")
+                return
+            }
+
+            // Exactly what `PanelView.refresh()` does right after THIS bind completed: it
+            // re-asserts the same packID the row is already showing.
+            rowViewModel.retarget(to: "my-pack")
+
+            guard case .success = rowViewModel.bindResult else {
+                expect(
+                    false,
+                    "retargeting to the SAME pack must PRESERVE a just-produced bindResult — the"
+                        + " very scenario refresh()-after-bind creates — got"
+                        + " \(String(describing: rowViewModel.bindResult))")
+                return
+            }
+            expect(
+                importViewModel.state == .success(importedBeforeRetarget),
+                "retargeting to the SAME pack must preserve the nested importViewModel's state too,"
+                    + " got \(importViewModel.state)")
+            expect(importViewModel.packID == "my-pack", "packID must stay unchanged")
         }
     }
 

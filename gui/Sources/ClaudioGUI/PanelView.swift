@@ -335,13 +335,27 @@ public struct PanelView: View {
     /// a stale path) and plays it — the real playback wiring `EventRowView`'s `onPreview`
     /// seam has always awaited (its own doc comment: "the caller...owns turning this into
     /// an actual playback call").
+    /// 试听这一行的声音。
+    ///
+    /// `else` 分支**不是**空的（本轮 /ship 评审：Claude 对抗子代理）。走到这里说明 `row.coverage` 还是
+    /// `.present`——那是上一次 ``refresh()`` 时算出来的——但文件此刻已经解析不出来了：用户在这中间把它
+    /// 删了 / 改名了 / 换成了一个目录。原来的 `else { return }` 让「点了试听、什么都没发生、也没有任何
+    /// 解释」成为可能，而这正是这一轮刚在 `switchPack` / 静音 / 绑定三处修掉的那种静默吞错。
+    ///
+    /// 修法不是弹一个错误框，而是**让面板说实话**：重跑 `refresh()`，这一行会自己从 `.present` 变成
+    /// `.broken`（「文件丢失」+ 进 doctor）。用户点下去看到的是行的状态当场改变——那比任何一句提示都更
+    /// 接近「不回头也知道状态」。
     private func playPreview(for row: EventRow) {
         guard case .present(let fileName) = row.coverage,
             let packDirectory = resolvePackDirectory(
                 id: config.selectedPack, userPacksDirectory: audioEnvironment.userPacksDirectory,
                 bundledPacksDirectory: audioEnvironment.bundledPacksDirectory),
-            let resolvedFile = safePackFileURL(fileName, in: packDirectory)
-        else { return }
+            let resolvedFile = safePackFileURL(fileName, in: packDirectory),
+            regularFileExists(at: resolvedFile)
+        else {
+            refresh()
+            return
+        }
         previewPlayer.play(fileAt: resolvedFile)
     }
 
@@ -414,9 +428,14 @@ public struct PanelView: View {
         config = loadPanelConfig(from: configFile)
         eventRows = packCoverage(packID: config.selectedPack, config: config, environment: audioEnvironment)
         packCards = availablePacks(config: config, environment: audioEnvironment)
-        dropZoneViewModel.packID = config.selectedPack
-        for importViewModel in rowImportViewModels.values {
-            importViewModel.importViewModel.packID = config.selectedPack
+        // `retarget(to:)`，不是裸赋 `packID`：包换了，属于上一个包的导入 / 绑定结果就失去了主语，必须
+        // 一起丢掉，否则包 A 的「已加入 stop.mp3」/「manifest 读不动」会原样留在包 B 的面板上
+        // （本轮 /ship 评审：`/codex review` [P2]）。两个 view-model 都只在包**真的换了**时才清——
+        // `refresh()` 在一次导入 / 绑定结束后也会被调用，无条件清空会把用户刚触发的那条结果（尤其是
+        // 失败原因）在他看见之前抹掉。判断条件在 view-model 里，这里不重复一遍。
+        dropZoneViewModel.retarget(to: config.selectedPack)
+        for rowViewModel in rowImportViewModels.values {
+            rowViewModel.retarget(to: config.selectedPack)
         }
     }
 }

@@ -81,11 +81,23 @@ public struct AudioDropZoneView: View {
     /// ``openImportPanel()`` (an `NSOpenPanel`, multi-select), feeding every chosen file into
     /// the SAME ``AudioImportViewModel/handleDrop(requests:)`` batch pipeline a multi-file
     /// drop already uses — never a second import path.
+    /// 文字颜色**恒为** `text-2`，hover 时也不转黏土——hover 的视觉反馈由**描边 + `clay-soft` 底色**
+    /// 承载（见 `body` 的 `.background`/`.overlay`）。
+    ///
+    /// ## 为什么（DESIGN.md 自己登记的「待拍板」冲突，本轮 /ship 拍板）
+    ///
+    /// DESIGN.md 的「拖入 drop-zone」原本写着「hover 命中 → 边框/**文字**转黏土」，但它同时规定正文文字
+    /// 恒保 ≥ 4.5:1 对比度。这两条互相矛盾：亮色下 clay `#C4633C` 压在 panel `#FFFDF8` 上实测只有
+    /// **3.97:1**——过得了非文字的 ≥ 3:1，过不了正文的 ≥ 4.5:1。
+    ///
+    /// 三条出路里选了 DESIGN.md 自己列的 option 1：**文字不动，hover 感交给边框与底色**。它零品牌代价
+    /// （黏土仍然是 hover 的唯一强调色，只是不落在文字上），且不必为这一处把 clay 调出第二个色值——
+    /// 「品牌强调唯一 = 黏土 #D97757」这条不能为了一个 hover 态开口子。
     private var promptLabel: some View {
         Button(action: openImportPanel) {
             Text("+ 拖入你自己的声音")
                 .font(.system(size: 12.5 * typeScale))
-                .foregroundColor(isHovering ? ClaudioColor.clay(colorScheme) : ClaudioColor.textSecondary(colorScheme))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
         }
         .buttonStyle(.plain)
         .accessibilityLabel("拖入或点按添加你自己的声音")

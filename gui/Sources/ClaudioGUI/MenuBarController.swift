@@ -47,7 +47,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             // exactly the 「不裁切、不溢出」 the degradation rule exists to prevent. `PanelView`
             // reports its real width here (on appear and on every tier change) and the popover
             // follows. Captures `popover` (a class), never `self`.
-            onPanelWidthChange: { width in popover.contentSize.width = CGFloat(width) }
+            // `[weak popover]`：强捕获会成环——`popover → contentViewController → rootView(PanelView)
+            // → 这个闭包 → popover`，于是 popover 与它整棵 SwiftUI 视图树永不释放（本轮 /ship 评审：
+            // Claude 对抗子代理）。今天菜单栏 app 的 popover 与进程同生共死，所以泄漏不可见；一旦将来
+            // 有人重建 popover（换皮肤、换尺寸策略、多状态栏图标），它就会变成一个真实的、每次重建都
+            // 涨一份的泄漏。捕获 popover 而不是 self 本来就是对的，只是漏了 weak。
+            onPanelWidthChange: { [weak popover] width in
+                popover?.contentSize.width = CGFloat(width)
+            }
         )
         hostingController = NSHostingController(rootView: panel)
 

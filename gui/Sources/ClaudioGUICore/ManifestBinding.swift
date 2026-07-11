@@ -177,10 +177,28 @@ public func bindEventToManifest(
     events[event.manifestKey] = fileName
     json["events"] = events
 
+    let manifestFile = userPackDirectory.appendingPathComponent("manifest.json")
+
+    // 规范化 + 校验 + 序列化走 ClaudioCore 的 ``encodeJSONObjectForWriting(_:path:)``——与 `config.json`
+    // 的读-改-写**同一份实现**。这里原本是裸的 `JSONSerialization.data(withJSONObject:)`，漏掉了
+    // config 那边早就修过的两件事（本轮 /ship 评审）：
+    //
+    // 1. **数字规范化**（安全专家）：`JSONSerialization` 用 `%.17g` 渲染浮点，于是一次绑定就能把某个
+    //    未知顶层键里干干净净的 `0.8` 写成 `0.80000000000000004`——正是「不认识的键原样保住」这句
+    //    承诺对**数字**失效的那个洞。
+    // 2. **绝不 abort**（Claude 对抗子代理，实测 exit 134）：一份含 `-1e400` 的 manifest.json 解析出
+    //    `-inf`，而 `JSONSerialization.data(withJSONObject:)` 对它抛的是 **Objective-C 异常**，Swift 的
+    //    `do/catch` 接不住——用户给某个事件绑一次音频，菜单栏 app 当场硬崩。
+    //
+    // 两个洞都不是「manifest 特有」的，它们是这个**读-改-写形状**本身的洞。所以修法不是在这里再抄一遍
+    // 补丁，而是让两个调用方共用同一个原语：以后任何一次加固自动同时覆盖两边。
+    let updatedData: Data
+    switch encodeJSONObjectForWriting(json, path: manifestFile.path) {
+    case .success(let encoded): updatedData = encoded
+    case .failure(let rejection): return .failure(.writeFailed(reason: rejection.reason))
+    }
+
     do {
-        let updatedData = try JSONSerialization.data(
-            withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
-        let manifestFile = userPackDirectory.appendingPathComponent("manifest.json")
         try updatedData.write(to: manifestFile, options: .atomic)
     } catch {
         return .failure(.writeFailed(reason: error.localizedDescription))

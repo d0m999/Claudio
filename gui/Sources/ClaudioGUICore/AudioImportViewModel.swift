@@ -34,6 +34,26 @@ public final class AudioImportViewModel: ObservableObject {
         self.environment = environment
     }
 
+    /// 把这个 view-model 指到另一个包上，并**丢掉属于上一个包的导入结果**。
+    ///
+    /// ## 为什么不能只改 `packID`（本轮 /ship 评审：`/codex review` [P2]）
+    ///
+    /// `state` 讲的是「**在某个包里**，上一次导入的结果是什么」——「已加入 stop.mp3」「这个文件不是音频」。
+    /// 一旦 `packID` 指向了别的包，这句话就失去了主语：它描述的那件事发生在包 A，而面板现在显示的是包 B。
+    /// 旧的 `PanelView.refresh()` 只写 `importViewModel.packID = ...`，于是包 A 的成功 / 拒绝提示会原样
+    /// 留在包 B 的面板上，直到下一次导入把它覆盖掉——用户看到的是一条关于一个他已经离开的包的消息。
+    ///
+    /// ## 为什么判 `packID != self.packID`，而不是无条件清
+    ///
+    /// 因为 `refresh()` 不只在切包时被调用，**一次导入 / 绑定结束之后也会调**（行末导入要靠它把行刷成
+    /// `.present`）。无条件清空等于把用户刚刚触发的那条结果——尤其是**失败**原因——在他看见之前抹掉，
+    /// 那会把这一轮刚修好的「绝不静默吞错」又变回静默。只有包**真的换了**，旧结果才失去主语。
+    public func retarget(to newPackID: String) {
+        guard newPackID != packID else { return }
+        packID = newPackID
+        state = .idle
+    }
+
     #if DEBUG
         /// Preview-only initializer (ENGINEERING.md T14 D2): pins ``state`` directly to
         /// `previewState`, without running any import pipeline. Mirrors

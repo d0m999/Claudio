@@ -41,6 +41,20 @@ public final class EventRowImportViewModel: ObservableObject {
         self.importViewModel = importViewModel
     }
 
+    /// 把这一行指到另一个包上，并丢掉**属于上一个包**的导入结果与绑定结果。
+    ///
+    /// 与 ``AudioImportViewModel/retarget(to:)`` 是同一件事的两层：那边清的是导入结果（`state`），这里
+    /// 还要多清一个 ``bindResult``——包换了之后，「绑定失败：这个包的 manifest.json 读不动」这句话讲的
+    /// 是包 A，把它显示在包 B 的行上是纯粹的误报。
+    ///
+    /// 同样只在包**真的换了**时才清（判断委托给下层的 `retarget`，两层用的是同一个条件）：`refresh()`
+    /// 在一次绑定结束后也会被调用，无条件清空会把用户刚触发的那条失败原因在他看见之前抹掉。
+    public func retarget(to newPackID: String) {
+        guard newPackID != importViewModel.packID else { return }
+        importViewModel.retarget(to: newPackID)
+        bindResult = nil
+    }
+
     /// Handles one dropped/picked file for this row: imports it via ``importViewModel``,
     /// then — only on a successful import — binds the resulting file to ``event``. `async`
     /// for the same reason ``AudioImportViewModel/handleDrop(sourceURL:suggestedFileName:)``
