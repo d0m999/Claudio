@@ -45,7 +45,7 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
 /// else (T17: this is also the path ``performFirstRunSetup(environment:)`` uses to
 /// establish a first-run default pack selection).
 ///
-/// The read-modify-write runs under ``ClaudioPaths/lockFile``'s non-blocking `flock` —
+/// The read-modify-write runs under ``ClaudioPaths/configLockFile``'s non-blocking `flock` —
 /// the same lock `install`/`play` already serialize on — so two concurrent `claudio use`
 /// (or `use` racing `setup`) invocations can't silently lose one write (Codex review of
 /// 3d09bf5, confirmed again by `/ship`'s pre-landing review red team pass: unlike
@@ -58,7 +58,7 @@ public func selectPack(
     configFile: URL = ClaudioPaths.configFile,
     userPacksDirectory: URL = ClaudioPaths.packsDirectory,
     bundledPacksDirectory: URL? = nil,
-    lockFile: URL = ClaudioPaths.lockFile
+    lockFile: URL = ClaudioPaths.configLockFile
 ) -> Result<UseOutcome, UseError> {
     guard isSafePackID(packID) else { return .failure(.invalidPackID(packID)) }
     guard

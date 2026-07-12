@@ -26,7 +26,15 @@ public struct SetupEnvironment: Sendable {
     public let userPacksDirectory: URL
     public let configFile: URL
     public let settingsFile: URL
-    public let lockFile: URL
+    /// Guards the `selectPack` read-modify-write against `config.json` (T17e's pack-selection
+    /// repair step below writes through here). Deliberately **separate** from
+    /// ``settingsLockFile`` — the two files (`config.json`, `settings.json`) have independent
+    /// writers and must never contend with, or be gated by, each other's lock.
+    public let configLockFile: URL
+    /// Guards ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``'s
+    /// read-modify-write against `settings.json`. Deliberately **separate** from
+    /// ``configLockFile`` — see that property's doc comment.
+    public let settingsLockFile: URL
 
     public init(
         executablePath: URL,
@@ -34,14 +42,16 @@ public struct SetupEnvironment: Sendable {
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         configFile: URL = ClaudioPaths.configFile,
         settingsFile: URL = ClaudioPaths.claudeSettingsFile,
-        lockFile: URL = ClaudioPaths.lockFile
+        configLockFile: URL = ClaudioPaths.configLockFile,
+        settingsLockFile: URL = ClaudioPaths.settingsLockFile
     ) {
         self.executablePath = executablePath
         self.claudioBinaryDestination = claudioBinaryDestination
         self.userPacksDirectory = userPacksDirectory
         self.configFile = configFile
         self.settingsFile = settingsFile
-        self.lockFile = lockFile
+        self.configLockFile = configLockFile
+        self.settingsLockFile = settingsLockFile
     }
 }
 
@@ -496,7 +506,7 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
         switch selectPack(
             packID, configFile: environment.configFile,
             userPacksDirectory: environment.userPacksDirectory,
-            lockFile: environment.lockFile)
+            lockFile: environment.configLockFile)
         {
         case .success(.selected(let id)): packSelection = .selectedDefault(packID: id)
         case .failure(let error): return .failure(.useFailure(error))
@@ -506,7 +516,7 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
         switch selectPack(
             selected, configFile: environment.configFile,
             userPacksDirectory: environment.userPacksDirectory,
-            lockFile: environment.lockFile)
+            lockFile: environment.configLockFile)
         {
         case .success(.selected(let id)):
             packSelection = .repairedDeadSelection(removed: removed, selected: id)
@@ -541,7 +551,7 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
     switch installClaudioHooks(
         settingsFile: environment.settingsFile,
         claudioBinaryPath: environment.claudioBinaryDestination.path,
-        lockFile: environment.lockFile
+        lockFile: environment.settingsLockFile
     ) {
     case .success(let hooksOutcome):
         return .success(

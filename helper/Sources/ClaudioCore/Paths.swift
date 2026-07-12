@@ -62,7 +62,7 @@ public enum ClaudioPaths {
     /// `~/.claudio/claudio.log.lock` — the non-blocking lock guarding `claudio.log`'s
     /// rotate-then-append sequence against concurrent tearing across processes
     /// (ENGINEERING.md 决议 6, T6; see ``FileLock``). Deliberately a **separate** lock from
-    /// ``lockFile`` (`play.lock`) — logging must never contend with, or be gated by,
+    /// ``playLockFile`` (`play.lock`) — logging must never contend with, or be gated by,
     /// `play`'s own debounce lock.
     public static var logLockFile: URL {
         root.appendingPathComponent("claudio.log.lock")
@@ -70,8 +70,27 @@ public enum ClaudioPaths {
 
     /// `~/.claudio/play.lock` — the non-blocking lock guarding `play`'s skip-style
     /// debounce (ENGINEERING.md 决议 1 + 5, T5). See ``FileLock``.
-    public static var lockFile: URL {
+    public static var playLockFile: URL {
         root.appendingPathComponent("play.lock")
+    }
+
+    /// `~/.claudio/config.lock` — the non-blocking lock guarding reads/writes of
+    /// `config.json` (GUI writes via `selectPack`/onboarding, `claudio use` /
+    /// `claudio event enabled` both read and write). Deliberately **separate** from
+    /// ``playLockFile`` — a config read/write must never contend with, or be gated by,
+    /// `play`'s own debounce lock (that contention is exactly what was silently
+    /// swallowing prompt sounds before this split).
+    public static var configLockFile: URL {
+        root.appendingPathComponent("config.lock")
+    }
+
+    /// `~/.claudio/settings.lock` — the non-blocking lock guarding install/uninstall of
+    /// the Claudio hooks in `~/.claude/settings.json` (``SettingsInstaller``).
+    /// Deliberately **separate** from both ``playLockFile`` and ``configLockFile`` — a
+    /// settings.json install/uninstall must never contend with `play`'s debounce lock or
+    /// a concurrent `config.json` read/write.
+    public static var settingsLockFile: URL {
+        root.appendingPathComponent("settings.lock")
     }
 
     /// `~/.claudio/play.state` — the single shared "last played" timestamp `play`'s

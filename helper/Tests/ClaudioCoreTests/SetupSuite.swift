@@ -39,7 +39,8 @@ private func makeEnvironment(
         userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
         configFile: claudioRoot.appendingPathComponent("config.json"),
         settingsFile: root.appendingPathComponent("settings.json"),
-        lockFile: claudioRoot.appendingPathComponent("play.lock"))
+        configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+        settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
 }
 
 @MainActor
@@ -91,7 +92,8 @@ func runSetupSuites() {
                 userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
-                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+                configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
             // T17d：这个 fixture 原本一个包都没有，而 `alreadyInstalled` 会把整个复制块跳过 ——
             // 于是它描述的其实是一台**装完也不会响**的机器，只是当年没人问这个问题。现在
             // `.noAvailablePack` 会拦住它（这正是该拦的），所以把 fixture 补成它本来想描述的样子：
@@ -240,7 +242,8 @@ func runSetupSuites() {
                 userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
-                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+                configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
             writeFixture(
                 #"{ "schema": 1, "id": "minimal-chime", "events": {} }"#,
                 to: environment.userPacksDirectory.appendingPathComponent(
@@ -320,7 +323,8 @@ func runSetupSuites() {
                 userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
-                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+                configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
             // A dot-prefixed leftover that sorts before the real pack ('.' 0x2E < 'z'): without
             // the `!hasPrefix(".")` filter it would be scanned first and either be selected or
             // fail selection outright. With the filter it is skipped and `zeta-chime` wins.
@@ -421,7 +425,8 @@ func runSetupSuites() {
                 userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
-                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+                configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
 
             let result = performFirstRunSetup(environment: environment)
             guard case .failure(.binaryCopyFailure) = result else {
@@ -489,7 +494,7 @@ func runSetupSuites() {
             // 完全正常的用户操作，不是构造出来的畸形 fixture。
             let muteResult = setEventEnabled(
                 .stop, enabled: false, configFile: environment.configFile,
-                lockFile: environment.lockFile)
+                lockFile: environment.configLockFile)
             expect(muteResult == .success(.updated(event: .stop, enabled: false)), "setup: mute must succeed")
 
             let afterMute = try? Data(contentsOf: environment.configFile)
@@ -635,7 +640,8 @@ private func makeInstalledEnvironment(root: URL) -> SetupEnvironment {
         userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
         configFile: claudioRoot.appendingPathComponent("config.json"),
         settingsFile: root.appendingPathComponent("settings.json"),
-        lockFile: claudioRoot.appendingPathComponent("play.lock"))
+        configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+        settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
 }
 
 @MainActor

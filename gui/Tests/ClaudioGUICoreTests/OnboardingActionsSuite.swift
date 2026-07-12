@@ -96,7 +96,8 @@ private struct FixtureTargets {
     let onboarding: OnboardingEnvironment
     let userPacksDirectory: URL
     let configFile: URL
-    let lockFile: URL
+    let configLockFile: URL
+    let settingsLockFile: URL
 
     init(in root: URL) {
         let claudeDirectory = root.appendingPathComponent("dot-claude", isDirectory: true)
@@ -109,13 +110,15 @@ private struct FixtureTargets {
             claudioBinaryPath: claudioRoot.appendingPathComponent("bin/claudio"))
         userPacksDirectory = claudioRoot.appendingPathComponent("packs", isDirectory: true)
         configFile = claudioRoot.appendingPathComponent("config.json")
-        lockFile = claudioRoot.appendingPathComponent("play.lock")
+        configLockFile = claudioRoot.appendingPathComponent("config.lock")
+        settingsLockFile = claudioRoot.appendingPathComponent("settings.lock")
     }
 
     func environment(bundledHelperBinary: URL?) -> OnboardingActionEnvironment {
         OnboardingActionEnvironment(
             onboarding: onboarding, bundledHelperBinary: bundledHelperBinary,
-            userPacksDirectory: userPacksDirectory, configFile: configFile, lockFile: lockFile)
+            userPacksDirectory: userPacksDirectory, configFile: configFile,
+            configLockFile: configLockFile, settingsLockFile: settingsLockFile)
     }
 }
 

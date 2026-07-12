@@ -25,8 +25,9 @@ import Foundation
 ///   aborts with an error and never touches the file.
 /// - **One-time backup**: the pre-claudio original is copied to `settings.json.claudio.bak`
 ///   the first time `install` actually writes, and never overwritten afterwards.
-/// - **Non-blocking, serialized read-modify-write**: reuses the same ``ClaudioPaths/lockFile``
-///   `play` debounces on (ENGINEERING.md 工程落地细节 ⑤) — never blocks.
+/// - **Non-blocking, serialized read-modify-write**: guarded by its own
+///   ``ClaudioPaths/settingsLockFile`` — deliberately **separate** from ``ClaudioPaths/playLockFile``
+///   (ENGINEERING.md 工程落地细节 ⑤) — never blocks, and never contends with `play`'s debounce lock.
 
 private let hooksKey = "hooks"
 private let hookTypeKey = "type"
@@ -116,7 +117,7 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
 public func installClaudioHooks(
     settingsFile: URL = ClaudioPaths.claudeSettingsFile,
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
-    lockFile: URL = ClaudioPaths.lockFile
+    lockFile: URL = ClaudioPaths.settingsLockFile
 ) -> Result<InstallOutcome, SettingsUpdateError> {
     installClaudioHooksLocked(
         settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath, lockFile: lockFile,
@@ -135,7 +136,7 @@ public func installClaudioHooks(
 public func installClaudioHooks(
     settingsFile: URL = ClaudioPaths.claudeSettingsFile,
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
-    lockFile: URL = ClaudioPaths.lockFile,
+    lockFile: URL = ClaudioPaths.settingsLockFile,
     betweenReadAndWrite: (() -> Void)?
 ) -> Result<InstallOutcome, SettingsUpdateError> {
     installClaudioHooksLocked(
@@ -186,7 +187,7 @@ private func installClaudioHooksLocked(
 public func uninstallClaudioHooks(
     settingsFile: URL = ClaudioPaths.claudeSettingsFile,
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
-    lockFile: URL = ClaudioPaths.lockFile
+    lockFile: URL = ClaudioPaths.settingsLockFile
 ) -> Result<UninstallOutcome, SettingsUpdateError> {
     uninstallClaudioHooksLocked(
         settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath, lockFile: lockFile,
@@ -200,7 +201,7 @@ public func uninstallClaudioHooks(
 public func uninstallClaudioHooks(
     settingsFile: URL = ClaudioPaths.claudeSettingsFile,
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
-    lockFile: URL = ClaudioPaths.lockFile,
+    lockFile: URL = ClaudioPaths.settingsLockFile,
     betweenReadAndWrite: (() -> Void)?
 ) -> Result<UninstallOutcome, SettingsUpdateError> {
     uninstallClaudioHooksLocked(
@@ -255,7 +256,7 @@ public enum HookInstallStatus: Sendable, Equatable {
 /// ``validateHooksShape(_:)``, and ``groupContainsCommand(_:command:)``, the very same
 /// private helpers `install`/`uninstall` use — so "is it installed?" can never silently
 /// drift out of sync with what a real `install`/`uninstall` call would actually see.
-/// Never takes ``ClaudioPaths/lockFile``: there is nothing to serialize against
+/// Never takes ``ClaudioPaths/settingsLockFile``: there is nothing to serialize against
 /// concurrent writers for a pure read that never writes anything back.
 public func detectHookInstallStatus(
     settingsFile: URL = ClaudioPaths.claudeSettingsFile,

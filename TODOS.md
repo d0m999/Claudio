@@ -45,27 +45,58 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 
 ## Ship / CI
 
-### `play.lock` 被 config / settings 写者共用 —— 任何一次设置写都可能静默吞掉一声提示音
+### ~~`play.lock` 被 config / settings 写者共用 —— 任何一次设置写都可能静默吞掉一声提示音~~ ✅ 2026-07-12 阶段 A 已修
 
-**What:** `ClaudioPaths.lockFile`（`play.lock`）今天被**五个互不相干的临界区**共用：`Play.swift:190`（去抖时间戳 + spawn afplay —— 它唯一该保护的东西）、`EventEnabled.swift:63`（写 config.json）、`Use.swift:72`（写 config.json）、`SettingsInstaller.swift:162/216`（写 **settings.json**）。而 `claudio play` 拿不到这把锁时的行为是 `.skippedDebounce` —— **静默不放声音**（这是故意的：hook 绝不能阻断 Claude Code）。
+`ClaudioPaths.lockFile` 已**改名**为 `playLockFile`，并新增 `configLockFile`（`~/.claudio/config.lock`）与
+`settingsLockFile`（`~/.claudio/settings.lock`）。改名是全部效力的来源：它把 11 个 `= ClaudioPaths.lockFile`
+默认值点**全部变成编译错误**，逼每一处做出显式选择 —— 原计划写的是「在 `lockFile` 上加一条 `- Important`
+文档注释」，那是在该放编译器的地方放了一条注释。最终归属：`Play` → play.lock；`Use` / `EventEnabled` /
+`PanelView` / `EventMuteController` → config.lock；`SettingsInstaller` 四个签名 → settings.lock；同时写两个
+文件的 `SetupEnvironment` 与 `OnboardingActionEnvironment` 各**持两把**，不共用。
 
-**Why:** 于是每一次「点静音 / 切包 / 跑 `claudio install`」都是一个**会吞掉提示音的窗口**：恰好落在窗口里的 Claude Code 事件，那声提示音直接消失，无任何错误、无任何日志。这打在产品的根上（「不回头也知道状态」）—— 用户在调设置的那几秒，恰好错过了他装这个 app 就是为了不错过的那声。
+**关键在 GUI，不在 helper**：GUI 是显式向下传参的，只改 helper 侧函数的默认参数对它一点作用都没有 ——
+照原清单（只列 helper 五个文件）实现完，用户点静音、切包**照样拿 `play.lock`**，照样吞提示音，而 GUI 是
+唯一的用户入口。守护它的是 `ViewWiringSuite` 的源码文本绊线（`ClaudioGUI` 是 executableTarget，import 不进来）。
 
-反方向的那一半**项目已经知道了**，只是把它当成了 UI 问题而不是锁设计问题 —— `PanelView.swift` 的注释原文：「`.lockBusy` 尤其是**真会发生**的，不是理论值：`setEventEnabled`/`selectPack` 与 `claudio play` 抢同一把 `play.lock`…点静音正好撞上」。修法是给它显示一句「请稍后重试」，而不是让它不再发生。
+**测试按 D30 重写，没有按本条目原先写的那两条做**：原计划的「持有 `play.lock` 时三个写者仍成功」**测不到东西** ——
+现有每条锁争用测试都**显式注入**临时 lockFile，与默认参数无关，把锁改回共用也不会 RED。真正有牙的是**接线断言**
+（默认构造后的 `lockFile` 值），三条，全部经变异验证确认会 RED。遗留的行为级缺口见下一条。
 
-更讽刺的是**正确的原则早已写在仓库里**：`Paths.swift:64-66` 为 `logLockFile` 写着「Deliberately a **separate** lock from `lockFile`（`play.lock`）—— logging must never contend with, or be gated by, `play`'s own debounce lock.」闸门建了，只推开了日志那一格。这正是本仓库自己记下的 learning `gate-built-but-not-rolled-out`，同一形状第三次。
+### 「三把锁互不阻塞」只有接线断言背书，没有一条行为级的持锁竞争测试
 
-**Context:** 2026-07-11 `/plan-eng-review`（主音量滑块）期间，Codex 外部声音（gpt-5.5 high）指出，Claude 侧逐条源码复核确认。**分离是安全的，三点源码实证**：① `play` 读 config 在**锁外**（`Play.swift:180` 的 `loadPlayConfig` 在 `withNonBlockingLock` 之前）—— 它从来不需要排斥 config 写者；② config 写走 `Data.write(options: .atomic)`（`ConfigMutation.swift:176`）即 `rename(2)`，并发读者只会看到旧的完整文件或新的完整文件，绝不撕裂 —— 读侧本来就不需要锁；③ `play` **从不读** settings.json。
+**What:** 阶段 A 之后，「`Play` 拿 play.lock、config 写者拿 config.lock、settings 写者拿 settings.lock」这件事
+由**接线断言**（默认构造后的 `lockFile` 值 = 哪把锁）+ `ViewWiringSuite` 的源码文本绊线守着。但**没有任何一条
+测试真的持有一把锁、再去证明另一条路径不被它挡住** —— 也就是这次分锁要兑现的那个行为本身，没有直接的测试信号。
 
-修法：新增 `ClaudioPaths.configLockFile`（`~/.claudio/config.lock`，串行三个 config 写者）与 `ClaudioPaths.settingsLockFile`（`~/.claudio/settings.lock`，串行 install/uninstall）；`play.lock` 退回只管 play 的去抖。回归测试钉住两条（**今天都会 RED，那正是 bug**）：持有 `play.lock` 时三个写者仍成功；持有 `config.lock` 时 `playSoundEvent` 仍发声。
+**Why:** 接线断言证明的是「默认值指向 config.lock」，不是「持有 play.lock 时点静音仍然成功」。两者之间隔着
+`FileLock` 的实际语义。今天靠人工读码确认（`play` 读 config 在锁外；config 写是原子 rename；`play` 从不读
+settings.json），但**回归时没有灯会灭**。
 
-一份**未测试的**探索性实现在分支 `feat/master-volume-slider` @ `cbc02f0`（helper 能编译，零测试，勿直接信任）。
-
-**升级窗口注记**：旧二进制（拿 play.lock 写 config）与新二进制（拿 config.lock）并存时不互相串行。因为写是原子 rename，最坏是丢一次更新、绝不撕裂；且 GUI 是单进程、`claudio use` 是手动调用，实际不可达。
+**Context:** 这不是疏忽，是一个**有前置条件**的取舍。要么用注入的临时 fixture 路径测 —— 那样断言从写下第一天
+起就恒真（两个临时路径本就互不相干），正是 D30 判定「测不到东西」的那类假绿；要么锚定生产默认值（真实的
+`~/.claudio/*.lock`）才有牙 —— 但 `ClaudioPaths.root` 锚在 `FileManager.default.homeDirectoryForCurrentUser`，
+**没有任何可覆盖的注入口**，而 Darwin 上 `$HOME` 会被忽略：这类测试会真实地碰到当前用户的 `~/.claudio/`。
+所以前置条件是**先给 `ClaudioPaths.root` 一个可覆盖锚点**，那是一次独立的基础设施改动，不该混进阶段 A。
 
 **Effort:** M
-**Priority:** P1
-**Depends on:** None（与主音量滑块无关，强烈建议**单独一个 PR**）
+**Priority:** P2
+**Depends on:** `ClaudioPaths.root` 需要先获得可覆盖锚点（独立 PR，不要混进阶段 B 主音量滑块）
+
+### 升级窗口：旧 CLI（拿 play.lock 写 config）与新 GUI（拿 config.lock）并存时会丢一次设置更新
+
+**What:** 两把不同的锁之间，原子 rename **只防撕裂、不防 lost update**。旧 `~/.claudio/bin/claudio` 拿 play.lock
+写 config.json，新 GUI 拿 config.lock 写同一个文件 —— 它们不互相串行。最坏是丢一次设置更新，且**报 `.success`**（静默）。
+
+**Why:** 原台账把这条写成「GUI 是单进程、`claudio use` 是手动，实际不可达」—— **不成立**。这不是一个「窗口」，
+是一个**无限期常驻**的状态：helper 二进制只在 `performFirstRunSetup` 时刷新，而 **GUI 从不调用它**（`gui/Sources/`
+零命中）。用户升级 app 后，`~/.claudio/bin/claudio` 可以**长期停留在旧版**，与新 GUI 并存。
+
+**Context:** 2026-07-12 阶段 A 侦察 S4 + Codex #6 更正。真修 = config 写路径加**乐观并发重读** —— 与 `config.json`
+写路径缺 symlink 解析那条（本文档「GUI 写/读路径的同用户 symlink TOCTOU」）是同一处加固，建议合并处理。
+
+**Effort:** M
+**Priority:** P3（需要用户在旧 CLI `claudio use` 与新 GUI 之间并发写）
+**Depends on:** None
 
 ### CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0
 

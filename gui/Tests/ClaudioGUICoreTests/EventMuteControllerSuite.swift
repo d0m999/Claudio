@@ -9,6 +9,17 @@ import Foundation
 
 @MainActor
 func runEventMuteControllerSuites() {
+    suite("EventMuteController()'s default lockFile is ClaudioPaths.configLockFile, never playLockFile") {
+        // Lock separation (D9): the mute button's config.json write must never contend with, or
+        // be gated by, `play`'s debounce lock — that contention is exactly what was silently
+        // swallowing prompt sounds before this split. Type-level only, no injected paths.
+        expect(
+            EventMuteController().lockFile == ClaudioPaths.configLockFile,
+            "EventMuteController()'s default lockFile must be ClaudioPaths.configLockFile, got "
+                + "\(EventMuteController().lockFile.path)"
+        )
+    }
+
     suite("EventMuteController: setEnabled writes through and returns true, clearing lastError") {
         withTempDirectory { root in
             let controller = EventMuteController(

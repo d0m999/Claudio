@@ -109,7 +109,7 @@ public struct PanelView: View {
         /// and it surfaces as a real error in the panel — never as a dead button.
         bundledHelperBinary: URL?,
         configFile: URL = ClaudioPaths.configFile,
-        lockFile: URL = ClaudioPaths.lockFile,
+        lockFile: URL = ClaudioPaths.configLockFile,
         onboardingEnvironment: OnboardingEnvironment = OnboardingEnvironment(),
         focusCoordinator: PanelFocusCoordinator = PanelFocusCoordinator(),
         onPanelWidthChange: @escaping (Double) -> Void = { _ in }
@@ -142,7 +142,12 @@ public struct PanelView: View {
             bundledHelperBinary: bundledHelperBinary,
             userPacksDirectory: audioEnvironment.userPacksDirectory,
             configFile: configFile,
-            lockFile: lockFile)
+            // `lockFile` (this init's own parameter) only ever guards `config.json` — see its
+            // other two call sites below (`EventMuteController`, `selectPack`). The takeOver path
+            // this environment drives ALSO writes `settings.json` (`installClaudioHooks`), which
+            // must serialize on its own, separate lock — never `config.json`'s.
+            configLockFile: lockFile,
+            settingsLockFile: ClaudioPaths.settingsLockFile)
         _onboardingViewModel = StateObject(
             wrappedValue: OnboardingViewModel(
                 environment: onboardingEnvironment,

@@ -482,21 +482,30 @@ public struct OnboardingActionEnvironment: Sendable {
     public let settingsFile: URL
     public let userPacksDirectory: URL
     public let configFile: URL
-    public let lockFile: URL
+    /// Guards `config.json` writes (``selectPack`` inside ``performFirstRunSetup``, via
+    /// ``SetupEnvironment/configLockFile``). Deliberately **separate** from
+    /// ``settingsLockFile`` — see ``SetupEnvironment/configLockFile``'s doc comment for why.
+    public let configLockFile: URL
+    /// Guards `settings.json` writes (``installClaudioHooks`` inside
+    /// ``performFirstRunSetup``, and ``uninstallClaudioHooks`` on the disconnect path).
+    /// Deliberately **separate** from ``configLockFile``.
+    public let settingsLockFile: URL
 
     public init(
         onboarding: OnboardingEnvironment,
         bundledHelperBinary: URL?,
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         configFile: URL = ClaudioPaths.configFile,
-        lockFile: URL = ClaudioPaths.lockFile
+        configLockFile: URL = ClaudioPaths.configLockFile,
+        settingsLockFile: URL = ClaudioPaths.settingsLockFile
     ) {
         self.bundledHelperBinary = bundledHelperBinary
         self.claudioBinaryDestination = onboarding.claudioBinaryPath
         self.settingsFile = onboarding.settingsFile
         self.userPacksDirectory = userPacksDirectory
         self.configFile = configFile
-        self.lockFile = lockFile
+        self.configLockFile = configLockFile
+        self.settingsLockFile = settingsLockFile
     }
 }
 
@@ -583,7 +592,8 @@ public func performOnboardingDiskAction(
                 userPacksDirectory: environment.userPacksDirectory,
                 configFile: environment.configFile,
                 settingsFile: environment.settingsFile,
-                lockFile: environment.lockFile)
+                configLockFile: environment.configLockFile,
+                settingsLockFile: environment.settingsLockFile)
             switch performFirstRunSetup(environment: setupEnvironment) {
             case .success(let outcome): return .success(.tookOver(outcome))
             case .failure(let error): return .failure(.setupFailed(error))
@@ -594,7 +604,7 @@ public func performOnboardingDiskAction(
         switch uninstallClaudioHooks(
             settingsFile: environment.settingsFile,
             claudioBinaryPath: environment.claudioBinaryDestination.path,
-            lockFile: environment.lockFile)
+            lockFile: environment.settingsLockFile)
         {
         case .success(.uninstalled(let count)):
             return .success(.disconnected(count: count))

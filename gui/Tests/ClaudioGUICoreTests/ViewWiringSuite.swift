@@ -331,6 +331,51 @@ func runViewWiringSuites() {
         }
     }
 
+    suite("PanelView 的 lockFile 默认值必须是 configLockFile（锁分离 D9 的兑现点）") {
+        // MenuBarController.swift 是全仓唯一的 `PanelView(` 构造点，且不传 `lockFile`（见下面那条
+        // suite「MenuBarController 里没有 Bundle.main」旁边同一个文件）—— 所以这个默认值是 GUI 生产
+        // 路径上**唯一活着**的锁值。`ClaudioGUI` 是 executableTarget，`claudio-gui-tests` import 不了
+        // 它，`PanelView.lockFile` 又是 `private let`（编译期也够不到），所以只能走源码文本绊线 ——
+        // 与本文件其余每一条断言同一个理由（见文件头部）。
+        guard let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift") else {
+            expect(false, "读不到 PanelView.swift —— 这个 suite 唯一的价值就是读它")
+            return
+        }
+        expect(
+            panel.contains("lockFile: URL = ClaudioPaths.configLockFile"),
+            "PanelView 的 lockFile 默认值必须是 ClaudioPaths.configLockFile，不是 playLockFile —— "
+                + "它同时喂给 EventMuteController 与 selectPack，两者都在写 config.json，绝不能被 "
+                + "play 的 debounce 锁挡住（这正是这次分锁要修的那个『吞提示音』的 bug）")
+
+        // 上面那条只钉住**默认值声明那一行**。它钉不住「这个值真的被转发下去」——
+        // 实测（swift-reviewer 的变异验证）：把 `configLockFile: lockFile` 改成
+        // `configLockFile: ClaudioPaths.playLockFile`，默认值声明原样不动，整个 gui 套件
+        // **1600/1600 全绿**。默认值写对、转发线接错，是一个测试一个字都不会红的洞，
+        // 而它的用户可见后果与默认值写错**一模一样**（点静音又吞一次提示音）。
+        // 所以下面三条把整条链钉死：默认值 → 两个下游写者 → 那把不该被 config 锁冒名顶替的 settings 锁。
+        expect(
+            panel.contains("configLockFile: lockFile"),
+            "PanelView 必须把它自己的 lockFile（= config.lock）转发给 OnboardingActionEnvironment "
+                + "的 configLockFile —— takeOver 路径要写 config.json（selectPack）")
+        expect(
+            panel.contains("EventMuteController(configFile: configFile, lockFile: lockFile)"),
+            "PanelView 必须把它自己的 lockFile（= config.lock）转发给 EventMuteController —— "
+                + "静音开关写的是 config.json")
+        expect(
+            panel.contains("settingsLockFile: ClaudioPaths.settingsLockFile"),
+            "PanelView 构造 OnboardingActionEnvironment 时，settingsLockFile 必须是独立的 "
+                + "settings.lock —— takeOver 路径同时写 settings.json（installClaudioHooks），"
+                + "它绝不能与 config.json 的写者共用一把锁（那正是这次分锁要拆开的东西）")
+
+        // 负向兜底：PanelView 在**任何位置**都不该出现 play 的去抖锁。它一个字节都不写
+        // play.state，也不参与去抖。这一条能同时逮住上面四条各自的变异，且因为 `codeOnly`
+        // 已剥掉注释，谈论 playLockFile 的**散文**不会把它假红（这正是本文件头部记着的那次翻车）。
+        expect(
+            !panel.contains("playLockFile"),
+            "PanelView 里出现了 playLockFile —— 它不写 play.state、不参与去抖，"
+                + "碰 play 的锁只会重新把提示音吞掉")
+    }
+
     suite("MenuBarController：popover 关闭必须发出隐藏信号，而且必须在那句会提前 return 的 guard 之前（T17d）") {
         guard let controller = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift") else {
             expect(false, "读不到 MenuBarController.swift")
