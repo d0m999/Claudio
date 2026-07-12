@@ -186,7 +186,7 @@ public final class OnboardingViewModel: ObservableObject {
     /// 用户点「接管 Claude Code」，然后（在几百毫秒的复制二进制 + 复制音频 + flock 期间）点到别的
     /// app 上 —— `popover.behavior = .transient`，面板**当场关闭**。而 CTA 那句
     /// `Task { await viewModel.performPrimaryAction() }` 是一个**不随视图销毁而取消**的非结构化
-    /// Task：它继续跑、撞上 `play.lock`（或任何一条 `SetupError`）、失败、把 `actionState` 写成
+    /// Task：它继续跑、撞上 `config.lock` / `settings.lock`（或任何一条 `SetupError`）、失败、把 `actionState` 写成
     /// `.failed`。此刻屏幕上**没有任何一个像素属于它**。用户回来重开面板 → 上一版第一件事就是把它
     /// 当成「看过了」清掉。**用户永远不知道接管失败了。**
     ///
@@ -286,10 +286,16 @@ public final class OnboardingViewModel: ObservableObject {
     private func perform(_ intent: OnboardingActionIntent?) async {
         // 画廊里 pin 死的实例：点一下什么都不该发生。
         guard !isPreviewPinned else { return }
-        // 重入守卫：双击「接管」会让两个 `performFirstRunSetup` 抢同一把 `play.lock`，其中一个
+        // 重入守卫：双击「接管」会让两个 `performFirstRunSetup` 撞在一起 —— 它们抢同一把
+        // `config.lock`（`selectPack`）与同一把 `settings.lock`（`installClaudioHooks`），其中一个
         // 必然拿到 `.lockBusy` —— 用户会看到一条**他自己制造出来的**假失败。视图侧的
         // `.disabled(isPerformingAction)` 挡不住它：`@Published` 到按钮的传播不是同步的，
         // 第二次点击可能已经在队列里了。
+        //
+        // ⚠️ 阶段 A 锁分离之前，这条注释写的是「抢同一把 `play.lock`」。那句话现在是**假的**：
+        // `SetupEnvironment` 结构上就没有 `playLockFile` 这个字段。但**隐患本身一个字都没变**，
+        // 只是换了两把锁。别顺着那句已经死掉的论据把这个守卫删了 —— 去查 `Setup.swift`，
+        // 你会看到 `configLockFile` × 2 + `settingsLockFile` × 1，三次都能 `.lockBusy`。
         guard !isPerformingAction else { return }
         guard let intent else {
             // 这个状态没有这颗 CTA（视图本来也不会渲染它）。仍然重新探测一次，绝不崩。

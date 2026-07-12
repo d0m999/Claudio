@@ -666,7 +666,7 @@ func runOnboardingActionsFixSuites() {
     // 它们不是 —— `runDiskAction` 在失败之后无条件重新探测磁盘。于是矩阵里有两个格子没有任何视图
     // 认领（`.failed(.takeOver)` × `.installed`，以及 `.failed(.disconnect)` × 非 `.installed`），
     // 而第一格是**可达的**：quarantine 检测让一台被盖章的机器报 `.helperMissing`（hooks 本来就在），
-    // 用户点「修复」→ setup 在写 config / hooks 那一步撞上 play.lock → 失败 → refresh 探测到
+    // 用户点「修复」→ setup 在写 config / hooks 那一步撞上 config.lock / settings.lock → 失败 → refresh 探测到
     // 二进制在位 + 没盖章 + 四条 hook 都在 → `.installed` → 面板切到运行态、亮绿点说「已接好」，
     // 而那条失败一个像素都没有。用户永远听不到一声响。
     //

@@ -82,8 +82,12 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
     /// renames the helper binary, which is precisely when it must be loud.
     case unsweepableBinaryPath(path: String)
     /// The on-disk `settings.json` changed between when this operation read it and when it was
-    /// about to write, so another writer (Claude Code itself, the GUI, an editor) edited it
-    /// concurrently. Rather than clobber that edit in a file `uninstall` keeps no backup of, the
+    /// about to write, so another writer edited it concurrently — one that does not take
+    /// `settings.lock`: Claude Code itself, or the user's editor. (**Not** the GUI: it writes
+    /// settings.json only through ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``
+    /// / ``uninstallClaudioHooks(settingsFile:claudioRoot:lockFile:)``, under the same
+    /// `settings.lock` this helper takes — so it serializes with us rather than racing us.)
+    /// Rather than clobber that edit in a file `uninstall` keeps no backup of, the
     /// write is aborted so the caller can retry against the fresh contents.
     case concurrentModification(path: String)
 
@@ -102,7 +106,7 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
                 + "（根之下只允许不含 shell 元字符的普通路径段，且文件名必须正好是 claudio）："
                 + "\(path)——已中止，未修改 settings.json"
         case .concurrentModification(let path):
-            "settings.json 在本次读取与写入之间被其他程序修改（Claude Code / GUI / 编辑器），"
+            "settings.json 在本次读取与写入之间被其他程序修改（Claude Code 自己，或你的编辑器），"
                 + "为避免覆盖对方的改动已中止（未修改文件），请重试：\(path)"
         }
     }
@@ -568,11 +572,20 @@ private func atomicWrite(
     root: [String: Any], to settingsFile: URL, expectedCurrentData: Data?
 ) -> Result<Void, SettingsUpdateError> {
     // Optimistic-concurrency check ([9]): settings.json has writers that do NOT honor claudio's
-    // settings.lock — Claude Code itself, the GUI, the user's editor. Re-read the bytes immediately
+    // settings.lock — Claude Code itself, and the user's editor. Re-read the bytes immediately
     // before writing; if they no longer match what this operation loaded, another writer changed
     // the file mid read-modify-write, so abort rather than clobber it — this file has no uninstall
     // backup. This shrinks the race to the microseconds between this re-read and the rename; it
     // cannot be closed fully without a lock every external writer respects (none exists).
+    //
+    // ⚠️ The GUI is NOT on that list, and listing it (as this comment did until the 阶段 A 锁分离
+    // review) is a dangerous falsehood: every GUI write to settings.json goes through
+    // `installClaudioHooks` / `uninstallClaudioHooks` — i.e. through *this* function, under
+    // `settings.lock` — because `OnboardingActionEnvironment.settingsLockFile` defaults to
+    // `ClaudioPaths.settingsLockFile` and `PanelView` never overrides it. Naming the GUI as a
+    // lock-ignoring writer invites the next person to add an unlocked settings.json write path on
+    // the GUI side ("it never honored the lock anyway") — and one clobber of this file is
+    // unrecoverable user config. helper and GUI take the SAME settings.lock. Keep it that way.
     let currentData = try? Data(contentsOf: settingsFile)
     guard currentData == expectedCurrentData else {
         return .failure(.concurrentModification(path: settingsFile.path))

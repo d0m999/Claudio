@@ -33,7 +33,7 @@ func runEventEnabledSuites() {
     suite("setEventEnabled: fresh install creates config.json with just that one flag set") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
 
             let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
             expect(
@@ -53,7 +53,7 @@ func runEventEnabledSuites() {
     suite("setEventEnabled: an existing config.json only changes the one event, everything else survives") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
                 #"""
                 { "selected_pack": "minimal-chime", "master_volume": 0.42, "events": { "notification": false } }
@@ -86,7 +86,7 @@ func runEventEnabledSuites() {
     suite("setEventEnabled: toggling back to true clears the muted state") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
                 #"{ "selected_pack": "minimal-chime", "events": { "stop": false } }"#, to: configFile)
 
@@ -104,7 +104,7 @@ func runEventEnabledSuites() {
     suite("setEventEnabled: a corrupt existing config.json aborts without overwriting it") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture("{ not valid json", to: configFile)
 
             let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
@@ -124,12 +124,12 @@ func runEventEnabledSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let original = #"{ "selected_pack": "minimal-chime", "events": { "stop": true } }"#
             writeFixture(original, to: configFile)
 
             let holder = FileLock(path: lockFile.path)
-            expect(holder.tryLock(), "test setup: holder must acquire play.lock first")
+            expect(holder.tryLock(), "test setup: holder must acquire config.lock first")
 
             let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
             expect(
@@ -154,7 +154,7 @@ func runEventEnabledSuites() {
             let original = #"{ "selected_pack": "minimal-chime" }"#
             writeFixture(original, to: configFile)
 
-            // A regular *file* occupies the path where play.lock's parent directory needs to
+            // A regular *file* occupies the path where config.lock's parent directory needs to
             // be — `FileLock`'s ENOENT self-heal (`createDirectory`) cannot turn a file into a
             // directory, so `attemptLock` surfaces a real errno via `.failed` (mirrors
             // `PlaySuite`/`FileLockSuite`'s equivalent fixtures). `.lockFailed` and `.lockBusy`
@@ -163,7 +163,7 @@ func runEventEnabledSuites() {
             let blockingFile = root.appendingPathComponent("blocking-file")
             writeFixture("not a directory", to: blockingFile)
             let unreachableLockFile =
-                blockingFile.appendingPathComponent("subdir").appendingPathComponent("play.lock")
+                blockingFile.appendingPathComponent("subdir").appendingPathComponent("config.lock")
 
             let result = setEventEnabled(
                 .stop, enabled: false, configFile: configFile, lockFile: unreachableLockFile)
@@ -185,7 +185,7 @@ func runEventEnabledSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // `FileManager.fileExists(atPath:)` answers `true` for a DIRECTORY too, so this
             // takes the "file exists" branch and then fails the `Data(contentsOf:)` read —
             // the read-failure path distinct from the decode-failure one above (they carry
@@ -206,7 +206,7 @@ func runEventEnabledSuites() {
 
     suite("setEventEnabled: a write failure is reported as .configWriteFailure, never a silent success") {
         withTempDirectory { root in
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // A regular file occupies the path where config.json's PARENT directory would have
             // to be, so `createDirectory(withIntermediateDirectories:)` in the persist step
             // throws — the `.configWriteFailure` branch (previously the only `setEventEnabled`
@@ -246,11 +246,11 @@ func runEventEnabledSuites() {
         expect(messages[3].contains("13"), "a lock failure must surface the real errno, got \(messages[3])")
     }
 
-    suite("setEventEnabled: shares play.lock with selectPack — the two calls serialize on the same lock") {
+    suite("setEventEnabled: shares config.lock with selectPack — the two calls serialize on the same lock") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let userPacks = root.appendingPathComponent("packs", isDirectory: true)
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             try? FileManager.default.createDirectory(
                 at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true),
                 withIntermediateDirectories: true)
@@ -275,7 +275,7 @@ func runEventEnabledSuites() {
         }
     }
 
-    // MARK: - 真并发写：这条 read-modify-write 新近才被纳入 play.lock（本轮 /ship 覆盖率审计 #1）
+    // MARK: - 真并发写：这条 read-modify-write 新近才被纳入 config.lock（本轮 /ship 覆盖率审计 #1）
     //
     // 之前只测过「1 个持有者 + 1 个等待者」这种锁竞争，从没有一条测试真正证明过并发写不会撕裂
     // config.json。1:1 镜像 `PlaySuite.swift` 里那条 `DispatchQueue.concurrentPerform` 压力测试
@@ -287,7 +287,7 @@ func runEventEnabledSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
                 #"""
                 { "selected_pack": "minimal-chime", "master_volume": 0.5, "night_dim": true, "events": { "stop": true } }

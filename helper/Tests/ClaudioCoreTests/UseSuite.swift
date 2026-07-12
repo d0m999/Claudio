@@ -20,7 +20,7 @@ func runUseSuites() {
 
             let result = selectPack(
                 "../evil", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             expect(
                 result == .failure(.invalidPackID("../evil")),
                 "path-traversal-shaped id must be rejected before any pack lookup, got \(result)")
@@ -37,7 +37,7 @@ func runUseSuites() {
 
             let result = selectPack(
                 "ghost-pack", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             expect(
                 result == .failure(.packNotFound("ghost-pack")),
                 "a pack id that resolves nowhere must fail with .packNotFound, got \(result)")
@@ -55,7 +55,7 @@ func runUseSuites() {
 
             let result = selectPack(
                 "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             expect(
                 result == .success(.selected(packID: "minimal-chime")),
                 "selecting an existing pack on a fresh install should succeed, got \(result)")
@@ -83,7 +83,7 @@ func runUseSuites() {
 
             let result = selectPack(
                 "new-pack", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             expect(
                 result == .success(.selected(packID: "new-pack")),
                 "switching to another existing pack should succeed, got \(result)")
@@ -110,7 +110,7 @@ func runUseSuites() {
             let result = selectPack(
                 "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
                 bundledPacksDirectory: bundledPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             expect(
                 result == .success(.selected(packID: "minimal-chime")),
                 "a pack that only exists in the bundled fallback root must still be selectable, got \(result)"
@@ -136,7 +136,7 @@ func runUseSuites() {
 
             let result = selectPack(
                 "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configWriteFailure) = result else {
                 expect(
                     false,
@@ -156,7 +156,7 @@ func runUseSuites() {
 
             let result = selectPack(
                 "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configReadFailure) = result else {
                 expect(false, "corrupt config.json must fail with .configReadFailure, got \(result)")
                 return
@@ -174,18 +174,20 @@ func runUseSuites() {
         withTempDirectory { root in
             // Regression test: before this fix, selectPack had no lock at all — two
             // concurrent writers could race on config.json's read-modify-write and one
-            // update would silently vanish. Now it shares `play.lock`/`settings.json`'s
-            // lock (same pattern as `installClaudioHooks`); contention must surface as a
-            // real, distinct error, never a silent no-op reported as success.
+            // update would silently vanish. It now takes `config.lock`, which it shares
+            // with the only other config.json writer (`setEventEnabled`) and with nobody
+            // else — deliberately NOT `settings.json`'s lock, and deliberately NOT
+            // `play`'s debounce lock (阶段 A 锁分离). Contention must surface as a real,
+            // distinct error, never a silent no-op reported as success.
             let configFile = root.appendingPathComponent("config.json")
             let userPacks = root.appendingPathComponent("packs", isDirectory: true)
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             makePackDirectory(at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true))
             writeFixture(
                 #"{ "selected_pack": "old-pack", "master_volume": 0.3 }"#, to: configFile)
 
             let holder = FileLock(path: lockFile.path)
-            expect(holder.tryLock(), "test setup: holder must acquire play.lock first")
+            expect(holder.tryLock(), "test setup: holder must acquire config.lock first")
 
             let result = selectPack(
                 "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,

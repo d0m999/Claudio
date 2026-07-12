@@ -43,6 +43,24 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 **Priority:** P2
 **Depends on:** None
 
+### 升级根本不换 helper —— `~/.claudio/bin/claudio` 永久停在用户第一次安装的那个版本
+
+**What:** `detectOnboardingState` 判 `.installed` 时**不做任何版本比对**：二进制「在位 + 可执行 + 没被盖章」+ 四条 hook 在 `settings.json` 里 → `.installed`（`OnboardingDetector.swift:45` 的 `isRunnableHelperBinary` + `:74` 的 `detectHookInstallStatus`）。而 helper 二进制**只在 `performFirstRunSetup` 里被复制**，那条路径**只从 takeOver / 修复 CTA 出发，而那颗按钮只在 `.notInstalled` / `.helperMissing` 时渲染**。合起来：**一个已经装好的用户，无论把 app 升级多少次，`~/.claudio/bin/claudio` 都不会被换掉一次。**
+
+**Why:** 这不是「锁分离的一个副作用」，锁分离只是**第一个撞上这堵墙的东西**（见本文件「升级窗口」那条 P3 —— 它是这个洞的一个**实例**，不是这个洞本身）。真正的形状是：**从今往后每一个 helper 修复，都送不到任何一个老用户手里，而且是静默的。** `play` 的 bug、`doctor` 的误报、一个安全修复、一次 hook 命令格式变更 —— 用户升级了 app、看见新 UI、以为自己拿到了修复，而磁盘上跑的还是他半年前装的那个 helper。**app 的版本号和真正执行 Claude Code 事件的那个二进制的版本号，从来没有被任何东西绑在一起。**
+
+这也是它比「升级窗口」那条 P3 严重得多的原因：那条的血溅半径是「丢一次设置更新、下次点一下就好」，这条的血溅半径是「**所有 helper 侧修复的投递率 = 0**」。
+
+**Context:** 2026-07-13 `/codex review 803c639,b74b7f3`。Codex 把它当成锁竞态的**前提**报了 P1，Claude 侧的三个对抗性反驳者则因为「锁那个实例血溅半径小」把整条否掉了 —— **两边都只看见了当期弹药，没看见那门炮**。此前它在本文件里**只作为「升级窗口」那条 P3 的一句论据存在**（「helper 二进制只在 `performFirstRunSetup` 里刷新」），从未被单独立项。
+
+**今天还没有真实受害者**：`git tag -l` 为空，Claudio 一次版都没发过，所以「持有旧 helper 的用户」这个群体尚不存在。**但它在第一次发版的那一刻就开始积累** —— 首个 release 的用户装下的那份 helper，就是他这辈子唯一一份，除非他手动删掉 `~/.claudio/bin/claudio`。**这条必须在首发之前修，之后再修就得处理存量。**
+
+**可能的修法**（未定）：① 给装下的二进制打版本戳（`~/.claudio/bin/.version`，或直接跑 `claudio --version` 比对 bundle 里那份），不一致就重新复制 —— 复制那一步已经是幂等的（T17e 的原子复制），接上探测即可；② 更狠也更简单：app 每次启动都把 bundle 里的 helper 与 `~/.claudio/bin/claudio` 比一次内容哈希，不同就覆盖 —— 反正 bundle 里那份**永远**是这个 app 版本该配的那份，没有「用户自己换了个 helper」这种合法情形需要保护。②看起来明显更对，但它会让每次启动多一次读盘，且要想清楚「正在被 `claudio play` 执行的二进制被覆盖」的语义（macOS 上覆盖一个正在执行的文件要用 rename，不能 write-in-place）。
+
+**Effort:** M
+**Priority:** P1（首发前必修 —— 发版之后再修就得面对存量旧 helper）
+**Depends on:** None
+
 ## Ship / CI
 
 ### ~~`play.lock` 被 config / settings 写者共用 —— 任何一次设置写都可能静默吞掉一声提示音~~ ✅ 2026-07-12 阶段 A 已修
@@ -98,8 +116,10 @@ settings.json），但**回归时没有灯会灭**。
 **Context:** 2026-07-12 阶段 A 侦察 S4 + Codex #6 更正。真修 = config 写路径加**乐观并发重读** —— 与 `config.json`
 写路径缺 symlink 解析那条（本文档「GUI 写/读路径的同用户 symlink TOCTOU」）是同一处加固，建议合并处理。
 
+**⚠️ 这一条是一个更大的洞的实例，不是那个洞本身**（2026-07-13 `/codex review 803c639,b74b7f3` 更正）：真正的根因是**升级根本不换 helper**（见「静默失败」段落里那条 P1）—— 锁分离只是第一个撞上它的东西。把根因修了，这一条自然消失；只修这一条（给 config 写路径加乐观并发重读）是**对的加固**，但它盖不住下一个撞上同一堵墙的 helper 修复。**两条一起看，别把这条的 P3 当成那条的定级。**
+
 **Effort:** M
-**Priority:** P3（需要用户在旧 CLI `claudio use` 与新 GUI 之间并发写）
+**Priority:** P3（需要用户在旧 CLI `claudio use` 与新 GUI 之间并发写；**根因那条是 P1**）
 **Depends on:** None
 
 ### CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0
@@ -504,7 +524,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Context:** 2026-07-11 `/ship` plan-completion 审计发现；同日 `/plan-eng-review`（四段 + Codex 外部声音）产出锁死方案，**并推翻了本条原有的两句修法**：
 
 - ~~「DESIGN.md 已定义其视觉」~~ —— **假的**。DESIGN.md 全文 grep `滑块|slider|轨道|track|thumb|拨杆` **零命中**，滑块长什么样从来没人定过。而 macOS 原生 `Slider` 的填充色默认跟**系统强调色**（用户在系统设置里选的），会把一个设计系统外、且 claudio 控制不了的颜色带进面板 —— 直接违反 DESIGN.md「品牌强调只有一个（黏土）」与 `DesignTokens.swift:17`「不得新增 DESIGN.md 里没有的颜色」。
-- ~~「第三个写者照抄即可」~~ —— **照抄就是 bug**。`setEventEnabled` 拿的是 `play.lock`（见本文件第一条 P1），逐帧写盘会把「吞掉提示音的窗口」开成一片。
+- ~~「第三个写者照抄即可」~~ —— **照抄就是 bug**，但**理由已经换了一条**（⚠️ 2026-07-12 阶段 A 锁分离后更正；原文写的是「`setEventEnabled` 拿的是 `play.lock`，逐帧写盘会把『吞掉提示音的窗口』开成一片」—— 那句话现在是**假的**：`setEventEnabled` 与 `selectPack` 拿的是 `config.lock`，`play` 拿 `play.lock`，逐帧写 config **再也吞不掉提示音了**）。真正的理由是另外两条，且都还站着：① 主音量是**第三个 `config.lock` 写者**，逐帧写盘会让它与切包 / 静音**互相**撞 `.lockBusy`（`withNonBlockingLock` 是**非阻塞**的：撞上就是 `.skipped`，不是排队等），拖一次滑块就能让用户同时点的静音假失败；② 该值没有实时消费者，逐帧写盘是纯成本。**结论（松手才写）不变，别顺着那条死掉的 `play.lock` 论据把它推翻。**
 
 **锁死的方案（14 项决议，全文见 `/plan-eng-review` 产出）要点：**
 - **松手才写**（`Slider(onEditingChanged:)`）—— 该值没有实时消费者（`claudio play` 每次 spawn 重读 config），拖动中间值无人可见，逐帧写盘是纯成本。ENGINEERING.md 交互状态覆盖表的「拖动即时改 config」需改为「松手即时落盘」并记理由。

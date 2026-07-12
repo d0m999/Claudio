@@ -31,7 +31,7 @@ func runHookStatusSuites() {
     suite("detectHookInstallStatus: freshly installed by installClaudioHooks reads back as .installed") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
 
             let installResult = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -179,7 +179,7 @@ func runHookStatusSuites() {
     suite("detectHookInstallStatus: uninstalling drops back to .notInstalled") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
 
             let installResult = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -208,7 +208,7 @@ func runHookStatusSuites() {
     suite("detectHookInstallStatus: a different claudio binary path's hooks do not count as installed") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let staleBinaryPath = "/Users/tester/.claudio-OLD/bin/claudio"
 
             let installResult = installClaudioHooks(

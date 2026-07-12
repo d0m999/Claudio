@@ -383,7 +383,7 @@ public enum OnboardingActionError: Error, Sendable, Equatable {
             "没找到 Claudio 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 Claudio 再试一次。"
         // 刻意**不**承诺「没有留下半成品」（T17c 对抗评审 —— 上一版这么写，而那是假话）。
         // `performFirstRunSetup` 的顺序是：复制二进制 → 复制包 → 解隔离+回验 → 写 config → 写 hooks。
-        // 最常见的失败点（`.installFailure`，包括 `play.lock` 争用）发生时，二进制、内置包、config.json
+        // 最常见的失败点（`.installFailure`，包括 `settings.lock` 争用）发生时，二进制、内置包、config.json
         // 都**已经在磁盘上了**。一个以「不撒谎」立身的产品，不能在它唯一一次报告失败的时候撒谎。
         // 能诚实承诺的是另一件事，而且它更有用：setup 是幂等的，再点一次会接着上次继续。
         case .setupFailed:

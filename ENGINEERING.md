@@ -603,7 +603,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
   **④ 【逐事件绑定的 packID TOCTOU】（Codex [P2]）**：用户在某行开始导入后、异步完成前切了包，`PanelView.refresh()` 会改写 `importViewModel.packID` → 文件已经复制进**原来**的包，绑定却写到**切换后**的包。变异测试证明它**不是报错，是真的静默改错了另一个包的 `manifest.json`**。已修：改用**导入时捕获的 `file.packID`**，绝不跨 `await` 重读 `@Published` 状态。
 
-  **⑤ 【三处静默吞错】**（多个评审独立命中，且直接违反项目自己写在 `Use.swift:54` 的规则「never a silent no-op reported as success」）：`bindResult` / `EventMuteController.lastError` / `switchPack` 的 `UseError` —— 全都**写了但没有任何视图读**。其中 `.lockBusy` **真会发生**：`setEventEnabled` 和 `claudio play` 抢同一把 `play.lock`，而**每个 Claude Code 事件都会 spawn 一次 `claudio play`**。已全部接上错误呈现。修的过程中还发现一条：**内层 `AudioImportViewModel` 的 `@Published` state 不会穿过外层 `EventRowImportViewModel` 传播**——所以即便天真地"把 `bindResult` 读出来显示"，导入被拒那条路径**照样不刷新视图**，必须额外挂一个 `@ObservedObject`。
+  **⑤ 【三处静默吞错】**（多个评审独立命中，且直接违反项目自己写在 `Use.swift:54` 的规则「never a silent no-op reported as success」）：`bindResult` / `EventMuteController.lastError` / `switchPack` 的 `UseError` —— 全都**写了但没有任何视图读**。其中 `.lockBusy` **真会发生**（⚠️ 2026-07-12 阶段 A 锁分离后，**这一条的理由已经失效，结论仍然成立**：当时写的是「`setEventEnabled` 和 `claudio play` 抢同一把 `play.lock`，而每个 Claude Code 事件都会 spawn 一次 `claudio play`」—— 分锁之后 `setEventEnabled` 拿 `config.lock`、`play` 拿 `play.lock`，两者**结构上不再相撞**。但 `.lockBusy` **依然真会发生**，只是换了对手：另一个 `config.json` 写者 —— 切包（`selectPack`）、以及接管路径里的 `performFirstRunSetup`。所以「必须渲染 `.lockBusy`、绝不静默吞掉」这条决议**一个字都不用改**）。已全部接上错误呈现。修的过程中还发现一条：**内层 `AudioImportViewModel` 的 `@Published` state 不会穿过外层 `EventRowImportViewModel` 传播**——所以即便天真地"把 `bindResult` 读出来显示"，导入被拒那条路径**照样不刷新视图**，必须额外挂一个 `@ObservedObject`。
 
   **⑥ 【`fileExists` 不辨目录】（Codex [P2]，真的、当下就能触发；此前已挂在 TODOS）**：一个名叫 `stop.mp3` 的**目录**会让包报 `complete`、`doctor` 通过、`play` 报"已播放"——实际**没有声音**。已修：`regularFileExists`（`stat` + `S_IFREG`）。**注意用 `stat` 而非 `lstat`**——包内指向包内真实文件的**合法 symlink 必须仍判为 present**。三个判定点（`play` / `doctor` / GUI 三态）同源。
 
@@ -651,7 +651,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
   **⑭ 【设计 · 已拍板】** DESIGN.md 自己登记的「待拍板」冲突落地：亮色 clay `#C4633C` 对 panel `#FFFDF8` = **3.97:1**，过非文字的 ≥3:1、**不过**正文的 ≥4.5:1，而 drop-zone 那条又要求 hover 时**文字**转黏土。取 DESIGN.md 自己标的推荐解法：**hover 反馈只由边框 + `clay-soft` 底承载，文案恒为 `text-2`**。零品牌成本——clay 的色值一个字没动，`Notification` 的视觉身份也没动。**「品牌强调唯一 = 黏土」这条不为任何单一状态开色值的口子。**
 
-  **⑮ 【回归缺口】** 覆盖率审计点名整个 diff 唯一的 REGRESSION GAP：`setEventEnabled` 的读-改-写在本分支**新**被纳入 `play.lock`（此前无锁），却只测了锁竞争、没有真并发写测试。已照 `PlaySuite` 现成的 `concurrentPerform` 形状补上。
+  **⑮ 【回归缺口】** 覆盖率审计点名整个 diff 唯一的 REGRESSION GAP：`setEventEnabled` 的读-改-写在本分支**新**被纳入 `play.lock`（此前无锁），却只测了锁竞争、没有真并发写测试。已照 `PlaySuite` 现成的 `concurrentPerform` 形状补上。（⚠️ 2026-07-12 阶段 A 锁分离后：`setEventEnabled` 现在拿的是 `config.lock`，**不再是** `play.lock`。上面这句话是它写下时的事实，保留作历史记录；今天读它的人请以 `EventEnabled.swift:63` 的默认值为准 —— 那个默认值现在由 `LockSeparationSuite` 的源码绊线钉住。）
 
   **这一轮的教训（写下来是为了下一轮不再交这个学费）**：一个 diff 建了一道闸门（`readRegularFileBounded`）、写了很长的注释论证它为什么必要——**然后只把它用在了发现问题的那一个文件上**。⑩⑪ 两条都是这个形状：正确的解法就在同一个 commit 里，只是没有被推到所有同类调用点。**下次给某个「形状」建闸门时，第一件事是 grep 出这个形状的全部调用点，而不是修好手头这一个。**
 

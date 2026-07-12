@@ -203,7 +203,7 @@ func runOnboardingViewModelSuites() async {
         }
     }
 
-    await suite("重入守卫：动作跑到一半时的点击被丢弃（否则两个 setup 抢同一把 play.lock）") {
+    await suite("重入守卫：动作跑到一半时的点击被丢弃（否则两个 setup 抢同一把 config.lock / settings.lock）") {
         await withTempDirectory { root in
             let environment = makeReadyEnvironment(in: root)
             let runner = ScriptedRunner()
@@ -219,8 +219,9 @@ func runOnboardingViewModelSuites() async {
             await viewModel.performPrimaryAction()
             expect(
                 runner.calls == [.takeOver],
-                "in-flight 期间的点击必须被丢弃 —— 两个 performFirstRunSetup 抢同一把 play.lock，其中一个"
-                    + "必然拿到 .lockBusy，用户会看到一条**他自己制造出来的**假失败。得到 \(runner.calls)")
+                "in-flight 期间的点击必须被丢弃 —— 两个 performFirstRunSetup 会抢同一把 config.lock"
+                    + "（selectPack）与同一把 settings.lock（installClaudioHooks），其中一个必然拿到 "
+                    + ".lockBusy，用户会看到一条**他自己制造出来的**假失败。得到 \(runner.calls)")
 
             runner.openGate()
             await first.value
