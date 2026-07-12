@@ -86,7 +86,9 @@ enum ClaudioColor {
     /// `clay-soft` — DESIGN.md 写作 `rgba(217,119,87,.15)` / `rgba(196,99,60,.12)`，即 `clay`
     /// 本身带透明度（通道值与 ``clay(_:)`` 逐位相同，不是另一个颜色），所以这里直接由 ``clay(_:)``
     /// 派生，而不是抄一份通道数字。仅用于 drop-zone 的 hover 底（T8; DESIGN.md「拖入 drop-zone」:
-    /// "hover 命中 → 边框 / 文字转黏土 + `clay-soft` 底"）。
+    /// "hover 命中 → **边框**转黏土 + `clay-soft` 底，**文案保持 `text-2` 不变**" —— 2026-07-11
+    /// `/ship` 拍板解法 1 后的现行文；旧文「边框 / 文字转黏土」已被推翻，勿再引用，见
+    /// PLAN-MASTER-VOLUME D46）。
     static func claySoft(_ scheme: ColorScheme) -> Color {
         clay(scheme).opacity(scheme == .dark ? 0.15 : 0.12)
     }
