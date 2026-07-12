@@ -148,7 +148,7 @@ func runViewWiringSuites() {
         expect(
             panel.contains("onboardingVisibleFailure(actionState:"),
             "运行态面板必须渲染任何失败，不只是断开的 —— 一次接管失败完全可能在 refresh() 之后落在"
-                + " .installed（点「修复」→ 撞上 play.lock → 失败，但二进制和 hooks 都在位），"
+                + " .installed（点「修复」→ 撞上 config.lock / settings.lock → 失败，但二进制和 hooks 都在位），"
                 + "那时 onboarding 卡根本不在屏幕上。上一版这里只认 branch: .disconnect，"
                 + "于是那条失败一个像素都没有：绿点、静音、零诊断")
 
@@ -374,6 +374,49 @@ func runViewWiringSuites() {
             !panel.contains("playLockFile"),
             "PanelView 里出现了 playLockFile —— 它不写 play.state、不参与去抖，"
                 + "碰 play 的锁只会重新把提示音吞掉")
+    }
+
+    suite("MenuBarController 构造 PanelView 时不许传 lockFile —— 上面那个默认值的唯一活路") {
+        // 上面那条 suite 的头部注释里写着一句话：「MenuBarController.swift 是全仓唯一的
+        // `PanelView(` 构造点，且不传 `lockFile`」。**那是一个被写进注释的事实，而这个仓库
+        // 自己的规矩是：该断言的地方不许放注释**（`/codex review 803c639,b74b7f3` 的完整性
+        // 复查逮到的就是这一条）。
+        //
+        // 它为什么必须是断言：`PanelView.lockFile` 是 `public` 的 init 参数，它存在的**唯一**
+        // 理由就是注入。任何一次「把锁/环境从 AppKit 外壳往下穿」的重构（主音量那一行、第二个
+        // popover、一个测试接缝）都会**自然而然**开始传它。而一旦这里传进 `ClaudioPaths.playLockFile`：
+        //
+        //   PanelView.lockFile → EventMuteController（静音写 config.json）
+        //                      → selectPack（切包写 config.json）
+        //                      → OnboardingActionEnvironment.configLockFile（接管写 config.json）
+        //
+        // 三个 GUI config 写者**同时**回到 play.lock 上。而上面那条 suite 只读 `PanelView.swift`：
+        // 默认值声明没动、两条转发没动、`!contains("playLockFile")` 也没动 —— **1604 条全绿**。
+        // 用户可见后果与默认值写错一模一样：点静音又吞一次提示音。
+        //
+        // 这是 D20 那条教训（「GUI 是显式向下传参的，改默认值挡不住调用点」）在**上一层**的复发：
+        // 阶段 A 给 PanelView 的默认值上了绊线，却把**调用点**的行为记成了一句散文。
+        guard let controller = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift") else {
+            expect(false, "读不到 MenuBarController.swift")
+            return
+        }
+
+        // 先证明前提还成立：这里确实还有一个 `PanelView(` 构造点。若哪天它搬走了，这条断言
+        // 会退化成一句恒真的空话 —— 与其静默失效，不如当场红给人看。
+        let constructionSites = controller.components(separatedBy: "PanelView(").count - 1
+        expect(
+            constructionSites == 1,
+            "MenuBarController 里应当正好有 1 个 `PanelView(` 构造点，实际 \(constructionSites) 个 —— "
+                + "这条 suite 与它上面那条（PanelView 的 lockFile 默认值）都建立在「全仓唯一构造点、"
+                + "且走默认值」这个前提上。前提变了，两条断言的保护范围就都变了，必须重新想")
+
+        expect(
+            !controller.contains("lockFile"),
+            "MenuBarController 在构造 PanelView 时传了 `lockFile` —— 这会绕过 PanelView 那个"
+                + "唯一活着的默认值（= config.lock），把静音、切包、接管三个 config.json 写者"
+                + "一起送回它调用点指定的那把锁上。传 playLockFile = 阶段 A 的分锁当场失效，"
+                + "而 PanelView.swift 一个字都不用改，整套 GUI 测试照样全绿。"
+                + "GUI 的锁只有一个来源：PanelView 的默认值")
     }
 
     suite("MenuBarController：popover 关闭必须发出隐藏信号，而且必须在那句会提前 return 的 guard 之前（T17d）") {
