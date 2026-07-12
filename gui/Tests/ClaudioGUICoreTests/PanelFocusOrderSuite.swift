@@ -35,7 +35,8 @@ func runPanelFocusOrderSuites() {
 
     suite("panelFocusOrder: operational — each row contributes action THEN mute, in Event.allCases order (follows visual left-to-right order)") {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: []))
-        let expected: [PanelFocusTarget] = Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.dropZone]
+        let expected: [PanelFocusTarget] =
+            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.dropZone, .disconnect]
         expect(order == expected, "got \(order)")
     }
 
@@ -56,16 +57,20 @@ func runPanelFocusOrderSuites() {
         let rowCount = Event.allCases.count * 2
         expect(dropZoneIndex == rowCount, "dropZone must sit right after all row controls, got index \(dropZoneIndex)")
         expect(
-            order[(dropZoneIndex + 1)...].elementsEqual([.packCard(id: "alpha-pack"), .packCard(id: "zeta-pack")]),
-            "gallery cards must follow the drop zone in their given order, got \(order)")
+            order[(dropZoneIndex + 1)...].elementsEqual([
+                .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"), .disconnect,
+            ]),
+            "gallery cards must follow the drop zone in their given order, and 断开连接 sits last"
+                + " (it is the bottom-most control — focus order tracks visual order), got \(order)")
     }
 
-    suite("panelFocusOrder: operational — total count is 2×events + dropZone + cards") {
+    suite("panelFocusOrder: operational — total count is 2×events + dropZone + cards + disconnect") {
         let order = panelFocusOrder(
             .operational(events: Event.allCases, packCardIDs: ["a", "b", "c"]))
+        // +1 dropZone, +3 cards, +1 断开连接（T17）
         expect(
-            order.count == Event.allCases.count * 2 + 1 + 3,
-            "expected \(Event.allCases.count * 2 + 1 + 3) items, got \(order.count)")
+            order.count == Event.allCases.count * 2 + 1 + 3 + 1,
+            "expected \(Event.allCases.count * 2 + 1 + 3 + 1) items, got \(order.count)")
     }
 
     suite("panelFocusOrder: onboarding vs operational produce structurally different orders") {
@@ -79,9 +84,11 @@ func runPanelFocusOrderSuites() {
             "onboarding's order must never contain an operational-only target")
     }
 
-    suite("panelFocusOrder: an empty operational panel (no cards) still ends at the drop zone") {
+    suite("panelFocusOrder: an empty operational panel (no cards) still ends at the drop zone + 断开连接") {
         let order = panelFocusOrder(.operational(events: [], packCardIDs: []))
-        expect(order == [.dropZone], "with zero rows and zero cards, only the drop zone remains, got \(order)")
+        expect(
+            order == [.dropZone, .disconnect],
+            "with zero rows and zero cards, only the drop zone and 断开连接 remain, got \(order)")
     }
 
     // MARK: - panelFirstFocusTarget (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项" — the
@@ -117,7 +124,8 @@ func runPanelFocusOrderSuites() {
         // still a Tab STOP in the full order (AppKit's key-loop skips disabled NSViews itself; the
         // per-row stop count stays stable). Pin the exact order so a shrink would fail here.
         let fullOrder = panelFocusOrder(scope)
-        let expected: [PanelFocusTarget] = Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.dropZone]
+        let expected: [PanelFocusTarget] =
+            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.dropZone, .disconnect]
         expect(fullOrder == expected, "the full order (incl. the disabled action) must be unchanged, got \(fullOrder)")
         expect(fullOrder.contains(.eventAction(first)), "the disabled action must remain a Tab stop")
         // Half B — the SAME event, marked non-operable, is skipped for OPENING focus only.
@@ -259,5 +267,38 @@ func runPanelFocusOrderSuites() {
         expect(
             panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"]) == .dropZone,
             "an operational panel always contains the drop zone, so opening focus is never nil")
+    }
+}
+
+// MARK: - T17: a CTA that is mid-flight cannot hold focus
+
+@MainActor
+func runPanelFocusInFlightSuites() {
+    suite("panelFirstFocusTarget: 动作跑到一半时，禁用的 CTA 不能拿首焦点（onboarding）") {
+        let scope = PanelFocusScope.onboarding(hasPrimaryAction: true, hasSecondaryAction: true)
+
+        expect(
+            panelFirstFocusTarget(scope, ctaOperable: true) == .onboardingPrimaryAction,
+            "空闲时首焦点当然是主 CTA")
+        expect(
+            panelFirstFocusTarget(scope, ctaOperable: false) == nil,
+            "in-flight 期间两颗 CTA 都 .disabled —— 焦点不能停在一个已经死掉的控件上。"
+                + "键盘用户在「接管」上按完空格之后，caret 必须有人接管，而不是悬在那儿")
+    }
+
+    suite("panelOpeningFocus: 断开跑到一半时，禁用的「断开连接」不能拿首焦点（operational）") {
+        let rows = Event.allCases.map { event in
+            EventRow(event: event, coverage: .unmapped, enabled: true)
+        }
+        // 全 unmapped：每行的 action 槽是永远可操作的导入入口，所以首焦点仍是第一行。
+        expect(
+            panelOpeningFocus(rows: rows, packCardIDs: [], ctaOperable: false)
+                == .eventAction(Event.allCases[0]),
+            "operational 面板里首焦点本来就不是断开连接，禁用它不该改变这一点")
+
+        // 极端情形：没有事件行、没有包卡 —— 唯一的候选就是 dropZone 与 disconnect。
+        expect(
+            panelOpeningFocus(rows: [], packCardIDs: [], ctaOperable: false) == .dropZone,
+            "断开被禁用时，焦点该落在仍然可操作的拖入区上")
     }
 }

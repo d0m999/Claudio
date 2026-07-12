@@ -17,7 +17,7 @@ import Foundation
 // `EventMuteControllerSuite.swift`, `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
 // `ContrastHexParsingSuite.swift`,
 // `PanelTypeSizeSuite.swift`, `PanelConfigSuite.swift`, `PanelFocusCoordinatorSuite.swift`,
-// `PreviewFixturesSuite.swift`).
+// `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`).
 
 var totalChecks = 0
 var failures = 0
@@ -55,7 +55,17 @@ func suite(_ name: String, _ body: @MainActor () async -> Void) async {
 runOnboardingStateSuites()
 runOnboardingCopySuites()
 runOnboardingDetectorSuites()
-runOnboardingViewModelSuites()
+await runOnboardingViewModelSuites()
+await runOnboardingViewModelDetailSuites()
+await runOnboardingFailureLifecycleSuites()
+await runSetupNoticeLifecycleSuites()
+await runPanelAnnouncementLifecycleSuites()
+runOnboardingActionsSuites()
+runOnboardingActionsFixSuites()
+runSetupNoticeSuites()
+runPanelAnnouncementSuites()
+runReleaseLayoutSuites()
+runViewWiringSuites()
 runAudioFormatSniffSuites()
 runAudioImportSuites()
 runAudioImportBatchSuites()
@@ -65,6 +75,7 @@ await runManifestBindingSuites()
 runPackGallerySuites()
 runEventMuteControllerSuites()
 runPanelFocusOrderSuites()
+runPanelFocusInFlightSuites()
 runContrastSuites()
 runContrastHexParsingSuites()
 runPanelTypeSizeSuites()

@@ -29,6 +29,7 @@
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     OnboardingGalleryView()
+                    OnboardingActionGalleryView()
                     DropZoneGalleryView()
                     EventRowGalleryView()
                     PackCardGalleryView()
@@ -61,11 +62,74 @@
     /// mirroring `PanelView`'s real `focusedTarget` ownership at a per-frame scale.
     private struct OnboardingStateFrame: View {
         let state: OnboardingState
+        /// T17: the CTA's own state, pinned alongside `state` (both are `#if DEBUG` preview-init
+        /// parameters). `.idle` for the six plain ``OnboardingState`` frames.
+        var actionState: OnboardingActionState = .idle
         @FocusState private var focusedTarget: PanelFocusTarget?
 
         var body: some View {
-            OnboardingView(viewModel: OnboardingViewModel(previewState: state), focusedTarget: $focusedTarget)
-                .frame(width: CGFloat(standardPanelWidth))
+            OnboardingView(
+                viewModel: OnboardingViewModel(previewState: state, actionState: actionState),
+                focusedTarget: $focusedTarget
+            )
+            .frame(width: CGFloat(standardPanelWidth))
+        }
+    }
+
+    // MARK: - OnboardingActionState (T17: the CTA's own state — in-flight / failed)
+
+    /// The two visual states T17 introduces — a CTA that is RUNNING (disabled + spinner + a
+    /// changed label) and a CTA that FAILED (a rejection row, optionally with a 「查看原因」
+    /// disclosure). Without this section they would be the first states in the repo that no frame
+    /// of the 视觉真相源 has ever rendered — in either theme — while `assertExhaustive()` stayed
+    /// green, because `onboardingStates` still covers its own six cases perfectly.
+    ///
+    /// Rendered against `.notInstalled` (the state a first-run user actually presses 接管 from),
+    /// except `.running(.disconnect)` which only exists in `.installed`.
+    struct OnboardingActionGalleryView: View {
+        var body: some View {
+            GallerySection(
+                title: "OnboardingActionState (\(PreviewFixtures.onboardingActionStates.count))"
+            ) {
+                ForEach(
+                    Array(PreviewFixtures.onboardingActionStates.enumerated()), id: \.offset
+                ) { _, actionState in
+                    GalleryFrame(caption: onboardingActionStateCaption(actionState)) {
+                        OnboardingStateFrame(
+                            state: hostState(for: actionState), actionState: actionState)
+                    }
+                }
+            }
+        }
+
+        /// 哪个 ``OnboardingState`` 承载这一帧。`.running(.disconnect)` 只可能发生在 `.installed`
+        /// （断开是它的次 CTA）；`.reported` 同理 —— 告知只从一次**成功的接管**而来，而成功必然让
+        /// `refresh()` 把 state 推成 `.installed`（T17f）。其余都用 `.notInstalled` —— 新用户真正
+        /// 按下「接管」的那个状态。
+        ///
+        /// ⚠️ **诚实标注**：这一帧渲染的是 `OnboardingStateFrame` → `OnboardingView`，而真机上
+        /// `.installed` 渲染的是 `PanelView` 的运行态面板 —— 也就是说画廊在这里展示的是告知行的
+        /// **长相**（字形 / 颜色 / 断行 / Dynamic Type），不是它**真实的落位**。`.running(.disconnect)`
+        /// 早就有同一条错位，本次没有引入新的债。真实落位由 `ViewWiringSuite` 的两条文本绊线守着
+        /// （两个渲染点都必须调 `onboardingVisibleNotices`）。
+        private func hostState(for actionState: OnboardingActionState) -> OnboardingState {
+            if case .running(.disconnect) = actionState { return .installed }
+            if case .reported = actionState { return .installed }
+            return .notInstalled
+        }
+    }
+
+    private func onboardingActionStateCaption(_ state: OnboardingActionState) -> String {
+        switch state {
+        case .idle: ".idle"
+        case .running(.takeOver): ".running(.takeOver) × .notInstalled"
+        case .running(.disconnect): ".running(.disconnect) × .installed"
+        case .failed(let action, _, let detail):
+            detail == nil
+                ? ".failed(\(action), detail: nil) × .notInstalled"
+                : ".failed(\(action), detail: …) × .notInstalled（可展开）"
+        case .reported(let notices):
+            ".reported(\(notices.count) 条) × .installed —— 我替你做了主"
         }
     }
 

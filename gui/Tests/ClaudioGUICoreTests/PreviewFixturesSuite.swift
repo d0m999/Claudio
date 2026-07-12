@@ -30,12 +30,26 @@ func runPreviewFixturesSuites() {
     // the complete expected roster: a fixture array that stops covering one of its enum's cases
     // (a case whose `switch` branch exists but is never REACHED — which compiles perfectly)
     // turns this red.
-    suite("PreviewFixtures.assertExhaustive() visits every case of all four state families") {
+    suite("PreviewFixtures.assertExhaustive() visits every case of all FIVE state families") {
         let visited = PreviewFixtures.assertExhaustive()
         let expected: Set<String> = [
             "onboarding.claudeCodeNotInstalled", "onboarding.helperMissing",
             "onboarding.settingsNotWritable", "onboarding.settingsParseFailure",
             "onboarding.notInstalled", "onboarding.installed",
+            // T17 —— 第五族：CTA 动作自身的状态。少了它，「进行中的 CTA」与「失败的 CTA」这两个
+            // 新视觉态**从来不会被任何一帧渲染**，而这条断言仍然全绿（因为 onboardingStates 依然
+            // 完美覆盖它自己那六个 case）——正是 /ship 收口记录 ③ 那次翻车的形状。
+            "onboardingAction.idle",
+            "onboardingAction.running.takeOver", "onboardingAction.running.disconnect",
+            "onboardingAction.failed.withDetail", "onboardingAction.failed.noDetail",
+            // T17f —— 「我替你做主」的告知。三个变体各渲染出不同的东西（一行搬走 / 一行换包 /
+            // 两行叠着），所以是三个 label、三帧。**注意这份名册是唯一真正的闸门**：
+            // `assertExhaustive()` 的比较是 `visited == expected`，若我只加了 coverage 分支（编译器
+            // 强制的）而**没加 fixture**，新 label 压根不会进 `visited`，`expected` 不变 → 全绿，
+            // 而那三个视觉态一帧都没渲染过。名册与 fixture 必须同时加，缺一个就红。
+            "onboardingAction.reported.salvaged",
+            "onboardingAction.reported.repaired",
+            "onboardingAction.reported.multiple",
             "dropZone.idle", "dropZone.hover", "dropZone.success",
             "dropZone.reject.oversize", "dropZone.reject.nonWhitelistFormat",
             "dropZone.reject.pathTraversal", "dropZone.reject.overDuration",
@@ -45,7 +59,7 @@ func runPreviewFixturesSuites() {
         ]
         expect(
             visited == expected,
-            "the shipped fixtures must exercise every case of all four state families;"
+            "the shipped fixtures must exercise every case of all five state families;"
                 + " missing \(expected.subtracting(visited)), unexpected \(visited.subtracting(expected))"
         )
     }

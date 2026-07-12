@@ -62,6 +62,16 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         // pack root, so the panel's pack gallery only ever needs to look there.
         let audioEnvironment = AudioImportEnvironment(
             durationProbe: AVFoundationAudioDurationProbe())
-        menuBarController = MenuBarController(audioEnvironment: audioEnvironment)
+
+        // The ONLY `Bundle.main` in the app (T17). Everything downstream of it — is this really
+        // the helper? is it runnable? what gets copied where? — is a pure function in
+        // `ClaudioGUICore`, unit-tested against a real fixture bundle. What is left here is a
+        // single branchless token, `.main`, with no decision in it and nothing to get wrong.
+        //
+        // `nil` under `swift run ClaudioGUI` (no bundle): NOT swallowed — it travels all the way
+        // to the panel as a real `.helperUnavailable` error the moment the user presses 接管.
+        menuBarController = MenuBarController(
+            audioEnvironment: audioEnvironment,
+            bundledHelperBinary: bundledHelperBinary(in: .main))
     }
 }

@@ -67,6 +67,50 @@ public enum PreviewFixtures {
         .installed,
     ]
 
+    // MARK: - OnboardingActionState (3 cases, ENGINEERING.md T17)
+
+    /// 每一个 ``OnboardingActionState`` case —— CTA 动作本身的状态，与 ``OnboardingState`` **正交**
+    /// 的第五族。
+    ///
+    /// 它必须在这里，否则 T17 引入的两个新视觉态（进行中的 CTA = 禁用按钮 + spinner；失败的 CTA =
+    /// 一条拒绝行）**从来不会被任何一帧渲染**，而 ``assertExhaustive()`` 仍然全绿 —— 因为
+    /// `onboardingStates` 依然「穷尽」它自己那六个 case。这与 `/ship` 收口记录 ③ 逮到的那次翻车
+    /// 是同一类错：真相源自己漏了一维，没人看得见。
+    ///
+    /// `.failed` 的两份 fixture 刻意一份带 `detail`、一份不带 —— 「查看原因」这个披露入口只在
+    /// `detail != nil` 时出现，两条渲染路径都得有人看过。
+    public static let onboardingActionStates: [OnboardingActionState] = [
+        .idle,
+        .running(.takeOver),
+        .running(.disconnect),
+        .failed(
+            action: .takeOver,
+            message: "这一步没能完成，Claudio 已经停下、没有留下半成品。看看下面的原因，或者稍后再试一次。",
+            detail: "写 settings.json hooks 失败：settings.json 存在但不可写：/Users/demo/.claude/settings.json"),
+        .failed(
+            action: .takeOver,
+            message: "没找到 Claudio 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 Claudio 再试一次。",
+            detail: nil),
+        // T17f —— 第三个视觉分支：动作**成功了**，但 setup 替用户做了主。三份 fixture 各渲染出不同的
+        // 东西（一行搬走 / 一行换包 / 两行叠着），所以是三个 label、三帧。少任何一帧，那个变体就
+        // 「从来没有任何人看过」——而这正是本文件存在的全部理由。
+        //
+        // ⚠️ 文案不是这里写的：它是 `SetupNotice.message` 算出来的，与生产环境**逐字同源**。
+        // 在这儿手抄一遍好看的假句子，等于让画廊评审的是一句真机上永远不会出现的话。
+        .reported(notices: [
+            .salvagedPack(
+                packID: "wobbuffet", movedTo: "/Users/demo/.claudio/packs/wobbuffet-已搬走")
+        ]),
+        .reported(notices: [
+            .repairedDeadSelection(removed: "pikachu", selected: "minimal-chime")
+        ]),
+        .reported(notices: [
+            .salvagedPack(
+                packID: "wobbuffet", movedTo: "/Users/demo/.claudio/packs/wobbuffet-已搬走"),
+            .repairedDeadSelection(removed: "wobbuffet", selected: "minimal-chime"),
+        ]),
+    ]
+
     // MARK: - DropZoneState (ENGINEERING.md T8): idle / hover / reject×6 / success
 
     /// A representative ``ImportedAudioFile`` — the payload ``DropZoneState/success(_:)``
@@ -185,10 +229,57 @@ public enum PreviewFixtures {
     public static func assertExhaustive() -> Set<String> {
         var visited: Set<String> = []
         for state in onboardingStates { visited.insert("onboarding.\(onboardingStateCoverage(state))") }
+        for state in onboardingActionStates {
+            visited.insert("onboardingAction.\(onboardingActionStateCoverage(state))")
+        }
         for state in dropZoneStates { visited.insert("dropZone.\(dropZoneStateCoverage(state))") }
         for row in eventRows { visited.insert("coverage.\(coverageStateCoverage(row.coverage))") }
         for card in packCards { visited.insert("packCard.\(packCardStateCoverage(card.state))") }
         return visited
+    }
+
+    /// Exhaustive over every ``OnboardingActionState`` case — no `default:` — recursing into
+    /// ``OnboardingDiskAction`` for `.running` so both enums are guarded by one function
+    /// (mirrors ``dropZoneStateCoverage(_:)``'s treatment of ``DropRejectionReason``).
+    /// `.failed` splits on whether it carries a `detail`, because those are two DIFFERENT
+    /// renders: only the `detail != nil` one grows a 「查看原因」 disclosure.
+    static func onboardingActionStateCoverage(_ state: OnboardingActionState) -> String {
+        switch state {
+        case .idle: "idle"
+        case .running(let action): "running.\(onboardingDiskActionCoverage(action))"
+        case .failed(_, _, let detail): detail == nil ? "failed.noDetail" : "failed.withDetail"
+        // `.reported` 按**内容**分标签，不是笼统一个 "reported"（T17f）。这正是本文件头部那条警告
+        // 在说的事：label 是 `assertExhaustive()` 能看见的**唯一**投影，任何没编进这个字符串的
+        // payload 维度，对穷尽性检查都是隐形的。三个变体渲染出三种不同的东西（一行搬走 / 一行换包 /
+        // 两行叠着），塌成一个 label 就等于「有两种没人看过」——而它们全都塌在同一个 `Set` 里。
+        // 递归进 ``setupNoticeCoverage(_:)``，于是将来加第三种告知同样是**编译错误**。
+        case .reported(let notices):
+            "reported."
+                + (notices.count > 1
+                    ? "multiple"
+                    // 恒非空（``onboardingActionState(afterSuccess:)`` 是唯一构造入口，
+                    // `OnboardingActionsSuite` 钉死）。`?? "empty"` 不是兜底，是**绊线**：
+                    // 它一旦出现在 label 集合里，就说明那条不变式被绕过去了，roster 当场变红。
+                    : (notices.first.map(setupNoticeCoverage) ?? "empty"))
+        }
+    }
+
+    /// Exhaustive over every ``OnboardingDiskAction`` case — no `default:`. Adding a third
+    /// disk-touching CTA breaks this until it has a fixture and a gallery frame.
+    static func onboardingDiskActionCoverage(_ action: OnboardingDiskAction) -> String {
+        switch action {
+        case .takeOver: "takeOver"
+        case .disconnect: "disconnect"
+        }
+    }
+
+    /// Exhaustive over every ``SetupNotice`` case — no `default:`（T17f）。加第三种「我替你做主」
+    /// 的告知，这里会**编译红**，直到它也有 fixture、也有一帧被人真的看过。
+    static func setupNoticeCoverage(_ notice: SetupNotice) -> String {
+        switch notice {
+        case .salvagedPack: "salvaged"
+        case .repairedDeadSelection: "repaired"
+        }
     }
 
     /// Exhaustive over every ``OnboardingState`` case — no `default:`. Adding a 7th case

@@ -182,7 +182,7 @@ jobs:
           gh release create "${{ steps.ver.outputs.tag }}" \
             "dist/${{ steps.dmg.outputs.dmg_name }}" \
             --title "${{ env.APP_NAME }} ${{ steps.ver.outputs.version }}" \
-            --notes "未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点\"仍要打开\"。首次安装后菜单栏面板暂不会自动接管，需在 Terminal 跑一次 \`/Applications/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio setup\`（详见 docs/distribution.md）才能真正听到声音。"
+            --notes "未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点\"仍要打开\"。打开 Claudio，点面板里的「接管 Claude Code」即可完成安装（追加、不覆盖、自动备份）。也可在 Terminal 跑 \`/Applications/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio setup\`，两者等价（详见 docs/distribution.md）。"
 
   update-cask:
     name: Update Homebrew tap cask
@@ -221,7 +221,7 @@ jobs:
 
             postflight do
               system_command "/usr/bin/xattr",
-                             args: ["-d", "com.apple.quarantine", "#{appdir}/${{ env.APP_NAME }}.app"],
+                             args: ["-dr", "com.apple.quarantine", "#{appdir}/${{ env.APP_NAME }}.app"],
                              must_succeed: false
             end
 
@@ -230,9 +230,10 @@ jobs:
                 未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：
                 系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点"仍要打开"。
 
-                首次安装后菜单栏面板暂不会自动接管 Claude Code 的 settings.json，
-                需在 Terminal 跑一次 #{appdir}/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio setup
-                （追加、不覆盖、自动备份；详见 docs/distribution.md）才能真正听到声音。
+                打开 ${{ env.APP_NAME }}，点菜单栏面板里的「接管 Claude Code」即可 —— 它会装好放声音的
+                小助手、复制内置声音包、并追加（不覆盖、自动备份）Claude Code 的 hook 配置。
+                也可以在 Terminal 里跑 #{appdir}/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio setup，
+                两者做的是同一件事（详见 docs/distribution.md）。
               EOS
             end
           end

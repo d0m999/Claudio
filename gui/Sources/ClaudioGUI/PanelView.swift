@@ -20,6 +20,9 @@ public struct PanelView: View {
     @StateObject private var onboardingViewModel: OnboardingViewModel
     @StateObject private var muteController: EventMuteController
     @StateObject private var dropZoneViewModel: AudioImportViewModel
+    /// 「这一句刚说过」的去重器（T17g）—— 让「一趟 update pass ≤ 一条播报」在结构上成立。
+    /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
+    @StateObject private var announcer: PanelAnnouncer
     @State private var rowImportViewModels: [Event: EventRowImportViewModel]
     @State private var config: ClaudioConfig
     @State private var eventRows: [EventRow]
@@ -61,13 +64,20 @@ public struct PanelView: View {
 
     // MARK: - Reduced motion / reduced transparency (ENGINEERING.md T15 D5)
     //
-    // No `@Environment(\.accessibilityReduceMotion)` read here: this view tree (PanelView /
-    // EventRowView / PackGalleryView / OnboardingView) applies NO `.animation()`/
-    // `withAnimation` anywhere — DESIGN.md's "招牌动效" (pitch-follow motion, EQ-bar bounce,
-    // visual waveform replay) isn't implemented by any T-numbered task yet, so there is
-    // nothing implicit to suppress today. This is a real compliance state, not an oversight:
-    // if a future task adds any animation to this tree, it MUST gate it behind
-    // `accessibilityReduceMotion` at that point — this comment is the tripwire.
+    // 这条绊线响了，而且是被 T17 自己踩响的（T17c 修复）。
+    //
+    // 它此前写的是：「this view tree applies NO `.animation()`/`withAnimation` anywhere … if a
+    // future task adds any animation to this tree, it MUST gate it behind
+    // `accessibilityReduceMotion` at that point — this comment is the tripwire.」而 T17 往这棵树里
+    // 加了**两个** `ProgressView()`（`OnboardingView.ctaButton` 与本文件的 `disconnectRow`）——
+    // 一个无限旋转动画 —— 既没有 gate，也没有回来改这段话。一条自己被跨过去还留在原地的绊线，
+    // 比没有绊线更坏：它是一句已经不成立的断言，而下一个人会信它。
+    //
+    // 现在的状态：这棵树里**唯一**的动画是那两颗 in-flight spinner，两者都 gate 在下面这个
+    // `reduceMotion` 后面。降级路径是 DESIGN.md 写的「静态字形与瞬时状态切换」—— 进行态本来就已经
+    // 由文案（「正在接管…」/「正在断开…」）与禁用态承担了，那圈转动只是锦上添花。
+    // **规矩不变**：再往这棵树里加任何动画，必须在那一点 gate 住 `reduceMotion`。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     //
     // Reduced transparency: already satisfied structurally, not just here — `.background(
     // ClaudioColor.panel(colorScheme))` below is a near-solid opaque color, never a
@@ -92,6 +102,12 @@ public struct PanelView: View {
 
     public init(
         audioEnvironment: AudioImportEnvironment,
+        /// `Claudio.app/Contents/Resources/bin/claudio` — the helper the 接管 CTA copies into
+        /// `~/.claudio/bin/claudio`. **No default on purpose**: a default would let a future call
+        /// site silently ship a panel whose CTA can never install anything, which is precisely the
+        /// bug T17 exists to close. `nil` is a legal, explicit answer ("this build has no bundle"),
+        /// and it surfaces as a real error in the panel — never as a dead button.
+        bundledHelperBinary: URL?,
         configFile: URL = ClaudioPaths.configFile,
         lockFile: URL = ClaudioPaths.lockFile,
         onboardingEnvironment: OnboardingEnvironment = OnboardingEnvironment(),
@@ -108,10 +124,32 @@ public struct PanelView: View {
         // same way rather than taking it as a public, overridable parameter.
         self.previewPlayer = NSSoundAudioPreviewPlayer()
 
+        // The runner is built INSIDE the `StateObject(wrappedValue:)` autoclosure, together with
+        // the view-model it belongs to — never assigned afterwards.
+        //
+        // Assigning it in this init's BODY (`onboardingViewModel.actionRunner = …`) would be the
+        // tempting answer and a silent disaster: reading a `@StateObject`'s `wrappedValue` before
+        // SwiftUI has installed the state re-evaluates this autoclosure and hands back a BRAND NEW
+        // instance every time ("Accessing StateObject's object without being installed on a View.
+        // This will create a new instance each time."). The runner would land on a phantom
+        // view-model that `body` never renders, the real one would keep a nil runner, and the CTA
+        // would be a no-op again — T17's own bug, reproduced by the fix for T17.
+        //
+        // Constructor injection removes the question entirely: there is no "when do we wire it",
+        // and deleting the wiring is a COMPILE ERROR rather than a green test suite.
+        let actionEnvironment = OnboardingActionEnvironment(
+            onboarding: onboardingEnvironment,
+            bundledHelperBinary: bundledHelperBinary,
+            userPacksDirectory: audioEnvironment.userPacksDirectory,
+            configFile: configFile,
+            lockFile: lockFile)
         _onboardingViewModel = StateObject(
-            wrappedValue: OnboardingViewModel(environment: onboardingEnvironment))
+            wrappedValue: OnboardingViewModel(
+                environment: onboardingEnvironment,
+                actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment)))
         _muteController = StateObject(
             wrappedValue: EventMuteController(configFile: configFile, lockFile: lockFile))
+        _announcer = StateObject(wrappedValue: PanelAnnouncer())
 
         let loadedConfig = loadPanelConfig(from: configFile)
         _config = State(initialValue: loadedConfig)
@@ -165,18 +203,97 @@ public struct PanelView: View {
         // ``PanelFocusCoordinator``'s own doc comment on why `.onAppear` is not), and `init(...)`
         // has already loaded the initial rows/cards from disk, so this hook only needs to place
         // focus and report the panel's width.
+        //
+        // T17g：它也**不播报**，一字不差的同一条推理 —— `.onAppear` 与 `.onChange(showCount)` 在同一次
+        // 打开里**都会**跑，两条 post 会抢同一条「一次一句」的通道，而谁先谁后取决于 `onAppear` 与
+        // `popoverDidShow` 的 AppKit 时序：一个没实测过的语义。`showCount` 是这两个信号里可靠的那个
+        // （见 ``PanelFocusCoordinator`` 的文档），所以播报只挂它。
         .onAppear {
             applyFirstFocus()
-            announcePanel()
             onPanelWidthChange(layoutAdaptation.panelWidth)
         }
         // a11y-architect FIX 4: `MenuBarController.popoverDidShow` bumps
         // `focusCoordinator.showCount` every time the popover becomes visible — the ONE place
         // "the popover just (re)opened, re-read the disk" is handled.
         .onChange(of: focusCoordinator.showCount) { _ in
+            // 面板真的出现在屏幕上了。**一条已经被看过的失败**在这里被忘掉；一条在面板关着时诞生的
+            // 失败**不会** —— 这一次打开才是它的第一次露面（T17d，见
+            // ``OnboardingViewModel/panelDidBecomeVisible()``）。上一版在这里无条件清，于是「用户
+            // 点完接管就切走、安装在后台失败」这条路径上的失败，从头到尾一个像素都没有过。
+            //
+            // 必须在 `refresh()` **之前**：清掉 `.failed` 会改变 `hasDetailToggle`，而
+            // `applyFirstFocus()` 要按清理**之后**的焦点序落焦，否则光标会落在一颗刚被清掉的
+            // 「查看原因」上。
+            // T17g —— **返回值不许丢**。它是「这条结果是不是第一次露面」的**唯一**真相源
+            // （`outcomeHasBeenSeen` 就在那个函数里被消费掉了），而那正是这一次打开唯一一次能把它
+            // **说出口**的机会。上一版把它丢了：结果画出来了，VoiceOver 用户却只听到一句平静的
+            // 「Claudio 面板，当前声音包 X」—— 静默替换换到听觉通道上原样复活。
+            let moment = onboardingViewModel.panelDidBecomeVisible()
             refresh()
             applyFirstFocus()
-            announcePanel()
+            // `say(_:)` 必须在 `refresh()` **之后**：面板句里的包名来自刚被 refresh 写新的 `packCards`。
+            say(moment)
+        }
+        // 另一半（T17d）：`MenuBarController.popoverDidClose` bumps `focusCoordinator.hideCount`。
+        // 没有它，view-model 就只能去**假定**「下一次打开 = 上一条失败已经被看过」—— 而在
+        // `.transient` popover 被一次 app 切换关掉、写盘 Task 却还在跑的那条路径上，那个假定是假的。
+        .onChange(of: focusCoordinator.hideCount) { _ in
+            onboardingViewModel.panelDidHide()
+        }
+        // T17 —— **这一行是「接管成功」这件事真正被兑现的地方**，不是锦上添花。
+        //
+        // CTA 落地后 `onboardingViewModel.refresh()` 把 state 翻到 `.installed`，`body` 于是从
+        // onboarding 卡切到 `operationalPanel`。但 `config` / `eventRows` / `packCards` 是三个
+        // 独立的 `@State`，只在 `init` 里读过一次盘 —— 而 `init` 跑在 app 启动的那一刻，也就是
+        // setup **之前**：那时 `config.json` 还不存在（`loadPanelConfig` 回落到 `selectedPack: ""`）、
+        // 包一个都还没复制。于是用户在**接管成功的那一秒**看到的会是：四行「未配置 / 文件丢失」、
+        // 试听全禁用、一个空的切包画廊 —— 而真实的包和 config 明明已经躺在磁盘上了。他必须关掉
+        // 面板再打开一次才看得到真相。这个产品在它唯一一次庆祝时刻上撒谎。
+        //
+        // 不会递归：`refresh()` 内部第一行就是 `onboardingViewModel.refresh()`，而探测是磁盘的
+        // 纯函数 —— 第二遍得到同一个 state，`onChange` 不再触发。
+        .onChange(of: onboardingViewModel.state) { _ in
+            refresh()
+            applyFirstFocus()
+            // T17g：有结果要说的时候，这一句**主动让出**那条「一次一句」的通道（政策在
+            // ``panelAnnouncement(_:)``）。上一版两边都无条件开口，于是「你的包被换掉了」能不能被听见，
+            // 押在 SwiftUI **未文档化**的 onChange 顺序上 —— `runDiskAction` 在同一个 MainActor turn 里
+            // 写完 `actionState` 又写 `state`，两个 handler 在**同一趟** update pass 里都会触发。
+            say(.stateChanged)
+        }
+        // 动作态变化（开始跑 / 失败）：① 播报——一颗变灰的按钮 + 一个 spinner 对 VoiceOver 是完全
+        // 无声的，而这个仓库自己已经论证过「光有 label 不会被播报，VO 只读它光标落上的元素」；
+        // ② 重新落焦——in-flight 期间 CTA 被禁用，持有焦点的那颗按钮当场作废，没人把焦点接走的话
+        // 键盘用户按完空格就无处可去了。
+        //
+        // 刻意 `{ _ in }` 而不是 `{ newValue in }`（与上面那条 `state` handler 一样）：两个 handler 必须读
+        // view-model 的**当前值**。整个防竞争契约（「同一趟里只有一个开口，或两个说同一句」）建立在
+        // 「两边看到的是同一份快照」上。
+        .onChange(of: onboardingViewModel.actionState) { _ in
+            // T17h′ —— **这一行让「同一趟只 post 一句」从一句推理变成一条结构。**
+            //
+            // 上一版这里是三个 `say(_:)` 调用点里**唯一**不先 `refresh()` 的那个。而 `refresh()` 写的正是
+            // `config` / `packCards` 两个 `@State`，也就是面板句里包名的来源。于是一次**无告知的成功接管**
+            // （`actionState: .running → .idle`、`state: .notInstalled → .installed`，同一个 MainActor turn、
+            // 同一趟 update pass）里，若 SwiftUI 先跑这个 handler（**未文档化**的顺序）：
+            //   · `onboardingViewModel.state` 已经是 `.installed`（引用类型，早更新了）
+            //   · 而 `packCards` / `config` 还是 **app 启动时**读的那份 —— 那时 `config.json` 还不存在，
+            //     `loadPanelConfig` 回落成 `selectedPack: ""`，一张卡都没有
+            //   → header = 「Claudio 面板，当前声音包 」**包名是空的**
+            // 紧接着 state 那个 handler（先 `refresh()`）说「…当前声音包 lofi。」——**两句不同，后缀规则吞不掉，
+            // 同一趟 post 了两条。** 而这恰恰是 T17f/T17g 整台机器存在的唯一理由。
+            //
+            // 「它没害处」是一句**推理**（陈旧那句必然先 post，后一条把它截断，幸存者总是对的）——它押的是
+            // 「被截断的那条一个字都不会出声」，一个**没人实测过**的 VoiceOver 语义。用户完全可能听到一句
+            // 卡半截的「Claudio 面板，当前声音包…」，就在这个产品唯一一次庆祝时刻上。
+            //
+            // 只在 `.idle` 那一格 refresh：**面板句只在那一格才被说出来**（别的动作态说的是 `actionClause`，
+            // 一个字的 header 都不用）。而 `.running` 时 refresh 会去扫一块**动作正在写**的磁盘 —— 那是
+            // 拿一个真 bug 换一个假 bug。代价：一次落地动作多扫一遍盘（点击路径，不是每次开面板的热路径 ——
+            // `/ship` 性能评审管的是后者）。
+            if case .idle = onboardingViewModel.actionState { refresh() }
+            say(.actionStateChanged)
+            applyFirstFocus()
         }
         // T15 D5 「极大 → 加宽 popover」: SwiftUI already widened ITSELF (`.frame(width:)` above);
         // this tells the AppKit popover around it to follow (see ``onPanelWidthChange``).
@@ -187,31 +304,100 @@ public struct PanelView: View {
         // label names the container itself, which otherwise reads as an anonymous group. It is
         // NOT what delivers 「VoiceOver 进入先播报面板标题 + 当前包」 — a label is read when the
         // cursor lands on the element, and the cursor lands on a control, not on the group.
-        // ``announcePanel()`` is what actually says the sentence on open.
+        // ``say(_:)`` is what actually says the sentence on open.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(headerAccessibilityLabel)
     }
 
-    /// 「VoiceOver 进入先播报面板标题 + 当前包」 (ENGINEERING.md「无障碍规格」), which nothing in this
-    /// view used to implement: the sentence lives in ``headerAccessibilityLabel``, hung on a
-    /// static `Text` header that the VoiceOver cursor never lands on by itself. `@FocusState`
-    /// doesn't help — that is the KEYBOARD focus, not the VoiceOver cursor. The only way to
-    /// make VoiceOver *say* something on open is to ask it to.
+    /// **整个 GUI 里唯一一处 `NSAccessibility.post`，也是唯一一处播报调用点**（T17g）。
     ///
-    /// AppKit's `.announcementRequested` rather than SwiftUI's `AccessibilityNotification`
-    /// (macOS 14+, above this package's macOS 12 floor). Async so it lands after the popover's
-    /// window is key and in the AX tree — VoiceOver drops announcements aimed at an app that
-    /// isn't there yet. A no-op when VoiceOver is off.
-    private func announcePanel() {
-        let message = headerAccessibilityLabel
+    /// 「VoiceOver 进入先播报面板标题 + 当前包」(ENGINEERING.md「无障碍规格」)，以及一次 CTA 动作的
+    /// 开始 / 失败 / 「我替你做主」的告知 —— 全部走这一个出口。一个禁用的按钮 + 一个
+    /// `.accessibilityHidden(true)` 的 spinner 对 VoiceOver 完全无声；一条静态 `Text` 写的失败原因，
+    /// VO 光标不会自己跑过去。**让 VoiceOver 开口的唯一办法，是去求它开口。**
+    ///
+    /// 政策不在这里：说不说、说哪一句、多条告知怎么拼，全在 ``panelAnnouncement(_:)``
+    /// （`ClaudioGUICore`，纯函数，harness 逐格钉死）；「同一趟里别说两遍」在 ``PanelAnnouncer``。
+    /// 这里只剩「把事实凑齐 + 把那一句交给 AppKit」。上一版的政策住在这个文件的三个 `private` 函数里，
+    /// 而 `ClaudioGUI` 是个 `@main` executableTarget —— harness **一行都 import 不到**，于是
+    /// 「谁抢到那条一次一句的通道」押在 SwiftUI 未文档化的 onChange 顺序上，零测试守护。
+    ///
+    /// 用 AppKit 的 `.announcementRequested` 而不是 SwiftUI 的 `AccessibilityNotification`
+    /// （macOS 14+，高于本包 macOS 12 的地板）。异步 post，好让它落在 popover 的窗口成为 key、进入
+    /// AX 树**之后** —— VoiceOver 会丢掉发给一个还不在那儿的 app 的播报。VoiceOver 没开时是 no-op。
+    ///
+    /// ⚠️ **不要从别处再调一次**（`switchPack` / `toggleMute` 都很诱人：换完包，面板句就变了）：
+    /// `.announcementRequested` 是「一次一句」的通道，那次 post 会**截断**用户可能还没听完的那条告知。
+    /// 要加一个新的播报时刻，先给 ``PanelAnnouncementMoment`` 加一个 case —— 那会让
+    /// ``panelAnnouncement(_:)`` 的 `switch` 编译红，逼你在纯函数里想清楚它跟别人抢不抢通道。
+    /// ## 为什么闸门与去重都在 `async` **里面**（T17h —— `/codex review a3c2d08` 逮到）
+    ///
+    /// 上一版在这里**同步**问完「该说吗 / 说哪句 / 刚才说过没」，却把 post 排进了下一趟 main queue：
+    ///
+    /// ```swift
+    /// let candidate = viewModel.announcement(moment, header: …)   // ← 闸门在这一趟问的
+    /// guard let sentence = announcer.consume(candidate, …) else { return }
+    /// DispatchQueue.main.async { NSAccessibility.post(…) }        // ← 但 post 发生在下一趟
+    /// ```
+    ///
+    /// 于是那道「面板关着就一个字都不说」的闸门，问的是**过去**的世界。两趟之间面板完全可能已经关了
+    /// （`.transient` popover 被一次 app 切换当场关掉 —— 那正是 T17d/T17f/T17g 整条 bug 家族的主路径），
+    /// 而 post 照发不误：`element: NSApp` 是**整个 app**，不是那个已经消失的 popover。用户人已经在
+    /// Finder 里，Claudio 朝着他正在用的窗口念了一句话。
+    ///
+    /// 那扇窗有多宽？只有**一次 main queue drain**：block 已经排在队里，AppKit 通常会在处理下一个输入
+    /// 事件之前把它抽干。所以这条路径**没有人实测到过**。但「我推理出这个格子不可达」正是这个仓库
+    /// 反复交学费的那句话（T17c 的两个无人认领的格子、T17d 那条「重开 = 看过了」的假定），而这里的
+    /// 修法只是把三行代码挪进一个已经存在的 block。
+    ///
+    /// 挪进来之后，闸门、去重、post 看到的是**同一份**世界，而不是隔着一趟的两份。顺带还白拿两件事：
+    /// - 若动作在这一跳里刚好落地，`.running` 那句「正在接管…」会被自动读成新的结果 —— 一句本来就要
+    ///   被下一条 post 当场截断的废话，现在压根不出生。
+    /// - 面板若已关闭，`announcement(…)` 返回 `nil`，`consume` **一次都不跑** —— 去重器不会被一条
+    ///   从未出口的话污染。
+    ///
+    /// **顺序不变**：两条 `say(_:)` 在同一趟 update pass 里各排一个 block，main queue 是 FIFO 的，
+    /// 所以它们仍按 handler 顺序 consume。「开面板那一句永远以结果结尾，第二条必然是它的后缀」这条
+    /// 结构不变式一个字都没动（`PanelAnnouncementSuite` 全矩阵仍然逐格钉着它）。
+    private func say(_ moment: PanelAnnouncementMoment) {
+        // `header` 仍在**这一趟**取，而不是推迟到 post：包名那半句来自 `packCards` / `config` 两个
+        // `@State`，而 `@Sendable` 闭包捕不到 `self`（`PanelView` 带着 `@State` / `@StateObject`，不是
+        // `Sendable`），所以 post 那一趟根本读不到它们。
+        //
+        // 那它凭什么是新鲜的？——**因为每一个会用到 header 的调用点，都排在 `refresh()` 之后**：
+        //   · `.onChange(showCount)`  → `refresh()` → `say(moment)`
+        //   · `.onChange(state)`      → `refresh()` → `say(.stateChanged)`
+        //   · `.onChange(actionState)`→ `.idle` 时 `refresh()` → `say(.actionStateChanged)`
+        //     （`.idle` **正是**这个时刻唯一会说面板句的那一格；别的动作态说 `actionClause`，不碰 header。）
+        // 这不是一句注释里的祝愿：第三条是 T17h′ 补上的，`ViewWiringSuite` 有一条顺序断言钉着它。少了它，
+        // 同一趟里两个 handler 会把**两个不同的 header** 喂进同一个政策函数 —— 两句不同、后缀吞不掉、
+        // 同一趟 post 两条，而政策的 harness 结构上看不见（`header` 是视图唯一供给的那个事实）。
+        //
+        // 剩下的事实（`state` / `actionState` / 面板还开着吗）全部推迟到 post 的那一趟去问 —— 它们的
+        // 真相源是 view-model，一个引用类型，读得到最新值。
+        let header = headerAccessibilityLabel
+        let viewModel = onboardingViewModel
+        let announcer = self.announcer
+        let coordinator = focusCoordinator
         DispatchQueue.main.async {
-            NSAccessibility.post(
-                element: NSApp as Any,
-                notification: .announcementRequested,
-                userInfo: [
-                    .announcement: message,
-                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
-                ])
+            // `DispatchQueue.main.async` 的闭包不是 `@MainActor` 的，但它**跑在主线程上**——
+            // `assumeIsolated` 把这个运行期事实交给编译器，好让下面两行 `@MainActor` 调用合法。
+            // （用 `Task { @MainActor in … }` 会换一条队列，两条 `say(_:)` 之间的 FIFO 顺序就没了 ——
+            // 而后缀去重正建立在那个顺序上。）
+            MainActor.assumeIsolated {
+                guard
+                    let sentence = announcer.consume(
+                        viewModel.announcement(moment, header: header),
+                        openCount: coordinator.showCount)
+                else { return }
+                NSAccessibility.post(
+                    element: NSApp as Any,
+                    notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: sentence,
+                        .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                    ])
+            }
         }
     }
 
@@ -276,8 +462,108 @@ public struct PanelView: View {
                 errorNotice(error.description)
             }
             AudioDropZoneView(viewModel: dropZoneViewModel)
+
+            // T17f：**这里是告知真正的家 —— 而且位置本身是它文案的一部分。**
+            //
+            // 一次成功的「接管」必然把 state 推成 `.installed`（`runDiskAction` 无条件 `refresh()`），
+            // 而 `.installed` 渲染的正是这个运行态面板 —— onboarding 卡此刻根本不在屏幕上。所以
+            // 「你选的包没了、已替你换成 X」「你那个读不出的包被搬到了 Y」这两句话，**每一次都诞生
+            // 在这一侧**。上一版这里一行都没有，于是它们每一次都无声。
+            //
+            // **紧挨在 `PackGalleryView` 之前**，这一条是硬约束，不是排版口味：那句文案白纸黑字写着
+            // 「你随时可以在**下面的**声音包里换成别的」。T17f 自评审第一版把它放进了 `disconnectRow`
+            // （画廊**之后**），于是那句话下面唯一的东西是「断开连接」那颗破坏性按钮 —— 一个刚被替换
+            // 了选包、正想换回去的用户，被一句话指向了卸载键。
+            //
+            // 换句话说：**移动这个 `ForEach` 到画廊下方，就等于把那句文案变成谎话。** 要改位置，
+            // 先改文案。（`runSetupNoticeSuites` 钉住了「文案里有『下面的声音包』」这一半；另一半
+            // ——「它真的在下面」—— 只有这条注释和你的眼睛守着。）
+            ForEach(Array(onboardingVisibleNotices(actionState: onboardingViewModel.actionState).enumerated()), id: \.offset) { _, notice in
+                ActionNoticeRow(message: notice.message, typeScale: typeScale)
+            }
+
             PackGalleryView(
                 cards: packCards, focusedTarget: $focusedTarget, onSelect: { switchPack(to: $0.id) })
+            disconnectRow
+        }
+    }
+
+    /// 「断开连接」——`.installed` 态的次 CTA（T17，**授权的设计变更**）。
+    ///
+    /// 它此前**在整个 shipping app 里没有一个像素**：`OnboardingCopy(.installed).secondaryActionTitle`
+    /// 确实写着「断开连接」，但 `.installed` 时 `body` 渲染的是这个 `operationalPanel`，
+    /// `OnboardingView` 压根不出现 —— 那颗按钮只活在 state gallery 里。而 `.notInstalled` 的正文
+    /// 白纸黑字向用户承诺「还会自动留一份备份，**随时可以一键撤销**」。那个「一键」到今天为止
+    /// 不存在。
+    ///
+    /// 失败也在这里渲染：断开失败的那一刻，onboarding 卡不在屏幕上（state 还是 `.installed`），
+    /// 所以 `OnboardingView` 里那条 `ActionFailureRow` 够不着它。
+    @ViewBuilder
+    private var disconnectRow: some View {
+        // 渲染**任何**失败，不只是断开的（T17c）。上一版这里只认 `branch: .disconnect`，理由是
+        // 「一条陈旧的接管失败不该永久挂在一张已经装好的面板底部」—— 顾虑是真的，答案是错的：它让
+        // 一次**真的**接管失败（失败后 state 恰好落在 `.installed`）变得**一个像素都没有**。
+        // 陈旧问题现在由时效性回答（``OnboardingViewModel/clearConsumedFailure()``，面板重开即清），
+        // 而不是靠在这里把它丢掉。
+        if let failure = onboardingVisibleFailure(actionState: onboardingViewModel.actionState) {
+            ActionFailureRow(
+                message: failure.message, detail: failure.detail,
+                isShowingDetail: onboardingViewModel.isShowingDetail,
+                showsDetailToggle: onboardingShowsFailureDetailToggle(
+                    state: onboardingViewModel.state, actionState: onboardingViewModel.actionState),
+                onToggleDetail: { onboardingViewModel.toggleDetail() },
+                focusedTarget: $focusedTarget, typeScale: typeScale)
+        }
+
+        // 告知**不在这里** —— 它排在 `PackGalleryView` **之前**（见 `operationalPanel`）。
+        // 那是刻意的，而且是被自评审逼出来的：文案说「在下面的声音包里换成别的」，而
+        // `disconnectRow` 排在画廊之后 —— 把提示行放在这里，就等于把用户指向「断开连接」。
+
+        let intent = onboardingSecondaryIntent(for: onboardingViewModel.state)
+        let isRunning = onboardingViewModel.isRunning(intent)
+        // copy 是按钮文案的**单一真相源**，没有兜底字面量（T17c）。上一版写的是
+        // `?? "断开连接"` —— 一条死分支（`.installed` 的 `secondaryActionTitle` 恒非 nil），
+        // 它唯一的效果是：哪天有人把那条 copy 改成 `nil`（= 「这个态没有这颗按钮」），面板照样会
+        // 用硬编码字面量把按钮画出来，copy 与视图当场分叉且零信号。copy 说没有，就真的不画。
+        if let baseTitle = onboardingViewModel.copy.secondaryActionTitle {
+            let title = isRunning ? onboardingActionRunningTitle(.disconnect) : baseTitle
+
+            Button {
+                Task { await onboardingViewModel.performSecondaryAction() }
+            } label: {
+                HStack(spacing: 6) {
+                    // `reduceMotion` 时不画 spinner（T17c）：这棵视图树的「无动画」绊线注释（见 body
+                    // 上方）立下的规矩是「若将来往这棵树里加动画，**必须**在那一点 gate 住
+                    // `accessibilityReduceMotion`」。`ProgressView` 是一个无限旋转动画，它是这棵树里
+                    // 的第一个。降级路径正是 DESIGN.md 写的「静态字形与瞬时状态切换」—— 而进行态本来
+                    // 就已经由文案（「正在断开…」）承担了，不靠那圈转动。
+                    if isRunning, !reduceMotion {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityHidden(true)
+                    }
+                    Text(title)
+                        .font(.system(size: 11 * typeScale))
+                }
+                .frame(maxWidth: .infinity)
+                // ≥24×24 命中区（a11y-architect FIX 6）。
+                .frame(minHeight: 24)
+                .padding(.vertical, 4)
+                .contentShape(RoundedRectangle(cornerRadius: 8))
+            }
+            // DESIGN.md「次 CTA = ghost」：**必须有 1px 描边**。裸 `.plain` 会让这条全宽的、破坏性的
+            // 点击区在视觉上彻底消失 —— 用户看到的只是一行灰字，既不知道它是个按钮，也不知道它有多大。
+            // 只用既有 token（`hairline-strong` 描边 + `text-2` 文字），不新造颜色。
+            .buttonStyle(.plain)
+            .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(ClaudioColor.hairlineStrong(colorScheme), lineWidth: 1)
+            )
+            .disabled(onboardingViewModel.isPerformingAction)
+            .accessibilityLabel(title)
+            .accessibilityHint("摘掉 Claudio 的声音，Claude Code 的其它设置都保留")
+            .focused($focusedTarget, equals: .disconnect)
         }
     }
 
@@ -347,15 +633,30 @@ public struct PanelView: View {
     /// `MenuBarController.popoverDidShow`'s `makeFirstResponder` call, which always runs BEFORE
     /// this (via `focusCoordinator.requestFocus()`), never after.
     private func applyFirstFocus() {
+        // `ctaOperable` (T17): while a `.takeOver`/`.disconnect` is in flight, both CTAs are
+        // `.disabled(...)`, so the pure model must not hand focus to one — otherwise the caret
+        // sits on a dead control and the keyboard user who just pressed 空格 on 「接管」 has
+        // nowhere to go. Same 可操作 rule the muted-row's disabled 试听 ▶ already obeys, applied
+        // to a transition that happens INSIDE the panel rather than at open.
+        let ctaOperable = !onboardingViewModel.isPerformingAction
+        // 失败行上那颗「查看原因」是一个真控件，所以它必须在焦点序里 —— 而渲染它的判据与算焦点序的
+        // 判据是**同一个纯函数**，两者不可能各自漂移。
+        let hasDetailToggle = onboardingShowsFailureDetailToggle(
+            state: onboardingViewModel.state, actionState: onboardingViewModel.actionState)
+
         guard onboardingViewModel.state == .installed else {
             let copy = onboardingViewModel.copy
             focusedTarget = panelFirstFocusTarget(
                 .onboarding(
                     hasPrimaryAction: copy.primaryActionTitle != nil,
-                    hasSecondaryAction: copy.secondaryActionTitle != nil))
+                    hasSecondaryAction: copy.secondaryActionTitle != nil,
+                    hasDetailToggle: hasDetailToggle),
+                ctaOperable: ctaOperable)
             return
         }
-        focusedTarget = panelOpeningFocus(rows: eventRows, packCardIDs: packCards.map(\.id))
+        focusedTarget = panelOpeningFocus(
+            rows: eventRows, packCardIDs: packCards.map(\.id), ctaOperable: ctaOperable,
+            hasDetailToggle: hasDetailToggle)
     }
 
     // MARK: - Actions

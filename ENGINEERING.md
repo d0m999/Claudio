@@ -658,7 +658,485 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - Surfaced by: `/codex review 10f00cf+f31987b`（T11 CC0 台账 + T12 CI/分发骨架）—— 两处 [P1]：release.yml 把二进制 + 内置包塞进 app bundle，但 (a) onboarding CTA 故意未接线（T8/T15 留白）、(b) `claudio use` 其实是 `NotYetImplemented` 占位符（正文「工程落地细节 ⑥」曾误标"已实现"）、(c) 没有任何代码把 bundle 内容复制到 `~/.claudio/`——"app 安装"这一步压根不存在。三者叠加 = 首个 DMG 装完后是哑的，装了但听不到声音。
   - Files: `helper/Sources/ClaudioCore/{Use,Setup}.swift`、`helper/Sources/claudio/{Subcommands,Claudio}.swift`、`helper/Tests/ClaudioCoreTests/{UseSuite,SetupSuite}.swift`、`docs/distribution.md`、`.github/workflows/release.yml`
   - 决议：T15 真身菜单栏面板落地前，v1 走 **Terminal 手动自举**过渡方案——不在占位 `ClaudioGUIApp.swift`（其文档注释明确"不是真正的 menu bar app"）里硬接 CTA，那会绑定一个将被 T15 替换的临时外壳。`claudio use <pack-id>` 补齐真实现（复用 `resolvePackDirectory` 校验 + 原子写 config.json；未选过包的 config 缺省新建，已选过的只更新 `selected_pack`，`master_volume`/`events` 不动）。新增 `claudio setup`：从当前运行二进制所在目录探测同级 `../packs`（判定"是否运行自 app bundle 内"的依据），复制自身到 `~/.claudio/bin/claudio`、把内置包逐个复制进 `~/.claudio/packs/<id>/`（已存在同名用户包则跳过，不覆盖）、若 config 尚不存在则用首个复制到的包调 `claudio use` 建立默认选择、最后调 `installClaudioHooks` 写 hooks——全程幂等（已在 `~/.claudio/bin/` 下运行时跳过复制步骤，只补 hooks）。`docs/distribution.md`「首次安装后」章节 + `release.yml` 的 Release notes 补一句 Terminal 命令，不再暗示"开 app 就活"。
-  - 非阻断遗留：① `PlayEnvironment.bundledPacksDirectory` 仍保持 `nil` 默认，不做"从 bundle 直接播放"的旁路——v1 只走"复制进用户包"这一条路径，两套路径并存会制造第二个查找顺序，故意不做；② `claudio setup` 只识别单层 `packs/<id>/` 铺开，多包同时内置时的确定性选择顺序（当前 = 目录名字典序取第一个）留作 T15 真身实现选包 UI 时的天然替代；③ T15 落地后 `claudio setup` 的逻辑函数 `performFirstRunSetup` 应被 onboarding CTA 直接调用而非继续要求用户开 Terminal——这条决议已写进 Distribution Plan，留 T15 收口。
+  - 非阻断遗留：① `PlayEnvironment.bundledPacksDirectory` 仍保持 `nil` 默认，不做"从 bundle 直接播放"的旁路——v1 只走"复制进用户包"这一条路径，两套路径并存会制造第二个查找顺序，故意不做；② `claudio setup` 只识别单层 `packs/<id>/` 铺开，多包同时内置时的确定性选择顺序（当前 = 目录名字典序取第一个）留作 T15 真身实现选包 UI 时的天然替代；③ ~~T15 落地后 `performFirstRunSetup` 应被 onboarding CTA 直接调用~~ → **已于 2026-07-12 完成，见下方 T17b。**
+
+  ---
+
+  ### T17b — onboarding CTA 端到端接线（2026-07-12）
+
+  **卡点从来不是"接上就行"。** `OnboardingViewModel` 早就留好了 `onPrimaryAction` / `onSecondaryAction` 两个 `(@MainActor () -> Void)?` 挂钩点，默认 `nil` = no-op —— 而**生产代码里从来没有人给它们赋过值**（三路 grep 各自确认，赋值点只出现在测试里）。2026-07-11 真机实测坐实：点完「修复」后 `shasum ~/.claude/settings.json` 不变、`~/.claudio/bin` 仍不存在。而 PR #5 的 a11y 修复让这颗按钮拿到 key window 后变成**黏土色实心**——它看起来比以前**更像能用**了。一个 no-op。
+
+  它还卡着别的一切：state 进不了 `.installed`，运行态面板（事件行 / 切包画廊 / 静音 / 试听 / VoiceOver）在真机上**一条都验不了**。
+
+  **真正的技术卡点（TODOS 原话「需先解决 GUI-bundled `claudio` 的 `executablePath` 语义」）**：`SetupEnvironment.executablePath` 的语义是「正在执行 setup 的那个二进制**自己**」，而 `performFirstRunSetup` **靠这条路径反推内置包目录**（去掉两级 → `Contents/Resources` → 拼 `packs`）。GUI 进程的 `CommandLine.arguments[0]` 是 `Claudio.app/Contents/MacOS/Claudio`（**SwiftUI app 自己，不是 helper**）。直接塞进去会：① 把 GUI 复制成 `~/.claudio/bin/claudio` → 此后每个事件都去 exec 一个 SwiftUI app；② 包目录反推成 `Contents/packs`（不存在）→ 一个包都复制不出来，且**不报错**。
+
+  **落地（新增 `gui/Sources/ClaudioGUICore/OnboardingActions.swift`）**：
+
+  - **`bundledHelperBinary(in: Bundle)` 下沉进 `ClaudioGUICore`**，`MenuBarController` 只剩 `bundledHelperBinary(in: .main)` —— 一次无分支调用，AppKit 里不再有任何决定。**这一条是本任务最重要的结构决定**：把那次查找留在 AppKit 层，就等于把 T17 的**整个 bug** 留在 harness 够不到的地方 —— 把它改成 `Bundle.main.executableURL`（字面意义上的本 bug），整套测试会**照样全绿**。
+  - **`takeOverHelperSource(environment:)`**（纯函数）决定「哪个二进制会被复制」：bundle 里那份必须**叫 `claudio`**（GUI 自己叫 `Claudio`，大写 C —— 这是一条结构性绊线，**不满足就大声报错，绝不悄悄回落**）且是可执行正规文件；没有 bundle（`swift run ClaudioGUI` 开发构建）但 `~/.claudio/bin/claudio` 已在位 → 用它自己（`alreadyInstalled` 分支，零复制）；两条都不成立 → `.helperUnavailable` **一个真错误**，不是静默 no-op。
+  - **`actionRunner` 是构造注入的非可选值**。做成 `var runner: Runner?` 只是把同一个洞挪高一层：nil 时那句 `guard let runner else { refresh(); return }` 与今天的 no-op 一字不差。**忘了接线现在是编译错误。** 另：**绝不能在 `PanelView.init` 体里给 `@StateObject` 赋值** —— SwiftUI 未安装前读 `wrappedValue` 会**每次返回一个新实例**，runner 会落在一个 `body` 永远看不见的幽灵 view-model 上，而真身的 runner 仍是 nil ——「T17 的修复复刻 T17 的 bug」。正确解是把 runner 建在 `StateObject(wrappedValue:)` 的 autoclosure 里，与它所属的 view-model 同生。
+  - **动作态是枚举**（`OnboardingActionState { idle / running(action) / failed(message:detail:) }`），不是 `isPerforming: Bool` + `error: String?` 两个正交标量 —— 后者结构上进不了 `PreviewFixtures`，于是 in-flight 与 failed 这两个新视觉态会**从来没有任何一帧渲染过**而 `assertExhaustive()` 仍然全绿（与收口记录 ③ 是同一类错）。现在它是**第五族状态**，进画廊、进穷尽断言。
+  - **动作方法是 `async` 的**：harness 得能 `await` 到它真的跑完，否则「失败真的上报了吗 / `refresh()` 真的跑了吗」只是靠一个瞬时 fake 恰好在一个调度回合内跑完而侥幸全绿。
+  - **CTA 落地后必须重跑 `PanelView.refresh()`**（`.onChange(of: onboardingViewModel.state)`）。否则接管成功的那一秒，`operationalPanel` 渲染的是 `PanelView.init` 在 **app 启动时**读到的磁盘 —— 也就是 setup **之前**：四行「未配置 / 文件丢失」、试听全禁用、一个**空的**切包画廊。产品在它唯一一次庆祝时刻上撒谎。
+  - **焦点与 VoiceOver**：in-flight 期间 CTA 被禁用，`panelFirstFocusTarget(_:ctaOperable:)` 因此不能把首焦点交给它（否则键盘用户按完空格 caret 就搁浅了）；CTA 的开始 / 失败 / 成功三个时刻各自主动 `NSAccessibility.post(.announcementRequested)` —— 「光有 label 不会被播报」这条推理本仓库已经为「面板打开」付过一次账，T17 新增了三个同类时刻。
+  - **错误文案两个字段**：`message`（安心叙事，过 T7 禁词表）+ `technicalDetail`（`SetupError` / `SettingsUpdateError` 原话，只在「查看原因」披露之后）。直接渲染 `SetupError.description` 会一句话踩中禁词表两个词（「settings.json」「hook」）。
+
+  **【授权的设计变更】「断开连接」拿到一个真入口。** 它此前**在整个 shipping app 里没有一个像素**：`OnboardingCopy(.installed).secondaryActionTitle` 写着「断开连接」，但 `.installed` 时 `PanelView` 渲染的是 `operationalPanel`、**根本不渲染 `OnboardingView`** —— 那颗按钮只活在 state gallery 里。而 `.notInstalled` 的正文白纸黑字向用户承诺「随时可以**一键撤销**」。现在运行态面板底部有一行 ghost「断开连接」，进 `PanelFocusTarget` / `panelFocusOrder` 尾部 / 画廊。用户拍板通过。
+
+  **【P0，实测，非推理】`com.apple.quarantine` 会让每一个 hook 被 Gatekeeper SIGKILL —— 而面板报「已经接好了」。**（新增 `helper/Sources/ClaudioCore/Quarantine.swift`）
+
+  三段都是本机实测（Darwin 25.5），不是推断：
+
+  1. `FileManager.copyItem` **把 `com.apple.quarantine` 一起复制过去**（`copySelfToFixedLocation` 用的正是它）：`source ["com.apple.provenance","com.apple.quarantine"] → destination ["com.apple.provenance","com.apple.quarantine"]`。
+  2. 带这个章的二进制，经 hook 的真实执行路径 `/bin/sh -c '<abs>/claudio play stop'` → **`exit=137`（SIGKILL），零输出、零 stderr**。剥掉之后，同一个二进制、同一条命令 → 正常运行，`exit=0`。
+  3. v1 分发的是**未签名未公证** DMG（Outside Voice T3），所以下载来的 `Claudio.app` 全身带章；Homebrew cask 的 postflight 是 `xattr -d`（**非递归**，剥不到嵌套的 helper），DMG 拖拽路径**根本没有 postflight**。
+
+  合起来：CTA 报成功 → 面板亮绿点 → `doctor` 说「✓ 二进制在位」→ **用户永远听不到一声响**。`play` 是 fire-and-forget，这条失败链**一行 `claudio.log` 都不会留下**。它同时也是一条**今天就存在**的 bug（`docs/distribution.md` 教的 Terminal `claudio setup` 走同一个 `copyItem`），只是 T17 把它变成了主路径、并拿掉了用户唯一的信号（Terminal 里那次 Gatekeeper 拦截至少看得见）。
+
+  修法：`stripQuarantineAttribute` + **剥完回头验一次**（「剥了」和「剥干净了」是两回事 —— 本仓库已经为「断言断错了对象」交过一次学费）。验证失败 → 新增 `SetupError.binaryQuarantined`，**一条 hook 都不写**。剥离刻意放在 `if !alreadyInstalled` **之外**：重跑路径会跳过整个复制步骤，而「重跑 `claudio setup` 就能自愈」是 `docs/distribution.md` 对用户的承诺，对这条失败也得成立。`doctor` 把被隔离的二进制报成**硬失败**（与「二进制不在」同级 —— 对用户而言后果一字不差）。cask 的 postflight 同批改 `-dr`。
+
+  **`ReleaseLayoutSuite`（新）**：harness 真的去读 `.github/workflows/release.yml`，断言它把 helper 放在 `Contents/Resources/bin/claudio`、包放在 `Contents/Resources/packs`。这条生产者/消费者契约横跨一个 yml 和一个二进制，中间**没有任何编译期联系** —— 把 release.yml 的目标目录改个名，所有测试绿、CI 绿、DMG 照常签发，然后 CTA 在**每一台用户机器上**报「找不到小助手」。
+
+  **评审**：动手前先跑了一轮 5 棱镜 × 对抗验证的设计评审（40 个 agent，35 条发现，28 条经对抗验证确认，其中 11 条 blocker）。**我的原设计有四处会原样复刻 T17 要修的那个 bug**（可选 runner / `init` 里给 `@StateObject` 赋值 / CTA 落地后不重读磁盘 / Bundle 查找留在 AppKit 层导致 e2e 测试抓不到真 bug）。quarantine 那条由 red-team 与我各自独立实测命中。
+
+  **落地之后的第二轮对抗评审（审真代码，不是设计稿）—— 又逮到 3 条，其中一条是我自己刚犯的同一个错：**
+
+  - **【BLOCKER】我合成的那颗「查看原因」是一颗死按钮。** `OnboardingView` 在「动作失败且带 detail、
+    且该 state 的 `copy.secondaryActionTitle == nil`」时合成一颗次按钮，而它的 action 走
+    `performSecondaryAction()` → `onboardingSecondaryIntent(.notInstalled)` = **nil** →
+    `perform(nil)` → 只 refresh。**点了什么都不会发生。** 面板正文写着「看看下面的原因」，下面给一颗
+    按钮，按了没反应 —— **在杀死「有按钮但没动作」的那次提交里，把它以另一种形状复刻了。**
+    原来那条不变式抓不到它，因为它断的是「**copy 里**的按钮 ↔ intent」，而这颗按钮压根不在 copy 里，
+    是视图自己变出来的。修法：删掉合成；「查看原因」成为**失败行自己**的一部分（整条行即按钮，有自己的
+    焦点身份 `.revealDetail` 与自己的入口 `toggleDetail()` —— **不能复用次 CTA**，`.installed` 下那个
+    intent 是 `.disconnect`，会再跑一次断开）。不变式同步升级为「遍历 **state × actionState** 的全部
+    组合，此刻会被渲染出来的每一颗控件都必须有一个真的去处」。
+  - **【MAJOR】`ReleaseLayoutSuite` 抓不到它专门为之而生的那次变异。** 它 grep 整份 release.yml 找
+    `Contents/Resources/bin/claudio` —— 而那条路径**也印在 Release notes 与 cask caveats 的散文里**。
+    把真正的 `cp` 目标改成 `Resources/helper/`，散文照样让 grep 命中，**652 全绿**。修法：只看真正的
+    `cp` 命令行。（讽刺的是 `ViewWiringSuite` 第一版立刻翻了同一次车 —— 它被 `MenuBarController` 里
+    那段解释「为什么这里不该有 `Bundle.main`」的**注释**判红。一次文本断言若不区分「代码」与「谈论
+    代码的文字」，它断的就不是代码。）
+  - **【MAJOR】整个 `ClaudioGUI` target 零测试覆盖，实测两次变异全绿**：删掉 `PanelView` 里让「接管
+    成功」兑现的那句 `.onChange(of: state)` → 652 全绿、release 零告警；把 `actionRunner` 改回可选 +
+    静默 guard（= 逐字重建 T17 之前那个死 CTA）→ 652 全绿。`claudio-gui-tests` 只依赖
+    `ClaudioGUICore`，而 `ClaudioGUI` 是带 `@main` 的 executableTarget，Swift 里 import 不了。
+    真正的结构修法是把视图层拆成可 import 的 library target（或引入 ViewInspector）—— 独立重构，
+    已记入 TODOS。在那之前新增 `ViewWiringSuite`：**读源码文本**的绊线（诚实标注：它证明不了那行代码
+    做**对**了，只能证明它**还在**；它挡的是「顺手删掉 / 重构漏掉」，而那恰恰是上面两次变异的形状）。
+  - **【MAJOR】被隔离的 helper 会让面板报 `.installed`** —— `doctor` 已经把它报成硬失败了，面板还在说
+    「已经接好了」。`detectOnboardingState` 现在也拦它，回落 `.helperMissing`（而不是新开一个 state：
+    那样它的 CTA 就是「修复」，点一下正好走 `performFirstRunSetup` 的无条件解除隔离把它治好）。
+    ⚠️ 这个检查**只针对 destination**，绝不能下沉进 `isRunnableHelperBinary` —— app bundle 里那份
+    helper 在真实下载路径上**本来就带着章**，拿同一把尺子量它会让 CTA 直接拒绝安装。
+  - 另修：失败态带上 `action:` 标签（接管失败与断开失败渲染在面板的两个不同分支，不带标签的话一次接管
+    失败会永久挂在一张后来装好了的面板底部）；运行态「断开连接」补上 DESIGN.md 要求的 ghost 1px 描边
+    （裸 `.plain` 让一条全宽的、破坏性的点击区在视觉上彻底消失）；删掉 `copySelfToFixedLocation` 里那次
+    **多余且无测试**的解除隔离（实测：删掉它零行为改变、零测试变红 —— 那正是「纵深防御」在没人核查时
+    退化成的东西：一行假装自己是安全网的、没被测过的代码）。
+
+  **7 条变异逐条实测过真的会红**（M1 `bundledHelperBinary` → `bundle.executableURL` = T17 的整个 bug →
+  3 红；M2 删 `.onChange` → 1 红；M3 release.yml 的 `cp` 目标 → 1 红；M4 拿掉「查看原因」入口 → 3 红；
+  M5 失败不记动作 → 2 红；M6 detector 不拦隔离 → 1 红；M7 拿掉无条件解除隔离 → 2 红）。M2 / M3 / M6
+  在修复前**全都是绿的**。
+
+  ### T17d — 第四轮对抗评审（`/codex review 354d0b4,3e433f3,f09799b`，2026-07-12）
+
+  外部模型（Codex）独立评审前三轮的合并 diff，两条 P1 全部经本地复现证实。**第四轮又是同一个家族**：
+  前三轮分别是死按钮、死按钮的复活、没人渲染的失败格子；这一轮是**一条渲染过零帧的失败被当成「用户看过了」清掉**。
+
+  - **【P1 · 本次提交自己造的】面板关着时诞生的失败，会在用户第一次有机会看到它之前被清掉。**
+    T17c 引入 `clearConsumedFailure()` 来解决「一条陈旧的接管失败永久挂在一张已经装好的面板上」，
+    做法是「面板重开 = 上一条失败已经被看过了 → 清掉」。**那不是一个事实，那是一个假定**，而它在最要命的
+    一条路径上是假的：`popover.behavior = .transient`（切个 app 就关），而 CTA 那句
+    `Task { await viewModel.performPrimaryAction() }` 是**不随视图销毁而取消**的非结构化 Task。用户点完
+    「接管」就切走 → 面板当场关闭 → 写盘继续跑 → 失败 → `actionState = .failed`，屏幕上**没有一个像素
+    属于它** → 用户回来重开 → 第一件事就是把它清掉。**用户永远不知道接管失败了。**
+    修法：不再假定，而是**在失败诞生的那一刻就记录「当时有没有人在看」**（`failureHasBeenSeen = isPanelVisible`）。
+    - 这需要仓库里此前**根本不存在**的一半信号：`PanelFocusCoordinator.hideCount` +
+      `MenuBarController.popoverDidClose` 里的 `notePanelHidden()`。⚠️ **它必须是那个方法的第一行** ——
+      下面那句 `guard NSApp.isActive` 在「切到别的 app 导致关闭」这条路径上会提前 return，而那恰恰是本
+      bug 的主路径。挪到 guard 之后 = 编译绿、`contains()` 照样绿、bug 原样复活。`ViewWiringSuite`
+      因此**断言的是顺序**（比较两个字符串的位置），不只是存在性。
+    - **标记刻意不进 `.failed` 的 payload**：① `PreviewFixtures.onboardingActionStateCoverage` 只按
+      `detail == nil` 分标签，新维度产生不了新 label → `assertExhaustive()` 会在新变体一帧没渲染过的情况下
+      照样全绿（正是 `PreviewFixtures` 自己写着在防的那个形状）；② 改写 `actionState` 会二次触发
+      `.onChange(of: actionState)` → VoiceOver 把同一条失败播报两遍。
+    - **也刻意不用 `.onAppear` 判断「真的渲染了」**：`PanelFocusCoordinator` 自己的文档早就写明 `NSPopover`
+      在 show/close 之间**不一定**重建内容视图层级、`@StateObject` 活满整个进程 —— 把正确性押在一个没实测过
+      的 AppKit 语义上，就是在造第五轮。
+    - 顺带补上 `clearConsumedFailure()` 从来没有过的**行为测试**（它此前唯一的守卫是一条文本绊线，
+      整套 harness 一次都没调用过它）。
+
+  - **【P1 · 07-10 就在的老洞，被 CTA 变成了主路径】零个声音包时，`performFirstRunSetup` 照样写 hooks 并报成功。**
+    `availablePackIDs.first` 为 nil 时没有 else 分支 → `selected_pack` 空 → `claudio play` 返回 `.notReady`
+    → fire-and-forget 拿不到退出码 → **每个事件静默无声**，而面板亮绿点（`detectOnboardingState` 只查
+    二进制 + hooks，不查包）。与 `.binaryQuarantined` **一字不差的后果**，却静静报成功。
+    新增 `SetupError.noAvailablePack`，在写 hooks 之前失败。
+    ⚠️ 这**推翻了一条既有回归测试的结论**（`SetupSuite`「no sibling packs/ still copies the binary」，
+    Codex + Claude 上一轮 `/ship` 对抗评审加的）—— 但**没有推翻它的本意**：二进制照常复制（那条断言原样
+    保留、仍然钉着），它当年防的是「hooks 指向一个不存在的二进制」，没问的是「hooks 指向一个有二进制、
+    却一个包都没有的安装」。同样的静默，另一个成因。新长出来的牙：断言 `settings.json` **压根不该被创建**。
+
+  - **【P2 · 我自己发现的，Codex 没提】`hasQuarantineAttribute` 把 `getxattr` 的每一种失败都读成「没盖章」。**
+    `ENOATTR`（真的没有）只是其中一种，`EPERM` / `EACCES` / `EIO` / 不支持 xattr 的文件系统全都返回 -1。
+    这条假阴性**恰好穿在这个文件想堵死的那条链上**：剥离后的回验用的就是它 → 假阴性 → 回验通过 → hooks
+    照写 → 二进制仍被 Gatekeeper 秒杀，`doctor` 也一起失明。现在只有 `ENOATTR` / `ENOENT` 算干净，其余
+    一律当成盖着章（宁可大声失败，也绝不静默放行）。判据抽成纯函数 `quarantineVerdict(getxattrReturned:errnoValue:)`
+    —— **不是为了好看，是为了它能被钉住**：EPERM 在临时目录里造不出来，判据留在 `hasQuarantineAttribute`
+    里的话，把 `default:` 改回 `false` 全套测试照样绿（实测确认）。
+
+  **5 条变异逐条实测过真的会红**（M1 `failureHasBeenSeen = isPanelVisible` → `= true`（旧假定）→ 主回归 suite 红；
+  M2 删 `notePanelHidden()` → 红；**M3 `notePanelHidden()` 仍在文件里、只挪到 `guard NSApp.isActive` 之后 →
+  只有顺序断言抓得住，`contains()` 照样绿**；M4 `quarantineVerdict` 的 `default:` 改回 `false` → 4 红；
+  M5 零包改回静默写 hooks → 红，且报错原文正是 Codex 描述的那个 outcome）。
+
+  测试：helper 971 → **978**，gui 809 → **826**，全绿；release 构建两个产品均零错误。
+
+  ### T17e — 第五轮对抗评审（`/codex review e6d57ba,72d68e7`，2026-07-12）
+
+  外部模型（Codex）评审 T17d 的两个提交，一条 P1 经本地读码证实。**第五轮仍是同一个家族**，而且这一次
+  它长在**上一轮的补丁自己身上**：T17d 立下了「注定是哑的安装不许报成功」这条纪律，却只在「从没选过包」
+  那条分支里兑现了它。
+
+  - **【P1 · Codex】`selected_pack` 非空时，`.noAvailablePack` 的守卫整段够不到。**
+    那道守卫长在 `noPackHasEverBeenSelected == true` 的分支里。只要 `config.json` 里已经躺着一个非空的
+    `selected_pack`，它就**永远不会被求值**——哪怕那个包的目录早就没了、或者 manifest 已经坏掉。setup 照样
+    写四条 hooks、照样 `.success`、照样打印「✓ 首次安装自举完成」，而 `play` 每次都在 `resolvePackDirectory`
+    上返回 `.notReady`：**每一个事件静默无声**，面板还亮着绿点。这条路恰好长在 `docs/distribution.md` 承诺
+    「重跑一次 setup 就能治好坏安装」的那条动线上（删掉 `~/.claudio/packs/` → 从已装好的位置重跑 →
+    `alreadyInstalled` 跳过整个复制块 → 一台报成功的哑机器）。
+
+  - **【P1 · 我自己的第一版修法造的，比原 bug 更狠】硬失败把用户永久挡在唯一能救他的界面之外。**
+    第一版的答案是「解析不出来就硬失败，绝不替用户改选（那是伪造一次他没做过的选择）」。推理听着对，
+    后果是灾难 —— 本轮对抗评审（**两个独立 agent 各自实测复现**）指出：**换包的唯一界面
+    （`PackGalleryView`）只在面板 `.installed` 时渲染，而 `.installed` 需要 hooks**。于是「他选的包没了 +
+    hooks 还没装」的用户被硬失败挡住 → 永远进不了 `.installed` → **永远够不到那个画廊**，只剩一句要开终端的
+    `claudio use`（而这个 app 的全部前提就是「不用开终端」）。在硬失败之前，他本来会拿到四行 `.unmapped`
+    ＋画廊里躺着的 minimal-chime —— **点一下就好了**。
+    **一道用「用户看不见」论证出来的闸门，自己造出了真正的「用户够不着」。**
+
+  **于是判据换成一句更强、也更好证的话：**
+
+  > **`performFirstRunSetup` 报成功时，`config.json` 的 `selected_pack` 一定指向一个 `play` 真的解析得出来的包。**
+
+  达成它的手段按代价从小到大（纯函数 `packSelectionPlan(status:usablePackIDs:)`，一张表逐格钉死）：
+  ①选择还好好的 → 什么都不动；②从没选过 → 挑一个能用的；③**他选的包没了 / 坏了、但还有能用的 → 替他换上，
+  并如实说出来**（`SetupOutcome` 带 `.repairedDeadSelection(removed:selected:)`，CLI 印成一行 ⚠；他随时能在
+  画廊里换回去）；④**一个能用的包都没有** → 这时画廊本来就是空的、hooks 写了也只是纯静音 → **才**硬失败。
+
+  - **「能用」= `resolvePackDirectory` ＋ `loadPackManifest` 都成功** —— 与 `play` / `doctor` 逐字同源
+    （`checkPackIntegrity`）。绝不另写第二套「可用」的定义：两套判据不一致的那一天，就是又一次静默失声的那一天。
+    音频文件在不在**不算**（那是「内容」：面板会逐行画成 `.unmapped` / `.broken`，用户看得见、拖一个文件就能修；
+    把它判成安装失败，等于把刚建了空包的用户挡在唯一能修好它的界面之外）。两条「内容层必须放行」的假阴性防线
+    专门钉这条线的另一侧，防的是**这次修复自己**收得过紧。
+  - **【P1 · 对抗评审 · 第一版的第二个洞】选包判据与闸门判据不同源。** `availablePackIDs` 的过滤是「是个目录」，
+    而闸门要求「manifest 读得出来」。于是 setup 会**自己**选中一个残骸目录（字典序还排在前面），再被**自己的**
+    闸门判死 —— **一台全新机器直接装不上**。现在选包、闸门、「你还能选什么」三处共用 `usablePackIDs`。
+  - **【P1 · 对抗评审】残骸把 setup 永久焊死。** 包复制不是原子的（`copyItem` 逐文件写最终路径），一次被杀掉的
+    setup 会留下半个包；而复制的跳过判据是「目标目录存在」→ 残骸永远不会被补全 → 它不是能用的包 → 每一次重跑
+    都一字不差地失败。**`docs/distribution.md` 承诺的「重跑一次就能治好」当场失效。** 现在：复制走
+    `.<id>.tmp-<pid>` ＋ rename（**真的**原子了 —— 那句注释此前是假话），且跳过判据收紧成「目标是一个**能用的包**」；
+    是残骸就**挪开**（`.<id>.broken-<pid>`，不删——里面可能有用户的东西）再重新复制一份完整的。
+  - **【P2 · 对抗评审】失败信息把刚判死的那个坏包当成出路推荐回去**（`claudio use <坏包>` 会「成功」却什么都
+    修不好）—— 一个指向自己的死循环。现在「你还能选什么」只列**真正能用**的包。失败文案也不再说「重新安装
+    Claudio」：`Casks/claudio.rb` 没有 `zap`，`brew reinstall` 一个字节都不碰 `~/.claudio/`，而所有中毒态全都
+    活在那里 —— 那条建议对它被印出来的每一种情形都是确定无效的。改成 `docs/distribution.md` 里真正有效的那条：
+    从 app bundle 跑一次 setup（它会把内置包补回来）。
+  - **文案不再撒谎**：失败信息说的是「**这次**没有写入任何 hooks」，而不是「Claudio 没有碰过你的 Claude Code」——
+    在**修复**动线上（用户重跑 setup 去救一台已经哑了的机器），四条 hooks 本来就已经躺在 `settings.json` 里了。
+
+  **第二轮对抗评审（针对上面这一版）又打出三条，均已修：**
+
+  - **【P1 · 我的新代码，零覆盖】原子复制根本没有被任何断言钉住。** 评审实测：把 staging＋rename 退回
+    「直接 `copyItem` 到最终路径」，**1017/1017 照样全绿** —— 也就是说这次修复最要害的那半个动作，
+    测试一个字都没证明。现在有了 `T17e/原子` suite（源包里放一个 `chmod 000` 的文件让复制在树的中途炸掉，
+    断言最终路径上**一个字节都不能有**），该变异下红。
+  - **【P1 · 我的新代码】搬走一个用户目录，却一个字都不说。** 「不是能用的包 → 挪开」这条分支会命中的
+    不只是残骸：用户自己导入过音频的 `minimal-chime`（`AudioImport` 把转码后的字节写进 `packs/<id>/`，
+    那往往是那份声音在磁盘上**唯一的副本**），只要他把 manifest 弄坏了（手改多打一个逗号、解压了一个没写
+    `id` 字段的第三方包），就会被判成「不是能用的包」→ 搬进一个**点开头**的目录 → 而 `PackGallery` 显式过滤
+    点开头目录 → 它在**任何界面里都不存在**，`SetupOutcome` 结构上也承载不了这件事。
+    **这恰恰违反了这次提交自己立的规矩**（「替用户做的决定必须说出来」）。现在 `SalvagedPack` 是 outcome 的
+    一等公民，CLI 印一行 ⚠ 带**绝对路径** ＋「一个文件都没删」。
+  - **【P2】悬空符号链接从判据的缝里漏过去。** `fileExists` **跟随**符号链接，于是一条悬空链接被判成
+    「不存在」→ 绕过「挪开」分支 → 直奔 `moveItem`（lstat 语义，看得见它）→ 抛 EEXIST → `.packCopyFailure`，
+    **每一次重跑都一字不差地失败**，而报错指向的是一个刚被 catch 块删掉的隐藏暂存目录。判据改用 lstat 语义
+    （`attributesOfItem`），与 `moveItem` 同源 —— 这一格在本函数**自己**的契约里本来就该走「挪开」。
+
+  **6 条变异逐条实测过真的会红**（M1 把「修复死选择」改回第一版的硬失败 → 3 红，包括那条 P1 回归；
+  M2 选包判据退回「目录存在」→ 2 红；M3 复制跳过判据退回「目录存在」→ 残骸自愈 suite 红；
+  M4 整道判据摘掉 → 4 红，且红出来的正是 `hooksOutcome: .installed`——hooks 真的被写进了一台哑机器；
+  **M5 去掉 staging＋rename → 红**（这一条在第二轮之前是**绿**的，那正是原子性零覆盖的证据）；
+  **M6 悬空链接判据退回 `fileExists` → 红**，且红出来的原文就是那句 EEXIST）。
+
+  测试：helper 978 → **1025**，gui **826**，全绿；两个产品的 release 构建零错误。
+  `docs/distribution.md` 新增「重跑一次 setup 就能治好」一节 —— 这句承诺此前被 `Setup.swift` 的注释反复引用，
+  而文档里**根本不存在**（第二轮评审命中）；现在它写下来了，并且说清了「必须从 app bundle 里跑」（只有那份
+  看得见内置包）。
+
+  **本轮刻意未做**（已记入 TODOS）：`claudio use` / `claudio install` 仍无此校验（Terminal 上一条命令就能重新
+  造出这台哑机器；GUI 画廊只列 manifest 解得开的包，所以主动线暂时安全）；`detectOnboardingState` 仍然不查包
+  （面板仍会对一台哑机器亮绿点）；~~**GUI 侧既不显示「已替你改选」、也不显示「已搬走你的包」那两句 ⚠——
+  只有 CLI 有**（这是本次修复自身最大的诚实性缺口）~~ → **已于 2026-07-12 补上，见下方 T17f**；
+  0 字节 / 非音频文件仍被判成 `.present`；`claudio` 可执行 target 的输出从来没有被测过一行。
+
+  ### T17f — 第六轮对抗评审（`/codex review df3771d`，2026-07-12）
+
+  外部模型（Codex）评审 T17e 那个提交，三条 [P2]，其中一条经本地读码**实测证实**（另两条见 TODOS）。
+  **第六轮仍是同一个家族**，而且它命中的正是 T17e 自己在「本轮刻意未做」里亲手写下的那一行：
+  **「GUI 侧既不显示『已替你改选』、也不显示『已搬走你的包』—— 只有 CLI 有。」**
+  一条被记下来的债，仍然是债。
+
+  - **【P2 · Codex，实测证实】`SetupOutcome` 在 GUI 里被整个丢掉，于是 T17e 的核心承诺只对开终端的人成立。**
+    `OnboardingViewModel.runDiskAction` 的成功分支是 `case .success: actionState = .idle` ——
+    `OnboardingActionOutcome.tookOver(SetupOutcome)` **连绑都没绑**。实测 `grep -rn "salvaged\|repairedDeadSelection" gui/`
+    ：**零命中**，整个 GUI 包从来没有提过这两个类型。
+    后果：用户在面板点「接管 / 修复」，setup 发现他选的包没了 → 替他换成 minimal-chime → 把他那个读不出的包
+    搬到一个隐藏路径 → 面板**一声不吭**地切到运行态、亮起绿点。而 `PackSelectionOutcome.repairedDeadSelection`
+    的文档里白纸黑字写着「**必须让他知道**」，CLI 的 `printSetupSummary` 旁边还留着一句注释解释为什么必须是
+    ⚠ 而不是 ·（「那个目录里完全可能装着他自己导入的、磁盘上唯一一份音频」）。
+    **而命中这条路径的用户，恰恰是点面板的那一个 —— 他不开终端，所以他是唯一一个看不到那行 ⚠ 的人。**
+    这是 T17 那句「我用『用户看不见』论证的闸门，自己造出了『用户够不着』」在成功路径上的复现：前五次是
+    死按钮、死错误、没人渲染的格子、一帧没露就被清掉的失败；这一次，是一条**成功路径上的告知**，它在 CLI 里响、
+    在 GUI 里哑。
+
+    **修法：不发明新机制，把失败那套机器原样再造一遍。** 这个 codebase 已经为「一件用户必须看见的事，诞生在
+    哪个渲染点由不得我们」交过两轮学费（T17c / T17d），答案早就写好了，照抄即可：
+
+    | 失败（已有） | 告知（本次） |
+    |---|---|
+    | `.failed(action:message:detail:)` | `.reported(notices:)` |
+    | `onboardingVisibleFailure(actionState:)` | `onboardingVisibleNotices(actionState:)` |
+    | `ActionFailureRow`（两个调用方） | `ActionNoticeRow`（两个调用方） |
+    | `failureHasBeenSeen` 寿命规则 | 同一条规则，抬成 `outcomeHasBeenSeen` |
+
+    于是它**自动**继承了两条已经交过学费的不变式：① **T17c** —— 两个渲染点都无条件调那个纯函数，所以「一条
+    告知必须有人画」是结构事实而不是分派规则（这一条在告知这里**比在失败那里更要命**：一次成功的接管必然把
+    state 推成 `.installed`，也就是说**每一条告知都诞生在运行态面板那一侧**，onboarding 卡永远接不住它 ——
+    要是把这个判断留在 SwiftUI 的一个 `if` 里，或者只接在 onboarding 卡上，**没有任何一条告知会被渲染**）；
+    ② **T17d** —— 一条诞生在**关着的面板**上的告知（用户点完「接管」就切走，`.transient` popover 当场关闭，
+    而那个 Task 不随视图销毁而取消）必须活到他下一次打开、真正露一次面为止。告知走成功路径，**比失败更容易**
+    撞上这个时序。
+
+    政策抽成纯函数 `setupNotices(for:)` + 唯一构造入口 `onboardingActionState(afterSuccess:)`（`packSelectionPlan`
+    的先例），一张真值表逐格钉死 —— 包括**两条必须保持沉默**的格子（`.untouched` / `.selectedDefault`：那是
+    用户按下「接管」时本来就在请求的事，不是「我替你做主」；报了它们，真正要紧的两条就会淹在噪音里）。
+    `notices` 恒非空由构造入口单点保证：空告知就是 `.idle`，不是一个长着零行的提示区。
+
+    VoiceOver 同权播报（`announceActionState` 加 `.reported` 分支）：对一个 VO 用户，`announcePanel()` 那句
+    平静的「当前声音包 minimal-chime」是**彻底的静默替换** —— 他选的明明是别的包。同一个 bug，换到听觉通道上。
+
+  - **【设计 · 授权变更】UI 语义 `warning` 亮色 `#E08600 → #B87000`。**
+    ⚠ 那个字形需要一个「不是错误、但不许被忽略」的颜色。DESIGN.md 早就为此定义了 UI 语义 `warning`
+    （「校验提示，与事件层 `StopFailure` 刻意分叉」），`ClaudioColorHex` 也早就搬了它 —— 但**从没有任何视图
+    渲染过它，于是也从没有人量过它**。真去量：亮色 `#E08600` 对亮 panel 只有 **2.73:1**，**连图标的 ≥3:1
+    （WCAG 1.4.11）都不过**。旧注只警告了「当正文用要过 ≥4.5:1」，**漏掉了图标这一半**，而告知行恰恰只以
+    图标形态用它。一个没人量过的 token 就是一个没人验过的承诺。
+    调深到 `#B87000`（3.86:1 / 3.85:1），只降明度不换色相 —— 与 `Stop`、`StopFailure` 是**同一条先例的第三次**。
+    刻意不复用 `StopFailure` 的 `#AC6900`：那会把「UI 语义层与事件层刻意分叉」当场合并成同一个 hex。
+    现由 `ContrastSuite` 四条 ≥3:1 断言钉死。**四事件语义一个不改。**
+
+  **自评审（16 个 agent、4 个视角对抗 + 逐条反驳验证）打出的三条，全部已修。** 三条都长在**同一个地方**：
+  一句话，它的正确性就是它存在的全部意义 —— 而我为它写的测试，一条都没有去测**那句话本身说了什么**。
+
+  - **【实测 · 文案会印出 Markdown 星号】** 第一版 salvage 文案写的是 `Claudio 把它**原样**搬到了 …`。
+    而 `ActionNoticeRow` 走的是 `Text(message)`，`message` 是一个 `String` **变量** —— Swift 于是选中
+    `Text.init<S: StringProtocol>(_:)` 这个**逐字**重载；会解析 Markdown 的 `LocalizedStringKey` 重载
+    **只有字符串字面量够得着**。（验证方式：编译 `Text(s)` 并 dump `Text.Storage` → `.verbatim("…**原样**…")`。）
+    于是在这个产品**唯一一次开口说「我动了你的东西」**的地方，屏幕上会印着四个星号，VoiceOver 还会念出来。
+    与 `warning` token 是同一个家族：那个是「没人渲染过 → 没人**量**过」，这个是「没人渲染过 → 没人**看**过」。
+
+  - **【实测 · 那句指路把用户指向了卸载键】** 文案写着「你随时可以在**下面的**声音包里换成别的」，而第一版
+    把提示行放进了 `disconnectRow` —— 它排在 `PackGalleryView` **之后**。于是那句话下面唯一的东西，是
+    「断开连接」那颗**破坏性按钮**：一个刚被替换了选包、正想换回去的用户，被我们一句话指向了卸载键。
+    更难堪的是，**同一次改动里我自己的两条注释就打了架**：`OnboardingActions` 说画廊在提示的「下方」，
+    `PanelView` 说「手指往上一抬就是那个画廊」。没有任何测试会为一句指错方向的话变红。
+    **修法是改布局、不是删掉那句指路**：提示行现在紧挨在画廊**之前**（解释挨着补救），并由 `ViewWiringSuite`
+    的**顺序断言**钉死 —— 挪到画廊下方 = 把文案变成谎话 = 变红。
+
+  - **【实测 · 我自己留下的陈旧断言】** `DESIGN.md:77` 与 `ClaudioColorHex.swift:146` 都还写着
+    「UI 语义 `warning` 仍保留 `#E08600`」—— 在我把它改成 `#B87000` 的**同一个提交里**。这正是本仓库
+    自己写下的那条教训：「一条自己被跨过去还留在原地的绊线，比没有绊线更坏：它是一句已经不成立的断言，
+    而下一个人会信它。」两处均已改，且都点明分叉仍然成立（`#B87000` ≠ `#AC6900`）。
+
+  **变异测试（逐条实测，每一条都真的变红过）**：
+  ① 把成功分支改回 `actionState = .idle`（= 原 bug）→ **6 条红**；
+  ② 删掉运行态面板的告知渲染点 → **ViewWiringSuite 2 条红**；
+  ③ 把 `removed` / `selected` 在文案里**对调**（= 面板对用户说一句**完全相反**的话：「你选的 minimal-chime
+  没了，已替你换成 pikachu」，而真相恰好反过来）→ 第一版**935 条全绿、一条都没响**；补上语义断言后 → **3 条红**。
+  ——③ 是这次自评审最该记住的一条：**一条说反了的告知，比一条沉默的告知更坏** —— 沉默只是没帮上忙，
+  说反了会主动把用户推向错误的行动（去找一个其实好好的包，同时对一个真的没了的包放下心来）。
+  而「枚举载荷对不对」与「禁词表过不过」这两组断言加起来，**恰好绕开了那句话到底说了什么**。
+  ④ 把 Markdown 星号写回文案 → **1 条红**；⑤ 把提示行挪回画廊下方 → **1 条红**。全部复原 → 全绿。
+
+  **收口**：GUI **957 checks**（+131）、helper 1025 checks（未动）、release build **零告警**。
+
+  **本轮刻意未做**（已记入 TODOS）：告知与失败共用 `actionState`，**同样不落盘** —— 用户点完「接管」切走、
+  在重开面板之前 ⌘Q，那条「我替你换了包」**永远消失**（与 TODOS 里那条「失败活不过进程」是同一个洞，
+  同一个修法，见该条已更新的说明）；Codex 另两条 [P2]（失败路径丢 `movedTo`、并发 setup 的 EEXIST）仍未修。
+
+  ### T17g — 第七轮对抗评审（`/codex review 0d789dd`，2026-07-12）
+
+  外部模型（Codex）评审 T17f 那个提交，两条 [P2]，**两条都经本地读码证实**。
+  **第七轮仍是同一个家族，而且这一次它长在上一轮的补丁自己身上**：T17f 花了整整一节论证
+  「一条诞生在关着的面板上的结果，必须活到用户下一次打开、真正露一次面为止」，造了 `outcomeHasBeenSeen`
+  这套机器去兑现它 —— **然后只兑现了视觉那一半**。
+
+  - **【P2 · Codex，实测证实】结果画得出来，却说不出口 —— 静默替换换个通道原样复活。**
+    `PanelView` 的「面板打开」handler（`.onChange(of: focusCoordinator.showCount)`）调
+    `panelDidBecomeVisible()` / `refresh()` / `applyFirstFocus()` / `announcePanel()` —— **没有 `announceActionState()`**。
+    而 `announceActionState` 只挂在 `.onChange(of: actionState)` 上，那次变化发生在**面板关着**的时候。
+    于是：用户点「接管」→ 立刻切到别的 app（`.transient` popover 当场关闭）→ 不随视图销毁的 Task 跑完、
+    失败（或替他换了包）→ 他回来重开面板 —— 面板把那条结果**画**在屏幕上，而一个 VoiceOver 用户听到的，
+    只有一句平静的「Claudio 面板，当前声音包 minimal-chime」。
+    **T17f 亲手写下「对 VO 用户这是彻底的静默替换」，然后在自己新造的那条路径上原样重演了它。**
+
+    **而「顺手的修法」修不好它。** 在 handler 里再补一句 `announceActionState()` —— 那是最自然的一改 ——
+    会让**两条 post 挤进同一趟**：`.announcementRequested` 是「一次一句」的通道，连发多条只剩最后一条。
+    这条铁律 T17f 自己就写在 `announceActionState` 的注释里，而它**同一个文件里就违反了自己**：一次带告知的
+    成功接管，`runDiskAction` 在**同一个 MainActor turn** 里先写 `actionState`、再经 `refresh()` 写 `state`，
+    SwiftUI 把两次写合并成**一趟** update pass，于是 `.onChange(of: state) → announcePanel()` 与
+    `.onChange(of: actionState) → announceActionState(.reported)` **都会触发**。「你的包被换掉了」能不能被听见，
+    押在 SwiftUI **未文档化**的 onChange 执行顺序上，零测试守护。
+
+    **修法：不去赢那场竞争，而是让它不存在。** 政策整体下沉进 `ClaudioGUICore`（新文件 `PanelAnnouncement.swift`）：
+    | 上一版（住在 `PanelView` 的三个 `private` 函数里） | 本次 |
+    |---|---|
+    | `announcePanel()` / `announceActionState()` / `announce()` | 唯一出口 `say(_ moment:)`，全 GUI 只剩**一处** `NSAccessibility.post` |
+    | 说不说、说哪一句 —— 散在两个 `.onChange` 闭包里 | 纯函数 `panelAnnouncement(_:)`，`switch` 穷尽、无 `default:` |
+    | 「面板关着时别说话」—— 没人管 | 闸门读 view-model 的 `isPanelVisible`（`outcomeHasBeenSeen` 押的**同一个** oracle） |
+    | 「第一次露面」—— 视图算不出来 | `panelDidBecomeVisible()` **交出返回值**（`@discardableResult` 刻意不加：丢掉它 = 编译警告） |
+
+    两条结构不变式让「同一趟里两条内容不同的 post」不可能：① 有结果要说时，面板句**主动让出**通道；
+    ② 开面板那一句永远以「动作态那一句」**结尾**，所以被推迟的第二条必然是它的**后缀**，由 `PanelAnnouncer`
+    按 `openCount` 分段吞掉（跨两次打开重复面板句是**必须**的，全局去重 = 重开面板一片死寂）。
+    顺带补上一个谁都没提的洞：**动作还在跑时重开面板** —— spinner 被 `.accessibilityHidden(true)`、按钮被
+    `.disabled`、焦点还被刻意挪离，VO 用户完全不知道有一个写盘动作正在跑。现在他听得到「正在接管…」。
+
+  - **【P2 · Codex，实测证实】换包告知承诺「这样每个事件都还能出声」—— 那是一句用户当场能证伪的谎话。**
+    顶替上来的包只过了一道 `isUsablePack`（`Setup.swift`），而它自己的文档白纸黑字写着：查目录、查 manifest，
+    **音频文件在不在不在此列**。`usablePackIDs.first` 按字典序挑，完全可能挑中一个只映了 1/4 事件的用户自导入包
+    —— 于是面板会在这句话的正上方打出三行「未配置」。
+    改成：「它未必每个事件都有声音，事件行里会标出哪些还缺。」`PackSelectionOutcome` 与 `SetupNotice` 两处
+    「换上了一个**能响的**」的注释同步改成「另一个**还读得出来的**包」—— 免得下一个人又从注释里读出那个保证。
+    （刻意**不**写「上面四行」：那会是第二句关于布局的断言，而 `OnboardingView` 那张卡也渲染告知行、
+    却既没有四行事件也没有画廊 —— 现存的「下面的声音包」已经在同一个洞里，已记入 TODOS，不再加第二条。）
+
+  **变异测试（逐条实测，每一条都真的变红过）**：
+  ① 开面板时只说面板句、不说结果（= 原 bug）→ **8 条红**（连「动作还在跑时重开」那格一起抓住）；
+  ② 视图里把 `say(moment)` 顺手删掉（重构时最容易发生的那种）→ **ViewWiringSuite 1 条红**；
+  ③ 把两条播报都无条件放开（= T17f 那场竞争）→ **6 条红**。全部复原 → 全绿。
+
+  **收口**：GUI **1102 checks**（+145）、helper 1025 checks（只动了一句文档注释）、release build 零告警。
+
+  ### T17h — 第八轮对抗评审（`/codex review a3c2d08`，2026-07-12）
+
+  外部模型（Codex）评审 T17g 那个提交。**这一轮先有一条方法论教训，它比两条 findings 本身更值钱。**
+
+  **⚠️ 评审跑错了树。** `a3c2d08` 当时活在未合并的 `feat/t17-onboarding-cta` 上，而主 checkout 停在别的分支。
+  `codex exec` 拿到了正确的 diff，可它去**读仓库源码**时读到的是**提交前的旧代码** —— `PanelAnnouncement.swift`
+  / `ViewWiringSuite.swift` 在它眼里根本不存在。它「证实」的那条单点 post 声明，其实是在旧的 `announcePanel()`
+  上碰巧也只有一处。第一轮的 file:line 全不可信。
+  **修法：`git worktree add --detach <tmp> <sha>`，再 `codex exec -C <tmp>`。** 换成真实的提交后源码重跑，
+  同一个模型给出的东西完全不同：**2 条 [P1] + 1 条 [P2]**，而不是原来那 2 条 [P2]。已记入 gstack learnings。
+  （下次 `/codex review <sha>`：先确认那个 sha 在不在 HEAD 上。不在 → 必须开 worktree。）
+
+  - **【P1 · Codex，本地读码证实】`OnboardingState` 那一维，T17g 一格都没盯 —— 同一个 bug，长在修复者自己刚立的规矩上。**
+    `PanelView.headerAccessibilityLabel` 长这样：`guard state == .installed else { return "Claudio 面板" }`。
+    也就是说**五个 onboarding 态**（`.claudeCodeNotInstalled` / `.helperMissing` / `.settingsNotWritable` /
+    `.settingsParseFailure` / `.notInstalled`）被折叠成**同一个常量** —— 包名那半句只有 `.installed` 才拼得出来。
+    而 T17g 的面板句 = 那个 header，仅此而已。
+
+    于是：用户开着 onboarding 卡（「没找到 Claude Code」），在别处把 Claude Code 装好，回来点「重新检测」——
+    `state` 跃迁到 `.notInstalled`，屏幕上**大标题、正文、CTA 三样全换了**（「让 Claude Code 学会开口」/
+    「接管 Claude Code」），而 `.stateChanged` 说出来的那一句与刚说完的**逐字相同**，被 `PanelAnnouncer` 按后缀
+    吞掉：**VoiceOver 一个字都没有。**
+    这就是 T17g 自己那句「结果画得出来，却说不出口」—— 只不过这一次它长在 `OnboardingState` 上。T17g 的穷尽
+    `switch` 逐格钉死了 `OnboardingActionState`，**正交的那一维一格都没人扫**。这个仓库为「真相源自己漏了一维」
+    这个形状（`PreviewFixtures` 的文档、`/ship` 收口记录 ③）已经交过两次学费。
+
+    **⚠️ 去重器不是罪魁 —— 这条差点修错。** 评审的第一版建议是「缩小 dedup 的 scope」。那会把一句**毫无信息量**
+    的重复播报放回来（用户第二次听到「Claudio 面板。」），然后宣布修好了。根因是那个**常量 header**。
+    真相源现成就在 `onboardingCopy(for:)` —— 屏幕上那行大标题，念出来即可。
+    政策留在纯函数里（新增 `panelSentence(state:header:)`，`state` 以模型事实的身份进 `PanelAnnouncementFacts`，
+    由 view-model 供给，**视图不碰** —— 不制造第二个会漂移的 oracle）。写回视图的 `headerAccessibilityLabel` 是最省事的
+    一改，也是最错的：`ClaudioGUI` 是 `@main` executableTarget，harness 一行都 import 不到 = 六个态零测试守护。
+
+    **新不变式（逐对钉死）**：*给定同一个 `header`，任意两个不同的 `OnboardingState`，面板句必须不同。*
+    相等 = 那条跃迁在听觉通道上根本不存在。用同一个 header 喂全部六个态是刻意的**更强**条件 —— 它不许这条
+    不变式去指望 header 帮忙区分（而真实视图里，五个 onboarding 态拿到的正是同一个 header）。
+
+  - **【P1 · Codex → 本地降级为 P2，但照修】那道「面板关着就一个字都不说」的闸门，问的是上一趟的世界。**
+    T17g 的 `say(_:)` **同步**问完闸门与去重，却把 `NSAccessibility.post` 排进 `DispatchQueue.main.async` ——
+    两趟之间 `.transient` popover 完全可能已经被一次 app 切换关掉（**那正是这整条 bug 家族的主路径**），
+    而 post 照发不误：`element: NSApp` 是**整个 app**，不是那个已经消失的 popover。用户人在 Finder 里，
+    Claudio 朝着他正在用的窗口念了一句话。
+    那扇窗只有**一次 main queue drain** 那么宽（block 已排队，AppKit 通常在处理下一个输入事件前把它抽干），
+    所以 Codex 与本地都**没有实测到**它 —— 严格说它是 P2。**照修**，理由是这个仓库自己的教条：
+    「我推理出这个格子不可达」正是 T17c 的两个无人认领的格子、T17d 那条「重开 = 看过了」假定的同一句话。
+
+    修法：闸门、去重、post **整体挪进** async block（`MainActor.assumeIsolated`）。三者从此看到**同一份**世界。
+    白拿两件事：① 动作若在这一跳里刚好落地，那句本来就要被下一条 post 当场截断的「正在接管…」压根不出生；
+    ② 面板若已关闭，`announcement(…)` 返回 nil，`consume` **一次都不跑** —— 去重器不会被一条从未出口的话污染。
+    **顺序不变**：两条 `say(_:)` 各排一个 block，main queue 是 FIFO 的，仍按 handler 顺序 consume。
+    （**不许换成 `Task { @MainActor in … }`** —— 那是另一条队列，FIFO 当场没了，而后缀去重正建立在那个顺序上。
+    这条已写成断言。）
+
+  - **【P2 · Codex，证实】那条「全 GUI 只许有一处 `NSAccessibility.post`」的断言，只数了一个文件。**
+    断言的**措辞**是「全 GUI」，它守的**范围**是 `PanelView.swift`。于是在 `MenuBarController` /
+    `PackGalleryView` / `OnboardingView` 里加第二处 post —— 换完包顺手补一句，正是 `say(_:)` 的文档**亲口点名
+    最诱人**的那条路 —— 测试全绿，而那条 post 会截断用户还没听完的那句「你的包被换掉了」。
+    T17g 的提交信息把它写成「由 ViewWiringSuite 数着」：**后半句当时是虚的。**
+    新增 `guiSources()`：枚举 `gui/Sources/ClaudioGUI` 下每一个 `.swift`、剥掉注释、全 target 计数（`consume` 同理）。
+    目录读不到 / 一个文件都数不到必须**变红** —— 一个数不到任何文件的计数器永远等不到 1，它会一直绿下去
+    （与本文件头部那条「一次文本断言若不区分代码与谈论代码的文字，它断的就不是代码」是同一种病）。
+
+  - **【T17h′ · 自查 + 34-agent 对抗验证，两条独立视角同时逮到】「同一趟只 post 一句」是一句推理，不是一条结构 ——
+    而漏洞恰恰长在本轮补丁自己的注释里。**
+    修完上面两条之后，我在 `say(_:)` 里写下一句 justification：「`say(_:)` 的每一个调用点都排在 `refresh()` 之后」。
+    **那句话是假的。** `.onChange(of: actionState)` 是三个调用点里**唯一**不 `refresh()` 的那个 —— 而 `refresh()`
+    写的正是 `config` / `packCards` 两个 `@State`，也就是面板句里包名的唯一来源。
+
+    于是一次**无告知的成功接管**（`actionState: .running → .idle`、`state: .notInstalled → .installed`，同一趟
+    update pass）：若 SwiftUI 先跑这个 handler（**未文档化**的顺序），`onboardingViewModel.state` 已经是
+    `.installed`（引用类型，早更新了），而 `packCards` / `config` 还是 **app 启动时**那份 —— 那时 `config.json`
+    还不存在，`loadPanelConfig` 回落成 `selectedPack: ""` —— **包名是空的**。它说「Claudio 面板，当前声音包 。」，
+    紧接着 state 那个 handler 说「…当前声音包 lofi。」：**两句不同 → 后缀吞不掉 → 同一趟 post 了两条。**
+    而这正是 T17f/T17g 整台机器存在的**唯一理由**。
+
+    对抗验证的三名怀疑者把它判为「无害」：陈旧那句必然**先** post，后一条把它截断，幸存者总是对的。
+    **推理没错，但它是一句推理。** 它押的是「被截断的那条一个字都不会出声」—— 一个没人实测过的 VoiceOver
+    语义。用户完全可能听到一句卡半截的「Claudio 面板，当前声音包…」，**就在这个产品唯一一次庆祝时刻上**。
+    「我推理出这个格子不可达」是这个仓库交过三次学费的那句话，不能由我在第八轮再说一遍。
+
+    修法一行：`.onChange(of: actionState)` 在 `say()` 之前 `refresh()`，**只在 `.idle` 那一格** —— 面板句只在
+    那一格才被说出来（别的动作态说 `actionClause`，一个字的 header 都不用），而 `.running` 时 refresh 会去扫
+    一块**动作正在写**的磁盘：拿一个真 bug 换一个假 bug。代价是一次落地动作多扫一遍盘（**点击**路径，
+    不是每次开面板的热路径 —— `/ship` 那条性能评审管的是后者）。注释同步改成一句**真话**，并配一条顺序断言。
+
+    残留（记入 TODOS，P3）：`headerAccessibilityLabel` 里仍藏着**第二个**「这是哪一屏」的 oracle
+    （它自己又分了一次 `state == .installed`），而且 harness 一行都测不到它 —— 根治是把 `config` / `packCards`
+    搬进一个 view-model。今天靠一条文本绊线维持一致，不靠类型。
+
+  **变异测试（逐条实测，每一条都真的变红过）**：
+  ① `panelSentence` 退回常量 header（= 原 bug 复活）→ **15 条红**；
+  ② 闸门与去重挪回 async 外面（= 那个跨趟窗口）→ **ViewWiringSuite 1 条红**；
+  ③ 在 `OnboardingView.swift` 里加第二处 post（「顺手补一句」那条路）→ **新断言 1 条红，而旧断言全绿** ——
+  变异 ③ 同时证明了旧断言确实是瞎的；
+  ④ 删掉 T17h′ 那句 `refresh()`（= 两条 post 复活）→ **2 条红**。全部复原 → 全绿。
+
+  **对抗验证**：34 个 agent（4 组独立视角找 → 每条发现 3 名怀疑者证伪），10 条候选**全部被驳回**。
+  唯一有价值的产出是上面那条 T17h′ —— 而它差点被我自己的 refute prompt 埋掉：那句提示让怀疑者去驳
+  「**本次修复的**缺陷」，于是一条真实的**既存** bug 被三票判成「不是这次引入的」而出局。
+  **「不是这次引入的」不等于「不是 bug」。** 下次写 refute prompt 得把这两件事分开问。
+
+  **两条测试被按意图重写，而不是把期望值改成新字面量。** `OnboardingViewModelSuite` 里两条
+  `== "\(header)。"` 在 T17h 之后过期了（非 `.installed` 态的面板句现在还带着大标题）。把字面量一改，
+  测试就只是在复述实现；所以改成断言**意图**：不许再念结果 + 必须说清这是哪一屏。
+
+  **收口**：GUI **1598 checks**（+496，绝大部分来自那四个矩阵多扫的 `state` 维）、helper 1025 checks（未受牵连）、
+  release build `--product ClaudioGUI` **零告警**。
 
 ## Approved Mockups（视觉参照）
 

@@ -29,6 +29,16 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case eventAction(Event)
     case dropZone
     case packCard(id: String)
+    /// 一条失败行上的「查看原因」（T17）—— 它是一个**可聚焦控件**，不是装饰：WCAG 2.1.1 要求
+    /// 键盘用户也能展开那条原因，而这个仓库已经为「成功/拒绝之后只剩鼠标可用」记过一条 P3 账。
+    case revealDetail
+    /// 运行态面板尾部的「断开连接」（T17，**授权的设计变更**）。
+    ///
+    /// 它此前是 `OnboardingCopy(.installed).secondaryActionTitle`，而 `.installed` 状态下
+    /// `PanelView` 渲染的是 `operationalPanel`、**根本不渲染 `OnboardingView`** —— 于是这颗按钮
+    /// 在整个 shipping app 里没有一个像素，只活在 state gallery 里。而 `.notInstalled` 的正文
+    /// 白纸黑字向用户承诺「随时可以一键撤销」。T17 给了它一个真入口，那句承诺才不是谎话。
+    case disconnect
 }
 
 /// Everything ``panelFocusOrder(_:)`` needs to know about the panel's CURRENT shape —
@@ -40,13 +50,13 @@ public enum PanelFocusScope: Sendable, Equatable {
     /// `hasPrimaryAction`/`hasSecondaryAction` mirror ``OnboardingCopy/primaryActionTitle``/
     /// ``OnboardingCopy/secondaryActionTitle`` being non-`nil` — a state like `.installed`
     /// has no primary action (`nil` title) but does have a secondary one ("断开连接").
-    case onboarding(hasPrimaryAction: Bool, hasSecondaryAction: Bool)
+    case onboarding(hasPrimaryAction: Bool, hasSecondaryAction: Bool, hasDetailToggle: Bool = false)
     /// The operational panel is showing: `events` is normally ``Event/allCases`` in its
     /// declared order (kept as an explicit parameter, not hardcoded, so a test can pin
     /// "exactly `Event.allCases`'s order" as its own assertion rather than baking that
     /// assumption into this function); `packCardIDs` mirrors ``PackCard/id``'s gallery order
     /// (``availablePacks(config:environment:)``'s sorted-by-id output).
-    case operational(events: [Event], packCardIDs: [String])
+    case operational(events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false)
 }
 
 /// The panel's Tab/Shift+Tab traversal order for its current ``PanelFocusScope`` —
@@ -61,13 +71,15 @@ public enum PanelFocusScope: Sendable, Equatable {
 /// 焦点落首个可操作项").
 public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
     switch scope {
-    case .onboarding(let hasPrimaryAction, let hasSecondaryAction):
+    case .onboarding(let hasPrimaryAction, let hasSecondaryAction, let hasDetailToggle):
         var order: [PanelFocusTarget] = []
+        // 失败行画在按钮**上方** —— 焦点序跟随视觉序（a11y-architect FIX 5）。
+        if hasDetailToggle { order.append(.revealDetail) }
         if hasPrimaryAction { order.append(.onboardingPrimaryAction) }
         if hasSecondaryAction { order.append(.onboardingSecondaryAction) }
         return order
 
-    case .operational(let events, let packCardIDs):
+    case .operational(let events, let packCardIDs, let hasDetailToggle):
         var order: [PanelFocusTarget] = []
         for event in events {
             order.append(.eventAction(event))
@@ -75,6 +87,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         }
         order.append(.dropZone)
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
+        // 面板最底部：失败行（若有）在「断开连接」之上 —— 焦点序跟随视觉序。
+        if hasDetailToggle { order.append(.revealDetail) }
+        order.append(.disconnect)
         return order
     }
 }
@@ -106,17 +121,46 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// which skips disabled `NSView`s on its own — keeps owning Tab traversal. This resolver
 /// governs only the ONE thing the pure model actually drives: which control opens focused.
 ///
-/// Returns `nil` only for a genuinely empty order (e.g. onboarding with neither CTA); an
-/// operational panel always ends in ``PanelFocusTarget/dropZone``, so it never returns `nil`.
+/// Returns `nil` when the order contains no OPERABLE target — two ways: a genuinely empty order
+/// (onboarding with neither CTA), **or** an onboarding scope whose only targets are the CTAs while
+/// `ctaOperable` is `false` (i.e. an action is in flight — both buttons are `.disabled`). The
+/// second case is not an oversight: during a `.takeOver`/`.disconnect` there is genuinely nothing
+/// operable left in the onboarding card to hold the caret, and pointing it at a disabled control
+/// would be a lie. (T17c: the previous wording — "Returns `nil` only for a genuinely empty order"
+/// — was written before `ctaOperable` existed and was false the moment it landed.)
+///
+/// The OPERATIONAL scope never returns `nil`: it always contains ``PanelFocusTarget/dropZone``,
+/// which is unconditionally operable.
+///
+/// 焦点在 in-flight 期间该落到哪，是一个仍未定的产品问题（见 TODOS「in-flight 期间 onboarding 的
+/// 键盘焦点无处可去」）—— 当前行为是**诚实的空**，不是一个已经想清楚的答案。
+/// `ctaOperable` (T17) names whether the onboarding CTA controls — the two onboarding buttons and
+/// the operational panel's 断开连接 — are currently ENABLED. They are not, for the whole duration
+/// of a `.takeOver`/`.disconnect` (``OnboardingActionState/running(_:)``): the view disables them
+/// so a second click cannot race the first. Without this, the caret keeps pointing at a control
+/// that is on screen but dead, and a keyboard user who presses 空格 on 「接管」 finds the focus
+/// simply gone — the panel's whole "打开焦点落首个可操作项" contract, but broken by a transition
+/// INSIDE the panel rather than at open. 可操作 is load-bearing here for exactly the same reason it
+/// is for a muted row's disabled 试听 ▶.
 public func panelFirstFocusTarget(
     _ scope: PanelFocusScope,
-    nonOperableActionEvents: Set<Event> = []
+    nonOperableActionEvents: Set<Event> = [],
+    ctaOperable: Bool = true
 ) -> PanelFocusTarget? {
     panelFocusOrder(scope).first { target in
-        if case .eventAction(let event) = target {
+        switch target {
+        case .eventAction(let event):
             return !nonOperableActionEvents.contains(event)
+        case .onboardingPrimaryAction, .onboardingSecondaryAction, .disconnect:
+            return ctaOperable
+        case .revealDetail:
+            // 动作跑到一半时失败行不存在（`runDiskAction` 一开跑就把 actionState 换成 `.running`），
+            // 所以这个 target 压根不会在 in-flight 的 order 里 —— 但仍显式跟随 `ctaOperable`，
+            // 免得未来某次改动让它悄悄留在一个全禁用的面板上。
+            return ctaOperable
+        case .eventMute, .dropZone, .packCard:
+            return true
         }
-        return true
     }
 }
 
@@ -139,9 +183,13 @@ public func panelFirstFocusTarget(
 ///
 /// Onboarding is deliberately out of scope: it has no rows, so it has no `.eventAction` targets
 /// to filter — ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` handles that scope directly.
-public func panelOpeningFocus(rows: [EventRow], packCardIDs: [String]) -> PanelFocusTarget? {
+public func panelOpeningFocus(
+    rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true,
+    hasDetailToggle: Bool = false
+) -> PanelFocusTarget? {
     let scope = PanelFocusScope.operational(
-        events: rows.map(\.event), packCardIDs: packCardIDs)
+        events: rows.map(\.event), packCardIDs: packCardIDs, hasDetailToggle: hasDetailToggle)
     let nonOperableActionEvents = Set(rows.filter { !$0.eventActionOperable }.map(\.event))
-    return panelFirstFocusTarget(scope, nonOperableActionEvents: nonOperableActionEvents)
+    return panelFirstFocusTarget(
+        scope, nonOperableActionEvents: nonOperableActionEvents, ctaOperable: ctaOperable)
 }

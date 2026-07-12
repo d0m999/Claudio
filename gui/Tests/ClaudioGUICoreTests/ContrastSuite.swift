@@ -155,6 +155,16 @@ func runContrastSuites() {
         NonTextPair(name: "error 真红 light ICON vs panel", hex: ClaudioColorHex.errorLight, background: ClaudioColorHex.panelLight),
         NonTextPair(name: "error 真红 dark ICON vs surface-2", hex: ClaudioColorHex.errorDark, background: ClaudioColorHex.surface2Dark),
         NonTextPair(name: "error 真红 light ICON vs surface-2", hex: ClaudioColorHex.errorLight, background: ClaudioColorHex.surface2Light),
+        // — UI 语义 warning（⚠ 告知行的字形），**只**做图标，同真红那条纪律（T17f）—
+        //
+        // 这四条是本次调深（`#E08600 → #B87000`）的**全部理由**：`warning` 在表里躺了很久，
+        // 但从没有任何视图渲染它，**于是也从没有人量过它**。真去量，亮色只有 2.73:1 —— 连图标的
+        // ≥3:1 都不过（旧注只警告了「当正文用要过 ≥4.5:1」，漏掉了图标这一半，而告知行恰恰只以
+        // 图标形态用它）。一个没人量过的 token 就是一个没人验过的承诺。现在它被量了。
+        NonTextPair(name: "warning 琥珀 dark ICON vs panel", hex: ClaudioColorHex.warningDark, background: ClaudioColorHex.panelDark),
+        NonTextPair(name: "warning 琥珀 light ICON vs panel", hex: ClaudioColorHex.warningLight, background: ClaudioColorHex.panelLight),
+        NonTextPair(name: "warning 琥珀 dark ICON vs surface-2", hex: ClaudioColorHex.warningDark, background: ClaudioColorHex.surface2Dark),
+        NonTextPair(name: "warning 琥珀 light ICON vs surface-2", hex: ClaudioColorHex.warningLight, background: ClaudioColorHex.surface2Light),
     ]
 
     for pair in nonTextPairs {

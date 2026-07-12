@@ -38,17 +38,27 @@ public func detectOnboardingState(
 
     // A bare `fileExists` here would green-light a directory, an empty 0-byte placeholder,
     // or a non-executable file at the binary's path — all of which Claude Code would fail
-    // to actually run. Require a *runnable* binary: a regular file (so not a directory, and
-    // not some other special file), non-empty, and executable by us. `isRegularFile`
-    // subsumes the not-a-directory check (`isExecutableFile` alone returns true for a
-    // searchable directory), and the non-zero size rejects the 0-byte stub a truncated /
-    // half-finished install can leave behind with its execute bit already set.
-    let binaryResourceValues = try? environment.claudioBinaryPath.resourceValues(
-        forKeys: [.isRegularFileKey, .fileSizeKey])
-    guard binaryResourceValues?.isRegularFile == true,
-        (binaryResourceValues?.fileSize ?? 0) > 0,
-        fileManager.isExecutableFile(atPath: environment.claudioBinaryPath.path)
-    else {
+    // to actually run. The three-part predicate that decides "runnable" now lives in
+    // ``isRunnableHelperBinary(at:)`` (T17): DETECTION and INSTALLATION must agree on what a
+    // usable helper is, and two inlined copies of the same three checks are two things that
+    // can drift.
+    guard isRunnableHelperBinary(at: environment.claudioBinaryPath) else {
+        return .helperMissing
+    }
+
+    // 「在位」不等于「跑得起来」（T17，实测）。一个带 `com.apple.quarantine` 的二进制对上面那三条
+    // 检查完全合格 —— 正规文件、非空、执行位也在 —— 但 Claude Code 的 hook 用 `/bin/sh -c` 执行它
+    // 时，Gatekeeper 会当场 SIGKILL（实测 exit=137，零 stderr）。不挡住它，面板会亮绿点说「已经接
+    // 好了」，而用户永远听不到一声响 —— `doctor` 已经把这种二进制报成硬失败了，面板不能继续撒谎。
+    //
+    // 回落 `.helperMissing` 而不是新开一个 state：它的 CTA 是「修复」→ takeOver →
+    // `performFirstRunSetup` 的**无条件**解除隔离那一步，正好把它治好。用户点一下就好了，而不是被
+    // 塞一句他无从下手的诊断。
+    //
+    // ⚠️ **这个检查只针对 destination**（`~/.claudio/bin/claudio`），**绝不能**下沉进
+    // ``isRunnableHelperBinary(at:)``：app bundle 里那份 helper 在真实下载路径上**本来就带着章**，
+    // 拿同一把尺子去量它会让 CTA 直接拒绝安装 —— 用户就永远装不上了。
+    guard !hasQuarantineAttribute(at: environment.claudioBinaryPath) else {
         return .helperMissing
     }
 
