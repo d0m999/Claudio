@@ -45,6 +45,28 @@ public final class OnboardingViewModel: ObservableObject {
     /// `panelOpeningFocus`：测试证明函数算得对，却没人盯住视图是否调用它）。
     @Published public private(set) var isShowingDetail: Bool = false
 
+    /// 当前这条 ``actionState`` 里的失败，**有没有真的出现在屏幕上过**（T17d）。
+    ///
+    /// **刻意不是 `.failed` 的第四个关联值**，两条具体理由：
+    /// ① `PreviewFixtures.onboardingActionStateCoverage` 只按 `detail == nil` 给 `.failed` 分标签，
+    ///    多出来的这一维**产生不了新 label** —— `assertExhaustive()` 会在「新变体一帧都没渲染过」
+    ///    的情况下照样全绿，正是 `PreviewFixtures` 自己写在文档里警告的「真相源漏了一维」那个形状。
+    /// ② 标记「看过了」会**改写 `actionState`**，于是 `PanelView` 的
+    ///    `.onChange(of: onboardingViewModel.actionState)` 会二次触发 —— VoiceOver 把同一条失败
+    ///    播报两遍，焦点再重置一次。
+    ///
+    /// 它**不是 `@Published`**：没有任何一个像素读它。它只决定失败的**寿命**，不决定失败的**长相**
+    /// （两个渲染点都无条件画「有没有失败」，这条结构不变式 T17c 已经钉死，本次改动一个字没动）。
+    public private(set) var failureHasBeenSeen: Bool = false
+
+    /// 面板此刻是不是真的在屏幕上。由 `MenuBarController` 的两个 `NSPopoverDelegate` 回调驱动
+    /// （``PanelFocusCoordinator/showCount`` / ``PanelFocusCoordinator/hideCount``），**不是**
+    /// SwiftUI 的 `.onAppear` / `.onDisappear` 推断出来的 —— `PanelFocusCoordinator` 的文档已经
+    /// 写明：`NSPopover` 在 show/close 之间**不一定**重建内容视图层级，`@StateObject` 活满整个
+    /// 进程，所以 `.onAppear` 根本不是「面板可见」的可靠信号。把「有没有被看见」押在一个没实测过的
+    /// AppKit 语义上，就是在造第五轮。
+    private var isPanelVisible: Bool = false
+
     /// 真实副作用的执行者。**非可选**（见类型文档）。
     private let actionRunner: any OnboardingActionRunning
 
@@ -138,24 +160,58 @@ public final class OnboardingViewModel: ObservableObject {
         isShowingDetail.toggle()
     }
 
-    /// 面板**重新打开**时，清掉一条已经被看过的失败（T17c）。
+    /// 面板真的出现在屏幕上了（`MenuBarController.popoverDidShow` → ``PanelFocusCoordinator/showCount``）。
     ///
-    /// 这是「一条陈旧的接管失败永久挂在一张已经装好的面板上」这个真实顾虑的答案 —— 用**时效性**回答，
-    /// 而不是用「按 action 分派到某个分支、于是在别的分支里看不见」回答。后者正是上一版的做法，它造出了
-    /// 两个没有任何视图认领的失败格子（见 ``onboardingVisibleFailure(actionState:)``）。
+    /// ## 它替换掉的那个 bug（T17d 第四轮对抗评审 · Codex 独立发现）
     ///
-    /// 时机是 `PanelView` 的 `.onChange(of: focusCoordinator.showCount)` —— 仓库里「popover 刚刚
-    /// (重新)可见」的**唯一**信号。于是失败从它发生那一刻起一直可见（包括紧随其后的那次 `refresh()`
-    /// 把 state 挪到任何地方），直到用户亲手关掉面板再打开为止。
+    /// 上一版叫 `clearConsumedFailure()`：面板每次重开就清掉当前那条 `.failed`，理由是「重开 =
+    /// 上一条失败已经被用户看过了」。**那个理由是一个假定，而它在最要命的一条路径上是假的。**
     ///
-    /// 刻意**不**在 ``refresh()`` 里做：`refresh()` 在一次失败的动作之后**立刻**会被调用
-    /// （`runDiskAction` 的最后一行），在那里清空会把用户刚触发的失败在他看见之前抹掉 —— 那正是
-    /// 这个仓库已经交过三次学费的「静默吞错」。
-    public func clearConsumedFailure() {
-        guard !isPreviewPinned, !isPerformingAction else { return }
+    /// 用户点「接管 Claude Code」，然后（在几百毫秒的复制二进制 + 复制音频 + flock 期间）点到别的
+    /// app 上 —— `popover.behavior = .transient`，面板**当场关闭**。而 CTA 那句
+    /// `Task { await viewModel.performPrimaryAction() }` 是一个**不随视图销毁而取消**的非结构化
+    /// Task：它继续跑、撞上 `play.lock`（或任何一条 `SetupError`）、失败、把 `actionState` 写成
+    /// `.failed`。此刻屏幕上**没有任何一个像素属于它**。用户回来重开面板 → 上一版第一件事就是把它
+    /// 当成「看过了」清掉。**用户永远不知道接管失败了。**
+    ///
+    /// 这是 T17 那句「装完后是哑的」的第四个形状：前三次是死按钮、死错误、没人渲染的格子；这一次，
+    /// 失败被**渲染过一次都没有**就清掉了。而它恰恰住在修「死错误」的那次提交里。
+    ///
+    /// ## 修法：不再假定，而是记录
+    ///
+    /// 「这条失败有没有被人看见过」在它**诞生的那一刻**就是一个已知事实（面板开着吗？），而不是
+    /// 下一次打开时需要猜的东西。``runDiskAction(_:)`` 直接把它记进 ``failureHasBeenSeen``。
+    /// 于是这里的规则退化成两行，不含任何假定：
+    /// - 已经被看过 → 忘掉它（T17c 那条「陈旧失败不该永久挂在一张已经装好的面板上」的顾虑，原样兑现）。
+    /// - 还没被看过 → **这一次打开就是它的第一次露面**，标记为已看过，但**绝不清掉**。
+    ///
+    /// 必须在 `PanelView` 里跑在 `refresh()` / `applyFirstFocus()` **之前**：清掉 `.failed` 会改变
+    /// `hasDetailToggle`，而 `applyFirstFocus()` 要按清理**之后**的焦点序落焦，否则光标会落在一颗
+    /// 刚被清掉的「查看原因」上。
+    public func panelDidBecomeVisible() {
+        guard !isPreviewPinned else { return }
+        isPanelVisible = true
+
+        // `.failed` 与 `.running` 在枚举层面互斥，所以这里不需要 `!isPerformingAction` ——
+        // 一条正在跑的动作永远匹配不上 `case .failed`。（上一版带着那个 guard，它是死的。）
         guard case .failed = actionState else { return }
-        actionState = .idle
-        isShowingDetail = false
+
+        if failureHasBeenSeen {
+            actionState = .idle
+            isShowingDetail = false
+            failureHasBeenSeen = false
+        } else {
+            failureHasBeenSeen = true
+        }
+    }
+
+    /// 面板不在屏幕上了（`MenuBarController.popoverDidClose` → ``PanelFocusCoordinator/hideCount``）。
+    ///
+    /// 只更新「面板可见吗」这一个事实。**刻意不碰 `actionState`**：一条在面板关闭之后才诞生的失败
+    /// 必须活到用户下一次打开为止 —— 那正是上面那段文档里的整个 bug。
+    public func panelDidHide() {
+        guard !isPreviewPinned else { return }
+        isPanelVisible = false
     }
 
     /// 每一颗 CTA 最终都走这里。`switch` 穷尽、无 `default:` —— 加一个 intent 会编译红。
@@ -181,6 +237,7 @@ public final class OnboardingViewModel: ObservableObject {
             // 一个字节都不写：用户的 Claude Code 没装 / 配置文件没权限 / 格式坏了 —— 都不是
             // Claudio 该替他动手的东西。只重新看一眼磁盘。
             actionState = .idle
+            failureHasBeenSeen = false
             refresh()
 
         case .takeOver:
@@ -194,15 +251,26 @@ public final class OnboardingViewModel: ObservableObject {
     private func runDiskAction(_ action: OnboardingDiskAction) async {
         actionState = .running(action)
         isShowingDetail = false
+        failureHasBeenSeen = false
 
         let result = await actionRunner.run(action)
 
         switch result {
         case .success:
             actionState = .idle
+            failureHasBeenSeen = false
         case .failure(let error):
             actionState = .failed(
                 action: action, message: error.message, detail: error.technicalDetail)
+            // **T17d 的整个修复就是这一行。**
+            //
+            // 「这条失败会不会被人看见」不是下一次开面板时该去假定的事，它在此刻就是一个事实：
+            // - 面板此刻开着 → 两个渲染点都无条件画「有没有失败」（T17c 的结构不变式），所以它
+            //   这一帧就在屏幕上 → 算看过，用户下次开面板时可以忘掉它。
+            // - 面板此刻关着 → 用户点完「接管」就切走了，`.transient` popover 早已关闭，而这个
+            //   `Task` 不随视图销毁而取消，于是失败诞生在一块没人看的屏幕上 → **不算看过**，
+            //   它必须活到用户下一次打开、真正露一次面为止。
+            failureHasBeenSeen = isPanelVisible
         }
         // 无论成败都重新探测：成功 → `.installed`；失败 → 可能变成 `.settingsNotWritable`，也可能
         // 原地不动。面板必须反映磁盘**此刻**的真相，而不是我们以为自己写成功了什么。

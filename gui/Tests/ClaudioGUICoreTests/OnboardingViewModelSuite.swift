@@ -369,3 +369,150 @@ func runOnboardingViewModelDetailSuites() async {
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// T17d —— 失败的**寿命**（第四轮对抗评审 · Codex 独立发现）
+//
+// 上一版 `clearConsumedFailure()` 在整套 harness 里**一次都没被调用过**：它唯一的守卫是
+// `ViewWiringSuite` 的一条文本绊线（「PanelView 里还有没有这个字符串」）。于是「面板重开 =
+// 上一条失败已经被用户看过了」这个假定从来没有被任何一条断言检验过 —— 而它在最要命的那条
+// 路径上是假的。下面这几条就是它欠的那些测试。
+// ═══════════════════════════════════════════════════════════════════════════════
+
+@MainActor
+func runOnboardingFailureLifecycleSuites() async {
+    /// 一个必定失败的 runner —— 复用现有失败 suite 的那条剧本。
+    func makeFailingRunner() -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        runner.result = .failure(.setupFailed(.installFailure(.notWritable(reason: "boom"))))
+        return runner
+    }
+
+    await suite(
+        "T17d【静默失败回归】面板关着时诞生的失败，下一次打开必须**露面**，绝不能被当成「看过了」清掉"
+    ) {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeFailingRunner())
+
+            // 真实时序，一步不省：
+            // ① 用户打开面板
+            viewModel.panelDidBecomeVisible()
+            // ② 点「修复」；在几百毫秒的复制 + flock 期间…
+            // ③ …他点到别的 app 上 —— `.transient` popover 当场关闭
+            viewModel.panelDidHide()
+            // ④ 而那个 `Task` 不随视图销毁而取消：它继续跑完，然后失败
+            await viewModel.performPrimaryAction()
+
+            guard case .failed = viewModel.actionState else {
+                expect(false, "前提：这次动作必须失败，得到 \(viewModel.actionState)")
+                return
+            }
+            expect(
+                !viewModel.failureHasBeenSeen,
+                "失败诞生在一块没人看的屏幕上 —— 它不该被标记成「看过了」")
+
+            // ⑤ 用户回来，重新打开面板。**这是整个 bug 的那一刻。**
+            viewModel.panelDidBecomeVisible()
+
+            guard case .failed = viewModel.actionState else {
+                expect(
+                    false,
+                    "❌ 静默失败复活了：一条从未渲染过的失败在用户第一次有机会看到它之前就被清掉了。"
+                        + "用户点了「修复」、切走、回来，面板一切如常 —— 而接管其实失败了，"
+                        + "他永远不会知道。得到 \(viewModel.actionState)")
+                return
+            }
+            expect(
+                viewModel.failureHasBeenSeen,
+                "这一次打开就是它的第一次露面 —— 从现在起才算「看过」")
+        }
+    }
+
+    await suite("T17d：露过一次面之后，下一次打开才把它忘掉（T17c 的「陈旧失败」顾虑仍然兑现）") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeFailingRunner())
+
+            viewModel.panelDidBecomeVisible()
+            viewModel.panelDidHide()
+            await viewModel.performPrimaryAction()
+
+            viewModel.panelDidBecomeVisible()  // 第一次露面：留着
+            guard case .failed = viewModel.actionState else {
+                expect(false, "第一次重开必须还看得到它")
+                return
+            }
+
+            viewModel.panelDidHide()
+            viewModel.panelDidBecomeVisible()  // 第二次：看过了，忘掉
+            expect(
+                viewModel.actionState == .idle,
+                "一条已经露过面的失败不该永久挂在面板上 —— 这是 T17c 那条顾虑，它仍然成立。"
+                    + "得到 \(viewModel.actionState)")
+            expect(!viewModel.isShowingDetail, "清掉失败时「查看原因」也必须收起")
+            expect(!viewModel.failureHasBeenSeen, "清掉之后标记也要归零")
+        }
+    }
+
+    await suite("T17d：面板**开着**时诞生的失败当场就算看过 —— 下一次打开直接忘掉，不会多留一轮") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeFailingRunner())
+
+            viewModel.panelDidBecomeVisible()
+            // 面板全程开着，失败就在他眼皮底下发生 —— 两个渲染点都无条件画它（T17c 结构不变式）。
+            await viewModel.performPrimaryAction()
+            expect(
+                viewModel.failureHasBeenSeen,
+                "面板开着时诞生的失败，这一帧就在屏幕上 —— 当场算看过")
+
+            viewModel.panelDidHide()
+            viewModel.panelDidBecomeVisible()
+            expect(
+                viewModel.actionState == .idle,
+                "他已经看过了，重开就该忘掉 —— 而不是再挂一轮。得到 \(viewModel.actionState)")
+        }
+    }
+
+    await suite("T17d：panelDidHide() 绝不碰 actionState（碰了就是把「静默吞错」原地请回来）") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeFailingRunner())
+
+            viewModel.panelDidBecomeVisible()
+            await viewModel.performPrimaryAction()
+            let before = viewModel.actionState
+
+            viewModel.panelDidHide()
+
+            expect(
+                viewModel.actionState == before,
+                "关面板只是「面板不在屏幕上了」这一个事实，不是「这条失败可以扔了」。得到 \(viewModel.actionState)")
+        }
+    }
+
+    #if DEBUG
+        suite("T17d：pin 死的预览实例上，两个面板信号都是彻底的 no-op（画廊不该自己改写自己）") {
+            let pinned = OnboardingViewModel(
+                previewState: .notInstalled,
+                actionState: .failed(action: .takeOver, message: "m", detail: "d"))
+
+            pinned.panelDidBecomeVisible()
+            pinned.panelDidBecomeVisible()
+            pinned.panelDidHide()
+
+            expect(
+                pinned.actionState == .failed(action: .takeOver, message: "m", detail: "d"),
+                "state gallery 里 pin 住的 .failed 帧必须原样活着 —— 渲染两次不该把它清掉。"
+                    + "得到 \(pinned.actionState)")
+            expect(
+                !pinned.failureHasBeenSeen,
+                "pin 死的实例连标记都不该动 —— 它压根不参与失败的寿命")
+        }
+    #endif
+}

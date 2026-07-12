@@ -91,10 +91,49 @@ func runViewWiringSuites() {
             !panel.contains("onboardingFailureBelongsHere"),
             "按 action 分派失败的那个函数已经删了（T17c）—— 它默认「哪个动作失败」与「失败之后 state"
                 + "落在哪」是同一件事，而 runDiskAction 在失败后无条件重新探测磁盘")
+        // T17d：面板的可见 / 隐藏**两个**信号都必须接进 view-model。
         expect(
-            panel.contains("clearConsumedFailure()"),
-            "「陈旧的失败永久挂在面板上」必须由**时效性**解决（面板重开即清），而不是靠在渲染时"
-                + "按分支把它丢掉 —— 后者正是上一版造出两个无人认领的失败格子的原因")
+            panel.contains("onboardingViewModel.panelDidBecomeVisible()"),
+            "面板可见时必须通知 view-model —— 一条**已经被看过**的失败在这里被忘掉（T17c 那条"
+                + "「陈旧失败不该永久挂在一张已经装好的面板上」的顾虑仍然成立）")
+        expect(
+            panel.contains(".onChange(of: focusCoordinator.hideCount)")
+                && panel.contains("onboardingViewModel.panelDidHide()"),
+            "面板**隐藏**也必须通知 view-model。没有这一半，view-model 只能去假定「下一次打开 ="
+                + "上一条失败已经被看过」—— 而用户点完「接管」就切走时（.transient popover 当场关闭，"
+                + "写盘的 Task 却不随视图销毁而取消、继续跑、失败），那条失败从头到尾一个像素都没有过，"
+                + "下一次打开却会把它当成「看过了」清掉。T17d 第四轮对抗评审（Codex）实测确认。")
+        expect(
+            !panel.contains("clearConsumedFailure"),
+            "`clearConsumedFailure()` 已经删了（T17d）—— 它无条件在面板重开时清掉当前失败，"
+                + "而「重开 = 看过了」是一个**假定**，在「失败诞生于面板关闭之后」这条路径上是假的")
+    }
+
+    suite("MenuBarController：popover 关闭必须发出隐藏信号，而且必须在那句会提前 return 的 guard 之前（T17d）") {
+        guard let controller = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift") else {
+            expect(false, "读不到 MenuBarController.swift")
+            return
+        }
+        expect(
+            controller.contains("focusCoordinator.notePanelHidden()"),
+            "popoverDidClose 必须告诉 coordinator 面板不在屏幕上了 —— 这是 view-model 判断"
+                + "「一条失败诞生时有没有人在看」的唯一依据")
+
+        // 这不是普通的文本绊线，它钉的是**顺序**：`popoverDidClose` 里那句 `guard NSApp.isActive`
+        // 在「用户切到别的 app 导致 popover 关闭」这条路径上会直接 return —— 而那**正是** T17d 修的
+        // 那个 bug 的主路径。把 notePanelHidden() 挪到 guard 之后，编译绿、上面那条 contains 也绿，
+        // 而 bug 原封不动地复活，且只在最常见的那条路径上复活。所以顺序本身必须是一条断言。
+        guard let hidden = controller.range(of: "focusCoordinator.notePanelHidden()"),
+            let guardIsActive = controller.range(of: "guard NSApp.isActive")
+        else {
+            expect(false, "在 MenuBarController 里找不到 notePanelHidden() 或 guard NSApp.isActive")
+            return
+        }
+        expect(
+            hidden.lowerBound < guardIsActive.lowerBound,
+            "notePanelHidden() 必须出现在 `guard NSApp.isActive` **之前**。放在之后 = 切换 app 关闭"
+                + "面板这条路径永远收不到隐藏信号（那句 guard 会提前 return），而那恰恰是「点完接管就"
+                + "切走、安装在后台失败」的那条路径 —— 静默失败当场复活")
     }
 
     suite("OnboardingView 渲染任何失败，而不是只渲染接管的失败（T17c）") {

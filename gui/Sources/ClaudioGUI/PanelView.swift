@@ -208,13 +208,24 @@ public struct PanelView: View {
         // `focusCoordinator.showCount` every time the popover becomes visible — the ONE place
         // "the popover just (re)opened, re-read the disk" is handled.
         .onChange(of: focusCoordinator.showCount) { _ in
-            // 面板重开 = 上一条失败已经被看过了，可以忘掉（T17c）。必须在 `refresh()` **之前** ——
-            // 清掉 `.failed` 会改变 `hasDetailToggle`，而 `applyFirstFocus()` 要按清理**之后**的
-            // 焦点序落焦，否则光标会落在一颗刚被清掉的「查看原因」上。
-            onboardingViewModel.clearConsumedFailure()
+            // 面板真的出现在屏幕上了。**一条已经被看过的失败**在这里被忘掉；一条在面板关着时诞生的
+            // 失败**不会** —— 这一次打开才是它的第一次露面（T17d，见
+            // ``OnboardingViewModel/panelDidBecomeVisible()``）。上一版在这里无条件清，于是「用户
+            // 点完接管就切走、安装在后台失败」这条路径上的失败，从头到尾一个像素都没有过。
+            //
+            // 必须在 `refresh()` **之前**：清掉 `.failed` 会改变 `hasDetailToggle`，而
+            // `applyFirstFocus()` 要按清理**之后**的焦点序落焦，否则光标会落在一颗刚被清掉的
+            // 「查看原因」上。
+            onboardingViewModel.panelDidBecomeVisible()
             refresh()
             applyFirstFocus()
             announcePanel()
+        }
+        // 另一半（T17d）：`MenuBarController.popoverDidClose` bumps `focusCoordinator.hideCount`。
+        // 没有它，view-model 就只能去**假定**「下一次打开 = 上一条失败已经被看过」—— 而在
+        // `.transient` popover 被一次 app 切换关掉、写盘 Task 却还在跑的那条路径上，那个假定是假的。
+        .onChange(of: focusCoordinator.hideCount) { _ in
+            onboardingViewModel.panelDidHide()
         }
         // T17 —— **这一行是「接管成功」这件事真正被兑现的地方**，不是锦上添花。
         //

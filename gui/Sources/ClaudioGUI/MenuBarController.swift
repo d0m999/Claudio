@@ -196,6 +196,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     // closed, someone give the keyboard back" — is met by returning it to the only party that
     // can hold it: the app the user came from. ENGINEERING.md's wording was corrected to say so.
     func popoverDidClose(_ notification: Notification) {
+        // T17d —— **必须是这个方法的第一行。** 下面那句 `guard NSApp.isActive` 会在「用户切到别的
+        // app 导致 popover 关闭」这条路径上直接 return，而那正是本信号存在的理由：用户点完「接管」
+        // 就切走，写盘的 `Task` 继续跑并失败，`OnboardingViewModel` 必须知道那一刻面板已经不在屏幕上
+        // 了，否则它会把这条从没被渲染过的失败当成「用户看过了」清掉（见
+        // ``PanelFocusCoordinator/notePanelHidden()``）。把这一行挪到 guard 之后 = 复活那个 bug，
+        // 而且只在最常见的那条路径上复活。
+        focusCoordinator.notePanelHidden()
+
         let previous = previousApp
         previousApp = nil
 
