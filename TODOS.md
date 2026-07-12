@@ -619,83 +619,6 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** 阶段 A′（路由态本身落地之后才有东西可画）
 
-## Completed
-
-### clay 当正文用够不到 4.5:1 —— DESIGN.md 自身冲突
-
-**What:** DESIGN.md 一边祝福「drop-zone hover 命中 → 边框 / **文字**转黏土」，一边要求「行内文字 ≥ 4.5:1」。实测亮色 clay `#C4633C` 对 panel `#FFFDF8` = **3.97:1**——过图标 / 边框的 ≥3:1，**不过正文的 ≥4.5:1**。两行规范互相矛盾，代码只能二选一。
-
-**Why:** 不是实现 bug，是规范内部冲突，且两条出路都动 DESIGN.md，而 clay 是品牌唯一强调色，实现者不该代为改动——所以挂账等用户拍板。
-
-**Context:** T14/T15/T16 pre-landing 评审（2026-07-11 `/ship`，对比度审计）登记；同日 `/ship` 九路评审复现并量到同一个 3.97:1。
-
-**修复方式:** 用户拍板取 DESIGN.md 自己标的**解法 1**：hover 反馈只由**边框 + `clay-soft` 底**承载，**文案恒为 `text-2`**。`AudioDropZoneView.promptLabel` 的 `foregroundColor` 去掉 `isHovering` 三元（`isHovering` 仍驱动边框与底色，hover 观感不变）；DESIGN.md 的 known-gap 注记改成已拍板记录。零品牌成本——clay 的色值一个字没动，`Notification` 的视觉身份也没动。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** None
-**Completed:** 2026-07-11（`/ship` 九路评审修复批，分支 `feat/t16-t15-t14-state-gallery`）
-
-### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂
-
-**What:** `setEventEnabled` 的 config 读-改-写在本分支里**新**被纳入 `play.lock`（此前无锁），但只测了锁竞争（1 持有者 + 1 等待者），没有任何 `DispatchQueue.concurrentPerform` 测试证明这条 RMW 在真并发写下不撕裂。
-
-**Why:** 「被本分支改掉行为、却没有覆盖变更后路径」的定义就是回归缺口——覆盖率审计把它列为整个 diff 里唯一的 REGRESSION GAP，优先级最高。`PlaySuite.swift` 里已有现成的同形状测试（真并发证明「恰好一个播放」）可以 1:1 照抄。
-
-**Context:** 2026-07-11 `/ship` 覆盖率审计（91%，唯一 REGRESSION GAP）。
-
-**修复方式:** 照 `PlaySuite` 的 `concurrentPerform` 形状补真并发写测试：N 个并发 `setEventEnabled` 打同一份 config，断言落地文件仍是合法 JSON、三个 v1 键都在、未知顶层键一个没丢、且每次调用要么成功要么 `.lockBusy`——绝无静默损坏。
-
-**Effort:** S
-**Priority:** P4
-**Depends on:** None
-**Completed:** 2026-07-11（`/ship` 九路评审修复批，分支 `feat/t16-t15-t14-state-gallery`）
-
-### CoverageState / checkPackIntegrity / Play 的 `fileExists` 不辨目录（3 站点共用）
-
-**What:** `coverageState`（T16 新增）、`checkPackIntegrity` 的 `missingFiles`、`Play` 的解析都用 `FileManager.fileExists(atPath:)` 判存在，不查 `isDirectory`。manifest 把某事件映射到一个**存在的同名目录**时，会报 `present`/`complete`，而 `afplay` 运行时静默失败。
-
-**Why:** 现实里 manifest 值都是文件名、且 `safePackFileURL` 已挡路径逃逸；「存在的同名目录」需用户手动造。纯健壮性，非 T16 引入（继承既有 `doctor`/`play` 语义），但现在多了 `CoverageState` 第三个站点。
-
-**Context:** T16 swift-reviewer（2026-07-11）。修法：三处统一改成「存在且是普通文件」判定，抽一个共享 helper 免第四次重犯。
-
-**修复方式:** 新增 `helper/Sources/ClaudioCore/SafeFileRead.swift` 的 `regularFileExists`（`stat` + `S_IFREG` 门），三个站点统一改用它，不再各自 `fileExists`。变异测试实证了旧代码的完整失败链：一个**名为 `stop.mp3` 的目录**会被判为 `present`、`doctor` 报通过、`play` 报「已播放」——却什么声音都没有。
-
-**Effort:** S
-**Priority:** P4
-**Depends on:** None
-**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
-
-### popover 尺寸硬编码 312×400，最大 Dynamic Type 档下不跟随 PanelView 加宽
-
-**What:** `MenuBarController.swift` init 里把 `popover.contentSize = NSSize(width: 312, height: 400)` 写死。注释只声明 height 由 `NSHostingController` 的 intrinsic content 在运行时驱动，width 没有。而 `PanelView.body` 在 `.accessibility2…5` 档会把自身 `.frame(width: layoutAdaptation.panelWidth)` 提到 360pt。
-
-**Why:** 若 `NSHostingController` 没开 `.preferredContentSize` 之类的 sizing 传导，SwiftUI 想要的 360pt 宽不会反映到 popover 的 contentSize width，最大字号下"加宽 popover"落空、内容可能被裁。仅在最高 Dynamic Type 档触发，属边角，但确是未验证的假设。
-
-**Context:** codex review（2026-07-11，commits e4dd25f/6b9cb66）P2。Claude 侧核验：硬编码属实，是否裁切取决于 `NSHostingController` sizing 行为。
-
-**修复方式:** 不再硬编码 312：popover 初始宽改用 `standardPanelWidth` 常量，并新增 `onPanelWidthChange` 回调，由 `PanelView` 把 `layoutAdaptation.panelWidth` 回传给 `MenuBarController` 更新 `contentSize`。`.maximum` Dynamic Type 档下 popover 真的加宽到 360，不再指望 `NSHostingController` 的隐式 sizing 传导。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** None
-**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
-
-### 焦点契约修复（52f8913）只有纯逻辑测试，视图接线无回归护栏
-
-**What:** commit `52f8913` 修了两处视图层 bug：① `PanelView.applyFirstFocus()` 首焦点跳过 muted-present preview（改用 `nonOperableActionEvents`，不再 `panelFocusOrder(...).first`）；② `.unmapped`/`.broken` 行的禁用 preview 不再持有 `.eventAction` 焦点身份。但新增的 `CoverageStateSuite`（+33）/`PanelFocusOrderSuite`（+96）只覆盖 `panelFirstFocusTarget` 与 `EventRow.eventActionOperable` 两个**纯函数**——证明「函数算得对」，没有一根测试盯住「视图真的调用了它们」。谁把 `applyFirstFocus` 改回 `panelFocusOrder(...).first`、或把 `.focused(... .eventAction)` 加回 disabled 的 `previewButtonBody`，现有测试大概率仍绿，原 bug 悄悄回归。
-
-**Why:** 回归护栏缺口，非当前正确性缺陷——Codex 独立审查已确认 diff 本身逻辑自洽，故记账而非阻断。
-
-**Context:** codex review `52f8913`（2026-07-11，[P2]，无 P1）。原计划是引入 ViewInspector 或并入真机走查。
-
-**修复方式:** **比原计划更好，且不需要 ViewInspector、不需要真机。** 把判定从视图**下沉**进 `ClaudioGUICore`，成为两个纯函数——`EventRow.previewClaimsActionFocus` 与 `panelOpeningFocus(rows:packCardIDs:)`——视图侧只剩一次调用、没有可漂移的分支。护栏因此变成普通单测：变异验证把视图改回旧写法，两组断言分别 **5 红 / 3 红**（含「首焦点必须 ≠ `order.first`」那条关键断言）。原来「测试证明函数算得对，却没人盯住视图是否调用它」的缺口，通过消灭「视图里的判定逻辑」这个东西本身而关闭。
-
-**Effort:** S
-**Priority:** P3
-**Depends on:** 线 173 的 T15 真机手验同批（若引入 ViewInspector 则可本机）
-**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
-
 ### `ClaudioGUI` 整个 target 在 harness 里一行都跑不到（视图层接线零回归网）
 
 **What:** `claudio-gui-tests` 只依赖 `ClaudioGUICore` + `ClaudioCore`。`ClaudioGUI` 是带 `@main` 的 **executableTarget**，Swift 里 import 不了。于是整棵 SwiftUI 视图树上的每一行接线，对这套测试都是不可见的。
@@ -796,7 +719,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### 面板句里的 `header` 是视图算的，harness 一行都测不到 —— 而它里面藏着第二个「这是哪一屏」的 oracle
+### 面板句里的 `header` 在 async **外**捕获，其余三个事实在 async **内**重读 —— 一个陈旧的 header 拼得到一个崭新的 state 上
 
 **What:** `PanelAnnouncementFacts` 的文档白纸黑字写着：`state` 由 view-model 供给，**视图不碰**，「也就不会有第二个会漂移的答案」。但 `header` 仍是视图算的，而 `PanelView.headerAccessibilityLabel` 自己**又分了一次 `state == .installed`**：
 
@@ -814,6 +737,147 @@ private var headerAccessibilityLabel: String {
 
 **Context:** 2026-07-12 T17h（`/codex review a3c2d08` 修复期间，本地 + 一次 34-agent 对抗验证双双指出）。修法：**把 `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model**。三件事一次到位：① header 变成一个**模型事实**，第二个 oracle 消失（`panelSentence` 独占那次分支）；② harness 第一次能测它（包括空包名那一格）；③ `say(_:)` 可以在 post 的那一趟**重算** header 而不是捕获它 —— 今天做不到，因为 `DispatchQueue.main.async` 的闭包是 `@Sendable` 的、捕不到 `self`（`PanelView` 带着 `@State`，不是 `Sendable`），而一个 `@MainActor` class 是 `Sendable` 的，捕得到。这与 `ViewWiringSuite` 头部那条「真正的结构修法是把视图层拆成可被 import 的 library target」是同一个方向，代价也在同一个量级。
 
+**更新（2026-07-12 · `/codex review 71262dd`）：上面那句「今天两者一致」是错的，而它错在 T17h 自己刚挪动的那条边界上。**
+T17h 把闸门 / 去重 / post 整体挪进 `DispatchQueue.main.async`，理由是「三者从此看到同一份世界」——
+于是 `state` / `actionState` / 面板还开着吗，三个事实都改成在 **post 的那一趟**去问（`PanelView.swift:387-392`）。
+但 `header` 没跟着走：它仍在 **enqueue 的那一趟**被捕获（`PanelView.swift:378`）。**世界并没有统一，只是从
+四个事实全在捕获侧，变成了三比一。**
+
+而那段捍卫 `header` 新鲜度的注释（`PanelView.swift:365-377`）论证的是**捕获时刻**的新鲜度 ——「每一个用到
+header 的调用点都排在 `refresh()` 之后」。它一个字都没有覆盖**捕获与执行之间**那段队列延迟。这两件事在
+T17h 之前是同一件事（那时 post 就在捕获的同一趟里），T17h 之后不再是。注释没跟着改，于是它今天在为一条
+它已经不再成立的不变式作证。
+
+**可达性**：这个洞**不需要 FIFO 被违反 —— 恰恰是 FIFO 被遵守造成了它。**（本段是三路复核后重写的：初稿写的
+是「`Task { @MainActor in … }` 的恢复与 `DispatchQueue.main.async` 之间不保证 FIFO 交错」，那句**是假的**，
+见下面的「一条被证伪的运行时事实」。结论没变，但它当初是**靠错的理由**站着的。）
+
+Darwin 上 MainActor 的默认 executor 就是把 job enqueue 进 **main dispatch queue**
+（`swift_task_enqueueMainExecutor` → `dispatch_async_swift_job(main queue, …)`），而 libdispatch 串行队列按
+**入队顺序**严格 FIFO（QoS 只抬执行线程的优先级，不重排串行队列）。所以：在我们的 block **之后**入队的
+MainActor job **不可能**抢在它前面跑。
+
+真正的竞争不在执行顺序，在**入队时刻** —— 而那个时刻**不由主线程决定**：
+- `OnboardingActions.swift:618`：`protocol OnboardingActionRunning: Sendable`，**没有** `@MainActor`。
+- `OnboardingActions.swift:632-639`：`DiskOnboardingActionRunner.run` = `await Task.detached(priority: .userInitiated) { performOnboardingDiskAction(…) }.value` —— 一次**真正的后台跳**。
+- `OnboardingViewModel.swift:324`：`let result = await actionRunner.run(action)`。这个 `await` 的续体 **C**，
+  是**后台线程完工的那一刻**把它丢回主执行器的。它落在哪，是一次纯粹的 wall-clock 竞争。
+
+于是只要 C 落进 `PanelView.swift:378`（捕获 header）与 `:382`（enqueue block **D**）之间 —— 甚至只要落在同一趟
+SwiftUI update pass 里、`:382` 之前 —— FIFO 就**保证** C 先跑：`actionState → .idle`、`state` 翻面、`refresh()`
+重写 `packCards`。D 随后醒来，把**捕获时**的 header 拼到**执行时**的 state 上。代码里**没有任何东西**把 C 排在
+D 之后。
+
+**两个具体症状**（不是「念错包名」那么轻，初稿把它写小了）：
+- **断开连接**（最现实的一格，`PanelView.swift:531-533`）：`:294` 只在 `.idle` 才 `refresh()`，所以 `.running`
+  那趟捕获的 header 是「Claudio 面板，当前声音包 lofi」；而 `uninstallClaudioHooks` 是一次**亚毫秒**的
+  settings.json 原子重写，落进那趟 update pass 极为现实。C 先跑 → `state = .notInstalled`、`actionState = .idle`
+  → D 读到 `.idle` 于是走面板句 → `panelSentence(.notInstalled, "…当前声音包 lofi")` → **面板念出用户刚刚
+  断开的那个包名。** 去重吞不掉它：`panelAnnouncementIsRedundant` 是**后缀**规则（`PanelAnnouncement.swift:189`），
+  两句不互为后缀。
+- **接管**（T17d 自己记录的主路径：点接管 → 切走 → 装着的时候重新打开）：捕获时 `state` 还是 `.notInstalled`
+  （hooks 是 `performFirstRunSetup` 的**最后**一次写），header 回落成常量「Claudio 面板」；醒来时 `state` 已是
+  `.installed` → 包名那半句**结构性消失** → 用户在这个产品**唯一一次庆祝时刻**只听到裸的一句「Claudio 面板。」，
+  随后被正确那条截断。
+
+而「反正会被正确那条截断，无害」正是 `PanelView.swift:283-288` **自己写下来要拒绝**的推理：「它没害处」是一句
+推理…它押的是「被截断的那条一个字都不会出声」，一个没人实测过的 VoiceOver 语义。T17h′ 花了真实代价消灭这
+一类伤害，async 边界又用**时序**把它放了回来。
+
+**一条被证伪的运行时事实（顺手记下，这条比 bug 本身更容易再咬人一次）**：`PanelView.swift:385-386` 的注释写着
+「用 `Task { @MainActor in … }` 会换一条队列，两条 `say(_:)` 之间的 FIFO 顺序就没了」—— 在 Darwin 上**同样不
+准确**，MainActor 默认 executor 走的就是 main queue。**留着 `DispatchQueue.main.async` 没错，但理由是假的**；
+下一个人会依赖这条假事实做决策。改掉它，和改掉 `:365-377` 那段（它在为一条 T17h 自己已经作废的不变式背书）
+一样，是零成本的止血，应该立刻做，不必等结构修法。
+
+**窗口宽度没有任何人实测过**（本轮的实证一路返回 null，如实记下）。接管那条路径窗口窄（复制 universal 二进制
+＋音频），断开那条宽（一次亚毫秒的原子写）。本段断言的是**可达**（源码结构上没有任何东西挡住它），**不是频率**。
+
+**为什么从 P3 抬到 P2**：这条目原本是**测试性 / 架构债**（「harness 测不到」「有第二个 oracle」），可以慢慢还。
+现在它多了一条**机制明确、两路独立复核确认**的活的正确性缺口 —— 它不再是 P3 的那个理由。爆炸半径确实不大
+（漏念 / 念错一次包名，不是失声），所以 P2-vs-P3 仍可争论；但挡在缺口前面的唯一东西是一句「我推理出这个交错
+不可达」，而那正是 71262dd 自己的 commit message 里点名的、这个仓库已经交过三次学费的那句话。
+
+**修法不变，已经写在上面的 ③ 里**：把 `config` / `packCards` 搬进 `@MainActor` view-model，`header` 就能和另外
+三个事实一样在 post 的那一趟**重算**而不是捕获。**三个洞一次买**：第二个 oracle、可测性、以及这条竞争。
+
 **Effort:** M
-**Priority:** P3
+**Priority:** P2（原 P3，2026-07-12 抬升 —— 见上面的更新）
 **Depends on:** None（与「把视图层拆成可被 import 的 library target」一起做最划算）
+
+## Completed
+
+### clay 当正文用够不到 4.5:1 —— DESIGN.md 自身冲突
+
+**What:** DESIGN.md 一边祝福「drop-zone hover 命中 → 边框 / **文字**转黏土」，一边要求「行内文字 ≥ 4.5:1」。实测亮色 clay `#C4633C` 对 panel `#FFFDF8` = **3.97:1**——过图标 / 边框的 ≥3:1，**不过正文的 ≥4.5:1**。两行规范互相矛盾，代码只能二选一。
+
+**Why:** 不是实现 bug，是规范内部冲突，且两条出路都动 DESIGN.md，而 clay 是品牌唯一强调色，实现者不该代为改动——所以挂账等用户拍板。
+
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11 `/ship`，对比度审计）登记；同日 `/ship` 九路评审复现并量到同一个 3.97:1。
+
+**修复方式:** 用户拍板取 DESIGN.md 自己标的**解法 1**：hover 反馈只由**边框 + `clay-soft` 底**承载，**文案恒为 `text-2`**。`AudioDropZoneView.promptLabel` 的 `foregroundColor` 去掉 `isHovering` 三元（`isHovering` 仍驱动边框与底色，hover 观感不变）；DESIGN.md 的 known-gap 注记改成已拍板记录。零品牌成本——clay 的色值一个字没动，`Notification` 的视觉身份也没动。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+**Completed:** 2026-07-11（`/ship` 九路评审修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂
+
+**What:** `setEventEnabled` 的 config 读-改-写在本分支里**新**被纳入 `play.lock`（此前无锁），但只测了锁竞争（1 持有者 + 1 等待者），没有任何 `DispatchQueue.concurrentPerform` 测试证明这条 RMW 在真并发写下不撕裂。
+
+**Why:** 「被本分支改掉行为、却没有覆盖变更后路径」的定义就是回归缺口——覆盖率审计把它列为整个 diff 里唯一的 REGRESSION GAP，优先级最高。`PlaySuite.swift` 里已有现成的同形状测试（真并发证明「恰好一个播放」）可以 1:1 照抄。
+
+**Context:** 2026-07-11 `/ship` 覆盖率审计（91%，唯一 REGRESSION GAP）。
+
+**修复方式:** 照 `PlaySuite` 的 `concurrentPerform` 形状补真并发写测试：N 个并发 `setEventEnabled` 打同一份 config，断言落地文件仍是合法 JSON、三个 v1 键都在、未知顶层键一个没丢、且每次调用要么成功要么 `.lockBusy`——绝无静默损坏。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+**Completed:** 2026-07-11（`/ship` 九路评审修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+### CoverageState / checkPackIntegrity / Play 的 `fileExists` 不辨目录（3 站点共用）
+
+**What:** `coverageState`（T16 新增）、`checkPackIntegrity` 的 `missingFiles`、`Play` 的解析都用 `FileManager.fileExists(atPath:)` 判存在，不查 `isDirectory`。manifest 把某事件映射到一个**存在的同名目录**时，会报 `present`/`complete`，而 `afplay` 运行时静默失败。
+
+**Why:** 现实里 manifest 值都是文件名、且 `safePackFileURL` 已挡路径逃逸；「存在的同名目录」需用户手动造。纯健壮性，非 T16 引入（继承既有 `doctor`/`play` 语义），但现在多了 `CoverageState` 第三个站点。
+
+**Context:** T16 swift-reviewer（2026-07-11）。修法：三处统一改成「存在且是普通文件」判定，抽一个共享 helper 免第四次重犯。
+
+**修复方式:** 新增 `helper/Sources/ClaudioCore/SafeFileRead.swift` 的 `regularFileExists`（`stat` + `S_IFREG` 门），三个站点统一改用它，不再各自 `fileExists`。变异测试实证了旧代码的完整失败链：一个**名为 `stop.mp3` 的目录**会被判为 `present`、`doctor` 报通过、`play` 报「已播放」——却什么声音都没有。
+
+**Effort:** S
+**Priority:** P4
+**Depends on:** None
+**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+### popover 尺寸硬编码 312×400，最大 Dynamic Type 档下不跟随 PanelView 加宽
+
+**What:** `MenuBarController.swift` init 里把 `popover.contentSize = NSSize(width: 312, height: 400)` 写死。注释只声明 height 由 `NSHostingController` 的 intrinsic content 在运行时驱动，width 没有。而 `PanelView.body` 在 `.accessibility2…5` 档会把自身 `.frame(width: layoutAdaptation.panelWidth)` 提到 360pt。
+
+**Why:** 若 `NSHostingController` 没开 `.preferredContentSize` 之类的 sizing 传导，SwiftUI 想要的 360pt 宽不会反映到 popover 的 contentSize width，最大字号下"加宽 popover"落空、内容可能被裁。仅在最高 Dynamic Type 档触发，属边角，但确是未验证的假设。
+
+**Context:** codex review（2026-07-11，commits e4dd25f/6b9cb66）P2。Claude 侧核验：硬编码属实，是否裁切取决于 `NSHostingController` sizing 行为。
+
+**修复方式:** 不再硬编码 312：popover 初始宽改用 `standardPanelWidth` 常量，并新增 `onPanelWidthChange` 回调，由 `PanelView` 把 `layoutAdaptation.panelWidth` 回传给 `MenuBarController` 更新 `contentSize`。`.maximum` Dynamic Type 档下 popover 真的加宽到 360，不再指望 `NSHostingController` 的隐式 sizing 传导。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+### 焦点契约修复（52f8913）只有纯逻辑测试，视图接线无回归护栏
+
+**What:** commit `52f8913` 修了两处视图层 bug：① `PanelView.applyFirstFocus()` 首焦点跳过 muted-present preview（改用 `nonOperableActionEvents`，不再 `panelFocusOrder(...).first`）；② `.unmapped`/`.broken` 行的禁用 preview 不再持有 `.eventAction` 焦点身份。但新增的 `CoverageStateSuite`（+33）/`PanelFocusOrderSuite`（+96）只覆盖 `panelFirstFocusTarget` 与 `EventRow.eventActionOperable` 两个**纯函数**——证明「函数算得对」，没有一根测试盯住「视图真的调用了它们」。谁把 `applyFirstFocus` 改回 `panelFocusOrder(...).first`、或把 `.focused(... .eventAction)` 加回 disabled 的 `previewButtonBody`，现有测试大概率仍绿，原 bug 悄悄回归。
+
+**Why:** 回归护栏缺口，非当前正确性缺陷——Codex 独立审查已确认 diff 本身逻辑自洽，故记账而非阻断。
+
+**Context:** codex review `52f8913`（2026-07-11，[P2]，无 P1）。原计划是引入 ViewInspector 或并入真机走查。
+
+**修复方式:** **比原计划更好，且不需要 ViewInspector、不需要真机。** 把判定从视图**下沉**进 `ClaudioGUICore`，成为两个纯函数——`EventRow.previewClaimsActionFocus` 与 `panelOpeningFocus(rows:packCardIDs:)`——视图侧只剩一次调用、没有可漂移的分支。护栏因此变成普通单测：变异验证把视图改回旧写法，两组断言分别 **5 红 / 3 红**（含「首焦点必须 ≠ `order.first`」那条关键断言）。原来「测试证明函数算得对，却没人盯住视图是否调用它」的缺口，通过消灭「视图里的判定逻辑」这个东西本身而关闭。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** 线 173 的 T15 真机手验同批（若引入 ViewInspector 则可本机）
+**Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
