@@ -122,6 +122,21 @@
 - **圆角阶梯**：控件 / 芯片 6px · 卡片 / 行 10px · 面板 14–16px · 开关 / 声音芯片 pill(999)。
 - **最大内容宽（营销）**：~1060px。
 - **行结构（每事件行）**：`[事件字形 tile 24pt, 事件色, 圆角6] · [事件名 SF Pro 13 + 原始 id JetBrains Mono 10] · [声音文件名 mono] · [波形] · [圆形试听键 speaker.wave.2, 事件色]`。此为 `present` 态的完整结构；事件行共有三态 `CoverageState{present | unmapped | broken}`，`unmapped` / `broken` 收起文件名 / 波形、试听禁用、行尾出「导入绑定」入口（详见 State Components 的「事件行三态」条）。
+- **控件行（Control Row）—— 面板里一切非事件的设置行**（主音量滑块 · 未来的开关 / 步进器 / 行内按钮）。**这一节管的是既成事实，不是新发明**：`OnboardingView` 主 CTA 早已是「原生外壳 + `.tint(clay)`」，此处只是把它升格成全 App 规则。
+  - **原生外壳，不自绘**：`Slider` / `Button` / `Toggle` / `Stepper` 一律保留系统绘制的**轨道 · 拇指 · 焦点环 · 按下态 · hover**。品牌强调**只经 `.tint(ClaudioColor.clay(colorScheme))` 一个入口**施加。理由同「App 内 UI = 系统 SF Pro」：自绘控件会连带丢掉 macOS 的焦点环、按下反馈与辅助功能行为，为一点视觉自由付整套原生正确性的账。**先例**：`OnboardingView.swift:102-103` `.buttonStyle(.borderedProminent) + .tint(clay)`。故本设计系统**不定义**轨道高度 / 拇指直径 / 焦点环 —— 那不是我们的决策面。
+  - **行解剖**：`[标签 SF Pro 13 · text] · Spacer · [原生控件]`。行高 ~28pt、内边距沿用面板 12–13pt、**无分隔线**（面板全局零 `Divider`，与事件行、drop-zone、画廊一致）。**关键：控件行没有事件色 tile** —— 这是它与事件行的唯一结构差别，也是它不会被误读成「第五个事件行」的全部依据。
+  - **不加图标（默认）**：四个事件行已各自带**两枚**喇叭字形（试听键 `speaker.wave.2` + 静音钮 `speaker.wave.2.fill` / `speaker.slash.fill`）。控件行再上一枚喇叭 = 同一个 312pt 面板里的**第三套**喇叭语义，读者无从分辨哪个才是"音量"。**标签用文字**。确需图标时，须挑一个不与事件行撞的字形并登记在此。
+  - **数值读数（默认不显示）**：交给 `accessibilityValue` 播报（对齐 macOS 系统音量滑块 —— 它也没有读数）。**一旦决定显示**：JetBrains Mono / SF Mono 10–12 + **`tabular-nums`（`.monospacedDigit()`）+ 定宽容纳最长值**（如 `100%`）。缺这两样，每跳一档数字宽度就变一次，会把控件横向顶得一伸一缩（GUI 里已有 8 处 `.monospacedDigit()` 正是为此）。
+  - **禁用态**：`.disabled(true)`，用原生灰 —— 即 State Components「事件行三态」那条的同一口径「**控件置灰 + 图标降饱和，不整行降 opacity**」，行内文字始终 ≥4.5:1。
+  - **Dynamic Type**：复用事件行既有的 `rowWrapsToTwoLines`（`PanelLayoutAdaptation`）—— **`.largest` 及以上档**（`xxxLarge` / `accessibility1+`）标签在上、控件整行在下。**不为控件行新立布局字段。**
+    ⚠️ 档位以 `PanelTypeSize.swift:59-65` 的真值表为准，**不是**「更大」（`.larger` = `xLarge`/`xxLarge`，其 `rowWrapsToTwoLines` 是 **`false`**）。
+  - **对比度**：控件的品牌填充是**非文本图形**，判 **≥3:1**（亮色 `clay` `#C4633C` 对 `panel` = **3.97:1** ✅），与已拍板的 drop-zone hover 边框同规则。
+    - **亮色这一对今天已经断了**：`ContrastSuite.swift:211-214`（`clayLight` vs `panelLight` ≥3:1）；且 `nonTextPairs` 里的 `notificationDark` **就是 `clayDark` 的别名**（`ClaudioColorHex.swift:133`）。缺的是**暗色**一对 —— 第一个控件行落地时补 `clayDark` vs `panelDark`。
+    - ⚠️ **但纯 hex 数学的 `ContrastSuite` 结构上捕获不了这条规则真正的回归**：它看不见 `NSSlider` 实际填了什么色。**有人删掉 `.tint(clay)` → 填充退回系统强调色**（实测裸 `Slider` = `#3275F0` 系统蓝；用户可把系统强调色设成**红**，而真红只许给真错误）—— 这个回归只能靠**真机走查 + state gallery** 兜住，测试兜不住。写进走查清单，别假装测试覆盖了它。
+  - **实证记录（2026-07-12，本机 key 窗口 + `screencapture` 真实像素）**：`.tint(clay)` 在 macOS `Slider` 上**确实生效** —— SwiftUI 的 macOS Slider 由 `NSSlider` 支撑，`.tint` 转发到公开属性 `NSSlider.trackFillColor`（`AppKit/NSSlider.h:30`，macOS 10.12.2+），渲染色 `#C7795B`（Display P3 → sRGB 偏移）。
+    **方法学**：同一探针在**离屏 / 非 key 窗口**下渲染成**灰色**（macOS 对非活跃窗口的强调色去饱和），会得出「`.tint` 无效」的错误结论。**任何控件视觉验证必须在 key + active 窗口下做。**
+    **同时实证**：`Slider(…, step:)` 会被直译成 `NSSlider.numberOfTickMarks`，在轨道下方画出一条刻度带（`step: 0.05` → **21 个点**），撑破本节的「行高 ~28pt」。**控件行不得使用 `step:`** —— 档位吸附交给状态机，视图侧只转发。
+  - **动效：控件行不加 `.animation()`**。连续拖拽必须跟手无动画；值的吸附 / 回滚一律**瞬跳**。这不只是偏好 —— `PanelView.swift:63-69` 白纸黑字写着「本视图树零动画，所以不读 `accessibilityReduceMotion`，**这条注释就是绊线**」。给控件行加动画 = 必须同时接上 reduced-motion 门控，代价远大于收益。
 
 ## Motion（动效）
 
@@ -196,3 +211,4 @@
 | 2026-07-11 | **（同日第一次修法，已推翻 · 存档）** 事件字形 tile 底 = 中性 `surface-2` | 推翻理由：亮色 `surface-2` `#FFFDF7` 对 `panel` `#FFFDF8` = **1.0006:1**，是同一个颜色 —— tile 在亮色下**整个消失**，「过了 ≥3:1」靠的是字形直接落在面板上，等于用「删掉 tile」通过对比度；与「行结构」的「事件字形 tile 24pt, **事件色**」冲突，并连带让试听键「已启用」的圆形底在亮色下消失。教训：**只断言字形对比度不够，tile 存不存在也得钉住** → 新增 tile 可见性断言 |
 | 2026-07-11 | 真红 `error` **只做图标**，配套文案改用 `text-2`；真红色值不变 | 亮色 `#E0453A` 对 `panel`/`surface-2` = 4.07:1/4.06:1：过非文本 ≥3:1、**不过**正文 ≥4.5:1，而它此前被当正文用（包卡「文件丢失」、onboarding 详情）。`text-2` 5.54:1 过 AA |
 | 2026-07-11 | **（待决 · 未改）** drop-zone hover「文字转黏土」与「行内文字 ≥4.5:1」冲突登记为 known gap | 亮色 `clay` `#C4633C` = 3.97:1（过 ≥3:1、不过 ≥4.5:1）。clay 同时是品牌唯一强调 + `Notification` 事件色，改动牵连品牌与事件身份，须用户拍板；已在 drop-zone 条列出三个候选解法，`ContrastSuite` 放 known-gap 断言（≥3:1 启用、≥4.5:1 注释 + 自毁提醒），`TODOS.md` P3 |
+| 2026-07-12 | 新增 Layout「**控件行（Control Row）**」一节：原生控件保留系统外壳（轨道 / 拇指 / 焦点环 / 按下态不自绘），品牌只经 `.tint(clay)` 施加；行 = 标签 + Spacer + 控件、**无事件色 tile**、无图标、无数值读数、瞬跳无动画 | 主音量滑块（`PLAN-MASTER-VOLUME.md`）暴露出 DESIGN.md 对**交互控件**零规范。但缺的不是「滑块长什么样」——**这套系统的既定立场本就是原生**（「App 内 UI = 系统 SF Pro」/「事件字形优先 SF Symbols，保原生」），且 `OnboardingView` 主 CTA 已经是「原生外壳 + clay tint」的**既成先例**。故本节不发明控件解剖，只把先例升格成规则，并钉死四个**真会踩的**坑：① 喇叭字形已被试听键 + 静音钮用掉两枚，控件行再上就是同屏第三套；② 数值读数不做 `tabular-nums` + 定宽会横向抖动；③ Dynamic Type 复用 `rowWrapsToTwoLines`，不新立字段；④ 加动画会引爆 `PanelView.swift:63-69` 的零动画绊线（须同时接 reduced-motion 门控）。一并替代 `/plan-design-review`（评估后判定不跑：真视觉缺口仅 4–5 条且均已被既有先例逼到唯一解） |
