@@ -92,13 +92,23 @@ func runSetupSuites() {
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
                 lockFile: claudioRoot.appendingPathComponent("play.lock"))
+            // T17d：这个 fixture 原本一个包都没有，而 `alreadyInstalled` 会把整个复制块跳过 ——
+            // 于是它描述的其实是一台**装完也不会响**的机器，只是当年没人问这个问题。现在
+            // `.noAvailablePack` 会拦住它（这正是该拦的），所以把 fixture 补成它本来想描述的样子：
+            // 一台**已经装好、包也在**的机器再跑一次 setup。本 suite 要钉的东西一个字没变 ——
+            // `copiedBinary: false` + `copiedPacks: []`，也就是「重跑不该重复复制任何东西」。
+            writeFixture(
+                #"{ "schema": 1, "id": "minimal-chime", "events": {} }"#,
+                to: environment.userPacksDirectory
+                    .appendingPathComponent("minimal-chime", isDirectory: true)
+                    .appendingPathComponent("manifest.json"))
 
             let result = performFirstRunSetup(environment: environment)
             expect(
                 result
                     == .success(
                         .completed(
-                            copiedBinary: false, copiedPacks: [], selectedPack: nil,
+                            copiedBinary: false, copiedPacks: [], selectedPack: "minimal-chime",
                             hooksOutcome: .installed)),
                 "re-running setup from the already-installed location must skip copy steps, got \(result)"
             )
@@ -106,7 +116,7 @@ func runSetupSuites() {
     }
 
     suite(
-        "performFirstRunSetup: not running from a bundle (no sibling packs/) still copies the binary, but skips packs"
+        "performFirstRunSetup: not running from a bundle (no sibling packs/) still copies the binary — but refuses to write hooks with zero packs"
     ) {
         withTempDirectory { root in
             // Regression test (Codex + Claude adversarial review, /ship pre-landing:
@@ -114,6 +124,13 @@ func runSetupSuites() {
             // NOT be gated on a sibling packs/ directory existing. A dev build (or a
             // corrupted bundle missing Resources/packs/) still needs the binary copied to
             // the fixed destination — otherwise hooks get installed pointing at nothing.
+            //
+            // T17d（第四轮对抗评审 · Codex）**推翻了这条测试原来的结论，但没有推翻它的本意**。
+            // 它当年防的是「hooks 指向一个不存在的二进制」，答案是「无论如何都先把二进制复制过去」。
+            // 它没问的是下一个问题：二进制在了，**可是一个声音包都没有**呢？答案是同样的静默——
+            // `play` 拿不到包返回 `.notReady`，fire-and-forget 拿不到退出码，用户永远听不到一声响，
+            // 而面板亮着绿点。所以现在：二进制照复制（下面第二条断言原样保留，仍然钉着它），
+            // 但 hooks **一条都不写**，并且大声失败。与 `.binaryQuarantined` 同一条纪律。
             let executablePath = root.appendingPathComponent("some-random-place/claudio")
             try? FileManager.default.createDirectory(
                 at: executablePath.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -121,17 +138,19 @@ func runSetupSuites() {
             let environment = makeEnvironment(root: root, executablePath: executablePath)
 
             let result = performFirstRunSetup(environment: environment)
-            expect(
-                result
-                    == .success(
-                        .completed(
-                            copiedBinary: true, copiedPacks: [], selectedPack: nil,
-                            hooksOutcome: .installed)),
-                "running with no sibling packs/ directory must still copy the binary (just skip packs), got \(result)"
-            )
+            guard case .failure(.noAvailablePack) = result else {
+                expect(false, "零个声音包的 setup 必须大声失败，绝不能报成功，得到 \(result)")
+                return
+            }
+            // 本 suite 的原始本意，一字未改：复制二进制**不能**被 packs/ 目录的存在与否卡住。
             expect(
                 FileManager.default.fileExists(atPath: environment.claudioBinaryDestination.path),
                 "the binary must actually exist at the fixed destination even with no sibling packs/")
+            // 新长出来的牙：失败必须发生在写 hooks **之前**。settings.json 压根不该被创建出来——
+            // 一个注定哑掉的安装，绝不允许在用户的 Claude Code 里留下任何痕迹。
+            expect(
+                !FileManager.default.fileExists(atPath: environment.settingsFile.path),
+                "零个声音包时必须在写 hooks 之前就失败——settings.json 不该被创建")
         }
     }
 

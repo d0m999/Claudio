@@ -1,5 +1,23 @@
 # TODOS
 
+## 静默失败
+
+### 一条接管失败只活在内存里 —— app 一退出就没了，而磁盘上那半成品还在
+
+**What:** `OnboardingActionState.failed` 是 `OnboardingViewModel` 的一个 `@Published` 属性，**不落盘**。T17d 保证了它活到「用户真的看过一次」为止，但那条命的上限是**进程的寿命**。用户点「接管」→ 切走 → 安装在后台失败 → **他直接 ⌘Q 退出了 Claudio**（或重启电脑）→ 下次启动 `actionState` 是 `.idle`，那条失败原因**永远消失**。
+
+**Why:** 这不只是「少看一条错误」。`performFirstRunSetup` 的失败点大多在**中途**（二进制、内置包、`config.json` 可能都已经落盘了），而失败后 `refresh()` 会重新探测磁盘 —— 一台「二进制在位 + 四条 hook 都在，但选包那步失败了」的机器会被探测成 `.installed`：**下次启动，面板亮绿点说「已经接好了」，而用户听不到任何声音，也没有任何东西告诉他为什么。** 这正是 T17 存在的理由那句话（「装完后是哑的」）的第五个形状，只是隔了一次重启。
+
+`MenuBarController.popoverDidClose` 在 ⌘Q 路径上也不保证被送达（`ClaudioGUIAppDelegate` 没有 `applicationWillTerminate`），所以连「隐藏」这一步都不一定发生 —— 但那不重要：`actionState` 本来就不过夜。
+
+**Context:** 2026-07-12 T17d 对抗评审顺带发现（Codex 的两条 P1 之外）。当前的缓解是 `doctor`：它会如实报出隔离 / 二进制缺失。但 `doctor` 是一条**用户得先知道自己有问题**才会去跑的命令，而这个 bug 的全部要害就是他不知道。
+
+**可能的修法**（未定，需要一次设计决策）：① 把最后一条失败写进 `~/.claudio/last-setup-error.json`，启动时读一次、渲染一次、读完即删；② 或者反过来 —— 别修失败的寿命，修**探测**：让 `detectOnboardingState` 也检查「有没有选中的包 + 那个包解析得出来」，于是一台哑机器根本不会被报成 `.installed`（这条更根治，而且顺带盖住「用户手动删了包目录」这类与 setup 无关的情形）。②看起来明显更对，但它会动 onboarding 状态机的定义，属于 T17 之外的范围。
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** None
+
 ## Ship / CI
 
 ### CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0

@@ -740,6 +740,59 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   M5 失败不记动作 → 2 红；M6 detector 不拦隔离 → 1 红；M7 拿掉无条件解除隔离 → 2 红）。M2 / M3 / M6
   在修复前**全都是绿的**。
 
+  ### T17d — 第四轮对抗评审（`/codex review 354d0b4,3e433f3,f09799b`，2026-07-12）
+
+  外部模型（Codex）独立评审前三轮的合并 diff，两条 P1 全部经本地复现证实。**第四轮又是同一个家族**：
+  前三轮分别是死按钮、死按钮的复活、没人渲染的失败格子；这一轮是**一条渲染过零帧的失败被当成「用户看过了」清掉**。
+
+  - **【P1 · 本次提交自己造的】面板关着时诞生的失败，会在用户第一次有机会看到它之前被清掉。**
+    T17c 引入 `clearConsumedFailure()` 来解决「一条陈旧的接管失败永久挂在一张已经装好的面板上」，
+    做法是「面板重开 = 上一条失败已经被看过了 → 清掉」。**那不是一个事实，那是一个假定**，而它在最要命的
+    一条路径上是假的：`popover.behavior = .transient`（切个 app 就关），而 CTA 那句
+    `Task { await viewModel.performPrimaryAction() }` 是**不随视图销毁而取消**的非结构化 Task。用户点完
+    「接管」就切走 → 面板当场关闭 → 写盘继续跑 → 失败 → `actionState = .failed`，屏幕上**没有一个像素
+    属于它** → 用户回来重开 → 第一件事就是把它清掉。**用户永远不知道接管失败了。**
+    修法：不再假定，而是**在失败诞生的那一刻就记录「当时有没有人在看」**（`failureHasBeenSeen = isPanelVisible`）。
+    - 这需要仓库里此前**根本不存在**的一半信号：`PanelFocusCoordinator.hideCount` +
+      `MenuBarController.popoverDidClose` 里的 `notePanelHidden()`。⚠️ **它必须是那个方法的第一行** ——
+      下面那句 `guard NSApp.isActive` 在「切到别的 app 导致关闭」这条路径上会提前 return，而那恰恰是本
+      bug 的主路径。挪到 guard 之后 = 编译绿、`contains()` 照样绿、bug 原样复活。`ViewWiringSuite`
+      因此**断言的是顺序**（比较两个字符串的位置），不只是存在性。
+    - **标记刻意不进 `.failed` 的 payload**：① `PreviewFixtures.onboardingActionStateCoverage` 只按
+      `detail == nil` 分标签，新维度产生不了新 label → `assertExhaustive()` 会在新变体一帧没渲染过的情况下
+      照样全绿（正是 `PreviewFixtures` 自己写着在防的那个形状）；② 改写 `actionState` 会二次触发
+      `.onChange(of: actionState)` → VoiceOver 把同一条失败播报两遍。
+    - **也刻意不用 `.onAppear` 判断「真的渲染了」**：`PanelFocusCoordinator` 自己的文档早就写明 `NSPopover`
+      在 show/close 之间**不一定**重建内容视图层级、`@StateObject` 活满整个进程 —— 把正确性押在一个没实测过
+      的 AppKit 语义上，就是在造第五轮。
+    - 顺带补上 `clearConsumedFailure()` 从来没有过的**行为测试**（它此前唯一的守卫是一条文本绊线，
+      整套 harness 一次都没调用过它）。
+
+  - **【P1 · 07-10 就在的老洞，被 CTA 变成了主路径】零个声音包时，`performFirstRunSetup` 照样写 hooks 并报成功。**
+    `availablePackIDs.first` 为 nil 时没有 else 分支 → `selected_pack` 空 → `claudio play` 返回 `.notReady`
+    → fire-and-forget 拿不到退出码 → **每个事件静默无声**，而面板亮绿点（`detectOnboardingState` 只查
+    二进制 + hooks，不查包）。与 `.binaryQuarantined` **一字不差的后果**，却静静报成功。
+    新增 `SetupError.noAvailablePack`，在写 hooks 之前失败。
+    ⚠️ 这**推翻了一条既有回归测试的结论**（`SetupSuite`「no sibling packs/ still copies the binary」，
+    Codex + Claude 上一轮 `/ship` 对抗评审加的）—— 但**没有推翻它的本意**：二进制照常复制（那条断言原样
+    保留、仍然钉着），它当年防的是「hooks 指向一个不存在的二进制」，没问的是「hooks 指向一个有二进制、
+    却一个包都没有的安装」。同样的静默，另一个成因。新长出来的牙：断言 `settings.json` **压根不该被创建**。
+
+  - **【P2 · 我自己发现的，Codex 没提】`hasQuarantineAttribute` 把 `getxattr` 的每一种失败都读成「没盖章」。**
+    `ENOATTR`（真的没有）只是其中一种，`EPERM` / `EACCES` / `EIO` / 不支持 xattr 的文件系统全都返回 -1。
+    这条假阴性**恰好穿在这个文件想堵死的那条链上**：剥离后的回验用的就是它 → 假阴性 → 回验通过 → hooks
+    照写 → 二进制仍被 Gatekeeper 秒杀，`doctor` 也一起失明。现在只有 `ENOATTR` / `ENOENT` 算干净，其余
+    一律当成盖着章（宁可大声失败，也绝不静默放行）。判据抽成纯函数 `quarantineVerdict(getxattrReturned:errnoValue:)`
+    —— **不是为了好看，是为了它能被钉住**：EPERM 在临时目录里造不出来，判据留在 `hasQuarantineAttribute`
+    里的话，把 `default:` 改回 `false` 全套测试照样绿（实测确认）。
+
+  **5 条变异逐条实测过真的会红**（M1 `failureHasBeenSeen = isPanelVisible` → `= true`（旧假定）→ 主回归 suite 红；
+  M2 删 `notePanelHidden()` → 红；**M3 `notePanelHidden()` 仍在文件里、只挪到 `guard NSApp.isActive` 之后 →
+  只有顺序断言抓得住，`contains()` 照样绿**；M4 `quarantineVerdict` 的 `default:` 改回 `false` → 4 红；
+  M5 零包改回静默写 hooks → 红，且报错原文正是 Codex 描述的那个 outcome）。
+
+  测试：helper 971 → **978**，gui 809 → **826**，全绿；release 构建两个产品均零错误。
+
 ## Approved Mockups（视觉参照）
 
 | 屏 / 节 | Mockup Path | 方向 | 备注 |

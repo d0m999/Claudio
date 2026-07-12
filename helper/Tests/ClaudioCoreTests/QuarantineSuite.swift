@@ -103,6 +103,44 @@ func runQuarantineSuites() {
                     + " O_NOFOLLOW 是同一条「绝不顺着链接走出我们以为在的那棵树」的纪律")
         }
     }
+
+    // ── T17d：判据本身（`quarantineVerdict`）─────────────────────────────────────
+    //
+    // 上一版是 `getxattr(…) >= 0` 一行，它把 `getxattr` 的**每一种失败**都读成「没盖章」。
+    // 而这条假阴性恰好穿在这个文件想堵死的那条链上：剥离后的回验用的就是它 → 假阴性 → 回验通过
+    // → 四条 hooks 照写 → 二进制仍被 Gatekeeper 秒杀 → 每个事件静默失声，连 doctor 都说没事。
+    //
+    // EPERM / EIO / 不支持 xattr 的文件系统，在一个临时目录里造不出来 —— 所以判据被从系统调用里
+    // 抽成了纯函数。**这不是为了好看，是为了这次修复能被钉住**：判据留在 `hasQuarantineAttribute`
+    // 里的话，把 `default:` 改回 `false`，全套测试照样绿（实测确认）。
+
+    suite("quarantineVerdict: getxattr 成功 = 这条路径上真的有章") {
+        expect(
+            quarantineVerdict(getxattrReturned: 32, errnoValue: 0),
+            "返回值 >= 0 = 属性存在（返回的是属性长度）")
+    }
+
+    suite("quarantineVerdict: ENOATTR / ENOENT 是仅有的两种「干净」") {
+        expect(
+            !quarantineVerdict(getxattrReturned: -1, errnoValue: ENOATTR),
+            "ENOATTR = 真的没有这个 xattr —— 本机构建的 app 从来就没被盖过章，这是最常见的情况")
+        expect(
+            !quarantineVerdict(getxattrReturned: -1, errnoValue: ENOENT),
+            "ENOENT = 文件压根不在，也就没有属性可言（「不在」由 isRunnableHelperBinary 负责报错）")
+    }
+
+    suite("quarantineVerdict【假阴性回归】读不出来 ≠ 干净：其他 errno 一律当成盖着章") {
+        for (code, name) in [
+            (EPERM, "EPERM"), (EACCES, "EACCES"), (EIO, "EIO"), (ENOTSUP, "ENOTSUP"),
+        ] {
+            expect(
+                quarantineVerdict(getxattrReturned: -1, errnoValue: code),
+                "\(name)：我们**没能知道**这条路径上有没有章，而上一版会把它读成「干净」→ 回验假通过"
+                    + " → hooks 照写 → 二进制被 Gatekeeper 秒杀 → 用户永远听不到一声响，"
+                    + "doctor 还说一切正常。宁可大声失败一次（它会告诉用户怎么手动 xattr -dr），"
+                    + "也绝不静默放行。")
+        }
+    }
 }
 
 // MARK: - performFirstRunSetup 侧：装出来的东西必须跑得起来
@@ -191,6 +229,15 @@ func runSetupQuarantineSuites() {
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("dot-claude/settings.json"),
                 lockFile: claudioRoot.appendingPathComponent("play.lock"))
+            // T17d：这台机器上得**真的有一个包**，否则 `.noAvailablePack` 会先一步拦下这次重跑
+            // （而且拦得对：没有包的安装装完也是哑的）。本 suite 要钉的是「复制被跳过时，剥离仍然
+            // 发生」，跟包无关 —— 所以把 fixture 补成它本来就该描述的那台机器：已经装好、包也在，
+            // 只是二进制上留着一个（修复前的安装留下的）隔离章。
+            writeFixture(
+                #"{ "schema": 1, "id": "minimal-chime", "events": {} }"#,
+                to: environment.userPacksDirectory
+                    .appendingPathComponent("minimal-chime", isDirectory: true)
+                    .appendingPathComponent("manifest.json"))
 
             let result = performFirstRunSetup(environment: environment)
             guard case .success = result else {

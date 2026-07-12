@@ -123,6 +123,23 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
     /// shows a green dot, passes `doctor` — and never makes a sound. A loud failure here is the
     /// only honest outcome.
     case binaryQuarantined(reason: String)
+    /// 一个包都没有，而且此前也从没选过包 —— 于是这次 setup 会写下四条 hooks，指向一个
+    /// **`selected_pack` 为空**的 config。
+    ///
+    /// 后果与 ``binaryQuarantined`` **一字不差**：`claudio play` 拿不到包会返回 `.notReady`，
+    /// 而 `play` 是 fire-and-forget（拿不到退出码、不写日志），所以每一个 Claude Code 事件都会
+    /// **静默无声**；面板照样亮绿点说「已经接好了」（`detectOnboardingState` 只查二进制 + hooks，
+    /// 不查包）。这正是 T17 存在的理由那句话——「装完后是哑的」——的又一个形状。
+    ///
+    /// 所以 hooks 在这里同样**不写**。这不是保守，这是与 ``binaryQuarantined`` 同一条纪律：
+    /// **只要这次安装注定是哑的，就不许把它报成成功。**
+    ///
+    /// ⚠️ 这条错误**推翻了一条既有的回归测试的断言**（`SetupSuite`「no sibling packs/ still copies
+    /// the binary」，Codex + Claude 上一轮 `/ship` 对抗评审加的）。那条测试的**本意**原样成立、
+    /// 且仍被钉着：二进制的复制**不能**被 packs/ 目录的存在与否卡住（它在这条失败返回之前就已经
+    /// 落盘了）。它当年防的是「hooks 指向一个不存在的二进制」；它没想到的是「hooks 指向一个有
+    /// 二进制、却没有任何包的安装」—— 同样的静默，另一个成因。
+    case noAvailablePack(reason: String)
     case useFailure(UseError)
     case installFailure(SettingsUpdateError)
 
@@ -134,6 +151,8 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
             "复制内置声音包失败：\(reason)"
         case .binaryQuarantined(let reason):
             "macOS 仍在隔离 ~/.claudio/bin/claudio，它一执行就会被系统杀掉（所以没有写入任何 hooks）：\(reason)"
+        case .noAvailablePack(let reason):
+            "一个声音包都没有，装完也不会有任何声音（所以没有写入任何 hooks）：\(reason)"
         case .useFailure(let error):
             "首次默认选包失败：\(error.description)"
         case .installFailure(let error):
@@ -284,15 +303,24 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
                         at: environment.userPacksDirectory.appendingPathComponent(
                             $0, isDirectory: true))
             }
-        if let firstAvailable = availablePackIDs.first {
-            switch selectPack(
-                firstAvailable, configFile: environment.configFile,
-                userPacksDirectory: environment.userPacksDirectory,
-                lockFile: environment.lockFile)
-            {
-            case .success(.selected(let id)): selectedPack = id
-            case .failure(let error): return .failure(.useFailure(error))
-            }
+        guard let firstAvailable = availablePackIDs.first else {
+            // 从没选过包，而且一个包都找不到 —— 再往下走就会写 hooks，然后每个事件静默无声。
+            // 与 `.binaryQuarantined` 同一条纪律：注定是哑的安装，不许报成功。见 ``noAvailablePack``。
+            return .failure(
+                .noAvailablePack(
+                    reason:
+                        "\(environment.userPacksDirectory.path) 里没有任何可用的声音包"
+                        + "（app 包里的内置包可能缺失或损坏）。"
+                        + "放一个包进去再跑一次，或者重新安装 Claudio。"
+                ))
+        }
+        switch selectPack(
+            firstAvailable, configFile: environment.configFile,
+            userPacksDirectory: environment.userPacksDirectory,
+            lockFile: environment.lockFile)
+        {
+        case .success(.selected(let id)): selectedPack = id
+        case .failure(let error): return .failure(.useFailure(error))
         }
     }
 

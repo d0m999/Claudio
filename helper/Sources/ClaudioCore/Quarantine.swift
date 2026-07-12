@@ -45,8 +45,44 @@ public let quarantineAttributeName = "com.apple.quarantine"
 /// `XATTR_NOFOLLOW`: ask about the path itself, never a symlink's target — the same
 /// "never follow a link out of the tree we think we're in" stance `readRegularFileBounded`
 /// (`SafeFileRead.swift`) takes with `O_NOFOLLOW`.
+///
+/// ## 为什么不是 `getxattr(…) >= 0`（T17d 对抗评审）
+///
+/// 上一版就是那一行，它把 `getxattr` 的**每一种失败**都读成「没盖章」。而 `ENOATTR`（真的没有
+/// 这个 xattr）只是其中一种：`EPERM` / `EACCES` / `EIO` / 一个不认识 xattr 的文件系统，全都返回
+/// -1。于是「读不出来」被悄悄翻译成「干净」。
+///
+/// 这条假阴性**恰好穿在这个文件想堵死的那条链上**：``performFirstRunSetup`` 剥完隔离后要回头验
+/// 一次，验的就是这个谓词。它一旦假阴性 → 回验通过 → 四条 hooks 照写 → 二进制仍被 Gatekeeper
+/// 秒杀 → 每个事件静默失声。而 `doctor` 用的也是它，于是连诊断轨迹都一起没了。
+///
+/// 所以：**只有明确的「这条路径上没有这个属性」才算干净**（`ENOATTR`；`ENOENT` = 文件压根不在，
+/// 也没有属性可言，而「不在」这件事由 ``isRunnableHelperBinary(at:)`` 负责报错）。**任何其他
+/// errno 一律当成「盖着章」** —— 方向是刻意选的：宁可大声失败一次（setup 报 `.binaryQuarantined`、
+/// doctor 报硬失败，两者都告诉用户怎么手动 `xattr -dr`），也绝不静默放行一个会被系统杀掉的二进制。
 public func hasQuarantineAttribute(at url: URL) -> Bool {
-    getxattr(url.path, quarantineAttributeName, nil, 0, 0, XATTR_NOFOLLOW) >= 0
+    let result = getxattr(url.path, quarantineAttributeName, nil, 0, 0, XATTR_NOFOLLOW)
+    return quarantineVerdict(getxattrReturned: result, errnoValue: errno)
+}
+
+/// `getxattr` 的 (返回值, errno) → 「这条路径上有没有章」。
+///
+/// **判据从系统调用里抽出来，是为了让它能被钉住。** `EPERM` / `EACCES` / `EIO` / 不支持 xattr 的
+/// 文件系统 —— 这些 errno 在一个临时目录的单元测试里造不出来，而 T17d 修的**恰恰就是判据本身**
+/// （上一版把它们统统读成「干净」）。判据留在 `hasQuarantineAttribute` 里，就等于把这次修复留在
+/// harness 够不到的地方：把 `default:` 改回 `false`，全套测试照样绿 —— 实测确认过。
+///
+/// 语义见 ``hasQuarantineAttribute(at:)`` 的文档：只有明确的「没有这个属性」（`ENOATTR`）和
+/// 「文件压根不在」（`ENOENT`）才算干净；**任何其他 errno 一律当成盖着章**，宁可大声失败，
+/// 也绝不静默放行一个会被 Gatekeeper 秒杀的二进制。
+public func quarantineVerdict(getxattrReturned result: Int, errnoValue: Int32) -> Bool {
+    if result >= 0 { return true }
+    switch errnoValue {
+    case ENOATTR, ENOENT:
+        return false
+    default:
+        return true
+    }
 }
 
 /// Strips `com.apple.quarantine` from `url`, and — if `url` is a directory — from everything
