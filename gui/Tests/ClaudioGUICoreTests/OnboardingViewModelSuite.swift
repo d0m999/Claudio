@@ -112,14 +112,23 @@ func runOnboardingViewModelSuites() async {
         }
     }
 
-    suite("refresh(): reflects a NEW environment if `environment` itself is reassigned") {
+    // T17c：`environment` 现在是 `let`，「换一个环境」= 重建 view-model。
+    //
+    // 上一版这里有一条 suite 叫「refresh(): reflects a NEW environment if `environment` itself is
+    // reassigned」—— 它测的是一条**逃生舱**，而那条逃生舱会当场打破 `OnboardingActionEnvironment`
+    // 文档里白纸黑字的承诺（「『探测器在看哪个文件』和『安装器在写哪个文件』**结构上不可能分叉**」）：
+    // runner 在 init 时就把自己那份环境**按值**冻住了，`viewModel.environment = …` 只换掉探测那一半，
+    // 于是探测读路径 A、安装写路径 B，零编译错误、零红灯 —— 正是那句承诺声称已经消灭的形状。
+    //
+    // `refresh()` 真正的契约（「磁盘变了就得看见」）由上面那条 suite 覆盖，不需要可变的 environment。
+    suite("换环境 = 重建 view-model（environment 是 let，探测与安装不可能只换一半）") {
         withTempDirectory { root in
             let firstEnvironment = makeReadyEnvironment(in: root)  // helperMissing
-            let viewModel = OnboardingViewModel(
+            let first = OnboardingViewModel(
                 environment: firstEnvironment, actionRunner: ScriptedRunner())
-            expect(viewModel.state == .helperMissing, "setup: must start as helperMissing")
+            expect(first.state == .helperMissing, "setup: must start as helperMissing")
 
-            // A completely different fixture, already fully installed.
+            // 一份完全不同的、已经装好的 fixture。
             let secondRoot = root.appendingPathComponent("second-fixture", isDirectory: true)
             let secondEnvironment = makeReadyEnvironment(in: secondRoot)
             writeExecutableFile(at: secondEnvironment.claudioBinaryPath)
@@ -131,11 +140,14 @@ func runOnboardingViewModelSuites() async {
             }.joined(separator: ",\n")
             writeFixture("{ \"hooks\": { \(entries) } }", to: secondEnvironment.settingsFile)
 
-            viewModel.environment = secondEnvironment
-            viewModel.refresh()
+            let second = OnboardingViewModel(
+                environment: secondEnvironment, actionRunner: ScriptedRunner())
             expect(
-                viewModel.state == .installed,
-                "refresh() must use the reassigned `environment`, not the one passed to init")
+                second.state == .installed,
+                "为新环境重建的 view-model 必须探测新环境")
+            expect(
+                first.state == .helperMissing,
+                "旧的那个不受影响 —— 每个 view-model 与它的 runner 绑定在同一份环境上，终身不变")
         }
     }
 

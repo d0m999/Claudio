@@ -61,13 +61,20 @@ public struct PanelView: View {
 
     // MARK: - Reduced motion / reduced transparency (ENGINEERING.md T15 D5)
     //
-    // No `@Environment(\.accessibilityReduceMotion)` read here: this view tree (PanelView /
-    // EventRowView / PackGalleryView / OnboardingView) applies NO `.animation()`/
-    // `withAnimation` anywhere — DESIGN.md's "招牌动效" (pitch-follow motion, EQ-bar bounce,
-    // visual waveform replay) isn't implemented by any T-numbered task yet, so there is
-    // nothing implicit to suppress today. This is a real compliance state, not an oversight:
-    // if a future task adds any animation to this tree, it MUST gate it behind
-    // `accessibilityReduceMotion` at that point — this comment is the tripwire.
+    // 这条绊线响了，而且是被 T17 自己踩响的（T17c 修复）。
+    //
+    // 它此前写的是：「this view tree applies NO `.animation()`/`withAnimation` anywhere … if a
+    // future task adds any animation to this tree, it MUST gate it behind
+    // `accessibilityReduceMotion` at that point — this comment is the tripwire.」而 T17 往这棵树里
+    // 加了**两个** `ProgressView()`（`OnboardingView.ctaButton` 与本文件的 `disconnectRow`）——
+    // 一个无限旋转动画 —— 既没有 gate，也没有回来改这段话。一条自己被跨过去还留在原地的绊线，
+    // 比没有绊线更坏：它是一句已经不成立的断言，而下一个人会信它。
+    //
+    // 现在的状态：这棵树里**唯一**的动画是那两颗 in-flight spinner，两者都 gate 在下面这个
+    // `reduceMotion` 后面。降级路径是 DESIGN.md 写的「静态字形与瞬时状态切换」—— 进行态本来就已经
+    // 由文案（「正在接管…」/「正在断开…」）与禁用态承担了，那圈转动只是锦上添花。
+    // **规矩不变**：再往这棵树里加任何动画，必须在那一点 gate 住 `reduceMotion`。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     //
     // Reduced transparency: already satisfied structurally, not just here — `.background(
     // ClaudioColor.panel(colorScheme))` below is a near-solid opaque color, never a
@@ -201,6 +208,10 @@ public struct PanelView: View {
         // `focusCoordinator.showCount` every time the popover becomes visible — the ONE place
         // "the popover just (re)opened, re-read the disk" is handled.
         .onChange(of: focusCoordinator.showCount) { _ in
+            // 面板重开 = 上一条失败已经被看过了，可以忘掉（T17c）。必须在 `refresh()` **之前** ——
+            // 清掉 `.failed` 会改变 `hasDetailToggle`，而 `applyFirstFocus()` 要按清理**之后**的
+            // 焦点序落焦，否则光标会落在一颗刚被清掉的「查看原因」上。
+            onboardingViewModel.clearConsumedFailure()
             refresh()
             applyFirstFocus()
             announcePanel()
@@ -368,12 +379,12 @@ public struct PanelView: View {
     /// 所以 `OnboardingView` 里那条 `ActionFailureRow` 够不着它。
     @ViewBuilder
     private var disconnectRow: some View {
-        // 只渲染**断开**的失败。一次**接管**失败绝不能漏进这里：用户可能在那次失败之后用别的办法
-        // （Terminal / 另一台机器同步）把它装好了，那条陈旧的「这一步没能完成」会永久挂在一张
-        // 一切正常的面板底部（``onboardingFailureBelongsHere(actionState:branch:)``）。
-        if let failure = onboardingFailureBelongsHere(
-            actionState: onboardingViewModel.actionState, branch: .disconnect)
-        {
+        // 渲染**任何**失败，不只是断开的（T17c）。上一版这里只认 `branch: .disconnect`，理由是
+        // 「一条陈旧的接管失败不该永久挂在一张已经装好的面板底部」—— 顾虑是真的，答案是错的：它让
+        // 一次**真的**接管失败（失败后 state 恰好落在 `.installed`）变得**一个像素都没有**。
+        // 陈旧问题现在由时效性回答（``OnboardingViewModel/clearConsumedFailure()``，面板重开即清），
+        // 而不是靠在这里把它丢掉。
+        if let failure = onboardingVisibleFailure(actionState: onboardingViewModel.actionState) {
             ActionFailureRow(
                 message: failure.message, detail: failure.detail,
                 isShowingDetail: onboardingViewModel.isShowingDetail,
@@ -385,42 +396,50 @@ public struct PanelView: View {
 
         let intent = onboardingSecondaryIntent(for: onboardingViewModel.state)
         let isRunning = onboardingViewModel.isRunning(intent)
-        let title =
-            isRunning
-            ? onboardingActionRunningTitle(.disconnect)
-            : (onboardingViewModel.copy.secondaryActionTitle ?? "断开连接")
+        // copy 是按钮文案的**单一真相源**，没有兜底字面量（T17c）。上一版写的是
+        // `?? "断开连接"` —— 一条死分支（`.installed` 的 `secondaryActionTitle` 恒非 nil），
+        // 它唯一的效果是：哪天有人把那条 copy 改成 `nil`（= 「这个态没有这颗按钮」），面板照样会
+        // 用硬编码字面量把按钮画出来，copy 与视图当场分叉且零信号。copy 说没有，就真的不画。
+        if let baseTitle = onboardingViewModel.copy.secondaryActionTitle {
+            let title = isRunning ? onboardingActionRunningTitle(.disconnect) : baseTitle
 
-        Button {
-            Task { await onboardingViewModel.performSecondaryAction() }
-        } label: {
-            HStack(spacing: 6) {
-                if isRunning {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityHidden(true)
+            Button {
+                Task { await onboardingViewModel.performSecondaryAction() }
+            } label: {
+                HStack(spacing: 6) {
+                    // `reduceMotion` 时不画 spinner（T17c）：这棵视图树的「无动画」绊线注释（见 body
+                    // 上方）立下的规矩是「若将来往这棵树里加动画，**必须**在那一点 gate 住
+                    // `accessibilityReduceMotion`」。`ProgressView` 是一个无限旋转动画，它是这棵树里
+                    // 的第一个。降级路径正是 DESIGN.md 写的「静态字形与瞬时状态切换」—— 而进行态本来
+                    // 就已经由文案（「正在断开…」）承担了，不靠那圈转动。
+                    if isRunning, !reduceMotion {
+                        ProgressView()
+                            .controlSize(.small)
+                            .accessibilityHidden(true)
+                    }
+                    Text(title)
+                        .font(.system(size: 11 * typeScale))
                 }
-                Text(title)
-                    .font(.system(size: 11 * typeScale))
+                .frame(maxWidth: .infinity)
+                // ≥24×24 命中区（a11y-architect FIX 6）。
+                .frame(minHeight: 24)
+                .padding(.vertical, 4)
+                .contentShape(RoundedRectangle(cornerRadius: 8))
             }
-            .frame(maxWidth: .infinity)
-            // ≥24×24 命中区（a11y-architect FIX 6）。
-            .frame(minHeight: 24)
-            .padding(.vertical, 4)
-            .contentShape(RoundedRectangle(cornerRadius: 8))
+            // DESIGN.md「次 CTA = ghost」：**必须有 1px 描边**。裸 `.plain` 会让这条全宽的、破坏性的
+            // 点击区在视觉上彻底消失 —— 用户看到的只是一行灰字，既不知道它是个按钮，也不知道它有多大。
+            // 只用既有 token（`hairline-strong` 描边 + `text-2` 文字），不新造颜色。
+            .buttonStyle(.plain)
+            .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(ClaudioColor.hairlineStrong(colorScheme), lineWidth: 1)
+            )
+            .disabled(onboardingViewModel.isPerformingAction)
+            .accessibilityLabel(title)
+            .accessibilityHint("摘掉 Claudio 的声音，Claude Code 的其它设置都保留")
+            .focused($focusedTarget, equals: .disconnect)
         }
-        // DESIGN.md「次 CTA = ghost」：**必须有 1px 描边**。裸 `.plain` 会让这条全宽的、破坏性的
-        // 点击区在视觉上彻底消失 —— 用户看到的只是一行灰字，既不知道它是个按钮，也不知道它有多大。
-        // 只用既有 token（`hairline-strong` 描边 + `text-2` 文字），不新造颜色。
-        .buttonStyle(.plain)
-        .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(ClaudioColor.hairlineStrong(colorScheme), lineWidth: 1)
-        )
-        .disabled(onboardingViewModel.isPerformingAction)
-        .accessibilityLabel(title)
-        .accessibilityHint("摘掉 Claudio 的声音，Claude Code 的其它设置都保留")
-        .focused($focusedTarget, equals: .disconnect)
     }
 
     /// One panel-level failure line — the 「拒绝行」 shape DESIGN.md already defines ("真红

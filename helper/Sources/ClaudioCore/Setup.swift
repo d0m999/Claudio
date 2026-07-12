@@ -237,11 +237,14 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
         }
     }
 
-    // Unconditional — deliberately OUTSIDE the `if !alreadyInstalled` block above.
+    // This is the ONLY place quarantine is stripped from the binary, and the ONLY place the strip
+    // is verified. `copySelfToFixedLocation` deliberately does NOT strip (see its own comment) —
+    // an earlier draft had it strip too, and this comment still claimed it did long after that
+    // line was deleted, which is exactly the kind of stale claim that gets the surviving one
+    // deleted next ("the copy path already handles it").
     //
-    // The copy path strips quarantine itself (`copySelfToFixedLocation`), so on a fresh install
-    // this is a second look at an already-clean file. It is here for the case that branch can't
-    // reach: a re-run where `alreadyInstalled` is true skips the copy ENTIRELY, so a destination
+    // Unconditional, and deliberately OUTSIDE the `if !alreadyInstalled` block above: a re-run
+    // where `alreadyInstalled` is true skips the copy ENTIRELY, so a destination
     // binary left quarantined by an earlier (pre-fix, or interrupted) install would never get
     // cleaned — setup would keep cheerfully re-writing hooks pointing at a binary macOS kills on
     // sight. "The bootstrap can always heal a broken install by re-running" is a promise this

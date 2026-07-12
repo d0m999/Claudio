@@ -110,6 +110,13 @@ public enum OnboardingActionState: Sendable, Equatable {
 /// 返回 `false` 的两种情形：① 压根没失败、或失败没带 detail（没有原因可看）；② 这个 state 的**次
 /// CTA 本身就是**「查看原因」（`.settingsNotWritable` / `.settingsParseFailure`）—— 再长一颗就是
 /// 两颗按钮做同一件事。
+///
+/// **它刻意不看 `action`，而这一点现在是对的**（T17c）：既然 ``onboardingVisibleFailure(actionState:)``
+/// 让两个渲染点都无条件画「有没有失败」，那么「这条失败行在不在屏幕上」与「哪个动作失败了」就彻底
+/// 无关了 —— 于是这个函数（决定**焦点序**里有没有那颗按钮）与那个函数（决定**渲染**）不可能再给出
+/// 矛盾答案。上一版它们会：`.failed(.takeOver)` × `.installed` 时这里返回 `true`、把 `.revealDetail`
+/// 塞进焦点序，而当时没有任何视图声明 `.focused(…, equals: .revealDetail)` —— 面板一打开，键盘焦点
+/// 落进一个不存在的控件里。
 public func onboardingShowsFailureDetailToggle(
     state: OnboardingState, actionState: OnboardingActionState
 ) -> Bool {
@@ -117,18 +124,48 @@ public func onboardingShowsFailureDetailToggle(
     return onboardingSecondaryIntent(for: state) != .revealDetail
 }
 
-/// 一次失败的动作，该由面板的**哪个分支**渲染。
+/// 此刻该被画出来的那条失败 —— **与是哪个动作失败了无关**。
 ///
-/// `.installed` 时 `PanelView` 渲染 `operationalPanel`（onboarding 卡根本不出现），所以断开失败
-/// 只能画在那里；其余状态渲染 onboarding 卡，接管失败画在那里。一次**接管**失败绝不能漏进一张
-/// 已经装好的面板 —— 用户可能在失败之后用别的办法（Terminal / 另一台机器同步）装好了，那条陈旧的
-/// 「这一步没能完成」会永久挂在一张一切正常的面板上。
-public func onboardingFailureBelongsHere(
-    actionState: OnboardingActionState, branch: OnboardingDiskAction
+/// ## 这个函数替换掉的那个 bug（T17c 对抗评审，实测复现）
+///
+/// 上一版是 `onboardingFailureBelongsHere(actionState:branch:)`：它按 `action` 把失败**分派**给
+/// 两个渲染点之一（接管失败 → onboarding 卡；断开失败 → 运行态面板底部）。推理是对的（`.installed`
+/// 只渲染 `operationalPanel`，onboarding 卡根本不在屏幕上），**结论是错的** —— 因为它默认了
+/// 「哪个动作失败」与「失败之后 state 落在哪」是同一件事。它们不是：`runDiskAction` 在失败之后
+/// **无条件重新探测磁盘**，而磁盘不欠我们这个人情。
+///
+/// 于是矩阵里有两个格子**没有任何视图认领**：
+///
+///     .failed(.takeOver)   × state == .installed   → 无人渲染
+///     .failed(.disconnect) × state != .installed   → 无人渲染
+///
+/// 第一格是**可达的、且这次提交自己新造出来的**：quarantine 检测让一台「二进制被盖章」的机器
+/// 报 `.helperMissing`（hooks 本来就在），用户点「修复」→ `performFirstRunSetup` 复制完二进制、
+/// 解除隔离通过 → 在选默认包 / 写 hooks 那一步撞上 `play.lock`（TODOS 里那条 P1）→ 失败返回。
+/// `refresh()` 一探测：二进制在位、没盖章、四条 hook 都在 → **`.installed`**。面板于是切到运行态、
+/// 亮起绿点说「已经接好了」，而 `config.json` 压根没写、一个包都没选中 —— 用户永远听不到一声响，
+/// 失败原因停在 `actionState` 里，没有任何一个像素属于它。
+///
+/// **这正是 T17 存在的理由那句话的第三个形状**：「装完后是哑的」。前两次是死按钮，这次是死错误。
+///
+/// ## 修法：不再分派，而是让「有失败就画」成为结构不变式
+///
+/// 两个渲染点（`OnboardingView` / `operationalPanel`）**互斥地占据屏幕** —— 任一时刻恰好有一个在。
+/// 所以只要**两边都无条件渲染「当前是否有失败」**，「一个 `.failed` 必须有人画」就不再是一条需要
+/// 人去维护的分派规则，而是一条不可能被违反的结构事实。`OnboardingActionsSuite` 遍历
+/// `OnboardingState × OnboardingActionState` 的**全组合**把它钉住。
+///
+/// `.failed` 里的 `action` 标签因此不再承担分派职责，但它**留着**：进行态文案、state gallery
+/// 的 caption、以及「是哪个动作失败了」这件事本身对调试与穷尽性都仍然是真信息。
+///
+/// 那条真实的顾虑 —— 「一条陈旧的接管失败永久挂在一张已经装好的面板上」（用户后来用 Terminal
+/// 装好了）—— 改由**时效性**解决，而不是靠丢弃：``OnboardingViewModel/clearConsumedFailure()``
+/// 在面板下一次重新打开时清掉它。失败从发生那一刻起可见，直到用户关掉面板再打开为止。
+/// 用「什么时候该忘掉它」回答，而不是用「什么时候该看不见它」。
+public func onboardingVisibleFailure(
+    actionState: OnboardingActionState
 ) -> (message: String, detail: String?)? {
-    guard case .failed(let action, let message, let detail) = actionState, action == branch else {
-        return nil
-    }
+    guard case .failed(_, let message, let detail) = actionState else { return nil }
     return (message, detail)
 }
 
@@ -168,8 +205,13 @@ public enum OnboardingActionError: Error, Sendable, Equatable {
         switch self {
         case .helperUnavailable:
             "没找到 Claudio 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 Claudio 再试一次。"
+        // 刻意**不**承诺「没有留下半成品」（T17c 对抗评审 —— 上一版这么写，而那是假话）。
+        // `performFirstRunSetup` 的顺序是：复制二进制 → 复制包 → 解隔离+回验 → 写 config → 写 hooks。
+        // 最常见的失败点（`.installFailure`，包括 `play.lock` 争用）发生时，二进制、内置包、config.json
+        // 都**已经在磁盘上了**。一个以「不撒谎」立身的产品，不能在它唯一一次报告失败的时候撒谎。
+        // 能诚实承诺的是另一件事，而且它更有用：setup 是幂等的，再点一次会接着上次继续。
         case .setupFailed:
-            "这一步没能完成，Claudio 已经停下、没有留下半成品。看看下面的原因，或者稍后再试一次。"
+            "这一步没能完成。Claudio 已经停下，没有改动 Claude Code 的配置。看看下面的原因，或者再点一次 —— 它会接着上次继续，不会重复安装。"
         case .disconnectFailed:
             "没能断开，你的配置一个字都没动。看看下面的原因，或者稍后再试一次。"
         case .disconnectSweptNothing:
@@ -232,6 +274,16 @@ public func bundledHelperBinary(in bundle: Bundle) -> URL? {
 /// 原样抽出来（它此前是内联的），让**探测**与**安装**用同一个谓词，而不是两份会各自漂移的拷贝。
 /// `isRegularFile` 顺带盖掉了目录（`isExecutableFile` 对可搜索目录返回 true）；非空那一条挡的是
 /// 一次半途而废的安装留下的 0 字节存根（执行位已经设好了）。
+///
+/// ⚠️ **`.isRegularFileKey` 是 lstat 语义 —— 对一个符号链接它返回 `false`**（实测，Darwin 25.5：
+/// 一条指向真实可执行文件的 `claudio` 符号链接，`isRegularFile = false` 而 `isExecutableFile = true`）。
+/// 这不是一条趣闻，它是 ``takeOverHelperSource(environment:)`` 把 `.resolvingSymlinksInPath()` 放在
+/// 校验**之后**仍然安全的**唯一支柱**：一个 `Contents/Resources/bin/claudio` 符号链接（能把源解析到
+/// bundle 之外）在这一关就被打掉了，根本走不到解析那一行。同理，`~/.claudio/bin/claudio` 若是一条
+/// 符号链接，探测会报 `.helperMissing` —— 而 quarantine 的检查与剥离都带 `XATTR_NOFOLLOW`（问的是
+/// 路径**自己**），若这里改成跟随符号链接的谓词（`fileExists`、或把这一条换成 `.isSymbolicLinkKey`
+/// 取反），「检测跟随、剥离不跟随」就会当场分叉：链接自己从不带章 → 报「干净」→ 剥离对目标零作用
+/// → 回验通过 → 写下 hooks → 目标二进制仍被 Gatekeeper 秒杀。**换掉这一条谓词之前，先读这段。**
 public func isRunnableHelperBinary(at url: URL) -> Bool {
     let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
     guard values?.isRegularFile == true, (values?.fileSize ?? 0) > 0 else { return false }

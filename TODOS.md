@@ -2,6 +2,48 @@
 
 ## Ship / CI
 
+### CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0
+
+**What:** `.github/workflows/` 里**只有** `release.yml`，只由 tag 触发，且只跑 `swift build`（arm64 / x86_64 各一次 + `--product ClaudioGUI`）。没有任何 job 跑 `swift run claudio-tests` 或 `claudio-gui-tests`。没有 `on: push` / `on: pull_request`。
+
+**Why:** helper 971 项 + gui 809 项断言，在 CI 上从未被执行过一次。其中包括 `ReleaseLayoutSuite` —— 一条**专门为「有人改了 release.yml」而存在**的绊线。改 release.yml 的 PR，恰恰是最不会有人想起来在本机跑一遍 GUI 测试套件的那一类。这套仓库把大量心血投在「让回归会红」上，然后没有任何自动化的东西去看那盏灯。
+
+`ReleaseLayoutSuite` 的注释里反复出现「CI 照样全绿」这句话 —— 它字面成立，而成立的原因是 CI 跑的测试数为零。
+
+**Context:** 2026-07-12 T17c 对抗评审。修法：新增 `.github/workflows/ci.yml`（`on: [push, pull_request]`，`runs-on: macos-14`），跑 `swift run --package-path helper claudio-tests` + `swift run --package-path gui claudio-gui-tests` + `swift build -c release --product ClaudioGUI`（零告警），设为 required check。
+
+**Effort:** S
+**Priority:** P1
+**Depends on:** None
+
+### `ViewWiringSuite` 的文本绊线只挡得住「整行被删」，挡不住「body 被掏空」
+
+**What:** `ViewWiringSuite` 断言的是 `panel.contains(".onChange(of: onboardingViewModel.state)")` —— 那行文本还在。它不断言那行**做了什么**。
+
+**Why:** T17c 评审实测：把 `.onChange(of: onboardingViewModel.state) { _ in refresh(); applyFirstFocus(); announcePanel() }` 的**闭包体掏空**成 `{ _ in }` —— 这精确复现了 T17 要修的那个 bug（接管成功那一秒面板仍显示启动时读的陈旧 config：四行「未配置」+ 空画廊）—— **739/739 全绿**，绿灯纹丝不动。而「把三行搬进别的 modifier 时漏搬」比「整行删除」是更自然的重构事故。
+
+其他合法绕过路径：重命名 `onboardingViewModel` 属性、改用 `.onReceive`、把 onChange 移进子视图 / ViewModifier 扩展的另一个文件。
+
+（T17c 已修掉相邻的一个更弱项：`codeOnly()` 此前只剥整行注释、不剥行尾注释，于是一行 `foo() // .onChange(of: onboardingViewModel.state)` 能让断言假绿。）
+
+**Context:** 2026-07-12 T17c。短期修法：把断言收紧到包含 body 首行（`contains("of: onboardingViewModel.state) { _ in\n            refresh()")`）。根治仍是下面那条 P2（把视图拆进可 import 的 library target），文本绊线的强度天花板就在这里。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
+
+### 穷尽性断言丢了 `action` 这一维 —— 「断开失败」这一视觉态从没被任何一帧渲染过
+
+**What:** `PreviewFixtures.onboardingActionStateCoverage` 对 `.failed` 的分类是 `case .failed(_, _, let detail)` —— **`action` 被 `_` 丢掉了**，只按 detail 是否为 nil 分成 `failed.noDetail` / `failed.withDetail`。而 `onboardingActionStates` 里两条 `.failed` fixture **都是 `.takeOver`**。于是 `.failed(action: .disconnect, …)` 在整个 state gallery 里**一帧都没有**，而 `assertExhaustive()` 照样全绿 —— 因为两个标签都已被 takeOver 的 fixture 满足。
+
+**Why:** 这与 `PreviewFixtures.swift` 自己的注释声称在防的那件事（「否则 T17 引入的两个新视觉态**从来不会被任何一帧渲染**，而 `assertExhaustive()` 仍然全绿」，即 `/ship` 收口记录 ③ 那次翻车）是**同一类错，在声称修好它的那个函数里**。
+
+**Context:** 2026-07-12 T17c。修法：`case .failed(let action, _, let detail): "failed.\(onboardingDiskActionCoverage(action)).\(detail == nil ? "noDetail" : "withDetail")"`，同步扩 `PreviewFixturesSuite` 的 expected 名册、补两条 `.failed(action: .disconnect, …)` fixture。**注意依赖**：补了 fixture 也没用，除非画廊能渲染真正画那颗按钮的视图 —— 见下一条。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** 「state gallery 给「断开连接」画的是一帧 app 里不存在的画面」
+
 ### 「仍要打开」之后，bundle 里的嵌套 helper 还带不带 quarantine —— 未在真实下载路径上验证
 
 **What:** T17 实测确认了三件事：`FileManager.copyItem` 会传播 `com.apple.quarantine`；一个带章的二进制经 `/bin/sh -c` 执行会被 Gatekeeper SIGKILL（`exit=137`，零 stderr）；`setup` 现在会剥离 + 回头验证。**没验的是**：用户在「系统设置 > 隐私与安全性 > 仍要打开」里批准这个 app 之后，`Contents/Resources/bin/claudio` 上的章**是不是也跟着被清掉了**。
@@ -432,3 +474,67 @@
 **Effort:** S
 **Priority:** P3
 **Depends on:** None
+
+### `hasQuarantineAttribute` 是 fail-open：任何 errno 都被折叠成「没被隔离」
+
+**What:** `getxattr(url.path, name, nil, 0, 0, XATTR_NOFOLLOW) >= 0` —— `ENOATTR` / `ENOENT` / `EPERM` / `EACCES` / `EIO` **全部**返回 -1，函数一律报 `false`（干净）。实测确认（Darwin 25.5）：穿一个 0000 权限的目录去读一个确实带章的文件 → `rc=-1 errno=13 (EACCES)` → 函数说「没被隔离」。
+
+**Why:** 三个调用点里，`Setup.swift:250` 是**唯一 load-bearing** 的那个 —— 它是「剥完回验、验不过就一条 hook 都不写」这道主保险的判据，而它唯一的失败方向是**放行**：读不出来 = 当作干净 = 照写 hooks。后果正是 T17 要杀死的那个 bug 原样复活（装完、绿点、doctor 全绿、每个事件被 Gatekeeper 静默杀掉）。`OnboardingDetector` / `Doctor` 那两处只是少报一次 `.helperMissing` / 少报一条硬失败。
+
+**在当前威胁模型下不可利用**（目标是用户自己家目录里、自己创建的文件；EACCES/EPERM 需要用户亲手 chmod 000 才构造得出来；`ENOTSUP`（无 xattr 的文件系统）下报 false 反而是正确答案）。这是**健壮性 / 断言诚实性**问题，不是安全漏洞 —— 所以不阻断发布。
+
+**Context:** 2026-07-12 T17c 对抗评审（Codex + Claude 安全专项 + 红队三方独立指出，安全专项实测了 errno）。修法：改成三态而不是布尔 —— `rc >= 0` → `.present`；`errno ∈ {ENOATTR, ENOENT, ENOTSUP}` → `.absent`；其余 errno → `.unknown(errno)`。`Setup.swift` 的闸门**只在 `.absent` 时放行**（`.unknown` 视为仍被隔离，走 `binaryQuarantined` 并把 errno 写进 reason）；Detector / Doctor 可以继续把 `.unknown` 当 `.absent`（保持宽松），但 doctor 至少要把 errno 打出来。顺带：`stripQuarantineAttribute` 现在完全丢弃 `removexattr` 的返回值，`binaryQuarantined` 的 reason 因此无法区分「剥不动」和「回验读不到」—— 一起收进来。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
+
+### in-flight 期间 onboarding 的键盘焦点无处可去（当前是「诚实的空」，不是想清楚的答案）
+
+**What:** 一个 `.takeOver` / `.disconnect` 跑到一半时，两颗 CTA 都 `.disabled`。`applyFirstFocus()` 于是拿 `ctaOperable: false` 去算焦点序，而 onboarding scope 里除了这两颗按钮**没有别的候选**（失败行此刻不存在 —— `runDiskAction` 一开跑就把 actionState 换成 `.running`）→ `panelFirstFocusTarget` 返回 `nil` → `focusedTarget = nil` → SwiftUI 的 `@FocusState` 置 nil 会 resign first responder，光标整个消失。
+
+**Why:** `PanelView` 那段 `.onChange(of: actionState)` 的注释白纸黑字说这次改动就是为了「没人把焦点接走的话，键盘用户按完空格就无处可去了」—— 而实现出来的结果正是「无处可去」。测试也把这个行为钉成了断言（`panelFirstFocusTarget(scope, ctaOperable: false) == nil`），而那条断言的失败文案写着「caret 必须有人接管，而不是悬在那儿」。
+
+**但这不是一个纯 bug**：in-flight 期间那张卡上**确实没有任何可操作的东西**，把光标指向一颗禁用的按钮同样是撒谎。这是一个真实的产品取舍（① 保持焦点不动，让它停在那颗已禁用但仍在屏幕上的按钮上，AppKit 的 key loop 会自己跳过 disabled view；② 让正在跑的那颗按钮保持可聚焦但不可激活，配 `.accessibilityValue("正在接管…")`；③ 把焦点交给面板容器）。需要拍板，不该由评审代劳。运行态面板不受影响（它恒含 `.dropZone`，永不返回 nil）。
+
+**Context:** 2026-07-12 T17c（Swift 专项 + 设计专项独立指出）。T17c 已修掉相邻的注释腐烂（`panelFirstFocusTarget` 的 doc 此前写着「Returns nil only for a genuinely empty order」，那句话在 `ctaOperable` 落地那一刻就是假的）。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None（需要先拍板取哪种行为）
+
+### `DiskOnboardingActionRunner` 用 `Task.detached` 在 Swift 协作线程池上跑阻塞式磁盘 I/O
+
+**What:** `await Task.detached(priority: .userInitiated) { performOnboardingDiskAction(...) }.value` —— 闭包体是纯同步阻塞 I/O（复制一个 universal 二进制 + 整个声音包目录 + flock + 原子写 settings.json）。
+
+**Why:** 协作池的线程数按核数固定，Swift Concurrency 的前向进度假设是「线程永不阻塞」。菜单栏 app 的 Task 并发度低、`flock` 是 `LOCK_NB`（不会长时间等锁），所以今天不致命 —— 但这是教科书级反模式，一旦将来有后台探测 / 定时刷新 / 更多并发动作，它会真的咬人。
+
+**Context:** 2026-07-12 T17c（Swift 专项 + 红队独立指出）。修法：换成 GCD 逃生舱 —— `await withCheckedContinuation { c in DispatchQueue.global(qos: .userInitiated).async { c.resume(returning: performOnboardingDiskAction(action, environment: environment)) } }`。行为一字不变，阻塞的是一条可增长的 GCD 线程而不是协作线程。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+
+### 「断开连接」ghost 按钮偏离 DESIGN.md，且「次 CTA」这一个角色现在有两套渲染
+
+**What:** 四条，都在 `PanelView.disconnectRow`：① 圆角 `cornerRadius: 8` 不在 DESIGN.md 的圆角阶梯上（控件 6 / 卡片·行 10 / onboarding 图标块 12 / 面板 15 —— 全 app 其余 `RoundedRectangle` 无一例外落在 token 上）；② 字号 `11` 是「次要 / 状态」那一档（面板里 `errorNotice` / `ActionFailureRow` 的说明文字正是 11），而控件标签最接近的档是「行标签 13」—— 这颗按钮的标签比面板里任何一颗别的按钮都小，跟它旁边的失败说明一样大；③ `.buttonStyle(.plain)` 剥掉了 AppKit 的全部反馈，只补了一层**静态**描边 —— 一颗全宽的、不可撤销的破坏性按钮，鼠标压下去屏幕上没有任何变化（本仓库对同类命中区已有成熟的 token 化 hover：`AudioDropZoneView` 的「边框转 clay + `clay-soft` 底」）；④ 同一个「次 CTA」语义角色，`OnboardingView` 里仍是 `.buttonStyle(.bordered)`（macOS 系统灰底按钮），而 DESIGN.md 写的是「次 CTA（ghost：透明 + `hairline-strong` 描边）」。
+
+**Why:** ①②④ 都需要拍板取值（6 还是 9？13 还是保持 11？把 `.bordered` 一起换成 ghost 会改动**已经真机验证过**的 onboarding 卡），不该由评审代劳。③ 是纯增补。
+
+**Context:** 2026-07-12 T17c 设计专项。修法：抽一个共享的 `GhostButtonStyle`（透明底 + `hairline-strong` 描边 + hover/pressed 态 + token 化圆角），`OnboardingView` 的次 CTA 与 `disconnectRow` 同时用它 —— 一个角色一套渲染。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None（需要先拍板 ①②④ 的取值）
+
+### 「断开连接」是全 app 唯一一条会与正在发声的 `claudio play` 抢 `play.lock` 的写路径
+
+**What:** `disconnectRow` 只在 `.installed` 渲染 —— 而 `.installed` 的定义就是「四条 hook 都在」，也就是**每一个 Claude Code 事件都会 spawn 一次 `claudio play`**，而 `play` 与 `uninstallClaudioHooks` 共用同一把 `play.lock`（`SettingsInstaller.swift:216` → `.skipped` → `.lockBusy`）。
+
+**Why:** 用户越是在正常用 Claude Code，点「断开」就越容易吃到一条 `.disconnectFailed(.lockBusy)` **假失败**。对照之下「接管」不受影响：takeOver 只从 `.notInstalled` / `.helperMissing` 出发，那时要么没有 hooks、要么 helper 跑不起来，`play` 拿不到锁。所以 T17 把 setup 搬进 GUI **没有**加剧 play.lock（与直觉相反），但它新造的**断开**按钮，第一次把 TODOS 里那条 P1 推到了 UI 表层。
+
+**Context:** 2026-07-12 T17c 红队。短期修法：`.lockBusy` 单独出一条更准的文案（「Claude Code 正在响，稍等一两秒再点一次」），别与真正的写失败混为一谈；或在 lockBusy 时自动重试 2–3 次（指数退避 100/300/700ms —— 这是一把非阻塞锁，重试安全且几乎必然成功）。根治仍是那条 P1：把 `play.lock` 拆成 play 专用锁与 config/settings 写锁。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** 「`play.lock` 被 config / settings 写者共用」（那条 P1 的根治会顺带消灭这一条）

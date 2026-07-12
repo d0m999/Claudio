@@ -655,32 +655,89 @@ func runOnboardingActionsFixSuites() {
         }
     }
 
-    suite("失败归属：接管的失败画在 onboarding 卡，断开的失败画在运行态面板 —— 绝不串台") {
-        let takeOverFailure = OnboardingActionState.failed(
-            action: .takeOver, message: "接管失败了", detail: "d")
-        let disconnectFailure = OnboardingActionState.failed(
-            action: .disconnect, message: "断开失败了", detail: "d")
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // T17c：**每一个 `.failed` 都必须有人画** —— 遍历 state × actionState 的全组合。
+    //
+    // 上一版这里钉的是「接管的失败画在 onboarding 卡，断开的失败画在运行态面板 —— 绝不串台」，
+    // 而那条断言**把 bug 钉住了**：它默认「哪个动作失败」与「失败之后 state 落在哪」是同一件事。
+    // 它们不是 —— `runDiskAction` 在失败之后无条件重新探测磁盘。于是矩阵里有两个格子没有任何视图
+    // 认领（`.failed(.takeOver)` × `.installed`，以及 `.failed(.disconnect)` × 非 `.installed`），
+    // 而第一格是**可达的**：quarantine 检测让一台被盖章的机器报 `.helperMissing`（hooks 本来就在），
+    // 用户点「修复」→ setup 在写 config / hooks 那一步撞上 play.lock → 失败 → refresh 探测到
+    // 二进制在位 + 没盖章 + 四条 hook 都在 → `.installed` → 面板切到运行态、亮绿点说「已接好」，
+    // 而那条失败一个像素都没有。用户永远听不到一声响。
+    //
+    // 现在的不变式不再是「分派对不对」，而是「**存不存在一个没人画的失败**」—— 一条结构性断言，
+    // 加新 state / 新 action 都自动被它覆盖。
+    // ═══════════════════════════════════════════════════════════════════════════════
+    suite("不变式：state × actionState 全组合下，任何一条 .failed 都必须有视图画它（T17c）") {
+        // 面板的两个渲染点互斥地占据屏幕：`.installed` → operationalPanel；其余 → OnboardingView。
+        // 两者都调 `onboardingVisibleFailure(actionState:)`，所以「屏幕上画不画得出这条失败」
+        // 就等价于这个纯函数返不返回 nil —— 与 state 无关，这正是修法的全部内容。
+        let allStates: [OnboardingState] = [
+            .claudeCodeNotInstalled,
+            .helperMissing,
+            .notInstalled,
+            .installed,
+            .settingsNotWritable(reason: "r"),
+            .settingsParseFailure(reason: "r"),
+        ]
+        let allActionStates: [OnboardingActionState] = [
+            .idle,
+            .running(.takeOver),
+            .running(.disconnect),
+            .failed(action: .takeOver, message: "接管失败了", detail: "d"),
+            .failed(action: .takeOver, message: "接管失败了", detail: nil),
+            .failed(action: .disconnect, message: "断开失败了", detail: "d"),
+            .failed(action: .disconnect, message: "断开失败了", detail: nil),
+        ]
 
-        expect(
-            onboardingFailureBelongsHere(actionState: takeOverFailure, branch: .takeOver)?.message
-                == "接管失败了",
-            "接管失败必须画在 onboarding 卡里")
-        expect(
-            onboardingFailureBelongsHere(actionState: takeOverFailure, branch: .disconnect) == nil,
-            "一次**接管**失败绝不能漏进运行态面板 —— 用户可能事后用别的办法装好了，"
-                + "那条陈旧的「这一步没能完成」会永久挂在一张一切正常的面板底部")
-        expect(
-            onboardingFailureBelongsHere(actionState: disconnectFailure, branch: .disconnect)?.message
-                == "断开失败了",
-            "断开失败必须画在运行态面板里 —— 那一刻 onboarding 卡根本不在屏幕上")
-        expect(
-            onboardingFailureBelongsHere(actionState: disconnectFailure, branch: .takeOver) == nil,
-            "断开失败不该同时出现在两个地方")
-        expect(
-            onboardingFailureBelongsHere(actionState: .idle, branch: .takeOver) == nil, "")
-        expect(
-            onboardingFailureBelongsHere(actionState: .running(.takeOver), branch: .takeOver) == nil,
-            "正在跑不是失败")
+        for state in allStates {
+            for actionState in allActionStates {
+                let visible = onboardingVisibleFailure(actionState: actionState)
+                switch actionState {
+                case .failed(_, let message, _):
+                    expect(
+                        visible?.message == message,
+                        "\(state) × \(actionState)：一条失败没有任何视图画它 —— 这正是 T17 要杀死的"
+                            + "那类静默失败（第三个形状：死错误）。用户会看到一张一切正常的面板，"
+                            + "而磁盘上什么都没成")
+                case .idle, .running:
+                    expect(visible == nil, "\(state) × \(actionState)：没失败就不该画失败行")
+                }
+            }
+        }
+    }
+
+    suite("不变式：焦点序里的「查看原因」⟺ 屏幕上真的有那颗按钮（T17c）") {
+        // 上一版这两者会分叉：`onboardingShowsFailureDetailToggle`（决定焦点序）是分支盲的，而
+        // `onboardingFailureBelongsHere`（决定渲染）是分支感知的。于是
+        // `.failed(.takeOver)` × `.installed` 时焦点序里被塞进一个 `.revealDetail`，而当时没有任何
+        // 视图声明 `.focused(…, equals: .revealDetail)` —— 面板一打开，键盘焦点落进一个不存在的控件。
+        let allStates: [OnboardingState] = [
+            .claudeCodeNotInstalled, .helperMissing, .notInstalled, .installed,
+            .settingsNotWritable(reason: "r"), .settingsParseFailure(reason: "r"),
+        ]
+        for state in allStates {
+            for detail in [String?.some("d"), nil] {
+                for action in [OnboardingDiskAction.takeOver, .disconnect] {
+                    let actionState = OnboardingActionState.failed(
+                        action: action, message: "m", detail: detail)
+                    let showsToggle = onboardingShowsFailureDetailToggle(
+                        state: state, actionState: actionState)
+                    let rowIsOnScreen = onboardingVisibleFailure(actionState: actionState) != nil
+                    let hasDetailToRead = detail != nil
+                    let stateOwnsTheToggle =
+                        onboardingSecondaryIntent(for: state) == .revealDetail
+
+                    expect(
+                        showsToggle
+                            == (rowIsOnScreen && hasDetailToRead && !stateOwnsTheToggle),
+                        "\(state) × \(actionState)：焦点序里有没有「查看原因」，必须与屏幕上有没有"
+                            + "那颗按钮完全一致 —— 否则光标会落进一个不存在的控件（或够不到一个存在的）")
+                }
+            }
+        }
     }
 
     suite("焦点：「查看原因」是一个真控件，必须在焦点序里（WCAG 2.1.1）") {

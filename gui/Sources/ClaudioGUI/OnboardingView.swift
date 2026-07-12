@@ -16,6 +16,9 @@ import SwiftUI
 public struct OnboardingView: View {
     @ObservedObject private var viewModel: OnboardingViewModel
     @Environment(\.colorScheme) private var colorScheme
+    /// T17c：in-flight spinner 是这棵视图树里唯一的动画，必须 gate 住「减弱动态效果」——
+    /// 见 ``PanelView`` 的 reduced-motion 段（那条绊线正是被 T17 踩响的）。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Dynamic-Type scale factor for this view's fixed `.system(size:)` text (a11y fix) — see
     /// ``EventRowView``'s `typeScale` for the full rationale.
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
@@ -93,12 +96,15 @@ public struct OnboardingView: View {
                 detailText(detail)
             }
 
-            // T17：一次 CTA **动作**失败必须说出来。只渲染**接管**的失败 —— 断开的失败发生在
-            // `.installed`，那一刻这张卡根本不在屏幕上（`PanelView` 渲染的是 operationalPanel），
-            // 它由那边的 `disconnectRow` 负责（``onboardingFailureBelongsHere(actionState:branch:)``）。
-            if let failure = onboardingFailureBelongsHere(
-                actionState: viewModel.actionState, branch: .takeOver)
-            {
+            // T17：一次 CTA **动作**失败必须说出来。
+            //
+            // T17c：**不再按 action 分派**。这张卡与 `PanelView` 的运行态面板互斥地占据屏幕，两边
+            // 都无条件渲染「此刻有没有失败」，于是「一个 `.failed` 必须有人画」是结构事实而不是一条
+            // 需要人去维护的规则。上一版这里只画 `branch: .takeOver`，而一次**接管**失败完全可能
+            // 在 `refresh()` 之后落在 `.installed`（quarantine 修复后点「修复」→ 撞上 play.lock →
+            // 失败，但二进制和 hooks 都在位）—— 那条失败于是一个像素都没有。见
+            // ``onboardingVisibleFailure(actionState:)`` 的完整推导。
+            if let failure = onboardingVisibleFailure(actionState: viewModel.actionState) {
                 ActionFailureRow(
                     message: failure.message, detail: failure.detail,
                     isShowingDetail: viewModel.isShowingDetail,
@@ -150,7 +156,9 @@ public struct OnboardingView: View {
             Task { await action() }
         } label: {
             HStack(spacing: 6) {
-                if isRunning {
+                // `reduceMotion` 时不画（T17c）：进行态由 label（「正在接管…」）与禁用态承担，
+                // 不靠这圈转动。见 ``PanelView`` 的 reduced-motion 段。
+                if isRunning, !reduceMotion {
                     ProgressView()
                         .controlSize(.small)
                         .accessibilityHidden(true)

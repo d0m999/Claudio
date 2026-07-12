@@ -204,6 +204,75 @@ func runSetupQuarantineSuites() {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // 整个 quarantine 修复的**主保险**：剥不干净 → 一条 hook 都不写。
+    //
+    // T17c 对抗评审实测：把 `Setup.swift` 的回验闸门短路掉（`if false, hasQuarantineAttribute(…)`），
+    // helper 967/967 **全绿** —— 这条闸门此前是一条无测试的线。而作者本人在
+    // `copySelfToFixedLocation` 的注释里刚刚写下过对这种线的判词：
+    // 「an untested line pretending to be a safety net」。
+    //
+    // 造一个「剥不掉」的 fixture：`chflags uchg`（UF_IMMUTABLE）会让 `removexattr` 以 EPERM 失败，
+    // 而 `getxattr` 照常可读 —— 正是「剥了 ≠ 剥干净了」这句话的可执行版本。
+    // ═══════════════════════════════════════════════════════════════════════════════
+    suite("performFirstRunSetup: 隔离剥不掉时 → binaryQuarantined，且**一条 hook 都不写**") {
+        withTempDirectory { root in
+            let claudioRoot = root.appendingPathComponent(".claudio", isDirectory: true)
+            let destination = claudioRoot.appendingPathComponent("bin/claudio")
+            writeExecutableFile(at: destination)
+            setQuarantine(at: destination)
+
+            let settingsFile = root.appendingPathComponent("dot-claude/settings.json")
+            try? FileManager.default.createDirectory(
+                at: settingsFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+            // UF_IMMUTABLE：removexattr → EPERM，getxattr 仍可读。必须在 setQuarantine **之后**
+            // （不可变文件连 setxattr 都做不了）。
+            expect(
+                chflags(destination.path, UInt32(UF_IMMUTABLE)) == 0,
+                "fixture 造不出来：chflags uchg 失败，这个用例什么都没测")
+            defer { _ = chflags(destination.path, 0) }  // 不还原的话临时目录删不掉
+
+            expect(
+                hasQuarantineAttribute(at: destination),
+                "fixture 必须真的带章，否则闸门不响也会「通过」")
+            stripQuarantineAttribute(at: destination)
+            expect(
+                hasQuarantineAttribute(at: destination),
+                "fixture 必须真的剥不掉 —— 若这里章已经没了，说明 UF_IMMUTABLE 没挡住 removexattr，"
+                    + "下面那条断言就会因为错误的原因而通过")
+
+            // executablePath == destination → alreadyInstalled，跳过复制，直奔闸门。
+            let environment = SetupEnvironment(
+                executablePath: destination,
+                claudioBinaryDestination: destination,
+                userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
+                configFile: claudioRoot.appendingPathComponent("config.json"),
+                settingsFile: settingsFile,
+                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+
+            let result = performFirstRunSetup(environment: environment)
+            guard case .failure(let error) = result else {
+                expect(
+                    false,
+                    "剥不干净还报成功 —— 这正是 T17 要杀死的那个 bug：装完、绿点、doctor 全绿、"
+                        + "而每个事件都被 Gatekeeper 静默杀掉。得到 \(result)")
+                return
+            }
+            guard case .binaryQuarantined = error else {
+                expect(false, "必须是 .binaryQuarantined（而不是别的错误顺手挡下了它）：\(error)")
+                return
+            }
+
+            // 这才是这条闸门的**全部意义**：失败时磁盘上不能留下任何一条会被 SIGKILL 的 hook。
+            expect(
+                !FileManager.default.fileExists(atPath: settingsFile.path),
+                "闸门没拦住写 hooks —— 一条指向被隔离二进制的 hook，会让每个 Claude Code 事件"
+                    + "被 Gatekeeper 当场杀掉（exit=137，零 stderr），而 play 是 fire-and-forget，"
+                    + "整条失败链一行日志都不留。大声失败是这里唯一诚实的结局")
+        }
+    }
+
     suite("doctor: 一个带隔离章的二进制是硬失败，不是「✓ 在位」") {
         withTempDirectory { root in
             let binary = root.appendingPathComponent(".claudio/bin/claudio")

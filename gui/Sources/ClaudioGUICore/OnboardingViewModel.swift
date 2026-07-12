@@ -25,7 +25,13 @@ public final class OnboardingViewModel: ObservableObject {
     /// Where on disk this view-model looks — injectable so previews/tests never touch
     /// the real `~/.claude` / `~/.claudio` (see ``OnboardingEnvironment``'s warning about
     /// `$HOME` not working on Darwin).
-    public var environment: OnboardingEnvironment
+    ///
+    /// `let`, **不是 `var`**（T17c）：``OnboardingActionEnvironment`` 的文档承诺「探测器在看哪个文件」
+    /// 与「安装器在写哪个文件」**结构上不可能分叉**，而那条不变式此前只在构造那一瞬间成立 —— runner
+    /// 在 init 时就把自己那份环境**按值**冻住了，任何一次 `viewModel.environment = …` 都会让探测读
+    /// 路径 A、安装写路径 B，零编译错误、零红灯。要换环境就重建 view-model（连带重建 runner），
+    /// 让「只换一半」结构上不可能。
+    public let environment: OnboardingEnvironment
 
     @Published public private(set) var state: OnboardingState
 
@@ -130,6 +136,26 @@ public final class OnboardingViewModel: ObservableObject {
     public func toggleDetail() {
         guard !isPreviewPinned, !isPerformingAction else { return }
         isShowingDetail.toggle()
+    }
+
+    /// 面板**重新打开**时，清掉一条已经被看过的失败（T17c）。
+    ///
+    /// 这是「一条陈旧的接管失败永久挂在一张已经装好的面板上」这个真实顾虑的答案 —— 用**时效性**回答，
+    /// 而不是用「按 action 分派到某个分支、于是在别的分支里看不见」回答。后者正是上一版的做法，它造出了
+    /// 两个没有任何视图认领的失败格子（见 ``onboardingVisibleFailure(actionState:)``）。
+    ///
+    /// 时机是 `PanelView` 的 `.onChange(of: focusCoordinator.showCount)` —— 仓库里「popover 刚刚
+    /// (重新)可见」的**唯一**信号。于是失败从它发生那一刻起一直可见（包括紧随其后的那次 `refresh()`
+    /// 把 state 挪到任何地方），直到用户亲手关掉面板再打开为止。
+    ///
+    /// 刻意**不**在 ``refresh()`` 里做：`refresh()` 在一次失败的动作之后**立刻**会被调用
+    /// （`runDiskAction` 的最后一行），在那里清空会把用户刚触发的失败在他看见之前抹掉 —— 那正是
+    /// 这个仓库已经交过三次学费的「静默吞错」。
+    public func clearConsumedFailure() {
+        guard !isPreviewPinned, !isPerformingAction else { return }
+        guard case .failed = actionState else { return }
+        actionState = .idle
+        isShowingDetail = false
     }
 
     /// 每一颗 CTA 最终都走这里。`switch` 穷尽、无 `default:` —— 加一个 intent 会编译红。

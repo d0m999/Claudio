@@ -44,11 +44,18 @@ private func source(_ relativePath: String) -> String? {
 /// `MenuBarController` 自己那段解释「为什么这里不该有 Bundle.main」的注释**判红了。
 /// 这与它上游的 `ReleaseLayoutSuite` 第一版翻的是**同一次车**（release.yml 的散文让 grep 命中，
 /// 于是那条断言永远不会红）。一次文本断言若不区分「代码」与「谈论代码的文字」，它断的就不是代码。
+/// T17c：也剥**行尾**注释，不只是整行注释。上一版只判断 `hasPrefix("//")`，于是一行
+/// `foo()  // 见 .onChange(of: onboardingViewModel.state)` 能同时活过过滤器**又**让 `contains()`
+/// 命中 —— 真代码被删掉了，绊线照样绿。这正是本 suite 头部自陈翻过的那次车的**残留一半**：
+/// 它修好了整行注释，没修行尾注释。（反向断言 `!contains("Bundle.main")` 则会被行尾注释假红。）
 @MainActor
 private func codeOnly(_ relativePath: String) -> String? {
     guard let text = source(relativePath) else { return nil }
     return text.split(separator: "\n", omittingEmptySubsequences: false)
-        .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("//") }
+        .map { line -> String in
+            guard let range = line.range(of: "//") else { return String(line) }
+            return String(line[line.startIndex..<range.lowerBound])
+        }
         .joined(separator: "\n")
 }
 
@@ -72,6 +79,36 @@ func runViewWiringSuites() {
         expect(
             panel.contains("DiskOnboardingActionRunner(environment:"),
             "PanelView 必须真的把生产 runner 接给 view-model —— 这是整个 T17 的接线点")
+
+        // T17c：两个渲染点都必须**无条件**画「此刻有没有失败」。
+        expect(
+            panel.contains("onboardingVisibleFailure(actionState:"),
+            "运行态面板必须渲染任何失败，不只是断开的 —— 一次接管失败完全可能在 refresh() 之后落在"
+                + " .installed（点「修复」→ 撞上 play.lock → 失败，但二进制和 hooks 都在位），"
+                + "那时 onboarding 卡根本不在屏幕上。上一版这里只认 branch: .disconnect，"
+                + "于是那条失败一个像素都没有：绿点、静音、零诊断")
+        expect(
+            !panel.contains("onboardingFailureBelongsHere"),
+            "按 action 分派失败的那个函数已经删了（T17c）—— 它默认「哪个动作失败」与「失败之后 state"
+                + "落在哪」是同一件事，而 runDiskAction 在失败后无条件重新探测磁盘")
+        expect(
+            panel.contains("clearConsumedFailure()"),
+            "「陈旧的失败永久挂在面板上」必须由**时效性**解决（面板重开即清），而不是靠在渲染时"
+                + "按分支把它丢掉 —— 后者正是上一版造出两个无人认领的失败格子的原因")
+    }
+
+    suite("OnboardingView 渲染任何失败，而不是只渲染接管的失败（T17c）") {
+        guard let view = codeOnly("gui/Sources/ClaudioGUI/OnboardingView.swift") else {
+            expect(false, "读不到 OnboardingView.swift")
+            return
+        }
+        expect(
+            view.contains("onboardingVisibleFailure(actionState:"),
+            "onboarding 卡必须渲染任何失败 —— 一次**断开**失败之后 state 可能不再是 .installed"
+                + "（比如 settings.json 同时被外部改坏），那时运行态面板不在屏幕上，只有这张卡在")
+        expect(
+            !view.contains("onboardingFailureBelongsHere"),
+            "按 action 分派失败的那个函数已经删了（T17c）")
     }
 
     suite("OnboardingViewModel 的 actionRunner 仍然是必填的（可选 = T17 那个 bug 换层皮）") {

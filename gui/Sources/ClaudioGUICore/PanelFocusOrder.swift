@@ -121,8 +121,19 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// which skips disabled `NSView`s on its own — keeps owning Tab traversal. This resolver
 /// governs only the ONE thing the pure model actually drives: which control opens focused.
 ///
-/// Returns `nil` only for a genuinely empty order (e.g. onboarding with neither CTA); an
-/// operational panel always ends in ``PanelFocusTarget/dropZone``, so it never returns `nil`.
+/// Returns `nil` when the order contains no OPERABLE target — two ways: a genuinely empty order
+/// (onboarding with neither CTA), **or** an onboarding scope whose only targets are the CTAs while
+/// `ctaOperable` is `false` (i.e. an action is in flight — both buttons are `.disabled`). The
+/// second case is not an oversight: during a `.takeOver`/`.disconnect` there is genuinely nothing
+/// operable left in the onboarding card to hold the caret, and pointing it at a disabled control
+/// would be a lie. (T17c: the previous wording — "Returns `nil` only for a genuinely empty order"
+/// — was written before `ctaOperable` existed and was false the moment it landed.)
+///
+/// The OPERATIONAL scope never returns `nil`: it always contains ``PanelFocusTarget/dropZone``,
+/// which is unconditionally operable.
+///
+/// 焦点在 in-flight 期间该落到哪，是一个仍未定的产品问题（见 TODOS「in-flight 期间 onboarding 的
+/// 键盘焦点无处可去」）—— 当前行为是**诚实的空**，不是一个已经想清楚的答案。
 /// `ctaOperable` (T17) names whether the onboarding CTA controls — the two onboarding buttons and
 /// the operational panel's 断开连接 — are currently ENABLED. They are not, for the whole duration
 /// of a `.takeOver`/`.disconnect` (``OnboardingActionState/running(_:)``): the view disables them
