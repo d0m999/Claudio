@@ -112,8 +112,9 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
 
 /// Appends claudio's hook command to all four core events (idempotent). Reuses
 /// ``probeSettingsWritable(settingsFile:)`` as a pre-write probe and
-/// ``withNonBlockingLock(path:_:)`` on `lockFile` (the same lock `play` debounces on) to
-/// serialize the read-modify-write against concurrent `claudio` invocations.
+/// ``withNonBlockingLock(path:_:)`` on `lockFile` (its own ``ClaudioPaths/settingsLockFile``,
+/// never `play`'s debounce lock) to serialize the read-modify-write against concurrent
+/// `claudio` invocations.
 public func installClaudioHooks(
     settingsFile: URL = ClaudioPaths.claudeSettingsFile,
     claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
@@ -567,7 +568,7 @@ private func atomicWrite(
     root: [String: Any], to settingsFile: URL, expectedCurrentData: Data?
 ) -> Result<Void, SettingsUpdateError> {
     // Optimistic-concurrency check ([9]): settings.json has writers that do NOT honor claudio's
-    // play.lock — Claude Code itself, the GUI, the user's editor. Re-read the bytes immediately
+    // settings.lock — Claude Code itself, the GUI, the user's editor. Re-read the bytes immediately
     // before writing; if they no longer match what this operation loaded, another writer changed
     // the file mid read-modify-write, so abort rather than clobber it — this file has no uninstall
     // backup. This shrinks the race to the microseconds between this re-read and the rename; it

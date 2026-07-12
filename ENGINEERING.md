@@ -180,7 +180,8 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 **⑥ config.json 归属（消除"真相源"歧义）：**
 - config.json 文件本身是唯一真相源。**app(GUI) 是写入者，helper `play` 只读。**
 - `claudio use <pack>`（**T17 实现**——此前正文这句长期误标"已实现"，实际代码是 `NotYetImplemented` 占位符，由 `/codex review 10f00cf+f31987b` 顺带牵出，见 T17 完成记录）/ 计划中的 `claudio set volume <0.0–1.0>` 是等价 CLI 便捷入口，与 GUI 写同一份 config，都走上面那把文件锁 + 原子写。**没有 `set night`**——`night_dim` 已由 T2 移出 v1 → v2。
-- **写入者只有两个，且共用同一条写路径**（2026-07-11 `/ship` 收口）：`selectPack`（`claudio use` / 画廊切包）与 `setEventEnabled`（GUI 静音钮）都调 `ConfigMutation.swift` 的 `updateConfigJSON(at:freshSelectedPack:mutate:)` —— 同一把非阻塞 `~/.claudio/play.lock`（`ClaudioPaths.lockFile`，与 `play` 去抖共用）、同一次原子写、同一套「只覆盖调用方自己拥有的那个键、其余顶层键（含未知键）逐字保留、读不懂即 fail-closed」的语义。**不允许出现第三条写路径**；尤其不允许任何写入者去 round-trip `ClaudioConfig`（理由见上文 config.json schema 段与收口记录 ①）。
+- **写入者只有两个，且共用同一条写路径**（2026-07-11 `/ship` 收口）：`selectPack`（`claudio use` / 画廊切包）与 `setEventEnabled`（GUI 静音钮）都调 `ConfigMutation.swift` 的 `updateConfigJSON(at:freshSelectedPack:mutate:)` —— 同一把非阻塞 `~/.claudio/config.lock`（`ClaudioPaths.configLockFile`）、同一次原子写、同一套「只覆盖调用方自己拥有的那个键、其余顶层键（含未知键）逐字保留、读不懂即 fail-closed」的语义。**不允许出现第三条写路径**；尤其不允许任何写入者去 round-trip `ClaudioConfig`（理由见上文 config.json schema 段与收口记录 ①）。
+  - **锁分离（2026-07-12 阶段 A，决议 D9 + D20）**：`config.lock` 是 `~/.claudio/play.lock` 分家出来的。此前 `ClaudioPaths.lockFile`（= `play.lock`）被**五个互不相干的临界区**共用：`play` 的去抖、两个 config.json 写者、两个 settings.json 写者。而 `claudio play` 拿不到锁时是**静默跳过**，于是每一次「点静音 / 切包 / 跑 `claudio install`」都是一个**会吞掉提示音的窗口**。今天三把锁各司其职：`playLockFile`（`play.lock`）只管 `play` 去抖；`configLockFile`（`config.lock`）只串行 config.json 的**写者**（读者一律不取锁 —— `play` 在临界区外读，安全性来自 `updateConfigJSON` 的 temp + `rename(2)` 原子写，不是来自这把锁）；`settingsLockFile`（`settings.lock`）只串行 `SettingsInstaller` 的 install/uninstall。修法是**改名**而不是加注释：`lockFile` → `playLockFile` 让 11 个默认值点全部编译不过，逼每一处显式选择（GUI 是显式向下传参的，只改 helper 的默认参数对它一点作用都没有）。
 
 ### 内置包（v1）
 

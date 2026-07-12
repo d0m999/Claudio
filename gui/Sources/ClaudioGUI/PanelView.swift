@@ -515,10 +515,12 @@ public struct PanelView: View {
             // 绝不静默吞错（项目规则）—— 静音写回失败与切包失败**都**在这里如实上报。两条都
             // 可能同时非 nil（一次失败的静音 + 一次失败的切包），所以两条都渲染，不互相顶替。
             //
-            // `.lockBusy` 尤其是**真会发生**的，不是理论值：`setEventEnabled`/`selectPack` 与
-            // `claudio play` 抢同一把 `play.lock`，而每个 Claude Code 事件都会 spawn 一次
-            // `claudio play`。点静音正好撞上 → 此前按钮纹丝不动、零反馈；现在它会说
-            // 「…请稍后重试」（文案本来就写好在 `SetEventEnabledError`/`UseError` 里，只是没人显示）。
+            // `.lockBusy` 仍然要渲染，但**它的成因已经变了**（锁分离，D9）：`setEventEnabled` /
+            // `selectPack` 现在拿 `config.lock`，`claudio play` 拿 `play.lock` —— 两者不再相撞，
+            // 「每个 Claude Code 事件 spawn 一次 play 就可能吞掉一次点击」那条高频路径**已经没了**。
+            // 今天 `.lockBusy` 只剩两个真实来源：另一个 config.json 写者（第二个 GUI 实例，或用户
+            // 手动跑 `claudio use`）—— 低频，但绝不是零。渲染保留（项目铁律：绝不静默吞错），
+            // 文案本来就写好在 `SetEventEnabledError`/`UseError` 里。
             if let error = muteController.lastError {
                 errorNotice(error.description)
             }
@@ -758,9 +760,10 @@ public struct PanelView: View {
     ///
     /// On FAILURE this does not silently do nothing (it used to): ``EventMuteController/setEnabled(_:enabled:)``
     /// records the reason in its own `@Published` ``EventMuteController/lastError``, which
-    /// ``operationalPanel`` now renders — so a `.lockBusy` (a real, reachable race with the
-    /// `claudio play` every Claude Code event spawns, both taking `play.lock`) shows 「…请稍后
-    /// 重试」 instead of a button that just doesn't move.
+    /// ``operationalPanel`` now renders — so a `.lockBusy` (since the lock split: another
+    /// `config.json` writer holding ``ClaudioPaths/configLockFile``, e.g. a concurrent
+    /// `claudio use`; **no longer** `claudio play`, which takes ``ClaudioPaths/playLockFile``)
+    /// shows 「…请稍后重试」 instead of a button that just doesn't move.
     private func toggleMute(_ event: Event) {
         let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
         if muteController.setEnabled(event, enabled: !currentlyEnabled) {

@@ -10,8 +10,10 @@ import Foundation
 /// **exactly** — same ``ClaudioPaths/configLockFile`` non-blocking `flock`, same
 /// read-existing-or-create-fresh shape, same atomic write — so two concurrent config.json
 /// writers (a pack switch racing a mute toggle, or two mute toggles racing each other)
-/// serialize on the identical lock `selectPack`/`installClaudioHooks` already use, rather
-/// than opening a second, independently-reasoned concurrency story for the exact same file.
+/// serialize on the identical lock `selectPack` already uses, rather than opening a second,
+/// independently-reasoned concurrency story for the exact same file. `installClaudioHooks`
+/// writes a *different* file (`settings.json`) and deliberately takes a *different* lock
+/// (``ClaudioPaths/settingsLockFile``) — a settings install must never gate a mute toggle.
 
 public enum SetEventEnabledOutcome: Sendable, Equatable {
     /// `config.json` now has `events.<event.cliName> == enabled`.

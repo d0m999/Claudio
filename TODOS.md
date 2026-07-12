@@ -88,8 +88,12 @@ settings.json），但**回归时没有灯会灭**。
 写 config.json，新 GUI 拿 config.lock 写同一个文件 —— 它们不互相串行。最坏是丢一次设置更新，且**报 `.success`**（静默）。
 
 **Why:** 原台账把这条写成「GUI 是单进程、`claudio use` 是手动，实际不可达」—— **不成立**。这不是一个「窗口」，
-是一个**无限期常驻**的状态：helper 二进制只在 `performFirstRunSetup` 时刷新，而 **GUI 从不调用它**（`gui/Sources/`
-零命中）。用户升级 app 后，`~/.claudio/bin/claudio` 可以**长期停留在旧版**，与新 GUI 并存。
+是一个**无限期常驻**的状态。helper 二进制只在 `performFirstRunSetup` 里刷新；GUI 确实会调它
+（`OnboardingActions.swift:597`），但**只从 takeOver / 修复那条 CTA 出发，而那颗按钮只在 `.notInstalled` /
+`.helperMissing` 时才渲染**。也就是说：一个**已经 `.installed`** 的用户升级 app 之后，永远不会再跑一次 setup ——
+`~/.claudio/bin/claudio` 就**长期停留在旧版**，与新 GUI 并存。（⚠️ 本条 2026-07-12 首版写的是「GUI 从不调用它
+（`gui/Sources/` 零命中）」—— 那是**假的**，一条 grep 就会命中，且命中的正是阶段 A 自己改过的文件。结论不变，
+理由已换成真的那个。）
 
 **Context:** 2026-07-12 阶段 A 侦察 S4 + Codex #6 更正。真修 = config 写路径加**乐观并发重读** —— 与 `config.json`
 写路径缺 symlink 解析那条（本文档「GUI 写/读路径的同用户 symlink TOCTOU」）是同一处加固，建议合并处理。
@@ -568,7 +572,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 ### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂（原 4 项 lake-not-ocean，只剩这 1 项）
 
-**What:** `setEventEnabled` 真并发写（`DispatchQueue.concurrentPerform` 多线程同时切同一/不同事件）——现仅有「一个持锁者 + 一个等待者」的 lock-busy 测（`EventEnabledSuite`「shares play.lock with selectPack」），未证真并发下 read-modify-write 不撕裂。`LogSuite` / `PlaySuite` 已有 `concurrentPerform` 的先例可照抄。
+**What:** `setEventEnabled` 真并发写（`DispatchQueue.concurrentPerform` 多线程同时切同一/不同事件）——现仅有「一个持锁者 + 一个等待者」的 lock-busy 测（`EventEnabledSuite`「shares play.lock with selectPack」——⚠️ suite 名里的 `play.lock` 是 2026-07-12 阶段 A 锁分离之前的旧名，它今天串行的是 `config.lock`），未证真并发下 read-modify-write 不撕裂。`LogSuite` / `PlaySuite` 已有 `concurrentPerform` 的先例可照抄。
 
 **Why:** 「lake」型补测：镜像已有 happy-path 结构、钉住一条当前未覆盖的分支。无功能风险，纯回归网加固。
 
@@ -726,17 +730,15 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None（需要先拍板 ①②④ 的取值）
 
-### 「断开连接」是全 app 唯一一条会与正在发声的 `claudio play` 抢 `play.lock` 的写路径
+### ~~「断开连接」是全 app 唯一一条会与正在发声的 `claudio play` 抢 `play.lock` 的写路径~~ ✅ 2026-07-12 阶段 A 已修
 
-**What:** `disconnectRow` 只在 `.installed` 渲染 —— 而 `.installed` 的定义就是「四条 hook 都在」，也就是**每一个 Claude Code 事件都会 spawn 一次 `claudio play`**，而 `play` 与 `uninstallClaudioHooks` 共用同一把 `play.lock`（`SettingsInstaller.swift:216` → `.skipped` → `.lockBusy`）。
+**What（原文，留档）:** `disconnectRow` 只在 `.installed` 渲染 —— 而 `.installed` 的定义就是「四条 hook 都在」，也就是**每一个 Claude Code 事件都会 spawn 一次 `claudio play`**，而 `play` 与 `uninstallClaudioHooks` 共用同一把 `play.lock`（`SettingsInstaller.swift:216` → `.skipped` → `.lockBusy`）。用户越是在正常用 Claude Code，点「断开」就越容易吃到一条 `.disconnectFailed(.lockBusy)` **假失败**。
 
-**Why:** 用户越是在正常用 Claude Code，点「断开」就越容易吃到一条 `.disconnectFailed(.lockBusy)` **假失败**。对照之下「接管」不受影响：takeOver 只从 `.notInstalled` / `.helperMissing` 出发，那时要么没有 hooks、要么 helper 跑不起来，`play` 拿不到锁。所以 T17 把 setup 搬进 GUI **没有**加剧 play.lock（与直觉相反），但它新造的**断开**按钮，第一次把 TODOS 里那条 P1 推到了 UI 表层。
+**如何被消灭的:** 这条的 **Depends on** 指向的那条 P1（`play.lock` 被 config / settings 写者共用）在同一个 commit（803c639）里被根治，本条随之消失 —— 正如它自己预言的「那条 P1 的根治会顺带消灭这一条」。今天 `uninstallClaudioHooks` 拿 `settings.lock`（`SettingsInstaller.swift:190`，GUI 侧 `OnboardingActions.swift:607` 显式传 `environment.settingsLockFile`），`claudio play` 拿 `play.lock` —— 断开与正在发声的 play **不再共用任何一把锁**，那条假失败的路径已经不存在。
 
-**Context:** 2026-07-12 T17c 红队。短期修法：`.lockBusy` 单独出一条更准的文案（「Claude Code 正在响，稍等一两秒再点一次」），别与真正的写失败混为一谈；或在 lockBusy 时自动重试 2–3 次（指数退避 100/300/700ms —— 这是一把非阻塞锁，重试安全且几乎必然成功）。根治仍是那条 P1：把 `play.lock` 拆成 play 专用锁与 config/settings 写锁。
+原先提的两条短期缓解（给 `.lockBusy` 单独出一条「Claude Code 正在响，稍等一两秒」的文案；lockBusy 时指数退避重试 2–3 次）**一并作废** —— 它们是为一个已经消失的争用准备的。
 
-**Effort:** S
-**Priority:** P2
-**Depends on:** 「`play.lock` 被 config / settings 写者共用」（那条 P1 的根治会顺带消灭这一条）
+**Completed:** 2026-07-12（阶段 A 锁分离，803c639）
 
 ### 「下面的声音包」与告知行的位置断言，在 onboarding 卡上都是假的
 
@@ -873,7 +875,7 @@ enqueue 之前 —— 它就**先跑**：`actionState → .idle`、view-model �
 
 ### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂
 
-**What:** `setEventEnabled` 的 config 读-改-写在本分支里**新**被纳入 `play.lock`（此前无锁），但只测了锁竞争（1 持有者 + 1 等待者），没有任何 `DispatchQueue.concurrentPerform` 测试证明这条 RMW 在真并发写下不撕裂。
+**What:** `setEventEnabled` 的 config 读-改-写在本分支里**新**被纳入 `play.lock`（此前无锁；⚠️ 这是 2026-07-11 的历史记录 —— 2026-07-12 阶段 A 锁分离后它拿的是 `config.lock`，见本文件那条已划掉的 P1），但只测了锁竞争（1 持有者 + 1 等待者），没有任何 `DispatchQueue.concurrentPerform` 测试证明这条 RMW 在真并发写下不撕裂。
 
 **Why:** 「被本分支改掉行为、却没有覆盖变更后路径」的定义就是回归缺口——覆盖率审计把它列为整个 diff 里唯一的 REGRESSION GAP，优先级最高。`PlaySuite.swift` 里已有现成的同形状测试（真并发证明「恰好一个播放」）可以 1:1 照抄。
 

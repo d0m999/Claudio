@@ -10,7 +10,7 @@ DerivedData/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 
-# Local dev app bundle from scripts/dev-bundle.sh — ad-hoc signed, rebuilt on demand
+# Local dev app bundle — ad-hoc signed, rebuilt on demand, never committed
 dist/
 
 # Personal/IP-protected sound packs (e.g. game character cries) — never commit or distribute

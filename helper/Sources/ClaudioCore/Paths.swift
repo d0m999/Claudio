@@ -74,12 +74,22 @@ public enum ClaudioPaths {
         root.appendingPathComponent("play.lock")
     }
 
-    /// `~/.claudio/config.lock` — the non-blocking lock guarding reads/writes of
-    /// `config.json` (GUI writes via `selectPack`/onboarding, `claudio use` /
-    /// `claudio event enabled` both read and write). Deliberately **separate** from
-    /// ``playLockFile`` — a config read/write must never contend with, or be gated by,
-    /// `play`'s own debounce lock (that contention is exactly what was silently
-    /// swallowing prompt sounds before this split).
+    /// `~/.claudio/config.lock` — the non-blocking lock serializing `config.json`'s
+    /// read-modify-**write** critical section across its writers: `selectPack` (`claudio use`,
+    /// the gallery, and `performFirstRunSetup`) and `setEventEnabled` (the GUI mute button —
+    /// in-process, it has no CLI surface).
+    ///
+    /// **Writers only.** No reader takes this lock, by design: `play` loads `config.json`
+    /// *outside* its critical section (``playSoundEvent(_:environment:)``), and `doctor` / the
+    /// panel read it with no lock at all. What makes a concurrent read safe is
+    /// ``updateConfigJSON(at:freshSelectedPack:mutate:)``'s temp-file + `rename(2)` atomic
+    /// write — a reader sees the whole old file or the whole new one, never a torn one. A
+    /// future reader that *takes* this lock, or a writer that drops `.atomic` because it
+    /// believes the lock covers readers, reintroduces exactly the class this split closed.
+    ///
+    /// Deliberately **separate** from ``playLockFile`` — a config write must never contend
+    /// with, or be gated by, `play`'s own debounce lock (that contention is exactly what was
+    /// silently swallowing prompt sounds before this split).
     public static var configLockFile: URL {
         root.appendingPathComponent("config.lock")
     }

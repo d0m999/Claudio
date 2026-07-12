@@ -46,13 +46,14 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
 /// establish a first-run default pack selection).
 ///
 /// The read-modify-write runs under ``ClaudioPaths/configLockFile``'s non-blocking `flock` —
-/// the same lock `install`/`play` already serialize on — so two concurrent `claudio use`
-/// (or `use` racing `setup`) invocations can't silently lose one write (Codex review of
-/// 3d09bf5, confirmed again by `/ship`'s pre-landing review red team pass: unlike
-/// `settings.json`'s write path, this one had never been brought under the lock). Because
-/// the lock is non-blocking, contention surfaces as ``UseError/lockBusy`` — a real,
-/// distinct error the caller sees and can retry — never a silent no-op reported as
-/// success (project rule: never silently swallow an error).
+/// the same lock `setEventEnabled` serializes on, and deliberately **not** the one `install`
+/// (``ClaudioPaths/settingsLockFile``) or `play` (``ClaudioPaths/playLockFile``) takes — so
+/// two concurrent `claudio use` (or `use` racing `setup`) invocations can't silently lose
+/// one write (Codex review of 3d09bf5, confirmed again by `/ship`'s pre-landing review red
+/// team pass: unlike `settings.json`'s write path, this one had never been brought under
+/// the lock). Because the lock is non-blocking, contention surfaces as ``UseError/lockBusy``
+/// — a real, distinct error the caller sees and can retry — never a silent no-op reported
+/// as success (project rule: never silently swallow an error).
 public func selectPack(
     _ packID: String,
     configFile: URL = ClaudioPaths.configFile,
