@@ -147,8 +147,12 @@ public enum SetupNotice: Sendable, Equatable {
     /// `movedTo` 是它现在的绝对路径 —— **必须出现在文案里**：那个目录里可能装着用户自己导入的、
     /// 磁盘上唯一一份音频，我们欠他一条能把它找回来的路径。
     case salvagedPack(packID: String, movedTo: String)
-    /// 他选中的包已经不在了 / 读不出来，setup **替他换了一个能响的**
+    /// 他选中的包已经不在了 / 读不出来，setup **替他换上了另一个还读得出来的包**
     /// （`PackSelectionOutcome.repairedDeadSelection`）。
+    ///
+    /// **不是「一个能响的」**（T17g 改的就是这个措辞）：顶替者只过了一道 `isUsablePack` —— 它查目录、
+    /// 查 manifest，**不查一个字节的音频**。所以它完全可能是一个只映了部分事件的包，那些没映到的事件
+    /// 依旧是哑的。文案必须照着这条真相说话。
     case repairedDeadSelection(removed: String, selected: String)
 
     /// 用户看得见的那句话。过 T7 禁词表（无「settings.json」「hook」等工程语）。
@@ -182,9 +186,23 @@ public enum SetupNotice: Sendable, Equatable {
         // 任何测试会为一句指错方向的话变红。）
         //
         // 修法是**改布局，不是删掉这句指路**：这个用户此刻最需要的就是那个画廊，解释必须紧挨着补救。
+        //
+        // ⚠️ T17g（codex 独立评审逮到）：这句话原本承诺「这样每个事件都还能出声」——**那是一句谎话**。
+        // 顶上来的那个包只过了一道 `isUsablePack`（`Setup.swift`），而它自己的文档白纸黑字写着：只查
+        // 目录能不能解析、manifest 能不能读，**音频文件在不在不在此列**。`usablePackIDs.first` 是按字典序
+        // 挑的，所以完全可能挑中一个只映了 1/4 事件的用户自导入包 —— 于是面板会在这句话的正上方打出三行
+        // 「未配置」，而这句话正对着用户说「每个事件都还能出声」。
+        //
+        // 这个产品的立身之本是不撒谎，而这里是它唯一一次开口说「我动了你的东西」的地方。宁可说一句
+        // 「它未必每个事件都有声音」，也不许说一句用户当场就能证伪的话。
+        //
+        // 刻意**不**写「上面四行会告诉你哪些还缺」：那会是第二句**关于布局的断言**，而 `OnboardingView`
+        // 那张卡也渲染告知行、却既没有四行事件也没有画廊（现存的「下面的声音包」已经在同一个洞里，
+        // 已记入 TODOS）。不再往里加第二条。
         case .repairedDeadSelection(let removed, let selected):
-            "你之前选的「\(removed)」已经不在了，Claudio 先替你换成了「\(selected)」，"
-                + "这样每个事件都还能出声。你随时可以在下面的声音包里换成别的。"
+            "你之前选的「\(removed)」已经不在了，Claudio 先替你换成了「\(selected)」。"
+                + "它未必每个事件都有声音，事件行里会标出哪些还缺。"
+                + "你随时可以在下面的声音包里换成别的。"
         }
     }
 }

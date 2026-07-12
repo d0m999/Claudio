@@ -722,3 +722,15 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Effort:** S
 **Priority:** P2
 **Depends on:** 「`play.lock` 被 config / settings 写者共用」（那条 P1 的根治会顺带消灭这一条）
+
+### 「下面的声音包」与告知行的位置断言，在 onboarding 卡上都是假的
+
+**What:** `SetupNotice.repairedDeadSelection` 的文案里有一句**关于布局的断言**：「你随时可以在**下面的**声音包里换成别的」。它由 `PanelView.operationalPanel` 的排布兑现（提示行排在 `PackGalleryView` 之前），并由 `ViewWiringSuite` 的顺序断言钉死。**但 `OnboardingView` 那张卡也渲染 `ActionNoticeRow`（`OnboardingView.swift:125`），而那张卡既没有声音包画廊、也没有四行事件覆盖度** —— 那句「下面的声音包」在它上面指向的是空气。
+
+**Why:** 今天不会伤到人，但理由是「这条路径不可达」：一次成功的 `takeOver` 必然把 state 推成 `.installed`，于是每一条告知都诞生在运行态面板那一侧，onboarding 卡接不住它。**而「我推理出这个格子不可达」正是这个仓库交过两次学费的那句话**（T17d 的「重开 = 看过了」、T17e 的「零包不会写 hooks」）—— 而且这张卡**之所以**渲染告知行，恰恰是因为 T17f 拒绝对不可达性做推理（「两个渲染点都无条件画」是它的结构不变式）。两条理由自己打架：要么承认它可达、给它一句站得住的文案，要么承认它不可达、别渲染。
+
+**Context:** 2026-07-12 T17g（`/codex review 0d789dd` 自评审顺带发现）。同一轮里刻意**没有**往文案里再加一句「上面四行会告诉你哪些还缺」，就是不想在这个洞里再多埋一条位置断言。修法二选一：① 把告知行做成一个自带上下文的组件（不假设自己上下有什么），文案去掉方位词；② 让 `onboardingVisibleNotices` 在 onboarding 卡上恒为空，并用一条测试把「告知只可能诞生在 `.installed`」钉死 —— 那等于正式承认这条不可达，就得配一条会变红的断言，而不是一句注释。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None

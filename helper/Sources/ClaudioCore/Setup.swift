@@ -195,7 +195,16 @@ public enum PackSelectionOutcome: Sendable, Equatable {
     case untouched
     /// 首次自举挑了一个默认包。
     case selectedDefault(packID: String)
-    /// 他选的包已经不在了 / 读不出来 —— 替他换上了一个能响的。**必须让他知道。**
+    /// 他选的包已经不在了 / 读不出来 —— 替他换上了**另一个还读得出来的包**。**必须让他知道。**
+    ///
+    /// 措辞刻意不是「一个能响的」（T17g，codex 独立评审逮到）：顶替者只过了一道 ``isUsablePack(_:in:)``，
+    /// 而那个函数自己的文档写得很清楚 —— 它查目录、查 manifest，**一个字节的音频都不查**。
+    /// `usablePackIDs.first` 又是按字典序挑的，所以完全可能挑中一个只映了部分事件的用户自导入包：
+    /// 换完之后，那些没映到的事件依旧是哑的。
+    ///
+    /// 这条区别不是咬文嚼字 —— GUI 侧的告知文案曾照着「能响的」这个措辞对用户承诺「这样每个事件都还能
+    /// 出声」，而用户在同一张面板上就能看见三行「未配置」。文案已改；这里的措辞跟着改，免得下一个人
+    /// 又从这句注释里读出那个错误的保证。
     case repairedDeadSelection(removed: String, selected: String)
 }
 

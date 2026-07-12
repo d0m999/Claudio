@@ -20,6 +20,9 @@ public struct PanelView: View {
     @StateObject private var onboardingViewModel: OnboardingViewModel
     @StateObject private var muteController: EventMuteController
     @StateObject private var dropZoneViewModel: AudioImportViewModel
+    /// 「这一句刚说过」的去重器（T17g）—— 让「一趟 update pass ≤ 一条播报」在结构上成立。
+    /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
+    @StateObject private var announcer: PanelAnnouncer
     @State private var rowImportViewModels: [Event: EventRowImportViewModel]
     @State private var config: ClaudioConfig
     @State private var eventRows: [EventRow]
@@ -146,6 +149,7 @@ public struct PanelView: View {
                 actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment)))
         _muteController = StateObject(
             wrappedValue: EventMuteController(configFile: configFile, lockFile: lockFile))
+        _announcer = StateObject(wrappedValue: PanelAnnouncer())
 
         let loadedConfig = loadPanelConfig(from: configFile)
         _config = State(initialValue: loadedConfig)
@@ -199,9 +203,13 @@ public struct PanelView: View {
         // ``PanelFocusCoordinator``'s own doc comment on why `.onAppear` is not), and `init(...)`
         // has already loaded the initial rows/cards from disk, so this hook only needs to place
         // focus and report the panel's width.
+        //
+        // T17g：它也**不播报**，一字不差的同一条推理 —— `.onAppear` 与 `.onChange(showCount)` 在同一次
+        // 打开里**都会**跑，两条 post 会抢同一条「一次一句」的通道，而谁先谁后取决于 `onAppear` 与
+        // `popoverDidShow` 的 AppKit 时序：一个没实测过的语义。`showCount` 是这两个信号里可靠的那个
+        // （见 ``PanelFocusCoordinator`` 的文档），所以播报只挂它。
         .onAppear {
             applyFirstFocus()
-            announcePanel()
             onPanelWidthChange(layoutAdaptation.panelWidth)
         }
         // a11y-architect FIX 4: `MenuBarController.popoverDidShow` bumps
@@ -216,10 +224,15 @@ public struct PanelView: View {
             // 必须在 `refresh()` **之前**：清掉 `.failed` 会改变 `hasDetailToggle`，而
             // `applyFirstFocus()` 要按清理**之后**的焦点序落焦，否则光标会落在一颗刚被清掉的
             // 「查看原因」上。
-            onboardingViewModel.panelDidBecomeVisible()
+            // T17g —— **返回值不许丢**。它是「这条结果是不是第一次露面」的**唯一**真相源
+            // （`outcomeHasBeenSeen` 就在那个函数里被消费掉了），而那正是这一次打开唯一一次能把它
+            // **说出口**的机会。上一版把它丢了：结果画出来了，VoiceOver 用户却只听到一句平静的
+            // 「Claudio 面板，当前声音包 X」—— 静默替换换到听觉通道上原样复活。
+            let moment = onboardingViewModel.panelDidBecomeVisible()
             refresh()
             applyFirstFocus()
-            announcePanel()
+            // `say(_:)` 必须在 `refresh()` **之后**：面板句里的包名来自刚被 refresh 写新的 `packCards`。
+            say(moment)
         }
         // 另一半（T17d）：`MenuBarController.popoverDidClose` bumps `focusCoordinator.hideCount`。
         // 没有它，view-model 就只能去**假定**「下一次打开 = 上一条失败已经被看过」—— 而在
@@ -242,14 +255,22 @@ public struct PanelView: View {
         .onChange(of: onboardingViewModel.state) { _ in
             refresh()
             applyFirstFocus()
-            announcePanel()
+            // T17g：有结果要说的时候，这一句**主动让出**那条「一次一句」的通道（政策在
+            // ``panelAnnouncement(_:)``）。上一版两边都无条件开口，于是「你的包被换掉了」能不能被听见，
+            // 押在 SwiftUI **未文档化**的 onChange 顺序上 —— `runDiskAction` 在同一个 MainActor turn 里
+            // 写完 `actionState` 又写 `state`，两个 handler 在**同一趟** update pass 里都会触发。
+            say(.stateChanged)
         }
         // 动作态变化（开始跑 / 失败）：① 播报——一颗变灰的按钮 + 一个 spinner 对 VoiceOver 是完全
         // 无声的，而这个仓库自己已经论证过「光有 label 不会被播报，VO 只读它光标落上的元素」；
         // ② 重新落焦——in-flight 期间 CTA 被禁用，持有焦点的那颗按钮当场作废，没人把焦点接走的话
         // 键盘用户按完空格就无处可去了。
-        .onChange(of: onboardingViewModel.actionState) { newValue in
-            announceActionState(newValue)
+        //
+        // 刻意 `{ _ in }` 而不是 `{ newValue in }`（与上面那条 `state` handler 一样）：两个 handler 必须读
+        // view-model 的**当前值**。整个防竞争契约（「同一趟里只有一个开口，或两个说同一句」）建立在
+        // 「两边看到的是同一份快照」上。
+        .onChange(of: onboardingViewModel.actionState) { _ in
+            say(.actionStateChanged)
             applyFirstFocus()
         }
         // T15 D5 「极大 → 加宽 popover」: SwiftUI already widened ITSELF (`.frame(width:)` above);
@@ -261,62 +282,42 @@ public struct PanelView: View {
         // label names the container itself, which otherwise reads as an anonymous group. It is
         // NOT what delivers 「VoiceOver 进入先播报面板标题 + 当前包」 — a label is read when the
         // cursor lands on the element, and the cursor lands on a control, not on the group.
-        // ``announcePanel()`` is what actually says the sentence on open.
+        // ``say(_:)`` is what actually says the sentence on open.
         .accessibilityElement(children: .contain)
         .accessibilityLabel(headerAccessibilityLabel)
     }
 
-    /// 「VoiceOver 进入先播报面板标题 + 当前包」 (ENGINEERING.md「无障碍规格」), which nothing in this
-    /// view used to implement: the sentence lives in ``headerAccessibilityLabel``, hung on a
-    /// static `Text` header that the VoiceOver cursor never lands on by itself. `@FocusState`
-    /// doesn't help — that is the KEYBOARD focus, not the VoiceOver cursor. The only way to
-    /// make VoiceOver *say* something on open is to ask it to.
+    /// **整个 GUI 里唯一一处 `NSAccessibility.post`，也是唯一一处播报调用点**（T17g）。
     ///
-    /// AppKit's `.announcementRequested` rather than SwiftUI's `AccessibilityNotification`
-    /// (macOS 14+, above this package's macOS 12 floor). Async so it lands after the popover's
-    /// window is key and in the AX tree — VoiceOver drops announcements aimed at an app that
-    /// isn't there yet. A no-op when VoiceOver is off.
-    private func announcePanel() {
-        announce(headerAccessibilityLabel)
-    }
-
-    /// 一次 CTA 动作的开始 / 失败，也必须说出口（T17）。
+    /// 「VoiceOver 进入先播报面板标题 + 当前包」(ENGINEERING.md「无障碍规格」)，以及一次 CTA 动作的
+    /// 开始 / 失败 / 「我替你做主」的告知 —— 全部走这一个出口。一个禁用的按钮 + 一个
+    /// `.accessibilityHidden(true)` 的 spinner 对 VoiceOver 完全无声；一条静态 `Text` 写的失败原因，
+    /// VO 光标不会自己跑过去。**让 VoiceOver 开口的唯一办法，是去求它开口。**
     ///
-    /// 与 ``announcePanel()`` 同一条推理，只是换了时刻：一个禁用的按钮 + 一个 spinner 对 VoiceOver
-    /// 完全无声；一条静态 `Text` 写的失败原因，VO 光标不会自己跑过去。而用户此刻正在等一次可能长达
-    /// 数百毫秒的磁盘复制，或者刚刚经历一次失败。
+    /// 政策不在这里：说不说、说哪一句、多条告知怎么拼，全在 ``panelAnnouncement(_:)``
+    /// （`ClaudioGUICore`，纯函数，harness 逐格钉死）；「同一趟里别说两遍」在 ``PanelAnnouncer``。
+    /// 这里只剩「把事实凑齐 + 把那一句交给 AppKit」。上一版的政策住在这个文件的三个 `private` 函数里，
+    /// 而 `ClaudioGUI` 是个 `@main` executableTarget —— harness **一行都 import 不到**，于是
+    /// 「谁抢到那条一次一句的通道」押在 SwiftUI 未文档化的 onChange 顺序上，零测试守护。
     ///
-    /// 一次**无话可说的**成功不在这里播报：它会让 `state` 变成 `.installed`，由上面
-    /// `.onChange(of: state)` 里的 ``announcePanel()`` 说出「Claudio 面板，当前声音包 X」——
-    /// 那句话比「成功了」信息量大得多。
+    /// 用 AppKit 的 `.announcementRequested` 而不是 SwiftUI 的 `AccessibilityNotification`
+    /// （macOS 14+，高于本包 macOS 12 的地板）。异步 post，好让它落在 popover 的窗口成为 key、进入
+    /// AX 树**之后** —— VoiceOver 会丢掉发给一个还不在那儿的 app 的播报。VoiceOver 没开时是 no-op。
     ///
-    /// **但一次「我替你做主」的成功必须播报**（T17f）。`announcePanel()` 那句
-    /// 「当前声音包 minimal-chime」对一个视力正常的用户来说尚可推断（他能看见 ⚠ 那一行），
-    /// 对一个 VoiceOver 用户则是**彻底的静默替换**：他会听到一句平静的「当前声音包 minimal-chime」，
-    /// 而他选的明明是别的包 —— 那正是这次修复要杀死的 bug，只是换到了听觉通道上。
-    /// 所以告知走这条 announce 通道，与失败**同权**。
-    private func announceActionState(_ actionState: OnboardingActionState) {
-        switch actionState {
-        case .idle:
-            break
-        case .running(let action):
-            announce(onboardingActionRunningTitle(action))
-        case .failed(_, let message, _):
-            announce(message)
-        case .reported(let notices):
-            // 多条告知连播成一句：`.announcementRequested` 是「一次一句」的通道，连发多条会被
-            // VoiceOver 截断成只剩最后一条 —— 而被丢掉的那条，恰恰可能是「你的目录被搬到了哪儿」。
-            announce(notices.map(\.message).joined(separator: " "))
-        }
-    }
-
-    private func announce(_ message: String) {
+    /// ⚠️ **不要从别处再调一次**（`switchPack` / `toggleMute` 都很诱人：换完包，面板句就变了）：
+    /// `.announcementRequested` 是「一次一句」的通道，那次 post 会**截断**用户可能还没听完的那条告知。
+    /// 要加一个新的播报时刻，先给 ``PanelAnnouncementMoment`` 加一个 case —— 那会让
+    /// ``panelAnnouncement(_:)`` 的 `switch` 编译红，逼你在纯函数里想清楚它跟别人抢不抢通道。
+    private func say(_ moment: PanelAnnouncementMoment) {
+        let candidate = onboardingViewModel.announcement(moment, header: headerAccessibilityLabel)
+        guard let sentence = announcer.consume(candidate, openCount: focusCoordinator.showCount)
+        else { return }
         DispatchQueue.main.async {
             NSAccessibility.post(
                 element: NSApp as Any,
                 notification: .announcementRequested,
                 userInfo: [
-                    .announcement: message,
+                    .announcement: sentence,
                     .priority: NSAccessibilityPriorityLevel.high.rawValue,
                 ])
         }

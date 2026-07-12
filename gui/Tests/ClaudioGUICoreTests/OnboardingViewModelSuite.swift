@@ -398,7 +398,7 @@ func runOnboardingFailureLifecycleSuites() async {
 
             // 真实时序，一步不省：
             // ① 用户打开面板
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
             // ② 点「修复」；在几百毫秒的复制 + flock 期间…
             // ③ …他点到别的 app 上 —— `.transient` popover 当场关闭
             viewModel.panelDidHide()
@@ -414,7 +414,7 @@ func runOnboardingFailureLifecycleSuites() async {
                 "失败诞生在一块没人看的屏幕上 —— 它不该被标记成「看过了」")
 
             // ⑤ 用户回来，重新打开面板。**这是整个 bug 的那一刻。**
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
 
             guard case .failed = viewModel.actionState else {
                 expect(
@@ -436,18 +436,18 @@ func runOnboardingFailureLifecycleSuites() async {
             let viewModel = OnboardingViewModel(
                 environment: environment, actionRunner: makeFailingRunner())
 
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
             viewModel.panelDidHide()
             await viewModel.performPrimaryAction()
 
-            viewModel.panelDidBecomeVisible()  // 第一次露面：留着
+            _ = viewModel.panelDidBecomeVisible()  // 第一次露面：留着
             guard case .failed = viewModel.actionState else {
                 expect(false, "第一次重开必须还看得到它")
                 return
             }
 
             viewModel.panelDidHide()
-            viewModel.panelDidBecomeVisible()  // 第二次：看过了，忘掉
+            _ = viewModel.panelDidBecomeVisible()  // 第二次：看过了，忘掉
             expect(
                 viewModel.actionState == .idle,
                 "一条已经露过面的失败不该永久挂在面板上 —— 这是 T17c 那条顾虑，它仍然成立。"
@@ -463,7 +463,7 @@ func runOnboardingFailureLifecycleSuites() async {
             let viewModel = OnboardingViewModel(
                 environment: environment, actionRunner: makeFailingRunner())
 
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
             // 面板全程开着，失败就在他眼皮底下发生 —— 两个渲染点都无条件画它（T17c 结构不变式）。
             await viewModel.performPrimaryAction()
             expect(
@@ -471,7 +471,7 @@ func runOnboardingFailureLifecycleSuites() async {
                 "面板开着时诞生的失败，这一帧就在屏幕上 —— 当场算看过")
 
             viewModel.panelDidHide()
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
             expect(
                 viewModel.actionState == .idle,
                 "他已经看过了，重开就该忘掉 —— 而不是再挂一轮。得到 \(viewModel.actionState)")
@@ -484,7 +484,7 @@ func runOnboardingFailureLifecycleSuites() async {
             let viewModel = OnboardingViewModel(
                 environment: environment, actionRunner: makeFailingRunner())
 
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
             await viewModel.performPrimaryAction()
             let before = viewModel.actionState
 
@@ -502,8 +502,8 @@ func runOnboardingFailureLifecycleSuites() async {
                 previewState: .notInstalled,
                 actionState: .failed(action: .takeOver, message: "m", detail: "d"))
 
-            pinned.panelDidBecomeVisible()
-            pinned.panelDidBecomeVisible()
+            _ = pinned.panelDidBecomeVisible()
+            _ = pinned.panelDidBecomeVisible()
             pinned.panelDidHide()
 
             expect(
@@ -560,7 +560,7 @@ func runSetupNoticeLifecycleSuites() async {
             let environment = makeReadyEnvironment(in: root)
             let viewModel = OnboardingViewModel(
                 environment: environment, actionRunner: makeMeddlingRunner())
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
 
             await viewModel.performPrimaryAction()
 
@@ -585,7 +585,7 @@ func runSetupNoticeLifecycleSuites() async {
             let environment = makeReadyEnvironment(in: root)
             let viewModel = OnboardingViewModel(
                 environment: environment, actionRunner: makeCleanRunner())
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
 
             await viewModel.performPrimaryAction()
 
@@ -609,7 +609,7 @@ func runSetupNoticeLifecycleSuites() async {
 
             // 真实时序，一步不省 —— 而且这条比 T17d 那条**更容易**发生：
             // ① 用户打开面板
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
             // ② 点「接管」；在几百毫秒的复制二进制 + 复制音频 + flock 期间…
             // ③ …他点到别的 app 上（最自然的动作：他以为已经装完了）—— `.transient` popover 当场关闭
             viewModel.panelDidHide()
@@ -622,7 +622,7 @@ func runSetupNoticeLifecycleSuites() async {
                 "告知诞生在一块关着的面板上 —— 它绝不能被标记成「看过了」")
 
             // ⑤ 用户回来重开面板 —— **这一次打开就是它的第一次露面**
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
 
             expect(
                 onboardingVisibleNotices(actionState: viewModel.actionState).count == 2,
@@ -632,7 +632,7 @@ func runSetupNoticeLifecycleSuites() async {
 
             // ⑥ 他关掉、再打开 —— 已经看过的告知这时才该被忘掉
             viewModel.panelDidHide()
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
             expect(
                 viewModel.actionState == .idle,
                 "看过之后再重开，陈旧的告知必须清掉 —— 它不该永久挂在一张早就装好的面板上")
@@ -645,7 +645,7 @@ func runSetupNoticeLifecycleSuites() async {
             let environment = makeReadyEnvironment(in: root)
             let viewModel = OnboardingViewModel(
                 environment: environment, actionRunner: makeMeddlingRunner())
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
 
             await viewModel.performPrimaryAction()
 
@@ -657,7 +657,7 @@ func runSetupNoticeLifecycleSuites() async {
                 "而且此刻它确实还在")
 
             viewModel.panelDidHide()
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
             expect(viewModel.actionState == .idle, "看过了 → 重开即清")
         }
     }
@@ -667,7 +667,7 @@ func runSetupNoticeLifecycleSuites() async {
             let environment = makeReadyEnvironment(in: root)
             let runner = makeMeddlingRunner()
             let viewModel = OnboardingViewModel(environment: environment, actionRunner: runner)
-            viewModel.panelDidBecomeVisible()
+            _ = viewModel.panelDidBecomeVisible()
 
             await viewModel.performPrimaryAction()
             expect(
@@ -687,4 +687,181 @@ func runSetupNoticeLifecycleSuites() async {
                 "第二次接管什么主都没做 —— 上一条告知必须已经被清掉，不能让它冒充这次的结果")
         }
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// T17g —— 「画得出来」与「说得出口」是两件事，而这个仓库只做了前一件
+//
+// T17d 造了 `outcomeHasBeenSeen`，T17f 把它从「失败」推广到「结果」，两次提交都在论证同一件事：
+// 一条诞生在**关着的面板**上的结果，必须活到用户下一次打开、真正露一次面为止。上面那些 suite
+// 逐格钉死了它 —— **在视觉通道上**。
+//
+// 听觉通道上，那条结果从头到尾一个字都没被说过。`PanelView` 的「面板打开」handler 只调
+// `announcePanel()`（「Claudio 面板，当前声音包 X」），从不播报动作态。于是一个 VoiceOver 用户
+// 点完「接管」、切到别的 app、安装在后台失败（或替他换掉了选包）、他回来重开面板 —— 面板把那条
+// 结果**画**在了屏幕上，而他听到的是一句平静的「当前声音包 minimal-chime」。
+//
+// **那正是 T17f 宣称杀死的那个静默替换，换个通道原样复活。** codex 独立评审逮到了它。
+//
+// 下面这组 suite 走的是**真的那条路**：开面板 → 关面板 → 动作在后台跑完 → 重开面板，然后问一个
+// 上一版根本没人问过的问题：**这一刻，VoiceOver 会听到什么？**
+// ═══════════════════════════════════════════════════════════════════════════════════════
+@MainActor
+func runPanelAnnouncementLifecycleSuites() async {
+    let header = "Claudio 面板，当前声音包 lofi"
+
+    func makeFailingRunner() -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        runner.result = .failure(.setupFailed(.installFailure(.notWritable(reason: "boom"))))
+        return runner
+    }
+
+    /// 「成功了，但替你做了主」：他选的 pikachu 没了 → 换成 lofi。
+    func makeMeddlingRunner() -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        runner.result = .success(
+            .tookOver(
+                .completed(
+                    copiedBinary: true, copiedPacks: [], salvaged: [],
+                    packSelection: .repairedDeadSelection(removed: "pikachu", selected: "lofi"),
+                    hooksOutcome: .installed)))
+        return runner
+    }
+
+    await suite("T17g【契约】panelDidBecomeVisible() 返回 repeat ⟺ 调用之后 actionState 里不再有活着的结果") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+
+            let idle = OnboardingViewModel(environment: environment, actionRunner: ScriptedRunner())
+            expect(
+                idle.panelDidBecomeVisible() == .panelOpened(outcomeIsFirstAppearance: false),
+                "没有结果 → 没有什么「第一次露面」")
+
+            let failed = OnboardingViewModel(
+                environment: environment, actionRunner: makeFailingRunner())
+            _ = failed.panelDidBecomeVisible()
+            failed.panelDidHide()
+            await failed.performPrimaryAction()
+            expect(
+                failed.panelDidBecomeVisible() == .panelOpened(outcomeIsFirstAppearance: true),
+                "这一次打开就是它的第一次露面 —— 返回值是它唯一一次能被说出口的机会")
+            guard case .failed = failed.actionState else {
+                expect(false, "契约上半：返回 first 时，actionState 里必须还留着那条结果")
+                return
+            }
+            failed.panelDidHide()
+            expect(
+                failed.panelDidBecomeVisible() == .panelOpened(outcomeIsFirstAppearance: false),
+                "看过了 → 不是第一次露面")
+            expect(
+                failed.actionState == .idle,
+                "**契约下半**：返回 repeat 时 actionState 必然不再是 .failed/.reported —— "
+                    + "`PanelAnnouncementSuite` 的后缀不变式（去重器结构性完备的全部依据）建立在这条上。"
+                    + "改掉这里的清理规则（比如「一条告知留两次打开」），那边会当场退化成两条抢通道的 post。"
+                    + "实得 \(failed.actionState)")
+        }
+    }
+
+    await suite("T17g【DEFECT 1 · 失败】面板关着时诞生的失败，在它露面的那一次打开里必须被**说出口**") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeFailingRunner())
+
+            _ = viewModel.panelDidBecomeVisible()  // ① 打开面板
+            viewModel.panelDidHide()  // ② 点完「修复」立刻切走 —— .transient popover 当场关闭
+            await viewModel.performPrimaryAction()  // ③ Task 不随视图销毁而取消：跑完，失败
+
+            expect(
+                viewModel.announcement(.actionStateChanged, header: header) == nil,
+                "面板关着 —— 此刻 post 一句话，是朝着用户正在用的那个 Finder 窗口念的")
+            expect(
+                viewModel.announcement(.stateChanged, header: header) == nil,
+                "同一趟里 state 也变了（runDiskAction 无条件 refresh()）—— 它同样不许开口")
+
+            let moment = viewModel.panelDidBecomeVisible()  // ④ 用户回来。**整个 bug 的那一刻。**
+            expect(moment == .panelOpened(outcomeIsFirstAppearance: true), "第一次露面")
+            guard case .failed(_, let message, _) = viewModel.actionState,
+                let said = viewModel.announcement(moment, header: header)
+            else {
+                expect(false, "❌ 面板把这条失败**画**出来了，却一个字都没**说** —— VO 用户永远不知道接管失败了")
+                return
+            }
+            expect(said.contains(message), "他必须听到失败原因本身，而不是一句平静的面板句。实得 \(said)")
+
+            viewModel.panelDidHide()
+            let again = viewModel.panelDidBecomeVisible()
+            expect(
+                viewModel.announcement(again, header: header) == "\(header)。",
+                "同一条失败播两遍，正是 outcomeHasBeenSeen 不做关联值的第二条理由所禁止的")
+        }
+    }
+
+    await suite("T17g【DEFECT 1 · 告知】同一条规则对「我替你做主」逐字成立（而且它更容易撞上）") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeMeddlingRunner())
+
+            _ = viewModel.panelDidBecomeVisible()
+            viewModel.panelDidHide()
+            await viewModel.performPrimaryAction()
+
+            expect(
+                viewModel.announcement(.actionStateChanged, header: header) == nil,
+                "「你之前选的「pikachu」已经不在了」这句话，此刻会被念进用户正在用的另一个 app 里")
+
+            let moment = viewModel.panelDidBecomeVisible()
+            guard let said = viewModel.announcement(moment, header: header) else {
+                expect(false, "❌ 静默替换在听觉通道上复活了：这一次打开是它唯一一次能被听见的机会")
+                return
+            }
+            for notice in onboardingVisibleNotices(actionState: viewModel.actionState) {
+                expect(said.contains(notice.message), "拼句丢了一条告知：\(notice.message)。实得 \(said)")
+            }
+            expect(said.hasPrefix(header), "面板句在前、告知在后 —— 去重器的后缀规则依赖这个次序")
+        }
+    }
+
+    await suite("T17g【面板开着】结果落在他眼皮底下 → 当场说，且面板句必须让出通道") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeMeddlingRunner())
+            _ = viewModel.panelDidBecomeVisible()
+
+            await viewModel.performPrimaryAction()
+
+            guard let said = viewModel.announcement(.actionStateChanged, header: header) else {
+                expect(false, "面板开着、结果落地 —— 必须当场说")
+                return
+            }
+            expect(said.contains("pikachu"), "实得 \(said)")
+            expect(
+                viewModel.announcement(.stateChanged, header: header) == nil,
+                "**这一趟里 state 也变了**（→ .installed），两个 onChange 都会触发。面板句必须让出这条"
+                    + "一次一句的通道 —— 否则谁活下来取决于 SwiftUI 未文档化的 handler 顺序，正是 T17f 押的注")
+
+            viewModel.panelDidHide()
+            let moment = viewModel.panelDidBecomeVisible()
+            expect(
+                viewModel.announcement(moment, header: header) == "\(header)。",
+                "看过也说过了 → 重开只说面板句")
+        }
+    }
+
+    #if DEBUG
+        suite("T17g：pin 死的预览实例永远不播报（画廊不该朝着评审者念句子）") {
+            let pinned = OnboardingViewModel(
+                previewState: .installed,
+                actionState: .failed(action: .takeOver, message: "m", detail: "d"))
+            let moment = pinned.panelDidBecomeVisible()
+            expect(
+                moment == .panelOpened(outcomeIsFirstAppearance: false), "pin 死的实例不参与结果的寿命")
+            expect(
+                pinned.announcement(moment, header: header) == nil,
+                "isPanelVisible 在 pin 死的实例上恒为 false —— 闸门直接拦下")
+            expect(pinned.announcement(.actionStateChanged, header: header) == nil, "同上")
+        }
+    #endif
 }

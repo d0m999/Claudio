@@ -69,6 +69,10 @@ public final class OnboardingViewModel: ObservableObject {
     ///
     /// 它**不是 `@Published`**：没有任何一个像素读它。它只决定结果的**寿命**，不决定结果的**长相**
     /// （两个渲染点都无条件画「有没有失败」与「有没有告知」，这条结构不变式 T17c 立、T17f 照搬）。
+    ///
+    /// T17g：视图读的是 ``panelDidBecomeVisible()`` 的**返回值**，不是这个属性 —— 上面那句「没有任何一个
+    /// 像素读它」仍然逐字成立。「第一次露面」这个事实由返回值送达，`actionState` 在那条路径上**一个字节
+    /// 都没被改写**（否则 `.onChange(of: actionState)` 二次触发 = 同一条失败播两遍，正是上面理由 ② 禁止的）。
     public private(set) var outcomeHasBeenSeen: Bool = false
 
     /// 面板此刻是不是真的在屏幕上。由 `MenuBarController` 的两个 `NSPopoverDelegate` 回调驱动
@@ -200,8 +204,24 @@ public final class OnboardingViewModel: ObservableObject {
     /// 必须在 `PanelView` 里跑在 `refresh()` / `applyFirstFocus()` **之前**：清掉 `.failed` 会改变
     /// `hasDetailToggle`，而 `applyFirstFocus()` 要按清理**之后**的焦点序落焦，否则光标会落在一颗
     /// 刚被清掉的「查看原因」上。
-    public func panelDidBecomeVisible() {
-        guard !isPreviewPinned else { return }
+    ///
+    /// ## 返回值（T17g）：把「第一次露面」交出去，否则它只画得出来、说不出口
+    ///
+    /// `outcomeIsFirstAppearance == true` ⟺ `actionState` 里那条结果（`.failed` / `.reported`）**这一次
+    /// 打开才第一次露面**，调用方必须把它**说出口**。
+    ///
+    /// 这不是锦上添花：``outcomeHasBeenSeen`` 是「第一次露面」的**唯一**真相源，而它就在这个函数里被
+    /// 消费掉了（下面那行 `outcomeHasBeenSeen = true`）。视图想在这一次打开里把结果说出来，只能从这里拿。
+    /// T17d/T17f 把这条结果**画**出来了，却从没**说**出来：VoiceOver 用户在 `ActionFailureRow` /
+    /// `ActionNoticeRow` 真正出现的那一次打开里，听到的只有一句平静的「Claudio 面板，当前声音包 X」——
+    /// 那正是这两次修复宣称杀死的静默替换，换到听觉通道上原样复活。
+    ///
+    /// **刻意不加 `@discardableResult`**：丢掉它 = 一条编译警告，而不是一次全绿的测试。
+    ///
+    /// **契约**（`OnboardingViewModelSuite` 的真值表钉死，`PanelAnnouncementSuite` 的后缀不变式依赖它）：
+    /// 返回 `outcomeIsFirstAppearance: false` ⟹ 本次调用**之后** `actionState ∉ {.failed, .reported}`。
+    public func panelDidBecomeVisible() -> PanelAnnouncementMoment {
+        guard !isPreviewPinned else { return .panelOpened(outcomeIsFirstAppearance: false) }
         isPanelVisible = true
 
         // `.failed` / `.reported` 与 `.running` 在枚举层面互斥，所以这里不需要 `!isPerformingAction`
@@ -212,7 +232,9 @@ public final class OnboardingViewModel: ObservableObject {
         // 别处清了它，它会在用户看见之前消失。`switch` 穷尽、无 `default:`，加新态会编译红。
         switch actionState {
         case .idle, .running:
-            return
+            // 一个**正在跑**的动作不是一条「结果」——它没有寿命可管（它还没落地）。但它照样欠用户一句话：
+            // 那由 `panelAnnouncement(_:)` 的 `.running` 子句负责，不走这条规则。
+            return .panelOpened(outcomeIsFirstAppearance: false)
         case .failed, .reported:
             break
         }
@@ -221,8 +243,10 @@ public final class OnboardingViewModel: ObservableObject {
             actionState = .idle
             isShowingDetail = false
             outcomeHasBeenSeen = false
+            return .panelOpened(outcomeIsFirstAppearance: false)
         } else {
             outcomeHasBeenSeen = true
+            return .panelOpened(outcomeIsFirstAppearance: true)
         }
     }
 
@@ -233,6 +257,23 @@ public final class OnboardingViewModel: ObservableObject {
     public func panelDidHide() {
         guard !isPreviewPinned else { return }
         isPanelVisible = false
+    }
+
+    /// 此刻该说的那句话（`nil` = 一个字都不说）—— 见 ``panelAnnouncement(_:)``（T17g）。
+    ///
+    /// 政策全在那个纯函数里（真值表逐格钉死）。这里只把**模型侧**的两个事实凑齐 —— 其中 ``isPanelVisible``
+    /// 是 `private`，视图结构上够不着，所以「面板关着就一个字都不说」这道闸门只能长在这儿。
+    ///
+    /// 刻意**不**把 `isPanelVisible` 提成 `public`：给视图第二个可见性 oracle（比如
+    /// `showCount > hideCount`），就等于让「谁看见了」有两个会各自漂移的答案 —— 而 ``outcomeHasBeenSeen``
+    /// 的诞生判据押的正是同一个事实，两者必须共用一个真相源。
+    public func announcement(_ moment: PanelAnnouncementMoment, header: String) -> String? {
+        panelAnnouncement(
+            PanelAnnouncementFacts(
+                moment: moment,
+                actionState: actionState,
+                panelIsVisible: isPanelVisible,
+                header: header))
     }
 
     /// 每一颗 CTA 最终都走这里。`switch` 穷尽、无 `default:` —— 加一个 intent 会编译红。

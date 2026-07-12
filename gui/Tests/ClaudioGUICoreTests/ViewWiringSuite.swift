@@ -140,6 +140,63 @@ func runViewWiringSuites() {
             !panel.contains("clearConsumedFailure"),
             "`clearConsumedFailure()` 已经删了（T17d）—— 它无条件在面板重开时清掉当前失败，"
                 + "而「重开 = 看过了」是一个**假定**，在「失败诞生于面板关闭之后」这条路径上是假的")
+
+        // ── T17g：结果不但要画得出来，还要说得出口 ────────────────────────────────────────
+        expect(
+            panel.contains("let moment = onboardingViewModel.panelDidBecomeVisible()")
+                && panel.contains("say(moment)"),
+            "打开面板必须把 panelDidBecomeVisible() 的返回值**说出去** —— 它是「这条结果第一次露面」的"
+                + "唯一真相源（outcomeHasBeenSeen 就在那个函数里被消费掉了）。T17d/T17f 把结果画出来了，"
+                + "却从没说出来：VO 用户在 ActionFailureRow / ActionNoticeRow 真正出现的那一次打开里，"
+                + "听到的只有一句平静的「Claudio 面板，当前声音包 X」")
+        expect(
+            panel.contains("say(.stateChanged)") && panel.contains("say(.actionStateChanged)"),
+            "另外两个播报时刻也必须接上 —— 政策在 panelAnnouncement(_:)，视图只负责报时刻")
+        expect(
+            panel.contains("onboardingViewModel.announcement("),
+            "播报政策必须从 ClaudioGUICore 拿，不许在视图里再判一次 —— 它上一次住在这个文件里的时候，"
+                + "「谁抢到那条一次一句的通道」押在 SwiftUI 未文档化的 onChange 顺序上，零测试守护")
+        expect(
+            !panel.contains("announcePanel") && !panel.contains("announceActionState"),
+            "这两个函数体里的 switch 就是播报政策，已整体下沉到 panelAnnouncement(_:)。"
+                + "把任何一个放回来 = 把那场竞争放回来")
+        expect(
+            panel.components(separatedBy: "NSAccessibility.post").count - 1 == 1,
+            "全 GUI 只许有**一处** NSAccessibility.post（在 say(_:) 里）。第二处 post = 第二条抢「一次一句」"
+                + "通道的话，它会截断用户可能还没听完的那条告知（在 switchPack / toggleMute 里顺手补一句，"
+                + "正是最诱人的那条路）")
+        expect(
+            panel.components(separatedBy: "announcer.consume(").count - 1 == 1,
+            "去重器只许有一个调用点 —— 绕过它 = 把「同一趟里 post 两条」放回来")
+        expect(
+            panel.contains(".onChange(of: onboardingViewModel.actionState) { _ in"),
+            "必须读 view-model 的**当前值**，不许用 onChange 的 newValue —— 「同一趟里只有一个开口，"
+                + "或两个说同一句」这条不变式建立在两边看到同一份快照上")
+
+        if let appearAt = panel.range(of: ".onAppear {")?.lowerBound,
+            let showAt = panel.range(of: ".onChange(of: focusCoordinator.showCount)")?.lowerBound
+        {
+            expect(
+                !panel[appearAt..<showAt].contains("say("),
+                ".onAppear 不许播报 —— 它与 .onChange(showCount) 在同一次打开里**都会**跑（本文件为 refresh() "
+                    + "实测过这一点：首开会扫盘两遍），两条 post 会抢同一条一次一句的通道，而谁先谁后取决于"
+                    + " onAppear 与 popoverDidShow 的 AppKit 时序 —— 一个没实测过的语义。播报只挂 showCount")
+        } else {
+            expect(false, "PanelView 里必须同时有 .onAppear 与 .onChange(of: focusCoordinator.showCount)")
+        }
+
+        if let rowsAt = panel.range(of: "ForEach(eventRows")?.lowerBound,
+            let noticeAt = panel.range(of: "ActionNoticeRow(")?.lowerBound
+        {
+            expect(
+                rowsAt < noticeAt,
+                "四行事件覆盖度必须排在告知行**之前** —— 换包告知白纸黑字写着「事件行里会标出哪些还缺」。"
+                    + "顶替上来的包只过了 isUsablePack（它一个字节的音频都不查，usablePackIDs.first 完全可能是"
+                    + "一个只映了 1/4 事件的用户包），所以那几行是这句话之后唯一说真话的地方。把它们挪到告知"
+                    + "下面，用户就得先读到「哪些还缺」、再往下找那个「哪些」")
+        } else {
+            expect(false, "PanelView 里必须同时有 ForEach(eventRows 与 ActionNoticeRow(")
+        }
     }
 
     suite("MenuBarController：popover 关闭必须发出隐藏信号，而且必须在那句会提前 return 的 guard 之前（T17d）") {

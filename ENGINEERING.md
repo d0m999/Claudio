@@ -976,6 +976,60 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   在重开面板之前 ⌘Q，那条「我替你换了包」**永远消失**（与 TODOS 里那条「失败活不过进程」是同一个洞，
   同一个修法，见该条已更新的说明）；Codex 另两条 [P2]（失败路径丢 `movedTo`、并发 setup 的 EEXIST）仍未修。
 
+  ### T17g — 第七轮对抗评审（`/codex review 0d789dd`，2026-07-12）
+
+  外部模型（Codex）评审 T17f 那个提交，两条 [P2]，**两条都经本地读码证实**。
+  **第七轮仍是同一个家族，而且这一次它长在上一轮的补丁自己身上**：T17f 花了整整一节论证
+  「一条诞生在关着的面板上的结果，必须活到用户下一次打开、真正露一次面为止」，造了 `outcomeHasBeenSeen`
+  这套机器去兑现它 —— **然后只兑现了视觉那一半**。
+
+  - **【P2 · Codex，实测证实】结果画得出来，却说不出口 —— 静默替换换个通道原样复活。**
+    `PanelView` 的「面板打开」handler（`.onChange(of: focusCoordinator.showCount)`）调
+    `panelDidBecomeVisible()` / `refresh()` / `applyFirstFocus()` / `announcePanel()` —— **没有 `announceActionState()`**。
+    而 `announceActionState` 只挂在 `.onChange(of: actionState)` 上，那次变化发生在**面板关着**的时候。
+    于是：用户点「接管」→ 立刻切到别的 app（`.transient` popover 当场关闭）→ 不随视图销毁的 Task 跑完、
+    失败（或替他换了包）→ 他回来重开面板 —— 面板把那条结果**画**在屏幕上，而一个 VoiceOver 用户听到的，
+    只有一句平静的「Claudio 面板，当前声音包 minimal-chime」。
+    **T17f 亲手写下「对 VO 用户这是彻底的静默替换」，然后在自己新造的那条路径上原样重演了它。**
+
+    **而「顺手的修法」修不好它。** 在 handler 里再补一句 `announceActionState()` —— 那是最自然的一改 ——
+    会让**两条 post 挤进同一趟**：`.announcementRequested` 是「一次一句」的通道，连发多条只剩最后一条。
+    这条铁律 T17f 自己就写在 `announceActionState` 的注释里，而它**同一个文件里就违反了自己**：一次带告知的
+    成功接管，`runDiskAction` 在**同一个 MainActor turn** 里先写 `actionState`、再经 `refresh()` 写 `state`，
+    SwiftUI 把两次写合并成**一趟** update pass，于是 `.onChange(of: state) → announcePanel()` 与
+    `.onChange(of: actionState) → announceActionState(.reported)` **都会触发**。「你的包被换掉了」能不能被听见，
+    押在 SwiftUI **未文档化**的 onChange 执行顺序上，零测试守护。
+
+    **修法：不去赢那场竞争，而是让它不存在。** 政策整体下沉进 `ClaudioGUICore`（新文件 `PanelAnnouncement.swift`）：
+    | 上一版（住在 `PanelView` 的三个 `private` 函数里） | 本次 |
+    |---|---|
+    | `announcePanel()` / `announceActionState()` / `announce()` | 唯一出口 `say(_ moment:)`，全 GUI 只剩**一处** `NSAccessibility.post` |
+    | 说不说、说哪一句 —— 散在两个 `.onChange` 闭包里 | 纯函数 `panelAnnouncement(_:)`，`switch` 穷尽、无 `default:` |
+    | 「面板关着时别说话」—— 没人管 | 闸门读 view-model 的 `isPanelVisible`（`outcomeHasBeenSeen` 押的**同一个** oracle） |
+    | 「第一次露面」—— 视图算不出来 | `panelDidBecomeVisible()` **交出返回值**（`@discardableResult` 刻意不加：丢掉它 = 编译警告） |
+
+    两条结构不变式让「同一趟里两条内容不同的 post」不可能：① 有结果要说时，面板句**主动让出**通道；
+    ② 开面板那一句永远以「动作态那一句」**结尾**，所以被推迟的第二条必然是它的**后缀**，由 `PanelAnnouncer`
+    按 `openCount` 分段吞掉（跨两次打开重复面板句是**必须**的，全局去重 = 重开面板一片死寂）。
+    顺带补上一个谁都没提的洞：**动作还在跑时重开面板** —— spinner 被 `.accessibilityHidden(true)`、按钮被
+    `.disabled`、焦点还被刻意挪离，VO 用户完全不知道有一个写盘动作正在跑。现在他听得到「正在接管…」。
+
+  - **【P2 · Codex，实测证实】换包告知承诺「这样每个事件都还能出声」—— 那是一句用户当场能证伪的谎话。**
+    顶替上来的包只过了一道 `isUsablePack`（`Setup.swift`），而它自己的文档白纸黑字写着：查目录、查 manifest，
+    **音频文件在不在不在此列**。`usablePackIDs.first` 按字典序挑，完全可能挑中一个只映了 1/4 事件的用户自导入包
+    —— 于是面板会在这句话的正上方打出三行「未配置」。
+    改成：「它未必每个事件都有声音，事件行里会标出哪些还缺。」`PackSelectionOutcome` 与 `SetupNotice` 两处
+    「换上了一个**能响的**」的注释同步改成「另一个**还读得出来的**包」—— 免得下一个人又从注释里读出那个保证。
+    （刻意**不**写「上面四行」：那会是第二句关于布局的断言，而 `OnboardingView` 那张卡也渲染告知行、
+    却既没有四行事件也没有画廊 —— 现存的「下面的声音包」已经在同一个洞里，已记入 TODOS，不再加第二条。）
+
+  **变异测试（逐条实测，每一条都真的变红过）**：
+  ① 开面板时只说面板句、不说结果（= 原 bug）→ **8 条红**（连「动作还在跑时重开」那格一起抓住）；
+  ② 视图里把 `say(moment)` 顺手删掉（重构时最容易发生的那种）→ **ViewWiringSuite 1 条红**；
+  ③ 把两条播报都无条件放开（= T17f 那场竞争）→ **6 条红**。全部复原 → 全绿。
+
+  **收口**：GUI **1102 checks**（+145）、helper 1025 checks（只动了一句文档注释）、release build 零告警。
+
 ## Approved Mockups（视觉参照）
 
 | 屏 / 节 | Mockup Path | 方向 | 备注 |
