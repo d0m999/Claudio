@@ -1080,8 +1080,18 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
     白拿两件事：① 动作若在这一跳里刚好落地，那句本来就要被下一条 post 当场截断的「正在接管…」压根不出生；
     ② 面板若已关闭，`announcement(…)` 返回 nil，`consume` **一次都不跑** —— 去重器不会被一条从未出口的话污染。
     **顺序不变**：两条 `say(_:)` 各排一个 block，main queue 是 FIFO 的，仍按 handler 顺序 consume。
-    （**不许换成 `Task { @MainActor in … }`** —— 那是另一条队列，FIFO 当场没了，而后缀去重正建立在那个顺序上。
-    这条已写成断言。）
+    （**不许换成 `Task { @MainActor in … }`**，这条已写成断言。但**理由要改**：~~那是另一条队列，FIFO 当场没了~~
+    —— **该句已于 2026-07-12 被推翻**，Darwin 上 MainActor 的默认 executor 正是把 job enqueue 进 main dispatch
+    queue，**并没有换队列**。真正的理由是**保证的强度**：串行队列按入队顺序 FIFO 是 libdispatch 的**文档保证**，
+    而 Swift 并发 job 相对 dispatch block 的入队顺序只是**实现细节** —— 后缀去重这条不变式不该压在实现细节上。）
+
+  - **【2026-07-12 · `/codex review 71262dd` 后续】上面这条「三者从此看到同一份世界」并没有完全兑现。**
+    挪进 async 的是 `state` / `actionState` / 面板还开着吗**三个**事实；`header` 仍在 enqueue 那一趟被捕获。
+    世界没有统一，只是从「四个事实全在捕获侧」变成了**三比一** —— 于是一个陈旧的 header 拼得到一个崭新的
+    state 上（磁盘动作的续体由**后台线程**决定入队时刻，可以落在捕获与 enqueue 之间）。台账：TODOS.md
+    「面板句里的 `header` 在 async **外**捕获…」（P2）。同批还推翻了另一条**编译期**假话 ——「`@Sendable`
+    闭包捕不到 `self`」：`View` 是 `@MainActor` 的，`PanelView` 隐式 `Sendable`，就地重算实测编得过。那条假话
+    曾是「必须做 view-model 迁移」这一结论的唯一依据。
 
   - **【P2 · Codex，证实】那条「全 GUI 只许有一处 `NSAccessibility.post`」的断言，只数了一个文件。**
     断言的**措辞**是「全 GUI」，它守的**范围**是 `PanelView.swift`。于是在 `MenuBarController` /

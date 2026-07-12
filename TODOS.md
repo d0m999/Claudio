@@ -735,7 +735,7 @@ private var headerAccessibilityLabel: String {
 
 **Why:** 今天两者**一致** —— T17h′ 补上了 `.onChange(of: actionState)` 里那句 `refresh()`，于是三个会用到 header 的 `say()` 调用点全都排在 `refresh()` 之后（`ViewWiringSuite` 有顺序断言钉着）。但这条一致性靠的是**一条文本绊线**，不是类型。`ClaudioGUI` 是 `@main` executableTarget，harness **一行都 import 不到**，所以 `headerAccessibilityLabel` 这个函数本身**从来没有被任何一个 check 执行过** —— 包括「首次运行时 `config.selectedPack` 回落成 `""`，包名会念成一片空白」这一格。而 `PanelAnnouncementSuite` 给每个时刻喂的都是同一个常量 `H`，所以政策的全矩阵结构上**看不见** header 这一维的任何毛病。
 
-**Context:** 2026-07-12 T17h（`/codex review a3c2d08` 修复期间，本地 + 一次 34-agent 对抗验证双双指出）。修法：**把 `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model**。三件事一次到位：① header 变成一个**模型事实**，第二个 oracle 消失（`panelSentence` 独占那次分支）；② harness 第一次能测它（包括空包名那一格）；③ `say(_:)` 可以在 post 的那一趟**重算** header 而不是捕获它 —— 今天做不到，因为 `DispatchQueue.main.async` 的闭包是 `@Sendable` 的、捕不到 `self`（`PanelView` 带着 `@State`，不是 `Sendable`），而一个 `@MainActor` class 是 `Sendable` 的，捕得到。这与 `ViewWiringSuite` 头部那条「真正的结构修法是把视图层拆成可被 import 的 library target」是同一个方向，代价也在同一个量级。
+**Context:** 2026-07-12 T17h（`/codex review a3c2d08` 修复期间，本地 + 一次 34-agent 对抗验证双双指出）。修法：**把 `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model**。三件事一次到位：① header 变成一个**模型事实**，第二个 oracle 消失（`panelSentence` 独占那次分支）；② harness 第一次能测它（包括空包名那一格）；③ `say(_:)` 可以在 post 的那一趟**重算** header 而不是捕获它。~~今天做不到，因为 `DispatchQueue.main.async` 的闭包是 `@Sendable` 的、捕不到 `self`（`PanelView` 带着 `@State`，不是 `Sendable`）~~ —— **这句话是假的，2026-07-12 实测推翻**（见下方更新）：`View` 协议是 `@MainActor` 的，`PanelView` 因而隐式 `Sendable`，闭包捕得到 `self`（它今天已经捕了 `announcer` / `coordinator` / `viewModel`）。就地重算 Swift 6 语言模式下编得过。不选它的真实理由是**语义**而非编译器（在 update pass 之外读视图 `@State` 无文档保证），而 `@MainActor` view-model 读的是引用类型的当前值，没有这个问题。这与 `ViewWiringSuite` 头部那条「真正的结构修法是把视图层拆成可被 import 的 library target」是同一个方向，代价也在同一个量级。
 
 **更新（2026-07-12 · `/codex review 71262dd`）：上面那句「今天两者一致」是错的，而它错在 T17h 自己刚挪动的那条边界上。**
 T17h 把闸门 / 去重 / post 整体挪进 `DispatchQueue.main.async`，理由是「三者从此看到同一份世界」——
@@ -763,43 +763,61 @@ MainActor job **不可能**抢在它前面跑。
 - `OnboardingViewModel.swift:324`：`let result = await actionRunner.run(action)`。这个 `await` 的续体 **C**，
   是**后台线程完工的那一刻**把它丢回主执行器的。它落在哪，是一次纯粹的 wall-clock 竞争。
 
-于是只要 C 落进 `PanelView.swift:378`（捕获 header）与 `:382`（enqueue block **D**）之间 —— 甚至只要落在同一趟
-SwiftUI update pass 里、`:382` 之前 —— FIFO 就**保证** C 先跑：`actionState → .idle`、`state` 翻面、`refresh()`
-重写 `packCards`。D 随后醒来，把**捕获时**的 header 拼到**执行时**的 state 上。代码里**没有任何东西**把 C 排在
-D 之后。
+于是只要 C 落进「捕获 header」与「enqueue block **D**」之间 —— 甚至只要落在同一趟 SwiftUI update pass 里、
+enqueue 之前 —— 它就**先跑**：`actionState → .idle`、view-model 的 `refresh()` 把 `state` 翻面。D 随后醒来，
+把**捕获时**的 header 拼到**执行时**的 state 上。代码里**没有任何东西**把 C 排在 D 之后。
 
-**两个具体症状**（不是「念错包名」那么轻，初稿把它写小了）：
-- **断开连接**（最现实的一格，`PanelView.swift:531-533`）：`:294` 只在 `.idle` 才 `refresh()`，所以 `.running`
-  那趟捕获的 header 是「Claudio 面板，当前声音包 lofi」；而 `uninstallClaudioHooks` 是一次**亚毫秒**的
-  settings.json 原子重写，落进那趟 update pass 极为现实。C 先跑 → `state = .notInstalled`、`actionState = .idle`
-  → D 读到 `.idle` 于是走面板句 → `panelSentence(.notInstalled, "…当前声音包 lofi")` → **面板念出用户刚刚
-  断开的那个包名。** 去重吞不掉它：`panelAnnouncementIsRedundant` 是**后缀**规则（`PanelAnnouncement.swift:189`），
-  两句不互为后缀。
+两点精确性（初稿这两处都写错了，改正如下）：
+- view-model 的 `refresh()`（`OnboardingViewModel.swift:155-157`）**只有一行** `state = detectOnboardingState(…)`，
+  **从不碰** `packCards` / `config`。重写 `packCards` 的是 **`PanelView.refresh()`**，它要等下一趟 update pass ——
+  与这条竞争**无关**：header 早在捕获时就定死了，D 从头到尾不读 `packCards`。
+- 这里只说 C **可能**先跑，**不说「保证」**。「Swift 并发 job 相对 dispatch block 的入队顺序」正是下面要论证的
+  **实现细节** —— 缺口论证不需要、也不该反过来把同一条实现细节当成保证来用。「可能」已经足够，也正是代码所支持的。
+
+**两个具体症状**（都只断言「post 出去的这一句是错的」，**不断言用户听到什么** —— 那需要真机 VoiceOver 实测）：
+- **断开连接**（最现实的一格）：`.running` 那趟捕获 header 时**磁盘写还没落地** —— `state` 仍是 `.installed`，
+  于是 `headerAccessibilityLabel` 第一行放行，header 带着旧包名。C 先跑 → `state = .notInstalled`、
+  `actionState = .idle` → D 读到 `.idle` 于是走面板句 → `panelSentence(.notInstalled, "…当前声音包 lofi")` →
+  **这一句 post 出去的内容，带着用户刚刚断开的那个包名。**
+  ⚠️ **「`.onChange(actionState)` 只在 `.idle` 才 `refresh()`」那道门在这一格帮不上任何忙**（初稿把它写成了病因）：
+  `uninstallClaudioHooks` **只重写 settings.json**，根本不碰 config.json / packs 目录，所以就算这一趟真的
+  refresh 了，算出来的 header **一字不差**。根因是「在写落地**之前**捕获」，不是「没 refresh」—— 谁想靠拆掉那道
+  门来修这一格，会一无所获。
 - **接管**（T17d 自己记录的主路径：点接管 → 切走 → 装着的时候重新打开）：捕获时 `state` 还是 `.notInstalled`
   （hooks 是 `performFirstRunSetup` 的**最后**一次写），header 回落成常量「Claudio 面板」；醒来时 `state` 已是
-  `.installed` → 包名那半句**结构性消失** → 用户在这个产品**唯一一次庆祝时刻**只听到裸的一句「Claudio 面板。」，
-  随后被正确那条截断。
+  `.installed` → **这一句** post 出去的内容里，包名那半句是缺的。
+  （随后那趟 update pass 会 post 出完整的一句，且**不会**被后缀去重吞掉 —— `hasSuffix`，长句不是短句的后缀。
+  所以真实症状更可能是「半句被更完整的一句截断 / 替换」，而不是「用户只听到半句」。没人实测过。）
 
-而「反正会被正确那条截断，无害」正是 `PanelView.swift:283-288` **自己写下来要拒绝**的推理：「它没害处」是一句
-推理…它押的是「被截断的那条一个字都不会出声」，一个没人实测过的 VoiceOver 语义。T17h′ 花了真实代价消灭这
-一类伤害，async 边界又用**时序**把它放了回来。
+而「反正会被正确那条截断，无害」正是 `PanelView` 自己写下来**要拒绝**的推理：「它没害处」是一句推理…它押的是
+「被截断的那条一个字都不会出声」，一个没人实测过的 VoiceOver 语义。T17h′ 花了真实代价消灭这一类伤害，async
+边界又用**时序**把它放了回来。
 
-**一条被证伪的运行时事实（顺手记下，这条比 bug 本身更容易再咬人一次）**：`PanelView.swift:385-386` 的注释写着
-「用 `Task { @MainActor in … }` 会换一条队列，两条 `say(_:)` 之间的 FIFO 顺序就没了」—— 在 Darwin 上**同样不
-准确**，MainActor 默认 executor 走的就是 main queue。**留着 `DispatchQueue.main.async` 没错，但理由是假的**；
-下一个人会依赖这条假事实做决策。改掉它，和改掉 `:365-377` 那段（它在为一条 T17h 自己已经作废的不变式背书）
-一样，是零成本的止血，应该立刻做，不必等结构修法。
+**两条被证伪的事实（比 bug 本身更容易再咬人一次，已在同一批改掉）**：
+1. **运行时**：注释与 `ViewWiringSuite` 都写着「用 `Task { @MainActor in … }` 会换一条队列，FIFO 顺序就没了」
+   —— 在 Darwin 上**是假的**，MainActor 默认 executor 走的就是 main queue。留着 `DispatchQueue.main.async`
+   没错，但**理由要换**：串行队列 FIFO 是 libdispatch 的**文档保证**，Swift 并发 job 的入队顺序只是**实现细节**，
+   不变式该压在前者上。
+2. **编译期**：注释与本条目 ③ 都写着「`@Sendable` 闭包捕不到 `self`，所以 header 只能捕获、不能重算」——
+   **也是假的，实测推翻**：`View` 是 `@MainActor` 的，`PanelView` 隐式 `Sendable`，就地重算 Swift 6 语言模式下
+   零错误零警告编得过（闭包今天已经捕了 `announcer` / `coordinator` / `viewModel`）。**这条尤其危险，因为它是
+   「必须做 view-model 迁移」这个结论的唯一依据。** 真实理由是**语义**：在 update pass 之外读视图 `@State` 无
+   文档保证。那是一堵**我们选择不翻**的墙，不是翻不过去的墙。
 
-**窗口宽度没有任何人实测过**（本轮的实证一路返回 null，如实记下）。接管那条路径窗口窄（复制 universal 二进制
-＋音频），断开那条宽（一次亚毫秒的原子写）。本段断言的是**可达**（源码结构上没有任何东西挡住它），**不是频率**。
+**窗口宽度没有任何人实测过**（本轮的实证一路 agent 挂了，如实记下）。接管那条路径窗口窄（复制 universal
+二进制 ＋ 音频），断开那条只动一个小 JSON，轻得多。本段断言的是**可达**（源码结构上没有任何东西挡住它），
+**不是频率**，也**不是**任何具体耗时数字。
 
 **为什么从 P3 抬到 P2**：这条目原本是**测试性 / 架构债**（「harness 测不到」「有第二个 oracle」），可以慢慢还。
 现在它多了一条**机制明确、两路独立复核确认**的活的正确性缺口 —— 它不再是 P3 的那个理由。爆炸半径确实不大
 （漏念 / 念错一次包名，不是失声），所以 P2-vs-P3 仍可争论；但挡在缺口前面的唯一东西是一句「我推理出这个交错
 不可达」，而那正是 71262dd 自己的 commit message 里点名的、这个仓库已经交过三次学费的那句话。
 
-**修法不变，已经写在上面的 ③ 里**：把 `config` / `packCards` 搬进 `@MainActor` view-model，`header` 就能和另外
-三个事实一样在 post 的那一趟**重算**而不是捕获。**三个洞一次买**：第二个 oracle、可测性、以及这条竞争。
+**修法**：把 `config` / `packCards` 搬进 `@MainActor` view-model，`header` 就能和另外三个事实一样在 post 的那一趟
+**重算**而不是捕获（读的是引用类型的当前值，没有「update pass 之外读 `@State`」那个语义问题）。**三个洞一次买**：
+第二个 oracle、可测性、以及这条竞争。**注意 Effort 可能比标的小** —— 既然就地重算编得过，那条便宜路线是否
+可接受，取决于「在 update pass 之外读 `@State`」到底会不会出事，而那一条**尚未有人实测**。谁先去测，谁就可能
+把这条 M 变成 S。
 
 **Effort:** M
 **Priority:** P2（原 P3，2026-07-12 抬升 —— 见上面的更新）

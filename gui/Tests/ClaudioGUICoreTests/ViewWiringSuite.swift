@@ -221,8 +221,9 @@ func runViewWiringSuites() {
                 && panel.contains("let viewModel = onboardingViewModel"),
             "播报政策必须从 ClaudioGUICore 拿，不许在视图里再判一次 —— 它上一次住在这个文件里的时候，"
                 + "「谁抢到那条一次一句的通道」押在 SwiftUI 未文档化的 onChange 顺序上，零测试守护。"
-                + "（T17h：那次调用挪进了 DispatchQueue 的闭包，而闭包捕不到 self，所以 view-model "
-                + "先取成一个局部量。）")
+                + "（T17h：那次调用挪进了 DispatchQueue 的闭包，view-model 先取成一个局部量。**这不是因为"
+                + "「闭包捕不到 self」** —— 那句话曾经写在这里，它是假的：`View` 是 @MainActor 的，PanelView "
+                + "隐式 Sendable，捕得到 self，实测编得过。取局部量只是不必绕道视图去拿一个引用类型。）")
         expect(
             !panel.contains("announcePanel") && !panel.contains("announceActionState"),
             "这两个函数体里的 switch 就是播报政策，已整体下沉到 panelAnnouncement(_:)。"
@@ -254,9 +255,12 @@ func runViewWiringSuites() {
         expect(
             panel.contains("MainActor.assumeIsolated"),
             "async 闭包里那两行是 @MainActor 的（consume / announcement），得把「这个 block 跑在主线程上」"
-                + "这个运行期事实交给编译器。**不许换成 Task { @MainActor in … }**：那是另一条队列，两条 "
-                + "say(_:) 之间的 FIFO 顺序当场没了 —— 而「第二条必然是第一条的后缀」这条去重不变式，"
-                + "正建立在那个顺序上")
+                + "这个运行期事实交给编译器。**不许换成 Task { @MainActor in … }** —— 但**不是**因为"
+                + "「那是另一条队列」（这句话曾经写在这里，它是假的：Darwin 上 MainActor 的默认 executor "
+                + "正是把 job enqueue 进 main dispatch queue，并没有换队列）。真正的理由是**保证的强度**："
+                + "串行队列按入队顺序 FIFO 是 libdispatch 的**文档保证**，而 Swift 并发 job 相对 dispatch "
+                + "block 的入队顺序只是**实现细节** —— 「第二条必然是第一条的后缀」这条去重不变式，不该"
+                + "压在实现细节上")
         expect(
             panel.contains(".onChange(of: onboardingViewModel.actionState) { _ in"),
             "必须读 view-model 的**当前值**，不许用 onChange 的 newValue —— 「同一趟里只有一个开口，"

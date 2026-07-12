@@ -360,21 +360,71 @@ public struct PanelView: View {
     /// 所以它们仍按 handler 顺序 consume。「开面板那一句永远以结果结尾，第二条必然是它的后缀」这条
     /// 结构不变式一个字都没动（`PanelAnnouncementSuite` 全矩阵仍然逐格钉着它）。
     private func say(_ moment: PanelAnnouncementMoment) {
-        // `header` 仍在**这一趟**取，而不是推迟到 post：包名那半句来自 `packCards` / `config` 两个
-        // `@State`，而 `@Sendable` 闭包捕不到 `self`（`PanelView` 带着 `@State` / `@StateObject`，不是
-        // `Sendable`），所以 post 那一趟根本读不到它们。
+        // ⚠️ **这里有一个已知的、活的正确性缺口 —— 不要把下面这段读成「已经论证安全」。**
+        // 台账：TODOS.md「面板句里的 `header` 在 async **外**捕获，其余三个事实在 async **内**重读」（P2）。
         //
-        // 那它凭什么是新鲜的？——**因为每一个会用到 header 的调用点，都排在 `refresh()` 之后**：
+        // `header` 仍在**这一趟**取，而不是推迟到 post：包名那半句来自 `packCards` / `config` 两个
+        // `@State`。**这是一个选择，不是能力所限** —— 这里曾经写着「`@Sendable` 闭包捕不到 `self`」，
+        // 那句话**是假的**：`View` 协议是 `@MainActor` 的，所以 `PanelView` 是 MainActor 隔离的，因而
+        // **隐式 `Sendable`**，闭包捕得到 `self`（今天它已经捕了 `announcer` / `coordinator` / `viewModel`
+        // —— 这本该是线索）。把这一行挪进闭包，Swift 6 语言模式下零错误零警告编得过，实测过。
+        //
+        // 真正的理由是**语义**，不是编译器：把视图 struct 捕进一个逃逸闭包、在 SwiftUI 已经更新过视图之后
+        // 再去读它的 `@State`，不是有文档保证的行为（SwiftUI 只保证 view update 期间的 State 读），捕获的
+        // 那个值完全可能读到一块已经卸掉的 / 陈旧的存储。**这一条我们没有实测过** —— 所以按未验证对待，
+        // 不去赌它。但要说清楚：它是一堵**我们选择不翻**的墙，不是一堵翻不过去的墙。
+        //
+        // 而剩下的事实（`state` / `actionState` / 面板还开着吗）全部推迟到 post 的那一趟去问 —— 它们的
+        // 真相源是 view-model，一个引用类型，读得到最新值。**于是四个事实分居两趟：三个在执行侧，
+        // header 一个在捕获侧。** T17h 把闸门 / 去重 / post 挪进 async 的理由是「三者从此看到同一份
+        // 世界」—— 那个世界并没有统一，只是从「四个全在捕获侧」变成了三比一。
+        //
+        // 【这段曾经写着什么，以及它为什么不再成立】T17h 之前，这里论证的是「header 凭什么是新鲜的」：
+        // 每一个会用到它的调用点都排在 `refresh()` 之后 ——
         //   · `.onChange(showCount)`  → `refresh()` → `say(moment)`
         //   · `.onChange(state)`      → `refresh()` → `say(.stateChanged)`
         //   · `.onChange(actionState)`→ `.idle` 时 `refresh()` → `say(.actionStateChanged)`
-        //     （`.idle` **正是**这个时刻唯一会说面板句的那一格；别的动作态说 `actionClause`，不碰 header。）
-        // 这不是一句注释里的祝愿：第三条是 T17h′ 补上的，`ViewWiringSuite` 有一条顺序断言钉着它。少了它，
-        // 同一趟里两个 handler 会把**两个不同的 header** 喂进同一个政策函数 —— 两句不同、后缀吞不掉、
-        // 同一趟 post 两条，而政策的 harness 结构上看不见（`header` 是视图唯一供给的那个事实）。
+        // 这条论证今天**仍然成立**（`ViewWiringSuite` 有顺序断言钉着第三条），但它论证的是**捕获时刻**的
+        // 新鲜度。T17h 之前，捕获与 post 是同一趟，「捕获时新鲜」等于「post 时新鲜」；T17h 之后，两者
+        // 之间隔了一次 main queue 派发，这两句话不再是同一句。**旧论证没有变错，是它要回答的问题变了。**
         //
-        // 剩下的事实（`state` / `actionState` / 面板还开着吗）全部推迟到 post 的那一趟去问 —— 它们的
-        // 真相源是 view-model，一个引用类型，读得到最新值。
+        // 【缺口怎么走通的 —— 不需要 FIFO 被违反，恰恰是 FIFO 被遵守造成的】
+        // Darwin 上 MainActor 的默认 executor 就是把 job enqueue 进 main dispatch queue，串行队列按**入队
+        // 顺序**严格 FIFO。所以在下面这个 block **之后**入队的 MainActor job 抢不到它前面 —— 竞争不在执行
+        // 顺序，在**入队时刻**，而那个时刻**不由主线程决定**：`DiskOnboardingActionRunner.run` 是
+        // `await Task.detached { performOnboardingDiskAction(…) }.value`（`OnboardingActions.swift:632-639`），
+        // `OnboardingViewModel.swift` 里那个 `await` 的续体，是**后台线程完工的那一刻**丢回主执行器的。
+        // 它完全可能落在下面的「捕获 header」与「enqueue block」之间 —— 真这么落了，它就**先跑**：
+        // `actionState → .idle`、view-model 的 `refresh()` 把 `state` 翻面。block 随后醒来，把**捕获时**的
+        // header 拼到**执行时**的 state 上 —— 这就是全部的缺口。代码里没有任何东西把那个续体排在这个
+        // block 之后。
+        //   （两点精确性，别再传错：① view-model 的 `refresh()` 只有一行 `state = detectOnboardingState(…)`，
+        //     **从不碰** `packCards` —— 重写 `packCards` 的是 `PanelView.refresh()`，那要等下一趟 update
+        //     pass，与这条竞争无关：header 早在捕获时就定死了。② 此处只说「可能先跑」，**不说「保证」**：
+        //     下面那段刚论证过，Swift 并发 job 相对 dispatch block 的入队顺序是**实现细节** —— 缺口论证
+        //     不需要、也不该反过来把同一条实现细节当成保证来用。）
+        //
+        // 最现实的一格是**断开连接**：`.running` 那趟捕获 header 时磁盘写还没落地 —— `state` 仍是
+        // `.installed`，于是 `headerAccessibilityLabel` 第一行放行，header 带着旧包名。**注意「只在 `.idle`
+        // 才 `refresh()`」那道门在这一格帮不上任何忙**：`uninstallClaudioHooks` 只重写 settings.json，根本
+        // 不碰 config.json / packs 目录，所以就算这一趟真的 refresh 了，算出来的 header 一字不差。陈旧的
+        // 根因是「在写落地**之前**捕获」，不是「没 refresh」—— 谁要是想靠拆掉那道门来修这一格，会一无所获。
+        // 而这次重写只动一个小 JSON（不拷二进制、不拷包），比接管那条路径轻得多；**窗口有多宽没人测过**，
+        // 这里只断言它**存在**：这一句 post 出去的内容会带上用户**刚刚断开**的那个包名。
+        //
+        // 接管那条路径症状相反：捕获时 `state` 还是 `.notInstalled`（hooks 是 `performFirstRunSetup` 的最后
+        // 一次写），header 回落成常量「Claudio 面板」，醒来时已是 `.installed` —— **这一句** post 出去的
+        // 内容里，包名那半句是缺的。
+        //   （用户最终**听到**什么，这里不作断言：续体的 `@Published` 写会触发下一趟 update pass，那一趟
+        //     `refresh()` → `say(…)` 会 post 出完整的那一句，且**不会**被后缀去重吞掉（`hasSuffix`，长句
+        //     不是短句的后缀）。真实症状更可能是「半句被更完整的一句截断 / 替换」。两处都只断言
+        //     「post 出去的这一句是错的」，不断言听感 —— 那需要真机 VoiceOver 实测。）
+        //
+        // 【为什么不在这里就地修】就地重算是**能编过的**（捕 `self`，在闭包里算 header）—— 不选它，是因为
+        // 那要在 SwiftUI 的 update pass 之外读视图 `@State`，语义无文档保证（见上）。真正的修法是把
+        // `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model（`@MainActor` class 是
+        // `Sendable` 的，捕得到，且读的是引用类型的**当前**值）。台账里那条 P2，一次买下三个洞：第二个
+        // oracle、可测性、以及这条竞争。**这是一个有理由的取舍，不是一堵墙** —— 别再把它写成「没有办法」。
         let header = headerAccessibilityLabel
         let viewModel = onboardingViewModel
         let announcer = self.announcer
@@ -382,8 +432,17 @@ public struct PanelView: View {
         DispatchQueue.main.async {
             // `DispatchQueue.main.async` 的闭包不是 `@MainActor` 的，但它**跑在主线程上**——
             // `assumeIsolated` 把这个运行期事实交给编译器，好让下面两行 `@MainActor` 调用合法。
-            // （用 `Task { @MainActor in … }` 会换一条队列，两条 `say(_:)` 之间的 FIFO 顺序就没了 ——
-            // 而后缀去重正建立在那个顺序上。）
+            //
+            // 【为什么是 `DispatchQueue.main.async` 而不是 `Task { @MainActor in … }`】
+            // **不是**因为后者「会换一条队列」—— 这段注释以前是这么写的，而那句话在 Darwin 上**是假的**：
+            // MainActor 的默认 executor 正是把 job enqueue 进 main dispatch queue
+            // （`swift_task_enqueueMainExecutor` → `dispatch_async_swift_job`），并没有换队列。
+            //
+            // 真正的理由是**保证的强度**：后缀去重这条不变式，依赖「同一趟 update pass 里排下的两个 block
+            // 按 handler 顺序 drain」。串行队列按入队顺序 FIFO 是 **libdispatch 的文档保证**；而 Swift
+            // 并发的 job 相对于 dispatch block 的入队顺序，是**实现细节**（今天走同一条 main queue，明天不
+            // 一定）。把一条产品级不变式压在实现细节上，是本仓库反复交学费的那类赌注 —— 所以选文档保证的
+            // 那个。**换成 `Task {}` 之前，先想清楚你是在拿哪一条保证换哪一条。**
             MainActor.assumeIsolated {
                 guard
                     let sentence = announcer.consume(
