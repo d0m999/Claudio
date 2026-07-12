@@ -369,6 +369,18 @@
 **Priority:** P3
 **Depends on:** 主音量滑块落地（在那之前这条不可观察）
 
+### StateGalleryView 没有整面板（PanelView）帧，路由态零仓库内视觉验证
+
+**What:** `StateGalleryView` 的四个族全是子视图帧，从不渲染 PanelView。于是 D23 定稿引入的三个面板级路由态（`.needsPack` 空态「先选包」/ `.malformed` / `.unwritable` 诚实失败态）落地后在仓库内没有任何视觉真相源 —— 而 DESIGN.md:161 声明「视觉真相源 = 仓库内 state gallery」。
+
+**Why:** 这三个态恰恰是最难手动复现的（要删 / 改坏 `~/.claudio/config.json`）。目前由 PLAN-MASTER-VOLUME §5.2 走查 ⑫⑬ 真机兜底，可接受但依赖人肉。
+
+**Context:** 2026-07-12 mockup 展示板议题 ②，用户授权拍板为 **D38**：主音量的 `MasterVolumeState` 族照常进 gallery（展示板 §2 即规格）；整面板 `PanelRouteState` 族因需要给 gallery 引入一类全新宿主（渲染整个 PanelView + 假 config 环境）而**不随主音量方案做**，登记于此。展示板 §4 的三帧可作将来实现时的参照。
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** 阶段 A′（路由态本身落地之后才有东西可画）
+
 ## Completed
 
 ### clay 当正文用够不到 4.5:1 —— DESIGN.md 自身冲突
