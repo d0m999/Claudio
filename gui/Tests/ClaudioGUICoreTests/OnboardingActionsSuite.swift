@@ -357,14 +357,14 @@ func runOnboardingActionsSuites() {
                 expect(false, "接管必须成功，得到 \(result)")
                 return
             }
-            guard case .completed(let copiedBinary, let copiedPacks, let selectedPack, let hooks) = outcome
+            guard case .completed(let copiedBinary, let copiedPacks, _, let packSelection, let hooks) = outcome
             else {
                 expect(false, "outcome 形状不对：\(outcome)")
                 return
             }
             expect(copiedBinary, "必须真的复制了二进制")
             expect(copiedPacks == ["minimal-chime"], "必须复制了内置包，得到 \(copiedPacks)")
-            expect(selectedPack == "minimal-chime", "首次必须挑一个默认包，得到 \(String(describing: selectedPack))")
+            expect(packSelection == .selectedDefault(packID: "minimal-chime"), "首次必须挑一个默认包，得到 \(String(describing: packSelection))")
             expect(hooks == .installed, "必须真的写了 hooks，得到 \(hooks)")
 
             // ① **装进去的是哪个二进制** —— 这是 T17 的整个要害。断言字节，不是断言「文件存在」。
@@ -458,7 +458,7 @@ func runOnboardingActionsSuites() {
             writeFixture("{\"id\":\"minimal-chime\",\"events\":{},\"USER\":\"touched\"}", to: userTouched)
 
             let second = performOnboardingDiskAction(.takeOver, environment: environment)
-            guard case .success(.tookOver(.completed(_, let copiedPacks, _, let hooks))) = second else {
+            guard case .success(.tookOver(.completed(_, let copiedPacks, _, _, let hooks))) = second else {
                 expect(false, "第二遍必须成功，得到 \(second)")
                 return
             }

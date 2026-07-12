@@ -14,6 +14,12 @@
 
 **可能的修法**（未定，需要一次设计决策）：① 把最后一条失败写进 `~/.claudio/last-setup-error.json`，启动时读一次、渲染一次、读完即删；② 或者反过来 —— 别修失败的寿命，修**探测**：让 `detectOnboardingState` 也检查「有没有选中的包 + 那个包解析得出来」，于是一台哑机器根本不会被报成 `.installed`（这条更根治，而且顺带盖住「用户手动删了包目录」这类与 setup 无关的情形）。②看起来明显更对，但它会动 onboarding 状态机的定义，属于 T17 之外的范围。
 
+**更新（2026-07-12 · T17e）：修法②的判据已经存在了，而且已经在用。** T17e 在 **setup 侧**立下了
+「报成功时 `selected_pack` 一定指向一个 `play` 解析得出来的包」这条不变式，判据就是 `checkPackIntegrity`
+＋ `isUsablePack`（与 `play` / `doctor` 逐字同源）。**探测侧仍然欠着**：`detectOnboardingState` 依旧只查
+二进制 ＋ hooks，所以一台「用户自己把包目录删了」的机器，面板照样亮绿点说「已经接好了」。现在要做的只是把
+同一个判据接进 `OnboardingDetector`（新增一个 state，或让 `.installed` 携带「包坏了」这一维），代价比当年小得多。
+
 **Effort:** M
 **Priority:** P2
 **Depends on:** None
@@ -74,16 +80,157 @@
 **Priority:** P3
 **Depends on:** 首个真实 tag release
 
-### Setup.swift 的包复制不是原子的，中断后无法自愈
+### ~~Setup.swift 的包复制不是原子的，中断后无法自愈~~ ✅ 2026-07-12 T17e 已修
 
-**What:** `performFirstRunSetup` 的 dedupe guard（`guard !FileManager.default.fileExists(atPath: destination.path) else { continue }`）只看目标目录是否存在，不看它是否复制完整。`copyItem` 本身不是原子操作。
+复制现在走 `packs/.<id>.tmp-<pid>` ＋ rename（同卷 rename 原子），且跳过判据从「目标目录存在」收紧成
+「目标是一个**能用的包**（manifest 读得出来）」；是残骸就挪到 `.<id>.broken-<pid>`（不删——里面可能有用户的
+东西）再重新复制。台账里当年那句「暂时接受这个风险」在 T17e 的对抗评审里被实测证伪：加上新的选包判据之后，
+这个残骸不再只是「少一个包」，它会让**每一次重跑都一字不差地失败**（永久死锁）。见 ENGINEERING.md T17e。
 
-**Why:** 如果 `claudio setup` 在复制某个包的过程中被打断（Ctrl-C、磁盘满、SIGKILL、笔记本合盖休眠），目标目录会存在但内容不全。之后任何一次重跑都会因为"目录已存在"永久跳过重新复制——这份损坏永远无法通过文档里教的"重跑 claudio setup"自愈。
+### `claudio use` / `claudio install` 没有 T17e 那条不变式 —— 一条命令就能重新造出 setup 刚拒绝创造的那台哑机器
 
-**Context:** 红队在 `/ship` pre-landing review（2026-07-10，commit 附近 f812af4）里挖出来的，跟同一轮已经修掉的"默认选包只看这次新复制的包"是同一类"中断态恢复不了"问题，但这一个改动更大（需要 staging 目录 + rename，或者校验完整性再决定是否跳过），这次先不做。v1 只有一个内置包（minimal-chime），复制失败的窗口很小，暂时接受这个风险。
+**What:** T17e 让 `performFirstRunSetup` 立下了「报成功时 `selected_pack` 一定指向一个 `play` 解析得出来的包」
+这条不变式。但它**只是 `performFirstRunSetup` 这一个函数的不变式，不是系统的**：
+- `selectPack`（`claudio use <id>`，Use.swift:63）只校验 `resolvePackDirectory`，**不读 manifest** —— 于是
+  `claudio use <一个只有目录、没有 manifest 的残骸>` 会返回 `.success` 并打印「✓ 已切换到声音包」，而 `play`
+  从此每次都 `.notReady`。
+- `claudio install`（Subcommands.swift）直接调 `installClaudioHooks()`，**零校验**，成功就打印 ✓。用户被 setup
+  的失败拦下之后，最自然的下一条命令就是它。
 
-**Effort:** M
+**Why:** 「注定是哑的安装不许报成功」这条纪律，只要有一扇门没装上，它就不是一条纪律，只是一个函数的局部性质。
+
+**Context:** 2026-07-12 T17e 对抗评审（bypass 镜头 + 完备性批评者独立命中）。本次刻意不做：`use` 加校验要新增
+`UseError` case（波及 UseSuite ＋ GUI 画廊），`install` 加校验会改动一条**文档里的一等命令**的契约（ENGINEERING.md
+契约表：「把 hook 写进 settings.json（幂等）」）—— 两者都该单独评审，不该混进一次 bugfix。
+GUI 侧的切包画廊只列**解析得出来**的包，所以主动线暂时安全；这个洞主要长在 Terminal 上。
+
+**可能的修法:** `selectPack` 在 `resolvePackDirectory` 之后追加一次 `loadPackManifest`（与 T17e 的
+`isUsablePack` 同源），失败返回新的 `UseError.manifestUnreadable`；`installClaudioHooks` 的入口加同一道判据
+（或至少让 `Install.run()` 先跑一次 `checkPackIntegrity`，坏管道时拒绝并给出与 setup 一字不差的那句话）。
+
+**Effort:** S（use）/ M（install，要动契约）
 **Priority:** P2
+**Depends on:** None
+
+### GUI 从不告诉用户「我替你换了声音包」「我搬走了你的包目录」—— 那两句 ⚠ 只有 CLI 有
+
+**What:** T17e 会在两种情形下**替用户做主**，并把这两件事都结构化地带在 `SetupOutcome` 里
+（`.repairedDeadSelection(removed:selected:)` 和 `salvaged: [SalvagedPack]`），`printSetupSummary` 各印一行 ⚠。
+但 GUI 的 `OnboardingActionOutcome.tookOver(SetupOutcome)` **只是把 outcome 接住就扔了**：
+`runDiskAction` 的成功分支是 `case .success: actionState = .idle`，payload 从头到尾没有任何视图、任何 `@Published`、
+任何无障碍标签消费它（grep 全 `gui/Sources` 可证）。
+
+**Why:** 面板才是产品的主动线（Terminal 只是 v1 的过渡）。也就是说，在最主要的那条路上：
+① 我们悄悄改掉了用户的声音包选择；② 我们把他一个可能装着**自己导入的、磁盘上唯一一份音频**的目录搬到了
+`packs/.<id>.broken-…`（而 `PackGallery` 显式过滤点开头目录 → 它在任何界面里都不存在）。**两件事他都永远不会
+被告知。** 这是 T17e 自身最大的诚实性缺口 —— 它亲手立的规矩就是「替用户做的决定必须说出来」。
+
+**Context:** 2026-07-12 T17e 第二轮对抗评审（repair-semantics ＋ data-loss 两个镜头独立命中）。之所以没在本次做：
+面板上多一条提示条需要一次设计决策（放哪、何时消失、要不要给一颗「换回去」/「打开那个目录」的按钮），
+属于 DESIGN.md 的范围。缓解：画廊此刻**是可达的**（`.installed`），用户随时能换回去 —— 这正是 T17e 硬失败版本
+翻车的那条路径；而被搬走的目录一个文件都没删。
+
+**可能的修法:** `OnboardingViewModel` 加一个与 `actionState` 同族的 `@Published packRepairNotice`（进
+`PreviewFixtures` / `assertExhaustive`），`runDiskAction` 的成功分支填它；`PanelView.operationalPanel` 里复用已有的
+`errorNotice(...)` 排版画一条琥珀色提示（**不用真红**——这不是 app 的错误），位置就在 `PackGalleryView` 上方，
+用户抬眼就是画廊、一步可改。清除时机沿用 `failureHasBeenSeen` 那条纪律（下一次打开面板时清），别在 `refresh()` 里清。
+
+**Effort:** S（一条提示条）/ M（带「换回去」＋「打开备份目录」）
+**Priority:** P2
+**Depends on:** None
+
+### `claudio` 可执行 target 的输出从来没有被测过一行 —— T17e 那两句 ⚠ 是产品语义，却住在测试够不到的地方
+
+**What:** `printSetupSummary` / `hooksOutcomeMessage` 住在 `helper/Sources/claudio/Subcommands.swift`（可执行
+target），而 `claudio-tests` 只依赖 `ClaudioCore`。于是 T17e 新增的两句 ⚠（「已替你选中 X」「已把你的包原样搬到 Y」）
+—— 也就是「替用户做主必须说出来」这条规矩的**唯一载体** —— **零测试覆盖**：把它们整段删掉，1025 checks 照样全绿。
+
+**Why:** 这与 `ViewWiringSuite` 头部自陈的那个结构问题同源（`ClaudioGUI` 是 executableTarget，harness 一行都跑不到）。
+一条产品承诺，如果没有任何断言钉着它，它离被顺手删掉只有一次重构的距离。
+
+**可能的修法:** 把 `printSetupSummary` 的**纯字符串部分**下沉进 `ClaudioCore`（例如
+`setupSummaryLines(_ outcome: SetupOutcome) -> [String]`），`Subcommands` 只负责 `print`。然后表驱动地钉住每一种
+outcome 该出现哪几行（尤其是那两个 ⚠ 必须出现、且必须带绝对路径）。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
+
+### `doctor` 会把两类「一声都发不出来」的包报成 ✓ 完整
+
+**What:** 两个各自独立的假阳性：
+① **manifest 的事件键全拼错**（第三方包写了 `"on_stop"` 而不是 `"stop"`）→ `checkPackIntegrity` 的 `missingFiles`
+   为空 → `.complete` → doctor 打印「✓ 声音包完整」，而四个 v1 事件一个都没映射上，**每个事件都静默无声**。
+② **0 字节 / 根本不是音频的文件**（见上一条「0 字节」）。
+
+**Why:** doctor 是「静默失败必须有诊断轨迹」（决议 6）的唯一出口。它自己失明的地方，就是用户永远查不到的地方。
+
+**Context:** 2026-07-12 T17e 第二轮对抗评审（bypass 镜头）。T17e 的判据只走到「manifest 读得出来」，够不到这一层。
+
+**可能的修法:** `checkPackIntegrity` 只认 `Event.allCases.map(\.manifestKey)` 这四个键；四个都没映射上时返回一个新的
+`.noMappedEvents(packID:)`，doctor 渲染成 ⚠（**仍是 warning，不硬失败** —— 包内容的缺口不该阻断安装，见 T17e
+「管道 vs 内容」那条线）。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
+
+### `selected_pack` 里的控制字符 / ANSI 转义会被原样打进终端
+
+**What:** `printSetupSummary` 的 ⚠ 行、以及 `SetupError.selectedPackUnresolvable` / `doctor` 的四条 pack 消息，
+都把 `config.json` 里的 `selected_pack` **原样**拼进输出。一个含 ANSI 转义序列 / C0 控制字符 / 超长字符串的 pack id
+可以借此改写终端显示。
+
+**Why:** 低危（用户得先自己往自己的 config 里塞这种东西，或者装一个恶意的第三方包并选中它），但输出的可信性是
+`doctor` 这类诊断工具的立身之本 —— 一个能被内容改写的诊断，诊断的就不是那台机器。
+
+**Context:** 2026-07-12 T17e 第二轮对抗评审（repair-semantics 镜头，P3）。既有问题（doctor 早就这么打了），
+T17e 只是**新增了一个打印点**。
+
+**可能的修法:** `ClaudioCore` 里加一个共享的 `displaySafe(_:)`（截断到 ~64 字符 ＋ 把非打印字符转义成 `\u{XX}`），
+setup 与 doctor 的所有 packID 打印点统一走它。
+
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
+
+### 一个 0 字节 / 根本不是音频的文件，会被判成「这个事件有声音」
+
+**What:** `doctor` / `play` / GUI 覆盖度三边共用的判据是 `regularFileExists`（`stat` 判 `S_IFREG`）——它只问「是不是
+一个正规文件」，不问「里面有没有东西」。一个 0 字节的 `stop.mp3`（下载中断、Git-LFS 指针、`touch` 出来的占位）
+会让 `doctor` 打印「✓ 声音包完整」、面板把这一行画成 `.present`（甚至给出试听按钮）、`play` 兴高采烈地 spawn
+`afplay` —— 然后**什么声音都没有**。afplay 的失败退出码没人接（fire-and-forget），`claudio.log` 一个字都不会写。
+
+**Why:** 这是「装完是哑的」这一族里**最后一个零信号的形状**：四个界面（setup ✓、doctor ✓、面板 present、日志空）
+全部说「好着呢」。T17e 的判据只走到「manifest 读得出来」，够不到这一层。
+
+**Context:** 2026-07-12 T17e 对抗评审（bypass 镜头）。本次不做：修法要**同时**改三处同源判据
+（`Doctor.swift` 的 missingFiles、`Play.swift` 的 `resolveAudioFile`、`gui/CoverageState.swift` 的 `coverageState`），
+少改一处就会制造出这三个文件的注释里反复警告过的「两套判据」。
+
+**可能的修法:** 在 `SafeFileRead.swift` 加一个 `playableFileExists(at:) = regularFileExists && st_size > 0`，三处
+逐字替换。（更彻底的做法是校验音频头，但那需要引入解码依赖，不值得。）
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
+
+### `Casks/claudio.rb` 没有 `zap` —— 「重新安装 Claudio」修不好任何一种中毒态
+
+**What:** cask 里没有 `zap` stanza，`postflight` 只跑 `xattr -dr`。于是 `brew uninstall --cask claudio` /
+`brew reinstall` **一个字节都不碰 `~/.claudio/`**（config.json、packs/、残骸全在），也不碰 `settings.json` 里的 hooks。
+
+**Why:** 而所有「装完是哑的」的中毒态**全都活在 `~/.claudio/` 里**。所以「重新安装 Claudio」这句用户最容易想到、
+我们此前也在错误信息里印过的建议，对它被印出来的每一种情形都是**确定无效**的。（T17e 已经把 setup 的失败文案
+改成了真正有效的那条：从 app bundle 跑一次 `setup`。但 cask 的 `caveats` 仍然只教用户「打开 Claudio，点接管」。）
+
+**Context:** 2026-07-12 T17e 对抗评审（完备性批评者）。
+
+**可能的修法:** 给 cask 加 `zap trash: ["~/.claudio"]`（以及 `uninstall` 里提示摘 hooks）。注意 `zap` 只在
+`brew uninstall --zap` 时生效，所以文档也要跟着说清楚。
+
+**Effort:** S
+**Priority:** P3
 **Depends on:** None
 
 ### release.yml 多处 `${{ }}` 表达式直接拼进 shell 脚本，存在脚本注入模式
