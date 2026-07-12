@@ -114,6 +114,17 @@ public struct OnboardingView: View {
                     focusedTarget: focusedTarget, typeScale: typeScale)
             }
 
+            // T17f：一次 CTA 动作**成功了、但替用户做了主**，同样必须说出来。
+            //
+            // 与上面那条失败行**同一条结构不变式**（无条件渲染，不按 action / state 分派），理由见
+            // ``onboardingVisibleNotices(actionState:)``。这张卡实际上很难看到告知——告知只从
+            // `.takeOver` 成功而来，而成功必然把 state 推成 `.installed`，那一刻屏幕上是运行态面板、
+            // 不是这张卡。**但它仍然必须画在这里**：正是「我推理出这个格子不可达，所以不画它」这句话，
+            // 在 T17c 里造出了两个无人认领的格子。两边都无条件画，「不可达」就不需要任何人去证明。
+            ForEach(Array(onboardingVisibleNotices(actionState: viewModel.actionState).enumerated()), id: \.offset) { _, notice in
+                ActionNoticeRow(message: notice.message, typeScale: typeScale)
+            }
+
             if let primaryTitle = copy.primaryActionTitle {
                 ctaButton(
                     title: primaryTitle, intent: primaryIntent,
@@ -276,6 +287,51 @@ struct ActionFailureRow: View {
         // ≥24×24 命中区（a11y-architect FIX 6）。
         .frame(minHeight: 24)
         .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 一条「Claudio 替你做了主」的告知行（T17f）—— ``ActionFailureRow`` 的孪生兄弟。
+///
+/// 和它一样，有**两个**调用方（`OnboardingView` 的卡 / `PanelView` 的运行态面板尾部），所以同样
+/// 不能是任何一方的私有成员。实际上告知**几乎总是**画在运行态面板那一侧：告知只从一次成功的
+/// 「接管」而来，而成功必然让 `state` 变成 `.installed`。
+///
+/// ## 三处与失败行**刻意不同**，每一处都有理由
+///
+/// ① **字形是 ⚠（`exclamationmark.triangle.fill`），不是 ✗（`xmark.circle.fill`）**，
+///    **颜色是暖琥珀 `warning`，不是真红 `error`**：setup **成功了**。磁盘上是一个能响的安装。
+///    DESIGN.md「错误态用色（关键约束）」把真红**限定**给三种 app 自身错误——把一次成功染成真红
+///    就是在对用户撒谎，而这个产品的立身之本就是不撒谎。
+///    同时它也**不能**是中性灰：那正是 CLI 侧那行注释明令禁止的形状（「⚠ 而不是 ·：…绝不能让它
+///    混在几条 · 里悄悄过去」）。琥珀是唯一同时满足「不是错误」与「不许被忽略」的答案。
+///
+/// ② **没有「查看原因」披露**：告知不是错误，没有底层 `Error.description` 可摊开——话本身就是
+///    全部内容（包名、新包名、搬到哪儿，全在那一句里）。于是它**不长任何可聚焦控件**，
+///    `PanelFocusTarget` / `panelFocusOrder` 一个字都不用改。少一个控件，就少一条
+///    「焦点序里有它、屏幕上没有它」的翻车路径（T17c 真的这么翻过）。
+///
+/// ③ **不参与 `isShowingDetail`**：同 ②。
+///
+/// 与失败行**相同**的那两条（不是巧合，是同一条纪律）：文案一律 `text-2`（琥珀只做图标——
+/// 亮色 `#B87000` 过 ≥3:1 的 WCAG 1.4.11，**不过** ≥4.5:1 的 1.4.3），以及
+/// `.accessibilityElement(children: .combine)`，让 VoiceOver 把「⚠ + 整句话」读成一个元素。
+struct ActionNoticeRow: View {
+    let message: String
+    let typeScale: CGFloat
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.warning(colorScheme))
+            Text(message)
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(minHeight: 24)
         .accessibilityElement(children: .combine)
     }
 }

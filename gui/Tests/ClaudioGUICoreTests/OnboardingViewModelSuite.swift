@@ -410,7 +410,7 @@ func runOnboardingFailureLifecycleSuites() async {
                 return
             }
             expect(
-                !viewModel.failureHasBeenSeen,
+                !viewModel.outcomeHasBeenSeen,
                 "失败诞生在一块没人看的屏幕上 —— 它不该被标记成「看过了」")
 
             // ⑤ 用户回来，重新打开面板。**这是整个 bug 的那一刻。**
@@ -425,7 +425,7 @@ func runOnboardingFailureLifecycleSuites() async {
                 return
             }
             expect(
-                viewModel.failureHasBeenSeen,
+                viewModel.outcomeHasBeenSeen,
                 "这一次打开就是它的第一次露面 —— 从现在起才算「看过」")
         }
     }
@@ -453,7 +453,7 @@ func runOnboardingFailureLifecycleSuites() async {
                 "一条已经露过面的失败不该永久挂在面板上 —— 这是 T17c 那条顾虑，它仍然成立。"
                     + "得到 \(viewModel.actionState)")
             expect(!viewModel.isShowingDetail, "清掉失败时「查看原因」也必须收起")
-            expect(!viewModel.failureHasBeenSeen, "清掉之后标记也要归零")
+            expect(!viewModel.outcomeHasBeenSeen, "清掉之后标记也要归零")
         }
     }
 
@@ -467,7 +467,7 @@ func runOnboardingFailureLifecycleSuites() async {
             // 面板全程开着，失败就在他眼皮底下发生 —— 两个渲染点都无条件画它（T17c 结构不变式）。
             await viewModel.performPrimaryAction()
             expect(
-                viewModel.failureHasBeenSeen,
+                viewModel.outcomeHasBeenSeen,
                 "面板开着时诞生的失败，这一帧就在屏幕上 —— 当场算看过")
 
             viewModel.panelDidHide()
@@ -511,8 +511,180 @@ func runOnboardingFailureLifecycleSuites() async {
                 "state gallery 里 pin 住的 .failed 帧必须原样活着 —— 渲染两次不该把它清掉。"
                     + "得到 \(pinned.actionState)")
             expect(
-                !pinned.failureHasBeenSeen,
+                !pinned.outcomeHasBeenSeen,
                 "pin 死的实例连标记都不该动 —— 它压根不参与失败的寿命")
         }
     #endif
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// T17f —— 「我替你做主」的告知：view-model 侧的行为
+//
+// 上面那组（T17d）证明的是「一条**失败**不会在用户看见之前被清掉」。这组证明的是**同一条规则**
+// 对告知同样成立 —— 而且告知**更容易**撞上那个时序：它走的是成功路径，用户点完「接管」就切走去
+// 干别的，正是最自然的动作。
+// ═══════════════════════════════════════════════════════════════════════════════════════
+@MainActor
+func runSetupNoticeLifecycleSuites() async {
+    /// 一个「成功了，但替你做了主」的 runner：他选的包没了 → 换成 minimal-chime；
+    /// 那个读不出的包被原样搬走。
+    func makeMeddlingRunner() -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        runner.result = .success(
+            .tookOver(
+                .completed(
+                    copiedBinary: true, copiedPacks: [],
+                    salvaged: [
+                        SalvagedPack(packID: "wobbuffet", movedTo: "/tmp/wobbuffet-aside")
+                    ],
+                    packSelection: .repairedDeadSelection(
+                        removed: "wobbuffet", selected: "minimal-chime"),
+                    hooksOutcome: .installed)))
+        return runner
+    }
+
+    /// 一个「干干净净地成功了」的 runner —— 什么主都没做。
+    func makeCleanRunner() -> ScriptedRunner {
+        let runner = ScriptedRunner()
+        runner.result = .success(
+            .tookOver(
+                .completed(
+                    copiedBinary: true, copiedPacks: ["minimal-chime"], salvaged: [],
+                    packSelection: .selectedDefault(packID: "minimal-chime"),
+                    hooksOutcome: .installed)))
+        return runner
+    }
+
+    await suite("T17f【核心】一次替用户做了主的接管，必须在 actionState 里留下告知 —— 而不是 .idle") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeMeddlingRunner())
+            viewModel.panelDidBecomeVisible()
+
+            await viewModel.performPrimaryAction()
+
+            // 这就是修复前掉在地上的那个 outcome。上一版这里是 `.idle`：面板一声不吭地切到运行态、
+            // 亮起绿点，而用户的包已经被换过、他的目录已经被搬走。
+            let notices = onboardingVisibleNotices(actionState: viewModel.actionState)
+            expect(
+                notices.count == 2,
+                "接管替他搬走了一个包、换掉了他的选包 —— 面板必须两条都说。实得 \(notices.count) 条："
+                    + "\(viewModel.actionState)")
+            expect(
+                notices.contains(.repairedDeadSelection(removed: "wobbuffet", selected: "minimal-chime")),
+                "『你选的包没了，已替你换成 X』—— T17e 白纸黑字承诺过要说的话")
+            expect(
+                notices.contains(.salvagedPack(packID: "wobbuffet", movedTo: "/tmp/wobbuffet-aside")),
+                "『你那个读不出的包被搬到了 X』—— 带着那条能把东西找回来的路径")
+        }
+    }
+
+    await suite("T17f 一次干干净净的接管（没替他做任何主）→ .idle，绝不制造噪音") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeCleanRunner())
+            viewModel.panelDidBecomeVisible()
+
+            await viewModel.performPrimaryAction()
+
+            expect(
+                viewModel.actionState == .idle,
+                "首次自举挑了个默认包 = 他按下「接管」时本来就在请求的事，不是『我替你做主』。"
+                    + "把它也报出来，真正要紧的那两条就会淹在噪音里。实得 \(viewModel.actionState)")
+            expect(
+                onboardingVisibleNotices(actionState: viewModel.actionState).isEmpty,
+                "没话说就一行都不画")
+        }
+    }
+
+    await suite(
+        "T17f【静默回归 · 与 T17d 同构】面板关着时诞生的告知，下一次打开必须**露面**，绝不能被当成「看过了」清掉"
+    ) {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeMeddlingRunner())
+
+            // 真实时序，一步不省 —— 而且这条比 T17d 那条**更容易**发生：
+            // ① 用户打开面板
+            viewModel.panelDidBecomeVisible()
+            // ② 点「接管」；在几百毫秒的复制二进制 + 复制音频 + flock 期间…
+            // ③ …他点到别的 app 上（最自然的动作：他以为已经装完了）—— `.transient` popover 当场关闭
+            viewModel.panelDidHide()
+            // ④ 而那个 Task 不随视图销毁而取消：它继续跑完，**成功**，并且替他换掉了包
+            await viewModel.performPrimaryAction()
+
+            // 此刻屏幕上没有任何一个像素属于这条告知。
+            expect(
+                !viewModel.outcomeHasBeenSeen,
+                "告知诞生在一块关着的面板上 —— 它绝不能被标记成「看过了」")
+
+            // ⑤ 用户回来重开面板 —— **这一次打开就是它的第一次露面**
+            viewModel.panelDidBecomeVisible()
+
+            expect(
+                onboardingVisibleNotices(actionState: viewModel.actionState).count == 2,
+                "重开面板时告知必须还在 —— 若这里被清掉，用户就**永远**不会知道他的包被换过、"
+                    + "他的目录被搬走过。那正是 T17d 那个 bug 在成功路径上的重演")
+            expect(viewModel.outcomeHasBeenSeen, "露过面了，标记为已看过")
+
+            // ⑥ 他关掉、再打开 —— 已经看过的告知这时才该被忘掉
+            viewModel.panelDidHide()
+            viewModel.panelDidBecomeVisible()
+            expect(
+                viewModel.actionState == .idle,
+                "看过之后再重开，陈旧的告知必须清掉 —— 它不该永久挂在一张早就装好的面板上")
+            expect(!viewModel.outcomeHasBeenSeen, "清掉之后标记也要归零")
+        }
+    }
+
+    await suite("T17f 面板开着时诞生的告知 → 当场算「看过」，下一次重开即清（与失败同权）") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let viewModel = OnboardingViewModel(
+                environment: environment, actionRunner: makeMeddlingRunner())
+            viewModel.panelDidBecomeVisible()
+
+            await viewModel.performPrimaryAction()
+
+            expect(
+                viewModel.outcomeHasBeenSeen,
+                "面板开着 → 两个渲染点都无条件画告知 → 它这一帧就在屏幕上")
+            expect(
+                !onboardingVisibleNotices(actionState: viewModel.actionState).isEmpty,
+                "而且此刻它确实还在")
+
+            viewModel.panelDidHide()
+            viewModel.panelDidBecomeVisible()
+            expect(viewModel.actionState == .idle, "看过了 → 重开即清")
+        }
+    }
+
+    await suite("T17f 一次新动作开跑，必须先清掉上一条告知 —— 绝不让陈旧的话跟着新结果一起显示") {
+        await withTempDirectory { root in
+            let environment = makeReadyEnvironment(in: root)
+            let runner = makeMeddlingRunner()
+            let viewModel = OnboardingViewModel(environment: environment, actionRunner: runner)
+            viewModel.panelDidBecomeVisible()
+
+            await viewModel.performPrimaryAction()
+            expect(
+                !onboardingVisibleNotices(actionState: viewModel.actionState).isEmpty,
+                "先制造一条告知")
+
+            // 第二次动作：这次干干净净
+            runner.result = .success(
+                .tookOver(
+                    .completed(
+                        copiedBinary: false, copiedPacks: [], salvaged: [],
+                        packSelection: .untouched, hooksOutcome: .alreadyInstalled)))
+            await viewModel.performPrimaryAction()
+
+            expect(
+                viewModel.actionState == .idle,
+                "第二次接管什么主都没做 —— 上一条告知必须已经被清掉，不能让它冒充这次的结果")
+        }
+    }
 }

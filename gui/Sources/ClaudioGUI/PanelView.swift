@@ -286,8 +286,15 @@ public struct PanelView: View {
     /// 完全无声；一条静态 `Text` 写的失败原因，VO 光标不会自己跑过去。而用户此刻正在等一次可能长达
     /// 数百毫秒的磁盘复制，或者刚刚经历一次失败。
     ///
-    /// 成功不在这里播报：成功会让 `state` 变成 `.installed`，由上面 `.onChange(of: state)` 里的
-    /// ``announcePanel()`` 说出「Claudio 面板，当前声音包 X」—— 那句话比「成功了」信息量大得多。
+    /// 一次**无话可说的**成功不在这里播报：它会让 `state` 变成 `.installed`，由上面
+    /// `.onChange(of: state)` 里的 ``announcePanel()`` 说出「Claudio 面板，当前声音包 X」——
+    /// 那句话比「成功了」信息量大得多。
+    ///
+    /// **但一次「我替你做主」的成功必须播报**（T17f）。`announcePanel()` 那句
+    /// 「当前声音包 minimal-chime」对一个视力正常的用户来说尚可推断（他能看见 ⚠ 那一行），
+    /// 对一个 VoiceOver 用户则是**彻底的静默替换**：他会听到一句平静的「当前声音包 minimal-chime」，
+    /// 而他选的明明是别的包 —— 那正是这次修复要杀死的 bug，只是换到了听觉通道上。
+    /// 所以告知走这条 announce 通道，与失败**同权**。
     private func announceActionState(_ actionState: OnboardingActionState) {
         switch actionState {
         case .idle:
@@ -296,6 +303,10 @@ public struct PanelView: View {
             announce(onboardingActionRunningTitle(action))
         case .failed(_, let message, _):
             announce(message)
+        case .reported(let notices):
+            // 多条告知连播成一句：`.announcementRequested` 是「一次一句」的通道，连发多条会被
+            // VoiceOver 截断成只剩最后一条 —— 而被丢掉的那条，恰恰可能是「你的目录被搬到了哪儿」。
+            announce(notices.map(\.message).joined(separator: " "))
         }
     }
 
@@ -372,6 +383,26 @@ public struct PanelView: View {
                 errorNotice(error.description)
             }
             AudioDropZoneView(viewModel: dropZoneViewModel)
+
+            // T17f：**这里是告知真正的家 —— 而且位置本身是它文案的一部分。**
+            //
+            // 一次成功的「接管」必然把 state 推成 `.installed`（`runDiskAction` 无条件 `refresh()`），
+            // 而 `.installed` 渲染的正是这个运行态面板 —— onboarding 卡此刻根本不在屏幕上。所以
+            // 「你选的包没了、已替你换成 X」「你那个读不出的包被搬到了 Y」这两句话，**每一次都诞生
+            // 在这一侧**。上一版这里一行都没有，于是它们每一次都无声。
+            //
+            // **紧挨在 `PackGalleryView` 之前**，这一条是硬约束，不是排版口味：那句文案白纸黑字写着
+            // 「你随时可以在**下面的**声音包里换成别的」。T17f 自评审第一版把它放进了 `disconnectRow`
+            // （画廊**之后**），于是那句话下面唯一的东西是「断开连接」那颗破坏性按钮 —— 一个刚被替换
+            // 了选包、正想换回去的用户，被一句话指向了卸载键。
+            //
+            // 换句话说：**移动这个 `ForEach` 到画廊下方，就等于把那句文案变成谎话。** 要改位置，
+            // 先改文案。（`runSetupNoticeSuites` 钉住了「文案里有『下面的声音包』」这一半；另一半
+            // ——「它真的在下面」—— 只有这条注释和你的眼睛守着。）
+            ForEach(Array(onboardingVisibleNotices(actionState: onboardingViewModel.actionState).enumerated()), id: \.offset) { _, notice in
+                ActionNoticeRow(message: notice.message, typeScale: typeScale)
+            }
+
             PackGalleryView(
                 cards: packCards, focusedTarget: $focusedTarget, onSelect: { switchPack(to: $0.id) })
             disconnectRow
@@ -404,6 +435,10 @@ public struct PanelView: View {
                 onToggleDetail: { onboardingViewModel.toggleDetail() },
                 focusedTarget: $focusedTarget, typeScale: typeScale)
         }
+
+        // 告知**不在这里** —— 它排在 `PackGalleryView` **之前**（见 `operationalPanel`）。
+        // 那是刻意的，而且是被自评审逼出来的：文案说「在下面的声音包里换成别的」，而
+        // `disconnectRow` 排在画廊之后 —— 把提示行放在这里，就等于把用户指向「断开连接」。
 
         let intent = onboardingSecondaryIntent(for: onboardingViewModel.state)
         let isRunning = onboardingViewModel.isRunning(intent)

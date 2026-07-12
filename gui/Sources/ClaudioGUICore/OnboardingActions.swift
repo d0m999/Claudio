@@ -98,6 +98,142 @@ public enum OnboardingActionState: Sendable, Equatable {
     /// `message` 是安心叙事的人话（渲染在卡片正文，必须过 T7 禁词表）；`detail` 是工程原文
     /// （`SetupError` / `SettingsUpdateError` 的 `description`），只出现在「查看原因」披露之后。
     case failed(action: OnboardingDiskAction, message: String, detail: String?)
+
+    /// 动作**成功了**，但 setup 在成功的路上**替用户做了主**，而他有权知道（T17f）。
+    ///
+    /// ## 这个 case 修的那个 bug
+    ///
+    /// T17e 给 `performFirstRunSetup` 立下了一条纪律，并把它写进 `PackSelectionOutcome`
+    /// `.repairedDeadSelection` 的文档里：**「他选的包没了 → 替他换上一个能响的，并如实说出来。」**
+    /// CLI 侧兑现了：`printSetupSummary` 用 **⚠**（而不是 ·）逐条打印搬走的包与被替换的选包，
+    /// 旁边还留着一句注释解释为什么必须是 ⚠：「搬走一个用户目录，是这次 setup 里代价最大的一个
+    /// 『我替你做主』…那个目录里完全可能装着他自己导入的、磁盘上唯一一份音频。」
+    ///
+    /// **GUI 侧一个字都没说。** `runDiskAction` 的成功分支是 `case .success: actionState = .idle`
+    /// —— `OnboardingActionOutcome.tookOver(SetupOutcome)` 连**绑都没绑**就掉在地上了。于是那条
+    /// 「必须让他知道」的纪律，只对开终端的人成立；而**命中这条路径的用户，恰恰是点面板「接管 /
+    /// 修复」的那一个** —— 他不开终端，所以他是唯一一个看不到那行 ⚠ 的人。
+    ///
+    /// 这是 T17 那句「我用『用户看不见』论证的闸门，自己造出了『用户够不着』」在下一层的复现：
+    /// 前四次是死按钮、死错误、没人渲染的格子、一帧都没露过面就被清掉的失败；这一次，是一条
+    /// **成功路径上的**告知，它在 CLI 里响，在 GUI 里哑。
+    ///
+    /// ## 为什么它是 `actionState` 的一个 case，而不是第二个 `@Published` 标量
+    ///
+    /// 与 `.failed` 同一条理由（见本枚举头部）：两个正交标量结构上进不了 `PreviewFixtures`，
+    /// 于是这个新视觉态会**从来没有任何一帧渲染过**而 `assertExhaustive()` 照样全绿。放进枚举，
+    /// 顺带也消灭了「既成功又失败」「正在跑 **且** 有告知」这些不可能组合。
+    ///
+    /// ## 为什么**不**带 `action` 标签（`.failed` 带）
+    ///
+    /// 告知只可能来自 `.takeOver`：`.disconnect` 走 `uninstallClaudioHooks`，它不碰包、不碰选包，
+    /// 结构上产不出一条 ``SetupNotice``（``setupNotices(for:)`` 的 `.disconnected` 分支恒返回 `[]`，
+    /// 并被真值表钉住）。带上 `action` 只会凭空造出 `.reported(.disconnect, …)` 这个**永远不可达**
+    /// 的状态，还得给它编一个 caption。`.failed` 需要 `action` 是因为**两个动作都会失败**。
+    ///
+    /// **`notices` 恒非空**：空告知就是「没什么可说的」，那是 `.idle`，不是一个长着零行的提示区。
+    /// 这条由 ``onboardingActionState(afterSuccess:)`` 单点保证（它是构造 `.reported` 的**唯一**
+    /// 入口），并由 `OnboardingActionsSuite` 钉死。
+    case reported(notices: [SetupNotice])
+}
+
+/// 一条「Claudio 替你做了主」的告知 —— setup **成功**了，但它在路上动了用户的东西。
+///
+/// 与 ``OnboardingActionError`` 同一套两段式：``message`` 是给人看的人话（过 T7 禁词表），
+/// 底层路径 / 包名嵌在句子里而不是甩一行工程原文。**没有 `detail` 披露**：告知不是错误，
+/// 没有「原因」可查——话本身就是全部内容。
+public enum SetupNotice: Sendable, Equatable {
+    /// 一个读不出 manifest 的包目录被**原样搬走**了（`SetupOutcome.salvaged`）。
+    /// `movedTo` 是它现在的绝对路径 —— **必须出现在文案里**：那个目录里可能装着用户自己导入的、
+    /// 磁盘上唯一一份音频，我们欠他一条能把它找回来的路径。
+    case salvagedPack(packID: String, movedTo: String)
+    /// 他选中的包已经不在了 / 读不出来，setup **替他换了一个能响的**
+    /// （`PackSelectionOutcome.repairedDeadSelection`）。
+    case repairedDeadSelection(removed: String, selected: String)
+
+    /// 用户看得见的那句话。过 T7 禁词表（无「settings.json」「hook」等工程语）。
+    ///
+    /// ⚠️ **纯文本，不是 Markdown。** 这两句话最终走 `ActionNoticeRow` 的 `Text(message)`，而
+    /// `message` 是一个 `String` **变量** —— Swift 于是选中 `Text.init<S: StringProtocol>(_:)` 这个
+    /// **逐字**重载；会解析 Markdown 的 `LocalizedStringKey` 重载**只有字符串字面量够得着**。
+    /// 所以在这里写任何 `**粗体**`，用户会**原样读到那几个星号**。
+    ///
+    /// 这不是推测，是 T17f 自评审实测（编译 `Text(s)` 并 dump `Text.Storage` → `.verbatim("…**原样**…")`）。
+    /// 第一版这句话里真的带着 `**原样**` —— 于是在这个产品**唯一一次开口说「我动了你的东西」**的地方，
+    /// 屏幕上会印着四个星号，VoiceOver 还会把它们念出来。与 `warning` token 那条是同一个家族：
+    /// `warning` 是「没人渲染过 → 没人**量**过」，这一条是「没人渲染过 → 没人**看**过」。
+    /// `runSetupNoticeSuites` 现在逐条扫 Markdown 标记，写回去当场变红。
+    public var message: String {
+        switch self {
+        // 「一个文件都没删」是这句话里最重要的六个字：用户此刻最想知道的不是我们发现了什么，
+        // 而是他的东西还在不在。路径紧跟其后 —— 他得能走过去把它捞回来。
+        case .salvagedPack(let packID, let movedTo):
+            "「\(packID)」这个声音包读不出来了（多半是上一次安装被中断留下的残骸）。"
+                + "Claudio 把它原样搬到了 \(movedTo) —— 一个文件都没删 —— 并重新装了一份干净的。"
+        // 刻意点明「随时能换回去」：这是一次未经请求的替换，用户有权知道它是可逆的。
+        //
+        // 「**下面的**声音包」是一句**关于布局的断言**，所以它必须由布局来兑现：`operationalPanel`
+        // 里这条提示行**排在 `PackGalleryView` 之前**。
+        //
+        // T17f 自评审逮到的就是这里：第一版把提示行塞在 `disconnectRow` 里，而 `disconnectRow` 排在
+        // 画廊**之后** —— 于是这句话下面唯一的东西，是「断开连接」那颗**破坏性按钮**。我们把一个刚
+        // 被替换了选包、正想换回去的用户，一句话指向了卸载键。（更难堪的是：同一次改动里，我在
+        // `PanelView` 的注释里写的是「手指往上一抬就是那个画廊」—— 两条注释自己就打了架，而没有
+        // 任何测试会为一句指错方向的话变红。）
+        //
+        // 修法是**改布局，不是删掉这句指路**：这个用户此刻最需要的就是那个画廊，解释必须紧挨着补救。
+        case .repairedDeadSelection(let removed, let selected):
+            "你之前选的「\(removed)」已经不在了，Claudio 先替你换成了「\(selected)」，"
+                + "这样每个事件都还能出声。你随时可以在下面的声音包里换成别的。"
+        }
+    }
+}
+
+/// 这次成功的动作，有哪些「我替你做主」需要告诉用户 —— **一个纯函数，一张真值表**
+/// （`packSelectionPlan` 的先例：政策抽成纯函数，一张表逐格钉死）。
+///
+/// 顺序与 CLI 的 `printSetupSummary` **一字不差**：先搬走的包，后被替换的选包。两条渲染在同一个
+/// 提示区里，用户读到的顺序与他 `claudio setup` 时读到的顺序相同。
+///
+/// `.disconnected` 恒返回 `[]`：摘 hooks 不碰包、不碰选包。这不是「暂时没有」，是**结构上没有**
+/// —— 它是 ``OnboardingActionState/reported(notices:)`` 不带 `action` 标签的全部依据。
+public func setupNotices(for outcome: OnboardingActionOutcome) -> [SetupNotice] {
+    switch outcome {
+    case .disconnected:
+        return []
+    case .tookOver(let setupOutcome):
+        switch setupOutcome {
+        case .completed(_, _, let salvaged, let packSelection, _):
+            var notices: [SetupNotice] = salvaged.map {
+                .salvagedPack(packID: $0.packID, movedTo: $0.movedTo)
+            }
+            switch packSelection {
+            // 这两条**不是**告知，刻意的：`.untouched` = 一个字节都没动；`.selectedDefault` =
+            // 首次自举挑了个默认包，那是用户按下「接管」时本来就在请求的事，不是「我替你做主」。
+            // 把它们也报出来，等于让真正要紧的那两条淹在噪音里——正是 CLI 那行「⚠ 而不是 ·」
+            // 的注释在防的事。
+            case .untouched, .selectedDefault:
+                break
+            case .repairedDeadSelection(let removed, let selected):
+                notices.append(.repairedDeadSelection(removed: removed, selected: selected))
+            }
+            return notices
+        }
+    }
+}
+
+/// 一次**成功**的动作之后，`actionState` 该落在哪 —— ``OnboardingActionState/reported(notices:)``
+/// 的**唯一**构造入口。
+///
+/// 没什么可说 → `.idle`；有话要说 → `.reported`。这条单点保证了「`notices` 恒非空」这条不变式：
+/// `.reported(notices: [])` 与 `.idle` 是同一个视觉态，两种表示会在 `PreviewFixtures` 的
+/// label 集合里**塌成一个** —— 于是「零行的提示区」这个变体永远不会有人渲染、也永远没人发现。
+/// 让它压根构造不出来，比事后断言它不该出现更结实。
+public func onboardingActionState(afterSuccess outcome: OnboardingActionOutcome)
+    -> OnboardingActionState
+{
+    let notices = setupNotices(for: outcome)
+    return notices.isEmpty ? .idle : .reported(notices: notices)
 }
 
 /// 这个 (state, actionState) 组合下，失败行自己该不该长出一颗「查看原因」。
@@ -167,6 +303,28 @@ public func onboardingVisibleFailure(
 ) -> (message: String, detail: String?)? {
     guard case .failed(_, let message, let detail) = actionState else { return nil }
     return (message, detail)
+}
+
+/// 此刻该被画出来的那些告知 —— ``onboardingVisibleFailure(actionState:)`` 的**孪生兄弟**，
+/// 一字不差的同一条推理，只是把「失败」换成「我替你做主」。
+///
+/// 它存在的唯一理由，是让「一条告知必须有人画」成为一条**结构事实**，而不是一条要靠人维护的
+/// 分派规则 —— 与 T17c 为失败行做的事完全同构：
+///
+/// 两个渲染点（`OnboardingView` 的卡 / `PanelView` 的运行态面板）**互斥地占据屏幕**，任一时刻
+/// 恰好有一个在。所以只要**两边都无条件调这个函数**，「有告知就一定被画」就不可能被违反。
+///
+/// 而这条不变式在告知这里**比在失败那里更要命**：一次成功的接管必然把 `state` 推成 `.installed`
+/// （`runDiskAction` 无条件 `refresh()`），也就是说**每一条告知都诞生在运行态面板那一侧**，
+/// onboarding 卡此刻根本不在屏幕上。如果这个判断留在 SwiftUI 里的一个 `if` 中、或者只接在
+/// onboarding 卡上，那么**没有任何一条告知会被渲染**——它会与它要修的那个 bug 一模一样。
+///
+/// 返回 `[]`（而不是 `[SetupNotice]?`）：调用方是 `ForEach`，空数组天然渲染成零行，不需要在视图里
+/// 再写一次 `if let`。`OnboardingActionsSuite` 用 `state × actionState` 全组合把
+/// 「`.reported` ⟺ 非空」钉死。
+public func onboardingVisibleNotices(actionState: OnboardingActionState) -> [SetupNotice] {
+    guard case .reported(let notices) = actionState else { return [] }
+    return notices
 }
 
 /// 动作进行中时，那颗按钮上显示的字（VoiceOver 也播报它）。

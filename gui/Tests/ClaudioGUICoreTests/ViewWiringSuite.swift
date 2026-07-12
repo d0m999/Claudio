@@ -87,6 +87,39 @@ func runViewWiringSuites() {
                 + " .installed（点「修复」→ 撞上 play.lock → 失败，但二进制和 hooks 都在位），"
                 + "那时 onboarding 卡根本不在屏幕上。上一版这里只认 branch: .disconnect，"
                 + "于是那条失败一个像素都没有：绿点、静音、零诊断")
+
+        // T17f：**这条比上面那条更要命。** 告知只从一次成功的接管而来，而成功必然把 state 推成
+        // `.installed` —— 也就是说**每一条告知都诞生在这个面板上**，onboarding 卡那一侧永远接不住。
+        // 这一行没了，就等于回到修复前：用户的包被换掉、目录被搬走，面板一声不吭。
+        expect(
+            panel.contains("onboardingVisibleNotices(actionState:"),
+            "运行态面板必须渲染「我替你做主」的告知 —— 一次成功的接管必然落在 .installed，所以这里"
+                + "是告知**唯一**的家。上一版这里一行都没有，于是 T17e 立下的『替他换上，并如实说"
+                + "出来』只对开终端的人成立，而命中这条路径的恰恰是点面板「接管 / 修复」的那个用户")
+        expect(
+            panel.contains("ActionNoticeRow("),
+            "光调纯函数不够 —— 面板得真的把它画成一行（⚠ 暖琥珀，不是真红：setup 成功了）")
+
+        // T17f 自评审：**文案里那句「下面的声音包」是一句关于布局的断言，这里把它兑现。**
+        //
+        // 第一版把提示行放进了 `disconnectRow`，而 `disconnectRow` 排在 `PackGalleryView` **之后** ——
+        // 于是那句话下面唯一的东西是「断开连接」那颗破坏性按钮：我们把一个刚被替换了选包、正想换回去
+        // 的用户，一句话指向了卸载键。没有任何测试为此变红（一句指错方向的话，编译器不管，
+        // `onboardingVisibleNotices` 也照样返回非空）。
+        //
+        // 这条断言是**顺序**断言：ActionNoticeRow 必须出现在 PackGalleryView **之前**。
+        // 把提示行挪到画廊下方 = 把文案变成谎话 = 这里变红。
+        if let noticeAt = panel.range(of: "ActionNoticeRow(")?.lowerBound,
+            let galleryAt = panel.range(of: "PackGalleryView(")?.lowerBound
+        {
+            expect(
+                noticeAt < galleryAt,
+                "告知行必须排在声音包画廊**之前** —— 文案白纸黑字写着「你随时可以在**下面的**声音包里"
+                    + "换成别的」。挪到画廊之后，那句话下面就只剩「断开连接」了：一个想换回自己包的用户，"
+                    + "会被这句话指向卸载键。要改位置，先改文案")
+        } else {
+            expect(false, "PanelView 里必须同时有 ActionNoticeRow 与 PackGalleryView")
+        }
         expect(
             !panel.contains("onboardingFailureBelongsHere"),
             "按 action 分派失败的那个函数已经删了（T17c）—— 它默认「哪个动作失败」与「失败之后 state"
@@ -145,6 +178,14 @@ func runViewWiringSuites() {
             view.contains("onboardingVisibleFailure(actionState:"),
             "onboarding 卡必须渲染任何失败 —— 一次**断开**失败之后 state 可能不再是 .installed"
                 + "（比如 settings.json 同时被外部改坏），那时运行态面板不在屏幕上，只有这张卡在")
+
+        // T17f：这张卡**几乎**看不到告知（告知来自成功的接管 → state 变 .installed → 画的是运行态
+        // 面板）。它仍然必须无条件画，理由与 T17c 一字不差：「我推理出这个格子不可达，所以不画它」
+        // 这句话，正是 T17c 里造出两个无人认领格子的那句话。两边都画，「不可达」就不需要任何人去证明。
+        expect(
+            view.contains("onboardingVisibleNotices(actionState:"),
+            "onboarding 卡也必须无条件渲染告知 —— 结构不变式两边都得成立，否则它就不是不变式，"
+                + "而是一条需要人去维护的分派规则（T17c 已经为这个区别交过学费）")
         expect(
             !view.contains("onboardingFailureBelongsHere"),
             "按 action 分派失败的那个函数已经删了（T17c）")

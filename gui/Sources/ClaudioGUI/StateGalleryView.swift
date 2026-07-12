@@ -103,9 +103,18 @@
         }
 
         /// 哪个 ``OnboardingState`` 承载这一帧。`.running(.disconnect)` 只可能发生在 `.installed`
-        /// （断开是它的次 CTA）；其余都用 `.notInstalled` —— 新用户真正按下「接管」的那个状态。
+        /// （断开是它的次 CTA）；`.reported` 同理 —— 告知只从一次**成功的接管**而来，而成功必然让
+        /// `refresh()` 把 state 推成 `.installed`（T17f）。其余都用 `.notInstalled` —— 新用户真正
+        /// 按下「接管」的那个状态。
+        ///
+        /// ⚠️ **诚实标注**：这一帧渲染的是 `OnboardingStateFrame` → `OnboardingView`，而真机上
+        /// `.installed` 渲染的是 `PanelView` 的运行态面板 —— 也就是说画廊在这里展示的是告知行的
+        /// **长相**（字形 / 颜色 / 断行 / Dynamic Type），不是它**真实的落位**。`.running(.disconnect)`
+        /// 早就有同一条错位，本次没有引入新的债。真实落位由 `ViewWiringSuite` 的两条文本绊线守着
+        /// （两个渲染点都必须调 `onboardingVisibleNotices`）。
         private func hostState(for actionState: OnboardingActionState) -> OnboardingState {
             if case .running(.disconnect) = actionState { return .installed }
+            if case .reported = actionState { return .installed }
             return .notInstalled
         }
     }
@@ -119,6 +128,8 @@
             detail == nil
                 ? ".failed(\(action), detail: nil) × .notInstalled"
                 : ".failed(\(action), detail: …) × .notInstalled（可展开）"
+        case .reported(let notices):
+            ".reported(\(notices.count) 条) × .installed —— 我替你做了主"
         }
     }
 

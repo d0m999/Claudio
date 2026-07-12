@@ -91,6 +91,24 @@ public enum PreviewFixtures {
             action: .takeOver,
             message: "没找到 Claudio 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 Claudio 再试一次。",
             detail: nil),
+        // T17f —— 第三个视觉分支：动作**成功了**，但 setup 替用户做了主。三份 fixture 各渲染出不同的
+        // 东西（一行搬走 / 一行换包 / 两行叠着），所以是三个 label、三帧。少任何一帧，那个变体就
+        // 「从来没有任何人看过」——而这正是本文件存在的全部理由。
+        //
+        // ⚠️ 文案不是这里写的：它是 `SetupNotice.message` 算出来的，与生产环境**逐字同源**。
+        // 在这儿手抄一遍好看的假句子，等于让画廊评审的是一句真机上永远不会出现的话。
+        .reported(notices: [
+            .salvagedPack(
+                packID: "wobbuffet", movedTo: "/Users/demo/.claudio/packs/wobbuffet-已搬走")
+        ]),
+        .reported(notices: [
+            .repairedDeadSelection(removed: "pikachu", selected: "minimal-chime")
+        ]),
+        .reported(notices: [
+            .salvagedPack(
+                packID: "wobbuffet", movedTo: "/Users/demo/.claudio/packs/wobbuffet-已搬走"),
+            .repairedDeadSelection(removed: "wobbuffet", selected: "minimal-chime"),
+        ]),
     ]
 
     // MARK: - DropZoneState (ENGINEERING.md T8): idle / hover / reject×6 / success
@@ -230,6 +248,19 @@ public enum PreviewFixtures {
         case .idle: "idle"
         case .running(let action): "running.\(onboardingDiskActionCoverage(action))"
         case .failed(_, _, let detail): detail == nil ? "failed.noDetail" : "failed.withDetail"
+        // `.reported` 按**内容**分标签，不是笼统一个 "reported"（T17f）。这正是本文件头部那条警告
+        // 在说的事：label 是 `assertExhaustive()` 能看见的**唯一**投影，任何没编进这个字符串的
+        // payload 维度，对穷尽性检查都是隐形的。三个变体渲染出三种不同的东西（一行搬走 / 一行换包 /
+        // 两行叠着），塌成一个 label 就等于「有两种没人看过」——而它们全都塌在同一个 `Set` 里。
+        // 递归进 ``setupNoticeCoverage(_:)``，于是将来加第三种告知同样是**编译错误**。
+        case .reported(let notices):
+            "reported."
+                + (notices.count > 1
+                    ? "multiple"
+                    // 恒非空（``onboardingActionState(afterSuccess:)`` 是唯一构造入口，
+                    // `OnboardingActionsSuite` 钉死）。`?? "empty"` 不是兜底，是**绊线**：
+                    // 它一旦出现在 label 集合里，就说明那条不变式被绕过去了，roster 当场变红。
+                    : (notices.first.map(setupNoticeCoverage) ?? "empty"))
         }
     }
 
@@ -239,6 +270,15 @@ public enum PreviewFixtures {
         switch action {
         case .takeOver: "takeOver"
         case .disconnect: "disconnect"
+        }
+    }
+
+    /// Exhaustive over every ``SetupNotice`` case — no `default:`（T17f）。加第三种「我替你做主」
+    /// 的告知，这里会**编译红**，直到它也有 fixture、也有一帧被人真的看过。
+    static func setupNoticeCoverage(_ notice: SetupNotice) -> String {
+        switch notice {
+        case .salvagedPack: "salvaged"
+        case .repairedDeadSelection: "repaired"
         }
     }
 

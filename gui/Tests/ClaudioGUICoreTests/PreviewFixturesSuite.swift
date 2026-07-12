@@ -42,6 +42,14 @@ func runPreviewFixturesSuites() {
             "onboardingAction.idle",
             "onboardingAction.running.takeOver", "onboardingAction.running.disconnect",
             "onboardingAction.failed.withDetail", "onboardingAction.failed.noDetail",
+            // T17f —— 「我替你做主」的告知。三个变体各渲染出不同的东西（一行搬走 / 一行换包 /
+            // 两行叠着），所以是三个 label、三帧。**注意这份名册是唯一真正的闸门**：
+            // `assertExhaustive()` 的比较是 `visited == expected`，若我只加了 coverage 分支（编译器
+            // 强制的）而**没加 fixture**，新 label 压根不会进 `visited`，`expected` 不变 → 全绿，
+            // 而那三个视觉态一帧都没渲染过。名册与 fixture 必须同时加，缺一个就红。
+            "onboardingAction.reported.salvaged",
+            "onboardingAction.reported.repaired",
+            "onboardingAction.reported.multiple",
             "dropZone.idle", "dropZone.hover", "dropZone.success",
             "dropZone.reject.oversize", "dropZone.reject.nonWhitelistFormat",
             "dropZone.reject.pathTraversal", "dropZone.reject.overDuration",

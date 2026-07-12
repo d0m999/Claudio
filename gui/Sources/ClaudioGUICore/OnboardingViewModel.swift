@@ -45,9 +45,21 @@ public final class OnboardingViewModel: ObservableObject {
     /// `panelOpeningFocus`：测试证明函数算得对，却没人盯住视图是否调用它）。
     @Published public private(set) var isShowingDetail: Bool = false
 
-    /// 当前这条 ``actionState`` 里的失败，**有没有真的出现在屏幕上过**（T17d）。
+    /// 当前这条 ``actionState`` 里的**结果**（一条失败，或一条「我替你做主」的告知），
+    /// **有没有真的出现在屏幕上过**（T17d 立的规矩；T17f 把它从「失败」推广到「结果」）。
     ///
-    /// **刻意不是 `.failed` 的第四个关联值**，两条具体理由：
+    /// ## 为什么告知必须共用这条寿命规则，而不是随手挂上去
+    ///
+    /// T17d 那个 bug 一字不改地适用于告知，而且**更容易撞上**：用户点「接管」，在几百毫秒的
+    /// 复制期间点到别的 app 上 —— `popover.behavior = .transient`，面板**当场关闭**。而 CTA 那句
+    /// `Task { await viewModel.performPrimaryAction() }` 不随视图销毁而取消：它继续跑、成功、
+    /// 把「你选的包没了，我替你换成了 X」写进 `actionState`。此刻屏幕上**没有任何一个像素属于它**。
+    ///
+    /// 若这里只认 `.failed`，告知就会落进两个坑之一（取决于 ``panelDidBecomeVisible()`` 怎么写）：
+    /// 要么**永远不清**（一条陈旧的告知永久挂在面板底部），要么**一帧没露就被清掉**（用户永远
+    /// 不知道他的包被换过）。后者正是 T17d 那个 bug 的形状，在成功路径上重演一次。
+    ///
+    /// **刻意不是关联值**，两条具体理由（对 `.failed` 与 `.reported` 同样成立）：
     /// ① `PreviewFixtures.onboardingActionStateCoverage` 只按 `detail == nil` 给 `.failed` 分标签，
     ///    多出来的这一维**产生不了新 label** —— `assertExhaustive()` 会在「新变体一帧都没渲染过」
     ///    的情况下照样全绿，正是 `PreviewFixtures` 自己写在文档里警告的「真相源漏了一维」那个形状。
@@ -55,9 +67,9 @@ public final class OnboardingViewModel: ObservableObject {
     ///    `.onChange(of: onboardingViewModel.actionState)` 会二次触发 —— VoiceOver 把同一条失败
     ///    播报两遍，焦点再重置一次。
     ///
-    /// 它**不是 `@Published`**：没有任何一个像素读它。它只决定失败的**寿命**，不决定失败的**长相**
-    /// （两个渲染点都无条件画「有没有失败」，这条结构不变式 T17c 已经钉死，本次改动一个字没动）。
-    public private(set) var failureHasBeenSeen: Bool = false
+    /// 它**不是 `@Published`**：没有任何一个像素读它。它只决定结果的**寿命**，不决定结果的**长相**
+    /// （两个渲染点都无条件画「有没有失败」与「有没有告知」，这条结构不变式 T17c 立、T17f 照搬）。
+    public private(set) var outcomeHasBeenSeen: Bool = false
 
     /// 面板此刻是不是真的在屏幕上。由 `MenuBarController` 的两个 `NSPopoverDelegate` 回调驱动
     /// （``PanelFocusCoordinator/showCount`` / ``PanelFocusCoordinator/hideCount``），**不是**
@@ -180,7 +192,7 @@ public final class OnboardingViewModel: ObservableObject {
     /// ## 修法：不再假定，而是记录
     ///
     /// 「这条失败有没有被人看见过」在它**诞生的那一刻**就是一个已知事实（面板开着吗？），而不是
-    /// 下一次打开时需要猜的东西。``runDiskAction(_:)`` 直接把它记进 ``failureHasBeenSeen``。
+    /// 下一次打开时需要猜的东西。``runDiskAction(_:)`` 直接把它记进 ``outcomeHasBeenSeen``。
     /// 于是这里的规则退化成两行，不含任何假定：
     /// - 已经被看过 → 忘掉它（T17c 那条「陈旧失败不该永久挂在一张已经装好的面板上」的顾虑，原样兑现）。
     /// - 还没被看过 → **这一次打开就是它的第一次露面**，标记为已看过，但**绝不清掉**。
@@ -192,16 +204,25 @@ public final class OnboardingViewModel: ObservableObject {
         guard !isPreviewPinned else { return }
         isPanelVisible = true
 
-        // `.failed` 与 `.running` 在枚举层面互斥，所以这里不需要 `!isPerformingAction` ——
-        // 一条正在跑的动作永远匹配不上 `case .failed`。（上一版带着那个 guard，它是死的。）
-        guard case .failed = actionState else { return }
+        // `.failed` / `.reported` 与 `.running` 在枚举层面互斥，所以这里不需要 `!isPerformingAction`
+        // —— 一条正在跑的动作永远匹配不上下面两个 case。（上一版带着那个 guard，它是死的。）
+        //
+        // T17f：`.reported`（一条「我替你做主」的告知）走**一字不差的同一条规则**。它不能被漏掉：
+        // 漏掉 = 那条告知永远不会被清（陈旧地挂在一张早就装好的面板上），或者更糟——若有人顺手在
+        // 别处清了它，它会在用户看见之前消失。`switch` 穷尽、无 `default:`，加新态会编译红。
+        switch actionState {
+        case .idle, .running:
+            return
+        case .failed, .reported:
+            break
+        }
 
-        if failureHasBeenSeen {
+        if outcomeHasBeenSeen {
             actionState = .idle
             isShowingDetail = false
-            failureHasBeenSeen = false
+            outcomeHasBeenSeen = false
         } else {
-            failureHasBeenSeen = true
+            outcomeHasBeenSeen = true
         }
     }
 
@@ -237,7 +258,7 @@ public final class OnboardingViewModel: ObservableObject {
             // 一个字节都不写：用户的 Claude Code 没装 / 配置文件没权限 / 格式坏了 —— 都不是
             // Claudio 该替他动手的东西。只重新看一眼磁盘。
             actionState = .idle
-            failureHasBeenSeen = false
+            outcomeHasBeenSeen = false
             refresh()
 
         case .takeOver:
@@ -251,26 +272,48 @@ public final class OnboardingViewModel: ObservableObject {
     private func runDiskAction(_ action: OnboardingDiskAction) async {
         actionState = .running(action)
         isShowingDetail = false
-        failureHasBeenSeen = false
+        outcomeHasBeenSeen = false
 
         let result = await actionRunner.run(action)
 
         switch result {
-        case .success:
-            actionState = .idle
-            failureHasBeenSeen = false
+        case .success(let outcome):
+            // **T17f 的整个修复就是这一行。**
+            //
+            // 上一版是 `case .success: actionState = .idle` —— `outcome` 连**绑都没绑**。于是
+            // `SetupOutcome` 里那两条 setup 明确承诺过「必须让他知道」的事（读不出的包被搬走了 /
+            // 他选的包没了、已替他换掉）在这里**掉在地上**：面板一声不吭地切到运行态、亮起绿点，
+            // 而用户的包已经被换过、他的目录已经被搬走。CLI 侧那行 ⚠ 只对开终端的人响。
+            //
+            // 政策不在这里：``onboardingActionState(afterSuccess:)`` 是纯函数（真值表钉死），
+            // 它也是 `.reported` 的唯一构造入口，负责保证「没什么可说就回 `.idle`」。
+            actionState = onboardingActionState(afterSuccess: outcome)
         case .failure(let error):
             actionState = .failed(
                 action: action, message: error.message, detail: error.technicalDetail)
-            // **T17d 的整个修复就是这一行。**
-            //
-            // 「这条失败会不会被人看见」不是下一次开面板时该去假定的事，它在此刻就是一个事实：
-            // - 面板此刻开着 → 两个渲染点都无条件画「有没有失败」（T17c 的结构不变式），所以它
-            //   这一帧就在屏幕上 → 算看过，用户下次开面板时可以忘掉它。
-            // - 面板此刻关着 → 用户点完「接管」就切走了，`.transient` popover 早已关闭，而这个
-            //   `Task` 不随视图销毁而取消，于是失败诞生在一块没人看的屏幕上 → **不算看过**，
-            //   它必须活到用户下一次打开、真正露一次面为止。
-            failureHasBeenSeen = isPanelVisible
+        }
+
+        // **T17d 的整个修复就是这一行**（T17f 把它从「失败」抬到「结果」，见下）。
+        //
+        // 「这条结果会不会被人看见」不是下一次开面板时该去假定的事，它在此刻就是一个事实：
+        // - 面板此刻开着 → 两个渲染点都无条件画「有没有失败 / 有没有告知」（T17c 的结构不变式），
+        //   所以它这一帧就在屏幕上 → 算看过，用户下次开面板时可以忘掉它。
+        // - 面板此刻关着 → 用户点完「接管」就切走了，`.transient` popover 早已关闭，而这个 `Task`
+        //   不随视图销毁而取消，于是结果诞生在一块没人看的屏幕上 → **不算看过**，它必须活到
+        //   用户下一次打开、真正露一次面为止。
+        //
+        // T17f：这一行原本长在 `case .failure` 里。抬出来是**必须的**，不是整理代码 —— 一条
+        // 「我替你换了包」的告知同样可能诞生在一块关着的面板上（而且**更容易**：它走的是成功路径，
+        // 用户点完「接管」切走去干别的，正是最自然的动作）。留在 `.failure` 里，告知就会带着
+        // `outcomeHasBeenSeen == false` 出生却没有人认领这条规则。
+        //
+        // `switch` 穷尽、无 `default:`：将来再加一个动作态，这里会**编译红**，而不是默默漏掉它的寿命。
+        switch actionState {
+        case .failed, .reported:
+            outcomeHasBeenSeen = isPanelVisible
+        case .idle, .running:
+            // 成功且无话可说（`.idle`）——没有任何东西需要被「看见」。
+            outcomeHasBeenSeen = false
         }
         // 无论成败都重新探测：成功 → `.installed`；失败 → 可能变成 `.settingsNotWritable`，也可能
         // 原地不动。面板必须反映磁盘**此刻**的真相，而不是我们以为自己写成功了什么。

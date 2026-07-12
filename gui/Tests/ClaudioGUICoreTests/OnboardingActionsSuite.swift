@@ -690,6 +690,12 @@ func runOnboardingActionsFixSuites() {
             .failed(action: .takeOver, message: "接管失败了", detail: nil),
             .failed(action: .disconnect, message: "断开失败了", detail: "d"),
             .failed(action: .disconnect, message: "断开失败了", detail: nil),
+            .reported(notices: [.salvagedPack(packID: "p", movedTo: "/tmp/p")]),
+            .reported(notices: [.repairedDeadSelection(removed: "a", selected: "b")]),
+            .reported(notices: [
+                .salvagedPack(packID: "p", movedTo: "/tmp/p"),
+                .repairedDeadSelection(removed: "a", selected: "b"),
+            ]),
         ]
 
         for state in allStates {
@@ -702,8 +708,46 @@ func runOnboardingActionsFixSuites() {
                         "\(state) × \(actionState)：一条失败没有任何视图画它 —— 这正是 T17 要杀死的"
                             + "那类静默失败（第三个形状：死错误）。用户会看到一张一切正常的面板，"
                             + "而磁盘上什么都没成")
-                case .idle, .running:
+                case .idle, .running, .reported:
                     expect(visible == nil, "\(state) × \(actionState)：没失败就不该画失败行")
+                }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════
+    // T17f：告知的孪生不变式。与上面那条**逐字同构**——因为它防的是同一个 bug 在成功路径上的重演。
+    // ═══════════════════════════════════════════════════════════════════════════════
+    suite("不变式：state × actionState 全组合下，任何一条告知都必须有视图画它（T17f）") {
+        let allStates: [OnboardingState] = [
+            .claudeCodeNotInstalled, .helperMissing, .notInstalled, .installed,
+            .settingsNotWritable(reason: "r"), .settingsParseFailure(reason: "r"),
+        ]
+        let allActionStates: [OnboardingActionState] = [
+            .idle,
+            .running(.takeOver),
+            .running(.disconnect),
+            .failed(action: .takeOver, message: "接管失败了", detail: "d"),
+            .reported(notices: [.salvagedPack(packID: "p", movedTo: "/tmp/p")]),
+            .reported(notices: [.repairedDeadSelection(removed: "a", selected: "b")]),
+            .reported(notices: [
+                .salvagedPack(packID: "p", movedTo: "/tmp/p"),
+                .repairedDeadSelection(removed: "a", selected: "b"),
+            ]),
+        ]
+
+        for state in allStates {
+            for actionState in allActionStates {
+                let visible = onboardingVisibleNotices(actionState: actionState)
+                switch actionState {
+                case .reported(let notices):
+                    expect(
+                        visible == notices,
+                        "\(state) × \(actionState)：一条告知没有任何视图画它。用户的包被换掉了 /"
+                            + "他的目录被搬走了，而面板一声不吭 —— 这正是 T17e 立下「必须让他知道」"
+                            + "之后，GUI 侧仍然违约的那个形状")
+                case .idle, .running, .failed:
+                    expect(visible.isEmpty, "\(state) × \(actionState)：没告知就不该画提示行")
                 }
             }
         }
@@ -791,6 +835,250 @@ func runOnboardingActionsFixSuites() {
             expect(
                 detectOnboardingState(environment: targets.onboarding) == .installed,
                 "点一下「修复」必须真的把它治好（performFirstRunSetup 的无条件解除隔离那一步）")
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════
+// T17f —— 「我替你做主」的告知：政策的真值表
+//
+// `setupNotices(for:)` 是政策，`onboardingActionState(afterSuccess:)` 是它唯一的出口。两者都是
+// 纯函数，所以这里能像 `packSelectionPlan` 的真值表那样，一张表逐格钉死——而不是靠「跑一遍看看」。
+// ═══════════════════════════════════════════════════════════════════════════════════════
+@MainActor
+func runSetupNoticeSuites() {
+    /// 一个「一切正常」的 setup 结果——每条用例只改它的一两格，于是每条断言在测的到底是哪一格，
+    /// 一眼可见。
+    func outcome(
+        salvaged: [SalvagedPack] = [],
+        packSelection: PackSelectionOutcome = .untouched
+    ) -> OnboardingActionOutcome {
+        .tookOver(
+            .completed(
+                copiedBinary: true, copiedPacks: [], salvaged: salvaged,
+                packSelection: packSelection, hooksOutcome: .installed))
+    }
+
+    // ── 真值表 ────────────────────────────────────────────────────────────────────────
+    // 这四条把「哪些事算『我替你做主』」逐格钉死。前两条**必须**是空的：它们是这张表最容易被
+    // 后人「顺手也报一下」而写坏的两格，而报了它们，真正要紧的两条就会淹在噪音里。
+    suite("告知真值表 ①：选择好好的（.untouched）→ 无话可说") {
+        expect(setupNotices(for: outcome()).isEmpty, "一个字节都没动，凭什么打扰用户")
+        expect(
+            onboardingActionState(afterSuccess: outcome()) == .idle,
+            "无话可说 → .idle，绝不是一个长着零行的 .reported（那会是第二个『空提示区』视觉态）")
+    }
+
+    suite("告知真值表 ②：首次自举挑了默认包（.selectedDefault）→ 无话可说") {
+        let o = outcome(packSelection: .selectedDefault(packID: "minimal-chime"))
+        expect(
+            setupNotices(for: o).isEmpty,
+            "他按下「接管」时本来就在请求这件事——这不是『我替你做主』，是『我照你说的做了』")
+        expect(onboardingActionState(afterSuccess: o) == .idle, "同上 → .idle")
+    }
+
+    suite("告知真值表 ③：他选的包没了、已替他换掉（.repairedDeadSelection）→ 必须说") {
+        let o = outcome(packSelection: .repairedDeadSelection(removed: "pikachu", selected: "minimal-chime"))
+        expect(
+            setupNotices(for: o) == [.repairedDeadSelection(removed: "pikachu", selected: "minimal-chime")],
+            "T17e 白纸黑字：『替他换上，并如实说出来』。CLI 说了，GUI 也必须说")
+        expect(
+            onboardingActionState(afterSuccess: o)
+                == .reported(notices: [.repairedDeadSelection(removed: "pikachu", selected: "minimal-chime")]),
+            "有话要说 → .reported")
+    }
+
+    suite("告知真值表 ④：读不出的包被原样搬走（.salvaged）→ 必须说，且必须带上路径") {
+        let o = outcome(salvaged: [SalvagedPack(packID: "wobbuffet", movedTo: "/tmp/wobbuffet-aside")])
+        expect(
+            setupNotices(for: o) == [.salvagedPack(packID: "wobbuffet", movedTo: "/tmp/wobbuffet-aside")],
+            "搬走一个用户目录是这次 setup 里代价最大的一个『我替你做主』")
+        // 路径不是装饰：那个目录里可能装着他自己导入的、磁盘上唯一一份音频。不给路径 = 不给回头路。
+        expect(
+            setupNotices(for: o)[0].message.contains("/tmp/wobbuffet-aside"),
+            "文案里必须有那条能把东西找回来的绝对路径")
+        expect(
+            setupNotices(for: o)[0].message.contains("一个文件都没删"),
+            "用户此刻最想知道的不是我们发现了什么，而是他的东西还在不在")
+    }
+
+    suite("告知真值表 ⑤：搬走 + 换包同时发生 → 两条都说，顺序与 CLI 一字不差（先搬走，后换包）") {
+        let o = outcome(
+            salvaged: [SalvagedPack(packID: "wobbuffet", movedTo: "/tmp/w")],
+            packSelection: .repairedDeadSelection(removed: "wobbuffet", selected: "minimal-chime"))
+        expect(
+            setupNotices(for: o) == [
+                .salvagedPack(packID: "wobbuffet", movedTo: "/tmp/w"),
+                .repairedDeadSelection(removed: "wobbuffet", selected: "minimal-chime"),
+            ],
+            "用户在面板上读到的顺序，必须与他 `claudio setup` 时读到的顺序相同")
+    }
+
+    suite("告知真值表 ⑥：多个包被搬走 → 一条都不许吞") {
+        let o = outcome(salvaged: [
+            SalvagedPack(packID: "a", movedTo: "/tmp/a"),
+            SalvagedPack(packID: "b", movedTo: "/tmp/b"),
+        ])
+        expect(
+            setupNotices(for: o) == [
+                .salvagedPack(packID: "a", movedTo: "/tmp/a"),
+                .salvagedPack(packID: "b", movedTo: "/tmp/b"),
+            ],
+            "两个目录被搬走就报两条——「只报第一条」是另一种形式的静默")
+    }
+
+    // ── 结构不变式 ────────────────────────────────────────────────────────────────────
+    suite("不变式：断开（.disconnected）结构上产不出任何告知 —— 这是 .reported 不带 action 标签的依据") {
+        for count in [0, 1, 4] {
+            expect(
+                setupNotices(for: .disconnected(count: count)).isEmpty,
+                "摘 hooks 不碰包、不碰选包。若这条哪天不成立了，.reported 就必须重新长回 action 标签")
+            expect(
+                onboardingActionState(afterSuccess: .disconnected(count: count)) == .idle,
+                "断开成功 → .idle")
+        }
+    }
+
+    suite("不变式：.reported 的 notices 恒非空（空告知就是 .idle，不是一个长着零行的提示区）") {
+        // `onboardingActionState(afterSuccess:)` 是 `.reported` 的唯一构造入口。穷举所有
+        // 「无话可说」的输入，断言没有一个能造出 `.reported`。
+        let silentOutcomes: [OnboardingActionOutcome] = [
+            outcome(),
+            outcome(packSelection: .selectedDefault(packID: "x")),
+            .disconnected(count: 4),
+        ]
+        for o in silentOutcomes {
+            if case .reported(let notices) = onboardingActionState(afterSuccess: o) {
+                expect(false, "构造出了一个空告知的 .reported：\(notices) —— 这个视觉态没有人渲染过")
+            }
+        }
+    }
+
+    // ── 文案的**语义**：哪个包落在哪个角色上 ──────────────────────────────────────────
+    //
+    // ## 这组断言补的是我自己挖的一个坑（T17f 自评审 · 变异实测）
+    //
+    // 上面那些真值表断的是**枚举载荷**（`setupNotices(for:) == [.repairedDeadSelection(removed:…,
+    // selected:…)]`），禁词表断的是**没有工程语**。两者都对，两者加起来仍然**漏掉了最要命的那一维**：
+    // 那句话到底把哪个包说成「没了」、把哪个包说成「换上了」。
+    //
+    // 实测：把 `SetupNotice.message` 里的 `\(removed)` 与 `\(selected)` **对调**——于是面板会对用户说
+    // 「你之前选的『minimal-chime』已经不在了，已替你换成『pikachu』」，而真相**恰好相反**——
+    // **935 条断言全绿，一条都没响。**
+    //
+    // 而这个变异比「不显示告知」**更坏**：一条沉默的告知只是没帮上忙；一条**说反了的**告知会主动
+    // 把用户推向错误的行动——他会去找一个其实好好的包，同时对一个真的没了的包放下心来。这个产品的
+    // 立身之本是不撒谎，而这里是它唯一一次开口说话的地方。
+    //
+    // 所以角色绑定必须被逐字钉死。**这组断言是刻意「脆」的**：任何人改写这句文案都会让它变红，
+    // 然后他必须回来重新声明「哪个包是没了的那个」——对一条正确性即全部意义的话来说，这不是负担，
+    // 这就是它该有的样子。
+    suite("告知文案的语义：说反了比不说更坏 —— 哪个包「没了」、哪个包「换上了」，逐字钉死") {
+        let notice = SetupNotice.repairedDeadSelection(removed: "pikachu", selected: "minimal-chime")
+        let message = notice.message
+
+        // ① 角色绑定：消失的是 pikachu，顶上的是 minimal-chime。对调 → 这两条当场红。
+        expect(
+            message.contains("「pikachu」已经不在了"),
+            "消失的那个包（removed = pikachu）必须被说成『没了』。实得：\(message)")
+        expect(
+            message.contains("换成了「minimal-chime」"),
+            "顶上来的那个包（selected = minimal-chime）必须被说成『换上的』。实得：\(message)")
+
+        // ② 顺序：先说没了的，再说换上的。这条对改写更宽容，但对**对调**同样致命 —— 双保险。
+        guard let removedAt = message.range(of: "pikachu")?.lowerBound,
+            let selectedAt = message.range(of: "minimal-chime")?.lowerBound
+        else {
+            expect(false, "两个包名必须都出现在文案里。实得：\(message)")
+            return
+        }
+        expect(
+            removedAt < selectedAt,
+            "叙事顺序必须是「你的没了 → 我换了这个」。反过来讲，用户读到的就是一句反话。实得：\(message)")
+
+        // ③ 可逆性必须说出口：这是一次未经请求的替换，用户有权知道他能换回去，
+        //    而那个入口（声音包画廊）此刻就在这条提示的上方。
+        expect(
+            message.contains("换成别的"),
+            "必须告诉用户这事是可逆的 —— 否则一次『我替你做主』就成了既成事实。实得：\(message)")
+    }
+
+    suite("告知文案的语义：搬走的包 —— 包名与去处不许错位") {
+        let notice = SetupNotice.salvagedPack(
+            packID: "wobbuffet", movedTo: "/Users/demo/.claudio/packs/wobbuffet-aside")
+        let message = notice.message
+
+        expect(
+            message.contains("「wobbuffet」"),
+            "必须点名是哪个包被搬走了。实得：\(message)")
+        expect(
+            message.contains("/Users/demo/.claudio/packs/wobbuffet-aside"),
+            "必须给出那条能把东西找回来的绝对路径 —— 不给路径 = 不给回头路。实得：\(message)")
+        // 包名不能被塞进「去处」那个位置（反之亦然）：路径在「搬到了」之后。
+        guard let packAt = message.range(of: "「wobbuffet」")?.lowerBound,
+            let pathAt = message.range(of: "/Users/demo")?.lowerBound
+        else {
+            expect(false, "包名与路径必须都在文案里。实得：\(message)")
+            return
+        }
+        expect(packAt < pathAt, "叙事顺序：先说哪个包，再说搬到哪儿。实得：\(message)")
+    }
+
+    // ── 文案里不许有 Markdown（T17f 自评审 · 实测）──────────────────────────────────────
+    //
+    // `ActionNoticeRow` 走 `Text(message)`，而 `message` 是一个 `String` **变量** → Swift 选中
+    // `Text.init<S: StringProtocol>(_:)` 这个**逐字**重载；会解析 Markdown 的 `LocalizedStringKey`
+    // 重载**只有字符串字面量够得着**。所以文案里的 `**粗体**` 会被**原样印在屏幕上**，VoiceOver
+    // 还会念出来。第一版的 salvage 文案真的带着 `**原样**` —— 在这个产品唯一一次开口说
+    // 「我动了你的东西」的地方，屏幕上会印着四个星号。
+    suite("告知文案里不许出现 Markdown 标记 —— Text(String) 是逐字渲染，星号会原样印给用户") {
+        let allNotices: [SetupNotice] = [
+            .salvagedPack(packID: "wobbuffet", movedTo: "/Users/demo/.claudio/packs/w-aside"),
+            .repairedDeadSelection(removed: "pikachu", selected: "minimal-chime"),
+        ]
+        // 只扫会被 Markdown **解析掉**、从而在逐字渲染下暴露成噪音的那几个标记。
+        // 中文全角标点（「」（））不在其列 —— 它们本来就是要原样显示的。
+        let markdownMarkers = ["**", "__", "`", "*_", "](", "~~"]
+        for notice in allNotices {
+            for marker in markdownMarkers {
+                expect(
+                    !notice.message.contains(marker),
+                    "告知文案里出现了 Markdown 标记「\(marker)」。`Text(String)` 不解析它 —— "
+                        + "用户会原样读到那几个字符，VoiceOver 还会念出来。实得：\(notice.message)")
+            }
+        }
+    }
+
+    // ── 「下面的声音包」是一句关于布局的断言 ──────────────────────────────────────────
+    //
+    // 文案里那句指路必须与 `operationalPanel` 的真实排布一致。这条只钉得住**文案这一半**
+    // （「它确实说了『下面的声音包』」）；另一半（「提示行真的排在画廊之前」）由
+    // `ViewWiringSuite` 的顺序断言守着 —— 两条合起来才是完整的那句话。
+    suite("换包告知必须把用户指向声音包画廊（而不是含糊其辞，也不是指向别处）") {
+        let message = SetupNotice.repairedDeadSelection(removed: "a", selected: "b").message
+        expect(
+            message.contains("下面的声音包"),
+            "必须明确指路 —— 一个刚被替换了选包的用户，最需要知道的就是去哪儿换回来。实得：\(message)")
+        expect(
+            !message.contains("断开"),
+            "绝不能把他指向「断开连接」—— 那是卸载键，不是换包入口")
+    }
+
+    // ── 文案纪律（T7 禁词表，与 onboardingCopy 同一把尺）────────────────────────────────
+    suite("告知文案必须过 T7 禁词表 —— 用户面前不出现「settings.json」「hook」这类工程语") {
+        let forbidden = ["settings.json", "hook", "claudio install", "claudio play"]
+        let allNotices: [SetupNotice] = [
+            .salvagedPack(packID: "wobbuffet", movedTo: "/Users/demo/.claudio/packs/w-aside"),
+            .repairedDeadSelection(removed: "pikachu", selected: "minimal-chime"),
+        ]
+        for notice in allNotices {
+            let lowered = notice.message.lowercased()
+            for word in forbidden {
+                expect(
+                    !lowered.contains(word.lowercased()),
+                    "告知文案里出现了工程语「\(word)」：\(notice.message)")
+            }
+            expect(!notice.message.isEmpty, "一条空文案的告知等于没有告知")
         }
     }
 }

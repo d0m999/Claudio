@@ -97,6 +97,29 @@ enum ClaudioColor {
             ? Color(hex: ClaudioColorHex.successDark) : Color(hex: ClaudioColorHex.successLight)
     }
 
+    /// UI-semantic `warning`（暖琥珀）——「Claudio 替你做了主，你有权知道」那一类**告知**，
+    /// 不是错误（T17f）。今天唯一的用处是 ``ActionNoticeRow`` 的 ⚠ 字形：一次 setup 把用户读不出来
+    /// 的包**搬走了**，或把他选中的包**换掉了**。
+    ///
+    /// 为什么不是既有的三个 token 之一——三条都是 DESIGN.md 自己写下的规矩，不是口味：
+    /// - **不是真红 ``error(_:)``**：DESIGN.md「错误态用色（关键约束）」把真红**限定**给三种 app
+    ///   自身错误（settings 不可写 / 解析失败 / helper 缺失）。这里 setup **成功了**，磁盘上是一个
+    ///   能响的安装。把它染成真红就是在对用户撒谎。
+    /// - **不是中性 `text-2`**：那正是 CLI 侧那行注释明令禁止的形状——「⚠ 而不是 ·：搬走一个用户
+    ///   目录，是这次 setup 里代价最大的一个『我替你做主』。绝不能让它混在几条 · 里悄悄过去——那个
+    ///   目录里完全可能装着他自己导入的、磁盘上唯一一份音频。」
+    /// - **不是黏土 ``clay(_:)``**：DESIGN.md「品牌强调唯一 = 黏土，这条不为任何单一状态开色值的
+    ///   口子」，且 `clay ≡ Notification` 的事件色（写成别名的那一处真绑定）——拿它当警告色会让提示行
+    ///   与「通知」事件同色。
+    ///
+    /// ⚠️ 与真红同一条纪律：**只做图标，不做正文**（亮色 `#B87000` 对面板 3.86:1，过 ≥3:1 的
+    /// WCAG 1.4.11，**不过** ≥4.5:1 的 WCAG 1.4.3）。提示**文案**一律 ``textSecondary(_:)``。
+    /// 这条契约由 `ContrastSuite` 的四条 ≥3:1 断言钉死。
+    static func warning(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(hex: ClaudioColorHex.warningDark) : Color(hex: ClaudioColorHex.warningLight)
+    }
+
     /// UI-semantic `error` (真红) — **只**给 App 自身真错误（DESIGN.md「错误态用色（关键约束）」），
     /// 绝不用于四事件层（`StopFailure` 永远琥珀，不在本 token 的射程内）。
     ///
