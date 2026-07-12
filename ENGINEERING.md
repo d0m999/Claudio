@@ -1030,6 +1030,114 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
   **收口**：GUI **1102 checks**（+145）、helper 1025 checks（只动了一句文档注释）、release build 零告警。
 
+  ### T17h — 第八轮对抗评审（`/codex review a3c2d08`，2026-07-12）
+
+  外部模型（Codex）评审 T17g 那个提交。**这一轮先有一条方法论教训，它比两条 findings 本身更值钱。**
+
+  **⚠️ 评审跑错了树。** `a3c2d08` 当时活在未合并的 `feat/t17-onboarding-cta` 上，而主 checkout 停在别的分支。
+  `codex exec` 拿到了正确的 diff，可它去**读仓库源码**时读到的是**提交前的旧代码** —— `PanelAnnouncement.swift`
+  / `ViewWiringSuite.swift` 在它眼里根本不存在。它「证实」的那条单点 post 声明，其实是在旧的 `announcePanel()`
+  上碰巧也只有一处。第一轮的 file:line 全不可信。
+  **修法：`git worktree add --detach <tmp> <sha>`，再 `codex exec -C <tmp>`。** 换成真实的提交后源码重跑，
+  同一个模型给出的东西完全不同：**2 条 [P1] + 1 条 [P2]**，而不是原来那 2 条 [P2]。已记入 gstack learnings。
+  （下次 `/codex review <sha>`：先确认那个 sha 在不在 HEAD 上。不在 → 必须开 worktree。）
+
+  - **【P1 · Codex，本地读码证实】`OnboardingState` 那一维，T17g 一格都没盯 —— 同一个 bug，长在修复者自己刚立的规矩上。**
+    `PanelView.headerAccessibilityLabel` 长这样：`guard state == .installed else { return "Claudio 面板" }`。
+    也就是说**五个 onboarding 态**（`.claudeCodeNotInstalled` / `.helperMissing` / `.settingsNotWritable` /
+    `.settingsParseFailure` / `.notInstalled`）被折叠成**同一个常量** —— 包名那半句只有 `.installed` 才拼得出来。
+    而 T17g 的面板句 = 那个 header，仅此而已。
+
+    于是：用户开着 onboarding 卡（「没找到 Claude Code」），在别处把 Claude Code 装好，回来点「重新检测」——
+    `state` 跃迁到 `.notInstalled`，屏幕上**大标题、正文、CTA 三样全换了**（「让 Claude Code 学会开口」/
+    「接管 Claude Code」），而 `.stateChanged` 说出来的那一句与刚说完的**逐字相同**，被 `PanelAnnouncer` 按后缀
+    吞掉：**VoiceOver 一个字都没有。**
+    这就是 T17g 自己那句「结果画得出来，却说不出口」—— 只不过这一次它长在 `OnboardingState` 上。T17g 的穷尽
+    `switch` 逐格钉死了 `OnboardingActionState`，**正交的那一维一格都没人扫**。这个仓库为「真相源自己漏了一维」
+    这个形状（`PreviewFixtures` 的文档、`/ship` 收口记录 ③）已经交过两次学费。
+
+    **⚠️ 去重器不是罪魁 —— 这条差点修错。** 评审的第一版建议是「缩小 dedup 的 scope」。那会把一句**毫无信息量**
+    的重复播报放回来（用户第二次听到「Claudio 面板。」），然后宣布修好了。根因是那个**常量 header**。
+    真相源现成就在 `onboardingCopy(for:)` —— 屏幕上那行大标题，念出来即可。
+    政策留在纯函数里（新增 `panelSentence(state:header:)`，`state` 以模型事实的身份进 `PanelAnnouncementFacts`，
+    由 view-model 供给，**视图不碰** —— 不制造第二个会漂移的 oracle）。写回视图的 `headerAccessibilityLabel` 是最省事的
+    一改，也是最错的：`ClaudioGUI` 是 `@main` executableTarget，harness 一行都 import 不到 = 六个态零测试守护。
+
+    **新不变式（逐对钉死）**：*给定同一个 `header`，任意两个不同的 `OnboardingState`，面板句必须不同。*
+    相等 = 那条跃迁在听觉通道上根本不存在。用同一个 header 喂全部六个态是刻意的**更强**条件 —— 它不许这条
+    不变式去指望 header 帮忙区分（而真实视图里，五个 onboarding 态拿到的正是同一个 header）。
+
+  - **【P1 · Codex → 本地降级为 P2，但照修】那道「面板关着就一个字都不说」的闸门，问的是上一趟的世界。**
+    T17g 的 `say(_:)` **同步**问完闸门与去重，却把 `NSAccessibility.post` 排进 `DispatchQueue.main.async` ——
+    两趟之间 `.transient` popover 完全可能已经被一次 app 切换关掉（**那正是这整条 bug 家族的主路径**），
+    而 post 照发不误：`element: NSApp` 是**整个 app**，不是那个已经消失的 popover。用户人在 Finder 里，
+    Claudio 朝着他正在用的窗口念了一句话。
+    那扇窗只有**一次 main queue drain** 那么宽（block 已排队，AppKit 通常在处理下一个输入事件前把它抽干），
+    所以 Codex 与本地都**没有实测到**它 —— 严格说它是 P2。**照修**，理由是这个仓库自己的教条：
+    「我推理出这个格子不可达」正是 T17c 的两个无人认领的格子、T17d 那条「重开 = 看过了」假定的同一句话。
+
+    修法：闸门、去重、post **整体挪进** async block（`MainActor.assumeIsolated`）。三者从此看到**同一份**世界。
+    白拿两件事：① 动作若在这一跳里刚好落地，那句本来就要被下一条 post 当场截断的「正在接管…」压根不出生；
+    ② 面板若已关闭，`announcement(…)` 返回 nil，`consume` **一次都不跑** —— 去重器不会被一条从未出口的话污染。
+    **顺序不变**：两条 `say(_:)` 各排一个 block，main queue 是 FIFO 的，仍按 handler 顺序 consume。
+    （**不许换成 `Task { @MainActor in … }`** —— 那是另一条队列，FIFO 当场没了，而后缀去重正建立在那个顺序上。
+    这条已写成断言。）
+
+  - **【P2 · Codex，证实】那条「全 GUI 只许有一处 `NSAccessibility.post`」的断言，只数了一个文件。**
+    断言的**措辞**是「全 GUI」，它守的**范围**是 `PanelView.swift`。于是在 `MenuBarController` /
+    `PackGalleryView` / `OnboardingView` 里加第二处 post —— 换完包顺手补一句，正是 `say(_:)` 的文档**亲口点名
+    最诱人**的那条路 —— 测试全绿，而那条 post 会截断用户还没听完的那句「你的包被换掉了」。
+    T17g 的提交信息把它写成「由 ViewWiringSuite 数着」：**后半句当时是虚的。**
+    新增 `guiSources()`：枚举 `gui/Sources/ClaudioGUI` 下每一个 `.swift`、剥掉注释、全 target 计数（`consume` 同理）。
+    目录读不到 / 一个文件都数不到必须**变红** —— 一个数不到任何文件的计数器永远等不到 1，它会一直绿下去
+    （与本文件头部那条「一次文本断言若不区分代码与谈论代码的文字，它断的就不是代码」是同一种病）。
+
+  - **【T17h′ · 自查 + 34-agent 对抗验证，两条独立视角同时逮到】「同一趟只 post 一句」是一句推理，不是一条结构 ——
+    而漏洞恰恰长在本轮补丁自己的注释里。**
+    修完上面两条之后，我在 `say(_:)` 里写下一句 justification：「`say(_:)` 的每一个调用点都排在 `refresh()` 之后」。
+    **那句话是假的。** `.onChange(of: actionState)` 是三个调用点里**唯一**不 `refresh()` 的那个 —— 而 `refresh()`
+    写的正是 `config` / `packCards` 两个 `@State`，也就是面板句里包名的唯一来源。
+
+    于是一次**无告知的成功接管**（`actionState: .running → .idle`、`state: .notInstalled → .installed`，同一趟
+    update pass）：若 SwiftUI 先跑这个 handler（**未文档化**的顺序），`onboardingViewModel.state` 已经是
+    `.installed`（引用类型，早更新了），而 `packCards` / `config` 还是 **app 启动时**那份 —— 那时 `config.json`
+    还不存在，`loadPanelConfig` 回落成 `selectedPack: ""` —— **包名是空的**。它说「Claudio 面板，当前声音包 。」，
+    紧接着 state 那个 handler 说「…当前声音包 lofi。」：**两句不同 → 后缀吞不掉 → 同一趟 post 了两条。**
+    而这正是 T17f/T17g 整台机器存在的**唯一理由**。
+
+    对抗验证的三名怀疑者把它判为「无害」：陈旧那句必然**先** post，后一条把它截断，幸存者总是对的。
+    **推理没错，但它是一句推理。** 它押的是「被截断的那条一个字都不会出声」—— 一个没人实测过的 VoiceOver
+    语义。用户完全可能听到一句卡半截的「Claudio 面板，当前声音包…」，**就在这个产品唯一一次庆祝时刻上**。
+    「我推理出这个格子不可达」是这个仓库交过三次学费的那句话，不能由我在第八轮再说一遍。
+
+    修法一行：`.onChange(of: actionState)` 在 `say()` 之前 `refresh()`，**只在 `.idle` 那一格** —— 面板句只在
+    那一格才被说出来（别的动作态说 `actionClause`，一个字的 header 都不用），而 `.running` 时 refresh 会去扫
+    一块**动作正在写**的磁盘：拿一个真 bug 换一个假 bug。代价是一次落地动作多扫一遍盘（**点击**路径，
+    不是每次开面板的热路径 —— `/ship` 那条性能评审管的是后者）。注释同步改成一句**真话**，并配一条顺序断言。
+
+    残留（记入 TODOS，P3）：`headerAccessibilityLabel` 里仍藏着**第二个**「这是哪一屏」的 oracle
+    （它自己又分了一次 `state == .installed`），而且 harness 一行都测不到它 —— 根治是把 `config` / `packCards`
+    搬进一个 view-model。今天靠一条文本绊线维持一致，不靠类型。
+
+  **变异测试（逐条实测，每一条都真的变红过）**：
+  ① `panelSentence` 退回常量 header（= 原 bug 复活）→ **15 条红**；
+  ② 闸门与去重挪回 async 外面（= 那个跨趟窗口）→ **ViewWiringSuite 1 条红**；
+  ③ 在 `OnboardingView.swift` 里加第二处 post（「顺手补一句」那条路）→ **新断言 1 条红，而旧断言全绿** ——
+  变异 ③ 同时证明了旧断言确实是瞎的；
+  ④ 删掉 T17h′ 那句 `refresh()`（= 两条 post 复活）→ **2 条红**。全部复原 → 全绿。
+
+  **对抗验证**：34 个 agent（4 组独立视角找 → 每条发现 3 名怀疑者证伪），10 条候选**全部被驳回**。
+  唯一有价值的产出是上面那条 T17h′ —— 而它差点被我自己的 refute prompt 埋掉：那句提示让怀疑者去驳
+  「**本次修复的**缺陷」，于是一条真实的**既存** bug 被三票判成「不是这次引入的」而出局。
+  **「不是这次引入的」不等于「不是 bug」。** 下次写 refute prompt 得把这两件事分开问。
+
+  **两条测试被按意图重写，而不是把期望值改成新字面量。** `OnboardingViewModelSuite` 里两条
+  `== "\(header)。"` 在 T17h 之后过期了（非 `.installed` 态的面板句现在还带着大标题）。把字面量一改，
+  测试就只是在复述实现；所以改成断言**意图**：不许再念结果 + 必须说清这是哪一屏。
+
+  **收口**：GUI **1598 checks**（+496，绝大部分来自那四个矩阵多扫的 `state` 维）、helper 1025 checks（未受牵连）、
+  release build `--product ClaudioGUI` **零告警**。
+
 ## Approved Mockups（视觉参照）
 
 | 屏 / 节 | Mockup Path | 方向 | 备注 |

@@ -791,9 +791,23 @@ func runPanelAnnouncementLifecycleSuites() async {
 
             viewModel.panelDidHide()
             let again = viewModel.panelDidBecomeVisible()
+            let repeated = viewModel.announcement(again, header: header)
+
+            // 这三条把「重开只剩面板句」拆成它真正的意思。上一版把它压成一个字面量
+            // （`== "\(header)。"`），而 T17h 之后那个字面量过期了：非 .installed 态的面板句**还得**
+            // 带上这一屏的大标题（否则五个 onboarding 态听起来一模一样）。字面量一改，测试就只是在
+            // 复述实现；所以改成断言**意图**——不许再念结果，且必须说清这是哪一屏。
             expect(
-                viewModel.announcement(again, header: header) == "\(header)。",
-                "同一条失败播两遍，正是 outcomeHasBeenSeen 不做关联值的第二条理由所禁止的")
+                repeated?.contains(message) == false,
+                "同一条失败播两遍，正是 outcomeHasBeenSeen 不做关联值的第二条理由所禁止的。"
+                    + "实得 \(String(describing: repeated))")
+            expect(
+                repeated == panelSentence(state: viewModel.state, header: header),
+                "重开只剩面板句 —— 一个字的失败原因都不许再念。实得 \(String(describing: repeated))")
+            expect(
+                repeated?.contains(viewModel.copy.title) == true,
+                "而那句面板句必须说清这是**哪一屏**（此刻是「\(viewModel.copy.title)」）—— 修复前它是一个"
+                    + "对五个 onboarding 态都一样的常量「Claudio 面板」，于是态与态之间的跃迁在听觉上不存在（T17h）")
         }
     }
 
@@ -842,11 +856,26 @@ func runPanelAnnouncementLifecycleSuites() async {
                 "**这一趟里 state 也变了**（→ .installed），两个 onChange 都会触发。面板句必须让出这条"
                     + "一次一句的通道 —— 否则谁活下来取决于 SwiftUI 未文档化的 handler 顺序，正是 T17f 押的注")
 
+            // 结果在下一次 panelDidBecomeVisible() 里会被清成 .idle，所以先把它记下来。
+            let noticeMessages = onboardingVisibleNotices(actionState: viewModel.actionState)
+                .map(\.message)
+            expect(!noticeMessages.isEmpty, "这个 fixture 的整个意义就是它带着告知")
+
             viewModel.panelDidHide()
             let moment = viewModel.panelDidBecomeVisible()
+            let repeated = viewModel.announcement(moment, header: header)
+
+            for message in noticeMessages {
+                expect(
+                    repeated?.contains(message) == false,
+                    "看过也说过了 → 重开一个字的告知都不许再念（\(message)）。实得 \(String(describing: repeated))")
+            }
             expect(
-                viewModel.announcement(moment, header: header) == "\(header)。",
-                "看过也说过了 → 重开只说面板句")
+                repeated == panelSentence(state: viewModel.state, header: header),
+                "重开只剩面板句。实得 \(String(describing: repeated))")
+            expect(
+                repeated?.contains(viewModel.copy.title) == true,
+                "而那句面板句必须说清这是**哪一屏**（T17h）—— 见上一个 suite 里同一条断言的理由")
         }
     }
 

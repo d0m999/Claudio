@@ -267,10 +267,16 @@ public final class OnboardingViewModel: ObservableObject {
     /// 刻意**不**把 `isPanelVisible` 提成 `public`：给视图第二个可见性 oracle（比如
     /// `showCount > hideCount`），就等于让「谁看见了」有两个会各自漂移的答案 —— 而 ``outcomeHasBeenSeen``
     /// 的诞生判据押的正是同一个事实，两者必须共用一个真相源。
+    /// T17h：``state`` 也从这里流进去，**不**由视图供给。视图侧的 `headerAccessibilityLabel` 把五个
+    /// onboarding 态折叠成同一个常量「Claudio 面板」，于是它们之间的任何一次跃迁在听觉上都不存在
+    /// （见 ``panelSentence(state:header:)``）。真相源是这个 `@Published` 属性，与 `actionState` 同一个
+    /// 出口 —— 两条事实必须来自同一份快照，否则「同一趟里只有一个开口」那条契约就建立在两份会漂移的
+    /// 世界观上。
     public func announcement(_ moment: PanelAnnouncementMoment, header: String) -> String? {
         panelAnnouncement(
             PanelAnnouncementFacts(
                 moment: moment,
+                state: state,
                 actionState: actionState,
                 panelIsVisible: isPanelVisible,
                 header: header))

@@ -734,3 +734,25 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Effort:** S
 **Priority:** P3
 **Depends on:** None
+
+### 面板句里的 `header` 是视图算的，harness 一行都测不到 —— 而它里面藏着第二个「这是哪一屏」的 oracle
+
+**What:** `PanelAnnouncementFacts` 的文档白纸黑字写着：`state` 由 view-model 供给，**视图不碰**，「也就不会有第二个会漂移的答案」。但 `header` 仍是视图算的，而 `PanelView.headerAccessibilityLabel` 自己**又分了一次 `state == .installed`**：
+
+```swift
+private var headerAccessibilityLabel: String {
+    guard onboardingViewModel.state == .installed else { return "Claudio 面板" }   // ← 第二个 oracle
+    let packName = packCards.first(where: \.isSelected)?.name ?? config.selectedPack  // ← 滞后的 @State
+    return "Claudio 面板，当前声音包 \(packName)"
+}
+```
+
+于是「这是哪一屏」有**两个**答案：模型侧的 `state`（`panelSentence` 用它），和视图侧这一支（over `packCards` / `config` 两个只在 `refresh()` 时才追上的 `@State`）。
+
+**Why:** 今天两者**一致** —— T17h′ 补上了 `.onChange(of: actionState)` 里那句 `refresh()`，于是三个会用到 header 的 `say()` 调用点全都排在 `refresh()` 之后（`ViewWiringSuite` 有顺序断言钉着）。但这条一致性靠的是**一条文本绊线**，不是类型。`ClaudioGUI` 是 `@main` executableTarget，harness **一行都 import 不到**，所以 `headerAccessibilityLabel` 这个函数本身**从来没有被任何一个 check 执行过** —— 包括「首次运行时 `config.selectedPack` 回落成 `""`，包名会念成一片空白」这一格。而 `PanelAnnouncementSuite` 给每个时刻喂的都是同一个常量 `H`，所以政策的全矩阵结构上**看不见** header 这一维的任何毛病。
+
+**Context:** 2026-07-12 T17h（`/codex review a3c2d08` 修复期间，本地 + 一次 34-agent 对抗验证双双指出）。修法：**把 `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model**。三件事一次到位：① header 变成一个**模型事实**，第二个 oracle 消失（`panelSentence` 独占那次分支）；② harness 第一次能测它（包括空包名那一格）；③ `say(_:)` 可以在 post 的那一趟**重算** header 而不是捕获它 —— 今天做不到，因为 `DispatchQueue.main.async` 的闭包是 `@Sendable` 的、捕不到 `self`（`PanelView` 带着 `@State`，不是 `Sendable`），而一个 `@MainActor` class 是 `Sendable` 的，捕得到。这与 `ViewWiringSuite` 头部那条「真正的结构修法是把视图层拆成可被 import 的 library target」是同一个方向，代价也在同一个量级。
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** None（与「把视图层拆成可被 import 的 library target」一起做最划算）

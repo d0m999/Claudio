@@ -270,6 +270,28 @@ public struct PanelView: View {
         // view-model 的**当前值**。整个防竞争契约（「同一趟里只有一个开口，或两个说同一句」）建立在
         // 「两边看到的是同一份快照」上。
         .onChange(of: onboardingViewModel.actionState) { _ in
+            // T17h′ —— **这一行让「同一趟只 post 一句」从一句推理变成一条结构。**
+            //
+            // 上一版这里是三个 `say(_:)` 调用点里**唯一**不先 `refresh()` 的那个。而 `refresh()` 写的正是
+            // `config` / `packCards` 两个 `@State`，也就是面板句里包名的来源。于是一次**无告知的成功接管**
+            // （`actionState: .running → .idle`、`state: .notInstalled → .installed`，同一个 MainActor turn、
+            // 同一趟 update pass）里，若 SwiftUI 先跑这个 handler（**未文档化**的顺序）：
+            //   · `onboardingViewModel.state` 已经是 `.installed`（引用类型，早更新了）
+            //   · 而 `packCards` / `config` 还是 **app 启动时**读的那份 —— 那时 `config.json` 还不存在，
+            //     `loadPanelConfig` 回落成 `selectedPack: ""`，一张卡都没有
+            //   → header = 「Claudio 面板，当前声音包 」**包名是空的**
+            // 紧接着 state 那个 handler（先 `refresh()`）说「…当前声音包 lofi。」——**两句不同，后缀规则吞不掉，
+            // 同一趟 post 了两条。** 而这恰恰是 T17f/T17g 整台机器存在的唯一理由。
+            //
+            // 「它没害处」是一句**推理**（陈旧那句必然先 post，后一条把它截断，幸存者总是对的）——它押的是
+            // 「被截断的那条一个字都不会出声」，一个**没人实测过**的 VoiceOver 语义。用户完全可能听到一句
+            // 卡半截的「Claudio 面板，当前声音包…」，就在这个产品唯一一次庆祝时刻上。
+            //
+            // 只在 `.idle` 那一格 refresh：**面板句只在那一格才被说出来**（别的动作态说的是 `actionClause`，
+            // 一个字的 header 都不用）。而 `.running` 时 refresh 会去扫一块**动作正在写**的磁盘 —— 那是
+            // 拿一个真 bug 换一个假 bug。代价：一次落地动作多扫一遍盘（点击路径，不是每次开面板的热路径 ——
+            // `/ship` 性能评审管的是后者）。
+            if case .idle = onboardingViewModel.actionState { refresh() }
             say(.actionStateChanged)
             applyFirstFocus()
         }
@@ -308,18 +330,74 @@ public struct PanelView: View {
     /// `.announcementRequested` 是「一次一句」的通道，那次 post 会**截断**用户可能还没听完的那条告知。
     /// 要加一个新的播报时刻，先给 ``PanelAnnouncementMoment`` 加一个 case —— 那会让
     /// ``panelAnnouncement(_:)`` 的 `switch` 编译红，逼你在纯函数里想清楚它跟别人抢不抢通道。
+    /// ## 为什么闸门与去重都在 `async` **里面**（T17h —— `/codex review a3c2d08` 逮到）
+    ///
+    /// 上一版在这里**同步**问完「该说吗 / 说哪句 / 刚才说过没」，却把 post 排进了下一趟 main queue：
+    ///
+    /// ```swift
+    /// let candidate = viewModel.announcement(moment, header: …)   // ← 闸门在这一趟问的
+    /// guard let sentence = announcer.consume(candidate, …) else { return }
+    /// DispatchQueue.main.async { NSAccessibility.post(…) }        // ← 但 post 发生在下一趟
+    /// ```
+    ///
+    /// 于是那道「面板关着就一个字都不说」的闸门，问的是**过去**的世界。两趟之间面板完全可能已经关了
+    /// （`.transient` popover 被一次 app 切换当场关掉 —— 那正是 T17d/T17f/T17g 整条 bug 家族的主路径），
+    /// 而 post 照发不误：`element: NSApp` 是**整个 app**，不是那个已经消失的 popover。用户人已经在
+    /// Finder 里，Claudio 朝着他正在用的窗口念了一句话。
+    ///
+    /// 那扇窗有多宽？只有**一次 main queue drain**：block 已经排在队里，AppKit 通常会在处理下一个输入
+    /// 事件之前把它抽干。所以这条路径**没有人实测到过**。但「我推理出这个格子不可达」正是这个仓库
+    /// 反复交学费的那句话（T17c 的两个无人认领的格子、T17d 那条「重开 = 看过了」的假定），而这里的
+    /// 修法只是把三行代码挪进一个已经存在的 block。
+    ///
+    /// 挪进来之后，闸门、去重、post 看到的是**同一份**世界，而不是隔着一趟的两份。顺带还白拿两件事：
+    /// - 若动作在这一跳里刚好落地，`.running` 那句「正在接管…」会被自动读成新的结果 —— 一句本来就要
+    ///   被下一条 post 当场截断的废话，现在压根不出生。
+    /// - 面板若已关闭，`announcement(…)` 返回 `nil`，`consume` **一次都不跑** —— 去重器不会被一条
+    ///   从未出口的话污染。
+    ///
+    /// **顺序不变**：两条 `say(_:)` 在同一趟 update pass 里各排一个 block，main queue 是 FIFO 的，
+    /// 所以它们仍按 handler 顺序 consume。「开面板那一句永远以结果结尾，第二条必然是它的后缀」这条
+    /// 结构不变式一个字都没动（`PanelAnnouncementSuite` 全矩阵仍然逐格钉着它）。
     private func say(_ moment: PanelAnnouncementMoment) {
-        let candidate = onboardingViewModel.announcement(moment, header: headerAccessibilityLabel)
-        guard let sentence = announcer.consume(candidate, openCount: focusCoordinator.showCount)
-        else { return }
+        // `header` 仍在**这一趟**取，而不是推迟到 post：包名那半句来自 `packCards` / `config` 两个
+        // `@State`，而 `@Sendable` 闭包捕不到 `self`（`PanelView` 带着 `@State` / `@StateObject`，不是
+        // `Sendable`），所以 post 那一趟根本读不到它们。
+        //
+        // 那它凭什么是新鲜的？——**因为每一个会用到 header 的调用点，都排在 `refresh()` 之后**：
+        //   · `.onChange(showCount)`  → `refresh()` → `say(moment)`
+        //   · `.onChange(state)`      → `refresh()` → `say(.stateChanged)`
+        //   · `.onChange(actionState)`→ `.idle` 时 `refresh()` → `say(.actionStateChanged)`
+        //     （`.idle` **正是**这个时刻唯一会说面板句的那一格；别的动作态说 `actionClause`，不碰 header。）
+        // 这不是一句注释里的祝愿：第三条是 T17h′ 补上的，`ViewWiringSuite` 有一条顺序断言钉着它。少了它，
+        // 同一趟里两个 handler 会把**两个不同的 header** 喂进同一个政策函数 —— 两句不同、后缀吞不掉、
+        // 同一趟 post 两条，而政策的 harness 结构上看不见（`header` 是视图唯一供给的那个事实）。
+        //
+        // 剩下的事实（`state` / `actionState` / 面板还开着吗）全部推迟到 post 的那一趟去问 —— 它们的
+        // 真相源是 view-model，一个引用类型，读得到最新值。
+        let header = headerAccessibilityLabel
+        let viewModel = onboardingViewModel
+        let announcer = self.announcer
+        let coordinator = focusCoordinator
         DispatchQueue.main.async {
-            NSAccessibility.post(
-                element: NSApp as Any,
-                notification: .announcementRequested,
-                userInfo: [
-                    .announcement: sentence,
-                    .priority: NSAccessibilityPriorityLevel.high.rawValue,
-                ])
+            // `DispatchQueue.main.async` 的闭包不是 `@MainActor` 的，但它**跑在主线程上**——
+            // `assumeIsolated` 把这个运行期事实交给编译器，好让下面两行 `@MainActor` 调用合法。
+            // （用 `Task { @MainActor in … }` 会换一条队列，两条 `say(_:)` 之间的 FIFO 顺序就没了 ——
+            // 而后缀去重正建立在那个顺序上。）
+            MainActor.assumeIsolated {
+                guard
+                    let sentence = announcer.consume(
+                        viewModel.announcement(moment, header: header),
+                        openCount: coordinator.showCount)
+                else { return }
+                NSAccessibility.post(
+                    element: NSApp as Any,
+                    notification: .announcementRequested,
+                    userInfo: [
+                        .announcement: sentence,
+                        .priority: NSAccessibilityPriorityLevel.high.rawValue,
+                    ])
+            }
         }
     }
 

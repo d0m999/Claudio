@@ -59,8 +59,72 @@ private func codeOnly(_ relativePath: String) -> String? {
         .joined(separator: "\n")
 }
 
+/// `ClaudioGUI` target 下**每一个** Swift 源文件，剥掉注释之后的样子 —— `(文件名, 代码)`。
+///
+/// ## 它修的那个洞（T17h —— `/codex review a3c2d08` 独立评审逮到）
+///
+/// 上一版那条断言的**措辞**是「全 GUI 只许有一处 `NSAccessibility.post`」，它守的**范围**却是
+/// `PanelView.swift` **一个文件**：
+///
+/// ```swift
+/// expect(panel.components(separatedBy: "NSAccessibility.post").count - 1 == 1, "全 GUI 只许有一处…")
+/// //     ^^^^^ 只有 PanelView.swift
+/// ```
+///
+/// 于是在 `MenuBarController.swift` / `PackGalleryView.swift` / `OnboardingView.swift` 里加第二处
+/// post —— 换完包顺手补一句「已切换到 X」，正是 ``PanelView/say(_:)`` 的文档亲口点名**最诱人**的那条路
+/// —— 测试全绿，而那条 post 会截断用户还没听完的那句「你的包被换掉了」。T17g 的提交信息把这条断言
+/// 写成「全 GUI 只剩一处 NSAccessibility.post，**由 ViewWiringSuite 数着**」：后半句当时是虚的。
+///
+/// 目录读不到 / 一个文件都数不到，必须**变红**，而不是安静地数出 0 —— 一个数不到任何文件的计数器
+/// 永远等不到 1，它会一直绿下去。这与本文件头部那条「一次文本断言若不区分代码与谈论代码的文字，
+/// 它断的就不是代码」是同一种病：一条永远不会红的断言，不是护栏。
+@MainActor
+private func guiSources() -> [(path: String, code: String)] {
+    let relativeRoot = "gui/Sources/ClaudioGUI"
+    let root = repoRoot().appendingPathComponent(relativeRoot)
+    guard let walker = FileManager.default.enumerator(atPath: root.path) else { return [] }
+    var found: [(path: String, code: String)] = []
+    for case let name as String in walker where name.hasSuffix(".swift") {
+        guard let code = codeOnly("\(relativeRoot)/\(name)") else { continue }
+        found.append((path: name, code: code))
+    }
+    return found.sorted { $0.path < $1.path }
+}
+
 @MainActor
 func runViewWiringSuites() {
+    suite("T17h 播报出口全 target 只此一个 —— 数的是整个 ClaudioGUI，不是一个文件") {
+        let sources = guiSources()
+        expect(
+            sources.count >= 5,
+            "在 gui/Sources/ClaudioGUI 下一个 Swift 文件都没数到（实得 \(sources.count)）。"
+                + "这条断言存在的全部意义就是去数那些文件 —— 数不到，它就永远等不到 1，安静地绿下去")
+        expect(
+            sources.contains { $0.path.hasSuffix("PanelView.swift") },
+            "PanelView.swift 必须在名册里 —— 唯一那处 post 就住在它的 say(_:) 里")
+
+        var posts: [String: Int] = [:]
+        var consumes: [String: Int] = [:]
+        for file in sources {
+            let postCount = file.code.components(separatedBy: "NSAccessibility.post").count - 1
+            let consumeCount = file.code.components(separatedBy: "announcer.consume(").count - 1
+            if postCount > 0 { posts[file.path] = postCount }
+            if consumeCount > 0 { consumes[file.path] = consumeCount }
+        }
+
+        expect(
+            posts == ["PanelView.swift": 1],
+            "全 GUI 只许有**一处** NSAccessibility.post（PanelView 的 say(_:) 里）。第二处 post = 第二条"
+                + "抢「一次一句」通道的话 —— 它会当场截断用户可能还没听完的那条告知。上一版这条断言只数"
+                + " PanelView 一个文件，措辞却写着「全 GUI」：在 MenuBarController / PackGalleryView 里"
+                + "加一处，它绿得毫无察觉。实得 \(posts)")
+        expect(
+            consumes == ["PanelView.swift": 1],
+            "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
+                + "实得 \(consumes)")
+    }
+
     suite("PanelView 仍然在 state 变化时重跑 refresh()（否则「接管成功」的那一秒面板是骗人的）") {
         guard let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "读不到 PanelView.swift —— 这个 suite 唯一的价值就是读它")
@@ -153,25 +217,89 @@ func runViewWiringSuites() {
             panel.contains("say(.stateChanged)") && panel.contains("say(.actionStateChanged)"),
             "另外两个播报时刻也必须接上 —— 政策在 panelAnnouncement(_:)，视图只负责报时刻")
         expect(
-            panel.contains("onboardingViewModel.announcement("),
+            panel.contains("viewModel.announcement(")
+                && panel.contains("let viewModel = onboardingViewModel"),
             "播报政策必须从 ClaudioGUICore 拿，不许在视图里再判一次 —— 它上一次住在这个文件里的时候，"
-                + "「谁抢到那条一次一句的通道」押在 SwiftUI 未文档化的 onChange 顺序上，零测试守护")
+                + "「谁抢到那条一次一句的通道」押在 SwiftUI 未文档化的 onChange 顺序上，零测试守护。"
+                + "（T17h：那次调用挪进了 DispatchQueue 的闭包，而闭包捕不到 self，所以 view-model "
+                + "先取成一个局部量。）")
         expect(
             !panel.contains("announcePanel") && !panel.contains("announceActionState"),
             "这两个函数体里的 switch 就是播报政策，已整体下沉到 panelAnnouncement(_:)。"
                 + "把任何一个放回来 = 把那场竞争放回来")
+
+        // ── T17h：闸门与去重必须在 `DispatchQueue.main.async` 的**里面** ──────────────────────
+        //
+        // 「全 GUI 只许有一处 post」那两条计数断言已经搬去上面那个 suite（它数的是整个 target，
+        // 而不是这一个文件 —— 那正是它上一版守不住的东西）。这里守的是**另一件事**：那一处 post
+        // 与它的闸门之间，不许再隔着一趟 main queue。
+        if let asyncAt = panel.range(of: "DispatchQueue.main.async")?.lowerBound,
+            let announceAt = panel.range(of: "viewModel.announcement(")?.lowerBound,
+            let consumeAt = panel.range(of: "announcer.consume(")?.lowerBound
+        {
+            expect(
+                asyncAt < announceAt && asyncAt < consumeAt,
+                "「该不该说」与「刚才说过没」必须在 async 闭包**里面**问。放回外面 = 那道「面板关着就一个字"
+                + "都不说」的闸门问的是**上一趟**的世界，而 post 发生在下一趟：两趟之间 .transient popover "
+                + "完全可能已经被一次 app 切换关掉（那正是这整条 bug 家族的主路径），而 post 的 element 是"
+                    + " NSApp —— 整个 app，不是那个已经消失的 popover。用户人在 Finder 里，Claudio 朝着他"
+                    + "正在用的窗口念了一句话。窗口只有一次 main queue drain 那么宽，谁都没实测到过 —— 而"
+                    + "「我推理出这个格子不可达」正是这个仓库反复交学费的那句话")
+        } else {
+            expect(
+                false,
+                "PanelView 里必须同时有 DispatchQueue.main.async、viewModel.announcement( 与 "
+                    + "announcer.consume( —— 三者缺一，上面那条顺序断言就无从判起")
+        }
         expect(
-            panel.components(separatedBy: "NSAccessibility.post").count - 1 == 1,
-            "全 GUI 只许有**一处** NSAccessibility.post（在 say(_:) 里）。第二处 post = 第二条抢「一次一句」"
-                + "通道的话，它会截断用户可能还没听完的那条告知（在 switchPack / toggleMute 里顺手补一句，"
-                + "正是最诱人的那条路）")
-        expect(
-            panel.components(separatedBy: "announcer.consume(").count - 1 == 1,
-            "去重器只许有一个调用点 —— 绕过它 = 把「同一趟里 post 两条」放回来")
+            panel.contains("MainActor.assumeIsolated"),
+            "async 闭包里那两行是 @MainActor 的（consume / announcement），得把「这个 block 跑在主线程上」"
+                + "这个运行期事实交给编译器。**不许换成 Task { @MainActor in … }**：那是另一条队列，两条 "
+                + "say(_:) 之间的 FIFO 顺序当场没了 —— 而「第二条必然是第一条的后缀」这条去重不变式，"
+                + "正建立在那个顺序上")
         expect(
             panel.contains(".onChange(of: onboardingViewModel.actionState) { _ in"),
             "必须读 view-model 的**当前值**，不许用 onChange 的 newValue —— 「同一趟里只有一个开口，"
                 + "或两个说同一句」这条不变式建立在两边看到同一份快照上")
+
+        // ── T17h′：actionState 那个 handler 必须在 say() **之前** refresh() ──────────────────────
+        //
+        // 它是三个 say() 调用点里唯一一个曾经**不** refresh 的。而 refresh() 写的正是 `config` /
+        // `packCards` 两个 @State —— 面板句里包名的唯一来源。少了它：一次**无告知的成功接管**，若 SwiftUI
+        // 先跑这个 handler（**未文档化**的顺序），它算 header 时 `onboardingViewModel.state` 已经是
+        // `.installed`（引用类型，早更新了），而 packCards / config 还是 **app 启动时**那份 —— 那时
+        // config.json 还不存在，`loadPanelConfig` 回落成 `selectedPack: ""` —— 于是包名是**空的**。
+        // 随后 state 那个 handler（先 refresh）说出带包名的那一句：**两句不同 → 后缀吞不掉 → 同一趟
+        // post 两条**，正是 T17f/T17g 整台机器存在的唯一理由。
+        //
+        // 「没害处」（陈旧那句必然先 post，被后一条截断，幸存者总是对的）是一句**推理**，它押的是
+        // 「被截断的那条一个字都不会出声」—— 一个没人实测过的 VoiceOver 语义。用户完全可能听到一句卡半截
+        // 的「Claudio 面板，当前声音包…」，就在这个产品唯一一次庆祝时刻上。
+        //
+        // 这条只能长在这里：`header` 是视图**唯一**供给的那个事实，而 `PanelAnnouncementSuite` 给每个
+        // 时刻喂的都是同一个 `H` —— 政策的 harness 结构上**看不见**两个 handler 各自算出不同 header 这件事。
+        if let actionHandlerAt = panel.range(
+            of: ".onChange(of: onboardingViewModel.actionState) { _ in")?.upperBound,
+            let sayActionAt = panel.range(of: "say(.actionStateChanged)")?.lowerBound,
+            actionHandlerAt < sayActionAt
+        {
+            let handlerBody = panel[actionHandlerAt..<sayActionAt]
+            expect(
+                handlerBody.contains("refresh()"),
+                "`.onChange(of: actionState)` 必须在 `say(.actionStateChanged)` **之前** refresh() —— 见上。"
+                    + "少了这一行，一次成功的接管会在同一趟里 post 两条内容不同的播报，而用户在这个产品"
+                    + "唯一一次庆祝时刻上，听到的是一句卡半截的「Claudio 面板，当前声音包…」")
+            expect(
+                handlerBody.contains("if case .idle = onboardingViewModel.actionState"),
+                "而且**只在 `.idle` 那一格** refresh：面板句只在那一格才被说出来（别的动作态说的是 "
+                    + "actionClause，一个字的 header 都不用）。无条件 refresh 会在 `.running` 时去扫一块"
+                    + "**动作正在写**的磁盘 —— 那是拿一个真 bug 换一个假 bug")
+        } else {
+            expect(
+                false,
+                "PanelView 里必须有 `.onChange(of: onboardingViewModel.actionState) { _ in`，且 "
+                    + "`say(.actionStateChanged)` 排在它**之后** —— 否则上面那条顺序断言无从判起")
+        }
 
         if let appearAt = panel.range(of: ".onAppear {")?.lowerBound,
             let showAt = panel.range(of: ".onChange(of: focusCoordinator.showCount)")?.lowerBound

@@ -19,6 +19,15 @@ public enum PanelAnnouncementMoment: Sendable, Equatable {
 /// 播报政策的全部输入。
 public struct PanelAnnouncementFacts: Sendable, Equatable {
     public let moment: PanelAnnouncementMoment
+
+    /// 探测态 —— 面板此刻「是哪一屏」。
+    ///
+    /// T17h：它必须在这里，而 `header` 顶替不了它。见 ``panelSentence(state:header:)`` 的文档：
+    /// 视图侧的 `headerAccessibilityLabel` 在**每一个**非 `.installed` 态上都返回同一个常量，于是
+    /// 五个 onboarding 态说出来是一模一样的一句话。真相源在 view-model 手里（``OnboardingViewModel/state``），
+    /// 所以它跟 `actionState` 一样以模型事实的身份流进来 —— 视图**不**供给它，也就不会有第二个会漂移的答案。
+    public let state: OnboardingState
+
     public let actionState: OnboardingActionState
 
     /// 面板此刻真的在屏幕上吗。真相源是 ``OnboardingViewModel`` 的 `isPanelVisible`（`private`），所以
@@ -32,15 +41,59 @@ public struct PanelAnnouncementFacts: Sendable, Equatable {
 
     public init(
         moment: PanelAnnouncementMoment,
+        state: OnboardingState,
         actionState: OnboardingActionState,
         panelIsVisible: Bool,
         header: String
     ) {
         self.moment = moment
+        self.state = state
         self.actionState = actionState
         self.panelIsVisible = panelIsVisible
         self.header = header
     }
+}
+
+/// 面板此刻「是哪一屏」那一句 —— 面板句本身，外加（非 `.installed` 时）**这个 onboarding 态自己**那一句。
+///
+/// ## 它修的那个洞（T17h —— `/codex review a3c2d08` 独立评审逮到，本地读码证实）
+///
+/// `header` 由视图侧的 `PanelView.headerAccessibilityLabel` 供给，而它长这样：
+///
+/// ```swift
+/// guard onboardingViewModel.state == .installed else { return "Claudio 面板" }
+/// return "Claudio 面板，当前声音包 \(packName)"
+/// ```
+///
+/// 也就是说：**五个 onboarding 态**（`.claudeCodeNotInstalled` / `.helperMissing` /
+/// `.settingsNotWritable` / `.settingsParseFailure` / `.notInstalled`）被折叠成**同一个常量**。
+/// 包名那半句只在 `.installed` 时才拼得出来，别的态一个字节的状态信息都不带。
+///
+/// 于是：用户在 onboarding 卡上点「重新检测」（他刚在别处把 Claude Code 装好了），`state` 从一个
+/// onboarding 态跃迁到另一个 —— 屏幕上大标题、正文、CTA 三样**全变了** —— 而 `.stateChanged` 那一句
+/// 与刚说完的那一句**逐字相同**，被 ``PanelAnnouncer`` 当成后缀吞掉：**VoiceOver 一个字都没有。**
+///
+/// 这就是 T17g 自己那句「结果画得出来，却说不出口」，只不过这一次它长在 ``OnboardingState`` 上，
+/// 而不是 ``OnboardingActionState`` 上。T17g 的穷尽 `switch` 逐格钉死了后者，**前者一格都没人盯** ——
+/// 修复者在自己刚立的规矩上，漏掉了正交的那一维。这个仓库为「真相源自己漏了一维」这个形状
+/// （`PreviewFixtures` 的文档、`/ship` 收口记录 ③）已经交过两次学费了。
+///
+/// ⚠️ **去重器不是罪魁，别去改它。** 被它吞掉的那句话本来就一个字节的状态信息都不带 —— 放它过去，
+/// 用户只会第二次听到一句「Claudio 面板。」。根因是那个常量 header，而不是「dedup 的 scope 太宽」。
+/// （第一版评审意见正是建议去缩 dedup 的 scope；那会把一句毫无信息量的重复播报放回来，然后宣布修好了。）
+///
+/// 真相源现成就在 ``onboardingCopy(for:)`` —— 屏幕上那行大标题，念出来即可。政策留在这个纯函数里，
+/// 而不是回到视图的 `headerAccessibilityLabel` 里：`ClaudioGUI` 是个 `@main` executableTarget，
+/// harness **一行都 import 不到**，把 state → 那句话的映射写在那儿 = 六个态零测试守护。
+///
+/// ## 不变式（``PanelAnnouncementSuite`` 逐对钉死）
+///
+/// **给定同一个 `header`，任意两个不同的 ``OnboardingState``，这个函数说出来的话必须不同。**
+/// 相等 = 那条跃迁在听觉通道上根本不存在。用同一个 header 喂全部六个态是刻意的**更强**条件：
+/// 它不许这条不变式去指望 header 帮忙区分（而在真实视图里，五个 onboarding 态拿到的正是同一个 header）。
+public func panelSentence(state: OnboardingState, header: String) -> String? {
+    guard state != .installed else { return joinSpokenClauses([header]) }
+    return joinSpokenClauses([header, onboardingCopy(for: state).title])
 }
 
 /// 此刻 VoiceOver 该听到的**那一句**；`nil` = 一个字都不说。
@@ -69,10 +122,15 @@ public func panelAnnouncement(_ facts: PanelAnnouncementFacts) -> String? {
     // `.panelOpened(outcomeIsFirstAppearance: true)` 说出来。闸门只是把它**推迟**到有人在听的时候。
     guard facts.panelIsVisible else { return nil }
 
+    // 「面板句」不再等于 `header` —— 非 `.installed` 时它还得带上这个 onboarding 态自己那一句，
+    // 否则五个态说出来一模一样（T17h，见 ``panelSentence(state:header:)``）。下面三个时刻里
+    // 「说面板句」的每一处都必须走它，一处漏掉 = 那一格的跃迁重新变哑。
+    let panel = panelSentence(state: facts.state, header: facts.header)
+
     switch facts.moment {
     case .panelOpened(let isFirstAppearance):
         return joinSpokenClauses(
-            [facts.header, openingOutcomeClause(facts.actionState, isFirstAppearance)]
+            [panel, openingOutcomeClause(facts.actionState, isFirstAppearance)]
                 .compactMap { $0 })
 
     case .actionStateChanged:
@@ -84,12 +142,12 @@ public func panelAnnouncement(_ facts: PanelAnnouncementFacts) -> String? {
         // 而「我推理出这个格子不可达」正是这个仓库交过学费的那句话）。
         //
         // 它与 `.stateChanged` 说的是**同一句**，所以同一趟里两个 handler 都跑也只会 post 一次。
-        return joinSpokenClauses([actionClause(facts.actionState) ?? facts.header])
+        return joinSpokenClauses([actionClause(facts.actionState) ?? panel].compactMap { $0 })
 
     case .stateChanged:
         // 有结果要说的时候，面板句**主动让出**这条一次一句的通道 —— 见本函数头部。
         guard case .idle = facts.actionState else { return nil }
-        return joinSpokenClauses([facts.header])
+        return panel
     }
 }
 
