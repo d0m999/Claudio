@@ -150,6 +150,38 @@ private func hookCommands(in settingsFile: URL) -> [String: [String]] {
     return result
 }
 
+/// `config.json` 里**真正被选中**的那个包（解析，不是子串匹配）。
+///
+/// `readString(configFile)?.contains("minimal-chime")` 说不出「选包那一步跑完了」——
+/// `{"note":"minimal-chime"}`、半截写坏的 JSON、甚至一句提到包名的注释，都能让它为真。而用它的
+/// 那几条断言，失败消息写的是「config.json 里得躺着**选中的包**」。措辞比覆盖范围大
+/// （`/codex review 2f107b5` 的 P2）。这里断的是解析出来的 `selected_pack` 本人。
+@MainActor
+private func selectedPack(in configFile: URL) -> String? {
+    guard let data = try? Data(contentsOf: configFile),
+        let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    else { return nil }
+    return root["selected_pack"] as? String
+}
+
+/// 一个文件此刻的**字节**；文件不存在 = `nil`。
+///
+/// 「动作前后两次快照相等」逐字表达「一个字节都没被碰过，也没有被凭空创建出来」——
+/// 而这正是几条持锁断言的失败消息一直声称、却从来没有真正检查过的那句话
+/// （`/codex review 2f107b5` 的 P1）：
+///
+/// 它们检查的是 `hookCommands(in:).allSatisfy { !$0.contains(claudioBinaryPath) }`。
+/// `hookCommands` 在**文件不存在 / JSON 坏掉 / 没有 `hooks` 键**时一律返回 `[:]`，而空数组的
+/// `allSatisfy` **恒真** —— 一个被创建成 `{}`、被写成坏 JSON、或被写进无关内容的 settings.json，
+/// 照样让它变绿，然后它在失败消息里说「一个字节都没被碰过」。
+///
+/// （它并非**恒真式**：`:402` 那条 happy-path 断言正向证明了 `hookCommands` 在同一套 fixture 下
+/// 确实能返回非空、且含 `claudioBinaryPath`。它是**措辞过宽**，不是永远不会红。）
+@MainActor
+private func fileBytes(_ url: URL) -> Data? {
+    try? Data(contentsOf: url)
+}
+
 // MARK: - Suites
 
 @MainActor
@@ -392,8 +424,12 @@ func runOnboardingActionsSuites() {
                 "内置包必须真的落进用户包根 —— 包目录是从 helper 路径反推的，递错 URL 时这里会是空的")
 
             // ③ config 真的选了包。
-            let config = readString(targets.configFile) ?? ""
-            expect(config.contains("minimal-chime"), "config.json 必须记下选中的包，得到：\(config)")
+            expect(
+                selectedPack(in: targets.configFile) == "minimal-chime",
+                "config.json 必须记下**选中的包** —— 断的是解析出来的 `selected_pack`，不是 "
+                    + "`contains(\"minimal-chime\")`（后者在 `{\"note\":\"minimal-chime\"}` 上也为真）。"
+                    + "得到：\(String(describing: selectedPack(in: targets.configFile)))，"
+                    + "原文：\(readString(targets.configFile) ?? "<无文件>")")
 
             // ④ hooks 真的指向 destination（而不是 bundle 里那份、或别的什么）。
             //
@@ -636,6 +672,8 @@ func runOnboardingActionsSuites() {
             expect(holder.tryLock(), "test setup: holder 必须先拿到**被注入的**那把 config.lock")
             defer { holder.unlock() }
 
+            let settingsBefore = fileBytes(targets.onboarding.settingsFile)
+
             let result = performOnboardingDiskAction(
                 .takeOver,
                 environment: targets.environment(bundledHelperBinary: fixture.helperBinary))
@@ -665,17 +703,29 @@ func runOnboardingActionsSuites() {
             // Claude Code 里留下新的痕迹」），而在这条断言之前，**没有任何东西背书它**。
             // 这就是「计数不绑调用点」（`/codex review 840ea37`）在**副作用层**的同一个形状：
             // 错误码不绑执行顺序。
+            // ⚠️ 断的是**字节**，不是「里面没有 claudio 的 hook」（`/codex review 2f107b5` 的 P1）。
+            //
+            // 上一版写的是 `hookCommands(…).allSatisfy { !$0.contains(claudioBinaryPath) }`，而
+            // `hookCommands` 在**文件不存在 / JSON 坏掉 / 没有 `hooks` 键**时一律返回 `[:]` ——
+            // 空数组的 `allSatisfy` **恒真**。于是一个被创建成 `{}`、被写坏、或被写进无关内容的
+            // settings.json 照样让它变绿，而它的失败消息写着「一个字节都没被碰过」。
+            // 措辞比覆盖范围大，第十次。现在这条断言**就是**它的那句话。
+            let settingsAfter = fileBytes(targets.onboarding.settingsFile)
             let hooks = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }
             expect(
-                hooks.allSatisfy { !$0.contains(targets.onboarding.claudioBinaryPath.path) },
-                "config.json 的写被挡住了，那 settings.json 就必须**一个字节都没被碰过** —— 得到："
-                    + "\(hooks)。有 hook 躺在里面 = 写 hooks 跑到了写 config **前面**（错误码一模一样，"
-                    + "上面那条照样绿）：一次失败的接管在用户的 Claude Code 里留下了痕迹，而 config.json "
-                    + "里一个包都没选中 —— 每个事件都会去 exec 一个选不出包的 helper")
+                settingsAfter == settingsBefore,
+                "config.json 的写被挡住了，那 settings.json 就必须**一个字节都没被碰过**（也不许被"
+                    + "凭空创建出来）—— 前 \(settingsBefore?.count.description ?? "<无文件>") 字节，"
+                    + "后 \(settingsAfter?.count.description ?? "<无文件>") 字节，此刻里面的 hook："
+                    + "\(hooks)。文件被动过 = 写 hooks 跑到了写 config **前面**（错误码一模一样，上面"
+                    + "那条照样绿）：一次失败的接管在用户的 Claude Code 里留下了痕迹，而 config.json "
+                    + "里一个包都没选中 —— 每个事件都会去 exec 一个选不出包的 helper。"
+                    + "`Setup.swift:482` 亲口立过这条不变式，在这条断言之前没有任何东西背书它")
             expect(
-                readString(targets.configFile)?.contains("minimal-chime") != true,
+                selectedPack(in: targets.configFile) == nil,
                 "config.json 的写正是被挡住的那一步，它不该留下任何选包结果。得到："
-                    + "\(String(describing: readString(targets.configFile)))")
+                    + "\(String(describing: selectedPack(in: targets.configFile)))，"
+                    + "原文：\(readString(targets.configFile) ?? "<无文件>")")
         }
     }
 
@@ -687,6 +737,8 @@ func runOnboardingActionsSuites() {
             let holder = FileLock(path: targets.settingsLockFile.path)
             expect(holder.tryLock(), "test setup: holder 必须先拿到**被注入的**那把 settings.lock")
             defer { holder.unlock() }
+
+            let settingsBefore = fileBytes(targets.onboarding.settingsFile)
 
             let result = performOnboardingDiskAction(
                 .takeOver,
@@ -712,17 +764,26 @@ func runOnboardingActionsSuites() {
             // `selectPack` 之前 —— 持 settings.lock 依然停在 `.installFailure(.lockBusy)`，上面那条
             // **原样绿** —— 而 config.json 从头到尾没被写过：接管在**第一步**就死了，一个包都没选。
             // 措辞（「放行」）比覆盖范围（「错误码对」）大，第九次。这条把前半句也钉上。
+            // 断的是**解析出来的 `selected_pack`**，不是 `contains("minimal-chime")`
+            // （`/codex review 2f107b5` 的 P2）：后者在 `{"note":"minimal-chime"}`、在半截写坏的
+            // JSON 上都为真 —— 它说不出「选包那一步真的跑完了」，而那正是这条失败消息声称的东西。
             expect(
-                readString(targets.configFile)?.contains("minimal-chime") == true,
+                selectedPack(in: targets.configFile) == "minimal-chime",
                 "settings.lock 与 config.json 的写毫无关系，config 那步必须**真的跑完** —— "
-                    + "config.json 里得躺着选中的包。得到：\(String(describing: readString(targets.configFile)))"
-                    + " —— 它是空的 / 没有包 = 写 hooks 跑到了写 config 前面（错误码一模一样，上面那条"
+                    + "config.json 里得躺着**解析得出来的**那个包。得到："
+                    + "\(String(describing: selectedPack(in: targets.configFile)))，"
+                    + "原文：\(readString(targets.configFile) ?? "<无文件>")"
+                    + " —— nil / 不是这个包 = 写 hooks 跑到了写 config 前面（错误码一模一样，上面那条"
                     + "照样绿），接管在第一步就被挡死了")
 
+            // 同上一条 suite：断**字节**。「里面没有 claudio 的 hook」在文件被创建成 `{}` 时恒真。
+            let settingsAfter = fileBytes(targets.onboarding.settingsFile)
             let hooks = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }
             expect(
-                hooks.allSatisfy { !$0.contains(targets.onboarding.claudioBinaryPath.path) },
-                "settings.json 的写正是被挡住的那一步 —— 它不该留下任何 hook。得到：\(hooks)")
+                settingsAfter == settingsBefore,
+                "settings.json 的写正是被挡住的那一步 —— 它必须**一个字节都没被碰过**（也不许被凭空"
+                    + "创建出来）。前 \(settingsBefore?.count.description ?? "<无文件>") 字节，"
+                    + "后 \(settingsAfter?.count.description ?? "<无文件>") 字节，此刻的 hook：\(hooks)")
         }
     }
 

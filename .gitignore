@@ -15,3 +15,6 @@ dist/
 
 # Personal/IP-protected sound packs (e.g. game character cries) — never commit or distribute
 local-packs/
+
+# Workflow 用的临时 worktree（Agent isolation: worktree）
+.claude/worktrees/
