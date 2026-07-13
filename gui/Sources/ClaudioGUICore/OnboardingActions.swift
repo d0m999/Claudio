@@ -295,7 +295,11 @@ public func onboardingShowsFailureDetailToggle(
 ///
 /// 第一格是**可达的、且这次提交自己新造出来的**：quarantine 检测让一台「二进制被盖章」的机器
 /// 报 `.helperMissing`（hooks 本来就在），用户点「修复」→ `performFirstRunSetup` 复制完二进制、
-/// 解除隔离通过 → 在选默认包 / 写 hooks 那一步撞上 `play.lock`（TODOS 里那条 P1）→ 失败返回。
+/// 解除隔离通过 → 在选默认包（`config.lock`）或写 hooks（`settings.lock`）那一步撞上锁 → 失败返回。
+/// （⚠️ 阶段 A 锁分离之前这里写的是「撞上 `play.lock`（TODOS 里那条 P1）」—— **两句都已经死了**：
+/// 锁分离之后 `play.lock` 只归 `claudio play` 的防抖用，而 TODOS 里那条 P1 是 `play.lock` 被
+/// config / settings 写者共用那一条，已经划掉了。可达性本身一个字都没变，只是换了两把锁 ——
+/// 见 `Setup.swift:509/519`（`configLockFile`）与 `:554`（`settingsLockFile`）。）
 /// `refresh()` 一探测：二进制在位、没盖章、四条 hook 都在 → **`.installed`**。面板于是切到运行态、
 /// 亮起绿点说「已经接好了」，而 `config.json` 压根没写、一个包都没选中 —— 用户永远听不到一声响，
 /// 失败原因停在 `actionState` 里，没有任何一个像素属于它。
@@ -383,7 +387,7 @@ public enum OnboardingActionError: Error, Sendable, Equatable {
             "没找到 Claudio 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 Claudio 再试一次。"
         // 刻意**不**承诺「没有留下半成品」（T17c 对抗评审 —— 上一版这么写，而那是假话）。
         // `performFirstRunSetup` 的顺序是：复制二进制 → 复制包 → 解隔离+回验 → 写 config → 写 hooks。
-        // 最常见的失败点（`.installFailure`，包括 `play.lock` 争用）发生时，二进制、内置包、config.json
+        // 最常见的失败点（`.installFailure`，包括 `settings.lock` 争用）发生时，二进制、内置包、config.json
         // 都**已经在磁盘上了**。一个以「不撒谎」立身的产品，不能在它唯一一次报告失败的时候撒谎。
         // 能诚实承诺的是另一件事，而且它更有用：setup 是幂等的，再点一次会接着上次继续。
         case .setupFailed:
@@ -482,21 +486,30 @@ public struct OnboardingActionEnvironment: Sendable {
     public let settingsFile: URL
     public let userPacksDirectory: URL
     public let configFile: URL
-    public let lockFile: URL
+    /// Guards `config.json` writes (``selectPack`` inside ``performFirstRunSetup``, via
+    /// ``SetupEnvironment/configLockFile``). Deliberately **separate** from
+    /// ``settingsLockFile`` — see ``SetupEnvironment/configLockFile``'s doc comment for why.
+    public let configLockFile: URL
+    /// Guards `settings.json` writes (``installClaudioHooks`` inside
+    /// ``performFirstRunSetup``, and ``uninstallClaudioHooks`` on the disconnect path).
+    /// Deliberately **separate** from ``configLockFile``.
+    public let settingsLockFile: URL
 
     public init(
         onboarding: OnboardingEnvironment,
         bundledHelperBinary: URL?,
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         configFile: URL = ClaudioPaths.configFile,
-        lockFile: URL = ClaudioPaths.lockFile
+        configLockFile: URL = ClaudioPaths.configLockFile,
+        settingsLockFile: URL = ClaudioPaths.settingsLockFile
     ) {
         self.bundledHelperBinary = bundledHelperBinary
         self.claudioBinaryDestination = onboarding.claudioBinaryPath
         self.settingsFile = onboarding.settingsFile
         self.userPacksDirectory = userPacksDirectory
         self.configFile = configFile
-        self.lockFile = lockFile
+        self.configLockFile = configLockFile
+        self.settingsLockFile = settingsLockFile
     }
 }
 
@@ -583,7 +596,8 @@ public func performOnboardingDiskAction(
                 userPacksDirectory: environment.userPacksDirectory,
                 configFile: environment.configFile,
                 settingsFile: environment.settingsFile,
-                lockFile: environment.lockFile)
+                configLockFile: environment.configLockFile,
+                settingsLockFile: environment.settingsLockFile)
             switch performFirstRunSetup(environment: setupEnvironment) {
             case .success(let outcome): return .success(.tookOver(outcome))
             case .failure(let error): return .failure(.setupFailed(error))
@@ -594,7 +608,7 @@ public func performOnboardingDiskAction(
         switch uninstallClaudioHooks(
             settingsFile: environment.settingsFile,
             claudioBinaryPath: environment.claudioBinaryDestination.path,
-            lockFile: environment.lockFile)
+            lockFile: environment.settingsLockFile)
         {
         case .success(.uninstalled(let count)):
             return .success(.disconnected(count: count))

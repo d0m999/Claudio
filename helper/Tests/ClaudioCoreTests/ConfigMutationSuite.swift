@@ -68,7 +68,7 @@ func runConfigMutationSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
                 #"{ "selected_pack": "pika", "night_dim": true, "ui_theme": "dark" }"#,
                 to: configFile)
@@ -104,7 +104,7 @@ func runConfigMutationSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // 旧行为（实证复现）：宽松解码把 `"0.35"` 解不出来 → 取默认值 0.8 → 把 0.8 写回磁盘 →
             // 报 SUCCESS。用户手调的音量就这样被一次静音点击吃掉了。类型不对 = 文件损坏 = 中止。
             let original = #"{ "selected_pack": "pika", "master_volume": "0.35" }"#
@@ -132,7 +132,7 @@ func runConfigMutationSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // 旧行为（实证复现）：`[String: Bool]` 解码失败 → 静默取 `[:]` → `notification` 和
             // `subagent_stop` 连同那个坏值一起被抹掉 → 报 SUCCESS。
             let original = #"""
@@ -160,7 +160,7 @@ func runConfigMutationSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // 一份「未来版本 / 手写」的 config：每个事件带自己的音量。旧行为会把整张 events 表
             // 抹平成 `{"stop": false}` 并报 SUCCESS。
             let original = #"""
@@ -185,7 +185,7 @@ func runConfigMutationSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
                 #"""
                 { "selected_pack": "pika", "master_volume": 0.35, "events": { "stop": true, "notification": false } }
@@ -219,7 +219,7 @@ func runConfigMutationSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // JSONSerialization 把 `true` 和 `1` 都还原成 NSNumber，而 `NSNumber(1) as? Bool` 会
             // 成功——一个天真的 `as? Bool` 会把 `{"notification": 1}` 悄悄当成 `true`。这正是
             // `isJSONBoolean` 用 CFBoolean 判定要挡住的静默强转。
@@ -241,7 +241,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: master_volume 是布尔 true → fail closed（布尔不是数字，是坏文件）") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let original = #"{ "selected_pack": "pika", "master_volume": true }"#
             writeFixture(original, to: configFile)
 
@@ -262,7 +262,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: 顶层不是 JSON 对象（是数组）→ fail closed") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let original = "[1, 2, 3]"
             writeFixture(original, to: configFile)
 
@@ -282,7 +282,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: events 存在但不是对象（是数组）→ fail closed") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let original = #"{ "selected_pack": "pika", "events": ["stop"] }"#
             writeFixture(original, to: configFile)
 
@@ -304,7 +304,7 @@ func runConfigMutationSuites() {
             // 这条护住新的「文件不存在 → 新建最小 config」分支：它不再走 `JSONEncoder`，所以键集合
             // 必须由测试来钉死，而不是靠 Codable 顺带保证。
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
 
             let result = setEventEnabled(
                 .stop, enabled: false, configFile: configFile, lockFile: lockFile)
@@ -338,7 +338,7 @@ func runConfigMutationSuites() {
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             expect(result == .success(.selected(packID: "psyduck")), "切包应当成功，got \(result)")
 
             let json = readRawConfigJSON(configFile)
@@ -366,7 +366,7 @@ func runConfigMutationSuites() {
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configReadFailure) = result else {
                 expect(false, "类型不对的 master_volume 必须让切包 fail closed，got \(result)")
                 return
@@ -389,7 +389,7 @@ func runConfigMutationSuites() {
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configReadFailure) = result else {
                 expect(false, "对象形状的 events 值必须让切包 fail closed，got \(result)")
                 return
@@ -412,7 +412,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: 全新安装写出的 master_volume 逐字是 0.8，不是 0.80000000000000004") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
 
             let result = setEventEnabled(
                 .stop, enabled: false, configFile: configFile, lockFile: lockFile)
@@ -433,7 +433,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: 一份原本干净的 master_volume: 0.35，读-改-写之后磁盘上仍逐字是 0.35") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // 静音钮**不拥有** master_volume：它连碰都没碰这个键，而旧实现照样把它改写了。
             writeFixture(
                 #"{ "selected_pack": "pika", "master_volume": 0.35 }"#, to: configFile)
@@ -456,7 +456,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: 写回后 events 里的 true 仍是 true，绝不被数字规范化变成 1") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
                 #"{ "selected_pack": "pika", "events": { "notification": true } }"#, to: configFile)
 
@@ -487,7 +487,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: 未知键里**嵌套**的数字（对象里、数组里）同样不被写脏") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // 数字规范化必须**递归**：只处理顶层的 master_volume 等于承认「未知键里的数字会被写脏」,
             // 那正是这次要修的 bug 本身。这里的 `night_dim.level` / `curve[0]` 是 v1 模型完全不认识的
             // 键里的数字，它们必须和 master_volume 一样逐字幸存。
@@ -513,7 +513,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: 超出 Double 精度的大整数逐字保留（整数绝不走 doubleValue）") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // 9007199254740993 == 2^53 + 1：Double 表示不了它（会变成 ...992）。整数本来就没被
             // `%.17g` 弄脏过，所以规范化对它们的正解是**一个字节都不动**——任何「统一走 doubleValue」
             // 的写法都会在这里当场丢精度。
@@ -537,7 +537,7 @@ func runConfigMutationSuites() {
             // 收敛性：真正的「保真」意味着写操作是**幂等**的——同样的输入写出同样的字节。旧行为里
             // 每一轮读-改-写都会让 0.8 再脏一点/维持脏，这条直接把「文件不再漂移」钉死。
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
                 #"{ "selected_pack": "pika", "master_volume": 0.8, "events": { "stop": true } }"#,
                 to: configFile)
@@ -567,7 +567,7 @@ func runConfigMutationSuites() {
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             expect(result == .success(.selected(packID: "psyduck")), "got \(result)")
 
             let text = readRawText(configFile)
@@ -589,7 +589,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: events.stop 是数字 1 → 失败原因是**可执行指令**（哪个键 / 必须是什么 / 当前是什么 / 怎么修）") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(#"{ "selected_pack": "pika", "events": { "stop": 1 } }"#, to: configFile)
 
             let result = setEventEnabled(
@@ -614,7 +614,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: master_volume 是字符串 → 原因带上当前值与两条出路") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(#"{ "selected_pack": "pika", "master_volume": "0.8" }"#, to: configFile)
 
             let result = setEventEnabled(
@@ -663,7 +663,7 @@ func runConfigMutationSuites() {
             // 「能不能写」的定义只能有一个：doctor 说的话必须就是写路径真失败时说的话，否则用户会
             // 遇到「doctor 绿灯但静音失败」（或反过来）这种更糟的不一致。
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(#"{ "selected_pack": "pika", "events": { "stop": 1 } }"#, to: configFile)
 
             guard case .malformed(let probedReason) = probeConfigRewritable(configFile: configFile)
@@ -706,7 +706,7 @@ func runConfigMutationSuites() {
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configReadFailure(let reason)) = result else {
                 expect(false, "缺少 selected_pack 的 config.json 必须 fail closed，got \(result)")
                 return
@@ -729,7 +729,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: master_volume 是 -1e400（解析成 -inf）→ fail closed，绝不 abort，文件逐字未动") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let original = #"{ "selected_pack": "pika", "master_volume": -1e400 }"#
             writeFixture(original, to: configFile)
 
@@ -765,7 +765,7 @@ func runConfigMutationSuites() {
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configReadFailure(let reason)) = result else {
                 expect(false, "-1e400（解析成 -inf）必须让切包 fail closed，got \(result)")
                 return
@@ -784,7 +784,7 @@ func runConfigMutationSuites() {
             // `night_dim` 是 v1 模型完全不认识的键——这条证明 firstUnwritableJSONValue 的递归
             // 会钻进未知键的嵌套对象里，而不是只查顶层的 master_volume。
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let original = #"{ "selected_pack": "pika", "night_dim": { "level": -1e400 } }"#
             writeFixture(original, to: configFile)
 
@@ -808,7 +808,7 @@ func runConfigMutationSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let original = #"{ "selected_pack": "pika", "x": [-1e400] }"#
             writeFixture(original, to: configFile)
 
@@ -852,7 +852,7 @@ func runConfigMutationSuites() {
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             writeFixture(
                 #"{ "selected_pack": "pika", "master_volume": -1e400 }"#, to: configFile)
 
@@ -882,7 +882,7 @@ func runConfigMutationSuites() {
             // 不需要钉死恰好第几层触发——递归函数本身如果没有深度闸门，这个层数足以在调试构建下
             // 观察到明显的调用栈增长，即便不一定真的 SIGSEGV。
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             var nested = "1"
             for _ in 0..<100 { nested = "{\"a\":\(nested)}" }
             let original = #"{ "selected_pack": "pika", "x": \#(nested) }"#
@@ -971,7 +971,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: selected_pack 是数字 42（不是字符串）→ fail closed，文件逐字未动") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let original = #"{ "selected_pack": 42 }"#
             writeFixture(original, to: configFile)
 
@@ -999,7 +999,7 @@ func runConfigMutationSuites() {
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configReadFailure(let reason)) = result else {
                 expect(false, "数字形状的 selected_pack 必须让切包 fail closed，got \(result)")
                 return
@@ -1014,7 +1014,7 @@ func runConfigMutationSuites() {
     suite("setEventEnabled: selected_pack 是布尔 true（不是字符串）→ fail closed，文件逐字未动") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             // `true` 桥接成 NSNumber，一个天真的「不是字符串就当数字/别的」判断可能被它蒙混过去——
             // `selected_pack` 校验必须明确拒绝布尔，同 `isJSONBoolean` 在别处挡的那类静默强转。
             let original = #"{ "selected_pack": true }"#
@@ -1043,7 +1043,7 @@ func runConfigMutationSuites() {
 
             let result = selectPack(
                 "psyduck", configFile: configFile, userPacksDirectory: userPacks,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configReadFailure(let reason)) = result else {
                 expect(false, "布尔形状的 selected_pack 必须让切包 fail closed，got \(result)")
                 return
@@ -1108,7 +1108,7 @@ func runConfigMutationSuites() {
             // 探针与真实写路径必须给出同一个判断：这份文件内容没问题，但真去写确实会失败。
             let writeResult = setEventEnabled(
                 .stop, enabled: false, configFile: configFile,
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
             guard case .failure(.configWriteFailure) = writeResult else {
                 expect(
                     false,

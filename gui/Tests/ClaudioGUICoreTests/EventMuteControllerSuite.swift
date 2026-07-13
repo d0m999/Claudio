@@ -9,11 +9,22 @@ import Foundation
 
 @MainActor
 func runEventMuteControllerSuites() {
+    suite("EventMuteController()'s default lockFile is ClaudioPaths.configLockFile, never playLockFile") {
+        // Lock separation (D9): the mute button's config.json write must never contend with, or
+        // be gated by, `play`'s debounce lock — that contention is exactly what was silently
+        // swallowing prompt sounds before this split. Type-level only, no injected paths.
+        expect(
+            EventMuteController().lockFile == ClaudioPaths.configLockFile,
+            "EventMuteController()'s default lockFile must be ClaudioPaths.configLockFile, got "
+                + "\(EventMuteController().lockFile.path)"
+        )
+    }
+
     suite("EventMuteController: setEnabled writes through and returns true, clearing lastError") {
         withTempDirectory { root in
             let controller = EventMuteController(
                 configFile: root.appendingPathComponent("config.json"),
-                lockFile: root.appendingPathComponent("play.lock"))
+                lockFile: root.appendingPathComponent("config.lock"))
 
             let succeeded = controller.setEnabled(.stop, enabled: false)
             expect(succeeded, "a clean write must return true")
@@ -30,7 +41,7 @@ func runEventMuteControllerSuites() {
             let configFile = root.appendingPathComponent("config.json")
             writeFixture("{ not valid json", to: configFile)
             let controller = EventMuteController(
-                configFile: configFile, lockFile: root.appendingPathComponent("play.lock"))
+                configFile: configFile, lockFile: root.appendingPathComponent("config.lock"))
 
             let succeeded = controller.setEnabled(.stop, enabled: false)
             expect(!succeeded, "a corrupt config.json must fail the call")
@@ -43,12 +54,12 @@ func runEventMuteControllerSuites() {
 
     suite("EventMuteController: a contended lock fails and records .lockBusy") {
         withTempDirectory { root in
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("config.lock")
             let controller = EventMuteController(
                 configFile: root.appendingPathComponent("config.json"), lockFile: lockFile)
 
             let holder = FileLock(path: lockFile.path)
-            expect(holder.tryLock(), "test setup: holder must acquire play.lock first")
+            expect(holder.tryLock(), "test setup: holder must acquire config.lock first")
 
             let succeeded = controller.setEnabled(.stop, enabled: false)
             expect(!succeeded, "a contended lock must fail the call")
@@ -63,7 +74,7 @@ func runEventMuteControllerSuites() {
             let configFile = root.appendingPathComponent("config.json")
             writeFixture("{ not valid json", to: configFile)
             let controller = EventMuteController(
-                configFile: configFile, lockFile: root.appendingPathComponent("play.lock"))
+                configFile: configFile, lockFile: root.appendingPathComponent("config.lock"))
 
             expect(!controller.setEnabled(.stop, enabled: false), "setup: first call must fail")
             expect(controller.lastError != nil, "setup: lastError must be recorded")

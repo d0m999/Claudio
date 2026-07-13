@@ -159,6 +159,20 @@ private final class OutcomeCollector: @unchecked Sendable {
 
 @MainActor
 func runPlaySuites() {
+    suite("PlayEnvironment()'s default lockFile is ClaudioPaths.playLockFile, never config/settingsLockFile") {
+        // Lock separation (D9): `play`'s debounce lock must stay its own — never the lock
+        // `selectPack` (`claudio use`) / `setEventEnabled` (the GUI mute button; no CLI surface)
+        // / `SettingsInstaller` serialize on. A config.json write or a settings.json
+        // install/uninstall must never contend with, or be gated by, `play`'s lock. This is the
+        // type-level half of that wiring assertion — no injected paths, just the real
+        // production default.
+        expect(
+            PlayEnvironment().lockFile == ClaudioPaths.playLockFile,
+            "PlayEnvironment()'s default lockFile must be ClaudioPaths.playLockFile, got "
+                + "\(PlayEnvironment().lockFile.path)"
+        )
+    }
+
     suite("playSoundEvent: unknown event name -> .unknownEvent, never spawns") {
         withTempDirectory { root in
             let spawner = RecordingSpawner()

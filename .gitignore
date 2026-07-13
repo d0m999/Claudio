@@ -10,5 +10,11 @@ DerivedData/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
 
+# Local dev app bundle — ad-hoc signed, rebuilt on demand, never committed
+dist/
+
 # Personal/IP-protected sound packs (e.g. game character cries) — never commit or distribute
 local-packs/
+
+# Workflow 用的临时 worktree（Agent isolation: worktree）
+.claude/worktrees/

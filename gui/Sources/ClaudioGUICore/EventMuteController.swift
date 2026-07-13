@@ -23,7 +23,7 @@ public final class EventMuteController: ObservableObject {
 
     public init(
         configFile: URL = ClaudioPaths.configFile,
-        lockFile: URL = ClaudioPaths.lockFile
+        lockFile: URL = ClaudioPaths.configLockFile
     ) {
         self.configFile = configFile
         self.lockFile = lockFile

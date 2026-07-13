@@ -7,11 +7,13 @@ import Foundation
 /// is its only real caller.
 ///
 /// Mirrors ``selectPack(_:configFile:userPacksDirectory:bundledPacksDirectory:lockFile:)``
-/// **exactly** — same ``ClaudioPaths/lockFile`` non-blocking `flock`, same
+/// **exactly** — same ``ClaudioPaths/configLockFile`` non-blocking `flock`, same
 /// read-existing-or-create-fresh shape, same atomic write — so two concurrent config.json
 /// writers (a pack switch racing a mute toggle, or two mute toggles racing each other)
-/// serialize on the identical lock `selectPack`/`installClaudioHooks` already use, rather
-/// than opening a second, independently-reasoned concurrency story for the exact same file.
+/// serialize on the identical lock `selectPack` already uses, rather than opening a second,
+/// independently-reasoned concurrency story for the exact same file. `installClaudioHooks`
+/// writes a *different* file (`settings.json`) and deliberately takes a *different* lock
+/// (``ClaudioPaths/settingsLockFile``) — a settings install must never gate a mute toggle.
 
 public enum SetEventEnabledOutcome: Sendable, Equatable {
     /// `config.json` now has `events.<event.cliName> == enabled`.
@@ -51,14 +53,14 @@ public enum SetEventEnabledError: Error, Sendable, Equatable, CustomStringConver
 /// this function is still total and testable on its own, not gated on that invariant
 /// holding elsewhere.
 ///
-/// Takes the exact same non-blocking ``ClaudioPaths/lockFile`` `selectPack` does (not a
+/// Takes the exact same non-blocking ``ClaudioPaths/configLockFile`` `selectPack` does (not a
 /// second, independent lock) — the two calls edit the same file, and must serialize against
 /// each other, not just against themselves.
 public func setEventEnabled(
     _ event: Event,
     enabled: Bool,
     configFile: URL = ClaudioPaths.configFile,
-    lockFile: URL = ClaudioPaths.lockFile
+    lockFile: URL = ClaudioPaths.configLockFile
 ) -> Result<SetEventEnabledOutcome, SetEventEnabledError> {
     let outcome = withNonBlockingLock(path: lockFile.path) {
         performSetEventEnabled(event, enabled: enabled, configFile: configFile)

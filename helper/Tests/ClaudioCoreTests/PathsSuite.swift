@@ -47,7 +47,9 @@ func runPathsSuites() {
             ("claudioBinary", ClaudioPaths.claudioBinary.path),
             ("logFile", ClaudioPaths.logFile.path),
             ("logLockFile", ClaudioPaths.logLockFile.path),
-            ("lockFile", ClaudioPaths.lockFile.path),
+            ("playLockFile", ClaudioPaths.playLockFile.path),
+            ("configLockFile", ClaudioPaths.configLockFile.path),
+            ("settingsLockFile", ClaudioPaths.settingsLockFile.path),
             ("claudeSettingsFile", ClaudioPaths.claudeSettingsFile.path),
         ]
         for (name, path) in paths {
@@ -82,7 +84,9 @@ func runPathsSuites() {
             ("claudioBinary", ClaudioPaths.claudioBinary.path),
             ("logFile", ClaudioPaths.logFile.path),
             ("logLockFile", ClaudioPaths.logLockFile.path),
-            ("lockFile", ClaudioPaths.lockFile.path),
+            ("playLockFile", ClaudioPaths.playLockFile.path),
+            ("configLockFile", ClaudioPaths.configLockFile.path),
+            ("settingsLockFile", ClaudioPaths.settingsLockFile.path),
         ]
         for (name, path) in owned {
             expect(

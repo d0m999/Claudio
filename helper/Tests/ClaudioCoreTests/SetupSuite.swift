@@ -39,11 +39,112 @@ private func makeEnvironment(
         userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
         configFile: claudioRoot.appendingPathComponent("config.json"),
         settingsFile: root.appendingPathComponent("settings.json"),
-        lockFile: claudioRoot.appendingPathComponent("play.lock"))
+        configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+        settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
 }
 
 @MainActor
 func runSetupSuites() {
+    suite(
+        "performFirstRunSetup: 覆盖一个**已存在**的二进制 —— 新内容 + 新执行位，旧文件的元数据一个字节都不留"
+    ) {
+        // 这条测试站的位置，是上一版**没有任何测试站过**的地方：`copySelfToFixedLocation` 的
+        // 「目标已存在」那条路。存量那条 executable 断言走的是「目标不存在」→ `moveItem`，
+        // 而 `moveItem` 原样带走暂存的 0o755，所以它**恒绿**，逮不住下面这个 bug。
+        //
+        // 而这个 bug 是「把删了再拷改成原子发布」那一刀**自己引入**的：`replaceItemAt` 的默认行为是
+        // **保留原文件的元数据**（权限位在其中）。实测：目标 0644 + 暂存 0755 → 默认选项发布出去是
+        // **0644** —— 内容是新的，执行位是旧的。于是 `settings.json` 里那四条 hook 指向的二进制
+        // 存在、完整、而**不可执行**，Claude Code 每一次事件都会撞上它。那正是那一刀在注释里
+        // 自称已经消灭的三种坏终态之一。修法是 `.usingNewMetadataOnly`。
+        withTempDirectory { root in
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            let destination = environment.claudioBinaryDestination
+
+            // 一台「上一次安装留下了一个不可执行的二进制」的机器（用户 chmod 过、一次坏掉的旧安装、
+            // 或任何别的原因 —— 这条路径要能把它**修好**，而不是把坏的执行位继承下来）。
+            try? FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? Data("#!stale-and-not-executable".utf8).write(to: destination, options: .atomic)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o644], ofItemAtPath: destination.path)
+
+            _ = performFirstRunSetup(environment: environment)
+
+            let published = try? String(contentsOf: destination, encoding: .utf8)
+            expect(
+                published == "#!fake-binary-fixture",
+                "覆盖之后磁盘上必须是**新**的那份二进制，实际是 \(published ?? "<读不到>")")
+
+            let permissions = (try? FileManager.default.attributesOfItem(
+                atPath: destination.path))?[.posixPermissions] as? NSNumber
+            expect(
+                permissions.map { ($0.uint16Value & 0o111) != 0 } ?? false,
+                "覆盖之后那个二进制必须是**可执行**的，实际 mode = "
+                    + "\(permissions.map { String($0.uint16Value, radix: 8) } ?? "<读不到>")。"
+                    + "`replaceItemAt` 默认**保留原文件的元数据**（权限位在其中）——不带 "
+                    + "`.usingNewMetadataOnly`，这里会原样继承旧文件的 0644：内容是新的，执行位是旧的。"
+                    + "而 `settings.json` 里那四条 hook 逐字指向这个文件，Claude Code 每一次事件都会"
+                    + "执行它 —— 一个完整但不可执行的二进制，等于每一次事件都静默失败")
+
+            // 暂存不许留在磁盘上（它是点开头的，留下来不致命，但留下来就说明发布那一步没走完）。
+            let staging = destination.deletingLastPathComponent()
+                .appendingPathComponent(
+                    ".\(destination.lastPathComponent).tmp-\(ProcessInfo.processInfo.processIdentifier)")
+            expect(
+                !FileManager.default.fileExists(atPath: staging.path),
+                "发布成功之后，暂存文件必须已经不在了（rename 会把它消耗掉）")
+        }
+    }
+
+    suite(
+        "performFirstRunSetup: 目标是一条指向真实文件的 symlink —— 必须发布出一份常规二进制，不能永久失败"
+    ) {
+        // 回归测试（`/codex review 3af8d5f` 红队实测逮住）：「原子发布」那一刀用 `fileExists` 判目标
+        // 存不存在，而 `fileExists` **跟随 symlink**；`replaceItemAt` / `moveItem` 却是 lstat 语义。
+        // 于是 `~/.claudio/bin/claudio` 是一条指向真实文件的 symlink 时，`fileExists` 说「在」→ 走
+        // `replaceItemAt` → 它 lstat 看见那条链接、当场抛 → `.binaryCopyFailure`、二进制永不发布、
+        // hooks 永不写、**每一次重跑都一字不差地失败**。姊妹的包复制路径（`Setup.swift:403`）早就为
+        // 这个 bug 从 `fileExists` 换成了 `attributesOfItem`（lstat）—— 二进制路径当时漏了。
+        withTempDirectory { root in
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            let destination = environment.claudioBinaryDestination
+
+            // 一台机器：`bin/claudio` 是一条指向别处一份真实（旧）二进制的软链接。
+            try? FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let elsewhere = root.appendingPathComponent("some-old-claudio")
+            try? Data("#!OLD-EXTERNAL".utf8).write(to: elsewhere, options: .atomic)
+            try? FileManager.default.createSymbolicLink(at: destination, withDestinationURL: elsewhere)
+
+            let result = performFirstRunSetup(environment: environment)
+
+            // 发布之后：`bin/claudio` 必须是一份**常规文件**（不再是链接），内容是新的、可执行。
+            let attributes = try? FileManager.default.attributesOfItem(atPath: destination.path)
+            expect(
+                attributes?[.type] as? FileAttributeType == .typeRegular,
+                "覆盖一条 symlink 之后，`bin/claudio` 必须是一份**常规文件**（旧算法就是这么做的："
+                    + "removeItem 删掉链接、copyItem 写一份新的）。实际 type = "
+                    + "\(attributes?[.type].map { "\($0)" } ?? "<不存在>")。"
+                    + "还是 symlink = 用了 `fileExists`（跟随链接）而不是 lstat，"
+                    + "`replaceItemAt` 当场抛，二进制永不发布，setup 每次重跑都失败：\(result)")
+            let published = try? String(contentsOf: destination, encoding: .utf8)
+            expect(
+                published == "#!fake-binary-fixture",
+                "发布之后磁盘上必须是**新**的那份二进制，实际是 \(published ?? "<读不到>")")
+            expect(
+                (attributes?[.posixPermissions] as? NSNumber).map { ($0.uint16Value & 0o111) != 0 }
+                    ?? false,
+                "发布出来的二进制必须可执行")
+            // 那份被指向的旧文件不该被动过（我们删的是**链接**，不是它指向的东西）。
+            expect(
+                (try? String(contentsOf: elsewhere, encoding: .utf8)) == "#!OLD-EXTERNAL",
+                "removeItem 删的必须是 symlink 本身，不是它指向的那份文件 —— 后者一个字节都不该动")
+        }
+    }
+
     suite("performFirstRunSetup: running from inside a bundle copies binary + pack, selects default, installs hooks") {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
@@ -91,7 +192,8 @@ func runSetupSuites() {
                 userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
-                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+                configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
             // T17d：这个 fixture 原本一个包都没有，而 `alreadyInstalled` 会把整个复制块跳过 ——
             // 于是它描述的其实是一台**装完也不会响**的机器，只是当年没人问这个问题。现在
             // `.noAvailablePack` 会拦住它（这正是该拦的），所以把 fixture 补成它本来想描述的样子：
@@ -240,7 +342,8 @@ func runSetupSuites() {
                 userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
-                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+                configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
             writeFixture(
                 #"{ "schema": 1, "id": "minimal-chime", "events": {} }"#,
                 to: environment.userPacksDirectory.appendingPathComponent(
@@ -320,7 +423,8 @@ func runSetupSuites() {
                 userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
-                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+                configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
             // A dot-prefixed leftover that sorts before the real pack ('.' 0x2E < 'z'): without
             // the `!hasPrefix(".")` filter it would be scanned first and either be selected or
             // fail selection outright. With the filter it is skipped and `zeta-chime` wins.
@@ -421,7 +525,8 @@ func runSetupSuites() {
                 userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
-                lockFile: claudioRoot.appendingPathComponent("play.lock"))
+                configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
 
             let result = performFirstRunSetup(environment: environment)
             guard case .failure(.binaryCopyFailure) = result else {
@@ -489,7 +594,7 @@ func runSetupSuites() {
             // 完全正常的用户操作，不是构造出来的畸形 fixture。
             let muteResult = setEventEnabled(
                 .stop, enabled: false, configFile: environment.configFile,
-                lockFile: environment.lockFile)
+                lockFile: environment.configLockFile)
             expect(muteResult == .success(.updated(event: .stop, enabled: false)), "setup: mute must succeed")
 
             let afterMute = try? Data(contentsOf: environment.configFile)
@@ -635,7 +740,8 @@ private func makeInstalledEnvironment(root: URL) -> SetupEnvironment {
         userPacksDirectory: claudioRoot.appendingPathComponent("packs", isDirectory: true),
         configFile: claudioRoot.appendingPathComponent("config.json"),
         settingsFile: root.appendingPathComponent("settings.json"),
-        lockFile: claudioRoot.appendingPathComponent("play.lock"))
+        configLockFile: claudioRoot.appendingPathComponent("config.lock"),
+        settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
 }
 
 @MainActor

@@ -45,20 +45,21 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
 /// else (T17: this is also the path ``performFirstRunSetup(environment:)`` uses to
 /// establish a first-run default pack selection).
 ///
-/// The read-modify-write runs under ``ClaudioPaths/lockFile``'s non-blocking `flock` —
-/// the same lock `install`/`play` already serialize on — so two concurrent `claudio use`
-/// (or `use` racing `setup`) invocations can't silently lose one write (Codex review of
-/// 3d09bf5, confirmed again by `/ship`'s pre-landing review red team pass: unlike
-/// `settings.json`'s write path, this one had never been brought under the lock). Because
-/// the lock is non-blocking, contention surfaces as ``UseError/lockBusy`` — a real,
-/// distinct error the caller sees and can retry — never a silent no-op reported as
-/// success (project rule: never silently swallow an error).
+/// The read-modify-write runs under ``ClaudioPaths/configLockFile``'s non-blocking `flock` —
+/// the same lock `setEventEnabled` serializes on, and deliberately **not** the one `install`
+/// (``ClaudioPaths/settingsLockFile``) or `play` (``ClaudioPaths/playLockFile``) takes — so
+/// two concurrent `claudio use` (or `use` racing `setup`) invocations can't silently lose
+/// one write (Codex review of 3d09bf5, confirmed again by `/ship`'s pre-landing review red
+/// team pass: unlike `settings.json`'s write path, this one had never been brought under
+/// the lock). Because the lock is non-blocking, contention surfaces as ``UseError/lockBusy``
+/// — a real, distinct error the caller sees and can retry — never a silent no-op reported
+/// as success (project rule: never silently swallow an error).
 public func selectPack(
     _ packID: String,
     configFile: URL = ClaudioPaths.configFile,
     userPacksDirectory: URL = ClaudioPaths.packsDirectory,
     bundledPacksDirectory: URL? = nil,
-    lockFile: URL = ClaudioPaths.lockFile
+    lockFile: URL = ClaudioPaths.configLockFile
 ) -> Result<UseOutcome, UseError> {
     guard isSafePackID(packID) else { return .failure(.invalidPackID(packID)) }
     guard

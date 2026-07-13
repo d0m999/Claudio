@@ -62,7 +62,7 @@ public enum ClaudioPaths {
     /// `~/.claudio/claudio.log.lock` — the non-blocking lock guarding `claudio.log`'s
     /// rotate-then-append sequence against concurrent tearing across processes
     /// (ENGINEERING.md 决议 6, T6; see ``FileLock``). Deliberately a **separate** lock from
-    /// ``lockFile`` (`play.lock`) — logging must never contend with, or be gated by,
+    /// ``playLockFile`` (`play.lock`) — logging must never contend with, or be gated by,
     /// `play`'s own debounce lock.
     public static var logLockFile: URL {
         root.appendingPathComponent("claudio.log.lock")
@@ -70,8 +70,37 @@ public enum ClaudioPaths {
 
     /// `~/.claudio/play.lock` — the non-blocking lock guarding `play`'s skip-style
     /// debounce (ENGINEERING.md 决议 1 + 5, T5). See ``FileLock``.
-    public static var lockFile: URL {
+    public static var playLockFile: URL {
         root.appendingPathComponent("play.lock")
+    }
+
+    /// `~/.claudio/config.lock` — the non-blocking lock serializing `config.json`'s
+    /// read-modify-**write** critical section across its writers: `selectPack` (`claudio use`,
+    /// the gallery, and `performFirstRunSetup`) and `setEventEnabled` (the GUI mute button —
+    /// in-process, it has no CLI surface).
+    ///
+    /// **Writers only.** No reader takes this lock, by design: `play` loads `config.json`
+    /// *outside* its critical section (``playSoundEvent(_:environment:)``), and `doctor` / the
+    /// panel read it with no lock at all. What makes a concurrent read safe is
+    /// ``updateConfigJSON(at:freshSelectedPack:mutate:)``'s temp-file + `rename(2)` atomic
+    /// write — a reader sees the whole old file or the whole new one, never a torn one. A
+    /// future reader that *takes* this lock, or a writer that drops `.atomic` because it
+    /// believes the lock covers readers, reintroduces exactly the class this split closed.
+    ///
+    /// Deliberately **separate** from ``playLockFile`` — a config write must never contend
+    /// with, or be gated by, `play`'s own debounce lock (that contention is exactly what was
+    /// silently swallowing prompt sounds before this split).
+    public static var configLockFile: URL {
+        root.appendingPathComponent("config.lock")
+    }
+
+    /// `~/.claudio/settings.lock` — the non-blocking lock guarding install/uninstall of
+    /// the Claudio hooks in `~/.claude/settings.json` (``SettingsInstaller``).
+    /// Deliberately **separate** from both ``playLockFile`` and ``configLockFile`` — a
+    /// settings.json install/uninstall must never contend with `play`'s debounce lock or
+    /// a concurrent `config.json` read/write.
+    public static var settingsLockFile: URL {
+        root.appendingPathComponent("settings.lock")
     }
 
     /// `~/.claudio/play.state` — the single shared "last played" timestamp `play`'s

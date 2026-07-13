@@ -35,7 +35,7 @@ func runSettingsInstallerSuites() {
     suite("installClaudioHooks: fresh settings.json (none exists) installs all four events, no backup") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
 
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -62,7 +62,7 @@ func runSettingsInstallerSuites() {
     suite("installClaudioHooks: idempotent — second call makes no changes, no duplicate entries") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
 
             let first = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -94,7 +94,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
 
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -124,7 +124,7 @@ func runSettingsInstallerSuites() {
     suite("installClaudioHooks: appends alongside an existing other-tool hook without overwriting it") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             writeFixture(
                 #"""
                 {
@@ -174,7 +174,7 @@ func runSettingsInstallerSuites() {
     suite("installClaudioHooks: backs up the pre-claudio original exactly once, never overwrites it") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let backupFile = root.appendingPathComponent("settings.json.claudio.bak")
             let originalContent = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
             writeFixture(originalContent, to: settingsFile)
@@ -215,7 +215,7 @@ func runSettingsInstallerSuites() {
         withTempDirectory { root in
             let settingsDir = root.appendingPathComponent("settings-dir", isDirectory: true)
             let settingsFile = settingsDir.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let originalContent = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
             writeFixture(originalContent, to: settingsFile)
 
@@ -253,7 +253,7 @@ func runSettingsInstallerSuites() {
     suite("uninstallClaudioHooks: no settings.json at all → .notInstalled, no file created") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
 
             let result = uninstallClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -270,7 +270,7 @@ func runSettingsInstallerSuites() {
     suite("uninstallClaudioHooks: no claudio hooks present → .notInstalled, file left byte-identical") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let originalContent = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
             writeFixture(originalContent, to: settingsFile)
 
@@ -289,7 +289,7 @@ func runSettingsInstallerSuites() {
     suite("uninstallClaudioHooks: precisely removes claudio entries, preserves other-tool hooks") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             writeFixture(
                 #"""
                 { "hooks": {
@@ -341,7 +341,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             // Simulates exactly the scenario T13 exists for: a PAST (or future) claudio
             // release placed the binary at a different subdirectory under the SAME
             // `.claudio/` namespace (`libexec/` instead of today's `bin/`). This
@@ -403,7 +403,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let spacedBinary = "/Users/John Smith/.claudio/bin/claudio"
 
             // What today's `install` writes (quoted, actually runnable under `/bin/sh -c`)...
@@ -451,7 +451,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let original = #"""
                 { "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "/Users/tester/.claudio/bin/claudio play stop" } ] } ] } }
                 """#
@@ -474,7 +474,7 @@ func runSettingsInstallerSuites() {
         // installed". (The guard's position in performUninstall is what this pins.)
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             writeFixture("{ not json at all", to: settingsFile)
 
             let result = uninstallClaudioHooks(
@@ -492,7 +492,7 @@ func runSettingsInstallerSuites() {
     suite("uninstallClaudioHooks: removes only claudio's entry from a group shared with another tool") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             writeFixture(
                 #"""
                 { "hooks": {
@@ -526,7 +526,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             // The Stop array holds a pre-existing EMPTY group (a third-party artifact) next to
             // claudio's own group. Sweeping must remove claudio's and leave the empty one exactly
             // as it was: `removeHookEntries` only drops a group whose inner array it just emptied
@@ -564,7 +564,7 @@ func runSettingsInstallerSuites() {
     suite("installClaudioHooks: a leftover entry with our command but no \"type\" is not counted as installed — install self-heals with a real command hook") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             // A pre-existing Stop entry carries claudio's exact command string but is
             // missing its "type": "command" — Claude Code would never fire it. The
             // idempotency check (strict `groupContainsCommand`) must treat Stop as
@@ -609,7 +609,7 @@ func runSettingsInstallerSuites() {
     suite("uninstallClaudioHooks: still removes a leftover entry carrying our command even without a \"type\" (loose, command-only match)") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             // The detect/install tightening must NOT make uninstall leave malformed cruft
             // behind: `removeHookEntries` matches on `command` alone, so a typeless leftover
             // carrying our command still gets cleaned up.
@@ -638,7 +638,7 @@ func runSettingsInstallerSuites() {
     suite("corrupt JSON syntax: install and uninstall both abort without writing or backing up") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let corrupt = "{ not valid json"
             writeFixture(corrupt, to: settingsFile)
 
@@ -671,7 +671,7 @@ func runSettingsInstallerSuites() {
     suite("malformed hooks shape: \"hooks\" is not an object → abort without writing") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let malformed = #"{ "hooks": "oops" }"#
             writeFixture(malformed, to: settingsFile)
 
@@ -690,7 +690,7 @@ func runSettingsInstallerSuites() {
     suite("malformed hooks shape: an event's array is not an array → abort without writing") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let malformed = #"{ "hooks": { "Stop": { "not": "an array" } } }"#
             writeFixture(malformed, to: settingsFile)
 
@@ -709,7 +709,7 @@ func runSettingsInstallerSuites() {
     suite("installClaudioHooks: unwritable settings.json (read-only) aborts via the writability probe") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let original = #"{ "hooks": {} }"#
             writeFixture(original, to: settingsFile)
             try? FileManager.default.setAttributes(
@@ -735,7 +735,7 @@ func runSettingsInstallerSuites() {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("no-such-dir", isDirectory: true)
                 .appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
 
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -754,7 +754,7 @@ func runSettingsInstallerSuites() {
     suite("installClaudioHooks: a busy lock is reported as .lockBusy and never writes (non-blocking)") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let holder = FileLock(path: lockFile.path)
             expect(holder.tryLock(), "holder should acquire the lock first")
 
@@ -773,7 +773,7 @@ func runSettingsInstallerSuites() {
     suite("uninstallClaudioHooks: a busy lock is reported as .lockBusy and never writes (non-blocking)") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let original = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath))" } ] } ] } }"#
             writeFixture(original, to: settingsFile)
             let holder = FileLock(path: lockFile.path)
@@ -809,7 +809,7 @@ func runSettingsInstallerSuites() {
                 !FileManager.default.fileExists(atPath: claudioDir.path),
                 "sanity: the lock file's parent directory must not exist before install runs"
                     + " — this is exactly the never-run-before-onboarding gap (T4 review HIGH)")
-            let lockFile = claudioDir.appendingPathComponent("play.lock")
+            let lockFile = claudioDir.appendingPathComponent("settings.lock")
 
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -834,7 +834,7 @@ func runSettingsInstallerSuites() {
             let settingsFile = claudeDir.appendingPathComponent("settings.json")
 
             let claudioDir = root.appendingPathComponent("dot-claudio", isDirectory: true)
-            let lockFile = claudioDir.appendingPathComponent("play.lock")
+            let lockFile = claudioDir.appendingPathComponent("settings.lock")
 
             // Uninstall in a "never installed before" scenario is expected to report
             // .notInstalled — the point of this test is that it must reach that outcome
@@ -853,7 +853,7 @@ func runSettingsInstallerSuites() {
     suite("install then uninstall round-trips: pre-existing hooks and unrelated keys survive both operations") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             writeFixture(
                 #"""
                 { "env": { "FOO": "bar" }, "hooks": {
@@ -916,7 +916,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
             let before = try? String(contentsOf: settingsFile, encoding: .utf8)
 
@@ -945,7 +945,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
 
             let result = installClaudioHooks(
@@ -978,7 +978,7 @@ func runSettingsInstallerSuites() {
 
             withTempDirectory { root in
                 let settingsFile = root.appendingPathComponent("settings.json")
-                let lockFile = root.appendingPathComponent("play.lock")
+                let lockFile = root.appendingPathComponent("settings.lock")
                 writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
 
                 let installed = installClaudioHooks(
@@ -1025,7 +1025,7 @@ func runSettingsInstallerSuites() {
         // so getting .unsweepableBinaryPath proves the guard ran before the load.
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: unsweepable, lockFile: lockFile)
             expect(
@@ -1040,7 +1040,7 @@ func runSettingsInstallerSuites() {
         // must still win, so the caller sees the real cause (bad binary path) not a probe failure.
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("no-such-dir/settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: unsweepable, lockFile: lockFile)
             expect(
@@ -1061,7 +1061,7 @@ func runSettingsInstallerSuites() {
 
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             writeFixture(#"{ "hooks": {} }"#, to: settingsFile)
             let before = readRawString(at: settingsFile)
 
@@ -1083,7 +1083,7 @@ func runSettingsInstallerSuites() {
         // real production path, the only one a user ever passes — try.
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let stranded = claudioHookCommand(for: .stop, claudioBinaryPath: traversing)
             let fixture = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(stranded)" } ] } ] } }"#
             writeFixture(fixture, to: settingsFile)
@@ -1119,7 +1119,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let original = #"{ "hooks": {} }"#
             writeFixture(original, to: settingsFile)
 
@@ -1159,7 +1159,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let stop = claudioHookCommand(for: .stop, claudioBinaryPath: testClaudioBinaryPath)
             writeFixture(
                 #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "\#(stop)" } ] } ] } }"#,
@@ -1189,7 +1189,7 @@ func runSettingsInstallerSuites() {
     ) {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let original = #"{ "hooks": {} }"#
             writeFixture(original, to: settingsFile)
 
@@ -1219,7 +1219,7 @@ func runSettingsInstallerSuites() {
         withTempDirectory { root in
             let target = root.appendingPathComponent("dotfiles/settings.json")
             let settingsFile = root.appendingPathComponent("claude/settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             let original = #"{ "hooks": {} }"#
             writeFixture(original, to: target)
             createSymlink(at: settingsFile, pointingTo: target)
@@ -1284,7 +1284,7 @@ func runSettingsInstallerSuites() {
         withTempDirectory { root in
             let target = root.appendingPathComponent("dotfiles/settings.json")
             let settingsFile = root.appendingPathComponent("claude/settings.json")
-            let lockFile = root.appendingPathComponent("play.lock")
+            let lockFile = root.appendingPathComponent("settings.lock")
             try? FileManager.default.createDirectory(
                 at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
             createSymlink(at: settingsFile, pointingTo: target)

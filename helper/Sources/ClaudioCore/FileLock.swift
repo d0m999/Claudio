@@ -60,10 +60,14 @@ public final class FileLock {
             if opened == -1 && errno == ENOENT {
                 // Self-heal: `O_CREAT` only ever creates the leaf file, never a missing
                 // *parent* directory — and nothing else in Claudio proactively creates
-                // `~/.claudio/` up front. Without this, `claudio install` on a brand-new
-                // machine (no `~/.claudio/` yet) would fail its very first `play.lock`
-                // acquisition with a misleading "retry later" error that could never
-                // actually succeed on retry. Only ENOENT triggers this: any other errno
+                // `~/.claudio/` up front. Without this, the first lock any command reaches for
+                // on a brand-new machine (no `~/.claudio/` yet) would fail with a misleading
+                // "retry later" error that could never actually succeed on retry — and since
+                // the lock split there are three such first-touch candidates, not one:
+                // `settings.lock` (`claudio install`), `config.lock` (`claudio use`,
+                // `performFirstRunSetup`), and `play.lock` (`claudio play`). Whichever runs
+                // first creates the directory for the other two. Only ENOENT triggers this:
+                // any other errno
                 // (e.g. `EACCES`) is a real failure that a directory creation wouldn't
                 // fix, and must fall straight through to `.failed` below.
                 let parentDirectory = URL(fileURLWithPath: path).deletingLastPathComponent()

@@ -96,7 +96,7 @@ public struct PlayEnvironment: Sendable {
 
     public init(
         afplayPath: String = "/usr/bin/afplay",
-        lockFile: URL = ClaudioPaths.lockFile,
+        lockFile: URL = ClaudioPaths.playLockFile,
         configFile: URL = ClaudioPaths.configFile,
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         bundledPacksDirectory: URL? = nil,

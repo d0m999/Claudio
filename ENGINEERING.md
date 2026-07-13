@@ -180,7 +180,8 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 **⑥ config.json 归属（消除"真相源"歧义）：**
 - config.json 文件本身是唯一真相源。**app(GUI) 是写入者，helper `play` 只读。**
 - `claudio use <pack>`（**T17 实现**——此前正文这句长期误标"已实现"，实际代码是 `NotYetImplemented` 占位符，由 `/codex review 10f00cf+f31987b` 顺带牵出，见 T17 完成记录）/ 计划中的 `claudio set volume <0.0–1.0>` 是等价 CLI 便捷入口，与 GUI 写同一份 config，都走上面那把文件锁 + 原子写。**没有 `set night`**——`night_dim` 已由 T2 移出 v1 → v2。
-- **写入者只有两个，且共用同一条写路径**（2026-07-11 `/ship` 收口）：`selectPack`（`claudio use` / 画廊切包）与 `setEventEnabled`（GUI 静音钮）都调 `ConfigMutation.swift` 的 `updateConfigJSON(at:freshSelectedPack:mutate:)` —— 同一把非阻塞 `~/.claudio/play.lock`（`ClaudioPaths.lockFile`，与 `play` 去抖共用）、同一次原子写、同一套「只覆盖调用方自己拥有的那个键、其余顶层键（含未知键）逐字保留、读不懂即 fail-closed」的语义。**不允许出现第三条写路径**；尤其不允许任何写入者去 round-trip `ClaudioConfig`（理由见上文 config.json schema 段与收口记录 ①）。
+- **写入者只有两个，且共用同一条写路径**（2026-07-11 `/ship` 收口）：`selectPack`（`claudio use` / 画廊切包）与 `setEventEnabled`（GUI 静音钮）都调 `ConfigMutation.swift` 的 `updateConfigJSON(at:freshSelectedPack:mutate:)` —— 同一把非阻塞 `~/.claudio/config.lock`（`ClaudioPaths.configLockFile`）、同一次原子写、同一套「只覆盖调用方自己拥有的那个键、其余顶层键（含未知键）逐字保留、读不懂即 fail-closed」的语义。**不允许出现第三条写路径**；尤其不允许任何写入者去 round-trip `ClaudioConfig`（理由见上文 config.json schema 段与收口记录 ①）。
+  - **锁分离（2026-07-12 阶段 A，决议 D9 + D20）**：`config.lock` 是 `~/.claudio/play.lock` 分家出来的。此前 `ClaudioPaths.lockFile`（= `play.lock`）被**五个互不相干的临界区**共用：`play` 的去抖、两个 config.json 写者、两个 settings.json 写者。而 `claudio play` 拿不到锁时是**静默跳过**，于是每一次「点静音 / 切包 / 跑 `claudio install`」都是一个**会吞掉提示音的窗口**。今天三把锁各司其职：`playLockFile`（`play.lock`）只管 `play` 去抖；`configLockFile`（`config.lock`）只串行 config.json 的**写者**（读者一律不取锁 —— `play` 在临界区外读，安全性来自 `updateConfigJSON` 的 temp + `rename(2)` 原子写，不是来自这把锁）；`settingsLockFile`（`settings.lock`）只串行 `SettingsInstaller` 的 install/uninstall。修法是**改名**而不是加注释：`lockFile` → `playLockFile` 让 11 个默认值点全部编译不过，逼每一处显式选择（GUI 是显式向下传参的，只改 helper 的默认参数对它一点作用都没有）。
 
 ### 内置包（v1）
 
@@ -602,7 +603,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
   **④ 【逐事件绑定的 packID TOCTOU】（Codex [P2]）**：用户在某行开始导入后、异步完成前切了包，`PanelView.refresh()` 会改写 `importViewModel.packID` → 文件已经复制进**原来**的包，绑定却写到**切换后**的包。变异测试证明它**不是报错，是真的静默改错了另一个包的 `manifest.json`**。已修：改用**导入时捕获的 `file.packID`**，绝不跨 `await` 重读 `@Published` 状态。
 
-  **⑤ 【三处静默吞错】**（多个评审独立命中，且直接违反项目自己写在 `Use.swift:54` 的规则「never a silent no-op reported as success」）：`bindResult` / `EventMuteController.lastError` / `switchPack` 的 `UseError` —— 全都**写了但没有任何视图读**。其中 `.lockBusy` **真会发生**：`setEventEnabled` 和 `claudio play` 抢同一把 `play.lock`，而**每个 Claude Code 事件都会 spawn 一次 `claudio play`**。已全部接上错误呈现。修的过程中还发现一条：**内层 `AudioImportViewModel` 的 `@Published` state 不会穿过外层 `EventRowImportViewModel` 传播**——所以即便天真地"把 `bindResult` 读出来显示"，导入被拒那条路径**照样不刷新视图**，必须额外挂一个 `@ObservedObject`。
+  **⑤ 【三处静默吞错】**（多个评审独立命中，且直接违反项目自己写在 `Use.swift:55` 的规则「never a silent no-op reported as success」）：`bindResult` / `EventMuteController.lastError` / `switchPack` 的 `UseError` —— 全都**写了但没有任何视图读**。其中 `.lockBusy` **真会发生**（⚠️ 2026-07-12 阶段 A 锁分离后，**这一条的理由已经失效，结论仍然成立**：当时写的是「`setEventEnabled` 和 `claudio play` 抢同一把 `play.lock`，而每个 Claude Code 事件都会 spawn 一次 `claudio play`」—— 分锁之后 `setEventEnabled` 拿 `config.lock`、`play` 拿 `play.lock`，两者**结构上不再相撞**。但 `.lockBusy` **依然真会发生**，只是换了对手：另一个 `config.json` 写者 —— 切包（`selectPack`）、以及接管路径里的 `performFirstRunSetup`。所以「必须渲染 `.lockBusy`、绝不静默吞掉」这条决议**一个字都不用改**）。已全部接上错误呈现。修的过程中还发现一条：**内层 `AudioImportViewModel` 的 `@Published` state 不会穿过外层 `EventRowImportViewModel` 传播**——所以即便天真地"把 `bindResult` 读出来显示"，导入被拒那条路径**照样不刷新视图**，必须额外挂一个 `@ObservedObject`。
 
   **⑥ 【`fileExists` 不辨目录】（Codex [P2]，真的、当下就能触发；此前已挂在 TODOS）**：一个名叫 `stop.mp3` 的**目录**会让包报 `complete`、`doctor` 通过、`play` 报"已播放"——实际**没有声音**。已修：`regularFileExists`（`stat` + `S_IFREG`）。**注意用 `stat` 而非 `lstat`**——包内指向包内真实文件的**合法 symlink 必须仍判为 present**。三个判定点（`play` / `doctor` / GUI 三态）同源。
 
@@ -650,7 +651,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
   **⑭ 【设计 · 已拍板】** DESIGN.md 自己登记的「待拍板」冲突落地：亮色 clay `#C4633C` 对 panel `#FFFDF8` = **3.97:1**，过非文字的 ≥3:1、**不过**正文的 ≥4.5:1，而 drop-zone 那条又要求 hover 时**文字**转黏土。取 DESIGN.md 自己标的推荐解法：**hover 反馈只由边框 + `clay-soft` 底承载，文案恒为 `text-2`**。零品牌成本——clay 的色值一个字没动，`Notification` 的视觉身份也没动。**「品牌强调唯一 = 黏土」这条不为任何单一状态开色值的口子。**
 
-  **⑮ 【回归缺口】** 覆盖率审计点名整个 diff 唯一的 REGRESSION GAP：`setEventEnabled` 的读-改-写在本分支**新**被纳入 `play.lock`（此前无锁），却只测了锁竞争、没有真并发写测试。已照 `PlaySuite` 现成的 `concurrentPerform` 形状补上。
+  **⑮ 【回归缺口】** 覆盖率审计点名整个 diff 唯一的 REGRESSION GAP：`setEventEnabled` 的读-改-写在本分支**新**被纳入 `play.lock`（此前无锁），却只测了锁竞争、没有真并发写测试。已照 `PlaySuite` 现成的 `concurrentPerform` 形状补上。（⚠️ 2026-07-12 阶段 A 锁分离后：`setEventEnabled` 现在拿的是 `config.lock`，**不再是** `play.lock`。上面这句话是它写下时的事实，保留作历史记录；今天读它的人请以 `EventEnabled.swift:63` 的默认值为准 —— 那个默认值现在由 `LockSeparationSuite` 的源码绊线钉住。）
 
   **这一轮的教训（写下来是为了下一轮不再交这个学费）**：一个 diff 建了一道闸门（`readRegularFileBounded`）、写了很长的注释论证它为什么必要——**然后只把它用在了发现问题的那一个文件上**。⑩⑪ 两条都是这个形状：正确的解法就在同一个 commit 里，只是没有被推到所有同类调用点。**下次给某个「形状」建闸门时，第一件事是 grep 出这个形状的全部调用点，而不是修好手头这一个。**
 

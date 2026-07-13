@@ -43,29 +43,370 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 **Priority:** P2
 **Depends on:** None
 
-## Ship / CI
+### 升级根本不换 helper —— `~/.claudio/bin/claudio` 永久停在用户第一次安装的那个版本
 
-### `play.lock` 被 config / settings 写者共用 —— 任何一次设置写都可能静默吞掉一声提示音
+**What:** `detectOnboardingState` 判 `.installed` 时**不做任何版本比对**：二进制「在位 + 可执行 + 没被盖章」+ 四条 hook 在 `settings.json` 里 → `.installed`（`OnboardingDetector.swift:45` 的 `isRunnableHelperBinary` + `:74` 的 `detectHookInstallStatus`）。而 helper 二进制**只在 `performFirstRunSetup` 里被复制**，那条路径**只从 takeOver / 修复 CTA 出发，而那颗按钮只在 `.notInstalled` / `.helperMissing` 时渲染**。合起来：**一个已经装好的用户，无论把 app 升级多少次，`~/.claudio/bin/claudio` 都不会被换掉一次。**
 
-**What:** `ClaudioPaths.lockFile`（`play.lock`）今天被**五个互不相干的临界区**共用：`Play.swift:190`（去抖时间戳 + spawn afplay —— 它唯一该保护的东西）、`EventEnabled.swift:63`（写 config.json）、`Use.swift:72`（写 config.json）、`SettingsInstaller.swift:162/216`（写 **settings.json**）。而 `claudio play` 拿不到这把锁时的行为是 `.skippedDebounce` —— **静默不放声音**（这是故意的：hook 绝不能阻断 Claude Code）。
+**Why:** 这不是「锁分离的一个副作用」，锁分离只是**第一个撞上这堵墙的东西**（见本文件「升级窗口」那条 P3 —— 它是这个洞的一个**实例**，不是这个洞本身）。真正的形状是：**从今往后每一个 helper 修复，都送不到任何一个老用户手里，而且是静默的。** `play` 的 bug、`doctor` 的误报、一个安全修复、一次 hook 命令格式变更 —— 用户升级了 app、看见新 UI、以为自己拿到了修复，而磁盘上跑的还是他半年前装的那个 helper。**app 的版本号和真正执行 Claude Code 事件的那个二进制的版本号，从来没有被任何东西绑在一起。**
 
-**Why:** 于是每一次「点静音 / 切包 / 跑 `claudio install`」都是一个**会吞掉提示音的窗口**：恰好落在窗口里的 Claude Code 事件，那声提示音直接消失，无任何错误、无任何日志。这打在产品的根上（「不回头也知道状态」）—— 用户在调设置的那几秒，恰好错过了他装这个 app 就是为了不错过的那声。
+这也是它比「升级窗口」那条 P3 严重得多的原因：那条的血溅半径是「丢一次设置更新、下次点一下就好」，这条的血溅半径是「**所有 helper 侧修复的投递率 = 0**」。
 
-反方向的那一半**项目已经知道了**，只是把它当成了 UI 问题而不是锁设计问题 —— `PanelView.swift` 的注释原文：「`.lockBusy` 尤其是**真会发生**的，不是理论值：`setEventEnabled`/`selectPack` 与 `claudio play` 抢同一把 `play.lock`…点静音正好撞上」。修法是给它显示一句「请稍后重试」，而不是让它不再发生。
+**Context:** 2026-07-13 `/codex review 803c639,b74b7f3`。Codex 把它当成锁竞态的**前提**报了 P1，Claude 侧的三个对抗性反驳者则因为「锁那个实例血溅半径小」把整条否掉了 —— **两边都只看见了当期弹药，没看见那门炮**。此前它在本文件里**只作为「升级窗口」那条 P3 的一句论据存在**（「helper 二进制只在 `performFirstRunSetup` 里刷新」），从未被单独立项。
 
-更讽刺的是**正确的原则早已写在仓库里**：`Paths.swift:64-66` 为 `logLockFile` 写着「Deliberately a **separate** lock from `lockFile`（`play.lock`）—— logging must never contend with, or be gated by, `play`'s own debounce lock.」闸门建了，只推开了日志那一格。这正是本仓库自己记下的 learning `gate-built-but-not-rolled-out`，同一形状第三次。
+**今天还没有真实受害者**：`git tag -l` 为空，Claudio 一次版都没发过，所以「持有旧 helper 的用户」这个群体尚不存在。**但它在第一次发版的那一刻就开始积累** —— 首个 release 的用户装下的那份 helper，就是他这辈子唯一一份，除非他手动删掉 `~/.claudio/bin/claudio`。**这条必须在首发之前修，之后再修就得处理存量。**
 
-**Context:** 2026-07-11 `/plan-eng-review`（主音量滑块）期间，Codex 外部声音（gpt-5.5 high）指出，Claude 侧逐条源码复核确认。**分离是安全的，三点源码实证**：① `play` 读 config 在**锁外**（`Play.swift:180` 的 `loadPlayConfig` 在 `withNonBlockingLock` 之前）—— 它从来不需要排斥 config 写者；② config 写走 `Data.write(options: .atomic)`（`ConfigMutation.swift:176`）即 `rename(2)`，并发读者只会看到旧的完整文件或新的完整文件，绝不撕裂 —— 读侧本来就不需要锁；③ `play` **从不读** settings.json。
-
-修法：新增 `ClaudioPaths.configLockFile`（`~/.claudio/config.lock`，串行三个 config 写者）与 `ClaudioPaths.settingsLockFile`（`~/.claudio/settings.lock`，串行 install/uninstall）；`play.lock` 退回只管 play 的去抖。回归测试钉住两条（**今天都会 RED，那正是 bug**）：持有 `play.lock` 时三个写者仍成功；持有 `config.lock` 时 `playSoundEvent` 仍发声。
-
-一份**未测试的**探索性实现在分支 `feat/master-volume-slider` @ `cbc02f0`（helper 能编译，零测试，勿直接信任）。
-
-**升级窗口注记**：旧二进制（拿 play.lock 写 config）与新二进制（拿 config.lock）并存时不互相串行。因为写是原子 rename，最坏是丢一次更新、绝不撕裂；且 GUI 是单进程、`claudio use` 是手动调用，实际不可达。
+**可能的修法**（未定）：① 给装下的二进制打版本戳（`~/.claudio/bin/.version`，或直接跑 `claudio --version` 比对 bundle 里那份），不一致就重新复制 —— 复制那一步已经是幂等的（T17e 的原子复制），接上探测即可；② 更狠也更简单：app 每次启动都把 bundle 里的 helper 与 `~/.claudio/bin/claudio` 比一次内容哈希，不同就覆盖 —— 反正 bundle 里那份**永远**是这个 app 版本该配的那份，没有「用户自己换了个 helper」这种合法情形需要保护。②看起来明显更对，但它会让每次启动多一次读盘，且要想清楚「正在被 `claudio play` 执行的二进制被覆盖」的语义（macOS 上覆盖一个正在执行的文件要用 rename，不能 write-in-place）。
 
 **Effort:** M
-**Priority:** P1
-**Depends on:** None（与主音量滑块无关，强烈建议**单独一个 PR**）
+**Priority:** P1（首发前必修 —— 发版之后再修就得面对存量旧 helper）
+**Depends on:** None
+
+## Ship / CI
+
+### ~~`play.lock` 被 config / settings 写者共用 —— 任何一次设置写都可能静默吞掉一声提示音~~ ✅ 2026-07-12 阶段 A 已修
+
+`ClaudioPaths.lockFile` 已**改名**为 `playLockFile`，并新增 `configLockFile`（`~/.claudio/config.lock`）与
+`settingsLockFile`（`~/.claudio/settings.lock`）。改名是全部效力的来源：它把 11 个 `= ClaudioPaths.lockFile`
+默认值点**全部变成编译错误**，逼每一处做出显式选择 —— 原计划写的是「在 `lockFile` 上加一条 `- Important`
+文档注释」，那是在该放编译器的地方放了一条注释。最终归属：`Play` → play.lock；`Use` / `EventEnabled` /
+`PanelView` / `EventMuteController` → config.lock；`SettingsInstaller` 四个签名 → settings.lock；同时写两个
+文件的 `SetupEnvironment` 与 `OnboardingActionEnvironment` 各**持两把**，不共用。
+
+**关键在 GUI，不在 helper**：GUI 是显式向下传参的，只改 helper 侧函数的默认参数对它一点作用都没有 ——
+照原清单（只列 helper 五个文件）实现完，用户点静音、切包**照样拿 `play.lock`**，照样吞提示音，而 GUI 是
+唯一的用户入口。守护它的是 `ViewWiringSuite` 的源码文本绊线（`ClaudioGUI` 是 executableTarget，import 不进来）。
+
+**测试按 D30 重写，没有按本条目原先写的那两条做**：原计划的「持有 `play.lock` 时三个写者仍成功」**测不到东西** ——
+现有每条锁争用测试都**显式注入**临时 lockFile，与默认参数无关，把锁改回共用也不会 RED。
+
+**～～真正有牙的是接线断言（默认构造后的 `lockFile` 值），三条，全部经变异验证确认会 RED～～ —— 这句是假的，
+`d5ec97e` 实测推翻。** 那三条比的是「环境默认值 == `ClaudioPaths.某个符号`」，两边都是符号：把 `Paths.swift` 里
+`configLockFile` 的**值**改回 `play.lock`（一行静默 revert 掉整个阶段 A），等式照样成立，`claudio-tests` +
+`claudio-gui-tests` **全绿（1030 + 1604）**。没有任何一条断言说过「这几把锁是不同的文件」。
+
+**现在真正有牙的是**（`d5ec97e` + `/codex review d5ec97e,8f9cfa2` + `/codex review 840ea37` + `/review e7c38ea`
+的修复，每一条都经变异验证确认会 RED）：
+
+- **① 值级**：四把锁两两不等、且文件名正好是 play/config/settings/claudio.log.lock（`LockSeparationSuite`）。
+- **② 默认值级**：每个写者的默认锁。只能走源码绊线 —— Swift 读不到自由函数的默认实参，而**调用**它就意味着
+  拿生产默认值去写真实的 `~/.claude/settings.json`。
+- **③ 调用点级**：`Subcommands.swift` 的**四条** CLI 命令（install / uninstall / use / **setup**）仍是全默认调用；
+  `Setup.swift` 接管路径的每一处调用点，其 `lockFile:` 实参**正好等于**它该拿的那把锁。没有 ③，② 只是摆设
+  （调用点一个参数就能覆盖掉所有默认值，而 ② 不会红）。
+- **④ 行为级**：`OnboardingActionsSuite` 的四条**持锁争用**断言 —— 把注入的锁**真的持住**，再断言写在**哪一步**
+  撞上 `.lockBusy`（详见下一条），**外加各自的副作用断言**（`/codex review be332ff` 的 P1）：错误码说不出
+  「做到哪一步」。把 `Setup.swift` 里的 `installClaudioHooks` **重排**到 `selectPack` 之前（两个调用点的
+  `lockFile:` 实参一个字都不用改），持 config.lock 依然停在 `.useFailure(.lockBusy)`、持 settings.lock 依然停在
+  `.installFailure(.lockBusy)` —— **四条错误码断言原样全绿**，而一次**失败**的接管已经在用户的
+  `~/.claude/settings.json` 里留下了四条 hook，config.json 里却一个包都没选（`Setup.swift:491` 的注释亲口立过
+  「一次注定不会响的安装，绝不允许在用户的 Claude Code 里留下新的痕迹」，此前无人背书）。现已补上：config 锁忙
+  → settings.json 必须一个字节没动；settings 锁忙 → config.json 必须**真的写完**（这正是那条 suite 标题里
+  「config 那步必须放行」的前半句，此前一条断言都没有）；断开被锁挡住 → 四条 hook 一条不许少（**原子**）；
+  断开成功 → 摘满四条且 settings.json 里真的干净。它绑的是真实锁文件路径 + 真实磁盘状态，是 ①②③ 全都够不着的那一层。
+- GUI 侧：`ViewWiringSuite` 的**全 target 普查** —— 唯一的 PanelView 构造点（`PanelView(` 与 `PanelView.init(`
+  一起数）、PanelView 的**三个**锁消费者各自转发、除 `PanelView.swift` 外 ClaudioGUI 代码里不许出现锁
+  （**大小写不敏感**）、ClaudioGUICore 代码里不许出现 play 的去抖锁。
+- **⑤ 扫描器级**（`/codex review be332ff`）：上面 ②③ 与 GUI 侧那三条普查，读到的「代码」全由**一个函数**
+  （`strippingComments`）生产 —— 它是这几套负向绊线的**单点故障**，而它自己此前一条断言都没有。现由
+  `SourceScannerSuite`（两个包各一份）喂合成输入钉死，外加两条「扫描器撞见了自己不认识的构造」守卫。详见下方逐次记账最后一条。
+
+**这三层是一路被打出来的，每一次都是同一个病：断言的措辞比它实际守的范围大。** 逐次记账：
+
+- **③ 的第一版是数计数的，而计数不绑调用点**（`840ea37` 写下、`/codex review 840ea37` 当场逮到）：它断的是
+  「全文件 `configLockFile` 出现 2 次、`settingsLockFile` 1 次、`playLockFile` 0 次」。把一处 `selectPack` 的锁与
+  `installClaudioHooks` 的锁**成对交换** —— 两把锁在生产上全串 —— 三个计数原样成立，`claudio-tests` **全绿 1060**
+  （实测）。当时的变异台账只测了**单边**改写，成对交换这一类没进台账。改成按调用点绑锁后，成对交换 **红 2 条**。
+- **③ 的第二版把「实参」断成了 `contains`，而 `contains` 不是绑定**（`/review e7c38ea`）：`callArguments` 把**调用**
+  的两头锚死了（头 `switch callee(`、尾配平括号），却让 `lockFile: ` **之后那一段没锚**。于是
+  `lockFile: environment.configLockFile.deletingLastPathComponent().appendingPathComponent("settings.lock")`
+  —— config.json 的写守着 settings.lock —— **逐字包含**那个 needle，三条断言 + 全文件计数**全绿 1064**（实测）。
+  与 `uninstallClaudioHooks(` 逐字包含 `installClaudioHooks(` **逐字同一个病**，只是搬到了实参上：子串断言没有
+  词边界。现已改成按**顶层逗号**切开实参、对 `lockFile:` 那一段做**相等**判定。
+- **③ 说「三条 CLI 命令」，而 CLI 有四条**（`/review e7c38ea`）：`claudio setup`（v1 首装自举，仍在发布路径上）
+  全默认构造 `SetupEnvironment`，两把锁全靠它的默认实参 —— 而它既不在那份名单里，也躲得过负向兜底：
+  `!subcommands.contains("lockFile")` **大小写敏感**，而 `configLockFile` / `settingsLockFile` / `playLockFile`
+  里那个 `L` 全是**大写**的，一个都不是 `lockFile` 的子串。给 setup 显式传一把 `playLockFile`（**首次安装**就把
+  config.json 的写送上去抖锁）→ **全绿 1064**（实测）。同一个大小写洞也在 `ViewWiringSuite` 普查二上。已全部
+  改成 `lowercased()`。
+- **负向兜底只禁标识符，禁不掉值级假名**（`/review e7c38ea`）：`!contains("playLockFile")` 拦不住
+  `ClaudioPaths.root.appendingPathComponent("play.lock")` —— 拿到的是**同一把**去抖锁，而那个标识符一次都不出现。
+  已改成标识符与字面量 `play.lock` 一起禁。
+- **~~已加一条元断言：被扫的源文件里不许出现 `://`~~ —— 那条元断言恒真，一个字节都没守住**
+  （`/review e7c38ea` 提出、`be332ff` 写下、`/codex review be332ff` 当场逮到）：`codeOnly` 在**第一个 `//`** 处
+  无条件截断整行，不认识字符串字面量 —— 一行 `let hint = "见 https://…"; _ = write(lockFile: playLockFile)`
+  会被剪成 `let hint = "见 https:`，后半行那句锁**对整套断言永久隐身**，而两个 suite 的兜底全是负向断言，
+  被剥掉的代码只会让它们**更绿**。**问题诊断是对的，守卫写错了**：它写的是 `!codeOnly(path).contains("://")`
+  —— 检查的是**截断之后**的文本，而 `://` 自带 `//`，到达断言之前早已被剪成 `https:`。它**恒真**，却在失败
+  消息里自称「真到了非放 URL 不可的那天会当场变红」。**措辞比覆盖范围大，复发在杀它的那一刀里**（第八次）。
+  同一个洞在 GUI 那半边更彻底：`ViewWiringSuite` 的两条普查（ClaudioGUI 锁普查、ClaudioGUICore 的 `play.lock`
+  普查）用同一个 `codeOnly`，而**连那条恒真的守卫都没有**。
+  **现在的修法是从根上改**（不是把 ban 挪到 raw source —— 那会在第一个把 URL 写进 doc comment 的人手上假红，
+  然后被删掉，洞原样回来）：`TestSupport.strippingComments` 是一个**位置感知**的状态机（代码 / 行注释 /
+  块注释 / 字符串 / 多行字符串），两个包各一份（跨包复制约定），字符串字面量里的 `//` 不再是注释起点。
+  它自己的行为由**新的 `SourceScannerSuite`**（两个包各一份）喂**合成输入**钉死 —— 正向断言，
+  结构上不可能再变成恒真式。它仍不建模 raw string（`#"…"#`），但它**知道自己不认识**：撞见一处就记进
+  `unmodeledConstructs`，两个 suite 各有一条断言盯着那张清单（位置感知是必须的 —— `ClaudioColorHex.swift`
+  的 `hasPrefix("#")` 逐字包含 `#"`，一条纯文本守卫会当场假红）。
+
+  **变异台账**（9 条变异，各自在独立 worktree 里跑真实测试，全部实测；`claudio-tests` 1090 / `claudio-gui-tests` 1646 为基线）：
+
+  | 变异 | 实测 | 结论 |
+  |---|---|---|
+  | M1a/M1b 扫描器退回朴素截断 | helper 红 6 / gui 红 6，全在 `SourceScannerSuite` | 扫描器行为被钉死 |
+  | M2 把锁藏在行内 URL 后面（`Setup.swift`） | 红 1：`LockSeparationSuite` 的 playLockFile 负向断言 | 修好的扫描器逮住了 |
+  | **M2C 同样藏锁 + 朴素扫描器**（控制组） | 那条锁断言**一条没红** | **证明逮住 M2 的正是「扫描器被修好」，锁断言本身瞎着** |
+  | M3 把 `play.lock` 藏在行内 URL 后面（`ClaudioGUICore`） | 红 1：GUICore 普查，精确点名 `OnboardingActions.swift` | GUI 那半边也堵上了 |
+  | **M3C 同样藏锁 + 朴素扫描器**（控制组） | GUICore 普查**没红**，连 `unmodeled` 守卫也跟着瞎 | 同上，且印证：真正拦住它的唯一防线是 `SourceScannerSuite` 的**正向**断言 |
+  | **M4 把 `installClaudioHooks` 重排到 `selectPack` 之前** | **四条错误码断言全绿**；新增的两条副作用断言红（`gui:669` 打印出真的躺进 settings.json 的四条 hook，`gui:715` 读 config.json 得 `nil`） | **坐实「错误码不绑执行顺序」** |
+  | M5 往 `Play.swift` 塞一个 raw string | 红 1：`unmodeledConstructs` 守卫，逐字点名构造与文件 | 新守卫有牙（不是又一条恒真式） |
+  | M6 把 URL 写进 doc comment / 行尾注释（三处） | helper 1090 + gui 1646 **全绿** | **没有假红** —— 这正是不把 ban 挪到 raw source 的理由 |
+
+  **台账自己抓出的一条弱断言**：`SourceScannerSuite` 的「空串 `""` 不吞掉后面的代码」第一版**没有牙** ——
+  它喂的输入里一个 `//` 都没有，于是任何「不会凭空发明注释」的实现都能过（包括它要杀的朴素截断版）。
+  已加强（行尾挂一条真注释，`""` 若被误读成开串则注释文本会活下来）；定向变异实测：只红这一条（`✗ 1 of 1090`），
+  而它的第一版在同一变异下全绿。**一条测试自己的断言，也可能是恒真的** —— 这就是为什么变异台账不能省。
+
+  **M4 的一个诚实补充（Codex 没说，台账发现的）**：那次重排**并非全无护栏** —— helper 的 `SetupSuite`
+  另有 4 条顺序不变式（`:153` / `:566` / `:786` / `:811`「必须在写 hooks 之前就失败——settings.json 不该被创建」）
+  **也红了**。所以它逃得过 GUI 那四条锁断言、逃不过 helper。Codex 的 P1 仍然成立（那条 suite 标题声称的
+  「config 那步必须放行」确实无人背书，且 **lockBusy 这条失败路径 helper 一条都没覆盖**），但严重性比它描述的低一档。
+
+- **~~扫描器「知道自己不认识什么」~~ —— 那张清单只认得 raw string，而它有第二个盲区：插值**
+  （`/codex review 2f107b5`，2026-07-13 已修）。上一条修的是「守卫读被它守的那个函数的输出」，这一条修的是
+  **同一节文字里紧接着的那句自夸**。扫描器不建模**字符串插值**，于是一句合法 Swift
+
+  ```swift
+  let hint = "\(fallback ?? "https://claudio.dev/locks")"; _ = write(lockFile: ClaudioPaths.playLockFile)
+  ```
+
+  里，插值内嵌套字符串的 `"` 被当成**外层串的结尾**，状态机倒相回代码模式，紧接着 URL 的 `//` 又成了注释
+  起点 —— 整行剪成 `let hint = "\(fallback ?? "https:`，那句锁**永久隐身**，而 `unmodeledConstructs`
+  **是空的**：两个包的守卫一个字都没说。**逐字是它自称已经治好的那个病。**（`helper/Sources` 里现存三处
+  插值嵌套字符串 —— `Doctor.swift:439`/`:443`、`Subcommands.swift:135` —— 至今没触发截断，靠的是引号奇偶数
+  凑巧对上，不是靠守卫。）
+
+  **现在**：插值是**被建模**的（`\(…)` 里面是代码，可嵌套，含独立的括号深度栈），枚举盲区补上 `#/…/#`
+  扩展 regex，另加**结构性失步兜底**（扫完没回到代码模式 / 单行串里撞见裸换行）。扫描器本体在两个包的
+  `// claudio:shared-scanner:begin/end` 哨兵区块里，**逐字节相同**，而这句「逐字节相同」由 `SourceScannerSuite`
+  的一条 suite**强制执行**（自带反恒真的正向控制：先证明自己确实抽到了那段代码，否则「两个空串相等」又是
+  一条恒真守卫 —— 第一版哨兵用 `contains` 匹配，被区块内部提到那两个 token 的散文骗到，正是这条正向控制
+  当场逮住的）。
+
+  同批还修了两条**措辞比覆盖范围大**的断言（Codex 的 P1-2 / P2）：
+  - `settings.json 必须一个字节都没被碰过` —— predicate 却只查「hook 里没有 claudioBinaryPath」。而
+    `hookCommands` 在文件不存在 / JSON 坏掉 / 没有 `hooks` 键时一律返回 `[:]`，空数组的 `allSatisfy` **恒真**：
+    一个被创建成 `{}` 的 settings.json 照样让它变绿。现改为**动作前后的字节快照相等**（`Data?` 的 `nil == nil`
+    逐字表达「没被碰过，也没被凭空创建」）。
+  - `config.json 里得躺着选中的包` —— predicate 却是 `contains("minimal-chime")`，在 `{"note":"minimal-chime"}`
+    上也为真。现改为解析 `selected_pack`。
+
+  **⚠️ 而这批修复的第一版，自己又留了四条没牙的断言**（变异台账当场逮住，第十一次）。根因值得写死在这里：
+
+  > **状态机倒相成 `.string` 并不吃代码** —— 字符串内容照样 `append`。只有倒相进 `.code`
+  > **而且那个位置上有 `//`**，才会开出一条假注释、把整行剩下的代码吃掉。
+
+  第一版那四条断言的输入，误判区里**一个 `//` 都没有**，于是变异版与原版输出**逐字节相同**，断言恒真。
+  修法统一：把 `//`（或一条真注释）放进误判区**内部**。四条全部重造输入并经定向变异实测。
+
+  **变异台账（两轮共 25 条，各自在独立 worktree 里跑真实测试，全部实测）**
+
+  第一轮（18 条，基线 helper 1110 / gui 1666）—— 逮出**我自己**的四条恒真断言：
+
+  | 变异 | 实测 | 结论 |
+  |---|---|---|
+  | M1 扫描器退回朴素截断 | helper 红 19 / gui 红 19，全在 `SourceScannerSuite` | 这道防线活着 |
+  | M2 移除插值建模（复原 P1） | 红 4 / 4（单行串那一半） | P1 修复有牙 |
+  | **M2C 同样移除 + 真实源码里藏锁**（控制组） | 那条锁断言**一条没红** | **逮住藏锁的正是「扫描器把插值建模对」这一件事** |
+  | M6 / M7 真实源码里藏锁（helper / gui，扫描器完好） | 各红 1，逐字点名文件 | 修好的扫描器真能逮住 |
+  | **M7C 同样藏锁 + 坏扫描器**（控制组） | gui 锁普查**没红** | 同上，反证成立 |
+  | **M3 插值栈退化成标志位** | **两个包 2776 条断言零红 —— 变异存活** | ❌ **那条断言恒真**（真 bug 穿过去了） |
+  | **M4 插值括号不计数** | **零红 —— 变异存活** | ❌ **那条断言恒真**（真 bug 穿过去了） |
+  | **M5 删掉转义对处理** | 只红 1（`\\(` 那两条**假绿** —— 行内自愈） | ❌ 半恒真 |
+  | **M2 的多行那一半** | **零杀伤** | ❌ suite 名字比杀伤力大 |
+  | **M8 删失步兜底** | 只红 2（4 个 note 站点里 **2 个零 fixture**） | ❌ 措辞比覆盖范围大 |
+  | M9 / M10 / M11 / M12 / M12C | 全部按期望变红 / 给出对照 | 有牙 |
+  | **M13 改 `CodingKeys`** | gui 目标断言没红 | ⚠️ **无效变异**：config 的**写**路径不走 Codable（`Use.swift:96` 是硬编码键），改 CodingKeys 只砸了读路径 |
+  | M14 无害 URL / 插值（假红检查） | 两个包**全绿** | **没有假红** |
+
+  第二轮（7 条定向验证，基线 helper 1115 / gui 1671）—— 加固之后重打那四条 + 一条**有效的** P2 变异：
+
+  | 变异 | 上一轮 | 加固后 |
+  |---|---|---|
+  | V1 插值括号不计数 | 存活（零红） | **helper 红 2 / gui 红 2** |
+  | V2 插值栈退化成标志位 | 存活（零红） | **红 1 / 1**（行尾那条真注释活下来了） |
+  | V3 删转义对处理 | 只红 1 条 | **红 3 / 3**（`\\(` 那两条不再假绿） |
+  | V4 删多行串的插值建模 | 零杀伤 | **红 1 / 1**（插值里那条块注释活下来了） |
+  | V5 删两个失步 note 站点 | 零 fixture，一条不红 | **红 2 / 2** |
+  | **V6 改 config 的写者键名**（`selected_pack` → `note`） | 上轮变异无效 | **gui 那两条解析断言红**（`得到：nil`） |
+  | **V6C 同变异 + 断言退回子串**（控制组） | —— | **变绿** ← P2 的论点首次被实证 |
+
+  V6/V6C 这一对是判决性的：磁盘上躺着 `{"note":"minimal-chime"}` —— **一个包都没选中**，而 `minimal-chime`
+  这个子串**照样在文件里**。解析版红、子串版绿。`contains(...)` 说得出的只是「这个字符串出现过」，
+  说不出「选包那一步真的跑完了」。
+
+  **两轮台账各自逮出的东西，性质不同，都必须记**：第一轮逮的是**新写的断言没牙**（4 条恒真 + 1 条无效变异），
+  第二轮逮的是**加固到底成没成功**。**一条测试自己的断言，也可能是恒真的** —— 而只跑一轮台账，看到的会是
+  「12/18 按期望变红」的漂亮数字，那四条恒真断言会安安静静地混过去。
+
+### ~~「三把锁互不阻塞」只有接线断言背书，没有一条行为级的持锁竞争测试~~ ✅ 2026-07-13 `/review e7c38ea` 大部已修
+
+**已补上的**（`OnboardingActionsSuite`，四条，全部经变异验证确认会 RED）：把 fixture **注入**的那把锁**真的持住**，
+再断言写必须在**哪一步**撞上 `.lockBusy` ——
+
+- 持 config.lock → 接管必须停在 `.setupFailed(.useFailure(.lockBusy))`（config.json 的写）；
+- 持 settings.lock → 接管必须**放行 config 那步**、停在 `.setupFailed(.installFailure(.lockBusy))`（settings.json 的写）；
+- 持 settings.lock → 断开必须 `.disconnectFailed(.lockBusy)`；
+- 持 config.lock → 断开必须**照常成功**（它一个字节都不写 config.json —— 这条防的是「多拿了一把不该碰的锁」）。
+
+**这四条只读返回的错误码，而错误码不绑执行顺序**（`/codex review be332ff` 的 P1，2026-07-13 已补）：把
+`installClaudioHooks` 重排到 `selectPack` 之前，四条**原样全绿**，而失败的接管已经在用户的 settings.json 里留下
+四条 hook。四条各自的**副作用**断言（settings.json 有没有被碰过 / config.json 有没有真的写完 / 四条 hook 一条不许少 /
+摘完之后磁盘真的干净）见上方 ④。「错误码不绑执行顺序」是「计数不绑调用点」（`/codex review 840ea37`）的同一个病，
+搬到了副作用层 —— **第九次**。
+
+**当初判它「测不到东西」的那个理由，对一半、错一半。** 原文写的是：「用注入的临时 fixture 路径测，断言从写下
+第一天起就恒真（两个临时路径本就互不相干）」。那句话对**「两把锁互不阻塞」**成立，对**「每个写者拿的是不是
+递给它的那把锁」**不成立 —— 后者一点都不恒真：把 `OnboardingActions.swift:599` 的 `configLockFile` 换成
+`ClaudioPaths.playLockFile`（或与 settings 那把**成对交换**），注入的那把锁**不再被争用**，接管当场**成功**（或停在
+**另一步**），断言立刻红。**恒真的是「两个不相干的路径互不阻塞」，不是「这条路径拿了哪把锁」。** 一个字之差，
+挡住了本来当天就能写的四条断言 —— 而在它们缺席的那段时间里，接管路径的三处锁转发（`OnboardingActions.swift`
+`:599` / `:600` / `:611`）**一条断言都没有**：它掉在 `LockSeparationSuite`（只读 `helper/`）与 `ViewWiringSuite`
+（`guiSources()` 只扫 `gui/Sources/ClaudioGUI`）**双方的盲区正中**。实测：把 `:599` 改成 `playLockFile` ——
+用户点下「接管」之后那几秒，他的每一声提示音被去抖锁静默吞掉 —— **1064 + 1607 全绿，零红**。
+
+**Effort:** M → **已完成**（行为断言那一半）
+**Priority:** ~~P2~~ → 剩余部分见下一条
+
+### 剩余的行为级缺口：`play` 与设置写之间的「互不阻塞」，仍然只有人工读码背书
+
+**What:** 上一条补的是「**每个写者拿的是递给它的那把锁**」（注入锁 + 持锁争用，够了）。它证明不了的是另一半：
+**「持有 play.lock 时点静音仍然成功」** —— 也就是分锁要兑现的那个行为本身。
+
+**Why:** 这一半要有牙，就必须锚定**生产默认值**（真实的 `~/.claudio/play.lock` 与 `~/.claudio/config.lock`）——
+用两个临时路径去测它，断言从写下第一天起就恒真（两个不相干的路径本来就互不阻塞），正是 D30 判定「测不到东西」
+的那类假绿。**这一条的前置条件是真的，上一条的不是**：区别在于前者断的是「两把锁之间的关系」（需要真锁），
+后者断的是「这条代码路径用了哪把锁」（注入锁就够）。
+
+**Context:** `ClaudioPaths.root` 锚在 `FileManager.default.homeDirectoryForCurrentUser`，**没有任何可覆盖的注入口**，
+而 Darwin 上 `$HOME` 会被忽略 —— 这类测试会真实地碰到当前用户的 `~/.claudio/`。所以前置条件是**先给
+`ClaudioPaths.root` 一个可覆盖锚点**，那是一次独立的基础设施改动。
+
+今天仍靠人工读码确认（`play` 读 config 在锁外；config 写是原子 rename；`play` 从不读 settings.json），
+**回归时没有灯会灭**。
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** `ClaudioPaths.root` 需要先获得可覆盖锚点（独立 PR，不要混进阶段 B 主音量滑块）
+
+### 全仓还有十几处「一个字节都不写」，背书它们的仍然只是**字节比较** —— 而字节比较看不见「写了又擦回去」
+
+**What:** `/codex review ee026db` 的 P2 指出：`fileBytes(after) == fileBytes(before)` 只证明**终态相同**，
+而写着这句话的失败消息声称的是「**一个字节都没被碰过**」。一个「写完再回滚」的实现（写下去 → 撞上锁 →
+把文件删/改回去）能让前后逐字相同，字节比较**全程绿**。
+
+这一条已在 **settings.json 的四条持锁路径**上治好了：`FileWriteWatch`（`gui/Tests/…/TestSupport.swift`）
+观测的是**事件**而不是状态差 —— 目录级 kqueue（`NOTE_WRITE|NOTE_DELETE|NOTE_RENAME`）逮住创建 / 原子替换 /
+删除，`stat(2)` 的 **ctime** 逮住「非原子的原地重写」（ctime 是 userspace 唯一伪造不了的字段：`utimensat`
+能把 mtime 按回过去，那一次调用自己却会把 ctime 顶到「现在」）。
+
+**没治的是同一族的其余声称**，它们今天全靠字节比较：
+`helper/Tests/ClaudioCoreTests/ConfigMutationSuite.swift`（`:126`、`:754`「fail closed 的含义是一个字节都不写」，
+`:686` 只读探针）、`SetupSuite.swift`（`:564`、`:791`、`:1065` 失败路径必须逐字保住用户的 config / 文件）、
+`gui/Tests/ClaudioGUICoreTests/ManifestBindingSuite.swift:302`（「一个字节都不写」）。
+
+**Why:** 严重性**低于** settings.json 那一族，而且理由是具体的、不是感觉：settings.json 有**不遵守
+claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所以那里的「窗口期」真的会被别人看见；上面这些
+路径上的 config.json / manifest 的并发读者是 claudio 自己，且都走原子 rename。**但这只是把风险降级，没有
+消灭它**：一次「写了又回滚」的窗口里，一个并发的 `claudio play` 照样可能读到半途的 config.json。
+
+真正的理由是：**这些断言的措辞，仍然比它们的覆盖范围大** —— 而这个仓库连着十一次栽在同一件事上。
+
+**修复方式:** `FileWriteWatch` 是现成的，把它按「按包复制而非跨包共享」的约定抄一份进
+`helper/Tests/ClaudioCoreTests/TestSupport.swift` 即可。⚠️ 两条硬约束，抄之前先读它文档里「它不兜什么」那节：
+① 目录那一半会因**同目录里的其它写者**假阳（`~/.claudio/` 在接管期间一直在被写：二进制、声音包、两把锁文件），
+所以它只能用在被观测文件是该目录唯一写者的时刻；② **每加一个用它的断言，都必须同时有一条正向对照**证明观测器
+在那条路径上真的会响 —— 一个观测不到写的观测器，会把每一条「没被碰过」变成恒真，那正是它要杀的病升了一层。
+
+**Effort:** M（每条断言都要配一次定向变异验证，不能批量替换了事）
+**Priority:** P2
+**Depends on:** None（工具已就绪）
+
+### `FileWriteWatch` 自己有两处 fail-open —— 一个观测不到写的观测器，会把每一条「没被碰过」变回恒真
+
+**What:** `/codex review 96ed71c` 的两条 P2，都打在 `FileWriteWatch`（`gui/Tests/…/TestSupport.swift`）身上 ——
+即上一条 TODO 指望「抄一份进 helper」的那个工具。**抄之前必须先修，否则是把两个洞抄成四个。**
+
+① **`kevent` 轮询失败被折叠成「没有目录事件」**：`sawDirectoryEvent = kevent(queue, nil, 0, &event, 1, &immediately) > 0`
+—— 返回 `-1`（`EINTR`、fd 被意外关闭/复用）和返回 `0`（真的没事件）走进**同一个分支**。`isArmed` 只兜得住
+**注册时**失败（7 处调用点都断言了），三条正向对照只兜得住**系统性**失明；谁都兜不住持锁 suite 真实跑的那一次
+**观测时**的 syscall 错误。而对 `nil → 写入 → 删除 → nil` 这类**正是它存在理由**的回滚窗口，身份快照也相等 ——
+于是断言静默变绿。零超时的 `kevent` 撞 `EINTR` 概率极低（不阻塞就没有可中断的睡眠），所以现实风险小；但这个
+文件通篇的论点就是「观测器必须 fail closed」，而它唯一能失败的 syscall 恰恰 fail open。
+
+② **dangling symlink 下两半同时瞎**：`settings.json` 是一条指向 dotfiles 的符号链接、而**目标不存在**时，
+`identityBefore = FileIdentity(of: file)` 走 `stat` → `nil`；穿链接的写落在 `dotfiles/`，未解析的 `dot-claude/`
+目录项一个都没动 → 目录 kqueue 全程安静。写 → 回滚删掉目标 → 终态又是 `nil`。**两半同时看不见。**
+而这个形状不是臆想：`SettingsInstallerSuite.swift:1277` 明确把「dangling settings.json symlink = 普通全新
+安装路径」钉成了**生产支持的行为**。新增的「写观测器③」用的是**目标已存在**的链接 —— 它钉的是 `stat` 的跟随
+语义，钉不到「before 就是 `nil`」这一支。
+
+**Why:** 今天**没有**任何断言因此假绿（四条持锁 suite 的 fixture 都是正规文件），所以不阻断 `96ed71c`。但工具
+文档里那节「**它不兜什么**」**没写 ②** —— 措辞又一次比覆盖范围大，而这一次是在专门用来杀这个病的工具自己的
+文档里。下一个人照着那节的承诺去用它，洞就跟着他走。
+
+**可能的修法:** ① 把 poll 结果**三分**为 event / no-event / error：`> 0` → 有事件；`== 0` → 没事件；`< 0` →
+`expect(false, ...)` 当场红（fail closed）。三行。② 在「它不兜什么」里写清 dangling symlink 这一支，并补一条
+正向对照（dangling link + 穿链接写 + 回滚 → 必须被看见），修法大概是身份快照那一半改成「`stat` 目标 + `lstat`
+链接本身」两个快照都拍。
+
+**Effort:** ① S（三行 + 一次定向变异）/ ② M（新对照 + 两轮台账）
+**Priority:** P2（不阻断本分支；**但阻断「把 FileWriteWatch 抄进 helper」那条 TODO** —— 别把洞抄一遍）
+**Depends on:** None
+
+### 一次性备份写在乐观闸门**之前** —— 一次 `.concurrentModification` 中止会留下一份 install 从没写过的永久备份
+
+**What:** `installClaudioHooksLocked` 的顺序是 `backupOriginalIfNeeded`（`:317`）→ `atomicWrite`（`:322`，
+里面才做 `expectedCurrentData` 的乐观并发重读）。于是：外部写者（Claude Code 自己 / 用户的编辑器）在读与写之间
+改了 `settings.json` → `atomicWrite` 正确地中止并返回 `.concurrentModification`、**一个字节都没写** —— 而
+`.claudio.bak` **已经落盘了**，且按「一次性备份」的纪律**永不刷新**。
+
+于是 `SettingsInstaller` 类头那条不变式是**假的**：「the pre-claudio original is copied to
+`settings.json.claudio.bak` **the first time `install` actually writes**」—— 它可以在 install **从没写过**的
+情况下就存在。
+
+**Why:** 行为影响比「备份非原子」那条小得多（已修：`options: .atomic`）：备份的**内容**仍然是 claudio 真实
+读到的那份原件（`loadRoot` 的 `rawData`，不是重读的），所以它不是坏数据，只是**时机**不对 —— 它记录的是一次
+被中止的 install 所看到的世界。真正要紧的是那句类头注释**在撒谎**，而这个仓库的规矩是：假注释就是 bug。
+
+**可能的修法:** 把乐观闸门从 `atomicWrite` 里拆出来、提到 `backupOriginalIfNeeded` **之前**跑；或者退一步，
+只把类头 `:26-27` 那条不变式改成实话（「the first time install **attempts** a write」）。前者是真修，后者是
+止损 —— 但**别只做后者然后当成修好了**。
+
+**Effort:** S（改注释）/ M（拆闸门）
+**Priority:** P3
+**Depends on:** None
+
+### 升级窗口：旧 CLI（拿 play.lock 写 config）与新 GUI（拿 config.lock）并存时会丢一次设置更新
+
+**What:** 两把不同的锁之间，原子 rename **只防撕裂、不防 lost update**。旧 `~/.claudio/bin/claudio` 拿 play.lock
+写 config.json，新 GUI 拿 config.lock 写同一个文件 —— 它们不互相串行。最坏是丢一次设置更新，且**报 `.success`**（静默）。
+
+**Why:** 原台账把这条写成「GUI 是单进程、`claudio use` 是手动，实际不可达」—— **不成立**。这不是一个「窗口」，
+是一个**无限期常驻**的状态。helper 二进制只在 `performFirstRunSetup` 里刷新；GUI 确实会调它
+（`OnboardingActions.swift:597`），但**只从 takeOver / 修复那条 CTA 出发，而那颗按钮只在 `.notInstalled` /
+`.helperMissing` 时才渲染**。也就是说：一个**已经 `.installed`** 的用户升级 app 之后，永远不会再跑一次 setup ——
+`~/.claudio/bin/claudio` 就**长期停留在旧版**，与新 GUI 并存。（⚠️ 本条 2026-07-12 首版写的是「GUI 从不调用它
+（`gui/Sources/` 零命中）」—— 那是**假的**，一条 grep 就会命中，且命中的正是阶段 A 自己改过的文件。结论不变，
+理由已换成真的那个。）
+
+**Context:** 2026-07-12 阶段 A 侦察 S4 + Codex #6 更正。真修 = config 写路径加**乐观并发重读** —— 与 `config.json`
+写路径缺 symlink 解析那条（本文档「GUI 写/读路径的同用户 symlink TOCTOU」）是同一处加固，建议合并处理。
+
+**⚠️ 这一条是一个更大的洞的实例，不是那个洞本身**（2026-07-13 `/codex review 803c639,b74b7f3` 更正）：真正的根因是**升级根本不换 helper**（见「静默失败」段落里那条 P1）—— 锁分离只是第一个撞上它的东西。把根因修了，这一条自然消失；只修这一条（给 config 写路径加乐观并发重读）是**对的加固**，但它盖不住下一个撞上同一堵墙的 helper 修复。**两条一起看，别把这条的 P3 当成那条的定级。**
+
+**Effort:** M
+**Priority:** P3（需要用户在旧 CLI `claudio use` 与新 GUI 之间并发写；**根因那条是 P1**）
+**Depends on:** None
 
 ### CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0
 
@@ -178,6 +519,47 @@ GUI 侧的切包画廊只列**解析得出来**的包，所以主动线暂时安
 
 **Effort:** S（一条提示条）/ M（带「换回去」＋「打开备份目录」）
 **Priority:** P2
+**Depends on:** None
+
+### 更坏的一半：install **失败**时，那两句 ⚠ 连 CLI 都没有 —— 而副作用已经落盘，且重试**永远不会**补发
+
+**What:** 上一条说的是「GUI 的**成功**路径把 `SetupOutcome` 接住就扔了」。失败路径更糟，而且是**结构性**的：
+
+`SetupError`（`Setup.swift:221-275`）的每一个 case 只带 `reason: String` 或子错误 —— **没有任何字段能承载
+`[SalvagedPack]` / `PackSelectionOutcome`**。而 `performFirstRunSetup` 的副作用顺序是：复制二进制 → **搬走坏包**
+（`:403-431`，`moveItem` 到 `packs/.<id>.broken-<pid>` + `salvagedPacks.append`）→ 复制干净的内置包 → **写 config**
+（选包）→ **写 hooks**（`:551`，`installClaudioHooks`）。
+
+也就是说：**做主的那两个副作用，发生在可能失败的那一步之前。** 一旦最后一步失败（`.lockBusy` / `.notWritable` /
+`.malformedHooksSection` / `.concurrentModification` —— 后三个每次重跑都一字不差地失败），`:562` 就
+`return .failure(.installFailure(error))`，`salvagedPacks` 就地丢弃。CLI 只 `print("✗ \(error.description)")`
+（`Subcommands.swift:117`，那句带绝对路径的 ⚠ 只在 `printSetupSummary` 的成功分支）；GUI 只
+`actionState = .failed(...)`（`OnboardingViewModel.swift:344-346`）。
+
+**而且补不回来**：用户按提示「再点一次」，这一次 `isUsablePack(minimal-chime)` 已经为真（上一轮刚盖了一份干净的）
+→ `:392` 直接 `continue` → `salvagedPacks` 恒空 → **就算这次成功，告知也永远不会再生成**。
+
+净结果：用户的包目录（里面可能有他自己导入的音频）被搬进了一个**每一个界面都过滤掉**的点开头目录
+（`availablePackIDs` 与 `PackGallery` 都显式过滤 `.` 开头），而唯一一条载着 `movedTo` 绝对路径的消息被丢弃了。
+`SalvagedPack` 自己的文档（`Setup.swift:186-190`）写的是：「**现在它是 outcome 的一等公民**」——
+它只是**成功** outcome 的一等公民。
+
+**Why:** 缓解是真的：`moveItem` 一个文件都没删，`AudioImport` 也只复制不移动源文件，所以用户拖进来的原件通常
+还在 Desktop / Downloads。**但这只是把「丢数据」降级成「藏数据」**：菜单栏 app 的用户，Finder 默认不显示点目录，
+app 内每一个界面又都过滤它 —— 我们替他做了主，然后在唯一一次该开口的时候闭嘴了。
+
+⚠️ **这条不是锁分离引入的**：`.malformedHooksSection` / `.notWritable` / `.concurrentModification` 在 `main` 上
+就走得出同一条路。锁分离只是给它新增了一条 `.lockBusy` 触发方式。**别让一条 147 行的锁分离分支扛它。**
+
+**可能的修法:** 让 `SetupError` 带得动部分结果 —— `case installFailure(SettingsUpdateError, salvaged: [SalvagedPack],
+packSelection: PackSelectionOutcome)`；`OnboardingActionFailure` 跟着带上 notices；GUI 的 `.failed` 分支与 CLI 的
+`print("✗ …")` 都把那行 ⚠ + 绝对路径打出来。与上一条（成功路径的提示条）**是同一处改动的两半，建议合并做**。
+
+**Context:** 2026-07-13 生产代码 diff 的六路对抗 review（lock-semantics / assume-broken 两个镜头独立命中）。
+上一条 TODO 只覆盖了成功路径的 GUI 侧，失败路径**两边都没有** —— 而失败路径才是副作用真的会留在磁盘上的那条。
+
+**Effort:** M
+**Priority:** P1（用户损害面：可能藏掉他磁盘上唯一一份自导入音频，且不可补发）
 **Depends on:** None
 
 ### `claudio` 可执行 target 的输出从来没有被测过一行 —— T17e 那两句 ⚠ 是产品语义，却住在测试够不到的地方
@@ -469,7 +851,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Context:** 2026-07-11 `/ship` plan-completion 审计发现；同日 `/plan-eng-review`（四段 + Codex 外部声音）产出锁死方案，**并推翻了本条原有的两句修法**：
 
 - ~~「DESIGN.md 已定义其视觉」~~ —— **假的**。DESIGN.md 全文 grep `滑块|slider|轨道|track|thumb|拨杆` **零命中**，滑块长什么样从来没人定过。而 macOS 原生 `Slider` 的填充色默认跟**系统强调色**（用户在系统设置里选的），会把一个设计系统外、且 claudio 控制不了的颜色带进面板 —— 直接违反 DESIGN.md「品牌强调只有一个（黏土）」与 `DesignTokens.swift:17`「不得新增 DESIGN.md 里没有的颜色」。
-- ~~「第三个写者照抄即可」~~ —— **照抄就是 bug**。`setEventEnabled` 拿的是 `play.lock`（见本文件第一条 P1），逐帧写盘会把「吞掉提示音的窗口」开成一片。
+- ~~「第三个写者照抄即可」~~ —— **照抄就是 bug**，但**理由已经换了一条**（⚠️ 2026-07-12 阶段 A 锁分离后更正；原文写的是「`setEventEnabled` 拿的是 `play.lock`，逐帧写盘会把『吞掉提示音的窗口』开成一片」—— 那句话现在是**假的**：`setEventEnabled` 与 `selectPack` 拿的是 `config.lock`，`play` 拿 `play.lock`，逐帧写 config **再也吞不掉提示音了**）。真正的理由是另外两条，且都还站着：① 主音量是**第三个 `config.lock` 写者**，逐帧写盘会让它与切包 / 静音**互相**撞 `.lockBusy`（`withNonBlockingLock` 是**非阻塞**的：撞上就是 `.skipped`，不是排队等），拖一次滑块就能让用户同时点的静音假失败；② 该值没有实时消费者，逐帧写盘是纯成本。**结论（松手才写）不变，别顺着那条死掉的 `play.lock` 论据把它推翻。**
 
 **锁死的方案（14 项决议，全文见 `/plan-eng-review` 产出）要点：**
 - **松手才写**（`Slider(onEditingChanged:)`）—— 该值没有实时消费者（`claudio play` 每次 spawn 重读 config），拖动中间值无人可见，逐帧写盘是纯成本。ENGINEERING.md 交互状态覆盖表的「拖动即时改 config」需改为「松手即时落盘」并记理由。
@@ -537,7 +919,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 ### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂（原 4 项 lake-not-ocean，只剩这 1 项）
 
-**What:** `setEventEnabled` 真并发写（`DispatchQueue.concurrentPerform` 多线程同时切同一/不同事件）——现仅有「一个持锁者 + 一个等待者」的 lock-busy 测（`EventEnabledSuite`「shares play.lock with selectPack」），未证真并发下 read-modify-write 不撕裂。`LogSuite` / `PlaySuite` 已有 `concurrentPerform` 的先例可照抄。
+**What:** `setEventEnabled` 真并发写（`DispatchQueue.concurrentPerform` 多线程同时切同一/不同事件）——现仅有「一个持锁者 + 一个等待者」的 lock-busy 测（`EventEnabledSuite`「shares play.lock with selectPack」——⚠️ suite 名里的 `play.lock` 是 2026-07-12 阶段 A 锁分离之前的旧名，它今天串行的是 `config.lock`），未证真并发下 read-modify-write 不撕裂。`LogSuite` / `PlaySuite` 已有 `concurrentPerform` 的先例可照抄。
 
 **Why:** 「lake」型补测：镜像已有 happy-path 结构、钉住一条当前未覆盖的分支。无功能风险，纯回归网加固。
 
@@ -695,17 +1077,15 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None（需要先拍板 ①②④ 的取值）
 
-### 「断开连接」是全 app 唯一一条会与正在发声的 `claudio play` 抢 `play.lock` 的写路径
+### ~~「断开连接」是全 app 唯一一条会与正在发声的 `claudio play` 抢 `play.lock` 的写路径~~ ✅ 2026-07-12 阶段 A 已修
 
-**What:** `disconnectRow` 只在 `.installed` 渲染 —— 而 `.installed` 的定义就是「四条 hook 都在」，也就是**每一个 Claude Code 事件都会 spawn 一次 `claudio play`**，而 `play` 与 `uninstallClaudioHooks` 共用同一把 `play.lock`（`SettingsInstaller.swift:216` → `.skipped` → `.lockBusy`）。
+**What（原文，留档）:** `disconnectRow` 只在 `.installed` 渲染 —— 而 `.installed` 的定义就是「四条 hook 都在」，也就是**每一个 Claude Code 事件都会 spawn 一次 `claudio play`**，而 `play` 与 `uninstallClaudioHooks` 共用同一把 `play.lock`（`SettingsInstaller.swift:216` → `.skipped` → `.lockBusy`）。用户越是在正常用 Claude Code，点「断开」就越容易吃到一条 `.disconnectFailed(.lockBusy)` **假失败**。
 
-**Why:** 用户越是在正常用 Claude Code，点「断开」就越容易吃到一条 `.disconnectFailed(.lockBusy)` **假失败**。对照之下「接管」不受影响：takeOver 只从 `.notInstalled` / `.helperMissing` 出发，那时要么没有 hooks、要么 helper 跑不起来，`play` 拿不到锁。所以 T17 把 setup 搬进 GUI **没有**加剧 play.lock（与直觉相反），但它新造的**断开**按钮，第一次把 TODOS 里那条 P1 推到了 UI 表层。
+**如何被消灭的:** 这条的 **Depends on** 指向的那条 P1（`play.lock` 被 config / settings 写者共用）在同一个 commit（803c639）里被根治，本条随之消失 —— 正如它自己预言的「那条 P1 的根治会顺带消灭这一条」。今天 `uninstallClaudioHooks` 拿 `settings.lock`（`SettingsInstaller.swift:190`，GUI 侧 `OnboardingActions.swift:607` 显式传 `environment.settingsLockFile`），`claudio play` 拿 `play.lock` —— 断开与正在发声的 play **不再共用任何一把锁**，那条假失败的路径已经不存在。
 
-**Context:** 2026-07-12 T17c 红队。短期修法：`.lockBusy` 单独出一条更准的文案（「Claude Code 正在响，稍等一两秒再点一次」），别与真正的写失败混为一谈；或在 lockBusy 时自动重试 2–3 次（指数退避 100/300/700ms —— 这是一把非阻塞锁，重试安全且几乎必然成功）。根治仍是那条 P1：把 `play.lock` 拆成 play 专用锁与 config/settings 写锁。
+原先提的两条短期缓解（给 `.lockBusy` 单独出一条「Claude Code 正在响，稍等一两秒」的文案；lockBusy 时指数退避重试 2–3 次）**一并作废** —— 它们是为一个已经消失的争用准备的。
 
-**Effort:** S
-**Priority:** P2
-**Depends on:** 「`play.lock` 被 config / settings 写者共用」（那条 P1 的根治会顺带消灭这一条）
+**Completed:** 2026-07-12（阶段 A 锁分离，803c639）
 
 ### 「下面的声音包」与告知行的位置断言，在 onboarding 卡上都是假的
 
@@ -842,7 +1222,7 @@ enqueue 之前 —— 它就**先跑**：`actionState → .idle`、view-model �
 
 ### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂
 
-**What:** `setEventEnabled` 的 config 读-改-写在本分支里**新**被纳入 `play.lock`（此前无锁），但只测了锁竞争（1 持有者 + 1 等待者），没有任何 `DispatchQueue.concurrentPerform` 测试证明这条 RMW 在真并发写下不撕裂。
+**What:** `setEventEnabled` 的 config 读-改-写在本分支里**新**被纳入 `play.lock`（此前无锁；⚠️ 这是 2026-07-11 的历史记录 —— 2026-07-12 阶段 A 锁分离后它拿的是 `config.lock`，见本文件那条已划掉的 P1），但只测了锁竞争（1 持有者 + 1 等待者），没有任何 `DispatchQueue.concurrentPerform` 测试证明这条 RMW 在真并发写下不撕裂。
 
 **Why:** 「被本分支改掉行为、却没有覆盖变更后路径」的定义就是回归缺口——覆盖率审计把它列为整个 diff 里唯一的 REGRESSION GAP，优先级最高。`PlaySuite.swift` 里已有现成的同形状测试（真并发证明「恰好一个播放」）可以 1:1 照抄。
 
@@ -899,3 +1279,99 @@ enqueue 之前 —— 它就**先跑**：`actionState → .idle`、view-model �
 **Priority:** P3
 **Depends on:** 线 173 的 T15 真机手验同批（若引入 ViewInspector 则可本机）
 **Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+## 写盘原子性：这一刀（`/codex review 3af8d5f` 的修复）**没**收进去的那几条
+
+### `.atomic` 不是掉电安全 —— 全仓没有一处 `fsync` / `F_FULLFSYNC`
+
+**What:** `Data.write(options: .atomic)` = 同目录临时文件 + `rename(2)`。`rename` 对**目录项**是原子的，
+所以**进程被 kill** 之后终态只有「没有」和「完整」两种 —— 这一半是真的。但 POSIX **不**保证掉电时临时文件的
+**数据块**先于那条目录项落盘：APFS 实践上大多会排序，规范上不保证。于是掉电之后，一个**目录项已经改好、
+内容却是零长度 / 半截**的 `.claudio.bak` 在原理上是可能的 —— 而那正是「一次性备份 + `fileExists` 闸门」
+最怕的东西（它认不出残缺）。
+
+**Why:** 行为风险低（要真正撞上得掉电撞在那个毫秒窗口里），但**措辞风险是满的**：commit `3af8d5f` 的正文与
+它写进生产注释的那段散文，都白纸黑字声称了「掉电」。那是这个仓库栽了十五次的同一个病（措辞比覆盖范围大）。
+注释已经改成实话（只声称 kill），但**能力**本身还没补。
+
+**可能的修法:** 写完临时文件后 `fcntl(fd, F_FULLFSYNC)`，`rename` 之后再 fsync 一次父目录 —— 这要绕开
+`Data.write(options:)`，自己拿 fd 写。代价：`.claudio.bak` 那一处（一次性、路径短）值得；`config.json` /
+`play.state` 那种高频写不值得（F_FULLFSYNC 在 macOS 上是真的慢）。所以它**不是**一条全仓不变量，
+而是一条「哪些文件配得上掉电安全」的分级政策 —— 那需要先想清楚，不该混在一次 bugfix 里。
+
+**Effort:** M（自己拿 fd 写 + 一条分级政策 + 台账）
+**Priority:** P3（不阻断发布：注释已经不再撒谎，而真实风险窗口极窄）
+**Depends on:** None
+
+### 一份 0600 的 `settings.json`，备份成了一份 0644 的 `.claudio.bak`
+
+**What:** 本机实测（Darwin 25.5, umask 022）：`Data.write(options: .atomic)` 写到一个**已存在**的目标会保留
+它原来的 mode（所以 `settings.json` 那一处 `:618` 没问题），但写一个**新**文件时 mode 走 umask → 0644。
+而 `.claudio.bak` **永远是新文件**（`!fileExists` 闸门保证了这一点）。于是一个把 `~/.claude/settings.json`
+chmod 到 0600 的用户（它可以装着 API key —— hook 命令、`env` 段），拿到的备份是**全世界可读**的。
+
+**Why:** 这不是这一刀引入的（上一版的非原子 `write(to:)` 同样走 umask），但它是**这一刀的邻居**，而且是
+一次真实的权限放宽。修法本身很短：备份写完之后按源文件的 mode `setAttributes` 一次。
+
+**Effort:** S（三行 + 一条断言）
+**Priority:** P2（安全相关，但需要用户自己先 chmod 过 —— 不是默认路径）
+**Depends on:** None
+
+### `~/.claudio/bin` 用 `createDirectory` 无显式 mode 建成 —— 松 umask 下组/世界可写，而里面的二进制每个事件都被 exec
+
+**What:** 本机实测（Darwin 25.5）：`copySelfToFixedLocation` 里 `createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)`（`Setup.swift:677`）**不传 `attributes:`**，于是新建的 `~/.claudio/bin`（及 `~/.claudio`）的 mode 走 umask：umask 022 → 0755（安全），umask 002 → **0775（组可写）**，umask 000 → 0777。而 `~/.claudio/bin/claudio` 正是 `settings.json` 四条 hook 每个 Claude Code 事件都 exec 的那个二进制。目录若组/世界可写，同组或本地另一个用户就能替换它（或抢先占用可预测的 `.claudio.tmp-<pid>` 暂存名）→ 下一个事件即以受害者身份**执行任意代码**。本分支的原子发布只加固了「崩溃/kill 时的完整性」，没有约束它发布进去的那个目录的**权限**。
+
+**Why:** 默认 macOS umask 是 022 → 0755，所以**默认单用户 Mac 打不到**；触发需要「非默认松 umask（MDM / 某些 dotfiles 会设 002）+ 多用户机 + 同组敌手」。但代价是代码执行，量级高于它的孪生项。修法很短：`~/.claudio` 与 `~/.claudio/bin` 显式建成 `0700`（`createDirectory(attributes: [.posixPermissions: 0o700])`，并对存量目录 `setAttributes` 兜底），无论用户 umask 是什么，被 exec 的二进制都不可能落在一个组/世界可写的目录里。与上一条（`.claudio.bak` 的 0644）是**同一形状的孪生**：都是「新建 filesystem 对象不传显式 mode → 继承 umask → 在一个安全敏感的位置放宽了权限」，建议一并修。
+
+**Context:** 2026-07-13 `/review feat/lock-separation` 的 security specialist（Claude 侧，opus）实测命中，Codex 对抗评审未报。台账此前只有文件侧（`.claudio.bak` 0644），漏了目录侧这条 exec 劫持路径。
+
+**Effort:** S（一行 `attributes:` + 一次存量 `setAttributes` 兜底 + 一条断言）
+**Priority:** P2（安全相关，但默认 umask 022 已使其不可达 —— 需用户/MDM 先设松 umask + 多用户机）
+**Depends on:** None
+
+### `claudio install` 在一台从没有过 `settings.json` 的机器上，照样说「备份见 settings.json.claudio.bak」
+
+**What:** `hooksOutcomeMessage(.installed)`（`Subcommands.swift:167`）**无条件**印出那句备份提示。而
+`backupOriginalIfNeeded` 在 `originalData == nil` 时**直接 `.success(())` 返回、什么都不写**（`:572`）——
+那正是「用户装了 Claude Code 但从没有过 `settings.json`」的常见全新态。于是 CLI 指着一个**不存在的文件**
+说「你的备份在这儿」。
+
+**Why:** 「假注释就是 bug」这条规矩对**印给用户看的字**只会更严。它不会弄坏任何东西，但它是一句假话，
+而这个产品的整个信任叙事（onboarding 的「会搞坏我现有配置吗？」→「自动备份」）就压在这句话上。
+
+**Effort:** S（把 outcome 带上「有没有真的写过备份」这一位）
+**Priority:** P2
+**Depends on:** None
+
+### `probeSettingsWritable` 探的是**文件**能不能写，而备份与原子写要的是**目录**能不能写
+
+**What:** `probeSettingsWritable`（`SettingsInstaller.swift:548`）对 `settings.json` **这个文件**调
+`isWritableFile`（底下是 `access(W_OK)`）。但 `.claudio.bak` 的创建、以及 `.atomic` 的「同目录临时文件 +
+rename」，要的都是**父目录**的写权限。`chmod 0500 ~/.claude`（MDM / 安全工具真的会这么干）而
+`settings.json` 本身仍是 0644 时：探测说「可写」→ `OnboardingDetector` 跳过 `.settingsNotWritable` →
+面板画的是「让 Claude Code 学会开口……还会自动留一份备份」→ 用户点接管 → 备份写失败 →
+`.backupFailure` → 面板回到同一张卡 → **他再点一次，永远。**
+
+**Why:** 这是一条**用户可见的死循环**，而且它的错误卡（`.settingsNotWritable`，那张会告诉他去改权限的卡）
+就在几行之外、只是够不到。
+
+**Effort:** S（探测改成同时探父目录，或直接试一次 `.atomic` 写）
+**Priority:** P2
+**Depends on:** None
+
+### 围栏的词汇表仍是一张枚举清单 —— 真要闭合，只能上 SwiftSyntax
+
+**What:** `AtomicWriteSuite` 的极性已经翻过来了（认不出 ⇒ 红），但它认「写盘调用」靠的仍然是一张**词法**
+词汇表（`byteWritingMembers` / `byteWritingFunctions` / `pathPublishing*` / `subprocess*`，故意过宽）。
+一个它**没听说过**的写盘 API（某个第三方库的 `save(to:)`、一个 `@_silgen_name` 直连的 syscall）仍然能溜过去。
+
+**Why:** 这是这条不变量今天**唯一**的假绿通道，而且文件头已经照字面写清了它（措辞不比覆盖范围大）。
+它比上一版好在：漏一个词的代价从「那类写盘永久隐身」降到了「那**一个** API 隐身」，而且过宽的词汇表让
+误伤的代价只是台账里多一行。
+
+**可能的修法:** 用 SwiftSyntax 解析 AST，把「所有函数调用的被调用方名字」整个抽出来，与一张**允许出现在
+生产码里的调用名**清单比对 —— 那样「我没听说过」就真的不可能是绿的了。代价：一个新依赖 + 测试包变重。
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** None
