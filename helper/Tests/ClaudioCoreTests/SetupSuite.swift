@@ -98,6 +98,53 @@ func runSetupSuites() {
         }
     }
 
+    suite(
+        "performFirstRunSetup: 目标是一条指向真实文件的 symlink —— 必须发布出一份常规二进制，不能永久失败"
+    ) {
+        // 回归测试（`/codex review 3af8d5f` 红队实测逮住）：「原子发布」那一刀用 `fileExists` 判目标
+        // 存不存在，而 `fileExists` **跟随 symlink**；`replaceItemAt` / `moveItem` 却是 lstat 语义。
+        // 于是 `~/.claudio/bin/claudio` 是一条指向真实文件的 symlink 时，`fileExists` 说「在」→ 走
+        // `replaceItemAt` → 它 lstat 看见那条链接、当场抛 → `.binaryCopyFailure`、二进制永不发布、
+        // hooks 永不写、**每一次重跑都一字不差地失败**。姊妹的包复制路径（`Setup.swift:403`）早就为
+        // 这个 bug 从 `fileExists` 换成了 `attributesOfItem`（lstat）—— 二进制路径当时漏了。
+        withTempDirectory { root in
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            let destination = environment.claudioBinaryDestination
+
+            // 一台机器：`bin/claudio` 是一条指向别处一份真实（旧）二进制的软链接。
+            try? FileManager.default.createDirectory(
+                at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let elsewhere = root.appendingPathComponent("some-old-claudio")
+            try? Data("#!OLD-EXTERNAL".utf8).write(to: elsewhere, options: .atomic)
+            try? FileManager.default.createSymbolicLink(at: destination, withDestinationURL: elsewhere)
+
+            let result = performFirstRunSetup(environment: environment)
+
+            // 发布之后：`bin/claudio` 必须是一份**常规文件**（不再是链接），内容是新的、可执行。
+            let attributes = try? FileManager.default.attributesOfItem(atPath: destination.path)
+            expect(
+                attributes?[.type] as? FileAttributeType == .typeRegular,
+                "覆盖一条 symlink 之后，`bin/claudio` 必须是一份**常规文件**（旧算法就是这么做的："
+                    + "removeItem 删掉链接、copyItem 写一份新的）。实际 type = "
+                    + "\(attributes?[.type].map { "\($0)" } ?? "<不存在>")。"
+                    + "还是 symlink = 用了 `fileExists`（跟随链接）而不是 lstat，"
+                    + "`replaceItemAt` 当场抛，二进制永不发布，setup 每次重跑都失败：\(result)")
+            let published = try? String(contentsOf: destination, encoding: .utf8)
+            expect(
+                published == "#!fake-binary-fixture",
+                "发布之后磁盘上必须是**新**的那份二进制，实际是 \(published ?? "<读不到>")")
+            expect(
+                (attributes?[.posixPermissions] as? NSNumber).map { ($0.uint16Value & 0o111) != 0 }
+                    ?? false,
+                "发布出来的二进制必须可执行")
+            // 那份被指向的旧文件不该被动过（我们删的是**链接**，不是它指向的东西）。
+            expect(
+                (try? String(contentsOf: elsewhere, encoding: .utf8)) == "#!OLD-EXTERNAL",
+                "removeItem 删的必须是 symlink 本身，不是它指向的那份文件 —— 后者一个字节都不该动")
+        }
+    }
+
     suite("performFirstRunSetup: running from inside a bundle copies binary + pack, selects default, installs hooks") {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))

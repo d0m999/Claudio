@@ -460,6 +460,53 @@ func runSourceScannerSuites() {
             "块注释必须被剥掉。得到：\(scanned.code)")
     }
 
+    // MARK: `codeWithoutStringLiterals` —— 字符串内容清空、界定符与插值代码保留
+    //
+    // ⚠️ 上一版这个字段的行为**只**由 helper 包的 `AtomicWriteSuite` suite ③ 钉着（`/codex review
+    // 3af8d5f` 红队命中）。而它是**共享**扫描器的输出：gui 包里逐字节相同的那一份，`AtomicWriteSuite`
+    // 不在那儿跑 —— 于是共享扫描器的这半个契约，在 gui 包里一条正向断言都没有。这个 suite 是**共享**
+    // 的（跟着哨兵区块一起复制进两个包），所以现在两个包各自都钉住了它。
+
+    suite("扫描器：`codeWithoutStringLiterals` 清空字符串**内容**、但界定符与插值里的代码原样留下") {
+        // 字符串内容清空：里面的 `(` 不许把「按配平括号取实参」的扫描带偏（`"pack (1.json"` 那个 bug）。
+        let paren = strippingComments(#"let p = f("pack (1.json", .atomic)"#)
+        expect(
+            !paren.codeWithoutStringLiterals.contains("pack (1.json"),
+            "字符串**内容**必须清空。得到：\(paren.codeWithoutStringLiterals)")
+        expect(
+            paren.codeWithoutStringLiterals.filter { $0 == "(" }.count
+                == paren.codeWithoutStringLiterals.filter { $0 == ")" }.count,
+            "清空之后括号必须配平（串里那个 `(` 不能留下）。得到：\(paren.codeWithoutStringLiterals)")
+        // 界定符保留：开闭引号是**代码位置**，去掉它们会让引号奇偶倒相。
+        expect(
+            paren.codeWithoutStringLiterals.filter { $0 == "\"" }.count == 2,
+            "开闭引号（界定符）必须留下，只清内容。得到：\(paren.codeWithoutStringLiterals)")
+
+        // 一句写着 `.write(to:` 的**散文串**不许变成调用点。
+        let prose = strippingComments(#"let hint = "改成 data.write(to: f) 就好了""#)
+        expect(
+            !prose.codeWithoutStringLiterals.contains("write(to: f)"),
+            "字符串里的散文清空后不能再像一处调用。得到：\(prose.codeWithoutStringLiterals)")
+
+        // 插值 `\(…)` 里面是**代码**，不是内容 —— 清空字符串绝不能把它一起吃掉
+        // （`/codex review 2f107b5` 那个 P1 的形状：一处藏在插值里的写调用永久隐身）。
+        let interp = strippingComments(##"log("wrote \(write(lockFile: ClaudioPaths.playLockFile)) ok")"##)
+        expect(
+            interp.codeWithoutStringLiterals.contains("playLockFile"),
+            "插值里的代码是代码，必须活着 —— 把它一起清空 = 藏在插值里的写调用永久隐身。"
+                + "得到：\(interp.codeWithoutStringLiterals)")
+        // 而插值**外面**的串内容仍要清掉。
+        expect(
+            !interp.codeWithoutStringLiterals.contains("wrote"),
+            "插值外的字符串内容仍要清空。得到：\(interp.codeWithoutStringLiterals)")
+
+        // 换行保留：行结构塌掉会让失败消息里的行号变成谎话。
+        let multiline = strippingComments("let a = \"x\"\nlet b = \"y\"")
+        expect(
+            multiline.codeWithoutStringLiterals.contains("\n"),
+            "换行必须留下（行号 = 失败消息的可读性）。得到：\(multiline.codeWithoutStringLiterals)")
+    }
+
     // MARK: 两个包里的那一份，逐字相同 —— 这条不再是注释里的承诺
 
     suite("扫描器：两个测试包里的哨兵区块**逐字节相同**（`/codex review 2f107b5` 的 P2）") {

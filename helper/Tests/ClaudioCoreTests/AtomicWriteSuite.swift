@@ -37,9 +37,19 @@ import Foundation
 //   **「凡是能把字节送进一个文件、或把一个文件放到一条路径上的调用，此刻出现在哪些生产文件里？
 //     这份名单必须**逐字**等于台账。」**
 //
-// 于是失效模式反过来了：一个**我没建模的**写盘 API（`createFile`、`fopen`、`OutputStream`、
-// `NSKeyedArchiver`、一个 `Process()` 起的子进程…）出现在任何一个生产文件里 → 台账对不上 → **当场红**，
-// 作者必须回来把它分类。**认不出 ⇒ 红**，而不是 ⇒ 绿。这是这条绊线与上一版唯一的、也是全部的区别。
+// 于是**在词表覆盖到的那部分写盘表面上**，失效模式反过来了：一处 `createFile` / `fopen` /
+// `OutputStream` / `NSKeyedArchiver` / 一个 `Process()` 起的子进程 —— 上一版 needle 完全看不见、
+// 因而**全绿**的那些 —— 现在会让 surface 多出一个 token、台账对不上、**当场红**。这是与上一版的
+// 实质区别：探测的写盘出口从 1 个（`.write(`）涨到了几十个，而它们的失效方向是**红，不是绿**。
+//
+// ⚠️ 但**别把这句话读成绝对的**（`/codex review 3af8d5f` 红队实测命中，措辞比覆盖范围大的第十六次）：
+// 词表本身是有限的，一个**词表外**的写盘 API 仍然全绿。`copyfile(2)`、swift-system 的
+// `FileDescriptor.writeAll`、`CGImageDestination…` 都被实测证明能带着一次真实的非原子写溜过去
+// （前两个已补进词表，第三类没有 —— 图像写入不是这个 app 的写盘表面）。翻过来的是**同一处写盘换
+// 一种已建模的写法**（换行 / 空格 / `createFile` 换 `.write(`）——那些现在都红；没翻过来、也翻不动的
+// 是**一个我压根没听说过的写盘 API**。真要闭合这最后一条缝，只能上 SwiftSyntax 把「所有函数调用名」
+// 整个抽出来比对（TODOS 里那条 L）。所以正确的读法是：**认不出的写法 ⇒ 红；认不出的 API ⇒ 仍绿
+// （但比上一版那张 1 项 needle 的缝窄了几十倍）。**
 //
 // 四条 suite：
 //
@@ -64,7 +74,7 @@ import Foundation
 //   而 POSIX 不保证掉电时数据块先于目录项落盘 —— 掉电这一半，这条不变量**给不了**。别再在失败消息里
 //   声称它（上一版的失败消息与那条 commit 的正文都声称了，第十五次）。
 // - **子进程写的东西**。`Process(` 在词汇表里，所以它**出现**会被围栏逮住，但它**写了什么**这条绊线
-//   看不见（`afplay` 不写盘，`sw_vers` 不写盘 —— 台账里为这两处写着理由）。
+//   看不见（`afplay` 不写盘、`claude --version` 不写盘 —— 台账里为这两处子进程写着理由）。
 
 // MARK: - 仓库与源码树
 
@@ -186,15 +196,25 @@ private func scanProduction(_ relativePath: String) -> StrippedSwiftSource? {
 // MARK: - 写盘表面的词汇表（**故意过宽**）
 
 /// 「能把字节送进一个文件」的成员调用。
+///
+/// `writeAll` 是 swift-system 的 `FileDescriptor.writeAll` —— `/codex review 3af8d5f` 红队实测：
+/// `let fd = try FileDescriptor.open(p, .writeOnly, options: [.create, .truncate]); try fd.writeAll(b)`
+/// 是一次完整的、非原子的内容替换，而它一个 `.write(` 都没有、flag 也不是字面 `O_*`，上一版三条 suite
+/// 全绿。（`FileDescriptor.open` 是 `.open(` 成员形，认不了 —— `NSWorkspace.shared.open(` 也是 `.open(`——
+/// 但 `.writeAll(` 够独特，它一出现就说明有人在拿裸 fd 写，台账里必须有它。）
 private let byteWritingMembers = [
-    "write", "createFile", "replaceItemAt", "writePropertyList", "writeToFile", "truncateFile",
-    "archiveRootObject",
+    "write", "writeAll", "createFile", "replaceItemAt", "writePropertyList", "writeToFile",
+    "truncateFile", "archiveRootObject",
 ]
 /// 「能把字节送进一个文件」的自由函数 —— 与成员调用**分开**认：`NSWorkspace.shared.open(` 不是
 /// POSIX `open(2)`，把它们混为一谈只会换来一条没人受得了的假红，而假红最后总是被删掉的那一个。
 private let byteWritingFunctions = [
     "open", "creat", "fopen", "fdopen", "freopen", "write", "pwrite", "writev",
     "fwrite", "fputs", "fputc", "fprintf", "truncate", "ftruncate", "mkstemp", "mmap",
+    // `copyfile(2)` —— `/codex review 3af8d5f` 红队实测：`copyfile(src, dst, nil, COPYFILE_DATA)` 把 src
+    // 的字节 truncate + 就地写进 dst 的同一个 inode（无 temp+rename），被 kill 会在最终路径留半截文件，
+    // 而它既没有 `.write(` 也没有 O_ token，上一版全绿。它是纯 Foundation 自由函数，写盘表面的一员。
+    "copyfile",
     // 类型构造器也是自由函数形状（前面不是 `.`）。三者都能把字节送进一个文件，而且**都不经过**
     // `.write(to:)` —— `OutputStream(url:append:)` 尤其是一条完整的、非原子的写盘管道。
     "OutputStream", "FileHandle", "NSKeyedArchiver",
@@ -429,7 +449,9 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // 路径 —— 那是全仓真正的第二处非原子写，而当时的豁免理由（「copyItem 的纪律是 staging+rename」）
     // 对它是假话。现在它是真的了。
     "helper/Sources/ClaudioCore/Setup.swift": [".copyItem(", ".moveItem(", ".replaceItemAt("],
-    // `sw_vers` 子进程（读版本号）。不写盘。
+    // `/usr/bin/env claude --version` 子进程（探已装的 `claude` CLI 版本，`:319`/`:330`）。
+    // 它读版本、不写盘 —— 但它跑的是**别人的**二进制，写没写盘不归这条不变量管（子进程那条免责在
+    // 文件头写着）。（macOS 版本走 `ProcessInfo.processInfo.operatingSystemVersion`，无子进程，`:82`。）
     "helper/Sources/ClaudioCore/VersionCompatibility.swift": ["Process("],
 
     // —— gui ——

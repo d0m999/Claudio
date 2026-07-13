@@ -433,9 +433,12 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
 
                 // **原子复制**（T17e）：先写进一个点开头的暂存目录，成功之后再 rename 到最终名字。
                 // 同卷 rename 是原子的，所以一次被杀掉的 setup 只可能留下 `.<id>.tmp-<pid>`（点开头 →
-                // 选包时天然被排除、下一次 setup 会重新覆盖它），**永远不会在最终路径上留下半个包**。
+                // `availablePackIDs` 选包时天然被排除），**永远不会在最终路径上留下半个包**。
                 // 上一版的注释早就声称这里是这么做的 —— 而代码里根本没有。谎言恰好盖住了新闸门最现实
                 // 的触发输入（T17e 对抗评审）。现在它是真的了。
+                // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:441` 的 `removeItem` 只删当前 pid 那一份）——
+                // 与 `copySelfToFixedLocation` 的 `.claudio.tmp-…` 同理，危害为零、不顺手 glob 删的理由
+                // 也同理（会误删并发存活的 setup 的暂存）。
                 let staging = environment.userPacksDirectory.appendingPathComponent(
                     ".\(id).tmp-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
                 try? FileManager.default.removeItem(at: staging)
@@ -657,8 +660,16 @@ private let restoreBundledPacksHint =
 /// 而新的事件拿到的是新的那份（TODOS「helper 二进制永不刷新」那条里记着这句话）。
 private func copySelfToFixedLocation(from source: URL, to destination: URL) -> Result<Void, SetupError> {
     let fileManager = FileManager.default
-    // 暂存必须与目标**同目录**（同卷）—— rename(2) 不跨卷。点开头：万一真被中断留下，它既不会被
-    // 当成那个二进制（探测认的是 `bin/claudio` 这个名字），下一次 setup 也会先把它清掉。
+    // 暂存必须与目标**同目录**（同卷）—— rename(2) 不跨卷。名字带 pid：两个并发 setup 互不覆盖
+    // 对方的暂存。点开头：万一真被中断留下，它**不会被当成那个二进制**（探测认的是 `bin/claudio`
+    // 这个名字，`.claudio.tmp-…` 不匹配）。
+    //
+    // ⚠️ 它**不会被自动清掉**：下面 `:668` 的 `try? removeItem(at: staging)` 只删**当前 pid** 那一份，
+    //    一次被 kill 的旧 setup 留下的 `.claudio.tmp-<别的 pid>` 会一直躺在 `~/.claudio/bin/` 里
+    //    （`/codex review 3af8d5f` 红队实测）。危害为零——它是隐藏文件、不参与任何探测、不占用户
+    //    可见空间——所以这里**不**顺手 glob 删 `.claudio.tmp-*`：那会把一个**并发存活**的 setup 的
+    //    暂存删掉，用一条真实的竞态换一次无害的清扫。真要收垃圾，得先有「哪些 pid 还活着」的判据，
+    //    那是另一件事。（同样的 pid 局限也在包路径 `:436` 上，那里的注释同此。）
     let staging = destination.deletingLastPathComponent()
         .appendingPathComponent(
             ".\(destination.lastPathComponent).tmp-\(ProcessInfo.processInfo.processIdentifier)")
@@ -668,21 +679,35 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
         try? fileManager.removeItem(at: staging)
         try fileManager.copyItem(at: source, to: staging)
         // 执行位在**发布之前**打上。上一版是在 copy 到最终路径**之后**才 chmod，于是「存在但不可
-        // 执行」是一个可达的终态；这里它不可达 —— rename 出去的那一刻它已经是 0o755 了。
+        // 执行」是一个可达的终态；这里它不可达 —— 发布出去的那一刻它已经是 0o755 了。
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staging.path)
-        if fileManager.fileExists(atPath: destination.path) {
-            // ⚠️ `.usingNewMetadataOnly` **不是可选的**。`replaceItemAt` 的默认行为是**保留原文件的
-            // 元数据**，而权限位在其中：实测（Darwin 25.5）目标 0644 + 暂存 0755 → 默认选项发布出去
-            // 的结果是 **0644**（内容是新的，执行位是旧的）。也就是说，不带这个选项的话，上面那句
-            // 「rename 出去的那一刻它已经是 0o755 了」是一句**假话** —— 而「存在但不可执行」正是这次
-            // 修复自称要消灭的三种坏终态之一。这个 bug 是本次修复**自己引入**的，被一条站在
-            // 「目标已存在且是 0644」那条路上的行为测试当场逮住（`SetupSuite`）。
+
+        // ⚠️ 判据必须用 **lstat 语义**（`attributesOfItem` 不跟随链接），不能用 `fileExists`
+        // （它**跟随**链接）—— 而这恰恰是姊妹的包复制路径（`:403`）早就修好的那个 bug：一条
+        // 指向真实文件的 symlink 会从 `fileExists` 的缝里漏过去、直奔 `replaceItemAt`，而
+        // `replaceItemAt` 用 lstat 看得见那条链接、当场抛（实测：「The file "claudio" doesn't exist」）——
+        // 于是 setup 返回 `.binaryCopyFailure`、二进制永不发布、hooks 永不写，**每一次重跑都一字不差
+        // 地失败**。这个回归是「原子发布」那一刀引入的（`/codex review 3af8d5f` 红队实测），而它
+        // 的修法在 270 行之上的包路径里逐字写着。（`bin/claudio` 是 symlink 永远不来自 Claudio 自己
+        // 的操作——它只写常规文件——但外部/用户可能造出来，且 TODOS:58 计划让日后的 helper 升级都走
+        // 这条路，敞口只会变大。）
+        let existing = try? fileManager.attributesOfItem(atPath: destination.path)
+        if existing?[.type] as? FileAttributeType == .typeRegular {
+            // 常规文件（正常的「app 更新后重跑 setup」路径）→ **原子替换**。
             //
-            // 我们要的语义就是「用新的那份，整个换掉旧的那份」—— 旧文件的元数据一个字节都不该留：
-            // `~/.claudio/bin/claudio` 不存用户数据，它只是这个 app 版本该配的那个二进制。
+            // `.usingNewMetadataOnly` **不是可选的**：`replaceItemAt` 默认**保留原文件的元数据**，
+            // 权限位在其中。实测（Darwin 25.5）目标 0644 + 暂存 0755 → 默认选项发布出去是 **0644**
+            // （内容新、执行位旧）。不带它，上面那句「已经是 0o755 了」是假话，而「存在但不可执行」
+            // 正是这次修复自称要消灭的三种坏终态之一（`SetupSuite` 里一条站在这条路上的行为测试
+            // 当场逮住过它）。我们要的语义就是「用新的那份整个换掉旧的那份」，旧元数据一字节不留。
             _ = try fileManager.replaceItemAt(
                 destination, withItemAt: staging, options: [.usingNewMetadataOnly])
         } else {
+            // 目标要么不存在，要么是一条 symlink / 悬空链接 / 目录 —— `replaceItemAt` 对非常规文件会抛。
+            // 先按 lstat 语义把它清掉（`removeItem` 用 `unlink`，删的是链接本身、不是它指向的东西），
+            // 再 `moveItem`。这一分支与旧算法（`removeItem` + `copyItem`）在 symlink 这一格上行为一致，
+            // 顺带把旧算法也会栽的悬空链接（EEXIST）一并修了。
+            if existing != nil { try fileManager.removeItem(at: destination) }
             try fileManager.moveItem(at: staging, to: destination)
         }
         // NO quarantine strip here — deliberately. `copyItem` DOES carry `com.apple.quarantine`
