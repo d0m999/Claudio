@@ -671,7 +671,17 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
         // 执行」是一个可达的终态；这里它不可达 —— rename 出去的那一刻它已经是 0o755 了。
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staging.path)
         if fileManager.fileExists(atPath: destination.path) {
-            _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
+            // ⚠️ `.usingNewMetadataOnly` **不是可选的**。`replaceItemAt` 的默认行为是**保留原文件的
+            // 元数据**，而权限位在其中：实测（Darwin 25.5）目标 0644 + 暂存 0755 → 默认选项发布出去
+            // 的结果是 **0644**（内容是新的，执行位是旧的）。也就是说，不带这个选项的话，上面那句
+            // 「rename 出去的那一刻它已经是 0o755 了」是一句**假话** —— 而「存在但不可执行」正是这次
+            // 修复自称要消灭的三种坏终态之一。这个 bug 是本次修复**自己引入**的，被一条站在
+            // 「目标已存在且是 0644」那条路上的行为测试当场逮住（`SetupSuite`）。
+            //
+            // 我们要的语义就是「用新的那份，整个换掉旧的那份」—— 旧文件的元数据一个字节都不该留：
+            // `~/.claudio/bin/claudio` 不存用户数据，它只是这个 app 版本该配的那个二进制。
+            _ = try fileManager.replaceItemAt(
+                destination, withItemAt: staging, options: [.usingNewMetadataOnly])
         } else {
             try fileManager.moveItem(at: staging, to: destination)
         }
