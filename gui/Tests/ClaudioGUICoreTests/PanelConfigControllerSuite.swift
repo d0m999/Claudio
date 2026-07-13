@@ -74,6 +74,67 @@ func runPanelConfigControllerSuites() {
         }
     }
 
+    // toggleMute 成功、**真包**、toggle 的是 .notification（不是 .stop）—— 红队 round4 逮到的两条零覆盖。
+    // 上面那条成功测试有两个盲区：① 它 toggle 的永远是 .stop（全仓每处 toggleMute 都喂 .stop），于是把写者
+    // 劫持成 `setEnabled(.stop, ...)` 对 .stop 恒等、对别的事件写错位，没人逮；② 它用空 packs 目录，coverage
+    // 一律 .unmapped，于是 reloadEnabledFlags 里「coverage 原样带过来」这行改成 `.broken` 也看不出来。
+    // 这条用一份**真包**（映了 stop + notification，两行都 .present）+ toggle .notification 同时钉死两样。
+    suite("PanelConfigController.toggleMute 成功（真包）：翻**对**事件的位、不碰别的事件、coverage 原样带过（红队 round4）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packsDir = root.appendingPathComponent("packs")
+            // 真包：stop + notification 都映到存在的文件 → 两行覆盖都是 .present（不是空 packs 的 .unmapped）。
+            writeFixture(
+                #"{ "selected_pack": "real-pack", "master_volume": 0.42, "events": {} }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "real-pack", "events": { "stop": "stop.mp3", "notification": "notif.mp3" } }"#,
+                to: packsDir.appendingPathComponent("real-pack/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("real-pack/stop.mp3"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("real-pack/notif.mp3"))
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile, environment: makeEnvironment(packsDir))
+
+            // 前提：两事件都 enabled，两行覆盖都 .present。
+            expect(controller.config.isEnabled(.stop) && controller.config.isEnabled(.notification),
+                "前提：stop 与 notification 初始都必须 enabled")
+            for event in [Event.stop, Event.notification] {
+                if case .present = controller.eventRows.first(where: { $0.event == event })?.coverage {} else {
+                    expect(false, "前提：\(event) 那行初始覆盖必须是 .present（真包映了它），得到 "
+                        + "\(String(describing: controller.eventRows.first(where: { $0.event == event })?.coverage))")
+                }
+            }
+
+            controller.toggleMute(.notification)  // ← 故意不是 .stop
+            let onDisk = loadPanelConfig(from: configFile).resolvedConfig
+
+            // ① 翻**对**事件：notification 的位必须翻成 false。把写者劫持成 `setEnabled(.stop, ...)` → 磁盘上
+            //    notification 仍 true（错位写去了 stop）→ 这条红。
+            expect(
+                onDisk.isEnabled(.notification) == false,
+                "toggleMute(.notification) 必须把 **notification** 的位翻成 disabled 并落盘 —— 它还 enabled = "
+                    + "写者把事件参数劫持成了别的事件（红队实测：setEnabled(.stop,...)）。得到 isEnabled(.notification)="
+                    + "\(onDisk.isEnabled(.notification))")
+            // ② 不碰别的事件：stop 的位必须**原样不动**（还是 enabled）。劫持成 .stop → stop 被翻成 false → 这条红。
+            expect(
+                onDisk.isEnabled(.stop) == true,
+                "toggleMute(.notification) **绝不能**碰 stop 的位 —— stop 变了 = 写者写错了事件（点 notification "
+                    + "的静音钮却静音了 stop）。得到 isEnabled(.stop)=\(onDisk.isEnabled(.stop))")
+
+            // ③ coverage 原样带过：轻量刷新（reloadEnabledFlags）只该翻 enabled 位，**不该动 coverage**
+            //    （文档承诺「coverage 按定义不变」）。把 `coverage: row.coverage` 改成 `.broken(...)` → 两行覆盖
+            //    都被谎报成 .broken（试听键被禁用、徽标错）→ 这两条红。
+            for event in [Event.stop, Event.notification] {
+                if case .present = controller.eventRows.first(where: { $0.event == event })?.coverage {} else {
+                    expect(false, "一次静音之后 \(event) 那行覆盖必须**原样**还是 .present —— 它变了 = "
+                        + "reloadEnabledFlags 没把 coverage 原样带过来（红队实测：改成 .broken）。整列事件行的"
+                        + "覆盖态谎报成打包错误、试听键被禁用。得到 "
+                        + "\(String(describing: controller.eventRows.first(where: { $0.event == event })?.coverage))")
+                }
+            }
+        }
+    }
+
     // 变异 #1（执行）：面板打开着的时候 config.json 被外部删掉，点静音 → 写盘 fail closed（.configMissing）
     // → 路由 .full → reload() 必须重载 configState 让它从 .operational 翻到 .needsPack。删掉 reload() 里那行
     // configState 重载 → configState 停在陈旧的 .operational → 面板顶着四行活控件撒谎，这条当场红。
