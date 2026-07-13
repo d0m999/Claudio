@@ -396,26 +396,54 @@ func runViewWiringSuites() {
         //
         // 这是 D20 那条教训（「GUI 是显式向下传参的，改默认值挡不住调用点」）在**上一层**的复发：
         // 阶段 A 给 PanelView 的默认值上了绊线，却把**调用点**的行为记成了一句散文。
-        guard let controller = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift") else {
-            expect(false, "读不到 MenuBarController.swift")
-            return
+        //
+        // ## 为什么数的是整个 target，而不是 MenuBarController 一个文件（`/codex review d5ec97e,8f9cfa2`）
+        //
+        // 这条断言的**上一版**只读 `MenuBarController.swift`，措辞却写着「全仓唯一构造点」——
+        // 与 T17h 那次（见 `guiSources()` 的文档）**逐字同一个病**：断言的措辞比它守的范围大。
+        // 于是在 `ClaudioGUIApp.swift` 或任何一个新文件里写第二处
+        //
+        // ```swift
+        // PanelView(configFile: …, lockFile: ClaudioPaths.playLockFile)
+        // ```
+        //
+        // —— MenuBarController 里那个计数仍是 1、`!contains("lockFile")` 仍成立 —— **全绿**，
+        // 而 GUI 的三个 config 写者已经回到 play.lock 上了。同一个洞在同一个 suite 里被修过一次，
+        // 又在它旁边重开了一次；这次连措辞一起钉死。
+        let sources = guiSources()
+        expect(
+            sources.count >= 5,
+            "在 gui/Sources/ClaudioGUI 下一个 Swift 文件都没数到（实得 \(sources.count)）—— "
+                + "下面两条都是**普查**，普查不到任何文件就永远等不到红，只会安静地绿下去")
+
+        // 普查一：全 target 只许有一个 `PanelView(` 构造点，且必须在 MenuBarController 里。
+        var constructionSites: [String: Int] = [:]
+        for file in sources {
+            let count = file.code.components(separatedBy: "PanelView(").count - 1
+            if count > 0 { constructionSites[file.path] = count }
         }
-
-        // 先证明前提还成立：这里确实还有一个 `PanelView(` 构造点。若哪天它搬走了，这条断言
-        // 会退化成一句恒真的空话 —— 与其静默失效，不如当场红给人看。
-        let constructionSites = controller.components(separatedBy: "PanelView(").count - 1
         expect(
-            constructionSites == 1,
-            "MenuBarController 里应当正好有 1 个 `PanelView(` 构造点，实际 \(constructionSites) 个 —— "
-                + "这条 suite 与它上面那条（PanelView 的 lockFile 默认值）都建立在「全仓唯一构造点、"
-                + "且走默认值」这个前提上。前提变了，两条断言的保护范围就都变了，必须重新想")
+            constructionSites == ["MenuBarController.swift": 1],
+            "全 ClaudioGUI 只许有**一处** `PanelView(` 构造点，且只许在 MenuBarController.swift 里，"
+                + "实得 \(constructionSites) —— 这条 suite 与它上面那条（PanelView 的 lockFile 默认值）"
+                + "都建立在「全 target 唯一构造点、且走默认值」这个前提上。多出第二处，两条断言的"
+                + "保护范围就都缩水了，必须重新想")
 
+        // 普查二：除 PanelView 自己之外，全 target 的**代码**里不许出现 lockFile。
+        // PanelView.swift 是唯一的例外，因为那个默认值与两条转发就住在它里面（上面那条 suite 钉的）。
+        // `PackGalleryView` 的 doc comment 里提过 `selectPack(…lockFile:)`，`codeOnly` 已把它剥掉 ——
+        // 这正是本文件头部记着的那次翻车（把谈论代码的文字当代码断）。
+        var lockLeaks: [String: Int] = [:]
+        for file in sources where !file.path.hasSuffix("PanelView.swift") {
+            let count = file.code.components(separatedBy: "lockFile").count - 1
+            if count > 0 { lockLeaks[file.path] = count }
+        }
         expect(
-            !controller.contains("lockFile"),
-            "MenuBarController 在构造 PanelView 时传了 `lockFile` —— 这会绕过 PanelView 那个"
-                + "唯一活着的默认值（= config.lock），把静音、切包、接管三个 config.json 写者"
-                + "一起送回它调用点指定的那把锁上。传 playLockFile = 阶段 A 的分锁当场失效，"
-                + "而 PanelView.swift 一个字都不用改，整套 GUI 测试照样全绿。"
+            lockLeaks.isEmpty,
+            "ClaudioGUI 里除 PanelView.swift 之外的文件出现了 lockFile：\(lockLeaks) —— "
+                + "这会绕过 PanelView 那个唯一活着的默认值（= config.lock），把静音、切包、接管"
+                + "三个 config.json 写者一起送回调用点指定的那把锁上。传 playLockFile = 阶段 A 的"
+                + "分锁当场失效，而 PanelView.swift 一个字都不用改，整套 GUI 测试照样全绿。"
                 + "GUI 的锁只有一个来源：PanelView 的默认值")
     }
 

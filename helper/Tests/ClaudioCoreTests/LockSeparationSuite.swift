@@ -188,6 +188,59 @@ func runLockSeparationSuites() {
                 + "settings.json，与 play 的去抖毫无关系")
     }
 
+    suite("CLI 的三个调用点仍是全默认调用 —— 上面那一排默认值的唯一活路（`/codex review d5ec97e,8f9cfa2`）") {
+        // 上面那条 suite 钉的是**默认值**。可它整段的前提 ——「`claudio install` / `uninstall` /
+        // `use` 是全默认调用的」—— 只以**注释**形式存在（就写在它自己第 130 行上）。而这个仓库
+        // 自己的规矩是：该断言的地方不许放注释。这正是 D20 那条教训（「改默认值挡不住调用点」）
+        // 第三次复发 —— 前两次分别在 GUI（`ViewWiringSuite`）和 `PanelView` 的构造点上。
+        //
+        // 变异：把 `Subcommands.swift:93` 改成
+        //
+        // ```swift
+        // switch selectPack(packID, lockFile: ClaudioPaths.playLockFile) {
+        // ```
+        //
+        // `claudio use` 当场回到 play.lock 上 —— 换一次包就吞一声提示音 —— 而
+        // `Use.swift` 的默认值声明一个字没动，上面那条 suite 与整套 1000+ 断言**全绿**。
+        // 默认值只有在没人覆盖它的时候才是默认值；「没人覆盖」得有人说出来。
+        guard let subcommands = codeOnly("helper/Sources/claudio/Subcommands.swift") else {
+            expect(false, "读不到 Subcommands.swift —— 这条 suite 唯一的价值就是读它")
+            return
+        }
+
+        // 正向：三条调用必须**逐字**保持全默认形态。
+        //
+        // ⚠️ 每一条都连 `switch` 与 `{` 一起匹配，**两头都锚死**。这不是啰嗦 —— 本条断言的
+        // 第一版写的是 `contains("installClaudioHooks()")`，而 `uninstallClaudioHooks()`
+        // **逐字包含**它（就是 `un` + 它）。于是变异实测（把 `Subcommands.swift:55` 改成
+        // `installClaudioHooks(lockFile: ClaudioPaths.playLockFile)`）时，install 这一行
+        // 被第 72 行那个**没被碰过的 uninstall 调用**满足了，正向断言**结构上不可能变红** ——
+        // 只有底下那条负向兜底救了场。一条措辞（「install 是全默认调用」）比它实际守的范围
+        // （「文件里某处出现过这个子串」）更大的断言，正是这个 suite 存在的理由本身。
+        // 子串断言没有词边界；`switch … {` 就是这里的词边界。
+        let defaultCalls: [(call: String, command: String, lock: String)] = [
+            ("switch installClaudioHooks() {", "claudio install", "settings.lock"),
+            ("switch uninstallClaudioHooks() {", "claudio uninstall", "settings.lock"),
+            ("switch selectPack(packID) {", "claudio use", "config.lock"),
+        ]
+        for (call, command, lock) in defaultCalls {
+            expect(
+                subcommands.contains(call),
+                "`\(command)` 在 Subcommands.swift 里必须仍然是全默认调用 `\(call)` —— 找不到它，"
+                    + "要么调用形态变了、要么开始显式传锁了。两种情况下，这个命令用的还是不是 "
+                    + "\(lock)，上面那条默认值 suite **一个字都没资格再说**")
+        }
+
+        // 负向兜底：Subcommands 在**任何位置**都不许出现 lockFile。它是三个 CLI 命令的
+        // 总入口，锁的来源只有一个 —— 被调用函数的默认值。注释已被 `codeOnly` 剥掉，
+        // 谈论锁的散文不会把这条判假红。
+        expect(
+            !subcommands.contains("lockFile"),
+            "Subcommands.swift 的**代码**里出现了 lockFile —— CLI 一旦开始显式传锁，"
+                + "`Use.swift` / `SettingsInstaller.swift` 里那几个默认值就成了摆设：改对它们没用，"
+                + "改错它们也不会红。锁分离在生产上到底成不成立，从此取决于这里传了什么")
+    }
+
     suite("SetupEnvironment 的两把锁默认值（运行期可求值 —— 它是 struct，不是自由函数）") {
         // `performFirstRunSetup` 是 GUI「接管」CTA 落到磁盘上的那条路径，它**同时**写
         // config.json（selectPack ×2）和 settings.json（installClaudioHooks）。这两把锁必须
@@ -216,5 +269,43 @@ func runLockSeparationSuites() {
                 && environment.settingsLockFile.path != ClaudioPaths.playLockFile.path,
             "SetupEnvironment 的两把锁都不许是 play.lock —— 接管会在磁盘上写好几秒，"
                 + "占住去抖锁就是在这几秒里静默吞掉用户的每一声提示音")
+    }
+
+    suite("接管路径的调用点确实转发 SetupEnvironment 的锁（上面那四条断言的唯一活路）") {
+        // 上面那条 suite 求值的是 `SetupEnvironment` 的**默认属性**。而 `performFirstRunSetup`
+        // 完全可以把它们晾在一边，直接朝下游写死一把锁 —— 于是那四条断言继续绿着，
+        // 而接管路径在生产上拿的是别的锁。这与 CLI 那条（Subcommands）是**同一个洞**：
+        // 默认值有人钉，调用点没人钉。区别只是这条路径更要命 —— 它是 GUI「接管」CTA 落到
+        // 磁盘上的那一下，同时写 config.json（selectPack ×2）与 settings.json（install ×1），
+        // 在磁盘上要写好几秒。
+        //
+        // 变异：把 `Setup.swift:551` 的 `lockFile: environment.settingsLockFile` 改成
+        // `lockFile: ClaudioPaths.playLockFile` —— 接管的那几秒占住去抖锁，用户在**最需要
+        // 反馈的那一刻**被静音，而 `SetupEnvironment` 的默认值一个字没动，四条断言全绿。
+        guard let setup = codeOnly("helper/Sources/ClaudioCore/Setup.swift") else {
+            expect(false, "读不到 Setup.swift —— 这条 suite 唯一的价值就是读它")
+            return
+        }
+
+        let configForwards =
+            setup.components(separatedBy: "lockFile: environment.configLockFile").count - 1
+        expect(
+            configForwards == 2,
+            "接管路径里必须正好有 2 处 `lockFile: environment.configLockFile`（`selectPack` 的两个"
+                + "调用点：兜底包与用户选中的包），实际 \(configForwards) 处 —— 少一处，就有一次"
+                + "config.json 的写没走 config.lock；写死成别的锁，SetupEnvironment 的默认值当场变摆设")
+
+        let settingsForwards =
+            setup.components(separatedBy: "lockFile: environment.settingsLockFile").count - 1
+        expect(
+            settingsForwards == 1,
+            "接管路径里必须正好有 1 处 `lockFile: environment.settingsLockFile`"
+                + "（`installClaudioHooks` 那一处），实际 \(settingsForwards) 处")
+
+        expect(
+            !setup.contains("playLockFile"),
+            "Setup.swift 的**代码**里出现了 playLockFile —— 接管写的是 config.json 与 settings.json，"
+                + "一个字节都不写 play.state。让接管去占去抖锁，等于在用户点下「接管」之后那几秒里"
+                + "把他的每一声提示音静默吞掉 —— 而那正是他最需要听见反馈的一刻")
     }
 }

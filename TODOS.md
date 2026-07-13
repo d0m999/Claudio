@@ -77,13 +77,27 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 唯一的用户入口。守护它的是 `ViewWiringSuite` 的源码文本绊线（`ClaudioGUI` 是 executableTarget，import 不进来）。
 
 **测试按 D30 重写，没有按本条目原先写的那两条做**：原计划的「持有 `play.lock` 时三个写者仍成功」**测不到东西** ——
-现有每条锁争用测试都**显式注入**临时 lockFile，与默认参数无关，把锁改回共用也不会 RED。真正有牙的是**接线断言**
-（默认构造后的 `lockFile` 值），三条，全部经变异验证确认会 RED。遗留的行为级缺口见下一条。
+现有每条锁争用测试都**显式注入**临时 lockFile，与默认参数无关，把锁改回共用也不会 RED。
+
+**～～真正有牙的是接线断言（默认构造后的 `lockFile` 值），三条，全部经变异验证确认会 RED～～ —— 这句是假的，
+`d5ec97e` 实测推翻。** 那三条比的是「环境默认值 == `ClaudioPaths.某个符号`」，两边都是符号：把 `Paths.swift` 里
+`configLockFile` 的**值**改回 `play.lock`（一行静默 revert 掉整个阶段 A），等式照样成立，`claudio-tests` +
+`claudio-gui-tests` **全绿（1030 + 1604）**。没有任何一条断言说过「这几把锁是不同的文件」。
+
+**现在真正有牙的是**（`d5ec97e` + 本次 `/codex review d5ec97e,8f9cfa2` 的修复，每一条都经变异验证确认会 RED）：
+`LockSeparationSuite` 的三层 —— ① **值级**：四把锁两两不等、且文件名正好是 play/config/settings/claudio.log.lock；
+② **默认值级**：每个写者的默认锁（源码绊线，因为 Swift 读不到自由函数的默认实参，而**调用**它就意味着拿生产默认值
+去写真实的 `~/.claude/settings.json`）；③ **调用点级**：`Subcommands.swift` 的三条 CLI 命令仍是全默认调用、
+`Setup.swift` 的接管路径确实转发 `SetupEnvironment` 的锁 —— 没有 ③，②只是摆设（调用点一个参数就能覆盖掉所有默认值，
+而②不会红）。GUI 侧对应的是 `ViewWiringSuite` 的**全 target 普查**：唯一的 `PanelView(` 构造点、且除 `PanelView.swift`
+外全 target 代码里不许出现 `lockFile`。
+
+遗留的行为级缺口见下一条。
 
 ### 「三把锁互不阻塞」只有接线断言背书，没有一条行为级的持锁竞争测试
 
 **What:** 阶段 A 之后，「`Play` 拿 play.lock、config 写者拿 config.lock、settings 写者拿 settings.lock」这件事
-由**接线断言**（默认构造后的 `lockFile` 值 = 哪把锁）+ `ViewWiringSuite` 的源码文本绊线守着。但**没有任何一条
+由 `LockSeparationSuite`（值级 + 默认值级 + 调用点级）+ `ViewWiringSuite` 的全 target 源码普查守着。但**没有任何一条
 测试真的持有一把锁、再去证明另一条路径不被它挡住** —— 也就是这次分锁要兑现的那个行为本身，没有直接的测试信号。
 
 **Why:** 接线断言证明的是「默认值指向 config.lock」，不是「持有 play.lock 时点静音仍然成功」。两者之间隔着
