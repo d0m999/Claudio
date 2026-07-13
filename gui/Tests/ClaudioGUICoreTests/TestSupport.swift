@@ -53,6 +53,29 @@ struct StrippedSwiftSource {
     /// 注释已剥掉、**字符串字面量原样保留**的代码文本。
     let code: String
 
+    /// 注释已剥掉，且**字符串字面量的内容也已清空**（界定符 `"` / `"""` 保留、换行保留、
+    /// **插值 `\(…)` 里的代码原样保留** —— 那本来就是代码，不是字符串内容）。
+    ///
+    /// ## 为什么需要第二路输出：`code` 里的字符串会把**按括号配平**的扫描带偏
+    ///
+    /// `AtomicWriteSuite` 要按配平括号取 `.write(…)` 的实参（按行取会漏掉每一次跨行调用）。
+    /// 而 `code` 保留字符串内容，于是一句合法 Swift
+    ///
+    /// ```swift
+    /// try data.write(to: dir.appendingPathComponent("pack (1.json"), options: .atomic)
+    /// ```
+    ///
+    /// 里那个**字符串里的** `(` 会被计进深度，括号从此永不配平：这次**合法的原子写**被判成
+    /// 「读不懂的写调用」当场假红，而扫描器还会 `break` 掉这个文件**剩下的每一处**写调用 ——
+    /// 假红有人喊，被 `break` 吞掉的那些**没有人看得见**（`/codex review 3af8d5f` 实测）。
+    ///
+    /// 同一路输出也顺手关掉第二个洞：`code` 里一句**散文**（错误消息、doc 里的示例串）只要写着
+    /// `.write(to:` 就会被当成调用点。清空串内容之后，它不再是。
+    ///
+    /// ⚠️ 它**不**替代 ``code``：需要看字符串**内容**的断言（hook 命令逐字、URL 白名单）必须继续
+    /// 读 `code`。这一路只给「我要看**代码结构**，不要看字符串里写了什么」的扫描用。
+    let codeWithoutStringLiterals: String
+
     /// 扫描器**已知自己没能正确读懂**的地方。非空 = `code` 不再可信：基于它的**负向**断言
     /// （`!contains`、`count == N`）都可能假绿 —— 一段消失的代码只会让它们更绿，这是两套源码
     /// 绊线唯一的、共同的致命失效模式。
@@ -100,6 +123,13 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
     /// 必须是栈而不是布尔 —— `"\(a("\(b)"))"` 是合法 Swift。
     var interpolations: [(returnMode: Mode, parenDepth: Int)] = []
     var code = ""
+    /// ``StrippedSwiftSource/codeWithoutStringLiterals`` —— 与 `code` **同一趟**扫出来，不是第二台
+    /// 扫描器。第二台扫描器会漂移，而漂移的那一半是**没有人在看**的那一半。
+    ///
+    /// 规则只有一条：**处在代码位置的字符进 `blanked`，处在字符串内容位置的不进。** 界定符
+    /// （`"` / `"""`）是代码位置（它们界定的是结构），插值里的一切也是（那是代码），换行无条件保留
+    /// （行结构塌掉会让失败消息里的行号变成谎话）。
+    var blanked = ""
     var unmodeled: [String] = []
     var index = source.startIndex
 
@@ -121,6 +151,9 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
         interpolations.append((returnMode: returnMode, parenDepth: 0))
         mode = .code
         code += "\\("
+        // `blanked` 也要吃这个 `(` —— 它的配平 `)` 会在下面的代码模式里被写进去。少写这个 `(`
+        // 而多写那个 `)`，`blanked` 的括号就永久欠平，按括号取实参的扫描会从此读串。
+        blanked += "\\("
         advance(2)
     }
 
@@ -134,6 +167,7 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
                 if character == "(" {
                     interpolations[interpolations.count - 1].parenDepth += 1
                     code.append(character)
+                    blanked.append(character)
                     advance(1)
                     continue
                 }
@@ -144,6 +178,7 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
                         interpolations[interpolations.count - 1].parenDepth -= 1
                     }
                     code.append(character)
+                    blanked.append(character)
                     advance(1)
                     continue
                 }
@@ -153,18 +188,21 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
             if upcoming("#\"") {
                 note("raw string literal (#\"…\"#)")
                 code.append(character)
+                blanked.append(character)
                 advance(1)
                 continue
             }
             if upcoming("#/") {
                 note("extended regex literal (#/…/#)")
                 code.append(character)
+                blanked.append(character)
                 advance(1)
                 continue
             }
             if upcoming("\"\"\"") {
                 mode = .multilineString
                 code += "\"\"\""
+                blanked += "\"\"\""
                 advance(3)
                 continue
             }
@@ -179,8 +217,10 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
                 advance(2)
                 continue
             }
+            // 开引号是**代码位置**（它界定结构），所以它进 `blanked`；从下一个字符起才是「内容」。
             if character == "\"" { mode = .string }
             code.append(character)
+            blanked.append(character)
             advance(1)
 
         case .lineComment:
@@ -189,6 +229,7 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
             if character == "\n" {
                 mode = .code
                 code.append(character)
+                blanked.append(character)
             }
             advance(1)
 
@@ -204,7 +245,10 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
                 if blockDepth == 0 { mode = .code }
                 continue
             }
-            if character == "\n" { code.append(character) }
+            if character == "\n" {
+                code.append(character)
+                blanked.append(character)
+            }
             advance(1)
 
         case .string:
@@ -218,6 +262,8 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
             code.append(character)
             if character == "\\" {
                 // 转义序列：`"\"//\""` 里那个 `\"` **不**结束字符串。整对一起吞掉。
+                // `blanked` 一个字都不吃：转义对是字符串**内容**，那个 `\"` 尤其不是界定符 ——
+                // 把它当界定符写进去，`blanked` 的引号就会奇偶倒相。
                 advance(1)
                 if index < source.endIndex {
                     code.append(source[index])
@@ -226,6 +272,8 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
                 continue
             }
             if character == "\"" {
+                // 闭引号：界定符，进 `blanked`（内容不进）。
+                blanked.append(character)
                 mode = .code
                 advance(1)
                 continue
@@ -234,10 +282,13 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
                 // 合法 Swift 的单行字符串不含裸换行 —— 走到这里 = 已经有某个没建模的构造把状态机
                 // 带偏了。收手回代码模式（别把文件剩下的部分整份当字符串吞掉），并且**记一笔**。
                 note("unterminated single-line string literal")
+                blanked.append(character)
                 mode = .code
                 advance(1)
                 continue
             }
+            // 字符串**内容** —— `blanked` 里什么都不留。这一行就是「括号被字符串带偏」那个 bug
+            // 的整个修复（`"pack (1.json"` 里的 `(` 到不了 `blanked`）。
             advance(1)
 
         case .multilineString:
@@ -257,9 +308,12 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
             if upcoming("\"\"\"") {
                 mode = .code
                 code += "\"\"\""
+                blanked += "\"\"\""
                 advance(3)
                 continue
             }
+            // 多行串里的换行**留着**（行结构 = 失败消息里的行号）；其余内容一律不留。
+            if character == "\n" { blanked.append(character) }
             code.append(character)
             advance(1)
         }
@@ -284,7 +338,8 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
         note("unterminated string interpolation (\\( …)")
     }
 
-    return StrippedSwiftSource(code: code, unmodeledConstructs: unmodeled)
+    return StrippedSwiftSource(
+        code: code, codeWithoutStringLiterals: blanked, unmodeledConstructs: unmodeled)
 }
 // claudio:shared-scanner:end
 

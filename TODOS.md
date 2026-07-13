@@ -1279,3 +1279,87 @@ enqueue 之前 —— 它就**先跑**：`actionState → .idle`、view-model �
 **Priority:** P3
 **Depends on:** 线 173 的 T15 真机手验同批（若引入 ViewInspector 则可本机）
 **Completed:** 2026-07-11（`/ship` pre-landing 修复批，分支 `feat/t16-t15-t14-state-gallery`）
+
+## 写盘原子性：这一刀（`/codex review 3af8d5f` 的修复）**没**收进去的那几条
+
+### `.atomic` 不是掉电安全 —— 全仓没有一处 `fsync` / `F_FULLFSYNC`
+
+**What:** `Data.write(options: .atomic)` = 同目录临时文件 + `rename(2)`。`rename` 对**目录项**是原子的，
+所以**进程被 kill** 之后终态只有「没有」和「完整」两种 —— 这一半是真的。但 POSIX **不**保证掉电时临时文件的
+**数据块**先于那条目录项落盘：APFS 实践上大多会排序，规范上不保证。于是掉电之后，一个**目录项已经改好、
+内容却是零长度 / 半截**的 `.claudio.bak` 在原理上是可能的 —— 而那正是「一次性备份 + `fileExists` 闸门」
+最怕的东西（它认不出残缺）。
+
+**Why:** 行为风险低（要真正撞上得掉电撞在那个毫秒窗口里），但**措辞风险是满的**：commit `3af8d5f` 的正文与
+它写进生产注释的那段散文，都白纸黑字声称了「掉电」。那是这个仓库栽了十五次的同一个病（措辞比覆盖范围大）。
+注释已经改成实话（只声称 kill），但**能力**本身还没补。
+
+**可能的修法:** 写完临时文件后 `fcntl(fd, F_FULLFSYNC)`，`rename` 之后再 fsync 一次父目录 —— 这要绕开
+`Data.write(options:)`，自己拿 fd 写。代价：`.claudio.bak` 那一处（一次性、路径短）值得；`config.json` /
+`play.state` 那种高频写不值得（F_FULLFSYNC 在 macOS 上是真的慢）。所以它**不是**一条全仓不变量，
+而是一条「哪些文件配得上掉电安全」的分级政策 —— 那需要先想清楚，不该混在一次 bugfix 里。
+
+**Effort:** M（自己拿 fd 写 + 一条分级政策 + 台账）
+**Priority:** P3（不阻断发布：注释已经不再撒谎，而真实风险窗口极窄）
+**Depends on:** None
+
+### 一份 0600 的 `settings.json`，备份成了一份 0644 的 `.claudio.bak`
+
+**What:** 本机实测（Darwin 25.5, umask 022）：`Data.write(options: .atomic)` 写到一个**已存在**的目标会保留
+它原来的 mode（所以 `settings.json` 那一处 `:618` 没问题），但写一个**新**文件时 mode 走 umask → 0644。
+而 `.claudio.bak` **永远是新文件**（`!fileExists` 闸门保证了这一点）。于是一个把 `~/.claude/settings.json`
+chmod 到 0600 的用户（它可以装着 API key —— hook 命令、`env` 段），拿到的备份是**全世界可读**的。
+
+**Why:** 这不是这一刀引入的（上一版的非原子 `write(to:)` 同样走 umask），但它是**这一刀的邻居**，而且是
+一次真实的权限放宽。修法本身很短：备份写完之后按源文件的 mode `setAttributes` 一次。
+
+**Effort:** S（三行 + 一条断言）
+**Priority:** P2（安全相关，但需要用户自己先 chmod 过 —— 不是默认路径）
+**Depends on:** None
+
+### `claudio install` 在一台从没有过 `settings.json` 的机器上，照样说「备份见 settings.json.claudio.bak」
+
+**What:** `hooksOutcomeMessage(.installed)`（`Subcommands.swift:167`）**无条件**印出那句备份提示。而
+`backupOriginalIfNeeded` 在 `originalData == nil` 时**直接 `.success(())` 返回、什么都不写**（`:572`）——
+那正是「用户装了 Claude Code 但从没有过 `settings.json`」的常见全新态。于是 CLI 指着一个**不存在的文件**
+说「你的备份在这儿」。
+
+**Why:** 「假注释就是 bug」这条规矩对**印给用户看的字**只会更严。它不会弄坏任何东西，但它是一句假话，
+而这个产品的整个信任叙事（onboarding 的「会搞坏我现有配置吗？」→「自动备份」）就压在这句话上。
+
+**Effort:** S（把 outcome 带上「有没有真的写过备份」这一位）
+**Priority:** P2
+**Depends on:** None
+
+### `probeSettingsWritable` 探的是**文件**能不能写，而备份与原子写要的是**目录**能不能写
+
+**What:** `probeSettingsWritable`（`SettingsInstaller.swift:548`）对 `settings.json` **这个文件**调
+`isWritableFile`（底下是 `access(W_OK)`）。但 `.claudio.bak` 的创建、以及 `.atomic` 的「同目录临时文件 +
+rename」，要的都是**父目录**的写权限。`chmod 0500 ~/.claude`（MDM / 安全工具真的会这么干）而
+`settings.json` 本身仍是 0644 时：探测说「可写」→ `OnboardingDetector` 跳过 `.settingsNotWritable` →
+面板画的是「让 Claude Code 学会开口……还会自动留一份备份」→ 用户点接管 → 备份写失败 →
+`.backupFailure` → 面板回到同一张卡 → **他再点一次，永远。**
+
+**Why:** 这是一条**用户可见的死循环**，而且它的错误卡（`.settingsNotWritable`，那张会告诉他去改权限的卡）
+就在几行之外、只是够不到。
+
+**Effort:** S（探测改成同时探父目录，或直接试一次 `.atomic` 写）
+**Priority:** P2
+**Depends on:** None
+
+### 围栏的词汇表仍是一张枚举清单 —— 真要闭合，只能上 SwiftSyntax
+
+**What:** `AtomicWriteSuite` 的极性已经翻过来了（认不出 ⇒ 红），但它认「写盘调用」靠的仍然是一张**词法**
+词汇表（`byteWritingMembers` / `byteWritingFunctions` / `pathPublishing*` / `subprocess*`，故意过宽）。
+一个它**没听说过**的写盘 API（某个第三方库的 `save(to:)`、一个 `@_silgen_name` 直连的 syscall）仍然能溜过去。
+
+**Why:** 这是这条不变量今天**唯一**的假绿通道，而且文件头已经照字面写清了它（措辞不比覆盖范围大）。
+它比上一版好在：漏一个词的代价从「那类写盘永久隐身」降到了「那**一个** API 隐身」，而且过宽的词汇表让
+误伤的代价只是台账里多一行。
+
+**可能的修法:** 用 SwiftSyntax 解析 AST，把「所有函数调用的被调用方名字」整个抽出来，与一张**允许出现在
+生产码里的调用名**清单比对 —— 那样「我没听说过」就真的不可能是绿的了。代价：一个新依赖 + 测试包变重。
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** None

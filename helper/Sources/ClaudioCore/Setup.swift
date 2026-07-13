@@ -631,24 +631,60 @@ private let restoreBundledPacksHint =
 /// Copies the currently-running binary to its fixed destination and marks it executable.
 /// Replaces an existing destination file (e.g. re-running `setup` after an app update) —
 /// `~/.claudio/bin/claudio` holds no user data, so overwriting it is always safe.
+///
+/// ## 它是**原子发布**，不是「删了再拷」（`/codex review 3af8d5f`，Claude 侧红队）
+///
+/// 上一版逐字是：`removeItem(destination)` → `copyItem(source, destination)` →
+/// `setAttributes(0o755)`。三步**直接落在最终路径上**，于是 `setup` 在这中间被 kill / 掉电，
+/// `~/.claudio/bin/claudio` 会停在三种坏终态之一：**不存在**、**半截二进制**、或**存在但没有执行位**。
+///
+/// 而这条路径不是普通的文件复制 —— `settings.json` 里那四条 hook 命令逐字指向的就是它
+/// （``claudioHookCommand``：`<root>/bin/claudio play <event>`）。所以那三种坏终态的用户可见形状是
+/// 同一个：**Claude Code 每一次事件都去执行一个缺失 / 半截 / 不可执行的二进制**，而面板的探测
+/// （`isRunnableHelperBinary`）此刻多半还说「已经接好了」。
+///
+/// 讽刺的是同一个文件 200 行之上的**包复制**（T17e）早就是对的：先写进点开头的暂存目录，成功之后
+/// 再 rename 到最终名字。而 `AtomicWriteSuite` 当时豁免 `copyItem` / `moveItem` 的理由，白纸黑字
+/// 写的正是「它们的原子性纪律是另一条（T17e 的 staging + rename）」—— 那句话对**这个调用点**是
+/// 字面意义上的假话。豁免的理由必须对每一个被豁免的调用点都成立，否则它就只是一句托词。
+///
+/// 现在这里走同一条纪律：**暂存 → chmod → 同卷 rename**。终态只有两种：旧的那份（或没有），
+/// 或者一份**完整且可执行**的新的。没有第三种。
+///
+/// `replaceItemAt` 底下就是 `rename(2)`（同卷、原子）。目标**不存在**时它会 throw，所以那一半走
+/// `moveItem`（同样是 `rename(2)`）—— 两条路都不经过「最终路径上先空一下」那个窗口。
+/// 覆盖一个**正在被执行**的二进制在 macOS 上正是要用 rename：老 inode 会被仍在跑的进程留住，
+/// 而新的事件拿到的是新的那份（TODOS「helper 二进制永不刷新」那条里记着这句话）。
 private func copySelfToFixedLocation(from source: URL, to destination: URL) -> Result<Void, SetupError> {
     let fileManager = FileManager.default
+    // 暂存必须与目标**同目录**（同卷）—— rename(2) 不跨卷。点开头：万一真被中断留下，它既不会被
+    // 当成那个二进制（探测认的是 `bin/claudio` 这个名字），下一次 setup 也会先把它清掉。
+    let staging = destination.deletingLastPathComponent()
+        .appendingPathComponent(
+            ".\(destination.lastPathComponent).tmp-\(ProcessInfo.processInfo.processIdentifier)")
     do {
         try fileManager.createDirectory(
             at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? fileManager.removeItem(at: staging)
+        try fileManager.copyItem(at: source, to: staging)
+        // 执行位在**发布之前**打上。上一版是在 copy 到最终路径**之后**才 chmod，于是「存在但不可
+        // 执行」是一个可达的终态；这里它不可达 —— rename 出去的那一刻它已经是 0o755 了。
+        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staging.path)
         if fileManager.fileExists(atPath: destination.path) {
-            try fileManager.removeItem(at: destination)
+            _ = try fileManager.replaceItemAt(destination, withItemAt: staging)
+        } else {
+            try fileManager.moveItem(at: staging, to: destination)
         }
-        try fileManager.copyItem(at: source, to: destination)
-        try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: destination.path)
         // NO quarantine strip here — deliberately. `copyItem` DOES carry `com.apple.quarantine`
         // across (see Quarantine.swift), but the strip AND the verification that it actually worked
-        // both live in ``performFirstRunSetup``, in ONE place, unconditionally. A second strip here
+        // both live in ``performFirstRunSetup``, in ONE place, unconditionally, and they run on the
+        // *destination* — i.e. after this function has published it. A second strip here
         // is dead code: removing it changes no behavior and breaks no test (measured) — which is
         // exactly what "defense in depth" degenerates into when nobody checks: an untested line
         // pretending to be a safety net.
         return .success(())
     } catch {
+        try? fileManager.removeItem(at: staging)
         return .failure(.binaryCopyFailure(reason: error.localizedDescription))
     }
 }
