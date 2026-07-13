@@ -331,6 +331,61 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 **Priority:** P2
 **Depends on:** None（工具已就绪）
 
+### `FileWriteWatch` 自己有两处 fail-open —— 一个观测不到写的观测器，会把每一条「没被碰过」变回恒真
+
+**What:** `/codex review 96ed71c` 的两条 P2，都打在 `FileWriteWatch`（`gui/Tests/…/TestSupport.swift`）身上 ——
+即上一条 TODO 指望「抄一份进 helper」的那个工具。**抄之前必须先修，否则是把两个洞抄成四个。**
+
+① **`kevent` 轮询失败被折叠成「没有目录事件」**：`sawDirectoryEvent = kevent(queue, nil, 0, &event, 1, &immediately) > 0`
+—— 返回 `-1`（`EINTR`、fd 被意外关闭/复用）和返回 `0`（真的没事件）走进**同一个分支**。`isArmed` 只兜得住
+**注册时**失败（7 处调用点都断言了），三条正向对照只兜得住**系统性**失明；谁都兜不住持锁 suite 真实跑的那一次
+**观测时**的 syscall 错误。而对 `nil → 写入 → 删除 → nil` 这类**正是它存在理由**的回滚窗口，身份快照也相等 ——
+于是断言静默变绿。零超时的 `kevent` 撞 `EINTR` 概率极低（不阻塞就没有可中断的睡眠），所以现实风险小；但这个
+文件通篇的论点就是「观测器必须 fail closed」，而它唯一能失败的 syscall 恰恰 fail open。
+
+② **dangling symlink 下两半同时瞎**：`settings.json` 是一条指向 dotfiles 的符号链接、而**目标不存在**时，
+`identityBefore = FileIdentity(of: file)` 走 `stat` → `nil`；穿链接的写落在 `dotfiles/`，未解析的 `dot-claude/`
+目录项一个都没动 → 目录 kqueue 全程安静。写 → 回滚删掉目标 → 终态又是 `nil`。**两半同时看不见。**
+而这个形状不是臆想：`SettingsInstallerSuite.swift:1277` 明确把「dangling settings.json symlink = 普通全新
+安装路径」钉成了**生产支持的行为**。新增的「写观测器③」用的是**目标已存在**的链接 —— 它钉的是 `stat` 的跟随
+语义，钉不到「before 就是 `nil`」这一支。
+
+**Why:** 今天**没有**任何断言因此假绿（四条持锁 suite 的 fixture 都是正规文件），所以不阻断 `96ed71c`。但工具
+文档里那节「**它不兜什么**」**没写 ②** —— 措辞又一次比覆盖范围大，而这一次是在专门用来杀这个病的工具自己的
+文档里。下一个人照着那节的承诺去用它，洞就跟着他走。
+
+**可能的修法:** ① 把 poll 结果**三分**为 event / no-event / error：`> 0` → 有事件；`== 0` → 没事件；`< 0` →
+`expect(false, ...)` 当场红（fail closed）。三行。② 在「它不兜什么」里写清 dangling symlink 这一支，并补一条
+正向对照（dangling link + 穿链接写 + 回滚 → 必须被看见），修法大概是身份快照那一半改成「`stat` 目标 + `lstat`
+链接本身」两个快照都拍。
+
+**Effort:** ① S（三行 + 一次定向变异）/ ② M（新对照 + 两轮台账）
+**Priority:** P2（不阻断本分支；**但阻断「把 FileWriteWatch 抄进 helper」那条 TODO** —— 别把洞抄一遍）
+**Depends on:** None
+
+### 一次性备份写在乐观闸门**之前** —— 一次 `.concurrentModification` 中止会留下一份 install 从没写过的永久备份
+
+**What:** `installClaudioHooksLocked` 的顺序是 `backupOriginalIfNeeded`（`:317`）→ `atomicWrite`（`:322`，
+里面才做 `expectedCurrentData` 的乐观并发重读）。于是：外部写者（Claude Code 自己 / 用户的编辑器）在读与写之间
+改了 `settings.json` → `atomicWrite` 正确地中止并返回 `.concurrentModification`、**一个字节都没写** —— 而
+`.claudio.bak` **已经落盘了**，且按「一次性备份」的纪律**永不刷新**。
+
+于是 `SettingsInstaller` 类头那条不变式是**假的**：「the pre-claudio original is copied to
+`settings.json.claudio.bak` **the first time `install` actually writes**」—— 它可以在 install **从没写过**的
+情况下就存在。
+
+**Why:** 行为影响比「备份非原子」那条小得多（已修：`options: .atomic`）：备份的**内容**仍然是 claudio 真实
+读到的那份原件（`loadRoot` 的 `rawData`，不是重读的），所以它不是坏数据，只是**时机**不对 —— 它记录的是一次
+被中止的 install 所看到的世界。真正要紧的是那句类头注释**在撒谎**，而这个仓库的规矩是：假注释就是 bug。
+
+**可能的修法:** 把乐观闸门从 `atomicWrite` 里拆出来、提到 `backupOriginalIfNeeded` **之前**跑；或者退一步，
+只把类头 `:26-27` 那条不变式改成实话（「the first time install **attempts** a write」）。前者是真修，后者是
+止损 —— 但**别只做后者然后当成修好了**。
+
+**Effort:** S（改注释）/ M（拆闸门）
+**Priority:** P3
+**Depends on:** None
+
 ### 升级窗口：旧 CLI（拿 play.lock 写 config）与新 GUI（拿 config.lock）并存时会丢一次设置更新
 
 **What:** 两把不同的锁之间，原子 rename **只防撕裂、不防 lost update**。旧 `~/.claudio/bin/claudio` 拿 play.lock
@@ -464,6 +519,47 @@ GUI 侧的切包画廊只列**解析得出来**的包，所以主动线暂时安
 
 **Effort:** S（一条提示条）/ M（带「换回去」＋「打开备份目录」）
 **Priority:** P2
+**Depends on:** None
+
+### 更坏的一半：install **失败**时，那两句 ⚠ 连 CLI 都没有 —— 而副作用已经落盘，且重试**永远不会**补发
+
+**What:** 上一条说的是「GUI 的**成功**路径把 `SetupOutcome` 接住就扔了」。失败路径更糟，而且是**结构性**的：
+
+`SetupError`（`Setup.swift:221-275`）的每一个 case 只带 `reason: String` 或子错误 —— **没有任何字段能承载
+`[SalvagedPack]` / `PackSelectionOutcome`**。而 `performFirstRunSetup` 的副作用顺序是：复制二进制 → **搬走坏包**
+（`:403-431`，`moveItem` 到 `packs/.<id>.broken-<pid>` + `salvagedPacks.append`）→ 复制干净的内置包 → **写 config**
+（选包）→ **写 hooks**（`:551`，`installClaudioHooks`）。
+
+也就是说：**做主的那两个副作用，发生在可能失败的那一步之前。** 一旦最后一步失败（`.lockBusy` / `.notWritable` /
+`.malformedHooksSection` / `.concurrentModification` —— 后三个每次重跑都一字不差地失败），`:562` 就
+`return .failure(.installFailure(error))`，`salvagedPacks` 就地丢弃。CLI 只 `print("✗ \(error.description)")`
+（`Subcommands.swift:117`，那句带绝对路径的 ⚠ 只在 `printSetupSummary` 的成功分支）；GUI 只
+`actionState = .failed(...)`（`OnboardingViewModel.swift:344-346`）。
+
+**而且补不回来**：用户按提示「再点一次」，这一次 `isUsablePack(minimal-chime)` 已经为真（上一轮刚盖了一份干净的）
+→ `:392` 直接 `continue` → `salvagedPacks` 恒空 → **就算这次成功，告知也永远不会再生成**。
+
+净结果：用户的包目录（里面可能有他自己导入的音频）被搬进了一个**每一个界面都过滤掉**的点开头目录
+（`availablePackIDs` 与 `PackGallery` 都显式过滤 `.` 开头），而唯一一条载着 `movedTo` 绝对路径的消息被丢弃了。
+`SalvagedPack` 自己的文档（`Setup.swift:186-190`）写的是：「**现在它是 outcome 的一等公民**」——
+它只是**成功** outcome 的一等公民。
+
+**Why:** 缓解是真的：`moveItem` 一个文件都没删，`AudioImport` 也只复制不移动源文件，所以用户拖进来的原件通常
+还在 Desktop / Downloads。**但这只是把「丢数据」降级成「藏数据」**：菜单栏 app 的用户，Finder 默认不显示点目录，
+app 内每一个界面又都过滤它 —— 我们替他做了主，然后在唯一一次该开口的时候闭嘴了。
+
+⚠️ **这条不是锁分离引入的**：`.malformedHooksSection` / `.notWritable` / `.concurrentModification` 在 `main` 上
+就走得出同一条路。锁分离只是给它新增了一条 `.lockBusy` 触发方式。**别让一条 147 行的锁分离分支扛它。**
+
+**可能的修法:** 让 `SetupError` 带得动部分结果 —— `case installFailure(SettingsUpdateError, salvaged: [SalvagedPack],
+packSelection: PackSelectionOutcome)`；`OnboardingActionFailure` 跟着带上 notices；GUI 的 `.failed` 分支与 CLI 的
+`print("✗ …")` 都把那行 ⚠ + 绝对路径打出来。与上一条（成功路径的提示条）**是同一处改动的两半，建议合并做**。
+
+**Context:** 2026-07-13 生产代码 diff 的六路对抗 review（lock-semantics / assume-broken 两个镜头独立命中）。
+上一条 TODO 只覆盖了成功路径的 GUI 侧，失败路径**两边都没有** —— 而失败路径才是副作用真的会留在磁盘上的那条。
+
+**Effort:** M
+**Priority:** P1（用户损害面：可能藏掉他磁盘上唯一一份自导入音频，且不可补发）
 **Depends on:** None
 
 ### `claudio` 可执行 target 的输出从来没有被测过一行 —— T17e 那两句 ⚠ 是产品语义，却住在测试够不到的地方

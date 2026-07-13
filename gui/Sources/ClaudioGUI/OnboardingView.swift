@@ -101,8 +101,9 @@ public struct OnboardingView: View {
             // T17c：**不再按 action 分派**。这张卡与 `PanelView` 的运行态面板互斥地占据屏幕，两边
             // 都无条件渲染「此刻有没有失败」，于是「一个 `.failed` 必须有人画」是结构事实而不是一条
             // 需要人去维护的规则。上一版这里只画 `branch: .takeOver`，而一次**接管**失败完全可能
-            // 在 `refresh()` 之后落在 `.installed`（quarantine 修复后点「修复」→ 撞上 play.lock →
-            // 失败，但二进制和 hooks 都在位）—— 那条失败于是一个像素都没有。见
+            // 在 `refresh()` 之后落在 `.installed`（quarantine 修复后点「修复」→ 在选默认包
+            // （`config.lock`）或写 hooks（`settings.lock`）那一步撞上锁 → 失败，但二进制和 hooks
+            // 都在位）—— 那条失败于是一个像素都没有。见
             // ``onboardingVisibleFailure(actionState:)`` 的完整推导。
             if let failure = onboardingVisibleFailure(actionState: viewModel.actionState) {
                 ActionFailureRow(
@@ -178,9 +179,16 @@ public struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity)
         }
-        // 禁用**两颗**按钮，不只是正在跑的那一颗：动作跑到一半时点另一颗会跟它抢同一把
-        // `play.lock`。view-model 侧还有一道重入守卫（`@Published` 到按钮的传播不是同步的，
+        // 禁用**两颗**按钮，不只是正在跑的那一颗：动作跑到一半时点另一颗会跟它抢同一把锁 ——
+        // `performFirstRunSetup` 里是 `config.lock`（`selectPack` × 2）与 `settings.lock`
+        // （`installClaudioHooks` × 1），三次里任意一次都能 `.lockBusy`，而那是一条**用户自己
+        // 制造出来的**假失败。view-model 侧还有一道重入守卫（`@Published` 到按钮的传播不是同步的，
         // 第二次点击可能已经在队列里），两道都要有。
+        //
+        // ⚠️ 阶段 A 锁分离之前，这里写的是「抢同一把 `play.lock`」。那句话是**假的** —— 而它是
+        // ``OnboardingViewModel/performPrimaryAction()`` 里那条警告点名要保的**孪生守卫**：那边
+        // 已经改对了，这边（同一条论据的另一半）漏了整整一刀。守卫本身一个字都不用动，死的只是
+        // 它的理由。别顺着一句死论据把一道活守卫删了。
         .disabled(viewModel.isPerformingAction)
         // label 随 in-flight 变（「接管 Claude Code」→「正在接管…」），VoiceOver 因此也读得到
         // 进行态 —— 而不是对着一颗突然变灰的按钮无话可说。

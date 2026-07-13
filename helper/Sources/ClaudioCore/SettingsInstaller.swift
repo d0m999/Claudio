@@ -85,7 +85,7 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
     /// about to write, so another writer edited it concurrently — one that does not take
     /// `settings.lock`: Claude Code itself, or the user's editor. (**Not** the GUI: it writes
     /// settings.json only through ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``
-    /// / ``uninstallClaudioHooks(settingsFile:claudioRoot:lockFile:)``, under the same
+    /// / ``uninstallClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``, under the same
     /// `settings.lock` this helper takes — so it serializes with us rather than racing us.)
     /// Rather than clobber that edit in a file `uninstall` keeps no backup of, the
     /// write is aborted so the caller can retry against the fresh contents.
@@ -549,6 +549,23 @@ private func removeHookEntries(
 /// new sibling entry needs directory write permission, not just file write permission) must abort
 /// the whole install rather than being silently swallowed: proceeding to overwrite `settings.json`
 /// without a successful backup defeats the entire safety net.
+///
+/// ## `.atomic` 不是这里的装饰 —— 它是「一次性备份」这条纪律的**前提**
+///
+/// 上面那道 `fileExists` 闸门认得的只有「有没有这个文件」，认不出「这是一份**残缺**的备份」。而这
+/// 份文件按设计**永不刷新**（这正是「一次性」的含义）。两条合起来意味着：一次被打断的非原子写
+/// （进程被 kill、机器掉电）会留下一个半截文件，而它会**永久**冒充那份备份 —— 下一次 install
+/// 照常把 hooks 写进 `settings.json`，用户 pre-claudio 配置的**唯一一份副本**就此永久残缺，
+/// 而没有任何代码会去发现它：`.claudio.bak` **没有任何程序化读者**（卸载刻意不从它还原），它整个
+/// 存在的意义就是在用户需要的那一天替他把东西还回去 —— 而 CLI 的「备份见 settings.json.claudio.bak」、
+/// onboarding 的信任文案、`docs/distribution.md` 三处都向他承诺过它。
+///
+/// `Data.write(options: .atomic)` 写同目录临时文件 + `rename(2)`，于是这条路径上只有两种终态：
+/// **没有备份**（下一次 install 会重新做一份对的），或者**一份完整的备份**。没有第三种。
+///
+/// 全仓每一处内容替换式写盘都是原子的，**零豁免** —— 这不是巧合，是一条被 `AtomicWriteSuite`
+/// 递归扫描两棵源码树钉死的不变量。加一处非原子写会当场变红。（这一行曾经就是那个唯一的例外，
+/// 而它守的恰恰是全仓最重的那个承诺。）
 private func backupOriginalIfNeeded(
     settingsFile: URL, originalData: Data?
 ) -> Result<Void, SettingsUpdateError> {
@@ -558,7 +575,7 @@ private func backupOriginalIfNeeded(
         .appendingPathComponent(settingsFile.lastPathComponent + ".claudio.bak")
     guard !fileManager.fileExists(atPath: backupFile.path) else { return .success(()) }
     do {
-        try originalData.write(to: backupFile)
+        try originalData.write(to: backupFile, options: .atomic)
         return .success(())
     } catch {
         return .failure(.backupFailure(reason: error.localizedDescription))

@@ -295,7 +295,11 @@ public func onboardingShowsFailureDetailToggle(
 ///
 /// 第一格是**可达的、且这次提交自己新造出来的**：quarantine 检测让一台「二进制被盖章」的机器
 /// 报 `.helperMissing`（hooks 本来就在），用户点「修复」→ `performFirstRunSetup` 复制完二进制、
-/// 解除隔离通过 → 在选默认包 / 写 hooks 那一步撞上 `play.lock`（TODOS 里那条 P1）→ 失败返回。
+/// 解除隔离通过 → 在选默认包（`config.lock`）或写 hooks（`settings.lock`）那一步撞上锁 → 失败返回。
+/// （⚠️ 阶段 A 锁分离之前这里写的是「撞上 `play.lock`（TODOS 里那条 P1）」—— **两句都已经死了**：
+/// 锁分离之后 `play.lock` 只归 `claudio play` 的防抖用，而 TODOS 里那条 P1 是 `play.lock` 被
+/// config / settings 写者共用那一条，已经划掉了。可达性本身一个字都没变，只是换了两把锁 ——
+/// 见 `Setup.swift:509/519`（`configLockFile`）与 `:554`（`settingsLockFile`）。）
 /// `refresh()` 一探测：二进制在位、没盖章、四条 hook 都在 → **`.installed`**。面板于是切到运行态、
 /// 亮起绿点说「已经接好了」，而 `config.json` 压根没写、一个包都没选中 —— 用户永远听不到一声响，
 /// 失败原因停在 `actionState` 里，没有任何一个像素属于它。
