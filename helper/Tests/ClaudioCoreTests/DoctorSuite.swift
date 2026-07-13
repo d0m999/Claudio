@@ -1180,4 +1180,55 @@ func runDoctorSuites() {
                     + " purely informational by design, got \(report.results)")
         }
     }
+
+    // MARK: - doctor 的 `.absent` 文案必须与「谁能创建 config.json」的**真实行为**一致
+    //
+    // 这条守的不是一句话好不好听，是一次**已经发生过**的漂移（`/codex review 573336d` [P2]）：
+    // D23 定稿①（`573336d`）把 `setEventEnabled` 改成对缺失的 config **fail closed**，那一刻起静音
+    // 再也不会创建 config.json —— 而 doctor 的 `.absent` 文案还在原地写着「首次选包 / **静音**时会
+    // 自动创建」。行为改了，文案没跟着改，因为**没有任何东西**把这两者绑在一起：`.absent` 这一支的
+    // 文案在整个测试套件里一次都没被碰过。
+    //
+    // 于是把两半焊在同一个测试里：下面先用**真实磁盘**验「静音确实创建不了 config」，再验「doctor 那
+    // 句话没有反过来向用户许诺它能」。任何一半单独改动，这条都会红 —— 而这正是它存在的意义：doctor 是
+    // 「静默失败必须有诊断轨迹」（决议 6）的唯一出口，一个说假话的 doctor 诊断的不是这台机器。
+    suite("doctor `.absent` 文案 ↔ 行为：静音创建不了 config.json，那句话就不许说它能") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+
+            // ① 行为（真实磁盘）：config.json 不存在时，静音必须 fail closed 且不留下任何文件。
+            let outcome = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(let error) = outcome else {
+                expect(
+                    false,
+                    "静音在缺失的 config.json 上必须失败（D23 定稿①）—— 它成功了，说明毒源回来了："
+                        + "「还没有人选过包」又一次被伪装成「选过，选的是空」。得到：\(outcome)")
+                return
+            }
+            expect(
+                error == .configMissing,
+                "必须是 .configMissing（而不是笼统的读写失败）—— 面板靠它重路由到「先选包」空态卡。"
+                    + "得到：\(error)")
+            expect(
+                !FileManager.default.fileExists(atPath: configFile.path),
+                "被拒绝的那次写，一个字节都不许落盘")
+
+            // ② 文案：doctor 在同一份磁盘状态上说的那句话，不许与①矛盾。
+            let message = configRewritabilityResult(configFile: configFile).message
+            expect(
+                !message.contains("静音"),
+                "doctor 的 `.absent` 文案不许再宣称静音会创建 config.json —— ① 刚刚在真实磁盘上证明了"
+                    + "它不会。（要在这句话里**提及**静音也不是不行，比如「在那之前静音开关无处可写」——"
+                    + "但那必须是一次**睁着眼**的改动：请连同这条断言一起改，别让文案再一次悄悄跑到行为"
+                    + "前面去。）得到：\(message)")
+            expect(
+                message.contains("选包"),
+                "`.absent` 文案必须告诉用户 config.json 到底**由什么**创建 —— 现在全仓唯一有资格从无到有"
+                    + "建出它的写者是 `selectPack`（`claudio use` / 面板选包 / 首次自举），这由"
+                    + " `MissingConfigPolicy` 在类型层面保证。只说「还没有」不说「怎么才会有」，用户就得"
+                    + "自己猜。得到：\(message)")
+        }
+    }
 }

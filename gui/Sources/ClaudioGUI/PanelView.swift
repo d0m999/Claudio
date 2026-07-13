@@ -862,12 +862,20 @@ public struct PanelView: View {
     /// itself is the explanation, so this is intentionally NOT surfaced via ``errorNotice`` (see
     /// its call site in ``operationalPanel``, which filters `.configMissing` out for the same
     /// reason D43 keeps it out of the panel's error copy entirely).
+    ///
+    /// **这三条路由的判断不在这里**（`/codex review 573336d` [P2]）：它住在 `ClaudioGUICore` 的
+    /// ``panelRefreshRoute(muteSucceeded:error:)``，一个纯函数，由 `PanelRefreshRouteSuite` 用行为断言
+    /// 钉死。理由写在 ``PanelRefreshRoute`` 的文档里，一句话：这几行**测不到**（`PanelView` 住在
+    /// `@main` executableTarget，测试 import 不进来），而守它的文本绊线守不住「哪个结果走哪条路」——
+    /// 把两个分支对调，绊线要的字符串一个不少，它照样绿。判断搬走之后，这里只剩「三条路各接哪个方法」，
+    /// 那才是绊线够得着的东西。
     private func toggleMute(_ event: Event) {
         let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
-        if muteController.setEnabled(event, enabled: !currentlyEnabled) {
-            refreshEnabledFlags()
-        } else if muteController.lastError == .configMissing {
-            refresh()
+        let succeeded = muteController.setEnabled(event, enabled: !currentlyEnabled)
+        switch panelRefreshRoute(muteSucceeded: succeeded, error: muteController.lastError) {
+        case .enabledFlagsOnly: refreshEnabledFlags()
+        case .full: refresh()
+        case .noRefresh: break
         }
     }
 

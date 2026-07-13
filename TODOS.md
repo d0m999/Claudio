@@ -408,6 +408,20 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 **Priority:** P3（需要用户在旧 CLI `claudio use` 与新 GUI 之间并发写；**根因那条是 P1**）
 **Depends on:** None
 
+### `updateConfigJSON` 的残余 TOCTOU：读完之后被外部删掉的 config，会被 `.atomic` 写**复活**（且报 `.success`）
+
+**What:** `ConfigMutation.swift` 仍是 `fileExists` → `readConfigFileBounded` → `mutate` → `encode` → `data.write(.atomic)`。一个**不拿 `config.lock`** 的进程（用户手动 `rm`、清理工具、同步冲突）如果在**读成功之后、rename 之前**删掉 `config.json`，`.atomic` 的 temp+rename 会照常把文件**重新创建**出来 —— 内容是刚才读到的那份旧 config（加上本次的改动），并向调用方报 `.success`。用户以为自己删掉了 config，它却自己回来了。
+
+**Why（先把措辞更正了）：** `573336d` 的提交信息写的是「判定与新建落在**同一次** `fileExists` 上，**那个窗口跟着一起没了**」。**这句话比它的覆盖范围大**（`/codex review 573336d` [P2] 独立指出，本人复核确认）。真正没掉的是**空串新建**那个窗口：调用方先探一次 `fileExists`、`updateConfigJSON` 内部再探第二次，两次之间的外部删除会让空串照常落盘。那一刀确实砍掉了（毒源在**类型层面**消失，`.failClosed` 的调用方递不出能落盘的 pack id）—— 但「TOCTOU 窗口关闭了」这个**广义**说法不成立：读→rename 之间那个窗口还在，它只是不再产毒了（复活的是旧内容，不是空串）。
+
+危害比原来的小一个量级（没有毒源，只是一次不该发生的复活），但**措辞必须与覆盖范围对齐** —— 这个仓库栽在「headline 比覆盖范围大」上已经不止一次（见本文档「⚠️ 本条首版写的是…那是**假的**」几处）。
+
+**Context:** 2026-07-13 `/codex review 573336d`。真修 = 与「GUI 写/读路径的同用户 symlink TOCTOU」那条的 config 侧加固**同一处**：写前解析 symlink + 乐观并发重读（读到的字节 vs 写之前重读的字节，不一致就 `.concurrentModification` 中止 —— `SettingsInstaller.swift:619` 对 `settings.json` 已经是这个形状，config 侧照抄即可）。三条并作一处改。
+
+**Effort:** M
+**Priority:** P3（需要一个不拿 config.lock 的外部写者，恰好落进读→rename 那几微秒；且后果是「旧 config 复活」，不是数据损坏）
+**Depends on:** None
+
 ### CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0
 
 **What:** `.github/workflows/` 里**只有** `release.yml`，只由 tag 触发，且只跑 `swift build`（arm64 / x86_64 各一次 + `--product ClaudioGUI`）。没有任何 job 跑 `swift run claudio-tests` 或 `claudio-gui-tests`。没有 `on: push` / `on: pull_request`。
@@ -433,6 +447,17 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 （T17c 已修掉相邻的一个更弱项：`codeOnly()` 此前只剥整行注释、不剥行尾注释，于是一行 `foo() // .onChange(of: onboardingViewModel.state)` 能让断言假绿。）
 
 **Context:** 2026-07-12 T17c。短期修法：把断言收紧到包含 body 首行（`contains("of: onboardingViewModel.state) { _ in\n            refresh()")`）。根治仍是下面那条 P2（把视图拆进可 import 的 library target），文本绊线的强度天花板就在这里。
+
+**⚠️ 2026-07-13 更新（`/codex review 573336d` [P2]）：这条病在静音路由上又犯了一次，而且比「body 被掏空」更弱** —— 上一版把「静音失败必须全量 refresh」钉成 `panel.contains("refresh()")`，在**整个文件**里找一个出现 **37 次**的名字：那个合取子**恒真**，连「整行被删」都挡不住（删掉 `.configMissing` 分支，另外 36 处 `refresh()` 一个没少，全绿）。它失败消息里亲口点名的那个变异（改调 `refreshEnabledFlags()`）实测存活。
+
+三处已修，各修一层：
+- **根治（本条自己开的方子）**：那份**判断**搬进了可 import 的 `ClaudioGUICore`（`panelRefreshRoute(muteSucceeded:error:)`），由 `PanelRefreshRouteSuite` 用**行为断言**钉死。文本绊线守不住「哪个结果走哪条路」——那是行为，不是存在性。**分支对调**这一刀，任何文本绊线都拦不住，行为断言当场红。
+- **绊线的作用域**：新增 `functionBody(_:in:)`，按花括号配平从 `codeWithoutStringLiterals` 里切出**单个函数体**再 contains。一条断言的作用域必须等于它声称的作用域。
+- **切片器自己的围栏**：认不出（改名 / 配平跑飞 / 切出半份文件）⇒ **红**，不是安静地绿。切片器自己也上了台账。
+
+变异台账（实测，12/12 全红）：毒瘤本尊、分支对调、路由反相、任何失败都判 `.full`、成功被陈旧 error 改道、视图就地重推、`toggleMute` 改名、doctor 文案倒退、毒源复活、切片起点跑到文件头、闭合括号差一、找不到时交出空串。
+
+**剩下的仍然欠着**：`.onChange` / `applyFirstFocus` / `switch configState` 那几条**仍然只有文本绊线**（只是现在切片得更准），本条**不关闭**。天花板没变：判断留在 `PanelView` 里，就只能靠文本守。
 
 **Effort:** S
 **Priority:** P2
@@ -783,6 +808,8 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Why:** 同用户威胁模型——能并发换 symlink 者本已有该用户的写权限、不构成提权，与 ENGINEERING.md「pack 路径 containment 的 TOCTOU 加固」既定立场一致，故 v1 不做。现在 T16/T15 把这些写路径接进真实面板，站点增至：manifest bind、`importAudioFile` 持久化、`config.json` 两个写者（CLI `use` + GUI 面板）。
 
 **Context:** T16 security-reviewer（2026-07-11）实证复现父目录 symlink 重定向（叶子 rename 语义只挡 `manifest.json` 自身被换，挡不住上层目录被换）；T15 swift-reviewer 指出 `config.json` 无 `settings.json` 那套加固。真修 = 校验后持有 `open(O_DIRECTORY|O_NOFOLLOW)` 目录 fd，后续全走 `openat`/`fstatat`/`renameat` 相对该 fd（`readRegularFileSource` 已对单文件这么做，缺的是**包目录级**）；config 侧补 symlink 解析 + 乐观并发重读。`ManifestBinding.swift` 的注释已修正为「原子写只保护叶子」。
+
+**2026-07-13 `/codex review 573336d` 独立复现同一条（[P2]），行号已锁死**：`ConfigMutation.swift:205` 是裸 `try data.write(to: configFile, options: .atomic)` —— **没有** `resolvingSymlinksInPath()`；而同一个仓库的 `SettingsInstaller.swift:634` 就在写 `settings.json` 前先解析了，还配了一段注释专门讲这个坑（「`.atomic` 做的是 temp+rename **on the symlink**，把链接本身替换成普通文件，与 dotfiles 仓库静默分叉」）。更刺的是 `SafeFileRead.swift:110` **明确允许** `config.json` 是 symlink 并跟随读取 —— 于是 stow / chezmoi 用户的 config 是**读目标、写链接**：两边操作的根本不是同一个文件。D23 定稿①（`573336d`）改的正是 `ConfigMutation` 的这个写函数，**没有**顺手加上这一行；本条仍然开着。（真修与本条上面那半是同一处加固，仍建议合并处理。）
 
 **Effort:** L
 **Priority:** P3
