@@ -655,7 +655,7 @@ func runOnboardingActionsSuites() {
     //
     // **四条错误码断言，一条都不红。** 而此刻：一次**失败**的接管在用户的 `~/.claude/settings.json` 里
     // 留下了四条指向 helper 的 hook，config.json 里却一个包都没选中 —— 每个事件都会去 exec 一个选不出包的
-    // helper。`Setup.swift:482` 的注释亲口立过这条不变式（「一次注定不会响的安装，绝不允许在用户的
+    // helper。`Setup.swift:491` 的注释亲口立过这条不变式（「一次注定不会响的安装，绝不允许在用户的
     // Claude Code 里留下新的痕迹」），在这批断言之前**没有任何东西背书它**。
     //
     // 这与「计数不绑调用点」（`840ea37`）、「`contains` 不是绑定」（`e7c38ea`）是**逐字同一个病**，
@@ -667,7 +667,7 @@ func runOnboardingActionsSuites() {
     //
     // `FileWriteWatch`（`TestSupport.swift`）是下面四条 suite 的地基：它们断言的是
     // **「这个文件一次都没被写过」**，而不是「它此刻的字节没变」。而一个**观测不到写**的观测器
-    // 会安静地永远返回 `false` —— 于是那四条永远绿，还在失败消息里自称守着 `Setup.swift:482`
+    // 会安静地永远返回 `false` —— 于是那四条永远绿，还在失败消息里自称守着 `Setup.swift:491`
     // 的不变式。那与 `2f107b5` 那条恒真守卫（读的是被它守的那个函数的输出）是**逐字同一个形状**，
     // 只是升了一层：这一次恒真的不是断言，是**它赖以判断的那个工具**。
     //
@@ -809,7 +809,7 @@ func runOnboardingActionsSuites() {
             // 在他的 Claude Code 里留下了痕迹，而 config.json 里没有任何包被选中 —— 每个事件都会去
             // exec 一个「选不出包」的 helper。
             //
-            // `Setup.swift:482` 的注释亲口立过这条不变式（「一次注定不会响的安装，绝不允许在用户的
+            // `Setup.swift:491` 的注释亲口立过这条不变式（「一次注定不会响的安装，绝不允许在用户的
             // Claude Code 里留下新的痕迹」），而在这条断言之前，**没有任何东西背书它**。
             // 这就是「计数不绑调用点」（`/codex review 840ea37`）在**副作用层**的同一个形状：
             // 错误码不绑执行顺序。
@@ -836,7 +836,7 @@ func runOnboardingActionsSuites() {
                     + "一样，上面那条照样绿），或者它写完又把文件删/改了回去（**字节比较看不见这一种**）。"
                     + "两种都意味着：一次注定不会响的接管，在用户的 Claude Code 里留下过痕迹，而 config.json"
                     + "里一个包都没选中 —— 那个窗口里每个事件都会去 exec 一个选不出包的 helper。"
-                    + "`Setup.swift:482` 亲口立过这条不变式")
+                    + "`Setup.swift:491` 亲口立过这条不变式")
 
             let settingsAfter = fileBytes(targets.onboarding.settingsFile)
             let hooks = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }

@@ -496,7 +496,7 @@ func writeEmptyExecutableFile(at url: URL) {
 //
 // 把 ``FileWriteWatch/observedWrite()`` 掏空成 `return false`（一次手滑、一次「先临时关掉调试一下」），
 // 每一条「必须没被碰过」就永远绿，而它们在失败消息里自称守着「一次注定不会响的安装，绝不允许在用户的
-// Claude Code 里留下新的痕迹」（`Setup.swift:482`）。这与 `2f107b5` 那条恒真守卫是**逐字同一个形状**：
+// Claude Code 里留下新的痕迹」（`Setup.swift:491`）。这与 `2f107b5` 那条恒真守卫是**逐字同一个形状**：
 // 守卫读的东西证明不了它声称守住的东西。**实测（第一轮台账 A1）：把 `observedWrite()` 换成
 // `return false`，四条持锁 suite 一条都不红，而 `isArmed` 也一声不吭**（它是独立字段，照常武装成功）。
 //

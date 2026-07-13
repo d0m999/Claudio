@@ -436,7 +436,7 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
                 // `availablePackIDs` 选包时天然被排除），**永远不会在最终路径上留下半个包**。
                 // 上一版的注释早就声称这里是这么做的 —— 而代码里根本没有。谎言恰好盖住了新闸门最现实
                 // 的触发输入（T17e 对抗评审）。现在它是真的了。
-                // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:441` 的 `removeItem` 只删当前 pid 那一份）——
+                // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:444` 的 `removeItem` 只删当前 pid 那一份）——
                 // 与 `copySelfToFixedLocation` 的 `.claudio.tmp-…` 同理，危害为零、不顺手 glob 删的理由
                 // 也同理（会误删并发存活的 setup 的暂存）。
                 let staging = environment.userPacksDirectory.appendingPathComponent(
@@ -664,7 +664,7 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
     // 对方的暂存。点开头：万一真被中断留下，它**不会被当成那个二进制**（探测认的是 `bin/claudio`
     // 这个名字，`.claudio.tmp-…` 不匹配）。
     //
-    // ⚠️ 它**不会被自动清掉**：下面 `:668` 的 `try? removeItem(at: staging)` 只删**当前 pid** 那一份，
+    // ⚠️ 它**不会被自动清掉**：下面 `:679` 的 `try? removeItem(at: staging)` 只删**当前 pid** 那一份，
     //    一次被 kill 的旧 setup 留下的 `.claudio.tmp-<别的 pid>` 会一直躺在 `~/.claudio/bin/` 里
     //    （`/codex review 3af8d5f` 红队实测）。危害为零——它是隐藏文件、不参与任何探测、不占用户
     //    可见空间——所以这里**不**顺手 glob 删 `.claudio.tmp-*`：那会把一个**并发存活**的 setup 的

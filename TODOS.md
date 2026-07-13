@@ -98,7 +98,7 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
   「做到哪一步」。把 `Setup.swift` 里的 `installClaudioHooks` **重排**到 `selectPack` 之前（两个调用点的
   `lockFile:` 实参一个字都不用改），持 config.lock 依然停在 `.useFailure(.lockBusy)`、持 settings.lock 依然停在
   `.installFailure(.lockBusy)` —— **四条错误码断言原样全绿**，而一次**失败**的接管已经在用户的
-  `~/.claude/settings.json` 里留下了四条 hook，config.json 里却一个包都没选（`Setup.swift:482` 的注释亲口立过
+  `~/.claude/settings.json` 里留下了四条 hook，config.json 里却一个包都没选（`Setup.swift:491` 的注释亲口立过
   「一次注定不会响的安装，绝不允许在用户的 Claude Code 里留下新的痕迹」，此前无人背书）。现已补上：config 锁忙
   → settings.json 必须一个字节没动；settings 锁忙 → config.json 必须**真的写完**（这正是那条 suite 标题里
   「config 那步必须放行」的前半句，此前一条断言都没有）；断开被锁挡住 → 四条 hook 一条不许少（**原子**）；
@@ -266,12 +266,12 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 
 **当初判它「测不到东西」的那个理由，对一半、错一半。** 原文写的是：「用注入的临时 fixture 路径测，断言从写下
 第一天起就恒真（两个临时路径本就互不相干）」。那句话对**「两把锁互不阻塞」**成立，对**「每个写者拿的是不是
-递给它的那把锁」**不成立 —— 后者一点都不恒真：把 `OnboardingActions.swift:595` 的 `configLockFile` 换成
+递给它的那把锁」**不成立 —— 后者一点都不恒真：把 `OnboardingActions.swift:599` 的 `configLockFile` 换成
 `ClaudioPaths.playLockFile`（或与 settings 那把**成对交换**），注入的那把锁**不再被争用**，接管当场**成功**（或停在
 **另一步**），断言立刻红。**恒真的是「两个不相干的路径互不阻塞」，不是「这条路径拿了哪把锁」。** 一个字之差，
 挡住了本来当天就能写的四条断言 —— 而在它们缺席的那段时间里，接管路径的三处锁转发（`OnboardingActions.swift`
-`:595` / `:596` / `:607`）**一条断言都没有**：它掉在 `LockSeparationSuite`（只读 `helper/`）与 `ViewWiringSuite`
-（`guiSources()` 只扫 `gui/Sources/ClaudioGUI`）**双方的盲区正中**。实测：把 `:595` 改成 `playLockFile` ——
+`:599` / `:600` / `:611`）**一条断言都没有**：它掉在 `LockSeparationSuite`（只读 `helper/`）与 `ViewWiringSuite`
+（`guiSources()` 只扫 `gui/Sources/ClaudioGUI`）**双方的盲区正中**。实测：把 `:599` 改成 `playLockFile` ——
 用户点下「接管」之后那几秒，他的每一声提示音被去抖锁静默吞掉 —— **1064 + 1607 全绿，零红**。
 
 **Effort:** M → **已完成**（行为断言那一半）
@@ -1315,6 +1315,18 @@ chmod 到 0600 的用户（它可以装着 API key —— hook 命令、`env` �
 
 **Effort:** S（三行 + 一条断言）
 **Priority:** P2（安全相关，但需要用户自己先 chmod 过 —— 不是默认路径）
+**Depends on:** None
+
+### `~/.claudio/bin` 用 `createDirectory` 无显式 mode 建成 —— 松 umask 下组/世界可写，而里面的二进制每个事件都被 exec
+
+**What:** 本机实测（Darwin 25.5）：`copySelfToFixedLocation` 里 `createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)`（`Setup.swift:677`）**不传 `attributes:`**，于是新建的 `~/.claudio/bin`（及 `~/.claudio`）的 mode 走 umask：umask 022 → 0755（安全），umask 002 → **0775（组可写）**，umask 000 → 0777。而 `~/.claudio/bin/claudio` 正是 `settings.json` 四条 hook 每个 Claude Code 事件都 exec 的那个二进制。目录若组/世界可写，同组或本地另一个用户就能替换它（或抢先占用可预测的 `.claudio.tmp-<pid>` 暂存名）→ 下一个事件即以受害者身份**执行任意代码**。本分支的原子发布只加固了「崩溃/kill 时的完整性」，没有约束它发布进去的那个目录的**权限**。
+
+**Why:** 默认 macOS umask 是 022 → 0755，所以**默认单用户 Mac 打不到**；触发需要「非默认松 umask（MDM / 某些 dotfiles 会设 002）+ 多用户机 + 同组敌手」。但代价是代码执行，量级高于它的孪生项。修法很短：`~/.claudio` 与 `~/.claudio/bin` 显式建成 `0700`（`createDirectory(attributes: [.posixPermissions: 0o700])`，并对存量目录 `setAttributes` 兜底），无论用户 umask 是什么，被 exec 的二进制都不可能落在一个组/世界可写的目录里。与上一条（`.claudio.bak` 的 0644）是**同一形状的孪生**：都是「新建 filesystem 对象不传显式 mode → 继承 umask → 在一个安全敏感的位置放宽了权限」，建议一并修。
+
+**Context:** 2026-07-13 `/review feat/lock-separation` 的 security specialist（Claude 侧，opus）实测命中，Codex 对抗评审未报。台账此前只有文件侧（`.claudio.bak` 0644），漏了目录侧这条 exec 劫持路径。
+
+**Effort:** S（一行 `attributes:` + 一次存量 `setAttributes` 兜底 + 一条断言）
+**Priority:** P2（安全相关，但默认 umask 022 已使其不可达 —— 需用户/MDM 先设松 umask + 多用户机）
 **Depends on:** None
 
 ### `claudio install` 在一台从没有过 `settings.json` 的机器上，照样说「备份见 settings.json.claudio.bak」
