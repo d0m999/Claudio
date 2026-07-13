@@ -272,12 +272,96 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - **Dynamic Type + 降级规则（codex 精修）**：312pt 单行塞 名+id+文件+波形+试听+静音，大字号必挤；降级：**较大 → 隐波形；更大 → 事件行转两行（名/id 上、文件/控件下）；极大 → 加宽 popover**。不裁切、不溢出。
 - **听障 / 失聪 scope（诚实标注）**：核心是声音，聋人用不了主功能。v1 **不做**视觉通知兜底（菜单栏字形闪烁 / 横幅）；理由：v1 播放层只用 afplay，视觉推送需常驻监听事件，超出"hook 触发即播即退"架构。→ 列入 NOT-in-scope；v2 探索"视觉回放常驻化"作为听障通道。
 
+## 按项目路由声音包（v2 设计 · 2026-07-13 定架构，未排期）
+
+**一句话**：不同项目响不同的包（工作项目用极简铃音、自己的玩具项目用皮卡丘）。**路由做在 helper 里，settings.json 的四条 hook 命令行一个字都不改。**
+
+### 三条外部事实（先纠正一个常见的错误前提）
+
+1. **Claude Code 没有"内置提示音"这一层。** 它不自带任何声音，也没有任何 settings 开关能选通知音（2026-07-13 查证官方 settings / configuration 文档，无此项）。声音从来只能靠 hook 调外部命令实现——即 Claudio 干的事。所以"多配几套官方默认音"这个思路的前提不成立：那一层是空的，规则由我们定。
+
+2. **hooks 跨 scope 是「合并执行」，不是「高优先级覆盖」。** 官方 settings 文档（Settings Precedence and Merging 章节，https://code.claude.com/docs/en/settings.md ）明写：hooks 从 **所有** scope 合并——user、project、local 的 hook **全都会跑**。这与其它配置项的分层语义相反。
+
+   → **推论（本设计的负空间，必须写死）：绝不可能靠"user 层 `~/.claude/settings.json` 配包 A + 项目 `.claude/settings.json` 配包 B"来实现按项目切换。** 那不会"在项目里换成 B"，而是 **A 和 B 同时响**。这条反直觉，将来任何人（包括我们自己）想"顺手改 settings 分层"解决此问题，都是错的——回来读这一段。
+
+3. **路由信号已经在手上，有两条独立来源。**
+   - hook 的 **stdin JSON payload 含 `cwd` 字段**（官方 hooks 文档 Hook Payload Fields：`session_id` / `transcript_path` / `cwd` / `hook_event_name` / `permission_mode` 等，https://code.claude.com/docs/en/hooks.md ）——这是**文档契约**。
+   - `docs/spike-hooks.md` §1 已实测：hook 进程的**工作目录就是 Claude Code 当前项目根目录**——这是**实现事实**，非契约。
+
+### 架构决定：路由在 helper，不在 settings
+
+与已有决议同源（"切声音包 = 改配置文件，不用重写 settings.json"，见上文「运行时架构：helper-CLI」）：**按项目切包同样 = 改配置文件，不重写 settings.json。** settings.json 里仍是四条死命令 `~/.claudio/bin/claudio play <event>`，接管算法一个字不动。
+
+改动落在 `play` 的解析链上：**取当前项目路径 → 查映射表 → 定包 → 其余不变**。当前 `Play.swift` 直接拿 `config.selectedPack` 单值去解析包目录，这是唯一需要改的解析点。
+
+**项目路径怎么取（两条路，推荐 A + B 兜底）：**
+
+| | 来源 | 稳定性 | 代价 |
+|---|---|---|---|
+| **A（主）** | 读 stdin 的 hook JSON payload 的 `cwd` | 官方文档契约，稳 | `play` 现在**从不读 stdin**，要新增读取；且**绝不能阻塞**——与"立即 exit 0、绝不阻断 Claude Code"纪律正面相接，必须非阻塞/带超时，读不到立刻走 B |
+| **B（兜底）** | `FileManager.default.currentDirectoryPath` | 依赖实现细节，Claude Code 改实现即**静默失效** | 零协议改动 |
+
+⚠️ **两条都必须把"这次用了哪条、解析出什么路径、命中哪条规则"写进 `claudio.log`。** 否则 A 静默退化成 B、B 又静默错，最终表现是"播了错误的包但一切正常"——**没有任何人会发现**。这是本设计最容易埋进去的哑火。
+
+### config.json schema 扩展（v2 · 必须 additive）
+
+```json
+{
+  "selected_pack": "minimal-chime",
+  "master_volume": 0.8,
+  "events": { "stop": true, "stop_failure": true, "notification": true, "subagent_stop": false },
+  "project_packs": {
+    "/Users/you/work/claudio": "pikachu",
+    "/Users/you/work": "minimal-chime"
+  }
+}
+```
+
+- **`selected_pack` 保留其原有语义 = 兜底默认包**（未命中任何规则时用）。`project_packs` 缺失 → 行为与 v1 **逐字节相同**（全局单包）。
+- **最长前缀匹配**：`/Users/you/work/claudio` 比 `/Users/you/work` 更具体，前者赢。规则集刻意只做**路径前缀**，不做 glob / 正则——可判定、可解释、可在 UI 里如实呈现。
+- 读路径沿用现有宽松策略：`project_packs` 缺失或损坏 → 退回 `selected_pack`，**不使整个 decode 失败**（hook 路径上 config 坏了也不该让 Claude Code 出错）。
+- **写路径纪律（比 v1 更致命，不是可选项）**：GUI 写 `project_packs` **必须**走 `ConfigMutation.swift` 的外科式 `JSONSerialization` 读-改-写，**绝不得 round-trip `ClaudioConfig`**。理由见上文「工程落地细节」——`ClaudioConfig` 的合成 `Encodable` 只写三个 v1 键，一次 round-trip 会**静默抹掉整张 `project_packs` 表、然后报 SUCCESS**。v1 时代这条纪律丢的是"未知第三方键"，v2 丢的是**用户亲手配的全部项目映射**。
+
+### 路径规范化（不解决就查不中，属于必做而非优化）
+
+映射表的 key 和运行时拿到的 `cwd` 必须在**同一规范化基准**下比较，否则规则静默不命中（又是一次"没声音但不报错"）：
+
+- `~` 展开、trailing slash、大小写（APFS 默认大小写不敏感但保留大小写）。
+- **symlink**：`/tmp` → `/private/tmp` 之类，写入与查找两侧都要 realpath。
+- **git worktree**：同一仓库的不同 worktree 是**不同的绝对路径**，不会命中同一条前缀规则。这对本项目的实际工作流（大量 worktree lanes）是真实的踩点，排期时必须明确是"按 worktree 各配一条"还是"按主仓库路径归并"。
+
+> 注：此处的 realpath 用途（**规范化以便比较**）与 `isReallyContained` 的 realpath 用途（**containment 安全校验**）是两件事，不要混用同一个 helper 或互相"复用"。
+
+### 与现有决议的正面冲突（排期时必须先拍板，只有这一条）
+
+**去抖是全局单时间戳**（决议 5：「一把锁 + 一个共享时间戳」，事件无关、1.5s 内跳过）。它当初刻意不做 per-event 映射，是为了避免多会话高频事件叠播。
+
+**但按项目路由落地后，这个取舍会变得刺眼**：两个项目同时干完活，1.5s 内你**只会听到其中一个包的音，且是哪个取决于竞态**——而这恰恰是本功能想解决的场景（"不回头也知道**哪个项目**好了"）。
+
+两条路，都不能顺手选：
+- **接受**：v2 仍只保证"不叠不炸"，按项目路由只在**串行使用**多项目时兑现价值。
+- **改成 per-project 去抖**：与决议 5 直接冲突，会把"一把锁 + 一个共享时间戳"重新打开——**不得在实现本功能时顺手改掉**，需要单独走一次评审。
+
+### 未决问题
+
+- **GUI 怎么呈现？** 现有画廊是"选中即应用"的**全局单选**。"当前项目用哪个包"是一个全新的 UI 面（是在画廊里加一个"应用到当前项目"？还是独立的项目映射列表？），**完全未设计**。
+- **helper 怎么知道"当前项目"是给谁看的？** GUI 是常驻 app，它的 cwd 与 Claude Code 的项目无关——GUI 要往映射表里写"当前项目"，得先有办法知道用户指的是哪个项目（最近一次 hook 触发的路径？让用户手动选目录？）。
+- **与会话级区分的关系**：两者**正交**。project-level 靠 payload 的 `cwd`；session-level 靠 payload 的 `session_id`。本章只解 project-level，session-level 仍留在 Open Questions。
+
+### 本章 NOT in scope
+
+- 不改 settings.json 接管算法（一个字不动）。
+- 不做 per-session 区分（正交问题，另说）。
+- 不做 glob / 正则规则（只做路径前缀）。
+- 不改去抖架构——**除非**上面那条冲突单独拍板要改。
+
 ## Open Questions（待解问题）
 
 - 运行时形态已定 helper-CLI；配置文件路径 `~/.claudio/` 是否 OK？
 - 首个内置包"极简铃音"的 3 个音：从 Freesound 按 CC0 精选，还是找人做原创？（合规工作量见 Next Steps 独立工作项）
 - 产品名 **Claudio** 是否确定？（做一次商标 / 现有项目重名检索）
 - （v2）会话级声音区分怎么做？从 GitHub 一键装包何时上？
+  - **注**：**项目级**区分已定架构（见上文「按项目路由声音包」，2026-07-13），与会话级正交——前者靠 hook payload 的 `cwd`，后者靠 `session_id`。此条现在**只剩会话级**未解。
 
 **设计待解（/plan-design-review 2026-07-07 补，附推荐倾向）：**
 - ① 包缺音的事件行可见性 → **已决（codex 精修为三态）**：GUI-only `CoverageState = present | unmapped | broken`——`unmapped`（manifest 没配此 event）显「未配置」、`broken`（配了，但目标文件不存在 / 路径未通过 containment；**不含音频内容损坏**，2026-07-09 收窄）显「文件丢失」入 doctor，两者试听禁用；**新增逐事件导入绑定**（行尾拖入/选文件 → 绑到该 event）。helper 不改行为，抽共享 `PackManifest` 模块与运行时查找顺序同源（见 T16）。
@@ -324,6 +408,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 6. **搭 SwiftUI menubar 骨架**：读包列表、逐事件下拉、试听、切包、主音量。
 7. **打包分发**：GitHub Actions 出 DMG + 建 Homebrew tap + 写新系统绕过指引。
 8. **（v2 探索）** 真·勿扰检测、ducking（需评估重写播放层为 CoreAudio/AVAudioEngine）、会话级区分、从 GitHub 一键装包。
+9. **（v2 · 架构已定，未排期）按项目路由声音包** —— 见上文同名章节。改动集中在 helper 的 `play` 解析链 + config.json 加一张 `project_packs` 前缀映射表；settings.json 接管算法不动。**排期前必须先拍板一条冲突**：全局单时间戳去抖（决议 5）会让"两个项目同时完工"只响一个音，而这正是本功能的目标场景。
 
 ## Feasibility 注记（评审后如实标注）
 
@@ -461,6 +546,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - `say` 语音摘要
 - **深夜降音量**（本次由 v1 移出 → v2）
 - 会话级声音区分（多会话只保证不叠不炸）
+- **按项目路由声音包**（不同项目响不同的包）—— v1 全局单包（`selected_pack` 单值）。**v2 架构已定、未排期**，见上文「按项目路由声音包（v2 设计）」章节；那里同时钉死了一条负空间：**不可能靠 settings.json 分层实现**（hooks 跨 scope 合并执行，会两个都响）。
 - **听障 / 失聪视觉通知兜底**（菜单栏字形闪烁 / 横幅）—— v1 播放层只用 afplay，视觉推送需常驻监听事件，超出"hook 触发即播即退"架构；v2 探索"视觉回放常驻化"作为听障通道（Design Review Pass 6）
 - **代码签名 / 公证**（v1 先发未签名 → 面向非技术用户前再上）
 - B 阶段 marketplace / GitHub 一键装包（包格式按 B 设计，但客户端后做）
