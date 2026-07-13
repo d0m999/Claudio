@@ -120,8 +120,100 @@ private func callArguments(of head: String, in source: String) -> [String] {
     return calls
 }
 
+/// `arguments`（`callArguments` 切出来的实参文本）里 `label:` 那**一个顶层实参的值**，trim 过。
+/// 找不到该标签返回 `nil`。
+///
+/// ## 为什么必须是「相等」，不能是 `contains`（`/review e7c38ea` 的 P2）
+///
+/// `callArguments` 已经把**调用**的两头锚死了（头 `switch callee(`、尾配平右括号）。但它交出来的
+/// 实参文本，上一版是拿 `contains("lockFile: environment.configLockFile")` 去断的 —— **头锚死了，
+/// 而 `lockFile: ` 之后那一段没锚**。于是每一种「以它开头、后面接着把它改掉」的写法都逐字包含那个
+/// needle：
+///
+/// ```swift
+/// lockFile: environment.configLockFile.deletingLastPathComponent()
+///     .appendingPathComponent("play.lock")            // 真的是 ~/.claudio/play.lock
+/// lockFile: isFirstRun ? environment.configLockFile : environment.settingsLockFile
+/// ```
+///
+/// 两条都编得过，`arguments.contains(…)` 都**绿**，`!setup.contains("playLockFile")` 也绿（标识符
+/// 一次没出现），`totalForwards == 3` 还是绿。这与 `callArguments` 自己文档里记着的那次翻车
+/// （`uninstallClaudioHooks(` 逐字包含 `installClaudioHooks(`）**逐字同一个病**，只是搬到了实参上：
+/// 子串断言没有词边界。
+///
+/// 这里按**顶层逗号**（括号 / 方括号 / 花括号深度为 0 的那些）把实参切开，再对 `lockFile:` 那一段
+/// 做**相等**判定。相等才配叫「绑定」；`contains` 只是「以它开头」。
+@MainActor
+private func argumentValue(_ label: String, in arguments: String) -> String? {
+    var depth = 0
+    var pieces: [String] = []
+    var current = ""
+    for character in arguments {
+        switch character {
+        case "(", "[", "{":
+            depth += 1
+            current.append(character)
+        case ")", "]", "}":
+            depth -= 1
+            current.append(character)
+        case "," where depth == 0:
+            pieces.append(current)
+            current = ""
+        default:
+            current.append(character)
+        }
+    }
+    pieces.append(current)
+
+    let prefix = label + ":"
+    return
+        pieces
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .first { $0.hasPrefix(prefix) }
+        .map { String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
+}
+
 @MainActor
 func runLockSeparationSuites() {
+    suite("codeOnly 的前提：被它扫的源文件里不许有 `://`（否则它会静默吞掉半行代码）") {
+        // `codeOnly` 在**第一个 `//`** 处无条件截断整行 —— 它不认识字符串字面量。于是一句
+        //
+        // ```swift
+        // let hint = "锁的说明见 https://claudio.dev/locks"; _ = write(…, lockFile: ClaudioPaths.playLockFile)
+        // ```
+        //
+        // 会在 `https:` 后面那个 `//` 处被剪成 `let hint = "锁的说明见 https:` —— **该行剩下的一切
+        // 在分析文本里根本不存在**。而这个文件（与 `ViewWiringSuite`）的兜底**全是负向断言**
+        // （`!contains(…)`、`count == N`）：被静默删掉的代码只会让它们**更绿**。
+        //
+        // 这是一条**元断言** —— 它守的不是产品行为，而是「下面每一条断言读到的文本，确实是那个文件」。
+        // 给 `codeOnly` 加一个引号状态机当然更正统，但那是在给一个只服务于测试的扫描器加复杂度；
+        // 直接禁掉 `://` 更便宜，而且失败消息能把**为什么**说清楚。真到了非放 URL 不可的那天，
+        // 这条断言会当场变红，逼人先去把 `codeOnly` 修好——而不是让它在某个负向断言底下无声地开一个洞。
+        let scanned = [
+            "helper/Sources/ClaudioCore/Setup.swift",
+            "helper/Sources/ClaudioCore/Use.swift",
+            "helper/Sources/ClaudioCore/EventEnabled.swift",
+            "helper/Sources/ClaudioCore/SettingsInstaller.swift",
+            "helper/Sources/ClaudioCore/Play.swift",
+            "helper/Sources/ClaudioCore/Log.swift",
+            "helper/Sources/claudio/Subcommands.swift",
+        ]
+        for path in scanned {
+            guard let code = codeOnly(path) else {
+                expect(false, "读不到 \(path) —— 下面每一条 suite 都指望它")
+                continue
+            }
+            expect(
+                !code.contains("://"),
+                "\(path) 的代码里出现了 `://` —— `codeOnly` 会把它当成行注释的起点，"
+                    + "把这一行剩下的**代码**整段剥掉。而本文件的兜底全是负向断言（`!contains`、"
+                    + "`count == N`），被剥掉的代码只会让它们更绿：一个藏在 URL 后面的 "
+                    + "`lockFile: ClaudioPaths.playLockFile` 会对整套锁分离断言**永久隐身**。"
+                    + "要么把这个字符串挪走，要么先给 `codeOnly` 加上字符串字面量识别")
+        }
+    }
+
     suite("四把锁是四个不同的文件 —— 锁分离的中心论点，此前零断言") {
         let locks: [(String, URL)] = [
             ("playLockFile", ClaudioPaths.playLockFile),
@@ -264,10 +356,19 @@ func runLockSeparationSuites() {
         // 只有底下那条负向兜底救了场。一条措辞（「install 是全默认调用」）比它实际守的范围
         // （「文件里某处出现过这个子串」）更大的断言，正是这个 suite 存在的理由本身。
         // 子串断言没有词边界；`switch … {` 就是这里的词边界。
+        // ⚠️ **四条，不是三条**（`/review e7c38ea` 的 P1-2）。上一版这里只列了 install / uninstall /
+        // use，措辞却写着「它是**三个** CLI 命令的总入口」—— 而 `claudio setup`（`Subcommands.swift:107`，
+        // v1 首次安装自举，仍在发布路径上）**也走锁**：它全默认构造 `SetupEnvironment`，两把锁全靠
+        // `Setup.swift` 那两个默认实参。它当时既不在这份名单里，也（见下）躲得过负向兜底。
+        // 又一次：措辞（「三个命令的总入口」）比覆盖范围（「这三行」）大，而漏掉的那一个是**首装**路径。
         let defaultCalls: [(call: String, command: String, lock: String)] = [
             ("switch installClaudioHooks() {", "claudio install", "settings.lock"),
             ("switch uninstallClaudioHooks() {", "claudio uninstall", "settings.lock"),
             ("switch selectPack(packID) {", "claudio use", "config.lock"),
+            (
+                "SetupEnvironment(executablePath: currentExecutablePath())", "claudio setup",
+                "config.lock + settings.lock"
+            ),
         ]
         for (call, command, lock) in defaultCalls {
             expect(
@@ -277,14 +378,29 @@ func runLockSeparationSuites() {
                     + "\(lock)，上面那条默认值 suite **一个字都没资格再说**")
         }
 
-        // 负向兜底：Subcommands 在**任何位置**都不许出现 lockFile。它是三个 CLI 命令的
-        // 总入口，锁的来源只有一个 —— 被调用函数的默认值。注释已被 `codeOnly` 剥掉，
-        // 谈论锁的散文不会把这条判假红。
+        // 负向兜底：Subcommands 在**任何位置**都不许出现任何锁。它是**四个** CLI 命令的总入口，
+        // 锁的来源只有一个 —— 被调用函数（与 `SetupEnvironment`）的默认值。注释已被 `codeOnly`
+        // 剥掉，谈论锁的散文不会把这条判假红。
+        //
+        // ⚠️ **大小写不敏感**（`/review e7c38ea` 的 P1-2）。上一版断的是 `!contains("lockFile")`，
+        // 而子串匹配**大小写敏感** —— `configLockFile` / `settingsLockFile` / `playLockFile` 里那个
+        // `L` 全是**大写**的，一个都不是 `lockFile` 的子串（`"lockFile" in "configLockFile" == false`）。
+        // 于是把 `claudio setup` 那一行改成
+        //
+        // ```swift
+        // let environment = SetupEnvironment(
+        //     executablePath: currentExecutablePath(), configLockFile: ClaudioPaths.playLockFile)
+        // ```
+        //
+        // —— `claudio setup`（首次安装！）在写 config.json 时占住 play 的去抖锁 —— 而这条负向兜底
+        // 与上面那份名单**两条都碰不到它**。措辞（「任何位置都不许出现 lockFile」）比它实际数的那
+        // 一种大小写写法大。一个 `lowercased()` 把三种标识符一起收进来。
         expect(
-            !subcommands.contains("lockFile"),
-            "Subcommands.swift 的**代码**里出现了 lockFile —— CLI 一旦开始显式传锁，"
-                + "`Use.swift` / `SettingsInstaller.swift` 里那几个默认值就成了摆设：改对它们没用，"
-                + "改错它们也不会红。锁分离在生产上到底成不成立，从此取决于这里传了什么")
+            !subcommands.lowercased().contains("lockfile"),
+            "Subcommands.swift 的**代码**里出现了锁（lockFile / configLockFile / settingsLockFile，"
+                + "大小写不敏感地数）—— CLI 一旦开始显式传锁，`Use.swift` / `SettingsInstaller.swift` / "
+                + "`Setup.swift` 里那几个默认值就成了摆设：改对它们没用，改错它们也不会红。"
+                + "锁分离在生产上到底成不成立，从此取决于这里传了什么")
     }
 
     suite("SetupEnvironment 的两把锁默认值（运行期可求值 —— 它是 struct，不是自由函数）") {
@@ -351,12 +467,15 @@ func runLockSeparationSuites() {
                 + "实际 \(selectPackCalls.count) 处 —— 前提变了，下面那两条「每一处都转发 config.lock」"
                 + "的断言就不再覆盖整条接管路径，必须重新想")
         for (ordinal, arguments) in selectPackCalls.enumerated() {
+            let lock = argumentValue("lockFile", in: arguments)
             expect(
-                arguments.contains("lockFile: environment.configLockFile"),
-                "接管路径第 \(ordinal + 1) 处 `switch selectPack(…)` 的实参里没有 "
-                    + "`lockFile: environment.configLockFile` —— 这一处写的是 config.json，它必须"
-                    + "守着 config.lock。锁传成别的（哪怕另一处 selectPack 传对了、全文件计数照样对得上），"
-                    + "这一次 config.json 的写就跑到别人的锁下面去了")
+                lock == "environment.configLockFile",
+                "接管路径第 \(ordinal + 1) 处 `switch selectPack(…)` 的 `lockFile:` 实参必须**正好是** "
+                    + "`environment.configLockFile`，实际是 `\(lock ?? "<没有这个实参>")` —— 这一处写的是 "
+                    + "config.json，它必须守着 config.lock。锁传成别的（哪怕另一处 selectPack 传对了、"
+                    + "全文件计数照样对得上），这一次 config.json 的写就跑到别人的锁下面去了。"
+                    + "**相等**，不是 `contains`：`environment.configLockFile.deletingLastPathComponent()"
+                    + ".appendingPathComponent(\"play.lock\")` 逐字包含前者，拿到的却是去抖锁")
         }
 
         // `installClaudioHooks` 那一处 —— 必须转发 settings.lock。
@@ -369,20 +488,27 @@ func runLockSeparationSuites() {
             "接管路径里必须正好有 1 处 `switch installClaudioHooks(…)` 调用，"
                 + "实际 \(installCalls.count) 处")
         for arguments in installCalls {
+            let lock = argumentValue("lockFile", in: arguments)
             expect(
-                arguments.contains("lockFile: environment.settingsLockFile"),
-                "接管路径的 `switch installClaudioHooks(…)` 实参里没有 "
-                    + "`lockFile: environment.settingsLockFile` —— 这一处写的是 settings.json，"
-                    + "它必须守着 settings.lock。传成 config.lock，settings.json 的写就跑到 config 的"
-                    + "锁下面去了；而只要 selectPack 那两处反过来传 settings.lock，全文件计数还是对的")
+                lock == "environment.settingsLockFile",
+                "接管路径的 `switch installClaudioHooks(…)` 的 `lockFile:` 实参必须**正好是** "
+                    + "`environment.settingsLockFile`，实际是 `\(lock ?? "<没有这个实参>")` —— 这一处"
+                    + "写的是 settings.json，它必须守着 settings.lock。传成 config.lock，settings.json "
+                    + "的写就跑到 config 的锁下面去了；而只要 selectPack 那两处反过来传 settings.lock，"
+                    + "全文件计数还是对的")
         }
 
-        // 负向兜底一：接管一个字节都不写 play.state，代码里不许出现 playLockFile。
+        // 负向兜底一：接管一个字节都不写 play.state，代码里不许出现 play 的去抖锁。
+        //
+        // ⚠️ 连**值级假名**一起拦（`/review e7c38ea`）：只禁标识符 `playLockFile` 拦不住
+        // `ClaudioPaths.root.appendingPathComponent("play.lock")` —— 它拿到的是**同一把**锁，而那个
+        // 标识符一次都不出现。上面那两条 `argumentValue` 的相等判定已经把这两处调用点的锁钉死了，
+        // 这一条是**全文件**的兜底：将来 Setup.swift 里长出第三个写者时，它得先撞上这一条。
         expect(
-            !setup.contains("playLockFile"),
-            "Setup.swift 的**代码**里出现了 playLockFile —— 接管写的是 config.json 与 settings.json，"
-                + "一个字节都不写 play.state。让接管去占去抖锁，等于在用户点下「接管」之后那几秒里"
-                + "把他的每一声提示音静默吞掉 —— 而那正是他最需要听见反馈的一刻")
+            !setup.contains("playLockFile") && !setup.contains("play.lock"),
+            "Setup.swift 的**代码**里出现了 playLockFile 或字面量 `play.lock` —— 接管写的是 config.json "
+                + "与 settings.json，一个字节都不写 play.state。让接管去占去抖锁，等于在用户点下「接管」"
+                + "之后那几秒里把他的每一声提示音静默吞掉 —— 而那正是他最需要听见反馈的一刻")
 
         // 负向兜底二：全文件正好 3 处锁转发 —— 上面按调用点绑死的就是这 3 处。多出第 4 处，
         // 说明接管路径长出了一个上面三条断言**没在看**的锁写者：当场红，逼人回这里想清楚它该拿哪把锁。

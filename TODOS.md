@@ -84,40 +84,86 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 `configLockFile` 的**值**改回 `play.lock`（一行静默 revert 掉整个阶段 A），等式照样成立，`claudio-tests` +
 `claudio-gui-tests` **全绿（1030 + 1604）**。没有任何一条断言说过「这几把锁是不同的文件」。
 
-**现在真正有牙的是**（`d5ec97e` + `/codex review d5ec97e,8f9cfa2` + `/codex review 840ea37` 的修复，每一条都经
-变异验证确认会 RED）：`LockSeparationSuite` 的三层 —— ① **值级**：四把锁两两不等、且文件名正好是
-play/config/settings/claudio.log.lock；② **默认值级**：每个写者的默认锁（源码绊线，因为 Swift 读不到自由函数的
-默认实参，而**调用**它就意味着拿生产默认值去写真实的 `~/.claude/settings.json`）；③ **调用点级**：`Subcommands.swift`
-的三条 CLI 命令仍是全默认调用、`Setup.swift` 接管路径的**每一个**调用点各自转发它该拿的那把锁 —— 没有 ③，②只是
-摆设（调用点一个参数就能覆盖掉所有默认值，而②不会红）。GUI 侧对应的是 `ViewWiringSuite` 的**全 target 普查**：
-唯一的 PanelView 构造点（`PanelView(` 与 `PanelView.init(` 一起数）、且除 `PanelView.swift` 外全 target 代码里
-不许出现 `lockFile`。
+**现在真正有牙的是**（`d5ec97e` + `/codex review d5ec97e,8f9cfa2` + `/codex review 840ea37` + `/review e7c38ea`
+的修复，每一条都经变异验证确认会 RED）：
 
-**③ 的第一版是数计数的，而计数不绑调用点**（`840ea37` 写下、`/codex review 840ea37` 当场逮到）：它断的是
-「全文件 `configLockFile` 出现 2 次、`settingsLockFile` 1 次、`playLockFile` 0 次」。把一处 `selectPack` 的锁与
-`installClaudioHooks` 的锁**成对交换** —— config.json 的写守着 settings.lock、settings.json 的写守着 config.lock，
-两把锁在生产上全串了 —— 三个计数原样成立，`claudio-tests` **全绿 1060**（实测）。措辞（「确实转发」）比覆盖范围
-（「数得对」）大，正是 `840ea37` 通篇要杀的那个病，复发在杀它的那一刀里；当时的变异台账只测了**单边**改写
-（settings→play、config→play），成对交换这一类没进台账，于是没被想到。现已改成按调用点绑锁（头用 `switch …(`
-锚、尾用配平括号锚），成对交换变异 **红 2 条**。
+- **① 值级**：四把锁两两不等、且文件名正好是 play/config/settings/claudio.log.lock（`LockSeparationSuite`）。
+- **② 默认值级**：每个写者的默认锁。只能走源码绊线 —— Swift 读不到自由函数的默认实参，而**调用**它就意味着
+  拿生产默认值去写真实的 `~/.claude/settings.json`。
+- **③ 调用点级**：`Subcommands.swift` 的**四条** CLI 命令（install / uninstall / use / **setup**）仍是全默认调用；
+  `Setup.swift` 接管路径的每一处调用点，其 `lockFile:` 实参**正好等于**它该拿的那把锁。没有 ③，② 只是摆设
+  （调用点一个参数就能覆盖掉所有默认值，而 ② 不会红）。
+- **④ 行为级**：`OnboardingActionsSuite` 的四条**持锁争用**断言 —— 把注入的锁**真的持住**，再断言写在**哪一步**
+  撞上 `.lockBusy`（详见下一条）。它绑的是真实锁文件路径，是 ①②③ 全部够不着的那一层。
+- GUI 侧：`ViewWiringSuite` 的**全 target 普查** —— 唯一的 PanelView 构造点（`PanelView(` 与 `PanelView.init(`
+  一起数）、PanelView 的**三个**锁消费者各自转发、除 `PanelView.swift` 外 ClaudioGUI 代码里不许出现锁
+  （**大小写不敏感**）、ClaudioGUICore 代码里不许出现 play 的去抖锁。
 
-遗留的行为级缺口见下一条。
+**这三层是一路被打出来的，每一次都是同一个病：断言的措辞比它实际守的范围大。** 逐次记账：
 
-### 「三把锁互不阻塞」只有接线断言背书，没有一条行为级的持锁竞争测试
+- **③ 的第一版是数计数的，而计数不绑调用点**（`840ea37` 写下、`/codex review 840ea37` 当场逮到）：它断的是
+  「全文件 `configLockFile` 出现 2 次、`settingsLockFile` 1 次、`playLockFile` 0 次」。把一处 `selectPack` 的锁与
+  `installClaudioHooks` 的锁**成对交换** —— 两把锁在生产上全串 —— 三个计数原样成立，`claudio-tests` **全绿 1060**
+  （实测）。当时的变异台账只测了**单边**改写，成对交换这一类没进台账。改成按调用点绑锁后，成对交换 **红 2 条**。
+- **③ 的第二版把「实参」断成了 `contains`，而 `contains` 不是绑定**（`/review e7c38ea`）：`callArguments` 把**调用**
+  的两头锚死了（头 `switch callee(`、尾配平括号），却让 `lockFile: ` **之后那一段没锚**。于是
+  `lockFile: environment.configLockFile.deletingLastPathComponent().appendingPathComponent("settings.lock")`
+  —— config.json 的写守着 settings.lock —— **逐字包含**那个 needle，三条断言 + 全文件计数**全绿 1064**（实测）。
+  与 `uninstallClaudioHooks(` 逐字包含 `installClaudioHooks(` **逐字同一个病**，只是搬到了实参上：子串断言没有
+  词边界。现已改成按**顶层逗号**切开实参、对 `lockFile:` 那一段做**相等**判定。
+- **③ 说「三条 CLI 命令」，而 CLI 有四条**（`/review e7c38ea`）：`claudio setup`（v1 首装自举，仍在发布路径上）
+  全默认构造 `SetupEnvironment`，两把锁全靠它的默认实参 —— 而它既不在那份名单里，也躲得过负向兜底：
+  `!subcommands.contains("lockFile")` **大小写敏感**，而 `configLockFile` / `settingsLockFile` / `playLockFile`
+  里那个 `L` 全是**大写**的，一个都不是 `lockFile` 的子串。给 setup 显式传一把 `playLockFile`（**首次安装**就把
+  config.json 的写送上去抖锁）→ **全绿 1064**（实测）。同一个大小写洞也在 `ViewWiringSuite` 普查二上。已全部
+  改成 `lowercased()`。
+- **负向兜底只禁标识符，禁不掉值级假名**（`/review e7c38ea`）：`!contains("playLockFile")` 拦不住
+  `ClaudioPaths.root.appendingPathComponent("play.lock")` —— 拿到的是**同一把**去抖锁，而那个标识符一次都不出现。
+  已改成标识符与字面量 `play.lock` 一起禁。
+- **`codeOnly` 不认识字符串字面量**（`/review e7c38ea`，潜伏未爆）：它在**第一个 `//`** 处无条件截断整行。
+  哪天有人往 `Setup.swift` 的提示文案里放一个 URL，`https:` 后面那个 `//` 会把该行剩下的**代码**整段剥掉 ——
+  而这两个 suite 的兜底**全是负向断言**，被删掉的代码只会让它们**更绿**。已加一条元断言：被扫的源文件里不许
+  出现 `://`，真到了非放不可的那天，它会当场变红，逼人先去把 `codeOnly` 修好。
 
-**What:** 阶段 A 之后，「`Play` 拿 play.lock、config 写者拿 config.lock、settings 写者拿 settings.lock」这件事
-由 `LockSeparationSuite`（值级 + 默认值级 + 调用点级）+ `ViewWiringSuite` 的全 target 源码普查守着。但**没有任何一条
-测试真的持有一把锁、再去证明另一条路径不被它挡住** —— 也就是这次分锁要兑现的那个行为本身，没有直接的测试信号。
+### ~~「三把锁互不阻塞」只有接线断言背书，没有一条行为级的持锁竞争测试~~ ✅ 2026-07-13 `/review e7c38ea` 大部已修
 
-**Why:** 接线断言证明的是「默认值指向 config.lock」，不是「持有 play.lock 时点静音仍然成功」。两者之间隔着
-`FileLock` 的实际语义。今天靠人工读码确认（`play` 读 config 在锁外；config 写是原子 rename；`play` 从不读
-settings.json），但**回归时没有灯会灭**。
+**已补上的**（`OnboardingActionsSuite`，四条，全部经变异验证确认会 RED）：把 fixture **注入**的那把锁**真的持住**，
+再断言写必须在**哪一步**撞上 `.lockBusy` ——
 
-**Context:** 这不是疏忽，是一个**有前置条件**的取舍。要么用注入的临时 fixture 路径测 —— 那样断言从写下第一天
-起就恒真（两个临时路径本就互不相干），正是 D30 判定「测不到东西」的那类假绿；要么锚定生产默认值（真实的
-`~/.claudio/*.lock`）才有牙 —— 但 `ClaudioPaths.root` 锚在 `FileManager.default.homeDirectoryForCurrentUser`，
-**没有任何可覆盖的注入口**，而 Darwin 上 `$HOME` 会被忽略：这类测试会真实地碰到当前用户的 `~/.claudio/`。
-所以前置条件是**先给 `ClaudioPaths.root` 一个可覆盖锚点**，那是一次独立的基础设施改动，不该混进阶段 A。
+- 持 config.lock → 接管必须停在 `.setupFailed(.useFailure(.lockBusy))`（config.json 的写）；
+- 持 settings.lock → 接管必须**放行 config 那步**、停在 `.setupFailed(.installFailure(.lockBusy))`（settings.json 的写）；
+- 持 settings.lock → 断开必须 `.disconnectFailed(.lockBusy)`；
+- 持 config.lock → 断开必须**照常成功**（它一个字节都不写 config.json —— 这条防的是「多拿了一把不该碰的锁」）。
+
+**当初判它「测不到东西」的那个理由，对一半、错一半。** 原文写的是：「用注入的临时 fixture 路径测，断言从写下
+第一天起就恒真（两个临时路径本就互不相干）」。那句话对**「两把锁互不阻塞」**成立，对**「每个写者拿的是不是
+递给它的那把锁」**不成立 —— 后者一点都不恒真：把 `OnboardingActions.swift:595` 的 `configLockFile` 换成
+`ClaudioPaths.playLockFile`（或与 settings 那把**成对交换**），注入的那把锁**不再被争用**，接管当场**成功**（或停在
+**另一步**），断言立刻红。**恒真的是「两个不相干的路径互不阻塞」，不是「这条路径拿了哪把锁」。** 一个字之差，
+挡住了本来当天就能写的四条断言 —— 而在它们缺席的那段时间里，接管路径的三处锁转发（`OnboardingActions.swift`
+`:595` / `:596` / `:607`）**一条断言都没有**：它掉在 `LockSeparationSuite`（只读 `helper/`）与 `ViewWiringSuite`
+（`guiSources()` 只扫 `gui/Sources/ClaudioGUI`）**双方的盲区正中**。实测：把 `:595` 改成 `playLockFile` ——
+用户点下「接管」之后那几秒，他的每一声提示音被去抖锁静默吞掉 —— **1064 + 1607 全绿，零红**。
+
+**Effort:** M → **已完成**（行为断言那一半）
+**Priority:** ~~P2~~ → 剩余部分见下一条
+
+### 剩余的行为级缺口：`play` 与设置写之间的「互不阻塞」，仍然只有人工读码背书
+
+**What:** 上一条补的是「**每个写者拿的是递给它的那把锁**」（注入锁 + 持锁争用，够了）。它证明不了的是另一半：
+**「持有 play.lock 时点静音仍然成功」** —— 也就是分锁要兑现的那个行为本身。
+
+**Why:** 这一半要有牙，就必须锚定**生产默认值**（真实的 `~/.claudio/play.lock` 与 `~/.claudio/config.lock`）——
+用两个临时路径去测它，断言从写下第一天起就恒真（两个不相干的路径本来就互不阻塞），正是 D30 判定「测不到东西」
+的那类假绿。**这一条的前置条件是真的，上一条的不是**：区别在于前者断的是「两把锁之间的关系」（需要真锁），
+后者断的是「这条代码路径用了哪把锁」（注入锁就够）。
+
+**Context:** `ClaudioPaths.root` 锚在 `FileManager.default.homeDirectoryForCurrentUser`，**没有任何可覆盖的注入口**，
+而 Darwin 上 `$HOME` 会被忽略 —— 这类测试会真实地碰到当前用户的 `~/.claudio/`。所以前置条件是**先给
+`ClaudioPaths.root` 一个可覆盖锚点**，那是一次独立的基础设施改动。
+
+今天仍靠人工读码确认（`play` 读 config 在锁外；config 写是原子 rename；`play` 从不读 settings.json），
+**回归时没有灯会灭**。
 
 **Effort:** M
 **Priority:** P2

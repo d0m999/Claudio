@@ -550,6 +550,180 @@ func runOnboardingActionsSuites() {
         }
     }
 
+    // MARK: - 锁分离：接管 / 断开这两条写盘路径，各自守的到底是**哪一把**锁
+    //
+    // ## 这四条在补的那个洞（`/review e7c38ea` 的 P1，变异实测）
+    //
+    // 锁从面板一路传到磁盘写，要过四手：
+    //
+    //     PanelView.lockFile → OnboardingActionEnvironment.configLockFile
+    //                        → SetupEnvironment.configLockFile
+    //                        → selectPack / installClaudioHooks
+    //
+    // 在这四条之前，**中间那一手一条断言都没有** —— `OnboardingActions.swift:589-596` 把
+    // `OnboardingActionEnvironment` 的两把锁灌进 `SetupEnvironment` 的那个构造点。它掉在两套绊线
+    // 中间的缝里：`LockSeparationSuite` 只 `codeOnly("helper/…")`，`ViewWiringSuite` 的
+    // `guiSources()` 只扫 `gui/Sources/ClaudioGUI` —— **没有任何东西读 `ClaudioGUICore`**。
+    //
+    // 实测变异（在真实文件上跑的，不是推理）：
+    //
+    // ```swift
+    // // OnboardingActions.swift:595
+    // configLockFile: ClaudioPaths.playLockFile,
+    // ```
+    //
+    // 用户点下「接管」之后那几秒，config.json 的写占住 `play` 的去抖锁 —— 他在**最需要听见反馈的
+    // 那一刻**被静音，而那正是阶段 A 存在的**唯一**理由。`claudio-tests` 1064 + `claudio-gui-tests`
+    // 1607，**全绿，零红**。
+    //
+    // ## 为什么这四条是**行为**断言，而不是又一条源码绊线
+    //
+    // 绊线绑的是**符号名的文本**（`lockFile: environment.configLockFile`），而那个符号的**值**是
+    // 上一层灌进来的。于是每一种「文本没变、值变了」的写法都能从它底下走过去：
+    //
+    // - 成对交换两把锁（全文件计数、每一处的符号名，全都原样成立）；
+    // - `ClaudioPaths.root.appendingPathComponent("play.lock")` —— 拿到的是同一把去抖锁，而标识符
+    //   `playLockFile` 一次都没出现，`!contains("playLockFile")` 照样绿；
+    // - 三元表达式 `lockFile: flag ? environment.configLockFile : …` —— 逐字包含那个 needle；
+    // - `configLockFile:` 里那个**大写的 `L`** —— `contains("lockFile")` 是大小写敏感的。
+    //
+    // 下面四条绑的是**真实的锁文件路径**：把注入的那把锁**真的持住**，再断言写必须在**那一步**
+    // 撞上 `.lockBusy`。上面每一种绕法在它们面前都当场变红 —— 因为它们根本不看源码长什么样。
+    //
+    // 接缝从第一天起就在（`FixtureTargets` 一直在注入 `configLockFile` / `settingsLockFile`），
+    // 只是**从来没有一条断言去持有它们**。注入一个测试接缝却从不求值它，等于没有这个接缝 ——
+    // 这与 `EventMuteControllerSuite` 的「a contended lock fails and records .lockBusy」是同一招，
+    // 那一招在静音路径上立着，却没人把它搬到接管路径上来。力气全花在了**难测的那一半**
+    // （helper 的 CLI 默认值不可求值，只能读源码文本），而**好测的那一半**（GUI 的锁本来就是
+    // 注入的）被留在裸奔状态。
+    //
+    // ## ⚠️ 为什么断的是「停在**哪一步**」，而不是「失败了」
+    //
+    // 只断言「接管失败了」会被**成对交换**整体满足：两把锁互换之后，持住 config.lock 依然会让接管
+    // 失败 —— 只不过挡住的是 settings 那一步。那正是 `/codex review 840ea37` 的 P1 教训（计数不绑
+    // 调用点）在**行为层**的同一个形状。
+    //
+    // `SetupError` 分得开阶段，所以这里能断死：`.useFailure` = config.json 的写（`selectPack`，
+    // `Setup.swift:512`/`:523`），`.installFailure` = settings.json 的写（`installClaudioHooks`，
+    // `Setup.swift:563`）。接管的顺序是 复制二进制 → 复制包 → 解隔离+回验 → 写 config → 写 hooks，
+    // 所以持哪把锁、该停在哪一步，是**唯一确定**的。
+
+    suite("接管：持住 config.lock → 必须停在 config.json 的写上（.useFailure(.lockBusy)）") {
+        withTempDirectory { root in
+            let fixture = FixtureBundle(in: root)
+            let targets = FixtureTargets(in: root)
+
+            let holder = FileLock(path: targets.configLockFile.path)
+            expect(holder.tryLock(), "test setup: holder 必须先拿到**被注入的**那把 config.lock")
+            defer { holder.unlock() }
+
+            let result = performOnboardingDiskAction(
+                .takeOver,
+                environment: targets.environment(bundledHelperBinary: fixture.helperBinary))
+
+            var stoppedAtConfigWrite = false
+            if case .failure(.setupFailed(.useFailure(.lockBusy))) = result {
+                stoppedAtConfigWrite = true
+            }
+            expect(
+                stoppedAtConfigWrite,
+                "接管写 config.json（selectPack）时必须撞上**被注入的那把** config.lock，得到 \(result) —— "
+                    + "① 接管**成功**了 = 它守的根本不是这把锁（例如被写死成 play.lock：用户点下接管之后"
+                    + "那几秒，他的每一声提示音被去抖锁静默吞掉）；② 停在 `.installFailure` = config 与 "
+                    + "settings 两把锁被**成对交换**了（config.json 的写守着 settings.lock）。断的是"
+                    + "**哪一步**被挡住，不只是「被挡住了」—— 只断言失败会被成对交换整体满足")
+        }
+    }
+
+    suite("接管：持住 settings.lock → config 那步必须放行，停在 hooks 的写上（.installFailure(.lockBusy)）") {
+        withTempDirectory { root in
+            let fixture = FixtureBundle(in: root)
+            let targets = FixtureTargets(in: root)
+
+            let holder = FileLock(path: targets.settingsLockFile.path)
+            expect(holder.tryLock(), "test setup: holder 必须先拿到**被注入的**那把 settings.lock")
+            defer { holder.unlock() }
+
+            let result = performOnboardingDiskAction(
+                .takeOver,
+                environment: targets.environment(bundledHelperBinary: fixture.helperBinary))
+
+            var stoppedAtHooksWrite = false
+            if case .failure(.setupFailed(.installFailure(.lockBusy))) = result {
+                stoppedAtHooksWrite = true
+            }
+            expect(
+                stoppedAtHooksWrite,
+                "接管写 settings.json（installClaudioHooks）时必须撞上**被注入的那把** settings.lock，"
+                    + "得到 \(result) —— ① 接管**成功**了 = settings.json 的写守的根本不是这把锁；"
+                    + "② 停在 `.useFailure` = 两把锁被**成对交换**了（config.json 的写反而守着 "
+                    + "settings.lock，于是被这个 holder 挡在了更早的那一步）。这一条与上面那条**成对**"
+                    + "存在：单独任何一条都能被成对交换骗过，两条一起才把「谁守谁」钉死")
+        }
+    }
+
+    suite("断开：持住 settings.lock → 必须撞上它（.disconnectFailed(.lockBusy)）") {
+        withTempDirectory { root in
+            let fixture = FixtureBundle(in: root)
+            let targets = FixtureTargets(in: root)
+            let environment = targets.environment(bundledHelperBinary: fixture.helperBinary)
+
+            // 先真的接管一次（此刻两把锁都空着），断开才有东西可摘。
+            _ = performOnboardingDiskAction(.takeOver, environment: environment)
+            expect(
+                detectOnboardingState(environment: targets.onboarding) == .installed,
+                "setup: 接管之后必须是 .installed，否则下面断开的是空气")
+
+            let holder = FileLock(path: targets.settingsLockFile.path)
+            expect(holder.tryLock(), "test setup: holder 必须先拿到**被注入的**那把 settings.lock")
+            defer { holder.unlock() }
+
+            let result = performOnboardingDiskAction(.disconnect, environment: environment)
+
+            var blockedBySettingsLock = false
+            if case .failure(.disconnectFailed(.lockBusy)) = result { blockedBySettingsLock = true }
+            expect(
+                blockedBySettingsLock,
+                "断开摘 hooks（uninstallClaudioHooks，`OnboardingActions.swift:607`）写的是 settings.json，"
+                    + "必须撞上**被注入的那把** settings.lock，得到 \(result) —— 断开**成功**了，就说明"
+                    + "这一处转发的是别的锁。它是接管路径之外**第二个** settings.json 的写者，此前同样"
+                    + "一条断言都没有")
+        }
+    }
+
+    suite("断开：持住 config.lock → 必须照常成功（它一个字节都不写 config.json）") {
+        withTempDirectory { root in
+            let fixture = FixtureBundle(in: root)
+            let targets = FixtureTargets(in: root)
+            let environment = targets.environment(bundledHelperBinary: fixture.helperBinary)
+
+            _ = performOnboardingDiskAction(.takeOver, environment: environment)
+            expect(
+                detectOnboardingState(environment: targets.onboarding) == .installed,
+                "setup: 接管之后必须是 .installed，否则下面断开的是空气")
+
+            let holder = FileLock(path: targets.configLockFile.path)
+            expect(holder.tryLock(), "test setup: holder 必须先拿到**被注入的**那把 config.lock")
+            defer { holder.unlock() }
+
+            let result = performOnboardingDiskAction(.disconnect, environment: environment)
+
+            // 这是一条**正向**断言，而且它是上面那条的镜像：上面那条防「断开没拿 settings.lock」，
+            // 这一条防「断开**多拿**了一把它根本不该碰的锁」。少了它，把 `:607` 写成
+            // `lockFile: environment.configLockFile` 只会让上面那条变红一次——而红的原因会被读成
+            // 「settings 锁没接上」，真正的病（断开跑去占 config 的锁，于是一次断开能把并发的
+            // 静音 / 切包写全部挡掉）没人说得出来。
+            var sweptDespiteConfigLock = false
+            if case .success(.disconnected) = result { sweptDespiteConfigLock = true }
+            expect(
+                sweptDespiteConfigLock,
+                "断开只写 settings.json，config.lock 被别人持着与它毫无关系，必须照常摘干净，"
+                    + "得到 \(result) —— 它**因为 config.lock 被持有而失败**，就说明这条路径拿了一把"
+                    + "它根本不该拿的锁：那样一次断开会连带挡住并发的静音开关与切包（两者都写 config.json），"
+                    + "而阶段 A 拆开这几把锁，图的正是它们互不相干")
+        }
+    }
+
     // MARK: 错误文案
 
     suite("OnboardingActionError.message 过 T7 禁词表；工程原话只进 technicalDetail") {

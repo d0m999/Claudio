@@ -80,8 +80,7 @@ private func codeOnly(_ relativePath: String) -> String? {
 /// 永远等不到 1，它会一直绿下去。这与本文件头部那条「一次文本断言若不区分代码与谈论代码的文字，
 /// 它断的就不是代码」是同一种病：一条永远不会红的断言，不是护栏。
 @MainActor
-private func guiSources() -> [(path: String, code: String)] {
-    let relativeRoot = "gui/Sources/ClaudioGUI"
+private func sourcesUnder(_ relativeRoot: String) -> [(path: String, code: String)] {
     let root = repoRoot().appendingPathComponent(relativeRoot)
     guard let walker = FileManager.default.enumerator(atPath: root.path) else { return [] }
     var found: [(path: String, code: String)] = []
@@ -90,6 +89,32 @@ private func guiSources() -> [(path: String, code: String)] {
         found.append((path: name, code: code))
     }
     return found.sorted { $0.path < $1.path }
+}
+
+@MainActor
+private func guiSources() -> [(path: String, code: String)] {
+    sourcesUnder("gui/Sources/ClaudioGUI")
+}
+
+/// `ClaudioGUICore` target 下每一个源文件 —— 上面那个 `guiSources()` **看不见**的那一半 GUI。
+///
+/// 它存在的理由（`/review e7c38ea` 的 P1，变异实测）：接管路径的锁要过四手，而**中间那一手**
+/// （`OnboardingActions.swift:589-596`，把 `OnboardingActionEnvironment` 的两把锁灌进
+/// `SetupEnvironment`）住在 `ClaudioGUICore` 里 —— `guiSources()` 只扫 `gui/Sources/ClaudioGUI`，
+/// `LockSeparationSuite` 只 `codeOnly("helper/…")`，于是这个 target **两套绊线都看不到**。
+///
+/// 把 `OnboardingActions.swift:595` 的 `configLockFile: environment.configLockFile` 改成
+/// `configLockFile: ClaudioPaths.playLockFile` —— 用户点下「接管」之后那几秒，config.json 的写占住
+/// `play` 的去抖锁，他的每一声提示音被静默吞掉 —— **1064 + 1607 全绿，零红**。
+///
+/// ⚠️ 这里只立**负向**兜底（不许出现 play 的去抖锁）。真正把「谁守谁」钉死的是
+/// `OnboardingActionsSuite` 那四条**持锁行为断言** —— 它们绑的是真实锁文件路径，成对交换、
+/// 值级假名、三元表达式、大小写差一个字母，在它们面前全部当场变红。这一条只是**便宜的第二道**：
+/// 行为断言够不到的地方（比如将来 `ClaudioGUICore` 里长出第三个写者、而没人给它写行为测试），
+/// 至少 play.lock 这条最要命的路是堵死的。
+@MainActor
+private func guiCoreSources() -> [(path: String, code: String)] {
+    sourcesUnder("gui/Sources/ClaudioGUICore")
 }
 
 @MainActor
@@ -361,19 +386,50 @@ func runViewWiringSuites() {
             panel.contains("EventMuteController(configFile: configFile, lockFile: lockFile)"),
             "PanelView 必须把它自己的 lockFile（= config.lock）转发给 EventMuteController —— "
                 + "静音开关写的是 config.json")
+
+        // 第三个消费者：切包（`switchPack` → `selectPack`）。
+        //
+        // 上一版这里只有**两**条转发断言，而 PanelView 自己的注释（`PanelView.swift:144`）白纸黑字
+        // 点着**三**个下游调用点：`EventMuteController`、`selectPack`、`OnboardingActionEnvironment`。
+        // 上一版那句「下面三条把整条链钉死：默认值 → **两个**下游写者」—— 措辞比覆盖范围小了一个，
+        // 而漏掉的那一个是用户**每次点画廊换包**都会走的路（`/review e7c38ea` 的 P1-4）。
+        //
+        // 变异：`PanelView.swift:782` 的 `lockFile: lockFile` → `lockFile: ClaudioPaths.settingsLockFile`
+        // —— 切包写 config.json 却守着 settings.lock，与并发的 `claudio use`（守 config.lock）之间
+        // **互斥当场消失**，两个读-改-写可以交错，丢更新。而上面每一条断言都原样成立。
+        expect(
+            panel.contains(
+                "bundledPacksDirectory: audioEnvironment.bundledPacksDirectory, lockFile: lockFile)"),
+            "PanelView 的 switchPack 必须把它自己的 lockFile（= config.lock）转发给 selectPack —— "
+                + "它是这个文件**第三个**锁消费者（另两个：EventMuteController、"
+                + "OnboardingActionEnvironment.configLockFile），也是用户每次在画廊里换包都会走的那一条。"
+                + "切包写的是 config.json，它必须守 config.lock")
+
         expect(
             panel.contains("settingsLockFile: ClaudioPaths.settingsLockFile"),
             "PanelView 构造 OnboardingActionEnvironment 时，settingsLockFile 必须是独立的 "
                 + "settings.lock —— takeOver 路径同时写 settings.json（installClaudioHooks），"
                 + "它绝不能与 config.json 的写者共用一把锁（那正是这次分锁要拆开的东西）")
 
-        // 负向兜底：PanelView 在**任何位置**都不该出现 play 的去抖锁。它一个字节都不写
-        // play.state，也不参与去抖。这一条能同时逮住上面四条各自的变异，且因为 `codeOnly`
-        // 已剥掉注释，谈论 playLockFile 的**散文**不会把它假红（这正是本文件头部记着的那次翻车）。
+        // 负向兜底：PanelView 在**任何位置**都不该碰 play 的去抖锁。它一个字节都不写 play.state，
+        // 也不参与去抖。因为 `codeOnly` 已剥掉注释，谈论 playLockFile 的**散文**不会把它假红
+        // （这正是本文件头部记着的那次翻车）。
+        //
+        // ⚠️ 连**值级假名**一起拦（`/review e7c38ea` 的 P1-4）：只禁标识符 `playLockFile` 是不够的 ——
+        //
+        // ```swift
+        // lockFile: ClaudioPaths.root.appendingPathComponent("play.lock")
+        // ```
+        //
+        // —— 拿到的是**同一把**去抖锁，而标识符 `playLockFile` 一次都没出现。禁掉字面量 `play.lock`
+        // 把这条路一起堵上。这不是洁癖：这个文件是 GUI 三个 config 写者的**唯一**锁来源，它是
+        // `claudio-gui-tests` **import 不到**的 target（`ClaudioGUI` 带 `@main`），所以源码绊线是
+        // 这里**唯一**能立的防线 —— 而绊线只挡得住它逐字写下的那几个形状。
         expect(
-            !panel.contains("playLockFile"),
-            "PanelView 里出现了 playLockFile —— 它不写 play.state、不参与去抖，"
-                + "碰 play 的锁只会重新把提示音吞掉")
+            !panel.contains("playLockFile") && !panel.contains("play.lock"),
+            "PanelView 的**代码**里出现了 playLockFile 或字面量 `play.lock` —— 它不写 play.state、"
+                + "不参与去抖，碰 play 的锁只会重新把提示音吞掉。两个都禁：`ClaudioPaths.root"
+                + ".appendingPathComponent(\"play.lock\")` 拿到的是同一把锁，却一次都不提那个标识符")
     }
 
     suite("MenuBarController 构造 PanelView 时不许传 lockFile —— 上面那个默认值的唯一活路") {
@@ -436,22 +492,62 @@ func runViewWiringSuites() {
                 + "那条（PanelView 的 lockFile 默认值）都建立在「全 target 唯一构造点、且走默认值」这个"
                 + "前提上。多出第二处，两条断言的保护范围就都缩水了，必须重新想")
 
-        // 普查二：除 PanelView 自己之外，全 target 的**代码**里不许出现 lockFile。
-        // PanelView.swift 是唯一的例外，因为那个默认值与两条转发就住在它里面（上面那条 suite 钉的）。
+        // 普查二：除 PanelView 自己之外，全 target 的**代码**里不许出现任何锁。
+        // PanelView.swift 是唯一的例外，因为那个默认值与三条转发就住在它里面（上面那条 suite 钉的）。
         // `PackGalleryView` 的 doc comment 里提过 `selectPack(…lockFile:)`，`codeOnly` 已把它剥掉 ——
         // 这正是本文件头部记着的那次翻车（把谈论代码的文字当代码断）。
+        //
+        // ⚠️ **大小写不敏感**（`/review e7c38ea` 的 P1-2）：上一版数的是子串 `lockFile`，而
+        // `configLockFile` / `settingsLockFile` 里那个 `L` 是**大写**的 —— 子串匹配大小写敏感，
+        // 于是在任何一个 ClaudioGUI 文件里写
+        //
+        // ```swift
+        // OnboardingActionEnvironment(…, configLockFile: ClaudioPaths.playLockFile, …)
+        // ```
+        //
+        // —— 这条普查**一次都数不到**。措辞（「不许出现 lockFile」）比正则（「小写 l 那一种写法」）大，
+        // 又一次。`lowercased()` 一行就把 `lockFile` / `configLockFile` / `settingsLockFile` 全收进来。
         var lockLeaks: [String: Int] = [:]
         for file in sources where !file.path.hasSuffix("PanelView.swift") {
-            let count = file.code.components(separatedBy: "lockFile").count - 1
+            let count = file.code.lowercased().components(separatedBy: "lockfile").count - 1
             if count > 0 { lockLeaks[file.path] = count }
         }
         expect(
             lockLeaks.isEmpty,
-            "ClaudioGUI 里除 PanelView.swift 之外的文件出现了 lockFile：\(lockLeaks) —— "
-                + "这会绕过 PanelView 那个唯一活着的默认值（= config.lock），把静音、切包、接管"
-                + "三个 config.json 写者一起送回调用点指定的那把锁上。传 playLockFile = 阶段 A 的"
-                + "分锁当场失效，而 PanelView.swift 一个字都不用改，整套 GUI 测试照样全绿。"
-                + "GUI 的锁只有一个来源：PanelView 的默认值")
+            "ClaudioGUI 里除 PanelView.swift 之外的文件出现了锁（lockFile / configLockFile / "
+                + "settingsLockFile，大小写不敏感地数）：\(lockLeaks) —— 这会绕过 PanelView 那个唯一"
+                + "活着的默认值（= config.lock），把静音、切包、接管三个 config.json 写者一起送回"
+                + "调用点指定的那把锁上。传 playLockFile = 阶段 A 的分锁当场失效，而 PanelView.swift "
+                + "一个字都不用改，整套 GUI 测试照样全绿。GUI 的锁只有一个来源：PanelView 的默认值")
+    }
+
+    suite("ClaudioGUICore 的代码里一个字都不许出现 play 的去抖锁（两套绊线中间那条缝）") {
+        // 见 `guiCoreSources()` 的文档：这个 target 是 `guiSources()`（只扫 ClaudioGUI）与
+        // `LockSeparationSuite`（只读 helper/）双方的盲区，而接管路径把两把锁灌进 `SetupEnvironment`
+        // 的那个构造点（`OnboardingActions.swift:589-596`）就住在这里。
+        let sources = guiCoreSources()
+        expect(
+            sources.count >= 5,
+            "在 gui/Sources/ClaudioGUICore 下一个 Swift 文件都没数到（实得 \(sources.count)）—— "
+                + "下面那条是**普查**，普查不到任何文件就永远等不到红，只会安静地绿下去")
+
+        // 与 PanelView 那条同样连**值级假名**一起拦：`ClaudioPaths.root.appendingPathComponent`
+        // `("play.lock")` 拿到的是同一把去抖锁，而标识符 `playLockFile` 一次都不出现。
+        var debounceLockLeaks: [String: Int] = [:]
+        for file in sources {
+            let byIdentifier = file.code.components(separatedBy: "playLockFile").count - 1
+            let byLiteral = file.code.components(separatedBy: "play.lock").count - 1
+            let count = byIdentifier + byLiteral
+            if count > 0 { debounceLockLeaks[file.path] = count }
+        }
+        expect(
+            debounceLockLeaks.isEmpty,
+            "ClaudioGUICore 的**代码**里出现了 playLockFile 或字面量 `play.lock`：\(debounceLockLeaks) —— "
+                + "这个 target 里的每一个写者写的都是 config.json（静音、切包）或 settings.json"
+                + "（接管、断开），**一个字节都不写 play.state**。让它们中的任何一个去占去抖锁，"
+                + "就是在用户点下按钮之后的那几秒里，把他的每一声提示音静默吞掉 —— 而那正是他"
+                + "最需要听见反馈的一刻。谁守哪把锁由 `OnboardingActionsSuite` 的四条持锁行为断言钉死；"
+                + "这一条只是把最要命的那把锁从整个 target 里赶出去")
     }
 
     suite("MenuBarController：popover 关闭必须发出隐藏信号，而且必须在那句会提前 return 的 guard 之前（T17d）") {
