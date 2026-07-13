@@ -162,19 +162,22 @@ func runPanelConfigControllerSuites() {
         }
     }
 
-    // switchPack **成功**路径（红队 b86ec0a：上一版这条路径整条无测试，逮到三条存活变异）。一条测试
-    // 同时钉死三样，各对应红队的一条：
-    //   #1 删 `packSwitchError = nil` → fail→success 序列里旧错不清 → 假警报挂在换过包的面板上；
-    //   #3 删成功分支的 `reload()`  → config 写盘了、读模型停在旧包 → 面板/画廊显示旧包直到重开；
-    //   #5 reload() 两行对调       → afterFullReload 拿到**旧** config → retarget 到旧包成空操作，
-    //                                拖拽/绑定写进旧包目录（用真 config 的 selectedPack 值当场逮住）。
-    suite("PanelConfigController.switchPack 成功：清旧错 + 全量 reload + afterFullReload 收到**新**包（红队 b86ec0a #1/#3/#5）") {
+    // switchPack **成功**路径（红队 b86ec0a #1/#3/#5 + 红队 round3 packCards/eventRows）。一次成功切包
+    // 走全量 `reload()`，它重算**四个** @Published 读模型（configState / config / eventRows / packCards）
+    // 外加清 packSwitchError + 跨-view-model 协调。这条测试把**每一个都断言到**——上一版只断言了 config/
+    // configState，红队 round3 于是删掉 `packCards = availablePacks(...)`（画廊高亮停在旧包）与
+    // `eventRows = packCoverage(...)`（事件行停在旧包覆盖）两条，测试照绿。
+    //
+    // 关键手法：pack-a 与 pack-b 的 manifest 映**不同的事件**（a→stop，b→notification），于是 eventRows
+    // 的逐事件覆盖态在切包后**可观测地变了**（.stop 从 .present 掉成 .unmapped）——否则两个同构包切过去
+    // eventRows 长得一样，删掉重算那行也看不出来。
+    suite("PanelConfigController.switchPack 成功：reload 的全部四个读模型都反映新包 + 清错 + afterFullReload 收到新包") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
             let packsDir = root.appendingPathComponent("packs")
-            // 初始选中 pack-a；磁盘上另有一个 pack-b 可切过去（两个都建出真目录 + manifest，
-            // 好让 selectPack 的 resolvePackDirectory 放行）。
+            // 初始 pack-a（映 stop）；磁盘上另有 pack-b（映 notification）。两包覆盖**不同**，好让 eventRows
+            // 在切包后可观测地变化。两个都建真目录 + manifest，让 selectPack 的 resolvePackDirectory 放行。
             writeFixture(
                 #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
             writeFixture(
@@ -182,9 +185,9 @@ func runPanelConfigControllerSuites() {
                 to: packsDir.appendingPathComponent("pack-a/manifest.json"))
             writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
             writeFixture(
-                #"{ "id": "pack-b", "events": { "stop": "stop.mp3" } }"#,
+                #"{ "id": "pack-b", "events": { "notification": "notification.mp3" } }"#,
                 to: packsDir.appendingPathComponent("pack-b/manifest.json"))
-            writeFixture("audio", to: packsDir.appendingPathComponent("pack-b/stop.mp3"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-b/notification.mp3"))
 
             var afterFullReloadConfigs: [ClaudioConfig] = []
             let controller = PanelConfigController(
@@ -192,7 +195,13 @@ func runPanelConfigControllerSuites() {
                 environment: makeEnvironment(packsDir),
                 afterFullReload: { afterFullReloadConfigs.append($0) })
 
-            // 先制造一次失败，让 packSwitchError 非 nil（#1 要观测的正是它随后被清）。
+            // 前提：初始 pack-a 时 .stop 是 .present（manifest 映了它、文件在）。切到 pack-b 后它该变。
+            if case .present = controller.eventRows.first(where: { $0.event == .stop })?.coverage {} else {
+                expect(false, "前提：pack-a 下 .stop 覆盖必须是 .present，得到 "
+                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.coverage))")
+            }
+
+            // 先制造一次失败，让 packSwitchError 非 nil（清错要观测的正是它随后被清）。
             controller.switchPack(to: "this-pack-does-not-exist")
             expect(
                 controller.packSwitchError != nil,
@@ -201,35 +210,102 @@ func runPanelConfigControllerSuites() {
             // 成功切到 pack-b。
             controller.switchPack(to: "pack-b")
 
-            // #1：成功必须**清掉**上一次失败留下的旧错 —— 否则「切包失败…」红字挂在一张已经成功换过包
-            // 的面板上（假警报）。删掉成功分支的 `packSwitchError = nil` → 这条红。
+            // ① 清错：成功必须清掉上一次失败留下的旧错，否则假警报挂在换过包的面板上（删 `packSwitchError = nil` → 红）。
             expect(
                 controller.packSwitchError == nil,
-                "成功切包必须清掉上一次失败留下的 packSwitchError —— 它还在 = 假警报挂在换过包的面板上"
-                    + "（违反『面板说实话』）。得到 \(String(describing: controller.packSwitchError))")
+                "成功切包必须清掉上一次失败留下的 packSwitchError —— 它还在 = 假警报挂在换过包的面板上。"
+                    + "得到 \(String(describing: controller.packSwitchError))")
 
-            // #3：成功必须**全量 reload** —— config/configState/eventRows 反映新包。删掉成功分支的
-            // `reload()` → config 停在 pack-a（尽管 selectPack 已把 pack-b 写盘）→ 这条红。
+            // ② config：reload 重读了刚写盘的 config（删成功分支 `reload()` → 停在 pack-a → 红）。
             expect(
                 controller.config.selectedPack == "pack-b",
-                "成功切包后 controller.config 必须是 pack-b（reload 重读了刚写盘的 config）—— 它还是 pack-a"
-                    + " = 成功分支没 reload，面板/画廊继续显示旧包直到重开 popover。得到 "
-                    + "\(controller.config.selectedPack)")
+                "成功切包后 controller.config 必须是 pack-b。得到 \(controller.config.selectedPack)")
+
+            // ③ configState：顶部路由据它渲染。
             guard case .operational(let onDisk) = controller.configState else {
                 expect(false, "成功切包后 configState 必须是 .operational(pack-b)，得到 \(controller.configState)")
                 return
             }
             expect(onDisk.selectedPack == "pack-b", "configState 里的 config 也必须是 pack-b，得到 \(onDisk.selectedPack)")
 
-            // #5：afterFullReload 必须收到**重载后**的新 config（pack-b），不是重载前的旧 config（pack-a）。
-            // reload() 把两行对调（afterFullReload 排到 config 重载之前）→ 闭包拿到 pack-a → retarget(pack-a)
-            // 在 A→B 之后是空操作（guard newPackID != packID），drop zone / 行内 import 全停在旧包 A，
-            // 拖拽/绑定写进包 A 目录。这条断言直接读闭包收到的 selectedPack 值，把那次对调当场逮住。
+            // ④ eventRows：全量 reload 必须**重算**逐事件覆盖。pack-b 不映 .stop → .stop 掉成 .unmapped。
+            // 删 `eventRows = packCoverage(...)` → eventRows 停在 pack-a 的 .stop=.present → 这条红。
+            if case .present = controller.eventRows.first(where: { $0.event == .stop })?.coverage {
+                expect(false, "切到 pack-b（不映 stop）后，.stop 那行覆盖必须重算成非 .present —— 它还是 "
+                    + ".present = eventRows 没重算，事件行停在旧包 pack-a。")
+            }
+
+            // ⑤ packCards：画廊高亮据 isSelected（= id == config.selectedPack）。删 `packCards = availablePacks(...)`
+            // → packCards 停在旧包 → 画廊仍把 pack-a 高亮成当前包 → 这条红。
+            expect(
+                controller.packCards.first(where: { $0.isSelected })?.id == "pack-b",
+                "成功切包后画廊的『当前选中』必须是 pack-b —— 它还是 pack-a = packCards 没重算，画廊对"
+                    + "『哪个是当前包』撒谎。得到 "
+                    + "\(String(describing: controller.packCards.first(where: { $0.isSelected })?.id))")
+
+            // ⑥ afterFullReload 收到**重载后**的新 config（reload 两行对调 → 拿到旧 config pack-a → retarget 空操作 → 红）。
             expect(
                 afterFullReloadConfigs.last?.selectedPack == "pack-b",
-                "afterFullReload 必须收到**重载后**的 config（pack-b）—— 收到 pack-a = reload() 里 config"
-                    + "重载与 afterFullReload 的顺序反了，retarget 会打到旧包、成空操作，后续拖拽/绑定落进"
-                    + "旧包目录。得到 \(String(describing: afterFullReloadConfigs.last?.selectedPack))")
+                "afterFullReload 必须收到重载后的 config（pack-b）—— 收到 pack-a = reload() 里 config 重载"
+                    + "与 afterFullReload 顺序反了，retarget 打到旧包成空操作，后续拖拽/绑定落进旧包目录。"
+                    + "得到 \(String(describing: afterFullReloadConfigs.last?.selectedPack))")
+        }
+    }
+
+    // muteError 的 republish（红队 round3：这行是 e49f0bc 新写的，此前零行为覆盖）。#2 的结构修复堵死了
+    // 「注入第二个 muteController 实例」，但**堵不住把 republish 写成常量**：删掉
+    // `muteError = muteController.lastError`（或写成 `= nil`）→ muteError 恒 nil → 真·静音失败（.lockBusy /
+    // 读写失败）的红色 errorNotice 永不渲染 = 静默吞错从另一扇门复活。这条测试逼真·失败经 republish 上浮。
+    //
+    // 用一份**存在但畸形**的 config 触发一个**非 .configMissing** 的失败（.configMissing 会被面板故意滤掉、
+    // 且走 .full 重路由，测不到 republish 该带的那类「要给用户看」的错误）——畸形 config 存在，静音写盘会
+    // fail closed 成读失败，muteError 必须带上它。
+    suite("PanelConfigController.toggleMute 真失败：muteError 必须把非 .configMissing 的错误 republish 上来（红队 round3）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            // config.json 存在、但 master_volume 是字符串（读得动结构、写路径 fail closed）——静音写盘会
+            // 失败成一个**非 .configMissing** 的错误（要给用户看的那类），不是「文件不存在」。
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": "oops", "events": {} }"#, to: configFile)
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")))
+
+            expect(controller.muteError == nil, "前提：还没点过静音，muteError 必须是 nil")
+
+            controller.toggleMute(.stop)
+
+            // republish 必须把这次真失败带上来。删掉那行 / 写成 nil → muteError 恒 nil → 这条红。
+            guard let surfaced = controller.muteError else {
+                expect(false, "一次真·静音失败（畸形 config，非 .configMissing）后，muteError 必须非 nil —— "
+                    + "它还是 nil = republish 那行被删/掏空，面板永不渲染 errorNotice = 静默吞错复活")
+                return
+            }
+            // 且它必须是要给用户看的那类，不是被面板滤掉的 .configMissing。
+            expect(
+                surfaced != .configMissing,
+                "muteError 带上来的必须是要给用户看的真错误（读/写/锁失败），不是被面板故意滤掉的 "
+                    + ".configMissing —— 得到 \(surfaced)")
+        }
+    }
+
+    // muteError 的另一半：一次**成功**静音必须把上一次失败留下的 muteError 清成 nil（否则旧红字残留）。
+    suite("PanelConfigController.toggleMute 成功：muteError 必须被清成 nil（不许旧失败的红字残留）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")))
+
+            controller.toggleMute(.stop)  // 成功（operational config）
+
+            expect(
+                controller.muteError == nil,
+                "一次成功静音后 muteError 必须是 nil —— 非 nil = republish 没在成功时清错，上一次失败的红字"
+                    + "会残留在一次成功操作之后。得到 \(String(describing: controller.muteError))")
         }
     }
 }
