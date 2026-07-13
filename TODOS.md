@@ -461,20 +461,40 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 
 | # | 变异 | 面 | 用户后果 | 现状 |
 |---|---|---|---|---|
-| 1 | `refresh()` 函数体删 `configState = loadPanelConfig(...)` | 执行 | config 被外部删后面板永久失明，四行活控件挂在不存在的文件上 | **仍存活**（text-slice 守不住函数体） |
-| 2 | switch 前插 `if …==.enabledFlagsOnly { return }` 让那条 case 成死代码 | 可达性 | 静音成功但开关视觉不动，面板对静音状态撒谎 | **仍存活**（存在≠可达） |
-| 3 | `onToggleMute: {}` 剪断按钮→handler | 接线 | 四行静音钮点了毫无反应，连失败都没有 | **已加存在性检查**（挡「线被剪」，不挡「接错/没接通」） |
-| 4 | `setEnabled(enabled: currentlyEnabled)` 去掉 `!` | 翻转 | 静音钮变死键，翻转逻辑裸奔 | **仍存活**（切片只查 switch，不查翻转行） |
-| 5 | doctor `.malformed` 对不含 "events" 的 reason 打绿勾 | doctor | master_volume 畸形→静音永久失效、声音照响，doctor 谎报健康 | **已行为级修复**（`configRewritabilityResult` 任意 reason→warning 围栏） |
+| 1 | `reload()` 不重载 `configState` | 执行 | config 被外部删后面板永久失明，四行活控件挂在不存在的文件上 | **已行为级修复** |
+| 2 | `reloadEnabledFlags()` 早退成死代码 | 可达性 | 静音成功但开关视觉不动，面板对静音状态撒谎 | **已行为级修复** |
+| 3 | `onToggleMute: {}` 剪断按钮→handler | 接线 | 四行静音钮点了毫无反应，连失败都没有 | **存在性检查**（挡「线被剪」；「运行期没接通」是 SwiftUI body 的固有天花板） |
+| 4 | `setEnabled(enabled: currentlyEnabled)` 去掉 `!` | 翻转 | 静音钮变死键，翻转逻辑裸奔 | **已行为级修复** |
+| 5 | doctor `.malformed` 对不含 "events" 的 reason 打绿勾 | doctor | master_volume 畸形→静音永久失效、声音照响，doctor 谎报健康 | **已行为级修复** |
 
-#5 是 helper 纯逻辑，已真修（`DoctorSuite` 参数化围栏，实测那条变异打出 4 红）。#3 补了存在性检查（`ViewWiringSuite` 断言 `onToggleMute: { toggleMute(row.event) }`，实测变异变红）。
+**2026-07-13 根治已落地（view-model 化）：本条实质关闭，只剩一个 SwiftUI 固有天花板。**
 
-**#1 / #2 / #4 三条仍存活，本条不关闭** —— 它们是**同一个根因的三个切面**：`configState` / `eventRows` 与操作它们的方法（`toggleMute` / `refresh` / `refreshEnabledFlags`）都住在 `PanelView`，text-slice 只能守「代码在不在」，守不住「执行 / 可达 / 翻转」。这是文本绊线的**强度天花板**，不是再加几条 contains 能补的缺口（白名单永远不完整，红队下一轮还能找第 N+1 个）。
+`configState` / `config` / `eventRows` / `packCards` / `packSwitchError` 连同操作它们的
+`toggleMute` / `switchPack` / `reload` / `reloadEnabledFlags`，**整体搬进了**
+`ClaudioGUICore.PanelConfigController`（可实例化的 `@MainActor` 类，同 `OnboardingViewModel` /
+`EventMuteController` 的既有做法）。`PanelView` 里避开「读 `@StateObject.wrappedValue` 造幽灵实例」
+陷阱的办法：init 里先构造纯 local 实例，再各自 wrap 进 `@StateObject` **并**把同一实例交给 controller，
+跨-view-model 协调（onboarding 重探 + import view-model retarget）走一个捕获这些 local 的闭包。
 
-**根治 = view-model 化**：把这组状态和方法搬进一个可实例化的 `@MainActor final class`（同 `OnboardingViewModel` / `AudioImportViewModel` / `EventMuteController` 的既有做法），放进 `ClaudioGUICore`。测试能真的 `new` 它、喂真磁盘、调 `toggleMute`、断言 `configState` 真的从 `.operational` 翻到 `.needsPack`、`eventRows` 真的重算 —— #1/#2/#4 全部**行为级**关闭。唯一仍关不掉的是 `PanelView.body` 把按钮绑到 `model.toggleMute` 那最外层一根线（SwiftUI body 接线，纯逻辑测试到不了，只有 UI/快照测试够得着，而本机 CommandLineTools 无 XCTest）—— 那一根靠 #3 的存在性检查兜底。
+`PanelConfigControllerSuite` **new 一个真 controller、喂真磁盘 config、调真方法、断言磁盘字节与读模型
+真的变**。定向变异台账（实测，5/5 全红）：
+- **#1**（`reload()` 删 configState 重载）→「外部删除后 configState 必须翻到 .needsPack」当场红；
+- **#2**（`reloadEnabledFlags()` 早退）→「config/eventRows 必须反映翻转」当场红；
+- **#4**（去掉 `!`）→「翻转必须落盘」当场红；
+- **#3**（`onToggleMute: {}`）→ `ViewWiringSuite` 存在性检查当场红；
+- 锁转发（`switchPack` 换 `settingsLockFile`）→ 锁分离断言当场红（跨搬迁保住 D9）。
 
-**Effort:** M（view-model 抽取是一次真重构，PanelView 与 onboarding/dropZone/rowImport/announcer/focus 多个 view-model 纠缠）
-**Priority:** P2
+抽取顺带删掉了整套 `functionBody("toggleMute")` 文本切片装置 —— 它是为「逻辑困在测不到的 View 里」这个
+问题写的脚手架，问题从根上消失后，脚手架也就没了存在理由（这正是「拆纯函数 vs 拆可实例化对象」的差别：
+前者只救判断，后者把执行/可达/翻转一起救出来）。
+
+**唯一残留（不是缺口，是 SwiftUI 的固有天花板）**：`PanelView.body` 把按钮绑到 `panelModel.toggleMute`
+那**最外层一根接线**，纯逻辑测试本质上到不了（只有 UI / 快照测试够得着，而本机 CommandLineTools 无
+XCTest）。由 `ViewWiringSuite` 的存在性检查兜底（挡「线被剪断」）。要连这一根也行为级关掉，需要引入
+快照测试栈 —— 那是独立的一条，不在本条范围。
+
+**Effort:** ~~M~~ 已完成（红队 9cccc9c → view-model 化）
+**Priority:** ~~P2~~ 已关闭（残留的 SwiftUI body 接线天花板另立门户，非本条）
 **Depends on:** None
 
 ### 穷尽性断言丢了 `action` 这一维 —— 「断开失败」这一视觉态从没被任何一帧渲染过

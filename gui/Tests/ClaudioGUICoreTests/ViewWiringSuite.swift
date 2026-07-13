@@ -86,67 +86,6 @@ private func collapsingWhitespace(_ text: String) -> String {
     text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
 }
 
-/// 从**清空过字符串内容**的源码里，按花括号配平切出 `func <name>(…)` 那一个函数的函数体。
-///
-/// ## 它修的那个洞（`/codex review 573336d` [P2]，变异实测）
-///
-/// 上一版这样钉「静音失败必须触发**全量** refresh()」：
-///
-/// ```swift
-/// expect(panel.contains("muteController.lastError == .configMissing") && panel.contains("refresh()"), …)
-/// ```
-///
-/// `refresh()` 在 `PanelView.swift` 里出现 **37 次**（剥注释后仍有八处真实调用点：`playPreview`、
-/// `switchPack`、`.onAppear`、导入回调……）。那个合取子**恒真**，整条断言只剩前半截 —— 而它失败消息里
-/// **亲口点名**的那个变异（`.configMissing` 分支改调 `refreshEnabledFlags()`）会让它**照样绿**：另外
-/// 36 处 `refresh()` 一个都没少。守卫读的是「整个文件」，它守的是「一个分支」。**一条断言的作用域必须
-/// 等于它声称的作用域**，否则它守的范围永远比它的措辞小。
-///
-/// ## 围栏，不是探针
-///
-/// 认不出 ⇒ **红**：函数名找不到（改名 / 内联 / 挪走）、参数表或花括号不配平、文件读不到 —— 一律 `nil`，
-/// 调用方当场 `expect(false, …)`。它宁可假红让人来看一眼，也绝不在「切不出东西」时安静地把断言判绿：
-/// 一段切不出来的代码，在 `contains` 眼里与「这一行本来就不存在」**完全同形**。
-///
-/// 输入必须是 ``StrippedSwiftSource/codeWithoutStringLiterals`` —— 数括号在保留字符串内容的文本上是
-/// 不安全的（`"pack (1.json"` 里那个 `(` 会让括号永不配平，见 `AtomicWriteSuite` 翻过的那次车）。
-private func functionBody(_ name: String, in code: String) -> String? {
-    guard let signature = code.range(of: "func \(name)(") else { return nil }
-
-    // ① 先读完参数表 —— 参数的默认值 / 闭包里可能有 `{`，那不是函数体的 `{`。
-    var index = signature.upperBound
-    var parenDepth = 1
-    while index < code.endIndex, parenDepth > 0 {
-        switch code[index] {
-        case "(": parenDepth += 1
-        case ")": parenDepth -= 1
-        default: break
-        }
-        index = code.index(after: index)
-    }
-    guard parenDepth == 0 else { return nil }
-
-    // ② 参数表之后的第一个 `{` 才是函数体的开口（中间可能隔着返回类型 / `async` / `throws`）。
-    while index < code.endIndex, code[index] != "{" {
-        index = code.index(after: index)
-    }
-    guard index < code.endIndex else { return nil }
-
-    // ③ 花括号配平。字符串内容已清空，串里的花括号到不了这里。
-    let bodyStart = index
-    var braceDepth = 0
-    while index < code.endIndex {
-        switch code[index] {
-        case "{": braceDepth += 1
-        case "}":
-            braceDepth -= 1
-            if braceDepth == 0 { return String(code[bodyStart...index]) }
-        default: break
-        }
-        index = code.index(after: index)
-    }
-    return nil  // 到文件尾都没配平
-}
 
 /// `ClaudioGUI` target 下**每一个** Swift 源文件，剥掉注释之后的样子 —— `(文件名, 代码)`。
 ///
@@ -449,7 +388,7 @@ func runViewWiringSuites() {
         {
             let handlerBody = panel[actionHandlerAt..<sayActionAt]
             expect(
-                handlerBody.contains("refresh()"),
+                handlerBody.contains("panelModel.reload()"),
                 "`.onChange(of: actionState)` 必须在 `say(.actionStateChanged)` **之前** refresh() —— 见上。"
                     + "少了这一行，一次成功的接管会在同一趟里 post 两条内容不同的播报，而用户在这个产品"
                     + "唯一一次庆祝时刻上，听到的是一句卡半截的「Claudio 面板，当前声音包…」")
@@ -477,7 +416,7 @@ func runViewWiringSuites() {
             expect(false, "PanelView 里必须同时有 .onAppear 与 .onChange(of: focusCoordinator.showCount)")
         }
 
-        if let rowsAt = panel.range(of: "ForEach(eventRows")?.lowerBound,
+        if let rowsAt = panel.range(of: "ForEach(panelModel.eventRows")?.lowerBound,
             let noticeAt = panel.range(of: "ActionNoticeRow(")?.lowerBound
         {
             expect(
@@ -487,7 +426,7 @@ func runViewWiringSuites() {
                     + "一个只映了 1/4 事件的用户包），所以那几行是这句话之后唯一说真话的地方。把它们挪到告知"
                     + "下面，用户就得先读到「哪些还缺」、再往下找那个「哪些」")
         } else {
-            expect(false, "PanelView 里必须同时有 ForEach(eventRows 与 ActionNoticeRow(")
+            expect(false, "PanelView 里必须同时有 ForEach(panelModel.eventRows 与 ActionNoticeRow(")
         }
     }
 
@@ -522,23 +461,33 @@ func runViewWiringSuites() {
             "PanelView 必须把它自己的 lockFile（= config.lock）转发给 EventMuteController —— "
                 + "静音开关写的是 config.json")
 
-        // 第三个消费者：切包（`switchPack` → `selectPack`）。
+        // 第三个消费者：切包（`switchPack` → `selectPack`）。它**搬进了**
+        // `ClaudioGUICore.PanelConfigController`（红队 9cccc9c 兑现台账那条 P2），所以这条锁转发链现在
+        // 有两段，两段都要钉：
+        //   ① PanelView.init 把自己的 lockFile（= config.lock）**灌进** PanelConfigController；
+        //   ② PanelConfigController.switchPack 把那把锁**转发给** selectPack。
+        // 任何一段接错（比如②里换成 settingsLockFile），切包写 config.json 却守着别的锁，与并发的
+        // `claudio use`（守 config.lock）之间互斥当场消失，两个读-改-写交错、丢更新。
         //
-        // 上一版这里只有**两**条转发断言，而 PanelView 自己的注释（`PanelView.swift:144`）白纸黑字
-        // 点着**三**个下游调用点：`EventMuteController`、`selectPack`、`OnboardingActionEnvironment`。
-        // 上一版那句「下面三条把整条链钉死：默认值 → **两个**下游写者」—— 措辞比覆盖范围小了一个，
-        // 而漏掉的那一个是用户**每次点画廊换包**都会走的路（`/review e7c38ea` 的 P1-4）。
-        //
-        // 变异：`PanelView.swift:782` 的 `lockFile: lockFile` → `lockFile: ClaudioPaths.settingsLockFile`
-        // —— 切包写 config.json 却守着 settings.lock，与并发的 `claudio use`（守 config.lock）之间
-        // **互斥当场消失**，两个读-改-写可以交错，丢更新。而上面每一条断言都原样成立。
+        // ② 这一段现在住在**可 import** 的 `ClaudioGUICore` 里（不像困在 executableTarget 的 PanelView）——
+        // 本可以行为级测锁竞争，但那要模拟持锁，太重；这里仍走源码文本，与①同一种绊线。
         expect(
-            panel.contains(
-                "bundledPacksDirectory: audioEnvironment.bundledPacksDirectory, lockFile: lockFile)"),
-            "PanelView 的 switchPack 必须把它自己的 lockFile（= config.lock）转发给 selectPack —— "
-                + "它是这个文件**第三个**锁消费者（另两个：EventMuteController、"
-                + "OnboardingActionEnvironment.configLockFile），也是用户每次在画廊里换包都会走的那一条。"
-                + "切包写的是 config.json，它必须守 config.lock")
+            collapsingWhitespace(panel).contains(
+                "PanelConfigController( configFile: configFile, lockFile: lockFile,"),
+            "① PanelView.init 必须把自己的 lockFile（= config.lock）灌进 PanelConfigController —— 切包 /"
+                + "静音的写路径都在那个 controller 里，它拿错锁 = 整条 config.json 写路径拿错锁")
+        guard let controllerSource = codeOnly("gui/Sources/ClaudioGUICore/PanelConfigController.swift")
+        else {
+            expect(false, "读不到 PanelConfigController.swift —— 切包的锁转发第②段住在那里")
+            return
+        }
+        expect(
+            controllerSource.contains(
+                "bundledPacksDirectory: environment.bundledPacksDirectory, lockFile: lockFile)"),
+            "② PanelConfigController.switchPack 必须把它自己的 lockFile 转发给 selectPack —— 它是全仓"
+                + "第三个 config.lock 消费者（另两个：EventMuteController、OnboardingActionEnvironment），"
+                + "也是用户每次在画廊里换包都会走的那一条。换成 settingsLockFile 之类，与并发 `claudio use`"
+                + "的互斥就没了")
 
         expect(
             panel.contains("settingsLockFile: ClaudioPaths.settingsLockFile"),
@@ -767,48 +716,35 @@ func runViewWiringSuites() {
                 + "一个无分支的 `.main`，没有任何决定可以做错")
     }
 
-    // ── D23 定稿④：面板路由的四条要害接线 ─────────────────────────────────────────────────
+    // ── D23 定稿④：面板路由的渲染层接线（红队 9cccc9c 之后，行为那半已经搬走了）─────────────
     //
-    // 这四行全部住在 `PanelView`（`ClaudioGUI`，`@main` executableTarget，测试 import 不进来 ——
-    // 见本文件开头那段自陈）。也就是说：把它们**逐条删掉**，`claudio-gui-tests` 一个断言都不会红。
-    // 而它们恰恰是本步存在的全部理由 —— 少任何一条，面板就退回「顶着绿点撒谎」：
-    //   · 少了 `switch configState` → 一份写不动的 config 照样渲染四行活控件，每次点击必败；
-    //   · 少了 toggleMute 那次**全量** refresh() → config 被外部删掉后，四行活控件继续挂在屏幕上；
-    //   · 少了 `.configMissing` 的过滤 → 「先选包」空态卡下面跟一句没人 QA 过的错误文案；
-    //   · 少了 applyFirstFocus 的空行列表 → 焦点落进一个根本没被渲染的控件。
+    // ## 这条 suite 缩了一圈，因为它守的东西一半**不在这里了**
     //
-    // ⚠️ 与本文件其余绊线同一句诚实标注：这是**文本绊线**，证明不了这四行做对了，只能证明它们**还在**。
+    // 曾经这里有一整套 `functionBody("toggleMute")` 切片装置，逐条钉 `toggleMute` 函数体里的三条路由
+    // （`panelRefreshRoute(` / `case .full: refresh()` / …）。那套装置存在的**全部理由**，是 `toggleMute`
+    // 连同它操作的 `configState` / `eventRows` 困在 `PanelView`（`@main` executableTarget，测试 import 不
+    // 进来）—— 逻辑测不到，只能退而用文本切片守「代码长什么样」。而红队 9cccc9c 实测证明：文本切片守不住
+    // 「执行 / 可达性 / 翻转」（refresh 不重载 configState、某条 case 早退成死代码、静音去掉取反，三条各自
+    // 改坏行为而两套测试全绿）。
     //
-    // ⚠️⚠️ 而「还在」这个词本身也曾经比覆盖范围大（`/codex review 573336d` [P2]，变异实测）：上一版
-    // 第三条写的是 `panel.contains("refresh()")` —— 在**整个文件**里找一个出现 37 次的名字，那个合取子
-    // 恒真。它失败消息里点名的那个变异（改调 `refreshEnabledFlags()`）让它照样绿。现在它按**函数体切片**
-    // 找（见 `functionBody(_:in:)`）。
+    // 所以 `toggleMute` / `switchPack` / `reload` / `reloadEnabledFlags` **整体搬进了**
+    // `ClaudioGUICore.PanelConfigController`（一个可实例化的 `@MainActor` 类），由 `PanelConfigControllerSuite`
+    // **new 它、喂真磁盘、调真方法、断言 configState/eventRows 真的变**。那三条变异现在各有一条行为断言当场
+    // 逮住 —— 切片装置连同 `functionBody` 一起删了，它是为一个已经不存在的问题写的脚手架。
     //
-    // 切片仍然守不住把两个分支**对调**（切片里 `.configMissing` 与 `refresh()` 一个字符都不少）——
-    // 所以那个**判断**已经不在这里了：它搬进了 `ClaudioGUICore.panelRefreshRoute(muteSucceeded:error:)`，
-    // 由 `PanelRefreshRouteSuite` 用行为断言钉死。
-    //
-    // ⚠️⚠️⚠️ 但**只有判断**搬走了、被行为断言守住了。判断**之后做的事**仍然住在 `PanelView`，红队
-    // 9cccc9c 在 worktree 里实测了 4 条 GUI 存活变异（改坏行为、两套测试全绿），全部落在这一面：
-    //   · `refresh()` 函数体删掉 configState 重载（**执行**：路由对了、refresh 也调了，但它没干活）；
-    //   · switch 前插 `return` 让某条 case 成死代码（**可达性**：切片要的字符串一个不少，存在 ≠ 可达）；
-    //   · `onToggleMute: {}` 剪断按钮→handler（**接线**：下面那条新断言补了它的存在性，但仅存在性）；
-    //   · `setEnabled(enabled: currentlyEnabled)` 去掉 `!`（**翻转**：切片只查 switch，翻转逻辑裸奔）。
-    // 下面这一整条 suite（连同 `functionBody` 切片器）能守的是「代码在不在、在切片里长什么样」，
-    // **守不住**「代码做什么 / 可不可达 / 运行期接线对不对」。这是文本绊线的强度天花板，不是可以再加
-    // 几条 contains 补上的缺口 —— 每加一条 contains，红队下一轮还能找到第 N+1 个 PanelView 里测不到的
-    // 东西（白名单永远不完整）。根治是把这些方法和状态搬进可实例化的 view-model。见 TODOS 台账那条 P2。
-    //
-    // 所以这里的诚实定位是：**这条 suite 守的是「静音路由的接线文本还在、且接的是对的方法名」，
-    // 不是「静音在真实磁盘上行为正确」**。后者由 `PanelRefreshRouteSuite`（判断那半）+ 将来的
-    // view-model 化（执行那半）合起来才谈得上。别把这条 suite 全绿读成「面板行为被守住了」。
-    suite("PanelView：config 不可用时必须换态，而不是继续渲染活控件（D23 定稿④，四条接线逐条钉死）") {
+    // 剩在 `PanelView` 里、这条 suite 还在守的，只有**渲染层接线**：顶部按 `configState` 路由、两张替换
+    // 视图被引用到、按钮接到 `panelModel.toggleMute`、`.configMissing` 被滤掉、焦点只收可见行。它们是
+    // `@main` View 的 body 接线，纯逻辑测试**本质上**到不了（只有 UI / 快照测试够得着，本机 CommandLineTools
+    // 无 XCTest）——所以这里仍是**存在性**级文本绊线，且**如实**标注成存在性级：它证明「body 里写着这根线」，
+    // 不证明「这根线运行期真的接通、接对了地方」。别把这条 suite 全绿读成「面板行为被守住了」——行为那半
+    // 由 `PanelConfigControllerSuite` + `PanelRefreshRouteSuite` 守，这半只守「渲染层的线还在不在」。
+    suite("PanelView：config 不可用时必须换态（渲染层接线的存在性；行为那半在 PanelConfigControllerSuite）") {
         guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "读不到 PanelView.swift")
             return
         }
         expect(
-            panel.contains("switch configState"),
+            panel.contains("switch panelModel.configState"),
             "operationalPanel 必须按 configState 路由 —— 没有这个 switch，`{\"master_volume\": \"0.35\"}`"
                 + " 这种「读得动、写不动」的 config 会照常渲染四行带静音钮 / 试听钮的活控件，而写路径"
                 + "早已 fail closed：用户点下去的每一次都必然失败（这正是判据要两条正交轴的理由）")
@@ -817,55 +753,17 @@ func runViewWiringSuites() {
             "`.needsPack` 要走「先选包」空态卡、`.malformed`/`.unwritable` 要走诚实失败态 —— 两个视图"
                 + "都必须仍然被 operationalPanel 引用到")
 
-        // 第三条：toggleMute 的**函数体**里，三条路由各接哪个方法。
+        // 按钮 → handler 的那根线：静音的**行为**（翻转 + 路由 + 刷新）现在住在可测的 `PanelConfigController`
+        // 里、由 `PanelConfigControllerSuite` 用真磁盘钉死。这里只剩守**最外层这根接线**：EventRowView 的
+        // 静音钮真的接到 `panelModel.toggleMute`。红队 9cccc9c 实测把它剪成 `onToggleMute: {}`，四行静音钮
+        // 点了毫无反应（连失败都没有）。
         //
-        // 作用域 = 一个函数，不是一整个文件。空白归一化之后再比，所以它守的是接线，不是排版。
-        guard let toggleMute = functionBody("toggleMute", in: panel) else {
-            expect(
-                false,
-                "在 PanelView.swift 里切不出 `toggleMute` 的函数体 —— 它被改名 / 内联 / 挪走了，"
-                    + "而下面三条断言全是在它的切片里找东西：切不出来的代码在 contains 眼里与"
-                    + "「这一行本来就不存在」完全同形，绝不能就这么绿过去（围栏：认不出就红）")
-            return
-        }
-        let wiring = collapsingWhitespace(toggleMute)
+        // ⚠️ 存在性级：证明「body 里写着这根线」，证明不了它运行期真的接通（SwiftUI body 接线，只有 UI /
+        // 快照测试够得着）。挡「线被剪断」，不挡「运行期没接通」。
         expect(
-            wiring.contains("panelRefreshRoute("),
-            "toggleMute 必须问 `panelRefreshRoute(muteSucceeded:error:)`，不许自己再推一遍这三条路由 ——"
-                + "一旦它在这里就地重推，那份判断就又回到了**测试 import 不进来**的那半边，而唯一守着它的"
-                + "又只剩文本绊线。判断住在 ClaudioGUICore，行为断言钉在 PanelRefreshRouteSuite。"
-                + "得到的函数体：\(wiring)")
-        expect(
-            wiring.contains("case .full: refresh()"),
-            "`.full`（config.json 在面板已经打开之后被外部删掉）必须接**全量** refresh() —— 接成"
-                + " refreshEnabledFlags() 就不重路由，四行活控件会原样留在一个已经不存在的文件上面。"
-                + "**这一条正是上一版恒真的那条**（它在整个文件里找 `refresh()`，而那个名字出现 37 次）。"
-                + "得到的函数体：\(wiring)")
-        expect(
-            wiring.contains("case .enabledFlagsOnly: refreshEnabledFlags()"),
-            "`.enabledFlagsOnly`（写成功）必须接轻量刷新 —— 接成全量 refresh() = 每点一次静音钮就在"
-                + "主线程上扫一遍整个包库（重读每个包的 manifest + stat 每个声音文件），而那次写盘只翻了"
-                + "config.json 里的一个 bool。得到的函数体：\(wiring)")
-        expect(
-            wiring.contains("case .noRefresh: break"),
-            "`.noRefresh`（.lockBusy / 读写失败：config.json 逐字节未变）必须什么都不做 —— 接上任何一种"
-                + "刷新，都是把一次锁竞争变成一次全库磁盘扫描，而扫出来的东西与扫之前完全相同。"
-                + "得到的函数体：\(wiring)")
-
-        // 按钮 → handler 的那根线：`toggleMute` 函数体再对，也得有人**调**它。红队 9cccc9c 实测把
-        // `onToggleMute: { toggleMute(row.event) }` 剪成 `onToggleMute: {}`，toggleMute 函数体一字未动、
-        // 上面每条切片断言照绿，而四行静音钮点了毫无反应（连失败都没有）。这条补上那根线的存在性。
-        //
-        // ⚠️ 仍是**存在性**级：它证明「body 里写着把按钮接到 toggleMute」，证明不了这根线在运行期真的
-        // 接通了（那是 SwiftUI body 的接线，纯逻辑测试到不了，只有 UI / 快照测试够得着 —— 见本文件
-        // 头部与 `PanelRefreshRoute` 文档里那条天花板）。它挡的是「线被剪断」，不是「线接错了地方」。
-        let collapsed = collapsingWhitespace(panel)
-        expect(
-            collapsed.contains("onToggleMute: { toggleMute(row.event) }"),
-            "operationalPanel 的 EventRowView 必须把 onToggleMute 接到 `toggleMute(row.event)` —— 剪成"
-                + " `onToggleMute: {}` 之类，四行事件的静音钮就变成点了没反应的死键，而 toggleMute 的"
-                + "函数体测试全绿（它还在，只是没人调）。这条只挡『线被剪断』；线接错地方 / 运行期没接通"
-                + "仍要靠 view-model 化才测得到（见 TODOS）")
+            collapsingWhitespace(panel).contains("onToggleMute: { panelModel.toggleMute(row.event) }"),
+            "operationalPanel 的 EventRowView 必须把 onToggleMute 接到 `panelModel.toggleMute(row.event)`"
+                + " —— 剪成 `onToggleMute: {}` 之类，四行事件的静音钮就变成点了没反应的死键")
 
         expect(
             panel.contains("error != .configMissing"),
@@ -877,32 +775,5 @@ func runViewWiringSuites() {
             "applyFirstFocus 必须只把**真的被渲染出来**的行送进焦点序 —— 非 .operational 态下"
                 + " eventRows 仍会算出四行（走 resolvedConfig 的空包默认值），但它们一个像素都没上屏；"
                 + "把它们送进开局焦点 = 焦点落在一个不存在的控件上")
-    }
-
-    // 切片器本身也要有守卫 —— 它是上面那条断言的**唯一**判据来源，而一个恒返回 nil 的切片器会让
-    // `guard let` 那条 expect(false) 天天假红（有人喊），一个切出**整份文件**的切片器则会让三条 contains
-    // 悄悄退化回上一版的全文件搜索（**没有人看得见**）。后者正是本轮修的那个洞，它必须不能从后门爬回来。
-    suite("functionBody：切出来的是一个函数，不是半份文件（切片器自己的围栏）") {
-        guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
-            expect(false, "读不到 PanelView.swift")
-            return
-        }
-        guard let toggleMute = functionBody("toggleMute", in: panel) else {
-            expect(false, "切不出 toggleMute —— 上面那条 suite 已经会红，这里只是不再重复报一遍")
-            return
-        }
-        expect(
-            !toggleMute.contains("func refresh()") && !toggleMute.contains("func switchPack("),
-            "toggleMute 的切片里不许出现**别的函数的定义** —— 一旦出现，说明花括号配平早已跑飞、切片"
-                + "一路吃到了文件后半截，上面那三条 contains 就退化成了全文件搜索（正是本轮要修的那个洞"
-                + "从后门爬回来）。切片长度：\(toggleMute.count)，全文长度：\(panel.count)")
-        expect(
-            toggleMute.count < panel.count / 4,
-            "toggleMute 是个五行的小函数，它的切片不该占到 PanelView 的四分之一 —— 占到了就说明配平"
-                + "跑飞了。切片长度：\(toggleMute.count)，全文长度：\(panel.count)")
-        expect(
-            functionBody("thisFunctionDoesNotExist", in: panel) == nil,
-            "找不到的函数名必须返回 nil（让调用方当场红），而不是返回一个空串 / 半份文件 —— 一个在"
-                + "「什么都没找到」时安静地交出一段文本的切片器，会把它上面每一条负向断言变成恒真")
     }
 }
