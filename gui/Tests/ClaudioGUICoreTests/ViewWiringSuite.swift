@@ -416,18 +416,25 @@ func runViewWiringSuites() {
             "在 gui/Sources/ClaudioGUI 下一个 Swift 文件都没数到（实得 \(sources.count)）—— "
                 + "下面两条都是**普查**，普查不到任何文件就永远等不到红，只会安静地绿下去")
 
-        // 普查一：全 target 只许有一个 `PanelView(` 构造点，且必须在 MenuBarController 里。
+        // 普查一：全 target 只许有一个 PanelView 构造点，且必须在 MenuBarController 里。
+        //
+        // 两种写法都数（`/codex review 840ea37` 的 P2）：`PanelView.init(` **不**包含 `PanelView(`，
+        // 上一版只数后者，措辞却写着「唯一构造点」—— 又一次措辞比正则宽。真正守住锁的是下面的
+        // 普查二（任何显式传锁的构造点，不论写成哪种，都会漏出 `lockFile`）；普查一守的是上面那条
+        // 默认值断言的**前提**（「只有一个构造点、且走默认值」）。前提得连写法一起数，才配叫普查。
         var constructionSites: [String: Int] = [:]
         for file in sources {
-            let count = file.code.components(separatedBy: "PanelView(").count - 1
+            let bare = file.code.components(separatedBy: "PanelView(").count - 1
+            let explicitInit = file.code.components(separatedBy: "PanelView.init(").count - 1
+            let count = bare + explicitInit
             if count > 0 { constructionSites[file.path] = count }
         }
         expect(
             constructionSites == ["MenuBarController.swift": 1],
-            "全 ClaudioGUI 只许有**一处** `PanelView(` 构造点，且只许在 MenuBarController.swift 里，"
-                + "实得 \(constructionSites) —— 这条 suite 与它上面那条（PanelView 的 lockFile 默认值）"
-                + "都建立在「全 target 唯一构造点、且走默认值」这个前提上。多出第二处，两条断言的"
-                + "保护范围就都缩水了，必须重新想")
+            "全 ClaudioGUI 只许有**一处** PanelView 构造点（`PanelView(` 与 `PanelView.init(` 一起数），"
+                + "且只许在 MenuBarController.swift 里，实得 \(constructionSites) —— 这条 suite 与它上面"
+                + "那条（PanelView 的 lockFile 默认值）都建立在「全 target 唯一构造点、且走默认值」这个"
+                + "前提上。多出第二处，两条断言的保护范围就都缩水了，必须重新想")
 
         // 普查二：除 PanelView 自己之外，全 target 的**代码**里不许出现 lockFile。
         // PanelView.swift 是唯一的例外，因为那个默认值与两条转发就住在它里面（上面那条 suite 钉的）。

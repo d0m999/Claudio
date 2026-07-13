@@ -84,13 +84,22 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 `configLockFile` 的**值**改回 `play.lock`（一行静默 revert 掉整个阶段 A），等式照样成立，`claudio-tests` +
 `claudio-gui-tests` **全绿（1030 + 1604）**。没有任何一条断言说过「这几把锁是不同的文件」。
 
-**现在真正有牙的是**（`d5ec97e` + 本次 `/codex review d5ec97e,8f9cfa2` 的修复，每一条都经变异验证确认会 RED）：
-`LockSeparationSuite` 的三层 —— ① **值级**：四把锁两两不等、且文件名正好是 play/config/settings/claudio.log.lock；
-② **默认值级**：每个写者的默认锁（源码绊线，因为 Swift 读不到自由函数的默认实参，而**调用**它就意味着拿生产默认值
-去写真实的 `~/.claude/settings.json`）；③ **调用点级**：`Subcommands.swift` 的三条 CLI 命令仍是全默认调用、
-`Setup.swift` 的接管路径确实转发 `SetupEnvironment` 的锁 —— 没有 ③，②只是摆设（调用点一个参数就能覆盖掉所有默认值，
-而②不会红）。GUI 侧对应的是 `ViewWiringSuite` 的**全 target 普查**：唯一的 `PanelView(` 构造点、且除 `PanelView.swift`
-外全 target 代码里不许出现 `lockFile`。
+**现在真正有牙的是**（`d5ec97e` + `/codex review d5ec97e,8f9cfa2` + `/codex review 840ea37` 的修复，每一条都经
+变异验证确认会 RED）：`LockSeparationSuite` 的三层 —— ① **值级**：四把锁两两不等、且文件名正好是
+play/config/settings/claudio.log.lock；② **默认值级**：每个写者的默认锁（源码绊线，因为 Swift 读不到自由函数的
+默认实参，而**调用**它就意味着拿生产默认值去写真实的 `~/.claude/settings.json`）；③ **调用点级**：`Subcommands.swift`
+的三条 CLI 命令仍是全默认调用、`Setup.swift` 接管路径的**每一个**调用点各自转发它该拿的那把锁 —— 没有 ③，②只是
+摆设（调用点一个参数就能覆盖掉所有默认值，而②不会红）。GUI 侧对应的是 `ViewWiringSuite` 的**全 target 普查**：
+唯一的 PanelView 构造点（`PanelView(` 与 `PanelView.init(` 一起数）、且除 `PanelView.swift` 外全 target 代码里
+不许出现 `lockFile`。
+
+**③ 的第一版是数计数的，而计数不绑调用点**（`840ea37` 写下、`/codex review 840ea37` 当场逮到）：它断的是
+「全文件 `configLockFile` 出现 2 次、`settingsLockFile` 1 次、`playLockFile` 0 次」。把一处 `selectPack` 的锁与
+`installClaudioHooks` 的锁**成对交换** —— config.json 的写守着 settings.lock、settings.json 的写守着 config.lock，
+两把锁在生产上全串了 —— 三个计数原样成立，`claudio-tests` **全绿 1060**（实测）。措辞（「确实转发」）比覆盖范围
+（「数得对」）大，正是 `840ea37` 通篇要杀的那个病，复发在杀它的那一刀里；当时的变异台账只测了**单边**改写
+（settings→play、config→play），成对交换这一类没进台账，于是没被想到。现已改成按调用点绑锁（头用 `switch …(`
+锚、尾用配平括号锚），成对交换变异 **红 2 条**。
 
 遗留的行为级缺口见下一条。
 

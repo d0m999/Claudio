@@ -74,6 +74,52 @@ private func codeOnly(_ relativePath: String) -> String? {
         .joined(separator: "\n")
 }
 
+/// `source` 里每一处 `head(` 调用的**实参文本**（从左括号后到与之配平的右括号前）。
+///
+/// 为什么不能只数全文件的锁出现次数（`/codex review 840ea37` 的 P1）：计数**不绑定调用点**。
+/// 「`configLockFile` 出现 2 次、`settingsLockFile` 出现 1 次」这三条计数断言，被下面这个
+/// **成对交换**整体满足 ——
+///
+/// ```swift
+/// switch selectPack(…, lockFile: environment.settingsLockFile)   // config.json 的写，守着 settings.lock
+/// switch installClaudioHooks(…, lockFile: environment.configLockFile)  // settings.json 的写，守着 config.lock
+/// ```
+///
+/// —— 总数仍是 2 config / 1 settings / 0 play，**全绿**，而接管路径在生产上两把锁全串了。
+/// 上一版的措辞（「调用点**确实转发** SetupEnvironment 的锁」）比它实际守的范围（「数得对」）大。
+/// 那正是这个文件通篇要杀的病，复发在杀它的那一刀里。锁必须**按调用点**绑。
+///
+/// `head` 要连 `switch` 一起传（`"switch installClaudioHooks"`）：`uninstallClaudioHooks(`
+/// **逐字包含** `installClaudioHooks(`，光传函数名就会被一个 uninstall 调用满足 —— 本文件
+/// 上一次翻的正是这个车。头由 `switch …(` 锚、尾由配平括号锚，两头锁死。
+@MainActor
+private func callArguments(of head: String, in source: String) -> [String] {
+    let needle = head + "("
+    var calls: [String] = []
+    var cursor = source.startIndex
+    while let hit = source.range(of: needle, range: cursor..<source.endIndex) {
+        var depth = 1
+        var index = hit.upperBound
+        while index < source.endIndex, depth > 0 {
+            switch source[index] {
+            case "(": depth += 1
+            case ")": depth -= 1
+            default: break
+            }
+            if depth == 0 { break }
+            index = source.index(after: index)
+        }
+        // 括号没配平 = 源码被截断或读串了。宁可回一个空实参让调用方当场红，也不要静默少数一处调用。
+        guard depth == 0 else {
+            calls.append("")
+            break
+        }
+        calls.append(String(source[hit.upperBound..<index]))
+        cursor = source.index(after: index)
+    }
+    return calls
+}
+
 @MainActor
 func runLockSeparationSuites() {
     suite("四把锁是四个不同的文件 —— 锁分离的中心论点，此前零断言") {
@@ -282,30 +328,69 @@ func runLockSeparationSuites() {
         // 变异：把 `Setup.swift:551` 的 `lockFile: environment.settingsLockFile` 改成
         // `lockFile: ClaudioPaths.playLockFile` —— 接管的那几秒占住去抖锁，用户在**最需要
         // 反馈的那一刻**被静音，而 `SetupEnvironment` 的默认值一个字没动，四条断言全绿。
+        //
+        // ## 为什么是按调用点绑锁，而不是数计数（`/codex review 840ea37` 的 P1）
+        //
+        // 这条 suite 的**上一版**断的是三个全文件计数（config 出现 2 次 / settings 1 次 / play 0 次）。
+        // 计数不绑定调用点：把一处 `selectPack` 的锁与 `installClaudioHooks` 的锁**成对交换**，
+        // 三个计数原样成立、**全绿**，而 config.json 的写守着 settings.lock、settings.json 的写
+        // 守着 config.lock —— 两把锁在生产上全串了。措辞（「确实转发」）比覆盖范围（「数得对」）大，
+        // 正是本 commit 通篇要杀的病，当时复发在杀它的那一刀里。变异台账当初只测了**单边**改写
+        // （settings→play、config→play），成对交换这一类没进台账，于是没被想到。
+        // 详见 `callArguments(of:in:)` 的文档。
         guard let setup = codeOnly("helper/Sources/ClaudioCore/Setup.swift") else {
             expect(false, "读不到 Setup.swift —— 这条 suite 唯一的价值就是读它")
             return
         }
 
-        let configForwards =
-            setup.components(separatedBy: "lockFile: environment.configLockFile").count - 1
+        // `selectPack` 的两个调用点（兜底包与用户选中的包）—— 两处都必须转发 config.lock。
+        let selectPackCalls = callArguments(of: "switch selectPack", in: setup)
         expect(
-            configForwards == 2,
-            "接管路径里必须正好有 2 处 `lockFile: environment.configLockFile`（`selectPack` 的两个"
-                + "调用点：兜底包与用户选中的包），实际 \(configForwards) 处 —— 少一处，就有一次"
-                + "config.json 的写没走 config.lock；写死成别的锁，SetupEnvironment 的默认值当场变摆设")
+            selectPackCalls.count == 2,
+            "接管路径里必须正好有 2 处 `switch selectPack(…)` 调用（兜底包与用户选中的包），"
+                + "实际 \(selectPackCalls.count) 处 —— 前提变了，下面那两条「每一处都转发 config.lock」"
+                + "的断言就不再覆盖整条接管路径，必须重新想")
+        for (ordinal, arguments) in selectPackCalls.enumerated() {
+            expect(
+                arguments.contains("lockFile: environment.configLockFile"),
+                "接管路径第 \(ordinal + 1) 处 `switch selectPack(…)` 的实参里没有 "
+                    + "`lockFile: environment.configLockFile` —— 这一处写的是 config.json，它必须"
+                    + "守着 config.lock。锁传成别的（哪怕另一处 selectPack 传对了、全文件计数照样对得上），"
+                    + "这一次 config.json 的写就跑到别人的锁下面去了")
+        }
 
-        let settingsForwards =
-            setup.components(separatedBy: "lockFile: environment.settingsLockFile").count - 1
+        // `installClaudioHooks` 那一处 —— 必须转发 settings.lock。
+        //
+        // ⚠️ `head` 连 `switch` 一起传：`uninstallClaudioHooks(` 逐字包含 `installClaudioHooks(`，
+        // 只传函数名会被一个 uninstall 调用满足 —— 本文件上一次翻的正是这个车。
+        let installCalls = callArguments(of: "switch installClaudioHooks", in: setup)
         expect(
-            settingsForwards == 1,
-            "接管路径里必须正好有 1 处 `lockFile: environment.settingsLockFile`"
-                + "（`installClaudioHooks` 那一处），实际 \(settingsForwards) 处")
+            installCalls.count == 1,
+            "接管路径里必须正好有 1 处 `switch installClaudioHooks(…)` 调用，"
+                + "实际 \(installCalls.count) 处")
+        for arguments in installCalls {
+            expect(
+                arguments.contains("lockFile: environment.settingsLockFile"),
+                "接管路径的 `switch installClaudioHooks(…)` 实参里没有 "
+                    + "`lockFile: environment.settingsLockFile` —— 这一处写的是 settings.json，"
+                    + "它必须守着 settings.lock。传成 config.lock，settings.json 的写就跑到 config 的"
+                    + "锁下面去了；而只要 selectPack 那两处反过来传 settings.lock，全文件计数还是对的")
+        }
 
+        // 负向兜底一：接管一个字节都不写 play.state，代码里不许出现 playLockFile。
         expect(
             !setup.contains("playLockFile"),
             "Setup.swift 的**代码**里出现了 playLockFile —— 接管写的是 config.json 与 settings.json，"
                 + "一个字节都不写 play.state。让接管去占去抖锁，等于在用户点下「接管」之后那几秒里"
                 + "把他的每一声提示音静默吞掉 —— 而那正是他最需要听见反馈的一刻")
+
+        // 负向兜底二：全文件正好 3 处锁转发 —— 上面按调用点绑死的就是这 3 处。多出第 4 处，
+        // 说明接管路径长出了一个上面三条断言**没在看**的锁写者：当场红，逼人回这里想清楚它该拿哪把锁。
+        let totalForwards = setup.components(separatedBy: "lockFile:").count - 1
+        expect(
+            totalForwards == 3,
+            "Setup.swift 的代码里必须正好有 3 处 `lockFile:` 转发（selectPack ×2 + installClaudioHooks ×1），"
+                + "实际 \(totalForwards) 处 —— 上面几条断言按调用点绑死的就是这 3 处。多出一处，就是接管"
+                + "路径上多了一个没人盯着锁的写者")
     }
 }
