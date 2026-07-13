@@ -38,6 +38,13 @@ private func source(_ relativePath: String) -> String? {
     return String(data: data, encoding: .utf8)
 }
 
+/// 同一个文件，被 ``strippingComments(_:)`` 扫过之后的样子（代码 + 「扫描器不认识的构造」清单）。
+@MainActor
+private func scan(_ relativePath: String) -> StrippedSwiftSource? {
+    guard let text = source(relativePath) else { return nil }
+    return strippingComments(text)
+}
+
 /// 同一个文件，**剥掉注释**之后的样子。
 ///
 /// 这不是洁癖：本 suite 的第一版直接对整份源码做 `contains("Bundle.main")`，然后**被
@@ -48,15 +55,16 @@ private func source(_ relativePath: String) -> String? {
 /// `foo()  // 见 .onChange(of: onboardingViewModel.state)` 能同时活过过滤器**又**让 `contains()`
 /// 命中 —— 真代码被删掉了，绊线照样绿。这正是本 suite 头部自陈翻过的那次车的**残留一半**：
 /// 它修好了整行注释，没修行尾注释。（反向断言 `!contains("Bundle.main")` 则会被行尾注释假红。）
+///
+/// **同一个病的第三半**（`/codex review be332ff` 的 P3）：它此前在**每行第一个 `//`** 处无条件截断，
+/// 而它不认识字符串字面量。于是一行 `let url = "https://…"; …("play.lock")` 会被剪掉后半截，
+/// `play.lock` 对下面那条 `ClaudioGUICore` 普查**隐身**。helper 那边给自己配了一条守卫（还是恒真的），
+/// GUI 这半边**连那条都没有**。现在剥注释的活儿交给 `TestSupport.strippingComments` —— 一个位置感知的
+/// 状态机，两个包共用，字符串字面量里的 `//` 不再是注释起点；它自己的行为由 `SourceScannerSuite`
+/// 喂合成输入钉死。剩下那点它不认识的（raw string），由本文件第一条 suite 盯着。
 @MainActor
 private func codeOnly(_ relativePath: String) -> String? {
-    guard let text = source(relativePath) else { return nil }
-    return text.split(separator: "\n", omittingEmptySubsequences: false)
-        .map { line -> String in
-            guard let range = line.range(of: "//") else { return String(line) }
-            return String(line[line.startIndex..<range.lowerBound])
-        }
-        .joined(separator: "\n")
+    scan(relativePath)?.code
 }
 
 /// `ClaudioGUI` target 下**每一个** Swift 源文件，剥掉注释之后的样子 —— `(文件名, 代码)`。
@@ -79,20 +87,26 @@ private func codeOnly(_ relativePath: String) -> String? {
 /// 目录读不到 / 一个文件都数不到，必须**变红**，而不是安静地数出 0 —— 一个数不到任何文件的计数器
 /// 永远等不到 1，它会一直绿下去。这与本文件头部那条「一次文本断言若不区分代码与谈论代码的文字，
 /// 它断的就不是代码」是同一种病：一条永远不会红的断言，不是护栏。
+/// 一个被扫过的源文件：路径、剥掉注释的代码、以及扫描器**自己不认识**的那些构造。
+///
+/// `unmodeled` 不是装饰：它非空 = `code` 不可信，而本文件的兜底全是负向断言（不可信的文本只会
+/// 让它们更绿）。第一条 suite 就盯着它。
+private typealias ScannedSource = (path: String, code: String, unmodeled: [String])
+
 @MainActor
-private func sourcesUnder(_ relativeRoot: String) -> [(path: String, code: String)] {
+private func sourcesUnder(_ relativeRoot: String) -> [ScannedSource] {
     let root = repoRoot().appendingPathComponent(relativeRoot)
     guard let walker = FileManager.default.enumerator(atPath: root.path) else { return [] }
-    var found: [(path: String, code: String)] = []
+    var found: [ScannedSource] = []
     for case let name as String in walker where name.hasSuffix(".swift") {
-        guard let code = codeOnly("\(relativeRoot)/\(name)") else { continue }
-        found.append((path: name, code: code))
+        guard let scanned = scan("\(relativeRoot)/\(name)") else { continue }
+        found.append((path: name, code: scanned.code, unmodeled: scanned.unmodeledConstructs))
     }
     return found.sorted { $0.path < $1.path }
 }
 
 @MainActor
-private func guiSources() -> [(path: String, code: String)] {
+private func guiSources() -> [ScannedSource] {
     sourcesUnder("gui/Sources/ClaudioGUI")
 }
 
@@ -113,12 +127,51 @@ private func guiSources() -> [(path: String, code: String)] {
 /// 行为断言够不到的地方（比如将来 `ClaudioGUICore` 里长出第三个写者、而没人给它写行为测试），
 /// 至少 play.lock 这条最要命的路是堵死的。
 @MainActor
-private func guiCoreSources() -> [(path: String, code: String)] {
+private func guiCoreSources() -> [ScannedSource] {
     sourcesUnder("gui/Sources/ClaudioGUICore")
 }
 
 @MainActor
 func runViewWiringSuites() {
+    suite("扫描器的前提：ClaudioGUI / ClaudioGUICore 里没有一处它自己不认识的构造") {
+        // ## GUI 这一半此前**一条守卫都没有**（`/codex review be332ff` 的 P3）
+        //
+        // 本文件下面的兜底全是**负向**断言（除 PanelView 外不许出现锁、ClaudioGUICore 里不许出现
+        // `play.lock`、全 target 只许一处 `NSAccessibility.post`）。它们共享同一个失效模式：
+        // **分析文本里少一段代码，它们只会更绿。**
+        //
+        // 上一版 `codeOnly` 在每行第一个 `//` 处无条件截断，不认识字符串字面量。于是
+        //
+        // ```swift
+        // let url = "https://claudio.dev/locks"; let lock = ClaudioPaths.root.appendingPathComponent("play.lock")
+        // ```
+        //
+        // 会被剪掉后半截 —— `play.lock` 对新增的 `ClaudioGUICore` 普查**隐身**。helper 那边给自己配了
+        // 一条守卫（`be332ff`），可惜那条守卫检查的是**截断之后**的文本，`://` 自带 `//`，它**恒真**；
+        // 而 GUI 这半边连那条恒真的都没有。两半的洞现在一起堵：剥注释交给两个包共用的
+        // `TestSupport.strippingComments`（位置感知，字符串里的 `//` 不再是注释起点，行为由
+        // `SourceScannerSuite` 喂合成输入钉死），剩下它不建模的 raw string 由这条盯着。
+        //
+        // 位置感知是必须的：`ClaudioColorHex.swift:206` / `ContrastRatio.swift:27` 里的
+        // `hasPrefix("#")` 逐字包含 `#"` —— 一条纯文本的 `#"` 守卫会在它们身上当场假红，然后被
+        // 下一个人删掉，洞原样回来。
+        let scanned = guiSources() + guiCoreSources()
+        expect(
+            scanned.count >= 10,
+            "两个 target 加起来一个 Swift 文件都没数到（实得 \(scanned.count)）—— 这条是**普查**，"
+                + "普查不到任何文件就永远等不到红，只会安静地绿下去")
+        var unmodeled: [String: [String]] = [:]
+        for file in scanned where !file.unmodeled.isEmpty {
+            unmodeled[file.path] = file.unmodeled
+        }
+        expect(
+            unmodeled.isEmpty,
+            "这些文件里出现了扫描器不建模的词法构造：\(unmodeled) —— 它剥出来的「代码」从此不可信，"
+                + "而本文件的兜底全是负向断言：一段被误判成字符串 / 注释而消失的代码只会让它们**更绿**，"
+                + "一句藏在里面的 `ClaudioPaths.playLockFile` 或 `\"play.lock\"` 会对整套锁普查"
+                + "**永久隐身**。要么把这个构造挪走，要么先教 `strippingComments` 认识它")
+    }
+
     suite("T17h 播报出口全 target 只此一个 —— 数的是整个 ClaudioGUI，不是一个文件") {
         let sources = guiSources()
         expect(

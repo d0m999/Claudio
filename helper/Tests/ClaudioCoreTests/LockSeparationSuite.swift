@@ -55,23 +55,45 @@ private func repoRoot(file: StaticString = #filePath) -> URL {
         .deletingLastPathComponent().deletingLastPathComponent()
 }
 
+/// 本文件所有绊线扫描的那份名单 —— 一处定义，守卫（下面第一条 suite）与各条断言共用。
+///
+/// 名单本身也是一条断言：`Subcommands.swift` 在里面，因为 `claudio setup` 是**第四条** CLI 命令
+/// （`/review e7c38ea`：它全默认构造 `SetupEnvironment`，两把锁全靠默认实参）。
+@MainActor
+private let scannedSourceFiles = [
+    "helper/Sources/ClaudioCore/Setup.swift",
+    "helper/Sources/ClaudioCore/Use.swift",
+    "helper/Sources/ClaudioCore/EventEnabled.swift",
+    "helper/Sources/ClaudioCore/SettingsInstaller.swift",
+    "helper/Sources/ClaudioCore/Play.swift",
+    "helper/Sources/ClaudioCore/Log.swift",
+    "helper/Sources/claudio/Subcommands.swift",
+]
+
+/// 一个源文件被 ``strippingComments(_:)`` 扫过之后的样子（代码 + 「扫描器不认识的构造」清单）。
+@MainActor
+private func scan(_ relativePath: String) -> StrippedSwiftSource? {
+    guard let data = try? Data(contentsOf: repoRoot().appendingPathComponent(relativePath)),
+        let text = String(data: data, encoding: .utf8)
+    else { return nil }
+    return strippingComments(text)
+}
+
 /// 一个源文件**剥掉注释**之后的样子。
 ///
 /// 不剥注释，下面每一条负向断言都会被**谈论 `playLockFile` 的散文**判成假红 —— `Use.swift:50`
 /// 与 `SettingsInstaller.swift:29` 的 doc comment 里都白纸黑字写着 `ClaudioPaths/playLockFile`
 /// （写的正是「我**不**用这把锁」）。`ViewWiringSuite` 的第一版就是在这里翻的车，代价记在它的
 /// 文件头上；这里不重犯。
+///
+/// 剥注释的活儿由 `TestSupport.strippingComments` 干 —— 一个**认识字符串字面量**的位置感知状态机。
+/// 上一版是「每行第一个 `//` 处无条件截断」，而 `be332ff` 给它配的那条守卫（「源文件里不许出现
+/// `://`」）**恒真**：它检查的是**截断之后**的文本，而 `://` 自带 `//`，到达断言之前就已经被剪成
+/// `https:`（`/codex review be332ff` 的 P2）。现在洞从根上没了，扫描器自己的行为由
+/// `SourceScannerSuite` 喂合成输入钉死。
 @MainActor
 private func codeOnly(_ relativePath: String) -> String? {
-    guard let data = try? Data(contentsOf: repoRoot().appendingPathComponent(relativePath)),
-        let text = String(data: data, encoding: .utf8)
-    else { return nil }
-    return text.split(separator: "\n", omittingEmptySubsequences: false)
-        .map { line -> String in
-            guard let range = line.range(of: "//") else { return String(line) }
-            return String(line[line.startIndex..<range.lowerBound])
-        }
-        .joined(separator: "\n")
+    scan(relativePath)?.code
 }
 
 /// `source` 里每一处 `head(` 调用的**实参文本**（从左括号后到与之配平的右括号前）。
@@ -175,42 +197,52 @@ private func argumentValue(_ label: String, in arguments: String) -> String? {
 
 @MainActor
 func runLockSeparationSuites() {
-    suite("codeOnly 的前提：被它扫的源文件里不许有 `://`（否则它会静默吞掉半行代码）") {
-        // `codeOnly` 在**第一个 `//`** 处无条件截断整行 —— 它不认识字符串字面量。于是一句
+    suite("扫描器的前提：被它扫的源文件里，没有一处它自己不认识的构造") {
+        // ## 这条替掉了什么（`/codex review be332ff` 的 P2）
+        //
+        // 上一版这里是一条「源文件里不许出现 `://`」的元断言。**理由是对的**：`codeOnly` 当时在
+        // **第一个 `//`** 处无条件截断整行，于是一句
         //
         // ```swift
         // let hint = "锁的说明见 https://claudio.dev/locks"; _ = write(…, lockFile: ClaudioPaths.playLockFile)
         // ```
         //
-        // 会在 `https:` 后面那个 `//` 处被剪成 `let hint = "锁的说明见 https:` —— **该行剩下的一切
-        // 在分析文本里根本不存在**。而这个文件（与 `ViewWiringSuite`）的兜底**全是负向断言**
-        // （`!contains(…)`、`count == N`）：被静默删掉的代码只会让它们**更绿**。
+        // 会被剪成 `let hint = "锁的说明见 https:` —— 后半行那句 `lockFile:` **在分析文本里根本不
+        // 存在**，而本文件的兜底全是负向断言（`!contains`、`count == N`）：被剥掉的代码只会让它们
+        // **更绿**。
         //
-        // 这是一条**元断言** —— 它守的不是产品行为，而是「下面每一条断言读到的文本，确实是那个文件」。
-        // 给 `codeOnly` 加一个引号状态机当然更正统，但那是在给一个只服务于测试的扫描器加复杂度；
-        // 直接禁掉 `://` 更便宜，而且失败消息能把**为什么**说清楚。真到了非放 URL 不可的那天，
-        // 这条断言会当场变红，逼人先去把 `codeOnly` 修好——而不是让它在某个负向断言底下无声地开一个洞。
-        let scanned = [
-            "helper/Sources/ClaudioCore/Setup.swift",
-            "helper/Sources/ClaudioCore/Use.swift",
-            "helper/Sources/ClaudioCore/EventEnabled.swift",
-            "helper/Sources/ClaudioCore/SettingsInstaller.swift",
-            "helper/Sources/ClaudioCore/Play.swift",
-            "helper/Sources/ClaudioCore/Log.swift",
-            "helper/Sources/claudio/Subcommands.swift",
-        ]
-        for path in scanned {
-            guard let code = codeOnly(path) else {
+        // **而它的写法是 `!codeOnly(path).contains("://")` —— 它检查的是「截断之后」的文本。**
+        // `://` 自带 `//`，到达断言之前就已经被剪成 `https:`：那条断言**恒真**，一个字节都守不住，
+        // 而它的失败消息自称「真到了非放 URL 不可的那天，它会当场变红」。一条永远不会红的断言不是
+        // 护栏 —— 这正是本文件通篇要杀的那个病（**措辞比覆盖范围大**），复发在杀它的那一刀里。
+        //
+        // ## 为什么不是「把 ban 挪到 raw source」
+        //
+        // `!raw.contains("://")` 确实红得起来 —— 也会在**第一个把 URL 写进 doc comment** 的人手上红，
+        // 而注释里的 URL 完全无害（剥注释本来就该把它剥掉）。一条会因为无害改动而红的断言，会被下一个
+        // 人删掉，然后洞原样回来。所以这次是把扫描器**修对**：`TestSupport.strippingComments` 现在是
+        // 位置感知的（代码 / 行注释 / 块注释 / 字符串 / 多行字符串），字符串字面量里的 `//` 不再是
+        // 注释起点。它自己的每一条行为由 `SourceScannerSuite` 喂**合成输入**钉死 —— 正向断言，喂的是
+        // 扫描器自己的输入，所以那些断言不可能变成又一条恒真式。
+        //
+        // ## 那这条守的是什么
+        //
+        // 修好的扫描器仍然**不建模 raw string**（`#"…"#`）。它知道这一点：撞见一处就记进
+        // `unmodeledConstructs`，这条断言盯着那张清单。与那条恒真的 `://` 的区别是：清单是在原始文本上
+        // 按**词法位置**记的 —— 串内的 `#"`（`hasPrefix("#")`）不会误记（`SourceScannerSuite` 最后一条
+        // 钉的就是这个）。既红得起来，也不会假红。
+        for path in scannedSourceFiles {
+            guard let scanned = scan(path) else {
                 expect(false, "读不到 \(path) —— 下面每一条 suite 都指望它")
                 continue
             }
             expect(
-                !code.contains("://"),
-                "\(path) 的代码里出现了 `://` —— `codeOnly` 会把它当成行注释的起点，"
-                    + "把这一行剩下的**代码**整段剥掉。而本文件的兜底全是负向断言（`!contains`、"
-                    + "`count == N`），被剥掉的代码只会让它们更绿：一个藏在 URL 后面的 "
-                    + "`lockFile: ClaudioPaths.playLockFile` 会对整套锁分离断言**永久隐身**。"
-                    + "要么把这个字符串挪走，要么先给 `codeOnly` 加上字符串字面量识别")
+                scanned.unmodeledConstructs.isEmpty,
+                "\(path) 里出现了扫描器不建模的词法构造：\(scanned.unmodeledConstructs) —— "
+                    + "它剥出来的「代码」从此不可信。而本文件的兜底全是负向断言（`!contains`、"
+                    + "`count == N`）：一段被误判成字符串 / 注释而消失的代码只会让它们**更绿**，"
+                    + "一句藏在里面的 `lockFile: ClaudioPaths.playLockFile` 会对整套锁分离断言"
+                    + "**永久隐身**。要么把这个构造挪走，要么先教 `strippingComments` 认识它")
         }
     }
 

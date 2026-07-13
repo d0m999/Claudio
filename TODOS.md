@@ -94,10 +94,21 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
   `Setup.swift` 接管路径的每一处调用点，其 `lockFile:` 实参**正好等于**它该拿的那把锁。没有 ③，② 只是摆设
   （调用点一个参数就能覆盖掉所有默认值，而 ② 不会红）。
 - **④ 行为级**：`OnboardingActionsSuite` 的四条**持锁争用**断言 —— 把注入的锁**真的持住**，再断言写在**哪一步**
-  撞上 `.lockBusy`（详见下一条）。它绑的是真实锁文件路径，是 ①②③ 全部够不着的那一层。
+  撞上 `.lockBusy`（详见下一条），**外加各自的副作用断言**（`/codex review be332ff` 的 P1）：错误码说不出
+  「做到哪一步」。把 `Setup.swift` 里的 `installClaudioHooks` **重排**到 `selectPack` 之前（两个调用点的
+  `lockFile:` 实参一个字都不用改），持 config.lock 依然停在 `.useFailure(.lockBusy)`、持 settings.lock 依然停在
+  `.installFailure(.lockBusy)` —— **四条错误码断言原样全绿**，而一次**失败**的接管已经在用户的
+  `~/.claude/settings.json` 里留下了四条 hook，config.json 里却一个包都没选（`Setup.swift:482` 的注释亲口立过
+  「一次注定不会响的安装，绝不允许在用户的 Claude Code 里留下新的痕迹」，此前无人背书）。现已补上：config 锁忙
+  → settings.json 必须一个字节没动；settings 锁忙 → config.json 必须**真的写完**（这正是那条 suite 标题里
+  「config 那步必须放行」的前半句，此前一条断言都没有）；断开被锁挡住 → 四条 hook 一条不许少（**原子**）；
+  断开成功 → 摘满四条且 settings.json 里真的干净。它绑的是真实锁文件路径 + 真实磁盘状态，是 ①②③ 全都够不着的那一层。
 - GUI 侧：`ViewWiringSuite` 的**全 target 普查** —— 唯一的 PanelView 构造点（`PanelView(` 与 `PanelView.init(`
   一起数）、PanelView 的**三个**锁消费者各自转发、除 `PanelView.swift` 外 ClaudioGUI 代码里不许出现锁
   （**大小写不敏感**）、ClaudioGUICore 代码里不许出现 play 的去抖锁。
+- **⑤ 扫描器级**（`/codex review be332ff`）：上面 ②③ 与 GUI 侧那三条普查，读到的「代码」全由**一个函数**
+  （`strippingComments`）生产 —— 它是这几套负向绊线的**单点故障**，而它自己此前一条断言都没有。现由
+  `SourceScannerSuite`（两个包各一份）喂合成输入钉死，外加两条「扫描器撞见了自己不认识的构造」守卫。详见下方逐次记账最后一条。
 
 **这三层是一路被打出来的，每一次都是同一个病：断言的措辞比它实际守的范围大。** 逐次记账：
 
@@ -120,10 +131,45 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 - **负向兜底只禁标识符，禁不掉值级假名**（`/review e7c38ea`）：`!contains("playLockFile")` 拦不住
   `ClaudioPaths.root.appendingPathComponent("play.lock")` —— 拿到的是**同一把**去抖锁，而那个标识符一次都不出现。
   已改成标识符与字面量 `play.lock` 一起禁。
-- **`codeOnly` 不认识字符串字面量**（`/review e7c38ea`，潜伏未爆）：它在**第一个 `//`** 处无条件截断整行。
-  哪天有人往 `Setup.swift` 的提示文案里放一个 URL，`https:` 后面那个 `//` 会把该行剩下的**代码**整段剥掉 ——
-  而这两个 suite 的兜底**全是负向断言**，被删掉的代码只会让它们**更绿**。已加一条元断言：被扫的源文件里不许
-  出现 `://`，真到了非放不可的那天，它会当场变红，逼人先去把 `codeOnly` 修好。
+- **~~已加一条元断言：被扫的源文件里不许出现 `://`~~ —— 那条元断言恒真，一个字节都没守住**
+  （`/review e7c38ea` 提出、`be332ff` 写下、`/codex review be332ff` 当场逮到）：`codeOnly` 在**第一个 `//`** 处
+  无条件截断整行，不认识字符串字面量 —— 一行 `let hint = "见 https://…"; _ = write(lockFile: playLockFile)`
+  会被剪成 `let hint = "见 https:`，后半行那句锁**对整套断言永久隐身**，而两个 suite 的兜底全是负向断言，
+  被剥掉的代码只会让它们**更绿**。**问题诊断是对的，守卫写错了**：它写的是 `!codeOnly(path).contains("://")`
+  —— 检查的是**截断之后**的文本，而 `://` 自带 `//`，到达断言之前早已被剪成 `https:`。它**恒真**，却在失败
+  消息里自称「真到了非放 URL 不可的那天会当场变红」。**措辞比覆盖范围大，复发在杀它的那一刀里**（第八次）。
+  同一个洞在 GUI 那半边更彻底：`ViewWiringSuite` 的两条普查（ClaudioGUI 锁普查、ClaudioGUICore 的 `play.lock`
+  普查）用同一个 `codeOnly`，而**连那条恒真的守卫都没有**。
+  **现在的修法是从根上改**（不是把 ban 挪到 raw source —— 那会在第一个把 URL 写进 doc comment 的人手上假红，
+  然后被删掉，洞原样回来）：`TestSupport.strippingComments` 是一个**位置感知**的状态机（代码 / 行注释 /
+  块注释 / 字符串 / 多行字符串），两个包各一份（跨包复制约定），字符串字面量里的 `//` 不再是注释起点。
+  它自己的行为由**新的 `SourceScannerSuite`**（两个包各一份）喂**合成输入**钉死 —— 正向断言，
+  结构上不可能再变成恒真式。它仍不建模 raw string（`#"…"#`），但它**知道自己不认识**：撞见一处就记进
+  `unmodeledConstructs`，两个 suite 各有一条断言盯着那张清单（位置感知是必须的 —— `ClaudioColorHex.swift`
+  的 `hasPrefix("#")` 逐字包含 `#"`，一条纯文本守卫会当场假红）。
+
+  **变异台账**（9 条变异，各自在独立 worktree 里跑真实测试，全部实测；`claudio-tests` 1090 / `claudio-gui-tests` 1646 为基线）：
+
+  | 变异 | 实测 | 结论 |
+  |---|---|---|
+  | M1a/M1b 扫描器退回朴素截断 | helper 红 6 / gui 红 6，全在 `SourceScannerSuite` | 扫描器行为被钉死 |
+  | M2 把锁藏在行内 URL 后面（`Setup.swift`） | 红 1：`LockSeparationSuite` 的 playLockFile 负向断言 | 修好的扫描器逮住了 |
+  | **M2C 同样藏锁 + 朴素扫描器**（控制组） | 那条锁断言**一条没红** | **证明逮住 M2 的正是「扫描器被修好」，锁断言本身瞎着** |
+  | M3 把 `play.lock` 藏在行内 URL 后面（`ClaudioGUICore`） | 红 1：GUICore 普查，精确点名 `OnboardingActions.swift` | GUI 那半边也堵上了 |
+  | **M3C 同样藏锁 + 朴素扫描器**（控制组） | GUICore 普查**没红**，连 `unmodeled` 守卫也跟着瞎 | 同上，且印证：真正拦住它的唯一防线是 `SourceScannerSuite` 的**正向**断言 |
+  | **M4 把 `installClaudioHooks` 重排到 `selectPack` 之前** | **四条错误码断言全绿**；新增的两条副作用断言红（`gui:669` 打印出真的躺进 settings.json 的四条 hook，`gui:715` 读 config.json 得 `nil`） | **坐实「错误码不绑执行顺序」** |
+  | M5 往 `Play.swift` 塞一个 raw string | 红 1：`unmodeledConstructs` 守卫，逐字点名构造与文件 | 新守卫有牙（不是又一条恒真式） |
+  | M6 把 URL 写进 doc comment / 行尾注释（三处） | helper 1090 + gui 1646 **全绿** | **没有假红** —— 这正是不把 ban 挪到 raw source 的理由 |
+
+  **台账自己抓出的一条弱断言**：`SourceScannerSuite` 的「空串 `""` 不吞掉后面的代码」第一版**没有牙** ——
+  它喂的输入里一个 `//` 都没有，于是任何「不会凭空发明注释」的实现都能过（包括它要杀的朴素截断版）。
+  已加强（行尾挂一条真注释，`""` 若被误读成开串则注释文本会活下来）；定向变异实测：只红这一条（`✗ 1 of 1090`），
+  而它的第一版在同一变异下全绿。**一条测试自己的断言，也可能是恒真的** —— 这就是为什么变异台账不能省。
+
+  **M4 的一个诚实补充（Codex 没说，台账发现的）**：那次重排**并非全无护栏** —— helper 的 `SetupSuite`
+  另有 4 条顺序不变式（`:153` / `:566` / `:786` / `:811`「必须在写 hooks 之前就失败——settings.json 不该被创建」）
+  **也红了**。所以它逃得过 GUI 那四条锁断言、逃不过 helper。Codex 的 P1 仍然成立（那条 suite 标题声称的
+  「config 那步必须放行」确实无人背书，且 **lockBusy 这条失败路径 helper 一条都没覆盖**），但严重性比它描述的低一档。
 
 ### ~~「三把锁互不阻塞」只有接线断言背书，没有一条行为级的持锁竞争测试~~ ✅ 2026-07-13 `/review e7c38ea` 大部已修
 
@@ -134,6 +180,12 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 - 持 settings.lock → 接管必须**放行 config 那步**、停在 `.setupFailed(.installFailure(.lockBusy))`（settings.json 的写）；
 - 持 settings.lock → 断开必须 `.disconnectFailed(.lockBusy)`；
 - 持 config.lock → 断开必须**照常成功**（它一个字节都不写 config.json —— 这条防的是「多拿了一把不该碰的锁」）。
+
+**这四条只读返回的错误码，而错误码不绑执行顺序**（`/codex review be332ff` 的 P1，2026-07-13 已补）：把
+`installClaudioHooks` 重排到 `selectPack` 之前，四条**原样全绿**，而失败的接管已经在用户的 settings.json 里留下
+四条 hook。四条各自的**副作用**断言（settings.json 有没有被碰过 / config.json 有没有真的写完 / 四条 hook 一条不许少 /
+摘完之后磁盘真的干净）见上方 ④。「错误码不绑执行顺序」是「计数不绑调用点」（`/codex review 840ea37`）的同一个病，
+搬到了副作用层 —— **第九次**。
 
 **当初判它「测不到东西」的那个理由，对一半、错一半。** 原文写的是：「用注入的临时 fixture 路径测，断言从写下
 第一天起就恒真（两个临时路径本就互不相干）」。那句话对**「两把锁互不阻塞」**成立，对**「每个写者拿的是不是

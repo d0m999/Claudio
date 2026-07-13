@@ -607,6 +607,25 @@ func runOnboardingActionsSuites() {
     // `Setup.swift:512`/`:523`），`.installFailure` = settings.json 的写（`installClaudioHooks`，
     // `Setup.swift:563`）。接管的顺序是 复制二进制 → 复制包 → 解隔离+回验 → 写 config → 写 hooks，
     // 所以持哪把锁、该停在哪一步，是**唯一确定**的。
+    //
+    // ## ⚠️⚠️ 而「停在哪一步」**也不够** —— 错误码不绑执行顺序（`/codex review be332ff` 的 P1）
+    //
+    // 上面那段推理有个没说出口的前提：**「返回哪个错误码」== 「做到了哪一步」**。它不成立。
+    // 把 `Setup.swift` 里 `installClaudioHooks` 那一整段**挪到** `selectPack` **之前** —— 两个调用点的
+    // `lockFile:` 实参一个字都不用改，全文件计数、每一处的符号名、③ 那三条调用点断言，全都原样成立 ——
+    //
+    // - 持 config.lock：hooks 先写（成功），再撞 config.lock → 依然是 `.useFailure(.lockBusy)`；
+    // - 持 settings.lock：hooks 先写就撞上 → 依然是 `.installFailure(.lockBusy)`。
+    //
+    // **四条错误码断言，一条都不红。** 而此刻：一次**失败**的接管在用户的 `~/.claude/settings.json` 里
+    // 留下了四条指向 helper 的 hook，config.json 里却一个包都没选中 —— 每个事件都会去 exec 一个选不出包的
+    // helper。`Setup.swift:482` 的注释亲口立过这条不变式（「一次注定不会响的安装，绝不允许在用户的
+    // Claude Code 里留下新的痕迹」），在这批断言之前**没有任何东西背书它**。
+    //
+    // 这与「计数不绑调用点」（`840ea37`）、「`contains` 不是绑定」（`e7c38ea`）是**逐字同一个病**，
+    // 第九次：断言绑的东西比它声称守的东西弱一层。所以下面每一条持锁 suite 除了错误码，还各自断言
+    // **磁盘上到底发生了什么** —— settings.json 有没有被碰过、config.json 有没有真的写完、四条 hook
+    // 是不是一条不少 / 一条不剩。错误码是执行器的自述，磁盘是事实。
 
     suite("接管：持住 config.lock → 必须停在 config.json 的写上（.useFailure(.lockBusy)）") {
         withTempDirectory { root in
@@ -632,6 +651,31 @@ func runOnboardingActionsSuites() {
                     + "那几秒，他的每一声提示音被去抖锁静默吞掉）；② 停在 `.installFailure` = config 与 "
                     + "settings 两把锁被**成对交换**了（config.json 的写守着 settings.lock）。断的是"
                     + "**哪一步**被挡住，不只是「被挡住了」—— 只断言失败会被成对交换整体满足")
+
+            // ## 副作用：**返回值说不出「做到哪一步」**（`/codex review be332ff` 的 P1-1）
+            //
+            // 上面那条只读 `result`。把 `Setup.swift` 里 `installClaudioHooks` 那一段**挪到**
+            // `selectPack` **之前**（一次重排，两个调用点的 `lockFile:` 实参一个字都不用改）——
+            // 持 config.lock 依然会停在 `.useFailure(.lockBusy)`，上面那条**原样绿**。而此刻
+            // 用户的 `~/.claude/settings.json` 里已经躺着四条指向 helper 的 hook：一次**失败**的接管，
+            // 在他的 Claude Code 里留下了痕迹，而 config.json 里没有任何包被选中 —— 每个事件都会去
+            // exec 一个「选不出包」的 helper。
+            //
+            // `Setup.swift:482` 的注释亲口立过这条不变式（「一次注定不会响的安装，绝不允许在用户的
+            // Claude Code 里留下新的痕迹」），而在这条断言之前，**没有任何东西背书它**。
+            // 这就是「计数不绑调用点」（`/codex review 840ea37`）在**副作用层**的同一个形状：
+            // 错误码不绑执行顺序。
+            let hooks = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }
+            expect(
+                hooks.allSatisfy { !$0.contains(targets.onboarding.claudioBinaryPath.path) },
+                "config.json 的写被挡住了，那 settings.json 就必须**一个字节都没被碰过** —— 得到："
+                    + "\(hooks)。有 hook 躺在里面 = 写 hooks 跑到了写 config **前面**（错误码一模一样，"
+                    + "上面那条照样绿）：一次失败的接管在用户的 Claude Code 里留下了痕迹，而 config.json "
+                    + "里一个包都没选中 —— 每个事件都会去 exec 一个选不出包的 helper")
+            expect(
+                readString(targets.configFile)?.contains("minimal-chime") != true,
+                "config.json 的写正是被挡住的那一步，它不该留下任何选包结果。得到："
+                    + "\(String(describing: readString(targets.configFile)))")
         }
     }
 
@@ -659,6 +703,26 @@ func runOnboardingActionsSuites() {
                     + "② 停在 `.useFailure` = 两把锁被**成对交换**了（config.json 的写反而守着 "
                     + "settings.lock，于是被这个 holder 挡在了更早的那一步）。这一条与上面那条**成对**"
                     + "存在：单独任何一条都能被成对交换骗过，两条一起才把「谁守谁」钉死")
+
+            // ## 「config 那步必须放行」—— 本 suite 标题的后半句，此前**一条断言都没有**
+            // （`/codex review be332ff` 的 P1-1）
+            //
+            // 标题写着「config 那步必须放行，停在 hooks 的写上」，而上面那条只看得见后半句：它读的是
+            // 错误码，而错误码说不出 config 那步**到底跑没跑**。把 `installClaudioHooks` 重排到
+            // `selectPack` 之前 —— 持 settings.lock 依然停在 `.installFailure(.lockBusy)`，上面那条
+            // **原样绿** —— 而 config.json 从头到尾没被写过：接管在**第一步**就死了，一个包都没选。
+            // 措辞（「放行」）比覆盖范围（「错误码对」）大，第九次。这条把前半句也钉上。
+            expect(
+                readString(targets.configFile)?.contains("minimal-chime") == true,
+                "settings.lock 与 config.json 的写毫无关系，config 那步必须**真的跑完** —— "
+                    + "config.json 里得躺着选中的包。得到：\(String(describing: readString(targets.configFile)))"
+                    + " —— 它是空的 / 没有包 = 写 hooks 跑到了写 config 前面（错误码一模一样，上面那条"
+                    + "照样绿），接管在第一步就被挡死了")
+
+            let hooks = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }
+            expect(
+                hooks.allSatisfy { !$0.contains(targets.onboarding.claudioBinaryPath.path) },
+                "settings.json 的写正是被挡住的那一步 —— 它不该留下任何 hook。得到：\(hooks)")
         }
     }
 
@@ -688,6 +752,18 @@ func runOnboardingActionsSuites() {
                     + "必须撞上**被注入的那把** settings.lock，得到 \(result) —— 断开**成功**了，就说明"
                     + "这一处转发的是别的锁。它是接管路径之外**第二个** settings.json 的写者，此前同样"
                     + "一条断言都没有")
+
+            // 副作用（`/codex review be332ff` 的 P1-1 同一类）：「它报了 lockBusy」说不出「它有没有先摘
+            // 掉几条再报」。一次**被锁挡住**的断开必须是**原子**的 —— 四条 hook 一条不少地留在原地。
+            // 摘一半再报错 = 用户的 Claude Code 里剩下几条半死的 hook，而面板告诉他「断开失败了」，
+            // 他会以为什么都没发生。
+            let survivors = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }
+                .filter { $0.contains(targets.onboarding.claudioBinaryPath.path) }
+            expect(
+                survivors.count == Event.allCases.count,
+                "断开被锁挡住 = 一条都不许摘（四条 hook 原样在位），实得 \(survivors.count) 条："
+                    + "\(survivors) —— 少了 = 它先动了手再报的错，用户看见「断开失败」，而他的 "
+                    + "settings.json 里躺着几条被摘剩的 hook")
         }
     }
 
@@ -713,14 +789,25 @@ func runOnboardingActionsSuites() {
             // `lockFile: environment.configLockFile` 只会让上面那条变红一次——而红的原因会被读成
             // 「settings 锁没接上」，真正的病（断开跑去占 config 的锁，于是一次断开能把并发的
             // 静音 / 切包写全部挡掉）没人说得出来。
-            var sweptDespiteConfigLock = false
-            if case .success(.disconnected) = result { sweptDespiteConfigLock = true }
+            // 断的是 `count`，不只是 `.success`：`uninstallClaudioHooks` 摘了 0 条也返回
+            // `.success(.notInstalled)`（文件头规则 2 记着这次翻车）。一条只看 `.success` 的断言，
+            // 会在「它其实什么都没摘」的情况下变绿 —— 而那正是这条要防的另一半。
+            var sweptCount: Int?
+            if case .success(.disconnected(let count)) = result { sweptCount = count }
             expect(
-                sweptDespiteConfigLock,
-                "断开只写 settings.json，config.lock 被别人持着与它毫无关系，必须照常摘干净，"
-                    + "得到 \(result) —— 它**因为 config.lock 被持有而失败**，就说明这条路径拿了一把"
+                sweptCount == Event.allCases.count,
+                "断开只写 settings.json，config.lock 被别人持着与它毫无关系，必须照常**摘干净四条**，"
+                    + "得到 \(result) —— ① 它**因为 config.lock 被持有而失败**，就说明这条路径拿了一把"
                     + "它根本不该拿的锁：那样一次断开会连带挡住并发的静音开关与切包（两者都写 config.json），"
-                    + "而阶段 A 拆开这几把锁，图的正是它们互不相干")
+                    + "而阶段 A 拆开这几把锁，图的正是它们互不相干；② 它成功了但只摘掉 "
+                    + "\(String(describing: sweptCount)) 条 = 它「成功」得毫无内容")
+
+            // 副作用：磁盘上真的干净了。`count` 是执行器**自报**的数字，这一条去问 settings.json 本人。
+            let leftovers = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }
+                .filter { $0.contains(targets.onboarding.claudioBinaryPath.path) }
+            expect(
+                leftovers.isEmpty,
+                "断开成功了，settings.json 里就不该再有任何指向 claudio 的命令。得到：\(leftovers)")
         }
     }
 
