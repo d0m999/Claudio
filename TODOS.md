@@ -298,6 +298,39 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 **Priority:** P2
 **Depends on:** `ClaudioPaths.root` 需要先获得可覆盖锚点（独立 PR，不要混进阶段 B 主音量滑块）
 
+### 全仓还有十几处「一个字节都不写」，背书它们的仍然只是**字节比较** —— 而字节比较看不见「写了又擦回去」
+
+**What:** `/codex review ee026db` 的 P2 指出：`fileBytes(after) == fileBytes(before)` 只证明**终态相同**，
+而写着这句话的失败消息声称的是「**一个字节都没被碰过**」。一个「写完再回滚」的实现（写下去 → 撞上锁 →
+把文件删/改回去）能让前后逐字相同，字节比较**全程绿**。
+
+这一条已在 **settings.json 的四条持锁路径**上治好了：`FileWriteWatch`（`gui/Tests/…/TestSupport.swift`）
+观测的是**事件**而不是状态差 —— 目录级 kqueue（`NOTE_WRITE|NOTE_DELETE|NOTE_RENAME`）逮住创建 / 原子替换 /
+删除，`stat(2)` 的 **ctime** 逮住「非原子的原地重写」（ctime 是 userspace 唯一伪造不了的字段：`utimensat`
+能把 mtime 按回过去，那一次调用自己却会把 ctime 顶到「现在」）。
+
+**没治的是同一族的其余声称**，它们今天全靠字节比较：
+`helper/Tests/ClaudioCoreTests/ConfigMutationSuite.swift`（`:126`、`:754`「fail closed 的含义是一个字节都不写」，
+`:686` 只读探针）、`SetupSuite.swift`（`:564`、`:791`、`:1065` 失败路径必须逐字保住用户的 config / 文件）、
+`gui/Tests/ClaudioGUICoreTests/ManifestBindingSuite.swift:302`（「一个字节都不写」）。
+
+**Why:** 严重性**低于** settings.json 那一族，而且理由是具体的、不是感觉：settings.json 有**不遵守
+claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所以那里的「窗口期」真的会被别人看见；上面这些
+路径上的 config.json / manifest 的并发读者是 claudio 自己，且都走原子 rename。**但这只是把风险降级，没有
+消灭它**：一次「写了又回滚」的窗口里，一个并发的 `claudio play` 照样可能读到半途的 config.json。
+
+真正的理由是：**这些断言的措辞，仍然比它们的覆盖范围大** —— 而这个仓库连着十一次栽在同一件事上。
+
+**修复方式:** `FileWriteWatch` 是现成的，把它按「按包复制而非跨包共享」的约定抄一份进
+`helper/Tests/ClaudioCoreTests/TestSupport.swift` 即可。⚠️ 两条硬约束，抄之前先读它文档里「它不兜什么」那节：
+① 目录那一半会因**同目录里的其它写者**假阳（`~/.claudio/` 在接管期间一直在被写：二进制、声音包、两把锁文件），
+所以它只能用在被观测文件是该目录唯一写者的时刻；② **每加一个用它的断言，都必须同时有一条正向对照**证明观测器
+在那条路径上真的会响 —— 一个观测不到写的观测器，会把每一条「没被碰过」变成恒真，那正是它要杀的病升了一层。
+
+**Effort:** M（每条断言都要配一次定向变异验证，不能批量替换了事）
+**Priority:** P2
+**Depends on:** None（工具已就绪）
+
 ### 升级窗口：旧 CLI（拿 play.lock 写 config）与新 GUI（拿 config.lock）并存时会丢一次设置更新
 
 **What:** 两把不同的锁之间，原子 rename **只防撕裂、不防 lost update**。旧 `~/.claudio/bin/claudio` 拿 play.lock

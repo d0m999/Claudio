@@ -405,3 +405,243 @@ func writeEmptyExecutableFile(at url: URL) {
     FileManager.default.createFile(
         atPath: url.path, contents: Data(), attributes: [.posixPermissions: 0o755])
 }
+
+// MARK: - 「这个文件到底有没有被**碰过**」——一次观测，不是一次终态比较
+//
+// ## 它补的那颗牙（`/codex review ee026db` 的 P2）
+//
+// `ee026db` 把几条持锁断言从「里面没有 claudio 的 hook」（`hookCommands(…).allSatisfy { !… }` ——
+// 空数组恒真）换成了**字节比较**：`fileBytes(after) == fileBytes(before)`。那一刀砍掉了恒真，
+// 却没砍掉它紧接着那句话：失败消息写的是「settings.json **一个字节都没被碰过**」，而字节比较
+// 只证明**终态相同**。
+//
+// 一个「写完再回滚」的实现（写 hooks → 撞上 config.lock → 把 settings.json 删回去）会让 before 与
+// after **都是「无文件」**，字节比较全程绿。而那个窗口里，用户的 `~/.claude/settings.json` 里真的
+// 躺过四条指向 helper 的 hook —— Claude Code 每一个事件都要读这个文件，进程若在窗口里崩掉，痕迹
+// 就永久留下。这条分支叫 `feat/lock-separation`，它整个存在的前提就是**这个文件有并发的读者与
+// 写者**：「窗口期」正是这个威胁模型里唯一算数的东西。措辞比覆盖范围大，第十一次。
+//
+// ## 这一版观测的是**事件**，不是状态差。两半，各补各的盲区
+//
+// 1. **目录级 kqueue**（`EVFILT_VNODE` / `NOTE_WRITE|NOTE_DELETE|NOTE_RENAME`，挂在文件**所在目录**
+//    的 fd 上）：目录项的增 / 删 / 改名都会在内核里排一个事件，动作跑完之后零超时轮询就取得到。
+//    `Data.write(options: .atomic)` 是「同目录临时文件 + rename」（`SettingsInstaller.atomicWrite`
+//    的契约），所以创建、原子替换、删除 —— 写盘的每一种形状 —— 都逃不过它。**写了又删掉**：目录
+//    响，字节比较一声不吭。
+//
+// 2. **`stat(2)` 身份快照**（dev / ino / size / mtime / **ctime**）：目录 watch 有一个已知盲区 ——
+//    对一个**已存在**的文件做**非原子的原地重写**不动任何目录项。ctime 补上它，而且 ctime 是这里
+//    唯一**伪造不了**的字段：`utimensat` 能把 mtime 按回过去（实测：设成 100 秒前也照设不误），
+//    但那一次调用自己就会把 ctime 顶到「现在」。userspace 没有任何系统调用能把 ctime 设回去。
+//
+// **读不会让任何一半响**：读只动 atime，而 atime 刻意不在快照里（一条会被「读了一次」弄红的断言，
+// 会被下一个人删掉）。
+//
+// ## ⚠️ 一个观测不到写的观测器，会把每一条「没被碰过」变成恒真 —— 同一个病，升了一层
+//
+// 把 ``FileWriteWatch/observedWrite()`` 掏空成 `return false`（一次手滑、一次「先临时关掉调试一下」），
+// 每一条「必须没被碰过」就永远绿，而它们在失败消息里自称守着「一次注定不会响的安装，绝不允许在用户的
+// Claude Code 里留下新的痕迹」（`Setup.swift:482`）。这与 `2f107b5` 那条恒真守卫是**逐字同一个形状**：
+// 守卫读的东西证明不了它声称守住的东西。**实测（第一轮台账 A1）：把 `observedWrite()` 换成
+// `return false`，四条持锁 suite 一条都不红，而 `isArmed` 也一声不吭**（它是独立字段，照常武装成功）。
+//
+// 所以真正兜住这一类的，只有**正向对照**，而且必须一半一个：
+//
+// - **写观测器①**（写了又删掉）—— 只有目录 kqueue 看得见。它顺带兜住「目录 fd 指错了一个**存在但
+//   不相干**的目录」这种 `isArmed` 抓不到的失效。
+// - **写观测器②**（原地重写并把内容与 mtime 都恢复）—— 只有 ctime 看得见。
+// - **写观测器③**（settings.json 是 dotfiles 符号链接，穿过它写目标）—— 只有 `stat(2)` 的跟随语义
+//   看得见（换成 `lstat` 当场变红，而其余整套台账一条都不红）。
+//
+// 三条各自钉死一处，互不代偿：任一处被打瞎，对应那条对照当场红，而**其余全绿**（三轮变异逐条实测）。
+//
+// ``FileWriteWatch/isArmed`` 是另一道**更早**的闸（`makePackFIFO` / `createSymlink` 的先例：fixture
+// 必须先证明自己真的生效了）。但它只管得着目录那一半 —— 见它自己的文档，那里记着我在这一刀里
+// 亲手写下、又被台账当场证伪的一句假话。
+//
+// ## ⚠️ 它**不**兜什么（别再让措辞比覆盖范围大）
+//
+// `observedWrite()` 没有假阴性，但目录那一半有**假阳性**：它响的是「这个目录里有东西变了」，
+// 而不是「**这个文件**变了」。所以它只能用在**被观测文件是该目录唯一写者**的地方：
+//
+// - `~/.claude/`（fixture 里的 `dot-claude/`）—— claudio 对它的全部写入只经由 `settings.json`
+//   与它的一次性备份，所以四条持锁 suite 都用得上；
+// - `~/.claudio/`（fixture 里的 `.claudio/`）—— 二进制、声音包、两把锁文件都住在这里，**接管
+//   期间它一直在被写**。所以 `config.json` 的观测只在**断开**那两条 suite 里成立（那时接管早已
+//   跑完，`.claudio/` 全程安静）；接管那两条里它会假阳，别往那里加。
+
+/// 一个文件此刻的**身份** —— 不只是它的字节。
+///
+/// `nil` = 这条路径上此刻没有文件。**存在性本身是身份的一部分**：`nil` → 非 `nil` 是一次创建，
+/// 反过来是一次删除。
+///
+/// **ctime 是这张快照的要害**，因为它是唯一伪造不了的字段：一个「原地重写、再把内容与 mtime 都
+/// 恢复回去」的写者能让 dev / ino / size / mtime 全部原样，但 ctime 会被顶到「现在」——
+/// `utimensat` 自己那一次调用就会顶它。
+///
+/// atime **刻意不在**里面：读文件会动它。
+private struct FileIdentity: Equatable {
+    let device: Int64
+    let inode: UInt64
+    let size: Int64
+    let modifiedSeconds: Int64
+    let modifiedNanoseconds: Int64
+    let attributesChangedSeconds: Int64
+    let attributesChangedNanoseconds: Int64
+
+    init?(of url: URL) {
+        var info = stat()
+        guard stat(url.path, &info) == 0 else { return nil }
+        device = Int64(info.st_dev)
+        inode = UInt64(info.st_ino)
+        size = Int64(info.st_size)
+        modifiedSeconds = Int64(info.st_mtimespec.tv_sec)
+        modifiedNanoseconds = Int64(info.st_mtimespec.tv_nsec)
+        attributesChangedSeconds = Int64(info.st_ctimespec.tv_sec)
+        attributesChangedNanoseconds = Int64(info.st_ctimespec.tv_nsec)
+    }
+}
+
+/// 从构造那一刻起，`file` 有没有被**写过** —— 哪怕它此刻的字节与构造那一刻逐字相同。
+/// 完整推理（含它不兜什么）见上面那节。
+final class FileWriteWatch {
+    /// 被观测的那条路径，**原样**，不做 `resolvingSymlinksInPath()`。
+    ///
+    /// 第一版在这里调了 `resolvingSymlinksInPath()`，并在文档里声称「否则一次穿过链接写到目标的
+    /// 安装会一声不响」。**那句话是假的**：``FileIdentity`` 用的是 `stat(2)`，而 `stat` 本来就
+    /// **跟随符号链接** —— 对着链接自己 stat，拿到的就是**目标**的 dev / ino / ctime。所以那一行
+    /// 解析对身份快照毫无影响，是一行纯装饰，而它的文档在替它撒谎。
+    ///
+    /// （dotfiles 的 stow / chezmoi 确实会把 `settings.json` 做成符号链接，而 `atomicWrite` 也确实
+    /// 写的是 `resolvingSymlinksInPath()` 之后的目标。真正让观测跟得上的是 `stat` 的跟随语义，
+    /// 不是那次解析。`SymlinkedSettings` 那条正向对照就钉这件事：换成 `lstat` 当场变红。）
+    private let file: URL
+    /// 目录项那一半盯的是**未解析**的父目录 —— 刻意的：一个把符号链接**整个替换**成正规文件的写者
+    /// 根本不碰目标（`stat` 那一半看不见），但它改了**这里**的目录项。两条路各盖一种，合起来没有缺口。
+    private let entryDirectory: URL
+    private let directoryDescriptor: Int32
+    private let queue: Int32
+    private let identityBefore: FileIdentity?
+    private var sawDirectoryEvent = false
+
+    /// **目录那一半**真的武装起来了吗（目录 fd 开到了、`kevent` 注册成功了）。
+    ///
+    /// ⚠️ **它管不着身份快照那一半** —— 这句话第一版写的是「`false` 时 ``observedWrite()`` 会永远
+    /// 返回 `false`，一条恒假的守卫」，而**那是假的**（第二轮台账 R2a 实测反证）：`identityBefore`
+    /// 在 `open()` **之前**就拍好了，与 fd / kevent 无关。于是武装失败的观测器不是**瞎**，是**半瞎**：
+    /// 任何改动 dev / ino / size / mtime / ctime 的写它照样看得见（一次真实的 `atomicWrite` 安装就是），
+    /// 它丢掉的**恰好**是终态身份不变的那一类 —— 「写了又删掉」（nil → nil），以及「把符号链接整个
+    /// 替换成正规文件」（目标没动）。而「写了又删掉」正是 `/codex review ee026db` 指出的那一类，
+    /// 也正是这整套观测存在的理由。**覆盖损失是要害的，但不是「全归零」。**
+    ///
+    /// （措辞比覆盖范围大，第十一次 —— 这一次复发在**杀掉它的那一刀自己的文档里**。留着这段话，
+    /// 是因为下一个人会本能地想把 `identityBefore` 挪进 guard 后面「让它真的恒假」——不必，
+    /// 半瞎比全瞎好，而 `isArmed` 的断言会先于一切当场变红。）
+    ///
+    /// 每个调用点都必须先断言它（七处，第二轮台账下 7/7 全红）。
+    let isArmed: Bool
+
+    init(watching file: URL) {
+        self.file = file
+        entryDirectory = file.deletingLastPathComponent()
+        identityBefore = FileIdentity(of: file)
+
+        let descriptor = open(entryDirectory.path, O_EVTONLY)
+        let kernelQueue = kqueue()
+        directoryDescriptor = descriptor
+        queue = kernelQueue
+        guard descriptor >= 0, kernelQueue >= 0 else {
+            isArmed = false
+            return
+        }
+
+        var change = kevent()
+        change.ident = UInt(descriptor)
+        change.filter = Int16(EVFILT_VNODE)
+        change.flags = UInt16(EV_ADD | EV_ENABLE | EV_CLEAR)
+        // 刻意**不**要 `NOTE_ATTRIB`：目录的属性变化（例如 readdir 顶 atime）与「有人写了这个文件」
+        // 无关，收它只会换来一条时不时假红、然后被人删掉的断言。目录项的增 / 删 / 改名就够了 ——
+        // 创建、原子替换（temp + rename）、删除，全在这三条里。
+        change.fflags = UInt32(NOTE_WRITE | NOTE_DELETE | NOTE_RENAME)
+        isArmed = kevent(kernelQueue, &change, 1, nil, 0, nil) == 0
+    }
+
+    /// 构造之后，这个文件被写过吗？**幂等**：问几次答案都一样（见下面那段缓存）。
+    func observedWrite() -> Bool {
+        if !sawDirectoryEvent {
+            var event = kevent()
+            var immediately = timespec(tv_sec: 0, tv_nsec: 0)
+            // `EV_CLEAR`：事件取一次就被内核清掉。**必须缓存**，否则第二次调用会返回 `false` ——
+            // 一条「问第二遍就翻供」的守卫，正是这里最不该出现的东西（今天每个调用点都只问一次，
+            // 所以这段缓存**没有任何断言在钉它** —— 除了「写观测器①」里那条刻意问两遍的断言）。
+            sawDirectoryEvent = kevent(queue, nil, 0, &event, 1, &immediately) > 0
+        }
+        return sawDirectoryEvent || FileIdentity(of: file) != identityBefore
+    }
+
+    deinit {
+        if directoryDescriptor >= 0 { close(directoryDescriptor) }
+        if queue >= 0 { close(queue) }
+    }
+}
+
+/// 原地重写 `url`，再把**内容与 mtime 都恢复**成动作前的样子 —— 一个尽力伪装成「没碰过」的写者。
+///
+/// 它是 ``FileWriteWatch`` 里 ctime 那一半唯一的正向对照，所以它必须真的把**除 ctime 之外**的每
+/// 一个字段都按回原样：inode 不变（原地写，不是 temp + rename）、size 不变、内容逐字不变、mtime
+/// 逐纳秒不变。于是「观测器看见了这次写」**只可能**是因为 ctime。
+///
+/// 这条纪律不是洁癖：少了它，这条对照会**因为错误的理由**变绿（比如 mtime 其实没恢复），而 ctime
+/// 那一半其实是死的 —— 一条自称在钉 ctime、实则在钉 mtime 的对照，比没有对照更坏。所以恢复是否
+/// 真的成功，就地断言。
+@MainActor
+func rewriteInPlaceRestoringContentAndModificationTime(_ url: URL) {
+    guard let original = try? Data(contentsOf: url) else {
+        expect(false, "rewriteInPlaceRestoringContentAndModificationTime: \(url.path) 读不出来")
+        return
+    }
+    var before = stat()
+    expect(stat(url.path, &before) == 0, "test setup: \(url.path) stat 失败")
+
+    // ① 原地写进不一样的内容（不动目录项 → 目录 watch 全程安静）。
+    let descriptor = open(url.path, O_WRONLY | O_TRUNC)
+    expect(descriptor >= 0, "test setup: \(url.path) 打不开来做原地写")
+    let scribble = Array(#"{"scribbled":true}"#.utf8)
+    _ = scribble.withUnsafeBufferPointer { write(descriptor, $0.baseAddress, $0.count) }
+    close(descriptor)
+
+    // ② 把内容原样写回去。
+    let restore = open(url.path, O_WRONLY | O_TRUNC)
+    expect(restore >= 0, "test setup: \(url.path) 打不开来做内容恢复")
+    let bytes = Array(original)
+    _ = bytes.withUnsafeBufferPointer { write(restore, $0.baseAddress, $0.count) }
+    close(restore)
+
+    // ③ 把 atime / mtime 也按回原值。`utimensat` 做得到 —— 而它**做不到**的正是 ctime：这一次
+    //    调用自己就会把 ctime 顶到「现在」。
+    let times = [before.st_atimespec, before.st_mtimespec]
+    expect(
+        times.withUnsafeBufferPointer { utimensat(AT_FDCWD, url.path, $0.baseAddress, 0) } == 0,
+        "test setup: utimensat 没能把 mtime 按回去")
+
+    // ④ 就地证明「除 ctime 外一切原样」—— 否则这条对照钉的不是 ctime。
+    var after = stat()
+    expect(stat(url.path, &after) == 0, "test setup: 重写之后 stat 失败")
+    expect(
+        (try? Data(contentsOf: url)) == original,
+        "test setup: 内容没能恢复成逐字相同 —— 这条对照会因为「字节变了」而绿，而 ctime 那一半"
+            + "其实是死的")
+    expect(
+        after.st_ino == before.st_ino && after.st_size == before.st_size,
+        "test setup: 原地写必须保住 inode 与 size（inode 变了 = 这是一次 temp+rename，目录 watch"
+            + " 会看见它，于是这条对照钉的不再是 ctime）")
+    expect(
+        after.st_mtimespec.tv_sec == before.st_mtimespec.tv_sec
+            && after.st_mtimespec.tv_nsec == before.st_mtimespec.tv_nsec,
+        "test setup: mtime 没能恢复成逐纳秒相同 —— 这条对照会因为 mtime 变了而绿，钉不到 ctime")
+    expect(
+        after.st_ctimespec.tv_sec != before.st_ctimespec.tv_sec
+            || after.st_ctimespec.tv_nsec != before.st_ctimespec.tv_nsec,
+        "test setup: ctime 竟然没变 —— 那么 `FileWriteWatch` 的身份快照那一半在这台机器上兜不住"
+            + "「原地重写」，别再声称它兜得住")
+}
