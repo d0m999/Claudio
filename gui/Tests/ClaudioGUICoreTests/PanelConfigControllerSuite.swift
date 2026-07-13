@@ -397,4 +397,269 @@ func runPanelConfigControllerSuites() {
                     + "会残留在一次成功操作之后。得到 \(String(describing: controller.muteError))")
         }
     }
+
+    // ══ `/codex review` 两条 [P1]：诚实失败态没有接到**用户操作**这条 shipping 路径 ══════════════
+    //
+    // `.malformed` / `.unwritable` 这两个诚实失败态，此前**只**在 init 和全量 reload 里算得出来。而面板
+    // 打开之后 config 被外部改坏时，唯一会撞上它的两条路 —— 点静音、点包卡 —— 都不 reload：
+    //
+    //   - 静音：`panelRefreshRoute` 把 `.configReadFailure` 判成 `.noRefresh`（理由是「config.json 原封
+    //     未动」—— 那句话把「**我们**没写」偷换成了「**文件**没变」）。
+    //   - 切包：失败分支只 `packSwitchError = error`，压根没有路由。
+    //
+    // 于是 `configState` 停在 `.operational`，面板一边用红字说「config.json 读取失败」，一边继续渲染四行
+    // 活控件 —— 直到用户重开 popover 才自愈。下面四条正钉 + 两条反向对照把这两条路都钉死。
+    //
+    // ⚠️ 反向对照为什么要在磁盘上放一份**坏** config：如果只是「持锁 + 好 config」，那么「configState 仍是
+    // `.operational`」是**恒真**的 —— 一次 reload 也会算出 `.operational`，断言区分不出 reload 跑没跑。
+    // 放一份坏 config，`.operational` 就只有在**确实没 reload** 时才可能留住，断言这才真的在测东西。
+
+    suite("[P1-a] toggleMute 撞上被外部改坏的 config：configState 必须翻到 .malformed") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+
+            // 前提（不是背景板）：面板确实是以一份**有效** config 打开的。
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            // 面板打开**之后**，外部（用户手改 / 同步工具 / 另一个进程）把它改坏：selected_pack 还读得动，
+            // 但 master_volume 成了字符串 → 写路径拒写（D23 定稿②「读得动、写不动」）。
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
+
+            controller.toggleMute(.stop)
+
+            guard case .configReadFailure = controller.muteError else {
+                expect(
+                    false,
+                    "改坏的 config 必须让这次静音失败在 .configReadFailure 上（否则这条测试测的不是它自称"
+                        + "在测的东西）。得到 \(String(describing: controller.muteError))")
+                return
+            }
+            guard case .malformed(let reason) = controller.configState else {
+                expect(
+                    false,
+                    "静音刚刚亲口承认 config.json 读不动，configState 却还停在 \(controller.configState)"
+                        + " —— 面板会顶着四行活控件继续撒谎。必须翻到 .malformed，渲染诚实失败卡")
+                return
+            }
+            expect(!reason.isEmpty, "诚实失败态必须带一条可行动的原因，得到空串")
+            expect(
+                afterFullReloadCalls == 1,
+                "这条路必须走**全量** reload（.full）—— afterFullReload 被调 \(afterFullReloadCalls) 次。"
+                    + "0 次 = 根本没 reload；轻量 reloadEnabledFlags 换不出 .malformed 之外的诚实失败态")
+        }
+    }
+
+    suite("[P1-b] switchPack 撞上被外部改坏的 config：configState 必须翻到 .malformed") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+            // 两个包都真的在磁盘上 —— 否则 selectPack 会停在 .packNotFound，这条测试就测不到 config 那一格。
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
+            writeFixture(
+                #"{ "id": "pack-b", "events": { "notification": "notification.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-b/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-b/notification.mp3"))
+
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(packsDir),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            writeFixture(#"{ "selected_pack": "pack-a", "master_volume": "loud" }"#, to: configFile)
+
+            controller.switchPack(to: "pack-b")
+
+            guard case .configReadFailure = controller.packSwitchError else {
+                expect(
+                    false,
+                    "改坏的 config 必须让这次切包失败在 .configReadFailure 上（pack-b 真的在磁盘上，所以"
+                        + "不该是 .packNotFound）。得到 \(String(describing: controller.packSwitchError))")
+                return
+            }
+            guard case .malformed(let reason) = controller.configState else {
+                expect(
+                    false,
+                    "切包刚刚亲口承认 config.json 读不动，configState 却还停在 \(controller.configState)"
+                        + " —— 这正是 /codex review 第二条 [P1]：失败分支只记 error，从不 reload")
+                return
+            }
+            expect(!reason.isEmpty, "诚实失败态必须带一条可行动的原因，得到空串")
+            expect(
+                afterFullReloadCalls == 1,
+                "失败的切包也必须走全量 reload —— afterFullReload 被调 \(afterFullReloadCalls) 次")
+        }
+    }
+
+    suite("[P1-c] toggleMute 撞上写不动的目录：configState 必须翻到 .unwritable（不是 .malformed）") {
+        guard geteuid() != 0 else {
+            print("  ⚠︎ 跳过：当前以 root 运行，chmod 只读目录挡不住 root 写入")
+            return
+        }
+        withTempDirectory { root in
+            // config.json 和 config.lock 同住一个目录（生产里就是 ~/.claudio/）。lock 文件**先建出来**：
+            // 生产里任何一次成功写盘都会留下它，而一个 r-x 目录里 open 一个**已存在**的文件仍然成功
+            // （目录写权限管的是新建/删除条目，不是打开现有条目）—— 所以 flock 拿得到，失败会如实落在
+            // 写那一步（.configWriteFailure），而不是提前变成 .lockFailed。
+            let claudioDir = root.appendingPathComponent("claudio", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: claudioDir, withIntermediateDirectories: true)
+            let configFile = claudioDir.appendingPathComponent("config.json")
+            let lockFile = claudioDir.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            writeFixture("", to: lockFile)
+
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")))
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            // 面板打开之后目录变成只读：内容还好好的，但原子写要在同目录落一个临时文件再 rename → 落不下去。
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o500], ofItemAtPath: claudioDir.path)
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: claudioDir.path)
+            }
+
+            controller.toggleMute(.stop)
+
+            guard case .unwritable(let reason) = controller.configState else {
+                expect(
+                    false,
+                    "内容合法但目录写不动，是一个**不同的**问题、一个**不同的**修法（chmod 目录，不是改"
+                        + "文件）—— configState 必须落到 .unwritable。得到 \(controller.configState)")
+                return
+            }
+            expect(
+                reason.contains(claudioDir.path),
+                "原因必须指名写不动的那个目录（用户照着它 chmod），得到 \(reason)")
+        }
+    }
+
+    // ── 反向对照：围栏的**内**侧不许被顺手拆掉 ────────────────────────────────────────────────
+    //
+    // 上面三条把「失败 → reload」钉死了。但一个偷懒的修法是「失败**一律** reload」—— 它能让上面三条全绿，
+    // 代价是每一次锁竞争（并发的 `claudio use` 持着 config.lock）都在主线程上白扫一遍整个包库。
+    // 下面两条就是逮它的：锁被别人持着时，`setEventEnabled` / `selectPack` 在**读 config 之前**就返回
+    // `.lockBusy`（`withNonBlockingLock` 包在最外层，EventEnabled.swift:84）—— config.json 一个字节都没读，
+    // 这次失败**什么也没揭示**，不许 reload。
+
+    suite("[反向对照-a] toggleMute 撞上 .lockBusy：不许 reload —— 哪怕磁盘上那份 config 此刻是坏的") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            // 磁盘上此刻是一份**坏** config —— 这是这条断言不恒真的全部理由：任何一次 reload 都会把
+            // configState 翻成 .malformed。它仍是 .operational，就**证明**了那次 reload 没有发生。
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
+            let holder = FileLock(path: lockFile.path)
+            expect(holder.tryLock(), "test setup：holder 必须先拿到 config.lock")
+
+            controller.toggleMute(.stop)
+            holder.unlock()
+
+            expect(
+                controller.muteError == .lockBusy,
+                "锁被持着时这次静音必须停在 .lockBusy（config.json 一个字节都没读）。得到 "
+                    + "\(String(describing: controller.muteError))")
+            expect(
+                afterFullReloadCalls == 0,
+                "一次锁竞争不许触发全库重扫 —— afterFullReload 被调了 \(afterFullReloadCalls) 次。"
+                    + "「失败了就 reload，反正更安全」不是保守，是把每一次并发写变成一次主线程全库扫描")
+            guard case .operational = controller.configState else {
+                expect(
+                    false,
+                    "锁没拿到 = 什么也没揭示 = 读模型不比点击之前更陈，configState 必须原样不动。它变成了"
+                        + " \(controller.configState) —— 说明失败分支无条件 reload 了（磁盘上那份坏 config"
+                        + "正是它被读进来的证据）")
+                return
+            }
+        }
+    }
+
+    suite("[反向对照-b] switchPack 撞上 .lockBusy：不许 reload —— 同上，坏 config 在盘上做证") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
+            writeFixture(
+                #"{ "id": "pack-b", "events": { "notification": "notification.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-b/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-b/notification.mp3"))
+
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile, environment: makeEnvironment(packsDir),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            writeFixture(#"{ "selected_pack": "pack-a", "master_volume": "loud" }"#, to: configFile)
+            let holder = FileLock(path: lockFile.path)
+            expect(holder.tryLock(), "test setup：holder 必须先拿到 config.lock")
+
+            controller.switchPack(to: "pack-b")
+            holder.unlock()
+
+            expect(
+                controller.packSwitchError == .lockBusy,
+                "锁被持着时这次切包必须停在 .lockBusy。得到 "
+                    + "\(String(describing: controller.packSwitchError))")
+            expect(
+                afterFullReloadCalls == 0,
+                "锁竞争的切包不许触发全库重扫 —— afterFullReload 被调了 \(afterFullReloadCalls) 次")
+            guard case .operational = controller.configState else {
+                expect(
+                    false,
+                    "锁没拿到 = 什么也没揭示，configState 必须原样不动。它变成了 \(controller.configState)"
+                        + " —— 说明切包的失败分支无条件 reload 了")
+                return
+            }
+        }
+    }
 }

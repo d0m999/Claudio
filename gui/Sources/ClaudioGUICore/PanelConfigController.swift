@@ -117,6 +117,16 @@ public final class PanelConfigController: ObservableObject {
 
     /// 切包，经 ``selectPack`` —— `claudio use` / `performFirstRunSetup` 用的**同一条**写路径。成功清
     /// `packSwitchError` 并全量 `reload()`；失败把 error 记进 `packSwitchError`（由面板渲染），绝不丢弃。
+    ///
+    /// **失败也可能要 `reload()`**（`/codex review` 第二条 [P1]）：上一版的失败分支只记 error 就完事，
+    /// 于是「打开有效面板 → 外部把 `master_volume` 改成字符串 → 点一张包卡」会让 `selectPack` 如实返回
+    /// `.configReadFailure`，而 `configState` 纹丝不动地停在 `.operational` —— 面板一边红字说 config 读不动，
+    /// 一边继续渲染四行活控件。判断交给 ``packSwitchNeedsFullReload(after:)``（纯函数、穷尽 switch、由
+    /// `PanelRefreshRouteSuite` 逐 case 钉死），与静音那一半 ``panelRefreshRoute(muteSucceeded:error:)``
+    /// 是同一种极性：只有**可证明磁盘没被碰过**的失败才跳过重读。
+    ///
+    /// 顺序：先记 error 再 `reload()` —— `reload()` 不碰 `packSwitchError`（只有一次**成功**的切包清它），
+    /// 所以红字不会被自己触发的这次重读抹掉。
     public func switchPack(to packID: String) {
         switch selectPack(
             packID, configFile: configFile, userPacksDirectory: environment.userPacksDirectory,
@@ -127,6 +137,7 @@ public final class PanelConfigController: ObservableObject {
             reload()
         case .failure(let error):
             packSwitchError = error
+            if packSwitchNeedsFullReload(after: error) { reload() }
         }
     }
 

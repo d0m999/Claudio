@@ -40,33 +40,117 @@ func runPanelRefreshRouteSuites() {
                 + "得到：\(panelRefreshRoute(muteSucceeded: false, error: .configMissing))")
     }
 
-    // 这一组单独逮一个变异：**任何失败都判 .full**（`if muteSucceeded { .enabledFlagsOnly }; return .full`）。
-    // 上面两条 suite 对它**全绿** —— 它们只问了「成功」和「.configMissing」，而这个变异在这两格上给的
-    // 答案都对。它错的是**剩下那些格**：每一次锁竞争（另一个 config.json 写者持锁，比如并发的
-    // `claudio use`）都会在主线程上扫一遍整个包库，而 config.json 根本没变（setEventEnabled 从不半写），
-    // 扫出来的东西与扫之前逐字节相同。「失败了就重扫一遍，反正更安全」不是保守，是把一次锁竞争变成一次
-    // 全库磁盘扫描。
-    suite("panelRefreshRoute：其他失败 → 不重扫（.noRefresh）—— config.json 原封未动，扫了也白扫") {
-        let untouchedFailures: [(name: String, error: SetEventEnabledError)] = [
+    // ── 失败一侧的**极性**（`/codex review` [P1]，本轮修复）────────────────────────────────────
+    //
+    // 上一版这里只有一条 suite：「其他失败 → .noRefresh」，把 `.configReadFailure` / `.configWriteFailure`
+    // 一并断言成「不重扫」，理由写的是「config.json 逐字节未变（setEventEnabled 从不半写）」。
+    //
+    // **那条理由把「我们没写」偷换成了「文件没变」。** `.configReadFailure` 的字面意思就是：**别人**在
+    // 面板打开之后把那份文件改坏了。文件变了，只是不是被我们变的 —— 读模型**已经陈了**，而旧规格让它
+    // 停在 `.operational`，面板于是在一份它刚刚亲口承认读不动的 config 上继续顶着四行活控件。
+    //
+    // 变异台账 12/12 全绿，一条也没逮到它 —— 因为台账验的是「实现符合规格」，而**错的是规格**。这就是
+    // 变异测试的天花板：它永远告诉不了你，你钉死的那份规格本身是错的。
+    //
+    // 极性因此倒过来：`.noRefresh` 是一张「**可证明**磁盘没被碰过」的**围栏**白名单（只有锁失败配得上），
+    // 其余一律 `.full`。下面两条 suite 分守围栏的两侧。
+
+    // 围栏**内**侧：只有这两条配得上 .noRefresh。
+    //
+    // 这一组逮的变异是：**任何失败都判 .full**（`if muteSucceeded { .enabledFlagsOnly }; return .full`）。
+    // 它在「成功」「.configMissing」「.configReadFailure」那些格上给的答案全对，只有这两格是错的 ——
+    // 而错的代价是真的：每一次锁竞争（并发的 `claudio use` 持着 config.lock）都会在主线程上扫一遍整个
+    // 包库，扫出来的东西与扫之前逐字节相同。「失败了就重扫，反正更安全」不是保守，是把一次锁竞争变成
+    // 一次全库磁盘扫描。
+    suite("panelRefreshRoute：锁失败 → 不重扫（.noRefresh）—— 锁都没拿到，磁盘一个字节没碰") {
+        let provablyUntouched: [(name: String, error: SetEventEnabledError)] = [
             ("lockBusy", .lockBusy),
             ("lockFailed", .lockFailed(errno: 35)),
-            ("configReadFailure", .configReadFailure(reason: "unreadable")),
-            ("configWriteFailure", .configWriteFailure(reason: "disk full")),
         ]
-        for failure in untouchedFailures {
+        for failure in provablyUntouched {
             expect(
                 panelRefreshRoute(muteSucceeded: false, error: failure.error) == .noRefresh,
-                "`.\(failure.name)` 之后 config.json 逐字节未变（setEventEnabled 从不半写）—— 读模型"
-                    + "没有变陈，重扫磁盘扫不出任何新东西。解释由 errorNotice 出，不由一次全库扫描出。"
-                    + "得到：\(panelRefreshRoute(muteSucceeded: false, error: failure.error))")
+                "`.\(failure.name)`：锁根本没拿到 → config.json 没读、没写，读模型不比点击之前更陈。"
+                    + "重扫扫不出任何新东西，只会把一次锁竞争变成一次主线程全库扫描。得到："
+                    + "\(panelRefreshRoute(muteSucceeded: false, error: failure.error))")
         }
-        // ⚠️ `SetEventEnabledError` 有关联值，不是 `CaseIterable` —— 这张表是**手抄**的。将来给它加了
-        // 第五个 case 而忘了抄进来，这条 suite 不会红（它只遍历它认得的四个）。下面那条负向断言是这张
-        // 手抄表的兜底：**唯一**能路由到 .full 的错误只许是 .configMissing。
-        expect(
-            panelRefreshRoute(muteSucceeded: false, error: nil) == .noRefresh,
-            "失败但没记下错误（不该发生：EventMuteController 在返回 false 的同一格里必写 lastError）——"
-                + "缺省也必须是「什么都不做」，不能是 .full：一条没有原因的失败不该触发全库重扫")
+    }
+
+    // 围栏**外**侧：其余每一条都必须 .full —— 这一组是本轮 [P1] 的正面钉子。
+    //
+    // 逮的变异正是**修复之前的那行代码**：`error == .configMissing ? .full : .noRefresh`。它对
+    // `.configMissing` 那一格答对，对下面另外三格全答错。这三条断言里任何一条被删，那行旧代码就能原样
+    // 复活而测试全绿 —— 所以三条都必须在，不许合并成一条「至少有一个是 .full」。
+    suite("panelRefreshRoute：config 已被外部改动 / 原因不明 → 必须全量重读（.full）") {
+        let revealsStaleReadModel: [(name: String, error: SetEventEnabledError?, becomes: String)] = [
+            ("configMissing", .configMissing, "configState 必须重路由到 .needsPack"),
+            (
+                "configReadFailure", .configReadFailure(reason: "master_volume is a string"),
+                "configState 必须重路由到 .malformed —— 这是本轮 [P1] 的第一条"
+            ),
+            (
+                "configWriteFailure", .configWriteFailure(reason: "directory not writable"),
+                "configState 必须重路由到 .unwritable —— 这是本轮 [P1] 的第一条"
+            ),
+            (
+                "nil（失败却没记下错误）", nil,
+                "不知道 = 去读盘。EventMuteController 的契约不该允许这一格出现，但缺省必须落在安全侧"
+            ),
+        ]
+        for failure in revealsStaleReadModel {
+            expect(
+                panelRefreshRoute(muteSucceeded: false, error: failure.error) == .full,
+                "`.\(failure.name)` 证明磁盘上那份 config 已经不是面板打开时的那份了（或我们压根不知道）"
+                    + " —— \(failure.becomes)。判成 .noRefresh = 面板顶着四行活控件、在一份它刚刚亲口"
+                    + "承认读不动的 config 上继续撒谎，直到用户重开 popover 才自愈。得到："
+                    + "\(panelRefreshRoute(muteSucceeded: false, error: failure.error))")
+        }
+    }
+
+    // ⚠️ 上面两张表是**手抄**的（`SetEventEnabledError` 有关联值，不是 `CaseIterable`）。守住「将来加了
+    // 第六个 case 却忘了归类」的**不是**这两张表 —— 是 `panelRefreshRoute` 里那个**穷尽 switch**：
+    // `ClaudioCore` 与 `ClaudioGUICore` 同包编译（非 resilient），加一个 case 而不在那个 switch 里归类，
+    // **编译不过**。这道围栏由编译器守，不由断言守 —— 所以这里不再写一条「唯一能路由到 .full 的只许是
+    // X」的负向兜底：那种兜底恰恰是上一版把极性写反的地方（它把白名单钉死成了「我认得的那一个」）。
+
+    // ── 切包那一半（`/codex review` 第二条 [P1]）────────────────────────────────────────────────
+    //
+    // 静音和切包是面板仅有的两条 config 写路径。它们撞上同一份被外部改坏的 config.json 时必须给出同一个
+    // 答案 —— 上一版切包的失败分支**只记 error、从不 reload**，于是同一个 [P1] 在这条路上原封不动地
+    // 复发了一遍。同一种极性，同样穷尽的 switch。
+    suite("packSwitchNeedsFullReload：只有「可证明磁盘没被碰过」的失败才跳过重读") {
+        let skipsReload: [(name: String, error: UseError)] = [
+            ("lockBusy", .lockBusy),
+            ("lockFailed", .lockFailed(errno: 35)),
+            ("invalidPackID", .invalidPackID("../etc")),
+        ]
+        for failure in skipsReload {
+            expect(
+                !packSwitchNeedsFullReload(after: failure.error),
+                "`.\(failure.name)`：碰盘之前就被拒了（或锁没拿到）—— 什么也没揭示，重扫是纯浪费。"
+                    + "得到 needsFullReload=\(packSwitchNeedsFullReload(after: failure.error))")
+        }
+
+        let revealsStale: [(name: String, error: UseError, why: String)] = [
+            (
+                "packNotFound", .packNotFound("ghost"),
+                "用户点的那张卡对应的包目录不在磁盘上 → packCards 已经陈了（画廊挂着一张幽灵卡）"
+            ),
+            (
+                "configReadFailure", .configReadFailure(reason: "master_volume is a string"),
+                "config.json 被外部改坏了 → configState 必须落到 .malformed"
+            ),
+            (
+                "configWriteFailure", .configWriteFailure(reason: "directory not writable"),
+                "config.json 的目录写不动了 → configState 必须落到 .unwritable"
+            ),
+        ]
+        for failure in revealsStale {
+            expect(
+                packSwitchNeedsFullReload(after: failure.error),
+                "`.\(failure.name)`：\(failure.why) —— 不 reload = 面板红字说切包失败，四行活控件却原样"
+                    + "留在屏幕上。得到 needsFullReload=\(packSwitchNeedsFullReload(after: failure.error))")
+        }
     }
 
     suite("panelRefreshRoute：成功压过陈旧的 error —— 不许被上一次失败的残留改道") {
