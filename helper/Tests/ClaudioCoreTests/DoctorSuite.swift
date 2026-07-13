@@ -1231,4 +1231,57 @@ func runDoctorSuites() {
                     + "自己猜。得到：\(message)")
         }
     }
+
+    // MARK: - `.malformed` 的严重级**只由 case 决定，与 reason 的文本内容无关**
+    //
+    // ## 它逮的那一刀（红队 9cccc9c，worktree 实测存活）
+    //
+    // 有人往 `configRewritabilityResult` 的 `case .malformed(let reason)` 里塞一句
+    // `guard reason.contains("events") else { return .ok「可安全重写」 }` —— 只有 reason 里带 "events"
+    // 的畸形才报 warning，其余（`master_volume` 是字符串、顶层不是对象、`selected_pack` 缺失……）一律
+    // 谎报为「✓ config.json 可安全重写」。两套测试**全绿**：整个套件里**唯一**碰过 malformed doctor
+    // 渲染的测试（上面第 806 行那条）恰好用的是 `{"events":{"stop":1}}`，reason 含 "events"，落进未改动的
+    // warning 分支，把变异完整掩盖。用户后果：手改 `master_volume` 成非法值后，App 里静音 / 切包永久
+    // 失效、声音照响，他跑 `doctor` 求诊断，doctor 打绿勾担保机器健康 —— 他永远找不到该修的那份文件。
+    //
+    // 这条病的形状是老熟人：**一个测试的覆盖范围比它的名字小**。上面那条叫「畸形 config → warning」，
+    // 它守的却只是「**events 畸形**的 config → warning」。修法不是再补一个 case，是把不变式本身钉死：
+    // doctor 对 config 的严重级是 `probeConfigRewritable` 的**返回 case** 的函数，**不是** reason 字符串
+    // 的函数。下面喂一组 reason 两两不同的畸形，逐一验「→ warning、文案是『畸形』那句、且绝不是
+    // 『可安全重写』」——任何一条「按 reason 文本放行」的旁路，都会在**非 events 的那几份**上当场变红。
+    suite("configRewritabilityResult: 任意 reason 的畸形 config 都必须 warning，绝不因 reason 文本翻成 ok") {
+        // (标签, config.json 字节)。三份的 malformed reason 各不相同，且**都不含 "events"** 中的两份，
+        // 正是掩盖那条变异的 events fixture 照不到的地方。
+        let malformedConfigs: [(label: String, bytes: String)] = [
+            ("master_volume 是字符串", #"{ "selected_pack": "x", "master_volume": "0.5" }"#),
+            ("顶层不是 JSON 对象", #"[1, 2, 3]"#),
+            ("events 畸形（与第 806 行同类，确保围栏也盖住它）", #"{ "selected_pack": "x", "events": { "stop": 1 } }"#),
+        ]
+        for fixture in malformedConfigs {
+            withTempDirectory { root in
+                let configFile = root.appendingPathComponent("config.json")
+                writeFixture(fixture.bytes, to: configFile)
+
+                // 前提：这份 fixture 确实被探针判成 .malformed（否则下面验的是别的东西）。
+                guard case .malformed = probeConfigRewritable(configFile: configFile) else {
+                    expect(
+                        false,
+                        "[\(fixture.label)] 本该是 .malformed，探针却没这么说 —— 这条围栏喂错了输入，"
+                            + "得到：\(probeConfigRewritable(configFile: configFile))")
+                    return
+                }
+
+                let result = configRewritabilityResult(configFile: configFile)
+                expect(
+                    result.severity == .warning,
+                    "[\(fixture.label)] 畸形 config 必须报 warning，与 reason 里写了什么**无关** —— "
+                        + "severity 一旦开始看 reason 文本（比如「不含 events 就放行」），doctor 就会对"
+                        + "一整类畸形谎报健康。得到 severity：\(result.severity)")
+                expect(
+                    result.message.contains("畸形") && !result.message.contains("可安全重写"),
+                    "[\(fixture.label)] 文案必须是「畸形 …一直失败」那句，绝不能是「✓ 可安全重写」—— "
+                        + "后者是对 fail-closed 写路径的假担保。得到：\(result.message)")
+            }
+        }
+    }
 }

@@ -785,9 +785,23 @@ func runViewWiringSuites() {
     // 找（见 `functionBody(_:in:)`）。
     //
     // 切片仍然守不住把两个分支**对调**（切片里 `.configMissing` 与 `refresh()` 一个字符都不少）——
-    // 所以那个判断已经**不在这里了**：它搬进了 `ClaudioGUICore.panelRefreshRoute(muteSucceeded:error:)`，
-    // 由 `PanelRefreshRouteSuite` 用行为断言钉死。这里只剩「三条路各接哪个方法」—— 那才是文本绊线
-    // 够得着的东西。两条测试各守一半，谁也不假装守到了对方那一半。
+    // 所以那个**判断**已经不在这里了：它搬进了 `ClaudioGUICore.panelRefreshRoute(muteSucceeded:error:)`，
+    // 由 `PanelRefreshRouteSuite` 用行为断言钉死。
+    //
+    // ⚠️⚠️⚠️ 但**只有判断**搬走了、被行为断言守住了。判断**之后做的事**仍然住在 `PanelView`，红队
+    // 9cccc9c 在 worktree 里实测了 4 条 GUI 存活变异（改坏行为、两套测试全绿），全部落在这一面：
+    //   · `refresh()` 函数体删掉 configState 重载（**执行**：路由对了、refresh 也调了，但它没干活）；
+    //   · switch 前插 `return` 让某条 case 成死代码（**可达性**：切片要的字符串一个不少，存在 ≠ 可达）；
+    //   · `onToggleMute: {}` 剪断按钮→handler（**接线**：下面那条新断言补了它的存在性，但仅存在性）；
+    //   · `setEnabled(enabled: currentlyEnabled)` 去掉 `!`（**翻转**：切片只查 switch，翻转逻辑裸奔）。
+    // 下面这一整条 suite（连同 `functionBody` 切片器）能守的是「代码在不在、在切片里长什么样」，
+    // **守不住**「代码做什么 / 可不可达 / 运行期接线对不对」。这是文本绊线的强度天花板，不是可以再加
+    // 几条 contains 补上的缺口 —— 每加一条 contains，红队下一轮还能找到第 N+1 个 PanelView 里测不到的
+    // 东西（白名单永远不完整）。根治是把这些方法和状态搬进可实例化的 view-model。见 TODOS 台账那条 P2。
+    //
+    // 所以这里的诚实定位是：**这条 suite 守的是「静音路由的接线文本还在、且接的是对的方法名」，
+    // 不是「静音在真实磁盘上行为正确」**。后者由 `PanelRefreshRouteSuite`（判断那半）+ 将来的
+    // view-model 化（执行那半）合起来才谈得上。别把这条 suite 全绿读成「面板行为被守住了」。
     suite("PanelView：config 不可用时必须换态，而不是继续渲染活控件（D23 定稿④，四条接线逐条钉死）") {
         guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "读不到 PanelView.swift")
@@ -837,6 +851,21 @@ func runViewWiringSuites() {
             "`.noRefresh`（.lockBusy / 读写失败：config.json 逐字节未变）必须什么都不做 —— 接上任何一种"
                 + "刷新，都是把一次锁竞争变成一次全库磁盘扫描，而扫出来的东西与扫之前完全相同。"
                 + "得到的函数体：\(wiring)")
+
+        // 按钮 → handler 的那根线：`toggleMute` 函数体再对，也得有人**调**它。红队 9cccc9c 实测把
+        // `onToggleMute: { toggleMute(row.event) }` 剪成 `onToggleMute: {}`，toggleMute 函数体一字未动、
+        // 上面每条切片断言照绿，而四行静音钮点了毫无反应（连失败都没有）。这条补上那根线的存在性。
+        //
+        // ⚠️ 仍是**存在性**级：它证明「body 里写着把按钮接到 toggleMute」，证明不了这根线在运行期真的
+        // 接通了（那是 SwiftUI body 的接线，纯逻辑测试到不了，只有 UI / 快照测试够得着 —— 见本文件
+        // 头部与 `PanelRefreshRoute` 文档里那条天花板）。它挡的是「线被剪断」，不是「线接错了地方」。
+        let collapsed = collapsingWhitespace(panel)
+        expect(
+            collapsed.contains("onToggleMute: { toggleMute(row.event) }"),
+            "operationalPanel 的 EventRowView 必须把 onToggleMute 接到 `toggleMute(row.event)` —— 剪成"
+                + " `onToggleMute: {}` 之类，四行事件的静音钮就变成点了没反应的死键，而 toggleMute 的"
+                + "函数体测试全绿（它还在，只是没人调）。这条只挡『线被剪断』；线接错地方 / 运行期没接通"
+                + "仍要靠 view-model 化才测得到（见 TODOS）")
 
         expect(
             panel.contains("error != .configMissing"),

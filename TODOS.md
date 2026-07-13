@@ -457,9 +457,23 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 
 变异台账（实测，12/12 全红）：毒瘤本尊、分支对调、路由反相、任何失败都判 `.full`、成功被陈旧 error 改道、视图就地重推、`toggleMute` 改名、doctor 文案倒退、毒源复活、切片起点跑到文件头、闭合括号差一、找不到时交出空串。
 
-**剩下的仍然欠着**：`.onChange` / `applyFirstFocus` / `switch configState` 那几条**仍然只有文本绊线**（只是现在切片得更准），本条**不关闭**。天花板没变：判断留在 `PanelView` 里，就只能靠文本守。
+**⚠️⚠️ 2026-07-13 二次更正（红队 9cccc9c，worktree 实测）：上面「三处已修」这个说法本身又比覆盖范围大。** 修的是**判断**那一半（`panelRefreshRoute` 纯函数 + 行为断言），这半是真的、扛住了攻击。但**判断之后的一切**仍住在 `PanelView`（测不到），红队对 9cccc9c 发动六视角攻击，实测 **5 条存活变异**（改坏真实行为、两套测试全绿、逐条独立复现）：
 
-**Effort:** S
+| # | 变异 | 面 | 用户后果 | 现状 |
+|---|---|---|---|---|
+| 1 | `refresh()` 函数体删 `configState = loadPanelConfig(...)` | 执行 | config 被外部删后面板永久失明，四行活控件挂在不存在的文件上 | **仍存活**（text-slice 守不住函数体） |
+| 2 | switch 前插 `if …==.enabledFlagsOnly { return }` 让那条 case 成死代码 | 可达性 | 静音成功但开关视觉不动，面板对静音状态撒谎 | **仍存活**（存在≠可达） |
+| 3 | `onToggleMute: {}` 剪断按钮→handler | 接线 | 四行静音钮点了毫无反应，连失败都没有 | **已加存在性检查**（挡「线被剪」，不挡「接错/没接通」） |
+| 4 | `setEnabled(enabled: currentlyEnabled)` 去掉 `!` | 翻转 | 静音钮变死键，翻转逻辑裸奔 | **仍存活**（切片只查 switch，不查翻转行） |
+| 5 | doctor `.malformed` 对不含 "events" 的 reason 打绿勾 | doctor | master_volume 畸形→静音永久失效、声音照响，doctor 谎报健康 | **已行为级修复**（`configRewritabilityResult` 任意 reason→warning 围栏） |
+
+#5 是 helper 纯逻辑，已真修（`DoctorSuite` 参数化围栏，实测那条变异打出 4 红）。#3 补了存在性检查（`ViewWiringSuite` 断言 `onToggleMute: { toggleMute(row.event) }`，实测变异变红）。
+
+**#1 / #2 / #4 三条仍存活，本条不关闭** —— 它们是**同一个根因的三个切面**：`configState` / `eventRows` 与操作它们的方法（`toggleMute` / `refresh` / `refreshEnabledFlags`）都住在 `PanelView`，text-slice 只能守「代码在不在」，守不住「执行 / 可达 / 翻转」。这是文本绊线的**强度天花板**，不是再加几条 contains 能补的缺口（白名单永远不完整，红队下一轮还能找第 N+1 个）。
+
+**根治 = view-model 化**：把这组状态和方法搬进一个可实例化的 `@MainActor final class`（同 `OnboardingViewModel` / `AudioImportViewModel` / `EventMuteController` 的既有做法），放进 `ClaudioGUICore`。测试能真的 `new` 它、喂真磁盘、调 `toggleMute`、断言 `configState` 真的从 `.operational` 翻到 `.needsPack`、`eventRows` 真的重算 —— #1/#2/#4 全部**行为级**关闭。唯一仍关不掉的是 `PanelView.body` 把按钮绑到 `model.toggleMute` 那最外层一根线（SwiftUI body 接线，纯逻辑测试到不了，只有 UI/快照测试够得着，而本机 CommandLineTools 无 XCTest）—— 那一根靠 #3 的存在性检查兜底。
+
+**Effort:** M（view-model 抽取是一次真重构，PanelView 与 onboarding/dropZone/rowImport/announcer/focus 多个 view-model 纠缠）
 **Priority:** P2
 **Depends on:** None
 
