@@ -132,6 +132,22 @@ func runPanelConfigControllerSuites() {
                         + "\(String(describing: controller.eventRows.first(where: { $0.event == event })?.coverage))")
                 }
             }
+
+            // ④ eventRows.enabled 的**两个方向**都钉（红队 round5）：被 toggle 的 .notification 那行读模型必须
+            //    是 disabled，**没被碰的 .stop 那行必须原样 enabled**。上面 ① 查的是**磁盘**（onDisk.isEnabled），
+            //    这里查的是**读模型**（eventRows.enabled，面板真正渲染的那个位）——两条正交。红队实测：把
+            //    reloadEnabledFlags 的 `enabled: config.isEnabled(row.event)` 改成常量 `false`，磁盘/config 全对、
+            //    但 eventRows 里**四行全变 muted 外观** → 点一个静音钮、面板谎报「全部静音」。而此前所有 toggleMute
+            //    测试只往 true→false 一个方向翻，常量 false 从「本应保持 enabled」这个方向的盲区溜过。
+            expect(
+                controller.eventRows.first(where: { $0.event == .notification })?.enabled == false,
+                "被 toggle 的 .notification 那行读模型 enabled 必须是 false。得到 "
+                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .notification })?.enabled))")
+            expect(
+                controller.eventRows.first(where: { $0.event == .stop })?.enabled == true,
+                "**没被碰**的 .stop 那行读模型 enabled 必须**原样还是 true** —— 它变 false = reloadEnabledFlags 把"
+                    + "非目标行的 enabled 也算错了（红队实测：常量 false → 点一个静音、面板四行全显示 muted）。"
+                    + "得到 \(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.enabled))")
         }
     }
 
@@ -212,6 +228,18 @@ func runPanelConfigControllerSuites() {
             let controller = PanelConfigController(
                 configFile: configFile, lockFile: lockFile,
                 environment: makeEnvironment(root.appendingPathComponent("packs")))
+
+            // 构造后、**任何 switchPack 之前**：packSwitchError 必须是 nil（红队 round5）。
+            // 这是六个 @Published 里唯一 init 值此前无断言守的（muteError 的 init nil 有断言、packSwitchError
+            // 没有），而它比 packCards 危险：reload() **从不清** packSwitchError（只有成功 switchPack 清），
+            // 所以 init 若非 nil，一条假的「切包失败」红字会**穿过每一次 popover 重开 / reload 存活**，直到
+            // 用户碰巧成功切一次包。红队实测：把 init 的 `packSwitchError = nil` 改成 `.lockBusy`，下面每条
+            // 断言都恒过（它们全在至少一次 switchPack 之后读），这条是唯一逮得住它的。
+            expect(
+                controller.packSwitchError == nil,
+                "刚构造、还没切过任何包时 packSwitchError 必须是 nil —— 非 nil = 首次开面板就挂一条假的"
+                    + "「切包失败」红字，且 reload 从不清它、会穿过每次重开存活。得到 "
+                    + "\(String(describing: controller.packSwitchError))")
 
             // 切到一个磁盘上根本不存在的包 → selectPack 失败（.packNotFound / 校验拒绝）。
             controller.switchPack(to: "this-pack-does-not-exist")
