@@ -46,10 +46,28 @@ public final class PanelConfigController: ObservableObject {
     /// 的形状（静音那一半的失败就住在那里）。绝不静默吞错：切包失败必须如实上报，不能像旧代码那样
     /// `if case .success = result { … }` 把 error 整个丢掉。
     @Published public private(set) var packSwitchError: UseError?
+    /// 上一次静音写盘的失败（`nil` 表示成功 / 还没点过）——面板据此渲染红色 errorNotice。
+    ///
+    /// ## 为什么这条 error 住在这里，而不是让面板直接读 `EventMuteController.lastError`（红队 b86ec0a）
+    ///
+    /// 上一版 `muteController` 是**注入**的：`PanelView` 持一个 `@StateObject muteController`（面板渲染
+    /// errorNotice 读它的 `lastError`），又把**同一个实例**传进这个 controller（`toggleMute` 调它写盘）。
+    /// 红队实测：把注入实参换成一个**新**实例（`muteController: EventMuteController(...)` 而不是共享的那个）——
+    /// 面板读实例 A、controller 写实例 B，一次静音**失败**（`.lockBusy`）的错误记进 B，面板读 A 恒 nil →
+    /// errorNotice **永不渲染** = 静默吞错，两套测试全绿。init 注释亲口警告了「幽灵实例」，却只用注释挡，
+    /// 没用**结构**挡。
+    ///
+    /// 现在结构上挡死：`muteController` 由这个 controller **自己构造、自己独占**（下面 init 里），外部
+    /// **递不进来第二个实例**。静音失败经这里的 `muteError`（`@Published`）republish，面板读的是
+    /// `panelModel.muteError`（经 `panelModel` 这个 `@StateObject` 观测）—— 面板与写盘看的是同一个 error
+    /// 源，分叉在类型层面不可能。
+    @Published public private(set) var muteError: SetEventEnabledError?
 
     private let configFile: URL
     private let lockFile: URL
     private let environment: AudioImportEnvironment
+    /// 这个 controller **独占**它 —— 不注入（见 ``muteError`` 的文档：注入会开「幽灵实例」的口）。
+    /// 拿 `lockFile`（= `config.lock`）构造，与切包写路径守同一把锁（锁分离 D9）。
     private let muteController: EventMuteController
     /// 一次**全量** reload 之后，config 读模型之外还要做的跨-view-model 协调（onboarding 重探 + 两组
     /// import view-model `retarget` 到新包）。参数是刚重载出来的 config —— retarget 要用它的 `selectedPack`。
@@ -59,13 +77,13 @@ public final class PanelConfigController: ObservableObject {
         configFile: URL,
         lockFile: URL,
         environment: AudioImportEnvironment,
-        muteController: EventMuteController,
         afterFullReload: @escaping @MainActor (ClaudioConfig) -> Void = { _ in }
     ) {
         self.configFile = configFile
         self.lockFile = lockFile
         self.environment = environment
-        self.muteController = muteController
+        // 独占构造，不注入 —— 结构性堵死「面板读一个实例、controller 写另一个」的幽灵分叉（见 muteError 文档）。
+        self.muteController = EventMuteController(configFile: configFile, lockFile: lockFile)
         self.afterFullReload = afterFullReload
 
         let loadedState = loadPanelConfig(from: configFile)
@@ -76,6 +94,7 @@ public final class PanelConfigController: ObservableObject {
             packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
         self.packCards = availablePacks(config: loadedConfig, environment: environment)
         self.packSwitchError = nil
+        self.muteError = nil
     }
 
     /// 把 `event` 的静音位翻到当前值的**反面**，经 ``EventMuteController`` 写盘，再按结果路由刷新。
@@ -86,6 +105,9 @@ public final class PanelConfigController: ObservableObject {
     public func toggleMute(_ event: Event) {
         let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
         let succeeded = muteController.setEnabled(event, enabled: !currentlyEnabled)
+        // republish：面板读 `panelModel.muteError`，不直接读 muteController（那会开幽灵实例的口，见 muteError 文档）。
+        // setEnabled 成功把 lastError 清 nil、失败记下错误，所以此刻读它就是这次写盘的结果。
+        muteError = muteController.lastError
         switch panelRefreshRoute(muteSucceeded: succeeded, error: muteController.lastError) {
         case .enabledFlagsOnly: reloadEnabledFlags()
         case .full: reload()

@@ -18,7 +18,6 @@ import SwiftUI
 /// unit-tested — this file's own job is ONLY correct composition, not re-deciding anything.
 public struct PanelView: View {
     @StateObject private var onboardingViewModel: OnboardingViewModel
-    @StateObject private var muteController: EventMuteController
     @StateObject private var dropZoneViewModel: AudioImportViewModel
     /// 「这一句刚说过」的去重器（T17g）—— 让「一趟 update pass ≤ 一条播报」在结构上成立。
     /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
@@ -152,7 +151,6 @@ public struct PanelView: View {
         let onboardingViewModel = OnboardingViewModel(
             environment: onboardingEnvironment,
             actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment))
-        let muteController = EventMuteController(configFile: configFile, lockFile: lockFile)
 
         let loadedConfig = loadPanelConfig(from: configFile).resolvedConfig
         let dropZoneViewModel = AudioImportViewModel(
@@ -165,7 +163,6 @@ public struct PanelView: View {
         }
 
         _onboardingViewModel = StateObject(wrappedValue: onboardingViewModel)
-        _muteController = StateObject(wrappedValue: muteController)
         _dropZoneViewModel = StateObject(wrappedValue: dropZoneViewModel)
         _announcer = StateObject(wrappedValue: PanelAnnouncer())
         _rowImportViewModels = State(initialValue: perRow)
@@ -179,7 +176,6 @@ public struct PanelView: View {
                 configFile: configFile,
                 lockFile: lockFile,
                 environment: audioEnvironment,
-                muteController: muteController,
                 afterFullReload: { reloadedConfig in
                     onboardingViewModel.refresh()
                     dropZoneViewModel.retarget(to: reloadedConfig.selectedPack)
@@ -560,7 +556,7 @@ public struct PanelView: View {
             // on this exact failure, and that empty state (`needsPackNotice`) IS the explanation.
             // Rendering its `description` too would show a redundant, never-QA'd string
             // underneath a card that already says "先选包".
-            if let error = muteController.lastError, error != .configMissing {
+            if let error = panelModel.muteError, error != .configMissing {
                 errorNotice(error.description)
             }
             if let error = panelModel.packSwitchError {

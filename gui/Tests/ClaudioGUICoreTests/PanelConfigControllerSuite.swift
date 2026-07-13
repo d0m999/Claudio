@@ -41,8 +41,7 @@ func runPanelConfigControllerSuites() {
             writeFixture(operationalConfigBytes, to: configFile)
             let controller = PanelConfigController(
                 configFile: configFile, lockFile: lockFile,
-                environment: makeEnvironment(root.appendingPathComponent("packs")),
-                muteController: EventMuteController(configFile: configFile, lockFile: lockFile))
+                environment: makeEnvironment(root.appendingPathComponent("packs")))
 
             // 前提：stop 当前 enabled（events 空 → opt-out 默认 true）。
             expect(controller.config.isEnabled(.stop), "前提：stop 初始必须是 enabled")
@@ -87,7 +86,6 @@ func runPanelConfigControllerSuites() {
             let controller = PanelConfigController(
                 configFile: configFile, lockFile: lockFile,
                 environment: makeEnvironment(root.appendingPathComponent("packs")),
-                muteController: EventMuteController(configFile: configFile, lockFile: lockFile),
                 afterFullReload: { afterFullReloadCalls.append($0.selectedPack) })
 
             // 前提：初始是 .operational（四行活控件的态）。
@@ -131,7 +129,6 @@ func runPanelConfigControllerSuites() {
             let controller = PanelConfigController(
                 configFile: configFile, lockFile: lockFile,
                 environment: makeEnvironment(root.appendingPathComponent("packs")),
-                muteController: EventMuteController(configFile: configFile, lockFile: lockFile),
                 afterFullReload: { _ in afterFullReloadCalls += 1 })
 
             controller.toggleMute(.stop)
@@ -153,8 +150,7 @@ func runPanelConfigControllerSuites() {
             writeFixture(operationalConfigBytes, to: configFile)
             let controller = PanelConfigController(
                 configFile: configFile, lockFile: lockFile,
-                environment: makeEnvironment(root.appendingPathComponent("packs")),
-                muteController: EventMuteController(configFile: configFile, lockFile: lockFile))
+                environment: makeEnvironment(root.appendingPathComponent("packs")))
 
             // 切到一个磁盘上根本不存在的包 → selectPack 失败（.packNotFound / 校验拒绝）。
             controller.switchPack(to: "this-pack-does-not-exist")
@@ -163,6 +159,77 @@ func runPanelConfigControllerSuites() {
                 controller.packSwitchError != nil,
                 "一次失败的切包必须把 error 记进 packSwitchError（面板据此上报）—— 它是 nil = error 被"
                     + "静默丢弃了（旧代码 `if case .success = result { … }` 的老毛病）。得到 nil")
+        }
+    }
+
+    // switchPack **成功**路径（红队 b86ec0a：上一版这条路径整条无测试，逮到三条存活变异）。一条测试
+    // 同时钉死三样，各对应红队的一条：
+    //   #1 删 `packSwitchError = nil` → fail→success 序列里旧错不清 → 假警报挂在换过包的面板上；
+    //   #3 删成功分支的 `reload()`  → config 写盘了、读模型停在旧包 → 面板/画廊显示旧包直到重开；
+    //   #5 reload() 两行对调       → afterFullReload 拿到**旧** config → retarget 到旧包成空操作，
+    //                                拖拽/绑定写进旧包目录（用真 config 的 selectedPack 值当场逮住）。
+    suite("PanelConfigController.switchPack 成功：清旧错 + 全量 reload + afterFullReload 收到**新**包（红队 b86ec0a #1/#3/#5）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packsDir = root.appendingPathComponent("packs")
+            // 初始选中 pack-a；磁盘上另有一个 pack-b 可切过去（两个都建出真目录 + manifest，
+            // 好让 selectPack 的 resolvePackDirectory 放行）。
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
+            writeFixture(
+                #"{ "id": "pack-b", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-b/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-b/stop.mp3"))
+
+            var afterFullReloadConfigs: [ClaudioConfig] = []
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(packsDir),
+                afterFullReload: { afterFullReloadConfigs.append($0) })
+
+            // 先制造一次失败，让 packSwitchError 非 nil（#1 要观测的正是它随后被清）。
+            controller.switchPack(to: "this-pack-does-not-exist")
+            expect(
+                controller.packSwitchError != nil,
+                "前提：一次失败切包必须先把 packSwitchError 置上（否则下面『清错』无从观测）")
+
+            // 成功切到 pack-b。
+            controller.switchPack(to: "pack-b")
+
+            // #1：成功必须**清掉**上一次失败留下的旧错 —— 否则「切包失败…」红字挂在一张已经成功换过包
+            // 的面板上（假警报）。删掉成功分支的 `packSwitchError = nil` → 这条红。
+            expect(
+                controller.packSwitchError == nil,
+                "成功切包必须清掉上一次失败留下的 packSwitchError —— 它还在 = 假警报挂在换过包的面板上"
+                    + "（违反『面板说实话』）。得到 \(String(describing: controller.packSwitchError))")
+
+            // #3：成功必须**全量 reload** —— config/configState/eventRows 反映新包。删掉成功分支的
+            // `reload()` → config 停在 pack-a（尽管 selectPack 已把 pack-b 写盘）→ 这条红。
+            expect(
+                controller.config.selectedPack == "pack-b",
+                "成功切包后 controller.config 必须是 pack-b（reload 重读了刚写盘的 config）—— 它还是 pack-a"
+                    + " = 成功分支没 reload，面板/画廊继续显示旧包直到重开 popover。得到 "
+                    + "\(controller.config.selectedPack)")
+            guard case .operational(let onDisk) = controller.configState else {
+                expect(false, "成功切包后 configState 必须是 .operational(pack-b)，得到 \(controller.configState)")
+                return
+            }
+            expect(onDisk.selectedPack == "pack-b", "configState 里的 config 也必须是 pack-b，得到 \(onDisk.selectedPack)")
+
+            // #5：afterFullReload 必须收到**重载后**的新 config（pack-b），不是重载前的旧 config（pack-a）。
+            // reload() 把两行对调（afterFullReload 排到 config 重载之前）→ 闭包拿到 pack-a → retarget(pack-a)
+            // 在 A→B 之后是空操作（guard newPackID != packID），drop zone / 行内 import 全停在旧包 A，
+            // 拖拽/绑定写进包 A 目录。这条断言直接读闭包收到的 selectedPack 值，把那次对调当场逮住。
+            expect(
+                afterFullReloadConfigs.last?.selectedPack == "pack-b",
+                "afterFullReload 必须收到**重载后**的 config（pack-b）—— 收到 pack-a = reload() 里 config"
+                    + "重载与 afterFullReload 的顺序反了，retarget 会打到旧包、成空操作，后续拖拽/绑定落进"
+                    + "旧包目录。得到 \(String(describing: afterFullReloadConfigs.last?.selectedPack))")
         }
     }
 }

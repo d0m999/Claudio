@@ -456,10 +456,9 @@ func runViewWiringSuites() {
             panel.contains("configLockFile: lockFile"),
             "PanelView 必须把它自己的 lockFile（= config.lock）转发给 OnboardingActionEnvironment "
                 + "的 configLockFile —— takeOver 路径要写 config.json（selectPack）")
-        expect(
-            panel.contains("EventMuteController(configFile: configFile, lockFile: lockFile)"),
-            "PanelView 必须把它自己的 lockFile（= config.lock）转发给 EventMuteController —— "
-                + "静音开关写的是 config.json")
+        // 第二个消费者 EventMuteController 的锁转发断言，下移到 `controllerSource` 读入之后 —— 因为
+        // 它现在由 `PanelConfigController` **独占构造**（红队 b86ec0a：注入会开「幽灵实例」的口，面板读
+        // 一个实例、controller 写另一个，静默吞错）。见下面 `controllerSource` 段。
 
         // 第三个消费者：切包（`switchPack` → `selectPack`）。它**搬进了**
         // `ClaudioGUICore.PanelConfigController`（红队 9cccc9c 兑现台账那条 P2），所以这条锁转发链现在
@@ -488,6 +487,14 @@ func runViewWiringSuites() {
                 + "第三个 config.lock 消费者（另两个：EventMuteController、OnboardingActionEnvironment），"
                 + "也是用户每次在画廊里换包都会走的那一条。换成 settingsLockFile 之类，与并发 `claudio use`"
                 + "的互斥就没了")
+
+        // 第二个消费者 EventMuteController：现在由 PanelConfigController 独占构造（红队 b86ec0a 的「幽灵
+        // 实例」结构性修复），所以它也拿 controller 的 lockFile（= config.lock）。锁转发断言读 controller 源码。
+        expect(
+            controllerSource.contains("EventMuteController(configFile: configFile, lockFile: lockFile)"),
+            "PanelConfigController 必须用它自己的 lockFile（= config.lock）构造 EventMuteController —— "
+                + "静音开关写的是 config.json，绝不能被 play 的 debounce 锁挡住。换成 playLockFile 之类，"
+                + "点静音又会吞一次提示音（这正是分锁 D9 要修的 bug）")
 
         expect(
             panel.contains("settingsLockFile: ClaudioPaths.settingsLockFile"),
@@ -748,10 +755,23 @@ func runViewWiringSuites() {
             "operationalPanel 必须按 configState 路由 —— 没有这个 switch，`{\"master_volume\": \"0.35\"}`"
                 + " 这种「读得动、写不动」的 config 会照常渲染四行带静音钮 / 试听钮的活控件，而写路径"
                 + "早已 fail closed：用户点下去的每一次都必然失败（这正是判据要两条正交轴的理由）")
+        // ⚠️ 检查的是 **case → view 的映射**，不是裸标识符（红队 b86ec0a）。上一版写的是
+        // `panel.contains("needsPackNotice")` —— 而这个标识符在它**自己的定义行**
+        // `private var needsPackNotice: some View {` 里就出现了，于是把 `.needsPack` 分支体改成
+        // `EmptyView()`（空态卡连同它唯一的 VoiceOver 播报被删）时，contains 仍恒真、测试全绿。
+        // 收紧成 collapsed 后的 `case .needsPack: needsPackNotice` —— 它区分「定义存在」与「case 真的
+        // 渲染它」。仍是 SwiftUI body 接线的存在性级（运行期接没接通到不了），但不再被自身定义满足。
+        let panelCollapsed = collapsingWhitespace(panel)
         expect(
-            panel.contains("needsPackNotice") && panel.contains("configFailureNotice"),
-            "`.needsPack` 要走「先选包」空态卡、`.malformed`/`.unwritable` 要走诚实失败态 —— 两个视图"
-                + "都必须仍然被 operationalPanel 引用到")
+            panelCollapsed.contains("case .needsPack: needsPackNotice"),
+            "`.needsPack` 分支体必须渲染「先选包」空态卡 `needsPackNotice`（不是 EmptyView 之类）—— 那是"
+                + "从没选过包时顶部唯一的引导 + VoiceOver 口头指引，删了它 = 顶部一片空白、无障碍指引消失。"
+                + "得到的 switch 附近：\(String(panelCollapsed.prefix(0)))（见 PanelView operationalPanel）")
+        expect(
+            panelCollapsed.contains(
+                "case .malformed(let reason), .unwritable(let reason): configFailureNotice(reason: reason)"),
+            "`.malformed`/`.unwritable` 分支体必须渲染诚实失败态 `configFailureNotice(reason:)` —— 它带"
+                + "可执行修复指令；换成别的（或空）= 写不动的 config 上顶着四行必败活控件却不说实话")
 
         // 按钮 → handler 的那根线：静音的**行为**（翻转 + 路由 + 刷新）现在住在可测的 `PanelConfigController`
         // 里、由 `PanelConfigControllerSuite` 用真磁盘钉死。这里只剩守**最外层这根接线**：EventRowView 的
