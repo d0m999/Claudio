@@ -350,7 +350,8 @@ func runViewWiringSuites() {
         // `packCards` 两个 @State —— 面板句里包名的唯一来源。少了它：一次**无告知的成功接管**，若 SwiftUI
         // 先跑这个 handler（**未文档化**的顺序），它算 header 时 `onboardingViewModel.state` 已经是
         // `.installed`（引用类型，早更新了），而 packCards / config 还是 **app 启动时**那份 —— 那时
-        // config.json 还不存在，`loadPanelConfig` 回落成 `selectedPack: ""` —— 于是包名是**空的**。
+        // config.json 还不存在，`loadPanelConfig` 回落成 `.needsPack`（`config` 走 `resolvedConfig`
+        // 的空包默认值）—— 于是包名是**空的**。
         // 随后 state 那个 handler（先 refresh）说出带包名的那一句：**两句不同 → 后缀吞不掉 → 同一趟
         // post 两条**，正是 T17f/T17g 整台机器存在的唯一理由。
         //
@@ -683,5 +684,47 @@ func runViewWiringSuites() {
             app.contains("bundledHelperBinary(in: .main)"),
             "ClaudioGUIApp 必须用 ClaudioGUICore 的 bundledHelperBinary(in:) 解析 helper —— 剩下的只有"
                 + "一个无分支的 `.main`，没有任何决定可以做错")
+    }
+
+    // ── D23 定稿④：面板路由的四条要害接线 ─────────────────────────────────────────────────
+    //
+    // 这四行全部住在 `PanelView`（`ClaudioGUI`，`@main` executableTarget，测试 import 不进来 ——
+    // 见本文件开头那段自陈）。也就是说：把它们**逐条删掉**，`claudio-gui-tests` 一个断言都不会红。
+    // 而它们恰恰是本步存在的全部理由 —— 少任何一条，面板就退回「顶着绿点撒谎」：
+    //   · 少了 `switch configState` → 一份写不动的 config 照样渲染四行活控件，每次点击必败；
+    //   · 少了 toggleMute 里那次 `refresh()` → config 被外部删掉后，四行活控件继续挂在屏幕上；
+    //   · 少了 `.configMissing` 的过滤 → 「先选包」空态卡下面跟一句没人 QA 过的错误文案；
+    //   · 少了 applyFirstFocus 的空行列表 → 焦点落进一个根本没被渲染的控件。
+    //
+    // ⚠️ 与本文件其余绊线同一句诚实标注：这是**文本绊线**，证明不了这四行做对了，只能证明它们**还在**。
+    suite("PanelView：config 不可用时必须换态，而不是继续渲染活控件（D23 定稿④，四条接线逐条钉死）") {
+        guard let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift") else {
+            expect(false, "读不到 PanelView.swift")
+            return
+        }
+        expect(
+            panel.contains("switch configState"),
+            "operationalPanel 必须按 configState 路由 —— 没有这个 switch，`{\"master_volume\": \"0.35\"}`"
+                + " 这种「读得动、写不动」的 config 会照常渲染四行带静音钮 / 试听钮的活控件，而写路径"
+                + "早已 fail closed：用户点下去的每一次都必然失败（这正是判据要两条正交轴的理由）")
+        expect(
+            panel.contains("needsPackNotice") && panel.contains("configFailureNotice"),
+            "`.needsPack` 要走「先选包」空态卡、`.malformed`/`.unwritable` 要走诚实失败态 —— 两个视图"
+                + "都必须仍然被 operationalPanel 引用到")
+        expect(
+            panel.contains("muteController.lastError == .configMissing") && panel.contains("refresh()"),
+            "toggleMute 拿到 .configMissing（config.json 在面板已经打开之后被外部删掉）必须触发**全量**"
+                + " refresh() 重路由到 .needsPack —— 只调 refreshEnabledFlags() 不重路由，四行活控件会"
+                + "原样留在一个已经不存在的文件上面")
+        expect(
+            panel.contains("error != .configMissing"),
+            "errorNotice 必须把 .configMissing 滤掉（D43：它不面向用户）—— 重路由之后，「先选包」那张"
+                + "空态卡本身就是解释；再补一句 description 就是在一张已经写着「先选包」的卡下面，"
+                + "重复一句没人 QA 过的错误文案")
+        expect(
+            panel.contains("let visibleRows"),
+            "applyFirstFocus 必须只把**真的被渲染出来**的行送进焦点序 —— 非 .operational 态下"
+                + " eventRows 仍会算出四行（走 resolvedConfig 的空包默认值），但它们一个像素都没上屏；"
+                + "把它们送进开局焦点 = 焦点落在一个不存在的控件上")
     }
 }

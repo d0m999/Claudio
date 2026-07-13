@@ -24,6 +24,13 @@ public struct PanelView: View {
     /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
     @StateObject private var announcer: PanelAnnouncer
     @State private var rowImportViewModels: [Event: EventRowImportViewModel]
+    /// D23 定稿：the panel's complete verdict on `config.json` (``loadPanelConfig(from:)``,
+    /// `ClaudioGUICore`) — drives ``operationalPanel``'s top-of-panel routing (event rows vs.
+    /// the "先选包" empty state vs. an honest failure card) and ``applyFirstFocus()``'s row
+    /// visibility. `config` below is always kept in sync with this (``PanelConfigState/resolvedConfig``)
+    /// — it is what the read models (``packCoverage``/``availablePacks``) compute off of, not
+    /// what decides which top-level view renders.
+    @State private var configState: PanelConfigState
     @State private var config: ClaudioConfig
     @State private var eventRows: [EventRow]
     @State private var packCards: [PackCard]
@@ -156,7 +163,9 @@ public struct PanelView: View {
             wrappedValue: EventMuteController(configFile: configFile, lockFile: lockFile))
         _announcer = StateObject(wrappedValue: PanelAnnouncer())
 
-        let loadedConfig = loadPanelConfig(from: configFile)
+        let loadedState = loadPanelConfig(from: configFile)
+        _configState = State(initialValue: loadedState)
+        let loadedConfig = loadedState.resolvedConfig
         _config = State(initialValue: loadedConfig)
         _eventRows = State(
             initialValue: packCoverage(
@@ -250,9 +259,10 @@ public struct PanelView: View {
         // CTA 落地后 `onboardingViewModel.refresh()` 把 state 翻到 `.installed`，`body` 于是从
         // onboarding 卡切到 `operationalPanel`。但 `config` / `eventRows` / `packCards` 是三个
         // 独立的 `@State`，只在 `init` 里读过一次盘 —— 而 `init` 跑在 app 启动的那一刻，也就是
-        // setup **之前**：那时 `config.json` 还不存在（`loadPanelConfig` 回落到 `selectedPack: ""`）、
-        // 包一个都还没复制。于是用户在**接管成功的那一秒**看到的会是：四行「未配置 / 文件丢失」、
-        // 试听全禁用、一个空的切包画廊 —— 而真实的包和 config 明明已经躺在磁盘上了。他必须关掉
+        // setup **之前**：那时 `config.json` 还不存在（`loadPanelConfig` 回落到 `.needsPack`，
+        // `config` 走 `resolvedConfig` 的空包默认值）、包一个都还没复制。于是用户在**接管成功的
+        // 那一秒**看到的会是：「先选包」空态卡（D23 定稿④的路由态）+ 一个空的切包画廊
+        // —— 而真实的包和 config 明明已经躺在磁盘上了。他必须关掉
         // 面板再打开一次才看得到真相。这个产品在它唯一一次庆祝时刻上撒谎。
         //
         // 不会递归：`refresh()` 内部第一行就是 `onboardingViewModel.refresh()`，而探测是磁盘的
@@ -283,7 +293,7 @@ public struct PanelView: View {
             // 同一趟 update pass）里，若 SwiftUI 先跑这个 handler（**未文档化**的顺序）：
             //   · `onboardingViewModel.state` 已经是 `.installed`（引用类型，早更新了）
             //   · 而 `packCards` / `config` 还是 **app 启动时**读的那份 —— 那时 `config.json` 还不存在，
-            //     `loadPanelConfig` 回落成 `selectedPack: ""`，一张卡都没有
+            //     `loadPanelConfig` 回落成 `.needsPack`，`config` 走空包默认值
             //   → header = 「Claudio 面板，当前声音包 」**包名是空的**
             // 紧接着 state 那个 handler（先 `refresh()`）说「…当前声音包 lofi。」——**两句不同，后缀规则吞不掉，
             // 同一趟 post 了两条。** 而这恰恰是 T17f/T17g 整台机器存在的唯一理由。
@@ -495,22 +505,35 @@ public struct PanelView: View {
     @ViewBuilder
     private var operationalPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(eventRows, id: \.event) { row in
-                if let importViewModel = rowImportViewModels[row.event] {
-                    EventRowView(
-                        row: row,
-                        importViewModel: importViewModel,
-                        focusedTarget: $focusedTarget,
-                        adaptation: layoutAdaptation,
-                        onPreview: { playPreview(for: row) },
-                        onToggleMute: { toggleMute(row.event) },
-                        // T16 fix: a successful row-end bind writes `manifest.json` but the
-                        // row renders off `eventRows`, which only `refresh()` recomputes —
-                        // without this the just-bound row keeps showing "未配置/文件丢失" and a
-                        // disabled 试听 until an unrelated mute/switch/reopen. Recompute now.
-                        onImportCompleted: { refresh() }
-                    )
+            // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState` 决定这一块顶部内容
+            // 显示什么——`.operational` 时是今天这四行事件覆盖度；`.needsPack`（还没有人选过包）
+            // 换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径本来就
+            // 通：点一张卡就是 ``selectPack``，会建出一份正确的 config）；`.malformed`/`.unwritable`
+            // 换成诚实失败态 + 可执行的修复指令——不禁用任何控件（写者本来就全部 fail closed），
+            // 只是不再假装一切正常（D19 已作废：不是禁用一个滑块，是整个面板换一个诚实的态）。
+            switch configState {
+            case .operational:
+                ForEach(eventRows, id: \.event) { row in
+                    if let importViewModel = rowImportViewModels[row.event] {
+                        EventRowView(
+                            row: row,
+                            importViewModel: importViewModel,
+                            focusedTarget: $focusedTarget,
+                            adaptation: layoutAdaptation,
+                            onPreview: { playPreview(for: row) },
+                            onToggleMute: { toggleMute(row.event) },
+                            // T16 fix: a successful row-end bind writes `manifest.json` but the
+                            // row renders off `eventRows`, which only `refresh()` recomputes —
+                            // without this the just-bound row keeps showing "未配置/文件丢失" and a
+                            // disabled 试听 until an unrelated mute/switch/reopen. Recompute now.
+                            onImportCompleted: { refresh() }
+                        )
+                    }
                 }
+            case .needsPack:
+                needsPackNotice
+            case .malformed(let reason), .unwritable(let reason):
+                configFailureNotice(reason: reason)
             }
             // 绝不静默吞错（项目规则）—— 静音写回失败与切包失败**都**在这里如实上报。两条都
             // 可能同时非 nil（一次失败的静音 + 一次失败的切包），所以两条都渲染，不互相顶替。
@@ -521,7 +544,12 @@ public struct PanelView: View {
             // 今天 `.lockBusy` 只剩两个真实来源：另一个 config.json 写者（第二个 GUI 实例，或用户
             // 手动跑 `claudio use`）—— 低频，但绝不是零。渲染保留（项目铁律：绝不静默吞错），
             // 文案本来就写好在 `SetEventEnabledError`/`UseError` 里。
-            if let error = muteController.lastError {
+            // `.configMissing` is deliberately excluded here (PLAN-MASTER-VOLUME.md D43): it is
+            // not a user-facing error — ``toggleMute`` reroutes ``configState`` to `.needsPack`
+            // on this exact failure, and that empty state (`needsPackNotice`) IS the explanation.
+            // Rendering its `description` too would show a redundant, never-QA'd string
+            // underneath a card that already says "先选包".
+            if let error = muteController.lastError, error != .configMissing {
                 errorNotice(error.description)
             }
             if let error = packSwitchError {
@@ -551,6 +579,54 @@ public struct PanelView: View {
             PackGalleryView(
                 cards: packCards, focusedTarget: $focusedTarget, onSelect: { switchPack(to: $0.id) })
             disconnectRow
+        }
+    }
+
+    /// D23 定稿④「先选包」空态卡——`configState == .needsPack` 时替换掉本该渲染的四行事件覆盖度。
+    /// `PackGalleryView` 仍然照常渲染在下面（这就是主行动：点一张卡）；这里只负责说清楚温度 +
+    /// 上下文（DESIGN.md 空态三要素）。文案是 ENGINEERING.md「切包画廊」空态行的标题
+    /// （"先选包"）+ 一句 2026-07-12 拍板的工作稿副文案。
+    private var needsPackNotice: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("先选包")
+                .font(.system(size: 13 * typeScale, weight: .semibold))
+                .foregroundColor(ClaudioColor.text(colorScheme))
+            Text("还没有选中任何声音包。点一张卡片，Claudio 会建好配置。")
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("先选包。还没有选中任何声音包。点一张卡片，Claudio 会建好配置。")
+    }
+
+    /// D23 定稿④诚实失败态——`configState`是 `.malformed`/`.unwritable` 时替换掉本该渲染的四行事件
+    /// 覆盖度。**不禁用任何控件**（写者本来就全部 fail closed，见 `ConfigMutation.swift`）：这里只
+    /// 负责把已经存在的、可执行的修复原因说出来，并给一个「在访达中显示」的快捷方式——doctor 的
+    /// 诊断今天就带着这句一模一样的话（``configRewritabilityResult(configFile:)``），这里不重新
+    /// 发明一套说法。
+    private func configFailureNotice(reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11 * typeScale))
+                    .foregroundColor(ClaudioColor.error(colorScheme))
+                Text(reason)
+                    .font(.system(size: 11 * typeScale))
+                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([configFile])
+            } label: {
+                Text("在访达中显示 config.json")
+                    .font(.system(size: 11 * typeScale))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            .accessibilityHint("在访达中定位 config.json，方便手工修正")
         }
     }
 
@@ -720,8 +796,19 @@ public struct PanelView: View {
                 ctaOperable: ctaOperable)
             return
         }
+        // D23 定稿④「路由态只做减法」：`operationalPanel` only renders `eventRows` for
+        // `.operational` — `.needsPack`/`.malformed`/`.unwritable` show the empty-state/failure
+        // card instead (see `operationalPanel`'s `switch configState`). A control that isn't on
+        // screen must never claim a slot in the opening-focus order, so this passes an EMPTY row
+        // list for every non-operational state rather than `eventRows` (which, off
+        // `resolvedConfig`'s empty-pack default, would otherwise resolve to four `.unmapped` rows
+        // that are never actually rendered).
+        let visibleRows: [EventRow] = {
+            if case .operational = configState { return eventRows }
+            return []
+        }()
         focusedTarget = panelOpeningFocus(
-            rows: eventRows, packCardIDs: packCards.map(\.id), ctaOperable: ctaOperable,
+            rows: visibleRows, packCardIDs: packCards.map(\.id), ctaOperable: ctaOperable,
             hasDetailToggle: hasDetailToggle)
     }
 
@@ -764,10 +851,23 @@ public struct PanelView: View {
     /// `config.json` writer holding ``ClaudioPaths/configLockFile``, e.g. a concurrent
     /// `claudio use`; **no longer** `claudio play`, which takes ``ClaudioPaths/playLockFile``)
     /// shows 「…请稍后重试」 instead of a button that just doesn't move.
+    ///
+    /// `.configMissing` (PLAN-MASTER-VOLUME.md D43) is handled separately from every other
+    /// failure: it means `config.json` disappeared out from under an ALREADY-OPEN operational
+    /// panel (external deletion, or a race with something else that removed it) — `eventRows` /
+    /// `configState` are now stale (still `.operational`, still showing four live-looking rows
+    /// over a file that no longer exists). Leaving those rows on screen next to a generic error
+    /// string would be exactly the "面板顶着绿点撒谎" failure mode this call exists to avoid: the
+    /// fix is a full ``refresh()`` so ``configState`` re-routes to `.needsPack` — the empty state
+    /// itself is the explanation, so this is intentionally NOT surfaced via ``errorNotice`` (see
+    /// its call site in ``operationalPanel``, which filters `.configMissing` out for the same
+    /// reason D43 keeps it out of the panel's error copy entirely).
     private func toggleMute(_ event: Event) {
         let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
         if muteController.setEnabled(event, enabled: !currentlyEnabled) {
             refreshEnabledFlags()
+        } else if muteController.lastError == .configMissing {
+            refresh()
         }
     }
 
@@ -805,9 +905,10 @@ public struct PanelView: View {
     /// follows.)
     private func refreshEnabledFlags() {
         let reloaded = loadPanelConfig(from: configFile)
-        config = reloaded
+        configState = reloaded
+        config = reloaded.resolvedConfig
         eventRows = eventRows.map { row in
-            EventRow(event: row.event, coverage: row.coverage, enabled: reloaded.isEnabled(row.event))
+            EventRow(event: row.event, coverage: row.coverage, enabled: config.isEnabled(row.event))
         }
     }
 
@@ -822,7 +923,8 @@ public struct PanelView: View {
     /// never duplicates that detection.
     private func refresh() {
         onboardingViewModel.refresh()
-        config = loadPanelConfig(from: configFile)
+        configState = loadPanelConfig(from: configFile)
+        config = configState.resolvedConfig
         eventRows = packCoverage(packID: config.selectedPack, config: config, environment: audioEnvironment)
         packCards = availablePacks(config: config, environment: audioEnvironment)
         // `retarget(to:)`，不是裸赋 `packID`：包换了，属于上一个包的导入 / 绑定结果就失去了主语，必须

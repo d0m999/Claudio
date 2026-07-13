@@ -16,7 +16,8 @@ import Foundation
 // `HookStatusSuite.swift`, `VolumeSuite.swift`, `UseSuite.swift`, `SetupSuite.swift`,
 // `VersionCompatibilitySuite.swift`, `HookCommandMatchingSuite.swift`,
 // `EventEnabledSuite.swift`, `ConfigMutationSuite.swift`, `PackContentSafetySuite.swift`,
-// `LockSeparationSuite.swift`), matching the project's "many small files" convention.
+// `LockSeparationSuite.swift`, `PackSelectionSuite.swift`), matching the project's "many
+// small files" convention.
 
 var totalChecks = 0
 var failures = 0
@@ -62,6 +63,7 @@ runHookCommandMatchingSuites()
 runEventEnabledSuites()
 runConfigMutationSuites()
 runPackContentSafetySuites()
+runPackSelectionSuites()
 
 // MARK: - Summary
 

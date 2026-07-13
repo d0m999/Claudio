@@ -859,7 +859,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 - **不变不写**：`drag(to:)` 只在 `isDragging` 时接受（`onEditingChanged(true)` 才置位），使 SwiftUI 的 render-time 网格吸附**无法**触发写 —— 用户手改的 `master_volume: 0.42`（读路径合法、面板照常显示、但不在 0.05 网格上）不碰就永远活着。
 - **失败即回滚**：写失败 → 滑块弹回磁盘值 + 错误行。UI 绝不显示磁盘上没有的值。
 - **先钳制再写**：越界值绝不落盘（spec 要求）；非有限值绝不到达 `JSONSerialization`（否则 ObjC 异常穿透 Swift `do/catch`，进程 abort，exit 134）。
-- **`freshSelectedPack` 强制调用方给**，不像 `setEventEnabled` 那样传 `""` —— 一份 `selected_pack: ""` 的 config 会让 play 读得到却解析不到包，即一份看起来正常的**静音**配置。
+- ~~**`freshSelectedPack` 强制调用方给**，不像 `setEventEnabled` 那样传 `""`~~ —— **已作废（2026-07-13 阶段 A′ / D23）**：那个参数没了。今天 `updateConfigJSON(at:onMissing:mutate:)` 的 `onMissing` 是显式策略，**主音量写者传 `.failClosed`**（config 缺失即拒写、回 `.configMissing`），根本递不出一个 pack id —— 「强制调用方给」管不住调用方手里的坏数据，而这个签名让坏数据**递不进来**。原本要防的那份 `selected_pack: ""` 的 config（play 读得到却解析不到包 = 一份看起来正常的**静音**配置）现在已经没有产地了。
 - **step 0.05**（21 档，默认 0.8 恰在网格上）；`.tint(ClaudioColor.clay(colorScheme))`（clay 亮色 3.97:1 过非文本 ≥3:1，合法）+ DESIGN.md 补登滑块视觉。
 - **把「一次拖动写几次盘」下沉成 `VolumeDragSession` 纯状态机**并单测 + 变异验证 —— 否则这条 P1 决策只活在注释里，而注释拦不住任何人（`PanelFocusOrder.swift:132-138` 记着本项目在同一形状上吃过的亏）。
 - 试听（`AudioPreviewPlayer`）**必须同批修**：它今天完全不理 `master_volume`（`NSSound` 默认满音量），滑块一上线就会「拖了没反应」。
@@ -1373,5 +1373,36 @@ rename」，要的都是**父目录**的写权限。`chmod 0500 ~/.claude`（MDM
 生产码里的调用名**清单比对 —— 那样「我没听说过」就真的不可能是绿的了。代价：一个新依赖 + 测试包变重。
 
 **Effort:** L
+**Priority:** P3
+**Depends on:** None
+
+## 面板 config 路由（D23 / 阶段 A′）落地后剩下的两条
+
+### `probeConfigRewritable` 的 `.absent` 早退，不问父目录可不可写
+
+**What:** `ConfigMutation.swift` 的 `probeConfigRewritable` 一发现 `config.json` 不存在就 `return .absent`
+（「全新安装的正常状态」），**在那之前不问一句父目录让不让写**——而这一问它对**存在**的 config 是问了的
+（`.unwritable` 那一支）。于是「config 缺失 **且** `~/.claudio/` 不可写」这一格会被两轴合成判成 `.needsPack`，
+面板渲染「先选包」空态，用户点一张包卡 → `selectPack` 在写盘那一步才失败。
+
+**Why:** 失败**是**如实上报的（`packSwitchError` → `errorNotice`），所以这不是静默失败，也不是撒谎——
+但它把一句本可以在面板一打开就说清的话（「你的目录不让写，chmod 一下」）推迟成了一次注定失败的点击。
+与 `probeSettingsWritable` 那条（本文件上一节）是**同一个形状**：探测的粒度比真正要写的东西细一级。
+
+**Effort:** S（`.absent` 那一支 return 前补一次 `isWritableFile(父目录)`，与 `.unwritable` 复用同一句 reason）
+**Priority:** P3
+**Depends on:** 会改到 `doctor` 的既有输出（`Doctor.swift:379` 是它今天的另一个调用方），要同批改 DoctorSuite。
+
+### `.malformed` 态丢掉了仍然读得出来的 `selected_pack`，于是拖拽的拒绝理由文不对题
+
+**What:** `PanelConfigState.malformed(reason:)` 不带 packID，`resolvedConfig` 一律回落成
+`ClaudioConfig(selectedPack: "")`。但「畸形」很多时候只坏在**别的**键上（`{"selected_pack": "lofi",
+"master_volume": "0.35"}`——`selected_pack` 好好的）。此时用户往面板里拖一个音频，`retarget(to: "")` →
+`isSafePackID("")` 判假 → 拒绝理由报的是 **`.pathTraversal`（路径穿越）**，而真实原因是「config 的
+`master_volume` 是字符串，包上下文没能带过来」。
+
+**Why:** 不是静默失败（拒绝会显式渲染），是**措辞与真实原因对不上**——而这个仓库反复栽在同一件事上。
+
+**Effort:** M（给 `.malformed` 加一个可选 packID 字段；牵动 PanelConfigSuite 的合成矩阵）
 **Priority:** P3
 **Depends on:** None

@@ -20,17 +20,43 @@ func runEventMuteControllerSuites() {
         )
     }
 
+    suite(
+        "EventMuteController: setEnabled fails closed with .configMissing when config.json"
+            + " doesn't exist yet (D23 定稿① — it used to silently create one with an empty"
+            + " selected_pack; setEventEnabled no longer does that, see EventEnabledSuite.swift)"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let controller = EventMuteController(
+                configFile: configFile, lockFile: root.appendingPathComponent("config.lock"))
+
+            let succeeded = controller.setEnabled(.stop, enabled: false)
+            expect(!succeeded, "a missing config.json must fail the call, not silently create one")
+            expect(
+                controller.lastError == .configMissing,
+                "lastError must be .configMissing, got \(String(describing: controller.lastError))")
+            expect(
+                !FileManager.default.fileExists(atPath: configFile.path),
+                "a rejected write must not create config.json")
+        }
+    }
+
     suite("EventMuteController: setEnabled writes through and returns true, clearing lastError") {
         withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            // D23 定稿①之后，setEventEnabled 对缺失的 config fail closed——这条「干净写入成功」的
+            // 覆盖率必须针对一份已经存在的 config.json（切包/自举已经建好的那种正常状态），而不是
+            // 依赖静音钮自己新建一份。
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
             let controller = EventMuteController(
-                configFile: root.appendingPathComponent("config.json"),
+                configFile: configFile,
                 lockFile: root.appendingPathComponent("config.lock"))
 
             let succeeded = controller.setEnabled(.stop, enabled: false)
             expect(succeeded, "a clean write must return true")
             expect(controller.lastError == nil, "a successful call must clear lastError")
 
-            let data = try? Data(contentsOf: root.appendingPathComponent("config.json"))
+            let data = try? Data(contentsOf: configFile)
             let config = data.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
             expect(config?.isEnabled(.stop) == false, "the underlying config.json must reflect the flip")
         }

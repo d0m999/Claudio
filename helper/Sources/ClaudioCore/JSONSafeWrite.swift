@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - 把一张 JSON 表安全地写回磁盘：一个原语，两个调用方
 //
-// `config.json`（``updateConfigJSON(at:freshSelectedPack:mutate:)``）与 pack 的 `manifest.json`
+// `config.json`（``updateConfigJSON(at:onMissing:mutate:)``）与 pack 的 `manifest.json`
 // （`gui` 的 `bindEventToManifest(...)`）做的是**同一件事**：把一份用户磁盘上的 JSON 读进来、只改自己
 // 拥有的那个键、再写回去，且不认识的键必须原样保住。既然是同一件事，它就只能有一份实现——否则两边
 // 会各自长出一套「哪些值写得出去」的判断，然后其中一边慢慢腐烂。本轮 /ship 评审两边都中了招：

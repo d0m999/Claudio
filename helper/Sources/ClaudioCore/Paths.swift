@@ -82,7 +82,7 @@ public enum ClaudioPaths {
     /// **Writers only.** No reader takes this lock, by design: `play` loads `config.json`
     /// *outside* its critical section (``playSoundEvent(_:environment:)``), and `doctor` / the
     /// panel read it with no lock at all. What makes a concurrent read safe is
-    /// ``updateConfigJSON(at:freshSelectedPack:mutate:)``'s temp-file + `rename(2)` atomic
+    /// ``updateConfigJSON(at:onMissing:mutate:)``'s temp-file + `rename(2)` atomic
     /// write — a reader sees the whole old file or the whole new one, never a torn one. A
     /// future reader that *takes* this lock, or a writer that drops `.atomic` because it
     /// believes the lock covers readers, reintroduces exactly the class this split closed.

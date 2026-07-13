@@ -114,9 +114,12 @@ public func packSelectionPlan(
     case .configUnreadable(let reason):
         return .failConfigUnusable(reason: reason)
 
-    // `selected_pack` 是空串 = 还没有人选过包。这条路真实存在且完全正常：hooks 装好、还没选包时，
-    // 用户点一下静音钮 → `setEventEnabled` 没有任何 pack 上下文 → 写出一份 `selected_pack: ""` 的
-    // config（那是**对的**，凭空编一个默认包才是伪造）。`resolvePackDirectory("")` 解不出来，于是它
+    // `selected_pack` 是空串 = 还没有人选过包。这条路必须留着，但它的产地已经变了（D23 定稿①）：
+    // 静音钮再也不会写出这份 config 了——`setEventEnabled` 现在对缺失的 config.json fail closed
+    // （见 `EventEnabled.swift`），磁盘上不会再凭空长出一份 `selected_pack: ""`。这一支今天只在
+    // 两种情况下被走到：`.noConfig`（全新机器，与这一支本就是同一件事）；或者一份手工编辑 /
+    // 第三方写出的 config.json 恰好把 `selected_pack` 留空——那同样是「还没有人选」，不是「选了
+    // 一个空的」，不该被当成 packNotFound 硬失败。`resolvePackDirectory("")` 解不出来，于是它
     // 在这里表现为 `.packNotFound("")` —— 与「config 压根不在」是同一件事。
     case .noConfig, .packNotFound(""):
         guard let first = usablePackIDs.first else { return .failNoPackAtAll }
