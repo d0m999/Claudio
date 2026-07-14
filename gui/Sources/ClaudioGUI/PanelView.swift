@@ -538,32 +538,54 @@ public struct PanelView: View {
                         )
                     }
                 }
+                // PLAN-MASTER-VOLUME.md 阶段 D：位置对齐线框——四行事件之后、拖入区之前。只在
+                // `.operational` 渲染（D23 定稿 + D41：这是滑块唯一真的出现在屏幕上的态），与下面
+                // `applyFirstFocus()` 的 `hasMasterVolume: isOperational` 是同一件事的两面——渲染
+                // 判据变了，焦点判据必须跟着变，否则「不在屏幕上的控件不得占用焦点位」这条铁律
+                // 当场破功。
+                //
+                // `setMasterVolume` 的完整行为（写、republish 错误、按结果路由刷新）整段住在
+                // `panelModel` 里（`PanelConfigControllerSuite` 用真磁盘钉死）——这里只转发。
+                MasterVolumeRow(
+                    diskVolume: panelModel.config.masterVolume,
+                    onCommit: { panelModel.setMasterVolume($0) },
+                    focusCoordinator: focusCoordinator,
+                    focusedTarget: $focusedTarget,
+                    adaptation: layoutAdaptation)
             case .needsPack:
                 needsPackNotice
             case .malformed(let reason), .unwritable(let reason):
                 configFailureNotice(reason: reason)
             }
-            // 绝不静默吞错（项目规则）—— 静音写回失败与切包失败**都**在这里如实上报。两条都
-            // 可能同时非 nil（一次失败的静音 + 一次失败的切包），所以两条都渲染，不互相顶替。
+            // 绝不静默吞错（项目规则）—— 静音写回失败、切包失败、主音量写回失败**都**在这里如实
+            // 上报，合并成一个有序去重列表（PLAN-MASTER-VOLUME.md Step 5 · D3，`PanelWriteFailures.swift`）：
+            // 多条可以同时存在（互不顶替），顺序稳定（静音 → 切包 → 主音量），三个写者撞上同一份
+            // `.lockBusy`/`.lockFailed` 文案时只保留一条。`.configMissing` 已经在纯函数内部被滤掉
+            // （D43）：那个失败不面向用户——写者据此把 `configState` 重路由到 `.needsPack`，「先选包」
+            // 空态卡本身就是解释，再印一遍 description 是重复且从未 QA 过的字符串。
             //
             // `.lockBusy` 仍然要渲染，但**它的成因已经变了**（锁分离，D9）：`setEventEnabled` /
-            // `selectPack` 现在拿 `config.lock`，`claudio play` 拿 `play.lock` —— 两者不再相撞，
-            // 「每个 Claude Code 事件 spawn 一次 play 就可能吞掉一次点击」那条高频路径**已经没了**。
-            // 今天 `.lockBusy` 只剩两个真实来源：另一个 config.json 写者（第二个 GUI 实例，或用户
-            // 手动跑 `claudio use`）—— 低频，但绝不是零。渲染保留（项目铁律：绝不静默吞错），
-            // 文案本来就写好在 `SetEventEnabledError`/`UseError` 里。
-            // `.configMissing` is deliberately excluded here (PLAN-MASTER-VOLUME.md D43): it is
-            // not a user-facing error — ``toggleMute`` reroutes ``configState`` to `.needsPack`
-            // on this exact failure, and that empty state (`needsPackNotice`) IS the explanation.
-            // Rendering its `description` too would show a redundant, never-QA'd string
-            // underneath a card that already says "先选包".
-            if let error = panelModel.muteError, error != .configMissing {
-                errorNotice(error.description)
+            // `selectPack` / `setMasterVolume` 现在拿 `config.lock`，`claudio play` 拿 `play.lock` ——
+            // 两者不再相撞，「每个 Claude Code 事件 spawn 一次 play 就可能吞掉一次点击」那条高频路径
+            // **已经没了**。今天 `.lockBusy` 只剩两个真实来源：另一个 config.json 写者（第二个 GUI
+            // 实例，或用户手动跑 `claudio use`）—— 低频，但绝不是零。渲染保留（项目铁律：绝不静默
+            // 吞错），文案本来就写好在各自的错误枚举里。
+            ForEach(
+                Array(
+                    panelWriteFailures(
+                        muteError: panelModel.muteError, packSwitchError: panelModel.packSwitchError,
+                        masterVolumeError: panelModel.masterVolumeError
+                    ).enumerated()), id: \.offset
+            ) { _, message in
+                errorNotice(message)
             }
-            if let error = panelModel.packSwitchError {
-                errorNotice(error.description)
-            }
-            AudioDropZoneView(viewModel: dropZoneViewModel)
+            AudioDropZoneView(
+                viewModel: dropZoneViewModel,
+                // D28: a closure, not a captured value — resolved at PLAY time (inside
+                // AudioDropZoneView's own `.onAppear`-bound `onImportSucceeded` handler), so a
+                // volume change made after the panel opened is still honored, instead of freezing
+                // at whatever `panelModel.config.masterVolume` happened to be at construction.
+                currentVolume: { previewVolume(for: panelModel.config) })
 
             // T17f：**这里是告知真正的家 —— 而且位置本身是它文案的一部分。**
             //
@@ -817,20 +839,18 @@ public struct PanelView: View {
             return false
         }()
         let visibleRows: [EventRow] = isOperational ? panelModel.eventRows : []
-        // hasMasterVolume: false (fix for a `/codex review` P2 on 341d9b7, which itself fixed a
-        // P1): `isOperational` is NOT a valid proxy for "the slider is on screen" yet — this repo
-        // is mid-way through PLAN-MASTER-VOLUME.md's staged rollout, and the actual slider view
-        // (`MasterVolumeRow`, 阶段 D) has not landed. `operationalPanel` renders zero master-volume
-        // control today (grep the target: no `Slider` bound to `.masterVolume` exists anywhere in
-        // `gui/Sources/ClaudioGUI`), so passing `isOperational` here reintroduces the exact bug
-        // 341d9b7 closed — just widened from three edge-case configStates to the common
-        // `.operational` one. Flip this back to `isOperational` ONLY when 阶段 D lands
-        // `MasterVolumeRow` in `operationalPanel` (ViewWiringSuite pins the literal `false` here
-        // and fails the moment this line reads anything else, so this is not a "remember to come
-        // back" — the test does the remembering).
+        // hasMasterVolume: isOperational (PLAN-MASTER-VOLUME.md 阶段 D landed `MasterVolumeRow` —
+        // see `operationalPanel`'s `.operational` case above, the ONLY branch that renders it).
+        // `isOperational` is now a VALID proxy for "the slider is on screen": the two are the
+        // same `switch panelModel.configState` decision, read twice. Before 阶段 D landed, this
+        // was pinned to a literal `false` (fix for a `/codex review` P2 on 341d9b7) precisely
+        // because `operationalPanel` rendered zero master-volume controls yet — flipping it back
+        // now is not a regression of that fix, it is the fix's own stated exit condition
+        // (ViewWiringSuite's tripwire on this line has been updated to match, and fails the
+        // moment either half of `operationalPanel`/`applyFirstFocus` drifts from the other).
         focusedTarget = panelOpeningFocus(
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
-            hasDetailToggle: hasDetailToggle, hasMasterVolume: false)
+            hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational)
     }
 
     // MARK: - Actions
@@ -860,7 +880,10 @@ public struct PanelView: View {
             panelModel.reload()
             return
         }
-        previewPlayer.play(fileAt: resolvedFile)
+        // D2: 试听 must play at the panel's current master volume, not NSSound's own default
+        // of 1.0 — read at the moment of the click (`panelModel.config` is always the
+        // just-reloaded truth), not cached anywhere.
+        previewPlayer.play(fileAt: resolvedFile, volume: Float(previewVolume(for: panelModel.config)))
     }
 
     // toggleMute / switchPack / reload / reloadEnabledFlags 已搬进 `ClaudioGUICore.PanelConfigController`

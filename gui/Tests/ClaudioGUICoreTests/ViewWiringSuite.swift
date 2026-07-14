@@ -785,32 +785,121 @@ func runViewWiringSuites() {
             "operationalPanel 的 EventRowView 必须把 onToggleMute 接到 `panelModel.toggleMute(row.event)`"
                 + " —— 剪成 `onToggleMute: {}` 之类，四行事件的静音钮就变成点了没反应的死键")
 
+        // D43 的 `.configMissing` 过滤（PLAN-MASTER-VOLUME.md 阶段 D）：过滤逻辑已经搬进纯函数
+        // `panelWriteFailures(muteError:packSwitchError:masterVolumeError:)`（`PanelWriteFailuresSuite`
+        // 逐条钉死「.configMissing 被排除」），不再是 PanelView.swift 里裸露的 `error != .configMissing`
+        // 字面量——这里改守**接线本身**：三个写者的错误必须全部喂给这一个合并函数，一个都不许漏
+        // （漏掉 masterVolumeError，主音量的写失败就会从错误列表里悄悄消失，且这条断言此前测不到它）。
         expect(
-            panel.contains("error != .configMissing"),
-            "errorNotice 必须把 .configMissing 滤掉（D43：它不面向用户）—— 重路由之后，「先选包」那张"
-                + "空态卡本身就是解释；再补一句 description 就是在一张已经写着「先选包」的卡下面，"
-                + "重复一句没人 QA 过的错误文案")
+            collapsingWhitespace(panel).contains(
+                "panelWriteFailures( muteError: panelModel.muteError, packSwitchError:"
+                    + " panelModel.packSwitchError, masterVolumeError: panelModel.masterVolumeError"),
+            "operationalPanel 必须把三个写者的错误全部喂给 panelWriteFailures(muteError:packSwitchError:"
+                + "masterVolumeError:)（D3 合并列表）—— 少喂一个，那个写者的失败就从错误列表里静默消失。"
+                + ".configMissing 的排除逻辑本身已经下沉进这个纯函数，由 PanelWriteFailuresSuite 钉死")
         expect(
             panel.contains("let visibleRows"),
             "applyFirstFocus 必须只把**真的被渲染出来**的行送进焦点序 —— 非 .operational 态下"
                 + " eventRows 仍会算出四行（走 resolvedConfig 的空包默认值），但它们一个像素都没上屏；"
                 + "把它们送进开局焦点 = 焦点落在一个不存在的控件上")
 
-        // /codex review P2（341d9b7 之后一轮）：`.masterVolume` 的存在判据一度被写成 `isOperational`
-        // —— 但 `operationalPanel` 今天**零个** Slider 渲染，PLAN-MASTER-VOLUME.md 阶段 D（`MasterVolumeRow`）
-        // 还没落地。`isOperational` 在这里等于把「滑块存在」的判据从「视图真的渲染了它」偷换成「configState
-        // 恰好是 operational」——341d9b7 刚从三个边缘态（.needsPack/.malformed/.unwritable）里修掉的那类
-        // bug，会原样在最常见的 .operational 态复发。这条钉住 fail-closed 的那一半：只要 `MasterVolumeRow`
-        // 还没被引进 `operationalPanel`，这里就必须是字面量 `false`，不能是任何从 `configState` 派生的布尔。
+        // 现状（PLAN-MASTER-VOLUME.md 阶段 D 已落地）：`MasterVolumeRow` 真的渲染在 `operationalPanel`
+        // 的 `.operational` 分支里，所以 `isOperational` 终于是「滑块在屏幕上」的有效代理 —— 渲染判据与
+        // 焦点判据读的是同一个 `switch panelModel.configState`，同一件事的两面。
+        //
+        // 历史，别再当现状读（这段注释本身在阶段 D 落地时说过一次反话，被 /codex review 逮到过 ——
+        // 1fcd96f 就是修同一个病的）：341d9b7 修掉的是「`.masterVolume` 在三个边缘态
+        // （`.needsPack`/`.malformed`/`.unwritable`）里指向一个不存在的滑块」；紧接着那一轮 /codex review
+        // 的 P2 指出，在阶段 D 落地**之前**，从 `configState` 派生这个布尔只是把同一个 bug 从边缘态搬到最
+        // 常见的 `.operational` 态，于是它一度被钉死成字面量 fail-closed 值。阶段 D 落地就是那颗钉子自己
+        // 写明的退出条件。下面两条断言双向钉死它：正向要求从 `isOperational` 派生，反向禁止再钉回字面量 ——
+        // 渲染判据与焦点判据从此不许分叉，任一边先动都会红。
         expect(
             panelCollapsed.contains(
-                "hasDetailToggle: hasDetailToggle, hasMasterVolume: false"),
-            "hasMasterVolume 必须钉在字面量 false，直到 PLAN-MASTER-VOLUME.md 阶段 D 落地 MasterVolumeRow"
-                + "（今天 operationalPanel 渲染零个 Slider）—— 换回 isOperational 或任何非 false 的表达式，"
-                + "会让 .masterVolume 在每次打开一个完全正常的面板时都抢一个不存在控件的焦点位，"
-                + "复现 341d9b7 刚修掉的那类 bug，只是从三个边缘态扩大到最常见的 .operational 态")
+                "hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational"),
+            "hasMasterVolume 现在必须真的从 isOperational 派生（PLAN-MASTER-VOLUME.md 阶段 D 已经把"
+                + " MasterVolumeRow 接进 operationalPanel 的 .operational 分支，见下面 MasterVolumeRow"
+                + " 那组 suite）—— 钉死字面量 false 会让 .masterVolume 在滑块真的在屏幕上时也永远抢不到"
+                + "焦点，键盘 / VoiceOver 用户走 Tab 会跳过一个明明可操作的控件")
         expect(
-            !panelCollapsed.contains("hasMasterVolume: isOperational"),
-            "hasMasterVolume 不得从 isOperational 派生 —— 那正是这次要挡的回归本身（见上一条断言）")
+            !panelCollapsed.contains("hasMasterVolume: false"),
+            "hasMasterVolume 不许再钉死字面量 false —— 那是 MasterVolumeRow 落地前的占位值（341d9b7 之后"
+                + "那一轮 /codex review 的临时状态），见上一条断言")
+    }
+
+    // ── PLAN-MASTER-VOLUME.md 阶段 D：MasterVolumeRow 的三个硬约束 + 三条接线绊线 ──────────────
+    //
+    // `MasterVolumeRow.swift` 是 SwiftUI body 接线，纯逻辑测试到不了（本机 CommandLineTools 无
+    // XCTest）—— 与本文件其余每一条同一个理由（见文件头部）。「全 GUI 只许一处 NSAccessibility.post /
+    // announcer.consume(」已经由上面「T17h 播报出口」那条 suite 覆盖（它数的是整个 `guiSources()`，
+    // MasterVolumeRow.swift 自然落进普查范围），这里不重复；这里守的是这个文件**自己**独有的三个
+    // 已实证的坑（D5/D10 已作废、D18）+ 三条本步新增的接线（D21 的 rebase、D22/D37 的 popover 冲刷、
+    // D22-bis 的 willTerminate 冲刷）。
+    suite("MasterVolumeRow：三个已作废/已实证的坑不许出现（step: / onDisappear / .animation(）") {
+        guard let row = codeOnly("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+            expect(false, "读不到 MasterVolumeRow.swift —— 这个 suite 唯一的价值就是读它")
+            return
+        }
+        expect(
+            !row.contains("step:"),
+            "MasterVolumeRow 不许使用 Slider(…, step:)（D24）—— 本机 key 窗口截图实证：`step: 0.05` 会被"
+                + "直译成 NSSlider.numberOfTickMarks = 21，在轨道下方画出一条 21 个灰点的刻度带，撑破"
+                + "DESIGN.md「控件行」的 ~28pt 行高。档位吸附交给 VolumeDragSession.snap()，视图侧只转发")
+        expect(
+            !row.contains("onDisappear"),
+            "MasterVolumeRow 不许用 onDisappear 冲刷（D10 已作废，全仓零命中且本仓库已明文否定该回调—— "
+                + "PanelFocusCoordinator.swift 的文档：popover 不保证在每次 show/close 之间重建视图层级）。"
+                + "冲刷信号走 focusCoordinator.hideCount")
+        expect(
+            !row.contains(".animation("),
+            "MasterVolumeRow 全行零 .animation()（D18）：拖动跟手不加动画、失败回滚一律瞬跳。给控件行加"
+                + "动画 = 必须同批接上 accessibilityReduceMotion 门控，代价远大于收益（PanelView.swift 顶部"
+                + "那条「本视图树的动画绊线」记录着同一条纪律）")
+    }
+
+    suite("MasterVolumeRow：diskVolume 变化必须下行同步进 session（D21，否则滑块永久显示磁盘上没有的值）") {
+        guard let row = codeOnly("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+            expect(false, "读不到 MasterVolumeRow.swift")
+            return
+        }
+        expect(
+            row.contains(".onChange(of: diskVolume)") && row.contains("session.rebase(to:"),
+            "MasterVolumeRow 必须有 .onChange(of: diskVolume) { session.rebase(to: $0) }（或等价写法）—— "
+                + "没有它：用户手改 config.json 成 0.30、重开面板，`config.masterVolume == 0.30` 而滑块仍"
+                + "显示旧值；D11「不变不写」还会让它不会自愈，下一次微调会基于幻影 baseline 提交（D21）")
+    }
+
+    suite("MasterVolumeRow：popover 隐藏必须冲刷（D22/D37，复用既有 hideCount 信号，不新增 closeCount）") {
+        guard let row = codeOnly("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+            expect(false, "读不到 MasterVolumeRow.swift")
+            return
+        }
+        expect(
+            !row.contains("closeCount"),
+            "不许新增 closeCount —— PanelFocusCoordinator 今天已经有 hideCount 且 "
+                + "MenuBarController.popoverDidClose 的第一条语句已经是 notePanelHidden()（T17d），语义"
+                + "与这里要的冲刷信号完全一致，复用它")
+        expect(
+            row.contains(".onChange(of: focusCoordinator.hideCount)"),
+            "MasterVolumeRow 必须观察 focusCoordinator.hideCount 的变化并冲刷 pending 的拖动 —— 没有它，"
+                + "用户拖到新值后点面板外面关闭 popover，值会静默丢失（D22：popover 关闭是 NSPopover 的"
+                + "可靠信号，`.onDisappear` 不是）")
+    }
+
+    suite("MasterVolumeRow：willTerminate 必须同步冲刷（D22-bis，且不得复用 hideCount 那套计数器机制）") {
+        guard let row = codeOnly("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+            expect(false, "读不到 MasterVolumeRow.swift")
+            return
+        }
+        expect(
+            row.contains("NSApplication.willTerminateNotification"),
+            "MasterVolumeRow 必须监听 NSApplication.willTerminateNotification 并同步冲刷 —— 这是 D22 冲刷"
+                + "的兜底：popover 关闭那条信号覆盖不了 ⌘Q 时 popover 从未被关闭过（用户直接退出）的路径")
+        expect(
+            row.contains(".onReceive("),
+            "willTerminate 的冲刷必须走 .onReceive(NotificationCenter.default.publisher(for:))，不是 "
+                + ".onChange —— app 正在终止时 SwiftUI 的 update pass 不保证再跑一次，bump 一个 @Published "
+                + "计数器等于什么都没做；.onReceive 是一条独立的 Combine 订阅，NotificationCenter 会在通知"
+                + "post 的同一线程上同步调用它，不依赖任何一次视图重渲染")
     }
 }

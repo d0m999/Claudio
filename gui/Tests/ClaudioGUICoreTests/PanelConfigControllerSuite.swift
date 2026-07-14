@@ -957,4 +957,178 @@ func runPanelConfigControllerSuites() {
             )
         }
     }
+
+    // ══ setMasterVolume（PLAN-MASTER-VOLUME.md 阶段 D，D27/D43）：镜像 toggleMute 的形状 ══════════
+    //
+    // 写、republish 错误、按 masterVolumeRefreshRoute 路由刷新——与静音那一半同一份接线，同一批变异
+    // 关注点（执行 / 可达性 / 翻转不适用于这里，但「写成功后读模型真的重算」「.configMissing 真的
+    // 重路由到 .needsPack」「.lockBusy 不触发白扫」三条与静音那一半是同一个问题）。
+
+    suite("PanelConfigController.setMasterVolume 成功：落盘 + 返回落地值 + 读模型走轻量刷新（D27）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+
+            let landed = controller.setMasterVolume(0.35)
+
+            expect(landed == 0.35, "一次干净的写盘必须返回落地值，得到 \(String(describing: landed))")
+            expect(controller.masterVolumeError == nil, "成功之后 masterVolumeError 必须是 nil")
+            expect(
+                controller.config.masterVolume == 0.35,
+                "controller.config 必须反映刚落盘的新音量（reloadConfigOnly 重读了 config）——它停在旧值 ="
+                    + "读模型没重算。得到 \(controller.config.masterVolume)")
+            let onDisk = loadPanelConfig(from: configFile).resolvedConfig
+            expect(onDisk.masterVolume == 0.35, "config.json 本身必须落盘新值，得到 \(onDisk.masterVolume)")
+            expect(
+                afterFullReloadCalls == 0,
+                "一次成功的音量写盘走 .configOnly（轻量刷新），不该触发全量 reload 的 afterFullReload —— "
+                    + "触发了就是每拖一次滑块都在主线程上白扫整个包库。得到 \(afterFullReloadCalls) 次")
+        }
+    }
+
+    suite("PanelConfigController.setMasterVolume + config 缺失：.configMissing 全量重路由到 .needsPack（D43）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            try? FileManager.default.removeItem(at: configFile)
+
+            let landed = controller.setMasterVolume(0.5)
+
+            expect(landed == nil, "config.json 被外部删掉后写盘必须失败，得到 \(String(describing: landed))")
+            expect(
+                controller.masterVolumeError == .configMissing,
+                "得到 \(String(describing: controller.masterVolumeError))")
+            guard case .needsPack = controller.configState else {
+                expect(
+                    false,
+                    "config 被外部删掉后，一次音量写盘必须让 configState 翻到 .needsPack（全量 reload 重载了"
+                        + "它）—— 它停在 \(controller.configState) = 面板会继续顶着一个不存在的滑块撒谎")
+                return
+            }
+            expect(
+                afterFullReloadCalls == 1,
+                ".configMissing 必须触发全量 reload（afterFullReload 恰好一次），自救入口是画廊、必须新鲜。"
+                    + "得到 \(afterFullReloadCalls) 次")
+        }
+    }
+
+    suite("PanelConfigController.setMasterVolume 撞上 .lockBusy：不许 reload（可证明什么也没揭示）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            // 磁盘上此刻是一份坏 config —— 这是这条断言不恒真的全部理由：任何一次 reload 都会把
+            // configState 翻成 .malformed。它仍是 .operational，就证明了那次 reload 没有发生。
+            writeFixture(#"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
+            let holder = FileLock(path: lockFile.path)
+            expect(holder.tryLock(), "test setup：holder 必须先拿到 config.lock")
+
+            let landed = controller.setMasterVolume(0.5)
+            holder.unlock()
+
+            expect(landed == nil, "锁被持着时写盘必须失败")
+            expect(
+                controller.masterVolumeError == .lockBusy,
+                "得到 \(String(describing: controller.masterVolumeError))")
+            expect(
+                afterFullReloadCalls == 0,
+                "一次锁竞争不许触发任何刷新（连 configOnly 都不该）—— afterFullReload 被调了"
+                    + " \(afterFullReloadCalls) 次")
+            guard case .operational = controller.configState else {
+                expect(
+                    false,
+                    "锁没拿到 = 什么也没揭示，configState 必须原样不动。它变成了 \(controller.configState)")
+                return
+            }
+        }
+    }
+
+    suite("PanelConfigController.setMasterVolume 撞上被外部改坏的 config：configState 翻到 .malformed（轻量刷新）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            writeFixture(#"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
+
+            let landed = controller.setMasterVolume(0.5)
+
+            expect(landed == nil, "畸形 config 必须让写盘失败")
+            guard case .configReadFailure = controller.masterVolumeError else {
+                expect(
+                    false,
+                    "得到 \(String(describing: controller.masterVolumeError))")
+                return
+            }
+            guard case .malformed(let reason) = controller.configState else {
+                expect(
+                    false,
+                    "写盘刚刚亲口承认 config.json 读不动，configState 却还停在 \(controller.configState)"
+                        + " —— 面板会顶着一个假装能用的滑块继续撒谎")
+                return
+            }
+            expect(!reason.isEmpty, "诚实失败态必须带一条可行动的原因，得到空串")
+            expect(
+                afterFullReloadCalls == 0,
+                "这条路必须走轻量 .configOnly —— config 坏了跟包库有没有变没有半点关系。afterFullReload"
+                    + " 被调了 \(afterFullReloadCalls) 次")
+        }
+    }
+
+    suite("PanelConfigController.setMasterVolume 成功：清掉上一次失败留下的 masterVolumeError（不许旧红字残留）") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")))
+
+            expect(controller.masterVolumeError == nil, "前提：还没写过音量，masterVolumeError 必须是 nil")
+
+            _ = controller.setMasterVolume(0.6)
+
+            expect(
+                controller.masterVolumeError == nil,
+                "一次成功写盘后 masterVolumeError 必须是 nil —— 非 nil = republish 没在成功时清错，上一次"
+                    + "失败的红字会残留在一次成功操作之后。得到 \(String(describing: controller.masterVolumeError))")
+        }
+    }
 }

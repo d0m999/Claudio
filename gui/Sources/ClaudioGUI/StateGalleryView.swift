@@ -4,9 +4,10 @@
     import SwiftUI
 
     /// The repo-internal SwiftUI state gallery (ENGINEERING.md T14 D2) — the in-repo VISUAL
-    /// TRUTH SOURCE. Renders ONE frame per ``PreviewFixtures`` value, across all four
-    /// per-feature state families this app has (``OnboardingState``, ``DropZoneState``,
-    /// ``EventRow``/``CoverageState``, ``PackCard``/``PackCardState``), EXCLUSIVELY off
+    /// TRUTH SOURCE. Renders ONE frame per ``PreviewFixtures`` value, across all six
+    /// per-feature state families this app has (``OnboardingState``, ``OnboardingActionState``,
+    /// ``DropZoneState``, ``EventRow``/``CoverageState``, ``PackCard``/``PackCardState``,
+    /// ``MasterVolumeState`` — PLAN-MASTER-VOLUME.md D33/D38), EXCLUSIVELY off
     /// `PreviewFixtures` — no ad-hoc values are constructed anywhere in this file. See
     /// `PreviewFixtures`'s own doc comment for why it — and therefore this gallery — is the
     /// single source both the gallery and the state tests draw sample values from.
@@ -32,6 +33,7 @@
                     OnboardingActionGalleryView()
                     DropZoneGalleryView()
                     EventRowGalleryView()
+                    MasterVolumeGalleryView()
                     PackCardGalleryView()
                 }
                 .padding(20)
@@ -167,7 +169,12 @@
             AudioDropZoneView(
                 viewModel: AudioImportViewModel(
                     packID: "minimal-chime", environment: previewAudioImportEnvironment,
-                    previewState: state)
+                    previewState: state),
+                // Every frame's state is pinned via `previewState:` — the gallery never actually
+                // runs the import pipeline, so this closure is never invoked. A fixed value
+                // (rather than reading some fixture's `masterVolume`) mirrors `PreviewDurationProbe`
+                // just below: a placeholder for a code path this file never exercises.
+                currentVolume: { 1.0 }
             )
             .frame(width: CGFloat(standardPanelWidth))
         }
@@ -241,6 +248,85 @@
         case .present: ".present"
         case .unmapped: ".unmapped"
         case .broken: ".broken"
+        }
+    }
+
+    // MARK: - MasterVolumeState (6 fixtures, PLAN-MASTER-VOLUME.md D33/D38)
+
+    struct MasterVolumeGalleryView: View {
+        var body: some View {
+            GallerySection(
+                title: "MasterVolumeState (\(PreviewFixtures.masterVolumeStates.count))"
+            ) {
+                ForEach(Array(PreviewFixtures.masterVolumeStates.enumerated()), id: \.offset) { _, state in
+                    GalleryFrame(caption: masterVolumeStateCaption(state)) {
+                        MasterVolumeStateFrame(state: state)
+                    }
+                }
+            }
+        }
+    }
+
+    /// One master-volume frame. The gallery never actually writes anything — every frame's state
+    /// is fully determined by ``PreviewFixtures/MasterVolumeState``, so ``onCommit`` is a no-op
+    /// that always reports failure (never invoked in practice, since nothing here drags the
+    /// slider) and ``focusCoordinator`` is a fresh, never-observed instance (mirrors this file's
+    /// other frames constructing throwaway view-models pinned to no particular state).
+    ///
+    /// D39: `.writeFailed` is rendered by `PanelView`, not `MasterVolumeRow` itself — this frame
+    /// reproduces that exact split (row, then a SEPARATE error row) for the `.failed` case, rather
+    /// than inventing a shape `MasterVolumeRow` alone could never produce on its own.
+    private struct MasterVolumeStateFrame: View {
+        let state: PreviewFixtures.MasterVolumeState
+        @FocusState private var focusedTarget: PanelFocusTarget?
+        @Environment(\.colorScheme) private var colorScheme
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 4) {
+                MasterVolumeRow(
+                    diskVolume: volume,
+                    onCommit: { _ in nil },
+                    focusCoordinator: PanelFocusCoordinator(),
+                    focusedTarget: $focusedTarget,
+                    adaptation: panelLayoutAdaptation(for: .standard))
+                if case .failed(_, let message) = state {
+                    errorRow(message)
+                }
+            }
+            .frame(width: CGFloat(standardPanelWidth))
+        }
+
+        private var volume: Double {
+            switch state {
+            case .value(let volume): volume
+            case .failed(let volume, _): volume
+            }
+        }
+
+        /// Mirrors `PanelView.errorNotice`'s shape verbatim (真红图标 + `text-2` 文案) — this
+        /// repo's established 「拒绝行」 pattern is duplicated per-view rather than shared (see
+        /// `AudioDropZoneView.rejectRow`/`EventRowView.importErrorRow`), since each already lives
+        /// as a `private` method on a `View` with no public surface for another file to call.
+        private func errorRow(_ message: String) -> some View {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(ClaudioColor.error(colorScheme))
+                Text(message)
+                    .font(.system(size: 11))
+                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// Exhaustive over every ``MasterVolumeState`` case, no `default:`.
+    private func masterVolumeStateCaption(_ state: PreviewFixtures.MasterVolumeState) -> String {
+        switch state {
+        case .value(let volume): ".value(\(volume))"
+        case .failed(let volume, let message):
+            ".failed(volume: \(volume), message: \"\(message.prefix(24))…\")"
         }
     }
 
@@ -391,6 +477,15 @@
             Group {
                 EventRowGalleryView().preferredColorScheme(.light)
                 EventRowGalleryView().preferredColorScheme(.dark)
+            }
+        }
+    }
+
+    struct MasterVolumeGalleryView_Previews: PreviewProvider {
+        static var previews: some View {
+            Group {
+                MasterVolumeGalleryView().preferredColorScheme(.light)
+                MasterVolumeGalleryView().preferredColorScheme(.dark)
             }
         }
     }

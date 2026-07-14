@@ -26,11 +26,11 @@ import Foundation
 func runPreviewFixturesSuites() {
     // Replaces the former `expect(true, ...)` tautology (T14 review 修复②), which could never
     // fail yet still counted as a check. `assertExhaustive()` now RETURNS the `family.case`
-    // labels its four exhaustive `switch`es actually visited, so this compares that set against
+    // labels its six exhaustive `switch`es actually visited, so this compares that set against
     // the complete expected roster: a fixture array that stops covering one of its enum's cases
     // (a case whose `switch` branch exists but is never REACHED — which compiles perfectly)
     // turns this red.
-    suite("PreviewFixtures.assertExhaustive() visits every case of all FIVE state families") {
+    suite("PreviewFixtures.assertExhaustive() visits every case of all SIX state families") {
         let visited = PreviewFixtures.assertExhaustive()
         let expected: Set<String> = [
             "onboarding.claudeCodeNotInstalled", "onboarding.helperMissing",
@@ -56,6 +56,10 @@ func runPreviewFixturesSuites() {
             "dropZone.reject.overwritesBuiltin", "dropZone.reject.copyFailed",
             "coverage.present", "coverage.unmapped", "coverage.broken",
             "packCard.complete", "packCard.partial", "packCard.broken",
+            // 第六族（PLAN-MASTER-VOLUME.md D33/D38）：主音量控件行的展示态。少了它，写失败之后的
+            // 「行 + 错误行」组合帧——D16「音量 0 = 全局静音」这类最难手动复现的态——落地前零仓库内
+            // 视觉验证，而这条断言仍会全绿（因为其余五族依然完美覆盖它们自己的 case）。
+            "masterVolume.value", "masterVolume.failed",
         ]
         expect(
             visited == expected,
@@ -174,6 +178,30 @@ func runPreviewFixturesSuites() {
             absent == Set(Event.allCases),
             "every event must appear ABSENT on at least one card (the .broken/.partial cards),"
                 + " missing \(Set(Event.allCases).subtracting(absent).map(\.cliName).sorted())")
+    }
+
+    // MARK: - MasterVolumeState (PLAN-MASTER-VOLUME.md D33/D38): 6 fixtures, both cases covered,
+    // including at least one 「行 + 错误行」组合帧 (D39) — the hardest-to-reproduce-by-hand state.
+
+    suite("PreviewFixtures.masterVolumeStates covers both MasterVolumeState cases, exactly 6 fixtures (D38)") {
+        expect(
+            PreviewFixtures.masterVolumeStates.count == 6,
+            "D38 pins the gallery's master-volume family at exactly 6 frames, got"
+                + " \(PreviewFixtures.masterVolumeStates.count)")
+        let labels = Set(
+            PreviewFixtures.masterVolumeStates.map { state -> String in
+                switch state {
+                case .value: "value"
+                case .failed: "failed"
+                }
+            })
+        expect(
+            labels == ["value", "failed"],
+            "masterVolumeStates must cover both MasterVolumeState cases, got \(labels)")
+        expect(
+            PreviewFixtures.masterVolumeStates.contains(.value(0.0)),
+            "D16 pins volume == 0 as a legal, non-disabled state (global mute) — it must appear as"
+                + " its own frame, not be silently folded away")
     }
 
     suite("PreviewFixtures.packCards covers every PackCardState case × isSelected (true and false)") {

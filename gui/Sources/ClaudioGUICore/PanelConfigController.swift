@@ -62,6 +62,10 @@ public final class PanelConfigController: ObservableObject {
     /// `panelModel.muteError`（经 `panelModel` 这个 `@StateObject` 观测）—— 面板与写盘看的是同一个 error
     /// 源，分叉在类型层面不可能。
     @Published public private(set) var muteError: SetEventEnabledError?
+    /// 上一次主音量写盘的失败（`nil` 表示成功 / 还没拖过）——面板据此渲染红色 errorNotice。生命周期
+    /// 逐字镜像 ``muteError``：同样的「独占构造，不注入」理由（避免面板读一个实例、controller 写另一个
+    /// 的幽灵分叉），同样经 ``setMasterVolume(_:)`` republish（PLAN-MASTER-VOLUME.md 阶段 D，D39）。
+    @Published public private(set) var masterVolumeError: SetMasterVolumeError?
 
     private let configFile: URL
     private let lockFile: URL
@@ -69,6 +73,8 @@ public final class PanelConfigController: ObservableObject {
     /// 这个 controller **独占**它 —— 不注入（见 ``muteError`` 的文档：注入会开「幽灵实例」的口）。
     /// 拿 `lockFile`（= `config.lock`）构造，与切包写路径守同一把锁（锁分离 D9）。
     private let muteController: EventMuteController
+    /// 同上，主音量的写者（D27/D39）——独占构造，与 ``muteController`` 同一个理由。
+    private let masterVolumeController: MasterVolumeController
     /// 一次**全量** reload 之后，config 读模型之外还要做的跨-view-model 协调（onboarding 重探 + 两组
     /// import view-model `retarget` 到新包）。参数是刚重载出来的 config —— retarget 要用它的 `selectedPack`。
     private let afterFullReload: @MainActor (ClaudioConfig) -> Void
@@ -84,6 +90,7 @@ public final class PanelConfigController: ObservableObject {
         self.environment = environment
         // 独占构造，不注入 —— 结构性堵死「面板读一个实例、controller 写另一个」的幽灵分叉（见 muteError 文档）。
         self.muteController = EventMuteController(configFile: configFile, lockFile: lockFile)
+        self.masterVolumeController = MasterVolumeController(configFile: configFile, lockFile: lockFile)
         self.afterFullReload = afterFullReload
 
         let loadedState = loadPanelConfig(from: configFile)
@@ -95,6 +102,7 @@ public final class PanelConfigController: ObservableObject {
         self.packCards = availablePacks(config: loadedConfig, environment: environment)
         self.packSwitchError = nil
         self.muteError = nil
+        self.masterVolumeError = nil
     }
 
     /// 把 `event` 的静音位翻到当前值的**反面**，经 ``EventMuteController`` 写盘，再按结果路由刷新。
@@ -113,6 +121,32 @@ public final class PanelConfigController: ObservableObject {
         case .full: reload()
         case .noRefresh: break
         }
+    }
+
+    /// 写 `master_volume`（PLAN-MASTER-VOLUME.md 阶段 D，D27/D39/D43），经 ``MasterVolumeController``。
+    /// **整条逻辑都在这里**，与 ``toggleMute(_:)`` 同一个理由：写、republish 错误、按结果路由刷新
+    /// 三件事绑在一起，才不会在测不到的 View 里再裂出第二份「翻转 + 路由」的手抄副本。
+    ///
+    /// - Returns: 落地（已钳制）的值，success 时；`nil` 表示失败（``masterVolumeError`` 已记下原因）——
+    ///   调用方（``MasterVolumeRow``）据此让 `VolumeDragSession` 提交成功或回滚，从不自己猜。
+    /// - 成功 → `.configOnly`（D27，``reloadConfigOnly()``）：一次成功的写盘只翻了一个 `Double`，
+    ///   不可能牵动任何包的 manifest / 磁盘上有哪些包，全量刷新在这条路上纯属白扫。
+    /// - `.configMissing`（D43）→ `.full`（``reload()``）：`config.json` 被外部删掉，`configState` 必须
+    ///   重路由到 `.needsPack`，而那张「先选包」空态卡的自救入口是画廊，画廊必须新鲜。
+    /// - 其余「什么也证明不了」的失败（`.lockBusy` 除外）→ 仍走 `.configOnly`：理由与静音那一半
+    ///   ``panelRefreshRoute(muteSucceeded:error:)`` 完全相同，见那里的文档。
+    @discardableResult
+    public func setMasterVolume(_ volume: Double) -> Double? {
+        let landed = masterVolumeController.setVolume(volume)
+        // republish：面板读 `panelModel.masterVolumeError`，不直接读 masterVolumeController（那会开
+        // 幽灵实例的口，见 masterVolumeError 文档）。
+        masterVolumeError = masterVolumeController.lastError
+        switch masterVolumeRefreshRoute(succeeded: landed != nil, error: masterVolumeController.lastError) {
+        case .configOnly: reloadConfigOnly()
+        case .full: reload()
+        case .noRefresh: break
+        }
+        return landed
     }
 
     /// 切包，经 ``selectPack`` —— `claudio use` / `performFirstRunSetup` 用的**同一条**写路径。成功清

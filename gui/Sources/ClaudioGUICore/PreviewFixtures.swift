@@ -17,9 +17,10 @@ import Foundation
 //     swift build -c release --product ClaudioGUI        # release: what CI actually ships
 #if DEBUG
 
-/// The **single canonical catalog** of concrete sample values for every case of all four
-/// per-feature state families (ENGINEERING.md T14 D1): ``OnboardingState``,
-/// ``DropZoneState``, ``EventRow``/``CoverageState``, ``PackCard``/``PackCardState``.
+/// The **single canonical catalog** of concrete sample values for every case of all five
+/// per-feature state families (ENGINEERING.md T14 D1, plus PLAN-MASTER-VOLUME.md D33/D38's
+/// ``MasterVolumeState``): ``OnboardingState``, ``DropZoneState``, ``EventRow``/``CoverageState``,
+/// ``PackCard``/``PackCardState``, ``MasterVolumeState``.
 ///
 /// This is the ONE place in the repo that constructs sample state VALUES — both the state
 /// gallery (`ClaudioGUI`'s `StateGalleryView`, T14 D2) and, where a test already hard-coded
@@ -38,14 +39,14 @@ import Foundation
 /// sidesteps that class of bug entirely by never touching a real path).
 ///
 /// ## Exhaustiveness (T14 acceptance criterion 3, the load-bearing part)
-/// None of the four state enums below are `CaseIterable` (each has at least one
+/// None of the five state enums below are `CaseIterable` (each has at least one
 /// associated-value case), so there is no compiler-checked "did I fixture every case?" for
-/// free. The four `_coverage(_:)` functions at the bottom of this file are hand-written
+/// free. The five `_coverage(_:)` functions at the bottom of this file are hand-written
 /// exhaustive `switch`es over EVERY case of ``OnboardingState``, ``DropRejectionReason``
-/// (nested one level inside ``DropZoneState``), ``CoverageState``, and ``PackCardState`` —
-/// with no `default:` branch anywhere. The instant a new case is added to any of those four
-/// enums, EVERY `switch` in THIS repo that already omits `default:` (which includes these
-/// four, plus each type's own `OnboardingState.swift`/`DropZoneState.swift`/
+/// (nested one level inside ``DropZoneState``), ``CoverageState``, ``PackCardState``, and
+/// ``MasterVolumeState`` — with no `default:` branch anywhere. The instant a new case is added
+/// to any of those five enums, EVERY `switch` in THIS repo that already omits `default:` (which
+/// includes these five, plus each type's own `OnboardingState.swift`/`DropZoneState.swift`/
 /// `CoverageState.swift`/`PackGallery.swift` internals) stops compiling until a matching
 /// branch — and, by the convention this file establishes, a fixture — is added. `Package
 /// GallerySuite.swift` (T14 D3) additionally pins the RUNTIME shape (how many fixtures,
@@ -207,6 +208,45 @@ public enum PreviewFixtures {
             state: .broken(reason: "manifest.json 解析失败"), isSelected: false),
     ]
 
+    // MARK: - MasterVolumeState (PLAN-MASTER-VOLUME.md 阶段 D, D33/D38/D39)
+    //
+    // 主音量控件行在 state gallery 里的展示态。**这不是生产代码里一个真实存在的状态机**——生产端
+    // `MasterVolumeRow` 显示什么是两个独立事实的组合（`VolumeDragSession.draft` 当前的值 + 若有，
+    // `PanelConfigController.masterVolumeError` 那条写失败），从未被合并成一个真实类型。这个 enum
+    // 只是给 gallery 一个可以逐帧枚举的手柄，与其它四族「照抄生产类型」的做法不同，理由见下。
+    //
+    // D38：范围只到这一族的六帧（含至少一条「行 + 错误行」组合帧，D39）——D23 定稿的三个路由态
+    // （`.needsPack`/`.malformed`/`.unwritable`）不进 gallery（那三态根本不渲染 `MasterVolumeRow`，
+    // 走真机走查 ⑫⑬ 兜底，见 `TODOS.md` 登记的 `PanelRouteState` 族 P3）。
+
+    /// 六帧要覆盖的两个「形状」：滑块单独显示一个值，或者滑块回滚之后贴着一条错误行（D12 的瞬跳 +
+    /// D39 的组合帧）。
+    public enum MasterVolumeState: Sendable, Equatable {
+        /// 滑块显示 `volume`，没有错误行。
+        case value(Double)
+        /// 一次写盘失败之后（D12：draft 已经瞬跳回磁盘上的 `volume`），下方贴着一条错误行 `message`
+        /// （D39：`.writeFailed` 归 `PanelView` 渲染，`MasterVolumeRow` 自身零错误 UI）。
+        case failed(volume: Double, message: String)
+    }
+
+    /// D16：音量 0 是合法值（全局静音），不是"禁用"或"错误"——它必须有自己的一帧，不能被折进
+    /// 「随便一个值」里悄悄消失。0.35 是 21 档网格上的一个中间值（D45「干净渲染」那一类的代表）。
+    /// 两条 `.failed` 帧的文案直接取自 `SetMasterVolumeError.description`（真实文案，不是在这里
+    /// 手抄一遍好看的假句子——见 `onboardingActionStates` 头部同一条纪律）：一条是高频常态的锁竞争，
+    /// 一条是 D12 走查项 ⑧ 的真实场景（目录只读）。
+    public static let masterVolumeStates: [MasterVolumeState] = [
+        .value(0.0),
+        .value(0.35),
+        .value(ClaudioConfig.defaultMasterVolume),
+        .value(1.0),
+        .failed(volume: 0.8, message: SetMasterVolumeError.lockBusy.description),
+        .failed(
+            volume: 0.35,
+            message: SetMasterVolumeError.configWriteFailure(
+                reason: "~/.claudio 目录不可写，请检查权限后重试"
+            ).description),
+    ]
+
     // MARK: - Compile-time exhaustiveness guards
 
     /// Runs every `_coverage(_:)` guard below against its matching fixture array and RETURNS
@@ -235,6 +275,7 @@ public enum PreviewFixtures {
         for state in dropZoneStates { visited.insert("dropZone.\(dropZoneStateCoverage(state))") }
         for row in eventRows { visited.insert("coverage.\(coverageStateCoverage(row.coverage))") }
         for card in packCards { visited.insert("packCard.\(packCardStateCoverage(card.state))") }
+        for state in masterVolumeStates { visited.insert("masterVolume.\(masterVolumeStateCoverage(state))") }
         return visited
     }
 
@@ -336,6 +377,14 @@ public enum PreviewFixtures {
         case .complete: "complete"
         case .partial: "partial"
         case .broken: "broken"
+        }
+    }
+
+    /// Exhaustive over every ``MasterVolumeState`` case — no `default:`.
+    static func masterVolumeStateCoverage(_ state: MasterVolumeState) -> String {
+        switch state {
+        case .value: "value"
+        case .failed: "failed"
         }
     }
 }

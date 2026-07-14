@@ -176,6 +176,64 @@ func runPanelRefreshRouteSuites() {
                 + "得到：\(route)")
     }
 
+    // ── 主音量那一半（PLAN-MASTER-VOLUME.md 阶段 D，D27/D43）：同一个问题、同一种极性 ────────────
+    //
+    // `SetMasterVolumeError` 逐 case 镜像 `SetEventEnabledError`（同一份文件、同一把锁、同一套
+    // missing-config 策略），所以极性与 `panelRefreshRoute` 完全相同：
+    //   - 写成功（D27）：只翻了 config.json 里的一个 Double —— .configOnly，不扫包库。
+    //   - `.configMissing`（D43）：config.json 被外部删掉 → 全量 .full，重路由到 .needsPack。
+    //   - `.lockBusy`：可证明什么也没揭示 —— .noRefresh。
+    //   - 其余（`.lockFailed` / `.configReadFailure` / `.configWriteFailure` / nil）：证明不了没变 —— .configOnly。
+    suite("masterVolumeRefreshRoute：写成功 → 只重读 config（.configOnly），不扫包库") {
+        expect(
+            masterVolumeRefreshRoute(succeeded: true, error: nil) == .configOnly,
+            "一次成功的主音量写盘只翻了 config.json 里的一个 Double —— 它不可能改变任何包的 manifest、"
+                + "任何声音文件的存在性、或磁盘上有哪些包。走 .full = 拖一次滑块就在主线程上扫一遍整个"
+                + "包库。得到：\(masterVolumeRefreshRoute(succeeded: true, error: nil))")
+    }
+
+    suite("masterVolumeRefreshRoute：成功压过陈旧的 error —— 不许被上一次失败的残留改道") {
+        expect(
+            masterVolumeRefreshRoute(succeeded: true, error: .configMissing) == .configOnly,
+            "succeeded 必须压过 error —— 写成功了就是写成功了。得到："
+                + "\(masterVolumeRefreshRoute(succeeded: true, error: .configMissing))")
+        expect(
+            masterVolumeRefreshRoute(succeeded: true, error: .lockBusy) == .configOnly,
+            "同上：陈旧的 .lockBusy 不该把一次成功的写盘路由到别处去")
+    }
+
+    suite("masterVolumeRefreshRoute：.lockBusy → 什么都不做（.noRefresh）—— 我们连 config.json 都没打开过") {
+        expect(
+            masterVolumeRefreshRoute(succeeded: false, error: .lockBusy) == .noRefresh,
+            "另一个写者持着锁 —— 我们连 config.json 都没打开过，读模型不比拖动之前更陈。得到："
+                + "\(masterVolumeRefreshRoute(succeeded: false, error: .lockBusy))")
+    }
+
+    suite("masterVolumeRefreshRoute：证明不了「没变」→ 重读 config（.configOnly），但不扫包库") {
+        let cannotProveUnchanged: [(name: String, error: SetMasterVolumeError?)] = [
+            ("lockFailed(EACCES 13)", .lockFailed(errno: 13)),
+            ("lockFailed(EROFS 30)", .lockFailed(errno: 30)),
+            ("configReadFailure", .configReadFailure(reason: "master_volume is a string")),
+            ("configWriteFailure", .configWriteFailure(reason: "directory not writable")),
+            ("nil（失败却没记下错误）", nil),
+        ]
+        for failure in cannotProveUnchanged {
+            let route = masterVolumeRefreshRoute(succeeded: false, error: failure.error)
+            expect(
+                route == .configOnly,
+                "`.\(failure.name)`：证明不了 config.json 没变，必须重读（诚实失败卡才出得来），但包库没理由"
+                    + "变，不扫。得到：\(route)")
+        }
+    }
+
+    suite("masterVolumeRefreshRoute：.configMissing → 全量（.full）—— 自救的入口是画廊，它必须新鲜") {
+        expect(
+            masterVolumeRefreshRoute(succeeded: false, error: .configMissing) == .full,
+            "config.json 在面板已经打开之后被外部删掉 → configState 重路由到 .needsPack（D43）。判成"
+                + " .configOnly = 用户对着一份可能已经陈了的画廊做唯一的自救动作。得到："
+                + "\(masterVolumeRefreshRoute(succeeded: false, error: .configMissing))")
+    }
+
     // ── 整条链：磁盘 → setEventEnabled → EventMuteController → 路由 ────────────────────────────
     //
     // 上面那些是对纯函数打的（喂的是**手写**的 error）。这一条把它接回**真实磁盘状态**：一个真的不存在的

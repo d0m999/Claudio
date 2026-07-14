@@ -19,9 +19,17 @@ public struct AudioDropZoneView: View {
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     private let previewPlayer: AudioPreviewPlaying
+    /// The volume the auto-试听（on a successful import）should play at, resolved **at play
+    /// time**, never at construction time (PLAN-MASTER-VOLUME.md D28). A `Double` value here
+    /// instead of a closure would be captured once, in ``body``'s `.onAppear` below, and stay
+    /// frozen at whatever the master volume was the instant the panel opened — the exact bug
+    /// D28 exists to close. `previewVolume(for:)` (`ClaudioGUICore`) is the caller's normal way
+    /// to produce this from a `ClaudioConfig`.
+    private let currentVolume: () -> Double
 
-    public init(viewModel: AudioImportViewModel) {
+    public init(viewModel: AudioImportViewModel, currentVolume: @escaping () -> Double) {
         self.viewModel = viewModel
+        self.currentVolume = currentVolume
         self.previewPlayer = NSSoundAudioPreviewPlayer()
     }
 
@@ -42,8 +50,8 @@ public struct AudioDropZoneView: View {
             )
             .onDrop(of: [UTType.fileURL], isTargeted: hoverBinding, perform: handleDrop)
             .onAppear {
-                viewModel.onImportSucceeded = { [previewPlayer] file in
-                    previewPlayer.play(fileAt: file.destinationURL)
+                viewModel.onImportSucceeded = { [previewPlayer, currentVolume] file in
+                    previewPlayer.play(fileAt: file.destinationURL, volume: Float(currentVolume()))
                 }
             }
     }

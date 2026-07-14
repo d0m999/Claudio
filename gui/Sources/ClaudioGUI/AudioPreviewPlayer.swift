@@ -5,8 +5,15 @@ import Foundation
 /// (ENGINEERING.md T8 acceptance criterion 8: "复制进用户包 + 行内文件名更新 + 自动试听确认").
 /// A small protocol (not a bare `NSSound` call inline in the view) so `AudioDropZoneView`
 /// stays swappable, mirroring the DI pattern `ClaudioGUICore` uses throughout.
+///
+/// `volume` (PLAN-MASTER-VOLUME.md D2): every preview — the row-level 试听 ▶ button
+/// (`PanelView/playPreview(for:)`) and the drop-zone's auto-试听 on a successful import
+/// (`AudioDropZoneView`) — must play at the panel's current master volume, not always at
+/// `NSSound`'s own default of `1.0`. The caller resolves the value (via
+/// ``previewVolume(for:)``, `ClaudioGUICore`, the one clamp this repo has), never this
+/// protocol's conforming type re-deriving its own clamp table.
 protocol AudioPreviewPlaying {
-    func play(fileAt url: URL)
+    func play(fileAt url: URL, volume: Float)
 }
 
 /// Real implementation: `NSSound` is the simplest correct way to play a short local audio
@@ -25,8 +32,9 @@ protocol AudioPreviewPlaying {
 final class NSSoundAudioPreviewPlayer: AudioPreviewPlaying {
     private var currentSound: NSSound?
 
-    func play(fileAt url: URL) {
+    func play(fileAt url: URL, volume: Float) {
         let sound = NSSound(contentsOf: url, byReference: true)
+        sound?.volume = volume
         currentSound = sound
         sound?.play()
     }

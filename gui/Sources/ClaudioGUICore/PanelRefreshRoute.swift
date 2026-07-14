@@ -149,6 +149,31 @@ public func panelRefreshRoute(muteSucceeded: Bool, error: SetEventEnabledError?)
     }
 }
 
+/// 一次 ``MasterVolumeController/setVolume(_:)``（PLAN-MASTER-VOLUME.md 阶段 D，D27/D43）的结果 →
+/// 面板该做哪一种刷新。逐 case 镜像 ``panelRefreshRoute(muteSucceeded:error:)``：`SetMasterVolumeError`
+/// 与 `SetEventEnabledError` 本就是同一份文件、同一把锁、同一套 missing-config 策略的两张面孔
+/// （见 `MasterVolume.swift` 的类型文档「Mirrors SetEventEnabledError case-for-case」），极性没有理由不同。
+///
+/// - 写成功（D27）：只翻了 `config.json` 里的一个 `Double` —— `.configOnly`，不扫包库。
+/// - `.configMissing`（D43）：`config.json` 被外部删掉 → `.full`，重路由到 `.needsPack`（自救入口是画廊，
+///   必须新鲜）。
+/// - `.lockBusy`：可证明什么也没揭示（另一个写者持锁，我们连文件都没打开过）—— `.noRefresh`。
+/// - 其余（`.lockFailed` / `.configReadFailure` / `.configWriteFailure` / `nil`）：证明不了「没变」——
+///   `.configOnly`（去读盘，但只读便宜的那一半）。
+///
+/// 穷尽 switch：给 `SetMasterVolumeError` 加一个 case 而不在这里归类，编译不过。
+public func masterVolumeRefreshRoute(succeeded: Bool, error: SetMasterVolumeError?) -> PanelRefreshRoute {
+    if succeeded { return .configOnly }
+    switch error {
+    case .lockBusy?:
+        return .noRefresh
+    case .configMissing?:
+        return .full
+    case .lockFailed?, .configReadFailure?, .configWriteFailure?, nil:
+        return .configOnly
+    }
+}
+
 /// 一次**失败**的 ``selectPack(_:configFile:userPacksDirectory:bundledPacksDirectory:lockFile:)`` 之后，
 /// 面板该做哪一种刷新。
 ///
