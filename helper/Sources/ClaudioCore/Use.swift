@@ -13,6 +13,15 @@ public enum UseOutcome: Sendable, Equatable {
     case selected(packID: String)
 }
 
+/// `configReadFailure`/`configWriteFailure`/`lockBusy`/`lockFailed` mirror
+/// ``SetEventEnabledError``/``SetMasterVolumeError``'s cases of the same name — same file,
+/// same lock, same failure vocabulary. Their `description` strings must stay byte-for-byte
+/// identical across all three types: ``panelWriteFailures(muteError:packSwitchError:masterVolumeError:)``
+/// dedupes cross-writer failures (e.g. two writers hitting the same `.lockBusy`) by comparing
+/// `description` text, not case identity — a wording change here that drifts from the other two
+/// types silently stops that dedup from firing for this case (`PanelWriteFailuresSuite`'s
+/// cross-type `.lockBusy` suites catch the drift, but nothing here warns a future editor before
+/// they make it).
 public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidPackID(String)
     case packNotFound(String)

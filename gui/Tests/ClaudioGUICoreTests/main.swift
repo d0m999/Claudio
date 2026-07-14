@@ -87,6 +87,7 @@ runPanelConfigControllerSuites()
 runPanelFocusCoordinatorSuites()
 runPreviewFixturesSuites()
 runVolumeDragSessionSuites()
+runPanelWriteFailuresSuites()
 
 // MARK: - Summary
 
