@@ -795,5 +795,22 @@ func runViewWiringSuites() {
             "applyFirstFocus 必须只把**真的被渲染出来**的行送进焦点序 —— 非 .operational 态下"
                 + " eventRows 仍会算出四行（走 resolvedConfig 的空包默认值），但它们一个像素都没上屏；"
                 + "把它们送进开局焦点 = 焦点落在一个不存在的控件上")
+
+        // /codex review P2（341d9b7 之后一轮）：`.masterVolume` 的存在判据一度被写成 `isOperational`
+        // —— 但 `operationalPanel` 今天**零个** Slider 渲染，PLAN-MASTER-VOLUME.md 阶段 D（`MasterVolumeRow`）
+        // 还没落地。`isOperational` 在这里等于把「滑块存在」的判据从「视图真的渲染了它」偷换成「configState
+        // 恰好是 operational」——341d9b7 刚从三个边缘态（.needsPack/.malformed/.unwritable）里修掉的那类
+        // bug，会原样在最常见的 .operational 态复发。这条钉住 fail-closed 的那一半：只要 `MasterVolumeRow`
+        // 还没被引进 `operationalPanel`，这里就必须是字面量 `false`，不能是任何从 `configState` 派生的布尔。
+        expect(
+            panelCollapsed.contains(
+                "hasDetailToggle: hasDetailToggle, hasMasterVolume: false"),
+            "hasMasterVolume 必须钉在字面量 false，直到 PLAN-MASTER-VOLUME.md 阶段 D 落地 MasterVolumeRow"
+                + "（今天 operationalPanel 渲染零个 Slider）—— 换回 isOperational 或任何非 false 的表达式，"
+                + "会让 .masterVolume 在每次打开一个完全正常的面板时都抢一个不存在控件的焦点位，"
+                + "复现 341d9b7 刚修掉的那类 bug，只是从三个边缘态扩大到最常见的 .operational 态")
+        expect(
+            !panelCollapsed.contains("hasMasterVolume: isOperational"),
+            "hasMasterVolume 不得从 isOperational 派生 —— 那正是这次要挡的回归本身（见上一条断言）")
     }
 }

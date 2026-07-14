@@ -812,20 +812,25 @@ public struct PanelView: View {
         // `resolvedConfig`'s empty-pack default, would otherwise resolve to four `.unmapped` rows
         // that are never actually rendered).
         //
-        // `isOperational` also gates `hasMasterVolume` (fix for a `/codex review` P1): the master
-        // volume slider renders in the exact same `case .operational` branch of that switch as
-        // the event rows, so `visibleRows` and `hasMasterVolume` share ONE boolean rather than
-        // two independently-computed checks that could silently drift apart — the same class of
-        // bug (a focus target claiming a slot for a control that isn't on screen) that this
-        // fix closes for the slider itself.
         let isOperational: Bool = {
             if case .operational = panelModel.configState { return true }
             return false
         }()
         let visibleRows: [EventRow] = isOperational ? panelModel.eventRows : []
+        // hasMasterVolume: false (fix for a `/codex review` P2 on 341d9b7, which itself fixed a
+        // P1): `isOperational` is NOT a valid proxy for "the slider is on screen" yet — this repo
+        // is mid-way through PLAN-MASTER-VOLUME.md's staged rollout, and the actual slider view
+        // (`MasterVolumeRow`, 阶段 D) has not landed. `operationalPanel` renders zero master-volume
+        // control today (grep the target: no `Slider` bound to `.masterVolume` exists anywhere in
+        // `gui/Sources/ClaudioGUI`), so passing `isOperational` here reintroduces the exact bug
+        // 341d9b7 closed — just widened from three edge-case configStates to the common
+        // `.operational` one. Flip this back to `isOperational` ONLY when 阶段 D lands
+        // `MasterVolumeRow` in `operationalPanel` (ViewWiringSuite pins the literal `false` here
+        // and fails the moment this line reads anything else, so this is not a "remember to come
+        // back" — the test does the remembering).
         focusedTarget = panelOpeningFocus(
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
-            hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational)
+            hasDetailToggle: hasDetailToggle, hasMasterVolume: false)
     }
 
     // MARK: - Actions
