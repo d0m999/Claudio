@@ -17,7 +17,8 @@ import Foundation
 // `EventMuteControllerSuite.swift`, `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
 // `ContrastHexParsingSuite.swift`,
 // `PanelTypeSizeSuite.swift`, `PanelConfigSuite.swift`, `PanelFocusCoordinatorSuite.swift`,
-// `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`).
+// `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`,
+// `VolumeDragSessionSuite.swift`).
 
 var totalChecks = 0
 var failures = 0
@@ -85,6 +86,7 @@ runPanelRefreshRouteSuites()
 runPanelConfigControllerSuites()
 runPanelFocusCoordinatorSuites()
 runPreviewFixturesSuites()
+runVolumeDragSessionSuites()
 
 // MARK: - Summary
 
