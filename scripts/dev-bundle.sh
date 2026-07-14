@@ -5,12 +5,15 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 APP="dist/Claudio.app"
 
+# 建之前先清旧 bundle：若下面任一 `swift build` 因编译错误退出（set -e），旧 dist/Claudio.app
+# 不能留在原地——否则走查者会 `open` 到上一次成功构建的旧二进制，却以为测的是这次改动。
+rm -rf "$APP"
+
 # `--product ClaudioGUI` 不是可省的修饰：裸 `swift build -c release` 会连 claudio-gui-tests
 # 一起建，而它引用 `#if DEBUG` 门控的 PreviewFixtures，Release 下编译不过（gui/Package.swift:18-23）。
 swift build -c release --package-path gui --product ClaudioGUI
 swift build -c release --package-path helper
 
-rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/packs"
 cp "$(swift build -c release --package-path gui --product ClaudioGUI --show-bin-path)/ClaudioGUI" \
    "$APP/Contents/MacOS/Claudio"
@@ -39,4 +42,4 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 codesign --force --deep --sign - "$APP"
 codesign --verify --verbose "$APP"
-echo "✅ $APP —— 用 open dist/Claudio.app 启动（菜单栏出现波形图标，无 Dock 图标）"
+echo "✅ $APP（$(uname -m)）—— 用 open $APP 启动（菜单栏出现波形图标，无 Dock 图标）"
