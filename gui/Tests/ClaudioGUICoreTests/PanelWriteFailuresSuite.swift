@@ -6,11 +6,15 @@ import Foundation
 //
 // ## 这个 suite 存在的理由（PLAN-MASTER-VOLUME.md Step 5，阶段 C2 · D3）
 //
-// `PanelView.operationalPanel` 今天有两条并列的 `if let error = …, error != .configMissing { errorNotice(…) }`
-// （静音 / 切包），Step 3 落地的主音量写者即将成为第三条。三条并列的 `if let` 各自决定「渲染不渲染」，却
-// 从来没人决定过「两条同时非 nil、且文案逐字相同（比如都撞上 `.lockBusy`）时该显示一遍还是两遍」——因为
-// 三个写者共享同一把 `config.lock`、同一份 `config.json`，**同时**撞上同一种失败不是理论情形。这个纯函数
-// 把「哪些该显示」「显示几遍」「显示顺序」从三段并列 `if let` 收拢成一个可测的决策点。
+// `PanelView.operationalPanel` **曾**有两条并列的 `if let error = …, error != .configMissing { errorNotice(…) }`
+// （静音 / 切包）。那种形状里每条 `if let` 各自决定「渲染不渲染」，却从来没人决定过「两条同时非 nil、且文案
+// 逐字相同（比如都撞上 `.lockBusy`）时该显示一遍还是两遍」——因为三个写者共享同一把 `config.lock`、同一份
+// `config.json`，**同时**撞上同一种失败不是理论情形。这个纯函数把「哪些该显示」「显示几遍」「显示顺序」
+// 收拢成一个可测的决策点。
+//
+// 阶段 D（8771946）落地后主音量成了第三个写者，面板侧的并列 `if let` **一条不剩**，改成单条
+// `ForEach(panelWriteFailures(muteError:packSwitchError:masterVolumeError:))`。（此处原用现在时写「今天有两条
+// 并列的 if let」+「即将成为第三条」，两句在阶段 D 当天就都成了假话 —— `/codex review 8771946`。）
 //
 // ## 为什么 dedupe 按 description 字符串比较，不是按 case
 //

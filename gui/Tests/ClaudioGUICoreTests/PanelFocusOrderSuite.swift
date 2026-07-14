@@ -333,9 +333,10 @@ func runPanelFocusOrderSuites() {
         // picked, or a corrupted/unwritable config.json), not a fixture-only edge case. Neither
         // the event rows nor the slider are on screen there, so first focus must land on
         // `.dropZone` (still unconditionally rendered/operable in every configState). Note:
-        // `hasMasterVolume` is a literal `false` here, NOT derived from `configState` — a
-        // `/codex review` P2 finding that `.operational` alone isn't a valid proxy for "slider is
-        // rendered" until PLAN-MASTER-VOLUME.md 阶段 D lands (see `PanelFocusOrder.swift`).
+        // `hasMasterVolume` is a literal `false` here because this fixture models a NON-operational
+        // panel, and `MasterVolumeRow` is rendered by exactly one branch of `operationalPanel` —
+        // the `.operational` one. Since PLAN-MASTER-VOLUME.md 阶段 D landed (8771946), the real
+        // caller passes `isOperational`, so `false` is what it would pass for this shape too.
         expect(
             panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"], hasMasterVolume: false) == .dropZone,
             "opening focus must be the drop zone, never .masterVolume, when the slider isn't"
@@ -373,9 +374,9 @@ func runPanelFocusInFlightSuites() {
             EventRow(event: event, coverage: .unmapped, enabled: true)
         }
         // 全 unmapped：每行的 action 槽是永远可操作的导入入口，所以首焦点仍是第一行。4 行真事件、
-        // ctaOperable: false 是真实操作态的形状；`hasMasterVolume: true` 是虚构值，只用来测这个
-        // flag 本身的行为——Phase D（MasterVolumeRow）落地前，真实的 `.operational` 面板从不会
-        // 真的渲染滑块（`/codex review` P2）。
+        // ctaOperable: false、`hasMasterVolume: true` —— 阶段 D（MasterVolumeRow，8771946）落地后
+        // 这整个组合都是**真实**操作态的形状，不再是为测 flag 而拼的虚构值：`.operational` 面板
+        // 今天确实渲染滑块，真实调用方（`PanelView.applyFirstFocus`）传的就是 `isOperational`。
         expect(
             panelOpeningFocus(rows: rows, packCardIDs: [], ctaOperable: false, hasMasterVolume: true)
                 == .eventAction(Event.allCases[0]),

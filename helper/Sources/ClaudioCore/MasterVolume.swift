@@ -1,9 +1,13 @@
 import Foundation
 
-/// Master-volume write-back (ENGINEERING.md「面板 UI 线框」`🔊 主音量 ●———————` +「交互状态覆盖表 ·
-/// 主音量」): flips `config.json`'s `master_volume` — the panel's volume slider is its (future)
-/// real caller, mirroring ``setEventEnabled(_:enabled:configFile:lockFile:)``'s relationship to
-/// the mute button.
+/// Master-volume write-back (ENGINEERING.md「交互状态覆盖表 · 主音量」): flips `config.json`'s
+/// `master_volume` — the panel's volume slider is its real caller, exactly as
+/// ``setEventEnabled(_:enabled:configFile:lockFile:)`` stands to the mute button.
+///
+/// That caller is live as of PLAN-MASTER-VOLUME.md 阶段 D (8771946): `MasterVolumeRow` →
+/// `PanelConfigController.setMasterVolume(_:)` → `MasterVolumeController` → here. (This doc said
+/// "(future) real caller" until then; it also cited ENGINEERING.md's ASCII wireframe, whose
+/// `🔊` speaker glyph the shipped row deliberately does NOT render — D15. `/codex review 8771946`.)
 ///
 /// The third writer of `config.json`, alongside
 /// ``selectPack(_:configFile:userPacksDirectory:bundledPacksDirectory:lockFile:)`` and

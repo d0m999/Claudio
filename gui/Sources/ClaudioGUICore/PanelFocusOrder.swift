@@ -61,15 +61,24 @@ public enum PanelFocusScope: Sendable, Equatable {
     /// assumption into this function); `packCardIDs` mirrors ``PackCard/id``'s gallery order
     /// (``availablePacks(config:environment:)``'s sorted-by-id output).
     ///
-    /// `hasMasterVolume` (fix for a `/codex review` P1, 阶段 C4 收尾; pinned back to a literal
-    /// `false` by a `/codex review` P2 — see ``PanelView/applyFirstFocus()``): whether the
-    /// master volume slider is ACTUALLY ON SCREEN right now. `configState == .operational` is
-    /// NOT a valid proxy for this: ``PanelView/operationalPanel`` renders zero `Slider`s until
-    /// PLAN-MASTER-VOLUME.md 阶段 D (`MasterVolumeRow`) lands, so an `.operational` panel today
-    /// never actually shows one. `.needsPack`/`.malformed`/`.unwritable` never render it either
-    /// (they show the empty-state/failure card instead). Defaults to `false` (fail-closed, same
-    /// reasoning as `hasDetailToggle`): a caller must not claim a slot for a control it doesn't
-    /// independently know is on screen.
+    /// `hasMasterVolume` (fix for a `/codex review` P1, 阶段 C4 收尾): whether the master volume
+    /// slider is ACTUALLY ON SCREEN right now.
+    ///
+    /// PLAN-MASTER-VOLUME.md 阶段 D has landed (`MasterVolumeRow`, 8771946), and
+    /// ``PanelView/operationalPanel``'s `.operational` case is the ONLY branch that renders it —
+    /// `.needsPack`/`.malformed`/`.unwritable` show the empty-state/failure card instead. So
+    /// ``PanelView/applyFirstFocus()`` now passes `isOperational` here, and that IS a valid
+    /// proxy: the render decision and the focus decision are the same `switch configState`, read
+    /// twice. (Before 阶段 D it was pinned to a literal `false` by a `/codex review` P2, precisely
+    /// because `operationalPanel` rendered zero `Slider`s back then — flipping it to
+    /// `isOperational` is not a regression of that fix, it is the fix's own stated exit
+    /// condition. `ViewWiringSuite` pins both halves and fails the moment either drifts.)
+    ///
+    /// Still defaults to `false` (fail-closed, same reasoning as `hasDetailToggle`), and that
+    /// default is NOT vestigial: this function is Core, it cannot see `configState` and must
+    /// never try to derive this itself. A caller must not claim a focus slot for a control it
+    /// doesn't independently know is on screen — the coupling has to be re-asserted at each call
+    /// site, honestly, every time.
     case operational(
         events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false,
         hasMasterVolume: Bool = false)
@@ -215,12 +224,20 @@ public func panelFirstFocusTarget(
 /// to filter — ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` handles that scope directly.
 ///
 /// `hasMasterVolume` defaults to `false` (fail-closed) and must be supplied by the caller as an
-/// explicit, honest signal — same reasoning as `hasDetailToggle`. It is NOT derivable from
-/// `configState == .operational` (that coupling was tried in 341d9b7 and reverted by a
-/// `/codex review` P2: `.operational` alone doesn't mean the slider is rendered —
-/// ``PanelView/operationalPanel`` shows zero `Slider`s before PLAN-MASTER-VOLUME.md 阶段 D
-/// lands). `PanelView.applyFirstFocus` currently passes a literal `false` here until Phase D
-/// ships a real `MasterVolumeRow` (``PanelView/applyFirstFocus()``).
+/// explicit, honest signal — same reasoning as `hasDetailToggle`. This function is Core: it
+/// cannot see `configState` and must never derive the flag itself.
+///
+/// PLAN-MASTER-VOLUME.md 阶段 D has landed (8771946): ``PanelView/applyFirstFocus()`` now passes
+/// `isOperational`, because `MasterVolumeRow` is rendered by exactly one branch of
+/// ``PanelView/operationalPanel`` — the `.operational` one. That makes the two decisions the same
+/// `switch configState` read twice, which is what makes the flag honest here.
+///
+/// History, so nobody re-litigates it: the coupling was first tried in 341d9b7 and reverted by a
+/// `/codex review` P2, back when `operationalPanel` rendered zero `Slider`s — `.operational` then
+/// genuinely did NOT mean "the slider is on screen", so the caller was pinned to a literal
+/// `false`. 阶段 D is the exit condition that P2 itself named. Do NOT "restore" the literal
+/// `false`: it would make the slider unreachable by Tab/VoiceOver while it is visibly on screen.
+/// `ViewWiringSuite` pins the call site in both directions and fails either way it drifts.
 public func panelOpeningFocus(
     rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true,
     hasDetailToggle: Bool = false, hasMasterVolume: Bool = false

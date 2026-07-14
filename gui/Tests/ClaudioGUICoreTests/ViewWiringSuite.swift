@@ -691,13 +691,19 @@ func runViewWiringSuites() {
         }
         expect(
             controller.contains("focusCoordinator.notePanelHidden()"),
-            "popoverDidClose 必须告诉 coordinator 面板不在屏幕上了 —— 这是 view-model 判断"
-                + "「一条失败诞生时有没有人在看」的唯一依据")
+            "popoverDidClose 必须告诉 coordinator 面板不在屏幕上了 —— 这一个信号今天驮着**两件**事："
+                + "① OnboardingViewModel 判断「一条失败诞生时有没有人在看」；② MasterVolumeRow 的冲刷"
+                + "（阶段 D / D22：拖动本身不写盘，popover 关闭就是那次拖动唯一的落盘时机）")
 
         // 这不是普通的文本绊线，它钉的是**顺序**：`popoverDidClose` 里那句 `guard NSApp.isActive`
         // 在「用户切到别的 app 导致 popover 关闭」这条路径上会直接 return —— 而那**正是** T17d 修的
         // 那个 bug 的主路径。把 notePanelHidden() 挪到 guard 之后，编译绿、上面那条 contains 也绿，
         // 而 bug 原封不动地复活，且只在最常见的那条路径上复活。所以顺序本身必须是一条断言。
+        //
+        // 阶段 D（8771946）之后这条顺序守的是**两个** bug，不是一个：主音量的冲刷（D22/D37）明确
+        // 依赖同一条 `notePanelHidden()` 的位置来继承这条排序保证（MasterVolumeRow.swift 的
+        // `focusCoordinator` doc 逐字写着这一点）。下面那条失败消息以前只报 onboarding 那一半 ——
+        // 绊线响的时候，失败消息是唯一会被读的那段文字，它漏掉的后果等于不存在（`/codex review 8771946`）。
         guard let hidden = controller.range(of: "focusCoordinator.notePanelHidden()"),
             let guardIsActive = controller.range(of: "guard NSApp.isActive")
         else {
@@ -707,8 +713,10 @@ func runViewWiringSuites() {
         expect(
             hidden.lowerBound < guardIsActive.lowerBound,
             "notePanelHidden() 必须出现在 `guard NSApp.isActive` **之前**。放在之后 = 切换 app 关闭"
-                + "面板这条路径永远收不到隐藏信号（那句 guard 会提前 return），而那恰恰是「点完接管就"
-                + "切走、安装在后台失败」的那条路径 —— 静默失败当场复活")
+                + "面板这条路径永远收不到隐藏信号（那句 guard 会提前 return），而「点了别的 app」正是"
+                + "关闭 popover 最常见的一条路径。两个 bug 会当场一起复活：①「点完接管就切走、安装在"
+                + "后台失败」的静默失败（T17d）；②「拖到新值后点别的 app 关掉面板」时那次拖动静默"
+                + "丢失（阶段 D / D22/D37 —— 主音量拖动本身一个字节都不写）")
     }
 
     suite("OnboardingView 渲染任何失败，而不是只渲染接管的失败（T17c）") {
@@ -974,6 +982,43 @@ func runViewWiringSuites() {
                 + "在、冲刷没了，用户拖完点面板外面关 popover，那次拖动**静默丢失**。这正是本条断言上一版"
                 + "（只查修饰符字面量在不在）放过去的那个变异体，实测存活、1973 checks 全绿。"
                 + "闭包体实际是：\(body)")
+    }
+
+    suite("MasterVolumeRow：VoiceOver 是读数的唯一交付通道，删掉它 = 盲用户彻底听不到音量（D15）") {
+        // D15 把百分比读数从**屏幕上**拿掉了（无「80%」文字，照抄 macOS 系统音量滑块），代价是
+        // `.accessibilityValue` 成了这个值**唯一**的交付通道 —— 对 VoiceOver 用户，删掉那一行不是
+        // 「少一点 a11y 修饰」，是这一整个控件从此不报数。
+        //
+        // 而本 suite 对 MasterVolumeRow 原有的 8 条断言里，**没有一条**读 accessibilityLabel/Value
+        // （`/codex review 8771946` 完备性批评）：删掉 `.accessibilityValue`，1976 checks 全绿。
+        // 一个「屏幕上没有、VO 里也没有」的值，就是压根不存在的值。
+        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+            expect(false, "读不到 MasterVolumeRow.swift")
+            return
+        }
+        let flat = collapsingWhitespace(row)
+        expect(
+            flat.contains(".accessibilityLabel("),
+            "MasterVolumeRow 必须给 Slider 一个 accessibilityLabel —— 没有它，VO 停在这个控件上只会"
+                + "念一句「滑块」，用户不知道自己在调什么")
+        expect(
+            flat.contains(".accessibilityValue("),
+            "MasterVolumeRow 必须给 Slider 一个 accessibilityValue —— D15 把百分比读数从屏幕上拿掉了，"
+                + "这是那个数字**唯一**的交付通道。删掉它，VO 用户听不到任何音量值，而屏幕上也没有 ——"
+                + "这个值对他们从此不存在")
+        // 读数必须来自**会话草稿**（拖动中的实时值），不是磁盘值：拖动期间一个字节都不写盘
+        // （VolumeDragSession 规则 1），若 VO 念的是 diskVolume，用户拖动时听到的是拖动**之前**的
+        // 那个数，全程不动 —— 一个永远滞后的读数比没有读数更糟。
+        expect(
+            flat.contains("session.draft"),
+            "accessibilityValue 必须读 session.draft（拖动中的草稿值），不是 diskVolume —— 拖动期间不"
+                + "写盘，念磁盘值 = VO 用户拖着滑块却始终听到旧数字")
+        // Text("主音量") 必须对 VO 隐藏：它与 accessibilityLabel 同字，不隐藏 VO 会在这一行停两次
+        // （一次念 Text、一次念 Slider 的 label）。
+        expect(
+            flat.contains(".accessibilityHidden(true)"),
+            "MasterVolumeRow 的可视标签 Text(\"主音量\") 必须 .accessibilityHidden(true) —— 它与 Slider 的"
+                + " accessibilityLabel 同字，不隐藏 VO 会在这一行停两次、把同一个词念两遍")
     }
 
     suite("MasterVolumeRow：willTerminate 必须同步冲刷（D22-bis，且不得复用 hideCount 那套计数器机制）") {

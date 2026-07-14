@@ -1,7 +1,7 @@
 import ClaudioCore
 import Foundation
 
-/// 一次 config 写盘（静音 / 切包）之后，面板必须做**哪一种**刷新。
+/// 一次 config 写盘（静音 / 切包 / 主音量）之后，面板必须做**哪一种**刷新。
 ///
 /// ## 为什么这个判断值得从 `PanelView` 里拆出来（`/codex review 573336d` [P2]，两个变异均为实测）
 ///
@@ -177,9 +177,13 @@ public func masterVolumeRefreshRoute(succeeded: Bool, error: SetMasterVolumeErro
 /// 一次**失败**的 ``selectPack(_:configFile:userPacksDirectory:bundledPacksDirectory:lockFile:)`` 之后，
 /// 面板该做哪一种刷新。
 ///
-/// 与 ``panelRefreshRoute(muteSucceeded:error:)`` 是**同一个问题的另一半**，同一种极性 —— 静音和切包是面板
-/// 仅有的两条 config 写路径，它们撞上同一份被外部改坏的 `config.json` 时必须给出同一个答案。上一版切包的
-/// 失败分支**只记 error、从不刷新**（`/codex review` 第二条 [P1]）。
+/// 与 ``panelRefreshRoute(muteSucceeded:error:)``、``masterVolumeRefreshRoute(succeeded:error:)`` 是**同一个
+/// 问题的三面**，同一种极性 —— 静音、切包、主音量（阶段 D，8771946）是面板仅有的三条 config 写路径，它们撞上
+/// 同一份被外部改坏的 `config.json` 时必须给出同一个答案。上一版切包的失败分支**只记 error、从不刷新**
+/// （`/codex review` 第二条 [P1]）。
+///
+/// （此处原写「静音和切包是面板仅有的**两条** config 写路径」—— 主音量在同一个 commit 里成为第三条时，这句话
+/// 就成了假话，而 `masterVolumeRefreshRoute` 当时就写在它上方 16 行。`/codex review 8771946`。）
 ///
 /// 问的仍然是那一个问题：**这次失败之后，我还能不能证明读模型没变陈？**
 ///

@@ -17,10 +17,14 @@ import Foundation
 //     swift build -c release --product ClaudioGUI        # release: what CI actually ships
 #if DEBUG
 
-/// The **single canonical catalog** of concrete sample values for every case of all five
-/// per-feature state families (ENGINEERING.md T14 D1, plus PLAN-MASTER-VOLUME.md D33/D38's
-/// ``MasterVolumeState``): ``OnboardingState``, ``DropZoneState``, ``EventRow``/``CoverageState``,
+/// The **single canonical catalog** of concrete sample values for every case of every per-feature
+/// state family (ENGINEERING.md T14 D1, plus PLAN-MASTER-VOLUME.md D33/D38's ``MasterVolumeState``):
+/// ``OnboardingState``, ``OnboardingActionState``, ``DropZoneState``, ``EventRow``/``CoverageState``,
 /// ``PackCard``/``PackCardState``, ``MasterVolumeState``.
+///
+/// 权威清单是 ``assertExhaustive()`` 实际遍历的那几个数组 —— **不是**这段散文里的族数。原文写死了
+/// 「all five」，而它在 T17 加进 `OnboardingActionState` 那天就已经数错，阶段 D 又添一族
+/// （`/codex review 8771946`）。一个写死的计数总会过期；下面那个函数不会。
 ///
 /// This is the ONE place in the repo that constructs sample state VALUES — both the state
 /// gallery (`ClaudioGUI`'s `StateGalleryView`, T14 D2) and, where a test already hard-coded
@@ -264,8 +268,11 @@ public enum PreviewFixtures {
     /// own exhaustive-`switch` guarantee (a branch EXISTS for every case) never covered that: a
     /// branch nothing ever reaches compiles perfectly.
     ///
-    /// Still also serves its original purpose: it keeps the four `switch`es below demonstrably
-    /// live code, so a future cleanup can't delete the enforcement mechanism as unreferenced.
+    /// Still also serves its original purpose: it keeps every `…Coverage(_:)` `switch` below
+    /// demonstrably live code, so a future cleanup can't delete the enforcement mechanism as
+    /// unreferenced. (This line used to promise "the four `switch`es below" — there are nine today,
+    /// and that count was already wrong before 阶段 D added the ninth. A hard-coded tally in prose
+    /// is a claim nobody re-checks; `/codex review 8771946`.)
     public static func assertExhaustive() -> Set<String> {
         var visited: Set<String> = []
         for state in onboardingStates { visited.insert("onboarding.\(onboardingStateCoverage(state))") }
