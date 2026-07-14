@@ -1291,15 +1291,18 @@ func runOnboardingActionsFixSuites() {
             "失败行画在按钮上方，焦点序跟随视觉序。得到 \(onboarding)")
 
         let operational = panelFocusOrder(
-            .operational(events: [], packCardIDs: [], hasDetailToggle: true))
-        // .masterVolume 在 .operational scope 里恒出现（不依赖 events 非空），排在 .dropZone 之前
+            .operational(events: [], packCardIDs: [], hasDetailToggle: true, hasMasterVolume: true))
+        // hasMasterVolume: true —— 这条测试关心的是 revealDetail/disconnect 的相对顺序，跟主音量
+        // 无关，显式给 true 只是让这个 fixture 继续代表「滑块真的渲染在屏幕上」那一半（`/codex
+        // review` P1 修复后，.masterVolume 不再是 .operational scope 里的恒定行为，见
+        // PanelFocusOrderSuite 对 hasMasterVolume: false 那一半的测试）。排在 .dropZone 之前
         // ——PLAN-MASTER-VOLUME.md D41；零事件行只是 fixture，生产恒 4 行。
         expect(
             operational == [.masterVolume, .dropZone, .revealDetail, .disconnect],
             "运行态：失败行在「断开连接」之上。得到 \(operational)")
 
         let withoutToggle = panelFocusOrder(
-            .operational(events: [], packCardIDs: [], hasDetailToggle: false))
+            .operational(events: [], packCardIDs: [], hasDetailToggle: false, hasMasterVolume: true))
         expect(
             !withoutToggle.contains(.revealDetail),
             "没有失败行时不该凭空多一个焦点位。得到 \(withoutToggle)")

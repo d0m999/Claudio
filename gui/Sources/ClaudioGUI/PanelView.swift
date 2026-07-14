@@ -811,13 +811,21 @@ public struct PanelView: View {
         // list for every non-operational state rather than `eventRows` (which, off
         // `resolvedConfig`'s empty-pack default, would otherwise resolve to four `.unmapped` rows
         // that are never actually rendered).
-        let visibleRows: [EventRow] = {
-            if case .operational = panelModel.configState { return panelModel.eventRows }
-            return []
+        //
+        // `isOperational` also gates `hasMasterVolume` (fix for a `/codex review` P1): the master
+        // volume slider renders in the exact same `case .operational` branch of that switch as
+        // the event rows, so `visibleRows` and `hasMasterVolume` share ONE boolean rather than
+        // two independently-computed checks that could silently drift apart — the same class of
+        // bug (a focus target claiming a slot for a control that isn't on screen) that this
+        // fix closes for the slider itself.
+        let isOperational: Bool = {
+            if case .operational = panelModel.configState { return true }
+            return false
         }()
+        let visibleRows: [EventRow] = isOperational ? panelModel.eventRows : []
         focusedTarget = panelOpeningFocus(
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
-            hasDetailToggle: hasDetailToggle)
+            hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational)
     }
 
     // MARK: - Actions

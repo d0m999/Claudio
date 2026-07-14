@@ -60,7 +60,17 @@ public enum PanelFocusScope: Sendable, Equatable {
     /// "exactly `Event.allCases`'s order" as its own assertion rather than baking that
     /// assumption into this function); `packCardIDs` mirrors ``PackCard/id``'s gallery order
     /// (``availablePacks(config:environment:)``'s sorted-by-id output).
-    case operational(events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false)
+    ///
+    /// `hasMasterVolume` (fix for a `/codex review` P1, 阶段 C4 收尾): whether the master
+    /// volume slider is ACTUALLY ON SCREEN right now. `configState == .operational` is the
+    /// only state that renders it — `.needsPack`/`.malformed`/`.unwritable` show the
+    /// empty-state/failure card instead (``PanelView/operationalPanel``) and have never
+    /// rendered a slider at all. Defaults to `false` (fail-closed, same reasoning as
+    /// `hasDetailToggle`): a caller that doesn't know about master volume must not
+    /// accidentally claim a slot for a control it never rendered.
+    case operational(
+        events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false,
+        hasMasterVolume: Bool = false)
 }
 
 /// The panel's Tab/Shift+Tab traversal order for its current ``PanelFocusScope`` —
@@ -83,13 +93,17 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         if hasSecondaryAction { order.append(.onboardingSecondaryAction) }
         return order
 
-    case .operational(let events, let packCardIDs, let hasDetailToggle):
+    case .operational(let events, let packCardIDs, let hasDetailToggle, let hasMasterVolume):
         var order: [PanelFocusTarget] = []
         for event in events {
             order.append(.eventAction(event))
             order.append(.eventMute(event))
         }
-        order.append(.masterVolume)
+        // 只有滑块真的渲染在屏幕上才进 order —— 不然「不在屏幕上的控件不得占用焦点位」这条
+        // 铁律（见 `PanelView.applyFirstFocus` 同一句注释）在这条 case 里就是一句空话
+        // （`/codex review` 2626083/47459a7 抓到的 P1：这里曾经无条件 append，`.needsPack`/
+        // `.malformed`/`.unwritable` 下会把首焦点指向一个不存在的控件）。
+        if hasMasterVolume { order.append(.masterVolume) }
         order.append(.dropZone)
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
         // 面板最底部：失败行（若有）在「断开连接」之上 —— 焦点序跟随视觉序。
@@ -136,7 +150,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// — was written before `ctaOperable` existed and was false the moment it landed.)
 ///
 /// The OPERATIONAL scope never returns `nil`: it always contains ``PanelFocusTarget/dropZone``,
-/// which is unconditionally operable.
+/// which is unconditionally operable — true regardless of `hasMasterVolume`, since `.dropZone`
+/// is appended unconditionally (``PanelView/operationalPanel`` renders the drop zone in every
+/// `configState`, not just `.operational`).
 ///
 /// 焦点在 in-flight 期间该落到哪，是一个仍未定的产品问题（见 TODOS「in-flight 期间 onboarding 的
 /// 键盘焦点无处可去」）—— 当前行为是**诚实的空**，不是一个已经想清楚的答案。
@@ -164,10 +180,12 @@ public func panelFirstFocusTarget(
             // 所以这个 target 压根不会在 in-flight 的 order 里 —— 但仍显式跟随 `ctaOperable`，
             // 免得未来某次改动让它悄悄留在一个全禁用的面板上。
             return ctaOperable
-        // .masterVolume (PLAN-MASTER-VOLUME.md D23 定稿 + D41): 滑块只存在于完全可运行的面板
-        // （.needsPack / .malformed / .unwritable 都不渲染它），所以 .operational scope 里它
-        // 恒可操作 —— this `true` is load-bearing for it, same as the other never-filtered
-        // targets in this case.
+        // .masterVolume (PLAN-MASTER-VOLUME.md D23 定稿 + D41): unconditionally operable
+        // WHEN PRESENT — but whether it's present at all is now decided upstream by
+        // `hasMasterVolume` (``PanelFocusScope/operational(events:packCardIDs:hasDetailToggle:hasMasterVolume:)``),
+        // not by this switch. If `hasMasterVolume` was `false`, `panelFocusOrder(_:)` never put
+        // `.masterVolume` in the order in the first place, so this arm simply never sees it —
+        // this `true` only fires for a slider that is ACTUALLY on screen.
         case .eventMute, .dropZone, .packCard, .masterVolume:
             return true
         }
@@ -193,12 +211,19 @@ public func panelFirstFocusTarget(
 ///
 /// Onboarding is deliberately out of scope: it has no rows, so it has no `.eventAction` targets
 /// to filter — ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` handles that scope directly.
+///
+/// `hasMasterVolume` defaults to `false` (fail-closed) and must be supplied by the caller as an
+/// explicit, honest signal — same reasoning as `hasDetailToggle`. `PanelView.applyFirstFocus`
+/// derives it from the exact same `configState == .operational` check that decides `rows`, so
+/// the two can never drift apart: either both reflect a truly-operational panel, or both reflect
+/// one that isn't (``PanelView/applyFirstFocus()``).
 public func panelOpeningFocus(
     rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true,
-    hasDetailToggle: Bool = false
+    hasDetailToggle: Bool = false, hasMasterVolume: Bool = false
 ) -> PanelFocusTarget? {
     let scope = PanelFocusScope.operational(
-        events: rows.map(\.event), packCardIDs: packCardIDs, hasDetailToggle: hasDetailToggle)
+        events: rows.map(\.event), packCardIDs: packCardIDs, hasDetailToggle: hasDetailToggle,
+        hasMasterVolume: hasMasterVolume)
     let nonOperableActionEvents = Set(rows.filter { !$0.eventActionOperable }.map(\.event))
     return panelFirstFocusTarget(
         scope, nonOperableActionEvents: nonOperableActionEvents, ctaOperable: ctaOperable)
