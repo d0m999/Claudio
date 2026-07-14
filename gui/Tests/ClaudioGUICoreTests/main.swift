@@ -14,11 +14,12 @@ import Foundation
 // `OnboardingViewModelSuite.swift`, `AudioFormatSniffSuite.swift`, `AudioImportSuite.swift`,
 // `AudioImportBatchSuite.swift`, `AudioImportViewModelSuite.swift`,
 // `CoverageStateSuite.swift`, `ManifestBindingSuite.swift`, `PackGallerySuite.swift`,
-// `EventMuteControllerSuite.swift`, `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
+// `EventMuteControllerSuite.swift`, `MasterVolumeControllerSuite.swift`,
+// `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
 // `ContrastHexParsingSuite.swift`,
 // `PanelTypeSizeSuite.swift`, `PanelConfigSuite.swift`, `PanelFocusCoordinatorSuite.swift`,
 // `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`,
-// `VolumeDragSessionSuite.swift`).
+// `VolumeDragSessionSuite.swift`, `PanelWriteFailuresSuite.swift`).
 
 var totalChecks = 0
 var failures = 0
@@ -76,6 +77,7 @@ runCoverageStateSuites()
 await runManifestBindingSuites()
 runPackGallerySuites()
 runEventMuteControllerSuites()
+runMasterVolumeControllerSuites()
 runPanelFocusOrderSuites()
 runPanelFocusInFlightSuites()
 runContrastSuites()
