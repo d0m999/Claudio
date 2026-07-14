@@ -235,6 +235,35 @@ func runContrastSuites() {
                 + "「换上的颜色真的行」")
     }
 
+    // MARK: - 控件行的品牌填充（DESIGN.md「控件行」·「对比度」/ PLAN-MASTER-VOLUME.md D4 + D25 ①）
+    //
+    // 亮色那一对上面已经有了（`clayLight` vs `panelLight`，但它是挂在 drop-zone 那条决议下的）；
+    // 暗色一直缺一条**专名**断言 —— D25 ① 要补的就是这个不对称。第一个控件行（`MasterVolumeRow`
+    // 的 `Slider.tint(clay)`）已落地，账在此清。
+    //
+    // **它今天能捕获什么，诚实说清楚（别把它当成比实际更强的护栏）**：
+    //
+    // - **不是**「clay 被改坏」的第一道防线。`ClaudioColorHex.swift` 里 `notificationDark = clayDark`
+    //   是**字面别名**（同一个常量），所以 `nonTextPairs` 里那条 "Notification dark glyph vs panel"
+    //   算的是**同两个 hex**：clay 一旦被调坏，那条与这条会同时红，这条并不更早、也不更灵。
+    // - **是**两件别的事：① 补上暗色缺的那条专名断言，与亮色对称 —— 「滑块填充对面板 ≥3:1」这条
+    //   规则从此在两个主题下各有一个**以自己的名字**存在的守卫；② 万一将来有人把 `notificationDark`
+    //   与 `clayDark` 解耦（事件色与品牌色本就是两个概念，只是今天恰好同值），那条别名断言就不再
+    //   覆盖 clay 了 —— 那一刻这条是**唯一**还钉着控件行填充色的断言。
+    //
+    // ☠️ **它捕获不了的那个真回归**：有人删掉 `.tint(clay)` → 填充退回系统强调色（用户可把强调色设成
+    // 红，而真红只许给真错误）。本 suite 是纯 hex 数学，`ClaudioGUICore` 连 SwiftUI 都不 link，
+    // **结构上看不见 NSSlider 实际填了什么色**。那条规则的守门人是**人**：DESIGN.md「控件行」与
+    // PLAN-MASTER-VOLUME.md §5.2 走查清单第 ⑨ 条（把系统强调色改成红 → 开面板 → 看填充段），
+    // **每次动控件行都必须重跑**。别让这条绿灯冒充那条覆盖。
+    suite("contract: 控件行的 clay 填充对面板过非文本 ≥3:1 —— 暗色专名一对（D25 ①，亮色见上方 drop-zone 那条）") {
+        let clayDarkRatio = contrastRatio(ClaudioColorHex.clayDark, ClaudioColorHex.panelDark)
+        expect(
+            clayDarkRatio >= 3.0,
+            "clay 暗色填充（`MasterVolumeRow` 的 Slider `.tint`，以及一切未来控件行的品牌填充）必须过"
+                + "非文本 ≥3:1，got \(clayDarkRatio) —— 它是图形不是文字，判 WCAG 1.4.11")
+    }
+
     runCompositedBackgroundSuites()
 }
 
