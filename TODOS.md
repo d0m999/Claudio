@@ -946,7 +946,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 **Context:** 2026-07-11 `/ship` plan-completion 审计发现；同日 `/plan-eng-review`（四段 + Codex 外部声音）产出锁死方案，**并推翻了本条原有的两句修法**：
 
-- ~~「DESIGN.md 已定义其视觉」~~ —— **假的**。DESIGN.md 全文 grep `滑块|slider|轨道|track|thumb|拨杆` **零命中**，滑块长什么样从来没人定过。而 macOS 原生 `Slider` 的填充色默认跟**系统强调色**（用户在系统设置里选的），会把一个设计系统外、且 claudio 控制不了的颜色带进面板 —— 直接违反 DESIGN.md「品牌强调只有一个（黏土）」与 `DesignTokens.swift:17`「不得新增 DESIGN.md 里没有的颜色」。
+- ~~「DESIGN.md 已定义其视觉」~~ —— **假的**。DESIGN.md 全文 grep `滑块|slider|轨道|track|thumb|拨杆` **零命中**，滑块长什么样从来没人定过。而 macOS 原生 `Slider` 的填充色默认跟**系统强调色**（用户在系统设置里选的），会把一个设计系统外、且 claudio 控制不了的颜色带进面板 —— 直接违反 DESIGN.md「品牌强调只有一个（黏土）」与 `DesignTokens.swift:17`「不得新增 DESIGN.md 里没有的颜色」。⚠️ **DESIGN.md 已于 2026-07-12 新增「控件行（Control Row）」一节**（`DESIGN.md:132-146`），现在确实定义了滑块视觉（原生外壳不自绘、只经 `.tint(clay)` 施加品牌色、行解剖、不加图标、数值读数默认不显示交给 accessibilityValue、Dynamic Type 处理、控件行不加动效）；这句「零命中/从没人定过」的判断准确性截止于它写下的那一天（2026-07-11）。
 - ~~「第三个写者照抄即可」~~ —— **照抄就是 bug**，但**理由已经换了一条**（⚠️ 2026-07-12 阶段 A 锁分离后更正；原文写的是「`setEventEnabled` 拿的是 `play.lock`，逐帧写盘会把『吞掉提示音的窗口』开成一片」—— 那句话现在是**假的**：`setEventEnabled` 与 `selectPack` 拿的是 `config.lock`，`play` 拿 `play.lock`，逐帧写 config **再也吞不掉提示音了**）。真正的理由是另外两条，且都还站着：① 主音量是**第三个 `config.lock` 写者**，逐帧写盘会让它与切包 / 静音**互相**撞 `.lockBusy`（`withNonBlockingLock` 是**非阻塞**的：撞上就是 `.skipped`，不是排队等），拖一次滑块就能让用户同时点的静音假失败；② 该值没有实时消费者，逐帧写盘是纯成本。**结论（松手才写）不变，别顺着那条死掉的 `play.lock` 论据把它推翻。**
 
 **锁死的方案（原 14 项决议 → 最终 46 项 D1–D46，全文见 `PLAN-MASTER-VOLUME.md`）要点 —— 这些是已实现的设计约束，不是待办：**
@@ -1027,16 +1027,16 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P4
 **Depends on:** None
 
-### 补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂（原 4 项 lake-not-ocean，只剩这 1 项）
+### ~~补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂（原 4 项 lake-not-ocean，只剩这 1 项）~~ ✅ 已完成（阶段 D，2026-07-11）
 
 **What:** `setEventEnabled` 真并发写（`DispatchQueue.concurrentPerform` 多线程同时切同一/不同事件）——现仅有「一个持锁者 + 一个等待者」的 lock-busy 测（`EventEnabledSuite`「shares play.lock with selectPack」——⚠️ suite 名里的 `play.lock` 是 2026-07-12 阶段 A 锁分离之前的旧名，它今天串行的是 `config.lock`），未证真并发下 read-modify-write 不撕裂。`LogSuite` / `PlaySuite` 已有 `concurrentPerform` 的先例可照抄。
 
 **Why:** 「lake」型补测：镜像已有 happy-path 结构、钉住一条当前未覆盖的分支。无功能风险，纯回归网加固。
 
-**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，pr-test-analyzer）原列 4 项，2026-07-11 `/ship` 修复批已补掉其中 3 项，故本条收窄到只剩并发写：① `setEventEnabled` 的 `.configWriteFailure` 路径 → 已补（`EventEnabledSuite`，父目录被普通文件挡住的 fixture）；② `contrastRatio` 的 `#` 前缀分支 → 已补（`ContrastSuite`「a `#`-prefixed hex parses identically to the bare form」+ 新 `ContrastHexParsingSuite` 连带钉住 `#+FFFF` 的 fail-closed）；③ `bindEventToManifest` 顶层合法 JSON 但非对象 → 已补（`ManifestBindingSuite`「a VALID-JSON but non-object top level (a JSON array) fails closed」）。**并发写这一项没做，别当成做了。**
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，pr-test-analyzer）原列 4 项，2026-07-11 `/ship` 修复批已补掉其中 3 项，故本条收窄到只剩并发写：① `setEventEnabled` 的 `.configWriteFailure` 路径 → 已补（`EventEnabledSuite`，父目录被普通文件挡住的 fixture）；② `contrastRatio` 的 `#` 前缀分支 → 已补（`ContrastSuite`「a `#`-prefixed hex parses identically to the bare form」+ 新 `ContrastHexParsingSuite` 连带钉住 `#+FFFF` 的 fail-closed）；③ `bindEventToManifest` 顶层合法 JSON 但非对象 → 已补（`ManifestBindingSuite`「a VALID-JSON but non-object top level (a JSON array) fails closed」）。该并发写缺口已在 `helper/Tests/ClaudioCoreTests/EventEnabledSuite.swift` 补上：紧跟在「shares config.lock with selectPack」那条 suite 之后，一条标题为「setEventEnabled: N 个并发写者打在同一个 config.json 上——写完之后文件仍是合法 JSON、三个 v1 键与一个未知顶层键全都还在，且每一次调用要么真的成功要么 .lockBusy，绝不静默损坏」的 suite，内部用 `DispatchQueue.concurrentPerform(iterations: 50)` 真并发跑 `setEventEnabled`。本条与上一条已完成条目（标题不带括注的「补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂」）描述的是同一个缺口，因同标题两条已于 2026-07-14 去重。
 
-**Effort:** S
-**Priority:** P4
+**Effort:** ~~S~~ 已完成
+**Priority:** ~~P4~~ 已关闭
 **Depends on:** None
 
 ### 导入区（AudioDropZoneView）成功/拒绝后不再可键盘/VoiceOver 触发，只剩拖拽
