@@ -328,12 +328,14 @@ func runPanelFocusOrderSuites() {
 
     suite("panelOpeningFocus: zero rows, hasMasterVolume false (the REAL .needsPack/.malformed/.unwritable shape) → first focus is the drop zone, never the (unrendered) master volume slider") {
         // /codex review P1 (2626083/47459a7): `PanelView.applyFirstFocus` calls
-        // `panelOpeningFocus` with `rows: []` AND `hasMasterVolume: false` together (both driven
-        // off the same `configState == .operational` check) whenever the panel is NOT truly
-        // operational — a common real shape (first launch before a pack is picked, or a
-        // corrupted/unwritable config.json), not a fixture-only edge case. Neither the event
-        // rows nor the slider are on screen there, so first focus must land on `.dropZone`
-        // (still unconditionally rendered/operable in every configState).
+        // `panelOpeningFocus` with `rows: []` AND `hasMasterVolume: false` together whenever the
+        // panel is NOT truly operational — a common real shape (first launch before a pack is
+        // picked, or a corrupted/unwritable config.json), not a fixture-only edge case. Neither
+        // the event rows nor the slider are on screen there, so first focus must land on
+        // `.dropZone` (still unconditionally rendered/operable in every configState). Note:
+        // `hasMasterVolume` is a literal `false` here, NOT derived from `configState` — a
+        // `/codex review` P2 finding that `.operational` alone isn't a valid proxy for "slider is
+        // rendered" until PLAN-MASTER-VOLUME.md 阶段 D lands (see `PanelFocusOrder.swift`).
         expect(
             panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"], hasMasterVolume: false) == .dropZone,
             "opening focus must be the drop zone, never .masterVolume, when the slider isn't"
@@ -370,8 +372,10 @@ func runPanelFocusInFlightSuites() {
         let rows = Event.allCases.map { event in
             EventRow(event: event, coverage: .unmapped, enabled: true)
         }
-        // 全 unmapped：每行的 action 槽是永远可操作的导入入口，所以首焦点仍是第一行。真实操作态、
-        // 4 行真事件，滑块也真的渲染在屏幕上（hasMasterVolume: true）。
+        // 全 unmapped：每行的 action 槽是永远可操作的导入入口，所以首焦点仍是第一行。4 行真事件、
+        // ctaOperable: false 是真实操作态的形状；`hasMasterVolume: true` 是虚构值，只用来测这个
+        // flag 本身的行为——Phase D（MasterVolumeRow）落地前，真实的 `.operational` 面板从不会
+        // 真的渲染滑块（`/codex review` P2）。
         expect(
             panelOpeningFocus(rows: rows, packCardIDs: [], ctaOperable: false, hasMasterVolume: true)
                 == .eventAction(Event.allCases[0]),

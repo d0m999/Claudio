@@ -61,13 +61,15 @@ public enum PanelFocusScope: Sendable, Equatable {
     /// assumption into this function); `packCardIDs` mirrors ``PackCard/id``'s gallery order
     /// (``availablePacks(config:environment:)``'s sorted-by-id output).
     ///
-    /// `hasMasterVolume` (fix for a `/codex review` P1, 阶段 C4 收尾): whether the master
-    /// volume slider is ACTUALLY ON SCREEN right now. `configState == .operational` is the
-    /// only state that renders it — `.needsPack`/`.malformed`/`.unwritable` show the
-    /// empty-state/failure card instead (``PanelView/operationalPanel``) and have never
-    /// rendered a slider at all. Defaults to `false` (fail-closed, same reasoning as
-    /// `hasDetailToggle`): a caller that doesn't know about master volume must not
-    /// accidentally claim a slot for a control it never rendered.
+    /// `hasMasterVolume` (fix for a `/codex review` P1, 阶段 C4 收尾; pinned back to a literal
+    /// `false` by a `/codex review` P2 — see ``PanelView/applyFirstFocus()``): whether the
+    /// master volume slider is ACTUALLY ON SCREEN right now. `configState == .operational` is
+    /// NOT a valid proxy for this: ``PanelView/operationalPanel`` renders zero `Slider`s until
+    /// PLAN-MASTER-VOLUME.md 阶段 D (`MasterVolumeRow`) lands, so an `.operational` panel today
+    /// never actually shows one. `.needsPack`/`.malformed`/`.unwritable` never render it either
+    /// (they show the empty-state/failure card instead). Defaults to `false` (fail-closed, same
+    /// reasoning as `hasDetailToggle`): a caller must not claim a slot for a control it doesn't
+    /// independently know is on screen.
     case operational(
         events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false,
         hasMasterVolume: Bool = false)
@@ -213,10 +215,12 @@ public func panelFirstFocusTarget(
 /// to filter — ``panelFirstFocusTarget(_:nonOperableActionEvents:)`` handles that scope directly.
 ///
 /// `hasMasterVolume` defaults to `false` (fail-closed) and must be supplied by the caller as an
-/// explicit, honest signal — same reasoning as `hasDetailToggle`. `PanelView.applyFirstFocus`
-/// derives it from the exact same `configState == .operational` check that decides `rows`, so
-/// the two can never drift apart: either both reflect a truly-operational panel, or both reflect
-/// one that isn't (``PanelView/applyFirstFocus()``).
+/// explicit, honest signal — same reasoning as `hasDetailToggle`. It is NOT derivable from
+/// `configState == .operational` (that coupling was tried in 341d9b7 and reverted by a
+/// `/codex review` P2: `.operational` alone doesn't mean the slider is rendered —
+/// ``PanelView/operationalPanel`` shows zero `Slider`s before PLAN-MASTER-VOLUME.md 阶段 D
+/// lands). `PanelView.applyFirstFocus` currently passes a literal `false` here until Phase D
+/// ships a real `MasterVolumeRow` (``PanelView/applyFirstFocus()``).
 public func panelOpeningFocus(
     rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true,
     hasDetailToggle: Bool = false, hasMasterVolume: Bool = false
