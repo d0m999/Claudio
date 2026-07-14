@@ -408,11 +408,21 @@ func runPanelConfigControllerSuites() {
     //   - 切包：失败分支只 `packSwitchError = error`，压根没有路由。
     //
     // 于是 `configState` 停在 `.operational`，面板一边用红字说「config.json 读取失败」，一边继续渲染四行
-    // 活控件 —— 直到用户重开 popover 才自愈。下面四条正钉 + 两条反向对照把这两条路都钉死。
+    // 活控件 —— 直到用户重开 popover 才自愈。
+    //
+    // ⚠️ **第一刀（1c65215）把同一个偷换概念原样犯了一遍**：它把 `.lockFailed` 也留在了「跳过」那一侧，
+    // 理由同样是「锁都没拿到 ⇒ config.json 没被碰 ⇒ 读模型没变陈」。可读模型是**两根轴**（内容 + 目录
+    // 可写性），而 `.lockFailed(EACCES)` 正是第二根轴出事时拿到的东西。[P1-d] 就是钉它的。
+    //
+    // 刷**哪一种**也跟着定稿了：这些失败一律走 `.configOnly`（重读 config.json + 目录探针），**不**走
+    // `.full` —— config 坏了跟包库有没有变没有半点关系，全量刷新只会白扫一遍包库，还会拿一份 selectedPack
+    // 为空的 config 去 `afterFullReload` retarget（污染 drop zone、抹掉画廊的选中卡高亮）。所以下面每条
+    // 正钉都**同时**断言两件事：configState 真的翻到了诚实失败态（= 刷新真的跑了），且 afterFullReload
+    // **一次都没被调**（= 没有白扫包库）。
     //
     // ⚠️ 反向对照为什么要在磁盘上放一份**坏** config：如果只是「持锁 + 好 config」，那么「configState 仍是
-    // `.operational`」是**恒真**的 —— 一次 reload 也会算出 `.operational`，断言区分不出 reload 跑没跑。
-    // 放一份坏 config，`.operational` 就只有在**确实没 reload** 时才可能留住，断言这才真的在测东西。
+    // `.operational`」是**恒真**的 —— 一次刷新也会算出 `.operational`，断言区分不出刷新跑没跑。
+    // 放一份坏 config，`.operational` 就只有在**确实没刷新**时才可能留住，断言这才真的在测东西。
 
     suite("[P1-a] toggleMute 撞上被外部改坏的 config：configState 必须翻到 .malformed") {
         withTempDirectory { root in
@@ -454,9 +464,10 @@ func runPanelConfigControllerSuites() {
             }
             expect(!reason.isEmpty, "诚实失败态必须带一条可行动的原因，得到空串")
             expect(
-                afterFullReloadCalls == 1,
-                "这条路必须走**全量** reload（.full）—— afterFullReload 被调 \(afterFullReloadCalls) 次。"
-                    + "0 次 = 根本没 reload；轻量 reloadEnabledFlags 换不出 .malformed 之外的诚实失败态")
+                afterFullReloadCalls == 0,
+                "这条路必须走**轻量** .configOnly —— config 坏了跟包库有没有变没有半点关系。afterFullReload"
+                    + " 被调了 \(afterFullReloadCalls) 次 = 走了 .full = 白扫一遍包库，还拿一份 selectedPack"
+                    + "为空的 config 去 retarget（污染 drop zone、抹掉画廊选中卡高亮）")
         }
     }
 
@@ -508,8 +519,10 @@ func runPanelConfigControllerSuites() {
             }
             expect(!reason.isEmpty, "诚实失败态必须带一条可行动的原因，得到空串")
             expect(
-                afterFullReloadCalls == 1,
-                "失败的切包也必须走全量 reload —— afterFullReload 被调 \(afterFullReloadCalls) 次")
+                afterFullReloadCalls == 0,
+                "失败的切包同样只该走**轻量** .configOnly —— 一次**没成功**的切包不可能改变磁盘上有哪些包，"
+                    + "重扫包库纯属白扫。afterFullReload 被调了 \(afterFullReloadCalls) 次 = 走了 .full。"
+                    + "（`.packNotFound` 是唯一的例外，它由另一条 suite 守。）")
         }
     }
 
@@ -531,9 +544,11 @@ func runPanelConfigControllerSuites() {
             writeFixture(operationalConfigBytes, to: configFile)
             writeFixture("", to: lockFile)
 
+            var afterFullReloadCalls = 0
             let controller = PanelConfigController(
                 configFile: configFile, lockFile: lockFile,
-                environment: makeEnvironment(root.appendingPathComponent("packs")))
+                environment: makeEnvironment(root.appendingPathComponent("packs")),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
             guard case .operational = controller.configState else {
                 expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
                 return
@@ -549,6 +564,17 @@ func runPanelConfigControllerSuites() {
 
             controller.toggleMute(.stop)
 
+            // 红队实测点名：这条 suite 上一版**既不断言静音真的失败了、也不断言走了哪条刷新** —— 于是
+            // 变异 M8（把刷新换成另一条）能从它身上完好无损地走过去。补上这两条，它才和两个兄弟一样硬。
+            guard case .configWriteFailure = controller.muteError else {
+                expect(
+                    false,
+                    "lock 文件**先建出来**了（生产里任何一次成功写盘都会留下它），r-x 目录里 open 一个**已存在**"
+                        + "的文件仍然成功 → flock 拿得到 → 失败必须如实落在**写**那一步（.configWriteFailure），"
+                        + "而不是提前变成 .lockFailed（那是 [P1-d] 守的另一格）。得到 "
+                        + "\(String(describing: controller.muteError))")
+                return
+            }
             guard case .unwritable(let reason) = controller.configState else {
                 expect(
                     false,
@@ -559,6 +585,152 @@ func runPanelConfigControllerSuites() {
             expect(
                 reason.contains(claudioDir.path),
                 "原因必须指名写不动的那个目录（用户照着它 chmod），得到 \(reason)")
+            expect(
+                afterFullReloadCalls == 0,
+                "同样只该走轻量 .configOnly —— 目录写不动跟包库有没有变没关系。afterFullReload 被调了 "
+                    + "\(afterFullReloadCalls) 次 = 走了 .full")
+        }
+    }
+
+    // ── [P1-d] 第一刀（1c65215）自己漏掉的那一格：`.lockFailed` ──────────────────────────────────
+    //
+    // 第一刀把围栏内侧写成 `.lockBusy` / `.lockFailed`，理由是「锁都没拿到 ⇒ config.json 一个字节没读没写
+    // ⇒ 读模型没变陈」。**这句话把「config.json 的字节」偷换成了「整个读模型」** —— 而 `PanelConfigState`
+    // 是 `probeConfigRewritable` 的**两根轴**判定，第二根轴是**目录可写性**。同一个偷换概念，换了个 case
+    // 原样复发在修它的那一刀上。
+    //
+    // 这条 fixture 与 [P1-c] 只差**一个字节**：[P1-c] 先把 config.lock 建出来（→ flock 成功 → 失败落在写
+    // 那一步 → `.configWriteFailure`），这里**不建**（→ r-x 目录里 open(O_CREAT) 拿 EACCES → `.lockFailed`）。
+    // 同一个物理局面（~/.claudio 写不动），只因为锁文件在不在，第一刀就把它分岔成了「诚实失败卡」和
+    // 「假装没事」两种结局。而红字说的是「请稍后重试」—— 在目录权限变回来之前，重试**永远**不会成功。
+    //
+    // 「config.json 在、config.lock 不在」是真实可达的：锁文件是**惰性**创建的（0 字节，常被备份/同步工具
+    // 跳过），用户看到「被占用」后手动 `rm ~/.claudio/*.lock` 也很自然。而只读卷（EROFS）连这个前提都不
+    // 需要 —— 连**已存在**的锁文件都 open 不动，照样 `.lockFailed`。
+    suite("[P1-d] toggleMute 撞上 .lockFailed（目录写不动、锁文件还没建出来）：configState 必须翻到 .unwritable") {
+        guard geteuid() != 0 else {
+            print("  ⚠︎ 跳过：当前以 root 运行，chmod 只读目录挡不住 root 写入")
+            return
+        }
+        withTempDirectory { root in
+            let claudioDir = root.appendingPathComponent("claudio", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: claudioDir, withIntermediateDirectories: true)
+            let configFile = claudioDir.appendingPathComponent("config.json")
+            let lockFile = claudioDir.appendingPathComponent("config.lock")
+            writeFixture(operationalConfigBytes, to: configFile)
+            // ⚠️ 与 [P1-c] 的唯一区别：**不**建 config.lock。
+
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile,
+                environment: makeEnvironment(root.appendingPathComponent("packs")),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o500], ofItemAtPath: claudioDir.path)
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: claudioDir.path)
+            }
+
+            controller.toggleMute(.stop)
+
+            guard case .lockFailed = controller.muteError else {
+                expect(
+                    false,
+                    "r-x 目录里 open(config.lock, O_CREAT) 必须拿 EACCES → .lockFailed（FileLock 只对 ENOENT"
+                        + "自愈，其余 errno 直落 .failed）。不是这一格 = 这条测试测的不是它自称在测的东西。"
+                        + "得到 \(String(describing: controller.muteError))")
+                return
+            }
+            guard case .unwritable(let reason) = controller.configState else {
+                expect(
+                    false,
+                    "静音刚刚因为「锁都建不出来」而失败，而此刻 loadPanelConfig 明明算得出 .unwritable + 一条"
+                        + "精确的 chmod 指令 —— configState 却停在 \(controller.configState)。面板一边红字说"
+                        + "「请稍后重试」（而重试永远不会成功），一边顶着四行活控件。这就是第一刀自己漏掉的"
+                        + "那一格：`.lockFailed` 是一袋**未知** errno，它什么也证明不了，而围栏要的是"
+                        + "「**证明没变**才敢不刷新」")
+                return
+            }
+            expect(
+                reason.contains(claudioDir.path),
+                "原因必须指名写不动的那个目录（用户照着它 chmod），得到 \(reason)")
+            expect(
+                afterFullReloadCalls == 0,
+                "只该走轻量 .configOnly —— 连锁都没拿到，包库更不可能变。afterFullReload 被调了 "
+                    + "\(afterFullReloadCalls) 次 = 走了 .full")
+        }
+    }
+
+    suite("[P1-d] switchPack 撞上 .lockFailed：同一格，另一条写路径") {
+        guard geteuid() != 0 else {
+            print("  ⚠︎ 跳过：当前以 root 运行，chmod 只读目录挡不住 root 写入")
+            return
+        }
+        withTempDirectory { root in
+            let claudioDir = root.appendingPathComponent("claudio", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: claudioDir, withIntermediateDirectories: true)
+            let configFile = claudioDir.appendingPathComponent("config.json")
+            let lockFile = claudioDir.appendingPathComponent("config.lock")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+            // pack-b 真的在磁盘上 —— 否则 selectPack 会提前停在 .packNotFound（那一格**该**走 .full），
+            // 这条测试就测不到锁那一步了。
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
+            writeFixture(
+                #"{ "id": "pack-b", "events": { "notification": "notification.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-b/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-b/notification.mp3"))
+
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile, environment: makeEnvironment(packsDir),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o500], ofItemAtPath: claudioDir.path)
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: claudioDir.path)
+            }
+
+            controller.switchPack(to: "pack-b")
+
+            guard case .lockFailed = controller.packSwitchError else {
+                expect(
+                    false,
+                    "pack-b 真的在磁盘上，所以不该是 .packNotFound；r-x 目录里建不出锁文件 → 必须是 "
+                        + ".lockFailed。得到 \(String(describing: controller.packSwitchError))")
+                return
+            }
+            guard case .unwritable(let reason) = controller.configState else {
+                expect(
+                    false,
+                    "切包因为「锁都建不出来」而失败，configState 却停在 \(controller.configState) —— 与静音"
+                        + "那一半同一个洞，两条写路径必须给出同一个答案")
+                return
+            }
+            expect(
+                reason.contains(claudioDir.path),
+                "原因必须指名写不动的那个目录，得到 \(reason)")
+            expect(
+                afterFullReloadCalls == 0,
+                "只该走轻量 .configOnly —— afterFullReload 被调了 \(afterFullReloadCalls) 次")
         }
     }
 

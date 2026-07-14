@@ -109,7 +109,7 @@ public final class PanelConfigController: ObservableObject {
         // setEnabled 成功把 lastError 清 nil、失败记下错误，所以此刻读它就是这次写盘的结果。
         muteError = muteController.lastError
         switch panelRefreshRoute(muteSucceeded: succeeded, error: muteController.lastError) {
-        case .enabledFlagsOnly: reloadEnabledFlags()
+        case .configOnly: reloadConfigOnly()
         case .full: reload()
         case .noRefresh: break
         }
@@ -118,15 +118,15 @@ public final class PanelConfigController: ObservableObject {
     /// 切包，经 ``selectPack`` —— `claudio use` / `performFirstRunSetup` 用的**同一条**写路径。成功清
     /// `packSwitchError` 并全量 `reload()`；失败把 error 记进 `packSwitchError`（由面板渲染），绝不丢弃。
     ///
-    /// **失败也可能要 `reload()`**（`/codex review` 第二条 [P1]）：上一版的失败分支只记 error 就完事，
-    /// 于是「打开有效面板 → 外部把 `master_volume` 改成字符串 → 点一张包卡」会让 `selectPack` 如实返回
+    /// **失败也可能要刷新**（`/codex review` 第二条 [P1]）：上一版的失败分支只记 error 就完事，于是
+    /// 「打开有效面板 → 外部把 `master_volume` 改成字符串 → 点一张包卡」会让 `selectPack` 如实返回
     /// `.configReadFailure`，而 `configState` 纹丝不动地停在 `.operational` —— 面板一边红字说 config 读不动，
-    /// 一边继续渲染四行活控件。判断交给 ``packSwitchNeedsFullReload(after:)``（纯函数、穷尽 switch、由
+    /// 一边继续渲染四行活控件。刷哪一种交给 ``packSwitchRefreshRoute(after:)``（纯函数、穷尽 switch、由
     /// `PanelRefreshRouteSuite` 逐 case 钉死），与静音那一半 ``panelRefreshRoute(muteSucceeded:error:)``
-    /// 是同一种极性：只有**可证明磁盘没被碰过**的失败才跳过重读。
+    /// 是同一种极性：只有**可证明什么也没揭示**的失败（`.lockBusy` / `.invalidPackID`）才完全跳过。
     ///
-    /// 顺序：先记 error 再 `reload()` —— `reload()` 不碰 `packSwitchError`（只有一次**成功**的切包清它），
-    /// 所以红字不会被自己触发的这次重读抹掉。
+    /// 顺序：先记 error 再刷新 —— 两条刷新路径都不碰 `packSwitchError`（只有一次**成功**的切包清它），
+    /// 所以红字不会被它自己触发的这次重读抹掉。
     public func switchPack(to packID: String) {
         switch selectPack(
             packID, configFile: configFile, userPacksDirectory: environment.userPacksDirectory,
@@ -137,13 +137,17 @@ public final class PanelConfigController: ObservableObject {
             reload()
         case .failure(let error):
             packSwitchError = error
-            if packSwitchNeedsFullReload(after: error) { reload() }
+            switch packSwitchRefreshRoute(after: error) {
+            case .configOnly: reloadConfigOnly()
+            case .full: reload()
+            case .noRefresh: break
+            }
         }
     }
 
     /// **全量** reload（= 旧 `PanelView.refresh()`）：重读 `config.json` + 重算每一个派生读模型，再做
     /// 跨-view-model 协调。面板「磁盘上可能有东西变了」那条规则用它 —— popover 重开、切包之后、一次
-    /// 行内 import/bind 之后。静音走下面那条轻量 `reloadEnabledFlags()`。
+    /// 行内 import/bind 之后。其余情况走下面那条轻量 `reloadConfigOnly()`。
     ///
     /// 顺序：先重载自己的读模型，再 `afterFullReload(config)`。旧 `refresh()` 里 `onboardingViewModel.refresh()`
     /// 排在最前，但它探的是 helper 二进制 / settings.json，与 config 读模型**互不依赖**，挪到后面结果一字
@@ -153,12 +157,23 @@ public final class PanelConfigController: ObservableObject {
         afterFullReload(config)
     }
 
-    /// 面板**轻量**的静音后刷新（`/ship` 性能评审）：重读 `config.json`，只重算每行的 `enabled` 位。
+    /// **只重读 config 读模型**（``PanelRefreshRoute/configOnly``）：重读 `config.json` → 重算 `configState`
+    /// / `config` → 按新 config 重算每行的 `enabled` 位。**不**重扫包根、**不**读 manifest、**不**调
+    /// `afterFullReload`。代价 = 一次文件读 + 一次目录 stat。
     ///
-    /// 一次静音只翻 `config.json` 里的一个 bool，**不可能**改变任何包的 manifest / 声音文件存在性 /
-    /// 磁盘上有哪些包 —— 所以全量 `reload()`（重扫两个包根 + 读每个包 manifest）在这条路上是纯浪费：
-    /// 点一次静音钮就在主线程上扫一遍整个包库。`coverage` 按定义不变，从已有行原样带过来。
-    public func reloadEnabledFlags() {
+    /// 两条路共用它，因为要做的事一模一样：
+    ///
+    ///   - **静音成功**（`/ship` 性能评审）：只翻了 `config.json` 里的一个 bool，**不可能**改变任何包的
+    ///     manifest / 声音文件存在性 / 磁盘上有哪些包 —— 全量 `reload()` 在这条路上是纯浪费：点一次静音钮
+    ///     就在主线程上扫一遍整个包库。`coverage` 按定义不变，从已有行原样带过来。
+    ///   - **「什么也证明不了」的失败**（`.lockFailed` / `.configReadFailure` / `.configWriteFailure`）：
+    ///     必须重读才知道 `config.json` 和它的目录还在不在原来的样子 —— `configState` 据此落到 `.malformed`
+    ///     / `.unwritable`，诚实失败卡才出得来。但**包库**没理由变，不扫；也不该拿一份 `selectedPack` 为空的
+    ///     config 去 `afterFullReload` retarget（那会污染 drop zone、让画廊丢掉选中卡高亮）。
+    ///
+    /// ⚠️ 改名自 `reloadEnabledFlags()`：那个名字在**低报**它做的事 —— 它从第一天起就在重算 `configState`
+    /// （下面第一行），只是没人注意到，于是没人想到「失败路径也可以用它」。
+    public func reloadConfigOnly() {
         let reloaded = loadPanelConfig(from: configFile)
         configState = reloaded
         config = reloaded.resolvedConfig

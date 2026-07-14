@@ -1467,3 +1467,34 @@ rename」，要的都是**父目录**的写权限。`chmod 0500 ~/.claude`（MDM
 **Effort:** M（给 `.malformed` 加一个可选 packID 字段；牵动 PanelConfigSuite 的合成矩阵）
 **Priority:** P3
 **Depends on:** None
+
+---
+
+### 诚实失败态（`.malformed` / `.unwritable` / `.needsPack`）本身的三处毛病 —— 红队 1c65215 实测，非本轮引入
+
+**Context:** 2026-07-14。`/codex review` 两条 [P1] 修完后，对修复本身发动多视角红队（14 条 finding，8 条挺过双反驳者）。其中三条与**路由**无关 —— 它们是这三个状态**出厂就带的**，任何一条抵达它们的路（包括最老的 `.configMissing` 和 popover 重开）都会撞上。修完路由之后它们更容易被看见了，所以入册。
+
+**1. `errorNotice` 的滤网没跟着极性一起扩 —— 同一句 reason 被印两遍**
+
+D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态卡本身就是解释，再画一遍它的 description 就是重复」。滤网是硬编码的 `error != .configMissing`（PanelView.swift:559），而 `packSwitchError` 那条**零滤网**（:562）。现在 `.configReadFailure` / `.configWriteFailure` / `.lockFailed` 也会重路由到一张**自带解释**的诚实失败卡 —— 于是同一份约 90 字的修复指令，会在同一屏、两个真红 circle-x 图标下渲染两遍。D43 的判据（「卡片本身就是解释」）现在适用于三条错误，滤网却只认得一条 —— 一元白名单探针。
+
+**Effort:** S（滤网改成「这条 error 是否已经被 configState 重路由并自带解释」的判断，而不是逐个 case 点名）
+**Priority:** P2
+
+**2. 顶部视图切换会吃掉键盘焦点 —— 而两条写路径上一处 `applyFirstFocus()` 都没有**
+
+`configState` 从 `.operational` 翻到 `.malformed` / `.unwritable` / `.needsPack` 会把四行事件行（或用户刚按下的那张包卡）整个从视图树里摘掉，SwiftUI 随即把 `@FocusState` 置 nil。键盘 / VoiceOver 用户按完空格，光标凭空消失。`applyFirstFocus()` 只挂在 `onAppear` / `showCount` / onboarding state / actionState 四处 —— `toggleMute` 和 `switchPack` 一处也没有。**不是本轮引入**：`.configMissing → .full → .needsPack` 这条路从 D43 起就能触发同样的摘除，本轮只是把触发点从一个扩到四个。
+
+**Effort:** M（写路径上在 configState 真的换了顶层视图时补一次 applyFirstFocus；要小心别在每次成功静音后都抢焦点）
+**Priority:** P2
+
+**3. `muteError` / `packSwitchError` 没有寿命 —— 一条过期红字能穿过每一次 popover 重开**
+
+两条 error 都只有「下一次**成功**的同类操作」才会清（`muteError` 在 `setEnabled` 成功时清，`packSwitchError` 在 `switchPack` 成功时清）。而**刷新从不清它们** —— `reload()` / `reloadConfigOnly()` 都不碰。popover 重开做的唯一一件事是 `panelModel.reload()`（PanelView.swift:246），而 `PanelView` 由 `MenuBarController.init` 构造**一次**、活满整个进程，`panelModel` 这个 `@StateObject` 从不重建。于是：一次 `.lockBusy`（并发的 `claudio use`，早就跑完了）留下的红字，会一直挂在面板上，直到用户碰巧成功静音一次。
+
+（`packSwitchError` 的 `init` 值已有断言守着，红队 round5；缺的是**寿命**，不是初值。）
+
+**Effort:** S（刷新时按新的 configState 重新裁定：错误还成立吗？或给 error 打时间戳/序号）
+**Priority:** P2
+
+**⚠️ 本轮**已经**关掉的，别重复记账：** 失败路径改走 `.configOnly`（不调 `afterFullReload`）之后，「拿一份 `selectedPack` 为空的 config 去 retarget，污染 drop zone / 抹掉画廊选中卡高亮」在 `.configReadFailure` / `.configWriteFailure` / `.lockFailed` 三条路上**不再发生**。但 `.configMissing → .full` 那条路**仍然**会（它必须重扫画廊，`afterFullReload` 躲不掉）—— 那一格的 drop zone 污染是真的、仍然开着，只是它比这三条老得多。
