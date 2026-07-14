@@ -86,6 +86,49 @@ private func collapsingWhitespace(_ text: String) -> String {
     text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
 }
 
+/// `marker` 之后紧跟的那个 `{ … }` 的**闭包体**（按花括号配对切出来），`nil` = 找不到 marker 或它后面
+/// 没有配平的闭包。
+///
+/// ## 它修的那个洞（`/codex review 8771946` P1 + 变异实测）
+///
+/// 本 suite 的绊线全是 `contains(修饰符字面量)`。那种断言能证明**修饰符在**，证明不了**闭包体做了
+/// 什么** —— 而「做了什么」恰恰是这些修饰符存在的全部理由。实测变异体：
+///
+/// ```swift
+/// .onChange(of: focusCoordinator.hideCount) { _ in
+///     // flush() 被删掉，闭包留空
+/// }
+/// ```
+///
+/// 用户拖完滑块点面板外面关掉 popover，音量**静默丢失** —— 正是守着这一行的那条断言在失败消息里
+/// 亲口写下的那个 bug —— 而 1973 checks **全绿**。绊线的措辞（「必须观察 hideCount 的变化**并冲刷
+/// pending 的拖动**」）比它的覆盖范围（「`.onChange(of:` 这串字符在文件里」）大了一整个闭包体。
+///
+/// 这是本仓库反复复发的同一种病，已有两处判例记在案：`PanelRefreshRoute.swift:17`（把「静音失败必须
+/// 全量 refresh」钉成 `contains("refresh()")`，而 `refresh()` 在那个文件里出现 37 次，那个合取子恒真）
+/// 与本文件 ``sourcesUnder(_:)`` 的 T17h（措辞说「全 GUI」，范围只有一个文件）。所以这个 helper 是
+/// **围栏**不是探针：切不出闭包体就返回 `nil`，调用方一律判红 —— 「我看不懂这段代码」绝不等于「这段
+/// 代码是对的」。
+///
+/// 必须喂 ``codeWithoutStrings(_:)`` 的输出，不能喂 ``codeOnly(_:)``：后者保留字符串**内容**，一句写着
+/// `flush()` 的错误消息在 `contains("flush()")` 眼里与一次真的调用完全同形。
+private func closureBody(after marker: String, in source: String) -> String? {
+    guard let markerRange = source.range(of: marker) else { return nil }
+    var depth = 0
+    var body = ""
+    for ch in source[markerRange.upperBound...] {
+        if ch == "{" {
+            depth += 1
+            if depth == 1 { continue }  // 最外层的开括号本身不算体
+        }
+        if ch == "}" {
+            depth -= 1
+            if depth == 0 { return body }  // 配平：闭包体到此为止
+        }
+        if depth >= 1 { body.append(ch) }
+    }
+    return nil  // 没配平（marker 后面根本没有闭包，或文件被截断）—— 围栏判红，不判绿
+}
 
 /// `ClaudioGUI` target 下**每一个** Swift 源文件，剥掉注释之后的样子 —— `(文件名, 代码)`。
 ///
@@ -835,8 +878,11 @@ func runViewWiringSuites() {
     // MasterVolumeRow.swift 自然落进普查范围），这里不重复；这里守的是这个文件**自己**独有的三个
     // 已实证的坑（D5/D10 已作废、D18）+ 三条本步新增的接线（D21 的 rebase、D22/D37 的 popover 冲刷、
     // D22-bis 的 willTerminate 冲刷）。
-    suite("MasterVolumeRow：三个已作废/已实证的坑不许出现（step: / onDisappear / .animation(）") {
-        guard let row = codeOnly("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+    suite("MasterVolumeRow：三个已作废/已实证的坑不许出现（step: / onDisappear / 任何动画入口）") {
+        // 读 codeWithoutStrings：负向断言（「不许出现 X」）若读保留字符串内容的 codeOnly，任何一句
+        // 恰好把 X 写进错误消息的代码都会让它**假红**；更要命的是正向那半（下面 closureBody 那几条）
+        // 会被同一份字符串**假绿**。统一读这一路。
+        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
             expect(false, "读不到 MasterVolumeRow.swift —— 这个 suite 唯一的价值就是读它")
             return
         }
@@ -850,56 +896,109 @@ func runViewWiringSuites() {
             "MasterVolumeRow 不许用 onDisappear 冲刷（D10 已作废，全仓零命中且本仓库已明文否定该回调—— "
                 + "PanelFocusCoordinator.swift 的文档：popover 不保证在每次 show/close 之间重建视图层级）。"
                 + "冲刷信号走 focusCoordinator.hideCount")
-        expect(
-            !row.contains(".animation("),
-            "MasterVolumeRow 全行零 .animation()（D18）：拖动跟手不加动画、失败回滚一律瞬跳。给控件行加"
-                + "动画 = 必须同批接上 accessibilityReduceMotion 门控，代价远大于收益（PanelView.swift 顶部"
-                + "那条「本视图树的动画绊线」记录着同一条纪律）")
+        // 动画有**两个**入口，这条绊线上一版只堵了一个。
+        //
+        // `.animation(` 是修饰符那一路；`withAnimation { … }` 是命令式那一路，它照样能给这一行接上
+        // 隐式动画，而 `!contains(".animation(")` 对它完全看不见。实测变异体
+        // `.opacity(withAnimation(.easeInOut) { 1.0 })` 注入 MasterVolumeRow —— 1973 checks 全绿
+        // （`/codex review 8771946`）。措辞（「全行零动画」）比覆盖范围（「零 `.animation(`」）大了
+        // 一整个入口，与本文件 `sourcesUnder(_:)` 的 T17h 是同一种病。
+        //
+        // 围栏，不是白名单：认不出的动画入口只会更多（`.transaction {}`、`Animation` 值本身），所以
+        // 判据是「这两个入口一个都不许在」，任何一个命中即红。
+        for entry in [".animation(", "withAnimation"] {
+            expect(
+                !row.contains(entry),
+                "MasterVolumeRow 全行零动画（D18）—— 命中了 `\(entry)`。拖动跟手不加动画、失败回滚一律"
+                    + "瞬跳；给控件行加动画 = 必须同批接上 accessibilityReduceMotion 门控，代价远大于收益"
+                    + "（PanelView.swift 顶部那条「本视图树的动画绊线」记录着同一条纪律）")
+        }
     }
 
+    // ══ 下面三条守的是 MasterVolumeRow 的三个 SwiftUI 修饰符，它们各自的**闭包体**才是本体 ══════
+    //
+    // 三条都经 `closureBody(after:in:)` 切出闭包体再断言，而不是 `row.contains(修饰符字面量)`。
+    // 理由是实测出来的，不是设计洁癖（`/codex review 8771946` P1）：变异体「把
+    // `.onChange(of: focusCoordinator.hideCount)` 的闭包体掏空、修饰符原样留着」—— 用户拖完滑块点
+    // 面板外面关掉 popover，音量**静默丢失**，正是下面那条断言的失败消息亲口写的那个 bug —— 而
+    // 1973 checks **全绿**。`contains(修饰符)` 守得住「这行代码在不在」，守不住「它做不做事」，
+    // 而「做不做事」是这些修饰符存在的全部理由。
+    //
+    // 喂的是 `codeWithoutStrings`（剥注释 + 清空字符串内容）而不是 `codeOnly`：后者保留字符串内容，
+    // 一句写着 `flush()` 的错误消息在 `contains("flush()")` 眼里与一次真的调用完全同形。
+
     suite("MasterVolumeRow：diskVolume 变化必须下行同步进 session（D21，否则滑块永久显示磁盘上没有的值）") {
-        guard let row = codeOnly("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
             expect(false, "读不到 MasterVolumeRow.swift")
             return
         }
+        let flat = collapsingWhitespace(row)
+        guard let body = closureBody(after: ".onChange(of: diskVolume)", in: flat) else {
+            expect(
+                false,
+                "MasterVolumeRow 必须有 .onChange(of: diskVolume) { … } —— 切不出它的闭包体（修饰符不在，"
+                    + "或后面没有配平的闭包）。围栏认不出就判红：看不懂 ≠ 是对的")
+            return
+        }
         expect(
-            row.contains(".onChange(of: diskVolume)") && row.contains("session.rebase(to:"),
-            "MasterVolumeRow 必须有 .onChange(of: diskVolume) { session.rebase(to: $0) }（或等价写法）—— "
-                + "没有它：用户手改 config.json 成 0.30、重开面板，`config.masterVolume == 0.30` 而滑块仍"
-                + "显示旧值；D11「不变不写」还会让它不会自愈，下一次微调会基于幻影 baseline 提交（D21）")
+            body.contains("session.rebase(to:"),
+            "`.onChange(of: diskVolume)` 的闭包体里必须真的调 session.rebase(to:) —— 上一版把这两样分成"
+                + "两个独立的 contains 用 && 连起来，于是把 rebase 挪进**别的**修饰符闭包里（或留在任何"
+                + "一句死代码里）都照样绿。没有这次下推：用户手改 config.json 成 0.30、重开面板，"
+                + "`config.masterVolume == 0.30` 而滑块仍显示旧值；D11「不变不写」还会让它不自愈，"
+                + "下一次微调基于幻影 baseline 提交（D21）。闭包体实际是：\(body)")
     }
 
     suite("MasterVolumeRow：popover 隐藏必须冲刷（D22/D37，复用既有 hideCount 信号，不新增 closeCount）") {
-        guard let row = codeOnly("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
             expect(false, "读不到 MasterVolumeRow.swift")
             return
         }
+        let flat = collapsingWhitespace(row)
         expect(
-            !row.contains("closeCount"),
+            !flat.contains("closeCount"),
             "不许新增 closeCount —— PanelFocusCoordinator 今天已经有 hideCount 且 "
                 + "MenuBarController.popoverDidClose 的第一条语句已经是 notePanelHidden()（T17d），语义"
                 + "与这里要的冲刷信号完全一致，复用它")
-        expect(
-            row.contains(".onChange(of: focusCoordinator.hideCount)"),
-            "MasterVolumeRow 必须观察 focusCoordinator.hideCount 的变化并冲刷 pending 的拖动 —— 没有它，"
-                + "用户拖到新值后点面板外面关闭 popover，值会静默丢失（D22：popover 关闭是 NSPopover 的"
-                + "可靠信号，`.onDisappear` 不是）")
-    }
-
-    suite("MasterVolumeRow：willTerminate 必须同步冲刷（D22-bis，且不得复用 hideCount 那套计数器机制）") {
-        guard let row = codeOnly("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
-            expect(false, "读不到 MasterVolumeRow.swift")
+        guard let body = closureBody(after: ".onChange(of: focusCoordinator.hideCount)", in: flat) else {
+            expect(
+                false,
+                "MasterVolumeRow 必须有 .onChange(of: focusCoordinator.hideCount) { … } —— 切不出它的闭包体。"
+                    + "没有它，用户拖到新值后点面板外面关闭 popover，值会静默丢失（D22：popover 关闭是 "
+                    + "NSPopover 的可靠信号，`.onDisappear` 不是）")
             return
         }
         expect(
-            row.contains("NSApplication.willTerminateNotification"),
-            "MasterVolumeRow 必须监听 NSApplication.willTerminateNotification 并同步冲刷 —— 这是 D22 冲刷"
-                + "的兜底：popover 关闭那条信号覆盖不了 ⌘Q 时 popover 从未被关闭过（用户直接退出）的路径")
+            body.contains("flush()"),
+            "`.onChange(of: focusCoordinator.hideCount)` 的闭包体里必须真的调 flush() —— 空闭包 = 修饰符"
+                + "在、冲刷没了，用户拖完点面板外面关 popover，那次拖动**静默丢失**。这正是本条断言上一版"
+                + "（只查修饰符字面量在不在）放过去的那个变异体，实测存活、1973 checks 全绿。"
+                + "闭包体实际是：\(body)")
+    }
+
+    suite("MasterVolumeRow：willTerminate 必须同步冲刷（D22-bis，且不得复用 hideCount 那套计数器机制）") {
+        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
+            expect(false, "读不到 MasterVolumeRow.swift")
+            return
+        }
+        let flat = collapsingWhitespace(row)
         expect(
-            row.contains(".onReceive("),
+            flat.contains(".onReceive("),
             "willTerminate 的冲刷必须走 .onReceive(NotificationCenter.default.publisher(for:))，不是 "
                 + ".onChange —— app 正在终止时 SwiftUI 的 update pass 不保证再跑一次，bump 一个 @Published "
                 + "计数器等于什么都没做；.onReceive 是一条独立的 Combine 订阅，NotificationCenter 会在通知"
                 + "post 的同一线程上同步调用它，不依赖任何一次视图重渲染")
+        guard let body = closureBody(after: "NSApplication.willTerminateNotification", in: flat) else {
+            expect(
+                false,
+                "MasterVolumeRow 必须监听 NSApplication.willTerminateNotification 并同步冲刷 —— 切不出它后面"
+                    + "的闭包体。这是 D22 冲刷的兜底：popover 关闭那条信号覆盖不了 ⌘Q 时 popover 从未被关闭"
+                    + "过（用户直接退出）的路径")
+            return
+        }
+        expect(
+            body.contains("flush()"),
+            "willTerminate 的闭包体里必须真的调 flush() —— 订阅建了但闭包是空的，等于没订阅：⌘Q 时那次"
+                + "没提交的拖动照样丢。闭包体实际是：\(body)")
     }
 }

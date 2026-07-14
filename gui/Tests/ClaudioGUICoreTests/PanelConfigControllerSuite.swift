@@ -1121,10 +1121,30 @@ func runPanelConfigControllerSuites() {
                 configFile: configFile, lockFile: lockFile,
                 environment: makeEnvironment(root.appendingPathComponent("packs")))
 
-            expect(controller.masterVolumeError == nil, "前提：还没写过音量，masterVolumeError 必须是 nil")
+            // ① 先真的造出一次失败 —— 这一步是整条用例的支点，不是背景铺垫。
+            //
+            // 上一版从一个干净的 controller 直接写一次成功，然后断言 masterVolumeError == nil：
+            // 它测的是 nil → nil，而 `masterVolumeError` 从 init（:105）起本来就是 nil。变异体
+            // 「`masterVolumeError = masterVolumeController.lastError` 改成 `if let e = …lastError
+            // { masterVolumeError = e }`」—— 即成功时压根不清错、只在失败时写 —— 实测**存活**，
+            // 1973 checks 全绿（/codex review 8771946 P1）。标题声称防的「旧红字残留」，恰恰是那个
+            // 变异体制造的真 bug，而旧用例一个字也测不到它：它从没让红字存在过。
+            let holder = FileLock(path: lockFile.path)
+            expect(holder.tryLock(), "test setup：holder 必须先拿到 config.lock，否则下面这次写盘不会失败")
+            _ = controller.setMasterVolume(0.2)
+            holder.unlock()
 
-            _ = controller.setMasterVolume(0.6)
+            // ② 红字**真的在那儿** —— 没有这条断言，①「造失败」可能悄悄失效（比如 FileLock 语义变了），
+            //    整条用例又会退回 nil → nil 的恒真形状而没人发现。
+            expect(
+                controller.masterVolumeError == .lockBusy,
+                "test setup：这条用例要测的是「清掉一个真实存在的错误」，所以此刻必须真的有一个。"
+                    + "得到 \(String(describing: controller.masterVolumeError))")
 
+            // ③ 锁已放开 → 这次写盘成功，它必须把 ② 里那条红字清掉。
+            let landed = controller.setMasterVolume(0.6)
+
+            expect(landed == 0.6, "锁放开后这次写盘必须成功，得到 \(String(describing: landed))")
             expect(
                 controller.masterVolumeError == nil,
                 "一次成功写盘后 masterVolumeError 必须是 nil —— 非 nil = republish 没在成功时清错，上一次"
