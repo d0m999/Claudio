@@ -63,6 +63,29 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 
 ## Ship / CI
 
+### `loadPanelConfig` 每次调用把 config.json 独立读三遍 —— 文档写的「一次读 + 一次目录 stat」和实现对不上
+
+**What:** D23 把面板的 config 判定拆成「写」「读」两条正交轴（`probeConfigRewritable` + `packSelection`），
+再加上最后 `loadClaudioConfig` 解码一次 —— `loadPanelConfig` 在 happy path 上因此对同一个 `configFile` 各自
+独立做了三次 `fileExists`/`open`/`read`/解析，而不是文档里 `PanelRefreshRoute.swift` 对 `.configOnly` 成本的
+描述（「代价 = 一次文件读 + 一次目录 stat」）。三次读之间没有共享同一个字节缓冲区，也没有加锁（读端本来就
+不占锁，这是既有约定），所以理论上一次外部并发写可能落在三次读之间，让三个判定基于不完全一致的磁盘内容
+（红队复核：影响自限——下一次真正写盘会重新校验并诚实拒绝，不丢数据，只是这一次面板渲染可能对不上磁盘
+当下状态）。
+
+**Why:** `/ship` pre-landing review 的 performance specialist + red-team 两条独立路径都命中了同一处
+（`gui/Sources/ClaudioGUICore/PanelConfig.swift:72`），confidence 都不低。不是这条分支要解决的问题（这条
+分支的目标是「切包 + 路由」的行为正确性，已经用五轮红队 + 两次独立对抗验证钉死了），但发现的时候文档
+与实现已经对不上号，值得单独一轮修，而不是为了赶这次 ship 临时改三个文件的函数签名。
+
+**Context:** 2026-07-14 `/ship` pre-landing review（performance + red-team 双命中，parent 已用 `git diff`
+逐行核实为真）。修法：给 `probeConfigRewritable`/`packSelection`/`loadClaudioConfig` 各配一个接受
+预读 `Data` 的内部重载，`loadPanelConfig` 只在最外层读一次文件、把字节传给三个判定复用。
+
+**Effort:** S
+**Priority:** P2（性能影响可忽略，正确性影响自限且无数据丢失；但文档与实现的说法已经不一致）
+**Depends on:** None
+
 ### ~~`play.lock` 被 config / settings 写者共用 —— 任何一次设置写都可能静默吞掉一声提示音~~ ✅ 2026-07-12 阶段 A 已修
 
 `ClaudioPaths.lockFile` 已**改名**为 `playLockFile`，并新增 `configLockFile`（`~/.claudio/config.lock`）与

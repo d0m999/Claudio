@@ -341,6 +341,63 @@ func runPanelConfigControllerSuites() {
         }
     }
 
+    // switchPack 失败 → .packNotFound → 全量刷新（.full）。这条此前只在 `PanelRefreshRouteSuite` 的纯函数
+    // 层钉过（`packSwitchRefreshRoute(after: .packNotFound(...)) == .full`），从没在 controller 这一层被
+    // 断言过：`switchPack` 的失败分支自己也有一个 `switch packSwitchRefreshRoute(after: error)`，
+    // `.configOnly` / `.full` / `.noRefresh` 三条各调不同的刷新方法——而 `.full` 这一格从未单独被钉过
+    // （上面「switchPack 失败：error 必须记进 packSwitchError」那条只查了 `packSwitchError != nil`，
+    // 「switchPack 成功」那条虽然也调过一次 `.packNotFound`，但只用它当「制造一次失败」的前提，从没读过
+    // 那一刻的 `afterFullReloadConfigs` 计数）。
+    //
+    // 覆盖率审计（本轮）实测：把 `switchPack` 失败分支里的 `case .full: reload()` 悄悄换成
+    // `case .full: reloadConfigOnly()`，两套测试（gui 1779 条 + helper 1247 条）**全绿**——画廊上那张
+    // 幽灵卡（切到一个磁盘上不存在的包）本该在下一次全量重扫时被抹掉，换成轻量刷新会让它继续挂在那儿，
+    // 而没有任何断言逮到这一步。补上这条：钉死 `afterFullReloadCalls` 在这一格必须是 1（只有 `reload()`
+    // 会调 `afterFullReload`，`reloadConfigOnly()` 不会）。
+    suite(
+        "PanelConfigController.switchPack 失败（.packNotFound）：必须走全量 .full（afterFullReload 被调），"
+            + "不是轻量 .configOnly（覆盖率审计：mutation-tested 逮到的活缺口）"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
+
+            var afterFullReloadCalls = 0
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile, environment: makeEnvironment(packsDir),
+                afterFullReload: { _ in afterFullReloadCalls += 1 })
+            guard case .operational = controller.configState else {
+                expect(false, "test setup：面板必须先以 .operational 打开，得到 \(controller.configState)")
+                return
+            }
+
+            // 切到一个磁盘上真的不存在的包 —— selectPack 拒在 .packNotFound（不是校验层的 .invalidPackID：
+            // 这个 id 是一个普通字符串，不空、不是 . / ..、不含路径分隔符）。
+            controller.switchPack(to: "ghost-pack-not-on-disk")
+
+            guard case .packNotFound = controller.packSwitchError else {
+                expect(
+                    false,
+                    "test setup：这个包 id 必须真的解析不出目录，落在 .packNotFound，而不是别的失败 —— "
+                        + "得到 \(String(describing: controller.packSwitchError))")
+                return
+            }
+            expect(
+                afterFullReloadCalls == 1,
+                ".packNotFound 必须触发**全量** reload()（afterFullReload 被调一次）—— 画廊里挂着一张"
+                    + "幽灵卡，只有全量重扫包库才能让它消失。走了轻量 .configOnly，afterFullReload 会是"
+                    + "0 次；得到 \(afterFullReloadCalls) 次（mutation-tested：把这一格的 `reload()` 换成 "
+                    + "`reloadConfigOnly()`，此前两套测试合计 3026 条全绿）")
+        }
+    }
+
     // muteError 的 republish（红队 round3：这行是 e49f0bc 新写的，此前零行为覆盖）。#2 的结构修复堵死了
     // 「注入第二个 muteController 实例」，但**堵不住把 republish 写成常量**：删掉
     // `muteError = muteController.lastError`（或写成 `= nil`）→ muteError 恒 nil → 真·静音失败（.lockBusy /
@@ -832,6 +889,72 @@ func runPanelConfigControllerSuites() {
                         + " —— 说明切包的失败分支无条件 reload 了")
                 return
             }
+        }
+    }
+
+    // /ship pre-landing review（testing specialist）：switchPack 的其他 suite 全部预先写好一份 config.json
+    // 再构造 controller，从没有一条从 configFile **真的不存在**开始——也就是从没测过全新安装唯一的自救
+    // 动作本身：configState 以 .needsPack 构造，用户在画廊里点第一张卡，switchPack 必须把 config.json
+    // 从无到有建出来、并把全部四个读模型（configState/config/eventRows/packCards）连同 afterFullReload
+    // 一起翻到位。底层 `selectPack` 的「凭空建 config」早被 helper 的 UseSuite 钉过，但 controller 这一层
+    // 的接线——从 .needsPack 出发——此前一条断言都没有。
+    suite(
+        "PanelConfigController.switchPack 冷启动：configFile 从不存在开始（.needsPack）→ "
+            + "首次选包必须把 configState/config/eventRows/packCards 全部翻到 .operational"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packsDir = root.appendingPathComponent("packs")
+            // 真包，映 stop —— 与 needsPack 的空包默认值（全 .unmapped）形成可观测对比。
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
+            // ⚠️ 刻意不写 configFile —— 这是全新安装的真实起点：hooks 装好、还没有人选过包。
+
+            var afterFullReloadConfigs: [ClaudioConfig] = []
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: lockFile, environment: makeEnvironment(packsDir),
+                afterFullReload: { afterFullReloadConfigs.append($0) })
+
+            // 前提：真的冷启动 —— configState 必须是 .needsPack（面板此刻显示「先选包」空态卡）。
+            guard case .needsPack = controller.configState else {
+                expect(
+                    false,
+                    "test setup：configFile 不存在，controller 必须以 .needsPack 构造，得到 "
+                        + "\(controller.configState)")
+                return
+            }
+            expect(controller.config.selectedPack == "", "前提：resolvedConfig 必须是空包默认值")
+
+            // 用户在画廊里点第一张卡 —— 全新安装唯一的自救动作。
+            controller.switchPack(to: "pack-a")
+
+            guard case .operational(let onDisk) = controller.configState else {
+                expect(
+                    false,
+                    "首次选包之后 configState 必须翻到 .operational —— 它停在 \(controller.configState)，"
+                        + "面板会在用户点了卡片之后继续显示「先选包」空态卡，看起来像点击毫无反应")
+                return
+            }
+            expect(onDisk.selectedPack == "pack-a", "得到 \(onDisk.selectedPack)")
+            expect(controller.config.selectedPack == "pack-a", "得到 \(controller.config.selectedPack)")
+            expect(
+                controller.packCards.first(where: { $0.isSelected })?.id == "pack-a",
+                "画廊必须把新建出的这个包高亮成当前选中")
+            if case .present = controller.eventRows.first(where: { $0.event == .stop })?.coverage {
+            } else {
+                expect(
+                    false,
+                    "首次选包之后 stop 那行覆盖必须重算成 .present（真包映了它），得到 "
+                        + "\(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.coverage))"
+                )
+            }
+            expect(
+                afterFullReloadConfigs.last?.selectedPack == "pack-a",
+                "afterFullReload 必须收到新建出的 config（onboarding 重探 + import view-model retarget 都要用它）"
+            )
         }
     }
 }

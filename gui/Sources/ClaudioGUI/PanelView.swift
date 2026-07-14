@@ -414,8 +414,9 @@ public struct PanelView: View {
         // header 拼到**执行时**的 state 上 —— 这就是全部的缺口。代码里没有任何东西把那个续体排在这个
         // block 之后。
         //   （两点精确性，别再传错：① view-model 的 `refresh()` 只有一行 `state = detectOnboardingState(…)`，
-        //     **从不碰** `packCards` —— 重写 `packCards` 的是 `PanelView.refresh()`，那要等下一趟 update
-        //     pass，与这条竞争无关：header 早在捕获时就定死了。② 此处只说「可能先跑」，**不说「保证」**：
+        //     **从不碰** `packCards` —— 重写 `packCards` 的是 `panelModel.reload()`（`PanelConfigController`，
+        //     T15 之后从这个文件抽出去了），那要等下一趟 update pass，与这条竞争无关：header 早在捕获时
+        //     就定死了。② 此处只说「可能先跑」，**不说「保证」**：
         //     下面那段刚论证过，Swift 并发 job 相对 dispatch block 的入队顺序是**实现细节** —— 缺口论证
         //     不需要、也不该反过来把同一条实现细节当成保证来用。）
         //
@@ -828,13 +829,13 @@ public struct PanelView: View {
     /// 试听这一行的声音。
     ///
     /// `else` 分支**不是**空的（本轮 /ship 评审：Claude 对抗子代理）。走到这里说明 `row.coverage` 还是
-    /// `.present`——那是上一次 ``refresh()`` 时算出来的——但文件此刻已经解析不出来了：用户在这中间把它
-    /// 删了 / 改名了 / 换成了一个目录。原来的 `else { return }` 让「点了试听、什么都没发生、也没有任何
-    /// 解释」成为可能，而这正是这一轮刚在 `switchPack` / 静音 / 绑定三处修掉的那种静默吞错。
+    /// `.present`——那是上一次 ``panelModel.reload()`` 时算出来的——但文件此刻已经解析不出来了：用户在
+    /// 这中间把它删了 / 改名了 / 换成了一个目录。原来的 `else { return }` 让「点了试听、什么都没发生、
+    /// 也没有任何解释」成为可能，而这正是这一轮刚在 `switchPack` / 静音 / 绑定三处修掉的那种静默吞错。
     ///
-    /// 修法不是弹一个错误框，而是**让面板说实话**：重跑 `refresh()`，这一行会自己从 `.present` 变成
-    /// `.broken`（「文件丢失」+ 进 doctor）。用户点下去看到的是行的状态当场改变——那比任何一句提示都更
-    /// 接近「不回头也知道状态」。
+    /// 修法不是弹一个错误框，而是**让面板说实话**：重跑 ``panelModel.reload()``，这一行会自己从
+    /// `.present` 变成 `.broken`（「文件丢失」+ 进 doctor）。用户点下去看到的是行的状态当场改变——那比
+    /// 任何一句提示都更接近「不回头也知道状态」。
     private func playPreview(for row: EventRow) {
         guard case .present(let fileName) = row.coverage,
             let packDirectory = resolvePackDirectory(
