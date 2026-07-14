@@ -1292,8 +1292,10 @@ func runOnboardingActionsFixSuites() {
 
         let operational = panelFocusOrder(
             .operational(events: [], packCardIDs: [], hasDetailToggle: true))
+        // .masterVolume 在 .operational scope 里恒出现（不依赖 events 非空），排在 .dropZone 之前
+        // ——PLAN-MASTER-VOLUME.md D41；零事件行只是 fixture，生产恒 4 行。
         expect(
-            operational == [.dropZone, .revealDetail, .disconnect],
+            operational == [.masterVolume, .dropZone, .revealDetail, .disconnect],
             "运行态：失败行在「断开连接」之上。得到 \(operational)")
 
         let withoutToggle = panelFocusOrder(

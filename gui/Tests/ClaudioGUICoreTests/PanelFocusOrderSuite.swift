@@ -36,7 +36,7 @@ func runPanelFocusOrderSuites() {
     suite("panelFocusOrder: operational — each row contributes action THEN mute, in Event.allCases order (follows visual left-to-right order)") {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: []))
         let expected: [PanelFocusTarget] =
-            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.dropZone, .disconnect]
+            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.masterVolume, .dropZone, .disconnect]
         expect(order == expected, "got \(order)")
     }
 
@@ -54,8 +54,9 @@ func runPanelFocusOrderSuites() {
             expect(false, "dropZone must appear in the order")
             return
         }
-        let rowCount = Event.allCases.count * 2
-        expect(dropZoneIndex == rowCount, "dropZone must sit right after all row controls, got index \(dropZoneIndex)")
+        // +1 accounts for .masterVolume, which sits between the last row and the drop zone.
+        let rowCount = Event.allCases.count * 2 + 1
+        expect(dropZoneIndex == rowCount, "dropZone must sit right after all row controls (incl. the master volume slider), got index \(dropZoneIndex)")
         expect(
             order[(dropZoneIndex + 1)...].elementsEqual([
                 .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"), .disconnect,
@@ -64,13 +65,27 @@ func runPanelFocusOrderSuites() {
                 + " (it is the bottom-most control — focus order tracks visual order), got \(order)")
     }
 
+    suite("panelFocusOrder: .masterVolume's position is pinned — right after the last row's .eventMute, right before .dropZone") {
+        let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: ["alpha-pack"]))
+        guard let masterVolumeIndex = order.firstIndex(of: .masterVolume) else {
+            expect(false, ".masterVolume must appear in the order")
+            return
+        }
+        expect(
+            order[masterVolumeIndex - 1] == .eventMute(Event.allCases.last!),
+            "masterVolume must immediately follow the last row's mute toggle, got \(order[masterVolumeIndex - 1])")
+        expect(
+            order[masterVolumeIndex + 1] == .dropZone,
+            "masterVolume must immediately precede the drop zone, got \(order[masterVolumeIndex + 1])")
+    }
+
     suite("panelFocusOrder: operational — total count is 2×events + dropZone + cards + disconnect") {
         let order = panelFocusOrder(
             .operational(events: Event.allCases, packCardIDs: ["a", "b", "c"]))
-        // +1 dropZone, +3 cards, +1 断开连接（T17）
+        // +1 masterVolume, +1 dropZone, +3 cards, +1 断开连接（T17）
         expect(
-            order.count == Event.allCases.count * 2 + 1 + 3 + 1,
-            "expected \(Event.allCases.count * 2 + 1 + 3 + 1) items, got \(order.count)")
+            order.count == Event.allCases.count * 2 + 1 + 1 + 3 + 1,
+            "expected \(Event.allCases.count * 2 + 1 + 1 + 3 + 1) items, got \(order.count)")
     }
 
     suite("panelFocusOrder: onboarding vs operational produce structurally different orders") {
@@ -86,9 +101,12 @@ func runPanelFocusOrderSuites() {
 
     suite("panelFocusOrder: an empty operational panel (no cards) still ends at the drop zone + 断开连接") {
         let order = panelFocusOrder(.operational(events: [], packCardIDs: []))
+        // .masterVolume is unconditional in the .operational scope (not gated on events being
+        // non-empty) — zero rows is only a fixture, production always has 4 (see below).
         expect(
-            order == [.dropZone, .disconnect],
-            "with zero rows and zero cards, only the drop zone and 断开连接 remain, got \(order)")
+            order == [.masterVolume, .dropZone, .disconnect],
+            "with zero rows and zero cards, only the master volume slider, drop zone, and"
+                + " 断开连接 remain, got \(order)")
     }
 
     // MARK: - panelFirstFocusTarget (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项" — the
@@ -125,7 +143,7 @@ func runPanelFocusOrderSuites() {
         // per-row stop count stays stable). Pin the exact order so a shrink would fail here.
         let fullOrder = panelFocusOrder(scope)
         let expected: [PanelFocusTarget] =
-            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.dropZone, .disconnect]
+            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.masterVolume, .dropZone, .disconnect]
         expect(fullOrder == expected, "the full order (incl. the disabled action) must be unchanged, got \(fullOrder)")
         expect(fullOrder.contains(.eventAction(first)), "the disabled action must remain a Tab stop")
         // Half B — the SAME event, marked non-operable, is skipped for OPENING focus only.
@@ -174,11 +192,15 @@ func runPanelFocusOrderSuites() {
             "onboarding first focus is unaffected by action operability, got \(String(describing: target))")
     }
 
-    suite("panelFirstFocusTarget: empty operational panel → first focus is the drop zone (never nil)") {
+    suite("panelFirstFocusTarget: empty operational panel → first focus is the master volume slider (never nil)") {
         let scope = PanelFocusScope.operational(events: [], packCardIDs: [])
+        // Zero events is only a fixture — production always renders 4 rows (packCoverage's
+        // branches are both `Event.allCases.map`, see CoverageState.swift), so .masterVolume
+        // being first here (ahead of .dropZone) is unreachable in shipping code.
         expect(
-            panelFirstFocusTarget(scope) == .dropZone,
-            "an operational panel always ends at the drop zone, so first focus is never nil, got \(String(describing: panelFirstFocusTarget(scope)))")
+            panelFirstFocusTarget(scope) == .masterVolume,
+            "an operational panel always contains the master volume slider ahead of the drop"
+                + " zone, so first focus is never nil, got \(String(describing: panelFirstFocusTarget(scope)))")
     }
 
     suite("panelFirstFocusTarget: onboarding with neither CTA → nil (nothing to focus)") {
@@ -263,10 +285,26 @@ func runPanelFocusOrderSuites() {
             "the first OPERABLE slot is the first row's mute, got \(String(describing: target))")
     }
 
-    suite("panelOpeningFocus: zero rows (packs still loading) → the drop zone, never nil") {
+    suite("panelOpeningFocus: every row muted → first focus is the first row's mute, NEVER the master volume slider (the slider only wins opening focus when the row list is empty — an unreachable-in-production fixture, see above)") {
+        let rows = Event.allCases.map {
+            EventRow(event: $0, coverage: .present(fileName: "\($0.cliName).mp3"), enabled: false)
+        }
+        let target = panelOpeningFocus(rows: rows, packCardIDs: [])
         expect(
-            panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"]) == .dropZone,
-            "an operational panel always contains the drop zone, so opening focus is never nil")
+            target == .eventMute(Event.allCases.first!),
+            "with every row muted, first focus is still the first row's mute, got \(String(describing: target))")
+        expect(
+            target != .masterVolume,
+            "the master volume slider must never steal opening focus away from an operable event"
+                + " row toggle, got \(String(describing: target))")
+    }
+
+    suite("panelOpeningFocus: zero rows (packs still loading) → the master volume slider, never nil") {
+        // Zero rows is only a fixture (production always has 4, see the .operational fixture
+        // note above) — .masterVolume, always operable, sits ahead of .dropZone in the order.
+        expect(
+            panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"]) == .masterVolume,
+            "an operational panel always contains the master volume slider, so opening focus is never nil")
     }
 }
 
@@ -296,9 +334,10 @@ func runPanelFocusInFlightSuites() {
                 == .eventAction(Event.allCases[0]),
             "operational 面板里首焦点本来就不是断开连接，禁用它不该改变这一点")
 
-        // 极端情形：没有事件行、没有包卡 —— 唯一的候选就是 dropZone 与 disconnect。
+        // 极端情形：没有事件行、没有包卡 —— 唯一的候选是 masterVolume（恒可操作，且排在 dropZone
+        // 之前）、dropZone、disconnect（disabled）。零行只是 fixture，生产恒 4 行。
         expect(
-            panelOpeningFocus(rows: [], packCardIDs: [], ctaOperable: false) == .dropZone,
-            "断开被禁用时，焦点该落在仍然可操作的拖入区上")
+            panelOpeningFocus(rows: [], packCardIDs: [], ctaOperable: false) == .masterVolume,
+            "断开被禁用时，焦点该落在仍然可操作的主音量滑块上")
     }
 }

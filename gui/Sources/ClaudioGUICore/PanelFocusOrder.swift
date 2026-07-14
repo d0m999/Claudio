@@ -27,6 +27,10 @@ public enum PanelFocusTarget: Sendable, Hashable {
     /// renders exactly one of them, so the tab STOP count per row never changes with
     /// coverage state, only what activating it does.
     case eventAction(Event)
+    /// The master volume slider control row (PLAN-MASTER-VOLUME.md D41). Sits after every event
+    /// row's action/mute pair and before the drop zone, aligning with the panel's visual layout
+    /// (line between event rows and drop zone).
+    case masterVolume
     case dropZone
     case packCard(id: String)
     /// 一条失败行上的「查看原因」（T17）—— 它是一个**可聚焦控件**，不是装饰：WCAG 2.1.1 要求
@@ -85,6 +89,7 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
             order.append(.eventAction(event))
             order.append(.eventMute(event))
         }
+        order.append(.masterVolume)
         order.append(.dropZone)
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
         // 面板最底部：失败行（若有）在「断开连接」之上 —— 焦点序跟随视觉序。
@@ -112,8 +117,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// same reason ``PanelFocusScope`` carries plain ``Event``s rather than `EventRow`s. Only the
 /// present-AND-muted case belongs here: `unmapped`/`broken` rows' action slot is the
 /// always-operable import affordance, not the (also-rendered, but no-longer-focus-owning)
-/// disabled preview button (see ``EventRowView``). Every non-action target — mute toggles,
-/// the drop zone, gallery cards — is operable and never filtered.
+/// disabled preview button (see ``EventRowView``). Every non-action target — mute toggles, the
+/// master volume slider, the drop zone, gallery cards — is operable and never filtered (the
+/// slider only ever appears in a fully-operational panel, PLAN-MASTER-VOLUME.md D23/D41).
 ///
 /// ``panelFocusOrder(_:)`` itself is intentionally NOT changed: it still lists every slot
 /// including disabled actions, so the per-row Tab-STOP count stays stable across coverage
@@ -158,7 +164,11 @@ public func panelFirstFocusTarget(
             // 所以这个 target 压根不会在 in-flight 的 order 里 —— 但仍显式跟随 `ctaOperable`，
             // 免得未来某次改动让它悄悄留在一个全禁用的面板上。
             return ctaOperable
-        case .eventMute, .dropZone, .packCard:
+        // .masterVolume (PLAN-MASTER-VOLUME.md D23 定稿 + D41): 滑块只存在于完全可运行的面板
+        // （.needsPack / .malformed / .unwritable 都不渲染它），所以 .operational scope 里它
+        // 恒可操作 —— this `true` is load-bearing for it, same as the other never-filtered
+        // targets in this case.
+        case .eventMute, .dropZone, .packCard, .masterVolume:
             return true
         }
     }
