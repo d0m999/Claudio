@@ -1477,18 +1477,49 @@ rename」，要的都是**父目录**的写权限。`chmod 0500 ~/.claude`（MDM
 **Priority:** P3
 **Depends on:** 会改到 `doctor` 的既有输出（`Doctor.swift:379` 是它今天的另一个调用方），要同批改 DoctorSuite。
 
-### `.malformed` 态丢掉了仍然读得出来的 `selected_pack`，于是拖拽的拒绝理由文不对题
+### `.malformed` / `.unwritable` 都丢掉了仍然读得出来的 `selected_pack` —— 拖拽拒绝理由、画廊高亮、VoiceOver 播报全部遭殃
 
-**What:** `PanelConfigState.malformed(reason:)` 不带 packID，`resolvedConfig` 一律回落成
-`ClaudioConfig(selectedPack: "")`。但「畸形」很多时候只坏在**别的**键上（`{"selected_pack": "lofi",
-"master_volume": "0.35"}`——`selected_pack` 好好的）。此时用户往面板里拖一个音频，`retarget(to: "")` →
-`isSafePackID("")` 判假 → 拒绝理由报的是 **`.pathTraversal`（路径穿越）**，而真实原因是「config 的
-`master_volume` 是字符串，包上下文没能带过来」。
+**What:** `PanelConfigState.malformed(reason:)` 和 `.unwritable(reason:)` 都不带 packID，`resolvedConfig`
+一律回落成 `ClaudioConfig(selectedPack: "")`。但两者都常常只坏在**别的**地方——`.malformed`：
+`{"selected_pack": "lofi", "master_volume": "0.35"}`，`selected_pack` 好好的，只是 `master_volume`
+是字符串；`.unwritable`：内容**必然**合法（`loadPanelConfig` 走到 `.unwritable` 分支之前，
+`probeConfigRewritable` 已经跑完 `parseRewritableConfig`——顶层对象、`selected_pack` 合法字符串、
+`master_volume` 数字、`events` 全布尔全部通过），坏的只是**父目录写不进去**。两种情况下
+`selected_pack` 其实都读得出来，却被那句硬编码的空默认值一起扔掉。
 
-**Why:** 不是静默失败（拒绝会显式渲染），是**措辞与真实原因对不上**——而这个仓库反复栽在同一件事上。
+**验证过的具体后果**（`.unwritable` 这一半，2026-07-14 `/ship` Step 11 adversarial review，Claude
+子代理逐行核对源码而非只看 diff hunk 确认）：
+- `AudioDropZoneView` 不像事件行那样受 `configState` 顶层路由收纳，是**无条件渲染**的。用户在
+  `~/.claudio` 目录突然变只读（MDM chmod、磁盘写满、同步工具占锁——都不是内容坏）时拖一个音频进去，
+  `importAudioFile` 第一道闸门 `isSafePackID("")` 判假，报的是 **「这个文件名 Claudio 不敢直接用，换个
+  正常一点的名字再拖一次」**——把一个目录权限问题说成文件名问题。
+- `PackGalleryView` 的选中高亮（`config.selectedPack` 比对）整卡熄灭，即便磁盘上明明有一张选中的卡。
+- `headerAccessibilityLabel` 对 VoiceOver 播报空包名，而不是真实、合法的那个。
 
-**Effort:** M（给 `.malformed` 加一个可选 packID 字段；牵动 PanelConfigSuite 的合成矩阵）
-**Priority:** P3
+`.malformed` 那一半仍是原始 finding（拖拽拒绝理由报 `.pathTraversal`，文不对题）。`.unwritable`
+这一半是**更干净的修法**：`loadClaudioConfig(from:)` 在这个分支下保证解码成功（构造上不存在
+「解不出来」的可能），不需要 `.malformed` 那种「解不解得出来看情况」的判断。
+
+**Why:** 不是静默失败（拒绝 / 空高亮都会显式渲染），是**措辞与真实原因对不上，且发生在完全非对抗性的
+生产场景下**（目录权限变化，不需要任何人手动改坏 config 内容）——这个仓库反复栽在同一件事上。
+
+**Context:** 2026-07-14 `/ship` Step 11 adversarial review（Claude adversarial subagent + Codex adversarial
+两路独立命中 `.unwritable` 这一半的不同侧面，均已用实际源码核实，非猜测）。顺带发现一条更窄、优先级更低、
+与本条同一处的相关缺口，先记在这里而非单开一条：`PanelConfigController.reloadConfigOnly()`（mute 成功 /
+`.configOnly` 失败两条路共用）重读 `configState`/`config` 之后，`eventRows` 只重算 `enabled` 位，
+`coverage` 原样带过来自旧值——如果外部一个不受锁约束的写者（`claudio use`）恰好在同一个窗口把
+`selected_pack` 换掉，`config`/header 会正确显示新包，但 `eventRows.coverage` 会继续显示旧包的文件
+存在性，直到下一次全量 reload。**这条不是本分支引入的回归**——`git show origin/main:.../PanelView.swift`
+确认 pre-branch 的 `refreshEnabledFlags()` 就是同一个模式（`eventRows.map` 只翻 `enabled`），本分支
+只是重命名+挪了地方，行为字面未变。窗口窄（需要外部 CLI 恰好在这个时间点写）、后果自限（下一次任何
+一次全量刷新——重开 popover、切包成功——就会纠正），不足以单开一条，但修上面这条 packID 携带问题时
+顺手看一眼这条是否也该在「新旧 selectedPack 不一致」时升级成全量刷新。
+
+**Effort:** M（给 `.malformed` / `.unwritable` 都加一个可选 packID 字段；`.unwritable` 那一半可以直接调
+`loadClaudioConfig` 拿到手，`.malformed` 那一半仍要处理「解不解得出来看情况」；牵动 PanelConfigSuite
+的合成矩阵）
+**Priority:** P2（从 P3 上调——`.unwritable` 这一半三处真实 UI 表面都受影响，且触发条件是完全非对抗性的
+目录权限变化，比原始 `.malformed` finding 的影响面更广）
 **Depends on:** None
 
 ---
