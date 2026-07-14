@@ -890,7 +890,9 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 已由那次走查验掉的：`NSStatusItem` 点击 ↔ popover 开关 ✅；`.transient` Esc 关闭 ✅（**并非白来的** —— 见下方 `NSApp.activate` 那笔账）；面板渲染 ✅。
 
-**仍未验、且必须在 state 到 `.installed` 之后才够得着的**（本机当前 `~/.claudio/bin/` 不存在、settings.json 无 claudio hooks，所以第一屏永远是 `.helperMissing`，运行态面板根本进不去）：Tab/Shift+Tab 走 action→mute 序（**注意：默认系统设置下这条根本不成立，见下一条 TODO**）、VoiceOver 逐控件导航 + 进入播报、切包画廊滚动/点选、Dynamic Type 三级真实布局、reduce-transparency、真实 `NSSound` 试听、静音/切包后 SwiftUI refresh、`NSOpenPanel` 端到端喂进导入管线。
+**仍未验、且必须在 state 到 `.installed` 之后才够得着的**（本机当前 `~/.claudio/bin/` 不存在、settings.json 无 claudio hooks，所以第一屏永远是 `.helperMissing`，运行态面板根本进不去）：Tab/Shift+Tab 走 action→mute 序（**注意：默认系统设置下这条根本不成立，见下一条 TODO**）、切包画廊滚动/点选、reduce-transparency、静音/切包后 SwiftUI refresh、`NSOpenPanel` 端到端喂进导入管线。
+
+> **2026-07-14 更新（PLAN-MASTER-VOLUME.md §9 真机走查，聚焦主音量行）**：VoiceOver 逐控件导航 + 进入播报 **✅ 已验**——开 VoiceOver、焦点移到主音量滑块，VO 字幕面板截图实测依次显示「42% 主音量, slider」→按↑箭头→「45%」，`config.json` 同步落盘，播报/推动/落盘三条断言全部拿到证据。真实 `NSSound` 试听 **✅ 已验**（拖到 ~20% 明显变小、拖到 0% 完全无声）。**Dynamic Type 三级真实布局 ❌ 验出真失败**——系统「文字大小」拉到最大档（`defaults read com.apple.universalaccess FontSizeCategory` 确认 `global=AX5`）、完全重启 app 后，主音量行没有任何变化（不折行、面板不加宽）。见新条目「主音量行的 Dynamic Type 三级布局在真机上完全不生效」。
 
 ~~此外仍未接线：onboarding CTA（接管/修复/断开）**全是 no-op**~~ → **2026-07-12 已接线并真机验证通过（T17b）**：CTA 现在真的会复制二进制 + 内置包、选默认包、写 hooks，失败会当场说出来；「断开连接」在运行态面板底部有了真入口。仍未做：状态栏图标仍是占位 SF Symbol（`waveform.circle`），非最终定制单色字形。
 
@@ -1014,6 +1016,18 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Effort:** S
 **Priority:** P4
 **Depends on:** None
+
+### 主音量行的 Dynamic Type 三级布局在真机上完全不生效——系统「文字大小」拉到最大档，面板一个像素都不变
+
+**What:** PLAN-MASTER-VOLUME.md §9 真机走查第 ⑪ 条（2026-07-14）：系统设置 → 辅助功能 → 显示 → 文字大小拉到最大档（`defaults read com.apple.universalaccess FontSizeCategory` 确认 `global=AX5`，即最高档），**完全退出重启** `Claudio.app` 后重新打开面板——D17/D44 描述的「主音量行变两行、面板加宽到 360pt」**完全没有发生**，面板与默认档位下逐像素一致。测试过程：先误增到系统设置里另一条无关滑块（显示对比度），发现后已改回原值，不影响本条结论；随后精确定位到「文字大小」这一控件（description 为「首选阅读字体大小」，range 0–14）并推到顶（14/14，预览文案确认变为「示例 42 点」），关闭面板重开、乃至 `⌘Q` 全新进程重启后复测，结果不变。
+
+**Why:** 这不是「测试没测对地方」——`defaults` 确认系统偏好确实写到了最高档，且给了 app 一次全新进程生命周期去读取它。真正的怀疑落在上面那条邻近 TODO（`DynamicTypeSize → PanelTypeSizeTier` 映射）默认成立的前提上：`PanelView.swift` 的 `typeSizeTier` 读的是 SwiftUI 的 `@Environment(\.dynamicTypeSize)`，而 macOS 上这个环境值**是否真的跟随「辅助功能 → 显示 → 文字大小」这个系统偏好**，本仓库从未验证过——两者可能根本不是同一件事（iOS 上 `dynamicTypeSize` 直接映射系统文字大小；macOS 的等价桥接历来更弱，`@Environment(\.dynamicTypeSize)` 在纯 AppKit 宿主的 SwiftUI 视图里默认恒为 `.large` 也是已知的平台坑）。如果确实如此，那么 `typeSizeTier` 后面接的那张三档映射表（`.larger`/`.largest`/`.maximum`，ENGINEERING.md:269 术语表）**永远读不到非默认值**，D17/D44 的验收标准在真机上不可能通过——不管 `switch` 里 `default:` 写不写 `@unknown` 都无关紧要（上面那条 TODO 因此可能是在打磨一段永远执行不到非默认分支的代码）。
+
+**Context:** PLAN-MASTER-VOLUME.md §9 走查第 ⑪ 条实测（2026-07-14，本机 macOS 26.5.1，`swift build -c release` 出的 ad-hoc `Claudio.app`）。按 Acceptance 要求本轮**未修改任何 Swift 代码**，只如实记录现象。下一步排查建议：① 确认 `PanelView.swift` 的 `typeSizeTier` 具体读的是哪个 SwiftUI/AppKit API；② 若确认是 `@Environment(\.dynamicTypeSize)`，查它在纯 `LSUIElement` + `NSPopover` 宿主下是否真的桥接系统「文字大小」偏好（可能需要显式监听 `NSApplication` 的辅助功能通知或改读 `NSApplication.shared.effectiveAppearance`/`NSFont` 的等价系统 API）；③ 有其它 macOS 系统 app（如 Finder/Notes）在同一台机器同一个系统偏好下是否表现出字体变化，作为「这是 macOS 平台限制」还是「只有 Claudio 没接对」的判据。
+
+**Effort:** M
+**Priority:** P1（D17/D44 是已拍板的验收决议，真机验证不通过意味着「阶段 D 已交付」这句话目前不成立）
+**Depends on:** 先查清 `typeSizeTier` 读的具体 API 再定修法；可能与上一条「`DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:`」共用一次修复窗口
 
 ### PackCardView 的 statusLine 图标/文字未 `accessibilityHidden`，且 CC0 徽标 VoiceOver 听不到
 
