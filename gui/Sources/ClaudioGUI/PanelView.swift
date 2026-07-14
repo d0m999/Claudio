@@ -485,27 +485,19 @@ public struct PanelView: View {
 
     // MARK: - Header
 
+    /// 唯一实现住在 ``PanelHeader``（`PanelRows.swift`）—— 此前这里与 `OnboardingView.header` 是两份
+    /// 逐字重复的副本，且两份对同一颗绿点的 a11y 处理正好相反（一份 hidden、一份配了一句**从来没有
+    /// 人听到过**的 label）。见 ``PanelHeader`` 的文档。
     private var header: some View {
-        HStack(spacing: 6) {
-            Text("Claudio")
-                .font(.system(size: 15 * typeScale, weight: .semibold))
-                .foregroundColor(ClaudioColor.text(colorScheme))
-            if onboardingViewModel.state.showsHeaderTakenOverDot {
-                Circle()
-                    .fill(ClaudioColor.success(colorScheme))
-                    .frame(width: 8, height: 8)
-                    .accessibilityHidden(true)
-            }
-            Spacer()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(headerAccessibilityLabel)
+        PanelHeader(
+            showsTakenOverDot: onboardingViewModel.state.showsHeaderTakenOverDot,
+            accessibilityLabel: headerAccessibilityLabel)
     }
 
     private var headerAccessibilityLabel: String {
-        guard onboardingViewModel.state == .installed else { return "Claudio 面板" }
+        guard onboardingViewModel.state == .installed else { return PanelHeader.baseLabel }
         let packName = panelModel.packCards.first(where: \.isSelected)?.name ?? panelModel.config.selectedPack
-        return "Claudio 面板，当前声音包 \(packName)"
+        return "\(PanelHeader.baseLabel)，当前声音包 \(packName)"
     }
 
     // MARK: - Operational panel (installed state)
@@ -577,7 +569,7 @@ public struct PanelView: View {
                         masterVolumeError: panelModel.masterVolumeError
                     ).enumerated()), id: \.offset
             ) { _, message in
-                errorNotice(message)
+                FailureRow(message: message)
             }
             AudioDropZoneView(
                 viewModel: dropZoneViewModel,
@@ -603,7 +595,7 @@ public struct PanelView: View {
             // 先改文案。（`runSetupNoticeSuites` 钉住了「文案里有『下面的声音包』」这一半；另一半
             // ——「它真的在下面」—— 只有这条注释和你的眼睛守着。）
             ForEach(Array(onboardingVisibleNotices(actionState: onboardingViewModel.actionState).enumerated()), id: \.offset) { _, notice in
-                ActionNoticeRow(message: notice.message, typeScale: typeScale)
+                ActionNoticeRow(message: notice.message)
             }
 
             PackGalleryView(
@@ -637,16 +629,10 @@ public struct PanelView: View {
     /// 发明一套说法。
     private func configFailureNotice(reason: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11 * typeScale))
-                    .foregroundColor(ClaudioColor.error(colorScheme))
-                Text(reason)
-                    .font(.system(size: 11 * typeScale))
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .combine)
+            // 2026-07-15 冗余审计的**第六份**手抄拒绝行 —— 审计当时只数到五份，漏了这一处（它藏在
+            // `configFailureNotice` 里面，不是一个独立命名的 `xxxRow` 函数，grep 拒绝行的时候没捞到它）。
+            // 如实记在这里：一次「我数清了所有副本」的断言，自己也漏了一个。
+            FailureRow(message: reason)
 
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([configFile])
@@ -684,7 +670,7 @@ public struct PanelView: View {
                 showsDetailToggle: onboardingShowsFailureDetailToggle(
                     state: onboardingViewModel.state, actionState: onboardingViewModel.actionState),
                 onToggleDetail: { onboardingViewModel.toggleDetail() },
-                focusedTarget: $focusedTarget, typeScale: typeScale)
+                focusedTarget: $focusedTarget)
         }
 
         // 告知**不在这里** —— 它排在 `PackGalleryView` **之前**（见 `operationalPanel`）。
@@ -739,25 +725,11 @@ public struct PanelView: View {
         }
     }
 
-    /// One panel-level failure line — the 「拒绝行」 shape DESIGN.md already defines ("真红
-    /// `circle-x` 字形 + `text-2` 说明"), identical to ``AudioDropZoneView``'s `rejectRow(_:)` and
-    /// ``EventRowView``'s `importErrorRow(_:)` so every failure in this panel looks like the same
-    /// kind of thing.
-    ///
-    /// 真红只上**图标**（非文本，≥3:1），文案走 `text-2`（≥4.5:1）—— 真红当正文亮色下只有
-    /// 4.07:1，不达文本门槛（`/ship` 评审实证）。
-    private func errorNotice(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.error(colorScheme))
-            Text(message)
-                .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-    }
+    // `errorNotice(_:)` 已删（2026-07-15 冗余审计 · A 类修复）—— 它是 DESIGN.md「拒绝行」的六份手抄
+    // 副本之一，而它自己的 doc comment 当时写着「**identical to** `AudioDropZoneView` 的 `rejectRow`
+    // 与 `EventRowView` 的 `importErrorRow`」，那句话在写下的时候就已经不是真的了（`rejectRow` 的图标
+    // 根本没设字号，文字是 11.5 不是 11）。现在这个面板里的每一条失败行都渲染同一个 ``FailureRow``
+    // （`PanelRows.swift`）—— 「它们长得一样」从一句需要被守的注释，变成了一个编译期事实。
 
     // MARK: - Dynamic Type (ENGINEERING.md T15 D5「Dynamic Type + 降级规则」)
 

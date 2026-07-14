@@ -290,7 +290,7 @@
                     focusedTarget: $focusedTarget,
                     adaptation: panelLayoutAdaptation(for: .standard))
                 if case .failed(_, let message) = state {
-                    errorRow(message)
+                    FailureRow(message: message)
                 }
             }
             .frame(width: CGFloat(standardPanelWidth))
@@ -303,22 +303,23 @@
             }
         }
 
-        /// Mirrors `PanelView.errorNotice`'s shape verbatim (真红图标 + `text-2` 文案) — this
-        /// repo's established 「拒绝行」 pattern is duplicated per-view rather than shared (see
-        /// `AudioDropZoneView.rejectRow`/`EventRowView.importErrorRow`), since each already lives
-        /// as a `private` method on a `View` with no public surface for another file to call.
-        private func errorRow(_ message: String) -> some View {
-            HStack(alignment: .top, spacing: 6) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 11))
-                    .foregroundColor(ClaudioColor.error(colorScheme))
-                Text(message)
-                    .font(.system(size: 11))
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .accessibilityElement(children: .combine)
-        }
+        /// 直接渲染产品用的那一个 ``FailureRow``（`PanelRows.swift`）—— 展柜画的就是真身，不是它的仿品。
+        ///
+        /// 【这里原本是第七份手抄副本，而它的注释把整个病灶说穿了】原文：
+        ///
+        /// > Mirrors `PanelView.errorNotice`'s shape **verbatim** … this repo's established
+        /// > 「拒绝行」 pattern is **duplicated per-view rather than shared** …, since each already
+        /// > lives as a `private` method on a `View` with **no public surface for another file to call**.
+        ///
+        /// 那句话是**对当时事实的准确描述**，也正是复制粘贴自我繁殖的机制：前五份全是 `private`，于是
+        /// 第六个想用它的人**只能再抄一份** —— 而每一份新副本，都被前面那些副本正当化了。抄到第七份时，
+        /// 「大家都是抄的」本身成了继续抄下去的理由。
+        ///
+        /// 它还有一个副本独有的 bug：字号是裸 `size: 11`，**没有乘 `typeScale`** —— 展柜里这一行字
+        /// 从来不跟随 Dynamic Type。换成 `FailureRow` 之后它**免费**获得了跟随（组件自带
+        /// `@ScaledMetric`），这一条谁都没去修过，它是被这次合并顺手带走的。
+        ///
+        /// 现在那个「no public surface」不成立了：``FailureRow`` 就是那个 surface。
     }
 
     /// Exhaustive over every ``MasterVolumeState`` case, no `default:`.

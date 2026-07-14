@@ -1189,7 +1189,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### 「断开连接」ghost 按钮偏离 DESIGN.md，且「次 CTA」这一个角色现在有两套渲染
+### 「断开连接」ghost 按钮偏离 DESIGN.md，且「次 CTA」这一个角色现在有~~两~~**五**套渲染
 
 **What:** 四条，都在 `PanelView.disconnectRow`：① 圆角 `cornerRadius: 8` 不在 DESIGN.md 的圆角阶梯上（控件 6 / 卡片·行 10 / onboarding 图标块 12 / 面板 15 —— 全 app 其余 `RoundedRectangle` 无一例外落在 token 上）；② 字号 `11` 是「次要 / 状态」那一档（面板里 `errorNotice` / `ActionFailureRow` 的说明文字正是 11），而控件标签最接近的档是「行标签 13」—— 这颗按钮的标签比面板里任何一颗别的按钮都小，跟它旁边的失败说明一样大；③ `.buttonStyle(.plain)` 剥掉了 AppKit 的全部反馈，只补了一层**静态**描边 —— 一颗全宽的、不可撤销的破坏性按钮，鼠标压下去屏幕上没有任何变化（本仓库对同类命中区已有成熟的 token 化 hover：`AudioDropZoneView` 的「边框转 clay + `clay-soft` 底」）；④ 同一个「次 CTA」语义角色，`OnboardingView` 里仍是 `.buttonStyle(.bordered)`（macOS 系统灰底按钮），而 DESIGN.md 写的是「次 CTA（ghost：透明 + `hairline-strong` 描边）」。
 
@@ -1197,9 +1197,21 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 **Context:** 2026-07-12 T17c 设计专项。修法：抽一个共享的 `GhostButtonStyle`（透明底 + `hairline-strong` 描边 + hover/pressed 态 + token 化圆角），`OnboardingView` 的次 CTA 与 `disconnectRow` 同时用它 —— 一个角色一套渲染。
 
-**Effort:** S
-**Priority:** P3
-**Depends on:** None（需要先拍板 ①②④ 的取值）
+**更新（2026-07-15 · 视图层通读审计）：④ 的范围**远不止两套**——「次要 / 非主 CTA」这一个角色，今天在同一个 312pt 面板里有 5 种视觉：**
+
+| # | 位置 | 渲染 | 合不合 DESIGN.md 的 ghost（透明 + `hairline-strong` 描边）？ |
+|---|---|---|---|
+| 1 | `PanelView.disconnectRow` | `.plain` + 手绘 `hairline-strong` 描边 + radius 8 | ✅ **唯一合规的那个**（除了 radius 8 越界，见 ①） |
+| 2 | `OnboardingView` 次 CTA | `.buttonStyle(.bordered)` | ❌ macOS 系统灰底按钮 |
+| 3 | `PanelView.configFailureNotice` 的「在访达中显示 config.json」 | `.plain` + `text-2`，**无描边** | ❌ 一行裸文字 |
+| 4 | `EventRowView.importAffordance` | `.plain` + **虚线**描边 radius 6 + hover 转黏土 | ❌ 第三种外观 |
+| 5 | `AudioDropZoneView.promptLabel` | `.plain` 裸文字（虚线框由外层 `body` 画） | ❌ 第四种外观 |
+
+也就是说：DESIGN.md 为这个角色定义了**一种**渲染，代码里有**五种**，而合规的那一个（#1）恰好是本条目一开始要改的那个。抽 `GhostButtonStyle` 时，#3/#4/#5 要一并判定「它们到底是不是同一个角色」—— #4/#5 是 drop 目标（另有虚线规格一条，见「前端设计冗余」节），#3 才是真正与 #1/#2 同族的第三个次 CTA。**别只修 ①②③④ 就宣布收口。**
+
+**Effort:** S ~~→ 重估 M~~（`GhostButtonStyle` 本身仍是 S；把 5 处判定归位是 M）
+**Priority:** P3 → **P2**（2026-07-15：从「一个角色两套」重估为「一个角色五套」，它已经是面板里最大的一处视觉不一致）
+**Depends on:** None（需要先拍板 ①②④ 的取值 + #3/#4/#5 的角色归属）
 
 ### ~~「断开连接」是全 app 唯一一条会与正在发声的 `claudio play` 抢 `play.lock` 的写路径~~ ✅ 2026-07-12 阶段 A 已修
 
@@ -1326,6 +1338,227 @@ enqueue 之前 —— 它就**先跑**：`actionState → .idle`、view-model �
 **Effort:** M
 **Priority:** P2（原 P3，2026-07-12 抬升 —— 见上面的更新）
 **Depends on:** None（与「把视图层拆成可被 import 的 library target」一起做最划算）
+
+## 前端设计冗余（2026-07-15 视图层通读审计）
+
+> 一次针对 `gui/Sources/ClaudioGUI/` 全部 14 个视图文件（3598 行）的冗余专项。判据是 DESIGN.md：
+> **凡是 DESIGN.md 定义了「一个」组件 / 一档 token，而代码里存在两份及以上互不相认的实现，即记一条。**
+> 下面五条按「同一个东西被写了几遍」排序，不按修复代价。
+> 已有的两条同族条目（「DesignTokens 规范化 / 生成式 token 模块归并延后」P3、「『断开连接』ghost 按钮偏离
+> DESIGN.md」P3 —— 后者本轮已就地更新）不在此重开，见各自原条目。
+
+### ~~DESIGN.md 的「拒绝行」有 5 份手抄实现，而给它们背书的注释写着「完全一致」—— 它们不一致~~ ✅ 2026-07-15 已修（**实际是 7 份** —— 审计自己漏数了两次）
+
+**✅ 修复（2026-07-15）：** 抽出 `FailureRow`（`gui/Sources/ClaudioGUI/PanelRows.swift`），七份副本全部改为渲染同一个 `View`。`ActionFailureRow` / `ActionNoticeRow` 一并从 `OnboardingView.swift` 底部搬进同一个文件（名字**不动** —— `ViewWiringSuite` 有两条真绊线数着 `PanelView.swift` 里的 `ActionNoticeRow(` 字面量，其中一条是顺序断言）。六个视图文件净 **−232 / +86** 行，`swift build` 绿，harness **1980 项全绿**。
+
+**⚠️ 但 1980 全绿不背书这次合并** —— `ClaudioGUI` 是 `@main` executableTarget，harness 一行都 import 不进来（见上面那条「`ClaudioGUI` 整个 target 在 harness 里一行都跑不到」）。`FailureRow` 的渲染**没有任何测试守着**，全绿只证明没踩坏别的东西。守门人是**真机走查**。
+
+**📌 审计方法的教训（这条比修复本身更值得记）：我把「五份」这个数字说错了两次，两次都是同一个原因。**
+
+- **第六份**：`PanelView.configFailureNotice` 里的一个逐字相同的 `HStack`。漏掉它是因为它**没有独立的函数名** —— 它藏在另一个函数体内部。
+- **第七份**：`StateGalleryView.errorRow`。漏掉它是因为它**名字不一样**（不叫 `rejectRow` / `errorNotice` / `importErrorRow`）。
+
+我审计时 grep 的是**函数名**（那是一张白名单：「我认得的那几个名字」），于是这两份都不在名单上。**真正能找全它们的判据是 grep 视觉特征本身 —— `xmark.circle.fill`** —— 而我是在改完代码、做结构验证时才用上这个判据，也正是它当场捞出了第七份。
+
+**这就是本仓库那条老教训的又一次应验：「我不认识什么」的清单是白名单，永远不完整。** 围栏要按「这个组件长什么样」去围（认不出的一律红），不能按「它可能叫什么名字」去猜。
+
+**第七份的注释，是这一整条目最好的注脚。** 它当时写着（原文，留档）：
+
+> Mirrors `PanelView.errorNotice`'s shape **verbatim** … this repo's established 「拒绝行」 pattern is **duplicated per-view rather than shared** …, since each already lives as a `private` method on a `View` with **no public surface for another file to call**.
+
+这句话**对当时的事实描述完全准确**，而它描述的正是复制粘贴的自我繁殖机制：前五份全是 `private`，于是第六个想复用的人**只能再抄一份**——而每一份新副本都被前面那些副本正当化了。抄到第七份时，「大家都是抄的」本身成了继续抄下去的理由。它还带着一个副本独有的 bug：字号是裸 `size: 11`，**没有乘 `typeScale`**，于是展柜里那行字从来不跟随 Dynamic Type —— 这条谁都没修过，是被本次合并**顺手带走**的。
+
+**刻意不收编的那一处**：`PackCardView.statusLine` 的 `.broken` 分支。它是 84pt 宽卡片**内部**的状态标签，不是面板级失败行，`spacing: 2` 是被卡片宽度逼出来的、不是漂移。折进去只会让组件长出一个纯为它服务的 `spacing:` 参数——那不叫收敛，那叫把差异换个地方藏。它与 `FailureRow` 共享的是 **token 层**（`error` + `text-2` + 11pt），那一层今天已经统一了。理由已写进代码注释。
+
+**同批拍板并落地**：drop-zone 的 `11.5pt` → `11pt`（DESIGN.md「次要 / 状态」档），✗ 图标补 `11pt`（它此前**根本没设字号**）；`successRow` 也一并 11.5 → 11（否则同一个 drop-zone 里会出现「拒绝 11 / 成功 11.5」的新漂移——拿一处旧漂移换一处新漂移）。**字号阶梯的 11.5 越界从此清零。**
+
+---
+
+**What（原文，留档）:** DESIGN.md「拒绝行」只定义了**一个**组件（"真红 `circle-x` 字形 + `text-2` 说明"）。代码里有五处各自独立的实现：
+
+| # | 位置 | 图标字号 | 文字字号 | HStack spacing | 其它 |
+|---|---|---|---|---|---|
+| 1 | `PanelView.errorNotice(_:)` | `11 * typeScale` | `11 * typeScale` | 6 | — |
+| 2 | `EventRowView.importErrorRow(_:)` | `11 * typeScale` | `11 * typeScale` | 6 | — |
+| 3 | `ActionFailureRow.messageRow`（`OnboardingView.swift`） | `11 * typeScale` | `11 * typeScale` | 6 | + chevron `9pt` + `minHeight 24` |
+| 4 | `AudioDropZoneView.rejectRow(_:)` | **未设**（继承默认 body 字号） | **`11.5 * typeScale`** | 6 | — |
+| 5 | `PackCardView.statusLine` 的 `.broken` 分支 | `11 * typeScale` | `11 * typeScale` | **2** | — |
+
+**Why:** 光是「一个组件五份副本」还只是普通的复制粘贴债。真正刺人的是**注释在替这五份副本作伪证**：
+
+- `EventRowView.importErrorRow` 的 doc comment：「reused **verbatim** from ``AudioDropZoneView``'s own `rejectRow(_:)`」
+- `ActionFailureRow` 的 doc comment：「与 ``PanelView`` 的 `errorNotice(_:)` 和 ``AudioDropZoneView`` 的 `rejectRow(_:)` **完全一致**：面板里每一种失败都长得像同一种东西」
+- `PanelView.errorNotice` 的 doc comment：「**identical to** ``AudioDropZoneView``'s `rejectRow(_:)` and ``EventRowView``'s `importErrorRow(_:)`」
+
+三处注释、两种语言，都在声明「它们是同一个东西」。而 #4 的图标**根本没设字号**（于是它比另外四处的 11pt 图标大一圈），文字是 11.5 不是 11；#5 的 spacing 是 2 不是 6。**这三句「完全一致」，今天没有一句是真的。**
+
+这正是本仓库反复交学费的那条教训的**镜像**：DESIGN.md 自己写过「一条错误的指控比没有指控更糟，因为下一个人会信它」。这里是一条错误的**保证**——它比没有保证更糟，因为下一个改「拒绝行」的人会读到「完全一致」，改一处、以为改了全部，而实际上还有四处岿然不动（这一轮就已经有两处在他之前先漂了）。
+
+**Context:** 2026-07-15 视图层通读审计。修法：抽一个 `FailureRow`（真红 ✗）+ 复用已有的 `ActionNoticeRow`（琥珀 ⚠，它已经是共享 struct 了 —— 说明这个抽法在本仓库已有先例，且已被证明可行），五个调用点全部改引用。抽完之后那三句注释才**成为真的**，而不是被删掉。⚠️ 抽的时候 #3 的 chevron / `minHeight 24` 与 #5 的紧凑 spacing 是**真实的差异**（可折叠 vs 不可折叠；卡片内 vs 面板行），别一刀切平——它们要么成为组件的参数，要么成为组件的两个变体。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
+
+### `typeScale` 是一个被手工穿线的环境值 —— 6 个视图各声明一份，40 处手写乘法，漏一处就静默不跟随 Dynamic Type
+
+**What:** `gui/Sources/ClaudioGUI/` 里**每一个**渲染文字的视图都各自声明了同一行：
+
+```swift
+@ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
+```
+
+`PanelView` / `EventRowView` / `OnboardingView` / `AudioDropZoneView` / `PackGalleryView` / `MasterVolumeRow` —— 六份。然后每一处字号都手写成 `.font(.system(size: 11 * typeScale))`，全树 **40 处**这样的乘法。
+
+更糟的是 `ActionFailureRow` / `ActionNoticeRow`：它们是独立的 `struct`，拿不到父视图的 `@ScaledMetric`，于是 `typeScale: CGFloat` 被做成了**构造参数**，由 `PanelView` / `OnboardingView` 在 4 个调用点手工传下去（`typeScale: typeScale`）。一个本该是环境值的东西，正在被当参数搬运。
+
+**Why:** 这是一条**只会静默失败**的约束。新加一个视图、忘了声明 `typeScale`，或者新加一行 `Text` 忘了乘 —— 编译过、测试全绿、真机上那行字**就是不跟随系统「文字大小」**。而这个失败模式**已经真的发生过一次**：TODOS.md 上面那条「主音量行的 Dynamic Type 三级布局在真机上完全不生效」（2026-07-14 走查 ⑪ 实测失败）就是同一个病根的另一半 —— 那条是**布局**没跟随，这条是**字号**没跟随，两者共享同一个根因：**Dynamic Type 在这棵树里靠人手工接线，没有任何结构强制它。**
+
+`ContrastSuite` 也守不住这一条：它是纯 hex 数学，看不见 `.font()`。
+
+**Context:** 2026-07-15 视图层通读审计。修法：一个 `.claudioFont(.rowLabel)` 式的 `ViewModifier` + 一个字号 token 枚举（见下一条：那个枚举**同时**是收敛字号阶梯的载体），`@ScaledMetric` 只在 modifier 内部声明一次，视图侧再也写不出「忘了乘」这种代码。这与上面那条「DesignTokens 规范化 / 生成式 token 模块归并延后」（P3）是**同一次重构**的两半 —— 那条管颜色 token，这条管字号 token（而字号 token 今天**根本不存在**）。合并考虑。
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** None（与「DesignTokens 规范化」合做最划算）
+
+### 字号阶梯：DESIGN.md 定义 4 档，代码在用 8 档 —— 而 DESIGN.md 自己也有两处互相矛盾
+
+**What:** DESIGN.md「字号阶梯」表里，App 内只有四档：**面板标题 14–15 · 行标签 13 · 次要/状态 11 · 数据/事件 id 10–12**。
+
+代码实际在用：**9 · 10 · 11 · 11.5 · 12 · 12.5 · 13 · 15** —— 八档。越界的三个：
+
+- **`11.5`** —— `AudioDropZoneView` 的 `rejectRow` + `successRow`。不在任何一档上。
+- **`12.5`** —— `AudioDropZoneView.promptLabel` + `OnboardingView` 卡正文。**但这一个不是代码的错**：DESIGN.md「State Components · onboarding 卡」白纸黑字写着「正文 `text-2` **12.5**」—— 也就是说 **DESIGN.md 的字号阶梯表与它自己的 State Components 节对不上**。要么阶梯表漏了一档，要么 State Components 越了界，得拍板一个。
+- **`9`** —— `ActionFailureRow.messageRow` 的 chevron，低于阶梯最小档。而 `PackCardView.statusLine` 里有一句现成的注释：「此前这三行都用 9pt，**低于阶梯的最小档**」，并已修掉 —— **同一个 9pt 在另一个文件里活得好好的，那次修复没走到底。**
+
+**Why:** 不是审美洁癖。字号阶梯是 DESIGN.md 唯一一处对「文字层级」的规定，而八档意味着「次要文字」这一个层级今天有 11 / 11.5 / 12.5 三种大小同屏 —— 用户看到的是三种「同等重要」的文字长得不一样大。且这三个越界值全都**没有任何测试或断言守着**（`ContrastSuite` 只管颜色对比度，不看字号）。
+
+**Context:** 2026-07-15 视图层通读审计。修法与上一条（字号 token 枚举）是**同一刀**：枚举的 case 就是 DESIGN.md 的档位，越界的字号在写枚举的那一刻就没有 case 可用。**但必须先拍板两件事**（不该由实现者代劳）：① `12.5` 进不进阶梯表（= DESIGN.md 自身冲突的收口）；② `11.5` 与 `9` 分别收敛到哪一档。
+
+**Effort:** S（收敛本身很小；拍板是前置）
+**Priority:** P3
+**Depends on:** 需先拍板 ①②
+
+### ~~两份 header —— 而其中一份的「已接管」绿点，在 shipping app 里**一个像素都画不出来**~~ ✅ 2026-07-15 已修
+
+**✅ 修复（2026-07-15）：** 抽出 `PanelHeader`（`PanelRows.swift`），`PanelView` 与 `OnboardingView` 同时引用。那句从来没有人听到过的 `.accessibilityLabel("已接管 Claude Code")` 随之消失；绿点的 a11y 处理从此只有一种（`.accessibilityHidden(true)` —— 它说的话已经折进整条 header 的 combine label 里）。「Claudio 面板」这句 base label 也从两处字面量收成一个 `PanelHeader.baseLabel` 常量。
+
+**⚠️ 一处诚实的更正 —— 本条目原文里有一句话是错的，别照抄它。** 原文写着：
+
+> 「抽的过程会**自动**暴露那个恒假的 `if` —— 因为共享组件只有一个绿点条件，而它不可能同时恒真和恒假。」
+
+**这句话不成立，实测后更正**：抽完之后 `if showsTakenOverDot` 仍然在（就在 `PanelHeader` 里），而且**它就该在**。`OnboardingView` 传进去的值恒为 `false` 并**不是 bug** —— 那是一个**正确的**恒假（onboarding 卡按定义就是「还没接管」）。同理 `PanelView` 那一侧的恒真也是正确的。一个 `if` 在某个调用点恒定，不等于它是死代码，只等于**那个调用点**的 state 已经被 `body` 的分支约束死了。
+
+**所以这次抽取真正消灭的东西是**：两份实现可能各自漂移（它们已经在 a11y 上漂了 —— 一份 hidden、一份配 label），以及那句永远听不到的话。**不是**那个 `if`。`OnboardingState.showsHeaderTakenOverDot` 与它的 `OnboardingStateSuite` 测试**都保留**，两个调用点仍然读它、不写字面量 —— 把一个恒定值硬编在调用点，等于把「为什么它恒定」这件事从代码里删掉。
+
+这条更正本身就是本节最后那条元条目的例证：**一句写在动手之前的断言，跑完之后必须回来对账。** 我差一点就让它以「已修复」的姿态留在原地。
+
+---
+
+**What（原文，留档）:** `PanelView.header`（`PanelView.swift:488`）与 `OnboardingView.header`（`OnboardingView.swift:54`）是两份几乎逐字相同的实现：`HStack(spacing: 6)` + `Text("Claudio")` 15pt semibold + `if state.showsHeaderTakenOverDot { Circle().fill(success).frame(8×8) }` + `Spacer()`。
+
+而 `OnboardingState.showsHeaderTakenOverDot` 的定义是 **`self == .installed`**（`OnboardingState.swift:61-63`），且 `PanelView.body` 的分支是：
+
+```swift
+if onboardingViewModel.state == .installed {
+    header              // ← PanelView 自己的 header
+    operationalPanel
+} else {
+    OnboardingView(...) // ← OnboardingView 自带另一份 header
+}
+```
+
+两个 `if` 因此各自退化成一个常量：
+
+- **`PanelView.header` 里的 `if` 恒为 `true`** —— 它只在 `.installed` 分支被渲染。
+- **`OnboardingView.header` 里的 `if` 恒为 `false`** —— `OnboardingView` 只在 `state != .installed` 时上屏。**那颗绿点，连同它的 `.accessibilityLabel("已接管 Claude Code")`，在 shipping app 里从来没有被渲染过一次，也从来没有一个 VoiceOver 用户听到过那句话。**
+
+两份 header 对绿点的 a11y 处理还正好**相反**：能渲染的那份把绿点 `.accessibilityHidden(true)`（因为 header 整体已有 combine label），画不出来的那份给它单独配了一句 label。
+
+**Why:** 死代码本身不伤人。伤人的是**它为什么活到了今天**：这段代码**唯一**能被看见的地方，是 `StateGalleryView` 的 `OnboardingState` fixture 网格 —— 那里有一帧 `.installed` × `OnboardingView`，绿点在那一帧里画得好好的。**而那一帧本身就是 app 里不存在的画面**（真机上 `.installed` 渲染的是 `PanelView.operationalPanel`，压根不是 `OnboardingView`）。
+
+这正是 TODOS.md 上面那条「**state gallery 给「断开连接」画的是一帧 app 里不存在的画面**」的**第二个实例** —— 同一帧、同一个病灶：**state gallery 是这段代码唯一的观众，于是没有任何人发现它在产品里是死的。** `StateGalleryView.swift:112-114` 甚至已经诚实标注了这一点（「画廊在这里展示的是告知行的一个近似」），但标注的是**告知行**，没人回头检查同一帧上**其它**元素是不是也一样虚假。
+
+**Context:** 2026-07-15 视图层通读审计。修法：把 header 抽成一个共享组件（一个真相源，绿点条件写一遍），`OnboardingView` 与 `PanelView` 同时引用。抽的过程会**自动**暴露那个恒假的 `if` —— 因为共享组件只有一个绿点条件，而它不可能同时恒真和恒假。⚠️ 顺带要拍板绿点的 a11y 归属（hidden 还是 label），今天两份的答案是相反的。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None（与「state gallery 画 app 里不存在的画面」那条同源，一起修最划算）
+
+### 「拖一个音频文件到这儿」这一个语义，有两套互不相认的虚线规格
+
+**What:** 面板里有两个 drop 目标，视觉语言是两套：
+
+| | 圆角 | 线宽 | dash | hover |
+|---|---|---|---|---|
+| `AudioDropZoneView`（面板底部大区） | 10 | **1.5** | **[4, 3]** | 边框转 clay + `clay-soft` 底 |
+| `EventRowView.importAffordance`（行尾「未配置 / 文件丢失」） | 6 | **1** | **[3, 2]** | 边框转 clay + `clay-soft` 底 |
+
+DESIGN.md 只定义了**前者**（「拖入 drop-zone：虚线 **1.5px** `hairline-strong` + radius 10」）。后者的 1px / `[3,2]` / radius 6 **没有任何 DESIGN.md 背书** —— 它是第二套虚线语言，凭空长出来的。
+
+**Why:** 两者是**同一个语义**（「往这儿拖一个音频文件」），hover 反馈也已经是同一套（边框转黏土 + `clay-soft` 底 —— 这一半是对的，说明当初确实有意对齐）。虚线规格却各写各的。危害有限（不影响可用性，也不违反任何对比度约束），但它是「同一个东西两份实现」这条主线上最便宜的一条：一个 `dashedBorder(radius:)` modifier 就收掉了。
+
+⚠️ 注意 radius 6 vs 10 **可能是对的** —— DESIGN.md 圆角阶梯里「控件 / 芯片 = 6，卡片 / 行 = 10」，行尾那个小按钮确实更像「控件」而非「卡片」。所以要收的是**线宽与 dash pattern**（两者没有任何理由不同），圆角保留两档、但要在 DESIGN.md 里把「行内小 drop 目标 = 控件档 radius 6」这句话补上，让它从「凭空」变成「有据」。
+
+**Context:** 2026-07-15 视图层通读审计。
+
+**Effort:** XS
+**Priority:** P3
+**Depends on:** None
+
+### 视图层的绊线以**散文**形式存在 —— 本轮实测腐烂 3 处，而它此前已经踩响过至少 4 次
+
+**What:** `gui/Sources/ClaudioGUI/` 的注释占比：`PanelView.swift` **56%**（894 行里 508 行注释 / 348 行代码）、`MasterVolumeRow.swift` **53%**、`EventRowView.swift` 44%。整个视图层的 SwiftUI 代码只有约 1200 行，被约 1100 行散文包着。
+
+**这一条不是在说「注释太多」。** 那些散文里装的是这个项目最贵的资产——「为什么**不能**那样做」的负空间知识（tile 底为什么不能用 `surface-2`、`.tint` 为什么不能自绘、告知行为什么必须排在画廊之前、`say()` 为什么不能从 `switchPack` 再调一次）。删掉它们是自杀。
+
+这一条说的是：**那些散文里混着三种载体完全不同的东西，而今天它们长得一模一样，于是没有人能分辨哪一句还活着。**
+
+| 类别 | 它是什么 | 正确的载体 | 今天的载体 |
+|---|---|---|---|
+| **A** | 「这五处必须一致」「这棵树里没有动画」 | **编译期结构**（一个共享组件 → 「一致」不再需要被断言，它成为无法违反的事实） | doc comment |
+| **B** | 「告知行必须排在画廊之前」「`.idle` 那一格必须先 `reload()`」 | **行为断言**（真磁盘 / 真状态机） | doc comment（+ 部分 `ViewWiringSuite` 的文本 `contains()`） |
+| **C** | 「走查 ⑨ 每次动控件行都必须重跑」 | **会过期的 checklist**（结构上测不到——`ContrastSuite` 是纯 hex 数学，`ClaudioGUICore` 连 SwiftUI 都不 link，看不见 `NSSlider` 填了什么色） | doc comment |
+
+**Why —— 腐烂不是风险，是已经发生的事实，而且反复发生：**
+
+*本轮实测新发现的 3 处（全部是 A 类，全部在说同一件事）：*
+1. `EventRowView.importErrorRow` 的注释：「reused **verbatim** from `AudioDropZoneView`'s own `rejectRow(_:)`」
+2. `ActionFailureRow` 的注释：「与 `PanelView` 的 `errorNotice(_:)` 和 `AudioDropZoneView` 的 `rejectRow(_:)` **完全一致**」
+3. `PanelView.errorNotice` 的注释：「**identical to** `AudioDropZoneView`'s `rejectRow(_:)` and `EventRowView`'s `importErrorRow(_:)`」
+
+三句话都是假的（图标字号、文字字号、spacing 三处已漂移——详见本节第一条）。
+
+*而在此之前，同一种腐烂已经踩响过至少 4 次，每一次都被如实记在案：*
+- `PanelView.swift:62-75` ——「本视图树零动画，所以不读 `accessibilityReduceMotion`，**这条注释就是绊线**」。T17c 往树里加了两颗 spinner，**跨过了它**，既没 gate 也没回来改。注释自己写着：「一条自己被跨过去还留在原地的绊线，比没有绊线更坏。」
+- `DESIGN.md:147` + `DESIGN.md` Decisions Log 2026-07-12 那一行 —— **两处**都在引用上面那条**已被推翻**的绊线原话，作为「控件行不得加动画」的理由。2026-07-14 才更正。
+- `MasterVolumeRow.swift:195-198` + `DESIGN.md` Decisions Log —— **两处**都写着走查 ⑨「That run is still owed / 本轮重新欠账」，而那一跑**已经跑完了**。注释自己写着：「话写在跑之前，跑完没人回来改……它对一条**真**纪律喊了狼来了。」
+- `PanelView.swift:603-604` —— 「`runSetupNoticeSuites` 钉住了『文案里有下面的声音包』这一半；另一半——**它真的在下面**——只有这条注释和你的眼睛守着。」这是一条 B 类不变式，主动声明自己没有断言背书。
+
+**而已经存在的那次「把绊线变成测试」的尝试，本身也在同一个坑里。** `ViewWiringSuite` 是读 `.swift` 源码文本做 `contains(字面量)`——它的 doc comment 自己列了四条失效模式，其中两条是**实测**的：
+
+- 第一版 `contains("Bundle.main")` **被一句注释假绿**（注释里的字面量与真调用同形）
+- 「把『全量 refresh』钉成 `contains("refresh()")`，而 `refresh()` 在那个文件里出现 **37 次**，那个合取子**恒真**」
+- 「那种断言能证明**修饰符在**，证明不了**闭包体做了什么**」
+- 另有 TODOS.md 上面那条已记的：「`ViewWiringSuite` 的文本绊线只挡得住『整行被删』，挡不住『body 被掏空』」
+
+所以修法**不是**「把散文改写成 `contains()` 断言」——那只是把一种脆弱换成另一种（探针，不是围栏：认不出的东西一律绿）。
+
+**Context:** 2026-07-15 视图层通读审计（本条是元层条目：它是本节前五条的**共同成因**，不是第六个并列现象）。根因是 `ClaudioGUI` 是 `@main` executableTarget，harness **一行都 import 不到**——所以视图层的每一条不变式，要么下沉进 `ClaudioGUICore`（已做过多次：`PanelConfigController` / `panelAnnouncement` / `panelFocusOrder` / `previewClaimsActionFocus`，每一次都是被一次真实的翻车逼出来的），要么就只能是一句话。
+
+**修法（按顺序，不是三选一）：**
+1. ✅ **已执行（2026-07-15）—— A 类优先，因为它最便宜也最彻底**：本节第一条（抽 `FailureRow`）与第四条（抽共享 `PanelHeader`）已落地。那三句「完全一致」的注释**不再需要存在**——七份变一份，「一致」从一句需要被守的话变成了一个**编译期事实**。**这是唯一一种不会腐烂的绊线。**
+
+   **实践中学到的两件事，都不在原计划里：**
+   - **A 类修复会顺手带走它没瞄准的 bug。** `StateGalleryView` 那份副本的字号是裸 `size: 11`、没乘 `typeScale`（展柜里那行字从不跟随 Dynamic Type）。没有人发现过它，也没有人修过它——它是被合并**免费**带走的（组件自带 `@ScaledMetric`）。这是 A 类相对 B 类（补断言）的额外红利：**断言只能证明你想到的那条，组件把你没想到的那条也一起收了。**
+   - **而 A 类修复自己也会犯同一种病。** 抽组件前我 grep 的是**函数名**（`rejectRow` / `errorNotice` / `importErrorRow`）——一张白名单——于是漏了两份（一份没有独立函数名、一份名字不一样）。**能找全它们的判据是视觉特征本身（`xmark.circle.fill`），不是名字。** 围栏按「它长什么样」围，不按「它可能叫什么」猜。
+2. **B 类下沉**，沿用仓库已经走了五次的那条路（搬进 `ClaudioGUICore` + 真行为断言），而不是加更多 `contains()`。
+3. **C 类必须换载体**：真机走查那几条（⑨ `.tint` 是不是黏土、⑪ Dynamic Type）结构上测不到，它们**只能**靠人。但它们今天散落在三个文件的 doc comment 里，且已经被证明会写成过去时。给它们一个**单一的、带时间戳的走查清单**（`docs/` 里一份，每次 `/ship` 前跑，跑完记 commit sha）——ENGINEERING.md §9 已经有 15 条真机走查的雏形，把注释里的纪律**收编进去**，别让它们继续住在代码旁边。
+
+**Effort:** M（普查 + 分类是 M；A 类的两次抽组件已分别记在本节第一、四条，各 S；C 类收编是 S）
+**Priority:** P2
+**Depends on:** None（1 与本节第一、四条是同一刀）
 
 ## Completed
 

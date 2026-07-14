@@ -76,7 +76,7 @@ public struct AudioDropZoneView: View {
         case .idle, .hover:
             promptLabel
         case .reject(let reason):
-            rejectRow(reason)
+            FailureRow(message: reason.message)
         case .success(let file):
             successRow(file)
         }
@@ -127,24 +127,28 @@ public struct AudioDropZoneView: View {
         }
     }
 
-    private func rejectRow(_ reason: DropRejectionReason) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "xmark.circle.fill")
-                .foregroundColor(ClaudioColor.error(colorScheme))
-            Text(reason.message)
-                .font(.system(size: 11.5 * typeScale))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-    }
+    // `rejectRow(_:)` 已删（2026-07-15 冗余审计 · A 类修复）—— 它是 DESIGN.md「拒绝行」的六份手抄副本
+    // 之一，而且是**漂得最远**的那一份：另外三处注释都声称与它「完全一致 / verbatim / identical」，而它的
+    // ✗ 图标**根本没设字号**（继承默认 body 字号，比其余五处的 11pt 大一圈），文字是 11.5pt 不是 11pt。
+    // 现在这一态渲染的是 ``FailureRow``（`PanelRows.swift`），字号回到 DESIGN.md 字号阶梯的「次要 /
+    // 状态 = 11」档（2026-07-15 拍板）。
 
+    /// 导入成功那一行。**不是**「拒绝行」的镜像，所以没有折进 ``FailureRow``：它用的是 `success` 绿 +
+    /// `text`（主文字色）+ 等宽文件名，而拒绝行是 `error` 真红图标 + `text-2` 说明 —— 两者只是恰好都
+    /// 长成「一个图标 + 一行字」。
+    ///
+    /// 字号 **11.5 → 11**（2026-07-15 拍板）：11.5 不在 DESIGN.md 字号阶梯的任何一档上。它本可以留着
+    /// 不动（它不属于本轮合并的那六份），但那会让同一个 drop-zone 里「拒绝 11pt / 成功 11.5pt」——
+    /// 拿一处旧漂移换一处新漂移。
     private func successRow(_ file: ImportedAudioFile) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 11 * typeScale))
                 .foregroundColor(ClaudioColor.success(colorScheme))
             Text(file.fileName)
-                .font(.system(size: 11.5 * typeScale, design: .monospaced))
+                // DESIGN.md 字体表：数据 / 文件名 = 等宽，tabular-nums。
+                .font(.system(size: 11 * typeScale, design: .monospaced))
+                .monospacedDigit()
                 .foregroundColor(ClaudioColor.text(colorScheme))
         }
         .accessibilityLabel("已导入 \(file.fileName)")

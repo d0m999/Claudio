@@ -158,9 +158,17 @@ private struct PackCardView: View {
                 .monospacedDigit()
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
         case .broken:
-            // ⚠️ DESIGN.md 未定义 broken(损坏) 卡片视觉 — 借用「拒绝行」既有的视觉语言（DESIGN.md
-            // 「拒绝行」原文："真红 `circle-x` 字形 + `text-2` 说明"），是 DESIGN.md 里唯一已定义的
+            // ⚠️ DESIGN.md 未定义 broken(损坏) 卡片视觉 — **借用**「拒绝行」的视觉语言（DESIGN.md
+            // 「拒绝行」原文："真红 `circle-x` 字形 + `text-2` 说明"），那是 DESIGN.md 里唯一已定义的
             // "文件缺失/错误"语言，不新造态色。
+            //
+            // 【为什么它没有折进 ``FailureRow``（2026-07-15 冗余审计 · 刻意不收编的那一处）】
+            // 这里是「借用」，**不是**「它就是一条拒绝行」—— 措辞上的这个区别是真的，别把它读成偷懒：
+            // `FailureRow` 是一条**面板级**失败行（整行宽、`spacing: 6`、`.top` 对齐、文案可折行）；
+            // 而这里是一张 **84pt 宽卡片内部**的状态标签，`spacing: 2` 是被卡片宽度逼出来的，不是漂移。
+            // 把它折进去，只会让那个组件长出一个纯粹为这一处服务的 `spacing:` 参数 —— 那不叫收敛，
+            // 那叫把差异换个地方藏。**共享的是 token 层**（`error` 真红 + `text-2` + 11pt），而 token
+            // 层今天已经统一了；共享的不是布局，因为布局本来就该不同。
             //
             // 真红**只**上图标（非文本，门槛 ≥3:1，实测 4.06 通过），文案走 `text-2`（5.54:1，过
             // ≥4.5:1）—— 此前整个 HStack 都染真红，把 4.07:1 的真红当正文用，不达标（`/ship` 评审

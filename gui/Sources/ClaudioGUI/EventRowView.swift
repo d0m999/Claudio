@@ -145,7 +145,7 @@ public struct EventRowView: View {
             // 字节可能已经落进包里成了孤儿，`onImportCompleted()` 照常触发 `refresh()`，行原地闪一下
             // 又回到「未配置」，用户只看到「拖进去没反应」。见 ``importErrorMessage``。
             if let message = importErrorMessage {
-                importErrorRow(message)
+                FailureRow(message: message)
             }
         }
         // LOAD-BEARING (DESIGN.md, verbatim): "禁用观感用显式禁用样式（控件置灰 + 图标降饱和），
@@ -472,24 +472,11 @@ public struct EventRowView: View {
         return nil
     }
 
-    /// The 「拒绝行」 shape DESIGN.md already defines ("真红 `circle-x` 字形 + `text-2` 说明"),
-    /// reused verbatim from ``AudioDropZoneView``'s own `rejectRow(_:)` so a row-level failure and
-    /// a drop-zone-level failure look like the same thing — because they ARE the same thing.
-    ///
-    /// 真红只上**图标**（非文本，门槛 ≥3:1），文案走 `text-2`（5.54:1，过 ≥4.5:1 文本门槛）—
-    /// `/ship` 评审实证：真红当正文亮色下只有 4.07:1，不达标。
-    private func importErrorRow(_ message: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.error(colorScheme))
-            Text(message)
-                .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .combine)
-    }
+    // `importErrorRow(_:)` 已删（2026-07-15 冗余审计 · A 类修复）—— 它是 DESIGN.md「拒绝行」的六份
+    // 手抄副本之一。它的 doc comment 当时写着「reused **verbatim** from `AudioDropZoneView`'s own
+    // `rejectRow(_:)` … because they ARE the same thing」——**那句话是假的**：`rejectRow` 的 ✗ 图标根本
+    // 没设字号，文字是 11.5pt 而不是 11pt。两份「同一个东西」在被那句话宣布相同的同时已经漂了。
+    // 现在它们真的是同一个东西：都渲染 ``FailureRow``（`PanelRows.swift`）。
 
     /// One human Chinese sentence per ``ManifestBindError`` case — presentation copy, so it lives
     /// HERE rather than in `ClaudioGUICore` (exactly like ``eventDisplayName(_:)`` below, and
