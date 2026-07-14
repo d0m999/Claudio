@@ -98,7 +98,7 @@ helper 侧的 `master_volume` → `afplay -v` 映射（T9，`Volume.swift`）早
 | **D15** | **主音量行 = 控件行，不是第五个事件行**：无事件色 tile、**无喇叭图标**、**无百分比读数**（跟 ENGINEERING:204 线框；读数交给 `accessibilityValue`，与 macOS 系统音量滑块同）。行 = `[「主音量」SF Pro 13] · Spacer · [Slider]`。**图标必须砍掉**：`speaker.wave.2` 已是试听键（`EventRowView.swift:290`）、`speaker.wave.2.fill`/`speaker.slash.fill` 已是静音钮两态（`:414`）——主音量再上喇叭就是同一个 312pt 面板里的**第三套**喇叭语义，紧贴在四行各带两枚喇叭的正下方 8pt 处，没人分得清哪个是"音量"。落 DESIGN.md 新增的「控件行」节。 | 设计缺口复核 |
 | **D16** | **音量 0 = 全局静音，且不与逐事件静音联动**：0 是合法值（非"禁用"、非"错误"），语义 = 全部事件不出声。四行的静音钮**不跟着变**——它们表达的是正交维度（"这个事件配没配声音"），一个是总闸、一个是分路。**不换 `speaker.slash`**（那是第四次喇叭撞车）。ENGINEERING.md:224 状态表「主音量」行的三个 `—` 用这条填上。 | 设计缺口复核 |
 | **D17** | **Dynamic Type 复用 `rowWrapsToTwoLines`**：「更大」及以上档 → 标签在上、Slider 整行在下，照抄 `EventRowView.swift:118-131` 的既有降级。**不给 `PanelLayoutAdaptation` 新立字段**（它今天只有 3 个字段，`PanelTypeSize.swift:31-43`）。这同时把第 5 节那条「Dynamic Type 最大档下滑块的布局」从"走查时现编"变成"走查时验收一个已知目标"。 | 设计缺口复核 |
-| **D18** | **D12 的回滚是瞬跳，不加动画**；拖动跟手也不加动画。`PanelView.swift:63-69` 明写「本视图树零 `.animation()`，**所以**不读 `accessibilityReduceMotion` —— **这条注释就是绊线**」。给滑块加任何动画 = 必须同批接上 reduced-motion 门控，代价远大于收益。 | 设计缺口复核 |
+| **D18** | **D12 的回滚是瞬跳，不加动画**；拖动跟手也不加动画。给滑块加任何动画 = 必须同批接上 reduced-motion 门控，代价远大于收益。<br>⚠️ **2026-07-14 更正（阶段 D 落地时发现）**：本条原本的理由是 ~~「`PanelView.swift:63-69` 明写『本视图树零 `.animation()`，**所以**不读 `accessibilityReduceMotion` —— 这条注释就是绊线』」~~ —— **这句话是假的，而且在写下它的那一刻就已经是假的**：那条绊线早被 T17c 踩响并改写（`0aab69a` 只修了 `.swift`，没修引用它的文档）。今天 `PanelView.swift:67-80` 说的是反话：树里有**两颗**已 gate 的 spinner（`PanelView.disconnectRow` + `OnboardingView.ctaButton`），`:80` 已声明 `@Environment(\.accessibilityReduceMotion)`。**规矩不变**（滑块行确实零动画；加动画必须同批 gate），作废的只是理由。 | 设计缺口复核 + **2026-07-14 更正** |
 | ~~**D19**~~ | ~~**`selectedPack` 为空 → 滑块 `.disabled(true)`**~~ → **封错了门，被 D23 取代**。同一状态下真正会写出空包 config 的是**静音钮**（`EventRowView.swift:412` 的 `Button(action: onToggleMute)`，**无任何 `.disabled`**）—— 它**今天就能**造出 `selected_pack: ""`。禁用滑块 = 给一扇本来就不会开的门贴封条，同时让隔壁那扇一直敞着的门继续敞着。（滑块仍应禁用，但那是**表象处理**，不是修复；且与 D31 的焦点不变式撞车。） | ~~设计缺口复核~~ → **Codex #4 + 源码实证** |
 
 ### 本轮新增（2026-07-12 第二轮 eng review）
@@ -264,7 +264,7 @@ helper 侧的 `master_volume` → `afplay -v` 映射（T9，`Volume.swift`）早
   - **按 DESIGN.md「控件行」照做**：文字标签「主音量」+ Spacer + Slider，无 tile、无喇叭图标、无百分比读数（D15）。
   - Dynamic Type：`rowWrapsToTwoLines` 时标签在上、Slider 在下 —— **触发档是 `.largest`（=「更大」）及以上**；
     「较大」（`.larger`）只隐波形、**不**折行（D44 撤销了 D34① 的假更正 —— 原文这里的「不是『更大』」恰恰是错的）。
-  - **全行零 `.animation()`**，回滚瞬跳（D18 —— 别踩 `PanelView.swift:63-69` 的绊线）。
+  - **全行零 `.animation()`**，回滚瞬跳（D18 —— **注意 D18 的理由已于 2026-07-14 更正**：`PanelView.swift` 那条「本视图树零动画」的绊线早就被 T17c 踩响并改写，别再照抄它；规矩仍在，理由换了）。
 - `PanelView.swift`：插入 `MasterVolumeRow`；错误行改列表渲染（D3 —— **`.writeFailed` 归这里**，
   `MasterVolumeRow` 零错误 UI，D39）；`playPreview` 传 volume；
   **新增 `refreshMasterVolume()`**（镜像 `refreshEnabledFlags()`，D27）；
