@@ -904,7 +904,9 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 ### 面板的 Tab 遍历 / 首焦点在**默认系统设置**下是死的（macOS「键盘导航」默认关闭）
 
-**What:** 面板里所有可聚焦控件都是 SwiftUI `Button`（`EventRowView` 试听/导入/静音、`PackGalleryView` 卡片、`OnboardingView` CTA），全 `gui/Sources/` 里 `.focusable()` 出现 **0 次**。而 macOS 的「键盘导航 / Full Keyboard Access」**系统默认是关的**，关闭时 Button 不进 key view loop —— `applyFirstFocus()` 那次 `@FocusState` 赋值直接落空，Tab 在面板里也无处可去。
+**What:** 面板里的可聚焦控件**绝大多数**是 SwiftUI `Button`（`EventRowView` 试听/导入/静音、`PackGalleryView` 卡片、`OnboardingView` CTA），全 `gui/Sources/` 里 `.focusable()` 出现 **0 次**。而 macOS 的「键盘导航 / Full Keyboard Access」**系统默认是关的**，关闭时 Button 不进 key view loop —— `applyFirstFocus()` 那次 `@FocusState` 赋值直接落空，Tab 在面板里也无处可去。
+
+> ⚠️ **本条的措辞原为「所有可聚焦控件都是 Button」，阶段 D 之后不再成立**：`MasterVolumeRow` 的 `Slider` 是个例外，且它在 FKA 关闭时的行为**没人验过**（Button 的那套理由不适用于 value-adjust 控件）。**别拿这条台账的判据给整个面板的 Tab 结案** —— 它只覆盖 Button。见下方独立条目「主音量滑块在 FKA 关闭时到底能不能 Tab 到」。
 
 **Why:** ENGINEERING.md 的无障碍规格已按实际行为改写（分成「无条件成立」和「仅 FKA 开启时成立」两档），所以**文档不再撒谎**；但产品缺口还在：一个没开 FKA 的纯键盘用户（非 VoiceOver）操作不了这个面板。VoiceOver 用户不受影响（VO 光标独立于 FKA），Esc 与鼠标也不受影响。
 
@@ -926,9 +928,19 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P4（触发条件驱动，不主动做）
 **Depends on:** 真机 AX 探针先验证 nonactivating panel 能进 AX 树
 
-### 主音量滑块 spec 写了、代码里根本没有（面板 UI 唯一的静默漂移）
+### ~~主音量滑块 spec 写了、代码里根本没有（面板 UI 唯一的静默漂移）~~ ✅ 已交付（阶段 D，2026-07-14）
 
-**What:** ENGINEERING.md 的面板 UI 线框和「交互状态覆盖表」都明确列着「🔊 主音量 ●———————」一行（拖动即时改 `config.json` / 越界钳制），但 `PanelView` 里**零 Slider**——`grep` 全仓库无 `masterVolume` / `Slider` 命中。helper 侧的 `volume` → `afplay -v` 映射早在 T9 就做完了（`Volume.swift`），缺的只是面板里的 Slider 控件 + 写回 config。
+> **✅ 阶段 A′/B/C/D 全部落地在 `main`**（`8771946` 收尾）。滑块在 `.operational` 面板上真的渲染：
+> `MasterVolumeRow.swift`（真 `Slider`）→ `PanelConfigController.setMasterVolume(_:)` →
+> `MasterVolumeController` → helper `MasterVolume.swift`。试听已接 volume（D2）。
+> 本条留档，因为下面「锁死的方案」那串决议是**已实现的设计约束**，不是待办 —— 谁要改主音量，先读它们。
+
+**What（历史，写于 2026-07-11）:** ENGINEERING.md 的面板 UI 线框和「交互状态覆盖表」都明确列着「🔊 主音量 ●———————」一行（拖动即时改 `config.json` / 越界钳制），但 `PanelView` 里**零 Slider**。helper 侧的 `volume` → `afplay -v` 映射早在 T9 就做完了（`Volume.swift`），缺的只是面板里的 Slider 控件 + 写回 config。
+
+> 原文这里还有一句「`grep` 全仓库无 `masterVolume` / `Slider` 命中」—— 今天一条 grep 就能证伪它
+> （`masterVolume` 169 命中）。而**线框和覆盖表那两条被引用的原文，后来也各自被实现推翻了**：
+> 🔊 喇叭字形被 D15 明令不画，「拖动即时改 config」被改成「松手才写」。ENGINEERING.md 已按实现
+> 更正（2026-07-14），所以本段引的是它**当时**的样子。
 
 **Why:** 这是本次 `/ship` plan-completion 审计发现的**唯一一处「spec 写了、代码没有、台账也没记」的静默漂移**——它此前既没有 TODOS 条目、也没有任何 T 编号认领，等于所有人都以为它做了。后果：用户能逐事件静音，但改不了整体音量，只能手改 `config.json`。（好消息：本次已把 `config.json` 改成保真读-改-写，所以用户手改的 `master_volume` **至少不会再被下一次点静音静默吃掉**——这正是本轮修复前的真实行为。）
 
@@ -937,21 +949,35 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 - ~~「DESIGN.md 已定义其视觉」~~ —— **假的**。DESIGN.md 全文 grep `滑块|slider|轨道|track|thumb|拨杆` **零命中**，滑块长什么样从来没人定过。而 macOS 原生 `Slider` 的填充色默认跟**系统强调色**（用户在系统设置里选的），会把一个设计系统外、且 claudio 控制不了的颜色带进面板 —— 直接违反 DESIGN.md「品牌强调只有一个（黏土）」与 `DesignTokens.swift:17`「不得新增 DESIGN.md 里没有的颜色」。
 - ~~「第三个写者照抄即可」~~ —— **照抄就是 bug**，但**理由已经换了一条**（⚠️ 2026-07-12 阶段 A 锁分离后更正；原文写的是「`setEventEnabled` 拿的是 `play.lock`，逐帧写盘会把『吞掉提示音的窗口』开成一片」—— 那句话现在是**假的**：`setEventEnabled` 与 `selectPack` 拿的是 `config.lock`，`play` 拿 `play.lock`，逐帧写 config **再也吞不掉提示音了**）。真正的理由是另外两条，且都还站着：① 主音量是**第三个 `config.lock` 写者**，逐帧写盘会让它与切包 / 静音**互相**撞 `.lockBusy`（`withNonBlockingLock` 是**非阻塞**的：撞上就是 `.skipped`，不是排队等），拖一次滑块就能让用户同时点的静音假失败；② 该值没有实时消费者，逐帧写盘是纯成本。**结论（松手才写）不变，别顺着那条死掉的 `play.lock` 论据把它推翻。**
 
-**锁死的方案（14 项决议，全文见 `/plan-eng-review` 产出）要点：**
-- **松手才写**（`Slider(onEditingChanged:)`）—— 该值没有实时消费者（`claudio play` 每次 spawn 重读 config），拖动中间值无人可见，逐帧写盘是纯成本。ENGINEERING.md 交互状态覆盖表的「拖动即时改 config」需改为「松手即时落盘」并记理由。
-- **但「拖动不写」不能变成「丢数据」**：popover 中途关闭 / app 退出时 `onEditingChanged(false)` 未必补发 —— 必须有 `onDisappear` + `willTerminate` 的 dirty flush。绝不把正确性押在 SwiftUI 会补发回调上。
+**锁死的方案（原 14 项决议 → 最终 46 项 D1–D46，全文见 `PLAN-MASTER-VOLUME.md`）要点 —— 这些是已实现的设计约束，不是待办：**
+- ✅ **松手才写**（`Slider(onEditingChanged:)`）—— 该值没有实时消费者（`claudio play` 每次 spawn 重读 config），拖动中间值无人可见，逐帧写盘是纯成本。~~ENGINEERING.md 交互状态覆盖表的「拖动即时改 config」需改为「松手即时落盘」并记理由。~~ ✅ **已改**（2026-07-14，`/codex review 8771946` 收口 —— 在此之前 spec 与实现整整矛盾了三个 commit）。
+- ✅ **但「拖动不写」不能变成「丢数据」**：popover 中途关闭 / app 退出时 `onEditingChanged(false)` 未必补发 —— 必须有 dirty flush。绝不把正确性押在 SwiftUI 会补发回调上。
+  ⚠️ 本行原写「必须有 **`onDisappear`** + `willTerminate`」—— **`onDisappear` 已被 D22 否决并作废**：本仓库明文认定它不是可靠信号（popover 不保证在每次 show/close 之间重建视图层级，全仓零命中）。落地的冲刷是 `.onChange(of: focusCoordinator.hideCount)`（popover 关闭，复用 T17d 既有信号）+ `.onReceive(…willTerminateNotification)`（⌘Q 兜底）。**两条的闭包体里都必须真的调 `flush()`** —— 掏空闭包的变异体曾实测存活（拖完点面板外面，值静默丢失，1973 checks 全绿），现已由 `ViewWiringSuite` 切开闭包体钉死。
 - **不变不写**：`drag(to:)` 只在 `isDragging` 时接受（`onEditingChanged(true)` 才置位），使 SwiftUI 的 render-time 网格吸附**无法**触发写 —— 用户手改的 `master_volume: 0.42`（读路径合法、面板照常显示、但不在 0.05 网格上）不碰就永远活着。
 - **失败即回滚**：写失败 → 滑块弹回磁盘值 + 错误行。UI 绝不显示磁盘上没有的值。
 - **先钳制再写**：越界值绝不落盘（spec 要求）；非有限值绝不到达 `JSONSerialization`（否则 ObjC 异常穿透 Swift `do/catch`，进程 abort，exit 134）。
 - ~~**`freshSelectedPack` 强制调用方给**，不像 `setEventEnabled` 那样传 `""`~~ —— **已作废（2026-07-13 阶段 A′ / D23）**：那个参数没了。今天 `updateConfigJSON(at:onMissing:mutate:)` 的 `onMissing` 是显式策略，**主音量写者传 `.failClosed`**（config 缺失即拒写、回 `.configMissing`），根本递不出一个 pack id —— 「强制调用方给」管不住调用方手里的坏数据，而这个签名让坏数据**递不进来**。原本要防的那份 `selected_pack: ""` 的 config（play 读得到却解析不到包 = 一份看起来正常的**静音**配置）现在已经没有产地了。
-- **step 0.05**（21 档，默认 0.8 恰在网格上）；`.tint(ClaudioColor.clay(colorScheme))`（clay 亮色 3.97:1 过非文本 ≥3:1，合法）+ DESIGN.md 补登滑块视觉。
+- **0.05 网格**（21 档，默认 0.8 恰在网格上）；`.tint(ClaudioColor.clay(colorScheme))`（clay 亮色 3.97:1 过非文本 ≥3:1，合法）+ DESIGN.md 补登滑块视觉。
+  ⚠️ 本行原写「**step 0.05**」，字面照做就是 bug：**D24 明令不许用 `Slider(…, step:)`** —— 本机 key 窗口截图实证，`step: 0.05` 会被直译成 `NSSlider.numberOfTickMarks = 21`，在轨道下方画出一条 21 个灰点的刻度带，撑破 DESIGN.md「控件行」的 ~28pt 行高。吸附由 `VolumeDragSession.snap()` 做，公式按 **D45** 是 `(v / 0.05).rounded() / 20`（**不是** `* 0.05` —— 后者会把 `0.35000000000000003` 写进用户的 config.json，21 档里有 7 档中招）。`ViewWiringSuite` 有一条负向断言禁止 `step:` 出现在 `MasterVolumeRow` 里。
 - **把「一次拖动写几次盘」下沉成 `VolumeDragSession` 纯状态机**并单测 + 变异验证 —— 否则这条 P1 决策只活在注释里，而注释拦不住任何人（`PanelFocusOrder.swift:132-138` 记着本项目在同一形状上吃过的亏）。
 - 试听（`AudioPreviewPlayer`）**必须同批修**：它今天完全不理 `master_volume`（`NSSound` 默认满音量），滑块一上线就会「拖了没反应」。
 
-**Depends on:** 本文件第一条 P1（`play.lock` 分离）—— 不先修它，即使松手才写也仍留一个会吞提示音的窗口。
+**Depends on:** ~~本文件第一条 P1（`play.lock` 分离）~~ ✅ 已完成（阶段 A / D9+D20，锁已分家：`play.lock` / `config.lock` / `settings.lock` 各司其职）。
 
-**Effort:** M
-**Priority:** P2
+**Effort:** ~~M~~ 已完成（阶段 A′/B/C/D，`8771946` 收尾）
+**Priority:** ~~P2~~ 已关闭
+
+### 主音量滑块在 FKA 关闭时到底能不能 Tab 到 —— 面板第一个非 Button 可聚焦控件，没人验过
+
+**What:** `MasterVolumeRow` 的 `Slider` 是面板里**唯一**的非 Button 可聚焦控件（阶段 D 新增），已被排进焦点序（`PanelFocusOrder` 的 `.masterVolume`）并绑了 `.focused(...)`。而上一条台账（「Tab 遍历在默认系统设置下是死的」）的**整段论证**建立在「面板里所有可聚焦控件都是 SwiftUI `Button`」这个前提上 —— 那个前提今天有了例外。
+
+**Why:** Button 不进 key view loop 的理由（`.activate` interactions、`.focusable()` 是 no-op）是 **Button 专属**的，根本不描述一个由 `NSSlider` 支撑的 **value-adjust** 控件 —— AppKit 里 NSSlider 在 FKA **关闭**时是否进 key view loop，与 Button 不是同一个答案。**我们没验过。** 风险不在「滑块能不能 Tab 到」本身，而在：将来有人按上一条台账去评估「Tab 修好了没有」，会拿一个只覆盖 Button 的判据，给一个已经含 Slider 的面板结案。
+
+**Context:** `/codex review 8771946` 完备性批评（2026-07-14）。ENGINEERING.md 的无障碍规格已就此**明确不作承诺**（在验之前）。验法：系统设置里**关掉**「键盘导航」，开面板，按 Tab —— 看焦点会不会落到滑块上（以及 ←/→ 能不能调值）。VoiceOver 那一档不受影响（VO 光标独立于 FKA，滑块的 label/value 已落地并有守卫）。
+
+**Effort:** S（一次真机走查即可定性；若结论是「能」，上一条台账的措辞要跟着收窄）
+**Priority:** P3
+**Depends on:** None
 
 ### T16/T15 GUI 小项：绑定失败留孤儿文件 + doc-comment 的 D 编号引用不存在
 

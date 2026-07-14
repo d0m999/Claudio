@@ -6,13 +6,26 @@
 > 与阶段 A 的文件清单** —— 其中 **D20 与 D21 各自足以让原方案「照做即坏」**。
 > **第三轮（2026-07-12）**：交互式 mockup 展示板自证出 **10 项计划没收口的议题**，用户授权（原则：功能完整易用 · UI 好看 · 这版设计完可直接用）后已全部拍板为 **D37–D46**——
 > 其中 **D44 撤销了第二轮的 D34①（假修正，D17 从头到尾是对的）**，**D45 修掉 `snap()` 的脏浮点**（21 档里 7 档会把 `0.35000000000000003` 写进用户的 config.json，模拟器实拖跑出来的）。
-> **实现尚未开始**（一份未测试的探索性 WIP 在分支 `feat/master-volume-slider` @ `cbc02f0`，勿直接信任 —— 处置见 D42）。
+> ~~**实现尚未开始**（一份未测试的探索性 WIP 在分支 `feat/master-volume-slider` @ `cbc02f0`，勿直接信任 —— 处置见 D42）。~~
+> ✅ **阶段 A′/B/C/D 已全部落地在 `main`**（2026-07-14）：`MasterVolume.swift`（helper，1c934a7）→
+> `VolumeDragSession.swift`（a789fe3）→ `MasterVolumeController.swift`（47459a7）→ `MasterVolumeRow.swift`
+> + `PanelConfigController.setMasterVolume(_:)` + 面板接线（8771946）。滑块在 `.operational` 面板上真的渲染。
+> **那个 WIP 分支不要再碰**（D42 列了它的四处毒）：本行原先把下一个接手的人指向它，而 `main` 上早已是
+> 已落地、已测、已评审的实现（`/codex review 8771946`）。
 
 ## 0. 问题
+
+> ⚠️ **本节是历史**（问题陈述，写于 2026-07-11）。阶段 D 已经解决了它 —— 「`PanelView` 里零 Slider」
+> 今天是假话（`MasterVolumeRow.swift` 就是那个 Slider）。保留原文是为了让后面的决议表有上下文，
+> 不是因为它还成立。
 
 ENGINEERING.md 面板线框（:204）画着 `│ 🔊 主音量  ●———————  │`，交互状态覆盖表（:224）写着
 「拖动即时改 config，映射 `afplay -v`（含默认值）」「越界值 → 钳制到 0.0–1.0」。
 **但 `PanelView` 里零 Slider。** 用户能逐事件静音，改不了整体音量，只能手改 `config.json`。
+
+> 注：上面引的那两条 ENGINEERING.md 原文**本身**后来也被实现推翻了 —— 线框里的 🔊 喇叭字形被 D15
+> 明令不画，「拖动即时改 config」被 D6/规则 1 改成「松手才写」。ENGINEERING.md 已按实现更正
+> （2026-07-14）；这里引的是它**当时**的样子。
 
 helper 侧的 `master_volume` → `afplay -v` 映射（T9，`Volume.swift`）早已完成，其 doc comment 甚至明写
 它是为「the GUI's volume slider (T15/T16)」准备的。缺的只是 GUI 那一半 + 一个写者。
@@ -65,8 +78,10 @@ helper 侧的 `master_volume` → `afplay -v` 映射（T9，`Volume.swift`）早
    滑块填充是非文本 → clay 合法（与已拍板的 drop-zone hover 同规则）。
    ⚠️ 但**这一对不是滑块真正的对比面**：clay 填充段的相邻色是 AppKit 的**未填充轨道灰**（截图实测 `#E0E0E0` 档），不是 panel。
    而未填充轨道灰是 AppKit 的、不在 `ClaudioColorHex` 里 → **纯 hex 数学的 `ContrastSuite` 结构上断不了它**（见 D25）。
-10. **面板的试听完全不理 master_volume**：`AudioPreviewPlayer.swift:28-32` 从不设 `sound.volume`
-    （NSSound 默认 1.0）。今天无害（没 UI 能改音量）；滑块一上线即成为「拖了没反应」的直接原因。
+10. ~~**面板的试听完全不理 master_volume**：`AudioPreviewPlayer.swift:28-32` 从不设 `sound.volume`
+    （NSSound 默认 1.0）。今天无害（没 UI 能改音量）；滑块一上线即成为「拖了没反应」的直接原因。~~
+    ✅ **已修（阶段 D，8771946）**：`AudioPreviewPlayer` 协议加了 volume 参数，`PanelView.playPreview`
+    传 `panelModel.config.masterVolume`。走查 ⑦ 验的就是这条（拖到 ~20% → 试听明显变小）。
 11. **面板的 SwiftUI 视图树与进程同寿**：`MenuBarController.swift:64` 的 `NSHostingController(rootView: panel)`
     **一辈子只建一次**，popover 只 show/close，视图树不重建 —— `PanelFocusCoordinator.swift:10-14` 已白纸黑字记下这一点
     （「`NSHostingController`'s SwiftUI-side state persists for the controller's whole lifetime」）。
@@ -107,7 +122,7 @@ helper 侧的 `master_volume` → `afplay -v` 映射（T9，`Volume.swift`）早
 |---|---|---|
 | **D20** | **锁分离必须改名，不能只改默认值 —— 否则 D9 对 GUI 完全无效（本轮最严重发现）。** 实证：`= ClaudioPaths.lockFile` 全仓 **10 个**默认值点，其中 **2 个在 `gui/`**（`PanelView.swift:96`、`EventMuteController.swift:26`）；而 GUI 是**显式传锁**的（`PanelView.swift:114` → `EventMuteController`、`:414` → `selectPack`、`EventMuteController.swift:38` → `setEventEnabled`）。**改 helper 侧函数的默认参数，对显式传参的调用方一点作用都没有。** 照阶段 A 的原清单实现完，用户点静音、切包**照样拿 `play.lock`**，照样吞提示音 —— 而 GUI 是本方案唯一的用户入口。<br>**修法：把 `ClaudioPaths.lockFile` 改名成 `playLockFile`。** 那 10 个点会**全部变成编译错误**，逼每一处做出显式选择。原计划写的是「在 `lockFile` 上加一条 `- Important` 文档注释」—— **那是在该放编译器的地方放了一条注释**，而本仓库刚刚才因为「注释拦不住任何人」吃过亏（`PanelFocusOrder.swift:132-138`）。 | **本轮 · Claude + Codex 独立同得** |
 | **D21** | **D8 与 D12 在 SwiftUI 语义上直接互斥 —— 滑块会永久显示磁盘上没有的值。** 地基（约束 11）：`MenuBarController.swift:64` 的 `NSHostingController` 一辈子只建一次，`@State` 跨 popover 开关存活、**只 seed 一次**。D8 要求 draft「就地持有」= `MasterVolumeRow` 的 `@State`。于是 `PanelView.refresh()`（`:457` 重读 config）**推不进滑块**：用户手改 config 成 0.30 → 重开面板 → `config.masterVolume == 0.30`，而滑块仍显示 0.80。更狠的是 D11「不变不写」让它**不会自愈**（draft == 陈旧 baseline → 判定「没变」→ 不写盘），这个谎言一直挂到用户手动拖一下为止；而用户下一次微调是**基于幻影 baseline 提交的**（磁盘 0.30、滑块显 0.80、往下拨一格 → 落盘 0.75，音量被静默拉高）。这一字不差地违反 D12 自己写的「UI 绝不显示磁盘上没有的值」，且是 D8 的机制**亲手**造成的。<br>**修法**：`MasterVolumeRow` 显式接一条下行同步 —— `.onChange(of: diskVolume) { session.rebase(to: $0) }`。**`rebase(to:)` 在 WIP 里已经写好了**（`cbc02f0` 的 `VolumeDragSession.swift:150`，doc comment 甚至点名了三个触发场景），**但全仓零调用点** —— 一个写了没人调的函数就是漂移的定义。 | **本轮 · 两路侦察独立同得** |
-| **D22** | **冲刷信号走 `popoverDidClose`，不是 `onDisappear`。** `MenuBarController` **已经是 `NSPopoverDelegate` 且已实现 `popoverDidClose`**（`:184`）；而 popover **显示**侧的可靠信号早已建成 —— `popoverDidShow`（`:159`）→ `focusCoordinator.requestFocus()` → `showCount` → `PanelView.onChange`（`:176`），且 `PanelFocusCoordinator.swift:10` 明写这套东西存在的**唯一理由**就是「SwiftUI 的 `.onAppear` 不是可靠信号」。全仓 `onDisappear` **零命中**。<br>**修法**：`popoverDidClose` → `focusCoordinator.closeCount` → `PanelView.onChange(of: closeCount) { flushMasterVolume() }`，与既有的 show 路径**完全对称**。零新机制、零新假设、复用一条已在真机验证过的通路。<br>`willTerminate` 那一半保留，但**降级为兜底**：app 无 Quit 入口，`willTerminate` 只覆盖 ⌘Q / 注销 / 关机，force quit 与 `killall` 完全不覆盖 —— §7 失败表把它写成「值照常落盘 ✅」是**假的**（见 D32）。 | **本轮 · Claude + Codex 独立同得** |
+| **D22** | **冲刷信号走 `popoverDidClose`，不是 `onDisappear`。** `MenuBarController` **已经是 `NSPopoverDelegate` 且已实现 `popoverDidClose`**（`:184`）；而 popover **显示**侧的可靠信号早已建成 —— `popoverDidShow`（`:159`）→ `focusCoordinator.requestFocus()` → `showCount` → `PanelView.onChange`（`:176`），且 `PanelFocusCoordinator.swift:10` 明写这套东西存在的**唯一理由**就是「SwiftUI 的 `.onAppear` 不是可靠信号」。全仓 `onDisappear` **零命中**。<br>**修法**：`popoverDidClose` → coordinator 上一个单调递增的隐藏计数器 → `.onChange(of: 它) { flush() }`，与既有的 show 路径**完全对称**。零新机制、零新假设、复用一条已在真机验证过的通路。<br>✅ **落地时比本条更彻底（8771946）**：那个计数器**不需要新加** —— T17d 早已建成 `PanelFocusCoordinator.hideCount` + `notePanelHidden()`，语义逐字相同，且它的 bump 已经在 `popoverDidClose` 的第一行（D37 要的排序保证是白送的）。所以实现直接复用 `hideCount`，**没有** `closeCount` 这个符号。本条原文写死了 `closeCount` 这个名字，与代码矛盾（`/codex review 8771946`）；「零新机制」这条原则本身是对的，实现只是把它贯彻得比计划更远。<br>`willTerminate` 那一半保留，但**降级为兜底**：app 无 Quit 入口，`willTerminate` 只覆盖 ⌘Q / 注销 / 关机，force quit 与 `killall` 完全不覆盖 —— §7 失败表把它写成「值照常落盘 ✅」是**假的**（见 D32）。 | **本轮 · Claude + Codex 独立同得** |
 | **D23** | **`selected_pack: ""` 是今天就活着的 bug，必须在本轮修根因（原计划把它划到了 scope 外）。修法已定稿（三路独立设计 + 对抗证伪，见下）。**<br>**病灶链（全部逐字实证）**：`PanelConfig.swift:25` 的 `loadPanelConfig` 读不出 config 时回落 `ClaudioConfig(selectedPack: "")` → `OnboardingDetector` 判 `.installed` **只看 hooks、不看 config** → 面板停在运行态、顶着绿点、手里一个空包 → `EventRowView.swift:412` 的静音钮**无任何 `.disabled`** → 点它 → `EventEnabled.swift:88` 的 `updateConfigJSON(at:, freshSelectedPack: "")`（**硬编码空串，不是参数**）在 config 不存在时新建一份**有毒**的 config。<br>`EventEnabled.swift:47-52` 那句「In practice this branch is unreachable from the real panel（the mute button only renders once a pack is already selected）」是**假话** —— 静音钮的真实渲染门槛只有 `onboardingViewModel.state == .installed`（`PanelView.swift:144`），与「选过包」无关。它依赖的不变式**恰恰是 `loadPanelConfig` 亲手破坏的那一个**。<br>**⚠️ 严重性更正：不是「永久静音」（P0），是 P1。** `Setup.noPackHasEverBeenSelected` 会在下次 `claudio setup` 时自愈；画廊点一下也能救回。真实后果是**面板顶着绿点撒谎、声音悄悄死了、没有任何东西告诉用户**。 | **本轮 · Codex #4 + 侦察 S3** |
 | **D23 定稿** | **三层修法。骨架取路线 A，helper 侧的刀取路线 C，判据是两条正交轴。**<br>**① helper —— 消灭毒源（一个文件，一个调用点）**：`setEventEnabled`（及新 `setMasterVolume`）在 config **缺失**时 **fail-closed 拒写**（新增 `.configMissing` 错误），不再新建。`EventEnabled.swift:88` 是磁盘上 `selected_pack: ""` 的**唯一产地**。该函数注释自己推理对了一半（「inventing one here would silently fabricate a selection **nothing actually chose**」——所以它拒绝**猜**包），却接着做了更糟的事：捏造了一个**有毒**的选择。**第三条路（什么都不写）从来没被考虑过。** → **D13 正式作废**（不再需要 `freshSelectedPack` 参数；该参数从此只剩 `selectPack` 一个用户）。<br>**② 判据是两问，不是一问（本轮最容易漏的一条）**：`loadClaudioConfig` 是**宽松**解码（`{"master_volume": "0.35"}` 读得动，静默换成 0.8），而 `updateConfigJSON` 的 `parseRewritableConfig` 是**严格**的（同一份文件 fail-closed 拒写）。于是存在一类「**读得动、写不动**」的 config → 只搬「读」判据会把它判成 `.usable` → 面板渲染全套活控件 → **每一次点击都必然失败**。这与 D23 是同一族的谎，而 `ConfigMutation.swift:46-49` **早就写下了这个警告**。<br>　· **读**：`packSelection(configFile:)` —— 把 `Setup.swift:71-75` 的 private 三态裁决升成 ClaudioCore 的 public（不存在 ∨ 空串 = 没人选过包；畸形 = 坏文件，不猜不重建）。<br>　· **写**：**复用已存在的 public `probeConfigRewritable`**（`ConfigMutation.swift:98-125`，四态 `.absent / .rewritable / .malformed(reason:) / .unwritable(reason:)`，**已经是 doctor 的单一真相源**）。**不要重造。**<br>　· 面板状态 = **两问的合成**。<br>**③ GUI —— 不再撒谎**：`loadPanelConfig` 去掉 `?? ClaudioConfig(selectedPack: "")`。`PanelConfig.swift:23` 的注释早就写对了：「Core 只回答『这份 config 能不能用』，『不能用时面板显示什么』是面板的事」。<br>**④ 面板 —— 路由到已经存在的自救路径（零新机制）**：<br>　· `.needsPack`（缺失 ∨ 空串）→ **画廊空态「先选包」**。`selectPack` 在 config 缺失时**会建出一份正确的 config**（`Use.swift:94`，`freshSelectedPack: packID` + 写前两道 pack 校验），而 `availablePacks` **不依赖 config** 列包 —— **自救路径本来就通，只是面板从来没走上去**。且这**已经是 ENGINEERING.md:224 的既有规格**（「空态卡『先选包』」）。<br>　· `.malformed` / `.unwritable` → 诚实失败态 + doctor 的可执行修复指令 + 「在访达中显示」（只读逃生口）。**不需要禁用所有控件** —— 写者本来就全部 fail-closed；要做的只是别再假装一切正常。<br>　· → **D19 作废**：不是禁用一个控件，是整个面板换一个诚实的态（空包态根本不渲染滑块）。<br>**为什么不是「让 OnboardingDetector 纳入 config.json」**：三路设计里这条被**两名反方一致判死、作者自己也 REJECT**。① 它会把用户**锁死** —— onboarding 的 CTA **今天根本没接线**（见 D35），点下去什么都不会发生；② 它混了两条正交的轴（「有没有接管 Claude Code」vs「Claudio 自己的状态健不健康」），`OnboardingEnvironment` 里**连 configFile 字段都没有**；③ 只把「损坏」送进 onboarding 的安全版**零修复**（D23 活着的那条路第一步是**缺失**，不是损坏）。<br>**为什么不自动自愈**（路线 C 的 `healPackSelection`）：它会**替用户选包**（字母序第一个 —— 用户装了 pikachu/psyduck/wobbuffet，config 一删就恢复成别的，原选择不可恢复），且开面板即写盘会撞 `play.lock`。这违反仓库自己的裁定：「**替他做主只会把一次诚实的报错换成一次静默的数据丢失**」。**让用户点那一下。** | **本轮定稿 · 三路设计 + 2×2 对抗证伪** |
 | **D35** | **`.notInstalled` 的「接管 Claude Code」按钮今天是个死钮 —— 独立的活 bug，与主音量无关。** `OnboardingViewModel.onPrimaryAction` 在**整个生产代码里从未被赋值过一次**（`gui/Sources` + `helper/Sources` 里 `onPrimaryAction =` **零命中**；唯一赋值点在 `OnboardingViewModelSuite.swift:108/139` 的测试里）。完整行为：点击 → `onPrimaryAction?()` 求值为 `nil` → 什么都不做 → `refresh()` 重新检测 → **状态原样不变 → 永远出不去**。<br>而 `.notInstalled` 确实渲染着这个主 CTA（`OnboardingCopy.swift:79-85` `primaryActionTitle: "接管 Claude Code"` → `OnboardingView.swift:95-97`）。`OnboardingViewModel.swift:8-13` 自己承认这个洞：「Wiring a CTA tap to an actual side-effecting action is **the menu bar shell's job** (T8/T15) … future work hooks into」—— **菜单栏 shell（`MenuBarController.swift`）已经落地了，却没回来接线。**<br>**修法**：`MenuBarController` / `PanelView` 把 `onPrimaryAction` 接到真实副作用上。注意：`installClaudioHooks` **只写 settings.json**，对「config 缺失」是幂等无效的；能建 config + 拷包的是 `performFirstRunSetup`，而它从 GUI **完全不可达**（唯一调用方是 CLI `Subcommands.swift:113`）。<br>**登记为独立 P1，单独 PR，不进主音量。** | **本轮 · 事实核验副产品** |
@@ -115,7 +130,7 @@ helper 侧的 `master_volume` → `afplay -v` 映射（T9，`Volume.swift`）早
 | **D24** | **不用 `Slider(step:)` —— 它会画出 21 个刻度点。** 本机 key 窗口截图实证（约束 8）：`step: 0.05` → `numberOfTickMarks = 21`，轨道下方多出一条 21 个灰点的刻度带。DESIGN.md 刚定的控件行「行高 ~28pt」装不下它，且这 21 个点**既不在设计系统里、也没人拍过板**，会出现在四行事件行正下方 8pt 处。<br>**修法**：视图侧用吸附型 `Binding` 转发，网格吸附放进 `VolumeDragSession`（D6 本来就说它是「唯一归宿」）：`Slider(value: Binding(get: { session.draft }, set: { session.drag(to: $0) }), in: 0...1, onEditingChanged: …)`，`drag(to:)` 内部吸附 ~~`snap(v) = (v / 0.05).rounded() * 0.05`~~ → **`(v / 0.05).rounded() / 20`（D45 —— `* 0.05` 会把 21 档里的 7 档写成脏浮点）**。`numberOfTickMarks` 恒为 0，21 档语义一点不丢。**副作用：D11 的「render-time 网格吸走 0.42」这个威胁自动消失** —— 没有 `step:` 就没有 render-time 网格。 | **本轮 · 渲染探针实证** |
 | **D25** | **`ContrastSuite` 只补暗色一对；`.tint` 是否生效**只能靠真机截图，且**已经截过了**。 计划原本要加的「滑块填充 vs 面板 ≥3:1（明暗双主题）」里，**亮色那一半是已有断言的逐字重复**（`ContrastSuite.swift:211-214` 已有 `clayLight vs panelLight >= 3.0`；且 `nonTextPairs` 里的 `notificationDark` **就是 `clayDark` 的别名**，`ClaudioColorHex.swift:133`）—— 新断言的信息量为 0，它唯一能变红的情形是 clay 本身被改坏，而那时上面 6 条**先**红。<br>更要紧的是**它测不到会出事的那个东西**：`ContrastSuite` 是纯 hex 数学（`ClaudioGUICore` 不依赖 SwiftUI），它**结构上不可能知道** `MasterVolumeRow` 到底有没有写 `.tint(clay)`、有没有被人删掉退回系统蓝 —— 而那正是 D4 存在的全部理由。这与该文件 `header:9-15` 自我批判过的「手抄副本 → 结构上捕获不了它所针对的回归」是同一个病。<br>**修法（用户已拍板，2026-07-12）**：① 只加**暗色**一对（`clayDark vs panelDark`，今天确实没有，有价值）；② 「`.tint` 生效 / 未退回系统强调色」**接受为测不到的缺口，用真机走查兜底** —— 不投 `NSViewRepresentable` 做可测封装。落成 **§5.2 走查清单第 ⑨ 条**（把系统强调色改成红色再开面板），并附本轮实证色（clay `#C7795B` / 系统蓝 `#3275F0`）。**代价说清楚：这条规则的守门人是人，不是 CI —— 每次动到控件行都必须重跑第 ⑨ 条。** | **本轮 · 侦察 S5 + S8 · 用户拍板** |
 | **D26** | **给 `VolumeDragSession` 加一条显式的非拖动提交路径（`adjust(to:)`），修 §11 P0-a。** VoiceOver 的 adjustable increment 与键盘方向键**不走** `onEditingChanged` → `isDragging` 永远 false → D11 的门控把它们的写**全部丢掉**。更糟：Slider 的 binding setter 被门掉后**显示值会弹回**，VO 用户体验到的不是「改了没存」，而是「控件根本推不动」（WCAG 2.1.1 可操作性失败，比持久化失败更严重）。而 §5 自己把「VoiceOver 上下箭头 5% 步进」列成了验收项 —— 按原设计**必挂**。<br>**修法**：`adjust(to:)` 走**非拖动路径、直接 commit**。⚠️ 关键约束：它**不能**简单地挂在 binding setter 的 `!isDragging` 分支上（那正是 render-time 写入的入口）—— 但 **D24 去掉 `step:` 后 render-time 网格吸附不复存在**，这个顾虑随之消失，setter 在 `!isDragging` 时路由到 `adjust(to:)` 变成安全的。**D24 是 D26 的前置条件。** | **本轮 · §11 P0-a 收口** |
-| **D27** | **写成功后走 `refreshMasterVolume()`，镜像既有的 `refreshEnabledFlags()` —— 不发明新机制（修 §11 P0-b）。** 计划称「写成功后 `PanelView` 的 `@State config` 不重读」，作为对**既有写者**的描述**是错的**：静音写者 `toggleMute`（`:399-403`）成功后调 `refreshEnabledFlags()`（`:438-444`），而那个函数的注释白纸黑字写着「`config` 本身是**重读**而不是内存 patch，所以面板反映的是**真正落盘的字节** —— 这是 `refresh()` 同样遵循的 re-detect-don't-patch 纪律」。<br>所以 D12 的「baseline := 实际落盘值（内存 patch）」**与仓库既定纪律冲突**，且计划**漏看了现成的先例**。<br>**修法**：写成功 → `refreshMasterVolume()`（只重读 config，**不**扫包 —— 镜像 `refreshEnabledFlags` 的轻量形状）→ `config.masterVolume` 变化 → 经 **D21** 的 `.onChange(of: diskVolume)` 下推到 session。**一举同时解决 P0-b 和 D21，且零新概念。** | **本轮 · 侦察 S2/S7** |
+| **D27** | **写成功后走 `refreshMasterVolume()`，镜像既有的 `refreshEnabledFlags()` —— 不发明新机制（修 §11 P0-b）。** 计划称「写成功后 `PanelView` 的 `@State config` 不重读」，作为对**既有写者**的描述**是错的**：静音写者 `toggleMute`（`:399-403`）成功后调 `refreshEnabledFlags()`（`:438-444`），而那个函数的注释白纸黑字写着「`config` 本身是**重读**而不是内存 patch，所以面板反映的是**真正落盘的字节** —— 这是 `refresh()` 同样遵循的 re-detect-don't-patch 纪律」。<br>所以 D12 的「baseline := 实际落盘值（内存 patch）」**与仓库既定纪律冲突**，且计划**漏看了现成的先例**。<br>**修法**：写成功 → 只重读 config（**不**扫包，轻量形状）→ `config.masterVolume` 变化 → 经 **D21** 的 `.onChange(of: diskVolume)` 下推到 session。**一举同时解决 P0-b 和 D21，且零新概念。**<br>✅ **落地（8771946）**：这条推理成立，但它引的两个函数名今天都不存在 —— `refreshEnabledFlags()` / `refreshMasterVolume()` 是 `PanelView` 的旧私有方法，9cccc9c 红队重构时随状态一起搬进 `PanelConfigController` 并合并成 **`reloadConfigOnly()`**。所以实现是 `setMasterVolume(_:)` 成功 → `.configOnly` → `reloadConfigOnly()`，与静音那一半**共用同一个函数**（比「镜像一个先例」更彻底：不是照着写第二份，是直接复用）。别照本条原文新建 `refreshMasterVolume()`，那只会重复它。 | **本轮 · 侦察 S2/S7** |
 | **D28** | **D2 的另一半：`AudioDropZoneView` 拿不到 config，且 `onAppear` 会把音量定格。** 计划的阶段 D 写「`AudioPreviewPlayer.swift`：协议加 volume 参数；`AudioDropZoneView` **跟随**」—— 但「跟随」在源码里**无处可跟**：`AudioDropZoneView.init(viewModel:)` 自己 `new` player 且**没有 config 入口**；而它在 `.onAppear`（`:44`）里绑定回调 —— 传值快照进去会把音量**定格在开面板那一刻**。<br>**修法**：volume 用**闭包**传（`currentVolume: () -> Double`），不是值。取值时机 = 播放时，不是绑定时。 | **本轮 · Codex #5 + 侦察 S2** |
 | **D29** | **「gui 预览 spy」这条测试在当前包结构下写不出来 —— §5 把它列进「可在本机自动测」是假的。** `AudioPreviewPlaying` 是 **internal 协议**，住在 `ClaudioGUI`（**executableTarget**，`gui/Package.swift`），而 `claudio-gui-tests` 的 dependencies **只有 `ClaudioGUICore`** —— harness 够不着它。<br>**修法**：把「音量解析」下沉成 `ClaudioGUICore` 的**纯函数**（`previewVolume(for config: ClaudioConfig) -> Double { AfplayVolume.clamped(config.masterVolume) }`）并单测；视图侧只做转发。可测的那一半进核心，够不着的那一半留在视图并**如实列进真机走查**。 | **本轮 · 侦察 S7/S8** |
 | **D30** | **`ConfigLockSuite`（D9 的唯一守门人）按原写法必然假绿。** 现有**每一条**锁争用测试都**显式注入临时 lockFile**（`EventEnabledSuite.swift:127-131` 等），因此与默认参数**完全无关**。而 D9 只改默认值 → 「变异验证：把锁改回共用，两条必须 RED」**不会 RED**，测试是恒真的空测试。<br>**修法**：D20 的**改名**让这条测试有了牙 —— 真正该断言的是**接线**：`EventMuteController()` **默认构造**后其 `lockFile == ClaudioPaths.configLockFile`（而非 `playLockFile`），`PanelView` 的默认 `lockFile` 同理。这是唯一能捕获「有人把 GUI 的默认值改回 play.lock」的断言。 | **本轮 · 侦察 S8** |
@@ -135,7 +150,7 @@ helper 侧的 `master_volume` → `afplay -v` 映射（T9，`Volume.swift`）早
 
 | # | 裁决 | 议题 |
 |---|---|---|
-| **D37** | **`closeCount += 1` 必须是 `popoverDidClose` 的第一条语句（`MenuBarController.swift:185`，任何 early return 之上）。** `:191` 的 `guard NSApp.isActive, let previous, … else { return }` 在「用户点了别的 app」——**关闭 popover 最常见的路径**——上恰好 `NSApp.isActive == false` 直接 return；冲刷挂在 guard 之后 = D22 白做而单测照绿（单测测的是状态机，测不到 AppKit 这一行的位置）。真机验证走 §5.2 ③④。 | 板 ① |
+| **D37** | **隐藏计数器的 bump 必须是 `popoverDidClose` 的第一条语句（任何 early return 之上）。** 那句 `guard NSApp.isActive, let previous, … else { return }` 在「用户点了别的 app」——**关闭 popover 最常见的路径**——上恰好 `NSApp.isActive == false` 直接 return；冲刷挂在 guard 之后 = D22 白做而单测照绿（单测测的是状态机，测不到 AppKit 这一行的位置）。真机验证走 §5.2 ③④。<br>✅ **落地即满足（8771946）**：复用的 `notePanelHidden()` **本来就是** `popoverDidClose` 的第一行（T17d 出于同一个理由把它放在那儿），所以这条排序保证是继承来的，不是重新争取的。`ViewWiringSuite` 有一条**顺序**断言钉死它（不是 contains，是 `range(of:).lowerBound` 比较），且失败消息现在同时点名它守的两个 bug。原文写的 `closeCount` 符号不存在，见 D22。 | 板 ① |
 | **D38** | **D33 的 gallery 范围 = `MasterVolumeState` 六帧（展示板 §2 即规格）；D23 的三个路由态不进 gallery，由 §5.2 ⑫⑬ 真机走查兜底。** `StateGalleryView` 的四个族全是子视图、从不渲染 PanelView —— 为三帧破例引入「整面板宿主」是一类全新机制，超出本方案。**整面板路由帧（`PanelRouteState` 族）登记为独立 P3 TODO**（TODOS.md），将来路由态再增多时投入。 | 板 ② |
 | **D39** | **`.writeFailed` 错误行归 PanelView（D3 合并列表），`MasterVolumeRow` 零错误 UI。** `MasterVolumeController.lastError` 只是 D3 纯函数的第三个输入，生命周期逐字镜像 `EventMuteController.lastError`（`EventMuteController.swift:19-22`：首次为 nil，**下一次成功写清空**）。gallery 侧推论：写失败帧以「行 + 错误行」**组合帧**留在 `MasterVolumeState` 族里（展示板 §2 已这么画），不需要 PanelView 帧。 | 板 ③ |
 | **D40** | **ENGINEERING.md:204 线框的拇指移到约 4/5 处**（默认 `defaultMasterVolume = 0.8`）：`│  主音量   ──────●──  │`。原线框画在最左（= 0%），与默认值矛盾且无一处解释。与 D34② 的「去 🔊」同批在阶段 E 改。 | 板 ④ |
@@ -260,19 +275,33 @@ helper 侧的 `master_volume` → `afplay -v` 映射（T9，`Volume.swift`）早
     （公式按 **D45**：`(v / 0.05).rounded() / 20`，**不是** `* 0.05`）。
   - a11y：label / `accessibilityValue` / adjustable → 走 **`adjust(to:)` 非拖动提交路径**（D26），不是 `drag(to:)`。
   - **`.onChange(of: diskVolume) { session.rebase(to: $0) }`** ← **D21，原计划漏掉的一行；`rebase(to:)` 在 WIP 里已经写好了但零调用点。**
-  - 冲刷：**`.onChange(of: focusCoordinator.closeCount) { flush() }`**（D22），**不是 `onDisappear`**。
+  - 冲刷：**`.onChange(of: focusCoordinator.hideCount) { flush() }`**（D22 —— 复用 T17d 既有的 `hideCount`，
+    **不新增 `closeCount`**；原文写的 `closeCount` 从未存在过，见 D22/D37 的落地注）。
+    冲刷的兜底是 `.onReceive(…willTerminateNotification) { flush() }`（D22-bis）。
+    **两条的闭包体里都必须真的调 `flush()`** —— `ViewWiringSuite` 切开闭包体验这一点，不是验修饰符
+    在不在（掏空闭包的变异体曾实测存活：拖完点面板外面，值静默丢失，测试全绿）。
   - **按 DESIGN.md「控件行」照做**：文字标签「主音量」+ Spacer + Slider，无 tile、无喇叭图标、无百分比读数（D15）。
   - Dynamic Type：`rowWrapsToTwoLines` 时标签在上、Slider 在下 —— **触发档是 `.largest`（=「更大」）及以上**；
     「较大」（`.larger`）只隐波形、**不**折行（D44 撤销了 D34① 的假更正 —— 原文这里的「不是『更大』」恰恰是错的）。
   - **全行零 `.animation()`**，回滚瞬跳（D18 —— **注意 D18 的理由已于 2026-07-14 更正**：`PanelView.swift` 那条「本视图树零动画」的绊线早就被 T17c 踩响并改写，别再照抄它；规矩仍在，理由换了）。
 - `PanelView.swift`：插入 `MasterVolumeRow`；错误行改列表渲染（D3 —— **`.writeFailed` 归这里**，
   `MasterVolumeRow` 零错误 UI，D39）；`playPreview` 传 volume；
-  **新增 `refreshMasterVolume()`**（镜像 `refreshEnabledFlags()`，D27）；
-  **`.configMissing` 不进错误列表** —— 回滚 + 全量 `refresh()` 重路由到 `.needsPack`（D43）。
-- `MenuBarController.swift`：`popoverDidClose`（`:184`，**已存在**）里 bump `focusCoordinator.closeCount`（D22）——
-  **必须是函数第一条语句（`:185`），在 `:191` 的 `guard NSApp.isActive` 之上**（D37 ——
-  「点了别的 app」这条最常见关闭路径上 guard 恰好提前 return，冲刷挂它后面 = D22 白做）。
-- `PanelFocusCoordinator.swift`：加 `closeCount`（与既有 `showCount` 完全对称）。
+  写成功后重读 config（D27）；
+  **`.configMissing` 不进错误列表** —— 回滚 + 全量重载重路由到 `.needsPack`（D43）。
+  - ⚠️ **D27 的落地形状与本行原文不同（8771946）**：原文要求「新增 `refreshMasterVolume()`（镜像
+    `refreshEnabledFlags()`）」。这两个函数**在今天的源码里都不存在** —— 它们是 `PanelView` 的旧私有
+    方法，早在 9cccc9c 红队重构时就随状态一起搬进了 `PanelConfigController`，并合并成
+    `reloadConfigOnly()`。D27 要的**行为**（写成功 → 只重读 config、不扫包 → `config.masterVolume` 变化
+    → 经 D21 的 `.onChange(of: diskVolume)` 下推给 session）由 `setMasterVolume(_:)` → `.configOnly`
+    → `reloadConfigOnly()` 逐字实现，且 `PanelConfigControllerSuite` 用真磁盘钉死。新增一个
+    `refreshMasterVolume()` 只会**重复**它（`/codex review 8771946`）。
+- `MenuBarController.swift`：**无需改动** —— `popoverDidClose` 里 bump 隐藏计数器（D22）这件事，
+  T17d 已经做完了：它的第一条语句就是 `focusCoordinator.notePanelHidden()`，恰好在
+  `guard NSApp.isActive` 之上（D37 要的排序保证）。原文以为要在这里加 `closeCount`。
+- `PanelFocusCoordinator.swift`：**无需改动** —— `hideCount` + `notePanelHidden()` 早已存在（T17d），
+  与既有 `showCount` 完全对称。原文要求「加 `closeCount`」；照做只会得到第二个语义相同、且需要
+  同样小心放置的计数器。（唯一该动的是它的 doc comment：那句「hideCount 存在的**唯一**理由是
+  OnboardingViewModel」在阶段 D 之后是假话，且是危险的假话 —— 已修，8771946 的 review 收口。）
 - `AudioPreviewPlayer.swift`：协议加 volume 参数。
 - `AudioDropZoneView.swift`：volume 用**闭包**传（`currentVolume: () -> Double`），**不是值快照**（D28 —— 它在 `onAppear` 里绑回调，传值会定格）。
 - `StateGalleryView.swift` + `PreviewFixtures.swift`：**补主音量行的各态**（D33 —— 否则新控件绕过了 DESIGN.md:161 声明的「视觉真相源」）。
@@ -417,11 +446,11 @@ dist/Claudio.app/Contents/Resources/bin/claudio doctor # 全绿才继续
 |---|---|---|---|---|---|
 | **①** | **D9 + D20**<br>**（本方案最重要的一条）** | 无 | 在 Claude Code 里跑一个会连续出声的任务，**同时**用鼠标来回拖主音量滑块十几秒 | **一声提示音都不能少。** 拖动期间 Claude Code 的每个事件都照常发声 | **锁分离没到 GUI**（D20）。去查 `EventMuteController.swift` / `PanelView.swift` 的默认 `lockFile` 是不是还指着 `playLockFile` |
 | **②** | **D21**<br>（滑块与磁盘脱钩） | 打开面板 → **关掉** → 终端 `jq '.master_volume = 0.30' ~/.claudio/config.json \| sponge ~/.claudio/config.json`（或手改） | **重新打开**面板 | 滑块显示 **30%** | **`rebase` 没接线**（D21）。`MasterVolumeRow` 缺 `.onChange(of: diskVolume) { session.rebase(to: $0) }`。这是本方案第二严重的洞，**必测** |
-| **③** | **D22 + D37 + D45**<br>（关面板不丢值） | 无 | 把滑块拖到一个新值，**手指不松开就没法关面板** → 所以：拖到新值、松手前先移出 popover 区域再松手；以及「拖到新值 → 立刻点面板外面关掉」（**后者必测** —— 它正是 `NSApp.isActive == false` 那条路） | `~/.claudio/config.json` 里是**新值**，且拖到 35% 时文件里**逐字是 `0.35`**，不是 `0.35000000000000003`（D45） | **冲刷信号错了**（D22），或 `closeCount += 1` 被放到了 `:191` 的 guard **之后**（D37 —— 「点别的 app 关面板」这条路上 guard 提前 return）。脏浮点 = `snap()` 还是 `k * 0.05`（D45） |
+| **③** | **D22 + D37 + D45**<br>（关面板不丢值） | 无 | 把滑块拖到一个新值，**手指不松开就没法关面板** → 所以：拖到新值、松手前先移出 popover 区域再松手；以及「拖到新值 → 立刻点面板外面关掉」（**后者必测** —— 它正是 `NSApp.isActive == false` 那条路） | `~/.claudio/config.json` 里是**新值**，且拖到 35% 时文件里**逐字是 `0.35`**，不是 `0.35000000000000003`（D45） | **冲刷信号错了**（D22 —— 检查 `MasterVolumeRow` 那条 `.onChange(of: focusCoordinator.hideCount)` 的**闭包体**里真的调了 `flush()`，不只是修饰符在），或 `notePanelHidden()` 被挪到了 `guard NSApp.isActive` **之后**（D37 —— 「点别的 app 关面板」这条路上 guard 提前 return）。脏浮点 = `snap()` 还是 `k * 0.05`（D45） |
 | **④** | **D22**<br>（退出 app 不丢值） | 无 | 拖到新值 → **⌘Q** 退出 | config 里是新值 | `willTerminate` 没接。**注意**：force quit / `killall Claudio` **不覆盖**（D32 已如实登记），别拿它测 |
 | **⑤** | **D11 + D24**<br>（不碰就不写） | `jq '.master_volume = 0.42' ~/.claudio/config.json`（0.42 **不在** 0.05 网格上）→ 记下 `shasum ~/.claudio/config.json` | 开面板 → **看一眼滑块，什么都不碰** → 关面板 | `shasum` **一个字节不变**，仍是 0.42 | 有东西在写盘。若值变成 0.40 → **`step:` 还在**（D24 没做，render-time 网格把它吸走了） |
 | **⑥** | **D24**<br>（**没有刻度点**） | 无 | 打开面板，**看滑块下方** | 轨道下面**干干净净**，没有一排小灰点；主音量行高与事件行观感一致 | **`step: 0.05` 还在**（D24）。已实证 `step:` → `numberOfTickMarks=21`，会画出一条 21 点的刻度带，撑破 28pt 行高 |
-| **⑦** | **D2 + D27**<br>（试听跟随音量） | 无 | 把滑块拖到 **~20%** → **立刻**点任意一行的试听 ▶ | 声音**明显变小** | 若响度不变：要么 `AudioPreviewPlayer` 没接 volume（D2），要么写成功后 `PanelView.config` 没重读（D27 的 `refreshMasterVolume()`）。拖到 **0%** 再试 —— 应该**完全没声** |
+| **⑦** | **D2 + D27**<br>（试听跟随音量） | 无 | 把滑块拖到 **~20%** → **立刻**点任意一行的试听 ▶ | 声音**明显变小** | 若响度不变：要么 `AudioPreviewPlayer` 没接 volume（D2），要么写成功后 config 没重读（D27 —— 落地是 `setMasterVolume` 成功 → `.configOnly` → `reloadConfigOnly()`，**不是**一个叫 `refreshMasterVolume()` 的函数）。拖到 **0%** 再试 —— 应该**完全没声** |
 | **⑧** | **D12**<br>（写失败 → 回滚 + 报错） | `chmod 500 ~/.claudio`（目录只读） | 拖动滑块 → 松手 | 滑块**瞬跳回**磁盘上的旧值（**无动画**，D18）+ 面板出现一行**错误行**（真红 ✗ 图标 + 人话） | 静默失败 = D12 没做。**滑块停在新位置而磁盘没变 = 面板在撒谎**（这正是 D12 存在的理由）。测完 `chmod 700 ~/.claudio` 改回来 |
 | **⑨** | **D4 + D25**<br>**（每次动控件行都要重跑）** | 系统设置 → 外观 → **强调色**改成**红色** | 打开面板，看滑块**填充段的颜色** | 填充是**黏土色**（`#C7795B` 档，橙棕），**不是红色，也不是蓝色** | **`.tint(clay)` 被人删了 / 写错了。** 填充变成系统强调色 = 一个「真红只给真错误」的设计系统给出了一根红色主音量滑块。<br>**这条 `ContrastSuite` 结构上测不到**（纯 hex 数学，看不见 NSSlider）—— 它的守门人就是你。测完把强调色改回去 |
 | **⑩** | **D26**<br>（VoiceOver 可操作） | ⌘F5 开 VoiceOver | VO 光标移到主音量 → 上/下箭头 | ① 播报「主音量，80%」；② 箭头**真的能推动**滑块；③ 推完的值**落盘**（`cat ~/.claudio/config.json` 确认） | ②挂 = `isDragging` 门控把 VO 堵死了（**WCAG 2.1.1 可操作性失败**，比丢值更严重）。③挂 = `adjust(to:)` 没接（D26） |
@@ -477,7 +506,7 @@ macOS 的「键盘导航 / FKA」**系统默认是关的**，关闭时 SwiftUI `
 | **重开面板 / 外部改了 config** | **`@State` 只 seed 一次 → 滑块显示磁盘上没有的值，且不自愈**（D8 × D12 互斥） | ✅ 纯单测 | ✅ **`.onChange(of: diskVolume) { rebase }`（D21）** —— **原计划漏掉了这条路径** | 滑块跟到磁盘值 |
 | config.json 不存在时**点静音钮** | 造出 `selected_pack: ""` → 面板撒谎 + 恢复无指引 | ❌ **今天就能触发** | ❌ **今天无任何处理**（D23） | **面板顶着绿点声称一件假话** |
 | config.json 不存在时首拖滑块 | 同上 | ✅ | ✅ 根因修在 `loadPanelConfig`（**D23**，~~D13 空转~~） | 不可能发生 |
-| 写成功但 UI 不同步 | UI 显 30%、磁盘 80% | ✅ 纯单测 | ✅ **`refreshMasterVolume()` 重读磁盘**（D27，镜像 `refreshEnabledFlags`） | — |
+| 写成功但 UI 不同步 | UI 显 30%、磁盘 80% | ✅ 纯单测 | ✅ **`reloadConfigOnly()` 重读磁盘**（D27 —— 与静音那一半共用同一个函数；`refreshMasterVolume()` / `refreshEnabledFlags()` 都不存在，见 D27 落地注） | — |
 | 滑块被人删掉 `.tint` | 填充退回**系统强调色**（可能是红 —— DESIGN.md 明令真红只给真错误） | ❌ **`ContrastSuite` 结构上测不到**（纯 hex 数学，看不见 NSSlider） | — | ⚠️ **只能靠真机走查兜住**（D25） |
 
 **critical gap（无测试 + 无错误处理 + 静默）：~~0 条~~ → 1 条。**
@@ -548,7 +577,7 @@ macOS 的「键盘导航 / FKA」**系统默认是关的**，关闭时 SwiftUI `
 | 原编号 | 收口去向 | 结论变化 |
 |---|---|---|
 | **P0-a**（`isDragging` 门控堵死 VoiceOver / 键盘） | → **D26**（`adjust(to:)` 非拖动提交路径） | 成立，且**比原描述更严重**：不是「改了没存」，是「控件根本推不动」（binding setter 被门掉 → 显示值弹回）—— WCAG 2.1.1 可操作性失败。修法有一个**前置条件**原文没写：必须先有 **D24**（去掉 `step:`），否则把 setter 的 `!isDragging` 分支路由到 `adjust(to:)` 会重新打开 render-time 写入。 |
-| **P0-b**（写成功后 `@State config` 不重读） | → **D27**（`refreshMasterVolume()`） | **结论对，证据错**。「既有写者也不重读」是**假的** —— `toggleMute` 成功后调 `refreshEnabledFlags()`（`PanelView.swift:438-444`），其注释明写 re-detect-don't-patch 纪律。所以主音量该做的是**镜像那个先例**，而不是发明新机制；同时 D12 的「内存 patch baseline」与该纪律冲突，应改为重读。 |
+| **P0-b**（写成功后 `@State config` 不重读） | → **D27** | **结论对，证据错**。「既有写者也不重读」是**假的** —— 静音写者成功后会重读 config，其注释明写 re-detect-don't-patch 纪律。所以主音量该做的是**复用那条既有路径**，而不是发明新机制；同时 D12 的「内存 patch baseline」与该纪律冲突，应改为重读。<br>（本行原引 `refreshEnabledFlags()` / `PanelView.swift:438-444`，两者今天都不存在：那个方法早在 9cccc9c 就搬进 `PanelConfigController` 并合并成 `reloadConfigOnly()`。结论不变，符号名以 D27 落地注为准。） |
 | **P0-c**（`selected_pack: ""` 可达） | → **D23**（根因修 `loadPanelConfig`） | **严重性被低估了**。它不是「滑块上线后可能坏」，而是**今天就活着**：静音钮（`EventRowView.swift:412`，无 `.disabled`）→ `EventEnabled.swift:83`（config 缺失时用空串新建）。D13（强制传 pack）是**空转** —— `ConfigMutation.swift:144` 实证 `freshSelectedPack` 只在 config 缺失的 else 分支被读，而那恰恰是面板手里只有空串的分支。原计划把「修 `setEventEnabled`」划到 scope 外，本轮**拉回 scope 内**。 |
 
 **新增的、上一轮完全没看见的洞**：D20（锁分离漏了 GUI）、D21（D8 × D12 在 SwiftUI 语义上互斥）、

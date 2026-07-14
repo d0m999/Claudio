@@ -33,7 +33,11 @@
 | **X5** | **`gui/Tests/ClaudioGUICoreTests/ViewWiringSuite.swift` 已经存在**（T17 期间建立）：它用 `#filePath` 推仓库根、读 `ClaudioGUI/*.swift` 的**源码文本**、断言视图层的接线行还在（现役断言逐字是 `panel.contains(".onChange(of: onboardingViewModel.state)")`，注释里明写「删掉这一行，652 项测试全绿」） | **这是 §9 变异验证第 ② 条（去掉 `rebase` 调用 → 必须 RED）唯一可能成立的机制** —— `ClaudioGUI` 是 executableTarget，测试 import 不进来，没有文本绊线的话那条变异**永远不会 RED**，测试就是恒真空测试（正是 D30 批判的病） | Step 8 要求给三条接线（rebase / popover 冲刷 / willTerminate 冲刷）各加一条文本绊线；Step 11 的变异 ② 已指名它 |
 | **X6** ⚠️**锁分离部分已作废** | **WIP 参考分支 `cbc02f0`（`feat/master-volume-slider`）与本编排不同底。** 它基于 `9162266`（pre-T17），**不含 f00521e**。它写过一版阶段 A 的锁分离，但做法与已落地的 PR #6 **相反**：它**保留了 `lockFile` 旧名**、只新增 `configLockFile` / `settingsLockFile`，还漏了第 11 个默认值点（那棵树没有 `OnboardingActions.swift`）。**PR #6 用正确做法（改名）落地之后，它这半彻底作废。** | **`cbc02f0` 的 `Paths.swift` / 锁相关改动全部忽略 —— 以 main（`2b759ca`）为准。** 它唯一还有参考价值的是 Step 3/4/7 要「新建」的三个文件草稿（`MasterVolume.swift` 117 行、`VolumeDragSession.swift` 173 行、`MasterVolumeController.swift` 56 行）。分支本身落后 main 36、仅领先 1（那个作废的 WIP commit），**不要 rebase 它**——从 main 重新拉分支、只把三个草稿当参考。 |
 
-**另一处「计划的前提已被源码证伪」**：D25 ① 要给 `ContrastSuite` 加的「`clayDark` vs `panelDark` ≥3:1」**今天已经存在** —— `ClaudioColorHex.swift` 里 `notificationDark = clayDark` 是别名，而 `nonTextPairs` 已有「Notification dark glyph vs panel」这一对。所以**没有任何 step 认领 D25① 是对的，不是漏了**（D25 自己已经证明亮色那一对是逐字重复，暗色这一对同理）。滑块 `.tint(clay)` 是否退回系统强调色这件事，`ContrastSuite` 结构上永远测不到 —— 守门人是闸门 G 的第 ⑨ 条。
+**另一处「计划的前提已被源码证伪」**：D25 ① 要给 `ContrastSuite` 加的「`clayDark` vs `panelDark` ≥3:1」在**数值上**今天已被覆盖 —— `ClaudioColorHex.swift` 里 `notificationDark = clayDark` 是**字面别名**（同一个常量），而 `nonTextPairs` 已有「Notification dark glyph vs panel」这一对，算的是同两个 hex。所以当时的结论是「没有任何 step 认领 D25① 不是漏了」。
+
+> ✅ **最终还是补了（`ee3af12`，2026-07-14）**，理由不是「数值没被覆盖」（上面那段推理仍然成立），而是另外两条：① **专名对称** —— 亮色那一对挂在 drop-zone 的决议下，暗色一直没有一条**以自己的名字**存在的守卫；② **解耦保险** —— 事件色与品牌色本是两个概念，只是今天恰好同值；哪天有人把 `notificationDark` 与 `clayDark` 解耦，那条别名断言就不再覆盖 clay，而这条会是唯一还钉着控件行填充色的断言。该 commit 的注释里逐字写明了它**不**更早也**不**更灵，别当成比实际更强的护栏。
+
+滑块 `.tint(clay)` 是否退回系统强调色这件事，`ContrastSuite` **结构上永远测不到**（纯 hex 数学，`ClaudioGUICore` 连 SwiftUI 都不 link，看不见 NSSlider 实际填了什么色）—— 守门人是闸门 G 的第 ⑨ 条，**是人，不是 CI**。
 
 **行号一律不可信**：计划里的 `PanelView.swift:96` 今天是 `:112`，`MenuBarController.swift:184` 今天是 `:198`，`PanelFocusOrder.swift:115-120` 今天是 `:145/:162`。所有 prompt 都改用**符号名 grep**定位，不用行号。
 
