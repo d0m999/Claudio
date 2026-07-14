@@ -63,6 +63,29 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 
 ## Ship / CI
 
+### `loadPanelConfig` 每次调用把 config.json 独立读三遍 —— 文档写的「一次读 + 一次目录 stat」和实现对不上
+
+**What:** D23 把面板的 config 判定拆成「写」「读」两条正交轴（`probeConfigRewritable` + `packSelection`），
+再加上最后 `loadClaudioConfig` 解码一次 —— `loadPanelConfig` 在 happy path 上因此对同一个 `configFile` 各自
+独立做了三次 `fileExists`/`open`/`read`/解析，而不是文档里 `PanelRefreshRoute.swift` 对 `.configOnly` 成本的
+描述（「代价 = 一次文件读 + 一次目录 stat」）。三次读之间没有共享同一个字节缓冲区，也没有加锁（读端本来就
+不占锁，这是既有约定），所以理论上一次外部并发写可能落在三次读之间，让三个判定基于不完全一致的磁盘内容
+（红队复核：影响自限——下一次真正写盘会重新校验并诚实拒绝，不丢数据，只是这一次面板渲染可能对不上磁盘
+当下状态）。
+
+**Why:** `/ship` pre-landing review 的 performance specialist + red-team 两条独立路径都命中了同一处
+（`gui/Sources/ClaudioGUICore/PanelConfig.swift:72`），confidence 都不低。不是这条分支要解决的问题（这条
+分支的目标是「切包 + 路由」的行为正确性，已经用五轮红队 + 两次独立对抗验证钉死了），但发现的时候文档
+与实现已经对不上号，值得单独一轮修，而不是为了赶这次 ship 临时改三个文件的函数签名。
+
+**Context:** 2026-07-14 `/ship` pre-landing review（performance + red-team 双命中，parent 已用 `git diff`
+逐行核实为真）。修法：给 `probeConfigRewritable`/`packSelection`/`loadClaudioConfig` 各配一个接受
+预读 `Data` 的内部重载，`loadPanelConfig` 只在最外层读一次文件、把字节传给三个判定复用。
+
+**Effort:** S
+**Priority:** P2（性能影响可忽略，正确性影响自限且无数据丢失；但文档与实现的说法已经不一致）
+**Depends on:** None
+
 ### ~~`play.lock` 被 config / settings 写者共用 —— 任何一次设置写都可能静默吞掉一声提示音~~ ✅ 2026-07-12 阶段 A 已修
 
 `ClaudioPaths.lockFile` 已**改名**为 `playLockFile`，并新增 `configLockFile`（`~/.claudio/config.lock`）与
@@ -408,6 +431,20 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 **Priority:** P3（需要用户在旧 CLI `claudio use` 与新 GUI 之间并发写；**根因那条是 P1**）
 **Depends on:** None
 
+### `updateConfigJSON` 的残余 TOCTOU：读完之后被外部删掉的 config，会被 `.atomic` 写**复活**（且报 `.success`）
+
+**What:** `ConfigMutation.swift` 仍是 `fileExists` → `readConfigFileBounded` → `mutate` → `encode` → `data.write(.atomic)`。一个**不拿 `config.lock`** 的进程（用户手动 `rm`、清理工具、同步冲突）如果在**读成功之后、rename 之前**删掉 `config.json`，`.atomic` 的 temp+rename 会照常把文件**重新创建**出来 —— 内容是刚才读到的那份旧 config（加上本次的改动），并向调用方报 `.success`。用户以为自己删掉了 config，它却自己回来了。
+
+**Why（先把措辞更正了）：** `573336d` 的提交信息写的是「判定与新建落在**同一次** `fileExists` 上，**那个窗口跟着一起没了**」。**这句话比它的覆盖范围大**（`/codex review 573336d` [P2] 独立指出，本人复核确认）。真正没掉的是**空串新建**那个窗口：调用方先探一次 `fileExists`、`updateConfigJSON` 内部再探第二次，两次之间的外部删除会让空串照常落盘。那一刀确实砍掉了（毒源在**类型层面**消失，`.failClosed` 的调用方递不出能落盘的 pack id）—— 但「TOCTOU 窗口关闭了」这个**广义**说法不成立：读→rename 之间那个窗口还在，它只是不再产毒了（复活的是旧内容，不是空串）。
+
+危害比原来的小一个量级（没有毒源，只是一次不该发生的复活），但**措辞必须与覆盖范围对齐** —— 这个仓库栽在「headline 比覆盖范围大」上已经不止一次（见本文档「⚠️ 本条首版写的是…那是**假的**」几处）。
+
+**Context:** 2026-07-13 `/codex review 573336d`。真修 = 与「GUI 写/读路径的同用户 symlink TOCTOU」那条的 config 侧加固**同一处**：写前解析 symlink + 乐观并发重读（读到的字节 vs 写之前重读的字节，不一致就 `.concurrentModification` 中止 —— `SettingsInstaller.swift:619` 对 `settings.json` 已经是这个形状，config 侧照抄即可）。三条并作一处改。
+
+**Effort:** M
+**Priority:** P3（需要一个不拿 config.lock 的外部写者，恰好落进读→rename 那几微秒；且后果是「旧 config 复活」，不是数据损坏）
+**Depends on:** None
+
 ### CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0
 
 **What:** `.github/workflows/` 里**只有** `release.yml`，只由 tag 触发，且只跑 `swift build`（arm64 / x86_64 各一次 + `--product ClaudioGUI`）。没有任何 job 跑 `swift run claudio-tests` 或 `claudio-gui-tests`。没有 `on: push` / `on: pull_request`。
@@ -434,8 +471,53 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 
 **Context:** 2026-07-12 T17c。短期修法：把断言收紧到包含 body 首行（`contains("of: onboardingViewModel.state) { _ in\n            refresh()")`）。根治仍是下面那条 P2（把视图拆进可 import 的 library target），文本绊线的强度天花板就在这里。
 
-**Effort:** S
-**Priority:** P2
+**⚠️ 2026-07-13 更新（`/codex review 573336d` [P2]）：这条病在静音路由上又犯了一次，而且比「body 被掏空」更弱** —— 上一版把「静音失败必须全量 refresh」钉成 `panel.contains("refresh()")`，在**整个文件**里找一个出现 **37 次**的名字：那个合取子**恒真**，连「整行被删」都挡不住（删掉 `.configMissing` 分支，另外 36 处 `refresh()` 一个没少，全绿）。它失败消息里亲口点名的那个变异（改调 `refreshEnabledFlags()`）实测存活。
+
+三处已修，各修一层：
+- **根治（本条自己开的方子）**：那份**判断**搬进了可 import 的 `ClaudioGUICore`（`panelRefreshRoute(muteSucceeded:error:)`），由 `PanelRefreshRouteSuite` 用**行为断言**钉死。文本绊线守不住「哪个结果走哪条路」——那是行为，不是存在性。**分支对调**这一刀，任何文本绊线都拦不住，行为断言当场红。
+- **绊线的作用域**：新增 `functionBody(_:in:)`，按花括号配平从 `codeWithoutStringLiterals` 里切出**单个函数体**再 contains。一条断言的作用域必须等于它声称的作用域。
+- **切片器自己的围栏**：认不出（改名 / 配平跑飞 / 切出半份文件）⇒ **红**，不是安静地绿。切片器自己也上了台账。
+
+变异台账（实测，12/12 全红）：毒瘤本尊、分支对调、路由反相、任何失败都判 `.full`、成功被陈旧 error 改道、视图就地重推、`toggleMute` 改名、doctor 文案倒退、毒源复活、切片起点跑到文件头、闭合括号差一、找不到时交出空串。
+
+**⚠️⚠️ 2026-07-13 二次更正（红队 9cccc9c，worktree 实测）：上面「三处已修」这个说法本身又比覆盖范围大。** 修的是**判断**那一半（`panelRefreshRoute` 纯函数 + 行为断言），这半是真的、扛住了攻击。但**判断之后的一切**仍住在 `PanelView`（测不到），红队对 9cccc9c 发动六视角攻击，实测 **5 条存活变异**（改坏真实行为、两套测试全绿、逐条独立复现）：
+
+| # | 变异 | 面 | 用户后果 | 现状 |
+|---|---|---|---|---|
+| 1 | `reload()` 不重载 `configState` | 执行 | config 被外部删后面板永久失明，四行活控件挂在不存在的文件上 | **已行为级修复** |
+| 2 | `reloadEnabledFlags()` 早退成死代码 | 可达性 | 静音成功但开关视觉不动，面板对静音状态撒谎 | **已行为级修复** |
+| 3 | `onToggleMute: {}` 剪断按钮→handler | 接线 | 四行静音钮点了毫无反应，连失败都没有 | **存在性检查**（挡「线被剪」；「运行期没接通」是 SwiftUI body 的固有天花板） |
+| 4 | `setEnabled(enabled: currentlyEnabled)` 去掉 `!` | 翻转 | 静音钮变死键，翻转逻辑裸奔 | **已行为级修复** |
+| 5 | doctor `.malformed` 对不含 "events" 的 reason 打绿勾 | doctor | master_volume 畸形→静音永久失效、声音照响，doctor 谎报健康 | **已行为级修复** |
+
+**2026-07-13 根治已落地（view-model 化）：本条实质关闭，只剩一个 SwiftUI 固有天花板。**
+
+`configState` / `config` / `eventRows` / `packCards` / `packSwitchError` 连同操作它们的
+`toggleMute` / `switchPack` / `reload` / `reloadEnabledFlags`，**整体搬进了**
+`ClaudioGUICore.PanelConfigController`（可实例化的 `@MainActor` 类，同 `OnboardingViewModel` /
+`EventMuteController` 的既有做法）。`PanelView` 里避开「读 `@StateObject.wrappedValue` 造幽灵实例」
+陷阱的办法：init 里先构造纯 local 实例，再各自 wrap 进 `@StateObject` **并**把同一实例交给 controller，
+跨-view-model 协调（onboarding 重探 + import view-model retarget）走一个捕获这些 local 的闭包。
+
+`PanelConfigControllerSuite` **new 一个真 controller、喂真磁盘 config、调真方法、断言磁盘字节与读模型
+真的变**。定向变异台账（实测，5/5 全红）：
+- **#1**（`reload()` 删 configState 重载）→「外部删除后 configState 必须翻到 .needsPack」当场红；
+- **#2**（`reloadEnabledFlags()` 早退）→「config/eventRows 必须反映翻转」当场红；
+- **#4**（去掉 `!`）→「翻转必须落盘」当场红；
+- **#3**（`onToggleMute: {}`）→ `ViewWiringSuite` 存在性检查当场红；
+- 锁转发（`switchPack` 换 `settingsLockFile`）→ 锁分离断言当场红（跨搬迁保住 D9）。
+
+抽取顺带删掉了整套 `functionBody("toggleMute")` 文本切片装置 —— 它是为「逻辑困在测不到的 View 里」这个
+问题写的脚手架，问题从根上消失后，脚手架也就没了存在理由（这正是「拆纯函数 vs 拆可实例化对象」的差别：
+前者只救判断，后者把执行/可达/翻转一起救出来）。
+
+**唯一残留（不是缺口，是 SwiftUI 的固有天花板）**：`PanelView.body` 把按钮绑到 `panelModel.toggleMute`
+那**最外层一根接线**，纯逻辑测试本质上到不了（只有 UI / 快照测试够得着，而本机 CommandLineTools 无
+XCTest）。由 `ViewWiringSuite` 的存在性检查兜底（挡「线被剪断」）。要连这一根也行为级关掉，需要引入
+快照测试栈 —— 那是独立的一条，不在本条范围。
+
+**Effort:** ~~M~~ 已完成（红队 9cccc9c → view-model 化）
+**Priority:** ~~P2~~ 已关闭（残留的 SwiftUI body 接线天花板另立门户，非本条）
 **Depends on:** None
 
 ### 穷尽性断言丢了 `action` 这一维 —— 「断开失败」这一视觉态从没被任何一帧渲染过
@@ -784,6 +866,8 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 **Context:** T16 security-reviewer（2026-07-11）实证复现父目录 symlink 重定向（叶子 rename 语义只挡 `manifest.json` 自身被换，挡不住上层目录被换）；T15 swift-reviewer 指出 `config.json` 无 `settings.json` 那套加固。真修 = 校验后持有 `open(O_DIRECTORY|O_NOFOLLOW)` 目录 fd，后续全走 `openat`/`fstatat`/`renameat` 相对该 fd（`readRegularFileSource` 已对单文件这么做，缺的是**包目录级**）；config 侧补 symlink 解析 + 乐观并发重读。`ManifestBinding.swift` 的注释已修正为「原子写只保护叶子」。
 
+**2026-07-13 `/codex review 573336d` 独立复现同一条（[P2]），行号已锁死**：`ConfigMutation.swift:205` 是裸 `try data.write(to: configFile, options: .atomic)` —— **没有** `resolvingSymlinksInPath()`；而同一个仓库的 `SettingsInstaller.swift:634` 就在写 `settings.json` 前先解析了，还配了一段注释专门讲这个坑（「`.atomic` 做的是 temp+rename **on the symlink**，把链接本身替换成普通文件，与 dotfiles 仓库静默分叉」）。更刺的是 `SafeFileRead.swift:110` **明确允许** `config.json` 是 symlink 并跟随读取 —— 于是 stow / chezmoi 用户的 config 是**读目标、写链接**：两边操作的根本不是同一个文件。D23 定稿①（`573336d`）改的正是 `ConfigMutation` 的这个写函数，**没有**顺手加上这一行；本条仍然开着。（真修与本条上面那半是同一处加固，仍建议合并处理。）
+
 **Effort:** L
 **Priority:** P3
 **Depends on:** helper 未来提权运行 / 处理不可信可写目录时才升级
@@ -859,7 +943,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 - **不变不写**：`drag(to:)` 只在 `isDragging` 时接受（`onEditingChanged(true)` 才置位），使 SwiftUI 的 render-time 网格吸附**无法**触发写 —— 用户手改的 `master_volume: 0.42`（读路径合法、面板照常显示、但不在 0.05 网格上）不碰就永远活着。
 - **失败即回滚**：写失败 → 滑块弹回磁盘值 + 错误行。UI 绝不显示磁盘上没有的值。
 - **先钳制再写**：越界值绝不落盘（spec 要求）；非有限值绝不到达 `JSONSerialization`（否则 ObjC 异常穿透 Swift `do/catch`，进程 abort，exit 134）。
-- **`freshSelectedPack` 强制调用方给**，不像 `setEventEnabled` 那样传 `""` —— 一份 `selected_pack: ""` 的 config 会让 play 读得到却解析不到包，即一份看起来正常的**静音**配置。
+- ~~**`freshSelectedPack` 强制调用方给**，不像 `setEventEnabled` 那样传 `""`~~ —— **已作废（2026-07-13 阶段 A′ / D23）**：那个参数没了。今天 `updateConfigJSON(at:onMissing:mutate:)` 的 `onMissing` 是显式策略，**主音量写者传 `.failClosed`**（config 缺失即拒写、回 `.configMissing`），根本递不出一个 pack id —— 「强制调用方给」管不住调用方手里的坏数据，而这个签名让坏数据**递不进来**。原本要防的那份 `selected_pack: ""` 的 config（play 读得到却解析不到包 = 一份看起来正常的**静音**配置）现在已经没有产地了。
 - **step 0.05**（21 档，默认 0.8 恰在网格上）；`.tint(ClaudioColor.clay(colorScheme))`（clay 亮色 3.97:1 过非文本 ≥3:1，合法）+ DESIGN.md 补登滑块视觉。
 - **把「一次拖动写几次盘」下沉成 `VolumeDragSession` 纯状态机**并单测 + 变异验证 —— 否则这条 P1 决策只活在注释里，而注释拦不住任何人（`PanelFocusOrder.swift:132-138` 记着本项目在同一形状上吃过的亏）。
 - 试听（`AudioPreviewPlayer`）**必须同批修**：它今天完全不理 `master_volume`（`NSSound` 默认满音量），滑块一上线就会「拖了没反应」。
@@ -1375,3 +1459,96 @@ rename」，要的都是**父目录**的写权限。`chmod 0500 ~/.claude`（MDM
 **Effort:** L
 **Priority:** P3
 **Depends on:** None
+
+## 面板 config 路由（D23 / 阶段 A′）落地后剩下的两条
+
+### `probeConfigRewritable` 的 `.absent` 早退，不问父目录可不可写
+
+**What:** `ConfigMutation.swift` 的 `probeConfigRewritable` 一发现 `config.json` 不存在就 `return .absent`
+（「全新安装的正常状态」），**在那之前不问一句父目录让不让写**——而这一问它对**存在**的 config 是问了的
+（`.unwritable` 那一支）。于是「config 缺失 **且** `~/.claudio/` 不可写」这一格会被两轴合成判成 `.needsPack`，
+面板渲染「先选包」空态，用户点一张包卡 → `selectPack` 在写盘那一步才失败。
+
+**Why:** 失败**是**如实上报的（`packSwitchError` → `errorNotice`），所以这不是静默失败，也不是撒谎——
+但它把一句本可以在面板一打开就说清的话（「你的目录不让写，chmod 一下」）推迟成了一次注定失败的点击。
+与 `probeSettingsWritable` 那条（本文件上一节）是**同一个形状**：探测的粒度比真正要写的东西细一级。
+
+**Effort:** S（`.absent` 那一支 return 前补一次 `isWritableFile(父目录)`，与 `.unwritable` 复用同一句 reason）
+**Priority:** P3
+**Depends on:** 会改到 `doctor` 的既有输出（`Doctor.swift:379` 是它今天的另一个调用方），要同批改 DoctorSuite。
+
+### `.malformed` / `.unwritable` 都丢掉了仍然读得出来的 `selected_pack` —— 拖拽拒绝理由、画廊高亮、VoiceOver 播报全部遭殃
+
+**What:** `PanelConfigState.malformed(reason:)` 和 `.unwritable(reason:)` 都不带 packID，`resolvedConfig`
+一律回落成 `ClaudioConfig(selectedPack: "")`。但两者都常常只坏在**别的**地方——`.malformed`：
+`{"selected_pack": "lofi", "master_volume": "0.35"}`，`selected_pack` 好好的，只是 `master_volume`
+是字符串；`.unwritable`：内容**必然**合法（`loadPanelConfig` 走到 `.unwritable` 分支之前，
+`probeConfigRewritable` 已经跑完 `parseRewritableConfig`——顶层对象、`selected_pack` 合法字符串、
+`master_volume` 数字、`events` 全布尔全部通过），坏的只是**父目录写不进去**。两种情况下
+`selected_pack` 其实都读得出来，却被那句硬编码的空默认值一起扔掉。
+
+**验证过的具体后果**（`.unwritable` 这一半，2026-07-14 `/ship` Step 11 adversarial review，Claude
+子代理逐行核对源码而非只看 diff hunk 确认）：
+- `AudioDropZoneView` 不像事件行那样受 `configState` 顶层路由收纳，是**无条件渲染**的。用户在
+  `~/.claudio` 目录突然变只读（MDM chmod、磁盘写满、同步工具占锁——都不是内容坏）时拖一个音频进去，
+  `importAudioFile` 第一道闸门 `isSafePackID("")` 判假，报的是 **「这个文件名 Claudio 不敢直接用，换个
+  正常一点的名字再拖一次」**——把一个目录权限问题说成文件名问题。
+- `PackGalleryView` 的选中高亮（`config.selectedPack` 比对）整卡熄灭，即便磁盘上明明有一张选中的卡。
+- `headerAccessibilityLabel` 对 VoiceOver 播报空包名，而不是真实、合法的那个。
+
+`.malformed` 那一半仍是原始 finding（拖拽拒绝理由报 `.pathTraversal`，文不对题）。`.unwritable`
+这一半是**更干净的修法**：`loadClaudioConfig(from:)` 在这个分支下保证解码成功（构造上不存在
+「解不出来」的可能），不需要 `.malformed` 那种「解不解得出来看情况」的判断。
+
+**Why:** 不是静默失败（拒绝 / 空高亮都会显式渲染），是**措辞与真实原因对不上，且发生在完全非对抗性的
+生产场景下**（目录权限变化，不需要任何人手动改坏 config 内容）——这个仓库反复栽在同一件事上。
+
+**Context:** 2026-07-14 `/ship` Step 11 adversarial review（Claude adversarial subagent + Codex adversarial
+两路独立命中 `.unwritable` 这一半的不同侧面，均已用实际源码核实，非猜测）。顺带发现一条更窄、优先级更低、
+与本条同一处的相关缺口，先记在这里而非单开一条：`PanelConfigController.reloadConfigOnly()`（mute 成功 /
+`.configOnly` 失败两条路共用）重读 `configState`/`config` 之后，`eventRows` 只重算 `enabled` 位，
+`coverage` 原样带过来自旧值——如果外部一个不受锁约束的写者（`claudio use`）恰好在同一个窗口把
+`selected_pack` 换掉，`config`/header 会正确显示新包，但 `eventRows.coverage` 会继续显示旧包的文件
+存在性，直到下一次全量 reload。**这条不是本分支引入的回归**——`git show origin/main:.../PanelView.swift`
+确认 pre-branch 的 `refreshEnabledFlags()` 就是同一个模式（`eventRows.map` 只翻 `enabled`），本分支
+只是重命名+挪了地方，行为字面未变。窗口窄（需要外部 CLI 恰好在这个时间点写）、后果自限（下一次任何
+一次全量刷新——重开 popover、切包成功——就会纠正），不足以单开一条，但修上面这条 packID 携带问题时
+顺手看一眼这条是否也该在「新旧 selectedPack 不一致」时升级成全量刷新。
+
+**Effort:** M（给 `.malformed` / `.unwritable` 都加一个可选 packID 字段；`.unwritable` 那一半可以直接调
+`loadClaudioConfig` 拿到手，`.malformed` 那一半仍要处理「解不解得出来看情况」；牵动 PanelConfigSuite
+的合成矩阵）
+**Priority:** P2（从 P3 上调——`.unwritable` 这一半三处真实 UI 表面都受影响，且触发条件是完全非对抗性的
+目录权限变化，比原始 `.malformed` finding 的影响面更广）
+**Depends on:** None
+
+---
+
+### 诚实失败态（`.malformed` / `.unwritable` / `.needsPack`）本身的三处毛病 —— 红队 1c65215 实测，非本轮引入
+
+**Context:** 2026-07-14。`/codex review` 两条 [P1] 修完后，对修复本身发动多视角红队（14 条 finding，8 条挺过双反驳者）。其中三条与**路由**无关 —— 它们是这三个状态**出厂就带的**，任何一条抵达它们的路（包括最老的 `.configMissing` 和 popover 重开）都会撞上。修完路由之后它们更容易被看见了，所以入册。
+
+**1. `errorNotice` 的滤网没跟着极性一起扩 —— 同一句 reason 被印两遍**
+
+D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态卡本身就是解释，再画一遍它的 description 就是重复」。滤网是硬编码的 `error != .configMissing`（PanelView.swift:559），而 `packSwitchError` 那条**零滤网**（:562）。现在 `.configReadFailure` / `.configWriteFailure` / `.lockFailed` 也会重路由到一张**自带解释**的诚实失败卡 —— 于是同一份约 90 字的修复指令，会在同一屏、两个真红 circle-x 图标下渲染两遍。D43 的判据（「卡片本身就是解释」）现在适用于三条错误，滤网却只认得一条 —— 一元白名单探针。
+
+**Effort:** S（滤网改成「这条 error 是否已经被 configState 重路由并自带解释」的判断，而不是逐个 case 点名）
+**Priority:** P2
+
+**2. 顶部视图切换会吃掉键盘焦点 —— 而两条写路径上一处 `applyFirstFocus()` 都没有**
+
+`configState` 从 `.operational` 翻到 `.malformed` / `.unwritable` / `.needsPack` 会把四行事件行（或用户刚按下的那张包卡）整个从视图树里摘掉，SwiftUI 随即把 `@FocusState` 置 nil。键盘 / VoiceOver 用户按完空格，光标凭空消失。`applyFirstFocus()` 只挂在 `onAppear` / `showCount` / onboarding state / actionState 四处 —— `toggleMute` 和 `switchPack` 一处也没有。**不是本轮引入**：`.configMissing → .full → .needsPack` 这条路从 D43 起就能触发同样的摘除，本轮只是把触发点从一个扩到四个。
+
+**Effort:** M（写路径上在 configState 真的换了顶层视图时补一次 applyFirstFocus；要小心别在每次成功静音后都抢焦点）
+**Priority:** P2
+
+**3. `muteError` / `packSwitchError` 没有寿命 —— 一条过期红字能穿过每一次 popover 重开**
+
+两条 error 都只有「下一次**成功**的同类操作」才会清（`muteError` 在 `setEnabled` 成功时清，`packSwitchError` 在 `switchPack` 成功时清）。而**刷新从不清它们** —— `reload()` / `reloadConfigOnly()` 都不碰。popover 重开做的唯一一件事是 `panelModel.reload()`（PanelView.swift:246），而 `PanelView` 由 `MenuBarController.init` 构造**一次**、活满整个进程，`panelModel` 这个 `@StateObject` 从不重建。于是：一次 `.lockBusy`（并发的 `claudio use`，早就跑完了）留下的红字，会一直挂在面板上，直到用户碰巧成功静音一次。
+
+（`packSwitchError` 的 `init` 值已有断言守着，红队 round5；缺的是**寿命**，不是初值。）
+
+**Effort:** S（刷新时按新的 configState 重新裁定：错误还成立吗？或给 error 打时间戳/序号）
+**Priority:** P2
+
+**⚠️ 本轮**已经**关掉的，别重复记账：** 失败路径改走 `.configOnly`（不调 `afterFullReload`）之后，「拿一份 `selectedPack` 为空的 config 去 retarget，污染 drop zone / 抹掉画廊选中卡高亮」在 `.configReadFailure` / `.configWriteFailure` / `.lockFailed` 三条路上**不再发生**。但 `.configMissing → .full` 那条路**仍然**会（它必须重扫画廊，`afterFullReload` 躲不掉）—— 那一格的 drop zone 污染是真的、仍然开着，只是它比这三条老得多。

@@ -5,8 +5,11 @@ import Foundation
 // MARK: - setEventEnabled: per-event mute write-back (ENGINEERING.md 决议③, T15 D4)
 //
 // Mirrors `UseSuite.swift`'s structure exactly — `setEventEnabled` mirrors `selectPack`'s
-// shape (flock + read-or-create + atomic write), so its test coverage mirrors `selectPack`'s
-// too: flip, field preservation, fresh-create, corrupt-abort, lock contention.
+// locking + atomic-write shape (flock + atomic write), so its test coverage mirrors
+// `selectPack`'s too: flip, field preservation, corrupt-abort, lock contention. It
+// deliberately DIVERGES from `selectPack` on the missing-file case (D23 定稿①): `selectPack`
+// creates a fresh config, `setEventEnabled` fails closed with `.configMissing` and creates
+// nothing — see the first suite below.
 
 /// Thread-safe collector for outcomes produced by concurrent `setEventEnabled` calls.
 /// Mirrors `PlaySuite.swift`'s `OutcomeCollector` — that one is file-scope `private` there,
@@ -30,23 +33,25 @@ private final class SetEventEnabledOutcomeCollector: @unchecked Sendable {
 
 @MainActor
 func runEventEnabledSuites() {
-    suite("setEventEnabled: fresh install creates config.json with just that one flag set") {
+    suite(
+        "setEventEnabled: a missing config.json fails closed with .configMissing and creates"
+            + " nothing (D23 定稿① — this used to create a fresh config with an empty"
+            + " selected_pack; that was the only place on disk selected_pack: \"\" could ever"
+            + " come from, silently fabricating a selection nobody made)"
+    ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
 
             let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
             expect(
-                result == .success(.updated(event: .stop, enabled: false)),
-                "flipping on a fresh install should succeed, got \(result)")
-
-            let data = try? Data(contentsOf: configFile)
-            let config = data.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
-            expect(config?.isEnabled(.stop) == false, "the written config.json must reflect the flip")
+                result == .failure(.configMissing),
+                "flipping a mute with no config.json must fail closed, got \(result)")
             expect(
-                config?.selectedPack == "",
-                "a fresh config.json created with no pack context has an empty selected_pack"
-                    + " (never a guessed default), got \(String(describing: config?.selectedPack))")
+                !FileManager.default.fileExists(atPath: configFile.path),
+                "a rejected mute toggle must not leave any config.json behind — mutation check:"
+                    + " flipping performSetEventEnabled's `onMissing: .failClosed` back to"
+                    + " `.createFresh(selectedPack: \"\")` must turn this RED")
         }
     }
 
@@ -205,45 +210,63 @@ func runEventEnabledSuites() {
     }
 
     suite("setEventEnabled: a write failure is reported as .configWriteFailure, never a silent success") {
+        // D23 定稿① 之后，一个「文件不存在、且父目录被一个普通文件占位」的 configFile 会先撞上
+        // `.configMissing`（文件真的不存在），根本到不了写步骤——那条覆盖率现在属于 `selectPack`
+        // 的「新建」路径（`UseSuite.swift` 的 "a configFile whose parent directory is blocked by a
+        // regular file fails with .configWriteFailure"）。这里改用「文件已经存在，但它所在的目录
+        // 之后被改成只读」来触发同一个 `.configWriteFailure` 分支——config.json 真的在，
+        // `updateConfigJSON` 走的是「读现有文件、只改一个键」那一支，只是原子写的临时文件落不进
+        // 那个只读目录。
+        guard geteuid() != 0 else {
+            print("  ⚠︎ 跳过：当前以 root 运行，chmod 只读目录挡不住 root 写入")
+            return
+        }
         withTempDirectory { root in
+            let restrictedDirectory = root.appendingPathComponent("restricted", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: restrictedDirectory, withIntermediateDirectories: true)
+            let configFile = restrictedDirectory.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
-            // A regular file occupies the path where config.json's PARENT directory would have
-            // to be, so `createDirectory(withIntermediateDirectories:)` in the persist step
-            // throws — the `.configWriteFailure` branch (previously the only `setEventEnabled`
-            // outcome with no test at all).
-            let blockingFile = root.appendingPathComponent("blocking-file")
-            writeFixture("not a directory", to: blockingFile)
-            let unwritableConfigFile = blockingFile.appendingPathComponent("config.json")
+            writeFixture(#"{ "selected_pack": "pika" }"#, to: configFile)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o500], ofItemAtPath: restrictedDirectory.path)
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: restrictedDirectory.path)
+            }
 
-            let result = setEventEnabled(
-                .stop, enabled: false, configFile: unwritableConfigFile, lockFile: lockFile)
+            let result = setEventEnabled(.stop, enabled: false, configFile: configFile, lockFile: lockFile)
             guard case .failure(.configWriteFailure) = result else {
-                expect(false, "an unwritable config.json must fail with .configWriteFailure, got \(result)")
+                expect(
+                    false,
+                    "an existing config.json whose directory is read-only must fail with"
+                        + " .configWriteFailure, got \(result)")
                 return
             }
-            expect(
-                !FileManager.default.fileExists(atPath: unwritableConfigFile.path),
-                "a failed write must not leave a config.json behind")
         }
     }
 
     suite("SetEventEnabledError: every case carries a distinct, human-readable description") {
         // `CustomStringConvertible` here is a user-facing surface (the same shape `selectPack`'s
-        // own errors take), so its four messages are behavior, not decoration.
+        // own errors take), so its five messages are behavior, not decoration.
         let messages = [
             SetEventEnabledError.configReadFailure(reason: "boom").description,
             SetEventEnabledError.configWriteFailure(reason: "boom").description,
             SetEventEnabledError.lockBusy.description,
             SetEventEnabledError.lockFailed(errno: 13).description,
+            SetEventEnabledError.configMissing.description,
         ]
         expect(
-            Set(messages).count == 4, "each error case must render a distinct message, got \(messages)")
+            Set(messages).count == 5, "each error case must render a distinct message, got \(messages)")
         expect(
             messages[0].contains("未修改文件"),
             "a read failure must promise the file was left untouched, got \(messages[0])")
         expect(messages[1].contains("写入失败"), "got \(messages[1])")
         expect(messages[2].contains("请稍后重试"), "a busy lock must tell the user to retry, got \(messages[2])")
         expect(messages[3].contains("13"), "a lock failure must surface the real errno, got \(messages[3])")
+        expect(
+            messages[4].contains("选") && messages[4].contains("config.json"),
+            "a missing-config failure must point the user at picking a pack, got \(messages[4])")
     }
 
     suite("setEventEnabled: shares config.lock with selectPack — the two calls serialize on the same lock") {

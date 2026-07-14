@@ -67,6 +67,26 @@ private func codeOnly(_ relativePath: String) -> String? {
     scan(relativePath)?.code
 }
 
+/// 同一个文件，剥掉注释**且清空字符串内容**之后的样子（界定符与插值里的代码保留）。
+///
+/// 需要看**代码结构**（数括号、切函数体）而不是「字符串里写了什么」的断言，必须读这一路 ——
+/// `code` 里一句写着 `refresh()` 的错误消息，在 `contains("refresh()")` 眼里与一次真的调用完全同形。
+/// 见 ``StrippedSwiftSource/codeWithoutStringLiterals``。
+@MainActor
+private func codeWithoutStrings(_ relativePath: String) -> String? {
+    scan(relativePath)?.codeWithoutStringLiterals
+}
+
+/// 把连续空白（含换行、缩进）压成单个空格 —— 让文本断言对**排版**免疫。
+///
+/// `.swift-format` 的 `respectsExistingLineBreaks: true` 意味着 `case .full: refresh()` 既可能写成一行、
+/// 也可能被人拆成两行。一条断言若要求其中一种，它守的就是排版而不是接线：下一个人换了行，它假红，
+/// 然后被删掉。
+private func collapsingWhitespace(_ text: String) -> String {
+    text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+}
+
+
 /// `ClaudioGUI` target 下**每一个** Swift 源文件，剥掉注释之后的样子 —— `(文件名, 代码)`。
 ///
 /// ## 它修的那个洞（T17h —— `/codex review a3c2d08` 独立评审逮到）
@@ -350,7 +370,8 @@ func runViewWiringSuites() {
         // `packCards` 两个 @State —— 面板句里包名的唯一来源。少了它：一次**无告知的成功接管**，若 SwiftUI
         // 先跑这个 handler（**未文档化**的顺序），它算 header 时 `onboardingViewModel.state` 已经是
         // `.installed`（引用类型，早更新了），而 packCards / config 还是 **app 启动时**那份 —— 那时
-        // config.json 还不存在，`loadPanelConfig` 回落成 `selectedPack: ""` —— 于是包名是**空的**。
+        // config.json 还不存在，`loadPanelConfig` 回落成 `.needsPack`（`config` 走 `resolvedConfig`
+        // 的空包默认值）—— 于是包名是**空的**。
         // 随后 state 那个 handler（先 refresh）说出带包名的那一句：**两句不同 → 后缀吞不掉 → 同一趟
         // post 两条**，正是 T17f/T17g 整台机器存在的唯一理由。
         //
@@ -367,7 +388,7 @@ func runViewWiringSuites() {
         {
             let handlerBody = panel[actionHandlerAt..<sayActionAt]
             expect(
-                handlerBody.contains("refresh()"),
+                handlerBody.contains("panelModel.reload()"),
                 "`.onChange(of: actionState)` 必须在 `say(.actionStateChanged)` **之前** refresh() —— 见上。"
                     + "少了这一行，一次成功的接管会在同一趟里 post 两条内容不同的播报，而用户在这个产品"
                     + "唯一一次庆祝时刻上，听到的是一句卡半截的「Claudio 面板，当前声音包…」")
@@ -395,7 +416,7 @@ func runViewWiringSuites() {
             expect(false, "PanelView 里必须同时有 .onAppear 与 .onChange(of: focusCoordinator.showCount)")
         }
 
-        if let rowsAt = panel.range(of: "ForEach(eventRows")?.lowerBound,
+        if let rowsAt = panel.range(of: "ForEach(panelModel.eventRows")?.lowerBound,
             let noticeAt = panel.range(of: "ActionNoticeRow(")?.lowerBound
         {
             expect(
@@ -405,7 +426,7 @@ func runViewWiringSuites() {
                     + "一个只映了 1/4 事件的用户包），所以那几行是这句话之后唯一说真话的地方。把它们挪到告知"
                     + "下面，用户就得先读到「哪些还缺」、再往下找那个「哪些」")
         } else {
-            expect(false, "PanelView 里必须同时有 ForEach(eventRows 与 ActionNoticeRow(")
+            expect(false, "PanelView 里必须同时有 ForEach(panelModel.eventRows 与 ActionNoticeRow(")
         }
     }
 
@@ -435,28 +456,45 @@ func runViewWiringSuites() {
             panel.contains("configLockFile: lockFile"),
             "PanelView 必须把它自己的 lockFile（= config.lock）转发给 OnboardingActionEnvironment "
                 + "的 configLockFile —— takeOver 路径要写 config.json（selectPack）")
-        expect(
-            panel.contains("EventMuteController(configFile: configFile, lockFile: lockFile)"),
-            "PanelView 必须把它自己的 lockFile（= config.lock）转发给 EventMuteController —— "
-                + "静音开关写的是 config.json")
+        // 第二个消费者 EventMuteController 的锁转发断言，下移到 `controllerSource` 读入之后 —— 因为
+        // 它现在由 `PanelConfigController` **独占构造**（红队 b86ec0a：注入会开「幽灵实例」的口，面板读
+        // 一个实例、controller 写另一个，静默吞错）。见下面 `controllerSource` 段。
 
-        // 第三个消费者：切包（`switchPack` → `selectPack`）。
+        // 第三个消费者：切包（`switchPack` → `selectPack`）。它**搬进了**
+        // `ClaudioGUICore.PanelConfigController`（红队 9cccc9c 兑现台账那条 P2），所以这条锁转发链现在
+        // 有两段，两段都要钉：
+        //   ① PanelView.init 把自己的 lockFile（= config.lock）**灌进** PanelConfigController；
+        //   ② PanelConfigController.switchPack 把那把锁**转发给** selectPack。
+        // 任何一段接错（比如②里换成 settingsLockFile），切包写 config.json 却守着别的锁，与并发的
+        // `claudio use`（守 config.lock）之间互斥当场消失，两个读-改-写交错、丢更新。
         //
-        // 上一版这里只有**两**条转发断言，而 PanelView 自己的注释（`PanelView.swift:144`）白纸黑字
-        // 点着**三**个下游调用点：`EventMuteController`、`selectPack`、`OnboardingActionEnvironment`。
-        // 上一版那句「下面三条把整条链钉死：默认值 → **两个**下游写者」—— 措辞比覆盖范围小了一个，
-        // 而漏掉的那一个是用户**每次点画廊换包**都会走的路（`/review e7c38ea` 的 P1-4）。
-        //
-        // 变异：`PanelView.swift:782` 的 `lockFile: lockFile` → `lockFile: ClaudioPaths.settingsLockFile`
-        // —— 切包写 config.json 却守着 settings.lock，与并发的 `claudio use`（守 config.lock）之间
-        // **互斥当场消失**，两个读-改-写可以交错，丢更新。而上面每一条断言都原样成立。
+        // ② 这一段现在住在**可 import** 的 `ClaudioGUICore` 里（不像困在 executableTarget 的 PanelView）——
+        // 本可以行为级测锁竞争，但那要模拟持锁，太重；这里仍走源码文本，与①同一种绊线。
         expect(
-            panel.contains(
-                "bundledPacksDirectory: audioEnvironment.bundledPacksDirectory, lockFile: lockFile)"),
-            "PanelView 的 switchPack 必须把它自己的 lockFile（= config.lock）转发给 selectPack —— "
-                + "它是这个文件**第三个**锁消费者（另两个：EventMuteController、"
-                + "OnboardingActionEnvironment.configLockFile），也是用户每次在画廊里换包都会走的那一条。"
-                + "切包写的是 config.json，它必须守 config.lock")
+            collapsingWhitespace(panel).contains(
+                "PanelConfigController( configFile: configFile, lockFile: lockFile,"),
+            "① PanelView.init 必须把自己的 lockFile（= config.lock）灌进 PanelConfigController —— 切包 /"
+                + "静音的写路径都在那个 controller 里，它拿错锁 = 整条 config.json 写路径拿错锁")
+        guard let controllerSource = codeOnly("gui/Sources/ClaudioGUICore/PanelConfigController.swift")
+        else {
+            expect(false, "读不到 PanelConfigController.swift —— 切包的锁转发第②段住在那里")
+            return
+        }
+        expect(
+            controllerSource.contains(
+                "bundledPacksDirectory: environment.bundledPacksDirectory, lockFile: lockFile)"),
+            "② PanelConfigController.switchPack 必须把它自己的 lockFile 转发给 selectPack —— 它是全仓"
+                + "第三个 config.lock 消费者（另两个：EventMuteController、OnboardingActionEnvironment），"
+                + "也是用户每次在画廊里换包都会走的那一条。换成 settingsLockFile 之类，与并发 `claudio use`"
+                + "的互斥就没了")
+
+        // 第二个消费者 EventMuteController：现在由 PanelConfigController 独占构造（红队 b86ec0a 的「幽灵
+        // 实例」结构性修复），所以它也拿 controller 的 lockFile（= config.lock）。锁转发断言读 controller 源码。
+        expect(
+            controllerSource.contains("EventMuteController(configFile: configFile, lockFile: lockFile)"),
+            "PanelConfigController 必须用它自己的 lockFile（= config.lock）构造 EventMuteController —— "
+                + "静音开关写的是 config.json，绝不能被 play 的 debounce 锁挡住。换成 playLockFile 之类，"
+                + "点静音又会吞一次提示音（这正是分锁 D9 要修的 bug）")
 
         expect(
             panel.contains("settingsLockFile: ClaudioPaths.settingsLockFile"),
@@ -683,5 +721,79 @@ func runViewWiringSuites() {
             app.contains("bundledHelperBinary(in: .main)"),
             "ClaudioGUIApp 必须用 ClaudioGUICore 的 bundledHelperBinary(in:) 解析 helper —— 剩下的只有"
                 + "一个无分支的 `.main`，没有任何决定可以做错")
+    }
+
+    // ── D23 定稿④：面板路由的渲染层接线（红队 9cccc9c 之后，行为那半已经搬走了）─────────────
+    //
+    // ## 这条 suite 缩了一圈，因为它守的东西一半**不在这里了**
+    //
+    // 曾经这里有一整套 `functionBody("toggleMute")` 切片装置，逐条钉 `toggleMute` 函数体里的三条路由
+    // （`panelRefreshRoute(` / `case .full: refresh()` / …）。那套装置存在的**全部理由**，是 `toggleMute`
+    // 连同它操作的 `configState` / `eventRows` 困在 `PanelView`（`@main` executableTarget，测试 import 不
+    // 进来）—— 逻辑测不到，只能退而用文本切片守「代码长什么样」。而红队 9cccc9c 实测证明：文本切片守不住
+    // 「执行 / 可达性 / 翻转」（refresh 不重载 configState、某条 case 早退成死代码、静音去掉取反，三条各自
+    // 改坏行为而两套测试全绿）。
+    //
+    // 所以 `toggleMute` / `switchPack` / `reload` / `reloadEnabledFlags` **整体搬进了**
+    // `ClaudioGUICore.PanelConfigController`（一个可实例化的 `@MainActor` 类），由 `PanelConfigControllerSuite`
+    // **new 它、喂真磁盘、调真方法、断言 configState/eventRows 真的变**。那三条变异现在各有一条行为断言当场
+    // 逮住 —— 切片装置连同 `functionBody` 一起删了，它是为一个已经不存在的问题写的脚手架。
+    //
+    // 剩在 `PanelView` 里、这条 suite 还在守的，只有**渲染层接线**：顶部按 `configState` 路由、两张替换
+    // 视图被引用到、按钮接到 `panelModel.toggleMute`、`.configMissing` 被滤掉、焦点只收可见行。它们是
+    // `@main` View 的 body 接线，纯逻辑测试**本质上**到不了（只有 UI / 快照测试够得着，本机 CommandLineTools
+    // 无 XCTest）——所以这里仍是**存在性**级文本绊线，且**如实**标注成存在性级：它证明「body 里写着这根线」，
+    // 不证明「这根线运行期真的接通、接对了地方」。别把这条 suite 全绿读成「面板行为被守住了」——行为那半
+    // 由 `PanelConfigControllerSuite` + `PanelRefreshRouteSuite` 守，这半只守「渲染层的线还在不在」。
+    suite("PanelView：config 不可用时必须换态（渲染层接线的存在性；行为那半在 PanelConfigControllerSuite）") {
+        guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
+            expect(false, "读不到 PanelView.swift")
+            return
+        }
+        expect(
+            panel.contains("switch panelModel.configState"),
+            "operationalPanel 必须按 configState 路由 —— 没有这个 switch，`{\"master_volume\": \"0.35\"}`"
+                + " 这种「读得动、写不动」的 config 会照常渲染四行带静音钮 / 试听钮的活控件，而写路径"
+                + "早已 fail closed：用户点下去的每一次都必然失败（这正是判据要两条正交轴的理由）")
+        // ⚠️ 检查的是 **case → view 的映射**，不是裸标识符（红队 b86ec0a）。上一版写的是
+        // `panel.contains("needsPackNotice")` —— 而这个标识符在它**自己的定义行**
+        // `private var needsPackNotice: some View {` 里就出现了，于是把 `.needsPack` 分支体改成
+        // `EmptyView()`（空态卡连同它唯一的 VoiceOver 播报被删）时，contains 仍恒真、测试全绿。
+        // 收紧成 collapsed 后的 `case .needsPack: needsPackNotice` —— 它区分「定义存在」与「case 真的
+        // 渲染它」。仍是 SwiftUI body 接线的存在性级（运行期接没接通到不了），但不再被自身定义满足。
+        let panelCollapsed = collapsingWhitespace(panel)
+        expect(
+            panelCollapsed.contains("case .needsPack: needsPackNotice"),
+            "`.needsPack` 分支体必须渲染「先选包」空态卡 `needsPackNotice`（不是 EmptyView 之类）—— 那是"
+                + "从没选过包时顶部唯一的引导 + VoiceOver 口头指引，删了它 = 顶部一片空白、无障碍指引消失。"
+                + "得到的 switch 附近：\(String(panelCollapsed.prefix(0)))（见 PanelView operationalPanel）")
+        expect(
+            panelCollapsed.contains(
+                "case .malformed(let reason), .unwritable(let reason): configFailureNotice(reason: reason)"),
+            "`.malformed`/`.unwritable` 分支体必须渲染诚实失败态 `configFailureNotice(reason:)` —— 它带"
+                + "可执行修复指令；换成别的（或空）= 写不动的 config 上顶着四行必败活控件却不说实话")
+
+        // 按钮 → handler 的那根线：静音的**行为**（翻转 + 路由 + 刷新）现在住在可测的 `PanelConfigController`
+        // 里、由 `PanelConfigControllerSuite` 用真磁盘钉死。这里只剩守**最外层这根接线**：EventRowView 的
+        // 静音钮真的接到 `panelModel.toggleMute`。红队 9cccc9c 实测把它剪成 `onToggleMute: {}`，四行静音钮
+        // 点了毫无反应（连失败都没有）。
+        //
+        // ⚠️ 存在性级：证明「body 里写着这根线」，证明不了它运行期真的接通（SwiftUI body 接线，只有 UI /
+        // 快照测试够得着）。挡「线被剪断」，不挡「运行期没接通」。
+        expect(
+            collapsingWhitespace(panel).contains("onToggleMute: { panelModel.toggleMute(row.event) }"),
+            "operationalPanel 的 EventRowView 必须把 onToggleMute 接到 `panelModel.toggleMute(row.event)`"
+                + " —— 剪成 `onToggleMute: {}` 之类，四行事件的静音钮就变成点了没反应的死键")
+
+        expect(
+            panel.contains("error != .configMissing"),
+            "errorNotice 必须把 .configMissing 滤掉（D43：它不面向用户）—— 重路由之后，「先选包」那张"
+                + "空态卡本身就是解释；再补一句 description 就是在一张已经写着「先选包」的卡下面，"
+                + "重复一句没人 QA 过的错误文案")
+        expect(
+            panel.contains("let visibleRows"),
+            "applyFirstFocus 必须只把**真的被渲染出来**的行送进焦点序 —— 非 .operational 态下"
+                + " eventRows 仍会算出四行（走 resolvedConfig 的空包默认值），但它们一个像素都没上屏；"
+                + "把它们送进开局焦点 = 焦点落在一个不存在的控件上")
     }
 }

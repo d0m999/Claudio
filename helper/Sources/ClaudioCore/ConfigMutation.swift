@@ -55,12 +55,14 @@ import Foundation
 /// 刻意**不**加 `--fix-config` 这类新命令：那是在给一份我们读不懂的文件做自动手术，超出「让错误可
 /// 执行」的范围。
 
-/// ``updateConfigJSON(at:freshSelectedPack:mutate:)`` 的失败原因。两个调用方各自把它映射成
+/// ``updateConfigJSON(at:onMissing:mutate:)`` 的失败原因。两个调用方各自把它映射成
 /// 自己的 `configReadFailure` / `configWriteFailure`（`UseError` / `SetEventEnabledError`）。
 enum ConfigMutationFailure: Error, Sendable, Equatable {
     /// 文件存在但读不出来，或读出来的内容不是一份我们能安全重写的 config（见类型注释里的
     /// fail-closed 规则）。带的 reason 直接透传给用户，且**必须是可执行的**（见上）。
     case unreadable(reason: String)
+    /// 文件不存在，而调用方声明了 ``MissingConfigPolicy/failClosed``——**一个字节都不写**。
+    case missing(reason: String)
     /// 改完之后写回磁盘失败（父目录被一个普通文件占位、磁盘满、只读卷……）。
     case writeFailed(reason: String)
 
@@ -68,13 +70,34 @@ enum ConfigMutationFailure: Error, Sendable, Equatable {
     var reason: String {
         switch self {
         case .unreadable(let reason): reason
+        case .missing(let reason): reason
         case .writeFailed(let reason): reason
         }
     }
 }
 
+/// `configFile` **不存在**时，这次写该怎么办——由调用方**显式声明**。
+///
+/// 这里曾经是一个 `freshSelectedPack: String` 参数：文件不在就拿它新建一份最小 config。于是一个
+/// 手上没有任何 pack 上下文的写者（静音钮）只能传一个空串——而那个空串就是磁盘上
+/// `selected_pack: ""` 的**唯一产地**（D23 定稿①）。
+///
+/// 换成这个枚举之后，那处产地在**类型层面**消失了：`.failClosed` 的调用方**拿不出**一个能被写进
+/// 磁盘的 pack id，`.createFresh` 的调用方**必须**拿出一个真的。这不只是把判断挪了个地方——判断与
+/// 新建现在落在 ``updateConfigJSON(at:onMissing:mutate:)`` **同一次** `fileExists` 上，中间没有第二
+/// 次检查、也就没有那个「检查完文件才被外部删掉、于是照样新建并报成功」的窗口。
+enum MissingConfigPolicy: Sendable, Equatable {
+    /// 新建一份最小 config，`selected_pack` 用这个 pack id。只有 `selectPack` 用得起它——它手上
+    /// 永远握着一个刚刚校验过的、真实存在的 pack id。
+    case createFresh(selectedPack: String)
+    /// 不新建，直接 ``ConfigMutationFailure/missing(reason:)``。没有 pack 上下文的写者（静音钮、
+    /// 主音量）走这条：凭空新建一份 config，等于伪造一次谁也没做过的选择。
+    case failClosed
+}
+
 /// `config.json` 当前是不是一份**写路径能安全重写**的文件——`claudio doctor` 的 config 检查
-/// （`Doctor.swift`）与 `gui` 的诊断都读这一个判定，而不是各自再解析一遍。
+/// （`Doctor.swift`）与 `gui` 面板的路由判定（`PanelConfig.swift` 的 `loadPanelConfig(from:)`，
+/// D23 定稿②「写」这半条正交轴）都读这一个判定，而不是各自再解析一遍。
 public enum ConfigRewritability: Sendable, Equatable {
     /// 文件还不存在。这**不是**错误：写路径会新建一份最小 config（全新安装的正常状态）。
     case absent
@@ -128,15 +151,14 @@ public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> 
 ///
 /// - Parameters:
 ///   - configFile: `~/.claudio/config.json`（测试注入临时目录）。
-///   - freshSelectedPack: 文件**不存在**时新建的最小 config 用哪个 `selected_pack`。
-///     `selectPack` 传它正要选中的 pack id；`setEventEnabled` 传空串——它没有任何 pack 上下文，
-///     凭空编一个默认值等于伪造一次谁也没做过的选择。
+///   - onMissing: 文件**不存在**时新建（用一个真实的 pack id）还是拒写——见 ``MissingConfigPolicy``。
+///     这一问必须由调用方回答：只有它知道自己手上有没有 pack 上下文。
 ///   - mutate: 只允许改调用方自己拥有的那个键。进来的 `[String: Any]` 要么是磁盘上那份文件的
 ///     **完整**顶层键集合（已通过下面的校验），要么是新建的最小 config；没被 `mutate` 碰过的键，
 ///     其**键与值**都会原封不动写回（**渲染**不保证逐字：键会排序、数字会被规范化，见类型注释）。
 func updateConfigJSON(
     at configFile: URL,
-    freshSelectedPack: String,
+    onMissing: MissingConfigPolicy,
     mutate: (inout [String: Any]) -> Void
 ) -> Result<Void, ConfigMutationFailure> {
     var json: [String: Any]
@@ -150,10 +172,17 @@ func updateConfigJSON(
         case .failure(let failure): return .failure(failure)
         }
     } else {
+        // 「文件不存在」与「因此该不该新建」在**同一次** `fileExists` 上判完，中间不隔第二次检查——
+        // 调用方无须（也无法）在外面先探一次存在性再把结论传进来：那样探测与新建之间会张开一个窗口，
+        // 一次不经过 `configLockFile` 的外部删除（用户手动 `rm`、清理工具、同步冲突）落在窗口里，
+        // 就会让这里照常新建、并向调用方报成功。
+        guard case .createFresh(let selectedPack) = onMissing else {
+            return .failure(.missing(reason: "config.json 不存在：\(configFile.path)"))
+        }
         // 全新安装：这份文件的每一个键都是我们自己刚写下的，没有任何未知键需要保留。
         // 键集合与旧的 `JSONEncoder().encode(ClaudioConfig(...))` 完全一致（三个 v1 键）。
         json = [
-            "selected_pack": freshSelectedPack,
+            "selected_pack": selectedPack,
             "master_volume": ClaudioConfig.defaultMasterVolume,
             "events": [String: Any](),
         ]
@@ -270,7 +299,7 @@ private let configRebuildHint = "或删除该文件让 claudio 重建（会丢�
 /// 它其实是个目录 / FIFO、或者它大得离谱（> ``maxConfigFileBytes``）。
 ///
 /// 只有一份文案，是因为只读探针（``probeConfigRewritable(configFile:)``）与真正的写路径
-/// （``updateConfigJSON(at:freshSelectedPack:mutate:)``）**必须逐字说同一句话**——那正是「不存在
+/// （``updateConfigJSON(at:onMissing:mutate:)``）**必须逐字说同一句话**——那正是「不存在
 /// doctor 说能、真去写又失败」这条契约的形状，也是 `ConfigMutationSuite` 里那条「reason 与真去写时
 /// 拿到的那一句逐字相同」断言钉住的东西。
 private func unreadableConfigReason(path: String) -> String {

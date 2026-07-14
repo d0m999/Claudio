@@ -81,6 +81,8 @@ runContrastSuites()
 runContrastHexParsingSuites()
 runPanelTypeSizeSuites()
 runPanelConfigSuites()
+runPanelRefreshRouteSuites()
+runPanelConfigControllerSuites()
 runPanelFocusCoordinatorSuites()
 runPreviewFixturesSuites()
 

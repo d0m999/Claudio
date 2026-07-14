@@ -81,7 +81,7 @@ public func selectPack(
     }
 }
 
-/// 走 ``updateConfigJSON(at:freshSelectedPack:mutate:)`` 这条共用的外科式读-改-写——与
+/// 走 ``updateConfigJSON(at:onMissing:mutate:)`` 这条共用的外科式读-改-写——与
 /// `setEventEnabled` 的写路径**同一份实现**，不是两份各自推理出来的：两者编辑的是同一个文件，
 /// 「保真」的定义必须只有一个。只 set `selected_pack`，`master_volume` / `events` / 未知顶层键
 /// 逐字保留。
@@ -92,7 +92,11 @@ public func selectPack(
 private func performSelectPack(
     _ packID: String, configFile: URL
 ) -> Result<UseOutcome, UseError> {
-    let result = updateConfigJSON(at: configFile, freshSelectedPack: packID) { json in
+    // 全仓**唯一**有资格从无到有建出一份 config 的写者——因为它是唯一手上握着真实 pack id 的那个
+    // （而且这个 id 上面刚刚校验过）。没有 pack 上下文的写者（静音钮、主音量）一律 `.failClosed`：
+    // 凭空新建等于伪造一次谁也没做过的选择（D23 定稿①）。
+    let result = updateConfigJSON(at: configFile, onMissing: .createFresh(selectedPack: packID)) {
+        json in
         json["selected_pack"] = packID
     }
 
@@ -100,6 +104,10 @@ private func performSelectPack(
     case .success:
         return .success(.selected(packID: packID))
     case .failure(.unreadable(let reason)):
+        return .failure(.configReadFailure(reason: reason))
+    case .failure(.missing(let reason)):
+        // 上面传的是 `.createFresh`，拒写只归 `.failClosed`，所以这一支不该出现。它存在是为了穷尽，
+        // 不是为了给一句「不可能」背书：真出现了，如实报一句「config 读不到」也不会伪造任何东西。
         return .failure(.configReadFailure(reason: reason))
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))

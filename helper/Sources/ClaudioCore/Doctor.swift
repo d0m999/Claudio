@@ -378,9 +378,17 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
 public func configRewritabilityResult(configFile: URL) -> DoctorCheckResult {
     switch probeConfigRewritable(configFile: configFile) {
     case .absent:
+        // ⚠️ 这句话曾经写的是「首次选包 / **静音**时会自动创建」，而它在 D23 定稿①（`573336d`）那一刻
+        // 就地变成了假的：`setEventEnabled` 从那一刻起对缺失的 config **fail closed**（`.configMissing`），
+        // 静音再也不会创建它了。改了行为、没改文案 —— 而 doctor 是「静默失败必须有诊断轨迹」（决议 6）的
+        // 唯一出口，一个说假话的 doctor 诊断的就不是这台机器。（`/codex review 573336d` [P2]。）
+        //
+        // 现在**唯一**能从无到有建出 config.json 的写者是 `selectPack`（`claudio use` / 面板选包 /
+        // 首次自举），这一点由 `ConfigMutation.MissingConfigPolicy` 在**类型层面**保证。这句文案由
+        // `DoctorSuite` 钉着：它不许再宣称静音能创建 config。
         return DoctorCheckResult(
             name: "config", severity: .ok,
-            message: "✓ 尚无 config.json（全新安装，首次选包 / 静音时会自动创建）")
+            message: "✓ 尚无 config.json（全新安装，首次选包时创建）")
     case .rewritable:
         return DoctorCheckResult(
             name: "config", severity: .ok, message: "✓ config.json 可安全重写：\(configFile.path)")

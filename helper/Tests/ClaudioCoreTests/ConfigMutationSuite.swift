@@ -299,16 +299,21 @@ func runConfigMutationSuites() {
         }
     }
 
-    suite("setEventEnabled: 全新安装写出的 config.json 恰好是三个 v1 键，没有多也没有少") {
+    suite("selectPack: 全新安装写出的 config.json 恰好是三个 v1 键，没有多也没有少") {
         withTempDirectory { root in
-            // 这条护住新的「文件不存在 → 新建最小 config」分支：它不再走 `JSONEncoder`，所以键集合
-            // 必须由测试来钉死，而不是靠 Codable 顺带保证。
+            // 这条护住「文件不存在 → 新建最小 config」这个分支：它不再走 `JSONEncoder`，所以键集合
+            // 必须由测试来钉死，而不是靠 Codable 顺带保证。这条以前挂在 `setEventEnabled` 名下——
+            // D23 定稿①之后 `setEventEnabled` 对缺失的 config fail closed（见 `EventEnabledSuite.swift`），
+            // 「新建最小 config」这个分支今天唯一的调用方是 `selectPack`，所以测试跟着搬过来，而不是
+            // 让这条护住的分支悄悄失去覆盖。
             let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("pika", isDirectory: true))
             let lockFile = root.appendingPathComponent("config.lock")
 
-            let result = setEventEnabled(
-                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
-            expect(result == .success(.updated(event: .stop, enabled: false)), "got \(result)")
+            let result = selectPack(
+                "pika", configFile: configFile, userPacksDirectory: userPacks, lockFile: lockFile)
+            expect(result == .success(.selected(packID: "pika")), "got \(result)")
 
             let json = readRawConfigJSON(configFile)
             expect(
@@ -319,8 +324,8 @@ func runConfigMutationSuites() {
                 json?["master_volume"] as? Double == ClaudioConfig.defaultMasterVolume,
                 "全新 config.json 拿到文档写定的默认 master_volume")
             expect(
-                (json?["events"] as? [String: Any])?["stop"] as? Bool == false,
-                "全新 config.json 里唯一的 events 项就是这次翻的那一个")
+                json?["selected_pack"] as? String == "pika",
+                "全新 config.json 的 selected_pack 必须是这次选中的包")
         }
     }
 
@@ -409,14 +414,18 @@ func runConfigMutationSuites() {
     // 这一组断言只认**字节**（`rawLiteral` / `compacted`），不认「解析回来相等」——后者对这个 bug 是
     // 全绿的，正是它让 bug 溜了进来。修法见 `ConfigMutation.swift` 的 `normalizedJSONNumbers`。
 
-    suite("setEventEnabled: 全新安装写出的 master_volume 逐字是 0.8，不是 0.80000000000000004") {
+    suite("selectPack: 全新安装写出的 master_volume 逐字是 0.8，不是 0.80000000000000004") {
         withTempDirectory { root in
+            // 同上一条：这条以前挂在 `setEventEnabled` 名下，D23 定稿①之后「新建最小 config」这个
+            // 分支唯一的调用方是 `selectPack`，测试跟着搬过来。
             let configFile = root.appendingPathComponent("config.json")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            makePackDirectory(at: userPacks.appendingPathComponent("pika", isDirectory: true))
             let lockFile = root.appendingPathComponent("config.lock")
 
-            let result = setEventEnabled(
-                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
-            expect(result == .success(.updated(event: .stop, enabled: false)), "got \(result)")
+            let result = selectPack(
+                "pika", configFile: configFile, userPacksDirectory: userPacks, lockFile: lockFile)
+            expect(result == .success(.selected(packID: "pika")), "got \(result)")
 
             let text = readRawText(configFile)
             expect(

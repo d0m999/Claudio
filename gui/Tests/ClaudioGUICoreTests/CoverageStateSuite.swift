@@ -340,12 +340,14 @@ func runCoverageStateSuites() {
         }
     }
 
-    // The FIRST-RUN path, not a hypothetical: `loadPanelConfig` falls back to
-    // `ClaudioConfig(selectedPack: "")` whenever config.json is missing/corrupt, and
-    // `PanelView.init` feeds that empty id straight into `packCoverage`. `isSafePackID("")`
-    // is false → `resolvePackDirectory` returns nil → every event must read `.unmapped`
-    // rather than trapping on an empty path component.
-    suite("packCoverage: an EMPTY packID (loadPanelConfig's first-run fallback) reports every event .unmapped, never crashes") {
+    // A real, live shape, not a hypothetical (D23): `PanelConfigState.resolvedConfig` hands back
+    // `ClaudioConfig(selectedPack: "")` for every state EXCEPT `.operational` — `.needsPack`
+    // (nobody has chosen a pack yet) chief among them — and `PanelView` feeds that empty id
+    // straight into `packCoverage` so its read models never crash while the panel is still
+    // showing its "先选包" empty state. `isSafePackID("")` is false → `resolvePackDirectory`
+    // returns nil → every event must read `.unmapped` rather than trapping on an empty path
+    // component.
+    suite("packCoverage: an EMPTY packID (PanelConfigState.resolvedConfig's non-operational default) reports every event .unmapped, never crashes") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             writeFixture(

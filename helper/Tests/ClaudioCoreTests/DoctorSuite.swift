@@ -1180,4 +1180,108 @@ func runDoctorSuites() {
                     + " purely informational by design, got \(report.results)")
         }
     }
+
+    // MARK: - doctor 的 `.absent` 文案必须与「谁能创建 config.json」的**真实行为**一致
+    //
+    // 这条守的不是一句话好不好听，是一次**已经发生过**的漂移（`/codex review 573336d` [P2]）：
+    // D23 定稿①（`573336d`）把 `setEventEnabled` 改成对缺失的 config **fail closed**，那一刻起静音
+    // 再也不会创建 config.json —— 而 doctor 的 `.absent` 文案还在原地写着「首次选包 / **静音**时会
+    // 自动创建」。行为改了，文案没跟着改，因为**没有任何东西**把这两者绑在一起：`.absent` 这一支的
+    // 文案在整个测试套件里一次都没被碰过。
+    //
+    // 于是把两半焊在同一个测试里：下面先用**真实磁盘**验「静音确实创建不了 config」，再验「doctor 那
+    // 句话没有反过来向用户许诺它能」。任何一半单独改动，这条都会红 —— 而这正是它存在的意义：doctor 是
+    // 「静默失败必须有诊断轨迹」（决议 6）的唯一出口，一个说假话的 doctor 诊断的不是这台机器。
+    suite("doctor `.absent` 文案 ↔ 行为：静音创建不了 config.json，那句话就不许说它能") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+
+            // ① 行为（真实磁盘）：config.json 不存在时，静音必须 fail closed 且不留下任何文件。
+            let outcome = setEventEnabled(
+                .stop, enabled: false, configFile: configFile, lockFile: lockFile)
+            guard case .failure(let error) = outcome else {
+                expect(
+                    false,
+                    "静音在缺失的 config.json 上必须失败（D23 定稿①）—— 它成功了，说明毒源回来了："
+                        + "「还没有人选过包」又一次被伪装成「选过，选的是空」。得到：\(outcome)")
+                return
+            }
+            expect(
+                error == .configMissing,
+                "必须是 .configMissing（而不是笼统的读写失败）—— 面板靠它重路由到「先选包」空态卡。"
+                    + "得到：\(error)")
+            expect(
+                !FileManager.default.fileExists(atPath: configFile.path),
+                "被拒绝的那次写，一个字节都不许落盘")
+
+            // ② 文案：doctor 在同一份磁盘状态上说的那句话，不许与①矛盾。
+            let message = configRewritabilityResult(configFile: configFile).message
+            expect(
+                !message.contains("静音"),
+                "doctor 的 `.absent` 文案不许再宣称静音会创建 config.json —— ① 刚刚在真实磁盘上证明了"
+                    + "它不会。（要在这句话里**提及**静音也不是不行，比如「在那之前静音开关无处可写」——"
+                    + "但那必须是一次**睁着眼**的改动：请连同这条断言一起改，别让文案再一次悄悄跑到行为"
+                    + "前面去。）得到：\(message)")
+            expect(
+                message.contains("选包"),
+                "`.absent` 文案必须告诉用户 config.json 到底**由什么**创建 —— 现在全仓唯一有资格从无到有"
+                    + "建出它的写者是 `selectPack`（`claudio use` / 面板选包 / 首次自举），这由"
+                    + " `MissingConfigPolicy` 在类型层面保证。只说「还没有」不说「怎么才会有」，用户就得"
+                    + "自己猜。得到：\(message)")
+        }
+    }
+
+    // MARK: - `.malformed` 的严重级**只由 case 决定，与 reason 的文本内容无关**
+    //
+    // ## 它逮的那一刀（红队 9cccc9c，worktree 实测存活）
+    //
+    // 有人往 `configRewritabilityResult` 的 `case .malformed(let reason)` 里塞一句
+    // `guard reason.contains("events") else { return .ok「可安全重写」 }` —— 只有 reason 里带 "events"
+    // 的畸形才报 warning，其余（`master_volume` 是字符串、顶层不是对象、`selected_pack` 缺失……）一律
+    // 谎报为「✓ config.json 可安全重写」。两套测试**全绿**：整个套件里**唯一**碰过 malformed doctor
+    // 渲染的测试（上面第 806 行那条）恰好用的是 `{"events":{"stop":1}}`，reason 含 "events"，落进未改动的
+    // warning 分支，把变异完整掩盖。用户后果：手改 `master_volume` 成非法值后，App 里静音 / 切包永久
+    // 失效、声音照响，他跑 `doctor` 求诊断，doctor 打绿勾担保机器健康 —— 他永远找不到该修的那份文件。
+    //
+    // 这条病的形状是老熟人：**一个测试的覆盖范围比它的名字小**。上面那条叫「畸形 config → warning」，
+    // 它守的却只是「**events 畸形**的 config → warning」。修法不是再补一个 case，是把不变式本身钉死：
+    // doctor 对 config 的严重级是 `probeConfigRewritable` 的**返回 case** 的函数，**不是** reason 字符串
+    // 的函数。下面喂一组 reason 两两不同的畸形，逐一验「→ warning、文案是『畸形』那句、且绝不是
+    // 『可安全重写』」——任何一条「按 reason 文本放行」的旁路，都会在**非 events 的那几份**上当场变红。
+    suite("configRewritabilityResult: 任意 reason 的畸形 config 都必须 warning，绝不因 reason 文本翻成 ok") {
+        // (标签, config.json 字节)。三份的 malformed reason 各不相同，且**都不含 "events"** 中的两份，
+        // 正是掩盖那条变异的 events fixture 照不到的地方。
+        let malformedConfigs: [(label: String, bytes: String)] = [
+            ("master_volume 是字符串", #"{ "selected_pack": "x", "master_volume": "0.5" }"#),
+            ("顶层不是 JSON 对象", #"[1, 2, 3]"#),
+            ("events 畸形（与第 806 行同类，确保围栏也盖住它）", #"{ "selected_pack": "x", "events": { "stop": 1 } }"#),
+        ]
+        for fixture in malformedConfigs {
+            withTempDirectory { root in
+                let configFile = root.appendingPathComponent("config.json")
+                writeFixture(fixture.bytes, to: configFile)
+
+                // 前提：这份 fixture 确实被探针判成 .malformed（否则下面验的是别的东西）。
+                guard case .malformed = probeConfigRewritable(configFile: configFile) else {
+                    expect(
+                        false,
+                        "[\(fixture.label)] 本该是 .malformed，探针却没这么说 —— 这条围栏喂错了输入，"
+                            + "得到：\(probeConfigRewritable(configFile: configFile))")
+                    return
+                }
+
+                let result = configRewritabilityResult(configFile: configFile)
+                expect(
+                    result.severity == .warning,
+                    "[\(fixture.label)] 畸形 config 必须报 warning，与 reason 里写了什么**无关** —— "
+                        + "severity 一旦开始看 reason 文本（比如「不含 events 就放行」），doctor 就会对"
+                        + "一整类畸形谎报健康。得到 severity：\(result.severity)")
+                expect(
+                    result.message.contains("畸形") && !result.message.contains("可安全重写"),
+                    "[\(fixture.label)] 文案必须是「畸形 …一直失败」那句，绝不能是「✓ 可安全重写」—— "
+                        + "后者是对 fail-closed 写路径的假担保。得到：\(result.message)")
+            }
+        }
+    }
 }

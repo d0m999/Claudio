@@ -541,11 +541,17 @@ func runSetupSuites() {
 
     // MARK: - 首次运行自举的判据是「还没有人选过包」，不是「config.json 不存在」
     //
-    // 本轮 /ship 评审（Codex 对抗 + Claude 对抗独立命中）：hooks 装好但还没选包时，用户点一次
-    // 静音钮会创建一份 `selected_pack: ""` 的 config.json（`setEventEnabled` 没有 pack 上下文，
-    // 凭空编一个默认值等于伪造一次谁也没做过的选择）。旧判据 `!fileExists(configFile)` 从此永远
-    // 为假——自举再也不会挑默认包，`play` 永远解析不出 pack，**永久静音**，且没有任何东西会自愈。
-    // `noPackHasEverBeenSelected` 把判据换成「文件不存在 或 selected_pack 为空」修好了这个洞。
+    // 这条政策的成因（本轮 /ship 评审：Codex 对抗 + Claude 对抗独立命中）：hooks 装好但还没选包时，
+    // 用户点一次静音钮**曾经**会创建一份 `selected_pack: ""` 的 config.json（`setEventEnabled`
+    // 没有 pack 上下文，凭空编一个默认值等于伪造一次谁也没做过的选择）。旧判据
+    // `!fileExists(configFile)` 从此永远为假——自举再也不会挑默认包，`play` 永远解析不出 pack，
+    // **永久静音**，且没有任何东西会自愈。`noPackHasEverBeenSelected` 把判据换成「文件不存在 或
+    // selected_pack 为空」修好了这个洞。
+    //
+    // D23 定稿①（见 `EventEnabled.swift`）已经把「静音钮创建这份 config」这条产地从根上拔除——
+    // `setEventEnabled` 现在对缺失的 config.json fail closed，磁盘上不会再凭空长出
+    // `selected_pack: ""`。这条政策本身仍然必须留着：一份手工编辑 / 第三方写出的 config.json
+    // 一样可能把 `selected_pack` 留空，且 `.noConfig`（全新机器）走的是同一支。
 
     suite(
         "performFirstRunSetup: 一份已存在、selected_pack 为空串的 config.json（旧判据下永久静音的现场）"
@@ -583,31 +589,28 @@ func runSetupSuites() {
     }
 
     suite(
-        "performFirstRunSetup: 完整回归序列——setEventEnabled 静音产生 selected_pack:\"\" →"
-            + " performFirstRunSetup 选出真实默认包，且用户此前设的静音状态必须原样保留（不能被自举覆盖）"
+        "performFirstRunSetup: setEventEnabled 现在对缺失的 config fail closed（D23 定稿①）——"
+            + " 静音钮再也造不出 selected_pack:\"\" 的 config，随后跑的仍是一次干净的全新安装"
     ) {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
             let environment = makeEnvironment(root: root, executablePath: executablePath)
 
             // 第一步：hooks 装好、还没有 config.json，用户点一次静音钮——这是 bug 报告里那个
-            // 完全正常的用户操作，不是构造出来的畸形 fixture。
+            // 完全正常的用户操作，不是构造出来的畸形 fixture。它现在必须被拒绝，且不许在磁盘上
+            // 留下任何 config.json（不再新建，不再伪造一次没人做过的选择）。
             let muteResult = setEventEnabled(
                 .stop, enabled: false, configFile: environment.configFile,
                 lockFile: environment.configLockFile)
-            expect(muteResult == .success(.updated(event: .stop, enabled: false)), "setup: mute must succeed")
-
-            let afterMute = try? Data(contentsOf: environment.configFile)
-            let configAfterMute = afterMute.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
             expect(
-                configAfterMute?.selectedPack == "",
-                "静音钮没有 pack 上下文，第一次写出的 config.json 的 selected_pack 必须是空串，got"
-                    + " \(String(describing: configAfterMute?.selectedPack))")
+                muteResult == .failure(.configMissing),
+                "config 缺失时静音必须 fail closed，got \(muteResult)")
             expect(
-                configAfterMute?.isEnabled(.stop) == false,
-                "静音必须真的生效，got \(String(describing: configAfterMute?.isEnabled(.stop)))")
+                !FileManager.default.fileExists(atPath: environment.configFile.path),
+                "被拒绝的静音写入不许在磁盘上留下任何 config.json")
 
-            // 第二步：（比如应用重启后）跑首次运行自举。
+            // 第二步：（比如应用重启后）跑首次运行自举——它面对的是一台真正干净的全新机器，
+            // 而不是一份被静音钮悄悄伪造出来的空包 config。
             let result = performFirstRunSetup(environment: environment)
             guard case .success(.completed(_, _, _, let packSelection, _)) = result else {
                 expect(false, "expected success, got \(result)")
@@ -615,18 +618,13 @@ func runSetupSuites() {
             }
             expect(
                 packSelection == .selectedDefault(packID: "minimal-chime"),
-                "自举必须能看穿「selected_pack 是空串」这层假象，选出一个真实默认包，got"
-                    + " \(String(describing: packSelection))")
+                "全新安装必须选出一个真实默认包，got \(String(describing: packSelection))")
 
             let afterSetup = try? Data(contentsOf: environment.configFile)
             let configAfterSetup = afterSetup.flatMap { try? JSONDecoder().decode(ClaudioConfig.self, from: $0) }
             expect(
                 configAfterSetup?.selectedPack == "minimal-chime",
                 "磁盘上的 config.json 必须真的反映自举选出的包")
-            expect(
-                configAfterSetup?.isEnabled(.stop) == false,
-                "自举只拥有 selected_pack 这一个键——用户此前设的静音状态绝不能被覆盖，got"
-                    + " \(String(describing: configAfterSetup?.isEnabled(.stop)))")
         }
     }
 
@@ -786,8 +784,8 @@ func runSetupPackSelectionSuites() {
         expect(
             packSelectionPlan(status: .packNotFound(packID: ""), usablePackIDs: usable)
                 == .selectDefault(packID: "minimal-chime"),
-            "selected_pack 是空串 = 还没有人选过包（静音钮先于选包写出的那份 config）——必须挑默认包，"
-                + "而不是当成「他选的包坏了」")
+            "selected_pack 是空串 = 还没有人选过包（无论这份空串来自全新机器还是一份手工编辑的"
+                + " config）——必须挑默认包，而不是当成「他选的包坏了」")
 
         // ③ 他选的包没了 / 坏了、但还有能用的 → **替他换上**（被推翻的就是这一格）
         expect(

@@ -18,27 +18,22 @@ import SwiftUI
 /// unit-tested — this file's own job is ONLY correct composition, not re-deciding anything.
 public struct PanelView: View {
     @StateObject private var onboardingViewModel: OnboardingViewModel
-    @StateObject private var muteController: EventMuteController
     @StateObject private var dropZoneViewModel: AudioImportViewModel
     /// 「这一句刚说过」的去重器（T17g）—— 让「一趟 update pass ≤ 一条播报」在结构上成立。
     /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
     @StateObject private var announcer: PanelAnnouncer
     @State private var rowImportViewModels: [Event: EventRowImportViewModel]
-    @State private var config: ClaudioConfig
-    @State private var eventRows: [EventRow]
-    @State private var packCards: [PackCard]
-
-    /// The last pack switch that FAILED, if any — `nil` before any switch and cleared on the next
-    /// successful one (mirrors ``EventMuteController/lastError``'s own shape, which is where the
-    /// mute half of this same reporting lives).
+    /// 运行态面板的 config 读模型 + 流经它的写操作（`configState` / `config` / `eventRows` /
+    /// `packCards` / `packSwitchError`，以及 `toggleMute` / `switchPack` / `reload` /
+    /// `reloadEnabledFlags`）—— **全部搬进了 `ClaudioGUICore.PanelConfigController`**（红队 9cccc9c
+    /// 兑现台账那条 P2）。理由见那个类的文档：这几段逻辑曾是本视图的 `@State` + 私有方法，而本视图住在
+    /// `@main` executableTarget、测试 import 不进来，于是红队实测三条「改坏行为、两套测试全绿」的变异
+    /// （refresh 不重载 configState / 某条路由 case 成死代码 / 静音去掉取反）。搬进可实例化的类之后，
+    /// `PanelConfigControllerSuite` 用真磁盘把这三条各钉一条行为断言。
     ///
-    /// 绝不静默吞错（项目规则）: ``switchPack(to:)`` used to be
-    /// `if case .success = result { refresh() }` — the failure was **discarded entirely, not even
-    /// recorded**, so a switch that hit `.lockBusy`/`.packNotFound` left the gallery visibly
-    /// unchanged with zero explanation. `UseError` is `CustomStringConvertible` with a ready
-    /// Chinese sentence for every case (including 「请稍后重试」 for `.lockBusy`); nothing was
-    /// showing it.
-    @State private var packSwitchError: UseError?
+    /// 本视图这一侧只剩两件文本绊线**够得着**的事：① `operationalPanel` 从 `panelModel` 读状态渲染；
+    /// ② 按钮把 action 接到 `panelModel` 的方法（`ViewWiringSuite` 的存在性检查）。
+    @StateObject private var panelModel: PanelConfigController
 
     /// The REAL `@FocusState` `panelFocusOrder(_:)`'s pure model drives (a11y-architect FIX
     /// 4, CRITICAL/HIGH — `panelFocusOrder` was computed but never consumed anywhere in
@@ -148,32 +143,46 @@ public struct PanelView: View {
             // must serialize on its own, separate lock — never `config.json`'s.
             configLockFile: lockFile,
             settingsLockFile: ClaudioPaths.settingsLockFile)
-        _onboardingViewModel = StateObject(
-            wrappedValue: OnboardingViewModel(
-                environment: onboardingEnvironment,
-                actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment)))
-        _muteController = StateObject(
-            wrappedValue: EventMuteController(configFile: configFile, lockFile: lockFile))
-        _announcer = StateObject(wrappedValue: PanelAnnouncer())
+        // 全部构造成**纯 local 实例**，再各自 wrap 进 `@StateObject` / `@State`，**并把同一实例**交给
+        // `PanelConfigController`。绝不在这里读 `_someStateObject.wrappedValue` —— 那会在 SwiftUI 装好
+        // state 之前重新求值 autoclosure、每次发一个全新实例（见上面 actionRunner 那段同样的坑）。捕获
+        // local 不碰这个陷阱：`ovm` / `dz` / `perRow` 就是被 wrap 的那几个引用，`panelModel` 的
+        // `afterFullReload` 闭包捕获它们，跨-view-model 协调因此打到的是面板真正在渲染的那几个实例。
+        let onboardingViewModel = OnboardingViewModel(
+            environment: onboardingEnvironment,
+            actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment))
 
-        let loadedConfig = loadPanelConfig(from: configFile)
-        _config = State(initialValue: loadedConfig)
-        _eventRows = State(
-            initialValue: packCoverage(
-                packID: loadedConfig.selectedPack, config: loadedConfig, environment: audioEnvironment))
-        _packCards = State(
-            initialValue: availablePacks(config: loadedConfig, environment: audioEnvironment))
-        _dropZoneViewModel = StateObject(
-            wrappedValue: AudioImportViewModel(
-                packID: loadedConfig.selectedPack, environment: audioEnvironment))
-
+        let loadedConfig = loadPanelConfig(from: configFile).resolvedConfig
+        let dropZoneViewModel = AudioImportViewModel(
+            packID: loadedConfig.selectedPack, environment: audioEnvironment)
         var perRow: [Event: EventRowImportViewModel] = [:]
         for event in Event.allCases {
             let importViewModel = AudioImportViewModel(
                 packID: loadedConfig.selectedPack, environment: audioEnvironment)
             perRow[event] = EventRowImportViewModel(event: event, importViewModel: importViewModel)
         }
+
+        _onboardingViewModel = StateObject(wrappedValue: onboardingViewModel)
+        _dropZoneViewModel = StateObject(wrappedValue: dropZoneViewModel)
+        _announcer = StateObject(wrappedValue: PanelAnnouncer())
         _rowImportViewModels = State(initialValue: perRow)
+
+        // config 读模型 + 静音/切包写路径的**全部行为**都住在这个可测的类里。`afterFullReload` 是全量
+        // reload 里 config 读模型**之外**的那一半：onboarding 重探 + 两组 import view-model retarget 到
+        // 新包 —— 与旧 `refresh()` 逐行等价（onboarding 那行挪到 config 重载之后，两者互不依赖，结果不变；
+        // retarget 收到刚重载出的 config，用它的 `selectedPack`，与旧代码一致）。
+        _panelModel = StateObject(
+            wrappedValue: PanelConfigController(
+                configFile: configFile,
+                lockFile: lockFile,
+                environment: audioEnvironment,
+                afterFullReload: { reloadedConfig in
+                    onboardingViewModel.refresh()
+                    dropZoneViewModel.retarget(to: reloadedConfig.selectedPack)
+                    for rowViewModel in perRow.values {
+                        rowViewModel.retarget(to: reloadedConfig.selectedPack)
+                    }
+                }))
     }
 
     public var body: some View {
@@ -234,7 +243,7 @@ public struct PanelView: View {
             // **说出口**的机会。上一版把它丢了：结果画出来了，VoiceOver 用户却只听到一句平静的
             // 「Claudio 面板，当前声音包 X」—— 静默替换换到听觉通道上原样复活。
             let moment = onboardingViewModel.panelDidBecomeVisible()
-            refresh()
+            panelModel.reload()
             applyFirstFocus()
             // `say(_:)` 必须在 `refresh()` **之后**：面板句里的包名来自刚被 refresh 写新的 `packCards`。
             say(moment)
@@ -250,15 +259,16 @@ public struct PanelView: View {
         // CTA 落地后 `onboardingViewModel.refresh()` 把 state 翻到 `.installed`，`body` 于是从
         // onboarding 卡切到 `operationalPanel`。但 `config` / `eventRows` / `packCards` 是三个
         // 独立的 `@State`，只在 `init` 里读过一次盘 —— 而 `init` 跑在 app 启动的那一刻，也就是
-        // setup **之前**：那时 `config.json` 还不存在（`loadPanelConfig` 回落到 `selectedPack: ""`）、
-        // 包一个都还没复制。于是用户在**接管成功的那一秒**看到的会是：四行「未配置 / 文件丢失」、
-        // 试听全禁用、一个空的切包画廊 —— 而真实的包和 config 明明已经躺在磁盘上了。他必须关掉
+        // setup **之前**：那时 `config.json` 还不存在（`loadPanelConfig` 回落到 `.needsPack`，
+        // `config` 走 `resolvedConfig` 的空包默认值）、包一个都还没复制。于是用户在**接管成功的
+        // 那一秒**看到的会是：「先选包」空态卡（D23 定稿④的路由态）+ 一个空的切包画廊
+        // —— 而真实的包和 config 明明已经躺在磁盘上了。他必须关掉
         // 面板再打开一次才看得到真相。这个产品在它唯一一次庆祝时刻上撒谎。
         //
         // 不会递归：`refresh()` 内部第一行就是 `onboardingViewModel.refresh()`，而探测是磁盘的
         // 纯函数 —— 第二遍得到同一个 state，`onChange` 不再触发。
         .onChange(of: onboardingViewModel.state) { _ in
-            refresh()
+            panelModel.reload()
             applyFirstFocus()
             // T17g：有结果要说的时候，这一句**主动让出**那条「一次一句」的通道（政策在
             // ``panelAnnouncement(_:)``）。上一版两边都无条件开口，于是「你的包被换掉了」能不能被听见，
@@ -283,7 +293,7 @@ public struct PanelView: View {
             // 同一趟 update pass）里，若 SwiftUI 先跑这个 handler（**未文档化**的顺序）：
             //   · `onboardingViewModel.state` 已经是 `.installed`（引用类型，早更新了）
             //   · 而 `packCards` / `config` 还是 **app 启动时**读的那份 —— 那时 `config.json` 还不存在，
-            //     `loadPanelConfig` 回落成 `selectedPack: ""`，一张卡都没有
+            //     `loadPanelConfig` 回落成 `.needsPack`，`config` 走空包默认值
             //   → header = 「Claudio 面板，当前声音包 」**包名是空的**
             // 紧接着 state 那个 handler（先 `refresh()`）说「…当前声音包 lofi。」——**两句不同，后缀规则吞不掉，
             // 同一趟 post 了两条。** 而这恰恰是 T17f/T17g 整台机器存在的唯一理由。
@@ -296,7 +306,7 @@ public struct PanelView: View {
             // 一个字的 header 都不用）。而 `.running` 时 refresh 会去扫一块**动作正在写**的磁盘 —— 那是
             // 拿一个真 bug 换一个假 bug。代价：一次落地动作多扫一遍盘（点击路径，不是每次开面板的热路径 ——
             // `/ship` 性能评审管的是后者）。
-            if case .idle = onboardingViewModel.actionState { refresh() }
+            if case .idle = onboardingViewModel.actionState { panelModel.reload() }
             say(.actionStateChanged)
             applyFirstFocus()
         }
@@ -404,8 +414,9 @@ public struct PanelView: View {
         // header 拼到**执行时**的 state 上 —— 这就是全部的缺口。代码里没有任何东西把那个续体排在这个
         // block 之后。
         //   （两点精确性，别再传错：① view-model 的 `refresh()` 只有一行 `state = detectOnboardingState(…)`，
-        //     **从不碰** `packCards` —— 重写 `packCards` 的是 `PanelView.refresh()`，那要等下一趟 update
-        //     pass，与这条竞争无关：header 早在捕获时就定死了。② 此处只说「可能先跑」，**不说「保证」**：
+        //     **从不碰** `packCards` —— 重写 `packCards` 的是 `panelModel.reload()`（`PanelConfigController`，
+        //     T15 之后从这个文件抽出去了），那要等下一趟 update pass，与这条竞争无关：header 早在捕获时
+        //     就定死了。② 此处只说「可能先跑」，**不说「保证」**：
         //     下面那段刚论证过，Swift 并发 job 相对 dispatch block 的入队顺序是**实现细节** —— 缺口论证
         //     不需要、也不该反过来把同一条实现细节当成保证来用。）
         //
@@ -428,8 +439,15 @@ public struct PanelView: View {
         // 【为什么不在这里就地修】就地重算是**能编过的**（捕 `self`，在闭包里算 header）—— 不选它，是因为
         // 那要在 SwiftUI 的 update pass 之外读视图 `@State`，语义无文档保证（见上）。真正的修法是把
         // `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model（`@MainActor` class 是
-        // `Sendable` 的，捕得到，且读的是引用类型的**当前**值）。台账里那条 P2，一次买下三个洞：第二个
-        // oracle、可测性、以及这条竞争。**这是一个有理由的取舍，不是一堵墙** —— 别再把它写成「没有办法」。
+        // `Sendable` 的，捕得到，且读的是引用类型的**当前**值）。
+        //
+        // ⚠️ 2026-07-13 更新：那个 view-model **已经存在了**（`PanelConfigController`，红队 9cccc9c）——
+        // 「一次买下三个洞：第二个 oracle、可测性、以及这条竞争」里，前两个（可测性 + oracle）已经关掉。
+        // 但**这条竞争本身还没修**：下面仍然在 update pass 里就地把 `header` 算成一个常量捕获进 block，
+        // 而不是捕 `panelModel`、在 block 里读它的**当前** `packCards` / `config`。修它现在只是**够得着**了
+        // （`panelModel` 是 `@MainActor` `Sendable` class，捕得到），不再是「无文档保证」——但它是一次
+        // 独立的、要碰 T17f/g 播报时序的改动，本轮（view-model 抽取）**没做**。别把「view-model 落地了」
+        // 读成「这条竞争修好了」。
         let header = headerAccessibilityLabel
         let viewModel = onboardingViewModel
         let announcer = self.announcer
@@ -486,7 +504,7 @@ public struct PanelView: View {
 
     private var headerAccessibilityLabel: String {
         guard onboardingViewModel.state == .installed else { return "Claudio 面板" }
-        let packName = packCards.first(where: \.isSelected)?.name ?? config.selectedPack
+        let packName = panelModel.packCards.first(where: \.isSelected)?.name ?? panelModel.config.selectedPack
         return "Claudio 面板，当前声音包 \(packName)"
     }
 
@@ -495,22 +513,35 @@ public struct PanelView: View {
     @ViewBuilder
     private var operationalPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ForEach(eventRows, id: \.event) { row in
-                if let importViewModel = rowImportViewModels[row.event] {
-                    EventRowView(
-                        row: row,
-                        importViewModel: importViewModel,
-                        focusedTarget: $focusedTarget,
-                        adaptation: layoutAdaptation,
-                        onPreview: { playPreview(for: row) },
-                        onToggleMute: { toggleMute(row.event) },
-                        // T16 fix: a successful row-end bind writes `manifest.json` but the
-                        // row renders off `eventRows`, which only `refresh()` recomputes —
-                        // without this the just-bound row keeps showing "未配置/文件丢失" and a
-                        // disabled 试听 until an unrelated mute/switch/reopen. Recompute now.
-                        onImportCompleted: { refresh() }
-                    )
+            // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState` 决定这一块顶部内容
+            // 显示什么——`.operational` 时是今天这四行事件覆盖度；`.needsPack`（还没有人选过包）
+            // 换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径本来就
+            // 通：点一张卡就是 ``selectPack``，会建出一份正确的 config）；`.malformed`/`.unwritable`
+            // 换成诚实失败态 + 可执行的修复指令——不禁用任何控件（写者本来就全部 fail closed），
+            // 只是不再假装一切正常（D19 已作废：不是禁用一个滑块，是整个面板换一个诚实的态）。
+            switch panelModel.configState {
+            case .operational:
+                ForEach(panelModel.eventRows, id: \.event) { row in
+                    if let importViewModel = rowImportViewModels[row.event] {
+                        EventRowView(
+                            row: row,
+                            importViewModel: importViewModel,
+                            focusedTarget: $focusedTarget,
+                            adaptation: layoutAdaptation,
+                            onPreview: { playPreview(for: row) },
+                            onToggleMute: { panelModel.toggleMute(row.event) },
+                            // T16 fix: a successful row-end bind writes `manifest.json` but the
+                            // row renders off `eventRows`, which only `refresh()` recomputes —
+                            // without this the just-bound row keeps showing "未配置/文件丢失" and a
+                            // disabled 试听 until an unrelated mute/switch/reopen. Recompute now.
+                            onImportCompleted: { panelModel.reload() }
+                        )
+                    }
                 }
+            case .needsPack:
+                needsPackNotice
+            case .malformed(let reason), .unwritable(let reason):
+                configFailureNotice(reason: reason)
             }
             // 绝不静默吞错（项目规则）—— 静音写回失败与切包失败**都**在这里如实上报。两条都
             // 可能同时非 nil（一次失败的静音 + 一次失败的切包），所以两条都渲染，不互相顶替。
@@ -521,10 +552,15 @@ public struct PanelView: View {
             // 今天 `.lockBusy` 只剩两个真实来源：另一个 config.json 写者（第二个 GUI 实例，或用户
             // 手动跑 `claudio use`）—— 低频，但绝不是零。渲染保留（项目铁律：绝不静默吞错），
             // 文案本来就写好在 `SetEventEnabledError`/`UseError` 里。
-            if let error = muteController.lastError {
+            // `.configMissing` is deliberately excluded here (PLAN-MASTER-VOLUME.md D43): it is
+            // not a user-facing error — ``toggleMute`` reroutes ``configState`` to `.needsPack`
+            // on this exact failure, and that empty state (`needsPackNotice`) IS the explanation.
+            // Rendering its `description` too would show a redundant, never-QA'd string
+            // underneath a card that already says "先选包".
+            if let error = panelModel.muteError, error != .configMissing {
                 errorNotice(error.description)
             }
-            if let error = packSwitchError {
+            if let error = panelModel.packSwitchError {
                 errorNotice(error.description)
             }
             AudioDropZoneView(viewModel: dropZoneViewModel)
@@ -549,8 +585,56 @@ public struct PanelView: View {
             }
 
             PackGalleryView(
-                cards: packCards, focusedTarget: $focusedTarget, onSelect: { switchPack(to: $0.id) })
+                cards: panelModel.packCards, focusedTarget: $focusedTarget, onSelect: { panelModel.switchPack(to: $0.id) })
             disconnectRow
+        }
+    }
+
+    /// D23 定稿④「先选包」空态卡——`configState == .needsPack` 时替换掉本该渲染的四行事件覆盖度。
+    /// `PackGalleryView` 仍然照常渲染在下面（这就是主行动：点一张卡）；这里只负责说清楚温度 +
+    /// 上下文（DESIGN.md 空态三要素）。文案是 ENGINEERING.md「切包画廊」空态行的标题
+    /// （"先选包"）+ 一句 2026-07-12 拍板的工作稿副文案。
+    private var needsPackNotice: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("先选包")
+                .font(.system(size: 13 * typeScale, weight: .semibold))
+                .foregroundColor(ClaudioColor.text(colorScheme))
+            Text("还没有选中任何声音包。点一张卡片，Claudio 会建好配置。")
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("先选包。还没有选中任何声音包。点一张卡片，Claudio 会建好配置。")
+    }
+
+    /// D23 定稿④诚实失败态——`configState`是 `.malformed`/`.unwritable` 时替换掉本该渲染的四行事件
+    /// 覆盖度。**不禁用任何控件**（写者本来就全部 fail closed，见 `ConfigMutation.swift`）：这里只
+    /// 负责把已经存在的、可执行的修复原因说出来，并给一个「在访达中显示」的快捷方式——doctor 的
+    /// 诊断今天就带着这句一模一样的话（``configRewritabilityResult(configFile:)``），这里不重新
+    /// 发明一套说法。
+    private func configFailureNotice(reason: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 11 * typeScale))
+                    .foregroundColor(ClaudioColor.error(colorScheme))
+                Text(reason)
+                    .font(.system(size: 11 * typeScale))
+                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .accessibilityElement(children: .combine)
+
+            Button {
+                NSWorkspace.shared.activateFileViewerSelecting([configFile])
+            } label: {
+                Text("在访达中显示 config.json")
+                    .font(.system(size: 11 * typeScale))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            .accessibilityHint("在访达中定位 config.json，方便手工修正")
         }
     }
 
@@ -720,8 +804,19 @@ public struct PanelView: View {
                 ctaOperable: ctaOperable)
             return
         }
+        // D23 定稿④「路由态只做减法」：`operationalPanel` only renders `eventRows` for
+        // `.operational` — `.needsPack`/`.malformed`/`.unwritable` show the empty-state/failure
+        // card instead (see `operationalPanel`'s `switch configState`). A control that isn't on
+        // screen must never claim a slot in the opening-focus order, so this passes an EMPTY row
+        // list for every non-operational state rather than `eventRows` (which, off
+        // `resolvedConfig`'s empty-pack default, would otherwise resolve to four `.unmapped` rows
+        // that are never actually rendered).
+        let visibleRows: [EventRow] = {
+            if case .operational = panelModel.configState { return panelModel.eventRows }
+            return []
+        }()
         focusedTarget = panelOpeningFocus(
-            rows: eventRows, packCardIDs: packCards.map(\.id), ctaOperable: ctaOperable,
+            rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
             hasDetailToggle: hasDetailToggle)
     }
 
@@ -734,105 +829,30 @@ public struct PanelView: View {
     /// 试听这一行的声音。
     ///
     /// `else` 分支**不是**空的（本轮 /ship 评审：Claude 对抗子代理）。走到这里说明 `row.coverage` 还是
-    /// `.present`——那是上一次 ``refresh()`` 时算出来的——但文件此刻已经解析不出来了：用户在这中间把它
-    /// 删了 / 改名了 / 换成了一个目录。原来的 `else { return }` 让「点了试听、什么都没发生、也没有任何
-    /// 解释」成为可能，而这正是这一轮刚在 `switchPack` / 静音 / 绑定三处修掉的那种静默吞错。
+    /// `.present`——那是上一次 ``panelModel.reload()`` 时算出来的——但文件此刻已经解析不出来了：用户在
+    /// 这中间把它删了 / 改名了 / 换成了一个目录。原来的 `else { return }` 让「点了试听、什么都没发生、
+    /// 也没有任何解释」成为可能，而这正是这一轮刚在 `switchPack` / 静音 / 绑定三处修掉的那种静默吞错。
     ///
-    /// 修法不是弹一个错误框，而是**让面板说实话**：重跑 `refresh()`，这一行会自己从 `.present` 变成
-    /// `.broken`（「文件丢失」+ 进 doctor）。用户点下去看到的是行的状态当场改变——那比任何一句提示都更
-    /// 接近「不回头也知道状态」。
+    /// 修法不是弹一个错误框，而是**让面板说实话**：重跑 ``panelModel.reload()``，这一行会自己从
+    /// `.present` 变成 `.broken`（「文件丢失」+ 进 doctor）。用户点下去看到的是行的状态当场改变——那比
+    /// 任何一句提示都更接近「不回头也知道状态」。
     private func playPreview(for row: EventRow) {
         guard case .present(let fileName) = row.coverage,
             let packDirectory = resolvePackDirectory(
-                id: config.selectedPack, userPacksDirectory: audioEnvironment.userPacksDirectory,
+                id: panelModel.config.selectedPack, userPacksDirectory: audioEnvironment.userPacksDirectory,
                 bundledPacksDirectory: audioEnvironment.bundledPacksDirectory),
             let resolvedFile = safePackFileURL(fileName, in: packDirectory),
             regularFileExists(at: resolvedFile)
         else {
-            refresh()
+            panelModel.reload()
             return
         }
         previewPlayer.play(fileAt: resolvedFile)
     }
 
-    /// Flips `event`'s mute flag to the opposite of its CURRENT ``EventRow/enabled`` value,
-    /// via ``EventMuteController`` — never re-derives the write itself.
-    ///
-    /// On FAILURE this does not silently do nothing (it used to): ``EventMuteController/setEnabled(_:enabled:)``
-    /// records the reason in its own `@Published` ``EventMuteController/lastError``, which
-    /// ``operationalPanel`` now renders — so a `.lockBusy` (since the lock split: another
-    /// `config.json` writer holding ``ClaudioPaths/configLockFile``, e.g. a concurrent
-    /// `claudio use`; **no longer** `claudio play`, which takes ``ClaudioPaths/playLockFile``)
-    /// shows 「…请稍后重试」 instead of a button that just doesn't move.
-    private func toggleMute(_ event: Event) {
-        let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
-        if muteController.setEnabled(event, enabled: !currentlyEnabled) {
-            refreshEnabledFlags()
-        }
-    }
-
-    /// Switches the selected pack via ``selectPack(_:configFile:userPacksDirectory:bundledPacksDirectory:lockFile:)``
-    /// — the exact same write path `claudio use`/`performFirstRunSetup` already use, never a
-    /// second one. A FAILURE is recorded in ``packSwitchError`` (and rendered by
-    /// ``operationalPanel``), never discarded: this was `if case .success = result { refresh() }`,
-    /// which threw the error away entirely — a dead card click with no explanation.
-    private func switchPack(to packID: String) {
-        switch selectPack(
-            packID, configFile: configFile, userPacksDirectory: audioEnvironment.userPacksDirectory,
-            bundledPacksDirectory: audioEnvironment.bundledPacksDirectory, lockFile: lockFile)
-        {
-        case .success:
-            packSwitchError = nil
-            refresh()
-        case .failure(let error):
-            packSwitchError = error
-        }
-    }
-
-    /// The panel's LIGHTWEIGHT post-mute refresh (`/ship` 评审 · 性能): re-reads `config.json` and
-    /// recomputes ONLY the `enabled` bit of each row.
-    ///
-    /// A mute toggle flips exactly one boolean in `config.json`. It **cannot** change any pack's
-    /// `manifest.json`, any sound file's existence, or which packs are on disk — so the full
-    /// ``refresh()``, which re-reads the selected pack's manifest + `stat`s each event's file +
-    /// enumerates BOTH pack roots and reads EVERY pack's manifest, is pure waste on this path:
-    /// a main-thread disk scan of the entire pack library on every click of a mute button.
-    /// ``CoverageState`` is carried over UNCHANGED from the rows we already have — not because
-    /// it's cheap to recompute, but because it is unchanged *by definition* of what was written.
-    ///
-    /// (`config` itself is re-read rather than patched in memory, so the panel still reflects the
-    /// bytes that actually landed on disk — the same re-detect-don't-patch discipline ``refresh()``
-    /// follows.)
-    private func refreshEnabledFlags() {
-        let reloaded = loadPanelConfig(from: configFile)
-        config = reloaded
-        eventRows = eventRows.map { row in
-            EventRow(event: row.event, coverage: row.coverage, enabled: reloaded.isEnabled(row.event))
-        }
-    }
-
-    /// Re-reads `config.json` + recomputes every derived read model — the panel's "something on
-    /// disk might have changed" rule (mirrors `OnboardingViewModel/refresh()`'s exact same
-    /// re-detect-don't-patch shape). Called when the popover (re)opens, after a pack switch, and
-    /// after a row-end import/bind — i.e. only on paths that really can have changed a pack's
-    /// manifest or files. A mute toggle goes through ``refreshEnabledFlags()`` instead (see there).
-    ///
-    /// Does NOT re-run onboarding detection's *own* underlying facts (helper binary /
-    /// settings.json) beyond what `onboardingViewModel.refresh()` already does — this view
-    /// never duplicates that detection.
-    private func refresh() {
-        onboardingViewModel.refresh()
-        config = loadPanelConfig(from: configFile)
-        eventRows = packCoverage(packID: config.selectedPack, config: config, environment: audioEnvironment)
-        packCards = availablePacks(config: config, environment: audioEnvironment)
-        // `retarget(to:)`，不是裸赋 `packID`：包换了，属于上一个包的导入 / 绑定结果就失去了主语，必须
-        // 一起丢掉，否则包 A 的「已加入 stop.mp3」/「manifest 读不动」会原样留在包 B 的面板上
-        // （本轮 /ship 评审：`/codex review` [P2]）。两个 view-model 都只在包**真的换了**时才清——
-        // `refresh()` 在一次导入 / 绑定结束后也会被调用，无条件清空会把用户刚触发的那条结果（尤其是
-        // 失败原因）在他看见之前抹掉。判断条件在 view-model 里，这里不重复一遍。
-        dropZoneViewModel.retarget(to: config.selectedPack)
-        for rowViewModel in rowImportViewModels.values {
-            rowViewModel.retarget(to: config.selectedPack)
-        }
-    }
+    // toggleMute / switchPack / reload / reloadEnabledFlags 已搬进 `ClaudioGUICore.PanelConfigController`
+    // （红队 9cccc9c 兑现台账那条 P2）。理由见那个类的文档：这几段逻辑住在测不到的 View 里时，
+    // 红队实测三条「改坏行为、两套测试全绿」的变异（refresh 不重载 configState / 某条路由 case 成
+    // 死代码 / 静音去掉取反）；搬进可实例化的类后由 `PanelConfigControllerSuite` 用真磁盘各钉一条
+    // 行为断言。本视图只经 `panelModel.toggleMute(_:)` / `.switchPack(to:)` / `.reload()` 调它们。
 }
