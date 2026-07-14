@@ -174,14 +174,28 @@ public struct MasterVolumeRow: View {
         // D4: the sole brand-accent entry point for a native control — never a hand-drawn
         // track/thumb (DESIGN.md「控件行」: 原生外壳，不自绘).
         //
-        // NOT yet verified on-device for THIS row. The 2026-07-12 screenshot D4 cites proved only
-        // the general fact that a SwiftUI `Slider` honors `.tint` (clay `#C7795B`, not the system
-        // accent `#3275F0`) — `MasterVolumeRow` did not exist on that date. D25 is explicit that
-        // whether `.tint` survives HERE is structurally untestable by CI (`ContrastSuite` is pure
-        // hex math over `ClaudioGUICore`, which does not even link SwiftUI — it cannot see an
-        // NSSlider), and that its ONLY gate is a human running 走查 ⑨ (set the system accent to
-        // red, open the panel, confirm the fill is clay and not red) — **re-run every time the
-        // control row is touched**, this row's own creation included. That run is still owed.
+        // Whether `.tint` survives HERE is structurally untestable by CI (D25): `ContrastSuite` is
+        // pure hex math over `ClaudioGUICore`, which does not even link SwiftUI — it cannot see an
+        // NSSlider. The ONLY gate is a human running 走查 ⑨ (set the system accent to red, open the
+        // panel, confirm the fill is clay and not red) — **re-run every time the control row is
+        // touched**, this row's own creation included.
+        //
+        // ✅ VERIFIED on-device for THIS row, 2026-07-14 (8771946), system accent set to red:
+        //   - slider fill        `#AE6E41`  (G−B = 45 — orange-brown), same family as
+        //   - clay glyph         `#B5754A`  in the same panel (so both went through the same
+        //                                    render/screenshot pipeline — this is the comparison
+        //                                    that matters, not raw equality with `#D97757`)
+        //   - system red accent  `#D55A53`  (G−B = 7 — red)
+        //   - positive control first: a BARE `Slider` under the same conditions rendered RED,
+        //     proving the red accent was actually in effect. Without that control, a clay fill
+        //     would "pass" even if the accent had never been applied — the probe has to prove
+        //     itself before it can prove anything else.
+        //   (走查 ⑥ same run: no tick-mark band under the track — the `step:` trap of D24 avoided.)
+        //
+        // This block used to end with "That run is still owed." — written before the run and never
+        // updated after it. DESIGN.md's Decisions Log said the same. Both were false, and in the
+        // worst direction: they cried wolf on a discipline that is real, teaching the next reader
+        // to discount "走查 ⑨ 欠账" the one time it actually means something (`/codex review 8771946`).
         .tint(ClaudioColor.clay(colorScheme))
         .focused(focusedTarget, equals: .masterVolume)
         .accessibilityLabel("主音量")
