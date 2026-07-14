@@ -42,4 +42,4 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 codesign --force --deep --sign - "$APP"
 codesign --verify --verbose "$APP"
-echo "✅ $APP（$(uname -m)）—— 用 open $APP 启动（菜单栏出现波形图标，无 Dock 图标）"
+echo "✅ ${APP}（$(uname -m)）—— 用 open ${APP} 启动（菜单栏出现波形图标，无 Dock 图标）"
