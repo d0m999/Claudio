@@ -87,10 +87,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.behavior = .transient
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        // Template image: SF Symbol renders as a single-color glyph, auto light/dark
-        // (DESIGN.md「App Icon」: "单色模板菜单栏字形（16×16pt，纯 alpha，自动亮/暗）").
-        let icon = NSImage(systemSymbolName: "waveform.circle", accessibilityDescription: "Claudio")
-        icon?.isTemplate = true
+        // Template image, auto light/dark (DESIGN.md「App Icon」: "单色模板菜单栏字形（16×16pt，
+        // 纯 alpha，自动亮/暗）") — the actual glyph (方案 B「单线括弧」) lives in `MenuBarIcon`,
+        // not inline here, since it replaced a one-line SF Symbol placeholder with real geometry.
+        let icon = MenuBarIcon.make()
+        icon.accessibilityDescription = "Claudio"
         statusItem.button?.image = icon
         statusItem.button?.setAccessibilityLabel("Claudio")
 
