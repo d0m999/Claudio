@@ -1825,3 +1825,35 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P2
 
 **⚠️ 本轮**已经**关掉的，别重复记账：** 失败路径改走 `.configOnly`（不调 `afterFullReload`）之后，「拿一份 `selectedPack` 为空的 config 去 retarget，污染 drop zone / 抹掉画廊选中卡高亮」在 `.configReadFailure` / `.configWriteFailure` / `.lockFailed` 三条路上**不再发生**。但 `.configMissing → .full` 那条路**仍然**会（它必须重扫画廊，`afterFullReload` 躲不掉）—— 那一格的 drop zone 污染是真的、仍然开着，只是它比这三条老得多。
+
+## 方向 D（糖果盘）全量采纳的落地债（2026-07-17）
+
+> 2026-07-17 DESIGN.md 全量采纳「糖果盘 · 方向 D」为现行视觉皮肤（见 DESIGN.md「现行视觉皮肤：糖果盘」节 + Decisions Log 两行）。落进真相源的是**决议**；下面两条是它在**代码 / 工程契约**层欠下的债，须在方向 D 于 SwiftUI 落地前处理。
+
+### `ContrastSuite` 的事件字形断言仍锚在 v1 底 `#FFFDF8` —— 糖果盘换了亮色底，那批 `compositedHex(…over: panel…)` 全部在量一个不再渲染的底
+
+**What:** `ContrastSuite.swift` 的事件字形对比度断言（DESIGN.md §Color「事件字形 tile 保持事件色自染 15%」那批）对**真实复合底**求值：`compositedHex(事件色, over: panel, alpha: 0.15)`，其中 `panel` = v1 亮色 `#FFFDF8`。糖果盘把亮色 `panel` 换成**渐变 `#FFFDFA → #FBF7F1`**（DESIGN 台账 ⑧），且 `text` / `text-2` / `text-muted` / `hairline` 一并改值。于是这批断言现在量的是**一个不再出现在屏幕上的底** —— 正是本仓库反复栽的那个病（「断言断错了那一对」/「没人量过的值」）的又一个形状，只不过这次是底被换走了、断言没跟。
+
+**Why:** 糖果盘新底**已在原型里实测过**（DESIGN 台账 ⑧ 对比度表：事件字形 vs tile 3.18–4.17、胶囊 present vs 白行 4.04、text-2 5.41/5.07、真红图标 3.87、暗色最弱 3.07，全过），所以**结论大概率仍绿**；但那是**原型的 web 渲染管线**量的，不是 `ContrastSuite` 的 hex 数学量的。两条管线不换算就等值，正是 DESIGN.md 自己反复警告的「登记 ≠ 验证」。在 `ContrastSuite` 把底换成糖果盘的最深底 `#FBF7F1`（渐变里最保守的一端）重新求值之前，「糖果盘亮色过 WCAG」这句话在**代码侧没有任何断言背书**。
+
+**Context:** 2026-07-17 DESIGN.md 全量采纳方向 D。取 `#FBF7F1`（渐变最深端）是刻意的保守选择 —— 事件色自染 15% 覆在更深的底上对比度最低，过了它、渐变其余位置自动过。同批要核的还有：`text-2 #75685A` 对白行 / panel（正文 ≥4.5:1）、真红图标对新 panel（≥3:1 且仍 <4.5 不够正文 —— 那条**自毁断言**的阈值也要对新底重算）。
+
+**修复方式:** `ContrastSuite.swift` 里把事件字形那批 `compositedHex(…, over: panelLight, …)` 的 `panelLight` 常量从 `#FFFDF8` 换成 `#FBF7F1`，`text` 族与真红那几条同步换新亮色底常量，跑 `swift run claudio-gui-tests`（**不是** `swift test`）。⚠ 换常量前先确认 `ContrastSuite` 里没有**别的** suite 复用同一个 `panelLight` 却语义不同（避免一处换值砸到不该砸的断言）。
+
+**Effort:** S（换 3–5 个底色常量 + 跑一遍；若有断言变红则回 DESIGN 台账 ⑧ 复核那一格）
+**Priority:** P2（方向 D 于代码落地前必做 —— 否则「糖果盘过对比度」在代码侧无背书；今天不阻断，因为方向 D 尚未进 SwiftUI）
+**Depends on:** 方向 D 进入 SwiftUI 落地（在那之前换底也无处渲染验证；可与落地同批）
+
+### 主音量行尾的「全局静音」钮：四版画稿都有、工程从未立项 —— 一个画稿默默变契约的入口
+
+**What:** 糖果盘（及此前多版）主音量行的**行尾**都画了一个喇叭 + 斜杠的**全局静音**钮（`master-mute`，区别于四个事件行各自的 per-event 静音）。但它在工程侧**从未立项**：不在 ENGINEERING.md 的 UI 线框、不在「交互状态覆盖表」，helper 侧也没有消费者 —— `master_volume` 走 `afplay -v`，而「全局静音」需要一个**新 config 键**（或一个纯 UI 的输出静音开关），且它与 per-event 静音的**叠加语义**（全局静音时 per-event 状态怎么显示 / 解除全局静音后回到哪个态）一个字都没定。
+
+**Why:** 这正是 DESIGN.md 反复警告的「**画稿默默变契约**」：一个控件在四版 mockup 里都出现，实现者很容易把它当既定需求直接画进 SwiftUI，于是一个从没经过工程决策的功能就长在了产品里，带着未定义的语义。DESIGN 台账 ⑨ 已把它标为落地债；工程侧的决策入口在 ENGINEERING.md「Open Questions · 设计待解 ⑥」。
+
+**Context:** 2026-07-17 方向 D 全量采纳时识别。已在 ENGINEERING.md「## Open Questions」的「设计待解」列表补 ⑥（立项或删除，二选一）。
+
+**修复方式（二选一，须用户 / 工程拍板）:** ①**立项** —— 定 config 契约（新键还是 UI-only）、与 per-event 静音的叠加语义、无障碍播报，进 ENGINEERING UI 规格与交互状态覆盖表；②**删除** —— 从糖果盘画稿与 DESIGN 组件解剖里拿掉这个钮，主音量行只留滑块。**别只把它画进代码当默认功能。**
+
+**Effort:** S（决策本身）/ M（若选①，含 config 契约 + 语义 + 测试）
+**Priority:** P2（方向 D 落地前须拍板 —— 否则实现者会替你默认选①的一个未定义版本）
+**Depends on:** None（是一次决策，不依赖其它改动）
