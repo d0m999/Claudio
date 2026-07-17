@@ -97,11 +97,16 @@ func runPanelFocusOrderSuites() {
             "onboarding's order must never contain an operational-only target")
     }
 
-    suite("panelFocusOrder: an empty operational panel (no cards, hasMasterVolume: false — the REAL shape of .needsPack/.malformed/.unwritable, which never render the slider) is just the always-present 断开连接, never claiming a slot for .masterVolume or a removed drop zone") {
+    suite("panelFocusOrder: an empty operational panel (no cards, hasMasterVolume: false, no config-failure notice — the REAL .needsPack 'nothing installed' shape) is just the always-present 断开连接, never claiming a slot for .masterVolume or a removed drop zone") {
         // /codex review P1 (2626083/47459a7): .masterVolume must not appear when the slider is not
         // on screen. cc59d52 (PLAN-SOUND-MANAGER T1) additionally removed `.dropZone` — the panel
         // no longer has a bottom drop affordance, so it claims no slot for one. With zero rows,
         // zero cards and no slider, only the always-appended 断开连接 row remains.
+        //
+        // This is the `.needsPack`-with-nothing shape ONLY. `.malformed`/`.unwritable` also render
+        // zero rows / no slider, but they carry the 诚实失败卡's `.configReveal` (hasConfigFailureNotice:
+        // true), which leads the order — pinned separately below (26bba37 follow-up). Keeping this
+        // fixture at the default `hasConfigFailureNotice: false` is what makes it the needsPack case.
         let order = panelFocusOrder(.operational(events: [], packCardIDs: [], hasMasterVolume: false))
         expect(
             order == [.disconnect],
@@ -118,6 +123,36 @@ func runPanelFocusOrderSuites() {
         expect(
             order == [.masterVolume, .disconnect],
             "with hasMasterVolume true, the slider still claims its slot even with zero rows, got \(order)")
+    }
+
+    // MARK: - .configReveal (/codex review P1, 26bba37 follow-up): the 诚实失败卡's
+    // 「在访达中显示 config.json」 is a real focus target that LEADS the order on
+    // `.malformed`/`.unwritable` — the two states that render the failure card at the panel top.
+
+    suite("panelFocusOrder: the config-failure shape (.malformed/.unwritable — hasConfigFailureNotice: true, no cards) leads with .configReveal, then the always-present 断开连接") {
+        // These two states render `configFailureNotice` at the TOP of the panel; its reveal button
+        // is visually first, so it must lead the focus order. No pack cards installed here → just
+        // .configReveal then .disconnect. (Contrast the .needsPack-nothing shape above, which has NO
+        // failure notice and so leads with .disconnect.)
+        let order = panelFocusOrder(
+            .operational(events: [], packCardIDs: [], hasMasterVolume: false, hasConfigFailureNotice: true))
+        expect(
+            order == [.configReveal, .disconnect],
+            ".configReveal must lead the order on the config-failure shape, ahead of 断开连接, got \(order)")
+    }
+
+    suite("panelFocusOrder: the config-failure shape WITH pack cards leads with .configReveal, then the cards, then 断开连接 (never folds into the plain .needsPack card order)") {
+        // `.malformed`/`.unwritable` can still have packs installed (the gallery renders in every
+        // configState). The reveal button is above the gallery, so .configReveal leads, THEN the
+        // cards. This is the exact case the pre-fix tests wrongly folded into the .needsPack
+        // 'first pack card' assertion — the reveal button was skipped entirely.
+        let order = panelFocusOrder(
+            .operational(
+                events: [], packCardIDs: ["alpha-pack", "zeta-pack"], hasMasterVolume: false,
+                hasConfigFailureNotice: true))
+        expect(
+            order == [.configReveal, .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"), .disconnect],
+            ".configReveal must lead, ahead of the pack cards it visually sits above, got \(order)")
     }
 
     // MARK: - panelFirstFocusTarget (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项" — the
@@ -203,20 +238,48 @@ func runPanelFocusOrderSuites() {
             "onboarding first focus is unaffected by action operability, got \(String(describing: target))")
     }
 
-    suite("panelFirstFocusTarget: empty operational panel, hasMasterVolume false, no cards (the REAL .needsPack/.malformed/.unwritable shape with nothing installed) → first focus is the always-present 断开连接, never the (unrendered) slider or a removed drop zone") {
+    suite("panelFirstFocusTarget: empty operational panel, hasMasterVolume false, no cards, no config-failure notice (the REAL .needsPack shape with nothing installed) → first focus is the always-present 断开连接, never the (unrendered) slider or a removed drop zone") {
         // /codex review P1 (2626083/47459a7): zero events is NOT "unreachable in shipping code" —
         // `PanelView.applyFirstFocus` passes `rows: []`, `hasMasterVolume: false` whenever
-        // `configState` is `.needsPack`/`.malformed`/`.unwritable` (first launch before a pack is
-        // picked, or a corrupted/unwritable config.json). cc59d52 (PLAN-SOUND-MANAGER T1) removed
-        // `.dropZone` (its view was deleted), so with no rows, no cards and no slider the first —
-        // and only — operable target is the always-appended `.disconnect` row. (T7 will give this
-        // shape a better landing via `.manageSounds`; until then 断开连接 is the honest one, never
-        // a ghost focus slot.)
+        // `configState` is `.needsPack` (first launch before a pack is picked). cc59d52
+        // (PLAN-SOUND-MANAGER T1) removed `.dropZone` (its view was deleted), so with no rows, no
+        // cards and no slider the first — and only — operable target is the always-appended
+        // `.disconnect` row. (T7 will give this shape a better landing via `.manageSounds`; until
+        // then 断开连接 is the honest one, never a ghost focus slot.)
+        //
+        // This is `.needsPack` ONLY. `.malformed`/`.unwritable` share the zero-rows/no-slider shape
+        // but ADD the 诚实失败卡's `.configReveal` (hasConfigFailureNotice: true), which leads —
+        // pinned in the next two suites (26bba37 follow-up). The default `hasConfigFailureNotice:
+        // false` here is exactly what makes this the needsPack case, not the config-broken ones.
         let scope = PanelFocusScope.operational(events: [], packCardIDs: [], hasMasterVolume: false)
         expect(
             panelFirstFocusTarget(scope) == .disconnect,
-            "with no rows/cards/slider, first focus must be the always-present 断开连接, never"
-                + " .masterVolume or a removed drop zone, got \(String(describing: panelFirstFocusTarget(scope)))")
+            "with no rows/cards/slider/failure-notice, first focus must be the always-present 断开连接,"
+                + " never .masterVolume or a removed drop zone, got \(String(describing: panelFirstFocusTarget(scope)))")
+    }
+
+    suite("panelFirstFocusTarget: the config-failure shape (.malformed/.unwritable, no cards) → first focus is .configReveal, never 断开连接 (26bba37 follow-up)") {
+        // The exact `.malformed`/`.unwritable` opening-focus decision Codex's P1 flagged: the
+        // 诚实失败卡's 「在访达中显示 config.json」 is visually first and operable, so it — not the
+        // destructive 断开连接 below it — is where keyboard/VoiceOver focus lands when the panel opens
+        // on a corrupt/unwritable config.
+        let scope = PanelFocusScope.operational(
+            events: [], packCardIDs: [], hasMasterVolume: false, hasConfigFailureNotice: true)
+        expect(
+            panelFirstFocusTarget(scope) == .configReveal,
+            "config-broken states open focused on .configReveal, not 断开连接, got \(String(describing: panelFirstFocusTarget(scope)))")
+    }
+
+    suite("panelFirstFocusTarget: the config-failure shape WITH pack cards → first focus is STILL .configReveal, never the first pack card (the pre-fix bug: reveal button was skipped to the gallery)") {
+        // `.malformed`/`.unwritable` with packs installed. Before this fix the focus model was blind
+        // to the reveal button and landed on `.packCard("alpha-pack")` — skipping the panel's own
+        // top-of-card recovery action. It must lead with .configReveal.
+        let scope = PanelFocusScope.operational(
+            events: [], packCardIDs: ["alpha-pack", "zeta-pack"], hasMasterVolume: false,
+            hasConfigFailureNotice: true)
+        expect(
+            panelFirstFocusTarget(scope) == .configReveal,
+            "the reveal button leads even when pack cards are installed, got \(String(describing: panelFirstFocusTarget(scope)))")
     }
 
     suite("panelFirstFocusTarget: empty operational panel with pack cards (the COMMON .needsPack 'pick a pack' shape) → first focus is the first pack card, not 断开连接") {
@@ -338,9 +401,11 @@ func runPanelFocusOrderSuites() {
 
     suite("panelOpeningFocus: zero rows, hasMasterVolume false, with a pack card (the REAL .needsPack 'pick a pack' shape) → first focus is the first pack card, never the (unrendered) slider or a removed drop zone") {
         // /codex review P1 (2626083/47459a7): `PanelView.applyFirstFocus` calls
-        // `panelOpeningFocus` with `rows: []` AND `hasMasterVolume: false` together whenever the
-        // panel is NOT truly operational — a common real shape (first launch before a pack is
-        // picked, or a corrupted/unwritable config.json), not a fixture-only edge case. cc59d52
+        // `panelOpeningFocus` with `rows: []` AND `hasMasterVolume: false` together on the
+        // `.needsPack` shape (first launch, packs installed but none picked) — a common real shape,
+        // not a fixture-only edge case. (`.malformed`/`.unwritable` also pass zero rows but carry
+        // `hasConfigFailureNotice: true`, so they lead with `.configReveal`, not the first card —
+        // that's the config-broken case, pinned in its own suites, 26bba37 follow-up.) cc59d52
         // (PLAN-SOUND-MANAGER T1) removed `.dropZone`; the pack gallery is still rendered in every
         // configState, so opening focus now lands on the first pack card — the panel's own primary
         // action ('点一张卡片') — instead of the deleted drop zone. `hasMasterVolume` is a literal
@@ -392,14 +457,26 @@ func runPanelFocusInFlightSuites() {
                 == .eventAction(Event.allCases[0]),
             "operational 面板里首焦点本来就不是断开连接，禁用它不该改变这一点")
 
-        // 极端情形：没有事件行、没有包卡、hasMasterVolume: false —— 这正是 `.needsPack`/
-        // `.malformed`/`.unwritable` 的真实形状（`/codex review` P1，2626083/47459a7），且此刻有
-        // 动作在飞（ctaOperable == false）。cc59d52（PLAN-SOUND-MANAGER T1）删掉 `.dropZone` 后，
-        // 面板底部不再有恒可操作的落点；唯一的 `.disconnect` 又被 in-flight 禁用 —— 于是首焦点
-        // 诚实地是 nil（与 onboarding in-flight 同型），而不是一个已删控件的幽灵。T7 的
-        // `.manageSounds`（in-flight 也恒可操作）会把这一格重新变成非 nil。
+        // 极端情形：没有事件行、没有包卡、hasMasterVolume: false、也没有失败卡 —— 这是 `.needsPack`
+        // **一无所有**的真实形状（`/codex review` P1，2626083/47459a7），且此刻有动作在飞
+        // （ctaOperable == false）。cc59d52（PLAN-SOUND-MANAGER T1）删掉 `.dropZone` 后，面板底部不再有
+        // 恒可操作的落点；唯一的 `.disconnect` 又被 in-flight 禁用 —— 于是首焦点诚实地是 nil（与
+        // onboarding in-flight 同型），而不是一个已删控件的幽灵。T7 的 `.manageSounds`（in-flight 也恒
+        // 可操作）会把这一格重新变成非 nil。
+        //
+        // 注意这**不含** `.malformed`/`.unwritable`：那两态带失败卡的 `.configReveal`（恒可操作），
+        // in-flight 也非 nil —— 见下一条断言（26bba37 follow-up）。
         expect(
             panelOpeningFocus(rows: [], packCardIDs: [], ctaOperable: false, hasMasterVolume: false) == nil,
-            "断开被禁用、滑块不在屏幕上、且拖放区已随 T1 删除时，没有可操作控件，首焦点诚实为 nil")
+            "断开被禁用、滑块不在屏幕上、没有失败卡、且拖放区已随 T1 删除时，没有可操作控件，首焦点诚实为 nil")
+
+        // `.malformed`/`.unwritable` 的 in-flight 强化：断开跑到一半，`.disconnect` 禁用，但失败卡的
+        // `.configReveal`（访达 reveal 无写副作用）照样可操作 —— 首焦点落在它上面，绝不 nil。这正是
+        // Codex P1 想要的诚实：config 坏掉时，开局焦点是那颗「在访达中显示 config.json」的修复入口。
+        expect(
+            panelOpeningFocus(
+                rows: [], packCardIDs: [], ctaOperable: false, hasMasterVolume: false,
+                hasConfigFailureNotice: true) == .configReveal,
+            "config 坏 + 断开在飞时，首焦点必须是恒可操作的 .configReveal，而不是 nil 或被禁用的断开连接")
     }
 }

@@ -411,6 +411,28 @@ focus 值 → SwiftUI 焦点解析未定义）。T2 会把它重新引爆。
    > ctaOperable:false) == nil` 的钉子**（T7 原指令清单没点名它）—— T7 的 `.manageSounds`（in-flight 恒
    > 可操作）落地后它必红，须**主动重写为 `== .manageSounds`**，别当意外红。
 
+   > **2026-07-18 追记（P1#2：`.configReveal` 也提前落地，非 T7）**：紧接 26bba37 的 `/codex review`
+   > 又逮到 —— 删掉 `.dropZone` 后，`.malformed`/`.unwritable` 的**诚实失败卡**上那颗
+   > `PanelView.configFailureNotice` 的「在访达中显示 config.json」按钮（`PanelView.swift:624`）是一颗
+   > 真控件，却没有焦点目标；开屏焦点于是越过这颗**视觉最顶端**的修复入口，落到包卡 / 断开连接 / nil。
+   > 这一刀也在 T7 之前单独落了（26bba37 follow-up commit）：新增焦点目标 `PanelFocusTarget.configReveal`
+   > + scope 字段 `hasConfigFailureNotice` + `panelOpeningFocus` 同名参；`panelFocusOrder` 在 operational
+   > 序**最前**插入它（视觉最顶），operability arm 恒 `true`（访达 reveal 无写副作用，含 in-flight）；
+   > `applyFirstFocus` 从 `configState` 的 `.malformed`/`.unwritable` 派生该 flag；`ViewWiringSuite` 按
+   > `.masterVolume` 先例双向钉（call site 传派生值 + 派生自那两态 + 禁字面量）；`PanelFocusOrderSuite`
+   > 拆掉把 `.malformed`/`.unwritable` 与 `.needsPack` 并成一个 fixture 的旧断言，新增 `.configReveal`
+   > 首焦点 / 有卡 / in-flight 各一条；TODOS `:1160` 的过期「运行态恒含 `.dropZone`，永不返回 nil」已改写。
+   >
+   > **对 T7 的三条约束（`.configReveal` 与 `.manageSounds` 不冲突，但同改 `panelFocusOrder`，须协调 merge）**：
+   > (i) `.configReveal` 是**条件性**顶部锚点（仅 `.malformed`/`.unwritable`），**不是** operational scope
+   > 「永不返回 nil」的无条件担保者 —— 那把交椅仍归 `.manageSounds`；本改动没动 §2.5 ⚠②，别以为 never-nil
+   > 已由它兜住。(ii) `.manageSounds` 落地时须排在 `.configReveal` **之后**（顶部 `.configReveal` → 事件 →
+   > packCards → `.manageSounds` → `.disconnect`），否则失败卡首焦点会错落到管理钮。(iii) 上面 (c) 那条 in-flight
+   > nil 钉子现在**只覆盖 `.needsPack` 一无所有**态（无失败卡）；`.malformed`/`.unwritable` 的 in-flight 已
+   > 由新增的 `== .configReveal` 断言钉死为非 nil —— T7 把 (c) 重写成 `.manageSounds` 时别把这条一起动了。
+   > （设计侧一条待拍板：post-T7 `.malformed`/`.unwritable` 面板上会有**两颗访达 reveal**——config.json 与
+   > `~/.claudio/packs/`——功能不撞，但归 DESIGN.md 定夺失败态呈现。）
+
 6. **测试要重写，不是删**（计划第一版没算这笔账）：
    `CoverageStateSuite` 有 **8 条**用例钉死 `previewClaimsActionFocus` / `eventActionOperable`
    的现语义；`PanelFocusOrderSuite:302` 那条「首焦点必须 ≠ `order.first`」的**前提**也变了

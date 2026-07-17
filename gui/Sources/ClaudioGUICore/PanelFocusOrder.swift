@@ -51,6 +51,20 @@ public enum PanelFocusTarget: Sendable, Hashable {
     /// 在整个 shipping app 里没有一个像素，只活在 state gallery 里。而 `.notInstalled` 的正文
     /// 白纸黑字向用户承诺「随时可以一键撤销」。T17 给了它一个真入口，那句承诺才不是谎话。
     case disconnect
+    /// 「诚实失败态」卡片上的「在访达中显示 config.json」（/codex review P1，26bba37 follow-up）。
+    ///
+    /// `.malformed`/`.unwritable` 时 ``PanelView/configFailureNotice(reason:)`` 渲染这颗按钮，而它排在
+    /// 面板**最顶端**（顶替掉四行事件、在画廊之上）—— 所以在 ``panelFocusOrder(_:)`` 里它 LEADS 整个
+    /// operational 序（焦点序跟随视觉序，a11y-architect FIX 5）。它是那张失败卡上唯一的 bespoke 修复
+    /// 动作（画廊在每个 `configState` 都一样），因此开局焦点该落在它上面，而不是越过它落到包卡 / 断开
+    /// 连接 / nil。
+    ///
+    /// 只在这两个 `configState` 出现（`hasConfigFailureNotice`）；`.operational`/`.needsPack` 不渲染
+    /// 失败卡，flag 为假，这颗 target 不进序。它**恒可操作**（访达 reveal 无写副作用，含 in-flight），
+    /// 但它是**条件性**锚点 —— 不是 operational scope「永不返回 nil」的**无条件**担保者（那把交椅留给
+    /// PLAN-SOUND-MANAGER T7 无条件 append 的 `.manageSounds`，见上方 NOTE）；它只是让
+    /// `.malformed`/`.unwritable` 这两态在 `.manageSounds` 落地前就已恒非 nil。
+    case configReveal
 }
 
 /// Everything ``panelFocusOrder(_:)`` needs to know about the panel's CURRENT shape —
@@ -87,9 +101,17 @@ public enum PanelFocusScope: Sendable, Equatable {
     /// never try to derive this itself. A caller must not claim a focus slot for a control it
     /// doesn't independently know is on screen — the coupling has to be re-asserted at each call
     /// site, honestly, every time.
+    ///
+    /// `hasConfigFailureNotice` (/codex review P1, 26bba37 follow-up): whether the
+    /// `.malformed`/`.unwritable` 诚实失败卡 is on screen — it carries the 在访达中显示 config.json
+    /// button (``PanelView/configFailureNotice(reason:)``), which renders at the panel TOP and so
+    /// LEADS the focus order as ``PanelFocusTarget/configReveal``. Same fail-closed default and same
+    /// honesty rule as `hasMasterVolume`: Core can't see `configState`, so the caller must derive it
+    /// from the very `switch configState` that decides whether the failure card renders — the render
+    /// decision and the focus decision are the same switch, read twice.
     case operational(
         events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false,
-        hasMasterVolume: Bool = false)
+        hasMasterVolume: Bool = false, hasConfigFailureNotice: Bool = false)
 }
 
 /// The panel's Tab/Shift+Tab traversal order for its current ``PanelFocusScope`` —
@@ -99,7 +121,9 @@ public enum PanelFocusScope: Sendable, Equatable {
 /// order left-to-right, ``EventRowView``'s `trailing` renders the action control before
 /// `muteIndicator`, which sits rightmost; a11y review a11y-architect FIX 5: focus order must
 /// track visual order, not an arbitrary model-first convenience), then
-/// every pack gallery card (in ``availablePacks(config:environment:)``'s own order).
+/// every pack gallery card (in ``availablePacks(config:environment:)``'s own order). On
+/// `.malformed`/`.unwritable` the 诚实失败卡's ``PanelFocusTarget/configReveal`` LEADS the whole
+/// operational list — it renders above every row/card, so visual order puts it first.
 /// `order.first` is where focus lands the instant the panel opens (ENGINEERING.md: "打开
 /// 焦点落首个可操作项").
 public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
@@ -112,8 +136,14 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         if hasSecondaryAction { order.append(.onboardingSecondaryAction) }
         return order
 
-    case .operational(let events, let packCardIDs, let hasDetailToggle, let hasMasterVolume):
+    case .operational(let events, let packCardIDs, let hasDetailToggle, let hasMasterVolume,
+                      let hasConfigFailureNotice):
         var order: [PanelFocusTarget] = []
+        // 诚实失败卡（`.malformed`/`.unwritable`）渲染在面板**最顶端**（顶替四行事件、在画廊之上），
+        // 它的「在访达中显示 config.json」按钮是那张卡上唯一的 bespoke 修复动作 —— 所以它 LEADS 焦点序
+        // （焦点序跟随视觉序，a11y-architect FIX 5）。只有这两态渲染失败卡；`.operational`/`.needsPack`
+        // 的 flag 为假，`.configReveal` 不进序。
+        if hasConfigFailureNotice { order.append(.configReveal) }
         for event in events {
             order.append(.eventAction(event))
             order.append(.eventMute(event))
@@ -171,18 +201,28 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// — was written before `ctaOperable` existed and was false the moment it landed.)
 ///
 /// The OPERATIONAL scope returns `nil` in exactly ONE shape: an in-flight panel with zero event
-/// rows, zero pack cards and no slider (`ctaOperable == false`, so even the always-appended
-/// `.disconnect` is not operable) — the honest counterpart to the onboarding in-flight `nil`
-/// below. In every reachable non-in-flight shape it is non-nil: a `.operational` panel's first
-/// row's mute is always operable; a `.needsPack` panel's first pack card is (the gallery renders
-/// in every `configState`); and when neither exists, the always-appended `.disconnect` (or, when a
-/// failure row shows, its `.revealDetail`) anchors it while `ctaOperable`.
+/// rows, zero pack cards, no slider AND no config-failure notice (`ctaOperable == false`, so even
+/// the always-appended `.disconnect` is not operable) — the honest counterpart to the onboarding
+/// in-flight `nil` below. Concretely that is a `.needsPack` panel with nothing installed while a
+/// disconnect is in flight; the two config-broken states can't reach it (next paragraph). In every
+/// reachable non-in-flight shape it is non-nil: a `.operational` panel's first row's mute is always
+/// operable; a `.needsPack` panel's first pack card is (the gallery renders in every `configState`);
+/// and when neither exists, the always-appended `.disconnect` (or, when a failure row shows, its
+/// `.revealDetail`) anchors it while `ctaOperable`.
+///
+/// `.malformed`/`.unwritable` are the exception that is ALWAYS non-nil, in-flight or not: their
+/// 诚实失败卡 leads the order with `.configReveal` (在访达中显示 config.json), which is
+/// unconditionally operable (reveal has no write side-effect), so it anchors those two states even
+/// while a disconnect is in flight (/codex review P1, 26bba37 follow-up). It is a CONDITIONAL anchor
+/// (only on those two states), NOT the operational scope's unconditional never-nil guarantor — that
+/// seat stays reserved for PLAN-SOUND-MANAGER T7's unconditionally-appended `.manageSounds`.
 ///
 /// (Before T1 this could NEVER be nil, because `.dropZone` was appended unconditionally and was
 /// always operable. That anchor left with `AudioDropZoneView` — cc59d52 / PLAN-SOUND-MANAGER T1 —
 /// because it was a focus slot for a control that no longer rendered, and `PanelView` was opening
-/// `.needsPack`/`.malformed`/`.unwritable` focus straight onto it. PLAN-SOUND-MANAGER T7 restores
-/// an unconditional anchor with `.manageSounds`, at which point the operational scope is once again
+/// `.needsPack`/`.malformed`/`.unwritable` focus straight onto it. `.configReveal` now anchors the
+/// two config-broken states honestly; PLAN-SOUND-MANAGER T7 adds `.manageSounds` as the
+/// unconditional anchor for the remaining shapes, at which point the operational scope is once again
 /// never-nil for every shape, in-flight or not.)
 ///
 /// 焦点在 in-flight 期间该落到哪，是一个仍未定的产品问题（见 TODOS「in-flight 期间 onboarding 的
@@ -217,6 +257,11 @@ public func panelFirstFocusTarget(
         // not by this switch. If `hasMasterVolume` was `false`, `panelFocusOrder(_:)` never put
         // `.masterVolume` in the order in the first place, so this arm simply never sees it —
         // this `true` only fires for a slider that is ACTUALLY on screen.
+        case .configReveal:
+            // 访达 reveal 无写副作用，恒可操作（含 in-flight，`ctaOperable == false` 时照样）—— 与
+            // T7 计划中的 `.manageSounds` operability arm 同理。这让 `.malformed`/`.unwritable` 这两态
+            // 的 operational scope 永不返回 nil，即便断开动作在飞。
+            return true
         case .eventMute, .packCard, .masterVolume:
             return true
         }
@@ -245,7 +290,10 @@ public func panelFirstFocusTarget(
 ///
 /// `hasMasterVolume` defaults to `false` (fail-closed) and must be supplied by the caller as an
 /// explicit, honest signal — same reasoning as `hasDetailToggle`. This function is Core: it
-/// cannot see `configState` and must never derive the flag itself.
+/// cannot see `configState` and must never derive the flag itself. `hasConfigFailureNotice` obeys
+/// the identical contract (fail-closed default; caller derives it from the `.malformed`/`.unwritable`
+/// arm of the same `switch configState` that renders the failure card): it makes `.configReveal`
+/// lead the order on those two states (/codex review P1, 26bba37 follow-up).
 ///
 /// PLAN-MASTER-VOLUME.md 阶段 D has landed (8771946): ``PanelView/applyFirstFocus()`` now passes
 /// `isOperational`, because `MasterVolumeRow` is rendered by exactly one branch of
@@ -260,11 +308,12 @@ public func panelFirstFocusTarget(
 /// `ViewWiringSuite` pins the call site in both directions and fails either way it drifts.
 public func panelOpeningFocus(
     rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true,
-    hasDetailToggle: Bool = false, hasMasterVolume: Bool = false
+    hasDetailToggle: Bool = false, hasMasterVolume: Bool = false,
+    hasConfigFailureNotice: Bool = false
 ) -> PanelFocusTarget? {
     let scope = PanelFocusScope.operational(
         events: rows.map(\.event), packCardIDs: packCardIDs, hasDetailToggle: hasDetailToggle,
-        hasMasterVolume: hasMasterVolume)
+        hasMasterVolume: hasMasterVolume, hasConfigFailureNotice: hasConfigFailureNotice)
     let nonOperableActionEvents = Set(rows.filter { !$0.eventActionOperable }.map(\.event))
     return panelFirstFocusTarget(
         scope, nonOperableActionEvents: nonOperableActionEvents, ctaOperable: ctaOperable)

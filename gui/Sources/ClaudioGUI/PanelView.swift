@@ -614,6 +614,11 @@ public struct PanelView: View {
     /// 负责把已经存在的、可执行的修复原因说出来，并给一个「在访达中显示」的快捷方式——doctor 的
     /// 诊断今天就带着这句一模一样的话（``configRewritabilityResult(configFile:)``），这里不重新
     /// 发明一套说法。
+    ///
+    /// 那颗「在访达中显示 config.json」是一颗**真控件**（焦点目标 ``PanelFocusTarget/configReveal``），
+    /// 不是装饰：它渲染在面板顶端，是这两态开局键盘/VoiceOver 焦点的落点（/codex review P1，26bba37
+    /// follow-up）。渲染它的判据与 `applyFirstFocus` 派生 `hasConfigFailureNotice` 的判据是同一个
+    /// `switch configState`，`ViewWiringSuite` 双向钉，任一半漂移即红。
     private func configFailureNotice(reason: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             // 2026-07-15 冗余审计的**第六份**手抄拒绝行 —— 审计当时只数到五份，漏了这一处（它藏在
@@ -630,6 +635,10 @@ public struct PanelView: View {
             .buttonStyle(.plain)
             .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             .accessibilityHint("在访达中定位 config.json，方便手工修正")
+            // 它是这张卡上唯一的 bespoke 修复动作，渲染在面板最顶端 —— 所以它必须在焦点序里，且开局
+            // 焦点就落在它上面（`.malformed`/`.unwritable` 时 `applyFirstFocus` 走 `.configReveal`）。
+            // /codex review P1（26bba37 follow-up）。
+            .focused($focusedTarget, equals: .configReveal)
         }
     }
 
@@ -807,9 +816,20 @@ public struct PanelView: View {
         // now is not a regression of that fix, it is the fix's own stated exit condition
         // (ViewWiringSuite's tripwire on this line has been updated to match, and fails the
         // moment either half of `operationalPanel`/`applyFirstFocus` drifts from the other).
+        // hasConfigFailureNotice: 与渲染 `configFailureNotice` 的判据是**同一个** `switch configState`
+        // （见 operationalPanel 的 `.malformed`/`.unwritable` 分支），读两次。诚实失败卡带着一颗真控件
+        // （在访达中显示 config.json），它渲染在面板顶端，所以开局焦点该落在它上面而不是越过它 —— 但
+        // Core 看不到 configState，必须由这里如实派生（/codex review P1，26bba37 follow-up）。
+        let hasConfigFailureNotice: Bool = {
+            switch panelModel.configState {
+            case .malformed, .unwritable: return true
+            default: return false
+            }
+        }()
         focusedTarget = panelOpeningFocus(
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
-            hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational)
+            hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational,
+            hasConfigFailureNotice: hasConfigFailureNotice)
     }
 
     // MARK: - Actions

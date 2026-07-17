@@ -876,6 +876,24 @@ func runViewWiringSuites() {
             !panelCollapsed.contains("hasMasterVolume: false"),
             "hasMasterVolume 不许再钉死字面量 false —— 那是 MasterVolumeRow 落地前的占位值（341d9b7 之后"
                 + "那一轮 /codex review 的临时状态），见上一条断言")
+
+        // /codex review P1（26bba37 follow-up）：诚实失败卡上的「在访达中显示 config.json」是一颗真控件
+        // （焦点目标 `.configReveal`），`.malformed`/`.unwritable` 开局焦点该落在它上面而不是越过它。渲染
+        // 判据（operationalPanel 的 `.malformed`/`.unwritable` 分支渲染 configFailureNotice，见上一条 suite）
+        // 与焦点判据（applyFirstFocus 传 hasConfigFailureNotice）必须读**同一个** `switch configState`。
+        // 下面三条断言双向钉：① call site 传的是派生值不是字面量；② 派生自 `.malformed`/`.unwritable`；
+        // ③ 反向禁止钉死 false —— 任一半漂移都会让渲染与焦点分叉，失败卡上的真控件抢不到开局焦点。
+        expect(
+            panelCollapsed.contains("hasConfigFailureNotice: hasConfigFailureNotice"),
+            "applyFirstFocus 必须把派生出的 hasConfigFailureNotice 传进 panelOpeningFocus —— 少这颗 flag，"
+                + "`.malformed`/`.unwritable` 开局焦点会越过「在访达中显示 config.json」落到包卡 / 断开连接 / nil")
+        expect(
+            panelCollapsed.contains("case .malformed, .unwritable: return true"),
+            "hasConfigFailureNotice 必须从 `switch panelModel.configState` 的 `.malformed`/`.unwritable` 派生"
+                + "（与渲染 configFailureNotice 同一判据）—— 钉死字面量或换判据都会让渲染与焦点分叉")
+        expect(
+            !panelCollapsed.contains("hasConfigFailureNotice: false"),
+            "hasConfigFailureNotice 不许钉死字面量 false —— 那会让失败卡上的真控件永远抢不到开局焦点")
     }
 
     // ── PLAN-MASTER-VOLUME.md 阶段 D：MasterVolumeRow 的三个硬约束 + 三条接线绊线 ──────────────
