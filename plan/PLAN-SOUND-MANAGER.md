@@ -390,12 +390,36 @@ focus 值 → SwiftUI 焦点解析未定义）。T2 会把它重新引爆。
    （顺带：TODOS.md「`.dropZone` 是焦点位但没有任何视图绑定它」那条台账被本改动**整个消灭** ——
    落地时更新台账，不许留一条指向已删除符号的活条目。）
 
+   > **2026-07-17 追记（P1#1 已提前落地，非 T7）**：cc59d52（T1）落地后 `/codex review` 逮到
+   > `.dropZone` 焦点位在 `.needsPack`/`.malformed`/`.unwritable`（生产可达：首次启动没选包、config
+   > 损坏）已是 `PanelView.applyFirstFocus` 的**开屏焦点目标**，即把焦点设到一个已删控件上（键盘/VO
+   > 开屏焦点丢失）—— 这已不是「低危缺口」，是可达真回归。于是**这一刀在 T7 之前就单独落了**：
+   > `PanelFocusTarget.dropZone`（枚举项 + `panelFocusOrder` 无条件 append + `panelFirstFocusTarget`
+   > operable arm）**已整个删除**；上面点名的两段 doc（`panelFirstFocusTarget` 非空论证、`panelFocusOrder`
+   > 头注释）与 TODOS 台账条目**已同批改写/删除**。删后诚实的过渡行为：`.needsPack` 有卡→首焦点是**首张
+   > 包卡**（正好是「点一张卡片」主行动，净改善）；无卡→`.disconnect`（真控件，非幽灵；仅「零安装包」
+   > 这个退化态才触发，内置包在场时不会）；in-flight 零形状→**首焦点诚实为 nil**（与 onboarding
+   > in-flight 同型）。
+   >
+   > **所以 T7 不再是「删 `.dropZone` 并原子替换」，而是「新增 `.manageSounds`」**，第 ①②③ 条不变，但：
+   > (a) 删除 `.dropZone` / 改那两段 doc / 消灭 TODOS 条目 —— **已完成，勿重做**；T7 名下只剩
+   > `PanelFocusTarget.eventAction`「A SINGLE slot per row」那段 doc（本节第 1-3 条 `eventSound` 才作废它）；
+   > (b) 测试的当前形状（`:329` 行号已移，按 suite 意图找）：无卡 `[.disconnect]` → `[.manageSounds, .disconnect]`
+   > 且首焦点 `.disconnect` → `.manageSounds`；有卡的首张包卡断言不受影响（`.manageSounds` 插在 packCards
+   > 之后、`.disconnect` 之前）；
+   > (c) ⚠️ **`runPanelFocusInFlightSuites` 里新增了一条 `panelOpeningFocus(rows:[], packCardIDs:[],
+   > ctaOperable:false) == nil` 的钉子**（T7 原指令清单没点名它）—— T7 的 `.manageSounds`（in-flight 恒
+   > 可操作）落地后它必红，须**主动重写为 `== .manageSounds`**，别当意外红。
+
 6. **测试要重写，不是删**（计划第一版没算这笔账）：
    `CoverageStateSuite` 有 **8 条**用例钉死 `previewClaimsActionFocus` / `eventActionOperable`
    的现语义；`PanelFocusOrderSuite:302` 那条「首焦点必须 ≠ `order.first`」的**前提**也变了
    （muted 行的首焦点从「跳过禁用的试听」变成「落在文件名下拉上」）；
    **`PanelFocusOrderSuite:329` 整条 suite 钉死「零行首焦点 = `.dropZone`」**（Codex 逮到 ——
    它连名字都写着 drop zone），T7 落地时它必红，重写为 `.manageSounds`，不许删。
+   > **2026-07-17 追记**：这条已不再钉 `.dropZone`（见第 5 条追记，P1#1 提前落地）。现在它钉的是
+   > 无卡→`.disconnect`、有卡→首张包卡、in-flight 零形状→`nil`。T7 要做的是把这些**当前**形状迁到
+   > `.manageSounds`，而不是「重写一条写着 dropZone 的断言」。
 
 7. **三态共用 `Menu` 的 VoiceOver 输出要成为契约，不只是焦点槽**（Codex 逮到，2026-07-17 补）：
    今天 present 行的文件名是**非控件** `Text`（`EventRowView.swift:254`，行级 a11y 合并播报），

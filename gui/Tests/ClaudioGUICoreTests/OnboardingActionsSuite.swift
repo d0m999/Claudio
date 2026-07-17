@@ -1295,10 +1295,11 @@ func runOnboardingActionsFixSuites() {
         // hasMasterVolume: true —— 这条测试关心的是 revealDetail/disconnect 的相对顺序，跟主音量
         // 无关，显式给 true 只是让这个 fixture 继续代表「滑块真的渲染在屏幕上」那一半（`/codex
         // review` P1 修复后，.masterVolume 不再是 .operational scope 里的恒定行为，见
-        // PanelFocusOrderSuite 对 hasMasterVolume: false 那一半的测试）。排在 .dropZone 之前
-        // ——PLAN-MASTER-VOLUME.md D41；零事件行只是 fixture，生产恒 4 行。
+        // PanelFocusOrderSuite 对 hasMasterVolume: false 那一半的测试）。零事件行只是 fixture，
+        // 生产恒 4 行。（cc59d52 / PLAN-SOUND-MANAGER T1 删掉 `.dropZone` 后，滑块之后直接是
+        // revealDetail/disconnect。）
         expect(
-            operational == [.masterVolume, .dropZone, .revealDetail, .disconnect],
+            operational == [.masterVolume, .revealDetail, .disconnect],
             "运行态：失败行在「断开连接」之上。得到 \(operational)")
 
         let withoutToggle = panelFocusOrder(

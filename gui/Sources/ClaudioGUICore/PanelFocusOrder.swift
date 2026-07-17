@@ -28,10 +28,18 @@ public enum PanelFocusTarget: Sendable, Hashable {
     /// coverage state, only what activating it does.
     case eventAction(Event)
     /// The master volume slider control row (PLAN-MASTER-VOLUME.md D41). Sits after every event
-    /// row's action/mute pair and before the drop zone, aligning with the panel's visual layout
-    /// (line between event rows and drop zone).
+    /// row's action/mute pair and before the pack gallery cards, aligning with the panel's visual
+    /// layout (the slider row sits between the event rows and the pack gallery).
     case masterVolume
-    case dropZone
+    // NOTE (cc59d52 / PLAN-SOUND-MANAGER T1): the panel-bottom drop affordance's focus slot
+    // `.dropZone` was removed here together with `AudioDropZoneView` (finding ①: it copied bytes
+    // but never wrote `manifest.json` — an orphan-maker). A focus target with no rendered control
+    // is exactly the ghost the "only real controls claim a slot" rule (see `panelFocusOrder(_:)`'s
+    // `.masterVolume` gate) forbids — and it was reachable: `PanelView.applyFirstFocus` opened
+    // `.needsPack`/`.malformed`/`.unwritable` focus onto it, i.e. onto nothing. PLAN-SOUND-MANAGER
+    // T7 reintroduces a real panel-bottom control ("管理声音包…") as `.manageSounds` — an
+    // unconditionally rendered+operable slot that becomes the operational scope's "never nil"
+    // anchor. Until then the panel has no bottom affordance, so it claims no slot.
     case packCard(id: String)
     /// 一条失败行上的「查看原因」（T17）—— 它是一个**可聚焦控件**，不是装饰：WCAG 2.1.1 要求
     /// 键盘用户也能展开那条原因，而这个仓库已经为「成功/拒绝之后只剩鼠标可用」记过一条 P3 账。
@@ -90,7 +98,7 @@ public enum PanelFocusScope: Sendable, Equatable {
 /// mute toggle (in ``Event/allCases`` order — this order follows the row's VISUAL reading
 /// order left-to-right, ``EventRowView``'s `trailing` renders the action control before
 /// `muteIndicator`, which sits rightmost; a11y review a11y-architect FIX 5: focus order must
-/// track visual order, not an arbitrary model-first convenience), then the drop zone, then
+/// track visual order, not an arbitrary model-first convenience), then
 /// every pack gallery card (in ``availablePacks(config:environment:)``'s own order).
 /// `order.first` is where focus lands the instant the panel opens (ENGINEERING.md: "打开
 /// 焦点落首个可操作项").
@@ -115,7 +123,9 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         // （`/codex review` 2626083/47459a7 抓到的 P1：这里曾经无条件 append，`.needsPack`/
         // `.malformed`/`.unwritable` 下会把首焦点指向一个不存在的控件）。
         if hasMasterVolume { order.append(.masterVolume) }
-        order.append(.dropZone)
+        // `.dropZone` used to be appended here unconditionally; it left with `AudioDropZoneView`
+        // (cc59d52 / PLAN-SOUND-MANAGER T1 — see the enum note). T7 re-adds a `.manageSounds` slot
+        // in this position once the "管理声音包…" control exists.
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
         // 面板最底部：失败行（若有）在「断开连接」之上 —— 焦点序跟随视觉序。
         if hasDetailToggle { order.append(.revealDetail) }
@@ -143,7 +153,7 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// present-AND-muted case belongs here: `unmapped`/`broken` rows' action slot is the
 /// always-operable import affordance, not the (also-rendered, but no-longer-focus-owning)
 /// disabled preview button (see ``EventRowView``). Every non-action target — mute toggles, the
-/// master volume slider, the drop zone, gallery cards — is operable and never filtered (the
+/// master volume slider, gallery cards — is operable and never filtered (the
 /// slider only ever appears in a fully-operational panel, PLAN-MASTER-VOLUME.md D23/D41).
 ///
 /// ``panelFocusOrder(_:)`` itself is intentionally NOT changed: it still lists every slot
@@ -160,10 +170,20 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// would be a lie. (T17c: the previous wording — "Returns `nil` only for a genuinely empty order"
 /// — was written before `ctaOperable` existed and was false the moment it landed.)
 ///
-/// The OPERATIONAL scope never returns `nil`: it always contains ``PanelFocusTarget/dropZone``,
-/// which is unconditionally operable — true regardless of `hasMasterVolume`, since `.dropZone`
-/// is appended unconditionally (``PanelView/operationalPanel`` renders the drop zone in every
-/// `configState`, not just `.operational`).
+/// The OPERATIONAL scope returns `nil` in exactly ONE shape: an in-flight panel with zero event
+/// rows, zero pack cards and no slider (`ctaOperable == false`, so even the always-appended
+/// `.disconnect` is not operable) — the honest counterpart to the onboarding in-flight `nil`
+/// below. In every reachable non-in-flight shape it is non-nil: a `.operational` panel's first
+/// row's mute is always operable; a `.needsPack` panel's first pack card is (the gallery renders
+/// in every `configState`); and when neither exists, the always-appended `.disconnect` (or, when a
+/// failure row shows, its `.revealDetail`) anchors it while `ctaOperable`.
+///
+/// (Before T1 this could NEVER be nil, because `.dropZone` was appended unconditionally and was
+/// always operable. That anchor left with `AudioDropZoneView` — cc59d52 / PLAN-SOUND-MANAGER T1 —
+/// because it was a focus slot for a control that no longer rendered, and `PanelView` was opening
+/// `.needsPack`/`.malformed`/`.unwritable` focus straight onto it. PLAN-SOUND-MANAGER T7 restores
+/// an unconditional anchor with `.manageSounds`, at which point the operational scope is once again
+/// never-nil for every shape, in-flight or not.)
 ///
 /// 焦点在 in-flight 期间该落到哪，是一个仍未定的产品问题（见 TODOS「in-flight 期间 onboarding 的
 /// 键盘焦点无处可去」）—— 当前行为是**诚实的空**，不是一个已经想清楚的答案。
@@ -197,7 +217,7 @@ public func panelFirstFocusTarget(
         // not by this switch. If `hasMasterVolume` was `false`, `panelFocusOrder(_:)` never put
         // `.masterVolume` in the order in the first place, so this arm simply never sees it —
         // this `true` only fires for a slider that is ACTUALLY on screen.
-        case .eventMute, .dropZone, .packCard, .masterVolume:
+        case .eventMute, .packCard, .masterVolume:
             return true
         }
     }
