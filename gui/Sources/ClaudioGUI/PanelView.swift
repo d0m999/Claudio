@@ -18,7 +18,6 @@ import SwiftUI
 /// unit-tested — this file's own job is ONLY correct composition, not re-deciding anything.
 public struct PanelView: View {
     @StateObject private var onboardingViewModel: OnboardingViewModel
-    @StateObject private var dropZoneViewModel: AudioImportViewModel
     /// 「这一句刚说过」的去重器（T17g）—— 让「一趟 update pass ≤ 一条播报」在结构上成立。
     /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
     @StateObject private var announcer: PanelAnnouncer
@@ -115,8 +114,8 @@ public struct PanelView: View {
         self.focusCoordinator = focusCoordinator
         self.onPanelWidthChange = onPanelWidthChange
         // `NSSoundAudioPreviewPlayer` is internal (module-private, not exposed as a public
-        // API surface) — mirrors `AudioDropZoneView`'s own init, which constructs it the
-        // same way rather than taking it as a public, overridable parameter.
+        // API surface), constructed here rather than taken as a public, overridable
+        // parameter — this panel is the only production owner of a preview player.
         self.previewPlayer = NSSoundAudioPreviewPlayer()
 
         // The runner is built INSIDE the `StateObject(wrappedValue:)` autoclosure, together with
@@ -146,15 +145,13 @@ public struct PanelView: View {
         // 全部构造成**纯 local 实例**，再各自 wrap 进 `@StateObject` / `@State`，**并把同一实例**交给
         // `PanelConfigController`。绝不在这里读 `_someStateObject.wrappedValue` —— 那会在 SwiftUI 装好
         // state 之前重新求值 autoclosure、每次发一个全新实例（见上面 actionRunner 那段同样的坑）。捕获
-        // local 不碰这个陷阱：`ovm` / `dz` / `perRow` 就是被 wrap 的那几个引用，`panelModel` 的
+        // local 不碰这个陷阱：`ovm` / `perRow` 就是被 wrap 的那几个引用，`panelModel` 的
         // `afterFullReload` 闭包捕获它们，跨-view-model 协调因此打到的是面板真正在渲染的那几个实例。
         let onboardingViewModel = OnboardingViewModel(
             environment: onboardingEnvironment,
             actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment))
 
         let loadedConfig = loadPanelConfig(from: configFile).resolvedConfig
-        let dropZoneViewModel = AudioImportViewModel(
-            packID: loadedConfig.selectedPack, environment: audioEnvironment)
         var perRow: [Event: EventRowImportViewModel] = [:]
         for event in Event.allCases {
             let importViewModel = AudioImportViewModel(
@@ -163,12 +160,11 @@ public struct PanelView: View {
         }
 
         _onboardingViewModel = StateObject(wrappedValue: onboardingViewModel)
-        _dropZoneViewModel = StateObject(wrappedValue: dropZoneViewModel)
         _announcer = StateObject(wrappedValue: PanelAnnouncer())
         _rowImportViewModels = State(initialValue: perRow)
 
         // config 读模型 + 静音/切包写路径的**全部行为**都住在这个可测的类里。`afterFullReload` 是全量
-        // reload 里 config 读模型**之外**的那一半：onboarding 重探 + 两组 import view-model retarget 到
+        // reload 里 config 读模型**之外**的那一半：onboarding 重探 + 每行 import view-model retarget 到
         // 新包 —— 与旧 `refresh()` 逐行等价（onboarding 那行挪到 config 重载之后，两者互不依赖，结果不变；
         // retarget 收到刚重载出的 config，用它的 `selectedPack`，与旧代码一致）。
         _panelModel = StateObject(
@@ -178,7 +174,6 @@ public struct PanelView: View {
                 environment: audioEnvironment,
                 afterFullReload: { reloadedConfig in
                     onboardingViewModel.refresh()
-                    dropZoneViewModel.retarget(to: reloadedConfig.selectedPack)
                     for rowViewModel in perRow.values {
                         rowViewModel.retarget(to: reloadedConfig.selectedPack)
                     }
@@ -571,14 +566,6 @@ public struct PanelView: View {
             ) { _, message in
                 FailureRow(message: message)
             }
-            AudioDropZoneView(
-                viewModel: dropZoneViewModel,
-                // D28: a closure, not a captured value — resolved at PLAY time (inside
-                // AudioDropZoneView's own `.onAppear`-bound `onImportSucceeded` handler), so a
-                // volume change made after the panel opened is still honored, instead of freezing
-                // at whatever `panelModel.config.masterVolume` happened to be at construction.
-                currentVolume: { previewVolume(for: panelModel.config) })
-
             // T17f：**这里是告知真正的家 —— 而且位置本身是它文案的一部分。**
             //
             // 一次成功的「接管」必然把 state 推成 `.installed`（`runDiskAction` 无条件 `refresh()`），
