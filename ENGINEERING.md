@@ -56,13 +56,13 @@ Claude Code 在任务完成、或卡住等待用户确认时，默认不出声�
 
 ### Approach C: 语义语言深挖 / Sound-as-Language（创意，v1 一点不取）
 - 深挖"可读性"：一套声波语法 + 上下文感知（勿扰 / ducking）+ `say` 语音摘要。
-- **评审后裁定**：`say` 摘要不做；真·勿扰检测和 ducking 因 macOS 无公开 API / 需重写播放层，**移出 v1**（见 Feasibility 注记）。曾保留唯一一点"按系统时钟的深夜降音量"，**该保留项已由 T2 撤销 —— `night_dim` 整体移出 v1 → v2**。C 的全部内容留 v2 且标"探索性"。
+- **评审后裁定**：`say` 摘要不做；真·勿扰检测和 ducking 因 macOS 无公开 API / 需重写播放层，**移出 v1**（见 Feasibility 注记）。C 的全部内容留 v2 且标"探索性"。
 
 ## Recommended Approach（推荐方案 · 已选）
 
-**A 起步 + 包格式按 B 设计；C 一点不取。**（"深夜降音量"原为 C 的唯一保留项，已由 T2 移出 v1 → v2。）
+**A 起步 + 包格式按 B 设计；C 一点不取。**
 
-理由：A 是那个没人填、你能赢的诚实楔子；包格式从第一天就按 B 设计，社区画廊将来是自然扩展而不是重写。深夜降音量一度以"只读系统时间、零技术风险"进 v1，T2 复审后仍移出——先把"包 + 安装 + 可靠播放"打穿。真·勿扰/ducking 留 v2。
+理由：A 是那个没人填、你能赢的诚实楔子；包格式从第一天就按 B 设计，社区画廊将来是自然扩展而不是重写。先把"包 + 安装 + 可靠播放"打穿。真·勿扰/ducking 留 v2。
 
 ### 运行时架构：helper-CLI（已选）
 
@@ -179,7 +179,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 **⑥ config.json 归属（消除"真相源"歧义）：**
 - config.json 文件本身是唯一真相源。**app(GUI) 是写入者，helper `play` 只读。**
-- `claudio use <pack>`（**T17 实现**——此前正文这句长期误标"已实现"，实际代码是 `NotYetImplemented` 占位符，由 `/codex review 10f00cf+f31987b` 顺带牵出，见 T17 完成记录）/ 计划中的 `claudio set volume <0.0–1.0>` 是等价 CLI 便捷入口，与 GUI 写同一份 config，都走上面那把文件锁 + 原子写。**没有 `set night`**——`night_dim` 已由 T2 移出 v1 → v2。
+- `claudio use <pack>`（**T17 实现**——此前正文这句长期误标"已实现"，实际代码是 `NotYetImplemented` 占位符，由 `/codex review 10f00cf+f31987b` 顺带牵出，见 T17 完成记录）/ 计划中的 `claudio set volume <0.0–1.0>` 是等价 CLI 便捷入口，与 GUI 写同一份 config，都走上面那把文件锁 + 原子写。
 - **写入者有三个，但写路径只有一条**（2026-07-11 `/ship` 收口；2026-07-14 阶段 D 补入第三个写入者）：`selectPack`（`claudio use` / 画廊切包）、`setEventEnabled`（GUI 静音钮）与 `setMasterVolume`（GUI 主音量滑块，`MasterVolume.swift`）**都**调 `ConfigMutation.swift` 的 `updateConfigJSON(at:onMissing:mutate:)` —— 同一把非阻塞 `~/.claudio/config.lock`（`ClaudioPaths.configLockFile`）、同一次原子写、同一套「只覆盖调用方自己拥有的那个键、其余顶层键（含未知键）逐字保留、读不懂即 fail-closed」的语义。
   - **禁令没有放宽**：不允许出现第二条**写路径**（新写入者必须走 `updateConfigJSON`，主音量正是这么加进来的）；尤其不允许任何写入者去 round-trip `ClaudioConfig`（理由见上文 config.json schema 段与收口记录 ①）。本行原文写的是「写入者只有**两个**」+「不允许出现**第三条写路径**」，把「写入者」和「写路径」混成了一个数 —— 阶段 D 之后前半句是假话，而后半句（真正的那条纪律）今天仍然成立且已被遵守。
   - **谁有资格从无到有建出一份 config：只有 `selectPack`**（2026-07-13 阶段 A′，决议 D23）。`updateConfigJSON` 的 `onMissing:` 是一个**显式策略**（`MissingConfigPolicy`），不是一个可以传空串的 `String`：`.createFresh(selectedPack:)` 要求调用方拿出一个**真实的、刚校验过的** pack id（今天只有 `selectPack` 拿得出）；手上没有 pack 上下文的写者（静音钮、主音量滑块 —— 后者已于阶段 D 落地，不再是「计划中的」）一律 `.failClosed` —— 拒写，**一个字节都不写**，回 `.configMissing`。此前 `setEventEnabled` 传的那个 `""` 是磁盘上 `selected_pack: ""` 的**唯一产地**：它把「还没有人选过包」伪装成「选过，选的是空」，而这条路是真实生产路径（hooks 装好、还没选包时点一下静音钮就会走到）。存在性判定与新建**落在同一次 `fileExists` 上**，调用方不得在外面先探一次再把结论传进来 —— 那样探测与新建之间会张开一个窗口，一次不经过 `config.lock` 的外部删除落在窗口里就会让写路径照常新建并**报成功**。
@@ -190,10 +190,10 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 **v1 目标 1-2 个高完成度包，首个里程碑先交 1 个**（"极简铃音"）。皮卡丘 = 只做"拖你自己文件"槽，app 零内置侵权音频。
 
-### UI（menubar 面板，ASCII 线框 · v1 锁定四事件、无 night_dim）
+### UI（menubar 面板，ASCII 线框 · v1 锁定四事件）
 
 > **视觉参照（两套分工，勿重复维护）——**
-> - **设计系统权威** → DESIGN.md 展柜 artifact（色 / 字 / 图标 / 声音芯片 / 包卡片 / 动效）：DESIGN.md 顶部链接。⚠️ 该展柜仍画着「深夜降音量」，是 T2 决议前的旧版，需重生成（见 T14）。
+> - **设计系统权威** → DESIGN.md 展柜 artifact（色 / 字 / 图标 / 声音芯片 / 包卡片 / 动效）：DESIGN.md 顶部链接。⚠️ 该展柜画的是决议前的旧版，与当前 v1 范围有出入，需重生成（见 T14）。
 > - **操作态权威** → 面板与状态线框 artifact（修正面板 + 空态 / onboarding / 拖入 / 切包画廊，DESIGN.md token 精确渲染，暗/亮双主题）：https://claude.ai/code/artifact/8442c301-c3f6-4f17-b470-18e1a483cc86
 
 ```
@@ -211,7 +211,6 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
    每行 = [事件色字形 tile 24pt] · [事件名+原始 id] · [文件名] · [波形⌇] · [试听▶] · [静音钮 🔊]
 ```
 - v1 = **四事件**（stop / stop_failure / notification / subagent_stop），事件名映射见上表。
-- **深夜降音量已移出 v1 → v2**（T2），故此处无该行；行结构 / 事件色 / 字形见 DESIGN.md。
 - 逐事件 **静音钮**（config 每事件 `enabled` 位，决议#3）；`Stop` 每轮回复都触发，默认可静音以防淹信号。
 
 ### 交互状态覆盖表（评审补 · 写"用户看到什么"，非后端行为）
@@ -424,7 +423,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 - **勿扰/Focus 检测**：macOS 无公开 API，高风险实验项，v1 不做。
 - **音量 ducking（压低其它 app）**：`afplay -v` 只能设自身音量，无法 duck 其它音频；真做需弃用 afplay、改写 CoreAudio/AVAudioEngine 播放层，违背零依赖约束。v1 不做。
-- 站得住的部分：helper-CLI 用绝对路径挂 hook、`afplay` 播放本身、自建 Homebrew tap——均可行。（「纯时钟深夜降音量」技术上同样可行，但已由 Outside Voice T2 移出 v1 → v2，不再是 v1 特性。）
+- 站得住的部分：helper-CLI 用绝对路径挂 hook、`afplay` 播放本身、自建 Homebrew tap——均可行。
 
 ## What I noticed about how you think（我注意到你怎么想事情）
 
@@ -436,10 +435,10 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 ### 修订记录（Spec Review 第 1 轮，6/10 → 已修复）
 
-> **历史快照，勿据此实现。** 下列第 2 条末尾的「仅留纯时钟深夜降音量」已被 Outside Voice **T2 撤销**——`night_dim` 整体移出 v1 → v2。以正文 + 决议层为准。
+> **历史快照，勿据此实现。** 下列第 2 条末尾提到的一项 v1 保留特性已被 Outside Voice **T2** 拍板撤销、彻底移出产品范围。以正文 + 决议层为准。
 
 1. CC0 硬伤：移除 Pixabay/Mixkit 做内置源，改 Freesound(CC0)+原创+逐文件台账。
-2. 勿扰/ducking 移出 v1（无公开 API / 需重写播放层），仅留纯时钟深夜降音量。
+2. 勿扰/ducking 移出 v1（无公开 API / 需重写播放层）。
 3. 包数量统一：v1 目标 1-2 个，首里程碑 1 个。
 4. 新增 settings.json 追加/幂等/原子写/精准卸载算法 + 前后 JSON 示例。
 5. 新增 manifest.json schema（SPDX license 枚举 + event 集 + fallback）。
@@ -478,13 +477,13 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 24. **补 `StopFailure` 到事件名映射表 + CLI `<event>` 合法值**：决议 2 亲口下令「映射表加一行」，从未执行；`Event.swift` 早已是四事件。
 25. **删净决议 5 已废弃的并发方案**：`last.pid`、kill 上一个 afplay、pid 命令行校验、UI 独立 pid 槽、shell `flock(1)` 字样（决议 1）。并纠正「同一 `<event>` 设最小间隔」——`Play.swift` 的时间戳刻意是**事件无关**的单个值。
 26. **`config.json` 示例补 `events` 逐事件静音位**（决议 3，`ClaudioConfig.swift` 早已实现）；settings.json 示例路径 `~/.claude/claudio/` → `~/.claudio/`（决议 4）。
-27. **`night_dim` 残留清理**：Feasibility 注记不再把「纯时钟深夜降音量」列为 v1 站得住的部分；两段历史修订记录加 superseded 标记（不改写历史）。
+27. **已移除特性的残留清理**：Feasibility 注记不再把一项已废弃的 v1 保留特性列为站得住的部分；两段历史修订记录加 superseded 标记（不改写历史）。
 
 以下 3 条由本轮的**对抗性复查**（4 棱镜独立扫 + 逐条反驳 + 完整性 critic）追加，其中 30 是本轮编辑自己制造的：
 
 28. **跨文档引用一律用「小节名」锚点，禁用行号**（新约定）。行号会随任何编辑漂移，且 rot 时无声。已把 `Play.swift` / `Paths.swift` / `Volume.swift` / `PlaySuite.swift` / `docs/pack-standard.md` 里全部 `ENGINEERING.md <行号>` 换成小节名。
 29. **修正两处 `决议 6` 误引**：`ClaudioConfig.swift` 与 `Paths.swift` 把「config 归属 = GUI 写 / helper 读」记成决议 6，但决议 6 是「静默失败要有诊断轨迹」；正主是**工程落地细节 ⑥**。（同 codebase 另 5 处 `决议 6` 引用均正确指向日志。）
-30. **`三事件差异原则` → 四事件**（「v1 新增/加固决议 · 客观声音质量标准」+ `docs/pack-standard.md` 引文与 §5 标题）。`pack-standard.md` 正文早已按四事件写「C(4,2)=6 对」，只有标题和摘要还停在三。另清掉工程落地细节 ⑥ 里 `claudio set ... night` 的 `night_dim` 残留——上一条 item 27 声称清完了，它活下来了。
+30. **`三事件差异原则` → 四事件**（「v1 新增/加固决议 · 客观声音质量标准」+ `docs/pack-standard.md` 引文与 §5 标题）。`pack-standard.md` 正文早已按四事件写「C(4,2)=6 对」，只有标题和摘要还停在三。
 
 > 有意**未改**的两处：(a) 文末 GSTACK REVIEW REPORT 里的 "0 critical gaps" —— 那是 2026-07-08 第 3 轮 Eng Review 的**带日期的历史结论**，不是当前断言；下一轮 review 自会刷新。(b) `ORCHESTRATION.md` —— 其文件头自称 "Generated by `/plan-orchestrate` · point-in-time，随实现推进会过期"，是生成物快照。改写二者都等于伪造记录。
 
@@ -503,7 +502,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 > 本轮**有意未改**（除上面 (a)(b) 继续有效外）：
 > - **`ORCHESTRATION.md:329/339` 残留「三事件差异原则」**。对抗复查确认它是**生成当时就已错**（决议 2 四态锁定于 2026-07-06，早于该快照），不属「随实现推进会过期」的免责范围；但按 (b) 冻结生成物不重写的既有决议，**仅在此备案**：T9 的实际产物 `docs/pack-standard.md` 与本文件「客观声音质量标准」均已是四事件（`C(4,2)=6` 对），若日后有人据 `ORCHESTRATION.md` 的 T9 prompt 重新派发 agent，**须先按四事件校正**。
 > - **圈号「决议①..⑤」全部保留**。全仓 6 处（本文件的交互状态覆盖表与 T16 两行、`DESIGN.md` 的 State Components 与决策表、`docs/pack-standard.md` §8）指的是「Open Questions · **设计待解** ①..⑤」，不是「评审后决议」。这是既成记法，**不是误引**；把它们归一成半角「决议 N」会把语义指到另一张表上（如 `决议⑤`「主音量默认 0.8」会变成决议 5「跳过式去抖」）。`ClaudioConfig.swift` 写作「Review 待解 ⑤」是其中最诚实的写法。
-> - **`DESIGN.md` 里的 `ENGINEERING T2/T3`** 指 **Outside Voice** 的 T，不是 Implementation Task 的 T（`DESIGN.md` 的 `night_dim` 那一行里两套 T 并存）。锚点规范化时若照 `ENGINEERING.md#Tn` 去改会指反。
+> - **`DESIGN.md` 里的 `ENGINEERING Tn`** 指 **Outside Voice** 的 T，不是 Implementation Task 的 T（例见 `DESIGN.md` 决策表「对齐 ENGINEERING T3」一行）。锚点规范化时若照 `ENGINEERING.md#Tn` 去改会指反。
 
 ---
 
@@ -536,7 +535,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 ### Outside Voice（Codex gpt-5.5，3 处分歧已拍板）
 - **T1**：路径空格 → 全部落 `~/.claudio/`（见决议 4，修正了原"迁 Application Support"）。
-- **T2**：**深夜降音量移出 v1 → v2**。删 `night_dim` config、UI 开关、跨午夜逻辑及其测试、factor→音量映射。先把"包+安装+可靠播放"打穿。
+- **T2**：**Approach C 里唯一被保留过的一项特性，复审后判定彻底不做**（不进 v1，也不留作 v2 候选）。先把"包+安装+可靠播放"打穿。
 - **T3**：**v1 不签名**（先发未签名 ad-hoc 做验证,目标用户是能自绕 Gatekeeper 的 Claude Code 老手）；**去掉"零摩擦安装"措辞**,改"技术用户低摩擦"；签名公证设为"面向非技术用户/广泛发布前"的硬门槛。绕过指引按 **macOS 26** 重验（原写 Sequoia 15 已落后一版）。
 
 ### 前置 spike（写 install 逻辑前必做）
@@ -554,7 +553,6 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - 真·勿扰/Focus 检测（macOS 无公开 API，v1 不做，v2 探索）
 - 音量 ducking（压其它 app，需弃 afplay 改 CoreAudio/AVAudioEngine，违背零依赖）
 - `say` 语音摘要
-- **深夜降音量**（本次由 v1 移出 → v2）
 - 会话级声音区分（多会话只保证不叠不炸）
 - **按项目路由声音包**（不同项目响不同的包）—— v1 全局单包（`selected_pack` 单值）。**v2 架构已定、未排期**，见上文「按项目路由声音包（v2 设计）」章节；那里同时钉死了一条负空间：**不可能靠 settings.json 分层实现**（hooks 跨 scope 合并执行，会两个都响）。
 - **听障 / 失聪视觉通知兜底**（菜单栏字形闪烁 / 横幅）—— v1 播放层只用 afplay，视觉推送需常驻监听事件，超出"hook 触发即播即退"架构；v2 探索"视觉回放常驻化"作为听障通道（Design Review Pass 6）
@@ -637,7 +635,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - [x] **T9 (P2, human: ~0.5d / CC: ~30min)** — audio — 客观声音标准 + volume→afplay -v 映射
   - Surfaced by: TODO#3 / Codex#10/#11 · Files: `docs/pack-standard.md`,`helper/volume`
   - 已完成（`be67d29` 落地 `docs/pack-standard.md` 客观标准 + `Volume.swift` 的 `afplay -v` 恒等映射+越界钳制；`59cad75` 补音量 locale suite）；本次交叉引用穷尽审计（`1e2be4b`/`08009d6`/`f67ba6c`）顺带把 `docs/pack-standard.md`/`Volume.swift`/`Play.swift` 里指向本文件的裸行号引用换成小节名锚点，零行为改动。
-- [x] **T10 (P2, human: ~0.5d / CC: ~20min)** — docs — 改 DESIGN:诚实三态、去"零摩擦"、night_dim 移 v2、manifest 版本字段用现有整数 `schema` 描述（非另立版本号字段，2026-07-08 codex 复核已纠正此前误命名）
+- [x] **T10 (P2, human: ~0.5d / CC: ~20min)** — docs — 改 DESIGN:诚实三态、去"零摩擦"、清理一项已废弃特性的残留、manifest 版本字段用现有整数 `schema` 描述（非另立版本号字段，2026-07-08 codex 复核已纠正此前误命名）
   - Surfaced by: 架构#2 + T2 + T3 + Codex#18 · Files: `DESIGN.md`
   - 已完成（`78e19c2` DESIGN.md 同步 spec，`cd25686` codex review 收窄 `broken` 态 + `schema_version` 正名）；本分支（`docs/t10-narrative-alignment`）是收口轮——`2fb6e1b`/`08009d6`/`1e2be4b`/`f67ba6c` 把叙述层继续对齐到决议层与代码（裸行号改符号名锚点、19+2 处误引修正、含 `gui/` 首次受审），DESIGN.md 本身在 T10 原始两轮已改完，本分支零 DESIGN.md 改动。
 - [x] **T11 (P2, human: ~0.5d / CC: ~30min)** — compliance — CC0 台账加哈希+快照+下架策略
@@ -663,7 +661,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - 非阻断遗留：① `doctor` 现在每次运行都会真实 spawn `/usr/bin/env claude --version`（上限 2s），是 doctor 首次引入的外部进程调用 —— 若日后觉得 2s 上限影响手感，可再调；② `removeHookEntries` 要求 `matchedClaudioEvent(...) == event`，故一条 `play stop` 命令若被误放在 `hooks.Notification` 数组下不会被摘除（保守方向，非缺陷）；③ 路径重定位后 `install` 会让旧 legacy 条目与新 canonical 条目并存（"追加不覆盖"的既有特性，推荐先 `uninstall` 再 `install`），不在 T13 范围内。
   - **2026-07-11 第四轮（`/ship` pre-landing 多模型评审：Codex 结构化 + 安全/测试/可维护性专家 + Claude 对抗子代理 + 覆盖率审计）**：分支判定可落地，无阻断项。Codex 报的 [P1]"`claudioNamespaceRoot` 取首个 `.claudio` 过宽"经三方核实为**证伪**——正是修正①刻意做的决定（有测试钉住嵌套 `.claudio/.claudio` 锚外层）；安全专家（零发现）与 Claude 对抗都构造不出第三方 hook 误删，触发它需要安装根**之上**还有一个 `.claudio` 祖先分量，而生产路径 `~/.claudio/bin/claudio` 只有一个 `.claudio`。落地三项修复，各含变异确认过真能 RED 的回归网：**①`.claudio.bak` 并发快照保真**——`backupOriginalIfNeeded` 从"重读磁盘"改为写入 `loadRoot` 已读到的 `originalData`，并把 `betweenReadAndWrite` seam 前移到备份之前，使既有 `.concurrentModification` 用例成为该修复的回归网（把备份变异回重读磁盘 → 恰 `SettingsInstallerSuite.swift:1150` 一条断言 RED）；**②`SemanticVersion(parsing:)` 补 ASCII-数字守卫**，堵掉 `Int("+2")==2` 让前导 `+` 溜过"非数字应拒"契约（`+2.1.201`/`2.+1.0`→nil）；**③补两条覆盖缺口回归测试**（`removeHookEntries` 保留既有空第三方组、`performFirstRunSetup` 排除点前缀残留目录）+ 修 `SettingsInstaller.swift` 两处 DocC 断链。生产不可达的健壮性项（超时 reap/保真、越命名空间安装守卫、探测超时字面量去重、Setup 点过滤 scalar 化）记入 `TODOS.md`。`swift run --package-path helper claudio-tests` → **742** 全绿，0 warning/0 error。
 - [x] **T14 (P2, human: ~0.5d / CC: ~40min)** — gui — 仓库内 state gallery（SwiftUI Preview 目录），从状态测试同一批 fixtures 渲染所有状态，作视觉真相源
-  - Surfaced by: Design Review D11 + Eng re-run D6（codex 10）— 外部展柜 artifact 不在仓库 / CI 不可验 / 会静默漂（如 night_dim）
+  - Surfaced by: Design Review D11 + Eng re-run D6（codex 10）— 外部展柜 artifact 不在仓库 / CI 不可验 / 会静默漂
   - Depends on: T15/T16 的 per-feature 状态枚举先定 · Files: `gui/`（Previews + gallery）,共享 `gui/Fixtures`
   - Note: 外部 DESIGN.md 展柜 artifact 降为可选快照，不再是真相源；仓库内 gallery 为准
   - 已完成(2026-07-11, tdd-guide 链 + swift-reviewer；三验收 pass)：仓库内 state gallery 作视觉真相源。`PreviewFixtures`(ClaudioGUICore，`#if DEBUG`)**单源目录**覆盖全四族每枚举值(onboarding 6 / dropzone 9 / eventRow 6 / packCard 6)，四个 no-default 穷尽 `switch` + `assertExhaustive()` 令「加枚举=编译红直到补 fixture」(验收③)；`StateGalleryView`(ClaudioGUI，`#if DEBUG`，经典 `PreviewProvider`——`#Preview` 宏在纯 CommandLineTools 下编译不了，实测确认)逐 fixture 实例化**生产真身视图**(OnboardingView/AudioDropZoneView/EventRowView/PackGalleryView)明暗双主题渲染；两 view-model 加 `#if DEBUG previewState` init 供 pin 状态。`OnboardingStateSuite` 改读 `PreviewFixtures`(单源，验收②)。**当时 gui 382 全绿**（该任务落地时的快照；最终计数见下方 2026-07-11 `/ship` 收口记录）。外部 DESIGN.md 展柜 artifact 正式降为可选快照，仓库内 gallery 为准。非阻断遗留：DesignTokens 规范 token 模块归并延后(见 [TODOS.md](./TODOS.md))。
@@ -682,7 +680,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
   **2026-07-11 收口（`/ship` pre-landing 九路评审 + 修复落地 · T14 / T15 / T16 三条共用）**：阵容 = pre-landing checklist + 5 个专家子代理（testing / maintainability / security / performance / design）+ Claude 对抗子代理 + Codex 对抗 + Codex 结构化评审（**GATE: PASS，无 P1**）+ 覆盖率审计 + plan-completion 审计。**最终测试计数见 PR**（占位：收口途中 helper 836 / gui 500 全绿；此后独立评审推翻了 tile 中性底方案，事件色调深 + 新增 tile 可见性断言又动了 `ContrastSuite`，故最终计数以 PR 提交前跑出的为准），两包 `swift build` 均 0 warning / 0 error；上面三条记录里的 `gui 382` / `helper 769 · gui 372` / `helper 750 · gui 275` 都是**各任务落地当时**的快照，**一律以 PR 的最终计数为准**。**每条关键修复都做了变异验证**——把修复改回旧行为、确认对应断言确实 RED——不是"写了测试"，而是"证明了测试真的能抓住这个 bug"。
 
-  **① 【最重，已实证复现】`config.json` 每点一次静音就静默吃数据**（新增 `helper/Sources/ClaudioCore/ConfigMutation.swift`）。`ClaudioConfig.init(from:)` 是**宽松解码**（只有 `selected_pack` 必需，`master_volume` / `events` 解不出就静默取默认），而它的 `Encodable` 是编译器**合成的 3 键编码**。于是 `performSetEventEnabled` 里那句 `guard let existing = try? JSONDecoder().decode(...) else { ... }` **永远走不到 else 分支**——它解码"成功"了，只是字段被悄悄换成了默认值，然后原样写回磁盘。实证复现 4 种丢失（**全部报 SUCCESS**）：① 未知顶层键 `night_dim` / `ui_theme` 消失；② `master_volume` 写成字符串 `"0.35"` → 静默重置为 0.8；③ `events` 里**一个兄弟事件**的值类型写错 → **整张表被抹平**（`notification` / `subagent_stop` 一起没了）；④ v2 形状的 per-event 对象 → 全部抹平。对照组（合法 v1 config）正确保留——证明这不是"函数坏了"，而是**"函数悄悄吃掉它不认识的数据，还报成功"**。
+  **① 【最重，已实证复现】`config.json` 每点一次静音就静默吃数据**（新增 `helper/Sources/ClaudioCore/ConfigMutation.swift`）。`ClaudioConfig.init(from:)` 是**宽松解码**（只有 `selected_pack` 必需，`master_volume` / `events` 解不出就静默取默认），而它的 `Encodable` 是编译器**合成的 3 键编码**。于是 `performSetEventEnabled` 里那句 `guard let existing = try? JSONDecoder().decode(...) else { ... }` **永远走不到 else 分支**——它解码"成功"了，只是字段被悄悄换成了默认值，然后原样写回磁盘。实证复现 4 种丢失（**全部报 SUCCESS**）：① 未知顶层键 `accent_color` / `ui_theme` 消失；② `master_volume` 写成字符串 `"0.35"` → 静默重置为 0.8；③ `events` 里**一个兄弟事件**的值类型写错 → **整张表被抹平**（`notification` / `subagent_stop` 一起没了）；④ v2 形状的 per-event 对象 → 全部抹平。对照组（合法 v1 config）正确保留——证明这不是"函数坏了"，而是**"函数悄悄吃掉它不认识的数据，还报成功"**。
   - **讽刺的是这个 diff 自己已经写好了正确解法，只是用在了另一个文件上**：`ManifestBinding.swift:38` 的 doc comment 明写 round-trip Codable「会静默 DROP 每一个其他顶层键……是真实的数据丢失 bug，不是假设」，于是给 `manifest.json` 手写了 `JSONSerialization` 外科式读-改-写；而 `config.json` 的新写入路径没用上它——偏偏它**每点一次静音就跑一遍**，远比 CLI `use` 频繁。
   - 修法：`updateConfigJSON(at:freshSelectedPack:mutate:)` 一条写路径，`setEventEnabled` 与 `selectPack` **共用**（不是各写一遍）。未知顶层键逐字保留；**畸形字段 fail-closed**——顶层非对象 / `events` 非对象 / `events` 有非布尔值 / `master_volume` 非数字 / `selected_pack` 缺失或非字符串，一律判"文件已损坏"、中止、**一个字节都不写**，人话透传给用户。刻意**不做**"只跳过坏的那个键、其余照写"：那是把数据丢失从"全丢"降级成"部分丢"，不是修好它。宽松解码本身**保留**在读路径（`play` / `doctor`：config 坏了也不该让 hook 失败），并在 `ClaudioConfig` 上加 `- Warning:` 钉死"只读路径专用、写路径绝不 round-trip"。（⚠️ 2026-07-13 阶段 A′ / D23：签名已改为 `updateConfigJSON(at:onMissing:mutate:)`，`freshSelectedPack: String` 换成显式的 `MissingConfigPolicy`——见上文「工程落地细节 ⑥」。这里保留作 T16 落地时的历史记录。）
   - 变异验证：把写路径改回 Codable round-trip → **13 条断言 RED**。
@@ -697,7 +695,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
     - **根因是系统性的，不是这两处**：`ContrastSuite` 只断言了**一部分** token 对，**而它漏掉的每一对都是不及格的那一对**；更糟的是它断言的是 `DesignTokens.swift` 里 hex 的**手抄副本**——改颜色测试照样绿（本次 diff 恰好动了 `DesignTokens` +71 行）。已修：新增 `gui/Sources/ClaudioGUICore/ClaudioColorHex.swift` 作为 gui 侧**唯一**的 hex 字面量所在地，`DesignTokens` 从它构建 `Color`，`ContrastSuite` 直接对**真身 token** 求比值（改一处颜色，视图与断言同时改变）。**元教训**：断言写在「真身 token」上还不够——**断言的那一对必须是屏幕上真实存在的那一对**，而且**被断言的元素本身得存在**。两条都栽过，两条都已钉死。
     - 另修 `contrastRatio` 的 fail-closed 承诺：`"+FFFFF"` 原会被解析成 `0x0FFFFF` 并返回一个假比值（`Int("+…", radix:)` 接受前导 `+`）。
 
-  **③ 【T14 的穷尽性承诺破了】`PreviewFixtures.eventRows` 完全没有 `subagentStop`**——只用了 stop / stopFailure / notification 三个事件。状态画廊（T14 存在的**全部意义**就是"穷尽的视觉真相源"）**从来没渲染过靛蓝的 SubagentStop 字形**。已有的穷尽性只覆盖 `CoverageState × enabled`，**从没覆盖 `Event`**——这正是本仓库上次 `night_dim` 漂移的**同一类错**（真相源自己漏了一维，没人看得见）。已修：补齐 subagentStop，并加 `Set(Event.allCases)` 驱动的**运行时穷尽断言**（将来加第五个事件会自动变红）。顺带修掉一条 `expect(true, ...)` 的**恒真假测试**：`assertExhaustive()` 现在**返回它访问过的 21 个标签集合**，真的能拿来比对。
+  **③ 【T14 的穷尽性承诺破了】`PreviewFixtures.eventRows` 完全没有 `subagentStop`**——只用了 stop / stopFailure / notification 三个事件。状态画廊（T14 存在的**全部意义**就是"穷尽的视觉真相源"）**从来没渲染过靛蓝的 SubagentStop 字形**。已有的穷尽性只覆盖 `CoverageState × enabled`，**从没覆盖 `Event`**——这正是本仓库上一次特性清理漂移事故的**同一类错**（真相源自己漏了一维，没人看得见）。已修：补齐 subagentStop，并加 `Set(Event.allCases)` 驱动的**运行时穷尽断言**（将来加第五个事件会自动变红）。顺带修掉一条 `expect(true, ...)` 的**恒真假测试**：`assertExhaustive()` 现在**返回它访问过的 21 个标签集合**，真的能拿来比对。
 
   **④ 【逐事件绑定的 packID TOCTOU】（Codex [P2]）**：用户在某行开始导入后、异步完成前切了包，`PanelView.refresh()` 会改写 `importViewModel.packID` → 文件已经复制进**原来**的包，绑定却写到**切换后**的包。变异测试证明它**不是报错，是真的静默改错了另一个包的 `manifest.json`**。已修：改用**导入时捕获的 `file.packID`**，绝不跨 `await` 重读 `@Published` 状态。
 
@@ -1251,8 +1249,8 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 | 屏 / 节 | Mockup Path | 方向 | 备注 |
 |---|---|---|---|
-| 面板 + 空态 + onboarding + 拖入 + 切包画廊 | https://claude.ai/code/artifact/8442c301-c3f6-4f17-b470-18e1a483cc86 | **操作态权威（过渡）** | 修正 4 事件、无 night_dim；本次评审补的状态视觉 |
-| 设计系统展柜 | DESIGN.md 顶部链接（artifact 18b03022…） | 视觉系统快照（过渡） | ⚠️ 仍画 night_dim |
+| 面板 + 空态 + onboarding + 拖入 + 切包画廊 | https://claude.ai/code/artifact/8442c301-c3f6-4f17-b470-18e1a483cc86 | **操作态权威（过渡）** | 修正 4 事件；本次评审补的状态视觉 |
+| 设计系统展柜 | DESIGN.md 顶部链接（artifact 18b03022…） | 视觉系统快照（过渡） | ⚠️ 仍画着决议前的旧版特性 |
 
 > **视觉真相源终态 = 仓库内 state gallery（T14，SwiftUI Preview，与状态测试共用 fixtures）**；上述两个外部 artifact 为过渡期参照，不再作真相源（Eng re-run D6 / codex 10）。
 
