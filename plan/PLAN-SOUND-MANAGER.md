@@ -1,8 +1,12 @@
 # PLAN — 声音包管理（Sound Pack Manager）
 
-> 来源：`/plan-design-review` 2026-07-15（含 `/codex` 跨模型评审）。设计决议已写入 [DESIGN.md](./DESIGN.md)
-> （「包卡片四态」/「4-slot 覆盖轨」/「行内文件名下拉」/「Sound Packs Window」四节 + 5 条 Decisions Log）。
+> 来源：`/plan-design-review` 2026-07-15（含 `/codex` 跨模型评审）。设计决议已写入 [DESIGN.md](../DESIGN.md)
+> （「包行四态」/「4-slot 覆盖轨」/「行内文件名下拉」/「Sound Packs Window」四节 + Decisions Log）。
 > 本文件是**工程计划**：写路径、契约、验收。视觉真相源是 DESIGN.md，不是这里。
+>
+> **2026-07-17 修订**（用户拍板，AskUserQuestion 四问）：面板包列表 = **竖排整宽行 + 覆盖轨恒显 +
+> 星标显示集（最多 4 行）**。工程契约见 §2.6；T4 / T5 / T7 已按此改写，新增 T16 / T17。
+> ⚠ 排期硬约束：**≤4 过滤的激活不得早于星标 UI（管理窗口）落地**（§2.6 末条）。
 
 ---
 
@@ -70,6 +74,8 @@ case .broken:   importAffordance(label: "文件丢失")
 | 管理界面住哪 | **面板（轻）+ 独立管理窗口（重）** | 全塞进 312pt popover —— `.transient` popover 点一下别处就消失，不适合编辑任务 |
 | 内置包 | **只读**；改 → 引导「复制为我的包」；另给「恢复出厂声音」 | 可写（现状）→ CC0 标说谎 |
 | 行内编辑入口 | **文件名本身升格为原生 `Menu`**（`stop.mp3 ▾`） | 行尾加第三颗 `⋯`（312pt 的行已经挤）；右键菜单（不可发现 + 违反 WCAG 2.1.1） |
+| 面板包列表形制（2026-07-17） | **竖排整宽行 + 覆盖轨恒显**（用户 mockup 全盘采纳） | 横向卡片画廊 +「complete 零图形」（2026-07-15 版 —— 已推翻存档，新旧理由并录于 DESIGN.md Decisions Log） |
+| 面板显示哪些包（2026-07-17） | **星标唯一判据，最多 4 行**（§2.6）：当前包不特赦；出厂内置包默认星（缺键 = 默认 / 空数组 = 清空）；硬上限 4 | 当前包特赦恒显 / 切换自动加星 / 星数不限显示截断 / 零星回落前 4（四条均被否，判词见 DESIGN.md Decisions Log） |
 
 **跨模型印证**：`/codex` 独立评审收敛到同一结论（删假 drop-zone > 一切；独立窗口是对的；
 内置包默认只读）。它**否决**了本轮设计的第一版推荐方案（波形包指纹），判词见 DESIGN.md。
@@ -169,12 +175,12 @@ values 全是 String / 顶层 `id` 必须是非空字符串），以及 `encodeJ
 |---|---|---|
 | `doctor` | **`.complete`** | 它问的是「你**声明**的文件在不在」。什么都没声明 → 没有缺失 |
 | `play` | **全静默**（四个事件都 `.notReady`） | 它问的是「这个事件**要不要**出声」。`unmapped` = 刻意静默 |
-| 画廊卡片 | **`partial(0/4)`「缺 4 个」** | 它问的是「**覆盖**了几个事件」 |
+| 面板包行（原「画廊卡片」，2026-07-17 改形制不改语义） | **`partial(0/4)`「缺 4 个」** | 它问的是「**覆盖**了几个事件」 |
 
 **拍板：三者都不改，因为它们回答的是三个不同的问题。** 一个 `events: {}` 的包是**合法**的
 （= 一个全静默的包）。
 
-⚠️ **但必须写成验收断言把三者同时钉死** —— 否则下一个人会看到「doctor 说完整、画廊说缺 4 个」
+⚠️ **但必须写成验收断言把三者同时钉死** —— 否则下一个人会看到「doctor 说完整、包行说缺 4 个」
 觉得是 bug，去「修好」其中一个，当场破坏另外两个。**这条分歧是被理解过的，不是被忽略的。**
 （`doctor` 对空包的**措辞**可以更友好 —— 记 P3，不阻断。）
 
@@ -183,7 +189,7 @@ values 全是 String / 顶层 `id` 必须是非空字符串），以及 `encodeJ
 **⚠️ 目录级原子性：`Data.write(.atomic)` 只保证单个文件。**
 一个包 = manifest + N 个音频。**逐文件拷到位**的话，中途被 kill 就会留下**半个包**躺在
 `~/.claudio/packs/<newid>/` —— 而 `availablePacks` **会照常把它枚举出来**，用户看到一张自己
-没造过的残卡。
+没造过的残行（半个包照样被枚举成一个可切换的包）。
 
 **基础设施已经在了**（`PackGallery.swift:118-119` 的注释就是为它写的）：
 
@@ -207,7 +213,7 @@ values 全是 String / 顶层 `id` 必须是非空字符串），以及 `encodeJ
     > 「`false` —— **not "unknown"** —— when `license` is absent or any other value;
     > this only ever drives a **positive** 'CC0' badge, never a negative claim.」
 
-    删掉 `license` = 卡片不再打 CC0 标 = **我们不再对这份副本的版权作任何声明**。
+    删掉 `license` = 包行不再打 CC0 标 = **我们不再对这份副本的版权作任何声明**。
     诚实的语义：用户 fork 出来就是要改它，我们**不知道**它改完还是不是 CC0。
     **零新词汇** —— 不发明 `"mixed"` / `"LicenseRef-User-Custom"`，因为 `license` 是 helper
     也读的字段，往里塞新枚举值要跨模块拍板，而删除不需要。
@@ -249,7 +255,7 @@ values 全是 String / 顶层 `id` 必须是非空字符串），以及 `encodeJ
 |---|---|
 | `manifest.author == "Claudio"` | ❌ **拿用户可写的数据当权限判据。** 任何人在自己的 manifest 里写 `"author": "Claudio"` 就能把自己的包变成只读。判据的真相源不能是被判据保护的那个文件。 |
 | 硬编码 id 清单 `["minimal-chime"]` | ❌ 第二个内置包上线的那天就漂移。而且它复制了一个**磁盘上已经存在**的事实。 |
-| **复用 `bundledPacksDirectory`（把 GUI 的 `nil` 改成真路径）** | ❌ **这是本节最重要的一条。** 那个字段**同时**喂给 `resolvePackDirectory`，它决定的是**包的查找顺序**。把它从 `nil` 改成真路径，会让「只存在于 bundle、还没被拷进用户根」的包**在 GUI 画廊里可见**——而 helper 的 `play` 看不见它（`PlayEnvironment.bundledPacksDirectory` 恒 `nil`，ENGINEERING T17：「v1 只走『复制进用户包』这一条路径」）。<br>`Setup.swift:503-505` **已经踩过并写下了这个警告**：「若把 `Resources/packs/` 传进去，就会认可一个 **`play` 根本看不见**的包 —— 一次假阴性」。<br>**一个字段一个职责。`bundledPacksDirectory` 的职责是查找，它的 `nil` 是负重的。** |
+| **复用 `bundledPacksDirectory`（把 GUI 的 `nil` 改成真路径）** | ❌ **这是本节最重要的一条。** 那个字段**同时**喂给 `resolvePackDirectory`，它决定的是**包的查找顺序**。把它从 `nil` 改成真路径，会让「只存在于 bundle、还没被拷进用户根」的包**在面板包列表里可见**——而 helper 的 `play` 看不见它（`PlayEnvironment.bundledPacksDirectory` 恒 `nil`，ENGINEERING T17：「v1 只走『复制进用户包』这一条路径」）。<br>`Setup.swift:503-505` **已经踩过并写下了这个警告**：「若把 `Resources/packs/` 传进去，就会认可一个 **`play` 根本看不见**的包 —— 一次假阴性」。<br>**一个字段一个职责。`bundledPacksDirectory` 的职责是查找，它的 `nil` 是负重的。** |
 
 **拍板 —— 新增一个字段：`factoryPacksDirectory`（一个「拷贝源」，不是一个「查找根」）**
 
@@ -322,7 +328,7 @@ public var builtinPackIDs: Set<String> { /* factoryPacksDirectory 下的子目�
 > 与 `factoryPacksDirectory` 里的出厂副本比。只对 `builtinPackIDs` 里的包算
 > （今天就一个），随 `packCards` 在 `reload()` 里算一次。
 >
-> **不一致 → 卡片显示 `⚠ 已修改`，而不是 `CC0`**，并在管理窗口引导「恢复出厂」。
+> **不一致 → 包行 meta 槽显示 `⚠ 已修改`，而不是 `CC0`**，并在管理窗口引导「恢复出厂」。
 >
 > **这才是 ③ 的真正修法**：让 CC0 标由 **bundle 背书**，而不是由**用户可写的字段**背书。
 > 一个会说谎的 CC0 标，比没有标更坏 —— 而「版权干净（CC0）」是 Product Context 第一行的卖点。
@@ -367,6 +373,85 @@ focus 值 → SwiftUI 焦点解析未定义）。T2 会把它重新引爆。
    的现语义；`PanelFocusOrderSuite:302` 那条「首焦点必须 ≠ `order.first`」的**前提**也变了
    （muted 行的首焦点从「跳过禁用的试听」变成「落在文件名下拉上」）。
 
+> **2026-07-17 追记（星标显示集连带）**：包列表行数从「有多少包画多少」变成 **≤4**（§2.6），
+> `packCard(id:)` 焦点槽数量随之有了上界；而「包列表零行」从病态（用户手删 `~/.claudio/packs/*`）
+> 升格为**日常合法态**（星标全取消）。第 5 条的 `.manageSounds` 首焦点从「边缘防御」变成
+> **用户天天走得到的路** —— 那条验收（`panelOpeningFocus(rows: [], packCardIDs: [], …) != .disconnect`）
+> 的分量随之变重。
+
+---
+
+## 2.6 星标显示集 `starred_packs` —— 面板最多 4 行（2026-07-17 用户拍板）
+
+**四条产品决议**（AskUserQuestion 逐条拍板，判词与被否方案存档于 DESIGN.md Decisions Log）：
+
+1. 面板包列表 = **竖排整宽行 + 覆盖轨恒显**（mockup 全盘采纳，推翻「横向画廊」+「complete 零图形」）；
+2. **星标是唯一判据** —— 当前使用中的包未加星就**不显示**（当前包的保证可见读数 = 事件区标题
+   「{包名} · 事件」，T7）；
+3. 出厂默认**内置包带星**（示范，可取消，绝不复活）；
+4. **硬上限 4**（管理窗口第 5 颗星显式禁用 + 原因；星标控件只住管理窗口，面板没有）。
+
+### 键与语义
+
+**`config.json` 顶层新键 `starred_packs: [String]`（pack id 数组）。**
+
+**为什么住 config.json 而不是新文件**：外科式读-改-写原语 `updateConfigJSON`（`ConfigMutation.swift`）
++ `configLockFile` flock 纪律 + 未知键保真已经全在了（ENGINEERING「写入者有三个，但写路径只有一条」——
+T17 落地后写入者变四个，写路径仍只有这一条）。第二份 GUI 偏好文件 = 第二条读写路径 + 第二把锁 + 第二个 doctor 盲区 ——
+与「不引入第二个查找根」同一条本能。
+
+**缺键 ≠ 空数组（防「默认复活」的那一刀）**：
+
+| 磁盘状态 | 语义 | 显示集 |
+|---|---|---|
+| 键不存在 | 出厂默认 | `builtinPackIDs`（§2.3 的派生集合） |
+| `starred_packs: []` | 用户清空 | 零行（合法日常态，§2.5 追记） |
+| `starred_packs: ["a","b"]` | 用户选择 | 数组 ∩ 磁盘上存在的包 |
+
+- **默认不靠 setup 写入** —— 没有写入者，就没有「取消默认星后每次启动重新种回来」的复活 bug。
+  用户第一次动星标才物化这个键（那一笔写的是**显式全量数组**，从此与默认脱钩）。
+- dev build（`swift run ClaudioGUI`，`factoryPacksDirectory == nil`）→ `builtinPackIDs` 为空 →
+  缺键默认零行。与 §2.3 的诚实降级同构，**不为 dev 造第二条默认**。
+
+### 写路径
+
+- **唯一写者 = 管理窗口星标钮（T17，阶段 2）**。走 `updateConfigJSON`（`.failClosed` —— 星标写者与
+  静音钮同款，凭空造不出 `selected_pack`）+ 同一把 `configLockFile`。
+- **写路径拒绝「>4 个指向磁盘上存在的包的星」** —— UI 的禁用是 UX，写层的拒绝是绊线
+  （手改 config 塞 5 个也进不来）。
+- **陈旧 id（星标指向已不存在的包）：读时跳过、绝不写；只在下一次星标写入时顺手剪掉。**
+  读路径写文件 = 打开面板就有副作用 —— 那是另一个 drop-zone 形状的坑。
+
+### `parseRewritableConfig` 加一条形状校验（⚠ 措辞要精确的地方）
+
+`ConfigMutation.swift` 是 helper 与 GUI **共用**的模块 —— 所以本节不说「helper 零改动」，说精确的：
+**`play` / `doctor` 的解析与播放链零改动**（宽松读的 `ClaudioConfig` **不 decode** `starred_packs`，
+播放路径不关心显示集）；config 写原语按 `events` 的既有先例**多认一个键**：
+
+- `starred_packs` 存在但不是数组、或数组里有非字符串 → `.unreadable`，reason 必须**可执行**
+  （哪个键 / 必须是什么 / 当前是什么 / 怎么修 + `configRebuildHint`），`probeConfigRewritable` 与
+  真写路径**逐字同一句** —— 全部是既有契约照抄，`ConfigMutationSuite` 的断言形状现成。
+- **兼容性注记（诚实说出去）**：一份昨天还被当未知键放行的畸形 `starred_packs`，加校验后会让**所有写**
+  fail closed（读 / 播不受影响）—— 与当年给 `events` 加校验同形状。`doctor` 会把原因说成人话。
+- id 的**内容**不校验（`isSafePackID` 不进 parse）：与 `selected_pack` 同款 —— 形状校验管
+  「能不能安全重写」，存在性 / 合法性由读模型的 ∩ 磁盘过滤兜住。
+
+### 读模型
+
+面板显示集 = `availablePacks(config:environment:)` 既有 `id` 排序 → 过滤到星标集（缺键 →
+`builtinPackIDs`）→ 防御性 `prefix(4)`（写层已保 ≤4，读层不信任磁盘）。**零新排序机制。**
+上限是一个具名常量（如 `maxStarredPacks = 4`），不许散落魔数 —— 它与「四个事件」数值巧合，语义无关。
+
+### ⚠ 排期硬约束（不是可选项）
+
+**≤4 过滤的激活不得早于星标 UI（管理窗口）落地。**
+出厂默认只星内置包 —— 若过滤先上而星标钮还没有，装了个人包（皮卡丘 / 可达鸭…）的用户会看到它们
+从面板**消失且无处找回**（管理窗口是唯一的星标面，而它还不存在）。所以：
+
+- **阶段 1 的 T4**：竖排行渲染**全部**包（照旧可滚动），不过滤；
+- **T16（星标契约：parse 校验 + 读模型 + 写路径）**：纯逻辑 + 测试，可进阶段 1，**不激活过滤**；
+- **T17（星标 UI + 过滤激活）**：钉死在阶段 2，与 T8 管理窗口同批。
+
 ---
 
 ## 3. 任务表
@@ -377,29 +462,33 @@ focus 值 → SwiftUI 焦点解析未定义）。T2 会把它重新引爆。
 | T1 | **P1** | drop-zone | **删除**面板级 `AudioDropZoneView`（假功能，孤儿制造机）。⚠️ **它是 `onImportSucceeded` 在生产代码里唯一的赋值点** —— 删了它就删掉了产品里唯一的「导入后自动试听」 | `PanelView.swift:574-580`, `AudioDropZoneView.swift` |
 | T2 | **P1** | 事件行 | 文件名 → 原生 `Menu`（三态共用一个控件）。**阶段 1 的菜单只有**：`选文件… / 清除绑定 / 在访达中显示`。<br>⚠️ **必须把 `onImportSucceeded` 接到行的 previewPlayer 上**（补回 T1 删掉的自动试听）。<br>⚠️ **焦点模型见 §2.5** | `EventRowView.swift`, `PanelFocusOrder.swift`, `CoverageState.swift` |
 | T3 | **P1** | 绑定 | `mutateManifestJSON` **顶层**原语 + `clearEventBinding`（§2.1）。<br>⚠️ **同批给 `SourceScannerSuite` 加并发绊线**：manifest 写函数带 `async`/`Task`/`DispatchQueue` → 测试红 | `ManifestBinding.swift`, `SourceScannerSuite.swift` |
-| T4 | **P1** | 包卡片 | 删 2×2 网格；`complete` **零图形**；`partial` 出 4-slot 覆盖轨（缺失格 = **空槽+斜杠**，另一种形状）+ `⚠` 图标 + `text-2` 文案；`broken` 出真红 ✕ | `PackGalleryView.swift:116-185` |
-| T5 | **P1** | 包卡片 | `CC0` 与「缺 N 个」拆到**两个槽位**（今天 `statusLine` 的 `switch` 让残包丢 CC0 标） | `PackGalleryView.swift:141-185` |
+| T4 | **P1** | 包行 | 卡片画廊 → **竖排整宽行**（2026-07-17 拍板）：行 = `[包名] [meta 槽] … [覆盖轨恒显]`；缺失格 = **空槽+斜杠**；`broken` 行 = 真红 ✕ + `text-2` 文案、**不渲染轨**。⚠ 阶段 1 渲染**全部**包（可滚动），≤4 过滤在 T17（§2.6 排期硬约束）。模型 `PackCard` / 焦点槽 `packCard(id:)` 的**名字沿用**（改名要动 `PanelFocusOrder` + 全部测试，为一个名字不值 —— 与 `ManifestBindError` 不改名同款拍板） | `PackGalleryView.swift` |
+| T5 | **P1** | 包行 | `CC0` 与「缺 N 个」拆到**两个槽位**（今天 `statusLine` 的 `switch` 让残包丢 CC0 标）。竖排行里 = **meta 槽**（含 T13 的 `⚠ 已修改`）与覆盖轨分居 —— mockup 没画 meta 标是**省略不是推翻**（DESIGN.md「包行四态」澄清条） | `PackGalleryView.swift` |
 | T6 | **P1** | 内置包 | `factoryPacksDirectory`（§2.3）；**删死函数 `isBuiltinOnlyPackID`**；`.overwritesBuiltin` → `.builtinReadOnly` + 新文案；`forkPack`（§2.2，**temp-dir + rename**，**必须改写 manifest 的 `id`**） | `AudioImportEnvironment.swift`, `AudioImport.swift`, `DropZoneState.swift`, `ClaudioGUIApp.swift`, 新 `PackFork.swift` |
-| **T13** | **P1** | CC0 诚实 | `factoryIntegrity(packID:)`（§2.4）：manifest 字节 + 声明文件 size 与 bundle 比对。不一致 → 卡片显示 **`⚠ 已修改`** 而不是 `CC0` | `PackGallery.swift` |
+| **T13** | **P1** | CC0 诚实 | `factoryIntegrity(packID:)`（§2.4）：manifest 字节 + 声明文件 size 与 bundle 比对。不一致 → 包行 meta 槽显示 **`⚠ 已修改`** 而不是 `CC0` | `PackGallery.swift` |
 | **T14** | **P1** | 导入 | **目标文件名冲突 → 生成唯一名，绝不覆盖**（§2.2b）。今天的覆盖行为会**静默改掉引用同名文件的其他事件的声音** | `AudioImport.swift:216-231` |
-| T7 | **P1** | 画廊 | 「声音包 ⋯ 管理…」标题行。<br>⚠️ **`管理…` 必须是焦点目标 `.manageSounds`，排在 `.disconnect` 之前** —— 否则空面板首焦点落在卸载键上（§2.5 第 5 条）。且**不得**做成全宽 ghost（会与「断开连接」撞脸） | `PanelView.swift:601-603`, `PanelFocusOrder.swift` |
+| T7 | **P1** | 面板节结构 | 「声音包」节标题 + 列表下方「**管理声音包…**」**全宽虚线 ghost**（2026-07-17 mockup 拍板 —— **推翻本行第一版「不得全宽 ghost」**：撞脸顾虑由**虚线 vs 实线**消解，全宽虚线自此专属「通往管理窗口」）+ 事件区标题「**{当前包名} · 事件**」（**负重**：当前包未加星不显示时，它是面板上唯一的当前包读数，§2.6 决议 2）。<br>⚠️ **`管理…` 必须是焦点目标 `.manageSounds`，排在 `.disconnect` 之前** —— 否则零行面板首焦点落在卸载键上（§2.5 第 5 条；星标时代零行是**日常态**）。<br>**阶段 1 中间态拍板（2026-07-17 修订时定，T8 未落地前）**：点击「管理声音包…」= **在访达中显示 `~/.claudio/packs/`**（既有词汇、真动作）。三个替代各撞一条本仓库铁律：做成禁用 → `panelFirstFocusTarget` 的 OPERABLE 过滤把零行首焦点滑到卸载键；先不渲染 → 违反零行首焦点验收；渲染但无动作 → 违反「绝不静默吞错」（`Use.swift` 的 never-silent-no-op）。T8 落地时改绑真窗口。<br>**同批改写 needsPack 空态卡文案与 `accessibilityLabel`**（「点一张**卡片**」→「点一个声音包」；零行时主行动指向「管理声音包…」—— DESIGN.md「面板显示集 · 星标」新条，`PanelView.swift:611-623`） | `PanelView.swift:601-623`, `PanelFocusOrder.swift` |
 | T10 | **P1** | 对比度 | `ContrastSuite` 补 4 条断言：覆盖轨 `present`/`missing` × 亮/暗 vs `surface-2`（值见 DESIGN.md） | `ContrastSuite.swift` |
 | T8 | P2 | 管理窗口 | 新 `SoundPacksWindow`。规范见 DESIGN.md「Sound Packs Window」。<br>⚠️ **时序/状态同步必须设计**：谁持 `NSWindow`、`管理…` 怎么开、窗口写完怎么刷 popover、popover 切包怎么刷窗口 | 新 target |
 | T9 | P2 | a11y | 窗口的焦点序 / Dynamic Type / VoiceOver。**`PanelFocusTarget` / `PanelLayoutAdaptation` / `PanelAnnouncement` 全是面板专用，套不上** | 新文件 |
 | T11 | P2 | 孤儿 | 包内音频枚举 + 「未被任何事件引用」判定；管理窗口列出 + 分配/删除。**事件行下拉的「复用包内已有音频」也在这一批**（阶段 1 刻意不做 —— 见下） | `PackGallery.swift` |
 | T12 | P2 | 存量 | `restoreFactoryPack`（§2.2）—— **不是**复用 `copyBundledPacks`，只复用它的 staging+rename 机械部分 | 新 `PackRestore.swift` |
+| **T16** | **P1** | 星标契约 | `starred_packs`（§2.6）：`parseRewritableConfig` 形状校验（数组 of 字符串，reason 可执行 + probe/写路径逐字同句）+ 读模型（缺键=`builtinPackIDs` / `[]`=零行 / ∩磁盘 / `prefix(4)`）+ 写路径（`.failClosed`、>4 拒绝、陈旧 id 只在写时剪）。**纯逻辑+测试，不激活过滤**；默认集依赖 T6 的 `builtinPackIDs` | `ConfigMutation.swift`, `PackGallery.swift` |
+| **T17** | P2 | 星标 UI | 管理窗口侧栏 **★/☆ 星标钮**（满 4 → 其余 `☆` 显式禁用 + 原因）+ **激活面板 ≤4 过滤**。⚠️ §2.6 排期硬约束：不得早于 T8 管理窗口 —— 过滤先上 = 个人包从面板消失且无处找回 | `SoundPacksWindow`（新 target）, `PanelView.swift` |
 | T15 | P3 | helper | `doctor` 对 `events: {}` 的空包措辞（今天报 `.complete`，与画廊的 `0/4` 读起来矛盾）。**语义不改**（§2.1b），只改措辞 | `Doctor.swift` |
 
 ### 分阶段（Codex 建议「阶段 1 过重」—— 部分采纳）
 
-**阶段 1 = T0–T7, T10, T13, T14**（把面板修活 + 让 CC0 不说谎）。
-**阶段 2 = T8, T9, T11, T12**（管理窗口 + 孤儿 + 恢复出厂）。
+**阶段 1 = T0–T7, T10, T13, T14, T16**（把面板修活 + 让 CC0 不说谎；T16 只落契约与测试，**不激活过滤**）。
+**阶段 2 = T8, T9, T11, T12, T17**（管理窗口 + 孤儿 + 恢复出厂 + 星标 UI 与 ≤4 过滤激活 —— §2.6 排期硬约束）。
 
 **采纳 Codex 的一半**：事件行下拉在**阶段 1 只有 `选文件…/清除/访达`**，
 **没有**「包内已有音频列表」。理由是它逼出了一条**隐藏依赖**：
 那个列表需要「包内音频枚举 + 未被引用判定」= **T11 的全部数据**，而 T11 在阶段 2。
-砍掉它，阶段 1 **一次 readdir 都不需要**（性能发现 P1 随之消失），
-而 ①② 两条致命 bug 照样全修。
+砍掉它，阶段 1 **不需要新增任何「包内音频枚举」**（readdir 包**内容** = T11 的数据；
+`availablePacks` 对包**根**的既有枚举、覆盖轨读的 `packCoverage` 不算 —— 它们今天就在跑。
+性能发现 P1 随之消失），而 ①② 两条致命 bug 照样全修。
+（措辞于 2026-07-17 收窄：原句「一次 readdir 都不需要」比覆盖范围大 —— 本仓库记档的老病。）
 
 **驳回 Codex 的另一半**：**T6 / T13 不能延期。**
 Codex 说阶段 1 不必包含内置包只读。**但 T2 会让 ③ 变得更糟**：
@@ -425,11 +514,11 @@ Codex 说阶段 1 不必包含内置包只读。**但 T2 会让 ③ 变得更糟
 - [ ] 内置包 `minimal-chime` **无法被写入**；试图编辑 → 引导「复制为我的包」。
 - [ ] **`forkPack` 出来的副本没有 CC0 标**（`license` 被删 = 不作任何声明），
       且它的 **manifest `id` 等于新目录名**（不是 `minimal-chime`）。
-- [ ] **一个被改脏的内置包，卡片显示 `⚠ 已修改`，不是 `CC0`**（T13）。
+- [ ] **一个被改脏的内置包，包行显示 `⚠ 已修改`，不是 `CC0`**（T13）。
       **构造方式**：直接往 fixture 的 `minimal-chime/stop.mp3` 写几个字节 → `factoryIntegrity` 必须失败。
       ⚠️ **这条替换了计划第一版那条会自我背书的验收**（「原包仍有 CC0 标」——
       它假设了原包是干净的，而那正是不能假设的东西）。
-- [ ] 「恢复出厂」之后，`factoryIntegrity` 重新通过，卡片回到 `CC0`；
+- [ ] 「恢复出厂」之后，`factoryIntegrity` 重新通过，包行回到 `CC0`；
       **且用户自己加进去的文件被搬走而不是删掉**，并有明确告知。
 
 ### 状态机 / 语义
@@ -437,13 +526,35 @@ Codex 说阶段 1 不必包含内置包只读。**但 T2 会让 ③ 变得更糟
 - [ ] `清除绑定` → 行显「未配置」（`unmapped`），**不是**「文件丢失」（`broken`）；
       `doctor` **不**把它报成缺陷；**磁盘上的文件还在**。
 - [ ] **「四个事件全清空」的三方回答同时钉死**（§2.1b，已知分歧、被理解过）：
-      `doctor` → `.complete`；`play` → 四个全静默；画廊卡片 → `partial(0/4)`「缺 4 个」。
+      `doctor` → `.complete`；`play` → 四个全静默；面板包行 → `partial(0/4)`「缺 4 个」。
       ⚠️ **三条必须写在同一个测试里** —— 否则下一个人会觉得是 bug，去「修好」一个，破坏另外两个。
-- [ ] 一个 `CC0-1.0` 的**残包**（缺 1 个事件），卡片上 **`CC0` 标与「⚠ 缺 1 个」同时可见**。
+- [ ] 一个 `CC0-1.0` 的**残包**（缺 1 个事件），包行上 **`CC0` 标与「⚠ 缺 1 个」同时可见**。
       （今天残包会丢掉 CC0 标）
 - [ ] **导入同名文件不覆盖**（T14）：包里已有 `a.mp3` 且被「中断了」引用 →
       给「干完了」导入另一个也叫 `a.mp3` 的文件 → 生成 `a-2.mp3`，
       **「中断了」的声音一个字节都没变**。
+
+### 星标显示集（§2.6 · 2026-07-17）
+
+- [ ] **缺键与空数组是两个不同结局**：无 `starred_packs` 键 → 显示集 = `builtinPackIDs`；
+      `starred_packs: []` → 零行。⚠️ 这条是「取消默认星后复活」的直接绊线 —— 两个 fixture 必须分开断言。
+- [ ] 取消内置包的星（写盘为不含它的显式数组）→ 重启 / `reload()` 后**不复活**。
+- [ ] 当前包未加星 → 不在包列表里；事件区标题仍显「{当前包名} · 事件」（决议 2 的两半在同一个测试里）。
+- [ ] 手改 config 塞 5 个有效星 → 星标**写路径**拒绝；**读路径** `prefix(4)` 防御性生效（两层分开测）。
+- [ ] 陈旧星标 id：读时跳过不渲染、**config.json 一个字节不动**（读路径零写断言）；下一次星标写入时被剪。
+- [ ] `starred_packs: "abc"`（非数组）→ `probeConfigRewritable` = `.malformed`，reason 可执行且与真写路径
+      **逐字相同**；同一份 config 下 `play` / `doctor` 的播放判定**不受影响**（宽松读不认识它）。
+- [ ] **helper 回归**：带合法 `starred_packs` 的 config，`claudio use` / 静音 / 主音量写后该键**键值幸存**
+      （未知键保真契约的新键专项 —— 它从「未知键」变成「被校验的键」后这条不许变松）。
+- [ ] 零行包列表首焦点 = `.manageSounds`（与 §2.5 第 5 条同一条断言 —— 星标时代它守的是日常路径）。
+- [ ] **加星侧的物化断言**（防「默认星静默消失」—— 与「取消不复活」互不覆盖，两条都要）：
+      缺键状态下经写路径给一个**非内置**包加星 → 写盘数组 = **显式全量**（内置包 id 仍在 + 新包 id），
+      reload 后两者都显示。只写 `["新包"]` 而丢掉默认星 = 一个不会报错的错误，这条必须逮住它。
+- [ ] **needsPack × 零行同屏**（两根正交轴）：config 缺失且零星标 → 空态卡主行动指向「管理声音包…」；
+      **无**「 · 事件」半截标题被渲染。
+- [ ] （T17）星标写失败（config malformed / lock busy / >4 拒绝）→ **窗口内可见错误行**
+      （`FailureRow` 组件与 token 层复用，DESIGN.md「窗口的失败呈现」）+ VoiceOver 播报；
+      reason 与 `probeConfigRewritable` **逐字同句**。
 
 ### 结构性绊线（防止「顺手改坏」）
 
@@ -496,7 +607,7 @@ Codex 说阶段 1 不必包含内置包只读。**但 T2 会让 ③ 变得更糟
       ├── [GAP] 清除已绑定的 event → unmapped，**文件仍在磁盘上**
       ├── [GAP] 清除一个本来就 unmapped 的 event → 幂等，不报错
       ├── [GAP] 清除后 doctor 不报缺陷（对比 broken）
-      └── [GAP] 四个全清空 → doctor .complete / play 全静默 / 卡片 0/4  ← 三方同一测试
+      └── [GAP] 四个全清空 → doctor .complete / play 全静默 / 包行 0/4  ← 三方同一测试
 
 [+] PackFork.swift                        【新文件】
   ├── forkPack(fromID:newID:)
@@ -512,8 +623,8 @@ Codex 说阶段 1 不必包含内置包只读。**但 T2 会让 ③ 变得更糟
 
 [+] PackGallery.swift
   └── factoryIntegrity(packID:)           【新 · T13】
-      ├── [GAP] 干净的内置包 → 通过 → 卡片显示 CC0
-      ├── [GAP] stop.mp3 被改了几个字节 → 失败 → 卡片显示 ⚠ 已修改   ← ③ 的真修法
+      ├── [GAP] 干净的内置包 → 通过 → 包行显示 CC0
+      ├── [GAP] stop.mp3 被改了几个字节 → 失败 → 包行显示 ⚠ 已修改   ← ③ 的真修法
       ├── [GAP] manifest 被改 → 失败
       └── [GAP] 非内置包 → 不参与判定（不显示 ⚠）
 
@@ -530,13 +641,24 @@ Codex 说阶段 1 不必包含内置包只读。**但 T2 会让 ③ 变得更糟
 [+] SourceScannerSuite.swift              【新绊线 · T3】
   └── [GAP] manifest 写函数带 async/Task/DispatchQueue → 红
 
+[+] ConfigMutation.swift / PackGallery.swift   【新 · T16 星标契约】
+  ├── [GAP] 缺键 → builtinPackIDs；[] → 零行（两个不同结局，防复活）
+  ├── [GAP] 缺键下加星非内置包 → 写盘显式全量（默认星不静默消失）
+  ├── [GAP] starred_packs 非数组 / 含非字符串 → .unreadable（probe 与写路径逐字同句）
+  ├── [GAP] >4 有效星 → 写拒绝；读 prefix(4)（两层分开）
+  ├── [GAP] 陈旧 id：读跳过 + 零写；写时剪
+  └── [GAP] use/静音/主音量写后 starred_packs 键值幸存
+
 用户流
   ├── [GAP] [→真机] 换掉「干完了」的声音（不先弄坏包）—— ①② 的端到端
+  ├── [GAP] [→真机] 加星第 4 颗后第 5 颗禁用且给原因；取消一颗后恢复可用（T17）
   ├── [GAP] [→真机] 导入后自动试听仍然响 —— **一条会被顺手删掉的现有行为**
   ├── [GAP] [→真机] 试图改内置包 → 引导「复制为我的包」→ 副本可改
   └── [GAP] [→真机] .tint(clay) 在 Menu 上生效（正向对照先自证）
 
-COVERAGE: 现有 0/31 新路径有测试  |  回归基线：ManifestBindingSuite 1108 行必须仍全绿
+COVERAGE: 现有 0/37 新路径有测试（口径 = [GAP] 41 条 − [→真机] 5 条 + [REWRITE] 1 条；
+真机项不计入自动测试路径数 —— 2026-07-17 起口径成文，此前的「0/31」同口径）
+回归基线：ManifestBindingSuite 1108 行必须仍全绿；ConfigMutationSuite 必须仍全绿
 ```
 
 ## 4c. 失败模式（每条新路径一个真实的生产故障）
@@ -549,6 +671,8 @@ COVERAGE: 现有 0/31 新路径有测试  |  回归基线：ManifestBindingSuite
 | `factoryIntegrity` | bundle 里没有 packs（dev build）→ 判定不出来 | 待建 | ✅ `factoryPacksDirectory == nil` → 不参与判定，**不显示 ⚠**（诚实降级） | — |
 | `importAudioFile` 唯一名 | `a.mp3` / `a-2.mp3` / … 无限增长 | 待建 | ⚠️ 需要上限或复用检测 → **P3** | 阶段 2 孤儿视图 |
 | 文件名 `Menu` | 包目录被外部删空 → 菜单为空 | 待建 | ✅ 只剩「选文件…」 | ✅ |
+| `starred_packs` 形状校验（T16） | 存量 config 带畸形 `starred_packs`（旧版当未知键放行）→ 加校验后 use / 静音 / 主音量**全部** fail closed | 待建 | ✅ `.unreadable` → probe `.malformed`，reason 可执行 + `configRebuildHint`（§2.6 兼容性注记） | ✅ `doctor` 说成人话；面板 `FailureRow` |
+| 星标写路径（T17） | config malformed / lock busy / >4 拒绝 → 星标钮写失败 | 待建 | ✅ fail closed，reason 与 probe 逐字同句 | ✅ 窗口内 `FailureRow`（DESIGN「窗口的失败呈现」）+ VO 播报 |
 | **并发不变式** | **有人把 `forkPack` 改成 `async` 去避免 UI 卡顿 → 无锁 RMW 竞争，manifest 丢更新** | **T3 的源码绊线** | ❌ **结构上没有锁** | ❌ **静默丢失** ← **唯一的 critical gap** |
 
 > **唯一的 critical gap**：并发不变式**没有运行时防护**（无锁），只有「全同步 + 全在 MainActor」
@@ -562,17 +686,21 @@ COVERAGE: 现有 0/31 新路径有测试  |  回归基线：ManifestBindingSuite
 | T0（抽 `loadDropRequest`） | `ClaudioGUI/` | — |
 | T3（原语 + clear + 绊线） | `ClaudioGUICore/`, `Tests/` | — |
 | T6 + T13 + T14（内置包 / 诚实 / 唯一名） | `ClaudioGUICore/`, `ClaudioGUI/` | T3（共用原语） |
-| T4 + T5 + T10（卡片 + 对比度） | `ClaudioGUI/PackGalleryView`, `Tests/` | — |
+| T4 + T5 + T10（包行 + 对比度） | `ClaudioGUI/PackGalleryView`, `Tests/` | — |
+| T16（星标契约） | `helper/ClaudioCore/ConfigMutation`, `ClaudioGUICore/PackGallery`, `Tests/` | T6（`builtinPackIDs`） |
 | T1 + T2 + T7（面板 + 焦点） | `ClaudioGUI/`, `ClaudioGUICore/PanelFocusOrder` | T0, T3 |
 
 ```
-Lane A: T3 → T6+T13+T14        （共用 mutateManifestJSON，顺序）
+Lane A: T3 → T6+T13+T14 → T16  （共用 mutateManifestJSON；T16 的默认集依赖 T6 的 builtinPackIDs）
 Lane B: T4 + T5 + T10          （只碰 PackGalleryView + ContrastSuite，独立）
 Lane C: T0 → T1 + T2 + T7      （面板 + 焦点，依赖 T0 与 T3 的原语）
 
-并行：A 与 B 可同时开工。C 等 T3 落地。
+并行：A 与 B 可同时开工。C 等 T3 落地。T16 挂 Lane A 尾部 —— 必须等 T6。
 ⚠️ 冲突旗标：Lane A 与 Lane C 都碰 `ClaudioGUICore/` —— A 改 ManifestBinding，
    C 改 PanelFocusOrder/CoverageState，文件不重叠，但同一 target，合并时留意。
+⚠️ 冲突旗标 2（2026-07-17）：T13 与 T16 都改 `PackGallery.swift` —— **同文件**，
+   须顺序进行（同在 Lane A 尾部即天然顺序，不得拆去并行）。T16 另碰 helper 侧
+   `ConfigMutation.swift`，与 Lane A 其余任务的 `ManifestBinding.swift` 同 target 不同文件。
 ```
 
 ## 5. 明确不做
@@ -583,8 +711,13 @@ Lane C: T0 → T1 + T2 + T7      （面板 + 焦点，依赖 T0 与 T3 的原语
 - **不做音频编辑 / 裁剪 / 音量归一。** 那是另一个产品。
 - **不在管理窗口里重做面板。** 面板管「不回头也知道状态」，窗口管「坐下来把它配好」。
   两个不同的使用时刻，不互相抄。
-- **卡片上不加试听 ▶。** 换包本已是一次点击且可逆，事件行是更好的试听面。
-  为省一次点击要付：每卡两个控件 → 撞破 `PanelFocusTarget.packCard(id:)` 的单焦点槽契约
+- **面板上不放星标控件。** 策展（加星 / 取消）住管理窗口 ——「两个不同的使用时刻，不互相抄」。
+- **星标显示集的四个被否方案不做**（2026-07-17 拍板，判词存档 DESIGN.md Decisions Log）：
+  当前包特赦恒显（星标不再是唯一判据）／切换自动加星（切包动作隐式改写星标集）／
+  星数不限、显示截断（「加了但不显示」暧昧态）／零星回落前 4（回落集随装包漂移）。
+- **读路径绝不剪陈旧星标**（打开面板就写盘 = 又一个带副作用的「只读」面，drop-zone 的老坑）。
+- **包行上不加试听 ▶。** 换包本已是一次点击且可逆，事件行是更好的试听面。
+  为省一次点击要付：每行两个控件 → 撞破 `PanelFocusTarget.packCard(id:)` 的单焦点槽契约
   + 序列播放器 + 中断语义 + reduce-motion 门控。（评审中提出、当场砍掉，理由存档于 DESIGN.md）
 - **波形「包指纹」不做。** 被 `/codex` 跨模型评审否决，判词成立：17pt 段 = 纹理不是信息，
   且缺失信号压在同一条不可读纹理上。（存档于 DESIGN.md，不要再提）
@@ -592,7 +725,7 @@ Lane C: T0 → T1 + T2 + T7      （面板 + 焦点，依赖 T0 与 T3 的原语
   加锁会把它压进 bind/clear 的热路径 —— 拿一条真不变式换一次 UI 微卡顿，不划算。
   守卫是 T3 的**源码绊线**，不是一句注释。
 - **阶段 1 的文件名下拉不列「包内已有音频」。** 那需要孤儿计算（T11），随管理窗口进阶段 2。
-  砍掉它，阶段 1 **一次 readdir 都不需要**，而 ①② 照样全修。
+  砍掉它，阶段 1 **不需要新增任何「包内音频枚举」**（包根的既有枚举不算），而 ①② 照样全修。
 - **`doctor` 对空包（`events: {}`）的语义不改**（只在 P3 改措辞）。三个子系统回答三个不同的问题，
   这条分歧是**被理解过的**，并由验收断言同时钉死（§2.1b）。
 
@@ -623,6 +756,8 @@ Lane C: T0 → T1 + T2 + T7      （面板 + 焦点，依赖 T0 与 T3 的原语
 - **CODEX:** 逮到 9 条本轮评审漏掉的问题，其中 **2 条推翻了本计划自己的事实断言**：`bindEventToManifest` **零锁**（`JSONSafeWrite` 只是编码门面），`Setup.copyBundledPacks` **不能直接复用**（它 skip 已可用的包）。两条均已实证并写进 §2 的更正框。另外 7 条（顶层原语 / fork 漏写 `id` / `factoryPacksDirectory` 需要源路径 / 空包三方语义 / CC0 未真正修复 / T2 隐含依赖 T11 / 同名覆盖的跨事件副作用）全部折进计划。**驳回 1 条**：Codex 主张 T6（内置包只读）可延期 —— 但 T2 会把 CC0 谎言的入口从难用变好用，两者必须同批。
 - **CROSS-MODEL:** 两个模型**独立收敛**到同一条最重的结论：**删掉假 drop-zone 优先于一切**。分歧在阶段切分（Codex 认为阶段 1 过重），**部分采纳**：砍掉下拉的「包内音频列表」（消除 T11 隐藏依赖 + 性能问题），但保留 T6/T13。
 - **VERDICT:** DESIGN + ENG CLEARED — 计划可实施。1 个 critical gap 已知且已有守卫（T3 源码绊线）。
+
+- **2026-07-17 修订**：星标显示集四决议（竖排行 + 恒显轨 / 星标唯一判据 / 出厂默认星 / 硬上限 4）为**用户直接拍板**（AskUserQuestion 四问），未跑新一轮评审流程；§2.6 的工程契约全部建立在本轮已评审的原语之上（`updateConfigJSON` / `configLockFile` / `builtinPackIDs` / `availablePacks` 排序），新增暴露面（parse 校验、读模型、写路径）已列入验收与覆盖图（T16 / T17）。
 
 **UNRESOLVED DECISIONS:**
 - 无 —— 本轮 19 条发现全部已折进计划并拍板（auto-select 授权）。唯一的 critical gap（manifest 并发不变式无运行时防护）是**已知且被接受**的结构性约束，守卫为 T3 的源码绊线，不是未决项。
