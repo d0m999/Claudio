@@ -27,6 +27,14 @@ private func failureError(_ result: Result<Void, ManifestBindError>) -> Manifest
     return nil
 }
 
+/// A `ProcessSpawning` that never actually launches anything — the joint "四个全清空"
+/// test (T3) only needs `playSoundEvent` to reach `.notReady` before it would ever spawn
+/// `afplay`, so this stub exists purely to satisfy `PlayEnvironment`'s initializer without
+/// touching any real process.
+private struct NoOpProcessSpawner: ProcessSpawning {
+    func spawn(executablePath: String, arguments: [String]) -> Bool { false }
+}
+
 @MainActor
 func runManifestBindingSuites() async {
     suite(
@@ -1067,6 +1075,494 @@ func runManifestBindingSuites() async {
                 rows.first { $0.event == .stop }?.coverage == .present(fileName: "chime.wav"),
                 "the valid drop's file must end up BOUND, never copied-in-but-unbound, got"
                     + " \(String(describing: rows.first { $0.event == .stop }?.coverage))")
+        }
+    }
+
+    // MARK: - mutateManifestJSON (T3 新原语) — 直接测原语本身，不经 bind/clear
+    //
+    // `bindEventToManifest`（上面几十条 suite）已经把这个原语的每一条 fail-closed 校验、写侧的
+    // 数字规范化/`-inf` 拒绝、未知顶层键保真都间接练到了 —— 但那全部是**通过 bind** 练到的，而
+    // bind 自己还有两道原语没有的文件预检（`safePackFileURL`/`regularFileExists`）。这里直接调
+    // `mutateManifestJSON`，把原语的契约从 bind 的契约里剥出来单独钉住：它是一个**目录级**、
+    // **顶层**的读-改-写，不认识 `packID`，也不关心文件是否存在。
+
+    suite(
+        "mutateManifestJSON: transform 能改**顶层**任意字段，不仅仅是 events —— forkPack（T6）改写顶层 id / 删 license 需要的正是这条"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            writeFixture(
+                #"""
+                { "id": "my-pack", "name": "极简铃音", "license": "CC0-1.0",
+                  "events": { "stop": "stop.mp3" } }
+                """#, to: manifestFile)
+
+            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+                json in
+                json["id"] = "my-pack-copy"
+                json["name"] = "极简铃音 的副本"
+                json.removeValue(forKey: "license")
+            }
+            guard case .success = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+
+            guard let rewrittenData = try? Data(contentsOf: manifestFile),
+                let rewritten = try? JSONSerialization.jsonObject(with: rewrittenData)
+                    as? [String: Any]
+            else {
+                expect(false, "rewritten manifest.json must still be valid JSON")
+                return
+            }
+            expect(rewritten["id"] as? String == "my-pack-copy", "顶层 id 必须被改写")
+            expect(rewritten["name"] as? String == "极简铃音 的副本", "顶层 name 必须被改写")
+            expect(rewritten["license"] == nil, "license 必须被整个删掉，不是改成别的值")
+            expect(
+                (rewritten["events"] as? [String: String])?["stop"] == "stop.mp3",
+                "transform 没碰的 events 必须原样保留")
+        }
+    }
+
+    suite("mutateManifestJSON: events 存在但不是 JSON 对象 → .manifestUnreadable，transform 从不被调用，字节不变") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            let originalRawJSON = #"{ "id": "my-pack", "events": ["stop.mp3"] }"#
+            writeFixture(originalRawJSON, to: manifestFile)
+
+            var transformCalled = false
+            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+                _ in
+                transformCalled = true
+            }
+
+            expect(
+                { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                "a non-object `events` must fail closed as .manifestUnreadable, got \(result)")
+            expect(!transformCalled, "the fail-closed guard must run BEFORE transform, never after")
+            expect(
+                (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
+                "a rejected mutation must leave manifest.json byte-for-byte untouched")
+        }
+    }
+
+    suite(
+        "mutateManifestJSON: events 对象里出现非字符串取值 → .manifestUnreadable，transform 从不被调用，字节不变"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            let originalRawJSON = #"{ "id": "my-pack", "events": { "stop": 1 } }"#
+            writeFixture(originalRawJSON, to: manifestFile)
+
+            var transformCalled = false
+            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+                _ in
+                transformCalled = true
+            }
+
+            expect(
+                { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                "a non-string `events` value must fail closed as .manifestUnreadable, got \(result)")
+            expect(!transformCalled, "the fail-closed guard must run BEFORE transform, never after")
+            expect(
+                (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
+                "a rejected mutation must leave manifest.json byte-for-byte untouched")
+        }
+    }
+
+    suite(
+        "mutateManifestJSON: 顶层 id 缺失 / 非字符串 / 空 → .manifestUnreadable，transform 从不被调用，字节不变"
+    ) {
+        let malformed: [(label: String, json: String)] = [
+            ("missing id", #"{ "events": {} }"#),
+            ("non-string id", #"{ "id": 42, "events": {} }"#),
+            ("empty id", #"{ "id": "", "events": {} }"#),
+        ]
+        for shape in malformed {
+            withTempDirectory { root in
+                let userPacks = root.appendingPathComponent("packs")
+                let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+                writeFixture(shape.json, to: manifestFile)
+
+                var transformCalled = false
+                let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+                    _ in
+                    transformCalled = true
+                }
+
+                expect(
+                    { if case .manifestUnreadable = failureError(result) { return true } else { return false } }(),
+                    "\(shape.label): must fail closed as .manifestUnreadable, got \(result)")
+                expect(
+                    !transformCalled,
+                    "\(shape.label): the fail-closed guard must run BEFORE transform, never after")
+                expect(
+                    (try? String(contentsOf: manifestFile, encoding: .utf8)) == shape.json,
+                    "\(shape.label): a rejected mutation must leave manifest.json byte-for-byte untouched"
+                )
+            }
+        }
+    }
+
+    suite("mutateManifestJSON: a MISSING manifest.json is rejected as .manifestUnreadable, transform never called") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            // The pack directory exists (created by the temp-dir scaffold below) but has no
+            // manifest.json at all.
+            try? FileManager.default.createDirectory(
+                at: userPacks.appendingPathComponent("my-pack"), withIntermediateDirectories: true)
+
+            var transformCalled = false
+            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+                _ in
+                transformCalled = true
+            }
+
+            guard case .manifestUnreadable(let reason) = failureError(result) else {
+                expect(false, "a missing manifest.json must be rejected as .manifestUnreadable, got \(result)")
+                return
+            }
+            expect(reason.contains("不存在或不可读"), "reason must be loadPackManifestData's own message, got \(reason)")
+            expect(!transformCalled, "the fail-closed guard must run BEFORE transform, never after")
+        }
+    }
+
+    suite(
+        "mutateManifestJSON: a manifest containing -1e400 (parses to -inf) is rejected as .writeFailed WITHOUT aborting, byte-for-byte untouched"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            let originalRawJSON = #"{ "id": "my-pack", "events": {}, "x": -1e400 }"#
+            writeFixture(originalRawJSON, to: manifestFile)
+
+            // Reaching the assertions below at all (rather than the process dying with exit
+            // 134) IS the fix working — the primitive must inherit this from
+            // `encodeJSONObjectForWriting`, not merely `bindEventToManifest`.
+            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+                json in
+                json["untouched"] = "value"
+            }
+
+            guard case .failure(.writeFailed) = result else {
+                expect(false, "expected .failure(.writeFailed), got \(result)")
+                return
+            }
+            expect(
+                (try? String(contentsOf: manifestFile, encoding: .utf8)) == originalRawJSON,
+                "a manifest containing an unwritable -inf must be left byte-for-byte untouched on disk"
+            )
+        }
+    }
+
+    // MARK: - clearEventBinding (T3 新) — bindEventToManifest 的对偶：从 events 里删掉一个 key，
+    // 从不删文件，recompute 到 .unmapped 而不是 .broken（PLAN-SOUND-MANAGER.md §2.1）。
+
+    suite("clearEventBinding: 清除一个已绑定的 event → recompute 到 .unmapped，且文件仍在磁盘上") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "id": "my-pack", "events": { "stop": "stop.mp3" } }"#,
+                to: userPacks.appendingPathComponent("my-pack/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let result = clearEventBinding(event: .stop, packID: "my-pack", environment: environment)
+            guard case .success = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+
+            let rows = packCoverage(
+                packID: "my-pack", config: ClaudioConfig(selectedPack: "my-pack"),
+                environment: environment)
+            expect(
+                rows.first { $0.event == .stop }?.coverage == .unmapped,
+                "after a clear, stop must recompute to .unmapped, got"
+                    + " \(String(describing: rows.first { $0.event == .stop }?.coverage))")
+            expect(
+                FileManager.default.fileExists(
+                    atPath: userPacks.appendingPathComponent("my-pack/stop.mp3").path),
+                "clearing a binding must NEVER delete the underlying audio file — only the"
+                    + " manifest key")
+        }
+    }
+
+    suite(
+        "clearEventBinding: 清除一个本来就 unmapped 的 event → 幂等成功（events 里没有这个 key，以及 events 整个不存在两种子情形）"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "notification": "ping.mp3" } }"#,
+                to: userPacks.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("pack-a/ping.mp3"))
+            writeFixture(
+                #"{ "id": "pack-b" }"#, to: userPacks.appendingPathComponent("pack-b/manifest.json"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            // pack-a: events 对象存在，但没有 "stop" 这个 key.
+            let resultA = clearEventBinding(event: .stop, packID: "pack-a", environment: environment)
+            guard case .success = resultA else {
+                expect(false, "clearing an already-unmapped event (key absent) must succeed, got \(resultA)")
+                return
+            }
+            let rowsA = packCoverage(
+                packID: "pack-a", config: ClaudioConfig(selectedPack: "pack-a"),
+                environment: environment)
+            expect(
+                rowsA.first { $0.event == .stop }?.coverage == .unmapped,
+                "must still read as .unmapped, got"
+                    + " \(String(describing: rowsA.first { $0.event == .stop }?.coverage))")
+            expect(
+                rowsA.first { $0.event == .notification }?.coverage == .present(fileName: "ping.mp3"),
+                "the sibling notification binding must survive an unrelated event's clear untouched")
+
+            // pack-b: events 字段整个不存在.
+            let resultB = clearEventBinding(event: .stop, packID: "pack-b", environment: environment)
+            guard case .success = resultB else {
+                expect(
+                    false,
+                    "clearing an event on a manifest with NO events object at all must still succeed"
+                        + " as a no-op, got \(resultB)")
+                return
+            }
+
+            // 再清一次（同一个已经是 unmapped 的 event）——幂等的第二个证明：连续两次调用都成功.
+            let resultAAgain = clearEventBinding(
+                event: .stop, packID: "pack-a", environment: environment)
+            guard case .success = resultAAgain else {
+                expect(false, "clearing the SAME already-cleared event twice must still succeed, got \(resultAAgain)")
+                return
+            }
+        }
+    }
+
+    suite("clearEventBinding: 保留未知顶层键（name/author/license/schema）与其它 sibling events") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            writeFixture(
+                #"""
+                { "id": "my-pack", "name": "极简铃音", "author": "Test Author",
+                  "license": "CC0-1.0", "schema": 1,
+                  "events": { "stop": "stop.mp3", "notification": "ping.mp3" } }
+                """#, to: manifestFile)
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/ping.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let result = clearEventBinding(event: .stop, packID: "my-pack", environment: environment)
+            guard case .success = result else {
+                expect(false, "expected .success, got \(result)")
+                return
+            }
+
+            guard let rewrittenData = try? Data(contentsOf: manifestFile),
+                let rewritten = try? JSONSerialization.jsonObject(with: rewrittenData)
+                    as? [String: Any],
+                let events = rewritten["events"] as? [String: String]
+            else {
+                expect(false, "rewritten manifest.json must still be valid JSON with an events object")
+                return
+            }
+            expect(rewritten["name"] as? String == "极简铃音", "unknown key `name` must survive the clear")
+            expect(rewritten["author"] as? String == "Test Author", "unknown key `author` must survive")
+            expect(rewritten["license"] as? String == "CC0-1.0", "unknown key `license` must survive")
+            expect(rewritten["schema"] as? Int == 1, "unknown key `schema` must survive")
+            expect(events["stop"] == nil, "the cleared `stop` key must be gone, got \(events)")
+            expect(
+                events["notification"] == "ping.mp3",
+                "the sibling `notification` event must survive the clear untouched, got \(events)")
+        }
+    }
+
+    suite("clearEventBinding: 一个无法解析的 packID → .packNotFound") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            let result = clearEventBinding(
+                event: .stop, packID: "ghost-pack", environment: environment)
+            expect(
+                failureError(result) == .packNotFound(packID: "ghost-pack"),
+                "an unresolvable packID must be rejected as .packNotFound, got \(result)")
+        }
+    }
+
+    suite("clearEventBinding: 只存在于只读 bundled 包根的 pack 被拒绝为 .packNotFound，bundled 的 manifest 一字节不动") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let bundledPacks = root.appendingPathComponent("bundled")
+            let bundledManifest = bundledPacks.appendingPathComponent("minimal-chime/manifest.json")
+            let originalBundledJSON = #"{ "id": "minimal-chime", "events": { "stop": "stop.mp3" } }"#
+            writeFixture(originalBundledJSON, to: bundledManifest)
+            writeFixture(
+                "fake-audio", to: bundledPacks.appendingPathComponent("minimal-chime/stop.mp3"))
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, bundledPacksDirectory: bundledPacks)
+
+            let result = clearEventBinding(
+                event: .stop, packID: "minimal-chime", environment: environment)
+            expect(
+                failureError(result) == .packNotFound(packID: "minimal-chime"),
+                "clearing must never write into the read-only bundled pack root, got \(result)")
+            expect(
+                (try? String(contentsOf: bundledManifest, encoding: .utf8)) == originalBundledJSON,
+                "the bundled pack's manifest.json must be completely untouched")
+        }
+    }
+
+    // 对比 broken：同一份起点，两条完全不同的路径产生完全不同的读数——一条是真实的打包缺陷
+    // （文件被外部删掉，manifest 仍然声称它在），另一条是用户主动清除（manifest 不再声明它）。
+    // §2.1b 拍板「真打包错误不被伪装成正常静默」反向也成立：一次主动清除不得被伪装成打包缺陷。
+    suite(
+        "clearEventBinding 对比 broken：外部删文件 → doctor 报缺陷 + .broken；主动清除 → doctor .complete + .unmapped"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+
+            // pack-broken：manifest 仍然声明 stop -> stop.mp3，但那个文件被外部删掉了 —— 真实缺陷。
+            writeFixture(
+                #"{ "id": "pack-broken", "events": { "stop": "stop.mp3" } }"#,
+                to: userPacks.appendingPathComponent("pack-broken/manifest.json"))
+            let brokenFile = userPacks.appendingPathComponent("pack-broken/stop.mp3")
+            writeFixture("fake-audio", to: brokenFile)
+            try? FileManager.default.removeItem(at: brokenFile)
+
+            // pack-cleared：一开始与 pack-broken 完全同构，但走 clearEventBinding 而不是删文件。
+            writeFixture(
+                #"{ "id": "pack-cleared", "events": { "stop": "stop.mp3" } }"#,
+                to: userPacks.appendingPathComponent("pack-cleared/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("pack-cleared/stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+            let clearResult = clearEventBinding(
+                event: .stop, packID: "pack-cleared", environment: environment)
+            guard case .success = clearResult else {
+                expect(false, "setup: clearing pack-cleared's stop binding must succeed, got \(clearResult)")
+                return
+            }
+
+            let brokenRows = packCoverage(
+                packID: "pack-broken", config: ClaudioConfig(selectedPack: "pack-broken"),
+                environment: environment)
+            expect(
+                brokenRows.first { $0.event == .stop }?.coverage == .broken(fileName: "stop.mp3"),
+                "an externally-deleted declared file must read as .broken, got"
+                    + " \(String(describing: brokenRows.first { $0.event == .stop }?.coverage))")
+
+            let clearedRows = packCoverage(
+                packID: "pack-cleared", config: ClaudioConfig(selectedPack: "pack-cleared"),
+                environment: environment)
+            expect(
+                clearedRows.first { $0.event == .stop }?.coverage == .unmapped,
+                "a deliberately-cleared event must read as .unmapped, never .broken, got"
+                    + " \(String(describing: clearedRows.first { $0.event == .stop }?.coverage))")
+
+            writeFixture(#"{"selected_pack": "pack-broken"}"#, to: configFile)
+            let brokenIntegrity = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: userPacks, bundledPacksDirectory: nil)
+            guard case .incomplete(let brokenPackID, let missingFiles) = brokenIntegrity else {
+                expect(false, "doctor must report pack-broken as .incomplete, got \(brokenIntegrity)")
+                return
+            }
+            expect(brokenPackID == "pack-broken", "the packID on the report must be pack-broken")
+            expect(missingFiles == ["stop.mp3"], "doctor must list the missing declared file, got \(missingFiles)")
+
+            writeFixture(#"{"selected_pack": "pack-cleared"}"#, to: configFile)
+            let clearedIntegrity = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: userPacks, bundledPacksDirectory: nil)
+            guard case .complete(let clearedPackID, let clearedEvents) = clearedIntegrity else {
+                expect(false, "doctor must report pack-cleared as .complete — a cleared key is no longer declared, so it can never appear on the missing-files list, got \(clearedIntegrity)")
+                return
+            }
+            expect(clearedPackID == "pack-cleared", "the packID on the report must be pack-cleared")
+            expect(clearedEvents.isEmpty, "no events remain declared after the clear, got \(clearedEvents)")
+        }
+    }
+
+    // §2.1b：「四个事件全被清空」—— 三个子系统给三个不同但都正确的答案，且这条分歧是被理解过的，
+    // 不是被忽略的（PLAN-SOUND-MANAGER.md §2.1b）。三者必须写在同一个测试里，否则下一个人会看到
+    // 「doctor 说完整、包行说缺 4 个」觉得是 bug，去「修好」其中一个，当场破坏另外两个。
+    suite(
+        "四个事件全部清空的三方回答同时钉死：doctor .complete / play 全部 .notReady / 面板包行 partial(0/4)，且四个音频文件全部原封不动"
+    ) {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(#"{"selected_pack": "my-pack"}"#, to: configFile)
+            writeFixture(
+                #"""
+                { "id": "my-pack", "events": {
+                    "stop": "stop.mp3", "stop_failure": "fail.mp3",
+                    "notification": "ping.mp3", "subagent_stop": "sub.mp3" } }
+                """#,
+                to: userPacks.appendingPathComponent("my-pack/manifest.json"))
+            let fileNames = ["stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"]
+            for fileName in fileNames {
+                writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/\(fileName)"))
+            }
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+
+            for event in Event.allCases {
+                let result = clearEventBinding(
+                    event: event, packID: "my-pack", environment: environment)
+                guard case .success = result else {
+                    expect(false, "clearing \(event) must succeed, got \(result)")
+                    return
+                }
+            }
+
+            // ① doctor：manifest 什么都没声明 → 没有缺失文件 → .complete（问的是「声明的文件在不在」）。
+            let integrity = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: userPacks, bundledPacksDirectory: nil)
+            guard case .complete(let packID, let events) = integrity else {
+                expect(false, "doctor must report an events:{} pack as .complete, got \(integrity)")
+                return
+            }
+            expect(packID == "my-pack", "packID on the report must be my-pack")
+            expect(events.isEmpty, "no events remain declared, got \(events)")
+
+            // ② play：四个事件全静默（问的是「这个事件要不要出声」，unmapped = 刻意静默）。
+            let playEnvironment = PlayEnvironment(
+                lockFile: root.appendingPathComponent("play.lock"),
+                configFile: configFile,
+                userPacksDirectory: userPacks,
+                bundledPacksDirectory: nil,
+                spawner: NoOpProcessSpawner(),
+                debounceStateFile: root.appendingPathComponent("play.state"),
+                logFile: root.appendingPathComponent("claudio.log"),
+                logLockFile: root.appendingPathComponent("claudio.log.lock"))
+            for event in Event.allCases {
+                let outcome = playSoundEvent(event.cliName, environment: playEnvironment)
+                expect(
+                    outcome == .notReady,
+                    "\(event) must be .notReady with every event cleared, got \(outcome)")
+            }
+
+            // ③ 面板包行：问的是「覆盖了几个事件」→ partial(0/4)「缺 4 个」。
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "my-pack"), environment: environment)
+            guard let card = cards.first(where: { $0.id == "my-pack" }) else {
+                expect(false, "my-pack must appear in availablePacks")
+                return
+            }
+            expect(
+                card.state == .partial(present: 0, total: 4),
+                "the pack row must read partial(0/4) — 「缺 4 个」, got \(card.state)")
+            expect(card.presentEvents.isEmpty, "no event glyph should be lit, got \(card.presentEvents)")
+
+            // 三方分歧之外的那条硬约束：清除绝不删文件——全部四个音频文件必须原封不动地留在磁盘上。
+            for fileName in fileNames {
+                expect(
+                    FileManager.default.fileExists(
+                        atPath: userPacks.appendingPathComponent("my-pack/\(fileName)").path),
+                    "\(fileName) must still be on disk — clearing only ever edits manifest keys")
+            }
         }
     }
 }

@@ -564,4 +564,47 @@ func runSourceScannerSuites() {
                 + "comment 仍然声称它们是同一份。第一处不同：\(firstDifference)\n"
                 + "    （helper \(helperLines.count) 行 / gui \(guiLines.count) 行）。改一份 = 两份一起改")
     }
+
+    // MARK: T3 并发绊线 —— manifest.json 唯一的并发安全保证是「全同步 + 全在 @MainActor」，
+    // 不是锁（PLAN-SOUND-MANAGER.md §2.1：`grep -iE 'lock' ManifestBinding.swift` 是空的）。
+    // 本计划会往 manifest.json 上加三个新写者（`clearEventBinding` / 未来的 `forkPack` /
+    // `restoreFactoryPack`）和一个新 UI 面（管理窗口）—— 一次善意的 `async` 重构会让这条无锁的
+    // 读-改-写在并发绑定/清除下静默丢更新，而且**没有任何运行时会报错**。这是这一批改动里
+    // 唯一没有运行时防护的 critical gap（§4c「并发不变式」表格最后一行），这条源码绊线是它
+    // **唯一**的守卫——不是写在文档里的一句话，是一条会响的东西。
+    //
+    // 这条绊线只属于 gui 包：`ManifestBinding.swift` / `PackFork.swift` 是 gui 侧文件，helper
+    // 没有对应物，所以不进两包共享的哨兵区块（上面那条「逐字节相同」钉的是 `TestSupport.swift`
+    // 里的扫描器本体，不是这个文件，两个包的 `SourceScannerSuite.swift` 允许在这类内容上分叉）。
+    suite(
+        "绊线（T3）：ManifestBinding.swift / PackFork.swift 里导出的 manifest 写函数不许带 async / Task / DispatchQueue"
+    ) {
+        let manifestWriterRelativePaths = [
+            "gui/Sources/ClaudioGUICore/ManifestBinding.swift",
+            // PackFork.swift 是 T6 的新文件，T3 落地时还不存在 —— 下面的 guard 会跳过它而不是
+            // 判它红。T6 把这个文件真的写出来那天，必须确认它仍在这份清单里，而不是任由这条
+            // 绊线悄悄只剩一个扫描对象。
+            "gui/Sources/ClaudioGUICore/PackFork.swift",
+        ]
+        for relativePath in manifestWriterRelativePaths {
+            let fileURL = repoRoot().appendingPathComponent(relativePath)
+            guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+                continue
+            }
+            let scanned = strippingComments(text)
+            expect(
+                scanned.unmodeledConstructs.isEmpty,
+                "\(relativePath) 里出现了扫描器不认识的构造：\(scanned.unmodeledConstructs) —— "
+                    + "下面几条负向断言会在一份不可信的『code』上跑，形同虚设")
+            for banned in ["async", "Task", "DispatchQueue"] {
+                expect(
+                    !scanned.code.contains(banned),
+                    "\(relativePath) 的代码里出现了 `\(banned)` —— manifest.json 今天零锁，"
+                        + "唯一的并发安全保证是「全同步 + 全在 @MainActor」（PLAN-SOUND-MANAGER.md "
+                        + "§2.1）。任何一个 manifest 写函数一旦变成 async / 派发任务 / 上队列，这条"
+                        + "不变式会在没有任何运行时报错的情况下静默失效 —— 这条源码绊线是它唯一的"
+                        + "守卫，得到的代码：\(scanned.code)")
+            }
+        }
+    }
 }
