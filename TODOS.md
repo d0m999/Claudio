@@ -1721,7 +1721,7 @@ rename」，要的都是**父目录**的写权限。`chmod 0500 ~/.claude`（MDM
 **Priority:** P3
 **Depends on:** None
 
-## 面板 config 路由（D23 / 阶段 A′）落地后剩下的两条
+## 面板 config 路由（D23 / 阶段 A′）落地后剩下的三条
 
 ### `probeConfigRewritable` 的 `.absent` 早退，不问父目录可不可写
 
@@ -1782,6 +1782,34 @@ rename」，要的都是**父目录**的写权限。`chmod 0500 ~/.claude`（MDM
 **Priority:** P2（从 P3 上调——`.unwritable` 这一半三处真实 UI 表面都受影响，且触发条件是完全非对抗性的
 目录权限变化，比原始 `.malformed` finding 的影响面更广）
 **Depends on:** None
+
+### 单源化到「决策级」之后，`operationalPanel` 的 case→子视图 render 映射仍是手写 switch，只文本探针背书 —— 要 ViewInspector 才根治
+
+**What:** f54d335 P1#1 把 `configState` 单源化到**决策级**：render 路径（`operationalPanel` 顶部
+`switch panelModel.configState.topContent`，PanelView.swift:514）与开局焦点派生（`applyFirstFocus` 读
+`content.showsEventContent` / `content.hasConfigFailureNotice`，:826/:830）现在读**同一个** `PanelTopContent`
+分类 + 同两颗 `PanelConfigSuite` 单测钉过返回值的纯投影。**决策级漂移**（两条路各 key 一个不同的
+state→content 映射）确实由类型堵死。但那个 `switch` 里 **case→画哪个子视图** 仍是**手写**的：没有任何
+import 单测把「`.events` 分支真的画了滑块 + 四行事件」「`.configFailure` 分支真的画了带 Reveal 钮的失败卡」
+钉到实际在屏幕上的控件。把 `EventRows` 误塞进 `.needsPack` 分支、或把滑块从 `.events` 分支删掉——两颗
+投影仍全绿、`PanelConfigSuite` 也全绿，而 render 与 focus 已经对不上。
+
+**Why:** 这是 `/codex review 457bff9`（2026-07-18）P2#2 的落点，也是本仓库反复自陈的那道天花板：
+`ViewWiringSuite` 只能 `codeOnly()` + `contains(修饰符字面量)` 文本探针——它证明得了「那一行还在」，
+证明不了「它接在对的 case / 对的子视图上」（ViewWiringSuite.swift:916-918 已如实自陈同一件事；本文件
+「视图层的绊线以散文形式存在」那条同族）。**源码注释此前写「在类型层一致，不可能漂移」，比真实覆盖范围大**；
+本轮已把 PanelConfig.swift 与 PanelView.swift（顶部 switch + `applyFirstFocus`）三处注释软化成「决策级封、
+呈现级 render 映射仅文本探针封」，与测试注释既有的「决策层」措辞对齐。真正堵住呈现级洞只有一条路：
+ViewInspector / XCTest（本机 CommandLineTools 没有，见本文件「CI 一次测试都不跑」与「`ClaudioGUI` 整个
+target 在 harness 里一行都跑不到」两条）。
+
+**Effort:** L（要么引 ViewInspector 把 `operationalPanel` 各分支渲染出的可见控件结构化断言；要么把
+「每个 topContent → 该出现的控件集 + 焦点输入」抽成一个可 import 单测的展示描述符，让视图只照它渲染）
+**Priority:** P3（非阻断：决策级已封，剩下的是「手写 switch 塞错子视图」这类**改错**才触发，非生产路径
+自然发生；与「`ClaudioGUI` target 零回归网」「ViewWiringSuite 文本绊线只挡整行删」同族，本质是无
+ViewInspector 的固有天花板）
+**Depends on:** 与「`ClaudioGUI` 整个 target 在 harness 里一行都跑不到」「`ViewWiringSuite` 的文本绊线只挡得住
+「整行被删」」同根，宜一并处理
 
 ---
 

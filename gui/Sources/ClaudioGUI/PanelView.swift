@@ -509,7 +509,10 @@ public struct PanelView: View {
             //
             // 这里 switch 的是 `.topContent`（`PanelConfigState.topContent`，映射由 `PanelConfigSuite` 真行为
             // 单测钉死），不是裸 `configState`——`applyFirstFocus` 的 `hasMasterVolume`/`hasConfigFailureNotice`
-            // 读**同一个**分类，渲染判据与焦点判据从此在类型层一致，不可能各写一份 switch 再漂移
+            // 读**同一个**分类，渲染判据与焦点判据从此在**决策级**一致（不再各写一份 `switch configState`），
+            // 决策级漂移由类型堵死。但**呈现级**的 render 映射仍是手写：这个 switch 里 case→哪个子视图 没有
+            // import 单测钉（塞错子视图、两颗投影仍全绿），要 ViewInspector/XCTest 才挡得住、本机没有——ViewWiringSuite
+            // 只文本探针它「还在」（残余呈现级洞见 TODOS.md「render 映射仍是手写 switch」）
             //（/codex review f54d335 P1#1，取代 26bba37 那轮「两段 switch + 文本绊线防漂移」的设计）。
             switch panelModel.configState.topContent {
             case .events:
@@ -811,7 +814,8 @@ public struct PanelView: View {
         // 渲染与焦点读**同一个**分类 `panelModel.configState.topContent`（`PanelConfigState.topContent`，
         // 映射由 `PanelConfigSuite` 真行为单测钉死）：`operationalPanel` 顶部 switch 在它上面，这里也从它派生
         // 两颗 flag。此前这两颗 flag 各自 `switch panelModel.configState` 一遍、与渲染判据靠 ViewWiringSuite
-        // 文本绊线防漂移；改读单源后，渲染判据与焦点判据在类型层一致，漂移不再可能（/codex review f54d335 P1#1）。
+        // 文本绊线防漂移；改读单源后，渲染判据与焦点判据在**决策级**一致，决策级漂移不再可能（呈现级 render 映射
+        // 仍是手写 switch、只文本探针封——见 operationalPanel 顶部注释与 TODOS.md）（/codex review f54d335 P1#1）。
         let content = panelModel.configState.topContent
         // 两颗焦点 flag 现在是 `content` 上**单测钉过**的纯投影，applyFirstFocus 只**原样转发**、不在视图里
         // 重新解释——这是把「单源」从**值级**提到**决策级**的关键（/codex review f54d335 P1#1 follow-up：对抗

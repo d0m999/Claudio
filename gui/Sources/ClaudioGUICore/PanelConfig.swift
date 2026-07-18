@@ -51,9 +51,15 @@ extension PanelConfigState {
 /// so the RENDER path (`operationalPanel`'s switch) and the OPENING-FOCUS derivation
 /// (`applyFirstFocus`'s `hasMasterVolume` / `hasConfigFailureNotice` flags) read ONE classification
 /// instead of two independent `switch panelModel.configState` reads. Before this, the two switches
-/// were kept in agreement only by a `ViewWiringSuite` text tripwire *after the fact*; now a
-/// render/focus drift is impossible by construction — change which state maps to `.configFailure`
-/// here and BOTH paths follow automatically.
+/// were kept in agreement only by a `ViewWiringSuite` text tripwire *after the fact*; now both paths
+/// read ONE classification, so DECISION-level drift — each path keying off a different
+/// state→content mapping — is fenced by construction: change which state maps to `.configFailure`
+/// here and BOTH paths follow automatically. What this does NOT fence is the PRESENTATION-level
+/// render mapping: `operationalPanel`'s `switch` still hand-picks which subview each branch draws,
+/// and no import unit test pins branch→on-screen-control (mis-wire a branch and both projections
+/// stay green). That residual hole needs ViewInspector/XCTest — absent on this machine — so
+/// `ViewWiringSuite` only text-probes the wiring line is still present (see TODOS.md
+/// 「render 映射仍是手写 switch」).
 ///
 /// - `.events`: the four event rows + the master-volume slider — the only state (`.operational`)
 ///   in which the slider is actually on screen, so it is exactly `hasMasterVolume`.
