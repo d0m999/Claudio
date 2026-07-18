@@ -18,7 +18,6 @@ import SwiftUI
 /// unit-tested — this file's own job is ONLY correct composition, not re-deciding anything.
 public struct PanelView: View {
     @StateObject private var onboardingViewModel: OnboardingViewModel
-    @StateObject private var dropZoneViewModel: AudioImportViewModel
     /// 「这一句刚说过」的去重器（T17g）—— 让「一趟 update pass ≤ 一条播报」在结构上成立。
     /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
     @StateObject private var announcer: PanelAnnouncer
@@ -115,8 +114,8 @@ public struct PanelView: View {
         self.focusCoordinator = focusCoordinator
         self.onPanelWidthChange = onPanelWidthChange
         // `NSSoundAudioPreviewPlayer` is internal (module-private, not exposed as a public
-        // API surface) — mirrors `AudioDropZoneView`'s own init, which constructs it the
-        // same way rather than taking it as a public, overridable parameter.
+        // API surface), constructed here rather than taken as a public, overridable
+        // parameter — this panel is the only production owner of a preview player.
         self.previewPlayer = NSSoundAudioPreviewPlayer()
 
         // The runner is built INSIDE the `StateObject(wrappedValue:)` autoclosure, together with
@@ -146,15 +145,13 @@ public struct PanelView: View {
         // 全部构造成**纯 local 实例**，再各自 wrap 进 `@StateObject` / `@State`，**并把同一实例**交给
         // `PanelConfigController`。绝不在这里读 `_someStateObject.wrappedValue` —— 那会在 SwiftUI 装好
         // state 之前重新求值 autoclosure、每次发一个全新实例（见上面 actionRunner 那段同样的坑）。捕获
-        // local 不碰这个陷阱：`ovm` / `dz` / `perRow` 就是被 wrap 的那几个引用，`panelModel` 的
+        // local 不碰这个陷阱：`ovm` / `perRow` 就是被 wrap 的那几个引用，`panelModel` 的
         // `afterFullReload` 闭包捕获它们，跨-view-model 协调因此打到的是面板真正在渲染的那几个实例。
         let onboardingViewModel = OnboardingViewModel(
             environment: onboardingEnvironment,
             actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment))
 
         let loadedConfig = loadPanelConfig(from: configFile).resolvedConfig
-        let dropZoneViewModel = AudioImportViewModel(
-            packID: loadedConfig.selectedPack, environment: audioEnvironment)
         var perRow: [Event: EventRowImportViewModel] = [:]
         for event in Event.allCases {
             let importViewModel = AudioImportViewModel(
@@ -163,12 +160,11 @@ public struct PanelView: View {
         }
 
         _onboardingViewModel = StateObject(wrappedValue: onboardingViewModel)
-        _dropZoneViewModel = StateObject(wrappedValue: dropZoneViewModel)
         _announcer = StateObject(wrappedValue: PanelAnnouncer())
         _rowImportViewModels = State(initialValue: perRow)
 
         // config 读模型 + 静音/切包写路径的**全部行为**都住在这个可测的类里。`afterFullReload` 是全量
-        // reload 里 config 读模型**之外**的那一半：onboarding 重探 + 两组 import view-model retarget 到
+        // reload 里 config 读模型**之外**的那一半：onboarding 重探 + 每行 import view-model retarget 到
         // 新包 —— 与旧 `refresh()` 逐行等价（onboarding 那行挪到 config 重载之后，两者互不依赖，结果不变；
         // retarget 收到刚重载出的 config，用它的 `selectedPack`，与旧代码一致）。
         _panelModel = StateObject(
@@ -178,7 +174,6 @@ public struct PanelView: View {
                 environment: audioEnvironment,
                 afterFullReload: { reloadedConfig in
                     onboardingViewModel.refresh()
-                    dropZoneViewModel.retarget(to: reloadedConfig.selectedPack)
                     for rowViewModel in perRow.values {
                         rowViewModel.retarget(to: reloadedConfig.selectedPack)
                     }
@@ -505,14 +500,19 @@ public struct PanelView: View {
     @ViewBuilder
     private var operationalPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState` 决定这一块顶部内容
-            // 显示什么——`.operational` 时是今天这四行事件覆盖度；`.needsPack`（还没有人选过包）
-            // 换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径本来就
-            // 通：点一张卡就是 ``selectPack``，会建出一份正确的 config）；`.malformed`/`.unwritable`
-            // 换成诚实失败态 + 可执行的修复指令——不禁用任何控件（写者本来就全部 fail closed），
-            // 只是不再假装一切正常（D19 已作废：不是禁用一个滑块，是整个面板换一个诚实的态）。
-            switch panelModel.configState {
-            case .operational:
+            // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState.topContent` 决定这一块顶部
+            // 内容显示什么——`.events`（= `.operational`）是今天这四行事件覆盖度 + 主音量滑块；`.needsPack`
+            //（还没有人选过包）换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径
+            // 本来就通：点一张卡就是 ``selectPack``，会建出一份正确的 config）；`.configFailure`（=
+            // `.malformed`/`.unwritable`）换成诚实失败态 + 可执行的修复指令——不禁用任何控件（写者本来就
+            // 全部 fail closed），只是不再假装一切正常（D19 已作废：不是禁用一个滑块，是整个面板换一个诚实的态）。
+            //
+            // 这里 switch 的是 `.topContent`（`PanelConfigState.topContent`，映射由 `PanelConfigSuite` 真行为
+            // 单测钉死），不是裸 `configState`——`applyFirstFocus` 的 `hasMasterVolume`/`hasConfigFailureNotice`
+            // 读**同一个**分类，渲染判据与焦点判据从此在类型层一致，不可能各写一份 switch 再漂移
+            //（/codex review f54d335 P1#1，取代 26bba37 那轮「两段 switch + 文本绊线防漂移」的设计）。
+            switch panelModel.configState.topContent {
+            case .events:
                 ForEach(panelModel.eventRows, id: \.event) { row in
                     if let importViewModel = rowImportViewModels[row.event] {
                         EventRowView(
@@ -531,10 +531,10 @@ public struct PanelView: View {
                     }
                 }
                 // PLAN-MASTER-VOLUME.md 阶段 D：位置对齐线框——四行事件之后、拖入区之前。只在
-                // `.operational` 渲染（D23 定稿 + D41：这是滑块唯一真的出现在屏幕上的态），与下面
-                // `applyFirstFocus()` 的 `hasMasterVolume: isOperational` 是同一件事的两面——渲染
-                // 判据变了，焦点判据必须跟着变，否则「不在屏幕上的控件不得占用焦点位」这条铁律
-                // 当场破功。
+                // `.events`（= `.operational`）渲染（D23 定稿 + D41：这是滑块唯一真的出现在屏幕上的态）。
+                // `applyFirstFocus()` 的 `hasMasterVolume: isOperational` 从**同一个** `.topContent` 分类派生
+                //（`isOperational = (content == .events)`），所以渲染判据与焦点判据自动一致——「不在屏幕上的
+                // 控件不得占用焦点位」这条铁律由类型担保，不再靠两处手动同步。
                 //
                 // `setMasterVolume` 的完整行为（写、republish 错误、按结果路由刷新）整段住在
                 // `panelModel` 里（`PanelConfigControllerSuite` 用真磁盘钉死）——这里只转发。
@@ -546,7 +546,7 @@ public struct PanelView: View {
                     adaptation: layoutAdaptation)
             case .needsPack:
                 needsPackNotice
-            case .malformed(let reason), .unwritable(let reason):
+            case .configFailure(let reason):
                 configFailureNotice(reason: reason)
             }
             // 绝不静默吞错（项目规则）—— 静音写回失败、切包失败、主音量写回失败**都**在这里如实
@@ -571,14 +571,6 @@ public struct PanelView: View {
             ) { _, message in
                 FailureRow(message: message)
             }
-            AudioDropZoneView(
-                viewModel: dropZoneViewModel,
-                // D28: a closure, not a captured value — resolved at PLAY time (inside
-                // AudioDropZoneView's own `.onAppear`-bound `onImportSucceeded` handler), so a
-                // volume change made after the panel opened is still honored, instead of freezing
-                // at whatever `panelModel.config.masterVolume` happened to be at construction.
-                currentVolume: { previewVolume(for: panelModel.config) })
-
             // T17f：**这里是告知真正的家 —— 而且位置本身是它文案的一部分。**
             //
             // 一次成功的「接管」必然把 state 推成 `.installed`（`runDiskAction` 无条件 `refresh()`），
@@ -627,6 +619,12 @@ public struct PanelView: View {
     /// 负责把已经存在的、可执行的修复原因说出来，并给一个「在访达中显示」的快捷方式——doctor 的
     /// 诊断今天就带着这句一模一样的话（``configRewritabilityResult(configFile:)``），这里不重新
     /// 发明一套说法。
+    ///
+    /// 那颗「在访达中显示 config.json」是一颗**真控件**（焦点目标 ``PanelFocusTarget/configReveal``），
+    /// 不是装饰：它渲染在面板顶端，是这两态开局键盘/VoiceOver 焦点的落点（/codex review P1，26bba37
+    /// follow-up）。渲染它的判据与 `applyFirstFocus` 派生 `hasConfigFailureNotice` 的判据现在是**同一个**
+    /// `panelModel.configState.topContent` 分类的 `.configFailure` 分支（单源化 f54d335 P1#1）——渲染 / 焦点
+    /// 漂移在类型层就不可能；`ViewWiringSuite` 只需钉「两边都读了这个单源」+ 接线还在。
     private func configFailureNotice(reason: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             // 2026-07-15 冗余审计的**第六份**手抄拒绝行 —— 审计当时只数到五份，漏了这一处（它藏在
@@ -643,6 +641,10 @@ public struct PanelView: View {
             .buttonStyle(.plain)
             .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             .accessibilityHint("在访达中定位 config.json，方便手工修正")
+            // 它是这张卡上唯一的 bespoke 修复动作，渲染在面板最顶端 —— 所以它必须在焦点序里，且开局
+            // 焦点就落在它上面（`.malformed`/`.unwritable` 时 `applyFirstFocus` 走 `.configReveal`）。
+            // /codex review P1（26bba37 follow-up）。
+            .focused($focusedTarget, equals: .configReveal)
         }
     }
 
@@ -798,31 +800,34 @@ public struct PanelView: View {
                 ctaOperable: ctaOperable)
             return
         }
-        // D23 定稿④「路由态只做减法」：`operationalPanel` only renders `eventRows` for
-        // `.operational` — `.needsPack`/`.malformed`/`.unwritable` show the empty-state/failure
-        // card instead (see `operationalPanel`'s `switch configState`). A control that isn't on
-        // screen must never claim a slot in the opening-focus order, so this passes an EMPTY row
-        // list for every non-operational state rather than `eventRows` (which, off
+        // D23 定稿④「路由态只做减法」：`operationalPanel` only renders `eventRows` for `.events`
+        // (= `.operational`) — `.needsPack`/`.configFailure` show the empty-state/failure card
+        // instead (see `operationalPanel`'s `switch panelModel.configState.topContent`). A control
+        // that isn't on screen must never claim a slot in the opening-focus order, so this passes
+        // an EMPTY row list for every non-`.events` state rather than `eventRows` (which, off
         // `resolvedConfig`'s empty-pack default, would otherwise resolve to four `.unmapped` rows
         // that are never actually rendered).
         //
-        let isOperational: Bool = {
-            if case .operational = panelModel.configState { return true }
-            return false
-        }()
-        let visibleRows: [EventRow] = isOperational ? panelModel.eventRows : []
-        // hasMasterVolume: isOperational (PLAN-MASTER-VOLUME.md 阶段 D landed `MasterVolumeRow` —
-        // see `operationalPanel`'s `.operational` case above, the ONLY branch that renders it).
-        // `isOperational` is now a VALID proxy for "the slider is on screen": the two are the
-        // same `switch panelModel.configState` decision, read twice. Before 阶段 D landed, this
-        // was pinned to a literal `false` (fix for a `/codex review` P2 on 341d9b7) precisely
-        // because `operationalPanel` rendered zero master-volume controls yet — flipping it back
-        // now is not a regression of that fix, it is the fix's own stated exit condition
-        // (ViewWiringSuite's tripwire on this line has been updated to match, and fails the
-        // moment either half of `operationalPanel`/`applyFirstFocus` drifts from the other).
+        // 渲染与焦点读**同一个**分类 `panelModel.configState.topContent`（`PanelConfigState.topContent`，
+        // 映射由 `PanelConfigSuite` 真行为单测钉死）：`operationalPanel` 顶部 switch 在它上面，这里也从它派生
+        // 两颗 flag。此前这两颗 flag 各自 `switch panelModel.configState` 一遍、与渲染判据靠 ViewWiringSuite
+        // 文本绊线防漂移；改读单源后，渲染判据与焦点判据在类型层一致，漂移不再可能（/codex review f54d335 P1#1）。
+        let content = panelModel.configState.topContent
+        // 两颗焦点 flag 现在是 `content` 上**单测钉过**的纯投影，applyFirstFocus 只**原样转发**、不在视图里
+        // 重新解释——这是把「单源」从**值级**提到**决策级**的关键（/codex review f54d335 P1#1 follow-up：对抗
+        // 复核实测，只让 render/focus 读同一个 `content` **值**还不够——视图里 `if case … = content { return
+        // true }` 这两颗闭包的**返回值**没有任何测试钉，把 true 翻成 false 就能让失败卡照画、而焦点跳过 Reveal
+        // 钮，全绿。把投影上提到 `PanelTopContent.showsEventContent` / `.hasConfigFailureNotice`、由 `PanelConfigSuite`
+        // 单测其返回值后，视图这侧再没有可翻转的布尔，只剩一句转发；ViewWiringSuite 钉住这句转发原样还在）。
+        // - showsEventContent：滑块 + 四行事件只在 `.events`（= `.operational`）真的在屏幕上，所以它同时决定
+        //   `visibleRows`（哪些行真被渲染进焦点序）与 `hasMasterVolume`（滑块此刻在不在屏幕上）。
+        // - hasConfigFailureNotice：诚实失败卡（`.configFailure` = `.malformed`/`.unwritable`）带着「在访达中
+        //   显示 config.json」这颗真控件，渲染在面板顶端，所以 `.configReveal` 领序、开局焦点落在它上面。
+        let visibleRows: [EventRow] = content.showsEventContent ? panelModel.eventRows : []
         focusedTarget = panelOpeningFocus(
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
-            hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational)
+            hasDetailToggle: hasDetailToggle, hasMasterVolume: content.showsEventContent,
+            hasConfigFailureNotice: content.hasConfigFailureNotice)
     }
 
     // MARK: - Actions

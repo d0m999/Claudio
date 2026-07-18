@@ -390,12 +390,58 @@ focus 值 → SwiftUI 焦点解析未定义）。T2 会把它重新引爆。
    （顺带：TODOS.md「`.dropZone` 是焦点位但没有任何视图绑定它」那条台账被本改动**整个消灭** ——
    落地时更新台账，不许留一条指向已删除符号的活条目。）
 
+   > **2026-07-17 追记（P1#1 已提前落地，非 T7）**：cc59d52（T1）落地后 `/codex review` 逮到
+   > `.dropZone` 焦点位在 `.needsPack`/`.malformed`/`.unwritable`（生产可达：首次启动没选包、config
+   > 损坏）已是 `PanelView.applyFirstFocus` 的**开屏焦点目标**，即把焦点设到一个已删控件上（键盘/VO
+   > 开屏焦点丢失）—— 这已不是「低危缺口」，是可达真回归。于是**这一刀在 T7 之前就单独落了**：
+   > `PanelFocusTarget.dropZone`（枚举项 + `panelFocusOrder` 无条件 append + `panelFirstFocusTarget`
+   > operable arm）**已整个删除**；上面点名的两段 doc（`panelFirstFocusTarget` 非空论证、`panelFocusOrder`
+   > 头注释）与 TODOS 台账条目**已同批改写/删除**。删后诚实的过渡行为：`.needsPack` 有卡→首焦点是**首张
+   > 包卡**（正好是「点一张卡片」主行动，净改善）；无卡→`.disconnect`（真控件，非幽灵；仅「零安装包」
+   > 这个退化态才触发，内置包在场时不会）；in-flight 零形状→**首焦点诚实为 nil**（与 onboarding
+   > in-flight 同型）。
+   >
+   > **所以 T7 不再是「删 `.dropZone` 并原子替换」，而是「新增 `.manageSounds`」**，第 ①②③ 条不变，但：
+   > (a) 删除 `.dropZone` / 改那两段 doc / 消灭 TODOS 条目 —— **已完成，勿重做**；T7 名下只剩
+   > `PanelFocusTarget.eventAction`「A SINGLE slot per row」那段 doc（本节第 1-3 条 `eventSound` 才作废它）；
+   > (b) 测试的当前形状（`:329` 行号已移，按 suite 意图找）：无卡 `[.disconnect]` → `[.manageSounds, .disconnect]`
+   > 且首焦点 `.disconnect` → `.manageSounds`；有卡的首张包卡断言不受影响（`.manageSounds` 插在 packCards
+   > 之后、`.disconnect` 之前）；
+   > (c) ⚠️ **`runPanelFocusInFlightSuites` 里新增了一条 `panelOpeningFocus(rows:[], packCardIDs:[],
+   > ctaOperable:false) == nil` 的钉子**（T7 原指令清单没点名它）—— T7 的 `.manageSounds`（in-flight 恒
+   > 可操作）落地后它必红，须**主动重写为 `== .manageSounds`**，别当意外红。
+
+   > **2026-07-18 追记（P1#2：`.configReveal` 也提前落地，非 T7）**：紧接 26bba37 的 `/codex review`
+   > 又逮到 —— 删掉 `.dropZone` 后，`.malformed`/`.unwritable` 的**诚实失败卡**上那颗
+   > `PanelView.configFailureNotice` 的「在访达中显示 config.json」按钮（`PanelView.swift:624`）是一颗
+   > 真控件，却没有焦点目标；开屏焦点于是越过这颗**视觉最顶端**的修复入口，落到包卡 / 断开连接 / nil。
+   > 这一刀也在 T7 之前单独落了（26bba37 follow-up commit）：新增焦点目标 `PanelFocusTarget.configReveal`
+   > + scope 字段 `hasConfigFailureNotice` + `panelOpeningFocus` 同名参；`panelFocusOrder` 在 operational
+   > 序**最前**插入它（视觉最顶），operability arm 恒 `true`（访达 reveal 无写副作用，含 in-flight）；
+   > `applyFirstFocus` 从 `configState` 的 `.malformed`/`.unwritable` 派生该 flag；`ViewWiringSuite` 按
+   > `.masterVolume` 先例双向钉（call site 传派生值 + 派生自那两态 + 禁字面量）；`PanelFocusOrderSuite`
+   > 拆掉把 `.malformed`/`.unwritable` 与 `.needsPack` 并成一个 fixture 的旧断言，新增 `.configReveal`
+   > 首焦点 / 有卡 / in-flight 各一条；TODOS `:1160` 的过期「运行态恒含 `.dropZone`，永不返回 nil」已改写。
+   >
+   > **对 T7 的三条约束（`.configReveal` 与 `.manageSounds` 不冲突，但同改 `panelFocusOrder`，须协调 merge）**：
+   > (i) `.configReveal` 是**条件性**顶部锚点（仅 `.malformed`/`.unwritable`），**不是** operational scope
+   > 「永不返回 nil」的无条件担保者 —— 那把交椅仍归 `.manageSounds`；本改动没动 §2.5 ⚠②，别以为 never-nil
+   > 已由它兜住。(ii) `.manageSounds` 落地时须排在 `.configReveal` **之后**（顶部 `.configReveal` → 事件 →
+   > packCards → `.manageSounds` → `.disconnect`），否则失败卡首焦点会错落到管理钮。(iii) 上面 (c) 那条 in-flight
+   > nil 钉子现在**只覆盖 `.needsPack` 一无所有**态（无失败卡）；`.malformed`/`.unwritable` 的 in-flight 已
+   > 由新增的 `== .configReveal` 断言钉死为非 nil —— T7 把 (c) 重写成 `.manageSounds` 时别把这条一起动了。
+   > （设计侧一条待拍板：post-T7 `.malformed`/`.unwritable` 面板上会有**两颗访达 reveal**——config.json 与
+   > `~/.claudio/packs/`——功能不撞，但归 DESIGN.md 定夺失败态呈现。）
+
 6. **测试要重写，不是删**（计划第一版没算这笔账）：
    `CoverageStateSuite` 有 **8 条**用例钉死 `previewClaimsActionFocus` / `eventActionOperable`
    的现语义；`PanelFocusOrderSuite:302` 那条「首焦点必须 ≠ `order.first`」的**前提**也变了
    （muted 行的首焦点从「跳过禁用的试听」变成「落在文件名下拉上」）；
    **`PanelFocusOrderSuite:329` 整条 suite 钉死「零行首焦点 = `.dropZone`」**（Codex 逮到 ——
    它连名字都写着 drop zone），T7 落地时它必红，重写为 `.manageSounds`，不许删。
+   > **2026-07-17 追记**：这条已不再钉 `.dropZone`（见第 5 条追记，P1#1 提前落地）。现在它钉的是
+   > 无卡→`.disconnect`、有卡→首张包卡、in-flight 零形状→`nil`。T7 要做的是把这些**当前**形状迁到
+   > `.manageSounds`，而不是「重写一条写着 dropZone 的断言」。
 
 7. **三态共用 `Menu` 的 VoiceOver 输出要成为契约，不只是焦点槽**（Codex 逮到，2026-07-17 补）：
    今天 present 行的文件名是**非控件** `Text`（`EventRowView.swift:254`，行级 a11y 合并播报），

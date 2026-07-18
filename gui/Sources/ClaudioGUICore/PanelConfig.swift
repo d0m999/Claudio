@@ -46,6 +46,67 @@ extension PanelConfigState {
     }
 }
 
+/// The three shapes ``PanelView``'s operational-panel TOP region can take, as a pure function of
+/// ``PanelConfigState`` (``PanelConfigState/topContent``). Extracted (/codex review f54d335 P1#1)
+/// so the RENDER path (`operationalPanel`'s switch) and the OPENING-FOCUS derivation
+/// (`applyFirstFocus`'s `hasMasterVolume` / `hasConfigFailureNotice` flags) read ONE classification
+/// instead of two independent `switch panelModel.configState` reads. Before this, the two switches
+/// were kept in agreement only by a `ViewWiringSuite` text tripwire *after the fact*; now a
+/// render/focus drift is impossible by construction — change which state maps to `.configFailure`
+/// here and BOTH paths follow automatically.
+///
+/// - `.events`: the four event rows + the master-volume slider — the only state (`.operational`)
+///   in which the slider is actually on screen, so it is exactly `hasMasterVolume`.
+/// - `.needsPack`: the 先选包 empty-state card.
+/// - `.configFailure(reason:)`: the honest-failure card, which carries the 在访达中显示 config.json
+///   Reveal button — exactly `hasConfigFailureNotice`, and the reason it leads the focus order with
+///   ``PanelFocusTarget/configReveal``. The `reason` is the exact actionable string
+///   ``PanelConfigState`` already carries (`.malformed`/`.unwritable`), computed once here rather
+///   than re-derived on the render side.
+public enum PanelTopContent: Sendable, Equatable {
+    case events
+    case needsPack
+    case configFailure(reason: String)
+}
+
+extension PanelTopContent {
+    /// The operational events content — four event rows + the master-volume slider — is on screen,
+    /// true only for `.events`. Drives both `visibleRows` (which rows are actually rendered into the
+    /// opening-focus order) and `hasMasterVolume` (the slider is on screen exactly then).
+    ///
+    /// Hoisted here as a UNIT-TESTED projection rather than re-pattern-matched inside `PanelView`
+    /// (/codex review f54d335 P1#1 follow-up): a value-level single source wasn't enough. When the
+    /// View re-derived this with `if case .events = content { return true }`, the closure's RETURN
+    /// value was pinned by no test — flipping it to `false` reintroduced the drift (slider renders
+    /// but focus skips `.masterVolume`) with every test still green. As a projection on
+    /// ``PanelTopContent``, its return is fenced by `PanelConfigSuite`; the View forwards it verbatim.
+    public var showsEventContent: Bool { self == .events }
+
+    /// The honest-failure card — carrying the 在访达中显示 config.json Reveal button (focus target
+    /// ``PanelFocusTarget/configReveal``) — is on screen, true only for `.configFailure`. Same
+    /// reasoning as ``showsEventContent``: a unit-tested projection the View forwards verbatim, so
+    /// the render/focus agreement is fenced at the DECISION level, not just the value level.
+    public var hasConfigFailureNotice: Bool {
+        if case .configFailure = self { return true }
+        return false
+    }
+}
+
+extension PanelConfigState {
+    /// What ``PanelView``'s operational panel renders at its top for this state — the SINGLE
+    /// classification both the render switch and the opening-focus flag derivation read (see
+    /// ``PanelTopContent``). `.malformed` and `.unwritable` collapse to the same `.configFailure`
+    /// (same card, same Reveal control), carrying their own `reason`; `.operational` → `.events`;
+    /// `.needsPack` → `.needsPack`.
+    public var topContent: PanelTopContent {
+        switch self {
+        case .operational: return .events
+        case .needsPack: return .needsPack
+        case .malformed(let reason), .unwritable(let reason): return .configFailure(reason: reason)
+        }
+    }
+}
+
 /// Determines the panel's complete config verdict for `configFile` — the ONLY entry point
 /// `PanelView` should call to decide what to render (D23 定稿②③). Composes both orthogonal
 /// axes (see ``PanelConfigState``'s doc comment): the WRITE axis is checked first, because a

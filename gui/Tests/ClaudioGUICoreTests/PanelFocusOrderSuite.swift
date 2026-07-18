@@ -36,7 +36,7 @@ func runPanelFocusOrderSuites() {
     suite("panelFocusOrder: operational — each row contributes action THEN mute, in Event.allCases order (follows visual left-to-right order)") {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true))
         let expected: [PanelFocusTarget] =
-            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.masterVolume, .dropZone, .disconnect]
+            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.masterVolume, .disconnect]
         expect(order == expected, "got \(order)")
     }
 
@@ -47,25 +47,22 @@ func runPanelFocusOrderSuites() {
             "first focus must be the first row's action control, got \(String(describing: order.first))")
     }
 
-    suite("panelFocusOrder: operational — drop zone comes after every row, before any gallery card") {
+    suite("panelFocusOrder: operational — gallery cards come right after the master volume slider, in their given order, with 断开连接 last") {
         let order = panelFocusOrder(
             .operational(events: Event.allCases, packCardIDs: ["alpha-pack", "zeta-pack"], hasMasterVolume: true))
-        guard let dropZoneIndex = order.firstIndex(of: .dropZone) else {
-            expect(false, "dropZone must appear in the order")
-            return
-        }
-        // +1 accounts for .masterVolume, which sits between the last row and the drop zone.
-        let rowCount = Event.allCases.count * 2 + 1
-        expect(dropZoneIndex == rowCount, "dropZone must sit right after all row controls (incl. the master volume slider), got index \(dropZoneIndex)")
+        // rows (action+mute per event) + the master volume slider; then the pack cards; 断开连接 last.
+        // `.dropZone` used to sit between the slider and the cards — it left with `AudioDropZoneView`
+        // (cc59d52 / PLAN-SOUND-MANAGER T1), so the cards now follow the slider directly.
+        let rowCount = Event.allCases.count * 2 + 1  // +1 for .masterVolume
         expect(
-            order[(dropZoneIndex + 1)...].elementsEqual([
+            order[rowCount...].elementsEqual([
                 .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"), .disconnect,
             ]),
-            "gallery cards must follow the drop zone in their given order, and 断开连接 sits last"
-                + " (it is the bottom-most control — focus order tracks visual order), got \(order)")
+            "gallery cards must follow the master volume slider in their given order, and 断开连接"
+                + " sits last (it is the bottom-most control — focus order tracks visual order), got \(order)")
     }
 
-    suite("panelFocusOrder: .masterVolume's position is pinned — right after the last row's .eventMute, right before .dropZone") {
+    suite("panelFocusOrder: .masterVolume's position is pinned — right after the last row's .eventMute, right before the first pack card") {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: ["alpha-pack"], hasMasterVolume: true))
         guard let masterVolumeIndex = order.firstIndex(of: .masterVolume) else {
             expect(false, ".masterVolume must appear in the order")
@@ -75,17 +72,18 @@ func runPanelFocusOrderSuites() {
             order[masterVolumeIndex - 1] == .eventMute(Event.allCases.last!),
             "masterVolume must immediately follow the last row's mute toggle, got \(order[masterVolumeIndex - 1])")
         expect(
-            order[masterVolumeIndex + 1] == .dropZone,
-            "masterVolume must immediately precede the drop zone, got \(order[masterVolumeIndex + 1])")
+            order[masterVolumeIndex + 1] == .packCard(id: "alpha-pack"),
+            "masterVolume must immediately precede the first pack card (the drop zone that used to sit"
+                + " between them left with AudioDropZoneView, T1), got \(order[masterVolumeIndex + 1])")
     }
 
-    suite("panelFocusOrder: operational — total count is 2×events + dropZone + cards + disconnect") {
+    suite("panelFocusOrder: operational — total count is 2×events + masterVolume + cards + disconnect") {
         let order = panelFocusOrder(
             .operational(events: Event.allCases, packCardIDs: ["a", "b", "c"], hasMasterVolume: true))
-        // +1 masterVolume, +1 dropZone, +3 cards, +1 断开连接（T17）
+        // +1 masterVolume, +3 cards, +1 断开连接（T17）. `.dropZone`'s +1 left with T1.
         expect(
-            order.count == Event.allCases.count * 2 + 1 + 1 + 3 + 1,
-            "expected \(Event.allCases.count * 2 + 1 + 1 + 3 + 1) items, got \(order.count)")
+            order.count == Event.allCases.count * 2 + 1 + 3 + 1,
+            "expected \(Event.allCases.count * 2 + 1 + 3 + 1) items, got \(order.count)")
     }
 
     suite("panelFocusOrder: onboarding vs operational produce structurally different orders") {
@@ -99,28 +97,62 @@ func runPanelFocusOrderSuites() {
             "onboarding's order must never contain an operational-only target")
     }
 
-    suite("panelFocusOrder: an empty operational panel (no cards, hasMasterVolume: false — the REAL shape of .needsPack/.malformed/.unwritable, which never render the slider) ends at the drop zone + 断开连接, never claiming a slot for .masterVolume") {
-        // /codex review P1 (2626083/47459a7): this used to be unconditional — .masterVolume
-        // was appended regardless of whether it was actually on screen, which silently misrouted
-        // opening focus to a nonexistent control in exactly these three real configStates
-        // (`PanelView.applyFirstFocus` passes `rows: []` for all three, and until this fix, the
-        // scope it built still claimed a slider was present).
+    suite("panelFocusOrder: an empty operational panel (no cards, hasMasterVolume: false, no config-failure notice — the REAL .needsPack 'nothing installed' shape) is just the always-present 断开连接, never claiming a slot for .masterVolume or a removed drop zone") {
+        // /codex review P1 (2626083/47459a7): .masterVolume must not appear when the slider is not
+        // on screen. cc59d52 (PLAN-SOUND-MANAGER T1) additionally removed `.dropZone` — the panel
+        // no longer has a bottom drop affordance, so it claims no slot for one. With zero rows,
+        // zero cards and no slider, only the always-appended 断开连接 row remains.
+        //
+        // This is the `.needsPack`-with-nothing shape ONLY. `.malformed`/`.unwritable` also render
+        // zero rows / no slider, but they carry the 诚实失败卡's `.configReveal` (hasConfigFailureNotice:
+        // true), which leads the order — pinned separately below (26bba37 follow-up). Keeping this
+        // fixture at the default `hasConfigFailureNotice: false` is what makes it the needsPack case.
         let order = panelFocusOrder(.operational(events: [], packCardIDs: [], hasMasterVolume: false))
         expect(
-            order == [.dropZone, .disconnect],
-            "with hasMasterVolume false, zero rows and zero cards, only the drop zone and"
-                + " 断开连接 remain — .masterVolume must NOT appear, got \(order)")
+            order == [.disconnect],
+            "with hasMasterVolume false, zero rows and zero cards, only 断开连接 remains —"
+                + " .masterVolume and the (removed) drop zone must NOT appear, got \(order)")
     }
 
-    suite("panelFocusOrder: an empty-rows operational panel with hasMasterVolume: true still surfaces the slider ahead of the drop zone") {
+    suite("panelFocusOrder: an empty-rows operational panel with hasMasterVolume: true still surfaces the slider ahead of 断开连接") {
         // The flip side of the test above: hasMasterVolume, not `events` being non-empty, is
         // what gates .masterVolume. Zero rows is only a fixture (production's true .operational
         // state always has 4, see the .masterVolume position test above) — this pins the flag's
         // OWN behavior independent of row count.
         let order = panelFocusOrder(.operational(events: [], packCardIDs: [], hasMasterVolume: true))
         expect(
-            order == [.masterVolume, .dropZone, .disconnect],
+            order == [.masterVolume, .disconnect],
             "with hasMasterVolume true, the slider still claims its slot even with zero rows, got \(order)")
+    }
+
+    // MARK: - .configReveal (/codex review P1, 26bba37 follow-up): the 诚实失败卡's
+    // 「在访达中显示 config.json」 is a real focus target that LEADS the order on
+    // `.malformed`/`.unwritable` — the two states that render the failure card at the panel top.
+
+    suite("panelFocusOrder: the config-failure shape (.malformed/.unwritable — hasConfigFailureNotice: true, no cards) leads with .configReveal, then the always-present 断开连接") {
+        // These two states render `configFailureNotice` at the TOP of the panel; its reveal button
+        // is visually first, so it must lead the focus order. No pack cards installed here → just
+        // .configReveal then .disconnect. (Contrast the .needsPack-nothing shape above, which has NO
+        // failure notice and so leads with .disconnect.)
+        let order = panelFocusOrder(
+            .operational(events: [], packCardIDs: [], hasMasterVolume: false, hasConfigFailureNotice: true))
+        expect(
+            order == [.configReveal, .disconnect],
+            ".configReveal must lead the order on the config-failure shape, ahead of 断开连接, got \(order)")
+    }
+
+    suite("panelFocusOrder: the config-failure shape WITH pack cards leads with .configReveal, then the cards, then 断开连接 (never folds into the plain .needsPack card order)") {
+        // `.malformed`/`.unwritable` can still have packs installed (the gallery renders in every
+        // configState). The reveal button is above the gallery, so .configReveal leads, THEN the
+        // cards. This is the exact case the pre-fix tests wrongly folded into the .needsPack
+        // 'first pack card' assertion — the reveal button was skipped entirely.
+        let order = panelFocusOrder(
+            .operational(
+                events: [], packCardIDs: ["alpha-pack", "zeta-pack"], hasMasterVolume: false,
+                hasConfigFailureNotice: true))
+        expect(
+            order == [.configReveal, .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"), .disconnect],
+            ".configReveal must lead, ahead of the pack cards it visually sits above, got \(order)")
     }
 
     // MARK: - panelFirstFocusTarget (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项" — the
@@ -157,7 +189,7 @@ func runPanelFocusOrderSuites() {
         // per-row stop count stays stable). Pin the exact order so a shrink would fail here.
         let fullOrder = panelFocusOrder(scope)
         let expected: [PanelFocusTarget] =
-            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.masterVolume, .dropZone, .disconnect]
+            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.masterVolume, .disconnect]
         expect(fullOrder == expected, "the full order (incl. the disabled action) must be unchanged, got \(fullOrder)")
         expect(fullOrder.contains(.eventAction(first)), "the disabled action must remain a Tab stop")
         // Half B — the SAME event, marked non-operable, is skipped for OPENING focus only.
@@ -206,19 +238,60 @@ func runPanelFocusOrderSuites() {
             "onboarding first focus is unaffected by action operability, got \(String(describing: target))")
     }
 
-    suite("panelFirstFocusTarget: empty operational panel, hasMasterVolume false (the REAL .needsPack/.malformed/.unwritable shape) → first focus falls to the drop zone, never the (unrendered) slider") {
-        // /codex review P1 (2626083/47459a7): zero events is NOT "unreachable in shipping code"
-        // as the previous version of this test claimed — `PanelView.applyFirstFocus` passes
-        // `rows: []` for exactly this shape whenever `configState` is `.needsPack`/`.malformed`/
-        // `.unwritable`, all common real states (first launch before a pack is picked, or a
-        // corrupted/unwritable config.json). None of those three render a master-volume slider,
-        // so first focus must never point at `.masterVolume` here — it must fall through to the
-        // next unconditionally-operable target, `.dropZone`.
+    suite("panelFirstFocusTarget: empty operational panel, hasMasterVolume false, no cards, no config-failure notice (the REAL .needsPack shape with nothing installed) → first focus is the always-present 断开连接, never the (unrendered) slider or a removed drop zone") {
+        // /codex review P1 (2626083/47459a7): zero events is NOT "unreachable in shipping code" —
+        // `PanelView.applyFirstFocus` passes `rows: []`, `hasMasterVolume: false` whenever
+        // `configState` is `.needsPack` (first launch before a pack is picked). cc59d52
+        // (PLAN-SOUND-MANAGER T1) removed `.dropZone` (its view was deleted), so with no rows, no
+        // cards and no slider the first — and only — operable target is the always-appended
+        // `.disconnect` row. (T7 will give this shape a better landing via `.manageSounds`; until
+        // then 断开连接 is the honest one, never a ghost focus slot.)
+        //
+        // This is `.needsPack` ONLY. `.malformed`/`.unwritable` share the zero-rows/no-slider shape
+        // but ADD the 诚实失败卡's `.configReveal` (hasConfigFailureNotice: true), which leads —
+        // pinned in the next two suites (26bba37 follow-up). The default `hasConfigFailureNotice:
+        // false` here is exactly what makes this the needsPack case, not the config-broken ones.
         let scope = PanelFocusScope.operational(events: [], packCardIDs: [], hasMasterVolume: false)
         expect(
-            panelFirstFocusTarget(scope) == .dropZone,
-            "with the slider not on screen, first focus must be the drop zone, never"
-                + " .masterVolume, got \(String(describing: panelFirstFocusTarget(scope)))")
+            panelFirstFocusTarget(scope) == .disconnect,
+            "with no rows/cards/slider/failure-notice, first focus must be the always-present 断开连接,"
+                + " never .masterVolume or a removed drop zone, got \(String(describing: panelFirstFocusTarget(scope)))")
+    }
+
+    suite("panelFirstFocusTarget: the config-failure shape (.malformed/.unwritable, no cards) → first focus is .configReveal, never 断开连接 (26bba37 follow-up)") {
+        // The exact `.malformed`/`.unwritable` opening-focus decision Codex's P1 flagged: the
+        // 诚实失败卡's 「在访达中显示 config.json」 is visually first and operable, so it — not the
+        // destructive 断开连接 below it — is where keyboard/VoiceOver focus lands when the panel opens
+        // on a corrupt/unwritable config.
+        let scope = PanelFocusScope.operational(
+            events: [], packCardIDs: [], hasMasterVolume: false, hasConfigFailureNotice: true)
+        expect(
+            panelFirstFocusTarget(scope) == .configReveal,
+            "config-broken states open focused on .configReveal, not 断开连接, got \(String(describing: panelFirstFocusTarget(scope)))")
+    }
+
+    suite("panelFirstFocusTarget: the config-failure shape WITH pack cards → first focus is STILL .configReveal, never the first pack card (the pre-fix bug: reveal button was skipped to the gallery)") {
+        // `.malformed`/`.unwritable` with packs installed. Before this fix the focus model was blind
+        // to the reveal button and landed on `.packCard("alpha-pack")` — skipping the panel's own
+        // top-of-card recovery action. It must lead with .configReveal.
+        let scope = PanelFocusScope.operational(
+            events: [], packCardIDs: ["alpha-pack", "zeta-pack"], hasMasterVolume: false,
+            hasConfigFailureNotice: true)
+        expect(
+            panelFirstFocusTarget(scope) == .configReveal,
+            "the reveal button leads even when pack cards are installed, got \(String(describing: panelFirstFocusTarget(scope)))")
+    }
+
+    suite("panelFirstFocusTarget: empty operational panel with pack cards (the COMMON .needsPack 'pick a pack' shape) → first focus is the first pack card, not 断开连接") {
+        // The common first-launch shape: no pack selected yet, but packs ARE installed and their
+        // cards are on screen (`needsPackNotice` tells the user '点一张卡片'). The pack gallery
+        // renders in every `configState`, so opening focus lands on the first pack card — the
+        // panel's actual primary action — not skips past it to the destructive 断开连接. Before
+        // cc59d52 this landed on the (view-less) `.dropZone`; removing it fixed that.
+        let scope = PanelFocusScope.operational(events: [], packCardIDs: ["alpha-pack", "zeta-pack"], hasMasterVolume: false)
+        expect(
+            panelFirstFocusTarget(scope) == .packCard(id: "alpha-pack"),
+            "first focus must be the first pack card, got \(String(describing: panelFirstFocusTarget(scope)))")
     }
 
     suite("panelFirstFocusTarget: empty operational panel, hasMasterVolume true → first focus IS the master volume slider (never nil)") {
@@ -326,30 +399,32 @@ func runPanelFocusOrderSuites() {
                 + " row toggle, got \(String(describing: target))")
     }
 
-    suite("panelOpeningFocus: zero rows, hasMasterVolume false (the REAL .needsPack/.malformed/.unwritable shape) → first focus is the drop zone, never the (unrendered) master volume slider") {
+    suite("panelOpeningFocus: zero rows, hasMasterVolume false, with a pack card (the REAL .needsPack 'pick a pack' shape) → first focus is the first pack card, never the (unrendered) slider or a removed drop zone") {
         // /codex review P1 (2626083/47459a7): `PanelView.applyFirstFocus` calls
-        // `panelOpeningFocus` with `rows: []` AND `hasMasterVolume: false` together whenever the
-        // panel is NOT truly operational — a common real shape (first launch before a pack is
-        // picked, or a corrupted/unwritable config.json), not a fixture-only edge case. Neither
-        // the event rows nor the slider are on screen there, so first focus must land on
-        // `.dropZone` (still unconditionally rendered/operable in every configState). Note:
-        // `hasMasterVolume` is a literal `false` here because this fixture models a NON-operational
-        // panel, and `MasterVolumeRow` is rendered by exactly one branch of `operationalPanel` —
-        // the `.operational` one. Since PLAN-MASTER-VOLUME.md 阶段 D landed (8771946), the real
+        // `panelOpeningFocus` with `rows: []` AND `hasMasterVolume: false` together on the
+        // `.needsPack` shape (first launch, packs installed but none picked) — a common real shape,
+        // not a fixture-only edge case. (`.malformed`/`.unwritable` also pass zero rows but carry
+        // `hasConfigFailureNotice: true`, so they lead with `.configReveal`, not the first card —
+        // that's the config-broken case, pinned in its own suites, 26bba37 follow-up.) cc59d52
+        // (PLAN-SOUND-MANAGER T1) removed `.dropZone`; the pack gallery is still rendered in every
+        // configState, so opening focus now lands on the first pack card — the panel's own primary
+        // action ('点一张卡片') — instead of the deleted drop zone. `hasMasterVolume` is a literal
+        // `false` because this fixture models a NON-operational panel, and `MasterVolumeRow` is
+        // rendered by exactly one branch of `operationalPanel` — the `.operational` one; the real
         // caller passes `isOperational`, so `false` is what it would pass for this shape too.
         expect(
-            panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"], hasMasterVolume: false) == .dropZone,
-            "opening focus must be the drop zone, never .masterVolume, when the slider isn't"
-                + " actually rendered")
+            panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"], hasMasterVolume: false) == .packCard(id: "alpha-pack"),
+            "opening focus must be the first pack card, never .masterVolume or a removed drop zone,"
+                + " when the slider isn't actually rendered")
     }
 
     suite("panelOpeningFocus: zero rows, hasMasterVolume true → the master volume slider, never nil") {
-        // The flag's positive case: .masterVolume, always operable, sits ahead of .dropZone in
-        // the order whenever it's actually present. Zero rows here is only a fixture (a truly
+        // The flag's positive case: .masterVolume, always operable, sits ahead of the pack cards
+        // in the order whenever it's actually present. Zero rows here is only a fixture (a truly
         // .operational configState always has 4 real rows) — this pins the flag's own behavior.
         expect(
             panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"], hasMasterVolume: true) == .masterVolume,
-            "with the slider on screen, opening focus is never nil and lands on it ahead of the drop zone")
+            "with the slider on screen, opening focus is never nil and lands on it ahead of the pack cards")
     }
 }
 
@@ -382,11 +457,26 @@ func runPanelFocusInFlightSuites() {
                 == .eventAction(Event.allCases[0]),
             "operational 面板里首焦点本来就不是断开连接，禁用它不该改变这一点")
 
-        // 极端情形：没有事件行、没有包卡、hasMasterVolume: false —— 这正是 `.needsPack`/
-        // `.malformed`/`.unwritable` 的真实形状（`/codex review` P1，2626083/47459a7）：滑块没有
-        // 渲染在屏幕上，唯一仍然可操作的候选是恒渲染的 dropZone；disconnect 被禁用不改变这一点。
+        // 极端情形：没有事件行、没有包卡、hasMasterVolume: false、也没有失败卡 —— 这是 `.needsPack`
+        // **一无所有**的真实形状（`/codex review` P1，2626083/47459a7），且此刻有动作在飞
+        // （ctaOperable == false）。cc59d52（PLAN-SOUND-MANAGER T1）删掉 `.dropZone` 后，面板底部不再有
+        // 恒可操作的落点；唯一的 `.disconnect` 又被 in-flight 禁用 —— 于是首焦点诚实地是 nil（与
+        // onboarding in-flight 同型），而不是一个已删控件的幽灵。T7 的 `.manageSounds`（in-flight 也恒
+        // 可操作）会把这一格重新变成非 nil。
+        //
+        // 注意这**不含** `.malformed`/`.unwritable`：那两态带失败卡的 `.configReveal`（恒可操作），
+        // in-flight 也非 nil —— 见下一条断言（26bba37 follow-up）。
         expect(
-            panelOpeningFocus(rows: [], packCardIDs: [], ctaOperable: false, hasMasterVolume: false) == .dropZone,
-            "断开被禁用、且滑块本就不在屏幕上时，焦点该落在仍然可操作的拖放区，而不是一个不存在的滑块")
+            panelOpeningFocus(rows: [], packCardIDs: [], ctaOperable: false, hasMasterVolume: false) == nil,
+            "断开被禁用、滑块不在屏幕上、没有失败卡、且拖放区已随 T1 删除时，没有可操作控件，首焦点诚实为 nil")
+
+        // `.malformed`/`.unwritable` 的 in-flight 强化：断开跑到一半，`.disconnect` 禁用，但失败卡的
+        // `.configReveal`（访达 reveal 无写副作用）照样可操作 —— 首焦点落在它上面，绝不 nil。这正是
+        // Codex P1 想要的诚实：config 坏掉时，开局焦点是那颗「在访达中显示 config.json」的修复入口。
+        expect(
+            panelOpeningFocus(
+                rows: [], packCardIDs: [], ctaOperable: false, hasMasterVolume: false,
+                hasConfigFailureNotice: true) == .configReveal,
+            "config 坏 + 断开在飞时，首焦点必须是恒可操作的 .configReveal，而不是 nil 或被禁用的断开连接")
     }
 }

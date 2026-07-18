@@ -31,7 +31,6 @@
                 VStack(alignment: .leading, spacing: 28) {
                     OnboardingGalleryView()
                     OnboardingActionGalleryView()
-                    DropZoneGalleryView()
                     EventRowGalleryView()
                     MasterVolumeGalleryView()
                     PackCardGalleryView()
@@ -146,58 +145,6 @@
         case .settingsParseFailure(let reason): ".settingsParseFailure(reason: \"\(reason)\")"
         case .notInstalled: ".notInstalled"
         case .installed: ".installed"
-        }
-    }
-
-    // MARK: - DropZoneState (9 fixtures: idle / hover / reject×6 / success)
-
-    struct DropZoneGalleryView: View {
-        var body: some View {
-            GallerySection(title: "DropZoneState (\(PreviewFixtures.dropZoneStates.count))") {
-                ForEach(Array(PreviewFixtures.dropZoneStates.enumerated()), id: \.offset) { _, state in
-                    GalleryFrame(caption: dropZoneStateCaption(state)) {
-                        DropZoneStateFrame(state: state)
-                    }
-                }
-            }
-        }
-    }
-
-    private struct DropZoneStateFrame: View {
-        let state: DropZoneState
-        var body: some View {
-            AudioDropZoneView(
-                viewModel: AudioImportViewModel(
-                    packID: "minimal-chime", environment: previewAudioImportEnvironment,
-                    previewState: state),
-                // Every frame's state is pinned via `previewState:` — the gallery never actually
-                // runs the import pipeline, so this closure is never invoked. A fixed value
-                // (rather than reading some fixture's `masterVolume`) mirrors `PreviewDurationProbe`
-                // just below: a placeholder for a code path this file never exercises.
-                currentVolume: { 1.0 }
-            )
-            .frame(width: CGFloat(standardPanelWidth))
-        }
-    }
-
-    private func dropZoneStateCaption(_ state: DropZoneState) -> String {
-        switch state {
-        case .idle: ".idle"
-        case .hover: ".hover"
-        case .reject(let reason): ".reject(\(dropRejectionReasonCaption(reason)))"
-        case .success(let file): ".success(\(file.fileName))"
-        }
-    }
-
-    /// Exhaustive over every ``DropRejectionReason`` case, no `default:`.
-    private func dropRejectionReasonCaption(_ reason: DropRejectionReason) -> String {
-        switch reason {
-        case .oversize: ".oversize"
-        case .nonWhitelistFormat: ".nonWhitelistFormat"
-        case .pathTraversal: ".pathTraversal"
-        case .overDuration: ".overDuration"
-        case .overwritesBuiltin: ".overwritesBuiltin"
-        case .copyFailed: ".copyFailed"
         }
     }
 
@@ -412,9 +359,9 @@
                     // 既有 token（`text-2`），不是非 token 的 `.secondary`。
                     .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 // LOAD-BEARING (`/ship` 评审): every framed view here — ``EventRowView``,
-                // ``AudioDropZoneView``, ``PackGalleryView``, ``OnboardingView`` — paints NO
-                // surface of its own; in production ``PanelView`` (the composition root) supplies
-                // it. Without this background, the gallery rendered all four event colors, every
+                // ``PackGalleryView``, ``OnboardingView`` — paints NO surface of its own; in
+                // production ``PanelView`` (the composition root) supplies it. Without this
+                // background, the gallery rendered all four event colors, every
                 // glyph tile and every reject row on SwiftUI's **untokenized default window
                 // background** — and that surface is precisely what every contrast assertion in
                 // `ContrastSuite` is talking about. A 视觉真相源 (DESIGN.md line 134) that shows
@@ -460,15 +407,6 @@
             Group {
                 OnboardingGalleryView().preferredColorScheme(.light)
                 OnboardingGalleryView().preferredColorScheme(.dark)
-            }
-        }
-    }
-
-    struct DropZoneGalleryView_Previews: PreviewProvider {
-        static var previews: some View {
-            Group {
-                DropZoneGalleryView().preferredColorScheme(.light)
-                DropZoneGalleryView().preferredColorScheme(.dark)
             }
         }
     }
