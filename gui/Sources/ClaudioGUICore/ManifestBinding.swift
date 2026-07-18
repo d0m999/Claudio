@@ -66,12 +66,16 @@ public enum ManifestBindError: Error, Sendable, Equatable {
 /// manifest.json 的**唯一**读-改-写原语。``bindEventToManifest`` / ``clearEventBinding`` 全部
 /// 经它——未来的 `forkPack`（T6）同理。
 ///
-/// **同步（不许 `async`）**：`SourceScannerSuite` 有一条源码绊线钉着这一点。manifest.json 今天
-/// **零锁**——`grep -iE 'lock' ManifestBinding.swift` 找不到一把锁——它唯一的并发安全保证是
-/// 「全同步 + 全在 `@MainActor`」：每个调用方都从 GUI 的 `@MainActor` 触发，所以同一时刻只可能有
-/// 一次读-改-写在跑。这条原语一旦被改成 `async`，这条不变式会在**没有任何运行时报错**的情况下
-/// 悄悄失效——manifest 的并发安全从此只是一句会被忘记的注释（PLAN-SOUND-MANAGER.md §2.1 / 4c
-/// 「并发不变式」：唯一的 critical gap，唯一的守卫就是那条源码绊线）。
+/// **@MainActor 隔离（编译器强制）+ 同步（源码绊线强制）**：这两条腿合起来，才是 manifest.json
+/// 今天**零锁**（`grep -iE 'lock' ManifestBinding.swift` 找不到一把锁）却仍并发安全的全部理由。
+/// 本函数标了 `@MainActor`，编译器逼着任何调用方都在主 actor 上调它——不再是「每个调用方碰巧都从
+/// GUI 的 `@MainActor` 触发」这句写在注释里、会被下一个后台调用方悄悄推翻的约定（正是
+/// `/codex review dcab3de,7e97bc4` 的 P1）。又因为全程同步、内部读→改→写之间没有挂起点，同一时刻
+/// 只可能有一次读-改-写在跑：两次并发绑定会在主 actor 上串行，第二次的读一定晚于第一次的写落地，
+/// 绝不丢更新。`SourceScannerSuite` 有两条源码绊线各钉一条腿——一条禁 `async`/`Task`/`DispatchQueue`
+/// （挡「变异步」），一条要求本文件每个导出写函数都带 `@MainActor`（挡「同步但脱离主 actor」）。
+/// 少了任一条，这条不变式会在**没有任何运行时报错**的情况下悄悄失效（PLAN-SOUND-MANAGER.md §2.1 /
+/// 4c「并发不变式」：唯一的 critical gap）。
 ///
 /// **只做目录级的读-改-写**：调用方必须先把 `packID` 解析成一个已经确认过是**用户**包根的
 /// `packDirectory`（见本文件 `resolveUserPackDirectory(packID:environment:)`），本函数不重新
@@ -91,6 +95,7 @@ public enum ManifestBindError: Error, Sendable, Equatable {
 /// 同一份实现）编码，再 `Data.write(to:options:.atomic)` 写回——与原来 `bindEventToManifest` 的最后
 /// 一步完全同构。未知顶层键（`schema` / `version` / 任何未来键）全程只被读进 `[String: Any]`、原样
 /// 透传给编码器，这个原语自己从不检查或丢弃它们。
+@MainActor
 public func mutateManifestJSON(
     at packDirectory: URL,
     _ transform: (inout [String: Any]) -> Void
@@ -220,6 +225,7 @@ private func resolveUserPackDirectory(
 /// identical to what this function always did — see that function's doc comment (and
 /// `importAudioFile`'s own final write, `AudioImport.swift`'s step 6, which carries the same
 /// intermediate-path-component limitation, a shared v2 item for both call sites).
+@MainActor
 public func bindEventToManifest(
     event: Event,
     fileName: String,
@@ -270,6 +276,7 @@ public func bindEventToManifest(
 /// ``regularFileExists(at:)`` at all, which is exactly why clearing a binding whose file was
 /// already deleted out from under it (a `.broken` row) still succeeds: clearing doesn't care
 /// whether the file is there.
+@MainActor
 public func clearEventBinding(
     event: Event,
     packID: String,

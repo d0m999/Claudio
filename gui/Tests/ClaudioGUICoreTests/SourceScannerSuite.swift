@@ -62,6 +62,43 @@ private func sharedScannerRegion(of relativePath: String) -> String? {
     return lines[begin...end].joined(separator: "\n")
 }
 
+// MARK: - T3 @MainActor 正向绊线的两个原语（/codex review dcab3de,7e97bc4 的 P1）
+//
+// async/Task/DispatchQueue 那三条负向断言只挡「变异步」，挡不住「同步但脱离主 actor」。manifest.json
+// 零锁的并发安全靠「全同步 **且** 全在 @MainActor」两条腿，负向那三条只钉住了「全同步」。这两个
+// helper 让绊线正向钉住第二条腿：**每一个**导出写函数都得带 @MainActor —— 不是一份会忘记更新的
+// 写死名字清单，新写者（forkPack / restoreFactoryPack）落地即自动纳入。
+
+/// 一段**已剥注释**的代码里所有 `public func` 的函数名。绊线要对每一个都断言 @MainActor。
+///
+/// ⚠️ 只认 `public func`（本文件的写函数都是这个形状）。`public static func` / `public final func`
+/// 等不匹配 —— 真出现了，得在这里补，别让绊线悄悄漏掉一个写者。
+private func exportedPublicFuncNames(in code: String) -> [String] {
+    var names: [String] = []
+    var cursor = code.startIndex
+    let needle = "public func "
+    while let range = code.range(of: needle, range: cursor..<code.endIndex) {
+        let ident = code[range.upperBound...].prefix {
+            $0.isLetter || $0.isNumber || $0 == "_"
+        }
+        if !ident.isEmpty { names.append(String(ident)) }
+        cursor = range.upperBound
+    }
+    return names
+}
+
+/// 一段**已剥注释**的代码里，名为 `name` 的 `public func` 是否带 @MainActor 隔离。
+///
+/// `@MainActor` 与 `public func` 之间只允许空白 / 访问修饰符 / 其它属性（都落在 `[\s A-Za-z@_]`），
+/// 而任意函数体都含 `{}()` 之类标点 —— 于是这个 run **不可能跨过上一个函数体**：`name` 必须带
+/// **它自己**那一个 @MainActor 才会匹配，前一个函数头上的 @MainActor 算不到它身上（下面那条合成
+/// 控制里的 `naked` 反例逐字钉着这一点）。
+private func hasMainActorIsolation(funcName name: String, in code: String) -> Bool {
+    code.range(
+        of: "@MainActor[\\sA-Za-z@_]*public func \(name)\\b",
+        options: .regularExpression) != nil
+}
+
 @MainActor
 func runSourceScannerSuites() {
 
@@ -605,6 +642,56 @@ func runSourceScannerSuites() {
                         + "不变式会在没有任何运行时报错的情况下静默失效 —— 这条源码绊线是它唯一的"
                         + "守卫，得到的代码：\(scanned.code)")
             }
+
+            // 第二条腿（/codex review dcab3de,7e97bc4 的 P1）：上面三条负向断言挡「变异步」，
+            // 挡不住「同步但脱离主 actor」——一个 `public func` 少写一个 @MainActor（或被人标了
+            // `nonisolated`），任意后台线程就能同步调它，两个读-改-写交错、丢更新，零运行时报错。
+            // 所以这里**正向**钉住：这些文件里每个导出写函数都必须 @MainActor 隔离。
+            let exported = exportedPublicFuncNames(in: scanned.code)
+            expect(
+                !exported.isEmpty,
+                "\(relativePath) 里一个 `public func` 都没枚举到 —— 枚举器瞎了，下面那条『每个都得 "
+                    + "@MainActor』就退化成对空集恒真。得到的代码开头：\(scanned.code.prefix(200))")
+            for name in exported where !hasMainActorIsolation(funcName: name, in: scanned.code) {
+                expect(
+                    false,
+                    "\(relativePath) 的导出写函数 `\(name)` 没有 @MainActor 隔离 —— manifest.json 零锁，"
+                        + "并发安全靠「全同步 + 全在 @MainActor」两条腿。少了 @MainActor（或被标 "
+                        + "nonisolated），它就能被后台线程同步调用，两个读-改-写交错丢更新且零运行时"
+                        + "报错。给它加回 @MainActor（PLAN-SOUND-MANAGER.md §2.1 / 4c「并发不变式」）。")
+            }
         }
+    }
+
+    // 上面那条 @MainActor 绊线自证有牙：@MainActor 缺失 / 存在 / 挂在**别的**函数上，三种情形
+    // `hasMainActorIsolation` 都要分辨对。少了这条合成控制，`hasMainActorIsolation` 一旦恒真（比如
+    // 正则写错、恒返回 non-nil），真文件那条 for 循环永远不进 body，整条绊线就是一句恒真绿。
+    suite("绊线（T3）@MainActor 检查自证有牙：缺失→未隔离、存在→已隔离、隔壁函数的不算数") {
+        let missing = strippingComments("public func writerWithout(x: Int) { _ = x }")
+        expect(
+            exportedPublicFuncNames(in: missing.code) == ["writerWithout"],
+            "枚举器必须逮到这个 public func。得到：\(exportedPublicFuncNames(in: missing.code))")
+        expect(
+            !hasMainActorIsolation(funcName: "writerWithout", in: missing.code),
+            "没有 @MainActor 的 public func 必须被判为『未隔离』—— 判成 true = 真文件那条 for 循环"
+                + "永远不进 body，整条 @MainActor 绊线恒真。得到 code：\(missing.code)")
+
+        let present = strippingComments("@MainActor\npublic func writerWith(x: Int) { _ = x }")
+        expect(
+            hasMainActorIsolation(funcName: "writerWith", in: present.code),
+            "带 @MainActor 的 public func 必须被判为『已隔离』—— 判成 false = 真文件永远假红，"
+                + "然后被下一个人删掉。得到 code：\(present.code)")
+
+        // 关键反例：@MainActor 挂在**上一个**函数上，中间隔着一个含 `{}` 的函数体，绝不能被算到
+        // 下一个裸函数头上。误算 = 少写 @MainActor 的写函数从这个缝里溜过绊线。
+        let crossTalk = strippingComments(
+            "@MainActor\npublic func isolated() {}\npublic func naked() {}")
+        expect(
+            hasMainActorIsolation(funcName: "isolated", in: crossTalk.code),
+            "`isolated` 自己带 @MainActor，必须判为已隔离。得到 code：\(crossTalk.code)")
+        expect(
+            !hasMainActorIsolation(funcName: "naked", in: crossTalk.code),
+            "`naked` 自己没有 @MainActor —— 前一个函数的 @MainActor 隔着一个函数体（含 `{}`），不许"
+                + "被算到它头上。误算 = 少写 @MainActor 的写函数溜过绊线。得到 code：\(crossTalk.code)")
     }
 }

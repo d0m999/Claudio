@@ -87,15 +87,14 @@ func runCoverageStateSuites() {
     // MARK: - `EventRow.previewClaimsActionFocus` 已删（PLAN-SOUND-MANAGER.md §2.5/T2）—— 它当年
     // 存在的唯一理由是仲裁「试听 ▶ 与导入入口，两者之中谁在这一行拥有 `.eventAction`」；T2 把导入入口
     // 整个搬进了 `PanelFocusTarget.eventSound(_:)`（文件名 `Menu` 自己的焦点身份），于是 `.eventAction`
-    // 从此在三态下都只剩一个候选（试听 ▶ 自己），仲裁不再有意义。`CoverageState.swift` 的
-    // `EventRow` extension 上留着一段解释这次删除的注释；本文件不再钉一个已经不存在的成员。
-
-    suite("EventRow: previewClaimsActionFocus no longer exists as a member (T2 removed the dedup it existed to arbitrate)") {
-        // 这条断言本身测不出"成员不存在"——那由编译器把关（试图访问会编译失败）。留这条 suite 是
-        // 为了让删除的意图在测试文件里也有一行落地，而不是只留在 CoverageState.swift 的注释里。
-        let row = EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: true)
-        expect(row.eventActionOperable, "sanity: eventActionOperable is still the only focus-decision surface EventRow exposes")
-    }
+    // 从此在三态下都只剩一个候选（试听 ▶ 自己），仲裁不再有意义。
+    //
+    // 这里**不留**一条「previewClaimsActionFocus 成员不存在」的 suite（/codex review dcab3de,7e97bc4
+    // P2）：那种 suite 只能重复断言 `eventActionOperable`（上面四条已覆盖），对「`.eventAction` 到底接在
+    // 谁身上」零分辨力 —— 而「成员真被删」这件事由**编译器**把关（任何引用都会编译失败），一条恒真
+    // suite 只会制造「删除契约已被测试覆盖」的错觉。真正的替代不变量是「`.eventAction` 恰好一个 owner、
+    // 且永远是试听 ▶」，那是控件树结构问题，钉在 `ViewWiringSuite` 的「三槽焦点身份各自恰好一个 owner」
+    // 那条里（连同 `.eventSound` 归 fileNameMenu、`.eventMute` 归 muteIndicator、三槽顺序一并钉住）。
 
     // MARK: - packCoverage: per-event present/unmapped/broken
 

@@ -1218,4 +1218,92 @@ func runViewWiringSuites() {
                 + " fileNameMenu / muteIndicator 三个独立控件会被合并成一个 VoiceOver 停靠点，"
                 + "禁用的试听 ▶ 会被合并进行摘要而不是单独播报「变灰」")
     }
+
+    suite(
+        "EventRowView：三槽焦点身份各自恰好一个 owner、owner 正确、且源码顺序 = 文件名 Menu → 试听 ▶ → 静音钮（PLAN-SOUND-MANAGER.md §2.5 三槽焦点 / /codex review dcab3de,7e97bc4 P2）"
+    ) {
+        // structural check（理由同本文件头部）：EventRowView 住在不可 import 的 ClaudioGUI
+        // executableTarget，够不着行为级测试，三槽焦点接线只能读源码结构。`PanelFocusOrderSuite` 钉的
+        // 是 `panelFocusOrder(_:)` 这个纯**模型**（eventSound→eventAction→eventMute），此前**没有任何
+        // 东西**钉住模型在视图侧的兑现：删掉或对调 EventRowView 里那三条 `.focused` 修饰符，纯模型测试
+        // 照样全绿，而真实的 Tab / 初始焦点会退化。这条补的就是那半。
+        //
+        // 它同时是 `CoverageStateSuite` 那条恒真 suite（「previewClaimsActionFocus 已删」）的**真替代**：
+        // 那条只重复断言 `eventActionOperable`、对「`.eventAction` 到底接在谁身上」零分辨力。真正要钉的
+        // 替代不变量是「`.eventAction` 恰好一个 owner，且永远是试听 ▶」——落在这里的第 ① / ② 条。
+        //
+        // 读 `codeWithoutStrings`（清空字符串内容）而不是 `codeOnly`：这条断的是控件树**结构**，一句
+        // 写着 `.focused(...)` 的错误消息不该被算成一处真接线（本文件头部 `codeWithoutStrings` doc）。
+        guard let rowSource = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift") else {
+            expect(false, "读不到 EventRowView.swift —— 这个 suite 唯一的价值就是读它")
+            return
+        }
+        let flat = collapsingWhitespace(rowSource)
+
+        // ① 每个焦点身份**恰好**一个 `.focused(... equals:)` 绑定 —— 直接兑现「一行 → 一个 owner」。
+        //    0 个 = 这一槽在这一行 Tab 不到；≥2 个 = 两个控件抢同一个焦点身份，SwiftUI 的焦点仲裁
+        //    行为未定义（正是 T2 把导入入口搬进 `.eventSound` 之前 `.eventAction` 要靠 dedup 仲裁的病）。
+        func focusOwnerCount(_ target: String) -> Int {
+            flat.components(separatedBy: ".focused(focusedTarget, equals: \(target))").count - 1
+        }
+        for target in [".eventSound(row.event)", ".eventAction(row.event)", ".eventMute(row.event)"] {
+            let count = focusOwnerCount(target)
+            expect(
+                count == 1,
+                "焦点身份 \(target) 必须恰好被一个 `.focused(focusedTarget, equals:)` 绑定占用 —— "
+                    + "0 个 = 这一槽在这一行不可达（Tab 到不了、初始焦点也落不上）；≥2 个 = 两个控件抢"
+                    + "同一个焦点身份，仲裁未定义。得到 \(count) 个。")
+        }
+
+        // ② owner 正确：eventSound 归 fileNameMenu，eventMute 归 muteIndicator，eventAction 归
+        //    previewButtonBody（且这三条绑定就挂在各自那颗控件上，不是飘在别处）。
+        guard let menuBody = closureBody(after: "private var fileNameMenu: some View", in: flat)
+        else {
+            expect(false, "切不出 fileNameMenu 的属性体 —— 下面那条 owner 断言无从判起")
+            return
+        }
+        expect(
+            menuBody.contains(".focused(focusedTarget, equals: .eventSound(row.event))"),
+            "文件名 Menu（fileNameMenu）必须是 `.eventSound` 的 owner —— 它是三态下都可操作的那一槽，"
+                + "所以一行的初始焦点落在它上，而不是还禁着的试听 ▶。fileNameMenu 属性体实际是：\(menuBody)")
+
+        guard let muteBody = closureBody(after: "private var muteIndicator: some View", in: flat)
+        else {
+            expect(false, "切不出 muteIndicator 的属性体 —— 下面那条 owner 断言无从判起")
+            return
+        }
+        expect(
+            muteBody.contains(".focused(focusedTarget, equals: .eventMute(row.event))"),
+            "静音钮（muteIndicator）必须是 `.eventMute` 的 owner。muteIndicator 属性体实际是：\(muteBody)")
+
+        guard let trailingBody = closureBody(after: "private var trailing: some View", in: flat)
+        else {
+            expect(false, "切不出 trailing 的属性体 —— 下面 eventAction owner + 三槽顺序都无从判起")
+            return
+        }
+        expect(
+            trailingBody.contains(
+                "previewButtonBody.focused(focusedTarget, equals: .eventAction(row.event))"),
+            "试听 ▶（previewButtonBody）必须是 `.eventAction` 的 owner，且这条绑定就挂在 trailing 里那颗"
+                + " previewButtonBody 上 —— 这是 `CoverageStateSuite` 删掉的 previewClaimsActionFocus 仲裁"
+                + "的真替代：三态下 `.eventAction` 只剩这一个候选。trailing 属性体实际是：\(trailingBody)")
+
+        // ③ 三槽源码顺序 = 文件名 Menu → 试听 ▶ → 静音钮（`panelFocusOrder` 的 eventSound → eventAction
+        //    → eventMute 在视图侧的兑现点）。顺序错了，Tab 键顺序与视觉从左到右就对不上。
+        guard let menuAt = trailingBody.range(of: "fileNameMenu")?.lowerBound,
+            let previewAt = trailingBody.range(of: "previewButtonBody")?.lowerBound,
+            let muteAt = trailingBody.range(of: "muteIndicator")?.lowerBound
+        else {
+            expect(
+                false,
+                "trailing 里必须同时出现 fileNameMenu / previewButtonBody / muteIndicator 三颗控件 —— "
+                    + "少一颗，这一行就缺一个焦点槽。trailing 属性体实际是：\(trailingBody)")
+            return
+        }
+        expect(
+            menuAt < previewAt && previewAt < muteAt,
+            "trailing 的三槽源码顺序必须是 文件名 Menu → 试听 ▶ → 静音钮（与 `panelFocusOrder` 的 "
+                + "eventSound → eventAction → eventMute 一致）—— 顺序对调，Tab 键顺序与视觉从左到右就"
+                + "对不上。实际位置：menu=\(menuAt) preview=\(previewAt) mute=\(muteAt)")
+    }
 }
