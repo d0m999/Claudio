@@ -500,14 +500,19 @@ public struct PanelView: View {
     @ViewBuilder
     private var operationalPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState` 决定这一块顶部内容
-            // 显示什么——`.operational` 时是今天这四行事件覆盖度；`.needsPack`（还没有人选过包）
-            // 换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径本来就
-            // 通：点一张卡就是 ``selectPack``，会建出一份正确的 config）；`.malformed`/`.unwritable`
-            // 换成诚实失败态 + 可执行的修复指令——不禁用任何控件（写者本来就全部 fail closed），
-            // 只是不再假装一切正常（D19 已作废：不是禁用一个滑块，是整个面板换一个诚实的态）。
-            switch panelModel.configState {
-            case .operational:
+            // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState.topContent` 决定这一块顶部
+            // 内容显示什么——`.events`（= `.operational`）是今天这四行事件覆盖度 + 主音量滑块；`.needsPack`
+            //（还没有人选过包）换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径
+            // 本来就通：点一张卡就是 ``selectPack``，会建出一份正确的 config）；`.configFailure`（=
+            // `.malformed`/`.unwritable`）换成诚实失败态 + 可执行的修复指令——不禁用任何控件（写者本来就
+            // 全部 fail closed），只是不再假装一切正常（D19 已作废：不是禁用一个滑块，是整个面板换一个诚实的态）。
+            //
+            // 这里 switch 的是 `.topContent`（`PanelConfigState.topContent`，映射由 `PanelConfigSuite` 真行为
+            // 单测钉死），不是裸 `configState`——`applyFirstFocus` 的 `hasMasterVolume`/`hasConfigFailureNotice`
+            // 读**同一个**分类，渲染判据与焦点判据从此在类型层一致，不可能各写一份 switch 再漂移
+            //（/codex review f54d335 P1#1，取代 26bba37 那轮「两段 switch + 文本绊线防漂移」的设计）。
+            switch panelModel.configState.topContent {
+            case .events:
                 ForEach(panelModel.eventRows, id: \.event) { row in
                     if let importViewModel = rowImportViewModels[row.event] {
                         EventRowView(
@@ -526,10 +531,10 @@ public struct PanelView: View {
                     }
                 }
                 // PLAN-MASTER-VOLUME.md 阶段 D：位置对齐线框——四行事件之后、拖入区之前。只在
-                // `.operational` 渲染（D23 定稿 + D41：这是滑块唯一真的出现在屏幕上的态），与下面
-                // `applyFirstFocus()` 的 `hasMasterVolume: isOperational` 是同一件事的两面——渲染
-                // 判据变了，焦点判据必须跟着变，否则「不在屏幕上的控件不得占用焦点位」这条铁律
-                // 当场破功。
+                // `.events`（= `.operational`）渲染（D23 定稿 + D41：这是滑块唯一真的出现在屏幕上的态）。
+                // `applyFirstFocus()` 的 `hasMasterVolume: isOperational` 从**同一个** `.topContent` 分类派生
+                //（`isOperational = (content == .events)`），所以渲染判据与焦点判据自动一致——「不在屏幕上的
+                // 控件不得占用焦点位」这条铁律由类型担保，不再靠两处手动同步。
                 //
                 // `setMasterVolume` 的完整行为（写、republish 错误、按结果路由刷新）整段住在
                 // `panelModel` 里（`PanelConfigControllerSuite` 用真磁盘钉死）——这里只转发。
@@ -541,7 +546,7 @@ public struct PanelView: View {
                     adaptation: layoutAdaptation)
             case .needsPack:
                 needsPackNotice
-            case .malformed(let reason), .unwritable(let reason):
+            case .configFailure(let reason):
                 configFailureNotice(reason: reason)
             }
             // 绝不静默吞错（项目规则）—— 静音写回失败、切包失败、主音量写回失败**都**在这里如实
@@ -617,8 +622,9 @@ public struct PanelView: View {
     ///
     /// 那颗「在访达中显示 config.json」是一颗**真控件**（焦点目标 ``PanelFocusTarget/configReveal``），
     /// 不是装饰：它渲染在面板顶端，是这两态开局键盘/VoiceOver 焦点的落点（/codex review P1，26bba37
-    /// follow-up）。渲染它的判据与 `applyFirstFocus` 派生 `hasConfigFailureNotice` 的判据是同一个
-    /// `switch configState`，`ViewWiringSuite` 双向钉，任一半漂移即红。
+    /// follow-up）。渲染它的判据与 `applyFirstFocus` 派生 `hasConfigFailureNotice` 的判据现在是**同一个**
+    /// `panelModel.configState.topContent` 分类的 `.configFailure` 分支（单源化 f54d335 P1#1）——渲染 / 焦点
+    /// 漂移在类型层就不可能；`ViewWiringSuite` 只需钉「两边都读了这个单源」+ 接线还在。
     private func configFailureNotice(reason: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             // 2026-07-15 冗余审计的**第六份**手抄拒绝行 —— 审计当时只数到五份，漏了这一处（它藏在
@@ -794,42 +800,34 @@ public struct PanelView: View {
                 ctaOperable: ctaOperable)
             return
         }
-        // D23 定稿④「路由态只做减法」：`operationalPanel` only renders `eventRows` for
-        // `.operational` — `.needsPack`/`.malformed`/`.unwritable` show the empty-state/failure
-        // card instead (see `operationalPanel`'s `switch configState`). A control that isn't on
-        // screen must never claim a slot in the opening-focus order, so this passes an EMPTY row
-        // list for every non-operational state rather than `eventRows` (which, off
+        // D23 定稿④「路由态只做减法」：`operationalPanel` only renders `eventRows` for `.events`
+        // (= `.operational`) — `.needsPack`/`.configFailure` show the empty-state/failure card
+        // instead (see `operationalPanel`'s `switch panelModel.configState.topContent`). A control
+        // that isn't on screen must never claim a slot in the opening-focus order, so this passes
+        // an EMPTY row list for every non-`.events` state rather than `eventRows` (which, off
         // `resolvedConfig`'s empty-pack default, would otherwise resolve to four `.unmapped` rows
         // that are never actually rendered).
         //
-        let isOperational: Bool = {
-            if case .operational = panelModel.configState { return true }
-            return false
-        }()
-        let visibleRows: [EventRow] = isOperational ? panelModel.eventRows : []
-        // hasMasterVolume: isOperational (PLAN-MASTER-VOLUME.md 阶段 D landed `MasterVolumeRow` —
-        // see `operationalPanel`'s `.operational` case above, the ONLY branch that renders it).
-        // `isOperational` is now a VALID proxy for "the slider is on screen": the two are the
-        // same `switch panelModel.configState` decision, read twice. Before 阶段 D landed, this
-        // was pinned to a literal `false` (fix for a `/codex review` P2 on 341d9b7) precisely
-        // because `operationalPanel` rendered zero master-volume controls yet — flipping it back
-        // now is not a regression of that fix, it is the fix's own stated exit condition
-        // (ViewWiringSuite's tripwire on this line has been updated to match, and fails the
-        // moment either half of `operationalPanel`/`applyFirstFocus` drifts from the other).
-        // hasConfigFailureNotice: 与渲染 `configFailureNotice` 的判据是**同一个** `switch configState`
-        // （见 operationalPanel 的 `.malformed`/`.unwritable` 分支），读两次。诚实失败卡带着一颗真控件
-        // （在访达中显示 config.json），它渲染在面板顶端，所以开局焦点该落在它上面而不是越过它 —— 但
-        // Core 看不到 configState，必须由这里如实派生（/codex review P1，26bba37 follow-up）。
-        let hasConfigFailureNotice: Bool = {
-            switch panelModel.configState {
-            case .malformed, .unwritable: return true
-            default: return false
-            }
-        }()
+        // 渲染与焦点读**同一个**分类 `panelModel.configState.topContent`（`PanelConfigState.topContent`，
+        // 映射由 `PanelConfigSuite` 真行为单测钉死）：`operationalPanel` 顶部 switch 在它上面，这里也从它派生
+        // 两颗 flag。此前这两颗 flag 各自 `switch panelModel.configState` 一遍、与渲染判据靠 ViewWiringSuite
+        // 文本绊线防漂移；改读单源后，渲染判据与焦点判据在类型层一致，漂移不再可能（/codex review f54d335 P1#1）。
+        let content = panelModel.configState.topContent
+        // 两颗焦点 flag 现在是 `content` 上**单测钉过**的纯投影，applyFirstFocus 只**原样转发**、不在视图里
+        // 重新解释——这是把「单源」从**值级**提到**决策级**的关键（/codex review f54d335 P1#1 follow-up：对抗
+        // 复核实测，只让 render/focus 读同一个 `content` **值**还不够——视图里 `if case … = content { return
+        // true }` 这两颗闭包的**返回值**没有任何测试钉，把 true 翻成 false 就能让失败卡照画、而焦点跳过 Reveal
+        // 钮，全绿。把投影上提到 `PanelTopContent.showsEventContent` / `.hasConfigFailureNotice`、由 `PanelConfigSuite`
+        // 单测其返回值后，视图这侧再没有可翻转的布尔，只剩一句转发；ViewWiringSuite 钉住这句转发原样还在）。
+        // - showsEventContent：滑块 + 四行事件只在 `.events`（= `.operational`）真的在屏幕上，所以它同时决定
+        //   `visibleRows`（哪些行真被渲染进焦点序）与 `hasMasterVolume`（滑块此刻在不在屏幕上）。
+        // - hasConfigFailureNotice：诚实失败卡（`.configFailure` = `.malformed`/`.unwritable`）带着「在访达中
+        //   显示 config.json」这颗真控件，渲染在面板顶端，所以 `.configReveal` 领序、开局焦点落在它上面。
+        let visibleRows: [EventRow] = content.showsEventContent ? panelModel.eventRows : []
         focusedTarget = panelOpeningFocus(
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
-            hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational,
-            hasConfigFailureNotice: hasConfigFailureNotice)
+            hasDetailToggle: hasDetailToggle, hasMasterVolume: content.showsEventContent,
+            hasConfigFailureNotice: content.hasConfigFailureNotice)
     }
 
     // MARK: - Actions

@@ -820,9 +820,10 @@ func runViewWiringSuites() {
                 + "得到的 switch 附近：\(String(panelCollapsed.prefix(0)))（见 PanelView operationalPanel）")
         expect(
             panelCollapsed.contains(
-                "case .malformed(let reason), .unwritable(let reason): configFailureNotice(reason: reason)"),
-            "`.malformed`/`.unwritable` 分支体必须渲染诚实失败态 `configFailureNotice(reason:)` —— 它带"
-                + "可执行修复指令；换成别的（或空）= 写不动的 config 上顶着四行必败活控件却不说实话")
+                "case .configFailure(let reason): configFailureNotice(reason: reason)"),
+            "`.configFailure`（= `.malformed`/`.unwritable`，见 `PanelConfigState.topContent`）分支体必须渲染"
+                + "诚实失败态 `configFailureNotice(reason:)` —— 它带可执行修复指令；换成别的（或空）= 写不动的"
+                + " config 上顶着四行必败活控件却不说实话")
 
         // 按钮 → handler 的那根线：静音的**行为**（翻转 + 路由 + 刷新）现在住在可测的 `PanelConfigController`
         // 里、由 `PanelConfigControllerSuite` 用真磁盘钉死。这里只剩守**最外层这根接线**：EventRowView 的
@@ -855,45 +856,71 @@ func runViewWiringSuites() {
                 + "把它们送进开局焦点 = 焦点落在一个不存在的控件上")
 
         // 现状（PLAN-MASTER-VOLUME.md 阶段 D 已落地）：`MasterVolumeRow` 真的渲染在 `operationalPanel`
-        // 的 `.operational` 分支里，所以 `isOperational` 终于是「滑块在屏幕上」的有效代理 —— 渲染判据与
-        // 焦点判据读的是同一个 `switch panelModel.configState`，同一件事的两面。
+        // 的 `.events`（= `.operational`）分支里。`hasMasterVolume` 现在转发的是 `content.showsEventContent`
+        // —— `PanelTopContent` 上一颗**单测钉过返回值**的投影（`= .events`，`PanelConfigSuite` 钉死），
+        // 而不是视图里一颗未测的 `content == .events` 闭包（f54d335 P1#1 follow-up：对抗复核逮到，值级单源
+        // 不够，视图里重解释的布尔翻个返回值就能让渲染 / 焦点分叉还全绿）。渲染判据与焦点判据从此在**决策层**
+        // 一致：投影返回值由单测钉，视图只转发，本断言钉住这句转发原样还在。
         //
         // 历史，别再当现状读（这段注释本身在阶段 D 落地时说过一次反话，被 /codex review 逮到过 ——
         // 1fcd96f 就是修同一个病的）：341d9b7 修掉的是「`.masterVolume` 在三个边缘态
         // （`.needsPack`/`.malformed`/`.unwritable`）里指向一个不存在的滑块」；紧接着那一轮 /codex review
         // 的 P2 指出，在阶段 D 落地**之前**，从 `configState` 派生这个布尔只是把同一个 bug 从边缘态搬到最
         // 常见的 `.operational` 态，于是它一度被钉死成字面量 fail-closed 值。阶段 D 落地就是那颗钉子自己
-        // 写明的退出条件。下面两条断言双向钉死它：正向要求从 `isOperational` 派生，反向禁止再钉回字面量 ——
-        // 渲染判据与焦点判据从此不许分叉，任一边先动都会红。
+        // 写明的退出条件。下面两条断言：正向要求转发 `content.showsEventContent`，反向禁止钉回字面量。
         expect(
             panelCollapsed.contains(
-                "hasDetailToggle: hasDetailToggle, hasMasterVolume: isOperational"),
-            "hasMasterVolume 现在必须真的从 isOperational 派生（PLAN-MASTER-VOLUME.md 阶段 D 已经把"
-                + " MasterVolumeRow 接进 operationalPanel 的 .operational 分支，见下面 MasterVolumeRow"
-                + " 那组 suite）—— 钉死字面量 false 会让 .masterVolume 在滑块真的在屏幕上时也永远抢不到"
-                + "焦点，键盘 / VoiceOver 用户走 Tab 会跳过一个明明可操作的控件")
+                "hasDetailToggle: hasDetailToggle, hasMasterVolume: content.showsEventContent"),
+            "hasMasterVolume 现在必须转发 `content.showsEventContent`（`PanelTopContent` 上单测钉过返回值的投影，"
+                + " = `.events`）—— 钉死字面量 false 会让 .masterVolume 在滑块真的在屏幕上时也永远抢不到焦点，"
+                + "键盘 / VoiceOver 用户走 Tab 会跳过一个明明可操作的控件；换成别的投影名 = render/focus 分叉")
         expect(
             !panelCollapsed.contains("hasMasterVolume: false"),
             "hasMasterVolume 不许再钉死字面量 false —— 那是 MasterVolumeRow 落地前的占位值（341d9b7 之后"
                 + "那一轮 /codex review 的临时状态），见上一条断言")
 
-        // /codex review P1（26bba37 follow-up）：诚实失败卡上的「在访达中显示 config.json」是一颗真控件
-        // （焦点目标 `.configReveal`），`.malformed`/`.unwritable` 开局焦点该落在它上面而不是越过它。渲染
-        // 判据（operationalPanel 的 `.malformed`/`.unwritable` 分支渲染 configFailureNotice，见上一条 suite）
-        // 与焦点判据（applyFirstFocus 传 hasConfigFailureNotice）必须读**同一个** `switch configState`。
-        // 下面三条断言双向钉：① call site 传的是派生值不是字面量；② 派生自 `.malformed`/`.unwritable`；
-        // ③ 反向禁止钉死 false —— 任一半漂移都会让渲染与焦点分叉，失败卡上的真控件抢不到开局焦点。
+        // /codex review f54d335 P1#1（单源化 + 决策级钉法，取代 26bba37 那轮的双 switch 设计）：诚实失败卡上的
+        //「在访达中显示 config.json」是一颗真控件（焦点目标 `.configReveal`），`.malformed`/`.unwritable` 开局
+        // 焦点该落在它上面而不是越过它。此前**渲染判据**（operationalPanel 的 switch 分支渲染 configFailureNotice）
+        // 与**焦点判据**（applyFirstFocus 派生 hasConfigFailureNotice）是**两段**独立 `switch panelModel.configState`，
+        // 只靠本 suite 的文本绊线防漂移。现在链条是：configState →（`PanelConfigState.topContent` 映射）→
+        // topContent →（`PanelTopContent.hasConfigFailureNotice` 投影）→ Bool，**两级都由 `PanelConfigSuite` 真行为
+        // 单测钉返回值**；render 在 `.topContent` 上 switch，focus **原样转发** `content.hasConfigFailureNotice`。
+        //（对抗复核实测的教训：只让两边读同一个 topContent **值**不够——视图里若再用一颗未测闭包把值重解释成
+        // Bool，翻个返回值就能让失败卡照画、焦点跳过 Reveal 钮还全绿。把投影上提到单测属性、视图只转发，才把
+        // 漂移堵在决策层。）所以本块只钉视图层无法被 import 单测的那几件**转发 / 接线**事实：① render switch 在
+        // `.topContent`；② focus 的 `content` 绑的就是这个单源；③ focus 原样转发 `content.hasConfigFailureNotice`
+        //（不是本地重解释、不是钉字面量）；④ 视图接线半：Reveal 按钮带 `.focused(... .configReveal)`。
         expect(
-            panelCollapsed.contains("hasConfigFailureNotice: hasConfigFailureNotice"),
-            "applyFirstFocus 必须把派生出的 hasConfigFailureNotice 传进 panelOpeningFocus —— 少这颗 flag，"
-                + "`.malformed`/`.unwritable` 开局焦点会越过「在访达中显示 config.json」落到包卡 / 断开连接 / nil")
+            panelCollapsed.contains("switch panelModel.configState.topContent"),
+            "operationalPanel 顶部必须 switch 在 `panelModel.configState.topContent` 上 —— 直接 switch 裸 configState "
+                + "会复活「渲染判据 / 焦点判据两段独立 switch」的漂移隐患（/codex review f54d335 P1#1 抽掉的正是它）")
         expect(
-            panelCollapsed.contains("case .malformed, .unwritable: return true"),
-            "hasConfigFailureNotice 必须从 `switch panelModel.configState` 的 `.malformed`/`.unwritable` 派生"
-                + "（与渲染 configFailureNotice 同一判据）—— 钉死字面量或换判据都会让渲染与焦点分叉")
+            panelCollapsed.contains("let content = panelModel.configState.topContent"),
+            "applyFirstFocus 必须把 `content` 绑到单源 `panelModel.configState.topContent` 上 —— 焦点判据从此和"
+                + "渲染判据同源，不是各自 switch 一遍 configState")
+        expect(
+            panelCollapsed.contains("hasConfigFailureNotice: content.hasConfigFailureNotice"),
+            "applyFirstFocus 必须**原样转发** `content.hasConfigFailureNotice`（`PanelTopContent` 上单测钉过返回值的"
+                + "投影）进 panelOpeningFocus —— 换成视图里本地重解释（`if case .configFailure = content { … }`）那颗"
+                + "闭包的返回值没测过，翻成 false 就让失败卡照画、`.configReveal` 被踢出焦点序还全绿（f54d335 P1#1 "
+                + "follow-up 对抗复核逮到的洞）；钉死字面量 / 换投影名同样让 render/focus 分叉")
         expect(
             !panelCollapsed.contains("hasConfigFailureNotice: false"),
             "hasConfigFailureNotice 不许钉死字面量 false —— 那会让失败卡上的真控件永远抢不到开局焦点")
+        // 视图接线半（此前完全没人钉，/codex review f54d335 P1#2 逮到）：把 `focusedTarget = .configReveal`
+        // 真正接到那颗控件的，是 configFailureNotice 里 Reveal 按钮上的 `.focused($focusedTarget, equals:
+        // .configReveal)`。删掉那一行，上面几条 + 纯 `PanelFocusOrderSuite` 仍会全绿，而 `.configReveal` 又变回
+        // 一个没有视图认领的悬空焦点位（`panelFocusOrder` 仍把它排进焦点序，PanelFocusOrder.swift:146）——
+        // 正是 cc59d52 删 `.dropZone`、26bba37 → 本分支要根除的那个形状。
+        // ⚠️ 存在性级绊线（同本文件头部自陈 + 下面 `.disconnect` 同款）：它只证明那一行**还在**，证不了它接在
+        // **对的**视图上（把这个修饰符原样挪到隐藏 / 别的兄弟视图照样绿——那只有 ViewInspector / XCTest 挡得住，
+        // 本机 CommandLineTools 没有）。它切实挡的是「顺手删掉 / 注释掉 / 改错 case」这一类，恰是本 bug 的复发形状。
+        expect(
+            panelCollapsed.contains(".focused($focusedTarget, equals: .configReveal)"),
+            "configFailureNotice 的「在访达中显示 config.json」按钮必须带 `.focused($focusedTarget, equals: "
+                + ".configReveal)` 把开局焦点接到自己身上 —— 删掉它，`.malformed`/`.unwritable` 开局焦点落到一个"
+                + "没有视图认领的 .configReveal（panelFocusOrder 仍排它进序），Reveal 钮永远抢不到键盘 / VoiceOver 焦点")
     }
 
     // ── PLAN-MASTER-VOLUME.md 阶段 D：MasterVolumeRow 的三个硬约束 + 三条接线绊线 ──────────────
