@@ -152,32 +152,74 @@ public struct PanelView: View {
             actionRunner: DiskOnboardingActionRunner(environment: actionEnvironment))
 
         let loadedConfig = loadPanelConfig(from: configFile).resolvedConfig
-        var perRow: [Event: EventRowImportViewModel] = [:]
-        for event in Event.allCases {
-            let importViewModel = AudioImportViewModel(
-                packID: loadedConfig.selectedPack, environment: audioEnvironment)
-            perRow[event] = EventRowImportViewModel(event: event, importViewModel: importViewModel)
-        }
-
-        _onboardingViewModel = StateObject(wrappedValue: onboardingViewModel)
-        _announcer = StateObject(wrappedValue: PanelAnnouncer())
-        _rowImportViewModels = State(initialValue: perRow)
+        // Built fully, as a `let`, BEFORE `panelModel` below — never mutated afterward. Earlier
+        // this dict was a `var` populated by a loop AFTER `panelModel`'s `afterFullReload`
+        // closure had already captured it (relying on "a `var` local captured by an escaping
+        // closure is captured by reference, so mutating it later is safe" — true, but Swift's
+        // Sendable-closure-capture diagnostic flags exactly that shape: "'perRow' mutated after
+        // capture by sendable closure"). Building it complete up front removes the capture-then-
+        // mutate shape entirely — same instances, same closures, zero behavior change, no warning.
+        let perRow: [Event: EventRowImportViewModel] = Dictionary(
+            uniqueKeysWithValues: Event.allCases.map { event in
+                (
+                    event,
+                    EventRowImportViewModel(
+                        event: event,
+                        importViewModel: AudioImportViewModel(
+                            packID: loadedConfig.selectedPack, environment: audioEnvironment))
+                )
+            })
 
         // config 读模型 + 静音/切包写路径的**全部行为**都住在这个可测的类里。`afterFullReload` 是全量
         // reload 里 config 读模型**之外**的那一半：onboarding 重探 + 每行 import view-model retarget 到
         // 新包 —— 与旧 `refresh()` 逐行等价（onboarding 那行挪到 config 重载之后，两者互不依赖，结果不变；
         // retarget 收到刚重载出的 config，用它的 `selectedPack`，与旧代码一致）。
-        _panelModel = StateObject(
-            wrappedValue: PanelConfigController(
-                configFile: configFile,
-                lockFile: lockFile,
-                environment: audioEnvironment,
-                afterFullReload: { reloadedConfig in
-                    onboardingViewModel.refresh()
-                    for rowViewModel in perRow.values {
-                        rowViewModel.retarget(to: reloadedConfig.selectedPack)
-                    }
-                }))
+        let panelModel = PanelConfigController(
+            configFile: configFile,
+            lockFile: lockFile,
+            environment: audioEnvironment,
+            afterFullReload: { reloadedConfig in
+                onboardingViewModel.refresh()
+                for rowViewModel in perRow.values {
+                    rowViewModel.retarget(to: reloadedConfig.selectedPack)
+                }
+            })
+
+        // `previewPlayer` (`self`'s own, assigned above) copied into a local so the escaping
+        // `onImportSucceeded` closures below never need to capture `self` — a struct's `init`
+        // may freely READ an already-assigned stored property, but an ESCAPING closure built
+        // inside `init` capturing `self` itself is illegal until every stored property is set
+        // (several of this type's `@StateObject`s below aren't yet).
+        //
+        // Wired in a SEPARATE loop, after `panelModel` exists — PLAN-SOUND-MANAGER.md T2
+        // (核心回归 #3): re-wires the row-end auto-preview hook `AudioDropZoneView.onImportSucceeded`
+        // used to drive before T1 deleted that view along with its only production caller —
+        // `AudioPreviewPlayer.swift`'s own doc comment names this exact call site as where it was
+        // slated to come back. Fires for BOTH a menu-driven pick (``EventRowView/openImportPanel()``)
+        // and a drag-drop onto the file-name `Menu` (``EventRowView/handleDrop(_:)``): both funnel
+        // through ``EventRowImportViewModel/handleDrop(sourceURL:suggestedFileName:)`` →
+        // ``AudioImportViewModel/handleDrop(requests:)``, whose `.success` arm already calls this
+        // hook (see that function's own doc comment). Reads the panel's CURRENT master volume at
+        // the moment playback actually starts (`panelModel.config`, always the just-reloaded
+        // truth, never a value captured once at init) — the exact same volume ``playPreview(for:)``
+        // resolves for the row's manual 试听 ▶ button (``previewVolume(for:)``, the one clamp this
+        // repo has). Mutating each row's `importViewModel.onImportSucceeded` — a stored property on
+        // a reference type — here, after `perRow` is already built, never re-triggers the
+        // capture-then-mutate warning `perRow` itself was rewritten to avoid.
+        let previewPlayer = self.previewPlayer
+        for rowViewModel in perRow.values {
+            let importViewModel = rowViewModel.importViewModel
+            importViewModel.onImportSucceeded = { [weak panelModel] file in
+                guard let panelModel else { return }
+                previewPlayer.play(
+                    fileAt: file.destinationURL, volume: Float(previewVolume(for: panelModel.config)))
+            }
+        }
+
+        _onboardingViewModel = StateObject(wrappedValue: onboardingViewModel)
+        _announcer = StateObject(wrappedValue: PanelAnnouncer())
+        _rowImportViewModels = State(initialValue: perRow)
+        _panelModel = StateObject(wrappedValue: panelModel)
     }
 
     public var body: some View {
@@ -529,7 +571,12 @@ public struct PanelView: View {
                             // row renders off `eventRows`, which only `refresh()` recomputes —
                             // without this the just-bound row keeps showing "未配置/文件丢失" and a
                             // disabled 试听 until an unrelated mute/switch/reopen. Recompute now.
-                            onImportCompleted: { panelModel.reload() }
+                            onImportCompleted: { panelModel.reload() },
+                            // T2: the SAME reasoning as `onImportCompleted` above, for the
+                            // menu's 「清除绑定」item — `EventRowImportViewModel.clearBinding()`
+                            // writes `manifest.json` directly, and the row needs the exact same
+                            // recompute-now nudge or it keeps showing its pre-clear state.
+                            onBindingCleared: { panelModel.reload() }
                         )
                     }
                 }

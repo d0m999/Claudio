@@ -19,13 +19,28 @@ import Foundation
 public enum PanelFocusTarget: Sendable, Hashable {
     case onboardingPrimaryAction
     case onboardingSecondaryAction
+    /// One event row's file-name ``Menu`` — `stop.mp3 ▾` / `未配置 ▾` / `文件丢失 ▾`
+    /// (PLAN-SOUND-MANAGER.md §2.5/T2, DESIGN.md「行内文件名下拉」). ALL THREE coverage
+    /// states share this one control (选文件… / 清除绑定 / 在访达中显示), and picking a file
+    /// is legal in every one of them — so unlike ``eventAction(_:)`` this slot is ALWAYS
+    /// operable, never conditionally disabled. This is the control an `.unmapped`/`.broken`
+    /// row's opening focus now lands on (``EventRow/eventActionOperable``'s new
+    /// `previewEnabled && enabled` makes those two states' `.eventAction` permanently
+    /// non-operable — see that property's doc comment): the row's actually-fixable control,
+    /// not a dead preview button. Sits FIRST in each row's three-slot visual order (leftmost:
+    /// the filename sits ahead of 试听/静音), replacing what used to be the row-end drag/
+    /// pick-to-bind affordance's implicit ownership of `.eventAction`.
+    case eventSound(Event)
     /// One event row's mute toggle (T15 D4).
     case eventMute(Event)
-    /// One event row's trailing action — 试听 ▶ when ``CoverageState/present(fileName:)``,
-    /// the drag/pick-to-bind affordance when `unmapped`/`broken` (`EventRowView`, T16). A
-    /// SINGLE slot per row regardless of which of the two it currently is: the row always
-    /// renders exactly one of them, so the tab STOP count per row never changes with
-    /// coverage state, only what activating it does.
+    /// One event row's 试听 ▶ preview button (`EventRowView`). PLAN-SOUND-MANAGER.md §2.5/T2:
+    /// UNCONDITIONALLY the preview button in all three coverage states — before T2 this slot
+    /// was contested between the preview button (`.present`) and the row-end drag/pick-to-bind
+    /// affordance (`.unmapped`/`.broken`), "a SINGLE slot per row regardless of which of the
+    /// two it currently is"; T2 gave that affordance its OWN slot (``eventSound(_:)``, the
+    /// file-name `Menu`), so there is no second candidate left to contest this one. Always the
+    /// same control, always this identity — only whether it's OPERABLE varies (see
+    /// ``EventRow/eventActionOperable``).
     case eventAction(Event)
     /// The master volume slider control row (PLAN-MASTER-VOLUME.md D41). Sits after every event
     /// row's action/mute pair and before the pack gallery cards, aligning with the panel's visual
@@ -116,11 +131,13 @@ public enum PanelFocusScope: Sendable, Equatable {
 
 /// The panel's Tab/Shift+Tab traversal order for its current ``PanelFocusScope`` —
 /// ENGINEERING.md's rule, reduced to a pure, orderable list: onboarding CTAs (primary then
-/// secondary, whichever exist) OR, once operational, each event row's action slot THEN its
-/// mute toggle (in ``Event/allCases`` order — this order follows the row's VISUAL reading
-/// order left-to-right, ``EventRowView``'s `trailing` renders the action control before
-/// `muteIndicator`, which sits rightmost; a11y review a11y-architect FIX 5: focus order must
-/// track visual order, not an arbitrary model-first convenience), then
+/// secondary, whichever exist) OR, once operational, each event row's THREE slots — file-name
+/// `Menu` (``PanelFocusTarget/eventSound(_:)``), THEN its 试听 ▶ action, THEN its mute toggle
+/// (in ``Event/allCases`` order — this order follows the row's VISUAL reading order
+/// left-to-right, ``EventRowView``'s `trailing` renders the file-name control first, then the
+/// action control, then `muteIndicator` rightmost; a11y review a11y-architect FIX 5: focus
+/// order must track visual order, not an arbitrary model-first convenience — PLAN-SOUND-
+/// MANAGER.md §2.5/T2 grew this from two slots to three), then
 /// every pack gallery card (in ``availablePacks(config:environment:)``'s own order). On
 /// `.malformed`/`.unwritable` the 诚实失败卡's ``PanelFocusTarget/configReveal`` LEADS the whole
 /// operational list — it renders above every row/card, so visual order puts it first.
@@ -144,7 +161,11 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         // （焦点序跟随视觉序，a11y-architect FIX 5）。只有这两态渲染失败卡；`.operational`/`.needsPack`
         // 的 flag 为假，`.configReveal` 不进序。
         if hasConfigFailureNotice { order.append(.configReveal) }
+        // 每行三槽，按视觉序（a11y-architect FIX 5）：文件名 `Menu`（eventSound，最左）→ 试听 ▶
+        // （eventAction）→ 静音钮（eventMute，最右）—— PLAN-SOUND-MANAGER.md §2.5/T2 把两槽改成
+        // 三槽，`EventRowView.trailing` 渲染的正是这个从左到右的顺序。
         for event in events {
+            order.append(.eventSound(event))
             order.append(.eventAction(event))
             order.append(.eventMute(event))
         }
@@ -168,23 +189,40 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// ``panelFocusOrder(_:)`` that is actually OPERABLE.
 ///
 /// ENGINEERING.md「无障碍规格」: "打开焦点落首个可操作项" — 可操作 (OPERABLE) is the
-/// load-bearing word, and `.first` alone does not honor it: an event row whose 试听 ▶ is
-/// present-but-disabled (its sound is MUTED, so ``EventRowView``'s preview `Button` renders
-/// `.disabled(true)`) is still the row's `.eventAction` slot and still sits FIRST in
-/// ``panelFocusOrder(_:)``'s list, so `panelFocusOrder(scope).first` would park the opening
-/// keyboard caret on a dimmed control that does nothing. This resolver skips those, landing
-/// focus on the first genuinely-operable target instead — for a muted first row that is its
-/// own (always-operable) mute toggle, one slot to the right.
+/// load-bearing word, and `.first` alone does not honor it. Each row's actual FIRST slot is
+/// now ``PanelFocusTarget/eventSound(_:)`` (PLAN-SOUND-MANAGER.md §2.5/T2), which is always
+/// operable — so `.eventSound` never needs skipping, and (this is the mechanical consequence,
+/// pinned by ``PanelFocusOrderSuite``) it is ALSO why this resolver's `nonOperableActionEvents`
+/// skip-to-the-next-slot machinery, built pre-T2 for a muted `.present` row's disabled preview,
+/// no longer actually fires for opening focus: `.eventSound` precedes `.eventAction` in every
+/// row and always answers `.first`'s predicate `true`, so the walk never even REACHES that
+/// row's `.eventAction` to decide whether to skip it — mute or coverage state notwithstanding.
+/// `.eventAction` (the 试听 ▶ button, one slot to the right of `.eventSound`) can still be
+/// present-but-disabled — for a `.present` row that is MUTED (``EventRowView``'s preview
+/// `Button` renders `.disabled(true)``), and, since T2, for EVERY `.unmapped`/`.broken` row
+/// regardless of mute (``CoverageState/previewEnabled`` is `false` there, so
+/// ``EventRow/eventActionOperable`` is `false` unconditionally) — but that only still matters
+/// for `panelFocusOrder(_:)`'s Tab-STOP bookkeeping (AppKit's key-loop skips a disabled `NSView`
+/// on its own), never for THIS function's return value whenever `events` is non-empty: opening
+/// focus is always that first event's `.eventSound`, for every mute/coverage combination.
 ///
 /// `nonOperableActionEvents` names the events whose `.eventAction` slot is currently
 /// disabled. It is computed by the view layer (``PanelView``), which alone knows each row's
 /// ``CoverageState`` + muted state — deliberately kept OUT of this Foundation-only model, the
-/// same reason ``PanelFocusScope`` carries plain ``Event``s rather than `EventRow`s. Only the
-/// present-AND-muted case belongs here: `unmapped`/`broken` rows' action slot is the
-/// always-operable import affordance, not the (also-rendered, but no-longer-focus-owning)
-/// disabled preview button (see ``EventRowView``). Every non-action target — mute toggles, the
-/// master volume slider, gallery cards — is operable and never filtered (the
-/// slider only ever appears in a fully-operational panel, PLAN-MASTER-VOLUME.md D23/D41).
+/// same reason ``PanelFocusScope`` carries plain ``Event``s rather than `EventRow`s. Every
+/// non-action, non-sound target — mute toggles, the master volume slider, gallery cards — is
+/// operable and never filtered (the slider only ever appears in a fully-operational panel,
+/// PLAN-MASTER-VOLUME.md D23/D41).
+///
+/// ⚠️ Since T2, this parameter no longer changes THIS function's return value whenever `events`
+/// is non-empty (see above: `.eventSound` always wins first). It is kept — rather than deleted —
+/// because ``panelFocusOrder(_:)`` still needs `.eventAction`'s operability distinguished from
+/// its mere presence for its OWN Tab-STOP semantics, and because ``EventRow/eventActionOperable``
+/// (the value this set is built from) still drives ``EventRowView``'s visual disabled styling —
+/// a real, still-load-bearing computation, just no longer one this specific resolver's answer
+/// depends on. ``PanelFocusOrderSuite`` pins the "any nonOperableActionEvents value resolves to
+/// the same first-row `.eventSound`" invariant explicitly, so a future revert of the `.eventSound`
+/// slot (which WOULD make this parameter matter again) fails loudly rather than silently.
 ///
 /// ``panelFocusOrder(_:)`` itself is intentionally NOT changed: it still lists every slot
 /// including disabled actions, so the per-row Tab-STOP count stays stable across coverage
@@ -205,9 +243,11 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// the always-appended `.disconnect` is not operable) — the honest counterpart to the onboarding
 /// in-flight `nil` below. Concretely that is a `.needsPack` panel with nothing installed while a
 /// disconnect is in flight; the two config-broken states can't reach it (next paragraph). In every
-/// reachable non-in-flight shape it is non-nil: a `.operational` panel's first row's mute is always
-/// operable; a `.needsPack` panel's first pack card is (the gallery renders in every `configState`);
-/// and when neither exists, the always-appended `.disconnect` (or, when a failure row shows, its
+/// reachable non-in-flight shape it is non-nil: a `.operational` panel's first row's
+/// ``PanelFocusTarget/eventSound(_:)`` is ALWAYS operable (PLAN-SOUND-MANAGER.md §2.5/T2 — it
+/// never needs to fall back to that row's mute toggle the way `.eventAction` sometimes did); a
+/// `.needsPack` panel's first pack card is (the gallery renders in every `configState`); and
+/// when neither exists, the always-appended `.disconnect` (or, when a failure row shows, its
 /// `.revealDetail`) anchors it while `ctaOperable`.
 ///
 /// `.malformed`/`.unwritable` are the exception that is ALWAYS non-nil, in-flight or not: their
@@ -242,6 +282,13 @@ public func panelFirstFocusTarget(
 ) -> PanelFocusTarget? {
     panelFocusOrder(scope).first { target in
         switch target {
+        case .eventSound:
+            // PLAN-SOUND-MANAGER.md §2.5/T2: picking a file is legal in EVERY coverage state
+            // (`.present`/`.unmapped`/`.broken` all render the same file-name `Menu`, never
+            // disabled) — unlike `.eventAction`, this slot has no operability axis to check.
+            // This is precisely what lets an `.unmapped` row's opening focus land HERE instead
+            // of skipping past a permanently-non-operable `.eventAction` to `.eventMute`.
+            return true
         case .eventAction(let event):
             return !nonOperableActionEvents.contains(event)
         case .onboardingPrimaryAction, .onboardingSecondaryAction, .disconnect:

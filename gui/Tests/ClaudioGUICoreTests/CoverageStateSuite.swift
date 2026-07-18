@@ -43,89 +43,58 @@ func runCoverageStateSuites() {
             ".broken must have entersDoctor == true")
     }
 
-    // MARK: - EventRow.eventActionOperable (a11y-architect FIX 4 first-focus: the pure decision
-    // PanelView.nonOperableActionEvents inverts, feeding panelFirstFocusTarget). Non-operable
-    // ONLY for a .present-AND-muted row (its 试听 ▶ is the disabled .eventAction owner);
-    // unmapped/broken keep an operable action slot (the always-enabled import affordance).
+    // MARK: - EventRow.eventActionOperable (PLAN-SOUND-MANAGER.md §2.5/T2). `.eventAction` is
+    // now UNCONDITIONALLY the 试听 ▶ preview button in all three coverage states (the file-name
+    // `Menu` that used to double as `.unmapped`/`.broken`'s action slot moved to its own focus
+    // identity, ``PanelFocusTarget/eventSound(_:)``) — so this is simply
+    // `coverage.previewEnabled && enabled`: operable ONLY for a `.present`, not-muted row.
+    // `.unmapped`/`.broken` are non-operable UNCONDITIONALLY (their 试听 ▶ is permanently
+    // disabled, mute or not — `CoverageState.previewEnabled` is `false` for both) — this is the
+    // exact opposite of their PRE-T2 answer, which is why these four cases are rewritten rather
+    // than deleted (PLAN-SOUND-MANAGER.md §2.5 acceptance: "CoverageStateSuite 8 条按新语义重写").
 
     suite("EventRow.eventActionOperable: .present + enabled is operable (the preview plays)") {
         let row = EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: true)
         expect(row.eventActionOperable, ".present not-muted must be operable")
     }
 
-    suite("EventRow.eventActionOperable: .present + muted is the ONLY non-operable case (disabled 试听 ▶ owns .eventAction)") {
+    suite("EventRow.eventActionOperable: .present + muted is non-operable (试听 ▶ is a real but disabled control)") {
         let row = EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: false)
-        expect(!row.eventActionOperable, ".present muted must be non-operable — this is the whole bug the resolver fixes")
+        expect(!row.eventActionOperable, ".present muted must be non-operable")
     }
 
-    suite("EventRow.eventActionOperable: .unmapped is operable regardless of mute (import affordance owns .eventAction, always enabled)") {
+    suite("EventRow.eventActionOperable: .unmapped is NEVER operable, mute or not (试听 ▶ is permanently disabled — CoverageState.previewEnabled is false; ``PanelFocusTarget/eventSound(_:)`` is this row's actually-fixable, always-operable slot instead)") {
         expect(
-            EventRow(event: .notification, coverage: .unmapped, enabled: true).eventActionOperable,
-            ".unmapped + enabled must be operable")
+            !EventRow(event: .notification, coverage: .unmapped, enabled: true).eventActionOperable,
+            ".unmapped + enabled must still be non-operable — T2 removed the import affordance"
+                + " that used to make this slot operable regardless of mute")
         expect(
-            EventRow(event: .notification, coverage: .unmapped, enabled: false).eventActionOperable,
-            ".unmapped + muted must STILL be operable — muting doesn't disable the import affordance")
+            !EventRow(event: .notification, coverage: .unmapped, enabled: false).eventActionOperable,
+            ".unmapped + muted must also be non-operable")
     }
 
-    suite("EventRow.eventActionOperable: .broken is operable regardless of mute (import affordance owns .eventAction, always enabled)") {
+    suite("EventRow.eventActionOperable: .broken is NEVER operable, mute or not (same reason as .unmapped)") {
         expect(
-            EventRow(event: .stopFailure, coverage: .broken(fileName: "x.mp3"), enabled: true).eventActionOperable,
-            ".broken + enabled must be operable")
+            !EventRow(event: .stopFailure, coverage: .broken(fileName: "x.mp3"), enabled: true)
+                .eventActionOperable,
+            ".broken + enabled must be non-operable")
         expect(
-            EventRow(event: .stopFailure, coverage: .broken(fileName: "x.mp3"), enabled: false).eventActionOperable,
-            ".broken + muted must STILL be operable — the import affordance is the action slot, not the disabled preview")
+            !EventRow(event: .stopFailure, coverage: .broken(fileName: "x.mp3"), enabled: false)
+                .eventActionOperable,
+            ".broken + muted must also be non-operable")
     }
 
-    // MARK: - EventRow.previewClaimsActionFocus (T16 review 修复⑥: the OTHER half of the
-    // a11y-architect FIX 4 dedup — WHO owns the row's `.eventAction` focus identity, as opposed
-    // to `eventActionOperable`'s "can that slot be used right now"). It lived as three
-    // hand-written `claimsActionFocus: true/false/false` literals inside `EventRowView`'s
-    // coverage `switch`, where nothing constrained them: flipping one so that BOTH the disabled
-    // preview and the import affordance bind `.eventAction` (undefined SwiftUI focus resolution,
-    // and opening focus lands on the dead preview) broke no test whatsoever. Now a pure function,
-    // pinned here.
+    // MARK: - `EventRow.previewClaimsActionFocus` 已删（PLAN-SOUND-MANAGER.md §2.5/T2）—— 它当年
+    // 存在的唯一理由是仲裁「试听 ▶ 与导入入口，两者之中谁在这一行拥有 `.eventAction`」；T2 把导入入口
+    // 整个搬进了 `PanelFocusTarget.eventSound(_:)`（文件名 `Menu` 自己的焦点身份），于是 `.eventAction`
+    // 从此在三态下都只剩一个候选（试听 ▶ 自己），仲裁不再有意义。`CoverageState.swift` 的
+    // `EventRow` extension 上留着一段解释这次删除的注释；本文件不再钉一个已经不存在的成员。
 
-    suite("EventRow.previewClaimsActionFocus: .present is the ONLY state where the preview button owns .eventAction") {
-        expect(
-            EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: true)
-                .previewClaimsActionFocus,
-            ".present + enabled: the preview button is the row's sole action control")
-        expect(
-            EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: false)
-                .previewClaimsActionFocus,
-            ".present + MUTED must still claim it: the disabled 试听 ▶ is still the row's action"
-                + " slot (that it's disabled is eventActionOperable's separate question — the two"
-                + " axes must not be collapsed)")
-    }
-
-    suite("EventRow.previewClaimsActionFocus: .unmapped/.broken preview must NOT claim .eventAction (the import affordance owns it — one row, one owner)") {
-        for enabled in [true, false] {
-            expect(
-                !EventRow(event: .notification, coverage: .unmapped, enabled: enabled)
-                    .previewClaimsActionFocus,
-                ".unmapped (enabled: \(enabled)): the co-rendered disabled preview must not ALSO"
-                    + " bind .eventAction — two simultaneous .focused(_:equals:) on one value make"
-                    + " SwiftUI's focus resolution undefined, and opening focus would land on the"
-                    + " dead preview instead of the operable import affordance")
-            expect(
-                !EventRow(
-                    event: .subagentStop, coverage: .broken(fileName: "x.mp3"), enabled: enabled
-                ).previewClaimsActionFocus,
-                ".broken (enabled: \(enabled)): same — the import affordance is the action slot")
-        }
-    }
-
-    suite("EventRow.previewClaimsActionFocus vs eventActionOperable: a muted .present row CLAIMS the slot yet is NOT operable (the two axes are independent)") {
-        let mutedPresent = EventRow(
-            event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: false)
-        expect(
-            mutedPresent.previewClaimsActionFocus && !mutedPresent.eventActionOperable,
-            "this exact combination is what makes opening focus skip to the mute toggle; if either"
-                + " axis were derived from the other, the skip would be impossible to express")
-        let mutedUnmapped = EventRow(event: .stop, coverage: .unmapped, enabled: false)
-        expect(
-            !mutedUnmapped.previewClaimsActionFocus && mutedUnmapped.eventActionOperable,
-            "and .unmapped inverts BOTH answers — no accidental coupling")
+    suite("EventRow: previewClaimsActionFocus no longer exists as a member (T2 removed the dedup it existed to arbitrate)") {
+        // 这条断言本身测不出"成员不存在"——那由编译器把关（试图访问会编译失败）。留这条 suite 是
+        // 为了让删除的意图在测试文件里也有一行落地，而不是只留在 CoverageState.swift 的注释里。
+        let row = EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: true)
+        expect(row.eventActionOperable, "sanity: eventActionOperable is still the only focus-decision surface EventRow exposes")
     }
 
     // MARK: - packCoverage: per-event present/unmapped/broken

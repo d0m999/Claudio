@@ -4,14 +4,17 @@ import ClaudioGUICore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// One event row (DESIGN.md "行结构（每事件行）" + "事件行三态", ENGINEERING.md T16 D4):
-/// renders purely off ``EventRow`` (`ClaudioGUICore`, computed by
-/// ``packCoverage(packID:config:environment:)``) — every state DECISION
-/// (present/unmapped/broken, ``CoverageState/previewEnabled``, muted-vs-not) already
-/// happened in `ClaudioGUICore` before this view ever renders. This view only lays pixels
-/// out and wires the row-end drag-to-bind affordance (``EventRowImportViewModel``, T16 D3)
-/// for the `unmapped`/`broken` states — no hardening/validation logic lives here, all of
-/// it is in `ClaudioGUICore`'s `importAudioFile`/`bindEventToManifest`.
+/// One event row (DESIGN.md "行结构（每事件行）" + "事件行三态" + "行内文件名下拉",
+/// ENGINEERING.md T16 D4, PLAN-SOUND-MANAGER.md T2): renders purely off ``EventRow``
+/// (`ClaudioGUICore`, computed by ``packCoverage(packID:config:environment:)``) — every
+/// state DECISION (present/unmapped/broken, ``CoverageState/previewEnabled``, muted-vs-not)
+/// already happened in `ClaudioGUICore` before this view ever renders. This view only lays
+/// pixels out and wires the file-name ``Menu`` (``fileNameMenu``, T2) — a single native
+/// control ALL THREE coverage states now share (选文件… / 清除绑定 / 在访达中显示; §2.6
+/// 排期 keeps 阶段 1's menu to those three items — the pack's existing-audio list needs
+/// T11's orphan enumeration, phase 2) — plus the always-present 试听/静音 pair. No
+/// hardening/validation logic lives here, all of it is in `ClaudioGUICore`'s
+/// `importAudioFile`/`bindEventToManifest`/`clearEventBinding`.
 ///
 /// Row height ~28pt, per DESIGN.md「间距」("菜单栏面板行高 ~28pt").
 public struct EventRowView: View {
@@ -71,6 +74,16 @@ public struct EventRowView: View {
     /// split. Fires on failure too (harmless: `refresh()` just recomputes the unchanged state).
     public let onImportCompleted: () -> Void
 
+    /// Invoked after a menu-driven 「清除绑定」succeeds or fails (T2) — the SAME reason
+    /// ``onImportCompleted`` exists: ``EventRowImportViewModel/clearBinding()`` writes
+    /// `manifest.json` directly (via ``clearEventBinding(event:packID:environment:)``), but
+    /// this row renders off ``row`` (``EventRow``), which only the caller's `refresh()`
+    /// recomputes — without this hook a successful clear would leave the row showing its
+    /// stale `.present`/`.broken` state until an unrelated action happened to refresh it.
+    /// Fires unconditionally (success or failure), mirroring ``onImportCompleted``'s own
+    /// "harmless on failure" reasoning: a failed clear just recomputes the unchanged state.
+    public let onBindingCleared: () -> Void
+
     /// The Dynamic Type degradation this row currently renders under (ENGINEERING.md
     /// T15 D5「无障碍规格 · Dynamic Type + 降级规则」, ``panelLayoutAdaptation(for:)``) —
     /// defaults to ``PanelTypeSizeTier/standard`` (today's single-line layout), so every
@@ -98,7 +111,8 @@ public struct EventRowView: View {
         adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
         onPreview: @escaping () -> Void = {},
         onToggleMute: @escaping () -> Void = {},
-        onImportCompleted: @escaping () -> Void = {}
+        onImportCompleted: @escaping () -> Void = {},
+        onBindingCleared: @escaping () -> Void = {}
     ) {
         self.row = row
         self.importViewModel = importViewModel
@@ -110,6 +124,7 @@ public struct EventRowView: View {
         self.onPreview = onPreview
         self.onToggleMute = onToggleMute
         self.onImportCompleted = onImportCompleted
+        self.onBindingCleared = onBindingCleared
     }
 
     public var body: some View {
@@ -154,11 +169,12 @@ public struct EventRowView: View {
         // controls below carry their own explicit greyed styling instead.
         //
         // `.contain`, NOT `.combine` (a11y-architect FIX 1, CRITICAL): `.combine` at the ROW
-        // level swallowed `previewButton`/`muteIndicator`/`importAffordance` — each already
-        // its own labeled `Button` — into ONE opaque VoiceOver element, so a VoiceOver/Switch
-        // Control user could never reach or activate mute/preview independently, defeating
-        // T15's own focus-order model (``panelFocusOrder(_:)`` names them as two SEPARATE
-        // stops per row). `.contain` groups the row for navigation purposes without merging
+        // level swallowed `previewButtonBody`/`muteIndicator`/the file-name control (T2:
+        // `fileNameMenu`, née `importAffordance`) — each already its own labeled control —
+        // into ONE opaque VoiceOver element, so a VoiceOver/Switch Control user could never
+        // reach or activate mute/preview/file-name independently, defeating the focus-order
+        // model (``panelFocusOrder(_:)`` names them as THREE separate stops per row since T2).
+        // `.contain` groups the row for navigation purposes without merging
         // its interactive children — the combined descriptive summary (name + sound +
         // enabled/muted) now lives on the NON-interactive ``identity`` node instead (below),
         // so VoiceOver still gets that summary when landing on the row's identity, while
@@ -195,10 +211,17 @@ public struct EventRowView: View {
     /// The row's NON-interactive summary node (a11y-architect FIX 1): carries the combined
     /// descriptive announcement (DESIGN.md「无障碍规格」: "事件行→「{事件名}，声音 {文件名}，
     /// {已启用/已静音}」") that used to live on the whole row before `.contain` replaced
-    /// `.combine` there. `presentTrailing`'s standalone `fileName` `Text` is hidden from
-    /// accessibility (below) precisely because its content is already folded into THIS
-    /// node's ``accessibilityLabel`` — so `.contain` at the row level doesn't spawn a
-    /// second, redundant, unlabeled-ish stop for the same information.
+    /// `.combine` there. Since T2, ``fileNameMenu`` is a REAL, reachable control with its OWN
+    /// (deliberately differently-phrased) accessibility label — this node's summary and that
+    /// control's label are two separate VoiceOver stops that describe two separate things
+    /// ("what this row IS" vs "what activating that control DOES"), not a hidden duplicate of
+    /// one string. §2.5 第 7 条's "don't repeat the exact same wording twice" contract is now a
+    /// real, string-level unit test (``EventRowAccessibilitySuite``, `ClaudioGUICoreTests`) —
+    /// both labels' actual DECISION logic moved to ``eventRowIdentityAccessibilityLabel(eventDisplayName:coverage:enabled:)``
+    /// (`ClaudioGUICore`) precisely so a harness that cannot `import` this executableTarget can
+    /// still assert on the returned strings themselves. A real-device VoiceOver walkthrough
+    /// remains the only residual item (TODOS.md) — this machine has no way to query the live
+    /// accessibility tree, only the strings these functions return.
     private var identity: some View {
         VStack(alignment: .leading, spacing: 1) {
             Text(eventDisplayName(row.event))
@@ -214,60 +237,16 @@ public struct EventRowView: View {
         .accessibilityLabel(accessibilityLabel)
     }
 
-    // MARK: - Trailing (state-dependent) + orthogonal mute indicator
+    // MARK: - Trailing: fileNameMenu + always-present 试听/静音 pair
 
     @ViewBuilder
     private var trailing: some View {
         HStack(spacing: 6) {
-            switch row.coverage {
-            case .present(let fileName):
-                presentTrailing(fileName: fileName)
-            case .unmapped:
-                importAffordance(label: "未配置")
-            case .broken:
-                importAffordance(label: "文件丢失")
-            }
-            // DESIGN.md line 127 renders 试听 ▶ on EVERY row, just DISABLED on unmapped/broken
-            // ("试听 ▶ 禁用" — a present-but-disabled button, not an absent one);
-            // `previewButtonBody`'s own `enabled` already folds in `row.coverage.previewEnabled`,
-            // so the disabled styling applies automatically. Hence ONE call site, outside the
-            // switch.
-            //
-            // `claimsActionFocus` comes from ``EventRow/previewClaimsActionFocus`` (`ClaudioGUICore`,
-            // unit-tested) — NOT from three hand-written `true`/`false` literals inside the switch
-            // above, which is what this was (T16 review 修复⑥ sank the decision into a pure
-            // function precisely because nothing constrained those literals: flipping one broke no
-            // test, while it silently decides whether opening focus lands on a dead preview button
-            // or the operable import affordance).
-            previewButton(claimsActionFocus: row.previewClaimsActionFocus)
-            muteIndicator
-        }
-    }
-
-    private func presentTrailing(fileName: String) -> some View {
-        HStack(spacing: 6) {
-            // Full `textSecondary` in EVERY state (present, regardless of `row.enabled`) —
-            // DESIGN.md's ≥4.5:1 in-row-text floor (line 127) applies here; the muted look
-            // is carried, compliantly, by `muteIndicator` (lit clay when muted) and
-            // `previewButton` (greyed + desaturated when muted, since its `enabled` already
-            // folds in `row.enabled`) — never by dimming this text's opacity.
-            Text(fileName)
-                .font(.system(size: 11 * typeScale, design: .monospaced))
-                // DESIGN.md 字体表：数据 / 事件 id = JetBrains Mono，**tabular-nums**（等宽数字）。
-                .monospacedDigit()
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                // 长文件名截断到一行、留尾（ENGINEERING.md T15 D5: "长文件名截断带尾"；"不裁切、
-                // 不溢出" 指布局层面不裁掉整个控件，文本本身仍需截断以不撑爆行）。
-                .lineLimit(1)
-                .truncationMode(.tail)
-                // Purely visual (a11y-architect FIX 1): its content is already folded into
-                // `identity`'s combined ``accessibilityLabel`` ("声音 \(fileName)") — hiding
-                // it here stops `.contain` (row-level) from spawning a second, redundant
-                // stop for the same filename.
-                .accessibilityHidden(true)
-            // 波形占位（DESIGN.md「招牌母题：波形」）— T16 只画占位字形，真实波形渲染不在本任务范围。
-            // "较大" 及以上 Dynamic Type 档位隐藏（ENGINEERING.md T15 D5: "较大 → 隐波形"）。
-            if !adaptation.hidesWaveform {
+            fileNameMenu
+            // 波形占位（DESIGN.md「招牌母题：波形」）—— 只在 `.present` 画（`.unmapped`/`.broken`
+            // 没有已知文件可以画波形），"较大" 及以上 Dynamic Type 档位隐藏（ENGINEERING.md T15 D5:
+            // "较大 → 隐波形"）。
+            if case .present = row.coverage, !adaptation.hidesWaveform {
                 Image(systemName: "waveform")
                     .font(.system(size: 10 * typeScale))
                     .foregroundColor(ClaudioColor.textSecondary(colorScheme))
@@ -276,13 +255,25 @@ public struct EventRowView: View {
                     // (e.g. "waveform") as an unlabeled-feeling extra `.contain` stop.
                     .accessibilityHidden(true)
             }
-            // 试听 ▶ 由 `trailing` 统一渲染（每行恰好一次，见那里的注释）—— 这里不再各自铺一份。
+            // DESIGN.md line 127 renders 试听 ▶ on EVERY row, just DISABLED on unmapped/broken
+            // ("试听 ▶ 禁用" — a present-but-disabled button, not an absent one);
+            // `previewButtonBody`'s own `enabled` already folds in `row.coverage.previewEnabled`,
+            // so the disabled styling applies automatically.
+            //
+            // PLAN-SOUND-MANAGER.md §2.5: `.eventAction` is now UNCONDITIONALLY the preview
+            // button in all three coverage states (the dedup `EventRow.previewClaimsActionFocus`
+            // used to arbitrate between this button and the import affordance no longer applies —
+            // that affordance moved into `fileNameMenu`'s own `.eventSound` focus identity, so
+            // there is no second control left to race `.eventAction` for). One row → exactly one
+            // `.focused(_:equals: .eventAction(_))` binding, always this button.
+            previewButtonBody.focused(focusedTarget, equals: .eventAction(row.event))
+            muteIndicator
         }
     }
 
-    /// The 试听 ▶ preview button's styled body, WITHOUT the `.eventAction` focus binding — the
-    /// binding is applied conditionally by ``previewButton(claimsActionFocus:)`` so that exactly
-    /// one control per row ever owns that focus identity (see there).
+    /// The 试听 ▶ preview button's styled body — always bound to ``PanelFocusTarget/eventAction(_:)``
+    /// by ``trailing`` (see there for why the state that used to arbitrate this — the removed
+    /// `EventRow.previewClaimsActionFocus` dedup — no longer needs to).
     private var previewButtonBody: some View {
         let enabled = row.coverage.previewEnabled && row.enabled
         return Button(action: onPreview) {
@@ -310,81 +301,170 @@ public struct EventRowView: View {
         .accessibilityLabel("试听 \(eventDisplayName(row.event)) 的声音")
     }
 
-    /// The 试听 ▶ preview button. `claimsActionFocus` decides whether THIS control owns the
-    /// row's ``PanelFocusTarget/eventAction(_:)`` focus identity:
+    // MARK: - File-name Menu (PLAN-SOUND-MANAGER.md §2.5/T2, DESIGN.md「行内文件名下拉」)
+
+    /// The event row's file-name control: `stop.mp3 ▾` — a single native `Menu` ALL THREE
+    /// ``CoverageState``s share. This replaces two things that used to be split across
+    /// states: `.present`'s non-interactive filename `Text` (no edit entry at all — 决议②'s
+    /// central bug, "一个完整的包在 GUI 里无法替换任何声音") and `.unmapped`/`.broken`'s
+    /// drag/pick-only import affordance (``importAffordance(label:)``, now gone). Every row,
+    /// in every state, now owns ONE control that can pick a new file, clear the binding, or
+    /// (when a file really exists) reveal it in Finder.
     ///
-    /// - `.present` rows pass `true`: the preview button is the row's SOLE action control, so it
-    ///   owns `.eventAction` (`panelFocusOrder(_:)`'s SAME identity, never a second one).
-    /// - `.unmapped`/`.broken` rows pass `false`: DESIGN.md line 127 still renders a disabled
-    ///   "试听 ▶ 禁用" here, but the row's OPERABLE action is the always-enabled
-    ///   ``importAffordance(label:)``, which owns `.eventAction`. This disabled button must NOT
-    ///   also bind `.eventAction` — two simultaneously-rendered `.focused(_:equals:)` on one
-    ///   value make SwiftUI's focus resolution undefined (a11y-architect FIX 4 dedup), and in
-    ///   particular would let ``PanelView/applyFirstFocus()`` land opening focus on this dead
-    ///   preview instead of the operable import affordance. One row → exactly one `.eventAction`
-    ///   owner, honoring ``PanelFocusTarget/eventAction(_:)``'s "a SINGLE slot per row" contract.
+    /// 阶段 1 scope only (PLAN-SOUND-MANAGER.md §2.6 排期): the menu does NOT list the pack's
+    /// existing audio files ("包内已有音频，含孤儿") — that needs T11's orphan enumeration,
+    /// phase 2. Only 选文件… / 清除绑定 / 在访达中显示, and which of the latter two appear
+    /// depends on ``row``'s coverage (see the menu body below).
+    ///
+    /// Owns ``PanelFocusTarget/eventSound(_:)`` — a NEW, always-operable focus slot
+    /// (PLAN-SOUND-MANAGER.md §2.5): picking a file is legal in every coverage state, so
+    /// unlike the old `.eventAction` arbitration this control never has to yield its focus
+    /// identity to anything else. This is also why an `.unmapped` row's opening focus now
+    /// lands HERE rather than on the (still-disabled-until-bound) 试听 ▶ — exactly the
+    /// control that can fix the row.
+    ///
+    /// Reuses ``EventRowImportViewModel/handleDrop(sourceURL:suggestedFileName:)`` /
+    /// ``EventRowImportViewModel/clearBinding()`` / ``loadDropRequest(from:)`` — never a
+    /// second, independent binding-mutation path. `.onDrop` (drag-to-bind) is preserved
+    /// alongside the menu's click-driven 选文件… in every state, a superset of what the old
+    /// `unmapped`/`broken`-only import affordance offered.
+    private var fileNameMenu: some View {
+        Menu {
+            Button("选文件…", action: openImportPanel)
+            switch row.coverage {
+            case .present:
+                Button("清除绑定", action: clearBinding)
+                Button("在访达中显示", action: revealInFinder)
+            case .broken:
+                // 声明的文件已经不在磁盘上了 —— 没有什么可「在访达中显示」的。「清除绑定」仍然
+                // 有意义：把这一行从「打包错误」（.broken）翻回「刻意静默」（.unmapped，
+                // DESIGN.md「清除绑定」条：真打包错误不被伪装成正常静默，反向也成立）。
+                Button("清除绑定", action: clearBinding)
+            case .unmapped:
+                // 本来就没有绑定 —— 「清除绑定」在这里只会是一次幂等的空操作，「在访达中显示」没有
+                // 文件可显示。菜单只留「选文件…」，不为不做事的项目占用户的眼睛。
+                EmptyView()
+            }
+        } label: {
+            fileNameMenuLabel
+        }
+        .menuStyle(.borderlessButton)
+        // 品牌强调只经 `.tint`（DESIGN.md「行内文件名下拉」："原生外壳，不自绘...品牌强调只经
+        // `.tint(clay)`"）—— 菜单本身的系统外壳（焦点环、按下态）一个像素都不重画。
+        .tint(ClaudioColor.clay(colorScheme))
+        .onDrop(of: [UTType.fileURL], isTargeted: $isHoveringImportTarget, perform: handleDrop)
+        .accessibilityLabel(fileNameMenuAccessibilityLabel)
+        // a11y-architect FIX 4 的同一条纪律，套在这颗新槽位上：这是 `.eventSound` 唯一的 owner。
+        .focused(focusedTarget, equals: .eventSound(row.event))
+    }
+
+    /// ``fileNameMenu``'s label content — the visible `stop.mp3 ▾` / `未配置 ▾` / `文件丢失 ▾`
+    /// each ``CoverageState`` renders. `.present` stays PLAIN mono text (matches the row's old
+    /// non-interactive filename exactly, just now inside a real control); `.unmapped` keeps the
+    /// dashed-border pill the old `importAffordance` used (DESIGN.md: "未配置「（虚线边框）"）；
+    /// `.broken` reuses the SAME pill shape (this row-level state had no distinct "broken" visual
+    /// before T2 either — both `.unmapped`/`.broken` shared `importAffordance`), plus a small
+    /// real-red glyph: DESIGN.md's dropdown note asks for "broken 显红名", but coloring the
+    /// FILENAME TEXT itself real-red would repeat the exact ≥4.5:1 contrast failure already
+    /// caught and fixed for `PackGalleryView`'s `.broken` card (真红 only ever passes the ≥3:1
+    /// icon floor, never the ≥4.5:1 text floor) — so, mirroring that fix, 真红 lands on the
+    /// icon only, the label text stays `text-2`.
     @ViewBuilder
-    private func previewButton(claimsActionFocus: Bool) -> some View {
-        if claimsActionFocus {
-            previewButtonBody.focused(focusedTarget, equals: .eventAction(row.event))
-        } else {
-            previewButtonBody
+    private var fileNameMenuLabel: some View {
+        switch row.coverage {
+        case .present(let fileName):
+            HStack(spacing: 3) {
+                Text(fileName)
+                    .font(.system(size: 11 * typeScale, design: .monospaced))
+                    // DESIGN.md 字体表：数据 / 事件 id = JetBrains Mono，**tabular-nums**。
+                    .monospacedDigit()
+                    // 长文件名截断到一行、留尾（ENGINEERING.md T15 D5）。
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                chevronGlyph
+            }
+            .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+        case .unmapped:
+            pillLabel(text: "未配置")
+        case .broken:
+            HStack(spacing: 4) {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.system(size: 10 * typeScale))
+                    .foregroundColor(ClaudioColor.error(colorScheme))
+                pillLabel(text: "文件丢失")
+            }
         }
     }
 
-    /// The row-end drag-to-bind affordance for `unmapped`/`broken` rows (DESIGN.md: "行尾
-    /// 提供逐事件导入绑定"). Reuses ``EventRowImportViewModel/handleDrop(sourceURL:suggestedFileName:)``
-    /// (T16 D3 — import via the existing hardened pipeline, then bind) and
-    /// ``loadDropRequest(from:)`` (the exact same `NSItemProvider` extraction
-    /// `AudioDropZoneView` already uses), never a second drop-handling implementation.
-    ///
-    /// A real `Button` (a11y-architect FIX 2, CRITICAL — WCAG 2.1.1): this control's own
-    /// accessibility label has always promised "拖入或点按" (drag OR TAP), but until this fix
-    /// it only ever handled `.onDrop` — a keyboard/VoiceOver/Switch Control user had no way
-    /// to activate it at all. Tapping/activating now opens ``openImportPanel()`` (an
-    /// `NSOpenPanel`), feeding the chosen file into the exact same
-    /// `importViewModel.handleDrop(sourceURL:suggestedFileName:)` pipeline a drop already
-    /// used — never a second import path. `.onDrop` is preserved unchanged alongside it.
-    private func importAffordance(label: String) -> some View {
-        Button(action: openImportPanel) {
-            HStack(spacing: 4) {
-                Text(label)
-                    .font(.system(size: 11 * typeScale))
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                Image(systemName: "square.and.arrow.down")
-                    .font(.system(size: 11 * typeScale))
-                    .foregroundColor(
-                        isHoveringImportTarget
-                            ? ClaudioColor.clay(colorScheme) : ClaudioColor.textSecondary(colorScheme))
-            }
-            .padding(.vertical, 3)
-            .padding(.horizontal, 6)
-            // ≥24×24 hit target (a11y-architect FIX 6, WCAG 2.5.8).
-            .frame(minHeight: 24)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isHoveringImportTarget ? ClaudioColor.claySoft(colorScheme) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .strokeBorder(
-                        isHoveringImportTarget
-                            ? ClaudioColor.clay(colorScheme) : ClaudioColor.hairlineStrong(colorScheme),
-                        style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
-            )
-            .contentShape(Rectangle())
+    private var chevronGlyph: some View {
+        Image(systemName: "chevron.down")
+            .font(.system(size: 8 * typeScale))
+    }
+
+    /// The dashed-border pill both `.unmapped` and `.broken` render (identical visual
+    /// treatment pre-T2, when both states shared `importAffordance` — T2 only changes the
+    /// CONTROL underneath from a plain `Button` to a `Menu`, not this shape).
+    private func pillLabel(text: String) -> some View {
+        HStack(spacing: 4) {
+            Text(text)
+                .font(.system(size: 11 * typeScale))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            chevronGlyph
+                .foregroundColor(
+                    isHoveringImportTarget
+                        ? ClaudioColor.clay(colorScheme) : ClaudioColor.textSecondary(colorScheme))
         }
-        .buttonStyle(.plain)
-        .onDrop(of: [UTType.fileURL], isTargeted: $isHoveringImportTarget, perform: handleDrop)
-        .accessibilityLabel("拖入或点按，绑定声音到 \(eventDisplayName(row.event))")
-        // a11y-architect FIX 4: this is the row's `.eventAction` focus OWNER when coverage is
-        // `.unmapped`/`.broken` — the SAME identity `previewButton(claimsActionFocus:)` uses for
-        // `.present`. DESIGN.md still renders a disabled "试听 ▶ 禁用" alongside this on
-        // unmapped/broken rows, but that button passes `claimsActionFocus: false` so it does NOT
-        // also bind `.eventAction`: exactly one operable owner per row, never a disabled one
-        // racing this affordance for the same `@FocusState` value (which would make first focus
-        // land on the dead preview — the whole reason for the dedup).
-        .focused(focusedTarget, equals: .eventAction(row.event))
+        .padding(.vertical, 3)
+        .padding(.horizontal, 6)
+        // ≥24×24 hit target (a11y-architect FIX 6, WCAG 2.5.8).
+        .frame(minHeight: 24)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(isHoveringImportTarget ? ClaudioColor.claySoft(colorScheme) : Color.clear)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(
+                    isHoveringImportTarget
+                        ? ClaudioColor.clay(colorScheme) : ClaudioColor.hairlineStrong(colorScheme),
+                    style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+        )
+        .contentShape(Rectangle())
+    }
+
+    /// `fileNameMenu`'s own accessibility label — a thin call-through to
+    /// ``eventRowFileNameMenuAccessibilityLabel(eventDisplayName:coverage:)`` (`ClaudioGUICore`).
+    /// The DECISION (what each coverage state's label says, and that it must not
+    /// double-announce ``identity``'s summary — §2.5 第 7 条 ①) lives there now, where
+    /// ``EventRowAccessibilitySuite`` can actually assert on the returned strings; this view
+    /// only supplies the presentation-copy event name, exactly like
+    /// ``PanelAnnouncementFacts/header`` supplies its half of a Core-decided sentence.
+    private var fileNameMenuAccessibilityLabel: String {
+        eventRowFileNameMenuAccessibilityLabel(
+            eventDisplayName: eventDisplayName(row.event), coverage: row.coverage)
+    }
+
+    /// 「清除绑定」菜单项（present/broken 才渲染，见 ``fileNameMenu``）—— 经由
+    /// ``EventRowImportViewModel/clearBinding()`` 落地到 ``clearEventBinding(event:packID:environment:)``
+    /// （PLAN-SOUND-MANAGER.md §2.1/T3），从不绕开那条原语自己动手改 manifest。清除是**幂等**且
+    /// **绝不删文件**的（该原语自己的文档），所以这里不需要任何确认对话框。
+    private func clearBinding() {
+        importViewModel.clearBinding()
+        onBindingCleared()
+    }
+
+    /// 「在访达中显示」菜单项（仅 `.present` 渲染）。解析路径与 ``PanelView/playPreview(for:)``
+    /// 同一套谓词（``resolvePackDirectory`` + ``safePackFileURL``），从不新写一条路径解析逻辑 ——
+    /// `dropState` 就是 ``EventRowImportViewModel/importViewModel``（同一个 `AudioImportViewModel`
+    /// 实例，见其doc comment），`packID`/`environment` 读的是它此刻真正指向的包。
+    private func revealInFinder() {
+        guard case .present(let fileName) = row.coverage,
+            let packDirectory = resolvePackDirectory(
+                id: dropState.packID, userPacksDirectory: dropState.environment.userPacksDirectory,
+                bundledPacksDirectory: dropState.environment.bundledPacksDirectory),
+            let resolvedFile = safePackFileURL(fileName, in: packDirectory)
+        else { return }
+        NSWorkspace.shared.activateFileViewerSelecting([resolvedFile])
     }
 
     /// Opens the shared audio picker (``runAudioOpenPanel(allowsMultipleSelection:)``,
@@ -502,14 +582,9 @@ public struct EventRowView: View {
     // {已启用/已静音}」")
 
     private var accessibilityLabel: String {
-        let soundDescription: String
-        switch row.coverage {
-        case .present(let fileName): soundDescription = "声音 \(fileName)"
-        case .unmapped: soundDescription = "未配置声音"
-        case .broken: soundDescription = "声音文件丢失"
-        }
-        let muteDescription = row.enabled ? "已启用" : "已静音"
-        return "\(eventDisplayName(row.event))，\(soundDescription)，\(muteDescription)"
+        eventRowIdentityAccessibilityLabel(
+            eventDisplayName: eventDisplayName(row.event), coverage: row.coverage,
+            enabled: row.enabled)
     }
 }
 

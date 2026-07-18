@@ -33,27 +33,27 @@ func runPanelFocusOrderSuites() {
         expect(order.isEmpty, "got \(order)")
     }
 
-    suite("panelFocusOrder: operational — each row contributes action THEN mute, in Event.allCases order (follows visual left-to-right order)") {
+    suite("panelFocusOrder: operational — each row contributes eventSound THEN action THEN mute, in Event.allCases order (follows visual left-to-right order, PLAN-SOUND-MANAGER.md §2.5/T2's 3-slot row)") {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true))
         let expected: [PanelFocusTarget] =
-            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.masterVolume, .disconnect]
+            Event.allCases.flatMap { [.eventSound($0), .eventAction($0), .eventMute($0)] } + [.masterVolume, .disconnect]
         expect(order == expected, "got \(order)")
     }
 
-    suite("panelFocusOrder: operational — first focus is the first row's action control (mute sits rightmost, visually last)") {
+    suite("panelFocusOrder: operational — first focus is the first row's file-name Menu (eventSound sits leftmost, visually first; mute sits rightmost, visually last)") {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true))
         expect(
-            order.first == .eventAction(Event.allCases.first!),
-            "first focus must be the first row's action control, got \(String(describing: order.first))")
+            order.first == .eventSound(Event.allCases.first!),
+            "first focus must be the first row's file-name Menu, got \(String(describing: order.first))")
     }
 
     suite("panelFocusOrder: operational — gallery cards come right after the master volume slider, in their given order, with 断开连接 last") {
         let order = panelFocusOrder(
             .operational(events: Event.allCases, packCardIDs: ["alpha-pack", "zeta-pack"], hasMasterVolume: true))
-        // rows (action+mute per event) + the master volume slider; then the pack cards; 断开连接 last.
+        // rows (sound+action+mute per event) + the master volume slider; then the pack cards; 断开连接 last.
         // `.dropZone` used to sit between the slider and the cards — it left with `AudioDropZoneView`
         // (cc59d52 / PLAN-SOUND-MANAGER T1), so the cards now follow the slider directly.
-        let rowCount = Event.allCases.count * 2 + 1  // +1 for .masterVolume
+        let rowCount = Event.allCases.count * 3 + 1  // +1 for .masterVolume
         expect(
             order[rowCount...].elementsEqual([
                 .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"), .disconnect,
@@ -77,13 +77,15 @@ func runPanelFocusOrderSuites() {
                 + " between them left with AudioDropZoneView, T1), got \(order[masterVolumeIndex + 1])")
     }
 
-    suite("panelFocusOrder: operational — total count is 2×events + masterVolume + cards + disconnect") {
+    suite("panelFocusOrder: operational — total count is 3×events + masterVolume + cards + disconnect") {
         let order = panelFocusOrder(
             .operational(events: Event.allCases, packCardIDs: ["a", "b", "c"], hasMasterVolume: true))
-        // +1 masterVolume, +3 cards, +1 断开连接（T17）. `.dropZone`'s +1 left with T1.
+        // +1 masterVolume, +3 cards, +1 断开连接（T17）. `.dropZone`'s +1 left with T1. 3× events
+        // since PLAN-SOUND-MANAGER.md §2.5/T2 grew each row from 2 slots (action, mute) to 3
+        // (sound, action, mute).
         expect(
-            order.count == Event.allCases.count * 2 + 1 + 3 + 1,
-            "expected \(Event.allCases.count * 2 + 1 + 3 + 1) items, got \(order.count)")
+            order.count == Event.allCases.count * 3 + 1 + 3 + 1,
+            "expected \(Event.allCases.count * 3 + 1 + 3 + 1) items, got \(order.count)")
     }
 
     suite("panelFocusOrder: onboarding vs operational produce structurally different orders") {
@@ -155,79 +157,76 @@ func runPanelFocusOrderSuites() {
             ".configReveal must lead, ahead of the pack cards it visually sits above, got \(order)")
     }
 
-    // MARK: - panelFirstFocusTarget (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项" — the
-    // OPERABLE half `panelFocusOrder(_:).first` alone does not honor: a muted `.present` row's
-    // 试听 ▶ is present-but-disabled, still first in the order, and must NOT get opening focus).
+    // MARK: - panelFirstFocusTarget (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项"). Before
+    // PLAN-SOUND-MANAGER.md §2.5/T2, `.eventAction` (试听 ▶) was each row's FIRST slot, and a
+    // muted `.present` row's disabled preview needed an explicit skip-to-mute resolver — that is
+    // what the whole `nonOperableActionEvents` mechanism below was built for. T2 inserted
+    // ``PanelFocusTarget/eventSound(_:)`` (the file-name `Menu`) BEFORE `.eventAction` in every
+    // row, and it is UNCONDITIONALLY operable (picking a file is always legal, mute or coverage
+    // state notwithstanding — see ``panelFirstFocusTarget(_:nonOperableActionEvents:ctaOperable:)``'s
+    // own `case .eventSound: return true`). The mechanical consequence, pinned below: whenever
+    // `events` is non-empty, the very FIRST entry `panelFocusOrder(_:)` produces is that first
+    // event's `.eventSound`, which is always operable — so `panelFirstFocusTarget`/
+    // `panelOpeningFocus` NEVER even reaches `.eventAction` to decide whether to skip it.
+    // `nonOperableActionEvents` no longer moves OPENING focus at all (it still describes real,
+    // disabled `.eventAction` Tab stops AppKit's own key-loop skips during normal Tab traversal —
+    // `panelFocusOrder(_:)` itself is unchanged and still lists them).
 
-    suite("panelFirstFocusTarget: nothing disabled → first focus is the first row's action (same as order.first)") {
+    suite("panelFirstFocusTarget: nothing disabled → first focus is the first row's file-name Menu (eventSound), same as order.first") {
         let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true)
         expect(
-            panelFirstFocusTarget(scope) == .eventAction(Event.allCases.first!),
-            "with every action operable, first focus is the first row's action, got \(String(describing: panelFirstFocusTarget(scope)))")
+            panelFirstFocusTarget(scope) == .eventSound(Event.allCases.first!),
+            "with every action operable, first focus is the first row's eventSound, got \(String(describing: panelFirstFocusTarget(scope)))")
         expect(
             panelFirstFocusTarget(scope) == panelFocusOrder(scope).first,
             "with nothing disabled the resolver must agree with plain order.first")
     }
 
-    suite("panelFirstFocusTarget: first row's action disabled (muted present) → first focus falls to that row's mute, NOT the dead action") {
+    suite("panelFirstFocusTarget: first row's action disabled (muted present) → first focus is STILL that row's eventSound — the disabled action is never even reached") {
         let first = Event.allCases[0]
         let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true)
         let target = panelFirstFocusTarget(scope, nonOperableActionEvents: [first])
         expect(
-            target == .eventMute(first),
-            "first focus must skip the disabled action and land on the SAME row's (always-operable) mute, got \(String(describing: target))")
+            target == .eventSound(first),
+            "eventSound precedes the disabled action in the SAME row and is unconditionally"
+                + " operable, so opening focus lands there — it no longer needs to skip past the"
+                + " disabled action to the row's mute the way it did pre-T2, got \(String(describing: target))")
         expect(
-            target != panelFocusOrder(scope).first,
-            "the whole point: the resolver must diverge from order.first when order.first is a disabled action")
+            target == panelFocusOrder(scope).first,
+            "post-T2 this AGREES with plain order.first — eventSound's unconditional operability"
+                + " means the resolver never diverges from it for a disabled FIRST-row action"
+                + " (contrast the pre-T2 behavior, where order.first was the disabled action itself)")
     }
 
-    suite("panelFirstFocusTarget: for the SAME disabled event, it stays a Tab stop in the full order YET is skipped for opening focus") {
+    suite("panelFirstFocusTarget: the full order (incl. the disabled action) is unchanged by disabling it — the disabled action remains a Tab stop, only opening focus is unaffected by it") {
         let first = Event.allCases[0]
         let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true)
-        // Half A — panelFocusOrder is deliberately UNCHANGED by the fix: the disabled action is
-        // still a Tab STOP in the full order (AppKit's key-loop skips disabled NSViews itself; the
-        // per-row stop count stays stable). Pin the exact order so a shrink would fail here.
+        // panelFocusOrder is deliberately UNCHANGED by disabling an action: it's still a Tab STOP
+        // in the full order (AppKit's key-loop skips disabled NSViews itself; the per-row stop
+        // count stays stable). Pin the exact order so a shrink would fail here.
         let fullOrder = panelFocusOrder(scope)
         let expected: [PanelFocusTarget] =
-            Event.allCases.flatMap { [.eventAction($0), .eventMute($0)] } + [.masterVolume, .disconnect]
+            Event.allCases.flatMap { [.eventSound($0), .eventAction($0), .eventMute($0)] } + [.masterVolume, .disconnect]
         expect(fullOrder == expected, "the full order (incl. the disabled action) must be unchanged, got \(fullOrder)")
         expect(fullOrder.contains(.eventAction(first)), "the disabled action must remain a Tab stop")
-        // Half B — the SAME event, marked non-operable, is skipped for OPENING focus only.
-        let firstFocus = panelFirstFocusTarget(scope, nonOperableActionEvents: [first])
-        expect(
-            firstFocus == .eventMute(first),
-            "opening focus must skip the disabled action to the row's mute, got \(String(describing: firstFocus))")
     }
 
-    suite("panelFirstFocusTarget: a NON-first disabled action does not move opening focus (matches by event IDENTITY, not position)") {
+    suite("panelFirstFocusTarget: nonOperableActionEvents no longer moves OPENING focus at all — empty / first-only / non-first / every event all resolve to the SAME first row's eventSound") {
         let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true)
-        // Only the THIRD event's action is disabled — the first row's action is still operable,
-        // so opening focus must stay on it. Kills a mutant that skips index 0 whenever the set is
-        // non-empty (which every event[0]-based suite above would let through).
-        let target = panelFirstFocusTarget(scope, nonOperableActionEvents: [Event.allCases[2]])
-        expect(
-            target == .eventAction(Event.allCases.first!),
-            "a disabled action on a LATER row must not steal the first row's opening focus, got \(String(describing: target))")
-    }
-
-    suite("panelFirstFocusTarget: only the FIRST action is skipped, not the whole row — lands on mute(first), never mute(second)") {
-        let first = Event.allCases[0]
-        let second = Event.allCases[1]
-        let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true)
-        // Both first two rows muted: focus still stops at the first operable slot it reaches,
-        // which is the FIRST row's mute (one slot to the right of its disabled action).
-        let target = panelFirstFocusTarget(scope, nonOperableActionEvents: [first, second])
-        expect(
-            target == .eventMute(first),
-            "must land on the first row's mute, not skip ahead to a later row, got \(String(describing: target))")
-    }
-
-    suite("panelFirstFocusTarget: every action disabled → first focus is still the first row's mute (mute is always operable)") {
-        let scope = PanelFocusScope.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true)
-        let target = panelFirstFocusTarget(scope, nonOperableActionEvents: Set(Event.allCases))
-        expect(
-            target == .eventMute(Event.allCases.first!),
-            "with all actions disabled the first operable target is the first row's mute, got \(String(describing: target))")
+        let expected = PanelFocusTarget.eventSound(Event.allCases.first!)
+        // Kills the pre-T2-shaped mutant that still skips to `.eventMute(first)` whenever the
+        // first row's action is in the disabled set — that mechanism is dead now that eventSound
+        // (unconditionally operable, and positioned BEFORE .eventAction in every row) always wins.
+        for nonOperable: Set<Event> in [
+            [], [Event.allCases[0]], [Event.allCases[2]], [Event.allCases[0], Event.allCases[1]],
+            Set(Event.allCases),
+        ] {
+            expect(
+                panelFirstFocusTarget(scope, nonOperableActionEvents: nonOperable) == expected,
+                "nonOperableActionEvents: \(nonOperable) must not change opening focus away from"
+                    + " the first row's eventSound, got"
+                    + " \(String(describing: panelFirstFocusTarget(scope, nonOperableActionEvents: nonOperable)))")
+        }
     }
 
     suite("panelFirstFocusTarget: onboarding scope ignores nonOperableActionEvents (it has no action targets)") {
@@ -317,26 +316,26 @@ func runPanelFocusOrderSuites() {
     // `panelFocusOrder(scope).first` — i.e. reintroducing the exact bug the resolver exists to fix —
     // left the entire suite green. It is a pure function now, so it can be pinned on this machine.
 
-    suite("panelOpeningFocus: nothing muted → opening focus is the first row's action (agrees with order.first when nothing is disabled)") {
+    suite("panelOpeningFocus: nothing muted → opening focus is the first row's eventSound (agrees with order.first)") {
         let rows = Event.allCases.map {
             EventRow(event: $0, coverage: .present(fileName: "\($0.cliName).mp3"), enabled: true)
         }
         let target = panelOpeningFocus(rows: rows, packCardIDs: ["alpha-pack"], hasMasterVolume: true)
         expect(
-            target == .eventAction(Event.allCases.first!),
-            "with every action operable, opening focus is the first row's action, got \(String(describing: target))")
+            target == .eventSound(Event.allCases.first!),
+            "opening focus is the first row's file-name Menu, got \(String(describing: target))")
         expect(
             target == panelFocusOrder(.operational(events: rows.map(\.event), packCardIDs: ["alpha-pack"], hasMasterVolume: true)).first,
-            "when nothing is disabled it must AGREE with order.first — the divergence below is not"
-                + " an unconditional off-by-one")
+            "it must AGREE with order.first")
     }
 
-    // THE load-bearing assertion of the whole fix: first row is `.present` + MUTED, so its 试听 ▶
-    // renders `.disabled(true)` while still owning `.eventAction` and still sitting first in the
-    // order. `order.first` would park the opening keyboard caret on that dead control
-    // (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项" — 可操作 is the load-bearing word).
-    // The `!=` half is what turns RED the moment anyone reverts to `panelFocusOrder(...).first`.
-    suite("panelOpeningFocus: a MUTED .present first row → focus lands on that row's mute toggle, and must NOT equal panelFocusOrder(...).first") {
+    // PLAN-SOUND-MANAGER.md §2.5/T2: first row is `.present` + MUTED, so its 试听 ▶ (`.eventAction`)
+    // renders `.disabled(true)` — but `.eventSound` (the file-name `Menu`) now sits BEFORE it in the
+    // same row and is UNCONDITIONALLY operable, so opening focus lands there regardless, and (unlike
+    // the pre-T2 shape, where a muted first row's disabled action WAS order.first and the resolver
+    // had to diverge from it) this now AGREES with plain `panelFocusOrder(...).first` — there is
+    // nothing left to skip past.
+    suite("panelOpeningFocus: a MUTED .present first row → focus is STILL that row's eventSound (mute never reaches, let alone disables, the file-name Menu)") {
         let first = Event.allCases[0]
         var rows = Event.allCases.map {
             EventRow(event: $0, coverage: .present(fileName: "\($0.cliName).mp3"), enabled: true)
@@ -346,22 +345,25 @@ func runPanelFocusOrderSuites() {
 
         let target = panelOpeningFocus(rows: rows, packCardIDs: packCardIDs, hasMasterVolume: true)
         expect(
-            target == .eventMute(first),
-            "opening focus must skip the muted row's disabled 试听 ▶ and land on the SAME row's"
-                + " (always-operable) mute toggle, got \(String(describing: target))")
+            target == .eventSound(first),
+            "opening focus lands on the muted row's file-name Menu — mute only disables the preview"
+                + " button one slot to its right, got \(String(describing: target))")
 
         let order = panelFocusOrder(.operational(events: rows.map(\.event), packCardIDs: packCardIDs, hasMasterVolume: true))
         expect(
-            target != order.first,
-            "the entire point of this function: it must DIVERGE from panelFocusOrder(...).first here"
-                + " — order.first is \(String(describing: order.first)), a dimmed control that does nothing")
+            target == order.first,
+            "post-T2 this AGREES with panelFocusOrder(...).first — order.first is"
+                + " \(String(describing: order.first)), and it's already operable, so the resolver"
+                + " has nothing to diverge from (contrast pre-T2, where order.first WAS the muted"
+                + " row's disabled action)")
         expect(
-            order.first == .eventAction(first),
-            "sanity: the disabled action is still first in the traversal order (and still a Tab stop)"
-                + " — the fix changes opening focus only, never the order")
+            order.contains(.eventAction(first)) && order.firstIndex(of: .eventAction(first))! > 0,
+            "sanity: the disabled action is still a Tab stop, just no longer first in the row"
+                + " (eventSound precedes it) — the fix changes NEITHER the order NOR, in this"
+                + " shape, opening focus's divergence from it")
     }
 
-    suite("panelOpeningFocus: an UNMAPPED muted first row keeps opening focus on its action (the import affordance is always operable — mute alone must not divert focus)") {
+    suite("panelOpeningFocus: an UNMAPPED muted first row's opening focus is ALSO its eventSound (the row's actually-fixable, always-operable control — mute is irrelevant to reaching it)") {
         let first = Event.allCases[0]
         var rows = Event.allCases.map {
             EventRow(event: $0, coverage: .present(fileName: "\($0.cliName).mp3"), enabled: true)
@@ -369,34 +371,35 @@ func runPanelFocusOrderSuites() {
         rows[0] = EventRow(event: first, coverage: .unmapped, enabled: false)
         let target = panelOpeningFocus(rows: rows, packCardIDs: [], hasMasterVolume: true)
         expect(
-            target == .eventAction(first),
-            "muting an .unmapped row does NOT disable its action slot (the import affordance), so"
-                + " opening focus must stay on it — kills a mutant that keys the skip off `enabled`"
-                + " alone rather than EventRow.eventActionOperable, got \(String(describing: target))")
+            target == .eventSound(first),
+            "an .unmapped row's file-name Menu is always operable regardless of mute or coverage,"
+                + " so opening focus lands there — kills a mutant that keys the skip off `enabled`"
+                + " alone rather than the eventSound/eventAction slot split, got \(String(describing: target))")
     }
 
-    suite("panelOpeningFocus: every row muted+present → focus lands on the FIRST row's mute (never skips ahead to a later row)") {
+    suite("panelOpeningFocus: every row muted+present → focus still lands on the FIRST row's eventSound (never a later row, never the disabled action, never the mute)") {
         let rows = Event.allCases.map {
             EventRow(event: $0, coverage: .present(fileName: "\($0.cliName).mp3"), enabled: false)
         }
         let target = panelOpeningFocus(rows: rows, packCardIDs: [], hasMasterVolume: true)
         expect(
-            target == .eventMute(Event.allCases.first!),
-            "the first OPERABLE slot is the first row's mute, got \(String(describing: target))")
+            target == .eventSound(Event.allCases.first!),
+            "the first slot, eventSound, is unconditionally operable regardless of every row being"
+                + " muted, got \(String(describing: target))")
     }
 
-    suite("panelOpeningFocus: every row muted → first focus is the first row's mute, NEVER the master volume slider (the slider only wins opening focus when the row list is empty, see the hasMasterVolume-gated tests below)") {
+    suite("panelOpeningFocus: every row muted → first focus is the first row's eventSound, NEVER the master volume slider (the slider only wins opening focus when the row list is empty, see the hasMasterVolume-gated tests below)") {
         let rows = Event.allCases.map {
             EventRow(event: $0, coverage: .present(fileName: "\($0.cliName).mp3"), enabled: false)
         }
         let target = panelOpeningFocus(rows: rows, packCardIDs: [], hasMasterVolume: true)
         expect(
-            target == .eventMute(Event.allCases.first!),
-            "with every row muted, first focus is still the first row's mute, got \(String(describing: target))")
+            target == .eventSound(Event.allCases.first!),
+            "with every row muted, first focus is still the first row's eventSound, got \(String(describing: target))")
         expect(
             target != .masterVolume,
             "the master volume slider must never steal opening focus away from an operable event"
-                + " row toggle, got \(String(describing: target))")
+                + " row control, got \(String(describing: target))")
     }
 
     suite("panelOpeningFocus: zero rows, hasMasterVolume false, with a pack card (the REAL .needsPack 'pick a pack' shape) → first focus is the first pack card, never the (unrendered) slider or a removed drop zone") {
@@ -448,14 +451,17 @@ func runPanelFocusInFlightSuites() {
         let rows = Event.allCases.map { event in
             EventRow(event: event, coverage: .unmapped, enabled: true)
         }
-        // 全 unmapped：每行的 action 槽是永远可操作的导入入口，所以首焦点仍是第一行。4 行真事件、
-        // ctaOperable: false、`hasMasterVolume: true` —— 阶段 D（MasterVolumeRow，8771946）落地后
-        // 这整个组合都是**真实**操作态的形状，不再是为测 flag 而拼的虚构值：`.operational` 面板
-        // 今天确实渲染滑块，真实调用方（`PanelView.applyFirstFocus`）传的就是 `isOperational`。
+        // 全 unmapped：PLAN-SOUND-MANAGER.md §2.5/T2 后，每行真正永远可操作的槽是 eventSound（文件名
+        // Menu），不再是 action（试听 ▶ 在 unmapped/broken 上恒禁用）——首焦点仍落第一行，只是落在
+        // eventSound 上。4 行真事件、ctaOperable: false、`hasMasterVolume: true` —— 阶段 D
+        // （MasterVolumeRow，8771946）落地后这整个组合都是**真实**操作态的形状，不再是为测 flag 而拼的
+        // 虚构值：`.operational` 面板今天确实渲染滑块，真实调用方（`PanelView.applyFirstFocus`）传的就是
+        // `isOperational`。
         expect(
             panelOpeningFocus(rows: rows, packCardIDs: [], ctaOperable: false, hasMasterVolume: true)
-                == .eventAction(Event.allCases[0]),
-            "operational 面板里首焦点本来就不是断开连接，禁用它不该改变这一点")
+                == .eventSound(Event.allCases[0]),
+            "operational 面板里首焦点本来就不是断开连接，禁用它不该改变这一点；ctaOperable 只影响"
+                + " onboarding CTA / .disconnect / .revealDetail，从不影响 eventSound 的操作性")
 
         // 极端情形：没有事件行、没有包卡、hasMasterVolume: false、也没有失败卡 —— 这是 `.needsPack`
         // **一无所有**的真实形状（`/codex review` P1，2626083/47459a7），且此刻有动作在飞

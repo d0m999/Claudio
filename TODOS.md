@@ -1873,3 +1873,19 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Effort:** S（决策本身）/ M（若选①，含 config 契约 + 语义 + 测试）
 **Priority:** P2（方向 D 落地前须拍板 —— 否则实现者会替你默认选①的一个未定义版本）
 **Depends on:** None（是一次决策，不依赖其它改动）
+
+## 声音包管理（PLAN-SOUND-MANAGER.md）落地债
+
+### T2 文件名 Menu 的 VoiceOver 措辞：字符串级单测 + 结构断言已钉，真机三态走查仍未做
+
+**What:** T2（事件行文件名升格为原生 `Menu`，三态共用）落地后，PLAN-SOUND-MANAGER.md §2.5 第 7 条要求的三件事——① 行身份与菜单 label 不重复播报；② 禁用的试听 ▶ 不抢播；③ unmapped 行的 Menu label 让 VO 用户听得出"这里能修"——**现在①③有真正的字符串级单测，②有结构级断言，但没有一条是真机 VoiceOver 走查**。`fileNameMenuAccessibilityLabel`/`accessibilityLabel` 的实际 DECISION 逻辑已从 `EventRowView`（住在不可 `import` 的 `ClaudioGUI` executableTarget）拆成 `ClaudioGUICore` 的纯函数 `eventRowIdentityAccessibilityLabel`/`eventRowFileNameMenuAccessibilityLabel`（`EventRowAccessibility.swift`），`EventRowAccessibilitySuite` 直接断言这两个函数的**返回字符串本身**（三态各断一次「不逐字重复」+ unmapped 的可操作动词「选择」）——这条修复过程中当场抓到一个真 bug：`.broken` 的旧菜单措辞把 identity 的「声音文件丢失」原样复述了一遍，两个 VoiceOver 停靠点背靠背念同一句话，现已改写为只说"能做什么"。②（禁用试听 ▶ 不被 `.combine` 合并抢播）是控件树**形状**问题、不是字符串问题，走的是 `ViewWiringSuite` 的源码结构断言（`.disabled(!enabled)` 结构性存在 + 行级 `.contain`、非 `.combine` + `identity` 节点内无 Button 混入）。WCAG 2.1.1 的 Tab 顺序（三槽焦点模型下 Menu 是否会被跳过）已由 `PanelFocusOrderSuite` 的既有断言覆盖（`.eventSound` 恒排每行首位、恒可操作，从未被 T2 之后的任何 fixture 跳过）。**但这一切仍然是本机能做到的上限**——`EventRowView.swift` 所在的 `ClaudioGUI` 执行体 target 不可 `import`（本机 CommandLineTools 无 ViewInspector/XCTest），没有任何测试能真正驱动一次运行期的 VoiceOver 会话，字符串对不对、结构对不对，都不等于"VoiceOver 实际念出来是什么"。
+
+**Why:** 这正是本仓库反复记录的"呈现级洞"天花板——不是偷懒没写,是这台机器结构上够不到 SwiftUI 运行期的无障碍树。如实标注比谎称"类型层已覆盖"更重要（DESIGN.md/ENGINEERING.md 反复踩过"断言存在 ≠ 断言为真"这同一个坑）；这次的教训又添了一条：**字符串级单测能抓到真 bug**（`.broken` 的重复播报），但它抓不到的是"两个 VoiceOver 停靠点之间的实际停顿/语速/是否被系统截断"这类只有真机才回答得了的问题。
+
+**Context:** PLAN-SOUND-MANAGER.md §2.5 第 7 条原文即预告了这条走查项："落进 PanelAnnouncement / 行 accessibilityLabel 的单测 + 一条真机 VO 走查"——本条把后半句正式记账，避免它只活在计划文档的散文里、落地后被遗忘。2026-07-18 a11y-architect 一轮补齐了前半句（单测）与结构断言，后半句依旧原样成立。
+
+**修复方式:** 在一台真 Mac 上开启 VoiceOver，对 `.present`/`.unmapped`/`.broken` 三态各走一遍：确认识别到的是两条不同措辞的公告（行身份 + 菜单控件），确认禁用的试听 ▶ 被 VO 跳过（Tab/VO-Right 移上去不触发播放），确认 unmapped 行的菜单公告让人听得出"可以选文件修好它"。
+
+**Effort:** S（人工走查，非代码改动；若发现真的措辞问题则另计）
+**Priority:** P3（不阻断发布——字符串级单测 + 结构断言已经把重复播报的概率降到接近零，真机走查是锦上添花的确认，不是已知缺陷）
+**Depends on:** None

@@ -1091,4 +1091,131 @@ func runViewWiringSuites() {
             "willTerminate 的闭包体里必须真的调 flush() —— 订阅建了但闭包是空的，等于没订阅：⌘Q 时那次"
                 + "没提交的拖动照样丢。闭包体实际是：\(body)")
     }
+
+    // MARK: - PLAN-SOUND-MANAGER.md T2：自动试听回归 + 「清除绑定」菜单项接线（存在性级，理由同本文件
+    // 头部——EventRowView/PanelView 都住在不可 import 的 `ClaudioGUI` executableTarget）
+
+    suite("PanelView：每行的 onImportSucceeded 必须接到 previewPlayer.play(...) —— T1 删掉假 drop-zone 时带走了它唯一的实现，T2 必须补回自动试听") {
+        guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
+            expect(false, "读不到 PanelView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(panel)
+        guard let body = closureBody(after: "importViewModel.onImportSucceeded =", in: flat) else {
+            expect(
+                false,
+                "PanelView 的 init 必须给每行的 AudioImportViewModel 接一句 onImportSucceeded —— 切不出它"
+                    + "后面的闭包体。没有它，导入成功后（菜单选文件 / 拖拽）行内不会自动试听，用户导入了"
+                    + "什么声音只能凭猜测")
+            return
+        }
+        expect(
+            body.contains("previewPlayer.play("),
+            "onImportSucceeded 的闭包体必须真的调 previewPlayer.play(...) —— 接了钩子却是空闭包，等于"
+                + "没接。闭包体实际是：\(body)")
+        expect(
+            body.contains("previewVolume(for: panelModel.config)"),
+            "自动试听必须读 panelModel.config（PLAY 时刻的最新音量），而不是 init 时捕获的一个冻结值 ——"
+                + "否则用户开着面板调过一次主音量之后，自动试听仍然放着调整前的音量。闭包体实际是：\(body)")
+    }
+
+    suite("EventRowView：文件名 Menu 的「清除绑定」菜单项必须接到 clearBinding()，而 clearBinding() 必须经由 importViewModel.clearBinding() 落地 —— 不许绕开 T3 的 clearEventBinding 原语另起一套清除逻辑") {
+        // `codeOnly`（剥注释、**保留**字符串内容），不是 `codeWithoutStrings`：这条要断的是菜单项的
+        // 字面量标签「清除绑定」本身也在——`codeWithoutStrings` 会把它清空成 `""`，让下面第一条
+        // 断言恒假。
+        guard let row = codeOnly("gui/Sources/ClaudioGUI/EventRowView.swift") else {
+            expect(false, "读不到 EventRowView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(row)
+        expect(
+            flat.contains(#"Button("清除绑定", action: clearBinding)"#),
+            "present/broken 两态的菜单必须把「清除绑定」接到 clearBinding —— 少了它，菜单项要么不存在"
+                + "要么是个死按钮")
+        guard let body = closureBody(after: "private func clearBinding()", in: flat) else {
+            expect(false, "切不出 clearBinding() 的函数体")
+            return
+        }
+        expect(
+            body.contains("importViewModel.clearBinding()"),
+            "clearBinding() 必须调用 importViewModel.clearBinding()（EventRowImportViewModel 那一层，"
+                + "它经由 ManifestBindingSuite 钉死的 clearEventBinding 落地）—— 绕开它另写一套会制造"
+                + "第二条清除路径。函数体实际是：\(body)")
+        expect(
+            body.contains("onBindingCleared()"),
+            "clearBinding() 必须调用 onBindingCleared() —— 少了它，清除成功后行仍显示清除前的旧状态，"
+                + "直到一次不相关的操作恰好触发 refresh()。函数体实际是：\(body)")
+    }
+
+    suite("PanelView：EventRowView 的 onBindingCleared 必须接到 panelModel.reload() —— 否则「清除绑定」写完 manifest.json 之后行不会重算") {
+        guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
+            expect(false, "读不到 PanelView.swift")
+            return
+        }
+        expect(
+            collapsingWhitespace(panel).contains("onBindingCleared: { panelModel.reload() }"),
+            "operationalPanel 的 EventRowView 必须把 onBindingCleared 接到 panelModel.reload() —— 与"
+                + " onImportCompleted 同一条理由：菜单驱动的清除直接写 manifest.json，行只在 reload()"
+                + " 之后才会显示新状态")
+    }
+
+    suite("EventRowView：禁用的试听 ▶ 不会被无障碍合并抢播 —— PLAN-SOUND-MANAGER.md §2.5 第 7 条 ②") {
+        // structural check，理由同本文件头部：EventRowView 住在不可 import 的 ClaudioGUI
+        // executableTarget，够不着行为级测试，只能读它的源码结构。字符串级契约（① / ③）已经
+        // 拆成纯函数进了 `EventRowAccessibility.swift`，走真正的单测（`EventRowAccessibilitySuite`）——
+        // 这一条独立存在，是因为「禁用样式是不是结构性的、有没有被某种 .combine 悄悄合并」是一个
+        // **控件树形状**问题，不是字符串问题，两者用不了同一套断言。
+        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift") else {
+            expect(false, "读不到 EventRowView.swift —— 这个 suite 唯一的价值就是读它")
+            return
+        }
+        let flat = collapsingWhitespace(row)
+
+        guard
+            let previewBody = closureBody(
+                after: "private var previewButtonBody: some View", in: flat)
+        else {
+            expect(false, "切不出 previewButtonBody 的属性体 —— 下面那条断言无从判起")
+            return
+        }
+        expect(
+            previewBody.contains(".disabled(!enabled)"),
+            "previewButtonBody 必须显式 .disabled(!enabled) —— 结构性禁用，VoiceOver 才会把它播报成"
+                + "「变灰」，而不是当成一个可正常触发的控件。属性体实际是：\(previewBody)")
+
+        guard let trailingBody = closureBody(after: "private var trailing: some View", in: flat)
+        else {
+            expect(
+                false,
+                "切不出 trailing 的属性体 —— previewButtonBody 就渲染在它里面，下面那条兜底无从判起")
+            return
+        }
+        expect(
+            !trailingBody.contains(".combine"),
+            "trailing（fileNameMenu + 试听 ▶ + 静音钮所在的那一段）不许出现"
+                + " .accessibilityElement(children: .combine) —— 一旦出现，会把三个本该各自独立的"
+                + "控件合并成一整块摘要，禁用的试听 ▶ 就被吞进那一整块播报里，VoiceOver 用户再也"
+                + "无法把焦点单独移到它上面区分「这一颗是灰的」。属性体实际是：\(trailingBody)")
+
+        guard let identityBody = closureBody(after: "private var identity: some View", in: flat)
+        else {
+            expect(false, "切不出 identity 的属性体 —— 下面那条兜底无从判起")
+            return
+        }
+        expect(
+            !identityBody.contains("Button"),
+            "identity 节点只能包 Text（DESIGN.md 的行摘要），不许混进任何 Button —— 它自己那句"
+                + " .accessibilityElement(children: .combine) 只该合并纯文字，一旦某个 Button 混"
+                + "进来，它自己的独立 accessibilityLabel 会被 combine 进这一整句摘要，无法再单独"
+                + "触达。属性体实际是：\(identityBody)")
+
+        // 行级分组必须是 .contain（a11y-architect FIX 1 既有纪律，EventRowView 头部 doc comment
+        // 早有记录）—— 这是「试听 ▶ / fileNameMenu / 静音钮三者各自独立可达」的结构性前提：没有它，
+        // 上面三条即使各自成立，行级 .combine 照样会把它们重新合并成一整块。
+        expect(
+            row.contains(".accessibilityElement(children: .contain)"),
+            "EventRowView 的行级分组必须是 .contain，不是 .combine —— 否则 previewButtonBody /"
+                + " fileNameMenu / muteIndicator 三个独立控件会被合并成一个 VoiceOver 停靠点，"
+                + "禁用的试听 ▶ 会被合并进行摘要而不是单独播报「变灰」")
+    }
 }

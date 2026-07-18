@@ -55,6 +55,27 @@ public final class EventRowImportViewModel: ObservableObject {
         bindResult = nil
     }
 
+    /// Clears this row's manifest binding — the menu 「清除绑定」item's (`EventRowView`,
+    /// PLAN-SOUND-MANAGER.md §2.1/T2) caller-facing entry point, and ``bindEventToManifest``'s
+    /// dual the way ``handleDrop(sourceURL:suggestedFileName:)`` is its bind-side counterpart.
+    ///
+    /// Synchronous, no `await`: ``clearEventBinding(event:packID:environment:)`` is fully
+    /// synchronous + `@MainActor` by design (PLAN-SOUND-MANAGER.md §2.1 — the manifest RMW's
+    /// only concurrency guard is "fully synchronous, always on the main actor", the same
+    /// invariant ``handleDrop(sourceURL:suggestedFileName:)``'s own doc comment documents for
+    /// binding), so there is no suspension point across which `packID`/`environment` could go
+    /// stale — unlike the bind path, which awaits the import pipeline first.
+    ///
+    /// Publishes into the SAME ``bindResult`` surface a failed BIND already reports through:
+    /// the row's UI (``EventRowView``'s `importErrorMessage`) already knows how to render a
+    /// `.failure` there (e.g. the manifest turned unreadable out from under the row between
+    /// opening the menu and clicking 清除绑定), so a failed clear surfaces identically — never
+    /// a second, unrendered failure-reporting path.
+    public func clearBinding() {
+        bindResult = clearEventBinding(
+            event: event, packID: importViewModel.packID, environment: importViewModel.environment)
+    }
+
     /// Handles one dropped/picked file for this row: imports it via ``importViewModel``,
     /// then — only on a successful import — binds the resulting file to ``event``. `async`
     /// for the same reason ``AudioImportViewModel/handleDrop(sourceURL:suggestedFileName:)``

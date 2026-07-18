@@ -733,6 +733,88 @@ func runManifestBindingSuites() async {
         }
     }
 
+    // MARK: - EventRowImportViewModel.clearBinding() (PLAN-SOUND-MANAGER.md §2.5/T2): the
+    // file-name `Menu`'s 「清除绑定」 item's caller-facing entry point (`EventRowView.clearBinding()`,
+    // compile-only/manual-verify — no ViewInspector in this repo). `clearEventBinding` itself is
+    // already thoroughly pinned at the Core level (`clearEventBinding` suites above, T3) — these
+    // close the ONE gap those don't reach: the view-model seam the menu item actually calls
+    // through, publishing into the SAME `bindResult` surface a failed bind already reports
+    // through (this type's own doc comment).
+
+    suite("EventRowImportViewModel.clearBinding(): clears a bound event — bindResult becomes .success, coverage recomputes to .unmapped, the file itself is untouched") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "id": "my-pack", "events": { "stop": "stop.mp3" } }"#,
+                to: userPacks.appendingPathComponent("my-pack/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+            let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
+            let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
+
+            rowViewModel.clearBinding()
+
+            guard case .success = rowViewModel.bindResult else {
+                expect(
+                    false,
+                    "clearBinding() must record .success in bindResult — the SAME surface a failed"
+                        + " bind reports through, got \(String(describing: rowViewModel.bindResult))")
+                return
+            }
+            let rows = packCoverage(
+                packID: "my-pack", config: ClaudioConfig(selectedPack: "my-pack"),
+                environment: environment)
+            expect(
+                rows.first { $0.event == .stop }?.coverage == .unmapped,
+                "after clearBinding(), stop must recompute to .unmapped (never .broken — a"
+                    + " deliberate clear must not be disguised as a packaging defect), got"
+                    + " \(String(describing: rows.first { $0.event == .stop }?.coverage))")
+            expect(
+                FileManager.default.fileExists(
+                    atPath: userPacks.appendingPathComponent("my-pack/stop.mp3").path),
+                "clearBinding() must never delete the audio file — only the manifest key")
+        }
+    }
+
+    suite("EventRowImportViewModel.clearBinding(): idempotent on an already-unmapped event — .success, a true no-op") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "id": "my-pack", "events": {} }"#,
+                to: userPacks.appendingPathComponent("my-pack/manifest.json"))
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+            let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
+            let rowViewModel = EventRowImportViewModel(
+                event: .notification, importViewModel: importViewModel)
+
+            rowViewModel.clearBinding()
+
+            guard case .success = rowViewModel.bindResult else {
+                expect(
+                    false,
+                    "clearing an already-unmapped event must still succeed (idempotent), got"
+                        + " \(String(describing: rowViewModel.bindResult))")
+                return
+            }
+        }
+    }
+
+    suite("EventRowImportViewModel.clearBinding(): an unresolvable packID surfaces as .failure(.packNotFound) in bindResult — the SAME surface a failed bind already reports through, never a second, unrendered failure path") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+            let importViewModel = AudioImportViewModel(packID: "ghost-pack", environment: environment)
+            let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
+
+            rowViewModel.clearBinding()
+
+            expect(
+                failureError(rowViewModel.bindResult ?? .success(())) == .packNotFound(packID: "ghost-pack"),
+                "an unresolvable pack must surface .packNotFound through bindResult, got"
+                    + " \(String(describing: rowViewModel.bindResult))")
+        }
+    }
+
     // MARK: - EventRowImportViewModel.retarget(to:) — the pack-switch state leak, one layer
     // deeper than ``AudioImportViewModel/retarget(to:)`` (see AudioImportViewModelSuite.swift
     // for that layer). This one has TWO things to clear on a REAL pack switch: the nested
