@@ -459,25 +459,23 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 **Priority:** P1
 **Depends on:** None
 
-### T3 内容围栏的两条判定腿仍是**白名单探针**，不是围栏 —— 两条已知逃逸都是可编译的真代码
+### T3 判定腿之二（并发黑名单）仍是**白名单探针** —— 跨文件调度这条逃逸是可编译的真代码
 
-**What:** `SourceScannerSuite.auditManifestConcurrencyFence` 的**枚举**那一层已经是围栏（认不出 ⇒ 红：
-symlink、读不到、属性判不出、子树枚举出错，全部 fail-closed，且各有自证）。但它下游的**两条判定腿**
-不是，它们各自只认一组已知形状：
+> **更新（2026-07-20 · `/codex review 48cbc07`）：下面的 ① 已修，② 未修，本条现在只讲 ②。**
+> ① 的修法就是本条当年写下的那一条（「别继续扩正则打地鼠，反过来把『认不出』变成红」）：新增
+> `allFuncDeclarationNames` 当标尺、`fileLocalFuncNames` 当白名单第二格，
+> `unrecognizedFuncDeclarations` 按**计数**做差 —— `func` 声明总数 ≠ 两台识别器认出来的数之和，
+> 差额就是漏网的，逐个变红。实测：`internal`（不写修饰符）/ `package` / `open` /
+> `public extension` 里省略修饰符的成员，四种形态各一条 fixture 全部真的开火；真仓库
+> `ManifestBinding.swift` 那个 `private func resolveUserPackDirectory` 不假红（白名单第二格接住）。
+> 变异台账 5/5 被逮，且按断言原文归因确认红是这三条新正控打出来的（`✗ 3 of 2174`），不是连坐。
+> **注意这只关掉了「修饰符形态」这一根轴。** 判定腿仍然只看**单个文件**，② 原封不动。
 
-1. **@MainActor 腿只查「正则认得出的 `public func`」。** 判据是 `exportedPublicFuncNames`，逐字匹配
-   `public` + 修饰符 run + `func`。于是一个**非 public** 的写原语完全隐身：
+**What:** `SourceScannerSuite.auditManifestConcurrencyFence` 的**枚举**那一层是围栏（认不出 ⇒ 红：
+symlink、读不到、属性判不出、子树枚举出错，全部 fail-closed，且各有自证），**@MainActor 腿**自
+2026-07-20 起在「声明形态」这根轴上也是围栏了（见上面那条更新）。但**并发腿**仍不是：
 
-   ```swift
-   // ManifestBinding.swift 里加这么一个（文件已有三个 @MainActor public func）
-   func unsafeMutateManifestJSON(at dir: URL, _ t: (inout [String: Any]) -> Void)
-       -> Result<Void, ManifestBindError> { /* 当前的读-改-写函数体 */ }
-   ```
-
-   文件含 `mutateManifestJSON` ⇒ 被纳入；`exported.isEmpty` 为假（那三个真 public func 顶着）；
-   `missingMainActorIsolation` 只遍历**导出**的那几个 ⇒ 这个无隔离的写原语一条断言都碰不到。
-   `public extension T { static func … }` 同样逃逸（`public` 与 `func` 被 `{` 隔开，正则不匹配）。
-   internal 仍是**模块内全局可见**，`ClaudioGUICore` 里任何后台线程都能同步调它 —— 不变式真的破了。
+1. ~~**@MainActor 腿只查「正则认得出的 `public func`」。**~~ ✅ 2026-07-20 已修（见上）。
 
 2. **并发腿只扫「包含原语名的那一个文件」。** 纳入判据是单文件文本 `contains("mutateManifestJSON")`，
    黑名单随后只扫那一个文件。于是把 `Task` 挪进**另一个文件**就整条绕开：
@@ -496,32 +494,132 @@ symlink、读不到、属性判不出、子树枚举出错，全部 fail-closed�
    两个文件都编译进 app，真正的写被 detached task 调度。`await` **不在**黑名单里，所以两个文件都清白。
 
 **Why:** `manifest.json` 今天零锁，并发安全**全靠**「全同步 + 全在 @MainActor」这一条不变式，而这条
-源码绊线是它唯一的自动守卫。上面两种写法都不是刁钻构造 —— ①是「加个内部 helper 少写一次 public」，
-②是「把耗时的写挪到后台去，别卡主线程」，都是重构时最自然的两个念头。两者都会让读-改-写交错、丢更新，
-**且零运行时报错**。
+源码绊线是它唯一的自动守卫。②「把耗时的写挪到后台去，别卡主线程」是重构时最自然的念头之一，
+它会让读-改-写交错、丢更新，**且零运行时报错**。
 
 **要害不在漏，在措辞。** 文件里 `bannedConcurrencyTokens` 头上那段 doc comment **早就诚实写着**
 「两条腿都是探针，各自覆盖一组已知形态，合起来仍有缺口」。可 suite 名、commit headline、以及这几轮
 review 的结论全都叫它「**内容围栏**」，而围栏的判据是「认不出 ⇒ 红」。**措辞比覆盖范围大** —— memory 里
 `fence-polarity-and-self-recurrence` 记着的那条，这是第八次应验，而且照例复发在「自称已经把探针升成
-围栏」的那一刀上。读代码的人会以为这两条腿也是 fail-closed 的；它们不是。
+围栏」的那一刀上。① 修掉之后这句话**依然成立**：@MainActor 腿在「声明形态」这根轴上是围栏了，
+并发腿在**任何**轴上都还不是。别把「① 已修」读成「围栏补齐了」。
 
-**Context:** 2026-07-20 `/codex review 36fce57` 的 P1 之一、之二（同一轮的 P1 之三「消费边没有自证」与
-P1 之四「属性读取 fail-open」已修，见该轮 commit）。当轮**刻意没修这两条**：前两条是「围栏自称的极性在
-自己代码里没兑现」，各是几行的确定修复；这两条是**重设计纳入判据**，混在一轮里会重演「一刀切太大、
-只改了 helper 没改整条边」的老毛病。
+**Context:** 2026-07-20 `/codex review 36fce57` 的 P1 之二，`/codex review 48cbc07` 复核后仍在。
+同一轮的 P1 之一（@MainActor 腿）已修，见上面那条更新。
 
-**可能的修法**（未定）：
-- 对 ①：**别继续扩正则打地鼠**（`public extension` / `static` / 各种修饰符排列是无穷的）。反过来，
-  把「认不出」变成红：在含原语的文件里数 `func` 声明的总数，与 `exportedPublicFuncNames` 枚举到的数
-  对不上 ⇒ 记 finding。这才是围栏极性，而且它自动覆盖今天还想不到的形状。
-- 对 ②：纳入判据从「文件含原语名」升成**调用图**（谁调了原语、谁调了调原语的人），或者退一步——
-  把黑名单扫描范围从「含原语的文件」放宽到**整个 target**，代价是要先量一次假红。`await` 无论如何
-  该进黑名单（它今天不在，是个独立的小漏）。
+**可能的修法**（未定）：纳入判据从「文件含原语名」升成**调用图**（谁调了原语、谁调了调原语的人），
+或者退一步——把黑名单扫描范围从「含原语的文件」放宽到**整个 target**，代价是要先量一次假红。
+`await` 无论如何该进黑名单（它今天不在，是个独立的小漏），但**单加 `await` 是创可贴**：它会让任何
+含 `await` 的文件假红，而假红的守卫会被下一个人删掉。
 
 **Effort:** M
 **Priority:** P2
 **Depends on:** None
+
+### T3 修饰符白名单放行 `private`，靠的是一条**被实测证伪**的前提
+
+**What:** `unrecognizedFuncDeclarations` 的白名单第二格放行 `private` / `fileprivate`。放行的理由
+原本写的是「私有函数出不了这个文件，而这个文件里每一个出得去的声明都已被『导出写函数都得
+@MainActor』钉住 ⇒ 私有函数只可能从已隔离的代码里被调到」。**那句推理是假的**，红队实测打穿：
+
+```swift
+public let escapeHatch: () -> Void = { privateFlush() }   // 公开闭包属性，把私有函数带出文件
+private func privateFlush() { mutateManifestJSON() }      // 白名单放行，零 finding
+```
+
+闭包属性不是 `func`，不进任何一台识别器；它捕获的私有函数于是从**任意线程**都可达。实测该
+fixture 产出 **0** 条 finding。
+
+**Why:** 这一格**不能简单删掉** —— 真仓库 `ManifestBinding.swift` 里的
+`private func resolveUserPackDirectory` 会当场假红，而本文件开头记着的病就是「假红的守卫会被
+下一个人删掉」。所以现状是一个**权衡**，不是一条证明。已经把 doc comment 里那句假推理改掉了，
+但缺口本身还在。
+
+**Context:** 2026-07-20 `/codex review 48cbc07` 之后那轮红队（9 agent × 三视角）实测。
+注意这条与「判定腿只数 `func`」是同一个根因的两个面：都是「非 `func` 的声明形态不进识别器」。
+
+**可能的修法**（未定）：与「只数 `func`」那条一起修 —— 一旦识别器能看见闭包属性 / 计算属性这类
+声明，`private` 那格就可以从「无条件放行」收紧成「放行且文件内没有把它导出去的闭包属性」。
+单独修这一条不划算。
+
+**Effort:** M（与「只数 `func`」合并修）
+**Priority:** P2
+**Depends on:** 「T3 判定腿只数 `func`」
+
+### T3 判定腿只数 `func` —— 计算属性 / subscript / init 里的写入点，四条腿一条都看不见
+
+**What:** 2026-07-20 把 @MainActor 腿在「`func` 声明的修饰符形态」这根轴上升成了围栏（认不出 ⇒ 红）。
+但那台标尺数的是 **`func` 声明**，于是**一切不是 `func` 的写入点全部隐身**。红队实测（临时探针，
+跑完即删）：
+
+```swift
+// 一个被纳入的文件里：
+@MainActor public func probeClean() { _ = 1 }
+public var probeTrigger: Int { mutateManifestJSON(); return 1 }   // ← 计算属性 getter
+```
+
+这个文件产出的 finding 数是 **0**。逐条走一遍：`unmodeledConstructs` 空；并发 token 空；
+`exported.isEmpty` 为假（`probeClean` 顶着）；`func` 声明总数 1 = 识别数 1，没有差额；
+`missingMainActorIsolation` 只遍历枚举得到的名字。**四条腿一条都没响**，而那句读-改-写就在
+`probeTrigger` 的 getter 里，任意后台线程读一次这个属性就同步触发它。
+
+同一根轴上的同一个洞还有：`subscript`、`init` / `deinit`、`willSet` / `didSet`、属性的
+`_read` / `_modify` 协程访问器。全部隐身。
+
+**Why:** 「把写入点从函数挪进计算属性」不是刁钻构造 —— 它就是「让调用方写起来顺手一点」这个念头
+的自然结果。而这条洞比修饰符那条更隐蔽：修饰符那条至少还是个 `func`，读代码的人扫一眼能认出「这是
+个写者」；计算属性长得像一个**读**。
+
+**要害仍然是措辞。** 本轮的 headline 若写成「围栏 fail-closed 补齐」，就是第九次应验
+`fence-polarity-and-self-recurrence` 那条 memory —— 补齐的是**一根**轴，不是「补齐」。
+`unrecognizedFuncDeclarations` 的 doc comment 里已经把这条逐字写下来了，这里登记的是同一件事。
+
+**Context:** 2026-07-20 修 `/codex review 48cbc07` P1 之一时自查发现（Codex 没提这一条，是本轮
+红队自己打自己那一刀打出来的）。
+
+**可能的修法**（未定）：判据的**量纲要换** —— 从「数 `func` 声明」变成「找出所有能含语句的括号块，
+每一个都得落在某个已知隔离的声明里」。那是重设计不是补一刀，而且假红面会大得多（每个计算属性都
+要标注或豁免），需要先在真仓库上量一次代价。退一步的便宜档：把纳入判据从「文件含原语名」升级后
+（见上一条 ②），顺带对**含原语的那几行**做一次「它落在哪个声明里」的定位，认不出归属 ⇒ 红。
+
+**Effort:** L
+**Priority:** P2
+**Depends on:** None
+
+### T3 围栏的自证闭不上 `root` 这根轴 —— 一句按扫描根判真假的谓词能让生产静默失效而自证全绿
+
+**What:** 围栏的两条自证 suite（消费边有牙、内容判定有牙）都必须把脏 fixture 写进一棵**临时树**，
+而生产路径恒定喂**真仓库根**。于是任何「在临时根下为真、在生产根下为假」的谓词都能寄生：
+
+```swift
+// enforceManifestConcurrencyFence 里，消费循环加一个 where：
+for finding in audit.findings where !root.path.hasPrefix("/Users/d0m999/Desktop/Claudio") { … }
+```
+
+自证喂的是 `/var/folders/…/T/…` ⇒ 照样全红；生产喂的是仓库根 ⇒ **一条 finding 都不消费**。
+`git diff` 只显示函数体里多了个 `where`，调用点一个字符没动，所以「消费边接线自证」那条钉哨兵区块
+逐字全等的 suite 也不会响。
+
+**Why:** 这是 `fence-polarity-and-self-recurrence` 那条 memory 记的「同一个函数 ≠ 同一个实参向量」
+的**第四层**：前三层（同一个 helper ≠ 同一条边、同一条边 ≠ 连消费一起、同一个函数 ≠ 同一个实参
+向量）都已经收窄过，`pathPrefix` 那根轴现在两侧逐字相同。`root` 是**剩下的最后一根**，而它结构性
+地闭不上：自证必须造脏输入，生产必须扫真代码，两者不可能喂同一个 `root`。
+
+**Context:** 2026-07-20 `/codex review 48cbc07` 的 P1 之三。代码里 `绊线（T3）围栏消费边自证有牙`
+那条 suite 头上的注释**已经逐字承认了这一条**（「仍然诚实的限度：`root` 这根轴闭不上 …… 收窄了，
+没清零」）—— 这里登记的是同一件事，不是新发现。登记的理由是：它写在一段散文里，而散文不会变红。
+
+**可能的修法**（未定，且都不便宜）：
+- 把生产根也变成一个**注入点**，让自证能喂一棵「真仓库的只读快照 + 一个脏文件」的合成树 —— 那样
+  两侧的 `root` 形状同构，`hasPrefix` 这类谓词失去分辨力。代价是围栏要多一层间接，而**多一层间接
+  就是多一个可改的接缝**（这正是 `15ce131` → `36fce57` → `48cbc07` 三轮反复踩的那个坑）。
+- 或者接受它，转而在**别处**兜底：一条 CI 侧的「把一个已知脏写者塞进真仓库、断言 suite 真的红」的
+  端到端冒烟。这条不依赖任何注入，但需要 CI 真的跑测试 —— 而 CI 今天一次测试都不跑（见本文件
+  「CI 一次测试都不跑」那条），所以它**依赖那条先修**。
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** 「CI 一次测试都不跑」（若走第二条修法）
 
 ### `ViewWiringSuite` 的文本绊线只挡得住「整行被删」，挡不住「body 被掏空」
 

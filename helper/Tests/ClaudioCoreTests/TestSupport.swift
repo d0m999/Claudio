@@ -260,7 +260,17 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
             if upcoming("*/") {
                 blockDepth -= 1
                 advance(2)
-                if blockDepth == 0 { mode = .code }
+                if blockDepth == 0 {
+                    mode = .code
+                    // 块注释在 Swift 里是**分词符**，不是零宽的。整段删掉会把它两侧的 token
+                    // **粘起来**：`public/* MARK */func f()` 剥完变成 `publicfunc f()`，于是
+                    // `\bfunc` 的词边界没了，两台识别器**同时**看不见这个声明 —— 差额为 0，
+                    // 围栏全绿。红队实测确认（`/codex review 48cbc07` 后那轮，CommentGlue.swift
+                    // 零 finding）。补一个空格还原分词，行数与行内顺序都不变（顺序断言读的是
+                    // 相对位置，插一个空格不影响谁在谁前面）。
+                    code.append(" ")
+                    blanked.append(" ")
+                }
                 continue
             }
             if character == "\n" {

@@ -359,6 +359,40 @@ private func auditManifestConcurrencyFence(
                     + "写法，比如 `public extension` 里的成员），要么这个写者根本不是 `public func` 形状。"
                     + "无论哪种，「每个都得 @MainActor」那条对它退化成恒真绿。")
         }
+        // 第三条腿（`/codex review 48cbc07` 的 P1 之一）：上面那条只在**一个都没枚举到**时开火，
+        // 挡不住「文件里已经有正常的 public func，再混进一个识别器不认得的声明」。那种声明既不进
+        // 下面的 @MainActor 检查、也不触发上面的 `exported.isEmpty` —— 认不出反而是绿的。这条把
+        // 差额变成红：`func` 声明总数 ≠ 两台识别器认出来的数之和 ⇒ 有漏网的。
+        //
+        // ⚠️ 措辞必须与另外两条腿**不共享任何子串**。上一轮红队逮到的正是这种串味：一条 finding
+        // 里回显了函数名，就把「@MainActor 腿必须对 deepWriter 开火」那条按「路径 + 函数名」匹配的
+        // 断言给满足了，@MainActor 整条腿掐死也全绿。所以这条钉的是「声明形态不在识别清单里」，
+        // 与「一个 `public func` 都没枚举到」「没有 @MainActor 隔离」逐字不相交。
+        // 第三条腿之零：**标尺自己有没有漏数**。`func` 关键字数 ≠ 解析得出名字的声明数 ⇒ 有声明
+        // 连名字都解析不出来（反引号转义标识符、运算符声明），三边同时看不见 ⇒ 差额恒为 0 ⇒ 下面
+        // 那条会静默全绿。见 `funcKeywordCount(in:)` 头上那段（红队实测两条 fatal）。
+        let keywordCount = funcKeywordCount(in: scanned.codeWithoutStringLiterals)
+        let namedCount = allFuncDeclarationNames(in: scanned.codeWithoutStringLiterals).count
+        if keywordCount != namedCount {
+            audit.findings.append(
+                "\(display(relative)) 里有 \(keywordCount) 个 `func` 关键字，但只解析得出 "
+                    + "\(namedCount) 个函数名 —— 差的 \(keywordCount - namedCount) 个声明**连名字都"
+                    + "认不出来**（反引号转义标识符 `func \\`default\\`()`、运算符声明 "
+                    + "`func == (…)`，都是可编译的真代码）。名字解析不出来 ⇒ 它同时躲开导出枚举、"
+                    + "文件内私有枚举、和「认不出的声明」那条差额判定，三边一起失明而差额恒为 0。"
+                    + "围栏极性是「认不出 ⇒ 红」：这条报不出是谁，请自己 grep 本文件的 `func`，"
+                    + "把那个声明改成普通标识符命名的 `public func` 并标 `@MainActor`。")
+        }
+        for name in unrecognizedFuncDeclarations(in: scanned) {
+            audit.findings.append(
+                "\(display(relative)) 里的 `\(name)` 声明形态不在识别清单里 —— 枚举器只认 `public`"
+                    + "（导出，逐个查隔离）和 `private` / `fileprivate`（出不了本文件）两类修饰符打头的"
+                    + "写法。不写修饰符（Swift 的隐式 `internal`）、`package`、`open`、以及 "
+                    + "`public extension` 里省略修饰符的成员，都会落到这里。围栏极性是「认不出 ⇒ 红」："
+                    + "认不出的声明不许静默跳过，因为 internal / package 的写者照样能被模块内任意后台"
+                    + "线程同步调用，而它不在下面那条逐个查隔离的名单里。给它补上 `public` 并标 "
+                    + "`@MainActor`，或者标 `private` 收回本文件（PLAN-SOUND-MANAGER.md §2.1）。")
+        }
         for gap in missingMainActorIsolation(in: scanned) {
             audit.findings.append(
                 "\(display(relative)) 的导出写函数 `\(gap.name)` 没有 @MainActor 隔离"
@@ -544,11 +578,11 @@ private let publicFuncModifierRun = "[\\sA-Za-z@_]*"
 /// critical gap」的确切形状。红队实测：旧版下往 `ManifestBinding.swift` 塞一个这样的写者，
 /// 2099 条断言**全绿**。所以这条从探针升成围栏。
 ///
-/// ⚠️ 仍然诚实地留着的限度（**不是**围栏的部分，别读成「不可能漏」）：
-/// - 只认 `public`。`package` / `open` 的写者不在内。
-/// - 靠 `@MainActor extension` 或类型级隔离、函数头上不带注解的写者，会被
-///   ``hasMainActorIsolation`` 判成「未隔离」而**假红**（假红是安全侧，但它会招来「把绊线删掉」
-///   那种修法——真出现了，请扩 ``hasMainActorIsolation``，别删断言）。
+/// ⚠️ 这台识别器**只认 `public`**，`package` / `open` / 不写修饰符（隐式 `internal`）都不在内。
+/// 但「认不出」不再等于「静默跳过」—— 认不出的声明由 ``unrecognizedFuncDeclarations(in:)``
+/// 当场变红（见那边）。这里保留的是**假红**那一侧的限度：靠 `@MainActor extension` 或类型级隔离、
+/// 函数头上不带注解的写者，会被 ``hasMainActorIsolation`` 判成「未隔离」而假红（假红是安全侧，
+/// 但它会招来「把绊线删掉」那种修法——真出现了，请扩 ``hasMainActorIsolation``，别删断言）。
 private func exportedPublicFuncNames(in code: String) -> [String] {
     let pattern = "public\(publicFuncModifierRun)\\bfunc\\s+([A-Za-z_][A-Za-z0-9_]*)"
     guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
@@ -556,6 +590,128 @@ private func exportedPublicFuncNames(in code: String) -> [String] {
     return regex
         .matches(in: code, range: NSRange(location: 0, length: text.length))
         .map { text.substring(with: $0.range(at: 1)) }
+}
+
+/// 一段**已剥注释**的代码里所有**文件内私有**（`private` / `fileprivate`）函数的名字。
+///
+/// 存在的唯一理由是给 ``unrecognizedFuncDeclarations(in:)`` 当**白名单的第二格**：真仓库
+/// `ManifestBinding.swift` 里的 `resolveUserPackDirectory` 正是这个形状，少了这一格它会假红，
+/// 而假红的守卫会被下一个人删掉（本文件开头记着这个病）。
+///
+/// ## ⚠️ 放行 `private` 的理由是**不完整**的，别把它读成一条证明
+/// 上一稿这里写的是「私有函数出不了这个文件，而这个文件里每一个出得去的声明都已被
+/// 『导出写函数都得 @MainActor』钉住 ⇒ 私有函数只可能从已隔离的代码里被调到」。
+/// **那句推理是假的**，红队实测打穿（`/codex review 48cbc07` 之后那轮）：
+///
+/// ```swift
+/// public let escapeHatch: () -> Void = { privateFlush() }   // 公开的闭包属性，把私有函数带出文件
+/// private func privateFlush() { mutateManifestJSON() }      // 白名单放行，零 finding
+/// ```
+///
+/// 闭包属性不是 `func`，不进任何一台识别器；它捕获的私有函数于是从**任意线程**都可达，
+/// 而 `private` 这一格白纸黑字放它过去。实测该 fixture 产出 **0** 条 finding。
+///
+/// 保留这一格是**权衡**（不放行 ⇒ 真仓库假红 ⇒ 绊线被删），不是「私有一定安全」。
+/// 这条缺口登记在 `TODOS.md`「`private` 白名单靠一条假前提」那一条，别在别处再引用那句假推理。
+///
+/// ⚠️ 用 `\b(?:fileprivate|private)\b` 而不是 `(?:private|fileprivate)`：后者在 `fileprivate`
+/// 上会从第 5 个字符起匹配到里面那个 `private`，两种写法各自计数就不再等价。
+private func fileLocalFuncNames(in code: String) -> [String] {
+    let pattern =
+        "\\b(?:fileprivate|private)\\b\(publicFuncModifierRun)\\bfunc\\s+([A-Za-z_][A-Za-z0-9_]*)"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+    let text = code as NSString
+    return regex
+        .matches(in: code, range: NSRange(location: 0, length: text.length))
+        .map { text.substring(with: $0.range(at: 1)) }
+}
+
+/// 一段**已剥注释**的代码里**每一个** `func` 声明的名字（同名重载各计一次）。
+///
+/// 这是围栏极性那根**标尺**：上面两台识别器各自只认一组已知形态，它们的和若少于这里数到的总数，
+/// 说明这个文件里有一个声明**没有任何一台识别器认得**。
+private func allFuncDeclarationNames(in code: String) -> [String] {
+    let pattern = "\\bfunc\\s+([A-Za-z_][A-Za-z0-9_]*)"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+    let text = code as NSString
+    return regex
+        .matches(in: code, range: NSRange(location: 0, length: text.length))
+        .map { text.substring(with: $0.range(at: 1)) }
+}
+
+/// 一段**已剥注释**的代码里 `func` **关键字**出现了几次（不管后面跟的是什么）。
+///
+/// ## 为什么标尺自己还要一把标尺（红队实测，两条 fatal）
+/// ``allFuncDeclarationNames(in:)`` 捞的是 `func` + **一个能当标识符首字符的名字**
+/// （`[A-Za-z_]`）。于是「有 `func` 关键字、但名字不长那样」的声明，它一条都数不到 ——
+/// 而这种声明**照样是可编译的真代码，照样能写 manifest**：
+///
+/// ```swift
+/// func `default`() { mutateManifestJSON() }              // 反引号转义标识符
+/// public static func == (l: K, r: K) -> Bool { … }        // 运算符声明，名字是 `==`
+/// ```
+///
+/// 两者都**不被** `allFuncDeclarationNames` 数到，也**不被**两台识别器数到 —— 三边同时看不见，
+/// 差额是 0，`unrecognizedFuncDeclarations` 全绿。实测确认：这两个 fixture 各自产出 **0** 条
+/// finding（`/codex review 48cbc07` 之后那轮红队，四种形状里的两种）。
+///
+/// 修法是**再退一层**：数关键字。关键字数 ≠ 三边数得出名字的总数 ⇒ 有声明**连名字都解析不出来**
+/// ⇒ 红。这条报不出是谁（正因为名字解析不出来），所以它报的是**计数差**，并让人自己去 grep
+/// `func` —— 一条报不出名字的红，好过一条报不出来的绿。
+private func funcKeywordCount(in code: String) -> Int {
+    guard let regex = try? NSRegularExpression(pattern: "\\bfunc\\b") else { return 0 }
+    let text = code as NSString
+    return regex.numberOfMatches(in: code, range: NSRange(location: 0, length: text.length))
+}
+
+/// 一个纳入文件里**没有任何识别器认得**的 `func` 声明名，按名字去重后排序。空 = 全都认得。
+///
+/// ## 这条补的是什么洞（`/codex review 48cbc07` 的 P1 之一，红队实测确认）
+/// 上一版判「枚举器瞎没瞎」只有一条 `exported.isEmpty` —— 它只在一个 `public func` 都**枚举不到**
+/// 时才开火。于是文件里只要**已经有一个**正常的 `public func`（真仓库的 `ManifestBinding.swift`
+/// 有三个），再加一个不写修饰符的写者：
+///
+/// ```swift
+/// @MainActor public func mutateManifestJSON(…) { … }   // 枚举得到 → exported 非空
+/// func sneakyWriter() { mutateManifestJSON() }          // 隐式 internal，两台识别器都不认得
+/// ```
+///
+/// `exported` 非空 ⇒ 那条不开火；`missingMainActorIsolation` 只遍历**枚举得到的**名字 ⇒ 也不开火。
+/// 一条 finding 都不产生，而 `sneakyWriter` 是 internal 的、模块内任意后台线程可以同步调它。
+/// 「认不出 ⇒ 红」在这个形状上**反过来**了：认不出 ⇒ 绿。
+///
+/// 修法是**数**：`func` 声明的总数，必须等于两台识别器认出来的数之和。差额就是认不出的那些。
+/// 按**计数**而不是按集合做差 —— 同名重载（`public func f` + 一个裸 `func f`）在集合语义下会被
+/// 前者洗白，正是本文件已经被咬过一次的那个形状（见 ``mainActorIsolatedFuncNames(in:)``）。
+///
+/// ⚠️ 这台**没有**独立的第三份正则去认修饰符：它复用上面两台的输出做差。所以两台识别器任何一台
+/// 变宽（比如有人给 `publicFuncModifierRun` 加上标点），这条会跟着一起变宽而不会报警。它守的是
+/// 「有没有漏网的声明」，不是「识别器认得对不对」—— 后者由 `@MainActor 合成控制` 那条 suite 守。
+///
+/// ## ⚠️ 它把极性补上的是**哪一根轴**：`func` 声明的**修饰符形态**，仅此一根
+/// 别把「认不出 ⇒ 红」读成「这个文件里不可能再有隐身的写者」。这台标尺数的是 `func` 声明，于是
+/// **一切不是 `func` 的写入点它一个都看不见**。红队实测（本轮，跑完即删的临时探针）：
+///
+/// ```swift
+/// @MainActor public func probeClean() { _ = 1 }
+/// public var probeTrigger: Int { mutateManifestJSON(); return 1 }   // ← 计算属性
+/// ```
+///
+/// 这个文件产出的 finding 数是 **0**：`unmodeledConstructs` 空、并发 token 空、`exported.isEmpty`
+/// 为假（`probeClean` 顶着）、`func` 声明总数与识别数相等（只有 `probeClean` 一个 `func`）、
+/// `missingMainActorIsolation` 只遍历枚举得到的名字。**四条腿一条都没响，而那句读-改-写就在
+/// `probeTrigger` 的 getter 里。** 计算属性、`subscript`、`init` / `deinit`、`willSet` / `didSet`
+/// 是同一根轴上的同一个洞，全部隐身。
+///
+/// 没在本轮修，是因为修它要换判据的**量纲**（从「数声明」变成「找出所有能含语句的括号块」），
+/// 那是重设计而不是补一刀。登记在 `TODOS.md`「T3 判定腿只数 `func`」那条。
+private func unrecognizedFuncDeclarations(in scanned: StrippedSwiftSource) -> [String] {
+    let source = scanned.codeWithoutStringLiterals
+    var counts: [String: Int] = [:]
+    for name in allFuncDeclarationNames(in: source) { counts[name, default: 0] += 1 }
+    for name in exportedPublicFuncNames(in: source) { counts[name, default: 0] -= 1 }
+    for name in fileLocalFuncNames(in: source) { counts[name, default: 0] -= 1 }
+    return counts.filter { $0.value > 0 }.map(\.key).sorted()
 }
 
 // MARK: - T3 并发绊线的判据（一份，正反两侧共用）
@@ -1750,6 +1906,98 @@ func runSourceScannerSuites() {
                 "public func dottedWriter() async { mutateManifestJSON() }",
                 to: scanned.appendingPathComponent(".DottedWriter.swift"))
 
+            // ⑦ **`/codex review 48cbc07` 的 P1 之一，逐字的攻击形状。** 关键在于这个文件里
+            //    **已经有一个**枚举得到、且带 @MainActor 的干净写者 —— 于是 `exported.isEmpty`
+            //    为假、那条兜底不开火；而 `missingMainActorIsolation` 只遍历**枚举得到的**名字，
+            //    `sneakyWriter` 根本不在名单里，也不开火。上一版对这个文件产出**零条 finding**。
+            //    ① 那个 fixture 抓不到它：那是「一个 public func 都没有」，这里有。
+            writeFixture(
+                """
+                @MainActor public func cleanWriter() { mutateManifestJSON() }
+                func sneakyWriter() { mutateManifestJSON() }
+                """,
+                to: scanned.appendingPathComponent("ImplicitInternal.swift"))
+
+            // ⑧ 同一个洞的另外两种修饰符。`package` / `open` 都不是 `public` 打头，
+            //    上一版同样是零条 finding（`exportedPublicFuncNames` 头上那段自己写着「不在内」，
+            //    但「不在内」当时的含义是**静默跳过**，不是红）。
+            writeFixture(
+                """
+                @MainActor public func packageClean() { mutateManifestJSON() }
+                package func packageWriter() { mutateManifestJSON() }
+                """,
+                to: scanned.appendingPathComponent("PackageWriter.swift"))
+            writeFixture(
+                """
+                @MainActor public func openClean() { mutateManifestJSON() }
+                open func openWriter() { mutateManifestJSON() }
+                """,
+                to: scanned.appendingPathComponent("OpenWriter.swift"))
+
+            // ⑧b **`public extension` 里省略修饰符的成员。** 这一条是照着**我自己那句 finding
+            //    措辞**补的：诊断里逐字列了「`public extension` 里省略修饰符的成员」，而 ⑦⑧ 三个
+            //    fixture 一个都没覆盖它 —— 措辞比覆盖范围大，memory 里记着的那条老病，这一轮长在
+            //    本轮**自己的诊断文案**上。纸上推理说「`public` 与 `func` 被 `{` 隔开 ⇒ 正则不匹配
+            //    ⇒ 落进认不出那一格」，但那条 doc comment 上一轮就是这么推的、也是这么错的，
+            //    所以这里**实测**一遍。
+            writeFixture(
+                """
+                public extension ManifestHelpers {
+                    func extensionWriter() { mutateManifestJSON() }
+                }
+                """,
+                to: scanned.appendingPathComponent("PublicExtension.swift"))
+
+            // ⑩ **名字解析不出来的两种声明**（红队实测的两条 fatal，都是可编译真代码）。
+            //    两者都不被 `allFuncDeclarationNames` 数到、也不被两台识别器数到 —— 三边同时失明
+            //    ⇒ 差额恒 0 ⇒ ⑦⑧ 那条判定静默全绿。逮它们的是**关键字计数**那条。
+            writeFixture(
+                """
+                @MainActor public func btClean() { _ = 1 }
+                func `default`() { mutateManifestJSON() }
+                """,
+                to: scanned.appendingPathComponent("Backtick.swift"))
+            writeFixture(
+                """
+                @MainActor public func opClean() { _ = 1 }
+                public struct K: Equatable {
+                    public static func == (l: K, r: K) -> Bool { mutateManifestJSON(); return true }
+                }
+                """,
+                to: scanned.appendingPathComponent("Operator.swift"))
+
+            // ⑪ **块注释是分词符。** `public/* MARK */func` 剥完若变成 `publicfunc`，`\bfunc` 的
+            //    词边界就没了，三边一起失明。修在 `strippingComments`（补一个空格），这条钉住它：
+            //    还原分词之后 `glued` 是个没带 @MainActor 的导出写者，@MainActor 腿必须对它开火。
+            writeFixture(
+                "@MainActor public func cmClean() { _ = 1 }\npublic/* MARK */func glued() { mutateManifestJSON() }",
+                to: scanned.appendingPathComponent("CommentGlue.swift"))
+
+            // ⑫ **目录布局轴的正向对照。** ⑦⑧⑧b⑩⑪ 全在 `scanned/` 平铺，于是一条
+            //    `where !relative.contains("/")` 的寄生谓词能让这条腿只在平目录下开火、对**子目录**
+            //    静默失效，而上面每一条断言照样全绿 —— memory `fence-polarity-and-self-recurrence`
+            //    记着的「平目录下递归=非递归全绿」，同一个病换到判定腿上。所以这里**自造嵌套输入**。
+            writeFixture(
+                """
+                @MainActor public func nestClean() { mutateManifestJSON() }
+                func nestedSneaky() { mutateManifestJSON() }
+                """,
+                to: scanned.appendingPathComponent("Deep/Nested/NestedInternal.swift"))
+
+            // ⑨ **负控，而且是照着真仓库 `ManifestBinding.swift` 的形状抄的**：三个
+            //    `@MainActor public func` + 一个 `private func` 辅助。这条钉的是
+            //    `fileLocalFuncNames` 那一格白名单不许消失 —— 少了它，真仓库那个
+            //    `resolveUserPackDirectory` 当场假红，而假红的守卫会被下一个人删掉。
+            //    ⚠️ 这条负控**不能**只靠真仓库全绿来背书：真仓库跑的是生产根，这条 suite 跑的是
+            //    临时树，两者走的是同一个判据但不同的输入轴（`root` 那根轴的老问题）。
+            writeFixture(
+                """
+                @MainActor public func realShapeOne() { mutateManifestJSON() }
+                @MainActor public func realShapeTwo() { _ = 1 }
+                private func realShapeHelper() -> Int { 1 }
+                """,
+                to: scanned.appendingPathComponent("RealShape.swift"))
+
             let audit = auditManifestConcurrencyFence(under: scanned)
 
             expect(
@@ -1758,6 +2006,87 @@ func runSourceScannerSuites() {
                 },
                 "一个含原语却枚举不出导出写函数的文件被静默放过了 —— 「每个都得 @MainActor」对它退化"
                     + "成恒真绿。实际诊断：\(audit.findings)")
+
+            // ⑦⑧⑧b 的判定。四个文件、四种形态，逐个钉 —— 只钉一个的话，「只报第一个漏网声明」
+            // 那类变异照样全绿（本文件已经被这个形状咬过一次，见 ② 的注释）。
+            // ⚠️ 干净写者的名字**逐个显式传进来**，不靠「名字里带 Clean」这种模式匹配：写成
+            // `$0.contains("Clean`")` 的话，`cleanWriter`（小写 c）根本匹配不上，那条负控对
+            // ImplicitInternal.swift 就是**恒真**的 —— 本轮自己写的断言，第一遍就恒真了一条。
+            // ⚠️ `cleanWriter` 为空串的那一行（⑧b）**没有**干净兄弟可比，下面用 `!isEmpty` 显式
+            // 跳过，而不是让 `contains("``")` 去当一条永远为真的负控 —— 那是同一个恒真病换个马甲。
+            for (fixture, writer, cleanWriter, modifier) in [
+                ("ImplicitInternal.swift", "sneakyWriter", "cleanWriter", "不写修饰符（隐式 internal）"),
+                ("PackageWriter.swift", "packageWriter", "packageClean", "package"),
+                ("OpenWriter.swift", "openWriter", "openClean", "open"),
+                ("PublicExtension.swift", "extensionWriter", "", "public extension 里省略修饰符的成员"),
+            ] {
+                expect(
+                    audit.findings.contains {
+                        $0.contains(fixture) && $0.contains("`\(writer)`")
+                            && $0.contains("声明形态不在识别清单里")
+                    },
+                    "\(fixture) 里那个 `\(modifier)` 的写者被**静默跳过**了 —— 这个文件里已经有一个"
+                        + "枚举得到的干净 public 写者，于是 `exported.isEmpty` 不开火；而逐个查隔离"
+                        + "只遍历枚举得到的名字，`\(writer)` 不在名单里也不开火。认不出反而是绿的，"
+                        + "围栏极性在这个形状上是反的。实际诊断：\(audit.findings)")
+                // 负控的另一半：干净的那个兄弟**不许**被这条腿连坐。判据若退化成「只要文件里有
+                // 认不出的声明就把每个名字都报一遍」，下面这条当场红。
+                if !cleanWriter.isEmpty {
+                    expect(
+                        !audit.findings.contains {
+                            $0.contains(fixture) && $0.contains("`\(cleanWriter)`")
+                                && $0.contains("声明形态不在识别清单里")
+                        },
+                        "\(fixture) 里那个枚举得到、带 @MainActor 的干净写者 `\(cleanWriter)` 被误报成"
+                            + "「认不出」了（负控）—— 判据退化成了「文件里有漏网的就把每个名字都报一遍」。"
+                            + "实际诊断：\(audit.findings)")
+                }
+            }
+
+            // ⑩ 的判定：名字解析不出来的声明，由**关键字计数**那条逮住。措辞与另外几条腿逐字不相交。
+            for (fixture, shape) in [
+                ("Backtick.swift", "反引号转义标识符 `func `default`()`"),
+                ("Operator.swift", "运算符声明 `func == (…)`"),
+            ] {
+                expect(
+                    audit.findings.contains {
+                        $0.contains(fixture) && $0.contains("连名字都") && $0.contains("认不出来")
+                    },
+                    "\(fixture) 里那个\(shape)被静默放过了 —— 它有 `func` 关键字，但名字不是 "
+                        + "`[A-Za-z_]` 打头，于是 `allFuncDeclarationNames`、导出枚举、文件内私有枚举"
+                        + "**三边同时**数不到它，差额恒为 0，「认不出的声明」那条判定退化成恒真绿。"
+                        + "逮它的必须是关键字计数那条。实际诊断：\(audit.findings)")
+            }
+
+            // ⑪ 的判定：块注释还原成分词符之后，`glued` 是个没带 @MainActor 的导出写者。
+            //    这条**不是**钉「认不出」那条腿 —— 恰恰相反，钉的是它重新变得**认得出**了。
+            expect(
+                audit.findings.contains {
+                    $0.contains("CommentGlue.swift") && $0.contains("`glued`")
+                        && $0.contains("没有 @MainActor 隔离")
+                },
+                "`public/* MARK */func glued()` 剥完粘成了 `publicfunc`，`\\bfunc` 的词边界没了，"
+                    + "三边一起失明、差额恒 0、@MainActor 腿也枚举不到它 —— 整个文件零 finding。"
+                    + "块注释在 Swift 里是分词符，`strippingComments` 必须补回一个空格。"
+                    + "实际诊断：\(audit.findings)")
+
+            // ⑫ 的判定：子目录里的漏网声明必须照样红（目录布局轴的正向对照）。
+            expect(
+                audit.findings.contains {
+                    $0.contains("Deep/Nested/NestedInternal.swift")
+                        && $0.contains("`nestedSneaky`") && $0.contains("声明形态不在识别清单里")
+                },
+                "**子目录**里的漏网声明没被报 —— 这条腿只在平铺目录下开火，一条 "
+                    + "`where !relative.contains(\"/\")` 的寄生谓词就能让它对整棵子树静默失效，"
+                    + "而其余每一条断言（全在平目录）照样全绿。实际诊断：\(audit.findings)")
+
+            // ⑨ 的判定：真仓库那个形状**一条都不许报**。
+            expect(
+                !audit.findings.contains { $0.contains("RealShape.swift") },
+                "照着真仓库 `ManifestBinding.swift` 抄的形状（`@MainActor public func` ×2 + "
+                    + "`private func` 辅助）被报了 —— `fileLocalFuncNames` 那一格白名单没了或者认不出 "
+                    + "`private`，真仓库的 `resolveUserPackDirectory` 会当场假红，然后这条绊线会被"
+                    + "下一个人删掉。实际诊断：\(audit.findings)")
 
             expect(
                 audit.findings.contains {
