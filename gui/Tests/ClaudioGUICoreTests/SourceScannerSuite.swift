@@ -64,38 +64,96 @@ private func sharedScannerRegion(of relativePath: String) -> String? {
 
 // MARK: - T3 @MainActor 正向绊线的两个原语（/codex review dcab3de,7e97bc4 的 P1）
 //
-// async/Task/DispatchQueue 那三条负向断言只挡「变异步」，挡不住「同步但脱离主 actor」。manifest.json
-// 零锁的并发安全靠「全同步 **且** 全在 @MainActor」两条腿，负向那三条只钉住了「全同步」。这两个
-// helper 让绊线正向钉住第二条腿：**每一个**导出写函数都得带 @MainActor —— 不是一份会忘记更新的
-// 写死名字清单，新写者（forkPack / restoreFactoryPack）落地即自动纳入。
+// 并发 token 黑名单那条腿只挡「变异步」，挡不住「同步但脱离主 actor」。manifest.json 零锁的并发
+// 安全靠「全同步 **且** 全在 @MainActor」两条腿，黑名单只钉住了「全同步」。这两个 helper 让绊线
+// 正向钉住第二条腿：文件里**每一个枚举得到的**导出写函数都得带 @MainActor —— 不是一份会忘记
+// 更新的写死名字清单，新写者（forkPack / restoreFactoryPack）落地即自动纳入。
+//
+// ⚠️ 「每一个**枚举得到的**」这个限定词是认真的，别读成「每一个」——见下面 `exportedPublicFuncNames`
+// 的已知盲区。这条腿是**探针，不是围栏**：它认不出的写函数形状是**静默跳过**，不是红。
 
-/// 一段**已剥注释**的代码里所有 `public func` 的函数名。绊线要对每一个都断言 @MainActor。
+/// `public` 与 `func` 之间允许出现的东西：空白 / 修饰符（`static` `final` `class` `override`
+/// `mutating`…）/ 其它属性。**全部是字母、空白、`@`、`_`** —— 一个标点都不含。
 ///
-/// ⚠️ 只认 `public func`（本文件的写函数都是这个形状）。`public static func` / `public final func`
-/// 等不匹配 —— 真出现了，得在这里补，别让绊线悄悄漏掉一个写者。
+/// 这正是它作为围栏的依据：任意**函数体**或参数表都带 `(){}:,` 之类标点，于是这个 run
+/// **跨不过**上一个声明，`public` 必须是**这一个** func 自己的修饰词才会匹配。
+private let publicFuncModifierRun = "[\\sA-Za-z@_]*"
+
+/// 一段**已剥注释**的代码里所有**导出**函数的名字。绊线要对每一个都断言 @MainActor。
+///
+/// 认 `public func` / `public static func` / `public final func` / `public class func` /
+/// `public override func` / 换行排版 / `@_spi(X) public func` —— 即 `public` 与 `func` 之间
+/// 只隔着修饰符与属性的**任何**形态（见 ``publicFuncModifierRun``）。
+///
+/// 上一版只逐字捞 `public func `，于是 `public static func` 的写者**不匹配、不报错、悄悄溜过**
+/// ——而这个形态在本模块里**已经在用**（`PreviewFixtures.swift` / `VolumeDragSession.swift`）。
+/// 一个 `public static func` 的**同步**写者不含任何被禁 token，两条腿会同时放行，而它不在
+/// @MainActor 上、任意后台线程可以同步调它 —— 正是 `PLAN-SOUND-MANAGER.md` 点名那个「唯一
+/// critical gap」的确切形状。红队实测：旧版下往 `ManifestBinding.swift` 塞一个这样的写者，
+/// 2099 条断言**全绿**。所以这条从探针升成围栏。
+///
+/// ⚠️ 仍然诚实地留着的限度（**不是**围栏的部分，别读成「不可能漏」）：
+/// - 只认 `public`。`package` / `open` 的写者不在内。
+/// - 靠 `@MainActor extension` 或类型级隔离、函数头上不带注解的写者，会被
+///   ``hasMainActorIsolation`` 判成「未隔离」而**假红**（假红是安全侧，但它会招来「把绊线删掉」
+///   那种修法——真出现了，请扩 ``hasMainActorIsolation``，别删断言）。
 private func exportedPublicFuncNames(in code: String) -> [String] {
-    var names: [String] = []
-    var cursor = code.startIndex
-    let needle = "public func "
-    while let range = code.range(of: needle, range: cursor..<code.endIndex) {
-        let ident = code[range.upperBound...].prefix {
-            $0.isLetter || $0.isNumber || $0 == "_"
-        }
-        if !ident.isEmpty { names.append(String(ident)) }
-        cursor = range.upperBound
-    }
-    return names
+    let pattern = "public\(publicFuncModifierRun)\\bfunc\\s+([A-Za-z_][A-Za-z0-9_]*)"
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+    let text = code as NSString
+    return regex
+        .matches(in: code, range: NSRange(location: 0, length: text.length))
+        .map { text.substring(with: $0.range(at: 1)) }
+}
+
+// MARK: - T3 并发绊线的判据（一份，正反两侧共用）
+//
+// ⚠️ **这是一份「已知构造」的黑名单，不是完备围栏。** 它只认得下面枚举的这些 token；Swift 里
+// 「离开主线程 / 引入并发」的写法远不止这些（自定义 `actor` 上的隔离、C 回调、Combine 的
+// `subscribe(on:)`、`NSXPCConnection`、GCD 的 C API …… 都不在内）。别把它读成「本文件不可能变并发」。
+//
+// 另一条腿（`@MainActor`）**也不是**完备围栏，别把两条腿加起来读成「不可能漏」：它枚举写函数
+// 靠逐字匹配 `public func `，认不出的形状（`public static func`、`extension` 里的类型级隔离……）
+// 是**静默跳过**——详见 `exportedPublicFuncNames` 头上那段已知盲区。
+//
+// 所以诚实的说法是：**两条腿都是探针，各自覆盖一组已知形态，合起来仍有缺口。**
+//  · 黑名单挡「变异步 / 派发 / 起线程」这组已知 token —— 这是 @MainActor 挡不住的形态
+//    （`@MainActor public func f() async` 编译得过，跨 await 的读-改-写照样能交错）。
+//  · @MainActor 挡「同步但脱离主 actor」，覆盖**枚举得到的**每个 `public func`。
+// 真正兜底的不是这两条腿，是 code review 和「所有写者都必须经 `mutateManifestJSON`」这条纪律。
+private let bannedConcurrencyTokens = [
+    "async", "Task", "DispatchQueue", "Thread", "OperationQueue",
+    ".detached", "withCheckedContinuation", "pthread",
+]
+
+/// 一段**已剥注释**的代码里命中的并发 token；空 = 清白。
+///
+/// 读 `codeWithoutStringLiterals`（字符串**内容**被清空、界定符与插值代码保留）而不是 `code`：
+/// 这条断的是「代码里有没有并发构造」，而一句**写着** `"…async…"` 的错误消息 / 文案 / 测试
+/// fixture 不是并发代码。用 `code` 会让真文件因为自己的一句提示文案假红，然后被下一个人删掉
+/// ——本文件开头记的「剥太少 → 假红 → 守卫被删」，字符串这一侧是同一个病。
+///
+/// 真文件那条绊线与它的合成正向控制共用**这一个**函数、且都传整个 `StrippedSwiftSource`，
+/// 所以连「读哪个字段」都不可能在两侧漂移。判据一旦静默失灵（token 拼错、`filter` 写反、
+/// `strippingComments` 把代码吃光），`hits.isEmpty` 就是一句恒真绿，而下面那条自证有牙的 suite
+/// ——逐 token 各一条手写脏 fixture、外加一条 token↔fixture 配平断言——会当场把它逮出来。
+private func bannedConcurrencyHits(in scanned: StrippedSwiftSource) -> [String] {
+    bannedConcurrencyTokens.filter { scanned.codeWithoutStringLiterals.contains($0) }
 }
 
 /// 一段**已剥注释**的代码里，名为 `name` 的 `public func` 是否带 @MainActor 隔离。
 ///
-/// `@MainActor` 与 `public func` 之间只允许空白 / 访问修饰符 / 其它属性（都落在 `[\s A-Za-z@_]`），
+/// `@MainActor` 与 `func` 之间只允许空白 / 访问修饰符 / 其它属性（都落在 ``publicFuncModifierRun``），
 /// 而任意函数体都含 `{}()` 之类标点 —— 于是这个 run **不可能跨过上一个函数体**：`name` 必须带
 /// **它自己**那一个 @MainActor 才会匹配，前一个函数头上的 @MainActor 算不到它身上（下面那条合成
 /// 控制里的 `naked` 反例逐字钉着这一点）。
+///
+/// 匹配到 `func` 而不是 `public func`，与 ``exportedPublicFuncNames`` 认的形态对齐：
+/// `@MainActor public static func f` 里 `public` 与 `static` 都落在同一个 run 里。两边若不对齐，
+/// 枚举器捞得到、隔离检查却匹配不上，每个 `static` 写者都会**假红**。
 private func hasMainActorIsolation(funcName name: String, in code: String) -> Bool {
     code.range(
-        of: "@MainActor[\\sA-Za-z@_]*public func \(name)\\b",
+        of: "@MainActor\(publicFuncModifierRun)\\bfunc\\s+\(name)\\b",
         options: .regularExpression) != nil
 }
 
@@ -614,34 +672,126 @@ func runSourceScannerSuites() {
     // 没有对应物，所以不进两包共享的哨兵区块（上面那条「逐字节相同」钉的是 `TestSupport.swift`
     // 里的扫描器本体，不是这个文件，两个包的 `SourceScannerSuite.swift` 允许在这类内容上分叉）。
     suite(
-        "绊线（T3）：ManifestBinding.swift / PackFork.swift 里导出的 manifest 写函数不许带 async / Task / DispatchQueue"
+        "绊线（T3）：ClaudioGUICore 里**每个**经 mutateManifestJSON 的文件，其导出写函数不带已知并发 "
+            + "token（黑名单，非完备）且逐个带 @MainActor；PackFork/PackRestore 未落地哨兵"
     ) {
-        let manifestWriterRelativePaths = [
-            "gui/Sources/ClaudioGUICore/ManifestBinding.swift",
-            // PackFork.swift 是 T6 的新文件，T3 落地时还不存在 —— 下面的 guard 会跳过它而不是
-            // 判它红。T6 把这个文件真的写出来那天，必须确认它仍在这份清单里，而不是任由这条
-            // 绊线悄悄只剩一个扫描对象。
-            "gui/Sources/ClaudioGUICore/PackFork.swift",
-        ]
-        for relativePath in manifestWriterRelativePaths {
-            let fileURL = repoRoot().appendingPathComponent(relativePath)
+        // 【纳入判据 —— 内容推导的围栏，不是路径白名单】
+        //
+        // 上一版（含本次修复的第一稿）是一份写死的**路径**清单。路径清单结构上不可能是围栏：
+        // 任何一个 manifest 写者只要落在清单外的文件里，整条绊线一条断言都不跑，而且**没有
+        // 任何东西认不出它**。这不是假想——`PLAN-SOUND-MANAGER.md:596` 白纸黑字把 T12 的
+        // `restoreFactoryPack` 放在**新 `PackRestore.swift`** 里，而清单（和它上面那句自称
+        // 守着 `forkPack` / `restoreFactoryPack` 的注释）只列了 `PackFork.swift`。措辞比覆盖
+        // 范围大，第 N 次复发在自称治好它的那一刀里。
+        //
+        // 所以纳入判据改成**从内容推导**：`ClaudioGUICore` 里任何一个 `.swift` 文件，只要它的
+        // 代码（已剥注释）里出现 `mutateManifestJSON` —— T3 定下的**唯一** manifest 读-改-写
+        // 原语，所有写者都必须经它 —— 就自动纳入这条绊线。`PackFork.swift`、`PackRestore.swift`、
+        // 以及今天还没有人命名的第三个文件，落地那天自动被检查，不需要谁记得回来改一份清单。
+        //
+        // ⚠️ **已知限度**（写在这里，免得下一个人把它读成「不可能漏」）：**绕开原语**、自己
+        // read-modify-write `manifest.json` 的写者不会被这条判据纳入。挡那一种的不是这里，是
+        // 下面的哨兵组 + code review。这条围栏守的是「经原语的写者不许变并发」，不是「没有人
+        // 能绕开原语」。
+        let coreRelativeDirectory = "gui/Sources/ClaudioGUICore"
+        let coreDirectoryURL = repoRoot().appendingPathComponent(coreRelativeDirectory)
+        let coreSwiftFileURLs =
+            ((try? FileManager.default.contentsOfDirectory(
+                at: coreDirectoryURL, includingPropertiesForKeys: nil)) ?? [])
+            .filter { $0.pathExtension == "swift" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        // 目录枚举本身不许静默失明：目录被改名/移走 → 枚举出空数组 → 下面「每个纳入的文件都
+        // 得清白」对空集恒真。这条把那种失明变成红。
+        expect(
+            !coreSwiftFileURLs.isEmpty,
+            "\(coreRelativeDirectory) 里一个 .swift 都没枚举到 —— 目录被改名/移走了，纳入判据"
+                + "扫不到任何文件，整条绊线退化成对空集恒真。把目录路径更新到新位置。")
+
+        var enrolledManifestWriterFiles: [(path: String, scanned: StrippedSwiftSource)] = []
+        for fileURL in coreSwiftFileURLs {
+            let relativePath = "\(coreRelativeDirectory)/\(fileURL.lastPathComponent)"
             guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+                expect(
+                    false,
+                    "\(relativePath) 枚举得到却读不到 —— 纳入判据对它无从判起，它若是个 manifest "
+                        + "写者就完全不设防。别让绊线在一次文件权限/编码问题上静默漏掉一个文件。")
                 continue
             }
             let scanned = strippingComments(text)
+            if scanned.code.contains("mutateManifestJSON") {
+                enrolledManifestWriterFiles.append((relativePath, scanned))
+            }
+        }
+
+        // 判据自身不许瞎：纳入集合空 = 「每个纳入的文件都得清白」对空集恒真，整条围栏是空话。
+        // `mutateManifestJSON` 被改名、`strippingComments` 把代码吃光、`contains` 写反——任何
+        // 一种都会走到这里。
+        let enrolledPaths = enrolledManifestWriterFiles.map(\.path)
+        expect(
+            !enrolledPaths.isEmpty,
+            "纳入判据一个 manifest 写者文件都没逮到 —— 判据瞎了（`mutateManifestJSON` 被改名？"
+                + "剥注释把代码吃光了？`contains` 写反了？）。下面『每个纳入的文件都得清白』因此"
+                + "是一句对空集的恒真绿，整条围栏形同虚设。")
+
+        // 再钉一条**具名**的：今天已知的那个写者文件得在里面。
+        //
+        // ⚠️ 这条红的时候有**两种**成因，别只报一种（消息里两条都写上）：判据真瞎了，或者这个
+        // 文件被合法改名了。后者不是 bug——内容围栏会自动跟着改名后的文件走（实测：改名成
+        // `ManifestWriters.swift` 后它照样被纳入、照样受检），只是这条具名的钉子需要有人更新。
+        // 一次改名理应让人回来重读这条绊线，所以这个红是有意保留的，但它的诊断必须诚实。
+        expect(
+            enrolledPaths.contains("\(coreRelativeDirectory)/ManifestBinding.swift"),
+            "纳入结果里没有 ManifestBinding.swift。两种可能，请自行分辨：\n"
+                + "  · 它被改名/移走了 —— 内容围栏已经自动跟上（实际纳入见下），**不是**漏检；"
+                + "把这条具名钉子里的文件名更新过去即可。\n"
+                + "  · 判据瞎了 —— 若『实际纳入』也是空的或明显不对，那是 `mutateManifestJSON` "
+                + "被改名 / 剥注释吃光了代码。\n"
+                + "实际纳入：\(enrolledPaths)")
+
+        // 【哨兵组】守的是上面那条围栏**唯一**盖不住的那件事：新写者**绕开原语**。
+        //
+        // 这两个文件是计划点名的未来 manifest 写者（`PLAN-SOUND-MANAGER.md:743` 的 T6
+        // `PackFork.swift` / `:596` 的 T12 `PackRestore.swift`）。今天正向断言它们**尚不存在**；
+        // 落地当天这条哨兵变红，逼一个人回来**确认新写者确实经 `mutateManifestJSON`**——确认了，
+        // 它就已经被上面的围栏自动纳入，这条哨兵删掉即可；没经原语，围栏漏得掉它，得在这里补。
+        // 哨兵不重复围栏的工作，它守的正是围栏的盲区。
+        let pendingManifestWriterPaths = [
+            "\(coreRelativeDirectory)/PackFork.swift",
+            "\(coreRelativeDirectory)/PackRestore.swift",
+        ]
+        for relativePath in pendingManifestWriterPaths {
+            let fileURL = repoRoot().appendingPathComponent(relativePath)
+            expect(
+                !FileManager.default.fileExists(atPath: fileURL.path),
+                "\(relativePath) 出现了 —— 计划点名的一个 manifest 新写者落地了。回来确认一件"
+                    + "上面那条内容围栏**盖不住**的事：它是不是真的经 `mutateManifestJSON` 写 "
+                    + "manifest？\n"
+                    + "  · 是 → 它已被自动纳入（并发 token + @MainActor 两条腿都在跑），把这条路径"
+                    + "从 `pendingManifestWriterPaths` 删掉即可。\n"
+                    + "  · 否 → 它绕开了原语，围栏漏得掉它，manifest.json 的零锁读-改-写多了一个"
+                    + "不设防的写者。要么让它经原语，要么在这里补一条针对它的检查。\n"
+                    + "（PLAN-SOUND-MANAGER.md §2.1 / 4c「并发不变式」）")
+        }
+
+        for entry in enrolledManifestWriterFiles {
+            let relativePath = entry.path
+            let scanned = entry.scanned
             expect(
                 scanned.unmodeledConstructs.isEmpty,
                 "\(relativePath) 里出现了扫描器不认识的构造：\(scanned.unmodeledConstructs) —— "
                     + "下面几条负向断言会在一份不可信的『code』上跑，形同虚设")
-            for banned in ["async", "Task", "DispatchQueue"] {
-                expect(
-                    !scanned.code.contains(banned),
-                    "\(relativePath) 的代码里出现了 `\(banned)` —— manifest.json 今天零锁，"
-                        + "唯一的并发安全保证是「全同步 + 全在 @MainActor」（PLAN-SOUND-MANAGER.md "
-                        + "§2.1）。任何一个 manifest 写函数一旦变成 async / 派发任务 / 上队列，这条"
-                        + "不变式会在没有任何运行时报错的情况下静默失效 —— 这条源码绊线是它唯一的"
-                        + "守卫，得到的代码：\(scanned.code)")
-            }
+            // 第一条腿：已知并发构造的黑名单（**不是**完备围栏，见 `bannedConcurrencyTokens`
+            // 头上那段）。判据走共用的 `bannedConcurrencyHits` —— 下面那条自证有牙的 suite 拿
+            // 手写的脏 fixture 喂的正是这同一个函数，所以它静默失灵会被逮到，不会退化成恒真绿。
+            let concurrencyHits = bannedConcurrencyHits(in: scanned)
+            expect(
+                concurrencyHits.isEmpty,
+                "\(relativePath) 的代码里出现了 \(concurrencyHits) —— manifest.json 今天零锁，"
+                    + "唯一的并发安全保证是「全同步 + 全在 @MainActor」（PLAN-SOUND-MANAGER.md "
+                    + "§2.1）。任何一个 manifest 写函数一旦变成 async / 派发任务 / 上队列 / 起线程，"
+                    + "这条不变式会在没有任何运行时报错的情况下静默失效 —— 这条源码绊线是它唯一的"
+                    + "守卫，得到的代码：\(scanned.code)")
 
             // 第二条腿（/codex review dcab3de,7e97bc4 的 P1）：上面三条负向断言挡「变异步」，
             // 挡不住「同步但脱离主 actor」——一个 `public func` 少写一个 @MainActor（或被人标了
@@ -663,6 +813,92 @@ func runSourceScannerSuites() {
         }
     }
 
+    // 上面那条**并发 token** 绊线自证有牙。缺了它，这条腿和 @MainActor 那条腿就不对称：
+    // @MainActor 一直有合成控制（下面那条），而黑名单这条从落地起只有一次**手工**变异背书——
+    // 手工变异不进 CI，判据明天静默失灵（token 拼错、`filter` 写反、`strippingComments` 把代码
+    // 吃光）没有任何东西会响，真文件那条 `hits.isEmpty` 直接变成恒真绿。
+    //
+    // ⚠️ 脏 fixture 全部是**手写的字面量**，绝不由 `bannedConcurrencyTokens` 插值拼出来。
+    // 拿清单自己去造输入，清单里写错的那一项（比如 `"asyncc"`）也会在 fixture 里原样出现、
+    // 于是照样命中——那种「自证」是恒真的，正是本文件开头记着的那个病的又一次复发。
+    suite("绊线（T3）并发 token 判据自证有牙：脏源码必须命中、清白必须放行、只在注释里提到不算") {
+        // 正控：每一种并发写法都是独立手写的代码形状，并各自钉住**它自己那一个** token。
+        //
+        // （这些 fixture 只作为**文本**喂给扫描器，不参与编译，所以不要求可独立编译——形状取自
+        // 真实写法即可。别把注释读成「这是能跑的代码」。）
+        //
+        // ⚠️ 断言是 `hits.contains(expected)`，**不是** `!hits.isEmpty`。后者太弱，会漏掉整整一类
+        // 回归：`DispatchQueue.main.async { }` 这段 fixture 同时含 `DispatchQueue` **和** `async`，
+        // 于是就算有人把 `DispatchQueue` 从清单里删掉，它也会靠 `async` 照样命中、照样绿 —— 那条
+        // 「自证」只证明了「清单非空」，没证明「这一项还在」。逐项钉死才有每 token 的分辨力。
+        //
+        // `expected` 是照着 fixture 的意图**手写**的字面量，不是从 `bannedConcurrencyTokens` 取的
+        // ——所以清单里某一项被写错（`"asyncc"`）时，对应 fixture 的 hits 会是空的、当场红。
+        let dirtySamples: [(label: String, expected: String, source: String)] = [
+            ("async 函数", "async", "@MainActor\npublic func writer() async { _ = 1 }"),
+            ("Task 派发", "Task", "@MainActor\npublic func writer() { Task { _ = 1 } }"),
+            (
+                "DispatchQueue", "DispatchQueue",
+                "@MainActor\npublic func writer() { DispatchQueue.main.async { _ = 1 } }"
+            ),
+            ("Thread", "Thread", "@MainActor\npublic func writer() { Thread.detachNewThread { _ = 1 } }"),
+            (
+                "OperationQueue", "OperationQueue",
+                "@MainActor\npublic func writer() { OperationQueue.main.addOperation { } }"
+            ),
+            (".detached", ".detached", "@MainActor\npublic func writer() { let h = pool.detached; _ = h }"),
+            (
+                "withCheckedContinuation", "withCheckedContinuation",
+                "@MainActor\npublic func writer() { _ = withCheckedContinuation { c in c.resume() } }"
+            ),
+            ("pthread", "pthread", "@MainActor\npublic func writer() { var t = pthread_t(); _ = t }"),
+        ]
+        for sample in dirtySamples {
+            let scanned = strippingComments(sample.source)
+            let hits = bannedConcurrencyHits(in: scanned)
+            expect(
+                hits.contains(sample.expected),
+                "『\(sample.label)』这段脏源码必须命中 `\(sample.expected)` 这一项 —— 没命中 = 清单里"
+                    + "这一项被删了/写错了，而真文件那条 `hits.isEmpty` 对这种并发写法就此恒真、"
+                    + "整条「全同步」绊线对它是一句空话。实际命中：\(hits)，"
+                    + "code：\(scanned.codeWithoutStringLiterals)")
+        }
+
+        // 配平围栏：清单里**每一个** token 都必须有一条属于自己的脏 fixture，反之亦然。
+        //
+        // 少了这条，上面那组逐项断言就只是一份**白名单**：明天有人往 `bannedConcurrencyTokens`
+        // 里加第 9 个 token，不配 fixture 也全绿 —— 那一项拼没拼对、`strippingComments` 会不会
+        // 把它吃掉，全无人验证，而它守的那种并发写法看着像「已经守住了」。认不出 ⇒ 红。
+        //
+        // 这条不构成自指：fixture 的 `source` 是手写的真实写法，配平只强制「每项都得有人举证」，
+        // 举证本身仍由那段手写代码完成。
+        expect(
+            Set(dirtySamples.map(\.expected)) == Set(bannedConcurrencyTokens),
+            "并发 token 清单与脏 fixture 没配平 —— 每个 token 必须有一条手写 fixture 证明它真的"
+                + "会命中，否则那一项是没有任何控制的白名单条目。\n"
+                + "  只在清单里、没有 fixture：\(Set(bannedConcurrencyTokens).subtracting(dirtySamples.map(\.expected)).sorted())\n"
+                + "  只在 fixture 里、不在清单：\(Set(dirtySamples.map(\.expected)).subtracting(bannedConcurrencyTokens).sorted())")
+
+        // 空集正控（对照 @MainActor 那条腿的 `exported.isEmpty`）：判据不许恒命中。
+        // 恒命中 = 真文件永远假红 → 下一个人把整条绊线删掉，洞比现在更大。
+        let clean = strippingComments("@MainActor\npublic func writer(x: Int) { _ = x }")
+        expect(
+            bannedConcurrencyHits(in: clean).isEmpty,
+            "清白的同步写函数必须放行 —— 恒命中 = 真文件永远假红，绊线会被下一个人删掉。"
+                + "得到命中：\(bannedConcurrencyHits(in: clean))")
+
+        // 剥注释这一步必须真的发生：`ManifestBinding.swift` 的 doc comment 里白纸黑字写着
+        // 「一条禁 async/Task/DispatchQueue」（它在描述这条绊线本身）。不剥注释，真文件当场假红。
+        // 这条把「真文件今天为什么是绿的」钉成断言，而不是一个碰巧。
+        let commentOnly = strippingComments(
+            "/// 这条绊线禁 async / Task / DispatchQueue。\n@MainActor\npublic func writer() { _ = 1 }")
+        expect(
+            bannedConcurrencyHits(in: commentOnly).isEmpty,
+            "只在注释里**谈论** async/Task/DispatchQueue 不算并发代码 —— 判成命中 = 真文件因为"
+                + "自己的 doc comment 假红。得到命中：\(bannedConcurrencyHits(in: commentOnly))"
+                + "，code：\(commentOnly.code)")
+    }
+
     // 上面那条 @MainActor 绊线自证有牙：@MainActor 缺失 / 存在 / 挂在**别的**函数上，三种情形
     // `hasMainActorIsolation` 都要分辨对。少了这条合成控制，`hasMainActorIsolation` 一旦恒真（比如
     // 正则写错、恒返回 non-nil），真文件那条 for 循环永远不进 body，整条绊线就是一句恒真绿。
@@ -681,6 +917,41 @@ func runSourceScannerSuites() {
             hasMainActorIsolation(funcName: "writerWith", in: present.code),
             "带 @MainActor 的 public func 必须被判为『已隔离』—— 判成 false = 真文件永远假红，"
                 + "然后被下一个人删掉。得到 code：\(present.code)")
+
+        // `public static func` / `public final func` —— 红队实测逃过旧版枚举器的那两个形态
+        // （旧版只逐字捞 `public func `，一个不带 @MainActor 的 `public static func` 写者塞进
+        // ManifestBinding.swift，2099 条断言全绿）。枚举器必须捞到它们，隔离检查必须两侧对齐。
+        let staticNaked = strippingComments("public static func staticWriter() { _ = 1 }")
+        expect(
+            exportedPublicFuncNames(in: staticNaked.code) == ["staticWriter"],
+            "`public static func` 必须被枚举到 —— 捞不到 = 这个形状的写者对整条 @MainActor 腿隐身，"
+                + "而它正是「同步但脱离主 actor」那个 critical gap 的确切形状。"
+                + "得到：\(exportedPublicFuncNames(in: staticNaked.code))")
+        expect(
+            !hasMainActorIsolation(funcName: "staticWriter", in: staticNaked.code),
+            "没有 @MainActor 的 `public static func` 必须判为『未隔离』。得到 code：\(staticNaked.code)")
+
+        let staticIsolated = strippingComments(
+            "@MainActor\npublic static func staticSafe() { _ = 1 }")
+        expect(
+            hasMainActorIsolation(funcName: "staticSafe", in: staticIsolated.code),
+            "带 @MainActor 的 `public static func` 必须判为『已隔离』—— 判成 false = 每一个 static "
+                + "写者都假红，绊线会被下一个人删掉。得到 code：\(staticIsolated.code)")
+
+        let finalIsolated = strippingComments(
+            "@MainActor\npublic final func finalSafe() { _ = 1 }")
+        expect(
+            exportedPublicFuncNames(in: finalIsolated.code) == ["finalSafe"]
+                && hasMainActorIsolation(funcName: "finalSafe", in: finalIsolated.code),
+            "`public final func` 两侧都得认。得到：\(exportedPublicFuncNames(in: finalIsolated.code))")
+
+        // 反向：`public` 与 `func` 之间**隔着一个声明**（含标点）时绝不能误配。
+        // 误配 = 一个非 public 的 func 被当成导出写者，绊线开始对私有实现细节假红。
+        let notExported = strippingComments("public struct Box { func hidden() { _ = 1 } }")
+        expect(
+            exportedPublicFuncNames(in: notExported.code).isEmpty,
+            "`public struct` 之后的**非 public** func 不许被算成导出写函数 —— `{` 是标点，修饰符 run "
+                + "跨不过去。误算 = 绊线对私有实现假红。得到：\(exportedPublicFuncNames(in: notExported.code))")
 
         // 关键反例：@MainActor 挂在**上一个**函数上，中间隔着一个含 `{}` 的函数体，绝不能被算到
         // 下一个裸函数头上。误算 = 少写 @MainActor 的写函数从这个缝里溜过绊线。
