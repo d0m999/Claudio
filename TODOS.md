@@ -459,6 +459,70 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 **Priority:** P1
 **Depends on:** None
 
+### T3 内容围栏的两条判定腿仍是**白名单探针**，不是围栏 —— 两条已知逃逸都是可编译的真代码
+
+**What:** `SourceScannerSuite.auditManifestConcurrencyFence` 的**枚举**那一层已经是围栏（认不出 ⇒ 红：
+symlink、读不到、属性判不出、子树枚举出错，全部 fail-closed，且各有自证）。但它下游的**两条判定腿**
+不是，它们各自只认一组已知形状：
+
+1. **@MainActor 腿只查「正则认得出的 `public func`」。** 判据是 `exportedPublicFuncNames`，逐字匹配
+   `public` + 修饰符 run + `func`。于是一个**非 public** 的写原语完全隐身：
+
+   ```swift
+   // ManifestBinding.swift 里加这么一个（文件已有三个 @MainActor public func）
+   func unsafeMutateManifestJSON(at dir: URL, _ t: (inout [String: Any]) -> Void)
+       -> Result<Void, ManifestBindError> { /* 当前的读-改-写函数体 */ }
+   ```
+
+   文件含 `mutateManifestJSON` ⇒ 被纳入；`exported.isEmpty` 为假（那三个真 public func 顶着）；
+   `missingMainActorIsolation` 只遍历**导出**的那几个 ⇒ 这个无隔离的写原语一条断言都碰不到。
+   `public extension T { static func … }` 同样逃逸（`public` 与 `func` 被 `{` 隔开，正则不匹配）。
+   internal 仍是**模块内全局可见**，`ClaudioGUICore` 里任何后台线程都能同步调它 —— 不变式真的破了。
+
+2. **并发腿只扫「包含原语名的那一个文件」。** 纳入判据是单文件文本 `contains("mutateManifestJSON")`，
+   黑名单随后只扫那一个文件。于是把 `Task` 挪进**另一个文件**就整条绕开：
+
+   ```swift
+   // BackgroundExecutor.swift —— 不含 mutateManifestJSON，压根不被纳入
+   func launchManifestWork(_ op: @escaping @Sendable () async -> Void) { _ = Task.detached(operation: op) }
+   ```
+   ```swift
+   // ManifestBinding.swift —— 没有 async / Task / DispatchQueue 任何一个黑名单 token
+   @MainActor public func deferredWriter(at dir: URL) -> Result<Void, ManifestBindError> {
+       launchManifestWork { _ = await mutateManifestJSON(at: dir) { _ in } }
+       return .success(())
+   }
+   ```
+   两个文件都编译进 app，真正的写被 detached task 调度。`await` **不在**黑名单里，所以两个文件都清白。
+
+**Why:** `manifest.json` 今天零锁，并发安全**全靠**「全同步 + 全在 @MainActor」这一条不变式，而这条
+源码绊线是它唯一的自动守卫。上面两种写法都不是刁钻构造 —— ①是「加个内部 helper 少写一次 public」，
+②是「把耗时的写挪到后台去，别卡主线程」，都是重构时最自然的两个念头。两者都会让读-改-写交错、丢更新，
+**且零运行时报错**。
+
+**要害不在漏，在措辞。** 文件里 `bannedConcurrencyTokens` 头上那段 doc comment **早就诚实写着**
+「两条腿都是探针，各自覆盖一组已知形态，合起来仍有缺口」。可 suite 名、commit headline、以及这几轮
+review 的结论全都叫它「**内容围栏**」，而围栏的判据是「认不出 ⇒ 红」。**措辞比覆盖范围大** —— memory 里
+`fence-polarity-and-self-recurrence` 记着的那条，这是第八次应验，而且照例复发在「自称已经把探针升成
+围栏」的那一刀上。读代码的人会以为这两条腿也是 fail-closed 的；它们不是。
+
+**Context:** 2026-07-20 `/codex review 36fce57` 的 P1 之一、之二（同一轮的 P1 之三「消费边没有自证」与
+P1 之四「属性读取 fail-open」已修，见该轮 commit）。当轮**刻意没修这两条**：前两条是「围栏自称的极性在
+自己代码里没兑现」，各是几行的确定修复；这两条是**重设计纳入判据**，混在一轮里会重演「一刀切太大、
+只改了 helper 没改整条边」的老毛病。
+
+**可能的修法**（未定）：
+- 对 ①：**别继续扩正则打地鼠**（`public extension` / `static` / 各种修饰符排列是无穷的）。反过来，
+  把「认不出」变成红：在含原语的文件里数 `func` 声明的总数，与 `exportedPublicFuncNames` 枚举到的数
+  对不上 ⇒ 记 finding。这才是围栏极性，而且它自动覆盖今天还想不到的形状。
+- 对 ②：纳入判据从「文件含原语名」升成**调用图**（谁调了原语、谁调了调原语的人），或者退一步——
+  把黑名单扫描范围从「含原语的文件」放宽到**整个 target**，代价是要先量一次假红。`await` 无论如何
+  该进黑名单（它今天不在，是个独立的小漏）。
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** None
+
 ### `ViewWiringSuite` 的文本绊线只挡得住「整行被删」，挡不住「body 被掏空」
 
 **What:** `ViewWiringSuite` 断言的是 `panel.contains(".onChange(of: onboardingViewModel.state)")` —— 那行文本还在。它不断言那行**做了什么**。

@@ -52,9 +52,28 @@ private func repoRoot(file: StaticString = #filePath) -> URL {
 // 退化成一行 `audit(under:)` + 对返回值的断言 —— 调用点上**没有枚举可以被改**。下面「自证有牙」那条
 // suite 喂它一棵含**脏嵌套写者**的临时树，正向钉死「围栏对子目录写者真的开火」。
 //
-// **仍然诚实的限度**（别读成「不可能绕过」）：自证覆盖的是这个函数**里面**。有人在调用点对返回的
-// `findings` 再 `.filter` 一道，仍然不会红 —— 那是抽取式自证的固有边界，只能靠把接缝做到最大（现在
-// 调用点只剩一行）+ code review 兜。别把这段注释写成绝对的。
+// **「围栏」这个词只对得起其中一层，别读成整条都是。** 摊开说：
+//
+// · **枚举那一层是围栏**（认不出 ⇒ 红）：symlink、读不到、属性读不到、类型判不出、子树枚举出错、
+//   根目录不在 —— 六处全部 fail-closed，各自有自证（见下面四条「围栏极性自证有牙」）。
+// · **两条判定腿是探针，不是围栏**：@MainActor 腿只查正则认得出的 `public func`；并发腿只扫「含原语
+//   名的那一个文件」里的 8 个已知 token。两条都是白名单，而白名单永远漏得掉下一个形状。
+//
+// 这不是假设，是两条**实测可编译**的逃逸（`/codex review 36fce57` 的 P1 之一、之二，已立项在
+// `TODOS.md`「T3 内容围栏的两条判定腿仍是白名单探针」）：
+//  ① 在 `ManifestBinding.swift` 里加一个**非 public** 的写原语 —— 文件照样被纳入，但 @MainActor 腿
+//     只遍历**导出**的那几个，它一条断言都碰不到。`public extension` 里的成员同样逃逸。
+//  ② 把 `Task.detached` 挪进**另一个不含原语名的文件** —— 那个文件根本不被纳入，而调用它的这个文件
+//     里一个黑名单 token 都没有（`await` 不在清单里）。
+//
+// 所以这条东西诚实的名字是「**内容推导的纳入 + 两条已知形态的判定**」。`bannedConcurrencyTokens` 头上
+// 那段一直是这么写的，而 suite 名和几轮 commit headline 一直叫它「内容围栏」—— 措辞比覆盖范围大，
+// memory 里 `fence-polarity-and-self-recurrence` 那条的第八次应验，照例复发在「自称把探针升成围栏」
+// 的那一刀上。改这个文件的人：先读这一段，再决定你要不要相信它挡得住你正在写的东西。
+//
+// **另一条仍然诚实的限度**：自证覆盖的是这个函数**里面**。消费边（把 findings 变成红）已经下沉进
+// `enforceManifestConcurrencyFence` 并有端到端自证 + 接线自证（`36fce57` 的 P1 之三），但「有人另写一个
+// 阉割过的入口并改接线」这类改法，最终仍然靠 code review 兜。别把这段注释写成绝对的。
 
 /// 一次 T3 内容围栏审计的**全部**产物。`findings` 非空 = 有违规或有**无从判定**的东西，
 /// 两者都必须让调用方变红（围栏极性：认不出 ⇒ 红，不是 ⇒ 绿）。
@@ -67,6 +86,46 @@ private struct ManifestFenceAudit {
     var findings: [String] = []
 }
 
+/// 一个目录条目的**类型判定**结果。两个字段都是 `Bool?`，而 `nil` 一律读作**「判不出」**，
+/// 绝不读作「不是」—— 围栏极性在这两个 optional 的解包处，不在注释里。
+private struct EntryKind {
+    let isSymbolicLink: Bool?
+    let isRegularFile: Bool?
+}
+
+/// 读一个 URL 的类型属性。返回 `nil` = **这次读取本身失败了**（区别于「读到了但值是 nil」）。
+///
+/// ## 为什么这是个可注入的 seam，而不是直接内联 `try?`
+/// `/codex review 36fce57` 的 P1 之四：上一版这里是一句裸 `try?`，失败落进 `values?.isSymbolicLink
+/// == true` 的 `false` 分支，接着被 `guard url.pathExtension == "swift"` 静默 `continue` 掉 ——
+/// 一个**没有后缀的目录 symlink** 只要属性读不到，就从三道闸门底下一路穿过去。fail-open，极性反了。
+///
+/// 但把它翻成 fail-closed 之后立刻撞上第二个问题：**这条分支没有任何输入能喂到它。** 实测
+/// （scratchpad/probe2.swift，四种造法）：`FileManager.enumerator(at:includingPropertiesForKeys:)`
+/// 会**预取**这两个键，于是枚举循环里这次 `resourceValues` 命中的是缓存 —— 枚举中途把文件删掉、
+/// 把父目录 chmod 000、dangling symlink、自指 symlink，**四种全部返回 OK**，一次都逼不出失败。
+/// （脱离枚举器直接读则确实会抛：删掉的文件 NSCocoa 260、000 目录里的文件 257。所以这不是一条
+/// 假想的错误码，只是被枚举器的缓存挡住了。）
+///
+/// 所以走注入：真围栏用 ``realEntryKind``，自证注入一个失败版本，把这两条 fail-closed 分支的
+/// **极性**钉成会响的断言。⚠️ 这条 seam 举证的是**分支极性**，不是端到端 —— 别把它读成
+/// 「真枚举里这条路走过了」。真枚举里它（今天）走不到，这正是它需要注入才能被验证的原因。
+private typealias EntryKindReader = (URL) -> EntryKind?
+
+/// 枚举器**预取**的键，与 ``realEntryKind`` 读的键 —— **必须是同一份**，所以只有这一份。
+///
+/// ⚠️ 两处若各写各的会**静默漂移**出一个假红：枚举器预取 A，读取器要 B，那次读就不是命中缓存而是
+/// 一次真 stat，权限/竞态下会抛 —— 于是围栏对一个完全正常的文件报「类型属性读不到」。
+/// 本文件里 `exportedPublicFuncNames` / `hasMainActorIsolation` 两侧对齐那条注释记的是同一个道理：
+/// 分成两份，漂移的那一半是没有人在看的那一半。
+private let fenceResourceKeys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+
+private func realEntryKind(_ url: URL) -> EntryKind? {
+    guard let values = try? url.resourceValues(forKeys: Set(fenceResourceKeys))
+    else { return nil }
+    return EntryKind(isSymbolicLink: values.isSymbolicLink, isRegularFile: values.isRegularFile)
+}
+
 /// 对 `root` 底下**任意深度**的 `.swift` 源文件跑完整条 T3 内容围栏。
 ///
 /// `pathPrefix` 只影响诊断消息里的路径显示（真围栏传 `gui/Sources/ClaudioGUICore/`，自证传空串），
@@ -76,14 +135,23 @@ private struct ManifestFenceAudit {
 /// SwiftPM 会**递归**编译 target 子目录里的源文件，所以一个落在 `ClaudioGUICore/Feature/PackWriter.swift`
 /// 的 manifest 新写者也必须被纳入 —— 非递归会把它编译进去却漏出围栏（`/codex review 327d211` 的 P1）。
 ///
-/// ## 三处 fail-closed（`/codex review 15ce131` 的 P1 之三）
-/// 上一版这三处全是 fail-**open**，即「出问题 ⇒ 静默排除 ⇒ 更绿」，与围栏极性正好相反：
+/// ## 五处 fail-closed（`/codex review 15ce131` 的 P1 之三、`36fce57` 的 P1 之四）
+/// 这几处一开始全是 fail-**open**，即「出问题 ⇒ 静默排除 ⇒ 更绿」，与围栏极性正好相反：
 /// 1. `errorHandler:` —— 上一版**没传**。某棵子树枚举失败（权限/IO）会被静默跳过，而顶层
 ///    `ManifestBinding.swift` 仍在 ⇒ 非空检查和具名钉子照样绿，嵌套写者无声无息地漏掉。
 /// 2. `isRegularFile` —— 上一版是 `(try? …) ?? false`，即**判不出类型的 `.swift` 条目被排除**。
 ///    「我判不出它是什么」绝不等于「它不是源文件」。现在判不出 ⇒ 记一条 finding。
 /// 3. `enumerator == nil` —— 上一版 `?? []` 吞掉。真围栏那侧靠 `!enumeratedSubpaths.isEmpty`
 ///    接得住，但这个函数自己也得说话，否则自证喂它一棵坏树时读到的是「干净」。
+/// 4. **属性读取本身失败**（`36fce57` P1）—— 上一版一句裸 `try?`，失败之后 `values?.isSymbolicLink
+///    == true` 走 `false` 分支，紧接着被 `.swift` 后缀闸门静默 `continue`。于是一个**没有后缀的
+///    目录 symlink** 只要属性读不到就整条穿过去。现在读不到 ⇒ 记一条 finding，**且排在后缀闸门
+///    之前**（没有后缀的目录 symlink 正是要接住的那一种）。
+/// 5. **`isSymbolicLink` 判不出**（同上）—— `== true` 把 `nil` 悄悄归进「不是 symlink」。同 2，
+///    「判不出」不是「不是」。现在也排在后缀闸门之前。
+///
+/// 4 与 5 的举证靠 ``EntryKindReader`` 注入（真枚举器预取属性，实测四种造法都逼不出失败 ——
+/// 详见那个 typealias 头上那段）。1/2/3 的举证见「围栏极性自证有牙」两条 suite。
 ///
 /// ## symlink（同一轮 P1）
 /// `FileManager.DirectoryEnumerator` **不下钻**指向目录的 symlink，而 SwiftPM 会跟随它发现源码 ——
@@ -91,12 +159,15 @@ private struct ManifestFenceAudit {
 /// 走廉价且正确的那条：**遇到任何 symlink 一律记 finding**（认不出 ⇒ 红）。今天 `gui/Sources` 底下
 /// 一个 symlink 都没有（`find gui/Sources -type l` 为空），所以这条不会制造噪音；真有人加了一个，
 /// 他会拿到一条写明该怎么办的红，而不是一片沉默的绿。
-private func auditManifestConcurrencyFence(under root: URL, pathPrefix: String = "")
-    -> ManifestFenceAudit
-{
+private func auditManifestConcurrencyFence(
+    under root: URL,
+    pathPrefix: String = "",
+    readEntryKind: EntryKindReader = realEntryKind
+) -> ManifestFenceAudit {
     var audit = ManifestFenceAudit()
     let basePath = root.standardizedFileURL.path
-    let resourceKeys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+    // 与 ``realEntryKind`` 读的键同一份 —— 见 `fenceResourceKeys` 头上那段（两份会漂移出假红）。
+    let resourceKeys = fenceResourceKeys
 
     // 根目录本身不在 / 不是目录 ⇒ 红，**并且**给一条说得清是哪种毛病的诊断。
     //
@@ -166,11 +237,31 @@ private func auditManifestConcurrencyFence(under root: URL, pathPrefix: String =
             continue
         }
 
-        let values = try? url.resourceValues(forKeys: Set(resourceKeys))
+        // ⚠️ 下面三道**全部排在 `.swift` 后缀闸门之前**，顺序不是随便写的（`/codex review 36fce57`
+        // 的 P1 之四）。后缀闸门是个 `continue`：任何在它之前没能定案的东西，到了它那里都会被
+        // **静默丢掉**。而这一族里最要命的输入 —— 一个**没有后缀的目录 symlink** —— 恰好过不了
+        // 后缀闸门。所以「判不出」必须在闸门之前就变成 finding，否则极性当场翻回 fail-open。
+        guard let kind = readEntryKind(url) else {
+            audit.findings.append(
+                "\(display(subpath(of: url))) 的类型属性读不到（`resourceValues` 抛错）—— 围栏对它"
+                    + "**无从判起**：它可能是个目录 symlink（SwiftPM 会跟进去编译里面的写者），也可能"
+                    + "是个源文件。判不出就不许放行。别让围栏在一次权限/IO 问题上静默丢掉一个条目。")
+            continue
+        }
 
         // symlink：枚举器不下钻，SwiftPM 会跟随 —— 认不出 ⇒ 红（见上面 doc comment）。
         // 这条**先于** `.swift` 后缀判断：一个 symlink **目录**没有后缀，但它里面全是源文件。
-        if values?.isSymbolicLink == true {
+        //
+        // ⚠️ 解包写成 `guard let` 而不是 `== true`。`== true` 会把 `nil`（判不出）悄悄归进
+        // 「不是 symlink」那一侧，接着被后缀闸门丢掉 —— 与上一条同一个病，同一个 fail-open。
+        guard let isSymbolicLink = kind.isSymbolicLink else {
+            audit.findings.append(
+                "\(display(subpath(of: url))) 判不出是不是 symlink（属性读到了但这一项是 nil）—— "
+                    + "围栏对它无从判起。它若是个指向别处的**目录** symlink，落在链接目标里的 manifest "
+                    + "写者会被 SwiftPM 编译、却完全漏出这条围栏。别把「我判不出」当成「它不是」。")
+            continue
+        }
+        if isSymbolicLink {
             audit.findings.append(
                 "\(display(subpath(of: url))) 是一个 symlink。`DirectoryEnumerator` 不会下钻指向目录的"
                     + " symlink，而 SwiftPM 会跟随它发现并编译源码 —— 落在链接目标里的 manifest 写者"
@@ -184,11 +275,12 @@ private func auditManifestConcurrencyFence(under root: URL, pathPrefix: String =
 
         // 「判不出类型」≠「不是源文件」。上一版这里是 `?? false`（静默排除），极性反了。
         //
-        // ⚠️ 诚实标注：这一条**没有 fixture**。实测逼不出来 —— chmod 000 的文件 `isRegularFile`
-        // 照样读得到（值为 true），而 dangling symlink 会先被上面那条 symlink 闸门接走。变异台账里
-        // 「把它改回 `?? false`」会**存活**，那是「无输入可喂」而不是「断言写错了」。极性是对的，
-        // 别因为它没测就翻回 fail-open；也别把它算进「已验证」的那一栏。
-        guard let isRegularFile = values?.isRegularFile else {
+        // ⚠️ 诚实标注（`36fce57` 之后已改）：**真实文件系统**里逼不出这个 nil —— chmod 000 的文件
+        // `isRegularFile` 照样读得到（值为 true），dangling symlink 会先被上面那条 symlink 闸门接走。
+        // 所以它的举证走 ``EntryKindReader`` 注入（「围栏极性自证有牙之三」那条 suite），钉的是
+        // **分支极性**：把它改回 `?? false`，那条 suite 当场红。这已经不是上一稿那个「无输入可喂、
+        // 台账必然存活」的状态了 —— 但也别把它读成「真枚举里走过这条路」，真枚举里它走不到。
+        guard let isRegularFile = kind.isRegularFile else {
             audit.findings.append(
                 "\(display(relative)) 判不出是不是正规文件（`resourceValues` 取不到 isRegularFile）——"
                     + "围栏对它无从判起。它若是个 manifest 写者就完全不设防。别把「我判不出」当成"
@@ -232,10 +324,15 @@ private func auditManifestConcurrencyFence(under root: URL, pathPrefix: String =
         audit.enrolledSubpaths.append(relative)
 
         // 第一条腿：已知并发构造的黑名单（**不是**完备围栏，见 `bannedConcurrencyTokens` 头上那段）。
-        // ⚠️ 命中清单用一个**专有措辞 + 逐字拼接**的形式（`命中 token：a, b`），不是数组的
-        // `\(…)` 默认描述。理由同上一条腿：诊断末尾那句 `得到的代码：` 会把源码整段抄进来，而源码里
-        // **本来就有**这些 token —— 台账第四轮实测，「只报第一个命中」这个变异靠那段回显照样满足
-        // 「诊断里出现 Task」的断言而全绿。有了这个专有前缀，自证钉的就是**判据的输出**，不是回显。
+        //
+        // ⚠️ 这条诊断**不回显源码**（`/codex review 36fce57` 的 P2）。上一稿末尾挂着
+        // `得到的代码：\(scanned.code)` —— 两个毛病，第二个才是真的：
+        //  · 一份大文件整段抄进失败输出，日志爆量。
+        //  · **回显是自证的污染源。** 源码里本来就有 `async` / `Task` 这些词，于是一条按「诊断里
+        //    出现 Task」写的断言会被**回显**满足而不是被**判据**满足。台账第四轮实测：「只报第一个
+        //    命中」这个变异靠那段回显照样全绿。姊妹腿（@MainActor）早就为同一个理由掐掉了回显。
+        // 两道都留着：既掐掉回显，命中清单也用**专有措辞 + 逐字拼接**（`命中 token：a, b`），不是
+        // 数组的 `\(…)` 默认描述 —— 断言钉的是判据的输出，任何一道单独失手都还有另一道。
         let concurrencyHits = bannedConcurrencyHits(in: scanned)
         if !concurrencyHits.isEmpty {
             audit.findings.append(
@@ -244,7 +341,7 @@ private func auditManifestConcurrencyFence(under root: URL, pathPrefix: String =
                     + "唯一的并发安全保证是「全同步 + 全在 @MainActor」（PLAN-SOUND-MANAGER.md "
                     + "§2.1）。任何一个 manifest 写函数一旦变成 async / 派发任务 / 上队列 / 起线程，"
                     + "这条不变式会在没有任何运行时报错的情况下静默失效 —— 这条源码绊线是它唯一的"
-                    + "守卫，得到的代码：\(scanned.code)")
+                    + "守卫。")
         }
 
         // 第二条腿（/codex review dcab3de,7e97bc4 的 P1）：上面那条挡「变异步」，挡不住「同步但脱离
@@ -278,6 +375,53 @@ private func auditManifestConcurrencyFence(under root: URL, pathPrefix: String =
     return audit
 }
 
+/// 跑一次围栏，**并且把每一条 finding 变成一次红**。返回审计产物供调用方再做覆盖范围断言。
+///
+/// ## 为什么消费边必须在这个函数里，而不在调用点（`/codex review 36fce57` 的 P1 之三）
+/// 上一版把消费留在调用点：
+///
+/// ```swift
+/// let audit = auditManifestConcurrencyFence(under: scanRootURL, pathPrefix: …)
+/// for finding in audit.findings { expect(false, finding) }        // ← 就是这里
+/// ```
+///
+/// Codex 打的正是这一行：把它改成 `audit.findings.filter { _ in false }`，真围栏从此**不消费任何
+/// finding** —— 枚举断言、覆盖范围断言、具名钉子、以及所有「自证有牙」的 suite **全部照绿**，因为
+/// 那些 suite 直接调 `auditManifestConcurrencyFence`、从来不经过这条消费边。围栏静默失效，零告警。
+///
+/// 这是 `15ce131` 那个病的**同构复发**，只不过退了一层：上一轮把「枚举」下沉进函数、调用点只剩
+/// 一行 `audit(under:)`，但那一行的**返回值还得有人消费**，于是可被改的东西从「枚举」变成了「消费」。
+/// 抽取一层，接缝就往外挪一层 —— 只要调用点还剩一段**有语义的**代码，它就是下一个被改的地方。
+///
+/// 所以这一版把消费也吞进来，调用点退化成一句**没有任何可改语义**的调用。而这个函数自己的牙由
+/// 「消费边自证有牙」那条 suite 钉住：它喂一棵必然产出 finding 的树、走**这个函数**、观测全局
+/// `failures` 计数真的涨了 `findings.count` 那么多，然后把这几条**故意的**失败从计数里撤回。
+/// 那是端到端的 —— 走的是生产同一个函数、用的是生产同一个 `expect`。
+///
+/// ⚠️ **仍然诚实的限度**：有人把调用点改回直接调 `auditManifestConcurrencyFence`、自己写一个
+/// 阉割过的循环，这个函数拦不住。拦那一手的是「消费边接线自证」那条 suite（读本文件源码，钉死
+/// 生产调用点那两行哨兵之间的内容**逐字全等**于预期的那一句调用）。两条合起来才是完整的。
+///
+/// ⚠️ 上一稿这里写的是「+ `expect(false, finding)` 全文件**只出现一次**」—— 那是第一版的设计，
+/// 后来那条计数断言被删掉了（改成了哨兵区块全等），而这句散文留在了原地。**红队实测逮到的正是它**：
+/// 一句描述着不存在的断言的注释。措辞比覆盖范围大，同一轮里第二次，长在自己的修复上。
+@MainActor
+private func enforceManifestConcurrencyFence(
+    under root: URL,
+    pathPrefix: String = "",
+    readEntryKind: EntryKindReader = realEntryKind
+) -> ManifestFenceAudit {
+    let audit = auditManifestConcurrencyFence(
+        under: root, pathPrefix: pathPrefix, readEntryKind: readEntryKind)
+    // 一条 finding = 一次红。违规（并发 token / 缺 @MainActor / 扫描器不认识的构造）与**无从判定**
+    // （symlink / 判不出类型 / 属性读不到 / 读不到文件 / 子树枚举出错）都在里面 —— 围栏极性是
+    // 「认不出 ⇒ 红」，两类同等对待。
+    for finding in audit.findings {
+        expect(false, finding)
+    }
+    return audit
+}
+
 /// 一份 `TestSupport.swift` 里两行哨兵之间的那段文本（含哨兵本身）。
 ///
 /// ⚠️ 哨兵按**整行精确匹配**，不是 `contains` —— 区块内部的散文里就**提到过**这两个 token
@@ -286,6 +430,71 @@ private func auditManifestConcurrencyFence(under root: URL, pathPrefix: String =
 /// 这不是假想：第一版就是 `contains` 写的，被本 suite 自己的正向控制当场逮住。
 private let scannerRegionBegin = "// claudio:shared-scanner:begin"
 private let scannerRegionEnd = "// claudio:shared-scanner:end"
+
+// MARK: - T3 围栏生产调用点的哨兵（`/codex review 36fce57` 的 P1 之三）
+//
+// 「消费边接线自证」那条 suite 靠这两行把**生产调用点那一段**抽出来单独喂扫描器。
+// 为什么不是整份文件：本文件前半段是扫描器自己的回归网，必然大量使用 raw string，而扫描器不建模
+// 它 —— 整份文件的 `unmodeledConstructs` 永远非空，那条前提**不可满足**（第一版就是这么写的，实测
+// 当场红）。抽一段就没这个问题，而且那一段里再出现 raw string 会被同一条断言当场逮住。
+//
+// ⚠️ 同 `scannerRegionBegin` 那对：按**整行精确匹配**，不是 `contains` —— 上面这段散文里就提到过
+// 这两个 token，`contains` 会把散文当成哨兵、抽出几行注释就收工，而剥完注释是空串，下面那条
+// 「非空白字符 > 40」会当场逮住它（那是那条断言存在的理由）。
+private let fenceCallSiteBegin = "// claudio:manifest-fence-callsite:begin"
+private let fenceCallSiteEnd = "// claudio:manifest-fence-callsite:end"
+
+/// 围栏的扫描根（相对仓库根），与生产传给 `pathPrefix` 的那个串。**只有这一份。**
+///
+/// ⚠️ 消费边自证必须能喂出与生产**逐字相同**的 `pathPrefix`，所以这两个常量不能留在生产 suite 的
+/// 局部作用域里。红队实测的那条逃逸就长在这根轴上：消费循环写成
+/// `for finding in audit.findings where pathPrefix.isEmpty { … }` —— 自证走默认实参（空串）照样全红、
+/// 四条断言全过，而生产传的是 `"gui/Sources/"`，消费边**在生产路径上被永久关掉**，
+/// **生产调用点一个字符都不用改**，`git diff` 只显示函数体里多了个 `where`。
+///
+/// 教训（第三轮同构复发）：自证喂的必须是**同一条生产路径**上的**同一个实参向量**，不只是同一个
+/// 函数。「函数有牙」只在它被举证过的那个向量上成立；任何「在自证向量下为真、在生产向量下为假」的
+/// 谓词都能寄生在消费循环里。所以下面那条 suite 对**每一个**向量各跑一遍。
+private let fenceScanRelativeRoot = "gui/Sources"
+private let fencePathPrefix = "\(fenceScanRelativeRoot)/"
+
+/// `relativePath` 里两行哨兵之间的那段文本（不含哨兵本身）。抽不到 ⇒ `nil`（调用方当作红处理）。
+private func fenceCallSiteRegion(of relativePath: String) -> String? {
+    guard
+        let text = try? String(
+            contentsOf: repoRoot().appendingPathComponent(relativePath), encoding: .utf8)
+    else { return nil }
+    let lines = text.components(separatedBy: "\n")
+    func indexOfSentinel(_ sentinel: String) -> Int? {
+        lines.firstIndex { $0.trimmingCharacters(in: .whitespaces) == sentinel }
+    }
+    guard
+        let begin = indexOfSentinel(fenceCallSiteBegin),
+        let end = indexOfSentinel(fenceCallSiteEnd),
+        begin < end
+    else { return nil }
+    return lines[(begin + 1)..<end].joined(separator: "\n")
+}
+
+/// `relativePath` 里两种哨兵**各自出现的行数**。读不到文件 ⇒ `(0, 0)`（调用方当作红处理）。
+///
+/// 上面那个抽取函数取的是 `firstIndex`，所以「有没有第二对」它一个字都不会说。红队实测的劫持手法：
+/// 在真调用点**之前**插一对诱饵哨兵（写在块注释里、或多行字符串里都行 —— 抽取跑在**原始文本**上，
+/// `strippingComments` 是抽完之后才施加的，所以诱饵与真哨兵逐字节无从区分），观测器就去读那段诱饵，
+/// 真调用点降为第二处、从此不受任何检查。所以唯一性必须**单独**断言。
+private func fenceCallSiteSentinelCounts(of relativePath: String) -> (begin: Int, end: Int) {
+    guard
+        let text = try? String(
+            contentsOf: repoRoot().appendingPathComponent(relativePath), encoding: .utf8)
+    else { return (0, 0) }
+    let trimmed = text.components(separatedBy: "\n").map {
+        $0.trimmingCharacters(in: .whitespaces)
+    }
+    return (
+        trimmed.filter { $0 == fenceCallSiteBegin }.count,
+        trimmed.filter { $0 == fenceCallSiteEnd }.count
+    )
+}
 
 private func sharedScannerRegion(of relativePath: String) -> String? {
     guard
@@ -1028,15 +1237,30 @@ func runSourceScannerSuites() {
         // 第一版把两者合成一个变量，放宽扫描根那一刀顺手把具名钉子也指到了 `gui/Sources/
         // ManifestBinding.swift`（不存在）—— 实测当场红。改覆盖范围时，跟着它走的东西也得一起改，
         // 分成两个常量就是让编译器/测试替人记住这件事。
-        let scanRelativeRoot = "gui/Sources"
+        // ⚠️ 扫描根与 `pathPrefix` 用**文件级**的那一份（`fenceScanRelativeRoot` / `fencePathPrefix`），
+        // 不在这里另起一个局部常量：消费边自证必须能喂出与生产**逐字相同**的实参向量，见那两个常量
+        // 头上那段（红队实测的 `where pathPrefix.isEmpty` 逃逸就长在这根轴上）。
+        let scanRelativeRoot = fenceScanRelativeRoot
         let coreRelativeDirectory = "gui/Sources/ClaudioGUICore"
         let scanRootURL = repoRoot().appendingPathComponent(scanRelativeRoot)
 
-        // ⚠️ 这一行**就是**整条围栏。枚举、纳入判据、三条判定腿全在 `auditManifestConcurrencyFence`
-        // 里边（见它头上那段 MARK）—— 调用点上没有枚举可以被改回非递归，这正是 `/codex review 15ce131`
-        // P1 的修法：上一版把枚举抽成 helper、真围栏与自证各自调它，改**调用点**就能让围栏静默退化。
-        let audit = auditManifestConcurrencyFence(
-            under: scanRootURL, pathPrefix: "\(scanRelativeRoot)/")
+        // ⚠️ 这一行**就是**整条围栏，连同「把 finding 变成红」那一步在内。枚举、纳入判据、三条判定
+        // 腿、以及消费边，全在 `enforceManifestConcurrencyFence` 里边（见它头上那段）：没有枚举可以
+        // 在这里被改回非递归（`/codex review 15ce131` 的 P1），也没有消费循环可以在这里被 `.filter`
+        // 掉（`36fce57` 的 P1）。
+        //
+        // ⚠️ **但别把这句读成「调用点上没有任何可改的语义」**（上一稿就是这么写的，红队实测打掉）：
+        // 这个函数有**默认实参**，而默认实参就是可改语义 —— 在这里多传一个 `readEntryKind:` 桩，
+        // 或多传一个新加的 `report: false`，都能让围栏在生产路径上失效。所以「消费边接线自证」那条
+        // suite 钉的是这两行哨兵之间的**逐字全等**（不是子串），多一个实参就当场红。
+        //
+        // 下面那些 `expect` 全是**覆盖范围**断言（枚举到没有、扫了哪两个 target、纳入判据瞎没瞎），
+        // 不是判定结果的消费 —— 判定结果已经在上面这一行里消费完了。别再往这里加 `audit.findings`
+        // 的循环。
+        // claudio:manifest-fence-callsite:begin
+        let audit = enforceManifestConcurrencyFence(
+            under: scanRootURL, pathPrefix: fencePathPrefix)
+        // claudio:manifest-fence-callsite:end
 
         // 目录枚举本身不许静默失明：目录被改名/移走 → 枚举出空数组 → 下面「每个纳入的文件都
         // 得清白」对空集恒真。这条把那种失明变成红。
@@ -1108,15 +1332,9 @@ func runSourceScannerSuites() {
                     + "（PLAN-SOUND-MANAGER.md §2.1 / 4c「并发不变式」）")
         }
 
-        // 判定结果。诊断消息全在 `auditManifestConcurrencyFence` 里成文（真围栏与自证 suite 读的是
-        // **同一批**消息），这里只负责把每一条变成一次红。
-        //
-        // 一条 finding = 一次 `expect(false, …)`：违规（并发 token / 缺 @MainActor / 扫描器不认识的
-        // 构造）与**无从判定**（symlink / 判不出类型 / 读不到 / 子树枚举出错）都在里面 —— 围栏极性
-        // 是「认不出 ⇒ 红」，两类同等对待。
-        for finding in audit.findings {
-            expect(false, finding)
-        }
+        // ⚠️ 这里**曾经**有一圈 `for finding in audit.findings { expect(false, finding) }`。
+        // 它已经下沉进 `enforceManifestConcurrencyFence`（`/codex review 36fce57` 的 P1 之三）——
+        // 留在这里就是留一段可以被 `.filter` 掉、而所有自证照绿的语义。别把它加回来。
     }
 
     // 上面那条内容围栏**整条生产路径**的自证有牙（`/codex review 15ce131` 的 P1）。
@@ -1262,6 +1480,209 @@ func runSourceScannerSuites() {
                 !audit.findings.contains(where: { $0.contains("Bystander") }),
                 "一个非写者被报了 —— 判定跑到了纳入判据之外的文件上。实际诊断：\(audit.findings)")
         }
+    }
+
+    // 围栏**消费边**自证有牙（`/codex review 36fce57` 的 P1 之三）。
+    //
+    // ## 被打穿的是哪一刀
+    // 上一版真围栏那侧是两行：`let audit = auditManifestConcurrencyFence(…)`，然后
+    // `for finding in audit.findings { expect(false, finding) }`。把第二行改成
+    // `audit.findings.filter { _ in false }`，围栏从此不消费任何 finding —— 而**当时全部**自证 suite
+    // 照绿，因为它们直接调 `auditManifestConcurrencyFence`，一条都不经过那行。围栏静默失效，零告警。
+    //
+    // ## 为什么这条逮得住
+    // 它走**生产同一个函数**（`enforceManifestConcurrencyFence`）、用**生产同一个** `expect`、观测
+    // **真的 `failures` 全局计数**。判据是「涨了多少」**等于**「该涨多少」——不是「涨了没有」，后者
+    // 对「只报第一条」那类变异恒真（本文件已经在别处被这个形状咬过一次）。
+    //
+    // ## 那几行 ✗ 是证据，不是回归
+    // 这条 suite **故意**制造真失败，然后把计数撤回。撤回的只是计数，已经打印出去的那几行 ✗ 撤不回，
+    // 所以上下各打一句标注，读日志的人不会把它们当成真失败。
+    // ## ⚠️ 为什么要对**每一个实参向量**各跑一遍（红队实测打穿的正是这里）
+    // 上一稿只调 `enforceManifestConcurrencyFence(under: scanned)` —— 全部走**默认实参**。而生产传的
+    // 是 `pathPrefix: fencePathPrefix`。于是任何「在自证向量下为真、在生产向量下为假」的谓词都能
+    // 寄生在消费循环上，实测两种，两种都全绿：
+    //  · `for finding in audit.findings where pathPrefix.isEmpty { … }` —— **生产调用点一个字符都不改**，
+    //    `git diff` 只显示函数体里多了个 `where`。自证传空串照样全红，生产的 `"gui/Sources/"` 被静默关掉。
+    //  · 新加一个 `report: Bool = true` 形参、生产调用点传 `report: false` —— 同理。
+    // （后者另有一道：接线自证现在钉哨兵区块**逐字全等**，多一个实参当场红。前者接线断言看不见，
+    //   只能靠这里把向量喂对。两道各挡一侧。）
+    //
+    // 教训：**「同一个函数」≠「同一条生产路径」的第三层。** 前两轮分别是「同一个 helper ≠ 同一条边」
+    // 和「同一条边 ≠ 连消费一起」，这一轮是「同一个函数 ≠ 同一个**实参向量**」。函数的牙只在它被
+    // 举证过的那个向量上成立。
+    //
+    // **仍然诚实的限度**：`root` 这根轴闭不上 —— 自证必须喂脏临时树，生产根恒为真仓库。所以
+    // `where root.path.hasPrefix("/Users") { … }` 这类寄生仍然逃得掉。收窄了，没清零。
+    suite("绊线（T3）围栏消费边自证有牙：findings 必须真的变成红，一条都不许少（含生产实参向量）") {
+        // 逐个向量各跑一遍。`("生产向量", fencePathPrefix)` 与真围栏传的**逐字相同**。
+        for (vectorLabel, vectorPathPrefix) in [
+            ("默认向量（pathPrefix 空串）", ""),
+            ("生产向量（pathPrefix 与真围栏逐字相同）", fencePathPrefix),
+        ] {
+        withTempDirectory { root in
+            let scanned = root.appendingPathComponent("scanned")
+            // 三个脏写者、三种不同的违规形态，且分布在三层目录 —— 保证 finding 不止一条，
+            // 「只报第一条」这类变异才有分辨力。
+            writeFixture(
+                "public func dirtyOne() async { mutateManifestJSON() }",
+                to: scanned.appendingPathComponent("DirtyOne.swift"))
+            writeFixture(
+                "public func dirtyTwo() { mutateManifestJSON() }",
+                to: scanned.appendingPathComponent("Nested/DirtyTwo.swift"))
+            writeFixture(
+                "@MainActor public func dirtyThree() { Task { mutateManifestJSON() } }",
+                to: scanned.appendingPathComponent("Nested/Deep/DirtyThree.swift"))
+
+            print("    ↓ 下面几行 ✗ 是这条 suite **故意**造的证据（\(vectorLabel)），稍后撤回，不是回归")
+            let checksBefore = totalChecks
+            let failuresBefore = failures
+            let audit = enforceManifestConcurrencyFence(
+                under: scanned, pathPrefix: vectorPathPrefix)
+            let raisedFailures = failures - failuresBefore
+            let raisedChecks = totalChecks - checksBefore
+            // 撤回：减掉**我造成的那么多**。撤多了的后果完全不对称 —— **撤多一条 = 把别的 suite 的
+            // 一次真失败一起吞掉**，整个 run 变绿而那条回归无人知晓，比漏报更坏。
+            failures -= raisedFailures
+            totalChecks -= raisedChecks
+            print("    ↑ 以上 \(raisedFailures) 行 ✗ 是证据，已撤回")
+
+            // ⚠️ 落点检查的三步顺序（先取快照 → **无条件**归位 → 最后才断言）是台账第二轮 M20 逼
+            // 出来的，别按「看着更简单」重排回去：
+            //
+            // 上一稿只有「断言落点 == 快照」这一条，没有中间那次无条件归位。把撤回改成
+            // `-= raisedFailures + 1`，这条断言**确实开火了** —— 可它自己那次失败恰好让 `failures += 1`，
+            // 与被多撤掉的那 1 **精确抵消**，全 run 照样绿。**一个 ±1 的信号抵消不掉一个 ±1 的错误。**
+            // 本文件反复在治的那个病，这次长在这一轮新加的守卫自己身上。
+            //
+            // 现在判定读的是**归位之前**取的 `landed…` 快照，而归位那两行无条件执行：
+            //  · 撤回被改坏 ⇒ landed ≠ 快照 ⇒ 归位把计数拉回快照 ⇒ 下面这条 expect 再 +1 ⇒ 全 run 红。
+            //  · 归位被改坏 ⇒ landed 是对的、expect 不响 ⇒ 但计数停在非快照值 ⇒ 全 run 红。
+            // 两条路都不自抵消。
+            let landedFailures = failures
+            let landedChecks = totalChecks
+            failures = failuresBefore
+            totalChecks = checksBefore
+
+            expect(
+                landedFailures == failuresBefore && landedChecks == checksBefore,
+                "撤回没有精确回到快照（failures \(landedFailures) 应为 \(failuresBefore)，"
+                    + "checks \(landedChecks) 应为 \(checksBefore)）—— 撤多了会把**别的 suite** 的真失败"
+                    + "一起吞掉，整个 run 变绿而那条回归没有任何人看得见。撤少了则这条 suite 自己的"
+                    + "证据会被当成回归。撤回必须精确。")
+
+            // 前提自钉：这棵树真的产出了 finding。缺了它，下面那条对账是 `0 == 0` 恒真。
+            expect(
+                audit.findings.count >= 3,
+                "这棵脏树没产出足够的 finding（实得 \(audit.findings.count) 条）—— 下面那条对账会在 "
+                    + "`0 == 0` 上恒真，等于没测。实际诊断：\(audit.findings)")
+            // 【关键腿】每一条 finding 都必须变成一次红，一条不少。
+            expect(
+                raisedFailures == audit.findings.count,
+                "消费边漏了 finding：围栏产出 \(audit.findings.count) 条，只变红 \(raisedFailures) 次。"
+                    + "有人在 `enforceManifestConcurrencyFence` 里把 findings `.filter` 掉了 / 只报第一条 / "
+                    + "把 `expect(false, …)` 写成了 `expect(true, …)`。围栏看得见违规却不上报 —— 真文件"
+                    + "那侧会静默全绿，这正是 `/codex review 36fce57` P1 打穿的那一刀。"
+                    + "实际诊断：\(audit.findings)")
+            // 撤回的对称性：每次红也得恰好是一次 check。对不上账 = 上面那条减法在数别的东西。
+            expect(
+                raisedChecks == audit.findings.count,
+                "消费边调 `expect` 的次数与 finding 数对不上（check +\(raisedChecks) / finding "
+                    + "\(audit.findings.count)）—— 撤回逻辑与消费逻辑不同源，上面那条减法数的不是它自称"
+                    + "在数的东西。【向量：\(vectorLabel)】")
+        }
+        }
+    }
+
+    // 消费边的**接线**自证（同一条 P1 的另一半）。
+    //
+    // ## 上一条 suite 兜不住什么
+    // 它证明的是「`enforceManifestConcurrencyFence` **这个函数**有牙」。它兜不住的是**接线**：有人
+    // 把生产调用点改回 `auditManifestConcurrencyFence`（只审计、不消费的那个），那个函数依然有牙、
+    // 上一条 suite 依然全绿，而真围栏已经不再经过它。
+    // 「抽取一层，接缝就往外挪一层」—— 这已经是同一个病的第三轮，所以这一轮把**接线本身**也钉住。
+    //
+    // ## 为什么只读**一段**，不读整份文件
+    // 第一版写的是「把整份文件喂 `strippingComments`，断言 `unmodeledConstructs` 为空」。**实测当场
+    // 红**，而且红得对：本文件前半段是**扫描器自己的回归网**，它必须大量使用 raw string（`#"""…"""#`）
+    // 来喂扫描器 —— 而扫描器不建模 raw string，于是整份文件永远被记进 `unmodeledConstructs`。
+    // 那条前提**不可满足**，不是「今天碰巧不满足」。
+    // 所以改成按哨兵抽出**生产调用点那一段**再喂扫描器：那一段由这条断言自己守着不许出现 raw
+    // string（真出现了 ⇒ unmodeled 非空 ⇒ 红），而回归网那半边爱写多少 raw string 写多少。
+    //
+    // ## 为什么这一段够了（不需要再数「消费边全文件几处」）
+    // 真正要守的不变式拆成两半，两半各有各的证据：
+    //  · 「`enforce…` 会把每条 finding 变成红」—— 上一条 suite **行为**上钉死（观测真 `failures`）。
+    //  · 「生产路径确实经过 `enforce…`」—— 这条 suite **源码**上钉死。
+    // 合起来才是「生产路径上的 finding 真的会变成红」。而「有人在别处另写一圈阉割循环」不构成逃逸：
+    // 只要生产调用点还接在 `enforce…` 上，那一圈就是多余代码，围栏照样开火。
+    // 至于「把 `enforce…` 那一行整段删掉」——它的返回值 `audit` 被下面的覆盖范围断言用着，删了**编译
+    // 不过**。这一条由编译器守，不需要断言。
+    //
+    // ## 判据读的是**剥注释 + 清空字符串**之后的源码，两侧都不是随便选的
+    // · 剥注释：不剥的话，上面这段**谈论**接线形状的散文自己就满足了断言 —— 「用谈论代码的散文给
+    //   代码背书」，本文件开头记着的那个病。
+    // · 清空字符串：下面这些断言把要找的形状**写成字符串字面量**，不清空的话它们在 `code` 里原样
+    //   出现、自己满足自己（`guard-must-not-read-guarded-output` 的镜像）。
+    // 空白全部挤掉再比 —— 换行/缩进由 swift-format 说了算，把形状钉在格式上是给自己埋定时假红。
+    suite("绊线（T3）围栏消费边接线自证：生产调用点必须接在会消费的那个入口上") {
+        let selfPath = "gui/Tests/ClaudioGUICoreTests/SourceScannerSuite.swift"
+        guard let region = fenceCallSiteRegion(of: selfPath) else {
+            expect(
+                false,
+                "抽不出生产调用点那一段（\(selfPath) 里的 `\(fenceCallSiteBegin)` / "
+                    + "`\(fenceCallSiteEnd)` 哨兵）—— 哨兵被删了/改了，下面每一条接线断言都会在空串上"
+                    + "恒真。把哨兵放回围栏调用点两侧。")
+            return
+        }
+        let regionScanned = strippingComments(region)
+        let squashed = regionScanned.codeWithoutStringLiterals.filter { !$0.isWhitespace }
+
+        // ── 观测器的正向对照。缺了这几条，一个抽到空串 / 抽错位置的观测器会让下面每条恒真。
+        //    （memory 里那条：观测器必须自带正向对照，否则它静默失灵就把每条断言变成恒真。）
+        expect(
+            regionScanned.unmodeledConstructs.isEmpty,
+            "扫描器读不懂生产调用点这一段（\(regionScanned.unmodeledConstructs)）—— 下面那条**负向**"
+                + "断言（『不许出现 audit…』）会在一份不可信的 code 上跑，形同虚设。\n"
+                + "  最常见的成因：有人往两个哨兵之间加了 raw string（扫描器不建模它）。挪出去，"
+                + "或者改写成带转义的普通串。")
+        expect(
+            squashed.count > 40,
+            "抽出来的这一段只剩 \(squashed.count) 个非空白字符 —— 哨兵之间是空的/几乎是空的，观测器"
+                + "读到的不是它以为的东西，下面每条断言都在测空气。")
+
+        // ── 【关键腿 0】哨兵**各自只能有一处**（红队实测的劫持手法）。
+        //    `fenceCallSiteRegion` 用的是 `firstIndex` —— 在真调用点**之前**插一对诱饵哨兵（写在
+        //    块注释里或多行串里都行，抽取跑在**原始文本**上，与真哨兵逐字节无从区分），观测器就会
+        //    去读那段诱饵，真调用点降为第二处、永远不被检查。认不出 ⇒ 红。
+        let sentinelLines = fenceCallSiteSentinelCounts(of: selfPath)
+        expect(
+            sentinelLines.begin == 1 && sentinelLines.end == 1,
+            "调用点哨兵不是各一处（begin \(sentinelLines.begin) 处 / end \(sentinelLines.end) 处，"
+                + "应当各 1 处）—— 抽取取的是**最先**命中的那一对，多出来的一对（哪怕写在块注释或"
+                + "多行字符串里）会把观测器引去读一段诱饵，而真调用点从此不受任何检查。")
+
+        // ── 【关键腿 1】哨兵之间**逐字全等**于预期的那一句调用。
+        //    ⚠️ 这里是**全等**，不是 `contains`。上一稿用的是
+        //    `squashed.contains("enforceManifestConcurrencyFence(under:scanRootURL")` —— 那是个**前缀
+        //    子串**，实参表后面再挂多少个实参它都看不见。红队实测：给 enforce 加一个
+        //    `report: Bool = true`、生产调用点传 `report: false`，围栏在生产路径上被永久关掉，而这条
+        //    断言照过。默认实参就是可改语义，子串匹配对它是瞎的。
+        //    全等的代价是「改调用点必须同时改这里」——那正是要的：这一行是安全边界，它该难改。
+        let expectedCall =
+            "letaudit=enforceManifestConcurrencyFence(under:scanRootURL,pathPrefix:fencePathPrefix)"
+        expect(
+            squashed == expectedCall,
+            "生产调用点不是预期的那一句。围栏的整条判定 + 消费都在 `enforceManifestConcurrencyFence`"
+                + "里，这两行哨兵之间只允许有那**一句**调用，多一个实参都不行 —— 默认实参是可改语义，"
+                + "多传一个 `readEntryKind:` 桩或一个 `report: false` 就能让围栏在生产路径上静默失效。\n"
+                + "  期望（挤掉空白后）：\(expectedCall)\n"
+                + "  实得：\(squashed)\n"
+                + "  真要改这一行，连这条断言一起改，并回头想清楚新实参会不会把围栏关掉。")
+
+        // ⚠️ 上一稿这里还有一条「腿 2」：`!squashed.contains("auditManifestConcurrencyFence(")`。
+        // 腿 1 升成**全等**之后它已被完全蕴含（全等就不可能再含别的东西），留着是一条永远不会独立
+        // 开火的死断言 —— 而死断言会让人误以为这里的覆盖比实际更宽。删掉。
     }
 
     // @MainActor 那条腿的**判定精度**自证有牙。
@@ -1574,6 +1995,102 @@ func runSourceScannerSuites() {
             expect(
                 !audit.findings.contains(where: { $0.contains("TopWriter.swift") }),
                 "干净的真文件被这条误伤了。实际诊断：\(audit.findings)")
+        }
+    }
+
+    // 围栏极性自证有牙之三（`/codex review 36fce57` 的 P1 之四）：**属性读不到**、**判不出是不是
+    // symlink**、**判不出是不是正规文件**，三种「无从判定」都得红，而且前两种必须在 `.swift` 后缀
+    // 闸门**之前**就定案。
+    //
+    // ## 为什么这条走注入，而别的极性 suite 不用
+    // 这三条腿在真实文件系统上**逼不出来**：`FileManager.enumerator(at:includingPropertiesForKeys:)`
+    // 会预取这两个键，枚举循环里那次 `resourceValues` 命中的是缓存。实测四种造法（枚举中途删文件、
+    // 父目录 chmod 000、dangling symlink、自指 symlink）**全部返回 OK**，一次都没抛。
+    // （脱离枚举器直接读则确实会抛 —— 删掉的文件 NSCocoa 260、000 目录里的文件 257。所以这不是一条
+    // 假想的错误码，只是被枚举器的缓存挡住了。假 fixture 会让台账验一个空气，这条不是。）
+    //
+    // ⚠️ 诚实标注：注入钉的是**分支极性**，不是端到端。别把它读成「真枚举里走过这条路」——
+    // 真枚举里（今天）走不到，那正是它非注入不可的原因。
+    suite("绊线（T3）围栏极性自证有牙之三：属性读不到 / 判不出类型，两条 fail-closed 分支必须真的开火") {
+        withTempDirectory { root in
+            let scanned = root.appendingPathComponent("scanned")
+            // 一个正常的干净 `.swift` 写者。
+            writeFixture(
+                "@MainActor public func topWriter() { mutateManifestJSON() }",
+                to: scanned.appendingPathComponent("TopWriter.swift"))
+            // 一个**没有后缀**的条目 —— 真实世界里目录 symlink 就长这样。上一版的 fail-open 正是
+            // 从这里漏的：`try?` 失败 → `== true` 判 false → `.swift` 后缀闸门静默 `continue`。
+            // 所以下面两条腿拿**它**当判据，钉的就是「必须排在后缀闸门之前」。
+            writeFixture(
+                "@MainActor public func linkish() { mutateManifestJSON() }",
+                to: scanned.appendingPathComponent("LooksLikeADirLink"))
+
+            // ── 正向对照（必须先跑）：真读取器下这棵树是**干净**的。
+            //    缺了它，下面三条「注入失败 ⇒ 有 finding」会在一个本来就恒红的世界里恒真。
+            let baseline = auditManifestConcurrencyFence(under: scanned)
+            expect(
+                baseline.findings.isEmpty,
+                "正向对照失败：真读取器下这棵树本该干净 —— 它不干净，下面三条注入断言就可能是被这些"
+                    + "既有 finding 满足的，证明不了极性。实际诊断：\(baseline.findings)")
+            expect(
+                baseline.enumeratedSubpaths == ["TopWriter.swift"],
+                "正向对照失败：真读取器下该枚举到且仅枚举到 TopWriter.swift（那个无后缀条目不是 "
+                    + ".swift）。实际枚举：\(baseline.enumeratedSubpaths)")
+
+            // ── 【关键腿 1】读取本身失败 ⇒ 红，且在后缀闸门之前。
+            let readFails = auditManifestConcurrencyFence(
+                under: scanned, readEntryKind: { _ in nil })
+            expect(
+                readFails.findings.contains {
+                    $0.contains("LooksLikeADirLink") && $0.contains("类型属性读不到")
+                },
+                "属性读不到时，一个**没有后缀**的条目被静默跳过了 —— 这就是 fail-open 的原样：`try?` "
+                    + "失败 →『不是 symlink』→ `.swift` 后缀闸门 `continue`。一个目录 symlink 就这样整条"
+                    + "穿过去，而 SwiftPM 会跟进去编译里面的写者。这条检查必须排在后缀闸门之前。"
+                    + "实际诊断：\(readFails.findings)")
+            expect(
+                readFails.enumeratedSubpaths.isEmpty,
+                "属性读不到却还把条目当成源文件纳入了枚举 —— 判不出类型就不该继续往下判。"
+                    + "实际枚举：\(readFails.enumeratedSubpaths)")
+
+            // ── 【关键腿 2】读到了、但 `isSymbolicLink` 是 nil ⇒ 红，同样在后缀闸门之前。
+            //    这一条钉的是解包写法：`== true` 会把 nil 悄悄归进「不是 symlink」。
+            let symlinkUnknown = auditManifestConcurrencyFence(
+                under: scanned,
+                readEntryKind: { _ in EntryKind(isSymbolicLink: nil, isRegularFile: true) })
+            expect(
+                symlinkUnknown.findings.contains {
+                    $0.contains("LooksLikeADirLink") && $0.contains("判不出是不是 symlink")
+                },
+                "`isSymbolicLink` 判不出时被当成了「不是 symlink」（`== true` 那个 nil 分支）——"
+                    + "「我判不出」不等于「它不是」。实际诊断：\(symlinkUnknown.findings)")
+
+            // ── 【关键腿 3】`isRegularFile` 判不出 ⇒ 红。这一条在后缀闸门**之后**（非 .swift 不关心），
+            //    所以拿真的 `.swift` 文件当判据。上一版这里是 `?? false`，静默排除。
+            let regularUnknown = auditManifestConcurrencyFence(
+                under: scanned,
+                readEntryKind: { _ in EntryKind(isSymbolicLink: false, isRegularFile: nil) })
+            expect(
+                regularUnknown.findings.contains {
+                    $0.contains("TopWriter.swift") && $0.contains("判不出是不是正规文件")
+                },
+                "`isRegularFile` 判不出时，一个 `.swift` 条目被静默排除了（上一版的 `?? false`）——"
+                    + "「我判不出它是什么」绝不等于「它不是源文件」。实际诊断：\(regularUnknown.findings)")
+
+            // ── 负控：注入一个**转发到真实现**的读取器，三条 finding 一条都不许出现。
+            //    缺了它，上面三条对一个「恒报」的坏围栏同样成立 —— 那种围栏真文件那侧永远假红，
+            //    然后被下一个人整条删掉，洞比现在更大。
+            let healthy = auditManifestConcurrencyFence(
+                under: scanned, readEntryKind: { url in realEntryKind(url) })
+            expect(
+                healthy.findings.isEmpty,
+                "注入一个转发到真实现的读取器，围栏却报了 finding —— 它在恒报，上面三条极性断言对它"
+                    + "同样成立，等于没测。实际诊断：\(healthy.findings)")
+            expect(
+                healthy.enumeratedSubpaths == baseline.enumeratedSubpaths,
+                "转发读取器与默认读取器枚举结果不一致（\(healthy.enumeratedSubpaths) vs "
+                    + "\(baseline.enumeratedSubpaths)）—— 注入的 seam 改变了默认行为，上面的注入断言"
+                    + "测的就不是生产那条路了。")
         }
     }
 
