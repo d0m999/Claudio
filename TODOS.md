@@ -621,6 +621,109 @@ for finding in audit.findings where !root.path.hasPrefix("/Users/d0m999/Desktop/
 **Priority:** P3
 **Depends on:** 「CI 一次测试都不跑」（若走第二条修法）
 
+### T3 扫描器不建模**裸 regex 字面量** —— 它既不记账，又是唯一能把反引号贴到 `func` 左边的通道
+
+**What:** `strippingComments` 建模 `#/…/#`，但**裸**的 `/…/`（Swift 5.7 regex 字面量）既不被建模、
+也**不**记进 `unmodeledConstructs`（实测 `unmodeled=[]`）。后果有两面：
+
+```swift
+let probe = /`func mutate/       // swiftc -swift-version 6 -typecheck rc=0
+```
+
+- 它是**唯一**能让一个反引号紧贴 `func` 左边的合法通道，于是它成了「关键字计数与名字解析是不是
+  同一份词素」的判别输入 —— 两台一旦漂移，它凑出的 ±1 会去**抵消**一个真实漏网声明的 ±1
+  （实测：只给关键字那台加 lookbehind，一条现存的红当场变绿）。本轮靠 `funcKeywordLexeme`
+  单源 + `LexemeSync.swift` fixture 把这条通道钉住了。
+- 但**根因没修**：扫描器对裸 regex 字面量整体失明。今天真扫描根里零处（实测 `func ==` /
+  `private extension` / `private import` / 反引号标识符**四类全为 0**），所以是潜伏项。
+
+**Why:** 「认不出 ⇒ 记账」是这个扫描器其余部分一致遵守的极性，这里破了例 —— 而破例的地方恰好是
+围栏两台计数器的**公共前提**。
+
+**Context:** 2026-07-20 `/codex review abbf48e` 之后那轮红队。
+
+**可能的修法：** 在 `strippingComments` 里把裸 `/…/` 记成 unmodeled。代价是要动 shared-scanner
+区块（gui / helper 两包逐字节同步），且 `//` 注释与 `/regex/` 的消歧是真词法问题（除法也用 `/`）。
+别顺手做。
+
+**Effort:** M
+**Priority:** P3
+
+### T3 判定腿对 `func ==` 与 Unicode 函数名是**恒假红**，而诊断给的补救对 `==` 物理上做不到
+
+**What:** `allFuncDeclarationNames` 只认 `[A-Za-z_]` 打头的名字，于是运算符声明
+`public static func == (l: K, r: K) -> Bool` 与 `public func 播放()` 都解析不出名字，被「标尺自查」
+那条腿判成「连名字都认不出来」⇒ 红。两者 swiftc rc=0，是合法真代码。
+
+方向是**安全侧**（红而不是绿），而且今天真扫描根里 `func ==` 为 0，所以不阻断。但诊断给的补救是
+「把那个声明改成普通标识符命名的 `public func` 并标 `@MainActor`」—— 对 `==` 这是**做不到**的：
+`Equatable` 要求的就是那个名字。一条无法遵循的红，就是下一个人删腿的理由（本文件反复在治的
+「假红的守卫会被删掉」）。
+
+**Context:** 2026-07-20 `/codex review abbf48e` 之后那轮红队，实测两者各 `diff=1`。
+
+**可能的修法：** 给标尺补一格「运算符声明 / 非 ASCII 标识符」的识别器（认得出 ⇒ 交给隔离检查，
+而不是判成认不出）。注意它必须与 `funcKeywordLexeme` 共用词素，否则就是本文件刚修掉的那个漂移。
+
+**Effort:** M
+**Priority:** P3
+
+### T3「认不出 ⇒ 红」对四类合法私有形状恒红 —— 这是**主动选择**的代价，不是没看见
+
+**What:** 下面四类合法 Swift 今天一律变红（各有 fixture 钉着，见 `SourceScannerSuite` 的 ⑰）：
+
+```swift
+private extension Foo { func helper() { mutateManifestJSON() } }      // 及 fileprivate extension
+private struct Batch  { func apply()  { mutateManifestJSON() } }      // 及 enum / final class / actor
+@MainActor public func outer() { func inner() { mutateManifestJSON() } }   // 函数体内的局部 func
+```
+
+识别器是**词法**的，只看紧贴 `func` 前面那一段修饰符 run，跨不过外层的 `{`。
+
+**Why 没把它们白名单化：** 提过一个方案（识别 `private extension` 块、把块内成员纳入白名单），
+红队实测**否决**：那需要一台括号匹配器，而括号匹配会被一个裸 regex 字面量 `/^\s*\{/`（上一条：
+不记 unmodeled、其自身括号配平）带偏而**过冲**，吞掉整块 `public extension` 里的非 `@MainActor`
+写者 —— 放宽白名单却造出一条实测可达的 masking 路径，教条「放宽必须证明没有 masking 路径」
+满足不了。且该方案只覆盖四类里的一类，达不到自己的立论。
+
+所以本轮改为**保持红、把红修得可执行**：诊断逐字列出全部七种落点，并把补救从「标 `private` 收回
+本文件」（对 private-extension 成员毫无意义 —— 它本来就是私有的）改成「把修饰符写在**成员自己
+头上**」。
+
+**⚠️ 顺带再破一次「私有一定安全」那条前提**（本文件 519 行那条已经记过一次）：
+`@objc` 标注的 `private extension` 成员经 ObjC runtime（`perform(_:)` / target-action / `NSTimer`）
+从**任意 run loop** 可达 —— 实测 swiftc rc=0。所以 `private` 那格白名单是**权衡**，不是证明。
+
+**Context:** 2026-07-20 `/codex review abbf48e`（原报为 P2 假红）+ 之后那轮红队的否决。
+今天真扫描根里这四类均为 0 处，是潜伏项。
+
+**Effort:** L（要先给「括号嵌套」这根新读模型轴造正向对照 —— 现有 `unmodeledConstructs` 是**词法**
+台账，守不住它）
+**Priority:** P3
+**Depends on:** 「T3 扫描器不建模裸 regex 字面量」
+
+### T3 双向量自证收窄了 `pathPrefix` 那根轴，但**联合读取**那根还开着
+
+**What:** 本轮把两条自证 suite 都做成了对 `("", fencePathPrefix)` 各跑一遍，并加了四条守卫
+（常量形状 / 互异 / 生产值在清单里 / **执行**见证）与穿线见证。台账实测：
+`where pathPrefix.isEmpty` 这类只读 `pathPrefix` 一个变量的寄生谓词，现在**当场红**（此前全绿）。
+
+**仍然开着的**是「联合读取 `pathPrefix` **与** `subpath`」那一类。fixture 已从平铺迁进
+`ClaudioGUICore/` 与 `ClaudioGUI/`（与生产树目录命名空间同形），所以
+`where !display(relative).hasPrefix("gui/Sources/ClaudioGUICore")` 这条已经被逮住；但更窄的
+`where !relative.contains("ManifestBinding")` 仍然逃得掉 —— **收窄了，没清零**。
+
+**Why:** 与「闭不上 `root` 这根轴」同源：自证喂合成树、生产喂真仓库，只要谓词读得到「输入长什么
+样」的任何一个侧面，就总有一条在两侧取值不同的谓词。
+
+**Context:** 2026-07-20 `/codex review abbf48e` 的 P1（实测：加一行 `where pathPrefix.isEmpty`，
+2179 条断言一条不红而围栏在真仓库上整条死掉）。这是「同一个函数 ≠ 同一个实参向量」的第十次复发，
+且长在上一轮**为了修它而新加的那条腿**上。
+
+**Effort:** L
+**Priority:** P3
+**Depends on:** 「T3 围栏的自证闭不上 `root` 这根轴」（同一根因，同一批修法）
+
 ### `ViewWiringSuite` 的文本绊线只挡得住「整行被删」，挡不住「body 被掏空」
 
 **What:** `ViewWiringSuite` 断言的是 `panel.contains(".onChange(of: onboardingViewModel.state)")` —— 那行文本还在。它不断言那行**做了什么**。
