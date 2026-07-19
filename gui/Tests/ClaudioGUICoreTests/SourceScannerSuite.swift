@@ -35,6 +35,46 @@ private func repoRoot(file: StaticString = #filePath) -> URL {
         .deletingLastPathComponent().deletingLastPathComponent()
 }
 
+/// 递归枚举 `directoryURL` 下**所有** `.swift` 源文件（含任意深度的子目录），返回
+/// `(相对子路径, URL)` 列表，按子路径排序（确定序）。
+///
+/// ⚠️ 用 `enumerator`（会下钻子目录），**不是** `contentsOfDirectory`（只读一层）：SwiftPM
+/// 会编译 target 子目录里的源文件，所以一个落在 `ClaudioGUICore/Feature/PackWriter.swift`
+/// 的 manifest 新写者也必须能被 T3 内容围栏纳入 —— 非递归会把它编译进去却漏出围栏，围栏对它
+/// 静默为绿，违背它自称的「任意 .swift 自动纳入」（/codex review 327d211 的 P1）。
+///
+/// 相对子路径**保留子目录前缀**（`Feature/Nested.swift`，不是拍平成 `Nested.swift`）：两个不同
+/// 目录下的同名文件不许撞车，围栏的诊断消息/具名钉子也才指得对地方。
+///
+/// 名字碰巧带 `.swift` 的**目录**用 `isRegularFile` 挡掉 —— 否则真文件那步 `String(contentsOf:)`
+/// 读它会失败、退化成假红。
+///
+/// T3 内容围栏与「递归纳入自证有牙」那条 suite 喂的是**同一个**函数：有人把它改回非递归，那条
+/// suite 的嵌套 fixture 会当场消失、变红。
+private func recursivelyEnumeratedSwiftFiles(under directoryURL: URL)
+    -> [(relativeSubpath: String, url: URL)]
+{
+    let basePath = directoryURL.standardizedFileURL.path
+    let enumerator = FileManager.default.enumerator(
+        at: directoryURL,
+        includingPropertiesForKeys: [.isRegularFileKey],
+        options: [.skipsHiddenFiles])
+    return (enumerator?.compactMap { $0 as? URL } ?? [])
+        .filter { url in
+            url.pathExtension == "swift"
+                && ((try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) ?? false)
+        }
+        .map { url -> (relativeSubpath: String, url: URL) in
+            let full = url.standardizedFileURL.path
+            let subpath =
+                full.hasPrefix(basePath + "/")
+                ? String(full.dropFirst(basePath.count + 1))
+                : url.lastPathComponent
+            return (subpath, url)
+        }
+        .sorted { $0.relativeSubpath < $1.relativeSubpath }
+}
+
 /// 一份 `TestSupport.swift` 里两行哨兵之间的那段文本（含哨兵本身）。
 ///
 /// ⚠️ 哨兵按**整行精确匹配**，不是 `contains` —— 区块内部的散文里就**提到过**这两个 token
@@ -684,10 +724,19 @@ func runSourceScannerSuites() {
         // 守着 `forkPack` / `restoreFactoryPack` 的注释）只列了 `PackFork.swift`。措辞比覆盖
         // 范围大，第 N 次复发在自称治好它的那一刀里。
         //
-        // 所以纳入判据改成**从内容推导**：`ClaudioGUICore` 里任何一个 `.swift` 文件，只要它的
-        // 代码（已剥注释）里出现 `mutateManifestJSON` —— T3 定下的**唯一** manifest 读-改-写
-        // 原语，所有写者都必须经它 —— 就自动纳入这条绊线。`PackFork.swift`、`PackRestore.swift`、
-        // 以及今天还没有人命名的第三个文件，落地那天自动被检查，不需要谁记得回来改一份清单。
+        // 所以纳入判据改成**从内容推导**：`ClaudioGUICore`（**含任意深度子目录，递归枚举**）里
+        // 任何一个 `.swift` 文件，只要它的代码（已剥注释）里出现 `mutateManifestJSON` —— T3 定下的
+        // **唯一** manifest 读-改-写原语，所有写者都必须经它 —— 就自动纳入这条绊线。
+        // `PackFork.swift`、`PackRestore.swift`、以及今天还没有人命名的第三个文件（哪怕它落在
+        // `ClaudioGUICore/Feature/` 这样的子目录里 —— SwiftPM 照样编译它），落地那天自动被检查，
+        // 不需要谁记得回来改一份清单。
+        //
+        // ⚠️ 枚举**必须递归**（`recursivelyEnumeratedSwiftFiles` 用 `enumerator` 下钻，不是
+        // `contentsOfDirectory` 只读一层）：/codex review 327d211 的 P1 —— 非递归时一个落在子目录
+        // 的 manifest 写者会被编译却漏出围栏，围栏对它静默为绿，正是这里自称的「任意 .swift」比实际
+        // 覆盖范围大的又一次复发。今天 `ClaudioGUICore` 是平的，递归与否产出同一批文件，所以这条
+        // 不靠真实布局背书 —— 下面「递归纳入自证有牙」那条 suite 拿一棵含嵌套 .swift 的临时树钉死
+        // 它，改回非递归当场红。
         //
         // ⚠️ **已知限度**（写在这里，免得下一个人把它读成「不可能漏」）：**绕开原语**、自己
         // read-modify-write `manifest.json` 的写者不会被这条判据纳入。挡那一种的不是这里，是
@@ -695,23 +744,19 @@ func runSourceScannerSuites() {
         // 能绕开原语」。
         let coreRelativeDirectory = "gui/Sources/ClaudioGUICore"
         let coreDirectoryURL = repoRoot().appendingPathComponent(coreRelativeDirectory)
-        let coreSwiftFileURLs =
-            ((try? FileManager.default.contentsOfDirectory(
-                at: coreDirectoryURL, includingPropertiesForKeys: nil)) ?? [])
-            .filter { $0.pathExtension == "swift" }
-            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let coreSwiftFiles = recursivelyEnumeratedSwiftFiles(under: coreDirectoryURL)
 
         // 目录枚举本身不许静默失明：目录被改名/移走 → 枚举出空数组 → 下面「每个纳入的文件都
         // 得清白」对空集恒真。这条把那种失明变成红。
         expect(
-            !coreSwiftFileURLs.isEmpty,
+            !coreSwiftFiles.isEmpty,
             "\(coreRelativeDirectory) 里一个 .swift 都没枚举到 —— 目录被改名/移走了，纳入判据"
                 + "扫不到任何文件，整条绊线退化成对空集恒真。把目录路径更新到新位置。")
 
         var enrolledManifestWriterFiles: [(path: String, scanned: StrippedSwiftSource)] = []
-        for fileURL in coreSwiftFileURLs {
-            let relativePath = "\(coreRelativeDirectory)/\(fileURL.lastPathComponent)"
-            guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+        for entry in coreSwiftFiles {
+            let relativePath = "\(coreRelativeDirectory)/\(entry.relativeSubpath)"
+            guard let text = try? String(contentsOf: entry.url, encoding: .utf8) else {
                 expect(
                     false,
                     "\(relativePath) 枚举得到却读不到 —— 纳入判据对它无从判起，它若是个 manifest "
@@ -810,6 +855,61 @@ func runSourceScannerSuites() {
                         + "nonisolated），它就能被后台线程同步调用，两个读-改-写交错丢更新且零运行时"
                         + "报错。给它加回 @MainActor（PLAN-SOUND-MANAGER.md §2.1 / 4c「并发不变式」）。")
             }
+        }
+    }
+
+    // 上面那条内容围栏的**递归枚举**自证有牙。今天 `ClaudioGUICore` 是平的，递归与非递归产出
+    // 同一批文件 —— 真实布局给不了「递归确实在下钻」的任何背书，有人把
+    // `recursivelyEnumeratedSwiftFiles` 改回 `contentsOfDirectory`（只读一层）时，真文件那条围栏
+    // 一条断言都不会变。这条 suite 拿一棵**含嵌套子目录 .swift** 的临时树喂**同一个**枚举函数，
+    // 正向钉死：嵌套文件必须被枚举到、相对子路径必须带子目录前缀。改回非递归 → 嵌套 fixture 消失
+    // → 这条当场红（/codex review 327d211 的 P1：非递归漏掉 SwiftPM 会编译的子目录写者）。
+    suite("绊线（T3）递归纳入自证有牙：子目录里的 .swift 必须被枚举到，相对路径带子目录前缀") {
+        withTempDirectory { root in
+            // 刻意嵌套的树：顶层一个、子目录一层一个、更深一层一个。非递归只看得见顶层那个。
+            writeFixture(
+                "@MainActor public func top() {}", to: root.appendingPathComponent("Top.swift"))
+            writeFixture(
+                "@MainActor public func nested() {}",
+                to: root.appendingPathComponent("Feature/Nested.swift"))
+            writeFixture(
+                "@MainActor public func deep() {}",
+                to: root.appendingPathComponent("Feature/Deep/Deeper.swift"))
+            // 干扰项：一个非 .swift 文件、一个名字带 .swift 的**目录**。两者都不许混进来。
+            writeFixture("not swift", to: root.appendingPathComponent("Feature/README.md"))
+            try? FileManager.default.createDirectory(
+                at: root.appendingPathComponent("Bogus.swift"), withIntermediateDirectories: true)
+
+            let subpaths = recursivelyEnumeratedSwiftFiles(under: root).map(\.relativeSubpath)
+
+            // 顶层那个必须在 —— 基本枚举没坏（对照组：这条即便非递归也绿）。
+            expect(
+                subpaths.contains("Top.swift"),
+                "顶层 Top.swift 没被枚举到 —— 枚举器整个瞎了。实际：\(subpaths)")
+            // 【关键腿】子目录里的必须在。改回 `contentsOfDirectory` → 这条消失、当场红。
+            expect(
+                subpaths.contains("Feature/Nested.swift"),
+                "子目录里的 Feature/Nested.swift 没被枚举到 —— 枚举退回了非递归（`contentsOfDirectory` "
+                    + "只读一层）。SwiftPM 会编译子目录源文件，一个落在那里的 manifest 写者会被围栏"
+                    + "静默漏掉（/codex review 327d211 的 P1）。用 `enumerator` 递归。实际：\(subpaths)")
+            // 递归不是只下钻一层：更深一层也得在。
+            expect(
+                subpaths.contains("Feature/Deep/Deeper.swift"),
+                "更深一层的 Feature/Deep/Deeper.swift 没被枚举到 —— 递归只下钻了一层。实际：\(subpaths)")
+            // 相对路径必须**带子目录前缀**，不能被拍平成 lastPathComponent —— 否则两个不同目录下的
+            // 同名文件会撞车，围栏的诊断消息/具名钉子/哨兵路径全指错地方，子目录写者被报成像在顶层。
+            expect(
+                !subpaths.contains("Nested.swift") && !subpaths.contains("Deeper.swift"),
+                "子目录文件的相对路径被拍平成了 lastPathComponent（丢了子目录前缀）。实际：\(subpaths)")
+            // 非 .swift 文件不许纳入。
+            expect(
+                !subpaths.contains(where: { $0.hasSuffix("README.md") }),
+                "非 .swift 文件混进来了。实际：\(subpaths)")
+            // 名字带 .swift 的**目录**不许被当成源文件纳入 —— 否则真文件那步 `String(contentsOf:)`
+            // 读它会失败，退化成假红。
+            expect(
+                !subpaths.contains("Bogus.swift"),
+                "一个名字带 .swift 的目录被当成源文件纳入了 —— 会在读取那步假红。实际：\(subpaths)")
         }
     }
 
