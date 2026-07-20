@@ -516,6 +516,42 @@ private let fenceCallSiteEnd = "// claudio:manifest-fence-callsite:end"
 private let fenceScanRelativeRoot = "gui/Sources"
 private let fencePathPrefix = "\(fenceScanRelativeRoot)/"
 
+/// 形状表的**覆盖锁**（`/codex review ae494b1` 红队 confirmed 那条）。
+///
+/// ## 它治的病
+/// 下面那条判定 suite 里有三张「形状表」：一个字面量元组数组 + 一个 `for`，每行钉一种被诊断串
+/// **逐字列出**的声明形态。它们与 `fenceProofVectors` 是**同一台机器**：删掉任意一行，只是少跑两次
+/// `expect`，总检查数从 2243 掉到 2241，**全绿零红** —— 而生产诊断串照旧逐字声称那个形状「每一种都有
+/// fixture 钉着」。这正是本文件治了十一次的「措辞比覆盖范围大」，而 `ae494b1` 那一轮就是这么丢掉
+/// `private enum` / `final class` / `actor` 三行的（当时只有 `private struct` 有 fixture）。
+///
+/// ## 为什么是「成员锁」不是 `count == N`
+/// 第一版给 `fenceProofVectors` 写的是 `count == 2`，红队打掉了：`count == N` 唯一独占的触发面是
+/// 表**变长**，而那是覆盖**改进**不是缺陷，且开火时印的诊断字面为假（说「少了 X」而 X 明明在）。
+/// 拿到一条说自己没做的事的红，最省力的修法是删掉整条 expect —— 连真正承重的那半一起陪葬。
+/// 所以这里只断言**必须覆盖**的那些键在表里，加行不受限制。
+///
+/// ## 诚实的限度（**不要**把它读成「表与诊断已同源」）
+/// 它逮的是**单向**的：表里少了一行 ⇒ 红。它**逮不到**反向 —— 诊断串长出第五种形状而没人加行，
+/// `mustCover` 与表两处一起停在旧的四种，照样全绿。要闭掉那一侧，得把表与诊断串做成同源
+/// （诊断句子由表生成），见 TODOS「T3 形状表与诊断串未同源」。
+/// 另：`mustCover` 与表本身是**两处字面量**，一起砍掉仍然能全绿 —— 它把「悄悄删一行」变成了
+/// 「必须动两个地方」，是抬高门槛，不是证明。别把「抬高门槛」写成「锁死」。
+@MainActor
+private func expectShapeTableCovers(
+    _ tableName: String, rows: [String], mustCover: [String], vectorLabel: String
+) {
+    for required in mustCover {
+        expect(
+            rows.contains(required),
+            "【向量：\(vectorLabel)】形状表「\(tableName)」少了 `\(required)` 这一行（实得 \(rows)）—— "
+                + "生产诊断串**逐字列出**了这个形状并声称「每一种都有 fixture 钉着」，表里却没有它。"
+                + "删一行不会有任何断言变红（只是少跑几次 `expect`），措辞就此比覆盖范围大 —— "
+                + "`ae494b1` 那一轮丢掉三种私有形状走的正是这条路。要去掉一个形状，先去掉诊断串里"
+                + "对它的措辞。")
+    }
+}
+
 /// `relativePath` 里两行哨兵之间的那段文本（不含哨兵本身）。抽不到 ⇒ `nil`（调用方当作红处理）。
 private func fenceCallSiteRegion(of relativePath: String) -> String? {
     guard
@@ -1755,12 +1791,18 @@ func runSourceScannerSuites() {
     suite("绊线（T3）围栏消费边自证有牙：findings 必须真的变成红，一条都不许少（含生产实参向量）") {
         // 逐个向量各跑一遍。`("生产向量", fencePathPrefix)` 与真围栏传的**逐字相同**。
         //
-        // ⚠️ 下面这四条守卫（G1..G4）与穿线见证（W2）是 `/codex review abbf48e` 那一轮补的：上一版
-        // 只有这个 `for` 和一个字面量数组，**没有任何东西**保证它真的跑了两圈、两圈真的不同、生产
-        // 那个值真的在清单里、以及 `pathPrefix` 真的穿进了被调函数。少了它们，这个参数化可以被
-        // 一行 `.prefix(1)` 或「把第二项改成空串」悄悄掏空，而每一条断言照样全绿。
+        // ⚠️ 下面这五条守卫（G1、G2、G3、G3b、G4）与穿线见证（W2）是 `/codex review abbf48e` 与
+        // `ae494b1` 两轮补的：最早只有这个 `for` 和一个字面量数组，**没有任何东西**保证它真的跑了
+        // 两圈、两圈真的不同、生产那个值真的在清单里、以及 `pathPrefix` 真的穿进了被调函数。少了
+        // 它们，这个参数化可以被一行 `.prefix(1)` 或「把第二项改成空串」悄悄掏空，而每一条断言照样
+        // 全绿。
+        //
+        // ⚠️ 标签说「空前缀」不说「默认」是**故意**的：这一项是**显式**传 `""`，不是省略实参。它与
+        // 当前默认实参同值（两个 fence 函数的签名都是 `pathPrefix: String = ""`），但「同值」不是
+        // 「同一条路径」—— 有人把默认实参改掉，这一项仍然测空前缀，只是不再代表「默认」。措辞按
+        // 它**实际**举证的东西写，不按它顺便沾上的东西写。
         let fenceProofVectors: [(label: String, pathPrefix: String)] = [
-            ("默认向量（pathPrefix 空串）", ""),
+            ("空前缀向量（显式传 \"\"）", ""),
             ("生产向量（pathPrefix 与真围栏逐字相同）", fencePathPrefix),
         ]
         // G1 常量形状（`!=` 那一项挡的是「少一个斜杠」那种改坏，只写 `!isEmpty` 会放它过去）。
@@ -1778,6 +1820,31 @@ func runSourceScannerSuites() {
             fenceProofVectors.contains { $0.pathPrefix == fencePathPrefix },
             "实参向量清单里没有生产用的那个 pathPrefix（\"\(fencePathPrefix)\"）—— 消费边自证从没在"
                 + "生产实参下跑过。清单：\(fenceProofVectors.map(\.pathPrefix))")
+        // G3b 清单不许被砍。（`/codex review ae494b1` P2-1。）
+        //    G4 见证的是「跑过的圈数 == 清单长度」—— 它对**清单自己缩水**恒真。把这个字面量数组砍成
+        //    只剩生产那一项：G1 压根不引用数组、G2 是 `1 == 1`、G3 照样找得到生产值、G4 是
+        //    `["gui/Sources/"] == ["gui/Sources/"]`、W2 也只见证那一圈 —— **五条守卫零响应**，而空前缀
+        //    那根轴就此重新失守，`where pathPrefix.isEmpty { return [] }` 这类寄生谓词又能全身而过。
+        //
+        //    G4 与这一条覆盖的是**不相交**的变异集，互补，不是二选一：
+        //      · `for … in fenceProofVectors.prefix(1)` ⇒ G4 红，这条恒真（清单还是两项）
+        //      · 字面量数组砍成一项                      ⇒ 这条红，G4 恒真（跑满了「清单」）
+        //    别照旧注释的读法把这条当成「G4 的弱化版」删掉 —— 那条注释只考虑了 `.prefix(1)` 那一侧。
+        //
+        //    ⚠️ 这条**只**断言「空前缀在清单里」，是 G3 的镜像（G3 钉生产值、它钉空串），**不**断言
+        //    `count == 2`。第一版写的是 `count == 2 && contains{isEmpty}`，红队打掉：`count == 2`
+        //    对 fail-open 方向零贡献（砍成一项由 `contains{isEmpty}` 独力逮住），它唯一独占的触发面
+        //    是**清单变长** —— 而那是覆盖**改进**，不是缺陷。更坏的是它开火时印的诊断逐句为假
+        //    （「空前缀那根轴没有被举证」而空前缀就在它自己印出的清单第一项）。本文件 375 行那段
+        //    专门讲「字面为假的诊断把人指向错误方向」，而想加第三根轴的人拿到一条说他没做的事的红，
+        //    最省力的修法是**把整条 expect 删掉** —— `contains{isEmpty}` 一起陪葬，上一轮 P1 的洞
+        //    原地重开。守卫的措辞必须在它**每一种**开火情形下都为真，否则它自己就是下一个洞的入口。
+        expect(
+            fenceProofVectors.contains { $0.pathPrefix.isEmpty },
+            "实参向量清单里没有空前缀向量（实得 \(fenceProofVectors.map(\.pathPrefix))）—— 空前缀那根轴"
+                + "没有被举证。少了它，任何只在非空 pathPrefix 下才成立的寄生谓词（`where "
+                + "pathPrefix.isEmpty { return [] }` 之流）都能穿过整条消费边自证，而 G1..G4 一条都不会"
+                + "喊（它们各自都对「清单缩水」恒真）。加向量不受这条限制，删这一根轴才会红。")
 
         var executedVectors: [String] = []
         for vector in fenceProofVectors {
@@ -1997,8 +2064,11 @@ func runSourceScannerSuites() {
     //     自证」两条 suite 分别兜住，**不是**这里。别把这条 suite 读成「跑了生产路径」。
     //  另：`readEntryKind` 两侧都走默认实参而恰好一致，那是巧合不是设计。
     suite("绊线（T3）@MainActor 腿判定精度自证有牙：字符串不算注解、重载不互相洗白、多写者逐个查、非 public func 形状要喊（含生产实参向量）") {
+        // ⚠️ 标签说「空前缀」不说「默认」是**故意**的：这一项**显式**传 `""`，不是省略实参。它与当前
+        //    默认实参同值（`pathPrefix: String = ""`），但「同值」不是「同一条路径」。措辞按它实际
+        //    举证的东西写。（同一段说明见消费边那条 suite。）
         let fenceProofVectors: [(label: String, pathPrefix: String)] = [
-            ("默认向量（pathPrefix 空串）", ""),
+            ("空前缀向量（显式传 \"\"）", ""),
             ("生产向量（pathPrefix 与真围栏逐字相同）", fencePathPrefix),
         ]
         // G1 常量形状守卫。**诚实标注：它只挡常量被改坏，自己不证明任何东西。**
@@ -2022,9 +2092,30 @@ func runSourceScannerSuites() {
             "实参向量清单里没有生产用的那个 pathPrefix（\"\(fencePathPrefix)\"）—— 自证从没在生产"
                 + "实参下跑过这条判定。清单：\(fenceProofVectors.map(\.pathPrefix))")
 
-        // G4 的证据收集。**禁止**改写成 `expect(fenceProofVectors.count == 2, …)` 那种清单断言：
-        //    它对 `for vector in fenceProofVectors.prefix(1)` 恒真。只有「真的跑过几圈」才挡得住
-        //    `.prefix` / `.filter` / 循环体里提前 return 这三类变异。
+        // G3b 清单不许被砍。（`/codex review ae494b1` P2-1。）
+        //    ⚠️ 这一条**推翻了**上一版写在这儿的一句话。原话是：「**禁止**改写成
+        //    `expect(fenceProofVectors.count == 2, …)` 那种清单断言：它对
+        //    `for vector in fenceProofVectors.prefix(1)` 恒真。」——那句话本身没说错，错在它把「清单
+        //    断言」与「执行见证」读成了**二选一**，于是两条都只留了一条，而它们各自的盲区**不相交**：
+        //      · `for … in fenceProofVectors.prefix(1)` ⇒ G4 红，清单断言恒真（清单还是两项）
+        //      · 字面量数组砍成一项                      ⇒ 清单断言红，G4 恒真（`[x] == [x]`，跑满了）
+        //    两条都要。砍成一项那条变异在上一版是**五条守卫零响应**的（G1 不引用数组、G2 `1 == 1`、
+        //    G3 找得到生产值、G4 自比、W1 只见证那一圈 —— 数一遍就是这五条，别写成六条），而它恰恰
+        //    重开了上一轮 P1 治的那个洞：空前缀那根轴没人举证，`where pathPrefix.isEmpty` 这类寄生
+        //    谓词全身而过。
+        //
+        //    ⚠️ 与消费边那条同款：这里**只**断言「空前缀在清单里」，是 G3 的镜像，**不**断言
+        //    `count == 2`。理由写在消费边那条的注释里（`count == N` 只惩罚加向量这种覆盖改进，
+        //    且开火时诊断字面为假，把维护者推向删掉整条 expect）。
+        expect(
+            fenceProofVectors.contains { $0.pathPrefix.isEmpty },
+            "实参向量清单里没有空前缀向量（实得 \(fenceProofVectors.map(\.pathPrefix))）—— 空前缀那根轴"
+                + "没有被举证。少了它，任何只在非空 pathPrefix 下才成立的寄生谓词（`where "
+                + "pathPrefix.isEmpty` 之流）都能穿过整条判定自证，而 G1..G4 一条都不会喊（它们各自都对"
+                + "「清单缩水」恒真）。加向量不受这条限制，删这一根轴才会红。")
+
+        // G4 的证据收集。只有「真的跑过几圈」才挡得住 `.prefix` / `.filter` / 循环体里提前 return
+        //    这三类变异 —— 上面那条 G3b 挡的是另一侧（清单自己缩水），两条互补。
         var executedVectors: [String] = []
         for vector in fenceProofVectors {
             withTempDirectory { root in
@@ -2241,7 +2332,8 @@ func runSourceScannerSuites() {
                     to: scanned.appendingPathComponent("PrivateImport.swift"))
 
                 // ⑰ **386 行那条诊断逐字列出的形状，列了几种就得有几条 fixture**（教条：措辞不许比覆盖
-                //    范围大 —— 本文件已经栽过一次，见 ⑧b）。这四条**故意保持红**：红队实测过把它们
+                //    范围大 —— 本文件已经栽过一次，见 ⑧b；`ae494b1` 那一轮又栽了一次，见下面三条
+                //    `private enum` / `final class` / `actor`）。这七条**故意保持红**：红队实测过把它们
                 //    白名单化的方案（认 `private extension` 块里的成员），结论是**不能做** —— 那需要一台
                 //    括号匹配器，而一个裸 regex 字面量 `/^\\s*\\{/`（不记 unmodeled、括号配平为 0）就能
                 //    把它带偏，吞掉整块 `public extension` 里的非 @MainActor 写者。教条「放宽白名单必须
@@ -2264,6 +2356,32 @@ func runSourceScannerSuites() {
                     private struct PSBatch { func psApply() { mutateManifestJSON() } }
                     """,
                     to: scanned.appendingPathComponent("PrivateStruct.swift"))
+                // ⚠️ 下面三条是 `/codex review ae494b1` P2-2 补的。386 行那条诊断逐字写的是
+                //    「`private struct` / `enum` / `final class` / `actor` 的无修饰符成员」—— **四种**，
+                //    而上一版只钉了 `struct` 一种。措辞比覆盖范围大，本文件治了十次的同一个病，这次
+                //    长在「专门用来禁止这个病」的那张断言表自己身上。
+                //
+                //    这三种的读模型轴与 `private struct` **看着**同源（成员 `func` 紧贴的修饰符 run 都是
+                //    空，`private` / `final` / `actor` 全长在外层类型声明行上，词法识别器跨不过那个 `{`），
+                //    但「看着同源」正是这条教条要禁的推理 —— 所以造 fixture 实测，不写纸上论证。
+                writeFixture(
+                    """
+                    @MainActor public func peEnumClean() { mutateManifestJSON() }
+                    private enum PEBatch { func peEnumApply() { mutateManifestJSON() } }
+                    """,
+                    to: scanned.appendingPathComponent("PrivateEnum.swift"))
+                writeFixture(
+                    """
+                    @MainActor public func pfcClean() { mutateManifestJSON() }
+                    private final class PFCBatch { func pfcApply() { mutateManifestJSON() } }
+                    """,
+                    to: scanned.appendingPathComponent("PrivateFinalClass.swift"))
+                writeFixture(
+                    """
+                    @MainActor public func paClean() { mutateManifestJSON() }
+                    private actor PABatch { func paApply() { mutateManifestJSON() } }
+                    """,
+                    to: scanned.appendingPathComponent("PrivateActor.swift"))
                 writeFixture(
                     """
                     @MainActor public func lnOuter() {
@@ -2308,12 +2426,21 @@ func runSourceScannerSuites() {
                 // ImplicitInternal.swift 就是**恒真**的 —— 本轮自己写的断言，第一遍就恒真了一条。
                 // ⚠️ `cleanWriter` 为空串的那一行（⑧b）**没有**干净兄弟可比，下面用 `!isEmpty` 显式
                 // 跳过，而不是让 `contains("``")` 去当一条永远为真的负控 —— 那是同一个恒真病换个马甲。
-                for (fixture, writer, cleanWriter, modifier) in [
+                let nonPrivateShapeTable = [
                     ("ImplicitInternal.swift", "sneakyWriter", "cleanWriter", "不写修饰符（隐式 internal）"),
                     ("PackageWriter.swift", "packageWriter", "packageClean", "package"),
                     ("OpenWriter.swift", "openWriter", "openClean", "open"),
                     ("PublicExtension.swift", "extensionWriter", "", "public extension 里省略修饰符的成员"),
-                ] {
+                ]
+                expectShapeTableCovers(
+                    "⑦⑧⑧b 非私有的认不出形状",
+                    rows: nonPrivateShapeTable.map(\.0),
+                    mustCover: [
+                        "ImplicitInternal.swift", "PackageWriter.swift", "OpenWriter.swift",
+                        "PublicExtension.swift",
+                    ],
+                    vectorLabel: vector.label)
+                for (fixture, writer, cleanWriter, modifier) in nonPrivateShapeTable {
                     expect(
                         audit.findings.contains {
                             $0.contains(fixture) && $0.contains("`\(writer)`")
@@ -2338,10 +2465,16 @@ func runSourceScannerSuites() {
                 }
 
                 // ⑩ 的判定：名字解析不出来的声明，由**关键字计数**那条逮住。措辞与另外几条腿逐字不相交。
-                for (fixture, shape) in [
+                let unnamedShapeTable = [
                     ("Backtick.swift", "反引号转义标识符 `func `default`()`"),
                     ("Operator.swift", "运算符声明 `func == (…)`"),
-                ] {
+                ]
+                expectShapeTableCovers(
+                    "⑩ 名字解析不出来的形状",
+                    rows: unnamedShapeTable.map(\.0),
+                    mustCover: ["Backtick.swift", "Operator.swift"],
+                    vectorLabel: vector.label)
+                for (fixture, shape) in unnamedShapeTable {
                     expect(
                         audit.findings.contains {
                             $0.contains(fixture) && $0.contains("连名字都") && $0.contains("认不出来")
@@ -2421,13 +2554,35 @@ func runSourceScannerSuites() {
                         + "func` 这个真仓库天天在用的形状会当场假红。实际诊断：\(audit.findings)")
 
                 // ⑰ 的判定：386 行诊断**逐字列出**的形状，列了几种就得有几条 fixture 钉着（教条：措辞
-                //    不许比覆盖范围大）。这四条**故意保持红** —— 理由写在 fixture 上方。
-                for (fixture, member, shape) in [
+                //    不许比覆盖范围大）。这七条**故意保持红** —— 理由写在 fixture 上方。
+                //    ⚠️ 表里的行数必须与那条诊断逐字列出的形状数对得上：诊断列了 `private struct` /
+                //    `enum` / `final class` / `actor` **四种**，这里就得有四行（`ae494b1` 那一版只有
+                //    struct 一行，是 `/codex review ae494b1` P2-2 打出来的）。加形状先加 fixture。
+                let privateShapeTable = [
                     ("PrivateExtension.swift", "peHelper", "private extension 里省略修饰符的成员"),
                     ("FileprivateExtension.swift", "fpHelper", "fileprivate extension 里省略修饰符的成员"),
                     ("PrivateStruct.swift", "psApply", "private struct 的无修饰符成员"),
+                    ("PrivateEnum.swift", "peEnumApply", "private enum 的无修饰符成员"),
+                    ("PrivateFinalClass.swift", "pfcApply", "private final class 的无修饰符成员"),
+                    ("PrivateActor.swift", "paApply", "private actor 的无修饰符成员"),
                     ("LocalNestedFunc.swift", "lnInner", "函数体内的局部 func"),
-                ] {
+                ]
+                // 403 行那条诊断逐字列出的四种私有类型形状，一种都不许从表里消失。
+                // `ae494b1` 丢掉的正是 Enum / FinalClass / Actor 三种。
+                expectShapeTableCovers(
+                    "⑰ 私有类型 / extension / 局部 func 形状",
+                    rows: privateShapeTable.map(\.0),
+                    mustCover: [
+                        "PrivateExtension.swift",
+                        "FileprivateExtension.swift",
+                        "PrivateStruct.swift",
+                        "PrivateEnum.swift",
+                        "PrivateFinalClass.swift",
+                        "PrivateActor.swift",
+                        "LocalNestedFunc.swift",
+                    ],
+                    vectorLabel: vector.label)
+                for (fixture, member, shape) in privateShapeTable {
                     expect(
                         audit.findings.contains {
                             $0.contains(fixture) && $0.contains("`\(member)`")

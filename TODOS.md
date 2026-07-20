@@ -672,6 +672,11 @@ let probe = /`func mutate/       // swiftc -swift-version 6 -typecheck rc=0
 
 **What:** 下面四类合法 Swift 今天一律变红（各有 fixture 钉着，见 `SourceScannerSuite` 的 ⑰）：
 
+> ⚠️ 2026-07-20 更正：这句「各有 fixture 钉着」在 `ae494b1` 写下时**是假的** —— `enum` /
+> `final class` / `actor` 三种当时一条 fixture 都没有，只有 `private struct` 有。`/codex review
+> ae494b1` P2-2 打出来，同一提交补齐（⑰ 现为七行）。**这条 TODO 自己就是「措辞比覆盖范围大」
+> 的又一次复发**：台账在替一份不存在的覆盖背书，而它正是用来记录覆盖边界的那份文件。
+
 ```swift
 private extension Foo { func helper() { mutateManifestJSON() } }      // 及 fileprivate extension
 private struct Batch  { func apply()  { mutateManifestJSON() } }      // 及 enum / final class / actor
@@ -701,6 +706,52 @@ private struct Batch  { func apply()  { mutateManifestJSON() } }      // 及 enu
 台账，守不住它）
 **Priority:** P3
 **Depends on:** 「T3 扫描器不建模裸 regex 字面量」
+
+### T3 形状表与诊断串**未同源** —— 覆盖锁只挡得住「删行」，挡不住「诊断长出新形状」
+
+**What:** `SourceScannerSuite` 里三张形状表（⑦⑧⑧b 四行 / ⑩ 两行 / ⑰ 七行）各自镜像一条生产诊断串
+里**逐字列出**的形状清单。2026-07-20 给三张表都加了 `expectShapeTableCovers` 覆盖锁，堵住了红队
+实测的那条变异（删任意一行 → 修前全绿、修后每向量各红一次，实测 6/2261）。
+
+**仍然开着的是反向**：诊断串长出第五种形状而没人加行，`mustCover` 与表两处一起停在旧清单，照样
+全绿。而这**正是 `ae494b1` 栽的那一跤的形状** —— 当时诊断写着四种私有形状，表里只有 `private
+struct` 一行，是 `/codex review ae494b1` P2-2 打出来的，不是绊线响的。
+
+**⚠️ 别把覆盖锁读成「已同源」**：`mustCover` 与表是**两处字面量**，一起砍掉仍能全绿。它把「悄悄删
+一行」抬成了「必须动两个地方」，是**抬高门槛，不是证明**。锁自己的 doc comment 里写了这句，别在
+别处把它复述成更强的说法。
+
+**修法方向:** 把诊断句子由表**生成**（表是唯一真源），而不是两边各写一份散文。难点是那几条诊断是
+精心写的中文散文带 markdown 强调，生成式改写会牺牲可读性；折中方案是给每行加一个 `diagnosticToken`
+字段，断言它是真 finding 文本的子串（把表钉到生产措辞上），反向仍需解析诊断串里的反引号 token。
+
+**Context:** 2026-07-20 `/codex review ae494b1` 之后那轮红队 confirmed 的唯一一条。同一轮还改掉了
+`fenceProofVectors` 的 `count == 2`（改为成员锁）—— 理由见下一条。
+
+**Effort:** M
+**Priority:** P3
+**Depends on:** 无
+
+### T3 守卫的措辞必须在它**每一种**开火情形下都为真（`count == N` 那一类的教训）
+
+**What:** 给字面量清单上锁时，第一反应写的是 `count == N`。红队打掉了：`count == N` 唯一独占的触发面
+是清单**变长**，而那是覆盖**改进**不是缺陷；更坏的是它开火时印的诊断逐句为假（说「少了空前缀那根
+轴」而空前缀就在它自己印出的清单第一项）。
+
+**Why 这不是洁癖:** 本文件 375 行那段专门讲「字面为假的诊断把读日志的人指向完全错误的方向」。想加
+第三根轴的人拿到一条**说他没做的事**的红，最省力的修法是删掉整条 `expect` —— 而那条 `expect` 里
+真正承重的另一半（`contains{isEmpty}`）会一起陪葬，上一轮 P1 治的洞原地重开。**守卫自己成了下一个
+洞的入口。**
+
+**现在的写法:** 只断言「必须在」的成员（`fenceProofVectors` 钉空前缀、形状表钉 `mustCover` 各键），
+加东西一律不受限。实测两向：删轴 → 红（2 条），加轴 → 全绿（2323 checks）。
+
+**Context:** 2026-07-20 红队 weak 但经复核采纳。记在这里是因为**下一个给清单上锁的人第一反应还会是
+`count == N`**。
+
+**Effort:** —（已修，留作教条）
+**Priority:** P4
+**Depends on:** 无
 
 ### T3 双向量自证收窄了 `pathPrefix` 那根轴，但**联合读取**那根还开着
 
