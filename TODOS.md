@@ -775,6 +775,45 @@ struct` 一行，是 `/codex review ae494b1` P2-2 打出来的，不是绊线响
 **Priority:** P3
 **Depends on:** 「T3 围栏的自证闭不上 `root` 这根轴」（同一根因，同一批修法）
 
+### T3 fixture 的**承重形状**普遍只由散文守着 —— ⑯ 已修，另有 8 处同形
+
+**What:** 「这条 fixture 的某个表面形状（顺序 / 相邻 / 有没有某个修饰符 / 文件名前导点 / 语句在块里的
+位置）是它全部分辨力的来源，但只写在注释里」是一整类病，不是一个点。⑯ `PrivateImport.swift` 那条
+2026-07-20 已修成可执行（重建旧 run、要求它认领的恰好是漏网写者）。**同一形状红队扫出另外 8 处，
+逐条经独立验证坐实**（每条都给出了「一次读起来更顺的无害编辑」+「随后存活的变异」）：
+
+| # | 站点 | 承重形状 | 无害编辑 → 存活的变异 |
+|---|---|---|---|
+| 1 | ③ `DecoyString.swift` | decoy 串**不带 `public`** 且名字与真函数逐字同名 | 串里补 `public`（更像真声明）／把串里的名字改成 `mutateManifestJSON` → **M12**（`missingMainActorIsolation` 读 `code` 而非 `codeWithoutStringLiterals`）存活。全仓只有这一条 fixture 杀得掉 M12 |
+| 2 | ⑪ `CommentGlue.swift` | `public/* MARK */func` 块注释**两侧零空白** | 加空格「更可读」（同文件 1189 行那条块注释 fixture 就是带空格的）→ 剥完粘不出 `publicfunc` |
+| 3 | ⑭ `GluedBacktick.swift` | `func` 与反引号之间**无空格** | 加一个空格 —— 诱因现成：⑩ `Backtick.swift` 用的正是带空格写法，一次「统一写法」就够 |
+| 4 | ⑮ `BacktickIdent.swift` | 毒源 `` let `func` = 0 `` 还在 | 改名成 `` `funcName` ``（或直接删，它是没人用的 `let`）→ 纳入见证由**干净写者**单独顶着仍成立、否定断言变恒真 → `funcKeywordLexeme` 丢掉 `(?<!`)` lookbehind 存活 |
+| 5 | ⑥ `.DottedWriter.swift` | 文件名的**前导点**；且它是全文件唯一一条没有存在性见证的裸负控 | 「统一 fixture 命名」去掉点 → 断言查的是 `contains(".DottedWriter.swift")`，把承重属性编进了搜索串本身，改名后静默恒真。`writeFixture` 用 `try?` 吞写失败，一行 `fileExists` 就能补 |
+| 6 | ② `TwoWriters.swift` | 「只有**第二个**缺 @MainActor」这个顺序 | 两行对调「先列不合规的」→ `exported.prefix(1)` 变异在②上存活。**但 suite 级没有活洞**：④ `Overload.swift` 顺序无关地兜住 `prefix(1)` 族，crosstalk 那根由 3126 的直接单测钉住。损失的是这条 fixture 自身的分辨力与那段散文的可信度 |
+| 7 | 1850 圈的**生产树目录形状** | 两条嵌套 fixture 落在 `ClaudioGUICore/` / `ClaudioGUI/Deep/` | 改回 `Nested/` / `Deep/`（「跟另一条 suite 命名统一」）或删掉 DirtyTwo → 五条断言零响应 → 消费循环挂 `where !finding.contains("ClaudioGUICore/")` 存活。姊妹 suite 2405 已用逐字前缀见证钉过同款，照抄即可 |
+| 8 | 1854 的「**三种**不同违规形态」 | 三条 Dirty fixture 产出跨两类 finding | 三条统一成同一种写法 → `count >= 3` 只数条数、对种类全瞎 → 消费循环按种类过滤（`where !finding.contains("没有 @MainActor 隔离")`）存活 |
+| 9 | 1939 `executedVectors.append` | 它**必须是块的最后一行** | 「读起来更顺」挪到块首 → G4 自称唯一挡得住的「提前退出」当场清零：`if vectorPathPrefix.isEmpty { return }` 会让生产向量那圈跳过四条关键腿而全绿，把 suite 打回 `abbf48e` 修之前 |
+
+**Why:** 与 ⑯ 同一根因。fixture 是**输入**，断言只看**输出**，于是「输入还是不是当初那个攻击形状」全靠
+人读注释。而这类编辑的诱因往往是现成的（同文件里另一条 fixture 就是那个写法），「统一一下写法」是
+最自然不过的一刀。
+
+**修法方向:** ⑯ 那一版是模板，但**别照抄它的第一稿**：钉表面形状（行序 / 行数）是代理量，红队实测
+`private import os.log` 能顺序不动地把分辨力清零。要钉的是**威胁本身** —— 就地重建被防的那个变异，
+断言它在这条 fixture 上产出的东西恰好是预期的那一个。#7 #9 例外：那两条钉的是路径与执行事实，用逐字
+前缀见证 / 检查数增量更直接。
+
+**⚠️ 覆盖边界（别把这条读得比它大）:** #6 经验证在 suite 级**没有活洞**，只是局部分辨力衰减；其余
+八条给出的「存活变异」均未实跑台账坐实，是读码推演。落地时每条都要先自己跑一遍第一格（打变异、
+不加断言、确认全绿），别把推演当实测。
+
+**Context:** 2026-07-20 修 ⑯（`/codex review 899302a` P1-2）时顺带扫出来的。⑯ 自己实测过：把干净
+写者挪到中间，**2269 条断言一条不红**。这是「措辞比覆盖范围大」的第十二次复发。
+
+**Effort:** M（九处各自独立，可逐条落；#1 #5 #7 最便宜）
+**Priority:** P2（#1 是全仓唯一杀得掉 M12 的 fixture，#9 能整条撤销 `abbf48e` 那一轮的修复）
+**Depends on:** 无
+
 ### `ViewWiringSuite` 的文本绊线只挡得住「整行被删」，挡不住「body 被掏空」
 
 **What:** `ViewWiringSuite` 断言的是 `panel.contains(".onChange(of: onboardingViewModel.state)")` —— 那行文本还在。它不断言那行**做了什么**。

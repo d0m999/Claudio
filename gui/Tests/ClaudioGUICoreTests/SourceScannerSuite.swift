@@ -2323,13 +2323,62 @@ func runSourceScannerSuites() {
                 //    「run 退回任意字母词」那条变异**零分辨力**（M4-1 当场存活）。排成现在这样，旧 run 下
                 //    `unrecognized=[]`、`exported.isEmpty` 为假（干净写者顶着）、隔离检查也满足 ——
                 //    **整个文件零 finding**，这才是那条 fail-open 的真形状。
-                writeFixture(
-                    """
+                //
+                //    ⚠️⚠️ 上面那段此前**只是散文**。实测（`/codex review 899302a` 的 P1-2）：把干净写者
+                //    挪到中间，**2269 条断言一条都不红**。所以下面把它做成可执行的 —— 但**不是**去钉
+                //    「三行的顺序」这个代理量：红队打回了那一版，顺序原样不动、把首行改成
+                //    `private import os.log`（SE-0409 合法，且这些 fixture 只被当文本扫、从不编译），
+                //    旧 run 撞上 `.` 自己就断在那儿、`privImportSneaky` 新旧两版都被报 —— 分辨力同样
+                //    归零，而顺序断言全绿。承重的是**两条**（零标点 + 顺序），钉一条就是措辞比覆盖大。
+                //    所以直接钉**威胁本身**：把旧 run 就地重建一遍，要求它认领的**恰好是**漏网那个名字。
+                //    一条就盖住重排、首行加标点、中间插 `private func`、`private` 换 `internal` 四种；
+                //    正则抄漂了只会红、不会绿（fail-closed）。词素复用 `funcKeywordLexeme` 那一份。
+                //    ⚠️ 这只证了差分的**一半**（「旧 run 会把它吞掉」）。另一半「新 run 必须报它」由下面
+                //    ⑯ 的判定钉。两条合起来才是分辨力，缺一条都证不出。
+                let privImportFixture = """
                     private import Foundation
                     func privImportSneaky(_ n: Int) { mutateManifestJSON() }
                     @MainActor public func privImportClean() { mutateManifestJSON() }
-                    """,
-                    to: scanned.appendingPathComponent("PrivateImport.swift"))
+                    """
+                let legacyWideRun = "[\\sA-Za-z@_]*"
+                let legacyClaims: [String] = {
+                    let pattern =
+                        "\\b(?:fileprivate|private)\\b\(legacyWideRun)\(funcKeywordLexeme)"
+                        + "\\s+([A-Za-z_][A-Za-z0-9_]*)"
+                    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+                    let text = privImportFixture as NSString
+                    return
+                        regex
+                        .matches(
+                            in: privImportFixture,
+                            range: NSRange(location: 0, length: text.length)
+                        )
+                        .map { text.substring(with: $0.range(at: 1)) }
+                }()
+                expect(
+                    legacyClaims == ["privImportSneaky"],
+                    "⑯ 的 fixture 对 M4-1（修饰符 run 退回任意字母词）失去分辨力了：就地重建的旧 run "
+                        + "认领的是 \(legacyClaims)，要求恰好是 [\"privImportSneaky\"]。这条 fixture 的全部"
+                        + "价值就在于「旧 run 跨过零标点的 `private import` 那行、把下一个隐式 internal "
+                        + "写者当成 private 的认领走」。认领到别的名字（干净写者被挪到了中间）、或什么都"
+                        + "认领不到（首行出现 `.` / `;` / `(` 这类标点，旧 run 自己断在那儿）—— 两种情况下"
+                        + "新旧 run 的产出**逐字相同**，M4-1 当场存活，而下面 ⑯ 那两条判定照样全绿。"
+                        + "fixture：\n\(privImportFixture)")
+                //    负控的非空性：⑯ 下面那条负控是 `!findings.contains { …privImportClean… }` ——
+                //    干净写者一旦被删掉或改名，它就**恒真**（不存在的东西当然不会被报）。所以它必须在
+                //    这里被单独钉住，且要恰好一处：有第二处，负控就分不清自己钉的是哪一个。
+                let privImportCleanDecls =
+                    privImportFixture
+                    .components(separatedBy: "\n")
+                    .filter { $0.contains("func privImportClean(") }
+                expect(
+                    privImportCleanDecls.count == 1,
+                    "⑯ 的 fixture 里 `privImportClean` 的声明不是恰好一处（实得 "
+                        + "\(privImportCleanDecls.count) 处）—— 下面那条负控说的是「它**不许**被报」，"
+                        + "被守的那个东西一旦不存在，负控就恒真、连「收窄修饰符 run 收过头会让 "
+                        + "`@MainActor public func` 假红」这条都不再守。fixture：\n\(privImportFixture)")
+                writeFixture(
+                    privImportFixture, to: scanned.appendingPathComponent("PrivateImport.swift"))
 
                 // ⑰ **386 行那条诊断逐字列出的形状，列了几种就得有几条 fixture**（教条：措辞不许比覆盖
                 //    范围大 —— 本文件已经栽过一次，见 ⑧b；`ae494b1` 那一轮又栽了一次，见下面三条
