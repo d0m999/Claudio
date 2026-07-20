@@ -41,6 +41,8 @@ public struct SetupEnvironment: Sendable {
     /// 这两个才是 `manifest.json` 真正的两个写者，此前它们之间零互斥。
     /// 见 ``ClaudioPaths/packsLockFile``。
     public let packsLockFile: URL
+    /// 取 ``packsLockFile`` 的有界重试策略 —— 见 ``PacksLockRetry``（为什么只有这一侧重试）。
+    public let packsLockRetry: PacksLockRetry
 
     public init(
         executablePath: URL,
@@ -50,7 +52,8 @@ public struct SetupEnvironment: Sendable {
         settingsFile: URL = ClaudioPaths.claudeSettingsFile,
         configLockFile: URL = ClaudioPaths.configLockFile,
         settingsLockFile: URL = ClaudioPaths.settingsLockFile,
-        packsLockFile: URL = ClaudioPaths.packsLockFile
+        packsLockFile: URL = ClaudioPaths.packsLockFile,
+        packsLockRetry: PacksLockRetry = PacksLockRetry()
     ) {
         self.executablePath = executablePath
         self.claudioBinaryDestination = claudioBinaryDestination
@@ -60,6 +63,7 @@ public struct SetupEnvironment: Sendable {
         self.configLockFile = configLockFile
         self.settingsLockFile = settingsLockFile
         self.packsLockFile = packsLockFile
+        self.packsLockRetry = packsLockRetry
     }
 }
 
@@ -349,6 +353,38 @@ public enum PackSelectionOutcome: Sendable, Equatable {
     case repairedDeadSelection(removed: String, selected: String)
 }
 
+/// `setup` 取 `~/.claudio/packs.lock` 的**有界**重试策略。
+///
+/// ## 为什么只有 setup 这一侧重试，GUI 那一侧不重试
+/// 两侧的约束不同，所以策略不同：
+///  · `setup` 是 CLI（以及 GUI 里那条**已经**跑在 `Task.detached` 上的接管动线 ——
+///    `performOnboardingDiskAction` 的 doc 明写「同步、阻塞，调用方负责挪出主线程」），
+///    阻塞几十毫秒不冻任何界面。
+///  · GUI 的 bind/clear 是 `@MainActor` **同步**的，一睡就是界面卡住，所以它保持非阻塞、
+///    直接把 `.lockBusy` 报给用户（与 `EventEnabled` / `MasterVolume` / `SettingsInstaller`
+///    三处先例逐字一致）。
+///
+/// ## 预算怎么定的（实测，不是拍脑袋）
+/// 内置包总共 508K，整棵复制实测 **33ms**；GUI 侧的临界区（读一个 ≤1MiB 的 JSON → 改 → 原子写）
+/// 更短。所以争用窗口是**几十毫秒**量级 —— 默认 10 次 × 50ms = 500ms 预算，够盖住十几个窗口。
+///
+/// ## 为什么必须**有界**
+/// `flock` 在持有进程死亡时由内核释放，所以不存在陈旧锁、无限等**不会**永久挂死。但无限等会把
+/// 一次「另一个写者卡住了」变成「setup 看起来没反应」——而 setup 是用户拿来**救**一台坏机器的
+/// 命令，它必须要么成功、要么说清楚为什么失败，不能沉默地转圈。
+public struct PacksLockRetry: Sendable, Equatable {
+    /// 总尝试次数，**含第一次**。`1` = 不重试（回到非阻塞语义）。
+    /// 小于 1 的值按 `1` 处理 —— 让它变成「一次都不试」是没有意义的语义。
+    public let attempts: Int
+    /// 两次尝试之间睡多久。
+    public let delay: TimeInterval
+
+    public init(attempts: Int = 10, delay: TimeInterval = 0.05) {
+        self.attempts = max(1, attempts)
+        self.delay = max(0, delay)
+    }
+}
+
 public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
     case binaryCopyFailure(reason: String)
     /// 取不到 `~/.claudio/packs.lock` —— GUI 此刻正在写 `manifest.json`（bind/clear）。
@@ -508,8 +544,18 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
             // 拿不到锁时**返回失败，不是跳过包继续装**：hooks 还没写，此刻失败是干净的；
             // 跳过包却照常写 hooks，用户拿到的是一台亮绿点、doctor 也过、却永远不响的机器
             // （与 `.binaryQuarantined` / `.noAvailablePack` 同一条纪律）。
-            let published = withNonBlockingLock(path: environment.packsLockFile.path) {
-                publishBundledPacks(from: bundledPacksDirectory, environment: environment)
+            // 有界重试：GUI 那一侧的临界区是毫秒级的，为它整个安装失败太重（见 ``PacksLockRetry``）。
+            // **只对 `.skipped`（争用）重试**：`.failed` 是真的系统错误，重试一百次也不会变好。
+            let retry = environment.packsLockRetry
+            var published = LockedRun<
+                Result<(copied: [String], salvaged: [SalvagedPack]), SetupError>
+            >.skipped
+            for attempt in 1...retry.attempts {
+                published = withNonBlockingLock(path: environment.packsLockFile.path) {
+                    publishBundledPacks(from: bundledPacksDirectory, environment: environment)
+                }
+                guard case .skipped = published else { break }
+                if attempt < retry.attempts { Thread.sleep(forTimeInterval: retry.delay) }
             }
             switch published {
             case .ran(.success(let result)):

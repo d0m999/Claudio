@@ -495,13 +495,23 @@ public struct OnboardingActionEnvironment: Sendable {
     /// Deliberately **separate** from ``configLockFile``.
     public let settingsLockFile: URL
 
+    /// `~/.claudio/packs.lock` —— 接管会跑 ``performFirstRunSetup(environment:)``，而它的包发布
+    /// 循环是 `manifest.json` 的**目录级**写者，与 GUI 侧 bind/clear 共用这把锁
+    /// （见 ``ClaudioPaths/packsLockFile``）。
+    ///
+    /// ⚠️ 它必须像另外两把一样**穿过这里**再灌进 `SetupEnvironment`，不能让下游落回默认值：
+    /// 生产上默认值碰巧是对的（GUI 侧 bind 用的也是它），但**测试**会因此去用户真实的
+    /// `~/.claudio/packs.lock` 上开一把锁。转发这一手由 `ViewWiringSuite` 的绊线钉住。
+    public let packsLockFile: URL
+
     public init(
         onboarding: OnboardingEnvironment,
         bundledHelperBinary: URL?,
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         configFile: URL = ClaudioPaths.configFile,
         configLockFile: URL = ClaudioPaths.configLockFile,
-        settingsLockFile: URL = ClaudioPaths.settingsLockFile
+        settingsLockFile: URL = ClaudioPaths.settingsLockFile,
+        packsLockFile: URL = ClaudioPaths.packsLockFile
     ) {
         self.bundledHelperBinary = bundledHelperBinary
         self.claudioBinaryDestination = onboarding.claudioBinaryPath
@@ -510,6 +520,7 @@ public struct OnboardingActionEnvironment: Sendable {
         self.configFile = configFile
         self.configLockFile = configLockFile
         self.settingsLockFile = settingsLockFile
+        self.packsLockFile = packsLockFile
     }
 }
 
@@ -597,7 +608,8 @@ public func performOnboardingDiskAction(
                 configFile: environment.configFile,
                 settingsFile: environment.settingsFile,
                 configLockFile: environment.configLockFile,
-                settingsLockFile: environment.settingsLockFile)
+                settingsLockFile: environment.settingsLockFile,
+                packsLockFile: environment.packsLockFile)
             switch performFirstRunSetup(environment: setupEnvironment) {
             case .success(let outcome): return .success(.tookOver(outcome))
             case .failure(let error): return .failure(.setupFailed(error))

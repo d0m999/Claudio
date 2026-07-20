@@ -41,7 +41,11 @@ private func makeEnvironment(
         settingsFile: root.appendingPathComponent("settings.json"),
         configLockFile: claudioRoot.appendingPathComponent("config.lock"),
         settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
-        packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
+        packsLockFile: claudioRoot.appendingPathComponent("packs.lock"),
+        // 生产默认是 10 × 50ms（见 ``PacksLockRetry``）。测试里压到 5 × 10ms：既不让「一直占着」
+        // 那条测试白等半秒，又保留**多于一次**的尝试——attempts 压到 1 就等于把重试这根轴从整个
+        // 测试套件里删掉，而那正是下面那条时序测试要钉的东西。
+        packsLockRetry: PacksLockRetry(attempts: 5, delay: 0.01))
 }
 
 @MainActor
@@ -57,6 +61,53 @@ func runSetupSuites() {
     // 拿不到锁时**不许报成功**：这与本文件 `binaryQuarantined` / `noAvailablePack` 是同一条纪律
     // ——「只要这次安装注定是哑的，就不许把它报成成功」。包没发布出去而 hooks 写了，用户拿到的
     // 就是一台装完不响的机器。
+    // 「只放宽 setup 侧」这个决定的兑现点：CLI 阻塞不冻界面（`performOnboardingDiskAction` 的 doc
+    // 明写「同步、阻塞 —— 调用方负责把它挪出主线程」，唯一调用点在 `Task.detached` 里），而 GUI 侧
+    // 的临界区只有毫秒级 —— 所以 setup 撞上锁时该等一下，不该整个安装当场失败。
+    // 实测：内置包总共 508K、整棵复制 33ms，所以争用窗口是**几十毫秒**量级，有界重试盖得住。
+    //
+    // ⚠️ 这条是**时序**测试，天生有一点脆，留了 10 倍余量（持锁 50ms / 重试预算 500ms）。
+    // 它与下面那条「一直占着就必须失败」是**一对**：只留下面那条的话，把 attempts 调回 1
+    // （等于取消重试）不会有任何断言变红；只留这条的话，把重试改成无限等也不会红。
+    suite("performFirstRunSetup：包锁在重试预算内被放开 ⇒ 挺过去，不是当场失败") {
+        withTempDirectory { root in
+            let bundleRoot = root.appendingPathComponent("Claudio.app", isDirectory: true)
+            let (executablePath, _) = makeBundleFixture(at: bundleRoot)
+            let base = makeEnvironment(root: root, executablePath: executablePath)
+            let environment = SetupEnvironment(
+                executablePath: base.executablePath,
+                claudioBinaryDestination: base.claudioBinaryDestination,
+                userPacksDirectory: base.userPacksDirectory,
+                configFile: base.configFile,
+                settingsFile: base.settingsFile,
+                configLockFile: base.configLockFile,
+                settingsLockFile: base.settingsLockFile,
+                packsLockFile: base.packsLockFile,
+                packsLockRetry: PacksLockRetry(attempts: 50, delay: 0.01))
+
+            // 后台线程持锁 50ms 再放开；setup 在主线程上跑，会在 500ms 预算内不断重试。
+            let holderReady = DispatchSemaphore(value: 0)
+            let lockPath = environment.packsLockFile.path
+            DispatchQueue.global().async {
+                let held = withNonBlockingLock(path: lockPath) {
+                    holderReady.signal()
+                    Thread.sleep(forTimeInterval: 0.05)
+                }
+                // 拿不到锁就别让主线程永远等下去 —— 那会把一条断言失败变成整个 run 挂死。
+                if case .ran = held {} else { holderReady.signal() }
+            }
+            holderReady.wait()
+
+            let result = performFirstRunSetup(environment: environment)
+            expect(
+                result != .failure(.packsLockBusy),
+                "包锁只被占了 50ms、而重试预算有 500ms，setup 却当场报了 .packsLockBusy —— "
+                    + "有界重试没有生效（attempts 被调回 1 / 循环写成只试一次 / sleep 被跳过）。"
+                    + "这一侧放宽的全部意义就是：GUI 那几毫秒的写不该让一次安装整个失败。"
+                    + "实得：\(result)")
+        }
+    }
+
     suite("performFirstRunSetup：包锁被占住时必须失败，绝不许静默跳过包却照样报成功") {
         withTempDirectory { root in
             let bundleRoot = root.appendingPathComponent("Claudio.app", isDirectory: true)
@@ -784,7 +835,8 @@ private func makeInstalledEnvironment(root: URL) -> SetupEnvironment {
         configFile: claudioRoot.appendingPathComponent("config.json"),
         settingsFile: root.appendingPathComponent("settings.json"),
         configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-        settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+        settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+        packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
 }
 
 @MainActor

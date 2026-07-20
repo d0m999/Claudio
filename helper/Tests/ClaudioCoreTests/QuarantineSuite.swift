@@ -182,7 +182,8 @@ func runSetupQuarantineSuites() {
             configFile: claudioRoot.appendingPathComponent("config.json"),
             settingsFile: root.appendingPathComponent("dot-claude/settings.json"),
             configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-            settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+            settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+            packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
     }
 
     suite("performFirstRunSetup: 从一个带隔离章的 bundle 装出来的 helper，必须是干净的") {
@@ -230,7 +231,8 @@ func runSetupQuarantineSuites() {
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("dot-claude/settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
             // T17d：这台机器上得**真的有一个包**，否则 `.noAvailablePack` 会先一步拦下这次重跑
             // （而且拦得对：没有包的安装装完也是哑的）。本 suite 要钉的是「复制被跳过时，剥离仍然
             // 发生」，跟包无关 —— 所以把 fixture 补成它本来就该描述的那台机器：已经装好、包也在，
@@ -299,7 +301,8 @@ func runSetupQuarantineSuites() {
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: settingsFile,
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
 
             let result = performFirstRunSetup(environment: environment)
             guard case .failure(let error) = result else {

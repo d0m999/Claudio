@@ -441,7 +441,7 @@ func runLockSeparationSuites() {
                 + "锁分离在生产上到底成不成立，从此取决于这里传了什么")
     }
 
-    suite("SetupEnvironment 的两把锁默认值（运行期可求值 —— 它是 struct，不是自由函数）") {
+    suite("SetupEnvironment 的三把锁默认值（运行期可求值 —— 它是 struct，不是自由函数）") {
         // `performFirstRunSetup` 是 GUI「接管」CTA 落到磁盘上的那条路径，它**同时**写
         // config.json（selectPack ×2）和 settings.json（installClaudioHooks）。这两把锁必须
         // 是不同的两把，且都不是 play 的。
@@ -461,14 +461,54 @@ func runLockSeparationSuites() {
             "SetupEnvironment.settingsLockFile 默认必须是 settings.lock，实际是 "
                 + "\(environment.settingsLockFile.lastPathComponent)")
         expect(
-            environment.configLockFile.path != environment.settingsLockFile.path,
-            "SetupEnvironment 的两把锁必须是**不同的**两把 —— 接管路径同时写 config.json 与 "
-                + "settings.json，共用一把锁就是把刚拆开的东西又焊回去")
+            environment.packsLockFile.path == ClaudioPaths.packsLockFile.path,
+            "SetupEnvironment.packsLockFile 默认必须是 packs.lock，实际是 "
+                + "\(environment.packsLockFile.lastPathComponent)")
+        expect(
+            Set([
+                environment.configLockFile.path, environment.settingsLockFile.path,
+                environment.packsLockFile.path,
+            ]).count == 3,
+            "SetupEnvironment 的三把锁必须是**三把不同**的 —— 接管路径同时写 config.json、"
+                + "settings.json 与 packs/ 下的整棵包目录，共用一把锁就是把刚拆开的东西又焊回去。"
+                + "尤其 packs 与 config 合并 = `performFirstRunSetup` 自己锁自己（它两把都要），"
+                + "非阻塞锁下不是死锁，是每一次 setup 都当场 `.skipped`")
         expect(
             environment.configLockFile.path != ClaudioPaths.playLockFile.path
                 && environment.settingsLockFile.path != ClaudioPaths.playLockFile.path,
             "SetupEnvironment 的两把锁都不许是 play.lock —— 接管会在磁盘上写好几秒，"
                 + "占住去抖锁就是在这几秒里静默吞掉用户的每一声提示音")
+    }
+
+    suite("包锁重试的**生产默认值**（测试全都显式注入，所以默认值没人求值过）") {
+        // 台账实测逼出来的一条（R1）：把 `PacksLockRetry` 的默认 `attempts` 从 10 砍成 1 ——
+        // 等于把「setup 侧放宽」整个取消 —— **两个包 3678 条断言全绿**。因为 `SetupSuite` 里
+        // 那条时序测试显式注入了 `PacksLockRetry(attempts: 50, delay: 0.01)`，从来没碰过默认值。
+        // 这与本文件开头记的那个病**逐字同形**：默认值有人写、没人求值，改错它不会红。
+        let defaults = PacksLockRetry()
+        expect(
+            defaults.attempts > 1,
+            "`PacksLockRetry` 默认必须**真的重试**（attempts > 1），实得 \(defaults.attempts) —— "
+                + "1 次等于回到非阻塞语义，而「只放宽 setup 侧」这个决定的全部内容就是这次重试。"
+                + "GUI 侧那几毫秒的 manifest 写会重新变成「整个安装当场失败」。")
+        expect(
+            defaults.delay > 0,
+            "`PacksLockRetry` 默认的 delay 必须 > 0（实得 \(defaults.delay)）—— 0 延迟的 N 次重试"
+                + "会在几微秒内烧完全部预算，等于没等：`flock` 的持有者还没来得及做完一次 33ms 的"
+                + "包复制，重试就已经耗尽了。")
+        // 预算下限绑在**实测**上，不是拍脑袋：内置包 508K、整棵复制实测 33ms，GUI 侧临界区更短。
+        // 250ms 能盖住 7 个以上那样的窗口。这里断的是下限，不是具体的 10×50ms —— 调参不该变红，
+        // 把预算调到盖不住实测窗口才该变红。
+        let budget = Double(defaults.attempts) * defaults.delay
+        expect(
+            budget >= 0.25,
+            "`PacksLockRetry` 的默认总预算是 \(budget)s，低于 0.25s 下限 —— 实测一次内置包发布"
+                + "（508K，整棵复制）要 33ms，预算至少要盖住若干个这样的窗口才有意义。")
+        expect(
+            SetupEnvironment(executablePath: URL(fileURLWithPath: "/nonexistent/claudio"))
+                .packsLockRetry == defaults,
+            "SetupEnvironment 必须默认转发 `PacksLockRetry()` —— 它自己另起一套默认值，"
+                + "上面三条就只在钉一个没人用的类型")
     }
 
     suite("接管路径的调用点确实转发 SetupEnvironment 的锁（上面那四条断言的唯一活路）") {

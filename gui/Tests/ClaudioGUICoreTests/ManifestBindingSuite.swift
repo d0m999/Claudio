@@ -1059,7 +1059,8 @@ func runManifestBindingSuites() async {
 
             let probe = GatedDurationProbe(fixedDuration: 1.0)
             let environment = AudioImportEnvironment(
-                userPacksDirectory: userPacks, bundledPacksDirectory: nil, durationProbe: probe)
+                userPacksDirectory: userPacks, bundledPacksDirectory: nil, durationProbe: probe,
+                packsLockFile: root.appendingPathComponent("packs.lock"))
             let importViewModel = AudioImportViewModel(packID: "pack-a", environment: environment)
             let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
 
@@ -1120,7 +1121,8 @@ func runManifestBindingSuites() async {
 
             let probe = GatedDurationProbe(fixedDuration: 1.0)
             let environment = AudioImportEnvironment(
-                userPacksDirectory: userPacks, bundledPacksDirectory: nil, durationProbe: probe)
+                userPacksDirectory: userPacks, bundledPacksDirectory: nil, durationProbe: probe,
+                packsLockFile: root.appendingPathComponent("packs.lock"))
             let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
             let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
 

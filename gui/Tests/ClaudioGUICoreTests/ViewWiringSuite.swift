@@ -684,6 +684,37 @@ func runViewWiringSuites() {
                 + "这一条只是把最要命的那把锁从整个 target 里赶出去")
     }
 
+    suite("接管路径必须把**包锁**也灌进 SetupEnvironment（第三把锁，与前两把同一个洞）") {
+        // `OnboardingActions.swift` 造 `SetupEnvironment` 时逐个转发 `configLockFile` /
+        // `settingsLockFile`。本轮给 setup 加了**第三把**锁（`packsLockFile`），而它一开始
+        // **没有**被转发 —— `SetupEnvironment.packsLockFile` 于是落回 `ClaudioPaths` 那个指向
+        // **真实** `~/.claudio/packs.lock` 的默认值。
+        //
+        // 生产上这碰巧是对的（GUI 侧 bind 用的也是那个默认值，两边仍然互斥）。**测试里不是**：
+        // 接管测试给其它每一样东西都注入了临时路径，唯独这把锁会去用户的 home 上开一把真锁。
+        // 实测症状：跑完测试之后 `~/.claudio/packs.lock` 真的躺在那里（0 字节、0600，正是
+        // `FileLock` 的 `open(O_CREAT, 0o600)` 留下的）。
+        //
+        // 这就是 memory 里记着的「接管路径的锁要过四手，而中间那一手住在 ClaudioGUICore」——
+        // 加第三把锁的那一刀（也就是我自己这一刀）原样重犯了一次。
+        guard let actions = codeOnly("gui/Sources/ClaudioGUICore/OnboardingActions.swift") else {
+            expect(false, "读不到 OnboardingActions.swift —— 这条 suite 唯一的价值就是读它")
+            return
+        }
+        expect(
+            actions.contains("packsLockFile: environment.packsLockFile"),
+            "接管路径造 `SetupEnvironment` 时必须**逐字**转发 `packsLockFile: environment.packsLockFile`"
+                + " —— 漏掉它，`SetupEnvironment` 会静默落回 `ClaudioPaths.packsLockFile` 那个真实路径："
+                + "生产上碰巧仍然互斥（两边都用默认值），而**测试会去用户的 `~/.claudio` 上开一把真锁**，"
+                + "并与他正在运行的 Claudio.app 抢锁。前两把锁（config / settings）已经各有一条断言，"
+                + "这是第三条。")
+        // 负向：不许绕过 environment 直接朝下游写死一把锁 —— 与前两把锁那两条负向兜底同形。
+        expect(
+            !actions.contains("packsLockFile: ClaudioPaths."),
+            "接管路径把 `packsLockFile` 直接写成了 `ClaudioPaths.…` —— 那就绕过了注入点，"
+                + "测试再怎么注入也拦不住它去碰真实 `~/.claudio`。锁只有一个来源：`environment`。")
+    }
+
     suite("MenuBarController：popover 关闭必须发出隐藏信号，而且必须在那句会提前 return 的 guard 之前（T17d）") {
         guard let controller = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift") else {
             expect(false, "读不到 MenuBarController.swift")

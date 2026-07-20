@@ -98,6 +98,7 @@ private struct FixtureTargets {
     let configFile: URL
     let configLockFile: URL
     let settingsLockFile: URL
+    let packsLockFile: URL
 
     init(in root: URL) {
         let claudeDirectory = root.appendingPathComponent("dot-claude", isDirectory: true)
@@ -112,13 +113,18 @@ private struct FixtureTargets {
         configFile = claudioRoot.appendingPathComponent("config.json")
         configLockFile = claudioRoot.appendingPathComponent("config.lock")
         settingsLockFile = claudioRoot.appendingPathComponent("settings.lock")
+        // 第三把锁必须和另外两把一样注入临时路径。漏掉它 ⇒ 落回 `ClaudioPaths.packsLockFile`
+        // ⇒ 这套接管测试会在**用户真实的** `~/.claudio/packs.lock` 上开一把锁（实测复现过：
+        // 跑完测试之后那个 0 字节、0600 的文件真的躺在那儿）。
+        packsLockFile = claudioRoot.appendingPathComponent("packs.lock")
     }
 
     func environment(bundledHelperBinary: URL?) -> OnboardingActionEnvironment {
         OnboardingActionEnvironment(
             onboarding: onboarding, bundledHelperBinary: bundledHelperBinary,
             userPacksDirectory: userPacksDirectory, configFile: configFile,
-            configLockFile: configLockFile, settingsLockFile: settingsLockFile)
+            configLockFile: configLockFile, settingsLockFile: settingsLockFile,
+            packsLockFile: packsLockFile)
     }
 }
 
