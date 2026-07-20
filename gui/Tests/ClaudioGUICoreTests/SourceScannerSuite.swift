@@ -552,6 +552,184 @@ private func expectShapeTableCovers(
     }
 }
 
+/// 一行形状表所声称的**声明形态**，写成可执行的判别式。三段合取，各钉一根轴：
+///
+/// · `declarator` —— fixture 里必须有**一行**，剥掉行首空白之后以它打头。
+/// · `indented` —— 那一行该不该带行首缩进。**别把它读成排版偏好**：⑦⑧⑧b 的
+///   `ImplicitInternal`（顶格 `func `）与 ⑧b 的 `PublicExtension`（缩进 `func `）判别词逐字相同，
+///   把它们分开的**只有**这一位。台账实测：把 `shapeWitnessLine` 里这一段判定拿掉 ⇒ 红 2 条，
+///   开火的正是 ⑦⑧⑧b 那一对。
+///   ⚠️ 上一稿这段散文写的是「⑰ 的 `LocalNestedFunc` 与 ⑩ 的 `Operator` 全靠它跟同表其他行分开」，
+///   **是假的，而且我自己的台账在写下这句之前就已经证伪了它**（那一轮红的是 ⑦⑧⑧b，不是这两行）：
+///   这两行的判别词（`public static func == ` / 配合 `enclosedBy`）本就与同表兄弟不同形，
+///   `indented` 在它们身上不承重。措辞按实测写，不按看着顺的写。
+/// · `enclosedBy` —— 见证行**上方最近一条非空行**必须以它打头；`nil` = 不约束外层。
+///   它治的是 `/codex review b0ce657` 红队那条 P1：`declarator` + `indented` 只约束**那一行自己**，
+///   完全不管它嵌在什么里。⑰ 第 13 行声称的形状是「函数体内的局部 func」，而在它之前，把 fixture
+///   改成 `public extension LNBatch { func lnInner() … }` —— 依然是一条缩进的 `func `、文件名与成员名
+///   一字不改、生产诊断照旧报同一句（`public extension` 成员走的是同构路径）—— **2325 全绿**，
+///   而「函数体内的局部 func」这根轴已经没了。这正是 b0ce657 那条 P1 在第 13 行原样存活。
+///   ⚠️ 这里**不给默认值**：11 行写 `nil`、2 行写值，是为了让「不约束外层」是一个写下来的决定，
+///   而不是一次省略。默认实参就是可改语义 —— 有人改掉默认值，11 行的语义会一起变而没有任何断言喊。
+private struct ShapeWitness {
+    let declarator: String
+    let indented: Bool
+    let enclosedBy: String?
+}
+
+/// `source` 里第一条满足 `witness` **三段合取**的行；没有 ⇒ `nil`（调用方当红处理）。
+private func shapeWitnessLine(_ witness: ShapeWitness, in source: String) -> String? {
+    let lines = source.components(separatedBy: "\n")
+    for (index, line) in lines.enumerated() {
+        let body = line.drop { $0 == " " || $0 == "\t" }
+        guard body.hasPrefix(witness.declarator) else { continue }
+        guard (body.count != line.count) == witness.indented else { continue }
+        guard let enclosedBy = witness.enclosedBy else { return line }
+        // 外层：上方最近一条**非空**行。用「最近非空」而不是「上一行」，是为了不被一行空行掀翻；
+        // 用 `hasPrefix` 而不是全等，是因为外层声明行尾部还挂着 `{`、泛型参数、`: Equatable` 之类。
+        guard
+            let above = lines[..<index].last(where: {
+                !$0.trimmingCharacters(in: .whitespaces).isEmpty
+            }),
+            above.drop(while: { $0 == " " || $0 == "\t" }).hasPrefix(enclosedBy)
+        else { continue }
+        return line
+    }
+    return nil
+}
+
+/// 形状表的**见证锁**（`/codex review b0ce657` 那条 P1）。
+///
+/// ## 它治的病（覆盖锁治不到的那一半）
+/// 上面那把覆盖锁锁的是**行还在不在**，而每一行的 `shape` / `modifier` 列是**纯散文**：锁读
+/// `.map(\.0)`（fixture 文件名），循环体里的 `expect` 读文件名 + 成员名 + 一句诊断措辞 —— 唯一
+/// 承载「这一行到底是哪种声明形态」的那一列，谁都不读。真正的形状写在几十行外 `writeFixture` 的
+/// 字符串字面量里，两边没有任何东西接着。
+///
+/// 实测（`/codex review b0ce657` P1，两发都打过）：
+///   · `PrivateEnum.swift` 的内容 `private enum` → `private struct`，文件名 / 成员名一字不改
+///     ⇒ **2269 全绿零红**，而 `private enum` 这个形状已经从 fixture 集里彻底消失。
+///   · `OpenWriter.swift` 的 `open func` → `package func` ⇒ 同样 **2269 全绿零红**。
+/// 也就是说：覆盖锁把「悄悄删一行」抬成了「必须动两处」，但「留着行、把形状换掉」这条路一步都
+/// 没抬高 —— 而后者正是让 `mustCover` 那几个键**逐个变成谎**的最省力走法。`ae494b1` 丢的是三行，
+/// 这个洞丢的是三行背后的东西：同一个病往下走了一层。
+///
+/// ## 为什么读**磁盘**不读字面量
+/// 见证读的是 `writeFixture` 已经落盘的那份字节（`writeFixture` 原样写、不加工），不是表里复制的
+/// 第二份源文。少一份字面量就少一处可以跟着一起改的地方：想让见证说谎，你得把真正被扫描的输入
+/// 也改成那个形状 —— 那时它已经不是「谎」了，是真换了形状，而换过去撞上的是下面那条互斥。
+/// 读不出来（路径写错 / fixture 被挪走）⇒ **红**，不是跳过。
+///
+/// ## 三条断言，各自的靶子不同，别合并
+/// · **正向**：这一行的三段判别式在它自己那份 fixture 里都成立。靶子 = 把 fixture 的形状换掉
+///   （上面那两发，外加 ⑰ 第 13 行那发 `public extension` —— 那一发由 `enclosedBy` 接住）。
+/// · **非空**：判别词不许是空串。靶子 = 把判别词削成恒真。
+/// · **互斥**：这个判别词**不**在同表任何别的 fixture 里出现。靶子 = 把判别词**放宽**到撞上兄弟
+///   （削成 `"private "` ⇒ 撞上同表另外三种私有类型 ⇒ 红）。
+///
+/// ⚠️ **「非空」为什么必须与「互斥」分开写，而不是让互斥去兜。** 上一稿把「削成 `""`」逐字写成
+/// 互斥的靶子，并声称「没有这一条，正向那半可以被一个 `""` 一次性买通」。红队打掉了，实测坐实：
+/// 互斥对 `indented: true` 的行是**结构性恒真**的 —— 同表兄弟里一条缩进行都没有（⑩ 的 `Backtick`
+/// 与 ⑰ 那六份私有 fixture 都是两行顶格），于是 `shapeWitnessLine` 在第二段合取处就短路成 `nil`，
+/// **`declarator` 取什么值根本进不了判别**。实测：`LocalNestedFunc` 与 `Operator` 的判别词各自削成
+/// `""` ⇒ **2325 全绿零红**；同一手打在 `PrivateActor`（`indented: false`）⇒ 红 2。
+/// 13 行里有 2 行，上一稿那句话是假的 —— 而**上一轮台账正好挑中了会红的那一行**，于是我以为这根轴
+/// 钉住了。台账挑对自己有利的样本，比没有台账更坏。
+///
+/// 台账实测（每条都跑过，不是推理）：换形状 ⇒ 红 4；`indented` 两个方向各翻一次 ⇒ 各红 2；
+/// 判别词削成 `"private "` ⇒ 红 2；`path` 写错 ⇒ 红 2（走读不出来那一支）；
+/// 判别词收窄成更长的真前缀 ⇒ 全绿（负控：这把锁不是一碰就红）。
+/// 把 `shapeWitnessLine` 里 `indented` 那一半判定拿掉（**数据没坏、判据坏了**）⇒ 红 2，
+/// 开火的是**互斥**那条（`func ` 要求顶格一旦不再要求，它当场同时认得出 `PublicExtension.swift`）。
+///
+/// ## 诚实的限度（每一条都是实测出来的全绿，不是推理出来的担忧）
+/// · **互斥在「同表唯一含缩进行」的那些行上恒真**，今天正是 ⑩ 的 `Operator` 与 ⑰ 的
+///   `LocalNestedFunc` 两行。它们的判别词由**非空**那条与 `enclosedBy` 兜着，不是由互斥兜着。
+///   要让互斥在这两行上真的有牙，得给这两张表各添一份**带缩进行、但形状不同**的兄弟 fixture ——
+///   而表的每一行都必须是生产诊断逐字列出的形状，不能为了喂互斥凭空加行。见 TODOS。
+/// · 互斥这一半的分辨力还来自**同表至少两行**。单行表上它恒真 —— 今天三张表分别是 4 / 2 / 7 行，
+///   而行数掉不下去是**覆盖锁**保证的（`mustCover` 三张表分别 4 / 2 / 7 个键），不是这里保证的。
+///   两把锁互补，谁也替不了谁。
+/// · `enclosedBy` 只看**上方最近一条非空行**，不是一台括号匹配器。它分得开「函数体内」与
+///   「`public extension` 块内」（这就够挡住红队那一发），但分不开更深的嵌套。要真的判「嵌在什么里」
+///   得有括号配平，而本文件 ⑰ 上方那段已经实测论证过那台机器**现在不能造**。
+/// · **`enclosedBy` 没有「守卫的守卫」。** `indented` 被掏空时互斥会替它喊（实测 R1：`func ` 一旦不再
+///   要求顶格，当场撞上 `PublicExtension.swift` ⇒ 红 2）；`enclosedBy` 没有这层 —— 把
+///   `shapeWitnessLine` 里那一段判定短路掉 ⇒ **2351 全绿**。原因是带 `enclosedBy` 的两行**恰好就是**
+///   互斥恒真的那两行，两个洞是同一个洞。它的分辨力全部来自「改 fixture 的外层」这三发实测
+///   （⇒ 各红 2），而**削弱判据本身自检不到** —— 这是台账的固有天花板，不是这里能补的，
+///   别把它读成「已经守住」。
+/// · **`shape` / `modifier` 那一列仍然是纯散文，这把锁没有碰它。** 它只进失败文案，没有任何断言读它。
+///   实测：把 ⑰ 里 `PrivateEnum.swift` 那一行的 `shape` 改成「private struct 的无修饰符成员」而
+///   判别词不动 ⇒ **2325 全绿**。这把锁钉死的是**判别词 ↔ fixture**这条边，不是**散文 ↔ 判别词**。
+///   ⑦⑧⑧b 的措辞（「package」「不写修饰符（隐式 internal）」）与判别词本就不同形，想用
+///   `shape.contains(declarator)` 一把捞是捞不住的 —— 别写一条只在 ⑰ 上成立的规则然后声称三张表都锁了。
+/// · 调用点本身没被强制存在：把某一张表的 `expectShapeWitnesses(…)` 整段删掉 ⇒ **2317 全绿**
+///   （少 8 条检查）。与 `mustCover` 同一类「两处字面量」限度 —— 抬高门槛，不是锁死。
+/// · 它证的是「表里这一行与它自己那份 fixture 对得上」，**不是**「表与生产诊断串对得上」。诊断串
+///   长出第六种私有形状而三处（诊断、表、`mustCover`）一起停在旧清单，照样全绿 —— 那一侧要靠
+///   「诊断句子由表生成」才闭得掉，见 TODOS「T3 形状表与诊断串未同源」。**别把这把锁复述成
+///   「形状表已经与诊断同源」。**
+@MainActor
+private func expectShapeWitnesses(
+    _ tableName: String,
+    rows: [(key: String, shape: String, path: String, witness: ShapeWitness)],
+    under root: URL,
+    vectorLabel: String
+) {
+    let sources: [(key: String, text: String?)] = rows.map { row in
+        (row.key, try? String(contentsOf: root.appendingPathComponent(row.path), encoding: .utf8))
+    }
+    for (index, row) in rows.enumerated() {
+        guard let text = sources[index].text else {
+            expect(
+                false,
+                "【向量：\(vectorLabel)】形状表「\(tableName)」这一行（`\(row.key)`）的 fixture 读不出来"
+                    + "（路径 `\(row.path)`）—— 见证锁没法证明这一行声称的「\(row.shape)」真的被扫描到过。"
+                    + "路径写错、fixture 被挪走、或者压根没写，这里一律**当红处理**：认不出就红，"
+                    + "不是跳过。")
+            continue
+        }
+        // 正向：这一行声称的形状，在真正被扫描的那份输入里确实长成那样。
+        expect(
+            shapeWitnessLine(row.witness, in: text) != nil,
+            "【向量：\(vectorLabel)】形状表「\(tableName)」的 `\(row.key)` 这一行声称的形状是"
+                + "「\(row.shape)」，但它那份 fixture 里**没有**任何一行同时满足："
+                + "\(row.witness.indented ? "带缩进" : "顶格")、以 `\(row.witness.declarator)` 打头"
+                + (row.witness.enclosedBy.map { "、且上方最近一条非空行以 `\($0)` 打头" } ?? "")
+                + " —— 行还在、文件名和成员名都对得上，形状却已经换掉了。这正是 "
+                + "`/codex review b0ce657` 那条 P1 的形状（把 `private enum` 换成 `private struct`，"
+                + "2269 条断言一条不红），而生产诊断串照旧逐字声称这个形状有 fixture 钉着。"
+                + "要换形状，先换诊断串里的措辞。fixture 实际内容：\n\(text)")
+        // 非空：判别词不许是空串。**这一条不能并进下面的互斥** —— 互斥对「同表唯一含缩进行」的行
+        //      （今天是 ⑩ 的 Operator 与 ⑰ 的 LocalNestedFunc）结构性恒真，实测把它们的判别词削成
+        //      `""` 是 2325 全绿。少了这一条，那两行的判别词可以直接归零而没有任何断言喊。
+        expect(
+            !row.witness.declarator.isEmpty,
+            "【向量：\(vectorLabel)】形状表「\(tableName)」的 `\(row.key)` 这一行判别词是**空串** —— "
+                + "空串对每一行都 `hasPrefix`，正向见证就此退化成「这份 fixture 里有没有一条"
+                + "\(row.witness.indented ? "带缩进" : "顶格")的行」，与它声称的「\(row.shape)」再无关系。"
+                + "别指望下面那条互斥兜住这一手：它对同表**没有可撞兄弟**的行恒真（实测两行全绿）。"
+                + "判别词必须窄到只认得出自己那一份形状。")
+        // 互斥：这个判别词只认得出自己那一份。靶子是把判别词**放宽**到撞上兄弟（如 `"private "`）。
+        let collisions =
+            zip(rows, sources)
+            .filter { $0.0.key != row.key }
+            .filter { _, source in
+                source.text.map { shapeWitnessLine(row.witness, in: $0) != nil } ?? false
+            }
+            .map(\.0.key)
+        expect(
+            collisions.isEmpty,
+            "【向量：\(vectorLabel)】形状表「\(tableName)」的 `\(row.key)` 这一行，判别词 "
+                + "`\(row.witness.declarator)`（\(row.witness.indented ? "要求缩进" : "要求顶格")）"
+                + "同时认得出同表的 \(collisions) —— 这两种形状在判别式眼里已经不可分了。放宽到这一步，"
+                + "正向见证对撞上的每一行都为真：谁的 fixture 换成了对方那种形状都不会有人喊，而生产"
+                + "诊断串还在逐字把它们当成**两种**形状、各自声称有 fixture 钉着。"
+                + "判别词必须窄到只认得出自己那一份形状。")
+    }
+}
+
 /// `relativePath` 里两行哨兵之间的那段文本（不含哨兵本身）。抽不到 ⇒ `nil`（调用方当作红处理）。
 private func fenceCallSiteRegion(of relativePath: String) -> String? {
     guard
@@ -2475,21 +2653,54 @@ func runSourceScannerSuites() {
                 // ImplicitInternal.swift 就是**恒真**的 —— 本轮自己写的断言，第一遍就恒真了一条。
                 // ⚠️ `cleanWriter` 为空串的那一行（⑧b）**没有**干净兄弟可比，下面用 `!isEmpty` 显式
                 // 跳过，而不是让 `contains("``")` 去当一条永远为真的负控 —— 那是同一个恒真病换个马甲。
-                let nonPrivateShapeTable = [
-                    ("ImplicitInternal.swift", "sneakyWriter", "cleanWriter", "不写修饰符（隐式 internal）"),
-                    ("PackageWriter.swift", "packageWriter", "packageClean", "package"),
-                    ("OpenWriter.swift", "openWriter", "openClean", "open"),
-                    ("PublicExtension.swift", "extensionWriter", "", "public extension 里省略修饰符的成员"),
-                ]
+                // ⚠️ `path` / `witness` 两列是 `/codex review b0ce657` P1 补的：在它们之前，`modifier`
+                // 这一列是**纯散文**，没有任何断言读它 —— 把 `OpenWriter.swift` 的内容 `open func` 换成
+                // `package func`，文件名和写者名一字不改，**2269 条断言一条不红**，而 `open` 这根轴已经
+                // 从 fixture 集里消失。见 ``expectShapeWitnesses``。
+                let nonPrivateShapeTable:
+                    [(
+                        fixture: String, writer: String, cleanWriter: String, modifier: String,
+                        path: String, witness: ShapeWitness
+                    )] = [
+                        (
+                            "ImplicitInternal.swift", "sneakyWriter", "cleanWriter",
+                            "不写修饰符（隐式 internal）", "ClaudioGUICore/ImplicitInternal.swift",
+                            ShapeWitness(declarator: "func ", indented: false, enclosedBy: nil)
+                        ),
+                        (
+                            "PackageWriter.swift", "packageWriter", "packageClean", "package",
+                            "PackageWriter.swift",
+                            ShapeWitness(
+                                declarator: "package func ", indented: false, enclosedBy: nil)
+                        ),
+                        (
+                            "OpenWriter.swift", "openWriter", "openClean", "open",
+                            "ClaudioGUI/OpenWriter.swift",
+                            ShapeWitness(declarator: "open func ", indented: false, enclosedBy: nil)
+                        ),
+                        (
+                            "PublicExtension.swift", "extensionWriter", "",
+                            "public extension 里省略修饰符的成员", "PublicExtension.swift",
+                            ShapeWitness(
+                                declarator: "public extension ", indented: false, enclosedBy: nil)
+                        ),
+                    ]
                 expectShapeTableCovers(
                     "⑦⑧⑧b 非私有的认不出形状",
-                    rows: nonPrivateShapeTable.map(\.0),
+                    rows: nonPrivateShapeTable.map(\.fixture),
                     mustCover: [
                         "ImplicitInternal.swift", "PackageWriter.swift", "OpenWriter.swift",
                         "PublicExtension.swift",
                     ],
                     vectorLabel: vector.label)
-                for (fixture, writer, cleanWriter, modifier) in nonPrivateShapeTable {
+                expectShapeWitnesses(
+                    "⑦⑧⑧b 非私有的认不出形状",
+                    rows: nonPrivateShapeTable.map {
+                        (key: $0.fixture, shape: $0.modifier, path: $0.path, witness: $0.witness)
+                    },
+                    under: scanned,
+                    vectorLabel: vector.label)
+                for (fixture, writer, cleanWriter, modifier, _, _) in nonPrivateShapeTable {
                     expect(
                         audit.findings.contains {
                             $0.contains(fixture) && $0.contains("`\(writer)`")
@@ -2514,16 +2725,37 @@ func runSourceScannerSuites() {
                 }
 
                 // ⑩ 的判定：名字解析不出来的声明，由**关键字计数**那条逮住。措辞与另外几条腿逐字不相交。
-                let unnamedShapeTable = [
-                    ("Backtick.swift", "反引号转义标识符 `func `default`()`"),
-                    ("Operator.swift", "运算符声明 `func == (…)`"),
+                // ⚠️ `witness` 这一列同 ⑦⑧⑧b。**别把 `Operator` 那行的 `indented: true` 读成「靠它跟
+                // `Backtick` 分开」**（上一稿就是这么写的，红队打掉了）：两者的判别词本就不同形，
+                // `indented` 在这里不承重。它真正的作用是配合 `enclosedBy: "public struct "` 钉住
+                // 「运算符声明嵌在类型体里」这根轴 —— 而 `Operator` 是同表**唯一**含缩进行的 fixture，
+                // 这恰恰让互斥那条在它身上恒真（实测：判别词削成 `""` 仍 2325 全绿），
+                // 兜住它的是「非空」那条与 `enclosedBy`，不是互斥。
+                let unnamedShapeTable: [(fixture: String, shape: String, witness: ShapeWitness)] = [
+                    (
+                        "Backtick.swift", "反引号转义标识符 `func `default`()`",
+                        ShapeWitness(declarator: "func `", indented: false, enclosedBy: nil)
+                    ),
+                    (
+                        "Operator.swift", "运算符声明 `func == (…)`",
+                        ShapeWitness(
+                            declarator: "public static func == ", indented: true,
+                            enclosedBy: "public struct ")
+                    ),
                 ]
                 expectShapeTableCovers(
                     "⑩ 名字解析不出来的形状",
-                    rows: unnamedShapeTable.map(\.0),
+                    rows: unnamedShapeTable.map(\.fixture),
                     mustCover: ["Backtick.swift", "Operator.swift"],
                     vectorLabel: vector.label)
-                for (fixture, shape) in unnamedShapeTable {
+                expectShapeWitnesses(
+                    "⑩ 名字解析不出来的形状",
+                    rows: unnamedShapeTable.map {
+                        (key: $0.fixture, shape: $0.shape, path: $0.fixture, witness: $0.witness)
+                    },
+                    under: scanned,
+                    vectorLabel: vector.label)
+                for (fixture, shape, _) in unnamedShapeTable {
                     expect(
                         audit.findings.contains {
                             $0.contains(fixture) && $0.contains("连名字都") && $0.contains("认不出来")
@@ -2607,20 +2839,55 @@ func runSourceScannerSuites() {
                 //    ⚠️ 表里的行数必须与那条诊断逐字列出的形状数对得上：诊断列了 `private struct` /
                 //    `enum` / `final class` / `actor` **四种**，这里就得有四行（`ae494b1` 那一版只有
                 //    struct 一行，是 `/codex review ae494b1` P2-2 打出来的）。加形状先加 fixture。
-                let privateShapeTable = [
-                    ("PrivateExtension.swift", "peHelper", "private extension 里省略修饰符的成员"),
-                    ("FileprivateExtension.swift", "fpHelper", "fileprivate extension 里省略修饰符的成员"),
-                    ("PrivateStruct.swift", "psApply", "private struct 的无修饰符成员"),
-                    ("PrivateEnum.swift", "peEnumApply", "private enum 的无修饰符成员"),
-                    ("PrivateFinalClass.swift", "pfcApply", "private final class 的无修饰符成员"),
-                    ("PrivateActor.swift", "paApply", "private actor 的无修饰符成员"),
-                    ("LocalNestedFunc.swift", "lnInner", "函数体内的局部 func"),
-                ]
-                // 403 行那条诊断逐字列出的四种私有类型形状，一种都不许从表里消失。
-                // `ae494b1` 丢掉的正是 Enum / FinalClass / Actor 三种。
+                let privateShapeTable:
+                    [(fixture: String, member: String, shape: String, witness: ShapeWitness)] = [
+                        (
+                            "PrivateExtension.swift", "peHelper",
+                            "private extension 里省略修饰符的成员",
+                            ShapeWitness(
+                                declarator: "private extension ", indented: false, enclosedBy: nil)
+                        ),
+                        (
+                            "FileprivateExtension.swift", "fpHelper",
+                            "fileprivate extension 里省略修饰符的成员",
+                            ShapeWitness(
+                                declarator: "fileprivate extension ", indented: false,
+                                enclosedBy: nil)
+                        ),
+                        (
+                            "PrivateStruct.swift", "psApply", "private struct 的无修饰符成员",
+                            ShapeWitness(
+                                declarator: "private struct ", indented: false, enclosedBy: nil)
+                        ),
+                        (
+                            "PrivateEnum.swift", "peEnumApply", "private enum 的无修饰符成员",
+                            ShapeWitness(
+                                declarator: "private enum ", indented: false, enclosedBy: nil)
+                        ),
+                        (
+                            "PrivateFinalClass.swift", "pfcApply",
+                            "private final class 的无修饰符成员",
+                            ShapeWitness(
+                                declarator: "private final class ", indented: false,
+                                enclosedBy: nil)
+                        ),
+                        (
+                            "PrivateActor.swift", "paApply", "private actor 的无修饰符成员",
+                            ShapeWitness(
+                                declarator: "private actor ", indented: false, enclosedBy: nil)
+                        ),
+                        (
+                            "LocalNestedFunc.swift", "lnInner", "函数体内的局部 func",
+                            ShapeWitness(
+                                declarator: "func ", indented: true,
+                                enclosedBy: "@MainActor public func ")
+                        ),
+                    ]
+                // ``unrecognizedFuncDeclarations`` 那条诊断逐字列出的四种私有类型形状，一种都不许从
+                // 表里消失。`ae494b1` 丢掉的正是 Enum / FinalClass / Actor 三种。
                 expectShapeTableCovers(
                     "⑰ 私有类型 / extension / 局部 func 形状",
-                    rows: privateShapeTable.map(\.0),
+                    rows: privateShapeTable.map(\.fixture),
                     mustCover: [
                         "PrivateExtension.swift",
                         "FileprivateExtension.swift",
@@ -2631,7 +2898,14 @@ func runSourceScannerSuites() {
                         "LocalNestedFunc.swift",
                     ],
                     vectorLabel: vector.label)
-                for (fixture, member, shape) in privateShapeTable {
+                expectShapeWitnesses(
+                    "⑰ 私有类型 / extension / 局部 func 形状",
+                    rows: privateShapeTable.map {
+                        (key: $0.fixture, shape: $0.shape, path: $0.fixture, witness: $0.witness)
+                    },
+                    under: scanned,
+                    vectorLabel: vector.label)
+                for (fixture, member, shape, _) in privateShapeTable {
                     expect(
                         audit.findings.contains {
                             $0.contains(fixture) && $0.contains("`\(member)`")
