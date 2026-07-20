@@ -369,6 +369,108 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
     return StrippedSwiftSource(
         code: code, codeWithoutStringLiterals: blanked, unmodeledConstructs: unmodeled)
 }
+
+/// `source` 里每一处 `head(` 调用的**实参文本**（从左括号后到与之配平的右括号前）。
+///
+/// ## 为什么不能只数全文件的出现次数（`/codex review 840ea37` 的 P1）
+///
+/// 计数**不绑定调用点**。「`configLockFile` 出现 2 次、`settingsLockFile` 出现 1 次」这三条计数
+/// 断言，被下面这个**成对交换**整体满足 ——
+///
+/// ```swift
+/// switch selectPack(…, lockFile: environment.settingsLockFile)
+/// switch installClaudioHooks(…, lockFile: environment.configLockFile)
+/// ```
+///
+/// —— 总数仍是 2 config / 1 settings / 0 play，**全绿**，而接管路径在生产上两把锁全串了。
+/// 上一版的措辞（「调用点**确实转发** SetupEnvironment 的锁」）比它实际守的范围（「数得对」）大。
+/// 锁必须**按调用点**绑。
+///
+/// `head` 有子串碰撞风险时要把上下文一起传（`"switch installClaudioHooks"`）：
+/// `uninstallClaudioHooks(` **逐字包含** `installClaudioHooks(`，光传函数名就会被一个 uninstall
+/// 调用满足。头由 `head(` 锚、尾由配平括号锚，两头锁死。
+///
+/// ⚠️ 必须喂 ``StrippedSwiftSource/codeWithoutStringLiterals``，不能喂 ``StrippedSwiftSource/code``：
+/// 后者保留字符串**内容**，一句 `"pack (1.json"` 里的 `(` 会被计进深度、括号从此永不配平 ——
+/// 那个洞的完整代价记在 `codeWithoutStringLiterals` 自己的 doc 里。
+func callArguments(of head: String, in source: String) -> [String] {
+    let needle = head + "("
+    var calls: [String] = []
+    var cursor = source.startIndex
+    while let hit = source.range(of: needle, range: cursor..<source.endIndex) {
+        var depth = 1
+        var index = hit.upperBound
+        while index < source.endIndex, depth > 0 {
+            switch source[index] {
+            case "(": depth += 1
+            case ")": depth -= 1
+            default: break
+            }
+            if depth == 0 { break }
+            index = source.index(after: index)
+        }
+        // 括号没配平 = 源码被截断或读串了。宁可回一个空实参让调用方当场红，也不要静默少数一处调用。
+        guard depth == 0 else {
+            calls.append("")
+            break
+        }
+        calls.append(String(source[hit.upperBound..<index]))
+        cursor = source.index(after: index)
+    }
+    return calls
+}
+
+/// `arguments`（``callArguments(of:in:)`` 切出来的实参文本）里 `label:` 那**一个顶层实参的值**，
+/// trim 过。找不到该标签返回 `nil`。
+///
+/// ## 为什么必须是「相等」，不能是 `contains`（`/review e7c38ea` 的 P2）
+///
+/// ``callArguments(of:in:)`` 已经把**调用**的两头锚死了（头 `head(`、尾配平右括号）。但它交出来的
+/// 实参文本，上一版是拿 `contains("lockFile: environment.configLockFile")` 去断的 —— **头锚死了，
+/// 而 `lockFile: ` 之后那一段没锚**。于是每一种「以它开头、后面接着把它改掉」的写法都逐字包含那个
+/// needle：
+///
+/// ```swift
+/// lockFile: environment.configLockFile.deletingLastPathComponent()
+///     .appendingPathComponent("play.lock")            // 真的是 ~/.claudio/play.lock
+/// lockFile: isFirstRun ? environment.configLockFile : environment.settingsLockFile
+/// ```
+///
+/// 两条都编得过，`arguments.contains(…)` 都**绿**，`!setup.contains("playLockFile")` 也绿（标识符
+/// 一次没出现），`totalForwards == 3` 还是绿。这与 ``callArguments(of:in:)`` doc 里记着的那次翻车
+/// （`uninstallClaudioHooks(` 逐字包含 `installClaudioHooks(`）**逐字同一个病**，只是搬到了实参上：
+/// 子串断言没有词边界。
+///
+/// 这里按**顶层逗号**（括号 / 方括号 / 花括号深度为 0 的那些）把实参切开，再对 `label:` 那一段做
+/// **相等**判定。相等才配叫「绑定」；`contains` 只是「以它开头」。
+func argumentValue(_ label: String, in arguments: String) -> String? {
+    var depth = 0
+    var pieces: [String] = []
+    var current = ""
+    for character in arguments {
+        switch character {
+        case "(", "[", "{":
+            depth += 1
+            current.append(character)
+        case ")", "]", "}":
+            depth -= 1
+            current.append(character)
+        case "," where depth == 0:
+            pieces.append(current)
+            current = ""
+        default:
+            current.append(character)
+        }
+    }
+    pieces.append(current)
+
+    let prefix = label + ":"
+    return
+        pieces
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .first { $0.hasPrefix(prefix) }
+        .map { String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
+}
 // claudio:shared-scanner:end
 
 /// Creates a unique temporary directory, runs `body` with its URL, and always removes it

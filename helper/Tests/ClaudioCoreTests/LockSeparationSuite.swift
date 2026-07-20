@@ -96,103 +96,18 @@ private func codeOnly(_ relativePath: String) -> String? {
     scan(relativePath)?.code
 }
 
-/// `source` 里每一处 `head(` 调用的**实参文本**（从左括号后到与之配平的右括号前）。
+/// 同一个文件，剥注释**且清空字符串内容**之后的样子（界定符与插值里的代码保留）。
 ///
-/// 为什么不能只数全文件的锁出现次数（`/codex review 840ea37` 的 P1）：计数**不绑定调用点**。
-/// 「`configLockFile` 出现 2 次、`settingsLockFile` 出现 1 次」这三条计数断言，被下面这个
-/// **成对交换**整体满足 ——
+/// ``callArguments(of:in:)`` 这一路**必须**读它：那个切法按括号配平走，而 `code` 保留字符串
+/// **内容** —— 实参表里一句带不配对括号的字面量（`"pack (1.json"`）会把深度算歪，从此那处调用
+/// 的实参再也切不出来。见 ``StrippedSwiftSource/codeWithoutStringLiterals`` 自己的 doc。
 ///
-/// ```swift
-/// switch selectPack(…, lockFile: environment.settingsLockFile)   // config.json 的写，守着 settings.lock
-/// switch installClaudioHooks(…, lockFile: environment.configLockFile)  // settings.json 的写，守着 config.lock
-/// ```
-///
-/// —— 总数仍是 2 config / 1 settings / 0 play，**全绿**，而接管路径在生产上两把锁全串了。
-/// 上一版的措辞（「调用点**确实转发** SetupEnvironment 的锁」）比它实际守的范围（「数得对」）大。
-/// 那正是这个文件通篇要杀的病，复发在杀它的那一刀里。锁必须**按调用点**绑。
-///
-/// `head` 要连 `switch` 一起传（`"switch installClaudioHooks"`）：`uninstallClaudioHooks(`
-/// **逐字包含** `installClaudioHooks(`，光传函数名就会被一个 uninstall 调用满足 —— 本文件
-/// 上一次翻的正是这个车。头由 `switch …(` 锚、尾由配平括号锚，两头锁死。
+/// ⚠️ 本文件的**负向**断言（`!setup.contains("playLockFile")` 那几条）**不**改读这一路：对
+/// 「不许出现 X」而言，喂更少的文本是 fail-**open**（清掉的那段里正好有 X 就静默变绿），
+/// 而喂保留字符串的 `code` 是 fail-closed（最坏只是假红，有人喊）。极性不同，读的路就不同。
 @MainActor
-private func callArguments(of head: String, in source: String) -> [String] {
-    let needle = head + "("
-    var calls: [String] = []
-    var cursor = source.startIndex
-    while let hit = source.range(of: needle, range: cursor..<source.endIndex) {
-        var depth = 1
-        var index = hit.upperBound
-        while index < source.endIndex, depth > 0 {
-            switch source[index] {
-            case "(": depth += 1
-            case ")": depth -= 1
-            default: break
-            }
-            if depth == 0 { break }
-            index = source.index(after: index)
-        }
-        // 括号没配平 = 源码被截断或读串了。宁可回一个空实参让调用方当场红，也不要静默少数一处调用。
-        guard depth == 0 else {
-            calls.append("")
-            break
-        }
-        calls.append(String(source[hit.upperBound..<index]))
-        cursor = source.index(after: index)
-    }
-    return calls
-}
-
-/// `arguments`（`callArguments` 切出来的实参文本）里 `label:` 那**一个顶层实参的值**，trim 过。
-/// 找不到该标签返回 `nil`。
-///
-/// ## 为什么必须是「相等」，不能是 `contains`（`/review e7c38ea` 的 P2）
-///
-/// `callArguments` 已经把**调用**的两头锚死了（头 `switch callee(`、尾配平右括号）。但它交出来的
-/// 实参文本，上一版是拿 `contains("lockFile: environment.configLockFile")` 去断的 —— **头锚死了，
-/// 而 `lockFile: ` 之后那一段没锚**。于是每一种「以它开头、后面接着把它改掉」的写法都逐字包含那个
-/// needle：
-///
-/// ```swift
-/// lockFile: environment.configLockFile.deletingLastPathComponent()
-///     .appendingPathComponent("play.lock")            // 真的是 ~/.claudio/play.lock
-/// lockFile: isFirstRun ? environment.configLockFile : environment.settingsLockFile
-/// ```
-///
-/// 两条都编得过，`arguments.contains(…)` 都**绿**，`!setup.contains("playLockFile")` 也绿（标识符
-/// 一次没出现），`totalForwards == 3` 还是绿。这与 `callArguments` 自己文档里记着的那次翻车
-/// （`uninstallClaudioHooks(` 逐字包含 `installClaudioHooks(`）**逐字同一个病**，只是搬到了实参上：
-/// 子串断言没有词边界。
-///
-/// 这里按**顶层逗号**（括号 / 方括号 / 花括号深度为 0 的那些）把实参切开，再对 `lockFile:` 那一段
-/// 做**相等**判定。相等才配叫「绑定」；`contains` 只是「以它开头」。
-@MainActor
-private func argumentValue(_ label: String, in arguments: String) -> String? {
-    var depth = 0
-    var pieces: [String] = []
-    var current = ""
-    for character in arguments {
-        switch character {
-        case "(", "[", "{":
-            depth += 1
-            current.append(character)
-        case ")", "]", "}":
-            depth -= 1
-            current.append(character)
-        case "," where depth == 0:
-            pieces.append(current)
-            current = ""
-        default:
-            current.append(character)
-        }
-    }
-    pieces.append(current)
-
-    let prefix = label + ":"
-    return
-        pieces
-        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        .first { $0.hasPrefix(prefix) }
-        .map { String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
+private func codeWithoutStrings(_ relativePath: String) -> String? {
+    scan(relativePath)?.codeWithoutStringLiterals
 }
 
 @MainActor
@@ -499,7 +414,25 @@ func runLockSeparationSuites() {
         // 预算下限绑在**实测**上，不是拍脑袋：内置包 508K、整棵复制实测 33ms，GUI 侧临界区更短。
         // 250ms 能盖住 7 个以上那样的窗口。这里断的是下限，不是具体的 10×50ms —— 调参不该变红，
         // 把预算调到盖不住实测窗口才该变红。
-        let budget = Double(defaults.attempts) * defaults.delay
+        //
+        // 预算是**间隔之和**，不是「尝试次数 × 间隔」：`attempts` 次尝试之间只有 `attempts - 1` 次
+        // `Thread.sleep`（第一次尝试前不睡，最后一次失败之后也不睡 —— 见 `performFirstRunSetup`
+        // 的重试循环里那句 `if attempt < retry.attempts`）。写成 `attempts * delay` 会把预算算大
+        // 一整个 `delay`，这条断言于是在为一段**生产上不存在的等待**背书 —— 而它守的恰恰是
+        // 「预算够不够盖住实测的 33ms 窗口」。（`/codex review 48b6730` 的 P2。同一个错模型当时还长在
+        // ``PacksLockRetry`` 的 doc 与 `SetupSuite` 的四处上 —— :45 的参数说明、:69 的余量估算、:88 的
+        // 行内注释、以及 :104 那句**会印给用户**的失败消息 —— 一并扫掉了。措辞按实际清扫范围写：
+        // 本注释的第一稿只写「PacksLockRetry 的 doc 上，一并改了」，把剩下四处说没了。）
+        //
+        // ⚠️ 这一改**吃掉了**上面两条的独立性，别当成加了一道防线：新式 `(attempts-1) * delay >= 0.25`
+        // 在 `attempts <= 1` 时恒假、在 `delay == 0` 时也恒假，所以它**严格蕴含** `attempts > 1` 与
+        // `delay > 0` 两条 —— 那两条自本次改式起没有专属靶子了，留着只为给出更具体的失败消息。
+        // （旧式 `attempts * delay >= 0.25` 反而与它们独立：`attempts = 1, delay = 0.25` 能同时满足旧式
+        // 与「预算够」却完全不重试。也就是说独立性是被**我这一刀**消掉的。本注释第一稿写的是
+        // 「两根不同的轴各自独立成立」，正好说反 —— 红队 F3 逮到。）
+        // 真要一根独立的轴，该断的是**重试循环本身**（注入 attempts = 2 断言它真睡了一次，形状见
+        // `SetupSuite` 那条时序测试），不是继续在默认值上加谓词。
+        let budget = Double(defaults.attempts - 1) * defaults.delay
         expect(
             budget >= 0.25,
             "`PacksLockRetry` 的默认总预算是 \(budget)s，低于 0.25s 下限 —— 实测一次内置包发布"
@@ -532,13 +465,29 @@ func runLockSeparationSuites() {
         // 正是本 commit 通篇要杀的病，当时复发在杀它的那一刀里。变异台账当初只测了**单边**改写
         // （settings→play、config→play），成对交换这一类没进台账，于是没被想到。
         // 详见 `callArguments(of:in:)` 的文档。
-        guard let setup = codeOnly("helper/Sources/ClaudioCore/Setup.swift") else {
+        //
+        // ⚠️ 这条 suite 读**两路**，因为它下面两类断言的**极性相反**，安全的那一侧也就相反：
+        //
+        //  · `setupStructure`（`codeWithoutStrings`，清空字符串内容）喂 `callArguments` ——
+        //    它按括号配平切实参，而保留字符串内容会让实参表里一句带不配对括号的字面量
+        //    （`"pack (1.json"`）把深度算歪，从此那处调用的实参再也切不出来。
+        //  · `setup`（`codeOnly`，**保留**字符串内容）喂下面两条**负向**兜底。这一路不能换：
+        //    `!setup.contains("play.lock")` 的 needle 本身就是一句**字符串字面量**，清空之后它
+        //    **永远命中不了** —— 而那条断言存在的全部理由，正是拦住值级假名
+        //    `ClaudioPaths.root.appendingPathComponent("play.lock")`（见它自己上方那段注释）。
+        //    换句话说：对负向断言，喂更少的文本是 fail-**open**。
+        //
+        // 这两处此前共用一个 `codeOnly` 绑定。切换时我先把两处一起换成了 `codeWithoutStrings`，
+        // 当场把上面那条值级假名兜底打死了 —— 一次「同一个变量喂给极性相反的两类断言」的典型事故。
+        guard let setupStructure = codeWithoutStrings("helper/Sources/ClaudioCore/Setup.swift"),
+            let setup = codeOnly("helper/Sources/ClaudioCore/Setup.swift")
+        else {
             expect(false, "读不到 Setup.swift —— 这条 suite 唯一的价值就是读它")
             return
         }
 
         // `selectPack` 的两个调用点（兜底包与用户选中的包）—— 两处都必须转发 config.lock。
-        let selectPackCalls = callArguments(of: "switch selectPack", in: setup)
+        let selectPackCalls = callArguments(of: "switch selectPack", in: setupStructure)
         expect(
             selectPackCalls.count == 2,
             "接管路径里必须正好有 2 处 `switch selectPack(…)` 调用（兜底包与用户选中的包），"
@@ -560,7 +509,7 @@ func runLockSeparationSuites() {
         //
         // ⚠️ `head` 连 `switch` 一起传：`uninstallClaudioHooks(` 逐字包含 `installClaudioHooks(`，
         // 只传函数名会被一个 uninstall 调用满足 —— 本文件上一次翻的正是这个车。
-        let installCalls = callArguments(of: "switch installClaudioHooks", in: setup)
+        let installCalls = callArguments(of: "switch installClaudioHooks", in: setupStructure)
         expect(
             installCalls.count == 1,
             "接管路径里必须正好有 1 处 `switch installClaudioHooks(…)` 调用，"

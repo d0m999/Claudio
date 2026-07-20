@@ -697,18 +697,160 @@ func runViewWiringSuites() {
         //
         // 这就是 memory 里记着的「接管路径的锁要过四手，而中间那一手住在 ClaudioGUICore」——
         // 加第三把锁的那一刀（也就是我自己这一刀）原样重犯了一次。
-        guard let actions = codeOnly("gui/Sources/ClaudioGUICore/OnboardingActions.swift") else {
+        //
+        // 读 `codeWithoutStrings`（剥注释**且清空字符串内容**）而不是 `codeOnly`。`/codex review
+        // 48b6730` 的 P1 给了逐字变异体 —— 在 `OnboardingActions.swift` 里加一句
+        // `let witness = "packsLockFile: environment.packsLockFile"`，再把真实实参换成局部别名
+        // （`let fallback = ClaudioPaths.packsLockFile` → `packsLockFile: fallback`）。台账实测
+        // （M1-old / M1-fixed 一对）：`codeOnly` 下两条断言**全绿**，`codeWithoutStrings` 下**红**。
+        //
+        // ⚠️ 但「两条全绿」的成因**不同**，这一刀也只救回来一条 —— 说清楚，别把功劳记大了：
+        //  · **正向**那条（下面 `contains(…environment.packsLockFile)`）是被那句 `witness` 字面量
+        //    喂饱的**假绿**。这一换关掉的就是这条轴 —— 只是这条轴，不是这条断言（它还有别的洞，
+        //    见下面第四段）。
+        //  · **负向**那条（`!contains("packsLockFile: ClaudioPaths.")`）绿跟字符串**无关**：它是被
+        //    别名躲开的 —— 变异体写的是 `packsLockFile: forgeryFallback`，那个 needle 一次都没出现。
+        //    换读取函数对它一点忙都帮不上，它今天仍然拦不住「换个局部别名」这一手。
+        //
+        // 而且对**纯负向**断言，这一换在极性上是**放宽**不是收紧：`codeOnly` 保留字符串内容 ⇒ 更容易
+        // 命中 ⇒ 更容易红（fail-closed，代价是假红）；`codeWithoutStrings` 清空 ⇒ 更容易绿
+        // （fail-open，代价是假绿）。这里仍然换，是因为两条断言共用一次读取，而**正向**那半是承重的
+        // （台账坐实），负向那半本就不靠字符串这条轴。
+        //
+        // MasterVolumeRow 那条 suite 做的是同一个动作（也为正向那半统一换了读取路），但它的行内注释
+        // 把负向那半的 `codeOnly` 成本只记成「**假红**」。fail-open 这一面 `TestSupport.swift` 早就写过
+        // 两遍（文件头 L14-15、``StrippedSwiftSource`` 的 doc L80-81），还称它为「两套源码绊线唯一的、
+        // 共同的致命失效模式」—— 这里只是把它落到这条 suite 上。
+        //
+        // ⚠️⚠️ 这一换关掉的是**四条已实测通道里的一条**。台账第二轮（`/codex review 48b6730` 之后
+        // 那轮红队逼出来的，三条全部在本机 `swift run claudio-gui-tests` 上跑过，不是纸上推理）：
+        //
+        //  R1 **第二手无守卫**（红队 F1，最要命的一条）：把 `OnboardingActionEnvironment.init` 里的
+        //     存储赋值改成 `self.packsLockFile = ClaudioPaths.packsLockFile`，**调用点一字不动** ——
+        //     下面两条断言读的是调用点那行文本，照常命中 ⇒ **2368 条全绿**，而注入的临时路径在赋值
+        //     那一手就被丢掉了，接管测试**真的**在用户 `~/.claudio/packs.lock` 上开了锁（台账跑完
+        //     那个 0 字节 0600 的文件真的躺在那儿）。这条**任何**文本绊线都够不着：调用点的实参
+        //     字面就是 `environment.packsLockFile`，完全合规，错的是它求值出来的**值**。
+        //  R2 **尾部未锚**：`packsLockFile: environment.packsLockFile.deletingLastPathComponent()`
+        //     `.appendingPathComponent("packs2.lock")` 逐字包含 needle ⇒ 全绿，而这把锁已经不是 GUI
+        //     侧那把，互斥归零。与 `LockSeparationSuite` 的 ``argumentValue`` doc 里记的判例同形。
+        //  R3 **死代码供养**：真实实参换成局部别名，另起一个永不被调用的函数供养 needle ⇒ 全绿，
+        //     真实 home 上的锁同样被创建。字符串插值 `\(…)` 里的同名调用同理（插值里的代码是
+        //     `codeWithoutStringLiterals` **按设计**保留的），`#if` 非活跃分支同理。
+        //
+        // 所以真正的收紧分两层，缺一不可：
+        //  · R2/R3 这一层用「按调用点绑实参」封（`LockSeparationSuite` 的 ``callArguments`` /
+        //    ``argumentValue`` 那一路 —— 锚到 `SetupEnvironment(` 调用点、对实参做**相等**判定而非
+        //    `contains`、再加一条「本文件恰好一处构造点」的计数）。正向、负向两条都要换。
+        //  · **R1 这一层只有行为测试封得住** —— 持住**被注入的那把** `packsLockFile` 跑一次接管、
+        //    断言它停在 `.packsLockBusy`。判据（不写「grep 零命中」那种会被本注释自己污染的说法 ——
+        //    第一稿就是这么写的，写完当场自我证伪）：`OnboardingActionsSuite` 里
+        //    `FileLock(path: targets.configLockFile.path)` 出现 2 次、`settingsLockFile` 那把 2 次、
+        //    而 `packsLockFile` 那把 **0 次**。这三个数才是「有没有行为兜底」的可执行判别式。
+        //
+        // 这条规矩本文件早就写着：逐字版在 ``closureBody(after:in:)`` 的 doc 里，MasterVolumeRow 那条
+        // suite 的行内注释重复过一遍。加第三把锁的这一刀照样没照着做 —— 「写下警告不等于守住它」
+        // 这句话，上一个提交刚在自己的 commit message 里写过。
+        //
+        // 附自纠，全是这段注释**自己**在成稿过程中犯的，留着当判例 —— 它们比上面任何一条结论都
+        // 更能说明这个病的复发力：一段专门为「措辞比覆盖范围大」而写的注释，每一稿都在犯它。
+        // （不写「共几条」：计数正是这段注释翻过车的东西之一，见 ③。）
+        //  ① 第一稿把出处写成「``codeWithoutStrings(_:)`` 的 doc、T17i 那条」—— 前者挂错（那个 doc
+        //     讲的是「看代码结构的断言」，不是「负向断言」这条），后者**是我凭空造的编号，本文件里
+        //     根本没有 T17i**。
+        //  ② 第一稿写「下面两条断言都能被一句字符串字面量伪造」—— 对着变异体核，只有正向那条是。
+        //  ③ 第二稿（也就是①的自纠本身）把出处改写成「MasterVolumeRow 与 **EventRowView** 那几条
+        //     suite 各自重复过一遍」—— 实测 EventRowView 三处读取里只有「三槽焦点身份各自恰好一个
+        //     owner」那条重复了；「禁用的试听 ▶ 不会被无障碍合并抢播」那条只字未提；而「文件名 Menu
+        //     的『清除绑定』菜单项」那条写的是**反面** —— 它逐字论证为什么那里该用 `codeOnly`（要断的
+        //     是字面量标签本身）。自纠自己又挂错了一次出处。现在也不写计数。
+        //     （按 suite 名指，不写行号：这三处的行号在本段注释写下之后就被本段自己推移了
+        //     1192/1234/1303 → 1211/1253/1322。行号是会腐烂的引用，本仓库为它翻过车。）
+        //  ④ 第三稿写「fail-open 这一面本仓库此前没写下来过，这里是第一次」—— `TestSupport.swift`
+        //     的文件头与 ``StrippedSwiftSource`` 的 doc 已经各写过一遍，还称它为「两套源码绊线唯一
+        //     的、共同的致命失效模式」。声称首创之前先 grep。
+        //  ⑤ 又一稿写「`packsLockBusy` 在整个 `gui/` 目录零命中」—— 写下这句话本身就把这个词写进了
+        //     `gui/`，grep 当场命中三处，全是我自己的散文。**判据不能是「会被自己污染的那次 grep」**
+        //     （memory 里那条「守卫不能读它自己守的输出」的同一形状）。改成数
+        //     `FileLock(path: targets.…LockFile.path)` 的出现次数 —— 那个串只会长在代码里。
+        //
+        // ③④ 是 `/codex review 48b6730` 之后那轮红队逮到的（F3-eventrowview-attribution-wrong /
+        // F4-fail-open-novelty-claim）—— 值得记一笔：这两条在红队自己的三人证伪投票里被判成
+        // 「已证伪」，实测却都成立。多数投票在这种「核对散文出处」的 finding 上不可靠。
+        guard let actions = codeWithoutStrings("gui/Sources/ClaudioGUICore/OnboardingActions.swift")
+        else {
             expect(false, "读不到 OnboardingActions.swift —— 这条 suite 唯一的价值就是读它")
             return
         }
+        // 按**调用点绑实参**，不是全文件 `contains`（`LockSeparationSuite` 为同一个病立过判例，
+        // 那两个 helper 现在住在跨包哨兵区块里，两包共用同一份实现）。三条已实测的伪造通道
+        // （R2 尾部未锚 / R3 死代码供养 needle / 插值里的同名调用）全靠这一换关掉：
+        //  · 头由 `SetupEnvironment(` 锚、尾由配平右括号锚 ⇒ 只看真正的构造点，死代码里那个也是
+        //    构造点、于是**也要**被查，而不是替真调用点背书；
+        //  · 实参做**相等**判定 ⇒ `environment.packsLockFile.deletingLastPathComponent()…` 这种
+        //    「以 needle 开头、后面接着把它改掉」的写法当场红。
+        //
+        // 刻意**不**写 `calls.count == 1`：那种「不许变多」的锁对 fail-open 方向零贡献（多一个构造点
+        // 若也转发对了，本就没问题），而它开火时印的诊断对「合法新增了一处构造点」的人是**假的**，
+        // 最省力的修法是删掉整条 expect —— 承重的另一半跟着陪葬。改成「**每一处**都必须转发对」+
+        // 一条 `!calls.isEmpty` 兜底：既杀死代码伪造，又不会因为合法新增而误报。
+        //
+        // ## 归因表（六个变异体 × 三条断言，干净树基线做减法，按**断言原文**归因，不看退出码）
+        //
+        // 只看「红了」是假背书 —— 非零退出可能来自任何一条断言。这张表证明的是：这三条**没有一条
+        // 是冗余的**，每条都有只有它逮得到的变异体。
+        //
+        // | 变异体                                   | 本条(实参相等) | 持锁行为 | 下面那条负向 |
+        // |------------------------------------------|:--------------:|:--------:|:------------:|
+        // | R1 `init` 存储赋值换成 `ClaudioPaths.…`  |       —        | **独占** |      —       |
+        // | R2 实参尾部未锚（`.deleting…append…`）   |       ✓        |    ✓     |      —       |
+        // | R3 死代码供养 needle + 真实参换别名      |       ✓        |    ✓     |      —       |
+        // | R4 实参直接写死 `ClaudioPaths.…`         |       ✓        |    ✓     |      ✓       |
+        // | R5 实参从**兄弟锁**推导出同一个路径      |    **独占**    |    —     |      —       |
+        // | R6 另起一个**非** `SetupEnvironment` 构造点写死 |  —       |    —     |   **独占**   |
+        //
+        // R5 是分辨本条的那一个：`environment.configLockFile.deletingLastPathComponent()`
+        // `.appendingPathComponent("packs.lock")` 在 fixture 里**恰好等于**注入的那把锁 ⇒ 持锁行为
+        // 测试拿到的锁是对的、**全绿**；但这一手已经不绑注入点了（它绑的是另一把锁的路径），只有
+        // 这条相等判定看得见。R1 反过来：调用点一个字符没动 ⇒ 本条全绿，只有行为测试看得见。
+        // **文本绊线与行为测试互不代偿，两条都得有。**
+        let setupEnvironmentCalls = callArguments(of: "SetupEnvironment", in: actions)
         expect(
-            actions.contains("packsLockFile: environment.packsLockFile"),
-            "接管路径造 `SetupEnvironment` 时必须**逐字**转发 `packsLockFile: environment.packsLockFile`"
-                + " —— 漏掉它，`SetupEnvironment` 会静默落回 `ClaudioPaths.packsLockFile` 那个真实路径："
-                + "生产上碰巧仍然互斥（两边都用默认值），而**测试会去用户的 `~/.claudio` 上开一把真锁**，"
-                + "并与他正在运行的 Claudio.app 抢锁。前两把锁（config / settings）已经各有一条断言，"
-                + "这是第三条。")
-        // 负向：不许绕过 environment 直接朝下游写死一把锁 —— 与前两把锁那两条负向兜底同形。
+            !setupEnvironmentCalls.isEmpty,
+            "`OnboardingActions.swift` 里一处 `SetupEnvironment(` 构造点都找不到 —— 要么接管路径不再"
+                + "经由它（那下面这条转发断言就是在守一段不存在的代码，整条 suite 失去意义），要么"
+                + "`callArguments` 的切法读串了。认不出 ⇒ 红，不许静默放行")
+        for (ordinal, arguments) in setupEnvironmentCalls.enumerated() {
+            let forwarded = argumentValue("packsLockFile", in: arguments)
+            expect(
+                forwarded == "environment.packsLockFile",
+                "第 \(ordinal + 1) 处 `SetupEnvironment(…)` 的 `packsLockFile:` 实参必须**正好是** "
+                    + "`environment.packsLockFile`，实际是 `\(forwarded ?? "<没有这个实参>")` —— 漏掉或"
+                    + "传别的，`SetupEnvironment` 会静默落回 `ClaudioPaths.packsLockFile` 那个真实路径："
+                    + "生产上碰巧仍然互斥（两边都用默认值），而**测试会去用户的 `~/.claudio` 上开一把"
+                    + "真锁**，并与他正在运行的 Claudio.app 抢锁。"
+                    + "⚠️ 这一条挡的是**这一手**（构造点的实参文本）。它挡不住上游 "
+                    + "`OnboardingActionEnvironment.init` 里那一手存储赋值被换掉 —— 那条实测全绿、"
+                    + "且真的会在用户 home 上开锁。封住它的是 `OnboardingActionsSuite` 里那条"
+                    + "**持锁行为**断言")
+        }
+        // 负向兜底：不许绕过 environment 直接写死一把锁 —— 与前两把锁那两条负向兜底同形。
+        //
+        // ⚠️ 如实标注它现在还剩多少分辨力：上面那条相等判定**已经覆盖了 `SetupEnvironment(` 构造点上
+        // 的这一种**（实参写成 `ClaudioPaths.packsLockFile` ⇒ 相等判定当场红，归因表 R4 那行三条一起响）。
+        // 它没有被完全吞掉 —— 归因表 R6 是**只有它**逮得到的那一个：本文件里另起一个**非**
+        // `SetupEnvironment(` 的构造点并写死真实路径
+        // （`OnboardingActionEnvironment(…, packsLockFile: ClaudioPaths.packsLockFile)`），上面那个
+        // 循环根本不看它，实测只有这一条开火。所以留着；但也别把它当「第二道独立防线」宣传：在最
+        // 要害的那个调用点上，它与上面那条是**重叠**的。
+        //
+        // （不写「两根独立的轴」这种话。上一刀我在 `LockSeparationSuite` 的预算断言上正好写反过一次：
+        // 改完算式之后 budget 那条其实**严格蕴含**了兄弟两条，我却写成「各自独立成立」。）
+        //
+        // 读的是 `codeWithoutStrings`：对这条负向断言而言那是 fail-**open**（清空的字符串里正好有
+        // needle 就静默变绿）。之所以仍然接受，是因为 needle `packsLockFile: ClaudioPaths.` 是一段
+        // **代码形状**、不是字符串内容，而同一次读取要喂上面那条承重的 `callArguments`。极性代价
+        // 写在这里，不藏。
         expect(
             !actions.contains("packsLockFile: ClaudioPaths."),
             "接管路径把 `packsLockFile` 直接写成了 `ClaudioPaths.…` —— 那就绕过了注入点，"

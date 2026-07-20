@@ -777,6 +777,87 @@ func runOnboardingActionsSuites() {
         }
     }
 
+    // ── 第三把锁（packs.lock）的行为兜底 —— `/codex review 48b6730,9f347fc` 那轮红队逼出来的 ──
+    //
+    // ## 它补的是什么洞（实测坐实，不是推演）
+    //
+    // 包锁从 `OnboardingActionEnvironment` 灌进 `SetupEnvironment` 要**过四手**，而在这条 suite 之前，
+    // 全套自动化里只有 `ViewWiringSuite` 那一条**文本**绊线在看，且它只钉得住**第三手**（构造
+    // `SetupEnvironment(` 时那行实参的文本）。把**第二手** —— `OnboardingActionEnvironment.init` 里
+    // 那句 `self.packsLockFile = packsLockFile` —— 改成 `self.packsLockFile = ClaudioPaths.packsLockFile`，
+    // **调用点一个字符都不用动**：
+    //
+    //  · 文本绊线读的是调用点那行，needle 照常命中 ⇒ **gui 2368 条全绿**；
+    //  · 而注入的临时路径在赋值那一手就被丢了 ⇒ 这套接管测试**真的**在用户的
+    //    `~/.claudio/packs.lock` 上开了一把锁（台账跑完，那个 0 字节 0600 的文件真的躺在那儿）。
+    //
+    // **任何**文本绊线都够不着它：调用点的实参字面就是 `environment.packsLockFile`，完全合规，
+    // 错的是那个表达式**求值出来的值**。文本看不见值 —— 只有让代码真的去开那把锁才看得见。
+    //
+    // config / settings 两把锁各自早有两条这样的持锁 suite；包锁一条都没有。可执行的判别式是数
+    // `FileLock(path: targets.<X>LockFile.path)` 的出现次数：config 2、settings 2、packs 在这条之前是 0。
+    //
+    // ## 为什么它慢半拍（别当成卡死去「优化」掉）
+    //
+    // 接管路径构造 `SetupEnvironment` 时**不**转发 `packsLockRetry`，于是走生产默认值
+    // `PacksLockRetry()` = 10 次尝试、间隔 50ms ⇒ 撞锁后要等满 `(10-1) × 50ms = 450ms` 才返回
+    // `.packsLockBusy`。这是这条 suite 的固有成本，不是死循环。
+    suite("接管：持住 packs.lock → 必须停在包发布上（.packsLockBusy），且 hooks 一个字节都没写") {
+        withTempDirectory { root in
+            let fixture = FixtureBundle(in: root)
+            let targets = FixtureTargets(in: root)
+
+            let holder = FileLock(path: targets.packsLockFile.path)
+            expect(holder.tryLock(), "test setup: holder 必须先拿到**被注入的**那把 packs.lock")
+            defer { holder.unlock() }
+
+            let settingsBefore = fileBytes(targets.onboarding.settingsFile)
+            let settingsWatch = FileWriteWatch(watching: targets.onboarding.settingsFile)
+            expect(settingsWatch.isArmed, "test setup: settings.json 的写观测器没能武装起来")
+
+            let result = performOnboardingDiskAction(
+                .takeOver,
+                environment: targets.environment(bundledHelperBinary: fixture.helperBinary))
+
+            var stoppedAtPackPublish = false
+            if case .failure(.setupFailed(.packsLockBusy)) = result {
+                stoppedAtPackPublish = true
+            }
+            expect(
+                stoppedAtPackPublish,
+                "接管发布内置包时必须撞上**被注入的那把** packs.lock，得到 \(result) —— "
+                    + "① 接管**成功**了 = 它开的根本不是这把锁：注入点在某一手被丢掉了（`OnboardingAction"
+                    + "Environment.init` 的存储赋值、或构造 `SetupEnvironment` 时的实参），于是它去开了"
+                    + "**用户真实的** `~/.claudio/packs.lock`，与他正在运行的 Claudio.app 抢锁 —— 而"
+                    + "`ViewWiringSuite` 那条文本绊线对这一整类是瞎的（实测：改存储赋值那一手，2368 全绿）；"
+                    + "② 停在 `.useFailure` / `.installFailure` = 包发布被整段跳过了，而它必须在选包与写"
+                    + "hooks **之前**：跳过包却照常写 hooks，用户拿到的是一台亮着绿点、doctor 也过、却"
+                    + "永远不响的机器（`Setup.swift` 里 `.packsLockBusy` 那一段亲口立的纪律）。"
+                    + "断的是**哪一步**被挡住，不只是「被挡住了」")
+
+            expect(
+                !settingsWatch.observedWrite(),
+                "包发布被挡住了，那 settings.json 就必须**一次都没被写过** —— 不是「终态一样」，是"
+                    + "**一个字节都没落过盘**。观测器响了 = 写 hooks 跑到了包发布**前面**（错误码一模"
+                    + "一样，上面那条照样绿），或者它写完又把文件删/改了回去（**字节比较看不见这一种**）。"
+                    + "两种都意味着：一次注定不会响的接管，在用户的 Claude Code 里留下过痕迹，而机器上"
+                    + "一个能用的包都没有 —— 那个窗口里每个事件都会去 exec 一个选不出包的 helper")
+
+            let settingsAfter = fileBytes(targets.onboarding.settingsFile)
+            expect(
+                settingsAfter == settingsBefore,
+                "settings.json 的**终态**必须与接管前逐字相同（也不许被凭空创建出来）—— "
+                    + "前 \(settingsBefore?.count.description ?? "<无文件>") 字节，"
+                    + "后 \(settingsAfter?.count.description ?? "<无文件>") 字节。上面那条观测器断言严格"
+                    + "更强；这一条留着，是因为它说得出**变成了什么样**，而观测器只说得出**被动过**")
+            expect(
+                selectedPack(in: targets.configFile) == nil,
+                "包发布是被挡住的那一步，它之后的选包一步都不该跑 —— config.json 里不该有任何选包结果。"
+                    + "得到：\(String(describing: selectedPack(in: targets.configFile)))，"
+                    + "原文：\(readString(targets.configFile) ?? "<无文件>")")
+        }
+    }
+
     suite("接管：持住 config.lock → 必须停在 config.json 的写上（.useFailure(.lockBusy)）") {
         withTempDirectory { root in
             let fixture = FixtureBundle(in: root)

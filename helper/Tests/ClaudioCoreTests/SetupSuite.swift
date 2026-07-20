@@ -42,9 +42,12 @@ private func makeEnvironment(
         configLockFile: claudioRoot.appendingPathComponent("config.lock"),
         settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
         packsLockFile: claudioRoot.appendingPathComponent("packs.lock"),
-        // 生产默认是 10 × 50ms（见 ``PacksLockRetry``）。测试里压到 5 × 10ms：既不让「一直占着」
-        // 那条测试白等半秒，又保留**多于一次**的尝试——attempts 压到 1 就等于把重试这根轴从整个
-        // 测试套件里删掉，而那正是下面那条时序测试要钉的东西。
+        // 生产默认是 10 次尝试、间隔 50ms（见 ``PacksLockRetry``）。测试里压到 5 次、间隔 10ms：
+        // 既不让「一直占着」那条测试白等，又保留**多于一次**的尝试——attempts 压到 1 就等于把重试
+        // 这根轴从整个测试套件里删掉，而那正是下面那条时序测试要钉的东西。
+        //
+        // 一律写「N 次尝试、间隔 D」，不写「N × D」：后者读起来像乘积，而等待预算是**间隔之和**
+        // `(N-1) × D`，不是 `N × D`（见 ``PacksLockRetry`` 的 doc，那里为这个说大一档的表述立了规矩）。
         packsLockRetry: PacksLockRetry(attempts: 5, delay: 0.01))
 }
 
@@ -66,7 +69,9 @@ func runSetupSuites() {
     // 的临界区只有毫秒级 —— 所以 setup 撞上锁时该等一下，不该整个安装当场失败。
     // 实测：内置包总共 508K、整棵复制 33ms，所以争用窗口是**几十毫秒**量级，有界重试盖得住。
     //
-    // ⚠️ 这条是**时序**测试，天生有一点脆，留了 10 倍余量（持锁 50ms / 重试预算 500ms）。
+    // ⚠️ 这条是**时序**测试，天生有一点脆，留了近 10 倍余量：持锁 50ms，而下面注入的
+    // `PacksLockRetry(attempts: 50, delay: 0.01)` 的等待预算是 `(50-1) × 10ms = 490ms`（不是 500ms
+    // —— 第一次尝试不睡，见 ``PacksLockRetry`` 的 doc）。所以余量是 9.8 倍，不是整 10 倍。
     // 它与下面那条「一直占着就必须失败」是**一对**：只留下面那条的话，把 attempts 调回 1
     // （等于取消重试）不会有任何断言变红；只留这条的话，把重试改成无限等也不会红。
     suite("performFirstRunSetup：包锁在重试预算内被放开 ⇒ 挺过去，不是当场失败") {
@@ -85,7 +90,7 @@ func runSetupSuites() {
                 packsLockFile: base.packsLockFile,
                 packsLockRetry: PacksLockRetry(attempts: 50, delay: 0.01))
 
-            // 后台线程持锁 50ms 再放开；setup 在主线程上跑，会在 500ms 预算内不断重试。
+            // 后台线程持锁 50ms 再放开；setup 在主线程上跑，会在 490ms 预算内不断重试。
             let holderReady = DispatchSemaphore(value: 0)
             let lockPath = environment.packsLockFile.path
             DispatchQueue.global().async {
@@ -101,7 +106,8 @@ func runSetupSuites() {
             let result = performFirstRunSetup(environment: environment)
             expect(
                 result != .failure(.packsLockBusy),
-                "包锁只被占了 50ms、而重试预算有 500ms，setup 却当场报了 .packsLockBusy —— "
+                "包锁只被占了 50ms、而重试预算有 490ms（(50-1) × 10ms），setup 却当场报了 "
+                    + ".packsLockBusy —— "
                     + "有界重试没有生效（attempts 被调回 1 / 循环写成只试一次 / sleep 被跳过）。"
                     + "这一侧放宽的全部意义就是：GUI 那几毫秒的写不该让一次安装整个失败。"
                     + "实得：\(result)")
