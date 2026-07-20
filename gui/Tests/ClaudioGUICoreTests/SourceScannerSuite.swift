@@ -2515,50 +2515,25 @@ func runSourceScannerSuites() {
                 //    正则抄漂了只会红、不会绿（fail-closed）。词素复用 `funcKeywordLexeme` 那一份。
                 //    ⚠️ 这只证了差分的**一半**（「旧 run 会把它吞掉」）。另一半「新 run 必须报它」由下面
                 //    ⑯ 的判定钉。两条合起来才是分辨力，缺一条都证不出。
-                let privImportFixture = """
+                let privImportLiteral = """
                     private import Foundation
                     func privImportSneaky(_ n: Int) { mutateManifestJSON() }
                     @MainActor public func privImportClean() { mutateManifestJSON() }
                     """
-                let legacyWideRun = "[\\sA-Za-z@_]*"
-                let legacyClaims: [String] = {
-                    let pattern =
-                        "\\b(?:fileprivate|private)\\b\(legacyWideRun)\(funcKeywordLexeme)"
-                        + "\\s+([A-Za-z_][A-Za-z0-9_]*)"
-                    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
-                    let text = privImportFixture as NSString
-                    return
-                        regex
-                        .matches(
-                            in: privImportFixture,
-                            range: NSRange(location: 0, length: text.length)
-                        )
-                        .map { text.substring(with: $0.range(at: 1)) }
-                }()
-                expect(
-                    legacyClaims == ["privImportSneaky"],
-                    "⑯ 的 fixture 对 M4-1（修饰符 run 退回任意字母词）失去分辨力了：就地重建的旧 run "
-                        + "认领的是 \(legacyClaims)，要求恰好是 [\"privImportSneaky\"]。这条 fixture 的全部"
-                        + "价值就在于「旧 run 跨过零标点的 `private import` 那行、把下一个隐式 internal "
-                        + "写者当成 private 的认领走」。认领到别的名字（干净写者被挪到了中间）、或什么都"
-                        + "认领不到（首行出现 `.` / `;` / `(` 这类标点，旧 run 自己断在那儿）—— 两种情况下"
-                        + "新旧 run 的产出**逐字相同**，M4-1 当场存活，而下面 ⑯ 那两条判定照样全绿。"
-                        + "fixture：\n\(privImportFixture)")
-                //    负控的非空性：⑯ 下面那条负控是 `!findings.contains { …privImportClean… }` ——
-                //    干净写者一旦被删掉或改名，它就**恒真**（不存在的东西当然不会被报）。所以它必须在
-                //    这里被单独钉住，且要恰好一处：有第二处，负控就分不清自己钉的是哪一个。
-                let privImportCleanDecls =
-                    privImportFixture
-                    .components(separatedBy: "\n")
-                    .filter { $0.contains("func privImportClean(") }
-                expect(
-                    privImportCleanDecls.count == 1,
-                    "⑯ 的 fixture 里 `privImportClean` 的声明不是恰好一处（实得 "
-                        + "\(privImportCleanDecls.count) 处）—— 下面那条负控说的是「它**不许**被报」，"
-                        + "被守的那个东西一旦不存在，负控就恒真、连「收窄修饰符 run 收过头会让 "
-                        + "`@MainActor public func` 假红」这条都不再守。fixture：\n\(privImportFixture)")
+                //    ⚠️ ⑯ 的自证**不在这里**，在下面那次 `auditManifestConcurrencyFence` 调用的正后方
+                //    （搜「⑯ 自证」）。这里只落盘。为什么隔那么远：自证要读的是**生产扫描器实际吃进去的
+                //    那份字节**，而生产是在下面 audit 那一刻才去枚举、读盘的。红队实测坐实两条 TOCTOU 绕过
+                //    （`/codex review 3598e5e` 之后第二轮，两个独立视角各自撞到）：只要自证在写盘后**立刻**
+                //    读、而 audit 在几百行之后才扫，中间任何一次 `writeFixture(…, to: …/PrivateImport.swift)`
+                //    （R3：伪装成 ⑯b 变体的复制粘贴，把整份覆盖成没有干净写者的两行），或把这里的落盘目标
+                //    改指扫描根外、由另一次 writeFixture 顶替 scanned 里那份（R4）—— 都能让「自证读到的三行」
+                //    与「生产扫到的两行」分家：六条自证全绿、下游负控恒真，`✓ all 2359`。把自证挪到 audit
+                //    正后方、且从 scanned 树里回读那唯一一份，才让「我证的字节」与「生产扫的字节」之间没有
+                //    写者窗口。
+                //    ⚠️ 不留 `privImportURL` 这个中间变量：留着它，「改这一行指向别处」就成了可改语义的接缝
+                //    （R4 的入口）。落盘目标直接内联，改它就等于改真正被扫的那份、连正控一起带红。
                 writeFixture(
-                    privImportFixture, to: scanned.appendingPathComponent("PrivateImport.swift"))
+                    privImportLiteral, to: scanned.appendingPathComponent("PrivateImport.swift"))
 
                 // ⑰ **``unrecognizedFuncDeclarations`` 那条诊断逐字列出的形状，列了几种就得有几条
                 //    fixture**（教条：措辞不许比覆盖
@@ -2624,6 +2599,106 @@ func runSourceScannerSuites() {
 
                 let audit = auditManifestConcurrencyFence(
                     under: scanned, pathPrefix: vector.pathPrefix)
+
+                // ⑯ 自证。读的是**生产 audit 这一刻刚扫过的那份**磁盘字节 —— 不是写盘后立刻读的、更不是
+                //    源码字面量（见上面写盘处那段 TOCTOU 说明）。红队实测坐实的两条绕过都靠「自证读的字节 ≠
+                //    生产扫的字节」：R3 在 audit 前把 `PrivateImport.swift` 覆盖成没有干净写者的两行；R4 把
+                //    落盘改指扫描根外、由另一次 writeFixture 往 scanned 里塞两行顶替品。所以先证「scanned 树
+                //    里那份唯一」，再从那唯一一份回读、在它上面验形状 —— 它与紧邻的这次 audit 之间没有写者。
+                let privImportOnDiskURLs: [URL] = {
+                    guard
+                        let enumerator = FileManager.default.enumerator(
+                            at: scanned, includingPropertiesForKeys: nil)
+                    else { return [] }
+                    return
+                        enumerator
+                        .compactMap { $0 as? URL }
+                        .filter { $0.lastPathComponent == "PrivateImport.swift" }
+                }()
+                expect(
+                    privImportOnDiskURLs.count == 1,
+                    "【向量：\(vector.label)】scanned 树里叫 `PrivateImport.swift` 的文件不是恰好一份（实得 "
+                        + "\(privImportOnDiskURLs.count) 份）—— ⑯ 的自证要在「生产实际扫描的那一份」上验形状。"
+                        + "多一份就分不清验的是哪一份、少一份说明它压根没落进扫描树。红队 R4：把 ⑯ 落盘改指"
+                        + "扫描根外、再由另一次 `writeFixture` 往 scanned 塞一份没有干净写者的两行版 —— 两份就"
+                        + "是这么来的。实得：\(privImportOnDiskURLs.map(\.lastPathComponent))")
+                let privImportOnDisk =
+                    privImportOnDiskURLs.first.flatMap {
+                        try? String(contentsOf: $0, encoding: .utf8)
+                    }
+                    ?? ""
+                expect(
+                    !privImportOnDisk.isEmpty,
+                    "【向量：\(vector.label)】⑯ 生产扫的那份 `PrivateImport.swift` 一个字节都读不回来 —— 下面"
+                        + "每一条自证都会跑在空串上，而生产也扫不到内容：⑯ 的正控与负控双双对空集恒真。")
+                //    旧 run 就地重建（M4-1 分辨力）—— 跑在生产扫的那份字节上。
+                let legacyWideRun = "[\\sA-Za-z@_]*"
+                let legacyClaims: [String] = {
+                    let pattern =
+                        "\\b(?:fileprivate|private)\\b\(legacyWideRun)\(funcKeywordLexeme)"
+                        + "\\s+([A-Za-z_][A-Za-z0-9_]*)"
+                    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+                    let text = privImportOnDisk as NSString
+                    return
+                        regex
+                        .matches(
+                            in: privImportOnDisk,
+                            range: NSRange(location: 0, length: text.length)
+                        )
+                        .map { text.substring(with: $0.range(at: 1)) }
+                }()
+                expect(
+                    legacyClaims == ["privImportSneaky"],
+                    "⑯ 的 fixture 对 M4-1（修饰符 run 退回任意字母词）失去分辨力了：就地重建的旧 run "
+                        + "认领的是 \(legacyClaims)，要求恰好是 [\"privImportSneaky\"]。这条 fixture 的全部"
+                        + "价值就在于「旧 run 跨过零标点的 `private import` 那行、把下一个隐式 internal "
+                        + "写者当成 private 的认领走」。认领到别的名字（干净写者被挪到了中间）、或什么都"
+                        + "认领不到（首行出现 `.` / `;` / `(` 这类标点，旧 run 自己断在那儿）—— 两种情况下"
+                        + "新旧 run 的产出**逐字相同**，M4-1 当场存活，而下面 ⑯ 那两条判定照样全绿。"
+                        + "fixture：\n\(privImportOnDisk)")
+                //    ⚠️ 读模型：数「声明」不是数「含子串的行」，且喂 codeWithoutStringLiterals（注释被剥、
+                //    字符串内容清空）—— 与生产 `auditManifestConcurrencyFence` 里 `strippingComments(text)`
+                //    同一个读模型（`/codex review 3598e5e` P1，实测坐实：读原始文本时把干净写者注释掉，
+                //    子串还在、`count == 1` 照样绿，而剥完注释那个声明已经不存在、下游负控当场恒真）。
+                //    形状轴只钉「重排」一种（M9，实测全绿、下游兜不住）；另三种（掉 @MainActor / 掉 public /
+                //    换 open）下游负控自己会红，不必在这里补。
+                let privImportScanned = strippingComments(privImportOnDisk)
+                expect(
+                    privImportScanned.unmodeledConstructs.isEmpty,
+                    "⑯ 的 fixture 里出现了 `strippingComments` 自己都说读不懂的构造："
+                        + "\(privImportScanned.unmodeledConstructs) —— 下面那条「干净写者恰好一处」读的"
+                        + "就是它剥出来的文本，剥错了，那条断言数的就是别的东西。实测坐实的坏法是**扩展 "
+                        + "regex 字面量**（`#/…/#`）：`#` 后面是 `/`，不开字符串模式，里面的字符原样当代码"
+                        + "流出去 —— 一个 `#/ … func privImportClean() … /#` 能让下面那条数到 1 而真声明"
+                        + "根本不存在，下游负控照样恒真。fixture：\n\(privImportOnDisk)")
+                expect(
+                    !privImportOnDisk.contains("/"),
+                    "⑯ 生产扫的那份 fixture 里出现了 `/` —— 这份 fixture 只该是三行朴素声明，一个斜杠都不该"
+                        + "有。禁它是因为**裸** regex 字面量 `/…/` 是 `strippingComments` 既不建模、也**不记 "
+                        + "unmodeled** 的那一种（⑬ / ⑰ 两处已实测坐实）：它的内容会原样当代码流进下面那份"
+                        + "文本，于是「声明恰好一处」与「逐字形状」两条都能在**一个真声明都不存在**的 fixture "
+                        + "上全绿，而下游负控照样恒真。落盘内容：\n\(privImportOnDisk)")
+                let privImportCleanDecls =
+                    allFuncDeclarationNames(in: privImportScanned.codeWithoutStringLiterals)
+                    .filter { $0 == "privImportClean" }
+                expect(
+                    privImportCleanDecls.count == 1,
+                    "⑯ 的 fixture 里 `privImportClean` 的声明不是恰好一处（在**生产扫描器看得见的那份文本**"
+                        + "里实得 \(privImportCleanDecls.count) 处）—— 下面那条负控说的是「它**不许**被报」，"
+                        + "被守的那个东西一旦不在扫描视野里，负控就恒真、连「收窄修饰符 run 收过头会让 "
+                        + "`@MainActor public func` 假红」这条都不再守。删掉、改名、**注释掉**、**塞进字符串"
+                        + "字面量**、以及 audit 前把整份覆盖掉，都会走到这里。fixture：\n\(privImportOnDisk)")
+                //    形状轴上**唯一**下游兜不住的那一种：修饰符重排（M9，实测全绿）。逐字钉，别放宽成
+                //    「含 `@MainActor` 且含 `public`」—— 那个宽形对重排恒真，等于没钉。
+                let privImportCleanShape = "@MainActor public func privImportClean("
+                expect(
+                    privImportScanned.codeWithoutStringLiterals.contains(privImportCleanShape),
+                    "⑯ 的 fixture 里那个干净写者不再是 `\(privImportCleanShape)…` 这个逐字形状 —— 下面那条"
+                        + "负控点名要守的就是它（「收窄修饰符 run 收过头，`@MainActor public func` 这个真"
+                        + "仓库天天在用的形状会当场假红」）。掉 `public` / 掉 `@MainActor` / 换 `open` 三种"
+                        + "负控自己会红，那三种用不着这一条；**把两者重排成 `public @MainActor func` 不会**"
+                        + " —— 在这条断言存在之前实测：全绿、负控一声不吭，而 fixture 已经不含负控点名的那"
+                        + "个形状了。这一条就是为那一种存在的。fixture：\n\(privImportOnDisk)")
 
                 // ── W1 向量穿线见证。**这条是整套参数化的命门。**
                 //    下面每一条断言都是 `contains(basename)`，而 `pathPrefix` 只**前缀**在诊断路径上 ——
