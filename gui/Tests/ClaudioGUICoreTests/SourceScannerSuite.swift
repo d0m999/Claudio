@@ -546,7 +546,8 @@ private func expectShapeTableCovers(
             rows.contains(required),
             "【向量：\(vectorLabel)】形状表「\(tableName)」少了 `\(required)` 这一行（实得 \(rows)）—— "
                 + "生产诊断串**逐字列出**了这个形状并声称「每一种都有 fixture 钉着」，表里却没有它。"
-                + "删一行不会有任何断言变红（只是少跑几次 `expect`），措辞就此比覆盖范围大 —— "
+                + "**在这把锁存在之前**，删一行不会有任何断言变红（只是少跑几次 `expect`），措辞"
+                + "就此比覆盖范围大 —— "
                 + "`ae494b1` 那一轮丢掉三种私有形状走的正是这条路。要去掉一个形状，先去掉诊断串里"
                 + "对它的措辞。")
     }
@@ -2013,7 +2014,8 @@ func runSourceScannerSuites() {
         //    `count == 2`。第一版写的是 `count == 2 && contains{isEmpty}`，红队打掉：`count == 2`
         //    对 fail-open 方向零贡献（砍成一项由 `contains{isEmpty}` 独力逮住），它唯一独占的触发面
         //    是**清单变长** —— 而那是覆盖**改进**，不是缺陷。更坏的是它开火时印的诊断逐句为假
-        //    （「空前缀那根轴没有被举证」而空前缀就在它自己印出的清单第一项）。本文件 375 行那段
+        //    （「空前缀那根轴没有被举证」而空前缀就在它自己印出的清单第一项）。``funcKeywordCount``
+        //    的负差额诊断头上那段
         //    专门讲「字面为假的诊断把人指向错误方向」，而想加第三根轴的人拿到一条说他没做的事的红，
         //    最省力的修法是**把整条 expect 删掉** —— `contains{isEmpty}` 一起陪葬，上一轮 P1 的洞
         //    原地重开。守卫的措辞必须在它**每一种**开火情形下都为真，否则它自己就是下一个洞的入口。
@@ -2558,7 +2560,8 @@ func runSourceScannerSuites() {
                 writeFixture(
                     privImportFixture, to: scanned.appendingPathComponent("PrivateImport.swift"))
 
-                // ⑰ **386 行那条诊断逐字列出的形状，列了几种就得有几条 fixture**（教条：措辞不许比覆盖
+                // ⑰ **``unrecognizedFuncDeclarations`` 那条诊断逐字列出的形状，列了几种就得有几条
+                //    fixture**（教条：措辞不许比覆盖
                 //    范围大 —— 本文件已经栽过一次，见 ⑧b；`ae494b1` 那一轮又栽了一次，见下面三条
                 //    `private enum` / `final class` / `actor`）。这七条**故意保持红**：红队实测过把它们
                 //    白名单化的方案（认 `private extension` 块里的成员），结论是**不能做** —— 那需要一台
@@ -2583,7 +2586,8 @@ func runSourceScannerSuites() {
                     private struct PSBatch { func psApply() { mutateManifestJSON() } }
                     """,
                     to: scanned.appendingPathComponent("PrivateStruct.swift"))
-                // ⚠️ 下面三条是 `/codex review ae494b1` P2-2 补的。386 行那条诊断逐字写的是
+                // ⚠️ 下面三条是 `/codex review ae494b1` P2-2 补的。``unrecognizedFuncDeclarations``
+                //    那条诊断逐字写的是
                 //    「`private struct` / `enum` / `final class` / `actor` 的无修饰符成员」—— **四种**，
                 //    而上一版只钉了 `struct` 一种。措辞比覆盖范围大，本文件治了十次的同一个病，这次
                 //    长在「专门用来禁止这个病」的那张断言表自己身上。
@@ -2834,11 +2838,17 @@ func runSourceScannerSuites() {
                         + "`privImportClean` 被报了（负控）—— 收窄修饰符 run 收过头了，`@MainActor public "
                         + "func` 这个真仓库天天在用的形状会当场假红。实际诊断：\(audit.findings)")
 
-                // ⑰ 的判定：386 行诊断**逐字列出**的形状，列了几种就得有几条 fixture 钉着（教条：措辞
+                // ⑰ 的判定：``unrecognizedFuncDeclarations`` 那条诊断**逐字列出**的形状，列了几种
+                //    就得有几条 fixture 钉着（教条：措辞
                 //    不许比覆盖范围大）。这七条**故意保持红** —— 理由写在 fixture 上方。
-                //    ⚠️ 表里的行数必须与那条诊断逐字列出的形状数对得上：诊断列了 `private struct` /
-                //    `enum` / `final class` / `actor` **四种**，这里就得有四行（`ae494b1` 那一版只有
-                //    struct 一行，是 `/codex review ae494b1` P2-2 打出来的）。加形状先加 fixture。
+                //    ⚠️ 诊断逐字列出的**四种私有类型**（`private struct` / `enum` / `final class` /
+                //    `actor`）必须一种不缺地在这张表里各占一行（`ae494b1` 那一版只有 struct 一行，是
+                //    `/codex review ae494b1` P2-2 打出来的）。加形状先加 fixture。
+                //    ⚠️ **别把上面那句读成「这张表应当恰好四行」**（上一稿逐字写的就是「这里就得有
+                //    四行」，而它紧挨着的表当时已经是七行 —— `/codex review b0ce657` P2）：诊断列出
+                //    的八种形状分在**两张**表里，非私有的那四种在 ⑦⑧⑧b，这张表装的是四种私有类型 +
+                //    两种 private/fileprivate extension + 局部 func，共七行。承重的是「一种都不许
+                //    少」，不是行数相等 —— 后者从来就不成立。
                 let privateShapeTable:
                     [(fixture: String, member: String, shape: String, witness: ShapeWitness)] = [
                         (
