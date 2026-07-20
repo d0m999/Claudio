@@ -246,12 +246,17 @@ func runLockSeparationSuites() {
         }
     }
 
-    suite("四把锁是四个不同的文件 —— 锁分离的中心论点，此前零断言") {
+    suite("五把锁是五个不同的文件 —— 锁分离的中心论点，此前零断言") {
         let locks: [(String, URL)] = [
             ("playLockFile", ClaudioPaths.playLockFile),
             ("configLockFile", ClaudioPaths.configLockFile),
             ("settingsLockFile", ClaudioPaths.settingsLockFile),
             ("logLockFile", ClaudioPaths.logLockFile),
+            // 第五把（`/codex review b0ce657` 之后那次核查加的）：`manifest.json` 有两个写者
+            // —— GUI 的 `mutateManifestJSON` 与 helper 的 `performFirstRunSetup`（目录粒度
+            // 发布整棵包目录）。它必须与 `config.lock` 分开：`performFirstRunSetup` 会**同时**
+            // 拿这两把（包循环一把、写 config 一把），合成一把就是自己锁自己。
+            ("packsLockFile", ClaudioPaths.packsLockFile),
         ]
 
         // 两两不等。挡的是「某把锁被改回另一把」——一行就能静默 revert 掉整个阶段 A，
@@ -274,11 +279,11 @@ func runLockSeparationSuites() {
         let names = locks.map { $0.1.lastPathComponent }
         expect(
             Set(names).count == locks.count,
-            "四把锁的文件名出现重复：\(names) —— 它们必须是 play.lock / config.lock / "
-                + "settings.lock / claudio.log.lock 四个不同的名字")
+            "五把锁的文件名出现重复：\(names) —— 它们必须是 play.lock / config.lock / "
+                + "settings.lock / claudio.log.lock / packs.lock 五个不同的名字")
 
         // 正向钉死每一个名字。上面两条只保证「互不相同」，保证不了「是**这四个**」——
-        // 把三把锁整体改名成 a.lock/b.lock/c.lock 仍然两两不等，但会把每一台**已经装过**
+        // 把几把锁整体改名成 a.lock/b.lock/c.lock 仍然两两不等，但会把每一台**已经装过**
         // Claudio 的机器上正在被持有的那把锁甩掉（旧进程持 play.lock，新进程持 a.lock，
         // 互斥当场消失）。锁文件名是**跨版本、跨进程**的契约，不是实现细节。
         let expected: [(String, String)] = [
@@ -286,6 +291,7 @@ func runLockSeparationSuites() {
             ("configLockFile", "config.lock"),
             ("settingsLockFile", "settings.lock"),
             ("logLockFile", "claudio.log.lock"),
+            ("packsLockFile", "packs.lock"),
         ]
         for (name, fileName) in expected {
             let actual = locks.first { $0.0 == name }?.1.lastPathComponent

@@ -7,15 +7,26 @@ import Foundation
 // PackManifest's Decodable/Encodable, which only models id+events and would silently drop
 // name/author/license/version/schema.
 
+/// ⚠️ `packsLockFile` 在这里**从 `userPacksDirectory` 派生**（`<tmp>/packs` → `<tmp>/packs.lock`），
+/// 而不是让它落回 `AudioImportEnvironment` 那个指向真实 `~/.claudio/packs.lock` 的默认值。
+///
+/// 理由与 `userPacksDirectory` 那条不同、也更硬：忘了注入 `userPacksDirectory` 的测试会**当场
+/// 断言失败**（它去读真实 `~/.claudio/packs/`，里面没有 fixture）；而忘了注入这把锁只会**静默**
+/// 地去用户机器上开一把真锁 —— 测试照样全绿，只是落了个文件、还与正在运行的 Claudio.app 抢锁。
+/// 静默那种才是危险的那种，所以这里不给它留下「忘记」的机会。
 @MainActor
 private func makeEnvironment(
     userPacksDirectory: URL,
-    bundledPacksDirectory: URL? = nil
+    bundledPacksDirectory: URL? = nil,
+    packsLockFile: URL? = nil
 ) -> AudioImportEnvironment {
     AudioImportEnvironment(
         userPacksDirectory: userPacksDirectory,
         bundledPacksDirectory: bundledPacksDirectory,
-        durationProbe: StubDurationProbe(fixedDuration: 1.0)
+        durationProbe: StubDurationProbe(fixedDuration: 1.0),
+        packsLockFile: packsLockFile
+            ?? userPacksDirectory.deletingLastPathComponent().appendingPathComponent(
+                "packs.lock")
     )
 }
 
@@ -1180,7 +1191,10 @@ func runManifestBindingSuites() async {
                   "events": { "stop": "stop.mp3" } }
                 """#, to: manifestFile)
 
-            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+            let result = mutateManifestJSON(
+                at: userPacks.appendingPathComponent("my-pack"),
+                lockFile: root.appendingPathComponent("packs.lock")
+            ) {
                 json in
                 json["id"] = "my-pack-copy"
                 json["name"] = "极简铃音 的副本"
@@ -1215,7 +1229,10 @@ func runManifestBindingSuites() async {
             writeFixture(originalRawJSON, to: manifestFile)
 
             var transformCalled = false
-            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+            let result = mutateManifestJSON(
+                at: userPacks.appendingPathComponent("my-pack"),
+                lockFile: root.appendingPathComponent("packs.lock")
+            ) {
                 _ in
                 transformCalled = true
             }
@@ -1240,7 +1257,10 @@ func runManifestBindingSuites() async {
             writeFixture(originalRawJSON, to: manifestFile)
 
             var transformCalled = false
-            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+            let result = mutateManifestJSON(
+                at: userPacks.appendingPathComponent("my-pack"),
+                lockFile: root.appendingPathComponent("packs.lock")
+            ) {
                 _ in
                 transformCalled = true
             }
@@ -1270,7 +1290,10 @@ func runManifestBindingSuites() async {
                 writeFixture(shape.json, to: manifestFile)
 
                 var transformCalled = false
-                let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+                let result = mutateManifestJSON(
+                    at: userPacks.appendingPathComponent("my-pack"),
+                    lockFile: root.appendingPathComponent("packs.lock")
+                ) {
                     _ in
                     transformCalled = true
                 }
@@ -1298,7 +1321,10 @@ func runManifestBindingSuites() async {
                 at: userPacks.appendingPathComponent("my-pack"), withIntermediateDirectories: true)
 
             var transformCalled = false
-            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+            let result = mutateManifestJSON(
+                at: userPacks.appendingPathComponent("my-pack"),
+                lockFile: root.appendingPathComponent("packs.lock")
+            ) {
                 _ in
                 transformCalled = true
             }
@@ -1324,7 +1350,10 @@ func runManifestBindingSuites() async {
             // Reaching the assertions below at all (rather than the process dying with exit
             // 134) IS the fix working — the primitive must inherit this from
             // `encodeJSONObjectForWriting`, not merely `bindEventToManifest`.
-            let result = mutateManifestJSON(at: userPacks.appendingPathComponent("my-pack")) {
+            let result = mutateManifestJSON(
+                at: userPacks.appendingPathComponent("my-pack"),
+                lockFile: root.appendingPathComponent("packs.lock")
+            ) {
                 json in
                 json["untouched"] = "value"
             }
@@ -1645,6 +1674,119 @@ func runManifestBindingSuites() async {
                         atPath: userPacks.appendingPathComponent("my-pack/\(fileName)").path),
                     "\(fileName) must still be on disk — clearing only ever edits manifest keys")
             }
+        }
+    }
+
+    // MARK: - 包目录锁（`/codex review b0ce657` 之后那次核查逼出来的）
+    //
+    // 那次核查坐实了两件事，两件都推翻了本文件此前赖以成立的前提：
+    //  ① `manifest.json` **有第二个写者** —— helper 的 `performFirstRunSetup` 以**目录粒度**发布
+    //     整棵包目录（`Setup.swift` 的 `copyItem`→`moveItem`），还会在 manifest 解不开时把用户
+    //     整个包目录挪走。那段循环当时零锁（本轮已一并上锁，共用同一把），而 T3 源码围栏
+    //     **两重**看不见它（只扫 `gui/Sources`，
+    //     且纳入判据要求文件里含 `mutateManifestJSON` 这个 token）。
+    //  ② GUI 自己把它派到主 actor 外（`OnboardingActions` 的 `Task.detached`）—— 所以「所有
+    //     manifest 写都在 @MainActor」这句不变式**在本进程内就是假的**。
+    //
+    // 于是 `manifest.json` 从「靠单写者 + @MainActor 序列化」改成「靠一把真锁序列化」，与
+    // `config.json` 一直以来的做法对齐。下面三条钉的是那把锁**真的在承重**。
+
+    suite("mutateManifestJSON：包锁被占住时 bind 必须报 .lockBusy，且磁盘一个字节都不许动") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let packsLock = root.appendingPathComponent("packs.lock")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            writeFixture(#"{ "id": "my-pack", "events": {} }"#, to: manifestFile)
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, packsLockFile: packsLock)
+
+            // 在锁被持有期间发起一次 bind。`FileLock` 每次自己 `open(2)`，同进程的第二个 open file
+            // description 与第一个照样争用 `flock` —— 所以这条不需要另起进程就能造出真争用。
+            let outcome = withNonBlockingLock(path: packsLock.path) {
+                bindEventToManifest(
+                    event: .stop, fileName: "stop.mp3", packID: "my-pack",
+                    environment: environment)
+            }
+            guard case .ran(let result) = outcome else {
+                expect(false, "测试自身的前提坏了：外层那把锁没拿到（\(outcome)）")
+                return
+            }
+            expect(
+                failureError(result) == .lockBusy,
+                "包锁被别人占住时 bind 必须返回 `.lockBusy`，实得 \(result)。"
+                    + "`withNonBlockingLock` 是**非阻塞**的：争用即 `.skipped`，body 根本不跑。"
+                    + "把 `.skipped` 映射成 `.success` 会让用户点完「设置声音」什么都没发生、"
+                    + "而且没有任何提示（面板只在 `.failure` 上出文案）；映射成别的 case 则会把"
+                    + "「另一个写者正占着」说成别的原因。")
+
+            // body 没跑，就不许有半次写 —— 这条钉的是「整段读-改-写都在锁里」，不是「锁在某处存在」。
+            let onDisk = try? String(contentsOf: manifestFile, encoding: .utf8)
+            expect(
+                onDisk?.contains("stop.mp3") == false,
+                "bind 因为锁忙而失败，manifest 却被改了 —— 说明读-改-写没有**整段**在锁的作用域里"
+                    + "（典型写法错误：只把最后那次 `write` 包进锁，读和改在锁外）。实得：\(onDisk ?? "<读不出>")")
+        }
+    }
+
+    suite("mutateManifestJSON：成功跑完必须把锁还回去（不许一直持有 / 不许泄漏 fd）") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let packsLock = root.appendingPathComponent("packs.lock")
+            writeFixture(
+                #"{ "id": "my-pack", "events": {} }"#,
+                to: userPacks.appendingPathComponent("my-pack/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, packsLockFile: packsLock)
+
+            let result = bindEventToManifest(
+                event: .stop, fileName: "stop.mp3", packID: "my-pack", environment: environment)
+            guard case .success = result else {
+                expect(false, "前提：这次 bind 应当成功，实得 \(result)")
+                return
+            }
+
+            // 锁还回去了 ⇒ 现在还能再拿到。拿不到 = 上一次调用把锁一直攥着，
+            // 于是**下一次** bind、以及任何一次 `claudio setup`，都会永久 `.lockBusy`。
+            let reacquired = withNonBlockingLock(path: packsLock.path) { true }
+            guard case .ran = reacquired else {
+                expect(
+                    false,
+                    "一次成功的 bind 之后包锁没有被释放（实得 \(reacquired)）—— 之后每一次 "
+                        + "bind 与每一次 `claudio setup` 都会永久报「忙」")
+                return
+            }
+            expect(true, "成功路径释放了包锁")
+        }
+    }
+
+    suite("clearEventBinding：与 bind 同等待遇 —— 锁被占住时也必须报 .lockBusy") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let packsLock = root.appendingPathComponent("packs.lock")
+            let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
+            writeFixture(
+                #"{ "id": "my-pack", "events": { "stop": "stop.mp3" } }"#, to: manifestFile)
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, packsLockFile: packsLock)
+
+            let outcome = withNonBlockingLock(path: packsLock.path) {
+                clearEventBinding(event: .stop, packID: "my-pack", environment: environment)
+            }
+            guard case .ran(let result) = outcome else {
+                expect(false, "测试自身的前提坏了：外层那把锁没拿到（\(outcome)）")
+                return
+            }
+            expect(
+                failureError(result) == .lockBusy,
+                "clear 是 bind 的对偶，走的是**同一个**原语，锁待遇必须一样，实得 \(result) —— "
+                    + "只给 bind 上锁而漏掉 clear，等于两个写者里只序列化了一个。")
+            let onDisk = try? String(contentsOf: manifestFile, encoding: .utf8)
+            expect(
+                onDisk?.contains("stop.mp3") == true,
+                "clear 因为锁忙而失败，绑定却已经被抹掉了 —— 读-改-写没有整段在锁里。实得：\(onDisk ?? "<读不出>")")
         }
     }
 }

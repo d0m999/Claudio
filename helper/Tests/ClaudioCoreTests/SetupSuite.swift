@@ -40,11 +40,52 @@ private func makeEnvironment(
         configFile: claudioRoot.appendingPathComponent("config.json"),
         settingsFile: root.appendingPathComponent("settings.json"),
         configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-        settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+        settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+        packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
 }
 
 @MainActor
 func runSetupSuites() {
+
+    // MARK: - 包目录锁（`/codex review b0ce657` 之后那次核查逼出来的）
+    //
+    // 这段包循环（`moveItem` 挪走用户整个包目录 → `copyItem`→`moveItem` 发布内置包）是
+    // `manifest.json` 的**第二个写者**，而它此前零锁 —— GUI 侧的 `mutateManifestJSON` 也零锁。
+    // 两个写者、两个进程、没有互斥，而 `docs/distribution.md` 与 `restoreBundledPacksHint`
+    // 都在主动教用户「从 Terminal 跑一次 setup」——也就是说这条竞争是被文档鼓励的，不是理论的。
+    //
+    // 拿不到锁时**不许报成功**：这与本文件 `binaryQuarantined` / `noAvailablePack` 是同一条纪律
+    // ——「只要这次安装注定是哑的，就不许把它报成成功」。包没发布出去而 hooks 写了，用户拿到的
+    // 就是一台装完不响的机器。
+    suite("performFirstRunSetup：包锁被占住时必须失败，绝不许静默跳过包却照样报成功") {
+        withTempDirectory { root in
+            let bundleRoot = root.appendingPathComponent("Claudio.app", isDirectory: true)
+            let (executablePath, _) = makeBundleFixture(at: bundleRoot)
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+
+            let outcome = withNonBlockingLock(path: environment.packsLockFile.path) {
+                performFirstRunSetup(environment: environment)
+            }
+            guard case .ran(let result) = outcome else {
+                expect(false, "测试自身的前提坏了：外层那把包锁没拿到（\(outcome)）")
+                return
+            }
+            expect(
+                result == .failure(.packsLockBusy),
+                "包锁被别人占住（GUI 正在写 manifest.json）时，setup 必须返回 `.packsLockBusy`，"
+                    + "实得 \(result)。最坏的两种错法：① 把 `.skipped` 当成「没有包要复制」而报"
+                    + "`.completed`——用户得到一台写了 hooks、却没有包的哑机器；② 跳过锁直接复制"
+                    + "——那就等于没上锁，`moveItem` 会在 GUI 读到一半时把整个包目录挪走。")
+
+            // hooks 一个字节都不许写：报失败就得是真失败，不许留下半个安装。
+            let settingsExists = FileManager.default.fileExists(
+                atPath: environment.settingsFile.path)
+            expect(
+                !settingsExists,
+                "setup 因为包锁忙而失败，却已经把 hooks 写进 settings.json 了 —— "
+                    + "「装完是哑的就不许报成功」这条纪律要求锁的判定发生在写 hooks **之前**。")
+        }
+    }
     suite(
         "performFirstRunSetup: 覆盖一个**已存在**的二进制 —— 新内容 + 新执行位，旧文件的元数据一个字节都不留"
     ) {
@@ -193,7 +234,8 @@ func runSetupSuites() {
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
             // T17d：这个 fixture 原本一个包都没有，而 `alreadyInstalled` 会把整个复制块跳过 ——
             // 于是它描述的其实是一台**装完也不会响**的机器，只是当年没人问这个问题。现在
             // `.noAvailablePack` 会拦住它（这正是该拦的），所以把 fixture 补成它本来想描述的样子：
@@ -343,7 +385,8 @@ func runSetupSuites() {
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
             writeFixture(
                 #"{ "schema": 1, "id": "minimal-chime", "events": {} }"#,
                 to: environment.userPacksDirectory.appendingPathComponent(
@@ -424,7 +467,8 @@ func runSetupSuites() {
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
             // A dot-prefixed leftover that sorts before the real pack ('.' 0x2E < 'z'): without
             // the `!hasPrefix(".")` filter it would be scanned first and either be selected or
             // fail selection outright. With the filter it is skipped and `zeta-chime` wins.
@@ -526,7 +570,8 @@ func runSetupSuites() {
                 configFile: claudioRoot.appendingPathComponent("config.json"),
                 settingsFile: root.appendingPathComponent("settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
-                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"))
+                settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
+                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
 
             let result = performFirstRunSetup(environment: environment)
             guard case .failure(.binaryCopyFailure) = result else {

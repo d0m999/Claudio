@@ -113,8 +113,15 @@ public final class EventRowImportViewModel: ObservableObject {
     /// write. That means two event rows binding into the SAME pack (e.g. two drops landing
     /// in quick succession) serialize on the main actor: the second call's read is
     /// guaranteed to happen strictly after the first call's write already landed — no lost
-    /// update. `manifest.json` also has no other writer anywhere in this codebase (the CLI
-    /// only ever writes `config.json`; `doctor`/`play` only ever read `manifest.json`). If
+    /// update. ⚠️ **这句话此前还有下半句，是假的，已删。** 原文写的是「`manifest.json` 在整个
+    /// 代码库里没有别的写者（CLI 只写 `config.json`）」—— 而 helper 的 `performFirstRunSetup`
+    /// 以**目录粒度**发布整棵包目录（`Setup.swift` 的 `copyItem`→`moveItem`，manifest.json 在
+    /// 里面），还会把用户整个包目录 `moveItem` 挪走；`restoreBundledPacksHint` 与
+    /// `docs/distribution.md` 还在主动教用户去 Terminal 跑它。写者从来就是两个，而这句背书让
+    /// 「不用上锁」这个决定看起来有据可依了很久。
+    ///
+    /// 现在两个写者共用 `~/.claudio/packs.lock`（见 ``ClaudioPaths/packsLockFile``），跨进程互斥
+    /// 由那把锁给，不再由「只有一个写者」这个假前提给。If
     /// `bindEventToManifest` is ever made `async` or moved off the main actor, per-pack
     /// write serialization (e.g. an actor, or a file lock mirroring `helper`'s `FileLock`)
     /// MUST be added at that point — this note is the tripwire for that future refactor, not

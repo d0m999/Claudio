@@ -103,6 +103,35 @@ public enum ClaudioPaths {
         root.appendingPathComponent("settings.lock")
     }
 
+    /// `~/.claudio/packs.lock` — the non-blocking lock serializing the **two** writers of
+    /// `~/.claudio/packs/`: the GUI's `mutateManifestJSON(at:lockFile:_:)` (bind/clear, byte
+    /// level) and the CLI's ``performFirstRunSetup(environment:)`` pack-publish loop
+    /// (directory level — it `moveItem`s a whole user pack aside and `moveItem`s a bundled
+    /// copy in).
+    ///
+    /// ## 为什么它必须存在（`/codex review b0ce657` 之后那次核查）
+    /// `manifest.json` 此前是**零锁**的，理由写在 `ManifestBinding.swift` 的散文里：「只有一个
+    /// 写者，而且全部在 `@MainActor` 上同步跑」。核查逐条证伪了这句话：
+    ///  · `performFirstRunSetup` 是第二个写者，在第二个进程里，当时零锁 —— 而
+    ///    `restoreBundledPacksHint` 与 `docs/distribution.md` 都在**主动教用户**去 Terminal 跑它。
+    ///  · GUI 自己还把它派到主 actor 外（`OnboardingActions` 的 `Task.detached`），所以
+    ///    「全部在 @MainActor」在**本进程内**也已经是假的。
+    ///  · `.atomic` 写只挡撕裂（读者看到的要么整份旧的、要么整份新的），**挡不住丢更新**，
+    ///    更挡不住 `moveItem` 在别人读到一半时把整个包目录换掉。
+    ///
+    /// ## 为什么是**一把**锁而不是每包一把
+    /// 每包一把的锁文件只能住在包目录里，而 setup 的救砖路径会把**整个包目录挪走** —— 锁会跟着
+    /// 一起走，互斥当场消失。所以锁住在 `packs/` **外面**，一把管整个 `packs/` 子树，与
+    /// `config.lock` 管整个 `config.json` 同构。代价是一次 bind 会与一次**别的包**的 setup 争用；
+    /// setup 罕见且短，这个代价是划算的。
+    ///
+    /// ## 为什么与 ``configLockFile`` 分开
+    /// `performFirstRunSetup` 会**同时**需要这两把（包循环一把、写 `config.json` 一把）。合成
+    /// 一把就是自己锁自己 —— 非阻塞锁下那不是死锁，是当场 `.skipped`，setup 每一次都失败。
+    public static var packsLockFile: URL {
+        root.appendingPathComponent("packs.lock")
+    }
+
     /// `~/.claudio/play.state` — the single shared "last played" timestamp `play`'s
     /// time-based debounce reads and overwrites (ENGINEERING.md「并发 / 进程堆积处理」:
     /// 距上次播放（**任意**事件）< 1.5s 就跳过；决议 5: "一把锁 + 一个共享时间戳",

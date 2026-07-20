@@ -59,15 +59,28 @@ public struct AudioImportEnvironment: Sendable {
 
     public var limits: AudioImportLimits
 
+    /// `~/.claudio/packs.lock` — 序列化 `manifest.json` 两个写者的那把锁（见
+    /// ``ClaudioPaths/packsLockFile``）。`bindEventToManifest` / `clearEventBinding` 把它递给
+    /// ``mutateManifestJSON(at:lockFile:_:)``。
+    ///
+    /// ⚠️ 默认值是**真实**路径，和 `userPacksDirectory` 一样。但忘记注入的后果**不一样**：
+    /// 忘了 `userPacksDirectory` 的测试会当场断言失败（真实 packs 里没有 fixture），
+    /// 而忘了这把锁只会**静默**地去用户机器上开一把真锁 —— 测试照样全绿，只是与正在运行的
+    /// Claudio.app 抢锁、并在 `~/.claudio/` 里落一个文件。所以本包的测试 helper 一律**显式**
+    /// 递临时路径，而这个默认值本身由 `LockSeparationSuite` 钉住。
+    public var packsLockFile: URL
+
     public init(
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         bundledPacksDirectory: URL? = nil,
         durationProbe: any AudioDurationProbing,
-        limits: AudioImportLimits = AudioImportLimits()
+        limits: AudioImportLimits = AudioImportLimits(),
+        packsLockFile: URL = ClaudioPaths.packsLockFile
     ) {
         self.userPacksDirectory = userPacksDirectory
         self.bundledPacksDirectory = bundledPacksDirectory
         self.durationProbe = durationProbe
         self.limits = limits
+        self.packsLockFile = packsLockFile
     }
 }

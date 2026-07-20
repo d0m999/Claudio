@@ -50,6 +50,19 @@ public enum ManifestBindError: Error, Sendable, Equatable {
     /// The updated JSON couldn't be serialized or written back to disk. Also produced by
     /// ``mutateManifestJSON(at:_:)``.
     case writeFailed(reason: String)
+    /// 另一个写者此刻正持有 `~/.claudio/packs.lock` —— 这次读-改-写**一个字节都没跑**。
+    ///
+    /// `manifest.json` 有两个写者：这里（bind/clear，字节级）与 `performFirstRunSetup` 的包发布
+    /// 循环（目录级，会把整个包目录 `moveItem` 挪走）。`withNonBlockingLock` 是**非阻塞**的，
+    /// 争用即返回、body 根本不跑 —— 所以这个 case 的语义是「什么都没发生，重试即可」，
+    /// 与 ``SetEventEnabledError/lockBusy`` 逐字同构。
+    ///
+    /// ⚠️ **绝不能把它折叠成 `.success`**：面板只在 `.failure` 上出文案，报成功会让用户点完
+    /// 「设置声音」之后什么都没发生、而且没有任何提示。
+    case lockBusy
+    /// 取包锁时撞上一个**真的**系统错误（不是争用）—— 坏掉的文件系统、权限、路径被占。
+    /// 与 ``lockBusy`` 分开，理由同 ``FileLock``：把真错误当成「忙，重试」会让用户永远重试下去。
+    case lockFailed(errno: Int32)
 }
 
 // MARK: - The shared read-modify-write primitive (PLAN-SOUND-MANAGER.md §2.1, T3)
@@ -66,16 +79,33 @@ public enum ManifestBindError: Error, Sendable, Equatable {
 /// manifest.json 的**唯一**读-改-写原语。``bindEventToManifest`` / ``clearEventBinding`` 全部
 /// 经它——未来的 `forkPack`（T6）同理。
 ///
-/// **@MainActor 隔离（编译器强制）+ 同步（源码绊线强制）**：这两条腿合起来，才是 manifest.json
-/// 今天**零锁**（`grep -iE 'lock' ManifestBinding.swift` 找不到一把锁）却仍并发安全的全部理由。
-/// 本函数标了 `@MainActor`，编译器逼着任何调用方都在主 actor 上调它——不再是「每个调用方碰巧都从
-/// GUI 的 `@MainActor` 触发」这句写在注释里、会被下一个后台调用方悄悄推翻的约定（正是
-/// `/codex review dcab3de,7e97bc4` 的 P1）。又因为全程同步、内部读→改→写之间没有挂起点，同一时刻
-/// 只可能有一次读-改-写在跑：两次并发绑定会在主 actor 上串行，第二次的读一定晚于第一次的写落地，
-/// 绝不丢更新。`SourceScannerSuite` 有两条源码绊线各钉一条腿——一条禁 `async`/`Task`/`DispatchQueue`
-/// （挡「变异步」），一条要求本文件每个导出写函数都带 `@MainActor`（挡「同步但脱离主 actor」）。
-/// 少了任一条，这条不变式会在**没有任何运行时报错**的情况下悄悄失效（PLAN-SOUND-MANAGER.md §2.1 /
-/// 4c「并发不变式」：唯一的 critical gap）。
+/// **三条腿：`packs.lock`（跨进程）+ @MainActor 隔离（进程内）+ 同步（无挂起点）。**
+///
+/// ⚠️ **上一版这段写的是「零锁」，那是假的，而且假了很久。** 原文逐字声称「`@MainActor` + 同步
+/// 这两条腿合起来，才是 manifest.json 今天**零锁**却仍并发安全的全部理由」，并让读者自己去
+/// `grep -iE 'lock' ManifestBinding.swift` 验证那份空结果。它漏掉的是：`manifest.json` 从来就有
+/// **第二个写者** —— helper 的 `performFirstRunSetup` 以目录粒度发布整棵包目录
+/// （`Setup.swift` 的 `copyItem`→`moveItem`），还会在 manifest 解不开时把用户整个包目录挪走，
+/// 当时零锁（本轮已一并上锁，与这里共用同一把）；而 `restoreBundledPacksHint` 与
+/// `docs/distribution.md` 都在**主动教用户**去 Terminal
+/// 跑它。`@MainActor` 是**进程内**的东西，对第二个进程一个字都管不住；`.atomic` 写只挡撕裂，
+/// **挡不住丢更新**，更挡不住 `moveItem` 在别人读到一半时把整个包目录换掉。
+///
+/// 现在这段读-改-写**整段**跑在 `~/.claudio/packs.lock` 里（见 ``ClaudioPaths/packsLockFile``），
+/// 与 `performFirstRunSetup` 的包发布循环共用同一把 —— 跨进程互斥由锁给。
+/// 锁盖住的是「读到写」这个**区间**，不是「写」这个瞬间：只包最后那次 write，两个写者仍然可以
+/// 各自读到同一份旧 JSON、各改各的、再依次写回，后写的整份覆盖先写的。
+///
+/// 另外两条腿**没有被锁取代**，各自还在守自己的东西：
+///  · `@MainActor`（进程内）—— 本函数标了它，编译器逼着任何调用方都在主 actor 上调它，不再是
+///    「每个调用方碰巧都从 GUI 触发」这句会被下一个后台调用方悄悄推翻的约定
+///    （`/codex review dcab3de,7e97bc4` 的 P1）。**但编译器强制的是注解的*后果*，不是注解的*存在***：
+///    删掉 `@MainActor` 是一次放宽，现存调用方本身都在主 actor 上，放宽后依然合法 —— 实测
+///    `swift build` **零诊断**。守住它的只有 `SourceScannerSuite` 那条源码绊线。
+///  · 同步 / 无挂起点 —— 它现在守的是**锁的作用域**：`Task.detached { … write … }` 或在读与写
+///    之间插一个 `await`，都会把真正的写挪到锁释放之后，锁当场形同虚设。实测：注入
+///    `Task.detached` 包住那次 write，**Build complete、零警告**（`Data`/`URL` 都是 Sendable、
+///    `Data.write` 是 nonisolated，strict concurrency 无从报警）。这也只有那条源码绊线看得见。
 ///
 /// **只做目录级的读-改-写**：调用方必须先把 `packID` 解析成一个已经确认过是**用户**包根的
 /// `packDirectory`（见本文件 `resolveUserPackDirectory(packID:environment:)`），本函数不重新
@@ -97,6 +127,36 @@ public enum ManifestBindError: Error, Sendable, Equatable {
 /// 透传给编码器，这个原语自己从不检查或丢弃它们。
 @MainActor
 public func mutateManifestJSON(
+    at packDirectory: URL,
+    lockFile: URL,
+    _ transform: (inout [String: Any]) -> Void
+) -> Result<Void, ManifestBindError> {
+    // 整段读-改-写都在锁里。**别把锁收窄到只包最后那次 `write`** —— 那样两个写者仍然可以各自
+    // 读到同一份旧 JSON、各改各的、再依次写回，后写的把先写的整份覆盖掉（丢更新）。锁要盖住的
+    // 是「读到写」这个区间，不是「写」这个瞬间。
+    //
+    // ⚠️ **上面这句话今天没有可执行的守卫，别把它读成已经钉住了。** 本轮台账（8 条全中）打的
+    // 靶子是「锁在不在」「忙时映射对不对」「是不是同一把锁」，**没有一条能分辨「读在锁里」与
+    // 「读在锁外」**：把读挪到锁外、只留写在锁里，忙的时候依然返回 `.lockBusy`、磁盘依然一个
+    // 字节没动 —— 四条新断言全绿，而丢更新的窗口原地打开。今天挡着它的只有「临界区是一个
+    // 函数体」这个形状（`performManifestMutation` 是 `private`、只有这一个调用点），那是可读性
+    // 保护，不是断言。见 TODOS。
+    let outcome = withNonBlockingLock(path: lockFile.path) {
+        performManifestMutation(at: packDirectory, transform)
+    }
+    switch outcome {
+    case .ran(let result): return result
+    case .skipped: return .failure(.lockBusy)
+    case .failed(let errno): return .failure(.lockFailed(errno: errno))
+    }
+}
+
+/// ``mutateManifestJSON(at:lockFile:_:)`` 的临界区本体 —— **只**在持有 `packs.lock` 时被调用。
+///
+/// 单独抽出来是为了让「锁的作用域 == 读-改-写的全长」在源码上一眼可判：临界区是一个函数体，
+/// 而不是一段可以被后来者不小心挪出去半截的内联代码。
+@MainActor
+private func performManifestMutation(
     at packDirectory: URL,
     _ transform: (inout [String: Any]) -> Void
 ) -> Result<Void, ManifestBindError> {
@@ -247,7 +307,8 @@ public func bindEventToManifest(
         return .failure(.fileNotFound(fileName: fileName))
     }
 
-    return mutateManifestJSON(at: userPackDirectory) { json in
+    return mutateManifestJSON(at: userPackDirectory, lockFile: environment.packsLockFile) {
+        json in
         var events = (json["events"] as? [String: Any]) ?? [:]
         events[event.manifestKey] = fileName
         json["events"] = events
@@ -290,7 +351,8 @@ public func clearEventBinding(
         return .failure(error)
     }
 
-    return mutateManifestJSON(at: userPackDirectory) { json in
+    return mutateManifestJSON(at: userPackDirectory, lockFile: environment.packsLockFile) {
+        json in
         guard var events = json["events"] as? [String: Any] else { return }
         events.removeValue(forKey: event.manifestKey)
         json["events"] = events

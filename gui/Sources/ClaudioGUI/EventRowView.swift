@@ -575,6 +575,12 @@ public struct EventRowView: View {
             "这个声音包的 manifest.json 读不动，绑定已中止（没有改坏它）：\(reason)"
         case .writeFailed(let reason):
             "声音存进去了，但写不进声音包清单：\(reason)"
+        case .lockBusy:
+            "声音包正被另一个操作占用（多半是 Terminal 里的 `claudio setup` 还没跑完），"
+                + "清单一个字节都没改——过一会儿再拖一次。"
+        case .lockFailed(let errno):
+            "取声音包的锁失败了（errno \(errno)），清单一个字节都没改——这不是「忙」，"
+                + "是 ~/.claudio 那边出了真问题，重试也不会好。"
         }
     }
 

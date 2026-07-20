@@ -35,6 +35,12 @@ public struct SetupEnvironment: Sendable {
     /// read-modify-write against `settings.json`. Deliberately **separate** from
     /// ``configLockFile`` — see that property's doc comment.
     public let settingsLockFile: URL
+    /// Guards the pack-publish loop below — the **directory-level** writer of
+    /// `manifest.json`（`moveItem` 挪走用户整个包目录、`copyItem`→`moveItem` 发布内置包）。
+    /// 与 GUI 的 `mutateManifestJSON(at:lockFile:_:)` 共用同一把 `~/.claudio/packs.lock`：
+    /// 这两个才是 `manifest.json` 真正的两个写者，此前它们之间零互斥。
+    /// 见 ``ClaudioPaths/packsLockFile``。
+    public let packsLockFile: URL
 
     public init(
         executablePath: URL,
@@ -43,7 +49,8 @@ public struct SetupEnvironment: Sendable {
         configFile: URL = ClaudioPaths.configFile,
         settingsFile: URL = ClaudioPaths.claudeSettingsFile,
         configLockFile: URL = ClaudioPaths.configLockFile,
-        settingsLockFile: URL = ClaudioPaths.settingsLockFile
+        settingsLockFile: URL = ClaudioPaths.settingsLockFile,
+        packsLockFile: URL = ClaudioPaths.packsLockFile
     ) {
         self.executablePath = executablePath
         self.claudioBinaryDestination = claudioBinaryDestination
@@ -52,7 +59,128 @@ public struct SetupEnvironment: Sendable {
         self.settingsFile = settingsFile
         self.configLockFile = configLockFile
         self.settingsLockFile = settingsLockFile
+        self.packsLockFile = packsLockFile
     }
+}
+
+/// ``performFirstRunSetup(environment:)`` 的**包发布临界区** —— 只在持有 `packs.lock` 时被调用。
+///
+/// 单独抽成一个函数，而不是在调用点内联一个闭包，有两个理由：
+///  ① 原来的代码里散着五处 `return .failure(...)`。内联进闭包之后那些 `return` 会变成「从闭包
+///     返回」，函数照常往下走去写 hooks —— 一次静默的语义改变，编译器不会喊。
+///  ② 「锁的作用域 == 整段发布」在源码上一眼可判：临界区是一个函数体，而不是一段后来者可能
+///     不小心挪出去半截的内联代码。同一个理由见 `ManifestBinding.swift` 的 `performManifestMutation`。
+private func publishBundledPacks(
+    from bundledPacksDirectory: URL, environment: SetupEnvironment
+) -> Result<(copied: [String], salvaged: [SalvagedPack]), SetupError> {
+    var copiedPackIDs: [String] = []
+    var salvagedPacks: [SalvagedPack] = []
+    let packIDs =
+        ((try? FileManager.default.contentsOfDirectory(atPath: bundledPacksDirectory.path)) ?? [])
+        .sorted()
+    if !packIDs.isEmpty {
+        // Hoisted out of the per-pack loop below: the destination directory never
+        // changes across iterations, so creating it once (idempotent — `createDirectory`
+        // no-ops if it already exists) does the same work as calling it once per pack,
+        // minus the redundant mkdir/stat syscalls.
+        do {
+            try FileManager.default.createDirectory(
+                at: environment.userPacksDirectory, withIntermediateDirectories: true)
+        } catch {
+            return .failure(
+                .packCopyFailure(reason: "创建 ~/.claudio/packs 失败：\(error.localizedDescription)")
+            )
+        }
+    }
+    for id in packIDs {
+        let source = bundledPacksDirectory.appendingPathComponent(id, isDirectory: true)
+        guard directoryExists(at: source) else { continue }
+        let destination = environment.userPacksDirectory.appendingPathComponent(
+            id, isDirectory: true)
+
+        // Never clobber a same-id pack the user already has (could be their own
+        // customized copy) — mirrors `resolvePackDirectory`'s "user root wins"
+        // rule by simply not overwriting it in the first place.
+        //
+        // T17e：判据从「目录存在」收紧成「目录存在**且它真的是一个包**（manifest 读得出来）」。
+        // 上一版把**任何**同名目录都当成「用户自己的定制包」而跳过 —— 包括一次**被杀掉的
+        // setup 留下的半个包**（`copyItem` 逐文件写最终路径，不是原子的）。于是：残骸永远
+        // 不会被补全 → 它不是一个能用的包 → 这台机器一个能用的包都没有 → setup 每一次重跑都
+        // 一字不差地失败。**永久死锁**，而 `docs/distribution.md` 白纸黑字承诺「重跑一次
+        // setup 就能治好坏安装」。（T17e 对抗评审实测复现。）
+        //
+        // 一个 manifest 都读不出来的目录**不是**用户的包，它是一堆残骸。所以：挪开它，重来。
+        if isUsablePack(id, in: environment.userPacksDirectory) { continue }
+
+        // `fileExists` **跟随符号链接**：一条指向不存在之物的悬空链接，它回答「不存在」。于是
+        // 那条链接会从这个判据的缝里漏过去，直奔下面的 `moveItem` —— 而 `moveItem` 用的是 lstat
+        // 语义，它看得见那条链接，抛 EEXIST。结果：`.packCopyFailure`，hooks 不写，**每一次重跑
+        // 都一字不差地失败**，而报错指向的是一个刚刚被 catch 块删掉的隐藏暂存目录（对抗评审实测：
+        // NSCocoaErrorDomain 516 / EEXIST）。
+        //
+        // 这一格在本函数**自己**的契约里（「目标存在、但它不是一个能用的包 → 挪开它」）本来就该
+        // 走挪开分支：一条悬空链接在 lstat 意义上**存在**，而且显然不是一个能用的包。所以判据必须
+        // 与 `moveItem` 用同一套语义 —— `attributesOfItem` 就是 lstat 语义（不跟随链接）。
+        if (try? FileManager.default.attributesOfItem(atPath: destination.path)) != nil {
+            // **挪走，不是删掉**：那堆残骸里可能有用户自己塞进去的东西（谁也没资格替他判
+            // 「这个文件不重要」）。点开头 → `availablePackIDs` 天然把它排除在选包之外。
+            //
+            // 名字撞了就往后找一个没人占的，**绝不覆盖已经挪过去的那一份**：pid 会被系统复用
+            // （重启之后尤其容易），而一句顺手的 `removeItem(aside)` 在那一刻删掉的，正是上一次
+            // 挪走的、里面装着用户文件的那个目录 —— 一条真实的数据丢失路径。
+            let base = ".\(id).broken-\(ProcessInfo.processInfo.processIdentifier)"
+            var aside = environment.userPacksDirectory.appendingPathComponent(
+                base, isDirectory: true)
+            var attempt = 1
+            while FileManager.default.fileExists(atPath: aside.path) {
+                attempt += 1
+                aside = environment.userPacksDirectory.appendingPathComponent(
+                    "\(base)-\(attempt)", isDirectory: true)
+            }
+            do {
+                try FileManager.default.moveItem(at: destination, to: aside)
+                salvagedPacks.append(
+                    SalvagedPack(packID: id, movedTo: aside.path))
+            } catch {
+                return .failure(
+                    .packCopyFailure(
+                        reason:
+                            "\(id)：\(destination.path) 是一个读不出 manifest 的目录"
+                            + "（多半是上一次安装被中断留下的残骸，也可能是你自己的包的 manifest 坏了），"
+                            + "而它挪不开：\(error.localizedDescription)。"
+                            + "把它改个名或删掉，再跑一次 setup。"))
+            }
+        }
+
+        // **原子复制**（T17e）：先写进一个点开头的暂存目录，成功之后再 rename 到最终名字。
+        // 同卷 rename 是原子的，所以一次被杀掉的 setup 只可能留下 `.<id>.tmp-<pid>`（点开头 →
+        // `availablePackIDs` 选包时天然被排除），**永远不会在最终路径上留下半个包**。
+        // 上一版的注释早就声称这里是这么做的 —— 而代码里根本没有。谎言恰好盖住了新闸门最现实
+        // 的触发输入（T17e 对抗评审）。现在它是真的了。
+        // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:444` 的 `removeItem` 只删当前 pid 那一份）——
+        // 与 `copySelfToFixedLocation` 的 `.claudio.tmp-…` 同理，危害为零、不顺手 glob 删的理由
+        // 也同理（会误删并发存活的 setup 的暂存）。
+        let staging = environment.userPacksDirectory.appendingPathComponent(
+            ".\(id).tmp-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+        try? FileManager.default.removeItem(at: staging)
+        do {
+            try FileManager.default.copyItem(at: source, to: staging)
+            // `copyItem` carries `com.apple.quarantine` across (see Quarantine.swift).
+            // Audio files aren't exec-gated the way the binary is, so this one is
+            // hygiene rather than load-bearing — but leaving half the tree we just
+            // wrote stamped 「从网上来的」 only invites someone to rediscover the same
+            // xattr later, in a context where it DOES bite.
+            stripQuarantineAttribute(at: staging)
+            try FileManager.default.moveItem(at: staging, to: destination)
+            copiedPackIDs.append(id)
+        } catch {
+            try? FileManager.default.removeItem(at: staging)
+            return .failure(
+                .packCopyFailure(reason: "\(id)：\(error.localizedDescription)"))
+        }
+    }
+
+    return .success((copied: copiedPackIDs, salvaged: salvagedPacks))
 }
 
 // MARK: - 这次 setup 该拿「选包」怎么办（T17e 的全部政策，一个纯函数）
@@ -223,6 +351,16 @@ public enum PackSelectionOutcome: Sendable, Equatable {
 
 public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
     case binaryCopyFailure(reason: String)
+    /// 取不到 `~/.claudio/packs.lock` —— GUI 此刻正在写 `manifest.json`（bind/clear）。
+    /// 包**一个都没发布**，hooks 也**一个字节都没写**。
+    ///
+    /// 为什么是失败而不是「跳过包、照常装」：与 ``binaryQuarantined`` / ``noAvailablePack``
+    /// 同一条纪律 —— **只要这次安装注定是哑的，就不许把它报成成功**。包没发布出去而 hooks
+    /// 写了，用户拿到的正是一台亮着绿点、`doctor` 也过、却永远不响的机器。
+    case packsLockBusy
+    /// 取包锁时撞上真的系统错误（不是争用）。与 ``packsLockBusy`` 分开的理由同 ``FileLock``：
+    /// 把真错误说成「忙，等一下重试」会让用户永远重试下去。
+    case packsLockFailed(errno: Int32)
     case packCopyFailure(reason: String)
     /// The installed `~/.claudio/bin/claudio` still carries `com.apple.quarantine` after we
     /// tried to strip it (see ``Quarantine.swift``). Hooks are deliberately **not** written in
@@ -281,6 +419,12 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
         switch self {
         case .binaryCopyFailure(let reason):
             "复制二进制到 ~/.claudio/bin/claudio 失败：\(reason)"
+        case .packsLockBusy:
+            "声音包目录正被另一个操作占用（多半是 Claudio 面板此刻正在写声音包清单）——"
+                + "这次什么都没做（没有复制任何包，也没有写入任何 hooks），过一会儿再跑一次。"
+        case .packsLockFailed(let errno):
+            "取声音包目录的锁失败了（errno \(errno)）——这不是「忙」，是 ~/.claudio 那边出了真问题，"
+                + "重试也不会好。这次什么都没做（没有复制任何包，也没有写入任何 hooks）。"
         case .packCopyFailure(let reason):
             "复制内置声音包失败：\(reason)"
         case .binaryQuarantined(let reason):
@@ -356,110 +500,27 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
             .appendingPathComponent("packs", isDirectory: true)  // .../Contents/Resources/packs
 
         if directoryExists(at: bundledPacksDirectory) {
-            let packIDs =
-                ((try? FileManager.default.contentsOfDirectory(atPath: bundledPacksDirectory.path))
-                    ?? []
-                ).sorted()
-            if !packIDs.isEmpty {
-                // Hoisted out of the per-pack loop below: the destination directory never
-                // changes across iterations, so creating it once (idempotent — `createDirectory`
-                // no-ops if it already exists) does the same work as calling it once per pack,
-                // minus the redundant mkdir/stat syscalls.
-                do {
-                    try FileManager.default.createDirectory(
-                        at: environment.userPacksDirectory, withIntermediateDirectories: true)
-                } catch {
-                    return .failure(
-                        .packCopyFailure(reason: "创建 ~/.claudio/packs 失败：\(error.localizedDescription)")
-                    )
-                }
+            // 整段包发布都在 `packs.lock` 里。这一段是 `manifest.json` 的**目录级**写者：它会把
+            // 用户整个包目录 `moveItem` 挪走、再 `moveItem` 一份内置包进来。GUI 侧的
+            // `mutateManifestJSON` 是字节级写者，两者此前零互斥 —— 而 `restoreBundledPacksHint`
+            // 正在主动教用户去 Terminal 跑这条命令，所以那是被文档鼓励的竞争，不是理论上的。
+            //
+            // 拿不到锁时**返回失败，不是跳过包继续装**：hooks 还没写，此刻失败是干净的；
+            // 跳过包却照常写 hooks，用户拿到的是一台亮绿点、doctor 也过、却永远不响的机器
+            // （与 `.binaryQuarantined` / `.noAvailablePack` 同一条纪律）。
+            let published = withNonBlockingLock(path: environment.packsLockFile.path) {
+                publishBundledPacks(from: bundledPacksDirectory, environment: environment)
             }
-            for id in packIDs {
-                let source = bundledPacksDirectory.appendingPathComponent(id, isDirectory: true)
-                guard directoryExists(at: source) else { continue }
-                let destination = environment.userPacksDirectory.appendingPathComponent(
-                    id, isDirectory: true)
-
-                // Never clobber a same-id pack the user already has (could be their own
-                // customized copy) — mirrors `resolvePackDirectory`'s "user root wins"
-                // rule by simply not overwriting it in the first place.
-                //
-                // T17e：判据从「目录存在」收紧成「目录存在**且它真的是一个包**（manifest 读得出来）」。
-                // 上一版把**任何**同名目录都当成「用户自己的定制包」而跳过 —— 包括一次**被杀掉的
-                // setup 留下的半个包**（`copyItem` 逐文件写最终路径，不是原子的）。于是：残骸永远
-                // 不会被补全 → 它不是一个能用的包 → 这台机器一个能用的包都没有 → setup 每一次重跑都
-                // 一字不差地失败。**永久死锁**，而 `docs/distribution.md` 白纸黑字承诺「重跑一次
-                // setup 就能治好坏安装」。（T17e 对抗评审实测复现。）
-                //
-                // 一个 manifest 都读不出来的目录**不是**用户的包，它是一堆残骸。所以：挪开它，重来。
-                if isUsablePack(id, in: environment.userPacksDirectory) { continue }
-
-                // `fileExists` **跟随符号链接**：一条指向不存在之物的悬空链接，它回答「不存在」。于是
-                // 那条链接会从这个判据的缝里漏过去，直奔下面的 `moveItem` —— 而 `moveItem` 用的是 lstat
-                // 语义，它看得见那条链接，抛 EEXIST。结果：`.packCopyFailure`，hooks 不写，**每一次重跑
-                // 都一字不差地失败**，而报错指向的是一个刚刚被 catch 块删掉的隐藏暂存目录（对抗评审实测：
-                // NSCocoaErrorDomain 516 / EEXIST）。
-                //
-                // 这一格在本函数**自己**的契约里（「目标存在、但它不是一个能用的包 → 挪开它」）本来就该
-                // 走挪开分支：一条悬空链接在 lstat 意义上**存在**，而且显然不是一个能用的包。所以判据必须
-                // 与 `moveItem` 用同一套语义 —— `attributesOfItem` 就是 lstat 语义（不跟随链接）。
-                if (try? FileManager.default.attributesOfItem(atPath: destination.path)) != nil {
-                    // **挪走，不是删掉**：那堆残骸里可能有用户自己塞进去的东西（谁也没资格替他判
-                    // 「这个文件不重要」）。点开头 → `availablePackIDs` 天然把它排除在选包之外。
-                    //
-                    // 名字撞了就往后找一个没人占的，**绝不覆盖已经挪过去的那一份**：pid 会被系统复用
-                    // （重启之后尤其容易），而一句顺手的 `removeItem(aside)` 在那一刻删掉的，正是上一次
-                    // 挪走的、里面装着用户文件的那个目录 —— 一条真实的数据丢失路径。
-                    let base = ".\(id).broken-\(ProcessInfo.processInfo.processIdentifier)"
-                    var aside = environment.userPacksDirectory.appendingPathComponent(
-                        base, isDirectory: true)
-                    var attempt = 1
-                    while FileManager.default.fileExists(atPath: aside.path) {
-                        attempt += 1
-                        aside = environment.userPacksDirectory.appendingPathComponent(
-                            "\(base)-\(attempt)", isDirectory: true)
-                    }
-                    do {
-                        try FileManager.default.moveItem(at: destination, to: aside)
-                        salvagedPacks.append(
-                            SalvagedPack(packID: id, movedTo: aside.path))
-                    } catch {
-                        return .failure(
-                            .packCopyFailure(
-                                reason:
-                                    "\(id)：\(destination.path) 是一个读不出 manifest 的目录"
-                                    + "（多半是上一次安装被中断留下的残骸，也可能是你自己的包的 manifest 坏了），"
-                                    + "而它挪不开：\(error.localizedDescription)。"
-                                    + "把它改个名或删掉，再跑一次 setup。"))
-                    }
-                }
-
-                // **原子复制**（T17e）：先写进一个点开头的暂存目录，成功之后再 rename 到最终名字。
-                // 同卷 rename 是原子的，所以一次被杀掉的 setup 只可能留下 `.<id>.tmp-<pid>`（点开头 →
-                // `availablePackIDs` 选包时天然被排除），**永远不会在最终路径上留下半个包**。
-                // 上一版的注释早就声称这里是这么做的 —— 而代码里根本没有。谎言恰好盖住了新闸门最现实
-                // 的触发输入（T17e 对抗评审）。现在它是真的了。
-                // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:444` 的 `removeItem` 只删当前 pid 那一份）——
-                // 与 `copySelfToFixedLocation` 的 `.claudio.tmp-…` 同理，危害为零、不顺手 glob 删的理由
-                // 也同理（会误删并发存活的 setup 的暂存）。
-                let staging = environment.userPacksDirectory.appendingPathComponent(
-                    ".\(id).tmp-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
-                try? FileManager.default.removeItem(at: staging)
-                do {
-                    try FileManager.default.copyItem(at: source, to: staging)
-                    // `copyItem` carries `com.apple.quarantine` across (see Quarantine.swift).
-                    // Audio files aren't exec-gated the way the binary is, so this one is
-                    // hygiene rather than load-bearing — but leaving half the tree we just
-                    // wrote stamped 「从网上来的」 only invites someone to rediscover the same
-                    // xattr later, in a context where it DOES bite.
-                    stripQuarantineAttribute(at: staging)
-                    try FileManager.default.moveItem(at: staging, to: destination)
-                    copiedPackIDs.append(id)
-                } catch {
-                    try? FileManager.default.removeItem(at: staging)
-                    return .failure(
-                        .packCopyFailure(reason: "\(id)：\(error.localizedDescription)"))
-                }
+            switch published {
+            case .ran(.success(let result)):
+                copiedPackIDs = result.copied
+                salvagedPacks = result.salvaged
+            case .ran(.failure(let error)):
+                return .failure(error)
+            case .skipped:
+                return .failure(.packsLockBusy)
+            case .failed(let errno):
+                return .failure(.packsLockFailed(errno: errno))
             }
         }
     }

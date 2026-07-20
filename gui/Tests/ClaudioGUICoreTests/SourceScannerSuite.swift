@@ -337,11 +337,13 @@ private func auditManifestConcurrencyFence(
         if !concurrencyHits.isEmpty {
             audit.findings.append(
                 "\(display(relative)) 的代码里出现了并发构造，命中 token："
-                    + "\(concurrencyHits.joined(separator: ", ")) —— manifest.json 今天零锁，"
-                    + "唯一的并发安全保证是「全同步 + 全在 @MainActor」（PLAN-SOUND-MANAGER.md "
-                    + "§2.1）。任何一个 manifest 写函数一旦变成 async / 派发任务 / 上队列 / 起线程，"
-                    + "这条不变式会在没有任何运行时报错的情况下静默失效 —— 这条源码绊线是它唯一的"
-                    + "守卫。")
+                    + "\(concurrencyHits.joined(separator: ", ")) —— manifest.json 的读-改-写"
+                    + "现在整段跑在 `~/.claudio/packs.lock` 里（`mutateManifestJSON(at:lockFile:_:)`），"
+                    + "而这条腿守的是**那把锁的作用域**：`Task.detached { … write … }` / 改成 async 并在"
+                    + "读与写之间插一个 `await` —— 两者都把真正的写**挪到锁释放之后**，锁当场形同虚设，"
+                    + "而编译器一条诊断都不会给（`Data`/`URL` 都是 Sendable，`Data.write` 是 nonisolated；"
+                    + "本轮实测：注入 `Task.detached` 包住那次 write，两个包都 Build complete、零警告）。"
+                    + "锁与这条绊线不互相替代。")
         }
 
         // 第二条腿（/codex review dcab3de,7e97bc4 的 P1）：上面那条挡「变异步」，挡不住「同步但脱离
@@ -421,9 +423,12 @@ private func auditManifestConcurrencyFence(
             audit.findings.append(
                 "\(display(relative)) 的导出写函数 `\(gap.name)` 没有 @MainActor 隔离"
                     + "（导出 \(gap.exported) 个声明，带 @MainActor 的只有 \(gap.isolated) 个）—— "
-                    + "manifest.json 零锁，并发安全靠「全同步 + 全在 @MainActor」两条腿。少了 @MainActor"
-                    + "（或被标 nonisolated、或被一个同名重载洗白），它就能被后台线程同步调用，"
-                    + "两个读-改-写交错丢更新且零运行时报错。给它加回 @MainActor"
+                    + "manifest.json 的跨进程互斥已经交给 `~/.claudio/packs.lock`，而 @MainActor 守的是"
+                    + "**进程内**那一半：少了它（或被标 nonisolated、或被一个同名重载洗白），这个写者就能"
+                    + "被后台线程同步调用。删掉 `@MainActor` 是一次**放宽** —— 现存调用方本身都在主 actor "
+                    + "上，放宽后调用依然合法，**编译器零诊断**（本轮实测：删掉原语的 @MainActor，"
+                    + "`swift build` 直接 Build complete）。编译器强制的是注解的*后果*，从不是注解的*存在*，"
+                    + "所以这条绊线是它唯一的守卫。给它加回 @MainActor"
                     + "（PLAN-SOUND-MANAGER.md §2.1 / 4c「并发不变式」）。")
         }
     }
@@ -789,8 +794,9 @@ private func sharedScannerRegion(of relativePath: String) -> String? {
 
 // MARK: - T3 @MainActor 正向绊线的两个原语（/codex review dcab3de,7e97bc4 的 P1）
 //
-// 并发 token 黑名单那条腿只挡「变异步」，挡不住「同步但脱离主 actor」。manifest.json 零锁的并发
-// 安全靠「全同步 **且** 全在 @MainActor」两条腿，黑名单只钉住了「全同步」。这两个 helper 让绊线
+// 并发 token 黑名单那条腿只挡「变异步」，挡不住「同步但脱离主 actor」。manifest.json 的跨进程
+// 互斥现在由 `packs.lock` 给，而**进程内**那一半仍然靠「全同步 **且** 全在 @MainActor」，
+// 黑名单只钉住了「全同步」那半。这两个 helper 让绊线
 // 正向钉住第二条腿：文件里**每一个枚举得到的**导出写函数都得带 @MainActor —— 不是一份会忘记
 // 更新的写死名字清单，新写者（forkPack / restoreFactoryPack）落地即自动纳入。
 //
@@ -1622,13 +1628,28 @@ func runSourceScannerSuites() {
                 + "    （helper \(helperLines.count) 行 / gui \(guiLines.count) 行）。改一份 = 两份一起改")
     }
 
-    // MARK: T3 并发绊线 —— manifest.json 唯一的并发安全保证是「全同步 + 全在 @MainActor」，
-    // 不是锁（PLAN-SOUND-MANAGER.md §2.1：`grep -iE 'lock' ManifestBinding.swift` 是空的）。
-    // 本计划会往 manifest.json 上加三个新写者（`clearEventBinding` / 未来的 `forkPack` /
-    // `restoreFactoryPack`）和一个新 UI 面（管理窗口）—— 一次善意的 `async` 重构会让这条无锁的
-    // 读-改-写在并发绑定/清除下静默丢更新，而且**没有任何运行时会报错**。这是这一批改动里
-    // 唯一没有运行时防护的 critical gap（§4c「并发不变式」表格最后一行），这条源码绊线是它
-    // **唯一**的守卫——不是写在文档里的一句话，是一条会响的东西。
+    // MARK: T3 并发绊线 —— 守的是 `~/.claudio/packs.lock` 的**作用域**，不再是「零锁」本身
+    //
+    // ⚠️ **这段自述被改写过一次，别照旧读。** 上一版逐字写的是「manifest.json 唯一的并发安全
+    // 保证是「全同步 + 全在 @MainActor」，不是锁（`grep -iE 'lock' ManifestBinding.swift` 是
+    // 空的）」。那句话已经**两头都假**了：
+    //  · `manifest.json` 现在有锁了（`mutateManifestJSON(at:lockFile:_:)` 整段读-改-写跑在
+    //    `packs.lock` 里），那句 grep 不再是空的；
+    //  · 而它当年也从来不是「唯一」的写者 —— helper 的 `performFirstRunSetup` 以**目录粒度**
+    //    发布整棵包目录（`Setup.swift` 的 `copyItem`→`moveItem`，还会把用户整个包目录挪走），
+    //    当时零锁（本轮已一并上锁，与 GUI 侧共用 `packs.lock`），且这条围栏**两重**看不见它
+    //    （只扫 `gui/Sources`；纳入判据又要求文件含
+    //    `mutateManifestJSON` 这个 token）。GUI 自己还把 setup 派到主 actor 外
+    //    （`OnboardingActions` 的 `Task.detached`）—— 所以「全部在 @MainActor」在本进程内也是假的。
+    //  这是本文件治了十二次的那个病，第十三次：**长在它自己的立身理由上**，而且假了很久没人发现。
+    //
+    // 现在这条绊线的理由收窄成一句能站住的话：**它守的是那把锁的作用域。**
+    //  · `Task.detached { … write … }`、或改成 async 并在读与写之间插一个 `await` —— 两者都把
+    //    真正的写**挪到锁释放之后**，锁当场形同虚设。实测：注入 `Task.detached` 包住那次 write，
+    //    两个包都 Build complete、**零警告**（`Data`/`URL` 都是 Sendable，`Data.write` 是 nonisolated）。
+    //  · 删掉 `@MainActor` 是一次**放宽**，现存调用方本身都在主 actor 上，放宽后依然合法 ——
+    //    实测同样 **Build complete、零诊断**。编译器强制的是注解的*后果*，从不是注解的*存在*。
+    // 两条都是编译器原理上看不见的，锁也替不了 —— 所以这条绊线留着，理由换了，措辞跟着换。
     //
     // 这条绊线只属于 gui 包：`ManifestBinding.swift` / `PackFork.swift` 是 gui 侧文件，helper
     // 没有对应物，所以不进两包共享的哨兵区块（上面那条「逐字节相同」钉的是 `TestSupport.swift`
@@ -1780,8 +1801,10 @@ func runSourceScannerSuites() {
                     + "manifest？\n"
                     + "  · 是 → 它已被自动纳入（并发 token + @MainActor 两条腿都在跑），把这条路径"
                     + "从 `pendingManifestWriterPaths` 删掉即可。\n"
-                    + "  · 否 → 它绕开了原语，围栏漏得掉它，manifest.json 的零锁读-改-写多了一个"
-                    + "不设防的写者。要么让它经原语，要么在这里补一条针对它的检查。\n"
+                    + "  · 否 → 它绕开了原语，围栏漏得掉它 —— 而绕开原语也就绕开了 `packs.lock`"
+                    + "（锁是在 `mutateManifestJSON(at:lockFile:_:)` 里取的，不是在文件系统那一层），"
+                    + "manifest.json 就多了一个**既不设防、也不互斥**的写者。要么让它经原语，"
+                    + "要么在这里补一条针对它的检查。\n"
                     + "（PLAN-SOUND-MANAGER.md §2.1 / 4c「并发不变式」）")
         }
 
