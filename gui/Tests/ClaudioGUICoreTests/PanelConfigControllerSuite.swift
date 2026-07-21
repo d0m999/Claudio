@@ -22,7 +22,9 @@ private func makeEnvironment(_ userPacksDirectory: URL) -> AudioImportEnvironmen
     AudioImportEnvironment(
         userPacksDirectory: userPacksDirectory,
         bundledPacksDirectory: nil,
-        durationProbe: StubDurationProbe(fixedDuration: 1.0))
+        durationProbe: StubDurationProbe(fixedDuration: 1.0),
+        // 见 ``injectedPacksLock(under:)``：漏掉 ⇒ 静默落回用户真实 `~/.claudio/packs.lock`。
+        packsLockFile: injectedPacksLock(besideUserPacks: userPacksDirectory))
 }
 
 /// 一份良构、`.operational` 的 config.json（`selected_pack` 有效、`master_volume` 是数字、`events` 空

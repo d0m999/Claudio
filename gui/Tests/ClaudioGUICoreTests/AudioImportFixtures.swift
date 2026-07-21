@@ -95,6 +95,40 @@ final class RecordingDurationProbe: AudioDurationProbing, @unchecked Sendable {
     }
 }
 
+/// 本测试包注入给 `AudioImportEnvironment` / `mutateManifestJSON` 的那把包锁 —— **全包唯一来源**。
+///
+/// ## 为什么每个 fixture 都必须显式递它
+///
+/// `AudioImportEnvironment.packsLockFile` 的默认值是**真实**的 `~/.claudio/packs.lock`。忘记注入的
+/// 后果与忘记注入 `userPacksDirectory` **完全不同**：后者会当场断言失败（真实 packs 目录里没有
+/// fixture），而前者只会**静默**地去用户机器上开一把真锁 —— 测试照样全绿，只是在用户
+/// `~/.claudio/` 里落一个 0 字节文件、并与他正在运行的 Claudio.app 抢锁。静默那种才是危险的。
+///
+/// ## 为什么位置**故意**不可从 `userPacksDirectory` 派生
+///
+/// 生产代码取这把锁的唯一合法写法是 `environment.packsLockFile`。任何「就地算一个出来」的写法
+/// （`userPacksDirectory` 的兄弟位、`<packs>/packs.lock`、硬编码 `ClaudioPaths.packsLockFile`）都必须
+/// 让持锁行为测试**当场红**。做到这一点的唯一办法是让注入值待在那些表达式**算不出来**的地方：
+/// 换父目录（`injected-locks/`）**且**换叶名（不是 `packs.lock`）。只换一样都不够。
+///
+/// 这条性质由 `ManifestBindingSuite` 的第一条 suite（fixture 自证）钉住 —— 那是本包唯一真的会去
+/// **持有**这把锁的地方，也是唯一能分辨「转发对了」与「就地算了一个」的地方。
+///
+/// 父目录不用预建：`FileLock.attemptLock()` 撞上 ENOENT 会自愈建父目录再重试一次。
+func injectedPacksLock(under root: URL) -> URL {
+    root
+        .appendingPathComponent("injected-locks", isDirectory: true)
+        .appendingPathComponent("test-packs-lock")
+}
+
+/// `userPacksDirectory` 的兄弟位上那把注入锁 —— 给只拿得到 packs 目录、拿不到 `root` 的 fixture 用。
+///
+/// 各 suite 的布局一律是 `<root>/packs`，所以 `deletingLastPathComponent()` 就是 `root`。
+@MainActor
+func injectedPacksLock(besideUserPacks userPacksDirectory: URL) -> URL {
+    injectedPacksLock(under: userPacksDirectory.deletingLastPathComponent())
+}
+
 @MainActor
 func makeAudioImportEnvironment(
     userPacksDirectory: URL,
@@ -108,6 +142,9 @@ func makeAudioImportEnvironment(
         bundledPacksDirectory: bundledPacksDirectory,
         durationProbe: StubDurationProbe(fixedDuration: duration),
         limits: AudioImportLimits(
-            maxFileSizeBytes: maxFileSizeBytes, maxDurationSeconds: maxDurationSeconds)
+            maxFileSizeBytes: maxFileSizeBytes, maxDurationSeconds: maxDurationSeconds),
+        // 见 ``injectedPacksLock(under:)``：漏掉这一行，本 factory 吸收的三十余个调用点会**静默**
+        // 在用户真实的 `~/.claudio/packs.lock` 上开锁。这个 factory 是全包最高杠杆的那一个。
+        packsLockFile: injectedPacksLock(besideUserPacks: userPacksDirectory)
     )
 }

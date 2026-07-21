@@ -438,7 +438,8 @@ func runAudioImportSuites() {
             let userPacksDirectory = root.appendingPathComponent("packs")
             let environment = AudioImportEnvironment(
                 userPacksDirectory: userPacksDirectory, durationProbe: probe,
-                limits: AudioImportLimits())
+                limits: AudioImportLimits(),
+                packsLockFile: injectedPacksLock(besideUserPacks: userPacksDirectory))
             let outcome = importAudioFile(
                 sourceURL: sourceURL, suggestedFileName: "chime.wav", packID: "my-pack",
                 environment: environment)

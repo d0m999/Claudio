@@ -69,11 +69,8 @@ private func makeEnvironment(
 ///
 /// 这条性质由本文件第一条 suite（fixture 自证）钉住 —— 少了它，上面整段保护力就寄生在一个
 /// **没有任何断言看着**的常量上，一次好意的「统一成生产布局」就全灭。
-private func injectedPacksLock(under root: URL) -> URL {
-    root
-        .appendingPathComponent("injected-locks", isDirectory: true)
-        .appendingPathComponent("manifest-packs-lock")
-}
+/// 实现住在 `AudioImportFixtures.swift`（全包唯一来源）—— 那里的 doc 写着为什么位置是承重的。
+/// 本文件第一条 suite 是这条性质的**唯一**守卫，因为这里是全包唯一真的会去**持有**这把锁的地方。
 
 /// `Result<Void, ManifestBindError>` isn't `Equatable` (`Void` isn't) — this extracts the
 /// `.failure` payload so tests can compare it directly, `nil` for `.success` (a mismatch

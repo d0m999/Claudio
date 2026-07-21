@@ -15,7 +15,9 @@ private func makeEnvironment(
     AudioImportEnvironment(
         userPacksDirectory: userPacksDirectory,
         bundledPacksDirectory: bundledPacksDirectory,
-        durationProbe: StubDurationProbe(fixedDuration: 1.0)
+        durationProbe: StubDurationProbe(fixedDuration: 1.0),
+        // 见 ``injectedPacksLock(under:)``：漏掉 ⇒ 静默落回用户真实 `~/.claudio/packs.lock`。
+        packsLockFile: injectedPacksLock(besideUserPacks: userPacksDirectory)
     )
 }
 
