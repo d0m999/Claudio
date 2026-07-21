@@ -177,6 +177,23 @@ private func guiSources() -> [ScannedSource] {
     sourcesUnder("gui/Sources/ClaudioGUI")
 }
 
+/// 从 `lockLeaks` 普查里豁免的文件（**文件级单源**）。
+///
+/// ⚠️ 提到文件级不是为了复用，是为了让「每个豁免项都换来一条更严的锚定绊线」这句散文有一条
+/// **可执行**版本：下面那条 suite 会断言这张表减去 `PanelView.swift` 之后，**逐项等于**
+/// `expectedProductionLocks` 的文件集。上一版两张清单各自硬编码、互不绑定 —— 往这里加第四项
+/// 而对价一条不写，普查静默少查一个文件、全绿、没有人会喊（`/review d7084be` 红队 P2 坐实）。
+///
+/// `PanelView.swift` 的豁免理由与另外两项不同（它是三把锁**唯一**允许的来源，由本文件那条
+/// 「PanelView 构造 OnboardingActionEnvironment 的三把锁逐个按调用点绑」守着），所以它在
+/// 那条相等判定里被单独减掉 —— 减的是**它一个**，不是「随便谁都能豁免」。
+private let lockCensusExemptedFiles = [
+    "PanelView.swift", "ClaudioGUIApp.swift", "StateGalleryView.swift",
+]
+
+/// 上一条里被单独减掉的那一个 —— 提成常量，免得相等判定里出现一个没人解释的字面量。
+private let lockCensusSelfGuardedFile = "PanelView.swift"
+
 /// `ClaudioGUICore` target 下每一个源文件 —— 上面那个 `guiSources()` **看不见**的那一半 GUI。
 ///
 /// 它存在的理由（`/review e7c38ea` 的 P1，变异实测）：接管路径的锁要过四手，而**中间那一手**
@@ -811,9 +828,7 @@ func runViewWiringSuites() {
         //
         // PanelView.swift 的豁免理由与它们不同（它是三把锁**唯一**允许的来源），由本文件那条
         // 「PanelView 构造 OnboardingActionEnvironment 的三把锁逐个按调用点绑」守着。
-        let lockCensusExemptions = [
-            "PanelView.swift", "ClaudioGUIApp.swift", "StateGalleryView.swift",
-        ]
+        let lockCensusExemptions = lockCensusExemptedFiles
         var lockLeaks: [String: Int] = [:]
         // ⚠️ 豁免按**文件名全等**判，不是 `hasSuffix` —— 极性在这里是反的，看清楚再改
         //   （`/review d7084be` 补，与 `/codex review d7084be` 那条 `hasPrefix(root.path)` 是同一个病
@@ -928,7 +943,31 @@ func runViewWiringSuites() {
                     + "上那把锁的能力 —— 而 preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它"
             ),
         ]
+        // ⚠️ [10] 「每个豁免项都换来一条更严的锚定绊线」的**可执行**版本（`/review d7084be` 红队 P2）。
+        //    上一版这句话只是散文：两张硬编码清单互不绑定，往 `lockCensusExemptions` 加第四项而这里
+        //    一条不写 —— 那个文件从此静默退出普查，编译通过、全绿、没有人会喊（豁免侧放宽 = fail-open）。
+        //    判据是**集合相等**不是 `count`：数目对得上而成员错位同样是一个没人守的文件。
+        expect(
+            Set(lockCensusExemptedFiles).subtracting([lockCensusSelfGuardedFile])
+                == Set(expectedProductionLocks.map(\.file)),
+            "`lockCensusExemptions` 减掉 `\(lockCensusSelfGuardedFile)`（它由本文件另一条 suite 按调用点"
+                + "守着）之后，必须**逐项等于** `expectedProductionLocks` 的文件集 —— 否则「豁免换来的是"
+                + "更严，不是更松」这句话就有一项没兑现。豁免侧="
+                + "\(Set(lockCensusExemptedFiles).subtracting([lockCensusSelfGuardedFile]).sorted())，"
+                + "对价侧=\(Set(expectedProductionLocks.map(\.file)).sorted())")
+
         for expected in expectedProductionLocks {
+            // ⚠️ [9] `literal` 是 `String?`，而 `if let` 意味着「没填 ⇒ 不查」—— 那正是这一刀声称要
+            //    修掉的 fail-open，只是从「第三项」挪到了「literal 填 nil 的那一项」。
+            //    这条把「哪一行**必须**填」从散文变成断言：`value` 里出现被清空的字符串字面量（`""`）
+            //    就说明这一处的真实实参含字面量内容，而相等判定对内容恒不可判 ⇒ 必须有 `literal` 那一半。
+            expect(
+                !expected.value.contains("\"\"") || expected.literal != nil,
+                "`expectedProductionLocks` 里 `\(expected.file)` 那一行的 `value` 是 "
+                    + "`\(expected.value)` —— 它含一个被清空的字符串字面量，说明真实实参里有字面量内容，"
+                    + "而相等判定读的是清空之后的文本、对内容完全不可判。这一行**必须**填 `literal`，"
+                    + "否则那半条检查静默不存在（漏填 = 不查 = fail-open）")
+
             guard let code = codeWithoutStrings("gui/Sources/ClaudioGUI/\(expected.file)"),
                 let raw = codeOnly("gui/Sources/ClaudioGUI/\(expected.file)")
             else {
@@ -969,13 +1008,35 @@ func runViewWiringSuites() {
             // 字面量那一半，**跟着表走**（上一版写死在循环外、只覆盖 StateGalleryView 一个文件）。
             // 上面读的是清空字符串内容之后的文本，字面量在那里一律是空串，于是「占位路径有没有偷偷
             // 变成真实路径」在上面完全不可判 —— 这一条是那一半，读的是 `raw`（保留字符串内容）。
+            // 字面量那一半 —— **绑回调用点**，不是全文件 `contains`（`/review d7084be` 红队 P1）。
+            //
+            // ⚠️ 上一版写的是 `raw.contains(literal)`：全文件、无锚点。于是把真实实参换成
+            //    `URL(fileURLWithPath: "/Users/<me>/.claudio/packs.lock")`、同时在文件里任意位置
+            //    留一句死代码 `private let note = "/dev/null/claudio-preview-packs.lock"`，三条断言
+            //    逐条通过 —— 相等判定读的是清空字符串的文本（两种写法都被清成 `URL(fileURLWithPath: "")`），
+            //    而 `contains` 被那句诱饵喂饱。**这与本文件上面亲口判过死刑的见证值形状逐字同构**，
+            //    只是换了个位置重开一次。
+            //
+            //    修法是换**判据种类**（不是换读模型）：从 `raw` 里按同一个调用点切出实参，
+            //    在**那一段**里找字面量。同文件别处的诱饵从此够不着。
             if let literal = expected.literal {
+                let rawCalls = callArguments(of: "AudioImportEnvironment", in: raw)
+                let rawValue = rawCalls.compactMap { argumentValue("packsLockFile", in: $0) }.first
+                // 切不出来一律判红（围栏，不是探针）——`raw` 保留字符串内容，一句带 `(` 的字面量
+                // 会把配平括号的扫描带偏，那时我们**不知道**自己在看什么，不能默认它是对的。
                 expect(
-                    raw.contains(literal),
-                    "\(expected.file) 里必须逐字出现 `\(literal)` —— 上面那条相等判定读的是清空字符串"
-                        + "内容之后的文本（`\(expected.value)`），它对「字面量换成了什么」完全不可判；"
-                        + "这一条是那一半。preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它，"
-                        + "一条指向真实 home 的占位路径不会有别的东西喊")
+                    rawValue != nil,
+                    "从 \(expected.file) 的**原始文本**（保留字符串内容）里切不出 "
+                        + "`AudioImportEnvironment(…)` 的 `packsLockFile:` 实参 —— 切不出来就无从判定"
+                        + "字面量内容，而「无从判定」必须落在红那一侧。实得 \(rawCalls.count) 处调用")
+                expect(
+                    rawValue?.contains(literal) == true,
+                    "\(expected.file) 的 `packsLockFile:` **实参本身**里必须逐字出现 `\(literal)`，"
+                        + "实得 `\(rawValue ?? "<切不出来>")` —— 上面那条相等判定读的是清空字符串内容"
+                        + "之后的文本（`\(expected.value)`），对「字面量换成了什么」完全不可判；这一条是"
+                        + "那一半。判据绑在**调用点**上而不是全文件：同文件别处留一句提到该串的死代码"
+                        + "喂不饱它。preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它，一条指向"
+                        + "真实 home 的占位路径不会有别的东西喊")
             }
         }
     }

@@ -328,6 +328,29 @@ func runOnboardingActionsSuites() {
                     + "**里面**。跑到外面 = 测试在别处开锁 + `withTempDirectory` 清不掉它，而上面那两条"
                     + "`!=` 对这种实现完全没有分辨力（它每次也确实不同）。"
                     + "实得 \(first.packsLockFile.path) / \(second.packsLockFile.path)")
+
+            // ⚠️ 上面那条只钉了**包锁一个**注入点，而这个 fixture 有四个。另外三个至今只被
+            //    「两次之间没变」（`==`）钉着 —— 对「它们指向用户**真实 home**」零分辨力：
+            //    把 `configLockFile = claudioRoot.appendingPathComponent("config.lock")` 改成
+            //    `configLockFile = ClaudioPaths.configLockFile`（一次「统一成生产布局」的重构，
+            //    看起来比拼临时路径整齐）是**确定的** ⇒ `==` 照绿，而三条持锁 suite 从此在用户
+            //    真实 home 上开 flock。`/review d7084be` 红队 P2，与上面那条是同一个病的另外三条腿。
+            //
+            //    这正是这一刀自己的教训第二次复发：补正向对照时只补了被点名的那一处。
+            //    「外部模型给的是样本不是清单」—— 拿到一条 finding 先问这个**形状**还有几处。
+            let injectionPoints: [(name: String, url: URL)] = [
+                ("configLockFile", first.configLockFile),
+                ("settingsLockFile", first.settingsLockFile),
+                ("userPacksDirectory", first.userPacksDirectory),
+            ]
+            for point in injectionPoints {
+                expect(
+                    isInside(point.url, of: root),
+                    "fixture 的 `\(point.name)` 跑到了 root（\(root.path)）之外 —— 实得 "
+                        + "\(point.url.path)。四个注入点**每一个**都必须长在这棵临时目录里；"
+                        + "上面那条 `==` 只说「两次之间没变」，一个指向用户真实 home 的确定值"
+                        + "在它面前是全绿的，而那意味着测试在用户家里开 flock")
+            }
         }
     }
 
