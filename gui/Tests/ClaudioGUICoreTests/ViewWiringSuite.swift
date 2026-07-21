@@ -82,7 +82,11 @@ private func codeWithoutStrings(_ relativePath: String) -> String? {
 /// `.swift-format` 的 `respectsExistingLineBreaks: true` 意味着 `case .full: refresh()` 既可能写成一行、
 /// 也可能被人拆成两行。一条断言若要求其中一种，它守的就是排版而不是接线：下一个人换了行，它假红，
 /// 然后被删掉。
-private func collapsingWhitespace(_ text: String) -> String {
+///
+/// ⚠️ **不是 `private`**：`SourceScannerSuite` 的锁转发腿（T3 内容围栏第四条腿）要拿同一份实现去
+/// 归一化 `lockFile:` 实参。两份拷贝会漂移（一份收窄、另一份没有 ⇒ 同一段源码在两处得出不同结论），
+/// 而这两个文件在同一个 target 里，去掉 `private` 就够了 —— 别为了「每个文件自带一份」再抄一遍。
+func collapsingWhitespace(_ text: String) -> String {
     text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
 }
 
@@ -808,76 +812,60 @@ func runViewWiringSuites() {
                 + "按文件名豁免的文件）")
     }
 
-    suite("ManifestBinding 的每一处 `lockFile:` 都必须是转发来的那把（行为测试够不到的那一类）") {
-        // ## 为什么行为测试不够，这条必须存在
+    suite("锁转发的**编译期前提**：`mutateManifestJSON` 的 `lockFile:` 不许有默认值") {
+        // ## 这条 suite 取代了什么
         //
-        // `ManifestBinding.swift` 的两处 `mutateManifestJSON(at:lockFile:)` 现在由
-        // `ManifestBindingSuite` 的三条**持锁** suite 守着（fixture 的包锁已挪到不可派生的位置，
-        // 所以「就地算一个锁出来」的写法求值 ≠ 注入值 ⇒ 当场红）。那覆盖的是**被执行到的**调用点。
+        // 这里原本是一条「`ManifestBinding.swift` 的每一处 `lockFile:` 都必须是转发来的那把」的绊线。
+        // 它的**措辞**（suite 标题与失败消息都逐字写着「每一处」「一个新增的、没人测的调用点」）比它
+        // 的**覆盖范围**大了整整一个目录树：它读的是**一个硬编码文件**
+        // （`codeWithoutStrings("gui/Sources/ClaudioGUICore/ManifestBinding.swift")`），而新调用点最
+        // 可能的落点恰恰是**新文件** —— `gui/Package.swift` 没有 `sources:` 白名单，默认目录下任意
+        // `.swift` 直接进 target，连 manifest 都不用改。实测（`/codex review 95d16a5,b89a0ee,37745f2`
+        // 的 P1-B）：往 `ClaudioGUICore` 里塞一个就地算锁的第三写者，两个包 Build complete 零警告，
+        // 整套 2411 条断言**一条都不红**。
         //
-        // 它够不到的是：**新增第三处调用点而没有任何测试执行它**。`mutateManifestJSON` 是公开原语
-        // （doc 里写着「bind/clear/未来 fork 共用」），第三个调用者是被预期会出现的。那一处若就地
-        // 算锁，三条持锁 suite 一条都不会红 —— 它们跑的是 bind 与 clear。
+        // 那条判定现在住在 `SourceScannerSuite` 的 T3 内容围栏里，作为**第四条腿** —— 那台机器递归
+        // 枚举 `gui/Sources`（两个 target）、按内容纳入、点开头/`UF_HIDDEN`/symlink/属性读不到全部
+        // 已建模，而且是全仓唯一一条有合格递归自证的枚举。它的三个独占靶子（就地派生 / 硬编码真实
+        // 路径 / 子目录）与两条极性腿（认不出的用法 / 条件编译）各配了常驻正/负控，跑遍两个
+        // `pathPrefix` 向量。删这条之前逐条确认过靶子都已搬走 —— 除了下面这一个。
         //
-        // ## 极性：这是**围栏**，不是探针
+        // ## 唯一没搬走的那个靶子，就是这条 suite
         //
-        // 判据不是「我认得出的调用点都对」（那是白名单，认不出的静默放行 —— `/codex review ceae86e`
-        // 的 P1 就是这么来的），而是「**每一处** `lockFile:` 的值都必须在许可集合里，认不出 ⇒ 红」。
-        // 许可集合只有两个成员：`URL`（原语自己的形参类型声明）与 `environment.packsLockFile`
-        // （唯一合法的转发）。新增任何第三种写法都必须有人**主动**来改这条断言 —— 那正是我们要的
-        // 那次停顿。
+        // 老绊线有一条 `!sites.isEmpty` 兜底：「一处 `lockFile:` 都找不到 ⇒ 红」。它**不能**原样搬进
+        // 第四条腿 —— 那条腿的宿主 suite 里有几十个 `mutateManifestJSON()` 无实参形状的合成 fixture
+        // （它们是另外三条腿的正/负控），一条 `isEmpty ⇒ 红` 会让它们集体假红，而最省事的修补
+        // （「文件里已出现 `lockFile:` 才检查」）恰好把极性改回 fail-open。红队实测过这条路。
+        //
+        // 所以把它换成**更硬**的那一种：钉住形参**没有默认值**。这样「漏传锁」在生产上是一次
+        // **编译错误**，根本到不了第四条腿；第四条腿因此可以对「取不到 `lockFile:` 标签」的调用点
+        // 安心沉默，而那份沉默由这条 suite 背书 —— 两条合起来才是完整的极性，单独任何一条都不是。
+        //
+        // ⚠️ 为什么编译器强制**不能**给它自己背书：给形参加回一个默认值是一次**放宽**，现存调用方
+        // 全都显式传着值，加完 `swift build` 零诊断（本文件与 `ManifestBinding.swift` 各记着同一句话
+        // 的两个判例：`@MainActor` 与 `async`）。编译器强制的是默认值的*后果*，从不是它的*不存在*。
         guard let manifest = codeWithoutStrings("gui/Sources/ClaudioGUICore/ManifestBinding.swift")
         else {
             expect(false, "读不到 ManifestBinding.swift —— 这条 suite 唯一的价值就是读它")
             return
         }
-        // 读 `codeWithoutStrings`：doc 注释里的 ``mutateManifestJSON(at:lockFile:_:)`` 会逐字包含
-        // `lockFile:`，剥掉注释才不会让散文冒充代码（本文件头部记着的那次翻车的同一形状）。
+        // 正向：形参在。它若整个消失（原语改从别处取锁），第四条腿会对每一处调用点取不到标签而
+        // **静默**，整条锁转发判定退化成对空集的恒真绿 —— 那正是老绊线 `!sites.isEmpty` 守的东西。
         expect(
-            !manifest.contains("#if"),
-            "`ManifestBinding.swift` 里出现了条件编译（`#if`）—— 扫描器不建模它，非活跃分支里的 "
-                + "`lockFile:` 会和真的一样被下面这条普查读进来。先把扫描器教会再放行")
-
-        let allowed = ["URL", "environment.packsLockFile"]
-        var sites: [String] = []
-        var cursor = manifest.startIndex
-        while let hit = manifest.range(of: "lockFile:", range: cursor..<manifest.endIndex) {
-            let tail = manifest[hit.upperBound...]
-            // 取到第一个 `,` 或 `)` 为止。
-            //
-            // ⚠️ **换行不是终止符** —— 这一条是实测出来的，第一版把 `\n` 也当终止符，于是
-            //
-            // ```swift
-            // lockFile: environment.packsLockFile
-            //     .deletingLastPathComponent().appendingPathComponent("packs.lock")
-            // ```
-            //
-            // 切出来的值**逐字等于** `environment.packsLockFile` ⇒ 落进许可集合 ⇒ 本条全绿。
-            // 那正是 ``argumentValue(_:in:)`` 的 doc 里立着判例的「尾部未锚」，我在写这条围栏时
-            // 又犯了一遍（实测：配上「没人测的第三调用点」，整套 2392 条全绿）。
-            //
-            // 现在尾由 `,` / `)` 锚 ⇒ 上面那种写法切出来带着 `.deletingLastPathComponent(`，
-            // 不在许可集合里，当场红。再把空白压平，让判定对**排版**免疫（跨行缩进不该影响结论）。
-            let value = collapsingWhitespace(
-                String(tail.prefix { $0 != "," && $0 != ")" }))
-            sites.append(value)
-            cursor = hit.upperBound
-        }
+            collapsingWhitespace(manifest).contains("lockFile: URL"),
+            "`mutateManifestJSON` 的形参表里找不到 `lockFile: URL` —— 要么读-改-写原语不再按锁参数"
+                + "取锁（那 `SourceScannerSuite` 第四条腿就是在守一段不存在的代码：它逐处取 "
+                + "`lockFile:` 标签，取不到就沉默，整条判定对空集恒真绿），要么扫描器读串了。"
+                + "两种都必须有人看一眼再放行")
+        // 负向：不许有默认值。`lockFile: URL = ClaudioPaths.packsLockFile` 会让**漏传**从编译错误
+        // 变成静默生效，而 `claudio-gui-tests` 压根不编译 `ClaudioGUI`，那一手在测试进程里无人看守。
         expect(
-            !sites.isEmpty,
-            "`ManifestBinding.swift` 里一处 `lockFile:` 都找不到 —— 要么读-改-写原语不再按锁参数"
-                + "取锁（那这条普查就是在守一段不存在的代码），要么扫描器读串了。认不出 ⇒ 红，"
-                + "不许静默放行")
-        for (ordinal, value) in sites.enumerated() {
-            expect(
-                allowed.contains(value),
-                "`ManifestBinding.swift` 第 \(ordinal + 1) 处 `lockFile:` 的值是 `\(value)`，不在许可"
-                    + "集合 \(allowed) 里 —— 包锁只有一个来源：调用方转发进来的 "
-                    + "`environment.packsLockFile`。就地算一个（`userPacksDirectory` 的兄弟位、"
-                    + "`ClaudioPaths.packsLockFile`）会让这个写者与接管那个写者用上不同的锁，"
-                    + "而 manifest.json 的读-改-写照旧并发 —— 丢更新，且没有任何行为测试跑得到"
-                    + "一个新增的、没人测的调用点")
-        }
+            !collapsingWhitespace(manifest).contains("lockFile: URL ="),
+            "`mutateManifestJSON` 的 `lockFile:` 形参被加上了**默认值** —— 漏传这把锁从此不再是编译"
+                + "错误，而是静默落回那个默认值。包锁只有一个来源：调用方转发进来的那把；一个默认值"
+                + "就是第二个来源，两个 manifest.json 写者从「同一个源」退化成「两个碰巧相等的常量」，"
+                + "而 `SourceScannerSuite` 第四条腿对「没有 `lockFile:` 标签」的调用点是**沉默**的"
+                + "（那份沉默正是靠这一条背书）。要加默认值，先把那条腿的极性一起改了")
     }
 
     suite("ClaudioGUICore 的代码里一个字都不许出现 play 的去抖锁（两套绊线中间那条缝）") {

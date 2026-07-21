@@ -323,6 +323,96 @@ private func auditManifestConcurrencyFence(
         guard scanned.code.contains("mutateManifestJSON") else { continue }
         audit.enrolledSubpaths.append(relative)
 
+        // ## 第四条腿：**锁转发**（`/codex review 95d16a5,b89a0ee,37745f2` 的 P1-B）
+        //
+        // 上面三条腿守的是**并发**（禁用 token / @MainActor / 认不出的声明形态），一个字都不看
+        // `lockFile:` 实参。于是一个 `@MainActor`、无 `async`、`public func` 形状完全合规的新写者，
+        // 就地算一把锁 —— 前三条腿**全绿**。实测（变异体 `PackImport.swift`，两个包 Build complete
+        // 零警告）：整套 2411 条断言一条都不红。
+        //
+        // ## 为什么住在这里，而不是给 `ViewWiringSuite` 那条单文件绊线再补一个路径
+        //
+        // 这条判定此前住在 `ViewWiringSuite`，读的是**一个硬编码的** `ManifestBinding.swift`，而它的
+        // suite 标题自称守「**每一处** `lockFile:`」「一个新增的、没人测的调用点」。新调用点最可能的
+        // 落点恰恰是**新文件**（`gui/Package.swift` 没有 `sources:` 白名单，默认目录下任意 `.swift`
+        // 直接进 target，连 manifest 都不用改），而那条绊线一个字都读不到它 —— 措辞比覆盖范围大，
+        // 本仓库第 N 次。
+        //
+        // 挂到这台机器上是因为它**已经**是「这个错误可能长出来的每一个位置」：`gui/Sources` 递归
+        // 枚举（两个 target）、按**内容**纳入（代码里出现 `mutateManifestJSON` ⇒ 自动纳入）、点开头
+        // 过滤 / `UF_HIDDEN` / symlink / 属性读不到 全部已建模，而且它是全仓**唯一**一条有合格递归
+        // 自证的枚举器（自造三层嵌套树喂同一个函数，不拿真实布局背书 —— 真仓库 `gui/Sources` 今天
+        // 是平的，递归与非递归在它身上产出完全相同的结论）。**别再写第二条枚举**：把判定挂上来，
+        // 覆盖范围就与措辞对齐，且白捡一份已经证明有牙的枚举。
+        //
+        // ⚠️ 如实标注这条腿**够不到什么**（红队实测，不是纸上推理）：`AudioImportEnvironment` 的
+        // 每个字段都是 `public var`，所以「转发的**文本**」与「转发的**值**」可以当场脱钩 ——
+        //
+        // ```swift
+        // var environment = environment
+        // environment.packsLockFile = environment.userPacksDirectory.appendingPathComponent(id)
+        // return mutateManifestJSON(at: dir, lockFile: environment.packsLockFile) { … }
+        // ```
+        //
+        // —— 实参逐字等于许可成员，这条腿全绿，而求值出来是另一把锁。任何**文本**判据都够不到它
+        // （memory 里那条「文本绊线够不到实参求值出来的值」）。堵它要么把那些字段改成 `let`，要么
+        // 靠行为测试；两者都不在本刀范围内，写在这里不藏。
+        let lockSource = scanned.codeWithoutStringLiterals
+
+        // 4-a：条件编译 ⇒ 红。扫描器不建模 `#if`，非活跃分支里的调用点与活跃的完全同形，会替真实
+        // 调用点喂饱下面两条。这条从被本刀删掉的那条单文件绊线原样搬过来 —— 它是那条绊线的独占靶子，
+        // 删之前必须先搬走。
+        //
+        // 放在纳入闸门**之后**是刻意的：`#if` 本身不是缺陷，只有「manifest 写者文件里的 `#if`」才是。
+        // 排在闸门之前会对 `gui/Sources` 下每一个带 `#if DEBUG` 的无关文件假红。
+        if lockSource.contains("#if") {
+            audit.findings.append(
+                "\(display(relative)) 是 manifest 写者，却出现了条件编译（`#if`）—— 扫描器不建模它，"
+                    + "**非活跃**分支里的 `mutateManifestJSON(…, lockFile: …)` 与活跃分支逐字同形，"
+                    + "会替真实调用点喂饱下面那条锁转发判定（反过来也可能：真实调用点被当成死代码）。"
+                    + "先把扫描器教会 `#if` 再放行。")
+        }
+
+        // 4-b 围栏那一半：**认不出 ⇒ 红**。`callArguments` 是白名单（它认 `head(` / `head (` /
+        // `head.init(` 四种形状），而白名单永远不完整。凡是标识符出现了、却没能被切成一次调用的，
+        // 都必须变成红 —— 「我读不到它怎么用的」绝不等于「它没事」。
+        //
+        // 独占靶子：`let writer = mutateManifestJSON` 把函数当值存起来再转走。它编译得过，下面那条
+        // 逐处判定对它**零命中**（切不出调用 ⇒ 循环体一次都不进 ⇒ 恒真绿）。
+        let identifierUses = manifestPrimitiveIdentifierCount(in: lockSource)
+        let primitiveCalls = callArguments(of: "mutateManifestJSON", in: lockSource)
+        if identifierUses != primitiveCalls.count {
+            audit.findings.append(
+                "\(display(relative)) 里 `mutateManifestJSON` 这个标识符出现 \(identifierUses) 次，"
+                    + "却只切得出 \(primitiveCalls.count) 次调用的实参 —— 差的那 "
+                    + "\(identifierUses - primitiveCalls.count) 处是**认不出的用法**（函数被当值存起来"
+                    + "`let f = mutateManifestJSON` 再转走、括号没配平、或者一种扫描器没建模的调用"
+                    + "形状）。它们会整个绕开下面那条逐处的锁转发判定，而绕开不会有任何人喊。"
+                    + "要么改成扫描器认得的直接调用，要么先把 `callArguments` 教会这个形状再放行。")
+        }
+
+        // 4-c：逐处判定。取不到 `lockFile:` 标签的调用点**不在这里报** —— 那一种由「形参无默认值」
+        // 钉住（见「锁转发的编译期前提」那条 suite）：`lockFile` 没有默认实参，漏传在生产上是
+        // **编译错误**，到不了这里。这条腿必须对它沉默，否则本文件那几十个 `mutateManifestJSON()`
+        // 形状的合成 fixture（它们是别的腿的正/负控）会集体假红，而最省事的修补恰好是把极性改回
+        // fail-open。红队实测过这条路，别再走一遍。
+        for arguments in primitiveCalls {
+            guard let raw = argumentValue("lockFile", in: arguments) else { continue }
+            let value = collapsingWhitespace(raw)
+            guard !allowedManifestLockArguments.contains(value) else { continue }
+            audit.findings.append(
+                "\(display(relative)) 有一处 `mutateManifestJSON` 的锁转发实参是 `\(value)`，不在"
+                    + "转发许可集合 \(allowedManifestLockArguments) 里 —— 包锁只有一个来源：调用方"
+                    + "**转发**进来的那把。就地算一个（`packDirectory` 的兄弟位、"
+                    + "`ClaudioPaths.packsLockFile`、每包一把的 `<id>.lock`）会让这个写者与 helper 的"
+                    + "`performFirstRunSetup` 那个目录级写者用上**两把不同路径**的 `flock` ⇒ 跨进程"
+                    + "互斥当场断开 ⇒ 用户刚绑好的音效被包发布循环整目录 `moveItem` 吞掉，而这次写"
+                    + "照旧返回 `.success`。锁若还落在 `packs/` **里面**，救砖路径会把它连包目录一起"
+                    + "搬走。行为测试对一个新增的、没人执行的调用点结构上看不见，只有这条腿看得见。"
+                    + "**相等**判定，不是 `contains`：`environment.packsLockFile.deletingLastPathComponent()`"
+                    + "逐字包含许可成员，求值出来却是别的路径。")
+        }
+
         // 第一条腿：已知并发构造的黑名单（**不是**完备围栏，见 `bannedConcurrencyTokens` 头上那段）。
         //
         // ⚠️ 这条诊断**不回显源码**（`/codex review 36fce57` 的 P2）。上一稿末尾挂着
@@ -520,6 +610,49 @@ private let fenceCallSiteEnd = "// claudio:manifest-fence-callsite:end"
 /// 谓词都能寄生在消费循环里。所以下面那条 suite 对**每一个**向量各跑一遍。
 private let fenceScanRelativeRoot = "gui/Sources"
 private let fencePathPrefix = "\(fenceScanRelativeRoot)/"
+
+/// 第四条腿（锁转发）的许可集合：`mutateManifestJSON` 的 `lockFile:` 实参**只**许是这两种写法。
+///
+/// 成员一 `URL` —— 原语自己那句形参声明 `lockFile: URL` 切出来的值（`callArguments` 对声明与调用
+/// 同形，声明的形参表也会被切成一次「调用」）。成员二 `environment.packsLockFile` —— 唯一合法的
+/// 转发。
+///
+/// ## 极性：不在集合里 ⇒ **红**。这是围栏，不是白名单
+///
+/// 第三个写者是被**预期**会出现的（`mutateManifestJSON` 的 doc 逐字写着「bind/clear/未来 fork 共用」）。
+/// 他若就地算一把锁，helper 的 `performFirstRunSetup` 在 `~/.claudio/packs.lock` 上取的锁与他那把
+/// 永不冲突 ⇒ 跨进程互斥断开 ⇒ 用户刚绑好的音效被 setup 的包发布循环整目录 `moveItem` 吞掉，而
+/// `mutateManifestJSON` 照旧返回 `.success`。
+///
+/// ⚠️ **不许靠往这里加成员来让一个新写者变绿。** 正确做法是让新写者也从注入的 environment 里取锁
+/// （于是实参逐字就是 `environment.packsLockFile`）。真要加第三个成员，加的人必须在这里写下为什么
+/// 那个写法与 `performFirstRunSetup` 取的是**同一个文件** —— 那次停顿就是这条腿的全部价值。
+private let allowedManifestLockArguments = ["URL", "environment.packsLockFile"]
+
+/// `source` 里 `mutateManifestJSON` 这个标识符出现了几次（**含**声明那一处）。
+///
+/// 第四条腿的围栏那一半靠它：这个数与 ``callArguments(of:in:)`` 切得出的调用数**必须相等**，差额就是
+/// 「标识符用到了、而扫描器认不出它怎么用的」那些处 —— 认不出 ⇒ 红。
+///
+/// ⚠️ 左词边界规则必须与 ``callArguments(of:in:)`` **逐字相同**（只排字母 / 数字 / 下划线，绝不排 `.`）。
+/// 两处不一致会凭空造出差额：一处把 `ClaudioGUICore.mutateManifestJSON(` 算进、另一处排掉，差额恒为
+/// 非零 ⇒ 这条腿在真仓库上永久假红，然后被下一个人删掉，而它守的洞原样回来。
+private func manifestPrimitiveIdentifierCount(in source: String) -> Int {
+    let needle = "mutateManifestJSON"
+    var count = 0
+    var cursor = source.startIndex
+    while let hit = source.range(of: needle, range: cursor..<source.endIndex) {
+        cursor = hit.upperBound
+        if hit.lowerBound > source.startIndex,
+            let previous = source[..<hit.lowerBound].last,
+            previous.isLetter || previous.isNumber || previous == "_"
+        {
+            continue  // `XmutateManifestJSON` —— 以它结尾的更长标识符，不是它
+        }
+        count += 1
+    }
+    return count
+}
 
 /// 形状表的**覆盖锁**（`/codex review ae494b1` 红队 confirmed 那条）。
 ///
@@ -2729,8 +2862,102 @@ func runSourceScannerSuites() {
                     """,
                     to: scanned.appendingPathComponent("LocalNestedFunc.swift"))
 
+                // ── L 组：**第四条腿（锁转发）的正/负控**。
+                //    四个正控各有独占靶子（实测：只有点名那条腿会对它开火），一个负控钉住「不许乱咬」。
+                //    全部放在**子目录**里：真仓库 `gui/Sources` 今天两个 target 目录都是平的，把它们摆在
+                //    顶层等于让「递归有没有在下钻」这根轴退化成恒真 —— 本仓库为「平目录下递归=非递归
+                //    全绿」翻过车，正向对照必须自造能分辨的输入。
+                //    每个都写成 `@MainActor public func`、不含 async/Task：让它们对前三条腿保持沉默，
+                //    这样下面那几条断言点名的才是第四条腿，不是被别的腿的 finding 顺手满足。
+                writeFixture(
+                    """
+                    @MainActor public func derivedLockWriter(d: URL) {
+                        mutateManifestJSON(at: d, lockFile: d.appendingPathComponent("packs.lock"))
+                    }
+                    """,
+                    to: scanned.appendingPathComponent("Lock/DerivedLockWriter.swift"))
+                writeFixture(
+                    """
+                    @MainActor public func opaqueLockWriter() {
+                        let writer = mutateManifestJSON
+                        _ = writer
+                    }
+                    """,
+                    to: scanned.appendingPathComponent("Lock/OpaqueLockWriter.swift"))
+                writeFixture(
+                    """
+                    @MainActor public func conditionalLockWriter(environment: E) {
+                    #if CLAUDIO_EXPERIMENTAL
+                        mutateManifestJSON(at: environment.dir, lockFile: environment.packsLockFile)
+                    #endif
+                    }
+                    """,
+                    to: scanned.appendingPathComponent("Lock/ConditionalLockWriter.swift"))
+                writeFixture(
+                    """
+                    @MainActor public func tailAnchorLockWriter(environment: E) {
+                        mutateManifestJSON(at: environment.dir, lockFile: environment.packsLockFile
+                            .deletingLastPathComponent().appendingPathComponent("packs.lock"))
+                    }
+                    """,
+                    to: scanned.appendingPathComponent("Lock/TailAnchorLockWriter.swift"))
+                writeFixture(
+                    """
+                    @MainActor public func cleanLockWriter(environment: E) {
+                        mutateManifestJSON(at: environment.dir, lockFile: environment.packsLockFile)
+                    }
+                    """,
+                    to: scanned.appendingPathComponent("Lock/CleanLockWriter.swift"))
+
                 let audit = auditManifestConcurrencyFence(
                     under: scanned, pathPrefix: vector.pathPrefix)
+
+                // ── L 组的四条正控 + 一条负控。
+                //
+                // ⚠️ 每一条都用 `hasPrefix("\(vector.pathPrefix)Lock/…")`，**不是** `contains(basename)`。
+                //    理由与上面 W1 那条逐字相同，但这里必须**逐条**都带上：红队对本刀开出的那条 fatal
+                //    正是这根轴 —— 给第四条腿加一个 `&& pathPrefix.isEmpty` 的寄生谓词，自证若走
+                //    `contains(basename)`（对前缀瞎）或只跑空前缀向量，四条正控照样全绿，而生产向量
+                //    （`"gui/Sources/"`）下整条腿是死的，生产调用点一个字符都不用改。本仓库在这条
+                //    suite 上实测过同构逃逸（见本文件那段「上一版整条 suite 只调 …(under: scanned)」）。
+                //    带上前缀之后，那个寄生谓词在生产那一圈当场红。
+                @MainActor
+                func expectLockLeg(
+                    _ fixture: String, _ needle: String, _ why: String
+                ) {
+                    expect(
+                        audit.findings.contains {
+                            $0.hasPrefix("\(vector.pathPrefix)Lock/\(fixture) ") && $0.contains(needle)
+                        },
+                        "【向量：\(vector.label)】第四条腿（锁转发）没有对 Lock/\(fixture) 开火，或诊断没有"
+                            + "以本向量的 pathPrefix（\"\(vector.pathPrefix)\"）打头。\(why) "
+                            + "两种可能：判定被削弱了，或者 `pathPrefix:` 没穿进这次调用 / 被一个"
+                            + "「自证向量下为真、生产向量下为假」的谓词寄生。本向量实得的 Lock/ 诊断："
+                            + "\(audit.findings.filter { $0.contains("Lock/") })")
+                }
+                expectLockLeg(
+                    "DerivedLockWriter.swift", "不在转发许可集合",
+                    "它就地从包目录算了一把锁（`d.appendingPathComponent(\"packs.lock\")`）—— 这正是"
+                        + "「新增一个没人测的第三调用点」那一类，行为测试结构上看不见它。")
+                expectLockLeg(
+                    "OpaqueLockWriter.swift", "认不出的用法",
+                    "它把原语**当值存起来**（`let writer = mutateManifestJSON`）—— 逐处判定对它零命中"
+                        + "（切不出调用 ⇒ 循环体一次都不进 ⇒ 恒真绿），只有「认不出 ⇒ 红」那一半看得见。")
+                expectLockLeg(
+                    "ConditionalLockWriter.swift", "条件编译",
+                    "它把调用点藏进 `#if` 的非活跃分支 —— 扫描器不建模条件编译，非活跃分支与活跃分支"
+                        + "逐字同形。注意它的锁实参**是合法的**，所以逐处判定对它沉默：这一条是 4-a 的"
+                        + "独占靶子。")
+                expectLockLeg(
+                    "TailAnchorLockWriter.swift", "不在转发许可集合",
+                    "它的实参**逐字以许可成员开头**、后面接着把它改掉 —— 判据若写成 `hasPrefix` /"
+                        + "`contains` 而不是**相等**，这一手当场隐身，而求值出来是另一把锁。")
+                expect(
+                    !audit.findings.contains { $0.contains("Lock/CleanLockWriter.swift") },
+                    "【向量：\(vector.label)】负控被咬了：Lock/CleanLockWriter.swift 是一个**干净**的"
+                        + "转发写者（`lockFile: environment.packsLockFile`，逐字就是许可成员），第四条腿"
+                        + "对它必须一声不吭。会假红的守卫会被下一个人删掉，洞原样回来 —— 这条负控就是"
+                        + "为那一种存在的。实得：\(audit.findings.filter { $0.contains("CleanLockWriter") })")
 
                 // ⑯ 自证。读的是**生产 audit 这一刻刚扫过的那份**磁盘字节 —— 不是写盘后立刻读的、更不是
                 //    源码字面量（见上面写盘处那段 TOCTOU 说明）。红队实测坐实的两条绕过都靠「自证读的字节 ≠
