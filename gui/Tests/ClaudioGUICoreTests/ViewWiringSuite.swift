@@ -540,11 +540,13 @@ func runViewWiringSuites() {
                 + "静音开关写的是 config.json，绝不能被 play 的 debounce 锁挡住。换成 playLockFile 之类，"
                 + "点静音又会吞一次提示音（这正是分锁 D9 要修的 bug）")
 
-        expect(
-            panel.contains("settingsLockFile: ClaudioPaths.settingsLockFile"),
-            "PanelView 构造 OnboardingActionEnvironment 时，settingsLockFile 必须是独立的 "
-                + "settings.lock —— takeOver 路径同时写 settings.json（installClaudioHooks），"
-                + "它绝不能与 config.json 的写者共用一把锁（那正是这次分锁要拆开的东西）")
+        // `OnboardingActionEnvironment(…)` 那三把锁（config / settings / packs）的转发断言**不在
+        // 这里** —— 它们搬进了下面那条按调用点绑的 suite。这里曾经有一条
+        // `panel.contains("settingsLockFile: ClaudioPaths.settingsLockFile")`，删掉不是放弃覆盖：
+        // 那是一条读 `codeOnly`（**保留**字符串内容）的全文件 `contains`，`/codex review 48b6730`
+        // 与 `37745f2` 两轮各证过它可以被一句见证值（字符串字面量 / 元组标签）喂饱，而真实实参
+        // 换成别的。新那条严格更强：调用点两头锚死 + 实参**相等**判定 + 读清空字符串的那一路，
+        // 三把锁一起。这里没有它的独占靶子（构造点认不出来时，那边的 `count == 1` 先红）。
 
         // 负向兜底：PanelView 在**任何位置**都不该碰 play 的去抖锁。它一个字节都不写 play.state，
         // 也不参与去抖。因为 `codeOnly` 已剥掉注释，谈论 playLockFile 的**散文**不会把它假红
@@ -567,7 +569,7 @@ func runViewWiringSuites() {
                 + ".appendingPathComponent(\"play.lock\")` 拿到的是同一把锁，却一次都不提那个标识符")
     }
 
-    suite("PanelView 必须把**包锁**转发给 OnboardingActionEnvironment（第四把手，此前无人看守）") {
+    suite("PanelView 构造 OnboardingActionEnvironment 的**三把锁**逐个按调用点绑（不是全文件 contains）") {
         // ## 这一手为什么此前是全链上唯一没有守卫的
         //
         // 包锁从 GUI 灌到 `Setup.swift` 要过四手。前三手各有守卫（`OnboardingActions.swift` 的
@@ -594,33 +596,114 @@ func runViewWiringSuites() {
         //
         // ## 为什么读 `codeWithoutStrings` 而不是 `codeOnly`
         //
-        // 上面那两条兄弟绊线（`configLockFile: lockFile` / `settingsLockFile: ClaudioPaths.…`）读的是
-        // `codeOnly` —— 剥注释但**保留字符串内容**。`/codex review 48b6730,9f347fc` 的 P1 逐字证过
+        // `codeOnly` 剥注释但**保留字符串内容**。`/codex review 48b6730,9f347fc` 的 P1 逐字证过
         // 那是可伪造的：往文件里加一句 `let witness = "packsLockFile: audioEnvironment.packsLockFile"`，
-        // 正向断言被这句字面量喂饱，而真实实参可以换成别的。这条新绊线不重复那个错误：`codeWithoutStrings`
-        // 把字符串**内容**清空，字面量再也喂不动它。（两条兄弟绊线的同一问题另记 —— 本条不声称修了它们。）
+        // 正向断言被这句字面量喂饱，而真实实参可以换成别的。`codeWithoutStrings` 把字符串**内容**
+        // 清空，字面量再也喂不动它。
+        //
+        // ## 而清空字符串**不够** —— 见证值可以是**代码**（`/codex review 37745f2` 的 P1）
+        //
+        // 上一版这条断的是 `panel.contains("packsLockFile: audioEnvironment.packsLockFile")`，并且
+        // 在注释里管它叫「**逐字全等的整行实参**，不是 `contains("packsLockFile:")` 那种前缀式」。
+        // 那句话是假的：它就是 `contains`，只是 needle 更长。Codex 给的见证值一个字符串都没用 ——
+        //
+        // ```swift
+        // let witness = (packsLockFile: audioEnvironment.packsLockFile)   // 元组标签，纯代码
+        // …
+        // packsLockFile: fallback                                        // 真实实参，fallback = ClaudioPaths.packsLockFile
+        // ```
+        //
+        // —— 元组标签是**代码位置**，`codeWithoutStrings` 一个字都不会碰它；正向断言被它喂饱，
+        // 负向断言（`!contains("packsLockFile: ClaudioPaths.")`）碰不到值级假名 `fallback`。
+        // 上一刀只关掉了**字符串字面量**那一个见证子类，却把措辞写成整类已封 —— 这个仓库第 N 次
+        // 栽在「措辞比覆盖范围大」上，而且又一次栽在自称修好它的那一刀里。
+        //
+        // 这一版换掉的是**判据的种类**，不是 needle 的长度：先把调用点两头锚死
+        // （``callArguments(of:in:)``：头是类型名、尾是配平右括号），再对切出来的实参做**相等**
+        // 判定。见证值无论写成字符串还是元组还是别的什么，都不在那对括号里，喂不动它。
         guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "读不到 PanelView.swift —— 这条 suite 唯一的价值就是读它")
             return
         }
-        // **逐字全等的整行实参**，不是 `contains("packsLockFile:")` 那种前缀式。
-        // 前缀式对「以它开头、后面接着把它改掉」零分辨力，而那正是 `argumentValue` 的 doc 里
-        // 记着的判例（`environment.packsLockFile.deletingLastPathComponent()…`）。
+
+        // ## 围栏那一半：认不出的构造形状 ⇒ 当场红
+        //
+        // `callArguments` 是白名单，而白名单永远不完整。少认一处 = 那一处静默退出审查 = 真实构造
+        // 可以随便写而没有人会喊。`unmodeledConstructionShapes` 把「我认不出哪些」从 doc comment
+        // 里搬进返回值 —— 被写进注释的洞不会因为被写进注释而变成有人看守它。
+        let unmodeledShapes = unmodeledConstructionShapes(
+            of: "OnboardingActionEnvironment", in: panel)
         expect(
-            panel.contains("packsLockFile: audioEnvironment.packsLockFile"),
-            "PanelView 构造 OnboardingActionEnvironment 时必须把 `packsLockFile` 转发成 "
-                + "`audioEnvironment.packsLockFile` —— manifest.json 有两个写者（接管发布内置包、"
-                + "`ManifestBinding` 绑定/解绑），`userPacksDirectory` 那一行已经把它们指向同一个包"
-                + "目录，这一行是把它们的**互斥**焊在同一个源上的唯一结构链接。漏掉它 ⇒ 默认实参静默"
-                + "生效、编译器一声不吭；写成 `ClaudioPaths.packsLockFile` ⇒ 今天碰巧仍相等，但那是"
-                + "「两个独立默认值恰好收敛」而不是「同一个源」，改动 audioEnvironment 那一侧（它是 "
-                + "`var`）两个写者当场分家，而 manifest.json 的读-改-写照旧并发")
+            unmodeledShapes.isEmpty,
+            "`PanelView.swift` 里出现了 `callArguments` 认不出的构造形状：\(unmodeledShapes) —— "
+                + "下面那条「每一处构造点都必须转发对」的循环会**漏掉**它，而漏掉不会有任何人喊。"
+                + "要么把这个构造挪走，要么先把扫描器教会这个形状再放行")
+        // ## 精确计数，不是 `!isEmpty`
+        //
+        // `!isEmpty` 只要求「≥1 处且那一处转发对」，于是一个写得完全合规的**死代码诱饵**就能替
+        // 真实构造背书（`/codex review 37745f2` P1 的第一步正是这个）。`PanelView` 里实测只有
+        // **一处** `OnboardingActionEnvironment(…)`，就断死这个数：多出来一处 ⇒ 红 ⇒ 有人来看
+        // 那是诱饵还是一次真实的重构。helper 那边两条锁绊线（`count == 2` / `count == 1`）
+        // 早就是这么写的，这里之前是全链上唯一还在用 `!isEmpty` 的。
+        let environmentCalls = callArguments(of: "OnboardingActionEnvironment", in: panel)
+        expect(
+            environmentCalls.count == 1,
+            "`PanelView.swift` 里必须正好有 1 处 `OnboardingActionEnvironment(…)` 构造点，实得 "
+                + "\(environmentCalls.count) 处 —— 0 处 = 接管路径不再经由它（下面那三条转发断言就是"
+                + "在守一段不存在的代码），>1 处 = 多出来的那个可能是喂饱断言的死代码诱饵，也可能是"
+                + "一次真实重构，两种都必须有人看一眼再放行")
+
+        // 三把锁一个循环断完。它们是**同一个构造点**上的三个实参，分开写成三条全文件 `contains`
+        // 是上一版的形状 —— 而那正是见证值攻击的入口（needle 在文件里任何位置出现都算数）。
+        //
+        // ⚠️ 这三条**互不代偿**，一条都不能省：三个实参各自绑不同的锁，任意一条传错都是一条真实
+        // 的锁串线，而另外两条照样绿。
+        let expectedLocks: [(label: String, value: String, why: String)] = [
+            (
+                "configLockFile", "lockFile",
+                "写的是 config.json，必须守着 PanelView 自己那把 config.lock（本 init 的 `lockFile` "
+                    + "参数）。传成别的 ⇒ 接管写 config.json 时与并发的 `claudio use`（守 config.lock）"
+                    + "互斥当场消失，两个读-改-写交错、丢更新"
+            ),
+            (
+                "settingsLockFile", "ClaudioPaths.settingsLockFile",
+                "takeOver 路径同时写 settings.json（installClaudioHooks），它必须守着**独立**的 "
+                    + "settings.lock —— 与 config.json 的写者共用一把锁，正是这次分锁要拆开的东西"
+            ),
+            (
+                "packsLockFile", "audioEnvironment.packsLockFile",
+                "manifest.json 有两个写者（接管发布内置包、`ManifestBinding` 绑定/解绑），"
+                    + "`userPacksDirectory` 那一行已经把它们指向同一个包目录，这一行是把它们的**互斥**"
+                    + "焊在同一个源上的唯一结构链接。漏掉它 ⇒ 默认实参静默生效、编译器一声不吭；"
+                    + "写成 `ClaudioPaths.packsLockFile` ⇒ 今天碰巧仍相等，但那是「两个独立默认值恰好"
+                    + "收敛」而不是「同一个源」，改动 audioEnvironment 那一侧（它是 `var`）两个写者当场分家"
+            ),
+        ]
+        for (ordinal, arguments) in environmentCalls.enumerated() {
+            for expected in expectedLocks {
+                let forwarded = argumentValue(expected.label, in: arguments)
+                expect(
+                    forwarded == expected.value,
+                    "第 \(ordinal + 1) 处 `OnboardingActionEnvironment(…)` 的 `\(expected.label):` 实参"
+                        + "必须**正好是** `\(expected.value)`，实际是 `\(forwarded ?? "<没有这个实参>")` —— "
+                        + expected.why
+                        + "。**相等**，不是 `contains`：`\(expected.value).deletingLastPathComponent()"
+                        + ".appendingPathComponent(…)` 逐字包含前者，拿到的却是别的路径")
+            }
+        }
+
         // 负向兜底：不许绕过 audioEnvironment 直接取真实路径。
         //
+        // ⚠️ 如实标注它现在还剩多少分辨力：上面那条相等判定**已经覆盖了这个构造点上的这一种**
+        // （实参写成 `ClaudioPaths.packsLockFile` ⇒ 相等判定当场红）。它没有被完全吞掉 —— 只有它
+        // 逮得到的是：本文件里**另起一个非 `OnboardingActionEnvironment(` 的构造点**并写死真实路径
+        // （上面那个循环根本不看它）。所以留着；但别把它当「第二道独立防线」宣传：在最要害的那个
+        // 调用点上，它与上面那条是**重叠**的。
+        //
         // ⚠️ 如实标注极性代价：读 `codeWithoutStrings` 对**负向**断言是 fail-**open**（被清空的字符串
-        // 里若正好有 needle 会静默变绿）。仍然接受，理由与本文件那条包锁负向兜底逐字相同：needle
-        // `packsLockFile: ClaudioPaths.` 是一段**代码形状**而不是字符串内容，且同一次读取要喂上面那条
-        // 承重的正向断言。代价写在这里，不藏。
+        // 里若正好有 needle 会静默变绿）。仍然接受，因为 needle `packsLockFile: ClaudioPaths.` 是一段
+        // **代码形状**而不是字符串内容，且同一次读取要喂上面那条承重的相等循环 —— 一个绑定喂两类
+        // 极性相反的断言时，承重的那一类说了算。代价写在这里，不藏。
         //
         // ⚠️ 它也**挡不住值级假名**（`let p = ClaudioPaths.packsLockFile` 再传 `packsLockFile: p`）——
         // 与本文件 play 锁那条负向兜底同一个已知天花板，那里靠加禁字面量 `play.lock` 补了一半。
@@ -944,76 +1027,91 @@ func runViewWiringSuites() {
         //    看得见**真实**构造点，而上一版只认裸 `SetupEnvironment(` 这一种形式。实测：把真实构造
         //    改写成 `let x: SetupEnvironment = .init(…)`（连同另外四种形式，全部编译得过），扫描器
         //    识别出 **0** 处；再加一个 `DecoySetupEnvironment(…)` 死代码诱饵（逐字包含 needle、写得
-        //    完全合规）喂饱 `!isEmpty`，**整套 gui 测试全绿**，而真实构造已经彻底退出审查。现在由
-        //    ``callArguments(of:in:)`` 的**左词边界**（杀诱饵）+ 多认一个 `.init(` needle 收掉两路，
-        //    并由上面那条 `!contains("#if")` 收掉条件编译那一路。**仍未关掉的形式如实记在
-        //    ``callArguments`` 自己的 doc 里**（空格形式、`typealias` 别名）——「白名单永远不完整」，
-        //    兜住这一整类的是行为测试，不是本条。
+        //    完全合规）喂饱 `!isEmpty`，**整套 gui 测试全绿**，而真实构造已经彻底退出审查。
+        //    现在三头一起堵：``callArguments(of:in:)`` 的**左词边界**杀诱饵替身那一路、它多认的
+        //    `.init(` 与**空格**形式收掉两种写法、上面那条 `count == 1` 让诱饵本身当场红。
+        //    ⚠️ 而「白名单永远不完整」这句话仍然成立，所以**别再把剩下的写进注释了事**：
+        //    上一版正是那么做的（把空格形式与 `typealias` 别名如实记进 `callArguments` 的 doc，
+        //    再声称「兜住这一整类的是行为测试」），而 `/codex review 37745f2` 的 P1 证明那句话是
+        //    假的 —— 诱饵 + 别名 + 从注入值派生的实参，文本与行为**双双全绿**。认不出的形状现在
+        //    由 ``unmodeledConstructionShapes(of:in:)`` 记账、由上面那条围栏断言变成红。
         //  · 实参做**相等**判定 ⇒ `environment.packsLockFile.deletingLastPathComponent()…` 这种
         //    「以 needle 开头、后面接着把它改掉」的写法当场红。
         //
-        // 刻意**不**写 `calls.count == 1`：那种「不许变多」的锁对 fail-open 方向零贡献（多一个构造点
-        // 若也转发对了，本就没问题），而它开火时印的诊断对「合法新增了一处构造点」的人是**假的**，
-        // 最省力的修法是删掉整条 expect —— 承重的另一半跟着陪葬。改成「**每一处**都必须转发对」+
-        // 一条 `!calls.isEmpty` 兜底：既杀死代码伪造，又不会因为合法新增而误报。
+        // ## ⚠️ 上一版这里刻意**不**写 `calls.count == 1`，那个论证已被证伪（`/codex review 37745f2`）
         //
-        // ## 归因表（六个变异体 × 三条断言，干净树基线做减法，按**断言原文**归因，不看退出码）
+        // 它当时写的是：「那种『不许变多』的锁对 fail-open 方向零贡献（多一个构造点若也转发对了，
+        // 本就没问题）」。**前半句是错的**，而且错在关键处：多出来的那个构造点如果是**死代码诱饵**，
+        // 它「转发对了」恰恰是伪装的一部分 —— 诱饵满足 `!calls.isEmpty` 与那条相等循环，真实构造
+        // 同时改走扫描器认不出的形式（`typealias` 别名）隐身而去。这不是「本就没问题」，这正是
+        // Codex 那条 P1 的第一步。
         //
-        // 只看「红了」是假背书 —— 非零退出可能来自任何一条断言。这张表证明的是：这三条**没有一条
+        // 所以现在写 `count == 1`。当时怕的「合法新增一处构造点时诊断是假的」仍然成立，处理办法是
+        // 把它写进失败消息本身（「>1 处 = 可能是诱饵，也可能是一次真实重构，两种都必须有人看一眼
+        // 再放行」）—— 让读消息的人知道该怎么办，而不是为了不误报就把这一维覆盖整个放掉。
+        //
+        // ## 归因表（七个变异体 × 四条断言，干净树基线做减法，按**断言原文**归因，不看退出码）
+        //
+        // 只看「红了」是假背书 —— 非零退出可能来自任何一条断言。这张表证明的是：这四条**没有一条
         // 是冗余的**，每条都有只有它逮得到的变异体。
         //
-        // | 变异体                                   | 本条(实参相等) | 持锁行为 | 下面那条负向 |
-        // |------------------------------------------|:--------------:|:--------:|:------------:|
-        // | R1 `init` 存储赋值换成 `ClaudioPaths.…`  |       —        | **独占** |      —       |
-        // | R2 实参尾部未锚（`.deleting…append…`）   |       ✓        |    ✓     |      —       |
-        // | R3 死代码供养 needle + 真实参换别名      |       ✓        |    ✓     |      —       |
-        // | R4 实参直接写死 `ClaudioPaths.…`         |       ✓        |    ✓     |      ✓       |
-        // | R5 实参从**兄弟锁**推导出同一个路径      |       ✓        |    ✓     |      —       |
-        // | R6 另起一个**非** `SetupEnvironment` 构造点写死 |  —       |    —     |   **独占**   |
+        // | 变异体                                          | 围栏 | 计数 | 实参相等 | 持锁行为 | 负向 |
+        // |-------------------------------------------------|:----:|:----:|:--------:|:--------:|:----:|
+        // | R1 `init` 存储赋值换成 `ClaudioPaths.…`         |  —   |  —   |    —     | **独占** |  —   |
+        // | R2 实参尾部未锚（`.deleting…append…`）          |  —   |  —   |    ✓     |    ✓     |  —   |
+        // | R3 死代码诱饵供养断言 + 真实构造走 `typealias`  |**独占**|  ✓  |    —     |    ✓     |  —   |
+        // | R4 实参直接写死 `ClaudioPaths.…`                |  —   |  —   |    ✓     |    ✓     |  ✓   |
+        // | R5 实参从别处**推导**出同一个路径               |  —   |  —   |    ✓     |    ✓     |  —   |
+        // | R6 另起一个**非** `SetupEnvironment` 构造点写死 |  —   |  —   |    —     |    —     |**独占**|
+        // | R7 只加死代码诱饵（真实构造不动）               |  —   |**独占**|   ✓    |    ✓     |  —   |
         //
-        // ⚠️ **R5 那一行曾经写的是「本条独占 / 行为 —」，现在不是了**，而变的不是断言，是 fixture。
-        // 旧 fixture 把包锁放在 `claudioRoot/packs.lock`，与 config / settings 两把锁同父同名规则，
-        // 于是 `environment.configLockFile.deletingLastPathComponent().appendingPathComponent("packs.lock")`
-        // 求值出来**恰好等于**注入的那把锁 ⇒ 持锁行为测试拿到的锁是对的、全绿，只有本条相等判定
-        // 看得见。`FixtureTargets` 现在把包锁挪到了**另一个父目录 + 另一个叶名**（`injected-locks/
-        // gui-packs-lock`），任何兄弟派生都算不出它 ⇒ 行为测试也红了。实测（干净树做减法）：
-        // 新 fixture 下 R5 让持锁那 4 条断言 + 本条一起红；旧 fixture 下只有本条红，持锁 4 条全绿。
+        // ⚠️ **R3 那一行是这一刀新加的，而它此前是全表唯一没有任何一条断言看得见的变异体**：诱饵喂饱
+        // 计数与相等循环，真实构造走别名隐身，实参再从注入值派生出来 ⇒ 文本与行为**双双全绿**。
+        // 现在围栏（`unmodeledConstructionShapes`）独占它 —— `typealias` 一出现就红，不管它后面写什么。
+        //
+        // ⚠️ **R5 那一行曾经写的是「本条独占 / 行为 —」，两次都不是了**，而两次变的都不是断言，是 fixture。
+        // 最早那版把包锁放在 `claudioRoot/packs.lock`（与 config / settings 同父同名规则），于是
+        // `environment.configLockFile.deletingLastPathComponent().appendingPathComponent("packs.lock")`
+        // 求值出来恰好等于注入值 ⇒ 行为测试全绿。上一版挪到固定的 `injected-locks/gui-packs-lock`，
+        // 并声称「任何兄弟派生都算不出它」—— Codex 证伪：向上**两级**再拼死那两个名字即可。现在
+        // fixture 的包锁带一段运行时 `UUID`，**不存在**能算出它的路径表达式 ⇒ R5 的任何写法都让行为
+        // 测试当场红。
         //
         // 这条 fixture 性质是**承重**的，它自己由「FixtureTargets 自证」那条 suite 钉着 —— 少了它，
-        // 上面这段推理就寄生在一个没人断言的常量上。
+        // 上面这段推理就寄生在一段没人断言的构造上。
         //
-        // R1 反过来：调用点一个字符没动 ⇒ 本条全绿，只有行为测试看得见。而 R1 的**派生变体**
-        // （`init` 存储赋值改成从兄弟锁派生）在旧 fixture 下**文本与行为双双全绿** —— 实测确认，
-        // 那是这次 fixture 改动的独占靶子。
-        // **文本绊线与行为测试互不代偿，两条都得有** —— 但它们的分工比上一版写的更偏向行为：
-        // 本条现在真正独占的，是「测试根本执行不到的那些构造点」，不再是 R5。
-        // 扫描器**不建模 `#` 开头的条件编译**（见 ``StrippedSwiftSource/unmodeledConstructs``：它记的是
-        // raw string 与结构性失步，`#if` 不在其中）。于是一个**非活跃**分支里的构造点，对它与对活跃
-        // 分支的完全同形：
+        // R1 反过来：调用点一个字符没动 ⇒ 文本三条全绿，只有行为测试看得见。
+        // **文本绊线与行为测试互不代偿，两类都得有** —— 分工：文本独占「测试根本执行不到的那些构造点」
+        // 与「诱饵/隐身」这类结构伪造，行为独占「实参求值出来的**值**」。
+        // ## 围栏那一半：`callArguments` 认不出的构造形状 ⇒ 当场红
         //
-        // ```swift
-        // #if false
-        // _ = SetupEnvironment(…, packsLockFile: environment.packsLockFile)   // 永不编译的诱饵
-        // #endif
-        // ```
+        // 上一版这里只钉了 `#if` 一种（扫描器不建模条件编译，非活跃分支里的构造点与活跃的同形，
+        // 一个 `#if false` 里的诱饵就能替真实构造喂饱下面两条断言）。`/codex review 37745f2` 的
+        // P1 证明那还不够：`typealias SE = SetupEnvironment; SE(…)` 与上下文推断的 `.init(` 是
+        // 另外两条同样宽的隐身路，而它们当时只被写在 `callArguments` 的 doc comment 里 ——
+        // **被写进注释的洞不会因为被写进注释而变成有人看守它**。
         //
-        // —— 喂饱下面的 `!isEmpty` 与相等循环，而真实构造可以走扫描器认不出的形式隐身（左词边界
-        // 杀的是 `DecoySetupEnvironment(` 那一路，杀不掉这一路：这里的 `SetupEnvironment(` 是**裸**的）。
-        //
-        // 本文件今天零 `#if` 命中（实测），所以这条现在就绿。它不是装饰：一旦有人在这个文件里引入
-        // 条件编译，上面那整套「按调用点绑实参」的推理就不再成立，必须当场停下来重新想，而不是让
-        // 诱饵悄悄替真实构造背书。
+        // 三类现在由 ``unmodeledConstructionShapes(of:in:)`` 统一记账，一条断言收口。合并不降低
+        // 覆盖（同样的输入 ⇒ 同样红），但把「新增一种认不出的形状」从「三处分散的 grep 各改一遍」
+        // 变成「改一个函数」。本文件今天三类各零命中（实测），所以它现在就绿 —— 它不是装饰：
+        // 一旦有人引入其中任何一种，下面那整套「按调用点绑实参」的推理就不再成立，必须当场停下来
+        // 重新想，而不是让诱饵悄悄替真实构造背书。
+        let unmodeledShapes = unmodeledConstructionShapes(of: "SetupEnvironment", in: actions)
         expect(
-            !actions.contains("#if"),
-            "`OnboardingActions.swift` 里出现了条件编译（`#if`）—— 本文件的扫描器不建模它，"
-                + "非活跃分支里的 `SetupEnvironment(` 会和真的一样被数进来、替真实构造喂饱下面两条"
-                + "断言。要么别在这个文件里用条件编译，要么先把扫描器教会 `#if` 再放行")
+            unmodeledShapes.isEmpty,
+            "`OnboardingActions.swift` 里出现了 `callArguments` 认不出的构造形状：\(unmodeledShapes) "
+                + "—— 下面那条「每一处构造点都必须转发对」的循环会**漏掉**它（或者被一个非活跃分支里的"
+                + "诱饵喂饱），而漏掉不会有任何人喊。要么把这个构造挪走，要么先把扫描器教会它再放行")
+
+        // 精确计数，不是 `!isEmpty`：后者只要求「≥1 处且那一处转发对」，一个写得完全合规的死代码
+        // 诱饵就能替真实构造背书（`/codex review 37745f2` P1 的第一步）。本文件实测正好 1 处。
         let setupEnvironmentCalls = callArguments(of: "SetupEnvironment", in: actions)
         expect(
-            !setupEnvironmentCalls.isEmpty,
-            "`OnboardingActions.swift` 里一处 `SetupEnvironment(` 构造点都找不到 —— 要么接管路径不再"
-                + "经由它（那下面这条转发断言就是在守一段不存在的代码，整条 suite 失去意义），要么"
-                + "`callArguments` 的切法读串了。认不出 ⇒ 红，不许静默放行")
+            setupEnvironmentCalls.count == 1,
+            "`OnboardingActions.swift` 里必须正好有 1 处 `SetupEnvironment(…)` 构造点，实得 "
+                + "\(setupEnvironmentCalls.count) 处 —— 0 处 = 接管路径不再经由它（那下面这条转发断言"
+                + "就是在守一段不存在的代码，整条 suite 失去意义）或 `callArguments` 的切法读串了；"
+                + ">1 处 = 多出来的那个可能是喂饱断言的死代码诱饵。认不出 / 数不对 ⇒ 红，不许静默放行")
         for (ordinal, arguments) in setupEnvironmentCalls.enumerated() {
             let forwarded = argumentValue("packsLockFile", in: arguments)
             expect(

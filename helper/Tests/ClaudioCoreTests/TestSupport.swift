@@ -410,28 +410,33 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
 ///
 /// `!calls.isEmpty` 那条兜底本来是把它做成**围栏**（认不出⇒红）的那一半，但它只要求「≥1 处」，
 /// 于是一个死代码诱饵（`DecoySetupEnvironment(…)`，写得完全合规）就能把它喂饱，真实构造走上面
-/// 任意一种形式隐身而去。左词边界杀死诱饵那一路，`.init` 那一路靠多认一种 needle 收掉。
+/// 任意一种形式隐身而去。左词边界杀死诱饵**替身**那一路；诱饵本身则由调用方的**精确计数**
+/// （`count == N`，不再是 `!isEmpty`）当场逮住。
 ///
-/// **剩下的没关掉的，如实记在这里**：`SetupEnvironment (` 的空格形式、`typealias` 别名形式，
-/// 本函数**仍然认不出**。它们是「白名单永远不完整」的活证据（``StrippedSwiftSource/unmodeledConstructs``
-/// 的 doc 为字符串扫描器写过同一句话）。真正兜住这一整类的不是本函数，是**行为测试** ——
-/// 持住被注入的那把锁跑一次真实路径，文本怎么写都骗不过求值出来的**值**。
+/// ## 空格形式已经认得，剩下的两类交给围栏（`/codex review 37745f2` 的 P1）
+///
+/// 上一版把「`SetupEnvironment (` 的空格形式、`typealias` 别名形式**仍然认不出**」如实写进了这段
+/// doc，然后声称「真正兜住这一整类的是**行为测试**」。那句话是**假的**，Codex 逐字证了：一个
+/// 死代码诱饵喂饱 `!calls.isEmpty`，真实构造改走 `typealias SE = SetupEnvironment; SE(…)` 之后
+/// **文本层零覆盖**；再让它的实参从注入值**派生**出来（当时的 fixture 算得出），**行为层也全绿**。
+/// 两条腿同时被拆掉 —— 一条被 doc 记录在案的洞，不会因为被记录而变成有人看守。
+///
+/// 所以这一刀两头都动：
+///
+/// * 空格形式（`head (…)`、`head .init (…)`）**直接认**（下面跳空白那一段）——单调放宽，fail-closed；
+/// * `typealias` / 上下文推断的 `.init(` / `#if` 这些本函数**结构上**认不出的，交给
+///   ``unmodeledConstructionShapes(of:in:)`` 记账，由调用方断言它为空 ——「认不出 ⇒ 红」。
+///
+/// 白名单永远不完整，所以**别再靠扩充白名单求完整**：完整性由那个围栏兜，本函数只管认得越多越好。
 ///
 /// ⚠️ 必须喂 ``StrippedSwiftSource/codeWithoutStringLiterals``，不能喂 ``StrippedSwiftSource/code``：
 /// 后者保留字符串**内容**，一句 `"pack (1.json"` 里的 `(` 会被计进深度、括号从此永不配平 ——
 /// 那个洞的完整代价记在 `codeWithoutStringLiterals` 自己的 doc 里。
 func callArguments(of head: String, in source: String) -> [String] {
-    // 认得出的构造形式**只许单调放宽，绝不许收窄** —— 见上面 doc 里那段极性说明。
-    // 两种都认：裸 `head(` 与显式 `head.init(`（后者 `head(` 匹配不到，因为 `head` 后面是 `.`）。
-    let needles = [head + "(", head + ".init("]
     var calls: [String] = []
     var cursor = source.startIndex
-    while cursor < source.endIndex {
-        guard
-            let hit = needles
-                .compactMap({ source.range(of: $0, range: cursor..<source.endIndex) })
-                .min(by: { $0.lowerBound < $1.lowerBound })
-        else { break }
+    while let hit = source.range(of: head, range: cursor..<source.endIndex) {
+        cursor = hit.upperBound
         // **左词边界**：命中前一个字符若是标识符字符，这不是对 `head` 的调用，而是某个
         // **以它结尾**的更长标识符 —— `DecoySetupEnvironment(` 逐字包含 `SetupEnvironment(`。
         // 那正是喂饱 `!calls.isEmpty` 的死代码诱饵（真实构造改走 `.init` 之类扫描器认不出的
@@ -444,11 +449,29 @@ func callArguments(of head: String, in source: String) -> [String] {
             let previous = source[..<hit.lowerBound].last,
             previous.isLetter || previous.isNumber || previous == "_"
         {
-            cursor = hit.upperBound
             continue
         }
+        // 右词边界 + 空格形式：`head` 与 `(` 之间允许空格 / tab，中间允许一个 `.init`。
+        // 认得的四种：`head(`、`head (`、`head.init(`、`head .init (`。
+        //
+        // ⚠️ 只跳**同行**空白，不跳换行：Swift 里 `Foo\n(x)` 不是一次调用（那是两条语句），
+        // 把换行也跳过去会开始把「一个裸类型名」和「下一行一个无关的括号表达式」缝成一处假调用点
+        // —— 那是**多认**，方向上安全，但失败消息会开始指着不存在的调用点，没人读得懂。
+        var probe = hit.upperBound
+        while probe < source.endIndex, source[probe] == " " || source[probe] == "\t" {
+            probe = source.index(after: probe)
+        }
+        if source[probe...].hasPrefix(".init") {
+            probe = source.index(probe, offsetBy: 5)
+            while probe < source.endIndex, source[probe] == " " || source[probe] == "\t" {
+                probe = source.index(after: probe)
+            }
+        }
+        // 后面不是 `(` ⇒ 这不是调用（`SetupEnvironmentFoo`、一句提到类型名的类型标注、
+        // `SetupEnvironment.Kind` …）。跳过，不记。
+        guard probe < source.endIndex, source[probe] == "(" else { continue }
         var depth = 1
-        var index = hit.upperBound
+        var index = source.index(after: probe)
         while index < source.endIndex, depth > 0 {
             switch source[index] {
             case "(": depth += 1
@@ -463,10 +486,87 @@ func callArguments(of head: String, in source: String) -> [String] {
             calls.append("")
             break
         }
-        calls.append(String(source[hit.upperBound..<index]))
+        // 实参文本从**左括号之后**起算，不是从 `head` 之后 —— 空格形式下两者不再重合
+        // （`head (a: 1)` 若从 `hit.upperBound` 起算会把 ` (` 也算进实参，`argumentValue`
+        // 的第一个 piece 从此永远带一个前导 `(`、`hasPrefix(label + ":")` 永假 ⇒ 静默返回
+        // `nil` ⇒ 下游那条相等断言拿 `<没有这个实参>` 当场红。方向上安全，但红得莫名其妙。）
+        calls.append(String(source[source.index(after: probe)..<index]))
         cursor = source.index(after: index)
     }
     return calls
+}
+
+/// `source` 里**可能构造 `type`、而 ``callArguments(of:in:)`` 结构上认不出**的那些构造形状。
+///
+/// 非空 ⇒ 调用方必须**当场红**。这是把 `callArguments` 从**白名单**（只报它认得出的）补成
+/// **围栏**（认不出 ⇒ 红）的那另一半。
+///
+/// ## 为什么必须有这个函数（`/codex review 37745f2` 的 P1）
+///
+/// `callArguments` 是一份白名单，而白名单永远不完整。上一版的处理方式是把「我认不出哪些」
+/// **如实写进 doc comment**，再声称「真正兜住这一整类的是行为测试」。Codex 逐字拆了它：
+///
+/// ```swift
+/// _ = SetupEnvironment(…, packsLockFile: environment.packsLockFile)  // 死代码诱饵，喂饱 !isEmpty
+/// typealias SE = SetupEnvironment
+/// let real = SE(…, packsLockFile: <从注入值派生出来的表达式>)         // 真实构造，文本层隐身
+/// ```
+///
+/// 诱饵满足「≥1 处且那一处转发对」，真实构造走别名隐身；实参再从 fixture 的注入值**派生**
+/// （当时的 fixture 算得出，见 `FixtureTargets` 那段），于是**行为测试也绿**。文本与行为两条腿
+/// 同时被拆掉 —— 一个洞不会因为被写进注释而变成有人看守它。
+///
+/// ## 极性：宁可多报，绝不少报
+///
+/// 下游是「非空 ⇒ 红」。多报一条 = 有人喊、去看一眼、要么挪走那个构造要么教会扫描器，fail-**closed**；
+/// 少报一条 = 那个形状静默退出审查，fail-**open**，没有人会喊。所以这里**不**去判断
+/// `typealias Foo = Int` 与 `type` 无关：一律记账。三个被扫文件今天 `typealias` / `#if` /
+/// 上下文 `.init(` 各 **0** 命中（实测），代价是零，而它把「未来某人引入一种新形状」这件事
+/// 从「静默失效」变成「当场红」。
+///
+/// ## 认得出 vs 记一笔，边界在哪
+///
+/// * `Foo.init(` —— 左边是**显式类型名**：要么 `Foo == type`（`callArguments` 认得），要么它构造的
+///   压根不是 `type`。两种都无须记账。（残余：`Foo` 是 `type` 的别名 —— 那由 `typealias` 那条收掉。）
+/// * `= .init(` / `: .init(` / `(.init(` —— **上下文推断**，构造的是什么由类型检查器决定，本模块
+///   无从判定，可能正是 `type` ⇒ 记一笔。
+/// * `Self.init(` / `super.init(` 左边是标识符 ⇒ 不记。它们构造的是**所在类型自身**，而这个函数
+///   扫的是**调用方**文件，不是 `type` 的定义处。如实记在这里，不声称封死。
+///
+/// ⚠️ 与 `callArguments` 一样喂 ``StrippedSwiftSource/codeWithoutStringLiterals``：注释里谈论
+/// `typealias` 的**散文**不该让它红（那正是本仓库反复栽的「假红的守卫会被下一个人删掉」）。
+func unmodeledConstructionShapes(of type: String, in source: String) -> [String] {
+    var shapes: [String] = []
+    for (offset, line) in source.components(separatedBy: "\n").enumerated() {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        let location = "第 \(offset + 1) 行：\(trimmed)"
+
+        if trimmed.contains("typealias") {
+            shapes.append(
+                "`typealias` —— 别名之后的构造（`SE(…)`）`callArguments(of: \"\(type)\", …)` 永远"
+                    + "认不出，那一处会静默退出审查。\(location)")
+        }
+        if trimmed.contains("#if") {
+            shapes.append(
+                "条件编译 —— 扫描器不建模 `#if`，**非活跃**分支里的构造点与活跃的完全同形，会替"
+                    + "真实构造喂饱「≥1 处 / 正好 N 处」那类断言。\(location)")
+        }
+
+        var cursor = line.startIndex
+        while let hit = line.range(of: ".init(", range: cursor..<line.endIndex) {
+            cursor = hit.upperBound
+            if hit.lowerBound > line.startIndex,
+                let previous = line[..<hit.lowerBound].last,
+                previous.isLetter || previous.isNumber || previous == "_"
+            {
+                continue  // `Foo.init(` —— 见上面 doc 里那段边界说明
+            }
+            shapes.append(
+                "上下文推断的 `.init(` —— 它构造的可能正是 `\(type)`，而本模块无从判定，"
+                    + "`callArguments` 会漏掉这一处。\(location)")
+        }
+    }
+    return shapes
 }
 
 /// `arguments`（``callArguments(of:in:)`` 切出来的实参文本）里 `label:` 那**一个顶层实参的值**，

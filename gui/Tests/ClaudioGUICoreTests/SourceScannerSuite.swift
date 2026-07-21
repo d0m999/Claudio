@@ -1523,6 +1523,115 @@ func runSourceScannerSuites() {
             "块注释必须被剥掉。得到：\(scanned.code)")
     }
 
+    // MARK: `callArguments` 的识别范围 + `unmodeledConstructionShapes` 这道围栏
+    //
+    // 这两个函数是一对：前者是**白名单**（认得出的构造点交给下游逐个查实参），后者是**围栏**
+    // （认不出的形状 ⇒ 调用方当场红）。`/codex review 37745f2` 的 P1 证过只有前者时的失守路径：
+    // 死代码诱饵喂饱「≥1 处」，真实构造走 `typealias` 别名隐身，实参再从注入值派生 ⇒ 文本层与
+    // 行为层**同时**全绿。所以这一组自证要分开钉两件事：白名单**认得的**到底有哪几种（多认一种
+    // 就少一条隐身路），围栏**记得住的**到底有哪几类（少记一类就是一条静默放行）。
+
+    suite("扫描器：`callArguments` 认得空格形式 —— 四种写法切出**同一份**实参") {
+        // 极性：识别范围只许放宽。这四种在 Swift 里是**同一次调用**，上一版只认第一种，
+        // 后三种全部静默退出审查（`/codex review ceae86e` 记了前两种，37745f2 证了空格那种可被利用）。
+        let variants: [(String, String)] = [
+            ("裸括号", "let a = Widget(lock: environment.packsLockFile)"),
+            ("空格", "let b = Widget (lock: environment.packsLockFile)"),
+            ("显式 init", "let c = Widget.init(lock: environment.packsLockFile)"),
+            ("空格 + 显式 init", "let d = Widget .init (lock: environment.packsLockFile)"),
+        ]
+        for (label, line) in variants {
+            let calls = callArguments(of: "Widget", in: line)
+            expect(
+                calls.count == 1,
+                "「\(label)」形式必须被认成**正好 1 处**调用，实得 \(calls.count) 处 —— 少认一处 = "
+                    + "那一处的实参从此没人查，真实构造可以随便写而没有人会喊。源：\(line)")
+            expect(
+                argumentValue("lock", in: calls.first ?? "") == "environment.packsLockFile",
+                "「\(label)」形式切出来的实参必须与其它三种**逐字一致**，实得 "
+                    + "`\(argumentValue("lock", in: calls.first ?? "") ?? "<没有这个实参>")` —— 切法随写法"
+                    + "漂移，下游那条相等判定就会因为一个与被测行为无关的理由而红/绿")
+        }
+    }
+
+    suite("扫描器：`callArguments` 的两条边界 —— 换行不算调用、左词边界仍在") {
+        // ⚠️ 这条钉的是**不认**的那一侧，方向与上面那条相反，所以它不能省：只写「多认」的正向
+        // 断言，一个「什么都认」的实现（比如把 `head` 之后的任意距离都跳过去）会让上面四条全绿。
+        let acrossLines = "let a = Widget\n(lock: environment.packsLockFile)"
+        expect(
+            callArguments(of: "Widget", in: acrossLines).isEmpty,
+            "`Widget` 与 `(` 之间隔着**换行**在 Swift 里是两条语句、不是一次调用。把它认成调用 = "
+                + "失败消息开始指着不存在的调用点。实得 \(callArguments(of: "Widget", in: acrossLines))")
+
+        let decoy = "let a = DecoyWidget(lock: ClaudioPaths.packsLockFile)"
+        expect(
+            callArguments(of: "Widget", in: decoy).isEmpty,
+            "`DecoyWidget(` 逐字包含 `Widget(`，但它不是对 `Widget` 的调用 —— 左词边界没了，"
+                + "一个改名的类型就能替真实构造喂饱下游的计数断言。实得 \(callArguments(of: "Widget", in: decoy))")
+
+        let qualified = "let a = ClaudioCore.Widget(lock: environment.packsLockFile)"
+        expect(
+            callArguments(of: "Widget", in: qualified).count == 1,
+            "⚠️ 与上一条极性相反：`ClaudioCore.Widget(` 是一次**真实**的限定构造，把它当成"
+                + "「更长的标识符」排掉 = 一处构造点静默退出审查 = fail-open。左词边界只排"
+                + "字母/数字/下划线，**绝不排 `.`**。实得 \(callArguments(of: "Widget", in: qualified))")
+    }
+
+    suite("围栏：`unmodeledConstructionShapes` 对三类认不出的形状**各**记一笔（正向对照，有牙）") {
+        // 一条一条分开断，不合并成「非空」：合并之后，只要任意一类还记得住，另外两类静默失效
+        // 也照样绿 —— 那正是「围栏看起来在，其实只剩一根柱子」的形状。
+        let alias = "typealias WidgetAlias = Widget\nlet a = WidgetAlias(lock: x)"
+        expect(
+            unmodeledConstructionShapes(of: "Widget", in: alias).contains { $0.contains("typealias") },
+            "`typealias` 必须记一笔 —— 别名之后的构造 `callArguments(of: \"Widget\", …)` 永远认不出，"
+                + "而这正是 `/codex review 37745f2` P1 用来让真实构造隐身的那一手。实得 "
+                + "\(unmodeledConstructionShapes(of: "Widget", in: alias))")
+
+        let conditional = "#if DEBUG\nlet a = Widget(lock: x)\n#endif"
+        expect(
+            unmodeledConstructionShapes(of: "Widget", in: conditional).contains { $0.contains("条件编译") },
+            "`#if` 必须记一笔 —— 非活跃分支里的构造点与活跃的完全同形，会替真实构造喂饱"
+                + "「正好 N 处」那类断言。实得 \(unmodeledConstructionShapes(of: "Widget", in: conditional))")
+
+        let contextual = "let a: Widget = .init(lock: x)"
+        expect(
+            unmodeledConstructionShapes(of: "Widget", in: contextual).contains { $0.contains(".init(") },
+            "上下文推断的 `.init(` 必须记一笔 —— 它构造的可能正是 `Widget`，而扫描器无从判定，"
+                + "`callArguments` 会漏掉这一处。实得 \(unmodeledConstructionShapes(of: "Widget", in: contextual))")
+
+        let argumentPosition = "perform(environment: .init(lock: x))"
+        expect(
+            unmodeledConstructionShapes(of: "Widget", in: argumentPosition).contains { $0.contains(".init(") },
+            "**实参位置**的上下文 `.init(` 也必须记一笔 —— 它与上一条是两种不同的语法位置，"
+                + "只钉「`= .init(`」那一种会漏掉它。实得 \(unmodeledConstructionShapes(of: "Widget", in: argumentPosition))")
+    }
+
+    suite("围栏：`unmodeledConstructionShapes` 在正常源码上**不**记账（假红的守卫会被删掉）") {
+        // 上一条的反向控制。围栏若在每个正常文件上红，它会被下一个人删掉，然后洞原样回来 ——
+        // 这个仓库已经栽过这一跤（`hasPrefix("#")` 被一条纯文本 `#"` 守卫假红）。
+        let source = #"""
+            /// doc: 这段散文里谈论 typealias 与 #if，还提到 = .init(…) 这种写法。
+            struct Holder {
+                let widget = Widget(lock: environment.packsLockFile)
+                let other = Other.init(value: 1)   // 显式类型名的 init：认得出，不该记账
+                let text = "typealias 与 #if 都只是字符串内容"
+            }
+            """#
+        let scanned = strippingComments(source)
+        let shapes = unmodeledConstructionShapes(
+            of: "Widget", in: scanned.codeWithoutStringLiterals)
+        expect(
+            shapes.isEmpty,
+            "这是一份**完全正常**的源码：`typealias` / `#if` / `.init(` 只出现在**注释**与**字符串内容**里，"
+                + "而 `Other.init(` 是显式类型名的构造（认得出）。在它身上记账 = 围栏假红 = 下一个人删掉它。"
+                + "得到：\(shapes)")
+        expect(
+            callArguments(of: "Widget", in: scanned.codeWithoutStringLiterals).count == 1,
+            "⚠️ 正向对照，这条不能省：上面那条 `isEmpty` 在一个**恒返回空**的实现下也全绿，而那样的围栏"
+                + "一个字节都守不住。这条证明同一份输入里真实构造点确实**被认了出来** —— 两条一起才说明"
+                + "「不假红」不是靠「什么都不认」换来的")
+    }
+
     // MARK: `codeWithoutStringLiterals` —— 字符串内容清空、界定符与插值代码保留
     //
     // ⚠️ 上一版这个字段的行为**只**由 helper 包的 `AtomicWriteSuite` suite ③ 钉着（`/codex review

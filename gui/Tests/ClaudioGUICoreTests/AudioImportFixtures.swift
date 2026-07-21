@@ -116,9 +116,11 @@ final class RecordingDurationProbe: AudioDurationProbing, @unchecked Sendable {
 ///
 /// 父目录不用预建：`FileLock.attemptLock()` 撞上 ENOENT 会自愈建父目录再重试一次。
 func injectedPacksLock(under root: URL) -> URL {
-    root
-        .appendingPathComponent("injected-locks", isDirectory: true)
-        .appendingPathComponent("test-packs-lock")
+    let nonce = UUID().uuidString
+    return
+        root
+        .appendingPathComponent("injected-locks-\(nonce)", isDirectory: true)
+        .appendingPathComponent("test-packs-lock-\(nonce)")
 }
 
 /// `userPacksDirectory` 的兄弟位上那把注入锁 —— 给只拿得到 packs 目录、拿不到 `root` 的 fixture 用。

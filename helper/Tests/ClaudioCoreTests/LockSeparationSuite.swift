@@ -486,6 +486,26 @@ func runLockSeparationSuites() {
             return
         }
 
+        // ## 围栏：`callArguments` 认不出的形状 ⇒ 当场红（`/codex review 37745f2` 的 P1）
+        //
+        // 下面两条是**精确计数**（2 处 / 1 处），比「≥1 处」强得多 —— 一个死代码诱饵会把计数顶到
+        // 3 而当场红。但计数守不住另一件事：**扫描器根本没数到的那一处**。`#if` 就是这样一条路 ——
+        // 扫描器不建模条件编译，一个 `#if false` 里的调用点与活跃分支的完全同形，它会顶替真实
+        // 调用点凑够那个计数，而真实调用点搬到别处、锁随便传。
+        //
+        // ⚠️ 如实说明适用性：这里的 `head` 是**函数调用**（`switch selectPack`），不是类型构造。
+        // 所以这个围栏记的三类里，只有 `#if` 那一类对本处是真正对口的；`typealias` 与上下文
+        // `.init(` 是**保守多报**（对函数调用它们不构成隐身路）。之所以照样用同一个函数而不是
+        // 手写第三条 `#if` grep：极性是「多报 = 有人喊 = fail-closed」，而三处分散的 grep 会在
+        // 下一次「新增一种认不出的形状」时漏改其中一处 —— 这个仓库栽过那一跤。
+        let unmodeledShapes = unmodeledConstructionShapes(
+            of: "switch selectPack", in: setupStructure)
+        expect(
+            unmodeledShapes.isEmpty,
+            "`Setup.swift` 里出现了扫描器认不出的构造/条件编译形状：\(unmodeledShapes) —— 下面两条"
+                + "**计数**断言会被非活跃分支里的调用点顶替着凑数，而真实调用点可以搬走、锁随便传，"
+                + "没有任何人会喊。要么把它挪走，要么先把 `callArguments` 教会这个形状再放行")
+
         // `selectPack` 的两个调用点（兜底包与用户选中的包）—— 两处都必须转发 config.lock。
         let selectPackCalls = callArguments(of: "switch selectPack", in: setupStructure)
         expect(

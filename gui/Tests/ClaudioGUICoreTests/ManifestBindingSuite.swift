@@ -35,9 +35,11 @@ import Foundation
 /// 于是三条持锁 suite 全绿。而 `ManifestBinding.swift` 的锁转发在整个 `gui/Tests` 里**没有任何
 /// 文本绊线**，所以那个变异体当时是**全仓零覆盖**的。
 ///
-/// 现在注入值一律走 ``injectedPacksLock(under:)`` —— **父目录与叶名两样都与任何自然派生不同**，
-/// 任何「从包目录/兄弟路径推出锁」的写法求值出来都 ≠ 注入值 ⇒ 持锁 suite 当场红。
-/// 这条「不可派生」的性质本身由本文件第一条 suite 钉住，别当成可以顺手整理的风格问题。
+/// 现在注入值一律走 ``injectedPacksLock(under:)`` —— 父目录与叶名各带一段**运行时随机成分**，
+/// 生产源码既写不出它也派生不出它 ⇒ 任何「从包目录/兄弟路径推出锁」的写法求值出来都 ≠ 注入值
+/// ⇒ 持锁 suite 当场红。这条「不可派生」的性质本身由本文件第一条 suite 钉住，别当成可以顺手
+/// 整理的风格问题。（上一版写的是「父目录与叶名两样都与任何自然派生不同」—— 那是**枚举**，
+/// 而 `/codex review 37745f2` 的 P2 证明枚举不完：固定名字总能被向上若干级再拼回去。）
 @MainActor
 private func makeEnvironment(
     userPacksDirectory: URL,
@@ -60,10 +62,12 @@ private func makeEnvironment(
 ///
 /// 生产代码取这把锁的唯一合法写法是 `environment.packsLockFile`。任何「就地算一个出来」的写法
 /// （`userPacksDirectory.deletingLastPathComponent()/packs.lock`、`<packs 目录>/packs.lock`、
-/// 硬编码 `ClaudioPaths.packsLockFile`）都必须让持锁 suite **当场红**。做到这一点的唯一办法，
-/// 是让注入值待在那些表达式**算不出来**的地方：换父目录（`injected-locks/`）**且**换叶名
-/// （`manifest-packs-lock`，不是 `packs.lock`）。只换一样都不够 —— 只换父目录挡不住硬编码叶名
-/// 再拼父目录的写法，只换叶名挡不住同父下的派生。
+/// 硬编码 `ClaudioPaths.packsLockFile`）都必须让持锁 suite **当场红**。做到这一点的办法，
+/// 是让注入值待在那些表达式**算不出来**的地方 —— 而「算不出来」必须是**结构性**的，不能是一份
+/// 「我想得到的派生写法都试过了」的清单：`root` 对生产代码可达，任何**固定**的父目录名 + 叶名
+/// 都能被向上若干级再拼回去（`/codex review 37745f2` 的 P2 逐字演示过）。所以父目录与叶名各带
+/// 一段运行时 `UUID`，两样都要带：只带父目录挡不住硬编码叶名再拼父目录的写法，只带叶名挡不住
+/// 同父下的派生。
 ///
 /// 父目录不用预建：`FileLock.attemptLock()` 撞上 ENOENT 会自愈建父目录再重试一次。
 ///
@@ -106,36 +110,53 @@ func runManifestBindingSuites() async {
         //
         // 这正是本仓库反复栽的形状：一条断言的分辨力寄生在另一处**没有人在断言**的事实上。
         //
-        // ## 四条派生源，少一条就有一半恒真
+        // ## 判据从「枚举四条派生源」换成「结构性不可派生」（`/codex review 37745f2` 的 P2）
         //
-        // 前三条是生产代码里**写得出来**的三种「就地算一个」；第四条钉叶名 —— 光换父目录挡不住
-        // 「硬编码 `packs.lock` 这个叶名、再从别处拼父目录」的写法。
+        // 上一版枚举了三条生产代码写得出来的「就地算一个」，外加一条叶名。那是一份**白名单**：
+        // `root` 对生产代码可达（`userPacksDirectory.deletingLastPathComponent()`），把当时那两个
+        // **固定**名字（`injected-locks` / `test-packs-lock`）向上若干级再拼回去，求值出来与注入值
+        // 逐字相同，而那四条一条都不会红。Codex 在姊妹 fixture 上逐字演示过这一手。
+        //
+        // 现在注入锁带一段运行时 `UUID`，那四条在它面前**恒真**（生产写不出 UUID），留着就是四条
+        // 永远不会红的断言。换成下面两条：直接钉「路径含运行时才存在的成分」这个**结构性**性质 ——
+        // 上面那四种派生只是它的推论，而它还挡住了所有没被枚举到的派生写法。
+        //
+        // 判据用**两次调用的关系**表达，不去读它用了哪个随机源（那会是「守卫读被它守的那个函数的
+        // 输出」，恒真）。父目录与叶名**分开断**：只带一段随机的实现会让另一半仍然可派生，而合并
+        // 成一条 `!=` 对那种半吊子实现零分辨力。
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             let environment = makeEnvironment(userPacksDirectory: userPacks)
             let injected = environment.packsLockFile
+            let second = injectedPacksLock(besideUserPacks: userPacks)
 
-            let derivations: [(String, URL)] = [
-                (
-                    "userPacksDirectory 的兄弟位",
-                    userPacks.deletingLastPathComponent().appendingPathComponent("packs.lock")
-                ),
-                ("userPacksDirectory 之内", userPacks.appendingPathComponent("packs.lock")),
-                ("用户真实 home 上的那把（= 生产默认值）", ClaudioPaths.packsLockFile),
-            ]
-            for (label, derived) in derivations {
-                expect(
-                    injected.path != derived.path,
-                    "注入的包锁落在了「\(label)」上（都是 \(derived.path)）—— 这让「`lockFile:` 那一手"
-                        + "改成从这条路径就地算出来」的变异体求值出来**恰好等于**注入值，下面三条持锁 "
-                        + "suite 于是全绿，而那一手已经不绑注入点了。而 `ManifestBinding` 的锁转发**没有"
-                        + "任何文本绊线**兜底，那三条 suite 是唯一的守卫，它们的分辨力全靠这个位置")
-            }
             expect(
-                injected.lastPathComponent != "packs.lock",
-                "注入的包锁叶名是 `packs.lock` —— 换父目录还不够：就地算锁的写法里硬编码这个叶名、"
-                    + "再从别处拼出父目录，照样可能撞上注入值。叶名也必须是生产代码不会写出来的那一个。"
-                    + "实际叶名：\(injected.lastPathComponent)")
+                injected.lastPathComponent != second.lastPathComponent,
+                "注入包锁的**叶名**在两次调用之间相同（都是 \(injected.lastPathComponent)）—— 叶名里"
+                    + "没有运行时成分，于是「就地算锁的写法里硬编码这个叶名、再从别处拼出父目录」"
+                    + "求值出来会撞上注入值，下面三条持锁 suite 全绿而那一手已经不绑注入点了。"
+                    + "`ManifestBinding` 的锁转发**没有任何文本绊线**兜底，那三条是唯一的守卫")
+            expect(
+                injected.deletingLastPathComponent().path
+                    != second.deletingLastPathComponent().path,
+                "注入包锁的**父目录**在两次调用之间相同（都是 "
+                    + "\(injected.deletingLastPathComponent().path)）—— 父目录里没有运行时成分，于是"
+                    + "「从 userPacksDirectory 向上若干级再拼死这个目录名」求值出来会撞上注入值。"
+                    + "Codex 用的正是这一手")
+
+            // ⚠️ 正向对照，这条不能省：上面两条 `!=` 只说明「两次调用不同」，一个
+            //    **完全不管 root**、每次返回 `/tmp/<uuid>` 的实现也能让它们全绿 —— 而那样的锁根本
+            //    不在被测的临时目录里，三条持锁 suite 会在一个与 fixture 无关的位置上开锁。
+            expect(
+                injected.path.hasPrefix(root.path) && second.path.hasPrefix(root.path),
+                "注入的包锁跑到了 fixture 的 root（\(root.path)）之外 —— 随机成分必须长在这棵临时目录"
+                    + "**里面**，否则测试会在别处开锁、`withTempDirectory` 也清理不掉它。"
+                    + "实得 \(injected.path) / \(second.path)")
+            expect(
+                injected.path != ClaudioPaths.packsLockFile.path,
+                "注入的包锁等于**生产默认值**（\(ClaudioPaths.packsLockFile.path)）—— 那正是这套 fixture "
+                    + "存在的全部理由要拦住的东西：测试会去用户真实 `~/.claudio` 上开一把锁，"
+                    + "并与他正在运行的 Claudio.app 抢锁")
         }
     }
 

@@ -119,7 +119,7 @@ private struct FixtureTargets {
         //
         // ## 它**故意不**和另外两把长在一起 —— 这个位置是承重的，别「顺手整理」回去
         //
-        // 上一版把它写成 `claudioRoot.appendingPathComponent("packs.lock")`，与 `config.lock` /
+        // 最早那一版把它写成 `claudioRoot.appendingPathComponent("packs.lock")`，与 `config.lock` /
         // `settings.lock` 同父同名规则。那让整整一类变异体**在行为层不可见**：
         //
         // ```swift
@@ -127,24 +127,44 @@ private struct FixtureTargets {
         //     .deletingLastPathComponent().appendingPathComponent("packs.lock")
         // ```
         //
-        // —— 这一手已经不绑注入点了（它绑的是**另一把锁**的路径），但在旧 fixture 里它求值出来的
-        // 路径**恰好等于**注入的那把，于是持锁行为测试拿到的锁是对的、全绿。当时只能靠一条文本
-        // 绊线去分辨它，而文本绊线够不着「实参求值出来的值」，只能钉调用点那一行。
+        // —— 这一手已经不绑注入点了（它绑的是**另一把锁**的路径），但在那版 fixture 里它求值出来的
+        // 路径**恰好等于**注入的那把，于是持锁行为测试拿到的锁是对的、全绿。
         //
-        // 换成**另一个父目录 + 另一个叶名**之后，任何「从兄弟锁派生」或「硬编码 packs.lock 这个
-        // 组件」的写法求值出来都 ≠ 注入值 ⇒ 持锁行为测试当场红。父目录与叶名**两样都要换**：
-        // 只换父目录挡不住 `userPacksDirectory.deletingLastPathComponent()` 那一路，只换叶名挡不住
-        // 同父下的派生。
+        // ## 而「换个父目录 + 换个叶名」是**枚举**，枚举不完（`/codex review 37745f2` 的 P2）
+        //
+        // 上一版换成了固定的 `injected-locks/gui-packs-lock`，并在这里写下「任何『从兄弟锁派生』或
+        // 『硬编码 packs.lock 这个组件』的写法求值出来都 ≠ 注入值」。Codex 一行就证伪了它：
+        //
+        // ```swift
+        // packsLockFile: environment.userPacksDirectory
+        //     .deletingLastPathComponent().deletingLastPathComponent()   // → root
+        //     .appendingPathComponent("injected-locks").appendingPathComponent("gui-packs-lock")
+        // ```
+        //
+        // —— 向上**两级**再拼死那两个名字，求值出来与注入值**逐字相同**，行为测试全绿；而那时的
+        // 自证 suite 只检查了「三个兄弟位向上**一级**再拼 `packs.lock`」这四种，四条也全绿。
+        // 一个**固定**的位置，无论挪到哪里，都总有一条路径表达式能把它拼回来 —— 枚举「算不出它的
+        // 那些写法」永远不完整，这是白名单，不是围栏。
+        //
+        // ## 所以换成**结构性**不可派生：路径带一段本次运行才存在的随机成分
+        //
+        // 父目录与叶名各带一个运行时 `UUID`。生产源码里既写不出它（编译期不存在），也没有任何
+        // 路径表达式能从别的 fixture 路径**派生**出它（那些路径里根本没有这段字节）。这不再是
+        // 「我想不出还有什么写法能算出它」，而是「不存在这样的写法」。
+        //
+        // 父目录与叶名**两样都要带**：只有父目录带，`<父目录>/packs.lock` 这种硬编码叶名的写法
+        // 仍然算得出；只有叶名带，同父下的派生仍然算得出。
         //
         // 父目录不用预建：`FileLock.attemptLock()` 撞上 ENOENT 会自愈建父目录再重试一次
         // （见 `FileLock.swift` 里那段 first-run 自举的理由）。
         //
-        // 这个「不可派生」的性质本身由下面那条 `FixtureTargets 自证` suite 钉住 —— 少了它，
+        // 这个「带随机成分」的性质本身由下面那条 `FixtureTargets 自证` suite 钉住 —— 少了它，
         // 上面整段保护力就寄生在一个**没有任何断言看着**的常量上，一次好意的重构就全灭。
+        let nonce = UUID().uuidString
         packsLockFile =
             root
-            .appendingPathComponent("injected-locks", isDirectory: true)
-            .appendingPathComponent("gui-packs-lock")
+            .appendingPathComponent("injected-locks-\(nonce)", isDirectory: true)
+            .appendingPathComponent("gui-packs-lock-\(nonce)")
     }
 
     func environment(bundledHelperBinary: URL?) -> OnboardingActionEnvironment {
@@ -223,44 +243,67 @@ func runOnboardingActionsSuites() {
 
     // MARK: fixture 自证
 
-    suite("FixtureTargets 自证：注入的包锁必须**不可**从任何兄弟路径派生出来") {
+    suite("FixtureTargets 自证：注入的包锁必须带**运行时随机成分**（父目录与叶名各一段）") {
         // ## 这条守的是「另一条守卫赖以成立的前提」，不是产品行为
         //
-        // 下面那条持锁行为测试之所以能逮住「实参从兄弟锁派生」这一整类变异体，唯一的理由是
-        // fixture 里的包锁**不在**任何兄弟路径能算出来的位置上。那是 `FixtureTargets.init` 里的
-        // 一个常量，而常量没有守卫 —— 谁把它「顺手整理」回 `claudioRoot/packs.lock`（那看起来
-        // 整齐得多，而且与生产布局一致，是个非常有说服力的重构），持锁测试**一条都不会红**，
-        // 保护力静默归零。
+        // 下面那条持锁行为测试之所以能逮住「实参从别的路径派生出来」这一整类变异体，唯一的理由是
+        // fixture 里的包锁**不可能**被任何路径表达式算出来。那是 `FixtureTargets.init` 里的一段
+        // 构造，而构造没有守卫 —— 谁把它「顺手整理」回 `claudioRoot/packs.lock`（那看起来整齐得多，
+        // 而且与生产布局一致，是个非常有说服力的重构），持锁测试**一条都不会红**，保护力静默归零。
         //
         // 这正是本仓库反复栽的那个形状：一条断言的分辨力寄生在另一处**没有人在断言**的事实上。
         //
-        // ## 四条都要写，少一条就有一半恒真
+        // ## 上一版的四条枚举断言已经删掉，因为它们被证伪了（`/codex review 37745f2` 的 P2）
         //
-        // 三个派生源（config 锁、settings 锁、包目录）各一条 —— 只断言其中一个，fixture 若被挪到
-        // 另外两个的兄弟位上，那一半就恒真。第四条钉叶名：光换父目录挡不住实参里硬编码
-        // `"packs.lock"` 这个组件、再从别处拼出来的写法。
+        // 那四条断的是「包锁 ≠ 三个兄弟位各自向上一级再拼 `packs.lock`」+「叶名 ≠ packs.lock」。
+        // 它们是一份**白名单**：向上**两级**再拼死当时那两个固定名字（`injected-locks` /
+        // `gui-packs-lock`）就能算出完全相同的路径，而那四条一条都不会红。措辞（「任何兄弟路径都
+        // 算不出来」）比覆盖范围（「这四种算不出来」）大 —— 这个仓库的常客。
+        //
+        // 现在 fixture 的包锁带一段运行时 `UUID`，四条枚举断言在它面前**恒真**（生产写不出 UUID，
+        // 那四种派生永远 ≠ 注入值），所以留着就是四条永远不会红的断言。删掉不是放弃覆盖：下面
+        // 这两条严格更强 —— 它们证明的是「路径含运行时才存在的成分」这个**结构性**性质本身，
+        // 而上面那四种派生只是它的推论。
+        //
+        // ## 判据：同一个 root 构造两次，包锁必须**两次都不同**
+        //
+        // 「含运行时随机成分」这句话，用两次构造的**关系**来表达，而不是去读它用了哪个随机源
+        // （那会是「守卫读被它守的那个函数的输出」，恒真）。父目录与叶名**分开断**：只带一个的
+        // 实现会让另一半仍然可派生，而合并成一条 `!=` 对那种半吊子实现零分辨力。
         withTempDirectory { root in
-            let targets = FixtureTargets(in: root)
-            let derivations: [(String, URL)] = [
-                ("configLockFile 的兄弟位", targets.configLockFile),
-                ("settingsLockFile 的兄弟位", targets.settingsLockFile),
-                ("userPacksDirectory 的兄弟位", targets.userPacksDirectory),
-            ]
-            for (label, sibling) in derivations {
-                let derived = sibling.deletingLastPathComponent()
-                    .appendingPathComponent("packs.lock")
-                expect(
-                    targets.packsLockFile.path != derived.path,
-                    "注入的包锁落在了「\(label)」上（都是 \(derived.path)）—— 这让"
-                        + "「实参改成从这条兄弟路径派生」的变异体求值出来**恰好等于**注入值，"
-                        + "持锁行为测试于是全绿，而那一手已经不绑注入点了。fixture 的包锁必须待在"
-                        + "任何兄弟路径都算不出来的地方，这是那条行为测试分辨力的**前提**")
-            }
+            let first = FixtureTargets(in: root)
+            let second = FixtureTargets(in: root)
+
             expect(
-                targets.packsLockFile.lastPathComponent != "packs.lock",
-                "注入的包锁叶名是 `packs.lock` —— 换父目录还不够：实参里硬编码这个叶名、再从别处"
-                    + "拼出父目录的写法照样可能撞上注入值。叶名也必须是生产代码不会写出来的那一个。"
-                    + "实际叶名：\(targets.packsLockFile.lastPathComponent)")
+                first.packsLockFile.lastPathComponent != second.packsLockFile.lastPathComponent,
+                "同一个 root 下构造两次 `FixtureTargets`，注入包锁的**叶名**却相同"
+                    + "（都是 \(first.packsLockFile.lastPathComponent)）—— 叶名里没有运行时成分，于是"
+                    + "「实参硬编码这个叶名、父目录从别处拼」的变异体求值出来会撞上注入值，持锁行为"
+                    + "测试全绿，而那一手已经不绑注入点了")
+            expect(
+                first.packsLockFile.deletingLastPathComponent().path
+                    != second.packsLockFile.deletingLastPathComponent().path,
+                "同一个 root 下构造两次 `FixtureTargets`，注入包锁的**父目录**却相同"
+                    + "（都是 \(first.packsLockFile.deletingLastPathComponent().path)）—— 父目录里没有"
+                    + "运行时成分，于是「从兄弟路径向上若干级再拼死这个目录名」的变异体求值出来会撞上"
+                    + "注入值。Codex 用的正是这一手（向上两级 + 拼死两个固定名字）")
+
+            // ⚠️ 正向对照，这两条不能省：上面那两条 `!=` 在一个「**整个** fixture 每次都随机」的
+            //    实现下也全绿 —— 而那样的 fixture 里，包锁与另外三条路径之间不再有任何固定关系，
+            //    「包锁带随机成分」这句话就退化成「什么都带随机成分」，上面两条断言对「包锁被挪回
+            //    兄弟位」这个真靶子反而失去分辨力（挪回去之后它照样每次不同）。
+            //    钉住「随机成分**只**加在包锁上」，两条 `!=` 才在说它们声称在说的那件事。
+            expect(
+                first.configLockFile.path == second.configLockFile.path
+                    && first.settingsLockFile.path == second.settingsLockFile.path,
+                "同一个 root 下构造两次，另外两把锁的路径却变了 —— 随机成分只该加在**包锁**上。"
+                    + "整个 fixture 都随机会让上面那两条 `!=` 恒真、对真靶子失去分辨力。"
+                    + "config: \(first.configLockFile.path) vs \(second.configLockFile.path)；"
+                    + "settings: \(first.settingsLockFile.path) vs \(second.settingsLockFile.path)")
+            expect(
+                first.userPacksDirectory.path == second.userPacksDirectory.path,
+                "同一个 root 下构造两次，包目录的路径却变了 —— 它是持锁行为测试的另一个注入点，"
+                    + "必须是确定的。\(first.userPacksDirectory.path) vs \(second.userPacksDirectory.path)")
         }
     }
 
