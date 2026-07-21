@@ -160,11 +160,19 @@ private struct FixtureTargets {
         //
         // 这个「带随机成分」的性质本身由下面那条 `FixtureTargets 自证` suite 钉住 —— 少了它，
         // 上面整段保护力就寄生在一个**没有任何断言看着**的常量上，一次好意的重构就全灭。
-        let nonce = UUID().uuidString
-        packsLockFile =
-            root
-            .appendingPathComponent("injected-locks-\(nonce)", isDirectory: true)
-            .appendingPathComponent("gui-packs-lock-\(nonce)")
+        //
+        // ## 为什么这里是一次**调用**，而不是原地再写一遍那三行
+        //
+        // 上一版是内联的（`injected-locks-<nonce>/gui-packs-lock-<nonce>`），与
+        // ``injectedPacksLock(under:)`` **同形而不同源**。代价不是理论上的：d7084be 那一刀为了同一个
+        // 病要改**两处**，它的 commit message 自己写着「Codex 只点了 FixtureTargets，
+        // `injectedPacksLock` 是同一个形状」—— 两份拷贝就是两次要记得一起改，而只改一处不会有任何
+        // 断言变红。同时 `AudioImportFixtures.swift` 的 doc 那句「全包唯一来源」当时是**假的**。
+        //
+        // 现在两边共用同一份实现，那句话成了真的，并由 `ViewWiringSuite` 那条构造点普查钉住。
+        // 本 suite 的 `FixtureTargets 自证` 照旧有效：它断的是「同一个 root 构造两次，父目录与叶名
+        // 必须两次都不同」这个**关系**，不读实现用了哪个随机源，所以换成调用之后一个字都不用改。
+        packsLockFile = injectedPacksLock(under: root)
     }
 
     func environment(bundledHelperBinary: URL?) -> OnboardingActionEnvironment {

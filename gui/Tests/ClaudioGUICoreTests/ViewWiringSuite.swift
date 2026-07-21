@@ -812,6 +812,55 @@ func runViewWiringSuites() {
                 + "按文件名豁免的文件）")
     }
 
+    suite("注入包锁的构造点全测试包只此一处 ——「唯一来源」这句散文的可执行版本") {
+        // ## 它治的病
+        //
+        // `AudioImportFixtures.swift` 的 doc 把 ``injectedPacksLock(under:)`` 称作「**全包唯一来源**」。
+        // 那句话在 `/codex review 95d16a5,b89a0ee,37745f2` 之前是**假的**：`OnboardingActionsSuite` 的
+        // `FixtureTargets.init` 里另有一段**同形而不同源**的内联构造。代价不是理论上的 —— d7084be
+        // 那一刀为了同一个病要改**两处**，而只改一处不会有任何断言变红。
+        //
+        // 两处已经合并。这条普查是那句话的**可执行版本**：散文说「唯一」，就得有人数着。
+        //
+        // ## ⚠️ 判据不能是会被自己污染的那次 grep
+        //
+        // 这条普查扫的是 `gui/Tests/ClaudioGUICoreTests` —— **包含本文件**。把目录名逐字写进本文件，
+        // grep 当场多命中一处，命中的还是我自己的判据。本仓库为这个形状翻过车（`SourceScannerSuite`
+        // 里那条自纠⑤：「`packsLockBusy` 在整个 `gui/` 目录零命中」—— 写下这句话本身就把这个词写进了
+        // `gui/`）。所以 needle **分段拼**，源码里永远不出现连续的那个串；失败消息里的那一份是运行时
+        // 插值，不是源码文本。
+        //
+        // 读 `code`（剥注释、**保留字符串内容**）而不是 `codeWithoutStrings`：要数的东西
+        // （`"injected-locks-\(nonce)"`）本身就是一个字符串字面量，清空内容会把靶子一起清掉。
+        // 代价如实标注：注释里谈论这个目录名的散文不会被数到（那是**想要**的，本文件下面就有几段），
+        // 但一段被误判成字符串的代码同样数不到 —— 后者由本文件第一条 suite（`unmodeled` 普查）兜。
+        //
+        // ## ⚠️ 它的天花板，别把措辞写大
+        //
+        // 它按**这一种形状的目录名**认人。一个换了名字的第二处构造（`fixture-locks-<nonce>/…`）它
+        // 认不出来。所以它守的是「**同一个病原样复发**」（这正是实际发生过的那一种），**不是**
+        // 「所有可能的第二来源」。真正管住「值必须来自被注入的那把锁」的是持锁行为测试。
+        let lockDirectoryMarker = "injected" + "-locks"
+        let testSources = sourcesUnder("gui/Tests/ClaudioGUICoreTests")
+        expect(
+            testSources.count >= 20,
+            "在 gui/Tests/ClaudioGUICoreTests 下只数到 \(testSources.count) 个 Swift 文件 —— 这条是"
+                + "**普查**，普查不到文件就永远等不到红，只会安静地绿下去（实测该目录下有三十余个）")
+        let constructionSites = testSources
+            .filter { $0.code.contains(lockDirectoryMarker) }
+            .map(\.path)
+        expect(
+            constructionSites == ["AudioImportFixtures.swift"],
+            "注入包锁的构造点不是恰好一处（实得 \(constructionSites)）—— 期望只有 "
+                + "`AudioImportFixtures.swift` 里的 `injectedPacksLock(under:)`。"
+                + "多出来一处 = 又一份**同形而不同源**的拷贝：它今天可能写得一模一样，但下次给这个"
+                + "形状打补丁（比如把固定名字换成运行时随机成分，d7084be 干的正是这件事）只改一处"
+                + "不会有任何断言变红，另一处静默留在可派生的老位置上，而那正是「就地算一把锁」的"
+                + "变异体求值出来会撞上的地方 —— 持锁行为测试于是全绿，保护力归零。"
+                + "少了那一处 = 要么文件改名了（把这条断言的期望值一起更新），要么唯一来源没了"
+                + "（那 `AudioImportFixtures.swift` 的 doc 里「全包唯一来源」那句话又变回散文）")
+    }
+
     suite("锁转发的**编译期前提**：`mutateManifestJSON` 的 `lockFile:` 不许有默认值") {
         // ## 这条 suite 取代了什么
         //

@@ -66,7 +66,17 @@ public struct AudioImportEnvironment: Sendable {
     /// ⚠️ 默认值是**真实**路径，和 `userPacksDirectory` 一样。但忘记注入的后果**不一样**：
     /// 忘了 `userPacksDirectory` 的测试会当场断言失败（真实 packs 里没有 fixture），
     /// 而忘了这把锁只会**静默**地去用户机器上开一把真锁 —— 测试照样全绿，只是与正在运行的
-    /// Claudio.app 抢锁、并在 `~/.claudio/` 里落一个文件。这个默认值本身由 `LockSeparationSuite` 钉住。
+    /// Claudio.app 抢锁、并在 `~/.claudio/` 里落一个文件。
+    ///
+    /// ⚠️ **上一版这里写着「这个默认值本身由 `LockSeparationSuite` 钉住」—— 那句话是假的**
+    /// （`/codex review 95d16a5,b89a0ee,37745f2` 的 P2 普查）。`LockSeparationSuite` 住在
+    /// `helper/Tests/ClaudioCoreTests`，钉的是 ``SetupEnvironment``（`ClaudioCore` 的类型）；
+    /// `claudio-tests` 的依赖表里只有 `ClaudioCore`，`helper/` 全目录对 `AudioImportEnvironment`
+    /// **零命中** —— 它**结构上不可能**钉本类型的任何东西。全仓也没有第二条断言在钉这个默认实参
+    /// （`gui/Tests` 里每一处 `ClaudioPaths.packsLockFile` 要么是注释，要么是
+    /// `ManifestBindingSuite` 那条**反向**断言「注入值 ≠ 生产默认值」）。
+    ///
+    /// 这句话最要命的地方不是它错，是它让读者以为**有人看着** —— 一句凭空的背书比没有背书更糟。
     ///
     /// 所以本包的测试 fixture 一律显式递临时路径（`AudioImportFixtures.swift` 的
     /// `injectedPacksLock(under:)`，全包唯一来源）。

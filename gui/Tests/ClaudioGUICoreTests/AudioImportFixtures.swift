@@ -108,11 +108,33 @@ final class RecordingDurationProbe: AudioDurationProbing, @unchecked Sendable {
 ///
 /// 生产代码取这把锁的唯一合法写法是 `environment.packsLockFile`。任何「就地算一个出来」的写法
 /// （`userPacksDirectory` 的兄弟位、`<packs>/packs.lock`、硬编码 `ClaudioPaths.packsLockFile`）都必须
-/// 让持锁行为测试**当场红**。做到这一点的唯一办法是让注入值待在那些表达式**算不出来**的地方：
-/// 换父目录（`injected-locks/`）**且**换叶名（不是 `packs.lock`）。只换一样都不够。
+/// 让持锁行为测试**当场红**。
 ///
-/// 这条性质由 `ManifestBindingSuite` 的第一条 suite（fixture 自证）钉住 —— 那是本包唯一真的会去
-/// **持有**这把锁的地方，也是唯一能分辨「转发对了」与「就地算了一个」的地方。
+/// ⚠️ **上一版这里写的办法是错的，别把它读成仍然成立**：它说「唯一办法是换父目录（`injected-locks/`）
+/// **且**换叶名」。那是一份**枚举**，而枚举不完 —— `/codex review 37745f2` 的 P2 一行就证伪了它：
+/// 向上**两级**再拼死那两个固定名字，求值出来与注入值逐字相同，四条自证断言一条都不会红。一个
+/// **固定**的位置无论挪到哪里，总有一条路径表达式能把它拼回来。
+///
+/// 现在走的是**结构性**不可派生：父目录与叶名各带一段运行时 `UUID`。生产源码既写不出它（编译期
+/// 不存在），也没有任何路径表达式能从别的 fixture 路径派生出它（那些路径里根本没有这段字节）。
+/// 这不再是「我想不出还有什么写法能算出它」，而是「不存在这样的写法」。两样都要带：只带父目录，
+/// `<父目录>/packs.lock` 这种硬编码叶名的写法仍然算得出；只带叶名，同父下的派生仍然算得出。
+///
+/// 这条性质由 `ManifestBindingSuite` 的第一条 suite 与 `OnboardingActionsSuite` 的 `FixtureTargets`
+/// 自证共同钉住（两条都用「同一个 root 构造两次，父目录与叶名必须两次都不同」这个**关系**来表达，
+/// 而不是去读它用了哪个随机源 —— 后者会是「守卫读被它守的那个函数的输出」，恒真）。
+///
+/// ## 「全包唯一来源」这句话是**可执行**的，不是承诺
+///
+/// 上一版这句话是假的：`OnboardingActionsSuite` 的 `FixtureTargets.init` 里另有一段**同形**的内联
+/// 构造（`injected-locks-<nonce>/gui-packs-lock-<nonce>`）。代价不是理论上的 —— d7084be 那一刀
+/// 为了同一个病要改**两处**，而它的 commit message 自己写着「Codex 只点了 FixtureTargets，
+/// `injectedPacksLock` 是同一个形状」。两份拷贝就是两次要记得一起改。
+///
+/// 现在 `FixtureTargets` 改调本函数，全包真的只剩这一处；而「只剩一处」这件事由 `ViewWiringSuite`
+/// 那条构造点普查钉住（认得出第二处 ⇒ 红）。如实标注它的天花板：那条普查按**这一种形状**的目录名
+/// 认人，一个换了名字的第二处构造它认不出来 —— 它守的是「同一个病原样复发」，不是「所有可能的
+/// 第二来源」。
 ///
 /// 父目录不用预建：`FileLock.attemptLock()` 撞上 ENOENT 会自愈建父目录再重试一次。
 func injectedPacksLock(under root: URL) -> URL {
