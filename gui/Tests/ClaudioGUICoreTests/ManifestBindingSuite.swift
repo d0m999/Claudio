@@ -147,8 +147,12 @@ func runManifestBindingSuites() async {
             // ⚠️ 正向对照，这条不能省：上面两条 `!=` 只说明「两次调用不同」，一个
             //    **完全不管 root**、每次返回 `/tmp/<uuid>` 的实现也能让它们全绿 —— 而那样的锁根本
             //    不在被测的临时目录里，三条持锁 suite 会在一个与 fixture 无关的位置上开锁。
+            //    ⚠️ 判据是**路径分量**（``isInside(_:of:)``），不是 `hasPrefix(root.path)`。裸前缀没有
+            //       分量边界：`<root>-escaped/packs.lock` 逐字通过 `hasPrefix(root.path)` 而它在 root
+            //       之外，于是这条本该 fail-closed 的对照对「把锁写到 root 的兄弟位」那一类**恒绿**
+            //       （`/codex review d7084be` P2 坐实）。
             expect(
-                injected.path.hasPrefix(root.path) && second.path.hasPrefix(root.path),
+                isInside(injected, of: root) && isInside(second, of: root),
                 "注入的包锁跑到了 fixture 的 root（\(root.path)）之外 —— 随机成分必须长在这棵临时目录"
                     + "**里面**，否则测试会在别处开锁、`withTempDirectory` 也清理不掉它。"
                     + "实得 \(injected.path) / \(second.path)")

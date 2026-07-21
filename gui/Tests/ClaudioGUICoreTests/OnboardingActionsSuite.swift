@@ -312,6 +312,22 @@ func runOnboardingActionsSuites() {
                 first.userPacksDirectory.path == second.userPacksDirectory.path,
                 "同一个 root 下构造两次，包目录的路径却变了 —— 它是持锁行为测试的另一个注入点，"
                     + "必须是确定的。\(first.userPacksDirectory.path) vs \(second.userPacksDirectory.path)")
+
+            // ⚠️ 第二条正向对照，`/review d7084be` 补的。上面三条**全部**只说「两次之间变了 / 没变」，
+            //    一个**整个忽略 `root`**、每次返回 `/tmp/<uuid>/<uuid>` 的实现在它们面前四条全绿 ——
+            //    而那样的锁根本不在被测的临时目录里，三条持锁 suite 会在一个与 fixture 无关的位置上
+            //    开锁，`withTempDirectory` 的 `removeItem` 也清不掉它。
+            //
+            //    这条对照在孪生 fixture（`injectedPacksLock(besideUserPacks:)` 的自证）里一直有，
+            //    **这一处一直没有** —— 而 d7084be 的 commit message 写的是「正向对照钉住『随机成分
+            //    只加在包锁上』『锁必须留在 fixture root 内』」。那句话对两处 fixture 只兑现了一处，
+            //    又一次「措辞比覆盖范围大」，而这次它写在给修复背书的散文里。
+            expect(
+                isInside(first.packsLockFile, of: root) && isInside(second.packsLockFile, of: root),
+                "注入的包锁跑到了 fixture 的 root（\(root.path)）之外 —— 随机成分必须长在这棵临时目录"
+                    + "**里面**。跑到外面 = 测试在别处开锁 + `withTempDirectory` 清不掉它，而上面那两条"
+                    + "`!=` 对这种实现完全没有分辨力（它每次也确实不同）。"
+                    + "实得 \(first.packsLockFile.path) / \(second.packsLockFile.path)")
         }
     }
 

@@ -1710,7 +1710,7 @@ func runSourceScannerSuites() {
                 + "字母/数字/下划线，**绝不排 `.`**。实得 \(callArguments(of: "Widget", in: qualified))")
     }
 
-    suite("围栏：`unmodeledConstructionShapes` 对三类认不出的形状**各**记一笔（正向对照，有牙）") {
+    suite("围栏：`unmodeledConstructionShapes` 对每一类认不出的形状**各**记一笔（正向对照，有牙）") {
         // 一条一条分开断，不合并成「非空」：合并之后，只要任意一类还记得住，另外两类静默失效
         // 也照样绿 —— 那正是「围栏看起来在，其实只剩一根柱子」的形状。
         let alias = "typealias WidgetAlias = Widget\nlet a = WidgetAlias(lock: x)"
@@ -1737,6 +1737,61 @@ func runSourceScannerSuites() {
             unmodeledConstructionShapes(of: "Widget", in: argumentPosition).contains { $0.contains(".init(") },
             "**实参位置**的上下文 `.init(` 也必须记一笔 —— 它与上一条是两种不同的语法位置，"
                 + "只钉「`= .init(`」那一种会漏掉它。实得 \(unmodeledConstructionShapes(of: "Widget", in: argumentPosition))")
+
+        // ↓ 以下两条是 `/review d7084be` 补的（`/codex review d7084be` P1 + 六路独立命中同一处）。
+        //   上一版这里是硬子串 `.init(`，两种形状同时漏网，而 doc 声称残余「只剩 typealias」。
+
+        let spacedContextual = "let a: Widget = .init (lock: x)"
+        expect(
+            unmodeledConstructionShapes(of: "Widget", in: spacedContextual).contains { $0.contains(".init(") },
+            "`.init` 与 `(` 之间**带空格**的上下文构造必须记一笔 —— `callArguments` 已经认得 "
+                + "`head .init (` 这一形式（上面那条四写法 suite 钉着），围栏却只找逐字 `.init(`："
+                + "**两个读模型不同轴**，`= .init (…)` 正好掉进缝里，两边都不管。"
+                + "实得 \(unmodeledConstructionShapes(of: "Widget", in: spacedContextual))")
+
+        let unappliedReference = "let make = Widget.init\nlet a = make(lock: x)"
+        expect(
+            unmodeledConstructionShapes(of: "Widget", in: unappliedReference).contains {
+                $0.contains("未应用的初始化器引用")
+            },
+            "**未应用**的初始化器引用必须记一笔 —— 构造真的发生了，只是发生在 `make` 这个名字底下，"
+                + "`callArguments` 认得的四种写法一种都对不上（`Widget.init` 后面没有 `(`）。这是上一版"
+                + "最大的洞：另留一处完全合规的死代码诱饵，就能同时喂饱 `count == 1` 与逐项实参相等，"
+                + "而真实构造一眼都没被看过。实得 \(unmodeledConstructionShapes(of: "Widget", in: unappliedReference))")
+
+        // ↓ 关键字前缀那一类（`/review d7084be` 红队 P1，本轮探针七种形状全实测）。
+        //   左轴若只问「末字符是不是标识符字符」，`return` 的 `n`、`try` 的 `y`、`await` 的 `t`、
+        //   `throw` 的 `w` 全部通过 ⇒ 静默跳过 ⇒ fail-open。逐个钉住，不合并成一条。
+        for keyword in ["return", "try", "await", "throw"] {
+            let tight = "\(keyword) .init(lock: x)"
+            expect(
+                unmodeledConstructionShapes(of: "Widget", in: tight).contains { $0.contains(".init(") },
+                "`\(keyword) .init(` 必须记一笔 —— 关键字不是类型名，这一处是**上下文推断**的构造，"
+                    + "`callArguments` 认不出它。实得 \(unmodeledConstructionShapes(of: "Widget", in: tight))")
+            let spaced = "\(keyword) .init (lock: x)"
+            expect(
+                unmodeledConstructionShapes(of: "Widget", in: spaced).contains { $0.contains(".init(") },
+                "`\(keyword) .init (`（带空格）同样必须记一笔 —— 与上一条是同一根轴的两种写法。"
+                    + "实得 \(unmodeledConstructionShapes(of: "Widget", in: spaced))")
+        }
+
+        // 元类型**变量**：`let f = Widget.self` 之后 `f.init(…)` 真的构造出 `Widget`，而左边那个
+        // `f` 是个**值**、不是类型名。判据是「像不像类型名」（首字母大写）而不是「是不是标识符」，
+        // 这一类才落在记账那一侧。
+        let metatypeVariable = "let f = Widget.self\nlet a = f.init(lock: x)"
+        expect(
+            unmodeledConstructionShapes(of: "Widget", in: metatypeVariable).contains { $0.contains(".init(") },
+            "元类型变量上的 `f.init(` 必须记一笔 —— 它构造的正是 `Widget`，而 `callArguments` 认得的"
+                + "四种写法一种都对不上。实得 \(unmodeledConstructionShapes(of: "Widget", in: metatypeVariable))")
+
+        let referenceAsArgument = "let all = ids.map(Widget.init)"
+        expect(
+            unmodeledConstructionShapes(of: "Widget", in: referenceAsArgument).contains {
+                $0.contains("未应用的初始化器引用")
+            },
+            "把 `Widget.init` 当**函数值**传出去（`map(Widget.init)`）与上一条是两种不同的语法位置，"
+                + "只钉「`let x = Widget.init`」那一种会漏掉它 —— 与 `= .init(` / `perform(.init(` "
+                + "那一对同构。实得 \(unmodeledConstructionShapes(of: "Widget", in: referenceAsArgument))")
     }
 
     suite("围栏：`unmodeledConstructionShapes` 在正常源码上**不**记账（假红的守卫会被删掉）") {
@@ -1747,6 +1802,9 @@ func runSourceScannerSuites() {
             struct Holder {
                 let widget = Widget(lock: environment.packsLockFile)
                 let other = Other.init(value: 1)   // 显式类型名的 init：认得出，不该记账
+                let spaced = Other .init (value: 2) // 同上，只是带空格：callArguments 也认得
+                let ready = buffer.initialize(repeating: 0)  // `.initialize(` 不是 init，整条跳过
+                init() { self.init(value: 0) }      // `self.init(` 构造的是所在类型自身，不该记账
                 let text = "typealias 与 #if 都只是字符串内容"
             }
             """#
@@ -1756,13 +1814,100 @@ func runSourceScannerSuites() {
         expect(
             shapes.isEmpty,
             "这是一份**完全正常**的源码：`typealias` / `#if` / `.init(` 只出现在**注释**与**字符串内容**里，"
-                + "而 `Other.init(` 是显式类型名的构造（认得出）。在它身上记账 = 围栏假红 = 下一个人删掉它。"
-                + "得到：\(shapes)")
+                + "而 `Other.init(` / `Other .init (` 是显式类型名的构造（`callArguments` 认得出，两种写法"
+                + "都算），`buffer.initialize(` 里的 `.init` 只是更长标识符的前缀、压根不是初始化器。"
+                + "在它们任何一个身上记账 = 围栏假红 = 下一个人删掉它。得到：\(shapes)")
         expect(
             callArguments(of: "Widget", in: scanned.codeWithoutStringLiterals).count == 1,
             "⚠️ 正向对照，这条不能省：上面那条 `isEmpty` 在一个**恒返回空**的实现下也全绿，而那样的围栏"
                 + "一个字节都守不住。这条证明同一份输入里真实构造点确实**被认了出来** —— 两条一起才说明"
                 + "「不假红」不是靠「什么都不认」换来的")
+    }
+
+    // MARK: `isInside(_:of:)` —— 换掉 `hasPrefix(root.path)` 的那一刀，自己的回归防线
+    //
+    // ⚠️ 这条 suite 是**变异台账逼出来的**，不是补完整性。`isInside` 落地时只有两个调用点
+    // （`ManifestBindingSuite` / `OnboardingActionsSuite`），而它们喂进去的都是**真的在 root 里**
+    // 的 fixture 锁 —— 只走 happy path。实测：把 `isInside` 改成 `return true`，gui 包 2433 条检查
+    // **全绿**；改成 `return false` 才红（16 处）。也就是说就测试套件而言，
+    // 「`hasPrefix` → `isInside`」这一刀与「`hasPrefix` → 恒 `true`」**完全不可分辨** ——
+    // 而这一刀存在的全部理由，就是 `<root>-escaped/packs.lock` 那一类兄弟位逃逸必须被挡住。
+    // 修好了，但没有任何东西钉住它修好了；下一个人把它简化回前缀判定，没有人会喊。
+
+    suite("`isInside` 按**路径分量**判：兄弟位逃逸挡得住，真子孙放得进（两侧都有牙）") {
+        withTempDirectory { root in
+            // 逃逸位**结构性派生**自真实 root（不写死字符串）：同一个父目录下，名字是 root 名字的
+            // 严格前缀延长。这正是裸 `hasPrefix(root.path)` 逐字放过、而 `withTempDirectory` 的
+            // `removeItem` 又清理不到的那一类位置。
+            let escaped = root.deletingLastPathComponent()
+                .appendingPathComponent(root.lastPathComponent + "-escaped", isDirectory: true)
+                .appendingPathComponent("packs.lock")
+            expect(
+                !isInside(escaped, of: root),
+                "兄弟位逃逸必须判 false —— `\(escaped.path)` 逐字通过 `hasPrefix(\(root.path))`，"
+                    + "而它在 root **之外**：测试会在一个 `withTempDirectory` 清理不到的位置上开锁。"
+                    + "这条断言是 `isInside` 存在的全部理由，也是唯一能把它与「恒 `true`」区分开的东西")
+
+            // ⚠️ 正向对照，这条不能省：上面那条在一个**恒返回 false** 的实现下也全绿，而那样的
+            //    判据会让两个 fixture 自证 suite 当场假红（实测 16 处）。两条一起才说明
+            //    「挡住逃逸」不是靠「什么都不放进来」换来的。
+            let inside = root.appendingPathComponent("packs.lock")
+            expect(
+                isInside(inside, of: root),
+                "root 下的真子孙必须判 true —— 否则这个判据是恒假的，挡住逃逸靠的是「谁也不放进来」。"
+                    + "实得 \(inside.path) vs root \(root.path)")
+            let deep = root.appendingPathComponent("a/b/c/packs.lock")
+            expect(
+                isInside(deep, of: root),
+                "多层子孙同样必须判 true（判据是**分量前缀**，不是「只差一层」）。实得 \(deep.path)")
+
+            // 严格**真**子孙：root 自己不算「在里面」—— 一把等于 root 自己的锁不是一个文件。
+            expect(
+                !isInside(root, of: root),
+                "root 自己必须判 false（`urlComponents.count > rootComponents.count` 那条 guard）。"
+                    + "实得 root=\(root.path)")
+
+            // `..` 逃逸 —— 这是**唯一**同时打掉两种前缀实现的输入。实测：
+            // `<root>/../claudio-sibling/packs.lock` 逐字通过 `hasPrefix(root.path)` **和**
+            // `hasPrefix(root.path + "/")`（两者都 true），而它解出来在 root 之外。
+            // 上面那条 `-escaped` 只打掉裸前缀那一种，这一条把「加个斜杠就完事了」那种修法也堵上。
+            let traversed = root.appendingPathComponent("../claudio-sibling/packs.lock")
+            expect(
+                !isInside(traversed, of: root),
+                "`..` 逃逸必须判 false —— `\(traversed.path)` 对**两种**前缀判定都是 true，"
+                    + "而它抵消掉 `..` 之后落在 root 的兄弟位上。这条是「按分量判并抵消 `..`」"
+                    + "相对「拼个斜杠再比前缀」的唯一分辨点")
+        }
+
+        // ⚠️ 这一条钉的是**归一化不能依赖文件是否存在**（`/review d7084be` 红队 P2，实测坐实）。
+        //    `standardizedFileURL` 只在结果仍指向真实存在的路径时才剥掉开头的 `/private`：
+        //    `/private/tmp` 存在 ⇒ 归一成 `/tmp`；它下面一个**不存在**的子路径原样保留 ⇒
+        //    两侧规则不同 ⇒ 一个货真价实的子孙被判 false，四条断言集体**假红**。
+        //    而按设计锁文件恰恰是不存在的（`injectedPacksLock`：「父目录不用预建」）。
+        //
+        //    ⚠️ 这条断言的分辨力**依赖 `/private/tmp` 真实存在**（macOS 上恒成立）—— 若它不存在，
+        //    旧实现两侧都不剥，这条也会绿。如实记在这里，别当成平台无关的判据。
+        let existingPrivateRoot = URL(fileURLWithPath: "/private/tmp")
+        let absentDescendant = existingPrivateRoot
+            .appendingPathComponent("claudio-isinside-absent-\(UUID().uuidString).lock")
+        expect(
+            isInside(absentDescendant, of: existingPrivateRoot),
+            "root 存在、子孙不存在时，真子孙仍须判 true —— 归一化若是**存在性依赖**的"
+                + "（`standardizedFileURL`），这里会把 root 剥成 `/tmp` 而把子孙留在 `/private/tmp`，"
+                + "于是在完全正确的 fixture 上假红。实得 root=\(existingPrivateRoot.path) "
+                + "url=\(absentDescendant.path)")
+
+        // ⚠️ 如实记一笔，不声称封死：`standardizedFileURL` 解 `.` / `..`，**不解 symlink**
+        //    （实测 `/private/tmp/abc/packs.lock` 对 root `/tmp/abc` 判 false）。今天这不是活风险，
+        //    因为两个调用点的 root 与锁**同源派生**（都从 `withTempDirectory` 交出来的那一个 URL 长出来），
+        //    symlink 解析状态天然一致。若将来有人把 root 与锁分别从两处构造（一处走 `/tmp`、一处走
+        //    `/private/tmp`），这个判据会**假红**而不是漏放 —— fail-closed，有人会喊，所以不换成
+        //    `resolvingSymlinksInPath()`（那会去碰文件系统，且对不存在的路径行为不一致）。
+        let root = URL(fileURLWithPath: "/tmp/claudio-isinside-doc")
+        expect(
+            !isInside(URL(fileURLWithPath: "/private/tmp/claudio-isinside-doc/packs.lock"), of: root),
+            "钉住「不跨 symlink 归一」这个**已知**边界：它今天恒假、方向是 fail-closed。这条不是"
+                + "在背书该行为，而是让「有人改成 resolvingSymlinksInPath」这件事当场可见")
     }
 
     // MARK: `codeWithoutStringLiterals` —— 字符串内容清空、界定符与插值代码保留

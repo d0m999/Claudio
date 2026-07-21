@@ -502,18 +502,40 @@ func callArguments(of head: String, in source: String) -> [String] {
 ///
 /// 下游是「非空 ⇒ 红」。多报一条 = 有人喊、去看一眼、要么挪走那个构造要么教会扫描器，fail-**closed**；
 /// 少报一条 = 那个形状静默退出审查，fail-**open**，没有人会喊。所以这里**不**去判断
-/// `typealias Foo = Int` 与 `type` 无关：一律记账。三个被扫文件今天 `typealias` / `#if` /
-/// 上下文 `.init(` 各 **0** 命中（实测），代价是零，而它把「未来某人引入一种新形状」这件事
+/// `typealias Foo = Int` 与 `type` 无关：一律记账。三个被扫文件今天**四类**形状（`typealias` /
+/// `#if` / 上下文 `.init(` / 未应用的 `.init` 引用）各 **0** 命中（`/review d7084be` 复测：三个
+/// 文件里 `.init` 总共只出现一次，在 `OnboardingActions.swift` 的一句 doc comment 里，而这里喂的
+/// 是**剥了注释**的文本），代价是零，而它把「未来某人引入一种新形状」这件事
 /// 从「静默失效」变成「当场红」。
 ///
 /// ## 认得出 vs 记一笔，边界在哪
 ///
-/// * `Foo.init(` —— 左边是**显式类型名**：要么 `Foo == type`（`callArguments` 认得），要么它构造的
-///   压根不是 `type`。两种都无须记账。（残余：`Foo` 是 `type` 的别名 —— 那由 `typealias` 那条收掉。）
-/// * `= .init(` / `: .init(` / `(.init(` —— **上下文推断**，构造的是什么由类型检查器决定，本模块
-///   无从判定，可能正是 `type` ⇒ 记一笔。
-/// * `Self.init(` / `super.init(` 左边是标识符 ⇒ 不记。它们构造的是**所在类型自身**，而这个函数
-///   扫的是**调用方**文件，不是 `type` 的定义处。如实记在这里，不声称封死。
+/// 判据是**两根轴**，不是一句子串匹配。上一版只找逐字 `.init(`，于是两种形状同时漏网
+/// （`/codex review d7084be` 的 P1 与 `/review d7084be` 的六路独立命中说的是同一件事）：
+///
+/// * **右轴 —— `.init` 后面（跳过同行空白）是不是 `(`。** 允许空白，与 `callArguments` 的
+///   `head .init (` 逐字同轴。上一版这里是硬子串 `.init(`，而同一刀刚把 `callArguments` 教会跳
+///   空白 —— **两个读模型从此不同轴**，`= .init (…)` 正好掉进缝里：`callArguments` 因为左边是
+///   `=` 认不出，围栏因为那个空格记不了一笔。
+/// * **右轴不成立（后面不是 `(`）⇒ 未应用的初始化器引用**（`let make = Foo.init` 之后 `make(…)`、
+///   `map(Foo.init)`）。构造真的发生了，只是发生在另一个名字底下，`callArguments` 认得的四种写法
+///   一种都对不上 ⇒ **不看左边，一律记一笔**。这一支是上一版最大的洞：只要另留一处完全合规的死
+///   代码诱饵，就能同时喂饱 `count == 1` 与逐项实参相等断言，而真实构造一眼都没被看过。
+/// * **左轴 —— `.init` 前面（跳过同行空白）是不是标识符字符。** 只在右轴成立（真的是一次调用）
+///   时才看。`Foo.init(` / `Foo .init (`：要么 `Foo == type`（`callArguments` 认得），要么它构造的
+///   压根不是 `type`，两种都无须记账。（残余：`Foo` 是 `type` 的别名 —— 那由 `typealias` 那条收掉。）
+///   `Self.init(` / `super.init(` 同理不记：它们构造的是**所在类型自身**，而这个函数扫的是**调用方**
+///   文件，不是 `type` 的定义处。如实记在这里，不声称封死。
+/// * `= .init(` / `: .init(` / `(.init(` —— 左边不是标识符，**上下文推断**，构造的是什么由类型
+///   检查器决定，本模块无从判定，可能正是 `type` ⇒ 记一笔。
+///
+/// ⚠️ `.init` 后面**紧跟**标识符字符（`.initialize(`）不是初始化器，整条跳过 —— 否则每一个
+/// `.initialize(` 都会被当成「未应用的引用」记一笔，那是假红，而假红的守卫会被下一个人删掉。
+///
+/// ⚠️ **不要**把探针放宽成「任何前导点的成员调用」。`/review d7084be` 的红队开过这个方子，实测
+/// 打回：`PanelView.swift` 里 41 行行首 SwiftUI 修饰符（`.padding(13)` / `.frame(width:)` /
+/// `.onChange(of:)` …）会被逐条记账，`unmodeledShapes.isEmpty` 当场**永久**假红。记在这里免得
+/// 下一轮再开一次同样的方子。
 ///
 /// ⚠️ 与 `callArguments` 一样喂 ``StrippedSwiftSource/codeWithoutStringLiterals``：注释里谈论
 /// `typealias` 的**散文**不该让它红（那正是本仓库反复栽的「假红的守卫会被下一个人删掉」）。
@@ -535,14 +557,67 @@ func unmodeledConstructionShapes(of type: String, in source: String) -> [String]
         }
 
         var cursor = line.startIndex
-        while let hit = line.range(of: ".init(", range: cursor..<line.endIndex) {
+        while let hit = line.range(of: ".init", range: cursor..<line.endIndex) {
             cursor = hit.upperBound
-            if hit.lowerBound > line.startIndex,
-                let previous = line[..<hit.lowerBound].last,
-                previous.isLetter || previous.isNumber || previous == "_"
-            {
-                continue  // `Foo.init(` —— 见上面 doc 里那段边界说明
+
+            // `.initialize(` / `.initial` —— `.init` 只是更长标识符的前缀，压根不是初始化器。
+            // 不先关掉它，下面那条「后面不是 `(` ⇒ 未应用的引用」会把它们逐条记成假红。
+            if hit.upperBound < line.endIndex {
+                let next = line[hit.upperBound]
+                if next.isLetter || next.isNumber || next == "_" { continue }
             }
+
+            // 右轴：跳过**同行**空白（不跳换行 —— 与 `callArguments` 同一条理由）之后是不是 `(`。
+            var probe = hit.upperBound
+            while probe < line.endIndex, line[probe] == " " || line[probe] == "\t" {
+                probe = line.index(after: probe)
+            }
+            let applied = probe < line.endIndex && line[probe] == "("
+
+            if !applied {
+                shapes.append(
+                    "未应用的初始化器引用 `.init` —— 构造 `\(type)` 的那一次调用被挪到了**另一个名字**"
+                        + "底下（`let make = \(type).init` 之后 `make(…)`、`map(\(type).init)`），"
+                        + "`callArguments` 认得的四种写法一种都对不上，那一处会静默退出审查。\(location)")
+                continue
+            }
+
+            // 左轴：跳过**同行**空白之后，把左边那个标识符**整个**取出来，再问它像不像**类型名**。
+            //
+            // ⚠️ 只问「末字符是不是标识符字符」是不够的，而且那正是这一刀第一版新开的 fail-open：
+            //    `return .init(` / `try .init(` / `await .init(` / `throw .init(` 的关键字末字符
+            //    （`n` / `y` / `t` / `w`）全是标识符字符 ⇒ 被当成显式类型名**静默跳过**，而上一版
+            //    （硬子串 `.init(`、只看紧邻前一个字符 = 空格）反而记得住。实测七种形状全漏
+            //    （`/review d7084be` 红队 P1，本轮探针坐实）。
+            var back = hit.lowerBound
+            while back > line.startIndex {
+                let candidate = line.index(before: back)
+                if line[candidate] == " " || line[candidate] == "\t" {
+                    back = candidate
+                    continue
+                }
+                break
+            }
+            var identifierStart = back
+            while identifierStart > line.startIndex {
+                let candidate = line.index(before: identifierStart)
+                let character = line[candidate]
+                guard character.isLetter || character.isNumber || character == "_" else { break }
+                identifierStart = candidate
+            }
+            let leftIdentifier = String(line[identifierStart..<back])
+            // 判据是「**像类型名**」，不是「是标识符」——极性要求这一侧尽可能窄（跳过 = 静默退出
+            // 审查 = fail-open；记一笔 = 有人喊 = fail-closed）。Swift 的类型名约定是首字母大写，
+            // 于是全小写的关键字（`return` / `try` / `await` / `throw` / `case` / `in` / `is` / `as`…）
+            // 与元类型**变量**（`let f = Foo.self` 之后 `f.init(…)`，红队 #9）**都落进记账那一侧** ——
+            // 而这里不需要维护任何关键字清单：清单永远不完整，而不完整的清单在这一侧是 fail-open。
+            let looksLikeTypeName =
+                leftIdentifier.first.map { $0.isUppercase } == true
+                || leftIdentifier == "self" || leftIdentifier == "super"
+            if looksLikeTypeName {
+                continue  // `Foo.init(` / `Foo .init (` / `self.init(` —— 见上面 doc 那段边界说明
+            }
+
             shapes.append(
                 "上下文推断的 `.init(` —— 它构造的可能正是 `\(type)`，而本模块无从判定，"
                     + "`callArguments` 会漏掉这一处。\(location)")
@@ -603,6 +678,57 @@ func argumentValue(_ label: String, in arguments: String) -> String? {
         .map { String($0.dropFirst(prefix.count)).trimmingCharacters(in: .whitespacesAndNewlines) }
 }
 // claudio:shared-scanner:end
+
+/// `url` 是不是真的落在 `root` **这棵子树里**（按**路径分量**判，不是按字符串前缀）。
+///
+/// ## 为什么不能写 `url.path.hasPrefix(root.path)`（`/codex review d7084be` P2 + `/review d7084be`）
+///
+/// 裸前缀没有分量边界：`root` 是 `/tmp/x/abc` 时，`/tmp/x/abc-escaped/packs.lock` 逐字通过
+/// `hasPrefix("/tmp/x/abc")`，而它**在 root 之外** —— `withTempDirectory` 的 `removeItem` 清不掉它，
+/// 测试从此在一个没人打扫的位置上开锁。这与 `callArguments` 当年那次「`uninstallClaudioHooks(` 逐字
+/// 包含 `installClaudioHooks(`」是同一个病：**子串判据没有词边界**，只是这次的「词」是路径分量。
+///
+/// ⚠️ 极性提醒：同一个病换到**豁免**那一侧就是 fail-**open**（少豁免 = 多查一个文件 = 有人喊；
+/// 多豁免 = 一个文件静默退出普查 = 没有人会喊）。`ViewWiringSuite` 的 `lockCensusExemptions` 就是
+/// 那一侧，它按 `lastPathComponent` 全等判，不是这个函数。
+///
+/// ## 为什么归一化必须是**纯词法**的，不能用 `standardizedFileURL`
+///
+/// `standardizedFileURL`（以及 `NSString.standardizingPath`）会把开头的 `/private` 剥掉，**但只在
+/// 结果仍指向一个真实存在的路径时才剥** —— 它是**存在性依赖**的。而这个函数的两个操作数存在性
+/// 天然不同：`root` 已被 `withTempDirectory` 的 `createDirectory` 建出来，锁文件按设计**不存在**
+/// （见 `injectedPacksLock` 的 doc：「父目录不用预建」）。于是两边被用**两套不同的规则**归一化。
+///
+/// 实测（本轮）：`root = /private/tmp`（存在）→ 归一成 `/tmp`；它下面一个**不存在**的子路径
+/// 原样保留 `/private/tmp/…` ⇒ 一个货真价实的子孙被判 `false`，四条断言集体**假红**，失败消息还
+/// 指着一条其实就在里面的路径说它跑到外面去了。今天默认 `TMPDIR` 是 `/var/folders/…` 所以够不到，
+/// 但 `TMPDIR=/private/tmp` 是完全正常的设置。假红的守卫会被下一个人删掉 —— 这正是本仓库反复栽的跤。
+///
+/// 所以下面自己做词法归一（去 `.`、抵消 `..`），不碰文件系统，**两侧同规则**。
+///
+/// ⚠️ 天花板，如实记：这是一条**纯词法**判定，不解 symlink、不看 inode、不管大小写。
+/// 一条用 symlink 跳出 `root` 的路径它拦不住。今天两个调用点的 root 与锁**同源派生**（都从
+/// `withTempDirectory` 交出来的那一个 URL 长出来），所以够不到；换到别处复用前先读这一段。
+private func lexicalPathComponents(_ url: URL) -> [String] {
+    var components: [String] = []
+    for component in url.pathComponents {
+        if component == "." { continue }
+        if component == "..", let last = components.last, last != "/", last != ".." {
+            components.removeLast()
+            continue
+        }
+        components.append(component)
+    }
+    return components
+}
+
+func isInside(_ url: URL, of root: URL) -> Bool {
+    let rootComponents = lexicalPathComponents(root)
+    let urlComponents = lexicalPathComponents(url)
+    // 严格**真子孙**：`url == root` 不算「在里面」（一把等于 root 自己的锁不是一个文件）。
+    guard urlComponents.count > rootComponents.count else { return false }
+    return Array(urlComponents.prefix(rootComponents.count)) == rootComponents
+}
 
 /// Creates a unique temporary directory, runs `body` with its URL, and always removes it
 /// afterwards (success or throw). Every test that touches the filesystem MUST use this

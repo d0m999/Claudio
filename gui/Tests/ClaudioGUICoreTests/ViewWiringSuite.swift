@@ -815,8 +815,31 @@ func runViewWiringSuites() {
             "PanelView.swift", "ClaudioGUIApp.swift", "StateGalleryView.swift",
         ]
         var lockLeaks: [String: Int] = [:]
+        // ⚠️ 豁免按**文件名全等**判，不是 `hasSuffix` —— 极性在这里是反的，看清楚再改
+        //   （`/review d7084be` 补，与 `/codex review d7084be` 那条 `hasPrefix(root.path)` 是同一个病
+        //   的孪生体，只是坐在**豁免**这一侧）。`file.path` 是 `sourcesUnder` 交出来的**相对子路径**，
+        //   于是裸 `hasSuffix("PanelView.swift")` 会连带命中**任何**以它收尾的文件名
+        //   （`<任意前缀>PanelView.swift`）—— 它们会**自动**退出这条普查，而换来对价的那条锚定绊线
+        //   按**精确文件名**读 `expectedProductionLocks`，够不到它们。
+        //   实测（本轮，隔离 worktree）：往 `gui/Sources/ClaudioGUI/` 放一个含 `lockFile` token 的
+        //   `SoundManagerPanelView.swift`，`lastPathComponent` 全等判据下**当场红** —— 这一刀有牙。
+        //
+        //   ⚠️ 另一个直觉上的泄漏形状 `Sub/PanelView.swift`（子目录下同名）**结构上不可达**，
+        //   不要为它加判据：`sourcesUnder` 用的 `enumerator(atPath:)` 确实递归、确实会交出
+        //   `Sub/PanelView.swift` 这种相对子路径，但同一个 SwiftPM target 里**不允许两个同名
+        //   basename** —— 实测直接构建失败（`couldn't build …/PanelView.swift.o because of
+        //   multiple producers`）。也就是说 SwiftPM 自己就是那一侧的围栏，源文件根本进不来。
+        //   少豁免一个 = 多查一个文件 = 有人喊（fail-closed）；多豁免一个 = 一个文件静默退出审查 =
+        //   **没有人会喊**（fail-open）。所以这里必须是最窄的那个判据。
+        //
+        //   ⚠️ 这里**不**举具体的未来文件名当论据。上一版写的是「plan/ 里已经写着
+        //   `SoundManagerPanelView.swift`，这不是假想输入」—— 实测证伪：`plan/` 下确有
+        //   `PLAN-SOUND-MANAGER.md`（规划了面板 + 独立管理窗口，点名的新 View 是 `AudioDropZoneView`
+        //   与 `EventRowView`），但字符串 `SoundManagerPanelView` 全仓**只出现在那句声称它存在的注释
+        //   自己身上**。那是一次凭空背书，与本分支 7caf6dc 修的是同一个病 —— 而这次它长在给修复
+        //   背书的散文里。收窄判据的理由是**极性**（上一段），它自己站得住，不需要引用任何文件名。
         for file in sources
-        where !lockCensusExemptions.contains(where: { file.path.hasSuffix($0) }) {
+        where !lockCensusExemptions.contains((file.path as NSString).lastPathComponent) {
             let count = file.code.lowercased().components(separatedBy: "lockfile").count - 1
             if count > 0 { lockLeaks[file.path] = count }
         }
@@ -882,15 +905,24 @@ func runViewWiringSuites() {
         // 这条 suite 是上面那条普查两个新豁免项的**对价**。普查按文件名放行它们，这里按**调用点**
         // 逐个绑回来：实参做相等判定，再用实参自己的文本算出该文件应有的 `lockfile` 命中数 ——
         // 多出一个 token 就是第三处锁，当场红。所以豁免换来的是更严，不是更松。
-        let expectedProductionLocks: [(file: String, value: String, why: String)] = [
+        // `literal` = 该文件里必须**逐字**出现的字符串**内容**。上面读的是清空字符串之后的文本，
+        // 字面量在那里一律是空串，于是「占位路径有没有偷偷变成真实路径」在那一路上完全不可判。
+        // 这一列补上那一半，而且它**跟着表走** —— 上一版把这半条检查写死在循环外、只覆盖
+        // `StateGalleryView.swift` 一个文件，表里再加第三项时那一半会静默不存在；同时循环里
+        // `let raw = codeOnly(…)` 绑了却一次没用，Swift 为它报 `immutable value 'raw' was never used`。
+        // 那条警告在这台机器上**一直看不见**：每次 build 都是增量的（零条 Compiling），
+        // 而 e278736 / 51aebae 的 commit message 写的是「两个包 Build complete 零警告」——
+        // `/review d7084be` 用 `--scratch-path` 全新编译一次才把它照出来（8 条，全是这一条）。
+        let expectedProductionLocks: [(file: String, value: String, literal: String?, why: String)] = [
             (
-                "ClaudioGUIApp.swift", "ClaudioPaths.packsLockFile",
+                "ClaudioGUIApp.swift", "ClaudioPaths.packsLockFile", nil,
                 "组装根是全 app 唯一该说出真实路径的地方。它若变成别的，两个 manifest.json 写者"
                     + "（接管发布内置包走 helper 的 `performFirstRunSetup`、绑定/解绑走 "
                     + "`mutateManifestJSON`）就不再是同一把 `flock`，跨进程互斥当场断开"
             ),
             (
                 "StateGalleryView.swift", "URL(fileURLWithPath: \"\")",
+                "/dev/null/claudio-preview-packs.lock",
                 "preview 用一条**永不解析**的占位路径（`/dev/null/…`，字符串内容由下面那条单独钉）。"
                     + "它若变成 `ClaudioPaths.packsLockFile`，一个 SwiftUI preview 就有了去碰用户 home "
                     + "上那把锁的能力 —— 而 preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它"
@@ -933,19 +965,19 @@ func runViewWiringSuites() {
                     + " \(accounted) 次 —— 多出来的 \(actual - accounted) 处是**没有人在断言**的第三处锁。"
                     + "这个文件之所以能从 `lockLeaks` 普查里豁免，全部理由就是「它里面的锁都被这条 suite "
                     + "按调用点绑住了」。多一处没绑的，那句话就不成立了")
+
+            // 字面量那一半，**跟着表走**（上一版写死在循环外、只覆盖 StateGalleryView 一个文件）。
+            // 上面读的是清空字符串内容之后的文本，字面量在那里一律是空串，于是「占位路径有没有偷偷
+            // 变成真实路径」在上面完全不可判 —— 这一条是那一半，读的是 `raw`（保留字符串内容）。
+            if let literal = expected.literal {
+                expect(
+                    raw.contains(literal),
+                    "\(expected.file) 里必须逐字出现 `\(literal)` —— 上面那条相等判定读的是清空字符串"
+                        + "内容之后的文本（`\(expected.value)`），它对「字面量换成了什么」完全不可判；"
+                        + "这一条是那一半。preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它，"
+                        + "一条指向真实 home 的占位路径不会有别的东西喊")
+            }
         }
-        // preview 那条占位路径的**字符串内容**：上面读的是清空内容之后的文本，字面量在那里是空串，
-        // 于是「它有没有偷偷变成真实路径」在上面完全不可判。这一条补上那一半。
-        guard let gallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift") else {
-            expect(false, "读不到 StateGalleryView.swift")
-            return
-        }
-        expect(
-            gallery.contains("/dev/null/claudio-preview-packs.lock"),
-            "StateGalleryView 的 preview 包锁不再是 `/dev/null/` 下那条永不解析的占位路径 —— "
-                + "上面那条相等判定读的是清空字符串内容之后的文本（`URL(fileURLWithPath: \"\")`），"
-                + "它对「字面量换成了什么」完全不可判；这一条是那一半。preview 是 `#if DEBUG` 里的"
-                + "代码，没有任何行为测试跑它，一条指向真实 home 的占位路径不会有别的东西喊")
     }
 
     suite("注入包锁的构造点全测试包只此一处 ——「唯一来源」这句散文的可执行版本") {
