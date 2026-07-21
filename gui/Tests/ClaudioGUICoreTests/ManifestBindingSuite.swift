@@ -7,13 +7,37 @@ import Foundation
 // PackManifest's Decodable/Encodable, which only models id+events and would silently drop
 // name/author/license/version/schema.
 
-/// ⚠️ `packsLockFile` 在这里**从 `userPacksDirectory` 派生**（`<tmp>/packs` → `<tmp>/packs.lock`），
-/// 而不是让它落回 `AudioImportEnvironment` 那个指向真实 `~/.claudio/packs.lock` 的默认值。
+/// ⚠️ `packsLockFile` 有一个**兜底默认值**（``injectedPacksLock(under:)``），而不是让它落回
+/// `AudioImportEnvironment` 那个指向真实 `~/.claudio/packs.lock` 的默认值。
 ///
 /// 理由与 `userPacksDirectory` 那条不同、也更硬：忘了注入 `userPacksDirectory` 的测试会**当场
 /// 断言失败**（它去读真实 `~/.claudio/packs/`，里面没有 fixture）；而忘了注入这把锁只会**静默**
 /// 地去用户机器上开一把真锁 —— 测试照样全绿，只是落了个文件、还与正在运行的 Claudio.app 抢锁。
 /// 静默那种才是危险的那种，所以这里不给它留下「忘记」的机会。
+///
+/// ## 但兜底的**值**曾经是可派生的，那让一整类变异体在行为层隐身（`/codex review ceae86e` 的余波）
+///
+/// 上一版兜底写的是 `userPacksDirectory.deletingLastPathComponent()/packs.lock`（`<tmp>/packs`
+/// → `<tmp>/packs.lock`），下面那三条持锁 suite 也各自手写同一个布局。于是把生产代码里的
+///
+/// ```swift
+/// mutateManifestJSON(at: userPackDirectory, lockFile: environment.packsLockFile)
+/// ```
+///
+/// 换成
+///
+/// ```swift
+/// lockFile: environment.userPacksDirectory
+///     .deletingLastPathComponent().appendingPathComponent("packs.lock")
+/// ```
+///
+/// —— 这一手**已经不绑注入点**了（它绑的是包目录的位置），但求值出来**恰好等于**注入的那把锁，
+/// 于是三条持锁 suite 全绿。而 `ManifestBinding.swift` 的锁转发在整个 `gui/Tests` 里**没有任何
+/// 文本绊线**，所以那个变异体当时是**全仓零覆盖**的。
+///
+/// 现在注入值一律走 ``injectedPacksLock(under:)`` —— **父目录与叶名两样都与任何自然派生不同**，
+/// 任何「从包目录/兄弟路径推出锁」的写法求值出来都 ≠ 注入值 ⇒ 持锁 suite 当场红。
+/// 这条「不可派生」的性质本身由本文件第一条 suite 钉住，别当成可以顺手整理的风格问题。
 @MainActor
 private func makeEnvironment(
     userPacksDirectory: URL,
@@ -25,9 +49,30 @@ private func makeEnvironment(
         bundledPacksDirectory: bundledPacksDirectory,
         durationProbe: StubDurationProbe(fixedDuration: 1.0),
         packsLockFile: packsLockFile
-            ?? userPacksDirectory.deletingLastPathComponent().appendingPathComponent(
-                "packs.lock")
+            ?? injectedPacksLock(under: userPacksDirectory.deletingLastPathComponent())
     )
+}
+
+/// 本文件注入给 `AudioImportEnvironment` 的那把包锁 —— **唯一来源**，三条持锁 suite 与
+/// `makeEnvironment` 的兜底都走它。
+///
+/// ## 它的位置是承重的：**故意**不可从 `userPacksDirectory` 派生
+///
+/// 生产代码取这把锁的唯一合法写法是 `environment.packsLockFile`。任何「就地算一个出来」的写法
+/// （`userPacksDirectory.deletingLastPathComponent()/packs.lock`、`<packs 目录>/packs.lock`、
+/// 硬编码 `ClaudioPaths.packsLockFile`）都必须让持锁 suite **当场红**。做到这一点的唯一办法，
+/// 是让注入值待在那些表达式**算不出来**的地方：换父目录（`injected-locks/`）**且**换叶名
+/// （`manifest-packs-lock`，不是 `packs.lock`）。只换一样都不够 —— 只换父目录挡不住硬编码叶名
+/// 再拼父目录的写法，只换叶名挡不住同父下的派生。
+///
+/// 父目录不用预建：`FileLock.attemptLock()` 撞上 ENOENT 会自愈建父目录再重试一次。
+///
+/// 这条性质由本文件第一条 suite（fixture 自证）钉住 —— 少了它，上面整段保护力就寄生在一个
+/// **没有任何断言看着**的常量上，一次好意的「统一成生产布局」就全灭。
+private func injectedPacksLock(under root: URL) -> URL {
+    root
+        .appendingPathComponent("injected-locks", isDirectory: true)
+        .appendingPathComponent("manifest-packs-lock")
 }
 
 /// `Result<Void, ManifestBindError>` isn't `Equatable` (`Void` isn't) — this extracts the
@@ -48,6 +93,55 @@ private struct NoOpProcessSpawner: ProcessSpawning {
 
 @MainActor
 func runManifestBindingSuites() async {
+
+    suite("fixture 自证：注入的包锁必须**不可**从 `userPacksDirectory` 派生出来") {
+        // ## 这条守的是「下面三条持锁 suite 赖以成立的前提」，不是产品行为
+        //
+        // `ManifestBinding.swift` 里那两处 `mutateManifestJSON(at:lockFile: environment.packsLockFile)`
+        // 的**锁转发**，在整个 `gui/Tests` 里**没有任何文本绊线**（`ViewWiringSuite` 那套只读
+        // `PanelView.swift` / `OnboardingActions.swift`，够不到这里）。所以能分辨「转发对了」与
+        // 「就地算了一个出来」的，**只有**下面那三条持锁 suite —— 而它们能分辨的唯一理由，是注入的
+        // 锁待在任何自然派生都算不出来的位置上。
+        //
+        // 那个位置是 ``injectedPacksLock(under:)`` 里的一个常量。常量没有守卫：谁把它「统一成生产
+        // 布局」（`<tmp>/packs.lock`，看起来整齐得多、还和 `ClaudioPaths` 一致），三条持锁 suite
+        // **一条都不会红**，而 `lockFile:` 那一手退回全仓零覆盖。
+        //
+        // 这正是本仓库反复栽的形状：一条断言的分辨力寄生在另一处**没有人在断言**的事实上。
+        //
+        // ## 四条派生源，少一条就有一半恒真
+        //
+        // 前三条是生产代码里**写得出来**的三种「就地算一个」；第四条钉叶名 —— 光换父目录挡不住
+        // 「硬编码 `packs.lock` 这个叶名、再从别处拼父目录」的写法。
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+            let injected = environment.packsLockFile
+
+            let derivations: [(String, URL)] = [
+                (
+                    "userPacksDirectory 的兄弟位",
+                    userPacks.deletingLastPathComponent().appendingPathComponent("packs.lock")
+                ),
+                ("userPacksDirectory 之内", userPacks.appendingPathComponent("packs.lock")),
+                ("用户真实 home 上的那把（= 生产默认值）", ClaudioPaths.packsLockFile),
+            ]
+            for (label, derived) in derivations {
+                expect(
+                    injected.path != derived.path,
+                    "注入的包锁落在了「\(label)」上（都是 \(derived.path)）—— 这让「`lockFile:` 那一手"
+                        + "改成从这条路径就地算出来」的变异体求值出来**恰好等于**注入值，下面三条持锁 "
+                        + "suite 于是全绿，而那一手已经不绑注入点了。而 `ManifestBinding` 的锁转发**没有"
+                        + "任何文本绊线**兜底，那三条 suite 是唯一的守卫，它们的分辨力全靠这个位置")
+            }
+            expect(
+                injected.lastPathComponent != "packs.lock",
+                "注入的包锁叶名是 `packs.lock` —— 换父目录还不够：就地算锁的写法里硬编码这个叶名、"
+                    + "再从别处拼出父目录，照样可能撞上注入值。叶名也必须是生产代码不会写出来的那一个。"
+                    + "实际叶名：\(injected.lastPathComponent)")
+        }
+    }
+
     suite(
         "bindEventToManifest: binding an unmapped event sets it, and recomputes to .present via packCoverage"
     ) {
@@ -1060,7 +1154,7 @@ func runManifestBindingSuites() async {
             let probe = GatedDurationProbe(fixedDuration: 1.0)
             let environment = AudioImportEnvironment(
                 userPacksDirectory: userPacks, bundledPacksDirectory: nil, durationProbe: probe,
-                packsLockFile: root.appendingPathComponent("packs.lock"))
+                packsLockFile: injectedPacksLock(under: root))
             let importViewModel = AudioImportViewModel(packID: "pack-a", environment: environment)
             let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
 
@@ -1122,7 +1216,7 @@ func runManifestBindingSuites() async {
             let probe = GatedDurationProbe(fixedDuration: 1.0)
             let environment = AudioImportEnvironment(
                 userPacksDirectory: userPacks, bundledPacksDirectory: nil, durationProbe: probe,
-                packsLockFile: root.appendingPathComponent("packs.lock"))
+                packsLockFile: injectedPacksLock(under: root))
             let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
             let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
 
@@ -1195,7 +1289,7 @@ func runManifestBindingSuites() async {
 
             let result = mutateManifestJSON(
                 at: userPacks.appendingPathComponent("my-pack"),
-                lockFile: root.appendingPathComponent("packs.lock")
+                lockFile: injectedPacksLock(under: root)
             ) {
                 json in
                 json["id"] = "my-pack-copy"
@@ -1233,7 +1327,7 @@ func runManifestBindingSuites() async {
             var transformCalled = false
             let result = mutateManifestJSON(
                 at: userPacks.appendingPathComponent("my-pack"),
-                lockFile: root.appendingPathComponent("packs.lock")
+                lockFile: injectedPacksLock(under: root)
             ) {
                 _ in
                 transformCalled = true
@@ -1261,7 +1355,7 @@ func runManifestBindingSuites() async {
             var transformCalled = false
             let result = mutateManifestJSON(
                 at: userPacks.appendingPathComponent("my-pack"),
-                lockFile: root.appendingPathComponent("packs.lock")
+                lockFile: injectedPacksLock(under: root)
             ) {
                 _ in
                 transformCalled = true
@@ -1294,7 +1388,7 @@ func runManifestBindingSuites() async {
                 var transformCalled = false
                 let result = mutateManifestJSON(
                     at: userPacks.appendingPathComponent("my-pack"),
-                    lockFile: root.appendingPathComponent("packs.lock")
+                    lockFile: injectedPacksLock(under: root)
                 ) {
                     _ in
                     transformCalled = true
@@ -1325,7 +1419,7 @@ func runManifestBindingSuites() async {
             var transformCalled = false
             let result = mutateManifestJSON(
                 at: userPacks.appendingPathComponent("my-pack"),
-                lockFile: root.appendingPathComponent("packs.lock")
+                lockFile: injectedPacksLock(under: root)
             ) {
                 _ in
                 transformCalled = true
@@ -1354,7 +1448,7 @@ func runManifestBindingSuites() async {
             // `encodeJSONObjectForWriting`, not merely `bindEventToManifest`.
             let result = mutateManifestJSON(
                 at: userPacks.appendingPathComponent("my-pack"),
-                lockFile: root.appendingPathComponent("packs.lock")
+                lockFile: injectedPacksLock(under: root)
             ) {
                 json in
                 json["untouched"] = "value"
@@ -1696,7 +1790,7 @@ func runManifestBindingSuites() async {
     suite("mutateManifestJSON：包锁被占住时 bind 必须报 .lockBusy，且磁盘一个字节都不许动") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
-            let packsLock = root.appendingPathComponent("packs.lock")
+            let packsLock = injectedPacksLock(under: root)
             let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
             writeFixture(#"{ "id": "my-pack", "events": {} }"#, to: manifestFile)
             writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
@@ -1734,7 +1828,7 @@ func runManifestBindingSuites() async {
     suite("mutateManifestJSON：成功跑完必须把锁还回去（不许一直持有 / 不许泄漏 fd）") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
-            let packsLock = root.appendingPathComponent("packs.lock")
+            let packsLock = injectedPacksLock(under: root)
             writeFixture(
                 #"{ "id": "my-pack", "events": {} }"#,
                 to: userPacks.appendingPathComponent("my-pack/manifest.json"))
@@ -1766,7 +1860,7 @@ func runManifestBindingSuites() async {
     suite("clearEventBinding：与 bind 同等待遇 —— 锁被占住时也必须报 .lockBusy") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
-            let packsLock = root.appendingPathComponent("packs.lock")
+            let packsLock = injectedPacksLock(under: root)
             let manifestFile = userPacks.appendingPathComponent("my-pack/manifest.json")
             writeFixture(
                 #"{ "id": "my-pack", "events": { "stop": "stop.mp3" } }"#, to: manifestFile)
