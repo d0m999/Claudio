@@ -396,7 +396,11 @@
     /// gallery ever performs a real import, so nothing ever reads it.
     private let previewAudioImportEnvironment = AudioImportEnvironment(
         userPacksDirectory: URL(fileURLWithPath: "/dev/null/claudio-preview-packs"),
-        durationProbe: PreviewDurationProbe()
+        durationProbe: PreviewDurationProbe(),
+        // 与 `userPacksDirectory` 同一个理由：一条**永不解析**的占位路径。gallery 从不写 manifest，
+        // 所以这把锁从不会被打开 —— 但它必须显式写出来（形参没有默认值），而写出来的绝不能是
+        // 真实路径：一个 preview 不该有能力去碰用户 home 上的锁。
+        packsLockFile: URL(fileURLWithPath: "/dev/null/claudio-preview-packs.lock")
     )
 
     // MARK: - Preview providers (classic `PreviewProvider` ONLY — `#Preview` does not

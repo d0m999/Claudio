@@ -60,8 +60,12 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         // can render at all (onboarding already reports `.installed`), `claudio
         // setup`/`performFirstRunSetup` has already copied every bundled pack into the user
         // pack root, so the panel's pack gallery only ever needs to look there.
+        // `packsLockFile` 没有默认值（见 ``AudioImportEnvironment/packsLockFile`` 的 doc：漏传它
+        // 的失败模式是**静默**的，所以由编译器执行而不是靠纪律）。这里是全 app 唯一一处说出真实
+        // 路径的地方 —— 组装根说出它，比让一个默认值在三十几个 fixture 背后悄悄生效要好。
         let audioEnvironment = AudioImportEnvironment(
-            durationProbe: AVFoundationAudioDurationProbe())
+            durationProbe: AVFoundationAudioDurationProbe(),
+            packsLockFile: ClaudioPaths.packsLockFile)
 
         // The ONLY `Bundle.main` in the app (T17). Everything downstream of it — is this really
         // the helper? is it runnable? what gets copied where? — is a pure function in
