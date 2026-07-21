@@ -113,10 +113,38 @@ private struct FixtureTargets {
         configFile = claudioRoot.appendingPathComponent("config.json")
         configLockFile = claudioRoot.appendingPathComponent("config.lock")
         settingsLockFile = claudioRoot.appendingPathComponent("settings.lock")
-        // 第三把锁必须和另外两把一样注入临时路径。漏掉它 ⇒ 落回 `ClaudioPaths.packsLockFile`
-        // ⇒ 这套接管测试会在**用户真实的** `~/.claudio/packs.lock` 上开一把锁（实测复现过：
-        // 跑完测试之后那个 0 字节、0600 的文件真的躺在那儿）。
-        packsLockFile = claudioRoot.appendingPathComponent("packs.lock")
+        // 第三把锁必须注入临时路径。漏掉它 ⇒ 落回 `ClaudioPaths.packsLockFile` ⇒ 这套接管测试会在
+        // **用户真实的** `~/.claudio/packs.lock` 上开一把锁（实测复现过：跑完测试之后那个 0 字节、
+        // 0600 的文件真的躺在那儿）。
+        //
+        // ## 它**故意不**和另外两把长在一起 —— 这个位置是承重的，别「顺手整理」回去
+        //
+        // 上一版把它写成 `claudioRoot.appendingPathComponent("packs.lock")`，与 `config.lock` /
+        // `settings.lock` 同父同名规则。那让整整一类变异体**在行为层不可见**：
+        //
+        // ```swift
+        // packsLockFile: environment.configLockFile
+        //     .deletingLastPathComponent().appendingPathComponent("packs.lock")
+        // ```
+        //
+        // —— 这一手已经不绑注入点了（它绑的是**另一把锁**的路径），但在旧 fixture 里它求值出来的
+        // 路径**恰好等于**注入的那把，于是持锁行为测试拿到的锁是对的、全绿。当时只能靠一条文本
+        // 绊线去分辨它，而文本绊线够不着「实参求值出来的值」，只能钉调用点那一行。
+        //
+        // 换成**另一个父目录 + 另一个叶名**之后，任何「从兄弟锁派生」或「硬编码 packs.lock 这个
+        // 组件」的写法求值出来都 ≠ 注入值 ⇒ 持锁行为测试当场红。父目录与叶名**两样都要换**：
+        // 只换父目录挡不住 `userPacksDirectory.deletingLastPathComponent()` 那一路，只换叶名挡不住
+        // 同父下的派生。
+        //
+        // 父目录不用预建：`FileLock.attemptLock()` 撞上 ENOENT 会自愈建父目录再重试一次
+        // （见 `FileLock.swift` 里那段 first-run 自举的理由）。
+        //
+        // 这个「不可派生」的性质本身由下面那条 `FixtureTargets 自证` suite 钉住 —— 少了它，
+        // 上面整段保护力就寄生在一个**没有任何断言看着**的常量上，一次好意的重构就全灭。
+        packsLockFile =
+            root
+            .appendingPathComponent("injected-locks", isDirectory: true)
+            .appendingPathComponent("gui-packs-lock")
     }
 
     func environment(bundledHelperBinary: URL?) -> OnboardingActionEnvironment {
@@ -192,6 +220,49 @@ private func fileBytes(_ url: URL) -> Data? {
 
 @MainActor
 func runOnboardingActionsSuites() {
+
+    // MARK: fixture 自证
+
+    suite("FixtureTargets 自证：注入的包锁必须**不可**从任何兄弟路径派生出来") {
+        // ## 这条守的是「另一条守卫赖以成立的前提」，不是产品行为
+        //
+        // 下面那条持锁行为测试之所以能逮住「实参从兄弟锁派生」这一整类变异体，唯一的理由是
+        // fixture 里的包锁**不在**任何兄弟路径能算出来的位置上。那是 `FixtureTargets.init` 里的
+        // 一个常量，而常量没有守卫 —— 谁把它「顺手整理」回 `claudioRoot/packs.lock`（那看起来
+        // 整齐得多，而且与生产布局一致，是个非常有说服力的重构），持锁测试**一条都不会红**，
+        // 保护力静默归零。
+        //
+        // 这正是本仓库反复栽的那个形状：一条断言的分辨力寄生在另一处**没有人在断言**的事实上。
+        //
+        // ## 四条都要写，少一条就有一半恒真
+        //
+        // 三个派生源（config 锁、settings 锁、包目录）各一条 —— 只断言其中一个，fixture 若被挪到
+        // 另外两个的兄弟位上，那一半就恒真。第四条钉叶名：光换父目录挡不住实参里硬编码
+        // `"packs.lock"` 这个组件、再从别处拼出来的写法。
+        withTempDirectory { root in
+            let targets = FixtureTargets(in: root)
+            let derivations: [(String, URL)] = [
+                ("configLockFile 的兄弟位", targets.configLockFile),
+                ("settingsLockFile 的兄弟位", targets.settingsLockFile),
+                ("userPacksDirectory 的兄弟位", targets.userPacksDirectory),
+            ]
+            for (label, sibling) in derivations {
+                let derived = sibling.deletingLastPathComponent()
+                    .appendingPathComponent("packs.lock")
+                expect(
+                    targets.packsLockFile.path != derived.path,
+                    "注入的包锁落在了「\(label)」上（都是 \(derived.path)）—— 这让"
+                        + "「实参改成从这条兄弟路径派生」的变异体求值出来**恰好等于**注入值，"
+                        + "持锁行为测试于是全绿，而那一手已经不绑注入点了。fixture 的包锁必须待在"
+                        + "任何兄弟路径都算不出来的地方，这是那条行为测试分辨力的**前提**")
+            }
+            expect(
+                targets.packsLockFile.lastPathComponent != "packs.lock",
+                "注入的包锁叶名是 `packs.lock` —— 换父目录还不够：实参里硬编码这个叶名、再从别处"
+                    + "拼出父目录的写法照样可能撞上注入值。叶名也必须是生产代码不会写出来的那一个。"
+                    + "实际叶名：\(targets.packsLockFile.lastPathComponent)")
+        }
+    }
 
     // MARK: intent ↔ copy 不变式
 
@@ -787,7 +858,7 @@ func runOnboardingActionsSuites() {
     // 那句 `self.packsLockFile = packsLockFile` —— 改成 `self.packsLockFile = ClaudioPaths.packsLockFile`，
     // **调用点一个字符都不用动**：
     //
-    //  · 文本绊线读的是调用点那行，needle 照常命中 ⇒ **gui 2368 条全绿**；
+    //  · 文本绊线读的是调用点那行，needle 照常命中 ⇒ **整套 gui 测试全绿**；
     //  · 而注入的临时路径在赋值那一手就被丢了 ⇒ 这套接管测试**真的**在用户的
     //    `~/.claudio/packs.lock` 上开了一把锁（台账跑完，那个 0 字节 0600 的文件真的躺在那儿）。
     //
@@ -795,7 +866,9 @@ func runOnboardingActionsSuites() {
     // 错的是那个表达式**求值出来的值**。文本看不见值 —— 只有让代码真的去开那把锁才看得见。
     //
     // config / settings 两把锁各自早有两条这样的持锁 suite；包锁一条都没有。可执行的判别式是数
-    // `FileLock(path: targets.<X>LockFile.path)` 的出现次数：config 2、settings 2、packs 在这条之前是 0。
+    // 这条 suite 在不在，就是「有没有行为兜底」的判据本身 —— **不写计数**。曾经这里记的是数
+    // `FileLock(path: targets.<X>LockFile.path)` 的出现次数（config 2 / settings 2 / packs 0），
+    // 而 packs 那个 0 在本 suite 落地当天就变成了 1，判据自己成了谎话（`/codex review ceae86e` P2）。
     //
     // ## 为什么它慢半拍（别当成卡死去「优化」掉）
     //
@@ -829,7 +902,7 @@ func runOnboardingActionsSuites() {
                     + "① 接管**成功**了 = 它开的根本不是这把锁：注入点在某一手被丢掉了（`OnboardingAction"
                     + "Environment.init` 的存储赋值、或构造 `SetupEnvironment` 时的实参），于是它去开了"
                     + "**用户真实的** `~/.claudio/packs.lock`，与他正在运行的 Claudio.app 抢锁 —— 而"
-                    + "`ViewWiringSuite` 那条文本绊线对这一整类是瞎的（实测：改存储赋值那一手，2368 全绿）；"
+                    + "`ViewWiringSuite` 那条文本绊线对这一整类是瞎的（实测：改存储赋值那一手，整套全绿）；"
                     + "② 停在 `.useFailure` / `.installFailure` = 包发布被整段跳过了，而它必须在选包与写"
                     + "hooks **之前**：跳过包却照常写 hooks，用户拿到的是一台亮着绿点、doctor 也过、却"
                     + "永远不响的机器（`Setup.swift` 里 `.packsLockBusy` 那一段亲口立的纪律）。"

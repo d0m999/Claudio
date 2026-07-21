@@ -141,7 +141,19 @@ public struct PanelView: View {
             // this environment drives ALSO writes `settings.json` (`installClaudioHooks`), which
             // must serialize on its own, separate lock — never `config.json`'s.
             configLockFile: lockFile,
-            settingsLockFile: ClaudioPaths.settingsLockFile)
+            settingsLockFile: ClaudioPaths.settingsLockFile,
+            // 必须是 `audioEnvironment.packsLockFile`，**不是** `ClaudioPaths.packsLockFile`。
+            //
+            // manifest.json 有**两个**写者：这条接管链（→ `SetupEnvironment` → 发布内置包）与
+            // `ManifestBinding` 的绑定/解绑（走 `audioEnvironment`）。上面 `userPacksDirectory:`
+            // 那一行已经把两者指向同一个包目录；这一行是把两者的**互斥**焊在同一个源上的唯一
+            // 结构链接。两边各自去取 `ClaudioPaths.packsLockFile` 也能在**今天**碰巧相等，但那
+            // 是「两个独立默认值恰好收敛」，不是「同一个源」—— 谁改了 `audioEnvironment` 那一侧
+            // （它是 `var`），两个写者当场分家，而 manifest.json 的读-改-写照旧并发。
+            //
+            // 漏掉这一行的代价（本行存在之前的真实状态，不是假想）：`packsLockFile` 有默认实参，
+            // 于是**静默**落回 `ClaudioPaths.packsLockFile`，编译器一个字都不说。
+            packsLockFile: audioEnvironment.packsLockFile)
         // 全部构造成**纯 local 实例**，再各自 wrap 进 `@StateObject` / `@State`，**并把同一实例**交给
         // `PanelConfigController`。绝不在这里读 `_someStateObject.wrappedValue` —— 那会在 SwiftUI 装好
         // state 之前重新求值 autoclosure、每次发一个全新实例（见上面 actionRunner 那段同样的坑）。捕获

@@ -501,7 +501,13 @@ public struct OnboardingActionEnvironment: Sendable {
     ///
     /// ⚠️ 它必须像另外两把一样**穿过这里**再灌进 `SetupEnvironment`，不能让下游落回默认值：
     /// 生产上默认值碰巧是对的（GUI 侧 bind 用的也是它），但**测试**会因此去用户真实的
-    /// `~/.claudio/packs.lock` 上开一把锁。转发这一手由 `ViewWiringSuite` 的绊线钉住。
+    /// `~/.claudio/packs.lock` 上开一把锁。
+    ///
+    /// 这一手分两半守，**两半都必要**：
+    ///  · `PanelView` 那一手（构造本类型时转发不转发）由 `ViewWiringSuite` 的绊线钉 —— `ClaudioGUI`
+    ///    带 `@main`、测试包 import 不了，源码文本是那里唯一可能的守卫；
+    ///  · 下面 `init` 的**存储赋值**那一手，文本绊线**够不着**（调用点一个字符都不用动，错的是
+    ///    表达式求值出来的值），只有 `OnboardingActionsSuite` 里那条持锁行为测试看得见。
     public let packsLockFile: URL
 
     public init(
@@ -511,7 +517,33 @@ public struct OnboardingActionEnvironment: Sendable {
         configFile: URL = ClaudioPaths.configFile,
         configLockFile: URL = ClaudioPaths.configLockFile,
         settingsLockFile: URL = ClaudioPaths.settingsLockFile,
-        packsLockFile: URL = ClaudioPaths.packsLockFile
+        // **刻意没有默认值**（另外两把锁有）。漏传它的代价与漏传别的参数不同：不是拿到一个不好用
+        // 的值，而是**静默**落回用户真实 home 上的那把锁，编译器一个字都不说 —— `PanelView` 就是
+        // 这么漏了整整一版的，没有任何测试红过。
+        //
+        // ⚠️ **「漏传 = 编译错误」这句话有一个必须写明的边界，别让措辞比覆盖范围大。**
+        // 唯一的生产构造点在 `PanelView.swift`，而它属于 `ClaudioGUI` —— 一个带 `@main` 的
+        // executableTarget，`claudio-gui-tests` **不依赖**它（依赖表里只有 `ClaudioGUICore` 与
+        // `ClaudioCore`）。所以本仓库文档化的绿灯信号 `swift run --package-path gui claudio-gui-tests`
+        // **根本不编译 PanelView.swift**，这条编译错误在那条命令下**不会出现**。
+        //
+        // 实测（同一个变异体，两条命令）：删掉 `PanelView` 那一行实参 ⇒
+        //   · `swift build --package-path gui` → `error: missing argument for parameter 'packsLockFile'`
+        //   · `swift run --package-path gui claudio-gui-tests` → **编译通过**，整套跑完，
+        //     红的是 `ViewWiringSuite` 那条**文本绊线**，不是编译器。
+        //
+        // 所以这一刀的真实作用域是：`swift build` 与 release CI（`swift build --product ClaudioGUI`）。
+        // 在测试进程里守住这一手的**始终是那条文本绊线**，不是类型。两者都要有，且别把功劳记错。
+        //
+        // ⚠️ 别把这一刀的作用说大：它只挡「**漏传**」。它对「传了但传错」零贡献（上面那条 `init`
+        // 存储赋值被换掉的变异体，参数照样必填、照样被老实传进来、然后在函数体里被扔掉，编译零
+        // 警告）。那一类只有持锁行为测试看得见。
+        //
+        // 另外两把锁的默认值**不能**照此删掉：那会逼 `Subcommands.swift` / `ClaudioGUIApp.swift`
+        // 等文件出现 `lockFile` 字样，而 `ViewWiringSuite` 与 `LockSeparationSuite` 各有一条普查
+        // 的立论正是「默认值是唯一锁来源」，放宽它们会重新打开 play 锁那个变异体。用包锁的类型
+        // 安全去换 config 锁的普查覆盖，净亏。
+        packsLockFile: URL
     ) {
         self.bundledHelperBinary = bundledHelperBinary
         self.claudioBinaryDestination = onboarding.claudioBinaryPath

@@ -372,14 +372,63 @@ func strippingComments(_ source: String) -> StrippedSwiftSource {
 /// `uninstallClaudioHooks(` **逐字包含** `installClaudioHooks(`，光传函数名就会被一个 uninstall
 /// 调用满足。头由 `head(` 锚、尾由配平括号锚，两头锁死。
 ///
+/// ## 极性：识别范围只许放宽，收窄就是 fail-open（`/codex review ceae86e` 的 P1）
+///
+/// 这个扫描器交出来的站点集合，下游是拿「**每一处**都必须转发对」去遍历的。所以：
+///
+/// * **多认一处** → 多查一处 → 最坏是误报（有人喊），fail-**closed**；
+/// * **少认一处** → 那一处静默退出审查 → 真实构造可以随便写，fail-**open**，没有人会喊。
+///
+/// 上一版只认裸 `head(` 这**一种**构造形式，于是下面这些**全部编译得过、全部隐身**（实测五种，
+/// 喂逐字照抄的本函数，识别出 **0** 处）：
+///
+/// ```swift
+/// let a: SetupEnvironment = .init(…)            // 类型标注 + 上下文 .init
+/// performFirstRunSetup(environment: .init(…))   // 实参位置的上下文 .init
+/// let c = SetupEnvironment.init(…)              // 类型名在，但后面是 `.` 不是 `(`
+/// let d = SetupEnvironment (…)                  // 中间一个空格
+/// typealias SE = SetupEnvironment; SE(…)        // 别名
+/// ```
+///
+/// `!calls.isEmpty` 那条兜底本来是把它做成**围栏**（认不出⇒红）的那一半，但它只要求「≥1 处」，
+/// 于是一个死代码诱饵（`DecoySetupEnvironment(…)`，写得完全合规）就能把它喂饱，真实构造走上面
+/// 任意一种形式隐身而去。左词边界杀死诱饵那一路，`.init` 那一路靠多认一种 needle 收掉。
+///
+/// **剩下的没关掉的，如实记在这里**：`SetupEnvironment (` 的空格形式、`typealias` 别名形式，
+/// 本函数**仍然认不出**。它们是「白名单永远不完整」的活证据（``StrippedSwiftSource/unmodeledConstructs``
+/// 的 doc 为字符串扫描器写过同一句话）。真正兜住这一整类的不是本函数，是**行为测试** ——
+/// 持住被注入的那把锁跑一次真实路径，文本怎么写都骗不过求值出来的**值**。
+///
 /// ⚠️ 必须喂 ``StrippedSwiftSource/codeWithoutStringLiterals``，不能喂 ``StrippedSwiftSource/code``：
 /// 后者保留字符串**内容**，一句 `"pack (1.json"` 里的 `(` 会被计进深度、括号从此永不配平 ——
 /// 那个洞的完整代价记在 `codeWithoutStringLiterals` 自己的 doc 里。
 func callArguments(of head: String, in source: String) -> [String] {
-    let needle = head + "("
+    // 认得出的构造形式**只许单调放宽，绝不许收窄** —— 见上面 doc 里那段极性说明。
+    // 两种都认：裸 `head(` 与显式 `head.init(`（后者 `head(` 匹配不到，因为 `head` 后面是 `.`）。
+    let needles = [head + "(", head + ".init("]
     var calls: [String] = []
     var cursor = source.startIndex
-    while let hit = source.range(of: needle, range: cursor..<source.endIndex) {
+    while cursor < source.endIndex {
+        guard
+            let hit = needles
+                .compactMap({ source.range(of: $0, range: cursor..<source.endIndex) })
+                .min(by: { $0.lowerBound < $1.lowerBound })
+        else { break }
+        // **左词边界**：命中前一个字符若是标识符字符，这不是对 `head` 的调用，而是某个
+        // **以它结尾**的更长标识符 —— `DecoySetupEnvironment(` 逐字包含 `SetupEnvironment(`。
+        // 那正是喂饱 `!calls.isEmpty` 的死代码诱饵（真实构造改走 `.init` 之类扫描器认不出的
+        // 形式，诱饵替它背书，三条断言全绿）。
+        //
+        // ⚠️ **只排字母/数字/下划线，绝不排 `.`**。`ClaudioCore.SetupEnvironment(` 是一次
+        // **真实**的限定构造，把它排掉 = 把一处构造点移出审查 = 下游那条「**每一处**都必须转发对」
+        // 的循环少查一处 = fail-**open**。这条极性与直觉相反，写在这里免得下次被「顺手收紧」。
+        if hit.lowerBound > source.startIndex,
+            let previous = source[..<hit.lowerBound].last,
+            previous.isLetter || previous.isNumber || previous == "_"
+        {
+            cursor = hit.upperBound
+            continue
+        }
         var depth = 1
         var index = hit.upperBound
         while index < source.endIndex, depth > 0 {
