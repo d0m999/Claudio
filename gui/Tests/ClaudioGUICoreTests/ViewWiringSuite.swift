@@ -90,6 +90,19 @@ func collapsingWhitespace(_ text: String) -> String {
     text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
 }
 
+/// `marker` 在 `source` 里出现几次，对空白排版（任意长度的空格、换行、块注释被剥完后补的那个
+/// 空格）免疫 —— 先 ``collapsingWhitespace(_:)`` 再数子串。
+///
+/// ⚠️ 生产扫描与它的合成正/负控**必须**共用这一个函数，不能各自重新拼一遍「collapse 再数」——
+/// 两处各写一份看起来一样的表达式，正/负控测的就只是「这个表达式抽象上对不对」，测不出「生产那
+/// 一行有没有真的在调它」：把生产那行悄悄改回不 collapse 的旧版，两份各自独立的表达式各判各的，
+/// 正/负控一个字都不会变，围栏本体的回归却没有任何东西喊。（`gui/Tests/ClaudioGUICoreTests`
+/// `extension` 普查那一刀第一版就是这么栽的：实测把生产那行改回
+/// `source.code.components(separatedBy: marker)`，2472 条检查照样全绿。）
+func whitespaceTolerantHitCount(of marker: String, in source: String) -> Int {
+    collapsingWhitespace(source).components(separatedBy: marker).count - 1
+}
+
 /// `marker` 之后紧跟的那个 `{ … }` 的**闭包体**（按花括号配对切出来），`nil` = 找不到 marker 或它后面
 /// 没有配平的闭包。
 ///
@@ -1069,8 +1082,14 @@ func runViewWiringSuites() {
                 // 读 `code`（剥注释、保留字符串内容）：注释里谈论这个形状的散文**不该**被数到
                 // （本 suite 上面就有两段），而一段被误判成字符串的代码同样数不到 —— 后者由本文件
                 // 第一条 suite（词法 `unmodeled` 普查）兜着。
-                let hits =
-                    source.code.components(separatedBy: environmentExtensionMarker).count - 1
+                //
+                // ⚠️ 喂 `whitespaceTolerantHitCount`（先 collapse 再数），不是直接数 `source.code`
+                // 里的固定单空格子串（`/codex review d9f099a,b4091d7,14ec6b1` P1 坐实）：那种判据
+                // 只逮得住原样敲一个空格的那一种，`extension  AudioImportEnvironment`（两个空格）、
+                // 换行分隔、或块注释隔开（剥完注释后补的那个空格，见 `strippingComments` 的
+                // `blockComment` 分支）都是合法 Swift、`swift-format` 不会去改它们，原判据一个字
+                // 都读不到。
+                let hits = whitespaceTolerantHitCount(of: environmentExtensionMarker, in: source.code)
                 if hits > 0 { environmentExtensions["\(root)/\(source.path)"] = hits }
             }
         }
@@ -1082,6 +1101,46 @@ func runViewWiringSuites() {
                 + "编译错误」当场失效，而它们结构上看不见。这不是「扩展一律不许」的教条：包锁的"
                 + "**必填性**是这个类型今天唯一靠编译器执行的不变量，而扩展是绕开它最短的一条路。"
                 + "真要加扩展，先把上面那两条改成能读到扩展里的构造器，再来放行这一条")
+
+        // 上面那条 `whitespaceTolerantHitCount` 的**正/负控**：合成输入直接喂**同一个函数**（定义
+        // 见 91 行附近，紧跟 `collapsingWhitespace` 之后），不各自重新拼一遍「collapse 再数」——
+        // 那样正/负控测的只是「这段逻辑抽象上对不对」，测不出「生产那行有没有真的在调它」（该函数
+        // 的 doc comment 里记着这条教训第一版是怎么栽的：生产那行独立改回旧版，正/负控一个字不变，
+        // 2472 条检查照样全绿）。现在两边共用同一个函数体，回退生产那一行就是回退这四条正/负控在
+        // 测的同一段代码，才会真的红。
+        //
+        // 真实仓库里从来没人写过两个空格的 `extension`，所以「以前逮不住、现在逮得住」这件事没有
+        // 真实文件能验证，只能靠合成输入。
+        //
+        // ⚠️ 下面四个变体的 needle **分段拼**，与 `environmentExtensionMarker` 自己那行同一个理由：
+        // 本条 suite 扫的目录**包含本文件**，若哪个变体在源码里连续写出 `extension AudioImportEnvironment`
+        // （哪怕中间隔的是两个空格、一个 `\n`），`source.code` 保留字符串字面量内容，扫到自己这行
+        // 就会算作一次命中 —— 上面那条围栏当场对着自己的正/负控假红。第一版就是这么栽的（实测：
+        // `swift run` 直接报 `ViewWiringSuite.swift: 2` 次命中）。
+        let extensionKeyword = "extension"
+        let typeName = "AudioImportEnvironment"
+        expect(
+            whitespaceTolerantHitCount(
+                of: environmentExtensionMarker, in: extensionKeyword + " " + typeName + " {"
+            ) == 1,
+            "正控基线都读不到 —— 单空格这个最平常的写法本该必中，`whitespaceTolerantHitCount` 本身就是坏的"
+        )
+        expect(
+            whitespaceTolerantHitCount(  // 两个空格
+                of: environmentExtensionMarker, in: extensionKeyword + "  " + typeName + " {"
+            ) == 1,
+            "两个空格的 `extension` 声明没被逮到 —— collapse 没生效，固定单空格子串那个洞原样还在")
+        expect(
+            whitespaceTolerantHitCount(  // 换行分隔
+                of: environmentExtensionMarker, in: extensionKeyword + "\n" + typeName + " {"
+            ) == 1,
+            "`extension` 和类型名之间换行的声明没被逮到 —— 同一个洞的换行变体")
+        expect(
+            whitespaceTolerantHitCount(
+                of: environmentExtensionMarker, in: extensionKeyword + " " + "SomeUnrelatedType { }"
+            ) == 0,
+            "负控假红了 —— collapse 之后不该无差别命中任何 `extension` 声明，只该命中"
+                + "`AudioImportEnvironment` 那一个")
     }
 
     suite("生产侧两处显式包锁各自锚到调用点 —— 它们换来了 lockLeaks 普查的两个豁免") {

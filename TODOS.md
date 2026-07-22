@@ -2286,3 +2286,17 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Effort:** M（①）/ S（②）
 **Priority:** P2（今天不漏；是「下一次善意重构」的静默失效面，而且现有绿色测试会给那次重构错误的信心）
 **Depends on:** None
+
+### `ViewWiringSuite` 的生产构造点普查够不到「文件里不出现类型名」的实参上下文推断构造
+
+**What:** `ViewWiringSuite.swift` 里给 `AudioImportEnvironment` 记账的生产构造点普查（`constructionCensus` / `unmodeledConstructionShapes`）只对**文件文本里出现 `AudioImportEnvironment` 这个类型名**的文件才跑。一个新文件如果调用某个已存在、形参类型是 `AudioImportEnvironment` 的 API，并且用 `environment: .init(userPacksDirectory: …, durationProbe: …, packsLockFile: otherLock)` 这种**实参位置的上下文推断构造**传参，该文件的文本里完全不出现 `AudioImportEnvironment` 这个词——既不计入 `constructionCensus`，`unmodeledConstructionShapes` 也不会对它跑。这正好能引入一把不受 `expectedProductionLocks` 约束的第三把包锁。
+
+**Why:** 这个盲区在代码自己的注释里已经如实标注（`ViewWiringSuite.swift` 该 suite 内「⚠️ 如实标注够不到什么」那一段），不是被隐瞒的疏漏。它没被同一刀收口的原因是：要收住它，得把普查扩到两个 target 的**每一个**文件，而这需要先给 `= .init(` 这种在 SwiftUI 代码里合法且常见的写法定一套「左侧接收者类型能不能从上下文推断」的策略——那是比这一刀大的设计决策，强行现在做容易做成「为了堵这一个洞而让普查在别的地方假红」。
+
+**Context:** `/codex review d9f099a,b4091d7,14ec6b1` 的 P1（第 2 条），代码核实属实。同一轮 Codex 还报了一条 P2（`unmodeledConstructionShapes` 里未应用的 `.init` 引用不检查左侧接收者，只要文件恰好提到 `AudioImportEnvironment` 就会被无关的 `.init` 引用假红）——那条是 fail-closed 方向（测试更容易假红，不会漏检），本轮未修，一并记在这里。
+
+**修复方式（未定，需要一次设计决策）:** 给「实参位置的上下文推断构造」定一个可执行判据——例如：普查扩到两个 target 的全部文件，对 `= .init(` 一类写法要求能从函数签名/局部类型标注反解出接收者类型，反解不出来就跟其余「结构上认不出的构造形状」一样计入 `hiddenShapes`（fail-closed，不是放行）。做的时候顺带把上面那条 P2 一起收口：检查 `.init` 左侧接收者是否确实是目标类型，再决定要不要记进 `hiddenShapes`。
+
+**Effort:** M（需要先定策略，再落地成普查逻辑 + 变异台账验证）
+**Priority:** P1（能引入未受约束的第三把包锁，与 b89a0ee 那次「八十余调用点在用户 home 上开锁」是同一类风险，只是入口换了个形状）
+**Depends on:** None
