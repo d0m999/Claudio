@@ -355,8 +355,30 @@ private func auditManifestConcurrencyFence(
         // ```
         //
         // —— 实参逐字等于许可成员，这条腿全绿，而求值出来是另一把锁。任何**文本**判据都够不到它
-        // （memory 里那条「文本绊线够不到实参求值出来的值」）。堵它要么把那些字段改成 `let`，要么
-        // 靠行为测试；两者都不在本刀范围内，写在这里不藏。
+        // （memory 里那条「文本绊线够不到实参求值出来的值」）。
+        //
+        // ⚠️ **上一版在这里开的方子是错的，已被 swiftc 实测证伪，别再开一次**：它写着「堵它要么把
+        // 那些字段改成 `let`，要么靠行为测试」。前半句是假的 —— `public var` 只是**最短**的一条路，
+        // 不是唯一的一条。下面两种都编得过（`/codex review 51aebae,7caf6dc,e278736`，单独 `swiftc`
+        // 编译验过，不是推理），而且**对字段是不是 `let` 完全免疫**，因为它们压根没碰那个 struct：
+        //
+        // ```swift
+        // // A：局部 struct，同名同成员
+        // struct LocalEnv { let packsLockFile: URL }
+        // let environment = LocalEnv(packsLockFile: d.appendingPathComponent("packs.lock"))
+        // return mutateManifestJSON(at: dir, lockFile: environment.packsLockFile) { … }
+        //
+        // // B：带标签的元组（**两个**元素起——单元素带标签元组是非法的：
+        // //    `cannot create a single-element tuple with an element label`，外部模型给的那个
+        // //    例子就卡在这里，别照抄）
+        // let environment = (packsLockFile: d.appendingPathComponent("packs.lock"), unused: 0)
+        // return mutateManifestJSON(at: dir, lockFile: environment.packsLockFile) { … }
+        // ```
+        //
+        // 只要局部作用域里能有一个叫 `environment`、带一个叫 `packsLockFile` 成员的**任何**东西，
+        // 这条腿看到的文本就一个字都不会变。所以真正的兜底只有一条：**持锁行为测试**（fixture 的
+        // 包锁待在结构性不可派生的位置，就地算出来的那把与它求值不等 ⇒ 当场红）。不在本刀范围内，
+        // 但方子得是真的 —— 一条错的方子比没有方子更糟，下一个人会照着它做完然后以为堵上了。
         let lockSource = scanned.codeWithoutStringLiterals
 
         // 4-a：条件编译 ⇒ 红。扫描器不建模 `#if`，非活跃分支里的调用点与活跃的完全同形，会替真实
@@ -637,6 +659,17 @@ private let allowedManifestLockArguments = ["URL", "environment.packsLockFile"]
 /// ⚠️ 左词边界规则必须与 ``callArguments(of:in:)`` **逐字相同**（只排字母 / 数字 / 下划线，绝不排 `.`）。
 /// 两处不一致会凭空造出差额：一处把 `ClaudioGUICore.mutateManifestJSON(` 算进、另一处排掉，差额恒为
 /// 非零 ⇒ 这条腿在真仓库上永久假红，然后被下一个人删掉，而它守的洞原样回来。
+///
+/// ⚠️ **右**词边界同理，而上一版只立了左边那条规矩、右边一个字都没写（`/codex review 51aebae,`
+/// `7caf6dc,e278736`）。后果是这条腿会被一个**以它开头**的更长标识符（`mutateManifestJSONV2`）
+/// 打成永久假红：本函数把它算进（左边界过、右边不看）⇒ +1，而 `callArguments` 认不出它
+/// （needle 后面是 `V`，不是 `(` / 空白 / `.init`）⇒ +0，差额恒为非零。更糟的是那样一个文件
+/// 还会因为 `code.contains("mutateManifestJSON")` 被**纳入**整台围栏，前三条腿一起开始查它。
+/// 这正是本函数自己的 doc 上一行预言的那个结局，只是应验在它没写的那半条规矩上。
+///
+/// 补上之后两侧仍然满足 `count >= calls`（`callArguments` 要求 needle 之后跳过同行空白、可选
+/// `.init`、再撞上 `(`；那三种形状的下一个字符都不是标识符字符，本函数一个都不会排掉），
+/// 所以这一刀是**纯收窄假红**，不会开出 fail-open 的口子。
 private func manifestPrimitiveIdentifierCount(in source: String) -> Int {
     let needle = "mutateManifestJSON"
     var count = 0
@@ -648,6 +681,12 @@ private func manifestPrimitiveIdentifierCount(in source: String) -> Int {
             previous.isLetter || previous.isNumber || previous == "_"
         {
             continue  // `XmutateManifestJSON` —— 以它结尾的更长标识符，不是它
+        }
+        if hit.upperBound < source.endIndex {
+            let next = source[hit.upperBound]
+            if next.isLetter || next.isNumber || next == "_" {
+                continue  // `mutateManifestJSONX` —— 以它开头的更长标识符，同样不是它
+            }
         }
         count += 1
     }
@@ -3053,6 +3092,20 @@ func runSourceScannerSuites() {
                     }
                     """,
                     to: scanned.appendingPathComponent("Lock/CleanLockWriter.swift"))
+                //    第二条负控：**以原语名开头**的更长标识符，4-b 的右词边界那一刀的独占靶子
+                //    （`/codex review 51aebae,7caf6dc,e278736`）。补右边界之前，
+                //    `manifestPrimitiveIdentifierCount` 把 `mutateManifestJSONV2` 也算进（左边界过、
+                //    右边不看）⇒ 2 次标识符 / 1 次切得出的调用 ⇒ 4-b 当场**假红**；而这个文件同时
+                //    因为含 `mutateManifestJSON` 子串被纳入整台围栏，前三条腿一起开始查它。
+                //    这条负控盯的就是那种假红 —— 会假红的守卫会被下一个人删掉，洞原样回来。
+                writeFixture(
+                    """
+                    @MainActor public func siblingNameLockWriter(environment: E) {
+                        mutateManifestJSONV2(at: environment.dir, lockFile: environment.packsLockFile)
+                        mutateManifestJSON(at: environment.dir, lockFile: environment.packsLockFile)
+                    }
+                    """,
+                    to: scanned.appendingPathComponent("Lock/SiblingNameLockWriter.swift"))
 
                 let audit = auditManifestConcurrencyFence(
                     under: scanned, pathPrefix: vector.pathPrefix)
@@ -3103,6 +3156,16 @@ func runSourceScannerSuites() {
                         + "转发写者（`lockFile: environment.packsLockFile`，逐字就是许可成员），第四条腿"
                         + "对它必须一声不吭。会假红的守卫会被下一个人删掉，洞原样回来 —— 这条负控就是"
                         + "为那一种存在的。实得：\(audit.findings.filter { $0.contains("CleanLockWriter") })")
+                expect(
+                    !audit.findings.contains { $0.contains("Lock/SiblingNameLockWriter.swift") },
+                    "【向量：\(vector.label)】负控被咬了：Lock/SiblingNameLockWriter.swift 里那个 "
+                        + "`mutateManifestJSONV2` 是**另一个函数**（只是名字以原语名开头），它旁边那次"
+                        + "真正的 `mutateManifestJSON` 调用锁实参完全合法。第四条腿对它必须一声不吭。"
+                        + "咬了它 = `manifestPrimitiveIdentifierCount` 的**右**词边界又没了："
+                        + "它会把 `mutateManifestJSONV2` 也算成一次原语用法（2 次标识符 / 1 次切得出的"
+                        + "调用）⇒ 4-b 的「认不出 ⇒ 红」当场假红，而这种假红的修法十有八九是把整条腿"
+                        + "删掉。左右两条词边界规则必须与 `callArguments` 逐字对齐，缺哪一边都一样。"
+                        + "实得：\(audit.findings.filter { $0.contains("SiblingNameLockWriter") })")
 
                 // ⑯ 自证。读的是**生产 audit 这一刻刚扫过的那份**磁盘字节 —— 不是写盘后立刻读的、更不是
                 //    源码字面量（见上面写盘处那段 TOCTOU 说明）。红队实测坐实的两条绕过都靠「自证读的字节 ≠

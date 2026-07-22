@@ -7,13 +7,20 @@ import Foundation
 // PackManifest's Decodable/Encodable, which only models id+events and would silently drop
 // name/author/license/version/schema.
 
-/// ⚠️ `packsLockFile` 有一个**兜底默认值**（``injectedPacksLock(under:)``），而不是让它落回
-/// `AudioImportEnvironment` 那个指向真实 `~/.claudio/packs.lock` 的默认值。
+/// ⚠️ `packsLockFile` 有一个**兜底默认值**（``injectedPacksLock(under:)``）—— 注意这是**本 suite 私有
+/// helper 的**默认值，指向一条临时路径。
 ///
-/// 理由与 `userPacksDirectory` 那条不同、也更硬：忘了注入 `userPacksDirectory` 的测试会**当场
-/// 断言失败**（它去读真实 `~/.claudio/packs/`，里面没有 fixture）；而忘了注入这把锁只会**静默**
-/// 地去用户机器上开一把真锁 —— 测试照样全绿，只是落了个文件、还与正在运行的 Claudio.app 抢锁。
-/// 静默那种才是危险的那种，所以这里不给它留下「忘记」的机会。
+/// ⚠️ **这段的理由在 e278736 之后变了，别把旧说法读成现状**：它上一版写的是「而不是让它落回
+/// `AudioImportEnvironment` 那个指向真实 `~/.claudio/packs.lock` 的默认值」——**那个默认值已经不
+/// 存在了**（`/codex review 95d16a5,b89a0ee,37745f2` 的 P1-A 拆掉的），漏传现在是一次编译错误。
+///
+/// 当时的理由（记作历史，因为它解释了这个 helper 为什么长成这样）：忘了注入 `userPacksDirectory`
+/// 的测试会**当场断言失败**（它去读真实 `~/.claudio/packs/`，里面没有 fixture）；而忘了注入这把锁
+/// 只会**静默**地去用户机器上开一把真锁 —— 测试照样全绿，只是落了个文件、还与正在运行的
+/// Claudio.app 抢锁。静默那种才是危险的那种。
+///
+/// 今天这个默认值还留着的理由变成了**省事 + 单源**：本 suite 是全包唯一真的会去**持有**这把锁的
+/// 地方，几十个调用点各写一遍注入表达式毫无价值，而写错一处就让那一处的持锁断言失去分辨力。
 ///
 /// ## 但兜底的**值**曾经是可派生的，那让一整类变异体在行为层隐身（`/codex review ceae86e` 的余波）
 ///

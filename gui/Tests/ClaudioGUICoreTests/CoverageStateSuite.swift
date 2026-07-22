@@ -16,7 +16,11 @@ private func makeEnvironment(
         userPacksDirectory: userPacksDirectory,
         bundledPacksDirectory: bundledPacksDirectory,
         durationProbe: StubDurationProbe(fixedDuration: 1.0),
-        // 见 ``injectedPacksLock(under:)``：漏掉 ⇒ 静默落回用户真实 `~/.claudio/packs.lock`。
+        // 见 ``injectedPacksLock(under:)``。⚠️ 这一行的**理由在 e278736 之后变了**，别照抄旧说法：
+        // 那之前 `packsLockFile` 有一个指向真实 `~/.claudio/packs.lock` 的默认值，漏掉它是**静默**
+        // 的（测试全绿，锁开在用户 home 上）；现在那个默认值已经拆掉，漏掉是**编译错误**。
+        // 所以这一行今天防的不再是「忘记」，而是「递错」——递 `ClaudioPaths.packsLockFile` 依旧会去
+        // 用户机器上开真锁，只是那一种是**响**的（写下这一行的人知道自己在写什么，且它出现在 diff 里）。
         packsLockFile: injectedPacksLock(besideUserPacks: userPacksDirectory)
     )
 }

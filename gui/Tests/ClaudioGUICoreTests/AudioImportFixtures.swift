@@ -99,10 +99,21 @@ final class RecordingDurationProbe: AudioDurationProbing, @unchecked Sendable {
 ///
 /// ## 为什么每个 fixture 都必须显式递它
 ///
-/// `AudioImportEnvironment.packsLockFile` 的默认值是**真实**的 `~/.claudio/packs.lock`。忘记注入的
-/// 后果与忘记注入 `userPacksDirectory` **完全不同**：后者会当场断言失败（真实 packs 目录里没有
-/// fixture），而前者只会**静默**地去用户机器上开一把真锁 —— 测试照样全绿，只是在用户
-/// `~/.claudio/` 里落一个 0 字节文件、并与他正在运行的 Claudio.app 抢锁。静默那种才是危险的。
+/// ⚠️ **这一段在 e278736 之后换了理由，别把旧说法读成现状**：那之前
+/// `AudioImportEnvironment.packsLockFile` 有一个指向**真实** `~/.claudio/packs.lock` 的默认值，
+/// 漏传的后果与漏传 `userPacksDirectory` 完全不同 —— 后者当场断言失败（真实 packs 目录里没有
+/// fixture），而前者只会**静默**地去用户机器上开一把真锁：测试照样全绿，只是在用户 `~/.claudio/`
+/// 里落一个 0 字节文件、并与他正在运行的 Claudio.app 抢锁。b89a0ee 那次实锤就是这么来的
+/// （四个 fixture 漏传、八十余个调用点在用户真实 home 上开锁，2421 条全绿）。
+///
+/// **那个默认值现在已经拆掉**（`/codex review 95d16a5,b89a0ee,37745f2` 的 P1-A），漏传是一次
+/// **编译错误**，由 `ViewWiringSuite` 那条「`packsLockFile` 不许有默认值」+ 便利 init / `extension`
+/// 围栏一起钉住。所以今天这个函数存在的理由**不再是**「防止忘记」，而是：
+///
+/// 1. 给「必须递一把锁」这件事一个**唯一**的、结构性不可派生的答案（见下一节）；
+/// 2. 挡住那条编译器管不到的路 —— 显式递 `ClaudioPaths.packsLockFile`。编译器逼的是「必须传」，
+///    不是「必须传对」，而那一种是**响**的（写下这一行的人知道自己在写什么，且它出现在 diff 里），
+///    与「静默漏传」不是一类；不声称封死。
 ///
 /// ## 为什么位置**故意**不可从 `userPacksDirectory` 派生
 ///

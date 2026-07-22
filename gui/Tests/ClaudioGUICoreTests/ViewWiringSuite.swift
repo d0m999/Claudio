@@ -194,6 +194,36 @@ private let lockCensusExemptedFiles = [
 /// 上一条里被单独减掉的那一个 —— 提成常量，免得相等判定里出现一个没人解释的字面量。
 private let lockCensusSelfGuardedFile = "PanelView.swift"
 
+/// 生产侧**每一处** `AudioImportEnvironment(…)` 构造点，连同它那把包锁应有的实参（**文件级单源**）。
+///
+/// ⚠️ 提到文件级的理由与 ``lockCensusExemptedFiles`` 逐字相同，只是又晚了一轮：这张表现在同时喂
+/// **三**条断言 —— 豁免绑定（集合相等）、逐调用点的实参锚定、以及下面那条**构造点普查**。
+/// `/codex review 51aebae,7caf6dc,e278736` 的 P1-B 坐实：它上一版是 suite 内部的局部 `let`，
+/// 于是「生产侧两个构造点」这句话在整个仓库里**没有任何东西在数**——往 `ClaudioGUICore` 放一个
+/// 就地算锁的第三个构造点（`packsLockFile: packDirectory.appendingPathComponent("packs.lock")`），
+/// 编译通过、**2456 条检查全绿**、一条都不红（隔离 worktree 实测，不是推理）。
+/// 再写第四张各自硬编码的清单就是同一个病第三次复发，所以从这里开始只有这一份。
+///
+/// `file` 是 **basename**；普查那条把它拼成 `ClaudioGUI/<file>` 去与实得的键比。那个前缀是硬编码的，
+/// 而这正是要的极性：某天 `ClaudioGUICore` 里合法长出一个构造点，实得的键会是
+/// `ClaudioGUICore/<file>`、与期望集合不等 ⇒ **红** ⇒ 有人必须来想清楚「lockLeaks 只扫
+/// `ClaudioGUI`，那个新文件由谁守」。fail-closed，不是遗漏。
+private let expectedProductionLocks: [(file: String, value: String, literal: String?, why: String)] = [
+    (
+        "ClaudioGUIApp.swift", "ClaudioPaths.packsLockFile", nil,
+        "组装根是全 app 唯一该说出真实路径的地方。它若变成别的，两个 manifest.json 写者"
+            + "（接管发布内置包走 helper 的 `performFirstRunSetup`、绑定/解绑走 "
+            + "`mutateManifestJSON`）就不再是同一把 `flock`，跨进程互斥当场断开"
+    ),
+    (
+        "StateGalleryView.swift", "URL(fileURLWithPath: \"\")",
+        "/dev/null/claudio-preview-packs.lock",
+        "preview 用一条**永不解析**的占位路径（`/dev/null/…`，字符串内容由下面那条单独钉）。"
+            + "它若变成 `ClaudioPaths.packsLockFile`，一个 SwiftUI preview 就有了去碰用户 home "
+            + "上那把锁的能力 —— 而 preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它"
+    ),
+]
+
 /// `ClaudioGUICore` target 下每一个源文件 —— 上面那个 `guiSources()` **看不见**的那一半 GUI。
 ///
 /// 它存在的理由（`/review e7c38ea` 的 P1，变异实测）：接管路径的锁要过四手，而**中间那一手**
@@ -828,7 +858,26 @@ func runViewWiringSuites() {
         //
         // PanelView.swift 的豁免理由与它们不同（它是三把锁**唯一**允许的来源），由本文件那条
         // 「PanelView 构造 OnboardingActionEnvironment 的三把锁逐个按调用点绑」守着。
-        let lockCensusExemptions = lockCensusExemptedFiles
+        //
+        // ⚠️ 这里**直接读**文件级的 ``lockCensusExemptedFiles``，不许再套一层 suite 局部别名
+        //   （`let lockCensusExemptions = lockCensusExemptedFiles`）。上一版套了，而那一层就是洞：
+        //   下面那条绑定断言绑的是**常量**，普查消费的是**别名** —— 两者之间没有任何断言。往别名上
+        //   写 `lockCensusExemptedFiles + ["MenuBarController.swift"]`，绑定断言逐字全绿
+        //   （它读的常量一个字没变），而 MenuBarController.swift 从此静默退出本普查，对价一条没付；
+        //   接着在它里面写 `PanelView(configFile: …, lockFile: ClaudioPaths.playLockFile)`，
+        //   三个 GUI config 写者一起回到 play.lock 上 —— 整套仍然全绿。
+        //   把常量提到文件级的**全部目的**就是让豁免集成为一个被绑住的值，再局部化一层等于原地
+        //   把它解绑（memory 第九次那条「抽取一层接缝就往外挪一层」）。而且当时修复**自己的散文**
+        //   与失败消息都指着 `lockCensusExemptions` 这个没被绑的名字，照着那句话去加第四项的人，
+        //   落笔正好落在洞上。删掉那一层，编辑点就不存在了，代价为零。
+        //   （`/codex review 51aebae,7caf6dc,e278736` 的红队对抗轮实测坐实。）
+        //
+        // ⚠️ **如实标注这一刀的性质：它消除的是编辑点，不是新增了一条守卫。**
+        //   台账实测：把那层别名写回来、并在它上面加第四项（`lockCensusExemptedFiles +
+        //   ["MenuBarController.swift"]`），**2468 条全绿**，没有任何断言会喊 —— 下面那条绑定
+        //   断言读的是常量，常量一个字没变。也就是说这条路今天靠的是「源码里没有那个编辑点」，
+        //   而不是「有人守着它」。要真正守住，得有一条断言去读本普查**实际消费的那个值**，
+        //   而那需要一台能读自己源码又不自我污染的机器；不在本刀范围内，不声称封死。
         var lockLeaks: [String: Int] = [:]
         // ⚠️ 豁免按**文件名全等**判，不是 `hasSuffix` —— 极性在这里是反的，看清楚再改
         //   （`/review d7084be` 补，与 `/codex review d7084be` 那条 `hasPrefix(root.path)` 是同一个病
@@ -854,7 +903,7 @@ func runViewWiringSuites() {
         //   自己身上**。那是一次凭空背书，与本分支 7caf6dc 修的是同一个病 —— 而这次它长在给修复
         //   背书的散文里。收窄判据的理由是**极性**（上一段），它自己站得住，不需要引用任何文件名。
         for file in sources
-        where !lockCensusExemptions.contains((file.path as NSString).lastPathComponent) {
+        where !lockCensusExemptedFiles.contains((file.path as NSString).lastPathComponent) {
             let count = file.code.lowercased().components(separatedBy: "lockfile").count - 1
             if count > 0 { lockLeaks[file.path] = count }
         }
@@ -866,7 +915,7 @@ func runViewWiringSuites() {
                 + "调用点指定的那把锁上。传 playLockFile = 阶段 A 的分锁当场失效，而 PanelView.swift "
                 + "一个字都不用改，整套 GUI 测试照样全绿。**config / settings 这两把**锁只有一个"
                 + "来源：PanelView 的默认值（包锁不在此列 —— 它由 PanelView 从 audioEnvironment "
-                + "**转发**，见那条独立的转发绊线）。豁免名单：\(lockCensusExemptions) —— 每一项都换来"
+                + "**转发**，见那条独立的转发绊线）。豁免名单：\(lockCensusExemptedFiles) —— 每一项都换来"
                 + "一条比本普查更严的锚定绊线，不是一个洞")
     }
 
@@ -895,7 +944,72 @@ func runViewWiringSuites() {
         // 第一版按 `public init` 锚，实得 2 处当场红。所以锚的是「**带 `packsLockFile:` 形参**的那个
         // init」：0 处 ⇒ 形参没了（下面那条判定就是在守一段不存在的代码，对空集恒真绿），
         // >1 处 ⇒ 两个 init 都带这个形参，下面那条只看得住它逐个遍历到的，歧义必须有人来定。
-        let initializerArguments = callArguments(of: "public init", in: environment)
+        //
+        // ## ⚠️ 那个 `.filter` 曾经**就是**这条 suite 的洞（`/codex review 51aebae,7caf6dc,e278736`
+        //    的 P1-A，隔离 worktree 实测坐实）
+        //
+        // 它把「**不带** `packsLockFile:` 形参的 init」整个丢掉 —— 而那正是逃逸体本身。给这个
+        // struct 加一个便利 init：
+        //
+        // ```swift
+        // public init(
+        //     userPacksDirectory: URL = ClaudioPaths.packsDirectory,
+        //     bundledPacksDirectory: URL? = nil,
+        //     durationProbe: any AudioDurationProbing,
+        //     limits: AudioImportLimits = AudioImportLimits()
+        // ) {
+        //     self.init(…, packsLockFile: ClaudioPaths.packsLockFile)   // 静默回到用户真实 home
+        // }
+        // ```
+        //
+        // —— 12 行，`swift build` 零诊断，随后让任意 fixture 漏传那把锁：**2456 条检查全绿**，
+        // 与基线逐字同数。「漏传 = 编译错误」这个性质当场没了，而这条 suite 一声不吭：它守的是
+        // **一种语法形态**（形参上挂没挂默认值），不是它声称的那个**后果**（漏传能不能编过）。
+        // 白名单式识别（认不出 ⇒ 静默放行）伪装成围栏 —— 本仓库反复立案的那一条，这次长在
+        // 为「把绊线升成围栏」而写的这一刀自己身上。
+        //
+        // 下面三条把它补成围栏：**总数**锚定 + 非包锁 init 的形参表**逐字全等** + `extension` 普查。
+        // 三条缺一不可：只锚总数，删掉 `AudioImportLimits` 的 init 再加便利 init 就绕过去了
+        // （总数仍是 2）；只钉签名，加第三个 init 时它一眼都不看。
+        let allPublicInits = callArguments(of: "public init", in: environment)
+        expect(
+            allPublicInits.count == 2,
+            "`AudioImportEnvironment.swift` 里的 `public init(…)` 不是恰好 2 处（实得 "
+                + "\(allPublicInits.count) 处）—— 这个文件按设计只住着两个类型的构造器："
+                + "`AudioImportEnvironment` 一个（`packsLockFile:` 必填）与 `AudioImportLimits` 一个。"
+                + "多出来的第三个最可能是一个**便利 init**：它不带 `packsLockFile:` 形参、内部转发一个"
+                + "硬编码的 `ClaudioPaths.packsLockFile`，于是「漏传 = 编译错误」当场失效，而下面那条"
+                + "按形参锚定的判定**结构上看不见它**（它先被 `.filter` 丢掉了）。"
+                + "少一个 = 某个构造器没了，下面两条各自在守一段不存在的代码")
+        // 非包锁的那一个 **必须**是 `AudioImportLimits` 的那个已知签名，逐字全等。
+        //
+        // ⚠️ 这一条与上面那条**不是**同一个靶子，别把任何一条当成锦上添花：
+        //
+        // * 上面那条（总数 == 2）逮的是「**多**一个 init」——便利 init 直接加进来那一种；
+        // * 这一条逮的是「总数没变、但那个非包锁 init **换了个人**」。
+        //
+        // ⚠️ 那么「删掉 `AudioImportLimits.init` 腾出名额、再补一个便利 init」这条组合路呢？
+        //    **实测走不通**（不是推理）：删掉它之后 Swift 合成的 memberwise init **不带默认值**，
+        //    同一个文件里 `limits: AudioImportLimits = AudioImportLimits()` 那句空参调用当场编译
+        //    失败 —— `error: missing arguments for parameters 'maxFileSizeBytes',`
+        //    `'maxDurationSeconds' in call`。台账里那个变异因此是**三态里的第三态**（既不是红也不是
+        //    绿，是编译不过），如实记在这里，免得下一个人以为它验过了。
+        //    所以这两条合起来对「本文件里冒出第二个能不传包锁就造出环境的入口」是完备的。
+        //
+        // **相等**判定，不是 `contains`：`maxFileSizeBytes: Int = …` 逐字包含任何它的前缀。
+        let audioImportLimitsInitSignature =
+            "maxFileSizeBytes: Int = 5 * 1024 * 1024, maxDurationSeconds: Double = 3.0"
+        let nonLockInits = allPublicInits
+            .filter { argumentValue("packsLockFile", in: $0) == nil }
+            .map(collapsingWhitespace)
+        expect(
+            nonLockInits == [audioImportLimitsInitSignature],
+            "`AudioImportEnvironment.swift` 里**不带** `packsLockFile:` 形参的 `public init(…)` 的形参表"
+                + "必须正好是 `AudioImportLimits` 那一个（`\(audioImportLimitsInitSignature)`），"
+                + "实得 \(nonLockInits) —— 对不上就意味着这个文件里多了一个**可以不传包锁就构造出"
+                + "环境**的入口（便利 init / 第二个 memberwise 风格入口）。那种入口让「漏传 = 编译"
+                + "错误」退回成「漏传 = 静默去用户 home 上开锁」，而测试照样全绿：实测 2456 条一条不红")
+        let initializerArguments = allPublicInits
             .filter { argumentValue("packsLockFile", in: $0) != nil }
         expect(
             initializerArguments.count == 1,
@@ -914,6 +1028,60 @@ func runViewWiringSuites() {
                     + "不能靠纪律，只能靠编译器。**相等**判定，不是 `hasPrefix`：`URL = ClaudioPaths.…` "
                     + "逐字以 `URL` 开头")
         }
+
+        // ## 第三条：`extension` 普查 —— 上面两条**唯一**够不到的那条路
+        //
+        // 上面两条都只读 `AudioImportEnvironment.swift` 这**一个文件**。而 Swift 允许在同一个
+        // 模块的**任何**文件里给这个 struct 加构造器：
+        //
+        // ```swift
+        // // 随便哪个新文件，甚至就在测试包里
+        // extension AudioImportEnvironment {
+        //     public init(userPacksDirectory: URL, durationProbe: any AudioDurationProbing) {
+        //         self.init(…, packsLockFile: ClaudioPaths.packsLockFile)
+        //     }
+        // }
+        // ```
+        //
+        // 效果与那个便利 init 逐字相同（漏传重新变得能编过、静默落到用户真实 home），而上面两条
+        // 一个字都读不到它 —— 又是「新调用点最可能的落点是**新文件**」那条老规律。
+        //
+        // 扫三个目录：两个生产 target **加测试包**。测试包必须一起扫，因为那里才是漏传真正会发生
+        // 的地方（b89a0ee 那个潜伏洞：四个 fixture 漏传，八十余个调用点在用户真实 home 上开锁，
+        // 全程 2421 条全绿）。
+        //
+        // ⚠️ needle **分段拼**，源码里永远不出现连续的那个串：本普查扫的目录**包含本文件**，
+        // 把它逐字写进来 = 命中的第一处就是我自己的判据 = 这条断言永久假红。本仓库为这个形状翻过车
+        // （`SourceScannerSuite` 的自纠⑤，以及本文件那条 `injected` + `-locks`）。失败消息里的那一份
+        // 也是运行时插值，不是源码文本。
+        let environmentExtensionMarker = "extension " + "AudioImportEnvironment"
+        var environmentExtensions: [String: Int] = [:]
+        for root in [
+            "gui/Sources/ClaudioGUI", "gui/Sources/ClaudioGUICore",
+            "gui/Tests/ClaudioGUICoreTests",
+        ] {
+            let scanned = sourcesUnder(root)
+            expect(
+                scanned.count >= 5,
+                "在 \(root) 下只数到 \(scanned.count) 个 Swift 文件 —— 这条是**普查**，普查不到文件"
+                    + "就永远等不到红，只会安静地绿下去")
+            for source in scanned {
+                // 读 `code`（剥注释、保留字符串内容）：注释里谈论这个形状的散文**不该**被数到
+                // （本 suite 上面就有两段），而一段被误判成字符串的代码同样数不到 —— 后者由本文件
+                // 第一条 suite（词法 `unmodeled` 普查）兜着。
+                let hits =
+                    source.code.components(separatedBy: environmentExtensionMarker).count - 1
+                if hits > 0 { environmentExtensions["\(root)/\(source.path)"] = hits }
+            }
+        }
+        expect(
+            environmentExtensions.isEmpty,
+            "有文件给 `AudioImportEnvironment` 开了 `\(environmentExtensionMarker)`："
+                + "\(environmentExtensions) —— 本 suite 上面那两条只读 "
+                + "`AudioImportEnvironment.swift` 一个文件，一个开在别处的扩展构造器让「漏传包锁 = "
+                + "编译错误」当场失效，而它们结构上看不见。这不是「扩展一律不许」的教条：包锁的"
+                + "**必填性**是这个类型今天唯一靠编译器执行的不变量，而扩展是绕开它最短的一条路。"
+                + "真要加扩展，先把上面那两条改成能读到扩展里的构造器，再来放行这一条")
     }
 
     suite("生产侧两处显式包锁各自锚到调用点 —— 它们换来了 lockLeaks 普查的两个豁免") {
@@ -928,29 +1096,16 @@ func runViewWiringSuites() {
         // 那条警告在这台机器上**一直看不见**：每次 build 都是增量的（零条 Compiling），
         // 而 e278736 / 51aebae 的 commit message 写的是「两个包 Build complete 零警告」——
         // `/review d7084be` 用 `--scratch-path` 全新编译一次才把它照出来（8 条，全是这一条）。
-        let expectedProductionLocks: [(file: String, value: String, literal: String?, why: String)] = [
-            (
-                "ClaudioGUIApp.swift", "ClaudioPaths.packsLockFile", nil,
-                "组装根是全 app 唯一该说出真实路径的地方。它若变成别的，两个 manifest.json 写者"
-                    + "（接管发布内置包走 helper 的 `performFirstRunSetup`、绑定/解绑走 "
-                    + "`mutateManifestJSON`）就不再是同一把 `flock`，跨进程互斥当场断开"
-            ),
-            (
-                "StateGalleryView.swift", "URL(fileURLWithPath: \"\")",
-                "/dev/null/claudio-preview-packs.lock",
-                "preview 用一条**永不解析**的占位路径（`/dev/null/…`，字符串内容由下面那条单独钉）。"
-                    + "它若变成 `ClaudioPaths.packsLockFile`，一个 SwiftUI preview 就有了去碰用户 home "
-                    + "上那把锁的能力 —— 而 preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它"
-            ),
-        ]
+        // 这张表现在住在文件级（见 ``expectedProductionLocks`` 的 doc）—— 它同时喂三条断言，
+        // 其中一条是下面那条**构造点普查**，而普查按定义不能读一张 suite 私有的表。
         // ⚠️ [10] 「每个豁免项都换来一条更严的锚定绊线」的**可执行**版本（`/review d7084be` 红队 P2）。
-        //    上一版这句话只是散文：两张硬编码清单互不绑定，往 `lockCensusExemptions` 加第四项而这里
+        //    上一版这句话只是散文：两张硬编码清单互不绑定，往 `lockCensusExemptedFiles` 加第四项而这里
         //    一条不写 —— 那个文件从此静默退出普查，编译通过、全绿、没有人会喊（豁免侧放宽 = fail-open）。
         //    判据是**集合相等**不是 `count`：数目对得上而成员错位同样是一个没人守的文件。
         expect(
             Set(lockCensusExemptedFiles).subtracting([lockCensusSelfGuardedFile])
                 == Set(expectedProductionLocks.map(\.file)),
-            "`lockCensusExemptions` 减掉 `\(lockCensusSelfGuardedFile)`（它由本文件另一条 suite 按调用点"
+            "`lockCensusExemptedFiles` 减掉 `\(lockCensusSelfGuardedFile)`（它由本文件另一条 suite 按调用点"
                 + "守着）之后，必须**逐项等于** `expectedProductionLocks` 的文件集 —— 否则「豁免换来的是"
                 + "更严，不是更松」这句话就有一项没兑现。豁免侧="
                 + "\(Set(lockCensusExemptedFiles).subtracting([lockCensusSelfGuardedFile]).sorted())，"
@@ -1088,6 +1243,128 @@ func runViewWiringSuites() {
                 + "变异体求值出来会撞上的地方 —— 持锁行为测试于是全绿，保护力归零。"
                 + "少了那一处 = 要么文件改名了（把这条断言的期望值一起更新），要么唯一来源没了"
                 + "（那 `AudioImportFixtures.swift` 的 doc 里「全包唯一来源」那句话又变回散文）")
+    }
+
+    suite("生产侧 `AudioImportEnvironment(…)` 构造点**普查** ——「两个构造点」那句散文的可执行版本") {
+        // ## 它治的病（`/codex review 51aebae,7caf6dc,e278736` 的 P1-B，隔离 worktree 实测坐实）
+        //
+        // `AudioImportEnvironment.swift` 的 doc 逐字写着「生产侧两个构造点显式写出真实路径，
+        // **各自有绊线看着**」。那个「两个」此前是一句**没有任何东西在数**的散文：上面那条
+        // 「生产侧两处显式包锁各自锚到调用点」按 ``expectedProductionLocks`` 里**硬编码的两个
+        // 文件名**逐一去读，它不枚举任何目录 —— 措辞比覆盖范围大，本仓库第 N 次，而这一次长在
+        // 「把绊线从硬编码文件升成围栏」那一刀**自己**身上。
+        //
+        // 实测的第三构造点（往 `gui/Sources/ClaudioGUICore/` 放一个文件）：
+        //
+        // ```swift
+        // public func makeAudioImportEnvironmentForPack(
+        //     at d: URL, durationProbe: any AudioDurationProbing
+        // ) -> AudioImportEnvironment {
+        //     AudioImportEnvironment(
+        //         userPacksDirectory: d, durationProbe: durationProbe,
+        //         packsLockFile: d.appendingPathComponent("packs.lock"))   // 就地算一把锁
+        // }
+        // ```
+        //
+        // —— `swift build` 零诊断、**2456 条检查全绿**、一条都不红。三张网一张都罩不到它：
+        // `lockLeaks` 只扫 `gui/Sources/ClaudioGUI`（`guiSources()`）；`guiCoreSources()` 那条只禁
+        // `playLockFile` 与字面量 `play.lock`；`SourceScannerSuite` 的 T3 四条腿只纳入**代码里出现
+        // `mutateManifestJSON` 的文件**，而一个环境**工厂**一个字节的 manifest 都不写。
+        //
+        // 它一旦被任何一个 manifest 写者用上，那个写者转发的**文本**依旧逐字是
+        // `environment.packsLockFile`（第四条腿全绿 —— 它守的是转发，不是被转发的那把锁自己
+        // 从哪来），求值出来却是包目录里的另一把锁：与 helper `performFirstRunSetup` 在
+        // `~/.claudio/packs.lock` 上取的那把**永不冲突** ⇒ 跨进程互斥断开 ⇒ 用户刚绑好的音效被
+        // 包发布循环整目录 `moveItem` 吞掉，而那次写照旧返回 `.success`。
+        //
+        // ## 为什么挂在这里而不是给上面那条再补一个文件名
+        //
+        // 与第四条腿搬家时逐字同一个理由：新构造点最可能的落点是**新文件**（`gui/Package.swift`
+        // 没有 `sources:` 白名单，默认目录下任意 `.swift` 直接进 target），而一张文件名清单
+        // 结构上读不到它。所以这里数的是**目录**，期望值从 ``expectedProductionLocks``（文件级
+        // 单源）派生 —— 不是第三张互不绑定的硬编码清单。
+        let productionRoots = [
+            (root: "gui/Sources/ClaudioGUI", target: "ClaudioGUI"),
+            (root: "gui/Sources/ClaudioGUICore", target: "ClaudioGUICore"),
+        ]
+        var constructionCensus: [String: Int] = [:]
+        var scannedFileCount = 0
+        var unreadable: [String] = []
+        var hiddenShapes: [String: [String]] = [:]
+        for entry in productionRoots {
+            for source in sourcesUnder(entry.root) {
+                scannedFileCount += 1
+                let key = "\(entry.target)/\(source.path)"
+                // 喂 `codeWithoutStringLiterals`，**不是** `code`：后者保留字符串内容，一句
+                // `"pack (1.json"` 里的 `(` 会被计进深度、括号从此永不配平（`callArguments` 的
+                // doc 里立着这条判例）。`sourcesUnder` 只交 `code`，所以这里按相对路径再要一次。
+                guard let code = codeWithoutStrings("\(entry.root)/\(source.path)") else {
+                    unreadable.append(key)
+                    continue
+                }
+                let count = callArguments(of: "AudioImportEnvironment", in: code).count
+                if count > 0 { constructionCensus[key] = count }
+
+                // 围栏那一半：`callArguments` 是白名单（`head(` / `head (` / `head.init(` /
+                // `head .init (` 四种），而白名单永远不完整。凡是**结构上认不出**的构造形状都必须
+                // 变成红 —— 「我读不到它怎么构造的」绝不等于「它没事」。
+                //
+                // ⚠️ 只对**提到这个类型名的文件**跑，理由不是省事，是极性：跨文件别名
+                // （`typealias AIE = AudioImportEnvironment` 在 A、`AIE(…)` 在 B）的**声明那一行**
+                // 必然含类型名 ⇒ A 会被纳入 ⇒ 红。所以这个收窄对别名那一类是 fail-closed。
+                //
+                // ⚠️ 过滤掉「条件编译」那一类，而这**有论证**、不是随手收窄：`unmodeledConstruction`
+                // `Shapes` 记 `#if` 的理由是「非活跃分支的构造点会替真实构造喂饱『≥1 处 / 正好 N 处』
+                // 那类断言」。本条的判据是**集合相等**（文件 → 计数），`#if` 只会让计数**偏多**、
+                // 让键**变多**，两种都是红 —— 它在这条判据上不构成隐身路径。不过滤则
+                // `StateGalleryView.swift`（整份 `#if DEBUG`）永久假红，然后被下一个人删掉。
+                //
+                // ⚠️ 如实标注够不到什么：一个**完全不提**这个类型名的文件里、**实参位置**的
+                // 上下文推断构造（`someCall(environment: .init(…))`）——本条既数不到它，也不会
+                // 对它记账。要够到那一类，得把这条围栏扩到两个 target 的**每一个**文件，而那需要
+                // 先给 `= .init(` 这种在 SwiftUI 代码里合法且常见的写法定一个策，不在本刀范围内。
+                if code.contains("AudioImportEnvironment") {
+                    let shapes = unmodeledConstructionShapes(
+                        of: "AudioImportEnvironment", in: code
+                    ).filter { !$0.contains("条件编译") }
+                    if !shapes.isEmpty { hiddenShapes[key] = shapes }
+                }
+            }
+        }
+        expect(
+            scannedFileCount >= 10,
+            "两个生产 target 加起来一个 Swift 文件都没数到（实得 \(scannedFileCount)）—— 这条是"
+                + "**普查**，普查不到文件就永远等不到红，只会安静地绿下去")
+        expect(
+            unreadable.isEmpty,
+            "这些生产源文件读不出来：\(unreadable) —— 读不到 ⇒ 那个文件里的构造点对本普查**隐身**，"
+                + "而隐身在这条判据上是静默放行。认不出 ⇒ 红，不许静默跳过")
+        expect(
+            hiddenShapes.isEmpty,
+            "这些文件里出现了 `callArguments` **结构上认不出**的 `AudioImportEnvironment` 构造形状："
+                + "\(hiddenShapes) —— 那一处会静默退出本普查，而普查是「就地算一把锁的第三个构造点」"
+                + "唯一的守卫。要么把它改成扫描器认得的直接构造，要么先把 `callArguments` 教会这个"
+                + "形状再放行")
+
+        var expectedCensus: [String: Int] = [:]
+        for expected in expectedProductionLocks {
+            expectedCensus["ClaudioGUI/\(expected.file)"] = 1
+        }
+        expect(
+            constructionCensus == expectedCensus,
+            "生产侧 `AudioImportEnvironment(…)` 的构造点集合必须**逐项等于** "
+                + "\(expectedCensus.keys.sorted())，实得 \(constructionCensus) —— "
+                + "多出来的那一处就是一个**没有任何断言在看**的包锁来源：上面那条按调用点锚定的 "
+                + "suite 只读 ``expectedProductionLocks`` 里点名的文件，它对一个新文件结构上是瞎的。"
+                + "它若就地算一把锁（`packDirectory` 的兄弟位、每包一把的 `<id>.lock`），这个环境喂给"
+                + "任何 manifest 写者之后，那个写者与 helper 的 `performFirstRunSetup` 就用上**两把"
+                + "不同路径**的 `flock` ⇒ 跨进程互斥当场断开 ⇒ 用户刚绑好的音效被包发布循环整目录 "
+                + "`moveItem` 吞掉，而那次写照旧返回 `.success`。"
+                + "少了一处 = 要么文件改名/构造点搬家（把 ``expectedProductionLocks`` 一起更新），"
+                + "要么它被换成了本普查认不出的形状（上面那条围栏该先红）。"
+                + "**不许**靠往 ``expectedProductionLocks`` 里加一行让新构造点变绿：那张表同时是"
+                + "`lockLeaks` 豁免名单的对价侧，加一行会让豁免绑定那条集合相等**当场红** —— "
+                + "两条断言咬合在一起，正是要的那次停顿")
     }
 
     suite("锁转发的**编译期前提**：`mutateManifestJSON` 的 `lockFile:` 不许有默认值") {
