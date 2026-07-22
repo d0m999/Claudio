@@ -2300,3 +2300,17 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Effort:** M（需要先定策略，再落地成普查逻辑 + 变异台账验证）
 **Priority:** P1（能引入未受约束的第三把包锁，与 b89a0ee 那次「八十余调用点在用户 home 上开锁」是同一类风险，只是入口换了个形状）
 **Depends on:** None
+
+### `whitespaceTolerantHitCount` 的正/负控只喂了 helper 本身，没有一条经由生产普查路径运行
+
+**What:** `/codex review 8ebc00b` 的 P2 指出：`ViewWiringSuite.swift` 新增的四条正/负控（单空格基线、两个空格、换行、负控）全部直接调用 `whitespaceTolerantHitCount(of:in:)`，喂的是手写的合成字符串（如 `"extension" + " " + "AudioImportEnvironment" + " {"`），不经过生产扫描那条调用点（`whitespaceTolerantHitCount(of: environmentExtensionMarker, in: source.code)`，读的是真实扫描目录里 `source.code` 剥完注释后的内容）。
+
+**Why:** commit message 与函数 doc comment 都写了「生产扫描与正/负控现在共用同一个函数体，回退生产那一行就是回退这四条在测的同一段代码，才会真的红」——这句话对**「helper 本身是否正确处理空白排版」**成立，但对**「生产扫描是否真的调用了这个 helper」**不成立。把生产那一行改回旧版 `source.code.components(separatedBy: environmentExtensionMarker).count - 1`（不经过 `whitespaceTolerantHitCount`），四条正/负控一个字都不用改、原样全绿——因为它们从没有触碰过那一行，只测过 helper 这个符号本身。这正是本文档反复记的那类洞：新写的断言的靶子是「函数对不对」，不是「生产是否调用了这个函数」（同族参见「计数不绑调用点」`840ea37`、「错误码不绑执行顺序」`be332ff` 那几条）。
+
+**Context:** 2026-07-23 `/codex review 8ebc00b`（P2，无 P1，GATE PASS）。
+
+**修复方式:** 加一条经由实际普查路径运行的合成 fixture——往 `ViewWiringSuite` 扫描的临时目录里放一个内容为 `extension  AudioImportEnvironment {`（两个空格）之类的合成源文件，跑真正的普查逻辑，断言 `environmentExtensions` 字典里出现这个文件、命中数对；或者至少把现有四条断言改成在扫描函数层级（而不是直接调 helper）触发。
+
+**Effort:** S
+**Priority:** P2
+**Depends on:** None

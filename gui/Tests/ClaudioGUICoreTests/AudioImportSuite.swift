@@ -685,4 +685,87 @@ func runAudioImportSuites() {
             }
         }
     }
+
+    // MARK: - packsLockFile: importAudioFile's persist step is a third writer of the same
+    // `packs/` subtree `bindEventToManifest`/`clearEventBinding` and `performFirstRunSetup`
+    // already serialize on (mirrors `ManifestBindingSuite`'s "包目录锁" section exactly — same
+    // lock, same non-blocking semantics, same failure-mode reasoning).
+
+    suite(
+        "importAudioFile: 包锁被占住时必须报 .lockBusy，且不许创建目录 / 写入任何文件"
+    ) {
+        withTempDirectory { root in
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let packsLock = injectedPacksLock(besideUserPacks: userPacksDirectory)
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: userPacksDirectory,
+                durationProbe: StubDurationProbe(fixedDuration: 1.0),
+                limits: AudioImportLimits(),
+                packsLockFile: packsLock)
+
+            let sourceURL = root.appendingPathComponent("source/stop.wav")
+            writeFixture(validWAVData(), to: sourceURL)
+
+            // 同进程内用第二个 `open(2)` 抢占同一把锁 —— 与 `ManifestBindingSuite` 同一手法：
+            // `FileLock` 自己 `open` 一次，`flock` 争用不看是不是同进程。
+            let outcome = withNonBlockingLock(path: packsLock.path) {
+                importAudioFile(
+                    sourceURL: sourceURL, suggestedFileName: "stop.wav", packID: "my-pack",
+                    environment: environment)
+            }
+            guard case .ran(let result) = outcome else {
+                expect(false, "测试自身的前提坏了：外层那把锁没拿到（\(outcome)）")
+                return
+            }
+            expect(
+                result == .rejected(.lockBusy),
+                "包锁被别人占住时 importAudioFile 必须返回 `.rejected(.lockBusy)`，实得 \(result)。"
+                    + "`withNonBlockingLock` 是**非阻塞**的：争用即 `.skipped`，创建目录 + 写入这两步"
+                    + "根本不跑。")
+
+            // body 没跑，就不许有任何磁盘痕迹 —— 钉的是「建目录 + 写文件」整段都在锁的作用域里，
+            // 不是「锁在某处存在」。
+            let packDirectory = userPacksDirectory.appendingPathComponent("my-pack")
+            expect(
+                !FileManager.default.fileExists(atPath: packDirectory.path),
+                "importAudioFile 因为锁忙而拒绝，却创建了 \(packDirectory.path) —— 说明"
+                    + "「建目录 + 写文件」没有**整段**在锁的作用域里。")
+        }
+    }
+
+    suite(
+        "importAudioFile: 成功导入之后必须把包锁还回去（不许一直持有）"
+    ) {
+        withTempDirectory { root in
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let packsLock = injectedPacksLock(besideUserPacks: userPacksDirectory)
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: userPacksDirectory,
+                durationProbe: StubDurationProbe(fixedDuration: 1.0),
+                limits: AudioImportLimits(),
+                packsLockFile: packsLock)
+
+            let sourceURL = root.appendingPathComponent("source/stop.wav")
+            writeFixture(validWAVData(), to: sourceURL)
+            let outcome = importAudioFile(
+                sourceURL: sourceURL, suggestedFileName: "stop.wav", packID: "my-pack",
+                environment: environment)
+            guard case .success = outcome else {
+                expect(false, "前提：这次 import 应当成功，实得 \(outcome)")
+                return
+            }
+
+            // 锁还回去了 ⇒ 现在还能再拿到。拿不到 = 上一次调用把锁一直攥着，于是**下一次**
+            // import、bind、以及任何一次 `claudio setup`，都会永久 `.lockBusy`。
+            let reacquired = withNonBlockingLock(path: packsLock.path) { true }
+            guard case .ran = reacquired else {
+                expect(
+                    false,
+                    "一次成功的 import 之后包锁没有被释放（实得 \(reacquired)）—— 之后每一次"
+                        + " import / bind / `claudio setup` 都会永久报「忙」")
+                return
+            }
+            expect(true, "成功路径释放了包锁")
+        }
+    }
 }

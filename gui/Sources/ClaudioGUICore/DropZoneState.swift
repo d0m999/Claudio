@@ -19,7 +19,7 @@ public enum DropZoneState: Sendable, Equatable {
 /// Why a drop was refused. The first five cases are T8's five named hardening checks
 /// (ENGINEERING.md T8 acceptance: "oversize / nonWhitelistFormat / pathTraversal /
 /// overDuration / overwritesBuiltin each trigger the correct human refusal"); ``copyFailed``
-/// is a defensive sixth case covering everything outside those five: a genuine,
+/// is a defensive case covering everything outside those five: a genuine,
 /// unexpected I/O failure discovered *after* every one of those five already passed
 /// (disk full, permission revoked mid-flight, the source vanishing between validation
 /// and copy), **and** a source file that is itself a symlink — refused up front, before
@@ -28,6 +28,21 @@ public enum DropZoneState: Sendable, Equatable {
 /// size cap for an arbitrarily large target (`AudioImport.swift`'s `importAudioFile`,
 /// step 3). Kept distinct rather than folded into one of the five, which would misreport
 /// the real cause (project rule: never silently swallow an error).
+///
+/// ``lockBusy`` / ``lockFailed(errno:)`` are a separate pair: `importAudioFile`'s final
+/// persist step (create the pack directory + the atomic write) runs inside
+/// ``AudioImportEnvironment/packsLockFile`` — the same lock `bindEventToManifest` /
+/// `clearEventBinding` hold for `manifest.json`, and `performFirstRunSetup` holds for its
+/// directory-level pack publish. Import writes *files* under the same `packs/` subtree that
+/// lock is documented to cover as a whole (`ClaudioPaths/packsLockFile`'s "一把管整个
+/// `packs/` 子树"), not `manifest.json` itself — but a concurrent `moveItem` of the whole
+/// pack directory (setup's salvage path) racing an unlocked create-directory-then-write
+/// could still yank the directory out from under the import mid-write. `lockBusy` mirrors
+/// ``ManifestBindError/lockBusy`` / ``SetEventEnabledError/lockBusy`` exactly: the
+/// non-blocking lock contended, so the body never ran — nothing on disk changed, retry is
+/// the whole story. `lockFailed` mirrors their `.lockFailed(errno:)` twin: a genuine
+/// `flock`/open failure, not contention — never mapped to `lockBusy`, or a real error would
+/// be reported as "just retry".
 public enum DropRejectionReason: Sendable, Equatable {
     /// The source file's size, in bytes, exceeded ``AudioImportLimits/maxFileSizeBytes``.
     case oversize(actualBytes: Int, maxBytes: Int)
@@ -50,6 +65,17 @@ public enum DropRejectionReason: Sendable, Equatable {
     case overwritesBuiltin(packID: String)
     /// A real I/O failure after every validation check already passed.
     case copyFailed(reason: String)
+    /// Another writer (a concurrent import, a bind/clear, or a `claudio setup` publish
+    /// loop) currently holds ``AudioImportEnvironment/packsLockFile``. `withNonBlockingLock`
+    /// is non-blocking — contention means the persist step never ran, so nothing on disk
+    /// changed. Retrying is the whole remedy.
+    case lockBusy
+    /// Acquiring ``AudioImportEnvironment/packsLockFile`` failed for a genuine reason (not
+    /// contention) — a broken filesystem, permissions, or the path itself being occupied.
+    /// Carries the raw `errno`, kept distinct from ``lockBusy`` for the same reason
+    /// ``ManifestBindError/lockFailed(errno:)`` is: treating a real error as "just busy,
+    /// retry" would have the user retry forever.
+    case lockFailed(errno: Int32)
 }
 
 extension DropRejectionReason {
@@ -84,6 +110,12 @@ extension DropRejectionReason {
 
         case .copyFailed(let reason):
             return "这个文件没能存进去（\(reason)），要不再试一次？"
+
+        case .lockBusy:
+            return "Claudio 正忙着处理另一个声音包，请稍等一下再拖一次。"
+
+        case .lockFailed(let errno):
+            return "没能拿到写入声音包需要的文件锁（errno \(errno)），请稍后重试。"
         }
     }
 }

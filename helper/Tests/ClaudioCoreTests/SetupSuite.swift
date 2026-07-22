@@ -41,7 +41,10 @@ private func makeEnvironment(
         settingsFile: root.appendingPathComponent("settings.json"),
         configLockFile: claudioRoot.appendingPathComponent("config.lock"),
         settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
-        packsLockFile: claudioRoot.appendingPathComponent("packs.lock"),
+        // 见 ``injectedSetupPacksLock(under:)``：故意不用 `claudioRoot.appendingPathComponent(
+        // "packs.lock")` —— 那个位置能从 `userPacksDirectory` 派生回来，规不出 `Setup.swift`
+        // 是「读了被注入的字段」还是「就地重新算了一遍碰巧算对」。
+        packsLockFile: injectedSetupPacksLock(under: root),
         // 生产默认是 10 次尝试、间隔 50ms（见 ``PacksLockRetry``）。测试里压到 5 次、间隔 10ms：
         // 既不让「一直占着」那条测试白等，又保留**多于一次**的尝试——attempts 压到 1 就等于把重试
         // 这根轴从整个测试套件里删掉，而那正是下面那条时序测试要钉的东西。
@@ -53,6 +56,37 @@ private func makeEnvironment(
 
 @MainActor
 func runSetupSuites() {
+
+    // MARK: - `injectedSetupPacksLock(under:)` 自证：注入值结构性不可派生
+    //
+    // 与 gui 侧 `injectedPacksLock(under:)` 的自证同一个关系式：同一个 root 构造两次，父目录与
+    // 叶名必须两次都不同（运行时 UUID）；且两次的值都不能等于「从 `userPacksDirectory` 就地
+    // 拼出来」的那个旧写法。守的是**关系**，不是读它用了哪个随机源——后者是「守卫读被它守的
+    // 那个函数的输出」，恒真。
+    suite("injectedSetupPacksLock(under:)：同一个 root 两次构造，父目录与叶名必须两次都不同") {
+        withTempDirectory { root in
+            let first = injectedSetupPacksLock(under: root)
+            let second = injectedSetupPacksLock(under: root)
+            expect(
+                first.deletingLastPathComponent().path != second.deletingLastPathComponent().path,
+                "两次注入的锁父目录相同（\(first.deletingLastPathComponent().path)）—— "
+                    + "父目录必须带运行时 UUID，否则一个写死的父目录名总能被拼出来")
+            expect(
+                first.lastPathComponent != second.lastPathComponent,
+                "两次注入的锁叶名相同（\(first.lastPathComponent)）—— 叶名也必须带运行时 UUID，"
+                    + "否则「只带父目录」的旧洞原样复发（只带其中一段仍然可派生，见"
+                    + "``injectedPacksLock(under:)`` 的 doc）")
+
+            let claudioRoot = root.appendingPathComponent("claudio-root", isDirectory: true)
+            let userPacksDirectory = claudioRoot.appendingPathComponent("packs", isDirectory: true)
+            let oldDerivableShape = userPacksDirectory.deletingLastPathComponent()
+                .appendingPathComponent("packs.lock")
+            expect(
+                first.path != oldDerivableShape.path && second.path != oldDerivableShape.path,
+                "注入值与「从 userPacksDirectory 父目录拼回来的旧写法」（\(oldDerivableShape.path)）"
+                    + "相同——这正是本函数要消灭的可派生形状")
+        }
+    }
 
     // MARK: - 包目录锁（`/codex review b0ce657` 之后那次核查逼出来的）
     //
@@ -292,7 +326,8 @@ func runSetupSuites() {
                 settingsFile: root.appendingPathComponent("settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
                 settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
-                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
+                // 见 ``injectedSetupPacksLock(under:)``：同上，故意不用可派生的位置。
+                packsLockFile: injectedSetupPacksLock(under: root))
             // T17d：这个 fixture 原本一个包都没有，而 `alreadyInstalled` 会把整个复制块跳过 ——
             // 于是它描述的其实是一台**装完也不会响**的机器，只是当年没人问这个问题。现在
             // `.noAvailablePack` 会拦住它（这正是该拦的），所以把 fixture 补成它本来想描述的样子：
@@ -443,7 +478,8 @@ func runSetupSuites() {
                 settingsFile: root.appendingPathComponent("settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
                 settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
-                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
+                // 见 ``injectedSetupPacksLock(under:)``：同上，故意不用可派生的位置。
+                packsLockFile: injectedSetupPacksLock(under: root))
             writeFixture(
                 #"{ "schema": 1, "id": "minimal-chime", "events": {} }"#,
                 to: environment.userPacksDirectory.appendingPathComponent(
@@ -525,7 +561,8 @@ func runSetupSuites() {
                 settingsFile: root.appendingPathComponent("settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
                 settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
-                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
+                // 见 ``injectedSetupPacksLock(under:)``：同上，故意不用可派生的位置。
+                packsLockFile: injectedSetupPacksLock(under: root))
             // A dot-prefixed leftover that sorts before the real pack ('.' 0x2E < 'z'): without
             // the `!hasPrefix(".")` filter it would be scanned first and either be selected or
             // fail selection outright. With the filter it is skipped and `zeta-chime` wins.
@@ -628,7 +665,8 @@ func runSetupSuites() {
                 settingsFile: root.appendingPathComponent("settings.json"),
                 configLockFile: claudioRoot.appendingPathComponent("config.lock"),
                 settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
-                packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
+                // 见 ``injectedSetupPacksLock(under:)``：同上，故意不用可派生的位置。
+                packsLockFile: injectedSetupPacksLock(under: root))
 
             let result = performFirstRunSetup(environment: environment)
             guard case .failure(.binaryCopyFailure) = result else {
@@ -842,7 +880,8 @@ private func makeInstalledEnvironment(root: URL) -> SetupEnvironment {
         settingsFile: root.appendingPathComponent("settings.json"),
         configLockFile: claudioRoot.appendingPathComponent("config.lock"),
         settingsLockFile: claudioRoot.appendingPathComponent("settings.lock"),
-        packsLockFile: claudioRoot.appendingPathComponent("packs.lock"))
+        // 见 ``injectedSetupPacksLock(under:)``：同上，故意不用可派生的位置。
+        packsLockFile: injectedSetupPacksLock(under: root))
 }
 
 @MainActor

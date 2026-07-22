@@ -226,11 +226,35 @@ public func importAudioFile(
     // write into a pack the user already owns). An interrupted/failed write leaves the
     // previous file (or nothing) in place, never a truncated half-written one, since the
     // rename is the only step that ever touches the real destination path.
-    do {
-        try fileManager.createDirectory(at: userPackDirectory, withIntermediateDirectories: true)
-        try data.write(to: destinationURL, options: .atomic)
-    } catch {
-        return .rejected(.copyFailed(reason: error.localizedDescription))
+    //
+    // The create-directory + write pair runs inside `environment.packsLockFile` —
+    // `bindEventToManifest`/`clearEventBinding`'s and `performFirstRunSetup`'s critical
+    // sections for the very same `packs/` subtree (see ``ClaudioPaths/packsLockFile``: "一把
+    // 管整个 `packs/` 子树"). Without it, `performFirstRunSetup`'s salvage path — which
+    // `moveItem`s a whole pack directory — could yank `userPackDirectory` out from under
+    // this create-then-write, same-user-race-wise identical to the `manifest.json` "second
+    // writer" gap `mutateManifestJSON` closed. `withNonBlockingLock` is non-blocking:
+    // contention maps to `.lockBusy` (nothing on disk changes, retry is the whole remedy —
+    // never folded into `.success`, or a "设置声音" tap would silently do nothing), a real
+    // acquisition failure to `.lockFailed(errno:)` (never reported as "just busy").
+    let persistOutcome = withNonBlockingLock(path: environment.packsLockFile.path) {
+        () -> AudioImportOutcome? in
+        do {
+            try fileManager.createDirectory(
+                at: userPackDirectory, withIntermediateDirectories: true)
+            try data.write(to: destinationURL, options: .atomic)
+            return nil
+        } catch {
+            return .rejected(.copyFailed(reason: error.localizedDescription))
+        }
+    }
+    switch persistOutcome {
+    case .ran(let earlyReturn):
+        if let earlyReturn { return earlyReturn }
+    case .skipped:
+        return .rejected(.lockBusy)
+    case .failed(let errno):
+        return .rejected(.lockFailed(errno: errno))
     }
 
     return .success(

@@ -54,6 +54,7 @@ func runPreviewFixturesSuites() {
             "dropZone.reject.oversize", "dropZone.reject.nonWhitelistFormat",
             "dropZone.reject.pathTraversal", "dropZone.reject.overDuration",
             "dropZone.reject.overwritesBuiltin", "dropZone.reject.copyFailed",
+            "dropZone.reject.lockBusy", "dropZone.reject.lockFailed",
             "coverage.present", "coverage.unmapped", "coverage.broken",
             "packCard.complete", "packCard.partial", "packCard.broken",
             // 第六族（PLAN-MASTER-VOLUME.md D33/D38）：主音量控件行的展示态。少了它，写失败之后的
@@ -106,7 +107,7 @@ func runPreviewFixturesSuites() {
             rejectReasonLabels
                 == [
                     "oversize", "nonWhitelistFormat", "pathTraversal", "overDuration",
-                    "overwritesBuiltin", "copyFailed",
+                    "overwritesBuiltin", "copyFailed", "lockBusy", "lockFailed",
                 ],
             "dropZoneStates must include a .reject for every DropRejectionReason case, got"
                 + " \(rejectReasonLabels)")
@@ -243,6 +244,8 @@ private func dropRejectionReasonLabel(_ reason: DropRejectionReason) -> String {
     case .overDuration: "overDuration"
     case .overwritesBuiltin: "overwritesBuiltin"
     case .copyFailed: "copyFailed"
+    case .lockBusy: "lockBusy"
+    case .lockFailed: "lockFailed"
     }
 }
 

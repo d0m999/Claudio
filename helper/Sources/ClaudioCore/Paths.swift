@@ -103,11 +103,17 @@ public enum ClaudioPaths {
         root.appendingPathComponent("settings.lock")
     }
 
-    /// `~/.claudio/packs.lock` — the non-blocking lock serializing the **two** writers of
-    /// `~/.claudio/packs/`: the GUI's `mutateManifestJSON(at:lockFile:_:)` (bind/clear, byte
-    /// level) and the CLI's ``performFirstRunSetup(environment:)`` pack-publish loop
-    /// (directory level — it `moveItem`s a whole user pack aside and `moveItem`s a bundled
-    /// copy in).
+    /// `~/.claudio/packs.lock` — the non-blocking lock serializing the **three** writers of
+    /// `~/.claudio/packs/`: the GUI's `mutateManifestJSON(at:lockFile:_:)` (bind/clear,
+    /// `manifest.json`, byte level), the GUI's `importAudioFile` (drag-in persist step —
+    /// create the pack directory + the atomic audio-file write), and the CLI's
+    /// ``performFirstRunSetup(environment:)`` pack-publish loop (directory level — it
+    /// `moveItem`s a whole user pack aside and `moveItem`s a bundled copy in).
+    ///
+    /// ⚠️ **这句「三个写者」曾经写的是「两个」，直到 `importAudioFile` 补上这把锁为止** —— 它此前
+    /// 一直在 `packs/` 子树里建目录、原子写文件，却从不持锁，与下面「为什么它必须存在」那段治的是
+    /// 同一类洞（同用户并发写者 + 无锁 = 丢更新 / 目录被换掉），只是入口从 `manifest.json` 换成了
+    /// 音频文件本身。别把「两个写者」再读成穷举——加一个新的 `packs/` 写者，就要把这一行也改了。
     ///
     /// ## 为什么它必须存在（`/codex review b0ce657` 之后那次核查）
     /// `manifest.json` 此前是**零锁**的，理由写在 `ManifestBinding.swift` 的散文里：「只有一个

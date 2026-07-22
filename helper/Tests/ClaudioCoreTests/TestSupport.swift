@@ -697,6 +697,36 @@ func argumentValue(_ label: String, in arguments: String) -> String? {
 }
 // claudio:shared-scanner:end
 
+/// 本测试包注入给 `SetupEnvironment.packsLockFile` 的那把包锁 —— 结构性不可从 `claudioRoot` /
+/// `userPacksDirectory` 派生（同源做法与 gui 侧 `AudioImportFixtures.swift` 的
+/// `injectedPacksLock(under:)` 逐字一致，见那里的完整论证）。
+///
+/// ## 为什么 `SetupSuite.swift` 原来的写法（`claudioRoot.appendingPathComponent("packs.lock")`）不够
+///
+/// `claudioRoot` 同时也是 `userPacksDirectory` 的父目录（`claudioRoot/packs`）——于是
+/// `userPacksDirectory.deletingLastPathComponent().appendingPathComponent("packs.lock")` 逐字
+/// 拼得回注入值。若 `Setup.swift` 未来某次重构悄悄把 `withNonBlockingLock(path:
+/// environment.packsLockFile.path)` 换成「就地从 `userPacksDirectory` 算一个」，两个表达式求值
+/// 出来仍是**同一个 URL**——所有持锁行为测试（外部占住锁、断言 `performFirstRunSetup` 被挡住）
+/// 全部继续绿，规不出「读的是被注入的字段」还是「重新算了一遍碰巧算对」。
+///
+/// 结构性不可派生的做法与 gui 侧相同：父目录与叶名各带一段运行时 `UUID`，生产源码既写不出它
+/// （编译期不存在），也没有任何路径表达式能从 `claudioRoot`/`userPacksDirectory` 派生出它。
+///
+/// ⚠️ 与 gui 侧的差异如实标注：`SetupEnvironment.packsLockFile` **保留**着默认值
+/// `= ClaudioPaths.packsLockFile`（`LockSeparationSuite.swift`「SetupEnvironment 的三把锁默认值」
+/// 那条专门钉的就是这个默认值本身，CLI 生产构造 `SetupEnvironment(executablePath:)` 时依赖它
+/// 落到真实 `~/.claudio/packs.lock`）——这与 gui 侧「default 是纯地雷、已被拆除」不是同一类。
+/// 本函数解决的是本文件另一件事：`SetupSuite.swift` 的 fixture **显式**传值时，那个值本身
+/// 不该是可从别的 fixture 字段派生出来的。
+func injectedSetupPacksLock(under root: URL) -> URL {
+    let nonce = UUID().uuidString
+    return
+        root
+        .appendingPathComponent("injected-setup-locks-\(nonce)", isDirectory: true)
+        .appendingPathComponent("setup-packs-lock-\(nonce)")
+}
+
 /// Creates a unique temporary directory, runs `body` with its URL, and always removes it
 /// afterwards (success or throw). Tests that touch the filesystem (`FileLock`, `doctor`
 /// pack/settings probes) MUST use this instead of any real `~/.claudio` or `~/.claude`

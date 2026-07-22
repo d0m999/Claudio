@@ -131,7 +131,7 @@ public enum PreviewFixtures {
     )
 
     /// `.idle`, `.hover`, `.success`, and one `.reject` for EACH of ``DropRejectionReason``'s
-    /// six cases (nine fixtures total) — every ``DropZoneState`` case, and every reason a
+    /// eight cases (eleven fixtures total) — every ``DropZoneState`` case, and every reason a
     /// `.reject` can carry, appears at least once.
     public static let dropZoneStates: [DropZoneState] = [
         .idle,
@@ -142,6 +142,8 @@ public enum PreviewFixtures {
         .reject(.overDuration(actualSeconds: 6.4, maxSeconds: 3.0)),
         .reject(.overwritesBuiltin(packID: "minimal-chime")),
         .reject(.copyFailed(reason: "磁盘已满")),
+        .reject(.lockBusy),
+        .reject(.lockFailed(errno: 5)),
         .success(sampleImportedAudioFile),
     ]
 
@@ -366,6 +368,8 @@ public enum PreviewFixtures {
         case .overDuration: "overDuration"
         case .overwritesBuiltin: "overwritesBuiltin"
         case .copyFailed: "copyFailed"
+        case .lockBusy: "lockBusy"
+        case .lockFailed: "lockFailed"
         }
     }
 

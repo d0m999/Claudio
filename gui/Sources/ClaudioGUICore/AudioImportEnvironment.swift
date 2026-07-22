@@ -59,9 +59,12 @@ public struct AudioImportEnvironment: Sendable {
 
     public var limits: AudioImportLimits
 
-    /// `~/.claudio/packs.lock` — 序列化 `manifest.json` 两个写者的那把锁（见
+    /// `~/.claudio/packs.lock` — 序列化整个 `packs/` 子树写者的那把锁（见
     /// ``ClaudioPaths/packsLockFile``）。`bindEventToManifest` / `clearEventBinding` 把它递给
-    /// ``mutateManifestJSON(at:lockFile:_:)``。
+    /// ``mutateManifestJSON(at:lockFile:_:)`` 序列化 `manifest.json` 的读-改-写；
+    /// ``importAudioFile(sourceURL:suggestedFileName:packID:environment:)`` 把它递给
+    /// `withNonBlockingLock` 序列化「建包目录 + 落音频文件」那一步——与
+    /// `performFirstRunSetup` 的目录级包发布循环共用同一把（三个写者，同一把锁）。
     ///
     /// ## 它**没有**默认值，而兄弟字段有 —— 这个不对称是刻意的
     ///
