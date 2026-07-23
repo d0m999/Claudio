@@ -161,7 +161,7 @@ private func publishBundledPacks(
         // `availablePackIDs` 选包时天然被排除），**永远不会在最终路径上留下半个包**。
         // 上一版的注释早就声称这里是这么做的 —— 而代码里根本没有。谎言恰好盖住了新闸门最现实
         // 的触发输入（T17e 对抗评审）。现在它是真的了。
-        // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:444` 的 `removeItem` 只删当前 pid 那一份）——
+        // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:794` 的 `removeItem` 只删当前 pid 那一份）——
         // 与 `copySelfToFixedLocation` 的 `.claudio.tmp-…` 同理，危害为零、不顺手 glob 删的理由
         // 也同理（会误删并发存活的 setup 的暂存）。
         let staging = environment.userPacksDirectory.appendingPathComponent(
@@ -761,7 +761,7 @@ private let restoreBundledPacksHint =
 /// 同一个：**Claude Code 每一次事件都去执行一个缺失 / 半截 / 不可执行的二进制**，而面板的探测
 /// （`isRunnableHelperBinary`）此刻多半还说「已经接好了」。
 ///
-/// 讽刺的是同一个文件 200 行之上的**包复制**（T17e）早就是对的：先写进点开头的暂存目录，成功之后
+/// 讽刺的是同一个文件 600 行之上的**包复制**（T17e）早就是对的：先写进点开头的暂存目录，成功之后
 /// 再 rename 到最终名字。而 `AtomicWriteSuite` 当时豁免 `copyItem` / `moveItem` 的理由，白纸黑字
 /// 写的正是「它们的原子性纪律是另一条（T17e 的 staging + rename）」—— 那句话对**这个调用点**是
 /// 字面意义上的假话。豁免的理由必须对每一个被豁免的调用点都成立，否则它就只是一句托词。
@@ -779,12 +779,12 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
     // 对方的暂存。点开头：万一真被中断留下，它**不会被当成那个二进制**（探测认的是 `bin/claudio`
     // 这个名字，`.claudio.tmp-…` 不匹配）。
     //
-    // ⚠️ 它**不会被自动清掉**：下面 `:679` 的 `try? removeItem(at: staging)` 只删**当前 pid** 那一份，
+    // ⚠️ 它**不会被自动清掉**：下面 `:794` 的 `try? removeItem(at: staging)` 只删**当前 pid** 那一份，
     //    一次被 kill 的旧 setup 留下的 `.claudio.tmp-<别的 pid>` 会一直躺在 `~/.claudio/bin/` 里
     //    （`/codex review 3af8d5f` 红队实测）。危害为零——它是隐藏文件、不参与任何探测、不占用户
     //    可见空间——所以这里**不**顺手 glob 删 `.claudio.tmp-*`：那会把一个**并发存活**的 setup 的
     //    暂存删掉，用一条真实的竞态换一次无害的清扫。真要收垃圾，得先有「哪些 pid 还活着」的判据，
-    //    那是另一件事。（同样的 pid 局限也在包路径 `:436` 上，那里的注释同此。）
+    //    那是另一件事。（同样的 pid 局限也在包路径 `:169` 上，那里的注释同此。）
     let staging = destination.deletingLastPathComponent()
         .appendingPathComponent(
             ".\(destination.lastPathComponent).tmp-\(ProcessInfo.processInfo.processIdentifier)")
@@ -798,12 +798,12 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
         try fileManager.setAttributes([.posixPermissions: 0o755], ofItemAtPath: staging.path)
 
         // ⚠️ 判据必须用 **lstat 语义**（`attributesOfItem` 不跟随链接），不能用 `fileExists`
-        // （它**跟随**链接）—— 而这恰恰是姊妹的包复制路径（`:403`）早就修好的那个 bug：一条
+        // （它**跟随**链接）—— 而这恰恰是姊妹的包复制路径（`:128`）早就修好的那个 bug：一条
         // 指向真实文件的 symlink 会从 `fileExists` 的缝里漏过去、直奔 `replaceItemAt`，而
         // `replaceItemAt` 用 lstat 看得见那条链接、当场抛（实测：「The file "claudio" doesn't exist」）——
         // 于是 setup 返回 `.binaryCopyFailure`、二进制永不发布、hooks 永不写，**每一次重跑都一字不差
         // 地失败**。这个回归是「原子发布」那一刀引入的（`/codex review 3af8d5f` 红队实测），而它
-        // 的修法在 270 行之上的包路径里逐字写着。（`bin/claudio` 是 symlink 永远不来自 Claudio 自己
+        // 的修法在 680 行之上的包路径里逐字写着。（`bin/claudio` 是 symlink 永远不来自 Claudio 自己
         // 的操作——它只写常规文件——但外部/用户可能造出来，且 TODOS:58 计划让日后的 helper 升级都走
         // 这条路，敞口只会变大。）
         let existing = try? fileManager.attributesOfItem(atPath: destination.path)
