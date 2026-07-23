@@ -161,7 +161,7 @@ private func publishBundledPacks(
         // `availablePackIDs` 选包时天然被排除），**永远不会在最终路径上留下半个包**。
         // 上一版的注释早就声称这里是这么做的 —— 而代码里根本没有。谎言恰好盖住了新闸门最现实
         // 的触发输入（T17e 对抗评审）。现在它是真的了。
-        // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:794` 的 `removeItem` 只删当前 pid 那一份）——
+        // ⚠️ 那个留下的暂存目录**不会被自动清掉**（`:169` 的 `removeItem` 只删当前 pid 那一份）——
         // 与 `copySelfToFixedLocation` 的 `.claudio.tmp-…` 同理，危害为零、不顺手 glob 删的理由
         // 也同理（会误删并发存活的 setup 的暂存）。
         let staging = environment.userPacksDirectory.appendingPathComponent(
