@@ -175,6 +175,14 @@ private struct PackCardView: View {
         }
     }
 
+    /// Single source for both ``metaSlot`` (视觉) and ``accessibilityLabel`` (听觉) —
+    /// computed once so the two channels can never read `card.isCC0` independently and
+    /// drift apart (/codex review d6dafe8 P2: `accessibilityLabel` had been deriving its
+    /// suffix from `card.state` alone, so VoiceOver never spoke the CC0 badge this view renders).
+    private var metaSlots: PackRowMetaSlots {
+        packRowMetaSlots(isCC0: card.isCC0, state: card.state)
+    }
+
     /// DESIGN.md「包行四态」meta 槽 content — two INDEPENDENT sub-slots
     /// (``packRowMetaSlots(isCC0:state:)``, `ClaudioGUICore`, unit-tested by
     /// ``PackGallerySuite``): "`CC0` 与「缺 N 个」必须分居两个槽位（license 与完整度是两根
@@ -192,7 +200,7 @@ private struct PackCardView: View {
     /// same badge twice in one row).
     @ViewBuilder
     private var metaSlot: some View {
-        let slots = packRowMetaSlots(isCC0: card.isCC0, state: card.state)
+        let slots = metaSlots
         HStack(spacing: 6) {
             if let label = licenseBadgeLabel(slots.license) {
                 Text(label)
@@ -269,9 +277,12 @@ private struct PackCardView: View {
     /// per-row list instead (no separate pill), so the template is adapted per-row: the
     /// SELECTED row reads as "当前声音包"（a readout, no need to say "点按切换" — you're
     /// already looking at it), every other row reads as "…，点按切换" (an actionable
-    /// switch target), each with its completeness state appended.
+    /// switch target), each with its license (T5) then completeness state appended — same
+    /// order as ``metaSlot``'s two sub-slots, both read off the same ``metaSlots`` value so
+    /// the spoken label can never diverge from what's rendered (/codex review d6dafe8 P2).
     private var accessibilityLabel: String {
         let name = card.name ?? card.id
+        let licenseSuffix = licenseBadgeLabel(metaSlots.license).map { "，\($0) 授权" } ?? ""
         let stateSuffix: String
         switch card.state {
         case .complete: stateSuffix = ""
@@ -279,8 +290,8 @@ private struct PackCardView: View {
         case .broken: stateSuffix = "，文件丢失"
         }
         return card.isSelected
-            ? "当前声音包 \(name)\(stateSuffix)"
-            : "声音包 \(name)，点按切换\(stateSuffix)"
+            ? "当前声音包 \(name)\(licenseSuffix)\(stateSuffix)"
+            : "声音包 \(name)，点按切换\(licenseSuffix)\(stateSuffix)"
     }
 
     /// Chinese display names (``eventDisplayName(_:)``, `EventRowView.swift`) of every

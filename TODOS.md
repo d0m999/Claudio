@@ -1376,16 +1376,21 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P1（D17/D44 是已拍板的验收决议，真机验证不通过意味着「阶段 D 已交付」这句话目前不成立；范围已从「主音量行」扩到全部三个 Dynamic Type 降级消费者，优先级不降）
 **Depends on:** 先查清 `typeSizeTier` 读的具体 API 再定修法；可能与上一条「`DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:`」共用一次修复窗口；修好后 `EventRowView`/`PackGalleryView` 需要各自的真机复测（目前只有主音量行被验证过失效）
 
-### PackCardView 的 statusLine 图标/文字未 `accessibilityHidden`，且 CC0 徽标 VoiceOver 听不到
+### ~~PackCardView 的 CC0 徽标 VoiceOver 听不到~~ ✅ CC0 半已修（2026-07-24，`/codex review d6dafe8`）；子槽图标未 `accessibilityHidden` 半 —— 现有结构下可能已非问题，未装机实测
 
-**What:** `PackCardView` 的 `eventGrid` 每个字形都 `.accessibilityHidden(true)`（已由卡片自身 `accessibilityLabel` 汇总），但 `statusLine` 的 `xmark.circle.fill` +「文件丢失」、`CC0` 徽标、`N/4` 计数都**未**隐藏，可能作为冗余/自动生成 label 的 VoiceOver 停靠泄漏；且 `CC0` 根本没进 `accessibilityLabel`，VoiceOver 用户完全听不到「这是 CC0 包」。
+**What（原文，2026-07-11 pre-T4/T5 组件形态）：** `PackCardView` 的 `eventGrid` 每个字形都 `.accessibilityHidden(true)`（已由卡片自身 `accessibilityLabel` 汇总），但 `statusLine` 的 `xmark.circle.fill` +「文件丢失」、`CC0` 徽标、`N/4` 计数都**未**隐藏，可能作为冗余/自动生成 label 的 VoiceOver 停靠泄漏；且 `CC0` 根本没进 `accessibilityLabel`，VoiceOver 用户完全听不到「这是 CC0 包」。
 
-**Why:** 均无功能风险，纯 VoiceOver 体验：要么冗余停靠、要么信息缺失（CC0）。
+**现状（2026-07-24）：** `eventGrid`/`statusLine` 是 T4/T5（竖排整宽行）之前的旧组件形态，今天的 `PackCardView`（`PackGalleryView.swift`）已经是 `metaSlot`/`trailingSlot`/`brokenStatusRow` 三槽结构，原文点名的两个属性名已不存在，需要按今天的形状重新判断：
 
-**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，a11y-architect，confidence 5）。修法：给 `statusLine` 的图标/文字节点补 `.accessibilityHidden(true)`（镜像 `eventGrid` 的既有处理），并把 `CC0` 折进 `.complete` 分支的 `accessibilityLabel` 若需播报。
+- **CC0 未播报半 —— 已修。** `d6dafe8` T5 引入的 `slots.license`（CC0 / `.none`）此前只喂 `metaSlot`（视觉），没喂 `accessibilityLabel`（听觉）——`/codex review d6dafe8` [P2] 抓到同一个洞。修法：把 `metaSlot`/`accessibilityLabel` 收口到同一个 `private var metaSlots: PackRowMetaSlots` 计算属性上（单一来源，两个读者），`accessibilityLabel` 追加「，CC0 授权」后缀（`card.isSelected` 与 `.broken` 分支同样生效，`.broken` 因 `packRowMetaSlots` 本身对 `.broken` 恒返回 `.none` 而正确地不播报）。`swift run --package-path gui claudio-gui-tests` 2494 项全绿（无回归，`metaSlots` 只是既有 `packRowMetaSlots` 纯函数的一层薄读取，纯函数本身已被 `PackGallerySuite` 覆盖）。
+- **子槽图标未 `accessibilityHidden` 半 —— 结构已变，很可能不再是问题，但未验证。** 原文的担忧是「图标会作为冗余/未标注的 VoiceOver 停靠泄漏」——这在 `EventRowView` 是真实风险，因为那一行是 `.accessibilityElement(children: .contain)`（同一行里 fileNameMenu/试听/静音三个**各自独立可达**的控件，`.contain` 故意不合并，所以每个纯装饰 `Image` 都得手动 `.accessibilityHidden(true)` 才不会冒出来）。而今天的 `PackCardView` 整行是**一个** `Button(action: onSelect)`，直接在 Button 本身挂 `.accessibilityLabel(accessibilityLabel)`——SwiftUI 对 `Button` 的默认无障碍行为就是把它折叠成单一元素（不像 `.contain` 那样让子视图各自可达），所以 `metaSlot`/`trailingSlot` 里的 `Image`/`Text` 大概率本来就不会被 VoiceOver 单独枚举到。但这是框架默认行为的推理，不是设备实测——本机没有 Xcode/VoiceOver 可验（同「T15 真身面板」那条的天花板）。如果之后哪次真机走查发现确实冗余播报，再补 `.accessibilityHidden(true)`。
 
-**Effort:** S
-**Priority:** P4
+**Why:** 均无功能风险，纯 VoiceOver 体验。CC0 半已随 `d6dafe8` 后续修复补齐；子槽图标半保留观察，不阻塞。
+
+**Context:** T14/T15/T16 pre-landing 评审（2026-07-11，a11y-architect，confidence 5）原文；`/codex review d6dafe8`（2026-07-24）独立命中同一个 CC0 缺口并已修。
+
+**Effort:** ~~S（CC0 半）~~ 已完成 / XS（子槽图标半，若日后需要）
+**Priority:** ~~P4（CC0 半）~~ 已关闭 / P4（子槽图标半，观察）
 **Depends on:** None
 
 ### ~~补 helper 单测缺口：`setEventEnabled` 的真并发写未证不撕裂（原 4 项 lake-not-ocean，只剩这 1 项）~~ ✅ 已完成（阶段 D，2026-07-11）
@@ -2318,3 +2323,17 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Effort:** S
 **Priority:** P2
 **Depends on:** None
+
+### `packRowMetaSlots` 的签名钉死了两个输入 —— T13 落地时必须改签名，doc comment「函数形状无需变化」的承诺站不住
+
+**What:** `packRowMetaSlots(isCC0:state:)`（`PackGallery.swift:112`）今天只接收 `isCC0: Bool` 与 `state: PackCardState` 两个输入，`let license: PackRowLicenseBadge = isCC0 ? .cc0 : .none` 这一行只能产出 `.cc0` 或 `.none`。`PackRowLicenseBadge`（同文件 :73-83）已经为 T13（`factoryIntegrity`，`plan/PLAN-SOUND-MANAGER.md#step-T13`）预留了 `.modified` case，但该 case 的注释写着「T13 落地时 `packRowMetaSlots(isCC0:state:)` 的形状不该需要变」——这句话不成立：`.modified` 要表达的是「manifest 字节与出厂 bundle 不一致的 CC0 包」，而「普通非 CC0 包」与「遭篡改的 CC0 包」在现有两个输入下**不可区分**（两者的 `isCC0` 都可能是 `true`/`false` 的任意组合，函数完全看不到 factoryIntegrity 的判定结果），所以 `.modified` 在今天的函数体内是一个**永远构造不出来**的死 case。
+
+**Why:** 这不是今天的 bug——`.modified` 只是预留的类型位置，还没有任何生产代码会走到它，`PackGallerySuite` 也没断言过它（断言了也会因为构造不出来而失败）。但「预留了位置」≠「预留了输入通道」，doc comment 把两者说成了同一件事，会让 T13 的实现者信以为真、只改 `case .modified` 的渲染分支而漏掉 `packRowMetaSlots` 的签名本身——这正是本文档反复记的「散文声称的覆盖范围比代码实际覆盖的大」那一类洞，只是这次长在**面向未来的注释**里而不是面向当下的断言里。
+
+**Context:** `/codex review d6dafe8`（2026-07-24）P2；核对属实（`PackGallery.swift:73-83,112-122` 逐字确认）。GATE PASS（另一条 P2——`accessibilityLabel` 未播报 CC0——已在同日修复，见「PackCardView 的 CC0 徽标 VoiceOver 听不到」条）。`plan/PLAN-SOUND-MANAGER.md#step-T13` 本身仍是 `[ ]` 未落地。
+
+**修复方式:** T13 落地时（而非现在）：① 给 `packRowMetaSlots` 加一个 `factoryIntegrity: Bool?`（或直接是判定结果的枚举）参数，签名从 `(isCC0:state:)` 变成三元输入；② `license` 的推导从简单三元改成「先看 factoryIntegrity 是否失败，失败则 `.modified`（与 `isCC0` 无关——篡改判定不看 license 声明本身）；否则 `isCC0 ? .cc0 : .none`」；③ 顺带改掉 :78-82 那句「形状不该需要变」的失实注释；④ `PackGallerySuite` 补一条「篡改的内置 CC0 包 → 行显 `⚠ 已修改` 而非 `CC0`」的断言（`plan/PLAN-SOUND-MANAGER.md:638` 验收清单已列，尚未有代码可断）。
+
+**Effort:** XS（跟着 T13 主工作量顺带做，非独立任务；单独拎出来做没有意义——没有 `factoryIntegrity` 就没有第三个输入可传）
+**Priority:** P4（不阻断当前提交——`.modified` 今天没有任何生产路径可达，唯一风险是「注释误导未来实现者」，T13 本身尚未排期）
+**Depends on:** T13（`plan/PLAN-SOUND-MANAGER.md#step-T13`，`factoryIntegrity(packID:)` 逐字节校验，目前 `plan/PLAN-SOUND-MANAGER.md:589` 状态仍是 `[ ]`）
