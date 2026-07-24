@@ -2082,7 +2082,9 @@ func runSourceScannerSuites() {
     // 里的扫描器本体，不是这个文件，两个包的 `SourceScannerSuite.swift` 允许在这类内容上分叉）。
     suite(
         "绊线（T3）：gui/Sources（两个 target，递归）里**每个**经 mutateManifestJSON 的文件，其导出写"
-            + "函数不带已知并发 token（黑名单，非完备）且逐个带 @MainActor；PackFork/PackRestore 未落地哨兵"
+            + "函数不带已知并发 token（黑名单，非完备）且逐个带 @MainActor；PackRestore 未落地哨兵"
+            + "（PackFork.swift 已于 T6 落地，已被下面的内容围栏自动纳入，见 `pendingManifestWriterPaths`"
+            + " 头上那段）"
     ) {
         // 【纳入判据 —— 内容推导的围栏，不是路径白名单】
         //
@@ -2209,13 +2211,15 @@ func runSourceScannerSuites() {
 
         // 【哨兵组】守的是上面那条围栏**唯一**盖不住的那件事：新写者**绕开原语**。
         //
-        // 这两个文件是计划点名的未来 manifest 写者（`PLAN-SOUND-MANAGER.md:743` 的 T6
-        // `PackFork.swift` / `:596` 的 T12 `PackRestore.swift`）。今天正向断言它们**尚不存在**；
-        // 落地当天这条哨兵变红，逼一个人回来**确认新写者确实经 `mutateManifestJSON`**——确认了，
-        // 它就已经被上面的围栏自动纳入，这条哨兵删掉即可；没经原语，围栏漏得掉它，得在这里补。
-        // 哨兵不重复围栏的工作，它守的正是围栏的盲区。
+        // 这份名单原本是计划点名的两个未来 manifest 写者（`PLAN-SOUND-MANAGER.md:743` 的 T6
+        // `PackFork.swift` / `:596` 的 T12 `PackRestore.swift`），对尚不存在的文件正向断言「尚不
+        // 存在」。**`PackFork.swift` 已经落地（T6）**：落地当天这条哨兵按预期变红，回来确认过
+        // 「新写者确实经 `mutateManifestJSON`」——`forkPack` 的唯一一次 manifest 改写就是
+        // `mutateManifestJSON(at: staging, lockFile: environment.packsLockFile) { … }`，已被上面
+        // 的内容围栏自动纳入（并发 token + @MainActor 两条腿都在跑）——所以按 doc 里写的做法，
+        // 把它从下面的名单里删掉了。`PackRestore.swift`（T12）仍未落地，继续留着当哨兵。
+        // 哨兵不重复围栏的工作，它守的正是围栏的盲区：新写者绕开原语。
         let pendingManifestWriterPaths = [
-            "\(coreRelativeDirectory)/PackFork.swift",
             "\(coreRelativeDirectory)/PackRestore.swift",
         ]
         for relativePath in pendingManifestWriterPaths {

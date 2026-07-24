@@ -2337,3 +2337,45 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Effort:** XS（跟着 T13 主工作量顺带做，非独立任务；单独拎出来做没有意义——没有 `factoryIntegrity` 就没有第三个输入可传）
 **Priority:** P4（不阻断当前提交——`.modified` 今天没有任何生产路径可达，唯一风险是「注释误导未来实现者」，T13 本身尚未排期）
 **Depends on:** T13（`plan/PLAN-SOUND-MANAGER.md#step-T13`，`factoryIntegrity(packID:)` 逐字节校验，目前 `plan/PLAN-SOUND-MANAGER.md:589` 状态仍是 `[ ]`）
+
+### `forkPack` 的 `.copyFailed`（源子目录缺失）与 `.renameFailed` 两条失败分支没有专门的单测
+
+**What:** `PackFork.swift` 的 `forkPack` 有 7 个错误 case，其中 `.copyFailed`（含"源子目录不存在"这种子情形）与 `.renameFailed`（最终 `moveItem` 失败）目前只靠 doc comment 散文声称覆盖 + 代码走读 + "staging 与 destination 同一父目录必然同卷，`rename(2)` 是单一原子系统调用"这条论证背书，`PackForkSuite.swift` 里没有一条真正驱动这两条路径的行为测试。
+
+**Why:** 与 `.manifestRewriteFailed` 分支不对称——那一条已经有一条用坏 `manifest.json` 触发 `mutateManifestJSON` 失败的行为测试，证明了"清理 staging、最终路径不留半成品"这条不变量在该分支下真的成立。而 `.copyFailed`/`.renameFailed` 这两条同样各自要保证同一个不变量，却完全没有行为测试撑腰，只是"看起来应该一样"。这正是本文档反复记的那类洞：论证成立不等于有断言钉住它。
+
+**Context:** T6（PLAN-SOUND-MANAGER.md，内置包只读）落地 workflow 的 swift-reviewer 终审（2026-07-24）标记为 minor finding，未阻断落地。
+
+**修复方式:** 补两条测试：① `fromID` 在 `factoryPacksDirectory` 下不存在的子目录 → 断言返回 `.copyFailed`，且 `userPacksDirectory` 下不出现任何非点开头目录；② 构造一个会让 `moveItem` 真的失败的场景（例如把 `destination` 的父目录设成不可写，需先确认这在测试环境里能稳定复现、而不是被更早的 `.destinationAlreadyExists` 检查提前拦截）触发 `.renameFailed`，同样断言不留半成品。若沙盒环境下构造只读目录不稳定，退而求其次给 `moveItem` 开一个可注入失败的 seam。
+
+**Effort:** S
+**Priority:** P3（不阻断——两条分支的清理逻辑与 `.manifestRewriteFailed` 分支逐字同构，已被间接验证过"清理"本身能工作；缺的只是"这两个特定错误码路径真的可达"这一层）
+**Depends on:** None
+
+### `forkPack` 副本 `name` 字段的措辞未拍板——plan 原文的书名号是不是要求字面写入，没有定论
+
+**What:** `plan/PLAN-SOUND-MANAGER.md` §2.2 给副本 `name` 的例子分别写成"《原name》的副本"与"「\<原name\>的副本」"两种引号包裹的写法，均可读成 prose 里的占位符标记，也可读成要求字面写入的字符。`PackFork.swift:187` 按最朴素的解读实现为 `"\(oldName) 的副本"`（不带任何书名号/引号包裹），`PackForkSuite.swift` 里对应的断言字符串也是这个不带书名号的版本。
+
+**Why:** 这是一处产品文案判断，不是代码缺陷——但如果日后拍板要求带书名号（比如与 DESIGN.md 别处引用包名的规范对齐），需要同时改 `PackFork.swift` 的 `transform` 闭包与 `PackForkSuite.swift` 里对应的几处断言字符串，两处必须同步改，否则测试会继续钉着旧文案、把新文案挡在门外。
+
+**Context:** T6 落地 workflow 的实现方（tdd-guide）在 HANDOFF 里主动标注的设计决策点；audit（silent-failure-hunter）与 review（swift-reviewer）两轮均判定为 minor、未要求返工。
+
+**修复方式:** 找一次产品/设计决策（比如看一眼 DESIGN.md 里其它地方引用包名时用不用书名号，或直接由用户拍板），定了之后同步改 `PackFork.swift:187` 与 `PackForkSuite.swift` 里断言该字符串的几处。
+
+**Effort:** XS
+**Priority:** P4（纯文案分歧，不影响功能正确性）
+**Depends on:** None
+
+### `DropRejectionReason.builtinReadOnly` 的新文案指向「复制为我的包」，但 `ClaudioGUI` 目前没有任何 UI 调用 `forkPack`
+
+**What:** T6 把 `DropRejectionReason.overwritesBuiltin` 重命名为 `.builtinReadOnly`，文案也从"先建一份属于你自己的包，再拖进来"（指向一个当时不存在的动作）改成"先点一下「复制为我的包」，再往副本里拖声音"——但 T6 只落地了 `forkPack(fromID:newID:environment:)` 这个 Core 原语和 `nextForkPackID(for:existingUserPackIDs:)` 这个 id 生成策略，`ClaudioGUI` 里没有任何按钮/菜单项/视图调用它们。用户此刻把文件拖到一个内置包上，看到的文案会指向一个真实点不到的按钮。
+
+**Why:** 这与 `plan/PLAN-SOUND-MANAGER.md` §2.3 明确点名批评过的旧 bug（"一块路牌只有在门真的存在之后才能立"）是同一种形状，只是往前挪了一层：Core 层的门已经存在（`forkPack` 可调用、测试齐全），但 UI 层还没有把手能推开它。这不是 T6 范围内的回归——按 T6 的任务边界，UI 挂线本就是后续任务——但如果不记账，这个"文案指向暂不存在动作"的空窗期容易被下一个人忘记，或被误以为整条链路已经打通。
+
+**Context:** T6 落地 workflow 的 silent-failure-hunter 审计（2026-07-24）标记为 minor finding；同轮 swift-reviewer 终审确认 Core 侧（`AudioImportEnvironment`/`PackFork.swift`）功能完整、测试齐全（含生产接线 `ClaudioGUIApp.swift` 的 `factoryPacksDirectory` 补线），缺口仅在 `ClaudioGUI` 的视图/按钮层。
+
+**修复方式:** 落地一个"复制为我的包"的 UI 入口（大概率是 `PackGalleryView` 上内置包行的一个按钮/菜单项），调用 `nextForkPackID(for:existingUserPackIDs:)` 生成新 id 后传给 `forkPack(fromID:newID:environment:)`。落地前后核对这条文案与真实按钮的位置/措辞是否一致，并把这一步补进 `plan/PLAN-SOUND-MANAGER.md`（T6 目前只字面覆盖 Core 原语，UI 入口尚未编号）。
+
+**Effort:** M（新视图/按钮 + 接线 + 测试，具体工作量取决于 `PackGalleryView` 现有结构）
+**Priority:** P2（不阻断当前发布——内置包仍然被正确挡写，用户只是暂时点不到"复制"这个补救动作；但文案已经在生产环境里可见，空窗期越长，误导用户的概率越高）
+**Depends on:** T6（`plan/PLAN-SOUND-MANAGER.md#step-T6`，本次已完成）

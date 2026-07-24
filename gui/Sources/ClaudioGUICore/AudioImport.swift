@@ -61,7 +61,7 @@ public struct AudioImportRequest: Sendable, Equatable {
 ///    audited containment logic (`isSafePackID` + `safePackFileURL`), checked before any
 ///    disk I/O on the dropped file's *content*, since a hostile filename is a security
 ///    concern independent of what the file contains.
-/// 2. **Built-in-pack collision** (``DropRejectionReason/overwritesBuiltin(packID:)``) —
+/// 2. **Built-in-pack collision** (``DropRejectionReason/builtinReadOnly(packID:)``) —
 ///    still no content I/O; see that case's doc comment for the exact semantics.
 /// 3. **Bound source acquisition — symlink refusal, regular-file whitelist, size cap, and
 ///    the byte read, all against one file descriptor**
@@ -107,12 +107,14 @@ public func importAudioFile(
         return .rejected(.pathTraversal)
     }
 
-    // 2. Built-in-pack collision — still no content I/O.
-    if isBuiltinOnlyPackID(
-        packID, userPacksDirectory: environment.userPacksDirectory,
-        bundledPacksDirectory: environment.bundledPacksDirectory)
-    {
-        return .rejected(.overwritesBuiltin(packID: packID))
+    // 2. Built-in-pack collision — still no content I/O. `environment.builtinPackIDs` is
+    // derived from `environment.factoryPacksDirectory` alone (PLAN-SOUND-MANAGER.md §2.3) —
+    // completely decoupled from `environment.bundledPacksDirectory`, which is never consulted
+    // here: that field's job is pack LOOKUP order, not the built-in-readonly decision (see
+    // `AudioImportEnvironment.bundledPacksDirectory`'s doc comment for why reusing it for this
+    // check was rejected).
+    if environment.builtinPackIDs.contains(packID) {
+        return .rejected(.builtinReadOnly(packID: packID))
     }
 
     // 3. Acquire the source bytes safely — a SINGLE `open()` whose file descriptor every
@@ -369,47 +371,6 @@ private func readRegularFileSource(at url: URL, maxBytes: Int) -> RegularFileSou
         return .oversize(actualBytes: data.count)
     }
     return .success(data)
-}
-
-/// Whether `packID` currently resolves to a pack directory **only** via the bundled
-/// (built-in) root — i.e. the user has no pack of their own at this id yet. This is the
-/// exact case ``DropRejectionReason/overwritesBuiltin(packID:)`` blocks.
-///
-/// **Reconciling with ENGINEERING.md「工程落地细节 ②（声音包存储根 + 查找顺序）」** (which
-/// explicitly *allows* a user pack to override a same-id bundled pack at *selection* time —
-/// `resolvePackDirectory` checks the user root first, by design): that decision is about
-/// which directory `claudio play` resolves to once a user copy already exists. It says
-/// nothing about whether drag-and-drop may *silently create* that user copy's very first
-/// file in the first place. T8's
-/// "拒同名覆盖内置" scopes to exactly that gap: importing into a pack id that is currently
-/// *only* a built-in identity is refused, so a casual drop can't accidentally start
-/// shadowing a built-in pack's contents without the user having explicitly done something
-/// (a future, out-of-T8-scope "为这个内置包创建你自己的版本" action, or simply having
-/// already imported once before) to "claim" that pack id as their own first. Once a user
-/// directory for `packID` exists — by whatever means — every subsequent import into it is
-/// just an ordinary edit to a pack the user already owns, and proceeds normally.
-///
-/// Note this is unrelated to, and does not weaken, the *destination-confinement*
-/// guarantee: `importAudioFile` never writes anywhere but `environment.userPacksDirectory`
-/// — the bundled root is read-only input to this one check, never a write target.
-///
-/// Deliberately built on top of ``resolvePackDirectory(id:userPacksDirectory:bundledPacksDirectory:)``
-/// — the same audited, symlink-safe resolver `doctor`/`play` use — called twice (once
-/// against the user root alone, once against both roots) rather than re-implementing
-/// containment/existence checks a second time (T8's "REUSE, do not reinvent" instruction).
-private func isBuiltinOnlyPackID(
-    _ packID: String,
-    userPacksDirectory: URL,
-    bundledPacksDirectory: URL?
-) -> Bool {
-    guard bundledPacksDirectory != nil else { return false }
-    let userOnlyResolution = resolvePackDirectory(
-        id: packID, userPacksDirectory: userPacksDirectory, bundledPacksDirectory: nil)
-    guard userOnlyResolution == nil else { return false }
-    let eitherRootResolution = resolvePackDirectory(
-        id: packID, userPacksDirectory: userPacksDirectory,
-        bundledPacksDirectory: bundledPacksDirectory)
-    return eitherRootResolution != nil
 }
 
 // MARK: - Multi-file batch

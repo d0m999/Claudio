@@ -177,6 +177,15 @@ public struct PackCard: Sendable, Equatable {
 /// test asserting its shape) can rely on; DESIGN.md doesn't specify a gallery ordering rule,
 /// and alphabetical-by-id is the least surprising default that doesn't require reading
 /// every manifest first just to decide a display order.
+///
+/// ⚠️ **`environment.factoryPacksDirectory` is deliberately NOT a third root here, and never
+/// should be** (PLAN-SOUND-MANAGER.md §2.3, T6). It answers a different question ("where do
+/// built-in packs get COPIED from") than this function does ("what's switchable right now") —
+/// see that field's own doc comment for the full reasoning (mixing the two would make a pack
+/// that only exists in the app bundle, not yet copied into the user root, appear switchable
+/// here while `play` still can't see it — the exact false-negative `Setup.swift:503-505`
+/// warns about). This function enumerates exactly two roots today, unchanged by T6:
+/// `environment.userPacksDirectory` ∪ `environment.bundledPacksDirectory`.
 public func availablePacks(
     config: ClaudioConfig,
     environment: AudioImportEnvironment
@@ -201,7 +210,11 @@ public func availablePacks(
 /// dot-prefixed entries (mirrors `Setup.swift`'s own filter: a killed import/setup can leave
 /// a `.<id>.tmp-<pid>` scratch directory behind, which must never appear as a switchable
 /// pack).
-private func packDirectoryIDs(in root: URL) -> [String] {
+///
+/// Module-visible (not `private`) as of T6: ``AudioImportEnvironment/builtinPackIDs`` reuses
+/// this exact function against `factoryPacksDirectory` — same "list dirs, drop dot-prefixed,
+/// drop non-directories" logic, not a second, independently-maintained copy.
+func packDirectoryIDs(in root: URL) -> [String] {
     let entries = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
     return entries.filter { id in
         guard !id.hasPrefix(".") else { return false }

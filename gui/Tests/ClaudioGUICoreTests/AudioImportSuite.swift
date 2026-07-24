@@ -597,13 +597,53 @@ func runAudioImportSuites() {
         }
     }
 
-    // MARK: - Built-in pack collision (T8 acceptance criterion 6)
+    // MARK: - Built-in pack collision (T8 acceptance criterion 6; T6 — PLAN-SOUND-MANAGER.md
+    // §2.3 — moved the judging criterion from `bundledPacksDirectory` to `builtinPackIDs`
+    // (derived from `factoryPacksDirectory`), completely decoupling the two.
 
-    suite("importAudioFile: importing into a pack id that exists ONLY as a bundled pack is refused") {
+    suite("importAudioFile: importing into a pack id in environment.builtinPackIDs is refused") {
+        withTempDirectory { root in
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let factoryPacksDirectory = root.appendingPathComponent("factory")
+            // "minimal-chime" is a built-in pack — its factory copy exists. The user has never
+            // touched this pack id under userPacksDirectory.
+            try? FileManager.default.createDirectory(
+                at: factoryPacksDirectory.appendingPathComponent("minimal-chime"),
+                withIntermediateDirectories: true)
+
+            let sourceURL = root.appendingPathComponent("source/stop.wav")
+            writeFixture(validWAVData(), to: sourceURL)
+
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: userPacksDirectory, factoryPacksDirectory: factoryPacksDirectory)
+            let outcome = importAudioFile(
+                sourceURL: sourceURL, suggestedFileName: "stop.wav", packID: "minimal-chime",
+                environment: environment)
+
+            expect(
+                outcome == .rejected(.builtinReadOnly(packID: "minimal-chime")),
+                "importing into a built-in pack id must be refused, got \(outcome)")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: userPacksDirectory.appendingPathComponent("minimal-chime/stop.wav").path),
+                "a refused import must never have written anything to disk")
+        }
+    }
+
+    suite(
+        "importAudioFile: T6 decoupling — a pack id that exists ONLY in bundledPacksDirectory"
+            + " (not in builtinPackIDs) is no longer refused; it imports normally"
+    ) {
         withTempDirectory { root in
             let userPacksDirectory = root.appendingPathComponent("packs")
             let bundledPacksDirectory = root.appendingPathComponent("bundled")
-            // The bundled pack exists on disk; the user has never touched this pack id.
+            // The OLD (pre-T6) `isBuiltinOnlyPackID` judging criterion would have refused this
+            // exact setup — a pack id existing only via `bundledPacksDirectory`, with no user
+            // copy yet. `factoryPacksDirectory` is deliberately left `nil` here: the new
+            // criterion (`environment.builtinPackIDs`, derived solely from
+            // `factoryPacksDirectory`) must not even glance at `bundledPacksDirectory`. This is
+            // a REAL behavior change from the old code, not just a renamed case — assert the
+            // change, not just the surviving half.
             try? FileManager.default.createDirectory(
                 at: bundledPacksDirectory.appendingPathComponent("minimal-chime"),
                 withIntermediateDirectories: true)
@@ -617,13 +657,13 @@ func runAudioImportSuites() {
                 sourceURL: sourceURL, suggestedFileName: "stop.wav", packID: "minimal-chime",
                 environment: environment)
 
-            expect(
-                outcome == .rejected(.overwritesBuiltin(packID: "minimal-chime")),
-                "importing into a still-purely-built-in pack id must be refused, got \(outcome)")
-            expect(
-                !FileManager.default.fileExists(
-                    atPath: userPacksDirectory.appendingPathComponent("minimal-chime/stop.wav").path),
-                "a refused import must never have written anything to disk")
+            guard case .success = outcome else {
+                expect(
+                    false,
+                    "a pack id present only in bundledPacksDirectory must import successfully now"
+                        + " that builtinPackIDs is decoupled from it — got \(outcome)")
+                return
+            }
         }
     }
 

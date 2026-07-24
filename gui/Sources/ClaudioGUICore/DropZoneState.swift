@@ -18,7 +18,7 @@ public enum DropZoneState: Sendable, Equatable {
 
 /// Why a drop was refused. The first five cases are T8's five named hardening checks
 /// (ENGINEERING.md T8 acceptance: "oversize / nonWhitelistFormat / pathTraversal /
-/// overDuration / overwritesBuiltin each trigger the correct human refusal"); ``copyFailed``
+/// overDuration / builtinReadOnly each trigger the correct human refusal"); ``copyFailed``
 /// is a defensive case covering everything outside those five: a genuine,
 /// unexpected I/O failure discovered *after* every one of those five already passed
 /// (disk full, permission revoked mid-flight, the source vanishing between validation
@@ -58,11 +58,13 @@ public enum DropRejectionReason: Sendable, Equatable {
     /// (`actualSeconds == nil`), which is treated as failing the cap too, fail-closed
     /// (see ``AudioDurationProbing``'s doc comment).
     case overDuration(actualSeconds: TimeInterval?, maxSeconds: TimeInterval)
-    /// `packID` currently resolves to a pack directory **only** via the bundled
-    /// (built-in) root — see `importAudioFile`'s doc comment for the exact semantics
-    /// this repo settled on for reconciling this with
-    /// ENGINEERING.md「工程落地细节 ②（声音包存储根 + 查找顺序）」.
-    case overwritesBuiltin(packID: String)
+    /// `packID` is a built-in pack (``AudioImportEnvironment/builtinPackIDs``, T6 —
+    /// PLAN-SOUND-MANAGER.md §2.3) — read-only by definition, regardless of whether the user
+    /// already has a copy of it under `userPacksDirectory`. Renamed from the earlier
+    /// `overwritesBuiltin` (whose semantics were "you don't have your own copy of this pack
+    /// *yet*" — a question `builtinPackIDs` doesn't ask at all): a built-in pack stays
+    /// read-only forever, not just until the user's first drop into it.
+    case builtinReadOnly(packID: String)
     /// A real I/O failure after every validation check already passed.
     case copyFailed(reason: String)
     /// Another writer (a concurrent import, a bind/clear, or a `claudio setup` publish
@@ -105,8 +107,8 @@ extension DropRejectionReason {
                 format: "这段声音有点长（约 %.1f 秒），Claudio 的提示音建议控制在 %.1f 秒以内，剪短一点再试试。",
                 actualSeconds, maxSeconds)
 
-        case .overwritesBuiltin(let packID):
-            return "「\(packID)」是内置声音包，Claudio 不会用拖进来的文件悄悄顶替它——先建一份属于你自己的包，再拖进来。"
+        case .builtinReadOnly(let packID):
+            return "「\(packID)」是内置声音包，不能直接改——先点一下「复制为我的包」，再往副本里拖声音。"
 
         case .copyFailed(let reason):
             return "这个文件没能存进去（\(reason)），要不再试一次？"

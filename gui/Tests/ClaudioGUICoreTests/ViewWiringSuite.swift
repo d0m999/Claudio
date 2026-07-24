@@ -1426,6 +1426,71 @@ func runViewWiringSuites() {
                 + "两条断言咬合在一起，正是要的那次停顿")
     }
 
+    suite("ClaudioGUIApp.swift 的 AudioImportEnvironment(…) 必须显式传 factoryPacksDirectory —— 否则 builtinPackIDs 生产环境恒为空集") {
+        // ## 它治的病（swift-reviewer 终审 blocker，PLAN-SOUND-MANAGER.md T6 验收表实测未过）
+        //
+        // `factoryPacksDirectory` 有默认值 `nil`（大多数测试 fixture 不需要它，见其 doc）。但生产侧
+        // **唯一**那一处构造点如果沿用默认值，`environment.builtinPackIDs` 就恒为空集
+        // （``AudioImportEnvironment/builtinPackIDs`` 的实现：`factoryPacksDirectory == nil` ⇒ `[]`），
+        // T6「内置包只读」唯一的判据 `environment.builtinPackIDs.contains(packID)` 对任何包永远是
+        // `false` —— 用户依旧能直接拖文件覆盖『极简铃音』，这正是 T6 想根治的那个 bug 以完全相同的
+        // 方式原地复发。而 `swift run claudio-gui-tests` 全绿掩盖了这一点：全部测试都走显式注入
+        // `factoryPacksDirectory` 的 fixture（`AudioImportFixtures.swift`），唯独这一个生产构造点
+        // 不受任何 fixture 覆盖 —— 上面那条「生产侧 `AudioImportEnvironment(…)` 构造点普查」按
+        // ``expectedProductionLocks`` 逐调用点锚的是 `packsLockFile:` 一个实参，从未看过
+        // `factoryPacksDirectory:`。这条补的就是那半条缺口。
+        //
+        // ## 为什么不塞进 ``expectedProductionLocks`` 那张表
+        //
+        // 那张表是**文件级单源**，同时喂三条断言（豁免绑定的集合相等 / 逐调用点包锁实参锚定 /
+        // 构造点普查的期望计数）——它的字段（`value` / `literal`）与「跟着表走」的相等判定全部是
+        // 为 `packsLockFile:` 一个实参设计的。硬塞第二个实参会让那三条断言的语义变得含糊（豁免的
+        // 对价到底是「这把锁被钉住」还是「这两个实参都被钉住」？）。这里单开一条自成一体的 suite，
+        // 只读 `ClaudioGUIApp.swift` 这一个已知的、唯一合法的构造点，不重新发明普查。
+        guard let code = codeWithoutStrings("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift"),
+            let raw = codeOnly("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift")
+        else {
+            expect(false, "读不到 ClaudioGUIApp.swift —— 这条 suite 唯一的价值就是读它")
+            return
+        }
+        let calls = callArguments(of: "AudioImportEnvironment", in: code)
+        expect(
+            calls.count == 1,
+            "ClaudioGUIApp.swift 里必须正好有 1 处 AudioImportEnvironment(…) 构造点，实得 "
+                + "\(calls.count) 处 —— 0 处 = 下面的断言在守一段不存在的代码，>1 处 = 多出来的那个"
+                + "需要有人看一眼再放行")
+        guard let arguments = calls.first else { return }
+
+        let expectedValue = "Bundle.main.resourceURL?.appendingPathComponent(\"\")"
+        let actualValue = argumentValue("factoryPacksDirectory", in: arguments)
+        let actualDescription =
+            actualValue
+            ?? "<没有这个实参 —— 默认值 nil 会静默生效，builtinPackIDs 在真实出货的 app 里恒为空集>"
+        expect(
+            actualValue == expectedValue,
+            "ClaudioGUIApp.swift 的 AudioImportEnvironment(…) 的 factoryPacksDirectory: 实参必须**正好"
+                + "是** `\(expectedValue)`（字符串内容被清空之后的文本），实际是 `\(actualDescription)` "
+                + "—— release.yml 把 minimal-chime 打进 Contents/Resources/packs/，这一处实参是唯一"
+                + "把它接进 T6 只读判据的线，PLAN-SOUND-MANAGER.md §2.3/T6 点名的来源就是 "
+                + "`Bundle.main.resourceURL` + `packs`")
+
+        // 字面量那一半：上面读的是清空字符串内容之后的文本，"packs" 这个目录名在那里已经不可判。
+        // 判据绑在**这一处调用点**上（`raw` 里同一个调用的实参文本），不是全文件 contains —— 同一
+        // 病同一修法，见上面「生产侧两处显式包锁各自锚到调用点」那条 suite 的 doc。
+        let rawCalls = callArguments(of: "AudioImportEnvironment", in: raw)
+        let rawValue = rawCalls.compactMap { argumentValue("factoryPacksDirectory", in: $0) }.first
+        expect(
+            rawValue != nil,
+            "从 ClaudioGUIApp.swift 的**原始文本**（保留字符串内容）里切不出 "
+                + "AudioImportEnvironment(…) 的 factoryPacksDirectory: 实参 —— 切不出来就无从判定"
+                + "字面量内容，而「无从判定」必须落在红那一侧。实得 \(rawCalls.count) 处调用")
+        expect(
+            rawValue?.contains("\"packs\"") == true,
+            "ClaudioGUIApp.swift 的 factoryPacksDirectory: **实参本身**里必须逐字出现 `\"packs\"`，"
+                + "实得 `\(rawValue ?? "<切不出来>")` —— 判据绑在这一处调用点上，同文件别处提到"
+                + "「packs」的死代码喂不饱它")
+    }
+
     suite("锁转发的**编译期前提**：`mutateManifestJSON` 的 `lockFile:` 不许有默认值") {
         // ## 这条 suite 取代了什么
         //

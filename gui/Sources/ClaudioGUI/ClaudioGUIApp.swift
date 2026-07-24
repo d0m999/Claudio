@@ -60,10 +60,21 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         // can render at all (onboarding already reports `.installed`), `claudio
         // setup`/`performFirstRunSetup` has already copied every bundled pack into the user
         // pack root, so the panel's pack gallery only ever needs to look there.
+        //
+        // `factoryPacksDirectory` 回答一个不同的问题（``AudioImportEnvironment/factoryPacksDirectory``
+        // 的 doc、PLAN-SOUND-MANAGER.md §2.3/T6）：不是「去哪查」（那是上面恒 `nil` 的
+        // `bundledPacksDirectory`），而是「出厂包从哪拷来」—— 派生 `builtinPackIDs`（T6 只读闸门
+        // 唯一判据）与 `forkPack` 的拷贝源。`Bundle.main` 是全 app 唯一允许说出
+        // `Contents/Resources/packs` 这个真实路径的地方（T17「唯一一处 `Bundle.main`」的规矩，
+        // 与下面 `bundledHelperBinary(in: .main)` 同一条纪律）—— release.yml 确实把
+        // `minimal-chime` 打进了那个目录。这里若漏传、沿用默认值 `nil`，`builtinPackIDs` 在真实
+        // 出货的 app 里恒为空集，T6 想关掉的「内置包被拖入静默覆盖」原样重开，且不会有任何测试
+        // 断言变红（所有测试 fixture 都显式注入这个字段，只有这一个生产构造点会漏）。
         // `packsLockFile` 没有默认值（见 ``AudioImportEnvironment/packsLockFile`` 的 doc：漏传它
         // 的失败模式是**静默**的，所以由编译器执行而不是靠纪律）。这里是全 app 唯一一处说出真实
         // 路径的地方 —— 组装根说出它，比让一个默认值在三十几个 fixture 背后悄悄生效要好。
         let audioEnvironment = AudioImportEnvironment(
+            factoryPacksDirectory: Bundle.main.resourceURL?.appendingPathComponent("packs"),
             durationProbe: AVFoundationAudioDurationProbe(),
             packsLockFile: ClaudioPaths.packsLockFile)
 

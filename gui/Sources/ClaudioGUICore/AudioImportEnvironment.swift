@@ -51,9 +51,53 @@ public struct AudioImportEnvironment: Sendable {
     public var userPacksDirectory: URL
 
     /// The read-only, app-bundled pack root, if any (`nil` when there is no bundled pack
-    /// distribution to consider, e.g. most test fixtures). Only ever *read* — to decide
-    /// ``DropRejectionReason/overwritesBuiltin(packID:)`` — never written to.
+    /// distribution to consider, e.g. most test fixtures). Only ever *read* — fed to
+    /// ``resolvePackDirectory(id:userPacksDirectory:bundledPacksDirectory:)`` to decide pack
+    /// **lookup order** — never written to.
+    ///
+    /// ⚠️ As of T6 (PLAN-SOUND-MANAGER.md §2.3) this field no longer has anything to do with
+    /// deciding ``DropRejectionReason/builtinReadOnly(packID:)`` — that used to be true (the
+    /// now-deleted `isBuiltinOnlyPackID`), but reusing this field for that decision was
+    /// rejected: it would mean flipping it from `nil` to a real path makes a pack that only
+    /// exists in the app bundle (not yet copied into the user root) visible in the gallery —
+    /// while `play` (`PlayEnvironment.bundledPacksDirectory` is always `nil`) can't see it at
+    /// all, a false negative `Setup.swift:503-505` already documents having been burned by.
+    /// The built-in-readonly decision now lives entirely on ``builtinPackIDs`` (derived from
+    /// ``factoryPacksDirectory``), which is completely independent of this field.
     public var bundledPacksDirectory: URL?
+
+    /// **出厂包的拷贝源** —— `Claudio.app/Contents/Resources/packs/` 的真实路径，仅供拷贝，
+    /// **绝不是查找根**（PLAN-SOUND-MANAGER.md §2.3）。
+    ///
+    /// 与 ``bundledPacksDirectory`` 职责正交，两个字段长得像但回答的是两个不同的问题：
+    ///   · `bundledPacksDirectory` 回答「去哪找」—— 喂给
+    ///     ``resolvePackDirectory(id:userPacksDirectory:bundledPacksDirectory:)``，决定的是
+    ///     **包的查找顺序**（GUI 生产侧恒 `nil`，与 helper `play` 的查找结果逐字一致）。
+    ///   · `factoryPacksDirectory` 回答「出厂包从哪拷来」—— 只喂给 ``builtinPackIDs``（派生
+    ///     只读判据）与 T6 `forkPack(fromID:newID:environment:)`（`PackFork.swift`，拷贝源），
+    ///     从不参与任何「这个包存不存在 / 查得到查不到」的判断。
+    ///
+    /// ⚠️⚠️ **绝不能被传给 `resolvePackDirectory`。** 那样会让一个只存在于
+    /// `Contents/Resources/packs/`、还没被拷进用户根的包在面板画廊里可见 —— 而 helper 的
+    /// `play` 看不见它（`PlayEnvironment.bundledPacksDirectory` 恒 `nil`），一次假阴性
+    /// （`Setup.swift:503-505` 已经踩过并写下了这个警告）。
+    ///
+    /// `nil`（`swift run ClaudioGUI` 无 bundle、以及全部测试 fixture 的默认状态）= 没有任何
+    /// 包是内置的 = 没有任何包是只读的。与 `bundledHelperBinary(in: .main)` 在无 bundle 时
+    /// 回落 `nil` 的诚实降级同构。
+    public var factoryPacksDirectory: URL?
+
+    /// 派生，**不是第二个真相源**——`factoryPacksDirectory` 下真实子目录名的集合（`nil` →
+    /// 空集）。`environment.builtinPackIDs.contains(packID)` 是「这个包只读吗」唯一合法的判据
+    /// （PLAN-SOUND-MANAGER.md §2.3：`manifest.author == "Claudio"` 与硬编码 id 清单都被否
+    /// 掉的理由，以及为什么不能复用 `bundledPacksDirectory`，都写在那一节）。
+    ///
+    /// 复用 ``packDirectoryIDs(in:)``（`PackGallery.swift`，本模块内可见）——同一份「列目录 +
+    /// 排点开头条目 + 排非目录条目」逻辑，不重新发明第二遍。
+    public var builtinPackIDs: Set<String> {
+        guard let factoryPacksDirectory else { return [] }
+        return Set(packDirectoryIDs(in: factoryPacksDirectory))
+    }
 
     public var durationProbe: any AudioDurationProbing
 
@@ -106,12 +150,14 @@ public struct AudioImportEnvironment: Sendable {
     public init(
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         bundledPacksDirectory: URL? = nil,
+        factoryPacksDirectory: URL? = nil,
         durationProbe: any AudioDurationProbing,
         limits: AudioImportLimits = AudioImportLimits(),
         packsLockFile: URL
     ) {
         self.userPacksDirectory = userPacksDirectory
         self.bundledPacksDirectory = bundledPacksDirectory
+        self.factoryPacksDirectory = factoryPacksDirectory
         self.durationProbe = durationProbe
         self.limits = limits
         self.packsLockFile = packsLockFile

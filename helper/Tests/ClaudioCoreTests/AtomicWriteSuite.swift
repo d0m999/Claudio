@@ -462,6 +462,11 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "gui/Sources/ClaudioGUICore/AudioImport.swift": [".write(", "open("],
     // 包 manifest 的原子写。
     "gui/Sources/ClaudioGUICore/ManifestBinding.swift": [".write("],
+    // T6 forkPack：出厂包整份目录拷进 staging（`.copyItem(`），成功之后整目录 rename 进最终位置
+    // （`.moveItem(`）——与 helper 的 `Setup.swift` 同一条「staging + 同卷 rename」纪律，非本文件
+    // 发明。manifest 本身的写（`mutateManifestJSON` 内部的 `.write(`）已经记在
+    // `ManifestBinding.swift` 那一行，这里不重复记。
+    "gui/Sources/ClaudioGUICore/PackFork.swift": [".copyItem(", ".moveItem("],
 ]
 
 /// **内容替换式写盘的调用点台账** —— 哪个文件里有几处 `.write(to:…)` / `.write(toFile:…)`。

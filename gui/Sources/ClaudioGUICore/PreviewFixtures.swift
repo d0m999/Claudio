@@ -140,7 +140,7 @@ public enum PreviewFixtures {
         .reject(.nonWhitelistFormat),
         .reject(.pathTraversal),
         .reject(.overDuration(actualSeconds: 6.4, maxSeconds: 3.0)),
-        .reject(.overwritesBuiltin(packID: "minimal-chime")),
+        .reject(.builtinReadOnly(packID: "minimal-chime")),
         .reject(.copyFailed(reason: "磁盘已满")),
         .reject(.lockBusy),
         .reject(.lockFailed(errno: 5)),
@@ -376,7 +376,7 @@ public enum PreviewFixtures {
         case .nonWhitelistFormat: "nonWhitelistFormat"
         case .pathTraversal: "pathTraversal"
         case .overDuration: "overDuration"
-        case .overwritesBuiltin: "overwritesBuiltin"
+        case .builtinReadOnly: "builtinReadOnly"
         case .copyFailed: "copyFailed"
         case .lockBusy: "lockBusy"
         case .lockFailed: "lockFailed"

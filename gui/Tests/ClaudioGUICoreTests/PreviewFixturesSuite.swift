@@ -53,7 +53,7 @@ func runPreviewFixturesSuites() {
             "dropZone.idle", "dropZone.hover", "dropZone.success",
             "dropZone.reject.oversize", "dropZone.reject.nonWhitelistFormat",
             "dropZone.reject.pathTraversal", "dropZone.reject.overDuration",
-            "dropZone.reject.overwritesBuiltin", "dropZone.reject.copyFailed",
+            "dropZone.reject.builtinReadOnly", "dropZone.reject.copyFailed",
             "dropZone.reject.lockBusy", "dropZone.reject.lockFailed",
             "coverage.present", "coverage.unmapped", "coverage.broken",
             "packCard.complete", "packCard.partial", "packCard.broken",
@@ -107,7 +107,7 @@ func runPreviewFixturesSuites() {
             rejectReasonLabels
                 == [
                     "oversize", "nonWhitelistFormat", "pathTraversal", "overDuration",
-                    "overwritesBuiltin", "copyFailed", "lockBusy", "lockFailed",
+                    "builtinReadOnly", "copyFailed", "lockBusy", "lockFailed",
                 ],
             "dropZoneStates must include a .reject for every DropRejectionReason case, got"
                 + " \(rejectReasonLabels)")
@@ -251,7 +251,7 @@ private func dropRejectionReasonLabel(_ reason: DropRejectionReason) -> String {
     case .nonWhitelistFormat: "nonWhitelistFormat"
     case .pathTraversal: "pathTraversal"
     case .overDuration: "overDuration"
-    case .overwritesBuiltin: "overwritesBuiltin"
+    case .builtinReadOnly: "builtinReadOnly"
     case .copyFailed: "copyFailed"
     case .lockBusy: "lockBusy"
     case .lockFailed: "lockFailed"

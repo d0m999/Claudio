@@ -168,6 +168,7 @@ func injectedPacksLock(besideUserPacks userPacksDirectory: URL) -> URL {
 func makeAudioImportEnvironment(
     userPacksDirectory: URL,
     bundledPacksDirectory: URL? = nil,
+    factoryPacksDirectory: URL? = nil,
     duration: TimeInterval? = 1.0,
     maxFileSizeBytes: Int = 5 * 1024 * 1024,
     maxDurationSeconds: Double = 3.0
@@ -175,6 +176,7 @@ func makeAudioImportEnvironment(
     AudioImportEnvironment(
         userPacksDirectory: userPacksDirectory,
         bundledPacksDirectory: bundledPacksDirectory,
+        factoryPacksDirectory: factoryPacksDirectory,
         durationProbe: StubDurationProbe(fixedDuration: duration),
         limits: AudioImportLimits(
             maxFileSizeBytes: maxFileSizeBytes, maxDurationSeconds: maxDurationSeconds),

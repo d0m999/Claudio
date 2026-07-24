@@ -14,6 +14,7 @@ import Foundation
 // `OnboardingViewModelSuite.swift`, `AudioFormatSniffSuite.swift`, `AudioImportSuite.swift`,
 // `AudioImportBatchSuite.swift`, `AudioImportViewModelSuite.swift`,
 // `CoverageStateSuite.swift`, `EventRowAccessibilitySuite.swift`, `ManifestBindingSuite.swift`, `PackGallerySuite.swift`,
+// `PackForkSuite.swift`,
 // `EventMuteControllerSuite.swift`, `MasterVolumeControllerSuite.swift`,
 // `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
 // `ContrastHexParsingSuite.swift`,
@@ -77,6 +78,7 @@ runCoverageStateSuites()
 runEventRowAccessibilitySuites()
 await runManifestBindingSuites()
 runPackGallerySuites()
+runPackForkSuites()
 runEventMuteControllerSuites()
 runMasterVolumeControllerSuites()
 runPanelFocusOrderSuites()
