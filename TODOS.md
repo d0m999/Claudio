@@ -1360,17 +1360,21 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P4
 **Depends on:** None
 
-### 主音量行的 Dynamic Type 三级布局在真机上完全不生效——系统「文字大小」拉到最大档，面板一个像素都不变
+### Dynamic Type 三级布局在真机上疑似完全不生效——目前只实测过主音量行，但根因（`typeSizeTier`）由 `EventRowView`/`MasterVolumeRow`/`PackGalleryView` 三者共享，系统「文字大小」拉到最大档、面板一个像素都不变
 
-**What:** PLAN-MASTER-VOLUME.md §9 真机走查第 ⑪ 条（2026-07-14）：系统设置 → 辅助功能 → 显示 → 文字大小拉到最大档（`defaults read com.apple.universalaccess FontSizeCategory` 确认 `global=AX5`，即最高档），**完全退出重启** `Claudio.app` 后重新打开面板——D17/D44 描述的「主音量行变两行、面板加宽到 360pt」**完全没有发生**，面板与默认档位下逐像素一致。测试过程：先误增到系统设置里另一条无关滑块（显示对比度），发现后已改回原值，不影响本条结论；随后精确定位到「文字大小」这一控件（description 为「首选阅读字体大小」，range 0–14）并推到顶（14/14，预览文案确认变为「示例 42 点」），关闭面板重开、乃至 `⌘Q` 全新进程重启后复测，结果不变。
+**What:** PLAN-MASTER-VOLUME.md §9 真机走查第 ⑪ 条（2026-07-14）：系统设置 → 辅助功能 → 显示 → 文字大小拉到最大档（`defaults read com.apple.universalaccess FontSizeCategory` 确认 `global=AX5`，即最高档），**完全退出重启** `Claudio.app` 后重新打开面板——D17/D44 描述的「主音量行变两行、面板加宽到 360pt」**完全没有发生**，面板与默认档位下逐像素一致。测试过程：先误增到系统设置里另一条无关滑块（显示对比度），发现后已改回原值，不影响本条结论；随后精确定位到「文字大小」这一控件（description 为「首选阅读字体大小」，range 0–14）并推到顶（14/14，预览文案确认变为「示例 42 点」），关闭面板重开、乃至 `⌘Q` 全新进程重启后复测，结果不变。**这次真机走查只覆盖了主音量行**（PLAN-MASTER-VOLUME.md §9 的走查范围本就是主音量行），`EventRowView`/`PackGalleryView` 从未被单独这样复测过。
 
 **Why:** 这不是「测试没测对地方」——`defaults` 确认系统偏好确实写到了最高档，且给了 app 一次全新进程生命周期去读取它。真正的怀疑落在上面那条邻近 TODO（`DynamicTypeSize → PanelTypeSizeTier` 映射）默认成立的前提上：`PanelView.swift` 的 `typeSizeTier` 读的是 SwiftUI 的 `@Environment(\.dynamicTypeSize)`，而 macOS 上这个环境值**是否真的跟随「辅助功能 → 显示 → 文字大小」这个系统偏好**，本仓库从未验证过——两者可能根本不是同一件事（iOS 上 `dynamicTypeSize` 直接映射系统文字大小；macOS 的等价桥接历来更弱，`@Environment(\.dynamicTypeSize)` 在纯 AppKit 宿主的 SwiftUI 视图里默认恒为 `.large` 也是已知的平台坑）。如果确实如此，那么 `typeSizeTier` 后面接的那张三档映射表（`.larger`/`.largest`/`.maximum`，ENGINEERING.md:269 术语表）**永远读不到非默认值**，D17/D44 的验收标准在真机上不可能通过——不管 `switch` 里 `default:` 写不写 `@unknown` 都无关紧要（上面那条 TODO 因此可能是在打磨一段永远执行不到非默认分支的代码）。
 
-**Context:** PLAN-MASTER-VOLUME.md §9 走查第 ⑪ 条实测（2026-07-14，本机 macOS 26.5.1，`swift build -c release` 出的 ad-hoc `Claudio.app`）。按 Acceptance 要求本轮**未修改任何 Swift 代码**，只如实记录现象。下一步排查建议：① 确认 `PanelView.swift` 的 `typeSizeTier` 具体读的是哪个 SwiftUI/AppKit API；② 若确认是 `@Environment(\.dynamicTypeSize)`，查它在纯 `LSUIElement` + `NSPopover` 宿主下是否真的桥接系统「文字大小」偏好（可能需要显式监听 `NSApplication` 的辅助功能通知或改读 `NSApplication.shared.effectiveAppearance`/`NSFont` 的等价系统 API）；③ 有其它 macOS 系统 app（如 Finder/Notes）在同一台机器同一个系统偏好下是否表现出字体变化，作为「这是 macOS 平台限制」还是「只有 Claudio 没接对」的判据。
+关键一点：`typeSizeTier`/`layoutAdaptation` 是 `PanelView.swift` 里的**同一个**计算属性（`private var layoutAdaptation: PanelLayoutAdaptation { panelLayoutAdaptation(for: typeSizeTier) }`），`EventRowView`（T15 起接线）、`MasterVolumeRow`（本条实测对象）、`PackGalleryView`（2026-07-24 补线，见下方追加）三个调用点读的是**同一份**上游值，没有第二条独立的 `@Environment` 读取路径。所以这条根因怀疑一旦坐实，**波及范围不是「主音量行」这一处，而是全部三个消费者**——只是目前只有主音量行被真机走查实际验证过失效，另外两个是根因层面的合理推断，尚未逐一复测。
+
+> **2026-07-24 追加**：`PackGalleryView`（T4 竖排整宽行重写，commit 6c40fbc）当时完全没有接 `adaptation: PanelLayoutAdaptation`——独立的 `/codex review 6c40fbc` 揪出这处遗漏（P1：最大字号下会挤裁切包名），已修复（同日），现在也读上面那同一个 `layoutAdaptation`。这次修复本身经 `swift build`（0 error）、`swift run claudio-gui-tests`（2484/2484）与一次独立 swift-reviewer 对抗审查确认代码层面无误——但它继承的正是本条尚未解决的疑点：如果 `typeSizeTier` 在真机上真的读不到非默认值，`PackGalleryView` 的两行布局分支和 `MasterVolumeRow`/`EventRowView` 一样，可能同样永远触发不到。下一次真机排查（见下方「下一步排查建议」）只需验一次 `typeSizeTier` 本身，三个消费者不必分别走查——反之，根因一旦修好，三处会同时恢复。
+
+**Context:** PLAN-MASTER-VOLUME.md §9 走查第 ⑪ 条实测（2026-07-14，本机 macOS 26.5.1，`swift build -c release` 出的 ad-hoc `Claudio.app`）。按 Acceptance 要求本轮**未修改任何 Swift 代码**，只如实记录现象。下一步排查建议：① 确认 `PanelView.swift` 的 `typeSizeTier` 具体读的是哪个 SwiftUI/AppKit API；② 若确认是 `@Environment(\.dynamicTypeSize)`，查它在纯 `LSUIElement` + `NSPopover` 宿主下是否真的桥接系统「文字大小」偏好（可能需要显式监听 `NSApplication` 的辅助功能通知或改读 `NSApplication.shared.effectiveAppearance`/`NSFont` 的等价系统 API）；③ 有其它 macOS 系统 app（如 Finder/Notes）在同一台机器同一个系统偏好下是否表现出字体变化，作为「这是 macOS 平台限制」还是「只有 Claudio 没接对」的判据；④ 根因修好后，`EventRowView`/`PackGalleryView` 也各自需要一次真机复测，不能只验主音量行就假定另外两个也好了。
 
 **Effort:** M
-**Priority:** P1（D17/D44 是已拍板的验收决议，真机验证不通过意味着「阶段 D 已交付」这句话目前不成立）
-**Depends on:** 先查清 `typeSizeTier` 读的具体 API 再定修法；可能与上一条「`DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:`」共用一次修复窗口
+**Priority:** P1（D17/D44 是已拍板的验收决议，真机验证不通过意味着「阶段 D 已交付」这句话目前不成立；范围已从「主音量行」扩到全部三个 Dynamic Type 降级消费者，优先级不降）
+**Depends on:** 先查清 `typeSizeTier` 读的具体 API 再定修法；可能与上一条「`DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:`」共用一次修复窗口；修好后 `EventRowView`/`PackGalleryView` 需要各自的真机复测（目前只有主音量行被验证过失效）
 
 ### PackCardView 的 statusLine 图标/文字未 `accessibilityHidden`，且 CC0 徽标 VoiceOver 听不到
 

@@ -653,7 +653,8 @@ public struct PanelView: View {
             }
 
             PackGalleryView(
-                cards: panelModel.packCards, focusedTarget: $focusedTarget, onSelect: { panelModel.switchPack(to: $0.id) })
+                cards: panelModel.packCards, focusedTarget: $focusedTarget, adaptation: layoutAdaptation,
+                onSelect: { panelModel.switchPack(to: $0.id) })
             disconnectRow
         }
     }

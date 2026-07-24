@@ -34,13 +34,25 @@ public struct PackGalleryView: View {
     /// default) since `PanelView` is this view's only real call site.
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
 
+    /// The Dynamic Type degradation these rows currently render under (ENGINEERING.md T15 D5
+    /// 「无障碍规格 · Dynamic Type + 降级规则」) — mirrors ``EventRowView``/``MasterVolumeRow``'s
+    /// own `adaptation` parameter exactly (/codex review 6c40fbc P1: this rewrite had wired
+    /// EVERY other row to `PanelView`'s `layoutAdaptation` except this gallery, so pack rows
+    /// alone never wrapped to two lines at `.largest`/`.maximum`, squeezing/truncating the
+    /// pack name against the trailing slot). Defaults to ``PanelTypeSizeTier/standard`` so
+    /// every existing call site (`StateGalleryView`'s single-card preview, `PackGallerySuite`)
+    /// keeps today's single-line layout unless a caller explicitly opts into a larger tier.
+    private let adaptation: PanelLayoutAdaptation
+
     public init(
         cards: [PackCard],
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
+        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
         onSelect: @escaping (PackCard) -> Void = { _ in }
     ) {
         self.cards = cards
         self.focusedTarget = focusedTarget
+        self.adaptation = adaptation
         self.onSelect = onSelect
     }
 
@@ -48,7 +60,9 @@ public struct PackGalleryView: View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 8) {
                 ForEach(cards, id: \.id) { card in
-                    PackCardView(card: card, focusedTarget: focusedTarget, onSelect: { onSelect(card) })
+                    PackCardView(
+                        card: card, focusedTarget: focusedTarget, adaptation: adaptation,
+                        onSelect: { onSelect(card) })
                 }
             }
             .padding(.vertical, 2)
@@ -61,11 +75,15 @@ public struct PackGalleryView: View {
     }
 }
 
-/// One pack row (2026-07-17 竖排整宽行 mockup 拍板; DESIGN.md「包行四态」). Anatomy:
-/// `[包名][meta 槽] Spacer [覆盖轨 / broken 状态行]`. DESIGN.md now defines the
-/// selected/broken/partial visual language (「包行四态」); where a pixel choice still isn't
-/// pinned there — the mockup itself omits meta labels entirely, a documented OMISSION not a
-/// reversal (DESIGN.md's own "省略不是推翻" note) — every derivation below is called out inline.
+/// One pack row (2026-07-17 竖排整宽行 mockup 拍板; DESIGN.md「包行四态」). Anatomy at
+/// ``PanelTypeSizeTier/standard``/``PanelTypeSizeTier/larger``:
+/// `[包名][meta 槽] Spacer [覆盖轨 / broken 状态行]`（一行）；从 ``PanelTypeSizeTier/largest``
+/// 起（`adaptation.rowWrapsToTwoLines`）改两行：`[包名][meta 槽]` 上、`[覆盖轨 / broken 状态行]`
+/// 下 —— 与 ``EventRowView``同一条降级规则 (ENGINEERING.md「无障碍规格 · Dynamic Type + 降级规则」)。
+/// DESIGN.md now defines the selected/broken/partial visual language (「包行四态」); where a
+/// pixel choice still isn't pinned there — the mockup itself omits meta labels entirely, a
+/// documented OMISSION not a reversal (DESIGN.md's own "省略不是推翻" note) — every derivation
+/// below is called out inline.
 ///
 /// The name stays `PackCardView` (private to this file, never referenced by symbol name from
 /// any test) even though it now renders a row, not a card — PLAN-SOUND-MANAGER.md T4's explicit
@@ -76,6 +94,9 @@ public struct PackGalleryView: View {
 private struct PackCardView: View {
     let card: PackCard
     let focusedTarget: FocusState<PanelFocusTarget?>.Binding
+    /// See ``PackGalleryView``'s own `adaptation` doc comment — this is that same value,
+    /// threaded straight through, never re-derived here.
+    let adaptation: PanelLayoutAdaptation
     let onSelect: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     /// Dynamic-Type scale factor for this row's fixed `.system(size:)` text (a11y fix) — see
@@ -93,17 +114,25 @@ private struct PackCardView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(spacing: 8) {
-                Text(card.name ?? card.id)
-                    .font(.system(size: 13 * typeScale))
-                    .foregroundColor(ClaudioColor.text(colorScheme))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                metaSlot
-                Spacer(minLength: 8)
-                trailingSlot
-                    .frame(height: trailingSlotHeight, alignment: .center)
+            Group {
+                if adaptation.rowWrapsToTwoLines {
+                    // "更大" 及以上 tier：包名/meta 上、trailing slot 下 —— 与 ``EventRowView``
+                    // 同一条两行降级 (ENGINEERING.md「无障碍规格 · Dynamic Type + 降级规则」)；否则
+                    // 最大字号下覆盖轨/broken 状态行会先把包名挤裁切或溢出，违背"不裁切、不溢出"。
+                    VStack(alignment: .leading, spacing: 4) {
+                        nameAndMeta
+                        trailingSlot
+                            .frame(height: trailingSlotHeight, alignment: .center)
+                    }
+                } else {
+                    HStack(spacing: 8) {
+                        nameAndMeta
+                        trailingSlot
+                            .frame(height: trailingSlotHeight, alignment: .center)
+                    }
+                }
             }
+            .frame(minHeight: adaptation.rowWrapsToTwoLines ? 44 : 28)
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
@@ -129,6 +158,21 @@ private struct PackCardView: View {
         // a11y-architect FIX 4: this row's `.packCard(id:)` slot — `panelFocusOrder(_:)`'s
         // SAME identity, never a second one.
         .focused(focusedTarget, equals: .packCard(id: card.id))
+    }
+
+    /// 包名 + meta 槽 + `Spacer` 这一簇 —— 单行/两行两种布局（``body`` 的 `Group`）都直接引用
+    /// 这同一份内容，从不各自重复抄写一遍（mirrors ``EventRowView``'s own `identity`/`glyphTile`
+    /// extraction: 每个「行的一段」只有一份定义，两种布局只是重新摆放同样的几个子视图）。
+    private var nameAndMeta: some View {
+        HStack(spacing: 8) {
+            Text(card.name ?? card.id)
+                .font(.system(size: 13 * typeScale))
+                .foregroundColor(ClaudioColor.text(colorScheme))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            metaSlot
+            Spacer(minLength: 8)
+        }
     }
 
     /// DESIGN.md「包行四态」meta 槽 content — `complete`/`partial` only (T5 will later split
