@@ -9,32 +9,62 @@ import Foundation
 /// reusing the exact same audited primitives (``resolvePackDirectory``, ``loadPackManifest``,
 /// ``safePackFileURL``), never reinventing pack-safety logic. The `partial` count itself,
 /// though, is derived from the card's present-event set (see ``packCard``'s ``PackCard/presentEvents``)
-/// rather than `checkPackIntegrity`'s declared-file-missing list, so the badge count, the 2×2
-/// glyph grid, and the accessibility "缺少：…" list are one source of truth (see
+/// rather than `checkPackIntegrity`'s declared-file-missing list, so the badge count, the 4-slot
+/// coverage track, and the accessibility "缺少：…" list are one source of truth (see
 /// `packCompletionState`).
 ///
-/// ⚠️ DESIGN.md 未定义 pack 卡状态视觉（selected/broken/partial 的呈现方式）——
-/// `PackGalleryView`（`ClaudioGUI`）用既有 token 派生，见该文件的行内注释。
+/// DESIGN.md「包行四态」(2026-07-17 竖排整宽行 mockup 拍板) now DOES define the
+/// selected/broken/partial visual language (this doc comment used to say it didn't — that was
+/// true before that section landed). ``PackGalleryView``（`ClaudioGUI`）renders it; where a pixel
+/// choice still isn't pinned by DESIGN.md, that file's inline comments call it out same as before.
 public enum PackCardState: Sendable, Equatable {
     /// All four v1 events resolve to ``CoverageState/present(fileName:)`` for this pack —
     /// i.e. ``PackCard/presentEvents`` == every ``Event/allCases``. A pack that legally leaves
     /// some events `unmapped` (silent-fallback, per DESIGN.md) reads as ``partial(present:total:)``
-    /// with a "N/4" badge, matching DESIGN.md line 218 ("包缺某事件音 → 卡 2×2 网格显「2/4」") —
-    /// NOT `.complete`. (Note: `doctor`'s own ``PackIntegrityStatus/incomplete(packID:missingFiles:)``
-    /// still keys off *declared*-file presence for its diagnostic list; the pack CARD's
-    /// completeness deliberately keys off the same present-event set its glyph grid renders, so
-    /// the badge, the grid, and the accessibility label never disagree.)
+    /// with a "缺 N 个" meta badge, matching DESIGN.md「包行四态」— NOT `.complete`. (Note:
+    /// `doctor`'s own ``PackIntegrityStatus/incomplete(packID:missingFiles:)`` still keys off
+    /// *declared*-file presence for its diagnostic list; the pack CARD's completeness
+    /// deliberately keys off the same present-event set its coverage track renders, so the
+    /// badge, the track, and the accessibility label never disagree.)
     case complete
     /// Fewer than all four v1 events are ``CoverageState/present(fileName:)``. `present` is
-    /// exactly ``PackCard/presentEvents``'s count (the number of lit glyphs in the card's 2×2
-    /// grid), `total` is always ``Event/allCases``'s count (`4` in v1) — the two are derived
-    /// from ONE source, so `present` can never exceed `total` or go negative, and always agrees
-    /// with the grid and the "缺少：…" accessibility list.
+    /// exactly ``PackCard/presentEvents``'s count (the number of lit slots in the row's 4-slot
+    /// coverage track), `total` is always ``Event/allCases``'s count (`4` in v1) — the two are
+    /// derived from ONE source, so `present` can never exceed `total` or go negative, and always
+    /// agrees with the track and the "缺少：…" accessibility list.
     case partial(present: Int, total: Int)
     /// The pack directory doesn't resolve at all, or its `manifest.json` can't be
     /// read/decoded — mirrors ``PackIntegrityStatus/packNotFound(packID:)`` /
     /// ``PackIntegrityStatus/manifestUnreadable(packID:reason:)``.
     case broken(reason: String)
+}
+
+/// What a pack row's trailing "coverage track" position renders, derived purely from
+/// ``PackCardState`` — PLAN-SOUND-MANAGER.md T4's a11y/layout model, resolving a 2026-07-17
+/// Codex catch: DESIGN.md's "覆盖轨恒显（含 complete）" and "`broken` 不渲染轨" read as
+/// contradictory taken together, until "恒显" is read precisely as "every MANIFEST-READABLE
+/// row" rather than "literally every row with no exception". This type makes that precise
+/// reading the one thing both ``PackGalleryView`` and ``PackGallerySuite`` derive from, so
+/// neither can independently drift from the other.
+public enum PackRowTrailingSlot: Sendable, Equatable {
+    /// `complete`/`partial` — the manifest decoded, so ``PackCard/presentEvents`` is real
+    /// per-event data the 4-slot track can render for real.
+    case track
+    /// `broken` — nothing was read (no directory, or an unreadable/undecodable manifest), so
+    /// there is no per-event coverage to show; the row renders a status indicator here instead,
+    /// reserving the SAME height the track would have used, so a row's height never jumps
+    /// depending on whether it lands on `.track` or `.brokenStatus`.
+    case brokenStatus
+}
+
+/// Resolves ``PackRowTrailingSlot`` for one card's ``PackCardState`` — see that type's doc
+/// comment. Exhaustive `switch`, no `default:`, so a future ``PackCardState`` case fails this
+/// to compile rather than silently falling into the wrong slot.
+public func packRowTrailingSlot(for state: PackCardState) -> PackRowTrailingSlot {
+    switch state {
+    case .complete, .partial: return .track
+    case .broken: return .brokenStatus
+    }
 }
 
 /// One pack switching card — the read-only render model

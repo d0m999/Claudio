@@ -440,13 +440,66 @@ func runPackGallerySuites() {
 
             expect(
                 card?.presentEvents == coverageTruth,
-                "卡片点亮的字形集合必须**恒等于** packCoverage 判定的 .present 集合（badge / 2×2 网格 /"
+                "卡片点亮的字形集合必须**恒等于** packCoverage 判定的 .present 集合（badge / 覆盖轨 /"
                     + " VoiceOver「缺少：…」三处同一个真相源）——got \(String(describing: card?.presentEvents))"
                     + " vs \(coverageTruth)")
             expect(coverageTruth == [.stop, .notification], "fixture 前提：恰好两个事件真的存在")
             expect(
                 card?.state == .partial(present: 2, total: 4),
                 "badge 计数必须仍等于 presentEvents.count，got \(String(describing: card?.state))")
+        }
+    }
+
+    // MARK: - PLAN-SOUND-MANAGER.md T4: packRowTrailingSlot（竖排整宽行的 a11y/布局二分模型）
+    //
+    // T4 的验收原句：「complete/partial 行必渲染轨、broken 行渲染状态行且高度不跳」。这套无
+    // ViewInspector 的 harness 测不了「像素真的没跳」，但「哪个状态落哪个分支」是一个纯函数，
+    // 能被钉死——`PackGalleryView` 只切换这个已经决定好的值，自己不做任何状态判断。
+
+    suite("packRowTrailingSlot: exhaustive over the three PackCardState shapes") {
+        expect(
+            packRowTrailingSlot(for: .complete) == .track,
+            "a manifest-readable complete row must resolve to .track")
+        expect(
+            packRowTrailingSlot(for: .partial(present: 2, total: 4)) == .track,
+            "a manifest-readable partial row must resolve to .track, regardless of the count")
+        expect(
+            packRowTrailingSlot(for: .partial(present: 0, total: 4)) == .track,
+            "even a fully-silent (0/4) but still-READABLE manifest must resolve to .track — it's"
+                + " not .broken, so there's real (all-missing) coverage data to render")
+        expect(
+            packRowTrailingSlot(for: .broken(reason: "任意原因")) == .brokenStatus,
+            "an unreadable pack must resolve to .brokenStatus regardless of its reason string")
+    }
+
+    suite("packRowTrailingSlot: agrees with real availablePacks() output, not just hand-built PackCardState literals") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeCompletePack(named: "complete-pack", at: userPacks)
+            writeFixture(
+                #"{ "id": "partial-pack", "name": "半成品", "events": { "stop": "stop.mp3" } }"#,
+                to: userPacks.appendingPathComponent("partial-pack/manifest.json"))
+            writeFixture("fake-audio", to: userPacks.appendingPathComponent("partial-pack/stop.mp3"))
+            writeFixture("{ not valid json", to: userPacks.appendingPathComponent("broken-pack/manifest.json"))
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "complete-pack"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+
+            expect(cards.count == 3, "expected complete/partial/broken, got \(cards.count)")
+            for card in cards {
+                let slot = packRowTrailingSlot(for: card.state)
+                switch card.state {
+                case .complete, .partial:
+                    expect(
+                        slot == .track,
+                        "\(card.id) is manifest-readable (\(card.state)) — must resolve to .track, got \(slot)")
+                case .broken:
+                    expect(
+                        slot == .brokenStatus,
+                        "\(card.id) is broken — must resolve to .brokenStatus, got \(slot)")
+                }
+            }
         }
     }
 }

@@ -42,11 +42,17 @@ import SwiftUI
 /// 全部四个失败渲染点（``PanelView`` 的写失败 / config 失败、``EventRowView`` 的导入·绑定失败、
 /// ``AudioDropZoneView`` 的拖入拒绝、``ActionFailureRow`` 的 CTA 动作失败）都渲染这一个 `View`。
 ///
-/// **刻意不收编的第五处**：``PackGalleryView`` 里 `PackCardView.statusLine` 的 `.broken` 分支。它
-/// **借用**了拒绝行的视觉语言（同样的 ✗ + `error` 色 + `text-2` 文案），但它不是一条面板级失败行 ——
-/// 它是一张 84pt 宽卡片**内部**的状态标签，`HStack(spacing: 2)` 是被卡片宽度逼出来的，不是漂移。
-/// 把它强行折进来会让这个组件长出一个只为它服务的 `spacing` 参数，那不是收敛，是把差异换个地方藏。
-/// （它与本组件共享的是 **token**（`ClaudioColor.error` / `.textSecondary` / 11pt），那一层已经统一了。）
+/// **刻意不收编的第五处**：``PackGalleryView`` 里 `PackCardView` 的 trailing-slot 状态行
+/// （T4，2026-07-17 竖排整宽行 — `packRowTrailingSlot(for:) == .brokenStatus` 时渲染的那个
+/// ✕ + 文案）。它**借用**了拒绝行的视觉语言（同样的 ✗ + `error` 色 + `text-2` 文案），但它不是
+/// 一条面板级失败行 —— 它是**竖排整宽行内部、覆盖轨那个定高槽位**（`trailingSlotHeight`）里的一个
+/// 状态占位，必须与轨道本身共享**完全相同的高度**（同一份滚动列表里，行不能因为相邻那个包是不是
+/// broken 而上下跳）。`FailureRow` 允许多行折行（`fixedSize(horizontal: false, vertical: true)`）
+/// + 一颗可选的披露箭头 —— "定高" 与 "允许折行" 是互相冲突的两条约束，硬塞进同一个组件只会让
+/// `FailureRow` 长出一个只为这一处服务的定高参数，那不是收敛，是把差异换个地方藏。
+/// （它与本组件共享的仍是 **token** 层：`ClaudioColor.error` / `.textSecondary` / 11pt。）
+/// （T4 之前这里说的是「84pt 宽卡片、`spacing: 2` 被卡片宽度逼出来」——那份理由随卡片画廊一起
+/// 消解了，本条随实现改写，结论没变：仍然不收编，只是理由换成了「定高 vs 允许折行」。）
 struct FailureRow: View {
     /// 一句人话。真红只上图标，所以这句话本身恒为 `text-2`。
     let message: String

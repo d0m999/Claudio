@@ -186,13 +186,19 @@ public enum PreviewFixtures {
     /// Every ``PackCardState`` case × `isSelected` (true/false) — six cards.
     ///
     /// The `presentEvents` sets carry a SECOND exhaustiveness obligation, for the same reason
-    /// ``eventRows`` does (T14 review 修复①): `PackGalleryView`'s 2×2 glyph grid renders
-    /// ``Event/allCases`` on EVERY card, styling each glyph present-or-absent. So a card fixture
-    /// set must show each of the four events in BOTH styles somewhere, or one of the eight
-    /// (event × present/absent) glyph renderings never gets looked at. The `.complete` cards
-    /// (`presentEvents == Set(Event.allCases)`) supply all four PRESENT glyphs; the two
-    /// `.broken` cards (`presentEvents == []`) supply all four ABSENT ones. ``PreviewFixturesSuite``
-    /// pins both halves off ``Event/allCases`` directly.
+    /// ``eventRows`` does (T14 review 修复①): the row's 4-slot coverage track
+    /// (``PackGalleryView``, T4) renders ``Event/allCases`` for every card whose
+    /// ``packRowTrailingSlot(for:)`` resolves to `.track`, styling each slot present-or-absent.
+    /// So the fixtures whose state is `.complete`/`.partial` (the ones that actually reach a
+    /// track) must show each of the four events in BOTH styles among THEMSELVES — the two
+    /// `.broken` cards' `presentEvents == []` does NOT count toward this anymore (T4: a broken
+    /// row renders a status row instead of a track, so its `presentEvents` is never turned into
+    /// an actual absent-styled slot anywhere in the gallery — counting it here would be exactly
+    /// the "asserted against data nobody renders" bug this file exists to prevent). The
+    /// `.complete` cards (`presentEvents == Set(Event.allCases)`) supply all four PRESENT
+    /// slots; the two `.partial` cards' present sets are chosen so their absent sets' UNION is
+    /// all four events. ``PreviewFixturesSuite`` pins both halves, scoped to the `.track`-
+    /// resolving cards, off ``Event/allCases`` directly.
     public static let packCards: [PackCard] = [
         PackCard(
             id: "minimal-chime", name: "极简铃", isCC0: true, presentEvents: Set(Event.allCases),
@@ -203,8 +209,12 @@ public enum PreviewFixtures {
         PackCard(
             id: "half-pack", name: "半成品", isCC0: false, presentEvents: [.stop, .notification],
             state: .partial(present: 2, total: 4), isSelected: true),
+        // 缺失集刻意选 `.subagentStop` 单独在场（而非 `.stop`）：与 `half-pack` 的缺失集
+        // {stopFailure, subagentStop} 取并集，四个事件的「缺」才恰好全部覆盖到——`half-pack`
+        // 两个都缺的正是 `stopFailure`/`subagentStop`，若这里仍选 `.stop` 在场，`.stop` 就永远
+        // 不会在任何一张会画轨的卡片上以「缺失格」样式出现过。
         PackCard(
-            id: "quarter-pack", name: "缺三个", isCC0: false, presentEvents: [.stop],
+            id: "quarter-pack", name: "缺三个", isCC0: false, presentEvents: [.subagentStop],
             state: .partial(present: 1, total: 4), isSelected: false),
         PackCard(
             id: "ghost-pack", name: nil, isCC0: false, presentEvents: [],

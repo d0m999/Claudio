@@ -159,26 +159,35 @@ func runPreviewFixturesSuites() {
                 + " \(Set(Event.allCases).subtracting(events).map(\.cliName).sorted())")
     }
 
-    // MARK: - PackCard: PackCardState × isSelected, every combination — plus the 2×2 glyph grid's
-    // own event axis (`PackGalleryView` renders Event.allCases on EVERY card, styled
-    // present-or-absent, so each event must appear in BOTH styles across the fixture set).
+    // MARK: - PackCard: PackCardState × isSelected, every combination — plus the coverage
+    // track's own event axis (T4: `PackGalleryView` renders `Event.allCases` on every card whose
+    // `packRowTrailingSlot(for:)` resolves to `.track` — i.e. `.complete`/`.partial` — styled
+    // present-or-absent; a `.broken` card renders a status row instead and reaches no track at
+    // all, so its `presentEvents` must NOT count toward this exhaustiveness check).
 
-    suite("PreviewFixtures.packCards' 2×2 glyph grid renders every Event in BOTH present and absent styles") {
-        let present = PreviewFixtures.packCards.reduce(into: Set<Event>()) {
+    suite("PreviewFixtures.packCards' coverage track renders every Event in BOTH present and absent styles (scoped to .track-resolving cards — .broken renders no track at all)") {
+        let trackCards = PreviewFixtures.packCards.filter { packRowTrailingSlot(for: $0.state) == .track }
+        expect(
+            trackCards.count == 4,
+            "fixture premise: exactly the two .complete + two .partial cards resolve to .track,"
+                + " got \(trackCards.count)")
+
+        let present = trackCards.reduce(into: Set<Event>()) {
             $0.formUnion($1.presentEvents)
         }
         expect(
             present == Set(Event.allCases),
-            "every event must appear PRESENT on at least one card (the .complete cards), missing"
-                + " \(Set(Event.allCases).subtracting(present).map(\.cliName).sorted())")
+            "every event must appear PRESENT on at least one .track-resolving card (the"
+                + " .complete cards), missing \(Set(Event.allCases).subtracting(present).map(\.cliName).sorted())")
 
-        let absent = PreviewFixtures.packCards.reduce(into: Set<Event>()) { accumulated, card in
+        let absent = trackCards.reduce(into: Set<Event>()) { accumulated, card in
             accumulated.formUnion(Set(Event.allCases).subtracting(card.presentEvents))
         }
         expect(
             absent == Set(Event.allCases),
-            "every event must appear ABSENT on at least one card (the .broken/.partial cards),"
-                + " missing \(Set(Event.allCases).subtracting(absent).map(\.cliName).sorted())")
+            "every event must appear ABSENT on at least one .track-resolving card (the .partial"
+                + " cards — .broken cards no longer render a track, so they don't count), missing"
+                + " \(Set(Event.allCases).subtracting(absent).map(\.cliName).sorted())")
     }
 
     // MARK: - MasterVolumeState (PLAN-MASTER-VOLUME.md D33/D38): 6 fixtures, both cases covered,
