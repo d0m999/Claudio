@@ -175,39 +175,60 @@ private struct PackCardView: View {
         }
     }
 
-    /// DESIGN.md「包行四态」meta 槽 content — `complete`/`partial` only (T5 will later split
-    /// this ONE slot into a license sub-slot + a completeness sub-slot; T4 keeps it a single
-    /// undivided slot, so a CC0 `.partial` pack still loses its CC0 badge here exactly like the
-    /// pre-T4 card did — a known, already-scheduled-for-T5 gap, not a T4 regression).
+    /// DESIGN.md「包行四态」meta 槽 content — two INDEPENDENT sub-slots
+    /// (``packRowMetaSlots(isCC0:state:)``, `ClaudioGUICore`, unit-tested by
+    /// ``PackGallerySuite``): "`CC0` 与「缺 N 个」必须分居两个槽位（license 与完整度是两根
+    /// **正交**的轴，一个格子塞不下两根轴）" — a CC0 `.partial` pack renders BOTH the `CC0`
+    /// badge and the "缺 N 个" badge at once (T5, fixing a T4-inherited gap where a single
+    /// `switch card.state` fell into the `.partial` branch and never looked at `card.isCC0`
+    /// again). This view makes no state decision of its own here — it only switches on the
+    /// already-computed ``PackRowMetaSlots`` value, exactly like ``trailingSlot`` does for
+    /// ``packRowTrailingSlot(for:)``.
     ///
-    /// `.broken` renders nothing here (`EmptyView`): its ONE visible indicator lives in
-    /// ``trailingSlot`` instead (see that property's doc comment for why — the T4 PLAN task's
-    /// literal wording, "以状态行替代轨", places the broken indicator AT the track's position,
-    /// not the meta slot's; showing "✕ 文件丢失" in BOTH places would just be the same badge
-    /// twice in one row).
+    /// `.broken` renders nothing here (both sub-slots resolve empty): its ONE visible indicator
+    /// lives in ``trailingSlot`` instead (see that property's doc comment for why — the T4 PLAN
+    /// task's literal wording, "以状态行替代轨", places the broken indicator AT the track's
+    /// position, not the meta slot's; showing "✕ 文件丢失" in BOTH places would just be the
+    /// same badge twice in one row).
     @ViewBuilder
     private var metaSlot: some View {
-        switch card.state {
-        case .complete:
-            if card.isCC0 {
-                Text("CC0")
+        let slots = packRowMetaSlots(isCC0: card.isCC0, state: card.state)
+        HStack(spacing: 6) {
+            if let label = licenseBadgeLabel(slots.license) {
+                Text(label)
                     .font(.system(size: 10 * typeScale, weight: .semibold, design: .monospaced))
                     .monospacedDigit()
                     .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             }
-        case .partial(let present, let total):
-            // DESIGN.md「包行四态」: meta 槽 = `⚠`（`warning` 图标）+ `缺 N 个`（**`text-2`，不是
-            // 琥珀**）—— 与 `ActionNoticeRow` 同一个图标/配色契约（琥珀只做图标，文案走 text-2）。
-            HStack(spacing: 3) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10 * typeScale))
-                    .foregroundColor(ClaudioColor.warning(colorScheme))
-                Text("缺 \(total - present) 个")
-                    .font(.system(size: 11 * typeScale))
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            if let missingCount = slots.missingCount {
+                // DESIGN.md「包行四态」: 完整度子槽 = `⚠`（`warning` 图标）+ `缺 N 个`（**`text-2`，
+                // 不是琥珀**）—— 与 `ActionNoticeRow` 同一个图标/配色契约（琥珀只做图标，文案走 text-2）。
+                HStack(spacing: 3) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10 * typeScale))
+                        .foregroundColor(ClaudioColor.warning(colorScheme))
+                    Text("缺 \(missingCount) 个")
+                        .font(.system(size: 11 * typeScale))
+                        .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                }
             }
-        case .broken:
-            EmptyView()
+        }
+    }
+
+    /// `nil` when nothing should render for this ``PackRowLicenseBadge`` — exhaustive `switch`,
+    /// no `default:`. Kept as a plain function (not a `@ViewBuilder` view) so the license sub-slot
+    /// in ``metaSlot`` stays an `if let` (``buildOptional``), contributing ZERO subviews to that
+    /// `HStack` when absent — exactly like the pre-T5 `if slots.license == .cc0` did — rather than
+    /// an unconditionally-called `@ViewBuilder` function, which would always occupy one subview
+    /// slot (as an invisible-but-present `EmptyView`) and could shift ``HStack``'s `spacing` onto
+    /// the completeness badge for every non-CC0 row. This still fails to compile when T13 adds
+    /// `.modified`, forcing a decision here.
+    private func licenseBadgeLabel(_ badge: PackRowLicenseBadge) -> String? {
+        switch badge {
+        case .none:
+            return nil
+        case .cc0:
+            return "CC0"
         }
     }
 

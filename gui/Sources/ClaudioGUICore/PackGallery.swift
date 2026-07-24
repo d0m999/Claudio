@@ -67,6 +67,60 @@ public func packRowTrailingSlot(for state: PackCardState) -> PackRowTrailingSlot
     }
 }
 
+/// A pack row's meta 槽 · license 子槽 (DESIGN.md「包行四态」) — one of two axes rendered
+/// side by side in ``PackRowMetaSlots``, never combined into one string with the completeness
+/// axis (see that type's doc comment for why the two must stay orthogonal).
+public enum PackRowLicenseBadge: Sendable, Equatable {
+    /// The manifest carries no CC0 claim (``PackCard/isCC0`` is `false`) — nothing renders here.
+    case none
+    /// ``PackCard/isCC0`` is `true` — renders the `"CC0"` badge.
+    case cc0
+    // T13 (factoryIntegrity, PLAN-SOUND-MANAGER.md §2.4) will add a `.modified` case here for a
+    // pack whose bundled bytes were tampered with — driven by a bundle-byte comparison, not
+    // `isCC0` — since it's a negation of the license claim, not completeness information, it
+    // belongs on THIS axis. This enum is the reserved slot for that case; nothing else about
+    // ``packRowMetaSlots(isCC0:state:)``'s shape should need to change when T13 lands.
+}
+
+/// One pack row's meta 槽, split into its two orthogonal sub-slots per DESIGN.md「包行四态」:
+/// "`CC0` 与「缺 N 个」必须分居两个槽位（license 与完整度是两根**正交**的轴，一个格子塞不下两根
+/// 轴）". Before this type existed, ``PackGalleryView``'s `metaSlot` switched on `card.state`
+/// alone, so a CC0 pack that was also ``PackCardState/partial(present:total:)`` silently lost
+/// its CC0 badge the moment it fell into that branch (T5, fixing a T4-inherited gap — see
+/// ``PackRowTrailingSlot``'s own doc comment for the analogous T4 precedent this type mirrors).
+/// `license` and `missingCount` are computed independently below, so a CC0 partial pack now
+/// reports BOTH at once.
+public struct PackRowMetaSlots: Sendable, Equatable {
+    public let license: PackRowLicenseBadge
+    /// `nil` when there's nothing to report — ``PackCardState/complete`` (zero missing) or
+    /// ``PackCardState/broken`` (no coverage data was ever read). Never `0`: a `.complete` row
+    /// has no "缺 0 个" badge, it has no completeness badge at all.
+    public let missingCount: Int?
+
+    public init(license: PackRowLicenseBadge, missingCount: Int?) {
+        self.license = license
+        self.missingCount = missingCount
+    }
+}
+
+/// Resolves ``PackRowMetaSlots`` for one card's `isCC0` + ``PackCardState`` — see that type's
+/// doc comment. Exhaustive `switch` on `state`, no `default:`, mirroring
+/// ``packRowTrailingSlot(for:)`` exactly. `.broken` reports `(.none, nil)` regardless of
+/// `isCC0`: DESIGN.md is explicit that a `.broken` row's ENTIRE meta slot renders nothing (its
+/// one visible indicator lives in the trailing slot instead, see ``PackRowTrailingSlot``) — a
+/// broken pack's manifest may never even have been read far enough to know its license.
+public func packRowMetaSlots(isCC0: Bool, state: PackCardState) -> PackRowMetaSlots {
+    let license: PackRowLicenseBadge = isCC0 ? .cc0 : .none
+    switch state {
+    case .complete:
+        return PackRowMetaSlots(license: license, missingCount: nil)
+    case .partial(let present, let total):
+        return PackRowMetaSlots(license: license, missingCount: total - present)
+    case .broken:
+        return PackRowMetaSlots(license: .none, missingCount: nil)
+    }
+}
+
 /// One pack switching card — the read-only render model
 /// ``PackGalleryView`` (``ClaudioGUI``, T15) lays pixels out from, and the write path
 /// (pack switching) reuses ``selectPack(_:configFile:userPacksDirectory:bundledPacksDirectory:lockFile:)``

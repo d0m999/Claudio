@@ -502,4 +502,67 @@ func runPackGallerySuites() {
             }
         }
     }
+
+    // MARK: - PLAN-SOUND-MANAGER.md T5: packRowMetaSlots（meta 槽拆两个正交子槽）
+    //
+    // T5 的验收原句：一张 CC0 的 `.partial` 卡必须同时读出 `.cc0` 徽标与「缺 N 个」——license 与
+    // 完整度是两根正交轴，T4 前那个单一 `switch card.state` 一旦落进 `.partial` 分支就再也不看
+    // `card.isCC0`，CC0 徽标随之静默消失。这个纯函数把「该显哪个徽标」也钉成可测的值，
+    // `PackGalleryView` 只渲染它，不再自己切 `card.state`。
+
+    suite("packRowMetaSlots: exhaustive over isCC0 × PackCardState") {
+        expect(
+            packRowMetaSlots(isCC0: false, state: .complete) == PackRowMetaSlots(license: .none, missingCount: nil),
+            "complete + 非 CC0 → 两个子槽都空")
+        expect(
+            packRowMetaSlots(isCC0: true, state: .complete) == PackRowMetaSlots(license: .cc0, missingCount: nil),
+            "complete + CC0 → 仅 license 子槽亮，缺失数为 nil")
+        expect(
+            packRowMetaSlots(isCC0: false, state: .partial(present: 3, total: 4))
+                == PackRowMetaSlots(license: .none, missingCount: 1),
+            "partial + 非 CC0 → 仅完整度子槽亮")
+        expect(
+            packRowMetaSlots(isCC0: true, state: .partial(present: 3, total: 4))
+                == PackRowMetaSlots(license: .cc0, missingCount: 1),
+            "T5 的核心断言：partial + CC0 → 两个子槽必须同时亮 —— CC0 徽标不因「缺 N 个」而消失")
+        expect(
+            packRowMetaSlots(isCC0: true, state: .broken(reason: "任意原因"))
+                == PackRowMetaSlots(license: .none, missingCount: nil),
+            "broken → 整个 meta 槽仍必须是空的，即使 isCC0 传 true（broken 行的判定不看 license）")
+        expect(
+            packRowMetaSlots(isCC0: false, state: .broken(reason: "任意原因"))
+                == PackRowMetaSlots(license: .none, missingCount: nil),
+            "broken + 非 CC0 → 同样两个子槽都空")
+    }
+
+    suite("packRowMetaSlots: agrees with real availablePacks() output — a CC0 partial pack keeps both badges") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            writeFixture(
+                #"""
+                { "id": "cc0-partial-pack", "name": "半成品 CC0 包", "license": "CC0-1.0", "events": {
+                    "stop": "stop.mp3", "stop_failure": "fail.mp3",
+                    "notification": "ping.mp3", "subagent_stop": "sub.mp3" } }
+                """#,
+                to: userPacks.appendingPathComponent("cc0-partial-pack/manifest.json"))
+            // 只有三个declared文件真的存在——缺 1 个。
+            for file in ["stop.mp3", "fail.mp3", "ping.mp3"] {
+                writeFixture("fake-audio", to: userPacks.appendingPathComponent("cc0-partial-pack/\(file)"))
+            }
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "cc0-partial-pack"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+
+            expect(cards.count == 1, "expected exactly one card, got \(cards.count)")
+            guard let card = cards.first else { return }
+            expect(card.isCC0 == true, "fixture 前提：license 是 CC0-1.0")
+            expect(card.state == .partial(present: 3, total: 4), "fixture 前提：缺 1 个事件")
+
+            let slots = packRowMetaSlots(isCC0: card.isCC0, state: card.state)
+            expect(
+                slots == PackRowMetaSlots(license: .cc0, missingCount: 1),
+                "一张 CC0 的 partial 卡必须同时读出 .cc0 与 missingCount: 1，got \(slots)")
+        }
+    }
 }
