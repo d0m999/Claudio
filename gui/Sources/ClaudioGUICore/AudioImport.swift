@@ -202,8 +202,8 @@ public func importAudioFile(
             .overDuration(actualSeconds: duration, maxSeconds: environment.limits.maxDurationSeconds))
     }
 
-    // 6. Persist. Deliberately `data.write(to:options:.atomic)` — the exact bytes read in
-    // step 3 and content-sniffed in step 4 — rather than `FileManager.copyItem(at:to:)`.
+    // 6. Persist. Deliberately write the exact `data` read in step 3 and content-sniffed in
+    // step 4 — rather than `FileManager.copyItem(at:to:)`.
     // `copyItem` was verified empirically to copy a symlink *as a symlink* (its link
     // target string, not the referenced content) rather than duplicating the target's
     // bytes; since step 3 above already refuses a symlink `sourceURL`, this can no
@@ -215,18 +215,16 @@ public func importAudioFile(
     // consistent with acceptance criterion 1: never reference the original path once
     // it's been read).
     //
-    // `.atomic` writes to a temp file in the destination directory, then `rename(2)`s it
-    // into place. It is therefore safe only after we have allocated a path with no existing
-    // directory entry: an atomic write *would* replace a regular file, a dangling symlink,
-    // or a symlink pointing at a real file elsewhere. T14 makes that replacement path
-    // unreachable for imports. Every occupied name is reserved — including symlinks, which
-    // `lstat` observes without following — and the incoming file receives `-2`, `-3`, and
-    // so on before its extension. This is what keeps a later "选文件…" on one event from
+    // The final publish is `link(2)` from a fully-written same-directory staging file, not
+    // Foundation's `.atomic` rename: an ordinary rename replaces an entry created after our
+    // `lstat` check, and `packs.lock` is cooperative so an external writer need not honor it.
+    // `link` makes the kernel reject that race with EEXIST. We then allocate again, so every
+    // occupied name — regular files and both kinds of symlink included — receives `-2`, `-3`,
+    // and so on before its extension. This is what keeps a later "选文件…" on one event from
     // silently changing the bytes another event already references.
     //
-    // An interrupted/failed write leaves the chosen unique path (or nothing) in place,
-    // never a truncated half-written one, since the rename is the only step that touches
-    // that newly allocated path.
+    // An interrupted/failed write leaves no final candidate in place; the staging entry is
+    // cleaned up and `link` is the only step that makes the newly allocated path visible.
     //
     // The create-directory + write pair runs inside `environment.packsLockFile` —
     // `bindEventToManifest`/`clearEventBinding`'s and `performFirstRunSetup`'s critical
@@ -244,23 +242,37 @@ public func importAudioFile(
         do {
             try fileManager.createDirectory(
                 at: userPackDirectory, withIntermediateDirectories: true)
-            let uniqueDestinationURL: URL
-            switch allocateUniqueDestinationURL(
-                requestedFileName: suggestedFileName, in: userPackDirectory)
-            {
-            case .available(let url):
-                uniqueDestinationURL = url
-            case .unsafeCandidate:
-                return .rejected(.copyFailed(reason: "无法生成安全的唯一文件名"))
-            case .inspectionFailed(let errno):
-                return .rejected(
-                    .copyFailed(reason: "无法检查目标文件名是否已存在（errno: \(errno)）"))
-            case .exhausted:
-                return .rejected(.copyFailed(reason: "无法生成唯一文件名"))
+            while true {
+                let uniqueDestinationURL: URL
+                switch allocateUniqueDestinationURL(
+                    requestedFileName: suggestedFileName, in: userPackDirectory)
+                {
+                case .available(let url):
+                    uniqueDestinationURL = url
+                case .unsafeCandidate:
+                    return .rejected(.copyFailed(reason: "无法生成安全的唯一文件名"))
+                case .inspectionFailed(let errno):
+                    return .rejected(
+                        .copyFailed(reason: "无法检查目标文件名是否已存在（errno: \(errno)）"))
+                case .exhausted:
+                    return .rejected(.copyFailed(reason: "无法生成唯一文件名"))
+                }
+
+                environment.beforeExclusivePublish?(uniqueDestinationURL)
+                switch publishDataWithoutReplacing(data, to: uniqueDestinationURL) {
+                case .published:
+                    persistedDestinationURL = uniqueDestinationURL
+                    return nil
+                case .destinationExists:
+                    // `lstat` and publish are deliberately separate calls. An external
+                    // writer may have created this entry after the former; the exclusive
+                    // rename did not replace it, so allocate the next name and retry.
+                    continue
+                case .failed(let errno):
+                    return .rejected(
+                        .copyFailed(reason: "无法写入唯一目标文件（errno: \(errno)）"))
+                }
             }
-            try data.write(to: uniqueDestinationURL, options: .atomic)
-            persistedDestinationURL = uniqueDestinationURL
-            return nil
         } catch {
             return .rejected(.copyFailed(reason: error.localizedDescription))
         }
@@ -303,6 +315,101 @@ private enum UniqueDestinationAllocation {
     case exhausted
 }
 
+/// The outcome of staging bytes in the destination directory and publishing them with an
+/// exclusive link. `destinationExists` is a normal race outcome, not a write failure: the
+/// caller must choose the next collision suffix and try again.
+private enum ExclusiveDestinationPublish {
+    case published
+    case destinationExists
+    case failed(errno: Int32)
+}
+
+/// Writes `data` to a private staging file beside `destinationURL`, then publishes it with
+/// `link(2)`. A normal `rename` (including `Data.WritingOptions.atomic`) would replace an
+/// existing regular file or symlink; `link` instead fails with EEXIST, making the final name
+/// allocation and publication safe even against writers that do not take Claudio's cooperative
+/// `packs.lock`. The staging source and destination share a directory, so the hard link is both
+/// atomic and cannot fail with EXDEV.
+private func publishDataWithoutReplacing(
+    _ data: Data,
+    to destinationURL: URL
+) -> ExclusiveDestinationPublish {
+    let stagingTemplateURL = destinationURL.deletingLastPathComponent().appendingPathComponent(
+        ".claudio-import-XXXXXX")
+    var stagingTemplate = stagingTemplateURL.path.utf8CString
+    let descriptor = stagingTemplate.withUnsafeMutableBufferPointer { buffer in
+        mkstemp(buffer.baseAddress!)
+    }
+    guard descriptor >= 0 else { return .failed(errno: errno) }
+
+    let stagingPath = stagingTemplate.withUnsafeBufferPointer { buffer in
+        String(cString: buffer.baseAddress!)
+    }
+    var descriptorNeedsClosing = true
+    defer {
+        if descriptorNeedsClosing { _ = close(descriptor) }
+        _ = unlink(stagingPath)
+    }
+
+    if let writeErrno = writeAll(data, to: descriptor) {
+        return .failed(errno: writeErrno)
+    }
+    if let syncErrno = synchronize(descriptor) {
+        return .failed(errno: syncErrno)
+    }
+    if close(descriptor) != 0 {
+        descriptorNeedsClosing = false
+        return .failed(errno: errno)
+    }
+    descriptorNeedsClosing = false
+
+    var linkErrno: Int32 = 0
+    let linkResult: Int32 = stagingPath.withCString { sourcePath in
+        destinationURL.withUnsafeFileSystemRepresentation { destinationPath in
+            guard let destinationPath else {
+                linkErrno = EINVAL
+                return Int32(-1)
+            }
+            let result = link(sourcePath, destinationPath)
+            if result != 0 { linkErrno = errno }
+            return result
+        }
+    }
+    if linkResult == 0 { return .published }
+    if linkErrno == EEXIST { return .destinationExists }
+    return .failed(errno: linkErrno)
+}
+
+/// Writes every byte to an already-private staging descriptor. `write(2)` may complete only a
+/// prefix or be interrupted, neither of which may publish a partial destination.
+private func writeAll(_ data: Data, to descriptor: Int32) -> Int32? {
+    data.withUnsafeBytes { rawBuffer in
+        guard !rawBuffer.isEmpty else { return nil }
+        guard var cursor = rawBuffer.baseAddress else { return EINVAL }
+        var remainingByteCount = rawBuffer.count
+        while remainingByteCount > 0 {
+            let writtenByteCount = write(descriptor, cursor, remainingByteCount)
+            if writtenByteCount > 0 {
+                cursor = cursor.advanced(by: writtenByteCount)
+                remainingByteCount -= writtenByteCount
+                continue
+            }
+            if writtenByteCount < 0, errno == EINTR { continue }
+            return errno
+        }
+        return nil
+    }
+}
+
+/// `fsync(2)` catches delayed staging-file write failures before the entry becomes visible.
+private func synchronize(_ descriptor: Int32) -> Int32? {
+    while fsync(descriptor) != 0 {
+        if errno == EINTR { continue }
+        return errno
+    }
+    return nil
+}
+
 /// Allocates the first unoccupied filename for `requestedFileName`: the original name, then
 /// `stem-2.ext`, `stem-3.ext`, and so on. It must run while `packsLockFile` is held so the
 /// existence check and the eventual atomic write are one serial operation with every other
@@ -314,6 +421,8 @@ private enum UniqueDestinationAllocation {
 /// every extant entry without following a symlink, so both a real file and any link reserve the
 /// filename. A candidate is passed back through `safePackFileURL` only after `lstat` proves it
 /// absent, keeping the audited lexical and real-path containment check at the allocation point.
+/// The later exclusive publish is still required: lstat cannot prevent a non-cooperating writer
+/// from creating the candidate in the interval after this inspection.
 private func allocateUniqueDestinationURL(
     requestedFileName: String,
     in packDirectory: URL
@@ -322,15 +431,23 @@ private func allocateUniqueDestinationURL(
     let directoryPrefix = (requestedFileName as NSString).deletingLastPathComponent
     let pathExtension = (fileName as NSString).pathExtension
     let stem = (fileName as NSString).deletingPathExtension
+    let candidateDirectory =
+        directoryPrefix == "."
+        ? packDirectory
+        : packDirectory.appendingPathComponent(directoryPrefix, isDirectory: true)
+    let maximumComponentByteCount = maximumFileNameByteCount(in: candidateDirectory)
 
     var suffix: Int? = nil
     while true {
         let candidateFileName: String
         if let suffix {
-            candidateFileName =
-                pathExtension.isEmpty
-                ? "\(stem)-\(suffix)"
-                : "\(stem)-\(suffix).\(pathExtension)"
+            guard let collisionFileName = collisionFileName(
+                stem: stem,
+                pathExtension: pathExtension,
+                suffix: suffix,
+                maximumByteCount: maximumComponentByteCount)
+            else { return .exhausted }
+            candidateFileName = collisionFileName
         } else {
             candidateFileName = fileName
         }
@@ -366,6 +483,58 @@ private func allocateUniqueDestinationURL(
         }
         return .available(safeCandidate)
     }
+}
+
+/// The component-length limit is filesystem-specific. The deployment target is macOS, whose
+/// conservative fallback is `NAME_MAX`; when the mounted destination reports a limit, honor it
+/// exactly (including a limit smaller or larger than the fallback).
+private func maximumFileNameByteCount(in directory: URL) -> Int {
+    let fallback = Int(NAME_MAX)
+    return directory.withUnsafeFileSystemRepresentation { pathPointer in
+        guard let pathPointer else { return fallback }
+        let result = pathconf(pathPointer, _PC_NAME_MAX)
+        guard result > 0 else { return fallback }
+        return Int(result)
+    }
+}
+
+/// Builds `stem-N.ext` without crossing the destination filesystem's byte limit. The normal
+/// case preserves the complete extension and truncates only the stem; an adversarially long
+/// extension is itself shortened at a `Character` boundary after reserving the collision suffix,
+/// because returning `ENAMETOOLONG` would violate the no-overwrite unique-name contract.
+private func collisionFileName(
+    stem: String,
+    pathExtension: String,
+    suffix: Int,
+    maximumByteCount: Int
+) -> String? {
+    let suffixPart = "-\(suffix)"
+    guard suffixPart.utf8.count <= maximumByteCount else { return nil }
+
+    let extensionPart = pathExtension.isEmpty ? "" : ".\(pathExtension)"
+    let extensionBudget = maximumByteCount - suffixPart.utf8.count
+    let retainedExtension = utf8Prefix(extensionPart, atMost: extensionBudget)
+    let stemBudget = extensionBudget - retainedExtension.utf8.count
+    let retainedStem = utf8Prefix(stem, atMost: stemBudget)
+    return "\(retainedStem)\(suffixPart)\(retainedExtension)"
+}
+
+/// Returns the longest prefix whose UTF-8 representation fits `maximumByteCount`, without
+/// splitting a Swift `Character` and therefore without producing invalid Unicode.
+private func utf8Prefix(_ value: String, atMost maximumByteCount: Int) -> String {
+    guard value.utf8.count > maximumByteCount else { return value }
+    guard maximumByteCount > 0 else { return "" }
+
+    var prefix = ""
+    var usedByteCount = 0
+    for character in value {
+        let characterString = String(character)
+        let characterByteCount = characterString.utf8.count
+        guard usedByteCount + characterByteCount <= maximumByteCount else { break }
+        prefix += characterString
+        usedByteCount += characterByteCount
+    }
+    return prefix
 }
 
 // MARK: - Bound source read

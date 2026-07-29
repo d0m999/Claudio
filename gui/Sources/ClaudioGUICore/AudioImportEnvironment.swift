@@ -147,13 +147,19 @@ public struct AudioImportEnvironment: Sendable {
     /// 不声称封死。
     public var packsLockFile: URL
 
+    /// 在导入已分配唯一候选、但尚未以不可覆盖语义发布之前调用的测试钩子。生产构造不传时为
+    /// `nil`；测试用它在精确的 TOCTOU 窗口放入一个外部目录项，验证最终发布会重新分配名称而非
+    /// 覆盖该项。回调是同步的，且必须自行满足 `Sendable`。
+    public var beforeExclusivePublish: (@Sendable (URL) -> Void)?
+
     public init(
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         bundledPacksDirectory: URL? = nil,
         factoryPacksDirectory: URL? = nil,
         durationProbe: any AudioDurationProbing,
         limits: AudioImportLimits = AudioImportLimits(),
-        packsLockFile: URL
+        packsLockFile: URL,
+        beforeExclusivePublish: (@Sendable (URL) -> Void)? = nil
     ) {
         self.userPacksDirectory = userPacksDirectory
         self.bundledPacksDirectory = bundledPacksDirectory
@@ -161,5 +167,6 @@ public struct AudioImportEnvironment: Sendable {
         self.durationProbe = durationProbe
         self.limits = limits
         self.packsLockFile = packsLockFile
+        self.beforeExclusivePublish = beforeExclusivePublish
     }
 }

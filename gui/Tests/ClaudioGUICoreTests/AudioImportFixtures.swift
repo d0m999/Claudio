@@ -72,6 +72,27 @@ struct StubDurationProbe: AudioDurationProbing {
     func probeDuration(of fileURL: URL) -> TimeInterval? { fixedDuration }
 }
 
+/// A deterministic non-cooperating writer for the post-`lstat` import race regression. The
+/// import is synchronous in these suites, but the hook is `@Sendable` to model a real external
+/// writer, so the tiny mutable box serializes its single creation explicitly.
+final class OneShotSymlinkOccupier: @unchecked Sendable {
+    private let targetURL: URL
+    private let lock = NSLock()
+    private var didOccupy = false
+
+    init(targetURL: URL) {
+        self.targetURL = targetURL
+    }
+
+    func occupy(_ candidateURL: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !didOccupy else { return }
+        didOccupy = true
+        try? FileManager.default.createSymbolicLink(at: candidateURL, withDestinationURL: targetURL)
+    }
+}
+
 /// A stub that additionally *records* which URL (and its on-disk bytes) it was handed, so a
 /// test can assert the import pipeline probes duration on a validated copy of the bytes it
 /// will persist — never by re-opening the original `sourceURL` (T8 codex P2: closes the

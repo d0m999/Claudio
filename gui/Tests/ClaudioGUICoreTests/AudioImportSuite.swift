@@ -598,6 +598,109 @@ func runAudioImportSuites() {
     }
 
     suite(
+        "importAudioFile: a collision on a NAME_MAX filename truncates the stem and still imports uniquely"
+    ) {
+        withTempDirectory { root in
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
+            let extensionPart = ".wav"
+            let maximumName = String(
+                repeating: "a", count: Int(NAME_MAX) - extensionPart.utf8.count) + extensionPart
+
+            var originalData = validWAVData()
+            originalData.append(Data("maximum-name-original".utf8))
+            let originalSource = root.appendingPathComponent("source/original.wav")
+            writeFixture(originalData, to: originalSource)
+            let firstOutcome = importAudioFile(
+                sourceURL: originalSource, suggestedFileName: maximumName, packID: "my-pack",
+                environment: environment)
+            expect(
+                { if case .success = firstOutcome { return true } else { return false } }(),
+                "setup: a filename exactly NAME_MAX bytes must import, got \(firstOutcome)")
+
+            var replacementData = validWAVData()
+            replacementData.append(Data("maximum-name-second".utf8))
+            let replacementSource = root.appendingPathComponent("source/replacement.wav")
+            writeFixture(replacementData, to: replacementSource)
+            let secondOutcome = importAudioFile(
+                sourceURL: replacementSource, suggestedFileName: maximumName, packID: "my-pack",
+                environment: environment)
+
+            guard case .success(let imported) = secondOutcome else {
+                expect(false, "a NAME_MAX collision must allocate a unique name, got \(secondOutcome)")
+                return
+            }
+            let expectedName = String(
+                repeating: "a", count: Int(NAME_MAX) - "-2.wav".utf8.count) + "-2.wav"
+            expect(
+                imported.fileName == expectedName,
+                "the collision name must reserve bytes for -2 and .wav, got \(imported.fileName)")
+            expect(
+                imported.fileName.utf8.count <= Int(NAME_MAX),
+                "the generated filename must not exceed NAME_MAX bytes")
+            let packDirectory = userPacksDirectory.appendingPathComponent("my-pack")
+            expect(
+                (try? Data(contentsOf: packDirectory.appendingPathComponent(maximumName))) == originalData,
+                "the full-length original entry must remain byte-for-byte unchanged")
+            expect(
+                (try? Data(contentsOf: imported.destinationURL)) == replacementData,
+                "the shortened unique destination must contain the new bytes")
+        }
+    }
+
+    suite(
+        "importAudioFile: an external symlink created after allocation remains untouched and forces the next suffix"
+    ) {
+        withTempDirectory { root in
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let packDirectory = userPacksDirectory.appendingPathComponent("my-pack")
+            let externalTarget = root.appendingPathComponent("external/keep-me.wav")
+            let externalBytes = Data("external-writer-bytes".utf8)
+            writeFixture(externalBytes, to: externalTarget)
+
+            // Start at -2 so the test hook places its link exactly after `lstat` selected
+            // the candidate. A plain `.atomic` rename would replace this link and land at
+            // chime-2.wav; exclusive publication must leave it intact and use chime-3.wav.
+            let originalDestination = packDirectory.appendingPathComponent("chime.wav")
+            let originalBytes = Data("already-bound-bytes".utf8)
+            writeFixture(originalBytes, to: originalDestination)
+            let occupier = OneShotSymlinkOccupier(targetURL: externalTarget)
+            var environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
+            environment.beforeExclusivePublish = { candidateURL in occupier.occupy(candidateURL) }
+
+            var newData = validWAVData()
+            newData.append(Data("new-import-bytes".utf8))
+            let sourceURL = root.appendingPathComponent("source/new.wav")
+            writeFixture(newData, to: sourceURL)
+            let outcome = importAudioFile(
+                sourceURL: sourceURL, suggestedFileName: "chime.wav", packID: "my-pack",
+                environment: environment)
+
+            guard case .success(let imported) = outcome else {
+                expect(false, "an externally occupied post-check candidate must retry, got \(outcome)")
+                return
+            }
+            let externallyCreatedLink = packDirectory.appendingPathComponent("chime-2.wav")
+            expect(
+                imported.fileName == "chime-3.wav",
+                "the post-lstat collision must force the next suffix, got \(imported.fileName)")
+            expect(
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: externallyCreatedLink.path))
+                    == externalTarget.path,
+                "the externally-created symlink must not be replaced")
+            expect(
+                (try? Data(contentsOf: externalTarget)) == externalBytes,
+                "the external symlink target must remain byte-for-byte unchanged")
+            expect(
+                (try? Data(contentsOf: originalDestination)) == originalBytes,
+                "the initially occupied filename must also remain unchanged")
+            expect(
+                (try? Data(contentsOf: imported.destinationURL)) == newData,
+                "only the newly allocated destination may receive imported bytes")
+        }
+    }
+
+    suite(
         "importAudioFile: a same-name import beside an in-pack symlink creates -2 and leaves the link and its target untouched"
     ) {
         withTempDirectory { root in
