@@ -8,11 +8,13 @@ import Foundation
 @MainActor
 private func makeEnvironment(
     userPacksDirectory: URL,
-    bundledPacksDirectory: URL? = nil
+    bundledPacksDirectory: URL? = nil,
+    factoryPacksDirectory: URL? = nil
 ) -> AudioImportEnvironment {
     AudioImportEnvironment(
         userPacksDirectory: userPacksDirectory,
         bundledPacksDirectory: bundledPacksDirectory,
+        factoryPacksDirectory: factoryPacksDirectory,
         durationProbe: StubDurationProbe(fixedDuration: 1.0),
         // 见 ``injectedPacksLock(under:)``。⚠️ 这一行的**理由在 e278736 之后变了**，别照抄旧说法：
         // 那之前 `packsLockFile` 有一个指向真实 `~/.claudio/packs.lock` 的默认值，漏掉它是**静默**
@@ -56,6 +58,160 @@ func runPackGallerySuites() {
                 cards.first?.presentEvents == Set(Event.allCases),
                 "every declared+present event must appear in presentEvents")
             expect(cards.first?.isSelected == true, "the card matching config.selectedPack must be isSelected")
+        }
+    }
+
+    // MARK: - PLAN-SOUND-MANAGER.md T13: factoryIntegrity（逐字节 CC0 背书）
+
+    suite("factoryIntegrity: clean built-in pack compares manifest and every declared file byte-for-byte") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("user-packs")
+            let factoryPacks = root.appendingPathComponent("factory-packs")
+            writeCompletePack(named: "minimal-chime", at: userPacks)
+            writeCompletePack(named: "minimal-chime", at: factoryPacks)
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, factoryPacksDirectory: factoryPacks)
+
+            expect(
+                factoryIntegrity(packID: "minimal-chime", environment: environment) == true,
+                "a clean built-in pack must match its factory copy")
+            let card = availablePacks(
+                config: ClaudioConfig(selectedPack: "minimal-chime"), environment: environment).first
+            expect(card?.factoryIntegrity == true, "availablePacks must cache the one factory result on the card")
+            expect(
+                packRowMetaSlots(
+                    isCC0: card?.isCC0 == true, state: card?.state ?? .broken(reason: "missing"),
+                    factoryIntegrity: card?.factoryIntegrity).license == .cc0,
+                "a clean built-in CC0 card must show CC0")
+        }
+    }
+
+    suite("factoryIntegrity: manifest bytes or a changed declared file marks the row modified") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("user-packs")
+            let factoryPacks = root.appendingPathComponent("factory-packs")
+            writeCompletePack(named: "minimal-chime", at: userPacks)
+            writeCompletePack(named: "minimal-chime", at: factoryPacks)
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, factoryPacksDirectory: factoryPacks)
+            let manifestURL = userPacks.appendingPathComponent("minimal-chime/manifest.json")
+            writeFixture(
+                #"{ "id": "minimal-chime", "name": "被改过", "license": "CC0-1.0", "events": { "stop": "stop.mp3", "stop_failure": "fail.mp3", "notification": "ping.mp3", "subagent_stop": "sub.mp3" } }"#,
+                to: manifestURL)
+
+            expect(
+                factoryIntegrity(packID: "minimal-chime", environment: environment) == false,
+                "a manifest byte change must fail factoryIntegrity")
+
+            writeCompletePack(named: "minimal-chime", at: userPacks)
+            let stopURL = userPacks.appendingPathComponent("minimal-chime/stop.mp3")
+            var changedBytes = (try? Data(contentsOf: stopURL)) ?? Data()
+            changedBytes.append(0x01)
+            writeFixture(changedBytes, to: stopURL)
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "minimal-chime"), environment: environment)
+            guard let card = cards.first else {
+                expect(false, "the modified built-in pack must still have a gallery card")
+                return
+            }
+            expect(card.factoryIntegrity == false, "a changed declared file must fail the cached result")
+            let slots = packRowMetaSlots(
+                isCC0: card.isCC0, state: card.state, factoryIntegrity: card.factoryIntegrity)
+            expect(slots.license == .modified, "a changed built-in row must show ⚠ 已修改")
+            expect(slots.license != .cc0, "⚠ 已修改 and CC0 must be mutually exclusive")
+        }
+    }
+
+    suite("factoryIntegrity: equal-size byte replacement is detected, not just a size change") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("user-packs")
+            let factoryPacks = root.appendingPathComponent("factory-packs")
+            writeCompletePack(named: "minimal-chime", at: userPacks)
+            writeCompletePack(named: "minimal-chime", at: factoryPacks)
+            let stopURL = userPacks.appendingPathComponent("minimal-chime/stop.mp3")
+            var equalSizeReplacement = (try? Data(contentsOf: stopURL)) ?? Data()
+            equalSizeReplacement[0] ^= 0x01
+            writeFixture(equalSizeReplacement, to: stopURL)
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, factoryPacksDirectory: factoryPacks)
+
+            expect(
+                equalSizeReplacement.count
+                    == ((try? Data(contentsOf: factoryPacks.appendingPathComponent("minimal-chime/stop.mp3")))?.count ?? -1),
+                "the fixture mutation must preserve file size")
+            expect(
+                factoryIntegrity(packID: "minimal-chime", environment: environment) == false,
+                "an equal-size byte replacement must fail factoryIntegrity")
+        }
+    }
+
+    suite("factoryIntegrity: non-built-in packs and nil factory roots do not produce a warning") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("user-packs")
+            let factoryPacks = root.appendingPathComponent("factory-packs")
+            writeCompletePack(named: "custom-pack", at: userPacks)
+            writeCompletePack(named: "minimal-chime", at: factoryPacks)
+            let withFactory = makeEnvironment(
+                userPacksDirectory: userPacks, factoryPacksDirectory: factoryPacks)
+            let customCard = availablePacks(
+                config: ClaudioConfig(selectedPack: "custom-pack"), environment: withFactory).first
+            expect(customCard?.factoryIntegrity == nil, "a non-built-in pack must not participate")
+            expect(
+                packRowMetaSlots(
+                    isCC0: customCard?.isCC0 == true, state: customCard?.state ?? .broken(reason: "missing"),
+                    factoryIntegrity: customCard?.factoryIntegrity).license == .cc0,
+                "a non-built-in CC0 pack must not be falsely marked modified")
+
+            let withoutFactory = makeEnvironment(userPacksDirectory: userPacks)
+            let devCard = availablePacks(
+                config: ClaudioConfig(selectedPack: "custom-pack"), environment: withoutFactory).first
+            expect(devCard?.factoryIntegrity == nil, "nil factoryPacksDirectory must degrade to not checked")
+            expect(
+                packRowMetaSlots(
+                    isCC0: devCard?.isCC0 == true, state: devCard?.state ?? .broken(reason: "missing"),
+                    factoryIntegrity: devCard?.factoryIntegrity).license != .modified,
+                "nil factoryPacksDirectory must never show ⚠ 已修改")
+        }
+    }
+
+    suite("factoryIntegrity: missing or non-regular declared files fail closed") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("user-packs")
+            let factoryPacks = root.appendingPathComponent("factory-packs")
+            writeCompletePack(named: "minimal-chime", at: userPacks)
+            writeCompletePack(named: "minimal-chime", at: factoryPacks)
+            let environment = makeEnvironment(
+                userPacksDirectory: userPacks, factoryPacksDirectory: factoryPacks)
+            let stopURL = userPacks.appendingPathComponent("minimal-chime/stop.mp3")
+
+            try? FileManager.default.removeItem(at: stopURL)
+            expect(
+                factoryIntegrity(packID: "minimal-chime", environment: environment) == false,
+                "a missing declared file must fail factoryIntegrity")
+
+            try? FileManager.default.createDirectory(at: stopURL, withIntermediateDirectories: true)
+            expect(
+                factoryIntegrity(packID: "minimal-chime", environment: environment) == false,
+                "a directory in place of a declared file must fail factoryIntegrity")
+        }
+    }
+
+    suite("factoryIntegrity: nil factory root is honest even for a built-in-shaped fixture id") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("user-packs")
+            writeCompletePack(named: "minimal-chime", at: userPacks)
+            let environment = makeEnvironment(userPacksDirectory: userPacks)
+            let card = availablePacks(
+                config: ClaudioConfig(selectedPack: "minimal-chime"), environment: environment).first
+
+            expect(card?.factoryIntegrity == nil, "without a factory root there is no bundle evidence")
+            expect(
+                packRowMetaSlots(
+                    isCC0: card?.isCC0 == true,
+                    state: card?.state ?? .broken(reason: "missing"),
+                    factoryIntegrity: card?.factoryIntegrity).license == .cc0,
+                "without a factory root a clean fixture must keep the existing CC0-positive behavior")
         }
     }
 

@@ -75,11 +75,8 @@ public enum PackRowLicenseBadge: Sendable, Equatable {
     case none
     /// ``PackCard/isCC0`` is `true` — renders the `"CC0"` badge.
     case cc0
-    // T13 (factoryIntegrity, PLAN-SOUND-MANAGER.md §2.4) will add a `.modified` case here for a
-    // pack whose bundled bytes were tampered with — driven by a bundle-byte comparison, not
-    // `isCC0` — since it's a negation of the license claim, not completeness information, it
-    // belongs on THIS axis. This enum is the reserved slot for that case; nothing else about
-    // ``packRowMetaSlots(isCC0:state:)``'s shape should need to change when T13 lands.
+    /// The installed built-in pack differs from its factory copy byte-for-byte.
+    case modified
 }
 
 /// One pack row's meta 槽, split into its two orthogonal sub-slots per DESIGN.md「包行四态」:
@@ -103,22 +100,31 @@ public struct PackRowMetaSlots: Sendable, Equatable {
     }
 }
 
-/// Resolves ``PackRowMetaSlots`` for one card's `isCC0` + ``PackCardState`` — see that type's
-/// doc comment. Exhaustive `switch` on `state`, no `default:`, mirroring
-/// ``packRowTrailingSlot(for:)`` exactly. `.broken` reports `(.none, nil)` regardless of
-/// `isCC0`: DESIGN.md is explicit that a `.broken` row's ENTIRE meta slot renders nothing (its
-/// one visible indicator lives in the trailing slot instead, see ``PackRowTrailingSlot``) — a
-/// broken pack's manifest may never even have been read far enough to know its license.
-public func packRowMetaSlots(isCC0: Bool, state: PackCardState) -> PackRowMetaSlots {
-    let license: PackRowLicenseBadge = isCC0 ? .cc0 : .none
+/// Resolves ``PackRowMetaSlots`` for one card's license/integrity facts + ``PackCardState`` —
+/// see that type's doc comment. `factoryIntegrity == nil` is an honest "not checked" result
+/// (non-built-in pack or a dev build without a factory directory), so it leaves the existing
+/// positive `CC0` badge behavior intact. A failed factory comparison takes precedence over the
+/// user-writable manifest's license field.
+public func packRowMetaSlots(
+    isCC0: Bool, state: PackCardState, factoryIntegrity: Bool? = nil
+) -> PackRowMetaSlots {
     switch state {
     case .complete:
-        return PackRowMetaSlots(license: license, missingCount: nil)
+        return PackRowMetaSlots(
+            license: licenseBadge(isCC0: isCC0, factoryIntegrity: factoryIntegrity),
+            missingCount: nil)
     case .partial(let present, let total):
-        return PackRowMetaSlots(license: license, missingCount: total - present)
+        return PackRowMetaSlots(
+            license: licenseBadge(isCC0: isCC0, factoryIntegrity: factoryIntegrity),
+            missingCount: total - present)
     case .broken:
         return PackRowMetaSlots(license: .none, missingCount: nil)
     }
+}
+
+private func licenseBadge(isCC0: Bool, factoryIntegrity: Bool?) -> PackRowLicenseBadge {
+    if factoryIntegrity == false { return .modified }
+    return isCC0 ? .cc0 : .none
 }
 
 /// One pack switching card — the read-only render model
@@ -138,6 +144,10 @@ public struct PackCard: Sendable, Equatable {
     /// this only ever drives a positive "CC0" badge, never a negative claim about
     /// non-CC0-licensed packs.
     public let isCC0: Bool
+    /// Factory-byte comparison for built-in packs. `nil` means this card did not participate
+    /// in the comparison: non-built-in packs and builds without `factoryPacksDirectory` are
+    /// intentionally not marked modified.
+    public let factoryIntegrity: Bool?
     /// Which of ``Event/allCases`` currently resolve to ``CoverageState/present(fileName:)``
     /// for this pack — reused verbatim from ``packCoverage(packID:config:environment:)``
     /// (T16), never recomputed independently.
@@ -153,6 +163,7 @@ public struct PackCard: Sendable, Equatable {
         id: String,
         name: String?,
         isCC0: Bool,
+        factoryIntegrity: Bool? = nil,
         presentEvents: Set<Event>,
         state: PackCardState,
         isSelected: Bool
@@ -160,10 +171,100 @@ public struct PackCard: Sendable, Equatable {
         self.id = id
         self.name = name
         self.isCC0 = isCC0
+        self.factoryIntegrity = factoryIntegrity
         self.presentEvents = presentEvents
         self.state = state
         self.isSelected = isSelected
     }
+}
+
+/// Compares an installed built-in pack with its factory copy byte-for-byte.
+///
+/// The result is `nil` when the pack is not in ``AudioImportEnvironment/builtinPackIDs`` or
+/// when no factory directory exists. That is the deliberate dev-build degradation: there is
+/// no bundle evidence, so the gallery must not invent a modified warning. A participating pack
+/// returns `false` for any missing/unreadable/different manifest or declared file.
+public func factoryIntegrity(packID: String, environment: AudioImportEnvironment) -> Bool? {
+    guard environment.builtinPackIDs.contains(packID) else { return nil }
+    guard
+        let currentDirectory = resolvePackDirectory(
+            id: packID,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory),
+        case .success(let currentManifestData) = loadPackManifestData(in: currentDirectory)
+    else {
+        return false
+    }
+    return factoryIntegrity(
+        packID: packID, environment: environment, currentDirectory: currentDirectory,
+        currentManifestData: currentManifestData)
+}
+
+private func factoryIntegrity(
+    packID: String,
+    environment: AudioImportEnvironment,
+    currentDirectory: URL?,
+    currentManifestData: Data?
+) -> Bool? {
+    guard environment.builtinPackIDs.contains(packID) else { return nil }
+    guard
+        let factoryRoot = environment.factoryPacksDirectory,
+        let currentDirectory,
+        let currentManifestData
+    else {
+        return false
+    }
+    let factoryDirectory = factoryRoot
+        .appendingPathComponent(packID, isDirectory: true)
+        .standardizedFileURL
+
+    guard case .success(let factoryManifestData) = loadPackManifestData(in: factoryDirectory) else {
+        return false
+    }
+    guard currentManifestData == factoryManifestData else { return false }
+    guard case .success(let factoryManifest) = loadPackManifest(in: factoryDirectory) else {
+        return false
+    }
+
+    for fileName in Set(factoryManifest.events.values) {
+        guard
+            let currentFile = safePackFileURL(fileName, in: currentDirectory),
+            let factoryFile = safePackFileURL(fileName, in: factoryDirectory),
+            sameRegularFileBytes(currentFile, factoryFile)
+        else {
+            return false
+        }
+    }
+    return true
+}
+
+/// Compares one installed file with its factory counterpart without an unbounded read.
+/// `currentFile` is user-writable, so the factory file's size is the only trustworthy bound:
+/// a modified current file that grows is rejected before its contents can be loaded. The actual
+/// read still goes through ``readRegularFileBounded(at:maxBytes:followSymlink:)``, which validates
+/// and reads the same open descriptor, rather than relying on a prior `stat` plus
+/// `Data(contentsOf:)`.
+private func sameRegularFileBytes(_ currentFile: URL, _ factoryFile: URL) -> Bool {
+    guard
+        regularFileExists(at: currentFile),
+        regularFileExists(at: factoryFile),
+        let factorySize = try? factoryFile.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+        let currentSize = try? currentFile.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+        factorySize >= 0,
+        currentSize == factorySize
+    else {
+        return false
+    }
+
+    guard
+        case .success(let currentBytes) = readRegularFileBounded(
+            at: currentFile, maxBytes: factorySize, followSymlink: true),
+        case .success(let factoryBytes) = readRegularFileBounded(
+            at: factoryFile, maxBytes: factorySize, followSymlink: true)
+    else {
+        return false
+    }
+    return currentBytes == factoryBytes
 }
 
 /// Enumerates every pack available for switching to — the user pack root **∪** the bundled
@@ -259,7 +360,11 @@ private func buildPackCard(
         // 目录都没有 → 四个事件全 `.unmapped`，present 集合必为空（这正是原来
         // `packCoverage(packID:)` 在同一情形下返回的东西，只是不必再为此白跑一趟 IO）。
         return PackCard(
-            id: id, name: nil, isCC0: false, presentEvents: [],
+            id: id, name: nil, isCC0: false,
+            factoryIntegrity: factoryIntegrity(
+                packID: id, environment: environment, currentDirectory: nil,
+                currentManifestData: nil),
+            presentEvents: [],
             state: .broken(reason: "声音包目录未找到"), isSelected: isSelected)
     }
 
@@ -268,7 +373,11 @@ private func buildPackCard(
     switch loadPackManifestData(in: packDirectory) {
     case .failure(let error):
         return PackCard(
-            id: id, name: nil, isCC0: false, presentEvents: [],
+            id: id, name: nil, isCC0: false,
+            factoryIntegrity: factoryIntegrity(
+                packID: id, environment: environment, currentDirectory: packDirectory,
+                currentManifestData: nil),
+            presentEvents: [],
             state: .broken(reason: error.reason), isSelected: isSelected)
     case .success(let data):
         manifestData = data
@@ -282,7 +391,11 @@ private func buildPackCard(
         manifest = try JSONDecoder().decode(PackManifest.self, from: manifestData)
     } catch {
         return PackCard(
-            id: id, name: nil, isCC0: false, presentEvents: [],
+            id: id, name: nil, isCC0: false,
+            factoryIntegrity: factoryIntegrity(
+                packID: id, environment: environment, currentDirectory: packDirectory,
+                currentManifestData: manifestData),
+            presentEvents: [],
             state: .broken(
                 reason: PackManifestLoadError.decodeFailed(reason: error.localizedDescription)
                     .reason),
@@ -292,10 +405,14 @@ private func buildPackCard(
     let presentEvents = presentEventSet(
         manifest: manifest, packDirectory: packDirectory, config: config)
     let (name, isCC0) = packMetadata(manifestData: manifestData)
+    let integrity = factoryIntegrity(
+        packID: id, environment: environment, currentDirectory: packDirectory,
+        currentManifestData: manifestData)
     let state = packCompletionState(presentEventCount: presentEvents.count)
 
     return PackCard(
-        id: id, name: name, isCC0: isCC0, presentEvents: presentEvents, state: state,
+        id: id, name: name, isCC0: isCC0, factoryIntegrity: integrity,
+        presentEvents: presentEvents, state: state,
         isSelected: isSelected)
 }
 

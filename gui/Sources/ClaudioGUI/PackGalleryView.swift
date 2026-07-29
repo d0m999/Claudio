@@ -176,15 +176,15 @@ private struct PackCardView: View {
     }
 
     /// Single source for both ``metaSlot`` (视觉) and ``accessibilityLabel`` (听觉) —
-    /// computed once so the two channels can never read `card.isCC0` independently and
-    /// drift apart (/codex review d6dafe8 P2: `accessibilityLabel` had been deriving its
-    /// suffix from `card.state` alone, so VoiceOver never spoke the CC0 badge this view renders).
+    /// computed once so the two channels cannot drift on either the CC0 badge or the
+    /// factory-integrity warning.
     private var metaSlots: PackRowMetaSlots {
-        packRowMetaSlots(isCC0: card.isCC0, state: card.state)
+        packRowMetaSlots(
+            isCC0: card.isCC0, state: card.state, factoryIntegrity: card.factoryIntegrity)
     }
 
     /// DESIGN.md「包行四态」meta 槽 content — two INDEPENDENT sub-slots
-    /// (``packRowMetaSlots(isCC0:state:)``, `ClaudioGUICore`, unit-tested by
+    /// (``packRowMetaSlots(isCC0:state:factoryIntegrity:)``, `ClaudioGUICore`, unit-tested by
     /// ``PackGallerySuite``): "`CC0` 与「缺 N 个」必须分居两个槽位（license 与完整度是两根
     /// **正交**的轴，一个格子塞不下两根轴）" — a CC0 `.partial` pack renders BOTH the `CC0`
     /// badge and the "缺 N 个" badge at once (T5, fixing a T4-inherited gap where a single
@@ -229,14 +229,16 @@ private struct PackCardView: View {
     /// `HStack` when absent — exactly like the pre-T5 `if slots.license == .cc0` did — rather than
     /// an unconditionally-called `@ViewBuilder` function, which would always occupy one subview
     /// slot (as an invisible-but-present `EmptyView`) and could shift ``HStack``'s `spacing` onto
-    /// the completeness badge for every non-CC0 row. This still fails to compile when T13 adds
-    /// `.modified`, forcing a decision here.
+    /// the completeness badge for every non-CC0 row. The `.modified` case is handled explicitly
+    /// below so a future license badge cannot silently disappear.
     private func licenseBadgeLabel(_ badge: PackRowLicenseBadge) -> String? {
         switch badge {
         case .none:
             return nil
         case .cc0:
             return "CC0"
+        case .modified:
+            return "⚠ 已修改"
         }
     }
 
@@ -282,7 +284,15 @@ private struct PackCardView: View {
     /// the spoken label can never diverge from what's rendered (/codex review d6dafe8 P2).
     private var accessibilityLabel: String {
         let name = card.name ?? card.id
-        let licenseSuffix = licenseBadgeLabel(metaSlots.license).map { "，\($0) 授权" } ?? ""
+        let licenseSuffix: String
+        switch metaSlots.license {
+        case .none:
+            licenseSuffix = ""
+        case .cc0:
+            licenseSuffix = "，CC0 授权"
+        case .modified:
+            licenseSuffix = "，⚠ 已修改"
+        }
         let stateSuffix: String
         switch card.state {
         case .complete: stateSuffix = ""
