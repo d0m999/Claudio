@@ -517,41 +517,88 @@ func runAudioImportSuites() {
         }
     }
 
-    suite("importAudioFile: re-dropping onto the same filename in an already-owned pack replaces it") {
+    suite(
+        "importAudioFile: a same-name import gets -2, preserves 中断了's bound bytes, and later collisions advance to -3"
+    ) {
         withTempDirectory { root in
             let userPacksDirectory = root.appendingPathComponent("packs")
             let environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
+            let packDirectory = userPacksDirectory.appendingPathComponent("my-pack", isDirectory: true)
 
-            let firstSource = root.appendingPathComponent("source/first.wav")
-            writeFixture(validWAVData(), to: firstSource)
-            let firstOutcome = importAudioFile(
-                sourceURL: firstSource, suggestedFileName: "chime.wav", packID: "my-pack",
-                environment: environment)
-            expect(
-                { if case .success = firstOutcome { return true } else { return false } }(),
-                "setup: the first import must succeed")
+            // This is the T14 user-visible failure shape: 中断了 already owns a.mp3. A
+            // later import for 干完了 has the same suggested filename but different bytes;
+            // it must get a new name instead of silently changing 中断了's sound.
+            var interruptedData = validWAVData()
+            interruptedData.append(Data("interrupted-event-original".utf8))
+            writeFixture(
+                #"{ "id": "my-pack", "events": { "stop_failure": "a.mp3" } }"#,
+                to: packDirectory.appendingPathComponent("manifest.json"))
+            writeFixture(interruptedData, to: packDirectory.appendingPathComponent("a.mp3"))
 
             var secondData = validWAVData()
             secondData.append(Data("second-version-marker".utf8))
             let secondSource = root.appendingPathComponent("source/second.wav")
             writeFixture(secondData, to: secondSource)
             let secondOutcome = importAudioFile(
-                sourceURL: secondSource, suggestedFileName: "chime.wav", packID: "my-pack",
+                sourceURL: secondSource, suggestedFileName: "a.mp3", packID: "my-pack",
                 environment: environment)
 
             guard case .success(let imported) = secondOutcome else {
-                expect(false, "expected the re-drop to succeed and replace the file, got \(secondOutcome)")
+                expect(false, "expected the same-name import to succeed with a unique name, got \(secondOutcome)")
                 return
             }
             expect(
+                imported.fileName == "a-2.mp3",
+                "a collision with a.mp3 must use the independent next name a-2.mp3, got \(imported.fileName)"
+            )
+            expect(
+                (try? Data(contentsOf: packDirectory.appendingPathComponent("a.mp3"))) == interruptedData,
+                "中断了's pre-existing a.mp3 bytes must remain byte-for-byte unchanged"
+            )
+            expect(
                 (try? Data(contentsOf: imported.destinationURL)) == secondData,
-                "re-dropping the same filename must replace the previous file's contents, not append/fail"
+                "the new same-name import must write its bytes only to a-2.mp3"
+            )
+            expect(
+                { if case .success = bindEventToManifest(
+                    event: .stop, fileName: imported.fileName, packID: "my-pack", environment: environment)
+                { return true } else { return false } }(),
+                "干完了 must be able to bind the distinct a-2.mp3 result"
+            )
+
+            var thirdData = validWAVData()
+            thirdData.append(Data("third-version-marker".utf8))
+            let thirdSource = root.appendingPathComponent("source/third.wav")
+            writeFixture(thirdData, to: thirdSource)
+            let thirdOutcome = importAudioFile(
+                sourceURL: thirdSource, suggestedFileName: "a.mp3", packID: "my-pack",
+                environment: environment)
+
+            guard case .success(let thirdImported) = thirdOutcome else {
+                expect(false, "expected a second collision to advance to a-3.mp3, got \(thirdOutcome)")
+                return
+            }
+            expect(
+                thirdImported.fileName == "a-3.mp3",
+                "a collision with both a.mp3 and a-2.mp3 must advance to a-3.mp3, got \(thirdImported.fileName)"
+            )
+            expect(
+                (try? Data(contentsOf: packDirectory.appendingPathComponent("a.mp3"))) == interruptedData,
+                "later collisions must still never modify 中断了's bound a.mp3 bytes"
+            )
+            expect(
+                (try? Data(contentsOf: packDirectory.appendingPathComponent("a-2.mp3"))) == secondData,
+                "later collisions must leave the first distinct import's a-2.mp3 bytes untouched"
+            )
+            expect(
+                (try? Data(contentsOf: thirdImported.destinationURL)) == thirdData,
+                "a-3.mp3 must contain only the third import's bytes"
             )
         }
     }
 
     suite(
-        "importAudioFile: re-dropping onto a filename that is currently an in-pack symlink replaces the link itself, never writes through it"
+        "importAudioFile: a same-name import beside an in-pack symlink creates -2 and leaves the link and its target untouched"
     ) {
         withTempDirectory { root in
             let userPacksDirectory = root.appendingPathComponent("packs")
@@ -561,8 +608,9 @@ func runAudioImportSuites() {
             // A symlink *inside* the pack directory pointing at another file also inside
             // the pack directory is lexically/really contained (unlike the escaping-
             // symlink case above), so `safePackFileURL` lets it through as a valid
-            // destination — the write step itself must still not clobber whatever it
-            // points to.
+            // destination. T14 treats even this occupied directory entry as a collision:
+            // the import must allocate chime-2.wav without replacing the link or writing
+            // through it to its target.
             let otherRealFile = packDirectory.appendingPathComponent("other-real.wav")
             let otherOriginalData = validWAVData()
             writeFixture(otherOriginalData, to: otherRealFile)
@@ -580,20 +628,72 @@ func runAudioImportSuites() {
                 environment: environment)
 
             guard case .success(let imported) = outcome else {
-                expect(false, "expected the re-drop over an in-pack symlink to succeed, got \(outcome)")
+                expect(false, "expected the collision beside an in-pack symlink to succeed, got \(outcome)")
                 return
             }
             expect(
-                (try? FileManager.default.destinationOfSymbolicLink(atPath: imported.destinationURL.path))
-                    == nil,
-                "the destination must become a REAL file, not remain/stay a symlink")
+                imported.fileName == "chime-2.wav",
+                "an occupied symlink entry must reserve chime.wav and allocate chime-2.wav, got \(imported.fileName)"
+            )
+            expect(
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: packDirectory
+                    .appendingPathComponent("chime.wav").path)) != nil,
+                "the original chime.wav directory entry must remain a symlink"
+            )
             expect(
                 (try? Data(contentsOf: imported.destinationURL)) == newData,
-                "the destination must contain the newly-imported bytes")
+                "the unique chime-2.wav destination must contain the newly-imported bytes")
             expect(
                 (try? Data(contentsOf: otherRealFile)) == otherOriginalData,
-                "the file the old symlink pointed to must be untouched — the import must replace the"
-                    + " directory entry, never write through the old symlink to its target")
+                "the symlink target must be untouched — the import must not write through or replace the old link")
+        }
+    }
+
+    suite(
+        "importAudioFile: a same-name import beside a dangling in-pack symlink creates -2 and preserves the dangling link"
+    ) {
+        withTempDirectory { root in
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            let packDirectory = userPacksDirectory.appendingPathComponent(
+                "my-pack", isDirectory: true)
+            let danglingLink = packDirectory.appendingPathComponent("chime.wav")
+            let missingTarget = packDirectory.appendingPathComponent("missing-target.wav")
+
+            // `FileManager.fileExists` follows links and reports this as absent. T14 must
+            // use lstat semantics instead: the directory entry still exists and must never
+            // be atomically replaced merely because its target is currently missing.
+            createSymlink(at: danglingLink, pointingTo: missingTarget)
+
+            var newData = validWAVData()
+            newData.append(Data("dangling-link-collision".utf8))
+            let newSource = root.appendingPathComponent("source/new.wav")
+            writeFixture(newData, to: newSource)
+
+            let environment = makeAudioImportEnvironment(userPacksDirectory: userPacksDirectory)
+            let outcome = importAudioFile(
+                sourceURL: newSource, suggestedFileName: "chime.wav", packID: "my-pack",
+                environment: environment)
+
+            guard case .success(let imported) = outcome else {
+                expect(false, "expected the collision beside a dangling symlink to succeed, got \(outcome)")
+                return
+            }
+            expect(
+                imported.fileName == "chime-2.wav",
+                "a dangling symlink must reserve chime.wav and allocate chime-2.wav, got \(imported.fileName)"
+            )
+            expect(
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: danglingLink.path))
+                    == missingTarget.path,
+                "the original chime.wav directory entry must remain the same dangling symlink"
+            )
+            expect(
+                !FileManager.default.fileExists(atPath: missingTarget.path),
+                "the dangling symlink's absent target must remain absent; import must not write through it"
+            )
+            expect(
+                (try? Data(contentsOf: imported.destinationURL)) == newData,
+                "the unique chime-2.wav destination must contain the imported bytes")
         }
     }
 

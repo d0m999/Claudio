@@ -216,18 +216,17 @@ public func importAudioFile(
     // it's been read).
     //
     // `.atomic` writes to a temp file in the destination directory, then `rename(2)`s it
-    // into place: verified empirically this replaces whatever directory entry currently
-    // sits at `destinationURL` — a prior regular file, a dangling symlink, or even a
-    // symlink pointing at a real file elsewhere — by repointing the directory entry
-    // itself, without ever opening/truncating/writing through an existing symlink's
-    // target. A re-drop onto the same filename inside the caller's own already-
-    // user-owned pack directory therefore safely replaces the previous file — the
-    // expected "re-bind this event's sound" flow (re-dragging a new file onto the same
-    // row) — distinct from the built-in-collision case already rejected in step 2 above
-    // (which blocks the *first* write into a still-purely-built-in pack id, not a second
-    // write into a pack the user already owns). An interrupted/failed write leaves the
-    // previous file (or nothing) in place, never a truncated half-written one, since the
-    // rename is the only step that ever touches the real destination path.
+    // into place. It is therefore safe only after we have allocated a path with no existing
+    // directory entry: an atomic write *would* replace a regular file, a dangling symlink,
+    // or a symlink pointing at a real file elsewhere. T14 makes that replacement path
+    // unreachable for imports. Every occupied name is reserved — including symlinks, which
+    // `lstat` observes without following — and the incoming file receives `-2`, `-3`, and
+    // so on before its extension. This is what keeps a later "选文件…" on one event from
+    // silently changing the bytes another event already references.
+    //
+    // An interrupted/failed write leaves the chosen unique path (or nothing) in place,
+    // never a truncated half-written one, since the rename is the only step that touches
+    // that newly allocated path.
     //
     // The create-directory + write pair runs inside `environment.packsLockFile` —
     // `bindEventToManifest`/`clearEventBinding`'s and `performFirstRunSetup`'s critical
@@ -239,12 +238,28 @@ public func importAudioFile(
     // contention maps to `.lockBusy` (nothing on disk changes, retry is the whole remedy —
     // never folded into `.success`, or a "设置声音" tap would silently do nothing), a real
     // acquisition failure to `.lockFailed(errno:)` (never reported as "just busy").
+    var persistedDestinationURL: URL?
     let persistOutcome = withNonBlockingLock(path: environment.packsLockFile.path) {
         () -> AudioImportOutcome? in
         do {
             try fileManager.createDirectory(
                 at: userPackDirectory, withIntermediateDirectories: true)
-            try data.write(to: destinationURL, options: .atomic)
+            let uniqueDestinationURL: URL
+            switch allocateUniqueDestinationURL(
+                requestedFileName: suggestedFileName, in: userPackDirectory)
+            {
+            case .available(let url):
+                uniqueDestinationURL = url
+            case .unsafeCandidate:
+                return .rejected(.copyFailed(reason: "无法生成安全的唯一文件名"))
+            case .inspectionFailed(let errno):
+                return .rejected(
+                    .copyFailed(reason: "无法检查目标文件名是否已存在（errno: \(errno)）"))
+            case .exhausted:
+                return .rejected(.copyFailed(reason: "无法生成唯一文件名"))
+            }
+            try data.write(to: uniqueDestinationURL, options: .atomic)
+            persistedDestinationURL = uniqueDestinationURL
             return nil
         } catch {
             return .rejected(.copyFailed(reason: error.localizedDescription))
@@ -259,17 +274,98 @@ public func importAudioFile(
         return .rejected(.lockFailed(errno: errno))
     }
 
+    guard let persistedDestinationURL else {
+        return .rejected(.copyFailed(reason: "导入没有生成目标文件"))
+    }
+
     return .success(
         ImportedAudioFile(
             packID: packID,
-            destinationURL: destinationURL,
-            fileName: destinationURL.lastPathComponent,
+            destinationURL: persistedDestinationURL,
+            fileName: persistedDestinationURL.lastPathComponent,
             format: format,
             // The exact byte count read in step 3 and persisted in step 6 — more accurate
             // than the pre-read `fstat` size (which a mid-read grow could have made stale).
             fileSizeBytes: data.count,
             duration: duration
         ))
+}
+
+// MARK: - Collision-free destination allocation
+
+/// A safe pack-relative destination chosen for one import, or the precise reason it could not
+/// be allocated. This is deliberately private: callers observe the chosen path only through
+/// ``ImportedAudioFile`` after its bytes have been atomically persisted there.
+private enum UniqueDestinationAllocation {
+    case available(URL)
+    case unsafeCandidate
+    case inspectionFailed(errno: Int32)
+    case exhausted
+}
+
+/// Allocates the first unoccupied filename for `requestedFileName`: the original name, then
+/// `stem-2.ext`, `stem-3.ext`, and so on. It must run while `packsLockFile` is held so the
+/// existence check and the eventual atomic write are one serial operation with every other
+/// Claudio pack writer. The product does not impose a collision-count limit in T14; orphan
+/// cleanup/reuse policy is explicitly deferred to T11/P3.
+///
+/// `lstat` is essential here rather than `FileManager.fileExists`: the latter says a dangling
+/// symlink is absent, which would let `.atomic` replace that directory entry. `lstat` reports
+/// every extant entry without following a symlink, so both a real file and any link reserve the
+/// filename. A candidate is passed back through `safePackFileURL` only after `lstat` proves it
+/// absent, keeping the audited lexical and real-path containment check at the allocation point.
+private func allocateUniqueDestinationURL(
+    requestedFileName: String,
+    in packDirectory: URL
+) -> UniqueDestinationAllocation {
+    let fileName = (requestedFileName as NSString).lastPathComponent
+    let directoryPrefix = (requestedFileName as NSString).deletingLastPathComponent
+    let pathExtension = (fileName as NSString).pathExtension
+    let stem = (fileName as NSString).deletingPathExtension
+
+    var suffix: Int? = nil
+    while true {
+        let candidateFileName: String
+        if let suffix {
+            candidateFileName =
+                pathExtension.isEmpty
+                ? "\(stem)-\(suffix)"
+                : "\(stem)-\(suffix).\(pathExtension)"
+        } else {
+            candidateFileName = fileName
+        }
+        let candidateRelativeName =
+            directoryPrefix == "."
+            ? candidateFileName
+            : (directoryPrefix as NSString).appendingPathComponent(candidateFileName)
+        let uncheckedCandidate = packDirectory.appendingPathComponent(candidateRelativeName)
+
+        var status = stat()
+        var lstatErrno: Int32 = 0
+        let directoryEntryExists = uncheckedCandidate.withUnsafeFileSystemRepresentation {
+            pathPointer -> Bool in
+            guard let pathPointer else {
+                lstatErrno = EINVAL
+                return false
+            }
+            let result = lstat(pathPointer, &status)
+            if result != 0 { lstatErrno = errno }
+            return result == 0
+        }
+
+        if directoryEntryExists {
+            guard suffix != Int.max else { return .exhausted }
+            suffix = (suffix ?? 1) + 1
+            continue
+        }
+        guard lstatErrno == ENOENT else {
+            return .inspectionFailed(errno: lstatErrno)
+        }
+        guard let safeCandidate = safePackFileURL(candidateRelativeName, in: packDirectory) else {
+            return .unsafeCandidate
+        }
+        return .available(safeCandidate)
+    }
 }
 
 // MARK: - Bound source read
