@@ -2481,6 +2481,44 @@ func runViewWiringSuites() {
                 + " 之后才会显示新状态")
     }
 
+    suite("T10：CoverageTrack 的 missing 空壳与斜杠都接 text-2，且真实行底仍是 surface-2") {
+        // ContrastSuite 的四对数学断言只能证明「这些 hex 配在一起能过 ≥3:1」，看不见不可 import 的
+        // ClaudioGUI 视图到底用了哪一个 token。少了这半，真把 missing 改回 muted `#6F665B`
+        // （暗色对 surface-2 只有 2.77:1）时，那四条会继续全绿——断言措辞就比覆盖范围大。
+        guard
+            let source = codeWithoutStrings("gui/Sources/ClaudioGUI/PackGalleryView.swift"),
+            let packCardBody = closureBody(after: "private struct PackCardView: View", in: source),
+            let slotBody = closureBody(
+                after: "private func slot(isPresent: Bool, color: Color) -> some View",
+                in: source)
+        else {
+            expect(
+                false,
+                "读不到 PackGalleryView.swift，或切不出 PackCardView / CoverageTrack.slot —— "
+                    + "T10 接线无从判起")
+            return
+        }
+        let flatSlot = collapsingWhitespace(slotBody)
+        expect(
+            whitespaceTolerantHitCount(
+                of: ".strokeBorder(ClaudioColor.textSecondary(colorScheme), lineWidth: 1)",
+                in: slotBody) == 1,
+            "CoverageTrack missing 的空槽描边必须接 text-2；改回 muted 会让暗色掉到 2.77:1。"
+                + "slot 实际是：\(flatSlot)")
+        expect(
+            whitespaceTolerantHitCount(
+                of: ".stroke(ClaudioColor.textSecondary(colorScheme), lineWidth: 1)",
+                in: slotBody) == 1,
+            "CoverageTrack missing 的斜杠必须与空槽同接 text-2；只修描边、不修斜杠仍是半个违规。"
+                + "slot 实际是：\(flatSlot)")
+        expect(
+            whitespaceTolerantHitCount(
+                of: ".fill(ClaudioColor.surface2(colorScheme))",
+                in: packCardBody) == 1,
+            "ContrastSuite 量的是覆盖轨对 surface-2；PackCardView 的真实行底若换了 token，必须同步"
+                + "重做四对数学断言，不能让旧底的绿灯冒充真实渲染路径")
+    }
+
     suite("EventRowView：禁用的试听 ▶ 不会被无障碍合并抢播 —— PLAN-SOUND-MANAGER.md §2.5 第 7 条 ②") {
         // structural check，理由同本文件头部：EventRowView 住在不可 import 的 ClaudioGUI
         // executableTarget，够不着行为级测试，只能读它的源码结构。字符串级契约（① / ③）已经

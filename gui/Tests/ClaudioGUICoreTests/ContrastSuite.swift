@@ -177,6 +177,49 @@ func runContrastSuites() {
         }
     }
 
+    // MARK: - 4-slot 覆盖轨：present / missing × 明 / 暗各一对（PLAN-SOUND-MANAGER T10）
+    //
+    // 这四条**刻意以覆盖轨自己的名字重断一次**，不是拿上面旧 2×2 网格的断言冒充新组件的覆盖：
+    //
+    // - `present` 是事件色实心胶囊；逐个事件里最弱的一对，亮色是 Notification、暗色是
+    //   SubagentStop（DESIGN.md「4-slot 覆盖轨」实测 3.97 / 3.09）；
+    // - `missing` 是 `text-2` 的 1px 空壳 + 斜杠；亮 / 暗分别是 5.54 / 7.03。
+    //
+    // 四对的真实底都是 PackCardView 的 `surface-2`。`ClaudioGUI` 是不可 import 的 executable
+    // target，所以这组保持纯 hex 数学；生产视图确实把这几个 token 接到 CoverageTrack 上的另一半，
+    // 由 ViewWiringSuite 的 T10 绊线钉住。两半缺一不可：只有这里会漏掉「描边改回 muted」的接线回归，
+    // 只有源码绊线又证明不了 token 本身真的过 ≥3:1。
+    func assertCoverageTrackContrast(
+        _ name: String,
+        foreground: String,
+        background: String
+    ) {
+        let ratio = contrastRatio(foreground, background)
+        suite("contrast: 4-slot 覆盖轨 \(name) vs surface-2 is ≥ 3:1 (DESIGN.md「4-slot 覆盖轨」)") {
+            expect(
+                ratio >= 3.0,
+                "4-slot 覆盖轨 \(name) must be ≥ 3:1, got \(ratio) — missing 必须用 text-2，"
+                    + "present 必须取该主题最弱事件色（WCAG 1.4.11 non-text）")
+        }
+    }
+
+    assertCoverageTrackContrast(
+        "present dark（最弱 SubagentStop）",
+        foreground: ClaudioColorHex.subagentStopDark,
+        background: ClaudioColorHex.surface2Dark)
+    assertCoverageTrackContrast(
+        "present light（最弱 Notification）",
+        foreground: ClaudioColorHex.notificationLight,
+        background: ClaudioColorHex.surface2Light)
+    assertCoverageTrackContrast(
+        "missing dark（text-2 描边 + 斜杠）",
+        foreground: ClaudioColorHex.text2Dark,
+        background: ClaudioColorHex.surface2Dark)
+    assertCoverageTrackContrast(
+        "missing light（text-2 描边 + 斜杠）",
+        foreground: ClaudioColorHex.text2Light,
+        background: ClaudioColorHex.surface2Light)
+
     // MARK: - 真红**不得**当正文用：这是上面那组断言在守的契约，这里把它写成可读的、会说话的一条
     //
     // 不是「期望它失败」的诡异断言——它断言的是一个事实：真红亮色**够不到**正文门槛。任何人想把
