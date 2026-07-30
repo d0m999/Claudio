@@ -35,8 +35,9 @@ public struct PanelAnnouncementFacts: Sendable, Equatable {
     /// oracle，也就不会有第二个会各自漂移的答案（而 `outcomeHasBeenSeen` 的诞生判据押的正是同一个事实）。
     public let panelIsVisible: Bool
 
-    /// 视图侧那半句（`PanelView.headerAccessibilityLabel`）。它依赖 `packCards` / `config` 两个只活在视图里
-    /// 的 `@State`，所以它以**数据**身份传进来 —— 政策一个字都没留在 SwiftUI 里。
+    /// 视图侧那半句（`PanelView.headerAccessibilityLabel`）。其中当前包名来自独立于显示集的
+    /// `PanelConfigController.selectedPackMetadata`；这里仍以**数据**身份接收整句 header，
+    /// 政策一个字都没留在 SwiftUI 里。
     public let header: String
 
     public init(

@@ -42,6 +42,10 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var config: ClaudioConfig
     @Published public private(set) var eventRows: [EventRow]
     @Published public private(set) var packCards: [PackCard]
+    /// The current pack's title/header metadata, loaded from that pack itself — never inferred
+    /// from ``packCards``. The display set may legally omit the selected pack once starred-only
+    /// filtering is active, while the event-section title remains its only guaranteed visible name.
+    @Published public private(set) var selectedPackMetadata: SelectedPackMetadata
     /// 上一次**失败**的切包（`nil` 表示还没失败过 / 上一次成功已清）——镜像 ``EventMuteController/lastError``
     /// 的形状（静音那一半的失败就住在那里）。绝不静默吞错：切包失败必须如实上报，不能像旧代码那样
     /// `if case .success = result { … }` 把 error 整个丢掉。
@@ -100,6 +104,8 @@ public final class PanelConfigController: ObservableObject {
         self.eventRows = packCoverage(
             packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
         self.packCards = availablePacks(config: loadedConfig, environment: environment)
+        self.selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
+            packID: loadedConfig.selectedPack, environment: environment)
         self.packSwitchError = nil
         self.muteError = nil
         self.masterVolumeError = nil
@@ -192,8 +198,10 @@ public final class PanelConfigController: ObservableObject {
     }
 
     /// **只重读 config 读模型**（``PanelRefreshRoute/configOnly``）：重读 `config.json` → 重算 `configState`
-    /// / `config` → 按新 config 重算每行的 `enabled` 位。**不**重扫包根、**不**读 manifest、**不**调
-    /// `afterFullReload`。代价 = 一次文件读 + 一次目录 stat。
+    /// / `config` → 按新 config 重算每行的 `enabled` 位。**不**重扫包根、正常写（selected_pack
+    /// 未变）**不**读 manifest、**不**调 `afterFullReload`。若外部写者同时换了 selected_pack，
+    /// 只为独立的 ``selectedPackMetadata`` 读新选中包 manifest 一次，避免 header/事件标题留在旧包。
+    /// 正常路径代价 = 一次文件读 + 一次目录 stat。
     ///
     /// 两条路共用它，因为要做的事一模一样：
     ///
@@ -208,9 +216,18 @@ public final class PanelConfigController: ObservableObject {
     /// ⚠️ 改名自 `reloadEnabledFlags()`：那个名字在**低报**它做的事 —— 它从第一天起就在重算 `configState`
     /// （下面第一行），只是没人注意到，于是没人想到「失败路径也可以用它」。
     public func reloadConfigOnly() {
+        let previousSelectedPack = config.selectedPack
         let reloaded = loadPanelConfig(from: configFile)
         configState = reloaded
         config = reloaded.resolvedConfig
+        // Normal mute/master-volume writes keep selected_pack unchanged, so the lightweight path
+        // still performs zero manifest reads. If an external writer changed selected_pack between
+        // our write attempt and this reread, refresh the independent title metadata once instead
+        // of letting header/event title describe the old pack.
+        if config.selectedPack != previousSelectedPack {
+            selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
+                packID: config.selectedPack, environment: environment)
+        }
         eventRows = eventRows.map { row in
             EventRow(event: row.event, coverage: row.coverage, enabled: config.isEnabled(row.event))
         }
@@ -224,5 +241,7 @@ public final class PanelConfigController: ObservableObject {
         eventRows = packCoverage(
             packID: config.selectedPack, config: config, environment: environment)
         packCards = availablePacks(config: config, environment: environment)
+        selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
+            packID: config.selectedPack, environment: environment)
     }
 }

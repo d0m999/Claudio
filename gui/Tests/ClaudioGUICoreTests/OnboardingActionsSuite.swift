@@ -1542,15 +1542,14 @@ func runOnboardingActionsFixSuites() {
 
         let operational = panelFocusOrder(
             .operational(events: [], packCardIDs: [], hasDetailToggle: true, hasMasterVolume: true))
-        // hasMasterVolume: true —— 这条测试关心的是 revealDetail/disconnect 的相对顺序，跟主音量
-        // 无关，显式给 true 只是让这个 fixture 继续代表「滑块真的渲染在屏幕上」那一半（`/codex
+        // hasMasterVolume: true —— 这条测试关心的是 manageSounds/revealDetail/disconnect 的相对顺序，
+        // 跟主音量无关，显式给 true 只是让这个 fixture 继续代表「滑块真的渲染在屏幕上」那一半（`/codex
         // review` P1 修复后，.masterVolume 不再是 .operational scope 里的恒定行为，见
         // PanelFocusOrderSuite 对 hasMasterVolume: false 那一半的测试）。零事件行只是 fixture，
-        // 生产恒 4 行。（cc59d52 / PLAN-SOUND-MANAGER T1 删掉 `.dropZone` 后，滑块之后直接是
-        // revealDetail/disconnect。）
+        // 生产恒 4 行。T7 的管理钮在包列表后无条件渲染，失败行仍位于最终的断开连接之上。
         expect(
-            operational == [.masterVolume, .revealDetail, .disconnect],
-            "运行态：失败行在「断开连接」之上。得到 \(operational)")
+            operational == [.masterVolume, .manageSounds, .revealDetail, .disconnect],
+            "运行态：管理声音包与失败行都在「断开连接」之上。得到 \(operational)")
 
         let withoutToggle = panelFocusOrder(
             .operational(events: [], packCardIDs: [], hasDetailToggle: false, hasMasterVolume: true))

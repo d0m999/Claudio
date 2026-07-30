@@ -1521,7 +1521,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 **Why:** `PanelView` 那段 `.onChange(of: actionState)` 的注释白纸黑字说这次改动就是为了「没人把焦点接走的话，键盘用户按完空格就无处可去了」—— 而实现出来的结果正是「无处可去」。测试也把这个行为钉成了断言（`panelFirstFocusTarget(scope, ctaOperable: false) == nil`），而那条断言的失败文案写着「caret 必须有人接管，而不是悬在那儿」。
 
-**但这不是一个纯 bug**：in-flight 期间那张卡上**确实没有任何可操作的东西**，把光标指向一颗禁用的按钮同样是撒谎。这是一个真实的产品取舍（① 保持焦点不动，让它停在那颗已禁用但仍在屏幕上的按钮上，AppKit 的 key loop 会自己跳过 disabled view；② 让正在跑的那颗按钮保持可聚焦但不可激活，配 `.accessibilityValue("正在接管…")`；③ 把焦点交给面板容器）。需要拍板，不该由评审代劳。**运行态面板**曾靠无条件的 `.dropZone` 永不返回 nil，但那个幽灵已随 T1（cc59d52）/26bba37 删除；运行态 scope 现在也可能为 nil（in-flight 且零行零卡的 `.needsPack` 空态），只是 `.malformed`/`.unwritable` 已由 `.configReveal` 兜底恒非 nil（26bba37 follow-up，`/codex review` P1），`.needsPack` 空态待 T7 的 `.manageSounds`。本条 onboarding in-flight 取舍与它们独立。
+**但这不是一个纯 bug**：in-flight 期间那张卡上**确实没有任何可操作的东西**，把光标指向一颗禁用的按钮同样是撒谎。这是一个真实的产品取舍（① 保持焦点不动，让它停在那颗已禁用但仍在屏幕上的按钮上，AppKit 的 key loop 会自己跳过 disabled view；② 让正在跑的那颗按钮保持可聚焦但不可激活，配 `.accessibilityValue("正在接管…")`；③ 把焦点交给面板容器）。需要拍板，不该由评审代劳。**运行态面板**已由 T7 的 `.manageSounds` 接过无条件锚点：它在四种 configState 恒渲染且 in-flight 恒可操作，零行零卡的 `.needsPack` 也返回 `.manageSounds`；`.malformed`/`.unwritable` 则仍由视觉更靠前的 `.configReveal` 领焦点。运行态因此重新保证非 nil，本条只讨论 onboarding 卡，二者独立。
 
 **Context:** 2026-07-12 T17c（Swift 专项 + 设计专项独立指出）。T17c 已修掉相邻的注释腐烂（`panelFirstFocusTarget` 的 doc 此前写着「Returns nil only for a genuinely empty order」，那句话在 `ctaOperable` 落地那一刻就是假的）。
 
@@ -1589,21 +1589,22 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 ### 面板句里的 `header` 在 async **外**捕获，其余三个事实在 async **内**重读 —— 一个陈旧的 header 拼得到一个崭新的 state 上
 
-**What:** `PanelAnnouncementFacts` 的文档白纸黑字写着：`state` 由 view-model 供给，**视图不碰**，「也就不会有第二个会漂移的答案」。但 `header` 仍是视图算的，而 `PanelView.headerAccessibilityLabel` 自己**又分了一次 `state == .installed`**：
+**What:** `PanelAnnouncementFacts` 的 `state` 由 view-model 供给，但 `header` 仍在视图侧先算成字符串；`PanelView.headerAccessibilityLabel` 自己**又分了一次 `state == .installed`**：
 
 ```swift
 private var headerAccessibilityLabel: String {
-    guard onboardingViewModel.state == .installed else { return "Claudio 面板" }   // ← 第二个 oracle
-    let packName = packCards.first(where: \.isSelected)?.name ?? config.selectedPack  // ← 滞后的 @State
-    return "Claudio 面板，当前声音包 \(packName)"
+    guard onboardingViewModel.state == .installed else { return PanelHeader.baseLabel }  // ← 第二个 oracle
+    let packName = selectedPackDisplayName  // ← T7：来自 panelModel.selectedPackMetadata，不依赖显示集
+    guard !packName.isEmpty else { return PanelHeader.baseLabel }
+    return "\(PanelHeader.baseLabel)，当前声音包 \(packName)"
 }
 ```
 
-于是「这是哪一屏」有**两个**答案：模型侧的 `state`（`panelSentence` 用它），和视图侧这一支（over `packCards` / `config` 两个只在 `refresh()` 时才追上的 `@State`）。
+于是「这是哪一屏」仍有**两个**答案：模型侧的 `state`（`panelSentence` 用它），和视图侧这一支。T7 已把包名读数从 `packCards` 显示集拆成 `PanelConfigController.selectedPackMetadata`，也补了空 id 回退；它修掉的是「当前包被星标过滤后 header 退化」和「空包名念半句」，**没有**改变 header 在 async 外先捕获的时序。
 
-**Why:** 今天两者**一致** —— T17h′ 补上了 `.onChange(of: actionState)` 里那句 `refresh()`，于是三个会用到 header 的 `say()` 调用点全都排在 `refresh()` 之后（`ViewWiringSuite` 有顺序断言钉着）。但这条一致性靠的是**一条文本绊线**，不是类型。`ClaudioGUI` 是 `@main` executableTarget，harness **一行都 import 不到**，所以 `headerAccessibilityLabel` 这个函数本身**从来没有被任何一个 check 执行过** —— 包括「首次运行时 `config.selectedPack` 回落成 `""`，包名会念成一片空白」这一格。而 `PanelAnnouncementSuite` 给每个时刻喂的都是同一个常量 `H`，所以政策的全矩阵结构上**看不见** header 这一维的任何毛病。
+**Why:** T17h′ 只保证三个 `say()` 调用点在**捕获时刻**先 `reload()`；T7 又用值级测试钉住 `selectedPackMetadata` 的真名/空值规则，并用 `ViewWiringSuite` 钉 header 与事件标题同源。但 `ClaudioGUI` 仍是 `@main` executableTarget，harness 无法行为级执行 `headerAccessibilityLabel`；更关键的是，捕获与 post 分属两趟，磁盘动作的 MainActor 续体仍可能落在它们之间。下面 2026-07-12 的时序论证仍成立，只有其中「包名来自 `packCards` / `config @State`」的旧数据源描述已被 T7 淘汰。
 
-**Context:** 2026-07-12 T17h（`/codex review a3c2d08` 修复期间，本地 + 一次 34-agent 对抗验证双双指出）。修法：**把 `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model**。三件事一次到位：① header 变成一个**模型事实**，第二个 oracle 消失（`panelSentence` 独占那次分支）；② harness 第一次能测它（包括空包名那一格）；③ `say(_:)` 可以在 post 的那一趟**重算** header 而不是捕获它。~~今天做不到，因为 `DispatchQueue.main.async` 的闭包是 `@Sendable` 的、捕不到 `self`（`PanelView` 带着 `@State`，不是 `Sendable`）~~ —— **这句话是假的，2026-07-12 实测推翻**（见下方更新）：`View` 协议是 `@MainActor` 的，`PanelView` 因而隐式 `Sendable`，闭包捕得到 `self`（它今天已经捕了 `announcer` / `coordinator` / `viewModel`）。就地重算 Swift 6 语言模式下编得过。不选它的真实理由是**语义**而非编译器（在 update pass 之外读视图 `@State` 无文档保证），而 `@MainActor` view-model 读的是引用类型的当前值，没有这个问题。这与 `ViewWiringSuite` 头部那条「真正的结构修法是把视图层拆成可被 import 的 library target」是同一个方向，代价也在同一个量级。
+**Context（2026-07-12 原方案）:** T17h（`/codex review a3c2d08` 修复期间，本地 + 一次 34-agent 对抗验证双双指出）最初提出把 `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model。这个前置现在已经由 `PanelConfigController` 完成，T7 又把 header 所需的当前包名收敛成它的 `selectedPackMetadata`。因此剩余修法不再是一次模型迁移，而是让 `say(_:)` 在 post 那一趟从引用模型重算 header，并与 T17f/g 的去重时序一并验证。
 
 **更新（2026-07-12 · `/codex review 71262dd`）：上面那句「今天两者一致」是错的，而它错在 T17h 自己刚挪动的那条边界上。**
 T17h 把闸门 / 去重 / post 整体挪进 `DispatchQueue.main.async`，理由是「三者从此看到同一份世界」——
@@ -1681,11 +1682,10 @@ enqueue 之前 —— 它就**先跑**：`actionState → .idle`、view-model �
 （漏念 / 念错一次包名，不是失声），所以 P2-vs-P3 仍可争论；但挡在缺口前面的唯一东西是一句「我推理出这个交错
 不可达」，而那正是 71262dd 自己的 commit message 里点名的、这个仓库已经交过三次学费的那句话。
 
-**修法**：把 `config` / `packCards` 搬进 `@MainActor` view-model，`header` 就能和另外三个事实一样在 post 的那一趟
-**重算**而不是捕获（读的是引用类型的当前值，没有「update pass 之外读 `@State`」那个语义问题）。**三个洞一次买**：
-第二个 oracle、可测性、以及这条竞争。**注意 Effort 可能比标的小** —— 既然就地重算编得过，那条便宜路线是否
-可接受，取决于「在 update pass 之外读 `@State`」到底会不会出事，而那一条**尚未有人实测**。谁先去测，谁就可能
-把这条 M 变成 S。
+**修法（2026-07-29 T7 后）**：捕获 `panelModel`，在 main-queue block 内从它的
+`selectedPackMetadata` 与执行时的 onboarding state 重算 header；同步扩 `PanelAnnouncement`/接线测试，
+确认一次 update pass 仍只 post 一句。引用模型与单一包名读数都已具备，剩下的是播报时序收口与真机
+VoiceOver 验证，不再需要迁移 `config` / `packCards`。
 
 **Effort:** M
 **Priority:** P2（原 P3，2026-07-12 抬升 —— 见上面的更新）

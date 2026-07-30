@@ -178,6 +178,52 @@ public struct PackCard: Sendable, Equatable {
     }
 }
 
+/// The selected pack's identity and display name, loaded independently from the panel's
+/// ``PackCard`` display set (PLAN-SOUND-MANAGER.md T7).
+///
+/// This is deliberately NOT derived from `packCards.first(where: \.isSelected)`: once T17's
+/// starred-only filter is active, the currently-used pack may legally be absent from that list.
+/// The event-section title and panel header still need a guaranteed current-pack reading, so the
+/// controller owns this separate value and both surfaces consume its ``displayName``.
+public struct SelectedPackMetadata: Sendable, Equatable {
+    public let id: String
+    public let name: String?
+
+    public init(id: String, name: String?) {
+        self.id = id
+        self.name = name
+    }
+
+    /// Human-facing name when the manifest supplies one; the safe pack id is the honest fallback
+    /// for a missing/unreadable name. An empty id remains empty (the `.needsPack` state never
+    /// renders the event-section title).
+    public var displayName: String {
+        guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return id
+        }
+        return name
+    }
+}
+
+/// Loads the selected pack's header/title metadata without consulting the panel's display set.
+///
+/// Exactly one manifest read is attempted, through ClaudioCore's shared
+/// ``loadPackManifestData(in:)`` bounded/symlink-safe path. A missing pack, unreadable manifest,
+/// or malformed raw JSON falls back to the id; it never invents a second file-reading path.
+public func selectedPackMetadata(
+    packID: String, environment: AudioImportEnvironment
+) -> SelectedPackMetadata {
+    guard
+        let packDirectory = resolvePackDirectory(
+            id: packID, userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory),
+        case .success(let manifestData) = loadPackManifestData(in: packDirectory)
+    else {
+        return SelectedPackMetadata(id: packID, name: nil)
+    }
+    return SelectedPackMetadata(id: packID, name: packMetadata(manifestData: manifestData).name)
+}
+
 /// Compares an installed built-in pack with its factory copy byte-for-byte.
 ///
 /// The result is `nil` when the pack is not in ``AudioImportEnvironment/builtinPackIDs`` or

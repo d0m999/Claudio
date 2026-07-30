@@ -224,7 +224,8 @@ struct PanelHeader: View {
     let showsTakenOverDot: Bool
 
     /// VoiceOver 落在这条 header 上时读的整句话。`.installed` 时是「Claudio 面板，当前声音包 X」
-    /// （包名来自 `PanelView` 的 `packCards`）；其余一律是 ``baseLabel``。
+    /// （包名来自 `PanelConfigController.selectedPackMetadata`，独立于 packCards 显示集）；
+    /// 其余状态或没有当前包名时一律是 ``baseLabel``。
     let accessibilityLabel: String
 
     /// 非 `.installed` 时那句 header —— 面板还没接管，没有「当前声音包」可报。

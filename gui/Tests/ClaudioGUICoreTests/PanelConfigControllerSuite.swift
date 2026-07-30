@@ -38,6 +38,38 @@ private let operationalConfigBytes =
 
 @MainActor
 func runPanelConfigControllerSuites() {
+    suite("PanelConfigController.selectedPackMetadata：当前包不在显示集时仍从该包 manifest 读到真名") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "current-pack", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "current-pack", "name": "当前包真名", "events": {} }"#,
+                to: packsDir.appendingPathComponent("current-pack/manifest.json"))
+            writeFixture(
+                #"{ "id": "starred-pack", "name": "面板显示包", "events": {} }"#,
+                to: packsDir.appendingPathComponent("starred-pack/manifest.json"))
+
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeEnvironment(packsDir))
+
+            // 模拟 T17 星标显示集：当前使用中的包未加星，所以显示集只剩另一行。
+            let displayedCards = controller.packCards.filter { $0.id == "starred-pack" }
+            expect(
+                displayedCards.allSatisfy { !$0.isSelected },
+                "前提：显示集中不得有当前包，否则这条测试没有覆盖『当前包未加星』")
+            expect(
+                controller.selectedPackMetadata.id == "current-pack",
+                "selectedPackMetadata 必须绑定 config.selectedPack，不得从显示集反推")
+            expect(
+                controller.selectedPackMetadata.displayName == "当前包真名",
+                "当前包不在显示集时仍必须从它自己的 manifest 读到真名，事件区标题与 header 才不会退化成 id")
+        }
+    }
+
     // 变异 #3（翻转）+ #2（可达性）：一次成功的静音必须（a）把翻转后的 enabled 位**落盘**，
     // （b）**重算** eventRows / config 读模型让面板反映它。
     suite("PanelConfigController.toggleMute 成功：翻转位落盘 + 读模型重算（钉死红队 #3 翻转、#2 可达性）") {
@@ -258,7 +290,8 @@ func runPanelConfigControllerSuites() {
     }
 
     // switchPack **成功**路径（红队 b86ec0a #1/#3/#5 + 红队 round3 packCards/eventRows）。一次成功切包
-    // 走全量 `reload()`，它重算**四个** @Published 读模型（configState / config / eventRows / packCards）
+    // 走全量 `reload()`，它重算**五个** @Published 读模型（configState / config / eventRows /
+    // packCards / selectedPackMetadata）
     // 外加清 packSwitchError + 跨-view-model 协调。这条测试把**每一个都断言到**——上一版只断言了 config/
     // configState，红队 round3 于是删掉 `packCards = availablePacks(...)`（画廊高亮停在旧包）与
     // `eventRows = packCoverage(...)`（事件行停在旧包覆盖）两条，测试照绿。
@@ -266,7 +299,7 @@ func runPanelConfigControllerSuites() {
     // 关键手法：pack-a 与 pack-b 的 manifest 映**不同的事件**（a→stop，b→notification），于是 eventRows
     // 的逐事件覆盖态在切包后**可观测地变了**（.stop 从 .present 掉成 .unmapped）——否则两个同构包切过去
     // eventRows 长得一样，删掉重算那行也看不出来。
-    suite("PanelConfigController.switchPack 成功：reload 的全部四个读模型都反映新包 + 清错 + afterFullReload 收到新包") {
+    suite("PanelConfigController.switchPack 成功：reload 的全部五个读模型都反映新包 + 清错 + afterFullReload 收到新包") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
@@ -276,11 +309,11 @@ func runPanelConfigControllerSuites() {
             writeFixture(
                 #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
             writeFixture(
-                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
+                #"{ "id": "pack-a", "name": "包 A", "events": { "stop": "stop.mp3" } }"#,
                 to: packsDir.appendingPathComponent("pack-a/manifest.json"))
             writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
             writeFixture(
-                #"{ "id": "pack-b", "events": { "notification": "notification.mp3" } }"#,
+                #"{ "id": "pack-b", "name": "包 B 真名", "events": { "notification": "notification.mp3" } }"#,
                 to: packsDir.appendingPathComponent("pack-b/manifest.json"))
             writeFixture("audio", to: packsDir.appendingPathComponent("pack-b/notification.mp3"))
 
@@ -338,7 +371,15 @@ func runPanelConfigControllerSuites() {
                     + "『哪个是当前包』撒谎。得到 "
                     + "\(String(describing: controller.packCards.first(where: { $0.isSelected })?.id))")
 
-            // ⑥ afterFullReload 收到**重载后**的新 config（reload 两行对调 → 拿到旧 config pack-a → retarget 空操作 → 红）。
+            // ⑥ 独立 selectedPackMetadata 也必须随全量 reload 走到新包，且从新包 manifest 读到真名。
+            // 它不能靠 packCards 的 selected 行反推：T17 的星标显示集会合法地隐去当前包。
+            expect(
+                controller.selectedPackMetadata.id == "pack-b"
+                    && controller.selectedPackMetadata.displayName == "包 B 真名",
+                "成功切包后 selectedPackMetadata 必须重载成 pack-b 的真名，得到 "
+                    + "\(controller.selectedPackMetadata)")
+
+            // ⑦ afterFullReload 收到**重载后**的新 config（reload 两行对调 → 拿到旧 config pack-a → retarget 空操作 → 红）。
             expect(
                 afterFullReloadConfigs.last?.selectedPack == "pack-b",
                 "afterFullReload 必须收到重载后的 config（pack-b）—— 收到 pack-a = reload() 里 config 重载"

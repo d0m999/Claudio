@@ -294,7 +294,8 @@ public struct PanelView: View {
             let moment = onboardingViewModel.panelDidBecomeVisible()
             panelModel.reload()
             applyFirstFocus()
-            // `say(_:)` 必须在 `refresh()` **之后**：面板句里的包名来自刚被 refresh 写新的 `packCards`。
+            // `say(_:)` 必须在 `refresh()` **之后**：面板句里的包名来自刚被 reload 写新的
+            // `selectedPackMetadata`，不再从可能隐去当前包的显示集反推。
             say(moment)
         }
         // 另一半（T17d）：`MenuBarController.popoverDidClose` bumps `focusCoordinator.hideCount`。
@@ -306,8 +307,9 @@ public struct PanelView: View {
         // T17 —— **这一行是「接管成功」这件事真正被兑现的地方**，不是锦上添花。
         //
         // CTA 落地后 `onboardingViewModel.refresh()` 把 state 翻到 `.installed`，`body` 于是从
-        // onboarding 卡切到 `operationalPanel`。但 `config` / `eventRows` / `packCards` 是三个
-        // 独立的 `@State`，只在 `init` 里读过一次盘 —— 而 `init` 跑在 app 启动的那一刻，也就是
+        // onboarding 卡切到 `operationalPanel`。但 `config` / `eventRows` / `packCards` /
+        // `selectedPackMetadata` 是 panelModel 里四份独立读模型，只在 `init` 里读过一次盘 —— 而
+        // `init` 跑在 app 启动的那一刻，也就是
         // setup **之前**：那时 `config.json` 还不存在（`loadPanelConfig` 回落到 `.needsPack`，
         // `config` 走 `resolvedConfig` 的空包默认值）、包一个都还没复制。于是用户在**接管成功的
         // 那一秒**看到的会是：「先选包」空态卡（D23 定稿④的路由态）+ 一个空的切包画廊
@@ -337,12 +339,12 @@ public struct PanelView: View {
             // T17h′ —— **这一行让「同一趟只 post 一句」从一句推理变成一条结构。**
             //
             // 上一版这里是三个 `say(_:)` 调用点里**唯一**不先 `refresh()` 的那个。而 `refresh()` 写的正是
-            // `config` / `packCards` 两个 `@State`，也就是面板句里包名的来源。于是一次**无告知的成功接管**
+            // `selectedPackMetadata`，也就是面板句里包名的来源。于是一次**无告知的成功接管**
             // （`actionState: .running → .idle`、`state: .notInstalled → .installed`，同一个 MainActor turn、
             // 同一趟 update pass）里，若 SwiftUI 先跑这个 handler（**未文档化**的顺序）：
             //   · `onboardingViewModel.state` 已经是 `.installed`（引用类型，早更新了）
-            //   · 而 `packCards` / `config` 还是 **app 启动时**读的那份 —— 那时 `config.json` 还不存在，
-            //     `loadPanelConfig` 回落成 `.needsPack`，`config` 走空包默认值
+            //   · 而 `selectedPackMetadata` / `config` 还是 **app 启动时**读的那份 —— 那时
+            //     `config.json` 还不存在，`loadPanelConfig` 回落成 `.needsPack`，metadata 的 id 为空
             //   → header = 「Claudio 面板，当前声音包 」**包名是空的**
             // 紧接着 state 那个 handler（先 `refresh()`）说「…当前声音包 lofi。」——**两句不同，后缀规则吞不掉，
             // 同一趟 post 了两条。** 而这恰恰是 T17f/T17g 整台机器存在的唯一理由。
@@ -427,16 +429,15 @@ public struct PanelView: View {
         // ⚠️ **这里有一个已知的、活的正确性缺口 —— 不要把下面这段读成「已经论证安全」。**
         // 台账：TODOS.md「面板句里的 `header` 在 async **外**捕获，其余三个事实在 async **内**重读」（P2）。
         //
-        // `header` 仍在**这一趟**取，而不是推迟到 post：包名那半句来自 `packCards` / `config` 两个
-        // `@State`。**这是一个选择，不是能力所限** —— 这里曾经写着「`@Sendable` 闭包捕不到 `self`」，
-        // 那句话**是假的**：`View` 协议是 `@MainActor` 的，所以 `PanelView` 是 MainActor 隔离的，因而
-        // **隐式 `Sendable`**，闭包捕得到 `self`（今天它已经捕了 `announcer` / `coordinator` / `viewModel`
-        // —— 这本该是线索）。把这一行挪进闭包，Swift 6 语言模式下零错误零警告编得过，实测过。
+        // `header` 仍在**这一趟**取，而不是推迟到 post：包名那半句已改为来自 `@MainActor` 引用模型
+        // `panelModel.selectedPackMetadata`。**这是一个选择，不是能力所限** —— 这里曾经写着
+        // 「`@Sendable` 闭包捕不到 `self`」，那句话**是假的**：`View` 协议是 `@MainActor` 的，所以
+        // `PanelView` 是 MainActor 隔离的，因而**隐式 `Sendable`**；更直接的修法是捕获同样可安全跨进
+        // main-queue block 的 `panelModel`，在 block 内重算 header。Swift 6 语言模式下能编过。
         //
-        // 真正的理由是**语义**，不是编译器：把视图 struct 捕进一个逃逸闭包、在 SwiftUI 已经更新过视图之后
-        // 再去读它的 `@State`，不是有文档保证的行为（SwiftUI 只保证 view update 期间的 State 读），捕获的
-        // 那个值完全可能读到一块已经卸掉的 / 陈旧的存储。**这一条我们没有实测过** —— 所以按未验证对待，
-        // 不去赌它。但要说清楚：它是一堵**我们选择不翻**的墙，不是一堵翻不过去的墙。
+        // 当前仍未修的是**时序语义**：磁盘动作可能在捕获 header 之后、post 之前落地；即使包名读数已
+        // 独立于显示集，提前算成的字符串仍可能描述上一趟状态。这个缺口需要连同 T17f/g 的播报时序一起
+        // 收口，不能把「换成 selectedPackMetadata」误读为竞争已经消失。
         //
         // 而剩下的事实（`state` / `actionState` / 面板还开着吗）全部推迟到 post 的那一趟去问 —— 它们的
         // 真相源是 view-model，一个引用类型，读得到最新值。**于是四个事实分居两趟：三个在执行侧，
@@ -485,18 +486,11 @@ public struct PanelView: View {
         //     不是短句的后缀）。真实症状更可能是「半句被更完整的一句截断 / 替换」。两处都只断言
         //     「post 出去的这一句是错的」，不断言听感 —— 那需要真机 VoiceOver 实测。）
         //
-        // 【为什么不在这里就地修】就地重算是**能编过的**（捕 `self`，在闭包里算 header）—— 不选它，是因为
-        // 那要在 SwiftUI 的 update pass 之外读视图 `@State`，语义无文档保证（见上）。真正的修法是把
-        // `config` / `packCards` 从视图 `@State` 搬进一个 `@MainActor` view-model（`@MainActor` class 是
-        // `Sendable` 的，捕得到，且读的是引用类型的**当前**值）。
-        //
-        // ⚠️ 2026-07-13 更新：那个 view-model **已经存在了**（`PanelConfigController`，红队 9cccc9c）——
-        // 「一次买下三个洞：第二个 oracle、可测性、以及这条竞争」里，前两个（可测性 + oracle）已经关掉。
-        // 但**这条竞争本身还没修**：下面仍然在 update pass 里就地把 `header` 算成一个常量捕获进 block，
-        // 而不是捕 `panelModel`、在 block 里读它的**当前** `packCards` / `config`。修它现在只是**够得着**了
-        // （`panelModel` 是 `@MainActor` `Sendable` class，捕得到），不再是「无文档保证」——但它是一次
-        // 独立的、要碰 T17f/g 播报时序的改动，本轮（view-model 抽取）**没做**。别把「view-model 落地了」
-        // 读成「这条竞争修好了」。
+        // 【为什么不在这里就地修】`PanelConfigController` 已经是可捕获的 `@MainActor` 引用模型；
+        // T7 又把包名收敛到它的 `selectedPackMetadata`，所以在 block 内重算 header 已不存在第二个
+        // oracle 或 SwiftUI `@State` 生命周期障碍。但这仍是一次独立的 T17f/g 播报时序改动：下面依旧
+        // 在 update pass 里把 `header` 算成常量再捕获。别把「metadata 已独立于显示集」读成「这条竞争
+        // 已经修好」。
         let header = headerAccessibilityLabel
         let viewModel = onboardingViewModel
         let announcer = self.announcer
@@ -545,8 +539,15 @@ public struct PanelView: View {
 
     private var headerAccessibilityLabel: String {
         guard onboardingViewModel.state == .installed else { return PanelHeader.baseLabel }
-        let packName = panelModel.packCards.first(where: \.isSelected)?.name ?? panelModel.config.selectedPack
+        let packName = selectedPackDisplayName
+        guard !packName.isEmpty else { return PanelHeader.baseLabel }
         return "\(PanelHeader.baseLabel)，当前声音包 \(packName)"
+    }
+
+    /// Header 与事件区标题共用这一份 current-pack 读数。它不看 `packCards`：星标显示集可合法地
+    /// 隐去当前包，而这两处仍必须播/显示 manifest 里的真名。
+    private var selectedPackDisplayName: String {
+        panelModel.selectedPackMetadata.displayName
     }
 
     // MARK: - Operational panel (installed state)
@@ -557,7 +558,7 @@ public struct PanelView: View {
             // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState.topContent` 决定这一块顶部
             // 内容显示什么——`.events`（= `.operational`）是今天这四行事件覆盖度 + 主音量滑块；`.needsPack`
             //（还没有人选过包）换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径
-            // 本来就通：点一张卡就是 ``selectPack``，会建出一份正确的 config）；`.configFailure`（=
+            // 本来就通：点一个声音包就是 ``selectPack``，会建出一份正确的 config）；`.configFailure`（=
             // `.malformed`/`.unwritable`）换成诚实失败态 + 可执行的修复指令——不禁用任何控件（写者本来就
             // 全部 fail closed），只是不再假装一切正常（D19 已作废：不是禁用一个滑块，是整个面板换一个诚实的态）。
             //
@@ -570,6 +571,9 @@ public struct PanelView: View {
             //（/codex review f54d335 P1#1，取代 26bba37 那轮「两段 switch + 文本绊线防漂移」的设计）。
             switch panelModel.configState.topContent {
             case .events:
+                Text("\(selectedPackDisplayName) · 事件")
+                    .font(.system(size: 11 * typeScale, weight: .semibold))
+                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 ForEach(panelModel.eventRows, id: \.event) { row in
                     if let importViewModel = rowImportViewModels[row.event] {
                         EventRowView(
@@ -652,29 +656,60 @@ public struct PanelView: View {
                 ActionNoticeRow(message: notice.message)
             }
 
+            Text("声音包")
+                .font(.system(size: 11 * typeScale, weight: .semibold))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             PackGalleryView(
                 cards: panelModel.packCards, focusedTarget: $focusedTarget, adaptation: layoutAdaptation,
                 onSelect: { panelModel.switchPack(to: $0.id) })
+            manageSoundsRow
             disconnectRow
         }
     }
 
     /// D23 定稿④「先选包」空态卡——`configState == .needsPack` 时替换掉本该渲染的四行事件覆盖度。
-    /// `PackGalleryView` 仍然照常渲染在下面（这就是主行动：点一张卡）；这里只负责说清楚温度 +
-    /// 上下文（DESIGN.md 空态三要素）。文案是 ENGINEERING.md「切包画廊」空态行的标题
-    /// （"先选包"）+ 一句 2026-07-12 拍板的工作稿副文案。
+    /// `PackGalleryView` 仍然照常渲染在下面；有包行时主行动是「点一个声音包」，零行时则指向仍在
+    /// 屏幕上的「管理声音包…」。这里只负责说清楚温度 + 主行动 + 上下文（DESIGN.md 空态三要素）。
     private var needsPackNotice: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        let copy = needsPackNoticeCopy(hasVisiblePackChoices: !panelModel.packCards.isEmpty)
+        return VStack(alignment: .leading, spacing: 4) {
             Text("先选包")
                 .font(.system(size: 13 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.text(colorScheme))
-            Text("还没有选中任何声音包。点一张卡片，Claudio 会建好配置。")
+            Text(copy.message)
                 .font(.system(size: 11 * typeScale))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("先选包。还没有选中任何声音包。点一张卡片，Claudio 会建好配置。")
+        .accessibilityLabel(copy.accessibilityLabel)
+    }
+
+    /// T7 阶段 1 的「管理声音包…」：真管理窗口尚未落地前，先提供一个真动作——在访达中
+    /// 显示 packs 目录。它位于包列表之后、断开连接之前，并在四种 configState 下无条件渲染；
+    /// 这与 `panelFocusOrder` 无条件 append `.manageSounds` 是一对不可拆的诚实性契约。
+    private var manageSoundsRow: some View {
+        Button {
+            NSWorkspace.shared.activateFileViewerSelecting([audioEnvironment.userPacksDirectory])
+        } label: {
+            Text("管理声音包…")
+                .font(.system(size: 11 * typeScale))
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: 24)
+                .padding(.vertical, 4)
+                .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .strokeBorder(
+                    ClaudioColor.hairlineStrong(colorScheme),
+                    style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
+        )
+        .accessibilityLabel("管理声音包")
+        .accessibilityHint("在访达中显示声音包文件夹")
+        .focused($focusedTarget, equals: .manageSounds)
     }
 
     /// D23 定稿④诚实失败态——`configState`是 `.malformed`/`.unwritable` 时替换掉本该渲染的四行事件

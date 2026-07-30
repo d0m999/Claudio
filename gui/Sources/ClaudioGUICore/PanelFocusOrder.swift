@@ -34,28 +34,20 @@ public enum PanelFocusTarget: Sendable, Hashable {
     /// One event row's mute toggle (T15 D4).
     case eventMute(Event)
     /// One event row's 试听 ▶ preview button (`EventRowView`). PLAN-SOUND-MANAGER.md §2.5/T2:
-    /// UNCONDITIONALLY the preview button in all three coverage states — before T2 this slot
-    /// was contested between the preview button (`.present`) and the row-end drag/pick-to-bind
-    /// affordance (`.unmapped`/`.broken`), "a SINGLE slot per row regardless of which of the
-    /// two it currently is"; T2 gave that affordance its OWN slot (``eventSound(_:)``, the
-    /// file-name `Menu`), so there is no second candidate left to contest this one. Always the
-    /// same control, always this identity — only whether it's OPERABLE varies (see
-    /// ``EventRow/eventActionOperable``).
+    /// this identity belongs only to the preview button in all three coverage states. The
+    /// file-name `Menu` owns the separate ``eventSound(_:)`` identity, so no two controls ever
+    /// compete for this focus target. The preview stays present in every state; only whether it
+    /// is OPERABLE varies (see ``EventRow/eventActionOperable``).
     case eventAction(Event)
     /// The master volume slider control row (PLAN-MASTER-VOLUME.md D41). Sits after every event
     /// row's action/mute pair and before the pack gallery cards, aligning with the panel's visual
     /// layout (the slider row sits between the event rows and the pack gallery).
     case masterVolume
-    // NOTE (cc59d52 / PLAN-SOUND-MANAGER T1): the panel-bottom drop affordance's focus slot
-    // `.dropZone` was removed here together with `AudioDropZoneView` (finding ①: it copied bytes
-    // but never wrote `manifest.json` — an orphan-maker). A focus target with no rendered control
-    // is exactly the ghost the "only real controls claim a slot" rule (see `panelFocusOrder(_:)`'s
-    // `.masterVolume` gate) forbids — and it was reachable: `PanelView.applyFirstFocus` opened
-    // `.needsPack`/`.malformed`/`.unwritable` focus onto it, i.e. onto nothing. PLAN-SOUND-MANAGER
-    // T7 reintroduces a real panel-bottom control ("管理声音包…") as `.manageSounds` — an
-    // unconditionally rendered+operable slot that becomes the operational scope's "never nil"
-    // anchor. Until then the panel has no bottom affordance, so it claims no slot.
     case packCard(id: String)
+    /// 列表下方全宽虚线「管理声音包…」（PLAN-SOUND-MANAGER.md T7）。它在 operational panel
+    /// 的四种 configState 都无条件渲染，焦点序中紧跟全部 pack cards、排在 `.disconnect` 之前。
+    /// 阶段 1 动作为在访达中显示 packs 目录，无写副作用，因此 in-flight 期间也恒可操作。
+    case manageSounds
     /// 一条失败行上的「查看原因」（T17）—— 它是一个**可聚焦控件**，不是装饰：WCAG 2.1.1 要求
     /// 键盘用户也能展开那条原因，而这个仓库已经为「成功/拒绝之后只剩鼠标可用」记过一条 P3 账。
     case revealDetail
@@ -76,9 +68,9 @@ public enum PanelFocusTarget: Sendable, Hashable {
     ///
     /// 只在这两个 `configState` 出现（`hasConfigFailureNotice`）；`.operational`/`.needsPack` 不渲染
     /// 失败卡，flag 为假，这颗 target 不进序。它**恒可操作**（访达 reveal 无写副作用，含 in-flight），
-    /// 但它是**条件性**锚点 —— 不是 operational scope「永不返回 nil」的**无条件**担保者（那把交椅留给
-    /// PLAN-SOUND-MANAGER T7 无条件 append 的 `.manageSounds`，见上方 NOTE）；它只是让
-    /// `.malformed`/`.unwritable` 这两态在 `.manageSounds` 落地前就已恒非 nil。
+    /// 但它是**条件性**锚点 —— 不是 operational scope「永不返回 nil」的**无条件**担保者；T7
+    /// 无条件 append 且恒可操作的 `.manageSounds` 才负责后者。`.configReveal` 只负责让
+    /// `.malformed`/`.unwritable` 的首焦点跟随那张视觉最靠上的失败卡。
     case configReveal
 }
 
@@ -137,8 +129,9 @@ public enum PanelFocusScope: Sendable, Equatable {
 /// left-to-right, ``EventRowView``'s `trailing` renders the file-name control first, then the
 /// action control, then `muteIndicator` rightmost; a11y review a11y-architect FIX 5: focus
 /// order must track visual order, not an arbitrary model-first convenience — PLAN-SOUND-
-/// MANAGER.md §2.5/T2 grew this from two slots to three), then
-/// every pack gallery card (in ``availablePacks(config:environment:)``'s own order). On
+/// MANAGER.md §2.5/T2 grew this from two slots to three), then every pack gallery card
+/// (in ``availablePacks(config:environment:)``'s own order), then the always-rendered
+/// ``PanelFocusTarget/manageSounds``, and finally ``PanelFocusTarget/disconnect``. On
 /// `.malformed`/`.unwritable` the 诚实失败卡's ``PanelFocusTarget/configReveal`` LEADS the whole
 /// operational list — it renders above every row/card, so visual order puts it first.
 /// `order.first` is where focus lands the instant the panel opens (ENGINEERING.md: "打开
@@ -174,10 +167,10 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         // （`/codex review` 2626083/47459a7 抓到的 P1：这里曾经无条件 append，`.needsPack`/
         // `.malformed`/`.unwritable` 下会把首焦点指向一个不存在的控件）。
         if hasMasterVolume { order.append(.masterVolume) }
-        // `.dropZone` used to be appended here unconditionally; it left with `AudioDropZoneView`
-        // (cc59d52 / PLAN-SOUND-MANAGER T1 — see the enum note). T7 re-adds a `.manageSounds` slot
-        // in this position once the "管理声音包…" control exists.
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
+        // T7 的真控件在全部四种 configState 下恒渲染，故这里也恒 append；排在 cards 之后、
+        // disconnect 之前，与屏幕从上到下的顺序一致。
+        order.append(.manageSounds)
         // 面板最底部：失败行（若有）在「断开连接」之上 —— 焦点序跟随视觉序。
         if hasDetailToggle { order.append(.revealDetail) }
         order.append(.disconnect)
@@ -238,35 +231,28 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// would be a lie. (T17c: the previous wording — "Returns `nil` only for a genuinely empty order"
 /// — was written before `ctaOperable` existed and was false the moment it landed.)
 ///
-/// The OPERATIONAL scope returns `nil` in exactly ONE shape: an in-flight panel with zero event
-/// rows, zero pack cards, no slider AND no config-failure notice (`ctaOperable == false`, so even
-/// the always-appended `.disconnect` is not operable) — the honest counterpart to the onboarding
-/// in-flight `nil` below. Concretely that is a `.needsPack` panel with nothing installed while a
-/// disconnect is in flight; the two config-broken states can't reach it (next paragraph). In every
-/// reachable non-in-flight shape it is non-nil: a `.operational` panel's first row's
-/// ``PanelFocusTarget/eventSound(_:)`` is ALWAYS operable (PLAN-SOUND-MANAGER.md §2.5/T2 — it
-/// never needs to fall back to that row's mute toggle the way `.eventAction` sometimes did); a
-/// `.needsPack` panel's first pack card is (the gallery renders in every `configState`); and
-/// when neither exists, the always-appended `.disconnect` (or, when a failure row shows, its
-/// `.revealDetail`) anchors it while `ctaOperable`.
+/// The OPERATIONAL scope never returns `nil`: T7's ``PanelFocusTarget/manageSounds`` is rendered
+/// in all four config states, appended unconditionally, and remains operable even while
+/// `ctaOperable == false` because its Finder reveal has no write side effect. Earlier visible
+/// controls still win in visual order — an event row's `.eventSound`, a `.needsPack` panel's
+/// first pack card, or a config-failure panel's `.configReveal` — but zero rows / zero cards /
+/// no slider now lands safely on `.manageSounds`, never the disabled-or-destructive `.disconnect`.
 ///
-/// `.malformed`/`.unwritable` are the exception that is ALWAYS non-nil, in-flight or not: their
-/// 诚实失败卡 leads the order with `.configReveal` (在访达中显示 config.json), which is
-/// unconditionally operable (reveal has no write side-effect), so it anchors those two states even
-/// while a disconnect is in flight (/codex review P1, 26bba37 follow-up). It is a CONDITIONAL anchor
-/// (only on those two states), NOT the operational scope's unconditional never-nil guarantor — that
-/// seat stays reserved for PLAN-SOUND-MANAGER T7's unconditionally-appended `.manageSounds`.
+/// `.malformed`/`.unwritable` remain a stronger, state-specific case: their 诚实失败卡 leads with
+/// `.configReveal` (在访达中显示 config.json), which is also unconditionally operable during
+/// in-flight. It is a CONDITIONAL top anchor; `.manageSounds` is the operational scope's
+/// unconditional never-nil guarantor.
 ///
 /// (Before T1 this could NEVER be nil, because `.dropZone` was appended unconditionally and was
 /// always operable. That anchor left with `AudioDropZoneView` — cc59d52 / PLAN-SOUND-MANAGER T1 —
 /// because it was a focus slot for a control that no longer rendered, and `PanelView` was opening
 /// `.needsPack`/`.malformed`/`.unwritable` focus straight onto it. `.configReveal` now anchors the
-/// two config-broken states honestly; PLAN-SOUND-MANAGER T7 adds `.manageSounds` as the
-/// unconditional anchor for the remaining shapes, at which point the operational scope is once again
-/// never-nil for every shape, in-flight or not.)
+/// two config-broken states honestly; PLAN-SOUND-MANAGER T7 then added `.manageSounds` as the
+/// unconditional anchor for every operational shape, making the scope never-nil again.)
 ///
-/// 焦点在 in-flight 期间该落到哪，是一个仍未定的产品问题（见 TODOS「in-flight 期间 onboarding 的
-/// 键盘焦点无处可去」）—— 当前行为是**诚实的空**，不是一个已经想清楚的答案。
+/// Onboarding 的 in-flight 焦点仍是独立的未决产品问题（见 TODOS「in-flight 期间 onboarding 的
+/// 键盘焦点无处可去」）；`.manageSounds` 只存在于 operational panel，不改变那张 onboarding 卡的
+/// 诚实 `nil`。
 /// `ctaOperable` (T17) names whether the onboarding CTA controls — the two onboarding buttons and
 /// the operational panel's 断开连接 — are currently ENABLED. They are not, for the whole duration
 /// of a `.takeOver`/`.disconnect` (``OnboardingActionState/running(_:)``): the view disables them
@@ -306,10 +292,10 @@ public func panelFirstFocusTarget(
         // this `true` only fires for a slider that is ACTUALLY on screen.
         case .configReveal:
             // 访达 reveal 无写副作用，恒可操作（含 in-flight，`ctaOperable == false` 时照样）—— 与
-            // T7 计划中的 `.manageSounds` operability arm 同理。这让 `.malformed`/`.unwritable` 这两态
+            // `.manageSounds` operability arm 同理。这让 `.malformed`/`.unwritable` 这两态
             // 的 operational scope 永不返回 nil，即便断开动作在飞。
             return true
-        case .eventMute, .packCard, .masterVolume:
+        case .eventMute, .packCard, .masterVolume, .manageSounds:
             return true
         }
     }

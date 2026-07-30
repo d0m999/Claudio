@@ -18,7 +18,8 @@ import Foundation
 // `EventMuteControllerSuite.swift`, `MasterVolumeControllerSuite.swift`,
 // `PanelFocusOrderSuite.swift`, `ContrastSuite.swift`,
 // `ContrastHexParsingSuite.swift`,
-// `PanelTypeSizeSuite.swift`, `PanelConfigSuite.swift`, `PanelFocusCoordinatorSuite.swift`,
+// `PanelTypeSizeSuite.swift`, `PanelAccessibilitySuite.swift`, `PanelConfigSuite.swift`,
+// `PanelFocusCoordinatorSuite.swift`,
 // `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`,
 // `VolumeDragSessionSuite.swift`, `PanelWriteFailuresSuite.swift`).
 
@@ -86,6 +87,7 @@ runPanelFocusInFlightSuites()
 runContrastSuites()
 runContrastHexParsingSuites()
 runPanelTypeSizeSuites()
+runPanelAccessibilitySuites()
 runPanelConfigSuites()
 runPanelRefreshRouteSuites()
 runPanelConfigControllerSuites()

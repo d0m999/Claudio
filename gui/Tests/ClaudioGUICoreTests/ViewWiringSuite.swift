@@ -147,6 +147,29 @@ private func closureBody(after marker: String, in source: String) -> String? {
     return nil  // 没配平（marker 后面根本没有闭包，或文件被截断）—— 围栏判红，不判绿
 }
 
+/// `marker` 所在位置的花括号嵌套深度。输入必须是 ``codeWithoutStrings(_:)`` 的结果。
+///
+/// T7 的 `.manageSounds` 双向诚实性不能只靠「出现一次 + 相对顺序」：把
+/// `manageSoundsRow` 包进 `if !packCards.isEmpty { … }`，或把 `order.append(.manageSounds)`
+/// 包进同型条件，字面量与先后顺序一个都没变，却会让零行面板再次出现幽灵焦点。层级与所在
+/// `switch`/`case` 相同，才证明它没有被一个额外的 `if`/`switch`/`ForEach` 花括号条件化。
+private func braceDepth(of marker: String, in source: String) -> Int? {
+    guard let markerRange = source.range(of: marker) else { return nil }
+    var depth = 0
+    for ch in source[..<markerRange.lowerBound] {
+        switch ch {
+        case "{":
+            depth += 1
+        case "}":
+            depth -= 1
+            if depth < 0 { return nil }
+        default:
+            break
+        }
+    }
+    return depth
+}
+
 /// `ClaudioGUI` target 下**每一个** Swift 源文件，剥掉注释之后的样子 —— `(文件名, 代码)`。
 ///
 /// ## 它修的那个洞（T17h —— `/codex review a3c2d08` 独立评审逮到）
@@ -338,9 +361,10 @@ func runViewWiringSuites() {
         expect(
             panel.contains(".onChange(of: onboardingViewModel.state)"),
             "PanelView 必须在 onboarding state 变化时重跑自己的 refresh()。没有它：CTA 成功 → state 翻到"
-                + " .installed → body 切到 operationalPanel，而 config/eventRows/packCards 三个 @State"
-                + "是 app **启动时**（= setup 之前）读的盘 —— 用户在接管成功的那一秒看到的是四行「未配置 /"
-                + "文件丢失」+ 一个空的切包画廊，真实的包和 config 明明已经写好在磁盘上了。"
+                + " .installed → body 切到 operationalPanel，而 panelModel 的 config/eventRows/packCards/"
+                + "selectedPackMetadata 仍是 app **启动时**（= setup 之前）读的盘 —— 用户在接管成功的"
+                + "那一秒看到的是四行「未配置 / 文件丢失」+ 空画廊/空包名，真实的包和 config 明明已经"
+                + "写好在磁盘上了。"
                 + "评审实测：删掉这一行，652 项测试全绿。")
         expect(
             panel.contains("bundledHelperBinary: bundledHelperBinary"),
@@ -473,12 +497,12 @@ func runViewWiringSuites() {
 
         // ── T17h′：actionState 那个 handler 必须在 say() **之前** refresh() ──────────────────────
         //
-        // 它是三个 say() 调用点里唯一一个曾经**不** refresh 的。而 refresh() 写的正是 `config` /
-        // `packCards` 两个 @State —— 面板句里包名的唯一来源。少了它：一次**无告知的成功接管**，若 SwiftUI
+        // 它是三个 say() 调用点里唯一一个曾经**不** refresh 的。而 refresh() 写新的
+        // `panelModel.selectedPackMetadata` —— 面板句里包名的唯一来源。少了它：一次**无告知的成功接管**，若 SwiftUI
         // 先跑这个 handler（**未文档化**的顺序），它算 header 时 `onboardingViewModel.state` 已经是
-        // `.installed`（引用类型，早更新了），而 packCards / config 还是 **app 启动时**那份 —— 那时
-        // config.json 还不存在，`loadPanelConfig` 回落成 `.needsPack`（`config` 走 `resolvedConfig`
-        // 的空包默认值）—— 于是包名是**空的**。
+        // `.installed`（引用类型，早更新了），而 selectedPackMetadata / config 还是 **app 启动时**
+        // 那份 —— 那时 config.json 还不存在，`loadPanelConfig` 回落成 `.needsPack`，metadata 的 id
+        // 为空 —— 于是包名是**空的**。
         // 随后 state 那个 handler（先 refresh）说出带包名的那一句：**两句不同 → 后缀吞不掉 → 同一趟
         // post 两条**，正是 T17f/T17g 整台机器存在的唯一理由。
         //
@@ -2067,6 +2091,158 @@ func runViewWiringSuites() {
             "configFailureNotice 的「在访达中显示 config.json」按钮必须带 `.focused($focusedTarget, equals: "
                 + ".configReveal)` 把开局焦点接到自己身上 —— 删掉它，`.malformed`/`.unwritable` 开局焦点落到一个"
                 + "没有视图认领的 .configReveal（panelFocusOrder 仍排它进序），Reveal 钮永远抢不到键盘 / VoiceOver 焦点")
+
+        // T7 `.manageSounds` 的诚实性双向钉（与 `.masterVolume` 的 P1 先例同型）：
+        // 视图侧必须在 configState 的三分支 switch 之外无条件渲染管理钮；模型侧必须无条件 append。
+        // 任一半条件化都会让另一半变成幽灵焦点或让真控件从 Tab 序消失。
+        let unconditionalShape =
+            "VStack { switch content { case .events: rows } manageSoundsRow }"
+        let conditionalShape =
+            "VStack { switch content { case .events: rows } if hasCards { manageSoundsRow } }"
+        expect(
+            braceDepth(of: "manageSoundsRow", in: unconditionalShape)
+                == braceDepth(of: "switch content", in: unconditionalShape),
+            "braceDepth 正向对照：switch 外的同级管理钮必须被识别为无条件")
+        expect(
+            braceDepth(of: "manageSoundsRow", in: conditionalShape)
+                != braceDepth(of: "switch content", in: conditionalShape),
+            "braceDepth 负向对照：把管理钮包进 if 后必须被识别为条件渲染；否则双向钉没有牙")
+        guard
+            let focusModel = codeWithoutStrings(
+                "gui/Sources/ClaudioGUICore/PanelFocusOrder.swift"),
+            let operationalBody = closureBody(
+                after: "private var operationalPanel: some View", in: panelCollapsed)
+        else {
+            expect(false, "读不到 operationalPanel 或 PanelFocusOrder.swift，无法核验 .manageSounds 双向接线")
+            return
+        }
+        let manageRenderCount =
+            operationalBody.components(separatedBy: "manageSoundsRow").count - 1
+        expect(
+            manageRenderCount == 1,
+            "operationalPanel 必须恰好无条件渲染一次 manageSoundsRow；它放在 configState switch "
+                + "之外，才能覆盖 operational/needsPack/malformed/unwritable 四态。得到 \(manageRenderCount) 次")
+        expect(
+            braceDepth(of: "manageSoundsRow", in: operationalBody)
+                == braceDepth(of: "switch panelModel.configState.topContent", in: operationalBody),
+            "manageSoundsRow 必须与 configState switch 处于同一花括号层级，证明它在 switch 之外无条件"
+                + "渲染；包进 if/switch 后即使字面量与顺序不变也必须红")
+        guard
+            let galleryAt = operationalBody.range(of: "PackGalleryView(")?.lowerBound,
+            let manageAt = operationalBody.range(of: "manageSoundsRow")?.lowerBound,
+            let disconnectAt = operationalBody.range(of: "disconnectRow")?.lowerBound
+        else {
+            expect(false, "operationalPanel 必须同时有 PackGalleryView → manageSoundsRow → disconnectRow")
+            return
+        }
+        expect(
+            galleryAt < manageAt && manageAt < disconnectAt,
+            "manageSoundsRow 必须在包列表之后、断开连接之前无条件渲染；这是视觉序与焦点序的共同真相")
+
+        let focusCollapsed = collapsingWhitespace(focusModel)
+        let appendNeedle = "order.append(.manageSounds)"
+        guard
+            let focusOrderBody = closureBody(
+                after: "public func panelFocusOrder(_ scope: PanelFocusScope)", in: focusCollapsed)
+        else {
+            expect(false, "读不到 panelFocusOrder 函数体，无法核验 .manageSounds 无条件 append")
+            return
+        }
+        expect(
+            focusOrderBody.components(separatedBy: appendNeedle).count - 1 == 1,
+            "panelFocusOrder operational 分支必须恰好无条件 append 一次 .manageSounds；条件 append "
+                + "会与四态恒渲染的真控件漂移")
+        expect(
+            braceDepth(of: appendNeedle, in: focusOrderBody)
+                == braceDepth(of: "case .operational(", in: focusOrderBody),
+            "order.append(.manageSounds) 必须与 operational case 处于同一花括号层级，证明它不受任何"
+                + "额外 if/switch 条件控制；只数 occurrence 无法守住无条件 append")
+        guard
+            let cardsAppendAt = focusOrderBody.range(
+                of: "order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })")?.lowerBound,
+            let manageAppendAt = focusOrderBody.range(of: appendNeedle)?.lowerBound,
+            let disconnectAppendAt = focusOrderBody.range(of: "order.append(.disconnect)")?.lowerBound
+        else {
+            expect(false, "焦点模型必须同时有 packCards → .manageSounds → .disconnect 三段")
+            return
+        }
+        expect(
+            cardsAppendAt < manageAppendAt && manageAppendAt < disconnectAppendAt,
+            ".manageSounds 必须无条件排在全部 packCards 之后、.disconnect 之前")
+        guard let panelRaw = source("gui/Sources/ClaudioGUI/PanelView.swift") else {
+            expect(false, "读不到 PanelView.swift 原文，无法核验 T7 的用户可见文案")
+            return
+        }
+        let rawCollapsed = collapsingWhitespace(panelRaw)
+
+        // 当前包名不能再从显示集反推：header 与事件区标题必须共用 selectedPackMetadata 的同一投影。
+        expect(
+            panelCollapsed.contains(
+                "private var selectedPackDisplayName: String { panelModel.selectedPackMetadata.displayName }"),
+            "selectedPackDisplayName 必须直接读独立的 selectedPackMetadata，不得从 packCards 显示集反推")
+        expect(
+            !panelCollapsed.contains("packCards.first(where:"),
+            "PanelView 不得再从 packCards.first(where:) 取当前包名；当前包未加星时它不在显示集")
+        expect(
+            rawCollapsed.contains(
+                "let packName = selectedPackDisplayName guard !packName.isEmpty else { return PanelHeader.baseLabel } "
+                    + "return \"\\(PanelHeader.baseLabel)，当前声音包 \\(packName)\""),
+            "headerAccessibilityLabel 必须消费 selectedPackDisplayName，与事件标题同源")
+        expect(
+            rawCollapsed.contains("case .events: Text(\"\\(selectedPackDisplayName) · 事件\")"),
+            "「{当前包名} · 事件」必须只从 `.events` 分支开始渲染，并消费同一个 selectedPackDisplayName；"
+                + "needsPack/失败态不得出现「 · 事件」半截")
+
+        // 节结构 + 真动作 + 专属虚线形制。
+        guard
+            let soundTitleAt = rawCollapsed.range(of: "Text(\"声音包\")")?.lowerBound,
+            let rawGalleryAt = rawCollapsed.range(of: "PackGalleryView(")?.lowerBound,
+            let manageBody = closureBody(
+                after: "private var manageSoundsRow: some View", in: panelCollapsed),
+            let rawManageBody = closureBody(
+                after: "private var manageSoundsRow: some View", in: rawCollapsed)
+        else {
+            expect(false, "必须能定位「声音包」节标题、PackGalleryView 与 manageSoundsRow")
+            return
+        }
+        expect(
+            soundTitleAt < rawGalleryAt,
+            "「声音包」节标题必须渲染在包列表上方")
+        expect(
+            manageBody.contains(
+                "NSWorkspace.shared.activateFileViewerSelecting([audioEnvironment.userPacksDirectory])"),
+            "阶段 1 管理钮必须是真动作：在访达中显示注入的 packs 目录，不能是空 closure")
+        expect(
+            manageBody.contains(".frame(maxWidth: .infinity)"),
+            "管理声音包必须是列表下方全宽 ghost")
+        expect(
+            manageBody.contains("StrokeStyle(lineWidth: 1.5, dash: [4, 3])"),
+            "管理声音包必须使用虚线描边，与实线「断开连接」区分")
+        expect(
+            manageBody.contains(".focused($focusedTarget, equals: .manageSounds)"),
+            "管理声音包按钮本体必须认领 .manageSounds 焦点身份，否则纯模型会再次指向一个无 owner 的幽灵目标")
+        expect(
+            rawManageBody.contains(".accessibilityLabel(\"管理声音包\")"),
+            ".manageSounds 的 VoiceOver 名称必须是「管理声音包」；零行首焦点不得播报成断开连接或卸载")
+        expect(
+            rawManageBody.contains(".accessibilityHint(\"在访达中显示声音包文件夹\")"),
+            "阶段 1 的 VoiceOver hint 必须如实说明点击后是在访达中显示文件夹")
+        expect(
+            !rawManageBody.contains("断开连接") && !rawManageBody.contains("卸载"),
+            ".manageSounds 控件自己的可访问语义不得混入相邻破坏性动作的名称")
+
+        // needsPack 两根正交轴：文案值由 PanelAccessibilitySuite 逐字断言；这里钉视图确实把
+        // 同一份 copy 同时送给可见 Text 与 accessibilityLabel，不能在 SwiftUI 里另写一套。
+        expect(
+            panelCollapsed.contains(
+                "let copy = needsPackNoticeCopy(hasVisiblePackChoices: !panelModel.packCards.isEmpty)"),
+            "needsPack 的有包/零行选择必须交给可单测的 needsPackNoticeCopy，且轴来自真实显示集是否为空")
+        expect(
+            panelCollapsed.contains("Text(copy.message)"),
+            "needsPack 可见副文案必须直接消费 copy.message")
+        expect(
+            panelCollapsed.contains(".accessibilityLabel(copy.accessibilityLabel)"),
+            "needsPack VoiceOver label 必须直接消费同一份 copy，不得与可见文案各写一套")
     }
 
     // ── PLAN-MASTER-VOLUME.md 阶段 D：MasterVolumeRow 的三个硬约束 + 三条接线绊线 ──────────────
