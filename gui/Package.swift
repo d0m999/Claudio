@@ -34,6 +34,15 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper")
             ]
         ),
+        // Standard AppKit/SwiftUI window surface. This is a library target (no `@main`);
+        // `MenuBarController` owns its single lazy window for the app lifetime.
+        .target(
+            name: "SoundPacksWindow",
+            dependencies: [
+                "ClaudioGUICore",
+                .product(name: "ClaudioCore", package: "helper"),
+            ]
+        ),
         // The SwiftUI app shell. Minimal for T7 (just enough to host `OnboardingView`
         // for manual/visual verification) — the real menu bar skeleton lands in T8/T15.
         //
@@ -46,6 +55,7 @@ let package = Package(
             name: "ClaudioGUI",
             dependencies: [
                 "ClaudioGUICore",
+                "SoundPacksWindow",
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),

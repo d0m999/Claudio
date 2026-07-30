@@ -82,6 +82,8 @@ public struct PanelView: View {
     private let configFile: URL
     private let lockFile: URL
     private let previewPlayer: AudioPreviewPlaying
+    private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator
+    private let onManageSounds: @MainActor () -> Void
 
     /// Reports this panel's CURRENT ``PanelLayoutAdaptation/panelWidth`` to whoever owns the
     /// AppKit container around it — in production, ``MenuBarController``, which resizes its
@@ -106,12 +108,16 @@ public struct PanelView: View {
         lockFile: URL = ClaudioPaths.configLockFile,
         onboardingEnvironment: OnboardingEnvironment = OnboardingEnvironment(),
         focusCoordinator: PanelFocusCoordinator = PanelFocusCoordinator(),
+        soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
+        onManageSounds: @escaping @MainActor () -> Void,
         onPanelWidthChange: @escaping (Double) -> Void = { _ in }
     ) {
         self.audioEnvironment = audioEnvironment
         self.configFile = configFile
         self.lockFile = lockFile
         self.focusCoordinator = focusCoordinator
+        self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
+        self.onManageSounds = onManageSounds
         self.onPanelWidthChange = onPanelWidthChange
         // `NSSoundAudioPreviewPlayer` is internal (module-private, not exposed as a public
         // API surface), constructed here rather than taken as a public, overridable
@@ -195,7 +201,8 @@ public struct PanelView: View {
                 for rowViewModel in perRow.values {
                     rowViewModel.retarget(to: reloadedConfig.selectedPack)
                 }
-            })
+            },
+            soundPacksRefreshCoordinator: soundPacksRefreshCoordinator)
 
         // `previewPlayer` (`self`'s own, assigned above) copied into a local so the escaping
         // `onImportSucceeded` closures below never need to capture `self` — a struct's `init`
@@ -661,7 +668,10 @@ public struct PanelView: View {
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             PackGalleryView(
                 cards: panelModel.packCards, focusedTarget: $focusedTarget, adaptation: layoutAdaptation,
-                onSelect: { panelModel.switchPack(to: $0.id) })
+                onSelect: {
+                    let outcome = panelModel.switchPack(to: $0.id)
+                    soundPacksRefreshCoordinator.completePanelPackSwitch(outcome)
+                })
             manageSoundsRow
             disconnectRow
         }
@@ -685,12 +695,11 @@ public struct PanelView: View {
         .accessibilityLabel(copy.accessibilityLabel)
     }
 
-    /// T7 阶段 1 的「管理声音包…」：真管理窗口尚未落地前，先提供一个真动作——在访达中
-    /// 显示 packs 目录。它位于包列表之后、断开连接之前，并在四种 configState 下无条件渲染；
+    /// T8 的「管理声音包…」真窗口入口。它位于包列表之后、断开连接之前，并在四种 configState 下无条件渲染；
     /// 这与 `panelFocusOrder` 无条件 append `.manageSounds` 是一对不可拆的诚实性契约。
     private var manageSoundsRow: some View {
         Button {
-            NSWorkspace.shared.activateFileViewerSelecting([audioEnvironment.userPacksDirectory])
+            onManageSounds()
         } label: {
             Text("管理声音包…")
                 .font(.system(size: 11 * typeScale))
@@ -708,7 +717,7 @@ public struct PanelView: View {
                     style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
         )
         .accessibilityLabel("管理声音包")
-        .accessibilityHint("在访达中显示声音包文件夹")
+        .accessibilityHint("打开声音包管理窗口")
         .focused($focusedTarget, equals: .manageSounds)
     }
 

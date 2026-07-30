@@ -1,7 +1,19 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import SoundPacksWindow
 import SwiftUI
+
+/// Breaks the pre-`super.init()` construction cycle: `PanelView` needs an action closure before
+/// `MenuBarController` can become that closure's weak owner.
+@MainActor
+private final class MenuBarActionRouter {
+    weak var owner: MenuBarController?
+
+    func requestSoundPacksWindow() {
+        owner?.requestSoundPacksWindowPresentation()
+    }
+}
 
 /// The real menu-bar shell (ENGINEERING.md T15 D2): an `NSStatusItem` + `NSPopover` hosting
 /// ``PanelView`` via `NSHostingController` — replaces T7's temporary `WindowGroup`
@@ -21,6 +33,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let statusItem: NSStatusItem
     private let popover: NSPopover
     private let hostingController: NSHostingController<PanelView>
+    private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator
+    private let soundPacksWindowController: SoundPacksWindowController
+    private let actionRouter: MenuBarActionRouter
 
     /// Owned here (not by `PanelView`) so it survives across every popover show/close cycle
     /// for the app's whole lifetime, and so `popoverDidShow` has something concrete to
@@ -28,9 +43,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let focusCoordinator = PanelFocusCoordinator()
 
     /// Whoever was frontmost when the popover opened. `showPopover()` takes the foreground
-    /// away from them (it has to — see there); `popoverDidClose` gives it back. Nil whenever
-    /// no handback is owed.
+    /// away from them (it has to — see there); an ordinary `popoverDidClose` gives it back,
+    /// while a transition to the management window transfers the debt to that window's owner.
+    /// Nil whenever no handback is owed.
     private var previousApp: NSRunningApplication?
+    /// The window is shown only after the transient popover has fully closed. Showing it from
+    /// the button action itself lets `popoverDidClose` race in afterward and hand activation back
+    /// to `previousApp`, immediately stealing key status from our own window.
+    private var pendingSoundPacksWindowPresentation = false
 
     /// `bundledHelperBinary` is the helper CLI inside this app bundle
     /// (`Claudio.app/Contents/Resources/bin/claudio`) — what the 接管 CTA copies to
@@ -46,6 +66,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// the mutation above keeps the ENTIRE suite green. Sunk into `ClaudioGUICore`, it is pinned
     /// by a real fixture bundle (`OnboardingActionsSuite`).
     init(audioEnvironment: AudioImportEnvironment, bundledHelperBinary: URL?) {
+        let soundPacksRefreshCoordinator = SoundPacksRefreshCoordinator()
+        let soundPacksWindowController = SoundPacksWindowController(
+            configFile: ClaudioPaths.configFile,
+            environment: audioEnvironment,
+            refreshCoordinator: soundPacksRefreshCoordinator)
+        let actionRouter = MenuBarActionRouter()
+
         // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
         // capture `self` — we're still pre-`super.init()` here).
         let popover = NSPopover()
@@ -59,6 +86,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             audioEnvironment: audioEnvironment,
             bundledHelperBinary: bundledHelperBinary,
             focusCoordinator: focusCoordinator,
+            soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
+            onManageSounds: { [weak actionRouter] in
+                actionRouter?.requestSoundPacksWindow()
+            },
             // T15 D5「极大 → 加宽 popover」, now actually in effect (TODOS.md:257): `PanelView`
             // widens ITSELF to `widenedPanelWidth` (360pt) at the `.maximum` Dynamic Type tier,
             // but this AppKit popover around it kept its hardcoded 312pt `contentSize` — so the
@@ -79,6 +110,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         popover.contentViewController = hostingController
         self.popover = popover
+        self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
+        self.soundPacksWindowController = soundPacksWindowController
+        self.actionRouter = actionRouter
         // `.transient`: AppKit closes the popover on a click outside it, on an app switch,
         // and — ONLY once the popover's window is key — on Esc. That last clause is the whole
         // catch: `.transient` alone does NOT buy "Esc 关闭", because a status-item popover in
@@ -97,6 +131,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         super.init()
 
+        actionRouter.owner = self
         popover.delegate = self
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
@@ -160,6 +195,29 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.contentViewController?.view.window?.makeKey()
     }
 
+    /// Close the transient popover first, then present the app-owned standard window from
+    /// ``popoverDidClose(_:)``. That callback consumes `previousApp` without paying it
+    /// immediately: the transition stays inside Claudio, so handing activation back now would
+    /// steal key status from the management window. Instead, the window owner pays the debt when
+    /// its retained standard window really closes.
+    fileprivate func requestSoundPacksWindowPresentation() {
+        pendingSoundPacksWindowPresentation = true
+
+        guard popover.isShown else {
+            pendingSoundPacksWindowPresentation = false
+            let previous = previousApp
+            previousApp = nil
+            soundPacksWindowController.showWindow(returnFocusTo: previous)
+            return
+        }
+        // This is an explicit in-app navigation, not a dismiss request that a delegate or nested
+        // popover may veto. `performClose` can fail while a nested popover/child window is present;
+        // no `popoverDidClose` would then consume `pendingSoundPacksWindowPresentation`, leaving a
+        // later unrelated close to open a ghost management window. `close()` also closes nested
+        // popovers and guarantees this pending transition reaches the delegate callback.
+        popover.close()
+    }
+
     // MARK: - NSPopoverDelegate — focus owner (ENGINEERING.md「无障碍规格」, a11y-architect
     // FIX 4)
     //
@@ -205,8 +263,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         // 而且只在最常见的那条路径上复活。
         focusCoordinator.notePanelHidden()
 
+        let shouldPresentSoundPacksWindow = pendingSoundPacksWindowPresentation
+        pendingSoundPacksWindowPresentation = false
         let previous = previousApp
         previousApp = nil
+
+        if shouldPresentSoundPacksWindow {
+            soundPacksWindowController.showWindow(returnFocusTo: previous)
+            return
+        }
 
         // Not active ⇒ the popover closed BECAUSE the user went elsewhere (clicked another
         // app, ⌘-Tabbed away). That app owns the foreground now, and it is not necessarily

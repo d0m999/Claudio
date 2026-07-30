@@ -2193,7 +2193,7 @@ func runViewWiringSuites() {
             "「{当前包名} · 事件」必须只从 `.events` 分支开始渲染，并消费同一个 selectedPackDisplayName；"
                 + "needsPack/失败态不得出现「 · 事件」半截")
 
-        // 节结构 + 真动作 + 专属虚线形制。
+        // 节结构 + T8 真窗口动作 + 专属虚线形制。
         guard
             let soundTitleAt = rawCollapsed.range(of: "Text(\"声音包\")")?.lowerBound,
             let rawGalleryAt = rawCollapsed.range(of: "PackGalleryView(")?.lowerBound,
@@ -2209,9 +2209,9 @@ func runViewWiringSuites() {
             soundTitleAt < rawGalleryAt,
             "「声音包」节标题必须渲染在包列表上方")
         expect(
-            manageBody.contains(
-                "NSWorkspace.shared.activateFileViewerSelecting([audioEnvironment.userPacksDirectory])"),
-            "阶段 1 管理钮必须是真动作：在访达中显示注入的 packs 目录，不能是空 closure")
+            manageBody.contains("onManageSounds()")
+                && !manageBody.contains("activateFileViewerSelecting"),
+            "T8 管理钮必须调用注入的真窗口入口，并替换掉阶段 1 的 Finder 中间态；不能退回空 closure")
         expect(
             manageBody.contains(".frame(maxWidth: .infinity)"),
             "管理声音包必须是列表下方全宽 ghost")
@@ -2225,8 +2225,8 @@ func runViewWiringSuites() {
             rawManageBody.contains(".accessibilityLabel(\"管理声音包\")"),
             ".manageSounds 的 VoiceOver 名称必须是「管理声音包」；零行首焦点不得播报成断开连接或卸载")
         expect(
-            rawManageBody.contains(".accessibilityHint(\"在访达中显示声音包文件夹\")"),
-            "阶段 1 的 VoiceOver hint 必须如实说明点击后是在访达中显示文件夹")
+            rawManageBody.contains(".accessibilityHint(\"打开声音包管理窗口\")"),
+            "T8 的 VoiceOver hint 必须如实说明点击后打开管理窗口，不得继续声称会去访达")
         expect(
             !rawManageBody.contains("断开连接") && !rawManageBody.contains("卸载"),
             ".manageSounds 控件自己的可访问语义不得混入相邻破坏性动作的名称")

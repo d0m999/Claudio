@@ -82,12 +82,16 @@ public final class PanelConfigController: ObservableObject {
     /// 一次**全量** reload 之后，config 读模型之外还要做的跨-view-model 协调（onboarding 重探 + 两组
     /// import view-model `retarget` 到新包）。参数是刚重载出来的 config —— retarget 要用它的 `selectedPack`。
     private let afterFullReload: @MainActor (ClaudioConfig) -> Void
+    /// 管理窗口成功写发布的 revision。订阅只做 ``reload()``，绝不降级到
+    /// ``reloadConfigOnly()``，因为 manifest 与未来的星标写都可能改变 `packCards`。
+    private var soundPacksRefreshCancellable: AnyCancellable?
 
     public init(
         configFile: URL,
         lockFile: URL,
         environment: AudioImportEnvironment,
-        afterFullReload: @escaping @MainActor (ClaudioConfig) -> Void = { _ in }
+        afterFullReload: @escaping @MainActor (ClaudioConfig) -> Void = { _ in },
+        soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator? = nil
     ) {
         self.configFile = configFile
         self.lockFile = lockFile
@@ -109,6 +113,14 @@ public final class PanelConfigController: ObservableObject {
         self.packSwitchError = nil
         self.muteError = nil
         self.masterVolumeError = nil
+
+        soundPacksRefreshCancellable = soundPacksRefreshCoordinator?.$panelReloadRevision
+            .dropFirst()
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.reload()
+                }
+            }
     }
 
     /// 把 `event` 的静音位翻到当前值的**反面**，经 ``EventMuteController`` 写盘，再按结果路由刷新。
@@ -167,7 +179,9 @@ public final class PanelConfigController: ObservableObject {
     ///
     /// 顺序：先记 error 再刷新 —— 两条刷新路径都不碰 `packSwitchError`（只有一次**成功**的切包清它），
     /// 所以红字不会被它自己触发的这次重读抹掉。
-    public func switchPack(to packID: String) {
+    /// - Returns: 切包的真实落盘结局。窗口同步只消费这个 outcome；调用返回本身绝不等于成功。
+    @discardableResult
+    public func switchPack(to packID: String) -> PanelPackSwitchOutcome {
         switch selectPack(
             packID, configFile: configFile, userPacksDirectory: environment.userPacksDirectory,
             bundledPacksDirectory: environment.bundledPacksDirectory, lockFile: lockFile)
@@ -175,6 +189,7 @@ public final class PanelConfigController: ObservableObject {
         case .success:
             packSwitchError = nil
             reload()
+            return .succeeded
         case .failure(let error):
             packSwitchError = error
             switch packSwitchRefreshRoute(after: error) {
@@ -182,6 +197,7 @@ public final class PanelConfigController: ObservableObject {
             case .full: reload()
             case .noRefresh: break
             }
+            return .failed(error)
         }
     }
 
