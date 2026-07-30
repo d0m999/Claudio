@@ -70,6 +70,33 @@ func runPanelConfigControllerSuites() {
         }
     }
 
+    suite("SelectedPackMetadata.displayName：第三方包名压成单行并限制为 80 个 Character") {
+        let metadata = SelectedPackMetadata(
+            id: "fallback-pack",
+            name: " \n 第一行\t第二行  " + String(repeating: "👨‍👩‍👧‍👦", count: 100))
+        let displayName = metadata.displayName
+
+        expect(
+            displayName.hasPrefix("第一行 第二行 "),
+            "包名必须去掉首尾空白，并把换行、tab、连续空格统一压成一个空格；得到 \(displayName)")
+        expect(
+            !displayName.contains("\n") && !displayName.contains("\t")
+                && !displayName.contains("  "),
+            "进入标题和 VoiceOver 播报的包名必须是单行、无连续空白；得到 \(displayName)")
+        expect(
+            displayName.count == 80,
+            "超长包名必须按 Swift Character 限制为 80 个，且不能拆开 emoji 字素；得到 "
+                + "\(displayName.count) 个")
+        expect(
+            displayName.last?.isWhitespace == false,
+            "截断后的包名不得留下尾随空白；得到 \(displayName)")
+
+        expect(
+            SelectedPackMetadata(id: "fallback-pack", name: "\n \t ").displayName
+                == "fallback-pack",
+            "规范化后为空的 manifest name 必须继续回退到安全 pack id")
+    }
+
     // 变异 #3（翻转）+ #2（可达性）：一次成功的静音必须（a）把翻转后的 enabled 位**落盘**，
     // （b）**重算** eventRows / config 读模型让面板反映它。
     suite("PanelConfigController.toggleMute 成功：翻转位落盘 + 读模型重算（钉死红队 #3 翻转、#2 可达性）") {
@@ -253,6 +280,76 @@ func runPanelConfigControllerSuites() {
                 "一次成功的静音走 .enabledFlagsOnly（轻量刷新），**不**该触发全量 reload 的 afterFullReload"
                     + " —— 触发了就是每点一次静音钮都在主线程上白扫整个包库 + 重探 onboarding。得到 "
                     + "\(afterFullReloadCalls) 次")
+        }
+    }
+
+    suite("PanelConfigController.reloadConfigOnly 遇到外部切包：升级为全量重载并 retarget 到新包") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "name": "包 A", "events": { "stop": "stop.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("pack-a/stop.mp3"))
+            writeFixture(
+                #"{ "id": "pack-b", "name": "包 B", "events": { "notification": "notification.mp3" } }"#,
+                to: packsDir.appendingPathComponent("pack-b/manifest.json"))
+            writeFixture(
+                "audio", to: packsDir.appendingPathComponent("pack-b/notification.mp3"))
+
+            var afterFullReloadConfigs: [ClaudioConfig] = []
+            let controller = PanelConfigController(
+                configFile: configFile, lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeEnvironment(packsDir),
+                afterFullReload: { afterFullReloadConfigs.append($0) })
+
+            if case .present = controller.eventRows.first(where: { $0.event == .stop })?.coverage {
+                // 前提成立：旧读模型确实属于 pack-a。
+            } else {
+                expect(false, "前提：pack-a 的 stop 必须是 .present")
+            }
+            expect(
+                controller.packCards.first(where: { $0.isSelected })?.id == "pack-a",
+                "前提：画廊初始必须选中 pack-a")
+
+            // 模拟 CLI / 第二个实例在本实例一次轻量刷新前把 selected_pack 从 A 改为 B。
+            writeFixture(
+                #"{ "selected_pack": "pack-b", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
+            controller.reloadConfigOnly()
+
+            expect(
+                controller.config.selectedPack == "pack-b"
+                    && controller.selectedPackMetadata.id == "pack-b"
+                    && controller.selectedPackMetadata.displayName == "包 B",
+                "外部切包后 config 与标题元数据必须共同指向 pack-b；得到 "
+                    + "\(controller.config.selectedPack) / \(controller.selectedPackMetadata)")
+            let notificationCoverage =
+                controller.eventRows.first(where: { $0.event == .notification })?.coverage
+            if case .present = notificationCoverage {
+                // 新包覆盖已重算。
+            } else {
+                expect(
+                    false,
+                    "外部切到 pack-b 后 notification 必须按新 manifest 重算成 .present；得到 "
+                        + "\(String(describing: notificationCoverage))")
+            }
+            if case .present =
+                controller.eventRows.first(where: { $0.event == .stop })?.coverage
+            {
+                expect(false, "外部切到不映 stop 的 pack-b 后，stop 不得继续保留 pack-a 的 .present")
+            }
+            expect(
+                controller.packCards.first(where: { $0.isSelected })?.id == "pack-b",
+                "外部切包后画廊高亮必须重算为 pack-b，不能继续显示 pack-a")
+            expect(
+                afterFullReloadConfigs.map(\.selectedPack) == ["pack-b"],
+                "检测到 selected_pack 变化后必须恰好执行一次 afterFullReload(pack-b)，让 drop zone 与"
+                    + "每行 import view-model retarget 到真实编辑目标；得到 "
+                    + "\(afterFullReloadConfigs.map(\.selectedPack))")
         }
     }
 

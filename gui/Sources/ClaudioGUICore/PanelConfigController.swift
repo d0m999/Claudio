@@ -193,15 +193,23 @@ public final class PanelConfigController: ObservableObject {
     /// 排在最前，但它探的是 helper 二进制 / settings.json，与 config 读模型**互不依赖**，挪到后面结果一字
     /// 不差；而 `retarget` 必须排在 config 重载**之后**（它要用新的 `selectedPack`），闭包收到的正是新 config。
     public func reload() {
-        reloadConfigReadModel()
+        reload(using: loadPanelConfig(from: configFile))
+    }
+
+    /// 使用一份已经读到的 config state 执行与 ``reload()`` 完全相同的全量重载。轻量刷新若发现
+    /// `selected_pack` 被外部写者换过，会从这里升级，既避免把同一份 config 再读一次，也保证
+    /// `eventRows` / `packCards` / `selectedPackMetadata` 与 import view-model retarget 在同一次刷新中
+    /// 对齐到同一包。
+    private func reload(using loadedState: PanelConfigState) {
+        reloadConfigReadModel(using: loadedState)
         afterFullReload(config)
     }
 
     /// **只重读 config 读模型**（``PanelRefreshRoute/configOnly``）：重读 `config.json` → 重算 `configState`
     /// / `config` → 按新 config 重算每行的 `enabled` 位。**不**重扫包根、正常写（selected_pack
-    /// 未变）**不**读 manifest、**不**调 `afterFullReload`。若外部写者同时换了 selected_pack，
-    /// 只为独立的 ``selectedPackMetadata`` 读新选中包 manifest 一次，避免 header/事件标题留在旧包。
-    /// 正常路径代价 = 一次文件读 + 一次目录 stat。
+    /// 未变）**不**读 manifest、**不**调 `afterFullReload`。若外部写者同时换了 selected_pack，则升级为
+    /// 与 ``reload()`` 相同的全量重载：标题、事件覆盖、画廊高亮和 import view-model 的写入目标必须一起
+    /// 切到新包，不能只换标题。正常路径代价 = 一次文件读 + 一次目录 stat。
     ///
     /// 两条路共用它，因为要做的事一模一样：
     ///
@@ -218,16 +226,25 @@ public final class PanelConfigController: ObservableObject {
     public func reloadConfigOnly() {
         let previousSelectedPack = config.selectedPack
         let reloaded = loadPanelConfig(from: configFile)
+        let selectedPackChanged: Bool
+        switch reloaded {
+        case .operational(let reloadedConfig):
+            selectedPackChanged = reloadedConfig.selectedPack != previousSelectedPack
+        case .needsPack:
+            selectedPackChanged = !previousSelectedPack.isEmpty
+        case .malformed, .unwritable:
+            // These states expose an empty `resolvedConfig` only as a safe read-model fallback.
+            // It is not evidence that an external writer actually selected the empty pack.
+            selectedPackChanged = false
+        }
+
+        if selectedPackChanged {
+            reload(using: reloaded)
+            return
+        }
+
         configState = reloaded
         config = reloaded.resolvedConfig
-        // Normal mute/master-volume writes keep selected_pack unchanged, so the lightweight path
-        // still performs zero manifest reads. If an external writer changed selected_pack between
-        // our write attempt and this reread, refresh the independent title metadata once instead
-        // of letting header/event title describe the old pack.
-        if config.selectedPack != previousSelectedPack {
-            selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
-                packID: config.selectedPack, environment: environment)
-        }
         eventRows = eventRows.map { row in
             EventRow(event: row.event, coverage: row.coverage, enabled: config.isEnabled(row.event))
         }
@@ -235,8 +252,8 @@ public final class PanelConfigController: ObservableObject {
 
     /// 重读 `config.json` + 重算 config 派生的每一个读模型 —— `reload()` 里“属于这个类自己”的那一半，
     /// 不含跨-view-model 协调（那是 `afterFullReload` 的事）。
-    private func reloadConfigReadModel() {
-        configState = loadPanelConfig(from: configFile)
+    private func reloadConfigReadModel(using loadedState: PanelConfigState) {
+        configState = loadedState
         config = configState.resolvedConfig
         eventRows = packCoverage(
             packID: config.selectedPack, config: config, environment: environment)

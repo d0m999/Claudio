@@ -186,6 +186,11 @@ public struct PackCard: Sendable, Equatable {
 /// The event-section title and panel header still need a guaranteed current-pack reading, so the
 /// controller owns this separate value and both surfaces consume its ``displayName``.
 public struct SelectedPackMetadata: Sendable, Equatable {
+    /// Header/event titles and their automatic VoiceOver announcement share this projection.
+    /// Keep it short enough to remain useful in both surfaces, counting extended grapheme
+    /// clusters rather than Unicode scalars so truncation never splits a visible character.
+    private static let displayNameCharacterLimit = 80
+
     public let id: String
     public let name: String?
 
@@ -194,14 +199,40 @@ public struct SelectedPackMetadata: Sendable, Equatable {
         self.name = name
     }
 
-    /// Human-facing name when the manifest supplies one; the safe pack id is the honest fallback
-    /// for a missing/unreadable name. An empty id remains empty (the `.needsPack` state never
-    /// renders the event-section title).
+    /// Human-facing, single-line name when the manifest supplies one; the safe pack id is the
+    /// honest fallback for a missing/unreadable/whitespace-only name. Manifest names are
+    /// third-party input, so whitespace is collapsed and output is capped before it reaches the
+    /// panel title or its automatic VoiceOver announcement. An empty id remains empty (the
+    /// `.needsPack` state never renders the event-section title).
     public var displayName: String {
-        guard let name, !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return id
+        guard let name else { return id }
+
+        var normalized = ""
+        normalized.reserveCapacity(Self.displayNameCharacterLimit)
+        var characterCount = 0
+        var hasPendingWhitespace = false
+
+        for character in name {
+            if character.isWhitespace {
+                hasPendingWhitespace = characterCount > 0
+                continue
+            }
+
+            if hasPendingWhitespace {
+                // Preserve a separator only when there is room for both it and the character
+                // that follows. This keeps truncation from manufacturing trailing whitespace.
+                guard characterCount + 1 < Self.displayNameCharacterLimit else { break }
+                normalized.append(" ")
+                characterCount += 1
+                hasPendingWhitespace = false
+            }
+
+            guard characterCount < Self.displayNameCharacterLimit else { break }
+            normalized.append(character)
+            characterCount += 1
         }
-        return name
+
+        return normalized.isEmpty ? id : normalized
     }
 }
 
