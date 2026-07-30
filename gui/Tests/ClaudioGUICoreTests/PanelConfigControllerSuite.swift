@@ -73,7 +73,7 @@ func runPanelConfigControllerSuites() {
     suite("SelectedPackMetadata.displayName：第三方包名压成单行并限制为 80 个 Character") {
         let metadata = SelectedPackMetadata(
             id: "fallback-pack",
-            name: " \n 第一行\t第二行  " + String(repeating: "👨‍👩‍👧‍👦", count: 100))
+            name: " \n 第一行\t第二行  " + String(repeating: "字", count: 100))
         let displayName = metadata.displayName
 
         expect(
@@ -85,8 +85,7 @@ func runPanelConfigControllerSuites() {
             "进入标题和 VoiceOver 播报的包名必须是单行、无连续空白；得到 \(displayName)")
         expect(
             displayName.count == 80,
-            "超长包名必须按 Swift Character 限制为 80 个，且不能拆开 emoji 字素；得到 "
-                + "\(displayName.count) 个")
+            "超长包名必须按 Swift Character 限制为 80 个；得到 \(displayName.count) 个")
         expect(
             displayName.last?.isWhitespace == false,
             "截断后的包名不得留下尾随空白；得到 \(displayName)")
@@ -95,6 +94,60 @@ func runPanelConfigControllerSuites() {
             SelectedPackMetadata(id: "fallback-pack", name: "\n \t ").displayName
                 == "fallback-pack",
             "规范化后为空的 manifest name 必须继续回退到安全 pack id")
+    }
+
+    suite("SelectedPackMetadata.displayName：缺失 name 时回退 id 也必须单行化并截断") {
+        let rawID = " \n fallback\tpack  " + String(repeating: "x", count: 100)
+        let missingNameDisplay = SelectedPackMetadata(id: rawID, name: nil).displayName
+        let blankNameDisplay = SelectedPackMetadata(id: rawID, name: "\n \t ").displayName
+
+        for displayName in [missingNameDisplay, blankNameDisplay] {
+            expect(
+                displayName.hasPrefix("fallback pack "),
+                "缺失或空白 name 的回退 id 必须折叠首尾、换行、tab 与连续空白；得到 \(displayName)")
+            expect(
+                !displayName.contains("\n") && !displayName.contains("\t")
+                    && !displayName.contains("  "),
+                "回退 id 进入标题和 VoiceOver 前也必须成为单行；得到 \(displayName)")
+            expect(
+                displayName.count == 80,
+                "超长回退 id 也必须限制为 80 个 Character；得到 \(displayName.count) 个")
+            expect(
+                displayName.last?.isWhitespace == false,
+                "截断后的回退 id 不得留下尾随空白；得到 \(displayName)")
+        }
+    }
+
+    suite("SelectedPackMetadata.displayName：完整字素边界之外另限 256 个 Unicode 标量") {
+        let family = "👨‍👩‍👧‍👦"
+        let emojiDisplay = SelectedPackMetadata(
+            id: "fallback-pack", name: String(repeating: family, count: 100)
+        ).displayName
+        expect(
+            emojiDisplay.count <= 80,
+            "组合 emoji 仍必须受 80 个 Character 上限约束；得到 \(emojiDisplay.count) 个")
+        expect(
+            emojiDisplay.unicodeScalars.count <= 256,
+            "80 个复杂字素仍可能含大量标量，输出必须另受 256 标量上限约束；得到 "
+                + "\(emojiDisplay.unicodeScalars.count) 个")
+        expect(
+            emojiDisplay.allSatisfy { $0 == "👨‍👩‍👧‍👦" },
+            "标量预算必须在完整 Character 边界停止，不能拆开家庭 emoji；得到 \(emojiDisplay)")
+
+        let oversizedCluster = "a" + String(repeating: "\u{0301}", count: 10_000)
+        let manifestDisplay = SelectedPackMetadata(
+            id: "fallback-pack", name: "Visible " + oversizedCluster
+        ).displayName
+        expect(
+            manifestDisplay == "Visible",
+            "单个超预算字素簇必须整体拒绝，且不得留下它前面的待定空格；得到 "
+                + "\(manifestDisplay.unicodeScalars.count) 个标量")
+
+        let fallbackDisplay = SelectedPackMetadata(id: oversizedCluster, name: nil).displayName
+        expect(
+            fallbackDisplay.unicodeScalars.count <= 256,
+            "回退 id 自身是超大组合字素簇时也不得绕过标量上限；得到 "
+                + "\(fallbackDisplay.unicodeScalars.count) 个")
     }
 
     // 变异 #3（翻转）+ #2（可达性）：一次成功的静音必须（a）把翻转后的 enabled 位**落盘**，

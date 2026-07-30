@@ -187,9 +187,11 @@ public struct PackCard: Sendable, Equatable {
 /// controller owns this separate value and both surfaces consume its ``displayName``.
 public struct SelectedPackMetadata: Sendable, Equatable {
     /// Header/event titles and their automatic VoiceOver announcement share this projection.
-    /// Keep it short enough to remain useful in both surfaces, counting extended grapheme
-    /// clusters rather than Unicode scalars so truncation never splits a visible character.
+    /// Keep it short enough to remain useful in both surfaces. The Character limit preserves
+    /// complete extended grapheme clusters; the independent scalar limit keeps one adversarial
+    /// cluster from carrying an otherwise-unbounded number of combining marks.
     private static let displayNameCharacterLimit = 80
+    private static let displayNameUnicodeScalarLimit = 256
 
     public let id: String
     public let name: String?
@@ -200,39 +202,56 @@ public struct SelectedPackMetadata: Sendable, Equatable {
     }
 
     /// Human-facing, single-line name when the manifest supplies one; the safe pack id is the
-    /// honest fallback for a missing/unreadable/whitespace-only name. Manifest names are
-    /// third-party input, so whitespace is collapsed and output is capped before it reaches the
-    /// panel title or its automatic VoiceOver announcement. An empty id remains empty (the
-    /// `.needsPack` state never renders the event-section title).
+    /// honest fallback for a missing/unreadable/whitespace-only name. Both values are third-party
+    /// input, so each goes through the same whitespace collapse and Character/scalar caps before
+    /// it reaches the panel title or its automatic VoiceOver announcement. An empty id remains
+    /// empty (the `.needsPack` state never renders the event-section title).
     public var displayName: String {
-        guard let name else { return id }
+        if let name {
+            let normalizedName = Self.normalizedDisplayName(name)
+            if !normalizedName.isEmpty { return normalizedName }
+        }
+        return Self.normalizedDisplayName(id)
+    }
 
+    private static func normalizedDisplayName(_ candidate: String) -> String {
         var normalized = ""
         normalized.reserveCapacity(Self.displayNameCharacterLimit)
         var characterCount = 0
+        var unicodeScalarCount = 0
         var hasPendingWhitespace = false
 
-        for character in name {
+        for character in candidate {
             if character.isWhitespace {
                 hasPendingWhitespace = characterCount > 0
                 continue
             }
 
+            let separatorCount = hasPendingWhitespace ? 1 : 0
+            let characterUnicodeScalarCount = character.unicodeScalars.count
+            guard
+                characterCount + separatorCount < Self.displayNameCharacterLimit,
+                unicodeScalarCount + separatorCount + characterUnicodeScalarCount
+                    <= Self.displayNameUnicodeScalarLimit
+            else {
+                // Stop at the prior complete Character. In particular, never append part of one
+                // oversized base-plus-combining-marks cluster merely to fill the scalar budget.
+                break
+            }
+
             if hasPendingWhitespace {
-                // Preserve a separator only when there is room for both it and the character
-                // that follows. This keeps truncation from manufacturing trailing whitespace.
-                guard characterCount + 1 < Self.displayNameCharacterLimit else { break }
                 normalized.append(" ")
                 characterCount += 1
+                unicodeScalarCount += 1
                 hasPendingWhitespace = false
             }
 
-            guard characterCount < Self.displayNameCharacterLimit else { break }
             normalized.append(character)
             characterCount += 1
+            unicodeScalarCount += characterUnicodeScalarCount
         }
 
-        return normalized.isEmpty ? id : normalized
+        return normalized
     }
 }
 
