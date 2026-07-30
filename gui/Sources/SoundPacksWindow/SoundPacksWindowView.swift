@@ -52,8 +52,8 @@ struct SoundPacksWindowView: View {
                 HStack {
                     Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
                         .font(.title2.weight(.semibold))
-                    if card.isCC0 {
-                        Text("CC0")
+                    if let label = licenseBadgeLabel(metaSlots.license) {
+                        Text(label)
                             .font(.caption)
                     }
                     Spacer()
@@ -110,6 +110,25 @@ struct SoundPacksWindowView: View {
     private var selectedCard: PackCard? {
         guard let selectedPackID = model.selectedPackID else { return nil }
         return model.packCards.first(where: { $0.id == selectedPackID })
+    }
+
+    private var metaSlots: PackRowMetaSlots {
+        guard let card = selectedCard else {
+            return PackRowMetaSlots(license: .none, missingCount: nil)
+        }
+        return packRowMetaSlots(
+            isCC0: card.isCC0, state: card.state, factoryIntegrity: card.factoryIntegrity)
+    }
+
+    private func licenseBadgeLabel(_ badge: PackRowLicenseBadge) -> String? {
+        switch badge {
+        case .none:
+            return nil
+        case .cc0:
+            return "CC0"
+        case .modified:
+            return "⚠ 已修改"
+        }
     }
 
     private func mappingText(_ coverage: CoverageState) -> String {

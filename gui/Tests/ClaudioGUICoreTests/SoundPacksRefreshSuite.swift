@@ -260,10 +260,13 @@ func runSoundPacksRefreshSuites() {
         guard
             let controller = soundPacksCode(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"),
+            let view = soundPacksCode("gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let model = soundPacksCode(
                 "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift")
         else {
-            expect(false, "读不到 SoundPacksWindowController.swift 或 SoundPacksWindowModel.swift")
+            expect(
+                false,
+                "读不到 SoundPacksWindowController.swift、SoundPacksWindowView.swift 或 SoundPacksWindowModel.swift")
             return
         }
 
@@ -272,6 +275,12 @@ func runSoundPacksRefreshSuites() {
         expect(
             controller.contains("private var window: NSWindow?"),
             "owner 必须持有一个 optional NSWindow，按需创建")
+        expect(
+            controller.contains("private lazy var model: SoundPacksWindowModel"),
+            "管理窗口 model 必须延迟到首次展示时创建，启动时不得扫描声音包")
+        expect(
+            view.contains("packRowMetaSlots(") && view.contains("case .modified:"),
+            "管理窗口 license 必须复用 factoryIntegrity 的 modified 优先规则")
         expect(
             controller.contains("window ?? makeWindow()"),
             "showWindow 必须复用已有窗口，不能每点一次管理就 new 一扇")

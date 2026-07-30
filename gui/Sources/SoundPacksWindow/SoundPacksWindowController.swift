@@ -5,12 +5,18 @@ import SwiftUI
 
 /// App-lifetime owner of the one Sound Packs window.
 ///
-/// `MenuBarController` owns this controller. The `NSWindow` itself is lazy because most menu-bar
-/// sessions never open management, and retained after close so repeated 「管理声音包…」 actions
-/// reuse the same window/model instead of growing a second editor.
+/// `MenuBarController` owns this controller. The `NSWindow` and its disk-backed model are lazy
+/// because most menu-bar sessions never open management, and retained after close so repeated
+/// 「管理声音包…」 actions reuse the same window/model instead of growing a second editor.
 @MainActor
 public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
-    private let model: SoundPacksWindowModel
+    private let configFile: URL
+    private let environment: AudioImportEnvironment
+    private let refreshCoordinator: SoundPacksRefreshCoordinator
+    private lazy var model: SoundPacksWindowModel = SoundPacksWindowModel(
+        configFile: configFile,
+        environment: environment,
+        refreshCoordinator: refreshCoordinator)
     private let userPacksDirectory: URL
     private var window: NSWindow?
     /// The app that owned the keyboard before Claudio opened its popover. The popover transfers
@@ -26,10 +32,9 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         environment: AudioImportEnvironment,
         refreshCoordinator: SoundPacksRefreshCoordinator
     ) {
-        model = SoundPacksWindowModel(
-            configFile: configFile,
-            environment: environment,
-            refreshCoordinator: refreshCoordinator)
+        self.configFile = configFile
+        self.environment = environment
+        self.refreshCoordinator = refreshCoordinator
         userPacksDirectory = environment.userPacksDirectory
         super.init()
 
