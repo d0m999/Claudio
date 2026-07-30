@@ -2481,24 +2481,44 @@ func runViewWiringSuites() {
                 + " 之后才会显示新状态")
     }
 
-    suite("T10：CoverageTrack 的 missing 空壳与斜杠都接 text-2，且真实行底仍是 surface-2") {
+    suite("T10：CoverageTrack 的 present 接事件色、missing 接 text-2，且真实行底仍是 surface-2") {
         // ContrastSuite 的四对数学断言只能证明「这些 hex 配在一起能过 ≥3:1」，看不见不可 import 的
-        // ClaudioGUI 视图到底用了哪一个 token。少了这半，真把 missing 改回 muted `#6F665B`
-        // （暗色对 surface-2 只有 2.77:1）时，那四条会继续全绿——断言措辞就比覆盖范围大。
+        // ClaudioGUI 视图到底用了哪一个 token。少了这半，把 present 改成 hairline-strong，或把
+        // missing 改回 muted `#6F665B`（暗色对 surface-2 只有 2.77:1）时，那四条都会继续全绿
+        // ——断言措辞就比覆盖范围大。
         guard
             let source = codeWithoutStrings("gui/Sources/ClaudioGUI/PackGalleryView.swift"),
             let packCardBody = closureBody(after: "private struct PackCardView: View", in: source),
+            let coverageTrackBody = closureBody(
+                after: "private struct CoverageTrack: View", in: source),
+            let coverageBody = closureBody(after: "var body: some View", in: coverageTrackBody),
             let slotBody = closureBody(
                 after: "private func slot(isPresent: Bool, color: Color) -> some View",
-                in: source)
+                in: coverageTrackBody),
+            let presentBody = closureBody(after: "if isPresent", in: slotBody)
         else {
             expect(
                 false,
-                "读不到 PackGalleryView.swift，或切不出 PackCardView / CoverageTrack.slot —— "
+                "读不到 PackGalleryView.swift，或切不出 PackCardView / CoverageTrack.body / "
+                    + "CoverageTrack.slot 的 present 分支 —— "
                     + "T10 接线无从判起")
             return
         }
+        let flatCoverage = collapsingWhitespace(coverageBody)
         let flatSlot = collapsingWhitespace(slotBody)
+        let flatPresent = collapsingWhitespace(presentBody)
+        expect(
+            whitespaceTolerantHitCount(
+                of: "slot(isPresent: presentEvents.contains(event), "
+                    + "color: ClaudioColor.event(event, colorScheme))",
+                in: coverageBody) == 1,
+            "CoverageTrack.body 必须把每个 event 的 ClaudioColor.event(...) 作为 color 参数传给"
+                + " slot；否则 ContrastSuite 量到的事件色没有进入真实胶囊。body 实际是："
+                + "\(flatCoverage)")
+        expect(
+            whitespaceTolerantHitCount(of: ".fill(color)", in: presentBody) == 1,
+            "CoverageTrack present 分支必须用传入的事件色 .fill(color)；改成 hairline-strong 等"
+                + "其它 token 会让静态对比度断言继续假绿。present 分支实际是：\(flatPresent)")
         expect(
             whitespaceTolerantHitCount(
                 of: ".strokeBorder(ClaudioColor.textSecondary(colorScheme), lineWidth: 1)",
