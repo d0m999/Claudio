@@ -17,6 +17,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         configFile: configFile,
         environment: environment,
         refreshCoordinator: refreshCoordinator)
+    private lazy var focusCoordinator = SoundPacksWindowFocusCoordinator()
     private let userPacksDirectory: URL
     private var window: NSWindow?
     /// The app that owned the keyboard before Claudio opened its popover. The popover transfers
@@ -26,6 +27,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private var handbackApplication: NSRunningApplication?
     private var isClosingWindow = false
     private var externalActivationCancellable: AnyCancellable?
+    private var selectionAnnouncementCancellable: AnyCancellable?
 
     public init(
         configFile: URL,
@@ -71,6 +73,12 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         let presentedWindow = window ?? makeWindow()
         NSApp.activate(ignoringOtherApps: true)
         presentedWindow.makeKeyAndOrderFront(nil)
+        presentedWindow.makeFirstResponder(presentedWindow.contentViewController?.view)
+        focusCoordinator.requestInitialFocus()
+        SoundPacksWindowAccessibilityBridge.post(
+            .windowOpened,
+            facts: accessibilityFacts(),
+            window: presentedWindow)
     }
 
     public func windowWillClose(_ notification: Notification) {
@@ -108,7 +116,8 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private func makeWindow() -> NSWindow {
         let content = SoundPacksWindowView(
             model: model,
-            userPacksDirectory: userPacksDirectory)
+            userPacksDirectory: userPacksDirectory,
+            focusCoordinator: focusCoordinator)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
@@ -118,10 +127,45 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         window.contentMinSize = NSSize(width: 560, height: 400)
         window.contentViewController = NSHostingController(rootView: content)
         window.isReleasedWhenClosed = false
+        window.autorecalculatesKeyViewLoop = true
         window.delegate = self
         window.setFrameAutosaveName("Claudio.SoundPacksWindow")
         window.center()
         self.window = window
+        selectionAnnouncementCancellable = model.$selectedPackID
+            .dropFirst()
+            .sink { [weak self] selectedPackID in
+                MainActor.assumeIsolated {
+                    guard
+                        let self,
+                        self.window?.isKeyWindow == true
+                    else { return }
+                    SoundPacksWindowAccessibilityBridge.post(
+                        .selectionChanged,
+                        facts: self.accessibilityFacts(selectedPackID: selectedPackID),
+                        window: window)
+                }
+            }
         return window
+    }
+
+    private func accessibilityFacts() -> SoundPacksWindowAnnouncementFacts {
+        accessibilityFacts(selectedPackID: model.selectedPackID)
+    }
+
+    /// `@Published` emits its new value before the stored property is replaced. Accepting that
+    /// emitted value explicitly keeps a transition to `nil` from accidentally announcing the old
+    /// selection.
+    private func accessibilityFacts(
+        selectedPackID: String?
+    ) -> SoundPacksWindowAnnouncementFacts {
+        let selectedName = selectedPackID.flatMap { packID in
+            model.packCards.first(where: { $0.id == packID }).map {
+                SelectedPackMetadata(id: $0.id, name: $0.name).displayName
+            }
+        }
+        return SoundPacksWindowAnnouncementFacts(
+            packCount: model.packCards.count,
+            selectedPackName: selectedName)
     }
 }

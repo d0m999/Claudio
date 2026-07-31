@@ -1,0 +1,257 @@
+import Combine
+import Foundation
+
+/// One real keyboard stop in the Sound Packs standard window.
+///
+/// This identity space is intentionally window-owned. A standard, resizable `NSWindow` has a
+/// different visual order and lifetime from the transient menu-bar panel, so none of the
+/// `Panel*` accessibility types participate here.
+public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
+    /// The native pack `List` is one Tab stop; arrow keys move between its rows.
+    case packList
+    /// The selected pack's 「在访达中显示」 button.
+    case revealSelectedPack
+}
+
+/// The visible facts needed to derive the window's current keyboard order.
+public struct SoundPacksWindowFocusScope: Sendable, Equatable {
+    public let packIDs: [String]
+    public let selectedPackID: String?
+
+    public init(packIDs: [String], selectedPackID: String?) {
+        self.packIDs = packIDs
+        self.selectedPackID = selectedPackID
+    }
+}
+
+/// Tab order follows the standard window's visual reading order: sidebar list, then detail action.
+///
+/// An empty list is deliberately absent rather than becoming a dead opening focus. A stale
+/// selection also cannot create a focus target for a detail button that is not rendered.
+public func soundPacksWindowFocusOrder(
+    _ scope: SoundPacksWindowFocusScope
+) -> [SoundPacksWindowFocusTarget] {
+    guard !scope.packIDs.isEmpty else { return [] }
+
+    var order: [SoundPacksWindowFocusTarget] = [.packList]
+    if let selectedPackID = scope.selectedPackID,
+        scope.packIDs.contains(selectedPackID)
+    {
+        order.append(.revealSelectedPack)
+    }
+    return order
+}
+
+public func soundPacksWindowFirstFocusTarget(
+    _ scope: SoundPacksWindowFocusScope
+) -> SoundPacksWindowFocusTarget? {
+    soundPacksWindowFocusOrder(scope).first
+}
+
+/// A monotonic request channel from the retained `NSWindow` owner to SwiftUI's real FocusState.
+///
+/// The owner increments this on every presentation, including when the same retained window is
+/// reopened. The view remembers the last revision it handled, so ordinary body recomputation does
+/// not steal focus back from the user.
+@MainActor
+public final class SoundPacksWindowFocusCoordinator: ObservableObject {
+    @Published public private(set) var requestRevision = 0
+
+    public init() {}
+
+    public func requestInitialFocus() {
+        requestRevision += 1
+    }
+}
+
+/// Window-specific Dynamic Type tiers. They describe this standard window, not the panel's width
+/// ladder.
+public enum SoundPacksWindowTypeSizeTier: Sendable, CaseIterable {
+    case standard
+    case enlarged
+    case accessibility
+}
+
+/// Reflow decisions consumed by `SoundPacksWindowView`.
+///
+/// At accessibility sizes the two main regions stack vertically, preserving useful line length at
+/// up to 400% text scaling. Detail content remains scrollable, and critical controls never rely on
+/// a single-line truncation to fit.
+public struct SoundPacksWindowLayoutAdaptation: Sendable, Equatable {
+    public let stacksPrimaryRegions: Bool
+    public let stacksDetailHeader: Bool
+    public let stacksEventRows: Bool
+    public let sidebarMinimumWidth: Double
+    public let sidebarIdealWidth: Double
+    public let sidebarMaximumWidth: Double
+    public let detailMinimumWidth: Double
+    public let sidebarMinimumHeight: Double
+    public let packNameLineLimit: Int?
+
+    public init(
+        stacksPrimaryRegions: Bool,
+        stacksDetailHeader: Bool,
+        stacksEventRows: Bool,
+        sidebarMinimumWidth: Double,
+        sidebarIdealWidth: Double,
+        sidebarMaximumWidth: Double,
+        detailMinimumWidth: Double,
+        sidebarMinimumHeight: Double,
+        packNameLineLimit: Int?
+    ) {
+        self.stacksPrimaryRegions = stacksPrimaryRegions
+        self.stacksDetailHeader = stacksDetailHeader
+        self.stacksEventRows = stacksEventRows
+        self.sidebarMinimumWidth = sidebarMinimumWidth
+        self.sidebarIdealWidth = sidebarIdealWidth
+        self.sidebarMaximumWidth = sidebarMaximumWidth
+        self.detailMinimumWidth = detailMinimumWidth
+        self.sidebarMinimumHeight = sidebarMinimumHeight
+        self.packNameLineLimit = packNameLineLimit
+    }
+}
+
+public func soundPacksWindowLayoutAdaptation(
+    for tier: SoundPacksWindowTypeSizeTier
+) -> SoundPacksWindowLayoutAdaptation {
+    switch tier {
+    case .standard:
+        SoundPacksWindowLayoutAdaptation(
+            stacksPrimaryRegions: false,
+            stacksDetailHeader: false,
+            stacksEventRows: false,
+            sidebarMinimumWidth: 176,
+            sidebarIdealWidth: 176,
+            sidebarMaximumWidth: 220,
+            detailMinimumWidth: 380,
+            sidebarMinimumHeight: 0,
+            packNameLineLimit: 1)
+    case .enlarged:
+        SoundPacksWindowLayoutAdaptation(
+            stacksPrimaryRegions: false,
+            stacksDetailHeader: true,
+            stacksEventRows: true,
+            sidebarMinimumWidth: 196,
+            sidebarIdealWidth: 220,
+            sidebarMaximumWidth: 280,
+            detailMinimumWidth: 360,
+            sidebarMinimumHeight: 0,
+            packNameLineLimit: nil)
+    case .accessibility:
+        SoundPacksWindowLayoutAdaptation(
+            stacksPrimaryRegions: true,
+            stacksDetailHeader: true,
+            stacksEventRows: true,
+            sidebarMinimumWidth: 0,
+            sidebarIdealWidth: 0,
+            sidebarMaximumWidth: .greatestFiniteMagnitude,
+            detailMinimumWidth: 0,
+            sidebarMinimumHeight: 160,
+            packNameLineLimit: nil)
+    }
+}
+
+/// VoiceOver label for one native list row. Selection itself is exposed by the List; this sentence
+/// supplies the independent active-pack, integrity, completeness, and license facts.
+public func soundPacksWindowPackAccessibilityLabel(
+    displayName: String,
+    isActivePack: Bool,
+    state: PackCardState,
+    license: PackRowLicenseBadge
+) -> String {
+    var facts = [displayName]
+    if isActivePack { facts.append("当前正在使用") }
+
+    switch state {
+    case .complete:
+        facts.append("4 个事件均已配置")
+    case .partial(let present, let total):
+        facts.append("\(present)/\(total) 个事件已配置，缺 \(max(0, total - present)) 个")
+    case .broken(let reason):
+        facts.append("声音包不可用：\(reason)")
+    }
+
+    switch license {
+    case .none:
+        break
+    case .cc0:
+        facts.append("CC0")
+    case .modified:
+        facts.append("内置包已被修改")
+    }
+
+    return facts.joined(separator: "，")
+}
+
+/// VoiceOver label for one read-only event mapping status row.
+///
+/// Broken and intentionally-unmapped are distinct sentences. A missing file is explicitly called
+/// an error instead of being flattened into ordinary secondary-colored metadata.
+public func soundPacksWindowEventAccessibilityLabel(
+    eventName: String,
+    coverage: CoverageState,
+    enabled: Bool
+) -> String {
+    let enabledFact = enabled ? "已启用" : "已静音"
+    switch coverage {
+    case .present(let fileName):
+        return "\(eventName)，声音 \(fileName)，\(enabledFact)"
+    case .unmapped:
+        return "\(eventName)，未配置声音，\(enabledFact)"
+    case .broken(let fileName):
+        return "\(eventName)，错误，声音文件 \(fileName) 丢失，\(enabledFact)"
+    }
+}
+
+/// A write-failure row's window-owned Name/Value sentence. T11/T12/T17 callers supply the visible
+/// action and the same actionable reason they render; VoiceOver never receives a color-only error.
+public func soundPacksWindowFailureAccessibilityLabel(
+    action: String,
+    reason: String
+) -> String {
+    if action.isEmpty {
+        return reason.isEmpty ? "操作失败" : "操作失败：\(reason)"
+    }
+    return reason.isEmpty ? "\(action)失败" : "\(action)失败：\(reason)"
+}
+
+public enum SoundPacksWindowAnnouncementMoment: Sendable, Equatable {
+    case windowOpened
+    case selectionChanged
+    case writeFailed(action: String, reason: String)
+}
+
+public struct SoundPacksWindowAnnouncementFacts: Sendable, Equatable {
+    public let packCount: Int
+    public let selectedPackName: String?
+
+    public init(packCount: Int, selectedPackName: String?) {
+        self.packCount = packCount
+        self.selectedPackName = selectedPackName
+    }
+}
+
+/// Window-owned VoiceOver announcement policy for presentation, inspection selection, and future
+/// write failures.
+public func soundPacksWindowAnnouncement(
+    _ moment: SoundPacksWindowAnnouncementMoment,
+    facts: SoundPacksWindowAnnouncementFacts
+) -> String {
+    switch moment {
+    case .windowOpened:
+        guard facts.packCount > 0 else {
+            return "声音包管理窗口。没有可管理的声音包。"
+        }
+        if let selectedPackName = facts.selectedPackName {
+            return "声音包管理窗口。共 \(facts.packCount) 个声音包。正在检查「\(selectedPackName)」。"
+        }
+        return "声音包管理窗口。共 \(facts.packCount) 个声音包。尚未选择要检查的声音包。"
+    case .selectionChanged:
+        guard let selectedPackName = facts.selectedPackName else {
+            return "尚未选择要检查的声音包。"
+        }
+        return "正在检查「\(selectedPackName)」。"
+    case .writeFailed(let action, let reason):
+        return soundPacksWindowFailureAccessibilityLabel(action: action, reason: reason)
+    }
+}
