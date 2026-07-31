@@ -31,10 +31,11 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private var isClosingWindow = false
     private var externalActivationCancellable: AnyCancellable?
     private var selectionAnnouncementCancellable: AnyCancellable?
-    private var audioFailureAnnouncementCancellable: AnyCancellable?
-    private var factoryRestoreNoticeAnnouncementCancellable: AnyCancellable?
-    private var factoryRestoreFailureAnnouncementCancellable: AnyCancellable?
-    private var starredPacksFailureAnnouncementCancellable: AnyCancellable?
+    private var windowStatusAnnouncementCancellable: AnyCancellable?
+    private var lastAnnouncedStatusRevision = 0
+    /// Suppresses the delegate callback during `showWindow` so window-open context is announced
+    /// before any result that completed while the retained window was hidden.
+    private var isPresentingWindow = false
 
     public init(
         configFile: URL,
@@ -78,16 +79,37 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         if let application {
             handbackApplication = application
         }
-        model.reload(followActivePack: true)
+        let wasAlreadyCreated = window != nil
+        let wasVisible = window?.isVisible == true
         let presentedWindow = window ?? makeWindow()
+        if shouldReloadSoundPacksWindowOnShow(
+            wasAlreadyCreated: wasAlreadyCreated,
+            isVisible: wasVisible)
+        {
+            model.reload(followActivePack: true)
+        }
         NSApp.activate(ignoringOtherApps: true)
+        isPresentingWindow = true
         presentedWindow.makeKeyAndOrderFront(nil)
-        presentedWindow.makeFirstResponder(presentedWindow.contentViewController?.view)
-        focusCoordinator.requestInitialFocus()
-        SoundPacksWindowAccessibilityBridge.post(
-            .windowOpened,
-            facts: accessibilityFacts(),
-            window: presentedWindow)
+        if shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible) {
+            presentedWindow.makeFirstResponder(presentedWindow.contentViewController?.view)
+            focusCoordinator.requestInitialFocus()
+            SoundPacksWindowAccessibilityBridge.post(
+                .windowOpened,
+                facts: accessibilityFacts(),
+                window: presentedWindow)
+        }
+        announceLatestWindowStatusIfNeeded(in: presentedWindow)
+        isPresentingWindow = false
+    }
+
+    public func windowDidBecomeKey(_ notification: Notification) {
+        guard
+            !isPresentingWindow,
+            let keyWindow = notification.object as? NSWindow,
+            keyWindow === window
+        else { return }
+        announceLatestWindowStatusIfNeeded(in: keyWindow)
     }
 
     public func windowWillClose(_ notification: Notification) {
@@ -132,7 +154,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = "声音包"
+        window.title = "Claudio · 声音包"
         window.contentMinSize = NSSize(width: 560, height: 400)
         window.contentViewController = NSHostingController(rootView: content)
         window.isReleasedWhenClosed = false
@@ -145,82 +167,53 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             .dropFirst()
             .sink { [weak self] selectedPackID in
                 MainActor.assumeIsolated {
-                    guard
-                        let self,
-                        self.window?.isKeyWindow == true
-                    else { return }
+                    guard let self else { return }
+                    if self.model.consumeSelectionAnnouncementSuppression(for: selectedPackID) {
+                        return
+                    }
+                    guard self.window?.isKeyWindow == true else { return }
                     SoundPacksWindowAccessibilityBridge.post(
                         .selectionChanged,
                         facts: self.accessibilityFacts(selectedPackID: selectedPackID),
                         window: window)
                 }
             }
-        audioFailureAnnouncementCancellable = model.$audioActionError
+        windowStatusAnnouncementCancellable = model.$windowStatuses
             .dropFirst()
+            .map { statuses in statuses.max { $0.revision < $1.revision } }
             .compactMap { $0 }
-            .sink { [weak self] error in
+            .sink { [weak self] status in
                 MainActor.assumeIsolated {
-                    guard
-                        let self,
-                        self.window?.isKeyWindow == true
-                    else { return }
-                    SoundPacksWindowAccessibilityBridge.post(
-                        .writeFailed(action: "音频操作", reason: error.message),
-                        facts: self.accessibilityFacts(),
-                        window: window)
-                }
-            }
-        factoryRestoreNoticeAnnouncementCancellable = model.$factoryRestoreNotice
-            .dropFirst()
-            .compactMap { $0 }
-            .sink { [weak self] outcome in
-                MainActor.assumeIsolated {
-                    guard
-                        let self,
-                        self.window?.isKeyWindow == true
-                    else { return }
-                    SoundPacksWindowAccessibilityBridge.post(
-                        .writeSucceeded(
-                            message: factoryPackRestoreNoticeMessage(outcome)),
-                        facts: self.accessibilityFacts(),
-                        window: window)
-                }
-            }
-        factoryRestoreFailureAnnouncementCancellable = model.$factoryRestoreActionError
-            .dropFirst()
-            .compactMap { $0 }
-            .sink { [weak self] error in
-                MainActor.assumeIsolated {
-                    guard
-                        let self,
-                        self.window?.isKeyWindow == true
-                    else { return }
-                    SoundPacksWindowAccessibilityBridge.post(
-                        .writeFailed(
-                            action: "恢复出厂声音",
-                            reason: error.message),
-                        facts: self.accessibilityFacts(),
-                        window: window)
-                }
-            }
-        starredPacksFailureAnnouncementCancellable = model.$starredPacksError
-            .dropFirst()
-            .compactMap { $0 }
-            .sink { [weak self] error in
-                MainActor.assumeIsolated {
-                    guard
-                        let self,
-                        self.window?.isKeyWindow == true
-                    else { return }
-                    SoundPacksWindowAccessibilityBridge.post(
-                        .writeFailed(
-                            action: "更新星标",
-                            reason: soundPacksWindowStarredPacksFailureReason(error)),
-                        facts: self.accessibilityFacts(),
-                        window: window)
+                    self?.announceWindowStatusIfNeeded(status, in: window)
                 }
             }
         return window
+    }
+
+    private func announceLatestWindowStatusIfNeeded(in window: NSWindow) {
+        guard let status = model.windowStatuses.max(by: { $0.revision < $1.revision }) else {
+            return
+        }
+        announceWindowStatusIfNeeded(status, in: window)
+    }
+
+    private func announceWindowStatusIfNeeded(
+        _ status: SoundPacksWindowStatus,
+        in window: NSWindow
+    ) {
+        guard
+            status.revision > lastAnnouncedStatusRevision,
+            window.isKeyWindow
+        else { return }
+        lastAnnouncedStatusRevision = status.revision
+        let event: SoundPacksWindowAnnouncementMoment =
+            status.severity == .failure
+            ? .writeFailed(action: status.action, reason: status.message)
+            : .writeSucceeded(message: status.message)
+        SoundPacksWindowAccessibilityBridge.post(
+            event,
+            facts: accessibilityFacts(),
+            window: window)
     }
 
     private func accessibilityFacts() -> SoundPacksWindowAnnouncementFacts {

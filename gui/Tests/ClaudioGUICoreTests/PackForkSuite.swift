@@ -28,6 +28,10 @@ private func writeForkSourceManifest(
     writeFixture(json, to: directory.appendingPathComponent("manifest.json"))
 }
 
+private enum InjectedForkPublishError: Error {
+    case failed
+}
+
 @MainActor
 func runPackForkSuites() {
 
@@ -80,21 +84,55 @@ func runPackForkSuites() {
 
     suite("nextForkPackID: no collision ⇒ <fromID>-copy") {
         expect(
-            nextForkPackID(for: "minimal-chime", existingUserPackIDs: []) == "minimal-chime-copy",
+            nextForkPackID(for: "minimal-chime", occupiedBasenames: [])
+                == .success("minimal-chime-copy"),
             "expected minimal-chime-copy with no existing collisions")
     }
 
     suite("nextForkPackID: -copy taken ⇒ -copy-2, then -copy and -copy-2 both taken ⇒ -copy-3") {
         expect(
-            nextForkPackID(for: "minimal-chime", existingUserPackIDs: ["minimal-chime-copy"])
-                == "minimal-chime-copy-2",
+            nextForkPackID(for: "minimal-chime", occupiedBasenames: ["minimal-chime-copy"])
+                == .success("minimal-chime-copy-2"),
             "expected -copy-2 once -copy is taken")
         expect(
             nextForkPackID(
                 for: "minimal-chime",
-                existingUserPackIDs: ["minimal-chime-copy", "minimal-chime-copy-2"])
-                == "minimal-chime-copy-3",
+                occupiedBasenames: ["minimal-chime-copy", "minimal-chime-copy-2"])
+                == .success("minimal-chime-copy-3"),
             "expected -copy-3 once -copy and -copy-2 are both taken")
+    }
+
+    suite("nextForkPackID: checks at most occupied.count + 1 unique candidates") {
+        let occupied: Set<String> = [
+            "minimal-chime-copy", "minimal-chime-copy-2", "minimal-chime-copy-4", "stray-file",
+        ]
+        expect(
+            nextForkPackID(for: "minimal-chime", occupiedBasenames: occupied)
+                == .success("minimal-chime-copy-3"),
+            "a hole inside the finite pigeonhole bound must be selected")
+        expect(
+            nextForkPackID(for: "../unsafe", occupiedBasenames: occupied)
+                == .failure(.unsafeSourceID(fromID: "../unsafe")),
+            "unsafe source IDs must fail before candidate construction")
+    }
+
+    suite("occupiedPackBasenames: files, directories, symlinks and hidden entries all reserve names") {
+        withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs")
+            try? FileManager.default.createDirectory(
+                at: packs.appendingPathComponent("directory"), withIntermediateDirectories: true)
+            writeFixture("file", to: packs.appendingPathComponent("regular-file"))
+            try? FileManager.default.createSymbolicLink(
+                at: packs.appendingPathComponent("dangling-link"),
+                withDestinationURL: root.appendingPathComponent("missing"))
+            try? FileManager.default.createDirectory(
+                at: packs.appendingPathComponent(".hidden"), withIntermediateDirectories: true)
+
+            let occupied = try? occupiedPackBasenames(in: packs)
+            expect(
+                occupied == ["directory", "regular-file", "dangling-link", ".hidden"],
+                "allocator occupancy must include every directory entry, got \(String(describing: occupied))")
+        }
     }
 
     // MARK: - forkPack: success path
@@ -185,6 +223,122 @@ func runPackForkSuites() {
         }
     }
 
+    suite("forkPack: terminal factory symlink is rejected before copy or external manifest mutation") {
+        withTempDirectory { root in
+            let factory = root.appendingPathComponent("factory")
+            let external = root.appendingPathComponent("external/source")
+            let packs = root.appendingPathComponent("packs")
+            writeForkSourceManifest(id: "linked-pack", name: "External", to: external)
+            let manifest = external.appendingPathComponent("manifest.json")
+            let originalBytes = try? Data(contentsOf: manifest)
+            try? FileManager.default.createDirectory(at: factory, withIntermediateDirectories: true)
+            try? FileManager.default.createSymbolicLink(
+                at: factory.appendingPathComponent("linked-pack"),
+                withDestinationURL: external)
+
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: packs, factoryPacksDirectory: factory)
+            let result = forkPack(
+                fromID: "linked-pack", newID: "linked-pack-copy", environment: environment)
+
+            if case .failure(.unsafeFactorySource(fromID: "linked-pack")) = result {
+                expect(true, "terminal factory symlink failed closed")
+            } else {
+                expect(false, "a terminal factory symlink must fail closed, got \(result)")
+            }
+            expect(
+                (try? Data(contentsOf: manifest)) == originalBytes,
+                "rejection must not rewrite the external source manifest")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: packs.appendingPathComponent("linked-pack-copy").path),
+                "rejection must not publish a destination")
+        }
+    }
+
+    suite("forkPack: never removes a predictable PID staging path it did not create") {
+        withTempDirectory { root in
+            let factory = root.appendingPathComponent("factory")
+            let packs = root.appendingPathComponent("packs")
+            writeForkSourceManifest(
+                id: "minimal-chime", to: factory.appendingPathComponent("minimal-chime"))
+            let predictable = packs.appendingPathComponent(
+                ".minimal-chime-copy.tmp-\(ProcessInfo.processInfo.processIdentifier)")
+            let sentinel = predictable.appendingPathComponent("owned-by-someone-else")
+            writeFixture("sentinel", to: sentinel)
+
+            let result = forkPack(
+                fromID: "minimal-chime", newID: "minimal-chime-copy",
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: packs, factoryPacksDirectory: factory))
+
+            guard case .success = result else {
+                expect(false, "fork should use a fresh mkdtemp root, got \(result)")
+                return
+            }
+            expect(
+                (try? Data(contentsOf: sentinel)) == Data("sentinel".utf8),
+                "fork cleanup must never delete a predictable path it did not create")
+        }
+    }
+
+    suite("forkPack: publish-time EEXIST is typed and never overwrites the occupier") {
+        withTempDirectory { root in
+            let factory = root.appendingPathComponent("factory")
+            let packs = root.appendingPathComponent("packs")
+            writeForkSourceManifest(
+                id: "minimal-chime", to: factory.appendingPathComponent("minimal-chime"))
+            let result = forkPack(
+                fromID: "minimal-chime", newID: "minimal-chime-copy",
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: packs,
+                    factoryPacksDirectory: factory,
+                    beforeForkPackPublish: { destination in
+                        try Data("external-writer".utf8).write(to: destination)
+                    }))
+
+            guard
+                case .failure(.destinationAlreadyExists(let collidedID)) = result,
+                collidedID == "minimal-chime-copy"
+            else {
+                expect(
+                    false,
+                    "exclusive publish must map EEXIST to a retryable typed collision, got \(result)")
+                return
+            }
+            expect(
+                (try? Data(contentsOf: packs.appendingPathComponent("minimal-chime-copy")))
+                    == Data("external-writer".utf8),
+                "exclusive publish must leave the competing entry byte-for-byte unchanged")
+            let entries = (try? FileManager.default.contentsOfDirectory(atPath: packs.path)) ?? []
+            expect(
+                entries == ["minimal-chime-copy"],
+                "failed publish must clean only its own staging root, got \(entries)")
+        }
+    }
+
+    suite("forkPack: injected non-collision publish failure cleans staging and returns renameFailed") {
+        withTempDirectory { root in
+            let factory = root.appendingPathComponent("factory")
+            let packs = root.appendingPathComponent("packs")
+            writeForkSourceManifest(
+                id: "minimal-chime", to: factory.appendingPathComponent("minimal-chime"))
+            let result = forkPack(
+                fromID: "minimal-chime", newID: "minimal-chime-copy",
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: packs,
+                    factoryPacksDirectory: factory,
+                    beforeForkPackPublish: { _ in throw InjectedForkPublishError.failed }))
+
+            guard case .failure(.renameFailed) = result else {
+                expect(false, "expected renameFailed, got \(result)")
+                return
+            }
+            let entries = (try? FileManager.default.contentsOfDirectory(atPath: packs.path)) ?? []
+            expect(entries.isEmpty, "injected publish failure must leave no staging/final entry")
+        }
+    }
+
     // MARK: - forkPack: refusals, checked before any disk write where the plan requires it
 
     suite(
@@ -268,6 +422,31 @@ func runPackForkSuites() {
     }
 
     // MARK: - forkPack: mid-failure leaves only a dot-prefixed staging dir, never a half-pack
+
+    suite("forkPack: missing factory source is rejected before staging") {
+        withTempDirectory { root in
+            let factory = root.appendingPathComponent("factory")
+            let userPacksDirectory = root.appendingPathComponent("packs")
+            try? FileManager.default.createDirectory(
+                at: factory, withIntermediateDirectories: true)
+
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: userPacksDirectory, factoryPacksDirectory: factory)
+            let result = forkPack(
+                fromID: "missing-pack", newID: "missing-pack-copy", environment: environment)
+
+            guard case .failure(.unsafeFactorySource) = result else {
+                expect(false, "expected .unsafeFactorySource for a missing source, got \(result)")
+                return
+            }
+            let entriesAfter =
+                (try? FileManager.default.contentsOfDirectory(atPath: userPacksDirectory.path)) ?? []
+            expect(
+                entriesAfter.isEmpty,
+                "source rejection must leave no staging or final entry, found"
+                    + " \(entriesAfter)")
+        }
+    }
 
     suite(
         "forkPack: a corrupt source manifest fails the mutateManifestJSON step — nothing"

@@ -12,8 +12,13 @@ public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
     case packList
     /// The selected pack's 「在访达中显示」 button.
     case revealSelectedPack
+    case forkFactoryPack
+    case addAudio
     /// A built-in pack's explicitly-confirmed 「恢复出厂声音…」 button.
     case restoreFactoryPack
+    case useSelectedPack
+    case restoreAllFactoryPacks
+    case revealPacksDirectory
     /// Window-level retry after the attempted built-in disappeared during a failed publish.
     case retryFactoryRestore
     /// One selected-pack event mapping's existing-audio menu.
@@ -31,7 +36,12 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     public let editableEvents: [Event]
     public let orphanFileNames: [String]
     public let canEditSelectedPack: Bool
+    public let canForkFactoryPack: Bool
+    public let canAddAudio: Bool
     public let canRestoreFactoryPack: Bool
+    public let canUseSelectedPack: Bool
+    public let canRestoreAllFactoryPacks: Bool
+    public let canRevealPacksDirectory: Bool
     public let canRetryFactoryRestore: Bool
 
     public init(
@@ -40,7 +50,12 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         editableEvents: [Event] = [],
         orphanFileNames: [String] = [],
         canEditSelectedPack: Bool = false,
+        canForkFactoryPack: Bool = false,
+        canAddAudio: Bool = false,
         canRestoreFactoryPack: Bool = false,
+        canUseSelectedPack: Bool = false,
+        canRestoreAllFactoryPacks: Bool = false,
+        canRevealPacksDirectory: Bool = false,
         canRetryFactoryRestore: Bool = false
     ) {
         self.packIDs = packIDs
@@ -48,7 +63,12 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         self.editableEvents = editableEvents
         self.orphanFileNames = orphanFileNames
         self.canEditSelectedPack = canEditSelectedPack
+        self.canForkFactoryPack = canForkFactoryPack
+        self.canAddAudio = canAddAudio
         self.canRestoreFactoryPack = canRestoreFactoryPack
+        self.canUseSelectedPack = canUseSelectedPack
+        self.canRestoreAllFactoryPacks = canRestoreAllFactoryPacks
+        self.canRevealPacksDirectory = canRevealPacksDirectory
         self.canRetryFactoryRestore = canRetryFactoryRestore
     }
 }
@@ -67,19 +87,37 @@ public func soundPacksWindowFocusOrder(
     if scope.canRetryFactoryRestore {
         order.append(.retryFactoryRestore)
     }
+    if scope.packIDs.isEmpty {
+        if scope.canRestoreAllFactoryPacks {
+            order.append(.restoreAllFactoryPacks)
+        } else if scope.canRevealPacksDirectory {
+            order.append(.revealPacksDirectory)
+        }
+    }
     if let selectedPackID = scope.selectedPackID,
         scope.packIDs.contains(selectedPackID)
     {
         order.append(.revealSelectedPack)
-        if scope.canRestoreFactoryPack {
-            order.append(.restoreFactoryPack)
-        }
+        // Event and orphan controls live in the scrolling detail region above the fixed bottom
+        // action bar. Keep this pure order identical to that visible hierarchy.
         if scope.canEditSelectedPack {
             order.append(contentsOf: scope.editableEvents.map(SoundPacksWindowFocusTarget.eventAudio))
             for fileName in scope.orphanFileNames {
                 order.append(.orphanAssignment(fileName: fileName))
                 order.append(.orphanDeletion(fileName: fileName))
             }
+        }
+        if scope.canForkFactoryPack {
+            order.append(.forkFactoryPack)
+        }
+        if scope.canAddAudio {
+            order.append(.addAudio)
+        }
+        if scope.canRestoreFactoryPack {
+            order.append(.restoreFactoryPack)
+        }
+        if scope.canUseSelectedPack {
+            order.append(.useSelectedPack)
         }
     }
     return order
@@ -93,9 +131,9 @@ public func soundPacksWindowFirstFocusTarget(
 
 /// A monotonic request channel from the retained `NSWindow` owner to SwiftUI's real FocusState.
 ///
-/// The owner increments this on every presentation, including when the same retained window is
-/// reopened. The view remembers the last revision it handled, so ordinary body recomputation does
-/// not steal focus back from the user.
+/// The owner increments this only for a real hidden→visible presentation (first open or retained
+/// reopen). Re-invoking show while already visible leaves focus untouched. The view remembers the
+/// last revision it handled, so ordinary body recomputation does not steal focus back.
 @MainActor
 public final class SoundPacksWindowFocusCoordinator: ObservableObject {
     @Published public private(set) var requestRevision = 0
@@ -152,6 +190,10 @@ public struct SoundPacksWindowLayoutAdaptation: Sendable, Equatable {
         self.sidebarMinimumHeight = sidebarMinimumHeight
         self.packNameLineLimit = packNameLineLimit
     }
+}
+
+extension SoundPacksWindowLayoutAdaptation {
+    public var stacksActionBar: Bool { stacksDetailHeader }
 }
 
 public func soundPacksWindowLayoutAdaptation(

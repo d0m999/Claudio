@@ -9,6 +9,7 @@ public enum SoundPacksWindowAudioActionError: Error, Sendable, Equatable {
     case notInInventory(fileName: String)
     case bind(ManifestBindError)
     case delete(OrphanAudioDeleteError)
+    case importRejected(message: String)
 
     public var message: String {
         switch self {
@@ -24,7 +25,140 @@ public enum SoundPacksWindowAudioActionError: Error, Sendable, Equatable {
             return soundPacksWindowBindErrorMessage(error)
         case .delete(let error):
             return soundPacksWindowDeleteErrorMessage(error)
+        case .importRejected(let message):
+            return message
         }
+    }
+}
+
+public enum SoundPacksWindowStatusSeverity: Int, Sendable, Equatable {
+    case failure
+    case notice
+}
+
+public enum SoundPacksWindowStatusKind: String, Sendable, Equatable, Hashable {
+    case audio
+    case factoryRestore
+    case starredPacks
+    case packFork
+    case packUse
+}
+
+public enum SoundPacksWindowStatusRecovery: Sendable, Equatable {
+    case retryFactoryRestore(packID: String)
+}
+
+/// One model-owned status projection. The View sorts nothing and invents no lifetime rules.
+public struct SoundPacksWindowStatus: Identifiable, Sendable, Equatable {
+    public let kind: SoundPacksWindowStatusKind
+    public let severity: SoundPacksWindowStatusSeverity
+    public let revision: Int
+    public let action: String
+    public let message: String
+    public let packID: String?
+    public let actionID: Int?
+    public let recovery: SoundPacksWindowStatusRecovery?
+
+    public var id: Int { revision }
+}
+
+public struct PackForkOutcome: Sendable, Equatable {
+    public let sourcePackID: String
+    public let newPackID: String
+    public let displayName: String
+}
+
+public enum SoundPacksWindowPackForkActionError: Error, Sendable, Equatable {
+    case noSelectedPack
+    case notBuiltin(packID: String)
+    case occupancyReadFailed(reason: String)
+    case allocation(PackForkIDAllocationError)
+    case fork(PackForkError)
+    case destinationAllocationExhausted(attempts: Int)
+    case publishedButUnavailable(newID: String)
+
+    public var message: String {
+        switch self {
+        case .noSelectedPack:
+            return "没有选中的内置声音包，未创建任何副本。"
+        case .notBuiltin:
+            return "只有内置声音包需要复制；当前包已经可以直接编辑。"
+        case .occupancyReadFailed(let reason):
+            return "无法安全检查已有声音包名称，未创建任何副本：\(reason)"
+        case .allocation(let error):
+            return "无法分配安全且有限的新声音包名称，未覆盖任何文件：\(error)"
+        case .destinationAllocationExhausted(let attempts):
+            return "连续 \(attempts) 次发布都遇到外部占用；未覆盖任何现有文件，请稍后重试。"
+        case .publishedButUnavailable(let newID):
+            return "副本「\(newID)」已经安全写入，但暂时无法在窗口中读取；请在访达中检查后重开窗口。"
+        case .fork(let error):
+            return packForkFailureMessage(error)
+        }
+    }
+}
+
+private func packForkFailureMessage(_ error: PackForkError) -> String {
+    switch error {
+    case .unsafeNewID:
+        return "生成的副本名称不安全，未写入或覆盖任何文件。"
+    case .unsafeSourceID:
+        return "内置声音包标识不安全，未写入或覆盖任何文件。"
+    case .destinationAlreadyExists:
+        return "目标名称刚被其他操作占用；未覆盖该项目，请重试。"
+    case .sourceUnavailable:
+        return "当前构建没有可复制的出厂声音，请重新安装 Claudio 后再试。"
+    case .unsafeFactorySource:
+        return "出厂声音来源不是安全的真实目录；未创建副本，请重新安装 Claudio。"
+    case .copyFailed(let reason):
+        return "准备完整副本失败，未发布半成品：\(reason)"
+    case .manifestRewriteFailed(let reason):
+        return "副本清单无法安全改写，暂存内容已清理：\(reason)"
+    case .renameFailed(let reason):
+        return "副本最终发布失败，未覆盖任何现有项目：\(reason)"
+    }
+}
+
+public func packForkNoticeMessage(_ outcome: PackForkOutcome) -> String {
+    "已创建并选中「\(outcome.displayName)」。原内置包未更改；当前使用的包与面板显示未改变。"
+        + "需要时点「用这个包」或左侧星标。"
+}
+
+public struct SoundPacksWindowAudioImportCompletion: Sendable, Equatable {
+    public let targetPackID: String
+    public let result: AudioImportBatchResult
+    public let previewFile: ImportedAudioFile?
+    public let completedInBackground: Bool
+}
+
+public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
+    case noSelectedPack
+    case use(UseError)
+
+    public var message: String {
+        switch self {
+        case .noSelectedPack: return "没有选中的声音包，当前使用项未改变。"
+        case .use(let error): return error.description
+        }
+    }
+}
+
+public struct FactoryPackBatchRestoreFailure: Sendable, Equatable {
+    public let packID: String
+    public let error: FactoryPackRestoreError
+}
+
+public struct FactoryPackBatchRestoreOutcome: Sendable, Equatable {
+    public let restoredPacks: [FactoryPackRestoreOutcome]
+    public let failures: [FactoryPackBatchRestoreFailure]
+
+    public var restoredPackIDs: [String] {
+        restoredPacks.map(\.restoredPackID)
+    }
+
+    /// Every pre-existing entry retained by successful restores in this batch.
+    /// Failure-side salvages remain attached to their typed errors and visible status text.
+    public var retainedSalvages: [SalvagedPack] {
+        restoredPacks.flatMap(\.retainedSalvages)
     }
 }
 
@@ -205,6 +339,10 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// assignment/deletion error.
     @Published public private(set) var factoryRestoreActionError:
         SoundPacksWindowFactoryRestoreActionError?
+    @Published public private(set) var packForkNotice: PackForkOutcome?
+    @Published public private(set) var packForkActionError: SoundPacksWindowPackForkActionError?
+    @Published public private(set) var packUseActionError: SoundPacksWindowPackUseActionError?
+    @Published public private(set) var windowStatuses: [SoundPacksWindowStatus]
 
     /// The built-in id whose restore lifecycle can be retried even when its visible installed
     /// directory no longer exists and therefore cannot appear in ``packCards``. After the first
@@ -229,6 +367,10 @@ public final class SoundPacksWindowModel: ObservableObject {
         selectedPackID.map(builtinPackIDs.contains) ?? false
     }
 
+    public var factoryPackIDs: [String] { builtinPackIDs.sorted() }
+
+    public var hasFactoryPacks: Bool { !builtinPackIDs.isEmpty }
+
     public var starredPacksFailureReason: String? {
         starredPacksError.map(soundPacksWindowStarredPacksFailureReason)
     }
@@ -242,6 +384,10 @@ public final class SoundPacksWindowModel: ObservableObject {
     private let refreshCoordinator: SoundPacksRefreshCoordinator
     private var windowRefreshCancellable: AnyCancellable?
     private var windowContentRefreshCancellable: AnyCancellable?
+    private var statusRevision = 0
+    private var statusByKind: [SoundPacksWindowStatusKind: SoundPacksWindowStatus] = [:]
+    private var audioImportActionRevision = 0
+    private var suppressedSelectionAnnouncementPackID: String?
 
     private var factoryRestoreRetainedSalvages: [SalvagedPack] {
         guard case .restore(_, _, let retainedSalvages)? = factoryRestoreActionError
@@ -301,6 +447,10 @@ public final class SoundPacksWindowModel: ObservableObject {
         starredPacksError = nil
         factoryRestoreNotice = nil
         factoryRestoreActionError = nil
+        packForkNotice = nil
+        packForkActionError = nil
+        packUseActionError = nil
+        windowStatuses = []
 
         windowRefreshCancellable = refreshCoordinator.$windowReloadRevision
             .dropFirst()
@@ -321,6 +471,7 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// 侧栏只改变窗口正在查看的包，不写 config，也不改变面板当前包。
     public func selectPackForInspection(_ packID: String) {
         guard packCards.contains(where: { $0.id == packID }) else { return }
+        guard selectedPackID != packID else { return }
         selectedPackID = packID
         selectedEventRows = packCoverage(
             packID: packID, config: config, environment: environment)
@@ -328,6 +479,181 @@ public final class SoundPacksWindowModel: ObservableObject {
         audioActionError = nil
         factoryRestoreNotice = nil
         factoryRestoreActionError = nil
+        clearWindowStatus(.audio)
+        clearWindowStatus(.factoryRestore)
+        if packForkNotice?.newPackID != packID {
+            packForkNotice = nil
+            if packForkActionError == nil { clearWindowStatus(.packFork) }
+        }
+    }
+
+    /// The controller calls this from the `selectedPackID` publisher before posting a normal
+    /// selection announcement. A fork consumes exactly one matching token, then its compound
+    /// success status becomes the sole announcement.
+    public func consumeSelectionAnnouncementSuppression(for packID: String?) -> Bool {
+        guard let packID, suppressedSelectionAnnouncementPackID == packID else { return false }
+        suppressedSelectionAnnouncementPackID = nil
+        return true
+    }
+
+    @discardableResult
+    public func forkSelectedFactoryPack(
+        maximumPublishCollisions: Int = 8
+    ) -> Result<PackForkOutcome, SoundPacksWindowPackForkActionError> {
+        packForkNotice = nil
+        packForkActionError = nil
+        clearWindowStatus(.packFork)
+
+        guard let sourcePackID = selectedPackID else {
+            return finishPackFork(.failure(.noSelectedPack))
+        }
+        guard builtinPackIDs.contains(sourcePackID) else {
+            return finishPackFork(.failure(.notBuiltin(packID: sourcePackID)))
+        }
+
+        var occupied: Set<String>
+        do {
+            occupied = try occupiedPackBasenames(in: environment.userPacksDirectory)
+        } catch {
+            return finishPackFork(
+                .failure(.occupancyReadFailed(reason: error.localizedDescription)))
+        }
+
+        let attemptLimit = max(1, maximumPublishCollisions)
+        for attempt in 1...attemptLimit {
+            let newPackID: String
+            switch nextForkPackID(for: sourcePackID, occupiedBasenames: occupied) {
+            case .success(let candidate): newPackID = candidate
+            case .failure(let error): return finishPackFork(.failure(.allocation(error)))
+            }
+
+            switch forkPack(fromID: sourcePackID, newID: newPackID, environment: environment) {
+            case .success:
+                completeSynchronousWrite(.succeeded)
+                guard
+                    let card = packCards.first(where: { $0.id == newPackID })
+                else {
+                    return finishPackFork(
+                        .failure(.publishedButUnavailable(newID: newPackID)),
+                        publishCompletion: false)
+                }
+                suppressedSelectionAnnouncementPackID = newPackID
+                selectPackForInspection(newPackID)
+                let outcome = PackForkOutcome(
+                    sourcePackID: sourcePackID,
+                    newPackID: newPackID,
+                    displayName: SelectedPackMetadata(id: card.id, name: card.name).displayName)
+                return finishPackFork(.success(outcome), publishCompletion: false)
+            case .failure(.destinationAlreadyExists):
+                occupied.insert(newPackID)
+                if attempt == attemptLimit {
+                    return finishPackFork(
+                        .failure(.destinationAllocationExhausted(attempts: attemptLimit)))
+                }
+            case .failure(let error):
+                return finishPackFork(.failure(.fork(error)))
+            }
+        }
+        return finishPackFork(
+            .failure(.destinationAllocationExhausted(attempts: attemptLimit)))
+    }
+
+    @discardableResult
+    public func useSelectedPack() -> Result<UseOutcome, SoundPacksWindowPackUseActionError> {
+        packUseActionError = nil
+        clearWindowStatus(.packUse)
+        guard let selectedPackID else {
+            return finishPackUse(.failure(.noSelectedPack))
+        }
+        let result = selectPack(
+            selectedPackID,
+            configFile: configFile,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory,
+            lockFile: lockFile)
+        switch result {
+        case .success(let outcome): return finishPackUse(.success(outcome))
+        case .failure(let error): return finishPackUse(.failure(.use(error)))
+        }
+    }
+
+    /// Imports picked files off the MainActor while binding completion to the pack and action that
+    /// started it. A later selection never inherits this result or its automatic preview.
+    public func importSelectedAudioFiles(
+        _ requests: [AudioImportRequest],
+        expectedPackID: String
+    ) async -> Result<SoundPacksWindowAudioImportCompletion, SoundPacksWindowAudioActionError> {
+        guard selectedPackID == expectedPackID else {
+            return .failure(.selectionChanged)
+        }
+        guard !builtinPackIDs.contains(expectedPackID) else {
+            return .failure(.builtinReadOnly(packID: expectedPackID))
+        }
+        guard !requests.isEmpty else {
+            return .success(
+                SoundPacksWindowAudioImportCompletion(
+                    targetPackID: expectedPackID,
+                    result: AudioImportBatchResult(accepted: [], rejected: []),
+                    previewFile: nil,
+                    completedInBackground: false))
+        }
+
+        audioImportActionRevision += 1
+        let actionRevision = audioImportActionRevision
+        let environment = self.environment
+        let targetName = packCards.first(where: { $0.id == expectedPackID }).map {
+            SelectedPackMetadata(id: $0.id, name: $0.name).displayName
+        } ?? expectedPackID
+        clearWindowStatus(.audio)
+        audioActionError = nil
+
+        let batch = await Task.detached {
+            importAudioFiles(requests, packID: expectedPackID, environment: environment)
+        }.value
+        let isLatestAction = actionRevision == audioImportActionRevision
+        let isStillInspectingTarget = selectedPackID == expectedPackID
+        if !batch.accepted.isEmpty {
+            completeSynchronousWrite(.succeeded)
+        } else {
+            reload(followActivePack: false)
+        }
+
+        if isLatestAction {
+            let backgroundPrefix = isStillInspectingTarget ? "" : "后台操作："
+            if batch.rejected.isEmpty {
+                setWindowStatus(
+                    kind: .audio,
+                    severity: .notice,
+                    action: "添加音频",
+                    message: "\(backgroundPrefix)已向「\(targetName)」添加 \(batch.accepted.count) 个音频；"
+                        + "它们会先显示为未被使用，请从事件菜单分配。",
+                    packID: isStillInspectingTarget ? expectedPackID : nil,
+                    actionID: actionRevision)
+            } else {
+                let rejectionDetails = batch.rejected.map {
+                    "\($0.sourceFileName)：\($0.reason.message)"
+                }.joined(separator: "；")
+                let message =
+                    "\(backgroundPrefix)「\(targetName)」已导入 \(batch.accepted.count) 个，"
+                    + "另有 \(batch.rejected.count) 个未导入：\(rejectionDetails)"
+                audioActionError = .importRejected(message: message)
+                setWindowStatus(
+                    kind: .audio,
+                    severity: .failure,
+                    action: "添加音频",
+                    message: message,
+                    packID: isStillInspectingTarget ? expectedPackID : nil,
+                    actionID: actionRevision)
+            }
+        }
+
+        return .success(
+            SoundPacksWindowAudioImportCompletion(
+                targetPackID: expectedPackID,
+                result: batch,
+                previewFile: isLatestAction && isStillInspectingTarget
+                    ? batch.accepted.last : nil,
+                completedInBackground: !isStillInspectingTarget))
     }
 
     /// The star state for one full-library sidebar row. Existing stars stay removable even when a
@@ -375,9 +701,15 @@ public final class SoundPacksWindowModel: ObservableObject {
         switch result {
         case .success:
             starredPacksError = nil
+            clearWindowStatus(.starredPacks)
             completeSynchronousWrite(.succeeded)
         case .failure(let error):
             starredPacksError = error
+            setWindowStatus(
+                kind: .starredPacks,
+                severity: .failure,
+                action: "更新星标",
+                message: soundPacksWindowStarredPacksFailureReason(error))
             completeSynchronousWrite(.failed)
         }
         return result
@@ -411,6 +743,12 @@ public final class SoundPacksWindowModel: ObservableObject {
             audioActionError = nil
             factoryRestoreNotice = nil
             factoryRestoreActionError = nil
+            clearWindowStatus(.audio)
+            clearWindowStatus(.factoryRestore)
+            if packForkNotice?.newPackID != nextSelection {
+                packForkNotice = nil
+                if packForkActionError == nil { clearWindowStatus(.packFork) }
+            }
         }
 
         configState = loadedState
@@ -540,6 +878,65 @@ public final class SoundPacksWindowModel: ObservableObject {
             retainedSalvages: factoryRestoreRetainedSalvages)
     }
 
+    /// Empty-library recovery means all factory IDs, never an arbitrary `Set.first`. Each core
+    /// restore remains independently fail-closed; UI refresh is emitted once after the batch.
+    @discardableResult
+    public func restoreAllFactoryPacksAfterConfirmation() -> FactoryPackBatchRestoreOutcome {
+        let ids = factoryPackIDs
+        var restored: [FactoryPackRestoreOutcome] = []
+        var failures: [FactoryPackBatchRestoreFailure] = []
+        var diskChanged = false
+
+        for packID in ids {
+            switch restoreFactoryPack(id: packID, environment: environment) {
+            case .success(let outcome):
+                restored.append(outcome)
+                diskChanged = true
+            case .failure(let error):
+                failures.append(FactoryPackBatchRestoreFailure(packID: packID, error: error))
+                if factoryPackRestoreSalvage(in: error) != nil { diskChanged = true }
+            }
+        }
+
+        if diskChanged {
+            completeSynchronousWrite(failures.isEmpty ? .succeeded : .changedDespiteFailure)
+        } else {
+            completeSynchronousWrite(.failed)
+        }
+
+        let outcome = FactoryPackBatchRestoreOutcome(
+            restoredPacks: restored,
+            failures: failures)
+        let retainedSuccessNotice: String
+        if outcome.retainedSalvages.isEmpty {
+            retainedSuccessNotice = ""
+        } else {
+            retainedSuccessNotice =
+                " 恢复前的内容已原样搬到 "
+                + outcome.retainedSalvages.map(\.movedTo).joined(separator: "；")
+                + "；一个文件都没删。"
+        }
+        if failures.isEmpty {
+            setWindowStatus(
+                kind: .factoryRestore,
+                severity: .notice,
+                action: "恢复内置声音包",
+                message: "已恢复 \(restored.count) 个内置声音包。" + retainedSuccessNotice)
+        } else {
+            let details = failures.map {
+                "\($0.packID)：\(factoryPackRestoreErrorMessage($0.error, retainedSalvages: []))"
+            }.joined(separator: "；")
+            setWindowStatus(
+                kind: .factoryRestore,
+                severity: .failure,
+                action: "恢复内置声音包",
+                message:
+                    "已恢复 \(restored.count) 个；\(failures.count) 个失败：\(details)"
+                    + retainedSuccessNotice)
+        }
+        return outcome
+    }
+
     private func restoreFactoryPackAfterConfirmation(
         packID: String,
         retainedSalvages: [SalvagedPack] = []
@@ -573,9 +970,16 @@ public final class SoundPacksWindowModel: ObservableObject {
         switch result {
         case .success:
             audioActionError = nil
+            clearWindowStatus(.audio)
             completeSynchronousWrite(.succeeded)
         case .failure(let error):
             audioActionError = error
+            setWindowStatus(
+                kind: .audio,
+                severity: .failure,
+                action: "音频操作",
+                message: error.message,
+                packID: selectedPackID)
             completeSynchronousWrite(.failed)
         }
         return result
@@ -596,6 +1000,12 @@ public final class SoundPacksWindowModel: ObservableObject {
             // clears old pack-scoped status when that changes selection, so publish the success
             // notice after the reload to keep the new outcome visible.
             factoryRestoreNotice = outcome
+            setWindowStatus(
+                kind: .factoryRestore,
+                severity: .notice,
+                action: "恢复出厂声音",
+                message: factoryPackRestoreNoticeMessage(outcome),
+                packID: outcome.restoredPackID)
         case .failure(let error):
             let outcome: SoundPacksWindowWriteOutcome
             if diskChangedDespiteFailure {
@@ -610,11 +1020,111 @@ public final class SoundPacksWindowModel: ObservableObject {
             }
             factoryRestoreNotice = nil
             factoryRestoreActionError = error
+            setWindowStatus(
+                kind: .factoryRestore,
+                severity: .failure,
+                action: "恢复出厂声音",
+                message: error.message,
+                recovery: factoryRestoreRetryPackID.map {
+                    .retryFactoryRestore(packID: $0)
+                })
             if outcome == .failed {
                 completeSynchronousWrite(outcome)
             }
         }
         return result
+    }
+
+    private func finishPackFork(
+        _ result: Result<PackForkOutcome, SoundPacksWindowPackForkActionError>,
+        publishCompletion: Bool = true
+    ) -> Result<PackForkOutcome, SoundPacksWindowPackForkActionError> {
+        switch result {
+        case .success(let outcome):
+            packForkActionError = nil
+            packForkNotice = outcome
+            setWindowStatus(
+                kind: .packFork,
+                severity: .notice,
+                action: "复制为我的包",
+                message: packForkNoticeMessage(outcome),
+                packID: outcome.newPackID)
+        case .failure(let error):
+            packForkNotice = nil
+            packForkActionError = error
+            setWindowStatus(
+                kind: .packFork,
+                severity: .failure,
+                action: "复制为我的包",
+                message: error.message)
+            if publishCompletion { completeSynchronousWrite(.failed) }
+        }
+        return result
+    }
+
+    private func finishPackUse(
+        _ result: Result<UseOutcome, SoundPacksWindowPackUseActionError>
+    ) -> Result<UseOutcome, SoundPacksWindowPackUseActionError> {
+        switch result {
+        case .success(.selected(let packID)):
+            packUseActionError = nil
+            completeSynchronousWrite(.succeeded)
+            setWindowStatus(
+                kind: .packUse,
+                severity: .notice,
+                action: "用这个包",
+                message: "现在使用「\(displayName(for: packID))」。星标列表没有改变。",
+                packID: packID)
+        case .failure(let error):
+            packUseActionError = error
+            setWindowStatus(
+                kind: .packUse,
+                severity: .failure,
+                action: "用这个包",
+                message: error.message,
+                packID: selectedPackID)
+            completeSynchronousWrite(.failed)
+        }
+        return result
+    }
+
+    private func displayName(for packID: String) -> String {
+        guard let card = packCards.first(where: { $0.id == packID }) else { return packID }
+        return SelectedPackMetadata(id: card.id, name: card.name).displayName
+    }
+
+    private func setWindowStatus(
+        kind: SoundPacksWindowStatusKind,
+        severity: SoundPacksWindowStatusSeverity,
+        action: String,
+        message: String,
+        packID: String? = nil,
+        actionID: Int? = nil,
+        recovery: SoundPacksWindowStatusRecovery? = nil
+    ) {
+        statusRevision += 1
+        statusByKind[kind] = SoundPacksWindowStatus(
+            kind: kind,
+            severity: severity,
+            revision: statusRevision,
+            action: action,
+            message: message,
+            packID: packID,
+            actionID: actionID,
+            recovery: recovery)
+        publishWindowStatuses()
+    }
+
+    private func clearWindowStatus(_ kind: SoundPacksWindowStatusKind) {
+        guard statusByKind.removeValue(forKey: kind) != nil else { return }
+        publishWindowStatuses()
+    }
+
+    private func publishWindowStatuses() {
+        windowStatuses = statusByKind.values.sorted {
+            if $0.severity != $1.severity { return $0.severity.rawValue < $1.severity.rawValue }
+            return $0.revision > $1.revision
+        }
     }
 
     private func deleteFailureInvalidatesWindowReadModel(

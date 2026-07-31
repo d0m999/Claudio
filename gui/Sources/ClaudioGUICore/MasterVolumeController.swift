@@ -48,10 +48,9 @@ public final class MasterVolumeController: ObservableObject {
 /// The volume `AudioPreviewPlaying` should preview at, given the config currently on disk
 /// (D29): forwards ``ClaudioConfig/masterVolume`` through ``AfplayVolume/clamped(_:)`` — the one
 /// clamp this repo has, not a second one rederived here. This is the testable half of the
-/// gallery's preview-volume plumbing; `AudioPreviewPlaying` itself is an `internal` protocol
-/// living in `ClaudioGUI` (an `executableTarget`), which `claudio-gui-tests` cannot reach, so the
-/// view-side forwarding call is left to real-machine walkthrough instead (D29 判死: "gui 预览 spy"
-/// 在当前包结构下写不出来).
+/// gallery's preview-volume plumbing. The shared AppKit player lives in `ClaudioGUIComponents`;
+/// this Foundation-only target deliberately exposes only the volume projection and does not import
+/// AppKit. View-side playback remains covered by wiring guards plus the real-machine walkthrough.
 public func previewVolume(for config: ClaudioConfig) -> Double {
     AfplayVolume.clamped(config.masterVolume)
 }

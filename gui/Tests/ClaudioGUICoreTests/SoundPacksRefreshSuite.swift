@@ -20,6 +20,38 @@ private final class SoundPacksFailFirstPublish: @unchecked Sendable {
     }
 }
 
+private final class SoundPacksForkCollisionInjector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var remaining: Int
+
+    init(count: Int) { remaining = count }
+
+    func occupy(_ destination: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard remaining > 0 else { return }
+        remaining -= 1
+        try? Data("external-occupier".utf8).write(to: destination)
+    }
+}
+
+private final class SoundPacksBlockingDurationProbe: AudioDurationProbing, @unchecked Sendable {
+    private let entered = DispatchSemaphore(value: 0)
+    private let resume = DispatchSemaphore(value: 0)
+
+    func probeDuration(of fileURL: URL) -> TimeInterval? {
+        entered.signal()
+        resume.wait()
+        return 1
+    }
+
+    func waitUntilEntered() -> DispatchTimeoutResult {
+        entered.wait(timeout: .now() + 5)
+    }
+
+    func allowCompletion() { resume.signal() }
+}
+
 private func soundPacksRepoRoot(file: StaticString = #filePath) -> URL {
     URL(fileURLWithPath: "\(file)")
         .deletingLastPathComponent().deletingLastPathComponent()
@@ -68,7 +100,29 @@ private func soundPacksEnvironment(
 }
 
 @MainActor
-func runSoundPacksRefreshSuites() {
+func runSoundPacksRefreshSuites() async {
+    suite("SoundPacksWindow show policy：首开不 reload、隐藏重开 reload、已可见只前置") {
+        expect(
+            !shouldReloadSoundPacksWindowOnShow(
+                wasAlreadyCreated: false, isVisible: false),
+            "首次创建的 model init 已完成 hydration，不得立即再 reload")
+        expect(
+            shouldReloadSoundPacksWindowOnShow(
+                wasAlreadyCreated: true, isVisible: false),
+            "retained window 隐藏后重开必须重读外部磁盘变化")
+        expect(
+            !shouldReloadSoundPacksWindowOnShow(
+                wasAlreadyCreated: true, isVisible: true),
+            "已可见窗口再次 show 不得打断当前详情")
+
+        expect(
+            shouldPrepareSoundPacksWindowForPresentation(isVisible: false),
+            "隐藏→显示才应设置首焦点并播报 opened")
+        expect(
+            !shouldPrepareSoundPacksWindowForPresentation(isVisible: true),
+            "已可见窗口不得重置焦点或重播 opened")
+    }
+
     suite("SoundPacksRefreshCoordinator：窗口成功写只发 panel full reload") {
         let coordinator = SoundPacksRefreshCoordinator()
 
@@ -907,6 +961,252 @@ func runSoundPacksRefreshSuites() {
         }
     }
 
+    suite("SoundPacksWindowModel fork：factory bytes、顺序、config/star 零副作用与单次公告 token") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            let manifest =
+                #"{ "id": "builtin", "name": "内置原版", "license": "CC0-1.0", "events": { "stop": "stop.mp3" } }"#
+            writeFixture(
+                #"{ "selected_pack": "builtin", "events": {}, "starred_packs": ["builtin"] }"#,
+                to: configFile)
+            writeFixture(manifest, to: factory.appendingPathComponent("builtin/manifest.json"))
+            writeFixture("factory-bytes", to: factory.appendingPathComponent("builtin/stop.mp3"))
+            writeFixture(
+                #"{ "id": "builtin", "name": "用户改过", "license": "CC0-1.0", "events": { "stop": "stop.mp3" } }"#,
+                to: packs.appendingPathComponent("builtin/manifest.json"))
+            writeFixture("modified-bytes", to: packs.appendingPathComponent("builtin/stop.mp3"))
+            let configBytesBefore = try? Data(contentsOf: configFile)
+            let coordinator = SoundPacksRefreshCoordinator()
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: soundPacksEnvironment(
+                    packs, factoryPacksDirectory: factory),
+                refreshCoordinator: coordinator)
+
+            let result = model.forkSelectedFactoryPack()
+            guard case .success(let outcome) = result else {
+                expect(false, "built-in fork should succeed, got \(result)")
+                return
+            }
+            expect(outcome.newPackID == "builtin-copy", "first finite candidate must be -copy")
+            expect(model.selectedPackID == "builtin-copy", "reload must precede selecting the new id")
+            expect(
+                model.consumeSelectionAnnouncementSuppression(for: "builtin-copy"),
+                "programmatic fork selection must carry exactly one suppression token")
+            expect(
+                !model.consumeSelectionAnnouncementSuppression(for: "builtin-copy"),
+                "suppression token must be one-shot")
+            expect(
+                (try? Data(contentsOf: packs.appendingPathComponent("builtin-copy/stop.mp3")))
+                    == Data("factory-bytes".utf8),
+                "modified installed bytes must never become the fork source")
+            expect(
+                (try? Data(contentsOf: configFile)) == configBytesBefore,
+                "fork must leave config.json byte-for-byte unchanged")
+            expect(model.config.selectedPack == "builtin", "fork must not activate the copy")
+            expect(model.starredPackIDs == ["builtin"], "fork must not add a star")
+            expect(coordinator.panelReloadRevision == 1, "successful fork must publish one panel full reload")
+            expect(
+                model.windowStatuses.first?.kind == .packFork
+                    && model.windowStatuses.first?.message.contains("已创建并选中") == true,
+                "compound success must be the visible/VoiceOver status truth")
+        }
+    }
+
+    suite("SoundPacksWindowModel fork：publish EEXIST 只重试有限次数且不做下一次") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            writeFixture(#"{ "selected_pack": "builtin", "events": {} }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "builtin", "events": {} }"#,
+                to: packs.appendingPathComponent("builtin/manifest.json"))
+            writeFixture(
+                #"{ "id": "builtin", "events": {} }"#,
+                to: factory.appendingPathComponent("builtin/manifest.json"))
+            let injector = SoundPacksForkCollisionInjector(count: 3)
+            var environment = soundPacksEnvironment(packs, factoryPacksDirectory: factory)
+            environment.beforeForkPackPublish = { injector.occupy($0) }
+            let coordinator = SoundPacksRefreshCoordinator()
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                refreshCoordinator: coordinator)
+
+            let result = model.forkSelectedFactoryPack(maximumPublishCollisions: 3)
+            guard case .failure(.destinationAllocationExhausted(let attempts)) = result else {
+                expect(false, "three collisions must exhaust exactly, got \(result)")
+                return
+            }
+            expect(attempts == 3, "error must report the actual finite attempt cap")
+            let entries = Set((try? FileManager.default.contentsOfDirectory(atPath: packs.path)) ?? [])
+            expect(
+                entries == ["builtin", "builtin-copy", "builtin-copy-2", "builtin-copy-3"],
+                "must preserve exactly three occupiers and create no fourth candidate/staging, got \(entries)")
+            expect(coordinator.panelReloadRevision == 0, "collision-only failure changed no Claudio bytes")
+        }
+    }
+
+    suite("SoundPacksWindowModel use：only explicit action changes selected_pack and preserves stars") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "events": {}, "starred_packs": ["pack-a"] }"#,
+                to: configFile)
+            for id in ["pack-a", "pack-b"] {
+                writeFixture(
+                    "{ \"id\": \"\(id)\", \"name\": \"\(id)\", \"events\": {} }",
+                    to: packs.appendingPathComponent("\(id)/manifest.json"))
+            }
+            let coordinator = SoundPacksRefreshCoordinator()
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: soundPacksEnvironment(packs),
+                refreshCoordinator: coordinator)
+            model.selectPackForInspection("pack-b")
+            expect(model.config.selectedPack == "pack-a", "inspection alone must not activate pack-b")
+
+            let result = model.useSelectedPack()
+            guard case .success(.selected(let packID)) = result else {
+                expect(false, "explicit use should succeed, got \(result)")
+                return
+            }
+            expect(packID == "pack-b" && model.config.selectedPack == "pack-b", "use must activate pack-b")
+            expect(model.starredPackIDs == ["pack-a"], "use must not mutate starred_packs")
+            expect(coordinator.panelReloadRevision == 1, "use must publish one full panel reload")
+            expect(
+                model.windowStatuses.first?.kind == .packUse
+                    && model.windowStatuses.first?.severity == .notice,
+                "use success must enter unified status")
+        }
+    }
+
+    await suite("SoundPacksWindowModel add audio：改选期间按原包落盘但禁止串包反馈与试听") {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "claudio-window-import-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configFile = root.appendingPathComponent("config.json")
+        let packs = root.appendingPathComponent("packs")
+        writeFixture(#"{ "selected_pack": "pack-a", "events": {} }"#, to: configFile)
+        for id in ["pack-a", "pack-b"] {
+            writeFixture(
+                "{ \"id\": \"\(id)\", \"name\": \"\(id)\", \"events\": {} }",
+                to: packs.appendingPathComponent("\(id)/manifest.json"))
+        }
+        let source = root.appendingPathComponent("picked.wav")
+        try? validWAVData().write(to: source)
+        let probe = SoundPacksBlockingDurationProbe()
+        let environment = AudioImportEnvironment(
+            userPacksDirectory: packs,
+            durationProbe: probe,
+            packsLockFile: injectedPacksLock(under: root))
+        let model = SoundPacksWindowModel(
+            configFile: configFile,
+            lockFile: root.appendingPathComponent("config.lock"),
+            environment: environment,
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+
+        let operation = Task {
+            await model.importSelectedAudioFiles(
+                [AudioImportRequest(sourceURL: source, suggestedFileName: "picked.wav")],
+                expectedPackID: "pack-a")
+        }
+        await Task.yield()
+        expect(probe.waitUntilEntered() == .success, "detached import must reach duration probe")
+        model.selectPackForInspection("pack-b")
+        probe.allowCompletion()
+        let result = await operation.value
+        guard case .success(let completion) = result else {
+            expect(false, "import should complete for original pack, got \(result)")
+            return
+        }
+        expect(completion.completedInBackground, "selection change must mark background completion")
+        expect(completion.previewFile == nil, "later-selected pack must never preview pack-a audio")
+        expect(model.selectedPackID == "pack-b", "completion must not pull inspection back to pack-a")
+        expect(
+            FileManager.default.fileExists(
+                atPath: packs.appendingPathComponent("pack-a/picked.wav").path),
+            "bytes must still land in the pack that started the action")
+        expect(
+            model.windowStatuses.first?.message.contains("后台操作") == true
+                && model.windowStatuses.first?.message.contains("pack-a") == true,
+            "global result must explicitly name the real background target")
+    }
+
+    suite("SoundPacksWindowModel status：失败优先，同级按最新 revision 排序") {
+        withTempDirectory { root in
+            let model = SoundPacksWindowModel(
+                configFile: root.appendingPathComponent("missing-config.json"),
+                environment: soundPacksEnvironment(root.appendingPathComponent("packs")),
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            _ = model.forkSelectedFactoryPack()
+            _ = model.useSelectedPack()
+            _ = model.restoreAllFactoryPacksAfterConfirmation()
+
+            expect(model.windowStatuses.count == 3, "three independent kinds must remain visible")
+            expect(
+                model.windowStatuses.map(\.severity) == [.failure, .failure, .notice],
+                "all failures must sort ahead of a newer notice")
+            expect(
+                model.windowStatuses[0].kind == .packUse
+                    && model.windowStatuses[1].kind == .packFork,
+                "same-severity failures must sort by descending monotonic revision")
+        }
+    }
+
+    suite("SoundPacksWindowModel empty restore：all factory IDs attempted，partial failure aggregated，one refresh") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            writeFixture(#"{ "selected_pack": "missing", "events": {} }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "good", "events": {} }"#,
+                to: factory.appendingPathComponent("good/manifest.json"))
+            writeFixture(
+                "not-json",
+                to: factory.appendingPathComponent("broken/manifest.json"))
+            writeFixture("user-only", to: packs.appendingPathComponent("good"))
+            let coordinator = SoundPacksRefreshCoordinator()
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: soundPacksEnvironment(packs, factoryPacksDirectory: factory),
+                refreshCoordinator: coordinator)
+            expect(model.packCards.isEmpty, "precondition: empty window")
+
+            let outcome = model.restoreAllFactoryPacksAfterConfirmation()
+            expect(outcome.restoredPackIDs == ["good"], "good factory ID must restore")
+            expect(outcome.failures.map(\.packID) == ["broken"], "broken factory ID must be named")
+            expect(
+                outcome.retainedSalvages.count == 1,
+                "successful batch restore must retain and report the plain-file occupant")
+            if let salvage = outcome.retainedSalvages.first {
+                expect(
+                    (try? String(contentsOfFile: salvage.movedTo, encoding: .utf8)) == "user-only",
+                    "successful salvage bytes must remain intact at the reported path")
+                expect(
+                    model.windowStatuses.first?.message.contains(salvage.movedTo) == true
+                        && model.windowStatuses.first?.message.contains("一个文件都没删") == true,
+                    "partial status must expose successful salvage path and no-delete truth")
+            }
+            expect(coordinator.panelReloadRevision == 1, "batch must publish exactly one final refresh")
+            expect(model.packCards.map(\.id) == ["good"], "successful partial result must be visible")
+            expect(
+                model.windowStatuses.first?.severity == .failure
+                    && model.windowStatuses.first?.message.contains("broken") == true,
+                "partial failure status must aggregate and name the failed pack")
+        }
+    }
+
     suite("SoundPacksWindow 是普通 library target，仓库仍只有一个 @main") {
         guard let package = soundPacksCode("gui/Package.swift") else {
             expect(false, "读不到 gui/Package.swift")
@@ -975,6 +1275,25 @@ func runSoundPacksRefreshSuites() {
         expect(
             controller.contains("window ?? makeWindow()"),
             "showWindow 必须复用已有窗口，不能每点一次管理就 new 一扇")
+        let reloadPolicyCalls = callArguments(
+            of: "shouldReloadSoundPacksWindowOnShow", in: controller)
+        expect(
+            reloadPolicyCalls.count == 1,
+            "controller 必须恰好调用一次 show-time reload policy，实得 \(reloadPolicyCalls.count) 次")
+        if let arguments = reloadPolicyCalls.first {
+            expect(
+                argumentValue("wasAlreadyCreated", in: arguments) == "wasAlreadyCreated"
+                    && argumentValue("isVisible", in: arguments) == "wasVisible",
+                "show-time reload 的两个实参必须锚在同一处调用上并逐字转发 "
+                    + "`wasAlreadyCreated` / `wasVisible`，实得：\(arguments) —— 全文件 contains 会被"
+                    + "下面 focus policy 的 `isVisible: wasVisible` 诱饵喂饱")
+        }
+        expect(
+            controller.contains("shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible)"),
+            "首焦点与 windowOpened 必须共用真实 hidden→visible 判定")
+        expect(
+            controller.contains("window.title = \"Claudio · 声音包\""),
+            "后台标准窗口标题必须保留 Claudio 品牌锚点")
         expect(
             controller.contains("isReleasedWhenClosed = false"),
             "关闭后 owner 仍保留窗口，下一次复用同一实例")

@@ -12,6 +12,40 @@
 
 ---
 
+## 2026-07-31 当前实现状态（以本节与当前源码为准）
+
+本轮在未提交工作树中完成 Sound Pack Manager 余项的自动化实现；不改变上面的历史编排基线。已落地：
+
+- 管理窗口 hidden→visible 生命周期统一控制 reload、初始焦点与 `.windowOpened` 公告；重复 show 只激活前置，既不抢焦点也不重载。
+- 内置包 `复制为我的包` 使用随机自有 staging、有限候选分配、全部 basename 占位与 `renameatx_np(..., RENAME_EXCL)` 独占发布；成功后只切换窗口检查项，不隐式改变 `selected_pack` 或星标。
+- 自有包 `+ 添加音频…` 复用共享原生选择器/播放器及既有安全导入；异步完成以目标包 ID 与 action revision 归属，切包后只发布明确的窗口级后台结果。
+- `用这个包` 是独立显式动作；零包空态可批量恢复全部 factory IDs，部分失败逐项汇总并只刷新一次；factory 不可用时提供 Finder/重装恢复路径。
+- 包级/窗口级结果进入统一、单调 revision 的 status 生命周期；底部动作栏、Dynamic Type 堆叠、焦点序与 VoiceOver suppression 均由窗口自己的投影控制。
+- 源码围栏补齐表外 fixture 字节见证、缩进行反向控、manifest 锁作用域、全 target 上下文 `.init` 普查与共享 marker census；fork 的 copy/rename/EEXIST 失败路径都有行为测试。关键守卫均做过针对性变异实测并确认会红，随后已恢复。
+
+自动证据（2026-07-31，本工作树）：
+
+| 门禁 | 结果 |
+|---|---|
+| `swift run --package-path helper claudio-tests` | ✅ 1387 checks |
+| `swift run --package-path gui claudio-gui-tests` | ✅ 3046 checks |
+| `swift build --package-path gui --product ClaudioGUI` | ✅ Debug product build |
+| `swift build --package-path gui -c release --product ClaudioGUI` | ✅ Release product build |
+| `scripts/dev-bundle.sh` | ✅ `dist/Claudio.app` arm64 组装、ad-hoc 签名与验证 |
+
+下列六项仍是**未签署的人工验收**，自动门禁或 bundle 成功不能替代：
+
+1. 修改“干完了”声音后真实播放正确。
+2. 导入后自动试听真实可闻。
+3. 原生 `Menu` 的 `.tint(clay)` 正/负控视觉结果。
+4. 三态 Menu 的 VoiceOver 实际播报与禁用试听跳过。
+5. 加第 4 颗星后第 5 颗禁用，取消后恢复。
+6. built-in 的“复制为我的包”按钮、副本可编辑且原包不变。
+
+本轮没有启动 app、没有读写真实 `~/.claudio`，也没有 commit、push、部署或发布；人工验收开始前仍须按计划单独授权真实数据备份与走查。
+
+---
+
 > ⚠️ 两点非机械提示，先读：
 >
 > 1. **`a11y` 不是本 skill tag 表里的行** —— `a11y-architect` 是目录里的「特殊角度」agent。T2 / T7 / T9 因带**一等 WCAG/VoiceOver 交付物**（§2.5 第 7 条的三态 Menu VO 契约、`.manageSounds` label、新窗口焦点序）而显式挂它，非 tag 触发。视觉层的 mockup 符合度审计仍走 gstack `/design-review`（不在本目录内）。

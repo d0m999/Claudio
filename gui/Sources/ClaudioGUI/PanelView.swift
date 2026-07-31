@@ -120,9 +120,8 @@ public struct PanelView: View {
         self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
         self.onManageSounds = onManageSounds
         self.onPanelWidthChange = onPanelWidthChange
-        // `NSSoundAudioPreviewPlayer` is internal (module-private, not exposed as a public
-        // API surface), constructed here rather than taken as a public, overridable
-        // parameter — this panel is the only production owner of a preview player.
+        // Construct the shared `ClaudioGUIComponents` player here. Both GUI surfaces reuse the
+        // same retention/volume implementation while owning independent playback lifetimes.
         self.previewPlayer = NSSoundAudioPreviewPlayer()
 
         // The runner is built INSIDE the `StateObject(wrappedValue:)` autoclosure, together with
@@ -214,8 +213,8 @@ public struct PanelView: View {
         // Wired in a SEPARATE loop, after `panelModel` exists — PLAN-SOUND-MANAGER.md T2
         // (核心回归 #3): re-wires the row-end auto-preview hook `AudioDropZoneView.onImportSucceeded`
         // used to drive before T1 deleted that view along with its only production caller —
-        // `AudioPreviewPlayer.swift`'s own doc comment names this exact call site as where it was
-        // slated to come back. Fires for BOTH a menu-driven pick (``EventRowView/openImportPanel()``)
+        // the shared player's contract names this exact call site. Fires for BOTH a menu-driven
+        // pick (``EventRowView/openImportPanel()``)
         // and a drag-drop onto the file-name `Menu` (``EventRowView/handleDrop(_:)``): both funnel
         // through ``EventRowImportViewModel/handleDrop(sourceURL:suggestedFileName:)`` →
         // ``AudioImportViewModel/handleDrop(requests:)``, whose `.success` arm already calls this

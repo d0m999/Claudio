@@ -879,6 +879,33 @@ private func expectShapeWitnesses(
                 + "`/codex review b0ce657` 那条 P1 的形状（把 `private enum` 换成 `private struct`，"
                 + "2269 条断言一条不红），而生产诊断串照旧逐字声称这个形状有 fixture 钉着。"
                 + "要换形状，先换诊断串里的措辞。fixture 实际内容：\n\(text)")
+
+        // 同表唯一的缩进行没有可供互斥检查碰撞的兄弟；直接从生产扫描的 fixture 字节生成反例，
+        // 证明缩进与外层约束本身都真的承重。这里不新增一份会进入 production audit 的伪造 fixture，
+        // 所以不会凭空扩张诊断声称覆盖的 Swift 形状。
+        if row.witness.indented,
+            let witnessedLine = shapeWitnessLine(row.witness, in: text)
+        {
+            let dedented = String(witnessedLine.drop(while: { $0 == " " || $0 == "\t" }))
+            let withoutIndent = text.replacingOccurrences(of: witnessedLine, with: dedented)
+            expect(
+                shapeWitnessLine(row.witness, in: withoutIndent) == nil,
+                "【向量：\(vectorLabel)】形状表「\(tableName)」的 `\(row.key)` 是同表唯一的缩进行，"
+                    + "但把它生成式去缩进后见证仍然成立 —— `indented` 这一轴没有真的参与判定，"
+                    + "互斥检查又没有同缩进兄弟可替它开火。")
+
+            if let enclosedBy = row.witness.enclosedBy,
+                let enclosureLine = text.components(separatedBy: "\n").first(where: {
+                    $0.drop(while: { $0 == " " || $0 == "\t" }).hasPrefix(enclosedBy)
+                })
+            {
+                let withoutEnclosure = text.replacingOccurrences(of: enclosureLine, with: "")
+                expect(
+                    shapeWitnessLine(row.witness, in: withoutEnclosure) == nil,
+                    "【向量：\(vectorLabel)】形状表「\(tableName)」的 `\(row.key)` 去掉承重外层后见证"
+                        + "仍然成立 —— `enclosedBy` 没有真正参与判定。")
+            }
+        }
         // 非空：判别词不许是空串。**这一条不能并进下面的互斥** —— 互斥对「同表唯一含缩进行」的行
         //      （今天是 ⑩ 的 Operator 与 ⑰ 的 LocalNestedFunc）结构性恒真，实测把它们的判别词削成
         //      `""` 是 2325 全绿。少了这一条，那两行的判别词可以直接归零而没有任何断言喊。
@@ -2278,6 +2305,54 @@ func runSourceScannerSuites() {
     // ## 正负控制成对
     // 只断言「脏的会红」是不够的 —— 一个「见谁咬谁」的坏围栏也能满足它。所以每条正控都配一条负控：
     // 干净写者不许被报、非写者（不含原语）不许被纳入。两侧同时钉，围栏才既有牙又不乱咬。
+    suite("ManifestBinding：完整读改写本体只能从 packs.lock 闭包内调用") {
+        let path = repoRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUICore/ManifestBinding.swift")
+        guard
+            let raw = try? String(contentsOf: path, encoding: .utf8)
+        else {
+            expect(false, "读不到 ManifestBinding.swift —— 锁作用域守卫无法执行")
+            return
+        }
+        let scanned = strippingComments(raw)
+        expect(
+            scanned.unmodeledConstructs.isEmpty,
+            "ManifestBinding.swift 出现扫描器不建模的词法构造：\(scanned.unmodeledConstructs) —— "
+                + "下面的作用域判定已不可信，认不出必须红")
+        let code = scanned.codeWithoutStringLiterals
+        let collapsed = collapsingWhitespace(code)
+        let lockedCall =
+            "let outcome = withNonBlockingLock(path: lockFile.path) { "
+            + "performManifestMutation(at: packDirectory, transform) }"
+        expect(
+            collapsed.contains(lockedCall),
+            "`performManifestMutation(at:packDirectory,transform)` 必须逐字位于 "
+                + "`withNonBlockingLock(path: lockFile.path)` 闭包内 —— 它封装的是从读取 manifest 到"
+                + "原子写回的完整临界区；把读取挪到锁外会重新打开丢更新窗口。实得代码：\n\(collapsed)")
+
+        let bodyIdentifierCount =
+            code.components(separatedBy: "performManifestMutation").count - 1
+        expect(
+            bodyIdentifierCount == 2,
+            "`performManifestMutation` 在生产代码里必须恰好出现两次（一次私有声明、一次锁内调用），"
+                + "实得 \(bodyIdentifierCount) 次 —— 多一个调用点可能绕开 packs.lock，少一个说明上面的"
+                + "锁内调用已不再是实际读改写路径")
+        let loadCount = code.components(separatedBy: "loadPackManifestData(").count - 1
+        expect(
+            loadCount == 1,
+            "`loadPackManifestData` 在 ManifestBinding.swift 里必须只有读改写本体内那一次，实得 "
+                + "\(loadCount) 次 —— 额外读取若落在锁外，两个写者仍能读到同一份旧 JSON")
+        if let bodyStart = code.range(of: "private func performManifestMutation("),
+            let load = code.range(of: "loadPackManifestData(")
+        {
+            expect(
+                bodyStart.lowerBound < load.lowerBound,
+                "manifest 读取出现在 `performManifestMutation` 私有临界区本体之前 —— 读已经被挪出锁")
+        } else {
+            expect(false, "切不出 `performManifestMutation` 声明或 manifest 读取；无法证明读在锁内")
+        }
+    }
+
     suite("绊线（T3）内容围栏自证有牙：整条生产路径对子目录里的脏 manifest 写者必须真的开火") {
         withTempDirectory { root in
             let scanned = root.appendingPathComponent("scanned")
@@ -3132,6 +3207,88 @@ func runSourceScannerSuites() {
 
                 let audit = auditManifestConcurrencyFence(
                     under: scanned, pathPrefix: vector.pathPrefix)
+
+                // 九份不属于任何 shape table 的 fixture 也有承重字节。只断后面的 finding 会允许
+                // fixture 被改成另一种恰好触发同一句诊断的形状，测试仍绿、原来的读模型轴却已消失。
+                // 这里直接回读 production audit 刚扫描过的那份磁盘字节，并逐项钉住威胁本体。
+                let tableExternalFixtureWitnesses: [
+                    (path: String, requiredFragments: [String])
+                ] = [
+                    (
+                        "NoPublicFunc.swift",
+                        ["@MainActor func internalWriter()", "mutateManifestJSON()"]
+                    ),
+                    (
+                        "TwoWriters.swift",
+                        [
+                            "@MainActor public func firstWriter()",
+                            "public func secondWriter()",
+                        ]
+                    ),
+                    (
+                        "DecoyString.swift",
+                        [
+                            "public func decoyWriter()",
+                            "let note = \"@MainActor func decoyWriter",
+                        ]
+                    ),
+                    (
+                        "Overload.swift",
+                        [
+                            "@MainActor public func overloaded(a: Int)",
+                            "public func overloaded(b: Int)",
+                        ]
+                    ),
+                    (
+                        "CommentGlue.swift",
+                        ["public/* MARK */func glued()", "mutateManifestJSON()"]
+                    ),
+                    (
+                        "Deep/Nested/NestedInternal.swift",
+                        [
+                            "@MainActor public func nestClean()",
+                            "func nestedSneaky()",
+                        ]
+                    ),
+                    (
+                        "LexemeSync.swift",
+                        [
+                            "let lexProbe = /`func mutate/",
+                            "mutateManifestJSON()",
+                        ]
+                    ),
+                    (
+                        "GluedBacktick.swift",
+                        [
+                            "func`default`()",
+                            "mutateManifestJSON()",
+                        ]
+                    ),
+                    (
+                        "BacktickIdent.swift",
+                        [
+                            "@MainActor public func btIdentClean()",
+                            "let `func` = 0",
+                        ]
+                    ),
+                ]
+                for witness in tableExternalFixtureWitnesses {
+                    let fixtureURL = scanned.appendingPathComponent(witness.path)
+                    guard let bytes = try? String(contentsOf: fixtureURL, encoding: .utf8) else {
+                        expect(
+                            false,
+                            "【向量：\(vector.label)】表外 fixture `\(witness.path)` 读不回来 —— "
+                                + "production audit 没有可核对的输入字节")
+                        continue
+                    }
+                    for fragment in witness.requiredFragments {
+                        expect(
+                            bytes.contains(fragment),
+                            "【向量：\(vector.label)】表外 fixture `\(witness.path)` 丢了承重字节 "
+                                + "`\(fragment)` —— 现有 finding 即使仍红，也可能已由另一种形状顺手满足。"
+                                + "实际 fixture：\n\(bytes)")
+                    }
+                }
 
                 // ── L 组的四条正控 + 一条负控。
                 //

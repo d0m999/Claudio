@@ -29,6 +29,16 @@ private extension Color {
     }
 }
 
+/// Shared surfaces consume the existing DESIGN.md clay token without depending on the executable's
+/// private `DesignTokens.swift` implementation or retyping its hex values.
+public enum ClaudioSharedColor {
+    public static func clay(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(failureRowHex: ClaudioColorHex.clayDark)
+            : Color(failureRowHex: ClaudioColorHex.clayLight)
+    }
+}
+
 /// DESIGN.md's one shared in-place failure component: a true-red icon and `text-2` sentence.
 /// Standard-window callers add their own window-owned VoiceOver announcement, but share this exact
 /// rendered component and token treatment with the panel.

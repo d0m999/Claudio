@@ -1,5 +1,12 @@
 import ClaudioCore
+import Darwin
 import Foundation
+
+public enum PackForkIDAllocationError: Error, Sendable, Equatable {
+    case unsafeSourceID(fromID: String)
+    case candidateCountOverflow
+    case noCandidateWithinBound(checked: Int)
+}
 
 /// Why ``forkPack(fromID:newID:environment:)`` refused, or failed partway through, forking a
 /// built-in pack's factory copy into a brand-new user-owned pack (PLAN-SOUND-MANAGER.md §2.2,
@@ -24,11 +31,11 @@ public enum PackForkError: Error, Sendable, Equatable {
     /// all (e.g. `swift run ClaudioGUI` with no app bundle, or any test fixture that never
     /// injected one). Checked, and refused, before any disk write.
     case sourceUnavailable(fromID: String)
-    /// Copying `environment.factoryPacksDirectory!/fromID` into the staging directory failed —
-    /// including the case where that source subdirectory doesn't exist at all (`copyItem`
-    /// throws; there is no separate existence pre-check for it, so "the source subdirectory is
-    /// missing" and "a genuine I/O failure mid-copy" share this one case). Always fails
-    /// closed — never a crash, never a silent substitution of some other source.
+    /// The named factory entry exists only through a symbolic link (or is not a real directory).
+    /// Forking it would let the manifest rewrite escape into an external tree.
+    case unsafeFactorySource(fromID: String)
+    /// Copying `environment.factoryPacksDirectory!/fromID` into staging failed after the source
+    /// was verified as a real directory. Always fails closed — never a crash or substitution.
     case copyFailed(reason: String)
     /// The staged copy's `manifest.json` rewrite (id/name/license/author) failed —
     /// ``mutateManifestJSON(at:lockFile:_:)`` returned `.failure`. The staging directory has
@@ -79,20 +86,75 @@ private func manifestRewriteReason(_ error: ManifestBindError) -> String {
 /// requires EVERY exported function in the file to carry `@MainActor`, not just the one(s)
 /// that actually call it.
 @MainActor
-public func nextForkPackID(for fromID: String, existingUserPackIDs: Set<String>) -> String {
+public func nextForkPackID(
+    for fromID: String,
+    occupiedBasenames: Set<String>
+) -> Result<String, PackForkIDAllocationError> {
+    guard isSafePackID(fromID) else { return .failure(.unsafeSourceID(fromID: fromID)) }
     let base = "\(fromID)-copy"
-    guard existingUserPackIDs.contains(base) else { return base }
-    var attempt = 2
-    while existingUserPackIDs.contains("\(base)-\(attempt)") {
-        attempt += 1
+    let (candidateCount, overflowed) = occupiedBasenames.count.addingReportingOverflow(1)
+    guard !overflowed else { return .failure(.candidateCountOverflow) }
+
+    for offset in 0..<candidateCount {
+        let candidate: String
+        if offset == 0 {
+            candidate = base
+        } else {
+            let (suffix, suffixOverflowed) = offset.addingReportingOverflow(1)
+            guard !suffixOverflowed else { return .failure(.candidateCountOverflow) }
+            candidate = "\(base)-\(suffix)"
+        }
+        if !occupiedBasenames.contains(candidate) { return .success(candidate) }
     }
-    return "\(base)-\(attempt)"
+    return .failure(.noCandidateWithinBound(checked: candidateCount))
+}
+
+/// Every directory entry reserves its basename for fork allocation — including regular files,
+/// dangling symlinks and malformed pack directories. `packDirectoryIDs(in:)` deliberately filters
+/// those entries for gallery display, so it cannot be reused for the stronger publication rule.
+@MainActor
+public func occupiedPackBasenames(in directory: URL) throws -> Set<String> {
+    do {
+        return Set(try FileManager.default.contentsOfDirectory(atPath: directory.path))
+    } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+        return []
+    }
+}
+
+private func makeForkStagingRoot(in userPacksDirectory: URL, newID: String) -> Result<URL, PackForkError> {
+    let templateURL = userPacksDirectory.appendingPathComponent(".\(newID).tmp-XXXXXX")
+    var template = Array(templateURL.path.utf8CString)
+    let created = template.withUnsafeMutableBufferPointer { buffer in
+        mkdtemp(buffer.baseAddress!)
+    }
+    guard created != nil else {
+        let capturedErrno = errno
+        return .failure(
+            .copyFailed(
+                reason: "无法创建独占暂存目录（errno \(capturedErrno)："
+                    + "\(String(cString: strerror(capturedErrno)))）"))
+    }
+    let createdPath = String(
+        decoding: template.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }, as: UTF8.self)
+    return .success(URL(fileURLWithPath: createdPath, isDirectory: true))
+}
+
+/// A factory pack must itself be a real directory entry. `copyItem` preserves a terminal symlink;
+/// accepting one here would make the later manifest rewrite follow that link outside staging.
+private func isRealForkSourceDirectory(at url: URL) -> Bool {
+    guard
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+        let type = attributes[.type] as? FileAttributeType
+    else {
+        return false
+    }
+    return type == .typeDirectory
 }
 
 /// Forks `fromID`'s **factory** copy (``AudioImportEnvironment/factoryPacksDirectory`` — never
 /// the user's possibly-already-edited copy under `userPacksDirectory`) into a brand-new,
 /// user-owned pack at `environment.userPacksDirectory/newID` (PLAN-SOUND-MANAGER.md §2.2).
-/// `newID` is the caller's to choose (typically ``nextForkPackID(for:existingUserPackIDs:)``'s
+/// `newID` is the caller's to choose (typically ``nextForkPackID(for:occupiedBasenames:)``'s
 /// result) — this function only ever safely executes or refuses a GIVEN `newID`, it never
 /// invents one itself.
 ///
@@ -102,8 +164,9 @@ public func nextForkPackID(for fromID: String, existingUserPackIDs: Set<String>)
 /// staging directory is still dot-prefixed** — i.e. before ``packDirectoryIDs(in:)`` /
 /// ``availablePacks(config:environment:)`` can see it at all (`PackGallery.swift`'s own
 /// dot-filter, mirroring `Setup.swift`'s identical one). Only once that rewrite has succeeded
-/// does the directory get `moveItem`'d into its final, visible name. There is therefore never
-/// a window in which a caller re-scanning `userPacksDirectory` could observe a directory named
+/// does the directory get atomically renamed with `RENAME_EXCL` into its final, visible name.
+/// There is therefore never a window in which a caller re-scanning `userPacksDirectory` could
+/// observe a directory named
 /// `newID` whose `manifest.json` still says `id: fromID` — a silently-mislabeled pack that
 /// PLAN-SOUND-MANAGER.md §2.2 calls out by name as exactly the bug a naive
 /// "rename first, fix the manifest after" ordering would reintroduce (`doctor` doesn't
@@ -112,11 +175,9 @@ public func nextForkPackID(for fromID: String, existingUserPackIDs: Set<String>)
 ///
 /// ## Every failure path leaves the staging directory removed, never a half-finished pack
 ///
-/// A copy failure, a manifest-rewrite failure, and a rename failure all `try? removeItem` the
-/// staging directory before returning — the same "stage in a dot-prefixed scratch dir, clean
-/// up on any failure, atomic `rename` into place only on success" shape `Setup.swift`'s
-/// `publishBundledPacks` already established. T6 deliberately reuses that exact shape rather
-/// than inventing a second one.
+/// A copy failure, manifest-rewrite failure, and rename failure all reach the owned staging root's
+/// `defer` cleanup. Final publication uses `renameatx_np(RENAME_EXCL)`, so a concurrent destination
+/// cannot be overwritten.
 ///
 /// ## Concurrency
 ///
@@ -146,14 +207,9 @@ public func forkPack(
         return .failure(.sourceUnavailable(fromID: fromID))
     }
     let sourceDirectory = factoryPacksDirectory.appendingPathComponent(fromID, isDirectory: true)
-
-    // Staging: dot-prefixed, pid-suffixed — invisible to `packDirectoryIDs(in:)` for as long as
-    // it lives here. `try? removeItem` first clears any same-pid leftover from a prior killed
-    // run (mirrors `Setup.swift`'s `publishBundledPacks`, which does the identical thing before
-    // its own per-pack staging copy).
-    let staging = environment.userPacksDirectory.appendingPathComponent(
-        ".\(newID).tmp-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
-    try? FileManager.default.removeItem(at: staging)
+    guard isRealForkSourceDirectory(at: sourceDirectory) else {
+        return .failure(.unsafeFactorySource(fromID: fromID))
+    }
 
     do {
         // Idempotent — a no-op if it already exists. Mirrors `publishBundledPacks` hoisting the
@@ -162,9 +218,23 @@ public func forkPack(
         // yet at all.
         try FileManager.default.createDirectory(
             at: environment.userPacksDirectory, withIntermediateDirectories: true)
+    } catch {
+        return .failure(.copyFailed(reason: error.localizedDescription))
+    }
+
+    let stagingRoot: URL
+    switch makeForkStagingRoot(in: environment.userPacksDirectory, newID: newID) {
+    case .success(let createdRoot): stagingRoot = createdRoot
+    case .failure(let error): return .failure(error)
+    }
+    // `stagingRoot` was atomically created by this invocation. No path is removed until ownership
+    // is established, and cleanup never escapes this root even if another process guesses newID.
+    defer { try? FileManager.default.removeItem(at: stagingRoot) }
+    let staging = stagingRoot.appendingPathComponent("payload", isDirectory: true)
+
+    do {
         try FileManager.default.copyItem(at: sourceDirectory, to: staging)
     } catch {
-        try? FileManager.default.removeItem(at: staging)
         return .failure(.copyFailed(reason: error.localizedDescription))
     }
 
@@ -198,15 +268,26 @@ public func forkPack(
     case .success:
         break
     case .failure(let error):
-        try? FileManager.default.removeItem(at: staging)
         return .failure(.manifestRewriteFailed(reason: manifestRewriteReason(error)))
     }
 
     do {
-        try FileManager.default.moveItem(at: staging, to: destination)
+        try environment.beforeForkPackPublish?(destination)
     } catch {
-        try? FileManager.default.removeItem(at: staging)
         return .failure(.renameFailed(reason: error.localizedDescription))
+    }
+
+    let renameResult = renameatx_np(
+        AT_FDCWD, staging.path, AT_FDCWD, destination.path, UInt32(RENAME_EXCL))
+    if renameResult != 0 {
+        let renameErrno = errno
+        if renameErrno == EEXIST {
+            return .failure(.destinationAlreadyExists(newID: newID))
+        }
+        return .failure(
+            .renameFailed(
+                reason: "renameatx_np errno \(renameErrno): "
+                    + String(cString: strerror(renameErrno))))
     }
 
     return .success(())

@@ -226,7 +226,9 @@ private let byteWritingFunctions = [
 private let pathPublishingMembers = [
     "copyItem", "moveItem", "linkItem", "createSymbolicLink", "replaceItem",
 ]
-private let pathPublishingFunctions = ["rename", "link", "symlink", "unlink"]
+private let pathPublishingFunctions = [
+    "rename", "renameatx_np", "link", "symlink", "unlink",
+]
 /// 一个子进程能写任何东西。它**出现**会被围栏逮住；它**写了什么**这条绊线看不见（台账里写理由）。
 private let subprocessMembers: [String] = []
 private let subprocessFunctions = ["Process", "posix_spawn", "posix_spawnp", "execve", "system"]
@@ -455,18 +457,23 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "helper/Sources/ClaudioCore/VersionCompatibility.swift": ["Process("],
 
     // —— gui ——
-    // 导入音频：有界只读源文件（`open(O_RDONLY | O_NOFOLLOW | O_NONBLOCK)`，它是**读者**）+ 两处
-    // 原子写。（这个文件的散文里写着 `copyItem` / `moveItem`，但那是在**讲**它为什么不用它们 ——
-    // 台账读的是剥掉注释之后的代码，所以它们不在这里。第一版台账正是照着 `grep` 原文写的，
-    // 于是比真实覆盖面大了两个 token，而围栏当场把这个错逮住了。)
-    "gui/Sources/ClaudioGUICore/AudioImport.swift": [".write(", "open("],
+    // 导入音频：探测文件走一次 `.atomic`，最终音频走 `mkstemp` 私有 staging fd + 完整 `write(2)`
+    // + `fsync` + `link(2)` 的不可覆盖发布，最后 `unlink(2)` 清 staging。源文件的 `open(O_RDONLY |
+    // O_NOFOLLOW | O_NONBLOCK)` 仍只是有界只读；这里逐字记录的是整个受审计表面，不把低层安全
+    // 发布误算成第二处内容替换式 `.write`。
+    "gui/Sources/ClaudioGUICore/AudioImport.swift": [
+        ".write(", "link(", "mkstemp(", "open(", "unlink(", "write(",
+    ],
     // 包 manifest 的原子写。
     "gui/Sources/ClaudioGUICore/ManifestBinding.swift": [".write("],
-    // T6 forkPack：出厂包整份目录拷进 staging（`.copyItem(`），成功之后整目录 rename 进最终位置
-    // （`.moveItem(`）——与 helper 的 `Setup.swift` 同一条「staging + 同卷 rename」纪律，非本文件
-    // 发明。manifest 本身的写（`mutateManifestJSON` 内部的 `.write(`）已经记在
-    // `ManifestBinding.swift` 那一行，这里不重复记。
-    "gui/Sources/ClaudioGUICore/PackFork.swift": [".copyItem(", ".moveItem("],
+    // 星标删除：锁内重验后的单目录项 `unlink(2)`；不跟随 symlink，也不递归删除目录。
+    "gui/Sources/ClaudioGUICore/PackGallery.swift": ["unlink("],
+    // T6 forkPack：出厂包整份目录拷进调用独占 staging（`.copyItem(`），成功后用
+    // `renameatx_np(..., RENAME_EXCL)` 做同卷、原子、不可覆盖的目录发布。manifest 本身的写
+    // 已记在 `ManifestBinding.swift`，这里不重复记。
+    "gui/Sources/ClaudioGUICore/PackFork.swift": [".copyItem(", "renameatx_np("],
+    // 恢复出厂包：完整 factory staging、旧安装 salvage 与同父目录发布。
+    "gui/Sources/ClaudioGUICore/PackRestore.swift": [".copyItem(", ".moveItem("],
 ]
 
 /// **内容替换式写盘的调用点台账** —— 哪个文件里有几处 `.write(to:…)` / `.write(toFile:…)`。
@@ -478,7 +485,7 @@ private let contentReplacingWriteSites: [String: Int] = [
     "helper/Sources/ClaudioCore/Log.swift": 2,
     "helper/Sources/ClaudioCore/Play.swift": 1,
     "helper/Sources/ClaudioCore/SettingsInstaller.swift": 2,
-    "gui/Sources/ClaudioGUICore/AudioImport.swift": 2,
+    "gui/Sources/ClaudioGUICore/AudioImport.swift": 1,
     "gui/Sources/ClaudioGUICore/ManifestBinding.swift": 1,
 ]
 

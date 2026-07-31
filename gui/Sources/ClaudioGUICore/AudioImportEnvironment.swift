@@ -152,6 +152,12 @@ public struct AudioImportEnvironment: Sendable {
     /// 覆盖该项。回调是同步的，且必须自行满足 `Sendable`。
     public var beforeExclusivePublish: (@Sendable (URL) -> Void)?
 
+    /// `forkPack` 已完成 factory copy 与 manifest rewrite、但尚未执行最终独占目录发布时调用。
+    /// 与音频导入的 ``beforeExclusivePublish`` 分开：两者处于不同写路径，复用同一个 hook 会让
+    /// 测试注入的语义随调用者漂移。生产默认 `nil`；测试可在这里抢占 final URL，或抛错验证
+    /// 非 `EEXIST` 发布失败的清理与错误映射。
+    public var beforeForkPackPublish: (@Sendable (URL) throws -> Void)?
+
     /// T12 `restoreFactoryPack` 的目录发布失败注入点。它在旧目录已经完整 salvage、出厂副本仍只
     /// 存在于点前缀 staging 时同步调用；生产构造恒为 `nil`。测试用它证明这一精确中断点不会暴露
     /// 半份包，并且失败结果仍携带用户旧目录的可告知路径。
@@ -170,6 +176,7 @@ public struct AudioImportEnvironment: Sendable {
         limits: AudioImportLimits = AudioImportLimits(),
         packsLockFile: URL,
         beforeExclusivePublish: (@Sendable (URL) -> Void)? = nil,
+        beforeForkPackPublish: (@Sendable (URL) throws -> Void)? = nil,
         beforeFactoryPackRestorePublish: (@Sendable () throws -> Void)? = nil,
         beforeFactoryPackRestoreSalvage: (@Sendable () throws -> Void)? = nil
     ) {
@@ -180,6 +187,7 @@ public struct AudioImportEnvironment: Sendable {
         self.limits = limits
         self.packsLockFile = packsLockFile
         self.beforeExclusivePublish = beforeExclusivePublish
+        self.beforeForkPackPublish = beforeForkPackPublish
         self.beforeFactoryPackRestorePublish = beforeFactoryPackRestorePublish
         self.beforeFactoryPackRestoreSalvage = beforeFactoryPackRestoreSalvage
     }

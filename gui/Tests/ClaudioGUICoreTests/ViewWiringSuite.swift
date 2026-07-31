@@ -208,6 +208,27 @@ private func sourcesUnder(_ relativeRoot: String) -> [ScannedSource] {
     return found.sorted { $0.path < $1.path }
 }
 
+/// 生产普查与合成正/负控共用的唯一入口：逐文件扫描、空白归一后按 marker 计数。
+/// 调用方不得绕过它另写一次 `collapsingWhitespace + components`，否则合成控制无法证明生产接线。
+private func whitespaceTolerantMarkerCensus(
+    _ marker: String,
+    in sources: [ScannedSource],
+    pathPrefix: String = ""
+) -> [String: Int] {
+    var census: [String: Int] = [:]
+    for source in sources {
+        let hits = whitespaceTolerantHitCount(of: marker, in: source.code)
+        if hits > 0 { census["\(pathPrefix)\(source.path)"] = hits }
+    }
+    return census
+}
+
+/// 合成输入也先走与磁盘生产文件相同的 `strippingComments`，再交给同一个 census 入口。
+private func scannedFixture(path: String, text: String) -> ScannedSource {
+    let scanned = strippingComments(text)
+    return (path: path, code: scanned.code, unmodeled: scanned.unmodeledConstructs)
+}
+
 @MainActor
 private func guiSources() -> [ScannedSource] {
     sourcesUnder("gui/Sources/ClaudioGUI")
@@ -1102,20 +1123,12 @@ func runViewWiringSuites() {
                 scanned.count >= 5,
                 "在 \(root) 下只数到 \(scanned.count) 个 Swift 文件 —— 这条是**普查**，普查不到文件"
                     + "就永远等不到红，只会安静地绿下去")
-            for source in scanned {
-                // 读 `code`（剥注释、保留字符串内容）：注释里谈论这个形状的散文**不该**被数到
-                // （本 suite 上面就有两段），而一段被误判成字符串的代码同样数不到 —— 后者由本文件
-                // 第一条 suite（词法 `unmodeled` 普查）兜着。
-                //
-                // ⚠️ 喂 `whitespaceTolerantHitCount`（先 collapse 再数），不是直接数 `source.code`
-                // 里的固定单空格子串（`/codex review d9f099a,b4091d7,14ec6b1` P1 坐实）：那种判据
-                // 只逮得住原样敲一个空格的那一种，`extension  AudioImportEnvironment`（两个空格）、
-                // 换行分隔、或块注释隔开（剥完注释后补的那个空格，见 `strippingComments` 的
-                // `blockComment` 分支）都是合法 Swift、`swift-format` 不会去改它们，原判据一个字
-                // 都读不到。
-                let hits = whitespaceTolerantHitCount(of: environmentExtensionMarker, in: source.code)
-                if hits > 0 { environmentExtensions["\(root)/\(source.path)"] = hits }
-            }
+            // 读 `code`（剥注释、保留字符串内容）：注释里谈论这个形状的散文**不该**被数到。
+            // 生产与下面合成控制都必须走同一个 census 入口，防止生产悄悄绕回固定空白匹配而控制仍绿。
+            environmentExtensions.merge(
+                whitespaceTolerantMarkerCensus(
+                    environmentExtensionMarker, in: scanned, pathPrefix: "\(root)/")
+            ) { _, replacement in replacement }
         }
         expect(
             environmentExtensions.isEmpty,
@@ -1143,28 +1156,41 @@ func runViewWiringSuites() {
         // `swift run` 直接报 `ViewWiringSuite.swift: 2` 次命中）。
         let extensionKeyword = "extension"
         let typeName = "AudioImportEnvironment"
+        let whitespaceControls = [
+            scannedFixture(
+                path: "SingleSpace.swift", text: extensionKeyword + " " + typeName + " {}"),
+            scannedFixture(
+                path: "DoubleSpace.swift", text: extensionKeyword + "  " + typeName + " {}"),
+            scannedFixture(
+                path: "Newline.swift", text: extensionKeyword + "\n" + typeName + " {}"),
+            scannedFixture(
+                path: "Negative.swift",
+                text: extensionKeyword + " " + "SomeUnrelatedType {}"),
+        ]
+        let controlCensus = whitespaceTolerantMarkerCensus(
+            environmentExtensionMarker, in: whitespaceControls)
         expect(
-            whitespaceTolerantHitCount(
-                of: environmentExtensionMarker, in: extensionKeyword + " " + typeName + " {"
-            ) == 1,
-            "正控基线都读不到 —— 单空格这个最平常的写法本该必中，`whitespaceTolerantHitCount` 本身就是坏的"
-        )
+            controlCensus == [
+                "SingleSpace.swift": 1,
+                "DoubleSpace.swift": 1,
+                "Newline.swift": 1,
+            ],
+            "生产同入口的空白正/负控失配：实得 \(controlCensus) —— 单空格、双空格与换行必须命中，"
+                + "无关类型必须保持不命中")
+
+        guard let thisSuite = codeWithoutStrings(
+            "gui/Tests/ClaudioGUICoreTests/ViewWiringSuite.swift")
+        else {
+            expect(false, "读不到 ViewWiringSuite.swift，无法证明生产与控制共用 census 入口")
+            return
+        }
+        let sharedPipelineCallCount =
+            thisSuite.components(separatedBy: "whitespaceTolerantMarkerCensus(").count - 1
         expect(
-            whitespaceTolerantHitCount(  // 两个空格
-                of: environmentExtensionMarker, in: extensionKeyword + "  " + typeName + " {"
-            ) == 1,
-            "两个空格的 `extension` 声明没被逮到 —— collapse 没生效，固定单空格子串那个洞原样还在")
-        expect(
-            whitespaceTolerantHitCount(  // 换行分隔
-                of: environmentExtensionMarker, in: extensionKeyword + "\n" + typeName + " {"
-            ) == 1,
-            "`extension` 和类型名之间换行的声明没被逮到 —— 同一个洞的换行变体")
-        expect(
-            whitespaceTolerantHitCount(
-                of: environmentExtensionMarker, in: extensionKeyword + " " + "SomeUnrelatedType { }"
-            ) == 0,
-            "负控假红了 —— collapse 之后不该无差别命中任何 `extension` 声明，只该命中"
-                + "`AudioImportEnvironment` 那一个")
+            sharedPipelineCallCount == 3,
+            "`whitespaceTolerantMarkerCensus` 必须恰好出现三次（声明、生产普查、合成控制），实得 "
+                + "\(sharedPipelineCallCount) 次 —— 生产若绕回独立的固定空白匹配，控制即使全绿也证明不了"
+                + "生产接线；新增调用同样必须先解释它属于哪条证明边")
     }
 
     suite("生产侧两处显式包锁各自锚到调用点 —— 它们换来了 lockLeaks 普查的两个豁免") {
@@ -1392,26 +1418,20 @@ func runViewWiringSuites() {
                 // `head .init (` 四种），而白名单永远不完整。凡是**结构上认不出**的构造形状都必须
                 // 变成红 —— 「我读不到它怎么构造的」绝不等于「它没事」。
                 //
-                // ⚠️ 只对**提到这个类型名的文件**跑，理由不是省事，是极性：跨文件别名
-                // （`typealias AIE = AudioImportEnvironment` 在 A、`AIE(…)` 在 B）的**声明那一行**
-                // 必然含类型名 ⇒ A 会被纳入 ⇒ 红。所以这个收窄对别名那一类是 fail-closed。
-                //
                 // ⚠️ 过滤掉「条件编译」那一类，而这**有论证**、不是随手收窄：`unmodeledConstruction`
                 // `Shapes` 记 `#if` 的理由是「非活跃分支的构造点会替真实构造喂饱『≥1 处 / 正好 N 处』
                 // 那类断言」。本条的判据是**集合相等**（文件 → 计数），`#if` 只会让计数**偏多**、
                 // 让键**变多**，两种都是红 —— 它在这条判据上不构成隐身路径。不过滤则
                 // `StateGalleryView.swift`（整份 `#if DEBUG`）永久假红，然后被下一个人删掉。
                 //
-                // ⚠️ 如实标注够不到什么：一个**完全不提**这个类型名的文件里、**实参位置**的
-                // 上下文推断构造（`someCall(environment: .init(…))`）——本条既数不到它，也不会
-                // 对它记账。要够到那一类，得把这条围栏扩到两个 target 的**每一个**文件，而那需要
-                // 先给 `= .init(` 这种在 SwiftUI 代码里合法且常见的写法定一个策，不在本刀范围内。
-                if code.contains("AudioImportEnvironment") {
-                    let shapes = unmodeledConstructionShapes(
-                        of: "AudioImportEnvironment", in: code
-                    ).filter { !$0.contains("条件编译") }
-                    if !shapes.isEmpty { hiddenShapes[key] = shapes }
-                }
+                // 对两个 target 的**每一个**文件跑，而不是先要求文件提到类型名。否则
+                // `someCall(environment: .init(…))` 这类完全依赖上下文推断的构造既不含类型名、也不会被
+                // `callArguments` 计数，能静默绕过整份 census。当前生产代码没有这种不透明构造；未来若要
+                // 引入，必须先给扫描器一条可判定的类型边界，而不是让它在这里无声通过。
+                let shapes = unmodeledConstructionShapes(
+                    of: "AudioImportEnvironment", in: code
+                ).filter { !$0.contains("条件编译") }
+                if !shapes.isEmpty { hiddenShapes[key] = shapes }
             }
         }
         expect(
@@ -1424,7 +1444,8 @@ func runViewWiringSuites() {
                 + "而隐身在这条判据上是静默放行。认不出 ⇒ 红，不许静默跳过")
         expect(
             hiddenShapes.isEmpty,
-            "这些文件里出现了 `callArguments` **结构上认不出**的 `AudioImportEnvironment` 构造形状："
+            "这些文件里出现了 `callArguments` **结构上认不出**、且可能构造 "
+                + "`AudioImportEnvironment` 的形状："
                 + "\(hiddenShapes) —— 那一处会静默退出本普查，而普查是「就地算一把锁的第三个构造点」"
                 + "唯一的守卫。要么把它改成扫描器认得的直接构造，要么先把 `callArguments` 教会这个"
                 + "形状再放行")
@@ -2550,13 +2571,13 @@ func runViewWiringSuites() {
                     codeWithoutStrings(
                         "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift") ?? "")),
             let selectedCardAt = detailBody.range(of: "if let card = selectedCard")?.lowerBound,
-            let audioErrorAt = detailBody.range(of: "model.audioActionError")?.lowerBound
+            let statusRegionAt = detailBody.range(of: "model.windowStatuses")?.lowerBound
         else {
-            expect(false, "必须能切出详情体中的窗口级音频错误与 selected-card 分支")
+            expect(false, "必须能切出详情体中的统一窗口状态区与 selected-card 分支")
             return
         }
         expect(
-            audioErrorAt < selectedCardAt,
+            statusRegionAt < selectedCardAt,
             "音频操作错误必须位于 selected-card 分支之外：确认期间唯一包被外部移走时，"
                 + "packNotFound 会把窗口重读为空态，若错误仍留在包详情里就会静默消失")
     }
@@ -2767,6 +2788,73 @@ func runViewWiringSuites() {
                 + "对不上。实际位置：menu=\(menuAt) preview=\(previewAt) mute=\(muteAt)")
         }
 
+    suite("声音包窗口剩余动作：共享 picker/player、底部动作栏、异步身份与统一公告均接到生产视图") {
+        let componentsPicker =
+            "gui/Sources/ClaudioGUIComponents/AudioOpenPanel.swift"
+        let componentsPlayer =
+            "gui/Sources/ClaudioGUIComponents/AudioPreviewPlayer.swift"
+        let oldPicker = repoRoot().appendingPathComponent("gui/Sources/ClaudioGUI/AudioOpenPanel.swift")
+        let oldPlayer = repoRoot().appendingPathComponent("gui/Sources/ClaudioGUI/AudioPreviewPlayer.swift")
+        expect(
+            !FileManager.default.fileExists(atPath: oldPicker.path)
+                && !FileManager.default.fileExists(atPath: oldPlayer.path),
+            "picker/player 已下沉 ClaudioGUIComponents；ClaudioGUI 下不许残留第二份实现")
+        guard
+            let picker = codeWithoutStrings(componentsPicker),
+            let player = codeWithoutStrings(componentsPlayer),
+            let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift"),
+            let window = codeWithoutStrings(
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
+            let windowRaw = codeOnly("gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
+            let controller = codeWithoutStrings(
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"),
+            let package = source("gui/Package.swift")
+        else {
+            expect(false, "读不到共享 AppKit 实现、两处消费者、窗口 controller 或 Package.swift")
+            return
+        }
+
+        let allProduction = sourcesUnder("gui/Sources").map(\.code).joined(separator: "\n")
+        expect(
+            allProduction.components(separatedBy: "NSOpenPanel()").count - 1 == 1
+                && picker.contains("NSOpenPanel()"),
+            "全 GUI 只允许共享组件里一处 NSOpenPanel 构造，避免两处 allow-list/取消语义漂移")
+        expect(
+            allProduction.components(separatedBy: "NSSound(contentsOf:").count - 1 == 1
+                && player.contains("NSSound(contentsOf:"),
+            "全 GUI 只允许共享组件里一处 NSSound 播放实现，避免 retention/volume 语义漂移")
+        expect(
+            package.contains("name: \"ClaudioGUIComponents\"")
+                && package.contains("\"ClaudioGUIComponents\"")
+                && panel.contains("runAudioOpenPanel(allowsMultipleSelection: false)")
+                && window.contains("runAudioOpenPanel(allowsMultipleSelection: true)"),
+            "ClaudioGUI 与 SoundPacksWindow 必须经同一 ClaudioGUIComponents API 复用 picker；"
+                + "面板单选、管理窗口多选")
+        expect(
+            window.contains("expectedPackID: expectedPackID")
+                && window.contains("await model.importSelectedAudioFiles(")
+                && window.contains("let previewFile = completion.previewFile")
+                && window.contains("previewPlayer.play("),
+            "管理窗口导入必须捕获 expectedPackID，经异步 model action 返回可试听文件后才播放；"
+                + "不能按回调时的新选择串包反馈/试听")
+        expect(
+            window.contains("model.forkSelectedFactoryPack()")
+                && window.contains("model.useSelectedPack()")
+                && window.contains("model.restoreAllFactoryPacksAfterConfirmation()"),
+            "复制、显式启用与空态全部恢复必须接到各自的 model action")
+        expect(
+            windowRaw.contains("复制为我的包")
+                && windowRaw.contains("+ 添加音频…")
+                && windowRaw.contains("用这个包")
+                && windowRaw.contains("恢复内置声音包"),
+            "底部动作栏与空态主行动的用户标签必须全部存在")
+        expect(
+            window.contains("ForEach(model.windowStatuses)")
+                && controller.contains("model.$windowStatuses")
+                && controller.contains("consumeSelectionAnnouncementSuppression("),
+            "窗口必须从统一 revision 状态投影渲染/播报，并消费 fork 程序化选中的单次公告抑制 token")
+    }
+
     suite("T12：管理窗口恢复出厂是内置包专属的显式替换确认，成功/失败告知都在窗口内可见") {
         guard let view = codeOnly(
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
@@ -2795,9 +2883,10 @@ func runViewWiringSuites() {
                 && flat.contains(".focused($focusedTarget, equals: .retryFactoryRestore)"),
             "publish 失败移除原包后，窗口级失败行必须保留经过确认的重试入口并接入真实焦点序")
         expect(
-            flat.contains("factoryPackRestoreNoticeMessage(")
-                && flat.contains("model.factoryRestoreActionError"),
-            "成功 salvage 路径告知与失败原因都必须在窗口内渲染，不能只留在 model")
+            flat.contains("ForEach(model.windowStatuses)")
+                && flat.contains("private func windowStatusRow(")
+                && flat.contains("status.recovery"),
+            "恢复成功/失败必须进入统一状态投影，并保留可执行 retry recovery")
         guard
             let detailBody = closureBody(
                 after: "private var detail: some View",
@@ -2805,14 +2894,13 @@ func runViewWiringSuites() {
                     codeWithoutStrings(
                         "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift") ?? "")),
             let selectedCardAt = detailBody.range(of: "if let card = selectedCard")?.lowerBound,
-            let restoreErrorAt =
-                detailBody.range(of: "model.factoryRestoreActionError")?.lowerBound
+            let statusRegionAt = detailBody.range(of: "model.windowStatuses")?.lowerBound
         else {
-            expect(false, "必须能切出详情体中的窗口级恢复状态与 selected-card 分支")
+            expect(false, "必须能切出详情体中的统一窗口状态与 selected-card 分支")
             return
         }
         expect(
-            restoreErrorAt < selectedCardAt,
+            statusRegionAt < selectedCardAt,
             "恢复失败提示必须位于 selected-card 分支之外：publish 在 salvage 后失败会让原包从列表消失，"
                 + "若把失败行留在包详情里，零 fallback 时整条错误不可见，有 fallback 时又会错挂到别的包")
         expect(

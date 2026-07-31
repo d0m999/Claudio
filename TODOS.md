@@ -2254,7 +2254,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P3（不阻断发布——字符串级单测 + 结构断言已经把重复播报的概率降到接近零，真机走查是锦上添花的确认，不是已知缺陷）
 **Depends on:** None
 
-### T3 「fixture 内容可换、断言只读文件名+成员名」的洞，范围比三张形状表大得多
+### ~~T3 「fixture 内容可换、断言只读文件名+成员名」的洞，范围比三张形状表大得多~~ ✅ 2026-07-31 已解决
+
+**更新（2026-07-31）:** `SourceScannerSuite` 现在直接回读 9 份表外 fixture 的磁盘字节，逐项钉住形状、顺序、注释粘连、裸 regex 与反引号边界；并以实际字节变异验证守卫会红。以下保留原始问题记录供追溯。
 
 **What:** `/codex review b0ce657` 那条 P1 的形状是：断言的谓词只读 `contains(文件名) && contains(成员名) && contains(诊断措辞)`，而 fixture 真正承重的**形状**写在几十行外 `writeFixture` 的字符串字面量里，两边零连接 —— 于是换掉形状、保住文件名和成员名，整套围栏零响应（实测两发全绿）。本轮 `expectShapeWitnesses` 把这条边钉住了，但**只钉了进三张形状表的那 13 份 fixture**。红队实测点名了同一形状的**表外** fixture，它们一份都没被钉：③ `DecoyString.swift`、② 两写者顺序、⑪ `CommentGlue.swift`、⑬ `LexemeSync.swift`、⑭ `GluedBacktick.swift`、⑮ `BacktickIdent.swift`。这些 fixture 的注释里逐字写着「这一行的形状是承重的」「顺序是承重的」「必须是无空格这一条才分得开」—— 而没有任何断言读它们的内容。
 
@@ -2268,7 +2270,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P2（不阻断发布 —— 今天这些 fixture 的内容是对的；但它们是"下一次无意改动"的静默失效面）
 **Depends on:** None
 
-### T3 形状见证锁的两处结构性恒真：互斥腿在「同表唯一含缩进行」的行上不判别任何东西
+### ~~T3 形状见证锁的两处结构性恒真：互斥腿在「同表唯一含缩进行」的行上不判别任何东西~~ ✅ 2026-07-31 已解决
+
+**更新（2026-07-31）:** `expectShapeWitnesses` 为唯一缩进行生成反向兄弟控件，互斥腿不再对空候选集合恒真；相关控制与生产判据共用同一入口。
 
 **What:** `expectShapeWitnesses` 的互斥腿（判别词不许认得出同表别的 fixture）对 `indented: true` 的行**结构性恒真**：同表兄弟一条缩进行都没有，`shapeWitnessLine` 在第二段合取处就短路成 `nil`，判别词取什么值都进不了判别。今天正是 ⑩ 的 `Operator` 与 ⑰ 的 `LocalNestedFunc` 两行 —— 实测把它们的判别词各自削成 `""` 是 **2351 全绿**（同一手打在 `indented: false` 的行上是红 2）。本轮加的「非空」断言与 `enclosedBy` 兜住了这两行最要命的那一手，但互斥腿本身在这 2/13 行上依旧不产生分辨力。相关的第二条：`enclosedBy` 没有「守卫的守卫」—— `indented` 被掏空时互斥会替它喊，`enclosedBy` 被短路掉则 2351 全绿。
 
@@ -2282,7 +2286,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P3（今天不漏；是可读性 / 防误解债，且已在锁自己的 doc comment 里逐字标注）
 **Depends on:** T3 形状表与诊断串未同源
 
-### T3 包锁的「读在不在锁里」没有可执行守卫
+### ~~T3 包锁的「读在不在锁里」没有可执行守卫~~ ✅ 2026-07-31 已解决
+
+**更新（2026-07-31）:** 新增 `ManifestBinding` 锁作用域结构守卫：锁闭包内调用形状必须唯一、只允许两个承重标识符，完整 load 必须恰好一次且位于私有读改写本体声明之后；把调用移出锁的变异已验证会红。
 
 **What:** `mutateManifestJSON(at:lockFile:_:)` 现在把整段读-改-写包在 `~/.claudio/packs.lock` 里，本轮为它写的四条断言 + 八条变异台账全部通过。但这批断言**分辨不出「读在锁里」与「读在锁外」**：把读挪到锁外、只留最后那次 `write` 在锁里，锁忙时依然返回 `.lockBusy`、磁盘依然一个字节没动 —— 四条断言全绿，而两个写者各自读到同一份旧 JSON、各改各的、依次写回的丢更新窗口原地打开。今天挡着它的只有「临界区被抽成一个 `private` 函数、只有一个调用点」这个**形状**，那是可读性保护，不是断言。
 
@@ -2296,7 +2302,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P2（今天不漏；是「下一次善意重构」的静默失效面，而且现有绿色测试会给那次重构错误的信心）
 **Depends on:** None
 
-### `ViewWiringSuite` 的生产构造点普查够不到「文件里不出现类型名」的实参上下文推断构造
+### ~~`ViewWiringSuite` 的生产构造点普查够不到「文件里不出现类型名」的实参上下文推断构造~~ ✅ 2026-07-31 已解决
+
+**更新（2026-07-31）:** 普查现扫描 `ClaudioGUI` 与 `ClaudioGUICore` 两个生产 target 的全部 Swift 文件，不再用类型名预筛；无法归属的上下文 `.init` fail closed。向无类型名字面的生产文件注入 `.init` 的变异已验证会红。
 
 **What:** `ViewWiringSuite.swift` 里给 `AudioImportEnvironment` 记账的生产构造点普查（`constructionCensus` / `unmodeledConstructionShapes`）只对**文件文本里出现 `AudioImportEnvironment` 这个类型名**的文件才跑。一个新文件如果调用某个已存在、形参类型是 `AudioImportEnvironment` 的 API，并且用 `environment: .init(userPacksDirectory: …, durationProbe: …, packsLockFile: otherLock)` 这种**实参位置的上下文推断构造**传参，该文件的文本里完全不出现 `AudioImportEnvironment` 这个词——既不计入 `constructionCensus`，`unmodeledConstructionShapes` 也不会对它跑。这正好能引入一把不受 `expectedProductionLocks` 约束的第三把包锁。
 
@@ -2310,7 +2318,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P1（能引入未受约束的第三把包锁，与 b89a0ee 那次「八十余调用点在用户 home 上开锁」是同一类风险，只是入口换了个形状）
 **Depends on:** None
 
-### `whitespaceTolerantHitCount` 的正/负控只喂了 helper 本身，没有一条经由生产普查路径运行
+### ~~`whitespaceTolerantHitCount` 的正/负控只喂了 helper 本身，没有一条经由生产普查路径运行~~ ✅ 2026-07-31 已解决
+
+**更新（2026-07-31）:** 抽出 `whitespaceTolerantMarkerCensus`，生产扫描与临时目录 fixture 共用同一包装层；结构断言钉住声明、生产调用和控制调用三处，绕开共享入口的变异已验证会红。
 
 **What:** `/codex review 8ebc00b` 的 P2 指出：`ViewWiringSuite.swift` 新增的四条正/负控（单空格基线、两个空格、换行、负控）全部直接调用 `whitespaceTolerantHitCount(of:in:)`，喂的是手写的合成字符串（如 `"extension" + " " + "AudioImportEnvironment" + " {"`），不经过生产扫描那条调用点（`whitespaceTolerantHitCount(of: environmentExtensionMarker, in: source.code)`，读的是真实扫描目录里 `source.code` 剥完注释后的内容）。
 
@@ -2324,7 +2334,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P2
 **Depends on:** None
 
-### `packRowMetaSlots` 的签名钉死了两个输入 —— T13 落地时必须改签名，doc comment「函数形状无需变化」的承诺站不住
+### ~~`packRowMetaSlots` 的签名钉死了两个输入 —— T13 落地时必须改签名，doc comment「函数形状无需变化」的承诺站不住~~ ✅ 2026-07-31 已解决
+
+**更新（2026-07-31）:** `packRowMetaSlots` 已接收 factory integrity 投影；被修改的内置包优先显示 `.modified` 而非 `CC0`，生产视图与行为测试均已接线。
 
 **What:** `packRowMetaSlots(isCC0:state:)`（`PackGallery.swift:112`）今天只接收 `isCC0: Bool` 与 `state: PackCardState` 两个输入，`let license: PackRowLicenseBadge = isCC0 ? .cc0 : .none` 这一行只能产出 `.cc0` 或 `.none`。`PackRowLicenseBadge`（同文件 :73-83）已经为 T13（`factoryIntegrity`，`plan/PLAN-SOUND-MANAGER.md#step-T13`）预留了 `.modified` case，但该 case 的注释写着「T13 落地时 `packRowMetaSlots(isCC0:state:)` 的形状不该需要变」——这句话不成立：`.modified` 要表达的是「manifest 字节与出厂 bundle 不一致的 CC0 包」，而「普通非 CC0 包」与「遭篡改的 CC0 包」在现有两个输入下**不可区分**（两者的 `isCC0` 都可能是 `true`/`false` 的任意组合，函数完全看不到 factoryIntegrity 的判定结果），所以 `.modified` 在今天的函数体内是一个**永远构造不出来**的死 case。
 
@@ -2338,7 +2350,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P4（不阻断当前提交——`.modified` 今天没有任何生产路径可达，唯一风险是「注释误导未来实现者」，T13 本身尚未排期）
 **Depends on:** T13（`plan/PLAN-SOUND-MANAGER.md#step-T13`，`factoryIntegrity(packID:)` 逐字节校验，目前 `plan/PLAN-SOUND-MANAGER.md:589` 状态仍是 `[ ]`）
 
-### `forkPack` 的 `.copyFailed`（源子目录缺失）与 `.renameFailed` 两条失败分支没有专门的单测
+### ~~`forkPack` 的 `.copyFailed`（源子目录缺失）与 `.renameFailed` 两条失败分支没有专门的单测~~ ✅ 2026-07-31 已解决
+
+**更新（2026-07-31）:** 缺失 factory 子目录会真实触发 `.copyFailed`；发布前注入的非碰撞错误会触发 `.renameFailed`。两条测试均断言自有随机 staging 被清理且 final 目标不存在；EEXIST 另有独占发布竞态测试。
 
 **What:** `PackFork.swift` 的 `forkPack` 有 7 个错误 case，其中 `.copyFailed`（含"源子目录不存在"这种子情形）与 `.renameFailed`（最终 `moveItem` 失败）目前只靠 doc comment 散文声称覆盖 + 代码走读 + "staging 与 destination 同一父目录必然同卷，`rename(2)` 是单一原子系统调用"这条论证背书，`PackForkSuite.swift` 里没有一条真正驱动这两条路径的行为测试。
 
@@ -2366,7 +2380,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P4（纯文案分歧，不影响功能正确性）
 **Depends on:** None
 
-### `DropRejectionReason.builtinReadOnly` 的新文案指向「复制为我的包」，但 `ClaudioGUI` 目前没有任何 UI 调用 `forkPack`
+### ~~`DropRejectionReason.builtinReadOnly` 的新文案指向「复制为我的包」，但 `ClaudioGUI` 目前没有任何 UI 调用 `forkPack`~~ ✅ 2026-07-31 已解决
+
+**更新（2026-07-31）:** `SoundPacksWindow` 的内置包动作栏已提供 `复制为我的包`，通过有限候选分配与独占发布调用 `forkPack`；成功后刷新并选中新副本，同时保持 `selected_pack`、`starred_packs` 与 `config.json` bytes 不变。
 
 **What:** T6 把 `DropRejectionReason.overwritesBuiltin` 重命名为 `.builtinReadOnly`，文案也从"先建一份属于你自己的包，再拖进来"（指向一个当时不存在的动作）改成"先点一下「复制为我的包」，再往副本里拖声音"——但 T6 只落地了 `forkPack(fromID:newID:environment:)` 这个 Core 原语和 `nextForkPackID(for:existingUserPackIDs:)` 这个 id 生成策略，`ClaudioGUI` 里没有任何按钮/菜单项/视图调用它们。用户此刻把文件拖到一个内置包上，看到的文案会指向一个真实点不到的按钮。
 

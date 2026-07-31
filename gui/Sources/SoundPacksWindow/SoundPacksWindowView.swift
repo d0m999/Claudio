@@ -15,6 +15,7 @@ private struct FactoryPackRestoreRequest: Identifiable {
     enum Kind {
         case selectedPack
         case failedPublishRetry
+        case allFactoryPacks
     }
 
     let packID: String
@@ -35,10 +36,13 @@ struct SoundPacksWindowView: View {
     @ObservedObject var focusCoordinator: SoundPacksWindowFocusCoordinator
 
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: SoundPacksWindowFocusTarget?
     @State private var handledFocusRequestRevision = 0
     @State private var pendingPermanentDeletion: PermanentAudioDeletionRequest?
     @State private var pendingFactoryPackRestore: FactoryPackRestoreRequest?
+    @State private var previewPlayer = NSSoundAudioPreviewPlayer()
+    @State private var isImportingAudio = false
 
     var body: some View {
         Group {
@@ -130,6 +134,8 @@ struct SoundPacksWindowView: View {
                 case .failedPublishRetry:
                     model.retryFailedFactoryPackRestoreAfterConfirmation(
                         expectedPackID: request.packID)
+                case .allFactoryPacks:
+                    model.restoreAllFactoryPacksAfterConfirmation()
                 }
                 pendingFactoryPackRestore = nil
             }
@@ -223,40 +229,24 @@ struct SoundPacksWindowView: View {
     @ViewBuilder
     private var detail: some View {
         VStack(spacing: 0) {
-            // Factory restore is a window-level operation status, not metadata for whichever card
-            // happens to be selected after the disk reload. In particular, a publish failure after
-            // salvage removes the attempted pack's active path; keeping this row inside the
-            // selected-card branch would either hide it entirely or misattribute it to a fallback.
-            if let outcome = model.factoryRestoreNotice {
-                windowFactoryRestoreNoticeRow(
-                    factoryPackRestoreNoticeMessage(outcome))
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-            }
-            if let error = model.factoryRestoreActionError {
-                factoryRestoreFailureSection(error)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-            }
-            // Audio failures also belong to the window-level action surface. A lock-time
-            // `packNotFound` reload can legitimately remove the last card before the failure is
-            // published; keeping this row inside `selectedCard` would hide the refusal in empty
-            // state.
-            if let error = model.audioActionError {
-                windowFailureRow(action: "音频操作", reason: error.message)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-            }
-            if let reason = model.starredPacksFailureReason {
-                windowFailureRow(action: "更新星标", reason: reason)
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
+            if !model.windowStatuses.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(model.windowStatuses) { status in
+                        windowStatusRow(status)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
             }
 
             if let card = selectedCard {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
                         detailHeader(card)
+
+                        if model.selectedPackIsBuiltinReadOnly {
+                            builtinCopyExplanation(card)
+                        }
 
                         Divider()
 
@@ -277,19 +267,12 @@ struct SoundPacksWindowView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(20)
                 }
+                Divider()
+                packActionBar(card)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
             } else {
-                VStack(spacing: 8) {
-                    Text("没有可管理的声音包")
-                        .font(.headline)
-                        .accessibilityAddTraits(.isHeader)
-                    Text("声音包出现后会列在左侧。")
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding(20)
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("没有可管理的声音包。声音包出现后会列在左侧。")
+                emptyState
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -301,18 +284,12 @@ struct SoundPacksWindowView: View {
             VStack(alignment: .leading, spacing: 10) {
                 detailIdentity(card)
                 revealButton(card)
-                if model.selectedPackIsBuiltinReadOnly {
-                    factoryRestoreButton(card)
-                }
             }
         } else {
             HStack {
                 detailIdentity(card)
                 Spacer(minLength: 12)
                 revealButton(card)
-                if model.selectedPackIsBuiltinReadOnly {
-                    factoryRestoreButton(card)
-                }
             }
         }
     }
@@ -360,6 +337,205 @@ struct SoundPacksWindowView: View {
         .focused($focusedTarget, equals: .restoreFactoryPack)
         .accessibilityLabel("恢复「\(displayName)」的出厂声音")
         .accessibilityHint("会先确认替换，并说明恢复前内容的保存方式")
+    }
+
+    private func builtinCopyExplanation(_ card: PackCard) -> some View {
+        let discardsInstalledChanges: Bool = {
+            if card.factoryIntegrity == false { return true }
+            switch card.state {
+            case .complete: return false
+            case .partial, .broken: return true
+            }
+        }()
+        let message = discardsInstalledChanges
+            ? "副本来自出厂版本；当前修改、缺失或损坏内容不会带入。"
+            : "从内置原版创建可编辑副本。"
+        return Text(message)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .help(message)
+            .accessibilityLabel(message)
+    }
+
+    @ViewBuilder
+    private func packActionBar(_ card: PackCard) -> some View {
+        if layoutAdaptation.stacksActionBar {
+            VStack(alignment: .leading, spacing: 8) {
+                packActions(card, includeFlexibleSpace: false)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack(spacing: 8) {
+                packActions(card, includeFlexibleSpace: true)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func packActions(_ card: PackCard, includeFlexibleSpace: Bool) -> some View {
+        if model.selectedPackIsBuiltinReadOnly {
+            Button("复制为我的包") {
+                model.forkSelectedFactoryPack()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(ClaudioSharedColor.clay(colorScheme))
+            .frame(minHeight: 44)
+            .fixedSize(horizontal: false, vertical: true)
+            .focused($focusedTarget, equals: .forkFactoryPack)
+            .help(builtinCopyHelp(card))
+            .accessibilityHint(builtinCopyHelp(card))
+
+            factoryRestoreButton(card)
+        } else {
+            Button(isImportingAudio ? "正在添加…" : "+ 添加音频…") {
+                chooseAndImportAudio()
+            }
+            .disabled(isImportingAudio)
+            .frame(minHeight: 44)
+            .fixedSize(horizontal: false, vertical: true)
+            .focused($focusedTarget, equals: .addAudio)
+            .accessibilityHint("选择 wav、mp3、aiff 或 m4a；导入后先显示为未被使用")
+        }
+
+        if includeFlexibleSpace {
+            Spacer(minLength: 8)
+        }
+
+        if card.isSelected {
+            Text("当前使用")
+                .foregroundStyle(.secondary)
+                .accessibilityLabel("当前正在使用这个声音包")
+        } else if model.selectedPackIsBuiltinReadOnly {
+            Button("用这个包") {
+                model.useSelectedPack()
+            }
+            .frame(minHeight: 44)
+            .focused($focusedTarget, equals: .useSelectedPack)
+            .accessibilityHint("明确切换当前使用的声音包；不会自动添加星标")
+        } else {
+            Button("用这个包") {
+                model.useSelectedPack()
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(ClaudioSharedColor.clay(colorScheme))
+            .frame(minHeight: 44)
+            .focused($focusedTarget, equals: .useSelectedPack)
+            .accessibilityHint("明确切换当前使用的声音包；不会自动添加星标")
+        }
+    }
+
+    private func builtinCopyHelp(_ card: PackCard) -> String {
+        if card.factoryIntegrity == false {
+            return "从出厂版本创建可编辑副本；当前修改、缺失或损坏内容不会带入"
+        }
+        switch card.state {
+        case .complete:
+            return "从内置原版创建可编辑副本；原包、当前使用项与星标都不改变"
+        case .partial, .broken:
+            return "从出厂版本创建可编辑副本；当前修改、缺失或损坏内容不会带入"
+        }
+    }
+
+    private func chooseAndImportAudio() {
+        guard let expectedPackID = model.selectedPackID else { return }
+        let requests = runAudioOpenPanel(allowsMultipleSelection: true).map {
+            AudioImportRequest(sourceURL: $0, suggestedFileName: $0.lastPathComponent)
+        }
+        guard !requests.isEmpty else { return }
+        isImportingAudio = true
+        Task {
+            defer { isImportingAudio = false }
+            let result = await model.importSelectedAudioFiles(
+                requests,
+                expectedPackID: expectedPackID)
+            guard
+                case .success(let completion) = result,
+                let previewFile = completion.previewFile
+            else { return }
+            previewPlayer.play(
+                fileAt: previewFile.destinationURL,
+                volume: Float(previewVolume(for: model.config)))
+        }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(spacing: 12) {
+            Text("没有可管理的声音包")
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+            if model.hasFactoryPacks {
+                Text("可以从 Claudio 的出厂资源恢复全部内置声音包。")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("恢复内置声音包") {
+                    pendingFactoryPackRestore = FactoryPackRestoreRequest(
+                        packID: "all-factory-packs",
+                        displayName: "所有内置声音包",
+                        kind: .allFactoryPacks)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(ClaudioSharedColor.clay(colorScheme))
+                .frame(minHeight: 44)
+                .focused($focusedTarget, equals: .restoreAllFactoryPacks)
+            } else {
+                Text("当前构建没有出厂声音资源；重新安装 Claudio 可恢复内置声音包。")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("在访达中打开声音包文件夹") {
+                    revealPacksDirectory()
+                }
+                .frame(minHeight: 44)
+                .focused($focusedTarget, equals: .revealPacksDirectory)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(20)
+    }
+
+    private func revealPacksDirectory() {
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(
+            atPath: userPacksDirectory.path,
+            isDirectory: &isDirectory),
+            isDirectory.boolValue
+        {
+            NSWorkspace.shared.open(userPacksDirectory)
+        } else {
+            NSWorkspace.shared.open(userPacksDirectory.deletingLastPathComponent())
+        }
+    }
+
+    @ViewBuilder
+    private func windowStatusRow(_ status: SoundPacksWindowStatus) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if status.severity == .failure {
+                windowFailureRow(action: status.action, reason: status.message)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    Text(status.message)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(status.message)
+            }
+            if case .retryFactoryRestore(let packID)? = status.recovery {
+                let displayName = SelectedPackMetadata(id: packID, name: nil).displayName
+                Button("重试恢复「\(displayName)」…") {
+                    pendingFactoryPackRestore = FactoryPackRestoreRequest(
+                        packID: packID,
+                        displayName: displayName,
+                        kind: .failedPublishRetry)
+                }
+                .frame(minHeight: 44)
+                .focused($focusedTarget, equals: .retryFactoryRestore)
+            }
+        }
     }
 
     @ViewBuilder
@@ -509,27 +685,6 @@ struct SoundPacksWindowView: View {
             soundPacksWindowFailureAccessibilityLabel(action: action, reason: reason))
     }
 
-    private func factoryRestoreFailureSection(
-        _ error: SoundPacksWindowFactoryRestoreActionError
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            windowFailureRow(action: "恢复出厂声音", reason: error.message)
-            if let packID = model.factoryRestoreRetryPackID {
-                let displayName = SelectedPackMetadata(id: packID, name: nil).displayName
-                Button("重试恢复「\(displayName)」…") {
-                    pendingFactoryPackRestore = FactoryPackRestoreRequest(
-                        packID: packID,
-                        displayName: displayName,
-                        kind: .failedPublishRetry)
-                }
-                .frame(minHeight: 44)
-                .focused($focusedTarget, equals: .retryFactoryRestore)
-                .accessibilityLabel("重试恢复「\(displayName)」的出厂声音")
-                .accessibilityHint("会先确认，再重新发布完整的出厂版本")
-            }
-        }
-    }
-
     private func factoryRestoreConfirmationMessage(
         _ request: FactoryPackRestoreRequest
     ) -> String {
@@ -542,20 +697,11 @@ struct SoundPacksWindowView: View {
             return
                 "将重新尝试发布完整的出厂版本。上次恢复前搬走的内容会继续原样保留，"
                 + "一个文件都不会删除。"
+        case .allFactoryPacks:
+            return
+                "将恢复全部缺失或损坏的内置声音包。每个现有目录都会先完整搬到同级隐藏位置，"
+                + "一个文件都不会删除；部分失败会逐项列出。"
         }
-    }
-
-    private func windowFactoryRestoreNoticeRow(_ message: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
-                .accessibilityHidden(true)
-            Text(message)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(message)
     }
 
     private func inventoryErrorMessage(_ error: PackAudioInventoryError) -> String {
@@ -593,7 +739,12 @@ struct SoundPacksWindowView: View {
             orphanFileNames: canEditSelectedPack
                 ? model.selectedAudioFiles.filter(\.isOrphan).map(\.fileName) : [],
             canEditSelectedPack: canEditSelectedPack,
+            canForkFactoryPack: model.selectedPackIsBuiltinReadOnly,
+            canAddAudio: canEditSelectedPack,
             canRestoreFactoryPack: model.selectedPackIsBuiltinReadOnly,
+            canUseSelectedPack: selectedCard?.isSelected == false,
+            canRestoreAllFactoryPacks: model.packCards.isEmpty && model.hasFactoryPacks,
+            canRevealPacksDirectory: model.packCards.isEmpty && !model.hasFactoryPacks,
             canRetryFactoryRestore: model.factoryRestoreRetryPackID != nil)
     }
 

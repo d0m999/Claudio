@@ -338,9 +338,11 @@ func runSoundPacksWindowStarredPacksSuites() {
             "禁用 ☆ 的原因必须同时以 macOS hover、就地可见文字和既有 VoiceOver hint 提供；"
                 + "不得靠降低整行透明度表达禁用，星标失败仍接到共享 FailureRow")
         expect(
-            controller.contains("model.$starredPacksError")
-                && controller.contains("action: \"更新星标\"")
-                && controller.contains("soundPacksWindowStarredPacksFailureReason(error)"),
-            "窗口 controller 必须对星标失败走自己的高优先级 VoiceOver bridge，且使用 FailureRow 的同一句 reason")
+            model.contains("kind: .starredPacks")
+                && model.contains("message: soundPacksWindowStarredPacksFailureReason(error)")
+                && controller.contains("model.$windowStatuses")
+                && controller.contains("status.action")
+                && controller.contains("status.message"),
+            "星标失败必须用 FailureRow 同一句 reason 进入统一状态与唯一 VoiceOver bridge")
     }
 }

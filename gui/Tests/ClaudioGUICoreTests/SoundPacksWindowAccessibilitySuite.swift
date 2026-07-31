@@ -73,13 +73,60 @@ func runSoundPacksWindowAccessibilitySuites() {
             "上下结构中的列表必须仍有可用高度并允许内部滚动")
     }
 
-    suite("SoundPacksWindow a11y：重复展示信号每次都能重新请求首焦点") {
+    suite("SoundPacksWindow a11y：每次真实 hidden→visible 都能发出独立首焦点请求") {
         let coordinator = SoundPacksWindowFocusCoordinator()
         expect(coordinator.requestRevision == 0, "焦点请求 revision 必须从 0 开始")
         coordinator.requestInitialFocus()
         expect(coordinator.requestRevision == 1, "第一次展示必须产生一次独立焦点请求")
         coordinator.requestInitialFocus()
-        expect(coordinator.requestRevision == 2, "复用同一窗口再次展示时也必须产生新请求")
+        expect(coordinator.requestRevision == 2, "隐藏后复用窗口重开也必须产生新请求")
+    }
+
+    suite("SoundPacksWindow a11y：包级动作栏、空态 CTA 与视觉顺序完全一致") {
+        let builtin = SoundPacksWindowFocusScope(
+            packIDs: ["builtin"],
+            selectedPackID: "builtin",
+            canForkFactoryPack: true,
+            canRestoreFactoryPack: true,
+            canUseSelectedPack: true)
+        expect(
+            soundPacksWindowFocusOrder(builtin)
+                == [
+                    .packList, .revealSelectedPack, .forkFactoryPack,
+                    .restoreFactoryPack, .useSelectedPack,
+                ],
+            "built-in 焦点必须按列表→Finder→复制→恢复→启用")
+
+        let custom = SoundPacksWindowFocusScope(
+            packIDs: ["custom"],
+            selectedPackID: "custom",
+            editableEvents: [.stop],
+            orphanFileNames: ["spare.wav"],
+            canEditSelectedPack: true,
+            canAddAudio: true,
+            canUseSelectedPack: true)
+        expect(
+            soundPacksWindowFocusOrder(custom)
+                == [
+                    .packList, .revealSelectedPack, .eventAudio(.stop),
+                    .orphanAssignment(fileName: "spare.wav"),
+                    .orphanDeletion(fileName: "spare.wav"),
+                    .addAudio, .useSelectedPack,
+                ],
+            "custom 焦点必须按列表→Finder→事件/孤儿控件→底部添加/启用动作栏")
+
+        expect(
+            soundPacksWindowFocusOrder(
+                SoundPacksWindowFocusScope(
+                    packIDs: [], selectedPackID: nil,
+                    canRestoreAllFactoryPacks: true)) == [.restoreAllFactoryPacks],
+            "factory 可用的零包空态必须有唯一恢复 CTA")
+        expect(
+            soundPacksWindowFocusOrder(
+                SoundPacksWindowFocusScope(
+                    packIDs: [], selectedPackID: nil,
+                    canRevealPacksDirectory: true)) == [.revealPacksDirectory],
+            "factory 不可用的零包空态必须有唯一 Finder CTA")
     }
 
     suite("SoundPacksWindow a11y：T11 编辑控件按视觉序进入窗口自己的焦点序，内置包不产生活控件") {
@@ -355,10 +402,14 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && bridge.contains("NSAccessibility.post"),
             "播报必须延后一趟等窗口进入 AX 树，并在真正 post 前重新确认仍是 key window")
         expect(
-            controller.contains("model.$factoryRestoreNotice")
-                && controller.contains("model.$factoryRestoreActionError")
-                && controller.contains("factoryPackRestoreNoticeMessage("),
-            "T12 恢复成功的 salvage 路径与失败原因都必须进入窗口唯一 VoiceOver 播报出口，"
-                + "不能只更新盲用户不会自动读到的静态行")
+            controller.contains("model.$windowStatuses")
+                && controller.contains("status.severity == .failure")
+                && controller.contains(".writeSucceeded(message: status.message)"),
+            "恢复、音频、星标、复制和启用必须共用一个 revision 驱动的 VoiceOver 出口")
+        expect(
+            controller.contains("public func windowDidBecomeKey")
+                && controller.contains("announceLatestWindowStatusIfNeeded(in: keyWindow)")
+                && controller.contains("status.revision > lastAnnouncedStatusRevision"),
+            "窗口非 key 期间完成的全局结果必须在重新成为 key 时补播且 revision 去重")
     }
 }

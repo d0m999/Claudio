@@ -192,7 +192,8 @@ func makeAudioImportEnvironment(
     factoryPacksDirectory: URL? = nil,
     duration: TimeInterval? = 1.0,
     maxFileSizeBytes: Int = 5 * 1024 * 1024,
-    maxDurationSeconds: Double = 3.0
+    maxDurationSeconds: Double = 3.0,
+    beforeForkPackPublish: (@Sendable (URL) throws -> Void)? = nil
 ) -> AudioImportEnvironment {
     AudioImportEnvironment(
         userPacksDirectory: userPacksDirectory,
@@ -203,6 +204,7 @@ func makeAudioImportEnvironment(
             maxFileSizeBytes: maxFileSizeBytes, maxDurationSeconds: maxDurationSeconds),
         // 见 ``injectedPacksLock(under:)``：漏掉这一行，本 factory 吸收的三十余个调用点会**静默**
         // 在用户真实的 `~/.claudio/packs.lock` 上开锁。这个 factory 是全包最高杠杆的那一个。
-        packsLockFile: injectedPacksLock(besideUserPacks: userPacksDirectory)
+        packsLockFile: injectedPacksLock(besideUserPacks: userPacksDirectory),
+        beforeForkPackPublish: beforeForkPackPublish
     )
 }
