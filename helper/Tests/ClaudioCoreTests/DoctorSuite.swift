@@ -559,6 +559,50 @@ func runDoctorSuites() {
     }
 
     suite(
+        "checkPackIntegrity: an empty events object remains .complete and doctor explains that no audio was declared"
+    ) {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDir = root.appendingPathComponent("packs")
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let claudioBinaryPath = root.appendingPathComponent("claudio")
+            writeFixture("{}", to: settingsFile)
+            writeFixture(#"{ "selected_pack": "minimal-chime" }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": {} }"#,
+                to: packsDir.appendingPathComponent("minimal-chime/manifest.json"))
+            makeExecutableFixture(at: claudioBinaryPath)
+
+            let status = checkPackIntegrity(
+                configFile: configFile, userPacksDirectory: packsDir, bundledPacksDirectory: nil)
+            expect(
+                status == .complete(packID: "minimal-chime", events: []),
+                "an empty events object is a legal all-silent pack: doctor must keep .complete, got \(status)"
+            )
+
+            let report = runDoctorChecks(
+                environment: DoctorEnvironment(
+                    afplayPath: "/usr/bin/afplay",
+                    settingsFile: settingsFile,
+                    configFile: configFile,
+                    userPacksDirectory: packsDir,
+                    bundledPacksDirectory: nil,
+                    logFile: root.appendingPathComponent("claudio.log"),
+                    claudioBinaryPath: claudioBinaryPath.path,
+                    commandRunner: FakeCommandRunner(
+                        result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")),
+                    currentMacOSVersion: { SemanticVersion(major: 15, minor: 0, patch: 0) }))
+            let packResult = report.results.first { $0.name == "pack" }
+            expect(packResult?.severity == .ok, "the empty pack remains an ok doctor result")
+            expect(
+                packResult?.message
+                    == "✓ 声音包 `minimal-chime` 未声明事件；无需检查音频文件",
+                "doctor must explain that its ok result means no audio was declared, not imply 0/4 coverage is complete"
+            )
+        }
+    }
+
+    suite(
         "checkPackIntegrity: a fully legitimate real (non-symlink) pack resolved via the"
             + " bundled fallback still reports .complete"
     ) {

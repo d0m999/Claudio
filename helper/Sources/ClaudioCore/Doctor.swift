@@ -446,9 +446,15 @@ extension PackIntegrityStatus {
                 name: "pack", severity: .warning,
                 message: "⚠ 声音包 `\(packID)` 缺少音频文件：\(missingFiles.joined(separator: ", "))")
         case .complete(let packID, let events):
+            let message: String
+            if events.isEmpty {
+                message = "✓ 声音包 `\(packID)` 未声明事件；无需检查音频文件"
+            } else {
+                message = "✓ 声音包 `\(packID)` 完整（\(events.joined(separator: ", "))）"
+            }
             return DoctorCheckResult(
                 name: "pack", severity: .ok,
-                message: "✓ 声音包 `\(packID)` 完整（\(events.joined(separator: ", "))）")
+                message: message)
         }
     }
 }
