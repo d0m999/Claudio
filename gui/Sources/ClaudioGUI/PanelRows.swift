@@ -1,4 +1,5 @@
 import ClaudioGUICore
+import ClaudioGUIComponents
 import SwiftUI
 
 // MARK: - 面板共享组件（2026-07-15 前端设计冗余审计 · A 类修复）
@@ -53,51 +54,6 @@ import SwiftUI
 /// （它与本组件共享的仍是 **token** 层：`ClaudioColor.error` / `.textSecondary` / 11pt。）
 /// （T4 之前这里说的是「84pt 宽卡片、`spacing: 2` 被卡片宽度逼出来」——那份理由随卡片画廊一起
 /// 消解了，本条随实现改写，结论没变：仍然不收编，只是理由换成了「定高 vs 允许折行」。）
-struct FailureRow: View {
-    /// 一句人话。真红只上图标，所以这句话本身恒为 `text-2`。
-    let message: String
-
-    /// 行尾的披露箭头 —— **只有** ``ActionFailureRow`` 传它（那条失败行整行是一颗可展开的按钮）。
-    /// `nil`（默认）= 不画箭头，也不占位：其余三个调用点的失败行是纯文本，没有可点的东西。
-    var disclosure: Disclosure?
-
-    /// 披露箭头的两态。用一个枚举而不是 `Bool`，是为了让 `nil`（没有箭头）与 `false`（有箭头、收着）
-    /// 在类型上就分得开 —— 一个 `Bool?` 会让这两件事在调用点看起来一模一样。
-    enum Disclosure {
-        case collapsed
-        case expanded
-    }
-
-    @Environment(\.colorScheme) private var colorScheme
-    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
-
-    var body: some View {
-        HStack(alignment: .top, spacing: 6) {
-            // 真红只做图标（非文本图形，WCAG 1.4.11 门槛 ≥3:1，实测亮色 4.07:1 通过）。
-            Image(systemName: "xmark.circle.fill")
-                .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.error(colorScheme))
-            // 文案走 `text-2`（5.54:1，过 WCAG 1.4.3 的正文 ≥4.5:1）—— 真红当正文只有 4.07:1，不达标。
-            Text(message)
-                .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                .fixedSize(horizontal: false, vertical: true)
-            if let disclosure {
-                Spacer(minLength: 4)
-                Image(systemName: disclosure == .expanded ? "chevron.up" : "chevron.down")
-                    // ⚠️ 9pt **低于** DESIGN.md 字号阶梯的最小档（次要 / 状态 = 11）。这是一处**已知的**
-                    // 越界，原样搬过来的，本轮没有一并修 —— 它需要一次拍板（收到 10 还是 11？），而拍板
-                    // 属于 TODOS.md「字号阶梯：DESIGN.md 定义 4 档，代码在用 8 档」那一条（P3）。
-                    // 写在这里而不是留在原处，是为了让它**只剩一个**站点：修的时候只用改这一行。
-                    .font(.system(size: 9 * typeScale))
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-            }
-        }
-        // VoiceOver 把「✗ + 整句话」读成一个元素，而不是一个无名图标 + 一段文字。
-        .accessibilityElement(children: .combine)
-    }
-}
-
 /// 一条「Claudio 替你做了主」的**告知**行（T17f）—— ``FailureRow`` 的孪生兄弟，不是它的一个变体。
 ///
 /// **名字不能改**：`ViewWiringSuite` 有两条真绊线数着 `PanelView.swift` 里的 `ActionNoticeRow(`
@@ -168,8 +124,7 @@ struct ActionFailureRow: View {
                 Button(action: onToggleDetail) {
                     FailureRow(
                         message: message,
-                        disclosure: isShowingDetail ? .expanded : .collapsed
-                    )
+                        disclosure: isShowingDetail ? .expanded : .collapsed)
                     // ≥24×24 命中区（a11y-architect FIX 6）—— 只有可点的那一态需要它。不可点的失败行
                     // （另外三个调用点）是纯文本，给它撑一个 24pt 命中区没有任何意义，只会白占垂直空间。
                     .frame(minHeight: 24)

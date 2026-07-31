@@ -1,4 +1,5 @@
 import AppKit
+import ClaudioCore
 import ClaudioGUICore
 import Combine
 import SwiftUI
@@ -11,10 +12,12 @@ import SwiftUI
 @MainActor
 public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private let configFile: URL
+    private let lockFile: URL
     private let environment: AudioImportEnvironment
     private let refreshCoordinator: SoundPacksRefreshCoordinator
     private lazy var model: SoundPacksWindowModel = SoundPacksWindowModel(
         configFile: configFile,
+        lockFile: lockFile,
         environment: environment,
         refreshCoordinator: refreshCoordinator)
     private lazy var focusCoordinator = SoundPacksWindowFocusCoordinator()
@@ -31,13 +34,16 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private var audioFailureAnnouncementCancellable: AnyCancellable?
     private var factoryRestoreNoticeAnnouncementCancellable: AnyCancellable?
     private var factoryRestoreFailureAnnouncementCancellable: AnyCancellable?
+    private var starredPacksFailureAnnouncementCancellable: AnyCancellable?
 
     public init(
         configFile: URL,
+        lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
         refreshCoordinator: SoundPacksRefreshCoordinator
     ) {
         self.configFile = configFile
+        self.lockFile = lockFile
         self.environment = environment
         self.refreshCoordinator = refreshCoordinator
         userPacksDirectory = environment.userPacksDirectory
@@ -193,6 +199,23 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                         .writeFailed(
                             action: "恢复出厂声音",
                             reason: error.message),
+                        facts: self.accessibilityFacts(),
+                        window: window)
+                }
+            }
+        starredPacksFailureAnnouncementCancellable = model.$starredPacksError
+            .dropFirst()
+            .compactMap { $0 }
+            .sink { [weak self] error in
+                MainActor.assumeIsolated {
+                    guard
+                        let self,
+                        self.window?.isKeyWindow == true
+                    else { return }
+                    SoundPacksWindowAccessibilityBridge.post(
+                        .writeFailed(
+                            action: "更新星标",
+                            reason: soundPacksWindowStarredPacksFailureReason(error)),
                         facts: self.accessibilityFacts(),
                         window: window)
                 }

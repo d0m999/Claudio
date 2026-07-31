@@ -56,17 +56,22 @@ private enum StarredPackDirectoryReadFailure: Error {
 /// directory is never mistaken for an empty one: it fails closed before the config can be changed.
 /// If `starred_packs` has never been materialized, `defaultStarredPackIDs` is expanded here before
 /// the requested ids are written, so the first non-built-in star cannot silently erase default stars.
+/// `materializeDefaultStarredPacks: false` is for the management window only: it already passes
+/// its complete visible selection (including defaults when retained), so it must also be able to
+/// make an explicit empty selection when the user cancels the last default star.
 public func setStarredPacks(
     _ ids: [String],
     configFile: URL = ClaudioPaths.configFile,
     lockFile: URL = ClaudioPaths.configLockFile,
     userPacksDirectory: URL = ClaudioPaths.packsDirectory,
-    defaultStarredPackIDs: Set<String>
+    defaultStarredPackIDs: Set<String>,
+    materializeDefaultStarredPacks: Bool = true
 ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
     let outcome = withNonBlockingLock(path: lockFile.path) {
         performSetStarredPacks(
             ids, configFile: configFile, userPacksDirectory: userPacksDirectory,
-            defaultStarredPackIDs: defaultStarredPackIDs)
+            defaultStarredPackIDs: defaultStarredPackIDs,
+            materializeDefaultStarredPacks: materializeDefaultStarredPacks)
     }
 
     switch outcome {
@@ -80,7 +85,8 @@ private func performSetStarredPacks(
     _ ids: [String],
     configFile: URL,
     userPacksDirectory: URL,
-    defaultStarredPackIDs: Set<String>
+    defaultStarredPackIDs: Set<String>,
+    materializeDefaultStarredPacks: Bool
 ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
     var normalizedIDs: [String] = []
     var unreadablePacksDirectoryReason: String?
@@ -97,7 +103,7 @@ private func performSetStarredPacks(
             return .failure(.mutationRejected)
         }
         let requestedIDs: [String]
-        if json["starred_packs"] == nil {
+        if json["starred_packs"] == nil && materializeDefaultStarredPacks {
             requestedIDs = defaultStarredPackIDs.sorted() + ids
         } else {
             requestedIDs = ids

@@ -141,7 +141,7 @@ func runSoundPacksRefreshSuites() {
             let packsDirectory = root.appendingPathComponent("packs")
             let manifest = packsDirectory.appendingPathComponent("pack-a/manifest.json")
             writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {}, "starred_packs": ["pack-a"] }"#,
                 to: configFile)
             writeFixture(
                 #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,

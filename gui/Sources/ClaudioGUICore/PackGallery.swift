@@ -383,9 +383,18 @@ private func sameRegularFileBytes(_ currentFile: URL, _ factoryFile: URL) -> Boo
 /// here while `play` still can't see it — the exact false-negative `Setup.swift:503-505`
 /// warns about). This function enumerates exactly two roots today, unchanged by T6:
 /// `environment.userPacksDirectory` ∪ `environment.bundledPacksDirectory`.
+/// Chooses whether callers need the full disk library (the management window) or the panel's
+/// active starred-only display set. Keeping this choice at the `availablePacks` id boundary means
+/// the panel does not read manifests for cards it will not render.
+public enum PackCardReadScope: Sendable, Equatable {
+    case fullLibrary
+    case panelStarredDisplay
+}
+
 public func availablePacks(
     config: ClaudioConfig,
-    environment: AudioImportEnvironment
+    environment: AudioImportEnvironment,
+    scope: PackCardReadScope = .fullLibrary
 ) -> [PackCard] {
     var seenIDs: Set<String> = []
     var orderedIDs: [String] = []
@@ -397,7 +406,18 @@ public func availablePacks(
             orderedIDs.append(id)
         }
     }
-    return orderedIDs.sorted().map { buildPackCard(id: $0, config: config, environment: environment) }
+    let sortedIDs = orderedIDs.sorted()
+    let displayedIDs: [String]
+    switch scope {
+    case .fullLibrary:
+        displayedIDs = sortedIDs
+    case .panelStarredDisplay:
+        displayedIDs = starredPackDisplayIDs(
+            orderedPackIDs: sortedIDs,
+            starredPacks: config.starredPacks,
+            defaultStarredPackIDs: environment.builtinPackIDs)
+    }
+    return displayedIDs.map { buildPackCard(id: $0, config: config, environment: environment) }
 }
 
 /// Computes T17's future starred panel display set from already-enumerated pack ids, before any
@@ -407,9 +427,8 @@ public func availablePacks(
 /// intersects with the ids that the caller already enumerated from disk, collapses duplicate ids,
 /// and defensively applies ClaudioCore's one shared ``maxStarredPacks`` limit.
 ///
-/// T16 defines and tests this model but deliberately does not call it from ``availablePacks`` yet:
-/// activating starred-only filtering is T17, when the management window gives users a way to undo
-/// a hidden star selection.
+/// T16 defined this model without activating it. T17 consumes it only through
+/// `availablePacks(..., scope: .panelStarredDisplay)`, before `buildPackCard` reads a manifest.
 public func starredPackDisplayIDs(
     orderedPackIDs: [String],
     starredPacks: [String]?,

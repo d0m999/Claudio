@@ -341,7 +341,7 @@ func runPanelConfigControllerSuites() {
             let configFile = root.appendingPathComponent("config.json")
             let packsDir = root.appendingPathComponent("packs")
             writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {}, "starred_packs": ["pack-a", "pack-b"] }"#,
                 to: configFile)
             writeFixture(
                 #"{ "id": "pack-a", "name": "包 A", "events": { "stop": "stop.mp3" } }"#,
@@ -370,7 +370,7 @@ func runPanelConfigControllerSuites() {
 
             // 模拟 CLI / 第二个实例在本实例一次轻量刷新前把 selected_pack 从 A 改为 B。
             writeFixture(
-                #"{ "selected_pack": "pack-b", "master_volume": 0.42, "events": {} }"#,
+                #"{ "selected_pack": "pack-b", "master_volume": 0.42, "events": {}, "starred_packs": ["pack-a", "pack-b"] }"#,
                 to: configFile)
             controller.reloadConfigOnly()
 
@@ -457,7 +457,7 @@ func runPanelConfigControllerSuites() {
             // 初始 pack-a（映 stop）；磁盘上另有 pack-b（映 notification）。两包覆盖**不同**，好让 eventRows
             // 在切包后可观测地变化。两个都建真目录 + manifest，让 selectPack 的 resolvePackDirectory 放行。
             writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {}, "starred_packs": ["pack-a", "pack-b"] }"#, to: configFile)
             writeFixture(
                 #"{ "id": "pack-a", "name": "包 A", "events": { "stop": "stop.mp3" } }"#,
                 to: packsDir.appendingPathComponent("pack-a/manifest.json"))
@@ -1138,8 +1138,8 @@ func runPanelConfigControllerSuites() {
             expect(onDisk.selectedPack == "pack-a", "得到 \(onDisk.selectedPack)")
             expect(controller.config.selectedPack == "pack-a", "得到 \(controller.config.selectedPack)")
             expect(
-                controller.packCards.first(where: { $0.isSelected })?.id == "pack-a",
-                "画廊必须把新建出的这个包高亮成当前选中")
+                controller.packCards.isEmpty,
+                "首次选中个人包不会隐式加星：没有 starred_packs 且没有内置默认时，面板列表必须保持零行")
             if case .present = controller.eventRows.first(where: { $0.event == .stop })?.coverage {
             } else {
                 expect(

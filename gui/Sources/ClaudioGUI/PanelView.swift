@@ -1,5 +1,6 @@
 import AppKit
 import ClaudioCore
+import ClaudioGUIComponents
 import ClaudioGUICore
 import SwiftUI
 

@@ -188,6 +188,13 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// Selected pack only: one shallow `readdir`, never one scan per event row or per pack card.
     @Published public private(set) var selectedAudioFiles: [PackAudioFile]
     @Published public private(set) var audioInventoryError: PackAudioInventoryError?
+    /// The full, uncapped window-side star selection (`starred_packs ∩ disk`). This deliberately
+    /// does not reuse the panel's four-row display set: a manually written fifth star must remain
+    /// visible here so the user can remove it without silently truncating config.json.
+    @Published public private(set) var starredPackIDs: [String]
+    /// A rejected T16 star write remains visible at window level even if the selected pack changes
+    /// or the panel has zero rows. The View renders the exact reason through the shared FailureRow.
+    @Published public private(set) var starredPacksError: SetStarredPacksError?
     /// The most recent assignment/deletion failure. The window renders this in-place and clears it
     /// only after a later successful audio action or a different pack selection.
     @Published public private(set) var audioActionError: SoundPacksWindowAudioActionError?
@@ -222,7 +229,12 @@ public final class SoundPacksWindowModel: ObservableObject {
         selectedPackID.map(builtinPackIDs.contains) ?? false
     }
 
+    public var starredPacksFailureReason: String? {
+        starredPacksError.map(soundPacksWindowStarredPacksFailureReason)
+    }
+
     private let configFile: URL
+    private let lockFile: URL
     private let environment: AudioImportEnvironment
     /// Factory contents are app-bundle-static for this model's lifetime. Cache the one derivation
     /// so SwiftUI body evaluation never turns a read-only check into repeated factory `readdir`.
@@ -241,10 +253,12 @@ public final class SoundPacksWindowModel: ObservableObject {
 
     public init(
         configFile: URL,
+        lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
         refreshCoordinator: SoundPacksRefreshCoordinator
     ) {
         self.configFile = configFile
+        self.lockFile = lockFile
         self.environment = environment
         self.builtinPackIDs = environment.builtinPackIDs
         self.refreshCoordinator = refreshCoordinator
@@ -260,6 +274,10 @@ public final class SoundPacksWindowModel: ObservableObject {
         configState = loadedState
         config = loadedConfig
         packCards = loadedCards
+        starredPackIDs = soundPacksWindowStarredPackIDs(
+            installedPackIDs: loadedCards.map(\.id),
+            starredPacks: loadedConfig.starredPacks,
+            defaultStarredPackIDs: builtinPackIDs)
         selectedPackID = initialSelection
         selectedEventRows =
             initialSelection.map {
@@ -280,6 +298,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             audioInventoryError = nil
         }
         audioActionError = nil
+        starredPacksError = nil
         factoryRestoreNotice = nil
         factoryRestoreActionError = nil
 
@@ -309,6 +328,59 @@ public final class SoundPacksWindowModel: ObservableObject {
         audioActionError = nil
         factoryRestoreNotice = nil
         factoryRestoreActionError = nil
+    }
+
+    /// The star state for one full-library sidebar row. Existing stars stay removable even when a
+    /// malformed hand edit exceeds four, while new stars are explicitly disabled at the shared cap.
+    public func starControl(for card: PackCard) -> SoundPacksWindowStarControl {
+        soundPacksWindowStarControl(
+            packID: card.id,
+            rawStarredPackIDs: starredPackIDs,
+            isPackBroken: {
+                if case .broken = card.state { return true }
+                return false
+            }())
+    }
+
+    /// Toggle one sidebar star. SwiftUI calls this only for an enabled `★` / `☆` button; the
+    /// writer remains the authoritative >4 guard for stale or programmatic callers.
+    @discardableResult
+    public func toggleStarredPack(
+        _ packID: String
+    ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
+        let nextIDs: [String]
+        if starredPackIDs.contains(packID) {
+            nextIDs = starredPackIDs.filter { $0 != packID }
+        } else {
+            nextIDs = starredPackIDs + [packID]
+        }
+        return updateStarredPacks(to: nextIDs)
+    }
+
+    /// Performs T16's one public writer and publishes a full two-surface refresh only after the
+    /// synchronous config write succeeds. This method is public so the write/error seam remains
+    /// directly testable without importing the SwiftUI window target; the view only invokes it via
+    /// ``toggleStarredPack(_:)``.
+    @discardableResult
+    public func updateStarredPacks(
+        to ids: [String]
+    ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
+        let result = setStarredPacks(
+            ids,
+            configFile: configFile,
+            lockFile: lockFile,
+            userPacksDirectory: environment.userPacksDirectory,
+            defaultStarredPackIDs: builtinPackIDs,
+            materializeDefaultStarredPacks: false)
+        switch result {
+        case .success:
+            starredPacksError = nil
+            completeSynchronousWrite(.succeeded)
+        case .failure(let error):
+            starredPacksError = error
+            completeSynchronousWrite(.failed)
+        }
+        return result
     }
 
     /// 窗口即将展示或已收到外部切包通知时重读磁盘。
@@ -344,6 +416,10 @@ public final class SoundPacksWindowModel: ObservableObject {
         configState = loadedState
         config = loadedConfig
         packCards = loadedCards
+        starredPackIDs = soundPacksWindowStarredPackIDs(
+            installedPackIDs: loadedCards.map(\.id),
+            starredPacks: loadedConfig.starredPacks,
+            defaultStarredPackIDs: builtinPackIDs)
         selectedPackID = nextSelection
         selectedEventRows =
             nextSelection.map {

@@ -114,7 +114,10 @@ public final class PanelConfigController: ObservableObject {
         self.config = loadedConfig
         self.eventRows = packCoverage(
             packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
-        self.packCards = availablePacks(config: loadedConfig, environment: environment)
+        self.packCards = availablePacks(
+            config: loadedConfig,
+            environment: environment,
+            scope: .panelStarredDisplay)
         self.selectedPackAudioFiles = Self.loadSelectedPackAudioFiles(
             packID: loadedConfig.selectedPack, environment: environment)
         self.selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(loadedConfig.selectedPack)
@@ -283,7 +286,10 @@ public final class PanelConfigController: ObservableObject {
         config = configState.resolvedConfig
         eventRows = packCoverage(
             packID: config.selectedPack, config: config, environment: environment)
-        packCards = availablePacks(config: config, environment: environment)
+        packCards = availablePacks(
+            config: config,
+            environment: environment,
+            scope: .panelStarredDisplay)
         selectedPackAudioFiles = Self.loadSelectedPackAudioFiles(
             packID: config.selectedPack, environment: environment)
         selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)

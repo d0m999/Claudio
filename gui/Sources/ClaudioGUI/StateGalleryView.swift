@@ -1,5 +1,6 @@
 #if DEBUG
-    import ClaudioCore
+import ClaudioCore
+import ClaudioGUIComponents
     import ClaudioGUICore
     import SwiftUI
 

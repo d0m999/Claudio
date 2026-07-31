@@ -1,5 +1,6 @@
 import AppKit
 import ClaudioCore
+import ClaudioGUIComponents
 import ClaudioGUICore
 import SwiftUI
 
@@ -142,18 +143,36 @@ struct SoundPacksWindowView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("声音包")
-                .font(.headline)
-                .accessibilityAddTraits(.isHeader)
-                .padding(.horizontal, 10)
-                .padding(.top, 10)
+            HStack(alignment: .firstTextBaseline) {
+                Text("声音包")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer(minLength: 8)
+                Text("★ \(model.starredPackIDs.count)/\(maxStarredPacks)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("显示在面板 \(model.starredPackIDs.count)/\(maxStarredPacks)")
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 10)
 
             List(selection: selection) {
                 ForEach(model.packCards, id: \.id) { card in
+                    let starControl = model.starControl(for: card)
                     HStack(spacing: 6) {
-                        Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
-                            .lineLimit(layoutAdaptation.packNameLineLimit)
-                            .fixedSize(horizontal: false, vertical: true)
+                        starButton(card, control: starControl)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
+                                .lineLimit(layoutAdaptation.packNameLineLimit)
+                                .fixedSize(horizontal: false, vertical: true)
+                            if let reason = starControl.disabledReason {
+                                Text(reason)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .accessibilityHidden(true)
+                            }
+                        }
                         Spacer(minLength: 4)
                         if card.isSelected {
                             Image(systemName: "checkmark")
@@ -163,7 +182,7 @@ struct SoundPacksWindowView: View {
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
                     .tag(Optional(card.id))
-                    .accessibilityElement(children: .ignore)
+                    .accessibilityElement(children: .contain)
                     .accessibilityLabel(packAccessibilityLabel(card))
                     .accessibilityAddTraits(
                         model.selectedPackID == card.id ? .isSelected : [])
@@ -174,6 +193,31 @@ struct SoundPacksWindowView: View {
             .accessibilityLabel("声音包列表")
             .accessibilityHint("使用上、下方向键选择要检查的声音包")
         }
+    }
+
+    private func starButton(
+        _ card: PackCard,
+        control: SoundPacksWindowStarControl
+    ) -> some View {
+        let displayName = SelectedPackMetadata(id: card.id, name: card.name).displayName
+        return Button {
+            model.toggleStarredPack(card.id)
+        } label: {
+            Text(control.isStarred ? "★" : "☆")
+                .font(.system(size: 15))
+                .frame(minWidth: 24, minHeight: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.borderless)
+        .disabled(!control.isEnabled)
+        .help(control.disabledReason ?? "")
+        .accessibilityLabel(
+            control.isStarred
+                ? "取消在面板显示「\(displayName)」"
+                : "在面板显示「\(displayName)」")
+        .accessibilityHint(
+            control.disabledReason
+                ?? (control.isStarred ? "取消后可腾出一个面板位置" : "最多显示 4 个声音包"))
     }
 
     @ViewBuilder
@@ -200,6 +244,11 @@ struct SoundPacksWindowView: View {
             // state.
             if let error = model.audioActionError {
                 windowFailureRow(action: "音频操作", reason: error.message)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+            }
+            if let reason = model.starredPacksFailureReason {
+                windowFailureRow(action: "更新星标", reason: reason)
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
             }
@@ -455,15 +504,7 @@ struct SoundPacksWindowView: View {
     }
 
     private func windowFailureRow(action: String, reason: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Image(systemName: "xmark.circle.fill")
-                .foregroundStyle(.red)
-                .accessibilityHidden(true)
-            Text(reason)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .accessibilityElement(children: .ignore)
+        FailureRow(message: reason)
         .accessibilityLabel(
             soundPacksWindowFailureAccessibilityLabel(action: action, reason: reason))
     }

@@ -34,12 +34,20 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper")
             ]
         ),
+        // Small shared SwiftUI component/token surface. Both the executable panel and the standard
+        // management window depend on it, so failure presentation cannot drift into two hand-made
+        // copies while the Foundation-only `ClaudioGUICore` remains free of SwiftUI.
+        .target(
+            name: "ClaudioGUIComponents",
+            dependencies: ["ClaudioGUICore"]
+        ),
         // Standard AppKit/SwiftUI window surface. This is a library target (no `@main`);
         // `MenuBarController` owns its single lazy window for the app lifetime.
         .target(
             name: "SoundPacksWindow",
             dependencies: [
                 "ClaudioGUICore",
+                "ClaudioGUIComponents",
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
@@ -55,6 +63,7 @@ let package = Package(
             name: "ClaudioGUI",
             dependencies: [
                 "ClaudioGUICore",
+                "ClaudioGUIComponents",
                 "SoundPacksWindow",
                 .product(name: "ClaudioCore", package: "helper"),
             ]
