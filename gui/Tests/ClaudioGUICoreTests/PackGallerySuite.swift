@@ -41,6 +41,41 @@ private func writeCompletePack(named id: String, at userPacks: URL, name: String
 
 @MainActor
 func runPackGallerySuites() {
+    suite("starredPackDisplayIDs: absent defaults, explicit empty, disk intersection, de-duplication, and defensive cap") {
+        let installedInOrder = ["a", "b", "c", "d", "e"]
+        let missingKeyFixture = try! JSONDecoder().decode(
+            ClaudioConfig.self, from: #"{ "selected_pack": "a" }"#.data(using: .utf8)!)
+        let explicitEmptyFixture = try! JSONDecoder().decode(
+            ClaudioConfig.self,
+            from: #"{ "selected_pack": "a", "starred_packs": [] }"#.data(using: .utf8)!)
+
+        expect(
+            starredPackDisplayIDs(
+                orderedPackIDs: installedInOrder, starredPacks: missingKeyFixture.starredPacks,
+                defaultStarredPackIDs: ["d", "b"]
+            ) == ["b", "d"],
+            "the missing-key fixture must use built-in defaults in existing id order")
+        expect(
+            starredPackDisplayIDs(
+                orderedPackIDs: installedInOrder, starredPacks: explicitEmptyFixture.starredPacks,
+                defaultStarredPackIDs: ["a"]
+            ).isEmpty,
+            "the explicit-empty fixture must mean zero rows, never revive defaults")
+        expect(
+            starredPackDisplayIDs(
+                orderedPackIDs: installedInOrder, starredPacks: ["b", "b", "ghost", "a"],
+                defaultStarredPackIDs: []
+            ) == ["a", "b"],
+            "read-side intersection must omit stale ids and collapse duplicate ids without writing")
+        expect(
+            starredPackDisplayIDs(
+                orderedPackIDs: installedInOrder, starredPacks: installedInOrder,
+                defaultStarredPackIDs: []
+            ) == ["a", "b", "c", "d"],
+            "a hand-edited five-star config must be defensively capped to the first four only in the display model")
+        expect(maxStarredPacks == 4, "the read model and writer must share ClaudioCore's named four-star limit")
+    }
+
     suite("availablePacks: a complete pack (every declared file present) reports .complete") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")

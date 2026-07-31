@@ -49,7 +49,7 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
 }
 
 /// Switches the active pack. If `configFile` already exists, only `selected_pack` is
-/// updated — `master_volume` / `events` are read back and preserved untouched. If it
+/// updated — `master_volume` / `events` / `starred_packs` are read back and preserved untouched. If it
 /// doesn't exist yet, a fresh ``ClaudioConfig`` is created with defaults for everything
 /// else (T17: this is also the path ``performFirstRunSetup(environment:)`` uses to
 /// establish a first-run default pack selection).
@@ -92,21 +92,22 @@ public func selectPack(
 
 /// 走 ``updateConfigJSON(at:onMissing:mutate:)`` 这条共用的外科式读-改-写——与
 /// `setEventEnabled` 的写路径**同一份实现**，不是两份各自推理出来的：两者编辑的是同一个文件，
-/// 「保真」的定义必须只有一个。只 set `selected_pack`，`master_volume` / `events` / 未知顶层键
+/// 「保真」的定义必须只有一个。只 set `selected_pack`，`master_volume` / `events` / `starred_packs` / 未知顶层键
 /// 逐字保留。
 ///
 /// 这里同样**曾经**是 round-trip `ClaudioConfig`（Codable），带着和 `setEventEnabled` 一模一样
-/// 的数据丢失 bug（只写三个键 + 宽松解码把坏值静默换成默认值），只是触发频率低——切包比点静音少。
+/// 的数据丢失 bug（只写已建模键 + 宽松解码把坏值静默换成默认值），只是触发频率低——切包比点静音少。
 /// 见 `ConfigMutation.swift` 的类型注释。
 private func performSelectPack(
     _ packID: String, configFile: URL
 ) -> Result<UseOutcome, UseError> {
     // 全仓**唯一**有资格从无到有建出一份 config 的写者——因为它是唯一手上握着真实 pack id 的那个
-    // （而且这个 id 上面刚刚校验过）。没有 pack 上下文的写者（静音钮、主音量）一律 `.failClosed`：
+    // （而且这个 id 上面刚刚校验过）。没有 pack 上下文的写者（静音钮、主音量、星标）一律 `.failClosed`：
     // 凭空新建等于伪造一次谁也没做过的选择（D23 定稿①）。
     let result = updateConfigJSON(at: configFile, onMissing: .createFresh(selectedPack: packID)) {
         json in
         json["selected_pack"] = packID
+        return .success(())
     }
 
     switch result {
@@ -120,5 +121,7 @@ private func performSelectPack(
         return .failure(.configReadFailure(reason: reason))
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))
+    case .failure(.mutationRejected):
+        return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
     }
 }

@@ -4,8 +4,9 @@ import Foundation
 /// 只覆盖调用方真正拥有的那一个键，其余每一个顶层键——**包括这份 v1 模型根本不认识的键**——
 /// 的**键与值**一律保留后写回。保的是**键与值，不是字节**：输出是规范化的（键排序、`prettyPrinted`
 /// 缩进、数字最短渲染），不是原文件的字节级复刻——两条边界各有一节说明，见下与「数字规范化」。
-/// `claudio use`（``selectPack``）与「静音钮」（``setEventEnabled``）是它
-/// 仅有的两个调用方，共用这一条代码路径，而不是各写一遍。
+/// `claudio use`（``selectPack``）、「静音钮」（``setEventEnabled``）、主音量
+/// （``setMasterVolume(_:)``）与星标（``setStarredPacks(_:configFile:lockFile:userPacksDirectory:defaultStarredPackIDs:)``）
+/// 是它的四个调用方，共用这一条代码路径，而不是各写一遍。
 ///
 /// ## 「保真」保的是键与值，不是**键顺序**（`/codex review` [P2]，判定为按现状）
 ///
@@ -21,7 +22,8 @@ import Foundation
 ///
 /// ## 为什么绝不能 round-trip `ClaudioConfig`（Codable）
 ///
-/// ``ClaudioConfig`` 只建模三个 v1 键（`selected_pack` / `master_volume` / `events`），而它的
+/// ``ClaudioConfig`` 只建模四个 v1 键（`selected_pack` / `master_volume` / `events` /
+/// `starred_packs`），而它的
 /// `Encodable` 是编译器合成的——「解码成 `ClaudioConfig` 再重新编码」会静默 **DROP 掉每一个其他
 /// 顶层键**。这是真实的数据丢失 bug，不是假设：`/ship` pre-landing 评审实证复现过——一份带
 /// `night_dim` / `ui_theme` 的 config.json，用户点一次静音，两个键当场消失，而 CLI 报 SUCCESS。
@@ -36,7 +38,7 @@ import Foundation
 /// ## 因此这里一律 fail closed
 ///
 /// 任何我们**读不懂**的结构（顶层不是对象、`events` 不是对象、`events` 里有非布尔值、
-/// `master_volume` 不是数字、`selected_pack` 缺失或不是字符串）都判定为「文件已损坏」，
+/// `master_volume` 不是数字、`selected_pack` 缺失或不是字符串、`starred_packs` 不是字符串数组）都判定为「文件已损坏」，
 /// ``ConfigMutationFailure/unreadable(reason:)`` 中止，**一个字节都不写**。刻意不做「只跳过坏的
 /// 那一个键、其余照写」——那等于用一个我们没读懂的文件去覆盖用户的真实文件，是把数据丢失从
 /// 「全丢」降级成「部分丢」，而不是修好它。
@@ -55,8 +57,9 @@ import Foundation
 /// 刻意**不**加 `--fix-config` 这类新命令：那是在给一份我们读不懂的文件做自动手术，超出「让错误可
 /// 执行」的范围。
 
-/// ``updateConfigJSON(at:onMissing:mutate:)`` 的失败原因。两个调用方各自把它映射成
-/// 自己的 `configReadFailure` / `configWriteFailure`（`UseError` / `SetEventEnabledError`）。
+/// ``updateConfigJSON(at:onMissing:mutate:)`` 的失败原因。四个调用方各自把它映射成
+/// 自己的 `configReadFailure` / `configWriteFailure`（`UseError` / `SetEventEnabledError` /
+/// `SetMasterVolumeError` / `SetStarredPacksError`）。
 enum ConfigMutationFailure: Error, Sendable, Equatable {
     /// 文件存在但读不出来，或读出来的内容不是一份我们能安全重写的 config（见类型注释里的
     /// fail-closed 规则）。带的 reason 直接透传给用户，且**必须是可执行的**（见上）。
@@ -65,13 +68,18 @@ enum ConfigMutationFailure: Error, Sendable, Equatable {
     case missing(reason: String)
     /// 改完之后写回磁盘失败（父目录被一个普通文件占位、磁盘满、只读卷……）。
     case writeFailed(reason: String)
+    /// 调用方在同一把锁、同一份已验证 JSON 上发现自己的业务前置条件不成立。这个 case 只让
+    /// ``updateConfigJSON(at:onMissing:mutate:)`` 在编码/写盘之前中止；公共写者必须把它映射回自己的
+    /// 领域错误，不能把内部占位文案漏给用户。
+    case mutationRejected
 
-    /// 人话原因，不管是哪一种失败——`doctor` 与两个 CLI 调用方都只想要这一个字符串。
+    /// 人话原因，不管是哪一种失败——`doctor` 与所有公共写者都只想要这一个字符串。
     var reason: String {
         switch self {
         case .unreadable(let reason): reason
         case .missing(let reason): reason
         case .writeFailed(let reason): reason
+        case .mutationRejected: "配置变更被调用方拒绝"
         }
     }
 }
@@ -91,7 +99,7 @@ enum MissingConfigPolicy: Sendable, Equatable {
     /// 永远握着一个刚刚校验过的、真实存在的 pack id。
     case createFresh(selectedPack: String)
     /// 不新建，直接 ``ConfigMutationFailure/missing(reason:)``。没有 pack 上下文的写者（静音钮、
-    /// 主音量）走这条：凭空新建一份 config，等于伪造一次谁也没做过的选择。
+    /// 主音量、星标）走这条：凭空新建一份 config，等于伪造一次谁也没做过的选择。
     case failClosed
 }
 
@@ -159,7 +167,7 @@ public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> 
 func updateConfigJSON(
     at configFile: URL,
     onMissing: MissingConfigPolicy,
-    mutate: (inout [String: Any]) -> Void
+    mutate: (inout [String: Any]) -> Result<Void, ConfigMutationFailure>
 ) -> Result<Void, ConfigMutationFailure> {
     var json: [String: Any]
 
@@ -188,7 +196,10 @@ func updateConfigJSON(
         ]
     }
 
-    mutate(&json)
+    switch mutate(&json) {
+    case .success: break
+    case .failure(let failure): return .failure(failure)
+    }
 
     // 规范化（不写脏数字）+ 校验（绝不 abort）+ 序列化，全在 ``encodeJSONForWriting(_:path:)`` 里，
     // 与 `gui` 的 manifest 绑定路径共用同一份实现——「哪些值写得出去」只有一个定义。
@@ -276,6 +287,27 @@ private func parseRewritableConfig(
                 .unreadable(
                     reason: "\(path) 的 events.\(key) 必须是 true/false"
                         + "（当前是\(describeJSONValue(value))）。请手工修正该值，"
+                        + "\(configRebuildHint)。"))
+        }
+    }
+
+    // `starred_packs` is intentionally a shape-only contract: pack-id content is not validated
+    // here because this parser decides only whether a config can be safely rewritten. Stale or
+    // otherwise non-displayable ids are a read-model/write-normalization concern, exactly like
+    // `selected_pack`'s existence is.
+    if let rawStarredPacks = json["starred_packs"] {
+        guard let starredPacks = rawStarredPacks as? [Any] else {
+            return .failure(
+                .unreadable(
+                    reason: "\(path) 的 starred_packs 必须是字符串数组（形如 [\"minimal-chime\"]）"
+                        + "（当前是\(describeJSONValue(rawStarredPacks))）。请手工修正该值，"
+                        + "\(configRebuildHint)。"))
+        }
+        for value in starredPacks where !(value is String) {
+            return .failure(
+                .unreadable(
+                    reason: "\(path) 的 starred_packs 必须是字符串数组（形如 [\"minimal-chime\"]）"
+                        + "（当前数组包含\(describeJSONValue(value))）。请手工修正该值，"
                         + "\(configRebuildHint)。"))
         }
     }

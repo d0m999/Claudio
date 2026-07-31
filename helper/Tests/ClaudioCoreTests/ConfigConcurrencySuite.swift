@@ -2,16 +2,18 @@ import ClaudioCore
 import Dispatch
 import Foundation
 
-// MARK: - D7: 三个不同类型的 config.json 写者混跑，仍然互斥、永不撕裂
+// MARK: - D7/T16: 四个不同类型的 config.json 写者混跑，仍然互斥、永不撕裂
 //
 // `EventEnabledSuite.swift` 已经有一条单写者压力测试（`DispatchQueue.concurrentPerform(iterations:
 // 50)` 反复调用同一个 `setEventEnabled`），证明的是「这一个函数自己跟自己竞争时不会撕裂文件」。这条
-// 把它扩成**三个不同的写者**——`selectPack` / `setEventEnabled` / `setMasterVolume`——在同一把
-// `config.lock` 上真·混跑，证明「三者共享同一把锁」这句话对三者都成立，不只是对其中两个各自的成对组合
+// 把它扩成**四个不同的写者**——`selectPack` / `setEventEnabled` / `setMasterVolume` /
+// `setStarredPacks`——在同一把 `config.lock` 上真·混跑，证明「四者共享同一把锁」这句话对四者都成立，
+// 不只是对其中几个各自的成对组合
 // 成立。断言的形状完全照抄那条单写者压力测试：文件永远不撕裂、旧键永远不丢、每次调用要么真成功要么
 // 各自的 `.lockBusy`，绝不静默损坏。
 
-/// 三个写者各自的错误类型不同（`UseError` / `SetEventEnabledError` / `SetMasterVolumeError`），所以
+/// 四个写者各自的错误类型不同（`UseError` / `SetEventEnabledError` / `SetMasterVolumeError` /
+/// `SetStarredPacksError`），所以
 /// 收集器把每次调用的结果先**折叠**成这一个共享形状，再统一断言——而不是给每个写者各配一套断言。
 private enum ConcurrentWriteOutcome: Sendable, Equatable {
     case succeeded
@@ -45,7 +47,7 @@ private final class ConcurrentOutcomeCollector: @unchecked Sendable {
 @MainActor
 func runConfigConcurrencySuites() {
     suite(
-        "config.json: selectPack / setEventEnabled / setMasterVolume 混跑在同一把 config.lock 上"
+        "config.json: selectPack / setEventEnabled / setMasterVolume / setStarredPacks 混跑在同一把 config.lock 上"
             + "（D7）——文件永远不撕裂、旧键永远不丢，每次调用要么真成功要么各自的 .lockBusy"
     ) {
         withTempDirectory { root in
@@ -60,13 +62,14 @@ func runConfigConcurrencySuites() {
                 withIntermediateDirectories: true)
             writeFixture(
                 #"""
-                { "selected_pack": "minimal-chime", "master_volume": 0.5, "night_dim": true, "events": { "stop": true } }
+                { "selected_pack": "minimal-chime", "master_volume": 0.5, "night_dim": true,
+                  "events": { "stop": true }, "starred_packs": ["minimal-chime"] }
                 """#, to: configFile)
 
             let collector = ConcurrentOutcomeCollector()
             let iterations = 60
             DispatchQueue.concurrentPerform(iterations: iterations) { index in
-                switch index % 3 {
+                switch index % 4 {
                 case 0:
                     let packID = index % 2 == 0 ? "minimal-chime" : "second-pack"
                     let result = selectPack(
@@ -87,7 +90,7 @@ func runConfigConcurrencySuites() {
                     case .failure(let error):
                         collector.append(.otherFailure("setEventEnabled: \(error)"))
                     }
-                default:
+                case 2:
                     let volume = Double(index % 11) / 10.0
                     let result = setMasterVolume(volume, configFile: configFile, lockFile: lockFile)
                     switch result {
@@ -95,6 +98,16 @@ func runConfigConcurrencySuites() {
                     case .failure(.lockBusy): collector.append(.lockBusy)
                     case .failure(let error):
                         collector.append(.otherFailure("setMasterVolume: \(error)"))
+                    }
+                default:
+                    let result = setStarredPacks(
+                        ["minimal-chime", "second-pack"], configFile: configFile, lockFile: lockFile,
+                        userPacksDirectory: userPacks, defaultStarredPackIDs: [])
+                    switch result {
+                    case .success: collector.append(.succeeded)
+                    case .failure(.lockBusy): collector.append(.lockBusy)
+                    case .failure(let error):
+                        collector.append(.otherFailure("setStarredPacks: \(error)"))
                     }
                 }
             }
@@ -121,14 +134,15 @@ func runConfigConcurrencySuites() {
             else {
                 expect(
                     false,
-                    "经过 \(iterations) 个三写者混跑之后，config.json 必须仍是一份合法、可解析的 JSON")
+                    "经过 \(iterations) 个四写者混跑之后，config.json 必须仍是一份合法、可解析的 JSON")
                 return
             }
-            // (b) + (c) 三个 v1 键与那个未知顶层键必须一个不少——三个写者混跑绝不能让任何一方的键
+            // (b) + (c) 四个 v1 键与那个未知顶层键必须一个不少——四个写者混跑绝不能让任何一方的键
             // 集合丢失（`selectPack` 只碰 `selected_pack`，`setEventEnabled` 只碰 `events`，
-            // `setMasterVolume` 只碰 `master_volume`，`night_dim` 谁都不碰）。
+            // `setMasterVolume` 只碰 `master_volume`，`setStarredPacks` 只碰 `starred_packs`，
+            // `night_dim` 谁都不碰）。
             expect(
-                Set(json.keys) == Set(["selected_pack", "master_volume", "events", "night_dim"]),
+                Set(json.keys) == Set(["selected_pack", "master_volume", "events", "night_dim", "starred_packs"]),
                 "混跑之后顶层键集合必须逐一保留（已知键 + 未知键），got \(json.keys.sorted())")
             expect(
                 json["night_dim"] as? Bool == true,
@@ -146,6 +160,11 @@ func runConfigConcurrencySuites() {
             expect(
                 events != nil && !(events!.isEmpty),
                 "events 表必须仍然存在且非空——并发写不能把它写没了")
+            let starredPacks = json["starred_packs"] as? [String]
+            expect(
+                starredPacks == ["minimal-chime"] || starredPacks == ["minimal-chime", "second-pack"],
+                "starred_packs 必须保留初始星标；若本轮星标写者拿到锁，则还必须是它归一化过的一组 id，got"
+                    + " \(String(describing: starredPacks))")
         }
     }
 }

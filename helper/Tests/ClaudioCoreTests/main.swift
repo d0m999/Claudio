@@ -65,6 +65,7 @@ runConfigMutationSuites()
 runPackContentSafetySuites()
 runPackSelectionSuites()
 runMasterVolumeSuites()
+runStarredPacksSuites()
 runConfigConcurrencySuites()
 
 // MARK: - Summary

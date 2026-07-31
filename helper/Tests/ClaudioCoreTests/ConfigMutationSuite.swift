@@ -299,7 +299,7 @@ func runConfigMutationSuites() {
         }
     }
 
-    suite("selectPack: 全新安装写出的 config.json 恰好是三个 v1 键，没有多也没有少") {
+    suite("selectPack: 全新安装写出的 config.json 恰好是三个最小必需键，没有多也没有少") {
         withTempDirectory { root in
             // 这条护住「文件不存在 → 新建最小 config」这个分支：它不再走 `JSONEncoder`，所以键集合
             // 必须由测试来钉死，而不是靠 Codable 顺带保证。这条以前挂在 `setEventEnabled` 名下——
@@ -318,7 +318,7 @@ func runConfigMutationSuites() {
             let json = readRawConfigJSON(configFile)
             expect(
                 json?.keys.sorted() == ["events", "master_volume", "selected_pack"],
-                "全新 config.json 的顶层键必须恰好是三个 v1 键，got"
+                "全新 config.json 的顶层键必须恰好是三个最小必需键（starred_packs 缺失有默认语义），got"
                     + " \(String(describing: json?.keys.sorted()))")
             expect(
                 json?["master_volume"] as? Double == ClaudioConfig.defaultMasterVolume,

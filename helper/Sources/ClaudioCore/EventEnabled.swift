@@ -93,11 +93,11 @@ public func setEventEnabled(
 }
 
 /// 走 ``updateConfigJSON(at:onMissing:mutate:)`` 这条共用的外科式读-改-写：只 set
-/// `events.<event.cliName>`，其余顶层键（`selected_pack` / `master_volume` / 兄弟事件的开关 /
+/// `events.<event.cliName>`，其余顶层键（`selected_pack` / `master_volume` / `starred_packs` / 兄弟事件的开关 /
 /// 我们根本不认识的键）逐字保留。
 ///
 /// 这里**曾经**是 round-trip `ClaudioConfig`（Codable）：解码 → 改一个字段 → 重新编码。而
-/// `ClaudioConfig` 的合成 `Encodable` 只写三个键，它的解码器又是宽松的——于是点一次静音就会
+/// `ClaudioConfig` 的合成 `Encodable` 只写已建模键，它的解码器又是宽松的——于是点一次静音就会
 /// 悄悄抹掉未知键、把一个坏掉的 `master_volume` 换成默认值 0.8 再写回去，还报 SUCCESS
 /// （`/ship` pre-landing 评审实证复现）。见 `ConfigMutation.swift` 的类型注释。
 ///
@@ -118,6 +118,7 @@ private func performSetEventEnabled(
         var events = json["events"] as? [String: Any] ?? [:]
         events[event.cliName] = enabled
         json["events"] = events
+        return .success(())
     }
 
     switch result {
@@ -129,5 +130,7 @@ private func performSetEventEnabled(
         return .failure(.configMissing)
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))
+    case .failure(.mutationRejected):
+        return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
     }
 }

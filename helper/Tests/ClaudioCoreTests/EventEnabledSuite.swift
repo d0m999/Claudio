@@ -305,7 +305,7 @@ func runEventEnabledSuites() {
     // 的写法（那条证明的是「恰好一次真正播放」；这条证明的是「文件永远不撕裂、旧键永远不丢」）。
 
     suite(
-        "setEventEnabled: N 个并发写者打在同一个 config.json 上——写完之后文件仍是合法 JSON、三个 v1"
+        "setEventEnabled: N 个并发写者打在同一个 config.json 上——写完之后文件仍是合法 JSON、三个最小"
             + " 键与一个未知顶层键全都还在，且每一次调用要么真的成功要么 .lockBusy，绝不静默损坏"
     ) {
         withTempDirectory { root in
@@ -354,7 +354,7 @@ func runEventEnabledSuites() {
                     "经过 \(iterations) 个并发写者之后，config.json 必须仍是一份合法、可解析的 JSON")
                 return
             }
-            // (b) + (c) 三个 v1 键与那个未知顶层键必须一个不少——并发写绝不能让任何一方的键集合丢失。
+            // (b) + (c) 三个最小键与那个未知顶层键必须一个不少——并发写绝不能让任何一方的键集合丢失。
             expect(
                 Set(json.keys) == Set(["selected_pack", "master_volume", "events", "night_dim"]),
                 "并发写之后顶层键集合必须逐一保留（已知键 + 未知键），got \(json.keys.sorted())")

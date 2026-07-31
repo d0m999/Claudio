@@ -400,6 +400,33 @@ public func availablePacks(
     return orderedIDs.sorted().map { buildPackCard(id: $0, config: config, environment: environment) }
 }
 
+/// Computes T17's future starred panel display set from already-enumerated pack ids, before any
+/// card reads happen. It is intentionally a pure id transformation: no `URL`, `FileManager`, or
+/// config writer can enter this seam, so reading a stale star never edits disk. A missing key uses
+/// the built-in defaults, while `[]` remains the user's explicit zero-row decision. It also
+/// intersects with the ids that the caller already enumerated from disk, collapses duplicate ids,
+/// and defensively applies ClaudioCore's one shared ``maxStarredPacks`` limit.
+///
+/// T16 defines and tests this model but deliberately does not call it from ``availablePacks`` yet:
+/// activating starred-only filtering is T17, when the management window gives users a way to undo
+/// a hidden star selection.
+public func starredPackDisplayIDs(
+    orderedPackIDs: [String],
+    starredPacks: [String]?,
+    defaultStarredPackIDs: Set<String>
+) -> [String] {
+    let starredIDs = Set(starredPacks ?? Array(defaultStarredPackIDs))
+    var emitted: Set<String> = []
+    var displayIDs: [String] = []
+    displayIDs.reserveCapacity(min(maxStarredPacks, orderedPackIDs.count))
+
+    for id in orderedPackIDs where starredIDs.contains(id) && emitted.insert(id).inserted {
+        displayIDs.append(id)
+        if displayIDs.count == maxStarredPacks { break }
+    }
+    return displayIDs
+}
+
 /// One directly-contained audio file in a pack and whether any manifest event currently names it.
 ///
 /// `fileName` is the real directory-entry spelling returned by `readdir`, not a lower-cased or

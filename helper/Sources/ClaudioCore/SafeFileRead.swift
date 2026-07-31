@@ -49,7 +49,7 @@ import Foundation
 /// 任何越过它的东西都不是 manifest，是攻击载荷或事故。
 let maxPackManifestBytes = 1 << 20
 
-/// `config.json` 的大小上限：64 KiB。一份真实 config（三个 v1 键 + 用户自定义字段）是几百字节；
+/// `config.json` 的大小上限：64 KiB。一份真实 config（四个 v1 键 + 用户自定义字段）是几百字节；
 /// 64 KiB 已经宽出两个数量级，任何越过它的东西都不是 config。
 ///
 /// 这道上限**必须存在**，理由与 manifest 那道一模一样，而且更硬：`config.json` 被读的地方比 manifest

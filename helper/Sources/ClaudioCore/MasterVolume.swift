@@ -9,11 +9,12 @@ import Foundation
 /// "(future) real caller" until then; it also cited ENGINEERING.md's ASCII wireframe, whose
 /// `🔊` speaker glyph the shipped row deliberately does NOT render — D15. `/codex review 8771946`.)
 ///
-/// The third writer of `config.json`, alongside
+/// The fourth writer of `config.json`, alongside
 /// ``selectPack(_:configFile:userPacksDirectory:bundledPacksDirectory:lockFile:)`` and
-/// ``setEventEnabled(_:enabled:configFile:lockFile:)``. All three go through the same surgical
+/// ``setEventEnabled(_:enabled:configFile:lockFile:)`` and
+/// ``setStarredPacks(_:configFile:lockFile:userPacksDirectory:defaultStarredPackIDs:)``. All four go through the same surgical
 /// read-modify-write (``updateConfigJSON(at:onMissing:mutate:)``) and take the same
-/// ``ClaudioPaths/configLockFile`` — not a fourth, independently-reasoned lock/write story for the
+/// ``ClaudioPaths/configLockFile`` — not a fifth, independently-reasoned lock/write story for the
 /// identical file.
 ///
 /// **No `freshSelectedPack` parameter — this signature never had one (D13 判死).** An earlier WIP
@@ -77,15 +78,15 @@ public enum SetMasterVolumeError: Error, Sendable, Equatable, CustomStringConver
 }
 
 /// Sets `master_volume`, clamped into `[0.0, 1.0]` via ``AfplayVolume/clamped(_:)`` before it is
-/// written. Only that one key is touched — `selected_pack`, every event's mute flag, and every
-/// top-level key this v1 model doesn't even know about are read back and written out untouched
+/// written. Only that one key is touched — `selected_pack`, every event's mute flag,
+/// `starred_packs`, and every top-level key this v1 model doesn't even know about are read back and written out untouched
 /// (``updateConfigJSON(at:onMissing:mutate:)``'s contract).
 ///
 /// If `configFile` does **not** exist yet, this call is **fail-closed**: it returns
 /// ``SetMasterVolumeError/configMissing`` and creates nothing — see the type-level doc above.
 ///
 /// Takes the exact same non-blocking ``ClaudioPaths/configLockFile`` `selectPack` and
-/// `setEventEnabled` do (not a fourth, independent lock) — all three edit the same file, and must
+/// `setEventEnabled` do (not a fifth, independent lock) — all four edit the same file, and must
 /// serialize against each other, not just against themselves. Deliberately **not** `play`'s
 /// ``ClaudioPaths/playLockFile`` — dragging a slider must never gate on, or be gated by, `play`'s
 /// debounce.
@@ -108,7 +109,7 @@ public func setMasterVolume(
 }
 
 /// 走 ``updateConfigJSON(at:onMissing:mutate:)`` 这条共用的外科式读-改-写：只 set `master_volume`，
-/// 其余顶层键（`selected_pack` / 每个事件的开关 / 我们根本不认识的键）逐字保留。
+/// 其余顶层键（`selected_pack` / 每个事件的开关 / `starred_packs` / 我们根本不认识的键）逐字保留。
 ///
 /// `landed` 在进来之前已经被 ``AfplayVolume/clamped(_:)`` 钳过
 /// （``setMasterVolume(_:configFile:lockFile:)`` 里做的），所以这里**不**重新钳一次——钳制只有一份
@@ -122,6 +123,7 @@ private func performSetMasterVolume(
 ) -> Result<SetMasterVolumeOutcome, SetMasterVolumeError> {
     let result = updateConfigJSON(at: configFile, onMissing: .failClosed) { json in
         json["master_volume"] = landed
+        return .success(())
     }
 
     switch result {
@@ -133,5 +135,7 @@ private func performSetMasterVolume(
         return .failure(.configMissing)
     case .failure(.writeFailed(let reason)):
         return .failure(.configWriteFailure(reason: reason))
+    case .failure(.mutationRejected):
+        return .failure(.configWriteFailure(reason: "配置变更被调用方拒绝"))
     }
 }
