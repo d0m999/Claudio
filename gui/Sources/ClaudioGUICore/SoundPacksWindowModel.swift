@@ -77,8 +77,13 @@ public enum SoundPacksWindowFactoryRestoreActionError: Error, Sendable, Equatabl
     case selectionChanged
     case notBuiltin(packID: String)
     /// The attempted pack id is retained even when a partial publish failure removes that pack
-    /// from the visible library and the window must fall back to another selection.
-    case restore(packID: String, error: FactoryPackRestoreError)
+    /// from the visible library and the window must fall back to another selection. Once an old
+    /// tree has been salvaged, that first path remains attached throughout every later retry.
+    case restore(
+        packID: String,
+        error: FactoryPackRestoreError,
+        retainedSalvage: SalvagedPack?
+    )
 
     public var message: String {
         switch self {
@@ -88,8 +93,12 @@ public enum SoundPacksWindowFactoryRestoreActionError: Error, Sendable, Equatabl
             return "正在查看的声音包已经改变，未恢复任何内容；请在当前包里重新确认。"
         case .notBuiltin:
             return "只有内置声音包可以恢复出厂声音。"
-        case .restore(let packID, let error):
-            return "声音包「\(packID)」：\(factoryPackRestoreErrorMessage(error))"
+        case .restore(let packID, let error, let retainedSalvage):
+            return
+                "声音包「\(packID)」："
+                + factoryPackRestoreErrorMessage(
+                    error,
+                    retainedSalvage: retainedSalvage)
         }
     }
 }
@@ -110,30 +119,55 @@ public func factoryPackRestoreNoticeMessage(
         + "因此没有文件需要搬走。"
 }
 
-private func factoryPackRestoreErrorMessage(_ error: FactoryPackRestoreError) -> String {
+private func factoryPackRestoreErrorMessage(
+    _ error: FactoryPackRestoreError,
+    retainedSalvage: SalvagedPack?
+) -> String {
+    let message: String
     switch error {
     case .unsafePackID:
-        return "声音包标识不安全，恢复已中止，磁盘内容未更改。"
+        message = "声音包标识不安全，恢复已中止，磁盘内容未更改。"
     case .factoryUnavailable:
-        return "当前构建没有可用的出厂声音来源，磁盘内容未更改。请重新安装 Claudio 后再试。"
+        message = "当前构建没有可用的出厂声音来源，磁盘内容未更改。请重新安装 Claudio 后再试。"
     case .notBuiltinPack:
-        return "这个声音包不是内置包，不能恢复出厂声音。"
+        message = "这个声音包不是内置包，不能恢复出厂声音。"
     case .unsafeFactorySource:
-        return "出厂声音来源不是安全的真实目录，恢复已中止，当前安装未更改。请重新安装 Claudio。"
+        message = "出厂声音来源不是安全的真实目录，恢复已中止，当前安装未更改。请重新安装 Claudio。"
     case .invalidFactoryContents(let reason):
-        return "出厂声音内容不完整，恢复已中止，当前安装未更改。请重新安装 Claudio：\(reason)"
+        message = "出厂声音内容不完整，恢复已中止，当前安装未更改。请重新安装 Claudio：\(reason)"
     case .stagingFailed(let reason):
-        return "无法准备完整的出厂副本，当前安装未更改：\(reason)"
+        message = "无法准备完整的出厂副本，当前安装未更改：\(reason)"
     case .salvageFailed(let reason):
-        return "恢复前的内容无法安全搬走，因此没有替换任何东西：\(reason)"
+        message = "恢复前的内容无法安全搬走，因此没有替换任何东西：\(reason)"
     case .publishFailed(let reason, let salvaged):
         if let salvaged {
-            return
+            let currentMessage =
                 "出厂副本未能发布。恢复前的内容已原样搬到 \(salvaged.movedTo)；"
                 + "一个文件都没删。请保留该目录并重试：\(reason)"
+            guard let retainedSalvage, retainedSalvage != salvaged else {
+                return currentMessage
+            }
+            return
+                currentMessage
+                + " 上次恢复前搬走的内容也仍原样保留在 \(retainedSalvage.movedTo)。"
+        } else if let retainedSalvage {
+            return
+                "出厂副本仍未能发布。上次恢复前搬走的内容仍原样保留在 "
+                + "\(retainedSalvage.movedTo)；一个文件都没删。请保留该目录并重试：\(reason)"
         }
         return "出厂副本未能发布，且没有旧内容需要搬走。请重试：\(reason)"
     }
+    guard let retainedSalvage else { return message }
+    return
+        message
+        + " 上次恢复前搬走的内容仍原样保留在 \(retainedSalvage.movedTo)；一个文件都没删。"
+}
+
+private func factoryPackRestoreSalvage(
+    in error: FactoryPackRestoreError
+) -> SalvagedPack? {
+    guard case .publishFailed(_, let salvaged) = error else { return nil }
+    return salvaged
 }
 
 /// 管理窗口的磁盘读模型。它列出完整包库，不应用面板的星标显示集，也不持有 `NSWindow`。
@@ -162,16 +196,23 @@ public final class SoundPacksWindowModel: ObservableObject {
     @Published public private(set) var factoryRestoreActionError:
         SoundPacksWindowFactoryRestoreActionError?
 
-    /// The built-in id whose failed factory publish can be retried even when its visible installed
-    /// directory no longer exists and therefore cannot appear in ``packCards``.
+    /// The built-in id whose restore lifecycle can be retried even when its visible installed
+    /// directory no longer exists and therefore cannot appear in ``packCards``. After the first
+    /// partial publish failure, later failures remain retryable while the retained salvage is live.
     public var factoryRestoreRetryPackID: String? {
         guard
-            case .restore(let packID, let error)? = factoryRestoreActionError,
-            case .publishFailed = error
+            case .restore(let packID, let error, let retainedSalvage)? =
+                factoryRestoreActionError
         else {
             return nil
         }
-        return packID
+        if retainedSalvage != nil {
+            return packID
+        }
+        if case .publishFailed = error {
+            return packID
+        }
+        return nil
     }
 
     public var selectedPackIsBuiltinReadOnly: Bool {
@@ -186,6 +227,14 @@ public final class SoundPacksWindowModel: ObservableObject {
     private let refreshCoordinator: SoundPacksRefreshCoordinator
     private var windowRefreshCancellable: AnyCancellable?
     private var windowContentRefreshCancellable: AnyCancellable?
+
+    private var factoryRestoreRetainedSalvage: SalvagedPack? {
+        guard case .restore(_, _, let retainedSalvage)? = factoryRestoreActionError
+        else {
+            return nil
+        }
+        return retainedSalvage
+    }
 
     public init(
         configFile: URL,
@@ -407,18 +456,31 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard builtinPackIDs.contains(expectedPackID) else {
             return finishFactoryRestore(.failure(.notBuiltin(packID: expectedPackID)))
         }
-        return restoreFactoryPackAfterConfirmation(packID: expectedPackID)
+        return restoreFactoryPackAfterConfirmation(
+            packID: expectedPackID,
+            retainedSalvage: factoryRestoreRetainedSalvage)
     }
 
     private func restoreFactoryPackAfterConfirmation(
-        packID: String
+        packID: String,
+        retainedSalvage: SalvagedPack? = nil
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
         switch restoreFactoryPack(id: packID, environment: environment) {
         case .success(let outcome):
-            return finishFactoryRestore(.success(outcome))
+            let visibleOutcome = FactoryPackRestoreOutcome(
+                restoredPackID: outcome.restoredPackID,
+                salvaged: retainedSalvage ?? outcome.salvaged)
+            return finishFactoryRestore(.success(visibleOutcome))
         case .failure(let error):
+            let diskChangedDespiteFailure = factoryPackRestoreSalvage(in: error) != nil
             return finishFactoryRestore(
-                .failure(.restore(packID: packID, error: error)))
+                .failure(
+                    .restore(
+                        packID: packID,
+                        error: error,
+                        retainedSalvage:
+                            retainedSalvage ?? factoryPackRestoreSalvage(in: error))),
+                diskChangedDespiteFailure: diskChangedDespiteFailure)
         }
     }
 
@@ -440,7 +502,8 @@ public final class SoundPacksWindowModel: ObservableObject {
         _ result: Result<
             FactoryPackRestoreOutcome,
             SoundPacksWindowFactoryRestoreActionError
-        >
+        >,
+        diskChangedDespiteFailure: Bool = false
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
         switch result {
         case .success(let outcome):
@@ -452,7 +515,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             factoryRestoreNotice = outcome
         case .failure(let error):
             let outcome: SoundPacksWindowWriteOutcome
-            if case .restore(_, .publishFailed(_, salvaged: .some)) = error {
+            if diskChangedDespiteFailure {
                 // The original tree is now safely in salvage, so the visible pack path changed
                 // even though publishing the factory copy failed. Reload both UIs before keeping
                 // the error visible; otherwise they would continue to show a pack that no longer

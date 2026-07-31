@@ -2543,6 +2543,22 @@ func runViewWiringSuites() {
             flat.contains("deleteSelectedOrphanAudioFileAfterConfirmation(")
                 && flat.contains("expectedPackID: request.packID"),
             "只有确认对话框的 destructive action 才能触发永久删除")
+        guard
+            let detailBody = closureBody(
+                after: "private var detail: some View",
+                in: collapsingWhitespace(
+                    codeWithoutStrings(
+                        "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift") ?? "")),
+            let selectedCardAt = detailBody.range(of: "if let card = selectedCard")?.lowerBound,
+            let audioErrorAt = detailBody.range(of: "model.audioActionError")?.lowerBound
+        else {
+            expect(false, "必须能切出详情体中的窗口级音频错误与 selected-card 分支")
+            return
+        }
+        expect(
+            audioErrorAt < selectedCardAt,
+            "音频操作错误必须位于 selected-card 分支之外：确认期间唯一包被外部移走时，"
+                + "packNotFound 会把窗口重读为空态，若错误仍留在包详情里就会静默消失")
     }
 
     suite("T10：CoverageTrack 的 present 接事件色、missing 接 text-2，且真实行底仍是 surface-2") {

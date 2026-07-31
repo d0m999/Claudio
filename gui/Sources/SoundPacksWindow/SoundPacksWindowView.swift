@@ -194,6 +194,15 @@ struct SoundPacksWindowView: View {
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
             }
+            // Audio failures also belong to the window-level action surface. A lock-time
+            // `packNotFound` reload can legitimately remove the last card before the failure is
+            // published; keeping this row inside `selectedCard` would hide the refusal in empty
+            // state.
+            if let error = model.audioActionError {
+                windowFailureRow(action: "音频操作", reason: error.message)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+            }
 
             if let card = selectedCard {
                 ScrollView {
@@ -212,10 +221,6 @@ struct SoundPacksWindowView: View {
                             windowFailureRow(
                                 action: "读取包内音频",
                                 reason: inventoryErrorMessage(error))
-                        }
-
-                        if let error = model.audioActionError {
-                            windowFailureRow(action: "音频操作", reason: error.message)
                         }
 
                         orphanAudioSection
