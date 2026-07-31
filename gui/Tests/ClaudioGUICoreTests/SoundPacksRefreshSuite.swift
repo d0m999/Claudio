@@ -20,6 +20,25 @@ private final class SoundPacksFailFirstPublish: @unchecked Sendable {
     }
 }
 
+private final class SoundPacksFailSelectedPublishCalls: @unchecked Sendable {
+    private let lock = NSLock()
+    private let failingCalls: Set<Int>
+    private var callCount = 0
+
+    init(_ failingCalls: Set<Int>) {
+        self.failingCalls = failingCalls
+    }
+
+    func run() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        callCount += 1
+        if failingCalls.contains(callCount) {
+            throw SoundPacksInjectedRestoreFailure.beforePublish
+        }
+    }
+}
+
 private final class SoundPacksForkCollisionInjector: @unchecked Sendable {
     private let lock = NSLock()
     private var remaining: Int
@@ -1477,6 +1496,254 @@ func runSoundPacksRefreshSuites() async {
             expect(
                 coordinator.panelReloadRevision == 2,
                 "partial batch and successful retry must each publish one truthful full reload")
+        }
+    }
+
+    suite("SoundPacksWindowModel restore：单包失败后重选再成功仍吸收同 ID 全部 batch salvage") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            writeFixture(#"{ "selected_pack": "missing", "events": {} }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "recover-me", "events": {} }"#,
+                to: factory.appendingPathComponent("recover-me/manifest.json"))
+            writeFixture("original-user-bytes", to: packs.appendingPathComponent("recover-me"))
+            let failPublish = SoundPacksFailSelectedPublishCalls([1, 2])
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: packs,
+                factoryPacksDirectory: factory,
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                packsLockFile: injectedPacksLock(besideUserPacks: packs),
+                beforeFactoryPackRestorePublish: {
+                    try failPublish.run()
+                })
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                refreshCoordinator: coordinator)
+
+            let batch = model.restoreAllFactoryPacksAfterConfirmation()
+            guard
+                batch.failures.count == 1,
+                let batchFailure = batch.failures.first,
+                let firstSalvage = batchFailure.retainedSalvages.first
+            else {
+                expect(
+                    false,
+                    "precondition: batch publish must fail after retaining the old occupant")
+                return
+            }
+            expect(
+                model.packCards.isEmpty
+                    && model.factoryRestoreRetryPackIDs == ["recover-me"],
+                "批量 publish 失败必须留下缺失包的窗口级恢复状态")
+
+            writeFixture(
+                #"{ "id": "recover-me", "events": {} }"#,
+                to: packs.appendingPathComponent("recover-me/manifest.json"))
+            writeFixture(
+                "first-external-rebuild-bytes",
+                to: packs.appendingPathComponent("recover-me/first-external.wav"))
+            model.reload(followActivePack: false)
+            expect(
+                model.selectedPackID == "recover-me",
+                "外部重建后 reload 必须重新提供同 ID 的单包详情恢复入口")
+
+            let failedOnce = model.restoreSelectedFactoryPackAfterConfirmation(
+                expectedPackID: "recover-me")
+            guard
+                case .failure(
+                    .restore(
+                        packID: "recover-me",
+                        error: .publishFailed(_, let secondSalvage?),
+                        retainedSalvages: let retainedAfterFailure)) = failedOnce
+            else {
+                expect(false, "单包再次 publish 失败必须返回第二条 salvage，实得 \(failedOnce)")
+                return
+            }
+            expect(
+                retainedAfterFailure == [firstSalvage, secondSalvage]
+                    && model.factoryRestoreActionError?.message.contains(firstSalvage.movedTo)
+                        == true
+                    && model.factoryRestoreActionError?.message.contains(secondSalvage.movedTo)
+                        == true,
+                "同 ID 单包失败必须立即吸收 batch salvage，并按发生顺序保留本次 salvage")
+            let failedBatchStatus = model.windowStatuses.first(where: {
+                $0.kind == .factoryBatchRestore
+            })
+            expect(
+                failedBatchStatus?.severity == .failure
+                    && failedBatchStatus?.recovery
+                        == .retryFactoryRestores(packIDs: ["recover-me"])
+                    && failedBatchStatus?.message.contains(firstSalvage.movedTo) == true
+                    && failedBatchStatus?.message.contains(secondSalvage.movedTo) == true,
+                "单包失败时批量状态也必须累计第二条 salvage，但不得清失败或增加完成数")
+
+            writeFixture(
+                #"{ "id": "recover-me", "events": {} }"#,
+                to: packs.appendingPathComponent("recover-me/manifest.json"))
+            writeFixture(
+                "second-external-rebuild-bytes",
+                to: packs.appendingPathComponent("recover-me/second-external.wav"))
+            model.reload(followActivePack: false)
+            expect(
+                model.selectedPackID == "recover-me"
+                    && model.factoryRestoreActionError == nil
+                    && model.factoryRestoreRetryPackIDs == ["recover-me"]
+                    && model.windowStatuses.first(where: {
+                        $0.kind == .factoryBatchRestore
+                    })?.message.contains(secondSalvage.movedTo) == true,
+                "重选会清单包错误，但批量失败必须继续持有第二条 salvage 与同一重试入口")
+
+            let restored = model.restoreSelectedFactoryPackAfterConfirmation(
+                expectedPackID: "recover-me")
+            guard case .success(let outcome) = restored else {
+                expect(false, "再次外部重建后的单包恢复应成功，实得 \(restored)")
+                return
+            }
+            expect(
+                outcome.retainedSalvages.count == 3
+                    && outcome.retainedSalvages.first == firstSalvage
+                    && outcome.retainedSalvages[1] == secondSalvage
+                    && outcome.salvaged == firstSalvage
+                    && outcome.retainedSalvages.filter { $0 == firstSalvage }.count == 1,
+                "最终成功必须保留 batch、单包失败和本次成功三次 salvage，且稳定去重")
+            if outcome.retainedSalvages.count == 3 {
+                let thirdSalvage = outcome.retainedSalvages[2]
+                expect(
+                    (try? String(contentsOfFile: firstSalvage.movedTo, encoding: .utf8))
+                        == "original-user-bytes",
+                    "批量失败保留的原始用户字节不得丢失")
+                expect(
+                    (try? String(
+                        contentsOf: URL(fileURLWithPath: secondSalvage.movedTo)
+                            .appendingPathComponent("first-external.wav"),
+                        encoding: .utf8)) == "first-external-rebuild-bytes",
+                    "单包失败搬走的外部重建字节必须跨重选保持原样")
+                expect(
+                    (try? String(
+                        contentsOf: URL(fileURLWithPath: thirdSalvage.movedTo)
+                            .appendingPathComponent("second-external.wav"),
+                        encoding: .utf8)) == "second-external-rebuild-bytes",
+                    "最终成功搬走的外部重建字节也必须保持原样")
+            }
+            expect(
+                model.factoryRestoreNotice == outcome
+                    && model.factoryRestoreRetryPackIDs.isEmpty,
+                "单包成功必须发布合并后的结果并清除同 ID 批量重试")
+            let batchStatus = model.windowStatuses.first(where: {
+                $0.kind == .factoryBatchRestore
+            })
+            let singleStatus = model.windowStatuses.first(where: {
+                $0.kind == .factoryRestore
+            })
+            let retainedPaths = outcome.retainedSalvages.map(\.movedTo)
+            expect(
+                batchStatus?.severity == .notice
+                    && batchStatus?.recovery == nil
+                    && batchStatus?.message.contains("已恢复 1 个") == true
+                    && retainedPaths.allSatisfy {
+                        batchStatus?.message.contains($0) == true
+                    },
+                "单包成功必须把旧批量失败计入完成数、移除 recovery，并告知新旧全部 salvage")
+            expect(
+                singleStatus?.severity == .notice
+                    && retainedPaths.allSatisfy {
+                        singleStatus?.message.contains($0) == true
+                    },
+                "单包成功状态也必须使用合并后的 outcome，逐条告知新旧 salvage")
+            expect(
+                model.windowStatuses.allSatisfy { $0.severity != .failure },
+                "成功后不得同时显示成功与已解决的旧批量失败")
+            expect(
+                coordinator.panelReloadRevision == 3,
+                "批量失败、单包部分失败与最终成功应各发布一次真实 full reload")
+        }
+    }
+
+    suite("SoundPacksWindowModel restore：重试焦点严格投影最新 windowStatuses 视觉顺序") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            writeFixture(#"{ "selected_pack": "missing", "events": {} }"#, to: configFile)
+            for packID in ["a-batch", "b-single"] {
+                writeFixture(
+                    #"{ "id": "\#(packID)", "events": {} }"#,
+                    to: factory.appendingPathComponent("\(packID)/manifest.json"))
+                writeFixture("user-\(packID)", to: packs.appendingPathComponent(packID))
+            }
+            let failPublish = SoundPacksFailSelectedPublishCalls([1, 3, 4])
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: packs,
+                factoryPacksDirectory: factory,
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                packsLockFile: injectedPacksLock(besideUserPacks: packs),
+                beforeFactoryPackRestorePublish: {
+                    try failPublish.run()
+                })
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+
+            let batch = model.restoreAllFactoryPacksAfterConfirmation()
+            expect(
+                batch.restoredPackIDs == ["b-single"]
+                    && batch.failures.map(\.packID) == ["a-batch"],
+                "precondition: first publish fails for A while sorted sibling B succeeds")
+            let singleFailure = model.restoreSelectedFactoryPackAfterConfirmation(
+                expectedPackID: "b-single")
+            guard case .failure = singleFailure else {
+                expect(false, "third publish call must create the newer single-pack B failure")
+                return
+            }
+            expect(
+                model.windowStatuses.compactMap { status -> [String]? in
+                    guard case .retryFactoryRestores(let ids)? = status.recovery else { return nil }
+                    return ids
+                }.flatMap { $0 } == ["b-single", "a-batch"]
+                    && model.factoryRestoreRetryPackIDs == ["b-single", "a-batch"],
+                "B 的单包失败较新，视觉状态与重试焦点都必须先 B 后 A")
+
+            let batchRetry = model.retryFailedFactoryPackRestoreAfterConfirmation(
+                expectedPackID: "a-batch")
+            guard case .failure = batchRetry else {
+                expect(
+                    false,
+                    "fourth publish call must keep batch A failed and make its status newest")
+                return
+            }
+            let visibleRecoveryIDs = model.windowStatuses.compactMap {
+                status -> [String]? in
+                guard case .retryFactoryRestores(let ids)? = status.recovery else { return nil }
+                return ids
+            }.flatMap { $0 }
+            let recoveryStatusKinds = model.windowStatuses.compactMap { status in
+                status.recovery == nil ? nil : status.kind
+            }
+            let recoveryStatuses = model.windowStatuses.filter { $0.recovery != nil }
+            let focusOrder = soundPacksWindowFocusOrder(
+                SoundPacksWindowFocusScope(
+                    packIDs: model.packCards.map(\.id),
+                    selectedPackID: model.selectedPackID,
+                    retryFactoryRestorePackIDs: model.factoryRestoreRetryPackIDs))
+            expect(
+                visibleRecoveryIDs == ["a-batch", "b-single"]
+                    && model.factoryRestoreRetryPackIDs == visibleRecoveryIDs
+                    && model.packCards.isEmpty
+                    && recoveryStatusKinds == [.factoryBatchRestore, .factoryRestore]
+                    && recoveryStatuses[0].revision > recoveryStatuses[1].revision
+                    && Array(focusOrder.prefix(2))
+                        == [
+                            .retryFactoryRestore(packID: "a-batch"),
+                            .retryFactoryRestore(packID: "b-single"),
+                        ],
+                "A 重试后成为第一条视觉状态，焦点投影必须同步变为 A→B，不能固定单包优先")
         }
     }
 

@@ -378,9 +378,12 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// Every failed restore that still has a window-level retry action. Batch failures are kept
     /// independently from the selected card so a successful sibling cannot hide their recovery.
     public var factoryRestoreRetryPackIDs: [String] {
-        var ids = factoryRestoreRetryPackID.map { [$0] } ?? []
-        for failure in factoryBatchRestoreFailures where !ids.contains(failure.packID) {
-            ids.append(failure.packID)
+        var ids: [String] = []
+        for status in windowStatuses {
+            guard case .retryFactoryRestores(let packIDs)? = status.recovery else { continue }
+            for packID in packIDs where !ids.contains(packID) {
+                ids.append(packID)
+            }
         }
         return ids
     }
@@ -997,18 +1000,8 @@ public final class SoundPacksWindowModel: ObservableObject {
 
         switch restoreFactoryPack(id: packID, environment: environment) {
         case .success(let outcome):
-            let visibleOutcome = FactoryPackRestoreOutcome(
-                restoredPackID: outcome.restoredPackID,
-                salvaged: previousFailure.retainedSalvages.first ?? outcome.salvaged,
-                retainedSalvages: appendingFactoryPackRestoreSalvage(
-                    outcome.salvaged,
-                    to: previousFailure.retainedSalvages))
+            let visibleOutcome = resolveFactoryBatchRestoreFailure(with: outcome).outcome
             completeSynchronousWrite(.succeeded)
-            factoryBatchRestoreFailures.removeAll(where: { $0.packID == packID })
-            factoryBatchRestoredCount += 1
-            factoryBatchRetainedSalvages = appendingFactoryPackRestoreSalvages(
-                visibleOutcome.retainedSalvages,
-                to: factoryBatchRetainedSalvages)
             publishFactoryBatchRestoreStatus()
             return .success(visibleOutcome)
         case .failure(let error):
@@ -1033,6 +1026,67 @@ public final class SoundPacksWindowModel: ObservableObject {
                     error: error,
                     retainedSalvages: retainedSalvages))
         }
+    }
+
+    /// Resolves one retained batch failure through any successful restore path, including a
+    /// selected-card restore after another process recreated the missing pack. The oldest salvage
+    /// remains the primary visible path and every later moved entry is appended in occurrence order.
+    private func resolveFactoryBatchRestoreFailure(
+        with outcome: FactoryPackRestoreOutcome
+    ) -> (outcome: FactoryPackRestoreOutcome, didResolve: Bool) {
+        guard
+            let index = factoryBatchRestoreFailures.firstIndex(where: {
+                $0.packID == outcome.restoredPackID
+            })
+        else {
+            return (outcome, false)
+        }
+        let previousFailure = factoryBatchRestoreFailures.remove(at: index)
+        let retainedSalvages = appendingFactoryPackRestoreSalvages(
+            outcome.retainedSalvages,
+            to: previousFailure.retainedSalvages)
+        let visibleOutcome = FactoryPackRestoreOutcome(
+            restoredPackID: outcome.restoredPackID,
+            salvaged: previousFailure.retainedSalvages.first ?? outcome.salvaged,
+            retainedSalvages: retainedSalvages)
+        factoryBatchRestoredCount += 1
+        factoryBatchRetainedSalvages = appendingFactoryPackRestoreSalvages(
+            visibleOutcome.retainedSalvages,
+            to: factoryBatchRetainedSalvages)
+        return (visibleOutcome, true)
+    }
+
+    /// A selected-card attempt can fail again after a batch failure's missing pack was recreated.
+    /// Keep the batch failure alive, but merge the newer salvage into both failure projections so a
+    /// later selection change cannot discard the only record of moved user content.
+    private func retainFactoryRestoreFailureInBatch(
+        _ error: SoundPacksWindowFactoryRestoreActionError
+    ) -> (error: SoundPacksWindowFactoryRestoreActionError, didRetain: Bool) {
+        guard
+            case .restore(
+                packID: let packID,
+                error: let restoreError,
+                retainedSalvages: let retainedSalvages) = error,
+            let index = factoryBatchRestoreFailures.firstIndex(where: {
+                $0.packID == packID
+            })
+        else {
+            return (error, false)
+        }
+        let mergedSalvages = appendingFactoryPackRestoreSalvages(
+            retainedSalvages,
+            to: factoryBatchRestoreFailures[index].retainedSalvages)
+        factoryBatchRestoreFailures[index] = FactoryPackBatchRestoreFailure(
+            packID: packID,
+            error: restoreError,
+            retainedSalvages: mergedSalvages)
+        return (
+            .restore(
+                packID: packID,
+                error: restoreError,
+                retainedSalvages: mergedSalvages),
+            true
+        )
     }
 
     private func publishFactoryBatchRestoreStatus() {
@@ -1131,19 +1185,27 @@ public final class SoundPacksWindowModel: ObservableObject {
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
         switch result {
         case .success(let outcome):
+            let batchResolution = resolveFactoryBatchRestoreFailure(with: outcome)
+            let visibleOutcome = batchResolution.outcome
             factoryRestoreActionError = nil
             completeSynchronousWrite(.succeeded)
+            if batchResolution.didResolve {
+                publishFactoryBatchRestoreStatus()
+            }
             // A retry can make a previously absent pack selectable again. `reload` correctly
             // clears old pack-scoped status when that changes selection, so publish the success
             // notice after the reload to keep the new outcome visible.
-            factoryRestoreNotice = outcome
+            factoryRestoreNotice = visibleOutcome
             setWindowStatus(
                 kind: .factoryRestore,
                 severity: .notice,
                 action: "恢复出厂声音",
-                message: factoryPackRestoreNoticeMessage(outcome),
-                packID: outcome.restoredPackID)
+                message: factoryPackRestoreNoticeMessage(visibleOutcome),
+                packID: visibleOutcome.restoredPackID)
+            return .success(visibleOutcome)
         case .failure(let error):
+            let batchRetention = retainFactoryRestoreFailureInBatch(error)
+            let visibleError = batchRetention.error
             let outcome: SoundPacksWindowWriteOutcome
             if diskChangedDespiteFailure {
                 // The original tree is now safely in salvage, so the visible pack path changed
@@ -1156,20 +1218,23 @@ public final class SoundPacksWindowModel: ObservableObject {
                 outcome = .failed
             }
             factoryRestoreNotice = nil
-            factoryRestoreActionError = error
+            factoryRestoreActionError = visibleError
+            if batchRetention.didRetain {
+                publishFactoryBatchRestoreStatus()
+            }
             setWindowStatus(
                 kind: .factoryRestore,
                 severity: .failure,
                 action: "恢复出厂声音",
-                message: error.message,
+                message: visibleError.message,
                 recovery: factoryRestoreRetryPackID.map {
                     .retryFactoryRestores(packIDs: [$0])
                 })
             if outcome == .failed {
                 completeSynchronousWrite(outcome)
             }
+            return .failure(visibleError)
         }
-        return result
     }
 
     private func finishPackFork(

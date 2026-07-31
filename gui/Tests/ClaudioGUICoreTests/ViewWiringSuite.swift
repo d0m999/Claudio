@@ -2901,16 +2901,38 @@ func runViewWiringSuites() {
                 in: collapsingWhitespace(
                     codeWithoutStrings(
                         "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift") ?? "")),
-            let selectedCardAt = detailBody.range(of: "if let card = selectedCard")?.lowerBound,
-            let statusRegionAt = detailBody.range(of: "model.windowStatuses")?.lowerBound
+            let scrollBody = closureBody(after: "ScrollView", in: detailBody),
+            let scrollContentBody = closureBody(
+                after: "VStack(alignment: .leading, spacing: 0)", in: scrollBody),
+            let statusRegionAt = scrollBody.range(of: "windowStatusRegion")?.lowerBound,
+            let selectedBranchAt = scrollBody.range(
+                of: "if let card = selectedCard")?.lowerBound,
+            let statusRegionBody = closureBody(
+                after: "private var windowStatusRegion: some View",
+                in: collapsingWhitespace(
+                    codeWithoutStrings(
+                        "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift") ?? ""))
         else {
-            expect(false, "必须能切出详情体中的统一窗口状态与 selected-card 分支")
+            expect(false, "必须能切出详情 ScrollView、统一状态区与 selected-card 分支")
             return
         }
         expect(
-            statusRegionAt < selectedCardAt,
-            "恢复失败提示必须位于 selected-card 分支之外：publish 在 salvage 后失败会让原包从列表消失，"
-                + "若把失败行留在包详情里，零 fallback 时整条错误不可见，有 fallback 时又会错挂到别的包")
+            statusRegionAt < selectedBranchAt
+                && scrollBody.contains("emptyState")
+                && statusRegionBody.contains("ForEach(model.windowStatuses)")
+                && statusRegionBody.contains("windowStatusRow(status)"),
+            "统一状态与每包重试必须位于共享 ScrollView 的最前面，并在有包/空态两条路径都可见")
+        expect(
+            braceDepth(
+                of: "if !model.windowStatuses.isEmpty", in: scrollContentBody) == 0
+                && braceDepth(
+                    of: "if let card = selectedCard", in: scrollContentBody) == 0,
+            "状态区与 selected/empty 分支必须同为滚动内容的无条件顶层结构；若外包 selectedCard "
+                + "条件，零 fallback 时状态或整段恢复入口都会消失")
+        expect(
+            !scrollBody.contains("packActionBar(card)")
+                && detailBody.contains("packActionBar(card)"),
+            "状态、详情与空态入口应滚动，但 selected-card 底部动作栏必须留在 ScrollView 外固定可达")
         expect(
             flat.contains(".focused($focusedTarget, equals: .restoreFactoryPack)"),
             "恢复出厂按钮必须接进窗口专用焦点模型")

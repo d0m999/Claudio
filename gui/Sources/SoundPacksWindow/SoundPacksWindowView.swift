@@ -234,54 +234,69 @@ struct SoundPacksWindowView: View {
 
     @ViewBuilder
     private var detail: some View {
-        VStack(spacing: 0) {
-            if !model.windowStatuses.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(model.windowStatuses) { status in
-                        windowStatusRow(status)
-                    }
-                }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-            }
-
-            if let card = selectedCard {
+        GeometryReader { geometry in
+            VStack(spacing: 0) {
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        detailHeader(card)
-
-                        if model.selectedPackIsBuiltinReadOnly {
-                            builtinCopyExplanation(card)
+                    VStack(alignment: .leading, spacing: 0) {
+                        if !model.windowStatuses.isEmpty {
+                            windowStatusRegion
+                                .padding(.horizontal, 20)
+                                .padding(.top, 20)
                         }
 
-                        Divider()
+                        if let card = selectedCard {
+                            VStack(alignment: .leading, spacing: 16) {
+                                detailHeader(card)
 
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(model.selectedEventRows, id: \.event) { row in
-                                eventMappingRow(row)
+                                if model.selectedPackIsBuiltinReadOnly {
+                                    builtinCopyExplanation(card)
+                                }
+
+                                Divider()
+
+                                VStack(alignment: .leading, spacing: 10) {
+                                    ForEach(model.selectedEventRows, id: \.event) { row in
+                                        eventMappingRow(row)
+                                    }
+                                }
+
+                                if let error = model.audioInventoryError {
+                                    windowFailureRow(
+                                        action: "读取包内音频",
+                                        reason: inventoryErrorMessage(error))
+                                }
+
+                                orphanAudioSection
                             }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(20)
+                        } else {
+                            emptyState
                         }
-
-                        if let error = model.audioInventoryError {
-                            windowFailureRow(
-                                action: "读取包内音频",
-                                reason: inventoryErrorMessage(error))
-                        }
-
-                        orphanAudioSection
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(20)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: selectedCard == nil ? geometry.size.height : nil,
+                        alignment: .topLeading)
                 }
-                Divider()
-                packActionBar(card)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-            } else {
-                emptyState
+                if let card = selectedCard {
+                    Divider()
+                    packActionBar(card)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var windowStatusRegion: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(model.windowStatuses) { status in
+                windowStatusRow(status)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
