@@ -2880,8 +2880,10 @@ func runViewWiringSuites() {
         expect(
             flat.contains(#"Button("重试恢复「\(displayName)」…")"#)
                 && flat.contains("retryFailedFactoryPackRestoreAfterConfirmation(")
-                && flat.contains(".focused($focusedTarget, equals: .retryFactoryRestore)"),
-            "publish 失败移除原包后，窗口级失败行必须保留经过确认的重试入口并接入真实焦点序")
+                && flat.contains(#"ForEach(packIDs, id: \.self)"#)
+                && flat.contains("equals: .retryFactoryRestore(packID: packID)"),
+            "单包或批量 publish 失败移除原包后，每个窗口级失败项都必须保留经过确认的重试入口，"
+                + "并接入可区分的真实焦点序")
         expect(
             flat.contains("ForEach(model.windowStatuses)")
                 && flat.contains("private func windowStatusRow(")

@@ -89,9 +89,9 @@ struct SoundPacksWindowView: View {
         .onChange(of: model.selectedAudioFiles) { _ in
             reconcileFocusWithVisibleControls()
         }
-        .onChange(of: model.factoryRestoreRetryPackID) { _ in
-            if model.packCards.isEmpty, model.factoryRestoreRetryPackID != nil {
-                focusedTarget = .retryFactoryRestore
+        .onChange(of: model.factoryRestoreRetryPackIDs) { _ in
+            if model.packCards.isEmpty, let packID = model.factoryRestoreRetryPackIDs.first {
+                focusedTarget = .retryFactoryRestore(packID: packID)
             } else {
                 reconcileFocusWithVisibleControls()
             }
@@ -524,16 +524,20 @@ struct SoundPacksWindowView: View {
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(status.message)
             }
-            if case .retryFactoryRestore(let packID)? = status.recovery {
-                let displayName = SelectedPackMetadata(id: packID, name: nil).displayName
-                Button("重试恢复「\(displayName)」…") {
-                    pendingFactoryPackRestore = FactoryPackRestoreRequest(
-                        packID: packID,
-                        displayName: displayName,
-                        kind: .failedPublishRetry)
+            if case .retryFactoryRestores(let packIDs)? = status.recovery {
+                ForEach(packIDs, id: \.self) { packID in
+                    let displayName = SelectedPackMetadata(id: packID, name: nil).displayName
+                    Button("重试恢复「\(displayName)」…") {
+                        pendingFactoryPackRestore = FactoryPackRestoreRequest(
+                            packID: packID,
+                            displayName: displayName,
+                            kind: .failedPublishRetry)
+                    }
+                    .frame(minHeight: 44)
+                    .focused(
+                        $focusedTarget,
+                        equals: .retryFactoryRestore(packID: packID))
                 }
-                .frame(minHeight: 44)
-                .focused($focusedTarget, equals: .retryFactoryRestore)
             }
         }
     }
@@ -745,7 +749,7 @@ struct SoundPacksWindowView: View {
             canUseSelectedPack: selectedCard?.isSelected == false,
             canRestoreAllFactoryPacks: model.packCards.isEmpty && model.hasFactoryPacks,
             canRevealPacksDirectory: model.packCards.isEmpty && !model.hasFactoryPacks,
-            canRetryFactoryRestore: model.factoryRestoreRetryPackID != nil)
+            retryFactoryRestorePackIDs: model.factoryRestoreRetryPackIDs)
     }
 
     private func applyInitialFocus() {

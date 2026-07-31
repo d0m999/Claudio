@@ -1204,6 +1204,102 @@ func runSoundPacksRefreshSuites() async {
                 model.windowStatuses.first?.severity == .failure
                     && model.windowStatuses.first?.message.contains("broken") == true,
                 "partial failure status must aggregate and name the failed pack")
+            expect(
+                model.factoryRestoreRetryPackIDs == ["broken"]
+                    && model.windowStatuses.first?.recovery
+                        == .retryFactoryRestores(packIDs: ["broken"]),
+                "批量部分失败刷新出非空列表后，失败项仍必须保留可执行的窗口级重试入口")
+        }
+    }
+
+    suite("SoundPacksWindowModel batch restore：success sibling cannot hide salvaged publish failure retry") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            writeFixture(#"{ "selected_pack": "missing", "events": {} }"#, to: configFile)
+            writeFixture(
+                #"{ "id": "a-failed", "events": {} }"#,
+                to: factory.appendingPathComponent("a-failed/manifest.json"))
+            writeFixture(
+                #"{ "id": "b-good", "events": {} }"#,
+                to: factory.appendingPathComponent("b-good/manifest.json"))
+            writeFixture("user-only", to: packs.appendingPathComponent("a-failed"))
+            let failFirstPublish = SoundPacksFailFirstPublish()
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: packs,
+                factoryPacksDirectory: factory,
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                packsLockFile: injectedPacksLock(besideUserPacks: packs),
+                beforeFactoryPackRestorePublish: {
+                    try failFirstPublish.run()
+                })
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                refreshCoordinator: coordinator)
+            expect(model.packCards.isEmpty, "precondition: batch restore starts from empty state")
+
+            let outcome = model.restoreAllFactoryPacksAfterConfirmation()
+            guard
+                outcome.restoredPackIDs == ["b-good"],
+                outcome.failures.count == 1,
+                let failure = outcome.failures.first,
+                failure.packID == "a-failed",
+                case .publishFailed(_, let salvage?) = failure.error
+            else {
+                expect(false, "first sorted pack must fail after salvage while its sibling succeeds: \(outcome)")
+                return
+            }
+            expect(
+                failure.retainedSalvages == [salvage]
+                    && (try? String(contentsOfFile: salvage.movedTo, encoding: .utf8))
+                        == "user-only",
+                "batch failure state must retain the exact salvage that contains the displaced bytes")
+            expect(
+                model.packCards.map(\.id) == ["b-good"]
+                    && model.factoryRestoreRetryPackIDs == ["a-failed"],
+                "successful sibling makes the library nonempty, but must not hide the failed pack retry")
+            let failureStatus = model.windowStatuses.first(where: {
+                $0.kind == .factoryBatchRestore
+            })
+            expect(
+                failureStatus?.severity == .failure
+                    && failureStatus?.message.contains(salvage.movedTo) == true
+                    && failureStatus?.recovery
+                        == .retryFactoryRestores(packIDs: ["a-failed"]),
+                "visible batch failure must expose salvage truth and an executable recovery payload")
+            expect(
+                model.factoryRestoreActionError == nil,
+                "batch retry state must not masquerade as the selected-pack restore error")
+
+            let retry = model.retryFailedFactoryPackRestoreAfterConfirmation(
+                expectedPackID: "a-failed")
+            guard case .success(let retryOutcome) = retry else {
+                expect(false, "batch publish failure must be retryable after its card disappeared: \(retry)")
+                return
+            }
+            expect(
+                retryOutcome.restoredPackID == "a-failed"
+                    && retryOutcome.retainedSalvages == [salvage],
+                "successful batch retry must carry the original salvage into its final outcome")
+            expect(
+                model.packCards.map(\.id) == ["a-failed", "b-good"]
+                    && model.factoryRestoreRetryPackIDs.isEmpty,
+                "successful retry must restore the missing card and clear only the completed recovery")
+            let successStatus = model.windowStatuses.first(where: {
+                $0.kind == .factoryBatchRestore
+            })
+            expect(
+                successStatus?.severity == .notice
+                    && successStatus?.recovery == nil
+                    && successStatus?.message.contains(salvage.movedTo) == true,
+                "final batch notice must remove the retry and continue exposing the retained path")
+            expect(
+                coordinator.panelReloadRevision == 2,
+                "partial batch and successful retry must each publish one truthful full reload")
         }
     }
 

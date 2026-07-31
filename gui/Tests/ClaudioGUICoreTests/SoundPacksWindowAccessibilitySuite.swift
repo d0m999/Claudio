@@ -23,11 +23,16 @@ func runSoundPacksWindowAccessibilitySuites() {
         let retryOnly = SoundPacksWindowFocusScope(
             packIDs: [],
             selectedPackID: nil,
-            canRetryFactoryRestore: true)
+            retryFactoryRestorePackIDs: ["missing-a", "missing-b"])
         expect(
-            soundPacksWindowFocusOrder(retryOnly) == [.retryFactoryRestore]
-                && soundPacksWindowFirstFocusTarget(retryOnly) == .retryFactoryRestore,
-            "发布失败移除最后一个包时，窗口级重试仍必须是可达首焦点")
+            soundPacksWindowFocusOrder(retryOnly)
+                == [
+                    .retryFactoryRestore(packID: "missing-a"),
+                    .retryFactoryRestore(packID: "missing-b"),
+                ]
+                && soundPacksWindowFirstFocusTarget(retryOnly)
+                    == .retryFactoryRestore(packID: "missing-a"),
+            "发布失败移除最后一个或多个包时，每个窗口级重试都必须是可区分的可达焦点")
         expect(
             soundPacksWindowFocusOrder(
                 SoundPacksWindowFocusScope(
@@ -180,10 +185,14 @@ func runSoundPacksWindowAccessibilitySuites() {
         let fallbackWithRetry = SoundPacksWindowFocusScope(
             packIDs: ["my-pack"],
             selectedPackID: "my-pack",
-            canRetryFactoryRestore: true)
+            retryFactoryRestorePackIDs: ["minimal-chime"])
         expect(
             soundPacksWindowFocusOrder(fallbackWithRetry)
-                == [.packList, .retryFactoryRestore, .revealSelectedPack],
+                == [
+                    .packList,
+                    .retryFactoryRestore(packID: "minimal-chime"),
+                    .revealSelectedPack,
+                ],
             "原内置包消失并落到 fallback 时，焦点必须按列表→窗口级重试→所选包详情排列")
     }
 

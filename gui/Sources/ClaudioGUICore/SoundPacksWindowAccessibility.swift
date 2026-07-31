@@ -20,7 +20,7 @@ public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
     case restoreAllFactoryPacks
     case revealPacksDirectory
     /// Window-level retry after the attempted built-in disappeared during a failed publish.
-    case retryFactoryRestore
+    case retryFactoryRestore(packID: String)
     /// One selected-pack event mapping's existing-audio menu.
     case eventAudio(Event)
     /// One orphan row's 「分配…」 menu.
@@ -42,7 +42,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     public let canUseSelectedPack: Bool
     public let canRestoreAllFactoryPacks: Bool
     public let canRevealPacksDirectory: Bool
-    public let canRetryFactoryRestore: Bool
+    public let retryFactoryRestorePackIDs: [String]
 
     public init(
         packIDs: [String],
@@ -56,7 +56,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         canUseSelectedPack: Bool = false,
         canRestoreAllFactoryPacks: Bool = false,
         canRevealPacksDirectory: Bool = false,
-        canRetryFactoryRestore: Bool = false
+        retryFactoryRestorePackIDs: [String] = []
     ) {
         self.packIDs = packIDs
         self.selectedPackID = selectedPackID
@@ -69,7 +69,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         self.canUseSelectedPack = canUseSelectedPack
         self.canRestoreAllFactoryPacks = canRestoreAllFactoryPacks
         self.canRevealPacksDirectory = canRevealPacksDirectory
-        self.canRetryFactoryRestore = canRetryFactoryRestore
+        self.retryFactoryRestorePackIDs = retryFactoryRestorePackIDs
     }
 }
 
@@ -84,9 +84,10 @@ public func soundPacksWindowFocusOrder(
     if !scope.packIDs.isEmpty {
         order.append(.packList)
     }
-    if scope.canRetryFactoryRestore {
-        order.append(.retryFactoryRestore)
-    }
+    order.append(
+        contentsOf: scope.retryFactoryRestorePackIDs.map {
+            .retryFactoryRestore(packID: $0)
+        })
     if scope.packIDs.isEmpty {
         if scope.canRestoreAllFactoryPacks {
             order.append(.restoreAllFactoryPacks)

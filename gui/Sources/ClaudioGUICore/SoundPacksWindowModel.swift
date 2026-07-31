@@ -39,13 +39,14 @@ public enum SoundPacksWindowStatusSeverity: Int, Sendable, Equatable {
 public enum SoundPacksWindowStatusKind: String, Sendable, Equatable, Hashable {
     case audio
     case factoryRestore
+    case factoryBatchRestore
     case starredPacks
     case packFork
     case packUse
 }
 
 public enum SoundPacksWindowStatusRecovery: Sendable, Equatable {
-    case retryFactoryRestore(packID: String)
+    case retryFactoryRestores(packIDs: [String])
 }
 
 /// One model-owned status projection. The View sorts nothing and invents no lifetime rules.
@@ -145,6 +146,17 @@ public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
 public struct FactoryPackBatchRestoreFailure: Sendable, Equatable {
     public let packID: String
     public let error: FactoryPackRestoreError
+    public let retainedSalvages: [SalvagedPack]
+
+    public init(
+        packID: String,
+        error: FactoryPackRestoreError,
+        retainedSalvages: [SalvagedPack] = []
+    ) {
+        self.packID = packID
+        self.error = error
+        self.retainedSalvages = retainedSalvages
+    }
 }
 
 public struct FactoryPackBatchRestoreOutcome: Sendable, Equatable {
@@ -363,6 +375,16 @@ public final class SoundPacksWindowModel: ObservableObject {
         return nil
     }
 
+    /// Every failed restore that still has a window-level retry action. Batch failures are kept
+    /// independently from the selected card so a successful sibling cannot hide their recovery.
+    public var factoryRestoreRetryPackIDs: [String] {
+        var ids = factoryRestoreRetryPackID.map { [$0] } ?? []
+        for failure in factoryBatchRestoreFailures where !ids.contains(failure.packID) {
+            ids.append(failure.packID)
+        }
+        return ids
+    }
+
     public var selectedPackIsBuiltinReadOnly: Bool {
         selectedPackID.map(builtinPackIDs.contains) ?? false
     }
@@ -388,6 +410,9 @@ public final class SoundPacksWindowModel: ObservableObject {
     private var statusByKind: [SoundPacksWindowStatusKind: SoundPacksWindowStatus] = [:]
     private var audioImportActionRevision = 0
     private var suppressedSelectionAnnouncementPackID: String?
+    private var factoryBatchRestoreFailures: [FactoryPackBatchRestoreFailure] = []
+    private var factoryBatchRestoredCount = 0
+    private var factoryBatchRetainedSalvages: [SalvagedPack] = []
 
     private var factoryRestoreRetainedSalvages: [SalvagedPack] {
         guard case .restore(_, _, let retainedSalvages)? = factoryRestoreActionError
@@ -867,21 +892,32 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func retryFailedFactoryPackRestoreAfterConfirmation(
         expectedPackID: String
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
-        guard factoryRestoreRetryPackID == expectedPackID else {
+        if factoryRestoreRetryPackID == expectedPackID {
+            guard builtinPackIDs.contains(expectedPackID) else {
+                return finishFactoryRestore(.failure(.notBuiltin(packID: expectedPackID)))
+            }
+            return restoreFactoryPackAfterConfirmation(
+                packID: expectedPackID,
+                retainedSalvages: factoryRestoreRetainedSalvages)
+        }
+        guard
+            builtinPackIDs.contains(expectedPackID),
+            factoryBatchRestoreFailures.contains(where: { $0.packID == expectedPackID })
+        else {
             return finishFactoryRestore(.failure(.selectionChanged))
         }
-        guard builtinPackIDs.contains(expectedPackID) else {
-            return finishFactoryRestore(.failure(.notBuiltin(packID: expectedPackID)))
-        }
-        return restoreFactoryPackAfterConfirmation(
-            packID: expectedPackID,
-            retainedSalvages: factoryRestoreRetainedSalvages)
+        return retryFactoryPackFromBatchAfterConfirmation(packID: expectedPackID)
     }
 
     /// Empty-library recovery means all factory IDs, never an arbitrary `Set.first`. Each core
     /// restore remains independently fail-closed; UI refresh is emitted once after the batch.
     @discardableResult
     public func restoreAllFactoryPacksAfterConfirmation() -> FactoryPackBatchRestoreOutcome {
+        factoryBatchRestoreFailures = []
+        factoryBatchRestoredCount = 0
+        factoryBatchRetainedSalvages = []
+        clearWindowStatus(.factoryBatchRestore)
+
         let ids = factoryPackIDs
         var restored: [FactoryPackRestoreOutcome] = []
         var failures: [FactoryPackBatchRestoreFailure] = []
@@ -893,7 +929,13 @@ public final class SoundPacksWindowModel: ObservableObject {
                 restored.append(outcome)
                 diskChanged = true
             case .failure(let error):
-                failures.append(FactoryPackBatchRestoreFailure(packID: packID, error: error))
+                failures.append(
+                    FactoryPackBatchRestoreFailure(
+                        packID: packID,
+                        error: error,
+                        retainedSalvages: appendingFactoryPackRestoreSalvage(
+                            factoryPackRestoreSalvage(in: error),
+                            to: [])))
                 if factoryPackRestoreSalvage(in: error) != nil { diskChanged = true }
             }
         }
@@ -907,34 +949,99 @@ public final class SoundPacksWindowModel: ObservableObject {
         let outcome = FactoryPackBatchRestoreOutcome(
             restoredPacks: restored,
             failures: failures)
+        factoryBatchRestoreFailures = failures
+        factoryBatchRestoredCount = restored.count
+        factoryBatchRetainedSalvages = outcome.retainedSalvages
+        publishFactoryBatchRestoreStatus()
+        return outcome
+    }
+
+    private func retryFactoryPackFromBatchAfterConfirmation(
+        packID: String
+    ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
+        guard let previousFailure = factoryBatchRestoreFailures.first(where: {
+            $0.packID == packID
+        }) else {
+            return .failure(.selectionChanged)
+        }
+
+        switch restoreFactoryPack(id: packID, environment: environment) {
+        case .success(let outcome):
+            let visibleOutcome = FactoryPackRestoreOutcome(
+                restoredPackID: outcome.restoredPackID,
+                salvaged: previousFailure.retainedSalvages.first ?? outcome.salvaged,
+                retainedSalvages: appendingFactoryPackRestoreSalvage(
+                    outcome.salvaged,
+                    to: previousFailure.retainedSalvages))
+            completeSynchronousWrite(.succeeded)
+            factoryBatchRestoreFailures.removeAll(where: { $0.packID == packID })
+            factoryBatchRestoredCount += 1
+            factoryBatchRetainedSalvages = appendingFactoryPackRestoreSalvages(
+                visibleOutcome.retainedSalvages,
+                to: factoryBatchRetainedSalvages)
+            publishFactoryBatchRestoreStatus()
+            return .success(visibleOutcome)
+        case .failure(let error):
+            let retainedSalvages = appendingFactoryPackRestoreSalvage(
+                factoryPackRestoreSalvage(in: error),
+                to: previousFailure.retainedSalvages)
+            let diskChangedDespiteFailure = factoryPackRestoreSalvage(in: error) != nil
+            completeSynchronousWrite(
+                diskChangedDespiteFailure ? .changedDespiteFailure : .failed)
+            if let index = factoryBatchRestoreFailures.firstIndex(where: {
+                $0.packID == packID
+            }) {
+                factoryBatchRestoreFailures[index] = FactoryPackBatchRestoreFailure(
+                    packID: packID,
+                    error: error,
+                    retainedSalvages: retainedSalvages)
+            }
+            publishFactoryBatchRestoreStatus()
+            return .failure(
+                .restore(
+                    packID: packID,
+                    error: error,
+                    retainedSalvages: retainedSalvages))
+        }
+    }
+
+    private func publishFactoryBatchRestoreStatus() {
         let retainedSuccessNotice: String
-        if outcome.retainedSalvages.isEmpty {
+        if factoryBatchRetainedSalvages.isEmpty {
             retainedSuccessNotice = ""
         } else {
             retainedSuccessNotice =
                 " 恢复前的内容已原样搬到 "
-                + outcome.retainedSalvages.map(\.movedTo).joined(separator: "；")
+                + factoryBatchRetainedSalvages.map(\.movedTo).joined(separator: "；")
                 + "；一个文件都没删。"
         }
-        if failures.isEmpty {
+        if factoryBatchRestoreFailures.isEmpty {
             setWindowStatus(
-                kind: .factoryRestore,
+                kind: .factoryBatchRestore,
                 severity: .notice,
                 action: "恢复内置声音包",
-                message: "已恢复 \(restored.count) 个内置声音包。" + retainedSuccessNotice)
-        } else {
-            let details = failures.map {
-                "\($0.packID)：\(factoryPackRestoreErrorMessage($0.error, retainedSalvages: []))"
-            }.joined(separator: "；")
-            setWindowStatus(
-                kind: .factoryRestore,
-                severity: .failure,
-                action: "恢复内置声音包",
                 message:
-                    "已恢复 \(restored.count) 个；\(failures.count) 个失败：\(details)"
+                    "已恢复 \(factoryBatchRestoredCount) 个内置声音包。"
                     + retainedSuccessNotice)
+            return
         }
-        return outcome
+
+        let details = factoryBatchRestoreFailures.map {
+            "\($0.packID)："
+                + factoryPackRestoreErrorMessage(
+                    $0.error,
+                    retainedSalvages: $0.retainedSalvages)
+        }.joined(separator: "；")
+        setWindowStatus(
+            kind: .factoryBatchRestore,
+            severity: .failure,
+            action: "恢复内置声音包",
+            message:
+                "已恢复 \(factoryBatchRestoredCount) 个；"
+                + "\(factoryBatchRestoreFailures.count) 个失败：\(details)"
+                + retainedSuccessNotice,
+            recovery: .retryFactoryRestores(
+                packIDs: factoryBatchRestoreFailures.map(\.packID)))
     }
 
     private func restoreFactoryPackAfterConfirmation(
@@ -1026,7 +1133,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 action: "恢复出厂声音",
                 message: error.message,
                 recovery: factoryRestoreRetryPackID.map {
-                    .retryFactoryRestore(packID: $0)
+                    .retryFactoryRestores(packIDs: [$0])
                 })
             if outcome == .failed {
                 completeSynchronousWrite(outcome)
@@ -1174,4 +1281,13 @@ private func appendingFactoryPackRestoreSalvage(
         return retainedSalvages
     }
     return retainedSalvages + [salvaged]
+}
+
+private func appendingFactoryPackRestoreSalvages(
+    _ salvages: [SalvagedPack],
+    to retainedSalvages: [SalvagedPack]
+) -> [SalvagedPack] {
+    salvages.reduce(retainedSalvages) { retained, salvage in
+        appendingFactoryPackRestoreSalvage(salvage, to: retained)
+    }
 }
