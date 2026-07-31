@@ -89,6 +89,9 @@ struct SoundPacksWindowView: View {
         .onChange(of: model.selectedAudioFiles) { _ in
             reconcileFocusWithVisibleControls()
         }
+        .onChange(of: model.selectedEventRows) { _ in
+            reconcileFocusWithVisibleControls()
+        }
         .onChange(of: model.factoryRestoreRetryPackIDs) { _ in
             if model.packCards.isEmpty, let packID = model.factoryRestoreRetryPackIDs.first {
                 focusedTarget = .retryFactoryRestore(packID: packID)
@@ -150,15 +153,18 @@ struct SoundPacksWindowView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text("声音包")
+                Text("显示在面板")
                     .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
                 Spacer(minLength: 8)
-                Text("★ \(model.starredPackIDs.count)/\(maxStarredPacks)")
+                Text("· ★ \(model.starredPackIDs.count)/\(maxStarredPacks)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .accessibilityLabel("显示在面板 \(model.starredPackIDs.count)/\(maxStarredPacks)")
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                "显示在面板，\(model.starredPackIDs.count)/\(maxStarredPacks)"
+            )
+            .accessibilityAddTraits(.isHeader)
             .padding(.horizontal, 10)
             .padding(.top, 10)
 
@@ -548,22 +554,20 @@ struct SoundPacksWindowView: View {
             if layoutAdaptation.stacksEventRows {
                 VStack(alignment: .leading, spacing: 4) {
                     eventIdentity(row)
-                    eventAudioControl(row)
+                    eventControls(row)
                 }
             } else {
                 HStack(alignment: .firstTextBaseline) {
                     eventIdentity(row)
                     Spacer(minLength: 12)
-                    eventAudioControl(row)
+                    eventControls(row)
                 }
             }
         }
         .padding(.vertical, 4)
-        // T9's read-only row could collapse all children into one status sentence. T11 adds a
-        // real Menu to editable rows, so those children must remain in the VoiceOver tree or the
-        // existing-audio action becomes keyboard-only. Built-in rows stay read-only and keep the
-        // original single-element status treatment.
-        .accessibilityElement(children: canEditSelectedPack ? .contain : .ignore)
+        // Every row now owns a real preview button, including built-in read-only packs. Keep that
+        // child in the VoiceOver tree; editable rows additionally expose their audio menu.
+        .accessibilityElement(children: .contain)
         .accessibilityLabel(
             soundPacksWindowEventAccessibilityLabel(
                 eventName: row.event.manifestKey,
@@ -587,6 +591,23 @@ struct SoundPacksWindowView: View {
         Text(mappingText(coverage))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func eventControls(_ row: EventRow) -> some View {
+        HStack(spacing: 8) {
+            eventAudioControl(row)
+            Button {
+                playPreview(for: row)
+            } label: {
+                Label("试听", systemImage: "speaker.wave.2")
+            }
+            .frame(minHeight: 44)
+            .disabled(!row.eventActionOperable)
+            .focused($focusedTarget, equals: .eventPreview(row.event))
+            .accessibilityLabel("试听「\(row.event.manifestKey)」")
+            .accessibilityValue(mappingText(row.coverage))
+            .accessibilityHint(previewAccessibilityHint(for: row))
+        }
     }
 
     @ViewBuilder
@@ -719,6 +740,23 @@ struct SoundPacksWindowView: View {
         }
     }
 
+    private func previewAccessibilityHint(for row: EventRow) -> String {
+        if !row.coverage.previewEnabled {
+            return "当前映射没有可播放的音频"
+        }
+        if !row.enabled {
+            return "这个事件已静音，请先取消静音"
+        }
+        return "播放当前映射的音频"
+    }
+
+    private func playPreview(for row: EventRow) {
+        guard let resolvedFile = model.previewFileForSelectedEvent(row.event) else { return }
+        previewPlayer.play(
+            fileAt: resolvedFile,
+            volume: Float(previewVolume(for: model.config)))
+    }
+
     private var selection: Binding<String?> {
         Binding(
             get: { model.selectedPackID },
@@ -740,6 +778,7 @@ struct SoundPacksWindowView: View {
             selectedPackID: model.selectedPackID,
             editableEvents: canEditSelectedPack && !model.selectedAudioFiles.isEmpty
                 ? model.selectedEventRows.map(\.event) : [],
+            previewableEvents: model.selectedEventRows.filter(\.eventActionOperable).map(\.event),
             orphanFileNames: canEditSelectedPack
                 ? model.selectedAudioFiles.filter(\.isOrphan).map(\.fileName) : [],
             canEditSelectedPack: canEditSelectedPack,

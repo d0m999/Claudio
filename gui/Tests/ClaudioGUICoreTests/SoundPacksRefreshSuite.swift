@@ -189,6 +189,22 @@ func runSoundPacksRefreshSuites() async {
         expect(coordinator.windowReloadRevision == 0, "内容变化不得复用切包 revision")
     }
 
+    suite("SoundPacksRefreshCoordinator：面板 config 真实变化只刷新窗口读模型") {
+        let coordinator = SoundPacksRefreshCoordinator()
+
+        expect(
+            coordinator.completePanelConfigChange(.unchanged) == .none,
+            "没有 config 落盘变化不得发布假刷新")
+        expect(coordinator.windowContentReloadRevision == 0, "unchanged 不得推进窗口 revision")
+
+        expect(
+            coordinator.completePanelConfigChange(.changed) == .windowReload,
+            "master_volume 等非切包 config 变化必须通知管理窗口重读")
+        expect(coordinator.windowContentReloadRevision == 1, "config changed 必须推进内容 revision")
+        expect(coordinator.windowReloadRevision == 0, "非切包 config 变化不得伪装成 active pack 切换")
+        expect(coordinator.panelReloadRevision == 0, "panel 自己已重读，不得反向再刷一次")
+    }
+
     suite("窗口写后：configOnly 负控保持 stale，full effect 重算真实 PanelConfigController.packCards") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -1139,6 +1155,167 @@ func runSoundPacksRefreshSuites() async {
             model.windowStatuses.first?.message.contains("后台操作") == true
                 && model.windowStatuses.first?.message.contains("pack-a") == true,
             "global result must explicitly name the real background target")
+    }
+
+    await suite("SoundPacksWindowModel add audio：A→B→A 不得重新继承旧操作的前台身份") {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "claudio-window-import-aba-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configFile = root.appendingPathComponent("config.json")
+        let packs = root.appendingPathComponent("packs")
+        writeFixture(#"{ "selected_pack": "pack-a", "events": {} }"#, to: configFile)
+        for id in ["pack-a", "pack-b"] {
+            writeFixture(
+                "{ \"id\": \"\(id)\", \"name\": \"\(id)\", \"events\": {} }",
+                to: packs.appendingPathComponent("\(id)/manifest.json"))
+        }
+        let source = root.appendingPathComponent("picked.wav")
+        try? validWAVData().write(to: source)
+        let probe = SoundPacksBlockingDurationProbe()
+        let model = SoundPacksWindowModel(
+            configFile: configFile,
+            lockFile: root.appendingPathComponent("config.lock"),
+            environment: AudioImportEnvironment(
+                userPacksDirectory: packs,
+                durationProbe: probe,
+                packsLockFile: injectedPacksLock(under: root)),
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+
+        let operation = Task {
+            await model.importSelectedAudioFiles(
+                [AudioImportRequest(sourceURL: source, suggestedFileName: "picked.wav")],
+                expectedPackID: "pack-a")
+        }
+        await Task.yield()
+        expect(probe.waitUntilEntered() == .success, "detached import 必须进入 duration probe")
+        model.selectPackForInspection("pack-b")
+        model.selectPackForInspection("pack-a")
+        probe.allowCompletion()
+
+        guard case .success(let completion) = await operation.value else {
+            expect(false, "导入应继续完成并落到原目标包")
+            return
+        }
+        expect(completion.completedInBackground, "选择身份一旦改变，返回原包也必须是后台结果")
+        expect(completion.previewFile == nil, "A→B→A 不得自动播放旧操作的音频")
+        expect(
+            model.windowStatuses.first?.message.contains("后台操作") == true,
+            "A→B→A 完成状态必须明确标成后台结果")
+    }
+
+    await suite("SoundPacksWindowModel add audio：隐藏期间完成的结果必须跨 follow-active 重开存活") {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "claudio-window-hidden-import-\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let configFile = root.appendingPathComponent("config.json")
+        let packs = root.appendingPathComponent("packs")
+        writeFixture(#"{ "selected_pack": "pack-b", "events": {} }"#, to: configFile)
+        for id in ["pack-a", "pack-b"] {
+            writeFixture(
+                "{ \"id\": \"\(id)\", \"name\": \"\(id)\", \"events\": {} }",
+                to: packs.appendingPathComponent("\(id)/manifest.json"))
+        }
+        let source = root.appendingPathComponent("picked.wav")
+        try? validWAVData().write(to: source)
+        let probe = SoundPacksBlockingDurationProbe()
+        let model = SoundPacksWindowModel(
+            configFile: configFile,
+            lockFile: root.appendingPathComponent("config.lock"),
+            environment: AudioImportEnvironment(
+                userPacksDirectory: packs,
+                durationProbe: probe,
+                packsLockFile: injectedPacksLock(under: root)),
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+        model.selectPackForInspection("pack-a")
+
+        let operation = Task {
+            await model.importSelectedAudioFiles(
+                [AudioImportRequest(sourceURL: source, suggestedFileName: "picked.wav")],
+                expectedPackID: "pack-a")
+        }
+        await Task.yield()
+        expect(probe.waitUntilEntered() == .success, "hidden import 必须进入 duration probe")
+        probe.allowCompletion()
+        _ = await operation.value
+        let completedRevision = model.windowStatuses.first?.revision
+        expect(model.windowStatuses.first?.kind == .audio, "隐藏期间完成必须先产生音频结果")
+
+        model.reload(followActivePack: true)
+
+        let retained = model.windowStatuses.first(where: { $0.kind == .audio })
+        expect(model.selectedPackID == "pack-b", "重开仍必须跟随真实 active pack")
+        expect(retained?.revision == completedRevision, "提升为后台状态不得伪造一次新操作 revision")
+        expect(retained?.packID == nil, "重开后的异步结果必须是窗口级，不得错挂到 active pack")
+        expect(
+            retained?.message.contains("后台操作") == true
+                && retained?.message.contains("pack-a") == true,
+            "重开后仍必须公告真实原目标，不得在播报前清除")
+    }
+
+    suite("Panel master volume：成功落盘后及时刷新保留窗口的 preview config") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let configLock = root.appendingPathComponent("config.lock")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.2, "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": {} }"#,
+                to: packs.appendingPathComponent("pack-a/manifest.json"))
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = soundPacksEnvironment(packs)
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: configLock,
+                environment: environment,
+                refreshCoordinator: coordinator)
+            let panel = PanelConfigController(
+                configFile: configFile,
+                lockFile: configLock,
+                environment: environment,
+                soundPacksRefreshCoordinator: coordinator)
+            expect(previewVolume(for: window.config) == 0.2, "前提：窗口初始音量是 0.2")
+
+            expect(panel.setMasterVolume(1.0) == 1.0, "面板主音量应成功落盘")
+
+            expect(coordinator.windowContentReloadRevision == 1, "主音量成功必须发布一次定向窗口刷新")
+            expect(previewVolume(for: window.config) == 1.0, "窗口下一次试听必须使用最新落盘音量")
+            expect(coordinator.panelReloadRevision == 0, "面板自己的写不得形成反向刷新环")
+        }
+    }
+
+    suite("SoundPacksWindowModel preview：只返回当前映射的包内正规文件，陈旧时刷成 broken") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            let sound = packs.appendingPathComponent("pack-a/stop.wav")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "stop.wav" } }"#,
+                to: packs.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: sound)
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: soundPacksEnvironment(packs),
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+
+            expect(
+                model.previewFileForSelectedEvent(.stop) == sound,
+                "present 事件必须解析到当前包内的真文件")
+            try? FileManager.default.removeItem(at: sound)
+            expect(
+                model.previewFileForSelectedEvent(.stop) == nil,
+                "外部删除后试听必须 fail closed，不得播放陈旧路径")
+            expect(
+                model.selectedEventRows.first(where: { $0.event == .stop })?.coverage
+                    == .broken(fileName: "stop.wav"),
+                "解析失败必须立即刷新为 broken，不得静默无反馈")
+        }
     }
 
     suite("SoundPacksWindowModel status：失败优先，同级按最新 revision 排序") {

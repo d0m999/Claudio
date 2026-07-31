@@ -2552,9 +2552,8 @@ func runViewWiringSuites() {
             flat.contains("model.assignSelectedAudioFile(file.fileName, to: event)"),
             "孤儿分配菜单必须接到窗口 model 的 T3 bind 路由")
         expect(
-            flat.contains(
-                ".accessibilityElement(children: canEditSelectedPack ? .contain : .ignore)"),
-            "可编辑事件行必须保留 Menu 的 VoiceOver 子节点；只有内置只读行可继续折叠为静态状态")
+            flat.contains(".accessibilityElement(children: .contain)"),
+            "事件行必须保留 Menu/试听的 VoiceOver 子节点；内置只读行也有真实试听控件")
         expect(
             flat.contains(".confirmationDialog(")
                 && flat.contains(#"Button("永久删除", role: .destructive)"#)
@@ -2838,6 +2837,12 @@ func runViewWiringSuites() {
             "管理窗口导入必须捕获 expectedPackID，经异步 model action 返回可试听文件后才播放；"
                 + "不能按回调时的新选择串包反馈/试听")
         expect(
+            window.contains("model.previewFileForSelectedEvent(")
+                && window.contains(".eventPreview(row.event)")
+                && window.contains("row.eventActionOperable")
+                && windowRaw.contains("试听"),
+            "管理窗口每条事件必须把安全解析、共享 player、可操作态与独立焦点槽接成真实试听按钮")
+        expect(
             window.contains("model.forkSelectedFactoryPack()")
                 && window.contains("model.useSelectedPack()")
                 && window.contains("model.restoreAllFactoryPacksAfterConfirmation()"),
@@ -2846,8 +2851,9 @@ func runViewWiringSuites() {
             windowRaw.contains("复制为我的包")
                 && windowRaw.contains("+ 添加音频…")
                 && windowRaw.contains("用这个包")
-                && windowRaw.contains("恢复内置声音包"),
-            "底部动作栏与空态主行动的用户标签必须全部存在")
+                && windowRaw.contains("恢复内置声音包")
+                && windowRaw.contains("显示在面板"),
+            "侧栏语义标题、底部动作栏与空态主行动的用户标签必须全部真实可见")
         expect(
             window.contains("ForEach(model.windowStatuses)")
                 && controller.contains("model.$windowStatuses")

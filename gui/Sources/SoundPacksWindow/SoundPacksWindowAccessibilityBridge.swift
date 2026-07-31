@@ -11,7 +11,8 @@ enum SoundPacksWindowAccessibilityBridge {
     static func post(
         _ moment: SoundPacksWindowAnnouncementMoment,
         facts: SoundPacksWindowAnnouncementFacts,
-        window: NSWindow
+        window: NSWindow,
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         let priority: NSAccessibilityPriorityLevel
         if case .writeFailed = moment {
@@ -24,7 +25,10 @@ enum SoundPacksWindowAccessibilityBridge {
         let priorityValue = priority.rawValue
         DispatchQueue.main.async { [weak window] in
             MainActor.assumeIsolated {
-                guard let window, window.isKeyWindow else { return }
+                guard let window, window.isKeyWindow else {
+                    completion?(false)
+                    return
+                }
                 NSAccessibility.post(
                     element: window,
                     notification: .announcementRequested,
@@ -32,6 +36,7 @@ enum SoundPacksWindowAccessibilityBridge {
                         .announcement: announcement,
                         .priority: priorityValue,
                     ])
+                completion?(true)
             }
         }
     }

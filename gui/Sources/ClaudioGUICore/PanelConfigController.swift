@@ -85,6 +85,8 @@ public final class PanelConfigController: ObservableObject {
     private let muteController: EventMuteController
     /// 同上，主音量的写者（D27/D39）——独占构造，与 ``muteController`` 同一个理由。
     private let masterVolumeController: MasterVolumeController
+    /// 定向通知保留的管理窗口重读它自己的 config；面板自己的写绝不反向推进 panel revision。
+    private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator?
     /// 一次**全量** reload 之后，config 读模型之外还要做的跨-view-model 协调（onboarding 重探 + 两组
     /// import view-model `retarget` 到新包）。参数是刚重载出来的 config —— retarget 要用它的 `selectedPack`。
     private let afterFullReload: @MainActor (ClaudioConfig) -> Void
@@ -105,7 +107,9 @@ public final class PanelConfigController: ObservableObject {
         self.builtinPackIDs = environment.builtinPackIDs
         // 独占构造，不注入 —— 结构性堵死「面板读一个实例、controller 写另一个」的幽灵分叉（见 muteError 文档）。
         self.muteController = EventMuteController(configFile: configFile, lockFile: lockFile)
-        self.masterVolumeController = MasterVolumeController(configFile: configFile, lockFile: lockFile)
+        self.masterVolumeController = MasterVolumeController(
+            configFile: configFile, lockFile: lockFile)
+        self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
         self.afterFullReload = afterFullReload
 
         let loadedState = loadPanelConfig(from: configFile)
@@ -172,10 +176,15 @@ public final class PanelConfigController: ObservableObject {
         // republish：面板读 `panelModel.masterVolumeError`，不直接读 masterVolumeController（那会开
         // 幽灵实例的口，见 masterVolumeError 文档）。
         masterVolumeError = masterVolumeController.lastError
-        switch masterVolumeRefreshRoute(succeeded: landed != nil, error: masterVolumeController.lastError) {
+        switch masterVolumeRefreshRoute(
+            succeeded: landed != nil, error: masterVolumeController.lastError)
+        {
         case .configOnly: reloadConfigOnly()
         case .full: reload()
         case .noRefresh: break
+        }
+        if landed != nil {
+            soundPacksRefreshCoordinator?.completePanelConfigChange(.changed)
         }
         return landed
     }

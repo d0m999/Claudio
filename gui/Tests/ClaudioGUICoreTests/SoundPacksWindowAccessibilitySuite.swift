@@ -87,6 +87,31 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(coordinator.requestRevision == 2, "隐藏后复用窗口重开也必须产生新请求")
     }
 
+    suite("SoundPacksWindow a11y：status revision 只在 NSAccessibility.post 真成功后消费") {
+        var tracker = SoundPacksWindowStatusAnnouncementTracker()
+
+        expect(!tracker.beginAttempt(revision: 1, isWindowKey: false), "非 key 窗口不得开始公告")
+        expect(tracker.beginAttempt(revision: 1, isWindowKey: true), "key 窗口应开始首次公告")
+        expect(
+            !tracker.beginAttempt(revision: 1, isWindowKey: true),
+            "同 revision in-flight 期间不得重复 post")
+
+        tracker.finishAttempt(revision: 1, didPost: false)
+        expect(tracker.lastPostedRevision == 0, "bridge 异步后失去 key 不得假装已播")
+        expect(
+            tracker.beginAttempt(revision: 1, isWindowKey: true),
+            "未实际 post 的 revision 必须允许回到 key 后重试")
+        tracker.finishAttempt(revision: 1, didPost: true)
+        expect(tracker.lastPostedRevision == 1, "真实 post 成功才能推进已播 revision")
+        expect(!tracker.beginAttempt(revision: 1, isWindowKey: true), "已播 revision 不得重播")
+
+        expect(tracker.beginAttempt(revision: 2, isWindowKey: true), "更新 revision 应正常开始")
+        expect(tracker.beginAttempt(revision: 3, isWindowKey: true), "更新结果不得被旧 in-flight 堵住")
+        tracker.finishAttempt(revision: 3, didPost: true)
+        tracker.finishAttempt(revision: 2, didPost: true)
+        expect(tracker.lastPostedRevision == 3, "异步乱序完成不得让 revision 倒退")
+    }
+
     suite("SoundPacksWindow a11y：包级动作栏、空态 CTA 与视觉顺序完全一致") {
         let builtin = SoundPacksWindowFocusScope(
             packIDs: ["builtin"],
@@ -106,6 +131,7 @@ func runSoundPacksWindowAccessibilitySuites() {
             packIDs: ["custom"],
             selectedPackID: "custom",
             editableEvents: [.stop],
+            previewableEvents: [.stop],
             orphanFileNames: ["spare.wav"],
             canEditSelectedPack: true,
             canAddAudio: true,
@@ -113,7 +139,7 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             soundPacksWindowFocusOrder(custom)
                 == [
-                    .packList, .revealSelectedPack, .eventAudio(.stop),
+                    .packList, .revealSelectedPack, .eventAudio(.stop), .eventPreview(.stop),
                     .orphanAssignment(fileName: "spare.wav"),
                     .orphanDeletion(fileName: "spare.wav"),
                     .addAudio, .useSelectedPack,
@@ -134,11 +160,12 @@ func runSoundPacksWindowAccessibilitySuites() {
             "factory 不可用的零包空态必须有唯一 Finder CTA")
     }
 
-    suite("SoundPacksWindow a11y：T11 编辑控件按视觉序进入窗口自己的焦点序，内置包不产生活控件") {
+    suite("SoundPacksWindow a11y：事件菜单与试听按视觉序进入焦点，内置包只保留可用试听") {
         let editable = SoundPacksWindowFocusScope(
             packIDs: ["my-pack"],
             selectedPackID: "my-pack",
             editableEvents: [.stop, .notification],
+            previewableEvents: [.stop],
             orphanFileNames: ["a.mp3"],
             canEditSelectedPack: true)
         expect(
@@ -147,6 +174,7 @@ func runSoundPacksWindowAccessibilitySuites() {
                     .packList,
                     .revealSelectedPack,
                     .eventAudio(.stop),
+                    .eventPreview(.stop),
                     .eventAudio(.notification),
                     .orphanAssignment(fileName: "a.mp3"),
                     .orphanDeletion(fileName: "a.mp3"),
@@ -157,11 +185,13 @@ func runSoundPacksWindowAccessibilitySuites() {
             packIDs: ["builtin"],
             selectedPackID: "builtin",
             editableEvents: Event.allCases,
+            previewableEvents: [.stop],
             orphanFileNames: ["spare.mp3"],
             canEditSelectedPack: false)
         expect(
-            soundPacksWindowFocusOrder(builtin) == [.packList, .revealSelectedPack],
-            "内置包只读时不得为隐藏/禁用的编辑动作制造死焦点")
+            soundPacksWindowFocusOrder(builtin)
+                == [.packList, .revealSelectedPack, .eventPreview(.stop)],
+            "内置包只读时不得制造编辑死焦点，但 present 且启用的试听仍必须可达")
     }
 
     suite("SoundPacksWindow a11y：T12 恢复出厂是内置包独有的真焦点，位于 Finder 动作之后") {
@@ -418,7 +448,12 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             controller.contains("public func windowDidBecomeKey")
                 && controller.contains("announceLatestWindowStatusIfNeeded(in: keyWindow)")
-                && controller.contains("status.revision > lastAnnouncedStatusRevision"),
+                && controller.contains("statusAnnouncementTracker.beginAttempt(")
+                && controller.contains("statusAnnouncementTracker.finishAttempt("),
             "窗口非 key 期间完成的全局结果必须在重新成为 key 时补播且 revision 去重")
+        expect(
+            bridge.contains("completion?(false)")
+                && bridge.contains("completion?(true)"),
+            "bridge 必须把异步 key-window 复核后的真实 post 结果回传，不能提前消费 revision")
     }
 }

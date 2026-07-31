@@ -409,6 +409,9 @@ public final class SoundPacksWindowModel: ObservableObject {
     private var statusRevision = 0
     private var statusByKind: [SoundPacksWindowStatusKind: SoundPacksWindowStatus] = [:]
     private var audioImportActionRevision = 0
+    /// Monotonic identity for the inspection session, not merely its current pack ID. Returning
+    /// A→B→A must not let an operation started in the first A session inherit foreground status.
+    private var inspectionSelectionRevision = 0
     private var suppressedSelectionAnnouncementPackID: String?
     private var factoryBatchRestoreFailures: [FactoryPackBatchRestoreFailure] = []
     private var factoryBatchRestoredCount = 0
@@ -497,6 +500,7 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func selectPackForInspection(_ packID: String) {
         guard packCards.contains(where: { $0.id == packID }) else { return }
         guard selectedPackID != packID else { return }
+        inspectionSelectionRevision += 1
         selectedPackID = packID
         selectedEventRows = packCoverage(
             packID: packID, config: config, environment: environment)
@@ -625,10 +629,12 @@ public final class SoundPacksWindowModel: ObservableObject {
 
         audioImportActionRevision += 1
         let actionRevision = audioImportActionRevision
+        let expectedSelectionRevision = inspectionSelectionRevision
         let environment = self.environment
-        let targetName = packCards.first(where: { $0.id == expectedPackID }).map {
-            SelectedPackMetadata(id: $0.id, name: $0.name).displayName
-        } ?? expectedPackID
+        let targetName =
+            packCards.first(where: { $0.id == expectedPackID }).map {
+                SelectedPackMetadata(id: $0.id, name: $0.name).displayName
+            } ?? expectedPackID
         clearWindowStatus(.audio)
         audioActionError = nil
 
@@ -636,7 +642,9 @@ public final class SoundPacksWindowModel: ObservableObject {
             importAudioFiles(requests, packID: expectedPackID, environment: environment)
         }.value
         let isLatestAction = actionRevision == audioImportActionRevision
-        let isStillInspectingTarget = selectedPackID == expectedPackID
+        let isStillInspectingTarget =
+            selectedPackID == expectedPackID
+            && inspectionSelectionRevision == expectedSelectionRevision
         if !batch.accepted.isEmpty {
             completeSynchronousWrite(.succeeded)
         } else {
@@ -679,6 +687,27 @@ public final class SoundPacksWindowModel: ObservableObject {
                 previewFile: isLatestAction && isStillInspectingTarget
                     ? batch.accepted.last : nil,
                 completedInBackground: !isStillInspectingTarget))
+    }
+
+    /// Resolves a preview from the current read model through the same audited pack/file gates as
+    /// runtime playback. A stale `.present` row triggers an immediate read-model refresh so the
+    /// window visibly becomes `.broken` instead of accepting a click with no explanation.
+    public func previewFileForSelectedEvent(_ event: Event) -> URL? {
+        guard
+            let selectedPackID,
+            let row = selectedEventRows.first(where: { $0.event == event }),
+            case .present(let fileName) = row.coverage,
+            let packDirectory = resolvePackDirectory(
+                id: selectedPackID,
+                userPacksDirectory: environment.userPacksDirectory,
+                bundledPacksDirectory: environment.bundledPacksDirectory),
+            let resolvedFile = safePackFileURL(fileName, in: packDirectory),
+            regularFileExists(at: resolvedFile)
+        else {
+            reload(followActivePack: false)
+            return nil
+        }
+        return resolvedFile
     }
 
     /// The star state for one full-library sidebar row. Existing stars stay removable even when a
@@ -765,10 +794,11 @@ public final class SoundPacksWindowModel: ObservableObject {
             nextSelection = loadedCards.first?.id
         }
         if nextSelection != previousSelection {
+            inspectionSelectionRevision += 1
             audioActionError = nil
             factoryRestoreNotice = nil
             factoryRestoreActionError = nil
-            clearWindowStatus(.audio)
+            preserveCompletedAudioImportStatusAsBackgroundIfNeeded()
             clearWindowStatus(.factoryRestore)
             if packForkNotice?.newPackID != nextSelection {
                 packForkNotice = nil
@@ -1224,6 +1254,31 @@ public final class SoundPacksWindowModel: ObservableObject {
 
     private func clearWindowStatus(_ kind: SoundPacksWindowStatusKind) {
         guard statusByKind.removeValue(forKey: kind) != nil else { return }
+        publishWindowStatuses()
+    }
+
+    /// A retained window may be hidden when an async import completes. Following the active pack
+    /// on reopen must not erase that only result before VoiceOver can announce it. Preserve its
+    /// original revision (so an already-announced result is not replayed), detach it from the old
+    /// pack selection, and make the original target explicit in the existing message.
+    private func preserveCompletedAudioImportStatusAsBackgroundIfNeeded() {
+        guard let status = statusByKind[.audio], status.actionID != nil else {
+            clearWindowStatus(.audio)
+            return
+        }
+        let message =
+            status.message.hasPrefix("后台操作：")
+            ? status.message
+            : "后台操作：" + status.message
+        statusByKind[.audio] = SoundPacksWindowStatus(
+            kind: status.kind,
+            severity: status.severity,
+            revision: status.revision,
+            action: status.action,
+            message: message,
+            packID: nil,
+            actionID: status.actionID,
+            recovery: status.recovery)
         publishWindowStatuses()
     }
 

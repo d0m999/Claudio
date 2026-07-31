@@ -23,6 +23,8 @@ public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
     case retryFactoryRestore(packID: String)
     /// One selected-pack event mapping's existing-audio menu.
     case eventAudio(Event)
+    /// One selected-pack event mapping's playable-audio preview button.
+    case eventPreview(Event)
     /// One orphan row's 「分配…」 menu.
     case orphanAssignment(fileName: String)
     /// One orphan row's irreversible 「删除」 button.
@@ -34,6 +36,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     public let packIDs: [String]
     public let selectedPackID: String?
     public let editableEvents: [Event]
+    public let previewableEvents: [Event]
     public let orphanFileNames: [String]
     public let canEditSelectedPack: Bool
     public let canForkFactoryPack: Bool
@@ -48,6 +51,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         packIDs: [String],
         selectedPackID: String?,
         editableEvents: [Event] = [],
+        previewableEvents: [Event] = [],
         orphanFileNames: [String] = [],
         canEditSelectedPack: Bool = false,
         canForkFactoryPack: Bool = false,
@@ -61,6 +65,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         self.packIDs = packIDs
         self.selectedPackID = selectedPackID
         self.editableEvents = editableEvents
+        self.previewableEvents = previewableEvents
         self.orphanFileNames = orphanFileNames
         self.canEditSelectedPack = canEditSelectedPack
         self.canForkFactoryPack = canForkFactoryPack
@@ -101,8 +106,15 @@ public func soundPacksWindowFocusOrder(
         order.append(.revealSelectedPack)
         // Event and orphan controls live in the scrolling detail region above the fixed bottom
         // action bar. Keep this pure order identical to that visible hierarchy.
+        for event in Event.allCases {
+            if scope.canEditSelectedPack, scope.editableEvents.contains(event) {
+                order.append(.eventAudio(event))
+            }
+            if scope.previewableEvents.contains(event) {
+                order.append(.eventPreview(event))
+            }
+        }
         if scope.canEditSelectedPack {
-            order.append(contentsOf: scope.editableEvents.map(SoundPacksWindowFocusTarget.eventAudio))
             for fileName in scope.orphanFileNames {
                 order.append(.orphanAssignment(fileName: fileName))
                 order.append(.orphanDeletion(fileName: fileName))
@@ -143,6 +155,33 @@ public final class SoundPacksWindowFocusCoordinator: ObservableObject {
 
     public func requestInitialFocus() {
         requestRevision += 1
+    }
+}
+
+/// Tracks status announcements across the AppKit bridge's asynchronous key-window recheck.
+/// A revision is consumed only after `NSAccessibility.post` is actually reached; an attempt that
+/// loses key status remains retryable when the retained window becomes key again.
+public struct SoundPacksWindowStatusAnnouncementTracker: Sendable, Equatable {
+    public private(set) var lastPostedRevision = 0
+    private var inFlightRevisions: Set<Int> = []
+
+    public init() {}
+
+    public mutating func beginAttempt(revision: Int, isWindowKey: Bool) -> Bool {
+        guard
+            isWindowKey,
+            revision > lastPostedRevision,
+            !inFlightRevisions.contains(revision)
+        else { return false }
+        inFlightRevisions.insert(revision)
+        return true
+    }
+
+    public mutating func finishAttempt(revision: Int, didPost: Bool) {
+        inFlightRevisions.remove(revision)
+        if didPost {
+            lastPostedRevision = max(lastPostedRevision, revision)
+        }
     }
 }
 

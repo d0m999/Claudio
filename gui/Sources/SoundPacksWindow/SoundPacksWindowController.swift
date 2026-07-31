@@ -32,7 +32,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private var externalActivationCancellable: AnyCancellable?
     private var selectionAnnouncementCancellable: AnyCancellable?
     private var windowStatusAnnouncementCancellable: AnyCancellable?
-    private var lastAnnouncedStatusRevision = 0
+    private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
     /// Suppresses the delegate callback during `showWindow` so window-open context is announced
     /// before any result that completed while the retained window was hidden.
     private var isPresentingWindow = false
@@ -202,10 +202,10 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         in window: NSWindow
     ) {
         guard
-            status.revision > lastAnnouncedStatusRevision,
-            window.isKeyWindow
+            statusAnnouncementTracker.beginAttempt(
+                revision: status.revision,
+                isWindowKey: window.isKeyWindow)
         else { return }
-        lastAnnouncedStatusRevision = status.revision
         let event: SoundPacksWindowAnnouncementMoment =
             status.severity == .failure
             ? .writeFailed(action: status.action, reason: status.message)
@@ -213,7 +213,12 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         SoundPacksWindowAccessibilityBridge.post(
             event,
             facts: accessibilityFacts(),
-            window: window)
+            window: window
+        ) { [weak self] didPost in
+            self?.statusAnnouncementTracker.finishAttempt(
+                revision: status.revision,
+                didPost: didPost)
+        }
     }
 
     private func accessibilityFacts() -> SoundPacksWindowAnnouncementFacts {

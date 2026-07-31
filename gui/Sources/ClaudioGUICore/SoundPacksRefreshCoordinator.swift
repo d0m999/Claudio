@@ -4,8 +4,9 @@ import Combine
 /// 一次声音包管理面与面板之间的可观察刷新效果。
 ///
 /// 两个 UI 面不互持彼此的 view-model：窗口写成功只发布 ``panelReloadRevision``；面板切包
-/// 成功发布 ``windowReloadRevision``（窗口跟随 active pack）；面板音频/import/manifest 真变化
-/// 发布 ``windowContentReloadRevision``（只重读窗口当前检查项）。各自仍在自己的 `@MainActor`
+/// 成功发布 ``windowReloadRevision``（窗口跟随 active pack）；面板音频/import/manifest 或
+/// `master_volume` 等非切包 config 真变化发布 ``windowContentReloadRevision``（只重读窗口当前检查项）。
+/// 各自仍在自己的 `@MainActor`
 /// 上重读磁盘，因而没有后台写、跨 actor 可变状态或第二份缓存。
 public enum SoundPacksRefreshEffect: Equatable, Sendable {
     case none
@@ -37,6 +38,12 @@ public enum PanelPackAudioChangeOutcome: Equatable, Sendable {
     case unchanged
 }
 
+/// 面板内一次不改变 active pack 的 config 写入结局。
+public enum PanelConfigChangeOutcome: Equatable, Sendable {
+    case changed
+    case unchanged
+}
+
 /// Pure retained-window presentation policy. Model construction already performs the first
 /// hydration, so only a previously-created hidden window needs a fresh reload.
 public func shouldReloadSoundPacksWindowOnShow(
@@ -59,7 +66,7 @@ public func shouldPrepareSoundPacksWindowForPresentation(isVisible: Bool) -> Boo
 /// - 窗口写成功 → `panelReloadRevision` 前进；`PanelView` **必须**调用
 ///   `PanelConfigController.reload()`，不能走不会重算 `packCards` 的 `reloadConfigOnly()`。
 /// - 面板切包成功 → `windowReloadRevision` 前进；窗口重读 config 与包状态。
-/// - 面板包音频或 manifest 真变化 → `windowContentReloadRevision` 前进；窗口保持侧栏选择重读。
+/// - 面板包音频、manifest 或非切包 config 真变化 → `windowContentReloadRevision` 前进；窗口保持侧栏选择重读。
 /// - 没有落盘变化的失败 → revision 不动；失败前磁盘已经变化 → 两侧如实重读，但错误仍由调用面显示。
 ///
 /// `@MainActor` 不只是发布 UI 状态的要求，也是 manifest/config 写者的时序边界：调用方必须在
@@ -96,6 +103,18 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
     @discardableResult
     public func completePanelPackAudioChange(
         _ outcome: PanelPackAudioChangeOutcome
+    ) -> SoundPacksRefreshEffect {
+        guard outcome == .changed else { return .none }
+        windowContentReloadRevision += 1
+        return .windowReload
+    }
+
+    /// Publishes a config-only refresh without changing which sidebar item the retained
+    /// management window is inspecting. The panel already reloaded its own read model, so this
+    /// deliberately never advances `panelReloadRevision`.
+    @discardableResult
+    public func completePanelConfigChange(
+        _ outcome: PanelConfigChangeOutcome
     ) -> SoundPacksRefreshEffect {
         guard outcome == .changed else { return .none }
         windowContentReloadRevision += 1
