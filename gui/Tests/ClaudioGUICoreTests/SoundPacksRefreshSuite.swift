@@ -7,6 +7,19 @@ private enum SoundPacksInjectedRestoreFailure: Error, Sendable {
     case beforePublish
 }
 
+private final class SoundPacksFailFirstPublish: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hasFailed = false
+
+    func run() throws {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !hasFailed else { return }
+        hasFailed = true
+        throw SoundPacksInjectedRestoreFailure.beforePublish
+    }
+}
+
 private func soundPacksRepoRoot(file: StaticString = #filePath) -> URL {
     URL(fileURLWithPath: "\(file)")
         .deletingLastPathComponent().deletingLastPathComponent()
@@ -241,17 +254,105 @@ func runSoundPacksRefreshSuites() {
                 refreshCoordinator: coordinator)
             expect(window.selectedPackID == "pack-a", "前提：窗口初始跟随 active pack-a")
 
+            let packAError = window.deleteSelectedOrphanAudioFileAfterConfirmation(
+                "stop.mp3", expectedPackID: "pack-a")
+            guard case .failure(.delete(.stillReferenced)) = packAError else {
+                expect(false, "前提：必须先在 pack-a 留下一条音频操作错误，实得 \(packAError)")
+                return
+            }
+            expect(window.audioActionError != nil, "前提：pack-a 音频错误必须留在窗口状态中")
+
             coordinator.completePanelPackSwitch(panel.switchPack(to: "missing-pack"))
             expect(window.selectedPackID == "pack-a", "失败切包不得让窗口选择漂移")
             expect(window.config.selectedPack == "pack-a", "失败切包不得让窗口假装 config 已变化")
+            expect(window.audioActionError != nil, "选择未变化的失败切包不得误清当前包错误")
 
             coordinator.completePanelPackSwitch(panel.switchPack(to: "pack-b"))
             expect(window.selectedPackID == "pack-b", "成功切包后窗口侧栏选择必须跟随 pack-b")
             expect(window.config.selectedPack == "pack-b", "窗口 config 必须重读为 pack-b")
+            expect(window.audioActionError == nil, "跟随到 pack-b 时必须清掉只属于 pack-a 的音频错误")
             expect(
                 window.selectedEventRows.first(where: { $0.event == .notification })?.coverage
                     == .present(fileName: "notification.mp3"),
                 "窗口主区必须跟着侧栏切到 pack-b 的真实事件映射")
+        }
+    }
+
+    suite("SoundPacksWindowModel：安全拒删会重读确认期间漂移的音频清单，不发布假写刷新") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs")
+            let pack = packsDirectory.appendingPathComponent("pack-a")
+            let manifest = pack.appendingPathComponent("manifest.json")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": {} }"#,
+                to: manifest)
+            writeFixture("orphan", to: pack.appendingPathComponent("orphan.mp3"))
+            let coordinator = SoundPacksRefreshCoordinator()
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: soundPacksEnvironment(packsDirectory),
+                refreshCoordinator: coordinator)
+            expect(
+                window.selectedAudioFiles
+                    == [PackAudioFile(fileName: "orphan.mp3", isOrphan: true)],
+                "前提：确认前窗口把 orphan.mp3 显示成可删孤儿")
+
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "orphan.mp3" } }"#,
+                to: manifest)
+            let becameReferenced = window.deleteSelectedOrphanAudioFileAfterConfirmation(
+                "orphan.mp3", expectedPackID: "pack-a")
+
+            guard case .failure(.delete(.stillReferenced)) = becameReferenced else {
+                expect(false, "确认期间新增引用必须安全拒删，实得 \(becameReferenced)")
+                return
+            }
+            expect(
+                window.selectedAudioFiles
+                    == [PackAudioFile(fileName: "orphan.mp3", isOrphan: false)],
+                "stillReferenced 必须立即重读清单，不能继续把该项显示为可删孤儿")
+            expect(
+                window.selectedEventRows.first(where: { $0.event == .stop })?.coverage
+                    == .present(fileName: "orphan.mp3"),
+                "同一次漂移重读必须让窗口事件映射也反映锁内发现的新引用")
+            expect(coordinator.panelReloadRevision == 0, "外部漂移后的安全拒删不是本窗口写成功，不得发布刷新")
+        }
+
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs")
+            let pack = packsDirectory.appendingPathComponent("pack-a")
+            let orphan = pack.appendingPathComponent("orphan.mp3")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": {} }"#,
+                to: pack.appendingPathComponent("manifest.json"))
+            writeFixture("orphan", to: orphan)
+            let coordinator = SoundPacksRefreshCoordinator()
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: soundPacksEnvironment(packsDirectory),
+                refreshCoordinator: coordinator)
+            expect(window.selectedAudioFiles.count == 1, "前提：确认前音频清单含 orphan.mp3")
+
+            try? FileManager.default.removeItem(at: orphan)
+            let disappeared = window.deleteSelectedOrphanAudioFileAfterConfirmation(
+                "orphan.mp3", expectedPackID: "pack-a")
+
+            guard case .failure(.delete(.fileNotFound)) = disappeared else {
+                expect(false, "确认期间文件被外部移走必须安全拒删，实得 \(disappeared)")
+                return
+            }
+            expect(
+                window.selectedAudioFiles.isEmpty,
+                "fileNotFound 必须立即重读清单，让已经消失的孤儿行退出窗口")
+            expect(coordinator.panelReloadRevision == 0, "外部移走后的安全拒删不得发布窗口写刷新")
         }
     }
 
@@ -574,13 +675,14 @@ func runSoundPacksRefreshSuites() {
                 to: thirdPack.appendingPathComponent("manifest.json"))
 
             let coordinator = SoundPacksRefreshCoordinator()
+            let failFirstPublish = SoundPacksFailFirstPublish()
             let environment = AudioImportEnvironment(
                 userPacksDirectory: packsDirectory,
                 factoryPacksDirectory: factory,
                 durationProbe: StubDurationProbe(fixedDuration: 1),
                 packsLockFile: injectedPacksLock(besideUserPacks: packsDirectory),
                 beforeFactoryPackRestorePublish: {
-                    throw SoundPacksInjectedRestoreFailure.beforePublish
+                    try failFirstPublish.run()
                 })
             let window = SoundPacksWindowModel(
                 configFile: configFile,
@@ -628,6 +730,31 @@ func runSoundPacksRefreshSuites() {
             expect(
                 coordinator.panelReloadRevision == 1,
                 "旧树已经搬到 salvage 后，面板必须收到一次 full reload 以显示磁盘真相")
+            expect(
+                window.factoryRestoreRetryPackID == "minimal-chime",
+                "原包已从 availablePacks 消失时，窗口级失败状态必须仍保留可重试的内置包 id")
+
+            let retried = window.retryFailedFactoryPackRestoreAfterConfirmation(
+                expectedPackID: "minimal-chime")
+            guard case .success(let retryOutcome) = retried else {
+                expect(false, "发布失败后的窗口级重试必须能在没有所选目标卡片时恢复，实得 \(retried)")
+                return
+            }
+            expect(
+                retryOutcome.restoredPackID == "minimal-chime"
+                    && retryOutcome.salvaged == nil,
+                "重试应重新发布原内置 id，旧树已经在首次 salvage 中，不得伪造第二条 salvage")
+            expect(
+                window.packCards.contains(where: { $0.id == "minimal-chime" }),
+                "重试成功后原内置包必须重新进入窗口读模型")
+            expect(
+                window.factoryRestoreActionError == nil
+                    && window.factoryRestoreRetryPackID == nil
+                    && window.factoryRestoreNotice?.restoredPackID == "minimal-chime",
+                "重试成功必须清掉失败/重试入口，并保留成功告知")
+            expect(
+                coordinator.panelReloadRevision == 2,
+                "首次部分失败与后续重试成功各发布一次真实 full reload")
 
             window.selectPackForInspection("third-pack")
             expect(

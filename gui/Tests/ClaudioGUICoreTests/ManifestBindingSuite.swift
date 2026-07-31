@@ -883,7 +883,10 @@ func runManifestBindingSuites() async {
                 to: userPacks.appendingPathComponent("my-pack/manifest.json"))
             writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/stop.mp3"))
             let environment = makeEnvironment(userPacksDirectory: userPacks)
-            let importViewModel = AudioImportViewModel(packID: "my-pack", environment: environment)
+            let importViewModel = AudioImportViewModel(
+                packID: "my-pack",
+                environment: environment,
+                previewState: .reject(.nonWhitelistFormat))
             let rowViewModel = EventRowImportViewModel(event: .stop, importViewModel: importViewModel)
 
             rowViewModel.clearBinding()
@@ -907,6 +910,9 @@ func runManifestBindingSuites() async {
                 FileManager.default.fileExists(
                     atPath: userPacks.appendingPathComponent("my-pack/stop.mp3").path),
                 "clearBinding() must never delete the audio file — only the manifest key")
+            expect(
+                importViewModel.state == .idle,
+                "a newer clear action must remove an older import rejection so it cannot hide the bindResult")
         }
     }
 

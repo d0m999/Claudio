@@ -162,6 +162,18 @@ public final class SoundPacksWindowModel: ObservableObject {
     @Published public private(set) var factoryRestoreActionError:
         SoundPacksWindowFactoryRestoreActionError?
 
+    /// The built-in id whose failed factory publish can be retried even when its visible installed
+    /// directory no longer exists and therefore cannot appear in ``packCards``.
+    public var factoryRestoreRetryPackID: String? {
+        guard
+            case .restore(let packID, let error)? = factoryRestoreActionError,
+            case .publishFailed = error
+        else {
+            return nil
+        }
+        return packID
+    }
+
     public var selectedPackIsBuiltinReadOnly: Bool {
         selectedPackID.map(builtinPackIDs.contains) ?? false
     }
@@ -272,6 +284,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             nextSelection = loadedCards.first?.id
         }
         if nextSelection != previousSelection {
+            audioActionError = nil
             factoryRestoreNotice = nil
             factoryRestoreActionError = nil
         }
@@ -346,6 +359,12 @@ public final class SoundPacksWindowModel: ObservableObject {
         case .success:
             return finishAudioAction(.success(()))
         case .failure(let error):
+            if deleteFailureInvalidatesWindowReadModel(error) {
+                // The lock-time check has disproved the confirmation-time snapshot. Re-read every
+                // window-owned projection (cards, event rows, and inventory) without publishing a
+                // fake local write completion to the panel.
+                reload(followActivePack: false)
+            }
             return finishAudioAction(.failure(.delete(error)))
         }
     }
@@ -353,8 +372,8 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// Executes the directory replacement only after the window's explicit confirmation.
     ///
     /// The expected id prevents a stale confirmation from restoring a newly-selected pack. The
-    /// success path preserves the returned salvage outcome before the shared full reload runs, so
-    /// the user-visible path cannot be dropped as an implementation detail.
+    /// success path publishes the returned salvage outcome after the shared full reload, so a
+    /// selection repaired by that reload cannot clear the user-visible path.
     @discardableResult
     public func restoreSelectedFactoryPackAfterConfirmation(
         expectedPackID: String
@@ -369,12 +388,37 @@ public final class SoundPacksWindowModel: ObservableObject {
             return finishFactoryRestore(.failure(.notBuiltin(packID: selectedPackID)))
         }
 
-        switch restoreFactoryPack(id: selectedPackID, environment: environment) {
+        return restoreFactoryPackAfterConfirmation(packID: selectedPackID)
+    }
+
+    /// Retries a failed factory publish using the id retained by the window-level failure state.
+    ///
+    /// This path deliberately does not depend on `selectedPackID`: after salvage succeeds and
+    /// publish fails, the attempted built-in no longer has an installed directory and cannot be a
+    /// selectable `PackCard`. The pending failure identity is revalidated at confirmation time so a
+    /// stale dialog cannot restore an unrelated pack.
+    @discardableResult
+    public func retryFailedFactoryPackRestoreAfterConfirmation(
+        expectedPackID: String
+    ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
+        guard factoryRestoreRetryPackID == expectedPackID else {
+            return finishFactoryRestore(.failure(.selectionChanged))
+        }
+        guard builtinPackIDs.contains(expectedPackID) else {
+            return finishFactoryRestore(.failure(.notBuiltin(packID: expectedPackID)))
+        }
+        return restoreFactoryPackAfterConfirmation(packID: expectedPackID)
+    }
+
+    private func restoreFactoryPackAfterConfirmation(
+        packID: String
+    ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
+        switch restoreFactoryPack(id: packID, environment: environment) {
         case .success(let outcome):
             return finishFactoryRestore(.success(outcome))
         case .failure(let error):
             return finishFactoryRestore(
-                .failure(.restore(packID: selectedPackID, error: error)))
+                .failure(.restore(packID: packID, error: error)))
         }
     }
 
@@ -400,9 +444,12 @@ public final class SoundPacksWindowModel: ObservableObject {
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
         switch result {
         case .success(let outcome):
-            factoryRestoreNotice = outcome
             factoryRestoreActionError = nil
             completeSynchronousWrite(.succeeded)
+            // A retry can make a previously absent pack selectable again. `reload` correctly
+            // clears old pack-scoped status when that changes selection, so publish the success
+            // notice after the reload to keep the new outcome visible.
+            factoryRestoreNotice = outcome
         case .failure(let error):
             let outcome: SoundPacksWindowWriteOutcome
             if case .restore(_, .publishFailed(_, salvaged: .some)) = error {
@@ -422,6 +469,18 @@ public final class SoundPacksWindowModel: ObservableObject {
             }
         }
         return result
+    }
+
+    private func deleteFailureInvalidatesWindowReadModel(
+        _ error: OrphanAudioDeleteError
+    ) -> Bool {
+        switch error {
+        case .packNotFound, .manifestUnreadable, .directoryUnreadable, .fileNotFound,
+            .stillReferenced:
+            return true
+        case .builtinReadOnly, .unsafeFileName, .deleteFailed, .lockBusy, .lockFailed:
+            return false
+        }
     }
 
     private func reloadSelectedAudioInventory(packID: String) {

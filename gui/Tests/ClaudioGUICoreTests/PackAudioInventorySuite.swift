@@ -287,10 +287,16 @@ func runPackAudioInventorySuites() {
                 to: pack.appendingPathComponent("manifest.json"))
             writeFixture("audio", to: pack.appendingPathComponent("spare.mp3"))
             let environment = packAudioEnvironment(userPacksDirectory: packs)
+            let importViewModel = AudioImportViewModel(
+                packID: "my-pack",
+                environment: environment,
+                previewState: .reject(.nonWhitelistFormat))
             let viewModel = EventRowImportViewModel(
                 event: .notification,
-                importViewModel: AudioImportViewModel(
-                    packID: "my-pack", environment: environment))
+                importViewModel: importViewModel)
+            expect(
+                importViewModel.state == .reject(.nonWhitelistFormat),
+                "前提：这一行仍显示上一次无效导入的拒绝")
 
             viewModel.bindExistingFile("spare.mp3")
 
@@ -305,6 +311,9 @@ func runPackAudioInventorySuites() {
                 ).first(where: { $0.event == .notification })?.coverage
                     == .present(fileName: "spare.mp3"),
                 "分配后 notification 行必须转为 .present(spare.mp3)")
+            expect(
+                importViewModel.state == .idle,
+                "成功复用包内音频后必须清掉旧导入拒绝，不能让 EventRowView 继续优先显示陈旧错误")
         }
     }
 }

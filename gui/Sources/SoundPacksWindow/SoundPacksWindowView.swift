@@ -11,8 +11,14 @@ private struct PermanentAudioDeletionRequest: Identifiable {
 }
 
 private struct FactoryPackRestoreRequest: Identifiable {
+    enum Kind {
+        case selectedPack
+        case failedPublishRetry
+    }
+
     let packID: String
     let displayName: String
+    let kind: Kind
 
     var id: String { packID }
 }
@@ -78,6 +84,13 @@ struct SoundPacksWindowView: View {
         .onChange(of: model.selectedAudioFiles) { _ in
             reconcileFocusWithVisibleControls()
         }
+        .onChange(of: model.factoryRestoreRetryPackID) { _ in
+            if model.packCards.isEmpty, model.factoryRestoreRetryPackID != nil {
+                focusedTarget = .retryFactoryRestore
+            } else {
+                reconcileFocusWithVisibleControls()
+            }
+        }
         .confirmationDialog(
             pendingPermanentDeletion.map { "永久删除「\($0.file.fileName)」？" } ?? "永久删除音频？",
             isPresented: Binding(
@@ -97,6 +110,33 @@ struct SoundPacksWindowView: View {
             }
         } message: { request in
             Text("「\(request.file.fileName)」会从这个声音包永久移除。此操作无法撤销。")
+        }
+        .confirmationDialog(
+            pendingFactoryPackRestore.map {
+                "用出厂版本替换「\($0.displayName)」？"
+            } ?? "恢复出厂声音？",
+            isPresented: Binding(
+                get: { pendingFactoryPackRestore != nil },
+                set: { if !$0 { pendingFactoryPackRestore = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingFactoryPackRestore
+        ) { request in
+            Button("替换并恢复出厂声音", role: .destructive) {
+                switch request.kind {
+                case .selectedPack:
+                    model.restoreSelectedFactoryPackAfterConfirmation(
+                        expectedPackID: request.packID)
+                case .failedPublishRetry:
+                    model.retryFailedFactoryPackRestoreAfterConfirmation(
+                        expectedPackID: request.packID)
+                }
+                pendingFactoryPackRestore = nil
+            }
+            Button("取消", role: .cancel) {
+                pendingFactoryPackRestore = nil
+            }
+        } message: { request in
+            Text(factoryRestoreConfirmationMessage(request))
         }
     }
 
@@ -150,7 +190,7 @@ struct SoundPacksWindowView: View {
                     .padding(.top, 20)
             }
             if let error = model.factoryRestoreActionError {
-                windowFailureRow(action: "恢复出厂声音", reason: error.message)
+                factoryRestoreFailureSection(error)
                     .padding(.horizontal, 20)
                     .padding(.top, 20)
             }
@@ -259,35 +299,13 @@ struct SoundPacksWindowView: View {
         return Button("恢复出厂声音…") {
             pendingFactoryPackRestore = FactoryPackRestoreRequest(
                 packID: card.id,
-                displayName: displayName)
+                displayName: displayName,
+                kind: .selectedPack)
         }
         .frame(minHeight: 44)
         .focused($focusedTarget, equals: .restoreFactoryPack)
         .accessibilityLabel("恢复「\(displayName)」的出厂声音")
         .accessibilityHint("会先确认替换，并说明恢复前内容的保存方式")
-        .confirmationDialog(
-            pendingFactoryPackRestore.map {
-                "用出厂版本替换「\($0.displayName)」？"
-            } ?? "恢复出厂声音？",
-            isPresented: Binding(
-                get: { pendingFactoryPackRestore != nil },
-                set: { if !$0 { pendingFactoryPackRestore = nil } }),
-            titleVisibility: .visible,
-            presenting: pendingFactoryPackRestore
-        ) { request in
-            Button("替换并恢复出厂声音", role: .destructive) {
-                model.restoreSelectedFactoryPackAfterConfirmation(
-                    expectedPackID: request.packID)
-                pendingFactoryPackRestore = nil
-            }
-            Button("取消", role: .cancel) {
-                pendingFactoryPackRestore = nil
-            }
-        } message: { _ in
-            Text(
-                "当前内容会被出厂版本替换。恢复前的整个目录会原样搬到同级隐藏位置，"
-                    + "一个文件都不会删除；完成后会显示实际路径。")
-        }
     }
 
     @ViewBuilder
@@ -445,6 +463,42 @@ struct SoundPacksWindowView: View {
             soundPacksWindowFailureAccessibilityLabel(action: action, reason: reason))
     }
 
+    private func factoryRestoreFailureSection(
+        _ error: SoundPacksWindowFactoryRestoreActionError
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            windowFailureRow(action: "恢复出厂声音", reason: error.message)
+            if let packID = model.factoryRestoreRetryPackID {
+                let displayName = SelectedPackMetadata(id: packID, name: nil).displayName
+                Button("重试恢复「\(displayName)」…") {
+                    pendingFactoryPackRestore = FactoryPackRestoreRequest(
+                        packID: packID,
+                        displayName: displayName,
+                        kind: .failedPublishRetry)
+                }
+                .frame(minHeight: 44)
+                .focused($focusedTarget, equals: .retryFactoryRestore)
+                .accessibilityLabel("重试恢复「\(displayName)」的出厂声音")
+                .accessibilityHint("会先确认，再重新发布完整的出厂版本")
+            }
+        }
+    }
+
+    private func factoryRestoreConfirmationMessage(
+        _ request: FactoryPackRestoreRequest
+    ) -> String {
+        switch request.kind {
+        case .selectedPack:
+            return
+                "当前内容会被出厂版本替换。恢复前的整个目录会原样搬到同级隐藏位置，"
+                + "一个文件都不会删除；完成后会显示实际路径。"
+        case .failedPublishRetry:
+            return
+                "将重新尝试发布完整的出厂版本。上次恢复前搬走的内容会继续原样保留，"
+                + "一个文件都不会删除。"
+        }
+    }
+
     private func windowFactoryRestoreNoticeRow(_ message: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
@@ -493,7 +547,8 @@ struct SoundPacksWindowView: View {
             orphanFileNames: canEditSelectedPack
                 ? model.selectedAudioFiles.filter(\.isOrphan).map(\.fileName) : [],
             canEditSelectedPack: canEditSelectedPack,
-            canRestoreFactoryPack: model.selectedPackIsBuiltinReadOnly)
+            canRestoreFactoryPack: model.selectedPackIsBuiltinReadOnly,
+            canRetryFactoryRestore: model.factoryRestoreRetryPackID != nil)
     }
 
     private func applyInitialFocus() {

@@ -14,6 +14,8 @@ public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
     case revealSelectedPack
     /// A built-in pack's explicitly-confirmed 「恢复出厂声音…」 button.
     case restoreFactoryPack
+    /// Window-level retry after the attempted built-in disappeared during a failed publish.
+    case retryFactoryRestore
     /// One selected-pack event mapping's existing-audio menu.
     case eventAudio(Event)
     /// One orphan row's 「分配…」 menu.
@@ -30,6 +32,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     public let orphanFileNames: [String]
     public let canEditSelectedPack: Bool
     public let canRestoreFactoryPack: Bool
+    public let canRetryFactoryRestore: Bool
 
     public init(
         packIDs: [String],
@@ -37,7 +40,8 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         editableEvents: [Event] = [],
         orphanFileNames: [String] = [],
         canEditSelectedPack: Bool = false,
-        canRestoreFactoryPack: Bool = false
+        canRestoreFactoryPack: Bool = false,
+        canRetryFactoryRestore: Bool = false
     ) {
         self.packIDs = packIDs
         self.selectedPackID = selectedPackID
@@ -45,6 +49,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         self.orphanFileNames = orphanFileNames
         self.canEditSelectedPack = canEditSelectedPack
         self.canRestoreFactoryPack = canRestoreFactoryPack
+        self.canRetryFactoryRestore = canRetryFactoryRestore
     }
 }
 
@@ -55,9 +60,13 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
 public func soundPacksWindowFocusOrder(
     _ scope: SoundPacksWindowFocusScope
 ) -> [SoundPacksWindowFocusTarget] {
-    guard !scope.packIDs.isEmpty else { return [] }
-
-    var order: [SoundPacksWindowFocusTarget] = [.packList]
+    var order: [SoundPacksWindowFocusTarget] = []
+    if !scope.packIDs.isEmpty {
+        order.append(.packList)
+    }
+    if scope.canRetryFactoryRestore {
+        order.append(.retryFactoryRestore)
+    }
     if let selectedPackID = scope.selectedPackID,
         scope.packIDs.contains(selectedPackID)
     {

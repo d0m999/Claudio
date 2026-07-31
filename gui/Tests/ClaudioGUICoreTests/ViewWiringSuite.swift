@@ -2774,6 +2774,11 @@ func runViewWiringSuites() {
                 && flat.contains("expectedPackID: request.packID"),
             "只有确认对话框的 destructive action 才能触发 restore，且必须带确认时的包 id 防陈旧选择")
         expect(
+            flat.contains(#"Button("重试恢复「\(displayName)」…")"#)
+                && flat.contains("retryFailedFactoryPackRestoreAfterConfirmation(")
+                && flat.contains(".focused($focusedTarget, equals: .retryFactoryRestore)"),
+            "publish 失败移除原包后，窗口级失败行必须保留经过确认的重试入口并接入真实焦点序")
+        expect(
             flat.contains("factoryPackRestoreNoticeMessage(")
                 && flat.contains("model.factoryRestoreActionError"),
             "成功 salvage 路径告知与失败原因都必须在窗口内渲染，不能只留在 model")

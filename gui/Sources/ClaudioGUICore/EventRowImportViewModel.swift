@@ -72,6 +72,7 @@ public final class EventRowImportViewModel: ObservableObject {
     /// opening the menu and clicking 清除绑定), so a failed clear surfaces identically — never
     /// a second, unrendered failure-reporting path.
     public func clearBinding() {
+        importViewModel.clearFeedback()
         bindResult = clearEventBinding(
             event: event, packID: importViewModel.packID, environment: importViewModel.environment)
     }
@@ -83,6 +84,9 @@ public final class EventRowImportViewModel: ObservableObject {
     /// the outcome is published through the same ``bindResult`` failure surface import and clear
     /// already use.
     public func bindExistingFile(_ fileName: String) {
+        // This bind is now the row's latest action. Clear an older drop rejection first so it
+        // cannot outrank either this bind's success or its current failure in EventRowView.
+        importViewModel.clearFeedback()
         bindResult = bindEventToManifest(
             event: event,
             fileName: fileName,

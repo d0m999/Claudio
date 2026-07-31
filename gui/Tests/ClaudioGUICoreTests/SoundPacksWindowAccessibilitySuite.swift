@@ -20,6 +20,14 @@ func runSoundPacksWindowAccessibilitySuites() {
                 SoundPacksWindowFocusScope(packIDs: [], selectedPackID: nil)
             ).isEmpty,
             "空列表不是可操作项，不得成为死焦点")
+        let retryOnly = SoundPacksWindowFocusScope(
+            packIDs: [],
+            selectedPackID: nil,
+            canRetryFactoryRestore: true)
+        expect(
+            soundPacksWindowFocusOrder(retryOnly) == [.retryFactoryRestore]
+                && soundPacksWindowFirstFocusTarget(retryOnly) == .retryFactoryRestore,
+            "发布失败移除最后一个包时，窗口级重试仍必须是可达首焦点")
         expect(
             soundPacksWindowFocusOrder(
                 SoundPacksWindowFocusScope(
@@ -121,6 +129,15 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             !soundPacksWindowFocusOrder(custom).contains(.restoreFactoryPack),
             "个人包没有恢复出厂动作，不得出现幽灵焦点")
+
+        let fallbackWithRetry = SoundPacksWindowFocusScope(
+            packIDs: ["my-pack"],
+            selectedPackID: "my-pack",
+            canRetryFactoryRestore: true)
+        expect(
+            soundPacksWindowFocusOrder(fallbackWithRetry)
+                == [.packList, .retryFactoryRestore, .revealSelectedPack],
+            "原内置包消失并落到 fallback 时，焦点必须按列表→窗口级重试→所选包详情排列")
     }
 
     suite("SoundPacksWindow a11y：包行 Name/Value 区分当前、残缺、损坏与 license") {

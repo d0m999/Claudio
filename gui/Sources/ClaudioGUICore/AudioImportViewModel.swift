@@ -54,6 +54,16 @@ public final class AudioImportViewModel: ObservableObject {
         state = .idle
     }
 
+    /// Clears feedback from an earlier drop after a different row action supersedes it.
+    ///
+    /// Reusing an audio file already present in the pack or clearing a binding does not run the
+    /// import pipeline, but it is still the user's latest action on this row. Leaving an older
+    /// `.reject` in place would make `EventRowView` render that stale import error ahead of the
+    /// newer bind outcome.
+    public func clearFeedback() {
+        state = .idle
+    }
+
     #if DEBUG
         /// Preview-only initializer (ENGINEERING.md T14 D2): pins ``state`` directly to
         /// `previewState`, without running any import pipeline. Mirrors
