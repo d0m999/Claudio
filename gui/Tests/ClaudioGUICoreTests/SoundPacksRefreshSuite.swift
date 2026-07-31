@@ -661,7 +661,7 @@ func runSoundPacksRefreshSuites() {
                     .restore(
                         packID: "minimal-chime",
                         error: .salvageFailed,
-                        retainedSalvage: nil)) = failed
+                        retainedSalvages: [])) = failed
             else {
                 expect(false, "注入的 salvage 失败必须保持结构化错误，实得 \(failed)")
                 return
@@ -744,12 +744,12 @@ func runSoundPacksRefreshSuites() {
                     .restore(
                         packID: "minimal-chime",
                         error: .publishFailed(_, let salvaged?),
-                        retainedSalvage: let retainedSalvage?)) = failed
+                        retainedSalvages: let retainedSalvages)) = failed
             else {
                 expect(false, "注入的发布失败必须保持结构化 salvage 结果，实得 \(failed)")
                 return
             }
-            expect(retainedSalvage == salvaged, "首次部分失败必须把同一条 salvage 路径带入重试生命周期")
+            expect(retainedSalvages == [salvaged], "首次部分失败必须把同一条 salvage 路径带入重试生命周期")
             let message = window.factoryRestoreActionError?.message ?? ""
             expect(
                 message.contains(salvaged.movedTo)
@@ -772,6 +772,12 @@ func runSoundPacksRefreshSuites() {
                 window.factoryRestoreRetryPackID == "minimal-chime",
                 "原包已从 availablePacks 消失时，窗口级失败状态必须仍保留可重试的内置包 id")
 
+            // 用户或另一个进程可能在重试前重新创建同名目录。第二次 restore 必须再次
+            // salvage 这个新目录，并把两条真实路径一起交给最终的成功告知。
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": {} }"#,
+                to: installed.appendingPathComponent("manifest.json"))
+            writeFixture("mine-again", to: installed.appendingPathComponent("second-user.wav"))
             let retried = window.retryFailedFactoryPackRestoreAfterConfirmation(
                 expectedPackID: "minimal-chime")
             guard case .success(let retryOutcome) = retried else {
@@ -780,8 +786,17 @@ func runSoundPacksRefreshSuites() {
             }
             expect(
                 retryOutcome.restoredPackID == "minimal-chime"
-                    && retryOutcome.salvaged == salvaged,
-                "重试应重新发布原内置 id，并把首次 salvage 的同一条路径带入最终结果，不能丢失或伪造第二条")
+                    && retryOutcome.salvaged == salvaged
+                    && retryOutcome.retainedSalvages.count == 2
+                    && retryOutcome.retainedSalvages.first == salvaged
+                    && retryOutcome.retainedSalvages[1] != salvaged,
+                "重试再次 salvage 时，最终结果必须按顺序保留首次和本次实际搬走的两条路径")
+            let secondSalvage = retryOutcome.retainedSalvages[1]
+            expect(
+                regularFileExists(
+                    at: URL(fileURLWithPath: secondSalvage.movedTo)
+                        .appendingPathComponent("second-user.wav")),
+                "最终告知中的第二条路径必须真的保存重试前重新出现的用户文件")
             expect(
                 window.packCards.contains(where: { $0.id == "minimal-chime" }),
                 "重试成功后原内置包必须重新进入窗口读模型")
@@ -789,8 +804,9 @@ func runSoundPacksRefreshSuites() {
                 window.factoryRestoreActionError == nil
                     && window.factoryRestoreRetryPackID == nil
                     && window.factoryRestoreNotice == retryOutcome
-                    && factoryPackRestoreNoticeMessage(retryOutcome).contains(salvaged.movedTo),
-                "重试成功必须清掉失败/重试入口，并在最终成功告知中继续显示首次 salvage 路径")
+                    && factoryPackRestoreNoticeMessage(retryOutcome).contains(salvaged.movedTo)
+                    && factoryPackRestoreNoticeMessage(retryOutcome).contains(secondSalvage.movedTo),
+                "重试成功必须清掉失败/重试入口，并在最终成功告知中显示每次 salvage 路径")
             expect(
                 coordinator.panelReloadRevision == 2,
                 "首次部分失败与后续重试成功各发布一次真实 full reload")
@@ -803,7 +819,7 @@ func runSoundPacksRefreshSuites() {
         }
     }
 
-    suite("SoundPacksWindowModel：恢复重试再次失败仍保留首次 salvage 路径且不伪造磁盘变化") {
+    suite("SoundPacksWindowModel：恢复重试再次 salvage 后失败仍保留全部路径") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let packsDirectory = root.appendingPathComponent("packs")
@@ -840,43 +856,54 @@ func runSoundPacksRefreshSuites() {
                     .restore(
                         packID: "minimal-chime",
                         error: .publishFailed(_, let firstSalvage?),
-                        retainedSalvage: let firstRetainedSalvage?)) = first
+                        retainedSalvages: let firstRetainedSalvages)) = first
             else {
                 expect(false, "首次发布失败必须搬走旧树并返回 salvage，实得 \(first)")
                 return
             }
-            expect(firstRetainedSalvage == firstSalvage, "首次失败必须记住实际搬走的目录")
+            expect(firstRetainedSalvages == [firstSalvage], "首次失败必须记住实际搬走的目录")
             expect(coordinator.panelReloadRevision == 1, "首次部分失败确实改变活动路径，必须发布一次 full reload")
 
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": {} }"#,
+                to: installed.appendingPathComponent("manifest.json"))
+            writeFixture("mine-again", to: installed.appendingPathComponent("second-user.wav"))
             let retried = window.retryFailedFactoryPackRestoreAfterConfirmation(
                 expectedPackID: "minimal-chime")
             guard
                 case .failure(
                     .restore(
                         packID: "minimal-chime",
-                        error: .publishFailed(_, salvaged: nil),
-                        retainedSalvage: let retainedSalvage?)) = retried
+                        error: .publishFailed(_, let secondSalvage?),
+                        retainedSalvages: let retainedSalvages)) = retried
             else {
-                expect(false, "重试再次发布失败仍必须在结构化错误中保留首次 salvage，实得 \(retried)")
+                expect(false, "重试再次 salvage 后发布失败必须保留全部路径，实得 \(retried)")
                 return
             }
             expect(
-                retainedSalvage == firstSalvage
+                retainedSalvages == [firstSalvage, secondSalvage]
                     && window.factoryRestoreActionError?.message.contains(firstSalvage.movedTo)
+                        == true
+                    && window.factoryRestoreActionError?.message.contains(secondSalvage.movedTo)
                         == true,
-                "后续失败必须继续显示首次 salvage 的同一绝对路径")
+                "后续失败必须在结构化状态和错误文案中显示每一条 salvage 的绝对路径")
             expect(
                 regularFileExists(
                     at: URL(fileURLWithPath: firstSalvage.movedTo)
                         .appendingPathComponent("only-user.wav")),
                 "保留的路径必须仍指向含用户文件的首次 salvage 目录")
             expect(
+                regularFileExists(
+                    at: URL(fileURLWithPath: secondSalvage.movedTo)
+                        .appendingPathComponent("second-user.wav")),
+                "第二条保留路径必须仍指向重试前重新出现的用户文件")
+            expect(
                 window.factoryRestoreRetryPackID == "minimal-chime"
                     && window.factoryRestoreNotice == nil,
                 "再次失败后必须保留原包重试入口，且不能伪装成成功")
             expect(
-                coordinator.panelReloadRevision == 1,
-                "重试只保留旧路径但本次没有再搬目录，不得误发第二次磁盘变化刷新")
+                coordinator.panelReloadRevision == 2,
+                "重试再次搬走目录后必须发布第二次真实的磁盘变化刷新")
         }
     }
 

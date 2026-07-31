@@ -8,11 +8,22 @@ import Foundation
 /// imported audio, so moving it aside is never a silent implementation detail.
 public struct FactoryPackRestoreOutcome: Sendable, Equatable {
     public let restoredPackID: String
+    /// The entry moved by this individual restore attempt, if any.
     public let salvaged: SalvagedPack?
+    /// Every old entry moved aside during this restore lifecycle, in occurrence order.
+    ///
+    /// A publish failure may be retried after another process recreates the active directory.
+    /// The window appends that later salvage here so no user content is moved silently.
+    public let retainedSalvages: [SalvagedPack]
 
-    public init(restoredPackID: String, salvaged: SalvagedPack?) {
+    public init(
+        restoredPackID: String,
+        salvaged: SalvagedPack?,
+        retainedSalvages: [SalvagedPack]? = nil
+    ) {
         self.restoredPackID = restoredPackID
         self.salvaged = salvaged
+        self.retainedSalvages = retainedSalvages ?? salvaged.map { [$0] } ?? []
     }
 }
 
