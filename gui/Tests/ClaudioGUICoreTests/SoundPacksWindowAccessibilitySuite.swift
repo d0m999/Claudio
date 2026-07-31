@@ -1,3 +1,4 @@
+import ClaudioCore
 import ClaudioGUICore
 import Foundation
 
@@ -71,6 +72,55 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(coordinator.requestRevision == 1, "第一次展示必须产生一次独立焦点请求")
         coordinator.requestInitialFocus()
         expect(coordinator.requestRevision == 2, "复用同一窗口再次展示时也必须产生新请求")
+    }
+
+    suite("SoundPacksWindow a11y：T11 编辑控件按视觉序进入窗口自己的焦点序，内置包不产生活控件") {
+        let editable = SoundPacksWindowFocusScope(
+            packIDs: ["my-pack"],
+            selectedPackID: "my-pack",
+            editableEvents: [.stop, .notification],
+            orphanFileNames: ["a.mp3"],
+            canEditSelectedPack: true)
+        expect(
+            soundPacksWindowFocusOrder(editable)
+                == [
+                    .packList,
+                    .revealSelectedPack,
+                    .eventAudio(.stop),
+                    .eventAudio(.notification),
+                    .orphanAssignment(fileName: "a.mp3"),
+                    .orphanDeletion(fileName: "a.mp3"),
+                ],
+            "焦点必须按列表→详情头→事件菜单→孤儿分配/删除的视觉顺序")
+
+        let builtin = SoundPacksWindowFocusScope(
+            packIDs: ["builtin"],
+            selectedPackID: "builtin",
+            editableEvents: Event.allCases,
+            orphanFileNames: ["spare.mp3"],
+            canEditSelectedPack: false)
+        expect(
+            soundPacksWindowFocusOrder(builtin) == [.packList, .revealSelectedPack],
+            "内置包只读时不得为隐藏/禁用的编辑动作制造死焦点")
+    }
+
+    suite("SoundPacksWindow a11y：T12 恢复出厂是内置包独有的真焦点，位于 Finder 动作之后") {
+        let builtin = SoundPacksWindowFocusScope(
+            packIDs: ["minimal-chime"],
+            selectedPackID: "minimal-chime",
+            canRestoreFactoryPack: true)
+        expect(
+            soundPacksWindowFocusOrder(builtin)
+                == [.packList, .revealSelectedPack, .restoreFactoryPack],
+            "内置包焦点序必须是列表→Finder→恢复出厂，不能隐藏恢复按钮或制造死焦点")
+
+        let custom = SoundPacksWindowFocusScope(
+            packIDs: ["my-pack"],
+            selectedPackID: "my-pack",
+            canRestoreFactoryPack: false)
+        expect(
+            !soundPacksWindowFocusOrder(custom).contains(.restoreFactoryPack),
+            "个人包没有恢复出厂动作，不得出现幽灵焦点")
     }
 
     suite("SoundPacksWindow a11y：包行 Name/Value 区分当前、残缺、损坏与 license") {
@@ -165,6 +215,18 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             failure == "用这个包失败：config.json 没有写权限",
             "未来窗口写失败行必须把动作与可执行原因一起播报，实得 \(failure)")
+
+        let restoreNotice =
+            "「minimal-chime」已恢复为出厂版本。恢复前的内容已原样搬到 "
+            + "/tmp/.minimal-chime.pre-restore-42；一个文件都没删。"
+        let success = soundPacksWindowAnnouncement(
+            .writeSucceeded(message: restoreNotice),
+            facts: SoundPacksWindowAnnouncementFacts(
+                packCount: 2,
+                selectedPackName: "极简铃音"))
+        expect(
+            success == restoreNotice,
+            "恢复成功的 VoiceOver 播报必须逐字复用可见 salvage 路径告知，不能另写一份会漂移的文案")
     }
 
     suite("SoundPacksWindow a11y：新窗口 target 不得耦合任何面板专用 a11y 类型") {
@@ -275,5 +337,11 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && bridge.contains("window.isKeyWindow")
                 && bridge.contains("NSAccessibility.post"),
             "播报必须延后一趟等窗口进入 AX 树，并在真正 post 前重新确认仍是 key window")
+        expect(
+            controller.contains("model.$factoryRestoreNotice")
+                && controller.contains("model.$factoryRestoreActionError")
+                && controller.contains("factoryPackRestoreNoticeMessage("),
+            "T12 恢复成功的 salvage 路径与失败原因都必须进入窗口唯一 VoiceOver 播报出口，"
+                + "不能只更新盲用户不会自动读到的静态行")
     }
 }

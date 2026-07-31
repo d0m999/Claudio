@@ -599,7 +599,16 @@ public struct PanelView: View {
                             // menu's 「清除绑定」item — `EventRowImportViewModel.clearBinding()`
                             // writes `manifest.json` directly, and the row needs the exact same
                             // recompute-now nudge or it keeps showing its pre-clear state.
-                            onBindingCleared: { panelModel.reload() }
+                            onBindingCleared: { panelModel.reload() },
+                            // T11: one full-reload inventory snapshot is shared by all four menus;
+                            // binding through EventRowImportViewModel then immediately recomputes
+                            // both coverage and the orphan labels.
+                            existingAudioFiles: panelModel.selectedPackAudioFiles,
+                            onExistingAudioBound: { panelModel.reload() },
+                            onPackAudioChanged: { _ in
+                                soundPacksRefreshCoordinator.completePanelPackAudioChange(.changed)
+                            },
+                            isBuiltinReadOnly: panelModel.selectedPackIsBuiltinReadOnly
                         )
                     }
                 }

@@ -1204,7 +1204,7 @@ func runManifestBindingSuites() async {
             // Exactly what `PanelView.refresh()` does on a pack switch: repoint every row's packID.
             importViewModel.packID = "pack-b"
             probe.release()
-            await drop.value
+            _ = await drop.value
 
             guard case .success = rowViewModel.bindResult else {
                 expect(
@@ -1272,7 +1272,7 @@ func runManifestBindingSuites() async {
             }
 
             probe.release()
-            await dropA.value
+            _ = await dropA.value
 
             // A's file was already copied into the pack. If A's bind decision consulted the shared
             // `state` (which B had just set to `.reject`) instead of A's own returned outcome, A

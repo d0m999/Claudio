@@ -28,6 +28,9 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private var isClosingWindow = false
     private var externalActivationCancellable: AnyCancellable?
     private var selectionAnnouncementCancellable: AnyCancellable?
+    private var audioFailureAnnouncementCancellable: AnyCancellable?
+    private var factoryRestoreNoticeAnnouncementCancellable: AnyCancellable?
+    private var factoryRestoreFailureAnnouncementCancellable: AnyCancellable?
 
     public init(
         configFile: URL,
@@ -143,6 +146,54 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                     SoundPacksWindowAccessibilityBridge.post(
                         .selectionChanged,
                         facts: self.accessibilityFacts(selectedPackID: selectedPackID),
+                        window: window)
+                }
+            }
+        audioFailureAnnouncementCancellable = model.$audioActionError
+            .dropFirst()
+            .compactMap { $0 }
+            .sink { [weak self] error in
+                MainActor.assumeIsolated {
+                    guard
+                        let self,
+                        self.window?.isKeyWindow == true
+                    else { return }
+                    SoundPacksWindowAccessibilityBridge.post(
+                        .writeFailed(action: "音频操作", reason: error.message),
+                        facts: self.accessibilityFacts(),
+                        window: window)
+                }
+            }
+        factoryRestoreNoticeAnnouncementCancellable = model.$factoryRestoreNotice
+            .dropFirst()
+            .compactMap { $0 }
+            .sink { [weak self] outcome in
+                MainActor.assumeIsolated {
+                    guard
+                        let self,
+                        self.window?.isKeyWindow == true
+                    else { return }
+                    SoundPacksWindowAccessibilityBridge.post(
+                        .writeSucceeded(
+                            message: factoryPackRestoreNoticeMessage(outcome)),
+                        facts: self.accessibilityFacts(),
+                        window: window)
+                }
+            }
+        factoryRestoreFailureAnnouncementCancellable = model.$factoryRestoreActionError
+            .dropFirst()
+            .compactMap { $0 }
+            .sink { [weak self] error in
+                MainActor.assumeIsolated {
+                    guard
+                        let self,
+                        self.window?.isKeyWindow == true
+                    else { return }
+                    SoundPacksWindowAccessibilityBridge.post(
+                        .writeFailed(
+                            action: "恢复出厂声音",
+                            reason: error.message),
+                        facts: self.accessibilityFacts(),
                         window: window)
                 }
             }

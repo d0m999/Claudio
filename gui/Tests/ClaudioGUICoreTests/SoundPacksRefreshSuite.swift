@@ -2,6 +2,11 @@ import ClaudioCore
 import ClaudioGUICore
 import Foundation
 
+private enum SoundPacksInjectedRestoreFailure: Error, Sendable {
+    case beforeSalvage
+    case beforePublish
+}
+
 private func soundPacksRepoRoot(file: StaticString = #filePath) -> URL {
     URL(fileURLWithPath: "\(file)")
         .deletingLastPathComponent().deletingLastPathComponent()
@@ -36,10 +41,14 @@ private func soundPacksFunctionBody(after marker: String, in source: String) -> 
 }
 
 @MainActor
-private func soundPacksEnvironment(_ packsDirectory: URL) -> AudioImportEnvironment {
+private func soundPacksEnvironment(
+    _ packsDirectory: URL,
+    factoryPacksDirectory: URL? = nil
+) -> AudioImportEnvironment {
     AudioImportEnvironment(
         userPacksDirectory: packsDirectory,
         bundledPacksDirectory: nil,
+        factoryPacksDirectory: factoryPacksDirectory,
         durationProbe: StubDurationProbe(fixedDuration: 1),
         packsLockFile: packsDirectory.deletingLastPathComponent()
             .appendingPathComponent("packs.lock"))
@@ -52,12 +61,14 @@ func runSoundPacksRefreshSuites() {
 
         expect(coordinator.panelReloadRevision == 0, "初始不应欠面板刷新")
         expect(coordinator.windowReloadRevision == 0, "初始不应欠窗口刷新")
+        expect(coordinator.windowContentReloadRevision == 0, "初始不应欠窗口内容刷新")
 
         let effect = coordinator.completeWindowWrite(.succeeded)
 
         expect(effect == .panelFullReload, "窗口成功写必须选择 panel full reload，得到 \(effect)")
         expect(coordinator.panelReloadRevision == 1, "窗口成功写必须发布一次面板刷新")
         expect(coordinator.windowReloadRevision == 0, "窗口自己的写不得伪装成 panel 切包")
+        expect(coordinator.windowContentReloadRevision == 0, "窗口自己的写不得反向再刷自己")
     }
 
     suite("SoundPacksRefreshCoordinator：窗口失败写不发布任何刷新") {
@@ -68,6 +79,18 @@ func runSoundPacksRefreshSuites() {
         expect(effect == .none, "失败写没有落盘事实，不得发布刷新，得到 \(effect)")
         expect(coordinator.panelReloadRevision == 0, "失败写不得让面板假装落盘成功")
         expect(coordinator.windowReloadRevision == 0, "失败写不得让窗口假装落盘成功")
+        expect(coordinator.windowContentReloadRevision == 0, "失败写不得发布窗口内容刷新")
+    }
+
+    suite("SoundPacksRefreshCoordinator：失败前已改变磁盘仍发布真实 full reload") {
+        let coordinator = SoundPacksRefreshCoordinator()
+
+        let effect = coordinator.completeWindowWrite(.changedDespiteFailure)
+
+        expect(effect == .panelFullReload, "部分失败必须让面板重读磁盘真实状态，得到 \(effect)")
+        expect(coordinator.panelReloadRevision == 1, "部分失败必须发布一次面板刷新")
+        expect(coordinator.windowReloadRevision == 0, "窗口自己的部分失败不得伪装成 panel 切包")
+        expect(coordinator.windowContentReloadRevision == 0, "窗口自己的部分失败不得反向再刷自己")
     }
 
     suite("SoundPacksRefreshCoordinator：面板切包仅成功时通知窗口") {
@@ -80,7 +103,23 @@ func runSoundPacksRefreshSuites() {
         let succeededEffect = coordinator.completePanelPackSwitch(.succeeded)
         expect(succeededEffect == .windowReload, "成功切包必须通知窗口 reload，得到 \(succeededEffect)")
         expect(coordinator.windowReloadRevision == 1, "成功切包必须推进窗口 revision")
+        expect(coordinator.windowContentReloadRevision == 0, "切包不得伪装成普通内容变化")
         expect(coordinator.panelReloadRevision == 0, "panel 自己已完成 reload，不得反向再刷一次")
+    }
+
+    suite("SoundPacksRefreshCoordinator：面板包音频真实变化只刷新窗口内容，不强迫侧栏跟随 active pack") {
+        let coordinator = SoundPacksRefreshCoordinator()
+
+        expect(
+            coordinator.completePanelPackAudioChange(.unchanged) == .none,
+            "没有磁盘变化不得发布假刷新")
+        expect(coordinator.windowContentReloadRevision == 0, "unchanged 不得推进内容 revision")
+
+        expect(
+            coordinator.completePanelPackAudioChange(.changed) == .windowReload,
+            "包音频或 manifest 真变化必须通知管理窗口重读")
+        expect(coordinator.windowContentReloadRevision == 1, "changed 必须推进内容 revision")
+        expect(coordinator.windowReloadRevision == 0, "内容变化不得复用切包 revision")
     }
 
     suite("窗口写后：configOnly 负控保持 stale，full effect 重算真实 PanelConfigController.packCards") {
@@ -213,6 +252,388 @@ func runSoundPacksRefreshSuites() {
                 window.selectedEventRows.first(where: { $0.event == .notification })?.coverage
                     == .present(fileName: "notification.mp3"),
                 "窗口主区必须跟着侧栏切到 pack-b 的真实事件映射")
+        }
+    }
+
+    suite("SoundPacksWindowModel：分配孤儿复用 T3 bind，刷新事件行/孤儿状态并通知面板") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs")
+            let pack = packsDirectory.appendingPathComponent("pack-a")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": {} }"#,
+                to: pack.appendingPathComponent("manifest.json"))
+            writeFixture("audio", to: pack.appendingPathComponent("spare.mp3"))
+
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = soundPacksEnvironment(packsDirectory)
+            let panel = PanelConfigController(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                soundPacksRefreshCoordinator: coordinator)
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: environment,
+                refreshCoordinator: coordinator)
+            expect(
+                window.selectedAudioFiles
+                    == [PackAudioFile(fileName: "spare.mp3", isOrphan: true)],
+                "前提：窗口初始应把 spare.mp3 列为孤儿")
+
+            let result = window.assignSelectedAudioFile("spare.mp3", to: .notification)
+
+            if case .failure(let error) = result {
+                expect(false, "分配孤儿应成功，实得 \(error)")
+            } else {
+                expect(true, "分配孤儿成功")
+            }
+            expect(
+                window.selectedEventRows.first(where: { $0.event == .notification })?.coverage
+                    == .present(fileName: "spare.mp3"),
+                "窗口成功写后 notification 行必须立即转 present")
+            expect(
+                window.selectedAudioFiles
+                    == [PackAudioFile(fileName: "spare.mp3", isOrphan: false)],
+                "同一次 reload 必须让 spare.mp3 从孤儿转为已引用")
+            expect(
+                panel.selectedPackAudioFiles
+                    == [PackAudioFile(fileName: "spare.mp3", isOrphan: false)],
+                "窗口写发布的 panel full reload 必须同步刷新面板菜单的现有音频/孤儿标记")
+            expect(coordinator.panelReloadRevision == 1, "成功分配必须发布一次面板 full reload")
+            expect(window.audioActionError == nil, "成功分配必须清掉旧错误")
+        }
+    }
+
+    suite("T11 双向刷新：面板复用包内音频后，已打开窗口不再保留陈旧孤儿；普通内容刷新不改侧栏选择") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs")
+            let packA = packsDirectory.appendingPathComponent("pack-a")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": {} }"#,
+                to: packA.appendingPathComponent("manifest.json"))
+            writeFixture("audio", to: packA.appendingPathComponent("spare.mp3"))
+            writeFixture(
+                #"{ "id": "pack-b", "events": {} }"#,
+                to: packsDirectory.appendingPathComponent("pack-b/manifest.json"))
+
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = soundPacksEnvironment(packsDirectory)
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: environment,
+                refreshCoordinator: coordinator)
+            let row = EventRowImportViewModel(
+                event: .notification,
+                importViewModel: AudioImportViewModel(packID: "pack-a", environment: environment))
+            expect(
+                window.selectedAudioFiles
+                    == [PackAudioFile(fileName: "spare.mp3", isOrphan: true)],
+                "前提：窗口已经打开且仍把 spare.mp3 显示为孤儿")
+
+            row.bindExistingFile("spare.mp3")
+            expect(
+                window.selectedAudioFiles
+                    == [PackAudioFile(fileName: "spare.mp3", isOrphan: true)],
+                "负控：只改磁盘、不发协调事件时，保留窗口确实会 stale")
+
+            coordinator.completePanelPackAudioChange(.changed)
+            expect(
+                window.selectedAudioFiles
+                    == [PackAudioFile(fileName: "spare.mp3", isOrphan: false)],
+                "面板成功 bind 后的内容 revision 必须让窗口立即重算引用状态")
+
+            window.selectPackForInspection("pack-b")
+            coordinator.completePanelPackAudioChange(.changed)
+            expect(
+                window.selectedPackID == "pack-b",
+                "普通音频内容变化只重读当前侧栏项，不得把用户拉回 active pack-a")
+        }
+    }
+
+    suite("SoundPacksWindowModel：显式确认后的删除刷新孤儿列表；失败删除不假刷新") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs")
+            let pack = packsDirectory.appendingPathComponent("pack-a")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "used.mp3" } }"#,
+                to: pack.appendingPathComponent("manifest.json"))
+            writeFixture("used", to: pack.appendingPathComponent("used.mp3"))
+            writeFixture("orphan", to: pack.appendingPathComponent("orphan.mp3"))
+
+            let coordinator = SoundPacksRefreshCoordinator()
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: soundPacksEnvironment(packsDirectory),
+                refreshCoordinator: coordinator)
+
+            let staleConfirmation = window.deleteSelectedOrphanAudioFileAfterConfirmation(
+                "orphan.mp3", expectedPackID: "previous-pack")
+            if case .failure(.selectionChanged) = staleConfirmation {
+                expect(true, "陈旧确认被拒绝")
+            } else {
+                expect(false, "确认后若选择已换包必须拒删，实得 \(staleConfirmation)")
+            }
+            expect(
+                regularFileExists(at: pack.appendingPathComponent("orphan.mp3")),
+                "陈旧确认不得删除当前包里的同名文件")
+            expect(coordinator.panelReloadRevision == 0, "陈旧确认失败不得发布假刷新")
+
+            let refused = window.deleteSelectedOrphanAudioFileAfterConfirmation(
+                "used.mp3", expectedPackID: "pack-a")
+            if case .failure(.delete(.stillReferenced(fileName: "used.mp3"))) = refused {
+                expect(true, "引用文件拒删原因正确")
+            } else {
+                expect(false, "引用文件必须以 stillReferenced 拒删，实得 \(refused)")
+            }
+            expect(coordinator.panelReloadRevision == 0, "失败删除不得发布假刷新")
+            expect(window.audioActionError != nil, "失败删除必须留在窗口可见错误表面")
+
+            let deleted = window.deleteSelectedOrphanAudioFileAfterConfirmation(
+                "orphan.mp3", expectedPackID: "pack-a")
+            if case .failure(let error) = deleted {
+                expect(false, "显式确认后的孤儿删除应成功，实得 \(error)")
+            } else {
+                expect(true, "确认后的孤儿删除成功")
+            }
+            expect(
+                window.selectedAudioFiles
+                    == [PackAudioFile(fileName: "used.mp3", isOrphan: false)],
+                "成功删除后孤儿行必须从窗口读模型消失")
+            expect(coordinator.panelReloadRevision == 1, "成功删除必须发布一次面板 full reload")
+            expect(window.audioActionError == nil, "后一次成功必须清掉前一次失败")
+        }
+    }
+
+    suite("SoundPacksWindowModel：显式确认后的恢复会告知 salvage 路径、重回 CC0，并全量刷新面板") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            let installed = packsDirectory.appendingPathComponent("minimal-chime")
+            let factoryPack = factory.appendingPathComponent("minimal-chime")
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "name": "极简铃音", "license": "CC0-1.0", "events": { "stop": "stop.mp3" } }"#,
+                to: factoryPack.appendingPathComponent("manifest.json"))
+            writeFixture("factory", to: factoryPack.appendingPathComponent("stop.mp3"))
+            writeFixture(
+                #"{ "id": "minimal-chime", "name": "已修改", "license": "CC0-1.0", "events": { "stop": "stop.mp3" } }"#,
+                to: installed.appendingPathComponent("manifest.json"))
+            writeFixture("modified", to: installed.appendingPathComponent("stop.mp3"))
+            writeFixture("mine", to: installed.appendingPathComponent("my-extra.wav"))
+
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = soundPacksEnvironment(
+                packsDirectory,
+                factoryPacksDirectory: factory)
+            let panel = PanelConfigController(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                soundPacksRefreshCoordinator: coordinator)
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: environment,
+                refreshCoordinator: coordinator)
+            expect(
+                window.packCards.first?.factoryIntegrity == false
+                    && panel.packCards.first?.factoryIntegrity == false,
+                "前提：窗口与面板都必须先如实显示内置包已修改")
+
+            let result = window.restoreSelectedFactoryPackAfterConfirmation(
+                expectedPackID: "minimal-chime")
+
+            guard case .success(let outcome) = result, let salvaged = outcome.salvaged else {
+                expect(false, "确认后的内置包恢复应成功并产生 salvage 告知，实得 \(result)")
+                return
+            }
+            expect(
+                window.factoryRestoreNotice == outcome,
+                "成功结果必须留在窗口可见告知模型里，不能在 reload 时掉地上")
+            let notice = factoryPackRestoreNoticeMessage(outcome)
+            expect(
+                notice.contains(salvaged.movedTo)
+                    && notice.contains("一个文件都没删")
+                    && notice.contains("已恢复为出厂版本"),
+                "成功告知必须说清替换结果、绝对 salvage 路径与零删除，实得 \(notice)")
+            expect(window.factoryRestoreActionError == nil, "成功恢复必须清掉旧恢复错误")
+            expect(
+                window.packCards.first?.factoryIntegrity == true,
+                "窗口必须在写完成后立刻重算 factoryIntegrity")
+            expect(
+                panel.packCards.first?.factoryIntegrity == true,
+                "窗口成功写发布的 full reload 必须让面板也回到 CC0")
+            expect(coordinator.panelReloadRevision == 1, "成功恢复必须只发布一次面板 full reload")
+            expect(
+                (try? String(
+                    contentsOf: URL(fileURLWithPath: salvaged.movedTo)
+                        .appendingPathComponent("my-extra.wav"),
+                    encoding: .utf8)) == "mine",
+                "model 告知指向的路径必须真的保存用户自加文件")
+        }
+    }
+
+    suite("SoundPacksWindowModel：salvage 失败保持原包、显示原包身份且不发布假刷新") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            let installed = packsDirectory.appendingPathComponent("minimal-chime")
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": {} }"#,
+                to: factory.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": {} }"#,
+                to: installed.appendingPathComponent("manifest.json"))
+            writeFixture("mine", to: installed.appendingPathComponent("only-user.wav"))
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: packsDirectory,
+                factoryPacksDirectory: factory,
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                packsLockFile: injectedPacksLock(besideUserPacks: packsDirectory),
+                beforeFactoryPackRestoreSalvage: {
+                    throw SoundPacksInjectedRestoreFailure.beforeSalvage
+                })
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: environment,
+                refreshCoordinator: coordinator)
+
+            let failed = window.restoreSelectedFactoryPackAfterConfirmation(
+                expectedPackID: "minimal-chime")
+
+            guard
+                case .failure(
+                    .restore(
+                        packID: "minimal-chime",
+                        error: .salvageFailed)) = failed
+            else {
+                expect(false, "注入的 salvage 失败必须保持结构化错误，实得 \(failed)")
+                return
+            }
+            expect(
+                window.factoryRestoreActionError?.message.contains(
+                    "声音包「minimal-chime」") == true
+                    && window.factoryRestoreActionError?.message.contains(
+                        "没有替换任何东西") == true,
+                "salvage 失败必须明确归属原包，并说明没有替换")
+            expect(
+                window.packCards.contains(where: { $0.id == "minimal-chime" })
+                    && regularFileExists(
+                        at: installed.appendingPathComponent("only-user.wav")),
+                "salvage 失败时窗口和磁盘都必须继续保留原包")
+            expect(
+                window.factoryRestoreNotice == nil
+                    && coordinator.panelReloadRevision == 0,
+                "salvage 前失败不能伪造成功告知或发布磁盘已变化的假刷新")
+        }
+    }
+
+    suite("SoundPacksWindowModel：陈旧确认拒绝恢复；publish 失败显示 salvage 路径并刷新磁盘真相") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs")
+            let factory = root.appendingPathComponent("factory")
+            let installed = packsDirectory.appendingPathComponent("minimal-chime")
+            let factoryPack = factory.appendingPathComponent("minimal-chime")
+            let fallbackPack = packsDirectory.appendingPathComponent("other-pack")
+            let thirdPack = packsDirectory.appendingPathComponent("third-pack")
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": {} }"#,
+                to: factoryPack.appendingPathComponent("manifest.json"))
+            writeFixture(
+                #"{ "id": "minimal-chime", "name": "changed", "events": {} }"#,
+                to: installed.appendingPathComponent("manifest.json"))
+            writeFixture("mine", to: installed.appendingPathComponent("my-extra.wav"))
+            writeFixture(
+                #"{ "id": "other-pack", "name": "另一个包", "events": {} }"#,
+                to: fallbackPack.appendingPathComponent("manifest.json"))
+            writeFixture(
+                #"{ "id": "third-pack", "name": "第三个包", "events": {} }"#,
+                to: thirdPack.appendingPathComponent("manifest.json"))
+
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: packsDirectory,
+                factoryPacksDirectory: factory,
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                packsLockFile: injectedPacksLock(besideUserPacks: packsDirectory),
+                beforeFactoryPackRestorePublish: {
+                    throw SoundPacksInjectedRestoreFailure.beforePublish
+                })
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                environment: environment,
+                refreshCoordinator: coordinator)
+
+            let stale = window.restoreSelectedFactoryPackAfterConfirmation(
+                expectedPackID: "previous-pack")
+            if case .failure(.selectionChanged) = stale {
+                expect(true, "陈旧恢复确认被拒绝")
+            } else {
+                expect(false, "确认期间选择变化必须拒绝恢复，实得 \(stale)")
+            }
+            expect(
+                regularFileExists(at: installed.appendingPathComponent("my-extra.wav")),
+                "陈旧确认不得搬走当前包")
+            expect(coordinator.panelReloadRevision == 0, "陈旧确认失败不得发布刷新")
+
+            let failed = window.restoreSelectedFactoryPackAfterConfirmation(
+                expectedPackID: "minimal-chime")
+            guard
+                case .failure(
+                    .restore(
+                        packID: "minimal-chime",
+                        error: .publishFailed(_, let salvaged?))) = failed
+            else {
+                expect(false, "注入的发布失败必须保持结构化 salvage 结果，实得 \(failed)")
+                return
+            }
+            let message = window.factoryRestoreActionError?.message ?? ""
+            expect(
+                message.contains(salvaged.movedTo)
+                    && message.contains("一个文件都没删")
+                    && message.contains("出厂副本未能发布")
+                    && message.contains("声音包「minimal-chime」"),
+                "失败行必须说清原恢复包、失败、salvage 绝对路径与零删除，不能把提示归到 fallback 包，"
+                    + "实得 \(message)")
+            expect(window.factoryRestoreNotice == nil, "失败不能同时伪装成成功告知")
+            expect(
+                !window.packCards.contains(where: { $0.id == "minimal-chime" }),
+                "旧树已经搬到 salvage 后，窗口必须重读并停止展示不存在的 active 路径")
+            expect(
+                window.selectedPackID == "other-pack",
+                "原包活动路径缺失后，窗口应如实落到仍存在的 fallback 包；恢复失败提示必须另带原包身份")
+            expect(
+                coordinator.panelReloadRevision == 1,
+                "旧树已经搬到 salvage 后，面板必须收到一次 full reload 以显示磁盘真相")
+
+            window.selectPackForInspection("third-pack")
+            expect(
+                window.selectedPackID == "third-pack"
+                    && window.factoryRestoreActionError == nil,
+                "自动 fallback 必须保留并归属原包的失败；用户随后主动切到另一个包时才清掉旧恢复提示")
         }
     }
 

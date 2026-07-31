@@ -152,6 +152,16 @@ public struct AudioImportEnvironment: Sendable {
     /// 覆盖该项。回调是同步的，且必须自行满足 `Sendable`。
     public var beforeExclusivePublish: (@Sendable (URL) -> Void)?
 
+    /// T12 `restoreFactoryPack` 的目录发布失败注入点。它在旧目录已经完整 salvage、出厂副本仍只
+    /// 存在于点前缀 staging 时同步调用；生产构造恒为 `nil`。测试用它证明这一精确中断点不会暴露
+    /// 半份包，并且失败结果仍携带用户旧目录的可告知路径。
+    public var beforeFactoryPackRestorePublish: (@Sendable () throws -> Void)?
+
+    /// T12 `restoreFactoryPack` 的 salvage 失败注入点。它在完整 factory staging 已准备好、旧
+    /// 安装仍在原位时同步调用；生产构造恒为 `nil`。测试用它证明搬移失败会清理 staging、保留
+    /// 用户原目录，并且不会发布一次假刷新。
+    public var beforeFactoryPackRestoreSalvage: (@Sendable () throws -> Void)?
+
     public init(
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         bundledPacksDirectory: URL? = nil,
@@ -159,7 +169,9 @@ public struct AudioImportEnvironment: Sendable {
         durationProbe: any AudioDurationProbing,
         limits: AudioImportLimits = AudioImportLimits(),
         packsLockFile: URL,
-        beforeExclusivePublish: (@Sendable (URL) -> Void)? = nil
+        beforeExclusivePublish: (@Sendable (URL) -> Void)? = nil,
+        beforeFactoryPackRestorePublish: (@Sendable () throws -> Void)? = nil,
+        beforeFactoryPackRestoreSalvage: (@Sendable () throws -> Void)? = nil
     ) {
         self.userPacksDirectory = userPacksDirectory
         self.bundledPacksDirectory = bundledPacksDirectory
@@ -168,5 +180,7 @@ public struct AudioImportEnvironment: Sendable {
         self.limits = limits
         self.packsLockFile = packsLockFile
         self.beforeExclusivePublish = beforeExclusivePublish
+        self.beforeFactoryPackRestorePublish = beforeFactoryPackRestorePublish
+        self.beforeFactoryPackRestoreSalvage = beforeFactoryPackRestoreSalvage
     }
 }

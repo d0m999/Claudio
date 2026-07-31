@@ -3,10 +3,24 @@ import ClaudioCore
 import ClaudioGUICore
 import SwiftUI
 
+private struct PermanentAudioDeletionRequest: Identifiable {
+    let packID: String
+    let file: PackAudioFile
+
+    var id: String { "\(packID)/\(file.fileName)" }
+}
+
+private struct FactoryPackRestoreRequest: Identifiable {
+    let packID: String
+    let displayName: String
+
+    var id: String { packID }
+}
+
 /// Standard-window surface: full pack sidebar plus the selected pack's four mappings.
 ///
-/// T9 adds a window-owned focus/VoiceOver/Dynamic Type layer. T11/T12/T17 orphan-file actions,
-/// restore action, and star controls remain deliberately out of scope.
+/// T9 adds a window-owned focus/VoiceOver/Dynamic Type layer. T11 adds selected-pack audio
+/// inventory, existing-audio assignment, and explicit confirmed orphan deletion.
 @MainActor
 struct SoundPacksWindowView: View {
     @ObservedObject var model: SoundPacksWindowModel
@@ -16,6 +30,8 @@ struct SoundPacksWindowView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @FocusState private var focusedTarget: SoundPacksWindowFocusTarget?
     @State private var handledFocusRequestRevision = 0
+    @State private var pendingPermanentDeletion: PermanentAudioDeletionRequest?
+    @State private var pendingFactoryPackRestore: FactoryPackRestoreRequest?
 
     var body: some View {
         Group {
@@ -59,6 +75,29 @@ struct SoundPacksWindowView: View {
         .onChange(of: model.selectedPackID) { _ in
             reconcileFocusWithVisibleControls()
         }
+        .onChange(of: model.selectedAudioFiles) { _ in
+            reconcileFocusWithVisibleControls()
+        }
+        .confirmationDialog(
+            pendingPermanentDeletion.map { "永久删除「\($0.file.fileName)」？" } ?? "永久删除音频？",
+            isPresented: Binding(
+                get: { pendingPermanentDeletion != nil },
+                set: { if !$0 { pendingPermanentDeletion = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingPermanentDeletion
+        ) { request in
+            Button("永久删除", role: .destructive) {
+                model.deleteSelectedOrphanAudioFileAfterConfirmation(
+                    request.file.fileName,
+                    expectedPackID: request.packID)
+                pendingPermanentDeletion = nil
+            }
+            Button("取消", role: .cancel) {
+                pendingPermanentDeletion = nil
+            }
+        } message: { request in
+            Text("「\(request.file.fileName)」会从这个声音包永久移除。此操作无法撤销。")
+        }
     }
 
     private var sidebar: some View {
@@ -99,36 +138,67 @@ struct SoundPacksWindowView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let card = selectedCard {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    detailHeader(card)
+        VStack(spacing: 0) {
+            // Factory restore is a window-level operation status, not metadata for whichever card
+            // happens to be selected after the disk reload. In particular, a publish failure after
+            // salvage removes the attempted pack's active path; keeping this row inside the
+            // selected-card branch would either hide it entirely or misattribute it to a fallback.
+            if let outcome = model.factoryRestoreNotice {
+                windowFactoryRestoreNoticeRow(
+                    factoryPackRestoreNoticeMessage(outcome))
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+            }
+            if let error = model.factoryRestoreActionError {
+                windowFailureRow(action: "恢复出厂声音", reason: error.message)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+            }
 
-                    Divider()
+            if let card = selectedCard {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        detailHeader(card)
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        ForEach(model.selectedEventRows, id: \.event) { row in
-                            eventMappingRow(row)
+                        Divider()
+
+                        VStack(alignment: .leading, spacing: 10) {
+                            ForEach(model.selectedEventRows, id: \.event) { row in
+                                eventMappingRow(row)
+                            }
                         }
+
+                        if let error = model.audioInventoryError {
+                            windowFailureRow(
+                                action: "读取包内音频",
+                                reason: inventoryErrorMessage(error))
+                        }
+
+                        if let error = model.audioActionError {
+                            windowFailureRow(action: "音频操作", reason: error.message)
+                        }
+
+                        orphanAudioSection
                     }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(20)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                VStack(spacing: 8) {
+                    Text("没有可管理的声音包")
+                        .font(.headline)
+                        .accessibilityAddTraits(.isHeader)
+                    Text("声音包出现后会列在左侧。")
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding(20)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("没有可管理的声音包。声音包出现后会列在左侧。")
             }
-        } else {
-            VStack(spacing: 8) {
-                Text("没有可管理的声音包")
-                    .font(.headline)
-                    .accessibilityAddTraits(.isHeader)
-                Text("声音包出现后会列在左侧。")
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .padding(20)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("没有可管理的声音包。声音包出现后会列在左侧。")
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     @ViewBuilder
@@ -137,12 +207,18 @@ struct SoundPacksWindowView: View {
             VStack(alignment: .leading, spacing: 10) {
                 detailIdentity(card)
                 revealButton(card)
+                if model.selectedPackIsBuiltinReadOnly {
+                    factoryRestoreButton(card)
+                }
             }
         } else {
             HStack {
                 detailIdentity(card)
                 Spacer(minLength: 12)
                 revealButton(card)
+                if model.selectedPackIsBuiltinReadOnly {
+                    factoryRestoreButton(card)
+                }
             }
         }
     }
@@ -178,25 +254,64 @@ struct SoundPacksWindowView: View {
         .accessibilityHint("打开这个声音包所在的文件夹")
     }
 
+    private func factoryRestoreButton(_ card: PackCard) -> some View {
+        let displayName = SelectedPackMetadata(id: card.id, name: card.name).displayName
+        return Button("恢复出厂声音…") {
+            pendingFactoryPackRestore = FactoryPackRestoreRequest(
+                packID: card.id,
+                displayName: displayName)
+        }
+        .frame(minHeight: 44)
+        .focused($focusedTarget, equals: .restoreFactoryPack)
+        .accessibilityLabel("恢复「\(displayName)」的出厂声音")
+        .accessibilityHint("会先确认替换，并说明恢复前内容的保存方式")
+        .confirmationDialog(
+            pendingFactoryPackRestore.map {
+                "用出厂版本替换「\($0.displayName)」？"
+            } ?? "恢复出厂声音？",
+            isPresented: Binding(
+                get: { pendingFactoryPackRestore != nil },
+                set: { if !$0 { pendingFactoryPackRestore = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingFactoryPackRestore
+        ) { request in
+            Button("替换并恢复出厂声音", role: .destructive) {
+                model.restoreSelectedFactoryPackAfterConfirmation(
+                    expectedPackID: request.packID)
+                pendingFactoryPackRestore = nil
+            }
+            Button("取消", role: .cancel) {
+                pendingFactoryPackRestore = nil
+            }
+        } message: { _ in
+            Text(
+                "当前内容会被出厂版本替换。恢复前的整个目录会原样搬到同级隐藏位置，"
+                    + "一个文件都不会删除；完成后会显示实际路径。")
+        }
+    }
+
     @ViewBuilder
     private func eventMappingRow(_ row: EventRow) -> some View {
         Group {
             if layoutAdaptation.stacksEventRows {
                 VStack(alignment: .leading, spacing: 4) {
                     eventIdentity(row)
-                    mappingValue(row.coverage)
+                    eventAudioControl(row)
                 }
             } else {
                 HStack(alignment: .firstTextBaseline) {
                     eventIdentity(row)
                     Spacer(minLength: 12)
-                    mappingValue(row.coverage)
-                        .multilineTextAlignment(.trailing)
+                    eventAudioControl(row)
                 }
             }
         }
         .padding(.vertical, 4)
-        .accessibilityElement(children: .ignore)
+        // T9's read-only row could collapse all children into one status sentence. T11 adds a
+        // real Menu to editable rows, so those children must remain in the VoiceOver tree or the
+        // existing-audio action becomes keyboard-only. Built-in rows stay read-only and keep the
+        // original single-element status treatment.
+        .accessibilityElement(children: canEditSelectedPack ? .contain : .ignore)
         .accessibilityLabel(
             soundPacksWindowEventAccessibilityLabel(
                 eventName: row.event.manifestKey,
@@ -222,6 +337,138 @@ struct SoundPacksWindowView: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    @ViewBuilder
+    private func eventAudioControl(_ row: EventRow) -> some View {
+        if canEditSelectedPack {
+            Menu {
+                ForEach(model.selectedAudioFiles) { file in
+                    Button(file.isOrphan ? "\(file.fileName) · 未被使用" : file.fileName) {
+                        model.assignSelectedAudioFile(file.fileName, to: row.event)
+                    }
+                }
+            } label: {
+                HStack(spacing: 4) {
+                    Text(mappingText(row.coverage))
+                    Image(systemName: "chevron.down")
+                        .accessibilityHidden(true)
+                }
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .disabled(model.selectedAudioFiles.isEmpty)
+            .focused($focusedTarget, equals: .eventAudio(row.event))
+            .accessibilityLabel("\(row.event.manifestKey) 的声音文件")
+            .accessibilityValue(mappingText(row.coverage))
+            .accessibilityHint(
+                model.selectedAudioFiles.isEmpty
+                    ? "这个包里没有可复用的音频"
+                    : "选择这个包里已有的音频")
+        } else {
+            mappingValue(row.coverage)
+        }
+    }
+
+    @ViewBuilder
+    private var orphanAudioSection: some View {
+        let orphanFiles = model.selectedAudioFiles.filter(\.isOrphan)
+        if !orphanFiles.isEmpty {
+            Divider()
+            VStack(alignment: .leading, spacing: 10) {
+                Text("未被使用的音频")
+                    .font(.headline)
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(orphanFiles) { file in
+                    orphanAudioRow(file)
+                }
+                if !canEditSelectedPack {
+                    Text("内置声音包是只读的；请先复制为我的包，再分配或删除这些音频。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func orphanAudioRow(_ file: PackAudioFile) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text("\(file.fileName) · 未被使用")
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if canEditSelectedPack {
+                Menu("分配…") {
+                    ForEach(Event.allCases, id: \.self) { event in
+                        Button(event.manifestKey) {
+                            model.assignSelectedAudioFile(file.fileName, to: event)
+                        }
+                    }
+                }
+                .frame(minHeight: 44)
+                .focused(
+                    $focusedTarget,
+                    equals: .orphanAssignment(fileName: file.fileName))
+                .accessibilityLabel("分配 \(file.fileName)")
+                .accessibilityHint("选择要使用这个音频的事件")
+
+                Button("删除") {
+                    if let selectedPackID = model.selectedPackID {
+                        pendingPermanentDeletion = PermanentAudioDeletionRequest(
+                            packID: selectedPackID,
+                            file: file)
+                    }
+                }
+                .frame(minHeight: 44)
+                .focused(
+                    $focusedTarget,
+                    equals: .orphanDeletion(fileName: file.fileName))
+                .accessibilityLabel("永久删除 \(file.fileName)")
+                .accessibilityHint("会先显示不可撤销的确认")
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func windowFailureRow(action: String, reason: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "xmark.circle.fill")
+                .foregroundStyle(.red)
+                .accessibilityHidden(true)
+            Text(reason)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            soundPacksWindowFailureAccessibilityLabel(action: action, reason: reason))
+    }
+
+    private func windowFactoryRestoreNoticeRow(_ message: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text(message)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(message)
+    }
+
+    private func inventoryErrorMessage(_ error: PackAudioInventoryError) -> String {
+        switch error {
+        case .packNotFound(let packID):
+            return "声音包「\(packID)」已找不到。"
+        case .manifestUnreadable(let reason):
+            return "manifest.json 无法安全读取：\(reason)"
+        case .directoryUnreadable(let reason):
+            return "声音包目录无法读取：\(reason)"
+        }
+    }
+
     private var selection: Binding<String?> {
         Binding(
             get: { model.selectedPackID },
@@ -240,7 +487,13 @@ struct SoundPacksWindowView: View {
     private var focusScope: SoundPacksWindowFocusScope {
         SoundPacksWindowFocusScope(
             packIDs: model.packCards.map(\.id),
-            selectedPackID: model.selectedPackID)
+            selectedPackID: model.selectedPackID,
+            editableEvents: canEditSelectedPack && !model.selectedAudioFiles.isEmpty
+                ? model.selectedEventRows.map(\.event) : [],
+            orphanFileNames: canEditSelectedPack
+                ? model.selectedAudioFiles.filter(\.isOrphan).map(\.fileName) : [],
+            canEditSelectedPack: canEditSelectedPack,
+            canRestoreFactoryPack: model.selectedPackIsBuiltinReadOnly)
     }
 
     private func applyInitialFocus() {
@@ -276,6 +529,10 @@ struct SoundPacksWindowView: View {
         }
         return packRowMetaSlots(
             isCC0: card.isCC0, state: card.state, factoryIntegrity: card.factoryIntegrity)
+    }
+
+    private var canEditSelectedPack: Bool {
+        selectedCard != nil && !model.selectedPackIsBuiltinReadOnly
     }
 
     private func licenseBadgeLabel(_ badge: PackRowLicenseBadge) -> String? {

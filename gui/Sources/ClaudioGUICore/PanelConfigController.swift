@@ -42,6 +42,11 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var config: ClaudioConfig
     @Published public private(set) var eventRows: [EventRow]
     @Published public private(set) var packCards: [PackCard]
+    /// Existing audio for the active pack, computed once per full reload and shared by all four
+    /// event-row menus. This avoids four synchronous `readdir` calls during one SwiftUI body pass.
+    /// An unreadable manifest yields an empty, fail-closed menu rather than invented orphan facts.
+    @Published public private(set) var selectedPackAudioFiles: [PackAudioFile]
+    @Published public private(set) var selectedPackIsBuiltinReadOnly: Bool
     /// The current pack's title/header metadata, loaded from that pack itself — never inferred
     /// from ``packCards``. The display set may legally omit the selected pack once starred-only
     /// filtering is active, while the event-section title remains its only guaranteed visible name.
@@ -74,6 +79,7 @@ public final class PanelConfigController: ObservableObject {
     private let configFile: URL
     private let lockFile: URL
     private let environment: AudioImportEnvironment
+    private let builtinPackIDs: Set<String>
     /// 这个 controller **独占**它 —— 不注入（见 ``muteError`` 的文档：注入会开「幽灵实例」的口）。
     /// 拿 `lockFile`（= `config.lock`）构造，与切包写路径守同一把锁（锁分离 D9）。
     private let muteController: EventMuteController
@@ -96,6 +102,7 @@ public final class PanelConfigController: ObservableObject {
         self.configFile = configFile
         self.lockFile = lockFile
         self.environment = environment
+        self.builtinPackIDs = environment.builtinPackIDs
         // 独占构造，不注入 —— 结构性堵死「面板读一个实例、controller 写另一个」的幽灵分叉（见 muteError 文档）。
         self.muteController = EventMuteController(configFile: configFile, lockFile: lockFile)
         self.masterVolumeController = MasterVolumeController(configFile: configFile, lockFile: lockFile)
@@ -108,6 +115,9 @@ public final class PanelConfigController: ObservableObject {
         self.eventRows = packCoverage(
             packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
         self.packCards = availablePacks(config: loadedConfig, environment: environment)
+        self.selectedPackAudioFiles = Self.loadSelectedPackAudioFiles(
+            packID: loadedConfig.selectedPack, environment: environment)
+        self.selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(loadedConfig.selectedPack)
         self.selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
             packID: loadedConfig.selectedPack, environment: environment)
         self.packSwitchError = nil
@@ -274,7 +284,22 @@ public final class PanelConfigController: ObservableObject {
         eventRows = packCoverage(
             packID: config.selectedPack, config: config, environment: environment)
         packCards = availablePacks(config: config, environment: environment)
+        selectedPackAudioFiles = Self.loadSelectedPackAudioFiles(
+            packID: config.selectedPack, environment: environment)
+        selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
         selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
             packID: config.selectedPack, environment: environment)
+    }
+
+    private static func loadSelectedPackAudioFiles(
+        packID: String,
+        environment: AudioImportEnvironment
+    ) -> [PackAudioFile] {
+        guard case .success(let files) = packAudioFiles(
+            packID: packID, environment: environment)
+        else {
+            return []
+        }
+        return files
     }
 }

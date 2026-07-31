@@ -2481,6 +2481,70 @@ func runViewWiringSuites() {
                 + " 之后才会显示新状态")
     }
 
+    suite("T11：面板事件行菜单列出包内音频（孤儿带标记），并经 EventRowImportViewModel.bindExistingFile 绑定") {
+        guard
+            let row = codeOnly("gui/Sources/ClaudioGUI/EventRowView.swift"),
+            let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift")
+        else {
+            expect(false, "读不到 EventRowView.swift 或 PanelView.swift")
+            return
+        }
+        let flatRow = collapsingWhitespace(row)
+        let flatPanel = collapsingWhitespace(panel)
+        expect(
+            flatRow.contains("ForEach(existingAudioFiles)")
+                && flatRow.contains(#""\(file.fileName) · 未被使用""#),
+            "文件名 Menu 必须消费共享 inventory，且孤儿逐字显示「· 未被使用」")
+        guard let bindBody = closureBody(
+            after: "private func bindExistingFile(_ fileName: String)", in: flatRow)
+        else {
+            expect(false, "切不出 EventRowView.bindExistingFile")
+            return
+        }
+        expect(
+            bindBody.contains("importViewModel.bindExistingFile(fileName)")
+                && bindBody.contains("guard case .success? = importViewModel.bindResult")
+                && bindBody.contains("onExistingAudioBound()")
+                && bindBody.contains("onPackAudioChanged(changedPackID)"),
+            "复用必须走 EventRowImportViewModel 的 T3 bind 包装；只有真成功才刷新两侧，实得 \(bindBody)")
+        expect(
+            flatPanel.contains("existingAudioFiles: panelModel.selectedPackAudioFiles")
+                && flatPanel.contains("onExistingAudioBound: { panelModel.reload() }")
+                && flatPanel.contains(
+                    "soundPacksRefreshCoordinator.completePanelPackAudioChange(.changed)"),
+            "PanelView 必须把共享 inventory 传给四行，并把真实包音频变化同时通知保留窗口")
+    }
+
+    suite("T11：管理窗口孤儿行的删除是显式永久确认，分配与删除都接到窗口 model") {
+        guard let view = codeOnly(
+            "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
+        else {
+            expect(false, "读不到 SoundPacksWindowView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(view)
+        expect(
+            flat.contains("model.selectedAudioFiles.filter(\\.isOrphan)")
+                && flat.contains(#"Text("\(file.fileName) · 未被使用")"#),
+            "窗口必须只把未引用项列进孤儿区，并逐字点名文件")
+        expect(
+            flat.contains("model.assignSelectedAudioFile(file.fileName, to: event)"),
+            "孤儿分配菜单必须接到窗口 model 的 T3 bind 路由")
+        expect(
+            flat.contains(
+                ".accessibilityElement(children: canEditSelectedPack ? .contain : .ignore)"),
+            "可编辑事件行必须保留 Menu 的 VoiceOver 子节点；只有内置只读行可继续折叠为静态状态")
+        expect(
+            flat.contains(".confirmationDialog(")
+                && flat.contains(#"Button("永久删除", role: .destructive)"#)
+                && flat.contains("此操作无法撤销"),
+            "删除必须是 destructive confirmation，并明确告知不可撤销")
+        expect(
+            flat.contains("deleteSelectedOrphanAudioFileAfterConfirmation(")
+                && flat.contains("expectedPackID: request.packID"),
+            "只有确认对话框的 destructive action 才能触发永久删除")
+    }
+
     suite("T10：CoverageTrack 的 present 接事件色、missing 接 text-2，且真实行底仍是 surface-2") {
         // ContrastSuite 的四对数学断言只能证明「这些 hex 配在一起能过 ≥3:1」，看不见不可 import 的
         // ClaudioGUI 视图到底用了哪一个 token。少了这半，把 present 改成 hairline-strong，或把
@@ -2685,5 +2749,53 @@ func runViewWiringSuites() {
             "trailing 的三槽源码顺序必须是 文件名 Menu → 试听 ▶ → 静音钮（与 `panelFocusOrder` 的 "
                 + "eventSound → eventAction → eventMute 一致）—— 顺序对调，Tab 键顺序与视觉从左到右就"
                 + "对不上。实际位置：menu=\(menuAt) preview=\(previewAt) mute=\(muteAt)")
+        }
+
+    suite("T12：管理窗口恢复出厂是内置包专属的显式替换确认，成功/失败告知都在窗口内可见") {
+        guard let view = codeOnly(
+            "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
+        else {
+            expect(false, "读不到 SoundPacksWindowView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(view)
+        expect(
+            flat.contains("if model.selectedPackIsBuiltinReadOnly")
+                && flat.contains(#"Button("恢复出厂声音…")"#),
+            "恢复入口必须只在内置包详情中出现，并用带省略号的明确动作标签预告后续确认")
+        expect(
+            flat.contains(".confirmationDialog(")
+                && flat.contains(#"Button("替换并恢复出厂声音", role: .destructive)"#)
+                && flat.contains("一个文件都不会删除")
+                && flat.contains("完成后会显示实际路径"),
+            "替换必须有 destructive confirmation，并在执行前说清旧目录会搬走、零删除和路径告知")
+        expect(
+            flat.contains("restoreSelectedFactoryPackAfterConfirmation(")
+                && flat.contains("expectedPackID: request.packID"),
+            "只有确认对话框的 destructive action 才能触发 restore，且必须带确认时的包 id 防陈旧选择")
+        expect(
+            flat.contains("factoryPackRestoreNoticeMessage(")
+                && flat.contains("model.factoryRestoreActionError"),
+            "成功 salvage 路径告知与失败原因都必须在窗口内渲染，不能只留在 model")
+        guard
+            let detailBody = closureBody(
+                after: "private var detail: some View",
+                in: collapsingWhitespace(
+                    codeWithoutStrings(
+                        "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift") ?? "")),
+            let selectedCardAt = detailBody.range(of: "if let card = selectedCard")?.lowerBound,
+            let restoreErrorAt =
+                detailBody.range(of: "model.factoryRestoreActionError")?.lowerBound
+        else {
+            expect(false, "必须能切出详情体中的窗口级恢复状态与 selected-card 分支")
+            return
+        }
+        expect(
+            restoreErrorAt < selectedCardAt,
+            "恢复失败提示必须位于 selected-card 分支之外：publish 在 salvage 后失败会让原包从列表消失，"
+                + "若把失败行留在包详情里，零 fallback 时整条错误不可见，有 fallback 时又会错挂到别的包")
+        expect(
+            flat.contains(".focused($focusedTarget, equals: .restoreFactoryPack)"),
+            "恢复出厂按钮必须接进窗口专用焦点模型")
     }
 }

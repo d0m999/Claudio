@@ -2082,9 +2082,8 @@ func runSourceScannerSuites() {
     // 里的扫描器本体，不是这个文件，两个包的 `SourceScannerSuite.swift` 允许在这类内容上分叉）。
     suite(
         "绊线（T3）：gui/Sources（两个 target，递归）里**每个**经 mutateManifestJSON 的文件，其导出写"
-            + "函数不带已知并发 token（黑名单，非完备）且逐个带 @MainActor；PackRestore 未落地哨兵"
-            + "（PackFork.swift 已于 T6 落地，已被下面的内容围栏自动纳入，见 `pendingManifestWriterPaths`"
-            + " 头上那段）"
+            + "函数不带已知并发 token（黑名单，非完备）且逐个带 @MainActor；T12 PackRestore 的"
+            + "目录级发布另受同步/@MainActor/staging 守卫"
     ) {
         // 【纳入判据 —— 内容推导的围栏，不是路径白名单】
         //
@@ -2098,9 +2097,11 @@ func runSourceScannerSuites() {
         // 所以纳入判据改成**从内容推导**：`gui/Sources`（**含任意深度子目录，递归枚举**）里
         // 任何一个 `.swift` 文件，只要它的代码（已剥注释）里出现 `mutateManifestJSON` —— T3 定下的
         // **唯一** manifest 读-改-写原语，所有写者都必须经它 —— 就自动纳入这条绊线。
-        // `PackFork.swift`、`PackRestore.swift`、以及今天还没有人命名的第三个文件（哪怕它落在
+        // `PackFork.swift`、以及今天还没有人命名的第三个 JSON 读改写文件（哪怕它落在
         // `ClaudioGUICore/Feature/` 这样的子目录里 —— SwiftPM 照样编译它），落地那天自动被检查，
-        // 不需要谁记得回来改一份清单。
+        // 不需要谁记得回来改一份清单。T12 的 `PackRestore.swift` 是不同的一类：它把 factory
+        // 目录树逐字节复制到 staging，再做目录 rename；它不对 manifest 做 JSON 手术，否则恢复后
+        // 反而无法通过 `factoryIntegrity`。它的同步性与发布机械由本 suite 末尾的具名守卫钉住。
         //
         // ⚠️ 扫描根是 **`gui/Sources`（两个 target）**，不是只有 `ClaudioGUICore`。
         // 理由：`mutateManifestJSON` 是 **`public`**（`ManifestBinding.swift:99`），`ClaudioGUI`
@@ -2209,34 +2210,52 @@ func runSourceScannerSuites() {
                 + "被改名 / 剥注释吃光了代码。\n"
                 + "实际纳入：\(enrolledPaths)")
 
-        // 【哨兵组】守的是上面那条围栏**唯一**盖不住的那件事：新写者**绕开原语**。
-        //
-        // 这份名单原本是计划点名的两个未来 manifest 写者（`PLAN-SOUND-MANAGER.md:743` 的 T6
-        // `PackFork.swift` / `:596` 的 T12 `PackRestore.swift`），对尚不存在的文件正向断言「尚不
-        // 存在」。**`PackFork.swift` 已经落地（T6）**：落地当天这条哨兵按预期变红，回来确认过
-        // 「新写者确实经 `mutateManifestJSON`」——`forkPack` 的唯一一次 manifest 改写就是
-        // `mutateManifestJSON(at: staging, lockFile: environment.packsLockFile) { … }`，已被上面
-        // 的内容围栏自动纳入（并发 token + @MainActor 两条腿都在跑）——所以按 doc 里写的做法，
-        // 把它从下面的名单里删掉了。`PackRestore.swift`（T12）仍未落地，继续留着当哨兵。
-        // 哨兵不重复围栏的工作，它守的正是围栏的盲区：新写者绕开原语。
-        let pendingManifestWriterPaths = [
-            "\(coreRelativeDirectory)/PackRestore.swift",
-        ]
-        for relativePath in pendingManifestWriterPaths {
-            let fileURL = repoRoot().appendingPathComponent(relativePath)
-            expect(
-                !FileManager.default.fileExists(atPath: fileURL.path),
-                "\(relativePath) 出现了 —— 计划点名的一个 manifest 新写者落地了。回来确认一件"
-                    + "上面那条内容围栏**盖不住**的事：它是不是真的经 `mutateManifestJSON` 写 "
-                    + "manifest？\n"
-                    + "  · 是 → 它已被自动纳入（并发 token + @MainActor 两条腿都在跑），把这条路径"
-                    + "从 `pendingManifestWriterPaths` 删掉即可。\n"
-                    + "  · 否 → 它绕开了原语，围栏漏得掉它 —— 而绕开原语也就绕开了 `packs.lock`"
-                    + "（锁是在 `mutateManifestJSON(at:lockFile:_:)` 里取的，不是在文件系统那一层），"
-                    + "manifest.json 就多了一个**既不设防、也不互斥**的写者。要么让它经原语，"
-                    + "要么在这里补一条针对它的检查。\n"
-                    + "（PLAN-SOUND-MANAGER.md §2.1 / 4c「并发不变式」）")
+        // T12 的恢复函数是**目录级发布者**，不是 JSON 读改写者。factory manifest 必须与恢复后
+        // manifest 逐字节相同，`mutateManifestJSON` 反而会开出第二条 manifest 手术路径并破坏
+        // `factoryIntegrity`。所以它不进入上面的 token 纳入判据，而在这里显式接受同一组
+        // “全同步 + @MainActor”检查，并钉住 factory → staging → destination 的机械顺序。
+        let restoreRelativePath = "\(coreRelativeDirectory)/PackRestore.swift"
+        let restoreURL = repoRoot().appendingPathComponent(restoreRelativePath)
+        guard
+            let restoreSource = try? String(contentsOf: restoreURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 \(restoreRelativePath) —— T12 目录发布者的同步守卫失明")
+            return
         }
+        let restoreScanned = strippingComments(restoreSource)
+        expect(
+            restoreScanned.unmodeledConstructs.isEmpty,
+            "\(restoreRelativePath) 出现扫描器不认识的源码构造："
+                + "\(restoreScanned.unmodeledConstructs)；认不出不能静默当安全")
+        let restoreConcurrencyHits = bannedConcurrencyHits(in: restoreScanned)
+        expect(
+            restoreConcurrencyHits.isEmpty,
+            "\(restoreRelativePath) 的目录发布必须全同步，命中 token："
+                + "\(restoreConcurrencyHits.joined(separator: ", "))")
+        let restoreExported = exportedPublicFuncNames(
+            in: restoreScanned.codeWithoutStringLiterals)
+        expect(
+            restoreExported == ["restoreFactoryPack"],
+            "\(restoreRelativePath) 的公开函数集合变了（实得 \(restoreExported)）—— 新目录写者必须"
+                + "逐个进入这条 @MainActor 守卫，不能靠旧清单静默放行")
+        expect(
+            restoreExported.allSatisfy {
+                hasMainActorIsolation(
+                    funcName: $0,
+                    in: restoreScanned.codeWithoutStringLiterals)
+            },
+            "\(restoreRelativePath) 的每一个公开目录写者都必须显式 @MainActor")
+        let restoreCode = collapsingWhitespace(restoreScanned.codeWithoutStringLiterals)
+        expect(
+            restoreCode.contains("factoryPacksDirectory")
+                && restoreCode.contains("copyItem(at: source, to: staging)")
+                && restoreCode.contains("moveItem(at: staging, to: destination)"),
+            "T12 必须从 factoryPacksDirectory 复制到隐藏 staging，再以目录 rename 发布；"
+                + "不得复用 setup 的可用包 skip 策略")
+        expect(
+            !restoreCode.contains("mutateManifestJSON"),
+            "T12 恢复的是 factory 逐字节副本，不得另开 manifest JSON 手术路径；否则恢复后"
+                + " factoryIntegrity 无法通过")
 
         // ⚠️ 这里**曾经**有一圈 `for finding in audit.findings { expect(false, finding) }`。
         // 它已经下沉进 `enforceManifestConcurrencyFence`（`/codex review 36fce57` 的 P1 之三）——

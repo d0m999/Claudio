@@ -76,6 +76,20 @@ public final class EventRowImportViewModel: ObservableObject {
             event: event, packID: importViewModel.packID, environment: importViewModel.environment)
     }
 
+    /// Binds a file already present in the current pack to this event.
+    ///
+    /// T11's reuse menus call this instead of performing a second JSON surgery. The only write is
+    /// still ``bindEventToManifest(event:fileName:packID:environment:)`` (T3's bind primitive), and
+    /// the outcome is published through the same ``bindResult`` failure surface import and clear
+    /// already use.
+    public func bindExistingFile(_ fileName: String) {
+        bindResult = bindEventToManifest(
+            event: event,
+            fileName: fileName,
+            packID: importViewModel.packID,
+            environment: importViewModel.environment)
+    }
+
     /// Handles one dropped/picked file for this row: imports it via ``importViewModel``,
     /// then — only on a successful import — binds the resulting file to ``event``. `async`
     /// for the same reason ``AudioImportViewModel/handleDrop(sourceURL:suggestedFileName:)``
@@ -126,7 +140,8 @@ public final class EventRowImportViewModel: ObservableObject {
     /// write serialization (e.g. an actor, or a file lock mirroring `helper`'s `FileLock`)
     /// MUST be added at that point — this note is the tripwire for that future refactor, not
     /// a claim that the current synchronous/`@MainActor` structure needs one now.
-    public func handleDrop(sourceURL: URL, suggestedFileName: String) async {
+    @discardableResult
+    public func handleDrop(sourceURL: URL, suggestedFileName: String) async -> String? {
         // 在 await 之前捕获环境（与 packID 同理：它也是 `var`，绝不跨挂起点重读可变状态）。
         let environment = importViewModel.environment
         let result = await importViewModel.handleDrop(
@@ -134,11 +149,14 @@ public final class EventRowImportViewModel: ObservableObject {
                 AudioImportRequest(sourceURL: sourceURL, suggestedFileName: suggestedFileName)
             ])
         // 只认这一笔导入自己的返回值 —— 不读 importViewModel.state。
-        guard let file = result.accepted.first else { return }
+        guard let file = result.accepted.first else { return nil }
         // packID 用 file.packID：字节真正被复制进去的那个包，而不是此刻 importViewModel 指向的包
         // （用户可能已经切了包）。
         bindResult = bindEventToManifest(
             event: event, fileName: file.fileName, packID: file.packID,
             environment: environment)
+        // 即使 bind 失败，导入成功也已经让这个包多出一个真实孤儿。T11 的管理窗口必须重读
+        // inventory，不能只在 manifest 写成功时才刷新。
+        return file.packID
     }
 }

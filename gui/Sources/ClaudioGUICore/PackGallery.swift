@@ -400,6 +400,252 @@ public func availablePacks(
     return orderedIDs.sorted().map { buildPackCard(id: $0, config: config, environment: environment) }
 }
 
+/// One directly-contained audio file in a pack and whether any manifest event currently names it.
+///
+/// `fileName` is the real directory-entry spelling returned by `readdir`, not a lower-cased or
+/// otherwise display-normalized alias. That exact value is what a later
+/// ``bindEventToManifest(event:fileName:packID:environment:)`` call writes into the manifest.
+public struct PackAudioFile: Sendable, Equatable, Identifiable {
+    public let fileName: String
+    public let isOrphan: Bool
+
+    public var id: String { fileName }
+
+    public init(fileName: String, isOrphan: Bool) {
+        self.fileName = fileName
+        self.isOrphan = isOrphan
+    }
+}
+
+/// Why ``packAudioFiles(packID:environment:)`` could not produce a trustworthy inventory.
+public enum PackAudioInventoryError: Error, Sendable, Equatable {
+    case packNotFound(packID: String)
+    case manifestUnreadable(reason: String)
+    case directoryUnreadable(reason: String)
+}
+
+/// Why the explicit, irreversible ``deleteOrphanAudioFile`` action refused or failed.
+public enum OrphanAudioDeleteError: Error, Sendable, Equatable {
+    case builtinReadOnly(packID: String)
+    case packNotFound(packID: String)
+    case manifestUnreadable(reason: String)
+    case directoryUnreadable(reason: String)
+    case unsafeFileName
+    case fileNotFound(fileName: String)
+    case stillReferenced(fileName: String)
+    case deleteFailed(reason: String)
+    case lockBusy
+    case lockFailed(errno: Int32)
+}
+
+/// Enumerates one pack root once and marks files not named by any manifest event as orphans.
+///
+/// The inventory is intentionally shallow: pack manifests and every import writer in this app use
+/// a bare file name, while nested directories are not an editable audio-file surface. Only the
+/// four supported audio extensions are considered, case-insensitively; hidden entries, directories,
+/// symlinks, FIFOs, and unrelated metadata files are excluded. The regular-file decision uses
+/// `lstat`, so a symlink is never promoted to a deletable directory entry merely because its target
+/// is regular.
+///
+/// Referencedness is not a naïve lower-cased string comparison. Every safe, existing manifest value
+/// and enumerated file is canonicalized through the filesystem. On a case-insensitive volume,
+/// `ping.mp3` therefore resolves to the real `Ping.MP3` entry; on a case-sensitive volume they stay
+/// distinct. `./ping.mp3` is normalized in either case. This matches the path semantics
+/// ``coverageState`` and `play` actually use, without falsely folding case on a case-sensitive disk.
+///
+/// A missing or unreadable manifest fails closed: callers receive no candidate list, so neither a
+/// menu assignment nor a destructive delete can be offered from invented “orphan” facts.
+public func packAudioFiles(
+    packID: String,
+    environment: AudioImportEnvironment
+) -> Result<[PackAudioFile], PackAudioInventoryError> {
+    guard
+        let packDirectory = resolvePackDirectory(
+            id: packID,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory)
+    else {
+        return .failure(.packNotFound(packID: packID))
+    }
+    return packAudioFiles(in: packDirectory)
+}
+
+private func packAudioFiles(
+    in packDirectory: URL
+) -> Result<[PackAudioFile], PackAudioInventoryError> {
+    let manifest: PackManifest
+    switch loadPackManifest(in: packDirectory) {
+    case .success(let loadedManifest):
+        manifest = loadedManifest
+    case .failure(let error):
+        return .failure(.manifestUnreadable(reason: error.reason))
+    }
+
+    let entries: [URL]
+    do {
+        entries = try FileManager.default.contentsOfDirectory(
+            at: packDirectory,
+            includingPropertiesForKeys: nil,
+            options: [])
+    } catch {
+        return .failure(.directoryUnreadable(reason: error.localizedDescription))
+    }
+
+    let referencedPaths = Set(
+        manifest.events.values.compactMap { fileName -> String? in
+            guard
+                let referencedFile = safePackFileURL(fileName, in: packDirectory),
+                regularFileExists(at: referencedFile)
+            else {
+                return nil
+            }
+            return canonicalPackAudioPath(referencedFile)
+        })
+
+    let files = entries.compactMap { entry -> PackAudioFile? in
+        let fileName = entry.lastPathComponent
+        guard
+            !fileName.hasPrefix("."),
+            isSupportedPackAudioFileName(fileName),
+            isDirectRegularFile(entry),
+            let safeEntry = safePackFileURL(fileName, in: packDirectory)
+        else {
+            return nil
+        }
+        let canonicalPath = canonicalPackAudioPath(safeEntry)
+        return PackAudioFile(
+            fileName: fileName,
+            isOrphan: !referencedPaths.contains(canonicalPath))
+    }
+    return .success(files.sorted { $0.fileName < $1.fileName })
+}
+
+private let supportedPackAudioExtensions = Set(AudioFormat.allCases.map(\.rawValue))
+
+private func isSupportedPackAudioFileName(_ fileName: String) -> Bool {
+    return supportedPackAudioExtensions.contains(
+        URL(fileURLWithPath: fileName).pathExtension.lowercased())
+}
+
+private func canonicalPackAudioPath(_ fileURL: URL) -> String {
+    fileURL.resolvingSymlinksInPath().standardizedFileURL.path
+}
+
+/// `lstat` rather than `stat`: inventory/delete operate on one directory entry, and must not turn
+/// an attacker-controlled symlink into an ordinary deletable audio row just because its target is
+/// a regular file.
+private func isDirectRegularFile(_ fileURL: URL) -> Bool {
+    var status = stat()
+    let result = fileURL.withUnsafeFileSystemRepresentation { path in
+        guard let path else { return Int32(-1) }
+        return lstat(path, &status)
+    }
+    return result == 0 && (status.st_mode & S_IFMT) == S_IFREG
+}
+
+/// Permanently deletes one audio file only after re-reading the manifest under `packs.lock` and
+/// proving it is still an orphan.
+///
+/// This is deliberately named as an irreversible action and performs no “cleanup” as a side effect
+/// of bind/clear. UI callers must present a destructive confirmation that names the file and states
+/// that the action cannot be undone before invoking this function. The function independently
+/// revalidates the fact at invocation time so a stale window row can never delete a file newly
+/// referenced by another event.
+@MainActor
+public func deleteOrphanAudioFile(
+    fileName: String,
+    packID: String,
+    environment: AudioImportEnvironment
+) -> Result<Void, OrphanAudioDeleteError> {
+    guard !environment.builtinPackIDs.contains(packID) else {
+        return .failure(.builtinReadOnly(packID: packID))
+    }
+
+    let userPackDirectory = environment.userPacksDirectory
+        .appendingPathComponent(packID, isDirectory: true)
+        .standardizedFileURL
+    guard
+        let resolvedPackDirectory = resolvePackDirectory(
+            id: packID,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory),
+        resolvedPackDirectory.standardizedFileURL.path == userPackDirectory.path
+    else {
+        return .failure(.packNotFound(packID: packID))
+    }
+
+    let outcome = withNonBlockingLock(path: environment.packsLockFile.path) {
+        deleteOrphanAudioFileWhileLocked(
+            fileName: fileName,
+            packID: packID,
+            packDirectory: userPackDirectory)
+    }
+    switch outcome {
+    case .ran(let result):
+        return result
+    case .skipped:
+        return .failure(.lockBusy)
+    case .failed(let errno):
+        return .failure(.lockFailed(errno: errno))
+    }
+}
+
+private func deleteOrphanAudioFileWhileLocked(
+    fileName: String,
+    packID: String,
+    packDirectory: URL
+) -> Result<Void, OrphanAudioDeleteError> {
+    guard fileName == URL(fileURLWithPath: fileName).lastPathComponent,
+        !fileName.hasPrefix("."),
+        isSupportedPackAudioFileName(fileName),
+        let target = safePackFileURL(fileName, in: packDirectory)
+    else {
+        return .failure(.unsafeFileName)
+    }
+
+    let files: [PackAudioFile]
+    switch packAudioFiles(in: packDirectory) {
+    case .success(let loadedFiles):
+        files = loadedFiles
+    case .failure(.packNotFound):
+        return .failure(.packNotFound(packID: packID))
+    case .failure(.manifestUnreadable(let reason)):
+        return .failure(.manifestUnreadable(reason: reason))
+    case .failure(.directoryUnreadable(let reason)):
+        return .failure(.directoryUnreadable(reason: reason))
+    }
+
+    guard let candidate = files.first(where: { $0.fileName == fileName }) else {
+        return .failure(.fileNotFound(fileName: fileName))
+    }
+    guard candidate.isOrphan else {
+        return .failure(.stillReferenced(fileName: fileName))
+    }
+    guard isDirectRegularFile(target) else {
+        return .failure(.fileNotFound(fileName: fileName))
+    }
+
+    // `unlink(2)`, not `FileManager.removeItem`: even if a non-cooperating process swaps the
+    // checked regular file for a directory between `lstat` and this call, `unlink` refuses the
+    // directory instead of recursively deleting its contents. If it swaps in a symlink, unlink
+    // removes only that directory entry and never follows the target.
+    var unlinkErrno: Int32 = 0
+    let unlinkResult = target.withUnsafeFileSystemRepresentation { path in
+        guard let path else {
+            unlinkErrno = EINVAL
+            return Int32(-1)
+        }
+        let result = unlink(path)
+        if result != 0 { unlinkErrno = errno }
+        return result
+    }
+    guard unlinkResult == 0 else {
+        return .failure(
+            .deleteFailed(reason: "unlink errno \(unlinkErrno): \(String(cString: strerror(unlinkErrno)))"))
+    }
+    return .success(())
+}
+
 /// Lists candidate pack ids directly under `root`: real subdirectories only (a stray
 /// regular file at a pack-id-shaped path is never a pack — mirrors `ClaudioCore`'s own
 /// `directoryExists` check, module-internal there so re-implemented here against the same

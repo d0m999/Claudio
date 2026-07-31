@@ -1,3 +1,4 @@
+import ClaudioCore
 import Combine
 import Foundation
 
@@ -11,16 +12,39 @@ public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
     case packList
     /// The selected pack's 「在访达中显示」 button.
     case revealSelectedPack
+    /// A built-in pack's explicitly-confirmed 「恢复出厂声音…」 button.
+    case restoreFactoryPack
+    /// One selected-pack event mapping's existing-audio menu.
+    case eventAudio(Event)
+    /// One orphan row's 「分配…」 menu.
+    case orphanAssignment(fileName: String)
+    /// One orphan row's irreversible 「删除」 button.
+    case orphanDeletion(fileName: String)
 }
 
 /// The visible facts needed to derive the window's current keyboard order.
 public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     public let packIDs: [String]
     public let selectedPackID: String?
+    public let editableEvents: [Event]
+    public let orphanFileNames: [String]
+    public let canEditSelectedPack: Bool
+    public let canRestoreFactoryPack: Bool
 
-    public init(packIDs: [String], selectedPackID: String?) {
+    public init(
+        packIDs: [String],
+        selectedPackID: String?,
+        editableEvents: [Event] = [],
+        orphanFileNames: [String] = [],
+        canEditSelectedPack: Bool = false,
+        canRestoreFactoryPack: Bool = false
+    ) {
         self.packIDs = packIDs
         self.selectedPackID = selectedPackID
+        self.editableEvents = editableEvents
+        self.orphanFileNames = orphanFileNames
+        self.canEditSelectedPack = canEditSelectedPack
+        self.canRestoreFactoryPack = canRestoreFactoryPack
     }
 }
 
@@ -38,6 +62,16 @@ public func soundPacksWindowFocusOrder(
         scope.packIDs.contains(selectedPackID)
     {
         order.append(.revealSelectedPack)
+        if scope.canRestoreFactoryPack {
+            order.append(.restoreFactoryPack)
+        }
+        if scope.canEditSelectedPack {
+            order.append(contentsOf: scope.editableEvents.map(SoundPacksWindowFocusTarget.eventAudio))
+            for fileName in scope.orphanFileNames {
+                order.append(.orphanAssignment(fileName: fileName))
+                order.append(.orphanDeletion(fileName: fileName))
+            }
+        }
     }
     return order
 }
@@ -218,6 +252,7 @@ public func soundPacksWindowFailureAccessibilityLabel(
 public enum SoundPacksWindowAnnouncementMoment: Sendable, Equatable {
     case windowOpened
     case selectionChanged
+    case writeSucceeded(message: String)
     case writeFailed(action: String, reason: String)
 }
 
@@ -251,6 +286,8 @@ public func soundPacksWindowAnnouncement(
             return "尚未选择要检查的声音包。"
         }
         return "正在检查「\(selectedPackName)」。"
+    case .writeSucceeded(let message):
+        return message
     case .writeFailed(let action, let reason):
         return soundPacksWindowFailureAccessibilityLabel(action: action, reason: reason)
     }

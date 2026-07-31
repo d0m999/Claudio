@@ -9,10 +9,10 @@ import UniformTypeIdentifiers
 /// (`ClaudioGUICore`, computed by ``packCoverage(packID:config:environment:)``) — every
 /// state DECISION (present/unmapped/broken, ``CoverageState/previewEnabled``, muted-vs-not)
 /// already happened in `ClaudioGUICore` before this view ever renders. This view only lays
-/// pixels out and wires the file-name ``Menu`` (``fileNameMenu``, T2) — a single native
-/// control ALL THREE coverage states now share (选文件… / 清除绑定 / 在访达中显示; §2.6
-/// 排期 keeps 阶段 1's menu to those three items — the pack's existing-audio list needs
-/// T11's orphan enumeration, phase 2) — plus the always-present 试听/静音 pair. No
+/// pixels out and wires the file-name ``Menu`` (``fileNameMenu``, T2/T11) — a single native
+/// control ALL THREE coverage states now share (包内已有音频 / 选文件… / 清除绑定 /
+/// 在访达中显示, with explicit orphan labels), plus the always-present
+/// 试听/静音 pair. No
 /// hardening/validation logic lives here, all of it is in `ClaudioGUICore`'s
 /// `importAudioFile`/`bindEventToManifest`/`clearEventBinding`.
 ///
@@ -84,6 +84,21 @@ public struct EventRowView: View {
     /// "harmless on failure" reasoning: a failed clear just recomputes the unchanged state.
     public let onBindingCleared: () -> Void
 
+    /// One inventory snapshot shared by all four rows. `PanelConfigController` computes it once
+    /// per full reload, so rendering four menus never performs four synchronous directory scans.
+    public let existingAudioFiles: [PackAudioFile]
+
+    /// Invoked after an existing pack file is rebound through
+    /// ``EventRowImportViewModel/bindExistingFile(_:)`` so the panel recomputes coverage and the
+    /// orphan labels from disk immediately.
+    public let onExistingAudioBound: () -> Void
+    /// One accepted import, successful clear, or successful existing-file bind changed this pack's
+    /// audio inventory/manifest. The management window uses it to refresh without changing its
+    /// current inspection selection.
+    public let onPackAudioChanged: (String) -> Void
+    /// Cached by `PanelConfigController`; never re-enumerates the factory root during body renders.
+    public let isBuiltinReadOnly: Bool
+
     /// The Dynamic Type degradation this row currently renders under (ENGINEERING.md
     /// T15 D5「无障碍规格 · Dynamic Type + 降级规则」, ``panelLayoutAdaptation(for:)``) —
     /// defaults to ``PanelTypeSizeTier/standard`` (today's single-line layout), so every
@@ -112,7 +127,11 @@ public struct EventRowView: View {
         onPreview: @escaping () -> Void = {},
         onToggleMute: @escaping () -> Void = {},
         onImportCompleted: @escaping () -> Void = {},
-        onBindingCleared: @escaping () -> Void = {}
+        onBindingCleared: @escaping () -> Void = {},
+        existingAudioFiles: [PackAudioFile] = [],
+        onExistingAudioBound: @escaping () -> Void = {},
+        onPackAudioChanged: @escaping (String) -> Void = { _ in },
+        isBuiltinReadOnly: Bool = false
     ) {
         self.row = row
         self.importViewModel = importViewModel
@@ -125,6 +144,10 @@ public struct EventRowView: View {
         self.onToggleMute = onToggleMute
         self.onImportCompleted = onImportCompleted
         self.onBindingCleared = onBindingCleared
+        self.existingAudioFiles = existingAudioFiles
+        self.onExistingAudioBound = onExistingAudioBound
+        self.onPackAudioChanged = onPackAudioChanged
+        self.isBuiltinReadOnly = isBuiltinReadOnly
     }
 
     public var body: some View {
@@ -311,10 +334,10 @@ public struct EventRowView: View {
     /// in every state, now owns ONE control that can pick a new file, clear the binding, or
     /// (when a file really exists) reveal it in Finder.
     ///
-    /// 阶段 1 scope only (PLAN-SOUND-MANAGER.md §2.6 排期): the menu does NOT list the pack's
-    /// existing audio files ("包内已有音频，含孤儿") — that needs T11's orphan enumeration,
-    /// phase 2. Only 选文件… / 清除绑定 / 在访达中显示, and which of the latter two appear
-    /// depends on ``row``'s coverage (see the menu body below).
+    /// T11 adds the pack's existing audio files before the file-picker actions. Orphans are not
+    /// hidden: their label explicitly ends in 「· 未被使用」. Built-in packs keep this editing
+    /// section absent because their id remains read-only even though setup copied them into the
+    /// writable user root.
     ///
     /// Owns ``PanelFocusTarget/eventSound(_:)`` — a NEW, always-operable focus slot
     /// (PLAN-SOUND-MANAGER.md §2.5): picking a file is legal in every coverage state, so
@@ -330,20 +353,40 @@ public struct EventRowView: View {
     /// `unmapped`/`broken`-only import affordance offered.
     private var fileNameMenu: some View {
         Menu {
-            Button("选文件…", action: openImportPanel)
-            switch row.coverage {
-            case .present:
-                Button("清除绑定", action: clearBinding)
-                Button("在访达中显示", action: revealInFinder)
-            case .broken:
-                // 声明的文件已经不在磁盘上了 —— 没有什么可「在访达中显示」的。「清除绑定」仍然
-                // 有意义：把这一行从「打包错误」（.broken）翻回「刻意静默」（.unmapped，
-                // DESIGN.md「清除绑定」条：真打包错误不被伪装成正常静默，反向也成立）。
-                Button("清除绑定", action: clearBinding)
-            case .unmapped:
-                // 本来就没有绑定 —— 「清除绑定」在这里只会是一次幂等的空操作，「在访达中显示」没有
-                // 文件可显示。菜单只留「选文件…」，不为不做事的项目占用户的眼睛。
-                EmptyView()
+            if isBuiltinReadOnly {
+                switch row.coverage {
+                case .present:
+                    Button("在访达中显示", action: revealInFinder)
+                case .broken, .unmapped:
+                    Button("内置声音包只读") {}
+                        .disabled(true)
+                }
+            } else {
+                ForEach(existingAudioFiles) { file in
+                    Button(
+                        file.isOrphan ? "\(file.fileName) · 未被使用" : file.fileName
+                    ) {
+                        bindExistingFile(file.fileName)
+                    }
+                }
+                if !existingAudioFiles.isEmpty {
+                    Divider()
+                }
+                Button("选文件…", action: openImportPanel)
+                switch row.coverage {
+                case .present:
+                    Button("清除绑定", action: clearBinding)
+                    Button("在访达中显示", action: revealInFinder)
+                case .broken:
+                    // 声明的文件已经不在磁盘上了 —— 没有什么可「在访达中显示」的。「清除绑定」仍然
+                    // 有意义：把这一行从「打包错误」（.broken）翻回「刻意静默」（.unmapped，
+                    // DESIGN.md「清除绑定」条：真打包错误不被伪装成正常静默，反向也成立）。
+                    Button("清除绑定", action: clearBinding)
+                case .unmapped:
+                    // 本来就没有绑定 —— 「清除绑定」在这里只会是一次幂等的空操作，「在访达中显示」没有
+                    // 文件可显示。菜单只留「选文件…」，不为不做事的项目占用户的眼睛。
+                    EmptyView()
+                }
             }
         } label: {
             fileNameMenuLabel
@@ -449,8 +492,21 @@ public struct EventRowView: View {
     /// （PLAN-SOUND-MANAGER.md §2.1/T3），从不绕开那条原语自己动手改 manifest。清除是**幂等**且
     /// **绝不删文件**的（该原语自己的文档），所以这里不需要任何确认对话框。
     private func clearBinding() {
+        let changedPackID = dropState.packID
         importViewModel.clearBinding()
+        guard case .success? = importViewModel.bindResult else { return }
         onBindingCleared()
+        onPackAudioChanged(changedPackID)
+    }
+
+    /// Reuses T3's sole bind primitive through the existing row view-model. This never performs
+    /// raw manifest surgery in the SwiftUI layer.
+    private func bindExistingFile(_ fileName: String) {
+        let changedPackID = dropState.packID
+        importViewModel.bindExistingFile(fileName)
+        guard case .success? = importViewModel.bindResult else { return }
+        onExistingAudioBound()
+        onPackAudioChanged(changedPackID)
     }
 
     /// 「在访达中显示」菜单项（仅 `.present` 渲染）。解析路径与 ``PanelView/playPreview(for:)``
@@ -479,8 +535,12 @@ public struct EventRowView: View {
         guard let url = runAudioOpenPanel(allowsMultipleSelection: false).first else { return }
         let suggestedFileName = url.lastPathComponent
         Task { @MainActor in
-            await importViewModel.handleDrop(sourceURL: url, suggestedFileName: suggestedFileName)
+            let changedPackID = await importViewModel.handleDrop(
+                sourceURL: url, suggestedFileName: suggestedFileName)
             onImportCompleted()
+            if let changedPackID {
+                onPackAudioChanged(changedPackID)
+            }
         }
     }
 
@@ -517,9 +577,12 @@ public struct EventRowView: View {
         guard let provider = providers.first else { return false }
         Task { @MainActor in
             guard let request = await loadDropRequest(from: provider) else { return }
-            await importViewModel.handleDrop(
+            let changedPackID = await importViewModel.handleDrop(
                 sourceURL: request.sourceURL, suggestedFileName: request.suggestedFileName)
             onImportCompleted()
+            if let changedPackID {
+                onPackAudioChanged(changedPackID)
+            }
         }
         return true
     }
