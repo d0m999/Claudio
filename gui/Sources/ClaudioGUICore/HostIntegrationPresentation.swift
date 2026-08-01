@@ -247,20 +247,29 @@ public func eventHostCoveragePresentation(
 public func hostLatestReceiptText(
     snapshot: HostIntegrationSnapshot
 ) -> String? {
-    guard case .observed(let evidence) = snapshot.activation else { return nil }
-    let timestamp = ISO8601DateFormatter().string(from: evidence.timestamp)
+    guard let evidence = hostLatestReceiptEvidence(snapshot: snapshot) else { return nil }
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    let timestamp = formatter.string(from: evidence.timestamp)
     return "\(snapshot.host.displayName) · \(evidence.nativeEvent) → "
         + "\(evidence.event.displayName) · \(timestamp) · "
         + hostHookPlaybackResultDisplayName(evidence.playbackResult)
 }
 
-/// 与 ``hostLatestReceiptText(snapshot:)`` 同一条已校验 evidence 的结构化事件身份。
-/// retained window 用它选择共享矩阵里的真实单元格，避免从可见摘要字符串反向解析原生事件。
+/// 与 ``hostLatestReceiptText(snapshot:)`` 同一条已校验、完整的结构化 evidence。
+/// retained window 用它判断新旧回执，避免用可见摘要的秒级字符串代替事实身份。
+public func hostLatestReceiptEvidence(
+    snapshot: HostIntegrationSnapshot
+) -> HostReceiptEvidence? {
+    guard case .observed(let evidence) = snapshot.activation else { return nil }
+    return evidence
+}
+
+/// 保留事件投影 API；事件身份仍来自完整 evidence，不反向解析摘要。
 public func hostLatestReceiptEvent(
     snapshot: HostIntegrationSnapshot
 ) -> Event? {
-    guard case .observed(let evidence) = snapshot.activation else { return nil }
-    return evidence.event
+    hostLatestReceiptEvidence(snapshot: snapshot)?.event
 }
 
 /// 真实回执只暴露脱敏后的播放结果；这个 exhaustive switch 保证 Core 增加结果时

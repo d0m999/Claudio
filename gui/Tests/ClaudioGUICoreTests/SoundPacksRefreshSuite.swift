@@ -179,6 +179,45 @@ func runSoundPacksRefreshSuites() async {
         expect(coordinator.windowContentReloadRevision == 0, "窗口自己的部分失败不得反向再刷自己")
     }
 
+    suite("shared bootstrap 完成：启动前已 hydration 的 PanelConfigController 必须 full reload 新磁盘真相") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDirectory = root.appendingPathComponent("packs", isDirectory: true)
+            let coordinator = SoundPacksRefreshCoordinator()
+            let panel = PanelConfigController(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: soundPacksEnvironment(packsDirectory),
+                soundPacksRefreshCoordinator: coordinator)
+
+            expect(panel.configState == .needsPack, "前提：bootstrap 前面板已读到 needsPack")
+
+            writeFixture(
+                #"{"selected_pack":"bootstrapped","events":{},"starred_packs":["bootstrapped"]}"#,
+                to: configFile)
+            writeFixture(
+                #"{"id":"bootstrapped","name":"Bootstrap 包","events":{"stop":"stop.mp3"}}"#,
+                to: packsDirectory.appendingPathComponent("bootstrapped/manifest.json"))
+            writeFixture(
+                "audio", to: packsDirectory.appendingPathComponent("bootstrapped/stop.mp3"))
+
+            let effect = coordinator.completeSharedRuntimeBootstrap()
+
+            expect(effect == .panelFullReload, "bootstrap 完成必须选择 panel full reload")
+            expect(coordinator.panelReloadRevision == 1, "bootstrap 完成必须发布一次面板刷新")
+            expect(panel.config.selectedPack == "bootstrapped", "面板必须重读 bootstrap 创建的默认选择")
+            expect(panel.configState.topContent == .events, "面板必须从 needsPack 切到 operational 事件态")
+            expect(
+                panel.packCards.first?.id == "bootstrapped"
+                    && panel.packCards.first?.presentEvents == [.stop],
+                "full reload 必须重扫 bootstrap 新增的 pack manifest，而非只重读 config")
+            expect(coordinator.windowReloadRevision == 0, "bootstrap 面板刷新不得伪装成 panel 切包")
+            expect(
+                coordinator.windowContentReloadRevision == 0,
+                "bootstrap 面板刷新不得反向制造管理窗口写入")
+        }
+    }
+
     suite("SoundPacksRefreshCoordinator：面板切包仅成功时通知窗口") {
         let coordinator = SoundPacksRefreshCoordinator()
 

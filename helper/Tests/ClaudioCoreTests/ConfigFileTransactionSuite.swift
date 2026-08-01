@@ -284,6 +284,42 @@ func runConfigFileTransactionSuites() {
         }
     }
 
+    suite("ConfigFileTransaction：staging 完成后的最终发布 CAS 仍拒绝外部新字节") {
+        withTempDirectory { directory in
+            let file = directory.appendingPathComponent("hooks.json")
+            let lock = directory.appendingPathComponent("hooks.lock")
+            let backup = directory.appendingPathComponent("hooks.json.claudio.bak")
+            let original = Data("{\"owner\":\"before\"}".utf8)
+            let external = Data("{\"owner\":\"after-staging\"}".utf8)
+            try! original.write(to: file)
+            let transaction = ConfigFileTransaction(
+                file: file, lockFile: lock, backupFile: backup)
+
+            let result = transaction.update(
+                { root in
+                    var next = root
+                    next["claudio"] = true
+                    return .replace(next)
+                },
+                betweenReadAndWrite: nil,
+                beforeFinalPublish: {
+                    // This seam runs only after the replacement staging file has been fully
+                    // written/fsynced, immediately before the publication-boundary CAS.
+                    try! external.write(to: file)
+                })
+
+            expect(
+                result == .failure(.concurrentModification(path: file.path)),
+                "最终 rename 边界必须重新执行 CAS，got \(result)")
+            expect(
+                (try? Data(contentsOf: file)) == external,
+                "staging 之后到达的外部写者必须逐字节存活")
+            expect(
+                (try? Data(contentsOf: backup)) == original,
+                "一次性备份即使已发布也只能保存事务最初读取的原字节")
+        }
+    }
+
     suite("ConfigFileTransaction：preserveTarget symlink 改指向时即使目标字节相同也必须 CAS 失败") {
         withTempDirectory { directory in
             let firstTarget = directory.appendingPathComponent("managed-a.json")
@@ -319,6 +355,70 @@ func runConfigFileTransactionSuites() {
                 link.resolvingSymlinksInPath().standardizedFileURL
                     == secondTarget.standardizedFileURL,
                 "外部写者的新 symlink 指向必须原样保留")
+        }
+    }
+
+    suite("ConfigFileTransaction：symlink NFC/NFD 目标字节变化即使解析到同一文件也必须 CAS 失败") {
+        withTempDirectory { directory in
+            let nfdName = "managed-e\u{301}.json"
+            let nfcName = "managed-\u{00E9}.json"
+            expect(nfdName == nfcName, "测试前提：Swift String == 必须视两种规范化为等价")
+            expect(
+                !nfdName.utf8.elementsEqual(nfcName.utf8),
+                "测试前提：两个 symlink 目标必须是不同 UTF-8 字节")
+
+            let nfdTargetPath = directory.path + "/" + nfdName
+            let nfcTargetPath = directory.path + "/" + nfcName
+            expect(
+                !nfdTargetPath.utf8.elementsEqual(nfcTargetPath.utf8),
+                "测试前提：不得先经过 URL.path 把目标 payload 规范化")
+            let nfdTarget = URL(fileURLWithPath: nfdTargetPath)
+            let nfcTarget = URL(fileURLWithPath: nfcTargetPath)
+            let link = directory.appendingPathComponent("hooks.json")
+            let lock = directory.appendingPathComponent("hooks.lock")
+            let identical = Data("{\"owner\":\"same-file-or-same-bytes\"}".utf8)
+            try! identical.write(to: nfdTarget)
+            if !FileManager.default.fileExists(atPath: nfcTarget.path) {
+                try! identical.write(to: nfcTarget)
+            }
+            expect(
+                Darwin.symlink(nfdTargetPath, link.path) == 0,
+                "测试前提：必须以 POSIX API 原样创建 NFD symlink payload")
+
+            let transaction = ConfigFileTransaction(
+                file: link, lockFile: lock, symlinkPolicy: .preserveTarget)
+            let result = transaction.update(
+                { root in
+                    var next = root
+                    next["claudio"] = true
+                    return .replace(next)
+                },
+                betweenReadAndWrite: {
+                    try! FileManager.default.removeItem(at: link)
+                    expect(
+                        Darwin.symlink(nfcTargetPath, link.path) == 0,
+                        "测试前提：必须以 POSIX API 原样创建 NFC symlink payload")
+                })
+
+            expect(
+                result == .failure(.concurrentModification(path: link.path)),
+                "raw symlink target 的 UTF-8 改变必须被 CAS 识别，got \(result)")
+            expect((try? Data(contentsOf: nfdTarget)) == identical, "被钉住的旧目标不得写入")
+            expect((try? Data(contentsOf: nfcTarget)) == identical, "外部改指的新目标不得写入")
+            var finalBuffer = [UInt8](repeating: 0, count: Int(PATH_MAX) + 1)
+            let finalCount = link.withUnsafeFileSystemRepresentation { path -> Int in
+                guard let path else { return -1 }
+                return finalBuffer.withUnsafeMutableBytes { bytes in
+                    Darwin.readlink(
+                        path,
+                        bytes.baseAddress!.assumingMemoryBound(to: CChar.self),
+                        bytes.count)
+                }
+            }
+            expect(
+                finalCount >= 0
+                    && Data(finalBuffer.prefix(finalCount)) == Data(nfcTargetPath.utf8),
+                "外部写者的 NFC symlink payload 必须逐字节保留")
         }
     }
     #endif

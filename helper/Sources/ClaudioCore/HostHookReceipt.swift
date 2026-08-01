@@ -321,14 +321,34 @@ public struct HostHookReceiptStore: Sendable {
 
     private static func encode(_ receipt: HostHookReceipt) throws -> Data {
         let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
+        // `.iso8601` drops all fractional seconds, while `ISO8601DateFormatter` with
+        // `.withFractionalSeconds` still emits only milliseconds. Different native events can
+        // legitimately land inside the same millisecond, so persist the Date's IEEE-754 epoch
+        // value directly; JSON's round-trip representation preserves every bit Date exposes.
+        encoder.dateEncodingStrategy = .custom { date, valueEncoder in
+            var container = valueEncoder.singleValueContainer()
+            try container.encode(date.timeIntervalSince1970)
+        }
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         return try encoder.encode(receipt)
     }
 
     private static func decode(_ data: Data) throws -> HostHookReceipt {
         let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
+        decoder.dateDecodingStrategy = .custom { valueDecoder in
+            let container = try valueDecoder.singleValueContainer()
+            if let seconds = try? container.decode(Double.self), seconds.isFinite {
+                return Date(timeIntervalSince1970: seconds)
+            }
+            if let value = try? container.decode(String.self),
+                let timestamp = hostHookReceiptTimestamp(from: value)
+            {
+                return timestamp
+            }
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "回执 timestamp 不是有限 epoch seconds 或受支持的 ISO-8601 时间")
+        }
         return try decoder.decode(HostHookReceipt.self, from: data)
     }
 
@@ -396,4 +416,18 @@ private func writeHostHookReceiptData(_ data: Data, to descriptor: Int32) throws
 
 private func hostHookReceiptPOSIXError(_ code: Int32) -> NSError {
     NSError(domain: NSPOSIXErrorDomain, code: Int(code))
+}
+
+/// Numeric epoch timestamps are the new lossless encoding. String decoding remains compatible
+/// with both whole-second schema-1 receipts and any fractional ISO-8601 producer.
+private func hostHookReceiptTimestamp(from value: String) -> Date? {
+    let fractionalFormatter = ISO8601DateFormatter()
+    fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    if let timestamp = fractionalFormatter.date(from: value) {
+        return timestamp
+    }
+
+    let legacyFormatter = ISO8601DateFormatter()
+    legacyFormatter.formatOptions = [.withInternetDateTime]
+    return legacyFormatter.date(from: value)
 }

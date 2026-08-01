@@ -178,6 +178,115 @@ func runHostHookReceiptSuites() {
         }
     }
 
+    suite("HostHookReceipt：同毫秒不同微秒回执无损 round-trip 后仍能选出最新 evidence") {
+        withTempDirectory { root in
+            let store = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
+            let installationID = UUID(uuidString: "45454545-4545-4545-8545-454545454545")!
+            let permissionTimestamp = Date(timeIntervalSince1970: 1_800_000_100.1234)
+            let subagentTimestamp = Date(timeIntervalSince1970: 1_800_000_100.1235)
+            guard case .success = store.activate(host: .codex, installationID: installationID)
+            else {
+                expect(false, "测试前提：必须先发布当前 Codex installation")
+                return
+            }
+
+            let permission = HostHookReceipt(
+                installationID: installationID,
+                host: .codex,
+                nativeEvent: "PermissionRequest",
+                semanticEvent: .notification,
+                timestamp: permissionTimestamp,
+                playbackResult: .played)
+            let subagent = HostHookReceipt(
+                installationID: installationID,
+                host: .codex,
+                nativeEvent: "SubagentStop",
+                semanticEvent: .subagentStop,
+                timestamp: subagentTimestamp,
+                playbackResult: .muted)
+            expect(store.store(permission) == .success(.written), "同秒第一条回执必须成功写入")
+            expect(store.store(subagent) == .success(.written), "同秒第二条回执必须成功写入")
+
+            let permissionEvidence = store.activationEvidence(
+                host: .codex,
+                nativeEvent: "PermissionRequest",
+                installationID: installationID)
+            let subagentEvidence = store.activationEvidence(
+                host: .codex,
+                nativeEvent: "SubagentStop",
+                installationID: installationID)
+            expect(
+                permissionEvidence?.timestamp == permissionTimestamp,
+                "PermissionRequest 小数秒必须逐值 round-trip")
+            expect(
+                subagentEvidence?.timestamp == subagentTimestamp,
+                "SubagentStop 小数秒必须逐值 round-trip")
+            let latest = [permissionEvidence, subagentEvidence]
+                .compactMap { $0 }
+                .max { $0.timestamp < $1.timestamp }
+            expect(
+                latest?.nativeEvent == "SubagentStop",
+                "同一秒内较晚的 SubagentStop 必须成为最新结构化 evidence")
+
+            let timestampValues = ["PermissionRequest", "SubagentStop"].compactMap {
+                event -> Double? in
+                guard let file = store.receiptFile(host: .codex, nativeEvent: event),
+                    let data = try? Data(contentsOf: file),
+                    let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+                else { return nil }
+                return (root["timestamp"] as? NSNumber)?.doubleValue
+            }
+            expect(timestampValues.count == 2, "两份回执都必须保存数值 timestamp")
+            expect(
+                timestampValues.contains(permissionTimestamp.timeIntervalSince1970)
+                    && timestampValues.contains(subagentTimestamp.timeIntervalSince1970)
+                    && timestampValues[0] != timestampValues[1],
+                "新回执必须无损保留同毫秒内不同的 epoch 小数，got \(timestampValues)")
+        }
+    }
+
+    suite("HostHookReceipt：旧版秒级 ISO-8601 回执仍可解码为 activation evidence") {
+        withTempDirectory { root in
+            let store = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
+            let installationID = UUID(uuidString: "56565656-5656-4656-8656-565656565656")!
+            guard case .success = store.activate(host: .codex, installationID: installationID),
+                let file = store.receiptFile(host: .codex, nativeEvent: "PermissionRequest")
+            else {
+                expect(false, "测试前提：必须发布 installation 并取得回执路径")
+                return
+            }
+            writeFixture(
+                """
+                {
+                  "schema": 1,
+                  "installation_id": "\(installationID.uuidString)",
+                  "host": "codex",
+                  "native_event": "PermissionRequest",
+                  "semantic_event": "notification",
+                  "timestamp": "2027-01-15T08:00:00Z",
+                  "playback_result": "played"
+                }
+                """, to: file)
+
+            expect(
+                store.activationEvidence(
+                    host: .codex,
+                    nativeEvent: "PermissionRequest",
+                    installationID: installationID)
+                    == HostReceiptEvidence(
+                        installationID: installationID,
+                        nativeEvent: "PermissionRequest",
+                        event: .notification,
+                        timestamp: Date(timeIntervalSince1970: 1_800_000_000),
+                        playbackResult: .played),
+                "升级后必须继续读取旧版无小数秒的 schema-1 回执")
+        }
+    }
+
     suite("HostHookReceiptStore：损坏、旧代次、宿主或事件错位均不是 activation evidence") {
         withTempDirectory { root in
             let store = HostHookReceiptStore(

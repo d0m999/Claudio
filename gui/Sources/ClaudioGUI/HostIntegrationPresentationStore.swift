@@ -114,7 +114,7 @@ private func integrationWindowContent(
                     host: row.host,
                     configurationSource: configurationSources[row.host] ?? "由宿主集成管理器提供",
                     latestReceiptText: snapshots[row.host].flatMap(hostLatestReceiptText),
-                    latestReceiptEvent: snapshots[row.host].flatMap(hostLatestReceiptEvent),
+                    latestReceiptEvidence: snapshots[row.host].flatMap(hostLatestReceiptEvidence),
                     actions: integrationsInspectorActions(for: row))
             )
         })

@@ -207,6 +207,96 @@ func runClaudeCodeHooksTransformSuites() {
             "正式四事件清除后应未连接；UserPromptSubmit 不计能力")
     }
 
+    suite("Claude transform：所有事件都扫描 modern callback，但非正式事件中的 legacy 仍保留") {
+        let rootPath = "/Users/test/.claudio"
+        let binary = rootPath + "/bin/claudio"
+        let currentID = UUID(uuidString: "BBBBBBBB-1111-4111-8111-111111111111")!
+        let repairID = UUID(uuidString: "BBBBBBBB-2222-4222-8222-222222222222")!
+        guard case .success(let canonical) = connectClaudeCodeHooks(
+            root: [:], claudioRoot: rootPath, claudioBinaryPath: binary,
+            installationID: currentID)
+        else {
+            expect(false, "测试前提：必须先生成完整 Claude modern 配置")
+            return
+        }
+
+        let misplacedStop = hostIntegrationHookCommand(
+            host: .claudeCode,
+            nativeEvent: "Stop",
+            installationID: currentID,
+            claudioBinaryPath: binary)!
+        let legacyPrompt = claudioHookCommand(
+            for: .notification, claudioBinaryPath: binary)
+        var mixed = canonical.root
+        var hooks = mixed["hooks"] as! [String: Any]
+        hooks["SessionStart"] = [[
+            "matcher": "session-third",
+            "hooks": [
+                ["type": "command", "command": misplacedStop],
+                ["type": "command", "command": "echo keep-session"],
+            ],
+        ]]
+        hooks["UserPromptSubmit"] = [[
+            "matcher": "prompt-third",
+            "hooks": [
+                ["type": "command", "command": legacyPrompt],
+                ["type": "command", "command": misplacedStop],
+                ["type": "command", "command": "echo keep-prompt"],
+            ],
+        ]]
+        mixed["hooks"] = hooks
+
+        guard case .success(.conflict(let reason)) = inspectClaudeCodeHooks(
+            root: mixed, claudioRoot: rootPath, claudioBinaryPath: binary)
+        else {
+            expect(false, "非正式事件中的 modern Stop 不能被完整四事件掩盖成 configured")
+            return
+        }
+        expect(reason.contains("事件位置"), "错位 modern callback 必须给出可诊断原因，got \(reason)")
+
+        guard case .success(let repaired) = connectClaudeCodeHooks(
+            root: mixed, claudioRoot: rootPath, claudioBinaryPath: binary,
+            installationID: repairID)
+        else {
+            expect(false, "显式 connect 必须能清扫非正式事件中的 modern callback")
+            return
+        }
+        expect(repaired.changed, "额外 modern callback 必须阻止幂等 no-op")
+        expect(repaired.removedCount == 6, "四条正式加两条错位 modern 必须全部清理")
+        expect(
+            inspectClaudeCodeHooks(
+                root: repaired.root, claudioRoot: rootPath, claudioBinaryPath: binary)
+                == .success(.configured(installationID: repairID)),
+            "清扫后必须形成唯一 repair installation")
+        let repairedHooks = repaired.root["hooks"] as? [String: Any]
+        let repairedSession = repairedHooks?["SessionStart"] as? [[String: Any]] ?? []
+        expect(
+            repairedSession.flatMap(claudeTransformCommands) == ["echo keep-session"],
+            "SessionStart 第三方 command 与 group 必须保留")
+        let repairedPrompt = repairedHooks?["UserPromptSubmit"] as? [[String: Any]] ?? []
+        expect(
+            repairedPrompt.flatMap(claudeTransformCommands) == [legacyPrompt, "echo keep-prompt"],
+            "UserPromptSubmit legacy play 与第三方 command 必须原序保留")
+
+        guard case .success(let disconnected) = disconnectClaudeCodeHooks(
+            root: mixed, claudioRoot: rootPath)
+        else {
+            expect(false, "disconnect 必须能从所有事件清扫 modern callback")
+            return
+        }
+        expect(disconnected.changed, "非正式事件的 modern callback 必须触发断开写入")
+        expect(disconnected.removedCount == 6, "disconnect 必须移除正式及非正式的全部 modern")
+        let disconnectedHooks = disconnected.root["hooks"] as? [String: Any]
+        let disconnectedSession = disconnectedHooks?["SessionStart"] as? [[String: Any]] ?? []
+        expect(
+            disconnectedSession.flatMap(claudeTransformCommands) == ["echo keep-session"],
+            "disconnect 必须保留 SessionStart 第三方 command")
+        let disconnectedPrompt = disconnectedHooks?["UserPromptSubmit"] as? [[String: Any]] ?? []
+        expect(
+            disconnectedPrompt.flatMap(claudeTransformCommands) == [legacyPrompt, "echo keep-prompt"],
+            "disconnect 必须保留非正式事件中的 legacy play 与第三方 command")
+    }
+
     suite("Claude transform：部分安装、代次冲突、畸形 schema 全部诚实失败关闭") {
         let rootPath = "/Users/test/.claudio"
         let binary = rootPath + "/bin/claudio"

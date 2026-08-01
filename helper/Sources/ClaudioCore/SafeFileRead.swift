@@ -1,4 +1,23 @@
+import Darwin
 import Foundation
+
+/// Swift `String ==` uses Unicode canonical equivalence. Filesystem ownership and command
+/// identity cannot: on a normalization-sensitive NFS/SMB home, NFC and NFD spellings can name
+/// different files. Keep the exact UTF-8 comparison in one module-wide primitive.
+func utf8BytesEqual(_ lhs: String, _ rhs: String) -> Bool {
+    lhs.utf8.elementsEqual(rhs.utf8)
+}
+
+/// Inspects the leaf node without following it. `FileManager.fileExists` follows a final
+/// symlink, so a dangling dotfiles link otherwise becomes indistinguishable from a missing file.
+func leafNodeIsSymbolicLink(at url: URL) -> Bool {
+    var status = stat()
+    let inspected = url.withUnsafeFileSystemRepresentation { path -> Bool in
+        guard let path else { return false }
+        return Darwin.lstat(path, &status) == 0
+    }
+    return inspected && (status.st_mode & S_IFMT) == S_IFLNK
+}
 
 /// 读**第三方分发内容**（声音包）时用的文件系统原语。
 ///

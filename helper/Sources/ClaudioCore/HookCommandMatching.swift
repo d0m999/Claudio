@@ -280,21 +280,25 @@ public func matchedHostHookCommand(
     }
 }
 
-/// 只接受 writer 当前会生成的 helper 绝对路径。inspect/connect 用它；路径迁移后的历史
-/// command 不会冒充当前连接，显式 connect 也就能够补写新的 canonical command。
+/// 只接受 writer 当前会生成的 helper 绝对路径。helper 路径与最终 canonical command 都按
+/// UTF-8 bytes 精确比较，不能让 Swift `String ==` 的 canonical equivalence 把 NFC/NFD 两个
+/// 文件误认为同一代。inspect/connect 用它；路径迁移后的历史 command 不会冒充当前连接，
+/// 显式 connect 也就能够补写新的 canonical command。
 public func matchedCurrentHostHookCommand(
     inHookCommand command: String,
     claudioBinaryPath: String
 ) -> MatchedHostHookCommand? {
-    guard let match = matchHostHookCommand(inHookCommand: command, acceptsBinaryPath: {
-        $0 == claudioBinaryPath
-    }),
+    let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard
+        let match = matchHostHookCommand(
+            inHookCommand: command,
+            acceptsBinaryPath: { $0.utf8.elementsEqual(claudioBinaryPath.utf8) }),
         let canonical = hostIntegrationHookCommand(
             host: match.host,
             nativeEvent: match.nativeEvent,
             installationID: match.installationID,
             claudioBinaryPath: claudioBinaryPath),
-        command.trimmingCharacters(in: .whitespacesAndNewlines) == canonical
+        trimmed.utf8.elementsEqual(canonical.utf8)
     else { return nil }
     return match
 }

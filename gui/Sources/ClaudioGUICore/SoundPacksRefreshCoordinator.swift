@@ -65,6 +65,8 @@ public func shouldPrepareSoundPacksWindowForPresentation(isVisible: Bool) -> Boo
 ///
 /// - 窗口写成功 → `panelReloadRevision` 前进；`PanelView` **必须**调用
 ///   `PanelConfigController.reload()`，不能走不会重算 `packCards` 的 `reloadConfigOnly()`。
+/// - shared bootstrap 完成 → `panelReloadRevision` 前进；即使启动时的宿主 presentation task
+///   已因用户打开面板而取消，面板仍须重读 bootstrap 刚创建或修复的 config / packs。
 /// - 面板切包成功 → `windowReloadRevision` 前进；窗口重读 config 与包状态。
 /// - 面板包音频、manifest 或非切包 config 真变化 → `windowContentReloadRevision` 前进；窗口保持侧栏选择重读。
 /// - 没有落盘变化的失败 → revision 不动；失败前磁盘已经变化 → 两侧如实重读，但错误仍由调用面显示。
@@ -85,6 +87,17 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
         _ outcome: SoundPacksWindowWriteOutcome
     ) -> SoundPacksRefreshEffect {
         guard outcome != .failed else { return .none }
+        panelReloadRevision += 1
+        return .panelFullReload
+    }
+
+    /// Shared runtime bootstrap may create the default config, copy packs, or salvage a damaged
+    /// pack tree after `PanelConfigController` has already hydrated its initial read model. Its
+    /// completion is therefore an unconditional full-reload boundary, including partial/failure
+    /// outcomes: the bootstrap manager reports those through host state, while the panel must still
+    /// render whatever disk truth the attempt left behind.
+    @discardableResult
+    public func completeSharedRuntimeBootstrap() -> SoundPacksRefreshEffect {
         panelReloadRevision += 1
         return .panelFullReload
     }

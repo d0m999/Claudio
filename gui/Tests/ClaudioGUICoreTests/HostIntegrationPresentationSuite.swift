@@ -257,10 +257,10 @@ func runHostIntegrationPresentationSuites() {
         let observed = hostPresentationSnapshot(.claudeCode)
         let text = hostLatestReceiptText(snapshot: observed)
         expect(
-            hostLatestReceiptEvent(snapshot: observed) == .stop,
-            "结构化回执事件必须来自同一份 observed evidence，不能反向解析摘要字符串")
+            hostLatestReceiptEvidence(snapshot: observed)?.event == .stop,
+            "结构化回执必须来自同一份 observed evidence，不能反向解析摘要字符串")
         expect(text?.contains("Claude Code · Stop → 本轮结束") == true, "回执摘要必须包含宿主与事件映射")
-        expect(text?.contains("1970-01-01T00:01:40Z") == true, "回执摘要必须包含真实 ISO 8601 时间")
+        expect(text?.contains("1970-01-01T00:01:40.000Z") == true, "回执摘要必须保留 ISO 8601 小数秒")
         expect(text?.hasSuffix("· 已播放") == true, "回执摘要必须显示脱敏播放结果")
         expect(
             text?.contains(hostPresentationInstallationID.uuidString) == false,
@@ -273,7 +273,39 @@ func runHostIntegrationPresentationSuites() {
         expect(
             hostLatestReceiptText(snapshot: awaiting) == nil,
             "待确认不能伪造最近真实回执")
-        expect(hostLatestReceiptEvent(snapshot: awaiting) == nil, "待确认也不能伪造回执事件身份")
+        expect(hostLatestReceiptEvidence(snapshot: awaiting) == nil, "待确认也不能伪造回执 evidence")
+    }
+
+    suite("真实回执变化：同毫秒摘要相同时仍由完整 evidence 区分") {
+        let binding = HostCapabilityCatalog.bindings(for: .claudeCode)
+            .first(where: { $0.isAudibleCapability })!
+        func snapshot(at interval: TimeInterval) -> HostIntegrationSnapshot {
+            hostPresentationSnapshot(
+                .claudeCode,
+                activation: .observed(
+                    HostReceiptEvidence(
+                        installationID: hostPresentationInstallationID,
+                        nativeEvent: binding.nativeEvent!,
+                        event: binding.event,
+                        timestamp: Date(timeIntervalSince1970: interval),
+                        playbackResult: .played)))
+        }
+        let earlier = snapshot(at: 100.1234)
+        let later = snapshot(at: 100.1235)
+
+        expect(
+            hostLatestReceiptText(snapshot: earlier) == hostLatestReceiptText(snapshot: later),
+            "测试前提：可见 ISO 摘要在同毫秒内可能相同")
+        guard let earlierEvidence = hostLatestReceiptEvidence(snapshot: earlier),
+            let laterEvidence = hostLatestReceiptEvidence(snapshot: later)
+        else {
+            expect(false, "observed snapshot 必须暴露结构化 evidence")
+            return
+        }
+        expect(earlierEvidence != laterEvidence, "变化判定不得被相同摘要吞掉")
+        expect(
+            earlierEvidence.timestamp < laterEvidence.timestamp,
+            "结构化 evidence 必须保留同毫秒内的真实顺序")
     }
 
     suite("真实回执播放结果：六种 Core 结果全部有中文且不泄漏 ID/路径") {

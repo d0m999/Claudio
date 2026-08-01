@@ -240,7 +240,13 @@ private func notifyArgumentsReferenceWrapper(
     _ arguments: [String],
     expectedWrapper: String
 ) -> Bool {
-    if arguments == [expectedWrapper] { return true }
+    // Swift String/Array equality applies Unicode canonical equivalence. Paths on a
+    // normalization-sensitive home must instead name the exact UTF-8 bytes Codex executes.
+    if arguments.count == 1,
+        arguments[0].utf8.elementsEqual(expectedWrapper.utf8)
+    {
+        return true
+    }
 
     let markers = arguments.indices.filter { arguments[$0] == "--previous-notify" }
     guard markers.count == 1 else { return false }
@@ -251,7 +257,8 @@ private func notifyArgumentsReferenceWrapper(
         let decoded = try? JSONSerialization.jsonObject(with: data),
         let previousArguments = decoded as? [String]
     else { return false }
-    return previousArguments == [expectedWrapper]
+    return previousArguments.count == 1
+        && previousArguments[0].utf8.elementsEqual(expectedWrapper.utf8)
 }
 
 private func expectedLegacyWrapperPath(
@@ -341,7 +348,7 @@ private func inspectKnownWrapper(
     guard let decodedBinary = decodeSingleLiteralShellWord(binaryWord) else {
         return .failure(.unknownOrModifiedWrapper)
     }
-    guard decodedBinary == claudioBinaryPath else {
+    guard decodedBinary.utf8.elementsEqual(claudioBinaryPath.utf8) else {
         return .failure(.differentClaudioBinary)
     }
     return .success(

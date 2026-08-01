@@ -74,6 +74,18 @@ public struct ConfigFileTransaction {
         /// like a genuinely missing path. Preserve the leaf node kind in the CAS baseline to
         /// stop a concurrent missing -> dangling-link replacement from being overwritten.
         let leafIsSymbolicLink: Bool
+        /// Preserve the leaf link's literal payload as well as its resolved target. On APFS two
+        /// NFC/NFD spellings may resolve to the same inode, while on NFS/SMB they can name distinct
+        /// files. Either way, retargeting the dotfiles node is an external mutation.
+        let leafSymbolicLinkDestination: Data?
+
+        static func == (lhs: FileSnapshot, rhs: FileSnapshot) -> Bool {
+            lhs.contents == rhs.contents
+                && utf8BytesEqual(
+                    lhs.resolvedDestinationPath, rhs.resolvedDestinationPath)
+                && lhs.leafIsSymbolicLink == rhs.leafIsSymbolicLink
+                && lhs.leafSymbolicLinkDestination == rhs.leafSymbolicLinkDestination
+        }
     }
 
     public let file: URL
@@ -145,15 +157,20 @@ public struct ConfigFileTransaction {
     #if DEBUG
     public func update(
         _ mutate: ([String: Any]) -> ConfigFileMutation,
-        betweenReadAndWrite: (() -> Void)?
+        betweenReadAndWrite: (() -> Void)?,
+        beforeFinalPublish: (() -> Void)? = nil
     ) -> Result<ConfigFileTransactionOutcome, ConfigFileTransactionError> {
-        updateLocked(mutate, betweenReadAndWrite: betweenReadAndWrite)
+        updateLocked(
+            mutate,
+            betweenReadAndWrite: betweenReadAndWrite,
+            beforeFinalPublish: beforeFinalPublish)
     }
     #endif
 
     private func updateLocked(
         _ mutate: ([String: Any]) -> ConfigFileMutation,
-        betweenReadAndWrite: (() -> Void)?
+        betweenReadAndWrite: (() -> Void)?,
+        beforeFinalPublish: (() -> Void)? = nil
     ) -> Result<ConfigFileTransactionOutcome, ConfigFileTransactionError> {
         let locked = withNonBlockingLock(path: lockFile.path) {
             // Keep the policy gate under the same lock as the snapshot. Checking only before
@@ -162,10 +179,19 @@ public struct ConfigFileTransaction {
                 return Result<ConfigFileTransactionOutcome, ConfigFileTransactionError>.failure(
                     .symlinkRejected(path: file.path))
             }
+            if symlinkPolicy == .preserveTarget,
+                leafNodeIsSymbolicLink(at: file),
+                !FileManager.default.fileExists(atPath: file.path)
+            {
+                return .failure(.danglingSymlink(path: file.path))
+            }
             if case .notWritable(let reason) = probeSettingsWritable(settingsFile: file) {
                 return .failure(.notWritable(reason: reason))
             }
-            return performUpdate(mutate, betweenReadAndWrite: betweenReadAndWrite)
+            return performUpdate(
+                mutate,
+                betweenReadAndWrite: betweenReadAndWrite,
+                beforeFinalPublish: beforeFinalPublish)
         }
         switch locked {
         case .ran(let result): return result
@@ -176,7 +202,8 @@ public struct ConfigFileTransaction {
 
     private func performUpdate(
         _ mutate: ([String: Any]) -> ConfigFileMutation,
-        betweenReadAndWrite: (() -> Void)?
+        betweenReadAndWrite: (() -> Void)?,
+        beforeFinalPublish: (() -> Void)?
     ) -> Result<ConfigFileTransactionOutcome, ConfigFileTransactionError> {
         let loaded: (root: [String: Any], snapshot: FileSnapshot)
         switch loadJSONObject() {
@@ -240,8 +267,22 @@ public struct ConfigFileTransaction {
                 to: loadedDestination,
                 permissions: filePermissions(at: loadedDestination),
                 replaceExisting: true,
-                exclusiveRename: exclusiveRename)
+                exclusiveRename: exclusiveRename,
+                beforeRename: {
+                    // Staging and the one-time backup can take arbitrarily long. External editors
+                    // do not share Claudio's lock, so the CAS that authorizes replacement must run
+                    // after all of that work, immediately beside the final rename boundary.
+                    beforeFinalPublish?()
+                    if symlinkPolicy == .reject, isSymbolicLink(at: file) {
+                        throw ConfigFileTransactionError.symlinkRejected(path: file.path)
+                    }
+                    guard currentSnapshot() == loaded.snapshot else {
+                        throw ConfigFileTransactionError.concurrentModification(path: file.path)
+                    }
+                })
             return .success(.written)
+        } catch let error as ConfigFileTransactionError {
+            return .failure(error)
         } catch {
             return .failure(.writeFailure(reason: error.localizedDescription))
         }
@@ -264,13 +305,15 @@ public struct ConfigFileTransaction {
             return .failure(.danglingSymlink(path: file.path))
         }
         let destinationBeforeRead = resolvedDestinationPath()
+        let linkDestinationBeforeRead = symbolicLinkDestinationBytes()
         guard FileManager.default.fileExists(atPath: file.path) else {
             return .success(
                 (root: [:],
                  snapshot: FileSnapshot(
                     contents: .missing,
                     resolvedDestinationPath: destinationBeforeRead,
-                    leafIsSymbolicLink: leafWasSymbolicLink)))
+                    leafIsSymbolicLink: leafWasSymbolicLink,
+                    leafSymbolicLinkDestination: linkDestinationBeforeRead)))
         }
         let data: Data
         switch readRegularFileBounded(at: file, maxBytes: maximumBytes, followSymlink: true) {
@@ -289,8 +332,10 @@ public struct ConfigFileTransaction {
         }
         let destinationAfterRead = resolvedDestinationPath()
         let leafIsSymbolicLinkAfterRead = isSymbolicLink(at: file)
-        guard destinationBeforeRead == destinationAfterRead,
-            leafWasSymbolicLink == leafIsSymbolicLinkAfterRead
+        let linkDestinationAfterRead = symbolicLinkDestinationBytes()
+        guard utf8BytesEqual(destinationBeforeRead, destinationAfterRead),
+            leafWasSymbolicLink == leafIsSymbolicLinkAfterRead,
+            linkDestinationBeforeRead == linkDestinationAfterRead
         else {
             return .failure(.concurrentModification(path: file.path))
         }
@@ -299,17 +344,20 @@ public struct ConfigFileTransaction {
              snapshot: FileSnapshot(
                 contents: .bytes(data),
                 resolvedDestinationPath: destinationAfterRead,
-                leafIsSymbolicLink: leafIsSymbolicLinkAfterRead)))
+                leafIsSymbolicLink: leafIsSymbolicLinkAfterRead,
+                leafSymbolicLinkDestination: linkDestinationAfterRead)))
     }
 
     private func currentSnapshot() -> FileSnapshot {
         let leafWasSymbolicLink = isSymbolicLink(at: file)
         let destinationBeforeRead = resolvedDestinationPath()
+        let linkDestinationBeforeRead = symbolicLinkDestinationBytes()
         guard FileManager.default.fileExists(atPath: file.path) else {
             return FileSnapshot(
                 contents: .missing,
                 resolvedDestinationPath: destinationBeforeRead,
-                leafIsSymbolicLink: leafWasSymbolicLink)
+                leafIsSymbolicLink: leafWasSymbolicLink,
+                leafSymbolicLinkDestination: linkDestinationBeforeRead)
         }
         guard case .success(let data) = readRegularFileBounded(
             at: file, maxBytes: maximumBytes, followSymlink: true)
@@ -317,22 +365,27 @@ public struct ConfigFileTransaction {
             return FileSnapshot(
                 contents: .unreadable,
                 resolvedDestinationPath: destinationBeforeRead,
-                leafIsSymbolicLink: leafWasSymbolicLink)
+                leafIsSymbolicLink: leafWasSymbolicLink,
+                leafSymbolicLinkDestination: linkDestinationBeforeRead)
         }
         let destinationAfterRead = resolvedDestinationPath()
         let leafIsSymbolicLinkAfterRead = isSymbolicLink(at: file)
-        guard destinationBeforeRead == destinationAfterRead,
-            leafWasSymbolicLink == leafIsSymbolicLinkAfterRead
+        let linkDestinationAfterRead = symbolicLinkDestinationBytes()
+        guard utf8BytesEqual(destinationBeforeRead, destinationAfterRead),
+            leafWasSymbolicLink == leafIsSymbolicLinkAfterRead,
+            linkDestinationBeforeRead == linkDestinationAfterRead
         else {
             return FileSnapshot(
                 contents: .unreadable,
                 resolvedDestinationPath: destinationAfterRead,
-                leafIsSymbolicLink: leafIsSymbolicLinkAfterRead)
+                leafIsSymbolicLink: leafIsSymbolicLinkAfterRead,
+                leafSymbolicLinkDestination: linkDestinationAfterRead)
         }
         return FileSnapshot(
             contents: .bytes(data),
             resolvedDestinationPath: destinationAfterRead,
-            leafIsSymbolicLink: leafIsSymbolicLinkAfterRead)
+            leafIsSymbolicLink: leafIsSymbolicLinkAfterRead,
+            leafSymbolicLinkDestination: linkDestinationAfterRead)
     }
 
     private func resolvedDestination() -> URL {
@@ -342,13 +395,27 @@ public struct ConfigFileTransaction {
     private func resolvedDestinationPath() -> String {
         resolvedDestination().standardizedFileURL.path
     }
+
+    private func symbolicLinkDestinationBytes() -> Data? {
+        guard leafNodeIsSymbolicLink(at: file) else { return nil }
+        // Foundation may bridge filesystem strings through NSString and normalize canonically
+        // equivalent Unicode. CAS needs the literal link payload because NFC/NFD can name
+        // different files on normalization-sensitive NFS/SMB volumes.
+        var buffer = [UInt8](repeating: 0, count: Int(PATH_MAX) + 1)
+        let count = file.withUnsafeFileSystemRepresentation { path -> Int in
+            guard let path else { return -1 }
+            return buffer.withUnsafeMutableBytes { bytes in
+                guard let baseAddress = bytes.baseAddress else { return -1 }
+                return Darwin.readlink(path, baseAddress.assumingMemoryBound(to: CChar.self), bytes.count)
+            }
+        }
+        guard count >= 0, count < buffer.count else { return nil }
+        return Data(buffer.prefix(count))
+    }
 }
 
 private func isSymbolicLink(at url: URL) -> Bool {
-    guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-        let type = attributes[.type] as? FileAttributeType
-    else { return false }
-    return type == .typeSymbolicLink
+    leafNodeIsSymbolicLink(at: url)
 }
 
 /// 原配置和一次性备份都可能包含第三方命令及用户私有设置。staging 在创建瞬间就是 0600，
@@ -358,7 +425,8 @@ private func secureAtomicPublish(
     to destination: URL,
     permissions: mode_t,
     replaceExisting: Bool,
-    exclusiveRename: (String, String) -> Int32
+    exclusiveRename: (String, String) -> Int32,
+    beforeRename: () throws -> Void = {}
 ) throws {
     let directory = destination.deletingLastPathComponent()
     let templateURL = directory.appendingPathComponent(
@@ -386,6 +454,8 @@ private func secureAtomicPublish(
         throw posixWriteError(errno)
     }
     needsClose = false
+
+    try beforeRename()
 
     let result: Int32
     if replaceExisting {

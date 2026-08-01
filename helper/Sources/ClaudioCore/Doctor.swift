@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 // `claudio doctor` — self-checks (ENGINEERING.md v1 helper-CLI 契约):
@@ -48,20 +49,22 @@ public enum SettingsWritability: Sendable, Equatable {
 }
 
 /// Probes `settingsFile` for writability without touching disk:
-/// - If the file exists, checks it directly.
-/// - If it doesn't exist yet (common before the first `claudio install`), checks
-///   whether its parent directory is writable (since `install` would need to create
-///   it there).
+/// Atomic publication always creates a sibling staging file and renames it over the destination.
+/// Therefore both an existing file and a first write require a writable/searchable destination
+/// directory; checking only the existing inode produces a false-green state that cannot be repaired.
 public func probeSettingsWritable(settingsFile: URL) -> SettingsWritability {
     let fileManager = FileManager.default
+    let fileExists = fileManager.fileExists(atPath: settingsFile.path)
 
-    if fileManager.fileExists(atPath: settingsFile.path) {
-        return fileManager.isWritableFile(atPath: settingsFile.path)
-            ? .writable
-            : .notWritable(reason: "settings.json 存在但不可写：\(settingsFile.path)")
+    if fileExists, !fileManager.isWritableFile(atPath: settingsFile.path) {
+        return .notWritable(reason: "settings.json 存在但不可写：\(settingsFile.path)")
     }
 
-    let parentDirectory = settingsFile.deletingLastPathComponent()
+    // A valid final symlink is published through its resolved target directory. For a missing
+    // path (including legacy callers' dangling-link behavior), resolving still canonicalizes any
+    // parent symlinks without inventing a target.
+    let publicationFile = settingsFile.resolvingSymlinksInPath().standardizedFileURL
+    let parentDirectory = publicationFile.deletingLastPathComponent()
     var parentIsDirectory: ObjCBool = false
     guard fileManager.fileExists(atPath: parentDirectory.path, isDirectory: &parentIsDirectory)
     else {
@@ -72,9 +75,15 @@ public func probeSettingsWritable(settingsFile: URL) -> SettingsWritability {
     guard parentIsDirectory.boolValue else {
         return .notWritable(reason: "settings.json 所在父路径不是目录：\(parentDirectory.path)")
     }
-    return fileManager.isWritableFile(atPath: parentDirectory.path)
-        ? .writable
-        : .notWritable(reason: "settings.json 尚未创建，且所在目录不可写：\(parentDirectory.path)")
+    let canPublish = parentDirectory.withUnsafeFileSystemRepresentation { path -> Bool in
+        guard let path else { return false }
+        return Darwin.access(path, W_OK | X_OK) == 0
+    }
+    guard canPublish else {
+        let operation = fileExists ? "无法在所在目录原子替换" : "尚未创建，且所在目录不可写"
+        return .notWritable(reason: "settings.json \(operation)：\(parentDirectory.path)")
+    }
+    return .writable
 }
 
 // MARK: - (b) pack integrity check

@@ -226,6 +226,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 let state = try await (bootstrapSharedRuntime
                     ? provider.bootstrapSharedRuntime()
                     : provider())
+                // Bootstrap can create config/packs after PanelConfigController has already read
+                // its initial state. Notify that read model before the presentation revision guard:
+                // opening the popover while bootstrap is in flight cancels this task and starts a
+                // newer refresh, but cancellation must not discard the completed disk mutation.
+                if bootstrapSharedRuntime {
+                    self?.soundPacksRefreshCoordinator.completeSharedRuntimeBootstrap()
+                }
                 guard
                     !Task.isCancelled,
                     let self,
@@ -346,15 +353,25 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         guard popover.isShown else {
             pendingIntegrationsWindowFocusTarget = nil
-            integrationsWindowController.showWindow { [weak self] in
-                self?.restorePanelFocus(to: target)
+            integrationsWindowController.showWindow { [weak self] latestHandbackApplication in
+                self?.restorePanelFocus(
+                    to: target, latestHandbackApplication: latestHandbackApplication)
             }
             return
         }
         popover.close()
     }
 
-    private func restorePanelFocus(to target: PanelFocusTarget) {
+    private func restorePanelFocus(
+        to target: PanelFocusTarget,
+        latestHandbackApplication: NSRunningApplication?
+    ) {
+        // The integrations window may have remained visible while the user visited another app.
+        // Preserve the original debt when no such activation occurred; otherwise the latest app
+        // becomes the recipient after the restored popover eventually closes.
+        if let latestHandbackApplication {
+            previousApp = latestHandbackApplication
+        }
         pendingRestoredPanelFocusTarget = target
         showPopover()
     }
@@ -407,8 +424,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let integrationsFocusTarget = pendingIntegrationsWindowFocusTarget
         pendingIntegrationsWindowFocusTarget = nil
         if let integrationsFocusTarget {
-            integrationsWindowController.showWindow { [weak self] in
-                self?.restorePanelFocus(to: integrationsFocusTarget)
+            integrationsWindowController.showWindow { [weak self] latestHandbackApplication in
+                self?.restorePanelFocus(
+                    to: integrationsFocusTarget,
+                    latestHandbackApplication: latestHandbackApplication)
             }
             return
         }

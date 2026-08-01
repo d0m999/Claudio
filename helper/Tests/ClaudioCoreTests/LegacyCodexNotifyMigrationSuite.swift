@@ -123,6 +123,59 @@ func runLegacyCodexNotifyMigrationSuites() {
             "普通 argv 里即使出现同一段 JSON，也不能冒充 --previous-notify 引用")
     }
 
+    suite("LegacyCodexNotifyMigration：wrapper 与 helper 路径按 UTF-8 字节精确匹配") {
+        let nfdRoot = "/Users/e\u{301}/.claudio"
+        let nfcRoot = "/Users/\u{00E9}/.claudio"
+        let nfdBinary = "\(nfdRoot)/bin/claudio"
+        let nfcBinary = "\(nfcRoot)/bin/claudio"
+        let nfdWrapperPath = "\(nfdRoot)/bin/codex-notify"
+        let nfcWrapperPath = "\(nfcRoot)/bin/codex-notify"
+        expect(
+            nfdWrapperPath == nfcWrapperPath,
+            "测试前提：Swift String == 必须把 NFC/NFD wrapper 路径视为 canonical-equivalent")
+        expect(
+            !nfdWrapperPath.utf8.elementsEqual(nfcWrapperPath.utf8),
+            "测试前提：NFC/NFD wrapper 路径必须是不同 UTF-8 bytes")
+
+        let nfdKnownWrapper = knownLegacyWrapper(binaryWord: shellQuotedPath(nfdBinary))
+        let directConfig = "notify = [\"\(nfcWrapperPath)\"]\n"
+        let encodedPrevious = String(
+            data: try! JSONSerialization.data(withJSONObject: [nfcWrapperPath]),
+            encoding: .utf8)!
+        let tomlPrevious = encodedPrevious
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+        let nestedConfig =
+            "notify = [\"third-notifier\", \"--previous-notify\", \"\(tomlPrevious)\"]\n"
+        for config in [directConfig, nestedConfig] {
+            expect(
+                detectLegacyCodexNotifyMigration(
+                    configTOML: config,
+                    wrapper: nfdKnownWrapper,
+                    claudioRoot: nfdRoot,
+                    claudioBinaryPath: nfdBinary)
+                    == .conflict(.configDoesNotReferenceWrapper),
+                "canonical-equivalent 但字节不同的 config wrapper 路径不能引用当前文件")
+        }
+
+        let exactConfig = "notify = [\"\(nfdWrapperPath)\"]\n"
+        expect(
+            detectLegacyCodexNotifyMigration(
+                configTOML: exactConfig,
+                wrapper: knownLegacyWrapper(binaryWord: shellQuotedPath(nfcBinary)),
+                claudioRoot: nfdRoot,
+                claudioBinaryPath: nfdBinary)
+                == .conflict(.differentClaudioBinary),
+            "已知 wrapper 内 canonical-equivalent 但字节不同的 helper 不能被当前安装接管")
+        expect(
+            detectLegacyCodexNotifyMigration(
+                configTOML: exactConfig,
+                wrapper: nfdKnownWrapper,
+                claudioRoot: nfdRoot,
+                claudioBinaryPath: nfdBinary) == .migratable,
+            "wrapper 与 helper 路径均同字节时仍必须可迁移")
+    }
+
     suite("LegacyCodexNotifyMigration：已迁移可识别，disconnect 保留 notifier，随后可重连新代次") {
         let config = "notify = [\"\(legacyMigrationWrapper)\"]\n"
         let firstMigration = migrateLegacyCodexNotifyWrapper(

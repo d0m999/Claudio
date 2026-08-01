@@ -57,6 +57,10 @@ public struct CodexIntegrationEnvironment: Sendable {
     public let claudioRoot: String
     public let receiptStore: HostHookReceiptStore
     public let availability: @Sendable () -> HostAvailability
+    /// Testable publication-boundary seam. Production uses the default no-op; regression tests
+    /// inject a non-cooperating writer after staging is complete and before the final expected-byte
+    /// check. Keeping it in the environment mirrors the existing injected host/filesystem facts.
+    public let beforeLegacyWrapperFinalPublish: @Sendable () -> Void
 
     public init(
         hooksFile: URL = ClaudioPaths.codexHooksFile,
@@ -78,7 +82,8 @@ public struct CodexIntegrationEnvironment: Sendable {
             return FileManager.default.fileExists(
                 atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
                 ? .available : .unavailable(reason: "未检测到 Codex 配置目录")
-        }
+        },
+        beforeLegacyWrapperFinalPublish: @escaping @Sendable () -> Void = {}
     ) {
         self.hooksFile = hooksFile
         self.lockFile = lockFile
@@ -94,6 +99,7 @@ public struct CodexIntegrationEnvironment: Sendable {
         self.claudioRoot = claudioRoot
         self.receiptStore = receiptStore
         self.availability = availability
+        self.beforeLegacyWrapperFinalPublish = beforeLegacyWrapperFinalPublish
     }
 }
 
@@ -284,7 +290,8 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
                 file: environment.legacyNotifyWrapper,
                 expected: wrapperPlan.expectedWrapper,
                 replacement: replacement,
-                lockFile: environment.lockFile)
+                lockFile: environment.lockFile,
+                beforeFinalPublish: environment.beforeLegacyWrapperFinalPublish)
             {
             case .success:
                 appliedWrapperMutation = AppliedLegacyWrapperMutation(
@@ -401,7 +408,8 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
                     file: environment.legacyNotifyWrapper,
                     expected: wrapperData,
                     replacement: replacement,
-                    lockFile: environment.lockFile)
+                    lockFile: environment.lockFile,
+                    beforeFinalPublish: environment.beforeLegacyWrapperFinalPublish)
                 {
                 case .success:
                     appliedWrapperMutation = AppliedLegacyWrapperMutation(
@@ -635,7 +643,11 @@ private func makeIntegrationSnapshot(
     activationNativeEvents: [String]? = nil
 ) -> HostIntegrationSnapshot {
     let writability: HostConfigWritability
-    if case .unavailable = availability,
+    if leafNodeIsSymbolicLink(at: file),
+        !FileManager.default.fileExists(atPath: file.path)
+    {
+        writability = .notWritable(reason: danglingIntegrationConfigReason(file))
+    } else if case .unavailable = availability,
         !FileManager.default.fileExists(atPath: file.path)
     {
         writability = .unknown
@@ -685,6 +697,11 @@ private enum IntegrationJSONObjectLoad {
 }
 
 private func loadIntegrationData(at file: URL) -> IntegrationDataLoad {
+    if leafNodeIsSymbolicLink(at: file),
+        !FileManager.default.fileExists(atPath: file.path)
+    {
+        return .failure(danglingIntegrationConfigReason(file))
+    }
     guard FileManager.default.fileExists(atPath: file.path) else { return .missing }
     switch readRegularFileBounded(at: file, maxBytes: 1 << 20, followSymlink: true) {
     case .success(let data): return .data(data)
@@ -692,6 +709,10 @@ private func loadIntegrationData(at file: URL) -> IntegrationDataLoad {
     case .oversize: return .failure("配置文件超过 1 MiB 安全上限：\(file.path)")
     case .unreadable: return .failure("配置文件无法读取：\(file.path)")
     }
+}
+
+private func danglingIntegrationConfigReason(_ file: URL) -> String {
+    "配置文件是目标不存在的符号链接，无法安全保留 dotfiles 链接：\(file.path)"
 }
 
 private func loadIntegrationJSONObject(at file: URL) -> IntegrationJSONObjectLoad {
@@ -806,7 +827,7 @@ private func legacyWrapperPlan(
         switch state {
         case .migrated(let installationID):
             chosenID = installationID
-        case .legacyPlayStop, .notifierOnly:
+        case .legacyPlayStop:
             switch plainHooksStatus {
             case .absent:
                 chosenID = requestedID
@@ -822,13 +843,30 @@ private func legacyWrapperPlan(
                 return .failure(
                     .conflict("旧 codex-notify 与 hooks.json 同时管理 Stop，可能重复播放"))
             }
+        case .notifierOnly:
+            switch plainHooksStatus {
+            case .absent:
+                chosenID = requestedID
+            case .partial(let existingID, _), .complete(let existingID):
+                chosenID = existingID
+            case .malformed(let reason):
+                return .failure(.conflict(reason))
+            case .conflict(let reason):
+                return .failure(.conflict(reason))
+            case .conflictingInstallationIDs:
+                return .failure(.conflict("hooks.json 含多个 Claudio installation ID"))
+            }
         }
 
         let replacement: Data?
+        let externallyManagedEvents: Set<String>
+        let externalInstallationID: UUID?
         switch state {
         case .migrated:
             replacement = nil
-        case .legacyPlayStop, .notifierOnly:
+            externallyManagedEvents = ["Stop"]
+            externalInstallationID = chosenID
+        case .legacyPlayStop:
             switch migrateLegacyCodexNotifyWrapper(
                 configTOML: configData,
                 wrapper: wrapperData,
@@ -840,12 +878,46 @@ private func legacyWrapperPlan(
             case .failure(let reason):
                 return .failure(.conflict(legacyConflictText(reason)))
             }
+            externallyManagedEvents = ["Stop"]
+            externalInstallationID = chosenID
+        case .notifierOnly:
+            let wrapperMustResumeManagingStop: Bool
+            switch plainHooksStatus {
+            case .absent:
+                wrapperMustResumeManagingStop = true
+            case .partial(_, let missing):
+                wrapperMustResumeManagingStop = missing.contains("Stop")
+            case .complete:
+                wrapperMustResumeManagingStop = false
+            case .malformed, .conflict, .conflictingInstallationIDs:
+                // These states returned above while choosing the installation ID.
+                return .failure(.conflict("hooks.json 状态无法安全规划"))
+            }
+            if wrapperMustResumeManagingStop {
+                switch migrateLegacyCodexNotifyWrapper(
+                    configTOML: configData,
+                    wrapper: wrapperData,
+                    claudioRoot: environment.claudioRoot,
+                    claudioBinaryPath: environment.claudioBinaryPath,
+                    installationID: chosenID)
+                {
+                case .success(let data): replacement = data
+                case .failure(let reason):
+                    return .failure(.conflict(legacyConflictText(reason)))
+                }
+                externallyManagedEvents = ["Stop"]
+                externalInstallationID = chosenID
+            } else {
+                replacement = nil
+                externallyManagedEvents = []
+                externalInstallationID = nil
+            }
         }
         return .success(
             LegacyWrapperPlan(
                 installationID: chosenID,
-                externallyManagedEvents: ["Stop"],
-                externalInstallationID: chosenID,
+                externallyManagedEvents: externallyManagedEvents,
+                externalInstallationID: externalInstallationID,
                 expectedWrapper: wrapperData,
                 replacement: replacement))
     }
@@ -893,7 +965,8 @@ private func codexFailureAfterRollingBackWrapper(
         file: environment.legacyNotifyWrapper,
         expected: appliedMutation.replacement,
         replacement: appliedMutation.original,
-        lockFile: environment.lockFile)
+        lockFile: environment.lockFile,
+        beforeFinalPublish: environment.beforeLegacyWrapperFinalPublish)
     {
     case .success:
         return .failure(failure)
@@ -909,7 +982,8 @@ private func atomicallyReplaceLegacyWrapper(
     file: URL,
     expected: Data,
     replacement: Data,
-    lockFile: URL
+    lockFile: URL,
+    beforeFinalPublish: @Sendable () -> Void
 ) -> Result<Void, LegacyWrapperWriteError> {
     let locked = withNonBlockingLock(path: lockFile.path) {
         guard case .data(let current) = readLegacyWrapperData(at: file), current == expected else {
@@ -928,6 +1002,15 @@ private func atomicallyReplaceLegacyWrapper(
                 [.posixPermissions: permissions], ofItemAtPath: staging.path)
         } catch {
             return .failure(.failed("旧 codex-notify staging 写入失败：\(error.localizedDescription)"))
+        }
+        // Third-party notifiers do not participate in Claudio's host lock. Re-read the expected
+        // bytes only after staging is complete, immediately beside the final rename boundary.
+        beforeFinalPublish()
+        guard case .data(let finalCurrent) = readLegacyWrapperData(at: file),
+            finalCurrent == expected
+        else {
+            return .failure(
+                .failed("旧 codex-notify 在 staging 与最终迁移之间发生变化，已停止写入"))
         }
         let renamed = staging.withUnsafeFileSystemRepresentation { source in
             file.withUnsafeFileSystemRepresentation { destination in

@@ -785,6 +785,60 @@ func runDoctorSuites() {
         }
     }
 
+    suite("probeSettingsWritable: existing writable file still requires atomic-publish parent access") {
+        withTempDirectory { root in
+            let parent = root.appendingPathComponent("host-config", isDirectory: true)
+            try! FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+            let settingsFile = parent.appendingPathComponent("settings.json")
+            writeFixture("{}", to: settingsFile)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o500], ofItemAtPath: parent.path)
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: parent.path)
+            }
+
+            guard case .notWritable(let reason) = probeSettingsWritable(settingsFile: settingsFile)
+            else {
+                expect(false, "现有 inode 可写但父目录不能 staging/rename 时不得报告 writable")
+                return
+            }
+            expect(
+                reason.contains("原子替换") && reason.contains(parent.path),
+                "阻塞理由必须指向真正无法发布的父目录，got \(reason)")
+        }
+    }
+
+    suite("probeSettingsWritable: preserved symlink requires its target parent to publish") {
+        withTempDirectory { root in
+            let dotfiles = root.appendingPathComponent("dotfiles", isDirectory: true)
+            let hostDirectory = root.appendingPathComponent("host", isDirectory: true)
+            try! FileManager.default.createDirectory(at: dotfiles, withIntermediateDirectories: true)
+            try! FileManager.default.createDirectory(
+                at: hostDirectory, withIntermediateDirectories: true)
+            let target = dotfiles.appendingPathComponent("settings.json")
+            let settingsFile = hostDirectory.appendingPathComponent("settings.json")
+            writeFixture("{}", to: target)
+            try! FileManager.default.createSymbolicLink(
+                at: settingsFile, withDestinationURL: target)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o500], ofItemAtPath: dotfiles.path)
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o700], ofItemAtPath: dotfiles.path)
+            }
+
+            guard case .notWritable(let reason) = probeSettingsWritable(settingsFile: settingsFile)
+            else {
+                expect(false, "preserveTarget 会在 target parent 发布，不得只检查 symlink parent")
+                return
+            }
+            expect(
+                reason.contains("原子替换") && reason.contains(dotfiles.path),
+                "阻塞理由必须指向 symlink target parent，got \(reason)")
+        }
+    }
+
     suite("probeSettingsWritable: existing read-only file → .notWritable") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")

@@ -88,6 +88,50 @@ func runHookCommandMatchingSuites() {
             "inspect/connect 只能接受当前 writer 的 canonical quoting；不可执行的旧裸路径只供断开清扫")
     }
 
+    suite("新版当前 helper matcher：NFC/NFD 路径必须按 UTF-8 字节精确区分") {
+        let installationID = UUID(uuidString: "12345678-89AB-4CDE-8FAB-123456789ABC")!
+        let nfdBinary = "/Users/e\u{301}/.claudio/bin/claudio"
+        let nfcBinary = "/Users/\u{00E9}/.claudio/bin/claudio"
+        expect(nfdBinary == nfcBinary, "测试前提：Swift String == 必须采用 canonical equivalence")
+        expect(
+            !nfdBinary.utf8.elementsEqual(nfcBinary.utf8),
+            "测试前提：NFC/NFD helper 路径必须是不同 UTF-8 字节")
+
+        let nfdCommand = hostIntegrationHookCommand(
+            host: .claudeCode,
+            nativeEvent: "Stop",
+            installationID: installationID,
+            claudioBinaryPath: nfdBinary)!
+        let nfcCommand = hostIntegrationHookCommand(
+            host: .claudeCode,
+            nativeEvent: "Stop",
+            installationID: installationID,
+            claudioBinaryPath: nfcBinary)!
+        expect(nfdCommand == nfcCommand, "测试前提：两条 command 在 Swift String 语义下 canonical-equivalent")
+        expect(
+            !nfdCommand.utf8.elementsEqual(nfcCommand.utf8),
+            "测试前提：两条 canonical command 的 UTF-8 bytes 必须不同")
+
+        expect(
+            matchedCurrentHostHookCommand(
+                inHookCommand: nfcCommand, claudioBinaryPath: nfdBinary) == nil,
+            "NFC command 不能冒充 NFD current helper")
+        expect(
+            matchedCurrentHostHookCommand(
+                inHookCommand: nfdCommand, claudioBinaryPath: nfcBinary) == nil,
+            "NFD command 不能冒充 NFC current helper")
+        expect(
+            matchedCurrentHostHookCommand(
+                inHookCommand: nfdCommand, claudioBinaryPath: nfdBinary)?.installationID
+                == installationID,
+            "同字节 NFD current helper 仍必须匹配")
+        expect(
+            matchedCurrentHostHookCommand(
+                inHookCommand: nfcCommand, claudioBinaryPath: nfcBinary)?.installationID
+                == installationID,
+            "同字节 NFC current helper 仍必须匹配")
+    }
+
     suite("matchedClaudioEvent: recognizes today's canonical path for every one of the 4 events") {
         for event in Event.allCases {
             let command = "\(canonicalPath) play \(event.cliName)"

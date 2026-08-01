@@ -535,7 +535,7 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("installClaudioHooks: a failed backup copy aborts install, settings.json left untouched") {
+    suite("installClaudioHooks: an atomic-publish-blocked parent aborts before backup, settings.json left untouched") {
         withTempDirectory { root in
             let settingsDir = root.appendingPathComponent("settings-dir", isDirectory: true)
             let settingsFile = settingsDir.appendingPathComponent("settings.json")
@@ -543,11 +543,9 @@ func runSettingsInstallerSuites() {
             let originalContent = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
             writeFixture(originalContent, to: settingsFile)
 
-            // Strip write permission from the *directory*: the existing settings.json
-            // file itself stays individually writable (so the writability probe still
-            // reports .writable), but creating a NEW sibling entry — the
-            // settings.json.claudio.bak backup — needs write+execute on the directory
-            // and must fail with EACCES.
+            // Strip write permission from the directory. Both the one-time backup and the final
+            // staging+rename require sibling publication, so the read-only probe must now expose
+            // this state before either write is attempted.
             try? FileManager.default.setAttributes(
                 [.posixPermissions: 0o500], ofItemAtPath: settingsDir.path)
             defer {
@@ -558,11 +556,11 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            if case .failure(.backupFailure) = result {
-                // expected
-            } else {
-                expect(false, "expected .backupFailure when the backup copy can't be created, got \(result)")
+            guard case .failure(.notWritable(let reason)) = result else {
+                expect(false, "expected .notWritable when atomic publication is impossible, got \(result)")
+                return
             }
+            expect(reason.contains("原子替换"), "错误必须说明真实发布阻塞，got \(reason)")
             expect(
                 readRawString(at: settingsFile) == originalContent,
                 "settings.json must be left untouched when the backup step fails — a failed"

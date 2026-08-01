@@ -21,7 +21,7 @@ struct IntegrationsWindowHostInspectorFacts: Sendable, Equatable {
     let host: HostID
     let configurationSource: String
     let latestReceiptText: String?
-    let latestReceiptEvent: Event?
+    let latestReceiptEvidence: HostReceiptEvidence?
     let actions: [IntegrationsWindowInspectorAction]
 }
 
@@ -455,21 +455,21 @@ private struct IntegrationsReceiptTransition {
 }
 
 /// 只把已经通过 current installation 校验、并且相对上一帧新增/变化的真实回执
-/// 提升为短暂反馈。旧代次与损坏回执不会进入 `latestReceiptText`，因此这里无从伪造。
+/// 提升为短暂反馈。变化判定比较完整 evidence，不依赖可见摘要的格式或时间精度。
 private func integrationsReceiptTransitions(
     from previous: IntegrationsWindowContent,
     to current: IntegrationsWindowContent
 ) -> [IntegrationsReceiptTransition] {
     HostID.allCases.compactMap { host in
-        let oldReceipt = previous.inspectorFacts[host]?.latestReceiptText
+        let oldEvidence = previous.inspectorFacts[host]?.latestReceiptEvidence
         guard let currentFacts = current.inspectorFacts[host],
+            let newEvidence = currentFacts.latestReceiptEvidence,
             let newReceipt = currentFacts.latestReceiptText,
-            let event = currentFacts.latestReceiptEvent,
-            newReceipt != oldReceipt
+            newEvidence != oldEvidence
         else { return nil }
         return IntegrationsReceiptTransition(
             host: host,
-            event: event,
+            event: newEvidence.event,
             message: "收到当前代次真实回执：\(newReceipt)")
     }
 }

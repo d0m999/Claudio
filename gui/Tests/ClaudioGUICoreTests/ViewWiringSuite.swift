@@ -2137,6 +2137,33 @@ func runViewWiringSuites() {
                 + "没提交的拖动照样丢。闭包体实际是：\(body)")
     }
 
+    suite("PanelView：主音量 commit 后必须刷新共享可听矩阵，且刷新发生在落盘尝试之后") {
+        guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
+            expect(false, "读不到 PanelView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(panel)
+        guard let body = closureBody(after: "onCommit:", in: flat) else {
+            expect(false, "MasterVolumeRow 的 onCommit 必须有可检查的闭包体")
+            return
+        }
+        guard
+            let write = body.range(of: "panelModel.setMasterVolume("),
+            let refresh = body.range(of: "onAudibilityInputsChanged()")
+        else {
+            expect(
+                false,
+                "onCommit 必须同时尝试 setMasterVolume 并请求共享矩阵刷新；闭包体：\(body)")
+            return
+        }
+        expect(
+            write.lowerBound < refresh.lowerBound,
+            "矩阵刷新必须发生在主音量写入/失败后的读模型同步之后，不能先刷新旧磁盘值；闭包体：\(body)")
+        expect(
+            body.contains("return landed"),
+            "onCommit 仍须把真实 landed/nil 返回 MasterVolumeRow，维持成功提交与失败回滚契约")
+    }
+
     // MARK: - PLAN-SOUND-MANAGER.md T2：自动试听回归 + 「清除绑定」菜单项接线（存在性级，理由同本文件
     // 头部——EventRowView/PanelView 都住在不可 import 的 `ClaudioGUI` executableTarget）
 

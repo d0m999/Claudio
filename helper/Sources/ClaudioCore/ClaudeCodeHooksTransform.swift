@@ -33,8 +33,9 @@ public struct HostHooksJSONMutation {
     }
 }
 
-/// 只读检查 Claude Code 的四个原生事件。旧版 `claudio play` 四事件完整时明确返回
-/// `.legacyConnected`；不会在检查时静默升级。
+/// 只读检查 Claude Code 的 hooks。modern Claudio command 会扫描所有事件键，避免一条
+/// 错放在 `SessionStart` / `UserPromptSubmit` 等合法事件下的 callback 被完整四事件掩盖；
+/// legacy `claudio play` 仍只在四个正式事件中计入连接，因此旧任务开始声音原样保留。
 public func inspectClaudeCodeHooks(
     root: [String: Any],
     claudioRoot: String,
@@ -44,15 +45,18 @@ public func inspectClaudeCodeHooks(
     case .failure(let error):
         return .failure(error)
     case .success(let hooks):
+        let bindings = HostCapabilityCatalog.bindings(for: .claudeCode)
+        let bindingByNativeEvent = Dictionary(
+            uniqueKeysWithValues: bindings.compactMap { binding in
+                binding.nativeEvent.map { ($0, binding) }
+            })
         var legacyEvents = Set<Event>()
         var modernByNativeEvent: [String: [MatchedHostHookCommand]] = [:]
         var ownedCount = 0
         var misplacedModern = false
 
-        for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
-            guard let nativeEvent = binding.nativeEvent,
-                let groups = hooks[nativeEvent] as? [Any]
-            else { continue }
+        for (nativeEvent, rawGroups) in hooks {
+            guard let groups = rawGroups as? [Any] else { continue }
             for group in groups {
                 let entries = ((group as? [String: Any])?["hooks"] as? [Any]) ?? []
                 for entry in entries {
@@ -69,8 +73,9 @@ public func inspectClaudeCodeHooks(
                         ownedCount += 1
                         modernByNativeEvent[nativeEvent, default: []].append(modern)
                         misplacedModern = misplacedModern || modern.nativeEvent != nativeEvent
-                    } else if let event = matchedClaudioEvent(
-                        inHookCommand: command, claudioRoot: claudioRoot)
+                    } else if let binding = bindingByNativeEvent[nativeEvent],
+                        let event = matchedClaudioEvent(
+                            inHookCommand: command, claudioRoot: claudioRoot)
                     {
                         ownedCount += 1
                         if event == binding.event { legacyEvents.insert(event) }
@@ -91,7 +96,6 @@ public func inspectClaudeCodeHooks(
             return .success(.conflict(reason: "Claude Code hook 含重复或不同安装代次"))
         }
 
-        let bindings = HostCapabilityCatalog.bindings(for: .claudeCode)
         let modernMissing = bindings.compactMap { binding -> String? in
             guard let nativeEvent = binding.nativeEvent else { return nil }
             return modernByNativeEvent[nativeEvent]?.count == 1 ? nil : nativeEvent
@@ -109,8 +113,9 @@ public func inspectClaudeCodeHooks(
     }
 }
 
-/// 显式连接/升级 Claude Code：若已是完整现代连接则幂等不写；否则只清理四个目标事件中的
-/// Claude Code Claudio 条目，再在每个事件数组末尾追加同一 installation ID 的现代 command hook。
+/// 显式连接/升级 Claude Code：若已是完整现代连接且所有事件都没有额外 modern callback，
+/// 则幂等不写；否则清理所有事件中的 modern Claudio 条目，只在四个正式事件中清理 legacy，
+/// 再为四个正式事件追加同一 installation ID 的 canonical command hook。
 public func connectClaudeCodeHooks(
     root: [String: Any],
     claudioRoot: String,
@@ -143,9 +148,10 @@ public func connectClaudeCodeHooks(
     var next = root
     var hooks = (next["hooks"] as? [String: Any]) ?? [:]
     var removed = 0
-    for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
-        guard let nativeEvent = binding.nativeEvent else { continue }
-        let groups = (hooks[nativeEvent] as? [Any]) ?? []
+    let officialNativeEvents = Set(
+        HostCapabilityCatalog.bindings(for: .claudeCode).compactMap(\.nativeEvent))
+    for nativeEvent in Array(hooks.keys) {
+        guard let groups = hooks[nativeEvent] as? [Any] else { continue }
         let filtered = filterClaudeOwnedEntries(
             groups: groups,
             claudioRoot: claudioRoot,
@@ -153,8 +159,18 @@ public func connectClaudeCodeHooks(
             // location before appending today's canonical one. Inspect stays exact-current so a
             // removed old binary can never make the host look connected.
             modernBinaryPath: nil,
+            removeLegacy: officialNativeEvents.contains(nativeEvent),
             removed: &removed)
-        var newGroups = filtered
+        if filtered.isEmpty {
+            hooks.removeValue(forKey: nativeEvent)
+        } else {
+            hooks[nativeEvent] = filtered
+        }
+    }
+    for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
+        guard let nativeEvent = binding.nativeEvent else { continue }
+        let groups = (hooks[nativeEvent] as? [Any]) ?? []
+        var newGroups = groups
         guard let command = hostIntegrationHookCommand(
             host: .claudeCode,
             nativeEvent: nativeEvent,
@@ -182,10 +198,8 @@ func containsRelocatedClaudeCodeHooks(
     claudioBinaryPath: String
 ) -> Bool {
     guard case .success(let hooks) = validatedClaudeHooks(in: root) else { return false }
-    for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
-        guard let nativeEvent = binding.nativeEvent,
-            let groups = hooks[nativeEvent] as? [Any]
-        else { continue }
+    for rawGroups in hooks.values {
+        guard let groups = rawGroups as? [Any] else { continue }
         for group in groups {
             let entries = ((group as? [String: Any])?["hooks"] as? [Any]) ?? []
             for entry in entries {
@@ -203,8 +217,8 @@ func containsRelocatedClaudeCodeHooks(
     return false
 }
 
-/// 精准断开 Claude Code：同时移除现代与 legacy Claudio 条目，但只扫描四个正式事件。
-/// 因此用户已有的 `UserPromptSubmit → claudio play notification` 会原样保留。
+/// 精准断开 Claude Code：扫描所有事件并移除 modern Claudio command；legacy 只在四个
+/// 正式事件中移除，因此用户已有的 `UserPromptSubmit → claudio play notification` 原样保留。
 public func disconnectClaudeCodeHooks(
     root: [String: Any],
     claudioRoot: String
@@ -218,14 +232,15 @@ public func disconnectClaudeCodeHooks(
     var next = root
     var nextHooks = hooks
     var removed = 0
-    for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
-        guard let nativeEvent = binding.nativeEvent,
-            let groups = nextHooks[nativeEvent] as? [Any]
-        else { continue }
+    let officialNativeEvents = Set(
+        HostCapabilityCatalog.bindings(for: .claudeCode).compactMap(\.nativeEvent))
+    for nativeEvent in Array(nextHooks.keys) {
+        guard let groups = nextHooks[nativeEvent] as? [Any] else { continue }
         let filtered = filterClaudeOwnedEntries(
             groups: groups,
             claudioRoot: claudioRoot,
             modernBinaryPath: nil,
+            removeLegacy: officialNativeEvents.contains(nativeEvent),
             removed: &removed)
         if filtered.isEmpty {
             nextHooks.removeValue(forKey: nativeEvent)
@@ -268,6 +283,7 @@ private func filterClaudeOwnedEntries(
     groups: [Any],
     claudioRoot: String,
     modernBinaryPath: String?,
+    removeLegacy: Bool,
     removed: inout Int
 ) -> [Any] {
     var filteredGroups: [Any] = []
@@ -285,8 +301,9 @@ private func filterClaudeOwnedEntries(
                     inHookCommand: command, claudioBinaryPath: $0)
             } ?? matchedHostHookCommand(inHookCommand: command, claudioRoot: claudioRoot)
             let isModernClaude = modern?.host == .claudeCode
-            let isLegacy = matchedClaudioEvent(
-                inHookCommand: command, claudioRoot: claudioRoot) != nil
+            let isLegacy = removeLegacy
+                && matchedClaudioEvent(
+                    inHookCommand: command, claudioRoot: claudioRoot) != nil
             if isModernClaude || isLegacy {
                 removed += 1
                 return false

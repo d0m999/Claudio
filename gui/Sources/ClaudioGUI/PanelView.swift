@@ -398,7 +398,15 @@ public struct PanelView: View {
                 // `panelModel` 里（`PanelConfigControllerSuite` 用真磁盘钉死）——这里只转发。
                 MasterVolumeRow(
                     diskVolume: panelModel.config.masterVolume,
-                    onCommit: { panelModel.setMasterVolume($0) },
+                    onCommit: { volume in
+                        let landed = panelModel.setMasterVolume(volume)
+                        // Like the config-only mute path above, every real commit attempt must
+                        // republish the matrix from disk. A success can cross the global 0/non-zero
+                        // audibility boundary; a failure may still reveal an external config change
+                        // through PanelConfigController's post-attempt reload.
+                        onAudibilityInputsChanged()
+                        return landed
+                    },
                     focusCoordinator: focusCoordinator,
                     focusedTarget: $focusedTarget,
                     adaptation: layoutAdaptation)

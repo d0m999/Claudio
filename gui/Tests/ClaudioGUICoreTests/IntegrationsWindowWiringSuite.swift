@@ -35,7 +35,8 @@ func runIntegrationsWindowWiringSuites() {
             "close 后窗口不得释放，否则不能 retained reopen")
         expect(controller.contains("window.delegate = self"), "controller 必须接管关闭生命周期")
         expect(
-            controller.contains("showWindow(returnFocusTo"),
+            controller.contains("func showWindow(")
+                && controller.contains("returnFocusTo restoration:"),
             "show API 必须接收恢复触发控件焦点的 seam")
         expect(
             controller.contains("focusRestoration = nil")
@@ -69,10 +70,12 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             menu.contains("pendingIntegrationsWindowFocusTarget")
                 && menu.contains("popoverDidClose")
-                && menu.contains("integrationsWindowController.showWindow { [weak self] in"),
+                && menu.contains(
+                    "integrationsWindowController.showWindow { [weak self] latestHandbackApplication in"),
             "详情窗必须在 popoverDidClose 后展示，不能与 transient close 竞态")
         expect(
-            menu.contains("restorePanelFocus(to: integrationsFocusTarget)")
+            menu.contains("restorePanelFocus(")
+                && menu.contains("latestHandbackApplication: latestHandbackApplication")
                 && menu.contains("focusCoordinator.requestFocus(target: restoredTarget)"),
             "关闭详情窗必须重开面板并恢复原始宿主行/管理入口")
 
@@ -88,6 +91,44 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             !branchBeforeSoundPacks.contains("previousApp = nil"),
             "integrations handoff 不得提前清 activation debt；要等恢复后的 popover 正常关闭")
+    }
+
+    suite("IntegrationsWindow handback：可见期间跟踪最近外部 app，关闭后交回 MenuBar 的原债务槽") {
+        guard
+            let controllerSource = integrationsSource(
+                "gui/Sources/ClaudioGUI/IntegrationsWindowController.swift"),
+            let menuSource = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift")
+        else {
+            expect(false, "缺少 IntegrationsWindowController/MenuBarController")
+            return
+        }
+        let controller = collapsingWhitespace(
+            strippingComments(controllerSource).codeWithoutStringLiterals)
+        let menu = collapsingWhitespace(strippingComments(menuSource).codeWithoutStringLiterals)
+
+        expect(
+            controller.contains("RetainedWindowHandbackTracker<NSRunningApplication>()")
+                && controller.contains("NSWorkspace.didActivateApplicationNotification")
+                && controller.contains(".sink { [weak self]"),
+            "retained integrations window 必须弱订阅外部 activation，并把状态交给可行为测试的 tracker")
+        expect(
+            controller.contains("handbackTracker.noteExternalActivation(")
+                && controller.contains("isWindowVisible: self.window?.isVisible == true")
+                && controller.contains("ProcessInfo.processInfo.processIdentifier"),
+            "activation 输入必须携带真实可见性并排除 Claudio 自己，不能在隐藏/自激活时污染 handback")
+        expect(
+            controller.contains("if !wasVisible { handbackTracker.beginPresentation() }")
+                && controller.contains("handbackTracker.consumeOnClose()")
+                && controller.contains("restoration?(handbackApplication)"),
+            "hidden→visible 才能开新代次，close 必须一次性消费最近 app 并随焦点恢复闭包交回")
+        expect(
+            menu.contains("if let latestHandbackApplication {")
+                && menu.contains("previousApp = latestHandbackApplication"),
+            "MenuBar 必须只在窗口确实观察到新外部 app 时覆盖原 previousApp；nil 时保留最初来源")
+        expect(
+            !controller.contains("latestHandbackApplication.activate(")
+                && !controller.contains("handbackApplication.activate("),
+            "详情窗关闭时不得直接激活外部 app；先恢复 popover，等它正常关闭后再偿还 handback")
     }
 
     suite("MenuBar shell：点宿主行先选中对应详情，管理入口保留现有选择") {
@@ -146,10 +187,11 @@ func runIntegrationsWindowWiringSuites() {
             "外部刷新同帧发现多个当前代次回执时必须逐条生成短暂可关闭反馈")
         expect(
             store.contains(
-                "latestReceiptEvent: snapshots[row.host].flatMap(hostLatestReceiptEvent)")
+                "latestReceiptEvidence: snapshots[row.host].flatMap(hostLatestReceiptEvidence)")
                 && model.contains("receiptTransitions.map")
                 && model.contains("receiptTransition.event")
-                && model.contains("currentFacts.latestReceiptEvent")
+                && model.contains("currentFacts.latestReceiptEvidence")
+                && model.contains("newEvidence != oldEvidence")
                 && model.contains("integrationsStateChangeAccessibilityLabel(")
                 && model.contains("capabilityCells:")
                 && model.contains("selectedCapabilityEvent(for: host)"),
@@ -272,6 +314,31 @@ func runIntegrationsWindowWiringSuites() {
             menu.contains("requestHostIntegrationRefresh(bootstrapSharedRuntime: true)")
                 && menu.contains("provider.bootstrapSharedRuntime()"),
             "启动必须只走共享 bootstrap + inspect")
+        let menuCode = strippingComments(menu).codeWithoutStringLiterals
+        let refreshBody: String
+        if let start = menuCode.range(of: "fileprivate func requestHostIntegrationRefresh")?.lowerBound,
+            let end = menuCode.range(of: "fileprivate func publishHostIntegrationState")?.lowerBound,
+            start < end
+        {
+            refreshBody = String(menuCode[start..<end])
+        } else {
+            refreshBody = ""
+            expect(false, "无法定位 requestHostIntegrationRefresh 以检查 bootstrap completion 顺序")
+        }
+        guard
+            let providerReturn = refreshBody.range(of: "provider.bootstrapSharedRuntime()"),
+            let panelReload = refreshBody.range(
+                of: "self?.soundPacksRefreshCoordinator.completeSharedRuntimeBootstrap()"),
+            let cancellationGuard = refreshBody.range(of: "!Task.isCancelled")
+        else {
+            expect(false, "bootstrap 返回、panel full reload 与 cancellation guard 三个边界必须同时存在")
+            return
+        }
+        expect(
+            providerReturn.lowerBound < panelReload.lowerBound
+                && panelReload.lowerBound < cancellationGuard.lowerBound,
+            "bootstrap 的 panel full reload 必须在 provider 完成后、取消/代次 guard 前发布；用户中途打开面板会取消旧 task，"
+                + "但不能吞掉 bootstrap 已完成的 config/packs 变化")
         let startupCall = "requestHostIntegrationRefresh(bootstrapSharedRuntime: true)"
         let startupSuffix = menu.range(of: startupCall).map { String(menu[$0.lowerBound...]) } ?? ""
         expect(

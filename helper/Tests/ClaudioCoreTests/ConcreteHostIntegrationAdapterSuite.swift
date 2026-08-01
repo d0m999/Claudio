@@ -159,6 +159,52 @@ func runConcreteHostIntegrationAdapterSuites() async {
         }
     }
 
+    await asyncSuite("adapter 快照：同一毫秒内按完整精度选出真正最新回执") {
+        await withAsyncTempDirectory { root in
+            let paths = makeAdapterFixture(root: root)
+            writeAdapterJSON([:], to: paths.claudeSettings)
+            let adapter = ClaudeCodeIntegrationAdapter(
+                environment: ClaudeCodeIntegrationEnvironment(
+                    settingsFile: paths.claudeSettings,
+                    lockFile: root.appendingPathComponent("claude.lock"),
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    availability: { .available }))
+            guard case .success(let connected) = await adapter.connect(runtime: .ready),
+                let installationID = connected.installationID
+            else {
+                expect(false, "测试前提：Claude 必须可连接并发布代次")
+                return
+            }
+
+            let earlier = HostHookReceipt(
+                installationID: installationID,
+                host: .claudeCode,
+                nativeEvent: "Stop",
+                semanticEvent: .stop,
+                timestamp: Date(timeIntervalSince1970: 100.1234),
+                playbackResult: .played)
+            let later = HostHookReceipt(
+                installationID: installationID,
+                host: .claudeCode,
+                nativeEvent: "SubagentStop",
+                semanticEvent: .subagentStop,
+                timestamp: Date(timeIntervalSince1970: 100.1235),
+                playbackResult: .muted)
+            expect(paths.receipts.store(earlier) == .success(.written), "较早回执必须可写")
+            expect(paths.receipts.store(later) == .success(.written), "较晚回执必须可写")
+
+            let snapshot = await adapter.inspect(runtime: .ready)
+            guard case .observed(let evidence) = snapshot.activation else {
+                expect(false, "完整配置应投影当前代次真实回执")
+                return
+            }
+            expect(evidence.nativeEvent == "SubagentStop", "不得因毫秒级截断选中较早 Stop")
+            expect(evidence.timestamp == later.timestamp, "快照必须保留最新回执的完整 Date 精度")
+        }
+    }
+
     await asyncSuite("Claude adapter：modern 与 legacy 混装必须成为可操作 conflict，不能伪报缺少空列表") {
         await withAsyncTempDirectory { root in
             let paths = makeAdapterFixture(root: root)
@@ -483,6 +529,116 @@ func runConcreteHostIntegrationAdapterSuites() async {
         }
     }
 
+    await asyncSuite("Codex adapter：notifier-only wrapper 不冒充 Stop 管理者") {
+        await withAsyncTempDirectory { root in
+            let paths = makeAdapterFixture(root: root)
+            let configFile = root.appendingPathComponent(".codex/config.toml")
+            let wrapper = paths.claudioRoot.appendingPathComponent("bin/codex-notify")
+            let notifierLine = "echo notifier \"$payload\" >/dev/null 2>&1 &"
+            let legacyWrapper = Data(
+                knownAdapterLegacyWrapper(
+                    binaryPath: paths.binary.path, notifierLine: notifierLine).utf8)
+            let config = Data(adapterPreviousNotifyConfig(wrapperPath: wrapper.path).utf8)
+            guard case .success(let notifierOnly) =
+                removeClaudioBranchFromLegacyCodexNotifyWrapper(
+                    configTOML: config,
+                    wrapper: legacyWrapper,
+                    claudioRoot: paths.claudioRoot.path,
+                    claudioBinaryPath: paths.binary.path)
+            else {
+                expect(false, "测试前提：已知旧 wrapper 必须可转为 notifier-only")
+                return
+            }
+            try! notifierOnly.write(to: wrapper)
+            try! config.write(to: configFile)
+
+            let installationID = UUID(
+                uuidString: "39393939-3939-4939-8939-393939393939")!
+            let complete = CodexHooksTransform.connect(
+                nil,
+                installationID: installationID,
+                claudioBinaryPath: paths.binary.path,
+                claudioRoot: paths.claudioRoot.path)
+            try! complete.data!.write(to: paths.codexHooks)
+            let wrapperBefore = try! Data(contentsOf: wrapper)
+            let hooksBefore = try! Data(contentsOf: paths.codexHooks)
+
+            let adapter = CodexIntegrationAdapter(
+                environment: CodexIntegrationEnvironment(
+                    hooksFile: paths.codexHooks,
+                    lockFile: root.appendingPathComponent("codex.lock"),
+                    configFile: configFile,
+                    legacyNotifyWrapper: wrapper,
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    availability: { .available }))
+
+            let inspected = await adapter.inspect(runtime: .ready)
+            expect(inspected.configuration == .configured, "modern hooks 完整时应已连接")
+            expect(inspected.installationID == installationID, "必须保留 modern hooks 的代次")
+            guard case .success(let connected) = await adapter.connect(runtime: .ready) else {
+                expect(false, "notifier-only 与完整 modern hooks 必须可幂等 reconnect")
+                return
+            }
+            expect(connected.installationID == installationID, "reconnect 不得换代")
+            expect(
+                (try? Data(contentsOf: wrapper)) == wrapperBefore,
+                "notifier-only wrapper 没有 Claudio Stop 分支，不得被重写")
+            expect(
+                (try? Data(contentsOf: paths.codexHooks)) == hooksBefore,
+                "完整 modern hooks 必须幂等保持 bytes")
+        }
+    }
+
+    await asyncSuite("Codex legacy wrapper：最终 rename 前 expected-bytes CAS 保留第三方新内容") {
+        await withAsyncTempDirectory { root in
+            let paths = makeAdapterFixture(root: root)
+            let configFile = root.appendingPathComponent(".codex/config.toml")
+            let wrapper = paths.claudioRoot.appendingPathComponent("bin/codex-notify")
+            let originalWrapper = knownAdapterLegacyWrapper(
+                binaryPath: paths.binary.path,
+                notifierLine: "echo notifier \"$payload\" >/dev/null 2>&1 &")
+            let externalWrapper = Data("#!/bin/sh\nexec external-notifier \"$@\"\n".utf8)
+            writeFixture(originalWrapper, to: wrapper)
+            writeFixture(adapterPreviousNotifyConfig(wrapperPath: wrapper.path), to: configFile)
+            writeAdapterJSON([:], to: paths.codexHooks)
+            let hooksBefore = try! Data(contentsOf: paths.codexHooks)
+
+            let adapter = CodexIntegrationAdapter(
+                environment: CodexIntegrationEnvironment(
+                    hooksFile: paths.codexHooks,
+                    lockFile: root.appendingPathComponent("codex-config.lock"),
+                    operationLockFile: root.appendingPathComponent("codex-operation.lock"),
+                    configFile: configFile,
+                    legacyNotifyWrapper: wrapper,
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    availability: { .available },
+                    beforeLegacyWrapperFinalPublish: {
+                        try! externalWrapper.write(to: wrapper)
+                    }))
+
+            guard case .failure(.migrationConflict(let reason)) =
+                await adapter.connect(runtime: .ready)
+            else {
+                expect(false, "staging 后 wrapper 被外部修改必须拒绝最终 rename")
+                return
+            }
+            expect(reason.contains("最终迁移之间发生变化"), "冲突理由必须指出最终发布 CAS，got \(reason)")
+            expect(
+                (try? Data(contentsOf: wrapper)) == externalWrapper,
+                "第三方在 staging 后发布的新 notifier 必须逐字节存活")
+            expect(
+                (try? Data(contentsOf: paths.codexHooks)) == hooksBefore,
+                "wrapper CAS 失败后 hooks.json 必须零写入")
+            expect(
+                paths.receipts.currentInstallationID(host: .codex) == nil,
+                "wrapper CAS 失败不得发布 activation marker")
+        }
+    }
+
     await asyncSuite("Codex adapter：未知或修改过的旧 wrapper fail closed，不另装 Stop") {
         await withAsyncTempDirectory { root in
             let paths = makeAdapterFixture(root: root)
@@ -567,6 +723,133 @@ func runConcreteHostIntegrationAdapterSuites() async {
             expect(
                 paths.receipts.currentInstallationID(host: .codex) == nil,
                 "Codex hooks.json 缺失时不能遗留 active marker")
+        }
+    }
+
+    await asyncSuite("双 adapter：dangling 配置 symlink 必须在只读快照中显式阻塞") {
+        await withAsyncTempDirectory { root in
+            let paths = makeAdapterFixture(root: root)
+            let missingClaudeTarget = root.appendingPathComponent("dotfiles/claude-settings.json")
+            let missingCodexTarget = root.appendingPathComponent("dotfiles/codex-hooks.json")
+            try! FileManager.default.createSymbolicLink(
+                at: paths.claudeSettings, withDestinationURL: missingClaudeTarget)
+            try! FileManager.default.createSymbolicLink(
+                at: paths.codexHooks, withDestinationURL: missingCodexTarget)
+
+            let claude = ClaudeCodeIntegrationAdapter(
+                environment: ClaudeCodeIntegrationEnvironment(
+                    settingsFile: paths.claudeSettings,
+                    lockFile: root.appendingPathComponent("claude.lock"),
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    availability: { .available }))
+            let codex = CodexIntegrationAdapter(
+                environment: CodexIntegrationEnvironment(
+                    hooksFile: paths.codexHooks,
+                    lockFile: root.appendingPathComponent("codex.lock"),
+                    configFile: root.appendingPathComponent("config.toml"),
+                    legacyNotifyWrapper: root.appendingPathComponent("codex-notify"),
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    availability: { .available }))
+
+            for snapshot in [
+                await claude.inspect(runtime: .ready),
+                await codex.inspect(runtime: .ready),
+            ] {
+                guard case .unreadable(let configurationReason) = snapshot.configuration,
+                    case .notWritable(let writabilityReason) = snapshot.writability
+                else {
+                    expect(false, "dangling symlink 必须同时阻塞配置与维护，got \(snapshot)")
+                    continue
+                }
+                expect(
+                    configurationReason.contains("符号链接")
+                        && configurationReason.contains("目标不存在"),
+                    "配置理由必须暴露 dangling symlink，got \(configurationReason)")
+                expect(
+                    writabilityReason.contains("符号链接")
+                        && writabilityReason.contains("目标不存在"),
+                    "维护理由必须与真实阻塞一致，got \(writabilityReason)")
+            }
+            guard case .failure = await claude.connect(runtime: .ready),
+                case .failure = await codex.connect(runtime: .ready)
+            else {
+                expect(false, "dangling symlink 不得到真正连接时才意外成功")
+                return
+            }
+            expect(!FileManager.default.fileExists(atPath: missingClaudeTarget.path), "不得创建 Claude 目标")
+            expect(!FileManager.default.fileExists(atPath: missingCodexTarget.path), "不得创建 Codex 目标")
+        }
+    }
+
+    await asyncSuite("双 adapter：已连接配置的父目录不可发布时必须报维护故障") {
+        await withAsyncTempDirectory { root in
+            let paths = makeAdapterFixture(root: root)
+            let installationID = UUID(
+                uuidString: "40404040-4040-4040-8040-404040404040")!
+            guard case .success(let claudeMutation) = connectClaudeCodeHooks(
+                root: [:],
+                claudioRoot: paths.claudioRoot.path,
+                claudioBinaryPath: paths.binary.path,
+                installationID: installationID)
+            else {
+                expect(false, "测试前提：必须生成 Claude modern hooks")
+                return
+            }
+            writeAdapterJSON(claudeMutation.root, to: paths.claudeSettings)
+            let codexMutation = CodexHooksTransform.connect(
+                nil,
+                installationID: installationID,
+                claudioBinaryPath: paths.binary.path,
+                claudioRoot: paths.claudioRoot.path)
+            try! codexMutation.data!.write(to: paths.codexHooks)
+
+            let claudeParent = paths.claudeSettings.deletingLastPathComponent()
+            let codexParent = paths.codexHooks.deletingLastPathComponent()
+            for parent in [claudeParent, codexParent] {
+                try! FileManager.default.setAttributes(
+                    [.posixPermissions: 0o500], ofItemAtPath: parent.path)
+            }
+            defer {
+                for parent in [claudeParent, codexParent] {
+                    try? FileManager.default.setAttributes(
+                        [.posixPermissions: 0o700], ofItemAtPath: parent.path)
+                }
+            }
+
+            let claude = ClaudeCodeIntegrationAdapter(
+                environment: ClaudeCodeIntegrationEnvironment(
+                    settingsFile: paths.claudeSettings,
+                    lockFile: root.appendingPathComponent("claude.lock"),
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    availability: { .available }))
+            let codex = CodexIntegrationAdapter(
+                environment: CodexIntegrationEnvironment(
+                    hooksFile: paths.codexHooks,
+                    lockFile: root.appendingPathComponent("codex.lock"),
+                    configFile: root.appendingPathComponent("config.toml"),
+                    legacyNotifyWrapper: root.appendingPathComponent("codex-notify"),
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    availability: { .available }))
+
+            for snapshot in [
+                await claude.inspect(runtime: .ready),
+                await codex.inspect(runtime: .ready),
+            ] {
+                expect(snapshot.configuration == .configured, "配置内容本身仍应可识别")
+                guard case .notWritable(let reason) = snapshot.writability else {
+                    expect(false, "已连接但无法 staging/rename 必须成为维护故障")
+                    continue
+                }
+                expect(reason.contains("原子替换"), "故障理由必须说明真实发布阻塞，got \(reason)")
+            }
         }
     }
 
