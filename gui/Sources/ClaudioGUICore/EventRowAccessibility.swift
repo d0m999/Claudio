@@ -10,11 +10,8 @@ import Foundation
 /// never by asserting on the actual returned string. `EventRowAccessibilitySuite` asserts on
 /// these two functions' return values directly — the strings themselves, not their wiring.
 ///
-/// `eventDisplayName` is presentation copy the caller supplies (mirrors
-/// ``PanelAnnouncementFacts/header``): the Chinese event-name mapping
-/// (`EventRowView.eventDisplayName(_:)`) stays out of this Foundation-only module exactly like
-/// `PanelView`'s `headerAccessibilityLabel` stays out of `PanelAnnouncement.swift` — these two
-/// functions only own the DECISION of how that name composes with `coverage`/`enabled`.
+/// `eventDisplayName` is stable semantic copy the caller supplies from `Event.displayName`.
+/// These functions only own the DECISION of how that name composes with `coverage`/`enabled`.
 
 /// The row's combined identity announcement (DESIGN.md「无障碍规格」: "事件行→「{事件名}，
 /// 声音 {文件名}，{已启用/已静音}」") — lands on `EventRowView`'s non-interactive `identity`

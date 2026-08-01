@@ -1,11 +1,11 @@
 # Claudio
 
-Claude Code 的语义化提示音 · 策展声音包（macOS 菜单栏 app）。核心记忆点：**不回头也知道状态**。
+Claude Code + Codex 双宿主的语义化提示音 · 策展声音包（macOS 菜单栏 app）。核心记忆点：**不回头也知道状态**。
 
 ## 文件分工
 
 - **[DESIGN.md](./DESIGN.md)** —— 视觉设计系统（美学 / 字体 / 配色 / 间距 / 布局 / 动效 / 声音视觉语言 / App 图标）。
-- **[ENGINEERING.md](./ENGINEERING.md)** —— 产品 + 工程 spec（架构、helper-CLI 契约、settings.json 接管、声音包格式、实现任务、评审决议）。
+- **[ENGINEERING.md](./ENGINEERING.md)** —— 产品 + 工程 spec（双 adapter 架构、helper-CLI 契约、宿主集成、真实回执、声音包格式、实现任务、评审决议）。
 - **[TODOS.md](./TODOS.md)** —— 已知遗留问题台账（red-team / review 发现但暂不阻断发布的项，含 Effort / Priority / 依赖）。
 - **[plan/](./plan/)** —— 各功能模块的实施计划与编排结果（`PLAN-*.md` / `ORCHESTRATION-*.md`）。这类文档随实现推进会过期，落地后请回读校正而非当作实时状态。
 

@@ -48,18 +48,17 @@ struct ClaudioGUIApp: App {
 /// structured: `Scene` bodies model WINDOWS, and this app deliberately has none).
 final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
+    private var hostIntegrationBridge: HostIntegrationManagerBridge?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `.accessory`: no Dock icon, no menu bar application menu — the correct activation
         // policy for a menu-bar-only utility (DESIGN.md「空间 / 同类」: menubar 工具类 app).
         NSApp.setActivationPolicy(.accessory)
 
-        // Bundled packs default to `nil` here — matches ENGINEERING.md T17's own decision
-        // for `PlayEnvironment.bundledPacksDirectory` ("v1 只走「复制进用户包」这一条路径，
-        // 两套路径并存会制造第二个查找顺序，故意不做"): by the time the operational panel
-        // can render at all (onboarding already reports `.installed`), `claudio
-        // setup`/`performFirstRunSetup` has already copied every bundled pack into the user
-        // pack root, so the panel's pack gallery only ever needs to look there.
+        // Bundled packs stay out of the runtime lookup order (`bundledPacksDirectory == nil`).
+        // The panel is always renderable now, including before either host is connected; the
+        // manager-backed launch task separately runs SharedRuntimeBootstrap to publish bundled
+        // packs into the user root, then refreshes this same injected environment.
         //
         // `factoryPacksDirectory` 回答一个不同的问题（``AudioImportEnvironment/factoryPacksDirectory``
         // 的 doc、PLAN-SOUND-MANAGER.md §2.3/T6）：不是「去哪查」（那是上面恒 `nil` 的
@@ -78,15 +77,55 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
             durationProbe: AVFoundationAudioDurationProbe(),
             packsLockFile: ClaudioPaths.packsLockFile)
 
+        // The shell starts from honest, fail-closed facts: both rows exist, neither is fabricated
+        // as connected. A manager-backed provider can replace this matrix asynchronously without
+        // changing either UI surface or teaching the views how to inspect host files.
+        let disconnectedSnapshots = HostID.allCases.map {
+            HostIntegrationSnapshot.disconnected(host: $0)
+        }
+        let hostCapabilities = Dictionary(
+            uniqueKeysWithValues: HostID.allCases.map { host in
+                (host, HostCapabilityCatalog.bindings(for: host))
+            })
+        let disconnectedMatrix = AudibilityMatrix.make(
+            snapshots: disconnectedSnapshots,
+            capabilities: hostCapabilities,
+            soundCoverage: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, false) }),
+            enabledEvents: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
+        let initialIntegrationState = HostIntegrationPresentationState(
+            snapshots: disconnectedSnapshots,
+            matrix: disconnectedMatrix)
+
         // The ONLY `Bundle.main` in the app (T17). Everything downstream of it — is this really
         // the helper? is it runnable? what gets copied where? — is a pure function in
         // `ClaudioGUICore`, unit-tested against a real fixture bundle. What is left here is a
         // single branchless token, `.main`, with no decision in it and nothing to get wrong.
         //
-        // `nil` under `swift run ClaudioGUI` (no bundle): NOT swallowed — it travels all the way
-        // to the panel as a real `.helperUnavailable` error the moment the user presses 接管.
+        // `nil` under `swift run ClaudioGUI` (no bundled helper) 也不伪造成功：bootstrapper
+        // 会检查固定 helper 路径，不可用时通过双宿主 snapshot 呈现 runtime 损坏。
+        let bundledHelper = bundledHelperBinary(in: .main)
+        let setupEnvironment = SetupEnvironment(
+            executablePath: bundledHelper ?? ClaudioPaths.claudioBinary)
+        let integrationManager = HostIntegrationManager(
+            adapters: [ClaudeCodeIntegrationAdapter(), CodexIntegrationAdapter()],
+            bootstrapper: SystemSharedRuntimeBootstrapper(environment: setupEnvironment))
+        let integrationBridge = HostIntegrationManagerBridge(
+            manager: integrationManager,
+            configFile: ClaudioPaths.configFile,
+            audioEnvironment: audioEnvironment)
+        hostIntegrationBridge = integrationBridge
+
+        let integrationMatrixProvider = HostIntegrationMatrixProvider(
+            refresh: { await integrationBridge.refresh() },
+            bootstrap: { await integrationBridge.bootstrapSharedRuntime() })
+        let integrationActionProvider = HostIntegrationActionProvider { action in
+            try await integrationBridge.perform(action)
+        }
+
         menuBarController = MenuBarController(
             audioEnvironment: audioEnvironment,
-            bundledHelperBinary: bundledHelperBinary(in: .main))
+            hostIntegrationState: initialIntegrationState,
+            integrationMatrixProvider: integrationMatrixProvider,
+            integrationActionProvider: integrationActionProvider)
     }
 }

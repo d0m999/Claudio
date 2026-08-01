@@ -26,11 +26,12 @@ import Foundation
 func runPreviewFixturesSuites() {
     // Replaces the former `expect(true, ...)` tautology (T14 review 修复②), which could never
     // fail yet still counted as a check. `assertExhaustive()` now RETURNS the `family.case`
-    // labels its six exhaustive `switch`es actually visited, so this compares that set against
+    // labels its state-family guards and dual-host scenario catalog actually visited, so this
+    // compares that set against
     // the complete expected roster: a fixture array that stops covering one of its enum's cases
     // (a case whose `switch` branch exists but is never REACHED — which compiles perfectly)
     // turns this red.
-    suite("PreviewFixtures.assertExhaustive() visits every case of all SIX state families") {
+    suite("PreviewFixtures.assertExhaustive() visits every case plus all dual-host scenarios") {
         let visited = PreviewFixtures.assertExhaustive()
         let expected: Set<String> = [
             "onboarding.claudeCodeNotInstalled", "onboarding.helperMissing",
@@ -61,10 +62,20 @@ func runPreviewFixturesSuites() {
             // 「行 + 错误行」组合帧——D16「音量 0 = 全局静音」这类最难手动复现的态——落地前零仓库内
             // 视觉验证，而这条断言仍会全绿（因为其余五族依然完美覆盖它们自己的 case）。
             "masterVolume.value", "masterVolume.failed",
+            "hostIntegration.dual-disconnected",
+            "hostIntegration.claude-only",
+            "hostIntegration.codex-only",
+            "hostIntegration.dual-connected",
+            "hostIntegration.codex-awaiting",
+            "hostIntegration.claude-legacy",
+            "hostIntegration.codex-normal-3-of-4",
+            "hostIntegration.partial-single-degraded",
+            "hostIntegration.shared-runtime-failure",
+            "hostIntegration.single-side-connection-failure",
         ]
         expect(
             visited == expected,
-            "the shipped fixtures must exercise every case of all five state families;"
+            "the shipped fixtures must exercise every state case and dual-host scenario;"
                 + " missing \(expected.subtracting(visited)), unexpected \(visited.subtracting(expected))"
         )
     }
@@ -228,6 +239,138 @@ func runPreviewFixturesSuites() {
             combos == expected,
             "packCards must cover every PackCardState × isSelected combination exactly, got \(combos)"
         )
+    }
+
+    // MARK: - Dual-host integration scenarios
+
+    suite("PreviewFixtures.hostIntegrationScenarios pins the complete 10-state product roster") {
+        let expectedIDs = [
+            "dual-disconnected",
+            "claude-only",
+            "codex-only",
+            "dual-connected",
+            "codex-awaiting",
+            "claude-legacy",
+            "codex-normal-3-of-4",
+            "partial-single-degraded",
+            "shared-runtime-failure",
+            "single-side-connection-failure",
+        ]
+        let scenarios = PreviewFixtures.hostIntegrationScenarios
+        expect(
+            scenarios.map(\.id) == expectedIDs,
+            "双宿主 gallery 必须按稳定顺序覆盖 10 个产品态，实得 \(scenarios.map(\.id))")
+        expect(
+            Set(scenarios.map(\.id)).count == scenarios.count,
+            "双宿主 gallery scenario ID 必须唯一")
+    }
+
+    suite("Host integration fixtures: every frame is a catalog-driven 4×2 AudibilityMatrix") {
+        for scenario in PreviewFixtures.hostIntegrationScenarios {
+            expect(
+                scenario.state.snapshots.map(\.host) == HostID.allCases,
+                "\(scenario.id) 必须同时带 Claude Code/Codex 快照")
+            expect(
+                scenario.state.matrix.rows.map(\.event) == Event.allCases,
+                "\(scenario.id) 必须由 Event.allCases 生成四行")
+            for row in scenario.state.matrix.rows {
+                expect(
+                    row.cells.map(\.host) == HostID.allCases,
+                    "\(scenario.id)/\(row.event) 必须由两宿主生成两格")
+                for cell in row.cells {
+                    expect(
+                        cell.binding == HostCapabilityCatalog.binding(
+                            host: cell.host, event: row.event),
+                        "\(scenario.id)/\(cell.host)/\(row.event) 必须直接复用 catalog binding")
+                }
+            }
+        }
+    }
+
+    suite("Host integration fixtures: 3/4 stays normal; awaiting, legacy and failures stay distinct") {
+        func scenario(_ id: String) -> PreviewFixtures.HostIntegrationScenario? {
+            PreviewFixtures.hostIntegrationScenarios.first(where: { $0.id == id })
+        }
+
+        let disconnected = scenario("dual-disconnected")
+        expect(
+            disconnected?.state.matrix.summary(for: .claudeCode)
+                == .notConnected(supported: 4, total: 4)
+                && disconnected?.state.matrix.summary(for: .codex)
+                    == .notConnected(supported: 3, total: 4),
+            "双未连必须保留两宿主各自的 4/4 与 3/4 能力事实")
+        let claudeOnly = scenario("claude-only")
+        expect(
+            claudeOnly?.state.matrix.summary(for: .claudeCode)
+                == .ready(supported: 4, total: 4)
+                && claudeOnly?.state.matrix.summary(for: .codex)
+                    == .notConnected(supported: 3, total: 4),
+            "Claude-only 必须一侧 ready、一侧 notConnected")
+        let codexOnly = scenario("codex-only")
+        expect(
+            codexOnly?.state.matrix.summary(for: .claudeCode)
+                == .notConnected(supported: 4, total: 4)
+                && codexOnly?.state.matrix.summary(for: .codex)
+                    == .ready(supported: 3, total: 4),
+            "Codex-only 必须一侧 notConnected、一侧正常 3/4 ready")
+        let dualConnected = scenario("dual-connected")
+        expect(
+            dualConnected?.state.matrix.summary(for: .claudeCode)
+                == .ready(supported: 4, total: 4)
+                && dualConnected?.state.matrix.summary(for: .codex)
+                    == .ready(supported: 3, total: 4),
+            "双连接必须同时显示 Claude 4/4 与 Codex 3/4 ready")
+
+        let codexNormal = scenario("codex-normal-3-of-4")
+        expect(
+            codexNormal?.state.matrix.summary(for: .codex)
+                == .ready(supported: 3, total: 4),
+            "Codex 3/4 必须是中性成功 ready")
+        expect(
+            codexNormal?.state.matrix.cell(host: .codex, event: .stopFailure)?.state
+                == .unsupported,
+            "Codex 第四格必须严格 unsupported，不得降级映射")
+
+        expect(
+            scenario("codex-awaiting")?.state.matrix.summary(for: .codex)
+                == .awaitingActivation(supported: 3, total: 4),
+            "Codex 等待 /hooks 确认必须独立于已连接")
+        expect(
+            scenario("claude-legacy")?.state.matrix.summary(for: .claudeCode)
+                == .legacy(supported: 4, total: 4),
+            "Claude legacy 必须保留可听但无真实回执语义")
+
+        if case .needsAttention = scenario("partial-single-degraded")?.state.matrix.summary(
+            for: .claudeCode)
+        {
+            expect(true, "partial 一侧必须 degraded")
+        } else {
+            expect(false, "partial 一侧必须 degraded")
+        }
+        expect(
+            scenario("partial-single-degraded")?.state.matrix.summary(for: .codex)
+                == .ready(supported: 3, total: 4),
+            "一侧 degraded 不得冻结另一侧")
+
+        let sharedFailure = scenario("shared-runtime-failure")
+        for host in HostID.allCases {
+            if case .needsAttention = sharedFailure?.state.matrix.summary(for: host) {
+                expect(true, "共享 runtime 损坏必须影响 \(host.displayName)")
+            } else {
+                expect(false, "共享 runtime 损坏必须影响 \(host.displayName)")
+            }
+        }
+
+        let oneSideFailure = scenario("single-side-connection-failure")
+        if case .needsAttention = oneSideFailure?.state.matrix.summary(for: .claudeCode) {
+            expect(true, "连接失败侧必须 needsAttention")
+        } else {
+            expect(false, "连接失败侧必须 needsAttention")
+        }
+        expect(
+            oneSideFailure?.state.matrix.summary(for: .codex)
+                == .ready(supported: 3, total: 4),
+            "单侧连接失败不得传染另一侧")
     }
 }
 

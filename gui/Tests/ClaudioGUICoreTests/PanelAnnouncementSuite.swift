@@ -69,6 +69,14 @@ private func reachableOpenMoments(for actionState: OnboardingActionState)
 
 @MainActor
 func runPanelAnnouncementSuites() {
+    suite("双宿主面板播报：只消费已组合 header，并规范为一句完整播报") {
+        expect(dualHostPanelAnnouncement(header: "") == nil, "空 header 不得打断 VoiceOver")
+        expect(
+            dualHostPanelAnnouncement(header: "Claudio 面板，2 个声音来源")
+                == "Claudio 面板，2 个声音来源。",
+            "双宿主运行面板不得再附加已被移除的 Claude onboarding 屏幕文案")
+    }
+
     suite("T17g 时刻名册：每一个 PanelAnnouncementMoment 变体都被这套 suite 真的喂过一次") {
         expect(
             Set(allMoments.map(momentLabel))

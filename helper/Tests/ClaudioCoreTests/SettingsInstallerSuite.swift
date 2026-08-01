@@ -10,6 +10,7 @@ import Foundation
 // style) that claudio must never touch (T3 spike: both are real, not hypothetical).
 
 private let testClaudioBinaryPath = "/Users/tester/.claudio/bin/claudio"
+private let testClaudioRootPath = "/Users/tester/.claudio"
 
 private func readRawString(at url: URL) -> String? {
     try? String(contentsOf: url, encoding: .utf8)
@@ -32,6 +33,329 @@ private func commands(inGroup group: [String: Any]) -> [String] {
 
 @MainActor
 func runSettingsInstallerSuites() {
+    suite("installClaudioHooks：完整现代 Claude 连接按幂等成功处理，不混装 legacy hook") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("settings.lock")
+            let installationID = UUID(
+                uuidString: "51515151-1111-4111-8111-111111111111")!
+            let thirdParty: [String: Any] = [
+                "hooks": [
+                    "Stop": [[
+                        "matcher": "third-party",
+                        "hooks": [["type": "command", "command": "echo keep"]],
+                    ]]
+                ],
+                "opaque": ["keep": true],
+            ]
+            guard case .success(let modern) = connectClaudeCodeHooks(
+                root: thirdParty,
+                claudioRoot: testClaudioRootPath,
+                claudioBinaryPath: testClaudioBinaryPath,
+                installationID: installationID)
+            else {
+                expect(false, "测试前提：必须能生成现代 Claude 配置")
+                return
+            }
+            let data = try! JSONSerialization.data(
+                withJSONObject: modern.root, options: [.prettyPrinted, .sortedKeys])
+            try! data.write(to: settingsFile)
+            let before = try! Data(contentsOf: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+
+            expect(
+                result == .success(.modernConnectionPresent),
+                "完整现代连接必须成功 no-op，并返回可区分结果，got \(result)")
+            expect(
+                (try? Data(contentsOf: settingsFile)) == before,
+                "现代连接幂等 no-op 时 settings.json 必须逐字节不变")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: settingsFile.appendingPathExtension("claudio.bak").path),
+                "零写入 no-op 不能制造一次性备份")
+        }
+    }
+
+    suite("installClaudioHooks：部分现代 Claude 配置失败关闭，不能用 legacy 补成混合连接") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("settings.lock")
+            let installationID = UUID(
+                uuidString: "52525252-2222-4222-8222-222222222222")!
+            let stop = hostIntegrationHookCommand(
+                host: .claudeCode,
+                nativeEvent: "Stop",
+                installationID: installationID,
+                claudioBinaryPath: testClaudioBinaryPath)!
+            let partial: [String: Any] = [
+                "hooks": [
+                    "Stop": [[
+                        "hooks": [["type": "command", "command": stop]]
+                    ]],
+                    "PreToolUse": [[
+                        "matcher": "third-party",
+                        "hooks": [["type": "command", "command": "echo keep"]],
+                    ]],
+                ],
+                "opaque": "keep",
+            ]
+            let data = try! JSONSerialization.data(
+                withJSONObject: partial, options: [.prettyPrinted, .sortedKeys])
+            try! data.write(to: settingsFile)
+            let before = try! Data(contentsOf: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+
+            guard case .failure(let error) = result else {
+                expect(false, "部分 modern 配置必须失败关闭，got \(result)")
+                return
+            }
+            expect(
+                error.description.contains("现代")
+                    && error.description.contains("不完整")
+                    && error.description.contains("integrations connect"),
+                "失败理由必须解释 partial 状态与修复入口，got \(error.description)")
+            expect(
+                (try? Data(contentsOf: settingsFile)) == before,
+                "partial 失败关闭时 settings.json 必须逐字节不变")
+        }
+    }
+
+    suite("installClaudioHooks：冲突的现代 Claude 配置失败关闭且零写入") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("settings.lock")
+            let installationID = UUID(
+                uuidString: "52525252-3333-4333-8333-333333333333")!
+            guard case .success(let modern) = connectClaudeCodeHooks(
+                root: [:],
+                claudioRoot: testClaudioRootPath,
+                claudioBinaryPath: testClaudioBinaryPath,
+                installationID: installationID)
+            else {
+                expect(false, "测试前提：必须生成完整现代 Claude 配置")
+                return
+            }
+            var conflicting = modern.root
+            var hooks = conflicting["hooks"] as! [String: Any]
+            var stopGroups = hooks["Stop"] as! [Any]
+            stopGroups.append(stopGroups.last!)
+            hooks["Stop"] = stopGroups
+            conflicting["hooks"] = hooks
+            let data = try! JSONSerialization.data(
+                withJSONObject: conflicting, options: [.prettyPrinted, .sortedKeys])
+            try! data.write(to: settingsFile)
+            let before = try! Data(contentsOf: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+
+            guard case .failure(let error) = result else {
+                expect(false, "冲突的 modern 配置必须失败关闭，got \(result)")
+                return
+            }
+            expect(
+                error.description.contains("重复或不同安装代次")
+                    && error.description.contains("integrations connect"),
+                "冲突诊断必须保留 adapter 原因与修复入口，got \(error.description)")
+            expect(
+                (try? Data(contentsOf: settingsFile)) == before,
+                "modern conflict 拒绝时 settings.json 必须逐字不变")
+        }
+    }
+
+    suite("installClaudioHooks：现代 callback 旁有畸形 group 时失败关闭，不能绕过 inspect 追加 legacy") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("settings.lock")
+            let installationID = UUID(
+                uuidString: "54545454-4444-4444-8444-444444444444")!
+            guard case .success(let modern) = connectClaudeCodeHooks(
+                root: [:],
+                claudioRoot: testClaudioRootPath,
+                claudioBinaryPath: testClaudioBinaryPath,
+                installationID: installationID)
+            else {
+                expect(false, "测试前提：必须生成完整现代 Claude 配置")
+                return
+            }
+            var malformed = modern.root
+            var hooks = malformed["hooks"] as! [String: Any]
+            var stopGroups = hooks["Stop"] as! [Any]
+            stopGroups.append(["matcher": "third-party-without-hooks-array"])
+            hooks["Stop"] = stopGroups
+            malformed["hooks"] = hooks
+            let data = try! JSONSerialization.data(
+                withJSONObject: malformed, options: [.prettyPrinted, .sortedKeys])
+            try! data.write(to: settingsFile)
+            let before = try! Data(contentsOf: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+
+            guard case .failure(let error) = result else {
+                expect(
+                    false,
+                    "inspect 无法安全分类时 legacy installer 必须失败关闭，got \(result)")
+                return
+            }
+            expect(
+                error.description.contains("现代")
+                    && error.description.contains("无法安全检查")
+                    && error.description.contains("integrations connect"),
+                "畸形 sibling 诊断必须说明检查失败与修复入口，got \(error.description)")
+            expect(
+                (try? Data(contentsOf: settingsFile)) == before,
+                "inspect failure 后不得追加任何 legacy callback")
+        }
+    }
+
+    suite("installClaudioHooks：modern 与 legacy 已混装时返回 typed repair error 且零写入") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("settings.lock")
+            let installationID = UUID(
+                uuidString: "55555555-5555-4555-8555-555555555555")!
+            guard case .success(let modern) = connectClaudeCodeHooks(
+                root: [:],
+                claudioRoot: testClaudioRootPath,
+                claudioBinaryPath: testClaudioBinaryPath,
+                installationID: installationID)
+            else {
+                expect(false, "测试前提：必须生成完整现代 Claude 配置")
+                return
+            }
+            var mixed = modern.root
+            var hooks = mixed["hooks"] as! [String: Any]
+            var stopGroups = hooks["Stop"] as! [Any]
+            stopGroups.append([
+                "hooks": [[
+                    "type": "command",
+                    "command": claudioHookCommand(
+                        for: .stop, claudioBinaryPath: testClaudioBinaryPath),
+                ]]
+            ])
+            hooks["Stop"] = stopGroups
+            mixed["hooks"] = hooks
+            let data = try! JSONSerialization.data(
+                withJSONObject: mixed, options: [.prettyPrinted, .sortedKeys])
+            try! data.write(to: settingsFile)
+            let before = try! Data(contentsOf: settingsFile)
+
+            let result = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+
+            guard case .failure(let error) = result else {
+                expect(false, "mixed modern/legacy 必须失败关闭，got \(result)")
+                return
+            }
+            expect(
+                error.description.contains("现代与 legacy")
+                    && error.description.contains("重复播放")
+                    && error.description.contains("integrations connect"),
+                "mixed 诊断必须说明重复播放风险与 repair 入口，got \(error.description)")
+            expect(
+                (try? Data(contentsOf: settingsFile)) == before,
+                "mixed repair error 必须保持原配置逐字不变")
+        }
+    }
+
+    suite("installClaudioHooks：同 root 旧 helper modern callback 一律失败关闭，不能追加 legacy") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("settings.lock")
+            let staleBinary = testClaudioRootPath + "/libexec/claudio"
+            let staleID = UUID(
+                uuidString: "53535353-3333-4333-8333-333333333333")!
+            let staleStop = hostIntegrationHookCommand(
+                host: .claudeCode,
+                nativeEvent: "Stop",
+                installationID: staleID,
+                claudioBinaryPath: staleBinary)!
+            let staleOnly: [String: Any] = [
+                "hooks": [
+                    "Stop": [
+                        ["hooks": [["type": "command", "command": "echo keep"]]],
+                        ["hooks": [["type": "command", "command": staleStop]]],
+                    ]
+                ]
+            ]
+            let staleData = try! JSONSerialization.data(
+                withJSONObject: staleOnly, options: [.prettyPrinted, .sortedKeys])
+            try! staleData.write(to: settingsFile)
+            let staleBefore = try! Data(contentsOf: settingsFile)
+
+            let staleResult = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            guard case .failure(let staleError) = staleResult else {
+                expect(false, "只有旧路径 modern 时 legacy install 必须失败关闭，got \(staleResult)")
+                return
+            }
+            expect(
+                staleError.description.contains("旧 helper")
+                    && staleError.description.contains("integrations connect"),
+                "stale modern 失败必须说明路径迁移与修复入口，got \(staleError.description)")
+            expect(
+                (try? Data(contentsOf: settingsFile)) == staleBefore,
+                "stale-only 拒绝时第三方与旧 callback 必须逐字不变")
+
+            let currentID = UUID(
+                uuidString: "53535353-4444-4444-8444-444444444444")!
+            guard case .success(let current) = connectClaudeCodeHooks(
+                root: [:],
+                claudioRoot: testClaudioRootPath,
+                claudioBinaryPath: testClaudioBinaryPath,
+                installationID: currentID)
+            else {
+                expect(false, "测试前提：必须生成完整 current modern 配置")
+                return
+            }
+            var currentPlusStale = current.root
+            var hooks = currentPlusStale["hooks"] as! [String: Any]
+            var stopGroups = hooks["Stop"] as! [Any]
+            stopGroups.insert(["hooks": [["type": "command", "command": staleStop]]], at: 0)
+            hooks["Stop"] = stopGroups
+            currentPlusStale["hooks"] = hooks
+            let mixedData = try! JSONSerialization.data(
+                withJSONObject: currentPlusStale, options: [.prettyPrinted, .sortedKeys])
+            try! mixedData.write(to: settingsFile)
+            let mixedBefore = try! Data(contentsOf: settingsFile)
+
+            let mixedResult = installClaudioHooks(
+                settingsFile: settingsFile,
+                claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            guard case .failure(let mixedError) = mixedResult else {
+                expect(
+                    false,
+                    "current complete + stale 不能被掩盖成 modernConnectionPresent，got \(mixedResult)")
+                return
+            }
+            expect(
+                mixedError.description.contains("旧 helper")
+                    && mixedError.description.contains("integrations connect"),
+                "current+stale 也必须给出显式 repair 入口，got \(mixedError.description)")
+            expect(
+                (try? Data(contentsOf: settingsFile)) == mixedBefore,
+                "current+stale 拒绝时 settings.json 必须逐字不变")
+        }
+    }
+
     suite("installClaudioHooks: fresh settings.json (none exists) installs all four events, no backup") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")

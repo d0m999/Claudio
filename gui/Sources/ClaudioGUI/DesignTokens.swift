@@ -93,7 +93,7 @@ enum ClaudioColor {
         clay(scheme).opacity(scheme == .dark ? 0.15 : 0.12)
     }
 
-    /// UI-semantic `success` — used only for the "已接管" header dot in T7's scope.
+    /// UI-semantic `success` — current-installation receipt observed for a host source.
     static func success(_ scheme: ColorScheme) -> Color {
         scheme == .dark
             ? Color(hex: ClaudioColorHex.successDark) : Color(hex: ClaudioColorHex.successLight)

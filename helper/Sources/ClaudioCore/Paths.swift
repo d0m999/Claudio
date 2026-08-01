@@ -103,6 +103,55 @@ public enum ClaudioPaths {
         root.appendingPathComponent("settings.lock")
     }
 
+    /// Claude Code 现代 adapter 与 legacy install 共用同一配置文件，因此必须共用同一把锁。
+    public static var claudeIntegrationLockFile: URL { settingsLockFile }
+
+    /// Codex hooks 配置拥有独立文件与独立锁；不得与 Claude 或声音播放互相争用。
+    public static var codexIntegrationLockFile: URL {
+        root.appendingPathComponent("codex-hooks.lock")
+    }
+
+    /// 宿主级连接/断开事务锁。配置文件自己的锁只保护一次 JSON
+    /// read-modify-write；这把独立锁覆盖「配置变换 + legacy wrapper 迁移
+    /// + active installation marker 发布/撤销」的整个操作，防止两个 CLI/GUI
+    /// 进程交错成「已断开配置 + 仍有效旧 marker」。它不能与内层配置锁
+    /// 同路径，否则非阻塞 `flock` 会让进程自己争用自己。
+    public static func hostIntegrationOperationLockFile(_ host: HostID) -> URL {
+        root.appendingPathComponent("\(host.rawValue)-operation.lock")
+    }
+
+    /// 双宿主回执与宿主级去抖状态的 Claudio 自有根目录。
+    public static var integrationsDirectory: URL {
+        root.appendingPathComponent("integrations", isDirectory: true)
+    }
+
+    public static var receiptsDirectory: URL {
+        integrationsDirectory.appendingPathComponent("receipts", isDirectory: true)
+    }
+
+    public static var receiptLocksDirectory: URL {
+        integrationsDirectory.appendingPathComponent("receipt-locks", isDirectory: true)
+    }
+
+    /// 当前宿主 installation 代次的最小标记。它与事件回执分开，断开/重连后可在
+    /// 写入点拒绝迟到的旧 hook，而不是等旧回执覆盖后才在读取时发现。
+    public static var activeInstallationsDirectory: URL {
+        integrationsDirectory.appendingPathComponent("installations", isDirectory: true)
+    }
+
+    public static var activeInstallationLocksDirectory: URL {
+        integrationsDirectory.appendingPathComponent("installation-locks", isDirectory: true)
+    }
+
+    /// 新版 hook 按宿主分锁、分时间戳；Claude 与 Codex 在 1.5 秒内的真实事件不会互相吞掉。
+    public static func hostPlayLockFile(_ host: HostID) -> URL {
+        integrationsDirectory.appendingPathComponent("\(host.rawValue)-play.lock")
+    }
+
+    public static func hostDebounceStateFile(_ host: HostID) -> URL {
+        integrationsDirectory.appendingPathComponent("\(host.rawValue)-play.state")
+    }
+
     /// `~/.claudio/packs.lock` — the non-blocking lock serializing the **three** writers of
     /// `~/.claudio/packs/`: the GUI's `mutateManifestJSON(at:lockFile:_:)` (bind/clear,
     /// `manifest.json`, byte level), the GUI's `importAudioFile` (drag-in persist step —
@@ -154,5 +203,23 @@ public enum ClaudioPaths {
         home
             .appendingPathComponent(".claude", isDirectory: true)
             .appendingPathComponent("settings.json")
+    }
+
+    /// Codex 可组合 hooks 的公开配置文件。fresh connect 只操作这里，不接管 `notify`。
+    public static var codexHooksFile: URL {
+        home
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("hooks.json")
+    }
+
+    /// 只用于旧版 `codex-notify` 冲突检测；fresh connect 不写该文件。
+    public static var codexConfigFile: URL {
+        home
+            .appendingPathComponent(".codex", isDirectory: true)
+            .appendingPathComponent("config.toml")
+    }
+
+    public static var legacyCodexNotifyWrapper: URL {
+        binDirectory.appendingPathComponent("codex-notify")
     }
 }

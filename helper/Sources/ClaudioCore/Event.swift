@@ -9,8 +9,8 @@ import Foundation
 ///
 /// The mapping MUST go through this table — never `lowercased()`, which would turn
 /// `SubagentStop` into `subagentstop` and fail to match the manifest key
-/// `subagent_stop`. See ``Event/init(settingsName:)`` and the `Event` tests.
-public enum Event: String, CaseIterable, Sendable {
+/// `subagent_stop`. 宿主原生事件名由 ``HostCapabilityCatalog`` 持有。
+public enum Event: String, CaseIterable, Codable, Sendable, Hashable {
     // Raw values are pinned to `cliName` explicitly (rather than left to Swift's default
     // camelCase-derived rawValue, which would give `stopFailure`/`subagentStop`) — anyone
     // who later reaches for `Event(rawValue:)` or `.rawValue` (e.g. in a config/log/test
@@ -20,16 +20,6 @@ public enum Event: String, CaseIterable, Sendable {
     case stopFailure = "stop_failure"
     case notification = "notification"
     case subagentStop = "subagent_stop"
-
-    /// Event name as written in Claude Code's `settings.json` hooks (camelCase).
-    public var settingsName: String {
-        switch self {
-        case .stop: "Stop"
-        case .stopFailure: "StopFailure"
-        case .notification: "Notification"
-        case .subagentStop: "SubagentStop"
-        }
-    }
 
     /// CLI `<event>` token — identical to the `manifest.json` event key (snake_case).
     public var cliName: String {
@@ -44,12 +34,14 @@ public enum Event: String, CaseIterable, Sendable {
     /// `manifest.json` event key — identical to ``cliName`` per the mapping table.
     public var manifestKey: String { cliName }
 
-    /// Resolve from a `settings.json` event name (camelCase). Returns `nil` for
-    /// events outside the v1 core set, which callers treat as "not one of ours".
-    public init?(settingsName: String) {
-        guard let match = Event.allCases.first(where: { $0.settingsName == settingsName })
-        else { return nil }
-        self = match
+    /// 用户界面的稳定声音语义；宿主原生事件名由各 adapter 提供。
+    public var displayName: String {
+        switch self {
+        case .stop: "本轮结束"
+        case .stopFailure: "执行中断"
+        case .notification: "需要你"
+        case .subagentStop: "子任务结束"
+        }
     }
 
     /// Resolve from a CLI `<event>` token / `manifest.json` key (snake_case).

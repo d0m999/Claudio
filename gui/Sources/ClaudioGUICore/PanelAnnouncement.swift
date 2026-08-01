@@ -152,6 +152,13 @@ public func panelAnnouncement(_ facts: PanelAnnouncementFacts) -> String? {
     }
 }
 
+/// The operational dual-host panel no longer changes shape with Claude Code onboarding state.
+/// Its opening/status announcement is therefore the already-composed panel header, normalized to
+/// one spoken sentence here rather than reintroducing announcement policy in SwiftUI.
+public func dualHostPanelAnnouncement(header: String) -> String? {
+    joinSpokenClauses([header])
+}
+
 /// 一条动作态**说出口**是什么样子；`nil` = 这个态没有任何话要说。
 /// `switch` 穷尽、无 `default:`：将来加一个动作态，这里编译红。
 public func actionClause(_ actionState: OnboardingActionState) -> String? {

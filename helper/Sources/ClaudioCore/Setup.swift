@@ -67,7 +67,8 @@ public struct SetupEnvironment: Sendable {
     }
 }
 
-/// ``performFirstRunSetup(environment:)`` 的**包发布临界区** —— 只在持有 `packs.lock` 时被调用。
+/// ``performSharedRuntimeBootstrap(environment:)`` 的**包发布临界区** —— 只在持有
+/// `packs.lock` 时被调用。
 ///
 /// 单独抽成一个函数，而不是在调用点内联一个闭包，有两个理由：
 ///  ① 原来的代码里散着五处 `return .failure(...)`。内联进闭包之后那些 `return` 会变成「从闭包
@@ -299,6 +300,30 @@ public func currentExecutablePath(
 
 // MARK: - Outcome / errors
 
+/// 共享 runtime 自举的结果，不包含任何宿主连接状态。
+///
+/// ``performSharedRuntimeBootstrap(environment:)`` 只负责发布 helper、声音包，修复
+/// quarantine，并保证 `selected_pack` 指向可解析的声音包。Claude Code 与 Codex adapter
+/// 可以在此结果之上各自连接，而不会让一个宿主的配置文件成为另一个宿主的前置条件。
+public struct SharedRuntimeBootstrapOutcome: Sendable, Equatable {
+    public let copiedBinary: Bool
+    public let copiedPacks: [String]
+    public let salvaged: [SalvagedPack]
+    public let packSelection: PackSelectionOutcome
+
+    public init(
+        copiedBinary: Bool,
+        copiedPacks: [String],
+        salvaged: [SalvagedPack],
+        packSelection: PackSelectionOutcome
+    ) {
+        self.copiedBinary = copiedBinary
+        self.copiedPacks = copiedPacks
+        self.salvaged = salvaged
+        self.packSelection = packSelection
+    }
+}
+
 public enum SetupOutcome: Sendable, Equatable {
     /// `copiedPacks` lists the bundled-pack ids that were newly copied into
     /// `userPacksDirectory` this run (empty if none were new, or if setup wasn't running
@@ -491,12 +516,18 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
 
 // MARK: - Entry point
 
-/// Runs the full first-run bootstrap. Safe to call repeatedly (idempotent): if
+/// Publishes and repairs Claudio's host-independent runtime. Safe to call repeatedly
+/// (idempotent): if
 /// `executablePath` is already `claudioBinaryDestination` (i.e. this is a rerun of the
 /// already-installed copy, not a fresh run from inside the app bundle), the binary/pack
-/// copy steps are skipped entirely and only the hooks step runs — reusing
-/// ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``'s own idempotency.
-public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupOutcome, SetupError> {
+/// copy steps are skipped entirely while quarantine and pack selection are rechecked.
+///
+/// This function deliberately never reads, locks, backs up, or writes `settingsFile`. Host
+/// connection belongs to the adapters; the legacy ``performFirstRunSetup(environment:)`` wrapper
+/// performs the Claude Code connection after this shared bootstrap succeeds.
+public func performSharedRuntimeBootstrap(
+    environment: SetupEnvironment
+) -> Result<SharedRuntimeBootstrapOutcome, SetupError> {
     let alreadyInstalled =
         environment.executablePath.standardizedFileURL.path
         == environment.claudioBinaryDestination.standardizedFileURL.path
@@ -598,13 +629,13 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
             ))
     }
 
-    // 写 hooks 之前的最后一件事，也是这次 setup 唯一还没兑现的不变式（T17e）：
+    // 共享 runtime 报成功之前的最后一件事，也是这次 setup 唯一还没兑现的不变式（T17e）：
     //
     //   **setup 返回成功时，`config.json` 的 `selected_pack` 一定指向一个 `play` 真的解析得出来的包。**
     //
     // 判据由 `checkPackIntegrity`（= `doctor` 的那条链，与 `play` 逐字同源）给出，政策由纯函数
-    // `packSelectionPlan` 决定。位置是要害：整段在 `installClaudioHooks` **之前** —— 一次注定不会
-    // 响的安装，绝不允许在用户的 Claude Code 里留下新的痕迹。
+    // `packSelectionPlan` 决定。位置是要害：只有这段成功之后，宿主 adapter 才可以连接 —— 一次
+    // 注定不会响的安装，绝不允许在任一宿主配置里留下新的痕迹。
     let packSelection: PackSelectionOutcome
     switch packSelectionPlan(
         status: checkPackIntegrity(
@@ -666,6 +697,28 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
                     + "跑一次 \(environment.claudioBinaryDestination.path) doctor 可以看到更具体的诊断。"))
     }
 
+    return .success(
+        SharedRuntimeBootstrapOutcome(
+            copiedBinary: copiedBinary,
+            copiedPacks: copiedPackIDs,
+            salvaged: salvagedPacks,
+            packSelection: packSelection))
+}
+
+/// Runs the original Claude Code first-run setup flow.
+///
+/// Kept as the compatibility entry point for `claudio setup` and the GUI's legacy onboarding
+/// action: shared runtime bootstrap happens first, then the existing Claude hook installer runs
+/// with exactly the same outcome and error mapping as before.
+public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupOutcome, SetupError> {
+    let bootstrap: SharedRuntimeBootstrapOutcome
+    switch performSharedRuntimeBootstrap(environment: environment) {
+    case .success(let outcome):
+        bootstrap = outcome
+    case .failure(let error):
+        return .failure(error)
+    }
+
     switch installClaudioHooks(
         settingsFile: environment.settingsFile,
         claudioBinaryPath: environment.claudioBinaryDestination.path,
@@ -674,8 +727,8 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
     case .success(let hooksOutcome):
         return .success(
             .completed(
-                copiedBinary: copiedBinary, copiedPacks: copiedPackIDs,
-                salvaged: salvagedPacks, packSelection: packSelection,
+                copiedBinary: bootstrap.copiedBinary, copiedPacks: bootstrap.copiedPacks,
+                salvaged: bootstrap.salvaged, packSelection: bootstrap.packSelection,
                 hooksOutcome: hooksOutcome))
     case .failure(let error):
         return .failure(.installFailure(error))
@@ -827,8 +880,8 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
         }
         // NO quarantine strip here — deliberately. `copyItem` DOES carry `com.apple.quarantine`
         // across (see Quarantine.swift), but the strip AND the verification that it actually worked
-        // both live in ``performFirstRunSetup``, in ONE place, unconditionally, and they run on the
-        // *destination* — i.e. after this function has published it. A second strip here
+        // both live in ``performSharedRuntimeBootstrap``, in ONE place, unconditionally, and they
+        // run on the *destination* — i.e. after this function has published it. A second strip here
         // is dead code: removing it changes no behavior and breaks no test (measured) — which is
         // exactly what "defense in depth" degenerates into when nobody checks: an untested line
         // pretending to be a safety net.

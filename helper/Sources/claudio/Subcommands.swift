@@ -3,16 +3,120 @@ import ClaudioCore
 import Foundation
 
 extension Claudio {
+    /// 新版宿主 hook 入口。生成的配置始终传合法参数；即使配置被手改成未知宿主/事件/UUID，
+    /// 这里也静默返回成功，绝不把宿主工作流卡在声音工具上。
+    struct Hook: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "宿主 hook 回调：严格映射、宿主级去抖、写最小真实回执并立即退出。")
+
+        @Argument(help: "宿主：claude-code / codex") var host: String
+        @Argument(help: "宿主原生事件名") var nativeEvent: String
+        @Option(name: .long, help: "当前连接 installation UUID") var installationID: String
+
+        func run() throws {
+            guard let parsedHost = HostID(rawValue: host),
+                let parsedID = UUID(uuidString: installationID)
+            else { return }
+            let environment = systemHostHookEnvironment(for: parsedHost)
+            _ = handleHostHook(
+                host: parsedHost,
+                nativeEvent: nativeEvent,
+                installationID: parsedID,
+                environment: environment)
+        }
+    }
+
+    struct Integrations: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "查看、连接或断开 Claude Code 与 Codex 声音来源。",
+            subcommands: [Status.self, Connect.self, Disconnect.self])
+
+        struct Status: AsyncParsableCommand {
+            static let configuration = CommandConfiguration(
+                abstract: "只读检查共享 runtime 与两个宿主。")
+
+            @Flag(name: .long, help: "输出机器可读 JSON") var json = false
+
+            mutating func run() async throws {
+                let manager = makeSystemIntegrationManager()
+                let snapshots = await manager.refresh()
+                if json {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                    encoder.dateEncodingStrategy = .iso8601
+                    let data = try encoder.encode(snapshots)
+                    print(String(decoding: data, as: UTF8.self))
+                    return
+                }
+                print("Claudio 声音来源")
+                if let runtime = snapshots.first?.runtime {
+                    print("  共享 runtime: \(sharedRuntimeText(runtime))")
+                }
+                for snapshot in snapshots {
+                    print("  \(snapshot.host.displayName): \(integrationSnapshotText(snapshot))")
+                }
+            }
+        }
+
+        struct Connect: AsyncParsableCommand {
+            static let configuration = CommandConfiguration(
+                abstract: "连接指定宿主；先幂等自举共享 runtime。")
+
+            @Argument(help: "claude-code / codex") var host: String
+
+            mutating func run() async throws {
+                guard let hostID = HostID(rawValue: host) else {
+                    print("✗ 未知宿主：\(host)")
+                    throw ExitCode.failure
+                }
+                let manager = makeSystemIntegrationManager()
+                switch await manager.connect(hostID) {
+                case .success(let snapshot):
+                    print("✓ \(hostID.displayName)：\(integrationSnapshotText(snapshot))")
+                    if hostID == .codex, case .awaitingReceipt = snapshot.activation {
+                        print("  Claudio 已写好，等待 Codex 确认；在 Codex 输入 /hooks。")
+                    }
+                case .failure(let error):
+                    print("✗ \(error.description)")
+                    throw ExitCode.failure
+                }
+            }
+        }
+
+        struct Disconnect: AsyncParsableCommand {
+            static let configuration = CommandConfiguration(
+                abstract: "只摘除指定宿主的 Claudio 条目，保留共享 runtime 与第三方配置。")
+
+            @Argument(help: "claude-code / codex") var host: String
+
+            mutating func run() async throws {
+                guard let hostID = HostID(rawValue: host) else {
+                    print("✗ 未知宿主：\(host)")
+                    throw ExitCode.failure
+                }
+                let manager = makeSystemIntegrationManager()
+                switch await manager.disconnect(hostID) {
+                case .success:
+                    print("✓ 已断开 \(hostID.displayName)；另一宿主、声音包与第三方 hooks 均未修改")
+                case .failure(let error):
+                    print("✗ \(error.description)")
+                    throw ExitCode.failure
+                }
+            }
+        }
+    }
+
     /// `claudio doctor` — self-check: afplay 在位、settings.json 可写（只读探测，绝不真
     /// 写）、当前声音包完整（无配置/无包 → warning，不判红）、claudio.log 尾部近期失败汇总
     /// （T6）。硬问题（afplay 缺 / settings.json 不可写）才让退出码非 0。
     struct Doctor: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "自检：afplay 在位、settings.json 可写、声音包完整（只读探测，不写入/不播放）。"
+            abstract: "只读自检 shared runtime、声音包、Claude Code 与 Codex；不写入、不播放。"
         )
 
         func run() throws {
-            let report = runDoctorChecks()
+            let report = runDoctorChecks(
+                environment: DoctorEnvironment(integrations: DoctorIntegrationsEnvironment()))
             print("claudio doctor")
             for result in report.results {
                 print("  \(result.message)")
@@ -34,7 +138,7 @@ extension Claudio {
     /// which don't exist: 权威决议表只到 6，10/16 是修订记录的历史快照条目).
     struct Play: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "hook 调用：播放某事件的声音（跳过式去抖 + 后台 spawn afplay，立即 exit 0）。"
+            abstract: "legacy hook 入口：按声音语义播放（全局去抖，立即 exit 0）。"
         )
 
         @Argument(help: "事件：stop / stop_failure / notification / subagent_stop")
@@ -45,11 +149,10 @@ extension Claudio {
         }
     }
 
-    /// `claudio install` — take over settings.json hooks (idempotent追加，见 ENGINEERING.md
-    /// "settings.json 接管：追加而非覆盖").
+    /// Claude Code legacy compatibility alias；不静默升级成真实回执连接。
     struct Install: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "把 hook 写进 settings.json（幂等追加，不覆盖已有配置）。"
+            abstract: "兼容别名：把 legacy hook 写进 Claude Code settings.json。"
         )
         func run() throws {
             switch installClaudioHooks() {
@@ -62,11 +165,11 @@ extension Claudio {
         }
     }
 
-    /// `claudio uninstall` — precisely remove claudio's hook entries, preserving every
+    /// Claude Code legacy compatibility alias：precisely remove claudio's hook entries, preserving every
     /// other hook (ENGINEERING.md 工程落地细节 ③: 命令精确等值匹配，非子串)。
     struct Uninstall: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "精准摘除 claudio 的 hook 条目、保留其它 hook。"
+            abstract: "Claude Code legacy 兼容别名：精准摘除 Claudio 条目并保留其它 hook。"
         )
         func run() throws {
             switch uninstallClaudioHooks() {
@@ -106,7 +209,7 @@ extension Claudio {
     /// 内运行时才有实质工作可做；已经装到 `~/.claudio/bin/` 后重复运行只会幂等地补 hooks。
     struct Setup: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "v1 首次安装自举：复制二进制 + 内置声音包到 ~/.claudio/、默认选包、写 hooks（见 ENGINEERING.md T17）。"
+            abstract: "legacy 自举：准备 shared runtime 并连接 Claude Code legacy hooks；不连接 Codex。"
         )
         func run() throws {
             let environment = SetupEnvironment(executablePath: currentExecutablePath())
@@ -118,6 +221,67 @@ extension Claudio {
                 throw ExitCode.failure
             }
         }
+    }
+}
+
+private func makeSystemIntegrationManager() -> HostIntegrationManager {
+    HostIntegrationManager(
+        adapters: [ClaudeCodeIntegrationAdapter(), CodexIntegrationAdapter()],
+        bootstrapper: SystemSharedRuntimeBootstrapper(
+            environment: SetupEnvironment(executablePath: currentExecutablePath())))
+}
+
+private func integrationSnapshotText(_ snapshot: HostIntegrationSnapshot) -> String {
+    if case .unavailable(let reason) = snapshot.availability {
+        if snapshot.configuration == .notConfigured {
+            return "未安装或未连接：\(reason)"
+        }
+        return "需要处理：已有 Claudio 配置，但宿主不可用（\(reason)）"
+    }
+    if case .notWritable(let reason) = snapshot.writability,
+        snapshot.configuration != .notConfigured
+    {
+        return "需要处理：已有 Claudio 配置，但无法维护（\(reason)）"
+    }
+    if snapshot.configuration != .notConfigured {
+        switch snapshot.runtime {
+        case .ready:
+            break
+        case .unavailable(let reason), .damaged(let reason):
+            return "需要处理：共享 runtime 不可用（\(reason)）"
+        }
+    }
+    switch snapshot.configuration {
+    case .notConfigured:
+        return "未连接"
+    case .legacyConnected:
+        return "旧版连接，可听但暂无真实回执"
+    case .incomplete(let missing):
+        return "配置不完整，缺少 \(missing.joined(separator: ", "))"
+    case .unreadable(let reason), .conflict(let reason):
+        return "需要处理：\(reason)"
+    case .configured:
+        switch snapshot.activation {
+        case .observed:
+            let supported = HostCapabilityCatalog.bindings(for: snapshot.host)
+                .filter(\.isAudibleCapability).count
+            return "\(supported)/\(Event.allCases.count) 已就绪"
+        case .none, .awaitingReceipt:
+            return snapshot.host == .codex
+                ? "Claudio 已写好，等待 Codex 确认"
+                : "已配置，等待首个真实事件"
+        }
+    }
+}
+
+private func sharedRuntimeText(_ runtime: SharedRuntimeHealth) -> String {
+    switch runtime {
+    case .ready:
+        "已就绪"
+    case .unavailable(let reason):
+        "尚不可用：\(reason)"
+    case .damaged(let reason):
+        "需要处理：\(reason)"
     }
 }
 
@@ -164,8 +328,10 @@ private func printSetupSummary(_ outcome: SetupOutcome) {
 private func hooksOutcomeMessage(_ outcome: InstallOutcome) -> String {
     switch outcome {
     case .installed:
-        "已接管 settings.json（追加 hook，未覆盖已有配置；备份见 settings.json.claudio.bak）"
+        "已连接 Claude Code legacy hooks（追加条目，未覆盖已有配置；备份见 settings.json.claudio.bak）"
     case .alreadyInstalled:
-        "settings.json 已接管过，无需重复操作"
+        "Claude Code legacy hooks 已存在，无需重复操作"
+    case .modernConnectionPresent:
+        "Claude Code 已是现代连接；未追加 legacy hooks，请使用 `claudio integrations` 管理"
     }
 }

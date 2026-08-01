@@ -88,6 +88,40 @@ func runSetupSuites() {
         }
     }
 
+    suite("performSharedRuntimeBootstrap：完成共享自举，但不读取、锁定或改写 Claude settings") {
+        withTempDirectory { root in
+            let bundleRoot = root.appendingPathComponent("Claudio.app", isDirectory: true)
+            let (executablePath, _) = makeBundleFixture(at: bundleRoot)
+            let environment = makeEnvironment(root: root, executablePath: executablePath)
+            let originalSettings = Data(
+                #"{ "hooks": { "Stop": [{ "hooks": [{ "type": "command", "command": "echo user-owned" }] }] }, "keep": "verbatim" }"#.utf8)
+            writeFixture(
+                String(decoding: originalSettings, as: UTF8.self), to: environment.settingsFile)
+
+            // 持有 Claude settings 自己的锁：共享 bootstrap 若仍偷偷调用旧 installer，必然得到
+            // `.settingsLocked`；正确实现与这把宿主专属锁完全无关，应该照常完成。
+            let lockedRun = withNonBlockingLock(path: environment.settingsLockFile.path) {
+                performSharedRuntimeBootstrap(environment: environment)
+            }
+            guard case .ran(.success(let outcome)) = lockedRun else {
+                expect(
+                    false,
+                    "共享 runtime 自举不得依赖 Claude settings 或它的锁，got \(lockedRun)")
+                return
+            }
+
+            expect(outcome.copiedBinary, "首次共享自举必须发布 helper")
+            expect(outcome.copiedPacks == ["minimal-chime"], "必须发布内置声音包，got \(outcome.copiedPacks)")
+            expect(outcome.salvaged.isEmpty, "全新 fixture 不应产生 salvage，got \(outcome.salvaged)")
+            expect(
+                outcome.packSelection == .selectedDefault(packID: "minimal-chime"),
+                "共享自举仍须建立默认选包，got \(outcome.packSelection)")
+            expect(
+                (try? Data(contentsOf: environment.settingsFile)) == originalSettings,
+                "共享 bootstrap 返回后，用户的 Claude settings fixture 必须逐字节不变")
+        }
+    }
+
     // MARK: - 包目录锁（`/codex review b0ce657` 之后那次核查逼出来的）
     //
     // 这段包循环（`moveItem` 挪走用户整个包目录 → `copyItem`→`moveItem` 发布内置包）是
@@ -311,6 +345,46 @@ func runSetupSuites() {
                 FileManager.default.fileExists(
                     atPath: packDirectory.appendingPathComponent("manifest.json").path),
                 "the copied pack's manifest.json must exist under the user pack root")
+        }
+    }
+
+    suite("performFirstRunSetup：完整现代 Claude 连接传播为幂等成功，settings 逐字不变") {
+        withTempDirectory { root in
+            let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
+            let environment = makeEnvironment(
+                root: root, executablePath: executablePath, claudioRootName: ".claudio")
+            let claudioRoot = environment.claudioBinaryDestination
+                .deletingLastPathComponent().deletingLastPathComponent()
+            let installationID = UUID(
+                uuidString: "56565656-6666-4666-8666-666666666666")!
+            guard case .success(let modern) = connectClaudeCodeHooks(
+                root: ["opaque": ["keep": true]],
+                claudioRoot: claudioRoot.path,
+                claudioBinaryPath: environment.claudioBinaryDestination.path,
+                installationID: installationID)
+            else {
+                expect(false, "测试前提：必须生成完整现代 Claude 配置")
+                return
+            }
+            let settingsData = try! JSONSerialization.data(
+                withJSONObject: modern.root, options: [.prettyPrinted, .sortedKeys])
+            try! settingsData.write(to: environment.settingsFile)
+            let before = try! Data(contentsOf: environment.settingsFile)
+
+            let result = performFirstRunSetup(environment: environment)
+
+            guard case .success(
+                .completed(_, _, _, _, let hooksOutcome)) = result
+            else {
+                expect(false, "现代连接下 setup 必须保持成功语义，got \(result)")
+                return
+            }
+            expect(
+                hooksOutcome == .modernConnectionPresent,
+                "setup 必须把 modernConnectionPresent 传播给 summary，got \(hooksOutcome)")
+            expect(
+                (try? Data(contentsOf: environment.settingsFile)) == before,
+                "setup shared bootstrap 后不得改写完整现代 settings")
         }
     }
 

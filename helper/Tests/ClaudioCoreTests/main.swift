@@ -42,9 +42,25 @@ func suite(_ name: String, _ body: @MainActor () -> Void) {
     body()
 }
 
+@MainActor
+func asyncSuite(_ name: String, _ body: @MainActor () async -> Void) async {
+    print("• \(name)")
+    await body()
+}
+
 runEventSuites()
+runHostIntegrationModelSuites()
+runHostHookReceiptSuites()
+runHostHookRunnerSuites()
+runConfigFileTransactionSuites()
+runClaudeCodeHooksTransformSuites()
+runCodexHooksTransformSuites()
+runLegacyCodexNotifyMigrationSuites()
+await runConcreteHostIntegrationAdapterSuites()
+await runHostIntegrationManagerOperationSuites()
 runFileLockSuites()
 runDoctorSuites()
+runDualHostDoctorSuites()
 runSettingsInstallerSuites()
 runPathsSuites()
 runSourceScannerSuites()

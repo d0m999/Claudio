@@ -29,9 +29,10 @@ import Foundation
 //                              `setup` 因为 config 已存在也不会重建它。doctor 的职责就是诊断：这条
 //                              检查把那个隐形状态摆到台面上，并直接给出可执行的修复指令。
 //
-// Hard failures (→ non-zero exit) are ONLY (a)、(c)、(e)。Everything pack-、log-、
-// version-compatibility- and config-rewritability-related is a warning in v1 doctor, per the
-// orchestrator's scope note for T1/T6, extended to (f) by T13. (g) 刻意也是 warning 而不是
+// Legacy（未注入 integrations）hard failures 仍是 (a)、(c)、(e)。双宿主 doctor 另外把
+// ``SystemSharedRuntimeBootstrapper.inspect`` 的 unavailable/damaged 判成 hard failure；原始 pack 行仍
+// 保留细节 warning，但不能再让一个不可播放的共享 runtime 以退出码 0 假绿。log、版本兼容与
+// config-rewritability 仍只是 warning。(g) 刻意也是 warning 而不是
 // failure：一份畸形 config **不影响播放**（读路径宽松，hook 照响），坏的只是 App 内的写操作——把它
 // 报成 failure 会让「声音一切正常」的机器 doctor 非零退出，与 (a)/(c)/(e)「claudio 根本工作不了」
 // 不是同一量级。
@@ -216,8 +217,8 @@ public struct DoctorCheckResult: Sendable, Equatable {
 public struct DoctorReport: Sendable, Equatable {
     public let results: [DoctorCheckResult]
 
-    /// `true` iff a **hard** problem was found (afplay missing / settings.json not
-    /// writable) — the only cases where `claudio doctor` should exit non-zero.
+    /// `true` iff a **hard** problem was found；双宿主模式还包括共享 runtime 不可用与
+    /// 已连接宿主的配置/可写性损坏。
     public var hasFailure: Bool {
         results.contains { $0.severity == .failure }
     }
@@ -251,6 +252,9 @@ public struct DoctorEnvironment: Sendable {
     /// simulate both above- and below-floor versions without needing to run on that actual
     /// OS. Defaults to the real ``SemanticVersion/currentMacOS()``.
     public let currentMacOSVersion: @Sendable () -> SemanticVersion
+    /// 双宿主检查为显式注入，保证旧测试与嵌入方不会意外读取真实 HOME。CLI 的 production
+    /// 入口传 ``DoctorIntegrationsEnvironment`` 默认值，自动覆盖 Claude Code 与 Codex。
+    public let integrations: DoctorIntegrationsEnvironment?
 
     public init(
         afplayPath: String = "/usr/bin/afplay",
@@ -262,7 +266,8 @@ public struct DoctorEnvironment: Sendable {
         claudioBinaryPath: String = ClaudioPaths.claudioBinary.path,
         commandRunner: any CommandRunning = SystemCommandRunner(),
         claudeVersionTimeout: TimeInterval = 2.0,
-        currentMacOSVersion: @escaping @Sendable () -> SemanticVersion = { .currentMacOS() }
+        currentMacOSVersion: @escaping @Sendable () -> SemanticVersion = { .currentMacOS() },
+        integrations: DoctorIntegrationsEnvironment? = nil
     ) {
         self.afplayPath = afplayPath
         self.settingsFile = settingsFile
@@ -274,12 +279,79 @@ public struct DoctorEnvironment: Sendable {
         self.commandRunner = commandRunner
         self.claudeVersionTimeout = claudeVersionTimeout
         self.currentMacOSVersion = currentMacOSVersion
+        self.integrations = integrations
     }
 }
 
-/// Runs all three `doctor` self-checks and returns a combined, human-readable report.
+public struct DoctorIntegrationsEnvironment: Sendable {
+    public let claudeSettingsFile: URL
+    public let codexHooksFile: URL
+    public let codexConfigFile: URL
+    public let legacyCodexNotifyWrapper: URL
+    public let claudioRoot: String
+    public let claudioBinaryPath: String
+    public let receiptStore: HostHookReceiptStore
+    public let claudeAvailability: @Sendable () -> HostAvailability
+    public let codexAvailability: @Sendable () -> HostAvailability
+
+    public init(
+        claudeSettingsFile: URL = ClaudioPaths.claudeSettingsFile,
+        codexHooksFile: URL = ClaudioPaths.codexHooksFile,
+        codexConfigFile: URL? = nil,
+        legacyCodexNotifyWrapper: URL? = nil,
+        claudioRoot: String = ClaudioPaths.root.path,
+        claudioBinaryPath: String? = nil,
+        receiptStore: HostHookReceiptStore = HostHookReceiptStore(
+            receiptsRoot: ClaudioPaths.receiptsDirectory,
+            locksRoot: ClaudioPaths.receiptLocksDirectory,
+            installationsRoot: ClaudioPaths.activeInstallationsDirectory,
+            installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory),
+        claudeAvailability: @escaping @Sendable () -> HostAvailability = {
+            let directory = ClaudioPaths.claudeSettingsFile.deletingLastPathComponent()
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(
+                atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
+                ? .available : .unavailable(reason: "未检测到 Claude Code 配置目录")
+        },
+        codexAvailability: @escaping @Sendable () -> HostAvailability = {
+            let directory = ClaudioPaths.codexHooksFile.deletingLastPathComponent()
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(
+                atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
+                ? .available : .unavailable(reason: "未检测到 Codex 配置目录")
+        }
+    ) {
+        self.claudeSettingsFile = claudeSettingsFile
+        self.codexHooksFile = codexHooksFile
+        self.codexConfigFile = codexConfigFile
+            ?? codexHooksFile.deletingLastPathComponent().appendingPathComponent("config.toml")
+        self.legacyCodexNotifyWrapper = legacyCodexNotifyWrapper
+            ?? URL(fileURLWithPath: claudioRoot, isDirectory: true)
+                .appendingPathComponent("bin/codex-notify")
+        self.claudioRoot = claudioRoot
+        self.claudioBinaryPath = claudioBinaryPath
+            ?? URL(fileURLWithPath: claudioRoot, isDirectory: true)
+                .appendingPathComponent("bin/claudio").path
+        self.receiptStore = receiptStore
+        self.claudeAvailability = claudeAvailability
+        self.codexAvailability = codexAvailability
+    }
+}
+
+/// Runs the complete `doctor` self-check set and returns a combined, human-readable report.
 public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()) -> DoctorReport {
     var results: [DoctorCheckResult] = []
+    let sharedRuntime: SharedRuntimeHealth? = environment.integrations.map { _ in
+        SystemSharedRuntimeBootstrapper(
+            environment: SetupEnvironment(
+                executablePath: URL(fileURLWithPath: environment.claudioBinaryPath),
+                claudioBinaryDestination: URL(
+                    fileURLWithPath: environment.claudioBinaryPath),
+                userPacksDirectory: environment.userPacksDirectory,
+                configFile: environment.configFile,
+                settingsFile: environment.settingsFile))
+            .inspect()
+    }
 
     // (c) afplay 在位 — hard failure if missing.
     if FileManager.default.isExecutableFile(atPath: environment.afplayPath) {
@@ -295,36 +367,18 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
         )
     }
 
-    // (e) claudio 固定路径二进制在位 — hard failure if missing, same severity as (c) afplay:
-    // settings.json's hooks always invoke this exact path (T17), so nothing existing there
-    // means every future Claude Code event silently fails to play.
-    if !FileManager.default.isExecutableFile(atPath: environment.claudioBinaryPath) {
+    // (e) 固定 helper 必须是非空、可执行、无 quarantine 的普通文件；与 manager 复用同一判据。
+    switch inspectSharedRuntimeHelper(
+        at: URL(fileURLWithPath: environment.claudioBinaryPath))
+    {
+    case .unavailable(let reason), .damaged(let reason):
         results.append(
             DoctorCheckResult(
                 name: "claudio-binary", severity: .failure,
-                message:
-                    "✗ 未找到 claudio 二进制（\(environment.claudioBinaryPath)），hooks 会静默失效——重跑一次 claudio setup"
+                message: "✗ \(reason)，hooks 会静默失效——重跑一次 claudio setup"
             )
         )
-    } else if hasQuarantineAttribute(at: URL(fileURLWithPath: environment.claudioBinaryPath)) {
-        // 「在位」不等于「跑得起来」（T17，2026-07-12 实测）。一个带 `com.apple.quarantine` 的
-        // 二进制对上面那句 `isExecutableFile` 是完全合格的——正规文件、执行位也在——但 Claude Code
-        // 的 hook 用 `/bin/sh -c` 执行它时，Gatekeeper 会直接 SIGKILL（实测 exit=137，零 stderr）。
-        // 而 `play` 是 fire-and-forget，这条失败连一行 `claudio.log` 都不会留下。
-        //
-        // 所以它属于 doctor 的**硬失败**，与「二进制不在」同级：对用户而言两者的后果一字不差——
-        // 每一个事件都静默失声。doctor 存在的意义就是「静默失败必须有诊断轨迹」（决议 6），
-        // 而这正是本仓库能造出的最静默的一种失败。
-        results.append(
-            DoctorCheckResult(
-                name: "claudio-binary", severity: .failure,
-                message:
-                    "✗ claudio 二进制在位但被 macOS 隔离（\(environment.claudioBinaryPath)），"
-                    + "一执行就会被系统杀掉、每个事件都会静默失声——重跑一次 claudio setup（它会自动解除隔离），"
-                    + "或手动跑：xattr -dr com.apple.quarantine \(environment.claudioBinaryPath)"
-            )
-        )
-    } else {
+    case .ready:
         results.append(
             DoctorCheckResult(
                 name: "claudio-binary", severity: .ok,
@@ -332,17 +386,21 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
         )
     }
 
-    // (a) settings.json 可写 — hard failure if not (read-only probe, never writes).
-    switch probeSettingsWritable(settingsFile: environment.settingsFile) {
-    case .writable:
-        results.append(
-            DoctorCheckResult(
-                name: "settings.json", severity: .ok,
-                message: "✓ settings.json 可写：\(environment.settingsFile.path)")
-        )
-    case .notWritable(let reason):
-        results.append(
-            DoctorCheckResult(name: "settings.json", severity: .failure, message: "✗ \(reason)"))
+    // 兼容嵌入方未启用双宿主报告时的 v1 检查。新版 CLI 已注入 integrations，写入能力
+    // 必须按宿主分别判定：未安装/未连接的一侧只是 warning，不能再被旧 Claude-only
+    // settings.json 检查提升成整个 doctor 的 hard failure。
+    if environment.integrations == nil {
+        switch probeSettingsWritable(settingsFile: environment.settingsFile) {
+        case .writable:
+            results.append(
+                DoctorCheckResult(
+                    name: "settings.json", severity: .ok,
+                    message: "✓ settings.json 可写：\(environment.settingsFile.path)")
+            )
+        case .notWritable(let reason):
+            results.append(
+                DoctorCheckResult(name: "settings.json", severity: .failure, message: "✗ \(reason)"))
+        }
     }
 
     // (b) 包完整 — always a warning at worst, never a hard failure in v1 doctor.
@@ -352,6 +410,10 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
         bundledPacksDirectory: environment.bundledPacksDirectory
     )
     results.append(packStatus.doctorCheckResult)
+
+    if let sharedRuntime {
+        results.append(sharedRuntimeDoctorResult(sharedRuntime))
+    }
 
     // (g) config.json 可重写 — always a warning at worst (see the module note above).
     results.append(configRewritabilityResult(configFile: environment.configFile))
@@ -366,8 +428,164 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
         claudeCodeVersionDoctorResult(
             commandRunner: environment.commandRunner, timeout: environment.claudeVersionTimeout))
 
+    if let integrations = environment.integrations {
+        results.append(
+            contentsOf: hostIntegrationDoctorResults(
+                environment: integrations,
+                runtime: sharedRuntime ?? .unavailable(reason: "共享 runtime 未检测")))
+    }
+
     return DoctorReport(results: results)
 }
+
+/// 双宿主 doctor 事实层。未安装/未连接、健康 runtime 上的 legacy/待确认是 warning；完整连接是 ok；
+/// 已连接侧的配置损坏、缺 hook、不可写或共享 runtime 不可用是 failure。始终返回两条宿主行。
+public func hostIntegrationDoctorResults(
+    environment: DoctorIntegrationsEnvironment,
+    runtime: SharedRuntimeHealth = .ready
+) -> [DoctorCheckResult] {
+    // doctor 只负责把 adapter 快照翻译成人类可读的严重度；配置、legacy wrapper 与
+    // 当前 installation 回执的判定全部复用 adapter 的同一事实入口。
+    let claude = inspectClaudeSnapshot(
+        environment: ClaudeCodeIntegrationEnvironment(
+            settingsFile: environment.claudeSettingsFile,
+            claudioBinaryPath: environment.claudioBinaryPath,
+            claudioRoot: environment.claudioRoot,
+            receiptStore: environment.receiptStore,
+            availability: environment.claudeAvailability),
+        runtime: runtime)
+    let codex = inspectCodexSnapshot(
+        environment: CodexIntegrationEnvironment(
+            hooksFile: environment.codexHooksFile,
+            configFile: environment.codexConfigFile,
+            legacyNotifyWrapper: environment.legacyCodexNotifyWrapper,
+            claudioBinaryPath: environment.claudioBinaryPath,
+            claudioRoot: environment.claudioRoot,
+            receiptStore: environment.receiptStore,
+            availability: environment.codexAvailability),
+        runtime: runtime)
+    return [
+        doctorHostResult(snapshot: claude),
+        doctorHostResult(snapshot: codex),
+    ]
+}
+
+private func sharedRuntimeDoctorResult(
+    _ runtime: SharedRuntimeHealth
+) -> DoctorCheckResult {
+    switch runtime {
+    case .ready:
+        return DoctorCheckResult(
+            name: "shared-runtime",
+            severity: .ok,
+            message: "✓ 共享 runtime 已就绪")
+    case .unavailable(let reason), .damaged(let reason):
+        return DoctorCheckResult(
+            name: "shared-runtime",
+            severity: .failure,
+            message: "✗ 共享 runtime 不可用：\(reason)")
+    }
+}
+
+private func sharedRuntimeFailureReason(
+    _ runtime: SharedRuntimeHealth
+) -> String? {
+    switch runtime {
+    case .ready: nil
+    case .unavailable(let reason), .damaged(let reason): reason
+    }
+}
+
+private func doctorHostResult(
+    snapshot: HostIntegrationSnapshot
+) -> DoctorCheckResult {
+    let host = snapshot.host
+    let configuration = snapshot.configuration
+    let name = "host-\(host.rawValue)"
+    if case .unavailable(let reason) = snapshot.availability, configuration == .notConfigured {
+        return DoctorCheckResult(
+            name: name, severity: .warning,
+            message: "⚠ \(host.displayName) 未安装或不可用：\(reason)")
+    }
+    if case .unavailable(let reason) = snapshot.availability {
+        return DoctorCheckResult(
+            name: name, severity: .failure,
+            message: "✗ \(host.displayName) 已有 Claudio 连接但宿主不可用：\(reason)")
+    }
+    let writable: Bool
+    let writableReason: String?
+    switch snapshot.writability {
+    case .writable:
+        writable = true
+        writableReason = nil
+    case .notWritable(let reason):
+        writable = false
+        writableReason = reason
+    case .unknown:
+        writable = false
+        writableReason = "宿主配置路径尚不可用"
+    }
+
+    switch configuration {
+    case .notConfigured:
+        return DoctorCheckResult(
+            name: name, severity: .warning,
+            message: writable
+                ? "⚠ \(host.displayName) 未连接"
+                : "⚠ \(host.displayName) 未连接；当前也无法写入配置：\(writableReason ?? "未知原因")")
+    case .legacyConnected:
+        guard writable else {
+            return DoctorCheckResult(
+                name: name, severity: .failure,
+                message: "✗ \(host.displayName) 旧版连接仍在但配置不可写：\(writableReason ?? "未知原因")")
+        }
+        if let reason = sharedRuntimeFailureReason(snapshot.runtime) {
+            return DoctorCheckResult(
+                name: name, severity: .failure,
+                message: "✗ \(host.displayName) 已连接但共享 runtime 不可用：\(reason)")
+        }
+        return DoctorCheckResult(
+            name: name, severity: .warning,
+            message: "⚠ \(host.displayName) 是旧版连接：可听，但暂无真实回执；可显式升级连接")
+    case .incomplete(let missing):
+        return DoctorCheckResult(
+            name: name, severity: .failure,
+            message: "✗ \(host.displayName) 已有 Claudio 配置但缺少 hook：\(missing.joined(separator: ", "))")
+    case .unreadable(let reason), .conflict(let reason):
+        return DoctorCheckResult(
+            name: name, severity: .failure,
+            message: "✗ \(host.displayName) 配置损坏或冲突：\(reason)")
+    case .configured:
+        if let reason = sharedRuntimeFailureReason(snapshot.runtime) {
+            return DoctorCheckResult(
+                name: name, severity: .failure,
+                message: "✗ \(host.displayName) 已连接但共享 runtime 不可用：\(reason)")
+        }
+        guard writable else {
+            return DoctorCheckResult(
+                name: name, severity: .failure,
+                message: "✗ \(host.displayName) 已连接但配置不可写：\(writableReason ?? "未知原因")")
+        }
+        guard snapshot.installationID != nil else {
+            return DoctorCheckResult(
+                name: name, severity: .failure,
+                message: "✗ \(host.displayName) 已配置但缺少 installation ID")
+        }
+        guard case .observed = snapshot.activation else {
+            return DoctorCheckResult(
+                name: name, severity: .warning,
+                message: host == .codex
+                    ? "⚠ Codex：Claudio 已写好，等待 Codex 确认（在 Codex 输入 /hooks）"
+                    : "⚠ Claude Code 已配置，等待首个真实事件回执")
+        }
+        let supported = HostCapabilityCatalog.bindings(for: host).filter(\.isAudibleCapability).count
+        let qualifier = host == .codex ? "；执行中断暂无事件，需要你仅授权请求" : ""
+        return DoctorCheckResult(
+            name: name, severity: .ok,
+            message: "✓ \(host.displayName) \(supported)/\(Event.allCases.count) 已就绪\(qualifier)")
+    }
+}
+
 
 /// (g) 把 ``probeConfigRewritable(configFile:)`` 的判定讲成 `doctor` 的一行话。
 ///

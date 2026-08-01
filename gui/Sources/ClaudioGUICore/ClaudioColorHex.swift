@@ -60,7 +60,7 @@ public enum ClaudioColorHex {
 
     // MARK: UI 语义色（DESIGN.md「UI 语义色（提示 / 校验，独立于事件层）」表）
 
-    /// `success`——「已接管」状态点。
+    /// `success`——已收到当前代次真实回执的宿主就绪状态。
     ///
     /// 和下面 `warning` vs `stopFailure` 完全同构的一次**刻意分叉**：UI 语义 `success` 仍是 DESIGN.md
     /// 原值 `#2FA24E`，而 `Stop` 的**事件**绿被调深到 `#288B43`（见 `stopLight`）。原因是两者画在
@@ -133,7 +133,7 @@ public enum ClaudioColorHex {
     //   2. 另一条走不通的路是「把 tile 底换成中性的 `surface-2`」：亮色下它对 `panel` 只有 1.0006:1，
     //      tile 会**整个消失**（详见 `surface2Light` 的注释）。tile 必须是事件色，所以只能调深事件色。
 
-    /// ✅ `Stop` 干完了。亮色由 DESIGN.md 原 `#2FA24E` 调深为 `#288B43`——见上面那段：字形对
+    /// ✅ `Stop` 本轮结束。亮色由 DESIGN.md 原 `#2FA24E` 调深为 `#288B43`——见上面那段：字形对
     /// 「Stop @15% 覆在 panel 上」的复合底旧值只有 2.75:1，新值 3.53:1。
     /// 注意它因此**不再**等于 UI 语义色 `success`（仍是 `#2FA24E`），那是刻意分叉，见 `successLight`。
     public static let stopDark = "34C759"
@@ -148,13 +148,13 @@ public enum ClaudioColorHex {
     public static let stopFailureDark = "FF9F0A"
     public static let stopFailureLight = "AC6900"
 
-    /// ✋ `Notification` 要你确认——**就是** `clay`（DESIGN.md「一个招牌绑定」：App 唯一一次
-    /// 「用 Claude 的颜色说话」）。这里刻意写成对 `clay` 的别名而不是复制一遍 hex：它们相等是
-    /// 设计意图，不是巧合，改 `clay` 就该同时改它。
+    /// ✋ `Notification` 需要你——**就是** `clay`（Claudio 自有品牌色与招牌绑定）。这里刻意
+    /// 写成对 `clay` 的别名而不是复制一遍 hex：它们相等是设计意图，不是巧合，改 `clay` 就该
+    /// 同时改它。
     public static let notificationDark = clayDark
     public static let notificationLight = clayLight
 
-    /// ◦ `SubagentStop` 子任务完成——空心勾、更暗。
+    /// ◦ `SubagentStop` 子任务结束——空心勾、更暗。
     public static let subagentStopDark = "5E5CE6"
     public static let subagentStopLight = "5B59D6"
 }

@@ -37,7 +37,7 @@ func runPanelFocusOrderSuites() {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true))
         let expected: [PanelFocusTarget] =
             Event.allCases.flatMap { [.eventSound($0), .eventAction($0), .eventMute($0)]
-            } + [.masterVolume, .manageSounds, .disconnect]
+            } + [.masterVolume, .manageSounds, .manageIntegrations]
         expect(order == expected, "got \(order)")
     }
 
@@ -46,6 +46,36 @@ func runPanelFocusOrderSuites() {
         expect(
             order.first == .eventSound(Event.allCases.first!),
             "first focus must be the first row's file-name Menu, got \(String(describing: order.first))")
+    }
+
+    suite("panelFocusOrder: production 双宿主形状固定 Claude → Codex → 四事件 → 音量 → 声音包 → 管理") {
+        let order = panelFocusOrder(
+            .operational(
+                events: Event.allCases,
+                packCardIDs: ["minimal-chime"],
+                hasMasterVolume: true,
+                hostSources: HostID.allCases))
+        let expected: [PanelFocusTarget] = [
+            .hostSource(.claudeCode), .hostSource(.codex),
+        ] + Event.allCases.flatMap {
+            [.eventSound($0), .eventAction($0), .eventMute($0)]
+        } + [
+            .masterVolume, .packCard(id: "minimal-chime"), .manageSounds,
+            .manageIntegrations,
+        ]
+        expect(order == expected, "production focus order drifted: \(order)")
+        expect(
+            panelFirstFocusTarget(
+                .operational(
+                    events: [], packCardIDs: [], hasMasterVolume: false,
+                    hasConfigFailureNotice: true, hostSources: HostID.allCases))
+                == .hostSource(.claudeCode),
+            "宿主行必须领先 config 修复卡；一侧坏掉也不能让焦点跳过来源区")
+        expect(
+            panelOpeningFocus(
+                rows: [], packCardIDs: [], hasMasterVolume: false,
+                hostSources: HostID.allCases) == .hostSource(.claudeCode),
+            "production opening focus 必须落 Claude 来源行")
     }
 
     suite("panelFocusOrder: operational — gallery cards come right after the master volume slider, then 管理声音包, with 断开连接 last") {
@@ -58,7 +88,7 @@ func runPanelFocusOrderSuites() {
         expect(
             order[rowCount...].elementsEqual([
                 .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"), .manageSounds,
-                .disconnect,
+                .manageIntegrations,
             ]),
             "gallery cards must follow the master volume slider in their given order, 管理声音包"
                 + " must follow the cards, and 断开连接 sits last, got \(order)")
@@ -113,7 +143,7 @@ func runPanelFocusOrderSuites() {
         // fixture at the default `hasConfigFailureNotice: false` is what makes it the needsPack case.
         let order = panelFocusOrder(.operational(events: [], packCardIDs: [], hasMasterVolume: false))
         expect(
-            order == [.manageSounds, .disconnect],
+            order == [.manageSounds, .manageIntegrations],
             "with hasMasterVolume false, zero rows and zero cards, 管理声音包 must be the first"
                 + " safe target and 断开连接 must remain last, got \(order)")
     }
@@ -125,7 +155,7 @@ func runPanelFocusOrderSuites() {
         // OWN behavior independent of row count.
         let order = panelFocusOrder(.operational(events: [], packCardIDs: [], hasMasterVolume: true))
         expect(
-            order == [.masterVolume, .manageSounds, .disconnect],
+            order == [.masterVolume, .manageSounds, .manageIntegrations],
             "with hasMasterVolume true, the slider still claims its slot even with zero rows,"
                 + " ahead of 管理声音包 and 断开连接, got \(order)")
     }
@@ -142,7 +172,7 @@ func runPanelFocusOrderSuites() {
         let order = panelFocusOrder(
             .operational(events: [], packCardIDs: [], hasMasterVolume: false, hasConfigFailureNotice: true))
         expect(
-            order == [.configReveal, .manageSounds, .disconnect],
+            order == [.configReveal, .manageSounds, .manageIntegrations],
             ".configReveal must lead the config-failure shape, with 管理声音包 still present"
                 + " ahead of 断开连接, got \(order)")
     }
@@ -159,7 +189,7 @@ func runPanelFocusOrderSuites() {
         expect(
             order == [
                 .configReveal, .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"),
-                .manageSounds, .disconnect,
+                .manageSounds, .manageIntegrations,
             ],
             ".configReveal must lead, ahead of the pack cards; 管理声音包 must follow the cards"
                 + " and remain ahead of 断开连接, got \(order)")
@@ -215,7 +245,7 @@ func runPanelFocusOrderSuites() {
         let fullOrder = panelFocusOrder(scope)
         let expected: [PanelFocusTarget] =
             Event.allCases.flatMap { [.eventSound($0), .eventAction($0), .eventMute($0)]
-            } + [.masterVolume, .manageSounds, .disconnect]
+            } + [.masterVolume, .manageSounds, .manageIntegrations]
         expect(fullOrder == expected, "the full order (incl. the disabled action) must be unchanged, got \(fullOrder)")
         expect(fullOrder.contains(.eventAction(first)), "the disabled action must remain a Tab stop")
     }
@@ -264,7 +294,7 @@ func runPanelFocusOrderSuites() {
             "with no rows/cards/slider/failure-notice, first focus must be the safe 管理声音包"
                 + " control, never 断开连接, got \(String(describing: panelFirstFocusTarget(scope)))")
         expect(
-            panelFirstFocusTarget(scope) != .disconnect,
+            panelFirstFocusTarget(scope) != .manageIntegrations,
             "zero-row opening focus must never fall through to the destructive 断开连接")
     }
 

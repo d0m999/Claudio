@@ -20,7 +20,7 @@ import Foundation
 /// The **single canonical catalog** of concrete sample values for every case of every per-feature
 /// state family (ENGINEERING.md T14 D1, plus PLAN-MASTER-VOLUME.md D33/D38's ``MasterVolumeState``):
 /// ``OnboardingState``, ``OnboardingActionState``, ``DropZoneState``, ``EventRow``/``CoverageState``,
-/// ``PackCard``/``PackCardState``, ``MasterVolumeState``.
+/// ``PackCard``/``PackCardState``, ``MasterVolumeState``，以及双宿主集成场景。
 ///
 /// 权威清单是 ``assertExhaustive()`` 实际遍历的那几个数组 —— **不是**这段散文里的族数。原文写死了
 /// 「all five」，而它在 T17 加进 `OnboardingActionState` 那天就已经数错，阶段 D 又添一族
@@ -263,6 +263,164 @@ public enum PreviewFixtures {
             ).description),
     ]
 
+    // MARK: - Host integrations (Claude Code + Codex)
+
+    /// 双宿主状态展柜的一帧。`state` 同时携带宿主快照与 Core 合成的可听矩阵，
+    /// 因此宿主卡、矩阵格和检查器不会在预览中分裂成三套事实。
+    public struct HostIntegrationScenario: Identifiable, Sendable, Equatable {
+        public let id: String
+        public let title: String
+        public let state: HostIntegrationPresentationState
+
+        public init(
+            id: String,
+            title: String,
+            state: HostIntegrationPresentationState
+        ) {
+            self.id = id
+            self.title = title
+            self.state = state
+        }
+    }
+
+    /// 双宿主产品态的最小验收名册。每帧都通过 ``hostIntegrationScenario`` 调用
+    /// ``HostCapabilityCatalog`` + ``AudibilityMatrix.make`` 构建；这里不允许手写
+    /// ``AudibilityCell``，因此删除 Codex 映射会直接改变展柜里的真实格子。
+    public static let hostIntegrationScenarios: [HostIntegrationScenario] = [
+        hostIntegrationScenario(
+            id: "dual-disconnected",
+            title: "双宿主未连接",
+            snapshots: HostID.allCases.map { HostIntegrationSnapshot.disconnected(host: $0) }),
+        hostIntegrationScenario(
+            id: "claude-only",
+            title: "仅 Claude Code 已连接",
+            snapshots: [
+                hostIntegrationSnapshot(host: .claudeCode),
+                .disconnected(host: .codex),
+            ]),
+        hostIntegrationScenario(
+            id: "codex-only",
+            title: "仅 Codex 已连接",
+            snapshots: [
+                .disconnected(host: .claudeCode),
+                hostIntegrationSnapshot(host: .codex),
+            ]),
+        hostIntegrationScenario(
+            id: "dual-connected",
+            title: "双宿主已连接",
+            snapshots: HostID.allCases.map { hostIntegrationSnapshot(host: $0) }),
+        hostIntegrationScenario(
+            id: "codex-awaiting",
+            title: "Claudio 已写好，等待 Codex 确认",
+            snapshots: [
+                hostIntegrationSnapshot(host: .claudeCode),
+                hostIntegrationSnapshot(
+                    host: .codex,
+                    activation: .awaitingReceipt(installationID: hostIntegrationInstallationID)),
+            ]),
+        hostIntegrationScenario(
+            id: "claude-legacy",
+            title: "Claude Code 旧版连接，可升级",
+            snapshots: [
+                hostIntegrationSnapshot(
+                    host: .claudeCode,
+                    configuration: .legacyConnected,
+                    activation: HostActivationEvidence.none),
+                hostIntegrationSnapshot(host: .codex),
+            ]),
+        hostIntegrationScenario(
+            id: "codex-normal-3-of-4",
+            title: "Codex 正常 3/4",
+            snapshots: [
+                .disconnected(host: .claudeCode),
+                hostIntegrationSnapshot(host: .codex),
+            ]),
+        hostIntegrationScenario(
+            id: "partial-single-degraded",
+            title: "Claude Code 缺少一个 hook，Codex 仍可用",
+            snapshots: [
+                hostIntegrationSnapshot(
+                    host: .claudeCode,
+                    configuration: .incomplete(missingNativeEvents: ["StopFailure"]),
+                    activation: HostActivationEvidence.none),
+                hostIntegrationSnapshot(host: .codex),
+            ]),
+        hostIntegrationScenario(
+            id: "shared-runtime-failure",
+            title: "共享 helper 损坏",
+            snapshots: HostID.allCases.map {
+                hostIntegrationSnapshot(
+                    host: $0,
+                    runtime: .damaged(reason: "Claudio helper 损坏"))
+            }),
+        hostIntegrationScenario(
+            id: "single-side-connection-failure",
+            title: "Claude Code 连接失败，Codex 仍可用",
+            snapshots: [
+                hostIntegrationSnapshot(
+                    host: .claudeCode,
+                    configuration: .conflict(reason: "连接失败：配置已被外部修改"),
+                    activation: HostActivationEvidence.none,
+                    operation: .failed(reason: "配置已被外部修改")),
+                hostIntegrationSnapshot(host: .codex),
+            ]),
+    ]
+
+    private static let hostIntegrationInstallationID = UUID(
+        uuidString: "00000000-0000-4000-8000-0000000000C1")!
+
+    private static func hostIntegrationSnapshot(
+        host: HostID,
+        runtime: SharedRuntimeHealth = .ready,
+        configuration: HostConfigurationState = .configured,
+        activation: HostActivationEvidence? = nil,
+        operation: HostOperationState = .idle
+    ) -> HostIntegrationSnapshot {
+        let binding = HostCapabilityCatalog.bindings(for: host)
+            .first(where: \.isAudibleCapability)!
+        let resolvedActivation = activation ?? .observed(
+            HostReceiptEvidence(
+                installationID: hostIntegrationInstallationID,
+                nativeEvent: binding.nativeEvent!,
+                event: binding.event,
+                timestamp: Date(timeIntervalSince1970: 1_721_980_800),
+                playbackResult: .played))
+        return HostIntegrationSnapshot(
+            host: host,
+            runtime: runtime,
+            availability: .available,
+            configuration: configuration,
+            writability: .writable,
+            activation: resolvedActivation,
+            operation: operation,
+            installationID: configuration == .notConfigured
+                ? nil : hostIntegrationInstallationID)
+    }
+
+    private static func hostIntegrationScenario(
+        id: String,
+        title: String,
+        snapshots: [HostIntegrationSnapshot]
+    ) -> HostIntegrationScenario {
+        let capabilities = Dictionary(
+            uniqueKeysWithValues: HostID.allCases.map {
+                ($0, HostCapabilityCatalog.bindings(for: $0))
+            })
+        let matrix = AudibilityMatrix.make(
+            snapshots: snapshots,
+            capabilities: capabilities,
+            soundCoverage: Dictionary(
+                uniqueKeysWithValues: Event.allCases.map { ($0, true) }),
+            enabledEvents: Dictionary(
+                uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
+        return HostIntegrationScenario(
+            id: id,
+            title: title,
+            state: HostIntegrationPresentationState(
+                snapshots: snapshots,
+                matrix: matrix))
+    }
+
     // MARK: - Compile-time exhaustiveness guards
 
     /// Runs every `_coverage(_:)` guard below against its matching fixture array and RETURNS
@@ -295,6 +453,9 @@ public enum PreviewFixtures {
         for row in eventRows { visited.insert("coverage.\(coverageStateCoverage(row.coverage))") }
         for card in packCards { visited.insert("packCard.\(packCardStateCoverage(card.state))") }
         for state in masterVolumeStates { visited.insert("masterVolume.\(masterVolumeStateCoverage(state))") }
+        for scenario in hostIntegrationScenarios {
+            visited.insert("hostIntegration.\(scenario.id)")
+        }
         return visited
     }
 

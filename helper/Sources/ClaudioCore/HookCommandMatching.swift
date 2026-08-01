@@ -237,6 +237,102 @@ public func matchedClaudioEvent(inHookCommand command: String, claudioRoot: Stri
     return nil
 }
 
+/// 新版双宿主 hook 命令的结构化识别结果。只有完整匹配 Claudio 自有命名空间、
+/// 已知宿主、该宿主真实支持的原生事件和合法 installation UUID 才会产生结果。
+public struct MatchedHostHookCommand: Sendable, Equatable {
+    public let host: HostID
+    public let nativeEvent: String
+    public let event: Event
+    public let installationID: UUID
+
+    public init(host: HostID, nativeEvent: String, event: Event, installationID: UUID) {
+        self.host = host
+        self.nativeEvent = nativeEvent
+        self.event = event
+        self.installationID = installationID
+    }
+}
+
+/// 生成带安装代次的新版 hook 命令。未知事件和宿主不支持的事件失败关闭；特别是 Codex
+/// `StopFailure` 与 `UserPromptSubmit` 永远不会被写成可执行 hook。
+public func hostIntegrationHookCommand(
+    host: HostID,
+    nativeEvent: String,
+    installationID: UUID,
+    claudioBinaryPath: String
+) -> String? {
+    guard HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: nativeEvent) != nil else {
+        return nil
+    }
+    return "\(shellQuotedPath(claudioBinaryPath)) hook \(host.rawValue) \(nativeEvent)"
+        + " --installation-id \(installationID.uuidString)"
+}
+
+/// 结构化匹配 Claudio namespace 内任意历史位置的新版 hook 命令。宽路径判定只供
+/// disconnect/uninstall 清扫旧位置；连接状态必须使用 ``matchedCurrentHostHookCommand``，
+/// 否则一个已经移除的 root 内旧 helper 会被误判成当前可听连接。
+public func matchedHostHookCommand(
+    inHookCommand command: String,
+    claudioRoot: String
+) -> MatchedHostHookCommand? {
+    matchHostHookCommand(inHookCommand: command) {
+        isClaudioBinaryPath($0, claudioRoot: claudioRoot)
+    }
+}
+
+/// 只接受 writer 当前会生成的 helper 绝对路径。inspect/connect 用它；路径迁移后的历史
+/// command 不会冒充当前连接，显式 connect 也就能够补写新的 canonical command。
+public func matchedCurrentHostHookCommand(
+    inHookCommand command: String,
+    claudioBinaryPath: String
+) -> MatchedHostHookCommand? {
+    guard let match = matchHostHookCommand(inHookCommand: command, acceptsBinaryPath: {
+        $0 == claudioBinaryPath
+    }),
+        let canonical = hostIntegrationHookCommand(
+            host: match.host,
+            nativeEvent: match.nativeEvent,
+            installationID: match.installationID,
+            claudioBinaryPath: claudioBinaryPath),
+        command.trimmingCharacters(in: .whitespacesAndNewlines) == canonical
+    else { return nil }
+    return match
+}
+
+private func matchHostHookCommand(
+    inHookCommand command: String,
+    acceptsBinaryPath: (String) -> Bool
+) -> MatchedHostHookCommand? {
+    let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+    let installationMarker = " --installation-id "
+    guard let markerRange = trimmed.range(of: installationMarker, options: .backwards),
+        markerRange.upperBound < trimmed.endIndex
+    else { return nil }
+
+    let uuidText = String(trimmed[markerRange.upperBound...])
+    guard !uuidText.contains(where: { $0.isWhitespace }),
+        let installationID = UUID(uuidString: uuidText)
+    else { return nil }
+    let commandWithoutID = String(trimmed[..<markerRange.lowerBound])
+
+    for host in HostID.allCases {
+        for binding in HostCapabilityCatalog.bindings(for: host) where binding.isAudibleCapability {
+            guard let nativeEvent = binding.nativeEvent else { continue }
+            let suffix = " hook \(host.rawValue) \(nativeEvent)"
+            guard commandWithoutID.hasSuffix(suffix) else { continue }
+            let rawWord = String(commandWithoutID.dropLast(suffix.count))
+            let candidates = [shellWordContents(rawWord), rawWord].compactMap { $0 }
+            guard candidates.contains(where: acceptsBinaryPath) else { return nil }
+            return MatchedHostHookCommand(
+                host: host,
+                nativeEvent: nativeEvent,
+                event: binding.event,
+                installationID: installationID)
+        }
+    }
+    return nil
+}
+
 /// The `.claudio` namespace root that `binaryPath` lives in — the prefix up to and including
 /// its first `.claudio` component (`/Users/x/.claudio/bin/claudio` → `/Users/x/.claudio`), or
 /// `nil` when `binaryPath` is relative, carries a `..`, or has no `.claudio` component at all.

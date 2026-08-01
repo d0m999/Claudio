@@ -595,7 +595,7 @@ struct SoundPacksWindowView: View {
             Text(row.event.manifestKey)
                 .font(.body)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(row.event.settingsName)
+            Text(row.event.displayName)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)

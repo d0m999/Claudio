@@ -244,7 +244,51 @@ private func diskWriteSurfaceTokens(in code: String) -> Set<String> {
     where !callOpenParens(of: name, member: false, in: code).isEmpty {
         tokens.insert("\(name)(")
     }
+    // Swift 通常把 POSIX 函数写成 `Darwin.rename(...)`。语法上它前面有 `.`，
+    // 所以上面刻意排除成员调用的自由函数扫描会漏掉它。只补已知系统模块，
+    // 不把 `NSWorkspace.shared.open(...)` 之类普通成员误报为 POSIX 写盘。
+    for name in byteWritingFunctions + pathPublishingFunctions
+    where hasNamespaceQualifiedCall(of: name, namespace: "Darwin", in: code) {
+        tokens.insert("\(name)(")
+    }
     return tokens
+}
+
+private func hasNamespaceQualifiedCall(
+    of name: String,
+    namespace: String,
+    in source: String
+) -> Bool {
+    func previousNonWhitespace(before boundary: String.Index) -> String.Index? {
+        guard boundary > source.startIndex else { return nil }
+        var probe = source.index(before: boundary)
+        while source[probe].isWhitespace {
+            guard probe > source.startIndex else { return nil }
+            probe = source.index(before: probe)
+        }
+        return probe
+    }
+
+    for openParen in callOpenParens(of: name, member: true, in: source) {
+        guard let nameEnd = previousNonWhitespace(before: openParen),
+            let nameStart = source.index(
+                nameEnd, offsetBy: -(name.count - 1), limitedBy: source.startIndex),
+            source[nameStart...nameEnd] == name,
+            let dot = previousNonWhitespace(before: nameStart),
+            source[dot] == ".",
+            let namespaceEnd = previousNonWhitespace(before: dot),
+            let namespaceStart = source.index(
+                namespaceEnd, offsetBy: -(namespace.count - 1), limitedBy: source.startIndex),
+            source[namespaceStart...namespaceEnd] == namespace
+        else { continue }
+
+        if namespaceStart > source.startIndex {
+            let before = source[source.index(before: namespaceStart)]
+            if before.isLetter || before.isNumber || before == "_" || before == "." { continue }
+        }
+        return true
+    }
+    return false
 }
 
 /// `source` 里每一处「调用 `name(`」的**左括号下标**。
@@ -446,6 +490,20 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "helper/Sources/ClaudioCore/SafeFileRead.swift": ["open("],
     // `settings.json` 的原子写 + `.claudio.bak` 的一次性原子备份。
     "helper/Sources/ClaudioCore/SettingsInstaller.swift": [".write("],
+    // Claude/Codex 配置事务：0600 起步的私有 staging fd 完整写入并 fsync；一次性备份用
+    // RENAME_EXCL 发布；卷不支持该 flag 时，同目录 link(2) 仍以 EEXIST 保证不覆盖。
+    // 最终配置用同目录 rename 替换，且两者都保留原文件权限。
+    "helper/Sources/ClaudioCore/ConfigFileTransaction.swift": [
+        "link(", "mkstemp(", "rename(", "renameatx_np(", "unlink(", "write(",
+    ],
+    // 已知旧版 codex-notify：私有同目录 staging 写入后恢复执行权限，再以 rename(2) 原子替换。
+    // 写入前在同一宿主锁内重读并比较预期内容，未知或并发修改版本 fail closed。
+    "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": [".write(", "rename("],
+    // 回执与 active installation 标记从 mkstemp(3) 创建瞬间就是 0600；完整 write(2) + fsync
+    // 后才以 rename(2) 原子替换稳定路径。unlink(2) 清 staging 及精确匹配的断开代次标记。
+    "helper/Sources/ClaudioCore/HostHookReceipt.swift": [
+        "mkstemp(", "rename(", "unlink(", "write(",
+    ],
     // 二进制与内置包的复制。**两处都是 staging + 同卷 rename**（`copyItem` 进暂存 → `moveItem` /
     // `replaceItemAt` 发布）。`copySelfToFixedLocation` 曾经是 `removeItem` + `copyItem` 直写最终
     // 路径 —— 那是全仓真正的第二处非原子写，而当时的豁免理由（「copyItem 的纪律是 staging+rename」）
@@ -485,6 +543,7 @@ private let contentReplacingWriteSites: [String: Int] = [
     "helper/Sources/ClaudioCore/Log.swift": 2,
     "helper/Sources/ClaudioCore/Play.swift": 1,
     "helper/Sources/ClaudioCore/SettingsInstaller.swift": 2,
+    "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": 1,
     "gui/Sources/ClaudioGUICore/AudioImport.swift": 1,
     "gui/Sources/ClaudioGUICore/ManifestBinding.swift": 1,
 ]
@@ -734,6 +793,7 @@ func runAtomicWriteSuites() {
             ("let stream = OutputStream(url: f, append: false)", "OutputStream("),
             ("let h = FileHandle(forWritingTo: configFile)", "FileHandle("),
             ("try fileManager.copyItem(at: source, to: destination)", ".copyItem("),
+            ("let result = Darwin.rename(source, destination)", "rename("),
         ]
         for (source, token) in evasions {
             let tokens = diskWriteSurfaceTokens(in: pipeline(source))

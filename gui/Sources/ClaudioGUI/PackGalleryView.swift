@@ -304,7 +304,7 @@ private struct PackCardView: View {
             : "声音包 \(name)，点按切换\(licenseSuffix)\(stateSuffix)"
     }
 
-    /// Chinese display names (``eventDisplayName(_:)``, `EventRowView.swift`) of every
+    /// Chinese semantic display names (``Event/displayName``) of every
     /// ``Event`` NOT in ``PackCard/presentEvents``, in ``Event/allCases`` order — a11y-
     /// architect FIX 7 (LOW): "N/4 可用" alone told VoiceOver a COUNT but never WHICH of
     /// the four events that count refers to. Only ever read from the `.partial` branch of
@@ -312,7 +312,7 @@ private struct PackCardView: View {
     private var missingEventNames: String {
         Event.allCases
             .filter { !card.presentEvents.contains($0) }
-            .map(eventDisplayName)
+            .map(\.displayName)
             .joined(separator: "、")
     }
 }

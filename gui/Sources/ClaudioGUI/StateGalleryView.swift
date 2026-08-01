@@ -5,8 +5,9 @@ import ClaudioGUIComponents
     import SwiftUI
 
     /// The repo-internal SwiftUI state gallery (ENGINEERING.md T14 D2) — the in-repo VISUAL
-    /// TRUTH SOURCE. Renders ONE frame per ``PreviewFixtures`` value, across all six
-    /// per-feature state families this app has (``OnboardingState``, ``OnboardingActionState``,
+    /// TRUTH SOURCE. Renders ONE frame per ``PreviewFixtures`` value across the app's
+    /// current per-feature state families and dual-host scenarios, plus an explicitly labelled
+    /// archive for the still-supported Claude-only legacy onboarding components (``OnboardingState``, ``OnboardingActionState``,
     /// ``DropZoneState``, ``EventRow``/``CoverageState``, ``PackCard``/``PackCardState``,
     /// ``MasterVolumeState`` — PLAN-MASTER-VOLUME.md D33/D38), EXCLUSIVELY off
     /// `PreviewFixtures` — no ad-hoc values are constructed anywhere in this file. See
@@ -30,11 +31,14 @@ import ClaudioGUIComponents
         var body: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
-                    OnboardingGalleryView()
-                    OnboardingActionGalleryView()
+                    GallerySection(title: "Legacy Claude-only onboarding archive（非生产 Panel）") {
+                        OnboardingGalleryView()
+                        OnboardingActionGalleryView()
+                    }
                     EventRowGalleryView()
                     MasterVolumeGalleryView()
                     PackCardGalleryView()
+                    HostIntegrationGalleryView()
                 }
                 .padding(20)
             }
@@ -49,7 +53,7 @@ import ClaudioGUIComponents
 
     struct OnboardingGalleryView: View {
         var body: some View {
-            GallerySection(title: "OnboardingState (\(PreviewFixtures.onboardingStates.count))") {
+            GallerySection(title: "Legacy OnboardingState (\(PreviewFixtures.onboardingStates.count))") {
                 ForEach(Array(PreviewFixtures.onboardingStates.enumerated()), id: \.offset) { _, state in
                     GalleryFrame(caption: onboardingStateCaption(state)) {
                         OnboardingStateFrame(state: state)
@@ -91,7 +95,7 @@ import ClaudioGUIComponents
     struct OnboardingActionGalleryView: View {
         var body: some View {
             GallerySection(
-                title: "OnboardingActionState (\(PreviewFixtures.onboardingActionStates.count))"
+                title: "Legacy OnboardingActionState (\(PreviewFixtures.onboardingActionStates.count))"
             ) {
                 ForEach(
                     Array(PreviewFixtures.onboardingActionStates.enumerated()), id: \.offset
@@ -318,6 +322,56 @@ import ClaudioGUIComponents
         }
     }
 
+    // MARK: - Host integrations (10 dual-host scenarios)
+
+    /// 双宿主展柜直接渲染生产 ``IntegrationsWindowView``：宿主卡、可听矩阵、检查器和
+    /// Dynamic Type 重排全都走同一份视图，不在 gallery 复制第二套展示组件。
+    struct HostIntegrationGalleryView: View {
+        var body: some View {
+            GallerySection(
+                title: "Host integrations (\(PreviewFixtures.hostIntegrationScenarios.count))"
+            ) {
+                ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
+                    GalleryFrame(caption: "\(scenario.id) · \(scenario.title)") {
+                        HostIntegrationStateFrame(scenario: scenario)
+                    }
+                }
+            }
+        }
+    }
+
+    private struct HostIntegrationStateFrame: View {
+        @StateObject private var model: IntegrationsWindowModel
+        @StateObject private var focusCoordinator = IntegrationsWindowFocusCoordinator()
+
+        init(scenario: PreviewFixtures.HostIntegrationScenario) {
+            let store = HostIntegrationPresentationStore(
+                state: scenario.state,
+                configurationSources: [
+                    .claudeCode: "~/.claude/settings.json",
+                    .codex: "~/.codex/hooks.json",
+                ])
+            let content = store.content
+            let unchanged = IntegrationsWindowActionOutcome(
+                content: content,
+                feedbackKind: .information,
+                feedbackMessage: "预览不会修改配置")
+            _model = StateObject(
+                wrappedValue: IntegrationsWindowModel(
+                    content: content,
+                    refreshHandler: IntegrationsWindowRefreshHandler { unchanged },
+                    actionHandler: IntegrationsWindowActionHandler { _ in unchanged },
+                    clipboardWriter: IntegrationsWindowClipboardWriter { _ in true }))
+        }
+
+        var body: some View {
+            IntegrationsWindowView(
+                model: model,
+                focusCoordinator: focusCoordinator)
+                .frame(width: 680, height: 640)
+        }
+    }
+
     // MARK: - Shared gallery chrome
 
     private struct GallerySection<Content: View>: View {
@@ -439,6 +493,15 @@ import ClaudioGUIComponents
             Group {
                 PackCardGalleryView().preferredColorScheme(.light)
                 PackCardGalleryView().preferredColorScheme(.dark)
+            }
+        }
+    }
+
+    struct HostIntegrationGalleryView_Previews: PreviewProvider {
+        static var previews: some View {
+            Group {
+                HostIntegrationGalleryView().preferredColorScheme(.light)
+                HostIntegrationGalleryView().preferredColorScheme(.dark)
             }
         }
     }

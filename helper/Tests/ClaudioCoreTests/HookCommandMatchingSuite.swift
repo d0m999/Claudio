@@ -18,6 +18,76 @@ private func matched(_ command: String, root: String = testRoot) -> Event? {
 
 @MainActor
 func runHookCommandMatchingSuites() {
+    suite("新版双宿主 hook 命令：严格 round-trip，拒绝 Codex 假能力与外部路径") {
+        let installationID = UUID(uuidString: "01234567-89AB-4CDE-8FAB-0123456789AB")!
+        let supported: [(HostID, String, Event)] = [
+            (.claudeCode, "Stop", .stop),
+            (.claudeCode, "StopFailure", .stopFailure),
+            (.claudeCode, "Notification", .notification),
+            (.claudeCode, "SubagentStop", .subagentStop),
+            (.codex, "Stop", .stop),
+            (.codex, "PermissionRequest", .notification),
+            (.codex, "SubagentStop", .subagentStop),
+        ]
+        for (host, nativeEvent, event) in supported {
+            let command = hostIntegrationHookCommand(
+                host: host, nativeEvent: nativeEvent, installationID: installationID,
+                claudioBinaryPath: canonicalPath)
+            expect(command != nil, "\(host.rawValue)/\(nativeEvent) 必须能生成新版命令")
+            expect(
+                command.flatMap { matchedHostHookCommand(inHookCommand: $0, claudioRoot: testRoot) }
+                    == MatchedHostHookCommand(
+                        host: host, nativeEvent: nativeEvent, event: event,
+                        installationID: installationID),
+                "新版命令必须结构化 round-trip：\(host.rawValue)/\(nativeEvent)")
+            expect(
+                command.flatMap {
+                    matchedCurrentHostHookCommand(
+                        inHookCommand: $0, claudioBinaryPath: canonicalPath)
+                }
+                    == MatchedHostHookCommand(
+                        host: host, nativeEvent: nativeEvent, event: event,
+                        installationID: installationID),
+                "当前连接 matcher 必须 round-trip writer 的 canonical command")
+        }
+
+        expect(
+            hostIntegrationHookCommand(
+                host: .codex, nativeEvent: "StopFailure", installationID: installationID,
+                claudioBinaryPath: canonicalPath) == nil,
+            "Codex StopFailure 必须失败关闭")
+        expect(
+            hostIntegrationHookCommand(
+                host: .codex, nativeEvent: "UserPromptSubmit", installationID: installationID,
+                claudioBinaryPath: canonicalPath) == nil,
+            "UserPromptSubmit 不得冒充需要你")
+
+        let canonical = hostIntegrationHookCommand(
+            host: .codex, nativeEvent: "Stop", installationID: installationID,
+            claudioBinaryPath: canonicalPath)!
+        expect(
+            matchedHostHookCommand(inHookCommand: canonical + " --extra", claudioRoot: testRoot)
+                == nil,
+            "额外 argv 必须拒绝")
+        expect(
+            matchedHostHookCommand(
+                inHookCommand: canonical.replacingOccurrences(
+                    of: installationID.uuidString, with: "not-a-uuid"),
+                claudioRoot: testRoot) == nil,
+            "损坏 installation ID 必须拒绝")
+        expect(
+            matchedHostHookCommand(inHookCommand: canonical, claudioRoot: "/tmp/.claudio") == nil,
+            "另一 Claudio namespace 下的命令不能被误认")
+
+        let spacedBinary = "/Users/John Smith/.claudio/bin/claudio"
+        let brokenUnquoted =
+            "\(spacedBinary) hook codex Stop --installation-id \(installationID.uuidString)"
+        expect(
+            matchedCurrentHostHookCommand(
+                inHookCommand: brokenUnquoted, claudioBinaryPath: spacedBinary) == nil,
+            "inspect/connect 只能接受当前 writer 的 canonical quoting；不可执行的旧裸路径只供断开清扫")
+    }
+
     suite("matchedClaudioEvent: recognizes today's canonical path for every one of the 4 events") {
         for event in Event.allCases {
             let command = "\(canonicalPath) play \(event.cliName)"

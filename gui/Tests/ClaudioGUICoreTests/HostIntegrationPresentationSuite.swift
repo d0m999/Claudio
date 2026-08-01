@@ -1,0 +1,549 @@
+import ClaudioCore
+import ClaudioGUICore
+import Foundation
+
+private let hostPresentationInstallationID = UUID(
+    uuidString: "00000000-0000-4000-8000-0000000000A1")!
+
+private func hostPresentationSnapshot(
+    _ host: HostID,
+    activation: HostActivationEvidence? = nil
+) -> HostIntegrationSnapshot {
+    let binding = HostCapabilityCatalog.bindings(for: host).first { $0.isAudibleCapability }!
+    let evidence = activation ?? .observed(
+        HostReceiptEvidence(
+            installationID: hostPresentationInstallationID,
+            nativeEvent: binding.nativeEvent!,
+            event: binding.event,
+            timestamp: Date(timeIntervalSince1970: 100),
+            playbackResult: .played))
+    return HostIntegrationSnapshot(
+        host: host,
+        runtime: .ready,
+        availability: .available,
+        configuration: .configured,
+        writability: .writable,
+        activation: evidence,
+        installationID: hostPresentationInstallationID)
+}
+
+private func hostPresentationMatrix(
+    snapshots: [HostIntegrationSnapshot]? = nil,
+    capabilities: [HostID: [HostCapabilityBinding]]? = nil
+) -> AudibilityMatrix {
+    AudibilityMatrix.make(
+        snapshots: snapshots ?? HostID.allCases.map { hostPresentationSnapshot($0) },
+        capabilities: capabilities ?? Dictionary(
+            uniqueKeysWithValues: HostID.allCases.map {
+                ($0, HostCapabilityCatalog.bindings(for: $0))
+            }),
+        soundCoverage: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }),
+        enabledEvents: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
+}
+
+@MainActor
+func runHostIntegrationPresentationSuites() {
+    suite("双宿主事件文案：四个 UI 名称统一为声音语义，不泄漏宿主原生事件名") {
+        let expected: [(Event, String)] = [
+            (.stop, "本轮结束"),
+            (.stopFailure, "执行中断"),
+            (.notification, "需要你"),
+            (.subagentStop, "子任务结束"),
+        ]
+
+        expect(
+            Event.allCases.map(\.displayName) == expected.map(\.1),
+            "四个事件必须按稳定顺序使用统一中文语义，实得 \(Event.allCases.map(\.displayName))")
+        expect(
+            Set(Event.allCases.map(\.displayName)).count == Event.allCases.count,
+            "四个声音语义名称必须互不重复")
+        for (event, title) in expected {
+            expect(event.displayName == title, "\(event.rawValue) 应显示 \(title)，实得 \(event.displayName)")
+        }
+    }
+
+    suite("声音来源行：Claude Code 与 Codex 永久等权出现，3/4 是正常 ready") {
+        let rows = hostSourceRowPresentations(from: hostPresentationMatrix())
+
+        expect(rows.count == 2, "声音来源必须固定两行，实得 \(rows.count)")
+        expect(rows.map(\.host) == [.claudeCode, .codex], "宿主行顺序必须固定为 Claude Code → Codex")
+        expect(rows[0].title == "Claude Code", "第一行标题必须是 Claude Code")
+        expect(rows[0].readinessText == "4/4 已就绪", "Claude Code 应显示 4/4 已就绪")
+        expect(rows[0].status == .ready, "Claude Code 完整连接应使用 ready 状态")
+        expect(rows[1].title == "Codex", "第二行标题必须是 Codex")
+        expect(rows[1].readinessText == "3/4 已就绪", "Codex 正常能力事实应显示 3/4 已就绪")
+        expect(rows[1].status == .ready, "Codex 的 3/4 不得降级成 warning 或 needsAttention")
+        expect(rows[1].detailText == "执行中断暂无事件", "Codex ready 行必须诚实说明缺少执行中断事件")
+        expect(
+            rows[1].accessibilityLabel == "Codex，3/4 已就绪，执行中断暂无事件",
+            "宿主行 VoiceOver 必须完整读出宿主、能力与限定，实得 \(rows[1].accessibilityLabel)")
+    }
+
+    suite("声音来源行：缺少一个快照也不能隐藏该宿主；Codex 待确认文案固定") {
+        let onlyClaude = hostSourceRowPresentations(
+            from: hostPresentationMatrix(snapshots: [hostPresentationSnapshot(.claudeCode)]))
+        expect(onlyClaude.map(\.host) == HostID.allCases, "单宿主连接时仍须保留两条声音来源行")
+        expect(onlyClaude[1].status == .notConnected, "没有 Codex 快照应呈现未连接")
+        expect(onlyClaude[1].readinessText == "3/4 未连接", "未连接仍须保留 Codex 的 3/4 能力事实")
+
+        let awaiting = hostSourceRowPresentations(
+            from: hostPresentationMatrix(
+                snapshots: [
+                    hostPresentationSnapshot(.claudeCode),
+                    hostPresentationSnapshot(
+                        .codex,
+                        activation: .awaitingReceipt(
+                            installationID: hostPresentationInstallationID)),
+                ]))
+        expect(awaiting[1].status == .awaitingActivation, "等待首个真实回执必须是待确认状态")
+        expect(awaiting[1].readinessText == "3/4 已配置", "待确认不得冒充已连接")
+        expect(
+            awaiting[1].detailText == "Claudio 已写好，等待 Codex 确认",
+            "Codex 待确认文案必须逐字固定，实得 \(String(describing: awaiting[1].detailText))")
+    }
+
+    suite("legacy 检查器：必须提供升级连接 + 重探 + 末尾断开，并复用 repair seam") {
+        let legacySnapshot = HostIntegrationSnapshot(
+            host: .claudeCode,
+            runtime: .ready,
+            availability: .available,
+            configuration: .legacyConnected,
+            writability: .writable,
+            activation: .none)
+        let rows = hostSourceRowPresentations(
+            from: hostPresentationMatrix(snapshots: [legacySnapshot]))
+        let legacy = rows.first(where: { $0.host == .claudeCode })!
+        let actions = integrationsInspectorActions(for: legacy)
+
+        expect(legacy.status == .legacy, "fixture 必须真实投影 legacy 行")
+        expect(
+            actions == [.repair(.claudeCode), .redetect, .disconnect(.claudeCode)],
+            "legacy 必须可升级、可重探且破坏性断开在末尾，实得 \(actions)")
+        expect(
+            integrationsInspectorActionTitle(
+                .repair(.claudeCode), hostStatus: legacy.status) == "升级连接",
+            "legacy 的 repair 可见标题必须是升级连接")
+        expect(
+            integrationsInspectorActionTitle(
+                .repair(.claudeCode), hostStatus: .needsAttention)
+                == "修复 Claude Code 连接",
+            "真实损坏态仍应显示修复，不能一律叫升级")
+    }
+
+    suite("可听能力矩阵：严格由四个语义行 × 两个宿主单元组成") {
+        let presentation = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
+
+        expect(presentation.hostColumns == HostID.allCases, "矩阵宿主列必须来自 HostID.allCases")
+        expect(presentation.rows.map(\.event) == Event.allCases, "矩阵事件行必须来自 Event.allCases")
+        expect(presentation.rows.count == 4, "矩阵必须有四个事件行")
+        expect(
+            presentation.rows.allSatisfy { $0.cells.map(\.host) == HostID.allCases },
+            "每个事件行必须按 Claude Code → Codex 提供两个单元")
+        expect(
+            presentation.rows.flatMap(\.cells).count == 8,
+            "标准矩阵必须完整提供 4×2 共八个单元")
+
+        let permission = presentation.cell(host: .codex, event: .notification)
+        expect(permission?.nativeEventText == "PermissionRequest", "Codex 需要你必须显示原生 PermissionRequest")
+        expect(permission?.qualificationText == "仅授权请求", "可见文案必须显示“仅授权请求”")
+        let permissionLabel = permission?.accessibilityLabel ?? ""
+        for required in [
+            "Codex", "需要你", "PermissionRequest", "部分支持", "仅授权请求", "已连接",
+        ] {
+            expect(
+                permissionLabel.contains(required),
+                "VoiceOver label 必须包含 \(required)，实得 \(permissionLabel)")
+        }
+
+        let interruption = presentation.cell(host: .codex, event: .stopFailure)
+        expect(interruption?.state == .unsupported, "Codex 执行中断必须严格是不支持")
+        expect(interruption?.nativeEventText == nil, "不支持的 Codex 执行中断不得伪造原生事件名")
+        expect(interruption?.statusText == "不支持", "不支持状态必须同时用文字编码")
+    }
+
+    suite("可听能力矩阵：删除 adapter 映射会暴露缺失，不得由 GUI 硬编码补回第四格") {
+        var capabilities = Dictionary(
+            uniqueKeysWithValues: HostID.allCases.map {
+                ($0, HostCapabilityCatalog.bindings(for: $0))
+            })
+        capabilities[.codex] = capabilities[.codex]?.filter { $0.event != .notification }
+
+        let presentation = hostCapabilityMatrixPresentation(
+            from: hostPresentationMatrix(capabilities: capabilities))
+        let missing = presentation.cell(host: .codex, event: .notification)
+
+        expect(missing?.state == .unsupported, "缺少 adapter 映射的格子必须 fail closed 为 unsupported")
+        expect(missing?.nativeEventText == nil, "GUI 不得硬编码补回 PermissionRequest")
+        expect(
+            missing?.qualificationText == "此宿主未声明该能力",
+            "缺映射必须保留 Core 生成的诊断限定语，实得 \(String(describing: missing?.qualificationText))")
+        expect(
+            missing?.accessibilityLabel.contains("仅授权请求") == false,
+            "删除 adapter 映射后 VoiceOver 也不得残留硬编码限定语")
+    }
+
+    suite("菜单栏事件宿主覆盖：四行文案纯投影矩阵，Codex 仅授权限定同时可见与可播报") {
+        let matrix = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
+        let rows = Dictionary(uniqueKeysWithValues: Event.allCases.map { event in
+            (event, eventHostCoveragePresentation(event: event, matrix: matrix))
+        })
+
+        expect(rows[.stop]?.visibleText == "Claude Code · Codex", "本轮结束必须显示两个宿主")
+        expect(rows[.stopFailure]?.visibleText == "仅 Claude Code", "执行中断必须只显示 Claude Code")
+        expect(
+            rows[.notification]?.visibleText
+                == "Claude Code · Codex（Codex 仅授权请求）",
+            "需要你必须把 Codex 的仅授权边界写进可见短文案")
+        expect(
+            rows[.notification]?.accessibilityLabel.contains("Codex 仅授权请求") == true,
+            "需要你的 VoiceOver label 必须包含宿主与仅授权限定")
+        expect(rows[.subagentStop]?.visibleText == "Claude Code · Codex", "子任务结束必须显示两个宿主")
+
+        var capabilities = Dictionary(
+            uniqueKeysWithValues: HostID.allCases.map {
+                ($0, HostCapabilityCatalog.bindings(for: $0))
+            })
+        capabilities[.codex] = capabilities[.codex]?.filter { $0.event != .notification }
+        let mutated = hostCapabilityMatrixPresentation(
+            from: hostPresentationMatrix(capabilities: capabilities))
+        let notification = eventHostCoveragePresentation(event: .notification, matrix: mutated)
+        expect(
+            notification.hosts == [.claudeCode]
+                && notification.visibleText == "仅 Claude Code",
+            "删除 Codex 映射必须让宿主从事件行消失，View 不得硬编码补回")
+        expect(
+            !notification.accessibilityLabel.contains("Codex"),
+            "删除映射后 VoiceOver 也不得残留 Codex")
+    }
+
+    suite("IntegrationsWindow 主动状态播报：共享宿主行与矩阵格补齐事件、连接状态及能力限定") {
+        let matrix = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
+        let codexRow = hostSourceRowPresentations(from: hostPresentationMatrix())
+            .first(where: { $0.host == .codex })!
+        let permission = matrix.cell(host: .codex, event: .notification)!
+        let receiptAnnouncement = integrationsStateChangeAccessibilityLabel(
+            message: "收到当前代次真实回执：已播放",
+            hostRow: codexRow,
+            capabilityCells: [permission])
+
+        for required in [
+            "Codex", "3/4 已就绪", "需要你", "PermissionRequest", "仅授权请求",
+            "已连接", "收到当前代次真实回执",
+        ] {
+            expect(
+                receiptAnnouncement.contains(required),
+                "真实回执主动播报必须包含 \(required)，实得 \(receiptAnnouncement)")
+        }
+
+        let refreshAnnouncement = integrationsStateChangeAccessibilityLabel(
+            message: "已重新检测声音来源",
+            hostRow: codexRow,
+            capabilityCells: matrix.rows.compactMap {
+                $0.cells.first(where: { $0.host == .codex })
+            })
+        expect(
+            refreshAnnouncement.contains("本轮结束")
+                && refreshAnnouncement.contains("执行中断")
+                && refreshAnnouncement.contains("需要你")
+                && refreshAnnouncement.contains("子任务结束"),
+            "宿主级 refresh 必须从共享矩阵播出四个事件，而不是只有一句无上下文的完成提示")
+        expect(
+            refreshAnnouncement.contains("仅授权请求")
+                && refreshAnnouncement.contains("已连接"),
+            "宿主级 refresh 仍须保留 Codex 的能力限定与连接状态")
+    }
+
+    suite("真实回执摘要：只投影 observed 的宿主、事件、时间与脱敏结果") {
+        let observed = hostPresentationSnapshot(.claudeCode)
+        let text = hostLatestReceiptText(snapshot: observed)
+        expect(
+            hostLatestReceiptEvent(snapshot: observed) == .stop,
+            "结构化回执事件必须来自同一份 observed evidence，不能反向解析摘要字符串")
+        expect(text?.contains("Claude Code · Stop → 本轮结束") == true, "回执摘要必须包含宿主与事件映射")
+        expect(text?.contains("1970-01-01T00:01:40Z") == true, "回执摘要必须包含真实 ISO 8601 时间")
+        expect(text?.hasSuffix("· 已播放") == true, "回执摘要必须显示脱敏播放结果")
+        expect(
+            text?.contains(hostPresentationInstallationID.uuidString) == false,
+            "检查器不得显示 installation ID")
+        expect(text?.contains("/") == false, "检查器不得显示绝对路径")
+
+        let awaiting = hostPresentationSnapshot(
+            .codex,
+            activation: .awaitingReceipt(installationID: hostPresentationInstallationID))
+        expect(
+            hostLatestReceiptText(snapshot: awaiting) == nil,
+            "待确认不能伪造最近真实回执")
+        expect(hostLatestReceiptEvent(snapshot: awaiting) == nil, "待确认也不能伪造回执事件身份")
+    }
+
+    suite("真实回执播放结果：六种 Core 结果全部有中文且不泄漏 ID/路径") {
+        let binding = HostCapabilityCatalog.bindings(for: .claudeCode)
+            .first(where: { $0.isAudibleCapability })!
+        let cases: [(HostHookPlaybackResult, String)] = [
+            (.played, "已播放"),
+            (.muted, "已静音"),
+            (.debounced, "防抖跳过"),
+            (.notReady, "声音未就绪"),
+            (.unsupportedEvent, "事件不支持"),
+            (.playbackFailed, "播放失败"),
+        ]
+
+        for (result, expected) in cases {
+            expect(
+                hostHookPlaybackResultDisplayName(result) == expected,
+                "\(result) 应投影为 \(expected)")
+            let snapshot = HostIntegrationSnapshot(
+                host: .claudeCode,
+                runtime: .ready,
+                availability: .available,
+                configuration: .configured,
+                writability: .writable,
+                activation: .observed(
+                    HostReceiptEvidence(
+                        installationID: hostPresentationInstallationID,
+                        nativeEvent: binding.nativeEvent!,
+                        event: binding.event,
+                        timestamp: Date(timeIntervalSince1970: 100),
+                        playbackResult: result)),
+                installationID: hostPresentationInstallationID)
+            let resultText = hostLatestReceiptText(snapshot: snapshot)
+            expect(resultText?.hasSuffix("· \(expected)") == true, "回执摘要必须包含 \(expected)")
+            expect(
+                resultText?.contains(hostPresentationInstallationID.uuidString) == false,
+                "\(result) 回执不得泄漏 installation ID")
+            expect(resultText?.contains("/") == false, "\(result) 回执不得泄漏绝对路径")
+        }
+    }
+
+    suite("IntegrationsWindow Dynamic Type：标准为 4×2 矩阵，最大字号重排为四张双宿主事件卡且从不横滚") {
+        let standard = integrationsWindowLayoutAdaptation(for: .standard)
+        let maximum = integrationsWindowLayoutAdaptation(for: .maximum)
+
+        expect(
+            standard.mode == .capabilityMatrix(eventRowCount: 4, hostColumnCount: 2),
+            "标准字号必须保留 4×2 矩阵，实得 \(standard.mode)")
+        expect(!standard.allowsHorizontalScrolling, "标准字号不应依赖横向滚动")
+        expect(
+            maximum.mode == .eventCards(cardCount: 4, hostRowsPerCard: 2),
+            "最大字号必须重排为四张事件卡、每张两条宿主子行，实得 \(maximum.mode)")
+        expect(!maximum.allowsHorizontalScrolling, "最大字号严禁横向滚动或裁切")
+    }
+
+    suite("IntegrationsWindow 焦点序：两张宿主卡领先、矩阵逐行、非破坏动作随后，断开永远最后") {
+        let matrix = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
+        let scope = IntegrationsWindowFocusScope(
+            matrix: matrix,
+            inspectorActions: [
+                .disconnect(.codex), .copyHooksCommand, .redetect, .connect(.claudeCode),
+            ],
+            feedbackRevision: 7)
+        let order = integrationsWindowFocusOrder(scope)
+        let expectedCells = Event.allCases.flatMap { event in
+            HostID.allCases.map { IntegrationsWindowFocusTarget.capabilityCell(host: $0, event: event) }
+        }
+
+        expect(
+            Array(order.prefix(2)) == [.hostCard(.claudeCode), .hostCard(.codex)],
+            "焦点必须先按视觉序经过两张等权宿主卡")
+        expect(
+            Array(order.dropFirst(2).prefix(8)) == expectedCells,
+            "焦点随后必须按事件行、宿主列遍历八个真实矩阵单元")
+        expect(
+            order.dropFirst(10).prefix(4) == [
+                .dismissFeedback(revision: 7),
+                .inspectorAction(.copyHooksCommand),
+                .inspectorAction(.redetect),
+                .inspectorAction(.connect(.claudeCode)),
+            ],
+            "反馈关闭与非破坏检查器动作应按视觉序排在断开之前")
+        expect(
+            order.last == .inspectorAction(.disconnect(.codex)),
+            "破坏性的断开必须无条件位于详情窗焦点序末尾")
+    }
+
+    suite("IntegrationsWindow 反馈：短暂、可关闭、可过期，VoiceOver 带宿主且 Reduce Motion 禁用位移动画") {
+        let now = Date(timeIntervalSince1970: 1_000)
+        var feedback = IntegrationsFeedbackModel()
+        let fullAnnouncement =
+            "Codex，3/4 已就绪。Codex，需要你，原生事件 PermissionRequest，仅授权请求，已连接"
+        let revision = feedback.present(
+            host: .codex,
+            kind: .information,
+            message: "Claudio 已写好，等待 Codex 确认",
+            accessibilityAnnouncement: fullAnnouncement,
+            now: now)
+        let banner = feedback.activeFeedback(at: now)
+
+        expect(banner?.revision == revision, "present 应返回当前反馈代次")
+        expect(banner?.isDismissible == true, "状态反馈必须提供显式关闭")
+        expect(
+            banner?.expiresAt == now.addingTimeInterval(integrationsFeedbackLifetime),
+            "状态反馈必须使用固定短生命周期")
+        expect(
+            banner?.message == "Claudio 已写好，等待 Codex 确认",
+            "可见反馈必须继续保持短文案")
+        expect(
+            banner?.accessibilityLabel == fullAnnouncement,
+            "主动播报必须允许使用共享 presentation 生成的完整上下文，实得 "
+                + "\(String(describing: banner?.accessibilityLabel))")
+        expect(
+            integrationsFeedbackTransition(reduceMotionEnabled: false) == .opacity,
+            "普通模式只使用短促透明度反馈")
+        expect(
+            integrationsFeedbackTransition(reduceMotionEnabled: true) == .immediate,
+            "Reduce Motion 开启时必须取消动画")
+        expect(
+            feedback.activeFeedback(
+                at: now.addingTimeInterval(integrationsFeedbackLifetime)) == nil,
+            "反馈到期边界必须立即不可见")
+
+        feedback.expire(at: now.addingTimeInterval(integrationsFeedbackLifetime))
+        expect(feedback.current == nil, "expire 必须清理已到期反馈")
+    }
+
+    suite("IntegrationsWindow 反馈：旧关闭动作不能误关后来出现的新反馈") {
+        let now = Date(timeIntervalSince1970: 2_000)
+        var feedback = IntegrationsFeedbackModel()
+        let oldRevision = feedback.present(
+            host: .claudeCode, kind: .success, message: "Claude Code 已连接", now: now)
+        let newRevision = feedback.present(
+            host: .codex, kind: .failure, message: "Codex 重新检测失败", now: now)
+
+        feedback.dismiss(revision: oldRevision)
+        expect(
+            feedback.current?.revision == newRevision,
+            "旧 banner 的延迟关闭事件不得清掉更新后的反馈")
+        feedback.dismiss(revision: newRevision)
+        expect(feedback.current == nil, "当前 banner 的关闭动作必须立即生效")
+    }
+
+    suite("IntegrationsWindow 完整播报覆盖：成功与失败 outcome 都不回落成短文案") {
+        let now = Date(timeIntervalSince1970: 2_500)
+        let announcement =
+            "Codex，3/4 已就绪。Codex，需要你，原生事件 PermissionRequest，仅授权请求，已连接"
+        for (kind, message) in [
+            (IntegrationsFeedbackKind.success, "Codex 已连接"),
+            (IntegrationsFeedbackKind.failure, "Codex 连接失败"),
+        ] {
+            var feedback = IntegrationsFeedbackModel()
+            _ = feedback.present(
+                host: .codex,
+                kind: kind,
+                message: message,
+                accessibilityAnnouncement: announcement,
+                now: now)
+            expect(feedback.current?.message == message, "可见 outcome 反馈仍须保持短文案")
+            expect(
+                feedback.current?.accessibilityLabel == announcement,
+                "\(kind) outcome 的主动播报必须保留共享 presentation 完整上下文")
+        }
+    }
+
+    suite("IntegrationsWindow 反馈播报：新 revision 恰好一次；关闭/过期 nil 不播也不重置去重") {
+        let now = Date(timeIntervalSince1970: 3_000)
+        let first = IntegrationsFeedback(
+            revision: 1,
+            host: .codex,
+            kind: .information,
+            message: "Claudio 已写好，等待 Codex 确认",
+            expiresAt: now.addingTimeInterval(5))
+        let second = IntegrationsFeedback(
+            revision: 2,
+            host: .claudeCode,
+            kind: .failure,
+            message: "连接失败",
+            expiresAt: now.addingTimeInterval(5))
+        var announcer = IntegrationsFeedbackAnnouncementModel()
+
+        expect(
+            announcer.consume(first) == first.accessibilityLabel,
+            "新反馈必须主动播完整宿主限定句")
+        expect(announcer.consume(first) == nil, "同一 revision 不得重复播报")
+        expect(announcer.consume(nil) == nil, "关闭或到期不得播一条空通知")
+        expect(announcer.consume(first) == nil, "nil 不得重置去重、让旧反馈复活")
+        expect(
+            announcer.consume(second) == second.accessibilityLabel,
+            "新 revision 必须独立播报")
+    }
+
+    suite("IntegrationsWindow 双宿主同帧回执：逐条反馈、独立 revision，关闭或到期后推进") {
+        let now = Date(timeIntervalSince1970: 3_500)
+        let requests = [
+            IntegrationsFeedbackRequest(
+                host: .claudeCode,
+                kind: .information,
+                message: "收到 Claude Code 回执",
+                accessibilityAnnouncement: "Claude Code，本轮结束，已连接，收到真实回执"),
+            IntegrationsFeedbackRequest(
+                host: .codex,
+                kind: .information,
+                message: "收到 Codex 回执",
+                accessibilityAnnouncement: "Codex，需要你，仅授权请求，已连接，收到真实回执"),
+        ]
+
+        var dismissedSequence = IntegrationsFeedbackModel()
+        guard let firstRevision = dismissedSequence.presentSequence(requests, now: now) else {
+            expect(false, "非空反馈序列必须立即呈现第一条")
+            return
+        }
+        let firstFeedback = dismissedSequence.current
+        expect(dismissedSequence.current?.host == .claudeCode, "第一条必须按宿主稳定顺序呈现")
+        dismissedSequence.dismiss(revision: firstRevision, now: now.addingTimeInterval(1))
+        let secondAfterDismiss = dismissedSequence.current
+        expect(secondAfterDismiss?.host == .codex, "关闭第一条后必须推进第二宿主反馈")
+        expect(secondAfterDismiss?.revision != firstRevision, "两条回执必须使用独立 revision 去重")
+        expect(
+            secondAfterDismiss?.expiresAt
+                == now.addingTimeInterval(1 + integrationsFeedbackLifetime),
+            "第二条必须从实际呈现时重新计算短生命周期")
+
+        var expiredSequence = IntegrationsFeedbackModel()
+        let firstBeforeExpiry = expiredSequence.presentSequence(requests, now: now)
+        expiredSequence.expire(at: now.addingTimeInterval(integrationsFeedbackLifetime))
+        let secondAfterExpiry = expiredSequence.current
+        expect(secondAfterExpiry?.host == .codex, "第一条自然到期后也必须推进第二宿主反馈")
+        expect(secondAfterExpiry?.revision != firstBeforeExpiry, "自然推进也必须分配独立 revision")
+        expect(
+            secondAfterExpiry?.expiresAt
+                == now.addingTimeInterval(2 * integrationsFeedbackLifetime),
+            "自然推进后的第二条也必须重新获得完整 5 秒生命周期")
+
+        var announcer = IntegrationsFeedbackAnnouncementModel()
+        let firstSentence = announcer.consume(firstFeedback)
+        let secondSentence = announcer.consume(secondAfterDismiss)
+        expect(firstSentence == requests[0].accessibilityAnnouncement, "第一宿主必须产生完整 VoiceOver 句")
+        expect(secondSentence == requests[1].accessibilityAnnouncement, "第二宿主必须产生完整 VoiceOver 句")
+    }
+
+    suite("IntegrationsWindow 当前操作：目标宿主、可见文字与 VoiceOver 同源，legacy repair 为升级中") {
+        let cases: [(IntegrationsWindowInspectorAction, HostSourceRowStatus?, String)] = [
+            (.redetect, .ready, "重新检测中"),
+            (.connect(.codex), .notConnected, "连接中"),
+            (.repair(.claudeCode), .needsAttention, "修复中"),
+            (.repair(.claudeCode), .legacy, "升级中"),
+            (.disconnect(.codex), .ready, "断开中"),
+        ]
+        for (action, status, expected) in cases {
+            let operation = integrationsInFlightPresentation(
+                action: action,
+                selectedHost: .claudeCode,
+                hostStatus: status)
+            expect(operation?.statusText == expected, "\(action) 应显示 \(expected)")
+            expect(
+                operation?.accessibilityLabel.contains(expected) == true,
+                "\(action) 的限定语必须进入 VoiceOver")
+        }
+        expect(
+            integrationsInFlightPresentation(
+                action: .redetect,
+                selectedHost: .codex,
+                hostStatus: .ready)?.host == .codex,
+            "重新检测必须显示在当前选择的宿主卡")
+        expect(
+            integrationsInFlightPresentation(
+                action: .copyHooksCommand,
+                selectedHost: .codex,
+                hostStatus: .awaitingActivation) == nil,
+            "同步复制动作不应制造虚假的进行中态")
+    }
+}

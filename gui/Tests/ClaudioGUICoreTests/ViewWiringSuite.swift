@@ -1,18 +1,13 @@
 import ClaudioGUICore
 import Foundation
 
-// MARK: - `ClaudioGUI` 这个 target，harness 一行都跑不到（T17 实测）
+// MARK: - `ClaudioGUI` 这个 executable target 需要源码接线护栏
 //
 // `claudio-gui-tests` 只依赖 `ClaudioGUICore` + `ClaudioCore`。`ClaudioGUI` 是一个带 `@main` 的
 // **executableTarget**，Swift 里没法 `import` 它。所以整棵 SwiftUI 视图树上的每一行接线，对这套
-// 测试都是**不可见的**。评审实测了两次变异，两次都全绿：
-//
-//   ① 删掉 `PanelView` 里那句 `.onChange(of: onboardingViewModel.state) { refresh(); … }`
-//      —— 也就是让「接管成功」真正兑现的那一行 —— `✓ all 652 checks passed`，release 构建零告警。
-//   ② 把 `actionRunner` 改回可选 + 默认 nil + 静默 `guard let … else { refresh(); return }`，
-//      并删掉 `PanelView` 那边的接线（= 逐字重建 T17 之前那个死 CTA）—— `✓ all 652 checks passed`。
-//
-// **两次变异都重新制造了这次提交要修的那个 bug，而绿灯一次都没灭。**
+// 测试都是**不可见的**。因此「Panel 不再探测 Claude-only onboarding」、
+// 「两条声音来源与运行控件恒显」、「每次打开请求共享 manager 刷新」和
+// 「连接/修复/断开只存在于 retained IntegrationsWindow」必须由本 suite 读生产源来守。
 //
 // 真正的结构修法是把视图层拆成一个可被 import 的 library target（或引入 ViewInspector）—— 那是一次
 // 独立的重构，不该跟一次 bugfix 混在一起（已记入 TODOS）。在那之前，这个 suite 是**唯一存在的护栏**：
@@ -20,7 +15,7 @@ import Foundation
 //
 // ⚠️ **诚实标注：这是文本绊线，不是行为测试。** 它证明不了那行代码**做对了**，只能证明它**还在**。
 // 一个把 `.onChange` 改成 `.onChange(of: config)` 的改动照样能骗过它。它挡的是「顺手删掉 / 重构时
-// 漏掉」这一类，而那恰恰是上面两次变异的形状。`ReleaseLayoutSuite` 已经为 release.yml 立下了同样的
+// 漏掉」这一类，而那恰恰是上述双宿主接线变异的形状。`ReleaseLayoutSuite` 已经为 release.yml 立下了同样的
 // 先例：一个可执行的 harness 读得了文件，那就用它读。
 
 /// 仓库根 —— 从 `#filePath` 推（编译期常量，不依赖 cwd）。
@@ -52,8 +47,8 @@ private func scan(_ relativePath: String) -> StrippedSwiftSource? {
 /// 这与它上游的 `ReleaseLayoutSuite` 第一版翻的是**同一次车**（release.yml 的散文让 grep 命中，
 /// 于是那条断言永远不会红）。一次文本断言若不区分「代码」与「谈论代码的文字」，它断的就不是代码。
 /// T17c：也剥**行尾**注释，不只是整行注释。上一版只判断 `hasPrefix("//")`，于是一行
-/// `foo()  // 见 .onChange(of: onboardingViewModel.state)` 能同时活过过滤器**又**让 `contains()`
-/// 命中 —— 真代码被删掉了，绊线照样绿。这正是本 suite 头部自陈翻过的那次车的**残留一半**：
+/// `foo()  // 见 hostSourcesSection` 能同时活过过滤器**又**让 `contains()`
+/// 命中 —— 真代码被删掉了，绊线照样绿。这正是本 suite 头部说明的文本护栏局限：
 /// 它修好了整行注释，没修行尾注释。（反向断言 `!contains("Bundle.main")` 则会被行尾注释假红。）
 ///
 /// **同一个病的第三半**（`/codex review be332ff` 的 P3）：它此前在**每行第一个 `//`** 处无条件截断，
@@ -241,8 +236,8 @@ private func guiSources() -> [ScannedSource] {
 /// `expectedProductionLocks` 的文件集。上一版两张清单各自硬编码、互不绑定 —— 往这里加第四项
 /// 而对价一条不写，普查静默少查一个文件、全绿、没有人会喊（`/review d7084be` 红队 P2 坐实）。
 ///
-/// `PanelView.swift` 的豁免理由与另外两项不同（它是三把锁**唯一**允许的来源，由本文件那条
-/// 「PanelView 构造 OnboardingActionEnvironment 的三把锁逐个按调用点绑」守着），所以它在
+/// `PanelView.swift` 的豁免理由与另外两项不同（它是面板 config.lock 的唯一注入点，
+/// 只向 `PanelConfigController` 下传，由本文件的 config.lock suite 守着），所以它在
 /// 那条相等判定里被单独减掉 —— 减的是**它一个**，不是「随便谁都能豁免」。
 private let lockCensusExemptedFiles = [
     "PanelView.swift", "ClaudioGUIApp.swift", "StateGalleryView.swift",
@@ -343,15 +338,16 @@ func runViewWiringSuites() {
                 + "**永久隐身**。要么把这个构造挪走，要么先教 `strippingComments` 认识它")
     }
 
-    suite("T17h 播报出口全 target 只此一个 —— 数的是整个 ClaudioGUI，不是一个文件") {
+    suite("T17h 播报出口按 surface 唯一：Panel 与 retained IntegrationsWindow 各一个") {
         let sources = guiSources()
         expect(
             sources.count >= 5,
             "在 gui/Sources/ClaudioGUI 下一个 Swift 文件都没数到（实得 \(sources.count)）。"
                 + "这条断言存在的全部意义就是去数那些文件 —— 数不到，它就永远等不到 1，安静地绿下去")
         expect(
-            sources.contains { $0.path.hasSuffix("PanelView.swift") },
-            "PanelView.swift 必须在名册里 —— 唯一那处 post 就住在它的 say(_:) 里")
+            sources.contains { $0.path.hasSuffix("PanelView.swift") }
+                && sources.contains { $0.path.hasSuffix("IntegrationsWindowView.swift") },
+            "Panel 与 retained IntegrationsWindow 两个独立 surface 都必须在普查名册里")
 
         var posts: [String: Int] = [:]
         var consumes: [String: Int] = [:]
@@ -363,468 +359,162 @@ func runViewWiringSuites() {
         }
 
         expect(
-            posts == ["PanelView.swift": 1],
-            "全 GUI 只许有**一处** NSAccessibility.post（PanelView 的 say(_:) 里）。第二处 post = 第二条"
-                + "抢「一次一句」通道的话 —— 它会当场截断用户可能还没听完的那条告知。上一版这条断言只数"
-                + " PanelView 一个文件，措辞却写着「全 GUI」：在 MenuBarController / PackGalleryView 里"
-                + "加一处，它绿得毫无察觉。实得 \(posts)")
+            posts == ["PanelView.swift": 1, "IntegrationsWindowView.swift": 1],
+            "Panel 的面板句和 retained IntegrationsWindow 的动作反馈各有一个主动播报出口；"
+                + "其它 GUI 文件不得新增第三条通道。实得 \(posts)")
         expect(
             consumes == ["PanelView.swift": 1],
             "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
                 + "实得 \(consumes)")
+        let integrations = sources.first {
+            $0.path.hasSuffix("IntegrationsWindowView.swift")
+        }?.code ?? ""
+        expect(
+            integrations.components(separatedBy: "feedbackAnnouncer.consume(").count - 1 == 1,
+            "IntegrationsWindow 的出口必须只经过一处 feedback revision 去重器")
     }
 
-    suite("PanelView 仍然在 state 变化时重跑 refresh()（否则「接管成功」的那一秒面板是骗人的）") {
-        guard let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift") else {
-            expect(false, "读不到 PanelView.swift —— 这个 suite 唯一的价值就是读它")
+    suite("PanelView 双宿主边界：无 Claude-only 探测，恒显来源与运行控制，打开时刷新并播报") {
+        guard
+            let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let menu = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift"),
+            let integrationsView = codeOnly(
+                "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
+            let integrationsModel = codeOnly(
+                "gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift")
+        else {
+            expect(false, "读不到 Panel/MenuBar/IntegrationsWindow 生产源")
+            return
+        }
+
+        for forbidden in [
+            "OnboardingViewModel", "DiskOnboardingActionRunner",
+            "OnboardingActionEnvironment", "detectOnboardingState(",
+            "OnboardingView(viewModel:", "settings.json", "hooks.json",
+            "Data(contentsOf:", "JSONDecoder",
+        ] {
+            expect(
+                !panel.contains(forbidden),
+                "PanelView 不得自行探测 Claude 或读取宿主配置，命中：\(forbidden)")
+        }
+
+        guard
+            let bodyStart = panel.range(of: "public var body: some View")?.lowerBound,
+            let headerStart = panel.range(
+                of: "private var headerAccessibilityLabel")?.lowerBound,
+            bodyStart < headerStart
+        else {
+            expect(false, "无法定位 PanelView.body")
+            return
+        }
+        let body = panel[bodyStart..<headerStart]
+        guard
+            let headerAt = body.range(of: "header")?.lowerBound,
+            let sourcesAt = body.range(of: "hostSourcesSection")?.lowerBound,
+            let operationalAt = body.range(of: "operationalPanel")?.lowerBound
+        else {
+            expect(false, "Panel body 必须同时含 header、hostSourcesSection、operationalPanel")
             return
         }
         expect(
-            panel.contains(".onChange(of: onboardingViewModel.state)"),
-            "PanelView 必须在 onboarding state 变化时重跑自己的 refresh()。没有它：CTA 成功 → state 翻到"
-                + " .installed → body 切到 operationalPanel，而 panelModel 的 config/eventRows/packCards/"
-                + "selectedPackMetadata 仍是 app **启动时**（= setup 之前）读的盘 —— 用户在接管成功的"
-                + "那一秒看到的是四行「未配置 / 文件丢失」+ 空画廊/空包名，真实的包和 config 明明已经"
-                + "写好在磁盘上了。"
-                + "评审实测：删掉这一行，652 项测试全绿。")
+            headerAt < sourcesAt && sourcesAt < operationalAt,
+            "Panel 必须恒按 header → 双声音来源 → 运行控制渲染；宿主断开/损坏不得门控后两者")
         expect(
-            panel.contains("bundledHelperBinary: bundledHelperBinary"),
-            "PanelView 必须把 bundle 里的 helper 路径传进 OnboardingActionEnvironment")
+            panel.contains("ForEach(hostIntegrations.content.sourceRows)")
+                && panel.contains("onManageIntegrations(.hostSource(row.host))")
+                && panel.contains("onManageIntegrations(.manageIntegrations)"),
+            "双宿主行必须来自共享 presentation，并只把连接管理交给 retained IntegrationsWindow")
         expect(
-            panel.contains("DiskOnboardingActionRunner(environment:"),
-            "PanelView 必须真的把生产 runner 接给 view-model —— 这是整个 T17 的接线点")
+            collapsingWhitespace(panel).contains(
+                ".frame(maxWidth: .infinity, minHeight: 32 * typeScale, alignment: .leading)")
+                && panel.contains("if let detailText = row.detailText")
+                && !panel.contains("Text(row.detailText ??"),
+            "两条正常宿主行必须共用随 Dynamic Type 放大且可容纳一行限定语的最小几何；"
+                + "无限定语一侧不得伪造 Text/VoiceOver 占位内容")
 
-        // T17c：两个渲染点都必须**无条件**画「此刻有没有失败」。
-        expect(
-            panel.contains("onboardingVisibleFailure(actionState:"),
-            "运行态面板必须渲染任何失败，不只是断开的 —— 一次接管失败完全可能在 refresh() 之后落在"
-                + " .installed（点「修复」→ 撞上 config.lock / settings.lock → 失败，但二进制和 hooks 都在位），"
-                + "那时 onboarding 卡根本不在屏幕上。上一版这里只认 branch: .disconnect，"
-                + "于是那条失败一个像素都没有：绿点、静音、零诊断")
-
-        // T17f：**这条比上面那条更要命。** 告知只从一次成功的接管而来，而成功必然把 state 推成
-        // `.installed` —— 也就是说**每一条告知都诞生在这个面板上**，onboarding 卡那一侧永远接不住。
-        // 这一行没了，就等于回到修复前：用户的包被换掉、目录被搬走，面板一声不吭。
-        expect(
-            panel.contains("onboardingVisibleNotices(actionState:"),
-            "运行态面板必须渲染「我替你做主」的告知 —— 一次成功的接管必然落在 .installed，所以这里"
-                + "是告知**唯一**的家。上一版这里一行都没有，于是 T17e 立下的『替他换上，并如实说"
-                + "出来』只对开终端的人成立，而命中这条路径的恰恰是点面板「接管 / 修复」的那个用户")
-        expect(
-            panel.contains("ActionNoticeRow("),
-            "光调纯函数不够 —— 面板得真的把它画成一行（⚠ 暖琥珀，不是真红：setup 成功了）")
-
-        // T17f 自评审：**文案里那句「下面的声音包」是一句关于布局的断言，这里把它兑现。**
-        //
-        // 第一版把提示行放进了 `disconnectRow`，而 `disconnectRow` 排在 `PackGalleryView` **之后** ——
-        // 于是那句话下面唯一的东西是「断开连接」那颗破坏性按钮：我们把一个刚被替换了选包、正想换回去
-        // 的用户，一句话指向了卸载键。没有任何测试为此变红（一句指错方向的话，编译器不管，
-        // `onboardingVisibleNotices` 也照样返回非空）。
-        //
-        // 这条断言是**顺序**断言：ActionNoticeRow 必须出现在 PackGalleryView **之前**。
-        // 把提示行挪到画廊下方 = 把文案变成谎话 = 这里变红。
-        if let noticeAt = panel.range(of: "ActionNoticeRow(")?.lowerBound,
-            let galleryAt = panel.range(of: "PackGalleryView(")?.lowerBound
-        {
-            expect(
-                noticeAt < galleryAt,
-                "告知行必须排在声音包画廊**之前** —— 文案白纸黑字写着「你随时可以在**下面的**声音包里"
-                    + "换成别的」。挪到画廊之后，那句话下面就只剩「断开连接」了：一个想换回自己包的用户，"
-                    + "会被这句话指向卸载键。要改位置，先改文案")
-        } else {
-            expect(false, "PanelView 里必须同时有 ActionNoticeRow 与 PackGalleryView")
-        }
-        expect(
-            !panel.contains("onboardingFailureBelongsHere"),
-            "按 action 分派失败的那个函数已经删了（T17c）—— 它默认「哪个动作失败」与「失败之后 state"
-                + "落在哪」是同一件事，而 runDiskAction 在失败后无条件重新探测磁盘")
-        // T17d：面板的可见 / 隐藏**两个**信号都必须接进 view-model。
-        expect(
-            panel.contains("onboardingViewModel.panelDidBecomeVisible()"),
-            "面板可见时必须通知 view-model —— 一条**已经被看过**的失败在这里被忘掉（T17c 那条"
-                + "「陈旧失败不该永久挂在一张已经装好的面板上」的顾虑仍然成立）")
-        expect(
-            panel.contains(".onChange(of: focusCoordinator.hideCount)")
-                && panel.contains("onboardingViewModel.panelDidHide()"),
-            "面板**隐藏**也必须通知 view-model。没有这一半，view-model 只能去假定「下一次打开 ="
-                + "上一条失败已经被看过」—— 而用户点完「接管」就切走时（.transient popover 当场关闭，"
-                + "写盘的 Task 却不随视图销毁而取消、继续跑、失败），那条失败从头到尾一个像素都没有过，"
-                + "下一次打开却会把它当成「看过了」清掉。T17d 第四轮对抗评审（Codex）实测确认。")
-        expect(
-            !panel.contains("clearConsumedFailure"),
-            "`clearConsumedFailure()` 已经删了（T17d）—— 它无条件在面板重开时清掉当前失败，"
-                + "而「重开 = 看过了」是一个**假定**，在「失败诞生于面板关闭之后」这条路径上是假的")
-
-        // ── T17g：结果不但要画得出来，还要说得出口 ────────────────────────────────────────
-        expect(
-            panel.contains("let moment = onboardingViewModel.panelDidBecomeVisible()")
-                && panel.contains("say(moment)"),
-            "打开面板必须把 panelDidBecomeVisible() 的返回值**说出去** —— 它是「这条结果第一次露面」的"
-                + "唯一真相源（outcomeHasBeenSeen 就在那个函数里被消费掉了）。T17d/T17f 把结果画出来了，"
-                + "却从没说出来：VO 用户在 ActionFailureRow / ActionNoticeRow 真正出现的那一次打开里，"
-                + "听到的只有一句平静的「Claudio 面板，当前声音包 X」")
-        expect(
-            panel.contains("say(.stateChanged)") && panel.contains("say(.actionStateChanged)"),
-            "另外两个播报时刻也必须接上 —— 政策在 panelAnnouncement(_:)，视图只负责报时刻")
-        expect(
-            panel.contains("viewModel.announcement(")
-                && panel.contains("let viewModel = onboardingViewModel"),
-            "播报政策必须从 ClaudioGUICore 拿，不许在视图里再判一次 —— 它上一次住在这个文件里的时候，"
-                + "「谁抢到那条一次一句的通道」押在 SwiftUI 未文档化的 onChange 顺序上，零测试守护。"
-                + "（T17h：那次调用挪进了 DispatchQueue 的闭包，view-model 先取成一个局部量。**这不是因为"
-                + "「闭包捕不到 self」** —— 那句话曾经写在这里，它是假的：`View` 是 @MainActor 的，PanelView "
-                + "隐式 Sendable，捕得到 self，实测编得过。取局部量只是不必绕道视图去拿一个引用类型。）")
-        expect(
-            !panel.contains("announcePanel") && !panel.contains("announceActionState"),
-            "这两个函数体里的 switch 就是播报政策，已整体下沉到 panelAnnouncement(_:)。"
-                + "把任何一个放回来 = 把那场竞争放回来")
-
-        // ── T17h：闸门与去重必须在 `DispatchQueue.main.async` 的**里面** ──────────────────────
-        //
-        // 「全 GUI 只许有一处 post」那两条计数断言已经搬去上面那个 suite（它数的是整个 target，
-        // 而不是这一个文件 —— 那正是它上一版守不住的东西）。这里守的是**另一件事**：那一处 post
-        // 与它的闸门之间，不许再隔着一趟 main queue。
-        if let asyncAt = panel.range(of: "DispatchQueue.main.async")?.lowerBound,
-            let announceAt = panel.range(of: "viewModel.announcement(")?.lowerBound,
-            let consumeAt = panel.range(of: "announcer.consume(")?.lowerBound
-        {
-            expect(
-                asyncAt < announceAt && asyncAt < consumeAt,
-                "「该不该说」与「刚才说过没」必须在 async 闭包**里面**问。放回外面 = 那道「面板关着就一个字"
-                + "都不说」的闸门问的是**上一趟**的世界，而 post 发生在下一趟：两趟之间 .transient popover "
-                + "完全可能已经被一次 app 切换关掉（那正是这整条 bug 家族的主路径），而 post 的 element 是"
-                    + " NSApp —— 整个 app，不是那个已经消失的 popover。用户人在 Finder 里，Claudio 朝着他"
-                    + "正在用的窗口念了一句话。窗口只有一次 main queue drain 那么宽，谁都没实测到过 —— 而"
-                    + "「我推理出这个格子不可达」正是这个仓库反复交学费的那句话")
-        } else {
-            expect(
-                false,
-                "PanelView 里必须同时有 DispatchQueue.main.async、viewModel.announcement( 与 "
-                    + "announcer.consume( —— 三者缺一，上面那条顺序断言就无从判起")
-        }
-        expect(
-            panel.contains("MainActor.assumeIsolated"),
-            "async 闭包里那两行是 @MainActor 的（consume / announcement），得把「这个 block 跑在主线程上」"
-                + "这个运行期事实交给编译器。**不许换成 Task { @MainActor in … }** —— 但**不是**因为"
-                + "「那是另一条队列」（这句话曾经写在这里，它是假的：Darwin 上 MainActor 的默认 executor "
-                + "正是把 job enqueue 进 main dispatch queue，并没有换队列）。真正的理由是**保证的强度**："
-                + "串行队列按入队顺序 FIFO 是 libdispatch 的**文档保证**，而 Swift 并发 job 相对 dispatch "
-                + "block 的入队顺序只是**实现细节** —— 「第二条必然是第一条的后缀」这条去重不变式，不该"
-                + "压在实现细节上")
-        expect(
-            panel.contains(".onChange(of: onboardingViewModel.actionState) { _ in"),
-            "必须读 view-model 的**当前值**，不许用 onChange 的 newValue —— 「同一趟里只有一个开口，"
-                + "或两个说同一句」这条不变式建立在两边看到同一份快照上")
-
-        // ── T17h′：actionState 那个 handler 必须在 say() **之前** refresh() ──────────────────────
-        //
-        // 它是三个 say() 调用点里唯一一个曾经**不** refresh 的。而 refresh() 写新的
-        // `panelModel.selectedPackMetadata` —— 面板句里包名的唯一来源。少了它：一次**无告知的成功接管**，若 SwiftUI
-        // 先跑这个 handler（**未文档化**的顺序），它算 header 时 `onboardingViewModel.state` 已经是
-        // `.installed`（引用类型，早更新了），而 selectedPackMetadata / config 还是 **app 启动时**
-        // 那份 —— 那时 config.json 还不存在，`loadPanelConfig` 回落成 `.needsPack`，metadata 的 id
-        // 为空 —— 于是包名是**空的**。
-        // 随后 state 那个 handler（先 refresh）说出带包名的那一句：**两句不同 → 后缀吞不掉 → 同一趟
-        // post 两条**，正是 T17f/T17g 整台机器存在的唯一理由。
-        //
-        // 「没害处」（陈旧那句必然先 post，被后一条截断，幸存者总是对的）是一句**推理**，它押的是
-        // 「被截断的那条一个字都不会出声」—— 一个没人实测过的 VoiceOver 语义。用户完全可能听到一句卡半截
-        // 的「Claudio 面板，当前声音包…」，就在这个产品唯一一次庆祝时刻上。
-        //
-        // 这条只能长在这里：`header` 是视图**唯一**供给的那个事实，而 `PanelAnnouncementSuite` 给每个
-        // 时刻喂的都是同一个 `H` —— 政策的 harness 结构上**看不见**两个 handler 各自算出不同 header 这件事。
-        if let actionHandlerAt = panel.range(
-            of: ".onChange(of: onboardingViewModel.actionState) { _ in")?.upperBound,
-            let sayActionAt = panel.range(of: "say(.actionStateChanged)")?.lowerBound,
-            actionHandlerAt < sayActionAt
-        {
-            let handlerBody = panel[actionHandlerAt..<sayActionAt]
-            expect(
-                handlerBody.contains("panelModel.reload()"),
-                "`.onChange(of: actionState)` 必须在 `say(.actionStateChanged)` **之前** refresh() —— 见上。"
-                    + "少了这一行，一次成功的接管会在同一趟里 post 两条内容不同的播报，而用户在这个产品"
-                    + "唯一一次庆祝时刻上，听到的是一句卡半截的「Claudio 面板，当前声音包…」")
-            expect(
-                handlerBody.contains("if case .idle = onboardingViewModel.actionState"),
-                "而且**只在 `.idle` 那一格** refresh：面板句只在那一格才被说出来（别的动作态说的是 "
-                    + "actionClause，一个字的 header 都不用）。无条件 refresh 会在 `.running` 时去扫一块"
-                    + "**动作正在写**的磁盘 —— 那是拿一个真 bug 换一个假 bug")
-        } else {
-            expect(
-                false,
-                "PanelView 里必须有 `.onChange(of: onboardingViewModel.actionState) { _ in`，且 "
-                    + "`say(.actionStateChanged)` 排在它**之后** —— 否则上面那条顺序断言无从判起")
-        }
-
-        if let appearAt = panel.range(of: ".onAppear {")?.lowerBound,
-            let showAt = panel.range(of: ".onChange(of: focusCoordinator.showCount)")?.lowerBound
-        {
-            expect(
-                !panel[appearAt..<showAt].contains("say("),
-                ".onAppear 不许播报 —— 它与 .onChange(showCount) 在同一次打开里**都会**跑（本文件为 refresh() "
-                    + "实测过这一点：首开会扫盘两遍），两条 post 会抢同一条一次一句的通道，而谁先谁后取决于"
-                    + " onAppear 与 popoverDidShow 的 AppKit 时序 —— 一个没实测过的语义。播报只挂 showCount")
-        } else {
-            expect(false, "PanelView 里必须同时有 .onAppear 与 .onChange(of: focusCoordinator.showCount)")
-        }
-
-        if let rowsAt = panel.range(of: "ForEach(panelModel.eventRows")?.lowerBound,
-            let noticeAt = panel.range(of: "ActionNoticeRow(")?.lowerBound
-        {
-            expect(
-                rowsAt < noticeAt,
-                "四行事件覆盖度必须排在告知行**之前** —— 换包告知白纸黑字写着「事件行里会标出哪些还缺」。"
-                    + "顶替上来的包只过了 isUsablePack（它一个字节的音频都不查，usablePackIDs.first 完全可能是"
-                    + "一个只映了 1/4 事件的用户包），所以那几行是这句话之后唯一说真话的地方。把它们挪到告知"
-                    + "下面，用户就得先读到「哪些还缺」、再往下找那个「哪些」")
-        } else {
-            expect(false, "PanelView 里必须同时有 ForEach(panelModel.eventRows 与 ActionNoticeRow(")
-        }
-    }
-
-    suite("PanelView 的 lockFile 默认值必须是 configLockFile（锁分离 D9 的兑现点）") {
-        // MenuBarController.swift 是全仓唯一的 `PanelView(` 构造点，且不传 `lockFile`（见下面那条
-        // suite「MenuBarController 里没有 Bundle.main」旁边同一个文件）—— 所以这个默认值是 GUI 生产
-        // 路径上**唯一活着**的锁值。`ClaudioGUI` 是 executableTarget，`claudio-gui-tests` import 不了
-        // 它，`PanelView.lockFile` 又是 `private let`（编译期也够不到），所以只能走源码文本绊线 ——
-        // 与本文件其余每一条断言同一个理由（见文件头部）。
-        guard let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift") else {
-            expect(false, "读不到 PanelView.swift —— 这个 suite 唯一的价值就是读它")
+        guard
+            let showStart = panel.range(
+                of: ".onChange(of: focusCoordinator.showCount)")?.lowerBound,
+            let widthStart = panel.range(
+                of: ".onChange(of: layoutAdaptation.panelWidth)")?.lowerBound,
+            showStart < widthStart
+        else {
+            expect(false, "无法定位面板打开 handler")
             return
         }
+        let showHandler = panel[showStart..<widthStart]
+        expect(
+            showHandler.contains("panelModel.reload()")
+                && showHandler.contains("applyFirstFocus()")
+                && showHandler.contains("announcePanelSummary()"),
+            "每次真实打开必须重读声音控制、恢复首焦点并主动播报双宿主摘要")
+        expect(
+            panel.contains("dualHostPanelAnnouncement(header: header)")
+                && panel.contains("announcer.consume(")
+                && panel.contains("let hideCount = coordinator.hideCount")
+                && panel.contains("guard coordinator.hideCount == hideCount else { return }"),
+            "面板播报必须消费双宿主纯策略、既有去重器，并在异步 post 前复核可见代次")
+
+        guard
+            let didShowStart = menu.range(of: "func popoverDidShow")?.lowerBound,
+            let didCloseStart = menu.range(of: "func popoverDidClose")?.lowerBound,
+            didShowStart < didCloseStart
+        else {
+            expect(false, "无法定位 MenuBarController popover show/close 生命周期")
+            return
+        }
+        let didShow = menu[didShowStart..<didCloseStart]
+        expect(
+            didShow.contains("requestHostIntegrationRefresh()")
+                && didShow.contains("focusCoordinator.requestFocus("),
+            "面板打开必须请求共享 manager 刷新双宿主，并继续恢复键盘焦点")
+
+        for forbidden in [".connect(", ".repair(", ".disconnect("] {
+            expect(
+                !panel.contains(forbidden),
+                "连接/修复/断开动作不得存在于 PanelView，命中：\(forbidden)")
+        }
+        expect(
+            integrationsView.contains("case .connect")
+                && integrationsView.contains("case .repair")
+                && integrationsView.contains("case .disconnect")
+                && integrationsModel.contains("func perform("),
+            "连接、升级/修复与破坏性断开只存在于 IntegrationsWindow")
+    }
+    suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {
+        guard
+            let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let controllerSource = codeOnly(
+                "gui/Sources/ClaudioGUICore/PanelConfigController.swift")
+        else {
+            expect(false, "读不到 PanelView/PanelConfigController")
+            return
+        }
+
         expect(
             panel.contains("lockFile: URL = ClaudioPaths.configLockFile"),
-            "PanelView 的 lockFile 默认值必须是 ClaudioPaths.configLockFile，不是 playLockFile —— "
-                + "它同时喂给 EventMuteController 与 selectPack，两者都在写 config.json，绝不能被 "
-                + "play 的 debounce 锁挡住（这正是这次分锁要修的那个『吞提示音』的 bug）")
-
-        // 上面那条只钉住**默认值声明那一行**。它钉不住「这个值真的被转发下去」——
-        // 实测（swift-reviewer 的变异验证）：把 `configLockFile: lockFile` 改成
-        // `configLockFile: ClaudioPaths.playLockFile`，默认值声明原样不动，整个 gui 套件
-        // **整套 gui 测试全绿**（不写条数：那个数每加一条断言就腐烂一次，本文件为它翻过车）。
-        // 默认值写对、转发线接错，是一个测试一个字都不会红的洞，
-        // 而它的用户可见后果与默认值写错**一模一样**（点静音又吞一次提示音）。
-        // 所以下面三条把整条链钉死：默认值 → 两个下游写者 → 那把不该被 config 锁冒名顶替的 settings 锁。
-        expect(
-            panel.contains("configLockFile: lockFile"),
-            "PanelView 必须把它自己的 lockFile（= config.lock）转发给 OnboardingActionEnvironment "
-                + "的 configLockFile —— takeOver 路径要写 config.json（selectPack）")
-        // 第二个消费者 EventMuteController 的锁转发断言，下移到 `controllerSource` 读入之后 —— 因为
-        // 它现在由 `PanelConfigController` **独占构造**（红队 b86ec0a：注入会开「幽灵实例」的口，面板读
-        // 一个实例、controller 写另一个，静默吞错）。见下面 `controllerSource` 段。
-
-        // 第三个消费者：切包（`switchPack` → `selectPack`）。它**搬进了**
-        // `ClaudioGUICore.PanelConfigController`（红队 9cccc9c 兑现台账那条 P2），所以这条锁转发链现在
-        // 有两段，两段都要钉：
-        //   ① PanelView.init 把自己的 lockFile（= config.lock）**灌进** PanelConfigController；
-        //   ② PanelConfigController.switchPack 把那把锁**转发给** selectPack。
-        // 任何一段接错（比如②里换成 settingsLockFile），切包写 config.json 却守着别的锁，与并发的
-        // `claudio use`（守 config.lock）之间互斥当场消失，两个读-改-写交错、丢更新。
-        //
-        // ② 这一段现在住在**可 import** 的 `ClaudioGUICore` 里（不像困在 executableTarget 的 PanelView）——
-        // 本可以行为级测锁竞争，但那要模拟持锁，太重；这里仍走源码文本，与①同一种绊线。
+            "PanelView 的 lockFile 默认值必须是 config.lock；静音与切包都写 config.json")
         expect(
             collapsingWhitespace(panel).contains(
                 "PanelConfigController( configFile: configFile, lockFile: lockFile,"),
-            "① PanelView.init 必须把自己的 lockFile（= config.lock）灌进 PanelConfigController —— 切包 /"
-                + "静音的写路径都在那个 controller 里，它拿错锁 = 整条 config.json 写路径拿错锁")
-        guard let controllerSource = codeOnly("gui/Sources/ClaudioGUICore/PanelConfigController.swift")
-        else {
-            expect(false, "读不到 PanelConfigController.swift —— 切包的锁转发第②段住在那里")
-            return
-        }
+            "PanelView 必须把 config.lock 灌进唯一 PanelConfigController")
         expect(
             controllerSource.contains(
                 "bundledPacksDirectory: environment.bundledPacksDirectory, lockFile: lockFile)"),
-            "② PanelConfigController.switchPack 必须把它自己的 lockFile 转发给 selectPack —— 它是全仓"
-                + "第三个 config.lock 消费者（另两个：EventMuteController、OnboardingActionEnvironment），"
-                + "也是用户每次在画廊里换包都会走的那一条。换成 settingsLockFile 之类，与并发 `claudio use`"
-                + "的互斥就没了")
-
-        // 第二个消费者 EventMuteController：现在由 PanelConfigController 独占构造（红队 b86ec0a 的「幽灵
-        // 实例」结构性修复），所以它也拿 controller 的 lockFile（= config.lock）。锁转发断言读 controller 源码。
+            "PanelConfigController.switchPack 必须把同一把锁转发给 selectPack")
         expect(
-            controllerSource.contains("EventMuteController(configFile: configFile, lockFile: lockFile)"),
-            "PanelConfigController 必须用它自己的 lockFile（= config.lock）构造 EventMuteController —— "
-                + "静音开关写的是 config.json，绝不能被 play 的 debounce 锁挡住。换成 playLockFile 之类，"
-                + "点静音又会吞一次提示音（这正是分锁 D9 要修的 bug）")
-
-        // `OnboardingActionEnvironment(…)` 那三把锁（config / settings / packs）的转发断言**不在
-        // 这里** —— 它们搬进了下面那条按调用点绑的 suite。这里曾经有一条
-        // `panel.contains("settingsLockFile: ClaudioPaths.settingsLockFile")`，删掉不是放弃覆盖：
-        // 那是一条读 `codeOnly`（**保留**字符串内容）的全文件 `contains`，`/codex review 48b6730`
-        // 与 `37745f2` 两轮各证过它可以被一句见证值（字符串字面量 / 元组标签）喂饱，而真实实参
-        // 换成别的。新那条严格更强：调用点两头锚死 + 实参**相等**判定 + 读清空字符串的那一路，
-        // 三把锁一起。这里没有它的独占靶子（构造点认不出来时，那边的 `count == 1` 先红）。
-
-        // 负向兜底：PanelView 在**任何位置**都不该碰 play 的去抖锁。它一个字节都不写 play.state，
-        // 也不参与去抖。因为 `codeOnly` 已剥掉注释，谈论 playLockFile 的**散文**不会把它假红
-        // （这正是本文件头部记着的那次翻车）。
-        //
-        // ⚠️ 连**值级假名**一起拦（`/review e7c38ea` 的 P1-4）：只禁标识符 `playLockFile` 是不够的 ——
-        //
-        // ```swift
-        // lockFile: ClaudioPaths.root.appendingPathComponent("play.lock")
-        // ```
-        //
-        // —— 拿到的是**同一把**去抖锁，而标识符 `playLockFile` 一次都没出现。禁掉字面量 `play.lock`
-        // 把这条路一起堵上。这不是洁癖：这个文件是 GUI 三个 config 写者的**唯一**锁来源，它是
-        // `claudio-gui-tests` **import 不到**的 target（`ClaudioGUI` 带 `@main`），所以源码绊线是
-        // 这里**唯一**能立的防线 —— 而绊线只挡得住它逐字写下的那几个形状。
+            controllerSource.contains(
+                "EventMuteController(configFile: configFile, lockFile: lockFile)"),
+            "PanelConfigController 必须用同一把 config.lock 构造 EventMuteController")
         expect(
             !panel.contains("playLockFile") && !panel.contains("play.lock"),
-            "PanelView 的**代码**里出现了 playLockFile 或字面量 `play.lock` —— 它不写 play.state、"
-                + "不参与去抖，碰 play 的锁只会重新把提示音吞掉。两个都禁：`ClaudioPaths.root"
-                + ".appendingPathComponent(\"play.lock\")` 拿到的是同一把锁，却一次都不提那个标识符")
-    }
-
-    suite("PanelView 构造 OnboardingActionEnvironment 的**三把锁**逐个按调用点绑（不是全文件 contains）") {
-        // ## 这一手为什么此前是全链上唯一没有守卫的
-        //
-        // 包锁从 GUI 灌到 `Setup.swift` 要过四手。前三手各有守卫（`OnboardingActions.swift` 的
-        // 构造点实参由本文件那条相等循环钉、`init` 的存储赋值由 `OnboardingActionsSuite` 的持锁
-        // 行为测试钉），而**第一手 —— `PanelView` 构造 `OnboardingActionEnvironment` 时转发不转发
-        // —— 一条断言都没有**。实际状态（不是假想变异体）：它**根本没传**，于是
-        // `packsLockFile` 的默认实参静默生效，落回 `ClaudioPaths.packsLockFile`。
-        //
-        // 它躲过了本文件已有的每一张网，三层原因叠在一起：
-        //  · 上面那条 `lockLeaks` 普查**按文件名豁免了 PanelView.swift**
-        //    （`where !file.path.hasSuffix("PanelView.swift")`）—— 那条普查的立论是「GUI 的锁只有
-        //    一个来源：PanelView 的默认值」，于是唯一允许写锁的文件也是唯一没人数它写了什么的文件；
-        //  · 那条相等循环读的是 `OnboardingActions.swift`，够不到 `PanelView.swift`；
-        //  · `ClaudioGUI` 带 `@main`、`claudio-gui-tests` **不依赖**它 ⇒ 没有任何行为测试到得了
-        //    这一手。**在测试进程里，源码绊线是这里唯一可能的守卫**，而三把锁里只有它没有。
-        //
-        // ⚠️ 「唯一」限定在**测试进程内**，别把它写大：`OnboardingActionEnvironment.init` 的
-        // `packsLockFile` 已经没有默认值，所以**漏传**这一种在 `swift build` 下是编译错误。但
-        // 本仓库文档化的绿灯信号 `swift run --package-path gui claudio-gui-tests` 压根不编译
-        // `PanelView.swift`（依赖表里没有 `ClaudioGUI`）—— 实测：删掉那行实参，`swift build` 报
-        // `missing argument`，而 `swift run claudio-gui-tests` **编译通过、整套跑完**，红的是下面
-        // 这条断言。所以：编译器守 `swift build` 与 release CI，本条守测试进程，**两者不互相代偿**。
-        // 而「传了但传错」（写成 `ClaudioPaths.…`）编译器**永远**看不见，只有下面两条看得见。
-        //
-        // ## 为什么读 `codeWithoutStrings` 而不是 `codeOnly`
-        //
-        // `codeOnly` 剥注释但**保留字符串内容**。`/codex review 48b6730,9f347fc` 的 P1 逐字证过
-        // 那是可伪造的：往文件里加一句 `let witness = "packsLockFile: audioEnvironment.packsLockFile"`，
-        // 正向断言被这句字面量喂饱，而真实实参可以换成别的。`codeWithoutStrings` 把字符串**内容**
-        // 清空，字面量再也喂不动它。
-        //
-        // ## 而清空字符串**不够** —— 见证值可以是**代码**（`/codex review 37745f2` 的 P1）
-        //
-        // 上一版这条断的是 `panel.contains("packsLockFile: audioEnvironment.packsLockFile")`，并且
-        // 在注释里管它叫「**逐字全等的整行实参**，不是 `contains("packsLockFile:")` 那种前缀式」。
-        // 那句话是假的：它就是 `contains`，只是 needle 更长。Codex 给的见证值一个字符串都没用 ——
-        //
-        // ```swift
-        // let witness = (packsLockFile: audioEnvironment.packsLockFile)   // 元组标签，纯代码
-        // …
-        // packsLockFile: fallback                                        // 真实实参，fallback = ClaudioPaths.packsLockFile
-        // ```
-        //
-        // —— 元组标签是**代码位置**，`codeWithoutStrings` 一个字都不会碰它；正向断言被它喂饱，
-        // 负向断言（`!contains("packsLockFile: ClaudioPaths.")`）碰不到值级假名 `fallback`。
-        // 上一刀只关掉了**字符串字面量**那一个见证子类，却把措辞写成整类已封 —— 这个仓库第 N 次
-        // 栽在「措辞比覆盖范围大」上，而且又一次栽在自称修好它的那一刀里。
-        //
-        // 这一版换掉的是**判据的种类**，不是 needle 的长度：先把调用点两头锚死
-        // （``callArguments(of:in:)``：头是类型名、尾是配平右括号），再对切出来的实参做**相等**
-        // 判定。见证值无论写成字符串还是元组还是别的什么，都不在那对括号里，喂不动它。
-        guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
-            expect(false, "读不到 PanelView.swift —— 这条 suite 唯一的价值就是读它")
-            return
+            "PanelView 不写 play.state，不得碰宿主级防抖锁")
+        for forbidden in ["settingsLockFile", "packsLockFile", "OnboardingActionEnvironment"] {
+            expect(
+                !panel.contains(forbidden),
+                "PanelView 不再执行宿主连接，不得持有其锁/环境：\(forbidden)")
         }
-
-        // ## 围栏那一半：认不出的构造形状 ⇒ 当场红
-        //
-        // `callArguments` 是白名单，而白名单永远不完整。少认一处 = 那一处静默退出审查 = 真实构造
-        // 可以随便写而没有人会喊。`unmodeledConstructionShapes` 把「我认不出哪些」从 doc comment
-        // 里搬进返回值 —— 被写进注释的洞不会因为被写进注释而变成有人看守它。
-        let unmodeledShapes = unmodeledConstructionShapes(
-            of: "OnboardingActionEnvironment", in: panel)
-        expect(
-            unmodeledShapes.isEmpty,
-            "`PanelView.swift` 里出现了 `callArguments` 认不出的构造形状：\(unmodeledShapes) —— "
-                + "下面那条「每一处构造点都必须转发对」的循环会**漏掉**它，而漏掉不会有任何人喊。"
-                + "要么把这个构造挪走，要么先把扫描器教会这个形状再放行")
-        // ## 精确计数，不是 `!isEmpty`
-        //
-        // `!isEmpty` 只要求「≥1 处且那一处转发对」，于是一个写得完全合规的**死代码诱饵**就能替
-        // 真实构造背书（`/codex review 37745f2` P1 的第一步正是这个）。`PanelView` 里实测只有
-        // **一处** `OnboardingActionEnvironment(…)`，就断死这个数：多出来一处 ⇒ 红 ⇒ 有人来看
-        // 那是诱饵还是一次真实的重构。helper 那边两条锁绊线（`count == 2` / `count == 1`）
-        // 早就是这么写的，这里之前是全链上唯一还在用 `!isEmpty` 的。
-        let environmentCalls = callArguments(of: "OnboardingActionEnvironment", in: panel)
-        expect(
-            environmentCalls.count == 1,
-            "`PanelView.swift` 里必须正好有 1 处 `OnboardingActionEnvironment(…)` 构造点，实得 "
-                + "\(environmentCalls.count) 处 —— 0 处 = 接管路径不再经由它（下面那三条转发断言就是"
-                + "在守一段不存在的代码），>1 处 = 多出来的那个可能是喂饱断言的死代码诱饵，也可能是"
-                + "一次真实重构，两种都必须有人看一眼再放行")
-
-        // 三把锁一个循环断完。它们是**同一个构造点**上的三个实参，分开写成三条全文件 `contains`
-        // 是上一版的形状 —— 而那正是见证值攻击的入口（needle 在文件里任何位置出现都算数）。
-        //
-        // ⚠️ 这三条**互不代偿**，一条都不能省：三个实参各自绑不同的锁，任意一条传错都是一条真实
-        // 的锁串线，而另外两条照样绿。
-        let expectedLocks: [(label: String, value: String, why: String)] = [
-            (
-                "configLockFile", "lockFile",
-                "写的是 config.json，必须守着 PanelView 自己那把 config.lock（本 init 的 `lockFile` "
-                    + "参数）。传成别的 ⇒ 接管写 config.json 时与并发的 `claudio use`（守 config.lock）"
-                    + "互斥当场消失，两个读-改-写交错、丢更新"
-            ),
-            (
-                "settingsLockFile", "ClaudioPaths.settingsLockFile",
-                "takeOver 路径同时写 settings.json（installClaudioHooks），它必须守着**独立**的 "
-                    + "settings.lock —— 与 config.json 的写者共用一把锁，正是这次分锁要拆开的东西"
-            ),
-            (
-                "packsLockFile", "audioEnvironment.packsLockFile",
-                "manifest.json 有两个写者（接管发布内置包、`ManifestBinding` 绑定/解绑），"
-                    + "`userPacksDirectory` 那一行已经把它们指向同一个包目录，这一行是把它们的**互斥**"
-                    + "焊在同一个源上的唯一结构链接。漏掉它 ⇒ 默认实参静默生效、编译器一声不吭；"
-                    + "写成 `ClaudioPaths.packsLockFile` ⇒ 今天碰巧仍相等，但那是「两个独立默认值恰好"
-                    + "收敛」而不是「同一个源」，改动 audioEnvironment 那一侧（它是 `var`）两个写者当场分家"
-            ),
-        ]
-        for (ordinal, arguments) in environmentCalls.enumerated() {
-            for expected in expectedLocks {
-                let forwarded = argumentValue(expected.label, in: arguments)
-                expect(
-                    forwarded == expected.value,
-                    "第 \(ordinal + 1) 处 `OnboardingActionEnvironment(…)` 的 `\(expected.label):` 实参"
-                        + "必须**正好是** `\(expected.value)`，实际是 `\(forwarded ?? "<没有这个实参>")` —— "
-                        + expected.why
-                        + "。**相等**，不是 `contains`：`\(expected.value).deletingLastPathComponent()"
-                        + ".appendingPathComponent(…)` 逐字包含前者，拿到的却是别的路径")
-            }
-        }
-
-        // 负向兜底：不许绕过 audioEnvironment 直接取真实路径。
-        //
-        // ⚠️ 如实标注它现在还剩多少分辨力：上面那条相等判定**已经覆盖了这个构造点上的这一种**
-        // （实参写成 `ClaudioPaths.packsLockFile` ⇒ 相等判定当场红）。它没有被完全吞掉 —— 只有它
-        // 逮得到的是：本文件里**另起一个非 `OnboardingActionEnvironment(` 的构造点**并写死真实路径
-        // （上面那个循环根本不看它）。所以留着；但别把它当「第二道独立防线」宣传：在最要害的那个
-        // 调用点上，它与上面那条是**重叠**的。
-        //
-        // ⚠️ 如实标注极性代价：读 `codeWithoutStrings` 对**负向**断言是 fail-**open**（被清空的字符串
-        // 里若正好有 needle 会静默变绿）。仍然接受，因为 needle `packsLockFile: ClaudioPaths.` 是一段
-        // **代码形状**而不是字符串内容，且同一次读取要喂上面那条承重的相等循环 —— 一个绑定喂两类
-        // 极性相反的断言时，承重的那一类说了算。代价写在这里，不藏。
-        //
-        // ⚠️ 它也**挡不住值级假名**（`let p = ClaudioPaths.packsLockFile` 再传 `packsLockFile: p`）——
-        // 与本文件 play 锁那条负向兜底同一个已知天花板，那里靠加禁字面量 `play.lock` 补了一半。
-        // 这里**没有**对应的字面量可禁（`"packs.lock"` 在 PanelView 里本就不该出现，但禁它挡不住
-        // `ClaudioPaths.packsLockFile` 这个不含该字面量的假名）。不声称封死，只声称封住直写那一种。
-        expect(
-            !panel.contains("packsLockFile: ClaudioPaths."),
-            "PanelView 把 packsLockFile 直接写成了 `ClaudioPaths.…` —— 那就绕过了 audioEnvironment "
-                + "这个唯一的源，两个 manifest.json 写者从「同一个源」退化成「两个碰巧相等的默认值」。"
-                + "锁只有一个来源：audioEnvironment")
     }
-
     suite("MenuBarController 构造 PanelView 时不许传 lockFile —— 上面那个默认值的唯一活路") {
         // 上面那条 suite 的头部注释里写着一句话：「MenuBarController.swift 是全仓唯一的
         // `PanelView(` 构造点，且不传 `lockFile`」。**那是一个被写进注释的事实，而这个仓库
@@ -835,9 +525,9 @@ func runViewWiringSuites() {
         // 理由就是注入。任何一次「把锁/环境从 AppKit 外壳往下穿」的重构（主音量那一行、第二个
         // popover、一个测试接缝）都会**自然而然**开始传它。而一旦这里传进 `ClaudioPaths.playLockFile`：
         //
-        //   PanelView.lockFile → EventMuteController（静音写 config.json）
+        //   PanelView.lockFile → PanelConfigController
+        //                      → EventMuteController（静音写 config.json）
         //                      → selectPack（切包写 config.json）
-        //                      → OnboardingActionEnvironment.configLockFile（接管写 config.json）
         //
         // 三个 GUI config 写者**同时**回到 play.lock 上。而上面那条 suite 只读 `PanelView.swift`：
         // 默认值声明没动、两条转发没动、`!contains("playLockFile")` 也没动 —— **整套全绿**。
@@ -857,7 +547,7 @@ func runViewWiringSuites() {
         // ```
         //
         // —— MenuBarController 里那个计数仍是 1、`!contains("lockFile")` 仍成立 —— **全绿**，
-        // 而 GUI 的三个 config 写者已经回到 play.lock 上了。同一个洞在同一个 suite 里被修过一次，
+        // 而 GUI 的静音/切包写者已经回到 play.lock 上了。同一个洞在同一个 suite 里被修过一次，
         // 又在它旁边重开了一次；这次连措辞一起钉死。
         let sources = guiSources()
         expect(
@@ -914,8 +604,8 @@ func runViewWiringSuites() {
         // 实参、做相等判定，并且用实参**自己的文本**算出该文件应有的命中数 —— 多出一个 token 就是
         // 第三处锁，当场红。所以每个被豁免的文件换来的是一条比本普查**更强**的守卫，不是一个洞。
         //
-        // PanelView.swift 的豁免理由与它们不同（它是三把锁**唯一**允许的来源），由本文件那条
-        // 「PanelView 构造 OnboardingActionEnvironment 的三把锁逐个按调用点绑」守着。
+        // PanelView.swift 的豁免理由与它们不同：它是面板 config.lock 的唯一注入点，
+        // 只向 PanelConfigController 下传，由上面的 config.lock suite 守着。
         //
         // ⚠️ 这里**直接读**文件级的 ``lockCensusExemptedFiles``，不许再套一层 suite 局部别名
         //   （`let lockCensusExemptions = lockCensusExemptedFiles`）。上一版套了，而那一层就是洞：
@@ -967,13 +657,12 @@ func runViewWiringSuites() {
         }
         expect(
             lockLeaks.isEmpty,
-            "ClaudioGUI 里除 PanelView.swift 之外的文件出现了锁（lockFile / configLockFile / "
-                + "settingsLockFile，大小写不敏感地数）：\(lockLeaks) —— 这会绕过 PanelView 那个唯一"
-                + "活着的默认值（= config.lock），把静音、切包、接管三个 config.json 写者一起送回"
+            "ClaudioGUI 里除 PanelView.swift 之外的文件出现了未锨定的锁：\(lockLeaks) —— "
+                + "这会绕过 PanelView 那个唯一活着的 config.lock 默认值，把静音、切包两个 "
+                + "config.json 写者一起送回"
                 + "调用点指定的那把锁上。传 playLockFile = 阶段 A 的分锁当场失效，而 PanelView.swift "
-                + "一个字都不用改，整套 GUI 测试照样全绿。**config / settings 这两把**锁只有一个"
-                + "来源：PanelView 的默认值（包锁不在此列 —— 它由 PanelView 从 audioEnvironment "
-                + "**转发**，见那条独立的转发绊线）。豁免名单：\(lockCensusExemptedFiles) —— 每一项都换来"
+                + "一个字都不用改，整套 GUI 测试照样全绿。包锁不在此列，由组装根和 "
+                + "preview 各自的锨定转发绊线守着。豁免名单：\(lockCensusExemptedFiles) —— 每一项都换来"
                 + "一条比本普查更严的锚定绊线，不是一个洞")
     }
 
@@ -1875,26 +1564,19 @@ func runViewWiringSuites() {
                 + "测试再怎么注入也拦不住它去碰真实 `~/.claudio`。锁只有一个来源：`environment`。")
     }
 
-    suite("MenuBarController：popover 关闭必须发出隐藏信号，而且必须在那句会提前 return 的 guard 之前（T17d）") {
+    suite("MenuBarController：popover 关闭必须在早返前发出隐藏信号，保证主音量冲刷") {
         guard let controller = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift") else {
             expect(false, "读不到 MenuBarController.swift")
             return
         }
         expect(
             controller.contains("focusCoordinator.notePanelHidden()"),
-            "popoverDidClose 必须告诉 coordinator 面板不在屏幕上了 —— 这一个信号今天驮着**两件**事："
-                + "① OnboardingViewModel 判断「一条失败诞生时有没有人在看」；② MasterVolumeRow 的冲刷"
-                + "（阶段 D / D22：拖动本身不写盘，popover 关闭就是那次拖动唯一的落盘时机）")
+            "popoverDidClose 必须告诉 coordinator 面板已隐藏；MasterVolumeRow 的拖动"
+                + "本身不写盘，popover 关闭是 pending 值必须冲刷的边界")
 
-        // 这不是普通的文本绊线，它钉的是**顺序**：`popoverDidClose` 里那句 `guard NSApp.isActive`
-        // 在「用户切到别的 app 导致 popover 关闭」这条路径上会直接 return —— 而那**正是** T17d 修的
-        // 那个 bug 的主路径。把 notePanelHidden() 挪到 guard 之后，编译绿、上面那条 contains 也绿，
-        // 而 bug 原封不动地复活，且只在最常见的那条路径上复活。所以顺序本身必须是一条断言。
-        //
-        // 阶段 D（8771946）之后这条顺序守的是**两个** bug，不是一个：主音量的冲刷（D22/D37）明确
-        // 依赖同一条 `notePanelHidden()` 的位置来继承这条排序保证（MasterVolumeRow.swift 的
-        // `focusCoordinator` doc 逐字写着这一点）。下面那条失败消息以前只报 onboarding 那一半 ——
-        // 绊线响的时候，失败消息是唯一会被读的那段文字，它漏掉的后果等于不存在（`/codex review 8771946`）。
+        // 这不是普通的存在性绊线，它钉的是**顺序**：`guard NSApp.isActive`
+        // 在用户切到别的 app 导致 popover 关闭时会提前 return。若隐藏信号在它之后，
+        // `MasterVolumeRow` 便收不到冲刷边界；所以光有 `notePanelHidden()` 字面命中还不够。
         guard let hidden = controller.range(of: "focusCoordinator.notePanelHidden()"),
             let guardIsActive = controller.range(of: "guard NSApp.isActive")
         else {
@@ -1904,10 +1586,7 @@ func runViewWiringSuites() {
         expect(
             hidden.lowerBound < guardIsActive.lowerBound,
             "notePanelHidden() 必须出现在 `guard NSApp.isActive` **之前**。放在之后 = 切换 app 关闭"
-                + "面板这条路径永远收不到隐藏信号（那句 guard 会提前 return），而「点了别的 app」正是"
-                + "关闭 popover 最常见的一条路径。两个 bug 会当场一起复活：①「点完接管就切走、安装在"
-                + "后台失败」的静默失败（T17d）；②「拖到新值后点别的 app 关掉面板」时那次拖动静默"
-                + "丢失（阶段 D / D22/D37 —— 主音量拖动本身一个字节都不写）")
+                + "面板时 guard 提前 return，主音量 pending 拖动值永久丢失（D22/D37）")
     }
 
     suite("OnboardingView 渲染任何失败，而不是只渲染接管的失败（T17c）") {
@@ -2024,9 +1703,10 @@ func runViewWiringSuites() {
         // ⚠️ 存在性级：证明「body 里写着这根线」，证明不了它运行期真的接通（SwiftUI body 接线，只有 UI /
         // 快照测试够得着）。挡「线被剪断」，不挡「运行期没接通」。
         expect(
-            collapsingWhitespace(panel).contains("onToggleMute: { panelModel.toggleMute(row.event) }"),
-            "operationalPanel 的 EventRowView 必须把 onToggleMute 接到 `panelModel.toggleMute(row.event)`"
-                + " —— 剪成 `onToggleMute: {}` 之类，四行事件的静音钮就变成点了没反应的死键")
+            collapsingWhitespace(panel).contains(
+                "onToggleMute: { panelModel.toggleMute(row.event) onAudibilityInputsChanged() }"),
+            "operationalPanel 的 EventRowView 必须把 onToggleMute 同时接到写盘与共享可听矩阵刷新"
+                + " —— 剪成空闭包会让静音钮死亡，漏掉刷新则双宿主格会停在旧状态")
 
         // D43 的 `.configMissing` 过滤（PLAN-MASTER-VOLUME.md 阶段 D）：过滤逻辑已经搬进纯函数
         // `panelWriteFailures(muteError:packSwitchError:masterVolumeError:)`（`PanelWriteFailuresSuite`
@@ -2151,14 +1831,14 @@ func runViewWiringSuites() {
         guard
             let galleryAt = operationalBody.range(of: "PackGalleryView(")?.lowerBound,
             let manageAt = operationalBody.range(of: "manageSoundsRow")?.lowerBound,
-            let disconnectAt = operationalBody.range(of: "disconnectRow")?.lowerBound
+            let integrationsAt = operationalBody.range(of: "manageIntegrationsRow")?.lowerBound
         else {
-            expect(false, "operationalPanel 必须同时有 PackGalleryView → manageSoundsRow → disconnectRow")
+            expect(false, "operationalPanel 必须同时有 PackGalleryView → manageSoundsRow → manageIntegrationsRow")
             return
         }
         expect(
-            galleryAt < manageAt && manageAt < disconnectAt,
-            "manageSoundsRow 必须在包列表之后、断开连接之前无条件渲染；这是视觉序与焦点序的共同真相")
+            galleryAt < manageAt && manageAt < integrationsAt,
+            "manageSoundsRow 必须在包列表之后、声音来源管理入口之前无条件渲染")
 
         let focusCollapsed = collapsingWhitespace(focusModel)
         let appendNeedle = "order.append(.manageSounds)"
@@ -2182,14 +1862,18 @@ func runViewWiringSuites() {
             let cardsAppendAt = focusOrderBody.range(
                 of: "order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })")?.lowerBound,
             let manageAppendAt = focusOrderBody.range(of: appendNeedle)?.lowerBound,
-            let disconnectAppendAt = focusOrderBody.range(of: "order.append(.disconnect)")?.lowerBound
+            let integrationsAppendAt = focusOrderBody.range(of: "order.append(.manageIntegrations)")?.lowerBound
         else {
-            expect(false, "焦点模型必须同时有 packCards → .manageSounds → .disconnect 三段")
+            expect(false, "焦点模型必须同时有 packCards → .manageSounds → .manageIntegrations 三段")
             return
         }
         expect(
-            cardsAppendAt < manageAppendAt && manageAppendAt < disconnectAppendAt,
-            ".manageSounds 必须无条件排在全部 packCards 之后、.disconnect 之前")
+            cardsAppendAt < manageAppendAt && manageAppendAt < integrationsAppendAt,
+            ".manageSounds 必须无条件排在全部 packCards 之后、.manageIntegrations 之前")
+        expect(
+            !operationalBody.contains("disconnectRow")
+                && !focusOrderBody.contains("order.append(.disconnect)"),
+            "破坏性断开不得存在于 popover 运行表面或其焦点序；它只属于详情窗末尾")
         guard let panelRaw = source("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "读不到 PanelView.swift 原文，无法核验 T7 的用户可见文案")
             return
@@ -2206,9 +1890,9 @@ func runViewWiringSuites() {
             "PanelView 不得再从 packCards.first(where:) 取当前包名；当前包未加星时它不在显示集")
         expect(
             rawCollapsed.contains(
-                "let packName = selectedPackDisplayName guard !packName.isEmpty else { return PanelHeader.baseLabel } "
-                    + "return \"\\(PanelHeader.baseLabel)，当前声音包 \\(packName)\""),
-            "headerAccessibilityLabel 必须消费 selectedPackDisplayName，与事件标题同源")
+                "let packName = selectedPackDisplayName let base = \"Claudio 面板，2 个声音来源\" "
+                    + "guard !packName.isEmpty else { return base } return \"\\(base)，当前声音包 \\(packName)\""),
+            "headerAccessibilityLabel 必须同时说明双声音来源并消费 selectedPackDisplayName")
         expect(
             rawCollapsed.contains("case .events: Text(\"\\(selectedPackDisplayName) · 事件\")"),
             "「{当前包名} · 事件」必须只从 `.events` 分支开始渲染，并消费同一个 selectedPackDisplayName；"
@@ -2251,6 +1935,24 @@ func runViewWiringSuites() {
         expect(
             !rawManageBody.contains("断开连接") && !rawManageBody.contains("卸载"),
             ".manageSounds 控件自己的可访问语义不得混入相邻破坏性动作的名称")
+
+        guard
+            let integrationsBody = closureBody(
+                after: "private var manageIntegrationsRow: some View", in: panelCollapsed),
+            let rawIntegrationsBody = closureBody(
+                after: "private var manageIntegrationsRow: some View", in: rawCollapsed)
+        else {
+            expect(false, "必须有管理声音来源入口")
+            return
+        }
+        expect(
+            integrationsBody.contains("onManageIntegrations(.manageIntegrations)")
+                && integrationsBody.contains(".focused($focusedTarget, equals: .manageIntegrations)"),
+            "管理声音来源按钮必须路由 retained window 并认领末尾焦点")
+        expect(
+            rawIntegrationsBody.contains(".accessibilityLabel(\"管理声音来源\")")
+                && rawIntegrationsBody.contains("Claude Code 与 Codex"),
+            "管理入口必须同时给出可见/VoiceOver 双宿主语义")
 
         // needsPack 两根正交轴：文案值由 PanelAccessibilitySuite 逐字断言；这里钉视图确实把
         // 同一份 copy 同时送给可见 Text 与 accessibilityLabel，不能在 SwiftUI 里另写一套。

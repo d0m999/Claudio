@@ -1,18 +1,30 @@
 # claudio (helper)
 
-The `claudio` CLI invoked by Claude Code hooks — see [`../ENGINEERING.md`](../ENGINEERING.md).
+The `claudio` CLI invoked by Claude Code and Codex hooks — see [`../ENGINEERING.md`](../ENGINEERING.md).
 
-All six subcommands are implemented (see [`../ENGINEERING.md`](../ENGINEERING.md) for the
-full contract, exit codes, and config schema):
+The current command contract is below. Legacy Claude Code commands remain available so
+existing installations and scripts continue to work; see [`../ENGINEERING.md`](../ENGINEERING.md)
+for exit codes, host capability mappings, receipts, and config ownership.
 
 | Command | What it does |
 |---|---|
-| `claudio doctor` | Self-check, read-only (never writes, never plays): settings.json writable · `~/.claudio/bin/claudio` in place · afplay in place · selected pack intact · **config.json rewritable** · recent `claudio.log` failures · macOS + Claude Code version compat. Hard-fails (exit ≠ 0) only on the first three; everything else is a warning |
-| `claudio play <event>` | Hook entry point: debounced, backgrounded `afplay` spawn, always exits 0 |
-| `claudio install` | Idempotent append of the claudio hook into `settings.json` (never overwrites existing hooks) |
-| `claudio uninstall` | Precisely removes only claudio's hook entries, preserves everything else |
+| `claudio doctor` | Read-only report for shared runtime plus Claude Code and Codex. An unavailable/unconnected host is a warning; shared-runtime failure or a broken connected host exits nonzero |
+| `claudio integrations status [--json]` | Inspect both hosts from the same snapshots used by the GUI and doctor |
+| `claudio integrations connect <claude-code\|codex>` | Idempotently add only Claudio-owned hooks for one host; Codex remains awaiting activation until `/hooks` confirmation and a current-installation receipt |
+| `claudio integrations disconnect <claude-code\|codex>` | Remove only that host's Claudio entries; preserve shared runtime, the other host, sound packs, and third-party hooks |
+| `claudio hook <host> <native-event> --installation-id <uuid>` | New hook entry point: normalize the native event, play without blocking the host, and write a minimal `0600` receipt. Playback/lock/receipt failures never block the host |
+| `claudio play <event>` | Legacy hook entry point with its existing global debounce and always-exit behavior |
+| `claudio install` | Claude Code legacy compatibility entry: a complete modern connection is a successful no-op; partial/conflicting/malformed/relocated/mixed modern state fails closed instead of adding a duplicate `play` chain |
+| `claudio uninstall` | Claude Code legacy compatibility entry: precisely removes those established `claudio play` hooks |
 | `claudio use <pack-id>` | Switches the active pack (writes `~/.claudio/config.json`) |
-| `claudio setup` | v1 first-install bootstrap (T17): copies the binary + bundled packs to `~/.claudio/`, picks a default pack, and calls `install` — see [`../docs/distribution.md`](../docs/distribution.md) |
+| `claudio setup` | Legacy-compatible bootstrap: installs the shared helper/packs, picks a default pack, and connects Claude Code. GUI first launch bootstraps shared runtime only; hosts are connected separately |
+
+Codex is intentionally **3/4 ready**: it has no `StopFailure` hook. `PermissionRequest`
+maps to Claudio's `notification` sound only for authorization requests; `UserPromptSubmit`
+does not mean “needs you.” A Codex `Stop` is labelled “round ended,” not “task completed.”
+When migrating Claudio's exact legacy `codex-notify` wrapper, its `Stop` receipt does not
+prove `/hooks` trust; activation requires a current-installation `PermissionRequest` or
+`SubagentStop` receipt from Codex's composable hooks.
 
 ## Layout
 
@@ -20,10 +32,10 @@ full contract, exit codes, and config schema):
 helper/
   Package.swift                     # SwiftPM manifest (macOS 12+, Swift 6)
   Sources/
-    ClaudioCore/                    # shared domain: Event mapping, config, paths, play, doctor,
-                                     # pack manifest, install/uninstall, use, setup (see ENGINEERING.md)
+    ClaudioCore/                    # shared domain: semantic Event keys, host adapters/manager,
+                                     # config transactions, receipts, play, doctor, packs, bootstrap
     claudio/Claudio.swift           # @main CLI entry (swift-argument-parser)
-    claudio/Subcommands.swift       # doctor / play / install / uninstall / use / setup
+    claudio/Subcommands.swift       # doctor / integrations / hook + legacy commands
   Tests/
     ClaudioCoreTests/main.swift     # dependency-free test harness (see note below)
 ```
@@ -40,6 +52,7 @@ Try the CLI:
 
 ```bash
 swift run --package-path helper claudio doctor
+swift run --package-path helper claudio integrations status --json
 swift run --package-path helper claudio --help
 ```
 

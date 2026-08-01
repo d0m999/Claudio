@@ -13,6 +13,20 @@ private final class MenuBarActionRouter {
     func requestSoundPacksWindow() {
         owner?.requestSoundPacksWindowPresentation()
     }
+
+    func requestIntegrationsWindow(returnFocusTo target: PanelFocusTarget) {
+        owner?.requestIntegrationsWindowPresentation(returnFocusTo: target)
+    }
+
+    func audibilityInputsChanged() {
+        owner?.requestHostIntegrationRefresh()
+    }
+
+    func publishHostIntegrationState(
+        _ state: HostIntegrationPresentationState
+    ) -> IntegrationsWindowContent? {
+        owner?.publishHostIntegrationState(state)
+    }
 }
 
 /// The real menu-bar shell (ENGINEERING.md T15 D2): an `NSStatusItem` + `NSPopover` hosting
@@ -35,7 +49,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let hostingController: NSHostingController<PanelView>
     private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator
     private let soundPacksWindowController: SoundPacksWindowController
+    private let integrationsWindowController: IntegrationsWindowController
+    private let integrationsModel: IntegrationsWindowModel
     private let actionRouter: MenuBarActionRouter
+    private let hostIntegrations: HostIntegrationPresentationStore
+    private let hostIntegrationMatrixProvider: HostIntegrationMatrixProvider
+    private var hostIntegrationRefreshTask: Task<Void, Never>?
+    private var hostIntegrationRefreshRevision: UInt64 = 0
 
     /// Owned here (not by `PanelView`) so it survives across every popover show/close cycle
     /// for the app's whole lifetime, and so `popoverDidShow` has something concrete to
@@ -51,27 +71,65 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// the button action itself lets `popoverDidClose` race in afterward and hand activation back
     /// to `previousApp`, immediately stealing key status from our own window.
     private var pendingSoundPacksWindowPresentation = false
+    /// The exact panel trigger is carried through the close callback. A value here also means the
+    /// integrations window must be presented only after `popoverDidClose` finishes.
+    private var pendingIntegrationsWindowFocusTarget: PanelFocusTarget?
+    /// Set by the retained integrations window's close callback and consumed by the next
+    /// `popoverDidShow`, so focus restoration is one-shot rather than sticky across later opens.
+    private var pendingRestoredPanelFocusTarget: PanelFocusTarget?
 
-    /// `bundledHelperBinary` is the helper CLI inside this app bundle
-    /// (`Claudio.app/Contents/Resources/bin/claudio`) — what the 接管 CTA copies to
-    /// `~/.claudio/bin/claudio`. It is a PARAMETER, resolved by ``bundledHelperBinary(in:)``
-    /// (`ClaudioGUICore`), not a `Bundle.main` lookup performed here.
-    ///
-    /// That is deliberate and it is the whole point of T17: the lookup is the ONE line that can
-    /// hand `performFirstRunSetup` the wrong binary — swap it for `Bundle.main.executableURL` and
-    /// it resolves to `Contents/MacOS/Claudio`, the SwiftUI app itself, which then gets copied
-    /// over the helper so every Claude Code event execs a GUI app, and the bundled-pack directory
-    /// (derived by dropping two components off that path) resolves to a `Contents/packs` that does
-    /// not exist. Left in this AppKit-only file, that line is unreachable by the test harness, and
-    /// the mutation above keeps the ENTIRE suite green. Sunk into `ClaudioGUICore`, it is pinned
-    /// by a real fixture bundle (`OnboardingActionsSuite`).
-    init(audioEnvironment: AudioImportEnvironment, bundledHelperBinary: URL?) {
+    /// 面板 shell 只接收 manager 已组合的宿主事实。内置 helper 的定位与
+    /// shared bootstrap 已上移到 AppDelegate 的 composition root，不再经过面板。
+    init(
+        audioEnvironment: AudioImportEnvironment,
+        hostIntegrationState: HostIntegrationPresentationState,
+        integrationMatrixProvider: HostIntegrationMatrixProvider,
+        integrationActionProvider: HostIntegrationActionProvider
+    ) {
         let soundPacksRefreshCoordinator = SoundPacksRefreshCoordinator()
         let soundPacksWindowController = SoundPacksWindowController(
             configFile: ClaudioPaths.configFile,
             environment: audioEnvironment,
             refreshCoordinator: soundPacksRefreshCoordinator)
         let actionRouter = MenuBarActionRouter()
+        let hostIntegrations = HostIntegrationPresentationStore(
+            state: hostIntegrationState,
+            configurationSources: [
+                .claudeCode: ClaudioPaths.claudeSettingsFile.path,
+                .codex: ClaudioPaths.codexHooksFile.path,
+            ])
+        let integrationsModel = IntegrationsWindowModel(
+            content: hostIntegrations.content,
+            refreshHandler: IntegrationsWindowRefreshHandler {
+                [weak actionRouter, weak hostIntegrations] in
+                let state = try await integrationMatrixProvider()
+                guard let hostIntegrations else {
+                    throw HostIntegrationPresentationError.storeUnavailable
+                }
+                let content = actionRouter?.publishHostIntegrationState(state)
+                    ?? hostIntegrations.replace(state: state)
+                return IntegrationsWindowActionOutcome(
+                    content: content,
+                    feedbackKind: .information,
+                    feedbackMessage: "已重新检测声音来源")
+            },
+            actionHandler: IntegrationsWindowActionHandler {
+                [weak actionRouter, weak hostIntegrations] action in
+                let outcome = try await integrationActionProvider(action)
+                guard let hostIntegrations else {
+                    throw HostIntegrationPresentationError.storeUnavailable
+                }
+                let content = actionRouter?.publishHostIntegrationState(outcome.state)
+                    ?? hostIntegrations.replace(state: outcome.state)
+                return IntegrationsWindowActionOutcome(
+                    content: content,
+                    feedbackKind: outcome.feedbackKind,
+                    feedbackMessage: outcome.feedbackMessage)
+            },
+            onContentChanged: { [weak hostIntegrations] content in
+                hostIntegrations?.replace(content: content)
+            })
+        let integrationsWindowController = IntegrationsWindowController(model: integrationsModel)
 
         // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
         // capture `self` — we're still pre-`super.init()` here).
@@ -84,11 +142,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         let panel = PanelView(
             audioEnvironment: audioEnvironment,
-            bundledHelperBinary: bundledHelperBinary,
             focusCoordinator: focusCoordinator,
+            hostIntegrations: hostIntegrations,
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
             onManageSounds: { [weak actionRouter] in
                 actionRouter?.requestSoundPacksWindow()
+            },
+            onManageIntegrations: { [weak actionRouter] target in
+                actionRouter?.requestIntegrationsWindow(returnFocusTo: target)
+            },
+            onAudibilityInputsChanged: { [weak actionRouter] in
+                actionRouter?.audibilityInputsChanged()
             },
             // T15 D5「极大 → 加宽 popover」, now actually in effect (TODOS.md:257): `PanelView`
             // widens ITSELF to `widenedPanelWidth` (360pt) at the `.maximum` Dynamic Type tier,
@@ -112,7 +176,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.popover = popover
         self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
         self.soundPacksWindowController = soundPacksWindowController
+        self.integrationsWindowController = integrationsWindowController
+        self.integrationsModel = integrationsModel
         self.actionRouter = actionRouter
+        self.hostIntegrations = hostIntegrations
+        self.hostIntegrationMatrixProvider = integrationMatrixProvider
         // `.transient`: AppKit closes the popover on a click outside it, on an app switch,
         // and — ONLY once the popover's window is key — on Esc. That last clause is the whole
         // catch: `.transient` alone does NOT buy "Esc 关闭", because a status-item popover in
@@ -135,6 +203,51 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.delegate = self
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
+
+        // GUI 首启只运行共享 bootstrap + 双侧 inspect。宿主连接必须始终来自详情窗里的显式动作。
+        requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
+    }
+
+    deinit {
+        hostIntegrationRefreshTask?.cancel()
+    }
+
+    /// 声音包、manifest 或静音配置变化后重算同一份可听矩阵。代次保护避免较慢的旧 refresh
+    /// 覆盖详情窗动作刚发布的新状态；失败时保留最后一份诚实状态，不伪造 ready。
+    fileprivate func requestHostIntegrationRefresh(
+        bootstrapSharedRuntime: Bool = false
+    ) {
+        hostIntegrationRefreshRevision &+= 1
+        let revision = hostIntegrationRefreshRevision
+        hostIntegrationRefreshTask?.cancel()
+        let provider = hostIntegrationMatrixProvider
+        hostIntegrationRefreshTask = Task { @MainActor [weak self] in
+            do {
+                let state = try await (bootstrapSharedRuntime
+                    ? provider.bootstrapSharedRuntime()
+                    : provider())
+                guard
+                    !Task.isCancelled,
+                    let self,
+                    self.hostIntegrationRefreshRevision == revision
+                else { return }
+                let content = self.hostIntegrations.replace(state: state)
+                self.integrationsModel.replaceExternalContent(content)
+            } catch {
+                // IntegrationsWindow 的显式“重新检测”会显示错误反馈；后台/打开面板刷新只保留
+                // 上一份事实，避免一次瞬时 I/O 失败把两条宿主行抹成伪造状态。
+            }
+        }
+    }
+
+    /// IntegrationsWindow 的显式 refresh/action 赢过任何较早的后台刷新。发布与失效都在
+    /// MainActor 上完成，因此 popover 与 retained window 永远同时切到同一份 content。
+    fileprivate func publishHostIntegrationState(
+        _ state: HostIntegrationPresentationState
+    ) -> IntegrationsWindowContent {
+        hostIntegrationRefreshRevision &+= 1
+        hostIntegrationRefreshTask?.cancel()
+        return hostIntegrations.replace(state: state)
     }
 
     @objc private func togglePopover() {
@@ -201,6 +314,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// steal key status from the management window. Instead, the window owner pays the debt when
     /// its retained standard window really closes.
     fileprivate func requestSoundPacksWindowPresentation() {
+        pendingIntegrationsWindowFocusTarget = nil
         pendingSoundPacksWindowPresentation = true
 
         guard popover.isShown else {
@@ -218,6 +332,33 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.close()
     }
 
+    /// The integrations window follows the same close-before-show rule as SoundPacks, but keeps
+    /// the original foreground-app debt. Its close callback first reopens the popover and restores
+    /// the exact trigger; the later ordinary popover close finally returns activation to that app.
+    fileprivate func requestIntegrationsWindowPresentation(
+        returnFocusTo target: PanelFocusTarget
+    ) {
+        pendingSoundPacksWindowPresentation = false
+        pendingIntegrationsWindowFocusTarget = target
+        if case .hostSource(let host) = target {
+            integrationsModel.select(.host(host))
+        }
+
+        guard popover.isShown else {
+            pendingIntegrationsWindowFocusTarget = nil
+            integrationsWindowController.showWindow { [weak self] in
+                self?.restorePanelFocus(to: target)
+            }
+            return
+        }
+        popover.close()
+    }
+
+    private func restorePanelFocus(to target: PanelFocusTarget) {
+        pendingRestoredPanelFocusTarget = target
+        showPopover()
+    }
+
     // MARK: - NSPopoverDelegate — focus owner (ENGINEERING.md「无障碍规格」, a11y-architect
     // FIX 4)
     //
@@ -230,9 +371,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     // just the container. Order matters: step 2 only has an observable effect once step 1
     // has already put the hosting view into the responder chain.
     func popoverDidShow(_ notification: Notification) {
+        // 真实 hook 回执与宿主外部配置可在 app 后台期间变化。每次打开
+        // 都经 manager 重探两侧，面板不直接读 settings.json/hooks.json。
+        requestHostIntegrationRefresh()
         popover.contentViewController?.view.window?.makeFirstResponder(
             popover.contentViewController?.view)
-        focusCoordinator.requestFocus()
+        let restoredTarget = pendingRestoredPanelFocusTarget
+        pendingRestoredPanelFocusTarget = nil
+        focusCoordinator.requestFocus(target: restoredTarget)
     }
 
     // The other half of `showPopover()`'s `NSApp.activate` — the two are a pair, and shipping
@@ -255,13 +401,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     // closed, someone give the keyboard back" — is met by returning it to the only party that
     // can hold it: the app the user came from. ENGINEERING.md's wording was corrected to say so.
     func popoverDidClose(_ notification: Notification) {
-        // T17d —— **必须是这个方法的第一行。** 下面那句 `guard NSApp.isActive` 会在「用户切到别的
-        // app 导致 popover 关闭」这条路径上直接 return，而那正是本信号存在的理由：用户点完「接管」
-        // 就切走，写盘的 `Task` 继续跑并失败，`OnboardingViewModel` 必须知道那一刻面板已经不在屏幕上
-        // 了，否则它会把这条从没被渲染过的失败当成「用户看过了」清掉（见
-        // ``PanelFocusCoordinator/notePanelHidden()``）。把这一行挪到 guard 之后 = 复活那个 bug，
-        // 而且只在最常见的那条路径上复活。
+        // 必须在任何早返回之前通知 MasterVolumeRow 冲刷拖动会话。
         focusCoordinator.notePanelHidden()
+
+        let integrationsFocusTarget = pendingIntegrationsWindowFocusTarget
+        pendingIntegrationsWindowFocusTarget = nil
+        if let integrationsFocusTarget {
+            integrationsWindowController.showWindow { [weak self] in
+                self?.restorePanelFocus(to: integrationsFocusTarget)
+            }
+            return
+        }
 
         let shouldPresentSoundPacksWindow = pendingSoundPacksWindowPresentation
         pendingSoundPacksWindowPresentation = false

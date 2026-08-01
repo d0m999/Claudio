@@ -1548,8 +1548,8 @@ func runOnboardingActionsFixSuites() {
         // PanelFocusOrderSuite 对 hasMasterVolume: false 那一半的测试）。零事件行只是 fixture，
         // 生产恒 4 行。T7 的管理钮在包列表后无条件渲染，失败行仍位于最终的断开连接之上。
         expect(
-            operational == [.masterVolume, .manageSounds, .revealDetail, .disconnect],
-            "运行态：管理声音包与失败行都在「断开连接」之上。得到 \(operational)")
+            operational == [.masterVolume, .manageSounds, .revealDetail, .manageIntegrations],
+            "运行态：管理声音包与兼容失败详情之后，是非破坏性的声音来源管理入口。得到 \(operational)")
 
         let withoutToggle = panelFocusOrder(
             .operational(events: [], packCardIDs: [], hasDetailToggle: false, hasMasterVolume: true))

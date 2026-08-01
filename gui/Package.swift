@@ -1,13 +1,11 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Claudio's menu bar app — the SwiftUI front-end that talks to the `claudio` helper
-// binary/config, never the other way around (`ClaudioCore` writes `~/.claude/settings.json`
-// only through the CLI; the GUI reads state, it never edits it directly).
+// Claudio's menu bar app — the SwiftUI front-end delegates shared-runtime bootstrap and every
+// host-config inspect/connect/disconnect operation to `ClaudioCore`'s integration manager and
+// adapters. Views only consume injected presentation state; they never parse host files themselves.
 //
-// v1 scope (T7, ENGINEERING.md): onboarding state machine + view + view-model only. The
-// menu bar shell itself (NSStatusItem/NSPopover) is T8/T15 — this package's target
-// layout leaves room for that without needing to be restructured later:
+// The target split keeps the current menu-bar shell and retained management windows testable:
 //   - `ClaudioGUICore`: pure Foundation state/view-model logic (no SwiftUI import), so it
 //     can be exercised by the same dependency-free test harness `helper/` uses.
 //   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
@@ -51,8 +49,9 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // The SwiftUI app shell. Minimal for T7 (just enough to host `OnboardingView`
-        // for manual/visual verification) — the real menu bar skeleton lands in T8/T15.
+        // The SwiftUI app shell owns the status-item panel and the retained `IntegrationsWindow`.
+        // The latter consumes `ClaudioGUICore` presentation values and never opens host config
+        // itself, so adding the standard window does not create a second integration truth source.
         //
         // Depends on `ClaudioCore` directly (not just transitively via `ClaudioGUICore`,
         // same reasoning as `claudio-gui-tests` below) since `EventRowView`/`DesignTokens`

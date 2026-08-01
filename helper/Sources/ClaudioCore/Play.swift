@@ -93,6 +93,10 @@ public struct PlayEnvironment: Sendable {
     /// so tests that redirect `logFile` to a temp directory can never fall through to the
     /// real `ClaudioPaths.logLockFile` on the host machine.
     public let logLockFile: URL
+    /// 新版双宿主 hook 的脱敏回执需要区分「已尝试且成功启动」与「启动失败」。legacy
+    /// ``playSoundEvent`` 的公开 outcome 仍保持 `.played` 兼容语义；只有显式注入的观察者收到
+    /// 这一位真实结果，且绝不接收音频路径、提示词或会话数据。
+    public let spawnResultObserver: (@Sendable (Bool) -> Void)?
 
     public init(
         afplayPath: String = "/usr/bin/afplay",
@@ -105,7 +109,8 @@ public struct PlayEnvironment: Sendable {
         debounceInterval: TimeInterval = 1.5,
         now: @escaping @Sendable () -> Date = { Date() },
         logFile: URL = ClaudioPaths.logFile,
-        logLockFile: URL = ClaudioPaths.logLockFile
+        logLockFile: URL = ClaudioPaths.logLockFile,
+        spawnResultObserver: (@Sendable (Bool) -> Void)? = nil
     ) {
         self.afplayPath = afplayPath
         self.lockFile = lockFile
@@ -118,6 +123,7 @@ public struct PlayEnvironment: Sendable {
         self.now = now
         self.logFile = logFile
         self.logLockFile = logLockFile
+        self.spawnResultObserver = spawnResultObserver
     }
 }
 
@@ -203,6 +209,7 @@ public func playSoundEvent(
         let spawned = environment.spawner.spawn(
             executablePath: environment.afplayPath,
             arguments: ["-v", volumeArgument, audioFile.path])
+        environment.spawnResultObserver?(spawned)
         if !spawned {
             appendLogLine(
                 event: event.cliName,

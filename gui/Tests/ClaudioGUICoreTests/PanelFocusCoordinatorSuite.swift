@@ -1,3 +1,4 @@
+import ClaudioCore
 import ClaudioGUICore
 import Foundation
 
@@ -15,6 +16,28 @@ func runPanelFocusCoordinatorSuites() {
         let coordinator = PanelFocusCoordinator()
         coordinator.requestFocus()
         expect(coordinator.showCount == 1, "got \(coordinator.showCount)")
+    }
+
+    suite("PanelFocusCoordinator: retained window 恢复精确触发控件，普通打开会清掉旧请求") {
+        let coordinator = PanelFocusCoordinator()
+        expect(coordinator.requestedTarget == nil, "初始不得预设焦点")
+
+        coordinator.requestFocus(target: .hostSource(.codex))
+        expect(
+            coordinator.showCount == 1
+                && coordinator.requestedTarget == .hostSource(.codex),
+            "Codex 宿主行恢复请求必须与本次 show 一起发布")
+
+        coordinator.requestFocus(target: .manageIntegrations)
+        expect(
+            coordinator.showCount == 2
+                && coordinator.requestedTarget == .manageIntegrations,
+            "管理入口必须可作为独立精确恢复目标")
+
+        coordinator.requestFocus()
+        expect(
+            coordinator.showCount == 3 && coordinator.requestedTarget == nil,
+            "下一次普通菜单栏打开必须清掉旧窗口的恢复目标，不能重复偿还")
     }
 
     suite("PanelFocusCoordinator: each requestFocus call is a distinct, observable increment") {

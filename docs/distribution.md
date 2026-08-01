@@ -83,32 +83,56 @@ brew install --cask claudio
 
 ---
 
-## 首次安装后（点面板里的按钮就行）
+## 首次安装后：先准备声音，再分别连接宿主
 
-1. **打开 Claudio**（菜单栏会出现一个波形图标），点它 → 面板打开。
-2. **点「接管 Claude Code」**（如果小助手还没装上，这颗按钮会显示为「修复」）。
+1. **打开 Claudio**（菜单栏会出现一个波形图标）。首次启动只准备共享 runtime：把 helper 与内置声音包放进 `~/.claudio/`、修复 quarantine，并在尚未选包时选择默认包。它**不会静默改写** Claude Code 或 Codex 配置。
+2. 点菜单栏图标。面板始终显示两条等权声音来源：
 
-   一次点击会完成全部四件事：把 helper 复制到 `~/.claudio/bin/claudio`、把内置声音包"极简铃音"复制到 `~/.claudio/packs/`、首次默认选中它、并把 hook 追加进 `~/.claude/settings.json`。
-   - **追加，不覆盖**你的其他 hook
-   - 自动备份原 settings.json 到 `settings.json.claudio.bak`
-   - 幂等：重复点不会重复安装、也不会响两声
-   - 失败会**当场说出来**（面板上一句人话 + 可展开的原因），绝不会假装成功
-   - 面板底部的「断开连接」随时可以一键撤销
+   ```text
+   Claude Code    4/4 …
+   Codex          3/4 …
+   ```
 
-3. **完成**  
-   下次 Claude Code 的任务完成、中断或需要确认时，就会自动播放相应的声音了。换包直接点面板里的切包画廊。
+   Codex `3/4` 是正常能力，不是故障：当前没有与「执行中断」对应的 `StopFailure` 原生事件。
+3. 点击任一来源行打开「声音来源」详情窗口，然后分别连接需要的宿主。
 
-### 也可以走 Terminal（与上面完全等价）
+### 连接 Claude Code
+
+点 Claude Code 卡片里的「连接」。Claudio 只向 `~/.claude/settings.json` 追加自己的 hook：
+
+- 保留原有 hook、matcher 与数组顺序
+- 首次写入前建立一次性备份
+- 重复连接不会重复安装或制造双响
+- 旧的 `claudio play` 连接继续有效，并显示为 legacy；需要真实回执时可在详情窗口点「升级连接」
+
+### 连接 Codex
+
+点 Codex 卡片里的「连接」。Claudio 只在 `~/.codex/hooks.json` 中管理自己的 `Stop`、`PermissionRequest` 与 `SubagentStop` command hook；不会接管单命令 `notify`，也不会读写私有 trust 数据或删除第三方 hook。
+
+写入完成后会显示：
+
+> **Claudio 已写好，等待 Codex 确认**
+
+在新的 Codex 会话中运行 `/hooks` 并确认 Claudio hooks。详情窗口提供「复制 `/hooks`」和「重新检测」。只有确认后产生首个真实事件、且回执属于当前 installation ID，Codex 才显示绿色已连接；仅仅写好 JSON 不算激活。
+
+Codex 的「需要你」只覆盖 `PermissionRequest`（**仅授权请求**）。`UserPromptSubmit` 是任务开始，不计入「需要你」；`Stop` 只写「本轮结束」，不承诺任务已经完成。
+
+### 也可以走 Terminal
 
 ```bash
-/Applications/Claudio.app/Contents/Resources/bin/claudio setup
+# 查看两个宿主
+/Applications/Claudio.app/Contents/Resources/bin/claudio integrations status
+
+# 分别连接
+/Applications/Claudio.app/Contents/Resources/bin/claudio integrations connect claude-code
+/Applications/Claudio.app/Contents/Resources/bin/claudio integrations connect codex
 ```
 
-面板上那颗按钮调用的就是这条命令背后的同一个函数（`performFirstRunSetup`），两条路径没有任何行为差异。
+`claudio setup` 保留旧版兼容行为：它会准备 shared runtime 并连接 Claude Code，**不会替你激活 Codex**。`claudio install` / `uninstall` 也仍是 Claude Code 兼容别名。
 
 > **关于 Gatekeeper 隔离（macOS 会给下载来的文件盖一个 `com.apple.quarantine` 章）**：
 > 这个章如果留在 `~/.claudio/bin/claudio` 上，Claude Code 每次执行 hook 时都会被系统**直接杀掉**——
-> 没有任何报错，你只会觉得"装好了但就是不响"。所以 `setup`（以及面板上那颗按钮）在复制完成后会
+> 没有任何报错，你只会觉得"装好了但就是不响"。所以 shared bootstrap（以及兼容的 `setup`）在复制完成后会
 > **自动解除隔离并回头验证一次**；万一没解掉，它会**报错并且不写任何 hook**，而不是留给你一个
 > 看起来装好了、实际永远静音的安装。`claudio doctor` 也会把"被隔离的二进制"报成硬失败。
 
@@ -118,23 +142,29 @@ brew install --cask claudio
 
 ### 通过 Homebrew
 
+先在「声音来源」详情窗口分别断开已连接的宿主，或运行：
+
+```bash
+~/.claudio/bin/claudio integrations disconnect claude-code
+~/.claudio/bin/claudio integrations disconnect codex
+```
+
+然后卸载 app：
+
 ```bash
 brew uninstall --cask claudio
 ```
 
-然后手动卸载 Claude Code hook：
-
-```bash
-~/.claudio/bin/claudio uninstall
-```
+断开一个宿主只删除该宿主的 Claudio 条目；不会删除另一宿主、第三方 hooks、声音包或 `~/.claudio/` shared runtime。`claudio uninstall` 仍可作为断开 Claude Code 的兼容别名。
 
 ### 手动卸载
 
-1. 拖 `Claudio.app` 到回收站（从 `/Applications` 删除）
-2. 运行卸载命令：
+1. 在「声音来源」详情窗口分别断开已连接的宿主，或运行：
    ```bash
-   ~/.claudio/bin/claudio uninstall
+   ~/.claudio/bin/claudio integrations disconnect claude-code
+   ~/.claudio/bin/claudio integrations disconnect codex
    ```
+2. 拖 `Claudio.app` 到回收站（从 `/Applications` 删除）。
 
 ---
 
@@ -151,13 +181,15 @@ brew uninstall --cask claudio
 
 ### Claudio 打开了但没发声
 
-1. 确认你已经点过面板里的「接管 Claude Code」（或跑过 `claudio setup`）——见[「首次安装后」](#首次安装后点面板里的按钮就行)
-2. 确认系统音量没有静音
-3. 在 Claudio 面板里找到你选的声音包，点旁边的试听按钮 ▶ 测试一下
+1. 在面板确认目标宿主已连接；也可以运行 `~/.claudio/bin/claudio integrations status`。未安装/未连接是提示，不是 shared runtime 故障。
+2. 如果 Codex 显示「Claudio 已写好，等待 Codex 确认」，先在**新的 Codex 会话**运行 `/hooks` 完成确认，再触发一个真实事件并点「重新检测」。`3/4` 本身不需要修复。
+3. 确认系统音量以及 Claudio 的主音量/对应事件没有静音。
+4. 在 Claudio 面板里找到当前声音包，点对应事件的试听按钮 ▶。试听会绕过宿主 hook，能帮助区分「播放链坏了」和「宿主还没激活」。
+5. 运行 `~/.claudio/bin/claudio doctor`，分别查看 shared runtime、Claude Code 与 Codex。只有 shared runtime 不可用或已连接宿主损坏才会返回失败。
 
-### 重跑一次 `setup` 就能治好一台坏掉的安装（**从 app bundle 里跑**）
+### 重跑一次 `setup` 可以修复 shared runtime 与 Claude Code 兼容连接（**从 app bundle 里跑**）
 
-这是 Claudio 的一条承诺，也是 `setup` 之所以可以放心重复运行的原因：它是幂等的，而且**它会把它能修的都修好**。
+`setup` 是幂等兼容入口，会修复 helper、声音包、当前选包和 Claude Code 连接。Codex 始终通过 `integrations connect codex` / 详情窗口单独管理，并仍需要 `/hooks` 确认。
 
 ```bash
 /Applications/Claudio.app/Contents/Resources/bin/claudio setup
@@ -175,12 +207,12 @@ brew uninstall --cask claudio
 - 上一次安装被中断留下的**残缺包** → 原样搬到一个备份目录（`packs/.<id>.broken-…`，**一个文件都不删**），
   再装一份干净的；输出里会告诉你搬到哪儿了
 - 你选中的那个包已经不在了 / 读不出来 → 替你换上一个能响的，并打印一行 ⚠ 告诉你换的是哪个
-  （你随时可以在面板的切包画廊里换回去）
-- Claude Code 的 hooks 不在 → 补上（不会覆盖你自己的配置）
+  （你随时可以在面板的声音包列表里换回去）
+- Claude Code 的 Claudio hooks 不在 → 补上（不会覆盖你自己的配置）
 
-**它绝不会做的事**：在一台注定发不出声音的机器上写 hooks 然后告诉你「装好了」。
+**它绝不会做的事**：在一台注定发不出声音的机器上写 Claude Code hooks 然后告诉你「装好了」。
 只要这次安装注定是哑的（一个能用的声音包都没有、二进制被隔离、`config.json` 读不出来），
-它会**大声失败并且一条 hook 都不写** —— 一个看起来装好了、实际永远静音的安装，比一次诚实的报错糟糕得多。
+它会**大声失败并且不新增 Claude Code hook** —— 一个看起来装好了、实际永远静音的安装，比一次诚实的报错糟糕得多。
 
 ### 需要诊断日志
 
@@ -190,7 +222,12 @@ tail -20 ~/.claudio/claudio.log
 
 # 或运行自检
 ~/.claudio/bin/claudio doctor
+
+# 查看两宿主状态（机器可读时加 --json）
+~/.claudio/bin/claudio integrations status
 ```
+
+真实回执位于 `~/.claudio/integrations/receipts/<host>/<event>.json`，权限为 `0600`。它只含 installation ID、宿主/事件、时间和脱敏播放结果；不会保存提示词、响应内容、项目路径、会话内容或音频绝对路径。不要通过手改回执强行点亮连接——只有当前 installation 的真实 hook 回调才有效。
 
 ---
 
@@ -215,7 +252,7 @@ brew upgrade claudio
 3. 拖新的 `Claudio.app` 到 `/Applications`，覆盖旧版本
 4. 完成
 
-你之前配置的声音包和 Claude Code 接管会保留（配置存在 `~/.claudio/` 目录）。
+你之前配置的声音包、Claude Code / Codex 的 Claudio 条目与真实回执会保留。共享配置在 `~/.claudio/`，宿主条目仍分别位于各自配置文件中；更新后可用 `claudio integrations status` 重新检测。
 
 ---
 

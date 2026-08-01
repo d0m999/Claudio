@@ -1,8 +1,9 @@
 import Foundation
 
 /// Installs/uninstalls Claudio's `settings.json` hooks (ENGINEERING.md "settings.json 接管：
-/// 追加而非覆盖" + 工程落地细节 ①②③⑤). This is the only code path allowed to write
-/// `~/.claude/settings.json` — every other Claudio subsystem lives under `~/.claudio/`.
+/// 追加而非覆盖" + 工程落地细节 ①②③⑤). This is the legacy compatibility writer;
+/// modern receipt-bearing connections share the same transaction and matching primitives
+/// through ``ClaudeCodeIntegrationAdapter``.
 ///
 /// Invariants enforced here (see `SettingsInstallerSuite.swift`):
 /// - **Append, never overwrite**: existing hook groups belonging to other tools are left
@@ -11,6 +12,9 @@ import Foundation
 ///   read-only ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` probe key off
 ///   ``claudioHookCommand(for:claudioBinaryPath:)`` compared for exact equality, never a
 ///   substring (ENGINEERING.md 工程落地细节 ③).
+/// - **Never mix legacy and modern playback chains**: a complete modern connection is a
+///   successful no-op; partial, conflicting, malformed, relocated, or mixed modern state
+///   fails closed and directs the caller to `claudio integrations` for an explicit repair.
 /// - **Structural-match uninstall (T13)**: `uninstall` does NOT use the exact-match above —
 ///   it must still find and remove a claudio hook entry after a *future* binary relocation
 ///   it was never told the exact old path for. See
@@ -34,6 +38,10 @@ private let hookTypeKey = "type"
 private let hookCommandKey = "command"
 private let commandHookType = "command"
 
+private func claudeNativeEventName(for event: Event) -> String {
+    HostCapabilityCatalog.binding(host: .claudeCode, event: event)!.nativeEvent!
+}
+
 /// The exact `settings.json` hook `command` string Claudio installs/matches for `event`.
 /// Single source of truth for the install idempotency check and the read-only
 /// ``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` probe. **Not** used by
@@ -56,6 +64,9 @@ public enum InstallOutcome: Sendable, Equatable {
     case installed
     /// Every event already had our exact hook command; nothing changed.
     case alreadyInstalled
+    /// A complete modern Claude Code connection already exists. The legacy compatibility
+    /// command is an idempotent success and must not append a second playback chain.
+    case modernConnectionPresent
 }
 
 public enum UninstallOutcome: Sendable, Equatable {
@@ -74,6 +85,10 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
     case writeFailure(reason: String)
     case lockBusy
     case lockFailed(errno: Int32)
+    /// The legacy compatibility installer found a modern Claude Code configuration that is not
+    /// a complete, healthy connection. Appending `play` hooks would create two independent
+    /// playback/debounce chains, so the caller must repair it through the integration adapter.
+    case modernConnectionNeedsRepair(reason: String)
     /// `install` was handed a binary path that lives inside a `.claudio` namespace but does not
     /// have a shape that namespace's own `uninstall` sweep recognizes — see
     /// ``binaryPathContradictsItsNamespace(_:)``. Writing the hook would leak an entry no
@@ -101,6 +116,10 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
         case .writeFailure(let reason): "settings.json 写入失败：\(reason)"
         case .lockBusy: "settings.json 当前被占用（另一个 claudio 进程正在读写），请稍后重试"
         case .lockFailed(let errno): "无法获取文件锁（errno \(errno)），请稍后重试"
+        case .modernConnectionNeedsRepair(let reason):
+            "检测到需要修复的现代 Claude Code 连接（\(reason)）；已拒绝追加 legacy hooks，"
+                + "请运行 `claudio integrations connect claude-code` 修复，或先用 "
+                + "`claudio integrations disconnect claude-code` 断开"
         case .unsweepableBinaryPath(let path):
             "claudio 二进制路径位于自己的 .claudio 命名空间内，却不是 uninstall 能识别并清除的形状"
                 + "（根之下只允许不含 shell 元字符的普通路径段，且文件名必须正好是 claudio）："
@@ -277,7 +296,7 @@ public func detectHookInstallStatus(
         let hooksSection = (loaded.root[hooksKey] as? [String: Any]) ?? [:]
         let allEventsInstalled = Event.allCases.allSatisfy { event in
             let command = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
-            let eventArray = (hooksSection[event.settingsName] as? [Any]) ?? []
+            let eventArray = (hooksSection[claudeNativeEventName(for: event)] as? [Any]) ?? []
             return eventArray.contains { groupContainsCommand($0, command: command) }
         }
         return allEventsInstalled ? .installed : .notInstalled
@@ -296,6 +315,41 @@ private func performInstall(
         let originalRoot = loaded.root
         if let shapeError = validateHooksShape(originalRoot) {
             return .failure(shapeError)
+        }
+        if let claudioRoot = claudioNamespaceRoot(forBinaryPath: claudioBinaryPath) {
+            if containsRelocatedClaudeCodeHooks(
+                root: originalRoot,
+                claudioRoot: claudioRoot,
+                claudioBinaryPath: claudioBinaryPath)
+            {
+                return .failure(
+                    .modernConnectionNeedsRepair(
+                        reason:
+                            "同一 Claudio root 下仍有旧 helper 路径的 modern callback，"
+                            + "可能与新连接同时执行"))
+            }
+            switch inspectClaudeCodeHooks(
+                root: originalRoot,
+                claudioRoot: claudioRoot,
+                claudioBinaryPath: claudioBinaryPath)
+            {
+            case .success(.configured):
+                return .success(.modernConnectionPresent)
+            case .success(.partial(let missing, let hasLegacyEntries))
+                where missing.count < Event.allCases.count:
+                let detail = hasLegacyEntries
+                    ? "现代与 legacy hook 同时存在，可能重复播放"
+                    : "现代 hook 不完整，缺少 \(missing.joined(separator: ", "))"
+                return .failure(.modernConnectionNeedsRepair(reason: detail))
+            case .success(.conflict(let reason)):
+                return .failure(.modernConnectionNeedsRepair(reason: reason))
+            case .failure(let error):
+                return .failure(
+                    .modernConnectionNeedsRepair(
+                        reason: "现代/legacy hooks 无法安全检查：\(error.description)"))
+            case .success(.notConfigured), .success(.legacyConnected), .success(.partial):
+                break
+            }
         }
 
         var root = originalRoot
@@ -412,11 +466,12 @@ private func validateHooksShape(_ root: [String: Any]) -> SettingsUpdateError? {
             reason: "settings.json 的 \"hooks\" 字段不是 object，已中止（未修改文件）")
     }
     for event in Event.allCases {
-        guard let eventValue = hooksSection[event.settingsName] else { continue }
+        let nativeEvent = claudeNativeEventName(for: event)
+        guard let eventValue = hooksSection[nativeEvent] else { continue }
         guard eventValue is [Any] else {
             return .malformedHooksSection(
                 reason:
-                    "settings.json 的 \"hooks.\(event.settingsName)\" 字段不是 array，已中止（未修改文件）"
+                    "settings.json 的 \"hooks.\(nativeEvent)\" 字段不是 array，已中止（未修改文件）"
             )
         }
     }
@@ -430,7 +485,8 @@ private func appendHookEntry(
 ) -> (root: [String: Any], changed: Bool) {
     var root = root
     var hooksSection = (root[hooksKey] as? [String: Any]) ?? [:]
-    var eventArray = (hooksSection[event.settingsName] as? [Any]) ?? []
+    let nativeEvent = claudeNativeEventName(for: event)
+    var eventArray = (hooksSection[nativeEvent] as? [Any]) ?? []
 
     if eventArray.contains(where: { groupContainsCommand($0, command: command) }) {
         return (root, false)
@@ -440,7 +496,7 @@ private func appendHookEntry(
         hooksKey: [[hookTypeKey: commandHookType, hookCommandKey: command]]
     ]
     eventArray.append(newGroup)
-    hooksSection[event.settingsName] = eventArray
+    hooksSection[nativeEvent] = eventArray
     root[hooksKey] = hooksSection
     return (root, true)
 }
@@ -479,8 +535,9 @@ private func removeHookEntries(
     root: [String: Any], event: Event, claudioRoot: String
 ) -> (root: [String: Any], removed: Int) {
     var root = root
+    let nativeEvent = claudeNativeEventName(for: event)
     guard var hooksSection = root[hooksKey] as? [String: Any],
-        let eventArray = hooksSection[event.settingsName] as? [Any]
+        let eventArray = hooksSection[nativeEvent] as? [Any]
     else {
         return (root, 0)
     }
@@ -523,9 +580,9 @@ private func removeHookEntries(
     }
 
     if newEventArray.isEmpty {
-        hooksSection.removeValue(forKey: event.settingsName)
+        hooksSection.removeValue(forKey: nativeEvent)
     } else {
-        hooksSection[event.settingsName] = newEventArray
+        hooksSection[nativeEvent] = newEventArray
     }
     root[hooksKey] = hooksSection
     return (root, removed)

@@ -19,6 +19,8 @@ import Foundation
 public enum PanelFocusTarget: Sendable, Hashable {
     case onboardingPrimaryAction
     case onboardingSecondaryAction
+    /// One of the two permanently-present host source rows at the top of the panel.
+    case hostSource(HostID)
     /// One event row's file-name ``Menu`` — `stop.mp3 ▾` / `未配置 ▾` / `文件丢失 ▾`
     /// (PLAN-SOUND-MANAGER.md §2.5/T2, DESIGN.md「行内文件名下拉」). ALL THREE coverage
     /// states share this one control (选文件… / 清除绑定 / 在访达中显示), and picking a file
@@ -48,6 +50,9 @@ public enum PanelFocusTarget: Sendable, Hashable {
     /// 的四种 configState 都无条件渲染，焦点序中紧跟全部 pack cards、排在 `.disconnect` 之前。
     /// 阶段 1 动作为在访达中显示 packs 目录，无写副作用，因此 in-flight 期间也恒可操作。
     case manageSounds
+    /// Opens the retained integrations window. This is the final non-destructive control in the
+    /// popover; host disconnect actions live only in that window's inspector.
+    case manageIntegrations
     /// 一条失败行上的「查看原因」（T17）—— 它是一个**可聚焦控件**，不是装饰：WCAG 2.1.1 要求
     /// 键盘用户也能展开那条原因，而这个仓库已经为「成功/拒绝之后只剩鼠标可用」记过一条 P3 账。
     case revealDetail
@@ -118,7 +123,8 @@ public enum PanelFocusScope: Sendable, Equatable {
     /// decision and the focus decision are the same switch, read twice.
     case operational(
         events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false,
-        hasMasterVolume: Bool = false, hasConfigFailureNotice: Bool = false)
+        hasMasterVolume: Bool = false, hasConfigFailureNotice: Bool = false,
+        hostSources: [HostID] = [])
 }
 
 /// The panel's Tab/Shift+Tab traversal order for its current ``PanelFocusScope`` —
@@ -146,9 +152,13 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         if hasSecondaryAction { order.append(.onboardingSecondaryAction) }
         return order
 
-    case .operational(let events, let packCardIDs, let hasDetailToggle, let hasMasterVolume,
-                      let hasConfigFailureNotice):
+    case .operational(
+        let events, let packCardIDs, let hasDetailToggle, let hasMasterVolume,
+        let hasConfigFailureNotice, let hostSources):
         var order: [PanelFocusTarget] = []
+        // The two source rows are always the first visual and keyboard controls. Connection
+        // failures alter their copy, never their presence or priority.
+        order.append(contentsOf: hostSources.map { .hostSource($0) })
         // 诚实失败卡（`.malformed`/`.unwritable`）渲染在面板**最顶端**（顶替四行事件、在画廊之上），
         // 它的「在访达中显示 config.json」按钮是那张卡上唯一的 bespoke 修复动作 —— 所以它 LEADS 焦点序
         // （焦点序跟随视觉序，a11y-architect FIX 5）。只有这两态渲染失败卡；`.operational`/`.needsPack`
@@ -168,12 +178,12 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         // `.malformed`/`.unwritable` 下会把首焦点指向一个不存在的控件）。
         if hasMasterVolume { order.append(.masterVolume) }
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
-        // T7 的真控件在全部四种 configState 下恒渲染，故这里也恒 append；排在 cards 之后、
-        // disconnect 之前，与屏幕从上到下的顺序一致。
+        // T7 的真控件在全部四种 configState 下恒渲染，故这里也恒 append。
         order.append(.manageSounds)
-        // 面板最底部：失败行（若有）在「断开连接」之上 —— 焦点序跟随视觉序。
+        // 旧版动作失败的详情槽仍由兼容调用方显式声明；新双宿主面板不再传这个 flag。
         if hasDetailToggle { order.append(.revealDetail) }
-        order.append(.disconnect)
+        // 面板最底部固定为非破坏性的详情窗入口。断开只在详情窗检查器末尾。
+        order.append(.manageIntegrations)
         return order
     }
 }
@@ -295,7 +305,8 @@ public func panelFirstFocusTarget(
             // `.manageSounds` operability arm 同理。这让 `.malformed`/`.unwritable` 这两态
             // 的 operational scope 永不返回 nil，即便断开动作在飞。
             return true
-        case .eventMute, .packCard, .masterVolume, .manageSounds:
+        case .hostSource, .eventMute, .packCard, .masterVolume, .manageSounds,
+            .manageIntegrations:
             return true
         }
     }
@@ -342,11 +353,12 @@ public func panelFirstFocusTarget(
 public func panelOpeningFocus(
     rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true,
     hasDetailToggle: Bool = false, hasMasterVolume: Bool = false,
-    hasConfigFailureNotice: Bool = false
+    hasConfigFailureNotice: Bool = false, hostSources: [HostID] = []
 ) -> PanelFocusTarget? {
     let scope = PanelFocusScope.operational(
         events: rows.map(\.event), packCardIDs: packCardIDs, hasDetailToggle: hasDetailToggle,
-        hasMasterVolume: hasMasterVolume, hasConfigFailureNotice: hasConfigFailureNotice)
+        hasMasterVolume: hasMasterVolume, hasConfigFailureNotice: hasConfigFailureNotice,
+        hostSources: hostSources)
     let nonOperableActionEvents = Set(rows.filter { !$0.eventActionOperable }.map(\.event))
     return panelFirstFocusTarget(
         scope, nonOperableActionEvents: nonOperableActionEvents, ctaOperable: ctaOperable)

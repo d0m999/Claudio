@@ -21,6 +21,8 @@ import UniformTypeIdentifiers
 public struct EventRowView: View {
     public let row: EventRow
     @ObservedObject private var importViewModel: EventRowImportViewModel
+    /// 由共享 `AudibilityMatrix` 纯投影的宿主覆盖；真实面板始终注入，State Gallery 可留空。
+    public let hostCoverage: EventHostCoveragePresentation?
 
     /// The row's UNDERLYING drop-zone mechanics (``EventRowImportViewModel/importViewModel``),
     /// observed SEPARATELY (`/ship` 评审 · 静默吞错修复): `@ObservedObject` on the outer
@@ -123,6 +125,7 @@ public struct EventRowView: View {
     public init(
         row: EventRow,
         importViewModel: EventRowImportViewModel,
+        hostCoverage: EventHostCoveragePresentation? = nil,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
         adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
         onPreview: @escaping () -> Void = {},
@@ -136,6 +139,7 @@ public struct EventRowView: View {
     ) {
         self.row = row
         self.importViewModel = importViewModel
+        self.hostCoverage = hostCoverage
         // The SAME object `importViewModel` already owns — observed a second time so this view
         // also re-renders on the IMPORT-side `.reject` surface (see `dropState`'s doc comment).
         _dropState = ObservedObject(wrappedValue: importViewModel.importViewModel)
@@ -230,7 +234,7 @@ public struct EventRowView: View {
             .accessibilityHidden(true)
     }
 
-    // MARK: - Event name + raw id
+    // MARK: - Event name + host coverage
 
     /// The row's NON-interactive summary node (a11y-architect FIX 1): carries the combined
     /// descriptive announcement (DESIGN.md「无障碍规格」: "事件行→「{事件名}，声音 {文件名}，
@@ -248,13 +252,11 @@ public struct EventRowView: View {
     /// accessibility tree, only the strings these functions return.
     private var identity: some View {
         VStack(alignment: .leading, spacing: 1) {
-            Text(eventDisplayName(row.event))
+            Text(row.event.displayName)
                 .font(.system(size: 13 * typeScale))
                 .foregroundColor(ClaudioColor.text(colorScheme))
-            Text(row.event.cliName)
-                .font(.system(size: 10 * typeScale, design: .monospaced))
-                // DESIGN.md 字体表：数据 / 事件 id = JetBrains Mono，**tabular-nums**。
-                .monospacedDigit()
+            Text(hostCoverage?.visibleText ?? row.event.cliName)
+                .font(.system(size: 10 * typeScale))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
         }
         .accessibilityElement(children: .combine)
@@ -322,7 +324,7 @@ public struct EventRowView: View {
         .saturation(enabled ? 1 : 0)
         .disabled(!enabled)
         .contentShape(Rectangle())
-        .accessibilityLabel("试听 \(eventDisplayName(row.event)) 的声音")
+        .accessibilityLabel("试听 \(row.event.displayName) 的声音")
     }
 
     // MARK: - File-name Menu (PLAN-SOUND-MANAGER.md §2.5/T2, DESIGN.md「行内文件名下拉」)
@@ -485,7 +487,7 @@ public struct EventRowView: View {
     /// ``PanelAnnouncementFacts/header`` supplies its half of a Core-decided sentence.
     private var fileNameMenuAccessibilityLabel: String {
         eventRowFileNameMenuAccessibilityLabel(
-            eventDisplayName: eventDisplayName(row.event), coverage: row.coverage)
+            eventDisplayName: row.event.displayName, coverage: row.coverage)
     }
 
     /// 「清除绑定」菜单项（present/broken 才渲染，见 ``fileNameMenu``）—— 经由
@@ -562,7 +564,7 @@ public struct EventRowView: View {
         .contentShape(Rectangle())
         .foregroundColor(
             row.enabled ? ClaudioColor.textSecondary(colorScheme) : ClaudioColor.clay(colorScheme))
-        .accessibilityLabel("\(eventDisplayName(row.event)) 声音")
+        .accessibilityLabel("\(row.event.displayName) 声音")
         .accessibilityValue(row.enabled ? "已启用" : "已静音")
         .accessibilityAddTraits(.isButton)
         // a11y-architect FIX 4: this row's `.eventMute` slot — `panelFocusOrder(_:)`'s SAME
@@ -623,8 +625,8 @@ public struct EventRowView: View {
     // 现在它们真的是同一个东西：都渲染 ``FailureRow``（`PanelRows.swift`）。
 
     /// One human Chinese sentence per ``ManifestBindError`` case — presentation copy, so it lives
-    /// HERE rather than in `ClaudioGUICore` (exactly like ``eventDisplayName(_:)`` below, and
-    /// unlike `DropRejectionReason.message`, which `ClaudioGUICore` already owns). Exhaustive, no
+    /// HERE rather than in `ClaudioGUICore` (unlike `DropRejectionReason.message`, which
+    /// `ClaudioGUICore` already owns). Exhaustive, no
     /// `default:` — a new bind-error case fails this file to compile until it, too, gets told to
     /// the user instead of being swallowed.
     private func bindErrorMessage(_ error: ManifestBindError) -> String {
@@ -652,22 +654,11 @@ public struct EventRowView: View {
     // {已启用/已静音}」")
 
     private var accessibilityLabel: String {
-        eventRowIdentityAccessibilityLabel(
-            eventDisplayName: eventDisplayName(row.event), coverage: row.coverage,
+        let rowLabel = eventRowIdentityAccessibilityLabel(
+            eventDisplayName: row.event.displayName,
+            coverage: row.coverage,
             enabled: row.enabled)
-    }
-}
-
-/// The product-language Chinese display name for each event (ASCII 线框: "干完了 (Stop)" /
-/// "中断了 (StopFailure)" / "要你确认 (Notification)" / "子任务完成 (SubagentStop)") — kept
-/// here (not in `ClaudioGUICore`) since it is static, deterministic presentation copy with
-/// no state decision behind it, mirroring how `OnboardingView.iconName(for:)` stays local to
-/// its own view file rather than round-tripping through the Foundation-only core module.
-func eventDisplayName(_ event: Event) -> String {
-    switch event {
-    case .stop: "干完了"
-    case .stopFailure: "中断了"
-    case .notification: "要你确认"
-    case .subagentStop: "子任务完成"
+        guard let hostCoverage else { return rowLabel }
+        return "\(rowLabel)，\(hostCoverage.accessibilityLabel)"
     }
 }
