@@ -123,6 +123,8 @@ private func integrationWindowContent(
         })
     return IntegrationsWindowContent(
         sourceRows: sourceRows,
-        matrix: hostCapabilityMatrixPresentation(from: state.matrix),
+        matrix: hostCapabilityMatrixPresentation(
+            from: state.matrix,
+            mutedReason: state.masterVolumeIsZero ? .masterVolumeZero : .eventDisabled),
         inspectorFacts: facts)
 }

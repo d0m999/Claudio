@@ -101,11 +101,14 @@ func runSoundPacksWindowAccessibilitySuites() {
         coordinator.requestInitialFocus()
         expect(coordinator.requestRevision == 2, "隐藏后复用窗口重开也必须产生新请求")
         expect(coordinator.requestedRoute == .overview, "普通重开必须回到显式 overview 路由")
-        coordinator.requestRoute(.editEvent(packID: "pack-b", event: .stop))
+        let repeatedRoute = SoundPacksWindowRoute.editEvent(
+            packID: "pack-a", event: .notification)
+        coordinator.requestRoute(repeatedRoute)
+        coordinator.requestRoute(repeatedRoute)
         expect(
-            coordinator.requestRevision == 3
-                && coordinator.requestedRoute == .editEvent(packID: "pack-b", event: .stop),
-            "已显示窗口接收新事件时必须保留窗口并只推进路由请求")
+            coordinator.requestRevision == 4
+                && coordinator.requestedRoute == repeatedRoute,
+            "相同 editEvent 重复请求也必须推进独立代次，不能依赖 route 值变化")
     }
 
     suite("SoundPacksWindow a11y：status revision 只在 NSAccessibility.post 真成功后消费") {
@@ -436,6 +439,10 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && view.contains("soundPacksWindowFirstFocusTarget(focusScope)"),
             "首焦点与状态变化后的焦点修复必须消费同一套窗口纯模型")
         expect(
+            view.contains(".onChange(of: handledFocusRequestRevision)")
+                && !view.contains(".onChange(of: requestedRoute)"),
+            "事件滚动必须由单调请求代次驱动，相同 editEvent 重开也要重新定位")
+        expect(
             view.contains("@AppStorage(ClaudioInterfaceTextSize.defaultsKey)")
                 && view.contains("interfaceTextSize.dynamicTypeSize")
                 && view.contains("layoutAdaptation.detailMinimumWidth")
@@ -453,7 +460,8 @@ func runSoundPacksWindowAccessibilitySuites() {
 
         guard
             let responderIndex = controller.range(of: "makeFirstResponder")?.lowerBound,
-            let focusIndex = controller.range(of: "requestInitialFocus(route: route)")?.lowerBound
+            let focusIndex = controller.range(of: "requestInitialFocus(route: effectiveRoute)")?
+                .lowerBound
         else {
             expect(false, "窗口展示必须先进入 responder chain，再请求 SwiftUI 首焦点")
             return

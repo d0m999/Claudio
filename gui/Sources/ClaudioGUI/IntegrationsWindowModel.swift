@@ -395,7 +395,7 @@ final class IntegrationsWindowModel: ObservableObject {
         case .redetect:
             await perform(.redetect)
             return
-        case .explainUnsupported, .none:
+        case .explainMasterVolumeZero, .explainUnsupported, .none:
             return
         case .unmute(let host, let event), .configureSound(let host, let event):
             guard !isPerformingAction, let recoveryHandler else { return }

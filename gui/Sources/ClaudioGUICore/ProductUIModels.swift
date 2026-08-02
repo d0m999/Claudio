@@ -134,6 +134,7 @@ public enum SoundPacksWindowRoute: Sendable, Equatable, Hashable {
 /// 能力矩阵当前格子的首要恢复意图。它只描述产品动作，不执行 host/config I/O。
 public enum IntegrationsRecoveryAction: Sendable, Equatable, Hashable {
     case unmute(host: HostID, event: Event)
+    case explainMasterVolumeZero(host: HostID, event: Event)
     case configureSound(host: HostID, event: Event)
     case connect(HostID)
     case upgrade(HostID)
@@ -150,7 +151,7 @@ public enum IntegrationsRecoveryAction: Sendable, Equatable, Hashable {
         case .upgrade: "升级连接"
         case .repair(let host): "修复 \(host.displayName) 连接"
         case .redetect: "重新检测"
-        case .explainUnsupported, .none: nil
+        case .explainMasterVolumeZero, .explainUnsupported, .none: nil
         }
     }
 }
@@ -163,7 +164,9 @@ public func integrationsRecoveryAction(
     case .audible:
         return .none
     case .muted:
-        return .unmute(host: cell.host, event: cell.event)
+        return cell.muteReason == .masterVolumeZero
+            ? .explainMasterVolumeZero(host: cell.host, event: cell.event)
+            : .unmute(host: cell.host, event: cell.event)
     case .missingSound:
         return .configureSound(host: cell.host, event: cell.event)
     case .notConnected:

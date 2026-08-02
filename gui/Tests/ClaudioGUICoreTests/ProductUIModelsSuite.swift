@@ -85,11 +85,15 @@ func runProductUIModelsSuites() {
     suite("集成恢复动作：每个能力状态都有唯一产品意图") {
         let host = HostID.claudeCode
         let event = Event.stop
-        func cell(_ state: AudibilityCellState) -> HostCapabilityCellPresentation {
+        func cell(
+            _ state: AudibilityCellState,
+            muteReason: HostCapabilityMuteReason? = nil
+        ) -> HostCapabilityCellPresentation {
             HostCapabilityCellPresentation(
                 host: host,
                 event: event,
                 state: state,
+                muteReason: muteReason,
                 nativeEventText: HostCapabilityCatalog.binding(host: host, event: event)?.nativeEvent)
         }
         expect(
@@ -98,7 +102,16 @@ func runProductUIModelsSuites() {
         expect(
             integrationsRecoveryAction(for: cell(.muted), hostStatus: .ready)
                 == .unmute(host: host, event: event),
-            "静音格首动作必须取消静音")
+            "逐事件静音格首动作必须取消静音")
+        let masterVolumeMutedCell = cell(.muted, muteReason: .masterVolumeZero)
+        expect(
+            masterVolumeMutedCell.statusText == "主音量为零"
+                && masterVolumeMutedCell.accessibilityLabel.contains("主音量为零"),
+            "总音量为零必须进入可见文案与无障碍名称，不能继续伪装逐事件静音")
+        expect(
+            integrationsRecoveryAction(for: masterVolumeMutedCell, hostStatus: .ready)
+                == .explainMasterVolumeZero(host: host, event: event),
+            "总音量为零只能解释正确恢复路径，不能派生只写 enabled 的虚假 unmute")
         expect(
             integrationsRecoveryAction(for: cell(.missingSound), hostStatus: .ready)
                 == .configureSound(host: host, event: event),
@@ -130,12 +143,13 @@ func runProductUIModelsSuites() {
         expect(
             [
                 .unmute(host: host, event: event),
+                .explainMasterVolumeZero(host: host, event: event),
                 .configureSound(host: host, event: event),
                 .connect(host), .upgrade(host), .repair(host), .redetect(host),
                 .explainUnsupported(host: host, event: event), .none,
             ].allSatisfy { (action: IntegrationsRecoveryAction) in
                 switch action {
-                case .none, .explainUnsupported: action.title == nil
+                case .none, .explainMasterVolumeZero, .explainUnsupported: action.title == nil
                 default: action.title?.isEmpty == false
                 }
             },

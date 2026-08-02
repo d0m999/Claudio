@@ -28,7 +28,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     /// on every close before any activation attempt, so a retained/reopened window cannot hand
     /// focus to a stale app twice.
     private var handbackApplication: NSRunningApplication?
-    private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
+    private var focusRestoration: (@MainActor (NSRunningApplication?) -> Bool)?
     private var isClosingWindow = false
     private var externalActivationCancellable: AnyCancellable?
     private var selectionAnnouncementCancellable: AnyCancellable?
@@ -76,7 +76,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     public func showWindow(
         route: SoundPacksWindowRoute = .overview,
         returnFocusTo application: NSRunningApplication?,
-        onClose: (@MainActor (NSRunningApplication?) -> Void)? = nil
+        onClose: (@MainActor (NSRunningApplication?) -> Bool)? = nil
     ) {
         isClosingWindow = false
         focusRestoration = onClose
@@ -94,22 +94,25 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         {
             model.reload(followActivePack: false)
         }
+        let effectiveRoute: SoundPacksWindowRoute
         if case .editEvent(let packID, _) = route {
-            model.selectPackForInspection(packID)
+            effectiveRoute = model.selectPackForInspection(packID) ? route : .overview
+        } else {
+            effectiveRoute = route
         }
         NSApp.activate(ignoringOtherApps: true)
         isPresentingWindow = true
         presentedWindow.makeKeyAndOrderFront(nil)
         if shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible) {
             presentedWindow.makeFirstResponder(presentedWindow.contentViewController?.view)
-            focusCoordinator.requestInitialFocus(route: route)
+            focusCoordinator.requestInitialFocus(route: effectiveRoute)
             SoundPacksWindowAccessibilityBridge.post(
                 .windowOpened,
                 facts: accessibilityFacts(),
                 window: presentedWindow)
         }
-        if wasVisible, route != .overview {
-            focusCoordinator.requestRoute(route)
+        if wasVisible, effectiveRoute != .overview {
+            focusCoordinator.requestRoute(effectiveRoute)
         }
         announceLatestWindowStatusIfNeeded(in: presentedWindow)
         isPresentingWindow = false
@@ -125,6 +128,11 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     }
 
     public func windowWillClose(_ notification: Notification) {
+        guard
+            let closingWindow = notification.object as? NSWindow,
+            closingWindow === window
+        else { return }
+
         isClosingWindow = true
         let previous = handbackApplication
         handbackApplication = nil
@@ -134,17 +142,18 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         if let restoration {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    restoration(previous)
+                    guard !restoration(previous) else { return }
+                    self.completeCloseHandoff(to: previous)
                 }
             }
             return
         }
 
-        guard
-            let closingWindow = notification.object as? NSWindow,
-            closingWindow === window,
-            NSApp.isActive
-        else { return }
+        completeCloseHandoff(to: previous)
+    }
+
+    private func completeCloseHandoff(to previous: NSRunningApplication?) {
+        guard NSApp.isActive else { return }
 
         guard
             let previous,

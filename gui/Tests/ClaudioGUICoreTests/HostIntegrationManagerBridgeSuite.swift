@@ -298,6 +298,14 @@ func runHostIntegrationManagerBridgeSuites() async {
                 state.matrix.cell(host: .claudeCode, event: .stop)?.state == .muted
                     && state.matrix.cell(host: .codex, event: .stop)?.state == .muted,
                 "master_volume == 0 必须把所有 supported 格投影为 muted")
+            expect(state.masterVolumeIsZero, "bridge 必须保留 muted 来自总音量为零的原因")
+            let projected = hostCapabilityMatrixPresentation(
+                from: state.matrix,
+                mutedReason: state.masterVolumeIsZero ? .masterVolumeZero : .eventDisabled)
+            expect(
+                projected.cell(host: .claudeCode, event: .stop)?.muteReason
+                    == .masterVolumeZero,
+                "presentation 格必须保留总音量原因，恢复层不得再猜成逐事件静音")
             expect(
                 state.matrix.cell(host: .codex, event: .stopFailure)?.state == .unsupported,
                 "全局静音不得把 Codex 不支持的 StopFailure 误画成 muted")

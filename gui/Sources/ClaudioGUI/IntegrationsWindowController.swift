@@ -64,10 +64,12 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
         focusCoordinator.requestInitialFocus()
     }
 
-    func restoreKeyWindow() {
-        guard let window, window.isVisible else { return }
+    @discardableResult
+    func restoreKeyWindow() -> Bool {
+        guard let window, window.isVisible else { return false }
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+        return true
     }
 
     func windowWillClose(_ notification: Notification) {

@@ -6,10 +6,16 @@ import Foundation
 public struct HostIntegrationPresentationState: Sendable, Equatable {
     public let snapshots: [HostIntegrationSnapshot]
     public let matrix: AudibilityMatrix
+    public let masterVolumeIsZero: Bool
 
-    public init(snapshots: [HostIntegrationSnapshot], matrix: AudibilityMatrix) {
+    public init(
+        snapshots: [HostIntegrationSnapshot],
+        matrix: AudibilityMatrix,
+        masterVolumeIsZero: Bool = false
+    ) {
         self.snapshots = snapshots
         self.matrix = matrix
+        self.masterVolumeIsZero = masterVolumeIsZero
     }
 }
 
@@ -135,7 +141,10 @@ public actor HostIntegrationManagerBridge {
             capabilities: capabilities,
             soundCoverage: coverage,
             enabledEvents: enabled)
-        return HostIntegrationPresentationState(snapshots: snapshots, matrix: matrix)
+        return HostIntegrationPresentationState(
+            snapshots: snapshots,
+            matrix: matrix,
+            masterVolumeIsZero: !masterVolumeAllowsAudio)
     }
 }
 

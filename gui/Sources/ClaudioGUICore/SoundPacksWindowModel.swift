@@ -538,9 +538,10 @@ public final class SoundPacksWindowModel: ObservableObject {
 #endif
 
     /// 侧栏只改变窗口正在查看的包，不写 config，也不改变面板当前包。
-    public func selectPackForInspection(_ packID: String) {
-        guard packCards.contains(where: { $0.id == packID }) else { return }
-        guard selectedPackID != packID else { return }
+    @discardableResult
+    public func selectPackForInspection(_ packID: String) -> Bool {
+        guard packCards.contains(where: { $0.id == packID }) else { return false }
+        guard selectedPackID != packID else { return true }
         inspectionSelectionRevision += 1
         selectedPackID = packID
         selectedEventRows = packCoverage(
@@ -555,6 +556,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             packForkNotice = nil
             if packForkActionError == nil { clearWindowStatus(.packFork) }
         }
+        return true
     }
 
     /// The controller calls this from the `selectedPackID` publisher before posting a normal

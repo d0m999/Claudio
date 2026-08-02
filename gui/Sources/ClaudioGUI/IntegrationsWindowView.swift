@@ -455,6 +455,12 @@ struct IntegrationsWindowView: View {
         switch primaryRecoveryAction {
         case .none:
             EmptyView()
+        case .explainMasterVolumeZero:
+            Text("主音量为零；请在菜单栏面板中调高主音量后再试。")
+                .font(ClaudioTheme.font(.secondary))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("integrations.recovery.master-volume-zero")
         case .explainUnsupported(_, let event):
             Text("\(event.displayName) 不是这个宿主支持的能力；这不是连接错误，无需修复。")
                 .font(ClaudioTheme.font(.secondary))
@@ -647,6 +653,7 @@ struct IntegrationsWindowView: View {
     private func recoveryAccessibilityHint(_ action: IntegrationsRecoveryAction) -> String {
         switch action {
         case .unmute: "只取消当前事件静音；不会改变声音映射"
+        case .explainMasterVolumeZero: "请在菜单栏面板中调高主音量"
         case .configureSound: "打开声音包窗口并定位到当前事件"
         case .connect: "连接当前宿主"
         case .upgrade: "把旧版连接升级到当前格式"

@@ -46,6 +46,11 @@ func runIntegrationsWindowWiringSuites() {
             controller.contains("focusCoordinator.requestInitialFocus()"),
             "首次展示和隐藏后重开必须向窗口自己的 FocusState 发新请求")
         expect(
+            controller.contains("func restoreKeyWindow() -> Bool")
+                && controller.contains("guard let window, window.isVisible else { return false }")
+                && controller.contains("return true"),
+            "跨窗口恢复必须只在集成窗口仍可见时报告成功")
+        expect(
             controller.contains("width: 840, height: 620")
                 && controller.contains("width: 640, height: 520"),
             "集成窗口默认必须是 840×620，且最小保持 640×520")
@@ -366,7 +371,8 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             store.contains("HostIntegrationPresentationStore: ObservableObject")
                 && store.contains("hostSourceRowPresentations(from: state.matrix)")
-                && store.contains("hostCapabilityMatrixPresentation(from: state.matrix)"),
+                && store.contains("mutedReason: state.masterVolumeIsZero")
+                && store.contains("? .masterVolumeZero : .eventDisabled"),
             "popover 与 window 必须从同一注入矩阵投影")
         expect(
             panel.contains("@ObservedObject private var hostIntegrations")
@@ -433,6 +439,30 @@ func runIntegrationsWindowWiringSuites() {
             panel.contains("panelModel.toggleMute(row.event)")
                 && panel.components(separatedBy: "onAudibilityInputsChanged()").count >= 3,
             "静音的 configOnly 路径也必须显式更新矩阵")
+        expect(
+            menu.contains("case .unmute(_, let event):")
+                && menu.contains("integrationsMuteController.setEnabled(event, enabled: true)")
+                && menu.contains(
+                    "soundPacksRefreshCoordinator?.completePanelConfigChange(.changed)"),
+            "集成取消静音成功后必须推进共享 config-only revision，让保留窗口同步 enabled")
+    }
+
+    suite("集成→声音包关闭恢复：目标窗口消失时回落普通关闭交接") {
+        guard
+            let menu = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
+            let soundPacks = integrationsSource(
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift")
+        else {
+            expect(false, "缺少 MenuBarController/SoundPacksWindowController")
+            return
+        }
+        expect(
+            menu.contains("self?.integrationsWindowController.restoreKeyWindow() ?? false"),
+            "关闭声音包窗口时必须把集成窗口恢复的真实 Bool 交给 owner")
+        expect(
+            soundPacks.contains("guard !restoration(previous) else { return }")
+                && soundPacks.contains("self.completeCloseHandoff(to: previous)"),
+            "恢复返回 false 时不得无条件 return，必须继续 handback 或 deactivate")
     }
 
     suite("检查器证据：真实 snapshot receipt 与两个实际配置路径由共享 store 投影") {

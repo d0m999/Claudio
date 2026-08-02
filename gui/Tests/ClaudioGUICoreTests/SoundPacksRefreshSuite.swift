@@ -263,6 +263,48 @@ func runSoundPacksRefreshSuites() async {
         expect(coordinator.panelReloadRevision == 0, "panel 自己已重读，不得反向再刷一次")
     }
 
+    suite("集成取消静音：config-only revision 让保留的声音包窗口重读 enabled") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let configLock = root.appendingPathComponent("config.lock")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "events": { "notification": false } }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "notification": "notification.mp3" } }"#,
+                to: packs.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture(
+                "audio",
+                to: packs.appendingPathComponent("pack-a/notification.mp3"))
+            let coordinator = SoundPacksRefreshCoordinator()
+            let window = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: configLock,
+                environment: soundPacksEnvironment(packs),
+                refreshCoordinator: coordinator)
+            let muteController = EventMuteController(
+                configFile: configFile,
+                lockFile: configLock)
+            expect(
+                window.selectedEventRows.first(where: { $0.event == .notification })?.enabled
+                    == false,
+                "前提：窗口初始必须读到 notification 已静音")
+
+            expect(
+                muteController.setEnabled(.notification, enabled: true),
+                "集成恢复 seam 必须成功写入逐事件 enabled")
+            coordinator.completePanelConfigChange(.changed)
+
+            expect(coordinator.windowContentReloadRevision == 1, "成功写必须发布一次窗口内容刷新")
+            expect(
+                window.selectedEventRows.first(where: { $0.event == .notification })?.enabled
+                    == true,
+                "保留窗口必须立即重读 config，VoiceOver 不得继续播报已静音")
+            expect(window.selectedPackID == "pack-a", "config-only 刷新不得改变检查中的包")
+        }
+    }
+
     suite("窗口写后：configOnly 负控保持 stale，full effect 重算真实 PanelConfigController.packCards") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -1126,6 +1168,32 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
+    suite("SoundPacksWindowModel route：缺失包明确拒绝且不污染当前检查上下文") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
+                to: packs.appendingPathComponent("pack-a/manifest.json"))
+            writeFixture("audio", to: packs.appendingPathComponent("pack-a/stop.mp3"))
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: soundPacksEnvironment(packs),
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            let originalRows = model.selectedEventRows
+
+            expect(
+                !model.selectPackForInspection("deleted-pack"),
+                "路由目标未进入 retained model 时必须明确返回失败")
+            expect(model.selectedPackID == "pack-a", "失败选择不得改到其他包")
+            expect(model.selectedEventRows == originalRows, "失败选择不得重算成其他包的同名事件")
+        }
+    }
+
     suite("SoundPacksWindowModel use：only explicit action changes selected_pack and preserves stars") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -1871,6 +1939,12 @@ func runSoundPacksRefreshSuites() async {
             controller.contains("shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible)"),
             "首焦点与 windowOpened 必须共用真实 hidden→visible 判定")
         expect(
+            controller.contains(
+                "effectiveRoute = model.selectPackForInspection(packID) ? route : .overview")
+                && controller.contains("requestInitialFocus(route: effectiveRoute)")
+                && controller.contains("focusCoordinator.requestRoute(effectiveRoute)"),
+            "editEvent 必须先确认目标包存在；缺失包只能降级 overview，不能把事件转给当前其他包")
+        expect(
             controller.contains("window.title = \"Claudio · 声音包\""),
             "后台标准窗口标题必须保留 Claudio 品牌锚点")
         expect(
@@ -1894,11 +1968,19 @@ func runSoundPacksRefreshSuites() async {
             closeBody.contains("handbackApplication = nil"),
             "windowWillClose 必须先清 handback 债务，关闭/重开不得复用陈旧 app")
         expect(
-            closeBody.contains("NSApp.isActive"),
+            controller.contains(
+                "private var focusRestoration: (@MainActor (NSRunningApplication?) -> Bool)?")
+                && closeBody.contains("guard !restoration(previous) else { return }")
+                && closeBody.contains("self.completeCloseHandoff(to: previous)")
+                && controller.contains("private func completeCloseHandoff("),
+            "恢复闭包必须报告真实成功；目标窗口消失时仍要继续普通 handback/deactivate")
+        expect(
+            controller.contains("private func completeCloseHandoff(")
+                && controller.contains("guard NSApp.isActive else { return }"),
             "用户已切到别处时，窗口关闭不得把旧 app 抢回前台")
         expect(
-            closeBody.contains("NSApp.yieldActivation(to: previous)")
-                && closeBody.contains("NSApp.deactivate()"),
+            controller.contains("NSApp.yieldActivation(to: previous)")
+                && controller.contains("NSApp.deactivate()"),
             "windowWillClose 必须覆盖 macOS 14+ cooperative handback 与旧系统 deactivate")
         expect(
             controller.contains("NSWorkspace.didActivateApplicationNotification")

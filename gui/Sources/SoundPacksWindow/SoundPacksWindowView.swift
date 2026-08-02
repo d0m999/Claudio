@@ -83,8 +83,8 @@ struct SoundPacksWindowView: View {
         .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
         .onReceive(focusCoordinator.$requestRevision) { revision in
             guard revision > handledFocusRequestRevision else { return }
-            handledFocusRequestRevision = revision
             requestedRoute = focusCoordinator.requestedRoute
+            handledFocusRequestRevision = revision
             applyInitialFocus()
         }
         .onChange(of: model.packCards.map(\.id)) { _ in
@@ -322,8 +322,8 @@ struct SoundPacksWindowView: View {
                             proxy.scrollTo("detail-top", anchor: .top)
                         }
                     }
-                    .onChange(of: requestedRoute) { route in
-                        guard case .editEvent(_, let event) = route else { return }
+                    .onChange(of: handledFocusRequestRevision) { _ in
+                        guard case .editEvent(_, let event) = requestedRoute else { return }
                         DispatchQueue.main.async {
                             withAnimation(.easeOut(duration: 0.14)) {
                                 proxy.scrollTo("event-\(event.rawValue)", anchor: .center)

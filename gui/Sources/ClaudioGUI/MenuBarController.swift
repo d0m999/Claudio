@@ -136,13 +136,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                     feedbackMessage: outcome.feedbackMessage)
             },
             recoveryHandler: IntegrationsWindowRecoveryHandler {
-                [weak actionRouter, weak hostIntegrations] action in
+                [weak actionRouter, weak hostIntegrations, weak soundPacksRefreshCoordinator]
+                action in
                 guard let hostIntegrations else {
                     throw HostIntegrationPresentationError.storeUnavailable
                 }
                 switch action {
                 case .unmute(_, let event):
                     if integrationsMuteController.setEnabled(event, enabled: true) {
+                        soundPacksRefreshCoordinator?.completePanelConfigChange(.changed)
                         let state = try await integrationMatrixProvider()
                         let content = actionRouter?.publishHostIntegrationState(state)
                             ?? hostIntegrations.replace(state: state)
@@ -161,7 +163,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                         content: hostIntegrations.content,
                         feedbackKind: .information,
                         feedbackMessage: "已打开「\(event.displayName)」声音映射")
-                case .connect, .upgrade, .repair, .redetect, .explainUnsupported, .none:
+                case .connect, .upgrade, .repair, .redetect, .explainMasterVolumeZero,
+                    .explainUnsupported, .none:
                     throw HostIntegrationPresentationError.recoveryFailed("当前状态没有可执行的恢复动作。")
                 }
             },
@@ -382,7 +385,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             ) { [weak self] latestHandbackApplication in
                 self?.restorePanelFocus(
                     to: target,
-                    latestHandbackApplication: latestHandbackApplication)
+                    latestHandbackApplication: latestHandbackApplication) ?? false
             }
             return
         }
@@ -409,7 +412,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         guard popover.isShown else {
             pendingIntegrationsWindowFocusTarget = nil
             integrationsWindowController.showWindow { [weak self] latestHandbackApplication in
-                self?.restorePanelFocus(
+                _ = self?.restorePanelFocus(
                     to: target, latestHandbackApplication: latestHandbackApplication)
             }
             return
@@ -428,14 +431,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             route: route,
             returnFocusTo: nil
         ) { [weak self] _ in
-            self?.integrationsWindowController.restoreKeyWindow()
+            self?.integrationsWindowController.restoreKeyWindow() ?? false
         }
     }
 
     private func restorePanelFocus(
         to target: PanelFocusTarget,
         latestHandbackApplication: NSRunningApplication?
-    ) {
+    ) -> Bool {
         // The integrations window may have remained visible while the user visited another app.
         // Preserve the original debt when no such activation occurred; otherwise the latest app
         // becomes the recipient after the restored popover eventually closes.
@@ -444,6 +447,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         }
         pendingRestoredPanelFocusTarget = target
         showPopover()
+        return popover.isShown
     }
 
     // MARK: - NSPopoverDelegate — focus owner (ENGINEERING.md「无障碍规格」, a11y-architect
@@ -495,7 +499,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         pendingIntegrationsWindowFocusTarget = nil
         if let integrationsFocusTarget {
             integrationsWindowController.showWindow { [weak self] latestHandbackApplication in
-                self?.restorePanelFocus(
+                _ = self?.restorePanelFocus(
                     to: integrationsFocusTarget,
                     latestHandbackApplication: latestHandbackApplication)
             }
@@ -514,7 +518,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             ) { [weak self] latestHandbackApplication in
                 self?.restorePanelFocus(
                     to: soundPacksPresentation.focusTarget,
-                    latestHandbackApplication: latestHandbackApplication)
+                    latestHandbackApplication: latestHandbackApplication) ?? false
             }
             return
         }

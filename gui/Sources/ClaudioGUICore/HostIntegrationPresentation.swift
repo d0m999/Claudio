@@ -102,27 +102,44 @@ private func hostSourceRowPresentation(
 
 // MARK: - 4 × 2 可听能力矩阵
 
+/// `.muted` 格仍需保留它由哪一条独立音量轴造成，否则恢复动作会把总音量为零
+/// 误当成逐事件静音，并在没有改变可听事实时返回成功。
+public enum HostCapabilityMuteReason: Sendable, Equatable, Hashable {
+    case eventDisabled
+    case masterVolumeZero
+}
+
 /// 一个矩阵格的可见与无障碍文案。所有内容均投影自 `AudibilityCell`，不在 GUI 重建能力映射。
 public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable {
     public var id: String { "\(host.rawValue):\(event.rawValue)" }
     public let host: HostID
     public let event: Event
     public let state: AudibilityCellState
+    public let muteReason: HostCapabilityMuteReason?
     public let nativeEventText: String?
     public let qualificationText: String?
     public let statusText: String
     public let detailText: String?
     public let accessibilityLabel: String
 
-    public init(cell: AudibilityCell) {
+    public init(
+        cell: AudibilityCell,
+        muteReason: HostCapabilityMuteReason? = nil
+    ) {
+        let resolvedMuteReason = cell.state == .muted
+            ? (muteReason ?? .eventDisabled)
+            : nil
         host = cell.host
         event = cell.event
         state = cell.state
+        self.muteReason = resolvedMuteReason
         nativeEventText = cell.binding.nativeEvent
         qualificationText = cell.binding.qualification
-        statusText = hostCapabilityStatusText(cell.state)
+        statusText = hostCapabilityStatusText(cell.state, muteReason: resolvedMuteReason)
         detailText = cell.detail
-        accessibilityLabel = cell.accessibilityLabel
+        accessibilityLabel = resolvedMuteReason == .masterVolumeZero
+            ? "\(cell.accessibilityLabel)，原因：主音量为零"
+            : cell.accessibilityLabel
     }
 
     /// Preview/test initializer for presentation-only state galleries and pure recovery tests.
@@ -131,21 +148,28 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         host: HostID,
         event: Event,
         state: AudibilityCellState,
+        muteReason: HostCapabilityMuteReason? = nil,
         nativeEventText: String? = nil,
         qualificationText: String? = nil,
         statusText: String? = nil,
         detailText: String? = nil,
         accessibilityLabel: String? = nil
     ) {
+        let resolvedMuteReason = state == .muted
+            ? (muteReason ?? .eventDisabled)
+            : nil
         self.host = host
         self.event = event
         self.state = state
+        self.muteReason = resolvedMuteReason
         self.nativeEventText = nativeEventText
         self.qualificationText = qualificationText
-        self.statusText = statusText ?? hostCapabilityStatusText(state)
+        self.statusText = statusText
+            ?? hostCapabilityStatusText(state, muteReason: resolvedMuteReason)
         self.detailText = detailText
         self.accessibilityLabel = accessibilityLabel
-            ?? "\(host.displayName)，\(event.displayName)，\(hostCapabilityStatusText(state))"
+            ?? "\(host.displayName)，\(event.displayName)，"
+                + "\(hostCapabilityStatusText(state, muteReason: resolvedMuteReason))"
     }
 }
 
@@ -188,7 +212,8 @@ public struct HostCapabilityMatrixPresentation: Sendable, Equatable {
 /// 只投影 Core 已组合好的格子。若 adapter 删除一个映射，Core 的 fail-closed 格会原样进入 UI；
 /// 此处不会按宿主或事件补写任何原生事件名。
 public func hostCapabilityMatrixPresentation(
-    from matrix: AudibilityMatrix
+    from matrix: AudibilityMatrix,
+    mutedReason: HostCapabilityMuteReason = .eventDisabled
 ) -> HostCapabilityMatrixPresentation {
     HostCapabilityMatrixPresentation(
         hostColumns: HostID.allCases,
@@ -198,7 +223,9 @@ public func hostCapabilityMatrixPresentation(
                 title: row.event.displayName,
                 cells: HostID.allCases.compactMap { host in
                     row.cells.first(where: { $0.host == host }).map { cell in
-                        HostCapabilityCellPresentation(cell: cell)
+                        HostCapabilityCellPresentation(
+                            cell: cell,
+                            muteReason: cell.state == .muted ? mutedReason : nil)
                     }
                 })
         })
@@ -314,10 +341,13 @@ public func hostHookPlaybackResultDisplayName(
     }
 }
 
-private func hostCapabilityStatusText(_ state: AudibilityCellState) -> String {
+private func hostCapabilityStatusText(
+    _ state: AudibilityCellState,
+    muteReason: HostCapabilityMuteReason? = nil
+) -> String {
     switch state {
     case .audible: "可听"
-    case .muted: "已静音"
+    case .muted: muteReason == .masterVolumeZero ? "主音量为零" : "已静音"
     case .missingSound: "声音缺失"
     case .notConnected: "未连接"
     case .awaitingActivation: "等待确认"
