@@ -124,6 +124,29 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         detailText = cell.detail
         accessibilityLabel = cell.accessibilityLabel
     }
+
+    /// Preview/test initializer for presentation-only state galleries and pure recovery tests.
+    /// Production still uses ``init(cell:)`` so adapter truth remains the only live source.
+    public init(
+        host: HostID,
+        event: Event,
+        state: AudibilityCellState,
+        nativeEventText: String? = nil,
+        qualificationText: String? = nil,
+        statusText: String? = nil,
+        detailText: String? = nil,
+        accessibilityLabel: String? = nil
+    ) {
+        self.host = host
+        self.event = event
+        self.state = state
+        self.nativeEventText = nativeEventText
+        self.qualificationText = qualificationText
+        self.statusText = statusText ?? hostCapabilityStatusText(state)
+        self.detailText = detailText
+        self.accessibilityLabel = accessibilityLabel
+            ?? "\(host.displayName)，\(event.displayName)，\(hostCapabilityStatusText(state))"
+    }
 }
 
 /// 同一个声音语义下的两条宿主子行。最大 Dynamic Type 直接把该值渲染成一张事件卡。
@@ -219,16 +242,20 @@ public func eventHostCoveragePresentation(
     }
 
     let visibleText: String
-    switch hostNames.count {
+    switch supportedCells.count {
     case 0:
         visibleText = "暂无宿主事件"
     case 1:
-        visibleText = "仅 \(hostNames[0])"
+        let cell = supportedCells[0]
+        if let qualification = cell.qualificationText {
+            visibleText = "\(cell.host.displayName) \(qualification)"
+        } else {
+            visibleText = "仅 \(cell.host.displayName)"
+        }
     default:
-        let names = hostNames.joined(separator: " · ")
         visibleText = qualificationTexts.isEmpty
-            ? names
-            : "\(names)（\(qualificationTexts.joined(separator: "；"))）"
+            ? "两个来源"
+            : "两个来源 · \(qualificationTexts.joined(separator: "；"))"
     }
 
     let accessibilityParts = hostNames + qualificationTexts
@@ -397,6 +424,8 @@ public func integrationsInspectorActionTitle(
 public enum IntegrationsWindowFocusTarget: Sendable, Hashable {
     case hostCard(HostID)
     case capabilityCell(host: HostID, event: Event)
+    case recoveryAction(IntegrationsRecoveryAction)
+    case copyConfigurationPath(HostID)
     case dismissFeedback(revision: UInt64)
     case inspectorAction(IntegrationsWindowInspectorAction)
 }
@@ -406,20 +435,26 @@ public enum IntegrationsWindowFocusTarget: Sendable, Hashable {
 public struct IntegrationsWindowFocusScope: Sendable, Equatable {
     public let matrix: HostCapabilityMatrixPresentation
     public let inspectorActions: [IntegrationsWindowInspectorAction]
+    public let recoveryAction: IntegrationsRecoveryAction
+    public let configurationPathHost: HostID?
     public let feedbackRevision: UInt64?
 
     public init(
         matrix: HostCapabilityMatrixPresentation,
         inspectorActions: [IntegrationsWindowInspectorAction],
+        recoveryAction: IntegrationsRecoveryAction = .none,
+        configurationPathHost: HostID? = nil,
         feedbackRevision: UInt64? = nil
     ) {
         self.matrix = matrix
         self.inspectorActions = inspectorActions
+        self.recoveryAction = recoveryAction
+        self.configurationPathHost = configurationPathHost
         self.feedbackRevision = feedbackRevision
     }
 }
 
-/// 从上到下遍历两张宿主卡与矩阵，再进入反馈和检查器。即使调用者把断开动作夹在中间，函数也
+/// 从上到下遍历两张宿主摘要与矩阵，再进入检查器。即使调用者把断开动作夹在中间，函数也
 /// 会把全部破坏性动作移到末尾；视图不能无意中让首焦点或普通 Tab 流先撞上断开。
 public func integrationsWindowFocusOrder(
     _ scope: IntegrationsWindowFocusScope
@@ -430,8 +465,14 @@ public func integrationsWindowFocusOrder(
             IntegrationsWindowFocusTarget.capabilityCell(host: $0.host, event: $0.event)
         }
     })
+    if let host = scope.configurationPathHost {
+        order.append(.copyConfigurationPath(host))
+    }
     if let revision = scope.feedbackRevision {
         order.append(.dismissFeedback(revision: revision))
+    }
+    if scope.recoveryAction.title != nil {
+        order.append(.recoveryAction(scope.recoveryAction))
     }
     order.append(contentsOf: scope.inspectorActions.filter { !$0.isDestructive }.map {
         .inspectorAction($0)

@@ -42,7 +42,7 @@ func runSoundPacksWindowAccessibilitySuites() {
             "陈旧选择没有详情按钮，只能留下真实存在的列表停靠点")
     }
 
-    suite("SoundPacksWindow a11y：Dynamic Type 降级梯在辅助功能字号改为上下分区且不截名") {
+    suite("SoundPacksWindow a11y：四档文字与真实详情宽度共同决定重排且不截名") {
         let standard = soundPacksWindowLayoutAdaptation(for: .standard)
         let enlarged = soundPacksWindowLayoutAdaptation(for: .enlarged)
         let accessibility = soundPacksWindowLayoutAdaptation(for: .accessibility)
@@ -59,8 +59,8 @@ func runSoundPacksWindowAccessibilitySuites() {
             enlarged.sidebarIdealWidth > standard.sidebarIdealWidth,
             "较大字号的侧栏必须获得更多宽度")
         expect(
-            enlarged.sidebarMinimumWidth + enlarged.detailMinimumWidth <= 560,
-            "较大字号在窗口最小 560pt 宽度下不得声明一组互相挤不下的最小宽度")
+            enlarged.sidebarMinimumWidth + enlarged.detailMinimumWidth <= 640,
+            "较大字号在窗口最小 640pt 宽度下不得声明一组互相挤不下的最小宽度")
         expect(
             enlarged.packNameLineLimit == nil,
             "较大字号不得再用固定行数截断第三方包名")
@@ -76,15 +76,36 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             accessibility.sidebarMinimumHeight >= 160,
             "上下结构中的列表必须仍有可用高度并允许内部滚动")
+
+        expect(
+            !soundPacksWindowDetailUsesStackedLayout(detailWidth: 520, tier: .standard)
+                && soundPacksWindowDetailUsesStackedLayout(
+                    detailWidth: 459, tier: .standard),
+            "标准文字必须按 split view 实际详情宽度在单行与堆叠间切换")
+        expect(
+            soundPacksWindowDetailUsesStackedLayout(detailWidth: 900, tier: .enlarged)
+                && soundPacksWindowDetailUsesStackedLayout(
+                    detailWidth: 900, tier: .accessibility),
+            "较大与最大文字即使窗口很宽也必须保留安全堆叠")
     }
 
     suite("SoundPacksWindow a11y：每次真实 hidden→visible 都能发出独立首焦点请求") {
         let coordinator = SoundPacksWindowFocusCoordinator()
         expect(coordinator.requestRevision == 0, "焦点请求 revision 必须从 0 开始")
-        coordinator.requestInitialFocus()
+        coordinator.requestInitialFocus(
+            route: .editEvent(packID: "pack-a", event: .notification))
         expect(coordinator.requestRevision == 1, "第一次展示必须产生一次独立焦点请求")
+        expect(
+            coordinator.requestedRoute == .editEvent(packID: "pack-a", event: .notification),
+            "跨窗口打开必须把包与事件路由和首焦点请求原子传入")
         coordinator.requestInitialFocus()
         expect(coordinator.requestRevision == 2, "隐藏后复用窗口重开也必须产生新请求")
+        expect(coordinator.requestedRoute == .overview, "普通重开必须回到显式 overview 路由")
+        coordinator.requestRoute(.editEvent(packID: "pack-b", event: .stop))
+        expect(
+            coordinator.requestRevision == 3
+                && coordinator.requestedRoute == .editEvent(packID: "pack-b", event: .stop),
+            "已显示窗口接收新事件时必须保留窗口并只推进路由请求")
     }
 
     suite("SoundPacksWindow a11y：status revision 只在 NSAccessibility.post 真成功后消费") {
@@ -415,19 +436,24 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && view.contains("soundPacksWindowFirstFocusTarget(focusScope)"),
             "首焦点与状态变化后的焦点修复必须消费同一套窗口纯模型")
         expect(
-            view.contains("@Environment(\\.dynamicTypeSize)")
+            view.contains("@AppStorage(ClaudioInterfaceTextSize.defaultsKey)")
+                && view.contains("interfaceTextSize.dynamicTypeSize")
                 && view.contains("layoutAdaptation.detailMinimumWidth")
-                && view.contains("layoutAdaptation.packNameLineLimit"),
-            "Dynamic Type 环境值必须实际驱动详情最小宽度与包名截断策略")
+                && view.contains("layoutAdaptation.packNameLineLimit")
+                && view.contains("soundPacksWindowDetailUsesStackedLayout(")
+                && view.contains("detailHeader(card, stacks: stacksDetail)")
+                && view.contains("packActionBar(card, stacks: stacksDetail)"),
+            "Claudio 四档文字偏好和真实 detail 宽度必须共同驱动详情重排")
         expect(
-            view.contains(".frame(minHeight: 44)")
+            view.contains("ClaudioTheme.Metrics.iconTarget")
+                && view.contains("ClaudioTheme.Metrics.regularControlHeight")
                 && view.contains(".accessibilityLabel(packAccessibilityLabel(card))")
                 && view.contains("soundPacksWindowEventAccessibilityLabel("),
-            "44pt 目标、包行状态与事件失败状态必须真正接进窗口视图")
+            "macOS 28/32pt 控件目标、包行状态与事件失败状态必须真正接进窗口视图")
 
         guard
             let responderIndex = controller.range(of: "makeFirstResponder")?.lowerBound,
-            let focusIndex = controller.range(of: "requestInitialFocus()")?.lowerBound
+            let focusIndex = controller.range(of: "requestInitialFocus(route: route)")?.lowerBound
         else {
             expect(false, "窗口展示必须先进入 responder chain，再请求 SwiftUI 首焦点")
             return
@@ -445,6 +471,10 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && controller.contains("status.severity == .failure")
                 && controller.contains(".writeSucceeded(message: status.message)"),
             "恢复、音频、星标、复制和启用必须共用一个 revision 驱动的 VoiceOver 出口")
+        expect(
+            controller.contains("width: 760, height: 560")
+                && controller.contains("width: 640, height: 480"),
+            "声音包窗口默认必须是 760×560，且最小保持 640×480")
         expect(
             controller.contains("public func windowDidBecomeKey")
                 && controller.contains("announceLatestWindowStatusIfNeeded(in: keyWindow)")

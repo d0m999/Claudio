@@ -224,6 +224,20 @@ public enum PreviewFixtures {
             state: .broken(reason: "manifest.json 解析失败"), isSelected: false),
     ]
 
+    // MARK: - Product UI refactor states
+
+    /// 主面板包区域的四个互斥状态，另加固定包 1 行/4 行两种真实密度。
+    public static let panelPackSectionStates: [PanelPackSectionState] = [
+        .pinned([packCards[0]]),
+        .pinned(Array(packCards.prefix(maxStarredPacks))),
+        .noPinnedPacks(availablePackCount: 6),
+        .noPacks,
+        .readFailed(reason: "声音包目录暂时无法读取，请检查权限。"),
+    ]
+
+    /// Claudio 专属界面文字的全部四档；gallery 用同一个动态字号映射渲染代表内容。
+    public static let interfaceTextSizes = ClaudioInterfaceTextSize.allCases
+
     // MARK: - MasterVolumeState (PLAN-MASTER-VOLUME.md 阶段 D, D33/D38/D39)
     //
     // 主音量控件行在 state gallery 里的展示态。**这不是生产代码里一个真实存在的状态机**——生产端
@@ -245,7 +259,7 @@ public enum PreviewFixtures {
         case failed(volume: Double, message: String)
     }
 
-    /// D16：音量 0 是合法值（全局静音），不是"禁用"或"错误"——它必须有自己的一帧，不能被折进
+    /// D16：音量 0 是合法值（总输出无声），不是"禁用"或"错误"——它必须有自己的一帧，不能被折进
     /// 「随便一个值」里悄悄消失。0.35 是 21 档网格上的一个中间值（D45「干净渲染」那一类的代表）。
     /// 两条 `.failed` 帧的文案直接取自 `SetMasterVolumeError.description`（真实文案，不是在这里
     /// 手抄一遍好看的假句子——见 `onboardingActionStates` 头部同一条纪律）：一条是高频常态的锁竞争，
@@ -452,6 +466,12 @@ public enum PreviewFixtures {
         for state in dropZoneStates { visited.insert("dropZone.\(dropZoneStateCoverage(state))") }
         for row in eventRows { visited.insert("coverage.\(coverageStateCoverage(row.coverage))") }
         for card in packCards { visited.insert("packCard.\(packCardStateCoverage(card.state))") }
+        for state in panelPackSectionStates {
+            visited.insert("panelPack.\(panelPackSectionStateCoverage(state))")
+        }
+        for size in interfaceTextSizes {
+            visited.insert("interfaceText.\(interfaceTextSizeCoverage(size))")
+        }
         for state in masterVolumeStates { visited.insert("masterVolume.\(masterVolumeStateCoverage(state))") }
         for scenario in hostIntegrationScenarios {
             visited.insert("hostIntegration.\(scenario.id)")
@@ -559,6 +579,24 @@ public enum PreviewFixtures {
         case .complete: "complete"
         case .partial: "partial"
         case .broken: "broken"
+        }
+    }
+
+    static func panelPackSectionStateCoverage(_ state: PanelPackSectionState) -> String {
+        switch state {
+        case .pinned(let cards): cards.count == 1 ? "pinned.one" : "pinned.four"
+        case .noPinnedPacks: "noPinned"
+        case .noPacks: "noPacks"
+        case .readFailed: "readFailed"
+        }
+    }
+
+    static func interfaceTextSizeCoverage(_ size: ClaudioInterfaceTextSize) -> String {
+        switch size {
+        case .compact: "compact"
+        case .standard: "standard"
+        case .large: "large"
+        case .maximum: "maximum"
         }
     }
 

@@ -10,12 +10,19 @@ import SwiftUI
 private final class MenuBarActionRouter {
     weak var owner: MenuBarController?
 
-    func requestSoundPacksWindow() {
-        owner?.requestSoundPacksWindowPresentation()
+    func requestSoundPacksWindow(
+        route: SoundPacksWindowRoute,
+        returnFocusTo target: PanelFocusTarget
+    ) {
+        owner?.requestSoundPacksWindowPresentation(route: route, returnFocusTo: target)
     }
 
     func requestIntegrationsWindow(returnFocusTo target: PanelFocusTarget) {
         owner?.requestIntegrationsWindowPresentation(returnFocusTo: target)
+    }
+
+    func requestSoundPacksFromIntegrations(event: Event) {
+        owner?.requestSoundPacksFromIntegrations(event: event)
     }
 
     func audibilityInputsChanged() {
@@ -70,7 +77,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// The window is shown only after the transient popover has fully closed. Showing it from
     /// the button action itself lets `popoverDidClose` race in afterward and hand activation back
     /// to `previousApp`, immediately stealing key status from our own window.
-    private var pendingSoundPacksWindowPresentation = false
+    private var pendingSoundPacksWindowPresentation:
+        (route: SoundPacksWindowRoute, focusTarget: PanelFocusTarget)?
     /// The exact panel trigger is carried through the close callback. A value here also means the
     /// integrations window must be presented only after `popoverDidClose` finishes.
     private var pendingIntegrationsWindowFocusTarget: PanelFocusTarget?
@@ -92,6 +100,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             environment: audioEnvironment,
             refreshCoordinator: soundPacksRefreshCoordinator)
         let actionRouter = MenuBarActionRouter()
+        let integrationsMuteController = EventMuteController()
         let hostIntegrations = HostIntegrationPresentationStore(
             state: hostIntegrationState,
             configurationSources: [
@@ -126,6 +135,36 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                     feedbackKind: outcome.feedbackKind,
                     feedbackMessage: outcome.feedbackMessage)
             },
+            recoveryHandler: IntegrationsWindowRecoveryHandler {
+                [weak actionRouter, weak hostIntegrations] action in
+                guard let hostIntegrations else {
+                    throw HostIntegrationPresentationError.storeUnavailable
+                }
+                switch action {
+                case .unmute(_, let event):
+                    if integrationsMuteController.setEnabled(event, enabled: true) {
+                        let state = try await integrationMatrixProvider()
+                        let content = actionRouter?.publishHostIntegrationState(state)
+                            ?? hostIntegrations.replace(state: state)
+                        return IntegrationsWindowActionOutcome(
+                            content: content,
+                            feedbackKind: .success,
+                            feedbackMessage: "已取消「\(event.displayName)」静音")
+                    } else {
+                        throw HostIntegrationPresentationError.recoveryFailed(
+                            integrationsMuteController.lastError?.description
+                                ?? "无法取消当前事件静音。")
+                    }
+                case .configureSound(_, let event):
+                    actionRouter?.requestSoundPacksFromIntegrations(event: event)
+                    return IntegrationsWindowActionOutcome(
+                        content: hostIntegrations.content,
+                        feedbackKind: .information,
+                        feedbackMessage: "已打开「\(event.displayName)」声音映射")
+                case .connect, .upgrade, .repair, .redetect, .explainUnsupported, .none:
+                    throw HostIntegrationPresentationError.recoveryFailed("当前状态没有可执行的恢复动作。")
+                }
+            },
             onContentChanged: { [weak hostIntegrations] content in
                 hostIntegrations?.replace(content: content)
             })
@@ -138,15 +177,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         // 312pt panel width already exists as a constant, and `PanelLayoutAdaptation/panelWidth`
         // — the value the SwiftUI side actually sizes itself to — is derived from it.
         // Height is intrinsic-content-driven at runtime.
-        popover.contentSize = NSSize(width: standardPanelWidth, height: 400)
+        popover.contentSize = NSSize(width: standardPanelWidth, height: 520)
 
         let panel = PanelView(
             audioEnvironment: audioEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
-            onManageSounds: { [weak actionRouter] in
-                actionRouter?.requestSoundPacksWindow()
+            onManageSounds: { [weak actionRouter] route, focusTarget in
+                actionRouter?.requestSoundPacksWindow(
+                    route: route,
+                    returnFocusTo: focusTarget)
             },
             onManageIntegrations: { [weak actionRouter] target in
                 actionRouter?.requestIntegrationsWindow(returnFocusTo: target)
@@ -267,6 +308,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     private func showPopover() {
         guard let button = statusItem.button else { return }
+        let visibleHeight = button.window?.screen?.visibleFrame.height
+            ?? NSScreen.main?.visibleFrame.height
+            ?? 560
+        popover.contentSize.height = min(560, max(400, visibleHeight - 32))
 
         // Remember who we're about to take the foreground from, so `popoverDidClose` can give
         // it back (AppKit will not: see there). Guarded on a real closed→open transition —
@@ -320,15 +365,25 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// immediately: the transition stays inside Claudio, so handing activation back now would
     /// steal key status from the management window. Instead, the window owner pays the debt when
     /// its retained standard window really closes.
-    fileprivate func requestSoundPacksWindowPresentation() {
+    fileprivate func requestSoundPacksWindowPresentation(
+        route: SoundPacksWindowRoute,
+        returnFocusTo target: PanelFocusTarget
+    ) {
         pendingIntegrationsWindowFocusTarget = nil
-        pendingSoundPacksWindowPresentation = true
+        pendingSoundPacksWindowPresentation = (route, target)
 
         guard popover.isShown else {
-            pendingSoundPacksWindowPresentation = false
+            pendingSoundPacksWindowPresentation = nil
             let previous = previousApp
             previousApp = nil
-            soundPacksWindowController.showWindow(returnFocusTo: previous)
+            soundPacksWindowController.showWindow(
+                route: route,
+                returnFocusTo: previous
+            ) { [weak self] latestHandbackApplication in
+                self?.restorePanelFocus(
+                    to: target,
+                    latestHandbackApplication: latestHandbackApplication)
+            }
             return
         }
         // This is an explicit in-app navigation, not a dismiss request that a delegate or nested
@@ -345,7 +400,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     fileprivate func requestIntegrationsWindowPresentation(
         returnFocusTo target: PanelFocusTarget
     ) {
-        pendingSoundPacksWindowPresentation = false
+        pendingSoundPacksWindowPresentation = nil
         pendingIntegrationsWindowFocusTarget = target
         if case .hostSource(let host) = target {
             integrationsModel.select(.host(host))
@@ -360,6 +415,21 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             return
         }
         popover.close()
+    }
+
+    /// 集成检查器的“配置声音”保持当前窗口上下文，并把声音包窗口直接路由到当前包的目标事件。
+    /// 声音包窗口关闭后重新激活仍然可见的集成窗口，不经过菜单栏 popover。
+    fileprivate func requestSoundPacksFromIntegrations(event: Event) {
+        let selectedPackID = loadClaudioConfig(from: ClaudioPaths.configFile)?.selectedPack ?? ""
+        let route: SoundPacksWindowRoute = selectedPackID.isEmpty
+            ? .overview
+            : .editEvent(packID: selectedPackID, event: event)
+        soundPacksWindowController.showWindow(
+            route: route,
+            returnFocusTo: nil
+        ) { [weak self] _ in
+            self?.integrationsWindowController.restoreKeyWindow()
+        }
     }
 
     private func restorePanelFocus(
@@ -432,13 +502,20 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             return
         }
 
-        let shouldPresentSoundPacksWindow = pendingSoundPacksWindowPresentation
-        pendingSoundPacksWindowPresentation = false
+        let soundPacksPresentation = pendingSoundPacksWindowPresentation
+        pendingSoundPacksWindowPresentation = nil
         let previous = previousApp
         previousApp = nil
 
-        if shouldPresentSoundPacksWindow {
-            soundPacksWindowController.showWindow(returnFocusTo: previous)
+        if let soundPacksPresentation {
+            soundPacksWindowController.showWindow(
+                route: soundPacksPresentation.route,
+                returnFocusTo: previous
+            ) { [weak self] latestHandbackApplication in
+                self?.restorePanelFocus(
+                    to: soundPacksPresentation.focusTarget,
+                    latestHandbackApplication: latestHandbackApplication)
+            }
             return
         }
 

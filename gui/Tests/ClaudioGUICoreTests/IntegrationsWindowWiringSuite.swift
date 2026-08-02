@@ -45,6 +45,10 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             controller.contains("focusCoordinator.requestInitialFocus()"),
             "首次展示和隐藏后重开必须向窗口自己的 FocusState 发新请求")
+        expect(
+            controller.contains("width: 840, height: 620")
+                && controller.contains("width: 640, height: 520"),
+            "集成窗口默认必须是 840×620，且最小保持 640×520")
     }
 
     suite("MenuBar shell：唯一 retained IntegrationsWindow，经 popover close 交接并精确恢复触发控件") {
@@ -65,8 +69,8 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             panel.contains("HostSourceRowView(")
                 && panel.contains("onManageIntegrations(.hostSource(row.host))")
-                && panel.contains("onManageIntegrations(.manageIntegrations)"),
-            "两条宿主行与底部管理入口都必须把精确触发 target 交给 AppKit shell")
+                && !panel.contains("manageIntegrationsRow"),
+            "两条宿主状态条必须把精确触发 target 交给 AppKit shell，且不保留重复底部入口")
         expect(
             menu.contains("pendingIntegrationsWindowFocusTarget")
                 && menu.contains("popoverDidClose")
@@ -86,7 +90,7 @@ func runIntegrationsWindowWiringSuites() {
         let suffix = String(menu[integrationBranch.lowerBound...])
         let branchBeforeSoundPacks = String(
             suffix.prefix(
-                upTo: suffix.range(of: "let shouldPresentSoundPacksWindow")?.lowerBound
+                upTo: suffix.range(of: "let soundPacksPresentation")?.lowerBound
                     ?? suffix.endIndex))
         expect(
             !branchBeforeSoundPacks.contains("previousApp = nil"),
@@ -209,9 +213,9 @@ func runIntegrationsWindowWiringSuites() {
                 && panel.contains("let typeScale: CGFloat"),
             "两条来源行必须接收 Panel 的 @ScaledMetric，而不是固定字号孤岛")
         expect(
-            panel.contains("size: 12 * typeScale")
-                && panel.contains("size: 10.5 * typeScale")
-                && panel.contains("minHeight: 32 * typeScale"),
+            panel.contains("size: 11.5 * typeScale")
+                && panel.contains("size: 9.5 * typeScale")
+                && panel.contains("minHeight: 48 * typeScale"),
             "来源行标题、状态与几何必须一起随最大 Dynamic Type 放大")
     }
 
@@ -268,8 +272,9 @@ func runIntegrationsWindowWiringSuites() {
             return
         }
         expect(
-            menu.contains("pendingSoundPacksWindowPresentation = true")
-                && menu.contains("soundPacksWindowController.showWindow(returnFocusTo: previous)"),
+            menu.contains("pendingSoundPacksWindowPresentation = (route, target)")
+                && menu.contains("route: soundPacksPresentation.route")
+                && menu.contains("returnFocusTo: previous"),
             "新增 integrations handoff 不得破坏 SoundPacks 的 pending 与 activation handback")
         expect(menu.contains("popover.close()"), "两个管理窗口都必须先可靠关闭 transient popover")
     }
@@ -475,7 +480,7 @@ func runIntegrationsWindowWiringSuites() {
             "重新检测与连接动作必须经注入 handler 回到共享 manager seam")
     }
 
-    suite("IntegrationsWindow layout：两张等宽宿主卡；标准 4×2，最大字号四张双宿主卡；只有纵向滚动") {
+    suite("IntegrationsWindow layout：紧凑双宿主摘要；标准 4×2 表格，最大文字纵向双宿主行；只有纵向滚动") {
         guard
             let view = integrationsSource(
                 "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift")
@@ -486,16 +491,17 @@ func runIntegrationsWindowWiringSuites() {
 
         expect(
             view.contains("ForEach(model.content.sourceRows)")
-                && view.contains("sourceRowCard"),
-            "顶部宿主卡必须由固定两行 presentation 同一视图生成")
+                && view.contains("sourceSummaryButton"),
+            "顶部宿主摘要必须由固定两行 presentation 同一视图生成")
         expect(
-            view.contains("sourceRowCard(row)")
+            view.contains("sourceSummaryButton(row)")
                 && view.contains(".frame(maxWidth: .infinity"),
-            "两张宿主卡必须共享实现并各自占满等宽槽")
+            "两条宿主摘要必须共享实现并各自占满等宽槽")
         expect(
-            view.contains("switch layoutAdaptation.mode")
-                && view.contains("case .capabilityMatrix")
-                && view.contains("case .eventCards"),
+            view.contains("usesNarrowCapabilityTable")
+                && view.contains("case .eventCards = layoutAdaptation.mode")
+                && view.contains("standardCapabilityMatrix")
+                && view.contains("narrowCapabilityTable"),
             "真实视图必须消费纯模型的两种 Dynamic Type 布局，而不是只在测试里声明")
         expect(
             view.contains("ForEach(model.content.matrix.rows)")
@@ -504,11 +510,19 @@ func runIntegrationsWindowWiringSuites() {
         expect(view.contains("ScrollView(.vertical"), "窗口内容必须允许纵向增长")
         expect(!view.contains("ScrollView(.horizontal"), "最大字号严禁横向滚动")
         expect(!view.contains(".clipped()"), "文字与事件卡不得用裁切解决拥挤")
-        expect(!view.contains(".lineLimit(1)"), "最大 Dynamic Type 下不得强制单行截断")
         expect(
-            view.contains("dynamicTypeSize.isAccessibilitySize")
+            view.contains("interfaceTextSize == .maximum ? 3 : 1"),
+            "只有固定选择摘要可在非最大文字时单行；最大文字必须放开为三行")
+        expect(
+            view.contains("interfaceTextSize == .maximum")
                 && view.contains("integrationsWindowLayoutAdaptation"),
-            "系统最大辅助字号必须真实映射到 presentation 的 eventCards 决策")
+            "Claudio 最大文字档必须真实映射到 presentation 的 eventCards 决策")
+        expect(
+            view.contains("width >= 760 && interfaceTextSize != .maximum")
+                && view.contains("if usesSideBySideLayout(width: geometry.size.width)")
+                && view.contains("sideBySideContent(width: geometry.size.width)")
+                && view.contains("stackedContent"),
+            "矩阵与 inspector 必须按真实窗口宽度在左右常驻和纵向重排间切换，最大文字恒为纵向")
     }
 
     suite("IntegrationsWindow inspector：三类证据与动作齐全，Codex 待确认固定为 /hooks + 重新检测") {
@@ -531,11 +545,16 @@ func runIntegrationsWindowWiringSuites() {
                 && model.contains(".copyHooksCommand")
                 && model.contains(".redetect"),
             "Codex 待确认必须由状态事实补齐复制 /hooks 与重新检测")
-        expect(view.contains("Button(\"复制 /hooks\")"), "必须提供固定的复制 /hooks 按钮")
-        expect(view.contains("Button(\"重新检测\")"), "必须提供固定的重新检测按钮")
+        expect(
+            view.contains("integrationsInspectorActionTitle(action")
+                && model.contains(".copyHooksCommand"),
+            "Codex 待授权必须通过统一动作标题渲染复制 /hooks")
+        expect(
+            view.contains("Label(\"重新检测\", systemImage: \"arrow.clockwise\")"),
+            "重新检测必须位于窗口工具栏")
         expect(
             view.contains("integrationsInspectorActionTitle(")
-                && view.contains("hostStatus: model.content.sourceRows.first"),
+                && view.contains("hostStatus: selectedHostStatus"),
             "repair 按钮必须从纯状态标题投影 legacy 的“升级连接”，不能一律写修复")
         expect(
             view.contains("role: .destructive")
@@ -586,8 +605,7 @@ func runIntegrationsWindowWiringSuites() {
             view.contains(".accessibilityLabel(cell.accessibilityLabel)"),
             "矩阵格必须原样使用含宿主、事件、连接及“仅授权请求”的 Core label")
         expect(
-            view.contains("Text(cell.qualificationText)")
-                || view.contains("Text(qualificationText)"),
+            view.contains("Text(qualification)"),
             "“仅授权请求”等限定语还必须可见，不能只藏在 VoiceOver")
         expect(
             view.contains(".accessibilityLabel(feedback.accessibilityLabel)"),
@@ -680,17 +698,16 @@ func runIntegrationsWindowWiringSuites() {
         }
         expect(
             view.contains("@Environment(\\.colorScheme)")
-                && view.contains("ClaudioColor.panel(colorScheme)")
-                && view.contains("ClaudioColor.surface2(colorScheme)")
-                && view.contains("ClaudioColor.text(colorScheme)")
-                && view.contains("ClaudioColor.textSecondary(colorScheme)")
-                && view.contains("ClaudioColor.hairlineStrong(colorScheme)"),
+                && view.contains("ClaudioTheme.panel(colorScheme)")
+                && view.contains("ClaudioTheme.elevated(colorScheme)")
+                && view.contains("ClaudioTheme.secondaryText(colorScheme)")
+                && view.contains("ClaudioTheme.hairline(colorScheme)"),
             "窗口中性表面必须随 colorScheme 使用现有 token")
         expect(
-            view.contains("ClaudioColor.success(colorScheme)")
-                && view.contains("ClaudioColor.error(colorScheme)")
-                && view.contains("ClaudioColor.clay(colorScheme)")
-                && view.contains("ClaudioColor.event(row.event, colorScheme)"),
+            view.contains("ClaudioTheme.success(colorScheme)")
+                && view.contains("ClaudioTheme.error(colorScheme)")
+                && view.contains("ClaudioTheme.clay(colorScheme)")
+                && view.contains("ClaudioEventGlyph(event:"),
             "窗口状态与四事件颜色必须使用语义 token")
         for forbidden in [
             "Color(red:", "Color.white", "Color.black", ".foregroundColor(.red)",

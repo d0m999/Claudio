@@ -37,7 +37,10 @@ let package = Package(
         // copies while the Foundation-only `ClaudioGUICore` remains free of SwiftUI.
         .target(
             name: "ClaudioGUIComponents",
-            dependencies: ["ClaudioGUICore"]
+            dependencies: [
+                "ClaudioGUICore",
+                .product(name: "ClaudioCore", package: "helper"),
+            ]
         ),
         // Standard AppKit/SwiftUI window surface. This is a library target (no `@main`);
         // `MenuBarController` owns its single lazy window for the app lifetime.

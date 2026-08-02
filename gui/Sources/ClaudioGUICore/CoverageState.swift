@@ -66,27 +66,19 @@ extension EventRow {
     /// keyboard focus parked on a dimmed control (ENGINEERING.md「无障碍规格」"打开焦点落首个
     /// 可操作项" — 可操作 is load-bearing).
     ///
-    /// PLAN-SOUND-MANAGER.md §2.5 (T2) changed this from "`.present` 看 `enabled`, otherwise
-    /// `true`" to **`previewEnabled && enabled`**: `.eventAction` is now UNCONDITIONALLY the
-    /// 试听 ▶ preview button in all three coverage states (``EventRowView``'s three-slot row —
-    /// `eventSound → eventAction → eventMute` — gave `.unmapped`/`.broken` their OWN always-
-    /// operable slot, ``PanelFocusTarget/eventSound(_:)``, the file-name `Menu`; the import
-    /// affordance that used to double as those states' `.eventAction` owner is gone). Since
-    /// `.unmapped`/`.broken` both have `previewEnabled == false` (``CoverageState``'s own
-    /// doc comment), their preview button — a real but permanently-disabled control on those
-    /// states — is now ALWAYS non-operable, regardless of `enabled`: opening focus on an
-    /// unmapped/broken row skips straight past its dead preview to `.eventSound` (the control
-    /// that can actually fix the row) or, if that's somehow not first, on to `.eventMute`.
-    /// `.present` keeps its pre-T2 behavior exactly: operable iff not muted.
+    /// `eventAction` 是手工试听；事件自动播放静音 (`enabled`) 与它正交。只要覆盖态存在安全文件，
+    /// 试听焦点就是可操作的；主音量为零等运行期原因由 ``EventPreviewAvailability`` 在视图边界补充。
+    /// `.unmapped` / `.broken` 的修复入口是每行最前面的 ``PanelFocusTarget/eventSound(_:)``
+    /// 身份按钮，它会打开完整声音包编辑器并定位当前事件。
     public var eventActionOperable: Bool {
-        coverage.previewEnabled && enabled
+        coverage.previewEnabled
     }
 
     // `previewClaimsActionFocus` 已删（PLAN-SOUND-MANAGER.md §2.5/T2）—— 它存在的唯一理由是仲裁
     // 「试听 ▶ 与导入入口，两者之中谁在这一行拥有 `.eventAction`」（T16 review 修复⑥ 造它时，
     // `.unmapped`/`.broken` 的导入入口与 `.present` 的试听 ▶ 是**互斥的两个候选**，同时渲染时必须
     // 有一个不绑 `.eventAction`，否则 SwiftUI 的焦点解析未定义）。T2 把那个导入入口整个搬进了
-    // ``PanelFocusTarget/eventSound(_:)``（文件名 `Menu` 自己的焦点身份）—— 于是 `.eventAction`
+    // ``PanelFocusTarget/eventSound(_:)``（事件身份 / 编辑路由的焦点身份）—— 于是 `.eventAction`
     // 从此在三态下都只剩**一个**候选（试听 ▶ 自己），仲裁不再有意义：`EventRowView` 现在无条件把
     // `.focused(_:equals: .eventAction(_))` 绑在 `previewButtonBody` 上，不再有第二个控件跟它抢。
 }

@@ -1880,7 +1880,8 @@ func runSoundPacksRefreshSuites() async {
             controller.contains("private var handbackApplication: NSRunningApplication?"),
             "window owner 必须接住 popover 的 previous-app handback 债务")
         expect(
-            controller.contains("showWindow(returnFocusTo application: NSRunningApplication?)"),
+            controller.contains("public func showWindow(")
+                && controller.contains("returnFocusTo application: NSRunningApplication?"),
             "窗口展示入口必须显式接收 handback app，不能在 popover 关闭时把它丢掉")
         guard
             let closeBody = soundPacksFunctionBody(
@@ -1907,9 +1908,10 @@ func runSoundPacksRefreshSuites() async {
             controller.contains("isClosingWindow"),
             "窗口关闭时必须阻止 activation notification 把刚清掉的 handback 债务重新写回")
         expect(
-            !controller.contains("Task") && !controller.contains("DispatchQueue")
-                && !controller.contains(" async "),
-            "窗口 target 不得把 config/manifest 写或刷新丢进 Task/DispatchQueue/async")
+            !controller.contains("Task.detached")
+                && !controller.contains("mutateManifestJSON")
+                && !controller.contains("setEventEnabled("),
+            "窗口 owner 可延后焦点恢复，但不得自行启动后台 manifest/config 写路径")
     }
 
     suite(".manageSounds：保留按钮位置/焦点，只把 Finder 动作改为 pending-close 窗口 presentation") {
@@ -1917,7 +1919,7 @@ func runSoundPacksRefreshSuites() async {
             let panel = soundPacksCode("gui/Sources/ClaudioGUI/PanelView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let requestBody = soundPacksFunctionBody(
-                after: "fileprivate func requestSoundPacksWindowPresentation()", in: menu),
+                after: "fileprivate func requestSoundPacksWindowPresentation(", in: menu),
             let closeBody = soundPacksFunctionBody(
                 after: "func popoverDidClose(_ notification: Notification)", in: menu)
         else {
@@ -1926,7 +1928,7 @@ func runSoundPacksRefreshSuites() async {
         }
 
         expect(
-            panel.contains("onManageSounds()"),
+            panel.contains("onManageSounds(.overview, .manageSounds)"),
             "manageSoundsRow 必须调用注入的真窗口入口")
         expect(
             !panel.contains(
@@ -1937,7 +1939,7 @@ func runSoundPacksRefreshSuites() async {
             panel.contains(".focused($focusedTarget, equals: .manageSounds)"),
             "T7 的 .manageSounds 焦点契约不得因换动作而丢失")
         expect(
-            requestBody.contains("pendingSoundPacksWindowPresentation = true")
+            requestBody.contains("pendingSoundPacksWindowPresentation = (route, target)")
                 && requestBody.contains("popover.close()"),
             "管理入口必须先记 pending，再强制关闭 transient popover；performClose 可能因 nested "
                 + "popover/child window 失败并留下幽灵 pending")
@@ -1949,7 +1951,7 @@ func runSoundPacksRefreshSuites() async {
                 && closeBody.contains("previousApp = nil"),
             "popoverDidClose 必须取出并清掉 previous app，普通关闭偿还、窗口导航则转交")
         if let pendingAt = requestBody.range(
-            of: "pendingSoundPacksWindowPresentation = true"
+            of: "pendingSoundPacksWindowPresentation = (route, target)"
         )?.lowerBound,
             let closeAt = requestBody.range(of: "popover.close()")?.lowerBound
         {
@@ -1960,12 +1962,12 @@ func runSoundPacksRefreshSuites() async {
             expect(false, "管理入口必须同时包含 pending 与强制 close")
         }
         expect(
-            closeBody.contains("if shouldPresentSoundPacksWindow")
-                && closeBody.contains(
-                    "soundPacksWindowController.showWindow(returnFocusTo: previous)"),
+            closeBody.contains("if let soundPacksPresentation")
+                && closeBody.contains("route: soundPacksPresentation.route")
+                && closeBody.contains("returnFocusTo: previous"),
             "popover 关闭完成后必须把 previous-app handback 债务转交给单窗口 owner")
         if let showAt = closeBody.range(
-            of: "soundPacksWindowController.showWindow(returnFocusTo: previous)"
+            of: "soundPacksWindowController.showWindow("
         )?.lowerBound,
             let returnAt = closeBody[showAt...].range(of: "return")?.lowerBound,
             let handbackGuardAt = closeBody.range(of: "guard NSApp.isActive")?.lowerBound

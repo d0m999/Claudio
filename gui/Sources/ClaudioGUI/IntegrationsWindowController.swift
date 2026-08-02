@@ -64,6 +64,12 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
         focusCoordinator.requestInitialFocus()
     }
 
+    func restoreKeyWindow() {
+        guard let window, window.isVisible else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard
             let closingWindow = notification.object as? NSWindow,
@@ -98,7 +104,7 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
             model: model,
             focusCoordinator: focusCoordinator)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 680),
+            contentRect: NSRect(x: 0, y: 0, width: 840, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)

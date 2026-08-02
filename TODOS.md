@@ -1360,7 +1360,9 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P4
 **Depends on:** None
 
-### Dynamic Type 三级布局在真机上疑似完全不生效——目前只实测过主音量行，但根因（`typeSizeTier`）由 `EventRowView`/`MasterVolumeRow`/`PackGalleryView` 三者共享，系统「文字大小」拉到最大档、面板一个像素都不变
+### Dynamic Type 三级布局在真机上疑似完全不生效——代码路径已替换，四档人工复验待做（2026-08-02）
+
+**2026-08-02 更新：** 不再把 macOS SwiftUI `dynamicTypeSize` 误作会跟随系统设置的能力。三个界面现统一读取 `ClaudioInterfaceTextSize` 的四档 `UserDefaults` 偏好，并显式注入 `dynamicTypeSize`；入口位于主面板「Claudio 选项」。原根因已绕开，但真实四档布局与 VoiceOver 仍需在 AppKit 会话复验后才能关闭本条。
 
 **What:** PLAN-MASTER-VOLUME.md §9 真机走查第 ⑪ 条（2026-07-14）：系统设置 → 辅助功能 → 显示 → 文字大小拉到最大档（`defaults read com.apple.universalaccess FontSizeCategory` 确认 `global=AX5`，即最高档），**完全退出重启** `Claudio.app` 后重新打开面板——D17/D44 描述的「主音量行变两行、面板加宽到 360pt」**完全没有发生**，面板与默认档位下逐像素一致。测试过程：先误增到系统设置里另一条无关滑块（显示对比度），发现后已改回原值，不影响本条结论；随后精确定位到「文字大小」这一控件（description 为「首选阅读字体大小」，range 0–14）并推到顶（14/14，预览文案确认变为「示例 42 点」），关闭面板重开、乃至 `⌘Q` 全新进程重启后复测，结果不变。**这次真机走查只覆盖了主音量行**（PLAN-MASTER-VOLUME.md §9 的走查范围本就是主音量行），`EventRowView`/`PackGalleryView` 从未被单独这样复测过。
 
@@ -2206,11 +2208,13 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 
 **⚠️ 本轮**已经**关掉的，别重复记账：** 失败路径改走 `.configOnly`（不调 `afterFullReload`）之后，「拿一份 `selectedPack` 为空的 config 去 retarget，污染 drop zone / 抹掉画廊选中卡高亮」在 `.configReadFailure` / `.configWriteFailure` / `.lockFailed` 三条路上**不再发生**。但 `.configMissing → .full` 那条路**仍然**会（它必须重扫画廊，`afterFullReload` 躲不掉）—— 那一格的 drop zone 污染是真的、仍然开着，只是它比这三条老得多。
 
-## 方向 D（糖果盘）全量采纳的落地债（2026-07-17）
+## 方向 D（糖果盘）全量采纳的落地债（2026-07-17；2026-08-02 代码已落地）
 
 > 2026-07-17 DESIGN.md 全量采纳「糖果盘 · 方向 D」为现行视觉皮肤（见 DESIGN.md「现行视觉皮肤：糖果盘」节 + Decisions Log 两行）。落进真相源的是**决议**；下面两条是它在**代码 / 工程契约**层欠下的债，须在方向 D 于 SwiftUI 落地前处理。
 
-### `ContrastSuite` 的事件字形断言仍锚在 v1 底 `#FFFDF8` —— 糖果盘换了亮色底，那批 `compositedHex(…over: panel…)` 全部在量一个不再渲染的底
+### ✅ 已解决（2026-08-02）：`ContrastSuite` 已改用糖果盘最深底 `#FBF7F1`
+
+**Resolution:** `ClaudioColorHex` 已纳入 `panelDeepLight` / 白色 `surface` 与现行文字、hairline token；自染事件 tile 的亮色断言统一使用渐变最深端，包行覆盖轨改量真实白色行底。
 
 **What:** `ContrastSuite.swift` 的事件字形对比度断言（DESIGN.md §Color「事件字形 tile 保持事件色自染 15%」那批）对**真实复合底**求值：`compositedHex(事件色, over: panel, alpha: 0.15)`，其中 `panel` = v1 亮色 `#FFFDF8`。糖果盘把亮色 `panel` 换成**渐变 `#FFFDFA → #FBF7F1`**（DESIGN 台账 ⑧），且 `text` / `text-2` / `text-muted` / `hairline` 一并改值。于是这批断言现在量的是**一个不再出现在屏幕上的底** —— 正是本仓库反复栽的那个病（「断言断错了那一对」/「没人量过的值」）的又一个形状，只不过这次是底被换走了、断言没跟。
 
@@ -2224,7 +2228,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 **Priority:** P2（方向 D 于代码落地前必做 —— 否则「糖果盘过对比度」在代码侧无背书；今天不阻断，因为方向 D 尚未进 SwiftUI）
 **Depends on:** 方向 D 进入 SwiftUI 落地（在那之前换底也无处渲染验证；可与落地同批）
 
-### 主音量行尾的「全局静音」钮：四版画稿都有、工程从未立项 —— 一个画稿默默变契约的入口
+### ✅ 已解决（2026-08-02）：主音量行尾的「全局静音」钮正式删除
+
+**Resolution:** 选择原二选一中的删除方案；未新增全局静音状态或 schema，主音量行只保留滑块。事件静音仅控制真实自动播放，手工试听与之正交。
 
 **What:** 糖果盘（及此前多版）主音量行的**行尾**都画了一个喇叭 + 斜杠的**全局静音**钮（`master-mute`，区别于四个事件行各自的 per-event 静音）。但它在工程侧**从未立项**：不在 ENGINEERING.md 的 UI 线框、不在「交互状态覆盖表」，helper 侧也没有消费者 —— `master_volume` 走 `afplay -v`，而「全局静音」需要一个**新 config 键**（或一个纯 UI 的输出静音开关），且它与 per-event 静音的**叠加语义**（全局静音时 per-event 状态怎么显示 / 解除全局静音后回到哪个态）一个字都没定。
 
@@ -2240,7 +2246,9 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 
 ## 声音包管理（PLAN-SOUND-MANAGER.md）落地债
 
-### T2 文件名 Menu 的 VoiceOver 措辞：字符串级单测 + 结构断言已钉，真机三态走查仍未做
+### T2 文件名 Menu 已迁入 Sound Packs Window；新三界面 VoiceOver 真机走查仍未做（2026-08-02）
+
+**2026-08-02 更新：** 主面板不再渲染文件名 `Menu`；事件身份按钮只负责显式路由。完整文件菜单、清除绑定和拖放都在 Sound Packs Window。原字符串级测试保留历史契约，新人工验收应覆盖三个生产界面的唯一名称、Hint、Selected trait、稳定 identifier 与焦点返回。
 
 **What:** T2（事件行文件名升格为原生 `Menu`，三态共用）落地后，PLAN-SOUND-MANAGER.md §2.5 第 7 条要求的三件事——① 行身份与菜单 label 不重复播报；② 禁用的试听 ▶ 不抢播；③ unmapped 行的 Menu label 让 VO 用户听得出"这里能修"——**现在①③有真正的字符串级单测，②有结构级断言，但没有一条是真机 VoiceOver 走查**。`fileNameMenuAccessibilityLabel`/`accessibilityLabel` 的实际 DECISION 逻辑已从 `EventRowView`（住在不可 `import` 的 `ClaudioGUI` executableTarget）拆成 `ClaudioGUICore` 的纯函数 `eventRowIdentityAccessibilityLabel`/`eventRowFileNameMenuAccessibilityLabel`（`EventRowAccessibility.swift`），`EventRowAccessibilitySuite` 直接断言这两个函数的**返回字符串本身**（三态各断一次「不逐字重复」+ unmapped 的可操作动词「选择」）——这条修复过程中当场抓到一个真 bug：`.broken` 的旧菜单措辞把 identity 的「声音文件丢失」原样复述了一遍，两个 VoiceOver 停靠点背靠背念同一句话，现已改写为只说"能做什么"。②（禁用试听 ▶ 不被 `.combine` 合并抢播）是控件树**形状**问题、不是字符串问题，走的是 `ViewWiringSuite` 的源码结构断言（`.disabled(!enabled)` 结构性存在 + 行级 `.contain`、非 `.combine` + `identity` 节点内无 Button 混入）。WCAG 2.1.1 的 Tab 顺序（三槽焦点模型下 Menu 是否会被跳过）已由 `PanelFocusOrderSuite` 的既有断言覆盖（`.eventSound` 恒排每行首位、恒可操作，从未被 T2 之后的任何 fixture 跳过）。**但这一切仍然是本机能做到的上限**——`EventRowView.swift` 所在的 `ClaudioGUI` 执行体 target 不可 `import`（本机 CommandLineTools 无 ViewInspector/XCTest），没有任何测试能真正驱动一次运行期的 VoiceOver 会话，字符串对不对、结构对不对，都不等于"VoiceOver 实际念出来是什么"。
 

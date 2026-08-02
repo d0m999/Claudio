@@ -122,8 +122,9 @@ public actor HostIntegrationManagerBridge {
             }
             return (row.event, hasSound)
         })
-        // `master_volume == 0` 是全局静音，与逐事件 enabled 正交。把两轴在进入唯一矩阵前
-        // 合成；`AudibilityMatrix` 仍先判 unsupported，因此 Codex StopFailure 不会被误画成 muted。
+        // `master_volume == 0` 表示总输出无声，与逐事件 enabled 正交；它不是另一颗“全局静音”
+        // 控件。把两轴在进入唯一矩阵前合成；`AudibilityMatrix` 仍先判 unsupported，因此 Codex
+        // StopFailure 不会被误画成 muted。
         let masterVolumeAllowsAudio = config.masterVolume > 0
         let enabled = Dictionary(
             uniqueKeysWithValues: eventRows.map {

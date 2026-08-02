@@ -20,7 +20,6 @@ public struct PanelView: View {
     /// 「这一句刚说过」的去重器（T17g）—— 让「一趟 update pass ≤ 一条播报」在结构上成立。
     /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
     @StateObject private var announcer: PanelAnnouncer
-    @State private var rowImportViewModels: [Event: EventRowImportViewModel]
     /// 运行态面板的 config 读模型 + 流经它的写操作（`configState` / `config` / `eventRows` /
     /// `packCards` / `packSwitchError`，以及 `toggleMute` / `switchPack` / `reload` /
     /// `reloadEnabledFlags`）—— **全部搬进了 `ClaudioGUICore.PanelConfigController`**（红队 9cccc9c
@@ -52,11 +51,8 @@ public struct PanelView: View {
     @ObservedObject private var hostIntegrations: HostIntegrationPresentationStore
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    /// Dynamic-Type scale factor for the header's fixed `.system(size:)` text (a11y fix) — see
-    /// ``EventRowView``'s `typeScale`. `dynamicTypeSize` above still drives the LAYOUT tier
-    /// (``typeSizeTier``); this makes the header TEXT actually scale alongside it.
-    @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
+    @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
+    private var interfaceTextSizeRaw = ClaudioInterfaceTextSize.defaultValue.rawValue
 
     // Reduced transparency is satisfied structurally: `.background(
     // ClaudioColor.panel(colorScheme))` below is a near-solid opaque color, never a
@@ -68,7 +64,7 @@ public struct PanelView: View {
     private let lockFile: URL
     private let previewPlayer: AudioPreviewPlaying
     private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator
-    private let onManageSounds: @MainActor () -> Void
+    private let onManageSounds: @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void
     private let onManageIntegrations: @MainActor (PanelFocusTarget) -> Void
     private let onAudibilityInputsChanged: @MainActor () -> Void
 
@@ -90,7 +86,7 @@ public struct PanelView: View {
         focusCoordinator: PanelFocusCoordinator = PanelFocusCoordinator(),
         hostIntegrations: HostIntegrationPresentationStore,
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
-        onManageSounds: @escaping @MainActor () -> Void,
+        onManageSounds: @escaping @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void,
         onManageIntegrations: @escaping @MainActor (PanelFocusTarget) -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
         onPanelWidthChange: @escaping (Double) -> Void = { _ in }
@@ -109,99 +105,37 @@ public struct PanelView: View {
         // same retention/volume implementation while owning independent playback lifetimes.
         self.previewPlayer = NSSoundAudioPreviewPlayer()
 
-        // 全部构造成**纯 local 实例**，再各自 wrap 进 `@StateObject` / `@State`，**并把同一实例**交给
-        // `PanelConfigController`。绝不在这里读 `_someStateObject.wrappedValue` —— 那会在 SwiftUI 装好
-        // state 之前重新求值 autoclosure、每次发一个全新实例（见上面 actionRunner 那段同样的坑）。捕获
-        // local 不碰这个陷阱：`ovm` / `perRow` 就是被 wrap 的那几个引用，`panelModel` 的
-        // `afterFullReload` 闭包捕获它们，跨-view-model 协调因此打到的是面板真正在渲染的那几个实例。
-        let loadedConfig = loadPanelConfig(from: configFile).resolvedConfig
-        // Built fully, as a `let`, BEFORE `panelModel` below — never mutated afterward. Earlier
-        // this dict was a `var` populated by a loop AFTER `panelModel`'s `afterFullReload`
-        // closure had already captured it (relying on "a `var` local captured by an escaping
-        // closure is captured by reference, so mutating it later is safe" — true, but Swift's
-        // Sendable-closure-capture diagnostic flags exactly that shape: "'perRow' mutated after
-        // capture by sendable closure"). Building it complete up front removes the capture-then-
-        // mutate shape entirely — same instances, same closures, zero behavior change, no warning.
-        let perRow: [Event: EventRowImportViewModel] = Dictionary(
-            uniqueKeysWithValues: Event.allCases.map { event in
-                (
-                    event,
-                    EventRowImportViewModel(
-                        event: event,
-                        importViewModel: AudioImportViewModel(
-                            packID: loadedConfig.selectedPack, environment: audioEnvironment))
-                )
-            })
-
-        // config 读模型 + 静音/切包写路径的**全部行为**都住在这个可测的类里。`afterFullReload` 是全量
-        // reload 里 config 读模型**之外**的那一半：onboarding 重探 + 每行 import view-model retarget 到
-        // 新包 —— 与旧 `refresh()` 逐行等价（onboarding 那行挪到 config 重载之后，两者互不依赖，结果不变；
-        // retarget 收到刚重载出的 config，用它的 `selectedPack`，与旧代码一致）。
         let onAudibilityInputsChanged = self.onAudibilityInputsChanged
         let panelModel = PanelConfigController(
             configFile: configFile,
             lockFile: lockFile,
             environment: audioEnvironment,
-            afterFullReload: { reloadedConfig in
-                for rowViewModel in perRow.values {
-                    rowViewModel.retarget(to: reloadedConfig.selectedPack)
-                }
+            afterFullReload: { _ in
                 onAudibilityInputsChanged()
             },
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator)
 
-        // `previewPlayer` (`self`'s own, assigned above) copied into a local so the escaping
-        // `onImportSucceeded` closures below never need to capture `self` — a struct's `init`
-        // may freely READ an already-assigned stored property, but an ESCAPING closure built
-        // inside `init` capturing `self` itself is illegal until every stored property is set
-        // (several of this type's `@StateObject`s below aren't yet).
-        //
-        // Wired in a SEPARATE loop, after `panelModel` exists — PLAN-SOUND-MANAGER.md T2
-        // (核心回归 #3): re-wires the row-end auto-preview hook `AudioDropZoneView.onImportSucceeded`
-        // used to drive before T1 deleted that view along with its only production caller —
-        // the shared player's contract names this exact call site. Fires for BOTH a menu-driven
-        // pick (``EventRowView/openImportPanel()``)
-        // and a drag-drop onto the file-name `Menu` (``EventRowView/handleDrop(_:)``): both funnel
-        // through ``EventRowImportViewModel/handleDrop(sourceURL:suggestedFileName:)`` →
-        // ``AudioImportViewModel/handleDrop(requests:)``, whose `.success` arm already calls this
-        // hook (see that function's own doc comment). Reads the panel's CURRENT master volume at
-        // the moment playback actually starts (`panelModel.config`, always the just-reloaded
-        // truth, never a value captured once at init) — the exact same volume ``playPreview(for:)``
-        // resolves for the row's manual 试听 ▶ button (``previewVolume(for:)``, the one clamp this
-        // repo has). Mutating each row's `importViewModel.onImportSucceeded` — a stored property on
-        // a reference type — here, after `perRow` is already built, never re-triggers the
-        // capture-then-mutate warning `perRow` itself was rewritten to avoid.
-        let previewPlayer = self.previewPlayer
-        for rowViewModel in perRow.values {
-            let importViewModel = rowViewModel.importViewModel
-            importViewModel.onImportSucceeded = { [weak panelModel] file in
-                guard let panelModel else { return }
-                previewPlayer.play(
-                    fileAt: file.destinationURL, volume: Float(previewVolume(for: panelModel.config)))
-            }
-        }
-
         _announcer = StateObject(wrappedValue: PanelAnnouncer())
-        _rowImportViewModels = State(initialValue: perRow)
         _panelModel = StateObject(wrappedValue: panelModel)
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Host state never gates the sound controls. A disconnected or damaged source stays
-            // visible as one source row while events, volume and sound packs remain reachable.
-            header
-            hostSourcesSection
-            operationalPanel
+        ScrollView(.vertical, showsIndicators: true) {
+            VStack(alignment: .leading, spacing: 12) {
+                header
+                hostSourcesSection
+                operationalPanel
+            }
+            .padding(13)
         }
-        .padding(13)
         .frame(width: layoutAdaptation.panelWidth)
-        .background(ClaudioColor.panel(colorScheme))
+        .background(ClaudioTheme.panelGradient(colorScheme))
         .overlay(
-            RoundedRectangle(cornerRadius: 15)
-                .strokeBorder(ClaudioColor.hairlineStrong(colorScheme), lineWidth: 1)
+            RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel)
+                .strokeBorder(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 15))
+        .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel))
+        .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
         // `.onAppear` deliberately does NOT call `refresh()` (`/ship` 评审 · 性能): `refresh()`
         // is a synchronous, main-thread DISK SCAN (re-reads config.json, the selected pack's
         // manifest + a `stat` per event, then enumerates BOTH pack roots and reads EVERY pack's
@@ -283,42 +217,79 @@ public struct PanelView: View {
 
     // MARK: - Header
 
-    /// 面板标题只表达 Claudio 与恒定两个声音来源；不再用单一宿主绿点代替事实。
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text("Claudio")
-                .font(.system(size: 18 * typeScale, weight: .semibold, design: .rounded))
-                .foregroundColor(ClaudioColor.text(colorScheme))
-            Spacer(minLength: 8)
-            Text("\(hostIntegrations.content.sourceRows.count) 个声音来源")
-                .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .center) {
+                Text("Claudio")
+                    .font(.system(size: 18 * typeScale, weight: .semibold, design: .rounded))
+                    .foregroundColor(ClaudioTheme.text(colorScheme))
+                Spacer(minLength: 8)
+                interfaceOptionsMenu
+            }
+            Text(selectedPackDisplayName.isEmpty ? "尚未选择声音包" : selectedPackDisplayName)
+                .font(.system(size: 14 * typeScale, weight: .semibold, design: .rounded))
+                .foregroundColor(ClaudioTheme.text(colorScheme))
+                .lineLimit(2)
+            Text("\(audibleEventCount) 个可听事件")
+                .font(.system(size: 11 * typeScale, design: .rounded))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
         }
-        .accessibilityElement(children: .combine)
         .accessibilityLabel(headerAccessibilityLabel)
+    }
+
+    private var interfaceOptionsMenu: some View {
+        Menu {
+            Picker("界面文字", selection: $interfaceTextSizeRaw) {
+                ForEach(ClaudioInterfaceTextSize.allCases) { size in
+                    Text(size.displayName).tag(size.rawValue)
+                }
+            }
+            .accessibilityLabel("界面文字大小")
+            .accessibilityValue(interfaceTextSize.displayName)
+            .accessibilityHint("应用到主面板、声音包窗口和集成窗口")
+            .accessibilityIdentifier("panel.options.text-size")
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .frame(
+                    minWidth: ClaudioTheme.Metrics.iconTarget,
+                    minHeight: ClaudioTheme.Metrics.iconTarget)
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityLabel("Claudio 选项")
+        .accessibilityValue("界面文字，\(interfaceTextSize.displayName)")
+        .accessibilityHint("选择 Claudio 三个界面的文字大小")
+        .accessibilityIdentifier("panel.options")
     }
 
     private var headerAccessibilityLabel: String {
         let packName = selectedPackDisplayName
-        let base = "Claudio 面板，2 个声音来源"
+        let base = "Claudio 面板，2 个声音来源，\(audibleEventCount) 个可听事件"
         guard !packName.isEmpty else { return base }
         return "\(base)，当前声音包 \(packName)"
     }
 
     private var hostSourcesSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("声音来源")
-                .font(.system(size: 11 * typeScale, weight: .semibold))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                .accessibilityAddTraits(.isHeader)
+        HStack(alignment: .top, spacing: 8) {
             ForEach(hostIntegrations.content.sourceRows) { row in
                 HostSourceRowView(
                     row: row,
                     typeScale: typeScale,
                     focusedTarget: $focusedTarget,
                     onSelect: { onManageIntegrations(.hostSource(row.host)) })
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("声音来源")
+    }
+
+    private var audibleEventCount: Int {
+        panelModel.eventRows.filter {
+            eventPreviewAvailability(
+                coverage: $0.coverage,
+                masterVolume: panelModel.config.masterVolume).isAvailable
+        }.count
     }
 
     /// Header 与事件区标题共用这一份 current-pack 读数。它不看 `packCards`：星标显示集可合法地
@@ -352,41 +323,28 @@ public struct PanelView: View {
                     .font(.system(size: 11 * typeScale, weight: .semibold))
                     .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 ForEach(panelModel.eventRows, id: \.event) { row in
-                    if let importViewModel = rowImportViewModels[row.event] {
-                        EventRowView(
-                            row: row,
-                            importViewModel: importViewModel,
-                            hostCoverage: eventHostCoveragePresentation(
-                                event: row.event,
-                                matrix: hostIntegrations.content.matrix),
-                            focusedTarget: $focusedTarget,
-                            adaptation: layoutAdaptation,
-                            onPreview: { playPreview(for: row) },
-                            onToggleMute: {
-                                panelModel.toggleMute(row.event)
-                                onAudibilityInputsChanged()
-                            },
-                            // T16 fix: a successful row-end bind writes `manifest.json` but the
-                            // row renders off `eventRows`, which only `refresh()` recomputes —
-                            // without this the just-bound row keeps showing "未配置/文件丢失" and a
-                            // disabled 试听 until an unrelated mute/switch/reopen. Recompute now.
-                            onImportCompleted: { panelModel.reload() },
-                            // T2: the SAME reasoning as `onImportCompleted` above, for the
-                            // menu's 「清除绑定」item — `EventRowImportViewModel.clearBinding()`
-                            // writes `manifest.json` directly, and the row needs the exact same
-                            // recompute-now nudge or it keeps showing its pre-clear state.
-                            onBindingCleared: { panelModel.reload() },
-                            // T11: one full-reload inventory snapshot is shared by all four menus;
-                            // binding through EventRowImportViewModel then immediately recomputes
-                            // both coverage and the orphan labels.
-                            existingAudioFiles: panelModel.selectedPackAudioFiles,
-                            onExistingAudioBound: { panelModel.reload() },
-                            onPackAudioChanged: { _ in
-                                soundPacksRefreshCoordinator.completePanelPackAudioChange(.changed)
-                            },
-                            isBuiltinReadOnly: panelModel.selectedPackIsBuiltinReadOnly
-                        )
-                    }
+                    EventRowView(
+                        row: row,
+                        hostCoverage: eventHostCoveragePresentation(
+                            event: row.event,
+                            matrix: hostIntegrations.content.matrix),
+                        previewAvailability: eventPreviewAvailability(
+                            coverage: row.coverage,
+                            masterVolume: panelModel.config.masterVolume),
+                        focusedTarget: $focusedTarget,
+                        adaptation: layoutAdaptation,
+                        onOpenEditor: {
+                            onManageSounds(
+                                .editEvent(
+                                    packID: panelModel.config.selectedPack,
+                                    event: row.event),
+                                .eventSound(row.event))
+                        },
+                        onPreview: { playPreview(for: row) },
+                        onToggleMute: {
+                            panelModel.toggleMute(row.event)
+                            onAudibilityInputsChanged()
+                        })
                 }
                 // PLAN-MASTER-VOLUME.md 阶段 D：位置对齐线框——四行事件之后、拖入区之前。只在
                 // `.events`（= `.operational`）渲染（D23 定稿 + D41：这是滑块唯一真的出现在屏幕上的态）。
@@ -453,15 +411,22 @@ public struct PanelView: View {
             Text("声音包")
                 .font(.system(size: 11 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-            PackGalleryView(
-                cards: panelModel.packCards, focusedTarget: $focusedTarget, adaptation: layoutAdaptation,
-                onSelect: {
-                    let outcome = panelModel.switchPack(to: $0.id)
-                    soundPacksRefreshCoordinator.completePanelPackSwitch(outcome)
-                })
+            panelPackSection
             manageSoundsRow
-            manageIntegrationsRow
         }
+    }
+
+    @ViewBuilder
+    private var panelPackSection: some View {
+        PanelPackSectionView(
+            state: panelModel.packSectionState,
+            typeScale: typeScale,
+            focusedTarget: $focusedTarget,
+            adaptation: layoutAdaptation,
+            onSelect: {
+                let outcome = panelModel.switchPack(to: $0.id)
+                soundPacksRefreshCoordinator.completePanelPackSwitch(outcome)
+            })
     }
 
     /// D23 定稿④「先选包」空态卡——`configState == .needsPack` 时替换掉本该渲染的四行事件覆盖度。
@@ -486,7 +451,7 @@ public struct PanelView: View {
     /// 这与 `panelFocusOrder` 无条件 append `.manageSounds` 是一对不可拆的诚实性契约。
     private var manageSoundsRow: some View {
         Button {
-            onManageSounds()
+            onManageSounds(.overview, .manageSounds)
         } label: {
             Text("管理声音包…")
                 .font(.system(size: 11 * typeScale))
@@ -505,30 +470,8 @@ public struct PanelView: View {
         )
         .accessibilityLabel("管理声音包")
         .accessibilityHint("打开声音包管理窗口")
+        .accessibilityIdentifier("panel.manage-sound-packs")
         .focused($focusedTarget, equals: .manageSounds)
-    }
-
-    private var manageIntegrationsRow: some View {
-        Button {
-            onManageIntegrations(.manageIntegrations)
-        } label: {
-            HStack(spacing: 6) {
-                Text("管理声音来源…")
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
-                    .accessibilityHidden(true)
-            }
-            .font(.system(size: 11 * typeScale))
-            .frame(maxWidth: .infinity)
-            .frame(minHeight: 24)
-            .padding(.vertical, 4)
-            .contentShape(RoundedRectangle(cornerRadius: 8))
-        }
-        .buttonStyle(.plain)
-        .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-        .accessibilityLabel("管理声音来源")
-        .accessibilityHint("打开 Claude Code 与 Codex 声音来源详情")
-        .focused($focusedTarget, equals: .manageIntegrations)
     }
 
     /// D23 定稿④诚实失败态——`configState`是 `.malformed`/`.unwritable` 时替换掉本该渲染的四行事件
@@ -557,7 +500,10 @@ public struct PanelView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            .accessibilityLabel("在访达中显示 Claudio 配置")
+            .accessibilityValue(configFile.path)
             .accessibilityHint("在访达中定位 config.json，方便手工修正")
+            .accessibilityIdentifier("panel.reveal-config")
             // 它是这张卡上唯一的 bespoke 修复动作，渲染在面板最顶端 —— 所以它必须在焦点序里，且开局
             // 焦点就落在它上面（`.malformed`/`.unwritable` 时 `applyFirstFocus` 走 `.configReveal`）。
             // /codex review P1（26bba37 follow-up）。
@@ -573,17 +519,17 @@ public struct PanelView: View {
 
     // MARK: - Dynamic Type (ENGINEERING.md T15 D5「Dynamic Type + 降级规则」)
 
-    /// Real `DynamicTypeSize` (11 cases) → this panel's own 4-tier
-    /// ``PanelTypeSizeTier`` — the only place this mapping happens; the actual DEGRADATION
-    /// TABLE for each tier (``panelLayoutAdaptation(for:)``) lives in `ClaudioGUICore` and
-    /// is unit-tested there. This mapping itself is a one-line SwiftUI-only lookup, not a
-    /// "decision" worth its own test (the environment type isn't available outside SwiftUI).
+    private var interfaceTextSize: ClaudioInterfaceTextSize {
+        ClaudioInterfaceTextSize(storedValue: interfaceTextSizeRaw)
+    }
+
+    private var typeScale: CGFloat { CGFloat(interfaceTextSize.scale) }
+
     private var typeSizeTier: PanelTypeSizeTier {
-        switch dynamicTypeSize {
-        case .xSmall, .small, .medium, .large: .standard
-        case .xLarge, .xxLarge: .larger
-        case .xxxLarge, .accessibility1: .largest
-        default: .maximum  // .accessibility2...5
+        switch interfaceTextSize {
+        case .compact, .standard: .standard
+        case .large: .larger
+        case .maximum: .maximum
         }
     }
 
@@ -723,54 +669,45 @@ private struct HostSourceRowView: View {
 
     var body: some View {
         Button(action: onSelect) {
-            HStack(alignment: .center, spacing: 8) {
-                Image(systemName: statusSymbol)
-                    .font(.system(size: 12 * typeScale, weight: .semibold))
-                    .foregroundColor(statusColor)
-                    .frame(width: 16 * typeScale, height: 16 * typeScale)
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(row.title)
-                            .font(
-                                .system(
-                                    size: 12 * typeScale, weight: .semibold,
-                                    design: .rounded))
-                        Spacer(minLength: 4)
-                        Text(row.readinessText)
-                            .font(.system(size: 10.5 * typeScale, weight: .medium))
-                            .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                    }
-                    if let detailText = row.detailText {
-                        Text(detailText)
-                            .font(.system(size: 10 * typeScale))
-                            .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Image(systemName: statusSymbol)
+                        .font(.system(size: 11 * typeScale, weight: .semibold))
+                        .foregroundColor(statusColor)
+                        .accessibilityHidden(true)
+                    Text(row.title)
+                        .font(.system(size: 11.5 * typeScale, weight: .semibold, design: .rounded))
+                        .lineLimit(1)
+                    Spacer(minLength: 2)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 9 * typeScale, weight: .semibold))
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                    .accessibilityHidden(true)
+                Text(row.readinessText)
+                    .font(.system(size: 9.5 * typeScale, weight: .medium, design: .rounded))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    .lineLimit(2)
+                if row.status != .ready, let detailText = row.detailText {
+                    Text(detailText)
+                        .font(.system(size: 9 * typeScale, design: .rounded))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                        .lineLimit(2)
+                        }
             }
-            .foregroundColor(ClaudioColor.text(colorScheme))
-            // 32pt 内容槽同时容纳标题与一行限定语；Claude Code 没有
-            // 限定语时仍与 Codex ready 行等高，不需要伪造占位 Text/AX 内容。
-            .frame(maxWidth: .infinity, minHeight: 32 * typeScale, alignment: .leading)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 6)
-            .contentShape(RoundedRectangle(cornerRadius: 9))
+            .foregroundColor(ClaudioTheme.text(colorScheme))
+            .frame(maxWidth: .infinity, minHeight: 48 * typeScale, alignment: .topLeading)
+            .padding(8)
+            .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
             .background(
-                RoundedRectangle(cornerRadius: 9)
-                    .fill(ClaudioColor.surface2(colorScheme)))
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                    .fill(ClaudioTheme.elevated(colorScheme).opacity(0.88)))
             .overlay(
-                RoundedRectangle(cornerRadius: 9)
-                    .stroke(ClaudioColor.hairlineStrong(colorScheme), lineWidth: 1))
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                    .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1))
         }
         .buttonStyle(.plain)
         .focused(focusedTarget, equals: .hostSource(row.host))
         .accessibilityLabel(row.accessibilityLabel)
+        .accessibilityValue(row.readinessText)
         .accessibilityHint("打开该声音来源的连接与诊断详情")
+        .accessibilityIdentifier("panel.host.\(row.host.rawValue)")
     }
 
     private var statusSymbol: String {

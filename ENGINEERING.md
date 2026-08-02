@@ -470,7 +470,15 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - ③ 第一次响后轻确认形态 → 倾向**一次性 toast**「刚刚：{事件名}」，建立映射后不再出现（非常驻角标，避免打扰）。
 - ④ 视觉回放触发范围 → 倾向**仅当前触发事件按其事件色重放一次**波形（非重放所有事件，防菜单栏太闹）；单色模板图标下用 alpha 强弱表现。
 - ⑤ 主音量 → `afplay -v` 默认值 → 倾向**默认 0.8**（对齐 config `master_volume`），越界钳制 0.0–1.0。
-- ⑥ **主音量行尾的「全局静音」钮 → 待定（须立项或删除）**（2026-07-17 方向 D 全量采纳时识别）：糖果盘四版画稿都在主音量行**行尾**画了一个喇叭 + 斜杠的**全局静音**钮（`master-mute`，区别于四个事件行各自的 per-event 静音），但工程侧**从未立项** —— 它不在本文档 UI 线框、不在「交互状态覆盖表」，helper 侧也没有消费者（`master_volume` 走 `afplay -v`；一个「全局静音」需要**新 config 键**或一个纯 UI 的输出静音开关，且与 per-event 静音的**叠加语义**——全局静音时 per-event 状态怎么显示 / 解除后回到哪个态——一个字都没定）。**落地前二选一**：①**立项**（定 config 契约 + 叠加语义 + 无障碍播报，进 UI 规格与交互状态覆盖表）；②**删除**（从画稿与 DESIGN 组件解剖拿掉，主音量行只留滑块）。⚠ 别让画稿默默变契约（DESIGN.md「现行视觉皮肤：糖果盘」台账 ⑨ · TODOS.md「方向 D 落地债」）。
+- ⑥ **主音量行尾的「全局静音」钮 → 已删除（2026-08-02）**：该控件从未立项，也没有 config/runtime 消费者；现行主音量行只保留滑块。事件级静音只控制真实宿主事件，手工试听由 `EventPreviewAvailability` 独立判断。
+
+### 2026-08-02 全产品 UI/UX 重构实现记录
+
+- 共享 `ClaudioTheme` 统一 SF Pro Rounded、18/13/11 圆角、状态胶囊、事件图形和 28/32pt 控件；亮色 token 与菜单栏专属最深渐变底进入同源对比度测试。`ClaudioInterfaceTextSize` 以 `UserDefaults` 提供四档产品内文字偏好并注入三个界面。
+- `PanelPackSectionState` 显式区分固定包、无固定包、无包和读取失败；主面板只有一个滚动容器，`PackGalleryView` 最多四行。事件行不再读取/写入 manifest，只通过 `SoundPacksWindowRoute.editEvent` 进入编辑器。
+- `SoundPacksWindow` 默认 760×560、最小 640×480；支持现有文件绑定、选择并绑定、清除、Finder 定位和事件目标拖放，全部复用既有安全导入与原子发布管线。retained 窗口只在真实切换检查包时滚回顶部。
+- `IntegrationsWindow` 默认 840×620、最小 640×520；矩阵与检查器按实际宽度重排，`IntegrationsRecoveryAction` 从状态纯派生，配置路径缩写显示且可选择/复制，重新检测归工具栏，断开归检查器末尾确认。
+- 自动化覆盖状态、路由、恢复动作、文字档位、窗口几何和无障碍源码契约；真实鼠标、Full Keyboard Access、VoiceOver、Accessibility Inspector、明暗/高对比/无颜色区分/透明度/动态效果和音频仍须 AppKit 人工验收，构建通过不能替代。
 
 ## Success Criteria（成功标准）
 

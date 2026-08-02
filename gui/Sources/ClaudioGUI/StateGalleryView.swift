@@ -2,6 +2,7 @@
 import ClaudioCore
 import ClaudioGUIComponents
     import ClaudioGUICore
+    import SoundPacksWindow
     import SwiftUI
 
     /// The repo-internal SwiftUI state gallery (ENGINEERING.md T14 D2) — the in-repo VISUAL
@@ -36,8 +37,13 @@ import ClaudioGUIComponents
                         OnboardingActionGalleryView()
                     }
                     EventRowGalleryView()
+                    PanelPackSectionGalleryView()
+                    InterfaceTextSizeGalleryView()
                     MasterVolumeGalleryView()
                     PackCardGalleryView()
+                    GallerySection(title: "Sound Packs Window (3 production states)") {
+                        SoundPacksWindowStateGalleryView()
+                    }
                     HostIntegrationGalleryView()
                 }
                 .padding(20)
@@ -172,17 +178,12 @@ import ClaudioGUIComponents
         @FocusState private var focusedTarget: PanelFocusTarget?
 
         var body: some View {
-            // `importViewModel` only backs the row-end drag/pick-to-bind AFFORDANCE — never
-            // read by `EventRowView`'s rendering itself (see its own doc comment) — so a
-            // throwaway instance, pinned to no particular state, is exactly what its own
-            // doc comment anticipates ("construct a throwaway EventRowImportViewModel...
-            // for its affordance").
+            // 生产事件行只负责扫读、显式编辑路由、手工试听与自动事件静音；画廊不写磁盘。
             EventRowView(
                 row: row,
-                importViewModel: EventRowImportViewModel(
-                    event: row.event,
-                    importViewModel: AudioImportViewModel(
-                        packID: "minimal-chime", environment: previewAudioImportEnvironment)),
+                previewAvailability: eventPreviewAvailability(
+                    coverage: row.coverage,
+                    masterVolume: 1),
                 focusedTarget: $focusedTarget,
                 onPreview: {}
             )
@@ -200,6 +201,88 @@ import ClaudioGUIComponents
         case .present: ".present"
         case .unmapped: ".unmapped"
         case .broken: ".broken"
+        }
+    }
+
+    // MARK: - Product UI refactor states
+
+    struct PanelPackSectionGalleryView: View {
+        var body: some View {
+            GallerySection(
+                title: "PanelPackSectionState (\(PreviewFixtures.panelPackSectionStates.count))"
+            ) {
+                ForEach(
+                    Array(PreviewFixtures.panelPackSectionStates.enumerated()),
+                    id: \.offset
+                ) { _, state in
+                    GalleryFrame(caption: panelPackSectionCaption(state)) {
+                        PanelPackSectionStateFrame(state: state)
+                    }
+                }
+            }
+        }
+    }
+
+    private struct PanelPackSectionStateFrame: View {
+        let state: PanelPackSectionState
+        @FocusState private var focusedTarget: PanelFocusTarget?
+
+        var body: some View {
+            PanelPackSectionView(
+                state: state,
+                typeScale: 1,
+                focusedTarget: $focusedTarget,
+                adaptation: panelLayoutAdaptation(for: .standard),
+                onSelect: { _ in })
+                .frame(width: CGFloat(standardPanelWidth))
+        }
+    }
+
+    private func panelPackSectionCaption(_ state: PanelPackSectionState) -> String {
+        switch state {
+        case .pinned(let cards): ".pinned(\(cards.count))"
+        case .noPinnedPacks(let count): ".noPinnedPacks(available: \(count))"
+        case .noPacks: ".noPacks"
+        case .readFailed: ".readFailed"
+        }
+    }
+
+    struct InterfaceTextSizeGalleryView: View {
+        var body: some View {
+            GallerySection(title: "ClaudioInterfaceTextSize (4)") {
+                ForEach(PreviewFixtures.interfaceTextSizes) { size in
+                    GalleryFrame(caption: ".\(size.rawValue) · \(size.displayName)") {
+                        InterfaceTextSizeFrame(size: size)
+                    }
+                }
+            }
+        }
+    }
+
+    private struct InterfaceTextSizeFrame: View {
+        let size: ClaudioInterfaceTextSize
+        @FocusState private var focusedTarget: PanelFocusTarget?
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Claudio · 当前声音包 极简铃 · 4 个可听事件")
+                    .font(ClaudioTheme.font(.productTitle))
+                EventRowView(
+                    row: PreviewFixtures.eventRows[0],
+                    previewAvailability: .available(fileName: "stop.mp3"),
+                    focusedTarget: $focusedTarget,
+                    adaptation: panelLayoutAdaptation(for: panelTier))
+            }
+            .frame(width: size == .maximum ? CGFloat(widenedPanelWidth) : CGFloat(standardPanelWidth))
+            .environment(\.dynamicTypeSize, size.dynamicTypeSize)
+        }
+
+        private var panelTier: PanelTypeSizeTier {
+            switch size {
+            case .compact, .standard: .standard
+            case .large: .larger
+            case .maximum: .maximum
+            }
         }
     }
 

@@ -150,10 +150,17 @@ public func soundPacksWindowFirstFocusTarget(
 @MainActor
 public final class SoundPacksWindowFocusCoordinator: ObservableObject {
     @Published public private(set) var requestRevision = 0
+    @Published public private(set) var requestedRoute: SoundPacksWindowRoute = .overview
 
     public init() {}
 
-    public func requestInitialFocus() {
+    public func requestInitialFocus(route: SoundPacksWindowRoute = .overview) {
+        requestedRoute = route
+        requestRevision += 1
+    }
+
+    public func requestRoute(_ route: SoundPacksWindowRoute) {
+        requestedRoute = route
         requestRevision += 1
     }
 }
@@ -274,6 +281,16 @@ public func soundPacksWindowLayoutAdaptation(
             sidebarMinimumHeight: 160,
             packNameLineLimit: nil)
     }
+}
+
+/// Detail rows must respond to the space the split view actually gives them. A restored narrow
+/// window can make the detail column compact even at the standard text setting, while the larger
+/// text tiers still force the safer stacked shape regardless of width.
+public func soundPacksWindowDetailUsesStackedLayout(
+    detailWidth: Double,
+    tier: SoundPacksWindowTypeSizeTier
+) -> Bool {
+    soundPacksWindowLayoutAdaptation(for: tier).stacksDetailHeader || detailWidth < 460
 }
 
 /// VoiceOver label for one native list row. Selection itself is exposed by the List; this sentence

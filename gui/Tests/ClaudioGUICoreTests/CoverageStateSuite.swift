@@ -64,9 +64,9 @@ func runCoverageStateSuites() {
         expect(row.eventActionOperable, ".present not-muted must be operable")
     }
 
-    suite("EventRow.eventActionOperable: .present + muted is non-operable (试听 ▶ is a real but disabled control)") {
+    suite("EventRow.eventActionOperable: .present + muted 仍可手工试听（静音只控制真实事件）") {
         let row = EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: false)
-        expect(!row.eventActionOperable, ".present muted must be non-operable")
+        expect(row.eventActionOperable, ".present muted must remain manually previewable")
     }
 
     suite("EventRow.eventActionOperable: .unmapped is NEVER operable, mute or not (试听 ▶ is permanently disabled — CoverageState.previewEnabled is false; ``PanelFocusTarget/eventSound(_:)`` is this row's actually-fixable, always-operable slot instead)") {

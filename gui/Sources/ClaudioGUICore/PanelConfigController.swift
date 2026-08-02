@@ -42,6 +42,7 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var config: ClaudioConfig
     @Published public private(set) var eventRows: [EventRow]
     @Published public private(set) var packCards: [PackCard]
+    @Published public private(set) var packSectionState: PanelPackSectionState
     /// Existing audio for the active pack, computed once per full reload and shared by all four
     /// event-row menus. This avoids four synchronous `readdir` calls during one SwiftUI body pass.
     /// An unreadable manifest yields an empty, fail-closed menu rather than invented orphan facts.
@@ -118,10 +119,9 @@ public final class PanelConfigController: ObservableObject {
         self.config = loadedConfig
         self.eventRows = packCoverage(
             packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
-        self.packCards = availablePacks(
-            config: loadedConfig,
-            environment: environment,
-            scope: .panelStarredDisplay)
+        let loadedPackSection = Self.loadPackSection(config: loadedConfig, environment: environment)
+        self.packCards = loadedPackSection.cards
+        self.packSectionState = loadedPackSection.state
         self.selectedPackAudioFiles = Self.loadSelectedPackAudioFiles(
             packID: loadedConfig.selectedPack, environment: environment)
         self.selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(loadedConfig.selectedPack)
@@ -295,10 +295,9 @@ public final class PanelConfigController: ObservableObject {
         config = configState.resolvedConfig
         eventRows = packCoverage(
             packID: config.selectedPack, config: config, environment: environment)
-        packCards = availablePacks(
-            config: config,
-            environment: environment,
-            scope: .panelStarredDisplay)
+        let loadedPackSection = Self.loadPackSection(config: config, environment: environment)
+        packCards = loadedPackSection.cards
+        packSectionState = loadedPackSection.state
         selectedPackAudioFiles = Self.loadSelectedPackAudioFiles(
             packID: config.selectedPack, environment: environment)
         selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
@@ -316,5 +315,46 @@ public final class PanelConfigController: ObservableObject {
             return []
         }
         return files
+    }
+
+    private static func loadPackSection(
+        config: ClaudioConfig,
+        environment: AudioImportEnvironment
+    ) -> (cards: [PackCard], state: PanelPackSectionState) {
+        for root in [environment.userPacksDirectory, environment.bundledPacksDirectory].compactMap({ $0 }) {
+            var isDirectory: ObjCBool = false
+            let exists = FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory)
+            if exists, !isDirectory.boolValue {
+                let reason = "声音包位置不是文件夹：\(root.path)"
+                return ([], .readFailed(reason: reason))
+            }
+            guard exists else { continue }
+            do {
+                _ = try FileManager.default.contentsOfDirectory(atPath: root.path)
+            } catch {
+                return ([], .readFailed(reason: "无法读取声音包：\(error.localizedDescription)"))
+            }
+        }
+
+        let pinnedCards = availablePacks(
+            config: config,
+            environment: environment,
+            scope: .panelStarredDisplay)
+        if !pinnedCards.isEmpty {
+            return (
+                pinnedCards,
+                panelPackSectionState(
+                    pinnedCards: pinnedCards,
+                    availablePackCount: pinnedCards.count))
+        }
+        let fullLibrary = availablePacks(
+            config: config,
+            environment: environment,
+            scope: .fullLibrary)
+        return (
+            [],
+            panelPackSectionState(
+                pinnedCards: [],
+                availablePackCount: fullLibrary.count))
     }
 }

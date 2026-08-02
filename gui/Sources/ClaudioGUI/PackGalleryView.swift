@@ -1,4 +1,5 @@
 import ClaudioCore
+import ClaudioGUIComponents
 import ClaudioGUICore
 import SwiftUI
 
@@ -12,13 +13,7 @@ import SwiftUI
 /// ``selectPack(_:configFile:userPacksDirectory:bundledPacksDirectory:lockFile:)`` via
 /// `onSelect`, never a second write path.
 ///
-/// 阶段 1（PLAN-SOUND-MANAGER.md §2.6 排期硬约束）: renders EVERY card, unfiltered — the ≤4
-/// starred-only filter is T17, gated on the management window landing first (starring becomes
-/// the only way back once filtering activates, so filtering can't ship before it). Still
-/// scrollable (now vertically, was horizontally): the panel's `NSPopover` has a fixed
-/// `contentSize` (`MenuBarController.swift`), so this view's `ScrollView` simply absorbs
-/// whatever vertical space the fixed-height siblings around it (event rows, notices,
-/// disconnect row) leave over, and scrolls internally rather than growing the popover.
+/// 主面板只有一个外层滚动容器；本视图只渲染普通 `VStack`，并防御性限制为四行。
 ///
 /// COMPILE-ONLY here (CommandLineTools, no Xcode/simulator/`#Preview`): visual layout is
 /// manual-verify on a real Mac. The one piece of this file's behavior that IS unit-tested is
@@ -57,16 +52,14 @@ public struct PackGalleryView: View {
     }
 
     public var body: some View {
-        ScrollView(showsIndicators: false) {
-            VStack(spacing: 8) {
-                ForEach(cards, id: \.id) { card in
-                    PackCardView(
-                        card: card, focusedTarget: focusedTarget, adaptation: adaptation,
-                        onSelect: { onSelect(card) })
-                }
+        VStack(spacing: 8) {
+            ForEach(Array(cards.prefix(maxStarredPacks)), id: \.id) { card in
+                PackCardView(
+                    card: card, focusedTarget: focusedTarget, adaptation: adaptation,
+                    onSelect: { onSelect(card) })
             }
-            .padding(.vertical, 2)
         }
+        .padding(.vertical, 2)
         // `.contain`, not `.combine`: unlike `EventRowView`'s single-announcement row
         // (ENGINEERING.md「无障碍规格」spells out one combined string per row), the gallery's
         // whole point is per-ROW navigation/selection — VoiceOver must be able to move
@@ -136,24 +129,23 @@ private struct PackCardView: View {
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                // ⚠️ DESIGN.md 未定义 pack 行背景的确切 token（「现行视觉皮肤：糖果盘」把它改成白色
-                // `surface` + radius 13，但方向 D 尚未落地到任何一处 SwiftUI 代码——TODOS.md「方向
-                // D 全量采纳的落地债」——所以这里跟随代码库现状，沿用 v1 的既有 `surface-2` + radius
-                // 10，不单独抢跑糖果盘皮肤）。
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(ClaudioColor.surface2(colorScheme))
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
+                    .fill(ClaudioTheme.surface(colorScheme))
             )
             .overlay(
-                // ⚠️ DESIGN.md 未定义 selected 视觉 — 用既有 `clay`（品牌强调，语义固定为
-                // "选中/该你了"）描边环表达选中，非选中态回落到既有 `hairline-strong`。
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
                     .strokeBorder(
-                        card.isSelected ? ClaudioColor.clay(colorScheme) : ClaudioColor.hairlineStrong(colorScheme),
+                        card.isSelected
+                            ? ClaudioTheme.clay(colorScheme)
+                            : ClaudioTheme.hairline(colorScheme),
                         lineWidth: card.isSelected ? 2 : 1)
             )
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
+        .accessibilityValue(card.isSelected ? "使用中" : "未使用")
+        .accessibilityHint("切换为当前运行声音包")
+        .accessibilityIdentifier("panel.pack.\(card.id)")
         .accessibilityAddTraits(card.isSelected ? [.isButton, .isSelected] : .isButton)
         // a11y-architect FIX 4: this row's `.packCard(id:)` slot — `panelFocusOrder(_:)`'s
         // SAME identity, never a second one.
@@ -166,8 +158,8 @@ private struct PackCardView: View {
     private var nameAndMeta: some View {
         HStack(spacing: 8) {
             Text(card.name ?? card.id)
-                .font(.system(size: 13 * typeScale))
-                .foregroundColor(ClaudioColor.text(colorScheme))
+                .font(ClaudioTheme.font(.body))
+                .foregroundColor(ClaudioTheme.text(colorScheme))
                 .lineLimit(1)
                 .truncationMode(.tail)
             metaSlot
@@ -204,9 +196,9 @@ private struct PackCardView: View {
         HStack(spacing: 6) {
             if let label = licenseBadgeLabel(slots.license) {
                 Text(label)
-                    .font(.system(size: 10 * typeScale, weight: .semibold, design: .monospaced))
+                    .font(ClaudioTheme.font(.technical).weight(.semibold))
                     .monospacedDigit()
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             }
             if let missingCount = slots.missingCount {
                 // DESIGN.md「包行四态」: 完整度子槽 = `⚠`（`warning` 图标）+ `缺 N 个`（**`text-2`，
@@ -216,8 +208,8 @@ private struct PackCardView: View {
                         .font(.system(size: 10 * typeScale))
                         .foregroundColor(ClaudioColor.warning(colorScheme))
                     Text("缺 \(missingCount) 个")
-                        .font(.system(size: 11 * typeScale))
-                        .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                        .font(ClaudioTheme.font(.caption))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 }
             }
         }
@@ -269,8 +261,8 @@ private struct PackCardView: View {
                 .font(.system(size: 11 * typeScale))
                 .foregroundColor(ClaudioColor.error(colorScheme))
             Text("文件丢失")
-                .font(.system(size: 11 * typeScale))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .font(ClaudioTheme.font(.caption))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
         }
     }
 
@@ -332,17 +324,14 @@ private struct CoverageTrack: View {
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
-    /// v1 几何（DESIGN.md「4-slot 覆盖轨」"面板行档 ≈ 18×10pt...间距 4pt"）— the candy-skin
-    /// mockup's 14×7 geometry is a DESIGN value that hasn't landed in any SwiftUI code yet
-    /// (TODOS.md「方向 D 全量采纳的落地债」: `ContrastSuite` is still pinned to the v1 surface).
-    /// This component follows the rest of the codebase and stays on v1 numbers rather than
-    /// jumping the queue on its own.
-    private var slotSize: CGSize { CGSize(width: 18 * typeScale, height: 10 * typeScale) }
+    private var slotSize: CGSize { CGSize(width: 14 * typeScale, height: 7 * typeScale) }
 
     var body: some View {
-        HStack(spacing: 4 * typeScale) {
+        HStack(spacing: 3 * typeScale) {
             ForEach(Event.allCases, id: \.self) { event in
-                slot(isPresent: presentEvents.contains(event), color: ClaudioColor.event(event, colorScheme))
+                slot(
+                    isPresent: presentEvents.contains(event),
+                    color: ClaudioTheme.event(event, colorScheme))
             }
         }
         .accessibilityHidden(true)
@@ -357,9 +346,9 @@ private struct CoverageTrack: View {
         } else {
             ZStack {
                 RoundedRectangle(cornerRadius: slotSize.height / 2)
-                    .strokeBorder(ClaudioColor.textSecondary(colorScheme), lineWidth: 1)
+                    .strokeBorder(ClaudioTheme.secondaryText(colorScheme), lineWidth: 1)
                 CoverageTrackSlash()
-                    .stroke(ClaudioColor.textSecondary(colorScheme), lineWidth: 1)
+                    .stroke(ClaudioTheme.secondaryText(colorScheme), lineWidth: 1)
             }
             .frame(width: slotSize.width, height: slotSize.height)
         }

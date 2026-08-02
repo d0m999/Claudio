@@ -9,15 +9,15 @@ APP="dist/Claudio.app"
 # 不能留在原地——否则走查者会 `open` 到上一次成功构建的旧二进制，却以为测的是这次改动。
 rm -rf "$APP"
 
-# `--product ClaudioGUI` 不是可省的修饰：裸 `swift build -c release` 会连 claudio-gui-tests
-# 一起建，而它引用 `#if DEBUG` 门控的 PreviewFixtures，Release 下编译不过（gui/Package.swift:18-23）。
+# 两个 `--product` 都不是可省的修饰：裸 `swift build -c release` 会连各自的测试
+# executable 一起建，而测试会引用 `#if DEBUG` 门控的 fixture，Release 下编译不过。
 swift build -c release --package-path gui --product ClaudioGUI
-swift build -c release --package-path helper
+swift build -c release --package-path helper --product claudio
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/packs"
 cp "$(swift build -c release --package-path gui --product ClaudioGUI --show-bin-path)/ClaudioGUI" \
    "$APP/Contents/MacOS/Claudio"
-cp "$(swift build -c release --package-path helper --show-bin-path)/claudio" \
+cp "$(swift build -c release --package-path helper --product claudio --show-bin-path)/claudio" \
    "$APP/Contents/Resources/bin/claudio"
 cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
 

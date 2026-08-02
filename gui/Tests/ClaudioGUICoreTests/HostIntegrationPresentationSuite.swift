@@ -188,16 +188,16 @@ func runHostIntegrationPresentationSuites() {
             (event, eventHostCoveragePresentation(event: event, matrix: matrix))
         })
 
-        expect(rows[.stop]?.visibleText == "Claude Code · Codex", "本轮结束必须显示两个宿主")
+        expect(rows[.stop]?.visibleText == "两个来源", "本轮结束必须显示紧凑双来源状态")
         expect(rows[.stopFailure]?.visibleText == "仅 Claude Code", "执行中断必须只显示 Claude Code")
         expect(
             rows[.notification]?.visibleText
-                == "Claude Code · Codex（Codex 仅授权请求）",
+                == "两个来源 · Codex 仅授权请求",
             "需要你必须把 Codex 的仅授权边界写进可见短文案")
         expect(
             rows[.notification]?.accessibilityLabel.contains("Codex 仅授权请求") == true,
             "需要你的 VoiceOver label 必须包含宿主与仅授权限定")
-        expect(rows[.subagentStop]?.visibleText == "Claude Code · Codex", "子任务结束必须显示两个宿主")
+        expect(rows[.subagentStop]?.visibleText == "两个来源", "子任务结束必须显示紧凑双来源状态")
 
         var capabilities = Dictionary(
             uniqueKeysWithValues: HostID.allCases.map {
@@ -361,13 +361,15 @@ func runHostIntegrationPresentationSuites() {
         expect(!maximum.allowsHorizontalScrolling, "最大字号严禁横向滚动或裁切")
     }
 
-    suite("IntegrationsWindow 焦点序：两张宿主卡领先、矩阵逐行、非破坏动作随后，断开永远最后") {
+    suite("IntegrationsWindow 焦点序：宿主摘要领先、矩阵逐行、检查器视觉序随后，断开永远最后") {
         let matrix = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
         let scope = IntegrationsWindowFocusScope(
             matrix: matrix,
             inspectorActions: [
                 .disconnect(.codex), .copyHooksCommand, .redetect, .connect(.claudeCode),
             ],
+            recoveryAction: .repair(.codex),
+            configurationPathHost: .codex,
             feedbackRevision: 7)
         let order = integrationsWindowFocusOrder(scope)
         let expectedCells = Event.allCases.flatMap { event in
@@ -381,13 +383,15 @@ func runHostIntegrationPresentationSuites() {
             Array(order.dropFirst(2).prefix(8)) == expectedCells,
             "焦点随后必须按事件行、宿主列遍历八个真实矩阵单元")
         expect(
-            order.dropFirst(10).prefix(4) == [
+            order.dropFirst(10).prefix(6) == [
+                .copyConfigurationPath(.codex),
                 .dismissFeedback(revision: 7),
+                .recoveryAction(.repair(.codex)),
                 .inspectorAction(.copyHooksCommand),
                 .inspectorAction(.redetect),
                 .inspectorAction(.connect(.claudeCode)),
             ],
-            "反馈关闭与非破坏检查器动作应按视觉序排在断开之前")
+            "配置路径、反馈、主恢复与非破坏检查器动作应按视觉序排在断开之前")
         expect(
             order.last == .inspectorAction(.disconnect(.codex)),
             "破坏性的断开必须无条件位于详情窗焦点序末尾")

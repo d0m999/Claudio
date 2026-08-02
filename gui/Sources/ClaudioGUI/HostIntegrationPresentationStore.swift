@@ -91,11 +91,14 @@ struct HostIntegrationActionProvider: Sendable {
 
 enum HostIntegrationPresentationError: LocalizedError {
     case storeUnavailable
+    case recoveryFailed(String)
 
     var errorDescription: String? {
         switch self {
         case .storeUnavailable:
             "声音来源状态暂时不可用，请重新检测。"
+        case .recoveryFailed(let message):
+            message
         }
     }
 }

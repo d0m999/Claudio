@@ -24,16 +24,22 @@ public enum ClaudioColorHex {
 
     /// `text` 主文字。
     public static let textDark = "F4EBDD"
-    public static let textLight = "201D19"
+    public static let textLight = "2B2620"
 
     /// `text-2` 次要文字。DESIGN.md 里的次要文字色——也是「真红只做图标、文案改用 text-2」这条
     /// 决议（修复③）之后，pack 卡「文件丢失」/ onboarding 详情等报错**文案**的用色。
     public static let text2Dark = "B0AEA5"
-    public static let text2Light = "6F665B"
+    public static let text2Light = "75685A"
 
     /// `panel` 面板底——事件行、面板正文的真实底色。
     public static let panelDark = "1A1815"
-    public static let panelLight = "FFFDF8"
+    public static let panelLight = "FFFDFA"
+    /// 糖果盘菜单栏面板渐变的最深端。对比度测试必须以这一端作为亮色最坏底。
+    public static let panelDeepLight = "FBF7F1"
+
+    /// 糖果盘行卡 / 表面。暗色不新增值，只提供语义别名。
+    public static let surfaceDark = surface2Dark
+    public static let surfaceLight = "FFFFFF"
 
     /// `surface-2` 抬升表面——pack 卡背景（T15 D3；卡内 2×2 事件字形网格**直接**画在它上面，没有 tile，
     /// 所以「事件字形 vs surface-2」仍是一对真实渲染的对比，`ContrastSuite` 继续钉它）。
@@ -51,7 +57,7 @@ public enum ClaudioColorHex {
     /// 通道值放这里，这样 gui/ 里没有第二处颜色字面量。注意 `F5EBDD` **不是** `text` 的 `F4EBDD`
     /// （红通道差 1），是 DESIGN.md 自己的两个值，不要「顺手统一」。
     public static let hairlineBaseDark = "F5EBDD"
-    public static let hairlineBaseLight = "141413"
+    public static let hairlineBaseLight = "3C2C20"
 
     /// `clay` 品牌强调——App 唯一的品牌色，同时是 `Notification` 的事件色（DESIGN.md「一个招牌绑定」）。
     /// `clay-soft`（drop-zone hover 底）就是这个色带透明度，不是另一个色，见 `ClaudioColor.claySoft(_:)`。

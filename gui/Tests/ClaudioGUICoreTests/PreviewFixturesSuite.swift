@@ -58,6 +58,10 @@ func runPreviewFixturesSuites() {
             "dropZone.reject.lockBusy", "dropZone.reject.lockFailed",
             "coverage.present", "coverage.unmapped", "coverage.broken",
             "packCard.complete", "packCard.partial", "packCard.broken",
+            "panelPack.pinned.one", "panelPack.pinned.four",
+            "panelPack.noPinned", "panelPack.noPacks", "panelPack.readFailed",
+            "interfaceText.compact", "interfaceText.standard",
+            "interfaceText.large", "interfaceText.maximum",
             // 第六族（PLAN-MASTER-VOLUME.md D33/D38）：主音量控件行的展示态。少了它，写失败之后的
             // 「行 + 错误行」组合帧——D16「音量 0 = 全局静音」这类最难手动复现的态——落地前零仓库内
             // 视觉验证，而这条断言仍会全绿（因为其余五族依然完美覆盖它们自己的 case）。
@@ -239,6 +243,20 @@ func runPreviewFixturesSuites() {
             combos == expected,
             "packCards must cover every PackCardState × isSelected combination exactly, got \(combos)"
         )
+    }
+
+    suite("PreviewFixtures covers panel pack four-state rendering plus 1/4 density and all text sizes") {
+        expect(
+            PreviewFixtures.panelPackSectionStates.count == 5,
+            "包区域必须包含 pinned 1/4 行、无固定、无包、读取失败五帧")
+        let pinnedCounts = PreviewFixtures.panelPackSectionStates.compactMap { state -> Int? in
+            guard case .pinned(let cards) = state else { return nil }
+            return cards.count
+        }
+        expect(pinnedCounts == [1, 4], "固定包密度必须覆盖 1 与 4 行，实得 \(pinnedCounts)")
+        expect(
+            PreviewFixtures.interfaceTextSizes == ClaudioInterfaceTextSize.allCases,
+            "state gallery 必须逐档渲染 Claudio 的全部四档界面文字")
     }
 
     // MARK: - Dual-host integration scenarios

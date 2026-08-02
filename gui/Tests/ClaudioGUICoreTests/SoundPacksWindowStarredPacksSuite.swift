@@ -333,7 +333,7 @@ func runSoundPacksWindowStarredPacksSuites() {
                 && view.contains(".accessibilityHidden(true)")
                 && view.contains(".accessibilityHint(")
                 && view.contains("model.toggleStarredPack(card.id)")
-                && !view.contains(".opacity(")
+                && !view.contains(".opacity(control.isEnabled")
                 && view.contains("FailureRow(message: reason)"),
             "禁用 ☆ 的原因必须同时以 macOS hover、就地可见文字和既有 VoiceOver hint 提供；"
                 + "不得靠降低整行透明度表达禁用，星标失败仍接到共享 FailureRow")

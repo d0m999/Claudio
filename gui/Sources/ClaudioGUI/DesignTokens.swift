@@ -69,12 +69,11 @@ enum ClaudioColor {
             ? Color(hex: ClaudioColorHex.surface2Dark) : Color(hex: ClaudioColorHex.surface2Light)
     }
 
-    /// `hairline-strong` — DESIGN.md 把它写成 `rgba(...)`：基色取自 ``ClaudioColorHex``，
-    /// 透明度（`.16`）是本层（`Color` 层）的事。
+    /// `hairline-strong` — 现行糖果盘亮色为 `.14`；暗色沿用 `.16`。
     static func hairlineStrong(_ scheme: ColorScheme) -> Color {
         scheme == .dark
             ? Color(hex: ClaudioColorHex.hairlineBaseDark).opacity(0.16)
-            : Color(hex: ClaudioColorHex.hairlineBaseLight).opacity(0.16)
+            : Color(hex: ClaudioColorHex.hairlineBaseLight).opacity(0.14)
     }
 
     /// `clay` — the sole brand accent.

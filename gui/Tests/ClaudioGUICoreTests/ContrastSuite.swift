@@ -84,6 +84,7 @@ func runContrastSuites() {
     let textPairs: [(name: String, ratio: Double)] = [
         ("text/panel dark", contrastRatio(ClaudioColorHex.textDark, ClaudioColorHex.panelDark)),
         ("text/panel light", contrastRatio(ClaudioColorHex.textLight, ClaudioColorHex.panelLight)),
+        ("text/panel deepest light", contrastRatio(ClaudioColorHex.textLight, ClaudioColorHex.panelDeepLight)),
         // text-2/panel — 这一对现在钉住的东西比原来多：
         //   (a) T16 FIX B：muted 态的次要文字（行内文件名/id、「未配置」/「文件丢失」标签）永远
         //       是 `text-2`，`EventRowView` 从不降 opacity，所以钉住这一对就钉住了 muted 态的
@@ -93,11 +94,12 @@ func runContrastSuites() {
         //       为「只做图标」，见下面 ≥3:1 那一组。
         ("text-2/panel dark (muted 次要文字 + 报错文案)", contrastRatio(ClaudioColorHex.text2Dark, ClaudioColorHex.panelDark)),
         ("text-2/panel light (muted 次要文字 + 报错文案)", contrastRatio(ClaudioColorHex.text2Light, ClaudioColorHex.panelLight)),
-        // pack-card text (T15 D3) — card background derived as `surface-2`.
-        ("text/surface-2 dark (pack-card name)", contrastRatio(ClaudioColorHex.textDark, ClaudioColorHex.surface2Dark)),
-        ("text/surface-2 light (pack-card name)", contrastRatio(ClaudioColorHex.textLight, ClaudioColorHex.surface2Light)),
-        ("text-2/surface-2 dark (pack-card N/4 + 「文件丢失」文案)", contrastRatio(ClaudioColorHex.text2Dark, ClaudioColorHex.surface2Dark)),
-        ("text-2/surface-2 light (pack-card N/4 + 「文件丢失」文案)", contrastRatio(ClaudioColorHex.text2Light, ClaudioColorHex.surface2Light)),
+        ("text-2/panel deepest light", contrastRatio(ClaudioColorHex.text2Light, ClaudioColorHex.panelDeepLight)),
+        // 糖果盘 pack row 的真实底是 `surface`（亮色纯白；暗色沿用旧抬升面）。
+        ("text/surface dark (pack-row name)", contrastRatio(ClaudioColorHex.textDark, ClaudioColorHex.surfaceDark)),
+        ("text/surface light (pack-row name)", contrastRatio(ClaudioColorHex.textLight, ClaudioColorHex.surfaceLight)),
+        ("text-2/surface dark (pack-row status)", contrastRatio(ClaudioColorHex.text2Dark, ClaudioColorHex.surfaceDark)),
+        ("text-2/surface light (pack-row status)", contrastRatio(ClaudioColorHex.text2Light, ClaudioColorHex.surfaceLight)),
     ]
 
     for pair in textPairs {
@@ -185,7 +187,7 @@ func runContrastSuites() {
     //   SubagentStop（DESIGN.md「4-slot 覆盖轨」实测 3.97 / 3.09）；
     // - `missing` 是 `text-2` 的 1px 空壳 + 斜杠；亮 / 暗分别是 5.54 / 7.03。
     //
-    // 四对的真实底都是 PackCardView 的 `surface-2`。`ClaudioGUI` 是不可 import 的 executable
+    // 四对的真实底都是 PackCardView 的糖果盘 `surface`。`ClaudioGUI` 是不可 import 的 executable
     // target，所以这组保持纯 hex 数学；生产视图确实把这几个 token 接到 CoverageTrack 上的另一半，
     // 由 ViewWiringSuite 的 T10 绊线钉住。两半缺一不可：只有这里会漏掉「描边改回 muted」的接线回归，
     // 只有源码绊线又证明不了 token 本身真的过 ≥3:1。
@@ -195,7 +197,7 @@ func runContrastSuites() {
         background: String
     ) {
         let ratio = contrastRatio(foreground, background)
-        suite("contrast: 4-slot 覆盖轨 \(name) vs surface-2 is ≥ 3:1 (DESIGN.md「4-slot 覆盖轨」)") {
+        suite("contrast: 4-slot 覆盖轨 \(name) vs surface is ≥ 3:1 (DESIGN.md「4-slot 覆盖轨」)") {
             expect(
                 ratio >= 3.0,
                 "4-slot 覆盖轨 \(name) must be ≥ 3:1, got \(ratio) — missing 必须用 text-2，"
@@ -206,19 +208,19 @@ func runContrastSuites() {
     assertCoverageTrackContrast(
         "present dark（最弱 SubagentStop）",
         foreground: ClaudioColorHex.subagentStopDark,
-        background: ClaudioColorHex.surface2Dark)
+        background: ClaudioColorHex.surfaceDark)
     assertCoverageTrackContrast(
         "present light（最弱 Notification）",
         foreground: ClaudioColorHex.notificationLight,
-        background: ClaudioColorHex.surface2Light)
+        background: ClaudioColorHex.surfaceLight)
     assertCoverageTrackContrast(
         "missing dark（text-2 描边 + 斜杠）",
         foreground: ClaudioColorHex.text2Dark,
-        background: ClaudioColorHex.surface2Dark)
+        background: ClaudioColorHex.surfaceDark)
     assertCoverageTrackContrast(
         "missing light（text-2 描边 + 斜杠）",
         foreground: ClaudioColorHex.text2Light,
-        background: ClaudioColorHex.surface2Light)
+        background: ClaudioColorHex.surfaceLight)
 
     // MARK: - 真红**不得**当正文用：这是上面那组断言在守的契约，这里把它写成可读的、会说话的一条
     //
@@ -391,13 +393,13 @@ private func runCompositedBackgroundSuites() {
 
     let tilePairs: [SelfTintedTilePair] = [
         SelfTintedTilePair(name: "Stop dark", glyph: ClaudioColorHex.stopDark, panel: ClaudioColorHex.panelDark),
-        SelfTintedTilePair(name: "Stop light", glyph: ClaudioColorHex.stopLight, panel: ClaudioColorHex.panelLight),
+        SelfTintedTilePair(name: "Stop light · 糖果盘最深底", glyph: ClaudioColorHex.stopLight, panel: ClaudioColorHex.panelDeepLight),
         SelfTintedTilePair(name: "StopFailure dark", glyph: ClaudioColorHex.stopFailureDark, panel: ClaudioColorHex.panelDark),
-        SelfTintedTilePair(name: "StopFailure light", glyph: ClaudioColorHex.stopFailureLight, panel: ClaudioColorHex.panelLight),
+        SelfTintedTilePair(name: "StopFailure light · 糖果盘最深底", glyph: ClaudioColorHex.stopFailureLight, panel: ClaudioColorHex.panelDeepLight),
         SelfTintedTilePair(name: "Notification dark", glyph: ClaudioColorHex.notificationDark, panel: ClaudioColorHex.panelDark),
-        SelfTintedTilePair(name: "Notification light", glyph: ClaudioColorHex.notificationLight, panel: ClaudioColorHex.panelLight),
+        SelfTintedTilePair(name: "Notification light · 糖果盘最深底", glyph: ClaudioColorHex.notificationLight, panel: ClaudioColorHex.panelDeepLight),
         SelfTintedTilePair(name: "SubagentStop dark", glyph: ClaudioColorHex.subagentStopDark, panel: ClaudioColorHex.panelDark),
-        SelfTintedTilePair(name: "SubagentStop light", glyph: ClaudioColorHex.subagentStopLight, panel: ClaudioColorHex.panelLight),
+        SelfTintedTilePair(name: "SubagentStop light · 糖果盘最深底", glyph: ClaudioColorHex.subagentStopLight, panel: ClaudioColorHex.panelDeepLight),
     ]
 
     for pair in tilePairs {

@@ -28,6 +28,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     /// on every close before any activation attempt, so a retained/reopened window cannot hand
     /// focus to a stale app twice.
     private var handbackApplication: NSRunningApplication?
+    private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
     private var isClosingWindow = false
     private var externalActivationCancellable: AnyCancellable?
     private var selectionAnnouncementCancellable: AnyCancellable?
@@ -72,8 +73,13 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             }
     }
 
-    public func showWindow(returnFocusTo application: NSRunningApplication?) {
+    public func showWindow(
+        route: SoundPacksWindowRoute = .overview,
+        returnFocusTo application: NSRunningApplication?,
+        onClose: (@MainActor (NSRunningApplication?) -> Void)? = nil
+    ) {
         isClosingWindow = false
+        focusRestoration = onClose
         // Re-presenting an already-open window from Claudio itself has no new external app to
         // record; retain the existing debt until the window really closes.
         if let application {
@@ -86,18 +92,24 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             wasAlreadyCreated: wasAlreadyCreated,
             isVisible: wasVisible)
         {
-            model.reload(followActivePack: true)
+            model.reload(followActivePack: false)
+        }
+        if case .editEvent(let packID, _) = route {
+            model.selectPackForInspection(packID)
         }
         NSApp.activate(ignoringOtherApps: true)
         isPresentingWindow = true
         presentedWindow.makeKeyAndOrderFront(nil)
         if shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible) {
             presentedWindow.makeFirstResponder(presentedWindow.contentViewController?.view)
-            focusCoordinator.requestInitialFocus()
+            focusCoordinator.requestInitialFocus(route: route)
             SoundPacksWindowAccessibilityBridge.post(
                 .windowOpened,
                 facts: accessibilityFacts(),
                 window: presentedWindow)
+        }
+        if wasVisible, route != .overview {
+            focusCoordinator.requestRoute(route)
         }
         announceLatestWindowStatusIfNeeded(in: presentedWindow)
         isPresentingWindow = false
@@ -116,6 +128,17 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         isClosingWindow = true
         let previous = handbackApplication
         handbackApplication = nil
+        let restoration = focusRestoration
+        focusRestoration = nil
+
+        if let restoration {
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    restoration(previous)
+                }
+            }
+            return
+        }
 
         guard
             let closingWindow = notification.object as? NSWindow,
@@ -150,12 +173,12 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             userPacksDirectory: userPacksDirectory,
             focusCoordinator: focusCoordinator)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
         window.title = "Claudio · 声音包"
-        window.contentMinSize = NSSize(width: 560, height: 400)
+        window.contentMinSize = NSSize(width: 640, height: 480)
         window.contentViewController = NSHostingController(rootView: content)
         window.isReleasedWhenClosed = false
         window.autorecalculatesKeyViewLoop = true

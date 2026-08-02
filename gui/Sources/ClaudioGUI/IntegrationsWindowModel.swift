@@ -152,6 +152,27 @@ struct IntegrationsWindowActionHandler: Sendable {
     }
 }
 
+struct IntegrationsWindowRecoveryHandler: Sendable {
+    private let operation:
+        @MainActor @Sendable (IntegrationsRecoveryAction) async throws
+            -> IntegrationsWindowActionOutcome
+
+    init(
+        _ operation: @escaping
+            @MainActor @Sendable (IntegrationsRecoveryAction) async throws
+                -> IntegrationsWindowActionOutcome
+    ) {
+        self.operation = operation
+    }
+
+    @MainActor
+    func callAsFunction(
+        _ action: IntegrationsRecoveryAction
+    ) async throws -> IntegrationsWindowActionOutcome {
+        try await operation(action)
+    }
+}
+
 struct IntegrationsWindowClipboardWriter: Sendable {
     private let operation: @MainActor @Sendable (String) -> Bool
 
@@ -186,12 +207,14 @@ final class IntegrationsWindowModel: ObservableObject {
     @Published private(set) var content: IntegrationsWindowContent
     @Published private(set) var feedback: IntegrationsFeedback?
     @Published private(set) var inFlightOperation: IntegrationsInFlightPresentation?
+    @Published private(set) var isPerformingRecovery = false
     @Published private(set) var isWindowVisible = false
     @Published private(set) var isWindowKey = false
     @Published var selection: IntegrationsWindowSelection
 
     private let refreshHandler: IntegrationsWindowRefreshHandler
     private let actionHandler: IntegrationsWindowActionHandler
+    private let recoveryHandler: IntegrationsWindowRecoveryHandler?
     private let clipboardWriter: IntegrationsWindowClipboardWriter
     private let onContentChanged: @MainActor @Sendable (IntegrationsWindowContent) -> Void
     private var feedbackState = IntegrationsFeedbackModel()
@@ -201,6 +224,7 @@ final class IntegrationsWindowModel: ObservableObject {
         content: IntegrationsWindowContent,
         refreshHandler: IntegrationsWindowRefreshHandler,
         actionHandler: IntegrationsWindowActionHandler,
+        recoveryHandler: IntegrationsWindowRecoveryHandler? = nil,
         clipboardWriter: IntegrationsWindowClipboardWriter = .system,
         onContentChanged: @escaping @MainActor @Sendable
             (IntegrationsWindowContent) -> Void = { _ in }
@@ -208,6 +232,7 @@ final class IntegrationsWindowModel: ObservableObject {
         self.content = content
         self.refreshHandler = refreshHandler
         self.actionHandler = actionHandler
+        self.recoveryHandler = recoveryHandler
         self.clipboardWriter = clipboardWriter
         self.onContentChanged = onContentChanged
         inFlightOperation = nil
@@ -222,7 +247,16 @@ final class IntegrationsWindowModel: ObservableObject {
         content.inspector(for: selection)
     }
 
-    var isPerformingAction: Bool { inFlightOperation != nil }
+    var isPerformingAction: Bool { inFlightOperation != nil || isPerformingRecovery }
+
+    var recoveryAction: IntegrationsRecoveryAction {
+        guard
+            case .capability(let host, let event) = selection,
+            let cell = content.matrix.cell(host: host, event: event),
+            let status = content.sourceRows.first(where: { $0.host == host })?.status
+        else { return .none }
+        return integrationsRecoveryAction(for: cell, hostStatus: status)
+    }
 
     /// Codex's trust step is a product invariant rather than optional caller decoration. Even if
     /// a stale manager result omitted actions, an awaiting Codex row still exposes exactly the
@@ -348,6 +382,59 @@ final class IntegrationsWindowModel: ObservableObject {
                     event: selectedCapabilityEvent(for: host),
                     message: message))
         }
+    }
+
+    func performRecovery(_ action: IntegrationsRecoveryAction) async {
+        switch action {
+        case .connect(let host):
+            await perform(.connect(host))
+            return
+        case .upgrade(let host), .repair(let host):
+            await perform(.repair(host))
+            return
+        case .redetect:
+            await perform(.redetect)
+            return
+        case .explainUnsupported, .none:
+            return
+        case .unmute(let host, let event), .configureSound(let host, let event):
+            guard !isPerformingAction, let recoveryHandler else { return }
+            isPerformingRecovery = true
+            defer { isPerformingRecovery = false }
+            do {
+                let outcome = try await recoveryHandler(action)
+                replaceContent(outcome.content)
+                presentFeedback(
+                    host: host,
+                    kind: outcome.feedbackKind,
+                    message: outcome.feedbackMessage,
+                    accessibilityAnnouncement: stateChangeAccessibilityAnnouncement(
+                        in: outcome.content,
+                        host: host,
+                        event: event,
+                        message: outcome.feedbackMessage))
+            } catch {
+                let message = "操作失败：\(error.localizedDescription)"
+                presentFeedback(
+                    host: host,
+                    kind: .failure,
+                    message: message,
+                    accessibilityAnnouncement: stateChangeAccessibilityAnnouncement(
+                        in: content,
+                        host: host,
+                        event: event,
+                        message: message))
+            }
+        }
+    }
+
+    func copyConfigurationPath() {
+        guard let inspector else { return }
+        let didCopy = clipboardWriter(inspector.configurationSource)
+        presentFeedback(
+            host: inspector.host,
+            kind: didCopy ? .information : .failure,
+            message: didCopy ? "已复制配置路径" : "无法复制配置路径")
     }
 
     func dismissFeedback(revision: UInt64) {

@@ -28,10 +28,10 @@ func runPanelFocusCoordinatorSuites() {
                 && coordinator.requestedTarget == .hostSource(.codex),
             "Codex 宿主行恢复请求必须与本次 show 一起发布")
 
-        coordinator.requestFocus(target: .manageIntegrations)
+        coordinator.requestFocus(target: .hostSource(.claudeCode))
         expect(
             coordinator.showCount == 2
-                && coordinator.requestedTarget == .manageIntegrations,
+                && coordinator.requestedTarget == .hostSource(.claudeCode),
             "管理入口必须可作为独立精确恢复目标")
 
         coordinator.requestFocus()

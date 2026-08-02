@@ -499,6 +499,44 @@ public final class SoundPacksWindowModel: ObservableObject {
             }
     }
 
+#if DEBUG
+    /// Deterministic, disk-free construction for the repository state gallery. The injected
+    /// environment is retained only to satisfy action seams; gallery frames never execute them.
+    public init(
+        previewConfig: ClaudioConfig,
+        packCards: [PackCard],
+        selectedPackID: String?,
+        selectedEventRows: [EventRow],
+        selectedAudioFiles: [PackAudioFile] = [],
+        builtinPackIDs: Set<String> = [],
+        starredPackIDs: [String] = [],
+        environment: AudioImportEnvironment,
+        refreshCoordinator: SoundPacksRefreshCoordinator
+    ) {
+        self.configFile = URL(fileURLWithPath: "/dev/null/claudio-preview-config.json")
+        self.lockFile = URL(fileURLWithPath: "/dev/null/claudio-preview-config.lock")
+        self.environment = environment
+        self.builtinPackIDs = builtinPackIDs
+        self.refreshCoordinator = refreshCoordinator
+        configState = previewConfig.selectedPack.isEmpty ? .needsPack : .operational(previewConfig)
+        config = previewConfig
+        self.packCards = packCards
+        self.selectedPackID = selectedPackID
+        self.selectedEventRows = selectedEventRows
+        self.selectedAudioFiles = selectedAudioFiles
+        audioInventoryError = nil
+        self.starredPackIDs = starredPackIDs
+        starredPacksError = nil
+        audioActionError = nil
+        factoryRestoreNotice = nil
+        factoryRestoreActionError = nil
+        packForkNotice = nil
+        packForkActionError = nil
+        packUseActionError = nil
+        windowStatuses = []
+    }
+#endif
+
     /// 侧栏只改变窗口正在查看的包，不写 config，也不改变面板当前包。
     public func selectPackForInspection(_ packID: String) {
         guard packCards.contains(where: { $0.id == packID }) else { return }
@@ -848,6 +886,31 @@ public final class SoundPacksWindowModel: ObservableObject {
         switch bindEventToManifest(
             event: event,
             fileName: fileName,
+            packID: selectedPackID,
+            environment: environment)
+        {
+        case .success:
+            return finishAudioAction(.success(()))
+        case .failure(let error):
+            return finishAudioAction(.failure(.bind(error)))
+        }
+    }
+
+    /// Clears one selected event through the same audited manifest mutation primitive as the
+    /// former panel editor. Built-in packs remain read-only and every outcome refreshes the
+    /// window-owned read model through ``finishAudioAction(_:)``.
+    @discardableResult
+    public func clearSelectedEventBinding(
+        _ event: Event
+    ) -> Result<Void, SoundPacksWindowAudioActionError> {
+        guard let selectedPackID else {
+            return finishAudioAction(.failure(.noSelectedPack))
+        }
+        guard !builtinPackIDs.contains(selectedPackID) else {
+            return finishAudioAction(.failure(.builtinReadOnly(packID: selectedPackID)))
+        }
+        switch clearEventBinding(
+            event: event,
             packID: selectedPackID,
             environment: environment)
         {
