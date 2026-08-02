@@ -1,7 +1,7 @@
 import Foundation
 
 /// The complete onboarding state machine (ENGINEERING.md T7): every state the panel can
-/// be in before/around "has Claudio taken over Claude Code's hooks yet?", each with a
+/// be in before/around "has claudi0 taken over Claude Code's hooks yet?", each with a
 /// human, reassurance-toned next step — never engineering phrasing like "写入 hook 到
 /// settings.json" (T7 acceptance criterion 3).
 ///

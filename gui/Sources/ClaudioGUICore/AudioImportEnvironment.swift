@@ -66,7 +66,7 @@ public struct AudioImportEnvironment: Sendable {
     /// ``factoryPacksDirectory``), which is completely independent of this field.
     public var bundledPacksDirectory: URL?
 
-    /// **出厂包的拷贝源** —— `Claudio.app/Contents/Resources/packs/` 的真实路径，仅供拷贝，
+    /// **出厂包的拷贝源** —— `claudi0.app/Contents/Resources/packs/` 的真实路径，仅供拷贝，
     /// **绝不是查找根**（PLAN-SOUND-MANAGER.md §2.3）。
     ///
     /// 与 ``bundledPacksDirectory`` 职责正交，两个字段长得像但回答的是两个不同的问题：
@@ -115,7 +115,7 @@ public struct AudioImportEnvironment: Sendable {
     /// `userPacksDirectory` 留着 `ClaudioPaths.packsDirectory` 那个默认值，这一把不留。理由是两者
     /// 漏传的**失败模式不一样**：忘了 `userPacksDirectory` 的测试会当场断言失败（真实 packs 目录里
     /// 没有 fixture），**响**的那一类；而忘了这把锁只会**静默**地去用户机器上开一把真锁 —— 测试
-    /// 照样全绿，只是与正在运行的 Claudio.app 抢锁、并在 `~/.claudio/` 里落一个文件。
+    /// 照样全绿，只是与正在运行的 claudi0.app 抢锁、并在 `~/.claudio/` 里落一个文件。
     ///
     /// 静默那一类不能靠纪律，只能靠编译器。
     ///

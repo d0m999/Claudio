@@ -162,7 +162,7 @@ private func mutationFeedbackMessage(
         if let snapshot, case .observed = snapshot.activation {
             return "Codex 已连接，当前代次已收到真实回执"
         }
-        return "Claudio 已写好，等待 Codex 确认"
+        return "claudi0 已写好，等待 Codex 确认"
     }
 
     if let snapshot, case .observed = snapshot.activation {

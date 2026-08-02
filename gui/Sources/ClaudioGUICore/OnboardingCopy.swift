@@ -47,21 +47,21 @@ public func onboardingCopy(for state: OnboardingState) -> OnboardingCopy {
     case .claudeCodeNotInstalled:
         return OnboardingCopy(
             title: "没找到 Claude Code",
-            body: "Claudio 得先有 Claude Code 才能配合报声音。按官方指引装好以后，回来点一下重新检测就行。",
+            body: "claudi0 得先有 Claude Code 才能配合报声音。按官方指引装好以后，回来点一下重新检测就行。",
             primaryActionTitle: "重新检测"
         )
 
     case .helperMissing:
         return OnboardingCopy(
             title: "还差最后一小步",
-            body: "负责放声音的小助手还没装上。点一下，Claudio 会帮你补上，其它设置都不会动。",
+            body: "负责放声音的小助手还没装上。点一下，claudi0 会帮你补上，其它设置都不会动。",
             primaryActionTitle: "修复"
         )
 
     case .settingsNotWritable(let reason):
         return OnboardingCopy(
             title: "这份设置我们暂时改不了",
-            body: "Claude Code 的配置文件目前不允许写入，Claudio 不会硬闯。改好权限后，回来点一下重新检测。",
+            body: "Claude Code 的配置文件目前不允许写入，claudi0 不会硬闯。改好权限后，回来点一下重新检测。",
             detail: reason,
             primaryActionTitle: "重新检测",
             secondaryActionTitle: "查看原因"
@@ -70,7 +70,7 @@ public func onboardingCopy(for state: OnboardingState) -> OnboardingCopy {
     case .settingsParseFailure(let reason):
         return OnboardingCopy(
             title: "配置文件看着有点乱",
-            body: "Claude Code 的配置文件格式跟预期不太一样，Claudio 怕越改越乱，先停手没有碰它。检查一下这个文件，弄好后回来点一下重新检测。",
+            body: "Claude Code 的配置文件格式跟预期不太一样，claudi0 怕越改越乱，先停手没有碰它。检查一下这个文件，弄好后回来点一下重新检测。",
             detail: reason,
             primaryActionTitle: "重新检测",
             secondaryActionTitle: "查看原因"

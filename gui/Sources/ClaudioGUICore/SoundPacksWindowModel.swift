@@ -107,9 +107,9 @@ private func packForkFailureMessage(_ error: PackForkError) -> String {
     case .destinationAlreadyExists:
         return "目标名称刚被其他操作占用；未覆盖该项目，请重试。"
     case .sourceUnavailable:
-        return "当前构建没有可复制的出厂声音，请重新安装 Claudio 后再试。"
+        return "当前构建没有可复制的出厂声音，请重新安装 claudi0 后再试。"
     case .unsafeFactorySource:
-        return "出厂声音来源不是安全的真实目录；未创建副本，请重新安装 Claudio。"
+        return "出厂声音来源不是安全的真实目录；未创建副本，请重新安装 claudi0。"
     case .copyFailed(let reason):
         return "准备完整副本失败，未发布半成品：\(reason)"
     case .manifestRewriteFailed(let reason):
@@ -275,13 +275,13 @@ private func factoryPackRestoreErrorMessage(
     case .unsafePackID:
         message = "声音包标识不安全，恢复已中止，磁盘内容未更改。"
     case .factoryUnavailable:
-        message = "当前构建没有可用的出厂声音来源，磁盘内容未更改。请重新安装 Claudio 后再试。"
+        message = "当前构建没有可用的出厂声音来源，磁盘内容未更改。请重新安装 claudi0 后再试。"
     case .notBuiltinPack:
         message = "这个声音包不是内置包，不能恢复出厂声音。"
     case .unsafeFactorySource:
-        message = "出厂声音来源不是安全的真实目录，恢复已中止，当前安装未更改。请重新安装 Claudio。"
+        message = "出厂声音来源不是安全的真实目录，恢复已中止，当前安装未更改。请重新安装 claudi0。"
     case .invalidFactoryContents(let reason):
-        message = "出厂声音内容不完整，恢复已中止，当前安装未更改。请重新安装 Claudio：\(reason)"
+        message = "出厂声音内容不完整，恢复已中止，当前安装未更改。请重新安装 claudi0：\(reason)"
     case .stagingFailed(let reason):
         message = "无法准备完整的出厂副本，当前安装未更改：\(reason)"
     case .salvageFailed(let reason):

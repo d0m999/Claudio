@@ -186,7 +186,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = "Claudio · 声音包"
+        window.title = "claudi0 · 声音包"
         window.contentMinSize = NSSize(width: 640, height: 480)
         window.contentViewController = NSHostingController(rootView: content)
         window.isReleasedWhenClosed = false

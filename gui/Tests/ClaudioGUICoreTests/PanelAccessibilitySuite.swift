@@ -33,10 +33,10 @@ func runPanelAccessibilitySuites() {
         let copy = needsPackNoticeCopy(hasVisiblePackChoices: true)
 
         expect(
-            copy.message == "还没有选中任何声音包。点一个声音包，Claudio 会建好配置。",
+            copy.message == "还没有选中任何声音包。点一个声音包，claudi0 会建好配置。",
             "有包行时主行动必须是选择现有声音包，实得 \(copy.message)")
         expect(
-            copy.accessibilityLabel == "先选包。还没有选中任何声音包。点一个声音包，Claudio 会建好配置。",
+            copy.accessibilityLabel == "先选包。还没有选中任何声音包。点一个声音包，claudi0 会建好配置。",
             "有包行的 VoiceOver label 必须与可见文案同源，实得 \(copy.accessibilityLabel)")
         expect(
             !copy.accessibilityLabel.contains("管理声音包"),

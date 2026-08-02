@@ -62,8 +62,8 @@ public struct PanelAnnouncementFacts: Sendable, Equatable {
 /// `header` 由视图侧的 `PanelView.headerAccessibilityLabel` 供给，而它长这样：
 ///
 /// ```swift
-/// guard onboardingViewModel.state == .installed else { return "Claudio 面板" }
-/// return "Claudio 面板，当前声音包 \(packName)"
+/// guard onboardingViewModel.state == .installed else { return "claudi0 面板" }
+/// return "claudi0 面板，当前声音包 \(packName)"
 /// ```
 ///
 /// 也就是说：**五个 onboarding 态**（`.claudeCodeNotInstalled` / `.helperMissing` /

@@ -277,6 +277,8 @@ private func expectedLegacyWrapperPath(
 }
 
 private let knownLegacyComment =
+    // Exact historical bytes are part of wrapper ownership detection. Keep the old brand
+    // spelling here so an upgrade can still recognize and safely migrate existing wrappers.
     "# Codex 的 notify 只能配置一个外部命令；这里保留既有通知，并追加 Claudio 的完成音效。"
 private let legacyNotifierSuffix = " \"$payload\" >/dev/null 2>&1 &"
 private let legacyClaudioSuffix = " play stop >/dev/null 2>&1 &"

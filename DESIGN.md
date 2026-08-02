@@ -1,4 +1,4 @@
-# Design System — Claudio
+# Design System — claudi0
 
 > 视觉设计系统（美学 / 字体 / 配色 / 间距 / 布局 / 动效 / 声音视觉语言 / App 图标）。
 > 由 `/design-consultation` 生成 2026-07-06。工程 / 产品 spec 见 [ENGINEERING.md](./ENGINEERING.md)。
@@ -7,7 +7,7 @@
 
 ## Product Context（产品上下文）
 
-- **是什么**：Claudio —— 一个 macOS 双宿主声音中心，为 **Claude Code 与 Codex** 的原生事件播放同一套语义化声音；主打开箱即用、版权干净（CC0）的策展声音包，可切换。
+- **是什么**：claudi0（仍读作 “Claudio”）—— 一个 macOS 双宿主声音中心，为 **Claude Code 与 Codex** 的原生事件播放同一套语义化声音；主打开箱即用、版权干净（CC0）的策展声音包，可切换。
 - **给谁**：同时或分别使用 Claude Code / Codex 的开发者（长在终端里、用 AI 编码 agent）。两个宿主在信息架构、入口几何与交互权重上完全并列，能力差异则如实呈现。
 - **v1 受众与安装摩擦（与 ENGINEERING T3 对齐）**：v1 **不签名、未公证**，面向能自绕 Gatekeeper 的技术用户 —— 定位是**技术用户低摩擦**，**不是「零摩擦安装」**。签名 + 公证是**面向非技术用户 / 广泛发布前**的硬门槛。因此 onboarding 视觉须诚实交代「未签名 + 绕过步骤」（见下方 State Components onboarding 卡与 ENGINEERING 用户旅程步骤 1），不作零摩擦承诺。
 - **空间 / 同类**：macOS 菜单栏工具 · 开发者工具 · 音频类 app。参照：`claude-sounds`、`claudecodenotify`、Bartender、Ice、Rogue Amoeba SoundSource、Tailscale、Raycast、Linear、Warp、CleanShot、Notion Calendar、Amie。
@@ -16,10 +16,10 @@
 
 ## Aesthetic Direction（美学方向）
 
-- **方向**：暖色工具主义（Warm Utilitarian）—— macOS 原生骨架（毛玻璃/近实心表面、SF Pro Rounded、系统设置式分组圆角卡片），**Claudio 自有暖色皮肤**，波形母题给灵魂。
+- **方向**：暖色工具主义（Warm Utilitarian）—— macOS 原生骨架（毛玻璃/近实心表面、SF Pro Rounded、系统设置式分组圆角卡片），**claudi0 自有暖色皮肤**，波形母题给灵魂。
 - **装饰程度**：intentional —— 主要靠排版 + 材质，一个招牌母题：**波形**（贯穿 App 图标 / 声音芯片 / 菜单栏视觉回放）。不靠视觉噪音。
 - **基调**：像一台深夜用的、有触感的音频硬件 / 信号仪表，暖、克制、精确；个性来自**时序与声音**，不是花哨的图形。
-- **核心张力（差异化）**：整个开发者工具圈都是冷蓝灰（Linear `#08090A` / Raycast `#07080A`）。Claudio 刻意往**暖**走，以自有黏土色跳出同质化；它不借用 Claude / OpenAI 品牌色，也不靠宿主 logo 识别来源。宿主身份由名称、能力数与连接状态表达。
+- **核心张力（差异化）**：整个开发者工具圈都是冷蓝灰（Linear `#08090A` / Raycast `#07080A`）。claudi0 刻意往**暖**走，以自有黏土色跳出同质化；它不借用 Claude / OpenAI 品牌色，也不靠宿主 logo 识别来源。宿主身份由名称、能力数与连接状态表达。
 - **参考站点 / 产品**：Linear、Raycast、Warp、CleanShot X、SoundSource（Rogue Amoeba）、Tailscale、Bartender、Ice、Notion Calendar、Amie、Teenage Engineering。
 
 ## 现行视觉皮肤：糖果盘（方向 D · 2026-07-17 用户全量采纳）
@@ -74,7 +74,7 @@
 - **Sound Packs Window** 是唯一完整映射编辑器。系统选择表示「正在查看」，星标表示「显示在主面板」，`使用中` 胶囊表示当前运行包；三者不得混为同一状态。映射菜单、文件拖放、导入并绑定、清除绑定与 Finder 定位全部在此完成；内置包明确只读并引导复制。
 - **Integrations Window** 负责四事件 × 两宿主能力比较、连接证据、诊断与就地恢复。宿主摘要不再是两张大卡；标准宽度使用原生 `Grid` 与常驻检查器，窄宽或最大文字档纵向重排。重新检测只在工具栏，破坏性断开只在检查器末尾并说明具体影响范围。
 
-共享基线：菜单栏面板独占 `#FFFDFA → #FBF7F1` 糖果盘渐变，标准窗口使用温暖实色与少量分组；字体统一 SF Pro Rounded，只有 manifest ID、原生事件与路径使用等宽字体；圆角固定为 18 / 13 / 11；图标按钮至少 28×28pt。Claudio 自有「界面文字」提供紧凑、标准、较大、最大四档并注入三个界面，不能再把 macOS 的 SwiftUI `dynamicTypeSize` 描述成会自动跟随系统文字大小。
+共享基线：菜单栏面板独占 `#FFFDFA → #FBF7F1` 糖果盘渐变，标准窗口使用温暖实色与少量分组；字体统一 SF Pro Rounded，只有 manifest ID、原生事件与路径使用等宽字体；圆角固定为 18 / 13 / 11；图标按钮至少 28×28pt。claudi0 自有「界面文字」提供紧凑、标准、较大、最大四档并注入三个界面，不能再把 macOS 的 SwiftUI `dynamicTypeSize` 描述成会自动跟随系统文字大小。
 
 **试听与静音正交**：事件静音只阻止宿主真实事件自动播放。安全可读的映射文件在主音量非零时始终可手工试听；主音量为零、未映射、文件缺失/损坏或安全校验失败必须显示明确原因。
 
@@ -104,8 +104,8 @@
 
 ## Color（配色）
 
-- **策略**：**restrained brand + functional semantic**。中性是 Claudio 自有暖色系统；品牌强调**只有一个**（黏土），克制使用；**四事件语义色是功能性的**（产品灵魂 = 听声辨状态，事件必须有可视身份）。
-- **一个招牌绑定**：**需要你（底层键 `notification`）的事件色 = Claudio 品牌黏土** —— 正是 agent 需要一个人的时候；它不是任一宿主的品牌色。
+- **策略**：**restrained brand + functional semantic**。中性是 claudi0 自有暖色系统；品牌强调**只有一个**（黏土），克制使用；**四事件语义色是功能性的**（产品灵魂 = 听声辨状态，事件必须有可视身份）。
+- **一个招牌绑定**：**需要你（底层键 `notification`）的事件色 = claudi0 品牌黏土** —— 正是 agent 需要一个人的时候；它不是任一宿主的品牌色。
 - **一个可读性约束**：**Stop 实心粗勾 vs SubagentStop 空心勾** = 同形状两权重 = 一眼分「本轮结束 / 子任务结束」。
 
 **中性 + 品牌（暗色为主基调，亮色完整支持）**
@@ -132,7 +132,7 @@
 |---|---|---|---|---|
 | ✅ 本轮结束（`stop`） | 一轮停止；**不承诺任务已经完成** | `#34C759` | `#288B43` | 实心粗勾 `checkmark.circle.fill` |
 | ⏸ 执行中断（`stop_failure`） | 限流 / 欠费 / 过载 / 认证（**非代码 bug**；仅 Claude Code） | `#FF9F0A` | `#AC6900` | 暂停 `pause.circle.fill` · **琥珀，绝不用红** |
-| ✋ 需要你（`notification`） | 等你操作；Codex **仅授权请求** | `#D97757`（=clay） | `#C4633C` | 铃 / 举手 `bell.badge.fill` · **Claudio 品牌黏土** |
+| ✋ 需要你（`notification`） | 等你操作；Codex **仅授权请求** | `#D97757`（=clay） | `#C4633C` | 铃 / 举手 `bell.badge.fill` · **claudi0 品牌黏土** |
 | ◦ 子任务结束（`subagent_stop`） | 从属任务停止 | `#5E5CE6` | `#5B59D6` | **空心**勾 `checkmark.circle` · 更暗 |
 
 > **`StopFailure` 亮色的两次调深（如实记录，因为第一次没达成目的）**：原 `#E08600` → `#C87A00` → 现 `#AC6900`。第一次调深（`#E08600 → #C87A00`）是**专为**过事件字形对表面的 **≥3:1**（WCAG 1.4.11 非文本对比）而授权的，但它**并没有达成目的**：当时 `ContrastSuite` 断的是「字形 vs 纯 `panel`」，而字形实际画在**事件色 @15% 自染**的 tile 上 —— **断言断错了那一对**。对纯 `panel` 它从 2.73:1 升到 3.31:1（看着过了），对**真实的自染 tile 底**却只从 2.36:1 升到 2.82:1，**依然不及格**。故本次进一步调深到 `#AC6900`（对真实 tile 底 **3.59:1**，见下注）。两次都只降明度、**不换色相** —— 仍为暖琥珀、绝不用红。UI 语义 `warning` token 是独立用途（校验提示，非事件字形），当时保留 `#E08600`（**已于 2026-07-12 · T17f 调深为 `#B87000`** —— 它当年之所以能带着一个连 ≥3:1 都不过的值留在表里，正是因为「没有任何视图渲染它」＝「没有任何人量过它」，见下方 T17f 记录）；同理 UI 语义 `success` 亮色仍为 `#2FA24E`，不随 `Stop` 调深 —— 事件层与 UI 语义层**刻意分叉**（这条分叉今天仍然成立：`warning` `#B87000` ≠ `StopFailure` `#AC6900`）。`gui` 侧由 `ContrastSuite.swift` 逐对数学断言钉死。
@@ -159,7 +159,7 @@
 | 用途 | Dark | Light | 备注 |
 |---|---|---|---|
 | success | `#34C759` | `#2FA24E` | |
-| **warning（告知，非错误）** | `#FF9F0A` | `#B87000` | 「Claudio 替你做了主」那一类**告知**（搬走一个读不出的包 / 替你换掉一个已失效的选包）；**不是**错误，绝不上真红；**且只做图标、不做正文**（见下注） |
+| **warning（告知，非错误）** | `#FF9F0A` | `#B87000` | 「claudi0 替你做了主」那一类**告知**（搬走一个读不出的包 / 替你换掉一个已失效的选包）；**不是**错误，绝不上真红；**且只做图标、不做正文**（见下注） |
 | **error（真错误）** | `#FF453A` | `#E0453A` | **只**给 App 自身真错误（如写不进 settings.json）；**绝不**用于事件层；**且只做图标、不做正文**（见下注） |
 | info | `#0A84FF` | `#0A72D0` | ⚠️ 仓库里**尚未落地**（`ClaudioColorHex` 没搬它）——第一个要用它的视图，请先按 `warning` 的先例量一遍对比度再落值 |
 
@@ -186,7 +186,7 @@
 
 - **策略**：App = grid-disciplined（系统设置式分组圆角卡片、行=左标签右控件、可预期对齐）；营销 = hybrid（落地页可编辑化、真机构图）。
 - **菜单栏面板**：宽 **312pt**；`NSPopover` 带尖角。
-- **面板材质（关键决策）**：**近实心暖表面（`panel`）+ 1px `hairline-strong` 描边 + 柔和阴影**，**不用**满毛玻璃 vibrancy —— 因为 vibrancy 会被壁纸「染色」，而 Claudio 是颜色即语义的产品，事件色必须显示为真色（参照 Itsycal 的实心表面做法）。
+- **面板材质（关键决策）**：**近实心暖表面（`panel`）+ 1px `hairline-strong` 描边 + 柔和阴影**，**不用**满毛玻璃 vibrancy —— 因为 vibrancy 会被壁纸「染色」，而 claudi0 是颜色即语义的产品，事件色必须显示为真色（参照 Itsycal 的实心表面做法）。
 - **圆角阶梯**（**⚠ 2026-07-17 糖果盘上调，现行见「现行视觉皮肤：糖果盘」②；下列 v1 值存档**）：〔v1 存档〕控件 / 芯片 6px · 卡片 / 行 10px · 面板 14–16px · 开关 / 声音芯片 pill(999)；覆盖轨 slot 两档：面板行档 = **胶囊（pill 999 档的半高应用）**；管理窗口微型档 9×9 radius 2（阶梯外微几何）。〔糖果盘现行〕控件 / 芯片 6 · **行卡 13** · tile 11 · **面板 18** · 微型 tile 9 · 开关 / 胶囊 pill(999)；覆盖轨改**横排糖豆胶囊**（present 实心 ≈14×7、missing 空壳 + 斜杠，见 ⑥）。
 - **最大内容宽（营销）**：~1060px。
 - **行结构（每事件行）**：`[事件字形 tile 24pt, 事件色, 圆角6] · [事件名 SF Pro 13 + 原始 id JetBrains Mono 10] · [声音文件名 mono] · [波形] · [圆形试听键 speaker.wave.2, 事件色]`。此为 `present` 态的完整结构；事件行共有三态 `CoverageState{present | unmapped | broken}`，`unmapped` / `broken` 收起文件名 / 波形、试听禁用、行尾出「导入绑定」入口（详见 State Components 的「事件行三态」条）。
@@ -212,7 +212,7 @@
 菜单栏面板继续使用 **312pt** 标准宽度、最大文字档下 **360pt**；它负责快速扫视与声音控制，不承担配置文件解释或破坏性操作。详情、连接与排障留给 retained window；这种职责分工参考 [SoundSource 的菜单栏主窗口](https://www.rogueamoeba.com/support/manuals/soundsource/?page=main-window-overview) 与 [Tailscale 的菜单栏/详情窗并存](https://tailscale.com/blog/windowed-macos-ui-beta)。顶部不再使用单一「已接管」绿点，而是始终渲染等权双列声音来源状态条：
 
 ```text
-Claudio                            2 个声音来源
+claudi0                            2 个声音来源
 
 声音来源
 Claude Code  ● 4/4 已就绪  │  Codex  ● 3/4 已就绪  ›
@@ -235,7 +235,7 @@ Claude Code  ● 4/4 已就绪  │  Codex  ● 3/4 已就绪  ›
 
 矩阵必须由宿主 adapter 的能力数据生成，不能在视图中手写八格。底层仍只有四个声音包键，不新增第五事件，也不把宿主事件生硬降级到错误语义：
 
-| Claudio 语义 | 文件键 | Claude Code 原生事件 | Codex 原生事件 |
+| claudi0 语义 | 文件键 | Claude Code 原生事件 | Codex 原生事件 |
 |---|---|---|---|
 | 本轮结束 | `stop` | `Stop` | `Stop` |
 | 执行中断 | `stop_failure` | `StopFailure` | 不支持 |
@@ -367,22 +367,23 @@ Claude Code  ● 4/4 已就绪  │  Codex  ● 3/4 已就绪  ›
 
 - **尺寸 / 形制**：默认 840×620、最小 640×520；顶部只保留紧凑双宿主摘要和固定当前选择摘要，不重复窗口标题或来源计数。
 - **主体是原生能力矩阵**：标准宽度以 `Grid` 显示四事件 × 两宿主，并与检查器左右常驻；窄宽或最大文字档纵向重排。只有当前选择使用黏土强调，单元格靠 hairline 分隔，不套卡片。矩阵必须来自 `AudibilityMatrix`，并把声音包缺映射与事件静音一起算入「是否可听」。
-- **Codex 激活边界**：写入 hooks 后固定显示「**Claudio 已写好，等待 Codex 确认**」，提供「复制 `/hooks`」与「重新检测」。在 `/hooks` 中确认并收到当前 installation ID 的首个真实回执之前，不显示绿色已连接；`3/4` 本身仍是中性成功。
-- **真实回执**：检查器只展示宿主、原生事件、Claudio 语义、时间与脱敏后的播放结果。不得展示或暗示存储提示词、响应内容、项目路径、会话内容或音频绝对路径。旧 installation、断开后的迟到回调与损坏回执只能显示为无效证据，不能点亮连接。
+- **Codex 激活边界**：写入 hooks 后固定显示「**claudi0 已写好，等待 Codex 确认**」，提供「复制 `/hooks`」与「重新检测」。在 `/hooks` 中确认并收到当前 installation ID 的首个真实回执之前，不显示绿色已连接；`3/4` 本身仍是中性成功。
+- **真实回执**：检查器只展示宿主、原生事件、claudi0 语义、时间与脱敏后的播放结果。不得展示或暗示存储提示词、响应内容、项目路径、会话内容或音频绝对路径。旧 installation、断开后的迟到回调与损坏回执只能显示为无效证据，不能点亮连接。
 - **动作层级**：取消静音、配置声音、连接、升级或修复由当前矩阵状态纯派生；缺声会路由到声音包窗口并定位事件，不支持只解释。重新检测只在工具栏。「断开 Claude Code」或「断开 Codex」只位于检查器末尾，并在确认中写明另一个宿主、声音包和静音设置不受影响。
 - **最大 Dynamic Type**：矩阵改为四张事件卡，每张包含 Claude Code、Codex 两条宿主子行；禁止横向滚动、横向裁切或把限定语藏进 tooltip。辅助功能字号下动作纵向排列。
-- **可访问性**：VoiceOver label 至少包含「宿主、Claudio 语义、原生事件、连接状态、支持级别」；Codex 的需要你单元格必须在可见文案和 label 中同时出现「仅授权请求」。短暂状态播报必须可关闭，并尊重 Reduce Motion。
+- **可访问性**：VoiceOver label 至少包含「宿主、claudi0 语义、原生事件、连接状态、支持级别」；Codex 的需要你单元格必须在可见文案和 label 中同时出现「仅授权请求」。短暂状态播报必须可关闭，并尊重 Reduce Motion。
 - **State Gallery**：实现期视觉基线覆盖双未连、单宿主、双宿主、Codex 待确认、Claude legacy、Codex 正常 `3/4`、partial、单侧 degraded、共享 runtime 失败与单侧连接失败。画廊 fixture 与生产 adapter 能力数据同源；不得手写一个永远存在的 Codex 第四格。
 
 自动化结构检查不能替代真机：popover → window handoff、关闭后焦点恢复、实际 VoiceOver 顺序、完整键盘路径、最大 Dynamic Type、明暗模式与 Reduce Motion 必须另行人工走查；未走查不得标为完成。
 
 ## App Icon（图标）
 
-- **概念**：同心声波弧 / 放射波形，同时读作一个 **C**（Claudio）。奶油 `#F0EEE6` 底 + 黏土 `#D97757` 弧，暖而克制。
-- **不碰** Claude、OpenAI 或任何第三方官方 logo / wordmark / 品牌渐变；Claudio 图标只表达自己的声波母题。
-- **两版**：全彩 Dock 图标；**单色模板菜单栏字形**（16×16pt，纯 alpha，自动亮/暗，可做「视觉回放」动画）。
-- **已选定形状：方案 B「单线括弧 / Monoline Bracket」**——一圈粗括弧扛住全部视觉重量（外弧），内圈细弧只是半透明的回声点缀（内弧，`alpha 0.5`），缺口统一朝东（3 点钟方向）。选它是因为概念评审的真实 16px 压力测试里，B 是仅有的两个「缩到菜单栏尺寸依然看得出缺口方向」的方案之一，其余多环/高对比方案会糊成一坨。
-- **菜单栏字形已落地**：`gui/Sources/ClaudioGUI/MenuBarIcon.swift`（`NSBezierPath` 直接画，非位图资源——`gui/` 是 SPM target，没有 `Assets.xcassets`），替换了原先占位的 SF Symbol `waveform.circle`；已用真实运行中的 app 截图核实菜单栏渲染效果（居中、清晰读作「C」）。**全彩 Dock 图标（`.icns`）尚未生成**，`Info.plist` 也还没有 `CFBundleIconFile`——v1 是 `LSUIElement`（无 Dock 图标），暂不阻断。
+- **现行主方向：C / Signal**。未闭合的粗 `C` 是持续工作的信号容器；中间脉冲是声音事件；右侧偏心圆点是一条刚抵达的通知。三者合起来也让末尾的数字 `0` 有了信号仪表的联想。
+- **品牌写法**：产品名固定写作小写 `claudi0`，仍读作 “Claudio”。数字 `0` 只承担视觉记忆点，不要求用户改变读法。
+- **不碰** Claude、OpenAI 或任何第三方官方 logo / wordmark / 品牌渐变；claudi0 图标只表达自己的声音与状态母题。
+- **全彩图标**：深色硬件底 `#2B2620` + 奶油标志 `#F1E9DF`；Finder / Dock 使用同一图形。亮色平面可使用黏土 `#C4633C` 单色标志。
+- **菜单栏模板版**：16×16pt 只保留 C 外环、脉冲与信号点，纯 alpha 自动适配亮 / 暗菜单栏，不带彩色底板。
+- **资产已落地**：`assets/branding/claudi0-mark.svg`、`claudi0-app-icon.svg`、1024px PNG 与 `claudi0.icns` 同源；`scripts/generate-brand-assets.swift` 生成全部位图尺寸。`gui/Sources/ClaudioGUI/MenuBarIcon.swift` 使用同一 SVG 几何直接绘制。打包脚本与 release workflow 都写入 `CFBundleIconFile = claudi0.icns`。
 
 ## macOS 平台注记
 
@@ -428,3 +429,4 @@ Claude Code  ● 4/4 已就绪  │  Codex  ● 3/4 已就绪  ›
 | 2026-07-17 | **⑪ 「加星」不另开界面 → 整合进管理窗口侧栏**：曾设想的独立「加星选 4 个」屏**撤销**，三件东西各归侧栏已有解剖位 —— 每行行首 `★/☆`、侧栏头 **`★ n/4`** 计数、满 4 上限提示。星标控件**只**住管理窗口，面板零星标控件。承接同日「面板显示集 = 星标」行 —— 那行定「是什么」，本行定「加星的操作住哪、长什么样」 | 用户「把 image #9 功能整合到 #10，不要单独设计」拍板。#9（独立星标屏）与窗口侧栏功能冗余；侧栏 DESIGN 本就定了每行 `★/☆`（Sound Packs Window 条），只差把计数与上限提示收进来。满 4 → 其余 `☆` 控件置灰 + 图标降饱和（不整行降 opacity，沿用事件行禁用铁律）+ 就地原因；坏包 `☆` 禁用（响不了不上面板）。星标切换 `stopPropagation`（不连带选包）、「用这个包」绝不自动加星（被否的那半：星标集被切包隐式改写）。全交互原型 `e70c017b` 已落地验证 |
 | 2026-07-24 | **`broken` 行的可见指示器从 meta 槽挪到覆盖轨槽位**（以状态行替代轨：真红 ✕ + `文件丢失`，与 `track` 共享同一 `.frame(height:)`，同槽位高度不跳；meta 槽对 `broken` 改留空），推翻 2026-07-15/07-17 两行「meta 槽 = ✕+文件丢失；覆盖轨不渲染」的原始写法——旧写法仍留在「包行四态」「4-slot 覆盖轨」两节的历史脉络里，正文已同步改写为现行版本，本行存档新旧对照，不删旧行 | T4（竖排整宽行）实现阶段 `swift-reviewer` 逐字核对 DESIGN.md 与 PLAN-SOUND-MANAGER.md T4 行，发现两份文档在 broken 指示器位置上直接矛盾：DESIGN.md 原文钉 meta 槽、覆盖轨「宁可空着」；PLAN.md T4 行（用户下达任务时的原话）写「以状态行替代轨（保留同一槽位高度，布局不跳）」。实现已按 PLAN.md 一侧落地并全绿（`swift build` 0 error、`swift run claudio-gui-tests` 2484/2484）。经 `AskUserQuestion` 向用户当面拍板：维持 trailing slot 实现，DESIGN.md 补录为已授权偏离，不留两份文档各执一词。**技术上两种位置都能满足「布局不跳」**——高度由外层共享 `.frame(height:)` 保证，与 ✕+文案放哪个槽位正交，本次纯粹是位置拍板，不是被迫的技术取舍 |
 | 2026-08-01 | Claudio 升级为 Claude Code + Codex 双宿主声音中心；黏土色明确为 Claudio 自有品牌；菜单栏双来源行、4×2 能力矩阵与 retained `IntegrationsWindow` 成为现行规范 | 宿主入口与交互权重并列，但能力差异诚实呈现：Claude Code `4/4`、Codex `3/4` 都是正常态；Codex 需要你仅映射 `PermissionRequest`，`StopFailure` 不支持。连接绿色以当前 installation ID 的真实回执为证据，配置完成不等于已激活。 |
+| 2026-08-02 | 产品品牌改为小写 `claudi0`（仍读作 “Claudio”），主图标改为 **C / Signal** | 数字 `0` 提供更独特的字标与域名 / icon 延展空间；C 外环、脉冲、信号点在 16px 到 1024px 保持同一几何。对外 app / DMG / CLI alias 使用 `claudi0`；为避免用户设置与 hooks 失效，`ClaudioCore` / `ClaudioGUI`、`~/.claudio/`、`~/.claudio/bin/claudio` 与 `com.claudio.app` 保持兼容。 |

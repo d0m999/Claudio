@@ -217,7 +217,7 @@ func runHostIntegrationManagerBridgeSuites() async {
             let fixture = bridgeFixture(root: root, codexObservesReceipt: false)
             let outcome = try? await fixture.bridge.perform(.connect(.codex))
             expect(
-                outcome?.feedbackMessage == "Claudio 已写好，等待 Codex 确认",
+                outcome?.feedbackMessage == "claudi0 已写好，等待 Codex 确认",
                 "Codex 配置完成但没有真实回执时，必须保留固定待确认文案")
             expect(
                 outcome?.state.snapshots.first(where: { $0.host == .codex })?.activation

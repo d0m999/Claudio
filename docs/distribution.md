@@ -1,4 +1,4 @@
-# Claudio 安装指南
+# claudi0 安装指南
 
 > 本文档描述 v1 发布后的安装流程；`.github/workflows/release.yml` 尚未真正跑过一次 tag release，
 > 下方的 Homebrew tap / GitHub Releases 链接在首个版本发布前不会有实际内容。
@@ -9,7 +9,7 @@
 
 ## 免责声明：当前未签名
 
-Claudio v1 分发的是**未签名 ad-hoc 构建**（开发者签名，非 Apple Developer 签名）。这意味着：
+claudi0 v1 分发的是**未签名 ad-hoc 构建**（开发者签名，非 Apple Developer 签名）。这意味着：
 - 首次打开时，macOS 会拦截并要求你确认才能运行
 - **这不是 bug，是苹果对未签名应用的安全审查**
 - 我们即将上线 Apple Developer 签名 + 公证（预计接下来的版本），消除这个摩擦
@@ -22,7 +22,7 @@ Claudio v1 分发的是**未签名 ad-hoc 构建**（开发者签名，非 Apple
 
 ```bash
 brew tap d0m999/homebrew-tap
-brew install --cask claudio
+brew install --cask claudi0
 ```
 
 首次打开时，按下方【在新系统上打开】或【在旧系统上打开】的指引操作。
@@ -32,16 +32,16 @@ brew install --cask claudio
 ## 安装方式 2：手动下载 DMG
 
 1. **下载最新 DMG**  
-   前往 [GitHub Releases](https://github.com/d0m999/Claudio/releases) 找到最新版本的 `Claudio.dmg`
+   前往 [GitHub Releases](https://github.com/d0m999/Claudio/releases) 找到最新版本的 `claudi0-<version>.dmg`
 
 2. **挂载 DMG**  
-   下载完成后双击 `Claudio.dmg`，会在桌面出现一个虚拟磁盘
+   下载完成后双击 `claudi0-<version>.dmg`，会在桌面出现一个虚拟磁盘
 
 3. **拖入应用文件夹**  
-   打开虚拟磁盘后，拖 `Claudio.app` 到 `/Applications` 文件夹（需要有写入权限）
+   打开虚拟磁盘后，拖 `claudi0.app` 到 `/Applications` 文件夹（需要有写入权限）
 
 4. **打开应用**  
-   前往 `/Applications`，找到 `Claudio.app`，按下方指引操作
+   前往 `/Applications`，找到 `claudi0.app`，按下方指引操作
 
 ---
 
@@ -49,27 +49,27 @@ brew install --cask claudio
 
 ### 在新系统上打开（macOS Sequoia 15 及更新版本，含 26）
 
-1. **打开 Claudio 时收到拦截**  
-   > `"Claudio" 无法打开，因为 Apple 无法检查是否包含恶意软件。`
+1. **打开 claudi0 时收到拦截**
+   > `"claudi0" 无法打开，因为 Apple 无法检查是否包含恶意软件。`
 
 2. **进入系统设置 > 隐私与安全性**
 
-3. **下滑找到被拦的 Claudio**  
+3. **下滑找到被拦的 claudi0**
    在"安全性"部分你会看到这条信息：
    ```
-   "Claudio" 已被阻止，因为来自身份不明的开发者
+   "claudi0" 已被阻止，因为来自身份不明的开发者
    ```
    旁边会有一个按钮
 
 4. **点击"仍要打开"**  
-   系统会要求你输入密码确认，完成后 Claudio 就能正常打开
+   系统会要求你输入密码确认，完成后 claudi0 就能正常打开
 
 5. **后续打开直接运行**  
-   第一次绕过后，下次直接双击 `Claudio.app` 打开，不会再拦截
+   第一次绕过后，下次直接双击 `claudi0.app` 打开，不会再拦截
 
 ### 在旧系统上打开（macOS Sonoma 14 及更早版本）
 
-1. **右键点击 Claudio.app**
+1. **右键点击 claudi0.app**
 
 2. **选择"打开"**  
    （而非左键双击）
@@ -85,7 +85,7 @@ brew install --cask claudio
 
 ## 首次安装后：先准备声音，再分别连接宿主
 
-1. **打开 Claudio**（菜单栏会出现一个波形图标）。首次启动只准备共享 runtime：把 helper 与内置声音包放进 `~/.claudio/`、修复 quarantine，并在尚未选包时选择默认包。它**不会静默改写** Claude Code 或 Codex 配置。
+1. **打开 claudi0**（菜单栏会出现 C / Signal 图标）。首次启动只准备共享 runtime：把 helper 与内置声音包放进 `~/.claudio/`、修复 quarantine，并在尚未选包时选择默认包。它**不会静默改写** Claude Code 或 Codex 配置。
 2. 点菜单栏图标。面板始终显示两条等权声音来源：
 
    ```text
@@ -98,7 +98,7 @@ brew install --cask claudio
 
 ### 连接 Claude Code
 
-点 Claude Code 卡片里的「连接」。Claudio 只向 `~/.claude/settings.json` 追加自己的 hook：
+点 Claude Code 卡片里的「连接」。claudi0 只向 `~/.claude/settings.json` 追加自己的 hook：
 
 - 保留原有 hook、matcher 与数组顺序
 - 首次写入前建立一次性备份
@@ -107,13 +107,13 @@ brew install --cask claudio
 
 ### 连接 Codex
 
-点 Codex 卡片里的「连接」。Claudio 只在 `~/.codex/hooks.json` 中管理自己的 `Stop`、`PermissionRequest` 与 `SubagentStop` command hook；不会接管单命令 `notify`，也不会读写私有 trust 数据或删除第三方 hook。
+点 Codex 卡片里的「连接」。claudi0 只在 `~/.codex/hooks.json` 中管理自己的 `Stop`、`PermissionRequest` 与 `SubagentStop` command hook；不会接管单命令 `notify`，也不会读写私有 trust 数据或删除第三方 hook。
 
 写入完成后会显示：
 
-> **Claudio 已写好，等待 Codex 确认**
+> **claudi0 已写好，等待 Codex 确认**
 
-在新的 Codex 会话中运行 `/hooks` 并确认 Claudio hooks。详情窗口提供「复制 `/hooks`」和「重新检测」。只有确认后产生首个真实事件、且回执属于当前 installation ID，Codex 才显示绿色已连接；仅仅写好 JSON 不算激活。
+在新的 Codex 会话中运行 `/hooks` 并确认 claudi0 hooks。详情窗口提供「复制 `/hooks`」和「重新检测」。只有确认后产生首个真实事件、且回执属于当前 installation ID，Codex 才显示绿色已连接；仅仅写好 JSON 不算激活。
 
 Codex 的「需要你」只覆盖 `PermissionRequest`（**仅授权请求**）。`UserPromptSubmit` 是任务开始，不计入「需要你」；`Stop` 只写「本轮结束」，不承诺任务已经完成。
 
@@ -121,20 +121,20 @@ Codex 的「需要你」只覆盖 `PermissionRequest`（**仅授权请求**）�
 
 ```bash
 # 查看两个宿主
-/Applications/Claudio.app/Contents/Resources/bin/claudio integrations status
+/Applications/claudi0.app/Contents/Resources/bin/claudi0 integrations status
 
 # 分别连接
-/Applications/Claudio.app/Contents/Resources/bin/claudio integrations connect claude-code
-/Applications/Claudio.app/Contents/Resources/bin/claudio integrations connect codex
+/Applications/claudi0.app/Contents/Resources/bin/claudi0 integrations connect claude-code
+/Applications/claudi0.app/Contents/Resources/bin/claudi0 integrations connect codex
 ```
 
-`claudio setup` 保留旧版兼容行为：它会准备 shared runtime 并连接 Claude Code，**不会替你激活 Codex**。`claudio install` / `uninstall` 也仍是 Claude Code 兼容别名。
+`claudi0 setup` 保留旧版兼容行为：它会准备 shared runtime 并连接 Claude Code，**不会替你激活 Codex**。`claudi0 install` / `uninstall` 也仍是 Claude Code 兼容别名。旧 hooks 继续调用 `~/.claudio/bin/claudio`，改名不会让现有连接失效。
 
 > **关于 Gatekeeper 隔离（macOS 会给下载来的文件盖一个 `com.apple.quarantine` 章）**：
 > 这个章如果留在 `~/.claudio/bin/claudio` 上，Claude Code 每次执行 hook 时都会被系统**直接杀掉**——
 > 没有任何报错，你只会觉得"装好了但就是不响"。所以 shared bootstrap（以及兼容的 `setup`）在复制完成后会
 > **自动解除隔离并回头验证一次**；万一没解掉，它会**报错并且不写任何 hook**，而不是留给你一个
-> 看起来装好了、实际永远静音的安装。`claudio doctor` 也会把"被隔离的二进制"报成硬失败。
+> 看起来装好了、实际永远静音的安装。`claudi0 doctor` 也会把"被隔离的二进制"报成硬失败。
 
 ---
 
@@ -145,59 +145,59 @@ Codex 的「需要你」只覆盖 `PermissionRequest`（**仅授权请求**）�
 先在「声音来源」详情窗口分别断开已连接的宿主，或运行：
 
 ```bash
-~/.claudio/bin/claudio integrations disconnect claude-code
-~/.claudio/bin/claudio integrations disconnect codex
+~/.claudio/bin/claudi0 integrations disconnect claude-code
+~/.claudio/bin/claudi0 integrations disconnect codex
 ```
 
 然后卸载 app：
 
 ```bash
-brew uninstall --cask claudio
+brew uninstall --cask claudi0
 ```
 
-断开一个宿主只删除该宿主的 Claudio 条目；不会删除另一宿主、第三方 hooks、声音包或 `~/.claudio/` shared runtime。`claudio uninstall` 仍可作为断开 Claude Code 的兼容别名。
+断开一个宿主只删除该宿主的 claudi0 条目；不会删除另一宿主、第三方 hooks、声音包或 `~/.claudio/` shared runtime。`claudi0 uninstall` 仍可作为断开 Claude Code 的兼容别名。
 
 ### 手动卸载
 
 1. 在「声音来源」详情窗口分别断开已连接的宿主，或运行：
    ```bash
-   ~/.claudio/bin/claudio integrations disconnect claude-code
-   ~/.claudio/bin/claudio integrations disconnect codex
+   ~/.claudio/bin/claudi0 integrations disconnect claude-code
+   ~/.claudio/bin/claudi0 integrations disconnect codex
    ```
-2. 拖 `Claudio.app` 到回收站（从 `/Applications` 删除）。
+2. 拖 `claudi0.app` 到回收站（从 `/Applications` 删除）。
 
 ---
 
 ## 故障排除
 
-### 我已经点过"仍要打开"，但 Claudio 还是打不开
+### 我已经点过"仍要打开"，但 claudi0 还是打不开
 
 1. 确认你是在**系统设置 > 隐私与安全性** 中点的，而不是在通知框里
 2. 如果仍不行，尝试在终端里直接运行：
    ```bash
-   open /Applications/Claudio.app
+   open /Applications/claudi0.app
    ```
 3. 看是否有其他错误信息
 
-### Claudio 打开了但没发声
+### claudi0 打开了但没发声
 
-1. 在面板确认目标宿主已连接；也可以运行 `~/.claudio/bin/claudio integrations status`。未安装/未连接是提示，不是 shared runtime 故障。
-2. 如果 Codex 显示「Claudio 已写好，等待 Codex 确认」，先在**新的 Codex 会话**运行 `/hooks` 完成确认，再触发一个真实事件并点「重新检测」。`3/4` 本身不需要修复。
-3. 确认系统音量以及 Claudio 的主音量/对应事件没有静音。
-4. 在 Claudio 面板里找到当前声音包，点对应事件的试听按钮 ▶。试听会绕过宿主 hook，能帮助区分「播放链坏了」和「宿主还没激活」。
-5. 运行 `~/.claudio/bin/claudio doctor`，分别查看 shared runtime、Claude Code 与 Codex。只有 shared runtime 不可用或已连接宿主损坏才会返回失败。
+1. 在面板确认目标宿主已连接；也可以运行 `~/.claudio/bin/claudi0 integrations status`。未安装/未连接是提示，不是 shared runtime 故障。
+2. 如果 Codex 显示「claudi0 已写好，等待 Codex 确认」，先在**新的 Codex 会话**运行 `/hooks` 完成确认，再触发一个真实事件并点「重新检测」。`3/4` 本身不需要修复。
+3. 确认系统音量以及 claudi0 的主音量/对应事件没有静音。
+4. 在 claudi0 面板里找到当前声音包，点对应事件的试听按钮 ▶。试听会绕过宿主 hook，能帮助区分「播放链坏了」和「宿主还没激活」。
+5. 运行 `~/.claudio/bin/claudi0 doctor`，分别查看 shared runtime、Claude Code 与 Codex。只有 shared runtime 不可用或已连接宿主损坏才会返回失败。
 
 ### 重跑一次 `setup` 可以修复 shared runtime 与 Claude Code 兼容连接（**从 app bundle 里跑**）
 
 `setup` 是幂等兼容入口，会修复 helper、声音包、当前选包和 Claude Code 连接。Codex 始终通过 `integrations connect codex` / 详情窗口单独管理，并仍需要 `/hooks` 确认。
 
 ```bash
-/Applications/Claudio.app/Contents/Resources/bin/claudio setup
+/Applications/claudi0.app/Contents/Resources/bin/claudi0 setup
 ```
 
-> ⚠️ **一定要从 app bundle 里跑这条路径**，不要跑 `~/.claudio/bin/claudio setup`。
+> ⚠️ **一定要从 app bundle 里跑这条路径**，不要跑 `~/.claudio/bin/claudi0 setup`。
 > 两者的区别只有一个，但很致命：**只有 app bundle 里的那份看得见内置声音包**（它们躺在
-> `Claudio.app/Contents/Resources/packs/`）。从 `~/.claudio/bin/` 跑的那份没有内置包可复制 ——
+> `claudi0.app/Contents/Resources/packs/`）。从 `~/.claudio/bin/` 跑的那份没有内置包可复制 ——
 > 如果你的问题恰恰是「声音包不见了」，它就修不好。
 
 它会做这几件事（每一件都会在输出里如实说出来）：
@@ -208,7 +208,7 @@ brew uninstall --cask claudio
   再装一份干净的；输出里会告诉你搬到哪儿了
 - 你选中的那个包已经不在了 / 读不出来 → 替你换上一个能响的，并打印一行 ⚠ 告诉你换的是哪个
   （你随时可以在面板的声音包列表里换回去）
-- Claude Code 的 Claudio hooks 不在 → 补上（不会覆盖你自己的配置）
+- Claude Code 的 claudi0 hooks 不在 → 补上（不会覆盖你自己的配置）
 
 **它绝不会做的事**：在一台注定发不出声音的机器上写 Claude Code hooks 然后告诉你「装好了」。
 只要这次安装注定是哑的（一个能用的声音包都没有、二进制被隔离、`config.json` 读不出来），
@@ -221,10 +221,10 @@ brew uninstall --cask claudio
 tail -20 ~/.claudio/claudio.log
 
 # 或运行自检
-~/.claudio/bin/claudio doctor
+~/.claudio/bin/claudi0 doctor
 
 # 查看两宿主状态（机器可读时加 --json）
-~/.claudio/bin/claudio integrations status
+~/.claudio/bin/claudi0 integrations status
 ```
 
 真实回执位于 `~/.claudio/integrations/receipts/<host>/<event>.json`，权限为 `0600`。它只含 installation ID、宿主/事件、时间和脱敏播放结果；不会保存提示词、响应内容、项目路径、会话内容或音频绝对路径。不要通过手改回执强行点亮连接——只有当前 installation 的真实 hook 回调才有效。
@@ -242,17 +242,17 @@ tail -20 ~/.claudio/claudio.log
 ### 通过 Homebrew
 
 ```bash
-brew upgrade claudio
+brew upgrade claudi0
 ```
 
 ### 手动更新
 
-1. 下载新的 `Claudio.dmg`
+1. 下载新的 `claudi0-<version>.dmg`
 2. 挂载 DMG
-3. 拖新的 `Claudio.app` 到 `/Applications`，覆盖旧版本
+3. 拖新的 `claudi0.app` 到 `/Applications`，覆盖旧版本
 4. 完成
 
-你之前配置的声音包、Claude Code / Codex 的 Claudio 条目与真实回执会保留。共享配置在 `~/.claudio/`，宿主条目仍分别位于各自配置文件中；更新后可用 `claudio integrations status` 重新检测。
+你之前配置的声音包、Claude Code / Codex 的 claudi0 条目与真实回执会保留。共享配置在 `~/.claudio/`，宿主条目仍分别位于各自配置文件中；更新后可用 `claudi0 integrations status` 重新检测。
 
 ---
 

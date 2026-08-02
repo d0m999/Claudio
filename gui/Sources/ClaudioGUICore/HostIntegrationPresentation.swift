@@ -72,7 +72,7 @@ private func hostSourceRowPresentation(
     case .awaitingActivation(let supported, let total):
         readinessText = "\(supported)/\(total) 已配置"
         detailText = host == .codex
-            ? "Claudio 已写好，等待 Codex 确认"
+            ? "claudi0 已写好，等待 Codex 确认"
             : "等待宿主产生首个真实事件"
         status = .awaitingActivation
 

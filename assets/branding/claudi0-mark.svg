@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
+  <title id="title">claudi0 C / Signal mark</title>
+  <desc id="desc">An open C containing an audio pulse and a signal dot.</desc>
+  <g fill="none" stroke="#C4633C" stroke-linecap="round">
+    <path d="M91 28a45 45 0 1 0 0 72" stroke-width="9"/>
+    <path d="M48 64h9l6-18 9 36 8-21h10" stroke-linejoin="round" stroke-width="6"/>
+  </g>
+  <circle cx="99" cy="64" r="5" fill="#C4633C"/>
+</svg>

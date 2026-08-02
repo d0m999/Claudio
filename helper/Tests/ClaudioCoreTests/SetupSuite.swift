@@ -330,6 +330,16 @@ func runSetupSuites() {
             expect(
                 FileManager.default.fileExists(atPath: environment.claudioBinaryDestination.path),
                 "binary must actually exist at the fixed destination afterward")
+            let brandedAlias = environment.claudioBinaryDestination
+                .deletingLastPathComponent()
+                .appendingPathComponent("claudi0")
+            expect(
+                FileManager.default.fileExists(atPath: brandedAlias.path),
+                "brand rename must publish ~/.claudio/bin/claudi0 beside the legacy hook runtime")
+            expect(
+                (try? Data(contentsOf: brandedAlias))
+                    == (try? Data(contentsOf: environment.claudioBinaryDestination)),
+                "claudi0 alias and legacy claudio runtime must contain identical executable bytes")
             var isExecutable = false
             if let attributes = try? FileManager.default.attributesOfItem(
                 atPath: environment.claudioBinaryDestination.path),
@@ -1093,9 +1103,9 @@ func runSetupPackSelectionSuites() {
             }
             expect(packID == "wobbuffet", "必须指名道姓说出是哪个包没了，got \(packID)")
             expect(
-                reason.contains("/Applications/Claudio.app"),
+                reason.contains("/Applications/claudi0.app/Contents/Resources/bin/claudi0 setup"),
                 "失败必须给出一条**真的有效**的出路：从 app bundle 跑 setup 会把内置包补回来。"
-                    + "（刻意不说「重新安装 Claudio」——cask 没有 zap，brew reinstall 一个字节都不碰"
+                    + "（刻意不说「重新安装 claudi0」——cask 没有 zap，brew reinstall 一个字节都不碰"
                     + " ~/.claudio/，而所有中毒态都活在那里。）got \(reason)")
             expect(
                 !FileManager.default.fileExists(atPath: environment.settingsFile.path),

@@ -265,7 +265,7 @@ import ClaudioGUIComponents
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Claudio · 当前声音包 极简铃 · 4 个可听事件")
+                Text("claudi0 · 当前声音包 极简铃 · 4 个可听事件")
                     .font(ClaudioTheme.font(.productTitle))
                 EventRowView(
                     row: PreviewFixtures.eventRows[0],

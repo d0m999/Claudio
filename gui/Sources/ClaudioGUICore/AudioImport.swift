@@ -142,7 +142,7 @@ public func importAudioFile(
         // open itself fail, so this is caught before a single target byte is read.
         return .rejected(
             .copyFailed(
-                reason: "这个文件是个链接（symlink），Claudio 只收音频文件本身，请直接拖入真正的文件再试一次"))
+                reason: "这个文件是个链接（symlink），claudi0 只收音频文件本身，请直接拖入真正的文件再试一次"))
     case .notRegularFile:
         // A directory, FIFO/named pipe, socket, or character/block device — everything that
         // is not a plain regular file, refused by an explicit whitelist (`fstat` said the
@@ -152,7 +152,7 @@ public func importAudioFile(
         // `O_NONBLOCK` on the open plus this `fstat` gate rule it out before any read.
         return .rejected(
             .copyFailed(
-                reason: "这个不是普通文件（可能是文件夹或特殊文件），Claudio 只收音频文件本身，请直接拖入真正的音频文件再试一次"))
+                reason: "这个不是普通文件（可能是文件夹或特殊文件），claudi0 只收音频文件本身，请直接拖入真正的音频文件再试一次"))
     case .oversize(let actualBytes):
         return .rejected(
             .oversize(actualBytes: actualBytes, maxBytes: environment.limits.maxFileSizeBytes))

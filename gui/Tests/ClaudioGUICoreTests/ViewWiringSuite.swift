@@ -1887,7 +1887,7 @@ func runViewWiringSuites() {
             "PanelView 不得再从 packCards.first(where:) 取当前包名；当前包未加星时它不在显示集")
         expect(
             rawCollapsed.contains(
-                "let packName = selectedPackDisplayName let base = \"Claudio 面板，2 个声音来源，\\(audibleEventCount) 个可听事件\" "
+                "let packName = selectedPackDisplayName let base = \"claudi0 面板，2 个声音来源，\\(audibleEventCount) 个可听事件\" "
                     + "guard !packName.isEmpty else { return base } return \"\\(base)，当前声音包 \\(packName)\""),
             "headerAccessibilityLabel 必须同时说明双声音来源并消费 selectedPackDisplayName")
         expect(

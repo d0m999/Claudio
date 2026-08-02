@@ -384,7 +384,7 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
         results.append(
             DoctorCheckResult(
                 name: "claudio-binary", severity: .failure,
-                message: "✗ \(reason)，hooks 会静默失效——重跑一次 claudio setup"
+                message: "✗ \(reason)，hooks 会静默失效——从 claudi0.app 重跑一次 claudi0 setup"
             )
         )
     case .ready:
@@ -519,7 +519,7 @@ private func doctorHostResult(
     if case .unavailable(let reason) = snapshot.availability {
         return DoctorCheckResult(
             name: name, severity: .failure,
-            message: "✗ \(host.displayName) 已有 Claudio 连接但宿主不可用：\(reason)")
+            message: "✗ \(host.displayName) 已有 claudi0 连接但宿主不可用：\(reason)")
     }
     let writable: Bool
     let writableReason: String?
@@ -559,7 +559,7 @@ private func doctorHostResult(
     case .incomplete(let missing):
         return DoctorCheckResult(
             name: name, severity: .failure,
-            message: "✗ \(host.displayName) 已有 Claudio 配置但缺少 hook：\(missing.joined(separator: ", "))")
+            message: "✗ \(host.displayName) 已有 claudi0 配置但缺少 hook：\(missing.joined(separator: ", "))")
     case .unreadable(let reason), .conflict(let reason):
         return DoctorCheckResult(
             name: name, severity: .failure,
@@ -584,7 +584,7 @@ private func doctorHostResult(
             return DoctorCheckResult(
                 name: name, severity: .warning,
                 message: host == .codex
-                    ? "⚠ Codex：Claudio 已写好，等待 Codex 确认（在 Codex 输入 /hooks）"
+                    ? "⚠ Codex：claudi0 已写好，等待 Codex 确认（在 Codex 输入 /hooks）"
                     : "⚠ Claude Code 已配置，等待首个真实事件回执")
         }
         let supported = HostCapabilityCatalog.bindings(for: host).filter(\.isAudibleCapability).count
@@ -657,7 +657,7 @@ extension PackIntegrityStatus {
         case .noConfig:
             return DoctorCheckResult(
                 name: "pack", severity: .warning,
-                message: "⚠ 尚未选择声音包（全新安装，运行 `claudio use <pack-id>` 后可解决）")
+                message: "⚠ 尚未选择声音包（全新安装，运行 `~/.claudio/bin/claudi0 use <pack-id>` 后可解决）")
         case .configUnreadable(let reason):
             return DoctorCheckResult(name: "pack", severity: .warning, message: "⚠ \(reason)")
         case .packNotFound(let packID):

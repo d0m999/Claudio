@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">claudi0 app icon</title>
+  <desc id="desc">The cream C / Signal mark on a dark rounded hardware surface.</desc>
+  <rect x="72" y="72" width="880" height="880" rx="210" fill="#2B2620"/>
+  <rect x="77" y="77" width="870" height="870" rx="205" fill="none" stroke="#FFFDF4" stroke-opacity=".07" stroke-width="10"/>
+  <g transform="translate(166.4 166.4) scale(5.4)">
+    <g fill="none" stroke="#F1E9DF" stroke-linecap="round">
+      <path d="M91 28a45 45 0 1 0 0 72" stroke-width="9"/>
+      <path d="M48 64h9l6-18 9 36 8-21h10" stroke-linejoin="round" stroke-width="6"/>
+    </g>
+    <circle cx="99" cy="64" r="5" fill="#F1E9DF"/>
+  </g>
+</svg>

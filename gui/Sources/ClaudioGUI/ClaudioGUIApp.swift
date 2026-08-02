@@ -30,7 +30,7 @@ struct ClaudioGUIApp: App {
         // ``MenuBarController/showPopover()`` started calling `NSApp.activate`, the panel
         // being open means Claudio is frontmost while the menu bar on screen still belongs to
         // the app the user was in — so a user reaching for ⌘, (meaning to open THAT app's
-        // preferences) instead opens a blank "Claudio Settings" window, which takes key and
+        // preferences) instead opens a blank "claudi0 Settings" window, which takes key and
         // shoves the transient popover out of existence.
         //
         // Only this one item is removed. `NSApp.mainMenu = nil` would take ⌘C/⌘V/⌘X/⌘A down

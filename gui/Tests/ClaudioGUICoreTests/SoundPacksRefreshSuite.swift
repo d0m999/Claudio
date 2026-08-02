@@ -1945,8 +1945,8 @@ func runSoundPacksRefreshSuites() async {
                 && controller.contains("focusCoordinator.requestRoute(effectiveRoute)"),
             "editEvent 必须先确认目标包存在；缺失包只能降级 overview，不能把事件转给当前其他包")
         expect(
-            controller.contains("window.title = \"Claudio · 声音包\""),
-            "后台标准窗口标题必须保留 Claudio 品牌锚点")
+            controller.contains("window.title = \"claudi0 · 声音包\""),
+            "后台标准窗口标题必须保留 claudi0 品牌锚点")
         expect(
             controller.contains("isReleasedWhenClosed = false"),
             "关闭后 owner 仍保留窗口，下一次复用同一实例")

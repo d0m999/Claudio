@@ -237,9 +237,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         // 纯 alpha，自动亮/暗）") — the actual glyph (方案 B「单线括弧」) lives in `MenuBarIcon`,
         // not inline here, since it replaced a one-line SF Symbol placeholder with real geometry.
         let icon = MenuBarIcon.make()
-        icon.accessibilityDescription = "Claudio"
+        icon.accessibilityDescription = "claudi0"
         statusItem.button?.image = icon
-        statusItem.button?.setAccessibilityLabel("Claudio")
+        statusItem.button?.setAccessibilityLabel("claudi0")
 
         super.init()
 

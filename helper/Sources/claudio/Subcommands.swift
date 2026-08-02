@@ -48,7 +48,7 @@ extension Claudio {
                     print(String(decoding: data, as: UTF8.self))
                     return
                 }
-                print("Claudio 声音来源")
+                print("claudi0 声音来源")
                 if let runtime = snapshots.first?.runtime {
                     print("  共享 runtime: \(sharedRuntimeText(runtime))")
                 }
@@ -74,7 +74,7 @@ extension Claudio {
                 case .success(let snapshot):
                     print("✓ \(hostID.displayName)：\(integrationSnapshotText(snapshot))")
                     if hostID == .codex, case .awaitingReceipt = snapshot.activation {
-                        print("  Claudio 已写好，等待 Codex 确认；在 Codex 输入 /hooks。")
+                        print("  claudi0 已写好，等待 Codex 确认；在 Codex 输入 /hooks。")
                     }
                 case .failure(let error):
                     print("✗ \(error.description)")
@@ -85,7 +85,7 @@ extension Claudio {
 
         struct Disconnect: AsyncParsableCommand {
             static let configuration = CommandConfiguration(
-                abstract: "只摘除指定宿主的 Claudio 条目，保留共享 runtime 与第三方配置。")
+                abstract: "只摘除指定宿主的 claudi0 条目，保留共享 runtime 与第三方配置。")
 
             @Argument(help: "claude-code / codex") var host: String
 
@@ -117,7 +117,7 @@ extension Claudio {
         func run() throws {
             let report = runDoctorChecks(
                 environment: DoctorEnvironment(integrations: DoctorIntegrationsEnvironment()))
-            print("claudio doctor")
+            print("claudi0 doctor")
             for result in report.results {
                 print("  \(result.message)")
             }
@@ -169,7 +169,7 @@ extension Claudio {
     /// other hook (ENGINEERING.md 工程落地细节 ③: 命令精确等值匹配，非子串)。
     struct Uninstall: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "Claude Code legacy 兼容别名：精准摘除 Claudio 条目并保留其它 hook。"
+            abstract: "Claude Code legacy 兼容别名：精准摘除 claudi0 条目并保留其它 hook。"
         )
         func run() throws {
             switch uninstallClaudioHooks() {
@@ -236,12 +236,12 @@ private func integrationSnapshotText(_ snapshot: HostIntegrationSnapshot) -> Str
         if snapshot.configuration == .notConfigured {
             return "未安装或未连接：\(reason)"
         }
-        return "需要处理：已有 Claudio 配置，但宿主不可用（\(reason)）"
+        return "需要处理：已有 claudi0 配置，但宿主不可用（\(reason)）"
     }
     if case .notWritable(let reason) = snapshot.writability,
         snapshot.configuration != .notConfigured
     {
-        return "需要处理：已有 Claudio 配置，但无法维护（\(reason)）"
+        return "需要处理：已有 claudi0 配置，但无法维护（\(reason)）"
     }
     if snapshot.configuration != .notConfigured {
         switch snapshot.runtime {
@@ -268,7 +268,7 @@ private func integrationSnapshotText(_ snapshot: HostIntegrationSnapshot) -> Str
             return "\(supported)/\(Event.allCases.count) 已就绪"
         case .none, .awaitingReceipt:
             return snapshot.host == .codex
-                ? "Claudio 已写好，等待 Codex 确认"
+                ? "claudi0 已写好，等待 Codex 确认"
                 : "已配置，等待首个真实事件"
         }
     }
@@ -288,11 +288,11 @@ private func sharedRuntimeText(_ runtime: SharedRuntimeHealth) -> String {
 private func printSetupSummary(_ outcome: SetupOutcome) {
     switch outcome {
     case .completed(let copiedBinary, let copiedPacks, let salvaged, let packSelection, let hooksOutcome):
-        print("✓ Claudio 首次安装自举完成")
+        print("✓ claudi0 首次安装自举完成")
         print(
             copiedBinary
-                ? "  · 二进制已复制到 ~/.claudio/bin/claudio"
-                : "  · 二进制已在 ~/.claudio/bin/claudio（跳过复制）")
+                ? "  · runtime 已复制到 ~/.claudio/bin/claudio，并提供 ~/.claudio/bin/claudi0 命令"
+                : "  · runtime 已在 ~/.claudio/bin/claudio，并已同步 ~/.claudio/bin/claudi0 命令")
         if copiedPacks.isEmpty {
             print("  · 没有发现需要复制的新内置声音包")
         } else {
@@ -332,6 +332,6 @@ private func hooksOutcomeMessage(_ outcome: InstallOutcome) -> String {
     case .alreadyInstalled:
         "Claude Code legacy hooks 已存在，无需重复操作"
     case .modernConnectionPresent:
-        "Claude Code 已是现代连接；未追加 legacy hooks，请使用 `claudio integrations` 管理"
+        "Claude Code 已是现代连接；未追加 legacy hooks，请使用 `claudi0 integrations` 管理"
     }
 }

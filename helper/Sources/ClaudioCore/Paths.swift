@@ -54,6 +54,13 @@ public enum ClaudioPaths {
         binDirectory.appendingPathComponent("claudio")
     }
 
+    /// `~/.claudio/bin/claudi0` — the user-facing CLI alias introduced by the brand rename.
+    /// Host hooks deliberately keep using ``claudioBinary`` so existing exact-match ownership
+    /// and uninstall behavior remain stable across upgrades.
+    public static var claudi0Binary: URL {
+        binDirectory.appendingPathComponent("claudi0")
+    }
+
     /// `~/.claudio/claudio.log` — rolling diagnostic log (ENGINEERING.md 决议 6, T6).
     public static var logFile: URL {
         root.appendingPathComponent("claudio.log")

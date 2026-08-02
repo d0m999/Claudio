@@ -1,15 +1,15 @@
 import Foundation
 
-/// `claudio setup` — v1 Terminal 首次安装自举（ENGINEERING.md T17, Distribution Plan「接管
+/// `claudi0 setup` — v1 Terminal 首次安装自举（ENGINEERING.md T17, Distribution Plan「接管
 /// 机制」v1 过渡）.
 ///
 /// Closes the gap a codex review of T11+T12 (commits 10f00cf/f31987b) surfaced: `release.yml`
-/// ships the helper CLI + `minimal-chime` inside `Claudio.app`'s `Contents/Resources/`, but
+/// ships the helper CLI + `minimal-chime` inside `claudi0.app`'s `Contents/Resources/`, but
 /// nothing ever copies either out to `~/.claudio/` — "the app install" `Paths.swift`
 /// documents as owning that step doesn't exist anywhere in code, and the real menu bar
 /// shell that would trigger it (T15) hasn't landed. This is the interim, Terminal-runnable
 /// substitute: run once from *inside* the app bundle (e.g.
-/// `/Applications/Claudio.app/Contents/Resources/bin/claudio setup`) and it places the
+/// `/Applications/claudi0.app/Contents/Resources/bin/claudi0 setup`) and it places the
 /// binary, seeds a default pack selection, and installs hooks — the same three side effects
 /// T15's onboarding CTA is expected to trigger automatically once it exists.
 
@@ -486,7 +486,7 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
         case .binaryCopyFailure(let reason):
             "复制二进制到 ~/.claudio/bin/claudio 失败：\(reason)"
         case .packsLockBusy:
-            "声音包目录正被另一个操作占用（多半是 Claudio 面板此刻正在写声音包清单）——"
+            "声音包目录正被另一个操作占用（多半是 claudi0 面板此刻正在写声音包清单）——"
                 + "这次什么都没做（没有复制任何包，也没有写入任何 hooks），过一会儿再跑一次。"
         case .packsLockFailed(let errno):
             "取声音包目录的锁失败了（errno \(errno)）——这不是「忙」，是 ~/.claudio 那边出了真问题，"
@@ -559,7 +559,7 @@ public func performSharedRuntimeBootstrap(
         }
 
         // Bundled packs ship as a sibling of the binary's containing directory:
-        // `Contents/Resources/bin/claudio` ↔ `Contents/Resources/packs/` (release.yml).
+        // `Contents/Resources/bin/claudi0` ↔ `Contents/Resources/packs/` (release.yml).
         // Its mere presence is also how `setup` tells "running from inside a bundle" apart
         // from "running some other copy of this binary from an arbitrary directory" — if
         // there's no sibling `packs/`, there's no bundled pack to copy, but (unlike the
@@ -607,6 +607,29 @@ public func performSharedRuntimeBootstrap(
         }
     }
 
+    // Publish the user-facing `claudi0` command next to the legacy runtime path. Hooks keep
+    // targeting `bin/claudio`; this sibling is an executable alias, not a path migration.
+    let claudi0AliasDestination = environment.claudioBinaryDestination
+        .deletingLastPathComponent()
+        .appendingPathComponent("claudi0")
+    var legacyBinaryIsDirectory: ObjCBool = false
+    let legacyBinaryExists = FileManager.default.fileExists(
+        atPath: environment.claudioBinaryDestination.path,
+        isDirectory: &legacyBinaryIsDirectory)
+    let shouldPublishClaudi0Alias =
+        claudi0AliasDestination.standardizedFileURL.path
+        != environment.claudioBinaryDestination.standardizedFileURL.path
+        && legacyBinaryExists
+        && !legacyBinaryIsDirectory.boolValue
+    if shouldPublishClaudi0Alias {
+        // The alias is additive branding, not part of the host runtime contract. A read-only
+        // legacy installation must remain usable even if this convenience entry cannot be
+        // refreshed; the next app-bundle bootstrap will retry it.
+        _ = copySelfToFixedLocation(
+            from: environment.claudioBinaryDestination,
+            to: claudi0AliasDestination)
+    }
+
     // This is the ONLY place quarantine is stripped from the binary, and the ONLY place the strip
     // is verified. `copySelfToFixedLocation` deliberately does NOT strip (see its own comment) —
     // an earlier draft had it strip too, and this comment still claimed it did long after that
@@ -627,6 +650,16 @@ public func performSharedRuntimeBootstrap(
                     "已尝试解除隔离但没成功（\(environment.claudioBinaryDestination.path)）。"
                     + "可以手动跑一次：xattr -dr com.apple.quarantine \(environment.claudioBinaryDestination.path)"
             ))
+    }
+    if shouldPublishClaudi0Alias
+        && FileManager.default.fileExists(atPath: claudi0AliasDestination.path)
+    {
+        stripQuarantineAttribute(at: claudi0AliasDestination)
+        if hasQuarantineAttribute(at: claudi0AliasDestination) {
+            // Never leave a branded command that is present but guaranteed to be killed by
+            // Gatekeeper. The legacy runtime remains authoritative and already passed its gate.
+            try? FileManager.default.removeItem(at: claudi0AliasDestination)
+        }
     }
 
     // 共享 runtime 报成功之前的最后一件事，也是这次 setup 唯一还没兑现的不变式（T17e）：
@@ -693,7 +726,7 @@ public func performSharedRuntimeBootstrap(
             .configUnusable(
                 reason:
                     "\(reason)。修好 \(environment.configFile.path)，或者直接删掉它"
-                    + "（Claudio 会重新生成一份），然后再跑一次 setup。"
+                    + "（claudi0 会重新生成一份），然后再跑一次 setup。"
                     + "跑一次 \(environment.claudioBinaryDestination.path) doctor 可以看到更具体的诊断。"))
     }
 
@@ -792,12 +825,12 @@ private func usablePackIDs(in userPacksDirectory: URL) -> [String] {
 /// 一次有用的失败必须让用户**看得见出路**，而且那条出路必须是**真的**。
 ///
 /// 这里只说一件事：从 app bundle 里跑一次 setup，它会把内置包补回来（`docs/distribution.md` 里
-/// 记的就是这条命令）。刻意**不**说「重新安装 Claudio」—— `Casks/claudio.rb` 没有 `zap`，
+/// 记的就是这条命令）。刻意**不**说「重新安装 claudi0」—— `Casks/claudi0.rb` 没有 `zap`，
 /// `brew reinstall` 一个字节都不碰 `~/.claudio/`，而所有中毒态全都活在 `~/.claudio/` 里：
 /// 那条建议对它被印出来的每一种情形都是确定无效的（T17e 完备性批评者命中）。
 private let restoreBundledPacksHint =
     "从 app 里跑一次 setup 就能把内置包补回来："
-    + "/Applications/Claudio.app/Contents/Resources/bin/claudio setup"
+    + "/Applications/claudi0.app/Contents/Resources/bin/claudi0 setup"
 
 /// Copies the currently-running binary to its fixed destination and marks it executable.
 /// Replaces an existing destination file (e.g. re-running `setup` after an app update) —

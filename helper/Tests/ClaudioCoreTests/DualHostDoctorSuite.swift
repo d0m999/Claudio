@@ -278,7 +278,7 @@ func runDualHostDoctorSuites() {
             let codex = dualHostDoctorResult(results, host: .codex)
             expect(codex?.severity == .failure, "已有配置但宿主不可用必须 hard fail")
             expect(
-                codex?.message.contains("已有 Claudio 连接但宿主不可用") == true,
+                codex?.message.contains("已有 claudi0 连接但宿主不可用") == true,
                 "failure 必须明确区分未安装空态与已连接侧损坏")
         }
     }
@@ -295,7 +295,7 @@ func runDualHostDoctorSuites() {
             }
             expect(codex.severity == .warning, "配置完成但未激活必须是待确认 warning")
             expect(
-                codex.message.contains("Claudio 已写好，等待 Codex 确认")
+                codex.message.contains("claudi0 已写好，等待 Codex 确认")
                     && codex.message.contains("/hooks"),
                 "待确认文案必须给出固定状态与可执行 /hooks 指令，got \(codex.message)")
         }

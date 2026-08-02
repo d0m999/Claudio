@@ -67,7 +67,7 @@ struct IntegrationsWindowView: View {
                 perform(.disconnect(host))
             }
             .accessibilityLabel("确认断开 \(host.displayName)")
-            .accessibilityHint("只移除这个宿主的 Claudio 连接")
+            .accessibilityHint("只移除这个宿主的 claudi0 连接")
             .accessibilityIdentifier("integrations.confirm-disconnect.\(host.rawValue)")
             Button("取消", role: .cancel) {
                 pendingDisconnectHost = nil
@@ -75,7 +75,7 @@ struct IntegrationsWindowView: View {
             .accessibilityLabel("取消断开 \(host.displayName)")
             .accessibilityIdentifier("integrations.cancel-disconnect.\(host.rawValue)")
         } message: { host in
-            Text("只移除 \(host.displayName) 的 Claudio 连接；另一个宿主、声音包和静音设置不会改变。")
+            Text("只移除 \(host.displayName) 的 claudi0 连接；另一个宿主、声音包和静音设置不会改变。")
         }
         .onReceive(focusCoordinator.$requestRevision) { revision in
             guard revision > handledFocusRequestRevision else { return }
@@ -523,7 +523,7 @@ struct IntegrationsWindowView: View {
             .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .inspectorAction(action))
             .disabled(model.isPerformingAction)
-            .accessibilityHint("会先确认；只移除这个宿主的 Claudio 连接")
+            .accessibilityHint("会先确认；只移除这个宿主的 claudi0 连接")
             .accessibilityIdentifier("integrations.disconnect.\(host.rawValue)")
         default:
             Button(integrationsInspectorActionTitle(action, hostStatus: selectedHostStatus)) {
@@ -657,7 +657,7 @@ struct IntegrationsWindowView: View {
         case .configureSound: "打开声音包窗口并定位到当前事件"
         case .connect: "连接当前宿主"
         case .upgrade: "把旧版连接升级到当前格式"
-        case .repair: "修复当前宿主的 Claudio 连接"
+        case .repair: "修复当前宿主的 claudi0 连接"
         case .redetect: "重新读取当前连接状态"
         case .explainUnsupported, .none: ""
         }

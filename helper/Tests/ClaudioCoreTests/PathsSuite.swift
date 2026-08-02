@@ -45,6 +45,7 @@ func runPathsSuites() {
             ("packDirectory(id:)", ClaudioPaths.packDirectory(id: "minimal-chime").path),
             ("binDirectory", ClaudioPaths.binDirectory.path),
             ("claudioBinary", ClaudioPaths.claudioBinary.path),
+            ("claudi0Binary", ClaudioPaths.claudi0Binary.path),
             ("logFile", ClaudioPaths.logFile.path),
             ("logLockFile", ClaudioPaths.logLockFile.path),
             ("playLockFile", ClaudioPaths.playLockFile.path),
@@ -72,6 +73,16 @@ func runPathsSuites() {
         expect(path.hasSuffix("/claudio"), "claudioBinary should resolve to a file named claudio")
     }
 
+    suite("claudi0Binary is a sibling branding alias, never the hook ownership anchor") {
+        expect(
+            ClaudioPaths.claudi0Binary.deletingLastPathComponent() == ClaudioPaths.binDirectory,
+            "claudi0 alias must live beside the legacy runtime")
+        expect(ClaudioPaths.claudi0Binary.lastPathComponent == "claudi0", "alias basename")
+        expect(
+            ClaudioPaths.claudi0Binary != ClaudioPaths.claudioBinary,
+            "brand alias and legacy exact-match runtime must remain two explicit paths")
+    }
+
     suite("every Claudio-owned path lives under ~/.claudio, except claudeSettingsFile") {
         let root = ClaudioPaths.root.path
         expect(root.hasSuffix("/.claudio"), "root should be a `.claudio` dot-folder: \(root)")
@@ -82,6 +93,7 @@ func runPathsSuites() {
             ("packDirectory(id:)", ClaudioPaths.packDirectory(id: "minimal-chime").path),
             ("binDirectory", ClaudioPaths.binDirectory.path),
             ("claudioBinary", ClaudioPaths.claudioBinary.path),
+            ("claudi0Binary", ClaudioPaths.claudi0Binary.path),
             ("logFile", ClaudioPaths.logFile.path),
             ("logLockFile", ClaudioPaths.logLockFile.path),
             ("playLockFile", ClaudioPaths.playLockFile.path),

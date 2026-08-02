@@ -1,7 +1,7 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Claudio's menu bar app — the SwiftUI front-end delegates shared-runtime bootstrap and every
+// claudi0's menu bar app — the SwiftUI front-end delegates shared-runtime bootstrap and every
 // host-config inspect/connect/disconnect operation to `ClaudioCore`'s integration manager and
 // adapters. Views only consume injected presentation state; they never parse host files themselves.
 //

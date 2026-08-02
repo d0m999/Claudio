@@ -1,9 +1,9 @@
 name: Release
 
 # 触发：push 一个形如 vX.Y.Z 的 tag（例如 `git tag v1.0.0 && git push origin v1.0.0`）。
-# 链路：build 出 universal（arm64 + x86_64）的 `claudio` CLI 与 `ClaudioGUI` 可执行文件
+# 链路：build 出 universal（arm64 + x86_64）的 helper CLI 与 `ClaudioGUI` 可执行文件
 #   → 各自两个架构分别 `swift build`，再手动 `lipo -create` 合并
-#   → 组装未签名 ad-hoc `Claudio.app`
+#   → 组装未签名 ad-hoc `claudi0.app`
 #   → 打 DMG
 #   → 建 GitHub Release 并上传 DMG
 #   → 更新自建 Homebrew tap（`<owner>/homebrew-tap`）里的 cask formula。
@@ -25,8 +25,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APP_NAME: Claudio
-  CASK_NAME: claudio
+  APP_NAME: claudi0
+  APP_EXECUTABLE: claudi0-app
+  CASK_NAME: claudi0
+  # 品牌改名不迁移 bundle identity，保留现有 UserDefaults 与窗口状态。
   BUNDLE_ID: com.claudio.app
   MACOS_DEPLOYMENT_TARGET: "12.0" # 对齐 helper/Package.swift · gui/Package.swift 的 .macOS(.v12)
 
@@ -105,21 +107,23 @@ jobs:
           chmod +x dist/app-bin/ClaudioGUI
           echo "ClaudioGUI archs: $(lipo -archs dist/app-bin/ClaudioGUI)"
 
-      - name: Assemble Claudio.app
+      - name: Assemble claudi0.app
         run: |
           set -euo pipefail
           APP="dist/${{ env.APP_NAME }}.app"
           rm -rf "$APP"
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/packs"
 
-          cp dist/app-bin/ClaudioGUI "$APP/Contents/MacOS/${{ env.APP_NAME }}"
+          cp dist/app-bin/ClaudioGUI "$APP/Contents/MacOS/${{ env.APP_EXECUTABLE }}"
 
-          # 内置 helper CLI 随 app bundle 分发；app 首次运行调 `claudio install` 把它
-          # 装到固定路径 ~/.claudio/bin/claudio（ENGINEERING.md 工程落地细节③：固定安装路径 + 幂等标记）。
+          # 新品牌入口为 `claudi0`；同时保留 `claudio` bundle alias，避免旧版安装说明失效。
+          # shared runtime 仍装到 ~/.claudio/bin/claudio，确保现有 hooks 精确匹配。
+          cp dist/bin/claudio "$APP/Contents/Resources/bin/claudi0"
           cp dist/bin/claudio "$APP/Contents/Resources/bin/claudio"
 
           # 内置声音包只读随 app bundle 分发（ENGINEERING.md 工程落地细节②：声音包存储根 + 查找顺序）。
           cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
+          cp assets/branding/claudi0.icns "$APP/Contents/Resources/claudi0.icns"
 
           cat > "$APP/Contents/Info.plist" <<PLIST
           <?xml version="1.0" encoding="UTF-8"?>
@@ -131,7 +135,8 @@ jobs:
             <key>CFBundleIdentifier</key><string>${{ env.BUNDLE_ID }}</string>
             <key>CFBundleVersion</key><string>${{ steps.ver.outputs.version }}</string>
             <key>CFBundleShortVersionString</key><string>${{ steps.ver.outputs.version }}</string>
-            <key>CFBundleExecutable</key><string>${{ env.APP_NAME }}</string>
+            <key>CFBundleExecutable</key><string>${{ env.APP_EXECUTABLE }}</string>
+            <key>CFBundleIconFile</key><string>claudi0.icns</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>LSMinimumSystemVersion</key><string>${{ env.MACOS_DEPLOYMENT_TARGET }}</string>
             <key>LSUIElement</key><true/>
@@ -150,7 +155,8 @@ jobs:
       - name: Verify universal binaries (arm64 + x86_64)
         run: |
           set -euo pipefail
-          for BIN in "dist/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_NAME }}" \
+          for BIN in "dist/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_EXECUTABLE }}" \
+                     "dist/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudi0" \
                      "dist/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio"; do
             ARCHS="$(lipo -archs "$BIN")"
             echo "$BIN archs: $ARCHS"
@@ -182,7 +188,7 @@ jobs:
           gh release create "${{ steps.ver.outputs.tag }}" \
             "dist/${{ steps.dmg.outputs.dmg_name }}" \
             --title "${{ env.APP_NAME }} ${{ steps.ver.outputs.version }}" \
-            --notes "未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点\"仍要打开\"。打开 Claudio，点面板里的「接管 Claude Code」即可完成安装（追加、不覆盖、自动备份）。也可在 Terminal 跑 \`/Applications/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio setup\`，两者等价（详见 docs/distribution.md）。"
+            --notes "未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点\"仍要打开\"。打开 claudi0，点面板里的「接管 Claude Code」即可完成安装（追加、不覆盖、自动备份）。也可在 Terminal 跑 \`/Applications/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudi0 setup\`，两者等价（详见 docs/distribution.md）。"
 
   update-cask:
     name: Update Homebrew tap cask
@@ -212,7 +218,7 @@ jobs:
 
             url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${{ env.APP_NAME }}-#{version}.dmg"
             name "${{ env.APP_NAME }}"
-            desc "Claude Code 语义化提示音 · 策展声音包"
+            desc "Claude Code + Codex 语义化提示音 · 策展声音包"
             homepage "https://github.com/${{ github.repository }}"
 
             depends_on macos: ">= :monterey"
@@ -232,7 +238,7 @@ jobs:
 
                 打开 ${{ env.APP_NAME }}，点菜单栏面板里的「接管 Claude Code」即可 —— 它会装好放声音的
                 小助手、复制内置声音包、并追加（不覆盖、自动备份）Claude Code 的 hook 配置。
-                也可以在 Terminal 里跑 #{appdir}/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio setup，
+                也可以在 Terminal 里跑 #{appdir}/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudi0 setup，
                 两者做的是同一件事（详见 docs/distribution.md）。
               EOS
             end

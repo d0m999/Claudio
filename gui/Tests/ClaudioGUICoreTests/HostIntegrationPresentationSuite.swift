@@ -98,7 +98,7 @@ func runHostIntegrationPresentationSuites() {
         expect(awaiting[1].status == .awaitingActivation, "等待首个真实回执必须是待确认状态")
         expect(awaiting[1].readinessText == "3/4 已配置", "待确认不得冒充已连接")
         expect(
-            awaiting[1].detailText == "Claudio 已写好，等待 Codex 确认",
+            awaiting[1].detailText == "claudi0 已写好，等待 Codex 确认",
             "Codex 待确认文案必须逐字固定，实得 \(String(describing: awaiting[1].detailText))")
     }
 

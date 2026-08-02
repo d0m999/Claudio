@@ -110,7 +110,7 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = "Claudio · 集成"
+        window.title = "claudi0 · 集成"
         window.contentMinSize = NSSize(width: 640, height: 520)
         window.contentViewController = NSHostingController(rootView: content)
         window.isReleasedWhenClosed = false

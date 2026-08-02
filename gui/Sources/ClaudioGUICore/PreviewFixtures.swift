@@ -90,11 +90,11 @@ public enum PreviewFixtures {
         .running(.disconnect),
         .failed(
             action: .takeOver,
-            message: "这一步没能完成，Claudio 已经停下、没有留下半成品。看看下面的原因，或者稍后再试一次。",
+            message: "这一步没能完成，claudi0 已经停下、没有留下半成品。看看下面的原因，或者稍后再试一次。",
             detail: "写 settings.json hooks 失败：settings.json 存在但不可写：/Users/demo/.claude/settings.json"),
         .failed(
             action: .takeOver,
-            message: "没找到 Claudio 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 Claudio 再试一次。",
+            message: "没找到 claudi0 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 claudi0 再试一次。",
             detail: nil),
         // T17f —— 第三个视觉分支：动作**成功了**，但 setup 替用户做了主。三份 fixture 各渲染出不同的
         // 东西（一行搬走 / 一行换包 / 两行叠着），所以是三个 label、三帧。少任何一帧，那个变体就
@@ -325,7 +325,7 @@ public enum PreviewFixtures {
             snapshots: HostID.allCases.map { hostIntegrationSnapshot(host: $0) }),
         hostIntegrationScenario(
             id: "codex-awaiting",
-            title: "Claudio 已写好，等待 Codex 确认",
+            title: "claudi0 已写好，等待 Codex 确认",
             snapshots: [
                 hostIntegrationSnapshot(host: .claudeCode),
                 hostIntegrationSnapshot(
@@ -365,7 +365,7 @@ public enum PreviewFixtures {
             snapshots: HostID.allCases.map {
                 hostIntegrationSnapshot(
                     host: $0,
-                    runtime: .damaged(reason: "Claudio helper 损坏"))
+                    runtime: .damaged(reason: "claudi0 helper 损坏"))
             }),
         hostIntegrationScenario(
             id: "single-side-connection-failure",

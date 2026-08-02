@@ -164,7 +164,7 @@ public struct ClaudeCodeIntegrationAdapter: HostIntegrationAdapter {
         guard configured.configuration == .configured, let installationID = configured.installationID
         else {
             return .failure(
-                .configuration(reason: "Claude Code 写入后未形成完整的 Claudio installation ID"))
+                .configuration(reason: "Claude Code 写入后未形成完整的 claudi0 installation ID"))
         }
         if case .failure(let error) = environment.receiptStore.activate(
             host: .claudeCode, installationID: installationID)
@@ -324,7 +324,7 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
                 return .unchanged
             }
             if case .conflictingInstallationIDs = transformed.status {
-                transformFailure = "Codex hooks 含多个 Claudio installation ID，已停止写入"
+                transformFailure = "Codex hooks 含多个 claudi0 installation ID，已停止写入"
                 return .unchanged
             }
             if case .conflict(let reason) = transformed.status {
@@ -356,7 +356,7 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
         guard configured.configuration == .configured, let installationID = configured.installationID
         else {
             return .failure(
-                .configuration(reason: "Codex 写入后未形成完整的 Claudio installation ID"))
+                .configuration(reason: "Codex 写入后未形成完整的 claudi0 installation ID"))
         }
         if case .failure(let error) = environment.receiptStore.activate(
             host: .codex, installationID: installationID)
@@ -501,7 +501,7 @@ public func inspectClaudeSnapshot(
                 configuration = .conflict(
                     reason:
                         "Claude Code modern 与 legacy hooks 同时存在，可能重复播放；"
-                        + "请运行 `claudio integrations connect claude-code` 重新连接")
+                        + "请运行 `~/.claudio/bin/claudi0 integrations connect claude-code` 重新连接")
             } else {
                 configuration = .incomplete(missingNativeEvents: missing)
             }
@@ -546,7 +546,7 @@ public func inspectCodexSnapshot(
         configuration = .incomplete(missingNativeEvents: missing)
         installationID = id
     case .conflictingInstallationIDs:
-        configuration = .conflict(reason: "Codex hooks 含多个 Claudio installation ID")
+        configuration = .conflict(reason: "Codex hooks 含多个 claudi0 installation ID")
         installationID = nil
     case .conflict(let reason):
         configuration = .conflict(reason: reason)
@@ -838,7 +838,7 @@ private func legacyWrapperPlan(
             case .conflict(let reason):
                 return .failure(.conflict(reason))
             case .conflictingInstallationIDs:
-                return .failure(.conflict("hooks.json 含多个 Claudio installation ID"))
+                return .failure(.conflict("hooks.json 含多个 claudi0 installation ID"))
             case .complete, .partial:
                 return .failure(
                     .conflict("旧 codex-notify 与 hooks.json 同时管理 Stop，可能重复播放"))
@@ -854,7 +854,7 @@ private func legacyWrapperPlan(
             case .conflict(let reason):
                 return .failure(.conflict(reason))
             case .conflictingInstallationIDs:
-                return .failure(.conflict("hooks.json 含多个 Claudio installation ID"))
+                return .failure(.conflict("hooks.json 含多个 claudi0 installation ID"))
             }
         }
 
@@ -1039,9 +1039,9 @@ private func legacyConflictText(_ reason: LegacyCodexNotifyMigrationConflictReas
     case .wrapperNotUTF8: "旧 codex-notify 不是有效 UTF-8"
     case .configMalformed: "config.toml 的 notify 语法无法安全解析"
     case .configDoesNotReferenceWrapper: "config.toml 没有引用当前 codex-notify"
-    case .invalidCurrentPaths: "Claudio root 或 binary 路径不合法"
+    case .invalidCurrentPaths: "claudi0 root 或 binary 路径不合法"
     case .unknownOrModifiedWrapper: "codex-notify 未知或已被修改，拒绝安装可能重复的 Stop hook"
-    case .differentClaudioBinary: "codex-notify 指向另一 Claudio binary"
+    case .differentClaudioBinary: "codex-notify 指向另一 claudi0 binary"
     }
 }
 

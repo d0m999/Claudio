@@ -197,7 +197,7 @@ public struct PanelView: View {
                 // 先复核可见代次，再消费去重器或 post。
                 guard coordinator.hideCount == hideCount else { return }
                 let packName = panelModel.selectedPackMetadata.displayName
-                let base = "Claudio 面板，\(sourceCount) 个声音来源"
+                let base = "claudi0 面板，\(sourceCount) 个声音来源"
                 let header = packName.isEmpty ? base : "\(base)，当前声音包 \(packName)"
                 guard
                     let sentence = announcer.consume(
@@ -220,7 +220,7 @@ public struct PanelView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center) {
-                Text("Claudio")
+                Text("claudi0")
                     .font(.system(size: 18 * typeScale, weight: .semibold, design: .rounded))
                     .foregroundColor(ClaudioTheme.text(colorScheme))
                 Spacer(minLength: 8)
@@ -256,15 +256,15 @@ public struct PanelView: View {
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
-        .accessibilityLabel("Claudio 选项")
+        .accessibilityLabel("claudi0 选项")
         .accessibilityValue("界面文字，\(interfaceTextSize.displayName)")
-        .accessibilityHint("选择 Claudio 三个界面的文字大小")
+        .accessibilityHint("选择 claudi0 三个界面的文字大小")
         .accessibilityIdentifier("panel.options")
     }
 
     private var headerAccessibilityLabel: String {
         let packName = selectedPackDisplayName
-        let base = "Claudio 面板，2 个声音来源，\(audibleEventCount) 个可听事件"
+        let base = "claudi0 面板，2 个声音来源，\(audibleEventCount) 个可听事件"
         guard !packName.isEmpty else { return base }
         return "\(base)，当前声音包 \(packName)"
     }
@@ -500,7 +500,7 @@ public struct PanelView: View {
             }
             .buttonStyle(.plain)
             .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-            .accessibilityLabel("在访达中显示 Claudio 配置")
+            .accessibilityLabel("在访达中显示 claudi0 配置")
             .accessibilityValue(configFile.path)
             .accessibilityHint("在访达中定位 config.json，方便手工修正")
             .accessibilityIdentifier("panel.reveal-config")

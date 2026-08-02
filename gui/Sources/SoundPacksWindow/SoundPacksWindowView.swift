@@ -634,7 +634,7 @@ struct SoundPacksWindowView: View {
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
             if model.hasFactoryPacks {
-                Text("可以从 Claudio 的出厂资源恢复全部内置声音包。")
+                Text("可以从 claudi0 的出厂资源恢复全部内置声音包。")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("恢复内置声音包") {
@@ -652,7 +652,7 @@ struct SoundPacksWindowView: View {
                 .accessibilityHint("恢复后可以选择、星标和试听内置声音包")
                 .accessibilityIdentifier("sound-packs.restore-all-factory-packs")
             } else {
-                Text("当前构建没有出厂声音资源；重新安装 Claudio 可恢复内置声音包。")
+                Text("当前构建没有出厂声音资源；重新安装 claudi0 可恢复内置声音包。")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("在访达中打开声音包文件夹") {
@@ -660,7 +660,7 @@ struct SoundPacksWindowView: View {
                 }
                 .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
                 .focused($focusedTarget, equals: .revealPacksDirectory)
-                .accessibilityLabel("在访达中打开 Claudio 声音包文件夹")
+                .accessibilityLabel("在访达中打开 claudi0 声音包文件夹")
                 .accessibilityValue(userPacksDirectory.path)
                 .accessibilityHint("当前构建没有可恢复的出厂资源")
                 .accessibilityIdentifier("sound-packs.reveal-packs-directory")

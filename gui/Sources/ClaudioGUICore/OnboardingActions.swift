@@ -9,7 +9,7 @@ import Foundation
 /// 写 hooks），但它的 `SetupEnvironment.executablePath` 语义是**「正在执行 setup 的那个二进制
 /// 自己」**，而且它**靠这条路径反推内置包目录**（去掉两级 → `Contents/Resources` → `+ packs`）。
 ///
-/// GUI 进程的 `CommandLine.arguments[0]` 是 `Claudio.app/Contents/MacOS/Claudio` —— **SwiftUI
+/// GUI 进程的 `CommandLine.arguments[0]` 是 `claudi0.app/Contents/MacOS/claudi0-app` —— **SwiftUI
 /// app 自己，不是 helper**。把它塞进 `SetupEnvironment` 会：
 ///   ① 把 GUI app 复制成 `~/.claudio/bin/claudio` → 此后每个 Claude Code 事件都去 exec 一个
 ///      SwiftUI app；
@@ -173,7 +173,7 @@ public enum SetupNotice: Sendable, Equatable {
         // 而是他的东西还在不在。路径紧跟其后 —— 他得能走过去把它捞回来。
         case .salvagedPack(let packID, let movedTo):
             "「\(packID)」这个声音包读不出来了（多半是上一次安装被中断留下的残骸）。"
-                + "Claudio 把它原样搬到了 \(movedTo) —— 一个文件都没删 —— 并重新装了一份干净的。"
+                + "claudi0 把它原样搬到了 \(movedTo) —— 一个文件都没删 —— 并重新装了一份干净的。"
         // 刻意点明「随时能换回去」：这是一次未经请求的替换，用户有权知道它是可逆的。
         //
         // 「**下面的**声音包」是一句**关于布局的断言**，所以它必须由布局来兑现：`operationalPanel`
@@ -200,7 +200,7 @@ public enum SetupNotice: Sendable, Equatable {
         // 那张卡也渲染告知行、却既没有四行事件也没有画廊（现存的「下面的声音包」已经在同一个洞里，
         // 已记入 TODOS）。不再往里加第二条。
         case .repairedDeadSelection(let removed, let selected):
-            "你之前选的「\(removed)」已经不在了，Claudio 先替你换成了「\(selected)」。"
+            "你之前选的「\(removed)」已经不在了，claudi0 先替你换成了「\(selected)」。"
                 + "它未必每个事件都有声音，事件行里会标出哪些还缺。"
                 + "你随时可以在下面的声音包里换成别的。"
         }
@@ -384,18 +384,18 @@ public enum OnboardingActionError: Error, Sendable, Equatable {
     public var message: String {
         switch self {
         case .helperUnavailable:
-            "没找到 Claudio 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 Claudio 再试一次。"
+            "没找到 claudi0 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 claudi0 再试一次。"
         // 刻意**不**承诺「没有留下半成品」（T17c 对抗评审 —— 上一版这么写，而那是假话）。
         // `performFirstRunSetup` 的顺序是：复制二进制 → 复制包 → 解隔离+回验 → 写 config → 写 hooks。
         // 最常见的失败点（`.installFailure`，包括 `settings.lock` 争用）发生时，二进制、内置包、config.json
         // 都**已经在磁盘上了**。一个以「不撒谎」立身的产品，不能在它唯一一次报告失败的时候撒谎。
         // 能诚实承诺的是另一件事，而且它更有用：setup 是幂等的，再点一次会接着上次继续。
         case .setupFailed:
-            "这一步没能完成。Claudio 已经停下，没有改动 Claude Code 的配置。看看下面的原因，或者再点一次 —— 它会接着上次继续，不会重复安装。"
+            "这一步没能完成。claudi0 已经停下，没有改动 Claude Code 的配置。看看下面的原因，或者再点一次 —— 它会接着上次继续，不会重复安装。"
         case .disconnectFailed:
             "没能断开，你的配置一个字都没动。看看下面的原因，或者稍后再试一次。"
         case .disconnectSweptNothing:
-            "没能断开：Claudio 没能认出自己之前留下的设置，所以停手了，什么都没改。"
+            "没能断开：claudi0 没能认出自己之前留下的设置，所以停手了，什么都没改。"
         }
     }
 
@@ -420,27 +420,29 @@ public enum OnboardingActionOutcome: Sendable, Equatable {
 // MARK: - 环境
 
 /// 内置 helper 在 app bundle 里的固定名字。``takeOverHelperSource(environment:)`` 拿它当
-/// **结构性绊线**：GUI 自己的可执行文件叫 `Claudio`（大写 C），永远等不了这个字符串。
-public let claudioHelperBinaryName = "claudio"
+/// **结构性绊线**：GUI 自己的可执行文件叫 `claudi0-app`，永远等不了这个字符串。
+/// Bundle 内采用新品牌名；安装后的 shared runtime 仍落在 `~/.claudio/bin/claudio`，
+/// 以保持现有 Claude Code / Codex hooks 的精确路径兼容。
+public let claudioHelperBinaryName = "claudi0"
 
-/// helper 在 app bundle 里的相对位置 —— `Contents/Resources/bin/claudio`。
+/// helper 在 app bundle 里的相对位置 —— `Contents/Resources/bin/claudi0`。
 ///
-/// ⚠️ 这条契约的**另一端在 `.github/workflows/release.yml`**（"Assemble Claudio.app" 那步的
+/// ⚠️ 这条契约的**另一端在 `.github/workflows/release.yml`**（"Assemble claudi0.app" 那步的
 /// `cp`）。两边没有任何编译期联系：把 release.yml 里的目标目录改个名，所有测试照样绿、CI 照样绿、
 /// DMG 照常签发，而 CTA 会在**每一台用户机器上**报 `.helperUnavailable`。
 /// `ReleaseLayoutSuite` 就是为此存在的——它真的去读那个 yml。
 public let bundledHelperSubdirectory = "bin"
 
-/// app bundle 里的 helper CLI：`Claudio.app/Contents/Resources/bin/claudio`。
+/// app bundle 里的 helper CLI：`claudi0.app/Contents/Resources/bin/claudi0`。
 ///
 /// **住在 `ClaudioGUICore` 而不是 `ClaudioGUI`**，这是刻意的：把 `Bundle.main` 那次查找留在
 /// AppKit 层，就等于把 T17 的**整个 bug** 留在 harness 够不到的地方 —— 把它改成
-/// `Bundle.main.executableURL`（`Contents/MacOS/Claudio`，字面意义上的本 bug），整套测试仍然
+/// `Bundle.main.executableURL`（`Contents/MacOS/claudi0-app`，字面意义上的本 bug），整套测试仍然
 /// 全绿。放在这里，harness 就能拿一个真的假 bundle 去断言它解析出的是哪个文件。
 /// `MenuBarController` 那边因此只剩 `bundledHelperBinary(in: .main)` —— 一次无分支调用，
 /// AppKit 里不再有任何决定。
 ///
-/// `nil` = 这个进程压根不在一个带 `Resources/bin/claudio` 的 bundle 里跑（`swift run ClaudioGUI`
+/// `nil` = 这个进程压根不在一个带 `Resources/bin/claudi0` 的 bundle 里跑（`swift run ClaudioGUI`
 /// 的开发构建就是）。**不是**一个可以忽略的情况：它会一路变成面板上一句真的错误。
 public func bundledHelperBinary(in bundle: Bundle) -> URL? {
     bundle.url(
@@ -458,7 +460,7 @@ public func bundledHelperBinary(in bundle: Bundle) -> URL? {
 /// ⚠️ **`.isRegularFileKey` 是 lstat 语义 —— 对一个符号链接它返回 `false`**（实测，Darwin 25.5：
 /// 一条指向真实可执行文件的 `claudio` 符号链接，`isRegularFile = false` 而 `isExecutableFile = true`）。
 /// 这不是一条趣闻，它是 ``takeOverHelperSource(environment:)`` 把 `.resolvingSymlinksInPath()` 放在
-/// 校验**之后**仍然安全的**唯一支柱**：一个 `Contents/Resources/bin/claudio` 符号链接（能把源解析到
+/// 校验**之后**仍然安全的**唯一支柱**：一个 `Contents/Resources/bin/claudi0` 符号链接（能把源解析到
 /// bundle 之外）在这一关就被打掉了，根本走不到解析那一行。同理，`~/.claudio/bin/claudio` 若是一条
 /// 符号链接，探测会报 `.helperMissing` —— 而 quarantine 的检查与剥离都带 `XATTR_NOFOLLOW`（问的是
 /// 路径**自己**），若这里改成跟随符号链接的谓词（`fileExists`、或把这一条换成 `.isSymbolicLinkKey`
@@ -477,7 +479,7 @@ public func isRunnableHelperBinary(at url: URL) -> Bool {
 /// 不可能分叉。这与 `OnboardingEnvironment.claudeDirectory` 刻意做成派生属性（而不是第二个可独立
 /// 注入的字段）是同一条纪律，同一个理由。
 public struct OnboardingActionEnvironment: Sendable {
-    /// `Claudio.app/Contents/Resources/bin/claudio`；没有 bundle 时为 `nil`。
+    /// `claudi0.app/Contents/Resources/bin/claudi0`；没有 bundle 时为 `nil`。
     /// ⚠️ **永远不是** GUI 自己的可执行文件（见本文件头部）。
     public let bundledHelperBinary: URL?
     /// `~/.claudio/bin/claudio` —— 从 ``OnboardingEnvironment/claudioBinaryPath`` 派生。
@@ -560,7 +562,7 @@ public struct OnboardingActionEnvironment: Sendable {
 
 /// 接管时，作为 helper 源的那个二进制。
 public enum TakeOverSource: Sendable, Equatable {
-    /// app bundle 里的 `Contents/Resources/bin/claudio` —— 真实分发路径。
+    /// app bundle 里的 `Contents/Resources/bin/claudi0` —— 真实分发路径。
     case bundled(URL)
     /// 已经装好的 `~/.claudio/bin/claudio` 自己。``performFirstRunSetup`` 会认出
     /// `executablePath == claudioBinaryDestination`，走 `alreadyInstalled` 分支：**跳过全部复制**，
@@ -578,9 +580,9 @@ public enum TakeOverSource: Sendable, Equatable {
 /// **T17 的整个失败模式住在这个函数里**，所以它是一个纯函数，而不是 SwiftUI 里的一行。
 ///
 /// 规则，按顺序：
-/// 1. bundle 里给了一个 helper 路径 → 它**必须**叫 `claudio`（`claudioHelperBinaryName`），
+/// 1. bundle 里给了一个 helper 路径 → 它**必须**叫 `claudi0`（`claudioHelperBinaryName`），
 ///    而且必须是一个跑得起来的正规文件。**不满足就大声报错，绝不悄悄回落** —— 一个存在、
-///    但不叫 `claudio` 的 bundle 路径，只可能是有人把 GUI 自己的可执行文件（`Claudio`，大写 C）
+///    但不叫 `claudi0` 的 bundle 路径，只可能是有人把 GUI 自己的可执行文件（`claudi0-app`）
 ///    递了进来，也就是 T17 那个 bug 本身。悄悄回落会把它藏起来。
 /// 2. bundle 里没有（`nil` = 不在 bundle 里跑）→ 如果 `~/.claudio/bin/claudio` 已经是一个跑得起来
 ///    的二进制，就用它自己（`alreadyInstalled` 分支，零复制）。
@@ -596,7 +598,7 @@ public func takeOverHelperSource(
                     reason:
                         "app 包里指向的不是小助手本身：\(bundled.path)"
                         + "（期望文件名 \(claudioHelperBinaryName)）。"
-                        + "把 Claudio 自己的可执行文件复制成 helper 会让每一个事件都去执行一个 GUI app。"
+                        + "把 claudi0 自己的 GUI 可执行文件复制成 helper 会让每一个事件都去执行一个 GUI app。"
                 ))
         }
         guard isRunnableHelperBinary(at: bundled) else {
@@ -616,7 +618,7 @@ public func takeOverHelperSource(
     return .failure(
         .helperUnavailable(
             reason:
-                "既没有从 app 包里找到小助手（这个进程可能不是从 Claudio.app 启动的），"
+                "既没有从 app 包里找到小助手（这个进程可能不是从 claudi0.app 启动的），"
                 + "\(environment.claudioBinaryDestination.path) 也不在。"))
 }
 

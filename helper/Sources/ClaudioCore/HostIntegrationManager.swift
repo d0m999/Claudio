@@ -10,7 +10,7 @@ public enum HostIntegrationActionError: Error, Sendable, Equatable, CustomString
 
     public var description: String {
         switch self {
-        case .runtimeUnavailable(let reason): "Claudio 共享 runtime 不可用：\(reason)"
+        case .runtimeUnavailable(let reason): "claudi0 共享 runtime 不可用：\(reason)"
         case .hostUnavailable(let reason): reason
         case .configuration(let reason): reason
         case .transaction(let error): error.description

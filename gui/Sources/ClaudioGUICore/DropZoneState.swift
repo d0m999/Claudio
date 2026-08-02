@@ -90,21 +90,21 @@ extension DropRejectionReason {
             let actualMB = Double(actualBytes) / 1_048_576
             let maxMB = Double(maxBytes) / 1_048_576
             return String(
-                format: "这个文件有点大（约 %.1fMB），Claudio 目前只收 %.0fMB 以内的声音，换个小一点的文件试试。",
+                format: "这个文件有点大（约 %.1fMB），claudi0 目前只收 %.0fMB 以内的声音，换个小一点的文件试试。",
                 actualMB, maxMB)
 
         case .nonWhitelistFormat:
-            return "这个文件看着不是 wav / mp3 / aiff / m4a 里的任何一种，Claudio 认不出来，换个格式再试试。"
+            return "这个文件看着不是 wav / mp3 / aiff / m4a 里的任何一种，claudi0 认不出来，换个格式再试试。"
 
         case .pathTraversal:
-            return "这个文件名 Claudio 不敢直接用，换个正常一点的名字再拖一次。"
+            return "这个文件名 claudi0 不敢直接用，换个正常一点的名字再拖一次。"
 
         case .overDuration(let actualSeconds, let maxSeconds):
             guard let actualSeconds, actualSeconds.isFinite else {
-                return "这段声音的时长读不出来，Claudio 没法确认是否够短，换一个文件再试试。"
+                return "这段声音的时长读不出来，claudi0 没法确认是否够短，换一个文件再试试。"
             }
             return String(
-                format: "这段声音有点长（约 %.1f 秒），Claudio 的提示音建议控制在 %.1f 秒以内，剪短一点再试试。",
+                format: "这段声音有点长（约 %.1f 秒），claudi0 的提示音建议控制在 %.1f 秒以内，剪短一点再试试。",
                 actualSeconds, maxSeconds)
 
         case .builtinReadOnly(let packID):
@@ -114,7 +114,7 @@ extension DropRejectionReason {
             return "这个文件没能存进去（\(reason)），要不再试一次？"
 
         case .lockBusy:
-            return "Claudio 正忙着处理另一个声音包，请稍等一下再拖一次。"
+            return "claudi0 正忙着处理另一个声音包，请稍等一下再拖一次。"
 
         case .lockFailed(let errno):
             return "没能拿到写入声音包需要的文件锁（errno \(errno)），请稍后重试。"

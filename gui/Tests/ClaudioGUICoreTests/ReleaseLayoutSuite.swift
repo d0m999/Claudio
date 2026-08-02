@@ -3,9 +3,9 @@ import Foundation
 
 // MARK: - app bundle 布局契约：GUI 是消费者，release.yml 是生产者（T17）
 //
-// ``bundledHelperBinary(in:)`` 去 `Contents/Resources/bin/claudio` 找 helper，
+// ``bundledHelperBinary(in:)`` 去 `Contents/Resources/bin/claudi0` 找 helper，
 // `performFirstRunSetup` 再从那条路径反推 `Contents/Resources/packs`。这条布局契约的**另一端**
-// 在 `.github/workflows/release.yml` 的 "Assemble Claudio.app" 步骤里 —— 两边之间没有任何编译期
+// 在 `.github/workflows/release.yml` 的 "Assemble claudi0.app" 步骤里 —— 两边之间没有任何编译期
 // 联系。
 //
 // 把 release.yml 里的目标目录改个名（`Resources/bin/` → `Resources/helper/`），会发生什么：
@@ -43,7 +43,7 @@ func runReleaseLayoutSuites() {
 
         // **只看真正的 `cp` 命令行，不看散文。**
         //
-        // 第一版这条断言是 `yaml.contains("Contents/Resources/bin/claudio")` —— 而 release.yml 的
+        // 第一版这条断言是 `yaml.contains("Contents/Resources/bin/claudi0")` —— 而 release.yml 的
         // Release notes 与 cask caveats 里**也**印着这条路径。把真正的 `cp` 目标改成
         // `Resources/helper/`（也就是这条 suite 存在的全部理由那次变异），那两处散文照样让 grep 命中，
         // **652 全绿**。一条不可能失败的测试比没有测试更坏：它宣称自己在守着一件事。
@@ -51,7 +51,7 @@ func runReleaseLayoutSuites() {
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { $0.hasPrefix("cp ") || $0.hasPrefix("cp -") }
 
-        expect(!copyLines.isEmpty, "release.yml 里一条 `cp` 都没有？「Assemble Claudio.app」那步没了？")
+        expect(!copyLines.isEmpty, "release.yml 里一条 `cp` 都没有？「Assemble claudi0.app」那步没了？")
 
         let helperDestination = "Contents/Resources/\(bundledHelperSubdirectory)/\(claudioHelperBinaryName)"
         expect(
@@ -74,11 +74,40 @@ func runReleaseLayoutSuites() {
             copyLines.contains { $0.contains("Contents/MacOS/") },
             "release.yml 里没有任何一条 `cp` 往 Contents/MacOS/ 放 GUI 可执行文件 —— GUI 与 helper 必须"
                 + "是两个不同的文件。实际的 cp 行：\(copyLines)")
+
+        expect(
+            copyLines.contains { $0.contains("Contents/Resources/claudi0.icns") },
+            "release.yml 必须把 C / Signal 的 claudi0.icns 放进 app Resources。实际的 cp 行：\(copyLines)")
+        expect(
+            yaml.contains("<key>CFBundleIconFile</key><string>claudi0.icns</string>"),
+            "Info.plist 必须通过 CFBundleIconFile 指向 claudi0.icns")
+        expect(
+            yaml.contains("APP_NAME: claudi0"),
+            "发布 app、DMG 与 Finder 显示名必须统一使用 claudi0")
+        expect(
+            yaml.contains("APP_EXECUTABLE: claudi0-app"),
+            "GUI bundle 可执行文件必须使用 claudi0-app，与内置 claudi0 helper 明确分开")
+        expect(
+            yaml.contains("<key>CFBundleExecutable</key><string>${{ env.APP_EXECUTABLE }}</string>"),
+            "Info.plist 必须把 CFBundleExecutable 绑定到 APP_EXECUTABLE")
     }
 
-    // ⚠️ **钉 `release.yml`，不是 `Casks/claudio.rb`**（T17c 对抗评审）。
+    suite("C / Signal App 图标母版与 icns 都在仓库中") {
+        let branding = repositoryRoot().appendingPathComponent("assets/branding", isDirectory: true)
+        let svg = branding.appendingPathComponent("claudi0-app-icon.svg")
+        let icns = branding.appendingPathComponent("claudi0.icns")
+        let svgText = (try? String(contentsOf: svg, encoding: .utf8)) ?? ""
+        let icnsData = try? Data(contentsOf: icns)
+
+        expect(svgText.contains("M91 28a45 45 0 1 0 0 72"), "App 图标必须保留选定的 C 外环几何")
+        expect(svgText.contains("M48 64h9l6-18 9 36 8-21h10"), "App 图标必须保留选定的脉冲几何")
+        expect(svgText.contains("cx=\"99\" cy=\"64\" r=\"5\""), "App 图标必须保留右侧信号点")
+        expect(icnsData?.prefix(4) == Data("icns".utf8), "claudi0.icns 必须是有效的 icns 容器")
+    }
+
+    // ⚠️ **钉 `release.yml`，不是 `Casks/claudi0.rb`**（T17c 对抗评审）。
     //
-    // 上一版这条断言读的是 `Casks/claudio.rb` —— 而那个文件**自己的第 1 行**就写着「参考模板，
+    // 上一版这条断言读的是 `Casks/claudi0.rb` —— 而那个文件**自己的第 1 行**就写着「参考模板，
     // 非本仓库直接生效的 Homebrew tap」。真正 `brew install` 会用到的 cask，是下面这个 workflow 的
     // update-cask job 用 here-doc **生成并推到 tap 仓库**的那一份。于是：把 release.yml 里的 `-dr`
     // 改回 `-d` → 所有测试全绿、CI 全绿、DMG 照常签发 → 每一位 brew 用户拿到的 bundle 里，
@@ -89,7 +118,7 @@ func runReleaseLayoutSuites() {
     // 只有一种回归网可能存在 —— 真的去读那个 yml」。上一条 `cp` 断言做到了，这一条没有：它去读了
     // 一份仓库自己声明为「不是安装源」的模板。绊线钉在诱饵上，等于没钉。
     //
-    // `Casks/claudio.rb` 仍然一起钉 —— 它是人读的参考，漂了同样是 bug（这次评审正是先发现它的
+    // `Casks/claudi0.rb` 仍然一起钉 —— 它是人读的参考，漂了同样是 bug（这次评审正是先发现它的
     // caveats 与 release.yml 生成的那份已经反向漂移：一个说「点接管即可」，一个说「面板不会自动接管」）。
     suite("release.yml 生成的 cask（brew 真正装的那份）必须递归解除隔离（-dr）") {
         let yml = repositoryRoot().appendingPathComponent(".github/workflows/release.yml")
@@ -129,8 +158,8 @@ func runReleaseLayoutSuites() {
                 + " —— CTA 早已接线（T17）。这句话会印在主分发渠道的第一屏上")
     }
 
-    suite("Casks/claudio.rb（人读的参考模板）与 release.yml 生成的那份不得漂移") {
-        let cask = repositoryRoot().appendingPathComponent("Casks/claudio.rb")
+    suite("Casks/claudi0.rb（人读的参考模板）与 release.yml 生成的那份不得漂移") {
+        let cask = repositoryRoot().appendingPathComponent("Casks/claudi0.rb")
         guard let data = try? Data(contentsOf: cask),
             let ruby = String(data: data, encoding: .utf8)
         else {

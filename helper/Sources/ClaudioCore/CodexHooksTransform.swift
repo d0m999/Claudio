@@ -177,7 +177,7 @@ public enum CodexHooksTransform {
                     return CodexHooksTransformResult(
                         data: data,
                         status: .malformed(
-                            reason: "无法为 Codex \(nativeEvent) 生成当前 Claudio root 可识别的命令"),
+                            reason: "无法为 Codex \(nativeEvent) 生成当前 claudi0 root 可识别的命令"),
                         changed: false)
                 }
 
@@ -419,7 +419,7 @@ public enum CodexHooksTransform {
                                 return .failure(
                                     SchemaError(
                                         reason:
-                                            "Claudio Codex 旧 helper \(relocated.nativeEvent) 命令"
+                                            "claudi0 Codex 旧 helper \(relocated.nativeEvent) 命令"
                                             + "位于错误事件 hooks.\(eventName)"))
                             }
                             hasRelocatedOwnedCommands = true
@@ -434,7 +434,7 @@ public enum CodexHooksTransform {
                         return .failure(
                             SchemaError(
                                 reason:
-                                    "Claudio Codex \(match.nativeEvent) 命令位于错误事件 hooks.\(eventName)"
+                                    "claudi0 Codex \(match.nativeEvent) 命令位于错误事件 hooks.\(eventName)"
                             ))
                     }
                     guard !externallyManagedNativeEvents.contains(eventName) else {
@@ -473,7 +473,7 @@ public enum CodexHooksTransform {
         }
         if !duplicatedEvents.isEmpty {
             return .conflict(
-                reason: "Codex hooks 含重复 Claudio 事件：\(duplicatedEvents.joined(separator: ", "))")
+                reason: "Codex hooks 含重复 claudi0 事件：\(duplicatedEvents.joined(separator: ", "))")
         }
         let missing = managedNativeEvents.filter { presentEventCounts[$0, default: 0] == 0 }
         if missing.isEmpty {

@@ -22,7 +22,7 @@ public struct NeedsPackNoticeCopy: Sendable, Equatable {
 public func needsPackNoticeCopy(hasVisiblePackChoices: Bool) -> NeedsPackNoticeCopy {
     let instruction =
         hasVisiblePackChoices
-        ? "点一个声音包，Claudio 会建好配置。"
+        ? "点一个声音包，claudi0 会建好配置。"
         : "选择「管理声音包…」，在访达中添加声音包后再回来选择。"
     let message = "还没有选中任何声音包。\(instruction)"
     return NeedsPackNoticeCopy(

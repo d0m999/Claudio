@@ -7,7 +7,7 @@ import Foundation
 // ## 这个 suite 存在的意义：它必须抓得住那个真 bug
 //
 // T17 的真 bug 不是「执行器算错了」，而是**调用方递错了 URL** —— GUI 进程的
-// `CommandLine.arguments[0]` 是 `Claudio.app/Contents/MacOS/Claudio`（SwiftUI app 自己），不是
+// `CommandLine.arguments[0]` 是 `claudi0.app/Contents/MacOS/claudi0-app`（SwiftUI app 自己），不是
 // helper。如果那次查找留在 `MenuBarController` 的 `Bundle.main` 那一行里（AppKit，harness 够不到），
 // 把它改成 `Bundle.main.executableURL` —— **字面意义上的本 bug** —— 整套测试会照样全绿：负例仍然
 // 会拒绝一个 GUI 形状的 URL（当它被递进来时），e2e 仍然会给自己递一个正确的 URL。
@@ -27,27 +27,27 @@ import Foundation
 
 // MARK: - Fixtures
 
-/// 一个**真的** app bundle 布局：`<root>/Claudio.app/Contents/{MacOS/Claudio, Resources/bin/claudio,
-/// Resources/packs/<id>/...}` —— 与 `.github/workflows/release.yml` 的 "Assemble Claudio.app" 逐字
+/// 一个**真的** app bundle 布局：`<root>/claudi0.app/Contents/{MacOS/claudi0-app, Resources/bin/claudi0,
+/// Resources/packs/<id>/...}` —— 与 `.github/workflows/release.yml` 的 "Assemble claudi0.app" 逐字
 /// 同构（`ReleaseLayoutSuite` 钉住这一点）。
 @MainActor
 private struct FixtureBundle {
     let appDirectory: URL
-    /// `Contents/Resources/bin/claudio` —— 真 helper。
+    /// `Contents/Resources/bin/claudi0` —— 真 helper。
     let helperBinary: URL
-    /// `Contents/MacOS/Claudio` —— GUI 自己的可执行文件。**T17 的 bug 就是把这个当成了 helper。**
+    /// `Contents/MacOS/claudi0-app` —— GUI 自己的可执行文件。**T17 的 bug 就是把这个当成了 helper。**
     let guiBinary: URL
     let bundledPacksDirectory: URL
 
-    static let helperMagicBytes = "#!/bin/sh\n# I am the real claudio helper\nexit 0\n"
+    static let helperMagicBytes = "#!/bin/sh\n# I am the real claudi0 helper\nexit 0\n"
     static let guiMagicBytes = "#!/bin/sh\n# I am the SwiftUI app, NOT the helper\nexit 0\n"
 
     init(in root: URL, packIDs: [String] = ["minimal-chime"]) {
-        appDirectory = root.appendingPathComponent("Claudio.app", isDirectory: true)
+        appDirectory = root.appendingPathComponent("claudi0.app", isDirectory: true)
         let contents = appDirectory.appendingPathComponent("Contents", isDirectory: true)
         let resources = contents.appendingPathComponent("Resources", isDirectory: true)
-        helperBinary = resources.appendingPathComponent("bin/claudio")
-        guiBinary = contents.appendingPathComponent("MacOS/Claudio")
+        helperBinary = resources.appendingPathComponent("bin/claudi0")
+        guiBinary = contents.appendingPathComponent("MacOS/claudi0-app")
         bundledPacksDirectory = resources.appendingPathComponent("packs", isDirectory: true)
 
         writeExecutable(Self.helperMagicBytes, to: helperBinary)
@@ -74,7 +74,7 @@ private struct FixtureBundle {
             <?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
             <plist version="1.0"><dict>
-            <key>CFBundleExecutable</key><string>Claudio</string>
+            <key>CFBundleExecutable</key><string>claudi0-app</string>
             <key>CFBundleIdentifier</key><string>com.claudio.app.fixture</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             </dict></plist>
@@ -403,7 +403,7 @@ func runOnboardingActionsSuites() {
 
     // MARK: bundle 查找 —— T17 的要害那一行
 
-    suite("bundledHelperBinary(in:) 解析出 Contents/Resources/bin/claudio —— 不是 Contents/MacOS/Claudio") {
+    suite("bundledHelperBinary(in:) 解析出 Contents/Resources/bin/claudi0 —— 不是 Contents/MacOS/claudi0-app") {
         withTempDirectory { root in
             let fixture = FixtureBundle(in: root)
             guard let bundle = Bundle(url: fixture.appDirectory) else {
@@ -418,8 +418,8 @@ func runOnboardingActionsSuites() {
             // 变异钉子：把 `bundledHelperBinary(in:)` 的实现换成 `bundle.executableURL`
             // （= T17 的 bug），下面这条立刻 RED。
             expect(
-                resolved?.lastPathComponent == "claudio",
-                "解析结果的文件名必须是 claudio（GUI 自己那个叫 Claudio，大写 C）")
+                resolved?.lastPathComponent == "claudi0",
+                "解析结果的文件名必须是 claudi0（GUI 自己位于 Contents/MacOS）")
             expect(
                 resolved?.path.contains("/Contents/MacOS/") != true,
                 "绝不能解析到 Contents/MacOS/ —— 那是 SwiftUI app 自己")
@@ -428,10 +428,10 @@ func runOnboardingActionsSuites() {
 
     suite("bundledHelperBinary(in:) 在没有 Resources/bin/ 的 bundle 上返回 nil（= 开发构建）") {
         withTempDirectory { root in
-            // 只有 Info.plist + MacOS/Claudio，没有 Resources/bin —— `swift run ClaudioGUI` 的形状。
+            // 只有 Info.plist + MacOS/claudi0-app，没有 Resources/bin —— `swift run ClaudioGUI` 的形状。
             let appDirectory = root.appendingPathComponent("Bare.app", isDirectory: true)
             let contents = appDirectory.appendingPathComponent("Contents", isDirectory: true)
-            writeExecutableFile(at: contents.appendingPathComponent("MacOS/Claudio"))
+            writeExecutableFile(at: contents.appendingPathComponent("MacOS/claudi0-app"))
             writeFixture(
                 "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict>"
                     + "<key>CFBundleIdentifier</key><string>x.y</string></dict></plist>",
@@ -443,7 +443,7 @@ func runOnboardingActionsSuites() {
             }
             expect(
                 bundledHelperBinary(in: bundle) == nil,
-                "没有 Resources/bin/claudio 时必须是 nil —— 它会一路变成面板上一句真错误，不是静默 no-op")
+                "没有 Resources/bin/claudi0 时必须是 nil —— 它会一路变成面板上一句真错误，不是静默 no-op")
         }
     }
 
@@ -532,7 +532,7 @@ func runOnboardingActionsSuites() {
     suite("takeOverHelperSource：bundle 路径存在但是个 0 字节存根 → 拒绝") {
         withTempDirectory { root in
             let targets = FixtureTargets(in: root)
-            let stub = root.appendingPathComponent("Claudio.app/Contents/Resources/bin/claudio")
+            let stub = root.appendingPathComponent("claudi0.app/Contents/Resources/bin/claudi0")
             writeEmptyExecutableFile(at: stub)  // 名字对、执行位对，但是空的
 
             let result = takeOverHelperSource(

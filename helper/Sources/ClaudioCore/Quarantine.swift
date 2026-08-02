@@ -5,8 +5,8 @@ import Foundation
 /// ## 为什么这个文件必须存在（2026-07-12 T17 实测，不是推理）
 ///
 /// v1 的分发形态是**未签名、未公证**的 DMG（ENGINEERING.md Outside Voice T3）。用户下载后，
-/// `Claudio.app` 连同**里面每一个文件**都会被打上 `com.apple.quarantine` —— 包括
-/// `Contents/Resources/bin/claudio` 这个我们要复制出去的 helper。
+/// `claudi0.app` 连同**里面每一个文件**都会被打上 `com.apple.quarantine` —— 包括
+/// `Contents/Resources/bin/claudi0` 这个我们要复制出去的 helper。
 ///
 /// 而 `FileManager.copyItem` **会把这个 xattr 一起复制过去**（实测，Darwin 25.5）：
 ///

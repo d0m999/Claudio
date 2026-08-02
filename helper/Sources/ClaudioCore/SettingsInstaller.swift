@@ -118,8 +118,8 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
         case .lockFailed(let errno): "无法获取文件锁（errno \(errno)），请稍后重试"
         case .modernConnectionNeedsRepair(let reason):
             "检测到需要修复的现代 Claude Code 连接（\(reason)）；已拒绝追加 legacy hooks，"
-                + "请运行 `claudio integrations connect claude-code` 修复，或先用 "
-                + "`claudio integrations disconnect claude-code` 断开"
+                + "请运行 `~/.claudio/bin/claudi0 integrations connect claude-code` 修复，或先用 "
+                + "`~/.claudio/bin/claudi0 integrations disconnect claude-code` 断开"
         case .unsweepableBinaryPath(let path):
             "claudio 二进制路径位于自己的 .claudio 命名空间内，却不是 uninstall 能识别并清除的形状"
                 + "（根之下只允许不含 shell 元字符的普通路径段，且文件名必须正好是 claudio）："
@@ -325,7 +325,7 @@ private func performInstall(
                 return .failure(
                     .modernConnectionNeedsRepair(
                         reason:
-                            "同一 Claudio root 下仍有旧 helper 路径的 modern callback，"
+                            "同一 claudi0 root 下仍有旧 helper 路径的 modern callback，"
                             + "可能与新连接同时执行"))
             }
             switch inspectClaudeCodeHooks(

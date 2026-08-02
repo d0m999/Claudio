@@ -796,7 +796,7 @@ func runIntegrationsWindowWiringSuites() {
                 && gallery.contains("IntegrationsWindowView("),
             "gallery 必须遍历权威场景并渲染生产 IntegrationsWindowView")
         expect(
-            fixtures.contains("title: \"Claudio 已写好，等待 Codex 确认\"")
+            fixtures.contains("title: \"claudi0 已写好，等待 Codex 确认\"")
                 && !fixtures.contains("title: \"Codex 已写好，等待 /hooks 确认\""),
             "Codex 待确认场景 caption 必须使用固定产品文案")
     }

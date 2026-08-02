@@ -1,6 +1,7 @@
-# claudio (helper)
+# claudi0（helper）
 
-The `claudio` CLI invoked by Claude Code and Codex hooks — see [`../ENGINEERING.md`](../ENGINEERING.md).
+The user-facing CLI is `claudi0`; existing Claude Code and Codex hooks keep invoking the
+legacy-compatible `~/.claudio/bin/claudio` runtime path — see [`../ENGINEERING.md`](../ENGINEERING.md).
 
 The current command contract is below. Legacy Claude Code commands remain available so
 existing installations and scripts continue to work; see [`../ENGINEERING.md`](../ENGINEERING.md)
@@ -8,21 +9,21 @@ for exit codes, host capability mappings, receipts, and config ownership.
 
 | Command | What it does |
 |---|---|
-| `claudio doctor` | Read-only report for shared runtime plus Claude Code and Codex. An unavailable/unconnected host is a warning; shared-runtime failure or a broken connected host exits nonzero |
-| `claudio integrations status [--json]` | Inspect both hosts from the same snapshots used by the GUI and doctor |
-| `claudio integrations connect <claude-code\|codex>` | Idempotently add only Claudio-owned hooks for one host; Codex remains awaiting activation until `/hooks` confirmation and a current-installation receipt |
-| `claudio integrations disconnect <claude-code\|codex>` | Remove only that host's Claudio entries; preserve shared runtime, the other host, sound packs, and third-party hooks |
-| `claudio hook <host> <native-event> --installation-id <uuid>` | New hook entry point: normalize the native event, play without blocking the host, and write a minimal `0600` receipt. Playback/lock/receipt failures never block the host |
-| `claudio play <event>` | Legacy hook entry point with its existing global debounce and always-exit behavior |
-| `claudio install` | Claude Code legacy compatibility entry: a complete modern connection is a successful no-op; partial/conflicting/malformed/relocated/mixed modern state fails closed instead of adding a duplicate `play` chain |
-| `claudio uninstall` | Claude Code legacy compatibility entry: precisely removes those established `claudio play` hooks |
-| `claudio use <pack-id>` | Switches the active pack (writes `~/.claudio/config.json`) |
-| `claudio setup` | Legacy-compatible bootstrap: installs the shared helper/packs, picks a default pack, and connects Claude Code. GUI first launch bootstraps shared runtime only; hosts are connected separately |
+| `claudi0 doctor` | Read-only report for shared runtime plus Claude Code and Codex. An unavailable/unconnected host is a warning; shared-runtime failure or a broken connected host exits nonzero |
+| `claudi0 integrations status [--json]` | Inspect both hosts from the same snapshots used by the GUI and doctor |
+| `claudi0 integrations connect <claude-code\|codex>` | Idempotently add only claudi0-owned hooks for one host; Codex remains awaiting activation until `/hooks` confirmation and a current-installation receipt |
+| `claudi0 integrations disconnect <claude-code\|codex>` | Remove only that host's claudi0 entries; preserve shared runtime, the other host, sound packs, and third-party hooks |
+| `claudi0 hook <host> <native-event> --installation-id <uuid>` | New hook entry point: normalize the native event, play without blocking the host, and write a minimal `0600` receipt. Playback/lock/receipt failures never block the host |
+| `claudi0 play <event>` | Legacy hook entry point with its existing global debounce and always-exit behavior |
+| `claudi0 install` | Claude Code legacy compatibility entry: a complete modern connection is a successful no-op; partial/conflicting/malformed/relocated/mixed modern state fails closed instead of adding a duplicate `play` chain |
+| `claudi0 uninstall` | Claude Code legacy compatibility entry: precisely removes those established `claudio play` hooks |
+| `claudi0 use <pack-id>` | Switches the active pack (writes `~/.claudio/config.json`) |
+| `claudi0 setup` | Legacy-compatible bootstrap: installs the shared helper/packs, picks a default pack, and connects Claude Code. GUI first launch bootstraps shared runtime only; hosts are connected separately |
 
 Codex is intentionally **3/4 ready**: it has no `StopFailure` hook. `PermissionRequest`
-maps to Claudio's `notification` sound only for authorization requests; `UserPromptSubmit`
+maps to claudi0's `notification` sound only for authorization requests; `UserPromptSubmit`
 does not mean “needs you.” A Codex `Stop` is labelled “round ended,” not “task completed.”
-When migrating Claudio's exact legacy `codex-notify` wrapper, its `Stop` receipt does not
+When migrating claudi0's exact legacy `codex-notify` wrapper, its `Stop` receipt does not
 prove `/hooks` trust; activation requires a current-installation `PermissionRequest` or
 `SubagentStop` receipt from Codex's composable hooks.
 

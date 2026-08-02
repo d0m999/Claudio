@@ -1,7 +1,7 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Claudio helper — the `claudio` CLI invoked by Claude Code hooks.
+// claudi0 helper — the legacy `claudio` binary remains the runtime invoked by existing hooks.
 // v1 base: builds a green foundation (ClaudioCore + CLI surface + tests).
 // Real subcommand bodies land in T2–T6 (see ../ENGINEERING.md).
 let package = Package(

@@ -186,14 +186,14 @@ struct PanelHeader: View {
     /// 非 `.installed` 时那句 header —— 面板还没接管，没有「当前声音包」可报。
     /// 一个常量而不是两处字面量：`PanelView.headerAccessibilityLabel` 的 guard 分支与
     /// `OnboardingView` 的 header 读的是**同一个**它。
-    static let baseLabel = "Claudio 面板"
+    static let baseLabel = "claudi0 面板"
 
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("Claudio")
+            Text("claudi0")
                 // DESIGN.md 字号阶梯：面板标题 = SF Pro semibold 14–15。
                 .font(.system(size: 15 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.text(colorScheme))

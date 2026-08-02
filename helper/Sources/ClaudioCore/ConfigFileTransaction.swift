@@ -41,7 +41,7 @@ public enum ConfigFileTransactionError: Error, Sendable, Equatable, CustomString
         case .symlinkRejected(let path): "该配置事务不允许符号链接：\(path)"
         case .danglingSymlink(let path):
             "配置文件是目标不存在的符号链接，已停止写入以保留 dotfiles 链接：\(path)"
-        case .lockBusy: "配置文件正被另一个 Claudio 操作占用，请重试"
+        case .lockBusy: "配置文件正被另一个 claudi0 操作占用，请重试"
         case .lockFailed(let errno): "配置文件锁获取失败（errno \(errno)）"
         }
     }
