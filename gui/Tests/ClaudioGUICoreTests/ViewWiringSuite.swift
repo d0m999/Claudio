@@ -2321,6 +2321,44 @@ func runViewWiringSuites() {
             "主面板事件行不得继续消费映射 inventory")
     }
 
+    suite("声音包窗口：提示音卡片与映射控件使用统一全宽列，文件名不再推动试听按钮") {
+        guard
+            let source = codeWithoutStrings(
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
+        else {
+            expect(false, "读不到 SoundPacksWindowView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(source)
+        guard
+            let rowBody = closureBody(after: "private func eventMappingRow", in: flat),
+            let controlsBody = closureBody(after: "private func eventControls", in: flat),
+            let audioControlBody = closureBody(after: "private func eventAudioControl", in: flat)
+        else {
+            expect(false, "必须能切出事件卡片、控件行与音频选择控件")
+            return
+        }
+        let fullWidthLeadingFrame = ".frame(maxWidth: .infinity, alignment: .leading)"
+        expect(
+            rowBody.contains(
+                ".padding(.horizontal, 8) " + fullWidthLeadingFrame + " .background"),
+            "每张提示音卡片必须在绘制背景与描边前撑满详情列，不能随文件名产生不同外框宽度")
+        expect(
+            controlsBody.contains(
+                "eventAudioControl(row) " + fullWidthLeadingFrame)
+                && controlsBody.contains(
+                    ".fixedSize(horizontal: true, vertical: false) .frame(minHeight:")
+                && controlsBody.contains(fullWidthLeadingFrame),
+            "音频选择框必须消费剩余宽度，试听按钮保持固有宽度，整行才能共享同一右侧基线")
+        expect(
+            audioControlBody.contains(
+                ".lineLimit(1) .fixedSize(horizontal: false, vertical: true) "
+                    + fullWidthLeadingFrame)
+                && audioControlBody.contains(
+                    "} " + fullWidthLeadingFrame + " .frame(minHeight:"),
+            "映射菜单的标签与菜单表面都必须全宽，长短文件名不能改变可见控件宽度")
+    }
+
     suite("T11：管理窗口孤儿行的删除是显式永久确认，分配与删除都接到窗口 model") {
         guard let view = codeOnly(
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")

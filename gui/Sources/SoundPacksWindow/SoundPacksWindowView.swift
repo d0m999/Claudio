@@ -740,6 +740,7 @@ struct SoundPacksWindowView: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
                 .fill(
@@ -796,11 +797,13 @@ struct SoundPacksWindowView: View {
         let availability = previewAvailability(for: row)
         return HStack(spacing: 8) {
             eventAudioControl(row)
+                .frame(maxWidth: .infinity, alignment: .leading)
             Button {
                 playPreview(for: row)
             } label: {
                 Label("试听", systemImage: "play.fill")
             }
+            .fixedSize(horizontal: true, vertical: false)
             .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
             .disabled(!availability.isAvailable)
             .focused($focusedTarget, equals: .eventPreview(row.event))
@@ -809,6 +812,7 @@ struct SoundPacksWindowView: View {
             .accessibilityHint(availability.accessibilityHint)
             .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue).preview")
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder
@@ -858,7 +862,9 @@ struct SoundPacksWindowView: View {
                 Text(mappingText(row.coverage))
                     .lineLimit(1)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
             .focused($focusedTarget, equals: .eventAudio(row.event))
             .accessibilityLabel("\(row.event.displayName) 的声音映射")
