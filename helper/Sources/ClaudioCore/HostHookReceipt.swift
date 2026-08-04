@@ -57,7 +57,8 @@ public enum HostHookReceiptWriteOutcome: Sendable, Equatable {
     case written
 }
 
-/// 回执失败只影响 activation evidence；hook 调用方可以忽略整个 `Result` 并立即退出。
+/// 回执失败只影响可观察证据（activation / latest diagnosis）；hook 调用方可以忽略整个
+/// `Result` 并立即退出。
 public enum HostHookReceiptStoreError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidReceipt
     case staleInstallation
@@ -228,8 +229,10 @@ public struct HostHookReceiptStore: Sendable {
     }
 
     /// 只有当前 installation、请求的宿主/原生事件、catalog 语义和 schema 全部匹配时，
-    /// 才把磁盘回执提升为 activation evidence。损坏、旧代次或错位文件全部返回 `nil`。
-    public func activationEvidence(
+    /// 才把磁盘回执提升为结构化 evidence。是否可用作 activation 由 adapter 另行限制为
+    /// `UserPromptSubmit`；其它受支持事件只进入 latest diagnosis。损坏、旧代次或错位文件全部
+    /// 返回 `nil`。
+    public func receiptEvidence(
         host: HostID,
         nativeEvent: String,
         installationID: UUID

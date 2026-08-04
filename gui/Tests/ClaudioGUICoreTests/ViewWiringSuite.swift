@@ -1707,7 +1707,7 @@ func runViewWiringSuites() {
         expect(
             panel.contains("switch panelModel.configState"),
             "operationalPanel 必须按 configState 路由 —— 没有这个 switch，`{\"master_volume\": \"0.35\"}`"
-                + " 这种「读得动、写不动」的 config 会照常渲染四行带静音钮 / 试听钮的活控件，而写路径"
+                + " 这种「读得动、写不动」的 config 会照常渲染五行带静音钮 / 试听钮的活控件，而写路径"
                 + "早已 fail closed：用户点下去的每一次都必然失败（这正是判据要两条正交轴的理由）")
         // ⚠️ 检查的是 **case → view 的映射**，不是裸标识符（红队 b86ec0a）。上一版写的是
         // `panel.contains("needsPackNotice")` —— 而这个标识符在它**自己的定义行**
@@ -1726,11 +1726,11 @@ func runViewWiringSuites() {
                 "case .configFailure(let reason): configFailureNotice(reason: reason)"),
             "`.configFailure`（= `.malformed`/`.unwritable`，见 `PanelConfigState.topContent`）分支体必须渲染"
                 + "诚实失败态 `configFailureNotice(reason:)` —— 它带可执行修复指令；换成别的（或空）= 写不动的"
-                + " config 上顶着四行必败活控件却不说实话")
+                + " config 上顶着五行必败活控件却不说实话")
 
         // 按钮 → handler 的那根线：静音的**行为**（翻转 + 路由 + 刷新）现在住在可测的 `PanelConfigController`
         // 里、由 `PanelConfigControllerSuite` 用真磁盘钉死。这里只剩守**最外层这根接线**：EventRowView 的
-        // 静音钮真的接到 `panelModel.toggleMute`。红队 9cccc9c 实测把它剪成 `onToggleMute: {}`，四行静音钮
+        // 静音钮真的接到 `panelModel.toggleMute`。红队 9cccc9c 实测把它剪成 `onToggleMute: {}`，五行静音钮
         // 点了毫无反应（连失败都没有）。
         //
         // ⚠️ 存在性级：证明「body 里写着这根线」，证明不了它运行期真的接通（SwiftUI body 接线，只有 UI /
@@ -1756,7 +1756,7 @@ func runViewWiringSuites() {
         expect(
             panel.contains("let visibleRows"),
             "applyFirstFocus 必须只把**真的被渲染出来**的行送进焦点序 —— 非 .operational 态下"
-                + " eventRows 仍会算出四行（走 resolvedConfig 的空包默认值），但它们一个像素都没上屏；"
+                + " eventRows 仍会算出五行（走 resolvedConfig 的空包默认值），但它们一个像素都没上屏；"
                 + "把它们送进开局焦点 = 焦点落在一个不存在的控件上")
 
         // 现状（PLAN-MASTER-VOLUME.md 阶段 D 已落地）：`MasterVolumeRow` 真的渲染在 `operationalPanel`
@@ -2759,5 +2759,23 @@ func runViewWiringSuites() {
         expect(
             flat.contains(".focused($focusedTarget, equals: .restoreFactoryPack)"),
             "恢复出厂按钮必须接进窗口专用焦点模型")
+    }
+
+    suite("任务开始事件：身份字形使用 paperplane.fill，试听仍使用 play.fill") {
+        guard
+            let theme = codeOnly(
+                "gui/Sources/ClaudioGUIComponents/ClaudioTheme.swift"),
+            let row = codeOnly("gui/Sources/ClaudioGUI/EventRowView.swift")
+        else {
+            expect(false, "必须能读取共享主题与事件行接线")
+            return
+        }
+        expect(
+            theme.contains(#"case .taskStart: "paperplane.fill""#),
+            "任务开始身份字形必须与语义固定绑定到 paperplane.fill")
+        expect(
+            row.contains(#"Image(systemName: "play.fill")"#)
+                && row.contains("ClaudioEventGlyph(event: row.event)"),
+            "事件身份与试听动作必须继续是两个不同的可访问控件语义")
     }
 }

@@ -72,7 +72,7 @@ public struct EventRowView: View {
                     Text(row.event.displayName)
                         .font(ClaudioTheme.font(.body).weight(.medium))
                         .foregroundColor(ClaudioTheme.text(colorScheme))
-                    Text(hostCoverage?.visibleText ?? row.event.cliName)
+                    Text(hostCoverage?.visibleText ?? "宿主覆盖未检测")
                         .font(ClaudioTheme.font(.caption))
                         .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                         .lineLimit(adaptation.rowWrapsToTwoLines ? 2 : 1)

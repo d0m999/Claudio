@@ -5,17 +5,25 @@ import Foundation
 public struct HostHookEnvironment: Sendable {
     public let host: HostID
     public let playEnvironment: PlayEnvironment
+    public let taskStartDebounceStateFile: URL
+    public let taskStartDebounceInterval: TimeInterval
     public let receiptStore: HostHookReceiptStore
     public let now: @Sendable () -> Date
 
     public init(
         host: HostID,
         playEnvironment: PlayEnvironment,
+        taskStartDebounceStateFile: URL? = nil,
+        taskStartDebounceInterval: TimeInterval = 0.25,
         receiptStore: HostHookReceiptStore,
         now: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.host = host
         self.playEnvironment = playEnvironment
+        self.taskStartDebounceStateFile = taskStartDebounceStateFile
+            ?? playEnvironment.debounceStateFile.deletingLastPathComponent()
+                .appendingPathComponent("task-start.state")
+        self.taskStartDebounceInterval = taskStartDebounceInterval
         self.receiptStore = receiptStore
         self.now = now
     }
@@ -28,6 +36,7 @@ public func systemHostHookEnvironment(for host: HostID) -> HostHookEnvironment {
         playEnvironment: PlayEnvironment(
             lockFile: ClaudioPaths.hostPlayLockFile(host),
             debounceStateFile: ClaudioPaths.hostDebounceStateFile(host)),
+        taskStartDebounceStateFile: ClaudioPaths.hostTaskStartDebounceStateFile(host),
         receiptStore: HostHookReceiptStore(
             receiptsRoot: ClaudioPaths.receiptsDirectory,
             locksRoot: ClaudioPaths.receiptLocksDirectory,
@@ -71,6 +80,7 @@ public func handleHostHook(
 
     let capture = SpawnResultCapture()
     let base = environment.playEnvironment
+    let isTaskStart = event == .taskStart
     let observedPlayEnvironment = PlayEnvironment(
         afplayPath: base.afplayPath,
         lockFile: base.lockFile,
@@ -78,8 +88,13 @@ public func handleHostHook(
         userPacksDirectory: base.userPacksDirectory,
         bundledPacksDirectory: base.bundledPacksDirectory,
         spawner: base.spawner,
-        debounceStateFile: base.debounceStateFile,
-        debounceInterval: base.debounceInterval,
+        debounceStateFile: isTaskStart
+            ? environment.taskStartDebounceStateFile
+            : base.debounceStateFile,
+        debounceInterval: isTaskStart
+            ? environment.taskStartDebounceInterval
+            : base.debounceInterval,
+        debounceSilentOutcomes: isTaskStart || base.debounceSilentOutcomes,
         now: base.now,
         logFile: base.logFile,
         logLockFile: base.logLockFile,
@@ -95,10 +110,20 @@ public func handleHostHook(
         timestamp: environment.now(),
         playbackResult: playbackResult)
     let written: Bool
-    if case .success = environment.receiptStore.store(receipt) {
+    switch environment.receiptStore.store(receipt) {
+    case .success:
         written = true
-    } else {
+    case .failure(.staleInstallation):
+        // Disconnect/reconnect 后迟到的旧 callback 是预期竞争，安全丢弃且不制造噪声。
         written = false
+    case .failure(let error):
+        written = false
+        appendLogLine(
+            event: event.cliName,
+            reason: "回执写入失败（\(redactedReceiptStoreError(error))）",
+            timestamp: environment.now(),
+            to: base.logFile,
+            lockFile: base.logLockFile)
     }
     return HostHookHandlingOutcome(
         host: host,
@@ -106,6 +131,18 @@ public func handleHostHook(
         event: event,
         playbackResult: playbackResult,
         receiptWritten: written)
+}
+
+private func redactedReceiptStoreError(_ error: HostHookReceiptStoreError) -> String {
+    switch error {
+    case .invalidReceipt: "invalid_receipt"
+    case .staleInstallation: "stale_installation"
+    case .encodingFailure: "encoding_failure"
+    case .lockBusy: "lock_busy"
+    case .lockFailed: "lock_failed"
+    case .directoryCreationFailure: "directory_creation_failure"
+    case .writeFailure: "write_failure"
+    }
 }
 
 private final class SpawnResultCapture: @unchecked Sendable {

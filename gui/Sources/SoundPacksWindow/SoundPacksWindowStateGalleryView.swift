@@ -81,7 +81,7 @@ public struct SoundPacksWindowStateGalleryView: View {
                     name: "My very long bilingual 自定义声音包名称",
                     isCC0: false,
                     presentEvents: [.stop, .notification],
-                    state: .partial(present: 2, total: 4),
+                    state: .partial(present: 2, total: 5),
                     isSelected: true),
             ],
             selectedPackID: "my-long-pack",

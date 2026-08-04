@@ -234,7 +234,7 @@ private struct PackCardView: View {
         }
     }
 
-    /// The row's trailing position: the real 4-slot ``CoverageTrack`` for a manifest-readable
+    /// The row's trailing position: the real 5-slot ``CoverageTrack`` for a manifest-readable
     /// row, or a height-matched status row for `.broken` — ``packRowTrailingSlot(for:)``
     /// (`ClaudioGUICore`, unit-tested by ``PackGallerySuite``) is the ONLY thing deciding which;
     /// this view merely switches on that already-made decision, never re-derives it from
@@ -298,8 +298,8 @@ private struct PackCardView: View {
 
     /// Chinese semantic display names (``Event/displayName``) of every
     /// ``Event`` NOT in ``PackCard/presentEvents``, in ``Event/allCases`` order — a11y-
-    /// architect FIX 7 (LOW): "N/4 可用" alone told VoiceOver a COUNT but never WHICH of
-    /// the four events that count refers to. Only ever read from the `.partial` branch of
+    /// architect FIX 7 (LOW): "N/5 可用" alone told VoiceOver a COUNT but never WHICH of
+    /// the five events that count refers to. Only ever read from the `.partial` branch of
     /// ``accessibilityLabel`` above.
     private var missingEventNames: String {
         Event.allCases
@@ -309,14 +309,14 @@ private struct PackCardView: View {
     }
 }
 
-/// The 4-slot coverage track (DESIGN.md「4-slot 覆盖轨」): ``Event/allCases``' fixed order, one
+/// The 5-slot coverage track (DESIGN.md「5-slot 覆盖轨」): ``Event/allCases``' fixed order, one
 /// slot each. `present` = 事件色实心胶囊；`missing` = 空槽描边 + 斜杠— **必须是另一种形状**, not
 /// the same glyph dimmed (DESIGN.md's own words: "必须是另一种形状，不能是「同一个图标调灰」" —
 /// the exact failure mode the pre-2026-07-15 2×2 event grid died of). Only ever constructed for
 /// ``PackRowTrailingSlot/track`` (``PackCardView/trailingSlot``) — a `.broken` row never
 /// reaches this view at all, matching "画不出没读出来的覆盖度" (DESIGN.md「包行四态」).
 ///
-/// 双编码（DESIGN.md「4-slot 覆盖轨」）：轨道本身只答「缺的是哪一个」，`.accessibilityHidden(true)`
+/// 双编码（DESIGN.md「5-slot 覆盖轨」）：轨道本身只答「缺的是哪一个」，`.accessibilityHidden(true)`
 /// — 「缺了几个」和「具体缺哪几个」由行的 `accessibilityLabel`（``PackCardView``）统一读出,
 /// exactly like the pre-T4 2×2 grid's own per-glyph hiding.
 private struct CoverageTrack: View {

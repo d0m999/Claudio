@@ -80,6 +80,10 @@ public struct PlayEnvironment: Sendable {
     /// the second is skipped as ``PlayOutcome/skippedRecentPlay(event:)``.
     /// ENGINEERING.md「并发 / 进程堆积处理」: 距上次播放（任意事件）< 1.5s 就跳过.
     public let debounceInterval: TimeInterval
+    /// Modern `UserPromptSubmit` records its short debounce timestamp even when the first
+    /// callback is muted or not ready, so duplicate host callbacks still collapse to one
+    /// semantic task start. Legacy/lifecycle playback keeps the historical `false` behavior.
+    public let debounceSilentOutcomes: Bool
     /// Injectable clock so tests can simulate elapsed time deterministically instead of
     /// real `Thread.sleep`s spanning the full debounce window.
     public let now: @Sendable () -> Date
@@ -107,6 +111,7 @@ public struct PlayEnvironment: Sendable {
         spawner: any ProcessSpawning = SystemProcessSpawner(),
         debounceStateFile: URL = ClaudioPaths.debounceStateFile,
         debounceInterval: TimeInterval = 1.5,
+        debounceSilentOutcomes: Bool = false,
         now: @escaping @Sendable () -> Date = { Date() },
         logFile: URL = ClaudioPaths.logFile,
         logLockFile: URL = ClaudioPaths.logLockFile,
@@ -120,6 +125,7 @@ public struct PlayEnvironment: Sendable {
         self.spawner = spawner
         self.debounceStateFile = debounceStateFile
         self.debounceInterval = debounceInterval
+        self.debounceSilentOutcomes = debounceSilentOutcomes
         self.now = now
         self.logFile = logFile
         self.logLockFile = logLockFile
@@ -138,7 +144,7 @@ public enum PlayOutcome: Sendable, Equatable {
     /// missing `afplay` binary — but that failure is not observable here by design: T5
     /// scope stops at "attempted the spawn", real spawn-failure logging is T6.)
     case played(event: Event, filePath: String)
-    /// `eventName` didn't match any of the four v1 events (`Event(cliName:)` → `nil`).
+    /// `eventName` didn't match any of the five current events (`Event(cliName:)` → `nil`).
     case unknownEvent
     /// `ClaudioConfig.isEnabled(event) == false` — the user muted this event.
     case disabled(event: Event)
@@ -183,10 +189,40 @@ public func playSoundEvent(
     environment: PlayEnvironment = PlayEnvironment()
 ) -> PlayOutcome {
     guard let event = Event(cliName: eventName) else { return .unknownEvent }
-    guard let config = loadPlayConfig(from: environment.configFile) else { return .notReady }
-    guard config.isEnabled(event) else { return .disabled(event: event) }
-    guard let audioFile = resolveAudioFile(for: event, config: config, environment: environment)
-    else { return .notReady }
+    let preparation: PreparedPlay
+    if let config = loadPlayConfig(from: environment.configFile) {
+        if !config.isEnabled(event) {
+            preparation = .silent(.disabled(event: event))
+        } else if let audioFile = resolveAudioFile(
+            for: event, config: config, environment: environment)
+        {
+            preparation = .ready(config: config, audioFile: audioFile)
+        } else {
+            preparation = .silent(.notReady)
+        }
+    } else {
+        preparation = .silent(.notReady)
+    }
+
+    if case .silent(let outcome) = preparation,
+        !environment.debounceSilentOutcomes
+    {
+        return outcome
+    }
+
+    return performDebouncedPlay(event: event, preparation: preparation, environment: environment)
+}
+
+private enum PreparedPlay {
+    case ready(config: ClaudioConfig, audioFile: URL)
+    case silent(PlayOutcome)
+}
+
+private func performDebouncedPlay(
+    event: Event,
+    preparation: PreparedPlay,
+    environment: PlayEnvironment
+) -> PlayOutcome {
 
     // The read-compare-write of the shared timestamp happens entirely inside
     // `play.lock`'s non-blocking critical section: `withNonBlockingLock` guarantees at
@@ -201,6 +237,12 @@ public func playSoundEvent(
             return .skippedRecentPlay(event: event)
         }
         writeLastPlayedTimestamp(now, to: environment.debounceStateFile)
+        if case .silent(let outcome) = preparation {
+            return outcome
+        }
+        guard case .ready(let config, let audioFile) = preparation else {
+            return .notReady
+        }
         // `-v` and its value are two separate argv elements (never one concatenated
         // string) — `Process.arguments` passes each array element through as its own argv
         // entry, so `["-v value", path]` would make afplay see `-v value` as a single

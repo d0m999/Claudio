@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// `claudi0 setup` — v1 Terminal 首次安装自举（ENGINEERING.md T17, Distribution Plan「接管
@@ -43,6 +44,12 @@ public struct SetupEnvironment: Sendable {
     public let packsLockFile: URL
     /// 取 ``packsLockFile`` 的有界重试策略 —— 见 ``PacksLockRetry``（为什么只有这一侧重试）。
     public let packsLockRetry: PacksLockRetry
+    /// Test seam immediately before the second pristine check. Production is a no-op;
+    /// tests use it to model another process changing the destination while staging is built.
+    public let beforePristinePackFinalVerification: @Sendable () -> Void
+    /// Directory replacement seam. The production implementation deliberately uses the
+    /// default metadata-preservation policy (`options: []`) required for pack directories.
+    public let replacePristinePack: @Sendable (_ destination: URL, _ staging: URL) throws -> Void
 
     public init(
         executablePath: URL,
@@ -53,7 +60,13 @@ public struct SetupEnvironment: Sendable {
         configLockFile: URL = ClaudioPaths.configLockFile,
         settingsLockFile: URL = ClaudioPaths.settingsLockFile,
         packsLockFile: URL = ClaudioPaths.packsLockFile,
-        packsLockRetry: PacksLockRetry = PacksLockRetry()
+        packsLockRetry: PacksLockRetry = PacksLockRetry(),
+        beforePristinePackFinalVerification: @escaping @Sendable () -> Void = {},
+        replacePristinePack: @escaping @Sendable (URL, URL) throws -> Void = {
+            destination, staging in
+            _ = try FileManager.default.replaceItemAt(
+                destination, withItemAt: staging, backupItemName: nil, options: [])
+        }
     ) {
         self.executablePath = executablePath
         self.claudioBinaryDestination = claudioBinaryDestination
@@ -64,6 +77,147 @@ public struct SetupEnvironment: Sendable {
         self.settingsLockFile = settingsLockFile
         self.packsLockFile = packsLockFile
         self.packsLockRetry = packsLockRetry
+        self.beforePristinePackFinalVerification = beforePristinePackFinalVerification
+        self.replacePristinePack = replacePristinePack
+    }
+}
+
+private let minimalChimeV100Manifest = Data(
+    base64Encoded:
+        "ewogICJzY2hlbWEiOiAxLAogICJpZCI6ICJtaW5pbWFsLWNoaW1lIiwKICAibmFtZSI6ICLmnoHnroDpk4Ppn7MiLAogICJhdXRob3IiOiAiQ2xhdWRpbyIsCiAgImxpY2Vuc2UiOiAiQ0MwLTEuMCIsCiAgInZlcnNpb24iOiAiMS4wLjAiLAogICJldmVudHMiOiB7CiAgICAic3RvcCI6ICJzdG9wLm1wMyIsCiAgICAic3RvcF9mYWlsdXJlIjogInN0b3BfZmFpbHVyZS5tcDMiLAogICAgIm5vdGlmaWNhdGlvbiI6ICJub3RpZmljYXRpb24ubXAzIiwKICAgICJzdWJhZ2VudF9zdG9wIjogInN1YmFnZW50X3N0b3AubXAzIgogIH0KfQo="
+)!
+
+private let minimalChimeV100AudioSizes: [String: Int] = [
+    "stop.mp3": 14_462,
+    "stop_failure.mp3": 6_939,
+    "notification.mp3": 13_208,
+    "subagent_stop.mp3": 3_177,
+]
+
+private enum SetupNodeType {
+    case regular
+    case directory
+    case symbolicLink
+    case other
+}
+
+/// Non-following node classification for the pristine migration boundary. Foundation's
+/// high-level file APIs are deliberately not used as the authority here: the target itself,
+/// not a symlink destination, must be the exact directory/file node being verified.
+private func lstatType(at url: URL) -> SetupNodeType? {
+    var status = stat()
+    let result: Int32 = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+        guard let path else { return -1 }
+        return Darwin.lstat(path, &status)
+    }
+    guard result == 0 else { return nil }
+    switch status.st_mode & S_IFMT {
+    case S_IFREG: return .regular
+    case S_IFDIR: return .directory
+    case S_IFLNK: return .symbolicLink
+    default: return .other
+    }
+}
+
+private func exactRegularFileData(at url: URL, size: Int) -> Data? {
+    guard lstatType(at: url) == .regular else { return nil }
+    let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+    guard (attributes?[.size] as? NSNumber)?.intValue == size else { return nil }
+    guard case .success(let data) = readRegularFileBounded(
+        at: url, maxBytes: size, followSymlink: false)
+    else { return nil }
+    return data.count == size ? data : nil
+}
+
+/// The sole automatic pack-upgrade eligibility gate. It intentionally recognizes one exact
+/// historical tree only: the byte-pristine bundled `minimal-chime` 1.0.0. Any formatting,
+/// extra entry, non-regular node, or audio-byte change is user content and is left untouched.
+private func isPristineMinimalChimeV100(at destination: URL, comparedTo source: URL) -> Bool {
+    guard lstatType(at: destination) == .directory else { return false }
+    let expectedEntries = Set(["manifest.json"] + minimalChimeV100AudioSizes.keys)
+    guard
+        let entries = try? FileManager.default.contentsOfDirectory(atPath: destination.path),
+        Set(entries) == expectedEntries,
+        entries.count == expectedEntries.count,
+        exactRegularFileData(at: destination.appendingPathComponent("manifest.json"), size: 302)
+            == minimalChimeV100Manifest
+    else { return false }
+
+    for (fileName, expectedSize) in minimalChimeV100AudioSizes {
+        guard
+            let installed = exactRegularFileData(
+                at: destination.appendingPathComponent(fileName), size: expectedSize),
+            let bundled = exactRegularFileData(
+                at: source.appendingPathComponent(fileName), size: expectedSize),
+            installed == bundled
+        else { return false }
+    }
+    return true
+}
+
+private func isValidatedBundledPackCopy(_ staging: URL, matching source: URL) -> Bool {
+    guard lstatType(at: staging) == .directory else { return false }
+    let expectedEntries = Set(["manifest.json"] + Event.allCases.map { "\($0.rawValue).mp3" })
+    guard
+        let stagedEntries = try? FileManager.default.contentsOfDirectory(atPath: staging.path),
+        let sourceEntries = try? FileManager.default.contentsOfDirectory(atPath: source.path),
+        Set(stagedEntries) == expectedEntries,
+        stagedEntries.count == expectedEntries.count,
+        Set(sourceEntries) == expectedEntries,
+        sourceEntries.count == expectedEntries.count,
+        case .success(let manifest) = loadPackManifest(in: staging),
+        manifest.id == "minimal-chime",
+        manifest.events == Dictionary(
+            uniqueKeysWithValues: Event.allCases.map { ($0.rawValue, "\($0.rawValue).mp3") })
+    else { return false }
+
+    for fileName in expectedEntries {
+        let stagedFile = staging.appendingPathComponent(fileName)
+        let sourceFile = source.appendingPathComponent(fileName)
+        guard
+            lstatType(at: stagedFile) == .regular,
+            lstatType(at: sourceFile) == .regular,
+            isReallyContained(stagedFile, inside: staging),
+            isReallyContained(sourceFile, inside: source),
+            let stagedSize = ((try? FileManager.default.attributesOfItem(
+                atPath: stagedFile.path))?[.size] as? NSNumber)?.intValue,
+            let sourceSize = ((try? FileManager.default.attributesOfItem(
+                atPath: sourceFile.path))?[.size] as? NSNumber)?.intValue,
+            stagedSize == sourceSize,
+            let stagedData = exactRegularFileData(at: stagedFile, size: stagedSize),
+            let sourceData = exactRegularFileData(at: sourceFile, size: sourceSize),
+            stagedData == sourceData,
+            !hasQuarantineAttribute(at: stagedFile)
+        else { return false }
+    }
+    return !hasQuarantineAttribute(at: staging)
+}
+
+private func upgradePristineMinimalChime(
+    from source: URL, destination: URL, environment: SetupEnvironment
+) -> Result<Void, SetupError> {
+    let staging = environment.userPacksDirectory.appendingPathComponent(
+        ".minimal-chime.upgrade-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
+    try? FileManager.default.removeItem(at: staging)
+    do {
+        try FileManager.default.copyItem(at: source, to: staging)
+        stripQuarantineAttribute(at: staging)
+        guard isValidatedBundledPackCopy(staging, matching: source) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+
+        environment.beforePristinePackFinalVerification()
+        guard isPristineMinimalChimeV100(at: destination, comparedTo: source) else {
+            throw CocoaError(.fileWriteFileExists)
+        }
+
+        try environment.replacePristinePack(destination, staging)
+        return .success(())
+    } catch {
+        try? FileManager.default.removeItem(at: staging)
+        return .failure(
+            .packCopyFailure(
+                reason: "minimal-chime 1.0.0 原子升级失败，可安全重试：\(error.localizedDescription)"))
     }
 }
 
@@ -115,7 +269,21 @@ private func publishBundledPacks(
         // setup 就能治好坏安装」。（T17e 对抗评审实测复现。）
         //
         // 一个 manifest 都读不出来的目录**不是**用户的包，它是一堆残骸。所以：挪开它，重来。
-        if isUsablePack(id, in: environment.userPacksDirectory) { continue }
+        if isUsablePack(id, in: environment.userPacksDirectory) {
+            if id == "minimal-chime",
+                isPristineMinimalChimeV100(at: destination, comparedTo: source)
+            {
+                switch upgradePristineMinimalChime(
+                    from: source, destination: destination, environment: environment)
+                {
+                case .success:
+                    copiedPackIDs.append(id)
+                case .failure(let error):
+                    return .failure(error)
+                }
+            }
+            continue
+        }
 
         // `fileExists` **跟随符号链接**：一条指向不存在之物的悬空链接，它回答「不存在」。于是
         // 那条链接会从这个判据的缝里漏过去，直奔下面的 `moveItem` —— 而 `moveItem` 用的是 lstat
@@ -203,7 +371,7 @@ public enum PackSelectionPlan: Sendable, Equatable {
     /// 后果却是灾难性的 —— 因为**换包的唯一界面（`PackGalleryView`）只在面板 `.installed` 时渲染**，
     /// 而 `.installed` 需要 hooks。于是「他选的包没了 + hooks 还没装」的用户被硬失败挡住 →
     /// 永远进不了 `.installed` → **永远够不到那个能救他的画廊**，只剩一句要开终端的 `claudio use`。
-    /// 而在硬失败之前，他本来会拿到四行 `.unmapped` + 画廊里躺着的 minimal-chime —— **点一下就好了**。
+    /// 而在硬失败之前，他本来会拿到五行 `.unmapped` + 画廊里躺着的 minimal-chime —— **点一下就好了**。
     ///
     /// 「不伪造选择」这条原则本身没错，它防的是 `setEventEnabled` 那条路（**从没选过包**时凭空
     /// 编一个默认值）。但一个**指向不存在之物的选择不是选择，是一根悬空的指针**：保住它，保住的
@@ -239,7 +407,7 @@ public func packSelectionPlan(
 ) -> PackSelectionPlan {
     switch status {
     case .complete, .incomplete:
-        // 「内容」层的缺口（某个事件没声音 / 声明了但文件不在）**不是**坏管道：面板的四行覆盖度会把它
+        // 「内容」层的缺口（某个事件没声音 / 声明了但文件不在）**不是**坏管道：面板的五行覆盖度会把它
         // 逐行画成 `.unmapped` / `.broken`，用户看得见、拖一个文件进去就能修。拦住他只会把他挡在
         // 唯一能修好它的界面之外。
         return .keepExistingSelection
@@ -805,7 +973,7 @@ private func availablePackIDs(in userPacksDirectory: URL) -> [String] {
 /// `bundledPacksDirectory: nil` 与生产环境的 `claudio play`（`PlayEnvironment` 的默认值）逐字一致：
 /// 一个只存在于 app bundle、没被复制进 `~/.claudio/packs/` 的包，`play` 根本看不见 —— 那就不算能用。
 ///
-/// 音频文件在不在**不在此列**（那是「内容」，不是「管道」）：面板的四行覆盖度会把缺的那一行画成
+/// 音频文件在不在**不在此列**（那是「内容」，不是「管道」）：面板的五行覆盖度会把缺的那一行画成
 /// `.unmapped` / `.broken`，用户看得见、拖一个文件进去就能修。一个刚建出来、还没导入任何声音的空包
 /// 是产品明确支持的状态，它**能用**。
 private func isUsablePack(_ id: String, in userPacksDirectory: URL) -> Bool {

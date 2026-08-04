@@ -1,4 +1,5 @@
 import ClaudioCore
+import Darwin
 import Foundation
 
 // MARK: - claudio setup: v1 首次安装自举 (ENGINEERING.md T17)
@@ -30,7 +31,15 @@ private func makeBundleFixture(
 }
 
 private func makeEnvironment(
-    root: URL, executablePath: URL, claudioRootName: String = "claudio-root"
+    root: URL,
+    executablePath: URL,
+    claudioRootName: String = "claudio-root",
+    beforePristinePackFinalVerification: @escaping @Sendable () -> Void = {},
+    replacePristinePack: @escaping @Sendable (URL, URL) throws -> Void = {
+        destination, staging in
+        _ = try FileManager.default.replaceItemAt(
+            destination, withItemAt: staging, backupItemName: nil, options: [])
+    }
 ) -> SetupEnvironment {
     let claudioRoot = root.appendingPathComponent(claudioRootName, isDirectory: true)
     return SetupEnvironment(
@@ -51,11 +60,283 @@ private func makeEnvironment(
         //
         // 一律写「N 次尝试、间隔 D」，不写「N × D」：后者读起来像乘积，而等待预算是**间隔之和**
         // `(N-1) × D`，不是 `N × D`（见 ``PacksLockRetry`` 的 doc，那里为这个说大一档的表述立了规矩）。
-        packsLockRetry: PacksLockRetry(attempts: 5, delay: 0.01))
+        packsLockRetry: PacksLockRetry(attempts: 5, delay: 0.01),
+        beforePristinePackFinalVerification: beforePristinePackFinalVerification,
+        replacePristinePack: replacePristinePack)
+}
+
+private let setupMinimalChimeV100Manifest = Data(
+    base64Encoded:
+        "ewogICJzY2hlbWEiOiAxLAogICJpZCI6ICJtaW5pbWFsLWNoaW1lIiwKICAibmFtZSI6ICLmnoHnroDpk4Ppn7MiLAogICJhdXRob3IiOiAiQ2xhdWRpbyIsCiAgImxpY2Vuc2UiOiAiQ0MwLTEuMCIsCiAgInZlcnNpb24iOiAiMS4wLjAiLAogICJldmVudHMiOiB7CiAgICAic3RvcCI6ICJzdG9wLm1wMyIsCiAgICAic3RvcF9mYWlsdXJlIjogInN0b3BfZmFpbHVyZS5tcDMiLAogICAgIm5vdGlmaWNhdGlvbiI6ICJub3RpZmljYXRpb24ubXAzIiwKICAgICJzdWJhZ2VudF9zdG9wIjogInN1YmFnZW50X3N0b3AubXAzIgogIH0KfQo="
+)!
+
+private let setupMinimalChimeV100Audio: [(String, Int, UInt8)] = [
+    ("stop.mp3", 14_462, 0x11),
+    ("stop_failure.mp3", 6_939, 0x22),
+    ("notification.mp3", 13_208, 0x33),
+    ("subagent_stop.mp3", 3_177, 0x44),
+]
+
+private struct MinimalChimeUpgradeFixture {
+    let executablePath: URL
+    let bundledPack: URL
+}
+
+@MainActor
+private func makeMinimalChimeUpgradeBundle(at bundleRoot: URL) -> MinimalChimeUpgradeFixture {
+    let executablePath = bundleRoot.appendingPathComponent("Contents/Resources/bin/claudio")
+    let pack = bundleRoot.appendingPathComponent(
+        "Contents/Resources/packs/minimal-chime", isDirectory: true)
+    writeFixture("#!upgrade-helper", to: executablePath)
+    writeFixture(
+        """
+        {
+          "schema": 1,
+          "id": "minimal-chime",
+          "name": "极简铃音",
+          "author": "Claudio",
+          "license": "CC0-1.0",
+          "version": "1.1.0",
+          "events": {
+            "task_start": "task_start.mp3",
+            "stop": "stop.mp3",
+            "stop_failure": "stop_failure.mp3",
+            "notification": "notification.mp3",
+            "subagent_stop": "subagent_stop.mp3"
+          }
+        }
+        """,
+        to: pack.appendingPathComponent("manifest.json"))
+    for (name, size, byte) in setupMinimalChimeV100Audio {
+        let file = pack.appendingPathComponent(name)
+        try! FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try! Data(repeating: byte, count: size).write(to: file)
+    }
+    try! Data(repeating: 0x55, count: 8_820).write(
+        to: pack.appendingPathComponent("task_start.mp3"))
+    return MinimalChimeUpgradeFixture(executablePath: executablePath, bundledPack: pack)
+}
+
+@MainActor
+private func writePristineMinimalChimeV100(to pack: URL) {
+    try! FileManager.default.createDirectory(at: pack, withIntermediateDirectories: true)
+    try! setupMinimalChimeV100Manifest.write(to: pack.appendingPathComponent("manifest.json"))
+    for (name, size, byte) in setupMinimalChimeV100Audio {
+        try! Data(repeating: byte, count: size).write(to: pack.appendingPathComponent(name))
+    }
+}
+
+private struct InjectedPackReplacementFailure: Error {}
+
+private enum CustomizedMinimalChimeVariant: String, CaseIterable {
+    case formattedManifest
+    case extraFile
+    case changedAudio
+    case audioSymlink
+    case audioFIFO
+    case audioDirectory
+}
+
+@MainActor
+private func runMinimalChimeUpgradeSuites() {
+
+    suite("minimal-chime：逐字节 pristine 1.0.0 原子升级到 1.1.0，重复启动幂等") {
+        withTempDirectory { root in
+            let bundle = makeMinimalChimeUpgradeBundle(
+                at: root.appendingPathComponent("Claudio.app", isDirectory: true))
+            let environment = makeEnvironment(root: root, executablePath: bundle.executablePath)
+            let installed = environment.userPacksDirectory.appendingPathComponent(
+                "minimal-chime", isDirectory: true)
+            writePristineMinimalChimeV100(to: installed)
+
+            let first = performSharedRuntimeBootstrap(environment: environment)
+            guard case .success(let outcome) = first else {
+                expect(false, "严格 pristine 包必须可升级，got \(first)")
+                return
+            }
+            expect(outcome.copiedPacks == ["minimal-chime"], "升级必须进入 copiedPacks 证据")
+            let manifest = (try? String(
+                contentsOf: installed.appendingPathComponent("manifest.json"), encoding: .utf8)) ?? ""
+            expect(
+                manifest.contains(#""version": "1.1.0""#)
+                    && manifest.contains(#""task_start": "task_start.mp3""#),
+                "升级后必须是完整 1.1.0 manifest")
+            let taskBytes = try? Data(
+                contentsOf: installed.appendingPathComponent("task_start.mp3"))
+            expect(
+                taskBytes == Data(repeating: 0x55, count: 8_820),
+                "第五音频必须逐字节来自当前 bundle")
+            for (name, size, byte) in setupMinimalChimeV100Audio {
+                let installedBytes = try? Data(contentsOf: installed.appendingPathComponent(name))
+                expect(
+                    installedBytes == Data(repeating: byte, count: size),
+                    "旧音频 \(name) 必须逐字节保持")
+            }
+
+            let second = performSharedRuntimeBootstrap(environment: environment)
+            guard case .success(let repeated) = second else {
+                expect(false, "1.1.0 重复启动必须成功，got \(second)")
+                return
+            }
+            expect(repeated.copiedPacks.isEmpty, "已升级包不得重复替换")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: environment.userPacksDirectory.appendingPathComponent(
+                        ".minimal-chime.upgrade-\(ProcessInfo.processInfo.processIdentifier)").path),
+                "成功或幂等启动后不得留下升级 staging")
+        }
+    }
+
+    suite("minimal-chime：格式化、extra、音频改动、symlink、FIFO 与子目录全部视为自定义") {
+        for variant in CustomizedMinimalChimeVariant.allCases {
+            withTempDirectory { root in
+                let bundle = makeMinimalChimeUpgradeBundle(
+                    at: root.appendingPathComponent("Claudio.app", isDirectory: true))
+                let environment = makeEnvironment(root: root, executablePath: bundle.executablePath)
+                let installed = environment.userPacksDirectory.appendingPathComponent(
+                    "minimal-chime", isDirectory: true)
+                writePristineMinimalChimeV100(to: installed)
+                let stop = installed.appendingPathComponent("stop.mp3")
+                switch variant {
+                case .formattedManifest:
+                    writeFixture(
+                        #"{"schema":1,"id":"minimal-chime","name":"极简铃音","author":"Claudio","license":"CC0-1.0","version":"1.0.0","events":{"stop":"stop.mp3","stop_failure":"stop_failure.mp3","notification":"notification.mp3","subagent_stop":"subagent_stop.mp3"}}"#,
+                        to: installed.appendingPathComponent("manifest.json"))
+                case .extraFile:
+                    writeFixture("mine", to: installed.appendingPathComponent("notes.txt"))
+                case .changedAudio:
+                    try! Data(repeating: 0xFE, count: 14_462).write(to: stop)
+                case .audioSymlink:
+                    try! FileManager.default.removeItem(at: stop)
+                    try! FileManager.default.createSymbolicLink(
+                        atPath: stop.path, withDestinationPath: "notification.mp3")
+                case .audioFIFO:
+                    try! FileManager.default.removeItem(at: stop)
+                    expect(mkfifo(stop.path, 0o600) == 0, "FIFO fixture 必须创建成功")
+                case .audioDirectory:
+                    try! FileManager.default.removeItem(at: stop)
+                    try! FileManager.default.createDirectory(at: stop, withIntermediateDirectories: false)
+                }
+                let beforeEntries = try! FileManager.default.contentsOfDirectory(atPath: installed.path).sorted()
+                let beforeManifest = try! Data(
+                    contentsOf: installed.appendingPathComponent("manifest.json"))
+
+                let result = performSharedRuntimeBootstrap(environment: environment)
+                guard case .success(let outcome) = result else {
+                    expect(false, "自定义变体 \(variant.rawValue) 应保持并继续 bootstrap，got \(result)")
+                    return
+                }
+                expect(outcome.copiedPacks.isEmpty, "自定义变体不得报告自动升级：\(variant.rawValue)")
+                let afterEntries = try! FileManager.default.contentsOfDirectory(
+                    atPath: installed.path).sorted()
+                expect(
+                    afterEntries == beforeEntries,
+                    "自定义变体根集合必须不变：\(variant.rawValue)")
+                let afterManifest = try! Data(
+                    contentsOf: installed.appendingPathComponent("manifest.json"))
+                expect(
+                    afterManifest == beforeManifest,
+                    "自定义 manifest 必须逐字节不变：\(variant.rawValue)")
+                expect(
+                    !FileManager.default.fileExists(
+                        atPath: installed.appendingPathComponent("task_start.mp3").path),
+                    "自定义包不得被偷偷补第五音频：\(variant.rawValue)")
+
+                let type = (try? FileManager.default.attributesOfItem(atPath: stop.path)[.type])
+                    as? FileAttributeType
+                switch variant {
+                case .changedAudio:
+                    let changedBytes = try? Data(contentsOf: stop)
+                    expect(
+                        changedBytes == Data(repeating: 0xFE, count: 14_462),
+                        "同尺寸用户音频必须不变")
+                case .audioSymlink: expect(type == .typeSymbolicLink, "audio symlink 必须保持链接")
+                case .audioFIFO: expect(type != .typeRegular, "FIFO 必须保持非普通节点")
+                case .audioDirectory: expect(type == .typeDirectory, "子目录必须保持目录")
+                case .formattedManifest, .extraFile: break
+                }
+            }
+        }
+    }
+
+    suite("minimal-chime：发布前目标漂移会失败关闭，绝不覆盖外部新字节") {
+        withTempDirectory { root in
+            let bundle = makeMinimalChimeUpgradeBundle(
+                at: root.appendingPathComponent("Claudio.app", isDirectory: true))
+            let installed = root.appendingPathComponent(
+                "claudio-root/packs/minimal-chime", isDirectory: true)
+            writePristineMinimalChimeV100(to: installed)
+            let drifted = Data(
+                #"{"id":"minimal-chime","version":"user-edit","events":{"stop":"stop.mp3"}}"#.utf8)
+            let manifest = installed.appendingPathComponent("manifest.json")
+            let environment = makeEnvironment(
+                root: root,
+                executablePath: bundle.executablePath,
+                beforePristinePackFinalVerification: {
+                    try? drifted.write(to: manifest, options: .atomic)
+                })
+
+            let result = performSharedRuntimeBootstrap(environment: environment)
+            guard case .failure(.packCopyFailure) = result else {
+                expect(false, "最终复验遇到外部漂移必须返回可重试失败，got \(result)")
+                return
+            }
+            let landedManifest = try? Data(contentsOf: manifest)
+            expect(landedManifest == drifted, "外部写入的新字节不得被覆盖")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: installed.appendingPathComponent("task_start.mp3").path),
+                "复验失败不得留下半个 1.1.0")
+        }
+    }
+
+    suite("minimal-chime：原子替换失败保留 1.0.0，下一次正常启动可重试成功") {
+        withTempDirectory { root in
+            let bundle = makeMinimalChimeUpgradeBundle(
+                at: root.appendingPathComponent("Claudio.app", isDirectory: true))
+            let failing = makeEnvironment(
+                root: root,
+                executablePath: bundle.executablePath,
+                replacePristinePack: { _, _ in throw InjectedPackReplacementFailure() })
+            let installed = failing.userPacksDirectory.appendingPathComponent(
+                "minimal-chime", isDirectory: true)
+            writePristineMinimalChimeV100(to: installed)
+
+            let failed = performSharedRuntimeBootstrap(environment: failing)
+            guard case .failure(.packCopyFailure) = failed else {
+                expect(false, "注入替换失败必须向 bootstrap 报错，got \(failed)")
+                return
+            }
+            let preservedManifest = try? Data(
+                contentsOf: installed.appendingPathComponent("manifest.json"))
+            expect(
+                preservedManifest == setupMinimalChimeV100Manifest,
+                "替换失败必须保留原 1.0.0 manifest")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: installed.appendingPathComponent("task_start.mp3").path),
+                "替换失败不得留下第五音频")
+
+            let retry = makeEnvironment(root: root, executablePath: bundle.executablePath)
+            guard case .success(let outcome) = performSharedRuntimeBootstrap(environment: retry)
+            else {
+                expect(false, "替换失败后的下一次启动必须可重试")
+                return
+            }
+            expect(outcome.copiedPacks == ["minimal-chime"], "重试必须真正完成升级")
+            expect(
+                FileManager.default.fileExists(
+                    atPath: installed.appendingPathComponent("task_start.mp3").path),
+                "重试后第五音频必须在位")
+        }
+    }
+
 }
 
 @MainActor
 func runSetupSuites() {
+    runMinimalChimeUpgradeSuites()
 
     // MARK: - `injectedSetupPacksLock(under:)` 自证：注入值结构性不可派生
     //
@@ -937,7 +1218,7 @@ func runSetupSuites() {
 // 第一版的答案是「硬失败：绝不替用户改选，那是伪造一次他没做过的选择」。推理听着对，后果是灾难：
 // **换包的唯一界面（`PackGalleryView`）只在面板 `.installed` 时渲染**，而 `.installed` 需要 hooks。
 // 于是「他选的包没了 + hooks 还没装」的用户被硬失败挡住 → 永远进不了 `.installed` → **永远够不到
-// 那个能救他的画廊**，只剩一句要开终端的 `claudio use`。而在硬失败之前，他本来会拿到四行 `.unmapped`
+// 那个能救他的画廊**，只剩一句要开终端的 `claudio use`。而在硬失败之前，他本来会拿到五行 `.unmapped`
 // ＋画廊里躺着的 minimal-chime —— 点一下就好了。
 // **一道用「用户看不见」论证出来的闸门，自己造出了真正的「用户够不着」。**
 //
@@ -1427,7 +1708,7 @@ func runSetupPackSelectionSuites() {
 
     suite(
         "T17e/内容: manifest 一个事件都没声明（events: {}，一个刚建出来、还没导入声音的空包）→"
-            + " **必须照常装完**（面板画四行 .unmapped，用户看得见）"
+            + " **必须照常装完**（面板画五行 .unmapped，用户看得见）"
     ) {
         withTempDirectory { root in
             let environment = makeInstalledEnvironment(root: root)

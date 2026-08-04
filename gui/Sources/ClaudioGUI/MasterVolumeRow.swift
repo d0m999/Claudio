@@ -13,7 +13,7 @@ import SwiftUI
 ///
 /// - **"How many disk writes does one drag produce"** is ``VolumeDragSession``'s entire reason
 ///   to exist (阶段 C1) — this view holds one as private ``@State`` (D8: a drag only invalidates
-///   THIS row, never the four event rows + gallery) and only forwards callbacks.
+///   THIS row, never the five event rows + gallery) and only forwards callbacks.
 /// - **"What actually gets written, and did it land"** is
 ///   ``PanelConfigController/setMasterVolume(_:)`` (阶段 D, D27/D39/D43) — this view never talks
 ///   to `ClaudioCore` directly, it calls ``onCommit`` and reacts to whether that returned a

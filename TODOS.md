@@ -43,7 +43,11 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 **Priority:** P2
 **Depends on:** None
 
-### 升级根本不换 helper —— `~/.claudio/bin/claudio` 永久停在用户第一次安装的那个版本
+### ✅ 已解决（2026-08-04）：升级会在 App 启动时刷新 helper
+
+**Resolution:** `ClaudioGUIApp` 以 bundle 内 `Resources/bin/claudi0` 组装唯一的 `SystemSharedRuntimeBootstrapper`，`MenuBarController` 初始化后调用 `requestHostIntegrationRefresh(bootstrapSharedRuntime: true)`；这条启动链只做 shared bootstrap + inspect，不自动连接或改写宿主。`performSharedRuntimeBootstrap` 在 bundle helper 与固定 runtime 路径不同时无条件走同目录 staging + 原子替换，因此已安装用户每次启动新 App 都会拿到新 helper。`IntegrationsWindowWiringSuite` 钉住启动调用、完成后的 Panel/Sound Packs 刷新与「不得 connect」；`SetupSuite` 的「覆盖一个已存在的二进制」回归钉住新内容和新执行位。此次 `task_start` 还通过真实 CLI 子进程脚本验证 bundle 对应的 helper 契约。
+
+以下保留为修复前的根因记录：
 
 **What:** `detectOnboardingState` 判 `.installed` 时**不做任何版本比对**：二进制「在位 + 可执行 + 没被盖章」+ 四条 hook 在 `settings.json` 里 → `.installed`（`OnboardingDetector.swift:45` 的 `isRunnableHelperBinary` + `:74` 的 `detectHookInstallStatus`）。而 helper 二进制**只在 `performFirstRunSetup` 里被复制**，那条路径**只从 takeOver / 修复 CTA 出发，而那颗按钮只在 `.notInstalled` / `.helperMissing` 时渲染**。合起来：**一个已经装好的用户，无论把 app 升级多少次，`~/.claudio/bin/claudio` 都不会被换掉一次。**
 
@@ -58,7 +62,7 @@ T17f 新增的 `OnboardingActionState.reported(notices:)` 与 `.failed` **同住
 **可能的修法**（未定）：① 给装下的二进制打版本戳（`~/.claudio/bin/.version`，或直接跑 `claudio --version` 比对 bundle 里那份），不一致就重新复制 —— 复制那一步已经是幂等的（T17e 的原子复制），接上探测即可；② 更狠也更简单：app 每次启动都把 bundle 里的 helper 与 `~/.claudio/bin/claudio` 比一次内容哈希，不同就覆盖 —— 反正 bundle 里那份**永远**是这个 app 版本该配的那份，没有「用户自己换了个 helper」这种合法情形需要保护。②看起来明显更对，但它会让每次启动多一次读盘，且要想清楚「正在被 `claudio play` 执行的二进制被覆盖」的语义（macOS 上覆盖一个正在执行的文件要用 rename，不能 write-in-place）。
 
 **Effort:** M
-**Priority:** P1（首发前必修 —— 发版之后再修就得面对存量旧 helper）
+**Priority:** RESOLVED
 **Depends on:** None
 
 ## Ship / CI

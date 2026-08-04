@@ -122,7 +122,7 @@ public func packCoverage(
 }
 
 /// ``packCoverage(packID:config:environment:)`` 的下层：给一份**已经解析好的** pack 目录 + **已经
-/// 解码好的** manifest，算出四条 ``EventRow``。上面那个按 `packID` 的入口现在只是它的薄包装
+/// 解码好的** manifest，算出五条 ``EventRow``。上面那个按 `packID` 的入口现在只是它的薄包装
 /// （解析目录 → 读 manifest → 委托给这里），coverage 逻辑本身仍然只有这一份实现。
 ///
 /// 存在的理由（/ship 评审修复④，性能）：`PackGallery` 的每张卡片都要 (a) 每事件覆盖状态、

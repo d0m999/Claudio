@@ -54,6 +54,9 @@ public enum HostCapabilityCatalog {
         case .claudeCode:
             return [
                 HostCapabilityBinding(
+                    host: host, event: .taskStart, nativeEvent: "UserPromptSubmit",
+                    support: .supported),
+                HostCapabilityBinding(
                     host: host, event: .stop, nativeEvent: "Stop", support: .supported),
                 HostCapabilityBinding(
                     host: host, event: .stopFailure, nativeEvent: "StopFailure",
@@ -67,6 +70,9 @@ public enum HostCapabilityCatalog {
             ]
         case .codex:
             return [
+                HostCapabilityBinding(
+                    host: host, event: .taskStart, nativeEvent: "UserPromptSubmit",
+                    support: .supported),
                 HostCapabilityBinding(
                     host: host, event: .stop, nativeEvent: "Stop", support: .supported),
                 HostCapabilityBinding(
@@ -162,6 +168,9 @@ public struct HostIntegrationSnapshot: Codable, Sendable, Equatable {
     public let configuration: HostConfigurationState
     public let writability: HostConfigWritability
     public let activation: HostActivationEvidence
+    /// 当前 installation 全部受支持事件里时间最新的脱敏回执。它只负责诊断展示；
+    /// 宿主激活门槛由 ``activation`` 独立表达，旧 lifecycle 回执不能点亮任务开始能力。
+    public let latestReceipt: HostReceiptEvidence?
     public let operation: HostOperationState
     public let installationID: UUID?
 
@@ -172,6 +181,7 @@ public struct HostIntegrationSnapshot: Codable, Sendable, Equatable {
         configuration: HostConfigurationState,
         writability: HostConfigWritability,
         activation: HostActivationEvidence,
+        latestReceipt: HostReceiptEvidence? = nil,
         operation: HostOperationState = .idle,
         installationID: UUID? = nil
     ) {
@@ -181,6 +191,7 @@ public struct HostIntegrationSnapshot: Codable, Sendable, Equatable {
         self.configuration = configuration
         self.writability = writability
         self.activation = activation
+        self.latestReceipt = latestReceipt
         self.operation = operation
         self.installationID = installationID
     }
@@ -194,17 +205,16 @@ public struct HostIntegrationSnapshot: Codable, Sendable, Equatable {
     #if DEBUG
     public static func connectedForTesting(host: HostID) -> HostIntegrationSnapshot {
         let id = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!
-        let firstNativeEvent = HostCapabilityCatalog.bindings(for: host)
-            .compactMap(\.nativeEvent).first ?? "Stop"
-        let event = HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: firstNativeEvent)
-            ?? .stop
+        let firstNativeEvent = "UserPromptSubmit"
+        let event = Event.taskStart
+        let evidence = HostReceiptEvidence(
+            installationID: id, nativeEvent: firstNativeEvent, event: event,
+            timestamp: Date(timeIntervalSince1970: 1), playbackResult: .played)
         return HostIntegrationSnapshot(
             host: host, runtime: .ready, availability: .available,
             configuration: .configured, writability: .writable,
-            activation: .observed(
-                HostReceiptEvidence(
-                    installationID: id, nativeEvent: firstNativeEvent, event: event,
-                    timestamp: Date(timeIntervalSince1970: 1), playbackResult: .played)),
+            activation: .observed(evidence),
+            latestReceipt: evidence,
             installationID: id)
     }
     #endif
@@ -238,7 +248,6 @@ public struct AudibilityCell: Identifiable, Codable, Sendable, Equatable {
     public let detail: String?
 
     public var accessibilityLabel: String {
-        let nativeEvent = binding.nativeEvent.map { "原生事件 \($0)" } ?? "无原生事件"
         let support: String
         switch binding.support {
         case .supported:
@@ -277,7 +286,7 @@ public struct AudibilityCell: Identifiable, Codable, Sendable, Equatable {
             connection = "需要处理"
             audibility = "不可听"
         }
-        return "\(host.displayName)，\(event.displayName)，\(nativeEvent)\(qualifier)，\(support)，\(connection)，\(audibility)"
+        return "\(host.displayName)，\(event.displayName)\(qualifier)，\(support)，\(connection)，\(audibility)"
     }
 }
 

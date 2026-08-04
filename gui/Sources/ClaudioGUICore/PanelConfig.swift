@@ -61,7 +61,7 @@ extension PanelConfigState {
 /// `ViewWiringSuite` only text-probes the wiring line is still present (see TODOS.md
 /// 「render 映射仍是手写 switch」).
 ///
-/// - `.events`: the four event rows + the master-volume slider — the only state (`.operational`)
+/// - `.events`: the five event rows + the master-volume slider — the only state (`.operational`)
 ///   in which the slider is actually on screen, so it is exactly `hasMasterVolume`.
 /// - `.needsPack`: the 先选包 empty-state card.
 /// - `.configFailure(reason:)`: the honest-failure card, which carries the 在访达中显示 config.json
@@ -76,7 +76,7 @@ public enum PanelTopContent: Sendable, Equatable {
 }
 
 extension PanelTopContent {
-    /// The operational events content — four event rows + the master-volume slider — is on screen,
+    /// The operational events content — five event rows + the master-volume slider — is on screen,
     /// true only for `.events`. Drives both `visibleRows` (which rows are actually rendered into the
     /// opening-focus order) and `hasMasterVolume` (the slider is on screen exactly then).
     ///

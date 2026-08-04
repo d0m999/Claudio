@@ -107,6 +107,8 @@ public enum ClaudioTheme {
     public static func event(_ event: Event, _ scheme: ColorScheme) -> Color {
         let hex: String
         switch (event, scheme) {
+        case (.taskStart, .dark): hex = ClaudioColorHex.taskStartDark
+        case (.taskStart, _): hex = ClaudioColorHex.taskStartLight
         case (.stop, .dark): hex = ClaudioColorHex.stopDark
         case (.stop, _): hex = ClaudioColorHex.stopLight
         case (.stopFailure, .dark): hex = ClaudioColorHex.stopFailureDark
@@ -150,6 +152,7 @@ public extension ClaudioInterfaceTextSize {
 
 public func claudioEventGlyphName(_ event: Event) -> String {
     switch event {
+    case .taskStart: "paperplane.fill"
     case .stop: "checkmark.circle.fill"
     case .stopFailure: "pause.circle.fill"
     case .notification: "bell.badge.fill"

@@ -584,8 +584,8 @@ private func doctorHostResult(
             return DoctorCheckResult(
                 name: name, severity: .warning,
                 message: host == .codex
-                    ? "⚠ Codex：claudi0 已写好，等待 Codex 确认（在 Codex 输入 /hooks）"
-                    : "⚠ Claude Code 已配置，等待首个真实事件回执")
+                    ? "⚠ Codex：在 Codex 输入 /hooks，确认后再提交一次提示词"
+                    : "⚠ Claude Code 已配置，请提交一次提示词以确认连接")
         }
         let supported = HostCapabilityCatalog.bindings(for: host).filter(\.isAudibleCapability).count
         let qualifier = host == .codex ? "；执行中断暂无事件，需要你仅授权请求" : ""

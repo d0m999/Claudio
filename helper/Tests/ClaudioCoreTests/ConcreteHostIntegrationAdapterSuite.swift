@@ -139,7 +139,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 expect(false, "显式连接必须用真实 command hook 修复不可执行条目")
                 return
             }
-            expect(connected.configuration == .configured, "修复后四事件必须配置完整")
+            expect(connected.configuration == .configured, "修复后五事件必须配置完整")
             let repairedHooks = readAdapterJSON(paths.claudeSettings)["hooks"] as? [String: Any]
             for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
                 let groups = repairedHooks?[binding.nativeEvent!] as? [Any] ?? []
@@ -178,6 +178,13 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 return
             }
 
+            let activationReceipt = HostHookReceipt(
+                installationID: installationID,
+                host: .claudeCode,
+                nativeEvent: "UserPromptSubmit",
+                semanticEvent: .taskStart,
+                timestamp: Date(timeIntervalSince1970: 100.1233),
+                playbackResult: .played)
             let earlier = HostHookReceipt(
                 installationID: installationID,
                 host: .claudeCode,
@@ -192,7 +199,8 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 semanticEvent: .subagentStop,
                 timestamp: Date(timeIntervalSince1970: 100.1235),
                 playbackResult: .muted)
-            expect(paths.receipts.store(earlier) == .success(.written), "较早回执必须可写")
+            expect(paths.receipts.store(activationReceipt) == .success(.written), "激活回执必须可写")
+            expect(paths.receipts.store(earlier) == .success(.written), "较早诊断回执必须可写")
             expect(paths.receipts.store(later) == .success(.written), "较晚回执必须可写")
 
             let snapshot = await adapter.inspect(runtime: .ready)
@@ -200,8 +208,13 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 expect(false, "完整配置应投影当前代次真实回执")
                 return
             }
-            expect(evidence.nativeEvent == "SubagentStop", "不得因毫秒级截断选中较早 Stop")
-            expect(evidence.timestamp == later.timestamp, "快照必须保留最新回执的完整 Date 精度")
+            expect(evidence.nativeEvent == "UserPromptSubmit", "激活只能认任务开始回执")
+            expect(
+                snapshot.latestReceipt?.nativeEvent == "SubagentStop",
+                "latestReceipt 不得因毫秒级截断选中较早 Stop")
+            expect(
+                snapshot.latestReceipt?.timestamp == later.timestamp,
+                "latestReceipt 必须保留最新回执的完整 Date 精度")
         }
     }
 
@@ -257,7 +270,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
         }
     }
 
-    await asyncSuite("Claude adapter：legacy 显式升级、真实回执点亮、断开保留第三方与任务开始声音") {
+    await asyncSuite("Claude adapter：legacy 显式升级、任务开始回执点亮、断开只保留第三方") {
         await withAsyncTempDirectory { root in
             let paths = makeAdapterFixture(root: root)
             let third: [String: Any] = [
@@ -271,13 +284,14 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     "hooks": [["type": "command", "command": legacyTaskStart]]
                 ]],
             ]
-            for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
+            for event in Event.legacyLifecycleCases {
+                let binding = HostCapabilityCatalog.binding(host: .claudeCode, event: event)!
                 var groups = (hooks[binding.nativeEvent!] as? [Any]) ?? []
                 groups.append([
                     "hooks": [[
                         "type": "command",
                         "command": claudioHookCommand(
-                            for: binding.event, claudioBinaryPath: paths.binary.path),
+                            for: event, claudioBinaryPath: paths.binary.path),
                     ]]
                 ])
                 hooks[binding.nativeEvent!] = groups
@@ -310,8 +324,8 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let receipt = HostHookReceipt(
                 installationID: installationID,
                 host: .claudeCode,
-                nativeEvent: "Stop",
-                semanticEvent: .stop,
+                nativeEvent: "UserPromptSubmit",
+                semanticEvent: .taskStart,
                 timestamp: Date(timeIntervalSince1970: 10),
                 playbackResult: .played)
             expect(paths.receipts.store(receipt) == .success(.written), "fixture 回执必须可写")
@@ -332,8 +346,8 @@ func runConcreteHostIntegrationAdapterSuites() async {
             expect((after["opaque"] as? String) == "keep", "未知顶层键必须保留")
             expect((afterHooks?["Stop"] as? [Any])?.count == 1, "第三方 Stop group 必须保留")
             expect(
-                (afterHooks?["UserPromptSubmit"] as? [Any])?.count == 1,
-                "旧 UserPromptSubmit 任务开始声音不得被新断开删除")
+                afterHooks?["UserPromptSubmit"] == nil,
+                "旧 play notification 必须在显式升级时移除；断开后不得复活")
             expect(
                 paths.receipts.currentInstallationID(host: .claudeCode) == nil,
                 "Claude disconnect 成功移除配置后必须撤销当前回执代次")
@@ -343,7 +357,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
         }
     }
 
-    await asyncSuite("Codex adapter：只写 composable hooks，notify/trust 不变，3/4 待确认而非 degraded") {
+    await asyncSuite("Codex adapter：只写 composable hooks，notify/trust 不变，4/5 待确认而非 degraded") {
         await withAsyncTempDirectory { root in
             let paths = makeAdapterFixture(root: root)
             let original: [String: Any] = [
@@ -473,6 +487,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
             expect((connectedHooks?["Stop"] as? [Any])?.count == 1, "Stop 只能由旧 wrapper 管理，不得重复安装")
             expect((connectedHooks?["PermissionRequest"] as? [Any])?.count == 1, "仍须安装授权请求 hook")
             expect((connectedHooks?["SubagentStop"] as? [Any])?.count == 1, "仍须安装子任务结束 hook")
+            expect((connectedHooks?["UserPromptSubmit"] as? [Any])?.count == 1, "仍须安装任务开始 hook")
 
             let wrapperStopReceipt = HostHookReceipt(
                 installationID: firstID,
@@ -492,8 +507,8 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let trustedHooksReceipt = HostHookReceipt(
                 installationID: firstID,
                 host: .codex,
-                nativeEvent: "PermissionRequest",
-                semanticEvent: .notification,
+                nativeEvent: "UserPromptSubmit",
+                semanticEvent: .taskStart,
                 timestamp: Date(timeIntervalSince1970: 22),
                 playbackResult: .played)
             expect(
@@ -505,8 +520,8 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 return
             }
             expect(
-                evidence.nativeEvent == "PermissionRequest",
-                "迁移连接的激活证据必须来自 hooks.json 管理事件")
+                evidence.nativeEvent == "UserPromptSubmit",
+                "迁移连接的激活证据必须来自当前代次任务开始事件")
 
             guard case .success = await adapter.disconnect(runtime: .ready) else {
                 expect(false, "迁移后的 Codex 必须可断开")

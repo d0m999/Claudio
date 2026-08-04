@@ -203,7 +203,7 @@ func runOnboardingDetectorSuites() {
         }
     }
 
-    suite("5a. all four core events' claudio hooks present → .installed") {
+    suite("5a. all four legacy lifecycle claudio hooks present → .installed") {
         withTempDirectory { root in
             let environment = makeReadyEnvironment(in: root)
             writeFixture(
@@ -216,7 +216,7 @@ func runOnboardingDetectorSuites() {
         }
     }
 
-    suite("5b. only 3 of 4 core events' claudio hooks present → .notInstalled (partial ≠ done)") {
+    suite("5b. only 3 of 4 legacy lifecycle hooks present → .notInstalled (partial ≠ done)") {
         withTempDirectory { root in
             let environment = makeReadyEnvironment(in: root)
             let path = environment.claudioBinaryPath.path

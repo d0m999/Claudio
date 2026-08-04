@@ -15,7 +15,7 @@ private final class HostHookRunnerSpawner: ProcessSpawning, @unchecked Sendable 
 
 @MainActor
 func runHostHookRunnerSuites() {
-    suite("host hook：严格映射，Codex StopFailure 与未知事件不播放也不写回执") {
+    suite("host hook：UserPromptSubmit 严格映射任务开始，Codex StopFailure 与未知事件失败关闭") {
         withTempDirectory { root in
             let spawner = HostHookRunnerSpawner()
             let environment = makeHostHookRunnerEnvironment(
@@ -28,9 +28,9 @@ func runHostHookRunnerSuites() {
                 "Codex StopFailure 必须失败关闭")
             expect(
                 handleHostHook(
-                    host: .codex, nativeEvent: "UserPromptSubmit", installationID: id,
+                    host: .codex, nativeEvent: "SomethingNew", installationID: id,
                     environment: environment) == nil,
-                "UserPromptSubmit 不得冒充需要你")
+                "未知事件必须失败关闭")
             expect(spawner.callCount == 0, "不支持/未知事件不得进入播放链")
             expect(
                 !FileManager.default.fileExists(
@@ -52,7 +52,7 @@ func runHostHookRunnerSuites() {
             expect(failed?.playbackResult == .playbackFailed, "spawn 失败必须被回执脱敏记录")
             expect(failed?.receiptWritten == true, "播放失败不能抹掉真实 hook 回执")
             expect(
-                ready.receiptStore.activationEvidence(
+                ready.receiptStore.receiptEvidence(
                     host: .codex, nativeEvent: "PermissionRequest", installationID: id) != nil,
                 "播放失败的真实回调仍应形成 activation evidence")
 
@@ -70,7 +70,7 @@ func runHostHookRunnerSuites() {
         }
     }
 
-    suite("host hook：宿主级防抖互不相吞，legacy play 的共享路径未改变") {
+    suite("host hook：任务开始 250ms 与 lifecycle 1.5s 分轨，且宿主之间互不相吞") {
         withTempDirectory { root in
             let id = UUID()
             let instant = Date(timeIntervalSince1970: 4_000)
@@ -80,23 +80,106 @@ func runHostHookRunnerSuites() {
             let codex = makeHostHookRunnerEnvironment(
                 root: root, host: .codex, spawner: HostHookRunnerSpawner(),
                 fixtureIsReady: true, now: instant, activeInstallationID: id)
-            let firstClaude = handleHostHook(
+            let firstClaudeStart = handleHostHook(
+                host: .claudeCode, nativeEvent: "UserPromptSubmit", installationID: id,
+                environment: claude)
+            let secondClaudeStart = handleHostHook(
+                host: .claudeCode, nativeEvent: "UserPromptSubmit", installationID: id,
+                environment: claude)
+            let firstCodexStart = handleHostHook(
+                host: .codex, nativeEvent: "UserPromptSubmit", installationID: id,
+                environment: codex)
+            let firstClaudeLifecycle = handleHostHook(
                 host: .claudeCode, nativeEvent: "Stop", installationID: id,
                 environment: claude)
-            let firstCodex = handleHostHook(
-                host: .codex, nativeEvent: "Stop", installationID: id,
-                environment: codex)
-            let secondClaude = handleHostHook(
+            let secondClaudeLifecycle = handleHostHook(
                 host: .claudeCode, nativeEvent: "Notification", installationID: id,
                 environment: claude)
-            expect(firstClaude?.playbackResult == .played, "Claude 首次事件必须播放")
-            expect(firstCodex?.playbackResult == .played, "同一时刻 Codex 不得被 Claude 去抖吞掉")
-            expect(secondClaude?.playbackResult == .debounced, "同宿主 1.5 秒内第二事件必须去抖")
+            expect(firstClaudeStart?.playbackResult == .played, "Claude 首次任务开始必须播放")
+            expect(secondClaudeStart?.playbackResult == .debounced, "250ms 内重复任务开始必须去抖")
+            expect(firstCodexStart?.playbackResult == .played, "同一时刻 Codex 不得被 Claude 去抖吞掉")
+            expect(
+                firstClaudeLifecycle?.playbackResult == .played,
+                "任务开始时间戳不得压掉紧随其后的 lifecycle")
+            expect(
+                secondClaudeLifecycle?.playbackResult == .debounced,
+                "同宿主 1.5 秒内第二个 lifecycle 必须去抖")
             expect(
                 claude.playEnvironment.lockFile != codex.playEnvironment.lockFile
                     && claude.playEnvironment.debounceStateFile
-                        != codex.playEnvironment.debounceStateFile,
-                "两宿主必须使用不同 lock/state")
+                        != codex.playEnvironment.debounceStateFile
+                    && claude.taskStartDebounceStateFile
+                        != codex.taskStartDebounceStateFile
+                    && claude.taskStartDebounceStateFile
+                        != claude.playEnvironment.debounceStateFile,
+                "两宿主及两条去抖时间轴必须使用不同 state；同宿主仍共用播放锁")
+        }
+    }
+
+    suite("host hook：任务开始在静音与缺音状态也会独立去抖并写回执") {
+        withTempDirectory { root in
+            let id = UUID()
+            let muted = makeHostHookRunnerEnvironment(
+                root: root, host: .claudeCode, spawner: HostHookRunnerSpawner(),
+                fixtureIsReady: true, taskStartMuted: true, activeInstallationID: id)
+            let first = handleHostHook(
+                host: .claudeCode, nativeEvent: "UserPromptSubmit", installationID: id,
+                environment: muted)
+            let second = handleHostHook(
+                host: .claudeCode, nativeEvent: "UserPromptSubmit", installationID: id,
+                environment: muted)
+            expect(first?.playbackResult == .muted, "首次静音回调必须记录 muted")
+            expect(second?.playbackResult == .debounced, "静音重复回调仍须写 debounced")
+
+            let missingRoot = root.appendingPathComponent("missing-start", isDirectory: true)
+            try! FileManager.default.createDirectory(at: missingRoot, withIntermediateDirectories: true)
+            let missing = makeHostHookRunnerEnvironment(
+                root: missingRoot, host: .codex, spawner: HostHookRunnerSpawner(),
+                activeInstallationID: id)
+            let missingFirst = handleHostHook(
+                host: .codex, nativeEvent: "UserPromptSubmit", installationID: id,
+                environment: missing)
+            let missingSecond = handleHostHook(
+                host: .codex, nativeEvent: "UserPromptSubmit", installationID: id,
+                environment: missing)
+            expect(missingFirst?.playbackResult == .notReady, "首次缺音必须记录 notReady")
+            expect(missingSecond?.playbackResult == .debounced, "缺音重复回调仍须去抖")
+        }
+    }
+
+    suite("host hook：playback stub 连续 100 次的返回延迟 p95 不超过 100ms") {
+        withTempDirectory { root in
+            let id = UUID()
+            let spawner = HostHookRunnerSpawner()
+            let base = makeHostHookRunnerEnvironment(
+                root: root, host: .codex, spawner: spawner,
+                fixtureIsReady: true, activeInstallationID: id)
+            var durations: [TimeInterval] = []
+            durations.reserveCapacity(100)
+
+            for index in 0..<100 {
+                // 每次使用独立的短时 timestamp，确保测到完整 resolve → stub spawn → receipt
+                // 主路径，而不是第 2 次起全部走 debounced 快路径。
+                let environment = HostHookEnvironment(
+                    host: .codex,
+                    playEnvironment: base.playEnvironment,
+                    taskStartDebounceStateFile: root.appendingPathComponent(
+                        "performance-task-start-\(index).state"),
+                    receiptStore: base.receiptStore,
+                    now: base.now)
+                let started = ProcessInfo.processInfo.systemUptime
+                let outcome = handleHostHook(
+                    host: .codex, nativeEvent: "UserPromptSubmit", installationID: id,
+                    environment: environment)
+                durations.append(ProcessInfo.processInfo.systemUptime - started)
+                expect(outcome?.playbackResult == .played, "第 \(index + 1) 次必须经过 playback stub")
+            }
+
+            let p95 = durations.sorted()[94]
+            expect(spawner.callCount == 100, "100 次主路径必须全部调用 playback stub")
+            expect(
+                p95 <= 0.100,
+                "hook 返回延迟 p95 必须 ≤ 100ms，实测 \(String(format: "%.2f", p95 * 1_000))ms")
         }
     }
 }
@@ -107,6 +190,7 @@ private func makeHostHookRunnerEnvironment(
     host: HostID,
     spawner: any ProcessSpawning,
     fixtureIsReady: Bool = false,
+    taskStartMuted: Bool = false,
     now: Date = Date(timeIntervalSince1970: 3_000),
     activeInstallationID: UUID? = nil
 ) -> HostHookEnvironment {
@@ -116,11 +200,14 @@ private func makeHostHookRunnerEnvironment(
         let pack = packs.appendingPathComponent("test", isDirectory: true)
         try! FileManager.default.createDirectory(at: pack, withIntermediateDirectories: true)
         writeFixture(
-            #"{"selected_pack":"test","master_volume":0.8,"events":{}}"#,
+            taskStartMuted
+                ? #"{"selected_pack":"test","master_volume":0.8,"events":{"task_start":false}}"#
+                : #"{"selected_pack":"test","master_volume":0.8,"events":{}}"#,
             to: config)
         writeFixture(
-            #"{"id":"test","name":"Test","author":"Tests","version":"1","events":{"stop":"stop.mp3","notification":"notification.mp3","subagent_stop":"subagent.mp3"}}"#,
+            #"{"id":"test","name":"Test","author":"Tests","version":"1","events":{"task_start":"task_start.mp3","stop":"stop.mp3","notification":"notification.mp3","subagent_stop":"subagent.mp3"}}"#,
             to: pack.appendingPathComponent("manifest.json"))
+        writeFixture("sound", to: pack.appendingPathComponent("task_start.mp3"))
         writeFixture("sound", to: pack.appendingPathComponent("stop.mp3"))
         writeFixture("sound", to: pack.appendingPathComponent("notification.mp3"))
         writeFixture("sound", to: pack.appendingPathComponent("subagent.mp3"))
@@ -147,6 +234,7 @@ private func makeHostHookRunnerEnvironment(
     return HostHookEnvironment(
         host: host,
         playEnvironment: play,
+        taskStartDebounceStateFile: root.appendingPathComponent("\(host.rawValue)-task-start.state"),
         receiptStore: receiptStore,
         now: { now })
 }

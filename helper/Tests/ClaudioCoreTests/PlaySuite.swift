@@ -467,7 +467,7 @@ func runPlaySuites() {
     }
 
     suite(
-        "playSoundEvent: happy path plays every one of the four v1 events through their exact manifest keys (never lowercased)"
+        "playSoundEvent: happy path plays every one of the five events through their exact manifest keys"
     ) {
         withTempDirectory { root in
             let packsDir = root.appendingPathComponent("packs")
@@ -477,6 +477,7 @@ func runPlaySuites() {
             writeFixture(
                 #"""
                 { "id": "minimal-chime", "events": {
+                    "task_start": "task_start.mp3",
                     "stop": "stop.mp3",
                     "stop_failure": "stop_failure.mp3",
                     "notification": "notification.mp3",

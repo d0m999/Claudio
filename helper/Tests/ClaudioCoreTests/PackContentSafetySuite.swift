@@ -8,7 +8,7 @@ import Foundation
 //
 // 1) `manifest.json` 不是它该是的东西。
 //    - **已证实、今天就能触发**：读取**无大小上限**。裸 `Data(contentsOf:)` 会把一个 500MB 形状的
-//      manifest 整份读进来再喂给 `JSONDecoder`（一份四事件 manifest 实际不到 1 KB）。变异验证时
+//      manifest 整份读进来再喂给 `JSONDecoder`（一份五事件 manifest 实际不到 1 KB）。变异验证时
 //      这条确实变红：超限文件被完整读完，一路走到了解码器。
 //    - **非正规文件（目录 / FIFO / socket）**：实测 Darwin 上 `Data(contentsOf:)` 会拒绝它们
 //      （FIFO 抛 EACCES），并**不会**像评审最初判断的那样永久阻塞——真会挂死的是
@@ -117,7 +117,7 @@ func runPackContentSafetySuites() {
             let packDirectory = root.appendingPathComponent("evil-pack", isDirectory: true)
             try? FileManager.default.createDirectory(
                 at: packDirectory, withIntermediateDirectories: true)
-            // 一份四事件 manifest 实际不到 1 KB。这里刚好越过 1 MiB 上限一个字节——足以证明闸门在
+            // 一份五事件 manifest 实际不到 1 KB。这里刚好越过 1 MiB 上限一个字节——足以证明闸门在
             // 生效，又不用真的在测试里写一个 500MB 的文件。
             let oversize = Data(repeating: UInt8(ascii: "{"), count: (1 << 20) + 1)
             try? oversize.write(to: packDirectory.appendingPathComponent("manifest.json"))

@@ -20,12 +20,19 @@ for exit codes, host capability mappings, receipts, and config ownership.
 | `claudi0 use <pack-id>` | Switches the active pack (writes `~/.claudio/config.json`) |
 | `claudi0 setup` | Legacy-compatible bootstrap: installs the shared helper/packs, picks a default pack, and connects Claude Code. GUI first launch bootstraps shared runtime only; hosts are connected separately |
 
-Codex is intentionally **3/4 ready**: it has no `StopFailure` hook. `PermissionRequest`
-maps to claudi0's `notification` sound only for authorization requests; `UserPromptSubmit`
-does not mean “needs you.” A Codex `Stop` is labelled “round ended,” not “task completed.”
-When migrating claudi0's exact legacy `codex-notify` wrapper, its `Stop` receipt does not
-prove `/hooks` trust; activation requires a current-installation `PermissionRequest` or
-`SubagentStop` receipt from Codex's composable hooks.
+The stable sound model has five events. `UserPromptSubmit` maps to `task_start` for both
+hosts, so Claude Code is **5/5 ready** and Codex is intentionally **4/5 ready**: Codex still
+has no `StopFailure` hook. `PermissionRequest` maps to claudi0's `notification` sound only
+for authorization requests; a Codex `Stop` is labelled “round ended,” not “task completed.”
+Activation requires a current-installation `UserPromptSubmit` receipt. Other current-generation
+receipts remain useful as latest-event diagnostics, but cannot prove that the new task-start
+hook is trusted. After a Codex connect or upgrade, run `/hooks`, confirm the hook, then submit
+one more prompt.
+
+Modern task-start callbacks use a separate per-host 250ms debounce timestamp; lifecycle
+events retain their per-host 1.5s timestamp. Every supported `claudi0 hook` invocation exits
+0 with zero stdout/stderr bytes, including played, muted, debounced, missing-mapping and
+failure outcomes. The receipt contains only installation/host/event/time/result metadata.
 
 ## Layout
 

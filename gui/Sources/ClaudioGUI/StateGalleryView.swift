@@ -499,7 +499,7 @@ import ClaudioGUIComponents
                 // LOAD-BEARING (`/ship` 评审): every framed view here — ``EventRowView``,
                 // ``PackGalleryView``, ``OnboardingView`` — paints NO surface of its own; in
                 // production ``PanelView`` (the composition root) supplies it. Without this
-                // background, the gallery rendered all four event colors, every
+                // background, the gallery rendered all five event colors, every
                 // glyph tile and every reject row on SwiftUI's **untokenized default window
                 // background** — and that surface is precisely what every contrast assertion in
                 // `ContrastSuite` is talking about. A 视觉真相源 (DESIGN.md line 134) that shows

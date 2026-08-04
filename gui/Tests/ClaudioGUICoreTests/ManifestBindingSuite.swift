@@ -1727,11 +1727,11 @@ func runManifestBindingSuites() async {
         }
     }
 
-    // §2.1b：「四个事件全被清空」—— 三个子系统给三个不同但都正确的答案，且这条分歧是被理解过的，
+    // §2.1b：「五个事件全被清空」—— 三个子系统给三个不同但都正确的答案，且这条分歧是被理解过的，
     // 不是被忽略的（PLAN-SOUND-MANAGER.md §2.1b）。三者必须写在同一个测试里，否则下一个人会看到
-    // 「doctor 说完整、包行说缺 4 个」觉得是 bug，去「修好」其中一个，当场破坏另外两个。
+    // 「doctor 说完整、包行说缺 5 个」觉得是 bug，去「修好」其中一个，当场破坏另外两个。
     suite(
-        "四个事件全部清空的三方回答同时钉死：doctor .complete / play 全部 .notReady / 面板包行 partial(0/4)，且四个音频文件全部原封不动"
+        "五个事件全部清空的三方回答同时钉死：doctor .complete / play 全部 .notReady / 面板包行 partial(0/5)，且五个音频文件全部原封不动"
     ) {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
@@ -1740,11 +1740,11 @@ func runManifestBindingSuites() async {
             writeFixture(
                 #"""
                 { "id": "my-pack", "events": {
-                    "stop": "stop.mp3", "stop_failure": "fail.mp3",
+                    "task_start": "task.mp3", "stop": "stop.mp3", "stop_failure": "fail.mp3",
                     "notification": "ping.mp3", "subagent_stop": "sub.mp3" } }
                 """#,
                 to: userPacks.appendingPathComponent("my-pack/manifest.json"))
-            let fileNames = ["stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"]
+            let fileNames = ["task.mp3", "stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"]
             for fileName in fileNames {
                 writeFixture("fake-audio", to: userPacks.appendingPathComponent("my-pack/\(fileName)"))
             }
@@ -1769,7 +1769,7 @@ func runManifestBindingSuites() async {
             expect(packID == "my-pack", "packID on the report must be my-pack")
             expect(events.isEmpty, "no events remain declared, got \(events)")
 
-            // ② play：四个事件全静默（问的是「这个事件要不要出声」，unmapped = 刻意静默）。
+            // ② play：五个事件全静默（问的是「这个事件要不要出声」，unmapped = 刻意静默）。
             let playEnvironment = PlayEnvironment(
                 lockFile: root.appendingPathComponent("play.lock"),
                 configFile: configFile,
@@ -1786,7 +1786,7 @@ func runManifestBindingSuites() async {
                     "\(event) must be .notReady with every event cleared, got \(outcome)")
             }
 
-            // ③ 面板包行：问的是「覆盖了几个事件」→ partial(0/4)「缺 4 个」。
+            // ③ 面板包行：问的是「覆盖了几个事件」→ partial(0/5)「缺 5 个」。
             let cards = availablePacks(
                 config: ClaudioConfig(selectedPack: "my-pack"), environment: environment)
             guard let card = cards.first(where: { $0.id == "my-pack" }) else {
@@ -1794,8 +1794,8 @@ func runManifestBindingSuites() async {
                 return
             }
             expect(
-                card.state == .partial(present: 0, total: 4),
-                "the pack row must read partial(0/4) — 「缺 4 个」, got \(card.state)")
+                card.state == .partial(present: 0, total: 5),
+                "the pack row must read partial(0/5) — 「缺 5 个」, got \(card.state)")
             expect(card.presentEvents.isEmpty, "no event glyph should be lit, got \(card.presentEvents)")
 
             // 三方分歧之外的那条硬约束：清除绝不删文件——全部四个音频文件必须原封不动地留在磁盘上。

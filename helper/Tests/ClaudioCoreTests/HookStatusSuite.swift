@@ -46,7 +46,7 @@ func runHookStatusSuites() {
         }
     }
 
-    suite("detectHookInstallStatus: three of four events installed → still .notInstalled (partial)") {
+    suite("detectHookInstallStatus: three of four legacy lifecycle events installed → still .notInstalled (partial)") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             // Missing SubagentStop entirely — mirrors "user manually removed one event's
@@ -96,7 +96,7 @@ func runHookStatusSuites() {
     suite("detectHookInstallStatus: an entry with our command but a missing \"type\" → .notInstalled (not a runnable command hook)") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
-            // All four events carry our exact command string, but SubagentStop's entry is
+            // All four legacy lifecycle events carry our exact command string, but SubagentStop's entry is
             // missing its `"type": "command"` — Claude Code would NOT fire it as a command
             // hook, so a read-only "已接管?" probe must not count it as installed. If it
             // did, onboarding would show "已接好" for a config that never actually plays a

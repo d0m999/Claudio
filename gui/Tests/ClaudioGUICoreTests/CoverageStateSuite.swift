@@ -281,7 +281,7 @@ func runCoverageStateSuites() {
         }
     }
 
-    suite("packCoverage: covers all four v1 events, exactly once each") {
+    suite("packCoverage: covers all five current events, exactly once each") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             writeFixture(

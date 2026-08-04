@@ -32,7 +32,7 @@ private func makeEnvironment(_ userPacksDirectory: URL) -> AudioImportEnvironmen
 }
 
 /// 一份良构、`.operational` 的 config.json（`selected_pack` 有效、`master_volume` 是数字、`events` 空
-/// → 四个事件全 enabled）。写路径对它可安全重写，读路径判成 `.operational`。
+/// → 五个事件全 enabled）。写路径对它可安全重写，读路径判成 `.operational`。
 private let operationalConfigBytes =
     #"{ "selected_pack": "minimal-chime", "master_volume": 0.42, "events": {} }"#
 
@@ -255,7 +255,7 @@ func runPanelConfigControllerSuites() {
             //    是 disabled，**没被碰的 .stop 那行必须原样 enabled**。上面 ① 查的是**磁盘**（onDisk.isEnabled），
             //    这里查的是**读模型**（eventRows.enabled，面板真正渲染的那个位）——两条正交。红队实测：把
             //    reloadEnabledFlags 的 `enabled: config.isEnabled(row.event)` 改成常量 `false`，磁盘/config 全对、
-            //    但 eventRows 里**四行全变 muted 外观** → 点一个静音钮、面板谎报「全部静音」。而此前所有 toggleMute
+            //    但 eventRows 里**五行全变 muted 外观** → 点一个静音钮、面板谎报「全部静音」。而此前所有 toggleMute
             //    测试只往 true→false 一个方向翻，常量 false 从「本应保持 enabled」这个方向的盲区溜过。
             expect(
                 controller.eventRows.first(where: { $0.event == .notification })?.enabled == false,
@@ -264,14 +264,14 @@ func runPanelConfigControllerSuites() {
             expect(
                 controller.eventRows.first(where: { $0.event == .stop })?.enabled == true,
                 "**没被碰**的 .stop 那行读模型 enabled 必须**原样还是 true** —— 它变 false = reloadEnabledFlags 把"
-                    + "非目标行的 enabled 也算错了（红队实测：常量 false → 点一个静音、面板四行全显示 muted）。"
+                    + "非目标行的 enabled 也算错了（红队实测：常量 false → 点一个静音、面板五行全显示 muted）。"
                     + "得到 \(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.enabled))")
         }
     }
 
     // 变异 #1（执行）：面板打开着的时候 config.json 被外部删掉，点静音 → 写盘 fail closed（.configMissing）
     // → 路由 .full → reload() 必须重载 configState 让它从 .operational 翻到 .needsPack。删掉 reload() 里那行
-    // configState 重载 → configState 停在陈旧的 .operational → 面板顶着四行活控件撒谎，这条当场红。
+    // configState 重载 → configState 停在陈旧的 .operational → 面板顶着五行活控件撒谎，这条当场红。
     suite("PanelConfigController.toggleMute + 外部删除：reload() 必须把 configState 翻到 .needsPack（钉死红队 #1 执行）") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -283,7 +283,7 @@ func runPanelConfigControllerSuites() {
                 environment: makeEnvironment(root.appendingPathComponent("packs")),
                 afterFullReload: { afterFullReloadCalls.append($0.selectedPack) })
 
-            // 前提：初始是 .operational（四行活控件的态）。
+            // 前提：初始是 .operational（五行活控件的态）。
             guard case .operational = controller.configState else {
                 expect(false, "前提：初始 configState 必须是 .operational，得到 \(controller.configState)")
                 return
@@ -300,7 +300,7 @@ func runPanelConfigControllerSuites() {
                     false,
                     "config 被外部删掉后，一次静音必须让 configState 翻到 .needsPack（reload() 重载了它）"
                         + " —— 它停在 \(controller.configState) = reload() 没重载 configState，面板会继续顶着"
-                        + "四行活控件挂在一个不存在的文件上（正是这个 commit 要消除的『面板顶着绿点撒谎』）")
+                        + "五行活控件挂在一个不存在的文件上（正是这个 commit 要消除的『面板顶着绿点撒谎』）")
                 return
             }
 
@@ -661,7 +661,7 @@ func runPanelConfigControllerSuites() {
     //     未动」—— 那句话把「**我们**没写」偷换成了「**文件**没变」）。
     //   - 切包：失败分支只 `packSwitchError = error`，压根没有路由。
     //
-    // 于是 `configState` 停在 `.operational`，面板一边用红字说「config.json 读取失败」，一边继续渲染四行
+    // 于是 `configState` 停在 `.operational`，面板一边用红字说「config.json 读取失败」，一边继续渲染五行
     // 活控件 —— 直到用户重开 popover 才自愈。
     //
     // ⚠️ **第一刀（1c65215）把同一个偷换概念原样犯了一遍**：它把 `.lockFailed` 也留在了「跳过」那一侧，
@@ -713,7 +713,7 @@ func runPanelConfigControllerSuites() {
                 expect(
                     false,
                     "静音刚刚亲口承认 config.json 读不动，configState 却还停在 \(controller.configState)"
-                        + " —— 面板会顶着四行活控件继续撒谎。必须翻到 .malformed，渲染诚实失败卡")
+                        + " —— 面板会顶着五行活控件继续撒谎。必须翻到 .malformed，渲染诚实失败卡")
                 return
             }
             expect(!reason.isEmpty, "诚实失败态必须带一条可行动的原因，得到空串")
@@ -907,7 +907,7 @@ func runPanelConfigControllerSuites() {
                     false,
                     "静音刚刚因为「锁都建不出来」而失败，而此刻 loadPanelConfig 明明算得出 .unwritable + 一条"
                         + "精确的 chmod 指令 —— configState 却停在 \(controller.configState)。面板一边红字说"
-                        + "「请稍后重试」（而重试永远不会成功），一边顶着四行活控件。这就是第一刀自己漏掉的"
+                        + "「请稍后重试」（而重试永远不会成功），一边顶着五行活控件。这就是第一刀自己漏掉的"
                         + "那一格：`.lockFailed` 是一袋**未知** errno，它什么也证明不了，而围栏要的是"
                         + "「**证明没变**才敢不刷新」")
                 return

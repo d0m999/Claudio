@@ -57,7 +57,7 @@ private struct FixtureBundle {
             let pack = bundledPacksDirectory.appendingPathComponent(id, isDirectory: true)
             let manifest = """
                 {"schema":1,"id":"\(id)","name":"极简铃音","license":"CC0-1.0",
-                 "events":{"stop":"stop.mp3","stop_failure":"stop_failure.mp3",
+                 "events":{"task_start":"task_start.mp3","stop":"stop.mp3","stop_failure":"stop_failure.mp3",
                            "notification":"notification.mp3","subagent_stop":"subagent_stop.mp3"}}
                 """
             writeFixture(manifest, to: pack.appendingPathComponent("manifest.json"))
@@ -603,7 +603,7 @@ func runOnboardingActionsSuites() {
             // **解析 JSON，不做子串匹配**：Foundation 的 JSONSerialization 会把 `/` 转义成 `\/`，
             // 所以对着原始文本 `contains(path)` 会假红（第一版就是这么翻的）。
             let commands = hookCommands(in: targets.onboarding.settingsFile)
-            for event in Event.allCases {
+            for event in Event.legacyLifecycleCases {
                 expect(
                     commands[event.settingsName]?.isEmpty == false,
                     "settings.json 必须有 \(event.settingsName) 的 hook，得到 \(commands)")
@@ -697,7 +697,7 @@ func runOnboardingActionsSuites() {
                 expect(false, "断开必须成功且真的摘掉了东西，得到 \(result)")
                 return
             }
-            expect(count == Event.allCases.count, "必须摘掉四条，得到 \(count)")
+            expect(count == Event.legacyLifecycleCases.count, "必须摘掉四条，得到 \(count)")
 
             let remaining = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }
             expect(
@@ -1222,7 +1222,7 @@ func runOnboardingActionsSuites() {
             let survivors = hookCommands(in: targets.onboarding.settingsFile).values.flatMap { $0 }
                 .filter { $0.contains(targets.onboarding.claudioBinaryPath.path) }
             expect(
-                survivors.count == Event.allCases.count,
+                survivors.count == Event.legacyLifecycleCases.count,
                 "断开被锁挡住 = 一条都不许摘（四条 hook 原样在位），实得 \(survivors.count) 条："
                     + "\(survivors) —— 少了 = 它先动了手再报的错，用户看见「断开失败」，而他的 "
                     + "settings.json 里躺着几条被摘剩的 hook")
@@ -1272,7 +1272,7 @@ func runOnboardingActionsSuites() {
             var sweptCount: Int?
             if case .success(.disconnected(let count)) = result { sweptCount = count }
             expect(
-                sweptCount == Event.allCases.count,
+                sweptCount == Event.legacyLifecycleCases.count,
                 "断开只写 settings.json，config.lock 被别人持着与它毫无关系，必须照常**摘干净四条**，"
                     + "得到 \(result) —— ① 它**因为 config.lock 被持有而失败**，就说明这条路径拿了一把"
                     + "它根本不该拿的锁：那样一次断开会连带挡住并发的静音开关与切包（两者都写 config.json），"

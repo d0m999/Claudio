@@ -3,8 +3,8 @@ import Foundation
 
 // MARK: - 声音来源行
 
-/// 宿主行的语义状态。颜色只由视图把这些语义映射到 token；`ready` 不区分 4/4 与
-/// Codex 的正常 3/4，因此不会把能力差异误画成故障警告。
+/// 宿主行的语义状态。颜色只由视图把这些语义映射到 token；`ready` 不区分 5/5 与
+/// Codex 的正常 4/5，因此不会把能力差异误画成故障警告。
 public enum HostSourceRowStatus: Sendable, Equatable {
     case ready
     case awaitingActivation
@@ -72,8 +72,8 @@ private func hostSourceRowPresentation(
     case .awaitingActivation(let supported, let total):
         readinessText = "\(supported)/\(total) 已配置"
         detailText = host == .codex
-            ? "claudi0 已写好，等待 Codex 确认"
-            : "等待宿主产生首个真实事件"
+            ? "在 Codex 输入 /hooks，确认后再提交一次提示词"
+            : "请向 Claude Code 提交一次提示词以确认连接"
         status = .awaitingActivation
 
     case .legacy(let supported, let total):
@@ -100,7 +100,7 @@ private func hostSourceRowPresentation(
         status: status)
 }
 
-// MARK: - 4 × 2 可听能力矩阵
+// MARK: - 5 × 2 可听能力矩阵
 
 /// `.muted` 格仍需保留它由哪一条独立音量轴造成，否则恢复动作会把总音量为零
 /// 误当成逐事件静音，并在没有改变可听事实时返回成功。
@@ -305,8 +305,7 @@ public func hostLatestReceiptText(
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
     let timestamp = formatter.string(from: evidence.timestamp)
-    return "\(snapshot.host.displayName) · \(evidence.nativeEvent) → "
-        + "\(evidence.event.displayName) · \(timestamp) · "
+    return "\(snapshot.host.displayName) · \(evidence.event.displayName) · \(timestamp) · "
         + hostHookPlaybackResultDisplayName(evidence.playbackResult)
 }
 
@@ -315,8 +314,7 @@ public func hostLatestReceiptText(
 public func hostLatestReceiptEvidence(
     snapshot: HostIntegrationSnapshot
 ) -> HostReceiptEvidence? {
-    guard case .observed(let evidence) = snapshot.activation else { return nil }
-    return evidence
+    snapshot.latestReceipt
 }
 
 /// 保留事件投影 API；事件身份仍来自完整 evidence，不反向解析摘要。
@@ -381,7 +379,7 @@ public struct IntegrationsWindowLayoutAdaptation: Sendable, Equatable {
     }
 }
 
-/// 最大字号只改变几何：四行变四张卡，每张仍消费同一行的两个真实宿主格；两个布局都不把
+/// 最大字号只改变几何：五行变五张卡，每张仍消费同一行的两个真实宿主格；两个布局都不把
 /// 横向滚动当作文字放不下时的退路。
 public func integrationsWindowLayoutAdaptation(
     for tier: IntegrationsWindowTypeSizeTier,

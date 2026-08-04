@@ -114,7 +114,7 @@ func runContrastSuites() {
     // MARK: - ENGINEERING.md「无障碍规格」: 非文本 ≥ 3:1 (WCAG 1.4.11)
     //
     // 覆盖两类非文本着色元素：
-    //   (1) 四事件字形 × 明暗 × 它能画在的两种**不透明**底上：
+    //   (1) 五事件字形 × 明暗 × 它能画在的两种**不透明**底上：
     //         · `surface-2` —— `PackGalleryView` 卡片里的 2×2 事件网格：字形**直接**画在卡底上，
     //           没有 tile，所以这里的底就是这个 token 本身；以及
     //         · `panel` —— 面板上直接放字形、不带 tile 的地方（状态画廊 / 空态图标）。
@@ -135,6 +135,8 @@ func runContrastSuites() {
 
     let nonTextPairs: [NonTextPair] = [
         // — 事件字形 vs surface-2：pack 卡 2×2 网格的卡底（无 tile）—
+        NonTextPair(name: "TaskStart dark glyph vs surface-2", hex: ClaudioColorHex.taskStartDark, background: ClaudioColorHex.surface2Dark),
+        NonTextPair(name: "TaskStart light glyph vs surface-2", hex: ClaudioColorHex.taskStartLight, background: ClaudioColorHex.surface2Light),
         NonTextPair(name: "Stop dark glyph vs surface-2 (pack 卡 2×2 网格底)", hex: ClaudioColorHex.stopDark, background: ClaudioColorHex.surface2Dark),
         NonTextPair(name: "Stop light glyph vs surface-2 (pack 卡 2×2 网格底)", hex: ClaudioColorHex.stopLight, background: ClaudioColorHex.surface2Light),
         NonTextPair(name: "StopFailure dark glyph vs surface-2 (pack 卡 2×2 网格底)", hex: ClaudioColorHex.stopFailureDark, background: ClaudioColorHex.surface2Dark),
@@ -144,6 +146,8 @@ func runContrastSuites() {
         NonTextPair(name: "SubagentStop dark glyph vs surface-2 (pack 卡 2×2 网格底)", hex: ClaudioColorHex.subagentStopDark, background: ClaudioColorHex.surface2Dark),
         NonTextPair(name: "SubagentStop light glyph vs surface-2 (pack 卡 2×2 网格底)", hex: ClaudioColorHex.subagentStopLight, background: ClaudioColorHex.surface2Light),
         // — 事件字形 vs panel：面板上不带 tile 直接放字形的地方 —
+        NonTextPair(name: "TaskStart dark glyph vs panel", hex: ClaudioColorHex.taskStartDark, background: ClaudioColorHex.panelDark),
+        NonTextPair(name: "TaskStart light glyph vs panel", hex: ClaudioColorHex.taskStartLight, background: ClaudioColorHex.panelLight),
         NonTextPair(name: "Stop dark glyph vs panel", hex: ClaudioColorHex.stopDark, background: ClaudioColorHex.panelDark),
         NonTextPair(name: "Stop light glyph vs panel", hex: ClaudioColorHex.stopLight, background: ClaudioColorHex.panelLight),
         NonTextPair(name: "StopFailure dark glyph vs panel", hex: ClaudioColorHex.stopFailureDark, background: ClaudioColorHex.panelDark),
@@ -179,12 +183,12 @@ func runContrastSuites() {
         }
     }
 
-    // MARK: - 4-slot 覆盖轨：present / missing × 明 / 暗各一对（PLAN-SOUND-MANAGER T10）
+    // MARK: - 5-slot 覆盖轨：present / missing × 明 / 暗各一对（PLAN-SOUND-MANAGER T10）
     //
     // 这四条**刻意以覆盖轨自己的名字重断一次**，不是拿上面旧 2×2 网格的断言冒充新组件的覆盖：
     //
     // - `present` 是事件色实心胶囊；逐个事件里最弱的一对，亮色是 Notification、暗色是
-    //   SubagentStop（DESIGN.md「4-slot 覆盖轨」实测 3.97 / 3.09）；
+    //   SubagentStop（DESIGN.md「5-slot 覆盖轨」实测 3.97 / 3.09）；
     // - `missing` 是 `text-2` 的 1px 空壳 + 斜杠；亮 / 暗分别是 5.54 / 7.03。
     //
     // 四对的真实底都是 PackCardView 的糖果盘 `surface`。`ClaudioGUI` 是不可 import 的 executable
@@ -197,10 +201,10 @@ func runContrastSuites() {
         background: String
     ) {
         let ratio = contrastRatio(foreground, background)
-        suite("contrast: 4-slot 覆盖轨 \(name) vs surface is ≥ 3:1 (DESIGN.md「4-slot 覆盖轨」)") {
+        suite("contrast: 5-slot 覆盖轨 \(name) vs surface is ≥ 3:1 (DESIGN.md「5-slot 覆盖轨」)") {
             expect(
                 ratio >= 3.0,
-                "4-slot 覆盖轨 \(name) must be ≥ 3:1, got \(ratio) — missing 必须用 text-2，"
+                "5-slot 覆盖轨 \(name) must be ≥ 3:1, got \(ratio) — missing 必须用 text-2，"
                     + "present 必须取该主题最弱事件色（WCAG 1.4.11 non-text）")
         }
     }
@@ -331,7 +335,7 @@ func runContrastSuites() {
 //   1. 把 ``compositedHex(_:over:alpha:)`` 本身钉死（它是所有半透明底的量尺；量尺错了，下面每一条
 //      基于它的断言都会给出「合理而错误」的结论）；
 //   2. 对**真实渲染的那一对**下 ≥3:1：`contrastRatio(事件色, compositedHex(事件色, over: panel, 0.15))`
-//      —— 明暗 × 四事件 = 8 对；
+//      —— 明暗 × 五事件 = 10 对；
 //   3. **可见性护栏**：tile 底自己对面板必须 ≥1.10:1 —— 光看字形对比度达标是不够的，tile 还得**看得见**。
 //      上一轮正是漏了这一点才把 tile 弄没了；
 //   4. **反向断言**：`surface-2` 当 tile 底会掉到 1.0006:1，远低于那条 1.10 的下限 —— 把那条错路
@@ -383,7 +387,7 @@ private func runCompositedBackgroundSuites() {
     // 自染底把前景和背景往同一个色相上拉，是这套体系里最苛刻的一对（比对纯 panel 难得多），
     // 所以两个亮色事件色为它专门调深过；见 ``ClaudioColorHex/stopLight``。
     //
-    // 这 8 条断言取代了上一版那条「自染底**不满足** ≥3:1」的反向护栏——那条护栏当时是为了防止 tile
+    // 这 10 条断言取代了上一版那条「自染底**不满足** ≥3:1」的反向护栏——那条护栏当时是为了防止 tile
     // 改回自染，而自染现在才是正确实现（DESIGN.md 要求 tile 是事件色），前提整个反了过来。
     struct SelfTintedTilePair {
         let name: String
@@ -392,6 +396,8 @@ private func runCompositedBackgroundSuites() {
     }
 
     let tilePairs: [SelfTintedTilePair] = [
+        SelfTintedTilePair(name: "TaskStart dark", glyph: ClaudioColorHex.taskStartDark, panel: ClaudioColorHex.panelDark),
+        SelfTintedTilePair(name: "TaskStart light · 糖果盘最深底", glyph: ClaudioColorHex.taskStartLight, panel: ClaudioColorHex.panelDeepLight),
         SelfTintedTilePair(name: "Stop dark", glyph: ClaudioColorHex.stopDark, panel: ClaudioColorHex.panelDark),
         SelfTintedTilePair(name: "Stop light · 糖果盘最深底", glyph: ClaudioColorHex.stopLight, panel: ClaudioColorHex.panelDeepLight),
         SelfTintedTilePair(name: "StopFailure dark", glyph: ClaudioColorHex.stopFailureDark, panel: ClaudioColorHex.panelDark),
@@ -428,7 +434,7 @@ private func runCompositedBackgroundSuites() {
     // 一块 DESIGN.md 明确要求存在的 24pt 事件色 tile 被静悄悄地量没了，而所有断言全绿。
     //
     // 所以对比度这件事有**两个**方向，缺一不可：字形要从底上跳出来（≥3:1），底也要从面板上跳出来
-    // （这条：≥1.10:1；四事件明暗实测 1.14–1.32，亮色一律 ~1.20）。1.10 是一条「肉眼能分辨出这里有块
+    // （这条：≥1.10:1；五事件明暗实测均过门槛，亮色约 1.18–1.23）。1.10 是一条「肉眼能分辨出这里有块
     // 色板」的经验下限，不是 WCAG 的门槛（WCAG 根本不管装饰性表面），它的作用是：任何把 tile 底往面板
     // 色上拉平的改动，都必须先来改这条数字，而不是默默地让 tile 消失。
     for pair in tilePairs {

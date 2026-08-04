@@ -404,7 +404,7 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             panel.contains("eventHostCoveragePresentation(")
                 && panel.contains("matrix: hostIntegrations.content.matrix"),
-            "四条事件行必须从共享 manager 矩阵投影宿主覆盖")
+            "五条事件行必须从共享 manager 矩阵投影宿主覆盖")
         expect(
             row.contains("Text(hostCoverage?.visibleText")
                 && row.contains("hostCoverage.accessibilityLabel"),
@@ -510,7 +510,7 @@ func runIntegrationsWindowWiringSuites() {
             "重新检测与连接动作必须经注入 handler 回到共享 manager seam")
     }
 
-    suite("IntegrationsWindow layout：紧凑双宿主摘要；标准 4×2 表格，最大文字纵向双宿主行；只有纵向滚动") {
+    suite("IntegrationsWindow layout：紧凑双宿主摘要；标准 5×2 表格，最大文字纵向双宿主行；只有纵向滚动") {
         guard
             let view = integrationsSource(
                 "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift")
@@ -738,7 +738,7 @@ func runIntegrationsWindowWiringSuites() {
                 && view.contains("ClaudioTheme.error(colorScheme)")
                 && view.contains("ClaudioTheme.clay(colorScheme)")
                 && view.contains("ClaudioEventGlyph(event:"),
-            "窗口状态与四事件颜色必须使用语义 token")
+            "窗口状态与五事件颜色必须使用语义 token")
         for forbidden in [
             "Color(red:", "Color.white", "Color.black", ".foregroundColor(.red)",
             ".background(.white)",

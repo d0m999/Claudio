@@ -496,7 +496,7 @@ public func inspectClaudeSnapshot(
         case .success(.configured(let id)):
             configuration = .configured
             installationID = id
-        case .success(.partial(let missing, let hasLegacyEntries)):
+        case .success(.partial(_, let missing, let hasLegacyEntries)):
             if hasLegacyEntries, missing.count < Event.allCases.count {
                 configuration = .conflict(
                     reason:
@@ -555,18 +555,6 @@ public func inspectCodexSnapshot(
         configuration = .unreadable(reason: reason)
         installationID = nil
     }
-    let activationNativeEvents: [String]
-    if case .known(.migrated, _, _) = wrapperContext {
-        // 旧 notify wrapper 在 Codex `/hooks` 信任之前就会执行 Stop。它的真实
-        // 回执只能证明 wrapper 分支活着，不能证明 hooks.json 中另外两条已获信任；
-        // 因此 migrated wrapper 必须由 PermissionRequest/SubagentStop 首次点亮。
-        activationNativeEvents = HostCapabilityCatalog.bindings(for: .codex)
-            .compactMap(\.nativeEvent)
-            .filter { $0 != "Stop" }
-    } else {
-        activationNativeEvents = HostCapabilityCatalog.bindings(for: .codex)
-            .compactMap(\.nativeEvent)
-    }
     return makeIntegrationSnapshot(
         host: .codex,
         runtime: runtime,
@@ -574,8 +562,7 @@ public func inspectCodexSnapshot(
         configuration: configuration,
         installationID: installationID,
         file: environment.hooksFile,
-        receiptStore: environment.receiptStore,
-        activationNativeEvents: activationNativeEvents)
+        receiptStore: environment.receiptStore)
 }
 
 private func codexConfigurationStatus(
@@ -639,8 +626,7 @@ private func makeIntegrationSnapshot(
     configuration: HostConfigurationState,
     installationID: UUID?,
     file: URL,
-    receiptStore: HostHookReceiptStore,
-    activationNativeEvents: [String]? = nil
+    receiptStore: HostHookReceiptStore
 ) -> HostIntegrationSnapshot {
     let writability: HostConfigWritability
     if leafNodeIsSymbolicLink(at: file),
@@ -659,20 +645,32 @@ private func makeIntegrationSnapshot(
     }
 
     let activation: HostActivationEvidence
+    let latestReceipt: HostReceiptEvidence?
     if let installationID, configuration == .configured {
-        let evidence = (activationNativeEvents
-            ?? HostCapabilityCatalog.bindings(for: host).compactMap(\.nativeEvent))
+        let supportedNativeEvents = HostCapabilityCatalog.bindings(for: host)
+            .filter(\.isAudibleCapability)
+            .compactMap(\.nativeEvent)
+        latestReceipt = supportedNativeEvents
             .compactMap { nativeEvent in
-                receiptStore.activationEvidence(
+                receiptStore.receiptEvidence(
                     host: host,
                     nativeEvent: nativeEvent,
                     installationID: installationID)
             }
             .max { $0.timestamp < $1.timestamp }
-        activation = evidence.map(HostActivationEvidence.observed)
+        let taskStartNativeEvent = HostCapabilityCatalog.binding(host: host, event: .taskStart)?
+            .nativeEvent
+        let taskStartEvidence = taskStartNativeEvent.flatMap { nativeEvent in
+            receiptStore.receiptEvidence(
+                host: host,
+                nativeEvent: nativeEvent,
+                installationID: installationID)
+        }
+        activation = taskStartEvidence.map(HostActivationEvidence.observed)
             ?? .awaitingReceipt(installationID: installationID)
     } else {
         activation = .none
+        latestReceipt = nil
     }
     return HostIntegrationSnapshot(
         host: host,
@@ -681,6 +679,7 @@ private func makeIntegrationSnapshot(
         configuration: configuration,
         writability: writability,
         activation: activation,
+        latestReceipt: latestReceipt,
         installationID: installationID)
 }
 

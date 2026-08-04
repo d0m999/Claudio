@@ -100,7 +100,7 @@ public enum CodexHooksTransform {
                 return CodexHooksTransformResult(
                     data: data, status: loaded.status, changed: false)
             case .complete:
-                if !loaded.hasRelocatedOwnedCommands {
+                if !loaded.hasRelocatedOwnedCommands, !loaded.hasLegacyPromptNotification {
                     return CodexHooksTransformResult(
                         data: data, status: loaded.status, changed: false)
                 }
@@ -144,6 +144,9 @@ public enum CodexHooksTransform {
             let chosenID: UUID
             let missingEvents: [String]
             switch loaded.status {
+            case .complete(let existingID):
+                chosenID = existingID
+                missingEvents = []
             case .partial(let existingID, let missing):
                 chosenID = existingID
                 missingEvents = missing
@@ -157,6 +160,8 @@ public enum CodexHooksTransform {
 
             var root = loaded.root
             var hooks = (root[hooksKey] as? [String: Any]) ?? [:]
+            let removedLegacyPromptCount = removeLegacyPromptNotification(
+                from: &hooks, claudioRoot: claudioRoot)
             for nativeEvent in missingEvents {
                 guard
                     let semanticEvent = HostCapabilityCatalog.semanticEvent(
@@ -196,7 +201,10 @@ public enum CodexHooksTransform {
                     changed: false)
             }
             return CodexHooksTransformResult(
-                data: encoded, status: .complete(installationID: chosenID), changed: true)
+                data: encoded,
+                status: .complete(installationID: chosenID),
+                changed: true,
+                removedCount: removedLegacyPromptCount)
         }
     }
 
@@ -289,6 +297,7 @@ public enum CodexHooksTransform {
         let root: [String: Any]
         let status: CodexHooksConfigurationStatus
         let hasRelocatedOwnedCommands: Bool
+        let hasLegacyPromptNotification: Bool
     }
 
     private struct SchemaError: Error {
@@ -343,13 +352,15 @@ public enum CodexHooksTransform {
                     status: configurationStatus(
                         installationIDs: installationIDs,
                         presentEventCounts: presentEventCounts),
-                    hasRelocatedOwnedCommands: false))
+                    hasRelocatedOwnedCommands: false,
+                    hasLegacyPromptNotification: false))
         }
         guard let hooks = rawHooks as? [String: Any] else {
             return .failure(SchemaError(reason: "Codex hooks.json 的 hooks 必须是对象"))
         }
 
         var hasRelocatedOwnedCommands = false
+        var hasLegacyPromptNotification = false
 
         for (eventName, rawGroups) in hooks {
             guard let groups = rawGroups as? [Any] else {
@@ -405,6 +416,12 @@ public enum CodexHooksTransform {
                     guard (inner[typeKey] as? String) == commandType,
                         let command = inner[commandKey] as? String
                     else { continue }
+                    if eventName == "UserPromptSubmit",
+                        matchedClaudioEvent(
+                            inHookCommand: command, claudioRoot: claudioRoot) == .notification
+                    {
+                        hasLegacyPromptNotification = true
+                    }
                     let candidate: MatchedHostHookCommand?
                     if let claudioBinaryPath {
                         candidate = matchedCurrentHostHookCommand(
@@ -455,7 +472,53 @@ public enum CodexHooksTransform {
                 status: configurationStatus(
                     installationIDs: installationIDs,
                     presentEventCounts: presentEventCounts),
-                hasRelocatedOwnedCommands: hasRelocatedOwnedCommands))
+                hasRelocatedOwnedCommands: hasRelocatedOwnedCommands,
+                hasLegacyPromptNotification: hasLegacyPromptNotification))
+    }
+
+    /// 显式 connect / repair / upgrade 才清理的旧提示词映射。只认当前 Claudio root 下
+    /// `play notification` 的精确旧命令；其它事件、其它用户路径、look-alike、第三方 entry、
+    /// 原本为空的 group 与所有保留项的相对顺序都不动。
+    private static func removeLegacyPromptNotification(
+        from hooks: inout [String: Any], claudioRoot: String
+    ) -> Int {
+        let nativeEvent = "UserPromptSubmit"
+        guard let groups = hooks[nativeEvent] as? [Any] else { return 0 }
+
+        var removed = 0
+        var retainedGroups: [Any] = []
+        for rawGroup in groups {
+            guard var group = rawGroup as? [String: Any],
+                let innerHooks = group[hooksKey] as? [Any]
+            else {
+                retainedGroups.append(rawGroup)
+                continue
+            }
+            var groupRemoved = 0
+            let retainedInner = innerHooks.filter { rawInner in
+                guard let inner = rawInner as? [String: Any],
+                    (inner[typeKey] as? String) == commandType,
+                    let command = inner[commandKey] as? String,
+                    matchedClaudioEvent(
+                        inHookCommand: command, claudioRoot: claudioRoot) == .notification
+                else { return true }
+                groupRemoved += 1
+                removed += 1
+                return false
+            }
+            if retainedInner.isEmpty, groupRemoved > 0 {
+                continue
+            }
+            if groupRemoved > 0 { group[hooksKey] = retainedInner }
+            retainedGroups.append(group)
+        }
+
+        if retainedGroups.isEmpty {
+            hooks.removeValue(forKey: nativeEvent)
+        } else if removed > 0 {
+            hooks[nativeEvent] = retainedGroups
+        }
+        return removed
     }
 
     private static func configurationStatus(

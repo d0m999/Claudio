@@ -66,7 +66,7 @@ public enum ClaudioColorHex {
 
     // MARK: UI 语义色（DESIGN.md「UI 语义色（提示 / 校验，独立于事件层）」表）
 
-    /// `success`——已收到当前代次真实回执的宿主就绪状态。
+    /// `success`——已收到当前代次任务开始激活回执的宿主就绪状态。
     ///
     /// 和下面 `warning` vs `stopFailure` 完全同构的一次**刻意分叉**：UI 语义 `success` 仍是 DESIGN.md
     /// 原值 `#2FA24E`，而 `Stop` 的**事件**绿被调深到 `#288B43`（见 `stopLight`）。原因是两者画在
@@ -107,13 +107,21 @@ public enum ClaudioColorHex {
     public static let warningLight = "B87000"
 
     /// `error`（真红）——**只**给 App 自身真错误（DESIGN.md「错误态用色（关键约束）」），
-    /// 绝不用于四事件层（`StopFailure` 永远琥珀）。
+    /// 绝不用于声音事件层（`StopFailure` 永远琥珀）。
     /// 且（修复③决议）：真红**只做图标**，不做正文——亮色 `#E0453A` 对面板只有 4.07:1，
     /// 不过正文 ≥4.5:1；报错**文案**一律用 `text-2`（5.54:1）。这条契约由 `ContrastSuite` 钉死。
     public static let errorDark = "FF453A"
     public static let errorLight = "E0453A"
 
-    // MARK: 四事件语义色（DESIGN.md「四事件语义色」表）
+    /// `info`——任务开始使用的 UI 信息蓝。事件 token 通过别名绑定到它，避免视图
+    /// 或不同主题层各自手抄一份相同颜色。
+    public static let infoDark = "0A84FF"
+    public static let infoLight = "0A72D0"
+
+    // MARK: 五事件语义色（DESIGN.md「五事件语义色」表）
+
+    public static let taskStartDark = infoDark
+    public static let taskStartLight = infoLight
 
     // ⚠️ 下面两个**亮色**事件色比 DESIGN.md 的原始值更深。这不是审美选择，是一条对比度硬约束
     // 推导出来的结果，改回去测试就会红——先读完这段再动它们：
@@ -129,7 +137,7 @@ public enum ClaudioColorHex {
     //   · StopFailure `#C87A00` → `#AC6900`   字形对真实 tile 底 2.82 → **3.59:1** ✅
     //   · Notification `#C4633C`（= clay，不动，招牌绑定）           3.32:1 ✅
     //   · SubagentStop `#5B59D6`（不动）                            4.37:1 ✅
-    //   · 暗色四事件全部不动（本来就宽裕，全局最差是暗色 SubagentStop 的 3.06:1）
+    //   · 原四个 lifecycle 事件的暗色全部不动（本来就宽裕，全局最差是暗色 SubagentStop 的 3.06:1）
     //
     // 历史教训，两条都别再踩：
     //   1. 上一次的 `#E08600 → #C87A00` **没达成它的目的**。当时 `ContrastSuite` 断的是「字形 vs 纯

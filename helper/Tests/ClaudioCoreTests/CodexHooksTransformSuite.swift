@@ -5,6 +5,7 @@ private let codexTransformRoot = "/Users/tester/.claudio"
 private let codexTransformBinary = "\(codexTransformRoot)/bin/claudio"
 private let codexTransformID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
 private let codexOtherID = UUID(uuidString: "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE")!
+private let codexNativeEvents = ["UserPromptSubmit", "Stop", "PermissionRequest", "SubagentStop"]
 
 @MainActor
 private func codexFixtureData(_ source: String) -> Data {
@@ -51,7 +52,7 @@ func runCodexHooksTransformSuites() {
     suite("Codex hooks connect：清理仅旧 helper 路径 modern hooks，并保留第三方数组顺序") {
         let staleBinary = "\(codexTransformRoot)/libexec/claudio"
         var hooks: [String: Any] = [:]
-        for event in ["Stop", "PermissionRequest", "SubagentStop"] {
+        for event in codexNativeEvents {
             let stale = hostIntegrationHookCommand(
                 host: .codex,
                 nativeEvent: event,
@@ -78,14 +79,14 @@ func runCodexHooksTransformSuites() {
             claudioRoot: codexTransformRoot)
 
         expect(repaired.changed, "仅 stale modern 必须触发清理与 canonical 写入")
-        expect(repaired.removedCount == 3, "三条旧路径 Codex callback 必须全部被清理")
+        expect(repaired.removedCount == 4, "四条旧路径 Codex callback 必须全部被清理")
         expect(
             repaired.status == .complete(installationID: codexTransformID),
             "修复后必须形成调用方请求的 current installation")
         let object = codexJSONObject(repaired.data)
         expect(codexJSONEqual(object?["notify"], originalObject["notify"]), "notify 必须保留")
         expect(codexJSONEqual(object?["trust"], originalObject["trust"]), "trust 必须保留")
-        for event in ["Stop", "PermissionRequest", "SubagentStop"] {
+        for event in codexNativeEvents {
             let groups = codexEventGroups(object, event)
             expect(
                 groups.compactMap { $0["matcher"] as? String } == ["before", "after"],
@@ -143,7 +144,7 @@ func runCodexHooksTransformSuites() {
             repaired.status == .complete(installationID: codexTransformID),
             "清理额外 stale 时必须保留健康 current installation ID")
         let object = codexJSONObject(repaired.data)
-        for event in ["Stop", "PermissionRequest", "SubagentStop"] {
+        for event in codexNativeEvents {
             let commands = codexCommands(codexEventGroups(object, event))
             let owned = commands.compactMap {
                 matchedHostHookCommand(inHookCommand: $0, claudioRoot: codexTransformRoot)
@@ -187,7 +188,7 @@ func runCodexHooksTransformSuites() {
             "错误必须指出 relocated 与实际落点，got \(reason)")
     }
 
-    suite("Codex hooks connect：全新配置只新增三事件并保留顶层未知配置") {
+    suite("Codex hooks connect：全新配置只新增四个真实事件并保留顶层未知配置") {
         let original = codexFixtureData(
             #"{"notify":["third-party"],"trust":{"opaque":"keep"},"theme":"night"}"#)
         let result = CodexHooksTransform.connect(
@@ -200,7 +201,7 @@ func runCodexHooksTransformSuites() {
         expect(result.removedCount == 0, "connect 不得报告移除")
         expect(
             result.status == .complete(installationID: codexTransformID),
-            "三条 hook 必须使用同一 installation ID，got \(result.status)")
+            "四条 hook 必须使用同一 installation ID，got \(result.status)")
 
         let object = codexJSONObject(result.data)
         let originalObject = codexJSONObject(original)
@@ -211,12 +212,12 @@ func runCodexHooksTransformSuites() {
                 "connect 必须保留顶层 \(key)")
         }
 
-        let expectedEvents = ["Stop", "PermissionRequest", "SubagentStop"]
+        let expectedEvents = codexNativeEvents
         let hooks = object?["hooks"] as? [String: Any]
         let actualEventNames = hooks?.keys.map { $0 } ?? []
         expect(
             Set(actualEventNames) == Set(expectedEvents),
-            "Codex 只能安装三种真实事件，got \(actualEventNames.sorted())")
+            "Codex 只能安装四种真实事件，got \(actualEventNames.sorted())")
         expect(hooks?["StopFailure"] == nil, "Codex 不得伪造 StopFailure")
 
         for event in expectedEvents {
@@ -257,6 +258,9 @@ func runCodexHooksTransformSuites() {
         let subagent = hostIntegrationHookCommand(
             host: .codex, nativeEvent: "SubagentStop", installationID: codexTransformID,
             claudioBinaryPath: codexTransformBinary)!
+        let prompt = hostIntegrationHookCommand(
+            host: .codex, nativeEvent: "UserPromptSubmit", installationID: codexTransformID,
+            claudioBinaryPath: codexTransformBinary)!
         let partial = codexFixtureData(
             #"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\#(stop)"}]}]}}"#)
         expect(
@@ -266,11 +270,11 @@ func runCodexHooksTransformSuites() {
                 claudioBinaryPath: codexTransformBinary)
                 == .partial(
                     installationID: codexTransformID,
-                    missingNativeEvents: ["PermissionRequest", "SubagentStop"]),
+                    missingNativeEvents: ["UserPromptSubmit", "PermissionRequest", "SubagentStop"]),
             "单条 Stop 必须报告有序缺口")
 
         let complete = codexFixtureData(
-            #"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"\#(stop)"}]}],"PermissionRequest":[{"hooks":[{"type":"command","command":"\#(permission)"}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"\#(subagent)"}]}]}}"#
+            #"{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"\#(prompt)"}]}],"Stop":[{"hooks":[{"type":"command","command":"\#(stop)"}]}],"PermissionRequest":[{"hooks":[{"type":"command","command":"\#(permission)"}]}],"SubagentStop":[{"hooks":[{"type":"command","command":"\#(subagent)"}]}]}}"#
         )
         expect(
             CodexHooksTransform.inspect(
@@ -278,7 +282,7 @@ func runCodexHooksTransformSuites() {
                 claudioRoot: codexTransformRoot,
                 claudioBinaryPath: codexTransformBinary)
                 == .complete(installationID: codexTransformID),
-            "三条同代次 hook 必须 complete")
+            "四条同代次 hook 必须 complete")
 
         let conflictingPermission = hostIntegrationHookCommand(
             host: .codex, nativeEvent: "PermissionRequest", installationID: codexOtherID,
@@ -359,6 +363,7 @@ func runCodexHooksTransformSuites() {
             codexCommands(permissionGroups).first == "third-permission",
             "第三方 PermissionRequest group 必须保持首位")
         expect(codexEventGroups(object, "SubagentStop").count == 1, "缺失事件必须补一组")
+        expect(codexEventGroups(object, "UserPromptSubmit").count == 1, "任务开始必须补一组")
         expect(codexEventGroups(object, "AfterTool").count == 1, "无关事件必须原样保留")
 
         let repeated = CodexHooksTransform.connect(
@@ -369,6 +374,85 @@ func runCodexHooksTransformSuites() {
         expect(!repeated.changed, "complete 配置重复 connect 必须 no-op")
         expect(repeated.data == connected.data, "no-op 必须返回输入原字节，不能重排 JSON")
         expect(repeated.status == connected.status, "no-op 状态必须稳定")
+    }
+
+    suite("Codex hooks upgrade：只删除当前 root 的旧提示词通知，保留第三方、look-alike、空 group 与顺序") {
+        let canonical = CodexHooksTransform.connect(
+            nil,
+            installationID: codexTransformID,
+            claudioBinaryPath: codexTransformBinary,
+            claudioRoot: codexTransformRoot)
+        guard var object = codexJSONObject(canonical.data),
+            var hooks = object["hooks"] as? [String: Any],
+            let canonicalPromptGroup = (hooks["UserPromptSubmit"] as? [Any])?.first,
+            let canonicalPrompt = codexCommands(
+                codexEventGroups(object, "UserPromptSubmit")).first
+        else {
+            expect(false, "测试前提：必须先生成一条 canonical UserPromptSubmit")
+            return
+        }
+
+        let legacyNotification = claudioHookCommand(
+            for: .notification, claudioBinaryPath: codexTransformBinary)
+        let legacyStop = claudioHookCommand(
+            for: .stop, claudioBinaryPath: codexTransformBinary)
+        let foreignNotification = "/Users/other/.claudio/bin/claudio play notification"
+        let lookAlike = "\(legacyNotification) --extra"
+        hooks["UserPromptSubmit"] = [
+            ["matcher": "empty-third-party", "hooks": []],
+            [
+                "matcher": "shared",
+                "hooks": [
+                    ["type": "command", "command": "third-before"],
+                    ["type": "command", "command": legacyNotification],
+                    ["type": "command", "command": foreignNotification],
+                    ["type": "command", "command": lookAlike],
+                    ["type": "command", "command": legacyStop],
+                    ["type": "command", "command": "third-after"],
+                ],
+            ],
+            canonicalPromptGroup,
+            [
+                "matcher": "legacy-only",
+                "hooks": [["type": "command", "command": legacyNotification]],
+            ],
+        ]
+        object["hooks"] = hooks
+        let mixed = try! JSONSerialization.data(
+            withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
+
+        let upgraded = CodexHooksTransform.connect(
+            mixed,
+            installationID: codexOtherID,
+            claudioBinaryPath: codexTransformBinary,
+            claudioRoot: codexTransformRoot)
+        expect(upgraded.changed, "完整 modern 夹带旧 prompt notification 仍必须显式升级")
+        expect(upgraded.removedCount == 2, "两条精确旧 prompt notification 必须被清理")
+        expect(
+            upgraded.status == .complete(installationID: codexTransformID),
+            "纯清理升级必须保留唯一现有 installation ID")
+
+        let upgradedObject = codexJSONObject(upgraded.data)
+        let promptGroups = codexEventGroups(upgradedObject, "UserPromptSubmit")
+        expect(
+            promptGroups.compactMap { $0["matcher"] as? String }
+                == ["empty-third-party", "shared"],
+            "空 group、共享 group 与相对顺序必须保留；仅旧命令独占 group 应删除")
+        expect(
+            codexCommands(promptGroups)
+                == [
+                    "third-before", foreignNotification, lookAlike, legacyStop, "third-after",
+                    canonicalPrompt,
+                ],
+            "第三方、其它用户路径、look-alike、其它 legacy 事件与 canonical 顺序必须逐项保留")
+
+        let repeated = CodexHooksTransform.connect(
+            upgraded.data,
+            installationID: codexOtherID,
+            claudioBinaryPath: codexTransformBinary,
+            claudioRoot: codexTransformRoot)
+        expect(!repeated.changed, "清理后的完整 Codex 配置重复 connect 必须 no-op")
+        expect(repeated.data == upgraded.data, "重复 connect 必须逐字节不改")
     }
 
     suite("Codex hooks schema：hooks/event/group/inner 任一层畸形都失败关闭且原字节不变") {
@@ -434,6 +518,9 @@ func runCodexHooksTransformSuites() {
         let subagent = hostIntegrationHookCommand(
             host: .codex, nativeEvent: "SubagentStop", installationID: codexTransformID,
             claudioBinaryPath: codexTransformBinary)!
+        let prompt = hostIntegrationHookCommand(
+            host: .codex, nativeEvent: "UserPromptSubmit", installationID: codexTransformID,
+            claudioBinaryPath: codexTransformBinary)!
         let claudeStop = hostIntegrationHookCommand(
             host: .claudeCode, nativeEvent: "Stop", installationID: codexTransformID,
             claudioBinaryPath: codexTransformBinary)!
@@ -441,14 +528,15 @@ func runCodexHooksTransformSuites() {
             host: .codex, nativeEvent: "Stop", installationID: codexTransformID,
             claudioBinaryPath: "/tmp/.claudio/bin/claudio")!
         let fixture = codexFixtureData(
-            #"{"notify":["keep"],"trust":{"opaque":true},"hooks":{"Stop":[{"matcher":"empty-third-party","hooks":[]},{"ownedMeta":"drop-with-owned-group","hooks":[{"type":"command","command":"\#(stop)"}]},{"matcher":"shared","hooks":[{"type":"command","command":"third-before"},{"type":"command","command":"\#(stop)"},{"type":"command","command":"\#(claudeStop)"},{"type":"command","command":"\#(foreignStop)"},{"type":"command","command":"\#(stop) --extra"},{"type":"command","command":"third-after"}]}],"PermissionRequest":[{"hooks":[{"type":"command","command":"\#(permission)"}]}],"SubagentStop":[{"hooks":[{"command":"\#(subagent)"}]}],"AfterTool":[{"hooks":[{"type":"command","command":"third-after-tool"}]}]}}"#
+            #"{"notify":["keep"],"trust":{"opaque":true},"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"\#(prompt)"}]}],"Stop":[{"matcher":"empty-third-party","hooks":[]},{"ownedMeta":"drop-with-owned-group","hooks":[{"type":"command","command":"\#(stop)"}]},{"matcher":"shared","hooks":[{"type":"command","command":"third-before"},{"type":"command","command":"\#(stop)"},{"type":"command","command":"\#(claudeStop)"},{"type":"command","command":"\#(foreignStop)"},{"type":"command","command":"\#(stop) --extra"},{"type":"command","command":"third-after"}]}],"PermissionRequest":[{"hooks":[{"type":"command","command":"\#(permission)"}]}],"SubagentStop":[{"hooks":[{"command":"\#(subagent)"}]}],"AfterTool":[{"hooks":[{"type":"command","command":"third-after-tool"}]}]}}"#
         )
 
         let result = CodexHooksTransform.disconnect(fixture, claudioRoot: codexTransformRoot)
         expect(result.changed, "存在当前 root Codex entries 时必须改变")
         expect(
-            result.removedCount == 4, "两个 Stop + PermissionRequest + typeless SubagentStop 应移除 4 条")
-        expect(result.status == .absent, "扫完当前 root 的三事件后状态必须 absent")
+            result.removedCount == 5,
+            "UserPromptSubmit + 两个 Stop + PermissionRequest + typeless SubagentStop 应移除 5 条")
+        expect(result.status == .absent, "扫完当前 root 的四事件后状态必须 absent")
 
         let object = codexJSONObject(result.data)
         expect(
@@ -469,6 +557,7 @@ func runCodexHooksTransformSuites() {
         let hooks = object?["hooks"] as? [String: Any]
         expect(hooks?["PermissionRequest"] == nil, "被 Claudio 清空的 PermissionRequest event 应删除")
         expect(hooks?["SubagentStop"] == nil, "typeless Claudio leftover 也必须可清扫")
+        expect(hooks?["UserPromptSubmit"] == nil, "任务开始 callback 必须可清扫")
         expect(codexEventGroups(object, "AfterTool").count == 1, "无关 event 必须保留")
 
         let repeated = CodexHooksTransform.disconnect(
@@ -478,7 +567,7 @@ func runCodexHooksTransformSuites() {
         expect(repeated.data == result.data, "no-op disconnect 必须返回输入原字节")
     }
 
-    suite("Codex hooks connect：已知 wrapper 外管 Stop 时只写两事件且外部 UUID 参与一致性") {
+    suite("Codex hooks connect：已知 wrapper 外管 Stop 时只写其余三事件且外部 UUID 参与一致性") {
         let original = codexFixtureData(
             #"{"notify":["legacy-wrapper"],"trust":{"opaque":"keep"},"hooks":{"Stop":[{"hooks":[{"type":"command","command":"third-party-stop"}]}]}}"#
         )
@@ -490,7 +579,7 @@ func runCodexHooksTransformSuites() {
             externallyManagedNativeEvents: ["Stop"],
             externalInstallationID: codexTransformID)
 
-        expect(result.changed, "external Stop 下仍须补 PermissionRequest/SubagentStop")
+        expect(result.changed, "external Stop 下仍须补 UserPromptSubmit/PermissionRequest/SubagentStop")
         expect(
             result.status == .complete(installationID: codexTransformID),
             "complete 必须沿用并报告 wrapper installation ID")
@@ -498,7 +587,7 @@ func runCodexHooksTransformSuites() {
         expect(
             codexCommands(codexEventGroups(object, "Stop")) == ["third-party-stop"],
             "external Stop 时不得再追加 Claudio Stop 造成双响")
-        for event in ["PermissionRequest", "SubagentStop"] {
+        for event in ["UserPromptSubmit", "PermissionRequest", "SubagentStop"] {
             let matches = codexCommands(codexEventGroups(object, event)).compactMap {
                 matchedHostHookCommand(inHookCommand: $0, claudioRoot: codexTransformRoot)
             }

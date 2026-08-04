@@ -9,7 +9,7 @@ import Foundation
 /// reusing the exact same audited primitives (``resolvePackDirectory``, ``loadPackManifest``,
 /// ``safePackFileURL``), never reinventing pack-safety logic. The `partial` count itself,
 /// though, is derived from the card's present-event set (see ``packCard``'s ``PackCard/presentEvents``)
-/// rather than `checkPackIntegrity`'s declared-file-missing list, so the badge count, the 4-slot
+/// rather than `checkPackIntegrity`'s declared-file-missing list, so the badge count, the 5-slot
 /// coverage track, and the accessibility "缺少：…" list are one source of truth (see
 /// `packCompletionState`).
 ///
@@ -18,18 +18,18 @@ import Foundation
 /// true before that section landed). ``PackGalleryView``（`ClaudioGUI`）renders it; where a pixel
 /// choice still isn't pinned by DESIGN.md, that file's inline comments call it out same as before.
 public enum PackCardState: Sendable, Equatable {
-    /// All four v1 events resolve to ``CoverageState/present(fileName:)`` for this pack —
+    /// All five current events resolve to ``CoverageState/present(fileName:)`` for this pack —
     /// i.e. ``PackCard/presentEvents`` == every ``Event/allCases``. A pack that legally leaves
-    /// some events `unmapped` (silent-fallback, per DESIGN.md) reads as ``partial(present:total:)``
+    /// some events `unmapped` (intentionally silent, per DESIGN.md) reads as ``partial(present:total:)``
     /// with a "缺 N 个" meta badge, matching DESIGN.md「包行四态」— NOT `.complete`. (Note:
     /// `doctor`'s own ``PackIntegrityStatus/incomplete(packID:missingFiles:)`` still keys off
     /// *declared*-file presence for its diagnostic list; the pack CARD's completeness
     /// deliberately keys off the same present-event set its coverage track renders, so the
     /// badge, the track, and the accessibility label never disagree.)
     case complete
-    /// Fewer than all four v1 events are ``CoverageState/present(fileName:)``. `present` is
-    /// exactly ``PackCard/presentEvents``'s count (the number of lit slots in the row's 4-slot
-    /// coverage track), `total` is always ``Event/allCases``'s count (`4` in v1) — the two are
+    /// Fewer than all five current events are ``CoverageState/present(fileName:)``. `present` is
+    /// exactly ``PackCard/presentEvents``'s count (the number of lit slots in the row's 5-slot
+    /// coverage track), `total` is always ``Event/allCases``'s count (`5`) — the two are
     /// derived from ONE source, so `present` can never exceed `total` or go negative, and always
     /// agrees with the track and the "缺少：…" accessibility list.
     case partial(present: Int, total: Int)
@@ -48,7 +48,7 @@ public enum PackCardState: Sendable, Equatable {
 /// neither can independently drift from the other.
 public enum PackRowTrailingSlot: Sendable, Equatable {
     /// `complete`/`partial` — the manifest decoded, so ``PackCard/presentEvents`` is real
-    /// per-event data the 4-slot track can render for real.
+    /// per-event data the 5-slot track can render for real.
     case track
     /// `broken` — nothing was read (no directory, or an unreadable/undecodable manifest), so
     /// there is no per-event coverage to show; the row renders a status indicator here instead,
@@ -745,7 +745,7 @@ private func buildPackCard(
             id: id, userPacksDirectory: environment.userPacksDirectory,
             bundledPacksDirectory: environment.bundledPacksDirectory)
     else {
-        // 目录都没有 → 四个事件全 `.unmapped`，present 集合必为空（这正是原来
+        // 目录都没有 → 五个事件全 `.unmapped`，present 集合必为空（这正是原来
         // `packCoverage(packID:)` 在同一情形下返回的东西，只是不必再为此白跑一趟 IO）。
         return PackCard(
             id: id, name: nil, isCC0: false,
@@ -841,17 +841,17 @@ private func packMetadata(manifestData: Data) -> (name: String?, isCC0: Bool) {
 
 /// Derives the card's completeness from `presentEventCount` — the number of ``Event/allCases``
 /// that resolve to ``CoverageState/present(fileName:)`` for this pack (``presentEventSet``, the
-/// SAME set the card's 2×2 glyph grid and its "缺少：…" VoiceOver list read from).
+/// SAME set the card's 5-slot coverage track and its "缺少：…" VoiceOver list read from).
 ///
-/// This deliberately counts over **all four v1 events**, NOT over `manifest.events.values`
-/// (the declared keys). An earlier version used `4 - (declared files missing)`, which made
+/// This deliberately counts over **all five current events**, NOT over `manifest.events.values`
+/// (the declared keys). An earlier version used `total - (declared files missing)`, which made
 /// `present` disagree with `presentEvents` whenever a pack mixed an unmapped event with a
-/// declared-but-missing file (grid lit 1, badge said "3/4", VoiceOver listed 3 missing) — and,
+/// declared-but-missing file (grid lit 1, badge said "4/5", VoiceOver listed 4 missing) — and,
 /// because `manifest.events` is an unconstrained `[String: String]`, a forward-compat manifest
 /// with several extra event keys pointing at missing files could even drive it negative
-/// ("-1/4"). Counting present events instead keeps the badge, the grid, and the label a single
+/// ("-1/5"). Counting present events instead keeps the badge, the grid, and the label a single
 /// source of truth, always in `0...Event.allCases.count`, and matches DESIGN.md line 218
-/// ("包缺某事件音 → 卡 2×2 网格显「2/4」"): a pack that only maps some events reads as partial,
+/// ("包缺某事件音 → 覆盖轨显「N/5」"): a pack that only maps some events reads as partial,
 /// with the badge count equal to the number of lit glyphs.
 private func packCompletionState(presentEventCount: Int) -> PackCardState {
     let total = Event.allCases.count

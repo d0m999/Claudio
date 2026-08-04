@@ -48,7 +48,7 @@ func runPanelFocusOrderSuites() {
             "first focus must be the first row's file-name Menu, got \(String(describing: order.first))")
     }
 
-    suite("panelFocusOrder: production 双宿主形状固定 Claude → Codex → 四事件 → 音量 → 声音包 → 管理") {
+    suite("panelFocusOrder: production 双宿主形状固定 Claude → Codex → 五事件 → 音量 → 声音包 → 管理") {
         let order = panelFocusOrder(
             .operational(
                 events: Event.allCases,
@@ -149,7 +149,7 @@ func runPanelFocusOrderSuites() {
     suite("panelFocusOrder: an empty-rows operational panel with hasMasterVolume: true still surfaces the slider ahead of 断开连接") {
         // The flip side of the test above: hasMasterVolume, not `events` being non-empty, is
         // what gates .masterVolume. Zero rows is only a fixture (production's true .operational
-        // state always has 4, see the .masterVolume position test above) — this pins the flag's
+        // state always has 5, see the .masterVolume position test above) — this pins the flag's
         // OWN behavior independent of row count.
         let order = panelFocusOrder(.operational(events: [], packCardIDs: [], hasMasterVolume: true))
         expect(
@@ -463,7 +463,7 @@ func runPanelFocusOrderSuites() {
     suite("panelOpeningFocus: zero rows, hasMasterVolume true → the master volume slider, never nil") {
         // The flag's positive case: .masterVolume, always operable, sits ahead of the pack cards
         // in the order whenever it's actually present. Zero rows here is only a fixture (a truly
-        // .operational configState always has 4 real rows) — this pins the flag's own behavior.
+        // .operational configState always has 5 real rows) — this pins the flag's own behavior.
         expect(
             panelOpeningFocus(rows: [], packCardIDs: ["alpha-pack"], hasMasterVolume: true) == .masterVolume,
             "with the slider on screen, opening focus is never nil and lands on it ahead of the pack cards")

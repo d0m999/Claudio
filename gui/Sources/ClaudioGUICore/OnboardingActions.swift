@@ -190,14 +190,15 @@ public enum SetupNotice: Sendable, Equatable {
         // ⚠️ T17g（codex 独立评审逮到）：这句话原本承诺「这样每个事件都还能出声」——**那是一句谎话**。
         // 顶上来的那个包只过了一道 `isUsablePack`（`Setup.swift`），而它自己的文档白纸黑字写着：只查
         // 目录能不能解析、manifest 能不能读，**音频文件在不在不在此列**。`usablePackIDs.first` 是按字典序
-        // 挑的，所以完全可能挑中一个只映了 1/4 事件的用户自导入包 —— 于是面板会在这句话的正上方打出三行
+        // 挑的，所以完全可能挑中一个只映了 1/5 事件的用户自导入包 —— 于是面板会在这句话的正上方打出四行
         // 「未配置」，而这句话正对着用户说「每个事件都还能出声」。
         //
         // 这个产品的立身之本是不撒谎，而这里是它唯一一次开口说「我动了你的东西」的地方。宁可说一句
         // 「它未必每个事件都有声音」，也不许说一句用户当场就能证伪的话。
         //
-        // 刻意**不**写「上面四行会告诉你哪些还缺」：那会是第二句**关于布局的断言**，而 `OnboardingView`
-        // 那张卡也渲染告知行、却既没有四行事件也没有画廊（现存的「下面的声音包」已经在同一个洞里，
+        // 刻意**不**写「上面四行未配置会告诉你哪些还缺」：那会是第二句**关于布局的断言**，而
+        // `OnboardingView` 那张卡也渲染告知行、却既没有五事件列表也没有画廊（现存的「下面的声音包」
+        // 已经在同一个洞里，
         // 已记入 TODOS）。不再往里加第二条。
         case .repairedDeadSelection(let removed, let selected):
             "你之前选的「\(removed)」已经不在了，claudi0 先替你换成了「\(selected)」。"
@@ -300,7 +301,8 @@ public func onboardingShowsFailureDetailToggle(
 /// 锁分离之后 `play.lock` 只归 `claudio play` 的防抖用，而 TODOS 里那条 P1 是 `play.lock` 被
 /// config / settings 写者共用那一条，已经划掉了。可达性本身一个字都没变，只是换了两把锁 ——
 /// 见 `Setup.swift:509/519`（`configLockFile`）与 `:554`（`settingsLockFile`）。）
-/// `refresh()` 一探测：二进制在位、没盖章、四条 hook 都在 → **`.installed`**。面板于是切到运行态、
+/// `refresh()` 一探测：二进制在位、没盖章、四条 legacy lifecycle hook 都在 → **`.installed`**。
+/// 面板于是切到运行态、
 /// 亮起绿点说「已经接好了」，而 `config.json` 压根没写、一个包都没选中 —— 用户永远听不到一声响，
 /// 失败原因停在 `actionState` 里，没有任何一个像素属于它。
 ///
@@ -376,7 +378,8 @@ public enum OnboardingActionError: Error, Sendable, Equatable {
     /// 从 `.installed` 点「断开」，却一条都没摘掉。
     ///
     /// 这是**结构性矛盾**，不是「没什么可做」：能走到 `.installed` 说明
-    /// `detectHookInstallStatus` 刚刚证明了四条 hook 都在。所以 `.notInstalled` 这个 outcome
+    /// `detectHookInstallStatus` 刚刚证明了四条 legacy lifecycle hook 都在。所以
+    /// `.notInstalled` 这个 outcome
     /// 只可能意味着摘除逻辑没认出自己写下的东西（例如安装路径漂移）—— 必须响，绝不能报成功。
     case disconnectSweptNothing
 

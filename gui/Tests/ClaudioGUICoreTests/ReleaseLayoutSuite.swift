@@ -67,6 +67,16 @@ func runReleaseLayoutSuites() {
             "release.yml 里没有任何一条 `cp` 把内置包复制进 \"Contents/Resources/packs\" —— 包目录是从"
                 + "helper 路径反推出来的（去掉两级 + packs），放错地方会让 setup 一个包都复制不出来，"
                 + "而且**不报错**。实际的 cp 行：\(copyLines)")
+        expect(
+            copyLines.contains {
+                $0.contains("packs/LICENSES.md")
+                    && $0.contains("Contents/Resources/packs/LICENSES.md")
+            },
+            "release.yml 必须把内置音频来源与 CC0 台账一起装入 app bundle。实际的 cp 行：\(copyLines)")
+        expect(
+            yaml.contains("swift build -c release --arch arm64 --product claudio")
+                && yaml.contains("swift build -c release --arch x86_64 --product claudio"),
+            "helper Release 构建必须显式选择 claudio product，不能顺带编译测试 executable")
 
         // GUI 自己的可执行文件在 Contents/MacOS/ —— 钉住「两者确实是两个不同的文件」，也就是 T17
         // 那个 bug 的前提。
@@ -90,6 +100,52 @@ func runReleaseLayoutSuites() {
         expect(
             yaml.contains("<key>CFBundleExecutable</key><string>${{ env.APP_EXECUTABLE }}</string>"),
             "Info.plist 必须把 CFBundleExecutable 绑定到 APP_EXECUTABLE")
+    }
+
+    suite("dev/release 分发源包含 minimal-chime 1.1.0、第五音频与 CC0 台账") {
+        let root = repositoryRoot()
+        let manifestURL = root.appendingPathComponent("packs/minimal-chime/manifest.json")
+        let taskStartURL = root.appendingPathComponent("packs/minimal-chime/task_start.mp3")
+        let licensesURL = root.appendingPathComponent("packs/LICENSES.md")
+        let devBundleURL = root.appendingPathComponent("scripts/dev-bundle.sh")
+
+        guard
+            let manifestData = try? Data(contentsOf: manifestURL),
+            let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
+            let events = manifest["events"] as? [String: String],
+            let licenses = try? String(contentsOf: licensesURL, encoding: .utf8),
+            let devBundle = try? String(contentsOf: devBundleURL, encoding: .utf8)
+        else {
+            expect(false, "读不到内置包 manifest、许可证台账或 dev bundle 脚本")
+            return
+        }
+
+        expect(manifest["schema"] as? Int == 1, "新增 task_start 不得升级 manifest schema")
+        expect(manifest["version"] as? String == "1.1.0", "minimal-chime 必须以 1.1.0 分发")
+        expect(
+            Set(events.keys)
+                == Set(["task_start", "stop", "stop_failure", "notification", "subagent_stop"]),
+            "minimal-chime 必须精确映射五种事件，实得 \(events.keys.sorted())")
+        expect(
+            events["task_start"] == "task_start.mp3",
+            "task_start 必须映射独立音频，不能 fallback 到其它事件")
+
+        let taskStartValues = try? taskStartURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        expect(
+            taskStartValues?.isRegularFile == true && (taskStartValues?.fileSize ?? 0) > 0,
+            "task_start.mp3 必须作为非空正规文件进入仓库")
+        expect(
+            licenses.contains("Audio/confirmation_003.ogg")
+                && licenses.contains("https://kenney.nl/assets/interface-sounds")
+                && licenses.contains("CC0-1.0")
+                && licenses.contains("c96fbbd8a2f34fe480e1f7b09ddd9392740fe44af43ca400889636ba802701d2"),
+            "LICENSES.md 必须绑定 task_start 的来源、许可与最终 SHA256")
+
+        expect(
+            devBundle.contains("cp -R packs/minimal-chime")
+                && devBundle.contains("cp packs/LICENSES.md")
+                && devBundle.contains("--package-path helper --product claudio"),
+            "dev bundle 必须复制 1.1.0 包与许可证，并显式构建 claudio helper product")
     }
 
     suite("Orbit Zero App 图标母版与 icns 都在仓库中") {

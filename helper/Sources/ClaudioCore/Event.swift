@@ -1,6 +1,6 @@
 import Foundation
 
-/// The four v1 semantic events.
+/// The five stable semantic sound events.
 ///
 /// This enum is the **single source of truth** for the event-name mapping shared by
 /// `install` / `play` / `uninstall` (ENGINEERING.md 决议 · 指令). Claude Code's
@@ -16,6 +16,7 @@ public enum Event: String, CaseIterable, Codable, Sendable, Hashable {
     // who later reaches for `Event(rawValue:)` or `.rawValue` (e.g. in a config/log/test
     // fixture) must not get a third, undocumented spelling alongside `cliName`/`manifestKey`
     // (`/codex review` 2026-07-08).
+    case taskStart = "task_start"
     case stop = "stop"
     case stopFailure = "stop_failure"
     case notification = "notification"
@@ -24,6 +25,7 @@ public enum Event: String, CaseIterable, Codable, Sendable, Hashable {
     /// CLI `<event>` token — identical to the `manifest.json` event key (snake_case).
     public var cliName: String {
         switch self {
+        case .taskStart: "task_start"
         case .stop: "stop"
         case .stopFailure: "stop_failure"
         case .notification: "notification"
@@ -37,6 +39,7 @@ public enum Event: String, CaseIterable, Codable, Sendable, Hashable {
     /// 用户界面的稳定声音语义；宿主原生事件名由各 adapter 提供。
     public var displayName: String {
         switch self {
+        case .taskStart: "任务开始"
         case .stop: "本轮结束"
         case .stopFailure: "执行中断"
         case .notification: "需要你"
@@ -50,4 +53,11 @@ public enum Event: String, CaseIterable, Codable, Sendable, Hashable {
         else { return nil }
         self = match
     }
+
+    /// Claude Code legacy `claudi0 play` 安装器继续只管理原有四个 lifecycle 事件。
+    /// `UserPromptSubmit` 必须由现代宿主 adapter 在用户显式 connect / repair / upgrade
+    /// 时写入，启动 bootstrap 不得借由 `Event.allCases` 静默修改宿主配置。
+    public static let legacyLifecycleCases: [Event] = [
+        .stop, .stopFailure, .notification, .subagentStop,
+    ]
 }

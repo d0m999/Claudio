@@ -54,7 +54,7 @@ public enum PanelFocusTarget: Sendable, Hashable {
     /// 「诚实失败态」卡片上的「在访达中显示 config.json」（/codex review P1，26bba37 follow-up）。
     ///
     /// `.malformed`/`.unwritable` 时 ``PanelView/configFailureNotice(reason:)`` 渲染这颗按钮，而它排在
-    /// 面板**最顶端**（顶替掉四行事件、在画廊之上）—— 所以在 ``panelFocusOrder(_:)`` 里它 LEADS 整个
+    /// 面板**最顶端**（顶替掉五行事件、在画廊之上）—— 所以在 ``panelFocusOrder(_:)`` 里它 LEADS 整个
     /// operational 序（焦点序跟随视觉序，a11y-architect FIX 5）。它是那张失败卡上唯一的 bespoke 修复
     /// 动作（画廊在每个 `configState` 都一样），因此开局焦点该落在它上面，而不是越过它落到包卡 / 断开
     /// 连接 / nil。
@@ -147,7 +147,7 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         // The two source rows are always the first visual and keyboard controls. Connection
         // failures alter their copy, never their presence or priority.
         order.append(contentsOf: hostSources.map { .hostSource($0) })
-        // 诚实失败卡（`.malformed`/`.unwritable`）渲染在面板**最顶端**（顶替四行事件、在画廊之上），
+        // 诚实失败卡（`.malformed`/`.unwritable`）渲染在面板**最顶端**（顶替五行事件、在画廊之上），
         // 它的「在访达中显示 config.json」按钮是那张卡上唯一的 bespoke 修复动作 —— 所以它 LEADS 焦点序
         // （焦点序跟随视觉序，a11y-architect FIX 5）。只有这两态渲染失败卡；`.operational`/`.needsPack`
         // 的 flag 为假，`.configReveal` 不进序。

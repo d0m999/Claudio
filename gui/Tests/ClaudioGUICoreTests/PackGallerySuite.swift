@@ -30,11 +30,11 @@ private func writeCompletePack(named id: String, at userPacks: URL, name: String
     writeFixture(
         #"""
         { "id": "\#(id)", "name": "\#(name)", "license": "\#(license)", "events": {
-            "stop": "stop.mp3", "stop_failure": "fail.mp3", "notification": "ping.mp3",
+            "task_start": "task.mp3", "stop": "stop.mp3", "stop_failure": "fail.mp3", "notification": "ping.mp3",
             "subagent_stop": "sub.mp3" } }
         """#,
         to: userPacks.appendingPathComponent("\(id)/manifest.json"))
-    for file in ["stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"] {
+    for file in ["task.mp3", "stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"] {
         writeFixture("fake-audio", to: userPacks.appendingPathComponent("\(id)/\(file)"))
     }
 }
@@ -270,8 +270,8 @@ func runPackGallerySuites() {
 
             expect(cards.count == 1, "expected exactly one card, got \(cards.count)")
             expect(
-                cards.first?.state == .partial(present: 2, total: 4),
-                "2 of 4 declared files present must report .partial(present: 2, total: 4), got"
+                cards.first?.state == .partial(present: 2, total: 5),
+                "2 of 5 events present must report .partial(present: 2, total: 5), got"
                     + " \(String(describing: cards.first?.state))")
             expect(
                 cards.first?.presentEvents == [.stop, .notification],
@@ -282,15 +282,15 @@ func runPackGallerySuites() {
     }
 
     // Regression net for the T16 fix: a pack that BOTH leaves some events unmapped AND has a
-    // declared-but-missing file. Before the fix, `.partial(present:)` was `4 - (declared files
+    // declared-but-missing file. Before the fix, `.partial(present:)` was `total - (declared files
     // missing)`, counted over declared keys, so it disagreed with `presentEvents` (counted over
-    // all four v1 events) — the badge said "3/4" while the grid lit 1 glyph and VoiceOver named
-    // 3 missing. `present` must now equal `presentEvents.count`, so badge, grid, and label are
+    // all five current events) — the badge overstated coverage while the track lit 1 slot and
+    // VoiceOver named 4 missing. `present` must now equal `presentEvents.count`, so badge, track, and label are
     // one source of truth. (Under the old formula this asserted 3; it now asserts 1.)
     suite("availablePacks: an unmapped event + a declared-but-missing file — present == presentEvents.count") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
-            // Only stop + stop_failure declared (notification/subagent_stop UNMAPPED); of the
+            // Only stop + stop_failure declared (task_start/notification/subagent_stop UNMAPPED); of the
             // two declared, only stop.mp3 exists — fail.mp3 is declared but never written.
             writeFixture(
                 #"""
@@ -307,20 +307,20 @@ func runPackGallerySuites() {
             expect(cards.count == 1, "expected exactly one card, got \(cards.count)")
             expect(
                 cards.first?.presentEvents == [.stop],
-                "only stop truly resolves .present (stop_failure broken, the other two unmapped), got"
+                "only stop truly resolves .present (stop_failure broken, the other three unmapped), got"
                     + " \(String(describing: cards.first?.presentEvents))")
             expect(
-                cards.first?.state == .partial(present: 1, total: 4),
-                "present must equal presentEvents.count (1), NOT 4 − declared-missing (which was 3),"
+                cards.first?.state == .partial(present: 1, total: 5),
+                "present must equal presentEvents.count (1), not total minus declared-missing,"
                     + " so badge/grid/label agree — got \(String(describing: cards.first?.state))")
         }
     }
 
     // Regression net: `manifest.events` is an unconstrained `[String: String]`, so a
-    // forward-compat manifest can carry event keys beyond the four v1 events. Extra keys
+    // forward-compat manifest can carry event keys beyond the five current events. Extra keys
     // pointing at missing files must NOT inflate the missing count (which once drove
-    // `present = 4 − missingCount` negative, e.g. "-1/4"). Counting present v1 events instead
-    // keeps `present` in `0...4` regardless of how many extra broken keys a manifest declares.
+    // `present = total − missingCount` negative). Counting present current events instead
+    // keeps `present` in `0...5` regardless of how many extra broken keys a manifest declares.
     suite("availablePacks: extra forward-compat event keys with missing files never push present below 0") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
@@ -339,8 +339,8 @@ func runPackGallerySuites() {
                 environment: makeEnvironment(userPacksDirectory: userPacks))
 
             expect(
-                cards.first?.state == .partial(present: 1, total: 4),
-                "only the one present v1 event counts; five extra missing keys must not drive"
+                cards.first?.state == .partial(present: 1, total: 5),
+                "only the one present current event counts; five extra missing keys must not drive"
                     + " present negative — got \(String(describing: cards.first?.state))")
         }
     }
@@ -402,11 +402,11 @@ func runPackGallerySuites() {
             writeFixture(
                 #"""
                 { "id": "nameless-pack", "license": "CC0-1.0", "events": {
-                    "stop": "stop.mp3", "stop_failure": "fail.mp3",
+                    "task_start": "task.mp3", "stop": "stop.mp3", "stop_failure": "fail.mp3",
                     "notification": "ping.mp3", "subagent_stop": "sub.mp3" } }
                 """#,
                 to: userPacks.appendingPathComponent("nameless-pack/manifest.json"))
-            for file in ["stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"] {
+            for file in ["task.mp3", "stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"] {
                 writeFixture("fake-audio", to: userPacks.appendingPathComponent("nameless-pack/\(file)"))
             }
 
@@ -423,7 +423,7 @@ func runPackGallerySuites() {
         }
     }
 
-    suite("availablePacks: a manifest declaring ZERO events reports .partial(present: 0, total: 4), never .complete") {
+    suite("availablePacks: a manifest declaring ZERO events reports .partial(present: 0, total: 5), never .complete") {
         withTempDirectory { root in
             let userPacks = root.appendingPathComponent("packs")
             writeFixture(
@@ -435,7 +435,7 @@ func runPackGallerySuites() {
                 environment: makeEnvironment(userPacksDirectory: userPacks))
 
             expect(
-                cards.first?.state == .partial(present: 0, total: 4),
+                cards.first?.state == .partial(present: 0, total: 5),
                 "a readable manifest that maps nothing is a legal, fully-silent pack — .partial"
                     + " with a zero count, never .complete and never .broken, got"
                     + " \(String(describing: cards.first?.state))")
@@ -636,7 +636,7 @@ func runPackGallerySuites() {
                     + " vs \(coverageTruth)")
             expect(coverageTruth == [.stop, .notification], "fixture 前提：恰好两个事件真的存在")
             expect(
-                card?.state == .partial(present: 2, total: 4),
+                card?.state == .partial(present: 2, total: 5),
                 "badge 计数必须仍等于 presentEvents.count，got \(String(describing: card?.state))")
         }
     }
@@ -652,11 +652,11 @@ func runPackGallerySuites() {
             packRowTrailingSlot(for: .complete) == .track,
             "a manifest-readable complete row must resolve to .track")
         expect(
-            packRowTrailingSlot(for: .partial(present: 2, total: 4)) == .track,
+            packRowTrailingSlot(for: .partial(present: 2, total: 5)) == .track,
             "a manifest-readable partial row must resolve to .track, regardless of the count")
         expect(
-            packRowTrailingSlot(for: .partial(present: 0, total: 4)) == .track,
-            "even a fully-silent (0/4) but still-READABLE manifest must resolve to .track — it's"
+            packRowTrailingSlot(for: .partial(present: 0, total: 5)) == .track,
+            "even a fully-silent (0/5) but still-READABLE manifest must resolve to .track — it's"
                 + " not .broken, so there's real (all-missing) coverage data to render")
         expect(
             packRowTrailingSlot(for: .broken(reason: "任意原因")) == .brokenStatus,
@@ -709,11 +709,11 @@ func runPackGallerySuites() {
             packRowMetaSlots(isCC0: true, state: .complete) == PackRowMetaSlots(license: .cc0, missingCount: nil),
             "complete + CC0 → 仅 license 子槽亮，缺失数为 nil")
         expect(
-            packRowMetaSlots(isCC0: false, state: .partial(present: 3, total: 4))
+            packRowMetaSlots(isCC0: false, state: .partial(present: 4, total: 5))
                 == PackRowMetaSlots(license: .none, missingCount: 1),
             "partial + 非 CC0 → 仅完整度子槽亮")
         expect(
-            packRowMetaSlots(isCC0: true, state: .partial(present: 3, total: 4))
+            packRowMetaSlots(isCC0: true, state: .partial(present: 4, total: 5))
                 == PackRowMetaSlots(license: .cc0, missingCount: 1),
             "T5 的核心断言：partial + CC0 → 两个子槽必须同时亮 —— CC0 徽标不因「缺 N 个」而消失")
         expect(
@@ -732,12 +732,12 @@ func runPackGallerySuites() {
             writeFixture(
                 #"""
                 { "id": "cc0-partial-pack", "name": "半成品 CC0 包", "license": "CC0-1.0", "events": {
-                    "stop": "stop.mp3", "stop_failure": "fail.mp3",
+                    "task_start": "task.mp3", "stop": "stop.mp3", "stop_failure": "fail.mp3",
                     "notification": "ping.mp3", "subagent_stop": "sub.mp3" } }
                 """#,
                 to: userPacks.appendingPathComponent("cc0-partial-pack/manifest.json"))
-            // 只有三个declared文件真的存在——缺 1 个。
-            for file in ["stop.mp3", "fail.mp3", "ping.mp3"] {
+            // 只有四个 declared 文件真的存在——缺 1 个。
+            for file in ["task.mp3", "stop.mp3", "fail.mp3", "ping.mp3"] {
                 writeFixture("fake-audio", to: userPacks.appendingPathComponent("cc0-partial-pack/\(file)"))
             }
 
@@ -748,12 +748,38 @@ func runPackGallerySuites() {
             expect(cards.count == 1, "expected exactly one card, got \(cards.count)")
             guard let card = cards.first else { return }
             expect(card.isCC0 == true, "fixture 前提：license 是 CC0-1.0")
-            expect(card.state == .partial(present: 3, total: 4), "fixture 前提：缺 1 个事件")
+            expect(card.state == .partial(present: 4, total: 5), "fixture 前提：缺 1 个事件")
 
             let slots = packRowMetaSlots(isCC0: card.isCC0, state: card.state)
             expect(
                 slots == PackRowMetaSlots(license: .cc0, missingCount: 1),
                 "一张 CC0 的 partial 卡必须同时读出 .cc0 与 missingCount: 1，got \(slots)")
+        }
+    }
+
+    suite("旧四事件声音包无需 schema 迁移即可加载，并明确显示 4/5 缺任务开始") {
+        withTempDirectory { root in
+            let userPacks = root.appendingPathComponent("packs")
+            let pack = userPacks.appendingPathComponent("legacy-four", isDirectory: true)
+            writeFixture(
+                #"{"schema":1,"id":"legacy-four","events":{"stop":"stop.mp3","stop_failure":"fail.mp3","notification":"ping.mp3","subagent_stop":"sub.mp3"}}"#,
+                to: pack.appendingPathComponent("manifest.json"))
+            for file in ["stop.mp3", "fail.mp3", "ping.mp3", "sub.mp3"] {
+                writeFixture("fake-audio", to: pack.appendingPathComponent(file))
+            }
+
+            let cards = availablePacks(
+                config: ClaudioConfig(selectedPack: "legacy-four"),
+                environment: makeEnvironment(userPacksDirectory: userPacks))
+            guard let card = cards.first else {
+                expect(false, "旧四事件包必须继续形成可用卡片")
+                return
+            }
+            expect(card.state == .partial(present: 4, total: 5), "旧包必须诚实显示 4/5")
+            expect(
+                card.presentEvents == Set(Event.legacyLifecycleCases),
+                "旧包只保留原四事件覆盖，不能伪造 task_start fallback")
+            expect(!card.presentEvents.contains(.taskStart), "缺任务开始必须保持独立缺失")
         }
     }
 }

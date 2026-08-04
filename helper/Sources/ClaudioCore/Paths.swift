@@ -19,7 +19,16 @@ public enum ClaudioPaths {
 
     /// `~/.claudio/` — root of all Claudio-owned state.
     public static var root: URL {
-        home.appendingPathComponent(".claudio", isDirectory: true)
+        #if DEBUG
+        // 真实 CLI 子进程契约测试需要把所有 hook I/O 隔离到临时目录。Release 构建完全
+        // 不编译这条分支，因此用户环境无法通过进程变量改写生产固定路径。
+        if let testRoot = ProcessInfo.processInfo.environment["CLAUDIO_TEST_ROOT"],
+            testRoot.hasPrefix("/")
+        {
+            return URL(fileURLWithPath: testRoot, isDirectory: true)
+        }
+        #endif
+        return home.appendingPathComponent(".claudio", isDirectory: true)
     }
 
     /// `~/.claudio/config.json` — the single source of truth for user settings (GUI
@@ -157,6 +166,12 @@ public enum ClaudioPaths {
 
     public static func hostDebounceStateFile(_ host: HostID) -> URL {
         integrationsDirectory.appendingPathComponent("\(host.rawValue)-play.state")
+    }
+
+    /// `UserPromptSubmit` 专用 250ms 时间戳。它与 lifecycle 的 1.5s 时间戳分离，
+    /// 但仍复用同一宿主的非阻塞播放锁，避免真正并发 spawn 互相踩踏。
+    public static func hostTaskStartDebounceStateFile(_ host: HostID) -> URL {
+        integrationsDirectory.appendingPathComponent("\(host.rawValue)-task-start.state")
     }
 
     /// `~/.claudio/packs.lock` — the non-blocking lock serializing the **three** writers of

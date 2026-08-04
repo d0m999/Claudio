@@ -302,7 +302,7 @@ public struct PanelView: View {
     private var operationalPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
             // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState.topContent` 决定这一块顶部
-            // 内容显示什么——`.events`（= `.operational`）是今天这四行事件覆盖度 + 主音量滑块；`.needsPack`
+            // 内容显示什么——`.events`（= `.operational`）是今天这五行事件覆盖度 + 主音量滑块；`.needsPack`
             //（还没有人选过包）换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径
             // 本来就通：点一个声音包就是 ``selectPack``，会建出一份正确的 config）；`.configFailure`（=
             // `.malformed`/`.unwritable`）换成诚实失败态 + 可执行的修复指令——不禁用任何控件（写者本来就
@@ -344,7 +344,7 @@ public struct PanelView: View {
                             onAudibilityInputsChanged()
                         })
                 }
-                // PLAN-MASTER-VOLUME.md 阶段 D：位置对齐线框——四行事件之后、拖入区之前。只在
+                // PLAN-MASTER-VOLUME.md 阶段 D：位置对齐线框——五行事件之后、拖入区之前。只在
                 // `.events`（= `.operational`）渲染（D23 定稿 + D41：这是滑块唯一真的出现在屏幕上的态）。
                 // `applyFirstFocus()` 的 `hasMasterVolume: isOperational` 从**同一个** `.topContent` 分类派生
                 //（`isOperational = (content == .events)`），所以渲染判据与焦点判据自动一致——「不在屏幕上的
@@ -427,7 +427,7 @@ public struct PanelView: View {
             })
     }
 
-    /// D23 定稿④「先选包」空态卡——`configState == .needsPack` 时替换掉本该渲染的四行事件覆盖度。
+    /// D23 定稿④「先选包」空态卡——`configState == .needsPack` 时替换掉本该渲染的五行事件覆盖度。
     /// `PackGalleryView` 仍然照常渲染在下面；有包行时主行动是「点一个声音包」，零行时则指向仍在
     /// 屏幕上的「管理声音包…」。这里只负责说清楚温度 + 主行动 + 上下文（DESIGN.md 空态三要素）。
     private var needsPackNotice: some View {
@@ -472,7 +472,7 @@ public struct PanelView: View {
         .focused($focusedTarget, equals: .manageSounds)
     }
 
-    /// D23 定稿④诚实失败态——`configState`是 `.malformed`/`.unwritable` 时替换掉本该渲染的四行事件
+    /// D23 定稿④诚实失败态——`configState`是 `.malformed`/`.unwritable` 时替换掉本该渲染的五行事件
     /// 覆盖度。**不禁用任何控件**（写者本来就全部 fail closed，见 `ConfigMutation.swift`）：这里只
     /// 负责把已经存在的、可执行的修复原因说出来，并给一个「在访达中显示」的快捷方式——doctor 的
     /// 诊断今天就带着这句一模一样的话（``configRewritabilityResult(configFile:)``），这里不重新
@@ -586,7 +586,7 @@ public struct PanelView: View {
         // true }` 这两颗闭包的**返回值**没有任何测试钉，把 true 翻成 false 就能让失败卡照画、而焦点跳过 Reveal
         // 钮，全绿。把投影上提到 `PanelTopContent.showsEventContent` / `.hasConfigFailureNotice`、由 `PanelConfigSuite`
         // 单测其返回值后，视图这侧再没有可翻转的布尔，只剩一句转发；ViewWiringSuite 钉住这句转发原样还在）。
-        // - showsEventContent：滑块 + 四行事件只在 `.events`（= `.operational`）真的在屏幕上，所以它同时决定
+        // - showsEventContent：滑块 + 五行事件只在 `.events`（= `.operational`）真的在屏幕上，所以它同时决定
         //   `visibleRows`（哪些行真被渲染进焦点序）与 `hasMasterVolume`（滑块此刻在不在屏幕上）。
         // - hasConfigFailureNotice：诚实失败卡（`.configFailure` = `.malformed`/`.unwritable`）带着「在访达中
         //   显示 config.json」这颗真控件，渲染在面板顶端，所以 `.configReveal` 领序、开局焦点落在它上面。
@@ -655,7 +655,7 @@ public struct PanelView: View {
 }
 
 /// One geometry and one accessibility contract for both host rows in the panel. The status is
-/// already classified by `ClaudioGUICore`; notably Codex's normal 3/4 uses `.ready`, not warning.
+/// already classified by `ClaudioGUICore`; notably Codex's normal 4/5 uses `.ready`, not warning.
 @MainActor
 private struct HostSourceRowView: View {
     let row: HostSourceRowPresentation

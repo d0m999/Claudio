@@ -32,7 +32,7 @@ func leafNodeIsSymbolicLink(at url: URL) -> Bool {
 /// （`open(2)` 在等一个永远不来的写端）。所以这道闸门真正的价值是这两条：
 ///
 /// - **已证实、今天就能触发的洞：读取无大小上限。** 一个 500MB 的 `manifest.json` 会被
-///   `Data(contentsOf:)` 整份读进来、再原样喂给 `JSONDecoder`——而一份四事件 manifest 实际不到 1 KB。
+///   `Data(contentsOf:)` 整份读进来、再原样喂给 `JSONDecoder`——而一份五事件 manifest 实际不到 1 KB。
 ///   ``maxPackManifestBytes`` 这道上限是这个洞的正解（对应的回归测试变异验证时确实变红：超限文件被
 ///   完整读完，一路走到了解码器）。
 /// - **正规文件白名单 = 不把安全性押在一个未文档化的实现细节上。** `Data(contentsOf:)` 今天恰好帮我们
@@ -64,7 +64,7 @@ func leafNodeIsSymbolicLink(at url: URL) -> Bool {
 /// 无论选哪一边，`O_NONBLOCK` + `fstat` 判 `S_IFREG` 这道闸门都照常生效——一个指向 FIFO / 目录的
 /// 符号链接跟随之后仍然会被挡在正规文件白名单外，一个字节都不会读。
 
-/// manifest.json 的大小上限：1 MiB。一份四事件 manifest 实际不到 1 KB，1 MiB 已经宽出三个数量级，
+/// manifest.json 的大小上限：1 MiB。一份五事件 manifest 实际不到 1 KB，1 MiB 已经宽出三个数量级，
 /// 任何越过它的东西都不是 manifest，是攻击载荷或事故。
 let maxPackManifestBytes = 1 << 20
 

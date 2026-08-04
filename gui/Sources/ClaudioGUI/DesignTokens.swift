@@ -92,7 +92,7 @@ enum ClaudioColor {
         clay(scheme).opacity(scheme == .dark ? 0.15 : 0.12)
     }
 
-    /// UI-semantic `success` — current-installation receipt observed for a host source.
+    /// UI-semantic `success` — current-installation task-start activation receipt observed.
     static func success(_ scheme: ColorScheme) -> Color {
         scheme == .dark
             ? Color(hex: ClaudioColorHex.successDark) : Color(hex: ClaudioColorHex.successLight)
@@ -122,7 +122,7 @@ enum ClaudioColor {
     }
 
     /// UI-semantic `error` (真红) — **只**给 App 自身真错误（DESIGN.md「错误态用色（关键约束）」），
-    /// 绝不用于四事件层（`StopFailure` 永远琥珀，不在本 token 的射程内）。
+    /// 绝不用于声音事件层（`StopFailure` 永远琥珀，不在本 token 的射程内）。
     ///
     /// ⚠️ 且**只做图标**，不做正文（/ship 评审修复③）：亮色 `#E0453A` 对 `panel` / `surface-2`
     /// 只有 4.07:1 / 4.06:1 —— 过非文本的 ≥3:1（WCAG 1.4.11），但**不过**正文的 ≥4.5:1
@@ -149,7 +149,7 @@ func stateAccentColor(_ accent: OnboardingAccent, _ scheme: ColorScheme) -> Colo
 
 // MARK: - T16: per-event color + glyph tokens
 //
-// 同上：值全部来自 ``ClaudioColorHex``（DESIGN.md「四事件语义色」表的唯一真相源），
+// 同上：值全部来自 ``ClaudioColorHex``（DESIGN.md「五事件语义色」表的唯一真相源），
 // 这里只做「按 `ColorScheme` 选一个」这件事。不要在这里新增 DESIGN.md 里没有的色阶。
 extension ClaudioColor {
     /// DESIGN.md's per-event accent color (dark / light), keyed by ``Event``.
@@ -159,6 +159,10 @@ extension ClaudioColor {
     /// （``ClaudioColorHex/notificationDark`` 同样是对 `clayDark` 的别名，不是复制一遍 hex。）
     static func event(_ event: Event, _ scheme: ColorScheme) -> Color {
         switch event {
+        case .taskStart:
+            scheme == .dark
+                ? Color(hex: ClaudioColorHex.taskStartDark)
+                : Color(hex: ClaudioColorHex.taskStartLight)
         case .stop:
             scheme == .dark
                 ? Color(hex: ClaudioColorHex.stopDark) : Color(hex: ClaudioColorHex.stopLight)
@@ -188,6 +192,7 @@ extension ClaudioColor {
 /// checkmark, not an inconsistency to "fix".
 func eventGlyphName(_ event: Event) -> String {
     switch event {
+    case .taskStart: "paperplane.fill"
     case .stop: "checkmark.circle.fill"
     case .stopFailure: "pause.circle.fill"
     case .notification: "bell.badge.fill"

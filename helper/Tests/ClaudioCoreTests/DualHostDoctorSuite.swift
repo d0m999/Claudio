@@ -142,7 +142,7 @@ func runDualHostDoctorSuites() {
                 },
                 "doctor 必须有共享 runtime 的单一事实行")
             let codex = dualHostDoctorResult(report.results, host: .codex)
-            expect(codex?.severity == .failure, "runtime 不可用时已连接 Codex 不得继续显示 3/4 ready")
+            expect(codex?.severity == .failure, "runtime 不可用时已连接 Codex 不得继续显示 4/5 ready")
             expect(
                 codex?.message.contains("共享 runtime") == true,
                 "宿主 failure 必须解释声音链路不可用的共同根因")
@@ -283,7 +283,7 @@ func runDualHostDoctorSuites() {
         }
     }
 
-    suite("双宿主 doctor：Codex 三条 hook 无回执时固定等待 /hooks 确认") {
+    suite("双宿主 doctor：Codex 四条 hook 无回执时要求 /hooks 后再提交提示词") {
         withTempDirectory { root in
             let fixture = makeDualHostDoctorFixture(under: root)
             writeCompleteCodexDoctorHooks(fixture)
@@ -295,21 +295,21 @@ func runDualHostDoctorSuites() {
             }
             expect(codex.severity == .warning, "配置完成但未激活必须是待确认 warning")
             expect(
-                codex.message.contains("claudi0 已写好，等待 Codex 确认")
-                    && codex.message.contains("/hooks"),
+                codex.message.contains("在 Codex 输入 /hooks")
+                    && codex.message.contains("再提交一次提示词"),
                 "待确认文案必须给出固定状态与可执行 /hooks 指令，got \(codex.message)")
         }
     }
 
-    suite("双宿主 doctor：当前 installation 的真实回执点亮 Codex 中性 3/4") {
+    suite("双宿主 doctor：当前 installation 的任务开始回执点亮 Codex 中性 4/5") {
         withTempDirectory { root in
             let fixture = makeDualHostDoctorFixture(under: root)
             writeCompleteCodexDoctorHooks(fixture)
             let receipt = HostHookReceipt(
                 installationID: dualHostDoctorCurrentID,
                 host: .codex,
-                nativeEvent: "PermissionRequest",
-                semanticEvent: .notification,
+                nativeEvent: "UserPromptSubmit",
+                semanticEvent: .taskStart,
                 timestamp: Date(timeIntervalSince1970: 1_800_000_000),
                 playbackResult: .played)
             expect(
@@ -321,8 +321,8 @@ func runDualHostDoctorSuites() {
                 expect(false, "必须保留 Codex doctor 行")
                 return
             }
-            expect(codex.severity == .ok, "真实回执后 Codex 3/4 是正常能力事实")
-            expect(codex.message.contains("3/4 已就绪"), "必须诚实显示 Codex 3/4")
+            expect(codex.severity == .ok, "真实回执后 Codex 4/5 是正常能力事实")
+            expect(codex.message.contains("4/5 已就绪"), "必须诚实显示 Codex 4/5")
             expect(
                 codex.message.contains("仅授权请求"),
                 "需要你的 Codex 限定语必须进入 doctor 可见文案")
@@ -383,12 +383,13 @@ func runDualHostDoctorSuites() {
         withTempDirectory { root in
             let fixture = makeDualHostDoctorFixture(under: root)
             var hooks: [String: Any] = [:]
-            for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
+            for event in Event.legacyLifecycleCases {
+                let binding = HostCapabilityCatalog.binding(host: .claudeCode, event: event)!
                 hooks[binding.nativeEvent!] = [[
                     "hooks": [[
                         "type": "command",
                         "command": claudioHookCommand(
-                            for: binding.event,
+                            for: event,
                             claudioBinaryPath: fixture.claudioBinary.path),
                     ]]
                 ]]
@@ -448,12 +449,13 @@ func runDualHostDoctorSuites() {
         withTempDirectory { root in
             let fixture = makeDualHostDoctorFixture(under: root)
             var hooks: [String: Any] = [:]
-            for binding in HostCapabilityCatalog.bindings(for: .claudeCode) {
+            for event in Event.legacyLifecycleCases {
+                let binding = HostCapabilityCatalog.binding(host: .claudeCode, event: event)!
                 hooks[binding.nativeEvent!] = [[
                     "hooks": [[
                         "type": "command",
                         "command": claudioHookCommand(
-                            for: binding.event,
+                            for: event,
                             claudioBinaryPath: fixture.claudioBinary.path),
                     ]]
                 ]]
@@ -482,8 +484,8 @@ func runDualHostDoctorSuites() {
             let staleReceipt = HostHookReceipt(
                 installationID: dualHostDoctorStaleID,
                 host: .codex,
-                nativeEvent: "PermissionRequest",
-                semanticEvent: .notification,
+                nativeEvent: "UserPromptSubmit",
+                semanticEvent: .taskStart,
                 timestamp: Date(timeIntervalSince1970: 1_800_000_010),
                 playbackResult: .played)
             expect(
@@ -494,13 +496,13 @@ func runDualHostDoctorSuites() {
             let staleCodex = dualHostDoctorResult(staleResults, host: .codex)
             expect(staleCodex?.severity == .warning, "旧代次回执不得点亮当前配置")
             expect(
-                staleCodex?.message.contains("等待 Codex 确认") == true,
+                staleCodex?.message.contains("再提交一次提示词") == true,
                 "旧代次存在时仍必须显示当前代次待确认")
 
             guard let receiptFile = fixture.receiptStore.receiptFile(
-                host: .codex, nativeEvent: "PermissionRequest")
+                host: .codex, nativeEvent: "UserPromptSubmit")
             else {
-                expect(false, "PermissionRequest 必须有稳定回执路径")
+                expect(false, "UserPromptSubmit 必须有稳定回执路径")
                 return
             }
             writeFixture("{broken receipt", to: receiptFile)
@@ -508,7 +510,7 @@ func runDualHostDoctorSuites() {
             let damagedCodex = dualHostDoctorResult(damagedResults, host: .codex)
             expect(damagedCodex?.severity == .warning, "损坏回执必须失败关闭，不能点亮 Codex")
             expect(
-                damagedCodex?.message.contains("等待 Codex 确认") == true,
+                damagedCodex?.message.contains("再提交一次提示词") == true,
                 "损坏回执存在时仍必须给出 /hooks 激活路径")
         }
     }
@@ -578,13 +580,13 @@ func runDualHostDoctorSuites() {
             expect(
                 adapterSnapshot.configuration == .configured
                     && adapterSnapshot.installationID == dualHostDoctorCurrentID,
-                "adapter 必须把 migrated wrapper 的 Stop 与 hooks.json 两条事件合成完整 3/4")
+                "adapter 必须把 migrated wrapper 的 Stop 与 hooks.json 三条事件合成完整 4/5")
 
             let results = hostIntegrationDoctorResults(environment: fixture.environment)
             let codex = dualHostDoctorResult(results, host: .codex)
             expect(codex?.severity == .warning, "无真实回执时应等待确认，而不是误报缺 Stop")
             expect(
-                codex?.message.contains("等待 Codex 确认") == true,
+                codex?.message.contains("再提交一次提示词") == true,
                 "doctor 必须复用 adapter 对 migrated wrapper 的判定，got \(String(describing: codex))")
         }
     }

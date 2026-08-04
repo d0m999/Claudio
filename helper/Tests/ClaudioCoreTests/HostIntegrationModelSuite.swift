@@ -4,18 +4,19 @@ import Foundation
 
 @MainActor
 func runHostIntegrationModelSuites() {
-    suite("双宿主能力目录：Claude Code 4/4、Codex 严格 3/4") {
+    suite("双宿主能力目录：Claude Code 5/5、Codex 严格 4/5") {
         let claude = HostCapabilityCatalog.bindings(for: .claudeCode)
         let codex = HostCapabilityCatalog.bindings(for: .codex)
 
-        expect(claude.map(\.event) == Event.allCases, "Claude Code 必须按四个语义事件的稳定顺序给出能力")
+        expect(claude.map(\.event) == Event.allCases, "Claude Code 必须按五个语义事件的稳定顺序给出能力")
         expect(
-            claude.compactMap(\.nativeEvent) == ["Stop", "StopFailure", "Notification", "SubagentStop"],
+            claude.compactMap(\.nativeEvent)
+                == ["UserPromptSubmit", "Stop", "StopFailure", "Notification", "SubagentStop"],
             "Claude Code 原生事件名必须来自 adapter 能力目录")
-        expect(claude.allSatisfy { $0.support == .supported }, "Claude Code 必须是 4/4 supported")
+        expect(claude.allSatisfy { $0.support == .supported }, "Claude Code 必须是 5/5 supported")
 
-        expect(codex.map(\.event) == Event.allCases, "Codex 也必须保留四格，unsupported 不能被隐藏")
-        expect(codex.filter(\.isAudibleCapability).count == 3, "Codex 的正常能力事实必须严格是 3/4")
+        expect(codex.map(\.event) == Event.allCases, "Codex 也必须保留五格，unsupported 不能被隐藏")
+        expect(codex.filter(\.isAudibleCapability).count == 4, "Codex 的正常能力事实必须严格是 4/5")
         expect(
             codex.first(where: { $0.event == .stopFailure })
                 == HostCapabilityBinding(
@@ -33,7 +34,15 @@ func runHostIntegrationModelSuites() {
             "可见文案与 VoiceOver 共用的限定语必须是“仅授权请求”")
     }
 
-    suite("原生事件归一化：未知事件与 Codex StopFailure 一律拒绝") {
+    suite("原生事件归一化：UserPromptSubmit 映射任务开始，未知事件与 Codex StopFailure 拒绝") {
+        expect(
+            HostCapabilityCatalog.semanticEvent(host: .claudeCode, nativeEvent: "UserPromptSubmit")
+                == .taskStart,
+            "Claude Code UserPromptSubmit 必须映射任务开始")
+        expect(
+            HostCapabilityCatalog.semanticEvent(host: .codex, nativeEvent: "UserPromptSubmit")
+                == .taskStart,
+            "Codex UserPromptSubmit 必须映射任务开始")
         expect(
             HostCapabilityCatalog.semanticEvent(host: .claudeCode, nativeEvent: "StopFailure")
                 == .stopFailure,
@@ -46,14 +55,11 @@ func runHostIntegrationModelSuites() {
             HostCapabilityCatalog.semanticEvent(host: .codex, nativeEvent: "StopFailure") == nil,
             "Codex StopFailure 不能播放或被降级映射")
         expect(
-            HostCapabilityCatalog.semanticEvent(host: .codex, nativeEvent: "UserPromptSubmit") == nil,
-            "UserPromptSubmit 不能冒充需要你")
-        expect(
             HostCapabilityCatalog.semanticEvent(host: .codex, nativeEvent: "SomethingNew") == nil,
             "未知 Codex 事件必须失败关闭")
     }
 
-    suite("AudibilityMatrix 完全消费 adapter 能力数据，Codex 3/4 是中性就绪") {
+    suite("AudibilityMatrix 完全消费 adapter 能力数据，Codex 4/5 是中性就绪") {
         let readySnapshots = [
             HostIntegrationSnapshot.connectedForTesting(host: .claudeCode),
             HostIntegrationSnapshot.connectedForTesting(host: .codex),
@@ -69,17 +75,18 @@ func runHostIntegrationModelSuites() {
             soundCoverage: coverage,
             enabledEvents: enabled)
 
-        expect(matrix.rows.count == 4, "矩阵必须有四张语义事件行")
+        expect(matrix.rows.count == 5, "矩阵必须有五张语义事件行")
         expect(matrix.rows.allSatisfy { $0.cells.count == 2 }, "每个事件必须永久保留两条宿主子行")
-        expect(matrix.summary(for: .claudeCode) == .ready(supported: 4, total: 4), "Claude 4/4 ready")
-        expect(matrix.summary(for: .codex) == .ready(supported: 3, total: 4), "Codex 3/4 是正常 ready")
+        expect(matrix.summary(for: .claudeCode) == .ready(supported: 5, total: 5), "Claude 5/5 ready")
+        expect(matrix.summary(for: .codex) == .ready(supported: 4, total: 5), "Codex 4/5 是正常 ready")
         expect(
             matrix.cell(host: .codex, event: .stopFailure)?.state == .unsupported,
             "Codex 执行中断格必须以中性 unsupported 存在")
         expect(
             matrix.cell(host: .codex, event: .notification)?.accessibilityLabel
-                == "Codex，需要你，原生事件 PermissionRequest，仅授权请求，部分支持，已连接，可听",
-            "VoiceOver 必须同时说出宿主、声音语义、原生事件、支持级别、限定语、连接状态和可听状态")
+                == "Codex，需要你，仅授权请求，部分支持，已连接，可听",
+            "VoiceOver 必须说出宿主、声音语义、限定语、支持级别、连接状态和可听状态，"
+                + "但不拿原生 key 当主文案")
 
         var mutated = HostCapabilityCatalog.bindings(for: .codex)
         mutated.removeAll { $0.event == .subagentStop }
@@ -92,7 +99,7 @@ func runHostIntegrationModelSuites() {
             soundCoverage: coverage,
             enabledEvents: enabled)
         expect(
-            mutationMatrix.summary(for: .codex) == .ready(supported: 2, total: 4),
+            mutationMatrix.summary(for: .codex) == .ready(supported: 3, total: 5),
             "删除 Codex 映射必须改变矩阵，证明第四格不是 UI 硬编码")
         expect(
             mutationMatrix.cell(host: .codex, event: .subagentStop)?.state == .unsupported,
@@ -119,11 +126,11 @@ func runHostIntegrationModelSuites() {
             enabledEvents: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
 
         expect(
-            matrix.summary(for: .claudeCode) == .notConnected(supported: 4, total: 4),
-            "未安装 Claude Code 应保持中性 4/4 未连接")
+            matrix.summary(for: .claudeCode) == .notConnected(supported: 5, total: 5),
+            "未安装 Claude Code 应保持中性 5/5 未连接")
         expect(
-            matrix.summary(for: .codex) == .notConnected(supported: 3, total: 4),
-            "未安装 Codex 应保持中性 3/4 未连接")
+            matrix.summary(for: .codex) == .notConnected(supported: 4, total: 5),
+            "未安装 Codex 应保持中性 4/5 未连接")
         expect(
             matrix.cell(host: .codex, event: .stop)?.state == .notConnected,
             "支持的 Codex 格应显示未连接，不能显示红色 degraded")
@@ -194,8 +201,8 @@ func runHostIntegrationModelSuites() {
                 activation: .observed(
                     HostReceiptEvidence(
                         installationID: installationID,
-                        nativeEvent: "Stop",
-                        event: .stop,
+                        nativeEvent: "UserPromptSubmit",
+                        event: .taskStart,
                         timestamp: Date(timeIntervalSince1970: 1),
                         playbackResult: .played)),
                 installationID: installationID)
@@ -208,7 +215,7 @@ func runHostIntegrationModelSuites() {
                     uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
 
             expect(
-                matrix.summary(for: .claudeCode) == .ready(supported: 4, total: 4),
+                matrix.summary(for: .claudeCode) == .ready(supported: 5, total: 5),
                 "单事件缺音不得把宿主来源行整体降级")
             expect(
                 matrix.cell(host: .claudeCode, event: .notification)?.state == .missingSound,
@@ -239,6 +246,7 @@ private func makeSharedRuntimeFixture(
     writeFixture(#"{"selected_pack":"runtime-fixture"}"#, to: config)
 
     let eventFiles: [(Event, String)] = [
+        (.taskStart, "task-start.mp3"),
         (.stop, "stop.mp3"),
         (.stopFailure, "stop-failure.mp3"),
         (.notification, "notification.mp3"),

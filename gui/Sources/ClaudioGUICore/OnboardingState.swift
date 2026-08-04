@@ -36,7 +36,7 @@ public enum OnboardingState: Sendable, Equatable {
     /// "take over Claude Code" call-to-action state — brand `clay` accent, not an error.
     case notInstalled
 
-    /// Claudio's hook is present for all four core events. Renders the green ● header
+    /// Claudio's legacy hook is present for all four lifecycle events. Renders the green ● header
     /// dot (T7 acceptance criterion 2) — the only state that does.
     case installed
 }

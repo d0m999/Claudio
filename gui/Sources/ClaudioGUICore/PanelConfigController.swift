@@ -43,8 +43,8 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var eventRows: [EventRow]
     @Published public private(set) var packCards: [PackCard]
     @Published public private(set) var packSectionState: PanelPackSectionState
-    /// Existing audio for the active pack, computed once per full reload and shared by all four
-    /// event-row menus. This avoids four synchronous `readdir` calls during one SwiftUI body pass.
+    /// Existing audio for the active pack, computed once per full reload and shared by all five
+    /// event-row menus. This avoids five synchronous `readdir` calls during one SwiftUI body pass.
     /// An unreadable manifest yields an empty, fail-closed menu rather than invented orphan facts.
     @Published public private(set) var selectedPackAudioFiles: [PackAudioFile]
     @Published public private(set) var selectedPackIsBuiltinReadOnly: Bool
@@ -195,7 +195,7 @@ public final class PanelConfigController: ObservableObject {
     /// **失败也可能要刷新**（`/codex review` 第二条 [P1]）：上一版的失败分支只记 error 就完事，于是
     /// 「打开有效面板 → 外部把 `master_volume` 改成字符串 → 点一张包卡」会让 `selectPack` 如实返回
     /// `.configReadFailure`，而 `configState` 纹丝不动地停在 `.operational` —— 面板一边红字说 config 读不动，
-    /// 一边继续渲染四行活控件。刷哪一种交给 ``packSwitchRefreshRoute(after:)``（纯函数、穷尽 switch、由
+    /// 一边继续渲染五行活控件。刷哪一种交给 ``packSwitchRefreshRoute(after:)``（纯函数、穷尽 switch、由
     /// `PanelRefreshRouteSuite` 逐 case 钉死），与静音那一半 ``panelRefreshRoute(muteSucceeded:error:)``
     /// 是同一种极性：只有**可证明什么也没揭示**的失败（`.lockBusy` / `.invalidPackID`）才完全跳过。
     ///

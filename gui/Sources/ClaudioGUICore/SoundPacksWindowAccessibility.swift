@@ -306,7 +306,7 @@ public func soundPacksWindowPackAccessibilityLabel(
 
     switch state {
     case .complete:
-        facts.append("4 个事件均已配置")
+        facts.append("\(Event.allCases.count) 个事件均已配置")
     case .partial(let present, let total):
         facts.append("\(present)/\(total) 个事件已配置，缺 \(max(0, total - present)) 个")
     case .broken(let reason):

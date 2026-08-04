@@ -74,7 +74,7 @@ func runPanelRefreshRouteSuites() {
     //
     // 这一组是本轮两刀的正面钉子。它逮两类变异：
     //   (a) 把任何一条退回 .noRefresh —— 那正是修复前的代码（第一刀退 .configReadFailure/.configWriteFailure，
-    //       第二刀退 .lockFailed）。面板会在一份它刚刚亲口承认读不动的 config 上继续顶着四行活控件。
+    //       第二刀退 .lockFailed）。面板会在一份它刚刚亲口承认读不动的 config 上继续顶着五行活控件。
     //   (b) 把任何一条升到 .full —— 那会白扫一遍包库（config 坏了跟包库有没有变没有半点关系），并且拿一份
     //       selectedPack 为空的 config 去 retarget，污染 drop zone、抹掉画廊的选中卡高亮。
     //
@@ -113,7 +113,7 @@ func runPanelRefreshRouteSuites() {
             let route = panelRefreshRoute(muteSucceeded: false, error: failure.error)
             expect(
                 route == .configOnly,
-                "`.\(failure.name)`：\(failure.why)。判成 .noRefresh = 面板顶着四行活控件、在一份它刚刚"
+                "`.\(failure.name)`：\(failure.why)。判成 .noRefresh = 面板顶着五行活控件、在一份它刚刚"
                     + "亲口承认动不了的 config 上继续撒谎；判成 .full = 白扫一遍包库 + 拿空包 id 去 retarget。"
                     + "得到：\(route)")
         }

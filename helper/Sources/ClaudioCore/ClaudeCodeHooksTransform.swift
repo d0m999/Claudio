@@ -5,7 +5,8 @@ public enum ClaudeCodeHooksInspection: Sendable, Equatable {
     case notConfigured
     case legacyConnected
     case configured(installationID: UUID)
-    case partial(missingNativeEvents: [String], hasLegacyEntries: Bool)
+    case partial(
+        installationID: UUID?, missingNativeEvents: [String], hasLegacyEntries: Bool)
     case conflict(reason: String)
 }
 
@@ -34,8 +35,8 @@ public struct HostHooksJSONMutation {
 }
 
 /// 只读检查 Claude Code 的 hooks。modern Claudio command 会扫描所有事件键，避免一条
-/// 错放在 `SessionStart` / `UserPromptSubmit` 等合法事件下的 callback 被完整四事件掩盖；
-/// legacy `claudio play` 仍只在四个正式事件中计入连接，因此旧任务开始声音原样保留。
+/// 错放在 `SessionStart` 等合法事件下的 callback 被完整五事件掩盖；legacy `claudio play`
+/// 仍只以原有四个 lifecycle 事件计入旧连接，宿主原生名不进入声音语义协议。
 public func inspectClaudeCodeHooks(
     root: [String: Any],
     claudioRoot: String,
@@ -103,19 +104,21 @@ public func inspectClaudeCodeHooks(
         if modernMissing.isEmpty, legacyEvents.isEmpty, let id = modernIDs.first {
             return .success(.configured(installationID: id))
         }
-        if modern.isEmpty, legacyEvents == Set(bindings.map(\.event)) {
+        if modern.isEmpty, legacyEvents == Set(Event.legacyLifecycleCases) {
             return .success(.legacyConnected)
         }
         return .success(
             .partial(
+                installationID: modernIDs.first,
                 missingNativeEvents: modernMissing,
                 hasLegacyEntries: !legacyEvents.isEmpty))
     }
 }
 
 /// 显式连接/升级 Claude Code：若已是完整现代连接且所有事件都没有额外 modern callback，
-/// 则幂等不写；否则清理所有事件中的 modern Claudio 条目，只在四个正式事件中清理 legacy，
-/// 再为四个正式事件追加同一 installation ID 的 canonical command hook。
+/// 则幂等不写；否则清理所有事件中的 modern Claudio 条目，并在显式升级时额外清理五个正式
+/// 宿主事件下可精确识别的 legacy（含旧 `UserPromptSubmit → play notification`），再追加
+/// 同一 installation ID 的五条 canonical command hook。
 public func connectClaudeCodeHooks(
     root: [String: Any],
     claudioRoot: String,
@@ -140,6 +143,12 @@ public func connectClaudeCodeHooks(
     }
     let chosenInstallationID: UUID
     if case .configured(let currentID) = inspection {
+        chosenInstallationID = currentID
+    } else if case .partial(let currentID?, _, let hasLegacyEntries) = inspection,
+        !hasLegacyEntries
+    {
+        // 纯能力升级（例如 4 个现代 hook 补上 UserPromptSubmit）沿用唯一现有代次；
+        // fresh connect / legacy upgrade / mixed repair 才创建新代次。
         chosenInstallationID = currentID
     } else {
         chosenInstallationID = installationID
@@ -217,8 +226,9 @@ func containsRelocatedClaudeCodeHooks(
     return false
 }
 
-/// 精准断开 Claude Code：扫描所有事件并移除 modern Claudio command；legacy 只在四个
-/// 正式事件中移除，因此用户已有的 `UserPromptSubmit → claudio play notification` 原样保留。
+/// 精准断开 Claude Code：扫描所有事件并移除 modern Claudio command；legacy 只删除旧安装器
+/// 管理的四个 lifecycle 条目。未经过升级的用户自有 `UserPromptSubmit → play notification`
+/// 不属于 disconnect 的删除范围。
 public func disconnectClaudeCodeHooks(
     root: [String: Any],
     claudioRoot: String
@@ -232,15 +242,17 @@ public func disconnectClaudeCodeHooks(
     var next = root
     var nextHooks = hooks
     var removed = 0
-    let officialNativeEvents = Set(
-        HostCapabilityCatalog.bindings(for: .claudeCode).compactMap(\.nativeEvent))
+    let legacyManagedNativeEvents = Set(
+        Event.legacyLifecycleCases.compactMap {
+            HostCapabilityCatalog.binding(host: .claudeCode, event: $0)?.nativeEvent
+        })
     for nativeEvent in Array(nextHooks.keys) {
         guard let groups = nextHooks[nativeEvent] as? [Any] else { continue }
         let filtered = filterClaudeOwnedEntries(
             groups: groups,
             claudioRoot: claudioRoot,
             modernBinaryPath: nil,
-            removeLegacy: officialNativeEvents.contains(nativeEvent),
+            removeLegacy: legacyManagedNativeEvents.contains(nativeEvent),
             removed: &removed)
         if filtered.isEmpty {
             nextHooks.removeValue(forKey: nativeEvent)

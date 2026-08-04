@@ -63,7 +63,7 @@ func runHostHookReceiptSuites() {
                 permissions.map { $0.intValue & 0o777 } == 0o600,
                 "最终回执权限必须是 0600，got \(permissions?.stringValue ?? "<missing>")")
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .codex, nativeEvent: "PermissionRequest",
                     installationID: installationID)
                     == HostReceiptEvidence(
@@ -209,11 +209,11 @@ func runHostHookReceiptSuites() {
             expect(store.store(permission) == .success(.written), "同秒第一条回执必须成功写入")
             expect(store.store(subagent) == .success(.written), "同秒第二条回执必须成功写入")
 
-            let permissionEvidence = store.activationEvidence(
+            let permissionEvidence = store.receiptEvidence(
                 host: .codex,
                 nativeEvent: "PermissionRequest",
                 installationID: installationID)
-            let subagentEvidence = store.activationEvidence(
+            let subagentEvidence = store.receiptEvidence(
                 host: .codex,
                 nativeEvent: "SubagentStop",
                 installationID: installationID)
@@ -273,7 +273,7 @@ func runHostHookReceiptSuites() {
                 """, to: file)
 
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .codex,
                     nativeEvent: "PermissionRequest",
                     installationID: installationID)
@@ -307,12 +307,12 @@ func runHostHookReceiptSuites() {
                 playbackResult: .playbackFailed)
             expect(store.store(receipt) == .success(.written), "播放失败也应留下脱敏真实回执")
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .codex, nativeEvent: "PermissionRequest", installationID: currentID)
                     != nil,
                 "播放失败不抹掉 hook 已真实触发这一 activation 事实")
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .codex, nativeEvent: "PermissionRequest", installationID: staleID)
                     == nil,
                 "旧配置或断开后的迟到回调不能点亮当前 installation")
@@ -323,7 +323,7 @@ func runHostHookReceiptSuites() {
             }
             writeFixture("{broken json", to: file)
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .codex, nativeEvent: "PermissionRequest", installationID: currentID)
                     == nil,
                 "损坏 JSON 必须失败关闭")
@@ -341,7 +341,7 @@ func runHostHookReceiptSuites() {
                 }
                 """, to: file)
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .codex, nativeEvent: "PermissionRequest", installationID: currentID)
                     == nil,
                 "路径与内容宿主不匹配时不能形成 evidence")
@@ -359,7 +359,7 @@ func runHostHookReceiptSuites() {
                 }
                 """, to: file)
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .codex, nativeEvent: "PermissionRequest", installationID: currentID)
                     == nil,
                 "路径与内容原生/语义事件不匹配时不能形成 evidence")
@@ -406,7 +406,7 @@ func runHostHookReceiptSuites() {
                 store.store(lateOld) == .failure(.staleInstallation),
                 "时间更晚的旧进程回执也必须按 installation ID 拒绝")
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .codex, nativeEvent: "Stop", installationID: currentID)
                     == HostReceiptEvidence(
                         installationID: currentID,
@@ -443,7 +443,7 @@ func runHostHookReceiptSuites() {
                 store.store(late) == .failure(.staleInstallation),
                 "断开后的在途 hook 不得再写入稳定回执")
             expect(
-                store.activationEvidence(
+                store.receiptEvidence(
                     host: .claudeCode, nativeEvent: "Stop", installationID: installationID)
                     == nil,
                 "迟到回执不得重新点亮已断开的 installation")

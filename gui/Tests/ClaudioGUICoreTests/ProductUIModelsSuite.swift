@@ -23,7 +23,7 @@ func runProductUIModelsSuites() {
             "四档缩放必须严格递增")
     }
 
-    suite("面板声音包四态：1/4 个固定包、无固定、无包与读取失败互斥") {
+    suite("面板声音包四态：固定包 1 行/上限 4 行、无固定、无包与读取失败互斥") {
         let cards = (0..<5).map { index in
             PackCard(
                 id: "pack-\(index)",

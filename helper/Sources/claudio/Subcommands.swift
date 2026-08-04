@@ -74,7 +74,7 @@ extension Claudio {
                 case .success(let snapshot):
                     print("✓ \(hostID.displayName)：\(integrationSnapshotText(snapshot))")
                     if hostID == .codex, case .awaitingReceipt = snapshot.activation {
-                        print("  claudi0 已写好，等待 Codex 确认；在 Codex 输入 /hooks。")
+                        print("  在 Codex 输入 /hooks，确认后再提交一次提示词。")
                     }
                 case .failure(let error):
                     print("✗ \(error.description)")
@@ -141,7 +141,7 @@ extension Claudio {
             abstract: "legacy hook 入口：按声音语义播放（全局去抖，立即 exit 0）。"
         )
 
-        @Argument(help: "事件：stop / stop_failure / notification / subagent_stop")
+        @Argument(help: "事件：task_start / stop / stop_failure / notification / subagent_stop")
         var event: String
 
         func run() throws {
@@ -268,8 +268,8 @@ private func integrationSnapshotText(_ snapshot: HostIntegrationSnapshot) -> Str
             return "\(supported)/\(Event.allCases.count) 已就绪"
         case .none, .awaitingReceipt:
             return snapshot.host == .codex
-                ? "claudi0 已写好，等待 Codex 确认"
-                : "已配置，等待首个真实事件"
+                ? "在 Codex 输入 /hooks，确认后再提交一次提示词"
+                : "已配置，请提交一次提示词以确认连接"
         }
     }
 }

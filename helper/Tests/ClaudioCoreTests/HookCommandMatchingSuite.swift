@@ -21,10 +21,12 @@ func runHookCommandMatchingSuites() {
     suite("新版双宿主 hook 命令：严格 round-trip，拒绝 Codex 假能力与外部路径") {
         let installationID = UUID(uuidString: "01234567-89AB-4CDE-8FAB-0123456789AB")!
         let supported: [(HostID, String, Event)] = [
+            (.claudeCode, "UserPromptSubmit", .taskStart),
             (.claudeCode, "Stop", .stop),
             (.claudeCode, "StopFailure", .stopFailure),
             (.claudeCode, "Notification", .notification),
             (.claudeCode, "SubagentStop", .subagentStop),
+            (.codex, "UserPromptSubmit", .taskStart),
             (.codex, "Stop", .stop),
             (.codex, "PermissionRequest", .notification),
             (.codex, "SubagentStop", .subagentStop),
@@ -56,12 +58,6 @@ func runHookCommandMatchingSuites() {
                 host: .codex, nativeEvent: "StopFailure", installationID: installationID,
                 claudioBinaryPath: canonicalPath) == nil,
             "Codex StopFailure 必须失败关闭")
-        expect(
-            hostIntegrationHookCommand(
-                host: .codex, nativeEvent: "UserPromptSubmit", installationID: installationID,
-                claudioBinaryPath: canonicalPath) == nil,
-            "UserPromptSubmit 不得冒充需要你")
-
         let canonical = hostIntegrationHookCommand(
             host: .codex, nativeEvent: "Stop", installationID: installationID,
             claudioBinaryPath: canonicalPath)!
@@ -132,7 +128,7 @@ func runHookCommandMatchingSuites() {
             "同字节 NFC current helper 仍必须匹配")
     }
 
-    suite("matchedClaudioEvent: recognizes today's canonical path for every one of the 4 events") {
+    suite("matchedClaudioEvent: recognizes today's canonical path for every one of the 5 events") {
         for event in Event.allCases {
             let command = "\(canonicalPath) play \(event.cliName)"
             expect(

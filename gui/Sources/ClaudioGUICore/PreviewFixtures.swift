@@ -150,7 +150,7 @@ public enum PreviewFixtures {
     // MARK: - EventRow / CoverageState (ENGINEERING.md T16 D2, DESIGN.md "事件行三态")
 
     /// Every ``CoverageState`` case × `enabled` (true/false) — six rows — AND every ``Event``,
-    /// on both axes at once: the four events are ROTATED across the six coverage×enabled
+    /// on both axes at once: the five events are ROTATED across the six coverage×enabled
     /// combinations (in ``Event/allCases`` declaration order), so the combination grid stays
     /// exhaustive while no event is left un-rendered.
     ///
@@ -171,11 +171,12 @@ public enum PreviewFixtures {
     /// event turns that check red without anyone having to remember to update a hand-written
     /// list.
     public static let eventRows: [EventRow] = [
-        EventRow(event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: true),
         EventRow(
-            event: .stopFailure, coverage: .present(fileName: "stop-failure.mp3"), enabled: false),
-        EventRow(event: .notification, coverage: .unmapped, enabled: true),
-        EventRow(event: .subagentStop, coverage: .unmapped, enabled: false),
+            event: .taskStart, coverage: .present(fileName: "task-start.mp3"), enabled: true),
+        EventRow(
+            event: .stop, coverage: .present(fileName: "stop.mp3"), enabled: false),
+        EventRow(event: .stopFailure, coverage: .unmapped, enabled: true),
+        EventRow(event: .notification, coverage: .unmapped, enabled: false),
         EventRow(
             event: .subagentStop, coverage: .broken(fileName: "subagent-stop.mp3"), enabled: true),
         EventRow(event: .notification, coverage: .broken(fileName: "ping.mp3"), enabled: false),
@@ -186,18 +187,18 @@ public enum PreviewFixtures {
     /// Every ``PackCardState`` case × `isSelected` (true/false) — six cards.
     ///
     /// The `presentEvents` sets carry a SECOND exhaustiveness obligation, for the same reason
-    /// ``eventRows`` does (T14 review 修复①): the row's 4-slot coverage track
+    /// ``eventRows`` does (T14 review 修复①): the row's 5-slot coverage track
     /// (``PackGalleryView``, T4) renders ``Event/allCases`` for every card whose
     /// ``packRowTrailingSlot(for:)`` resolves to `.track`, styling each slot present-or-absent.
     /// So the fixtures whose state is `.complete`/`.partial` (the ones that actually reach a
-    /// track) must show each of the four events in BOTH styles among THEMSELVES — the two
+    /// track) must show each of the five events in BOTH styles among THEMSELVES — the two
     /// `.broken` cards' `presentEvents == []` does NOT count toward this anymore (T4: a broken
     /// row renders a status row instead of a track, so its `presentEvents` is never turned into
     /// an actual absent-styled slot anywhere in the gallery — counting it here would be exactly
     /// the "asserted against data nobody renders" bug this file exists to prevent). The
-    /// `.complete` cards (`presentEvents == Set(Event.allCases)`) supply all four PRESENT
+    /// `.complete` cards (`presentEvents == Set(Event.allCases)`) supply all five PRESENT
     /// slots; the two `.partial` cards' present sets are chosen so their absent sets' UNION is
-    /// all four events. ``PreviewFixturesSuite`` pins both halves, scoped to the `.track`-
+    /// all five events. ``PreviewFixturesSuite`` pins both halves, scoped to the `.track`-
     /// resolving cards, off ``Event/allCases`` directly.
     public static let packCards: [PackCard] = [
         PackCard(
@@ -207,15 +208,17 @@ public enum PreviewFixtures {
             id: "sunny-chime", name: "晴朗铃", isCC0: true, presentEvents: Set(Event.allCases),
             state: .complete, isSelected: false),
         PackCard(
-            id: "half-pack", name: "半成品", isCC0: false, presentEvents: [.stop, .notification],
-            state: .partial(present: 2, total: 4), isSelected: true),
-        // 缺失集刻意选 `.subagentStop` 单独在场（而非 `.stop`）：与 `half-pack` 的缺失集
-        // {stopFailure, subagentStop} 取并集，四个事件的「缺」才恰好全部覆盖到——`half-pack`
+            id: "half-pack", name: "半成品", isCC0: false,
+            presentEvents: [.taskStart, .stop, .notification],
+            state: .partial(present: 3, total: 5), isSelected: true),
+        // `one-event-pack` 刻意只让 `.subagentStop` 在场：其缺失集
+        // {taskStart, stop, stopFailure, notification} 与 `half-pack` 的缺失集
+        // {stopFailure, subagentStop} 取并集，五个事件的「缺」才恰好全部覆盖到。
         // 两个都缺的正是 `stopFailure`/`subagentStop`，若这里仍选 `.stop` 在场，`.stop` 就永远
         // 不会在任何一张会画轨的卡片上以「缺失格」样式出现过。
         PackCard(
-            id: "quarter-pack", name: "缺三个", isCC0: false, presentEvents: [.subagentStop],
-            state: .partial(present: 1, total: 4), isSelected: false),
+            id: "one-event-pack", name: "缺四个", isCC0: false, presentEvents: [.subagentStop],
+            state: .partial(present: 1, total: 5), isSelected: false),
         PackCard(
             id: "ghost-pack", name: nil, isCC0: false, presentEvents: [],
             state: .broken(reason: "声音包目录未找到"), isSelected: true),
@@ -343,8 +346,8 @@ public enum PreviewFixtures {
                 hostIntegrationSnapshot(host: .codex),
             ]),
         hostIntegrationScenario(
-            id: "codex-normal-3-of-4",
-            title: "Codex 正常 3/4",
+            id: "codex-normal-4-of-5",
+            title: "Codex 正常 4/5",
             snapshots: [
                 .disconnected(host: .claudeCode),
                 hostIntegrationSnapshot(host: .codex),

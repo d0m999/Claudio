@@ -54,6 +54,9 @@ func runDoctorSuites() {
         expect(decodedFull?.isEnabled(.stop) == false, "per-event enabled=false honored")
         expect(decodedFull?.isEnabled(.notification) == true, "per-event enabled=true honored")
         expect(
+            decodedFull?.isEnabled(.taskStart) == true,
+            "旧 config 没有 task_start 时必须缺省启用，不要求迁移")
+        expect(
             decodedFull?.isEnabled(.subagentStop) == true,
             "events absent from the map default to enabled (opt-out design)")
 
@@ -67,6 +70,9 @@ func runDoctorSuites() {
         expect(
             decodedMinimal?.isEnabled(.stop) == true,
             "missing events map: every event defaults to enabled")
+        expect(
+            decodedMinimal?.isEnabled(.taskStart) == true,
+            "missing events map: task_start also defaults to enabled")
 
         let missingSelectedPack = """
             { "master_volume": 0.5 }
@@ -597,7 +603,7 @@ func runDoctorSuites() {
             expect(
                 packResult?.message
                     == "✓ 声音包 `minimal-chime` 未声明事件；无需检查音频文件",
-                "doctor must explain that its ok result means no audio was declared, not imply 0/4 coverage is complete"
+                "doctor must explain that its ok result means no audio was declared, not imply 0/5 coverage is complete"
             )
         }
     }

@@ -4,8 +4,9 @@
   "name": "极简铃音",
   "author": "Claudio",
   "license": "CC0-1.0",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "events": {
+    "task_start": "task_start.mp3",
     "stop": "stop.mp3",
     "stop_failure": "stop_failure.mp3",
     "notification": "notification.mp3",

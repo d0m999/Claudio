@@ -89,11 +89,11 @@ brew install --cask claudi0
 2. 点菜单栏图标。面板始终显示两条等权声音来源：
 
    ```text
-   Claude Code    4/4 …
-   Codex          3/4 …
+   Claude Code    5/5 …
+   Codex          4/5 …
    ```
 
-   Codex `3/4` 是正常能力，不是故障：当前没有与「执行中断」对应的 `StopFailure` 原生事件。
+   Codex `4/5` 是正常能力，不是故障：当前没有与「执行中断」对应的 `StopFailure` 原生事件。
 3. 点击任一来源行打开「声音来源」详情窗口，然后分别连接需要的宿主。
 
 ### 连接 Claude Code
@@ -107,13 +107,13 @@ brew install --cask claudi0
 
 ### 连接 Codex
 
-点 Codex 卡片里的「连接」。claudi0 只在 `~/.codex/hooks.json` 中管理自己的 `Stop`、`PermissionRequest` 与 `SubagentStop` command hook；不会接管单命令 `notify`，也不会读写私有 trust 数据或删除第三方 hook。
+点 Codex 卡片里的「连接」。claudi0 只在 `~/.codex/hooks.json` 中管理自己的 `UserPromptSubmit`、`Stop`、`PermissionRequest` 与 `SubagentStop` command hook；不会接管单命令 `notify`，也不会读写私有 trust 数据或删除第三方 hook。
 
 写入完成后会显示：
 
 > **claudi0 已写好，等待 Codex 确认**
 
-在新的 Codex 会话中运行 `/hooks` 并确认 claudi0 hooks。详情窗口提供「复制 `/hooks`」和「重新检测」。只有确认后产生首个真实事件、且回执属于当前 installation ID，Codex 才显示绿色已连接；仅仅写好 JSON 不算激活。
+在 Codex 中运行 `/hooks` 并确认 claudi0 hooks，然后再提交一次提示词。详情窗口提供「复制 `/hooks`」和「重新检测」。只有当前 installation ID 的 `UserPromptSubmit` 回执才能证明新增的任务开始 hook 已激活并点亮绿色连接；仅仅写好 JSON，或只有旧的 Stop 等回执，都不算激活。其它当前代次回执仍会作为最新事件诊断显示。
 
 Codex 的「需要你」只覆盖 `PermissionRequest`（**仅授权请求**）。`UserPromptSubmit` 是任务开始，不计入「需要你」；`Stop` 只写「本轮结束」，不承诺任务已经完成。
 
@@ -182,7 +182,7 @@ brew uninstall --cask claudi0
 ### claudi0 打开了但没发声
 
 1. 在面板确认目标宿主已连接；也可以运行 `~/.claudio/bin/claudi0 integrations status`。未安装/未连接是提示，不是 shared runtime 故障。
-2. 如果 Codex 显示「claudi0 已写好，等待 Codex 确认」，先在**新的 Codex 会话**运行 `/hooks` 完成确认，再触发一个真实事件并点「重新检测」。`3/4` 本身不需要修复。
+2. 如果 Codex 显示「claudi0 已写好，等待 Codex 确认」，先运行 `/hooks` 完成确认，再提交一次提示词并点「重新检测」。`4/5` 本身不需要修复。
 3. 确认系统音量以及 claudi0 的主音量/对应事件没有静音。
 4. 在 claudi0 面板里找到当前声音包，点对应事件的试听按钮 ▶。试听会绕过宿主 hook，能帮助区分「播放链坏了」和「宿主还没激活」。
 5. 运行 `~/.claudio/bin/claudi0 doctor`，分别查看 shared runtime、Claude Code 与 Codex。只有 shared runtime 不可用或已连接宿主损坏才会返回失败。
@@ -203,7 +203,7 @@ brew uninstall --cask claudi0
 它会做这几件事（每一件都会在输出里如实说出来）：
 
 - 二进制不在 / 被 macOS 隔离 → 重新复制、解除隔离，并**回头验证一次**（没解掉就报错，绝不写 hooks）
-- 内置声音包不在 → 复制回来
+- 内置声音包不在 → 复制回来；严格 pristine 的 `minimal-chime 1.0.0` 会原子升级为含「任务开始」的 `1.1.0`，任何格式化、额外文件或音频变化都视为自定义并保持不变
 - 上一次安装被中断留下的**残缺包** → 原样搬到一个备份目录（`packs/.<id>.broken-…`，**一个文件都不删**），
   再装一份干净的；输出里会告诉你搬到哪儿了
 - 你选中的那个包已经不在了 / 读不出来 → 替你换上一个能响的，并打印一行 ⚠ 告诉你换的是哪个

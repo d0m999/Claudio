@@ -65,11 +65,11 @@ jobs:
       # --- helper (claudio CLI)：两个架构各自单独 `swift build`，再手动 lipo 合并 ---
       - name: Build helper (claudio CLI) — arm64
         working-directory: helper
-        run: swift build -c release --arch arm64
+        run: swift build -c release --arch arm64 --product claudio
 
       - name: Build helper (claudio CLI) — x86_64
         working-directory: helper
-        run: swift build -c release --arch x86_64
+        run: swift build -c release --arch x86_64 --product claudio
 
       - name: Lipo-merge helper into universal `claudio`
         run: |
@@ -123,6 +123,7 @@ jobs:
 
           # 内置声音包只读随 app bundle 分发（ENGINEERING.md 工程落地细节②：声音包存储根 + 查找顺序）。
           cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
+          cp packs/LICENSES.md "$APP/Contents/Resources/packs/LICENSES.md"
           cp assets/branding/claudi0.icns "$APP/Contents/Resources/claudi0.icns"
 
           cat > "$APP/Contents/Info.plist" <<PLIST

@@ -23,6 +23,7 @@ cp "$(swift build -c release --package-path helper --product claudio --show-bin-
 cp "$(swift build -c release --package-path helper --product claudio --show-bin-path)/claudio" \
    "$APP/Contents/Resources/bin/claudio"
 cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
+cp packs/LICENSES.md "$APP/Contents/Resources/packs/LICENSES.md"
 cp assets/branding/claudi0.icns "$APP/Contents/Resources/claudi0.icns"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'

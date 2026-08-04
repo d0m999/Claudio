@@ -143,7 +143,7 @@ public func shellQuotedPath(_ path: String) -> String {
 // MARK: - Matcher
 
 /// Whether `command` is a hook command claudio itself could plausibly have written **from the
-/// `claudioRoot` namespace**, for any of the four core events — returns the matched ``Event``,
+/// `claudioRoot` namespace**, for any of the five sound events — returns the matched ``Event``,
 /// or `nil` if it doesn't look like one of ours. This is the single source of truth
 /// `removeHookEntries` (uninstall's removal sweep) keys off;
 /// `install`/``detectHookInstallStatus(settingsFile:claudioBinaryPath:)`` deliberately do NOT
@@ -158,7 +158,7 @@ public func shellQuotedPath(_ path: String) -> String {
 /// **Why this can never misfire on a third-party hook** (adversarial argument, not just an
 /// assertion — every clause below is pinned by a case in `HookCommandMatchingSuite.swift`):
 /// 1. **Exact trailing argv**: `command` must end with the literal ` play <event>`, where
-///    `<event>` is one of the 4 real ``Event/cliName`` values. `mytool play deploy` fails; so
+///    `<event>` is one of the 5 real ``Event/cliName`` values. `mytool play deploy` fails; so
 ///    does anything with a trailing operator or extra argument (` play stop --verbose`,
 ///    ` play stop && rm -rf ~`), because that text is no longer the suffix.
 /// 2. **Everything before that suffix is read as one word**, decoded via
@@ -175,7 +175,7 @@ public func shellQuotedPath(_ path: String) -> String {
 ///    that (unlike `install`) takes **no backup** before rewriting `settings.json`.
 ///
 /// Combined, a false positive requires an entry whose command is literally
-/// `<this user's ~/.claudio>/<anything>/claudio play <one of our 4 events>` — i.e. claudio's
+/// `<this user's ~/.claudio>/<anything>/claudio play <one of our 5 events>` — i.e. claudio's
 /// own binary, under claudio's own directory. Sweeping that is the job, not a misfire. The
 /// match stays deliberately loose about *which subdirectory* under the root (`bin/`, a future
 /// `libexec/`, the root itself), which is exactly what survives a relocation.

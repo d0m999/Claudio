@@ -11,25 +11,26 @@ Spec review: 2 轮对抗式评审，6/10 → 8/10 → 再补 8 处工程落地�
 
 产品对外统一写作 **claudi0**，仍读作 “Claudio”。发布产物为 `claudi0.app` / `claudi0-<version>.dmg`，用户可见 CLI 为 `claudi0`。为避免一次视觉改名破坏真实安装，以下技术标识保持稳定：Swift 模块与 target `ClaudioCore` / `ClaudioGUI`、用户数据根 `~/.claudio/`、宿主 hooks 的精确可执行路径 `~/.claudio/bin/claudio`、bundle identifier `com.claudio.app`。bootstrap 会额外发布 `~/.claudio/bin/claudi0` 命令；旧路径继续作为 runtime 与 hook ownership 锚点。
 
-## 现行权威覆盖层：双宿主架构（2026-08-01）
+## 现行权威覆盖层：双宿主架构与任务开始（2026-08-04）
 
 > 本节是 Claude Code + Codex 双宿主实施规范。下方带日期的 v1 决议、评审记录和实现日志仍是当时事实，不回写成双宿主历史；凡旧的 Claude-only 产品、命令、焦点或状态语义与本节冲突，以本节为准。本文档只定义目标与完成证据，**不等于人工验收已经执行**。
 
 ### 产品边界与事件语义
 
-claudi0 管的是四种稳定的**声音语义**，不是把某个宿主的原生事件名扩散到 UI。`Event` 只保留文件键；宿主事件名与支持级别属于 adapter：
+claudi0 管的是五种稳定的**声音语义**，不是把某个宿主的原生事件名扩散到 UI。`Event` 只保留文件键；宿主事件名与支持级别属于 adapter：
 
 | claudi0 语义 | manifest / CLI 文件键 | Claude Code | Codex |
 |---|---|---|---|
+| 任务开始 | `task_start` | `UserPromptSubmit`（supported） | `UserPromptSubmit`（supported） |
 | 本轮结束 | `stop` | `Stop`（supported） | `Stop`（supported） |
 | 执行中断 | `stop_failure` | `StopFailure`（supported） | unsupported |
 | 需要你 | `notification` | `Notification`（supported） | `PermissionRequest`（partial：**仅授权请求**） |
 | 子任务结束 | `subagent_stop` | `SubagentStop`（supported） | `SubagentStop`（supported） |
 
-- Claude Code `4/4`、Codex `3/4` 都是正常能力事实；`3/4` 不算 degraded，也不得使用 warning/error 色。
+- Claude Code `5/5`、Codex `4/5` 都是正常能力事实；`4/5` 不算 degraded，也不得使用 warning/error 色。
 - Codex `Stop` 不等于「任务完成」：hook 运行后 Codex 仍可能继续。UI、CLI 和日志统一写「本轮结束」。
-- Codex `UserPromptSubmit` 表示用户提交提示词/任务开始，不能降级映射为「需要你」；遗留的该事件播放声音可继续存在，但不计入新矩阵。
-- manifest schema、四个事件文件名和用户当前选包保持不变，不新增第五事件。
+- 两宿主的 `UserPromptSubmit` 都映射「任务开始」，首次提示与 follow-up 同样触发；它不能降级映射为「需要你」。
+- manifest schema 保持 `1`；新增第五文件键不要求旧包迁移 schema。旧包缺少 `task_start` 仍可加载并显示 `4/5`，不得跨包 fallback。
 
 Codex 的事件边界、`/hooks` 信任步骤与可组合 hook schema 以当前 [Hooks 规范](https://learn.chatgpt.com/docs/hooks)、[advanced config](https://learn.chatgpt.com/docs/config-file/config-advanced) 和 [配置参考](https://learn.chatgpt.com/docs/config-file/config-reference) 为准；实现不读取私有 trust hash，也不把单命令 `notify` 当成可组合 hooks。
 
@@ -39,7 +40,7 @@ Codex 的事件边界、`/hooks` 信任步骤与可组合 hook schema 以当前 
 
 - `HostID`：`.claudeCode`、`.codex`。
 - `HostCapabilityBinding`：宿主原生事件、claudi0 `Event` 与 `supported / partial / unsupported` 的唯一映射表。
-- `HostIntegrationSnapshot`：分别承载 shared runtime、宿主可用性、配置完整度、可写性、激活证据与当前操作状态；不得把这些轴压成一个模糊的布尔值。
+- `HostIntegrationSnapshot`：分别承载 shared runtime、宿主可用性、配置完整度、可写性、`activation`、`latestReceipt` 与当前操作状态；不得把这些轴压成一个模糊的布尔值。`activation` 只认当前代次 `UserPromptSubmit`，`latestReceipt` 从当前代次全部受支持事件选最新诊断。
 - `HostIntegrationAdapter`：`inspect`、`connect`、`disconnect`。
 - `HostIntegrationManager`：actor；持有两个 adapter，串行共享 bootstrap，允许两个宿主并行刷新/连接，并保证一侧失败不冻结另一侧。
 - `AudibilityMatrix`：纯函数组合 adapter 能力、hook 状态、当前声音包覆盖与静音状态，为菜单栏和详情窗口生成同一份每格状态。UI 不得硬编码 Codex 第四格。
@@ -54,20 +55,23 @@ claudi0 hook <host> <native-event> --installation-id <uuid>
 ```
 
 - `integrations status --json` 与 GUI/doctor 读取同一 snapshot；JSON 是脚本接口，不混入面向人的进度文案。
-- `hook` 先按宿主归一化原生事件，再调用现有播放链并写最小回执。未知事件、Codex `StopFailure` 和缺少映射必须静默拒绝播放；无论映射、播放、回执或锁失败，hook 都立即退出且不阻断宿主。
+- `hook` 先按宿主归一化原生事件，再调用现有播放链并写最小回执。未知事件与 Codex `StopFailure` 失败关闭；当前包缺少映射写 `not_ready`，不偷用其它事件声音。每次受支持调用无论 played、muted、debounced、notReady、playbackFailed、锁或回执失败都 `exit 0`，stdout/stderr 均为零字节。
 - `claudi0 play <event>` 保留 legacy 行为，其全局 1.5 秒去抖语义不变；既有 hooks 中的 `claudio play` 路径继续有效。新 `hook` 使用**宿主级**去抖状态：Claude Code 与 Codex 不得互相吞掉 1.5 秒内的真实事件。
+- 现代 `UserPromptSubmit` 使用每宿主独立的 250ms 时间戳；它与该宿主 1.5 秒 lifecycle 时间戳分离，但共用非阻塞播放锁。静音或缺音的首次回调也记短时戳，重复回调写 `debounced`；任务开始不能压掉紧随其后的 Stop / PermissionRequest / SubagentStop。
 - `claudi0 install` / `uninstall` 保持 Claude Code 兼容别名；`claudi0 setup` 保持原有 CLI 行为（shared bootstrap + Claude Code legacy-compatible connection）。若 Claude Code 已有完整、健康的现代连接，`install` / `setup` 必须成功 no-op；遇到部分、冲突、畸形、旧 helper 路径或 modern + legacy 混装状态则 fail closed，并引导用户用 `claudi0 integrations connect/disconnect claude-code` 显式修复，绝不能再追加一条可能重复播放的 legacy 链。GUI 首次启动只做 shared bootstrap，宿主连接由用户分别选择。
 
 ### Shared bootstrap、配置事务与 adapter 归属
 
 `SharedRuntimeBootstrap` 只负责 helper、内置声音包、默认选包和 quarantine 修复；断开任一宿主都不得删除这些共享资产。
 
+内置 `minimal-chime` 为 `1.1.0`。bootstrap 只原子升级可证明为 byte-pristine 的 `1.0.0`：真实目录、根集合恰为旧 manifest + 四个旧 MP3、全部正规文件、manifest 与私有 v1.0 baseline 字节一致、旧音频先比尺寸再有界逐字节对照当前 bundle。格式化 manifest、extra、symlink/FIFO/subdir 或任一音频变化都视为自定义并完全保持不变。升级在 `packs.lock` 内同目录 staging，复验目标仍 pristine 后用 `replaceItemAt(..., options: [])` 替换；失败保留旧包并返回可重试错误，不创建永久 salvage。
+
 宿主配置统一经 `ConfigFileTransaction`：每个配置文件使用独立非阻塞锁、一次性备份、受限读取与解析、compare-and-swap 外部修改检测、符号链接防护及同目录原子替换。dotfiles 符号链接保留链接节点并写其已解析目标；dangling link 没有安全目标，明确 fail closed。一次性备份优先使用 `RENAME_EXCL`，文件系统不支持时只回退到同目录 `link(2)`，仍以 `EEXIST` 拒绝覆盖。adapter 只实现自身 schema 变换：
 
-- `ClaudeCodeIntegrationAdapter` 操作 `~/.claude/settings.json`。新连接写带 installation ID 的 `claudio hook claude-code ...`；现有精确 `claudio play` entries 识别为 `legacyConnected`，不在启动时静默升级。详情窗口提供「升级连接」。旧 `UserPromptSubmit → claudio play notification` 保留但不计入「需要你」。
-- `CodexIntegrationAdapter` 只操作 `~/.codex/hooks.json` 中 claudi0 自己的 `Stop`、`PermissionRequest`、`SubagentStop` command hook。它不接管 `notify`，不读写私有 trust hash，保留第三方 hook、matcher 与数组顺序。
-- Codex 写入成功后状态是 `configuredAwaitingActivation`，固定文案「claudi0 已写好，等待 Codex 确认」。用户须在 `/hooks` 确认；只有当前 installation ID 的首个真实事件回执才能进入 `connectedObserved`。
-- 已知旧版 `codex-notify` wrapper 只有在与 claudi0 生成版本**精确匹配**时才可显式迁移 claudi0 分支，并保留原 notifier。未知或修改过的 wrapper fail closed，不能再装一条可能重复发声的 `Stop` hook。该 wrapper 的 `Stop` 分支可能在用户完成 `/hooks` 信任前运行，因此即使写出当前 installation 的 `Stop` 回执也**不能**作为 Codex 激活证据；绿色连接必须由 composable hooks 中当前 installation 的 `PermissionRequest` 或 `SubagentStop` 真实回执点亮。
+- `ClaudeCodeIntegrationAdapter` 操作 `~/.claude/settings.json`。新连接写带 installation ID 的五个 canonical hook；现有精确 `claudio play` entries 识别为 `legacyConnected`，不在启动时静默升级。详情窗口提供「升级连接」。显式升级会清除当前 claudi0 root 可精确识别的旧 `UserPromptSubmit → claudio play notification`，保留第三方、其它用户路径、look-alike、空 group 与原顺序。
+- `CodexIntegrationAdapter` 只操作 `~/.codex/hooks.json` 中 claudi0 自己的 `UserPromptSubmit`、`Stop`、`PermissionRequest`、`SubagentStop` command hook。它不伪造 `StopFailure`，不接管 `notify`，不读写私有 trust hash，保留第三方 hook、matcher 与数组顺序。
+- Codex 写入成功后状态是 `configuredAwaitingActivation`，固定文案「claudi0 已写好，等待 Codex 确认」。用户须在 `/hooks` 确认并再提交一次提示词；只有当前 installation ID 的 `UserPromptSubmit` 回执才能进入 `connectedObserved`。
+- 已知旧版 `codex-notify` wrapper 只有在与 claudi0 生成版本**精确匹配**时才可显式迁移 claudi0 分支，并保留原 notifier。未知或修改过的 wrapper fail closed，不能再装一条可能重复发声的 `Stop` hook。该 wrapper 的 `Stop` 分支可能在用户完成 `/hooks` 信任前运行，因此即使写出当前 installation 的 `Stop` 回执也**不能**作为 Codex 激活证据；绿色连接只能由 composable hooks 中当前 installation 的 `UserPromptSubmit` 真实回执点亮。
 - `disconnect` 只删除所选宿主中 claudi0 自有条目；保留另一宿主、第三方配置、shared runtime 与声音包。
 
 每个宿主另有一把外层 operation lock，覆盖「配置变换 + legacy wrapper + active installation marker」整个连接或断开操作；配置文件的内层锁仍只负责单次 JSON read-modify-write。Codex wrapper 必须以 expected-bytes CAS 修改；若随后 `hooks.json` 事务失败，按相反 CAS 恢复原 wrapper，回滚也冲突时把双重冲突显式返回，绝不覆盖外部新内容。断开时先撤销当前 marker，再摘配置：marker 锁失败则配置零写入；撤销成功后即使后续配置事务失败，迟到 hook 也不能重新制造有效证据。现代连接只把「当前 helper 路径 + canonical 参数」认作自己的完整 hook；较宽的同一 `~/.claudio` 根历史路径 matcher 只用于显式 `connect` 兼容清扫，Claude Code 与 Codex 都必须移除自己的旧 modern command、保留第三方条目及其数组顺序，再写入唯一 canonical command，不能把旧路径误报为当前已连接。
@@ -76,12 +80,16 @@ claudi0 hook <host> <native-event> --installation-id <uuid>
 
 回执路径为 `~/.claudio/integrations/receipts/<host>/<event>.json`，文件权限 `0600`。schema 只允许：schema 版本、installation ID、宿主、原生事件、claudi0 语义事件、时间与脱敏播放结果。
 
-禁止保存提示词、响应内容、项目路径、会话内容或音频绝对路径。写入使用独立非阻塞锁与原子替换；回执失败只损失可见证据，不影响播放或宿主。每个宿主另有一份 `0600` active-installation marker；hook 在 marker 锁内确认当前 ID 后才可发布回执。旧 installation、断开后的迟到回调、旧配置回执与损坏文件都不能点亮当前连接。
+禁止保存提示词、响应内容、项目路径、会话内容或音频绝对路径。写入使用独立非阻塞锁与原子替换；回执失败只损失可见证据，不影响播放或宿主，并把脱敏错误分类写入 `claudio.log`。每个宿主另有一份 `0600` active-installation marker；hook 在 marker 锁内确认当前 ID 后才可发布回执。旧 installation、断开后的迟到回调、旧配置回执与损坏文件都不能点亮当前连接。
+
+`played`、`muted`、`debounced`、`not_ready`、`playback_failed` 均能证明 hook 已执行；它们不等于「一定可听」。可听性继续由声音包覆盖、单事件静音、主音量与真实播放结果四轴分别表达。
+
+真实 CLI 子进程测试可在 Debug 构建通过绝对路径环境变量 `CLAUDIO_TEST_ROOT` 重定向全部 Claudio 自有 I/O；该分支受 `#if DEBUG` 保护，Release 二进制不得包含或响应此变量，生产路径始终固定在 `~/.claudio/`。
 
 ### 状态、doctor 与失败分层
 
 - 未安装 / 未连接某宿主是 warning，不让 `doctor` 失败。
-- Codex 正常 `3/4` 是成功；`configuredAwaitingActivation` 是待用户确认，不是配置损坏。
+- Codex 正常 `4/5` 是成功；`configuredAwaitingActivation` 是待用户确认，不是配置损坏。
 - 已连接宿主的 hook 缺失、配置不可读/不可写、宿主不可用或 helper 损坏是失败；shared runtime 不可用是整体失败。配置完整但当前 installation 尚无真实回执属于待确认 warning，不等同于配置损坏，也不能显示绿色连接。
 - `doctor` 分别报告 shared runtime、Claude Code 与 Codex，退出非零只代表 shared runtime 不可用或一个**已连接**宿主已损坏。报告中不得把「没安装/用户没选择连接」写成故障。
 - 菜单栏永远显示两个宿主行；任一宿主断开或损坏都不隐藏主音量、事件、声音包与管理入口。连接、解释与破坏性断开位于 retained `IntegrationsWindow`。
@@ -92,13 +100,14 @@ claudi0 hook <host> <native-event> --installation-id <uuid>
 
 ```text
 swift run --package-path helper claudio-tests
+scripts/test-hook-cli-contract.sh
+swift build -c release --package-path helper --product claudio
 swift run --package-path gui claudio-gui-tests
-swift build --package-path gui --product ClaudioGUI
 swift build -c release --package-path gui --product ClaudioGUI
 git diff --check
 ```
 
-这些命令通过只表示**实现并自动化验证**；它们不代表已打包、发布、部署或人工验收。以下必须另行在真机完成并逐项记录，未执行时保持 open：Claude Code 与 Codex 新会话各触发真实事件并核对音频/回执；Codex `/hooks` 确认前不亮绿；第三方 hooks/notifier 继续执行且无重复「本轮结束」声音；VoiceOver、完整键盘路径、popover-to-window handoff、最大 Dynamic Type、明暗模式与 Reduce Motion。
+这些命令通过只表示**实现并自动化验证**；它们不代表已打包、发布、部署或人工验收。以下必须另行在真机完成并逐项记录，未执行时保持 open：Claude Code 首次提示与 follow-up；Codex `/hooks` 重新确认后的当前代次 `UserPromptSubmit`、新旧会话；模型上下文没有 hook 输出注入；短任务的任务开始不会吞掉结束/授权声音；第三方 hooks/notifier 继续执行且无重复声音；VoiceOver、完整键盘路径、popover-to-window handoff、standard/large/maximum、明暗模式与 Reduce Motion；五音响度、时长与辨识度。
 
 ## Problem Statement（问题陈述）
 

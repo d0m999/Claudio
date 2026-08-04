@@ -251,14 +251,21 @@ func runSoundPacksWindowAccessibilitySuites() {
     }
 
     suite("SoundPacksWindow a11y：包行 Name/Value 区分当前、残缺、损坏与 license") {
+        let complete = soundPacksWindowPackAccessibilityLabel(
+            displayName: "完整包",
+            isActivePack: false,
+            state: .complete,
+            license: .none)
+        expect(complete.contains("5 个事件均已配置"), "完整包必须按现行五事件播报，实得 \(complete)")
+
         let partial = soundPacksWindowPackAccessibilityLabel(
             displayName: "我的包",
             isActivePack: true,
-            state: .partial(present: 2, total: 4),
+            state: .partial(present: 2, total: 5),
             license: .cc0)
         expect(partial.contains("我的包"), "包名必须进入 VoiceOver Name，实得 \(partial)")
         expect(partial.contains("当前正在使用"), "active pack 状态不能只靠勾号，实得 \(partial)")
-        expect(partial.contains("2/4") && partial.contains("缺 2 个"), "残缺数必须可辨，实得 \(partial)")
+        expect(partial.contains("2/5") && partial.contains("缺 3 个"), "残缺数必须可辨，实得 \(partial)")
         expect(partial.contains("CC0"), "license 必须可辨，实得 \(partial)")
 
         let broken = soundPacksWindowPackAccessibilityLabel(
@@ -280,7 +287,7 @@ func runSoundPacksWindowAccessibilitySuites() {
             "modified 优先级必须与可见 license 槽一致，实得 \(modified)")
     }
 
-    suite("SoundPacksWindow a11y：四条映射的 present/unmapped/broken 与静音轴逐字可辨") {
+    suite("SoundPacksWindow a11y：五条映射的 present/unmapped/broken 与静音轴逐字可辨") {
         let present = soundPacksWindowEventAccessibilityLabel(
             eventName: "stop",
             coverage: .present(fileName: "stop.wav"),

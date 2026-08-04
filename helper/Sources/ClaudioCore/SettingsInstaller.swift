@@ -133,7 +133,7 @@ public enum SettingsUpdateError: Error, Sendable, Equatable, CustomStringConvert
 
 // MARK: - Public entry points
 
-/// Appends claudio's hook command to all four core events (idempotent). Reuses
+/// Appends the legacy `claudio play` command to all four lifecycle events (idempotent). Reuses
 /// ``probeSettingsWritable(settingsFile:)`` as a pre-write probe and
 /// ``withNonBlockingLock(path:_:)`` on `lockFile` (its own ``ClaudioPaths/settingsLockFile``,
 /// never `play`'s debounce lock) to serialize the read-modify-write against concurrent
@@ -197,8 +197,9 @@ private func installClaudioHooksLocked(
     }
 }
 
-/// Removes every hook entry claudio itself could plausibly have written, for any of the
-/// four core events, preserving everything else untouched — see
+/// Removes every legacy hook entry claudio itself could plausibly have written, for any of the
+/// four lifecycle events managed by this compatibility installer, preserving everything else
+/// untouched — see
 /// ``matchedClaudioEvent(inHookCommand:claudioRoot:)`` for the exact structural match this
 /// keys off (T13: a match on trailing argv + claudio's own root, NOT an exact-string compare
 /// against `claudioBinaryPath` — the whole point is still finding a stale entry after a
@@ -253,16 +254,16 @@ private func uninstallClaudioHooksLocked(
 
 // MARK: - Read-only hook-install detection (GUI onboarding, T7)
 
-/// Whether Claudio's hook command is present, for every one of the four core events, in
+/// Whether Claudio's legacy hook command is present, for every one of the four lifecycle events, in
 /// `settings.json` — a **read-only** query, never a write. GUI onboarding (T7) needs to
 /// tell "已接管" (already taken over) from "未接管" without ever calling
 /// ``installClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)`` — which has the real
 /// side effect of writing the file — just to answer that question (ENGINEERING.md T7
 /// note: "判定'是否已接管'要用只读方式").
 public enum HookInstallStatus: Sendable, Equatable {
-    /// Every core event already carries claudio's exact-match hook command.
+    /// Every legacy lifecycle event already carries claudio's exact-match hook command.
     case installed
-    /// `settings.json` is absent, or at least one core event is missing claudio's hook
+    /// `settings.json` is absent, or at least one legacy lifecycle event is missing claudio's hook
     /// command — this covers both "never installed" and "partially installed" (e.g. a
     /// user manually removed one event's entry): onboarding treats anything short of
     /// full coverage as "not yet taken over", since a fresh ``installClaudioHooks`` call
@@ -294,7 +295,7 @@ public func detectHookInstallStatus(
             return .settingsUnreadable(shapeError)
         }
         let hooksSection = (loaded.root[hooksKey] as? [String: Any]) ?? [:]
-        let allEventsInstalled = Event.allCases.allSatisfy { event in
+        let allEventsInstalled = Event.legacyLifecycleCases.allSatisfy { event in
             let command = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
             let eventArray = (hooksSection[claudeNativeEventName(for: event)] as? [Any]) ?? []
             return eventArray.contains { groupContainsCommand($0, command: command) }
@@ -335,8 +336,8 @@ private func performInstall(
             {
             case .success(.configured):
                 return .success(.modernConnectionPresent)
-            case .success(.partial(let missing, let hasLegacyEntries))
-                where missing.count < Event.allCases.count:
+            case .success(.partial(_, let missing, let hasLegacyEntries))
+                where missing.count < HostCapabilityCatalog.bindings(for: .claudeCode).count:
                 let detail = hasLegacyEntries
                     ? "现代与 legacy hook 同时存在，可能重复播放"
                     : "现代 hook 不完整，缺少 \(missing.joined(separator: ", "))"
@@ -354,7 +355,7 @@ private func performInstall(
 
         var root = originalRoot
         var anyChanged = false
-        for event in Event.allCases {
+        for event in Event.legacyLifecycleCases {
             let command = claudioHookCommand(for: event, claudioBinaryPath: claudioBinaryPath)
             let (nextRoot, changed) = appendHookEntry(root: root, event: event, command: command)
             root = nextRoot
@@ -409,7 +410,7 @@ private func performUninstall(
 
         var root = originalRoot
         var totalRemoved = 0
-        for event in Event.allCases {
+        for event in Event.legacyLifecycleCases {
             let (nextRoot, removed) = removeHookEntries(
                 root: root, event: event, claudioRoot: claudioRoot)
             root = nextRoot
@@ -465,7 +466,7 @@ private func validateHooksShape(_ root: [String: Any]) -> SettingsUpdateError? {
         return .malformedHooksSection(
             reason: "settings.json 的 \"hooks\" 字段不是 object，已中止（未修改文件）")
     }
-    for event in Event.allCases {
+    for event in Event.legacyLifecycleCases {
         let nativeEvent = claudeNativeEventName(for: event)
         guard let eventValue = hooksSection[nativeEvent] else { continue }
         guard eventValue is [Any] else {

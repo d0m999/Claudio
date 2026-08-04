@@ -356,7 +356,7 @@ func runSettingsInstallerSuites() {
         }
     }
 
-    suite("installClaudioHooks: fresh settings.json (none exists) installs all four events, no backup") {
+    suite("installClaudioHooks: fresh settings.json installs all four legacy lifecycle events, no backup") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("settings.json")
             let lockFile = root.appendingPathComponent("settings.lock")
@@ -367,7 +367,7 @@ func runSettingsInstallerSuites() {
             expect(result == .success(.installed), "fresh install should report .installed, got \(result)")
 
             let json = readJSONObject(at: settingsFile)
-            for event in Event.allCases {
+            for event in Event.legacyLifecycleCases {
                 let groups = hooksArray(json, event: event.settingsName) ?? []
                 expect(groups.count == 1, "\(event.settingsName): expected exactly 1 hook group, got \(groups.count)")
                 expect(
@@ -401,7 +401,7 @@ func runSettingsInstallerSuites() {
                 "second install should be .alreadyInstalled, got \(second)")
 
             let json = readJSONObject(at: settingsFile)
-            for event in Event.allCases {
+            for event in Event.legacyLifecycleCases {
                 let groups = hooksArray(json, event: event.settingsName) ?? []
                 expect(
                     groups.count == 1,
@@ -436,7 +436,7 @@ func runSettingsInstallerSuites() {
                         ],
                 "StopFailure must be written just like the other 3 events — install performs"
                     + " no Claude Code version check whatsoever, got \(stopFailureGroups)")
-            for event in Event.allCases {
+            for event in Event.legacyLifecycleCases {
                 let groups = hooksArray(json, event: event.settingsName) ?? []
                 expect(
                     groups.count == 1,
@@ -482,7 +482,9 @@ func runSettingsInstallerSuites() {
                 "claudio's own Stop group must be appended")
 
             let preToolUse = hooksArray(json, event: "PreToolUse") ?? []
-            expect(preToolUse.count == 1, "PreToolUse (not one of claudio's 4 events) must be untouched")
+            expect(
+                preToolUse.count == 1,
+                "PreToolUse (not one of claudio's legacy lifecycle events) must be untouched")
             expect(
                 (preToolUse.first?["matcher"] as? String) == "Bash",
                 "PreToolUse matcher must survive untouched")
@@ -924,7 +926,7 @@ func runSettingsInstallerSuites() {
             expect(
                 detectHookInstallStatus(
                     settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath) == .installed,
-                "after self-heal, all four events must read back as .installed")
+                "after self-heal, all four legacy lifecycle events must read back as .installed")
         }
     }
 
@@ -1193,7 +1195,7 @@ func runSettingsInstallerSuites() {
             expect(installResult == .success(.installed), "install should succeed, got \(installResult)")
 
             let afterInstall = readJSONObject(at: settingsFile)
-            for event in Event.allCases {
+            for event in Event.legacyLifecycleCases {
                 let groups = hooksArray(afterInstall, event: event.settingsName) ?? []
                 expect(groups.count == 2, "\(event.settingsName): expected vibe-island + claudio, got \(groups.count)")
             }
@@ -1312,8 +1314,8 @@ func runSettingsInstallerSuites() {
                 let removed = uninstallClaudioHooks(
                     settingsFile: settingsFile, claudioBinaryPath: binary, lockFile: lockFile)
                 expect(
-                    removed == .success(.uninstalled(count: Event.allCases.count)),
-                    "uninstall must sweep all \(Event.allCases.count) entries install wrote for"
+                    removed == .success(.uninstalled(count: Event.legacyLifecycleCases.count)),
+                    "uninstall must sweep all \(Event.legacyLifecycleCases.count) entries install wrote for"
                         + " home \(home), got \(removed)")
             }
         }
@@ -1558,7 +1560,7 @@ func runSettingsInstallerSuites() {
             expect(
                 readRawString(at: target)?.contains("claudio") == true,
                 "the symlink's target — the file the dotfiles repo tracks — must carry the hooks")
-            for event in Event.allCases {
+            for event in Event.legacyLifecycleCases {
                 let expected = claudioHookCommand(
                     for: event, claudioBinaryPath: testClaudioBinaryPath)
                 let groups = hooksArray(readJSONObject(at: target), event: event.settingsName)
@@ -1584,7 +1586,7 @@ func runSettingsInstallerSuites() {
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
             expect(
-                removed == .success(.uninstalled(count: Event.allCases.count)),
+                removed == .success(.uninstalled(count: Event.legacyLifecycleCases.count)),
                 "uninstall must sweep through the symlink, got \(removed)")
             expect(
                 (try? FileManager.default.destinationOfSymbolicLink(atPath: settingsFile.path))
