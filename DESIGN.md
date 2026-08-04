@@ -378,12 +378,12 @@ Claude Code  ● 4/4 已就绪  │  Codex  ● 3/4 已就绪  ›
 
 ## App Icon（图标）
 
-- **现行主方向：C / Signal**。未闭合的粗 `C` 是持续工作的信号容器；中间脉冲是声音事件；右侧偏心圆点是一条刚抵达的通知。三者合起来也让末尾的数字 `0` 有了信号仪表的联想。
+- **现行主方向：Orbit Zero**。末尾 `0` 是持续工作的信号容器；倾斜轨道表达 AI coding 的运行方向；偏心圆点是一条刚抵达的通知。窗口与面板使用完整 `claudi0 + Orbit Zero` 横向字标，菜单栏与 App Icon 使用同源的 `Orbit 0` 减法图形。
 - **品牌写法**：产品名固定写作小写 `claudi0`，仍读作 “Claudio”。数字 `0` 只承担视觉记忆点，不要求用户改变读法。
 - **不碰** Claude、OpenAI 或任何第三方官方 logo / wordmark / 品牌渐变；claudi0 图标只表达自己的声音与状态母题。
-- **全彩图标**：深色硬件底 `#2B2620` + 奶油标志 `#F1E9DF`；Finder / Dock 使用同一图形。亮色平面可使用黏土 `#C4633C` 单色标志。
-- **菜单栏模板版**：16×16pt 只保留 C 外环、脉冲与信号点，纯 alpha 自动适配亮 / 暗菜单栏，不带彩色底板。
-- **资产已落地**：`assets/branding/claudi0-mark.svg`、`claudi0-app-icon.svg`、1024px PNG 与 `claudi0.icns` 同源；`scripts/generate-brand-assets.swift` 生成全部位图尺寸。`gui/Sources/ClaudioGUI/MenuBarIcon.swift` 使用同一 SVG 几何直接绘制。打包脚本与 release workflow 都写入 `CFBundleIconFile = claudi0.icns`。
+- **全彩图标**：深色硬件底 `#2B2620` + 黏土色 `0` `#C4633C` + 奶油轨道 `#F1E9DF`；Finder / Dock 使用同一图形。亮色平面可使用黏土单色标志。
+- **菜单栏模板版**：16×16pt 只保留纵向 `0`、斜轨与信号点，纯 alpha 自动适配亮 / 暗菜单栏，不带彩色底板或光晕。
+- **资产已落地**：`assets/branding/claudi0-mark.svg`、`claudi0-app-icon.svg`、1024px PNG 与 `claudi0.icns` 同源；`scripts/generate-brand-assets.swift` 生成全部位图尺寸。`ClaudioOrbitWordmark` 负责 App 内横向字标，`MenuBarIcon.swift` 使用同一母题的 16pt 减法几何。打包脚本与 release workflow 都写入 `CFBundleIconFile = claudi0.icns`。
 
 ## macOS 平台注记
 
@@ -430,3 +430,4 @@ Claude Code  ● 4/4 已就绪  │  Codex  ● 3/4 已就绪  ›
 | 2026-07-24 | **`broken` 行的可见指示器从 meta 槽挪到覆盖轨槽位**（以状态行替代轨：真红 ✕ + `文件丢失`，与 `track` 共享同一 `.frame(height:)`，同槽位高度不跳；meta 槽对 `broken` 改留空），推翻 2026-07-15/07-17 两行「meta 槽 = ✕+文件丢失；覆盖轨不渲染」的原始写法——旧写法仍留在「包行四态」「4-slot 覆盖轨」两节的历史脉络里，正文已同步改写为现行版本，本行存档新旧对照，不删旧行 | T4（竖排整宽行）实现阶段 `swift-reviewer` 逐字核对 DESIGN.md 与 PLAN-SOUND-MANAGER.md T4 行，发现两份文档在 broken 指示器位置上直接矛盾：DESIGN.md 原文钉 meta 槽、覆盖轨「宁可空着」；PLAN.md T4 行（用户下达任务时的原话）写「以状态行替代轨（保留同一槽位高度，布局不跳）」。实现已按 PLAN.md 一侧落地并全绿（`swift build` 0 error、`swift run claudio-gui-tests` 2484/2484）。经 `AskUserQuestion` 向用户当面拍板：维持 trailing slot 实现，DESIGN.md 补录为已授权偏离，不留两份文档各执一词。**技术上两种位置都能满足「布局不跳」**——高度由外层共享 `.frame(height:)` 保证，与 ✕+文案放哪个槽位正交，本次纯粹是位置拍板，不是被迫的技术取舍 |
 | 2026-08-01 | Claudio 升级为 Claude Code + Codex 双宿主声音中心；黏土色明确为 Claudio 自有品牌；菜单栏双来源行、4×2 能力矩阵与 retained `IntegrationsWindow` 成为现行规范 | 宿主入口与交互权重并列，但能力差异诚实呈现：Claude Code `4/4`、Codex `3/4` 都是正常态；Codex 需要你仅映射 `PermissionRequest`，`StopFailure` 不支持。连接绿色以当前 installation ID 的真实回执为证据，配置完成不等于已激活。 |
 | 2026-08-02 | 产品品牌改为小写 `claudi0`（仍读作 “Claudio”），主图标改为 **C / Signal** | 数字 `0` 提供更独特的字标与域名 / icon 延展空间；C 外环、脉冲、信号点在 16px 到 1024px 保持同一几何。对外 app / DMG / CLI alias 使用 `claudi0`；为避免用户设置与 hooks 失效，`ClaudioCore` / `ClaudioGUI`、`~/.claudio/`、`~/.claudio/bin/claudio` 与 `com.claudio.app` 保持兼容。 |
+| 2026-08-04 | 全部 UI 品牌标识切换为 **Orbit Zero** | 用户以官网 Orbit Zero 字标稿拍板替换现有 UI logo。面板与首次启动页共用 `ClaudioOrbitWordmark`；菜单栏压缩为 `0 + 斜轨 + 信号点`；App Icon、SVG、PNG 与 `.icns` 同源更新。完整横向字标不硬塞进 16pt 状态栏，避免可读性退化；VoiceOver 仍只朗读 `claudi0` 与既有状态句。 |

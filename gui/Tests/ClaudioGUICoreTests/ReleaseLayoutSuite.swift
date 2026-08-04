@@ -77,7 +77,7 @@ func runReleaseLayoutSuites() {
 
         expect(
             copyLines.contains { $0.contains("Contents/Resources/claudi0.icns") },
-            "release.yml 必须把 C / Signal 的 claudi0.icns 放进 app Resources。实际的 cp 行：\(copyLines)")
+            "release.yml 必须把 Orbit Zero 的 claudi0.icns 放进 app Resources。实际的 cp 行：\(copyLines)")
         expect(
             yaml.contains("<key>CFBundleIconFile</key><string>claudi0.icns</string>"),
             "Info.plist 必须通过 CFBundleIconFile 指向 claudi0.icns")
@@ -92,16 +92,22 @@ func runReleaseLayoutSuites() {
             "Info.plist 必须把 CFBundleExecutable 绑定到 APP_EXECUTABLE")
     }
 
-    suite("C / Signal App 图标母版与 icns 都在仓库中") {
+    suite("Orbit Zero App 图标母版与 icns 都在仓库中") {
         let branding = repositoryRoot().appendingPathComponent("assets/branding", isDirectory: true)
         let svg = branding.appendingPathComponent("claudi0-app-icon.svg")
         let icns = branding.appendingPathComponent("claudi0.icns")
         let svgText = (try? String(contentsOf: svg, encoding: .utf8)) ?? ""
         let icnsData = try? Data(contentsOf: icns)
 
-        expect(svgText.contains("M91 28a45 45 0 1 0 0 72"), "App 图标必须保留选定的 C 外环几何")
-        expect(svgText.contains("M48 64h9l6-18 9 36 8-21h10"), "App 图标必须保留选定的脉冲几何")
-        expect(svgText.contains("cx=\"99\" cy=\"64\" r=\"5\""), "App 图标必须保留右侧信号点")
+        expect(
+            svgText.contains("<ellipse cx=\"512\" cy=\"512\" rx=\"170\" ry=\"300\""),
+            "App 图标必须保留 Orbit Zero 的纵向 0 几何")
+        expect(
+            svgText.contains("rx=\"356\" ry=\"128\" transform=\"rotate(-16 512 512)\""),
+            "App 图标必须保留穿过 0 的斜轨几何")
+        expect(
+            svgText.contains("<circle cx=\"755\" cy=\"303\" r=\"22\""),
+            "App 图标必须保留右上信号点")
         expect(icnsData?.prefix(4) == Data("icns".utf8), "claudi0.icns 必须是有效的 icns 容器")
     }
 

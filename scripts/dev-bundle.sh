@@ -47,4 +47,4 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 codesign --force --deep --sign - "$APP"
 codesign --verify --verbose "$APP"
-echo "✅ ${APP}（$(uname -m)）—— 用 open ${APP} 启动（菜单栏出现 C / Signal 图标）"
+echo "✅ ${APP}（$(uname -m)）—— 用 open ${APP} 启动（菜单栏出现 Orbit Zero 图标）"

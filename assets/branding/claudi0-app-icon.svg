@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
-  <title id="title">claudi0 app icon</title>
-  <desc id="desc">The cream C / Signal mark on a dark rounded hardware surface.</desc>
+  <title id="title">claudi0 Orbit Zero app icon</title>
+  <desc id="desc">A clay zero with a cream orbit and signal dot on a dark rounded hardware surface.</desc>
   <rect x="72" y="72" width="880" height="880" rx="210" fill="#2B2620"/>
   <rect x="77" y="77" width="870" height="870" rx="205" fill="none" stroke="#FFFDF4" stroke-opacity=".07" stroke-width="10"/>
-  <g transform="translate(166.4 166.4) scale(5.4)">
-    <g fill="none" stroke="#F1E9DF" stroke-linecap="round">
-      <path d="M91 28a45 45 0 1 0 0 72" stroke-width="9"/>
-      <path d="M48 64h9l6-18 9 36 8-21h10" stroke-linejoin="round" stroke-width="6"/>
-    </g>
-    <circle cx="99" cy="64" r="5" fill="#F1E9DF"/>
+  <g fill="none" stroke="#C4633C">
+    <ellipse cx="512" cy="512" rx="236" ry="340" stroke-width="54" opacity=".10"/>
+    <ellipse cx="512" cy="512" rx="194" ry="320" stroke-width="34" opacity=".18"/>
+    <ellipse cx="512" cy="512" rx="170" ry="300" stroke-width="66"/>
   </g>
+  <ellipse cx="512" cy="512" rx="356" ry="128" transform="rotate(-16 512 512)" fill="none" stroke="#F1E9DF" stroke-opacity=".74" stroke-width="20"/>
+  <circle cx="755" cy="303" r="22" fill="#C4633C"/>
 </svg>

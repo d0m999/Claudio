@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title desc">
-  <title id="title">claudi0 C / Signal mark</title>
-  <desc id="desc">An open C containing an audio pulse and a signal dot.</desc>
+  <title id="title">claudi0 Orbit Zero mark</title>
+  <desc id="desc">A vertical zero crossed by a tilted orbit with an offset signal dot.</desc>
   <g fill="none" stroke="#C4633C" stroke-linecap="round">
-    <path d="M91 28a45 45 0 1 0 0 72" stroke-width="9"/>
-    <path d="M48 64h9l6-18 9 36 8-21h10" stroke-linejoin="round" stroke-width="6"/>
+    <ellipse cx="64" cy="64" rx="24" ry="42" stroke-width="9"/>
+    <ellipse cx="64" cy="64" rx="54" ry="22" transform="rotate(-16 64 64)" stroke-width="4" opacity=".72"/>
   </g>
-  <circle cx="99" cy="64" r="5" fill="#C4633C"/>
+  <circle cx="103" cy="28" r="5" fill="#C4633C"/>
 </svg>

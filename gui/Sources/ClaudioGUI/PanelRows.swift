@@ -150,10 +150,10 @@ struct ActionFailureRow: View {
     }
 }
 
-/// 面板顶部的「Claudio」标题行 —— **唯一**实现。
+/// 面板顶部的 Orbit Zero 字标行 —— **唯一**实现。
 ///
 /// 【它替换掉了什么】此前 `PanelView.header` 与 `OnboardingView.header` 是两份几乎逐字相同的副本
-/// （`HStack(spacing: 6)` + 15pt semibold 标题 + 8×8 `success` 绿点 + `Spacer`）。而两份副本对**同一颗
+/// （横向字标 + 8×8 `success` 绿点 + `Spacer`）。而两份副本对**同一颗
 /// 绿点**的无障碍处理正好**相反**：
 ///
 ///   · `PanelView` 那份：`.accessibilityHidden(true)`（对的 —— header 整体已有一句 combine label）
@@ -193,10 +193,7 @@ struct PanelHeader: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text("claudi0")
-                // DESIGN.md 字号阶梯：面板标题 = SF Pro semibold 14–15。
-                .font(.system(size: 15 * typeScale, weight: .semibold))
-                .foregroundColor(ClaudioColor.text(colorScheme))
+            ClaudioOrbitWordmark(height: 18 * typeScale)
             if showsTakenOverDot {
                 Circle()
                     .fill(ClaudioColor.success(colorScheme))

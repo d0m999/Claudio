@@ -299,6 +299,40 @@ private func guiCoreSources() -> [ScannedSource] {
 
 @MainActor
 func runViewWiringSuites() {
+    suite("Orbit Zero 字标是所有 UI 品牌入口的单一实现") {
+        guard
+            let branding = codeOnly(
+                "gui/Sources/ClaudioGUIComponents/ClaudioBranding.swift"),
+            let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let sharedHeader = codeOnly("gui/Sources/ClaudioGUI/PanelRows.swift"),
+            let menuBarIcon = codeOnly("gui/Sources/ClaudioGUI/MenuBarIcon.swift")
+        else {
+            expect(false, "读不到 Orbit Zero 共享组件、面板标题或菜单栏图标源码")
+            return
+        }
+
+        expect(
+            branding.contains("public struct ClaudioOrbitWordmark")
+                && branding.contains("public struct ClaudioOrbitZeroMark")
+                && branding.contains(".accessibilityElement(children: .ignore)")
+                && branding.contains(".accessibilityLabel(\"claudi0\")")
+                && branding.contains(".accessibilityHidden(true)"),
+            "完整字标必须由共享组件绘制；轨道细节不拆成 VoiceOver 节点，字标本身仍有 claudi0 文本替代")
+
+        expect(
+            panel.components(separatedBy: "ClaudioOrbitWordmark(").count - 1 == 1
+                && sharedHeader.components(separatedBy: "ClaudioOrbitWordmark(").count - 1 == 1
+                && !panel.contains("Text(\"claudi0\")")
+                && !sharedHeader.contains("Text(\"claudi0\")"),
+            "运行面板与首次启动共享标题必须各调用同一份 Orbit Zero 字标，不能退回两份手写 Text logo")
+
+        expect(
+            menuBarIcon.contains("drawOrbitZero()")
+                && menuBarIcon.contains("rotation.rotate(byDegrees: 16)")
+                && menuBarIcon.contains("image.isTemplate = true"),
+            "菜单栏必须使用同源 Orbit Zero 减法几何，并保持 template image 自动适配亮暗菜单栏")
+    }
+
     suite("扫描器的前提：ClaudioGUI / ClaudioGUICore 里没有一处它自己不认识的构造") {
         // ## GUI 这一半此前**一条守卫都没有**（`/codex review be332ff` 的 P3）
         //

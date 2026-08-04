@@ -12,6 +12,7 @@ private let fileManager = FileManager.default
 private let canvas: CGFloat = 1024
 private let background = NSColor(srgbRed: 43 / 255, green: 38 / 255, blue: 32 / 255, alpha: 1)
 private let cream = NSColor(srgbRed: 241 / 255, green: 233 / 255, blue: 223 / 255, alpha: 1)
+private let clay = NSColor(srgbRed: 196 / 255, green: 99 / 255, blue: 60 / 255, alpha: 1)
 
 private func scaled(_ value: CGFloat, for size: Int) -> CGFloat {
     value * CGFloat(size) / canvas
@@ -67,47 +68,58 @@ private func makeIcon(size: Int) throws -> Data {
         insetPath.stroke()
     }
 
-    let markScale = CGFloat(size) / canvas * 5.4
-    let markCenter = NSPoint(x: CGFloat(size) / 2, y: CGFloat(size) / 2)
-    let cPath = NSBezierPath()
-    cPath.appendArc(
-        withCenter: markCenter,
-        radius: 45 * markScale,
-        startAngle: 53.130102,
-        endAngle: 306.869898,
-        clockwise: false)
-    cPath.lineWidth = max(1, 9 * markScale)
-    cPath.lineCapStyle = .round
-    cream.setStroke()
-    cPath.stroke()
-
     func point(_ x: CGFloat, _ y: CGFloat) -> NSPoint {
-        NSPoint(
-            x: markCenter.x + (x - 64) * markScale,
-            y: markCenter.y - (y - 64) * markScale)
+        NSPoint(x: scaled(x, for: size), y: CGFloat(size) - scaled(y, for: size))
     }
 
-    let pulse = NSBezierPath()
-    pulse.move(to: point(48, 64))
-    pulse.line(to: point(57, 64))
-    pulse.line(to: point(63, 46))
-    pulse.line(to: point(72, 82))
-    pulse.line(to: point(80, 61))
-    pulse.line(to: point(90, 61))
-    pulse.lineWidth = max(1, 6 * markScale)
-    pulse.lineCapStyle = .round
-    pulse.lineJoinStyle = .round
-    cream.setStroke()
-    pulse.stroke()
+    func drawEllipse(
+        centerX: CGFloat, centerY: CGFloat,
+        radiusX: CGFloat, radiusY: CGFloat,
+        color: NSColor, opacity: CGFloat,
+        lineWidth: CGFloat, rotationDegrees: CGFloat = 0
+    ) {
+        let center = point(centerX, centerY)
+        let path = NSBezierPath(ovalIn: NSRect(
+            x: center.x - scaled(radiusX, for: size),
+            y: center.y - scaled(radiusY, for: size),
+            width: scaled(radiusX * 2, for: size),
+            height: scaled(radiusY * 2, for: size)))
+        if rotationDegrees != 0 {
+            var rotation = AffineTransform()
+            rotation.translate(x: center.x, y: center.y)
+            rotation.rotate(byDegrees: rotationDegrees)
+            rotation.translate(x: -center.x, y: -center.y)
+            path.transform(using: rotation)
+        }
+        path.lineWidth = max(1, scaled(lineWidth, for: size))
+        color.withAlphaComponent(opacity).setStroke()
+        path.stroke()
+    }
 
-    let dotCenter = point(99, 64)
-    let dotRadius = max(0.75, 5 * markScale)
+    // Orbit Zero：大尺寸保留两层暖色光晕，小尺寸只画核心 0 与轨道。
+    if size >= 64 {
+        drawEllipse(
+            centerX: 512, centerY: 512, radiusX: 236, radiusY: 340,
+            color: clay, opacity: 0.10, lineWidth: 54)
+        drawEllipse(
+            centerX: 512, centerY: 512, radiusX: 194, radiusY: 320,
+            color: clay, opacity: 0.18, lineWidth: 34)
+    }
+    drawEllipse(
+        centerX: 512, centerY: 512, radiusX: 170, radiusY: 300,
+        color: clay, opacity: 1, lineWidth: 66)
+    drawEllipse(
+        centerX: 512, centerY: 512, radiusX: 356, radiusY: 128,
+        color: cream, opacity: 0.74, lineWidth: 20, rotationDegrees: 16)
+
+    let dotCenter = point(755, 303)
+    let dotRadius = max(0.75, scaled(22, for: size))
     let dot = NSBezierPath(ovalIn: NSRect(
         x: dotCenter.x - dotRadius,
         y: dotCenter.y - dotRadius,
         width: dotRadius * 2,
         height: dotRadius * 2))
-    cream.setFill()
+    clay.setFill()
     dot.fill()
 
     guard let png = bitmap.representation(using: .png, properties: [:]) else {
@@ -162,4 +174,4 @@ guard iconutil.terminationStatus == 0 else {
     ])
 }
 
-print("✓ 已生成 assets/branding/claudi0-app-icon.png 与 claudi0.icns")
+print("✓ 已生成 Orbit Zero assets/branding/claudi0-app-icon.png 与 claudi0.icns")

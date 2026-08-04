@@ -85,7 +85,7 @@ brew install --cask claudi0
 
 ## 首次安装后：先准备声音，再分别连接宿主
 
-1. **打开 claudi0**（菜单栏会出现 C / Signal 图标）。首次启动只准备共享 runtime：把 helper 与内置声音包放进 `~/.claudio/`、修复 quarantine，并在尚未选包时选择默认包。它**不会静默改写** Claude Code 或 Codex 配置。
+1. **打开 claudi0**（菜单栏会出现 Orbit Zero 图标）。首次启动只准备共享 runtime：把 helper 与内置声音包放进 `~/.claudio/`、修复 quarantine，并在尚未选包时选择默认包。它**不会静默改写** Claude Code 或 Codex 配置。
 2. 点菜单栏图标。面板始终显示两条等权声音来源：
 
    ```text

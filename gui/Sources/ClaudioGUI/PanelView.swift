@@ -220,9 +220,7 @@ public struct PanelView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .center) {
-                Text("claudi0")
-                    .font(.system(size: 18 * typeScale, weight: .semibold, design: .rounded))
-                    .foregroundColor(ClaudioTheme.text(colorScheme))
+                ClaudioOrbitWordmark(height: 22 * typeScale)
                 Spacer(minLength: 8)
                 interfaceOptionsMenu
             }
