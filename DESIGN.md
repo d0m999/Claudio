@@ -208,6 +208,10 @@
   - **动效：控件行不加 `.animation()`**。连续拖拽必须跟手无动画；值的吸附 / 回滚一律**瞬跳**。理由是**手感与诚实**：滑块是直接操纵控件，任何补间都会让拇指与填充段脱钩；而写盘失败后的回滚若被动画柔化，用户会以为值还在路上，而它其实已经没了。
     ⚠️ **（2026-08-01 双宿主覆盖）**：旧单宿主 Panel 曾含 `disconnectRow` / onboarding in-flight 动画并读取 `accessibilityReduceMotion`；现行双宿主 Panel 已移除这两类连接动作，视图树没有自定义动画，因此不再持有无消费者的 Reduce Motion 环境值。**规矩本身不变**：未来往 Panel 添加动画，必须在同一落点接入 Reduce Motion。retained `IntegrationsWindow` 的短暂反馈仍有 opacity transition，并已在开启 Reduce Motion 时改为瞬时替换。
 
+- **界面文字步进调节（方案 C · 2026-08-05）**：面板标题栏右侧固定 `Aa⌄` 原生触发器（约 54×32pt），子 Popover 固定 280pt 宽；触发器不直接显示当前档位，当前值只经 VoiceOver value 暴露。内容依次为「界面文字」标题、分隔线、固定横向列的小 `A` / 当前档位 / 大 `A`，以及四个仅表达状态的圆点。两侧为原生中性 bordered 按钮，点击相邻档位后即时写入共享 `@AppStorage`，Popover 保持打开；紧凑档聚焦大 `A`，其余档位聚焦小 `A`，触达边界时焦点转移到仍可用的一侧。
+  - 小 `A` 向前一步、大 `A` 向后一步；两端禁用、不循环、不 Toast、不自定义动画。当前档位使用 semibold，`第 n 档，共 4 档` 使用等宽数字；圆点同时用尺寸 / 外环和 clay 状态表达，且从 VoiceOver 树隐藏。
+  - `panel.options` 容器与 `panel.options.text-size` 触发器保持稳定标识，并新增 `.decrease` / `.increase` / `.status` 子标识。控件不加入 `PanelFocusTarget`，所以面板首次打开仍落在第一个可操作声音来源；子 Popover 关闭时焦点回到 `Aa⌄`。非法持久化值仍只在读取时回落为标准，下一次调节才写回合法 raw value。
+
 ### 双宿主菜单栏面板（现行）
 
 菜单栏面板继续使用 **312pt** 标准宽度、最大文字档下 **360pt**；它负责快速扫视与声音控制，不承担配置文件解释或破坏性操作。详情、连接与排障留给 retained window；这种职责分工参考 [SoundSource 的菜单栏主窗口](https://www.rogueamoeba.com/support/manuals/soundsource/?page=main-window-overview) 与 [Tailscale 的菜单栏/详情窗并存](https://tailscale.com/blog/windowed-macos-ui-beta)。顶部不再使用单一「已接管」绿点，而是始终渲染等权双列声音来源状态条：
@@ -435,3 +439,4 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 | 2026-08-04 | 新增首位语义「任务开始」与 5×2 能力矩阵；`paperplane.fill` + info blue，声音包覆盖轨与映射编辑器扩为 5-slot / 五行 | Claude Code 与 Codex 的 `UserPromptSubmit` 均映射 `task_start`；Claude 为 `5/5`、Codex 为正常 `4/5`。激活只认当前代次 `UserPromptSubmit`，其它回执只作 latest diagnosis；旧包缺第五映射时明确显示缺失，不跨包 fallback。 |
 | 2026-08-02 | 产品品牌改为小写 `claudi0`（仍读作 “Claudio”），主图标改为 **C / Signal** | 数字 `0` 提供更独特的字标与域名 / icon 延展空间；C 外环、脉冲、信号点在 16px 到 1024px 保持同一几何。对外 app / DMG / CLI alias 使用 `claudi0`；为避免用户设置与 hooks 失效，`ClaudioCore` / `ClaudioGUI`、`~/.claudio/`、`~/.claudio/bin/claudio` 与 `com.claudio.app` 保持兼容。 |
 | 2026-08-04 | 全部 UI 品牌标识切换为 **Orbit Zero** | 用户以官网 Orbit Zero 字标稿拍板替换现有 UI logo。面板与首次启动页共用 `ClaudioOrbitWordmark`；菜单栏压缩为 `0 + 斜轨 + 信号点`；App Icon、SVG、PNG 与 `.icns` 同源更新。完整横向字标不硬塞进 16pt 状态栏，避免可读性退化；VoiceOver 仍只朗读 `claudi0` 与既有状态句。 |
+| 2026-08-05 | 「界面文字」采用方案 C 步进调节：固定 `Aa⌄` 触发器 + 固定 280pt 子 Popover + 原生两侧 A 按钮 | 方案 C 在保持暖色原生面板的同时减少一层菜单；实时 `Binding<ClaudioInterfaceTextSize>` 继续写入共享 `@AppStorage`，四档、非法值回退、跨窗口同步和现有 Panel 首焦点契约不变。 |

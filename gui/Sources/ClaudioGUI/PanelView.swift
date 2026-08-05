@@ -236,28 +236,13 @@ public struct PanelView: View {
     }
 
     private var interfaceOptionsMenu: some View {
-        Menu {
-            Picker("界面文字", selection: $interfaceTextSizeRaw) {
-                ForEach(ClaudioInterfaceTextSize.allCases) { size in
-                    Text(size.displayName).tag(size.rawValue)
-                }
-            }
-            .accessibilityLabel("界面文字大小")
-            .accessibilityValue(interfaceTextSize.displayName)
-            .accessibilityHint("应用到主面板、声音包窗口和集成窗口")
-            .accessibilityIdentifier("panel.options.text-size")
-        } label: {
-            Image(systemName: "ellipsis.circle")
-                .frame(
-                    minWidth: ClaudioTheme.Metrics.iconTarget,
-                    minHeight: ClaudioTheme.Metrics.iconTarget)
-        }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .accessibilityLabel("claudi0 选项")
-        .accessibilityValue("界面文字，\(interfaceTextSize.displayName)")
-        .accessibilityHint("选择 claudi0 三个界面的文字大小")
-        .accessibilityIdentifier("panel.options")
+        InterfaceTextSizeControl(selection: interfaceTextSizeBinding)
+    }
+
+    private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize> {
+        Binding(
+            get: { ClaudioInterfaceTextSize(storedValue: interfaceTextSizeRaw) },
+            set: { interfaceTextSizeRaw = $0.rawValue })
     }
 
     private var headerAccessibilityLabel: String {
@@ -652,6 +637,51 @@ public struct PanelView: View {
     // 红队实测三条「改坏行为、两套测试全绿」的变异（refresh 不重载 configState / 某条路由 case 成
     // 死代码 / 静音去掉取反）；搬进可实例化的类后由 `PanelConfigControllerSuite` 用真磁盘各钉一条
     // 行为断言。本视图只经 `panelModel.toggleMute(_:)` / `.switchPack(to:)` / `.reload()` 调它们。
+}
+
+/// The panel-only trigger for the shared interface-text preference. Its trigger is intentionally
+/// outside ``PanelFocusTarget``: the panel still opens on its first sound-source control, while
+/// closing this child popover can return focus to this local trigger.
+struct InterfaceTextSizeControl: View {
+    @Binding var selection: ClaudioInterfaceTextSize
+
+    @Environment(\.colorScheme) private var colorScheme
+    @FocusState private var isTriggerFocused: Bool
+    @State private var isPopoverPresented = false
+
+    var body: some View {
+        ZStack {
+            triggerButton
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("panel.options")
+    }
+
+    private var triggerButton: some View {
+        Button {
+            isPopoverPresented.toggle()
+        } label: {
+            Text("Aa⌄")
+                .font(.system(size: 15, weight: .semibold, design: .rounded))
+        }
+        .buttonStyle(.bordered)
+        .tint(ClaudioTheme.clay(colorScheme))
+        .frame(width: 54, height: 32)
+        .contentShape(Rectangle())
+        .focused($isTriggerFocused)
+        .accessibilityLabel("界面文字")
+        .accessibilityValue(selection.displayName)
+        .accessibilityHint("调整 claudi0 三个界面的文字大小")
+        .accessibilityIdentifier("panel.options.text-size")
+        .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
+            InterfaceTextSizeStepperContent(selection: $selection)
+        }
+        .onChange(of: isPopoverPresented) { presented in
+            if !presented {
+                isTriggerFocused = true
+            }
+        }
+    }
 }
 
 /// One geometry and one accessibility contract for both host rows in the panel. The status is

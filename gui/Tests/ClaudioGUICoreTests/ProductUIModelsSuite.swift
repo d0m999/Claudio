@@ -16,11 +16,41 @@ func runProductUIModelsSuites() {
             ClaudioInterfaceTextSize(storedValue: "future-value") == .standard,
             "未知偏好必须安全回落到标准")
         expect(
+            ClaudioInterfaceTextSize(storedValue: nil) == .standard,
+            "缺失偏好必须安全回落到标准")
+        expect(
+            ClaudioInterfaceTextSize.allCases.map(\.rawValue)
+                == ["compact", "standard", "large", "maximum"],
+            "现有四档 raw value 不能因新增步进 API 改变")
+        expect(
+            ClaudioInterfaceTextSize.defaultsKey == "Claudio.InterfaceTextSize"
+                && ClaudioInterfaceTextSize.defaultValue == .standard,
+            "defaults key 与默认档位必须保持不变")
+        expect(
             zip(
                 ClaudioInterfaceTextSize.allCases.map(\.scale),
                 ClaudioInterfaceTextSize.allCases.dropFirst().map(\.scale)
             ).allSatisfy(<),
             "四档缩放必须严格递增")
+        expect(
+            ClaudioInterfaceTextSize.allCases.map(\.scale) == [0.92, 1, 1.18, 1.42],
+            "新增步进 API 不得改变现有四档 scale")
+    }
+
+    suite("界面文字：相邻档位、两端边界与档位序号") {
+        let sizes = ClaudioInterfaceTextSize.allCases
+        expect(
+            sizes.map(\.smaller) == [nil, .compact, .standard, .large],
+            "smaller 必须严格映射 compact ← standard ← large ← maximum")
+        expect(
+            sizes.map(\.larger) == [.standard, .large, .maximum, nil],
+            "larger 必须严格映射 compact → standard → large → maximum")
+        expect(
+            sizes.map(\.levelNumber) == [1, 2, 3, 4],
+            "档位序号必须从 1 到 4 且与 allCases 对齐")
+        expect(
+            sizes.allSatisfy { $0.levelCount == 4 },
+            "每一档暴露的总档数必须固定为 4")
     }
 
     suite("面板声音包四态：固定包 1 行/上限 4 行、无固定、无包与读取失败互斥") {

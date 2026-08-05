@@ -23,6 +23,37 @@ public enum ClaudioInterfaceTextSize: String, CaseIterable, Codable, Sendable, I
         }
     }
 
+    /// The adjacent smaller level, if this is not already the compact level.
+    public var smaller: ClaudioInterfaceTextSize? {
+        switch self {
+        case .compact: nil
+        case .standard: .compact
+        case .large: .standard
+        case .maximum: .large
+        }
+    }
+
+    /// The adjacent larger level, if this is not already the maximum level.
+    public var larger: ClaudioInterfaceTextSize? {
+        switch self {
+        case .compact: .standard
+        case .standard: .large
+        case .large: .maximum
+        case .maximum: nil
+        }
+    }
+
+    public var levelNumber: Int {
+        switch self {
+        case .compact: 1
+        case .standard: 2
+        case .large: 3
+        case .maximum: 4
+        }
+    }
+
+    public var levelCount: Int { Self.allCases.count }
+
     /// 仅供固定点字号仍需显式缩放的根视图使用。语义字体由 SwiftUI 环境缩放。
     public var scale: Double {
         switch self {

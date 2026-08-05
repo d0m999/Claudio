@@ -2256,6 +2256,7 @@ func runViewWiringSuites() {
     suite("三界面无障碍护栏：每个交互构造都有显式非空 Name 与稳定 identifier") {
         let paths = [
             "gui/Sources/ClaudioGUI/PanelView.swift",
+            "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift",
             "gui/Sources/ClaudioGUI/EventRowView.swift",
             "gui/Sources/ClaudioGUI/PackGalleryView.swift",
             "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
@@ -2295,16 +2296,27 @@ func runViewWiringSuites() {
             let integrations = codeOnly(
                 "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
             let packs = codeOnly(
-                "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
+            let textSizeStepper = codeOnly(
+                "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift")
         else {
             expect(false, "读不到三界面的关键 AX identifier")
             return
         }
         for identifier in [
-            "panel.options.text-size", "panel.reveal-config", "panel.manage-sound-packs",
+            "panel.options", "panel.options.text-size", "panel.reveal-config",
+            "panel.manage-sound-packs",
             #"panel.host.\(row.host.rawValue)"#,
         ] {
             expect(panel.contains(identifier), "主面板缺少稳定 AX identifier：\(identifier)")
+        }
+        for identifier in [
+            "panel.options.text-size.decrease", "panel.options.text-size.increase",
+            "panel.options.text-size.status",
+        ] {
+            expect(
+                textSizeStepper.contains(identifier),
+                "界面文字步进控件缺少稳定 AX identifier：\(identifier)")
         }
         for identifier in [
             "integrations.redetect", #"integrations.host.\(row.host.rawValue)"#,
@@ -2322,6 +2334,55 @@ func runViewWiringSuites() {
         ] {
             expect(packs.contains(identifier), "声音包窗口缺少稳定 AX identifier：\(identifier)")
         }
+    }
+
+    suite("PanelView：界面文字使用方案 C 原生子 Popover 与实时 Binding，旧 Picker 路径已移除") {
+        guard
+            let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let stepper = codeOnly(
+                "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift"),
+            let gallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift")
+        else {
+            expect(false, "读不到 PanelView 或界面文字步进内容源码")
+            return
+        }
+        let flatPanel = collapsingWhitespace(panel)
+        let flatStepper = collapsingWhitespace(stepper)
+        expect(
+            !panel.contains("Picker(\"界面文字\"")
+                && !panel.contains("Menu {\n            Picker"),
+            "方案 C 必须移除旧的 Menu + Picker 界面文字入口")
+        expect(
+            flatPanel.contains("InterfaceTextSizeControl(selection: interfaceTextSizeBinding)")
+                && flatPanel.contains(
+                    "private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize>"),
+            "Panel 必须把实时 ClaudioInterfaceTextSize Binding 传给新控件")
+        expect(
+            flatPanel.contains(".popover(isPresented: $isPopoverPresented, arrowEdge: .bottom)")
+                && flatPanel.contains("Text(\"Aa⌄\")")
+                && flatPanel.contains(".frame(width: 54, height: 32)"),
+            "触发器必须是固定 Aa⌄，并从原生子 Popover 打开")
+        expect(
+            flatPanel.contains("if !presented { isTriggerFocused = true }")
+                && !panel.contains("PanelFocusTarget.textSize"),
+            "子 Popover 关闭后必须回焦 Aa⌄，且文字控件不能进入 PanelFocusTarget")
+        expect(
+            flatStepper.contains("public struct InterfaceTextSizeStepperContent")
+                && flatStepper.contains("popoverWidth: CGFloat = 280")
+                && flatStepper.contains(".frame(width: Self.popoverWidth)"),
+            "步进内容必须是可复用且固定 280pt 宽")
+        expect(
+            flatStepper.contains(".focused($focusedTarget, equals: .decrease)")
+                && flatStepper.contains(".focused($focusedTarget, equals: .increase)")
+                && flatStepper.contains("focusedTarget = .increase")
+                && flatStepper.contains("focusedTarget = .decrease"),
+            "步进内容必须在边界切换时把焦点移到另一侧仍可用按钮")
+        expect(
+            flatStepper.contains("managesFocus: Bool = true")
+                && gallery.contains("InterfaceTextSizeStepperContent(")
+                && gallery.contains("managesFocus: false")
+                && flatPanel.contains("InterfaceTextSizeStepperContent(selection: $selection)"),
+            "State Gallery 与生产 Popover 必须复用同一份 stepper content")
     }
 
     suite("PanelView：事件身份区必须携带当前包与事件的显式窗口路由") {

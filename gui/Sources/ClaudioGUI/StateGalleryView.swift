@@ -264,7 +264,10 @@ import ClaudioGUIComponents
         @FocusState private var focusedTarget: PanelFocusTarget?
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 12) {
+                InterfaceTextSizeStepperContent(
+                    selection: .constant(size),
+                    managesFocus: false)
                 Text("claudi0 · 当前声音包 极简铃 · 4 个可听事件")
                     .font(ClaudioTheme.font(.productTitle))
                 EventRowView(
@@ -273,7 +276,9 @@ import ClaudioGUIComponents
                     focusedTarget: $focusedTarget,
                     adaptation: panelLayoutAdaptation(for: panelTier))
             }
-            .frame(width: size == .maximum ? CGFloat(widenedPanelWidth) : CGFloat(standardPanelWidth))
+            .frame(
+                width: size == .maximum ? CGFloat(widenedPanelWidth) : CGFloat(standardPanelWidth),
+                alignment: .leading)
             .environment(\.dynamicTypeSize, size.dynamicTypeSize)
         }
 
