@@ -355,8 +355,8 @@ func runPreviewFixturesSuites() {
             "Codex 等待 /hooks 确认必须独立于已连接")
         expect(
             scenario("claude-legacy")?.state.matrix.summary(for: .claudeCode)
-                == .legacy(supported: 5, total: 5),
-            "Claude legacy 必须保留可听但无真实回执语义")
+                == .legacy(supported: 4, total: 5),
+            "Claude legacy 必须只统计旧安装器实际写入的四个事件")
 
         if case .needsAttention = scenario("partial-single-degraded")?.state.matrix.summary(
             for: .claudeCode)

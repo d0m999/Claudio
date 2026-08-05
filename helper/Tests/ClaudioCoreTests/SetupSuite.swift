@@ -35,10 +35,24 @@ private func makeEnvironment(
     executablePath: URL,
     claudioRootName: String = "claudio-root",
     beforePristinePackFinalVerification: @escaping @Sendable () -> Void = {},
+    beforePristinePackAtomicExchange: @escaping @Sendable () -> Void = {},
     replacePristinePack: @escaping @Sendable (URL, URL) throws -> Void = {
         destination, staging in
-        _ = try FileManager.default.replaceItemAt(
-            destination, withItemAt: staging, backupItemName: nil, options: [])
+        let result = destination.withUnsafeFileSystemRepresentation { destinationPath in
+            staging.withUnsafeFileSystemRepresentation { stagingPath in
+                guard let destinationPath, let stagingPath else {
+                    errno = EINVAL
+                    return Int32(-1)
+                }
+                return renameatx_np(
+                    AT_FDCWD, destinationPath,
+                    AT_FDCWD, stagingPath,
+                    UInt32(RENAME_SWAP))
+            }
+        }
+        guard result == 0 else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
     }
 ) -> SetupEnvironment {
     let claudioRoot = root.appendingPathComponent(claudioRootName, isDirectory: true)
@@ -62,6 +76,7 @@ private func makeEnvironment(
         // `(N-1) × D`，不是 `N × D`（见 ``PacksLockRetry`` 的 doc，那里为这个说大一档的表述立了规矩）。
         packsLockRetry: PacksLockRetry(attempts: 5, delay: 0.01),
         beforePristinePackFinalVerification: beforePristinePackFinalVerification,
+        beforePristinePackAtomicExchange: beforePristinePackAtomicExchange,
         replacePristinePack: replacePristinePack)
 }
 
@@ -288,6 +303,38 @@ private func runMinimalChimeUpgradeSuites() {
                 !FileManager.default.fileExists(
                     atPath: installed.appendingPathComponent("task_start.mp3").path),
                 "复验失败不得留下半个 1.1.0")
+        }
+    }
+
+    suite("minimal-chime：最终复验后再漂移也由原子交换 CAS 回滚，不覆盖用户字节") {
+        withTempDirectory { root in
+            let bundle = makeMinimalChimeUpgradeBundle(
+                at: root.appendingPathComponent("Claudio.app", isDirectory: true))
+            let installed = root.appendingPathComponent(
+                "claudio-root/packs/minimal-chime", isDirectory: true)
+            writePristineMinimalChimeV100(to: installed)
+            let drifted = Data(
+                #"{"id":"minimal-chime","version":"last-moment-user-edit","events":{"stop":"stop.mp3"}}"#.utf8)
+            let manifest = installed.appendingPathComponent("manifest.json")
+            let environment = makeEnvironment(
+                root: root,
+                executablePath: bundle.executablePath,
+                beforePristinePackAtomicExchange: {
+                    try? drifted.write(to: manifest, options: .atomic)
+                })
+
+            let result = performSharedRuntimeBootstrap(environment: environment)
+            guard case .failure(.packCopyFailure) = result else {
+                expect(false, "最终复验后的漂移必须令 CAS 失败关闭，got \(result)")
+                return
+            }
+            expect(
+                (try? Data(contentsOf: manifest)) == drifted,
+                "原子交换发现预期字节失配后必须把用户目录完整换回原路径")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: installed.appendingPathComponent("task_start.mp3").path),
+                "CAS 回滚后不得在用户目录留下 1.1.0 文件")
         }
     }
 

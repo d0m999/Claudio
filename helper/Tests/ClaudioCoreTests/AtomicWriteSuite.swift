@@ -505,10 +505,14 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
         "mkstemp(", "rename(", "unlink(", "write(",
     ],
     // 二进制与内置包的复制。**两处都是 staging + 同卷 rename**（`copyItem` 进暂存 → `moveItem` /
-    // `replaceItemAt` 发布）。`copySelfToFixedLocation` 曾经是 `removeItem` + `copyItem` 直写最终
-    // 路径 —— 那是全仓真正的第二处非原子写，而当时的豁免理由（「copyItem 的纪律是 staging+rename」）
-    // 对它是假话。现在它是真的了。
-    "helper/Sources/ClaudioCore/Setup.swift": [".copyItem(", ".moveItem(", ".replaceItemAt("],
+    // `replaceItemAt` 发布）。pristine minimal-chime 升级更严格：`renameatx_np(RENAME_SWAP)`
+    // 原子交换 staging 与目标，再比较被隔离出来的原目录身份及完整字节；不匹配就原子交换回去。
+    // `copySelfToFixedLocation` 曾经是 `removeItem` + `copyItem` 直写最终路径 —— 那是全仓真正的
+    // 第二处非原子写，而当时的豁免理由（「copyItem 的纪律是 staging+rename」）对它是假话。
+    // 现在它是真的了。
+    "helper/Sources/ClaudioCore/Setup.swift": [
+        ".copyItem(", ".moveItem(", ".replaceItemAt(", "renameatx_np(",
+    ],
     // `/usr/bin/env claude --version` 子进程（探已装的 `claude` CLI 版本，`:319`/`:330`）。
     // 它读版本、不写盘 —— 但它跑的是**别人的**二进制，写没写盘不归这条不变量管（子进程那条免责在
     // 文件头写着）。（macOS 版本走 `ProcessInfo.processInfo.operatingSystemVersion`，无子进程，`:82`。）

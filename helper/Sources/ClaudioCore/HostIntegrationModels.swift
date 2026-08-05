@@ -286,7 +286,9 @@ public struct AudibilityCell: Identifiable, Codable, Sendable, Equatable {
             connection = "需要处理"
             audibility = "不可听"
         }
-        return "\(host.displayName)，\(event.displayName)\(qualifier)，\(support)，\(connection)，\(audibility)"
+        let summary =
+            "\(host.displayName)，\(event.displayName)\(qualifier)，\(support)，\(connection)，\(audibility)"
+        return detail.map { "\(summary)，\($0)" } ?? summary
     }
 }
 
@@ -316,7 +318,13 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
         var summaries: [HostID: HostReadinessSummary] = [:]
         for host in HostID.allCases {
             let bindings = capabilities[host] ?? []
-            let supported = bindings.filter(\.isAudibleCapability).count
+            let configuredSupported = bindings.filter(\.isAudibleCapability).count
+            let legacySupported = bindings.filter {
+                $0.isAudibleCapability && Event.legacyLifecycleCases.contains($0.event)
+            }.count
+            let supported = snapshotByHost[host]?.configuration == .legacyConnected
+                ? legacySupported
+                : configuredSupported
             summaries[host] = readinessSummary(
                 snapshot: snapshotByHost[host], supported: supported, total: Event.allCases.count)
         }
@@ -329,13 +337,19 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
                         ?? HostCapabilityBinding(
                             host: host, event: event, nativeEvent: nil, support: .unsupported,
                             qualification: "此宿主未声明该能力")
+                    let state = cellState(
+                        binding: binding, snapshot: snapshotByHost[host],
+                        hasSound: soundCoverage[event] ?? false,
+                        enabled: enabledEvents[event] ?? true)
+                    let detail = state == .degraded
+                            && snapshotByHost[host]?.configuration == .legacyConnected
+                            && !Event.legacyLifecycleCases.contains(event)
+                        ? "旧版连接未安装此事件，请升级连接"
+                        : nil
                     return AudibilityCell(
                         host: host, event: event, binding: binding,
-                        state: cellState(
-                            binding: binding, snapshot: snapshotByHost[host],
-                            hasSound: soundCoverage[event] ?? false,
-                            enabled: enabledEvents[event] ?? true),
-                        detail: nil)
+                        state: state,
+                        detail: detail)
                 })
         }
         return AudibilityMatrix(rows: rows, summaries: summaries)
@@ -416,6 +430,11 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
         case .notConfigured:
             return .notConnected
         case .legacyConnected:
+            // 旧安装器只写 Event.legacyLifecycleCases。通用能力目录里的 taskStart 是现代
+            // UserPromptSubmit 能力，不能因宿主总体是 legacyConnected 就被误报为可听/缺音。
+            guard Event.legacyLifecycleCases.contains(binding.event) else {
+                return .degraded
+            }
             if !enabled { return .muted }
             return hasSound ? .legacy : .missingSound
         case .configured:

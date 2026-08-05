@@ -55,6 +55,7 @@ public func inspectClaudeCodeHooks(
         var modernByNativeEvent: [String: [MatchedHostHookCommand]] = [:]
         var ownedCount = 0
         var misplacedModern = false
+        var hasLegacyPromptNotification = false
 
         for (nativeEvent, rawGroups) in hooks {
             guard let groups = rawGroups as? [Any] else { continue }
@@ -79,6 +80,9 @@ public func inspectClaudeCodeHooks(
                             inHookCommand: command, claudioRoot: claudioRoot)
                     {
                         ownedCount += 1
+                        if nativeEvent == "UserPromptSubmit", event == .notification {
+                            hasLegacyPromptNotification = true
+                        }
                         if event == binding.event { legacyEvents.insert(event) }
                     }
                 }
@@ -101,7 +105,9 @@ public func inspectClaudeCodeHooks(
             guard let nativeEvent = binding.nativeEvent else { return nil }
             return modernByNativeEvent[nativeEvent]?.count == 1 ? nil : nativeEvent
         }
-        if modernMissing.isEmpty, legacyEvents.isEmpty, let id = modernIDs.first {
+        if modernMissing.isEmpty, legacyEvents.isEmpty, !hasLegacyPromptNotification,
+            let id = modernIDs.first
+        {
             return .success(.configured(installationID: id))
         }
         if modern.isEmpty, legacyEvents == Set(Event.legacyLifecycleCases) {
@@ -111,7 +117,7 @@ public func inspectClaudeCodeHooks(
             .partial(
                 installationID: modernIDs.first,
                 missingNativeEvents: modernMissing,
-                hasLegacyEntries: !legacyEvents.isEmpty))
+                hasLegacyEntries: !legacyEvents.isEmpty || hasLegacyPromptNotification))
     }
 }
 

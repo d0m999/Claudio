@@ -139,6 +139,39 @@ func runHostIntegrationModelSuites() {
             "能力本身不支持仍优先显示 unsupported")
     }
 
+    suite("AudibilityMatrix：Claude 旧四事件连接把 taskStart 明确投影为需要升级") {
+        let legacy = HostIntegrationSnapshot(
+            host: .claudeCode,
+            runtime: .ready,
+            availability: .available,
+            configuration: .legacyConnected,
+            writability: .writable,
+            activation: .none)
+        let matrix = AudibilityMatrix.make(
+            snapshots: [legacy],
+            capabilities: [.claudeCode: HostCapabilityCatalog.bindings(for: .claudeCode)],
+            soundCoverage: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }),
+            enabledEvents: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
+
+        let taskStart = matrix.cell(host: .claudeCode, event: .taskStart)
+        expect(
+            taskStart?.state == .degraded,
+            "legacy installer 从未写 UserPromptSubmit，任务开始不得声称 legacy 可听")
+        expect(
+            taskStart?.detail == "旧版连接未安装此事件，请升级连接",
+            "任务开始格必须给出唯一且可操作的升级说明")
+        expect(
+            taskStart?.accessibilityLabel
+                == "Claude Code，任务开始，完整支持，需要处理，不可听，旧版连接未安装此事件，请升级连接",
+            "VoiceOver 不得把旧连接的任务开始误报为可听或仅缺声音")
+        expect(
+            matrix.summary(for: .claudeCode) == .legacy(supported: 4, total: 5),
+            "legacy 来源汇总只可计算旧安装器实际写入的四个事件")
+        expect(
+            matrix.cell(host: .claudeCode, event: .stop)?.state == .legacy,
+            "旧安装器实际写入的四个 lifecycle 事件仍应保持 legacy 可听")
+    }
+
     suite("Shared runtime inspect：helper 必须是非空、可执行、无隔离的普通文件") {
         withTempDirectory { root in
             let fixture = makeSharedRuntimeFixture(root: root, missingEvent: nil)

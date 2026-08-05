@@ -256,6 +256,67 @@ func runClaudeCodeHooksTransformSuites() {
             "五条现代事件清除后应未连接；第三方 prompt 不计能力")
     }
 
+    suite("Claude transform：完整 modern 夹旧 prompt notification 不得被 configured 掩盖") {
+        let rootPath = "/Users/test/.claudio"
+        let binary = rootPath + "/bin/claudio"
+        let originalID = UUID(uuidString: "CCCCCCCC-1111-4111-8111-111111111111")!
+        let repairID = UUID(uuidString: "CCCCCCCC-2222-4222-8222-222222222222")!
+        guard case .success(let canonical) = connectClaudeCodeHooks(
+            root: [:], claudioRoot: rootPath, claudioBinaryPath: binary,
+            installationID: originalID)
+        else {
+            expect(false, "测试前提：必须生成完整 Claude modern 配置")
+            return
+        }
+
+        let legacyPrompt = claudioHookCommand(
+            for: .notification, claudioBinaryPath: binary)
+        var mixed = canonical.root
+        var hooks = mixed["hooks"] as! [String: Any]
+        var promptGroups = hooks["UserPromptSubmit"] as! [Any]
+        promptGroups.insert(
+            [
+                "matcher": "mixed-prompt",
+                "hooks": [
+                    ["type": "command", "command": "echo keep-prompt"],
+                    ["type": "command", "command": legacyPrompt],
+                ],
+            ] as [String: Any],
+            at: 0)
+        hooks["UserPromptSubmit"] = promptGroups
+        mixed["hooks"] = hooks
+
+        expect(
+            inspectClaudeCodeHooks(
+                root: mixed, claudioRoot: rootPath, claudioBinaryPath: binary)
+                == .success(
+                    .partial(
+                        installationID: originalID,
+                        missingNativeEvents: [],
+                        hasLegacyEntries: true)),
+            "完整 modern 旁的旧 prompt notification 必须阻止 configured/no-op")
+
+        guard case .success(let repaired) = connectClaudeCodeHooks(
+            root: mixed, claudioRoot: rootPath, claudioBinaryPath: binary,
+            installationID: repairID)
+        else {
+            expect(false, "混合配置必须可显式清理")
+            return
+        }
+        expect(repaired.changed, "旧 prompt notification 必须触发真实写入")
+        expect(repaired.removedCount == 6, "五条 modern 与一条旧 prompt 必须被精确重建")
+        expect(
+            inspectClaudeCodeHooks(
+                root: repaired.root, claudioRoot: rootPath, claudioBinaryPath: binary)
+                == .success(.configured(installationID: repairID)),
+            "清理后必须形成唯一的新 repair installation")
+        let repairedHooks = repaired.root["hooks"] as? [String: Any]
+        let repairedPrompt = repairedHooks?["UserPromptSubmit"] as? [[String: Any]] ?? []
+        let commands = repairedPrompt.flatMap(claudeTransformCommands)
+        expect(commands.first == "echo keep-prompt", "第三方 prompt command 与相对顺序必须保留")
+        expect(!commands.contains(legacyPrompt), "旧 play notification 必须被删除")
+    }
+
     suite("Claude transform：所有事件都扫描 modern callback，但非正式事件中的 legacy 仍保留") {
         let rootPath = "/Users/test/.claudio"
         let binary = rootPath + "/bin/claudio"

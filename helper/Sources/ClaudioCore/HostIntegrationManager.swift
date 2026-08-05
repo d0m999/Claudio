@@ -348,6 +348,7 @@ private func snapshotWithOperation(
         configuration: snapshot.configuration,
         writability: snapshot.writability,
         activation: snapshot.activation,
+        latestReceipt: snapshot.latestReceipt,
         operation: operation,
         installationID: snapshot.installationID)
 }

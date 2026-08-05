@@ -124,6 +124,10 @@ func runHostIntegrationPresentationSuites() {
         let actions = integrationsInspectorActions(for: legacy)
 
         expect(legacy.status == .legacy, "fixture 必须真实投影 legacy 行")
+        expect(legacy.readinessText == "4/5 旧版连接", "legacy 汇总不得把任务开始算作已安装")
+        expect(
+            legacy.detailText == "四个旧版事件可听；任务开始需升级",
+            "legacy 行的可见与无障碍摘要必须直接指出任务开始需要升级")
         expect(
             actions == [.repair(.claudeCode), .redetect, .disconnect(.claudeCode)],
             "legacy 必须可升级、可重探且破坏性断开在末尾，实得 \(actions)")

@@ -65,6 +65,9 @@ func runHostIntegrationManagerOperationSuites() async {
         expect(
             operation(for: .claudeCode, in: whileDisconnecting) == .idle,
             "Codex 断开中不得改变 Claude 的 operation")
+        expect(
+            whileDisconnecting.first(where: { $0.host == .codex })?.latestReceipt?.event == .stop,
+            "切换为 disconnecting 的快照复制不得丢掉 adapter 已提供的最新回执")
 
         let refreshedWhileDisconnecting = await manager.refresh()
         expect(
@@ -86,6 +89,41 @@ func runHostIntegrationManagerOperationSuites() async {
         expect(
             afterSuccess.first(where: { $0.host == .codex })?.configuration == .notConfigured,
             "断开成功后 cached snapshot 必须保留 adapter 的最新配置事实")
+    }
+
+    await asyncSuite("HostIntegrationManager：refresh 与 connect 的 operation 投影保留 latestReceipt") {
+        let adapter = ControlledHostIntegrationAdapter(
+            host: .claudeCode,
+            initiallyConnected: false)
+        let manager = HostIntegrationManager(
+            adapters: [adapter], bootstrapper: OperationReadyRuntimeBootstrapper())
+
+        let initial = await manager.refresh()
+        expect(
+            initial.first(where: { $0.host == .claudeCode })?.latestReceipt == nil,
+            "未连接 fixture 不应伪造回执")
+
+        let connectTask = Task { await manager.connect(.claudeCode) }
+        await adapter.waitUntilConnectStarted()
+        await adapter.releaseConnect()
+        guard case .success(let connected) = await connectTask.value else {
+            expect(false, "受控 adapter 的连接必须成功")
+            return
+        }
+        expect(
+            connected.latestReceipt?.event == .stop,
+            "connect 成功返回的 idle 投影必须保留 adapter 回执")
+
+        let cached = await manager.snapshots()
+        expect(
+            cached.first(where: { $0.host == .claudeCode })?.latestReceipt
+                == connected.latestReceipt,
+            "connect 后 manager cache 必须保留同一条回执")
+        let refreshed = await manager.refresh()
+        expect(
+            refreshed.first(where: { $0.host == .claudeCode })?.latestReceipt
+                == connected.latestReceipt,
+            "显式 refresh 的 idle 投影不得清空回执")
     }
 }
 
@@ -182,7 +220,15 @@ private actor ControlledHostIntegrationAdapter: HostIntegrationAdapter {
     }
 
     private func snapshot(runtime: SharedRuntimeHealth) -> HostIntegrationSnapshot {
-        HostIntegrationSnapshot(
+        let latestReceipt = connected
+            ? HostReceiptEvidence(
+                installationID: installationID,
+                nativeEvent: "Stop",
+                event: .stop,
+                timestamp: Date(timeIntervalSince1970: 42),
+                playbackResult: .played)
+            : nil
+        return HostIntegrationSnapshot(
             host: host,
             runtime: runtime,
             availability: .available,
@@ -191,6 +237,7 @@ private actor ControlledHostIntegrationAdapter: HostIntegrationAdapter {
             activation: connected
                 ? .awaitingReceipt(installationID: installationID)
                 : .none,
+            latestReceipt: latestReceipt,
             installationID: connected ? installationID : nil)
     }
 }

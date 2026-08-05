@@ -47,8 +47,13 @@ public struct SetupEnvironment: Sendable {
     /// Test seam immediately before the second pristine check. Production is a no-op;
     /// tests use it to model another process changing the destination while staging is built.
     public let beforePristinePackFinalVerification: @Sendable () -> Void
-    /// Directory replacement seam. The production implementation deliberately uses the
-    /// default metadata-preservation policy (`options: []`) required for pack directories.
+    /// Test seam after the final pristine identity snapshot and immediately before the atomic
+    /// directory exchange. Production is a no-op; tests use it to prove the exchange-side CAS.
+    public let beforePristinePackAtomicExchange: @Sendable () -> Void
+    /// Atomic directory-exchange seam. On success, `destination` contains the staged pack and
+    /// `staging` contains the exact directory node that occupied `destination`; the caller then
+    /// compares that isolated node with the expected pristine identity/bytes and either commits
+    /// by removing it or rolls back with the same atomic exchange.
     public let replacePristinePack: @Sendable (_ destination: URL, _ staging: URL) throws -> Void
 
     public init(
@@ -62,10 +67,24 @@ public struct SetupEnvironment: Sendable {
         packsLockFile: URL = ClaudioPaths.packsLockFile,
         packsLockRetry: PacksLockRetry = PacksLockRetry(),
         beforePristinePackFinalVerification: @escaping @Sendable () -> Void = {},
+        beforePristinePackAtomicExchange: @escaping @Sendable () -> Void = {},
         replacePristinePack: @escaping @Sendable (URL, URL) throws -> Void = {
             destination, staging in
-            _ = try FileManager.default.replaceItemAt(
-                destination, withItemAt: staging, backupItemName: nil, options: [])
+            let result = destination.withUnsafeFileSystemRepresentation { destinationPath in
+                staging.withUnsafeFileSystemRepresentation { stagingPath in
+                    guard let destinationPath, let stagingPath else {
+                        errno = EINVAL
+                        return Int32(-1)
+                    }
+                    return renameatx_np(
+                        AT_FDCWD, destinationPath,
+                        AT_FDCWD, stagingPath,
+                        UInt32(RENAME_SWAP))
+                }
+            }
+            guard result == 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
         }
     ) {
         self.executablePath = executablePath
@@ -78,6 +97,7 @@ public struct SetupEnvironment: Sendable {
         self.packsLockFile = packsLockFile
         self.packsLockRetry = packsLockRetry
         self.beforePristinePackFinalVerification = beforePristinePackFinalVerification
+        self.beforePristinePackAtomicExchange = beforePristinePackAtomicExchange
         self.replacePristinePack = replacePristinePack
     }
 }
@@ -101,6 +121,11 @@ private enum SetupNodeType {
     case other
 }
 
+private struct SetupDirectoryIdentity: Equatable {
+    let device: UInt64
+    let inode: UInt64
+}
+
 /// Non-following node classification for the pristine migration boundary. Foundation's
 /// high-level file APIs are deliberately not used as the authority here: the target itself,
 /// not a symlink destination, must be the exact directory/file node being verified.
@@ -117,6 +142,18 @@ private func lstatType(at url: URL) -> SetupNodeType? {
     case S_IFLNK: return .symbolicLink
     default: return .other
     }
+}
+
+private func directoryIdentity(at url: URL) -> SetupDirectoryIdentity? {
+    var status = stat()
+    let result: Int32 = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+        guard let path else { return -1 }
+        return Darwin.lstat(path, &status)
+    }
+    guard result == 0, status.st_mode & S_IFMT == S_IFDIR else { return nil }
+    return SetupDirectoryIdentity(
+        device: UInt64(status.st_dev),
+        inode: UInt64(status.st_ino))
 }
 
 private func exactRegularFileData(at url: URL, size: Int) -> Data? {
@@ -153,6 +190,64 @@ private func isPristineMinimalChimeV100(at destination: URL, comparedTo source: 
         else { return false }
     }
     return true
+}
+
+/// Captures the directory node only if the exact-byte pristine check begins and ends on that
+/// same node. Publication later exchanges that node out of the live path before comparing it
+/// again, so a last-moment path replacement or byte edit cannot be silently overwritten.
+private func pristineMinimalChimeV100Identity(
+    at destination: URL, comparedTo source: URL
+) -> SetupDirectoryIdentity? {
+    guard let before = directoryIdentity(at: destination),
+        isPristineMinimalChimeV100(at: destination, comparedTo: source),
+        let after = directoryIdentity(at: destination),
+        before == after
+    else { return nil }
+    return before
+}
+
+private enum PristinePackAtomicPublishError: LocalizedError {
+    case concurrentModification
+    case rollbackFailed(preservedAt: String, reason: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .concurrentModification:
+            "目标目录在最终发布边界发生外部修改，已原子回滚"
+        case .rollbackFailed(let path, let reason):
+            "目标目录在最终发布边界发生外部修改；自动回滚失败，原目录保留在 \(path)：\(reason)"
+        }
+    }
+}
+
+private func atomicallyPublishPristineMinimalChime(
+    from source: URL,
+    destination: URL,
+    staging: URL,
+    expectedIdentity: SetupDirectoryIdentity,
+    environment: SetupEnvironment
+) throws {
+    environment.beforePristinePackAtomicExchange()
+    try environment.replacePristinePack(destination, staging)
+
+    let exchangedExpectedDirectory =
+        directoryIdentity(at: staging) == expectedIdentity
+        && isPristineMinimalChimeV100(at: staging, comparedTo: source)
+    guard exchangedExpectedDirectory else {
+        do {
+            try environment.replacePristinePack(destination, staging)
+        } catch {
+            throw PristinePackAtomicPublishError.rollbackFailed(
+                preservedAt: staging.path,
+                reason: error.localizedDescription)
+        }
+        throw PristinePackAtomicPublishError.concurrentModification
+    }
+
+    // The exchanged-out node is the exact known 1.0.0 tree. Failure to remove this hidden
+    // staging directory does not invalidate the already-atomic publication or justify rolling
+    // back a verified upgrade; a later idempotent bootstrap can safely ignore the dot entry.
+    try? FileManager.default.removeItem(at: staging)
 }
 
 private func isValidatedBundledPackCopy(_ staging: URL, matching source: URL) -> Bool {
@@ -199,6 +294,7 @@ private func upgradePristineMinimalChime(
     let staging = environment.userPacksDirectory.appendingPathComponent(
         ".minimal-chime.upgrade-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
     try? FileManager.default.removeItem(at: staging)
+    var expectedIdentity: SetupDirectoryIdentity?
     do {
         try FileManager.default.copyItem(at: source, to: staging)
         stripQuarantineAttribute(at: staging)
@@ -207,14 +303,26 @@ private func upgradePristineMinimalChime(
         }
 
         environment.beforePristinePackFinalVerification()
-        guard isPristineMinimalChimeV100(at: destination, comparedTo: source) else {
+        guard let verifiedIdentity = pristineMinimalChimeV100Identity(
+            at: destination, comparedTo: source)
+        else {
             throw CocoaError(.fileWriteFileExists)
         }
+        expectedIdentity = verifiedIdentity
 
-        try environment.replacePristinePack(destination, staging)
+        try atomicallyPublishPristineMinimalChime(
+            from: source,
+            destination: destination,
+            staging: staging,
+            expectedIdentity: verifiedIdentity,
+            environment: environment)
         return .success(())
     } catch {
-        try? FileManager.default.removeItem(at: staging)
+        // If rollback itself failed, `staging` is the only path retaining the exchanged-out
+        // user directory. Never apply the ordinary staging cleanup to that directory identity.
+        if expectedIdentity.map({ directoryIdentity(at: staging) != $0 }) ?? true {
+            try? FileManager.default.removeItem(at: staging)
+        }
         return .failure(
             .packCopyFailure(
                 reason: "minimal-chime 1.0.0 原子升级失败，可安全重试：\(error.localizedDescription)"))

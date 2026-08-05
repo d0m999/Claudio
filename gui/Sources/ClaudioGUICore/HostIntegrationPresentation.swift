@@ -78,7 +78,9 @@ private func hostSourceRowPresentation(
 
     case .legacy(let supported, let total):
         readinessText = "\(supported)/\(total) 旧版连接"
-        detailText = "可听，但暂无真实回执"
+        detailText = host == .claudeCode
+            ? "四个旧版事件可听；任务开始需升级"
+            : "可听，但暂无真实回执"
         status = .legacy
 
     case .notConnected(let supported, let total):
