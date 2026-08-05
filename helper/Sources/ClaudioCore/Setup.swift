@@ -53,7 +53,9 @@ public struct SetupEnvironment: Sendable {
     /// Atomic directory-exchange seam. On success, `destination` contains the staged pack and
     /// `staging` contains the exact directory node that occupied `destination`; the caller then
     /// compares that isolated node with the expected pristine identity/bytes and either commits
-    /// by removing it or rolls back with the same atomic exchange.
+    /// by removing it or rolls back with the same atomic exchange. Filesystems that reject
+    /// `RENAME_SWAP` with `ENOTSUP`/`ENOSYS` keep the pristine 1.0.0 pack and skip this optional
+    /// upgrade instead of blocking shared bootstrap.
     public let replacePristinePack: @Sendable (_ destination: URL, _ staging: URL) throws -> Void
 
     public init(
@@ -207,17 +209,25 @@ private func pristineMinimalChimeV100Identity(
 }
 
 private enum PristinePackAtomicPublishError: LocalizedError {
+    case atomicExchangeUnsupported
     case concurrentModification
     case rollbackFailed(preservedAt: String, reason: String)
 
     var errorDescription: String? {
         switch self {
+        case .atomicExchangeUnsupported:
+            "当前文件系统不支持原子目录交换，保留 minimal-chime 1.0.0"
         case .concurrentModification:
             "目标目录在最终发布边界发生外部修改，已原子回滚"
         case .rollbackFailed(let path, let reason):
             "目标目录在最终发布边界发生外部修改；自动回滚失败，原目录保留在 \(path)：\(reason)"
         }
     }
+}
+
+private enum PristinePackUpgradeOutcome {
+    case upgraded
+    case skippedUnsupportedAtomicExchange
 }
 
 private func atomicallyPublishPristineMinimalChime(
@@ -228,7 +238,15 @@ private func atomicallyPublishPristineMinimalChime(
     environment: SetupEnvironment
 ) throws {
     environment.beforePristinePackAtomicExchange()
-    try environment.replacePristinePack(destination, staging)
+    do {
+        try environment.replacePristinePack(destination, staging)
+    } catch {
+        let error = error as NSError
+        if error.domain == NSPOSIXErrorDomain && (error.code == ENOTSUP || error.code == ENOSYS) {
+            throw PristinePackAtomicPublishError.atomicExchangeUnsupported
+        }
+        throw error
+    }
 
     let exchangedExpectedDirectory =
         directoryIdentity(at: staging) == expectedIdentity
@@ -290,7 +308,7 @@ private func isValidatedBundledPackCopy(_ staging: URL, matching source: URL) ->
 
 private func upgradePristineMinimalChime(
     from source: URL, destination: URL, environment: SetupEnvironment
-) -> Result<Void, SetupError> {
+) -> Result<PristinePackUpgradeOutcome, SetupError> {
     let staging = environment.userPacksDirectory.appendingPathComponent(
         ".minimal-chime.upgrade-\(ProcessInfo.processInfo.processIdentifier)", isDirectory: true)
     try? FileManager.default.removeItem(at: staging)
@@ -316,7 +334,15 @@ private func upgradePristineMinimalChime(
             staging: staging,
             expectedIdentity: verifiedIdentity,
             environment: environment)
-        return .success(())
+        return .success(.upgraded)
+    } catch PristinePackAtomicPublishError.atomicExchangeUnsupported {
+        // Network/FUSE volumes may support ordinary same-volume operations but reject
+        // `RENAME_SWAP`. There is no equivalent directory CAS fallback: a two-step rename would
+        // create a missing-path window and could overwrite a last-moment user edit. Migration is
+        // optional, so preserve the verified 1.0.0 tree, discard staging, and let bootstrap (and
+        // host connection) continue. A later run on a capable volume can retry the upgrade.
+        try? FileManager.default.removeItem(at: staging)
+        return .success(.skippedUnsupportedAtomicExchange)
     } catch {
         // If rollback itself failed, `staging` is the only path retaining the exchanged-out
         // user directory. Never apply the ordinary staging cleanup to that directory identity.
@@ -384,8 +410,10 @@ private func publishBundledPacks(
                 switch upgradePristineMinimalChime(
                     from: source, destination: destination, environment: environment)
                 {
-                case .success:
+                case .success(.upgraded):
                     copiedPackIDs.append(id)
+                case .success(.skippedUnsupportedAtomicExchange):
+                    break
                 case .failure(let error):
                     return .failure(error)
                 }

@@ -64,7 +64,7 @@ claudi0 hook <host> <native-event> --installation-id <uuid>
 
 `SharedRuntimeBootstrap` 只负责 helper、内置声音包、默认选包和 quarantine 修复；断开任一宿主都不得删除这些共享资产。
 
-内置 `minimal-chime` 为 `1.1.0`。bootstrap 只原子升级可证明为 byte-pristine 的 `1.0.0`：真实目录、根集合恰为旧 manifest + 四个旧 MP3、全部正规文件、manifest 与私有 v1.0 baseline 字节一致、旧音频先比尺寸再有界逐字节对照当前 bundle。格式化 manifest、extra、symlink/FIFO/subdir 或任一音频变化都视为自定义并完全保持不变。升级在 `packs.lock` 内同目录 staging，复验目标仍 pristine 后用 `replaceItemAt(..., options: [])` 替换；失败保留旧包并返回可重试错误，不创建永久 salvage。
+内置 `minimal-chime` 为 `1.1.0`。bootstrap 只原子升级可证明为 byte-pristine 的 `1.0.0`：真实目录、根集合恰为旧 manifest + 四个旧 MP3、全部正规文件、manifest 与私有 v1.0 baseline 字节一致、旧音频先比尺寸再有界逐字节对照当前 bundle。格式化 manifest、extra、symlink/FIFO/subdir 或任一音频变化都视为自定义并完全保持不变。升级在 `packs.lock` 内同目录 staging，复验目标仍 pristine 后用 `renameatx_np(..., RENAME_SWAP)` 交换目录；若网络/FUSE 卷以 `ENOTSUP`/`ENOSYS` 明确拒绝该原语，则保留 1.0.0、清理 staging 并继续 bootstrap，不采用有缺口且可能覆盖外部编辑的两步 rename。其他失败保留旧包并返回可重试错误，不创建永久 salvage。
 
 宿主配置统一经 `ConfigFileTransaction`：每个配置文件使用独立非阻塞锁、一次性备份、受限读取与解析、compare-and-swap 外部修改检测、符号链接防护及同目录原子替换。dotfiles 符号链接保留链接节点并写其已解析目标；dangling link 没有安全目标，明确 fail closed。一次性备份优先使用 `RENAME_EXCL`，文件系统不支持时只回退到同目录 `link(2)`，仍以 `EEXIST` 拒绝覆盖。adapter 只实现自身 schema 变换：
 

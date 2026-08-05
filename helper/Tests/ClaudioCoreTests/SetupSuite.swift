@@ -379,6 +379,67 @@ private func runMinimalChimeUpgradeSuites() {
         }
     }
 
+    suite("minimal-chime：卷不支持 RENAME_SWAP 时保留 1.0.0 并继续 bootstrap") {
+        for unsupportedErrno in [ENOTSUP, ENOSYS] {
+            withTempDirectory { root in
+                let bundle = makeMinimalChimeUpgradeBundle(
+                    at: root.appendingPathComponent("Claudio.app", isDirectory: true))
+                let environment = makeEnvironment(
+                    root: root,
+                    executablePath: bundle.executablePath,
+                    replacePristinePack: { _, _ in
+                        throw NSError(
+                            domain: NSPOSIXErrorDomain,
+                            code: Int(unsupportedErrno))
+                    })
+                let installed = environment.userPacksDirectory.appendingPathComponent(
+                    "minimal-chime", isDirectory: true)
+                writePristineMinimalChimeV100(to: installed)
+
+                let result = performSharedRuntimeBootstrap(environment: environment)
+                guard case .success(let outcome) = result else {
+                    expect(
+                        false,
+                        "不支持 RENAME_SWAP 只能跳过可选升级，不能阻断 bootstrap，"
+                            + "errno=\(unsupportedErrno), got \(result)")
+                    return
+                }
+                expect(
+                    outcome.copiedPacks.isEmpty,
+                    "未发生升级时不得报告 copiedPacks，errno=\(unsupportedErrno)")
+                expect(
+                    (try? Data(contentsOf: installed.appendingPathComponent("manifest.json")))
+                        == setupMinimalChimeV100Manifest,
+                    "原 1.0.0 manifest 必须逐字节保留，errno=\(unsupportedErrno)")
+                expect(
+                    !FileManager.default.fileExists(
+                        atPath: installed.appendingPathComponent("task_start.mp3").path),
+                    "跳过升级不得留下第五音频，errno=\(unsupportedErrno)")
+                expect(
+                    !FileManager.default.fileExists(
+                        atPath: environment.userPacksDirectory.appendingPathComponent(
+                            ".minimal-chime.upgrade-\(ProcessInfo.processInfo.processIdentifier)"
+                        ).path),
+                    "跳过升级必须清理 staging，errno=\(unsupportedErrno)")
+
+                let firstConnection = performFirstRunSetup(environment: environment)
+                guard
+                    case .success(
+                        .completed(
+                            _, let copiedPacks, _, _, let hooksOutcome)) = firstConnection
+                else {
+                    expect(
+                        false,
+                        "同一能力缺失不能在首次宿主连接时重新阻断 setup，"
+                            + "errno=\(unsupportedErrno), got \(firstConnection)")
+                    return
+                }
+                expect(copiedPacks.isEmpty, "连接重试仍不得误报声音包升级")
+                expect(hooksOutcome == .installed, "保留 1.0.0 后必须继续完成宿主连接")
+            }
+        }
+    }
+
 }
 
 @MainActor
@@ -1777,4 +1838,5 @@ func runSetupPackSelectionSuites() {
             expect(hooksOutcome == .installed, "照常写 hooks")
         }
     }
+
 }
