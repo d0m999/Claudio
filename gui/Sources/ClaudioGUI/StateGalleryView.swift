@@ -37,6 +37,7 @@ import SwiftUI
                         OnboardingActionGalleryView()
                     }
                     EventRowGalleryView()
+                    EventHostIndicatorGalleryView()
                     PanelPackSectionGalleryView()
                     InterfaceTextSizeGalleryView()
                     MasterVolumeGalleryView()
@@ -204,6 +205,40 @@ import SwiftUI
         }
     }
 
+    // MARK: - Event-row host indicators (5 approved fact states)
+
+    struct EventHostIndicatorGalleryView: View {
+        var body: some View {
+            GallerySection(
+                title: "Event host indicators (\(PreviewFixtures.eventHostIndicatorScenarios.count))"
+            ) {
+                ForEach(PreviewFixtures.eventHostIndicatorScenarios) { scenario in
+                    GalleryFrame(caption: "\(scenario.id) · \(scenario.title)") {
+                        EventHostIndicatorStateFrame(scenario: scenario)
+                    }
+                }
+            }
+        }
+    }
+
+    private struct EventHostIndicatorStateFrame: View {
+        let scenario: PreviewFixtures.EventHostIndicatorScenario
+        @FocusState private var focusedTarget: PanelFocusTarget?
+
+        var body: some View {
+            let matrix = hostCapabilityMatrixPresentation(from: scenario.state.matrix)
+            EventRowView(
+                row: scenario.row,
+                hostIndicators: eventHostIndicatorPresentations(
+                    event: scenario.row.event,
+                    matrix: matrix),
+                previewAvailability: .available(fileName: "\(scenario.row.event.cliName).mp3"),
+                focusedTarget: $focusedTarget,
+                adaptation: scenario.adaptation)
+                .frame(width: CGFloat(scenario.adaptation.panelWidth))
+        }
+    }
+
     // MARK: - Product UI refactor states
 
     struct PanelPackSectionGalleryView: View {
@@ -273,6 +308,7 @@ import SwiftUI
                     .font(ClaudioTheme.font(.productTitle))
                 EventRowView(
                     row: PreviewFixtures.eventRows[0],
+                    hostIndicators: interfaceTextHostIndicators,
                     previewAvailability: .available(fileName: "stop.mp3"),
                     focusedTarget: $focusedTarget,
                     adaptation: panelLayoutAdaptation(for: panelTier))
@@ -289,6 +325,13 @@ import SwiftUI
             case .large: .larger
             case .maximum: .maximum
             }
+        }
+
+        private var interfaceTextHostIndicators: [EventHostIndicatorPresentation] {
+            let source = PreviewFixtures.eventHostIndicatorScenarios[0]
+            return eventHostIndicatorPresentations(
+                event: PreviewFixtures.eventRows[0].event,
+                matrix: hostCapabilityMatrixPresentation(from: source.state.matrix))
         }
     }
 
@@ -564,6 +607,15 @@ import SwiftUI
             Group {
                 EventRowGalleryView().preferredColorScheme(.light)
                 EventRowGalleryView().preferredColorScheme(.dark)
+            }
+        }
+    }
+
+    struct EventHostIndicatorGalleryView_Previews: PreviewProvider {
+        static var previews: some View {
+            Group {
+                EventHostIndicatorGalleryView().preferredColorScheme(.light)
+                EventHostIndicatorGalleryView().preferredColorScheme(.dark)
             }
         }
     }

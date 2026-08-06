@@ -233,69 +233,123 @@ public func hostCapabilityMatrixPresentation(
         })
 }
 
-/// 菜单栏事件行使用的紧凑宿主覆盖文案。它只消费矩阵里 adapter 已声明的格子：删除映射后
-/// `AudibilityMatrix` 会把对应格 fail closed 为 `unsupported`，这里便自然移除该宿主，不会在
-/// View 中按事件补写一份 Claude Code/Codex 对照表。
-public struct EventHostCoveragePresentation: Sendable, Equatable {
-    public let event: Event
-    public let hosts: [HostID]
-    public let visibleText: String
-    public let accessibilityLabel: String
+/// 菜单栏事件行中单枚宿主 Logo 的展示语义。颜色只是事实状态的冗余编码；鼠标帮助与事件编辑入口
+/// 的 VoiceOver label 会同时给出完整文字状态。
+public enum EventHostIndicatorState: Sendable, Equatable {
+    case connected
+    case legacy
+    case awaitingActivation
+    case notConnected
+    case needsAttention
+    case unsupported
 
-    public init(
-        event: Event,
-        hosts: [HostID],
-        visibleText: String,
-        accessibilityLabel: String
-    ) {
-        self.event = event
-        self.hosts = hosts
-        self.visibleText = visibleText
-        self.accessibilityLabel = accessibilityLabel
+    public var usesActiveColor: Bool {
+        switch self {
+        case .connected, .legacy: true
+        case .awaitingActivation, .notConnected, .needsAttention, .unsupported: false
+        }
+    }
+
+    public var statusText: String {
+        switch self {
+        case .connected: "已连接"
+        case .legacy: "旧版连接"
+        case .awaitingActivation: "待激活"
+        case .notConnected: "未连接"
+        case .needsAttention: "需处理"
+        case .unsupported: "此事件不支持"
+        }
     }
 }
 
-/// 从详情窗与菜单栏共用的矩阵投影一条事件行的宿主覆盖。`qualificationText` 同样来自 adapter，
-/// 所以 Codex 的“仅授权请求”会同时进入可见文案与 VoiceOver，而未知/删除的映射不会被猜测补回。
-public func eventHostCoveragePresentation(
+/// 一枚只读宿主 Logo 的完整呈现。`qualificationText` 仍来自 adapter，例如 Codex 的
+/// “仅授权请求”；视图不推测或重建任何宿主能力。
+public struct EventHostIndicatorPresentation: Identifiable, Sendable, Equatable {
+    public var id: HostID { host }
+    public let host: HostID
+    public let state: EventHostIndicatorState
+    public let qualificationText: String?
+
+    public init(
+        host: HostID,
+        state: EventHostIndicatorState,
+        qualificationText: String? = nil
+    ) {
+        self.host = host
+        self.state = state
+        self.qualificationText = qualificationText
+    }
+
+    public var helpText: String { state.statusText }
+
+    public var accessibilityLabel: String {
+        [host.displayName, state.statusText, qualificationText]
+            .compactMap { $0 }
+            .joined(separator: "，")
+    }
+}
+
+/// 宿主标识资源名。穷举 `HostID` 且没有 `default`，新增 CLI 工具但未提供资源时会编译失败。
+public func eventHostIndicatorAssetName(for host: HostID) -> String {
+    switch host {
+    case .claudeCode: "claude"
+    case .codex: "codex"
+    }
+}
+
+public struct EventHostIndicatorPalette: Sendable, Equatable {
+    public let lightHex: String
+    public let darkHex: String
+
+    public init(lightHex: String, darkHex: String) {
+        self.lightHex = lightHex
+        self.darkHex = darkHex
+    }
+}
+
+/// claudi0 的“已连接”状态色，不是宿主官方品牌色。与资源名映射一样穷举 `HostID`。
+public func eventHostIndicatorPalette(for host: HostID) -> EventHostIndicatorPalette {
+    switch host {
+    case .claudeCode:
+        EventHostIndicatorPalette(
+            lightHex: ClaudioColorHex.claudeIndicatorLight,
+            darkHex: ClaudioColorHex.claudeIndicatorDark)
+    case .codex:
+        EventHostIndicatorPalette(
+            lightHex: ClaudioColorHex.codexIndicatorLight,
+            darkHex: ClaudioColorHex.codexIndicatorDark)
+    }
+}
+
+/// 从详情窗与菜单栏共用的矩阵投影一条事件行的只读 Logo。顺序唯一来自
+/// `matrix.hostColumns`；缺失的行或格一律 fail closed 为“不支持”。
+public func eventHostIndicatorPresentations(
     event: Event,
     matrix: HostCapabilityMatrixPresentation
-) -> EventHostCoveragePresentation {
-    let supportedCells = matrix.rows.first(where: { $0.event == event })?.cells.filter {
-        $0.state != .unsupported && $0.nativeEventText != nil
-    } ?? []
-    let hosts = supportedCells.map(\.host)
-    let hostNames = supportedCells.map { $0.host.displayName }
-    let qualificationTexts = supportedCells.compactMap { cell in
-        cell.qualificationText.map { "\(cell.host.displayName) \($0)" }
-    }
-
-    let visibleText: String
-    switch supportedCells.count {
-    case 0:
-        visibleText = "暂无宿主事件"
-    case 1:
-        let cell = supportedCells[0]
-        if let qualification = cell.qualificationText {
-            visibleText = "\(cell.host.displayName) \(qualification)"
-        } else {
-            visibleText = "仅 \(cell.host.displayName)"
+) -> [EventHostIndicatorPresentation] {
+    let row = matrix.rows.first(where: { $0.event == event })
+    return matrix.hostColumns.map { host in
+        guard let cell = row?.cells.first(where: { $0.host == host }) else {
+            return EventHostIndicatorPresentation(host: host, state: .unsupported)
         }
-    default:
-        visibleText = qualificationTexts.isEmpty
-            ? "两个来源"
-            : "两个来源 · \(qualificationTexts.joined(separator: "；"))"
+        return EventHostIndicatorPresentation(
+            host: host,
+            state: eventHostIndicatorState(for: cell.state),
+            qualificationText: cell.qualificationText)
     }
+}
 
-    let accessibilityParts = hostNames + qualificationTexts
-    let accessibilityLabel = accessibilityParts.isEmpty
-        ? "\(event.displayName)，暂无宿主事件"
-        : "\(event.displayName)，声音来源，\(accessibilityParts.joined(separator: "，"))"
-    return EventHostCoveragePresentation(
-        event: event,
-        hosts: hosts,
-        visibleText: visibleText,
-        accessibilityLabel: accessibilityLabel)
+private func eventHostIndicatorState(
+    for state: AudibilityCellState
+) -> EventHostIndicatorState {
+    switch state {
+    case .audible, .muted, .missingSound: .connected
+    case .legacy: .legacy
+    case .notConnected: .notConnected
+    case .awaitingActivation: .awaitingActivation
+    case .unsupported: .unsupported
+    case .degraded: .needsAttention
+    }
 }
 
 /// 检查器的真实回执摘要。只投影快照中已经通过 installation ID 校验的 `.observed` 证据；

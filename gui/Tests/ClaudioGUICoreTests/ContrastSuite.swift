@@ -313,6 +313,40 @@ func runContrastSuites() {
                 + "非文本 ≥3:1，got \(clayDarkRatio) —— 它是图形不是文字，判 WCAG 1.4.11")
     }
 
+    // MARK: - 事件行宿主 Logo：连接色与 75% 灰色均为非文本状态指示
+
+    let hostIndicatorPairs: [(String, String, String)] = [
+        ("Claude dark", ClaudioColorHex.claudeIndicatorDark, ClaudioColorHex.panelDark),
+        ("Claude light deepest", ClaudioColorHex.claudeIndicatorLight, ClaudioColorHex.panelDeepLight),
+        ("Codex dark", ClaudioColorHex.codexIndicatorDark, ClaudioColorHex.panelDark),
+        ("Codex light deepest", ClaudioColorHex.codexIndicatorLight, ClaudioColorHex.panelDeepLight),
+    ]
+    for (name, foreground, background) in hostIndicatorPairs {
+        suite("contrast: event-row host indicator \(name) is ≥ 3:1") {
+            let ratio = contrastRatio(foreground, background)
+            expect(
+                ratio >= 3.0,
+                "\(name) Logo 状态色 \(foreground) 对最坏面板底 \(background) 只有 \(ratio):1")
+        }
+    }
+
+    let inactiveIndicatorPairs: [(String, String, String)] = [
+        ("inactive dark", ClaudioColorHex.text2Dark, ClaudioColorHex.panelDark),
+        ("inactive light deepest", ClaudioColorHex.text2Light, ClaudioColorHex.panelDeepLight),
+    ]
+    for (name, text2, background) in inactiveIndicatorPairs {
+        suite("contrast: event-row host indicator \(name) at 75% is ≥ 3:1") {
+            guard let composited = compositedHex(text2, over: background, alpha: 0.75) else {
+                expect(false, "\(name) 灰色无法合成")
+                return
+            }
+            let ratio = contrastRatio(composited, background)
+            expect(
+                ratio >= 3.0,
+                "\(name) 的 text-2 @75% 复合色 \(composited) 对 \(background) 只有 \(ratio):1")
+        }
+    }
+
     runCompositedBackgroundSuites()
 }
 

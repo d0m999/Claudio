@@ -25,7 +25,7 @@ func runHostIntegrationModelSuites() {
             "Codex StopFailure 必须 unsupported，不能降级映射到 Stop")
         expect(
             codex.first(where: { $0.event == .notification })?.nativeEvent == "PermissionRequest",
-            "Codex 的需要你只能来自 PermissionRequest")
+            "Codex 的待响应只能来自 PermissionRequest")
         expect(
             codex.first(where: { $0.event == .notification })?.support == .partial,
             "Codex PermissionRequest 必须标成 partial，而不是完整 Notification")
@@ -50,7 +50,7 @@ func runHostIntegrationModelSuites() {
         expect(
             HostCapabilityCatalog.semanticEvent(host: .codex, nativeEvent: "PermissionRequest")
                 == .notification,
-            "Codex PermissionRequest 必须映射到需要你")
+            "Codex PermissionRequest 必须映射到待响应")
         expect(
             HostCapabilityCatalog.semanticEvent(host: .codex, nativeEvent: "StopFailure") == nil,
             "Codex StopFailure 不能播放或被降级映射")
@@ -84,7 +84,7 @@ func runHostIntegrationModelSuites() {
             "Codex 执行中断格必须以中性 unsupported 存在")
         expect(
             matrix.cell(host: .codex, event: .notification)?.accessibilityLabel
-                == "Codex，需要你，仅授权请求，部分支持，已连接，可听",
+                == "Codex，待响应，仅授权请求，部分支持，已连接，可听",
             "VoiceOver 必须说出宿主、声音语义、限定语、支持级别、连接状态和可听状态，"
                 + "但不拿原生 key 当主文案")
 
@@ -252,7 +252,7 @@ func runHostIntegrationModelSuites() {
                 "单事件缺音不得把宿主来源行整体降级")
             expect(
                 matrix.cell(host: .claudeCode, event: .notification)?.state == .missingSound,
-                "只有缺失的需要你格应显示 missingSound")
+                "只有缺失的待响应格应显示 missingSound")
             expect(
                 matrix.cell(host: .claudeCode, event: .stop)?.state == .audible,
                 "仍有文件的本轮结束格必须保持 audible")

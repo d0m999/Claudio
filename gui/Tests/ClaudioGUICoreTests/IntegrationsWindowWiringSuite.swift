@@ -393,7 +393,7 @@ func runIntegrationsWindowWiringSuites() {
         }
     }
 
-    suite("事件行宿主覆盖：Panel 只投影共享矩阵；可见文案与 VoiceOver 不保留第二份事件 switch") {
+    suite("事件行宿主 Logo：Panel 只投影共享矩阵；Logo 只读且状态合并进编辑入口") {
         guard
             let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift"),
             let row = integrationsSource("gui/Sources/ClaudioGUI/EventRowView.swift")
@@ -402,20 +402,80 @@ func runIntegrationsWindowWiringSuites() {
             return
         }
         expect(
-            panel.contains("eventHostCoveragePresentation(")
+            panel.contains("eventHostIndicatorPresentations(")
                 && panel.contains("matrix: hostIntegrations.content.matrix"),
-            "五条事件行必须从共享 manager 矩阵投影宿主覆盖")
+            "五条事件行必须从共享 manager 矩阵投影宿主 Logo")
         expect(
-            row.contains("Text(hostCoverage?.visibleText")
-                && row.contains("hostCoverage.accessibilityLabel"),
-            "宿主覆盖必须同时进入可见文字与事件行 VoiceOver label")
+            row.contains("ForEach(hostIndicators)")
+                && row.contains("hostIndicatorImage(for: indicator.host)")
+                && row.contains("eventHostIndicatorAssetName(for: host)")
+                && row.contains("hostIconResourceBundle.image(forResource:")
+                && row.contains("image.isTemplate = true")
+                && row.contains("hostIndicators.map(\\.accessibilityLabel)"),
+            "共享宿主投影必须同时驱动打包资源中的 Logo 与事件编辑入口 VoiceOver label")
         expect(
             row.contains("row.event.displayName")
                 && !row.contains("func eventDisplayName"),
             "EventRowView 必须直接复用 Event.displayName，禁止保留第二份中文 switch")
-        for forbidden in [".stop: \"Claude Code", ".notification: \"Claude Code", "PermissionRequest"] {
+        for forbidden in [
+            "EventHostCoveragePresentation", "hostCoverage", "宿主覆盖未检测",
+            "两个来源", "仅 Claude Code", "PermissionRequest", "HostID.allCases",
+        ] {
             expect(!row.contains(forbidden), "EventRowView 不得硬编码宿主矩阵：\(forbidden)")
         }
+
+        guard
+            let indicatorStart = row.range(of: "private var hostIndicatorGroup")?.lowerBound,
+            let indicatorEnd = row.range(of: "private var previewButton")?.lowerBound,
+            indicatorStart < indicatorEnd
+        else {
+            expect(false, "无法定位 EventRowView 的只读 Logo 组")
+            return
+        }
+        let indicatorGroup = String(row[indicatorStart..<indicatorEnd])
+        expect(!indicatorGroup.contains("Button("), "Logo 组不得包含独立 Button")
+        expect(!indicatorGroup.contains("bundle: .module"), "Logo 组不得直接走 SwiftPM 的 Bundle.module 根目录查找")
+        expect(!indicatorGroup.contains(".focused("), "Logo 组不得新增焦点 owner")
+        expect(!indicatorGroup.contains("PanelFocusTarget"), "Logo 组不得新增 PanelFocusTarget")
+        expect(
+            indicatorGroup.contains(".accessibilityHidden(true)"),
+            "Logo 自身必须从 VoiceOver 树隐藏，由事件编辑入口统一播报")
+        expect(
+            indicatorGroup.contains("HStack(spacing: 5)")
+                && row.contains("adaptation.rowWrapsToTwoLines ? 19 : 22")
+                && row.contains("secondaryText(colorScheme).opacity(0.75)"),
+            "Logo 必须使用 5pt 间距、标准 22pt / 窄版 19pt 与 text-2 @75% 灰色")
+        for forbidden in [".background(", ".overlay(", ".animation(", ".onHover("] {
+            expect(!indicatorGroup.contains(forbidden), "Logo 必须无框、无底、无 hover 动画：\(forbidden)")
+        }
+    }
+
+    suite("事件静音按钮：使用批准的 24×24 双声波矢量，不回退到 SF Symbol") {
+        guard let row = integrationsSource("gui/Sources/ClaudioGUI/EventRowView.swift") else {
+            expect(false, "缺少 EventRowView 源")
+            return
+        }
+        expect(
+            row.contains("EventMuteSpeakerIcon(")
+                && row.contains("SpeakerBodyShape")
+                && row.contains("SpeakerWaveShape(radius: 4")
+                && row.contains("SpeakerWaveShape(radius: 8"),
+            "静音按钮必须由扬声器本体与两道声波组成")
+        expect(
+            row.contains("x: 3.5, y: 9")
+                && row.contains("x: 12.5, y: 19")
+                && row.contains("startX: 16, startY: 9.2, endY: 14.8")
+                && row.contains("startX: 18.8, startY: 6.5, endY: 17.5"),
+            "扬声器与两道声波必须钉住批准 mockup 的 24×24 几何")
+        expect(
+            row.contains("isMuted ? 0.24 : 1")
+                && row.contains("x: 4, y: 4.5")
+                && row.contains("x: 20, y: 20")
+                && row.contains("lineWidth: 2.1"),
+            "静音态必须把声波降至 24% 并叠加批准斜线")
+        expect(
+            !row.contains("speaker.wave.2") && !row.contains("speaker.slash.fill"),
+            "事件静音按钮不得回退到旧 SF Symbol")
     }
 
     suite("可听矩阵刷新：面板全量 reload 与静音写入都回到共享 manager provider") {
@@ -795,6 +855,24 @@ func runIntegrationsWindowWiringSuites() {
                 && gallery.contains("HostIntegrationStateFrame")
                 && gallery.contains("IntegrationsWindowView("),
             "gallery 必须遍历权威场景并渲染生产 IntegrationsWindowView")
+        expect(
+            fixtures.contains("eventHostIndicatorScenarios")
+                && fixtures.contains("id: \"full-color\"")
+                && fixtures.contains("id: \"mixed\"")
+                && fixtures.contains("id: \"all-gray\"")
+                && fixtures.contains("id: \"legacy\"")
+                && fixtures.contains("id: \"awaiting-narrow\""),
+            "EventRow Logo fixture 必须覆盖全彩、混合、全灰、legacy 与待激活窄版")
+        expect(
+            gallery.contains("PreviewFixtures.eventHostIndicatorScenarios")
+                && gallery.contains("EventHostIndicatorStateFrame")
+                && gallery.contains("hostIndicators: eventHostIndicatorPresentations("),
+            "EventRow Logo gallery 必须遍历 catalog 并渲染生产 EventRowView")
+        expect(
+            gallery.contains("ForEach(PreviewFixtures.interfaceTextSizes)")
+                && gallery.contains("hostIndicators: interfaceTextHostIndicators")
+                && gallery.contains("panelLayoutAdaptation(for: panelTier)"),
+            "四档界面文字帧必须带真实宿主 Logo，并复用生产行布局降级")
         expect(
             fixtures.contains("title: \"claudi0 已写好，等待 Codex 确认\"")
                 && !fixtures.contains("title: \"Codex 已写好，等待 /hooks 确认\""),

@@ -384,6 +384,63 @@ public enum PreviewFixtures {
             ]),
     ]
 
+    /// 菜单栏事件行宿主 Logo 的五个视觉事实态。每帧复用上面的真实双宿主矩阵，并明确携带
+    /// 标准或窄版布局；Gallery 不在 View 里手写任一状态或宿主能力。
+    public struct EventHostIndicatorScenario: Identifiable, Sendable, Equatable {
+        public let id: String
+        public let title: String
+        public let row: EventRow
+        public let state: HostIntegrationPresentationState
+        public let adaptation: PanelLayoutAdaptation
+
+        public init(
+            id: String,
+            title: String,
+            row: EventRow,
+            state: HostIntegrationPresentationState,
+            adaptation: PanelLayoutAdaptation
+        ) {
+            self.id = id
+            self.title = title
+            self.row = row
+            self.state = state
+            self.adaptation = adaptation
+        }
+    }
+
+    public static let eventHostIndicatorScenarios: [EventHostIndicatorScenario] = [
+        eventHostIndicatorScenario(
+            id: "full-color",
+            title: "双宿主已连接 · 标准 22pt",
+            event: .stop,
+            sourceScenarioID: "dual-connected",
+            tier: .standard),
+        eventHostIndicatorScenario(
+            id: "mixed",
+            title: "Claude 可用 · Codex 此事件不支持",
+            event: .stopFailure,
+            sourceScenarioID: "dual-connected",
+            tier: .standard),
+        eventHostIndicatorScenario(
+            id: "all-gray",
+            title: "双宿主未连接",
+            event: .stop,
+            sourceScenarioID: "dual-disconnected",
+            tier: .standard),
+        eventHostIndicatorScenario(
+            id: "legacy",
+            title: "Claude Code 旧版连接",
+            event: .stop,
+            sourceScenarioID: "claude-legacy",
+            tier: .standard),
+        eventHostIndicatorScenario(
+            id: "awaiting-narrow",
+            title: "Codex 待激活 · 窄版两行 19pt",
+            event: .notification,
+            sourceScenarioID: "codex-awaiting",
+            tier: .largest),
+    ]
+
     private static let hostIntegrationInstallationID = UUID(
         uuidString: "00000000-0000-4000-8000-0000000000C1")!
 
@@ -439,6 +496,28 @@ public enum PreviewFixtures {
                 matrix: matrix))
     }
 
+    private static func eventHostIndicatorScenario(
+        id: String,
+        title: String,
+        event: Event,
+        sourceScenarioID: String,
+        tier: PanelTypeSizeTier
+    ) -> EventHostIndicatorScenario {
+        guard let source = hostIntegrationScenarios.first(where: { $0.id == sourceScenarioID })
+        else {
+            preconditionFailure("missing host integration fixture: \(sourceScenarioID)")
+        }
+        return EventHostIndicatorScenario(
+            id: id,
+            title: title,
+            row: EventRow(
+                event: event,
+                coverage: .present(fileName: "\(event.cliName).mp3"),
+                enabled: true),
+            state: source.state,
+            adaptation: panelLayoutAdaptation(for: tier))
+    }
+
     // MARK: - Compile-time exhaustiveness guards
 
     /// Runs every `_coverage(_:)` guard below against its matching fixture array and RETURNS
@@ -479,6 +558,9 @@ public enum PreviewFixtures {
         for state in masterVolumeStates { visited.insert("masterVolume.\(masterVolumeStateCoverage(state))") }
         for scenario in hostIntegrationScenarios {
             visited.insert("hostIntegration.\(scenario.id)")
+        }
+        for scenario in eventHostIndicatorScenarios {
+            visited.insert("eventHostIndicator.\(scenario.id)")
         }
         return visited
     }

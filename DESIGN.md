@@ -105,7 +105,7 @@
 ## Color（配色）
 
 - **策略**：**restrained brand + functional semantic**。中性是 claudi0 自有暖色系统；品牌强调**只有一个**（黏土），克制使用；**五事件语义色是功能性的**（产品灵魂 = 听声辨状态，事件必须有可视身份）。
-- **一个招牌绑定**：**需要你（底层键 `notification`）的事件色 = claudi0 品牌黏土** —— 正是 agent 需要一个人的时候；它不是任一宿主的品牌色。
+- **一个招牌绑定**：**待响应（底层键 `notification`）的事件色 = claudi0 品牌黏土** —— 正是 agent 需要一个人的时候；它不是任一宿主的品牌色。
 - **一个可读性约束**：**Stop 实心粗勾 vs SubagentStop 空心勾** = 同形状两权重 = 一眼分「本轮结束 / 子任务结束」。
 
 **中性 + 品牌（暗色为主基调，亮色完整支持）**
@@ -133,7 +133,7 @@
 | ✈︎ 任务开始（`task_start`） | 用户提交提示词；Claude Code 与 Codex 首次及后续提示均触发 | `#0A84FF` | `#0A72D0` | `paperplane.fill`；与试听 `play.fill` 明确区分 |
 | ✅ 本轮结束（`stop`） | 一轮停止；**不承诺任务已经完成** | `#34C759` | `#288B43` | 实心粗勾 `checkmark.circle.fill` |
 | ⏸ 执行中断（`stop_failure`） | 限流 / 欠费 / 过载 / 认证（**非代码 bug**；仅 Claude Code） | `#FF9F0A` | `#AC6900` | 暂停 `pause.circle.fill` · **琥珀，绝不用红** |
-| ✋ 需要你（`notification`） | 等你操作；Codex **仅授权请求** | `#D97757`（=clay） | `#C4633C` | 铃 / 举手 `bell.badge.fill` · **claudi0 品牌黏土** |
+| ✋ 待响应（`notification`） | 等你操作；Codex **仅授权请求** | `#D97757`（=clay） | `#C4633C` | 铃 / 举手 `bell.badge.fill` · **claudi0 品牌黏土** |
 | ◦ 子任务结束（`subagent_stop`） | 从属任务停止 | `#5E5CE6` | `#5B59D6` | **空心**勾 `checkmark.circle` · 更暗 |
 
 > **`StopFailure` 亮色的两次调深（如实记录，因为第一次没达成目的）**：原 `#E08600` → `#C87A00` → 现 `#AC6900`。第一次调深（`#E08600 → #C87A00`）是**专为**过事件字形对表面的 **≥3:1**（WCAG 1.4.11 非文本对比）而授权的，但它**并没有达成目的**：当时 `ContrastSuite` 断的是「字形 vs 纯 `panel`」，而字形实际画在**事件色 @15% 自染**的 tile 上 —— **断言断错了那一对**。对纯 `panel` 它从 2.73:1 升到 3.31:1（看着过了），对**真实的自染 tile 底**却只从 2.36:1 升到 2.82:1，**依然不及格**。故本次进一步调深到 `#AC6900`（对真实 tile 底 **3.59:1**，见下注）。两次都只降明度、**不换色相** —— 仍为暖琥珀、绝不用红。UI 语义 `warning` token 是独立用途（校验提示，非事件字形），当时保留 `#E08600`（**已于 2026-07-12 · T17f 调深为 `#B87000`** —— 它当年之所以能带着一个连 ≥3:1 都不过的值留在表里，正是因为「没有任何视图渲染它」＝「没有任何人量过它」，见下方 T17f 记录）；同理 UI 语义 `success` 亮色仍为 `#2FA24E`，不随 `Stop` 调深 —— 事件层与 UI 语义层**刻意分叉**（这条分叉今天仍然成立：`warning` `#B87000` ≠ `StopFailure` `#AC6900`）。`gui` 侧由 `ContrastSuite.swift` 逐对数学断言钉死。
@@ -223,11 +223,11 @@ claudi0                            2 个声音来源
 Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 
 当前声音包 · 事件
-任务开始       Claude Code · Codex
-本轮结束       Claude Code · Codex
-执行中断       仅 Claude Code
-需要你         Claude Code · Codex（Codex 仅授权）
-子任务结束     Claude Code · Codex
+任务开始       [Claude Logo] [Codex Logo]  已映射  ▶  )))
+本轮结束       [Claude Logo] [Codex Logo]  已映射  ▶  )))
+执行中断       [Claude Logo] [Codex Logo 灰]  已映射  ▶  )))
+待响应         [Claude Logo] [Codex Logo]  已映射  ▶  )))
+子任务结束     [Claude Logo] [Codex Logo]  已映射  ▶  )))
 ```
 
 - **来源条永久存在**：Claude Code 与 Codex 必须由同一个组件、同一高度、同一点击面积渲染为等权双列；异常时才展开说明，未安装、待确认、legacy、损坏或断开不隐藏整格。
@@ -235,7 +235,17 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 - **状态双编码**：状态点必须同时由图标/形状和文字表达；不得只靠绿、琥珀或红。行尾 `›` 打开 `IntegrationsWindow` 并选中对应宿主。
 - **控制不被宿主状态门控**：任一宿主断开或损坏，主音量、五事件、声音包与管理入口仍全部可用；只有确实依赖该宿主的连接动作在详情窗口内禁用或改为修复。
 - **焦点顺序**：Claude Code → Codex → 任务开始身份/试听/静音 → 其余事件身份/试听/静音（均按 `Event.allCases`）→ 主音量 → 声音包 → 管理入口。面板内不放连接、修复或断开；破坏性断开只存在于详情窗口末尾。
-- **状态反馈**：连接、刷新与真实回执变化使用短暂且可关闭的反馈；开启 Reduce Motion 时只做瞬时状态替换。VoiceOver 播报须带宿主名、语义事件、连接状态及能力限定语，尤其是「Codex，需要你，仅授权请求」。
+- **状态反馈**：连接、刷新与真实回执变化使用短暂且可关闭的反馈；开启 Reduce Motion 时只做瞬时状态替换。VoiceOver 播报须带宿主名、语义事件、连接状态及能力限定语，尤其是「Codex，待响应，仅授权请求」。
+
+**事件行宿主 Logo（事实状态，不是品牌）**
+
+- 第一列固定为 `[事件字形] [事件标题] [弹性空白] [宿主 Logo 组]`；删除“两个来源 / 仅 Claude Code”等来源副标题，也不显示“宿主覆盖未检测”兜底。映射胶囊、试听与静音仍保持原位。Logo 顺序只取共享能力矩阵的 `hostColumns`，View 不保留 Claude/Codex 对照表。
+- Logo 是只读状态指示：无边框、无底色、无 hover 动画，不提供切换，也不新增键盘焦点。标准单行尺寸 **22pt**，窄版两行尺寸 **19pt**，间距 **5pt**；Logo 不得挤压映射胶囊。
+- 彩色表示宿主已连接并支持该事件：矩阵 `.audible`、`.muted`、`.missingSound` 使用连接色，`.legacy` 使用连接色但鼠标帮助明确“旧版连接”。静音或缺少声音继续由静音键 / 映射胶囊表达，不得把宿主误画成断开。
+- 灰色表示 `.notConnected`、`.awaitingActivation`、`.unsupported`、`.degraded` 或矩阵缺格；统一使用当前主题 `text-2` **75%**。鼠标帮助分别为“未连接 / 待激活 / 此事件不支持 / 需处理”。灰色不是唯一信号：Logo 从 VoiceOver 树隐藏，完整工具名、连接状态与能力限定语合并进事件编辑入口的 label。
+- 连接状态色（**claudi0 状态色，不是官方品牌色**）：Claude 暗/亮 `#E48667 / #BD6549`；Codex 暗/亮 `#79C995 / #318A50`。四个实色与 `text-2 @75%` 均须对暗色面板、亮色渐变最深端达到非文本 **≥3:1**。
+- 几何母版与来源记录在 `assets/host-icons/README.md`：Claude Spark 按 [Anthropic Press Kit](https://www.anthropic.com/press-kit) 校验；Codex/OpenAI 标识按 [OpenAI Design Guidelines](https://openai.com/brand/) 校验。商标分别归 Anthropic PBC 与 OpenAI；这里只用于说明事实归属，不表示背书，也不成为 claudi0 品牌资产。macOS 12 运行时只加载由母版生成的单色 template PDF，不直接依赖系统 SVG 解码。
+- 静音按钮使用批准的 24×24 自绘扬声器：正常态始终有两道声波；静音态两道声波降至 **24%** 并叠加斜线。按钮的颜色、动作、焦点身份与 VoiceOver 文案不变。
 
 ### 五事件 × 两宿主可听能力
 
@@ -246,10 +256,10 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 | 任务开始 | `task_start` | `UserPromptSubmit` | `UserPromptSubmit` |
 | 本轮结束 | `stop` | `Stop` | `Stop` |
 | 执行中断 | `stop_failure` | `StopFailure` | 不支持 |
-| 需要你 | `notification` | `Notification` | `PermissionRequest`，**仅授权请求** |
+| 待响应 | `notification` | `Notification` | `PermissionRequest`，**仅授权请求** |
 | 子任务结束 | `subagent_stop` | `SubagentStop` | `SubagentStop` |
 
-`Stop` 只表示一轮停止；特别是 Codex `Stop` hook 之后仍可能要求 Codex 继续，因此所有可见文案不得写成「任务完成」。`UserPromptSubmit` 只映射稳定语义「任务开始」，不得冒充「需要你」。
+`Stop` 只表示一轮停止；特别是 Codex `Stop` hook 之后仍可能要求 Codex 继续，因此所有可见文案不得写成「任务完成」。`UserPromptSubmit` 只映射稳定语义「任务开始」，不得冒充「待响应」。
 
 ## Motion（动效）
 
@@ -257,7 +267,7 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 - **缓动**：enter `ease-out`、exit `ease-in`、move `ease-in-out`；Spring 物理（起手快、落地软，stiffness ~380 / damping ~30）。
 - **时长**：micro 100ms · short 180ms · medium 260ms · long 400ms。
 - **招牌动效**：
-  1. **动效跟随音高轮廓**：本轮结束=上扬两音→勾上跳；执行中断=下沉且保持→暂停条淡入并停住；需要你=双击→双弹；子任务结束=单 blip→空心勾静静填上。
+  1. **动效跟随音高轮廓**：本轮结束=上扬两音→勾上跳；执行中断=下沉且保持→暂停条淡入并停住；待响应=双击→双弹；子任务结束=单 blip→空心勾静静填上。
   2. **视觉回放**：播声音时，菜单栏单色字形按事件色重放那段波形 —— 你能*看见*刚听到的声音。
   3. 试听 ▶ 触发 4–5 根 EQ 条弹跳。
 - **无障碍**：尊重 `prefers-reduced-motion` / macOS「减弱动态效果」，降级为静态字形与瞬时状态切换。
@@ -282,7 +292,7 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 > 这些是 `/design-consultation` 首版未覆盖、由设计评审补入词汇表的组件。**全部由既有 token 派生，勿另立新色 / 新圆角。**
 
 - **空态卡**：面板内居中列 —— 44px（radius 12）图标块（态色 15% 底 + 态色字形）→ 标题 SF Pro semibold 15 → 正文 `text-2` 12.5 → 主 CTA（黏土实心 pill radius 9 全宽）+ 次 CTA（ghost：透明 + `hairline-strong` 描边）。**空态三要素：温度 + 主行动 + 上下文。** 旧版全屏宿主 onboarding 卡不再承担连接：双宿主连接状态始终留在两条来源行，解释与动作进入 `IntegrationsWindow`；空态卡继续用于声音包/配置等真正没有可操作内容的场景。
-- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：面板以中文语义名、宿主覆盖短语、紧凑映射状态、试听与自动事件静音呈现三态；点击事件身份进入完整映射编辑器。`present` 可试听；`unmapped` 显「未配置」；`broken` 显「需修复」。静音与覆盖态正交，且不再禁用手工试听。文件名、manifest ID、导入/拖放/清除绑定只在 Sound Packs Window 中出现。
+- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：面板以中文语义名、只读宿主 Logo、紧凑映射状态、试听与自动事件静音呈现三态；点击事件身份进入完整映射编辑器。`present` 可试听；`unmapped` 显「未配置」；`broken` 显「需修复」。静音与覆盖态正交，且不再禁用手工试听。文件名、manifest ID、导入/拖放/清除绑定只在 Sound Packs Window 中出现。
 - **错误态用色（关键约束）**：app 自身错误（宿主配置不可读 / 写不进、已连接宿主的 helper 损坏）用 UI 语义 `error #FF453A`（真红）；**绝不用于声音事件层**（执行中断永远琥珀）。宿主未安装、未连接与 Codex 等待 `/hooks` 确认用 `surface-2` + `text-2`，不上真红或品牌黏土；Codex 已激活的正常 `4/5` 来源状态与 Claude Code `5/5` 同样用 `success`，只有不支持的 `StopFailure` 格用 `text-2`。
 - **拖入 drop-zone**（**⚠ 2026-07-15 起收窄存档 · 面板级 drop-zone 已拍板删除**，见 Decisions Log 与 PLAN-SOUND-MANAGER T1。本条样式自此只规范**事件行的行内拖放目标**，不再是任何全宽面板组件 —— 全宽虚线形制已让渡给「管理声音包…」入口的专属语义，见「面板显示集 · 星标」条。hover 配色拍板作为既有决议原样保留，仍被「控件行 · 对比度」引用为先例）：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → **边框** 转黏土 + `clay-soft` 底，**文案保持 `text-2` 不变**。
   - ✅ **已拍板（2026-07-11 `/ship`）—— hover 反馈由边框 + 底色承载，文字不转黏土**。此前本条写的是「边框 / **文字**转黏土」，与上面「事件行三态」条的「行内文字始终保 ≥ 4.5:1 对比度」自相矛盾：实测亮色 `clay` `#C4633C` 对 `panel` `#FFFDF8` = **3.97:1** —— 过图标 / 边框的 ≥3:1，**不过**正文的 ≥4.5:1。曾列的三个解法中取**解法 1**（本条原本自己标的推荐项）：
@@ -378,7 +388,7 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 - **真实回执**：`activation` 只认当前 installation ID 的 `UserPromptSubmit` 回执；`latestReceipt` 独立显示当前代次全部受支持事件中最新的一次诊断。检查器主文案只展示宿主、claudi0 语义、时间与脱敏播放结果，不把 CLI key 或宿主原生名当主文案；可访问性细节可补充原生事件。不得展示或暗示存储提示词、响应内容、项目路径、会话内容或音频绝对路径。旧 installation、断开后的迟到回调与损坏回执只能显示为无效证据，不能点亮连接。
 - **动作层级**：取消静音、配置声音、连接、升级或修复由当前矩阵状态纯派生；缺声会路由到声音包窗口并定位事件，不支持只解释。重新检测只在工具栏。「断开 Claude Code」或「断开 Codex」只位于检查器末尾，并在确认中写明另一个宿主、声音包和静音设置不受影响。
 - **最大 Dynamic Type**：矩阵改为五张事件卡，每张包含 Claude Code、Codex 两条宿主子行；禁止横向滚动、横向裁切或把限定语藏进 tooltip。辅助功能字号下动作纵向排列。
-- **可访问性**：VoiceOver label 至少包含「宿主、claudi0 语义、原生事件、连接状态、支持级别」；Codex 的需要你单元格必须在可见文案和 label 中同时出现「仅授权请求」。短暂状态播报必须可关闭，并尊重 Reduce Motion。
+- **可访问性**：VoiceOver label 至少包含「宿主、claudi0 语义、原生事件、连接状态、支持级别」；Codex 的待响应单元格必须在可见文案和 label 中同时出现「仅授权请求」。短暂状态播报必须可关闭，并尊重 Reduce Motion。
 - **State Gallery**：实现期视觉基线覆盖双未连、单宿主、双宿主、Codex 待确认、Claude legacy、Codex 正常 `4/5`、partial、单侧 degraded、共享 runtime 失败与单侧连接失败。画廊 fixture 与生产 adapter 能力数据同源；不得手写一个不存在的 Codex `StopFailure` 格。
 
 自动化结构检查不能替代真机：popover → window handoff、关闭后焦点恢复、实际 VoiceOver 顺序、完整键盘路径、最大 Dynamic Type、明暗模式与 Reduce Motion 必须另行人工走查；未走查不得标为完成。
@@ -387,7 +397,7 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 
 - **现行主方向：Orbit Zero**。末尾 `0` 是持续工作的信号容器；倾斜轨道表达 AI coding 的运行方向；偏心圆点是一条刚抵达的通知。窗口与面板使用完整 `claudi0 + Orbit Zero` 横向字标，菜单栏与 App Icon 使用同源的 `Orbit 0` 减法图形。
 - **品牌写法**：产品名固定写作小写 `claudi0`，仍读作 “Claudio”。数字 `0` 只承担视觉记忆点，不要求用户改变读法。
-- **不碰** Claude、OpenAI 或任何第三方官方 logo / wordmark / 品牌渐变；claudi0 图标只表达自己的声音与状态母题。
+- Claude/OpenAI 标识不得进入 claudi0 的 logo、wordmark 或品牌渐变；唯一例外是上文事件行中经来源校验的单色宿主 Logo，仅作事实状态指示，并始终遵守权利人的使用指南。claudi0 自身图标仍只表达自己的声音与状态母题。
 - **全彩图标**：深色硬件底 `#2B2620` + 黏土色 `0` `#C4633C` + 奶油轨道 `#F1E9DF`；Finder / Dock 使用同一图形。亮色平面可使用黏土单色标志。
 - **菜单栏模板版**：16×16pt 只保留纵向 `0`、斜轨与信号点，纯 alpha 自动适配亮 / 暗菜单栏，不带彩色底板或光晕。
 - **资产已落地**：`assets/branding/claudi0-mark.svg`、`claudi0-app-icon.svg`、1024px PNG 与 `claudi0.icns` 同源；`scripts/generate-brand-assets.swift` 生成全部位图尺寸。`ClaudioOrbitWordmark` 负责 App 内横向字标，`MenuBarIcon.swift` 使用同一母题的 16pt 减法几何。打包脚本与 release workflow 都写入 `CFBundleIconFile = claudi0.icns`。
@@ -435,8 +445,9 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 | 2026-07-17 | **全量采纳「糖果盘」（方向 D）为现行视觉皮肤**（用户拍板）。新增「现行视觉皮肤：糖果盘」节作单一真相源，覆盖 v1 的字体 / 亮色中性 / 圆角 / 覆盖轨几何 / 静音钮；v1「暖色工具主义」值**存档不删**。台账逐条：**①** App chrome 字体 SF Pro→**SF Pro Rounded**（仍系统字，`.fontDesign(.rounded)`）· **②** 圆角上调 面板 18 / 行卡 13 / tile 11 · **⑤** 事件行 mono id 面板删 / 窗口留 · **⑥** 覆盖轨改横排**糖豆胶囊**（≈14×7；missing = 空壳 + 斜杠）· **⑦** 静音钮 = 自绘 Touch Bar 波纹 + 斜杠 · **⑧** 亮色新中性（`panel #FFFDFA→#FBF7F1` / `text #2B2620` / **`text-2 #75685A`** / `text-muted #AB9E8E` / hairline 暖偏），暗色零新值 · **⑩** 静音态只弱化图形、文字不降 opacity | 战略「暖色工具主义」不变（暖 / 四事件四色 / `StopFailure` 绝不红 / 颜色即语义 / 原生骨架），糖果盘只换渲染皮。**⑧ `text-2` 是同一条对比度先例的第六次**：画稿 `#847768` 仅 4.36:1 不过 AA，落地前调深 `#75685A`（5.41 / 5.07:1）。亮色新底**全部实测**（事件字形 vs tile 3.18–4.17、胶囊 present vs 白行 4.04、clay 3.79/4.04、真红图标 3.87、暗色最弱 3.07，全过）。⚠ 两笔落地债：`ContrastSuite` 那批 `compositedHex(…over: panel…)` 须把底换成最深的 `#FBF7F1` 重跑；主音量行尾全局静音钮（⑨）`ENGINEERING` 未立项，落地前立项或删除。全交互原型 `e70c017b` 已落地验证（明暗双主题） |
 | 2026-07-17 | **⑪ 「加星」不另开界面 → 整合进管理窗口侧栏**：曾设想的独立「加星选 4 个」屏**撤销**，三件东西各归侧栏已有解剖位 —— 每行行首 `★/☆`、侧栏头 **`★ n/4`** 计数、满 4 上限提示。星标控件**只**住管理窗口，面板零星标控件。承接同日「面板显示集 = 星标」行 —— 那行定「是什么」，本行定「加星的操作住哪、长什么样」 | 用户「把 image #9 功能整合到 #10，不要单独设计」拍板。#9（独立星标屏）与窗口侧栏功能冗余；侧栏 DESIGN 本就定了每行 `★/☆`（Sound Packs Window 条），只差把计数与上限提示收进来。满 4 → 其余 `☆` 控件置灰 + 图标降饱和（不整行降 opacity，沿用事件行禁用铁律）+ 就地原因；坏包 `☆` 禁用（响不了不上面板）。星标切换 `stopPropagation`（不连带选包）、「用这个包」绝不自动加星（被否的那半：星标集被切包隐式改写）。全交互原型 `e70c017b` 已落地验证 |
 | 2026-07-24 | **`broken` 行的可见指示器从 meta 槽挪到覆盖轨槽位**（以状态行替代轨：真红 ✕ + `文件丢失`，与 `track` 共享同一 `.frame(height:)`，同槽位高度不跳；meta 槽对 `broken` 改留空），推翻 2026-07-15/07-17 两行「meta 槽 = ✕+文件丢失；覆盖轨不渲染」的原始写法——旧写法仍留在「包行四态」「4-slot 覆盖轨」两节的历史脉络里，正文已同步改写为现行版本，本行存档新旧对照，不删旧行 | T4（竖排整宽行）实现阶段 `swift-reviewer` 逐字核对 DESIGN.md 与 PLAN-SOUND-MANAGER.md T4 行，发现两份文档在 broken 指示器位置上直接矛盾：DESIGN.md 原文钉 meta 槽、覆盖轨「宁可空着」；PLAN.md T4 行（用户下达任务时的原话）写「以状态行替代轨（保留同一槽位高度，布局不跳）」。实现已按 PLAN.md 一侧落地并全绿（`swift build` 0 error、`swift run claudio-gui-tests` 2484/2484）。经 `AskUserQuestion` 向用户当面拍板：维持 trailing slot 实现，DESIGN.md 补录为已授权偏离，不留两份文档各执一词。**技术上两种位置都能满足「布局不跳」**——高度由外层共享 `.frame(height:)` 保证，与 ✕+文案放哪个槽位正交，本次纯粹是位置拍板，不是被迫的技术取舍 |
-| 2026-08-01 | Claudio 升级为 Claude Code + Codex 双宿主声音中心；黏土色明确为 Claudio 自有品牌；菜单栏双来源行、4×2 能力矩阵与 retained `IntegrationsWindow` 成为现行规范 | 宿主入口与交互权重并列，但能力差异诚实呈现：Claude Code `4/4`、Codex `3/4` 都是正常态；Codex 需要你仅映射 `PermissionRequest`，`StopFailure` 不支持。连接绿色以当前 installation ID 的真实回执为证据，配置完成不等于已激活。 |
+| 2026-08-01 | Claudio 升级为 Claude Code + Codex 双宿主声音中心；黏土色明确为 Claudio 自有品牌；菜单栏双来源行、4×2 能力矩阵与 retained `IntegrationsWindow` 成为现行规范 | 宿主入口与交互权重并列，但能力差异诚实呈现：Claude Code `4/4`、Codex `3/4` 都是正常态；Codex 待响应仅映射 `PermissionRequest`，`StopFailure` 不支持。连接绿色以当前 installation ID 的真实回执为证据，配置完成不等于已激活。 |
 | 2026-08-04 | 新增首位语义「任务开始」与 5×2 能力矩阵；`paperplane.fill` + info blue，声音包覆盖轨与映射编辑器扩为 5-slot / 五行 | Claude Code 与 Codex 的 `UserPromptSubmit` 均映射 `task_start`；Claude 为 `5/5`、Codex 为正常 `4/5`。激活只认当前代次 `UserPromptSubmit`，其它回执只作 latest diagnosis；旧包缺第五映射时明确显示缺失，不跨包 fallback。 |
 | 2026-08-02 | 产品品牌改为小写 `claudi0`（仍读作 “Claudio”），主图标改为 **C / Signal** | 数字 `0` 提供更独特的字标与域名 / icon 延展空间；C 外环、脉冲、信号点在 16px 到 1024px 保持同一几何。对外 app / DMG / CLI alias 使用 `claudi0`；为避免用户设置与 hooks 失效，`ClaudioCore` / `ClaudioGUI`、`~/.claudio/`、`~/.claudio/bin/claudio` 与 `com.claudio.app` 保持兼容。 |
 | 2026-08-04 | 全部 UI 品牌标识切换为 **Orbit Zero** | 用户以官网 Orbit Zero 字标稿拍板替换现有 UI logo。面板与首次启动页共用 `ClaudioOrbitWordmark`；菜单栏压缩为 `0 + 斜轨 + 信号点`；App Icon、SVG、PNG 与 `.icns` 同源更新。完整横向字标不硬塞进 16pt 状态栏，避免可读性退化；VoiceOver 仍只朗读 `claudi0` 与既有状态句。 |
+| 2026-08-07 | 菜单栏事件行删除来源副标题，改为共享能力矩阵驱动的 Claude Code / Codex 只读 Logo；`notification` 的全产品名称统一为“待响应” | Logo 只表达“该工具当前是否连接并支持此事件”，不成为 claudi0 品牌或交互开关。`.audible/.muted/.missingSound/.legacy` 彩色，其余状态与缺格灰色；22/19pt、间距 5pt、无框无底无 hover。VoiceOver 信息合并进既有事件编辑入口，焦点顺序不变；底层 `notification` 契约不变。两枚 24×24 母版生成 template PDF，以兼容 macOS 12。 |
 | 2026-08-05 | 「界面文字」采用方案 C 步进调节：固定 `Aa⌄` 触发器 + 固定 280pt 子 Popover + 原生两侧 A 按钮 | 方案 C 在保持暖色原生面板的同时减少一层菜单；实时 `Binding<ClaudioInterfaceTextSize>` 继续写入共享 `@AppStorage`，四档、非法值回退、跨窗口同步和现有 Panel 首焦点契约不变。 |

@@ -115,7 +115,7 @@ brew install --cask claudi0
 
 在 Codex 中运行 `/hooks` 并确认 claudi0 hooks，然后再提交一次提示词。详情窗口提供「复制 `/hooks`」和「重新检测」。只有当前 installation ID 的 `UserPromptSubmit` 回执才能证明新增的任务开始 hook 已激活并点亮绿色连接；仅仅写好 JSON，或只有旧的 Stop 等回执，都不算激活。其它当前代次回执仍会作为最新事件诊断显示。
 
-Codex 的「需要你」只覆盖 `PermissionRequest`（**仅授权请求**）。`UserPromptSubmit` 是任务开始，不计入「需要你」；`Stop` 只写「本轮结束」，不承诺任务已经完成。
+Codex 的「待响应」只覆盖 `PermissionRequest`（**仅授权请求**）。`UserPromptSubmit` 是任务开始，不计入「待响应」；`Stop` 只写「本轮结束」，不承诺任务已经完成。
 
 ### 也可以走 Terminal
 

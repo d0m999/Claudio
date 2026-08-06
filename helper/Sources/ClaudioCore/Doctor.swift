@@ -588,7 +588,7 @@ private func doctorHostResult(
                     : "⚠ Claude Code 已配置，请提交一次提示词以确认连接")
         }
         let supported = HostCapabilityCatalog.bindings(for: host).filter(\.isAudibleCapability).count
-        let qualifier = host == .codex ? "；执行中断暂无事件，需要你仅授权请求" : ""
+        let qualifier = host == .codex ? "；执行中断暂无事件，待响应仅授权请求" : ""
         return DoctorCheckResult(
             name: name, severity: .ok,
             message: "✓ \(host.displayName) \(supported)/\(Event.allCases.count) 已就绪\(qualifier)")

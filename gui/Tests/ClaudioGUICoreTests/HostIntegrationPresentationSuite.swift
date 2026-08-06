@@ -55,7 +55,7 @@ func runHostIntegrationPresentationSuites() {
             (.taskStart, "任务开始"),
             (.stop, "本轮结束"),
             (.stopFailure, "执行中断"),
-            (.notification, "需要你"),
+            (.notification, "待响应"),
             (.subagentStop, "子任务结束"),
         ]
 
@@ -156,11 +156,11 @@ func runHostIntegrationPresentationSuites() {
             "标准矩阵必须完整提供 5×2 共十个单元")
 
         let permission = presentation.cell(host: .codex, event: .notification)
-        expect(permission?.nativeEventText == "PermissionRequest", "Codex 需要你必须显示原生 PermissionRequest")
+        expect(permission?.nativeEventText == "PermissionRequest", "Codex 待响应必须显示原生 PermissionRequest")
         expect(permission?.qualificationText == "仅授权请求", "可见文案必须显示“仅授权请求”")
         let permissionLabel = permission?.accessibilityLabel ?? ""
         for required in [
-            "Codex", "需要你", "部分支持", "仅授权请求", "已连接",
+            "Codex", "待响应", "部分支持", "仅授权请求", "已连接",
         ] {
             expect(
                 permissionLabel.contains(required),
@@ -194,39 +194,103 @@ func runHostIntegrationPresentationSuites() {
             "删除 adapter 映射后 VoiceOver 也不得残留硬编码限定语")
     }
 
-    suite("菜单栏事件宿主覆盖：五行文案纯投影矩阵，Codex 仅授权限定同时可见与可播报") {
+    suite("菜单栏事件宿主 Logo：8 种矩阵状态按固定规则映射彩色或灰色") {
+        let cases: [(
+            AudibilityCellState, EventHostIndicatorState, Bool, String
+        )] = [
+            (.audible, .connected, true, "已连接"),
+            (.muted, .connected, true, "已连接"),
+            (.missingSound, .connected, true, "已连接"),
+            (.legacy, .legacy, true, "旧版连接"),
+            (.notConnected, .notConnected, false, "未连接"),
+            (.awaitingActivation, .awaitingActivation, false, "待激活"),
+            (.unsupported, .unsupported, false, "此事件不支持"),
+            (.degraded, .needsAttention, false, "需处理"),
+        ]
+
+        for (cellState, expectedState, expectedColor, expectedHelp) in cases {
+            let matrix = HostCapabilityMatrixPresentation(
+                hostColumns: [.claudeCode],
+                rows: [
+                    HostCapabilityEventRowPresentation(
+                        event: .stop,
+                        title: Event.stop.displayName,
+                        cells: [
+                            HostCapabilityCellPresentation(
+                                host: .claudeCode,
+                                event: .stop,
+                                state: cellState),
+                        ]),
+                ])
+            let indicators = eventHostIndicatorPresentations(event: .stop, matrix: matrix)
+            expect(indicators.count == 1, "每个 hostColumns 项必须生成一枚 Logo")
+            expect(
+                indicators.first?.state == expectedState,
+                "\(cellState) 应映射为 \(expectedState)，实得 \(String(describing: indicators.first?.state))")
+            expect(
+                indicators.first?.state.usesActiveColor == expectedColor,
+                "\(cellState) 的彩色规则错误")
+            expect(indicators.first?.helpText == expectedHelp, "\(cellState) 的鼠标帮助错误")
+        }
+    }
+
+    suite("菜单栏事件宿主 Logo：顺序只取 matrix.hostColumns，缺失格 fail closed") {
+        let matrix = HostCapabilityMatrixPresentation(
+            hostColumns: [.codex, .claudeCode],
+            rows: [
+                HostCapabilityEventRowPresentation(
+                    event: .stop,
+                    title: Event.stop.displayName,
+                    cells: [
+                        HostCapabilityCellPresentation(
+                            host: .claudeCode,
+                            event: .stop,
+                            state: .audible),
+                    ]),
+            ])
+        let indicators = eventHostIndicatorPresentations(event: .stop, matrix: matrix)
+
+        expect(
+            indicators.map(\.host) == [.codex, .claudeCode],
+            "Logo 顺序必须逐字服从 matrix.hostColumns，实得 \(indicators.map(\.host))")
+        expect(
+            indicators[0].state == .unsupported && !indicators[0].state.usesActiveColor,
+            "缺失的 Codex 格必须保留 Logo 并 fail closed 为灰色不支持")
+        expect(indicators[1].state == .connected, "存在的 Claude Code 可听格必须保持彩色")
+    }
+
+    suite("菜单栏事件宿主 Logo：Codex 限定语进入编辑入口，StopFailure 永久灰色") {
         let matrix = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
-        let rows = Dictionary(uniqueKeysWithValues: Event.allCases.map { event in
-            (event, eventHostCoveragePresentation(event: event, matrix: matrix))
-        })
+        let notification = eventHostIndicatorPresentations(event: .notification, matrix: matrix)
+        let interruption = eventHostIndicatorPresentations(event: .stopFailure, matrix: matrix)
+        let codexNotification = notification.first(where: { $0.host == .codex })
+        let codexInterruption = interruption.first(where: { $0.host == .codex })
 
-        expect(rows[.taskStart]?.visibleText == "两个来源", "任务开始必须显示紧凑双来源状态")
-        expect(rows[.stop]?.visibleText == "两个来源", "本轮结束必须显示紧凑双来源状态")
-        expect(rows[.stopFailure]?.visibleText == "仅 Claude Code", "执行中断必须只显示 Claude Code")
+        expect(notification.map(\.host) == matrix.hostColumns, "生产矩阵也必须保持宿主列顺序")
         expect(
-            rows[.notification]?.visibleText
-                == "两个来源 · Codex 仅授权请求",
-            "需要你必须把 Codex 的仅授权边界写进可见短文案")
+            codexNotification?.qualificationText == "仅授权请求"
+                && codexNotification?.accessibilityLabel == "Codex，已连接，仅授权请求",
+            "Codex 待响应必须把完整工具名、连接状态和能力限定合并进 VoiceOver label")
         expect(
-            rows[.notification]?.accessibilityLabel.contains("Codex 仅授权请求") == true,
-            "需要你的 VoiceOver label 必须包含宿主与仅授权限定")
-        expect(rows[.subagentStop]?.visibleText == "两个来源", "子任务结束必须显示紧凑双来源状态")
+            codexInterruption?.state == .unsupported
+                && codexInterruption?.state.usesActiveColor == false,
+            "Codex StopFailure 即使宿主已连接也必须永久灰色")
+        expect(
+            codexInterruption?.helpText == "此事件不支持",
+            "Codex StopFailure 鼠标帮助必须明确说明事件不支持")
+    }
 
-        var capabilities = Dictionary(
-            uniqueKeysWithValues: HostID.allCases.map {
-                ($0, HostCapabilityCatalog.bindings(for: $0))
-            })
-        capabilities[.codex] = capabilities[.codex]?.filter { $0.event != .notification }
-        let mutated = hostCapabilityMatrixPresentation(
-            from: hostPresentationMatrix(capabilities: capabilities))
-        let notification = eventHostCoveragePresentation(event: .notification, matrix: mutated)
+    suite("宿主 Logo 资源与状态色：HostID 穷举映射固定到两枚 template PDF") {
+        expect(eventHostIndicatorAssetName(for: .claudeCode) == "claude", "Claude 资源名错误")
+        expect(eventHostIndicatorAssetName(for: .codex) == "codex", "Codex 资源名错误")
         expect(
-            notification.hosts == [.claudeCode]
-                && notification.visibleText == "仅 Claude Code",
-            "删除 Codex 映射必须让宿主从事件行消失，View 不得硬编码补回")
+            eventHostIndicatorPalette(for: .claudeCode)
+                == EventHostIndicatorPalette(lightHex: "BD6549", darkHex: "E48667"),
+            "Claude 连接状态色必须匹配批准 mockup")
         expect(
-            !notification.accessibilityLabel.contains("Codex"),
-            "删除映射后 VoiceOver 也不得残留 Codex")
+            eventHostIndicatorPalette(for: .codex)
+                == EventHostIndicatorPalette(lightHex: "318A50", darkHex: "79C995"),
+            "Codex 连接状态色必须匹配批准 mockup")
     }
 
     suite("IntegrationsWindow 主动状态播报：共享宿主行与矩阵格补齐事件、连接状态及能力限定") {
@@ -240,7 +304,7 @@ func runHostIntegrationPresentationSuites() {
             capabilityCells: [permission])
 
         for required in [
-            "Codex", "4/5 已就绪", "需要你", "仅授权请求",
+            "Codex", "4/5 已就绪", "待响应", "仅授权请求",
             "已连接", "收到当前代次真实回执",
         ] {
             expect(
@@ -258,7 +322,7 @@ func runHostIntegrationPresentationSuites() {
             refreshAnnouncement.contains("任务开始")
                 && refreshAnnouncement.contains("本轮结束")
                 && refreshAnnouncement.contains("执行中断")
-                && refreshAnnouncement.contains("需要你")
+                && refreshAnnouncement.contains("待响应")
                 && refreshAnnouncement.contains("子任务结束"),
             "宿主级 refresh 必须从共享矩阵播出五个事件，而不是只有一句无上下文的完成提示")
         expect(
@@ -422,7 +486,7 @@ func runHostIntegrationPresentationSuites() {
         let now = Date(timeIntervalSince1970: 1_000)
         var feedback = IntegrationsFeedbackModel()
         let fullAnnouncement =
-            "Codex，4/5 已就绪。Codex，需要你，仅授权请求，已连接"
+            "Codex，4/5 已就绪。Codex，待响应，仅授权请求，已连接"
         let revision = feedback.present(
             host: .codex,
             kind: .information,
@@ -477,7 +541,7 @@ func runHostIntegrationPresentationSuites() {
     suite("IntegrationsWindow 完整播报覆盖：成功与失败 outcome 都不回落成短文案") {
         let now = Date(timeIntervalSince1970: 2_500)
         let announcement =
-            "Codex，4/5 已就绪。Codex，需要你，仅授权请求，已连接"
+            "Codex，4/5 已就绪。Codex，待响应，仅授权请求，已连接"
         for (kind, message) in [
             (IntegrationsFeedbackKind.success, "Codex 已连接"),
             (IntegrationsFeedbackKind.failure, "Codex 连接失败"),
@@ -535,7 +599,7 @@ func runHostIntegrationPresentationSuites() {
                 host: .codex,
                 kind: .information,
                 message: "收到 Codex 回执",
-                accessibilityAnnouncement: "Codex，需要你，仅授权请求，已连接，收到真实回执"),
+                accessibilityAnnouncement: "Codex，待响应，仅授权请求，已连接，收到真实回执"),
         ]
 
         var dismissedSequence = IntegrationsFeedbackModel()

@@ -157,6 +157,71 @@ func runReleaseLayoutSuites() {
             "release workflow 必须在签名前执行可执行负载体积门禁")
     }
 
+    suite("HostIcons：SwiftPM、开发 bundle 与双架构 release 都 fail closed 复制同一资源 bundle") {
+        let root = repositoryRoot()
+        let packageURL = root.appendingPathComponent("gui/Package.swift")
+        let eventRowURL = root.appendingPathComponent("gui/Sources/ClaudioGUI/EventRowView.swift")
+        let devURL = root.appendingPathComponent("scripts/dev-bundle.sh")
+        let releaseURL = root.appendingPathComponent(".github/workflows/release.yml")
+        let resourceURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI/Resources/HostIcons", isDirectory: true)
+        guard
+            let package = try? String(contentsOf: packageURL, encoding: .utf8),
+            let eventRow = try? String(contentsOf: eventRowURL, encoding: .utf8),
+            let dev = try? String(contentsOf: devURL, encoding: .utf8),
+            let release = try? String(contentsOf: releaseURL, encoding: .utf8),
+            let resources = try? FileManager.default.contentsOfDirectory(
+                at: resourceURL,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles])
+        else {
+            expect(false, "读不到 HostIcons 的 Package、组装脚本或资源目录")
+            return
+        }
+
+        expect(
+            package.contains(#".process("Resources/HostIcons")"#),
+            "ClaudioGUI executable target 必须显式声明 HostIcons SwiftPM 资源")
+        expect(
+            eventRow.contains("Bundle.main.resourceURL")
+                && eventRow.contains(#"hasSuffix("_ClaudioGUI.bundle")"#)
+                && eventRow.contains("guard candidates.count == 1")
+                && eventRow.contains("hostIconResourceBundle.image(forResource:")
+                && eventRow.contains("image.isTemplate = true"),
+            "打包运行时必须从 Contents/Resources 解析唯一 GUI resource bundle，不能直接依赖 Bundle.module")
+        let pdfNames = resources
+            .filter { $0.pathExtension.lowercased() == "pdf" }
+            .map(\.lastPathComponent)
+            .sorted()
+        expect(
+            pdfNames == ["claude.pdf", "codex.pdf"],
+            "运行时资源必须精确包含两枚 template PDF，实得 \(pdfNames)")
+        for pdf in resources.filter({ $0.pathExtension.lowercased() == "pdf" }) {
+            let data = try? Data(contentsOf: pdf)
+            expect(
+                data?.starts(with: Data("%PDF".utf8)) == true && (data?.count ?? 0) > 100,
+                "\(pdf.lastPathComponent) 必须是非空 PDF，不得把 SVG 改后缀冒充")
+        }
+
+        for (name, source) in [("dev", dev), ("release", release)] {
+            expect(
+                source.contains("*_ClaudioGUI.bundle")
+                    && source.contains("find_unique_gui_resource_bundle")
+                    && source.contains("${#candidates[@]} -ne 1"),
+                "\(name) 组装必须对 SwiftPM GUI resource bundle 做恰好一个候选的失败关闭校验")
+        }
+        expect(
+            dev.contains(#"cp -R "$GUI_RESOURCE_BUNDLE""#)
+                && dev.contains(#"$APP/Contents/Resources/$(basename "$GUI_RESOURCE_BUNDLE")"#),
+            "开发 app 必须把唯一 GUI resource bundle 复制到 Contents/Resources")
+        expect(
+            release.contains("gui/.build/arm64-apple-macosx/release")
+                && release.contains("gui/.build/x86_64-apple-macosx/release")
+                && release.contains(#"diff -qr "$ARM_GUI_RESOURCE_BUNDLE" "$X86_GUI_RESOURCE_BUNDLE""#)
+                && release.contains(#"cp -R "$ARM_GUI_RESOURCE_BUNDLE""#),
+            "release 必须分别解析双架构资源 bundle、确认完全一致后再复制")
+    }
+
     suite("dev/release 分发源包含 minimal-chime 1.1.0、第五音频与 CC0 台账") {
         let root = repositoryRoot()
         let manifestURL = root.appendingPathComponent("packs/minimal-chime/manifest.json")

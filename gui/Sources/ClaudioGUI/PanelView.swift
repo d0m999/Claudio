@@ -317,7 +317,7 @@ public struct PanelView: View {
                     ForEach(panelModel.eventRows, id: \.event) { row in
                         EventRowView(
                             row: row,
-                            hostCoverage: eventHostCoveragePresentation(
+                            hostIndicators: eventHostIndicatorPresentations(
                                 event: row.event,
                                 matrix: hostIntegrations.content.matrix),
                             previewAvailability: eventPreviewAvailability(

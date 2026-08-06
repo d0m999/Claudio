@@ -76,6 +76,11 @@ func runPreviewFixturesSuites() {
             "hostIntegration.partial-single-degraded",
             "hostIntegration.shared-runtime-failure",
             "hostIntegration.single-side-connection-failure",
+            "eventHostIndicator.full-color",
+            "eventHostIndicator.mixed",
+            "eventHostIndicator.all-gray",
+            "eventHostIndicator.legacy",
+            "eventHostIndicator.awaiting-narrow",
         ]
         expect(
             visited == expected,
@@ -172,6 +177,45 @@ func runPreviewFixturesSuites() {
             events == Set(Event.allCases),
             "eventRows must render every Event at least once; missing"
                 + " \(Set(Event.allCases).subtracting(events).map(\.cliName).sorted())")
+    }
+
+    suite("PreviewFixtures.eventHostIndicatorScenarios covers full/mixed/gray/legacy/awaiting and both row layouts") {
+        let scenarios = PreviewFixtures.eventHostIndicatorScenarios
+        expect(
+            scenarios.map(\.id)
+                == ["full-color", "mixed", "all-gray", "legacy", "awaiting-narrow"],
+            "宿主 Logo 展柜必须精确覆盖五个批准状态，实得 \(scenarios.map(\.id))")
+
+        func indicators(_ id: String) -> [EventHostIndicatorPresentation] {
+            guard let scenario = scenarios.first(where: { $0.id == id }) else { return [] }
+            return eventHostIndicatorPresentations(
+                event: scenario.row.event,
+                matrix: hostCapabilityMatrixPresentation(from: scenario.state.matrix))
+        }
+
+        expect(
+            indicators("full-color").allSatisfy(\.state.usesActiveColor),
+            "full-color 帧必须两枚 Logo 都彩色")
+        expect(
+            indicators("mixed").map(\.state) == [.connected, .unsupported],
+            "mixed 帧必须是 Claude 彩色、Codex 不支持灰色")
+        expect(
+            indicators("all-gray").allSatisfy { !$0.state.usesActiveColor },
+            "all-gray 帧必须两枚 Logo 都灰色")
+        expect(
+            indicators("legacy").contains(where: { $0.state == .legacy }),
+            "legacy 帧必须真的投影旧版连接")
+        expect(
+            indicators("awaiting-narrow").contains(where: { $0.state == .awaitingActivation }),
+            "awaiting 帧必须真的投影待激活")
+        expect(
+            scenarios.first(where: { $0.id == "full-color" })?.adaptation.rowWrapsToTwoLines
+                == false,
+            "全彩帧必须检查标准单行布局")
+        expect(
+            scenarios.first(where: { $0.id == "awaiting-narrow" })?.adaptation
+                .rowWrapsToTwoLines == true,
+            "待激活帧必须检查窄版两行布局")
     }
 
     // MARK: - PackCard: PackCardState × isSelected, every combination — plus the coverage

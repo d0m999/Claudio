@@ -325,7 +325,7 @@ func runDualHostDoctorSuites() {
             expect(codex.message.contains("4/5 已就绪"), "必须诚实显示 Codex 4/5")
             expect(
                 codex.message.contains("仅授权请求"),
-                "需要你的 Codex 限定语必须进入 doctor 可见文案")
+                "待响应的 Codex 限定语必须进入 doctor 可见文案")
         }
     }
 

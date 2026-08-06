@@ -64,6 +64,15 @@ public enum ClaudioColorHex {
     public static let clayDark = "D97757"
     public static let clayLight = "C4633C"
 
+    // MARK: 宿主连接状态（不是官方品牌色）
+
+    /// 只用于事件行宿主 Logo 的“已连接”事实。几何标识归各宿主商标权利人所有；这些颜色属于
+    /// claudi0 自己的状态语言，不表示官方品牌配色或背书。
+    public static let claudeIndicatorDark = "E48667"
+    public static let claudeIndicatorLight = "BD6549"
+    public static let codexIndicatorDark = "79C995"
+    public static let codexIndicatorLight = "318A50"
+
     // MARK: UI 语义色（DESIGN.md「UI 语义色（提示 / 校验，独立于事件层）」表）
 
     /// `success`——已收到当前代次任务开始激活回执的宿主就绪状态。
@@ -162,7 +171,7 @@ public enum ClaudioColorHex {
     public static let stopFailureDark = "FF9F0A"
     public static let stopFailureLight = "AC6900"
 
-    /// ✋ `Notification` 需要你——**就是** `clay`（Claudio 自有品牌色与招牌绑定）。这里刻意
+    /// ✋ `Notification` 待响应——**就是** `clay`（Claudio 自有品牌色与招牌绑定）。这里刻意
     /// 写成对 `clay` 的别名而不是复制一遍 hex：它们相等是设计意图，不是巧合，改 `clay` 就该
     /// 同时改它。
     public static let notificationDark = clayDark

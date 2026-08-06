@@ -24,12 +24,12 @@ claudi0 管的是五种稳定的**声音语义**，不是把某个宿主的原�
 | 任务开始 | `task_start` | `UserPromptSubmit`（supported） | `UserPromptSubmit`（supported） |
 | 本轮结束 | `stop` | `Stop`（supported） | `Stop`（supported） |
 | 执行中断 | `stop_failure` | `StopFailure`（supported） | unsupported |
-| 需要你 | `notification` | `Notification`（supported） | `PermissionRequest`（partial：**仅授权请求**） |
+| 待响应 | `notification` | `Notification`（supported） | `PermissionRequest`（partial：**仅授权请求**） |
 | 子任务结束 | `subagent_stop` | `SubagentStop`（supported） | `SubagentStop`（supported） |
 
 - Claude Code `5/5`、Codex `4/5` 都是正常能力事实；`4/5` 不算 degraded，也不得使用 warning/error 色。
 - Codex `Stop` 不等于「任务完成」：hook 运行后 Codex 仍可能继续。UI、CLI 和日志统一写「本轮结束」。
-- 两宿主的 `UserPromptSubmit` 都映射「任务开始」，首次提示与 follow-up 同样触发；它不能降级映射为「需要你」。
+- 两宿主的 `UserPromptSubmit` 都映射「任务开始」，首次提示与 follow-up 同样触发；它不能降级映射为「待响应」。
 - manifest schema 保持 `1`；新增第五文件键不要求旧包迁移 schema。旧包缺少 `task_start` 仍可加载并显示 `4/5`，不得跨包 fallback。
 
 Codex 的事件边界、`/hooks` 信任步骤与可组合 hook schema 以当前 [Hooks 规范](https://learn.chatgpt.com/docs/hooks)、[advanced config](https://learn.chatgpt.com/docs/config-file/config-advanced) 和 [配置参考](https://learn.chatgpt.com/docs/config-file/config-reference) 为准；实现不读取私有 trust hash，也不把单命令 `notify` 当成可组合 hooks。
@@ -116,7 +116,7 @@ Claude Code 与 Codex 的长任务可能结束一轮、执行中断、等待用�
 现有的"挂一行 `afplay`"确实能响，但三个洞：
 - (a) 要分别理解 `~/.claude/settings.json`、`~/.codex/hooks.json` 与 hook 激活；
 - (b) 没有一套好听、设计过、版权干净的声音；
-- (c) 一个"叮"无法区分「本轮结束 / 执行中断 / 需要你 / 子任务结束」。
+- (c) 一个"叮"无法区分「本轮结束 / 执行中断 / 待响应 / 子任务结束」。
 
 ## What Makes This Cool（爽点 / "哇"在哪）
 
@@ -499,7 +499,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 
 - **现行一句话**：`brew install --cask claudi0`（或下载 DMG 按指引打开）→ 开 app 完成 shared bootstrap → 分别连接 Claude Code / Codex → 选内置包 → 两个宿主按各自真实能力自动响，用户无需手改宿主 JSON。
 - 内置 **1-2 个**包，每个音效逐文件核验为 `CC0-1.0`，有 license 台账文件。
-- 本轮结束 / 执行中断 / 需要你 / 子任务结束四种声音有明显区分度；Codex 明确 `3/4`，且「需要你」只覆盖授权请求。
+- 本轮结束 / 执行中断 / 待响应 / 子任务结束四种声音有明显区分度；Codex 明确 `3/4`，且「待响应」只覆盖授权请求。
 - legacy `play` 保留全局去抖；新 `hook` 同宿主去抖，但 Claude Code / Codex 真实事件互不吞掉。
 - 两个 adapter 的 connect/disconnect 都幂等，只改 claudi0 自有条目；Codex `notify`、trust、第三方 hooks 与顺序保持不变。
 - Codex 配置完成后先显示待 `/hooks` 确认，只有当前 installation 的真实回执才显示绿色连接。
@@ -634,7 +634,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 ### 架构 / 代码质量（4 + 2 项，均已拍板）
 
 1. **helper = Swift 编译二进制**（不是 shell）。并发锁用 `flock(2)` / `open(O_EXLOCK)` 系统调用，**不是** shell 的 `flock(1)`（macOS 不自带,实测 `flock not found`）。JSON 全走 Foundation `Codable`/`JSONSerialization`。→ 正文所有 `flock <path>` 字样作废。
-2. **事件语义 = 完整四态**（**已由 spike 实测 + 双源交叉验证定稿**）：`Stop`=本轮结束 / `StopFailure`=**执行中断（限流/欠费/过载/认证）** / `Notification`=需要你 / `SubagentStop`=子任务结束。
+2. **事件语义 = 完整四态**（**已由 spike 实测 + 双源交叉验证定稿**）：`Stop`=本轮结束 / `StopFailure`=**执行中断（限流/欠费/过载/认证）** / `Notification`=待响应 / `SubagentStop`=子任务结束。
    > 更正说明：初评断言"Claude Code 无 error hook、报错声移 v2"是基于训练知识,**被真实数据推翻**。spike 已核实(2026-07-06,本机 Claude Code 2.1.201 二进制 + 官方文档双源一致)：`StopFailure` 事件真实存在(二进制内有独立 `executeStopFailureHooks` + `rate_limit`/`overloaded`/`billing_error`/`auth_error`/`credit_balance` 等 matcher)。
    - **精确语义(重要)**：`StopFailure` 只在**一轮因 API/基础设施错误而结束**时触发（被限流、跑没额度、过载、认证失败），仅信息性、不能 block。它**不覆盖**"任务逻辑失败 / 代码有 bug / Claude 说搞不定"——那些仍触发 `Stop`。所以它是**真实但窄**的"中断"信号。
    - **诚实标签**：UI/pitch 里叫**"🚫 中断了 (限流/欠费/过载)"**,不叫泛泛的"报错了",避免用户以为"代码有 bug"时会响。这仍是最高价值的离键盘信号之一(长任务被限流/欠费死在半路,能听声回来)。
@@ -682,7 +682,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
 - **听障 / 失聪视觉通知兜底**（菜单栏字形闪烁 / 横幅）—— v1 播放层只用 afplay，视觉推送需常驻监听事件，超出"hook 触发即播即退"架构；v2 探索"视觉回放常驻化"作为听障通道（Design Review Pass 6）
 - **代码签名 / 公证**（v1 先发未签名 → 面向非技术用户前再上）
 - B 阶段 marketplace / GitHub 一键装包（包格式按 B 设计，但客户端后做）
-- `session_start/end`、`user_prompt_submit`、`subagent_start` 等不属于现行四声音语义的事件。Codex `PermissionRequest` **已纳入**「需要你」的 partial binding（仅授权请求），不在本清单；遗留 `UserPromptSubmit` 声音可保留，但不计入「需要你」。
+- `session_start/end`、`user_prompt_submit`、`subagent_start` 等不属于现行四声音语义的事件。Codex `PermissionRequest` **已纳入**「待响应」的 partial binding（仅授权请求），不在本清单；遗留 `UserPromptSubmit` 声音可保留，但不计入「待响应」。
 - **pack 路径 containment 的 TOCTOU 加固**（`/codex review acd6c87` P2，2026-07-08）—— `isReallyContained` 是"realpath 检查后再按路径读取"，判定与 `fileExists` / `Data(contentsOf:)` 之间有 check-to-use 窗口。当前威胁模型 = 同用户自有 `~/.claudio/` 声音包，能并发替换 symlink 者本已有写权限、不构成提权，故 v1 不做；**仅当** helper 未来提权运行或处理不可信可写目录，才改为基于目录/文件 fd 打开 + 打开后重校验真实路径（→ v2）。符号链接逃逸主路径的 realpath containment 已在 acd6c87 修复并测试覆盖，此条只针对残留的 TOCTOU 竞态。**范围边界（`/codex review` 2026-07-08 复核，经代码复查后修正）**：这条讲的是 pack **目录本身**的 containment，与 manifest.json 里每个 event 值（如 `"stop": "stop.mp3"`，**音频文件路径**）的 containment 是两个独立校验点。后者其实**已经实现并测试**：`Doctor.swift` 的 `safePackFileURL`（拒绝 `../`、绝对路径、NUL、指向包外的 symlink，含 NFC/NFD 规范化攻击的回归测试）已被 `checkPackIntegrity` 用于 `doctor` 的只读存在性检查。**缺口在于它目前是 `private`**，只有同文件的 `checkPackIntegrity` 能调；尚未实现的 T5 `play`（要真正打开/播放文件，不只是查存在性）与 T16 GUI 解析必须**复用**这个已验证的实现（需先把它从 `private` 提升为 module 内可见），而不是重新发明一套未经对抗测试的路径校验。
 - **单 event 多音频/轮替播放**（`/plan-eng-review` 2026-07-08 评审，原 Follow-ups 占位条已迁入此处；`/codex review` 同日复核，字段命名与遗漏点已修正）—— 一个 event 支持配置 2 个音频文件、触发时轮替/随机播放以避免高频事件听觉疲劳，本次评审后维持不进 v1 → v2。理由：会同时触碰 `PackManifest.events`（现为 `[String: String]`，需改为支持数组/对象的自定义 `Decodable`；manifest 现有字段是 `"schema": 1`，`PackManifest.swift` 目前尚未 decode 该字段——若 v2 要靠版本号区分新旧 schema，需先落实 `schema` 字段的 decode/校验，而不是凭空引入一个不存在的 `schema_version` 名字）、尚未实现的 T5 `play` 选择逻辑（可靠轮替/去重复才需要持久化游标，与决议#5"删状态文件、简化并发"的方向相反；退而求其次的无状态随机挑选虽不需要游标，仍要改 schema）、尚未实现的 T16 GUI 事件行三态（present/unmapped/broken 需扩展为按文件计数或部分可用）与拖入绑定流程、`doctor`/`claudio.log` 需能报告"数组中哪个文件坏"而不只是单文件级别、测试 fixture 数量翻倍、以及 T11 CC0 音源采集量翻倍。**新 schema 必须是新增式（additive）而非替换式**：v2 decoder 必须仍能读 v1 遗留的单字符串格式 `"stop": "stop.mp3"`，不能要求所有旧 pack 一次性迁移。跨越的面比"随手记"暗示的大得多，不该在 v1 已锁定范围内顺手加。
 

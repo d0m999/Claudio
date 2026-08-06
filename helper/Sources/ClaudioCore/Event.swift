@@ -42,7 +42,7 @@ public enum Event: String, CaseIterable, Codable, Sendable, Hashable {
         case .taskStart: "任务开始"
         case .stop: "本轮结束"
         case .stopFailure: "执行中断"
-        case .notification: "需要你"
+        case .notification: "待响应"
         case .subagentStop: "子任务结束"
         }
     }

@@ -118,6 +118,30 @@ jobs:
 
           cp dist/app-bin/ClaudioGUI "$APP/Contents/MacOS/${{ env.APP_EXECUTABLE }}"
 
+          find_unique_gui_resource_bundle() {
+            local search_dir="$1"
+            local -a candidates=()
+            shopt -s nullglob
+            candidates=("$search_dir"/*_ClaudioGUI.bundle)
+            shopt -u nullglob
+            if [[ ${#candidates[@]} -ne 1 || ! -d "${candidates[0]:-}" ]]; then
+              echo "::error::expected exactly one *_ClaudioGUI.bundle in $search_dir; found ${#candidates[@]}"
+              return 1
+            fi
+            printf '%s\n' "${candidates[0]}"
+          }
+
+          ARM_GUI_RESOURCE_BUNDLE="$(find_unique_gui_resource_bundle \
+            gui/.build/arm64-apple-macosx/release)"
+          X86_GUI_RESOURCE_BUNDLE="$(find_unique_gui_resource_bundle \
+            gui/.build/x86_64-apple-macosx/release)"
+          if ! diff -qr "$ARM_GUI_RESOURCE_BUNDLE" "$X86_GUI_RESOURCE_BUNDLE"; then
+            echo "::error::arm64 and x86_64 ClaudioGUI resource bundles differ"
+            exit 1
+          fi
+          cp -R "$ARM_GUI_RESOURCE_BUNDLE" \
+            "$APP/Contents/Resources/$(basename "$ARM_GUI_RESOURCE_BUNDLE")"
+
           # 新品牌入口为 `claudi0`；同时保留 `claudio` bundle alias，避免旧版安装说明失效。
           # shared runtime 仍装到 ~/.claudio/bin/claudio，确保现有 hooks 精确匹配。
           cp dist/bin/claudio "$APP/Contents/Resources/bin/claudi0"
