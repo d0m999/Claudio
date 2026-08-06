@@ -85,6 +85,68 @@ func runProductUIModelsSuites() {
             "读取失败优先于任何陈旧卡片")
     }
 
+    suite("声音包事实可用性：首次加载/硬失败不输出伪造计数，旧快照状态继续输出真值") {
+        expect(
+            panelAudibleEventSummary(
+                audibleEventCount: 0, libraryState: .loading) == "正在读取声音包状态",
+            "首次加载不得显示 0 个可听事件")
+        expect(
+            panelAudibleEventSummary(
+                audibleEventCount: 0,
+                libraryState: .loadFailed(reason: "没有权限")) == "声音包状态不可用",
+            "首次失败不得显示事实型零计数")
+        expect(
+            panelAudibleEventSummary(
+                audibleEventCount: 3, libraryState: .refreshing) == "3 个可听事件",
+            "后台刷新有 previous snapshot 时必须继续显示旧快照真值")
+        expect(
+            panelAudibleEventSummary(
+                audibleEventCount: 2,
+                libraryState: .refreshFailed(reason: "暂不可用")) == "2 个可听事件",
+            "刷新失败保留 previous snapshot 时必须继续显示可听计数")
+    }
+
+    suite("按需音频清单：loading/ready/failed 与真实空清单保持可区分") {
+        let old = [PackAudioFile(fileName: "old.mp3", isOrphan: true)]
+        let loading = SoundPackAudioInventoryPresentationState.loading(previous: old)
+        let empty = SoundPackAudioInventoryPresentationState.ready([])
+        let failure = SoundPackAudioInventoryPresentationState.failed(
+            previous: old,
+            error: .directoryUnreadable(reason: "暂不可读"))
+        expect(loading.isLoading && loading.files == old, "刷新中必须保留可用旧清单")
+        expect(!empty.isLoading && empty.files.isEmpty, "真实空清单只能由 ready([]) 表达")
+        expect(
+            failure.files == old
+                && failure.error == .directoryUnreadable(reason: "暂不可读"),
+            "刷新失败必须同时保留旧清单与真实错误")
+        expect(
+            SoundPackAudioInventoryPresentationState.idle.files.isEmpty,
+            "未选择包时 idle 不得伪造文件")
+    }
+
+    suite("声音包窗口路由：首次 hydration 保留 editEvent，只有 ready 能证明目标缺失") {
+        let route = SoundPacksWindowRoute.editEvent(packID: "pack-b", event: .notification)
+        expect(
+            resolveSoundPacksWindowRoute(
+                route, availablePackIDs: [], libraryState: .loading) == .pending(route),
+            "首次构造时空 cards 只是未加载，不能静默降级 overview")
+        expect(
+            resolveSoundPacksWindowRoute(
+                route, availablePackIDs: ["pack-b"], libraryState: .ready)
+                == .resolved(route),
+            "ready 后目标存在必须恢复原包与事件路由")
+        expect(
+            resolveSoundPacksWindowRoute(
+                route, availablePackIDs: [], libraryState: .ready) == .resolved(.overview),
+            "只有 ready 快照明确缺少目标时才能降级 overview")
+        expect(
+            resolveSoundPacksWindowRoute(
+                route,
+                availablePackIDs: [],
+                libraryState: .refreshFailed(reason: "暂不可读")) == .pending(route),
+            "失败的陈旧快照不能证明目标永久不存在")
+    }
+
     suite("手工试听：事件静音不参与判定，主音量零、缺失、损坏均给明确原因") {
         let available = eventPreviewAvailability(
             coverage: .present(fileName: "stop.mp3"), masterVolume: 0.5)

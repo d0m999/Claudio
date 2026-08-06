@@ -6,8 +6,8 @@ import Combine
 /// 两个 UI 面不互持彼此的 view-model：窗口写成功只发布 ``panelReloadRevision``；面板切包
 /// 成功发布 ``windowReloadRevision``（窗口跟随 active pack）；面板音频/import/manifest 或
 /// `master_volume` 等非切包 config 真变化发布 ``windowContentReloadRevision``（只重读窗口当前检查项）。
-/// 各自仍在自己的 `@MainActor`
-/// 上重读磁盘，因而没有后台写、跨 actor 可变状态或第二份缓存。
+/// 两侧在自己的 `@MainActor` 上重读 config 并投影同一个不可变 library snapshot；真正的包读取由
+/// app-lifetime ``SoundPackLibrary`` 在后台完成。写入仍同步留在 MainActor，没有后台写或第二份缓存。
 public enum SoundPacksRefreshEffect: Equatable, Sendable {
     case none
     case panelFullReload
@@ -77,8 +77,17 @@ public func shouldPrepareSoundPacksWindowForPresentation(isVisible: Bool) -> Boo
 @MainActor
 public final class SoundPacksRefreshCoordinator: ObservableObject {
     @Published public private(set) var panelReloadRevision = 0
+    /// Read synchronously by the panel subscriber for the revision currently being published.
+    /// The window that completed a pack mutation owns the one shared-library refresh; the panel
+    /// always reprojects that shared stream instead of issuing a duplicate presentation request.
+    public private(set) var panelReloadRequiresLibraryRefresh = false
     @Published public private(set) var windowReloadRevision = 0
+    /// Pack selection is config-only, so the active-pack follower normally reprojects the current
+    /// snapshot. Kept explicit to make the revision's I/O semantics impossible to guess at use.
+    public private(set) var windowReloadRequiresLibraryRefresh = false
     @Published public private(set) var windowContentReloadRevision = 0
+    /// Read synchronously by the retained-window subscriber for the content revision being sent.
+    public private(set) var windowContentReloadRequiresLibraryRefresh = false
 
     public init() {}
 
@@ -87,6 +96,12 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
         _ outcome: SoundPacksWindowWriteOutcome
     ) -> SoundPacksRefreshEffect {
         guard outcome != .failed else { return .none }
+        // `SoundPacksWindowModel.completeSynchronousWrite` owns any required invalidation and
+        // refresh before publishing this revision. Asking the panel to request it again can overlap
+        // the first scan and is indistinguishable from a genuinely later external observation,
+        // which correctly schedules a follow-up. Keep one scan owner and let both consumers observe
+        // it. Config-only writes use the same projection-only recipient path.
+        panelReloadRequiresLibraryRefresh = false
         panelReloadRevision += 1
         return .panelFullReload
     }
@@ -98,8 +113,20 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
     /// render whatever disk truth the attempt left behind.
     @discardableResult
     public func completeSharedRuntimeBootstrap() -> SoundPacksRefreshEffect {
+        panelReloadRequiresLibraryRefresh = true
         panelReloadRevision += 1
+        windowContentReloadRequiresLibraryRefresh = false
+        windowContentReloadRevision += 1
         return .panelFullReload
+    }
+
+    /// External config writers are not required to publish our in-process revision. App activation
+    /// is therefore an explicit config projection boundary for a retained management window.
+    @discardableResult
+    public func refreshWindowConfigProjection() -> SoundPacksRefreshEffect {
+        windowContentReloadRequiresLibraryRefresh = false
+        windowContentReloadRevision += 1
+        return .windowReload
     }
 
     @discardableResult
@@ -107,6 +134,7 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
         _ outcome: PanelPackSwitchOutcome
     ) -> SoundPacksRefreshEffect {
         guard outcome == .succeeded else { return .none }
+        windowReloadRequiresLibraryRefresh = false
         windowReloadRevision += 1
         return .windowReload
     }
@@ -118,6 +146,7 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
         _ outcome: PanelPackAudioChangeOutcome
     ) -> SoundPacksRefreshEffect {
         guard outcome == .changed else { return .none }
+        windowContentReloadRequiresLibraryRefresh = true
         windowContentReloadRevision += 1
         return .windowReload
     }
@@ -130,6 +159,7 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
         _ outcome: PanelConfigChangeOutcome
     ) -> SoundPacksRefreshEffect {
         guard outcome == .changed else { return .none }
+        windowContentReloadRequiresLibraryRefresh = false
         windowContentReloadRevision += 1
         return .windowReload
     }

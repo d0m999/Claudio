@@ -229,8 +229,9 @@ public enum PreviewFixtures {
 
     // MARK: - Product UI refactor states
 
-    /// 主面板包区域的四个互斥状态，另加固定包 1 行/4 行两种真实密度。
+    /// 主面板包区域的五个互斥状态，另加固定包 1 行/4 行两种真实密度。
     public static let panelPackSectionStates: [PanelPackSectionState] = [
+        .loading,
         .pinned([packCards[0]]),
         .pinned(Array(packCards.prefix(maxStarredPacks))),
         .noPinnedPacks(availablePackCount: 6),
@@ -587,6 +588,7 @@ public enum PreviewFixtures {
 
     static func panelPackSectionStateCoverage(_ state: PanelPackSectionState) -> String {
         switch state {
+        case .loading: "loading"
         case .pinned(let cards): cards.count == 1 ? "pinned.one" : "pinned.four"
         case .noPinnedPacks: "noPinned"
         case .noPacks: "noPacks"

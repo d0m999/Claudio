@@ -81,12 +81,61 @@ public func setStarredPacks(
     }
 }
 
+/// Atomically toggles one membership against the latest on-disk `starred_packs` value. Unlike an
+/// array replacement computed by a retained UI model, this cannot erase a concurrent writer's
+/// unrelated star because the membership decision happens inside `config.lock` after the current
+/// JSON has been read and validated.
+public func toggleStarredPack(
+    _ id: String,
+    configFile: URL = ClaudioPaths.configFile,
+    lockFile: URL = ClaudioPaths.configLockFile,
+    userPacksDirectory: URL = ClaudioPaths.packsDirectory,
+    defaultStarredPackIDs: Set<String>
+) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
+    let outcome = withNonBlockingLock(path: lockFile.path) {
+        performStarredPacksMutation(
+            configFile: configFile,
+            userPacksDirectory: userPacksDirectory
+        ) { explicitIDs in
+            var current = explicitIDs ?? defaultStarredPackIDs.sorted()
+            if current.contains(id) {
+                current.removeAll { $0 == id }
+            } else {
+                current.append(id)
+            }
+            return current
+        }
+    }
+
+    switch outcome {
+    case .ran(let result): return result
+    case .skipped: return .failure(.lockBusy)
+    case .failed(let errno): return .failure(.lockFailed(errno: errno))
+    }
+}
+
 private func performSetStarredPacks(
     _ ids: [String],
     configFile: URL,
     userPacksDirectory: URL,
     defaultStarredPackIDs: Set<String>,
     materializeDefaultStarredPacks: Bool
+) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
+    performStarredPacksMutation(
+        configFile: configFile,
+        userPacksDirectory: userPacksDirectory
+    ) { explicitIDs in
+        if explicitIDs == nil && materializeDefaultStarredPacks {
+            return defaultStarredPackIDs.sorted() + ids
+        }
+        return ids
+    }
+}
+
+private func performStarredPacksMutation(
+    configFile: URL,
+    userPacksDirectory: URL,
+    requestedIDs: ([String]?) -> [String]
 ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
     var normalizedIDs: [String] = []
     var unreadablePacksDirectoryReason: String?
@@ -102,13 +151,10 @@ private func performSetStarredPacks(
             unreadablePacksDirectoryReason = reason
             return .failure(.mutationRejected)
         }
-        let requestedIDs: [String]
-        if json["starred_packs"] == nil && materializeDefaultStarredPacks {
-            requestedIDs = defaultStarredPackIDs.sorted() + ids
-        } else {
-            requestedIDs = ids
-        }
-        normalizedIDs = normalizedExistingStarredPackIDs(requestedIDs, installedIDs: installedIDs)
+        let explicitIDs = json["starred_packs"] as? [String]
+        normalizedIDs = normalizedExistingStarredPackIDs(
+            requestedIDs(explicitIDs),
+            installedIDs: installedIDs)
         guard normalizedIDs.count <= maxStarredPacks else {
             return .failure(.mutationRejected)
         }

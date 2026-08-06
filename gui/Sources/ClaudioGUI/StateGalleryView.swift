@@ -1,9 +1,9 @@
 #if DEBUG
 import ClaudioCore
 import ClaudioGUIComponents
-    import ClaudioGUICore
-    import SoundPacksWindow
-    import SwiftUI
+import ClaudioGUICore
+import SoundPacksWindow
+import SwiftUI
 
     /// The repo-internal SwiftUI state gallery (ENGINEERING.md T14 D2) — the in-repo VISUAL
     /// TRUTH SOURCE. Renders ONE frame per ``PreviewFixtures`` value across the app's
@@ -41,7 +41,7 @@ import ClaudioGUIComponents
                     InterfaceTextSizeGalleryView()
                     MasterVolumeGalleryView()
                     PackCardGalleryView()
-                    GallerySection(title: "Sound Packs Window (3 production states)") {
+                    GallerySection(title: "Sound Packs Window (7 production states)") {
                         SoundPacksWindowStateGalleryView()
                     }
                     HostIntegrationGalleryView()
@@ -240,6 +240,7 @@ import ClaudioGUIComponents
 
     private func panelPackSectionCaption(_ state: PanelPackSectionState) -> String {
         switch state {
+        case .loading: ".loading"
         case .pinned(let cards): ".pinned(\(cards.count))"
         case .noPinnedPacks(let count): ".noPinnedPacks(available: \(count))"
         case .noPacks: ".noPacks"

@@ -14,11 +14,13 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private let configFile: URL
     private let lockFile: URL
     private let environment: AudioImportEnvironment
+    private let soundPackLibrary: SoundPackLibrary
     private let refreshCoordinator: SoundPacksRefreshCoordinator
     private lazy var model: SoundPacksWindowModel = SoundPacksWindowModel(
         configFile: configFile,
         lockFile: lockFile,
         environment: environment,
+        soundPackLibrary: soundPackLibrary,
         refreshCoordinator: refreshCoordinator)
     private lazy var focusCoordinator = SoundPacksWindowFocusCoordinator()
     private let userPacksDirectory: URL
@@ -32,8 +34,10 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private var isClosingWindow = false
     private var externalActivationCancellable: AnyCancellable?
     private var selectionAnnouncementCancellable: AnyCancellable?
+    private var libraryStateAnnouncementCancellable: AnyCancellable?
     private var windowStatusAnnouncementCancellable: AnyCancellable?
     private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
+    private var pendingRoute: SoundPacksWindowRoute?
     /// Suppresses the delegate callback during `showWindow` so window-open context is announced
     /// before any result that completed while the retained window was hidden.
     private var isPresentingWindow = false
@@ -42,11 +46,13 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         configFile: URL,
         lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
+        soundPackLibrary: SoundPackLibrary,
         refreshCoordinator: SoundPacksRefreshCoordinator
     ) {
         self.configFile = configFile
         self.lockFile = lockFile
         self.environment = environment
+        self.soundPackLibrary = soundPackLibrary
         self.refreshCoordinator = refreshCoordinator
         userPacksDirectory = environment.userPacksDirectory
         super.init()
@@ -95,10 +101,21 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             model.reload(followActivePack: false)
         }
         let effectiveRoute: SoundPacksWindowRoute
-        if case .editEvent(let packID, _) = route {
-            effectiveRoute = model.selectPackForInspection(packID) ? route : .overview
-        } else {
-            effectiveRoute = route
+        switch resolveSoundPacksWindowRoute(
+            route,
+            availablePackIDs: Set(model.packCards.map(\.id)),
+            libraryState: model.libraryPresentationState)
+        {
+        case .resolved(let resolvedRoute):
+            pendingRoute = nil
+            if case .editEvent(let packID, _) = resolvedRoute {
+                effectiveRoute = model.selectPackForInspection(packID) ? resolvedRoute : .overview
+            } else {
+                effectiveRoute = resolvedRoute
+            }
+        case .pending(let route):
+            pendingRoute = route
+            effectiveRoute = .overview
         }
         NSApp.activate(ignoringOtherApps: true)
         isPresentingWindow = true
@@ -134,6 +151,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         else { return }
 
         isClosingWindow = true
+        pendingRoute = nil
         let previous = handbackApplication
         handbackApplication = nil
         let restoration = focusRestoration
@@ -210,6 +228,22 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                         window: window)
                 }
             }
+        libraryStateAnnouncementCancellable = model.$libraryPresentationState
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] libraryState in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.resolvePendingRouteIfPossible(libraryState: libraryState)
+                    guard self.window?.isKeyWindow == true else { return }
+                    SoundPacksWindowAccessibilityBridge.post(
+                        .libraryStateChanged,
+                        facts: self.accessibilityFacts(
+                            selectedPackID: self.model.selectedPackID,
+                            libraryPresentationState: libraryState),
+                        window: window)
+                }
+            }
         windowStatusAnnouncementCancellable = model.$windowStatuses
             .dropFirst()
             .map { statuses in statuses.max { $0.revision < $1.revision } }
@@ -220,6 +254,29 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                 }
             }
         return window
+    }
+
+    private func resolvePendingRouteIfPossible(
+        libraryState: SoundPackLibraryPresentationState
+    ) {
+        guard let pendingRoute, window?.isVisible == true else { return }
+        switch resolveSoundPacksWindowRoute(
+            pendingRoute,
+            availablePackIDs: Set(model.packCards.map(\.id)),
+            libraryState: libraryState)
+        {
+        case .pending:
+            return
+        case .resolved(let route):
+            self.pendingRoute = nil
+            if case .editEvent(let packID, _) = route,
+                model.selectPackForInspection(packID)
+            {
+                focusCoordinator.requestRoute(route)
+            } else if route == .overview {
+                focusCoordinator.requestRoute(.overview)
+            }
+        }
     }
 
     private func announceLatestWindowStatusIfNeeded(in window: NSWindow) {
@@ -254,14 +311,17 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     }
 
     private func accessibilityFacts() -> SoundPacksWindowAnnouncementFacts {
-        accessibilityFacts(selectedPackID: model.selectedPackID)
+        accessibilityFacts(
+            selectedPackID: model.selectedPackID,
+            libraryPresentationState: model.libraryPresentationState)
     }
 
     /// `@Published` emits its new value before the stored property is replaced. Accepting that
     /// emitted value explicitly keeps a transition to `nil` from accidentally announcing the old
     /// selection.
     private func accessibilityFacts(
-        selectedPackID: String?
+        selectedPackID: String?,
+        libraryPresentationState: SoundPackLibraryPresentationState? = nil
     ) -> SoundPacksWindowAnnouncementFacts {
         let selectedName = selectedPackID.flatMap { packID in
             model.packCards.first(where: { $0.id == packID }).map {
@@ -270,6 +330,8 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         }
         return SoundPacksWindowAnnouncementFacts(
             packCount: model.packCards.count,
-            selectedPackName: selectedName)
+            selectedPackName: selectedName,
+            libraryPresentationState:
+                libraryPresentationState ?? model.libraryPresentationState)
     }
 }

@@ -38,6 +38,19 @@ public struct AudioImportLimits: Sendable, Equatable {
     }
 }
 
+/// Resolves the factory-copy root only for a real macOS application bundle.
+///
+/// `Bundle.main.resourceURL` is also non-`nil` for a SwiftPM command-line executable, where it
+/// points at the tool/build directory rather than `Contents/Resources`. Treating that directory as
+/// a configured factory root would make `swift run ClaudioGUI` fail the library's required-root
+/// check. A real `.app` deliberately returns the expected path without checking whether it exists:
+/// a damaged release bundle that omitted `Resources/packs` must remain a visible, fail-closed
+/// library error instead of silently downgrading every factory pack to a writable user pack.
+public func applicationFactoryPacksDirectory(bundleURL: URL) -> URL? {
+    guard bundleURL.pathExtension.caseInsensitiveCompare("app") == .orderedSame else { return nil }
+    return bundleURL.appendingPathComponent("Contents/Resources/packs", isDirectory: true)
+}
+
 /// Everything ``importAudioFile(sourceURL:suggestedFileName:packID:environment:)`` needs,
 /// injectable for tests so they never touch the real `~/.claudio/packs/` (mirrors
 /// `helper`'s `DoctorEnvironment` / gui's `OnboardingEnvironment` pattern exactly — see

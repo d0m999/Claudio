@@ -321,9 +321,10 @@ private func factoryPackRestoreSalvage(
 
 /// 管理窗口的磁盘读模型。它列出完整包库，不应用面板的星标显示集，也不持有 `NSWindow`。
 ///
-/// 所有 reload 与未来写 completion 都在 `@MainActor` 同步完成。窗口自己的 config/manifest 写者
-/// 必须先完成落盘，再调用 ``completeSynchronousWrite(_:)``；这个 API 不接受 async closure，
-/// 因而不会把「刷新已发布」与「字节尚未落盘」拆成两个时刻。
+/// config 投影与所有写 completion 都在 `@MainActor` 同步完成；声音包读取由共享
+/// ``SoundPackLibrary`` 在 actor 外的 utility task 执行。窗口自己的 config/manifest 写者仍必须先
+/// 完成落盘，再调用 ``completeSynchronousWrite(_:invalidatingPackIDs:)``；这个 API 不接受 async
+/// closure，因而不会把「刷新已发布」与「字节尚未落盘」拆成两个时刻。
 @MainActor
 public final class SoundPacksWindowModel: ObservableObject {
     @Published public private(set) var configState: PanelConfigState
@@ -331,9 +332,14 @@ public final class SoundPacksWindowModel: ObservableObject {
     @Published public private(set) var packCards: [PackCard]
     @Published public private(set) var selectedPackID: String?
     @Published public private(set) var selectedEventRows: [EventRow]
-    /// Selected pack only: one shallow `readdir`, never one scan per event row or per pack card.
-    @Published public private(set) var selectedAudioFiles: [PackAudioFile]
-    @Published public private(set) var audioInventoryError: PackAudioInventoryError?
+    /// Selected pack only: one shared, on-demand shallow `readdir`, never one scan per pack card.
+    @Published public private(set) var selectedAudioInventoryState:
+        SoundPackAudioInventoryPresentationState
+
+    public var selectedAudioFiles: [PackAudioFile] { selectedAudioInventoryState.files }
+    public var audioInventoryError: PackAudioInventoryError? {
+        selectedAudioInventoryState.error
+    }
     /// The full, uncapped window-side star selection (`starred_packs ∩ disk`). This deliberately
     /// does not reuse the panel's four-row display set: a manually written fifth star must remain
     /// visible here so the user can remove it without silently truncating config.json.
@@ -355,6 +361,7 @@ public final class SoundPacksWindowModel: ObservableObject {
     @Published public private(set) var packForkActionError: SoundPacksWindowPackForkActionError?
     @Published public private(set) var packUseActionError: SoundPacksWindowPackUseActionError?
     @Published public private(set) var windowStatuses: [SoundPacksWindowStatus]
+    @Published public private(set) var libraryPresentationState: SoundPackLibraryPresentationState
 
     /// The built-in id whose restore lifecycle can be retried even when its visible installed
     /// directory no longer exists and therefore cannot appear in ``packCards``. After the first
@@ -405,7 +412,15 @@ public final class SoundPacksWindowModel: ObservableObject {
     private let environment: AudioImportEnvironment
     /// Factory contents are app-bundle-static for this model's lifetime. Cache the one derivation
     /// so SwiftUI body evaluation never turns a read-only check into repeated factory `readdir`.
-    private let builtinPackIDs: Set<String>
+    private var builtinPackIDs: Set<String>
+    private let soundPackLibrary: SoundPackLibrary
+    private let readSource: SoundPackReadSource
+    private var librarySnapshot: SoundPackLibrarySnapshot?
+    private var libraryObservationTask: Task<Void, Never>?
+    private var audioInventoryTask: Task<Void, Never>?
+    private var selectedAudioInventoryPackID: String?
+    private var pendingFollowActivePack = true
+    private var pendingInspectionPackID: String?
     private let refreshCoordinator: SoundPacksRefreshCoordinator
     private var windowRefreshCancellable: AnyCancellable?
     private var windowContentRefreshCancellable: AnyCancellable?
@@ -428,51 +443,97 @@ public final class SoundPacksWindowModel: ObservableObject {
         return retainedSalvages
     }
 
-    public init(
+    public convenience init(
+        configFile: URL,
+        lockFile: URL = ClaudioPaths.configLockFile,
+        environment: AudioImportEnvironment,
+        soundPackLibrary: SoundPackLibrary,
+        refreshCoordinator: SoundPacksRefreshCoordinator
+    ) {
+        self.init(
+            configFile: configFile,
+            lockFile: lockFile,
+            environment: environment,
+            soundPackLibrary: soundPackLibrary,
+            readSource: .sharedLibrary,
+            refreshCoordinator: refreshCoordinator)
+    }
+
+    #if DEBUG
+    /// Synchronous compatibility path for the existing disk mutation harness. The shipped target
+    /// has no initializer that can omit the app-lifetime shared library.
+    public convenience init(
         configFile: URL,
         lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
         refreshCoordinator: SoundPacksRefreshCoordinator
     ) {
+        self.init(
+            configFile: configFile,
+            lockFile: lockFile,
+            environment: environment,
+            soundPackLibrary: SoundPackLibrary(environment: environment),
+            readSource: .directDiskFixture,
+            refreshCoordinator: refreshCoordinator)
+    }
+    #endif
+
+    private init(
+        configFile: URL,
+        lockFile: URL,
+        environment: AudioImportEnvironment,
+        soundPackLibrary: SoundPackLibrary,
+        readSource: SoundPackReadSource,
+        refreshCoordinator: SoundPacksRefreshCoordinator
+    ) {
         self.configFile = configFile
         self.lockFile = lockFile
         self.environment = environment
-        self.builtinPackIDs = environment.builtinPackIDs
+        self.soundPackLibrary = soundPackLibrary
+        self.readSource = readSource
+        self.builtinPackIDs = readSource.readsSharedSnapshot ? [] : environment.builtinPackIDs
         self.refreshCoordinator = refreshCoordinator
 
         let loadedState = loadPanelConfig(from: configFile)
         let loadedConfig = loadedState.resolvedConfig
-        let loadedCards = availablePacks(config: loadedConfig, environment: environment)
-        let initialSelection =
-            loadedCards.contains(where: { $0.id == loadedConfig.selectedPack })
-            ? loadedConfig.selectedPack
-            : loadedCards.first?.id
 
         configState = loadedState
         config = loadedConfig
-        packCards = loadedCards
-        starredPackIDs = soundPacksWindowStarredPackIDs(
-            installedPackIDs: loadedCards.map(\.id),
-            starredPacks: loadedConfig.starredPacks,
-            defaultStarredPackIDs: builtinPackIDs)
-        selectedPackID = initialSelection
-        selectedEventRows =
-            initialSelection.map {
-                packCoverage(packID: $0, config: loadedConfig, environment: environment)
-            } ?? []
-        let initialAudioInventory = initialSelection.map {
-            packAudioFiles(packID: $0, environment: environment)
-        }
-        switch initialAudioInventory {
-        case .success(let files)?:
-            selectedAudioFiles = files
-            audioInventoryError = nil
-        case .failure(let error)?:
-            selectedAudioFiles = []
-            audioInventoryError = error
-        case nil:
-            selectedAudioFiles = []
-            audioInventoryError = nil
+        if !readSource.readsSharedSnapshot {
+            let loadedCards = availablePacks(config: loadedConfig, environment: environment)
+            let initialSelection =
+                loadedCards.contains(where: { $0.id == loadedConfig.selectedPack })
+                ? loadedConfig.selectedPack
+                : loadedCards.first?.id
+            packCards = loadedCards
+            starredPackIDs = soundPacksWindowStarredPackIDs(
+                installedPackIDs: loadedCards.map(\.id),
+                starredPacks: loadedConfig.starredPacks,
+                defaultStarredPackIDs: builtinPackIDs)
+            selectedPackID = initialSelection
+            selectedEventRows =
+                initialSelection.map {
+                    packCoverage(packID: $0, config: loadedConfig, environment: environment)
+                } ?? []
+            let initialAudioInventory = initialSelection.map {
+                packAudioFiles(packID: $0, environment: environment)
+            }
+            switch initialAudioInventory {
+            case .success(let files)?:
+                selectedAudioInventoryState = .ready(files)
+            case .failure(let error)?:
+                selectedAudioInventoryState = .failed(previous: nil, error: error)
+            case nil:
+                selectedAudioInventoryState = .idle
+            }
+            libraryPresentationState = .ready
+        } else {
+            packCards = []
+            starredPackIDs = []
+            selectedPackID = nil
+            selectedEventRows = []
+            selectedAudioInventoryState = .idle
+            libraryPresentationState = .loading
         }
         audioActionError = nil
         starredPacksError = nil
@@ -487,19 +548,42 @@ public final class SoundPacksWindowModel: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.reload(followActivePack: true)
+                    guard let self else { return }
+                    self.reload(
+                        followActivePack: true,
+                        refreshSoundPackLibrary:
+                            self.refreshCoordinator.windowReloadRequiresLibraryRefresh)
                 }
             }
         windowContentRefreshCancellable = refreshCoordinator.$windowContentReloadRevision
             .dropFirst()
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.reload(followActivePack: false)
+                    guard let self else { return }
+                    self.reload(
+                        followActivePack: false,
+                        refreshSoundPackLibrary:
+                            self.refreshCoordinator.windowContentReloadRequiresLibraryRefresh)
                 }
             }
+
+        guard readSource.readsSharedSnapshot else { return }
+        libraryObservationTask = Task { @MainActor [weak self, soundPackLibrary] in
+            let stream = await soundPackLibrary.states()
+            await soundPackLibrary.loadIfNeeded(trigger: .initial)
+            for await state in stream {
+                guard !Task.isCancelled else { return }
+                self?.consumeLibraryState(state)
+            }
+        }
     }
 
-#if DEBUG
+    deinit {
+        libraryObservationTask?.cancel()
+        audioInventoryTask?.cancel()
+    }
+
+    #if DEBUG
     /// Deterministic, disk-free construction for the repository state gallery. The injected
     /// environment is retained only to satisfy action seams; gallery frames never execute them.
     public init(
@@ -510,6 +594,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         selectedAudioFiles: [PackAudioFile] = [],
         builtinPackIDs: Set<String> = [],
         starredPackIDs: [String] = [],
+        libraryPresentationState: SoundPackLibraryPresentationState = .ready,
         environment: AudioImportEnvironment,
         refreshCoordinator: SoundPacksRefreshCoordinator
     ) {
@@ -517,14 +602,15 @@ public final class SoundPacksWindowModel: ObservableObject {
         self.lockFile = URL(fileURLWithPath: "/dev/null/claudio-preview-config.lock")
         self.environment = environment
         self.builtinPackIDs = builtinPackIDs
+        self.soundPackLibrary = SoundPackLibrary(environment: environment)
+        self.readSource = .directDiskFixture
         self.refreshCoordinator = refreshCoordinator
         configState = previewConfig.selectedPack.isEmpty ? .needsPack : .operational(previewConfig)
         config = previewConfig
         self.packCards = packCards
         self.selectedPackID = selectedPackID
         self.selectedEventRows = selectedEventRows
-        self.selectedAudioFiles = selectedAudioFiles
-        audioInventoryError = nil
+        selectedAudioInventoryState = .ready(selectedAudioFiles)
         self.starredPackIDs = starredPackIDs
         starredPacksError = nil
         audioActionError = nil
@@ -534,18 +620,24 @@ public final class SoundPacksWindowModel: ObservableObject {
         packForkActionError = nil
         packUseActionError = nil
         windowStatuses = []
+        self.libraryPresentationState = libraryPresentationState
     }
-#endif
+    #endif
 
     /// 侧栏只改变窗口正在查看的包，不写 config，也不改变面板当前包。
     @discardableResult
     public func selectPackForInspection(_ packID: String) -> Bool {
         guard packCards.contains(where: { $0.id == packID }) else { return false }
+        pendingFollowActivePack = false
         guard selectedPackID != packID else { return true }
         inspectionSelectionRevision += 1
         selectedPackID = packID
-        selectedEventRows = packCoverage(
-            packID: packID, config: config, environment: environment)
+        if !readSource.readsSharedSnapshot {
+            selectedEventRows = packCoverage(
+                packID: packID, config: config, environment: environment)
+        } else {
+            selectedEventRows = librarySnapshot?.eventRows(packID: packID, config: config) ?? []
+        }
         reloadSelectedAudioInventory(packID: packID)
         audioActionError = nil
         factoryRestoreNotice = nil
@@ -599,8 +691,21 @@ public final class SoundPacksWindowModel: ObservableObject {
             case .failure(let error): return finishPackFork(.failure(.allocation(error)))
             }
 
+            beginSoundPackMutation(packIDs: [newPackID])
             switch forkPack(fromID: sourcePackID, newID: newPackID, environment: environment) {
             case .success:
+                if readSource.readsSharedSnapshot {
+                    pendingInspectionPackID = newPackID
+                    suppressedSelectionAnnouncementPackID = newPackID
+                    let outcome = PackForkOutcome(
+                        sourcePackID: sourcePackID,
+                        newPackID: newPackID,
+                        displayName: displayName(for: sourcePackID))
+                    completeSynchronousWrite(
+                        .succeeded,
+                        invalidatingPackIDs: [newPackID])
+                    return finishPackFork(.success(outcome), publishCompletion: false)
+                }
                 completeSynchronousWrite(.succeeded)
                 guard
                     let card = packCards.first(where: { $0.id == newPackID })
@@ -617,6 +722,8 @@ public final class SoundPacksWindowModel: ObservableObject {
                     displayName: SelectedPackMetadata(id: card.id, name: card.name).displayName)
                 return finishPackFork(.success(outcome), publishCompletion: false)
             case .failure(.destinationAlreadyExists):
+                finishSoundPackMutation(packIDs: [newPackID])
+                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
                 occupied.insert(newPackID)
                 if attempt == attemptLimit {
                     return finishPackFork(
@@ -680,6 +787,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             } ?? expectedPackID
         clearWindowStatus(.audio)
         audioActionError = nil
+        beginSoundPackMutation(packIDs: [expectedPackID])
 
         let batch = await Task.detached {
             importAudioFiles(requests, packID: expectedPackID, environment: environment)
@@ -689,8 +797,11 @@ public final class SoundPacksWindowModel: ObservableObject {
             selectedPackID == expectedPackID
             && inspectionSelectionRevision == expectedSelectionRevision
         if !batch.accepted.isEmpty {
-            completeSynchronousWrite(.succeeded)
+            completeSynchronousWrite(
+                .succeeded,
+                invalidatingPackIDs: [expectedPackID])
         } else {
+            finishSoundPackMutation(packIDs: [expectedPackID])
             reload(followActivePack: false)
         }
 
@@ -771,30 +882,36 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func toggleStarredPack(
         _ packID: String
     ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
-        let nextIDs: [String]
-        if starredPackIDs.contains(packID) {
-            nextIDs = starredPackIDs.filter { $0 != packID }
-        } else {
-            nextIDs = starredPackIDs + [packID]
-        }
-        return updateStarredPacks(to: nextIDs)
+        finishStarredPacksUpdate(
+            ClaudioCore.toggleStarredPack(
+                packID,
+                configFile: configFile,
+                lockFile: lockFile,
+                userPacksDirectory: environment.userPacksDirectory,
+                defaultStarredPackIDs: builtinPackIDs))
     }
 
-    /// Performs T16's one public writer and publishes a full two-surface refresh only after the
-    /// synchronous config write succeeds. This method is public so the write/error seam remains
-    /// directly testable without importing the SwiftUI window target; the view only invokes it via
-    /// ``toggleStarredPack(_:)``.
+    #if DEBUG
+    /// Exact replacement remains only as a disk-harness seam. The shipped UI exposes the atomic
+    /// membership writer above, so a retained model can never overwrite an external sibling star.
     @discardableResult
     public func updateStarredPacks(
         to ids: [String]
     ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
-        let result = setStarredPacks(
-            ids,
-            configFile: configFile,
-            lockFile: lockFile,
-            userPacksDirectory: environment.userPacksDirectory,
-            defaultStarredPackIDs: builtinPackIDs,
-            materializeDefaultStarredPacks: false)
+        finishStarredPacksUpdate(
+            setStarredPacks(
+                ids,
+                configFile: configFile,
+                lockFile: lockFile,
+                userPacksDirectory: environment.userPacksDirectory,
+                defaultStarredPackIDs: builtinPackIDs,
+                materializeDefaultStarredPacks: false))
+    }
+    #endif
+
+    private func finishStarredPacksUpdate(
+        _ result: Result<SetStarredPacksOutcome, SetStarredPacksError>
+    ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
         switch result {
         case .success:
             starredPacksError = nil
@@ -812,11 +929,50 @@ public final class SoundPacksWindowModel: ObservableObject {
         return result
     }
 
-    /// 窗口即将展示或已收到外部切包通知时重读磁盘。
+    /// 窗口即将展示或已收到外部切包通知时重读 config、立即投影旧快照，并请求后台刷新共享库。
     ///
     /// `followActivePack == true` 只用于「popover 刚成功切包」与首次展示；普通窗口内写保留用户
     /// 正在查看的侧栏项，不把一次 manifest 编辑误当成选包动作。
     public func reload(followActivePack: Bool) {
+        reload(followActivePack: followActivePack, refreshSoundPackLibrary: true)
+    }
+
+    private func reload(
+        followActivePack: Bool,
+        refreshSoundPackLibrary: Bool
+    ) {
+        #if DEBUG
+        guard readSource.readsSharedSnapshot else {
+            reloadSynchronously(followActivePack: followActivePack)
+            return
+        }
+        #endif
+        pendingFollowActivePack = pendingFollowActivePack || followActivePack
+        configState = loadPanelConfig(from: configFile)
+        config = configState.resolvedConfig
+        if let librarySnapshot {
+            applySnapshot(librarySnapshot, followActivePack: pendingFollowActivePack)
+        }
+        if refreshSoundPackLibrary {
+            Task { await soundPackLibrary.requestRefresh(trigger: .windowPresentation) }
+        } else {
+            // A config-only projection has no future library result that could satisfy a missing
+            // target. Keeping this intent would let an unrelated later refresh override a manual
+            // sidebar selection.
+            pendingFollowActivePack = false
+        }
+    }
+
+    public func retrySoundPackLibraryRefresh() {
+        guard readSource.readsSharedSnapshot else {
+            reload(followActivePack: false)
+            return
+        }
+        Task { await soundPackLibrary.requestRefresh(trigger: .retry) }
+    }
+
+    #if DEBUG
+    private func reloadSynchronously(followActivePack: Bool) {
         let previousSelection = selectedPackID
         let loadedState = loadPanelConfig(from: configFile)
         let loadedConfig = loadedState.resolvedConfig
@@ -864,8 +1020,117 @@ public final class SoundPacksWindowModel: ObservableObject {
         if let nextSelection {
             reloadSelectedAudioInventory(packID: nextSelection)
         } else {
-            selectedAudioFiles = []
-            audioInventoryError = nil
+            selectedAudioInventoryState = .idle
+            selectedAudioInventoryPackID = nil
+        }
+    }
+    #endif
+
+    private func consumeLibraryState(_ state: SoundPackLibraryState) {
+        switch state {
+        case .unloaded:
+            libraryPresentationState = .loading
+        case .loading(let previous):
+            libraryPresentationState = previous == nil ? .loading : .refreshing
+            if let previous {
+                librarySnapshot = previous
+                applySnapshot(previous, followActivePack: pendingFollowActivePack)
+            }
+        case .ready(let snapshot):
+            librarySnapshot = snapshot
+            applySnapshot(snapshot, followActivePack: pendingFollowActivePack)
+            pendingFollowActivePack = false
+            libraryPresentationState = .ready
+        case .failed(let previous, let error):
+            if let previous {
+                librarySnapshot = previous
+                applySnapshot(previous, followActivePack: pendingFollowActivePack)
+                libraryPresentationState = .refreshFailed(reason: error.message)
+            } else {
+                librarySnapshot = nil
+                builtinPackIDs = []
+                packCards = []
+                starredPackIDs = []
+                selectedPackID = nil
+                selectedEventRows = []
+                selectedAudioInventoryState = .idle
+                selectedAudioInventoryPackID = nil
+                audioInventoryTask?.cancel()
+                libraryPresentationState = .loadFailed(reason: error.message)
+            }
+            pendingFollowActivePack = false
+        }
+    }
+
+    private func applySnapshot(
+        _ snapshot: SoundPackLibrarySnapshot,
+        followActivePack: Bool
+    ) {
+        let previousSelection = selectedPackID
+        builtinPackIDs = snapshot.factoryPackIDs
+        let loadedCards = snapshot.packCards(config: config)
+        let nextSelection: String?
+        var consumedInspectionIntent = false
+        if let pendingInspectionPackID,
+            loadedCards.contains(where: { $0.id == pendingInspectionPackID })
+        {
+            nextSelection = pendingInspectionPackID
+            self.pendingInspectionPackID = nil
+            consumedInspectionIntent = true
+        } else if followActivePack,
+            loadedCards.contains(where: { $0.id == config.selectedPack })
+        {
+            nextSelection = config.selectedPack
+        } else if let previousSelection,
+            loadedCards.contains(where: { $0.id == previousSelection })
+        {
+            nextSelection = previousSelection
+        } else if loadedCards.contains(where: { $0.id == config.selectedPack }) {
+            nextSelection = config.selectedPack
+        } else {
+            nextSelection = loadedCards.first?.id
+        }
+
+        if nextSelection != previousSelection {
+            inspectionSelectionRevision += 1
+            audioActionError = nil
+            factoryRestoreNotice = nil
+            // A publish failure can legitimately remove the attempted built-in from `packCards`
+            // after its old tree was salvaged. That automatic fallback selection must not erase
+            // the only retry identity. Explicit user selection still clears it in
+            // `selectPackForInspection`.
+            let preservesMissingPackRetry = factoryRestoreRetryPackID != nil
+            if !preservesMissingPackRetry {
+                factoryRestoreActionError = nil
+                clearWindowStatus(.factoryRestore)
+            }
+            preserveCompletedAudioImportStatusAsBackgroundIfNeeded()
+            if packForkNotice?.newPackID != nextSelection {
+                packForkNotice = nil
+                if packForkActionError == nil { clearWindowStatus(.packFork) }
+            }
+        }
+
+        packCards = loadedCards
+        starredPackIDs = soundPacksWindowStarredPackIDs(
+            installedPackIDs: loadedCards.map(\.id),
+            starredPacks: config.starredPacks,
+            defaultStarredPackIDs: builtinPackIDs)
+        selectedPackID = nextSelection
+        selectedEventRows =
+            nextSelection.map {
+                snapshot.eventRows(packID: $0, config: config)
+            } ?? []
+        if followActivePack,
+            consumedInspectionIntent || nextSelection == config.selectedPack
+        {
+            pendingFollowActivePack = false
+        }
+        if let nextSelection {
+            reloadSelectedAudioInventory(packID: nextSelection)
+        } else {
+            selectedAudioInventoryState = .idle
+            selectedAudioInventoryPackID = nil
         }
     }
 
@@ -884,6 +1149,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard selectedAudioFiles.contains(where: { $0.fileName == fileName }) else {
             return finishAudioAction(.failure(.notInInventory(fileName: fileName)))
         }
+        beginSoundPackMutation(packIDs: [selectedPackID])
 
         switch bindEventToManifest(
             event: event,
@@ -892,9 +1158,10 @@ public final class SoundPacksWindowModel: ObservableObject {
             environment: environment)
         {
         case .success:
-            return finishAudioAction(.success(()))
+            return finishAudioAction(.success(()), invalidatingPackID: selectedPackID)
         case .failure(let error):
-            return finishAudioAction(.failure(.bind(error)))
+            return finishAudioAction(
+                .failure(.bind(error)), invalidatingPackID: selectedPackID)
         }
     }
 
@@ -911,15 +1178,17 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard !builtinPackIDs.contains(selectedPackID) else {
             return finishAudioAction(.failure(.builtinReadOnly(packID: selectedPackID)))
         }
+        beginSoundPackMutation(packIDs: [selectedPackID])
         switch clearEventBinding(
             event: event,
             packID: selectedPackID,
             environment: environment)
         {
         case .success:
-            return finishAudioAction(.success(()))
+            return finishAudioAction(.success(()), invalidatingPackID: selectedPackID)
         case .failure(let error):
-            return finishAudioAction(.failure(.bind(error)))
+            return finishAudioAction(
+                .failure(.bind(error)), invalidatingPackID: selectedPackID)
         }
     }
 
@@ -939,6 +1208,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard selectedPackID == expectedPackID else {
             return finishAudioAction(.failure(.selectionChanged))
         }
+        beginSoundPackMutation(packIDs: [selectedPackID])
 
         switch deleteOrphanAudioFile(
             fileName: fileName,
@@ -946,7 +1216,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             environment: environment)
         {
         case .success:
-            return finishAudioAction(.success(()))
+            return finishAudioAction(.success(()), invalidatingPackID: selectedPackID)
         case .failure(let error):
             if deleteFailureInvalidatesWindowReadModel(error) {
                 // The lock-time check has disproved the confirmation-time snapshot. Re-read every
@@ -954,7 +1224,10 @@ public final class SoundPacksWindowModel: ObservableObject {
                 // fake local write completion to the panel.
                 reload(followActivePack: false)
             }
-            return finishAudioAction(.failure(.delete(error)))
+            return finishAudioAction(
+                .failure(.delete(error)),
+                invalidatingPackID: selectedPackID,
+                refreshAfterFailure: deleteFailureInvalidatesWindowReadModel(error))
         }
     }
 
@@ -1017,6 +1290,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         clearWindowStatus(.factoryBatchRestore)
 
         let ids = factoryPackIDs
+        beginSoundPackMutation(packIDs: Set(ids))
         var restored: [FactoryPackRestoreOutcome] = []
         var failures: [FactoryPackBatchRestoreFailure] = []
         var diskChanged = false
@@ -1039,8 +1313,12 @@ public final class SoundPacksWindowModel: ObservableObject {
         }
 
         if diskChanged {
-            completeSynchronousWrite(failures.isEmpty ? .succeeded : .changedDespiteFailure)
+            completeSynchronousWrite(
+                failures.isEmpty ? .succeeded : .changedDespiteFailure,
+                invalidatingPackIDs: Set(ids))
         } else {
+            finishSoundPackMutation(packIDs: Set(ids))
+            if readSource.readsSharedSnapshot { reload(followActivePack: false) }
             completeSynchronousWrite(.failed)
         }
 
@@ -1057,16 +1335,19 @@ public final class SoundPacksWindowModel: ObservableObject {
     private func retryFactoryPackFromBatchAfterConfirmation(
         packID: String
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
-        guard let previousFailure = factoryBatchRestoreFailures.first(where: {
-            $0.packID == packID
-        }) else {
+        guard
+            let previousFailure = factoryBatchRestoreFailures.first(where: {
+                $0.packID == packID
+            })
+        else {
             return .failure(.selectionChanged)
         }
 
+        beginSoundPackMutation(packIDs: [packID])
         switch restoreFactoryPack(id: packID, environment: environment) {
         case .success(let outcome):
             let visibleOutcome = resolveFactoryBatchRestoreFailure(with: outcome).outcome
-            completeSynchronousWrite(.succeeded)
+            completeSynchronousWrite(.succeeded, invalidatingPackIDs: [packID])
             publishFactoryBatchRestoreStatus()
             return .success(visibleOutcome)
         case .failure(let error):
@@ -1075,7 +1356,12 @@ public final class SoundPacksWindowModel: ObservableObject {
                 to: previousFailure.retainedSalvages)
             let diskChangedDespiteFailure = factoryPackRestoreSalvage(in: error) != nil
             completeSynchronousWrite(
-                diskChangedDespiteFailure ? .changedDespiteFailure : .failed)
+                diskChangedDespiteFailure ? .changedDespiteFailure : .failed,
+                invalidatingPackIDs: diskChangedDespiteFailure ? [packID] : [])
+            if !diskChangedDespiteFailure {
+                finishSoundPackMutation(packIDs: [packID])
+                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
+            }
             if let index = factoryBatchRestoreFailures.firstIndex(where: {
                 $0.packID == packID
             }) {
@@ -1197,6 +1483,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         packID: String,
         retainedSalvages: [SalvagedPack] = []
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
+        beginSoundPackMutation(packIDs: [packID])
         switch restoreFactoryPack(id: packID, environment: environment) {
         case .success(let outcome):
             let visibleOutcome = FactoryPackRestoreOutcome(
@@ -1221,13 +1508,17 @@ public final class SoundPacksWindowModel: ObservableObject {
     }
 
     private func finishAudioAction(
-        _ result: Result<Void, SoundPacksWindowAudioActionError>
+        _ result: Result<Void, SoundPacksWindowAudioActionError>,
+        invalidatingPackID: String? = nil,
+        refreshAfterFailure: Bool = true
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
         switch result {
         case .success:
             audioActionError = nil
             clearWindowStatus(.audio)
-            completeSynchronousWrite(.succeeded)
+            completeSynchronousWrite(
+                .succeeded,
+                invalidatingPackIDs: invalidatingPackID.map { [$0] } ?? [])
         case .failure(let error):
             audioActionError = error
             setWindowStatus(
@@ -1237,6 +1528,10 @@ public final class SoundPacksWindowModel: ObservableObject {
                 message: error.message,
                 packID: selectedPackID)
             completeSynchronousWrite(.failed)
+            if refreshAfterFailure, let invalidatingPackID {
+                finishSoundPackMutation(packIDs: [invalidatingPackID])
+                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
+            }
         }
         return result
     }
@@ -1253,7 +1548,9 @@ public final class SoundPacksWindowModel: ObservableObject {
             let batchResolution = resolveFactoryBatchRestoreFailure(with: outcome)
             let visibleOutcome = batchResolution.outcome
             factoryRestoreActionError = nil
-            completeSynchronousWrite(.succeeded)
+            completeSynchronousWrite(
+                .succeeded,
+                invalidatingPackIDs: [outcome.restoredPackID])
             if batchResolution.didResolve {
                 publishFactoryBatchRestoreStatus()
             }
@@ -1278,7 +1575,9 @@ public final class SoundPacksWindowModel: ObservableObject {
                 // the error visible; otherwise they would continue to show a pack that no longer
                 // exists at the active path.
                 outcome = .changedDespiteFailure
-                completeSynchronousWrite(outcome)
+                completeSynchronousWrite(
+                    outcome,
+                    invalidatingPackIDs: factoryRestorePackID(in: visibleError).map { [$0] } ?? [])
             } else {
                 outcome = .failed
             }
@@ -1297,6 +1596,10 @@ public final class SoundPacksWindowModel: ObservableObject {
                 })
             if outcome == .failed {
                 completeSynchronousWrite(outcome)
+                if let packID = factoryRestorePackID(in: visibleError) {
+                    finishSoundPackMutation(packIDs: [packID])
+                    if readSource.readsSharedSnapshot { reload(followActivePack: false) }
+                }
             }
             return .failure(visibleError)
         }
@@ -1432,14 +1735,38 @@ public final class SoundPacksWindowModel: ObservableObject {
     }
 
     private func reloadSelectedAudioInventory(packID: String) {
+        if readSource.readsSharedSnapshot {
+            audioInventoryTask?.cancel()
+            let previous = selectedAudioInventoryPackID == packID ? selectedAudioFiles : nil
+            selectedAudioInventoryPackID = packID
+            selectedAudioInventoryState = .loading(previous: previous)
+            audioInventoryTask = Task { @MainActor [weak self, soundPackLibrary] in
+                let inventory = await soundPackLibrary.audioInventory(packID: packID)
+                guard !Task.isCancelled, let self, self.selectedPackID == packID else { return }
+                switch inventory {
+                case .available(let files):
+                    self.selectedAudioInventoryState = .ready(files)
+                case .unavailable(let error):
+                    self.selectedAudioInventoryState = .failed(
+                        previous: previous, error: error)
+                case .deferred:
+                    self.selectedAudioInventoryState = .failed(
+                        previous: previous,
+                        error: .directoryUnreadable(reason: "音频清单尚未完成读取"))
+                }
+            }
+            return
+        }
+        #if DEBUG
         switch packAudioFiles(packID: packID, environment: environment) {
         case .success(let files):
-            selectedAudioFiles = files
-            audioInventoryError = nil
+            selectedAudioInventoryState = .ready(files)
+            selectedAudioInventoryPackID = packID
         case .failure(let error):
-            selectedAudioFiles = []
-            audioInventoryError = error
+            selectedAudioInventoryState = .failed(previous: nil, error: error)
+            selectedAudioInventoryPackID = packID
         }
+        #endif
     }
 
     /// 窗口内一个同步写者的统一 completion。
@@ -1449,12 +1776,41 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// `reloadConfigOnly()`。
     @discardableResult
     public func completeSynchronousWrite(
-        _ outcome: SoundPacksWindowWriteOutcome
+        _ outcome: SoundPacksWindowWriteOutcome,
+        invalidatingPackIDs: Set<String> = []
     ) -> SoundPacksRefreshEffect {
         if outcome != .failed {
-            reload(followActivePack: false)
+            finishSoundPackMutation(packIDs: invalidatingPackIDs)
+            if !readSource.readsSharedSnapshot || !invalidatingPackIDs.isEmpty {
+                reload(followActivePack: false)
+            } else {
+                configState = loadPanelConfig(from: configFile)
+                config = configState.resolvedConfig
+                if let librarySnapshot {
+                    applySnapshot(librarySnapshot, followActivePack: false)
+                }
+            }
         }
         return refreshCoordinator.completeWindowWrite(outcome)
+    }
+
+    private func beginSoundPackMutation(packIDs: Set<String>) {
+        guard readSource.readsSharedSnapshot, !packIDs.isEmpty else { return }
+        soundPackLibrary.invalidate(packIDs: packIDs)
+    }
+
+    private func finishSoundPackMutation(packIDs: Set<String>) {
+        guard readSource.readsSharedSnapshot, !packIDs.isEmpty else { return }
+        soundPackLibrary.invalidate(packIDs: packIDs)
+    }
+}
+
+private func factoryRestorePackID(
+    in error: SoundPacksWindowFactoryRestoreActionError
+) -> String? {
+    switch error {
+    case .restore(let packID, _, _): return packID
+    case .noSelectedPack, .selectionChanged, .notBuiltin: return nil
     }
 }
 

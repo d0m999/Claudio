@@ -49,32 +49,35 @@ struct SoundPacksWindowView: View {
     @State private var requestedRoute: SoundPacksWindowRoute = .overview
 
     var body: some View {
-        Group {
-            if layoutAdaptation.stacksPrimaryRegions {
-                VSplitView {
-                    sidebar
-                        .frame(
-                            minHeight: layoutAdaptation.sidebarMinimumHeight,
-                            idealHeight: 180)
-                    detail
-                        .frame(
-                            minWidth: 0,
-                            maxWidth: .infinity,
-                            minHeight: 200,
-                            maxHeight: .infinity)
-                }
-            } else {
-                HSplitView {
-                    sidebar
-                        .frame(
-                            minWidth: layoutAdaptation.sidebarMinimumWidth,
-                            idealWidth: layoutAdaptation.sidebarIdealWidth,
-                            maxWidth: layoutAdaptation.sidebarMaximumWidth)
-                    detail
-                        .frame(
-                            minWidth: layoutAdaptation.detailMinimumWidth,
-                            maxWidth: .infinity,
-                            maxHeight: .infinity)
+        VStack(spacing: 0) {
+            libraryStatusBar
+            Group {
+                if layoutAdaptation.stacksPrimaryRegions {
+                    VSplitView {
+                        sidebar
+                            .frame(
+                                minHeight: layoutAdaptation.sidebarMinimumHeight,
+                                idealHeight: 180)
+                        detail
+                            .frame(
+                                minWidth: 0,
+                                maxWidth: .infinity,
+                                minHeight: 200,
+                                maxHeight: .infinity)
+                    }
+                } else {
+                    HSplitView {
+                        sidebar
+                            .frame(
+                                minWidth: layoutAdaptation.sidebarMinimumWidth,
+                                idealWidth: layoutAdaptation.sidebarIdealWidth,
+                                maxWidth: layoutAdaptation.sidebarMaximumWidth)
+                        detail
+                            .frame(
+                                minWidth: layoutAdaptation.detailMinimumWidth,
+                                maxWidth: .infinity,
+                                maxHeight: .infinity)
+                    }
                 }
             }
         }
@@ -93,7 +96,7 @@ struct SoundPacksWindowView: View {
         .onChange(of: model.selectedPackID) { _ in
             reconcileFocusWithVisibleControls()
         }
-        .onChange(of: model.selectedAudioFiles) { _ in
+        .onChange(of: model.selectedAudioInventoryState) { _ in
             reconcileFocusWithVisibleControls()
         }
         .onChange(of: model.selectedEventRows) { _ in
@@ -105,6 +108,9 @@ struct SoundPacksWindowView: View {
             } else {
                 reconcileFocusWithVisibleControls()
             }
+        }
+        .onChange(of: model.libraryPresentationState) { _ in
+            reconcileFocusWithVisibleControls(assignFirstIfNil: true)
         }
         .confirmationDialog(
             pendingPermanentDeletion.map { "永久删除「\($0.file.fileName)」？" } ?? "永久删除音频？",
@@ -167,6 +173,59 @@ struct SoundPacksWindowView: View {
         }
     }
 
+    @ViewBuilder
+    private var libraryStatusBar: some View {
+        switch model.libraryPresentationState {
+        case .loading:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true)
+                Text("正在读取声音包…")
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("正在读取声音包")
+            .accessibilityIdentifier("sound-packs.library.loading")
+        case .refreshing:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true)
+                Text("正在后台刷新…")
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("正在后台刷新声音包；当前结果仍可使用")
+            .accessibilityIdentifier("sound-packs.library.refreshing")
+        case .refreshFailed(let reason), .loadFailed(let reason):
+            HStack(alignment: .center, spacing: 10) {
+                FailureRow(
+                    message: model.libraryPresentationState == .refreshFailed(reason: reason)
+                        ? "刷新失败，正在显示上次结果。\(reason)"
+                        : reason)
+                Spacer(minLength: 8)
+                Button("重试") {
+                    model.retrySoundPackLibraryRefresh()
+                }
+                .accessibilityLabel("重试读取声音包")
+                .accessibilityHint("在后台重新读取声音包库")
+                .accessibilityIdentifier("sound-packs.library.retry")
+                .focused($focusedTarget, equals: .retryLibraryLoad)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        case .ready:
+            EmptyView()
+        }
+    }
+
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
@@ -225,7 +284,8 @@ struct SoundPacksWindowView: View {
             .accessibilityValue(
                 selectedCard.map {
                     "正在查看 \(SelectedPackMetadata(id: $0.id, name: $0.name).displayName)"
-                } ?? "未选择声音包")
+                } ?? "未选择声音包"
+            )
             .accessibilityHint("使用上、下方向键选择要检查的声音包")
             .accessibilityIdentifier("sound-packs.pack-list")
         }
@@ -243,7 +303,8 @@ struct SoundPacksWindowView: View {
                 .font(.system(size: 13, weight: .semibold))
                 .frame(
                     minWidth: ClaudioTheme.Metrics.iconTarget,
-                    minHeight: ClaudioTheme.Metrics.iconTarget)
+                    minHeight: ClaudioTheme.Metrics.iconTarget
+                )
                 .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
@@ -252,10 +313,12 @@ struct SoundPacksWindowView: View {
         .accessibilityLabel(
             control.isStarred
                 ? "取消在面板显示「\(displayName)」"
-                : "在面板显示「\(displayName)」")
+                : "在面板显示「\(displayName)」"
+        )
         .accessibilityHint(
             control.disabledReason
-                ?? (control.isStarred ? "取消后可腾出一个面板位置" : "最多显示 4 个声音包"))
+                ?? (control.isStarred ? "取消后可腾出一个面板位置" : "最多显示 4 个声音包")
+        )
         .accessibilityValue(control.isStarred ? "已固定" : "未固定")
         .accessibilityAddTraits(control.isStarred ? .isSelected : [])
         .accessibilityIdentifier("sound-packs.pack.\(card.id).star")
@@ -293,9 +356,22 @@ struct SoundPacksWindowView: View {
                                         eventMappingRow(
                                             row,
                                             stacks: layoutAdaptation.stacksEventRows
-                                                || stacksDetail)
+                                                    || stacksDetail
+                                            )
                                             .id("event-\(row.event.rawValue)")
                                     }
+                                }
+
+                                if model.selectedAudioInventoryState.isLoading {
+                                    HStack(spacing: 8) {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                        Text("正在读取包内音频…")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .accessibilityElement(children: .combine)
+                                    .accessibilityLabel("正在读取包内音频")
                                 }
 
                                 if let error = model.audioInventoryError {
@@ -400,7 +476,8 @@ struct SoundPacksWindowView: View {
         }
         .focused($focusedTarget, equals: .revealSelectedPack)
         .accessibilityLabel(
-            "在访达中显示「\(SelectedPackMetadata(id: card.id, name: card.name).displayName)」")
+            "在访达中显示「\(SelectedPackMetadata(id: card.id, name: card.name).displayName)」"
+        )
         .accessibilityValue(userPacksDirectory.appendingPathComponent(card.id).path)
         .accessibilityHint("打开这个声音包所在的文件夹")
         .accessibilityIdentifier("sound-packs.reveal-selected")
@@ -430,7 +507,8 @@ struct SoundPacksWindowView: View {
             case .partial, .broken: return true
             }
         }()
-        let message = discardsInstalledChanges
+        let message =
+            discardsInstalledChanges
             ? "副本来自出厂版本；当前修改、缺失或损坏内容不会带入。"
             : "从内置原版创建可编辑副本。"
         return Text(message)
@@ -630,10 +708,18 @@ struct SoundPacksWindowView: View {
     @ViewBuilder
     private var emptyState: some View {
         VStack(spacing: 12) {
-            Text("没有可管理的声音包")
+            Text(emptyLibraryTitle)
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
-            if model.hasFactoryPacks {
+            if model.libraryPresentationState == .loading {
+                Text("窗口已经打开，读取会在后台完成。")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if case .loadFailed = model.libraryPresentationState {
+                Text("请使用上方的“重试”重新读取；失败不会被当成空声音包库。")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if model.hasFactoryPacks {
                 Text("可以从 claudi0 的出厂资源恢复全部内置声音包。")
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -668,6 +754,14 @@ struct SoundPacksWindowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(20)
+    }
+
+    private var emptyLibraryTitle: String {
+        switch model.libraryPresentationState {
+        case .loading: return "正在读取声音包"
+        case .loadFailed: return "声音包库暂不可用"
+        case .ready, .refreshing, .refreshFailed: return "没有可管理的声音包"
+        }
     }
 
     private func revealPacksDirectory() {
@@ -712,7 +806,8 @@ struct SoundPacksWindowView: View {
                     .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
                     .focused(
                         $focusedTarget,
-                        equals: .retryFactoryRestore(packID: packID))
+                        equals: .retryFactoryRestore(packID: packID)
+                    )
                     .accessibilityLabel("重试恢复「\(displayName)」")
                     .accessibilityValue("上一次恢复未完成")
                     .accessibilityHint("再次尝试安全恢复内置声音包")
@@ -759,17 +854,20 @@ struct SoundPacksWindowView: View {
         .onDrop(
             of: [UTType.fileURL.identifier],
             isTargeted: dropTargetBinding(for: row.event),
-            perform: { providers in handleAudioDrop(providers, onto: row.event) })
+            perform: { providers in handleAudioDrop(providers, onto: row.event) }
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
             soundPacksWindowEventAccessibilityLabel(
                 eventName: row.event.displayName,
                 coverage: row.coverage,
-                enabled: row.enabled))
+                enabled: row.enabled)
+        )
         .accessibilityHint(
             canEditSelectedPack
                 ? "可选择现有文件、选择并绑定新文件，或把音频文件拖到这一行"
-                : "内置包是只读的；复制后可以编辑")
+                : "内置包是只读的；复制后可以编辑"
+        )
         .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue)")
     }
 
@@ -820,7 +918,11 @@ struct SoundPacksWindowView: View {
         if canEditSelectedPack {
             Menu {
                 Section("已有文件") {
-                    if model.selectedAudioFiles.isEmpty {
+                    if model.selectedAudioInventoryState.isLoading
+                        && model.selectedAudioFiles.isEmpty
+                    {
+                        Text("正在读取音频…")
+                    } else if model.selectedAudioFiles.isEmpty {
                         Text("这个包里还没有音频")
                     } else {
                         ForEach(model.selectedAudioFiles) { file in
@@ -828,7 +930,8 @@ struct SoundPacksWindowView: View {
                                 model.assignSelectedAudioFile(file.fileName, to: row.event)
                             }
                             .accessibilityLabel(
-                                "把 \(file.fileName) 绑定到 \(row.event.displayName)")
+                                "把 \(file.fileName) 绑定到 \(row.event.displayName)"
+                            )
                             .accessibilityIdentifier(
                                 "sound-packs.event.\(row.event.rawValue).existing.\(file.fileName)")
                         }
@@ -916,7 +1019,8 @@ struct SoundPacksWindowView: View {
                             model.assignSelectedAudioFile(file.fileName, to: event)
                         }
                         .accessibilityLabel(
-                            "把 \(file.fileName) 分配给 \(event.displayName)")
+                            "把 \(file.fileName) 分配给 \(event.displayName)"
+                        )
                         .accessibilityIdentifier(
                             "sound-packs.orphan.\(file.fileName).event.\(event.rawValue)")
                     }
@@ -924,7 +1028,8 @@ struct SoundPacksWindowView: View {
                 .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
                 .focused(
                     $focusedTarget,
-                    equals: .orphanAssignment(fileName: file.fileName))
+                    equals: .orphanAssignment(fileName: file.fileName)
+                )
                 .accessibilityLabel("分配 \(file.fileName)")
                 .accessibilityValue("尚未被事件使用")
                 .accessibilityHint("选择要使用这个音频的事件")
@@ -940,7 +1045,8 @@ struct SoundPacksWindowView: View {
                 .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
                 .focused(
                     $focusedTarget,
-                    equals: .orphanDeletion(fileName: file.fileName))
+                    equals: .orphanDeletion(fileName: file.fileName)
+                )
                 .accessibilityLabel("永久删除 \(file.fileName)")
                 .accessibilityValue("尚未被事件使用")
                 .accessibilityHint("会先显示不可撤销的确认")
@@ -1015,7 +1121,8 @@ struct SoundPacksWindowView: View {
     }
 
     private var focusScope: SoundPacksWindowFocusScope {
-        SoundPacksWindowFocusScope(
+        let allowsEmptyLibraryActions = model.libraryPresentationState.hasUsableSnapshot
+        return SoundPacksWindowFocusScope(
             packIDs: model.packCards.map(\.id),
             selectedPackID: model.selectedPackID,
             editableEvents: canEditSelectedPack ? model.selectedEventRows.map(\.event) : [],
@@ -1029,8 +1136,11 @@ struct SoundPacksWindowView: View {
             canAddAudio: canEditSelectedPack,
             canRestoreFactoryPack: model.selectedPackIsBuiltinReadOnly,
             canUseSelectedPack: selectedCard?.isSelected == false,
-            canRestoreAllFactoryPacks: model.packCards.isEmpty && model.hasFactoryPacks,
-            canRevealPacksDirectory: model.packCards.isEmpty && !model.hasFactoryPacks,
+            canRestoreAllFactoryPacks:
+                allowsEmptyLibraryActions && model.packCards.isEmpty && model.hasFactoryPacks,
+            canRevealPacksDirectory:
+                allowsEmptyLibraryActions && model.packCards.isEmpty && !model.hasFactoryPacks,
+            canRetryLibraryLoad: model.libraryPresentationState.canRetry,
             retryFactoryRestorePackIDs: model.factoryRestoreRetryPackIDs)
     }
 
@@ -1049,9 +1159,13 @@ struct SoundPacksWindowView: View {
         }
     }
 
-    private func reconcileFocusWithVisibleControls() {
+    private func reconcileFocusWithVisibleControls(assignFirstIfNil: Bool = false) {
         let order = soundPacksWindowFocusOrder(focusScope)
-        if let focusedTarget, !order.contains(focusedTarget) {
+        if let focusedTarget {
+            if !order.contains(focusedTarget) {
+                self.focusedTarget = order.first
+            }
+        } else if assignFirstIfNil {
             self.focusedTarget = order.first
         }
     }

@@ -20,8 +20,8 @@ cp "$(swift build -c release --package-path gui --product ClaudioGUI --show-bin-
    "$APP/Contents/MacOS/claudi0-app"
 cp "$(swift build -c release --package-path helper --product claudio --show-bin-path)/claudio" \
    "$APP/Contents/Resources/bin/claudi0"
-cp "$(swift build -c release --package-path helper --product claudio --show-bin-path)/claudio" \
-   "$APP/Contents/Resources/bin/claudio"
+# 旧入口继续可执行，但只保留一个 helper Mach-O；相对链接在 app/DMG 搬动后仍然成立。
+ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
 cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
 cp packs/LICENSES.md "$APP/Contents/Resources/packs/LICENSES.md"
 cp assets/branding/claudi0.icns "$APP/Contents/Resources/claudi0.icns"
@@ -45,6 +45,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+strip -x "$APP/Contents/MacOS/claudi0-app" "$APP/Contents/Resources/bin/claudi0"
+bash scripts/check-release-size.sh "$APP"
 
 codesign --force --deep --sign - "$APP"
 codesign --verify --verbose "$APP"

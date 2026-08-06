@@ -4,8 +4,8 @@ import ClaudioGUIComponents
 import ClaudioGUICore
 import SwiftUI
 
-/// Production-shape gallery for the full mapping editor: built-in read-only, editable custom,
-/// and zero-pack recovery. All data is injected; no preview frame reads or writes user paths.
+/// Production-shape gallery for the full mapping editor, including all library availability
+/// states. All data is injected; no preview frame reads or writes user paths.
 @MainActor
 public struct SoundPacksWindowStateGalleryView: View {
     public init() {}
@@ -16,10 +16,24 @@ public struct SoundPacksWindowStateGalleryView: View {
                 window(model: builtinModel)
             }
             galleryFrame("自有包 · 可编辑 · 缺失映射 · 孤儿音频") {
-                window(model: customModel)
+                window(model: customModel())
             }
             galleryFrame("磁盘没有声音包 · 恢复入口") {
                 window(model: emptyModel)
+            }
+            galleryFrame("首次读取中 · 未知事实不冒充空库") {
+                window(model: loadingModel)
+            }
+            galleryFrame("后台刷新 · 继续显示上次结果") {
+                window(model: customModel(libraryState: .refreshing))
+            }
+            galleryFrame("刷新失败 · 保留上次结果 · 可重试") {
+                window(
+                    model: customModel(
+                        libraryState: .refreshFailed(reason: "磁盘暂不可用")))
+            }
+            galleryFrame("首次读取失败 · 无伪造空态 · 可重试") {
+                window(model: loadFailedModel)
             }
         }
     }
@@ -68,7 +82,9 @@ public struct SoundPacksWindowStateGalleryView: View {
             refreshCoordinator: SoundPacksRefreshCoordinator())
     }
 
-    private var customModel: SoundPacksWindowModel {
+    private func customModel(
+        libraryState: SoundPackLibraryPresentationState = .ready
+    ) -> SoundPacksWindowModel {
         let config = ClaudioConfig(selectedPack: "my-long-pack", masterVolume: 0.7)
         return SoundPacksWindowModel(
             previewConfig: config,
@@ -103,6 +119,7 @@ public struct SoundPacksWindowStateGalleryView: View {
                 PackAudioFile(fileName: "unused-long-audio-name.aiff", isOrphan: true),
             ],
             starredPackIDs: [],
+            libraryPresentationState: libraryState,
             environment: previewEnvironment,
             refreshCoordinator: SoundPacksRefreshCoordinator())
     }
@@ -113,6 +130,28 @@ public struct SoundPacksWindowStateGalleryView: View {
             packCards: [],
             selectedPackID: nil,
             selectedEventRows: [],
+            environment: previewEnvironment,
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+    }
+
+    private var loadingModel: SoundPacksWindowModel {
+        SoundPacksWindowModel(
+            previewConfig: ClaudioConfig(selectedPack: ""),
+            packCards: [],
+            selectedPackID: nil,
+            selectedEventRows: [],
+            libraryPresentationState: .loading,
+            environment: previewEnvironment,
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+    }
+
+    private var loadFailedModel: SoundPacksWindowModel {
+        SoundPacksWindowModel(
+            previewConfig: ClaudioConfig(selectedPack: ""),
+            packCards: [],
+            selectedPackID: nil,
+            selectedEventRows: [],
+            libraryPresentationState: .loadFailed(reason: "声音包目录没有读取权限"),
             environment: previewEnvironment,
             refreshCoordinator: SoundPacksRefreshCoordinator())
     }

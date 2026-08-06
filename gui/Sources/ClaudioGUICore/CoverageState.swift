@@ -1,6 +1,27 @@
 import ClaudioCore
 import Foundation
 
+/// Only the five runtime-supported event keys participate in GUI facts and fingerprints. Unknown
+/// keys remain forward-compatible JSON, but must not turn a bounded library refresh into thousands
+/// of retained strings and metadata syscalls. `1024` also bounds a current-event relative path to
+/// macOS `PATH_MAX` scale before any filesystem API sees it.
+let soundPackManifestAudioPathMaximumUTF8Bytes = 1_024
+let oversizedSoundPackManifestAudioPathReason =
+    "事件音频文件名过长（最多 \(soundPackManifestAudioPathMaximumUTF8Bytes) 个 UTF-8 字节）"
+
+func currentEventAudioFileNames(in manifest: PackManifest) -> [String]? {
+    var names: Set<String> = []
+    names.reserveCapacity(Event.allCases.count)
+    for event in Event.allCases {
+        guard let fileName = manifest.events[event.manifestKey] else { continue }
+        guard fileName.utf8.count <= soundPackManifestAudioPathMaximumUTF8Bytes else {
+            return nil
+        }
+        names.insert(fileName)
+    }
+    return names.sorted()
+}
+
 /// Per-event sound coverage for a pack (ENGINEERING.md 决议① · codex 精修为三态; DESIGN.md
 /// "事件行三态"). Computed purely from a pack's manifest + on-disk file presence —
 /// `helper`'s runtime playback behavior is unchanged by this type existing at all (it's a

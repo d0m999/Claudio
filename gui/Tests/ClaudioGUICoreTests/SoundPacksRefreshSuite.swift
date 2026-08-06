@@ -153,8 +153,42 @@ func runSoundPacksRefreshSuites() async {
 
         expect(effect == .panelFullReload, "窗口成功写必须选择 panel full reload，得到 \(effect)")
         expect(coordinator.panelReloadRevision == 1, "窗口成功写必须发布一次面板刷新")
+        expect(
+            !coordinator.panelReloadRequiresLibraryRefresh,
+            "窗口写入方已负责共享库刷新，面板只能重投影，不能发第二次扫描")
         expect(coordinator.windowReloadRevision == 0, "窗口自己的写不得伪装成 panel 切包")
         expect(coordinator.windowContentReloadRevision == 0, "窗口自己的写不得反向再刷自己")
+    }
+
+    suite("SoundPacksRefreshCoordinator：config-only 窗口写只重投影，不要求扫描包库") {
+        let coordinator = SoundPacksRefreshCoordinator()
+
+        let effect = coordinator.completeWindowWrite(.succeeded)
+
+        expect(effect == .panelFullReload, "config-only 写仍须让面板重读 config 与投影")
+        expect(coordinator.panelReloadRevision == 1, "config-only 写必须发布一次面板刷新")
+        expect(
+            !coordinator.panelReloadRequiresLibraryRefresh,
+            "config-only 写不得附带声音包扫描请求")
+    }
+
+    suite("SoundPacksRefreshCoordinator：面板到窗口的 config 与磁盘变化保留扫描语义") {
+        let coordinator = SoundPacksRefreshCoordinator()
+
+        coordinator.completePanelPackSwitch(.succeeded)
+        expect(
+            !coordinator.windowReloadRequiresLibraryRefresh,
+            "切包只改 selected_pack，窗口跟随时不得扫描")
+
+        coordinator.completePanelConfigChange(.changed)
+        expect(
+            !coordinator.windowContentReloadRequiresLibraryRefresh,
+            "静音或主音量只改 config，窗口内容刷新不得扫描")
+
+        coordinator.completePanelPackAudioChange(.changed)
+        expect(
+            coordinator.windowContentReloadRequiresLibraryRefresh,
+            "manifest 或音频变化必须要求窗口刷新共享库")
     }
 
     suite("SoundPacksRefreshCoordinator：窗口失败写不发布任何刷新") {
@@ -205,6 +239,9 @@ func runSoundPacksRefreshSuites() async {
 
             expect(effect == .panelFullReload, "bootstrap 完成必须选择 panel full reload")
             expect(coordinator.panelReloadRevision == 1, "bootstrap 完成必须发布一次面板刷新")
+            expect(
+                coordinator.panelReloadRequiresLibraryRefresh,
+                "bootstrap 可能创建或修复包，必须刷新共享库")
             expect(panel.config.selectedPack == "bootstrapped", "面板必须重读 bootstrap 创建的默认选择")
             expect(panel.configState.topContent == .events, "面板必须从 needsPack 切到 operational 事件态")
             expect(
@@ -213,9 +250,21 @@ func runSoundPacksRefreshSuites() async {
                 "full reload 必须重扫 bootstrap 新增的 pack manifest，而非只重读 config")
             expect(coordinator.windowReloadRevision == 0, "bootstrap 面板刷新不得伪装成 panel 切包")
             expect(
-                coordinator.windowContentReloadRevision == 0,
-                "bootstrap 面板刷新不得反向制造管理窗口写入")
+                coordinator.windowContentReloadRevision == 1
+                    && !coordinator.windowContentReloadRequiresLibraryRefresh,
+                "bootstrap 必须让可能已创建的保留窗口重投影 config，但不重复请求包扫描")
         }
+    }
+
+    suite("app activation：保留窗口重投影外部 config，且包扫描由生命周期入口单独负责") {
+        let coordinator = SoundPacksRefreshCoordinator()
+        let effect = coordinator.refreshWindowConfigProjection()
+        expect(effect == .windowReload, "激活必须发布窗口 config projection")
+        expect(coordinator.windowContentReloadRevision == 1, "激活必须推进一次内容 revision")
+        expect(
+            !coordinator.windowContentReloadRequiresLibraryRefresh,
+            "config 投影本身不得再附带第二次库扫描")
+        expect(coordinator.panelReloadRevision == 0, "激活不应伪造一次窗口写入面板")
     }
 
     suite("SoundPacksRefreshCoordinator：面板切包仅成功时通知窗口") {
@@ -606,9 +655,9 @@ func runSoundPacksRefreshSuites() async {
                     == [PackAudioFile(fileName: "spare.mp3", isOrphan: false)],
                 "同一次 reload 必须让 spare.mp3 从孤儿转为已引用")
             expect(
-                panel.selectedPackAudioFiles
-                    == [PackAudioFile(fileName: "spare.mp3", isOrphan: false)],
-                "窗口写发布的 panel full reload 必须同步刷新面板菜单的现有音频/孤儿标记")
+                panel.eventRows.first(where: { $0.event == .notification })?.coverage
+                    == .present(fileName: "spare.mp3"),
+                "窗口写发布的 panel full reload 必须同步刷新面板事件投影")
             expect(coordinator.panelReloadRevision == 1, "成功分配必须发布一次面板 full reload")
             expect(window.audioActionError == nil, "成功分配必须清掉旧错误")
         }
@@ -1940,10 +1989,12 @@ func runSoundPacksRefreshSuites() async {
             "首焦点与 windowOpened 必须共用真实 hidden→visible 判定")
         expect(
             controller.contains(
-                "effectiveRoute = model.selectPackForInspection(packID) ? route : .overview")
+                "effectiveRoute = model.selectPackForInspection(packID) ? resolvedRoute : .overview")
+                && controller.contains("pendingRoute = route")
+                && controller.contains("resolvePendingRouteIfPossible")
                 && controller.contains("requestInitialFocus(route: effectiveRoute)")
                 && controller.contains("focusCoordinator.requestRoute(effectiveRoute)"),
-            "editEvent 必须先确认目标包存在；缺失包只能降级 overview，不能把事件转给当前其他包")
+            "editEvent 必须等待 library 证明目标存在后再选包；ready 缺失只能降级 overview")
         expect(
             controller.contains("window.title = \"claudi0 · 声音包\""),
             "后台标准窗口标题必须保留 claudi0 品牌锚点")

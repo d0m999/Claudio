@@ -12,13 +12,17 @@ import PackageDescription
 let package = Package(
     name: "claudio-gui",
     platforms: [.macOS(.v12)],  // ENGINEERING.md: macOS 12+ floor, matching helper/Package.swift.
-    // The shipped app is the ONLY product. Declaring it explicitly is what lets
+    // The release workflow ships only ClaudioGUI. Declaring it explicitly is what lets
     // `.github/workflows/release.yml` build with `--product ClaudioGUI` instead of a bare
     // `swift build -c release`: the bare form also builds `claudio-gui-tests`, and that
     // target references `#if DEBUG`-gated symbols (`PreviewFixtures`), so it does not — and
     // is not meant to — compile in Release. Release must build the app, not the harness.
     products: [
-        .executable(name: "ClaudioGUI", targets: ["ClaudioGUI"])
+        .executable(name: "ClaudioGUI", targets: ["ClaudioGUI"]),
+        // Developer-only native benchmark; no bundle/release step copies this product.
+        .executable(
+            name: "claudio-sound-pack-benchmark",
+            targets: ["claudio-sound-pack-benchmark"]),
     ],
     dependencies: [
         .package(path: "../helper")
@@ -86,6 +90,17 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             path: "Tests/ClaudioGUICoreTests"
+        ),
+        // Release-mode native benchmark harness. It is intentionally not shipped;
+        // `scripts/benchmark-sound-pack-library.sh` builds this target explicitly and then runs
+        // the already-built executable so SwiftPM compilation time never contaminates latency.
+        .executableTarget(
+            name: "claudio-sound-pack-benchmark",
+            dependencies: [
+                "ClaudioGUICore",
+                .product(name: "ClaudioCore", package: "helper"),
+            ],
+            path: "Benchmarks/SoundPackLibraryBenchmark"
         ),
     ]
 )

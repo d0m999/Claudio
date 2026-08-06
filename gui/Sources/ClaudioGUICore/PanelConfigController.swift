@@ -43,15 +43,12 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var eventRows: [EventRow]
     @Published public private(set) var packCards: [PackCard]
     @Published public private(set) var packSectionState: PanelPackSectionState
-    /// Existing audio for the active pack, computed once per full reload and shared by all five
-    /// event-row menus. This avoids five synchronous `readdir` calls during one SwiftUI body pass.
-    /// An unreadable manifest yields an empty, fail-closed menu rather than invented orphan facts.
-    @Published public private(set) var selectedPackAudioFiles: [PackAudioFile]
     @Published public private(set) var selectedPackIsBuiltinReadOnly: Bool
     /// The current pack's title/header metadata, loaded from that pack itself — never inferred
     /// from ``packCards``. The display set may legally omit the selected pack once starred-only
     /// filtering is active, while the event-section title remains its only guaranteed visible name.
     @Published public private(set) var selectedPackMetadata: SelectedPackMetadata
+    @Published public private(set) var libraryPresentationState: SoundPackLibraryPresentationState
     /// 上一次**失败**的切包（`nil` 表示还没失败过 / 上一次成功已清）——镜像 ``EventMuteController/lastError``
     /// 的形状（静音那一半的失败就住在那里）。绝不静默吞错：切包失败必须如实上报，不能像旧代码那样
     /// `if case .success = result { … }` 把 error 整个丢掉。
@@ -80,7 +77,11 @@ public final class PanelConfigController: ObservableObject {
     private let configFile: URL
     private let lockFile: URL
     private let environment: AudioImportEnvironment
-    private let builtinPackIDs: Set<String>
+    private var builtinPackIDs: Set<String>
+    private let soundPackLibrary: SoundPackLibrary
+    private let readSource: SoundPackReadSource
+    private var librarySnapshot: SoundPackLibrarySnapshot?
+    private var libraryObservationTask: Task<Void, Never>?
     /// 这个 controller **独占**它 —— 不注入（见 ``muteError`` 的文档：注入会开「幽灵实例」的口）。
     /// 拿 `lockFile`（= `config.lock`）构造，与切包写路径守同一把锁（锁分离 D9）。
     private let muteController: EventMuteController
@@ -95,17 +96,60 @@ public final class PanelConfigController: ObservableObject {
     /// ``reloadConfigOnly()``，因为 manifest 与未来的星标写都可能改变 `packCards`。
     private var soundPacksRefreshCancellable: AnyCancellable?
 
-    public init(
+    public convenience init(
+        configFile: URL,
+        lockFile: URL,
+        environment: AudioImportEnvironment,
+        soundPackLibrary: SoundPackLibrary,
+        afterFullReload: @escaping @MainActor (ClaudioConfig) -> Void = { _ in },
+        soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator? = nil
+    ) {
+        self.init(
+            configFile: configFile,
+            lockFile: lockFile,
+            environment: environment,
+            soundPackLibrary: soundPackLibrary,
+            readSource: .sharedLibrary,
+            afterFullReload: afterFullReload,
+            soundPacksRefreshCoordinator: soundPacksRefreshCoordinator)
+    }
+
+    #if DEBUG
+    /// Compatibility initializer for the existing synchronous disk-behavior harness. Production
+    /// composition is structurally required to inject the one app-lifetime library.
+    public convenience init(
         configFile: URL,
         lockFile: URL,
         environment: AudioImportEnvironment,
         afterFullReload: @escaping @MainActor (ClaudioConfig) -> Void = { _ in },
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator? = nil
     ) {
+        self.init(
+            configFile: configFile,
+            lockFile: lockFile,
+            environment: environment,
+            soundPackLibrary: SoundPackLibrary(environment: environment),
+            readSource: .directDiskFixture,
+            afterFullReload: afterFullReload,
+            soundPacksRefreshCoordinator: soundPacksRefreshCoordinator)
+    }
+    #endif
+
+    private init(
+        configFile: URL,
+        lockFile: URL,
+        environment: AudioImportEnvironment,
+        soundPackLibrary: SoundPackLibrary,
+        readSource: SoundPackReadSource,
+        afterFullReload: @escaping @MainActor (ClaudioConfig) -> Void,
+        soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator?
+    ) {
         self.configFile = configFile
         self.lockFile = lockFile
         self.environment = environment
-        self.builtinPackIDs = environment.builtinPackIDs
+        self.soundPackLibrary = soundPackLibrary
+        self.readSource = readSource
+        self.builtinPackIDs = readSource.readsSharedSnapshot ? [] : environment.builtinPackIDs
         // 独占构造，不注入 —— 结构性堵死「面板读一个实例、controller 写另一个」的幽灵分叉（见 muteError 文档）。
         self.muteController = EventMuteController(configFile: configFile, lockFile: lockFile)
         self.masterVolumeController = MasterVolumeController(
@@ -117,16 +161,26 @@ public final class PanelConfigController: ObservableObject {
         let loadedConfig = loadedState.resolvedConfig
         self.configState = loadedState
         self.config = loadedConfig
-        self.eventRows = packCoverage(
-            packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
-        let loadedPackSection = Self.loadPackSection(config: loadedConfig, environment: environment)
-        self.packCards = loadedPackSection.cards
-        self.packSectionState = loadedPackSection.state
-        self.selectedPackAudioFiles = Self.loadSelectedPackAudioFiles(
-            packID: loadedConfig.selectedPack, environment: environment)
-        self.selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(loadedConfig.selectedPack)
-        self.selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
-            packID: loadedConfig.selectedPack, environment: environment)
+        if !readSource.readsSharedSnapshot {
+            self.eventRows = packCoverage(
+                packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
+            let loadedPackSection = Self.loadPackSection(
+                config: loadedConfig, environment: environment)
+            self.packCards = loadedPackSection.cards
+            self.packSectionState = loadedPackSection.state
+            self.selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(loadedConfig.selectedPack)
+            self.selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
+                packID: loadedConfig.selectedPack, environment: environment)
+            self.libraryPresentationState = .ready
+        } else {
+            self.eventRows = []
+            self.packCards = []
+            self.packSectionState = .loading
+            self.selectedPackIsBuiltinReadOnly = false
+            self.selectedPackMetadata = SelectedPackMetadata(
+                id: loadedConfig.selectedPack, name: nil)
+            self.libraryPresentationState = .loading
+        }
         self.packSwitchError = nil
         self.muteError = nil
         self.masterVolumeError = nil
@@ -135,9 +189,27 @@ public final class PanelConfigController: ObservableObject {
             .dropFirst()
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.reload()
+                    guard let self else { return }
+                    self.reload(
+                        refreshSoundPackLibrary:
+                            self.soundPacksRefreshCoordinator?
+                            .panelReloadRequiresLibraryRefresh ?? true)
                 }
             }
+
+        guard readSource.readsSharedSnapshot else { return }
+        libraryObservationTask = Task { @MainActor [weak self, soundPackLibrary] in
+            let stream = await soundPackLibrary.states()
+            await soundPackLibrary.loadIfNeeded(trigger: .initial)
+            for await state in stream {
+                guard !Task.isCancelled else { return }
+                self?.consumeLibraryState(state)
+            }
+        }
+    }
+
+    deinit {
+        libraryObservationTask?.cancel()
     }
 
     /// 把 `event` 的静音位翻到当前值的**反面**，经 ``EventMuteController`` 写盘，再按结果路由刷新。
@@ -190,7 +262,8 @@ public final class PanelConfigController: ObservableObject {
     }
 
     /// 切包，经 ``selectPack`` —— `claudio use` / `performFirstRunSetup` 用的**同一条**写路径。成功清
-    /// `packSwitchError` 并全量 `reload()`；失败把 error 记进 `packSwitchError`（由面板渲染），绝不丢弃。
+    /// `packSwitchError` 并重读 config、用已有 snapshot 完整重投影；失败把 error 记进
+    /// `packSwitchError`（由面板渲染），绝不丢弃。
     ///
     /// **失败也可能要刷新**（`/codex review` 第二条 [P1]）：上一版的失败分支只记 error 就完事，于是
     /// 「打开有效面板 → 外部把 `master_volume` 改成字符串 → 点一张包卡」会让 `selectPack` 如实返回
@@ -210,7 +283,9 @@ public final class PanelConfigController: ObservableObject {
         {
         case .success:
             packSwitchError = nil
-            reload()
+            // `selected_pack` is config, not a disk-pack fact. The selected card came from the
+            // current snapshot and `selectPack` just revalidated it, so a scan here is pure I/O.
+            reload(refreshSoundPackLibrary: false)
             return .succeeded
         case .failure(let error):
             packSwitchError = error
@@ -231,7 +306,21 @@ public final class PanelConfigController: ObservableObject {
     /// 排在最前，但它探的是 helper 二进制 / settings.json，与 config 读模型**互不依赖**，挪到后面结果一字
     /// 不差；而 `retarget` 必须排在 config 重载**之后**（它要用新的 `selectedPack`），闭包收到的正是新 config。
     public func reload() {
+        reload(refreshSoundPackLibrary: true)
+    }
+
+    private func reload(refreshSoundPackLibrary: Bool) {
         reload(using: loadPanelConfig(from: configFile))
+        guard readSource.readsSharedSnapshot, refreshSoundPackLibrary else { return }
+        Task { await soundPackLibrary.requestRefresh(trigger: .panelPresentation) }
+    }
+
+    public func retrySoundPackLibraryRefresh() {
+        guard readSource.readsSharedSnapshot else {
+            reload()
+            return
+        }
+        Task { await soundPackLibrary.requestRefresh(trigger: .retry) }
     }
 
     /// 使用一份已经读到的 config state 执行与 ``reload()`` 完全相同的全量重载。轻量刷新若发现
@@ -277,7 +366,19 @@ public final class PanelConfigController: ObservableObject {
         }
 
         if selectedPackChanged {
+            let requiresLibraryRefresh: Bool
+            switch reloaded {
+            case .operational(let reloadedConfig):
+                requiresLibraryRefresh =
+                    readSource.readsSharedSnapshot
+                    && librarySnapshot?.fact(for: reloadedConfig.selectedPack) == nil
+            case .needsPack, .malformed, .unwritable:
+                requiresLibraryRefresh = false
+            }
             reload(using: reloaded)
+            if requiresLibraryRefresh {
+                Task { await soundPackLibrary.requestRefresh(trigger: .panelPresentation) }
+            }
             return
         }
 
@@ -293,37 +394,92 @@ public final class PanelConfigController: ObservableObject {
     private func reloadConfigReadModel(using loadedState: PanelConfigState) {
         configState = loadedState
         config = configState.resolvedConfig
-        eventRows = packCoverage(
-            packID: config.selectedPack, config: config, environment: environment)
-        let loadedPackSection = Self.loadPackSection(config: config, environment: environment)
-        packCards = loadedPackSection.cards
-        packSectionState = loadedPackSection.state
-        selectedPackAudioFiles = Self.loadSelectedPackAudioFiles(
-            packID: config.selectedPack, environment: environment)
-        selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
-        selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
-            packID: config.selectedPack, environment: environment)
+        #if DEBUG
+        guard readSource.readsSharedSnapshot else {
+            eventRows = packCoverage(
+                packID: config.selectedPack, config: config, environment: environment)
+            let loadedPackSection = Self.loadPackSection(config: config, environment: environment)
+            packCards = loadedPackSection.cards
+            packSectionState = loadedPackSection.state
+            selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
+            selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
+                packID: config.selectedPack, environment: environment)
+            return
+        }
+        #endif
+        if let librarySnapshot {
+            applySnapshot(librarySnapshot)
+        } else {
+            eventRows = []
+            packCards = []
+            if case .loadFailed = libraryPresentationState {
+                // Preserve the explicit failure state until a retry produces a new library value.
+            } else {
+                packSectionState = .loading
+            }
+            selectedPackIsBuiltinReadOnly = false
+            selectedPackMetadata = SelectedPackMetadata(id: config.selectedPack, name: nil)
+        }
     }
 
-    private static func loadSelectedPackAudioFiles(
-        packID: String,
-        environment: AudioImportEnvironment
-    ) -> [PackAudioFile] {
-        guard case .success(let files) = packAudioFiles(
-            packID: packID, environment: environment)
-        else {
-            return []
+    private func consumeLibraryState(_ state: SoundPackLibraryState) {
+        switch state {
+        case .unloaded:
+            libraryPresentationState = .loading
+            packSectionState = .loading
+        case .loading(let previous):
+            libraryPresentationState = previous == nil ? .loading : .refreshing
+            if let previous {
+                librarySnapshot = previous
+                applySnapshot(previous)
+            } else {
+                packSectionState = .loading
+            }
+        case .ready(let snapshot):
+            librarySnapshot = snapshot
+            libraryPresentationState = .ready
+            applySnapshot(snapshot)
+        case .failed(let previous, let error):
+            if let previous {
+                librarySnapshot = previous
+                applySnapshot(previous)
+                libraryPresentationState = .refreshFailed(reason: error.message)
+            } else {
+                librarySnapshot = nil
+                packCards = []
+                packSectionState = .readFailed(reason: error.message)
+                selectedPackMetadata = SelectedPackMetadata(id: config.selectedPack, name: nil)
+                eventRows = []
+                libraryPresentationState = .loadFailed(reason: error.message)
+            }
         }
-        return files
+    }
+
+    private func applySnapshot(_ snapshot: SoundPackLibrarySnapshot) {
+        builtinPackIDs = snapshot.factoryPackIDs
+        eventRows = snapshot.eventRows(packID: config.selectedPack, config: config)
+        let pinnedCards = snapshot.packCards(
+            config: config,
+            scope: .panelStarredDisplay,
+            defaultStarredPackIDs: builtinPackIDs)
+        packCards = pinnedCards
+        packSectionState = panelPackSectionState(
+            pinnedCards: pinnedCards,
+            availablePackCount: snapshot.facts.count)
+        selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
+        selectedPackMetadata = snapshot.selectedPackMetadata(packID: config.selectedPack)
     }
 
     private static func loadPackSection(
         config: ClaudioConfig,
         environment: AudioImportEnvironment
     ) -> (cards: [PackCard], state: PanelPackSectionState) {
-        for root in [environment.userPacksDirectory, environment.bundledPacksDirectory].compactMap({ $0 }) {
+        for root in [environment.userPacksDirectory, environment.bundledPacksDirectory].compactMap({
+            $0
+        }) {
             var isDirectory: ObjCBool = false
-            let exists = FileManager.default.fileExists(atPath: root.path, isDirectory: &isDirectory)
+            let exists = FileManager.default.fileExists(
+                atPath: root.path, isDirectory: &isDirectory)
             if exists, !isDirectory.boolValue {
                 let reason = "声音包位置不是文件夹：\(root.path)"
                 return ([], .readFailed(reason: reason))
@@ -345,7 +501,8 @@ public final class PanelConfigController: ObservableObject {
                 pinnedCards,
                 panelPackSectionState(
                     pinnedCards: pinnedCards,
-                    availablePackCount: pinnedCards.count))
+                    availablePackCount: pinnedCards.count)
+            )
         }
         let fullLibrary = availablePacks(
             config: config,
@@ -355,6 +512,7 @@ public final class PanelConfigController: ObservableObject {
             [],
             panelPackSectionState(
                 pinnedCards: [],
-                availablePackCount: fullLibrary.count))
+                availablePackCount: fullLibrary.count)
+        )
     }
 }

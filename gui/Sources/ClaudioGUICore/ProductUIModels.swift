@@ -1,6 +1,24 @@
 import ClaudioCore
 import Foundation
 
+enum SoundPackReadSource: Sendable {
+    case sharedLibrary
+    #if DEBUG
+    case directDiskFixture
+    #endif
+
+    var readsSharedSnapshot: Bool {
+        switch self {
+        case .sharedLibrary:
+            return true
+        #if DEBUG
+        case .directDiskFixture:
+            return false
+        #endif
+        }
+    }
+}
+
 /// Claudio 自己的界面文字偏好。macOS SwiftUI 的 `dynamicTypeSize` 不会跟随系统文字大小，
 /// 因此三个产品界面共享这一个显式、可持久化的四档设置。
 public enum ClaudioInterfaceTextSize: String, CaseIterable, Codable, Sendable, Identifiable {
@@ -72,10 +90,88 @@ public enum ClaudioInterfaceTextSize: String, CaseIterable, Codable, Sendable, I
 /// 主面板声音包区域的四个互斥状态。`noPinnedPacks` 与 `noPacks` 不能合并：前者有包可恢复，
 /// 后者必须把用户带到完整管理窗口创建或恢复包。
 public enum PanelPackSectionState: Sendable, Equatable {
+    case loading
     case pinned([PackCard])
     case noPinnedPacks(availablePackCount: Int)
     case noPacks
     case readFailed(reason: String)
+}
+
+/// Compact UI projection of ``SoundPackLibraryState``. The full snapshot stays in the model;
+/// views only need to distinguish first load, background refresh, stale fallback, and hard failure.
+public enum SoundPackLibraryPresentationState: Sendable, Equatable {
+    case loading
+    case ready
+    case refreshing
+    case refreshFailed(reason: String)
+    case loadFailed(reason: String)
+
+    /// Whether event mappings and pack counts come from a real snapshot.
+    ///
+    /// A refresh failure still owns a usable stale snapshot; a first-load failure does not.
+    public var hasUsableSnapshot: Bool {
+        switch self {
+        case .ready, .refreshing, .refreshFailed:
+            return true
+        case .loading, .loadFailed:
+            return false
+        }
+    }
+
+    public var canRetry: Bool {
+        switch self {
+        case .refreshFailed, .loadFailed:
+            return true
+        case .loading, .ready, .refreshing:
+            return false
+        }
+    }
+}
+
+/// Selected-pack inventory has its own asynchronous lifecycle. Library metadata can already be
+/// ready while this one-pack directory read is still in flight, so an empty array alone is not a
+/// truthful presentation state.
+public enum SoundPackAudioInventoryPresentationState: Sendable, Equatable {
+    case idle
+    case loading(previous: [PackAudioFile]?)
+    case ready([PackAudioFile])
+    case failed(previous: [PackAudioFile]?, error: PackAudioInventoryError)
+
+    public var files: [PackAudioFile] {
+        switch self {
+        case .idle:
+            return []
+        case .loading(let previous), .failed(let previous, _):
+            return previous ?? []
+        case .ready(let files):
+            return files
+        }
+    }
+
+    public var error: PackAudioInventoryError? {
+        guard case .failed(_, let error) = self else { return nil }
+        return error
+    }
+
+    public var isLoading: Bool {
+        if case .loading = self { return true }
+        return false
+    }
+}
+
+/// Honest panel summary for facts that do not exist until the library has produced a snapshot.
+public func panelAudibleEventSummary(
+    audibleEventCount: Int,
+    libraryState: SoundPackLibraryPresentationState
+) -> String {
+    switch libraryState {
+    case .loading:
+        return "正在读取声音包状态"
+    case .loadFailed:
+        return "声音包状态不可用"
+    case .ready, .refreshing, .refreshFailed:
+        return "\(audibleEventCount) 个可听事件"
+    }
 }
 
 public func panelPackSectionState(
@@ -160,6 +256,25 @@ public func eventPreviewAvailability(
 public enum SoundPacksWindowRoute: Sendable, Equatable, Hashable {
     case overview
     case editEvent(packID: String, event: Event)
+}
+
+public enum SoundPacksWindowRouteResolution: Sendable, Equatable {
+    case resolved(SoundPacksWindowRoute)
+    case pending(SoundPacksWindowRoute)
+}
+
+/// A first-open model starts with no cards even when the app-lifetime library already has a replay
+/// ready to deliver. Only a completed `ready` snapshot can prove that an edit target is absent;
+/// loading and failed refreshes must retain the route for a later retry.
+public func resolveSoundPacksWindowRoute(
+    _ route: SoundPacksWindowRoute,
+    availablePackIDs: Set<String>,
+    libraryState: SoundPackLibraryPresentationState
+) -> SoundPacksWindowRouteResolution {
+    guard case .editEvent(let packID, _) = route else { return .resolved(route) }
+    if availablePackIDs.contains(packID) { return .resolved(route) }
+    if libraryState == .ready { return .resolved(.overview) }
+    return .pending(route)
 }
 
 /// 能力矩阵当前格子的首要恢复意图。它只描述产品动作，不执行 host/config I/O。

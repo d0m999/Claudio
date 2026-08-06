@@ -1435,7 +1435,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### GUI 主线程一次性全量扫包（装几十个包后开面板会卡）
+### ~~GUI 主线程一次性全量扫包（装几十个包后开面板会卡）~~（已完成，2026-08-06）
 
 **What:** 每开一次面板，`availablePacks` 在主线程上把两个包根目录全量枚举一遍，对**每个**包解析目录 + 有界读 manifest + 解 JSON + 算 coverage，无缓存、无异步、无分页。
 
@@ -1443,8 +1443,10 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 
 **Context:** 2026-07-11 `/ship` 九路评审（Codex 对抗 [P2] + Claude 对抗独立命中）。修法：把画廊加载移出主 actor + 缓存结果（按目录 mtime 失效），必要时分页。
 
-**Effort:** M
-**Priority:** P3
+**Resolution:** 已落地 app-lifetime `SoundPackLibrary` actor：面板与管理窗口共享一份会话内 snapshot，目录枚举、manifest 解码、coverage 与出厂完整性检查在专用 utility scan queue 完成；完整音频 inventory 只为当前检查包在独立 queue 按需读取，成功结果进入四项 fingerprint-keyed LRU。首次无 snapshot 显式 loading，之后 stale-while-refresh，失败保留上一份结果。snapshot 只缓存声音包磁盘事实，`selected_pack` / 星标 / 静音 / 主音量均从最新 config 重投影，不触发扫描。app 内磁盘写在同步写边界前后失效相关 pack，revision 与 ready/failed 发布原子排序；扫描中的观察与失效最多合并为一次 follow-up，外部修改在重新展示或 app 激活时用 metadata fingerprint 收敛。设计容量明确为 100 包，超过 100 保正确性、不承诺延迟，故本阶段不引入分页或 FSEvents。M1/APFS/Release 实测 100 包：首次会话读取 p95 `173.893 ms`、production model cached presentation p95 `0.282 ms`、incremental p95 `49.787 ms`，均满足 ADR 预算；详见 `docs/adr/0001`–`0004` 与 `docs/performance/sound-pack-library-benchmark.md`。
+
+**Effort:** ~~M~~ 已完成
+**Priority:** ~~P3~~ 已关闭
 **Depends on:** None
 
 ### ManifestBindError 的两个失败态没有「怎么修」的出路，且绑定失败会留下孤儿文件

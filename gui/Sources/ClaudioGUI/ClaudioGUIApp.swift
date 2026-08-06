@@ -69,11 +69,17 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         // `minimal-chime` 打进了那个目录。这里若漏传、沿用默认值 `nil`，`builtinPackIDs` 在真实
         // 出货的 app 里恒为空集，T6 想关掉的「内置包被拖入静默覆盖」原样重开，且不会有任何测试
         // 断言变红（所有测试 fixture 都显式注入这个字段，只有这一个生产构造点会漏）。
+        // `Bundle.main.resourceURL` 在 `swift run ClaudioGUI` 下也会指向一个非 app 目录，所以不能
+        // 直接把 `resourceURL/packs` 当成已配置的必需根。纯函数只对真实 `.app` 返回
+        // `Contents/Resources/packs`；开发态返回 nil，但正式 app 丢了 packs 目录仍会由
+        // `SoundPackLibrary` fail closed，不会把损坏的分发包伪装成「没有内置包」。
         // `packsLockFile` 没有默认值（见 ``AudioImportEnvironment/packsLockFile`` 的 doc：漏传它
         // 的失败模式是**静默**的，所以由编译器执行而不是靠纪律）。这里是全 app 唯一一处说出真实
         // 路径的地方 —— 组装根说出它，比让一个默认值在三十几个 fixture 背后悄悄生效要好。
+        let factoryPacksDirectory = applicationFactoryPacksDirectory(
+            bundleURL: Bundle.main.bundleURL)
         let audioEnvironment = AudioImportEnvironment(
-            factoryPacksDirectory: Bundle.main.resourceURL?.appendingPathComponent("packs"),
+            factoryPacksDirectory: factoryPacksDirectory,
             durationProbe: AVFoundationAudioDurationProbe(),
             packsLockFile: ClaudioPaths.packsLockFile)
 

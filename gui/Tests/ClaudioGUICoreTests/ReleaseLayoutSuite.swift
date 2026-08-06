@@ -26,6 +26,51 @@ private func repositoryRoot(file: StaticString = #filePath) -> URL {
         .deletingLastPathComponent()  // <repo root>
 }
 
+private struct ReleaseSizeProcessResult {
+    let status: Int32
+    let output: String
+}
+
+private func runReleaseSizeGate(
+    app: URL,
+    fakeLipo: URL,
+    overrides: [String: String] = [:]
+) -> ReleaseSizeProcessResult {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [
+        repositoryRoot().appendingPathComponent("scripts/check-release-size.sh").path,
+        app.path,
+    ]
+    var environment = ProcessInfo.processInfo.environment
+    environment.merge([
+        "CLAUDIO_GUI_BYTES_PER_ARCH": "100",
+        "CLAUDIO_HELPER_BYTES_PER_ARCH": "80",
+        "CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES": "1000",
+        "CLAUDIO_LIPO_BIN": fakeLipo.path,
+        "FAKE_GUI_ARCHS": "arm64 x86_64",
+        "FAKE_HELPER_ARCHS": "arm64 x86_64",
+        "FAKE_GUI_ARM64_BYTES": "100",
+        "FAKE_GUI_X86_64_BYTES": "100",
+        "FAKE_HELPER_ARM64_BYTES": "80",
+        "FAKE_HELPER_X86_64_BYTES": "80",
+    ]) { _, new in new }
+    environment.merge(overrides) { _, new in new }
+    process.environment = environment
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return ReleaseSizeProcessResult(status: -1, output: error.localizedDescription)
+    }
+    let output = String(
+        data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return ReleaseSizeProcessResult(status: process.terminationStatus, output: output)
+}
+
 @MainActor
 func runReleaseLayoutSuites() {
     suite("release.yml 真的把 helper 放在 GUI 会去找的那个位置") {
@@ -100,6 +145,16 @@ func runReleaseLayoutSuites() {
         expect(
             yaml.contains("<key>CFBundleExecutable</key><string>${{ env.APP_EXECUTABLE }}</string>"),
             "Info.plist 必须把 CFBundleExecutable 绑定到 APP_EXECUTABLE")
+        expect(
+            yaml.contains("strip -x dist/bin/claudio")
+                && yaml.contains("strip -x dist/app-bin/ClaudioGUI"),
+            "release workflow 必须在组装 app 前移除两个 Release Mach-O 的非导出符号")
+        expect(
+            yaml.contains(#"ln -s claudi0 "$APP/Contents/Resources/bin/claudio""#),
+            "legacy claudio bundle 入口必须链接到 claudi0，不能复制第二份 helper Mach-O")
+        expect(
+            yaml.contains("bash scripts/check-release-size.sh"),
+            "release workflow 必须在签名前执行可执行负载体积门禁")
     }
 
     suite("dev/release 分发源包含 minimal-chime 1.1.0、第五音频与 CC0 台账") {
@@ -146,6 +201,113 @@ func runReleaseLayoutSuites() {
                 && devBundle.contains("cp packs/LICENSES.md")
                 && devBundle.contains("--package-path helper --product claudio"),
             "dev bundle 必须复制 1.1.0 包与许可证，并显式构建 claudio helper product")
+        expect(
+            devBundle.contains("strip -x")
+                && devBundle.contains("bash scripts/check-release-size.sh")
+                && devBundle.contains(#"ln -s claudi0 "$APP/Contents/Resources/bin/claudio""#),
+            "dev bundle 必须与正式发布一样 strip 并执行体积门禁")
+    }
+
+    suite("release-size 门禁：逐架构边界、别名、架构与 bundle 总量都 fail closed") {
+        withTempDirectory { root in
+            let app = root.appendingPathComponent("fixture.app", isDirectory: true)
+            let gui = app.appendingPathComponent("Contents/MacOS/claudi0-app")
+            let helper = app.appendingPathComponent("Contents/Resources/bin/claudi0")
+            let alias = app.appendingPathComponent("Contents/Resources/bin/claudio")
+            writeFixture("g", to: gui)
+            writeFixture("h", to: helper)
+            try? FileManager.default.createSymbolicLink(
+                atPath: alias.path, withDestinationPath: "claudi0")
+
+            let fakeLipo = root.appendingPathComponent("fake-lipo.sh")
+            writeFixture(
+                #"""
+                #!/bin/bash
+                set -euo pipefail
+                if [ "$1" = "-archs" ]; then
+                  case "$(basename "$2")" in
+                    claudi0-app) printf '%s\n' "$FAKE_GUI_ARCHS" ;;
+                    claudi0) printf '%s\n' "$FAKE_HELPER_ARCHS" ;;
+                    *) exit 2 ;;
+                  esac
+                  exit 0
+                fi
+                input="$1"
+                arch="$3"
+                output="$5"
+                case "$(basename "$input"):$arch" in
+                  claudi0-app:arm64) size="$FAKE_GUI_ARM64_BYTES" ;;
+                  claudi0-app:x86_64) size="$FAKE_GUI_X86_64_BYTES" ;;
+                  claudi0:arm64) size="$FAKE_HELPER_ARM64_BYTES" ;;
+                  claudi0:x86_64) size="$FAKE_HELPER_X86_64_BYTES" ;;
+                  *) exit 3 ;;
+                esac
+                /bin/dd if=/dev/zero of="$output" bs=1 count="$size" 2>/dev/null
+                """#,
+                to: fakeLipo)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: fakeLipo.path)
+
+            let exact = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            expect(
+                exact.status == 0,
+                "每个切片恰好等于预算必须通过，status=\(exact.status)：\(exact.output)")
+
+            let asymmetric = runReleaseSizeGate(
+                app: app,
+                fakeLipo: fakeLipo,
+                overrides: ["FAKE_GUI_X86_64_BYTES": "101"])
+            expect(
+                asymmetric.status != 0
+                    && asymmetric.output.contains("claudi0-app [x86_64]")
+                    && asymmetric.output.contains("101 B > 100 B"),
+                "单个超预算切片不能被另一个小切片平均掉：\(asymmetric.output)")
+
+            let mismatched = runReleaseSizeGate(
+                app: app,
+                fakeLipo: fakeLipo,
+                overrides: ["FAKE_HELPER_ARCHS": "arm64"])
+            expect(
+                mismatched.status != 0 && mismatched.output.contains("架构不一致"),
+                "GUI/helper 架构不一致必须拒绝：\(mismatched.output)")
+
+            try? FileManager.default.removeItem(at: alias)
+            try? FileManager.default.createSymbolicLink(
+                atPath: alias.path, withDestinationPath: "wrong-helper")
+            let wrongAlias = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            expect(
+                wrongAlias.status != 0 && wrongAlias.output.contains("精确指向"),
+                "legacy alias 指错目标必须拒绝：\(wrongAlias.output)")
+            try? FileManager.default.removeItem(at: alias)
+            try? FileManager.default.createSymbolicLink(
+                atPath: alias.path, withDestinationPath: "claudi0")
+
+            let payload = app.appendingPathComponent("Contents/Resources/payload.bin")
+            writeFixture(String(repeating: "x", count: 1_001), to: payload)
+            let resourceOverflow = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            expect(
+                resourceOverflow.status != 0
+                    && resourceOverflow.output.contains("非可执行资源超出体积预算")
+                    && resourceOverflow.output.contains("1001 B > 1000 B"),
+                "未使用的 Mach-O 余量不得补贴资源越界：\(resourceOverflow.output)")
+            try? FileManager.default.removeItem(at: payload)
+
+            writeFixture(String(repeating: "g", count: 1_000), to: gui)
+            writeFixture(String(repeating: "h", count: 1_000), to: helper)
+            let bundleOverflow = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            expect(
+                bundleOverflow.status != 0
+                    && bundleOverflow.output.contains("app bundle 超出体积预算"),
+                "逐切片与资源都合格时，总 bundle 上限仍必须独立生效：\(bundleOverflow.output)")
+            writeFixture("g", to: gui)
+            writeFixture("h", to: helper)
+
+            try? FileManager.default.removeItem(at: helper)
+            let missing = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            expect(
+                missing.status != 0 && missing.output.contains("缺少 Release 可执行文件"),
+                "缺 helper 必须在任何预算计算前 fail closed：\(missing.output)")
+        }
     }
 
     suite("Orbit Zero App 图标母版与 icns 都在仓库中") {

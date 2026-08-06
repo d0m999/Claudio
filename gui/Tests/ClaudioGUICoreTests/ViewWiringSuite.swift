@@ -1214,9 +1214,7 @@ func runViewWiringSuites() {
         // 为 `packsLockFile:` 一个实参设计的。硬塞第二个实参会让那三条断言的语义变得含糊（豁免的
         // 对价到底是「这把锁被钉住」还是「这两个实参都被钉住」？）。这里单开一条自成一体的 suite，
         // 只读 `ClaudioGUIApp.swift` 这一个已知的、唯一合法的构造点，不重新发明普查。
-        guard let code = codeWithoutStrings("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift"),
-            let raw = codeOnly("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift")
-        else {
+        guard let code = codeWithoutStrings("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift") else {
             expect(false, "读不到 ClaudioGUIApp.swift —— 这条 suite 唯一的价值就是读它")
             return
         }
@@ -1228,7 +1226,7 @@ func runViewWiringSuites() {
                 + "需要有人看一眼再放行")
         guard let arguments = calls.first else { return }
 
-        let expectedValue = "Bundle.main.resourceURL?.appendingPathComponent(\"\")"
+        let expectedValue = "factoryPacksDirectory"
         let actualValue = argumentValue("factoryPacksDirectory", in: arguments)
         let actualDescription =
             actualValue
@@ -1238,24 +1236,16 @@ func runViewWiringSuites() {
             "ClaudioGUIApp.swift 的 AudioImportEnvironment(…) 的 factoryPacksDirectory: 实参必须**正好"
                 + "是** `\(expectedValue)`（字符串内容被清空之后的文本），实际是 `\(actualDescription)` "
                 + "—— release.yml 把 minimal-chime 打进 Contents/Resources/packs/，这一处实参是唯一"
-                + "把它接进 T6 只读判据的线，PLAN-SOUND-MANAGER.md §2.3/T6 点名的来源就是 "
-                + "`Bundle.main.resourceURL` + `packs`")
-
-        // 字面量那一半：上面读的是清空字符串内容之后的文本，"packs" 这个目录名在那里已经不可判。
-        // 判据绑在**这一处调用点**上（`raw` 里同一个调用的实参文本），不是全文件 contains —— 同一
-        // 病同一修法，见上面「生产侧两处显式包锁各自锚到调用点」那条 suite 的 doc。
-        let rawCalls = callArguments(of: "AudioImportEnvironment", in: raw)
-        let rawValue = rawCalls.compactMap { argumentValue("factoryPacksDirectory", in: $0) }.first
+                + "把真实 app bundle 接进 T6 只读判据的线。开发态与正式 bundle 的路径"
+                + "分类由这个纯函数的行为测试守住，不再在不可 import 的 composition root 里"
+                + "手写 `Bundle.main.resourceURL` 判断")
+        let compactCode = code.filter { !$0.isWhitespace }
         expect(
-            rawValue != nil,
-            "从 ClaudioGUIApp.swift 的**原始文本**（保留字符串内容）里切不出 "
-                + "AudioImportEnvironment(…) 的 factoryPacksDirectory: 实参 —— 切不出来就无从判定"
-                + "字面量内容，而「无从判定」必须落在红那一侧。实得 \(rawCalls.count) 处调用")
-        expect(
-            rawValue?.contains("\"packs\"") == true,
-            "ClaudioGUIApp.swift 的 factoryPacksDirectory: **实参本身**里必须逐字出现 `\"packs\"`，"
-                + "实得 `\(rawValue ?? "<切不出来>")` —— 判据绑在这一处调用点上，同文件别处提到"
-                + "「packs」的死代码喂不饱它")
+            compactCode.contains(
+                "letfactoryPacksDirectory=applicationFactoryPacksDirectory("
+                    + "bundleURL:Bundle.main.bundleURL)"),
+            "factoryPacksDirectory 局部值必须由真实 Bundle.main.bundleURL 经可测试的"
+                + " applicationFactoryPacksDirectory 分类，不得回落到 resourceURL/packs")
     }
 
     suite("锁转发的**编译期前提**：`mutateManifestJSON` 的 `lockFile:` 不许有默认值") {
@@ -1921,12 +1911,13 @@ func runViewWiringSuites() {
             "PanelView 不得再从 packCards.first(where:) 取当前包名；当前包未加星时它不在显示集")
         expect(
             rawCollapsed.contains(
-                "let packName = selectedPackDisplayName let base = \"claudi0 面板，2 个声音来源，\\(audibleEventCount) 个可听事件\" "
+                "let packName = selectedPackDisplayName let base = \"claudi0 面板，2 个声音来源，\\(audibleEventSummary)\" "
                     + "guard !packName.isEmpty else { return base } return \"\\(base)，当前声音包 \\(packName)\""),
-            "headerAccessibilityLabel 必须同时说明双声音来源并消费 selectedPackDisplayName")
+            "headerAccessibilityLabel 必须同时说明双声音来源、诚实库状态并消费 selectedPackDisplayName")
         expect(
-            rawCollapsed.contains("case .events: Text(\"\\(selectedPackDisplayName) · 事件\")"),
-            "「{当前包名} · 事件」必须只从 `.events` 分支开始渲染，并消费同一个 selectedPackDisplayName；"
+            rawCollapsed.contains(
+                "case .events: if panelModel.libraryPresentationState.hasUsableSnapshot { Text(\"\\(selectedPackDisplayName) · 事件\")"),
+            "「{当前包名} · 事件」必须只在 `.events` 且库事实可用时渲染，并消费同一个 selectedPackDisplayName；"
                 + "needsPack/失败态不得出现「 · 事件」半截")
 
         // 节结构 + T8 真窗口动作 + 专属虚线形制。
@@ -2225,7 +2216,7 @@ func runViewWiringSuites() {
             "窗口必须允许 present/broken 清除绑定，并经唯一窗口 model 写路径落地")
     }
 
-    suite("全状态画廊：声音包窗口用生产视图覆盖内置、自有与零包三态，且预览不读用户磁盘") {
+    suite("全状态画廊：声音包窗口用生产视图覆盖内容与库可用性七态，且预览不读用户磁盘") {
         guard
             let gallery = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowStateGalleryView.swift"),
@@ -2241,8 +2232,12 @@ func runViewWiringSuites() {
                 && gallery.contains("builtinModel")
                 && gallery.contains("customModel")
                 && gallery.contains("emptyModel")
-                && gallery.components(separatedBy: "galleryFrame(").count - 1 == 3,
-            "声音包画廊必须渲染生产窗口，并恰好覆盖内置只读、自有可编辑、零包恢复三帧")
+                && gallery.contains("libraryState: .refreshing")
+                && gallery.contains("libraryState: .refreshFailed")
+                && gallery.contains("loadingModel")
+                && gallery.contains("loadFailedModel")
+                && gallery.components(separatedBy: "galleryFrame(").count - 1 == 7,
+            "声音包画廊必须渲染生产窗口，并覆盖内置、自有、空库及四种非 ready 库状态")
         expect(
             rootGallery.contains("SoundPacksWindowStateGalleryView()"),
             "全产品根画廊必须实际挂入声音包窗口画廊")
@@ -2410,6 +2405,11 @@ func runViewWiringSuites() {
                 && window.contains(#""\(file.fileName) · 未被使用""#)
                 && window.contains("model.assignSelectedAudioFile(file.fileName, to: row.event)"),
             "窗口映射菜单必须列出包内音频、标识孤儿并经窗口 model 绑定")
+        expect(
+            window.contains("model.selectedAudioInventoryState.isLoading")
+                && window.contains("ProgressView()")
+                && window.contains(#"Text("正在读取包内音频…")"#),
+            "按需清单未完成时必须显示真 loading，不能把临时空数组说成空包")
         expect(
             !row.contains("selectedAudioFiles")
                 && !panel.contains("selectedPackAudioFiles"),

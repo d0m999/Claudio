@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import Combine
 import SoundPacksWindow
 import SwiftUI
 
@@ -55,6 +56,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let popover: NSPopover
     private let hostingController: NSHostingController<PanelView>
     private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator
+    private let soundPackLibrary: SoundPackLibrary
     private let soundPacksWindowController: SoundPacksWindowController
     private let integrationsWindowController: IntegrationsWindowController
     private let integrationsModel: IntegrationsWindowModel
@@ -62,6 +64,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let hostIntegrations: HostIntegrationPresentationStore
     private let hostIntegrationMatrixProvider: HostIntegrationMatrixProvider
     private var hostIntegrationRefreshTask: Task<Void, Never>?
+    private var appActivationCancellable: AnyCancellable?
     private var hostIntegrationRefreshRevision: UInt64 = 0
 
     /// Owned here (not by `PanelView`) so it survives across every popover show/close cycle
@@ -95,9 +98,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         integrationActionProvider: HostIntegrationActionProvider
     ) {
         let soundPacksRefreshCoordinator = SoundPacksRefreshCoordinator()
+        let soundPackLibrary = SoundPackLibrary(environment: audioEnvironment)
         let soundPacksWindowController = SoundPacksWindowController(
             configFile: ClaudioPaths.configFile,
             environment: audioEnvironment,
+            soundPackLibrary: soundPackLibrary,
             refreshCoordinator: soundPacksRefreshCoordinator)
         let actionRouter = MenuBarActionRouter()
         let integrationsMuteController = EventMuteController()
@@ -186,6 +191,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             audioEnvironment: audioEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
+            soundPackLibrary: soundPackLibrary,
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
             onManageSounds: { [weak actionRouter] route, focusTarget in
                 actionRouter?.requestSoundPacksWindow(
@@ -219,6 +225,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.contentViewController = hostingController
         self.popover = popover
         self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
+        self.soundPackLibrary = soundPackLibrary
         self.soundPacksWindowController = soundPacksWindowController
         self.integrationsWindowController = integrationsWindowController
         self.integrationsModel = integrationsModel
@@ -247,6 +254,19 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
 
+        appActivationCancellable = NotificationCenter.default
+            .publisher(for: NSApplication.didBecomeActiveNotification)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    self.soundPacksRefreshCoordinator.refreshWindowConfigProjection()
+                    Task {
+                        await self.soundPackLibrary.requestRefresh(
+                            trigger: .applicationActivation)
+                    }
+                }
+            }
+
         // GUI 首启只运行共享 bootstrap + 双侧 inspect。宿主连接必须始终来自详情窗里的显式动作。
         requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
     }
@@ -274,6 +294,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 // opening the popover while bootstrap is in flight cancels this task and starts a
                 // newer refresh, but cancellation must not discard the completed disk mutation.
                 if bootstrapSharedRuntime {
+                    self?.soundPackLibrary.invalidate(packIDs: [])
                     self?.soundPacksRefreshCoordinator.completeSharedRuntimeBootstrap()
                 }
                 guard

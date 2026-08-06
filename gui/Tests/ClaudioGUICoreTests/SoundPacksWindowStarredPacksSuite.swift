@@ -111,6 +111,35 @@ func runSoundPacksWindowStarredPacksSuites() {
         }
     }
 
+    suite("T17 星标 toggle：窗口陈旧时保留外部并发加入的 sibling") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packsDirectory = root.appendingPathComponent("packs")
+            for id in ["a", "b", "c"] { writeStarredWindowPack(id, under: packsDirectory) }
+            writeFixture(
+                #"{"selected_pack":"a","starred_packs":["a"]}"#,
+                to: configFile)
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: lockFile,
+                environment: starredWindowEnvironment(packsDirectory),
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            expect(model.starredPackIDs == ["a"], "前提：保留窗口仍持有旧星标投影")
+
+            writeFixture(
+                #"{"selected_pack":"a","starred_packs":["a","b"]}"#,
+                to: configFile)
+            let result = model.toggleStarredPack("c")
+            expect(
+                result == .success(.updated(ids: ["a", "b", "c"])),
+                "toggle 必须在锁内基于最新 JSON 加入 c：\(result)")
+            expect(
+                readStarredWindowConfig(configFile) == ["a", "b", "c"],
+                "外部新增的 b 不得被窗口旧数组覆盖掉")
+        }
+    }
+
     suite("T17 加入第四颗星后窗口发布 full reload，面板 packCards 不得停在三行 stale 显示") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -320,10 +349,10 @@ func runSoundPacksWindowStarredPacksSuites() {
             !view.contains("starredPackDisplayIDs("),
             "窗口不得复用 prefix(4) 的面板显示集作为星标状态源")
         expect(
-            model.contains("setStarredPacks(")
+            model.contains("ClaudioCore.toggleStarredPack(")
                 && model.contains("completeSynchronousWrite(.succeeded)")
                 && model.contains("completeSynchronousWrite(.failed)"),
-            "窗口星标写必须走 T16 writer；成功走重算 packCards 的 full refresh，失败保留状态但不假刷新")
+            "窗口星标写必须走锁内原子 membership writer；成功 full refresh，失败保留状态但不假刷新")
         expect(
             view.contains("private func starButton")
                 && view.contains(".disabled(!control.isEnabled)")

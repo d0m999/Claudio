@@ -79,6 +79,7 @@ jobs:
             helper/.build/arm64-apple-macosx/release/claudio \
             helper/.build/x86_64-apple-macosx/release/claudio \
             -output dist/bin/claudio
+          strip -x dist/bin/claudio
           chmod +x dist/bin/claudio
           echo "claudio archs: $(lipo -archs dist/bin/claudio)"
 
@@ -104,6 +105,7 @@ jobs:
             gui/.build/arm64-apple-macosx/release/ClaudioGUI \
             gui/.build/x86_64-apple-macosx/release/ClaudioGUI \
             -output dist/app-bin/ClaudioGUI
+          strip -x dist/app-bin/ClaudioGUI
           chmod +x dist/app-bin/ClaudioGUI
           echo "ClaudioGUI archs: $(lipo -archs dist/app-bin/ClaudioGUI)"
 
@@ -119,7 +121,7 @@ jobs:
           # 新品牌入口为 `claudi0`；同时保留 `claudio` bundle alias，避免旧版安装说明失效。
           # shared runtime 仍装到 ~/.claudio/bin/claudio，确保现有 hooks 精确匹配。
           cp dist/bin/claudio "$APP/Contents/Resources/bin/claudi0"
-          cp dist/bin/claudio "$APP/Contents/Resources/bin/claudio"
+          ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
 
           # 内置声音包只读随 app bundle 分发（ENGINEERING.md 工程落地细节②：声音包存储根 + 查找顺序）。
           cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
@@ -146,6 +148,9 @@ jobs:
           PLIST
 
           printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+      - name: Verify release size budget
+        run: bash scripts/check-release-size.sh "dist/${{ env.APP_NAME }}.app"
 
       - name: Ad-hoc codesign (v1 未签名/无公证 — 见 ENGINEERING.md Distribution Plan)
         run: |

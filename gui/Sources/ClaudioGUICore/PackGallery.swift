@@ -296,13 +296,14 @@ public func factoryIntegrity(packID: String, environment: AudioImportEnvironment
         currentManifestData: currentManifestData)
 }
 
-private func factoryIntegrity(
+func factoryIntegrity(
     packID: String,
     environment: AudioImportEnvironment,
     currentDirectory: URL?,
-    currentManifestData: Data?
+    currentManifestData: Data?,
+    builtinPackIDs: Set<String>? = nil
 ) -> Bool? {
-    guard environment.builtinPackIDs.contains(packID) else { return nil }
+    guard (builtinPackIDs ?? environment.builtinPackIDs).contains(packID) else { return nil }
     guard
         let factoryRoot = environment.factoryPacksDirectory,
         let currentDirectory,
@@ -321,8 +322,11 @@ private func factoryIntegrity(
     guard case .success(let factoryManifest) = loadPackManifest(in: factoryDirectory) else {
         return false
     }
+    guard let factoryAudioFileNames = currentEventAudioFileNames(in: factoryManifest) else {
+        return false
+    }
 
-    for fileName in Set(factoryManifest.events.values) {
+    for fileName in factoryAudioFileNames {
         guard
             let currentFile = safePackFileURL(fileName, in: currentDirectory),
             let factoryFile = safePackFileURL(fileName, in: factoryDirectory),
@@ -516,7 +520,7 @@ public func packAudioFiles(
     return packAudioFiles(in: packDirectory)
 }
 
-private func packAudioFiles(
+func packAudioFiles(
     in packDirectory: URL
 ) -> Result<[PackAudioFile], PackAudioInventoryError> {
     let manifest: PackManifest
@@ -527,6 +531,20 @@ private func packAudioFiles(
         return .failure(.manifestUnreadable(reason: error.reason))
     }
 
+    return packAudioFiles(in: packDirectory, manifest: manifest)
+}
+
+/// The inventory half that consumes a manifest already decoded by the library scanner. Keeping
+/// directory-entry filtering here lets the asynchronous library read each manifest once without
+/// creating a second interpretation of orphan safety.
+func packAudioFiles(
+    in packDirectory: URL,
+    manifest: PackManifest
+) -> Result<[PackAudioFile], PackAudioInventoryError> {
+    guard let declaredAudioFileNames = currentEventAudioFileNames(in: manifest) else {
+        return .failure(
+            .manifestUnreadable(reason: oversizedSoundPackManifestAudioPathReason))
+    }
     let entries: [URL]
     do {
         entries = try FileManager.default.contentsOfDirectory(
@@ -538,7 +556,7 @@ private func packAudioFiles(
     }
 
     let referencedPaths = Set(
-        manifest.events.values.compactMap { fileName -> String? in
+        declaredAudioFileNames.compactMap { fileName -> String? in
             guard
                 let referencedFile = safePackFileURL(fileName, in: packDirectory),
                 regularFileExists(at: referencedFile)
@@ -830,7 +848,7 @@ private func presentEventSet(
 /// 入参是**已经读好的** bytes（``buildPackCard`` 唯一那次 ``loadPackManifestData(in:)`` 的产物），
 /// 而不是再自己去读一遍第三次——那份读仍然是 `ClaudioCore` 那个 `isReallyContained` 闸门 +
 /// 有界读，只是不再对同一个文件重复触发（/ship 评审修复④）。
-private func packMetadata(manifestData: Data) -> (name: String?, isCC0: Bool) {
+func packMetadata(manifestData: Data) -> (name: String?, isCC0: Bool) {
     guard let raw = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any] else {
         return (nil, false)
     }

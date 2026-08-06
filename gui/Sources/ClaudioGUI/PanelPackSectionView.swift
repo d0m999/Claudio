@@ -30,6 +30,18 @@ struct PanelPackSectionView: View {
     @ViewBuilder
     var body: some View {
         switch state {
+        case .loading:
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .accessibilityHidden(true)
+                Text("正在读取声音包…")
+                    .font(.system(size: 11 * typeScale, design: .rounded))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("正在读取声音包")
+            .accessibilityIdentifier("panel.packs.loading")
         case .pinned(let cards):
             PackGalleryView(
                 cards: cards,

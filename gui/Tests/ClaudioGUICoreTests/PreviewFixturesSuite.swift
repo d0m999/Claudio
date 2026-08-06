@@ -58,7 +58,7 @@ func runPreviewFixturesSuites() {
             "dropZone.reject.lockBusy", "dropZone.reject.lockFailed",
             "coverage.present", "coverage.unmapped", "coverage.broken",
             "packCard.complete", "packCard.partial", "packCard.broken",
-            "panelPack.pinned.one", "panelPack.pinned.four",
+            "panelPack.loading", "panelPack.pinned.one", "panelPack.pinned.four",
             "panelPack.noPinned", "panelPack.noPacks", "panelPack.readFailed",
             "interfaceText.compact", "interfaceText.standard",
             "interfaceText.large", "interfaceText.maximum",
@@ -245,10 +245,10 @@ func runPreviewFixturesSuites() {
         )
     }
 
-    suite("PreviewFixtures covers panel pack four-state rendering plus 1-row/4-row pack density and all text sizes") {
+    suite("PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density and all text sizes") {
         expect(
-            PreviewFixtures.panelPackSectionStates.count == 5,
-            "包区域必须包含 pinned 1 行/4 行、无固定、无包、读取失败五帧")
+            PreviewFixtures.panelPackSectionStates.count == 6,
+            "包区域必须包含加载、pinned 1 行/4 行、无固定、无包、读取失败六帧")
         let pinnedCounts = PreviewFixtures.panelPackSectionStates.compactMap { state -> Int? in
             guard case .pinned(let cards) = state else { return nil }
             return cards.count

@@ -13,16 +13,16 @@ import SwiftUI
 ///
 /// COMPILE-ONLY here (CommandLineTools, no Xcode/simulator/`#Preview`): rendering, the
 /// operational-panel wiring end-to-end, and Dynamic Type behavior are manual-verify on a
-/// real Mac. `ClaudioGUICore`'s pieces this view composes (``packCoverage``, ``availablePacks``,
+/// real Mac. `ClaudioGUICore`'s pieces this view composes (``SoundPackLibrarySnapshot``,
 /// ``loadPanelConfig``, ``panelLayoutAdaptation``, ``panelFocusOrder``) are each independently
-/// unit-tested — this file's own job is ONLY correct composition, not re-deciding anything.
+/// tested — this file's own job is ONLY correct composition, not re-deciding anything.
 public struct PanelView: View {
     /// 「这一句刚说过」的去重器（T17g）—— 让「一趟 update pass ≤ 一条播报」在结构上成立。
     /// 它必须活得比一次 `body` 求值长（跨 handler、跨帧），所以是 `@StateObject` 而不是局部变量。
     @StateObject private var announcer: PanelAnnouncer
     /// 运行态面板的 config 读模型 + 流经它的写操作（`configState` / `config` / `eventRows` /
     /// `packCards` / `packSwitchError`，以及 `toggleMute` / `switchPack` / `reload` /
-    /// `reloadEnabledFlags`）—— **全部搬进了 `ClaudioGUICore.PanelConfigController`**（红队 9cccc9c
+    /// `reloadConfigOnly`）—— **全部搬进了 `ClaudioGUICore.PanelConfigController`**（红队 9cccc9c
     /// 兑现台账那条 P2）。理由见那个类的文档：这几段逻辑曾是本视图的 `@State` + 私有方法，而本视图住在
     /// `@main` executableTarget、测试 import 不进来，于是红队实测三条「改坏行为、两套测试全绿」的变异
     /// （refresh 不重载 configState / 某条路由 case 成死代码 / 静音去掉取反）。搬进可实例化的类之后，
@@ -63,6 +63,7 @@ public struct PanelView: View {
     private let configFile: URL
     private let lockFile: URL
     private let previewPlayer: AudioPreviewPlaying
+    private let soundPackLibrary: SoundPackLibrary
     private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator
     private let onManageSounds: @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void
     private let onManageIntegrations: @MainActor (PanelFocusTarget) -> Void
@@ -85,6 +86,7 @@ public struct PanelView: View {
         lockFile: URL = ClaudioPaths.configLockFile,
         focusCoordinator: PanelFocusCoordinator = PanelFocusCoordinator(),
         hostIntegrations: HostIntegrationPresentationStore,
+        soundPackLibrary: SoundPackLibrary,
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
         onManageSounds: @escaping @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void,
         onManageIntegrations: @escaping @MainActor (PanelFocusTarget) -> Void,
@@ -96,6 +98,7 @@ public struct PanelView: View {
         self.lockFile = lockFile
         self.focusCoordinator = focusCoordinator
         self.hostIntegrations = hostIntegrations
+        self.soundPackLibrary = soundPackLibrary
         self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
         self.onManageSounds = onManageSounds
         self.onManageIntegrations = onManageIntegrations
@@ -110,6 +113,7 @@ public struct PanelView: View {
             configFile: configFile,
             lockFile: lockFile,
             environment: audioEnvironment,
+            soundPackLibrary: soundPackLibrary,
             afterFullReload: { _ in
                 onAudibilityInputsChanged()
             },
@@ -136,15 +140,9 @@ public struct PanelView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel))
         .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
-        // `.onAppear` deliberately does NOT call `refresh()` (`/ship` 评审 · 性能): `refresh()`
-        // is a synchronous, main-thread DISK SCAN (re-reads config.json, the selected pack's
-        // manifest + a `stat` per event, then enumerates BOTH pack roots and reads EVERY pack's
-        // manifest). It used to run from `.onAppear` **and** from `.onChange(showCount)` below —
-        // both of which fire when the popover opens, so the very first open scanned everything
-        // TWICE. `.onChange(showCount)` is the reliable signal of the two (see
-        // ``PanelFocusCoordinator``'s own doc comment on why `.onAppear` is not), and `init(...)`
-        // has already loaded the initial rows/cards from disk, so this hook only needs to place
-        // focus and report the panel's width.
+        // `.onAppear` deliberately does not request another library refresh. The app-lifetime
+        // `SoundPackLibrary` performs its scan off the main actor and replays the latest state;
+        // `showCount` below is the single presentation signal that asks it to revalidate.
         //
         // T17g：它也**不播报**，一字不差的同一条推理 —— `.onAppear` 与 `.onChange(showCount)` 在同一次
         // 打开里**都会**跑，两条 post 会抢同一条「一次一句」的通道，而谁先谁后取决于 `onAppear` 与
@@ -167,6 +165,10 @@ public struct PanelView: View {
         // this tells the AppKit popover around it to follow (see ``onPanelWidthChange``).
         .onChange(of: layoutAdaptation.panelWidth) { newWidth in
             onPanelWidthChange(newWidth)
+        }
+        .onChange(of: panelModel.libraryPresentationState) { state in
+            guard !state.hasUsableSnapshot, isEventFocusTarget(focusedTarget) else { return }
+            applyFirstFocus()
         }
         // `.contain` keeps every control individually reachable by the VoiceOver cursor; the
         // label names the container itself, which otherwise reads as an anonymous group. It is
@@ -228,7 +230,7 @@ public struct PanelView: View {
                 .font(.system(size: 14 * typeScale, weight: .semibold, design: .rounded))
                 .foregroundColor(ClaudioTheme.text(colorScheme))
                 .lineLimit(2)
-            Text("\(audibleEventCount) 个可听事件")
+            Text(audibleEventSummary)
                 .font(.system(size: 11 * typeScale, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
         }
@@ -247,7 +249,7 @@ public struct PanelView: View {
 
     private var headerAccessibilityLabel: String {
         let packName = selectedPackDisplayName
-        let base = "claudi0 面板，2 个声音来源，\(audibleEventCount) 个可听事件"
+        let base = "claudi0 面板，2 个声音来源，\(audibleEventSummary)"
         guard !packName.isEmpty else { return base }
         return "\(base)，当前声音包 \(packName)"
     }
@@ -273,6 +275,12 @@ public struct PanelView: View {
                 coverage: $0.coverage,
                 masterVolume: panelModel.config.masterVolume).isAvailable
         }.count
+    }
+
+    private var audibleEventSummary: String {
+        panelAudibleEventSummary(
+            audibleEventCount: audibleEventCount,
+            libraryState: panelModel.libraryPresentationState)
     }
 
     /// Header 与事件区标题共用这一份 current-pack 读数。它不看 `packCards`：星标显示集可合法地
@@ -302,32 +310,36 @@ public struct PanelView: View {
             //（/codex review f54d335 P1#1，取代 26bba37 那轮「两段 switch + 文本绊线防漂移」的设计）。
             switch panelModel.configState.topContent {
             case .events:
-                Text("\(selectedPackDisplayName) · 事件")
-                    .font(.system(size: 11 * typeScale, weight: .semibold))
-                    .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                ForEach(panelModel.eventRows, id: \.event) { row in
-                    EventRowView(
-                        row: row,
-                        hostCoverage: eventHostCoveragePresentation(
-                            event: row.event,
-                            matrix: hostIntegrations.content.matrix),
-                        previewAvailability: eventPreviewAvailability(
-                            coverage: row.coverage,
-                            masterVolume: panelModel.config.masterVolume),
-                        focusedTarget: $focusedTarget,
-                        adaptation: layoutAdaptation,
-                        onOpenEditor: {
-                            onManageSounds(
-                                .editEvent(
-                                    packID: panelModel.config.selectedPack,
-                                    event: row.event),
-                                .eventSound(row.event))
-                        },
-                        onPreview: { playPreview(for: row) },
-                        onToggleMute: {
-                            panelModel.toggleMute(row.event)
-                            onAudibilityInputsChanged()
-                        })
+                if panelModel.libraryPresentationState.hasUsableSnapshot {
+                    Text("\(selectedPackDisplayName) · 事件")
+                        .font(.system(size: 11 * typeScale, weight: .semibold))
+                        .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                    ForEach(panelModel.eventRows, id: \.event) { row in
+                        EventRowView(
+                            row: row,
+                            hostCoverage: eventHostCoveragePresentation(
+                                event: row.event,
+                                matrix: hostIntegrations.content.matrix),
+                            previewAvailability: eventPreviewAvailability(
+                                coverage: row.coverage,
+                                masterVolume: panelModel.config.masterVolume),
+                            focusedTarget: $focusedTarget,
+                            adaptation: layoutAdaptation,
+                            onOpenEditor: {
+                                onManageSounds(
+                                    .editEvent(
+                                        packID: panelModel.config.selectedPack,
+                                        event: row.event),
+                                    .eventSound(row.event))
+                            },
+                            onPreview: { playPreview(for: row) },
+                            onToggleMute: {
+                                panelModel.toggleMute(row.event)
+                                onAudibilityInputsChanged()
+                            })
+                    }
+                } else {
+                    libraryEventFactsPlaceholder
                 }
                 // PLAN-MASTER-VOLUME.md 阶段 D：位置对齐线框——五行事件之后、拖入区之前。只在
                 // `.events`（= `.operational`）渲染（D23 定稿 + D41：这是滑块唯一真的出现在屏幕上的态）。
@@ -394,7 +406,16 @@ public struct PanelView: View {
             Text("声音包")
                 .font(.system(size: 11 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+            if let reason = soundPackLibraryRefreshFailureReason {
+                VStack(alignment: .leading, spacing: 6) {
+                    FailureRow(message: reason)
+                    soundPackLibraryRetryButton
+                }
+            }
             panelPackSection
+            if case .loadFailed = panelModel.libraryPresentationState {
+                soundPackLibraryRetryButton
+            }
             manageSoundsRow
         }
     }
@@ -410,6 +431,41 @@ public struct PanelView: View {
                 let outcome = panelModel.switchPack(to: $0.id)
                 soundPacksRefreshCoordinator.completePanelPackSwitch(outcome)
             })
+    }
+
+    private var soundPackLibraryRefreshFailureReason: String? {
+        switch panelModel.libraryPresentationState {
+        case .refreshFailed(let reason):
+            return "刷新失败，正在显示上次结果。\(reason)"
+        case .loading, .ready, .refreshing, .loadFailed:
+            return nil
+        }
+    }
+
+    private var soundPackLibraryRetryButton: some View {
+        Button("重试读取") {
+            panelModel.retrySoundPackLibraryRefresh()
+        }
+        .buttonStyle(.bordered)
+        .accessibilityLabel("重试读取声音包")
+        .accessibilityHint("在后台重新读取；已有结果会继续显示")
+        .accessibilityIdentifier("panel.packs.retry")
+    }
+
+    @ViewBuilder
+    private var libraryEventFactsPlaceholder: some View {
+        switch panelModel.libraryPresentationState {
+        case .loading:
+            Text("正在读取事件声音状态…")
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .accessibilityLabel("正在读取事件声音状态")
+        case .loadFailed:
+            Text("事件声音状态暂不可用；请在声音包区域重试读取。")
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        case .ready, .refreshing, .refreshFailed:
+            EmptyView()
+        }
     }
 
     /// D23 定稿④「先选包」空态卡——`configState == .needsPack` 时替换掉本该渲染的五行事件覆盖度。
@@ -575,7 +631,9 @@ public struct PanelView: View {
         //   `visibleRows`（哪些行真被渲染进焦点序）与 `hasMasterVolume`（滑块此刻在不在屏幕上）。
         // - hasConfigFailureNotice：诚实失败卡（`.configFailure` = `.malformed`/`.unwritable`）带着「在访达中
         //   显示 config.json」这颗真控件，渲染在面板顶端，所以 `.configReveal` 领序、开局焦点落在它上面。
-        let visibleRows: [EventRow] = content.showsEventContent ? panelModel.eventRows : []
+        let visibleRows: [EventRow] =
+            content.showsEventContent && panelModel.libraryPresentationState.hasUsableSnapshot
+            ? panelModel.eventRows : []
         let hostSources = hostIntegrations.content.sourceRows.map(\.host)
         let openingTarget = panelOpeningFocus(
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
@@ -596,6 +654,16 @@ public struct PanelView: View {
             focusedTarget = requestedTarget
         } else {
             focusedTarget = openingTarget
+        }
+    }
+
+    private func isEventFocusTarget(_ target: PanelFocusTarget?) -> Bool {
+        switch target {
+        case .eventSound, .eventMute, .eventAction:
+            return true
+        case .none, .onboardingPrimaryAction, .onboardingSecondaryAction, .hostSource,
+            .masterVolume, .packCard, .manageSounds, .revealDetail, .disconnect, .configReveal:
+            return false
         }
     }
 
@@ -632,7 +700,7 @@ public struct PanelView: View {
         previewPlayer.play(fileAt: resolvedFile, volume: Float(previewVolume(for: panelModel.config)))
     }
 
-    // toggleMute / switchPack / reload / reloadEnabledFlags 已搬进 `ClaudioGUICore.PanelConfigController`
+    // toggleMute / switchPack / reload / reloadConfigOnly 已搬进 `ClaudioGUICore.PanelConfigController`
     // （红队 9cccc9c 兑现台账那条 P2）。理由见那个类的文档：这几段逻辑住在测不到的 View 里时，
     // 红队实测三条「改坏行为、两套测试全绿」的变异（refresh 不重载 configState / 某条路由 case 成
     // 死代码 / 静音去掉取反）；搬进可实例化的类后由 `PanelConfigControllerSuite` 用真磁盘各钉一条
@@ -717,7 +785,7 @@ private struct HostSourceRowView: View {
                         .font(.system(size: 9 * typeScale, design: .rounded))
                         .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                         .lineLimit(2)
-                        }
+                }
             }
             .foregroundColor(ClaudioTheme.text(colorScheme))
             .frame(maxWidth: .infinity, minHeight: 48 * typeScale, alignment: .topLeading)

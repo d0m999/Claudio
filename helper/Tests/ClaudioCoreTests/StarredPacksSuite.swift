@@ -126,6 +126,43 @@ func runStarredPacksSuites() {
         }
     }
 
+    suite("toggleStarredPack: membership decision uses latest locked JSON and preserves external siblings") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let userPacks = root.appendingPathComponent("packs", isDirectory: true)
+            for id in ["a", "b", "c"] { makeStarredPackDirectory(id, under: userPacks) }
+            // A retained window may still remember only [a], while an external writer has already
+            // committed b. The atomic API must derive its next value from this file, not that UI.
+            writeFixture(
+                #"{"selected_pack":"a","starred_packs":["a","b"]}"#,
+                to: configFile)
+
+            let added = toggleStarredPack(
+                "c",
+                configFile: configFile,
+                lockFile: lockFile,
+                userPacksDirectory: userPacks,
+                defaultStarredPackIDs: [])
+            expect(
+                added == .success(.updated(ids: ["a", "b", "c"])),
+                "adding c must preserve externally-added b: \(added)")
+            expect(
+                readStarredPackIDs(from: configFile) == ["a", "b", "c"],
+                "atomic add must persist all unrelated current stars")
+
+            let removed = toggleStarredPack(
+                "a",
+                configFile: configFile,
+                lockFile: lockFile,
+                userPacksDirectory: userPacks,
+                defaultStarredPackIDs: [])
+            expect(
+                removed == .success(.updated(ids: ["b", "c"])),
+                "removing a must preserve b and c: \(removed)")
+        }
+    }
+
     suite("setStarredPacks: rejects more than four distinct existing ids without silently truncating or writing") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")

@@ -20,6 +20,14 @@ func runSoundPacksWindowAccessibilitySuites() {
                 SoundPacksWindowFocusScope(packIDs: [], selectedPackID: nil)
             ).isEmpty,
             "空列表不是可操作项，不得成为死焦点")
+        let libraryRetry = SoundPacksWindowFocusScope(
+            packIDs: [],
+            selectedPackID: nil,
+            canRetryLibraryLoad: true)
+        expect(
+            soundPacksWindowFocusOrder(libraryRetry) == [.retryLibraryLoad]
+                && soundPacksWindowFirstFocusTarget(libraryRetry) == .retryLibraryLoad,
+            "首次读取失败时唯一可见的库级重试必须成为首焦点")
         let retryOnly = SoundPacksWindowFocusScope(
             packIDs: [],
             selectedPackID: nil,
@@ -323,6 +331,16 @@ func runSoundPacksWindowAccessibilitySuites() {
             opened == "声音包管理窗口。共 2 个声音包。正在检查「我的包」。",
             "打开播报必须交代窗口、数量与检查对象，实得 \(opened)")
 
+        let loading = soundPacksWindowAnnouncement(
+            .windowOpened,
+            facts: SoundPacksWindowAnnouncementFacts(
+                packCount: 0,
+                selectedPackName: nil,
+                libraryPresentationState: .loading))
+        expect(
+            loading == "声音包管理窗口。正在读取声音包。",
+            "首次加载不能被播成空库，实得 \(loading)")
+
         let empty = soundPacksWindowAnnouncement(
             .windowOpened,
             facts: SoundPacksWindowAnnouncementFacts(
@@ -331,6 +349,26 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             empty == "声音包管理窗口。没有可管理的声音包。",
             "空态打开播报必须诚实，实得 \(empty)")
+
+        let loadFailure = soundPacksWindowAnnouncement(
+            .libraryStateChanged,
+            facts: SoundPacksWindowAnnouncementFacts(
+                packCount: 0,
+                selectedPackName: nil,
+                libraryPresentationState: .loadFailed(reason: "没有权限")))
+        expect(
+            loadFailure == "读取声音包失败：没有权限。可以重试。",
+            "首次读取失败必须通过窗口公告通道给出原因与恢复动作，实得 \(loadFailure)")
+
+        let refreshFailure = soundPacksWindowAnnouncement(
+            .libraryStateChanged,
+            facts: SoundPacksWindowAnnouncementFacts(
+                packCount: 2,
+                selectedPackName: "我的包",
+                libraryPresentationState: .refreshFailed(reason: "磁盘暂不可用")))
+        expect(
+            refreshFailure == "刷新声音包失败，正在显示上次结果：磁盘暂不可用。可以重试。",
+            "有旧快照的失败不得播成空库或抹掉 stale fallback，实得 \(refreshFailure)")
 
         let selection = soundPacksWindowAnnouncement(
             .selectionChanged,
