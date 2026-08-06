@@ -660,6 +660,7 @@ struct SoundPacksWindowView: View {
             guard
                 case .success(let completion) = result,
                 let imported = completion.result.accepted.last,
+                !completion.completedInBackground,
                 completion.targetPackID == model.selectedPackID,
                 case .success = model.assignImportedAudioFile(imported, to: event)
             else { return }

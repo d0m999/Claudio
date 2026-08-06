@@ -627,9 +627,21 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// 侧栏只改变窗口正在查看的包，不写 config，也不改变面板当前包。
     @discardableResult
     public func selectPackForInspection(_ packID: String) -> Bool {
+        selectPackForInspection(packID, selectionAnnouncementSuppression: nil)
+    }
+
+    /// The public entry point represents a user-owned selection, so it cancels both halves of a
+    /// pending fork auto-selection. The private path below is used only when a synchronous fork
+    /// selects its just-created pack and must suppress that one programmatic selection announcement.
+    @discardableResult
+    private func selectPackForInspection(
+        _ packID: String,
+        selectionAnnouncementSuppression: String?
+    ) -> Bool {
         guard packCards.contains(where: { $0.id == packID }) else { return false }
         pendingFollowActivePack = false
         pendingInspectionPackID = nil
+        suppressedSelectionAnnouncementPackID = selectionAnnouncementSuppression
         guard selectedPackID != packID else { return true }
         inspectionSelectionRevision += 1
         selectedPackID = packID
@@ -715,8 +727,9 @@ public final class SoundPacksWindowModel: ObservableObject {
                         .failure(.publishedButUnavailable(newID: newPackID)),
                         publishCompletion: false)
                 }
-                suppressedSelectionAnnouncementPackID = newPackID
-                selectPackForInspection(newPackID)
+                selectPackForInspection(
+                    newPackID,
+                    selectionAnnouncementSuppression: newPackID)
                 let outcome = PackForkOutcome(
                     sourcePackID: sourcePackID,
                     newPackID: newPackID,

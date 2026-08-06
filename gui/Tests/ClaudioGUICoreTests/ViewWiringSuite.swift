@@ -2719,6 +2719,18 @@ func runViewWiringSuites() {
                 && window.contains("previewPlayer.play("),
             "管理窗口导入必须捕获 expectedPackID，经异步 model action 返回可试听文件后才播放；"
                 + "不能按回调时的新选择串包反馈/试听")
+        guard let importAndBindBody = closureBody(after: "private func importAndBind(", in: window) else {
+            expect(false, "必须能切出逐事件导入并绑定的异步完成处理")
+            return
+        }
+        let normalizedImportAndBindBody = collapsingWhitespace(importAndBindBody)
+        expect(
+            normalizedImportAndBindBody.contains("!completion.completedInBackground")
+                && normalizedImportAndBindBody.contains("completion.targetPackID == model.selectedPackID")
+                && normalizedImportAndBindBody.contains(
+                    "model.assignImportedAudioFile(imported, to: event)"),
+            "逐事件绑定必须同时要求目标包仍匹配且 completion 仍属于前台检查会话；"
+                + "A→B→A 的后台导入结果不得改写当前事件或触发试听")
         expect(
             window.contains("model.previewFileForSelectedEvent(")
                 && window.contains(".eventPreview(row.event)")

@@ -782,6 +782,12 @@ func runSoundPackLibrarySuites() async {
                     }
                 },
                 "刷新完成后必须保留用户选择，不得跳回 fork 副本")
+            expect(
+                model.selectPackForInspection(outcome.newPackID),
+                "刷新完成后用户必须仍能手动选择新副本")
+            expect(
+                !model.consumeSelectionAnnouncementSuppression(for: outcome.newPackID),
+                "手动取消 fork 自动选择后，首次选择新副本必须保留正常 VoiceOver 选中播报")
         }
     }
 
