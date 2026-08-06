@@ -183,12 +183,15 @@ func runReleaseLayoutSuites() {
             package.contains(#".process("Resources/HostIcons")"#),
             "ClaudioGUI executable target 必须显式声明 HostIcons SwiftPM 资源")
         expect(
-            eventRow.contains("Bundle.main.resourceURL")
+            eventRow.contains(#"Bundle.main.bundleURL.lastPathComponent == "claudi0.app""#)
+                && eventRow.contains("return .module")
+                && eventRow.contains("Bundle.main.resourceURL")
                 && eventRow.contains(#"hasSuffix("_ClaudioGUI.bundle")"#)
                 && eventRow.contains("guard candidates.count == 1")
                 && eventRow.contains("hostIconResourceBundle.image(forResource:")
                 && eventRow.contains("image.isTemplate = true"),
-            "打包运行时必须从 Contents/Resources 解析唯一 GUI resource bundle，不能直接依赖 Bundle.module")
+            "只有真实 claudi0.app 才能从 Contents/Resources 解析唯一 GUI resource bundle；"
+                + "Xcode Preview 与 SwiftPM 开发进程必须回退到 Bundle.module")
         let pdfNames = resources
             .filter { $0.pathExtension.lowercased() == "pdf" }
             .map(\.lastPathComponent)

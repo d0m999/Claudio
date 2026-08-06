@@ -417,6 +417,15 @@ func runIntegrationsWindowWiringSuites() {
             row.contains("row.event.displayName")
                 && !row.contains("func eventDisplayName"),
             "EventRowView 必须直接复用 Event.displayName，禁止保留第二份中文 switch")
+        expect(
+            row.components(separatedBy: "HStack(spacing: 6)").count - 1 == 2
+                && row.contains("HStack(spacing: 5)")
+                && row.contains("Spacer(minLength: 0)")
+                && row.contains(".layoutPriority(1)"),
+            "标准 286pt 内容宽度必须压缩行内空白并优先保留完整事件标题")
+        expect(
+            panel.contains("case .large: .largest"),
+            "较大界面文字必须进入既有两行降级，不能继续在 312pt 单行内截断事件标题")
         for forbidden in [
             "EventHostCoveragePresentation", "hostCoverage", "宿主覆盖未检测",
             "两个来源", "仅 Claude Code", "PermissionRequest", "HostID.allCases",
@@ -871,7 +880,8 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             gallery.contains("ForEach(PreviewFixtures.interfaceTextSizes)")
                 && gallery.contains("hostIndicators: interfaceTextHostIndicators")
-                && gallery.contains("panelLayoutAdaptation(for: panelTier)"),
+                && gallery.contains("panelLayoutAdaptation(for: panelTier)")
+                && gallery.contains("case .large: .largest"),
             "四档界面文字帧必须带真实宿主 Logo，并复用生产行布局降级")
         expect(
             fixtures.contains("title: \"claudi0 已写好，等待 Codex 确认\"")

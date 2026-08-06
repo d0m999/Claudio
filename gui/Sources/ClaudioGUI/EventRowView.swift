@@ -8,9 +8,9 @@ import SwiftUI
 /// SwiftPM's generated `Bundle.module` accessor looks beside `Bundle.main.bundleURL`, which is
 /// correct for `swift run` but not for our hand-assembled macOS app: its resource bundle lives in
 /// `Contents/Resources`. Resolve that packaged location explicitly and keep `.module` only as the
-/// development-build fallback. The assembly scripts enforce the same exactly-one contract.
+/// development/Xcode Preview fallback. The assembly scripts enforce the same exactly-one contract.
 private let hostIconResourceBundle: Bundle = {
-    guard Bundle.main.bundleURL.pathExtension == "app" else {
+    guard Bundle.main.bundleURL.lastPathComponent == "claudi0.app" else {
         return .module
     }
     guard let resourcesURL = Bundle.main.resourceURL else {
@@ -88,7 +88,9 @@ public struct EventRowView: View {
                     }
                 }
             } else {
-                HStack(spacing: 8) {
+                // The standard panel leaves 286pt after padding. Keep the gaps compact so the
+                // fixed status/Logo/action slots still leave the longest event title intact.
+                HStack(spacing: 6) {
                     identityButton
                     coverageCapsule
                     previewButton
@@ -102,13 +104,14 @@ public struct EventRowView: View {
 
     private var identityButton: some View {
         Button(action: onOpenEditor) {
-            HStack(spacing: 8) {
+            HStack(spacing: 5) {
                 ClaudioEventGlyph(event: row.event)
                 Text(row.event.displayName)
                     .font(ClaudioTheme.font(.body).weight(.medium))
                     .foregroundColor(ClaudioTheme.text(colorScheme))
                     .lineLimit(1)
-                Spacer(minLength: 6)
+                    .layoutPriority(1)
+                Spacer(minLength: 0)
                 hostIndicatorGroup
             }
             .contentShape(Rectangle())

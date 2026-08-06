@@ -567,7 +567,7 @@ public struct PanelView: View {
     private var typeSizeTier: PanelTypeSizeTier {
         switch interfaceTextSize {
         case .compact, .standard: .standard
-        case .large: .larger
+        case .large: .largest
         case .maximum: .maximum
         }
     }

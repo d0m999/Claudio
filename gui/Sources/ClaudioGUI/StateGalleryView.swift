@@ -322,7 +322,7 @@ import SwiftUI
         private var panelTier: PanelTypeSizeTier {
             switch size {
             case .compact, .standard: .standard
-            case .large: .larger
+            case .large: .largest
             case .maximum: .maximum
             }
         }
