@@ -661,7 +661,7 @@ struct SoundPacksWindowView: View {
                 case .success(let completion) = result,
                 let imported = completion.result.accepted.last,
                 completion.targetPackID == model.selectedPackID,
-                case .success = model.assignSelectedAudioFile(imported.fileName, to: event)
+                case .success = model.assignImportedAudioFile(imported, to: event)
             else { return }
             if previewVolume(for: model.config) > 0 {
                 previewPlayer.play(

@@ -629,6 +629,7 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func selectPackForInspection(_ packID: String) -> Bool {
         guard packCards.contains(where: { $0.id == packID }) else { return false }
         pendingFollowActivePack = false
+        pendingInspectionPackID = nil
         guard selectedPackID != packID else { return true }
         inspectionSelectionRevision += 1
         selectedPackID = packID
@@ -1149,19 +1150,48 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard selectedAudioFiles.contains(where: { $0.fileName == fileName }) else {
             return finishAudioAction(.failure(.notInInventory(fileName: fileName)))
         }
-        beginSoundPackMutation(packIDs: [selectedPackID])
+        return bindSelectedAudioFile(fileName, to: event, packID: selectedPackID)
+    }
+
+    /// Binds a file returned by the immediately preceding import. The async shared-library
+    /// inventory may still be projecting the pre-import directory, so this path trusts the
+    /// import result's pack identity and lets the audited manifest primitive re-check the file.
+    @discardableResult
+    public func assignImportedAudioFile(
+        _ importedFile: ImportedAudioFile,
+        to event: Event
+    ) -> Result<Void, SoundPacksWindowAudioActionError> {
+        guard let selectedPackID else {
+            return finishAudioAction(.failure(.noSelectedPack))
+        }
+        guard selectedPackID == importedFile.packID else {
+            return finishAudioAction(.failure(.selectionChanged))
+        }
+        guard !builtinPackIDs.contains(selectedPackID) else {
+            return finishAudioAction(.failure(.builtinReadOnly(packID: selectedPackID)))
+        }
+        return bindSelectedAudioFile(importedFile.fileName, to: event, packID: selectedPackID)
+    }
+
+    @discardableResult
+    private func bindSelectedAudioFile(
+        _ fileName: String,
+        to event: Event,
+        packID: String
+    ) -> Result<Void, SoundPacksWindowAudioActionError> {
+        beginSoundPackMutation(packIDs: [packID])
 
         switch bindEventToManifest(
             event: event,
             fileName: fileName,
-            packID: selectedPackID,
+            packID: packID,
             environment: environment)
         {
         case .success:
-            return finishAudioAction(.success(()), invalidatingPackID: selectedPackID)
+            return finishAudioAction(.success(()), invalidatingPackID: packID)
         case .failure(let error):
             return finishAudioAction(
-                .failure(.bind(error)), invalidatingPackID: selectedPackID)
+                .failure(.bind(error)), invalidatingPackID: packID)
         }
     }
 
