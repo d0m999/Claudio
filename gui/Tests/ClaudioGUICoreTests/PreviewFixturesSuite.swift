@@ -216,6 +216,12 @@ func runPreviewFixturesSuites() {
             scenarios.first(where: { $0.id == "awaiting-narrow" })?.adaptation
                 .rowWrapsToTwoLines == true,
             "待激活帧必须检查窄版两行布局")
+        expect(
+            scenarios.first(where: { $0.id == "full-color" })?.title.contains("Logo 18pt") == true
+                && scenarios.first(where: { $0.id == "awaiting-narrow" })?.title
+                    .contains("Logo 18pt") == true
+                && scenarios.allSatisfy { !$0.title.contains("22pt") && !$0.title.contains("19pt") },
+            "Preview fixture 描述必须统一使用修正版 18pt Logo，不能留下旧的 22/19pt 规格")
     }
 
     // MARK: - PackCard: PackCardState × isSelected, every combination — plus the coverage

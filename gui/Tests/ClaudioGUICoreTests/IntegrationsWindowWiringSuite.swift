@@ -418,8 +418,8 @@ func runIntegrationsWindowWiringSuites() {
                 && !row.contains("func eventDisplayName"),
             "EventRowView 必须直接复用 Event.displayName，禁止保留第二份中文 switch")
         expect(
-            row.components(separatedBy: "HStack(spacing: 6)").count - 1 == 2
-                && row.contains("HStack(spacing: 5)")
+            row.components(separatedBy: "HStack(spacing: 6)").count - 1 == 3
+                && row.contains("HStack(spacing: 4)")
                 && row.contains("Spacer(minLength: 0)")
                 && row.contains(".layoutPriority(1)"),
             "标准 286pt 内容宽度必须压缩行内空白并优先保留完整事件标题")
@@ -450,10 +450,11 @@ func runIntegrationsWindowWiringSuites() {
             indicatorGroup.contains(".accessibilityHidden(true)"),
             "Logo 自身必须从 VoiceOver 树隐藏，由事件编辑入口统一播报")
         expect(
-            indicatorGroup.contains("HStack(spacing: 5)")
-                && row.contains("adaptation.rowWrapsToTwoLines ? 19 : 22")
+            indicatorGroup.contains("HStack(spacing: 4)")
+                && row.contains("private let hostIndicatorSize: CGFloat = 18")
+                && !row.contains("adaptation.rowWrapsToTwoLines ? 19 : 22")
                 && row.contains("secondaryText(colorScheme).opacity(0.75)"),
-            "Logo 必须使用 5pt 间距、标准 22pt / 窄版 19pt 与 text-2 @75% 灰色")
+            "Logo 必须统一使用 4pt 间距、18pt 几何与 text-2 @75% 灰色")
         for forbidden in [".background(", ".overlay(", ".animation(", ".onHover("] {
             expect(!indicatorGroup.contains(forbidden), "Logo 必须无框、无底、无 hover 动画：\(forbidden)")
         }

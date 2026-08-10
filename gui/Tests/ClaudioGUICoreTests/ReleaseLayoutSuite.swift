@@ -1,4 +1,5 @@
 import ClaudioGUICore
+import CryptoKit
 import Foundation
 
 // MARK: - app bundle 布局契约：GUI 是消费者，release.yml 是生产者（T17）
@@ -199,12 +200,60 @@ func runReleaseLayoutSuites() {
         expect(
             pdfNames == ["claude.pdf", "codex.pdf"],
             "运行时资源必须精确包含两枚 template PDF，实得 \(pdfNames)")
+        expect(
+            resources.map(\.lastPathComponent).sorted() == ["claude.pdf", "codex.pdf"],
+            "HostIcons 运行时目录不得混入 SVG 或其它资源")
         for pdf in resources.filter({ $0.pathExtension.lowercased() == "pdf" }) {
             let data = try? Data(contentsOf: pdf)
+            let pdfText = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
             expect(
-                data?.starts(with: Data("%PDF".utf8)) == true && (data?.count ?? 0) > 100,
-                "\(pdf.lastPathComponent) 必须是非空 PDF，不得把 SVG 改后缀冒充")
+                data?.starts(with: Data("%PDF".utf8)) == true
+                    && (data?.count ?? 0) > 100
+                    && pdfText.contains("/Type /Page")
+                    && pdfText.contains("/Count 1")
+                    && pdfText.contains("/MediaBox [0 0 24 24]")
+                    && pdfText.contains("%%EOF"),
+                "\(pdf.lastPathComponent) 必须是有效单页 PDF，MediaBox 必须为 24×24pt")
         }
+
+        let codexRuntimePDF = resourceURL.appendingPathComponent("codex.pdf")
+        let codexPDFText = (try? String(contentsOf: codexRuntimePDF, encoding: .isoLatin1)) ?? ""
+        expect(
+            codexPDFText.contains("/Subtype /Form")
+                && codexPDFText.contains("/S /Transparency")
+                && !codexPDFText.contains("/Subtype /Image"),
+            "codex.pdf 必须保留透明模板/矢量语义；不允许用无透明度整幅位图，否则 isTemplate 会把 24×24 画布染成实心方块")
+
+        let codexSourceURL = root.appendingPathComponent("assets/host-icons/codex.svg")
+        let hostIconReadmeURL = root.appendingPathComponent("assets/host-icons/README.md")
+        guard
+            let codexSourceData = try? Data(contentsOf: codexSourceURL),
+            let codexSource = String(data: codexSourceData, encoding: .utf8),
+            let hostIconReadme = try? String(contentsOf: hostIconReadmeURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 Codex Blossom SVG 或 HostIcons 来源台账")
+            return
+        }
+        let codexHash = SHA256.hash(data: codexSourceData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        expect(
+            codexHash == "2674292c146cd5c5c41819e19c6edb268bbba73832e088aa338750bfb92b8b4e",
+            "codex.svg 必须固定为批准稿的 OpenAI 2025 Blossom 几何，实得 SHA-256 \(codexHash)")
+        expect(
+            codexSource.contains(
+                #"fill="currentColor" height="24" viewBox="0 0 20 20" width="24""#)
+                && codexSource.contains(#"<path d="M11.248 18.25q-.825 0-1.568-.314"#)
+                && !codexSource.contains(#"M8.086.457"#)
+                && !codexSource.contains("<rect")
+                && !codexSource.contains("background"),
+            "codex.svg 必须是 24×24 方形透明 SVG，并保留批准稿完整 OpenAI Blossom path")
+        expect(
+            hostIconReadme.contains(codexHash)
+                && hostIconReadme.contains("OpenAI 2025 Blossom")
+                && !hostIconReadme.contains("theSVG")
+                && !hostIconReadme.contains("community"),
+            "HostIcons 来源台账必须记录 OpenAI 2025 Blossom 的当前 SHA，并删除社区来源")
 
         for (name, source) in [("dev", dev), ("release", release)] {
             expect(

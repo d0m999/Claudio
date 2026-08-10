@@ -411,7 +411,7 @@ public enum PreviewFixtures {
     public static let eventHostIndicatorScenarios: [EventHostIndicatorScenario] = [
         eventHostIndicatorScenario(
             id: "full-color",
-            title: "双宿主已连接 · 标准 22pt",
+            title: "双宿主已连接 · 标准 Logo 18pt",
             event: .stop,
             sourceScenarioID: "dual-connected",
             tier: .standard),
@@ -435,7 +435,7 @@ public enum PreviewFixtures {
             tier: .standard),
         eventHostIndicatorScenario(
             id: "awaiting-narrow",
-            title: "Codex 待激活 · 窄版两行 19pt",
+            title: "Codex 待激活 · 窄版两行 · Logo 18pt",
             event: .notification,
             sourceScenarioID: "codex-awaiting",
             tier: .largest),

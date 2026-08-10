@@ -180,7 +180,7 @@
 ## Spacing（间距）
 
 - **基准单位**：4px。
-- **密度**：comfortable-compact（菜单栏面板要紧凑但不挤）。菜单栏面板行高 ~28pt，面板内边距 12–13pt。
+- **密度**：comfortable-compact（菜单栏面板要紧凑但不挤）。普通控件行高 ~28pt；事件行标准档最小高度 **37pt**，较大文字两行布局保持 **52pt**；面板内边距 12–13pt。
 - **阶梯**：2 · 4 · 8 · 12 · 16 · 24 · 32 · 48。
 
 ## Layout（布局）
@@ -190,7 +190,7 @@
 - **面板材质（关键决策）**：**近实心暖表面（`panel`）+ 1px `hairline-strong` 描边 + 柔和阴影**，**不用**满毛玻璃 vibrancy —— 因为 vibrancy 会被壁纸「染色」，而 claudi0 是颜色即语义的产品，事件色必须显示为真色（参照 Itsycal 的实心表面做法）。
 - **圆角阶梯**（**⚠ 2026-07-17 糖果盘上调，现行见「现行视觉皮肤：糖果盘」②；下列 v1 值存档**）：〔v1 存档〕控件 / 芯片 6px · 卡片 / 行 10px · 面板 14–16px · 开关 / 声音芯片 pill(999)；覆盖轨 slot 两档：面板行档 = **胶囊（pill 999 档的半高应用）**；管理窗口微型档 9×9 radius 2（阶梯外微几何）。〔糖果盘现行〕控件 / 芯片 6 · **行卡 13** · tile 11 · **面板 18** · 微型 tile 9 · 开关 / 胶囊 pill(999)；覆盖轨改**横排糖豆胶囊**（present 实心 ≈14×7、missing 空壳 + 斜杠，见 ⑥）。
 - **最大内容宽（营销）**：~1060px。
-- **行结构（每事件行）**：`[事件字形 tile 24pt, 事件色, 圆角6] · [事件名 SF Pro 13 + 原始 id JetBrains Mono 10] · [声音文件名 mono] · [波形] · [圆形试听键 speaker.wave.2, 事件色]`。此为 `present` 态的完整结构；事件行共有三态 `CoverageState{present | unmapped | broken}`，`unmapped` / `broken` 收起文件名 / 波形、试听禁用、行尾出「导入绑定」入口（详见 State Components 的「事件行三态」条）。
+- **行结构（每事件行）**：`[事件字形 tile 24pt, 事件色, 圆角6] · [事件名 SF Pro Rounded 12.5pt medium（标准档，随界面文字缩放） + 原始 id JetBrains Mono 10] · [声音文件名 mono] · [波形] · [圆形试听键 speaker.wave.2, 事件色]`。此为 `present` 态的完整结构；事件行共有三态 `CoverageState{present | unmapped | broken}`，`unmapped` / `broken` 收起文件名 / 波形、试听禁用、行尾出「导入绑定」入口（详见 State Components 的「事件行三态」条）。
 - **控件行（Control Row）—— 面板里一切非事件的设置行**（主音量滑块 · 未来的开关 / 步进器 / 行内按钮）。**这一节管的是既成事实，不是新发明**：`OnboardingView` 主 CTA 早已是「原生外壳 + `.tint(clay)`」，此处只是把它升格成全 App 规则。
   - **原生外壳，不自绘**：`Slider` / `Button` / `Toggle` / `Stepper` 一律保留系统绘制的**轨道 · 拇指 · 焦点环 · 按下态 · hover**。品牌强调**只经 `.tint(ClaudioColor.clay(colorScheme))` 一个入口**施加。理由同「App 内 UI = 系统 SF Pro」：自绘控件会连带丢掉 macOS 的焦点环、按下反馈与辅助功能行为，为一点视觉自由付整套原生正确性的账。**先例**：`OnboardingView.swift:102-103` `.buttonStyle(.borderedProminent) + .tint(clay)`。故本设计系统**不定义**轨道高度 / 拇指直径 / 焦点环 —— 那不是我们的决策面。
   - **行解剖**：`[标签 SF Pro 13 · text] · Spacer · [原生控件]`。行高 ~28pt、内边距沿用面板 12–13pt、**无分隔线**（面板全局零 `Divider`，与事件行、包行一致）。**关键：控件行没有事件色 tile** —— 这是它与事件行的唯一结构差别，也是它不会被误读成「第五个事件行」的全部依据。
@@ -240,11 +240,11 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 **事件行宿主 Logo（事实状态，不是品牌）**
 
 - 第一列固定为 `[事件字形] [事件标题] [弹性空白] [宿主 Logo 组]`；删除“两个来源 / 仅 Claude Code”等来源副标题，也不显示“宿主覆盖未检测”兜底。映射胶囊、试听与静音仍保持原位。Logo 顺序只取共享能力矩阵的 `hostColumns`，View 不保留 Claude/Codex 对照表。
-- Logo 是只读状态指示：无边框、无底色、无 hover 动画，不提供切换，也不新增键盘焦点。标准单行尺寸 **22pt**，窄版两行尺寸 **19pt**，间距 **5pt**；Logo 不得挤压映射胶囊。
+- Logo 是只读状态指示：无边框、无底色、无 hover 动画，不提供切换，也不新增键盘焦点。事件标题标准档为 **12.5pt、SF Pro Rounded、medium**，经 `@ScaledMetric(relativeTo: .body)` 响应四档「界面文字」设置；标准单行与窄版两行的 Logo 均为 **18×18pt**，Logo 间距 **4pt**，事件字形与标题间距 **6pt**。标准行最小高度 **37pt**，两行布局保持 **52pt**；Logo 不得挤压映射胶囊。
 - 彩色表示宿主已连接并支持该事件：矩阵 `.audible`、`.muted`、`.missingSound` 使用连接色，`.legacy` 使用连接色但鼠标帮助明确“旧版连接”。静音或缺少声音继续由静音键 / 映射胶囊表达，不得把宿主误画成断开。
 - 灰色表示 `.notConnected`、`.awaitingActivation`、`.unsupported`、`.degraded` 或矩阵缺格；统一使用当前主题 `text-2` **75%**。鼠标帮助分别为“未连接 / 待激活 / 此事件不支持 / 需处理”。灰色不是唯一信号：Logo 从 VoiceOver 树隐藏，完整工具名、连接状态与能力限定语合并进事件编辑入口的 label。
 - 连接状态色（**claudi0 状态色，不是官方品牌色**）：Claude 暗/亮 `#E48667 / #BD6549`；Codex 暗/亮 `#79C995 / #318A50`。四个实色与 `text-2 @75%` 均须对暗色面板、亮色渐变最深端达到非文本 **≥3:1**。
-- 几何母版与来源记录在 `assets/host-icons/README.md`：Claude Spark 按 [Anthropic Press Kit](https://www.anthropic.com/press-kit) 校验；Codex/OpenAI 标识按 [OpenAI Design Guidelines](https://openai.com/brand/) 校验。商标分别归 Anthropic PBC 与 OpenAI；这里只用于说明事实归属，不表示背书，也不成为 claudi0 品牌资产。macOS 12 运行时只加载由母版生成的单色 template PDF，不直接依赖系统 SVG 解码。
+- 几何母版与来源记录在 `assets/host-icons/README.md`：Claude Spark 按 [Anthropic Press Kit](https://www.anthropic.com/press-kit) 校验；Codex 使用批准的 **OpenAI 2025 Blossom**，按 [OpenAI Design Guidelines](https://openai.com/brand/) 校验。商标分别归 Anthropic PBC 与 OpenAI；这里只用于说明事实归属，不表示背书，也不成为 claudi0 品牌资产。OpenAI 要求的 Blossom 保持单色；这里的绿色/灰色只表达 claudi0 的宿主状态，不宣称是官方品牌配色。macOS 12 运行时只加载由母版生成的单色 template PDF，不直接依赖系统 SVG 解码。
 - 静音按钮使用批准的 24×24 自绘扬声器：正常态始终有两道声波；静音态两道声波降至 **24%** 并叠加斜线。按钮的颜色、动作、焦点身份与 VoiceOver 文案不变。
 
 ### 五事件 × 两宿主可听能力
@@ -450,4 +450,5 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 | 2026-08-02 | 产品品牌改为小写 `claudi0`（仍读作 “Claudio”），主图标改为 **C / Signal** | 数字 `0` 提供更独特的字标与域名 / icon 延展空间；C 外环、脉冲、信号点在 16px 到 1024px 保持同一几何。对外 app / DMG / CLI alias 使用 `claudi0`；为避免用户设置与 hooks 失效，`ClaudioCore` / `ClaudioGUI`、`~/.claudio/`、`~/.claudio/bin/claudio` 与 `com.claudio.app` 保持兼容。 |
 | 2026-08-04 | 全部 UI 品牌标识切换为 **Orbit Zero** | 用户以官网 Orbit Zero 字标稿拍板替换现有 UI logo。面板与首次启动页共用 `ClaudioOrbitWordmark`；菜单栏压缩为 `0 + 斜轨 + 信号点`；App Icon、SVG、PNG 与 `.icns` 同源更新。完整横向字标不硬塞进 16pt 状态栏，避免可读性退化；VoiceOver 仍只朗读 `claudi0` 与既有状态句。 |
 | 2026-08-07 | 菜单栏事件行删除来源副标题，改为共享能力矩阵驱动的 Claude Code / Codex 只读 Logo；`notification` 的全产品名称统一为“待响应” | Logo 只表达“该工具当前是否连接并支持此事件”，不成为 claudi0 品牌或交互开关。`.audible/.muted/.missingSound/.legacy` 彩色，其余状态与缺格灰色；22/19pt、间距 5pt、无框无底无 hover。VoiceOver 信息合并进既有事件编辑入口，焦点顺序不变；底层 `notification` 契约不变。两枚 24×24 母版生成 template PDF，以兼容 macOS 12。 |
+| 2026-08-10 | 采用批准稿 C 修正版，收紧事件区排版并替换 Codex 几何 | **替代 2026-08-07 的 22/19pt、5pt 规格与社区 Codex 几何记录**：事件标题标准档定为 12.5pt SF Pro Rounded medium，并经 `@ScaledMetric(relativeTo: .body)` 响应四档界面文字；两种布局的宿主 Logo 统一 18×18pt，Logo 间距 4pt，事件字形与标题间距 6pt，标准行 37pt、两行 52pt。Codex 母版改用批准的 OpenAI 2025 Blossom；Claude Spark、状态语义、VoiceOver 合并方式、映射胶囊、试听、静音、能力矩阵与底层事件键均不变。 |
 | 2026-08-05 | 「界面文字」采用方案 C 步进调节：固定 `Aa⌄` 触发器 + 固定 280pt 子 Popover + 原生两侧 A 按钮 | 方案 C 在保持暖色原生面板的同时减少一层菜单；实时 `Binding<ClaudioInterfaceTextSize>` 继续写入共享 `@AppStorage`，四档、非法值回退、跨窗口同步和现有 Panel 首焦点契约不变。 |

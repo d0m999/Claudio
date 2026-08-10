@@ -53,6 +53,11 @@ public struct EventRowView: View {
 
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
     @Environment(\.colorScheme) private var colorScheme
+    @ScaledMetric(relativeTo: .body) private var eventTitleSize: CGFloat = 12.5
+
+    /// Host marks are factual status indicators, not controls. Keep their geometry fixed while
+    /// the event title follows the panel's four interface-text tiers.
+    private let hostIndicatorSize: CGFloat = 18
 
     public init(
         row: EventRow,
@@ -98,16 +103,16 @@ public struct EventRowView: View {
                 }
             }
         }
-        .frame(minHeight: adaptation.rowWrapsToTwoLines ? 52 : 32)
+        .frame(minHeight: adaptation.rowWrapsToTwoLines ? 52 : 37)
         .accessibilityElement(children: .contain)
     }
 
     private var identityButton: some View {
         Button(action: onOpenEditor) {
-            HStack(spacing: 5) {
+            HStack(spacing: 6) {
                 ClaudioEventGlyph(event: row.event)
                 Text(row.event.displayName)
-                    .font(ClaudioTheme.font(.body).weight(.medium))
+                    .font(.system(size: eventTitleSize, design: .rounded).weight(.medium))
                     .foregroundColor(ClaudioTheme.text(colorScheme))
                     .lineLimit(1)
                     .layoutPriority(1)
@@ -133,7 +138,7 @@ public struct EventRowView: View {
     }
 
     private var hostIndicatorGroup: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 4) {
             ForEach(hostIndicators) { indicator in
                 hostIndicatorImage(for: indicator.host)
                     .resizable()
@@ -199,10 +204,6 @@ public struct EventRowView: View {
         ]
         parts.append(contentsOf: hostIndicators.map(\.accessibilityLabel))
         return parts.joined(separator: "，")
-    }
-
-    private var hostIndicatorSize: CGFloat {
-        adaptation.rowWrapsToTwoLines ? 19 : 22
     }
 
     private func hostIndicatorColor(_ indicator: EventHostIndicatorPresentation) -> Color {

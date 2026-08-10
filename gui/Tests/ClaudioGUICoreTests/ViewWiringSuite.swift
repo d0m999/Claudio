@@ -2589,6 +2589,46 @@ func runViewWiringSuites() {
                 + "禁用的试听 ▶ 会被合并进行摘要而不是单独播报「变灰」")
     }
 
+    suite("EventRowView：C 修正版锁定标题、Logo 几何与行高，Logo 保持只读") {
+        guard let rowSource = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift") else {
+            expect(false, "读不到 EventRowView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(rowSource)
+        expect(
+            flat.contains("@ScaledMetric(relativeTo: .body) private var eventTitleSize: CGFloat = 12.5")
+                && flat.contains(".font(.system(size: eventTitleSize, design: .rounded).weight(.medium))"),
+            "事件标题必须是 12.5pt SF Pro Rounded medium，并通过 @ScaledMetric 响应四档界面文字")
+        expect(
+            flat.contains("private let hostIndicatorSize: CGFloat = 18")
+                && flat.contains(".frame(minHeight: adaptation.rowWrapsToTwoLines ? 52 : 37)"),
+            "Logo 必须统一 18pt；标准行最小高度 37pt，两行布局保持 52pt")
+
+        guard
+            let identityBody = closureBody(after: "private var identityButton: some View", in: flat),
+            let indicatorBody = closureBody(
+                after: "private var hostIndicatorGroup: some View", in: flat)
+        else {
+            expect(false, "切不出事件身份或宿主 Logo 视图体")
+            return
+        }
+        expect(
+            identityBody.contains(
+                "HStack(spacing: 6) { ClaudioEventGlyph(event: row.event) Text(row.event.displayName)"),
+            "事件字形与标题之间必须使用修正版 6pt 间距")
+        expect(
+            indicatorBody.contains("HStack(spacing: 4) { ForEach(hostIndicators)"),
+            "宿主 Logo 之间必须使用修正版 4pt 间距")
+        for forbidden in [
+            "Button(", ".buttonStyle(", ".focused(", ".onHover(", ".hoverEffect(",
+            ".background(", ".overlay(", ".border(", ".stroke(",
+        ] {
+            expect(
+                !indicatorBody.contains(forbidden),
+                "宿主 Logo 组不得出现独立交互或装饰 \(forbidden)，否则会改变只读状态语义")
+        }
+    }
+
     suite(
         "EventRowView：三槽焦点身份各自恰好一个 owner、owner 正确、且源码顺序 = 文件名 Menu → 试听 ▶ → 静音钮（PLAN-SOUND-MANAGER.md §2.5 三槽焦点 / /codex review dcab3de,7e97bc4 P2）"
     ) {
