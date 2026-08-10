@@ -786,11 +786,21 @@ private struct HostSourceRowView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Button(action: onSelect, label: { cardSurface })
+        Button(action: onSelect) {
+            ZStack(alignment: .topLeading) {
+                // Keep the natural layout as a sibling of the visible card. A fixed shared
+                // height must never become the proposal that measures this view, otherwise a
+                // later host-state or text-size change can remain stuck at the previous height.
+                naturalCardLayout
+                    .hidden()
+                    .allowsHitTesting(false)
+                    .accessibilityHidden(true)
+                cardSurface
+            }
+        }
         .buttonStyle(.plain)
         // Keep the hit target equal to the visible card, including its blank lower area.
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .frame(height: equalizedHeight, alignment: .topLeading)
         .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
         .focused(focusedTarget, equals: .hostSource(row.host))
         .accessibilityLabel(row.accessibilityLabel)
@@ -800,14 +810,7 @@ private struct HostSourceRowView: View {
     }
 
     private var cardSurface: some View {
-        cardContent
-            .foregroundColor(ClaudioTheme.text(colorScheme))
-            .frame(maxWidth: .infinity, minHeight: 48 * typeScale, alignment: .topLeading)
-            .padding(8)
-            // Measure this natural card before applying the shared height. This keeps the
-            // measurement honest when either the width, Dynamic Type tier, or host detail text
-            // changes, and never introduces a hidden placeholder into the accessibility tree.
-            .background(naturalHeightMeasurement)
+        cardContentLayout
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .frame(height: equalizedHeight, alignment: .topLeading)
             .background(
@@ -817,6 +820,22 @@ private struct HostSourceRowView: View {
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
                     .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1))
             .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+    }
+
+    private var cardContentLayout: some View {
+        cardContent
+            .foregroundColor(ClaudioTheme.text(colorScheme))
+            .frame(maxWidth: .infinity, minHeight: 48 * typeScale, alignment: .topLeading)
+            .padding(8)
+    }
+
+    private var naturalCardLayout: some View {
+        cardContentLayout
+            // Preserve the proposed card width while asking the vertical axis for its ideal
+            // height. This is intentionally outside `cardSurface`'s equalized frame.
+            .fixedSize(horizontal: false, vertical: true)
+            .background(naturalHeightMeasurement)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private var cardContent: some View {

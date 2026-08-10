@@ -12,18 +12,23 @@ APP_PATH="${CLAUDIO_TEST_APP_PATH:-$PWD/dist/claudi0.app}"
 APP_EXECUTABLE="$APP_PATH/Contents/MacOS/claudi0-app"
 DEFAULTS_DOMAIN="com.claudio.app"
 TEXT_SIZE_KEY="Claudio.InterfaceTextSize"
+APPEARANCE_KEY="AppleInterfaceStyle"
+TEST_HOST_CARD_STATE="${CLAUDIO_TEST_HOST_CARD_STATE:-unequal}"
 TEST_TEXT_SIZE="${CLAUDIO_TEST_TEXT_SIZE:-maximum}"
 TEST_DIR="$(mktemp -d "${TMPDIR:-/tmp}/claudio-host-card-height.XXXXXX")"
 SCREENSHOT_PATH="$TEST_DIR/panel.png"
 TEST_PID=""
 PREVIOUS_TEXT_SIZE=""
 HAD_TEXT_SIZE=false
+PREVIOUS_APPEARANCE=""
+HAD_APPEARANCE=false
+OLD_PIDS=()
 
 restore_test_state() {
     set +e
     if [[ -n "$TEST_PID" ]] && kill -0 "$TEST_PID" 2>/dev/null; then
         kill -TERM "$TEST_PID" 2>/dev/null
-        for _ in 1 2 3 4 5 6 7 8 9 10; do
+        for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
             kill -0 "$TEST_PID" 2>/dev/null || break
             sleep 0.1
         done
@@ -32,6 +37,11 @@ restore_test_state() {
         defaults write "$DEFAULTS_DOMAIN" "$TEXT_SIZE_KEY" -string "$PREVIOUS_TEXT_SIZE"
     else
         defaults delete "$DEFAULTS_DOMAIN" "$TEXT_SIZE_KEY" >/dev/null 2>&1
+    fi
+    if [[ "$HAD_APPEARANCE" == true ]]; then
+        defaults write "$DEFAULTS_DOMAIN" "$APPEARANCE_KEY" -string "$PREVIOUS_APPEARANCE"
+    else
+        defaults delete "$DEFAULTS_DOMAIN" "$APPEARANCE_KEY" >/dev/null 2>&1
     fi
     rm -rf "$TEST_DIR"
 }
@@ -45,38 +55,79 @@ case "$TEST_TEXT_SIZE" in
         ;;
 esac
 
-if [[ -f "$APP_EXECUTABLE" ]]; then
-    while IFS= read -r pid; do
-        [[ -n "$pid" ]] || continue
-        kill -TERM "$pid" 2>/dev/null || true
-    done < <(pgrep -f "$APP_EXECUTABLE" || true)
-fi
+case "$TEST_HOST_CARD_STATE" in
+    unequal) ;;
+    *)
+        echo "FAIL: unsupported host-card probe state: $TEST_HOST_CARD_STATE" >&2
+        exit 1
+        ;;
+esac
 
 if PREVIOUS_TEXT_SIZE="$(defaults read "$DEFAULTS_DOMAIN" "$TEXT_SIZE_KEY" 2>/dev/null)"; then
     HAD_TEXT_SIZE=true
 fi
+if PREVIOUS_APPEARANCE="$(defaults read "$DEFAULTS_DOMAIN" "$APPEARANCE_KEY" 2>/dev/null)"; then
+    HAD_APPEARANCE=true
+fi
+
+if [[ -f "$APP_EXECUTABLE" ]]; then
+    while IFS= read -r pid; do
+        [[ -n "$pid" ]] || continue
+        OLD_PIDS+=("$pid")
+        kill -TERM "$pid" 2>/dev/null || true
+    done < <(pgrep -f "$APP_EXECUTABLE" || true)
+fi
+
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
+    old_pid_alive=false
+    if [[ ${#OLD_PIDS[@]} -gt 0 ]]; then
+        for pid in "${OLD_PIDS[@]}"; do
+            if kill -0 "$pid" 2>/dev/null; then
+                old_pid_alive=true
+                break
+            fi
+        done
+    fi
+    [[ "$old_pid_alive" == false ]] && break
+    sleep 0.1
+done
+if [[ ${#OLD_PIDS[@]} -gt 0 ]]; then
+    for pid in "${OLD_PIDS[@]}"; do
+        if kill -0 "$pid" 2>/dev/null; then
+            echo "FAIL: previous claudi0-app PID $pid did not exit after SIGTERM" >&2
+            exit 1
+        fi
+    done
+fi
 
 bash scripts/dev-bundle.sh
 defaults write "$DEFAULTS_DOMAIN" "$TEXT_SIZE_KEY" -string "$TEST_TEXT_SIZE"
-open "$APP_PATH"
+defaults write "$DEFAULTS_DOMAIN" "$APPEARANCE_KEY" -string "Light"
+CLAUDIO_TEST_HOST_CARD_STATE="$TEST_HOST_CARD_STATE" \
+    "$APP_EXECUTABLE" >"$TEST_DIR/app.log" 2>&1 &
+TEST_PID=$!
 
-for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-    if TEST_PID="$(pgrep -f "$APP_EXECUTABLE" | head -n 1)" && [[ -n "$TEST_PID" ]]; then
-        break
-    fi
-    sleep 0.25
-done
-if [[ -z "$TEST_PID" ]]; then
+if ! kill -0 "$TEST_PID" 2>/dev/null; then
     echo "FAIL: claudi0-app did not start" >&2
     exit 1
 fi
+if ! ps -p "$TEST_PID" -o command= | rg -F -q "$APP_EXECUTABLE"; then
+    echo "FAIL: launched PID $TEST_PID is not the requested claudi0-app bundle" >&2
+    exit 1
+fi
 
+MENU_BAR_READY=false
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     if osascript -e 'tell application "System Events" to tell process "claudi0-app" to count of menu bars' 2>/dev/null | rg -q '^2$'; then
+        MENU_BAR_READY=true
         break
     fi
     sleep 0.25
 done
+if [[ "$MENU_BAR_READY" != true ]]; then
+    echo "FAIL: claudi0-app did not publish its expected menu bar" >&2
+    exit 1
+fi
 
 osascript -e 'tell application "System Events" to tell process "claudi0-app" to perform action "AXPress" of menu bar item 1 of menu bar 2'
 
@@ -118,108 +169,4 @@ if [[ -z "$STATUS_GEOMETRY" ]]; then
     exit 1
 fi
 
-python3 - "$SCREENSHOT_PATH" <<'PY'
-import sys
-
-try:
-    from PIL import Image
-except ImportError:
-    print("FAIL: native host-card probe requires Python Pillow", file=sys.stderr)
-    raise SystemExit(1)
-
-image_path = sys.argv[1]
-image = Image.open(image_path).convert("RGB")
-image_width, image_height = image.size
-
-def neutral_runs(y: int, minimum_length: int):
-    runs = []
-    start = None
-    for x in range(image_width):
-        red, green, blue = image.getpixel((x, y))
-        is_neutral = max(red, green, blue) - min(red, green, blue) <= 12 and 200 <= red <= 245
-        if is_neutral and start is None:
-            start = x
-        if (not is_neutral or x == image_width - 1) and start is not None:
-            end = x if is_neutral and x == image_width - 1 else x - 1
-            if end - start + 1 >= minimum_length:
-                runs.append((start, end))
-            start = None
-    return runs
-
-# The first row containing two long neutral runs is the two-card top border. This derives the
-# card x-ranges from the captured window rather than assuming a particular Retina scale or
-# desktop coordinate. The later border scan then remains sensitive to unequal bottom rows.
-minimum_run = max(100, round(image_width * 0.10))
-candidate_groups = []
-for y in range(80, image_height):
-    runs = neutral_runs(y, minimum_run)
-    if len(runs) < 2:
-        continue
-    if not candidate_groups or y != candidate_groups[-1][-1][0] + 1:
-        candidate_groups.append([(y, runs)])
-    else:
-        candidate_groups[-1].append((y, runs))
-
-if not candidate_groups:
-    print("FAIL: could not locate the two host card top borders", file=sys.stderr)
-    raise SystemExit(1)
-
-top_group = candidate_groups[0]
-top_runs = sorted(top_group[0][1], key=lambda run: run[1] - run[0], reverse=True)[:2]
-top_runs.sort()
-if len(top_runs) != 2:
-    print("FAIL: could not separate the two host card top borders", file=sys.stderr)
-    raise SystemExit(1)
-
-card_regions = []
-for top_run in top_runs:
-    left = max(0, min(run[0] for _, runs in top_group for run in runs if abs((run[0] + run[1]) / 2 - (top_run[0] + top_run[1]) / 2) < image_width * 0.20) - 8)
-    right = min(image_width, max(run[1] for _, runs in top_group for run in runs if abs((run[0] + run[1]) / 2 - (top_run[0] + top_run[1]) / 2) < image_width * 0.20) + 9)
-    card_regions.append((left, right))
-
-def border_rows(left: int, right: int):
-    width = right - left
-    row_hits = []
-    for y in range(top_group[-1][0] + 4, min(image_height, top_group[-1][0] + round(image_height * 0.45))):
-        hits = 0
-        for x in range(left, right):
-            red, green, blue = image.getpixel((x, y))
-            if max(red, green, blue) - min(red, green, blue) <= 12 and 200 <= red <= 245:
-                hits += 1
-        if hits >= max(20, round(width * 0.55)):
-            row_hits.append(y)
-
-    groups = []
-    for y in row_hits:
-        if not groups or y != groups[-1][-1] + 1:
-            groups.append([y])
-        else:
-            groups[-1].append(y)
-    return groups
-
-card_bottoms = []
-for left, right in card_regions:
-    groups = border_rows(left, right)
-    if not groups:
-        print(f"FAIL: could not detect a host card bottom in x={left}:{right}", file=sys.stderr)
-        raise SystemExit(1)
-    card_bottoms.append(groups[-1][-1])
-
-if len(card_bottoms) != 2:
-    print("FAIL: could not detect both host card bottoms", file=sys.stderr)
-    raise SystemExit(1)
-
-claude_bottom, codex_bottom = card_bottoms
-delta = abs(claude_bottom - codex_bottom)
-print(
-    f"Claude Code card bottom={claude_bottom}px, "
-    f"Codex card bottom={codex_bottom}px, delta={delta}px"
-)
-if delta > 2:
-    print(
-        f"FAIL: host card bottoms differ by {delta}px (allowed <= 2px)",
-        file=sys.stderr,
-    )
-    raise SystemExit(1)
-print("PASS: host card bottoms are aligned within 2px")
-PY
+swift scripts/scan-host-card-height.swift "$SCREENSHOT_PATH"

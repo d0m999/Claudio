@@ -85,7 +85,11 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
 
         // The shell starts from honest, fail-closed facts: both rows exist, neither is fabricated
         // as connected. A manager-backed provider can replace this matrix asynchronously without
-        // changing either UI surface or teaching the views how to inspect host files.
+        // changing either UI surface or teaching the views how to inspect host files. The native
+        // layout probe is the one explicit exception: it injects a fixed state through an
+        // environment variable so the screenshot can exercise unequal natural card heights
+        // without reading or mutating the user's real host configuration.
+        let nativeProbeState = nativeHostCardProbeState()
         let disconnectedSnapshots = HostID.allCases.map {
             HostIntegrationSnapshot.disconnected(host: $0)
         }
@@ -98,9 +102,10 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
             capabilities: hostCapabilities,
             soundCoverage: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, false) }),
             enabledEvents: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
-        let initialIntegrationState = HostIntegrationPresentationState(
+        let disconnectedIntegrationState = HostIntegrationPresentationState(
             snapshots: disconnectedSnapshots,
             matrix: disconnectedMatrix)
+        let initialIntegrationState = nativeProbeState ?? disconnectedIntegrationState
 
         // The ONLY `Bundle.main` in the app (T17). Everything downstream of it — is this really
         // the helper? is it runnable? what gets copied where? — is a pure function in
@@ -121,9 +126,18 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
             audioEnvironment: audioEnvironment)
         hostIntegrationBridge = integrationBridge
 
-        let integrationMatrixProvider = HostIntegrationMatrixProvider(
-            refresh: { await integrationBridge.refresh() },
-            bootstrap: { await integrationBridge.bootstrapSharedRuntime() })
+        let integrationMatrixProvider: HostIntegrationMatrixProvider
+        if let nativeProbeState {
+            // Keep both asynchronous entry points on the same fixture. Without this, the real
+            // launch bootstrap could replace the injected rows before the popover is captured.
+            integrationMatrixProvider = HostIntegrationMatrixProvider(
+                refresh: { nativeProbeState },
+                bootstrap: { nativeProbeState })
+        } else {
+            integrationMatrixProvider = HostIntegrationMatrixProvider(
+                refresh: { await integrationBridge.refresh() },
+                bootstrap: { await integrationBridge.bootstrapSharedRuntime() })
+        }
         let integrationActionProvider = HostIntegrationActionProvider { action in
             try await integrationBridge.perform(action)
         }
@@ -134,4 +148,58 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
             integrationMatrixProvider: integrationMatrixProvider,
             integrationActionProvider: integrationActionProvider)
     }
+}
+
+/// Fixed, side-effect-free state used only by the native host-card layout probe. The probe keeps
+/// one host in `.ready` (no detail text) and the other in a multiline `.needsAttention` state so
+/// removing equalization makes the screenshot assertion fail for the right reason.
+private func nativeHostCardProbeState() -> HostIntegrationPresentationState? {
+    guard ProcessInfo.processInfo.environment["CLAUDIO_TEST_HOST_CARD_STATE"] == "unequal" else {
+        return nil
+    }
+
+    let installationID = UUID(uuidString: "00000000-0000-4000-8000-0000000000A1")!
+    guard
+        let claudeBinding = HostCapabilityCatalog.binding(
+            host: .claudeCode, event: .taskStart),
+        let nativeEvent = claudeBinding.nativeEvent
+    else {
+        return nil
+    }
+
+    let receipt = HostReceiptEvidence(
+        installationID: installationID,
+        nativeEvent: nativeEvent,
+        event: .taskStart,
+        timestamp: Date(timeIntervalSince1970: 1),
+        playbackResult: .played)
+    let claudeSnapshot = HostIntegrationSnapshot(
+        host: .claudeCode,
+        runtime: .ready,
+        availability: .available,
+        configuration: .configured,
+        writability: .writable,
+        activation: .observed(receipt),
+        latestReceipt: receipt,
+        installationID: installationID)
+    let codexSnapshot = HostIntegrationSnapshot(
+        host: .codex,
+        runtime: .ready,
+        availability: .available,
+        configuration: .conflict(
+            reason: "native probe detail line one\n"
+                + "native probe detail line two"),
+        writability: .writable,
+        activation: .none)
+    let snapshots = [claudeSnapshot, codexSnapshot]
+    let capabilities = Dictionary(
+        uniqueKeysWithValues: HostID.allCases.map { host in
+            (host, HostCapabilityCatalog.bindings(for: host))
+        })
+    let matrix = AudibilityMatrix.make(
+        snapshots: snapshots,
+        capabilities: capabilities,
+        soundCoverage: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }),
+        enabledEvents: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
+    return HostIntegrationPresentationState(snapshots: snapshots, matrix: matrix)
 }
