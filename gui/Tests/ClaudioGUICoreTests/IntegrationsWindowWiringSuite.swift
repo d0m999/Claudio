@@ -299,6 +299,66 @@ func runIntegrationsWindowWiringSuites() {
             "production AppDelegate 绝不能为展示效果伪造 connected")
     }
 
+    suite("原生 host-card probe：发布构建不受测试环境变量影响") {
+        guard
+            let app = integrationsSource("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift"),
+            let bundle = integrationsSource("scripts/dev-bundle.sh"),
+            let probe = integrationsSource("scripts/test-host-card-height.sh")
+        else {
+            expect(false, "缺少 ClaudioGUIApp.swift 或原生 probe 脚本")
+            return
+        }
+
+        expect(
+            app.contains(
+                "#if CLAUDIO_NATIVE_HOST_CARD_PROBE\n"
+                    + "        let nativeProbeState = nativeHostCardProbeState()\n"
+                    + "#else\n"
+                    + "        let nativeProbeState: HostIntegrationPresentationState? = nil\n"
+                    + "#endif"),
+            "production 编译分支必须明确关闭 native host-card 状态注入")
+        expect(
+            app.contains("#if CLAUDIO_NATIVE_HOST_CARD_PROBE\n/// Fixed, side-effect-free state")
+                && app.contains("ProcessInfo.processInfo.environment[\"CLAUDIO_TEST_HOST_CARD_STATE\"]"),
+            "测试环境变量的读取必须只存在于专用 probe 编译分支")
+        expect(
+            bundle.contains("GUI_NATIVE_HOST_CARD_PROBE=true")
+                && bundle.contains(
+                    "-Xswiftc -DCLAUDIO_NATIVE_HOST_CARD_PROBE")
+                && bundle.contains("usage: $0 [--native-host-card-probe]"),
+            "probe 宏必须只能通过显式的专用 dev-bundle 参数开启")
+        expect(
+            probe.contains("bash scripts/dev-bundle.sh --native-host-card-probe"),
+            "原生布局脚本必须构建 probe 变体，而不是让普通发布 bundle 响应环境变量")
+    }
+
+    suite("host-card probe 脚本：快照未完成时 EXIT trap 不得删除用户 defaults") {
+        guard let script = integrationsSource("scripts/test-host-card-height.sh") else {
+            expect(false, "缺少 test-host-card-height.sh")
+            return
+        }
+
+        guard
+            let restoreStart = script.range(of: "restore_test_state()"),
+            let snapshotGuard = script.range(of: #"if [[ "$STATE_SNAPSHOT_COMPLETE" != true ]]; then"#),
+            let firstRestore = script.range(of: #"if [[ "$HAD_TEXT_SIZE" == true ]]; then"#),
+            let appearanceRead = script.range(
+                of: #"PREVIOUS_APPEARANCE="$(defaults read "#),
+            let snapshotComplete = script.range(of: "STATE_SNAPSHOT_COMPLETE=true")
+        else {
+            expect(false, "host-card probe 必须声明完整快照闸门与两个 defaults 快照")
+            return
+        }
+
+        expect(
+            restoreStart.lowerBound < snapshotGuard.lowerBound
+                && snapshotGuard.lowerBound < firstRestore.lowerBound,
+            "EXIT trap 必须在恢复 defaults 前先确认快照已经完成")
+        expect(
+            appearanceRead.lowerBound < snapshotComplete.lowerBound,
+            "只有读取完 AppleInterfaceStyle 后才能标记 defaults 快照完成")
+    }
+
     suite("App 真实组装：双 adapter + manager + shared bootstrap；启动只 bootstrap/refresh 不 connect") {
         guard
             let app = integrationsSource("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift"),

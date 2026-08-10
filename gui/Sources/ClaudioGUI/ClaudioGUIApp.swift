@@ -85,11 +85,15 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
 
         // The shell starts from honest, fail-closed facts: both rows exist, neither is fabricated
         // as connected. A manager-backed provider can replace this matrix asynchronously without
-        // changing either UI surface or teaching the views how to inspect host files. The native
-        // layout probe is the one explicit exception: it injects a fixed state through an
-        // environment variable so the screenshot can exercise unequal natural card heights
-        // without reading or mutating the user's real host configuration.
+        // changing either UI surface or teaching the views how to inspect host files. A dedicated
+        // native probe build can inject a fixed state to exercise unequal natural card heights
+        // without reading or mutating the user's real host configuration. The production build
+        // does not compile that injection path.
+#if CLAUDIO_NATIVE_HOST_CARD_PROBE
         let nativeProbeState = nativeHostCardProbeState()
+#else
+        let nativeProbeState: HostIntegrationPresentationState? = nil
+#endif
         let disconnectedSnapshots = HostID.allCases.map {
             HostIntegrationSnapshot.disconnected(host: $0)
         }
@@ -150,6 +154,7 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+#if CLAUDIO_NATIVE_HOST_CARD_PROBE
 /// Fixed, side-effect-free state used only by the native host-card layout probe. The probe keeps
 /// one host in `.ready` (no detail text) and the other in a multiline `.needsAttention` state so
 /// removing equalization makes the screenshot assertion fail for the right reason.
@@ -203,3 +208,4 @@ private func nativeHostCardProbeState() -> HostIntegrationPresentationState? {
         enabledEvents: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
     return HostIntegrationPresentationState(snapshots: snapshots, matrix: matrix)
 }
+#endif

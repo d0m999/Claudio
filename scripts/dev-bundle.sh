@@ -3,6 +3,24 @@
 # CI 那份用 lipo 合双架构；走查只需要本机这一个架构。
 set -euo pipefail
 cd "$(dirname "$0")/.."
+
+GUI_NATIVE_HOST_CARD_PROBE=false
+if [[ $# -eq 1 && "$1" == "--native-host-card-probe" ]]; then
+    GUI_NATIVE_HOST_CARD_PROBE=true
+elif [[ $# -ne 0 ]]; then
+    echo "usage: $0 [--native-host-card-probe]" >&2
+    exit 2
+fi
+
+gui_build() {
+    if [[ "$GUI_NATIVE_HOST_CARD_PROBE" == true ]]; then
+        swift build -c release --package-path gui --product ClaudioGUI \
+            -Xswiftc -DCLAUDIO_NATIVE_HOST_CARD_PROBE "$@"
+    else
+        swift build -c release --package-path gui --product ClaudioGUI "$@"
+    fi
+}
+
 APP="dist/claudi0.app"
 LEGACY_APP="dist/Claudio.app"
 
@@ -12,7 +30,7 @@ rm -rf "$APP" "$LEGACY_APP"
 
 # 两个 `--product` 都不是可省的修饰：裸 `swift build -c release` 会连各自的测试
 # executable 一起建，而测试会引用 `#if DEBUG` 门控的 fixture，Release 下编译不过。
-swift build -c release --package-path gui --product ClaudioGUI
+gui_build
 swift build -c release --package-path helper --product claudio
 
 find_unique_gui_resource_bundle() {
@@ -28,7 +46,7 @@ find_unique_gui_resource_bundle() {
   printf '%s\n' "${candidates[0]}"
 }
 
-GUI_BIN_DIR="$(swift build -c release --package-path gui --product ClaudioGUI --show-bin-path)"
+GUI_BIN_DIR="$(gui_build --show-bin-path)"
 GUI_RESOURCE_BUNDLE="$(find_unique_gui_resource_bundle "$GUI_BIN_DIR")"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/packs"

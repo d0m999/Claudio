@@ -22,6 +22,7 @@ PREVIOUS_TEXT_SIZE=""
 HAD_TEXT_SIZE=false
 PREVIOUS_APPEARANCE=""
 HAD_APPEARANCE=false
+STATE_SNAPSHOT_COMPLETE=false
 OLD_PIDS=()
 
 restore_test_state() {
@@ -32,6 +33,10 @@ restore_test_state() {
             kill -0 "$TEST_PID" 2>/dev/null || break
             sleep 0.1
         done
+    fi
+    if [[ "$STATE_SNAPSHOT_COMPLETE" != true ]]; then
+        rm -rf "$TEST_DIR"
+        return
     fi
     if [[ "$HAD_TEXT_SIZE" == true ]]; then
         defaults write "$DEFAULTS_DOMAIN" "$TEXT_SIZE_KEY" -string "$PREVIOUS_TEXT_SIZE"
@@ -69,6 +74,7 @@ fi
 if PREVIOUS_APPEARANCE="$(defaults read "$DEFAULTS_DOMAIN" "$APPEARANCE_KEY" 2>/dev/null)"; then
     HAD_APPEARANCE=true
 fi
+STATE_SNAPSHOT_COMPLETE=true
 
 if [[ -f "$APP_EXECUTABLE" ]]; then
     while IFS= read -r pid; do
@@ -100,7 +106,7 @@ if [[ ${#OLD_PIDS[@]} -gt 0 ]]; then
     done
 fi
 
-bash scripts/dev-bundle.sh
+bash scripts/dev-bundle.sh --native-host-card-probe
 defaults write "$DEFAULTS_DOMAIN" "$TEXT_SIZE_KEY" -string "$TEST_TEXT_SIZE"
 defaults write "$DEFAULTS_DOMAIN" "$APPEARANCE_KEY" -string "Light"
 CLAUDIO_TEST_HOST_CARD_STATE="$TEST_HOST_CARD_STATE" \
