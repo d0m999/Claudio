@@ -53,6 +53,10 @@ public struct PanelView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
     private var interfaceTextSizeRaw = ClaudioInterfaceTextSize.defaultValue.rawValue
+    /// The two host cards share the tallest measured natural card height. The measurement is
+    /// kept at the panel level so a width, text-size, or host-state change re-runs the same
+    /// equalization for both buttons.
+    @State private var hostSourceCardHeight: CGFloat?
 
     // Reduced transparency is satisfied structurally: `.background(
     // ClaudioColor.panel(colorScheme))` below is a near-solid opaque color, never a
@@ -261,9 +265,15 @@ public struct PanelView: View {
                     row: row,
                     typeScale: typeScale,
                     focusedTarget: $focusedTarget,
+                    equalizedHeight: hostSourceCardHeight,
                     onSelect: { onManageIntegrations(.hostSource(row.host)) })
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
+        }
+        .onPreferenceChange(HostSourceCardHeightPreferenceKey.self) { heights in
+            guard let maximum = heights.values.max(), maximum > 0 else { return }
+            guard hostSourceCardHeight.map({ abs($0 - maximum) > 0.5 }) ?? true else { return }
+            hostSourceCardHeight = maximum
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("声音来源")
@@ -754,56 +764,79 @@ struct InterfaceTextSizeControl: View {
 
 /// One geometry and one accessibility contract for both host rows in the panel. The status is
 /// already classified by `ClaudioGUICore`; notably Codex's normal 4/5 uses `.ready`, not warning.
+private struct HostSourceCardHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: [HostID: CGFloat] = [:]
+
+    static func reduce(
+        value: inout [HostID: CGFloat],
+        nextValue: () -> [HostID: CGFloat]
+    ) {
+        value.merge(nextValue(), uniquingKeysWith: { _, newValue in newValue })
+    }
+}
+
 @MainActor
 private struct HostSourceRowView: View {
     let row: HostSourceRowPresentation
     let typeScale: CGFloat
     var focusedTarget: FocusState<PanelFocusTarget?>.Binding
+    let equalizedHeight: CGFloat?
     let onSelect: @MainActor () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 5) {
-                    Image(systemName: statusSymbol)
-                        .font(.system(size: 11 * typeScale, weight: .semibold))
-                        .foregroundColor(statusColor)
-                        .accessibilityHidden(true)
-                    Text(row.title)
-                        .font(.system(size: 11.5 * typeScale, weight: .semibold, design: .rounded))
-                        .lineLimit(1)
-                    Spacer(minLength: 2)
-                }
-                Text(row.readinessText)
-                    .font(.system(size: 9.5 * typeScale, weight: .medium, design: .rounded))
-                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                    .lineLimit(2)
-                if row.status != .ready, let detailText = row.detailText {
-                    Text(detailText)
-                        .font(.system(size: 9 * typeScale, design: .rounded))
-                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                        .lineLimit(2)
-                }
-            }
+        Button(action: onSelect, label: { cardSurface })
+        .buttonStyle(.plain)
+        // Keep the hit target equal to the visible card, including its blank lower area.
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(height: equalizedHeight, alignment: .topLeading)
+        .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+        .focused(focusedTarget, equals: .hostSource(row.host))
+        .accessibilityLabel(row.accessibilityLabel)
+        .accessibilityValue(row.readinessText)
+        .accessibilityHint("打开该声音来源的连接与诊断详情")
+        .accessibilityIdentifier("panel.host.\(row.host.rawValue)")
+    }
+
+    private var cardSurface: some View {
+        cardContent
             .foregroundColor(ClaudioTheme.text(colorScheme))
             .frame(maxWidth: .infinity, minHeight: 48 * typeScale, alignment: .topLeading)
             .padding(8)
-            .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+            // Measure this natural card before applying the shared height. This keeps the
+            // measurement honest when either the width, Dynamic Type tier, or host detail text
+            // changes, and never introduces a hidden placeholder into the accessibility tree.
+            .background(naturalHeightMeasurement)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(height: equalizedHeight, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
                     .fill(ClaudioTheme.elevated(colorScheme).opacity(0.88)))
             .overlay(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
                     .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
+    }
+
+    private var cardContent: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 5) {
+                Image(systemName: statusSymbol)
+                    .font(.system(size: 11 * typeScale, weight: .semibold))
+                    .foregroundColor(statusColor)
+                    .accessibilityHidden(true)
+                Text(row.title)
+                    .font(.system(size: 11.5 * typeScale, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+            }
+            Text(row.readinessText)
+                .font(.system(size: 9.5 * typeScale, weight: .medium, design: .rounded))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                .lineLimit(2)
+            optionalDetailText
         }
-        .buttonStyle(.plain)
-        .focused(focusedTarget, equals: .hostSource(row.host))
-        .accessibilityLabel(row.accessibilityLabel)
-        .accessibilityValue(row.readinessText)
-        .accessibilityHint("打开该声音来源的连接与诊断详情")
-        .accessibilityIdentifier("panel.host.\(row.host.rawValue)")
     }
 
     private var statusSymbol: String {
@@ -813,6 +846,25 @@ private struct HostSourceRowView: View {
         case .legacy: "clock.arrow.circlepath"
         case .notConnected: "circle"
         case .needsAttention: "exclamationmark.circle.fill"
+        }
+    }
+
+    @ViewBuilder
+    private var optionalDetailText: some View {
+        if row.status != .ready, let detailText = row.detailText {
+            Text(detailText)
+                .font(.system(size: 9 * typeScale, design: .rounded))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                .lineLimit(2)
+        }
+    }
+
+    private var naturalHeightMeasurement: some View {
+        GeometryReader { proxy in
+            let height = proxy.size.height
+            Color.clear.preference(
+                key: HostSourceCardHeightPreferenceKey.self,
+                value: [row.host: height])
         }
     }
 

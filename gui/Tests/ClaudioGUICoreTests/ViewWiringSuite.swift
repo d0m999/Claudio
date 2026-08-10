@@ -461,9 +461,15 @@ func runViewWiringSuites() {
             collapsingWhitespace(panel).contains(
                 ".frame(maxWidth: .infinity, minHeight: 48 * typeScale, alignment: .topLeading)")
                 && panel.contains("let detailText = row.detailText")
-                && !panel.contains("Text(row.detailText ??"),
-            "两条正常宿主行必须共用随 Dynamic Type 放大且可容纳一行限定语的最小几何；"
-                + "无限定语一侧不得伪造 Text/VoiceOver 占位内容")
+                && !panel.contains("Text(row.detailText ??")
+                && panel.contains("HostSourceCardHeightPreferenceKey: PreferenceKey")
+                && panel.contains("@State private var hostSourceCardHeight: CGFloat?")
+                && panel.contains(".onPreferenceChange(HostSourceCardHeightPreferenceKey.self)")
+                && panel.contains("let equalizedHeight: CGFloat?")
+                && panel.contains("value: [row.host: height]")
+                && panel.contains("height: equalizedHeight"),
+            "两条宿主卡片必须测量各自自然高度并共用最大高度；"
+                + "无限定语一侧不得伪造 Text/VoiceOver 占位内容，Button 与可点击外框必须一起等高")
 
         guard
             let showStart = panel.range(
