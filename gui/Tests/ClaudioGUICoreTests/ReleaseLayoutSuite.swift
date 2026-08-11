@@ -184,15 +184,15 @@ func runReleaseLayoutSuites() {
             package.contains(#".process("Resources/HostIcons")"#),
             "ClaudioGUI executable target 必须显式声明 HostIcons SwiftPM 资源")
         expect(
-            eventRow.contains(#"Bundle.main.bundleURL.lastPathComponent == "claudi0.app""#)
+            eventRow.contains("Bundle.main.bundleURL.pathExtension == \"app\"")
                 && eventRow.contains("return .module")
                 && eventRow.contains("Bundle.main.resourceURL")
                 && eventRow.contains(#"hasSuffix("_ClaudioGUI.bundle")"#)
                 && eventRow.contains("guard candidates.count == 1")
                 && eventRow.contains("hostIconResourceBundle.image(forResource:")
                 && eventRow.contains("image.isTemplate = true"),
-            "只有真实 claudi0.app 才能从 Contents/Resources 解析唯一 GUI resource bundle；"
-                + "Xcode Preview 与 SwiftPM 开发进程必须回退到 Bundle.module")
+            "只有真实 macOS app 才能从 Contents/Resources 解析唯一 GUI resource bundle；"
+                + "Xcode Preview 与 SwiftPM 开发进程必须回退到 Bundle.module；改名 app 也必须可用")
         let pdfNames = resources
             .filter { $0.pathExtension.lowercased() == "pdf" }
             .map(\.lastPathComponent)
@@ -261,6 +261,11 @@ func runReleaseLayoutSuites() {
                     && source.contains("find_unique_gui_resource_bundle")
                     && source.contains("${#candidates[@]} -ne 1"),
                 "\(name) 组装必须对 SwiftPM GUI resource bundle 做恰好一个候选的失败关闭校验")
+            expect(
+                source.contains("*_ClaudioLocalization.bundle")
+                    && source.contains("find_unique_localization_bundle")
+                    && source.contains("ClaudioLocalization"),
+                "\(name) 组装必须对本地化 resource bundle 做恰好一个候选的失败关闭校验")
         }
         expect(
             dev.contains(#"cp -R "$GUI_RESOURCE_BUNDLE""#)
@@ -272,6 +277,10 @@ func runReleaseLayoutSuites() {
                 && release.contains(#"diff -qr "$ARM_GUI_RESOURCE_BUNDLE" "$X86_GUI_RESOURCE_BUNDLE""#)
                 && release.contains(#"cp -R "$ARM_GUI_RESOURCE_BUNDLE""#),
             "release 必须分别解析双架构资源 bundle、确认完全一致后再复制")
+        expect(
+            release.contains(#"diff -qr "$ARM_LOCALIZATION_BUNDLE" "$X86_LOCALIZATION_BUNDLE""#)
+                && release.contains(#"cp -R "$ARM_LOCALIZATION_BUNDLE""#),
+            "release 必须分别解析双架构本地化 bundle、确认内容一致后再复制")
     }
 
     suite("dev/release 分发源包含 minimal-chime 1.1.0、第五音频与 CC0 台账") {

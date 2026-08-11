@@ -1996,7 +1996,7 @@ func runSoundPacksRefreshSuites() async {
                 && controller.contains("focusCoordinator.requestRoute(effectiveRoute)"),
             "editEvent 必须等待 library 证明目标存在后再选包；ready 缺失只能降级 overview")
         expect(
-            controller.contains("window.title = \"claudi0 · 声音包\""),
+            controller.contains("ClaudioL10n(language: languageStore.language).text(.soundPacksWindowTitle)"),
             "后台标准窗口标题必须保留 claudi0 品牌锚点")
         expect(
             controller.contains("isReleasedWhenClosed = false"),

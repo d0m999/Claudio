@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import Combine
 import Foundation
 
@@ -111,7 +112,29 @@ struct IntegrationsWindowContent: Sendable, Equatable {
 struct IntegrationsWindowActionOutcome: Sendable, Equatable {
     let content: IntegrationsWindowContent
     let feedbackKind: IntegrationsFeedbackKind
-    let feedbackMessage: String
+    let feedbackText: IntegrationsFeedbackText
+
+    var feedbackMessage: String { feedbackText.resolve(language: .zhHans) }
+
+    init(
+        content: IntegrationsWindowContent,
+        feedbackKind: IntegrationsFeedbackKind,
+        feedbackMessage: String
+    ) {
+        self.content = content
+        self.feedbackKind = feedbackKind
+        feedbackText = .literal(feedbackMessage)
+    }
+
+    init(
+        content: IntegrationsWindowContent,
+        feedbackKind: IntegrationsFeedbackKind,
+        feedbackText: IntegrationsFeedbackText
+    ) {
+        self.content = content
+        self.feedbackKind = feedbackKind
+        self.feedbackText = feedbackText
+    }
 }
 
 struct IntegrationsWindowRefreshHandler: Sendable {
@@ -296,12 +319,16 @@ final class IntegrationsWindowModel: ObservableObject {
                 IntegrationsFeedbackRequest(
                     host: receiptTransition.host,
                     kind: .information,
-                    message: receiptTransition.message,
-                    accessibilityAnnouncement: stateChangeAccessibilityAnnouncement(
+                    text: .localized(
+                        key: .feedbackReceipt,
+                        arguments: [receiptTransition.receipt]),
+                    accessibilityText: stateChangeAccessibilityText(
                         in: replacement,
                         host: receiptTransition.host,
                         event: receiptTransition.event,
-                        message: receiptTransition.message))
+                        message: .localized(
+                            key: .feedbackReceipt,
+                            arguments: [receiptTransition.receipt])))
             })
         }
     }
@@ -326,7 +353,9 @@ final class IntegrationsWindowModel: ObservableObject {
             presentFeedback(
                 host: host,
                 kind: didCopy ? .information : .failure,
-                message: didCopy ? "已复制 /hooks" : "无法复制 /hooks")
+                text: .localized(
+                    key: didCopy ? .feedbackCopyHooksSucceeded : .feedbackCopyHooksFailed,
+                    arguments: []))
             return
         }
 
@@ -352,35 +381,39 @@ final class IntegrationsWindowModel: ObservableObject {
                     IntegrationsFeedbackRequest(
                         host: receiptTransition.host,
                         kind: .information,
-                        message: receiptTransition.message,
-                        accessibilityAnnouncement: stateChangeAccessibilityAnnouncement(
+                        text: .localized(
+                            key: .feedbackReceipt,
+                            arguments: [receiptTransition.receipt]),
+                        accessibilityText: stateChangeAccessibilityText(
                             in: outcome.content,
                             host: receiptTransition.host,
                             event: receiptTransition.event,
-                            message: receiptTransition.message))
+                            message: .localized(
+                                key: .feedbackReceipt,
+                                arguments: [receiptTransition.receipt])))
                 })
             } else {
                 presentFeedback(
                     host: host,
                     kind: outcome.feedbackKind,
-                    message: outcome.feedbackMessage,
-                    accessibilityAnnouncement: stateChangeAccessibilityAnnouncement(
+                    text: outcome.feedbackText,
+                    accessibilityText: stateChangeAccessibilityText(
                         in: outcome.content,
                         host: host,
                         event: selectedCapabilityEvent(for: host),
-                        message: outcome.feedbackMessage))
+                        message: outcome.feedbackText))
             }
         } catch {
-            let message = "操作失败：\(error.localizedDescription)"
+            let failureText = localizedFailureFeedbackText(for: error)
             presentFeedback(
                 host: host,
                 kind: .failure,
-                message: message,
-                accessibilityAnnouncement: stateChangeAccessibilityAnnouncement(
+                text: failureText,
+                accessibilityText: stateChangeAccessibilityText(
                     in: content,
                     host: host,
                     event: selectedCapabilityEvent(for: host),
-                    message: message))
+                    message: failureText))
         }
     }
 
@@ -407,23 +440,23 @@ final class IntegrationsWindowModel: ObservableObject {
                 presentFeedback(
                     host: host,
                     kind: outcome.feedbackKind,
-                    message: outcome.feedbackMessage,
-                    accessibilityAnnouncement: stateChangeAccessibilityAnnouncement(
+                    text: outcome.feedbackText,
+                    accessibilityText: stateChangeAccessibilityText(
                         in: outcome.content,
                         host: host,
                         event: event,
-                        message: outcome.feedbackMessage))
+                        message: outcome.feedbackText))
             } catch {
-                let message = "操作失败：\(error.localizedDescription)"
+                let failureText = localizedFailureFeedbackText(for: error)
                 presentFeedback(
                     host: host,
                     kind: .failure,
-                    message: message,
-                    accessibilityAnnouncement: stateChangeAccessibilityAnnouncement(
+                    text: failureText,
+                    accessibilityText: stateChangeAccessibilityText(
                         in: content,
                         host: host,
                         event: event,
-                        message: message))
+                        message: failureText))
             }
         }
     }
@@ -434,7 +467,11 @@ final class IntegrationsWindowModel: ObservableObject {
         presentFeedback(
             host: inspector.host,
             kind: didCopy ? .information : .failure,
-            message: didCopy ? "已复制配置路径" : "无法复制配置路径")
+            text: .localized(
+                key: didCopy
+                    ? .feedbackCopyConfigurationPathSucceeded
+                    : .feedbackCopyConfigurationPathFailed,
+                arguments: []))
     }
 
     func dismissFeedback(revision: UInt64) {
@@ -457,16 +494,29 @@ final class IntegrationsWindowModel: ObservableObject {
     private func presentFeedback(
         host: HostID,
         kind: IntegrationsFeedbackKind,
-        message: String,
-        accessibilityAnnouncement: String? = nil
+        text: IntegrationsFeedbackText,
+        accessibilityText: IntegrationsFeedbackText? = nil
     ) {
         presentFeedbackSequence([
             IntegrationsFeedbackRequest(
                 host: host,
                 kind: kind,
-                message: message,
-                accessibilityAnnouncement: accessibilityAnnouncement)
+                text: text,
+                accessibilityText: accessibilityText)
         ])
+    }
+
+    private func presentFeedback(
+        host: HostID,
+        kind: IntegrationsFeedbackKind,
+        message: String,
+        accessibilityText: IntegrationsFeedbackText? = nil
+    ) {
+        presentFeedback(
+            host: host,
+            kind: kind,
+            text: .literal(message),
+            accessibilityText: accessibilityText)
     }
 
     private func presentFeedbackSequence(_ requests: [IntegrationsFeedbackRequest]) {
@@ -503,12 +553,12 @@ final class IntegrationsWindowModel: ObservableObject {
 
     /// `event == nil` 表示宿主卡级 refresh：把该宿主的四个共享矩阵格都播出；矩阵格选择或
     /// 真实回执则只播相关事件。两条路径都先带宿主来源行的能力/连接摘要。
-    private func stateChangeAccessibilityAnnouncement(
+    private func stateChangeAccessibilityText(
         in content: IntegrationsWindowContent,
         host: HostID,
         event: Event?,
-        message: String
-    ) -> String? {
+        message: IntegrationsFeedbackText
+    ) -> IntegrationsFeedbackText? {
         guard let hostRow = content.sourceRows.first(where: { $0.host == host }) else {
             return nil
         }
@@ -520,7 +570,7 @@ final class IntegrationsWindowModel: ObservableObject {
                 $0.cells.first(where: { $0.host == host })
             }
         }
-        return integrationsStateChangeAccessibilityLabel(
+        return .stateChange(
             message: message,
             hostRow: hostRow,
             capabilityCells: capabilityCells)
@@ -533,12 +583,33 @@ final class IntegrationsWindowModel: ObservableObject {
         return event
     }
 
+    private func localizedFailureFeedbackText(for error: Error) -> IntegrationsFeedbackText {
+        if let presentationError = error as? HostIntegrationPresentationError {
+            switch presentationError {
+            case .storeUnavailable:
+                return .localized(key: .integrationsStoreUnavailable, arguments: [])
+            case .recoveryFailed(let reason):
+                let l10n = ClaudioL10n(language: .zhHans)
+                if reason == l10n.text(.integrationsMuteFallbackFailed) {
+                    return .localized(key: .integrationsMuteFallbackFailed, arguments: [])
+                }
+                if reason == l10n.text(.integrationsRecoveryUnavailable) {
+                    return .localized(key: .integrationsRecoveryUnavailable, arguments: [])
+                }
+                return .localized(key: .feedbackOperationFailed, arguments: [reason])
+            }
+        }
+        return .localized(
+            key: .feedbackOperationFailed,
+            arguments: [error.localizedDescription])
+    }
+
 }
 
 private struct IntegrationsReceiptTransition {
     let host: HostID
     let event: Event
-    let message: String
+    let receipt: String
 }
 
 /// 只把已经通过 current installation 校验、并且相对上一帧新增/变化的真实回执
@@ -557,7 +628,7 @@ private func integrationsReceiptTransitions(
         return IntegrationsReceiptTransition(
             host: host,
             event: newEvidence.event,
-            message: "收到当前代次真实回执：\(newReceipt)")
+            receipt: newReceipt)
     }
 }
 

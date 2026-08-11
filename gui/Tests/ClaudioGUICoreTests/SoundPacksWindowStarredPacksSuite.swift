@@ -368,10 +368,11 @@ func runSoundPacksWindowStarredPacksSuites() {
                 + "不得靠降低整行透明度表达禁用，星标失败仍接到共享 FailureRow")
         expect(
             model.contains("kind: .starredPacks")
-                && model.contains("message: soundPacksWindowStarredPacksFailureReason(error)")
+                && model.contains(
+                    "messageText: .literal(soundPacksWindowStarredPacksFailureReason(error))")
                 && controller.contains("model.$windowStatuses")
-                && controller.contains("status.action")
-                && controller.contains("status.message"),
+                && controller.contains("status.action(language: languageStore.language)")
+                && controller.contains("status.message(language: languageStore.language)"),
             "星标失败必须用 FailureRow 同一句 reason 进入统一状态与唯一 VoiceOver bridge")
     }
 }

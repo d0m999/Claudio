@@ -131,6 +131,19 @@ jobs:
             printf '%s\n' "${candidates[0]}"
           }
 
+          find_unique_localization_bundle() {
+            local search_dir="$1"
+            local -a candidates=()
+            shopt -s nullglob
+            candidates=("$search_dir"/*_ClaudioLocalization.bundle)
+            shopt -u nullglob
+            if [[ ${#candidates[@]} -ne 1 || ! -d "${candidates[0]:-}" ]]; then
+              echo "::error::expected exactly one *_ClaudioLocalization.bundle in $search_dir; found ${#candidates[@]}"
+              return 1
+            fi
+            printf '%s\n' "${candidates[0]}"
+          }
+
           ARM_GUI_RESOURCE_BUNDLE="$(find_unique_gui_resource_bundle \
             gui/.build/arm64-apple-macosx/release)"
           X86_GUI_RESOURCE_BUNDLE="$(find_unique_gui_resource_bundle \
@@ -141,6 +154,17 @@ jobs:
           fi
           cp -R "$ARM_GUI_RESOURCE_BUNDLE" \
             "$APP/Contents/Resources/$(basename "$ARM_GUI_RESOURCE_BUNDLE")"
+
+          ARM_LOCALIZATION_BUNDLE="$(find_unique_localization_bundle \
+            gui/.build/arm64-apple-macosx/release)"
+          X86_LOCALIZATION_BUNDLE="$(find_unique_localization_bundle \
+            gui/.build/x86_64-apple-macosx/release)"
+          if ! diff -qr "$ARM_LOCALIZATION_BUNDLE" "$X86_LOCALIZATION_BUNDLE"; then
+            echo "::error::arm64 and x86_64 ClaudioLocalization resource bundles differ"
+            exit 1
+          fi
+          cp -R "$ARM_LOCALIZATION_BUNDLE" \
+            "$APP/Contents/Resources/$(basename "$ARM_LOCALIZATION_BUNDLE")"
 
           # 新品牌入口为 `claudi0`；同时保留 `claudio` bundle alias，避免旧版安装说明失效。
           # shared runtime 仍装到 ~/.claudio/bin/claudio，确保现有 hooks 精确匹配。

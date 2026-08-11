@@ -500,7 +500,7 @@ func runSoundPacksWindowAccessibilitySuites() {
             view.contains("ClaudioTheme.Metrics.iconTarget")
                 && view.contains("ClaudioTheme.Metrics.regularControlHeight")
                 && view.contains(".accessibilityLabel(packAccessibilityLabel(card))")
-                && view.contains("soundPacksWindowEventAccessibilityLabel("),
+                && view.contains("localizedSoundPacksEventAccessibilityLabel("),
             "macOS 28/32pt 控件目标、包行状态与事件失败状态必须真正接进窗口视图")
 
         guard
@@ -522,7 +522,8 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             controller.contains("model.$windowStatuses")
                 && controller.contains("status.severity == .failure")
-                && controller.contains(".writeSucceeded(message: status.message)"),
+                && controller.contains(
+                    ".writeSucceeded(message: status.message(language: languageStore.language))"),
             "恢复、音频、星标、复制和启用必须共用一个 revision 驱动的 VoiceOver 出口")
         expect(
             controller.contains("width: 760, height: 560")

@@ -1,4 +1,5 @@
 import ClaudioCore
+import ClaudioLocalization
 import Foundation
 
 enum SoundPackReadSource: Sendable {
@@ -38,6 +39,16 @@ public enum ClaudioInterfaceTextSize: String, CaseIterable, Codable, Sendable, I
         case .standard: "标准"
         case .large: "较大"
         case .maximum: "最大"
+        }
+    }
+
+    public func localizedDisplayName(_ language: ClaudioAppLanguage) -> String {
+        let l10n = ClaudioL10n(language: language)
+        return switch self {
+        case .compact: l10n.text(.interfaceTextSizeCompact)
+        case .standard: l10n.text(.interfaceTextSizeStandard)
+        case .large: l10n.text(.interfaceTextSizeLarge)
+        case .maximum: l10n.text(.interfaceTextSizeMaximum)
         }
     }
 
@@ -174,6 +185,22 @@ public func panelAudibleEventSummary(
     }
 }
 
+public func localizedPanelAudibleEventSummary(
+    audibleEventCount: Int,
+    libraryState: SoundPackLibraryPresentationState,
+    language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    switch libraryState {
+    case .loading:
+        return l10n.text(.panelAudibleEventsLoading)
+    case .loadFailed:
+        return l10n.text(.panelAudibleEventsUnavailable)
+    case .ready, .refreshing, .refreshFailed:
+        return l10n.plural(.panelAudibleEventsCount, count: audibleEventCount)
+    }
+}
+
 public func panelPackSectionState(
     pinnedCards: [PackCard],
     availablePackCount: Int,
@@ -249,6 +276,25 @@ public func eventPreviewAvailability(
         return AfplayVolume.clamped(masterVolume) == 0
             ? .masterVolumeZero(fileName: fileName)
             : .available(fileName: fileName)
+    }
+}
+
+public func localizedEventPreviewHint(
+    _ availability: EventPreviewAvailability,
+    language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    switch availability {
+    case .available:
+        return l10n.text(.eventPreviewHint)
+    case .masterVolumeZero:
+        return l10n.text(.eventPreviewMasterVolumeZero)
+    case .unmapped:
+        return l10n.text(.eventPreviewUnmapped)
+    case .missingOrDamaged:
+        return l10n.text(.eventPreviewMissing)
+    case .unsafeOrUnreadable(let reason):
+        return ClaudioL10n(language: language).format(.eventPreviewUnsafe, reason as NSString)
     }
 }
 

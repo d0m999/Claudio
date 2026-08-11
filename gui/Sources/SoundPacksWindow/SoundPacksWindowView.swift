@@ -2,6 +2,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioLocalization
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -35,6 +36,7 @@ struct SoundPacksWindowView: View {
     @ObservedObject var model: SoundPacksWindowModel
     let userPacksDirectory: URL
     @ObservedObject var focusCoordinator: SoundPacksWindowFocusCoordinator
+    @ObservedObject var languageStore: ClaudioLanguageStore
 
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
@@ -47,6 +49,8 @@ struct SoundPacksWindowView: View {
     @State private var isImportingAudio = false
     @State private var dropTargetEvent: Event?
     @State private var requestedRoute: SoundPacksWindowRoute = .overview
+
+    private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -113,41 +117,43 @@ struct SoundPacksWindowView: View {
             reconcileFocusWithVisibleControls(assignFirstIfNil: true)
         }
         .confirmationDialog(
-            pendingPermanentDeletion.map { "永久删除「\($0.file.fileName)」？" } ?? "永久删除音频？",
+            pendingPermanentDeletion.map {
+                l10n.format(.soundPacksDeleteTitle, $0.file.fileName)
+            } ?? l10n.text(.soundPacksDeleteButton),
             isPresented: Binding(
                 get: { pendingPermanentDeletion != nil },
                 set: { if !$0 { pendingPermanentDeletion = nil } }),
             titleVisibility: .visible,
             presenting: pendingPermanentDeletion
         ) { request in
-            Button("永久删除", role: .destructive) {
+            Button(l10n.text(.soundPacksDeleteButton), role: .destructive) {
                 model.deleteSelectedOrphanAudioFileAfterConfirmation(
                     request.file.fileName,
                     expectedPackID: request.packID)
                 pendingPermanentDeletion = nil
             }
-            .accessibilityLabel("永久删除 \(request.file.fileName)")
-            .accessibilityHint("确认后无法撤销")
+            .accessibilityLabel(l10n.format(.soundPacksOrphanDeleteLabel, request.file.fileName))
+            .accessibilityHint(l10n.text(.soundPacksDeleteHint))
             .accessibilityIdentifier("sound-packs.confirm-delete")
-            Button("取消", role: .cancel) {
+            Button(l10n.text(.commonCancel), role: .cancel) {
                 pendingPermanentDeletion = nil
             }
-            .accessibilityLabel("取消永久删除")
+            .accessibilityLabel(l10n.text(.commonCancel))
             .accessibilityIdentifier("sound-packs.cancel-delete")
         } message: { request in
-            Text("「\(request.file.fileName)」会从这个声音包永久移除。此操作无法撤销。")
+            Text(l10n.format(.soundPacksDeleteMessage, request.file.fileName))
         }
         .confirmationDialog(
             pendingFactoryPackRestore.map {
-                "用出厂版本替换「\($0.displayName)」？"
-            } ?? "恢复出厂声音？",
+                l10n.format(.soundPacksRestoreTitle, $0.displayName)
+            } ?? l10n.text(.soundPacksRestore),
             isPresented: Binding(
                 get: { pendingFactoryPackRestore != nil },
                 set: { if !$0 { pendingFactoryPackRestore = nil } }),
             titleVisibility: .visible,
             presenting: pendingFactoryPackRestore
         ) { request in
-            Button("替换并恢复出厂声音", role: .destructive) {
+            Button(l10n.text(.soundPacksRestoreButton), role: .destructive) {
                 switch request.kind {
                 case .selectedPack:
                     model.restoreSelectedFactoryPackAfterConfirmation(
@@ -160,13 +166,13 @@ struct SoundPacksWindowView: View {
                 }
                 pendingFactoryPackRestore = nil
             }
-            .accessibilityLabel("恢复 \(request.displayName) 的出厂声音")
-            .accessibilityHint("替换前会尽量保留当前内容以供恢复")
+            .accessibilityLabel(l10n.format(.soundPacksRestoreLabel, request.displayName))
+            .accessibilityHint(l10n.text(.soundPacksRestoreHint))
             .accessibilityIdentifier("sound-packs.confirm-factory-restore")
-            Button("取消", role: .cancel) {
+            Button(l10n.text(.commonCancel), role: .cancel) {
                 pendingFactoryPackRestore = nil
             }
-            .accessibilityLabel("取消恢复出厂声音")
+            .accessibilityLabel(l10n.text(.commonCancel))
             .accessibilityIdentifier("sound-packs.cancel-factory-restore")
         } message: { request in
             Text(factoryRestoreConfirmationMessage(request))
@@ -181,41 +187,41 @@ struct SoundPacksWindowView: View {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityHidden(true)
-                Text("正在读取声音包…")
+                Text(l10n.text(.soundPacksLibraryLoading))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("正在读取声音包")
+            .accessibilityLabel(l10n.text(.soundPacksLibraryLoading).replacingOccurrences(of: "…", with: ""))
             .accessibilityIdentifier("sound-packs.library.loading")
         case .refreshing:
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
                     .accessibilityHidden(true)
-                Text("正在后台刷新…")
+                Text(l10n.text(.soundPacksLibraryRefreshing))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .accessibilityElement(children: .combine)
-            .accessibilityLabel("正在后台刷新声音包；当前结果仍可使用")
+            .accessibilityLabel(l10n.text(.soundPacksLibraryRefreshing))
             .accessibilityIdentifier("sound-packs.library.refreshing")
         case .refreshFailed(let reason), .loadFailed(let reason):
             HStack(alignment: .center, spacing: 10) {
                 FailureRow(
                     message: model.libraryPresentationState == .refreshFailed(reason: reason)
-                        ? "刷新失败，正在显示上次结果。\(reason)"
+                        ? l10n.format(.soundPacksLibraryRefreshFailed, reason)
                         : reason)
                 Spacer(minLength: 8)
-                Button("重试") {
+                Button(l10n.text(.commonRetry)) {
                     model.retrySoundPackLibraryRefresh()
                 }
-                .accessibilityLabel("重试读取声音包")
-                .accessibilityHint("在后台重新读取声音包库")
+                .accessibilityLabel(l10n.text(.soundPacksLibraryRetryLabel))
+                .accessibilityHint(l10n.text(.soundPacksLibraryRetryHint))
                 .accessibilityIdentifier("sound-packs.library.retry")
                 .focused($focusedTarget, equals: .retryLibraryLoad)
             }
@@ -229,17 +235,22 @@ struct SoundPacksWindowView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
-                Text("显示在面板")
+                Text(l10n.text(.soundPacksSidebarTitle))
                     .font(.headline)
                 Spacer(minLength: 8)
-                Text("· ★ \(model.starredPackIDs.count)/\(maxStarredPacks)")
+                Text(l10n.format(
+                    .soundPacksSidebarStars,
+                    Int64(model.starredPackIDs.count),
+                    Int64(maxStarredPacks)))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(
-                "显示在面板，\(model.starredPackIDs.count)/\(maxStarredPacks)"
-            )
+            .accessibilityLabel(l10n.format(
+                .soundPacksSidebarLabel) + (languageStore.language == .english ? ", " : "，") + l10n.format(
+                    .soundPacksSidebarStars,
+                    Int64(model.starredPackIDs.count),
+                    Int64(maxStarredPacks)))
             .accessibilityAddTraits(.isHeader)
             .padding(.horizontal, 10)
             .padding(.top, 10)
@@ -263,7 +274,7 @@ struct SoundPacksWindowView: View {
                         }
                         Spacer(minLength: 4)
                         if card.isSelected {
-                            ClaudioStatusCapsule("使用中", isEmphasized: true)
+                            ClaudioStatusCapsule(l10n.text(.soundPacksUsing), isEmphasized: true)
                         }
                     }
                     .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -272,7 +283,7 @@ struct SoundPacksWindowView: View {
                     .accessibilityElement(children: .contain)
                     .accessibilityLabel(packAccessibilityLabel(card))
                     .accessibilityValue(packAccessibilityValue(card))
-                    .accessibilityHint("选择后在右侧查看；星标只控制主面板显示")
+                    .accessibilityHint(l10n.text(.soundPacksCardHint))
                     .accessibilityIdentifier("sound-packs.pack.\(card.id)")
                     .accessibilityAddTraits(
                         model.selectedPackID == card.id ? .isSelected : [])
@@ -280,13 +291,15 @@ struct SoundPacksWindowView: View {
             }
             .focusable(!model.packCards.isEmpty)
             .focused($focusedTarget, equals: .packList)
-            .accessibilityLabel("声音包列表")
+            .accessibilityLabel(l10n.text(.soundPacksSidebarLabel))
             .accessibilityValue(
                 selectedCard.map {
-                    "正在查看 \(SelectedPackMetadata(id: $0.id, name: $0.name).displayName)"
-                } ?? "未选择声音包"
+                    l10n.format(
+                        .soundPacksSidebarViewing,
+                        SelectedPackMetadata(id: $0.id, name: $0.name).displayName)
+                } ?? l10n.text(.soundPacksSidebarNone)
             )
-            .accessibilityHint("使用上、下方向键选择要检查的声音包")
+            .accessibilityHint(l10n.text(.soundPacksSidebarHint))
             .accessibilityIdentifier("sound-packs.pack-list")
         }
     }
@@ -312,14 +325,19 @@ struct SoundPacksWindowView: View {
         .help(control.disabledReason ?? "")
         .accessibilityLabel(
             control.isStarred
-                ? "取消在面板显示「\(displayName)」"
-                : "在面板显示「\(displayName)」"
+            ? l10n.format(.soundPacksStarUnpin, displayName)
+                : l10n.format(.soundPacksStarPin, displayName)
         )
         .accessibilityHint(
             control.disabledReason
-                ?? (control.isStarred ? "取消后可腾出一个面板位置" : "最多显示 4 个声音包")
+                ?? (control.isStarred
+                    ? l10n.text(.soundPacksStarUnpinHint)
+                    : l10n.text(.soundPacksStarPinHint))
         )
-        .accessibilityValue(control.isStarred ? "已固定" : "未固定")
+        .accessibilityValue(
+            control.isStarred
+                ? l10n.text(.soundPacksStarPinned)
+                : l10n.text(.soundPacksStarUnpinned))
         .accessibilityAddTraits(control.isStarred ? .isSelected : [])
         .accessibilityIdentifier("sound-packs.pack.\(card.id).star")
     }
@@ -366,17 +384,17 @@ struct SoundPacksWindowView: View {
                                     HStack(spacing: 8) {
                                         ProgressView()
                                             .controlSize(.small)
-                                        Text("正在读取包内音频…")
+                                        Text(l10n.text(.soundPacksAudioLoading))
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
                                     }
                                     .accessibilityElement(children: .combine)
-                                    .accessibilityLabel("正在读取包内音频")
+                                    .accessibilityLabel(l10n.text(.soundPacksAudioLoadingLabel))
                                 }
 
                                 if let error = model.audioInventoryError {
                                     windowFailureRow(
-                                        action: "读取包内音频",
+                                        action: l10n.text(.soundPacksAudioLoadingLabel),
                                         reason: inventoryErrorMessage(error))
                                 }
 
@@ -456,8 +474,8 @@ struct SoundPacksWindowView: View {
                 }
             }
             if model.selectedPackIsBuiltinReadOnly {
-                ClaudioStatusCapsule("内置包 · 复制后编辑")
-                    .accessibilityLabel("内置声音包，只读；复制后可以编辑")
+                ClaudioStatusCapsule(l10n.text(.soundPacksBuiltinBadge))
+                    .accessibilityLabel(l10n.text(.soundPacksBuiltinLabel))
             }
         }
         .accessibilityElement(children: .combine)
@@ -470,22 +488,24 @@ struct SoundPacksWindowView: View {
                 userPacksDirectory.appendingPathComponent(card.id)
             ])
         } label: {
-            Text("在访达中显示")
+            Text(l10n.text(.soundPacksReveal))
                 .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .focused($focusedTarget, equals: .revealSelectedPack)
         .accessibilityLabel(
-            "在访达中显示「\(SelectedPackMetadata(id: card.id, name: card.name).displayName)」"
+            l10n.format(
+                .soundPacksRevealLabel,
+                SelectedPackMetadata(id: card.id, name: card.name).displayName)
         )
         .accessibilityValue(userPacksDirectory.appendingPathComponent(card.id).path)
-        .accessibilityHint("打开这个声音包所在的文件夹")
+        .accessibilityHint(l10n.text(.soundPacksRevealHint))
         .accessibilityIdentifier("sound-packs.reveal-selected")
     }
 
     private func factoryRestoreButton(_ card: PackCard) -> some View {
         let displayName = SelectedPackMetadata(id: card.id, name: card.name).displayName
-        return Button("恢复出厂声音…") {
+        return Button(l10n.text(.soundPacksRestore)) {
             pendingFactoryPackRestore = FactoryPackRestoreRequest(
                 packID: card.id,
                 displayName: displayName,
@@ -493,24 +513,14 @@ struct SoundPacksWindowView: View {
         }
         .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
         .focused($focusedTarget, equals: .restoreFactoryPack)
-        .accessibilityLabel("恢复「\(displayName)」的出厂声音")
-        .accessibilityValue("内置只读声音包")
-        .accessibilityHint("会先确认替换，并说明恢复前内容的保存方式")
+        .accessibilityLabel(l10n.format(.soundPacksRestorePackLabel, displayName))
+        .accessibilityValue(l10n.text(.soundPacksBuiltinValue))
+        .accessibilityHint(l10n.text(.soundPacksRestorePackHint))
         .accessibilityIdentifier("sound-packs.restore-selected-factory-pack")
     }
 
     private func builtinCopyExplanation(_ card: PackCard) -> some View {
-        let discardsInstalledChanges: Bool = {
-            if card.factoryIntegrity == false { return true }
-            switch card.state {
-            case .complete: return false
-            case .partial, .broken: return true
-            }
-        }()
-        let message =
-            discardsInstalledChanges
-            ? "副本来自出厂版本；当前修改、缺失或损坏内容不会带入。"
-            : "从内置原版创建可编辑副本。"
+        let message = l10n.text(.soundPacksBuiltinCopyExplanation)
         return Text(message)
             .font(.callout)
             .foregroundStyle(.secondary)
@@ -537,7 +547,7 @@ struct SoundPacksWindowView: View {
     private func packActions(_ card: PackCard, includeFlexibleSpace: Bool) -> some View {
         let displayName = SelectedPackMetadata(id: card.id, name: card.name).displayName
         if model.selectedPackIsBuiltinReadOnly {
-            Button("复制为我的包") {
+            Button(l10n.text(.soundPacksCopy)) {
                 model.forkSelectedFactoryPack()
             }
             .buttonStyle(.borderedProminent)
@@ -546,23 +556,27 @@ struct SoundPacksWindowView: View {
             .fixedSize(horizontal: false, vertical: true)
             .focused($focusedTarget, equals: .forkFactoryPack)
             .help(builtinCopyHelp(card))
-            .accessibilityLabel("复制「\(displayName)」为我的包")
-            .accessibilityValue("原包只读")
+            .accessibilityLabel(l10n.format(.soundPacksCopyLabel, displayName))
+            .accessibilityValue(l10n.text(.soundPacksOriginalReadonly))
             .accessibilityHint(builtinCopyHelp(card))
             .accessibilityIdentifier("sound-packs.fork-selected-pack")
 
             factoryRestoreButton(card)
         } else {
-            Button(isImportingAudio ? "正在添加…" : "+ 添加音频…") {
+            Button(isImportingAudio
+                ? l10n.text(.soundPacksAddingAudio)
+                : l10n.text(.soundPacksAddAudio)) {
                 chooseAndImportAudio()
             }
             .disabled(isImportingAudio)
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .fixedSize(horizontal: false, vertical: true)
             .focused($focusedTarget, equals: .addAudio)
-            .accessibilityLabel("向「\(displayName)」添加音频")
-            .accessibilityValue(isImportingAudio ? "正在导入" : "可以选择文件")
-            .accessibilityHint("选择 wav、mp3、aiff 或 m4a；导入后先显示为未被使用")
+            .accessibilityLabel(l10n.format(.soundPacksAddAudioLabel, displayName))
+            .accessibilityValue(isImportingAudio
+                ? l10n.text(.soundPacksImporting)
+                : l10n.text(.soundPacksCanChooseFile))
+            .accessibilityHint(l10n.text(.soundPacksAddAudioHint))
             .accessibilityIdentifier("sound-packs.add-audio")
         }
 
@@ -571,42 +585,42 @@ struct SoundPacksWindowView: View {
         }
 
         if card.isSelected {
-            ClaudioStatusCapsule("使用中", isEmphasized: true)
-                .accessibilityLabel("当前正在使用这个声音包")
+            ClaudioStatusCapsule(l10n.text(.soundPacksUsing), isEmphasized: true)
+                .accessibilityLabel(l10n.text(.soundPacksUsing))
         } else if model.selectedPackIsBuiltinReadOnly {
-            Button("用这个包") {
+            Button(l10n.text(.soundPacksUse)) {
                 model.useSelectedPack()
             }
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .useSelectedPack)
-            .accessibilityLabel("使用「\(displayName)」")
-            .accessibilityValue("当前未使用")
-            .accessibilityHint("明确切换当前使用的声音包；不会自动添加星标")
+            .accessibilityLabel(l10n.format(.soundPacksUseLabel, displayName))
+            .accessibilityValue(l10n.text(.soundPacksUseValue))
+            .accessibilityHint(l10n.text(.soundPacksUseHint))
             .accessibilityIdentifier("sound-packs.use-selected-pack")
         } else {
-            Button("用这个包") {
+            Button(l10n.text(.soundPacksUse)) {
                 model.useSelectedPack()
             }
             .buttonStyle(.borderedProminent)
             .tint(ClaudioSharedColor.clay(colorScheme))
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .useSelectedPack)
-            .accessibilityLabel("使用「\(displayName)」")
-            .accessibilityValue("当前未使用")
-            .accessibilityHint("明确切换当前使用的声音包；不会自动添加星标")
+            .accessibilityLabel(l10n.format(.soundPacksUseLabel, displayName))
+            .accessibilityValue(l10n.text(.soundPacksUseValue))
+            .accessibilityHint(l10n.text(.soundPacksUseHint))
             .accessibilityIdentifier("sound-packs.use-selected-pack")
         }
     }
 
     private func builtinCopyHelp(_ card: PackCard) -> String {
         if card.factoryIntegrity == false {
-            return "从出厂版本创建可编辑副本；当前修改、缺失或损坏内容不会带入"
+            return l10n.text(.soundPacksBuiltinCopyHelp)
         }
         switch card.state {
         case .complete:
-            return "从内置原版创建可编辑副本；原包、当前使用项与星标都不改变"
+            return l10n.text(.soundPacksBuiltinCopyHelp)
         case .partial, .broken:
-            return "从出厂版本创建可编辑副本；当前修改、缺失或损坏内容不会带入"
+            return l10n.text(.soundPacksBuiltinCopyHelp)
         }
     }
 
@@ -713,43 +727,43 @@ struct SoundPacksWindowView: View {
                 .font(.headline)
                 .accessibilityAddTraits(.isHeader)
             if model.libraryPresentationState == .loading {
-                Text("窗口已经打开，读取会在后台完成。")
+                Text(l10n.text(.soundPacksEmptyLoadingMessage))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if case .loadFailed = model.libraryPresentationState {
-                Text("请使用上方的“重试”重新读取；失败不会被当成空声音包库。")
+                Text(l10n.text(.soundPacksEmptyLoadFailedMessage))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             } else if model.hasFactoryPacks {
-                Text("可以从 claudi0 的出厂资源恢复全部内置声音包。")
+                Text(l10n.text(.soundPacksEmptyFactoryMessage))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("恢复内置声音包") {
+                Button(l10n.text(.soundPacksEmptyRestore)) {
                     pendingFactoryPackRestore = FactoryPackRestoreRequest(
                         packID: "all-factory-packs",
-                        displayName: "所有内置声音包",
+                        displayName: l10n.text(.soundPacksEmptyRestoreLabel),
                         kind: .allFactoryPacks)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(ClaudioSharedColor.clay(colorScheme))
                 .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
                 .focused($focusedTarget, equals: .restoreAllFactoryPacks)
-                .accessibilityLabel("恢复全部内置声音包")
-                .accessibilityValue("当前没有可管理的声音包")
-                .accessibilityHint("恢复后可以选择、星标和试听内置声音包")
+                .accessibilityLabel(l10n.text(.soundPacksEmptyRestoreLabel))
+                .accessibilityValue(l10n.text(.soundPacksEmptyRestoreValue))
+                .accessibilityHint(l10n.text(.soundPacksEmptyRestoreHint))
                 .accessibilityIdentifier("sound-packs.restore-all-factory-packs")
             } else {
-                Text("当前构建没有出厂声音资源；重新安装 claudi0 可恢复内置声音包。")
+                Text(l10n.text(.soundPacksEmptyNoFactoryMessage))
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
-                Button("在访达中打开声音包文件夹") {
+                Button(l10n.text(.soundPacksEmptyReveal)) {
                     revealPacksDirectory()
                 }
                 .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
                 .focused($focusedTarget, equals: .revealPacksDirectory)
-                .accessibilityLabel("在访达中打开 claudi0 声音包文件夹")
+                .accessibilityLabel(l10n.text(.soundPacksEmptyRevealLabel))
                 .accessibilityValue(userPacksDirectory.path)
-                .accessibilityHint("当前构建没有可恢复的出厂资源")
+                .accessibilityHint(l10n.text(.soundPacksEmptyRevealHint))
                 .accessibilityIdentifier("sound-packs.reveal-packs-directory")
             }
         }
@@ -759,9 +773,9 @@ struct SoundPacksWindowView: View {
 
     private var emptyLibraryTitle: String {
         switch model.libraryPresentationState {
-        case .loading: return "正在读取声音包"
-        case .loadFailed: return "声音包库暂不可用"
-        case .ready, .refreshing, .refreshFailed: return "没有可管理的声音包"
+        case .loading: return l10n.text(.soundPacksLibraryLoading).replacingOccurrences(of: "…", with: "")
+        case .loadFailed: return l10n.text(.panelPacksReadFailed)
+        case .ready, .refreshing, .refreshFailed: return l10n.text(.panelPacksNoneTitle)
         }
     }
 
@@ -782,23 +796,26 @@ struct SoundPacksWindowView: View {
     private func windowStatusRow(_ status: SoundPacksWindowStatus) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if status.severity == .failure {
-                windowFailureRow(action: status.action, reason: status.message)
+                windowFailureRow(
+                    action: status.action(language: languageStore.language),
+                    reason: status.message(language: languageStore.language))
             } else {
+                let message = status.message(language: languageStore.language)
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "checkmark.circle")
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
-                    Text(status.message)
+                    Text(message)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(status.message)
+                .accessibilityLabel(message)
             }
             if case .retryFactoryRestores(let packIDs)? = status.recovery {
                 ForEach(packIDs, id: \.self) { packID in
                     let displayName = SelectedPackMetadata(id: packID, name: nil).displayName
-                    Button("重试恢复「\(displayName)」…") {
+                    Button(l10n.format(.soundPacksRetryRestore, displayName)) {
                         pendingFactoryPackRestore = FactoryPackRestoreRequest(
                             packID: packID,
                             displayName: displayName,
@@ -809,9 +826,9 @@ struct SoundPacksWindowView: View {
                         $focusedTarget,
                         equals: .retryFactoryRestore(packID: packID)
                     )
-                    .accessibilityLabel("重试恢复「\(displayName)」")
-                    .accessibilityValue("上一次恢复未完成")
-                    .accessibilityHint("再次尝试安全恢复内置声音包")
+                    .accessibilityLabel(l10n.format(.soundPacksRetryRestoreLabel, displayName))
+                    .accessibilityValue(l10n.text(.soundPacksRetryRestoreValue))
+                    .accessibilityHint(l10n.text(.soundPacksRetryRestoreHint))
                     .accessibilityIdentifier("sound-packs.retry-factory-restore.\(packID)")
                 }
             }
@@ -859,15 +876,16 @@ struct SoundPacksWindowView: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(
-            soundPacksWindowEventAccessibilityLabel(
-                eventName: row.event.displayName,
+            localizedSoundPacksEventAccessibilityLabel(
+                eventName: localizedEventName(row.event, language: languageStore.language),
                 coverage: row.coverage,
-                enabled: row.enabled)
+                enabled: row.enabled,
+                language: languageStore.language)
         )
         .accessibilityHint(
             canEditSelectedPack
-                ? "可选择现有文件、选择并绑定新文件，或把音频文件拖到这一行"
-                : "内置包是只读的；复制后可以编辑"
+                ? l10n.text(.soundPacksMappingHint)
+                : l10n.text(.soundPacksBuiltinLabel)
         )
         .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue)")
     }
@@ -876,7 +894,7 @@ struct SoundPacksWindowView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 7) {
                 ClaudioEventGlyph(event: row.event, size: 24)
-                Text(row.event.displayName)
+                Text(localizedEventName(row.event, language: languageStore.language))
                     .font(ClaudioTheme.font(.body).weight(.medium))
             }
             Text(row.event.manifestKey)
@@ -900,15 +918,18 @@ struct SoundPacksWindowView: View {
             Button {
                 playPreview(for: row)
             } label: {
-                Label("试听", systemImage: "play.fill")
+                Label(l10n.text(.soundPacksPreview), systemImage: "play.fill")
             }
             .fixedSize(horizontal: true, vertical: false)
             .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
             .disabled(!availability.isAvailable)
             .focused($focusedTarget, equals: .eventPreview(row.event))
-            .accessibilityLabel("试听「\(row.event.displayName)」")
+            .accessibilityLabel(l10n.format(
+                .soundPacksPreviewLabel,
+                localizedEventName(row.event, language: languageStore.language)))
             .accessibilityValue(mappingText(row.coverage))
-            .accessibilityHint(availability.accessibilityHint)
+            .accessibilityHint(
+                localizedEventPreviewHint(availability, language: languageStore.language))
             .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue).preview")
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -918,20 +939,26 @@ struct SoundPacksWindowView: View {
     private func eventAudioControl(_ row: EventRow) -> some View {
         if canEditSelectedPack {
             Menu {
-                Section("已有文件") {
+                Section(l10n.text(.soundPacksExistingFiles)) {
                     if model.selectedAudioInventoryState.isLoading
                         && model.selectedAudioFiles.isEmpty
                     {
-                        Text("正在读取音频…")
+                        Text(l10n.text(.soundPacksAudioLoading))
                     } else if model.selectedAudioFiles.isEmpty {
-                        Text("这个包里还没有音频")
+                        Text(l10n.text(.soundPacksEmptyAudio))
                     } else {
                         ForEach(model.selectedAudioFiles) { file in
-                            Button(file.isOrphan ? "\(file.fileName) · 未被使用" : file.fileName) {
+                            Button(file.isOrphan
+                                ? l10n.format(.soundPacksOrphanUnused, file.fileName)
+                                : file.fileName) {
                                 model.assignSelectedAudioFile(file.fileName, to: row.event)
-                            }
-                            .accessibilityLabel(
-                                "把 \(file.fileName) 绑定到 \(row.event.displayName)"
+                        }
+                        .accessibilityLabel(
+                            l10n.format(
+                                .soundPacksChooseBindLabel,
+                                "\(localizedEventName(row.event, language: languageStore.language))"
+                                    + (languageStore.language == .english ? ": " : "：")
+                                    + file.fileName)
                             )
                             .accessibilityIdentifier(
                                 "sound-packs.event.\(row.event.rawValue).existing.\(file.fileName)")
@@ -939,27 +966,33 @@ struct SoundPacksWindowView: View {
                     }
                 }
                 Divider()
-                Button("选择并绑定文件…") {
+                Button(l10n.text(.soundPacksChooseBind)) {
                     chooseAndBindAudio(to: row.event)
                 }
-                .accessibilityLabel("为 \(row.event.displayName) 选择并绑定文件")
-                .accessibilityHint("文件会先通过安全导入检查")
+                                .accessibilityLabel(l10n.format(
+                                    .soundPacksChooseBindLabel,
+                                    localizedEventName(row.event, language: languageStore.language)))
+                .accessibilityHint(l10n.text(.soundPacksChooseBindHint))
                 .accessibilityIdentifier(
                     "sound-packs.event.\(row.event.rawValue).choose-and-bind")
-                Button("清除绑定", role: .destructive) {
+                Button(l10n.text(.soundPacksClearBinding), role: .destructive) {
                     model.clearSelectedEventBinding(row.event)
                 }
                 .disabled(!hasBinding(row.coverage))
-                .accessibilityLabel("清除 \(row.event.displayName) 的声音绑定")
-                .accessibilityHint("只移除 manifest 映射，不删除音频文件")
+                .accessibilityLabel(l10n.format(
+                    .soundPacksClearBindingLabel,
+                    localizedEventName(row.event, language: languageStore.language)))
+                .accessibilityHint(l10n.text(.soundPacksClearBindingHint))
                 .accessibilityIdentifier(
                     "sound-packs.event.\(row.event.rawValue).clear-binding")
-                Button("在访达中显示") {
+                Button(l10n.text(.soundPacksRevealMapping)) {
                     revealMappedAudio(for: row.event)
                 }
                 .disabled(!row.coverage.previewEnabled)
-                .accessibilityLabel("在访达中显示 \(row.event.displayName) 的声音文件")
-                .accessibilityHint("定位当前映射的安全包内文件")
+                .accessibilityLabel(l10n.format(
+                    .soundPacksRevealMappingLabel,
+                    localizedEventName(row.event, language: languageStore.language)))
+                .accessibilityHint(l10n.text(.soundPacksRevealMappingHint))
                 .accessibilityIdentifier(
                     "sound-packs.event.\(row.event.rawValue).reveal-mapping")
             } label: {
@@ -971,13 +1004,17 @@ struct SoundPacksWindowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
             .focused($focusedTarget, equals: .eventAudio(row.event))
-            .accessibilityLabel("\(row.event.displayName) 的声音映射")
+            .accessibilityLabel(l10n.format(
+                .soundPacksMappingLabel,
+                localizedEventName(row.event, language: languageStore.language)))
             .accessibilityValue(mappingText(row.coverage))
-            .accessibilityHint("选择已有文件、绑定新文件、清除绑定或在访达中显示")
+            .accessibilityHint(l10n.text(.soundPacksMappingHint))
             .accessibilityIdentifier("sound-packs.event.\(row.event.rawValue).mapping")
         } else {
             mappingValue(row.coverage)
-                .accessibilityLabel("\(row.event.displayName) 的声音映射")
+                .accessibilityLabel(l10n.format(
+                    .soundPacksMappingLabel,
+                    localizedEventName(row.event, language: languageStore.language)))
                 .accessibilityValue(mappingText(row.coverage))
         }
     }
@@ -988,14 +1025,14 @@ struct SoundPacksWindowView: View {
         if !orphanFiles.isEmpty {
             Divider()
             VStack(alignment: .leading, spacing: 10) {
-                Text("未被使用的音频")
+                Text(l10n.text(.soundPacksOrphanTitle))
                     .font(.headline)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(orphanFiles) { file in
                     orphanAudioRow(file)
                 }
                 if !canEditSelectedPack {
-                    Text("内置声音包是只读的；请先复制为我的包，再分配或删除这些音频。")
+                    Text(l10n.text(.soundPacksOrphanReadonly))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1009,18 +1046,22 @@ struct SoundPacksWindowView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            Text("\(file.fileName) · 未被使用")
+            Text(l10n.format(.soundPacksOrphanUnused, file.fileName))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 8)
             if canEditSelectedPack {
-                Menu("分配…") {
+                Menu(l10n.text(.soundPacksOrphanAssign)) {
                     ForEach(Event.allCases, id: \.self) { event in
-                        Button(event.displayName) {
+                        Button(localizedEventName(event, language: languageStore.language)) {
                             model.assignSelectedAudioFile(file.fileName, to: event)
                         }
                         .accessibilityLabel(
-                            "把 \(file.fileName) 分配给 \(event.displayName)"
+                            l10n.format(
+                                .soundPacksOrphanAssignLabel,
+                                file.fileName
+                                    + (languageStore.language == .english ? ": " : "：")
+                                    + localizedEventName(event, language: languageStore.language))
                         )
                         .accessibilityIdentifier(
                             "sound-packs.orphan.\(file.fileName).event.\(event.rawValue)")
@@ -1031,12 +1072,12 @@ struct SoundPacksWindowView: View {
                     $focusedTarget,
                     equals: .orphanAssignment(fileName: file.fileName)
                 )
-                .accessibilityLabel("分配 \(file.fileName)")
-                .accessibilityValue("尚未被事件使用")
-                .accessibilityHint("选择要使用这个音频的事件")
+                .accessibilityLabel(l10n.format(.soundPacksOrphanAssignLabel, file.fileName))
+                .accessibilityValue(l10n.text(.soundPacksOrphanAssignValue))
+                .accessibilityHint(l10n.text(.soundPacksOrphanAssignHint))
                 .accessibilityIdentifier("sound-packs.orphan.\(file.fileName).assign")
 
-                Button("删除") {
+                Button(l10n.text(.soundPacksOrphanDelete)) {
                     if let selectedPackID = model.selectedPackID {
                         pendingPermanentDeletion = PermanentAudioDeletionRequest(
                             packID: selectedPackID,
@@ -1048,9 +1089,9 @@ struct SoundPacksWindowView: View {
                     $focusedTarget,
                     equals: .orphanDeletion(fileName: file.fileName)
                 )
-                .accessibilityLabel("永久删除 \(file.fileName)")
-                .accessibilityValue("尚未被事件使用")
-                .accessibilityHint("会先显示不可撤销的确认")
+                .accessibilityLabel(l10n.format(.soundPacksOrphanDeleteLabel, file.fileName))
+                .accessibilityValue(l10n.text(.soundPacksOrphanDeleteValue))
+                .accessibilityHint(l10n.text(.soundPacksOrphanDeleteHint))
                 .accessibilityIdentifier("sound-packs.orphan.\(file.fileName).delete")
             }
         }
@@ -1060,7 +1101,10 @@ struct SoundPacksWindowView: View {
     private func windowFailureRow(action: String, reason: String) -> some View {
         FailureRow(message: reason)
         .accessibilityLabel(
-            soundPacksWindowFailureAccessibilityLabel(action: action, reason: reason))
+            localizedSoundPacksFailureAccessibilityLabel(
+                action: action,
+                reason: reason,
+                language: languageStore.language))
     }
 
     private func factoryRestoreConfirmationMessage(
@@ -1068,28 +1112,22 @@ struct SoundPacksWindowView: View {
     ) -> String {
         switch request.kind {
         case .selectedPack:
-            return
-                "当前内容会被出厂版本替换。恢复前的整个目录会原样搬到同级隐藏位置，"
-                + "一个文件都不会删除；完成后会显示实际路径。"
+            return l10n.text(.soundPacksRestoreSelectedMessage)
         case .failedPublishRetry:
-            return
-                "将重新尝试发布完整的出厂版本。上次恢复前搬走的内容会继续原样保留，"
-                + "一个文件都不会删除。"
+            return l10n.text(.soundPacksRestoreRetryMessage)
         case .allFactoryPacks:
-            return
-                "将恢复全部缺失或损坏的内置声音包。每个现有目录都会先完整搬到同级隐藏位置，"
-                + "一个文件都不会删除；部分失败会逐项列出。"
+            return l10n.text(.soundPacksRestoreAllMessage)
         }
     }
 
     private func inventoryErrorMessage(_ error: PackAudioInventoryError) -> String {
         switch error {
         case .packNotFound(let packID):
-            return "声音包「\(packID)」已找不到。"
+            return l10n.format(.soundPacksInventoryPackNotFound, packID)
         case .manifestUnreadable(let reason):
-            return "manifest.json 无法安全读取：\(reason)"
+            return l10n.format(.soundPacksInventoryManifestUnreadable, reason)
         case .directoryUnreadable(let reason):
-            return "声音包目录无法读取：\(reason)"
+            return l10n.format(.soundPacksInventoryDirectoryUnreadable, reason)
         }
     }
 
@@ -1206,15 +1244,15 @@ struct SoundPacksWindowView: View {
         case .cc0:
             return "CC0"
         case .modified:
-            return "⚠ 已修改"
+            return "⚠ " + l10n.text(.soundPacksPackModified)
         }
     }
 
     private func mappingText(_ coverage: CoverageState) -> String {
         switch coverage {
         case .present(let fileName): return fileName
-        case .unmapped: return "未配置"
-        case .broken(let fileName): return "\(fileName) · 文件丢失"
+        case .unmapped: return l10n.text(.soundPacksCoverageUnmapped)
+        case .broken(let fileName): return l10n.format(.soundPacksCoverageBroken, fileName)
         }
     }
 
@@ -1224,7 +1262,7 @@ struct SoundPacksWindowView: View {
     }
 
     private func packAccessibilityLabel(_ card: PackCard) -> String {
-        soundPacksWindowPackAccessibilityLabel(
+        localizedSoundPacksPackAccessibilityLabel(
             displayName: SelectedPackMetadata(id: card.id, name: card.name).displayName,
             isActivePack: card.isSelected,
             state: card.state,
@@ -1232,14 +1270,19 @@ struct SoundPacksWindowView: View {
                 isCC0: card.isCC0,
                 state: card.state,
                 factoryIntegrity: card.factoryIntegrity
-            ).license)
+            ).license,
+            language: languageStore.language)
     }
 
     private func packAccessibilityValue(_ card: PackCard) -> String {
         var values: [String] = []
-        if model.selectedPackID == card.id { values.append("正在查看") }
-        if model.starredPackIDs.contains(card.id) { values.append("显示在主面板") }
-        if card.isSelected { values.append("使用中") }
-        return values.isEmpty ? "未固定，未使用" : values.joined(separator: "，")
+        if model.selectedPackID == card.id {
+            values.append(l10n.format(
+                .soundPacksSidebarViewing,
+                SelectedPackMetadata(id: card.id, name: card.name).displayName))
+        }
+        if model.starredPackIDs.contains(card.id) { values.append(l10n.text(.soundPacksPanelVisible)) }
+        if card.isSelected { values.append(l10n.text(.soundPacksUsing)) }
+        return values.isEmpty ? l10n.text(.soundPacksPackNotUsed) : values.joined(separator: languageStore.language == .english ? ", " : "，")
     }
 }

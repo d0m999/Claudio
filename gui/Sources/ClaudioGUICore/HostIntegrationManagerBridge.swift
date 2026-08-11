@@ -1,4 +1,5 @@
 import ClaudioCore
+import ClaudioLocalization
 import Foundation
 
 /// GUI 两个表面一次性消费的 manager 快照。宿主连接事实与可听矩阵同代返回，避免窗口与
@@ -23,16 +24,28 @@ public struct HostIntegrationPresentationState: Sendable, Equatable {
 public struct HostIntegrationMutationOutcome: Sendable, Equatable {
     public let state: HostIntegrationPresentationState
     public let feedbackKind: IntegrationsFeedbackKind
-    public let feedbackMessage: String
+    public let feedbackText: IntegrationsFeedbackText
+    public var feedbackMessage: String { feedbackText.resolve(language: .zhHans) }
 
     public init(
         state: HostIntegrationPresentationState,
         feedbackKind: IntegrationsFeedbackKind,
         feedbackMessage: String
     ) {
+        self.init(
+            state: state,
+            feedbackKind: feedbackKind,
+            feedbackText: .literal(feedbackMessage))
+    }
+
+    public init(
+        state: HostIntegrationPresentationState,
+        feedbackKind: IntegrationsFeedbackKind,
+        feedbackText: IntegrationsFeedbackText
+    ) {
         self.state = state
         self.feedbackKind = feedbackKind
-        self.feedbackMessage = feedbackMessage
+        self.feedbackText = feedbackText
     }
 }
 
@@ -99,7 +112,9 @@ public actor HostIntegrationManagerBridge {
             return HostIntegrationMutationOutcome(
                 state: state,
                 feedbackKind: .failure,
-                feedbackMessage: "操作失败：\(error.description)")
+                feedbackText: .localized(
+                    key: .feedbackOperationFailed,
+                    arguments: [error.description]))
         }
 
         // 动作只写一侧，但完成后刷新两侧，使另一宿主的新回执或外部配置变化不会被冻结。
@@ -107,7 +122,7 @@ public actor HostIntegrationManagerBridge {
         return HostIntegrationMutationOutcome(
             state: state,
             feedbackKind: action.isDisconnect ? .information : .success,
-            feedbackMessage: mutationFeedbackMessage(action: action, state: state))
+            feedbackText: mutationFeedbackText(action: action, state: state))
     }
 
     private func presentationState(
@@ -150,26 +165,32 @@ public actor HostIntegrationManagerBridge {
 
 /// 动作反馈必须描述刷新后的事实，不是连接按钮在点击前预设的路径。
 /// 特别是 Codex：如果当前 installation 已经收到真实回执，不能还说“等待确认”。
-private func mutationFeedbackMessage(
+private func mutationFeedbackText(
     action: IntegrationsWindowInspectorAction,
     state: HostIntegrationPresentationState
-) -> String {
-    guard let host = action.host else { return "宿主状态已更新" }
-    if action.isDisconnect { return "已断开 \(host.displayName)" }
+) -> IntegrationsFeedbackText {
+    guard let host = action.host else {
+        return .localized(key: .feedbackHostStateUpdated, arguments: [])
+    }
+    if action.isDisconnect {
+        return .localized(key: .feedbackDisconnected, arguments: [host.displayName])
+    }
 
     let snapshot = state.snapshots.first { $0.host == host }
     if host == .codex {
         if let snapshot, case .observed = snapshot.activation {
-            return "Codex 已连接，当前代次已收到真实回执"
+            return .localized(key: .feedbackConnectedReceipt, arguments: [host.displayName])
         }
-        return "claudi0 已写好，等待 Codex 确认"
+        return .localized(key: .feedbackAwaitingConfirmation, arguments: [host.displayName])
     }
 
     if let snapshot, case .observed = snapshot.activation {
-        return "Claude Code 已连接，当前代次已收到真实回执"
+        return .localized(key: .feedbackConnectedReceipt, arguments: [host.displayName])
     }
-    if case .repair = action { return "已修复 Claude Code 连接，等待首个真实事件" }
-    return "已配置 Claude Code 连接，等待首个真实事件"
+    if case .repair = action {
+        return .localized(key: .feedbackRepairedWaiting, arguments: [host.displayName])
+    }
+    return .localized(key: .feedbackConfiguredWaiting, arguments: [host.displayName])
 }
 
 private extension IntegrationsWindowInspectorAction {

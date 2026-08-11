@@ -1,0 +1,2013 @@
+{
+  "sourceLanguage" : "zh-Hans",
+  "strings" : {
+    "common.cancel" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消" } }
+      }
+    },
+    "common.close" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭" } }
+      }
+    },
+    "common.confirm" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Confirm" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确认" } }
+      }
+    },
+    "common.copy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制" } }
+      }
+    },
+    "common.delete-permanently" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete Permanently" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "永久删除" } }
+      }
+    },
+    "common.restore" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复" } }
+      }
+    },
+    "common.retry" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试" } }
+      }
+    },
+    "host.details.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open connection and diagnostics for this source" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开该声音来源的连接与诊断详情" } }
+      }
+    },
+    "host.ready" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld ready" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 已就绪" } }
+      }
+    },
+    "host.configured" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld configured" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 已配置" } }
+      }
+    },
+    "host.legacy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld legacy connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 旧版连接" } }
+      }
+    },
+    "host.not-connected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld not connected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 未连接" } }
+      }
+    },
+    "host.needs-attention" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld needs attention" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 需要处理" } }
+      }
+    },
+    "host.codex.ready-detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Execution interruption has no event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "执行中断暂无事件" } }
+      }
+    },
+    "host.codex.awaiting-detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enter /hooks in Codex, confirm it, then submit another prompt" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在 Codex 输入 /hooks，确认后再提交一次提示词" } }
+      }
+    },
+    "host.claude.awaiting-detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Submit a prompt to Claude Code to confirm the connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请向 Claude Code 提交一次提示词以确认连接" } }
+      }
+    },
+    "host.claude.legacy-detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Four legacy events are audible; task start needs an upgrade" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "四个旧版事件可听；任务开始需升级" } }
+      }
+    },
+    "host.codex.legacy-detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Audible, but no real receipt yet" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可听，但暂无真实回执" } }
+      }
+    },
+    "event.task-start" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Task start" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "任务开始" } }
+      }
+    },
+    "event.stop" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Turn complete" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本轮结束" } }
+      }
+    },
+    "event.stop-failure" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Execution interrupted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "执行中断" } }
+      }
+    },
+    "event.notification" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Needs response" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "待响应" } }
+      }
+    },
+    "event.subagent-stop" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Subtask complete" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "子任务结束" } }
+      }
+    },
+    "event.editor.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Sound Packs and locate this event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开声音包窗口并定位到这个事件" } }
+      }
+    },
+    "event.coverage.present" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Mapped" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已映射" } }
+      }
+    },
+    "event.coverage.unmapped" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not configured" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未配置" } }
+      }
+    },
+    "event.coverage.broken" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Needs repair" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需修复" } }
+      }
+    },
+    "event.coverage.present-file" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Mapped to %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已映射 %@" } }
+      }
+    },
+    "event.coverage.broken-file" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ is missing or damaged" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 缺失或损坏" } }
+      }
+    },
+    "event.preview.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "试听 %@" } }
+      }
+    },
+    "event.preview.available-enabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview available; event is enabled" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可以试听；事件已启用" } }
+      }
+    },
+    "event.preview.available-muted" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview available; event is muted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可以试听；事件已静音" } }
+      }
+    },
+    "event.preview.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不可试听" } }
+      }
+    },
+    "event.preview.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview the mapped audio; event mute does not affect manual preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放当前映射的音频；事件静音不影响手工试听" } }
+      }
+    },
+    "event.preview.master-volume-zero" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Master volume is zero; raise it to preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主音量为零；调高主音量后可以试听" } }
+      }
+    },
+    "event.preview.unmapped" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound is configured; bind audio in Sound Packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未配置声音；请在声音包窗口中绑定音频" } }
+      }
+    },
+    "event.preview.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Mapped sound is missing or damaged; repair it in Sound Packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "映射的声音文件缺失或损坏；请在声音包窗口中修复" } }
+      }
+    },
+    "event.preview.unsafe" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cannot preview safely: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法安全试听：%@" } }
+      }
+    },
+    "event.mute.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only affects real host events; manual preview is unchanged" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只影响宿主真实事件；不影响手工试听" } }
+      }
+    },
+    "event.mute" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Mute %@ automatic playback" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "静音 %@ 自动播放" } }
+      }
+    },
+    "event.unmute" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unmute %@ automatic playback" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消静音 %@ 自动播放" } }
+      }
+    },
+    "event.enabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enabled" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已启用" } }
+      }
+    },
+    "event.muted" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Muted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已静音" } }
+      }
+    },
+    "cell.audible" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Audible" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可听" } }
+      }
+    },
+    "cell.muted" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Muted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已静音" } }
+      }
+    },
+    "cell.master-volume-zero" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Master volume is zero" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主音量为零" } }
+      }
+    },
+    "cell.missing-sound" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound missing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音缺失" } }
+      }
+    },
+    "cell.not-connected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not connected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未连接" } }
+      }
+    },
+    "cell.awaiting-activation" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Awaiting confirmation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "等待确认" } }
+      }
+    },
+    "cell.legacy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Legacy connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "旧版连接" } }
+      }
+    },
+    "cell.unsupported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unsupported" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不支持" } }
+      }
+    },
+    "cell.degraded" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Needs attention" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要处理" } }
+      }
+    },
+    "host.playback.played" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Played" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已播放" } }
+      }
+    },
+    "host.playback.muted" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Muted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已静音" } }
+      }
+    },
+    "host.playback.debounced" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Skipped by debounce" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "防抖跳过" } }
+      }
+    },
+    "host.playback.not-ready" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound not ready" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音未就绪" } }
+      }
+    },
+    "host.playback.unsupported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unsupported event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件不支持" } }
+      }
+    },
+    "host.playback.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playback failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放失败" } }
+      }
+    },
+    "integrations.redetect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redetect" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新检测" } }
+      }
+    },
+    "integrations.redetect.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redetect both sound sources" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新检测两个声音来源" } }
+      }
+    },
+    "integrations.redetect.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Read connections, capabilities, and real receipts without changing configuration" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只重新读取连接、能力和真实回执，不修改配置" } }
+      }
+    },
+    "integrations.sources-summary" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound source summary" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音来源摘要" } }
+      }
+    },
+    "integrations.selection.empty" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose a sound source or capability" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择一个声音来源或能力" } }
+      }
+    },
+    "integrations.selection.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current selection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前选择" } }
+      }
+    },
+    "integrations.capability" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Capabilities" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可听能力" } }
+      }
+    },
+    "integrations.event" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件" } }
+      }
+    },
+    "integrations.inspector" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Inspector" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检查器" } }
+      }
+    },
+    "integrations.connection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connection status" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接状态" } }
+      }
+    },
+    "integrations.native-event" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Native event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原生事件" } }
+      }
+    },
+    "integrations.recent-receipt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Latest real receipt" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近真实回执" } }
+      }
+    },
+    "integrations.choose-event" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose an event to view" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择一个事件查看" } }
+      }
+    },
+    "integrations.configuration-source" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configuration source" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置来源" } }
+      }
+    },
+    "integrations.copy-path.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy the full path to the clipboard" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "把完整路径复制到剪贴板" } }
+      }
+    },
+    "integrations.feedback.close" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Close status feedback" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭状态反馈" } }
+      }
+    },
+    "integrations.selected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Selected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已选择" } }
+      }
+    },
+    "integrations.not-selected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not selected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未选择" } }
+      }
+    },
+    "integrations.cell.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "View evidence and recovery actions for this status" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择后查看证据和当前状态对应的恢复动作" } }
+      }
+    },
+    "interface.language" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Language" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "语言" } }
+      }
+    },
+    "interface.language.chinese" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "中文" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "中文" } }
+      }
+    },
+    "interface.language.english" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "English" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "English" } }
+      }
+    },
+    "interface.text-size" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface text" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "界面文字" } }
+      }
+    },
+    "interface.text-size.compact" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Compact" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "紧凑" } }
+      }
+    },
+    "interface.text-size.current" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current interface text" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前界面文字" } }
+      }
+    },
+    "interface.text-size.decrease" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Decrease interface text" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "减小界面文字" } }
+      }
+    },
+    "interface.text-size.increase" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Increase interface text" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "增大界面文字" } }
+      }
+    },
+    "interface.text-size.large" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Large" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "较大" } }
+      }
+    },
+    "interface.text-size.level" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Level %lld of 4" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "第 %lld 档，共 4 档" } }
+      }
+    },
+    "interface.text-size.maximum" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Maximum" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最大" } }
+      }
+    },
+    "interface.text-size.minimum" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Already at the smallest size" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已是最小档" } }
+      }
+    },
+    "interface.text-size.standard" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Standard" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "标准" } }
+      }
+    },
+    "interface.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "界面" } }
+      }
+    },
+    "panel.audible-events.count" : {
+      "localizations" : {
+        "en" : {
+          "variations" : { "plural" : {
+            "one" : { "stringUnit" : { "state" : "translated", "value" : "%lld audible event" } },
+            "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld audible events" } }
+          } }
+        },
+        "zh-Hans" : {
+          "variations" : { "plural" : {
+            "other" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个可听事件" } }
+          } }
+        }
+      }
+    },
+    "panel.audible-events.loading" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading sound pack status" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在读取声音包状态" } }
+      }
+    },
+    "panel.audible-events.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack status unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包状态不可用" } }
+      }
+    },
+    "panel.events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Events" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件" } }
+      }
+    },
+    "panel.header" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 panel, %lld sound sources" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 面板，%lld 个声音来源" } }
+      }
+    },
+    "panel.header.with-pack" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 panel, %lld sound sources, current sound pack %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 面板，%lld 个声音来源，当前声音包 %@" } }
+      }
+    },
+    "panel.loading-events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading event sound status…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在读取事件声音状态…" } }
+      }
+    },
+    "panel.manage-sound-packs" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage Sound Packs…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理声音包…" } }
+      }
+    },
+    "panel.manage-sound-packs.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the sound pack manager" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开声音包管理窗口" } }
+      }
+    },
+    "panel.options.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjust text size across the three Claudio interfaces" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "调整 claudi0 三个界面的文字大小" } }
+      }
+    },
+    "panel.master-volume" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Master volume" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主音量" } }
+      }
+    },
+    "panel.reveal-config" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show config.json in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中显示 config.json" } }
+      }
+    },
+    "panel.reveal-config.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Locate config.json in Finder for manual repair" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中定位 config.json，方便手工修正" } }
+      }
+    },
+    "panel.packs.loading" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading sound packs…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在读取声音包…" } }
+      }
+    },
+    "panel.packs.no-pinned.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No packs pinned to the panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主面板还没有固定包" } }
+      }
+    },
+    "panel.packs.no-pinned.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "There are %lld sound packs on disk. Star them in the manager; up to four are shown." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "磁盘上有 %lld 个声音包。请在管理窗口点亮星标，最多显示四个。" } }
+      }
+    },
+    "panel.packs.none.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound packs yet" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有声音包" } }
+      }
+    },
+    "panel.packs.none.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the manager to restore built-in packs, or create and import your own." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开管理窗口恢复内置包，或创建并导入自己的声音包。" } }
+      }
+    },
+    "panel.packs.read-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unable to read sound packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法读取声音包" } }
+      }
+    },
+    "panel.retry" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry reading" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试读取" } }
+      }
+    },
+    "panel.retry.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Read again in the background; existing results remain visible" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在后台重新读取；已有结果会继续显示" } }
+      }
+    },
+    "panel.selected-pack.none" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound pack selected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未选择声音包" } }
+      }
+    },
+    "panel.select-pack.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose a sound pack below to start using Claudio." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从下面的声音包中选择一个，就可以开始使用 claudi0。" } }
+      }
+    },
+    "panel.select-pack.message.with-choices" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound pack is selected. Choose a sound pack to let claudi0 create the configuration." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有选中任何声音包。点一个声音包，claudi0 会建好配置。" } }
+      }
+    },
+    "panel.select-pack.message.without-choices" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound pack is selected. Choose “Manage Sound Packs” to add a pack in Finder, then return to choose it." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还没有选中任何声音包。选择「管理声音包…」，在访达中添加声音包后再回来选择。" } }
+      }
+    },
+    "panel.select-pack.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose a sound pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "先选包" } }
+      }
+    },
+    "panel.sound-packs" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包" } }
+      }
+    },
+    "panel.sources" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound sources" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音来源" } }
+      }
+    },
+    "panel.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 面板" } }
+      }
+    },
+    "panel.unavailable-events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Event sound status is temporarily unavailable; retry in Sound Packs." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件声音状态暂不可用；请在声音包区域重试读取。" } }
+      }
+    },
+    "sound-packs.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包" } }
+      }
+    },
+    "action.copy-hooks" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy /hooks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制 /hooks" } }
+      }
+    },
+    "action.redetect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redetect" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新检测" } }
+      }
+    },
+    "action.connect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接 %@" } }
+      }
+    },
+    "action.upgrade" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Upgrade connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "升级连接" } }
+      }
+    },
+    "action.repair" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Repair %@ connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修复 %@ 连接" } }
+      }
+    },
+    "action.disconnect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnect %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开 %@" } }
+      }
+    },
+    "action.copy-hooks.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy /hooks to the clipboard so Codex can complete authorization" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "把 /hooks 复制到剪贴板，以便在 Codex 中完成授权" } }
+      }
+    },
+    "action.redetect.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Read the current connection state again" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新读取连接状态" } }
+      }
+    },
+    "action.connect.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect this sound source" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接这个声音来源" } }
+      }
+    },
+    "action.upgrade.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Upgrade the legacy connection to the current format" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "把旧版连接升级到当前格式" } }
+      }
+    },
+    "action.repair.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Repair this sound source's Claudio connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修复这个声音来源的 claudi0 连接" } }
+      }
+    },
+    "action.disconnect.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A confirmation appears first; only this sound source's Claudio connection is removed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会先确认；只移除这个声音来源的 claudi0 连接" } }
+      }
+    },
+    "action.unmute" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unmute" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消静音" } }
+      }
+    },
+    "action.unmute.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only unmutes this event; sound mapping is unchanged" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只取消当前事件静音；不会改变声音映射" } }
+      }
+    },
+    "action.configure-sound" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure sound…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置声音…" } }
+      }
+    },
+    "action.configure-sound.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Sound Packs and locate this event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开声音包窗口并定位到当前事件" } }
+      }
+    },
+    "action.redetect.in-progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redetecting" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新检测中" } }
+      }
+    },
+    "action.connect.in-progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connecting" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接中" } }
+      }
+    },
+    "action.upgrade.in-progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Upgrading" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "升级中" } }
+      }
+    },
+    "action.repair.in-progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Repairing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修复中" } }
+      }
+    },
+    "action.disconnect.in-progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnecting" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开中" } }
+      }
+    },
+    "sound-packs.confirm.delete.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete “%@” permanently?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "永久删除「%@」？" } }
+      }
+    },
+    "sound-packs.confirm.delete.button" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete Permanently" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "永久删除" } }
+      }
+    },
+    "sound-packs.confirm.delete.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This cannot be undone" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "确认后无法撤销" } }
+      }
+    },
+    "sound-packs.confirm.delete.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” will be permanently removed from this sound pack. This cannot be undone." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "「%@」会从这个声音包永久移除。此操作无法撤销。" } }
+      }
+    },
+    "sound-packs.confirm.restore.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Replace “%@” with the factory version?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用出厂版本替换「%@」？" } }
+      }
+    },
+    "sound-packs.confirm.restore.button" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Replace and Restore Factory Sound" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "替换并恢复出厂声音" } }
+      }
+    },
+    "sound-packs.confirm.restore.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore %@ factory sound" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复 %@ 的出厂声音" } }
+      }
+    },
+    "sound-packs.confirm.restore.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current contents are preserved as much as possible before replacement" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "替换前会尽量保留当前内容以供恢复" } }
+      }
+    },
+    "sound-packs.confirm.restore.selected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current contents will be replaced by the factory version. The entire old directory is moved to a hidden sibling location first; no files are deleted, and the final path is shown." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前内容会被出厂版本替换。恢复前的整个目录会原样搬到同级隐藏位置，一个文件都不会删除；完成后会显示实际路径。" } }
+      }
+    },
+    "sound-packs.confirm.restore.retry" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The complete factory version will be published again. Contents moved aside before the previous attempt remain preserved; no files are deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将重新尝试发布完整的出厂版本。上次恢复前搬走的内容会继续原样保留，一个文件都不会删除。" } }
+      }
+    },
+    "sound-packs.confirm.restore.all" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "All missing or damaged built-in sound packs will be restored. Each existing directory is moved to a hidden sibling location first; no files are deleted, and partial failures are listed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将恢复全部缺失或损坏的内置声音包。每个现有目录都会先完整搬到同级隐藏位置，一个文件都不会删除；部分失败会逐项列出。" } }
+      }
+    },
+    "sound-packs.library.loading" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading sound packs…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在读取声音包…" } }
+      }
+    },
+    "sound-packs.library.refreshing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refreshing in the background…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在后台刷新…" } }
+      }
+    },
+    "sound-packs.library.refresh-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh failed; showing the previous result. %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新失败，正在显示上次结果。%@" } }
+      }
+    },
+    "sound-packs.library.retry.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry reading sound packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试读取声音包" } }
+      }
+    },
+    "sound-packs.library.retry.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Read the sound pack library again in the background" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在后台重新读取声音包库" } }
+      }
+    },
+    "sound-packs.sidebar.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show in panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示在面板" } }
+      }
+    },
+    "sound-packs.sidebar.stars" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "★ %lld/%lld" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "★ %lld/%lld" } }
+      }
+    },
+    "sound-packs.sidebar.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack list" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包列表" } }
+      }
+    },
+    "sound-packs.sidebar.viewing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Viewing %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在查看 %@" } }
+      }
+    },
+    "sound-packs.sidebar.none" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound pack selected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未选择声音包" } }
+      }
+    },
+    "sound-packs.sidebar.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use the arrow keys to choose a sound pack to inspect" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用上、下方向键选择要检查的声音包" } }
+      }
+    },
+    "sound-packs.card.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select to inspect on the right; stars only control panel visibility" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择后在右侧查看；星标只控制主面板显示" } }
+      }
+    },
+    "sound-packs.star.pin" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show %@ in the panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在面板显示「%@」" } }
+      }
+    },
+    "sound-packs.star.unpin" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop showing %@ in the panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消在面板显示「%@」" } }
+      }
+    },
+    "sound-packs.star.pin.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "At most 4 sound packs can be shown" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最多显示 4 个声音包" } }
+      }
+    },
+    "sound-packs.star.unpin.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Free a panel position" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消后可腾出一个面板位置" } }
+      }
+    },
+    "sound-packs.star.pinned" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Pinned" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已固定" } }
+      }
+    },
+    "sound-packs.star.unpinned" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not pinned" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未固定" } }
+      }
+    },
+    "sound-packs.using" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "In use" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用中" } }
+      }
+    },
+    "sound-packs.audio.loading" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading pack audio…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在读取包内音频…" } }
+      }
+    },
+    "sound-packs.audio.loading.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reading pack audio" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在读取包内音频" } }
+      }
+    },
+    "sound-packs.builtin.badge" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in · copy to edit" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置包 · 复制后编辑" } }
+      }
+    },
+    "sound-packs.builtin.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in sound pack, read-only; copy it to edit" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置声音包，只读；复制后可以编辑" } }
+      }
+    },
+    "sound-packs.reveal" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中显示" } }
+      }
+    },
+    "sound-packs.reveal.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show %@ in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中显示「%@」" } }
+      }
+    },
+    "sound-packs.reveal.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the folder containing this sound pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开这个声音包所在的文件夹" } }
+      }
+    },
+    "sound-packs.restore" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore Factory Sound…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复出厂声音…" } }
+      }
+    },
+    "sound-packs.restore.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore %@ factory sound" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复「%@」的出厂声音" } }
+      }
+    },
+    "sound-packs.builtin.value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in read-only sound pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置只读声音包" } }
+      }
+    },
+    "sound-packs.restore.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Confirm replacement and learn where old contents are preserved" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会先确认替换，并说明恢复前内容的保存方式" } }
+      }
+    },
+    "sound-packs.copy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy as My Pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制为我的包" } }
+      }
+    },
+    "sound-packs.copy.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy %@ as My Pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制「%@」为我的包" } }
+      }
+    },
+    "sound-packs.original-readonly" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Original is read-only" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原包只读" } }
+      }
+    },
+    "sound-packs.add-audio" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "+ Add Audio…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "+ 添加音频…" } }
+      }
+    },
+    "sound-packs.adding-audio" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Adding…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在添加…" } }
+      }
+    },
+    "sound-packs.add-audio.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add audio to %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "向「%@」添加音频" } }
+      }
+    },
+    "sound-packs.importing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Importing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在导入" } }
+      }
+    },
+    "sound-packs.add-audio.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose wav, mp3, aiff, or m4a; imported files first appear as unused" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择 wav、mp3、aiff 或 m4a；导入后先显示为未被使用" } }
+      }
+    },
+    "sound-packs.use" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use This Pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用这个包" } }
+      }
+    },
+    "sound-packs.use.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用「%@」" } }
+      }
+    },
+    "sound-packs.use.value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not currently used" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前未使用" } }
+      }
+    },
+    "sound-packs.use.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Explicitly switch the active sound pack; this does not add a star" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "明确切换当前使用的声音包；不会自动添加星标" } }
+      }
+    },
+    "sound-packs.empty.loading-message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The window is open; reading continues in the background." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "窗口已经打开，读取会在后台完成。" } }
+      }
+    },
+    "sound-packs.empty.load-failed-message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use Retry above to read again; a failure is not treated as an empty library." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请使用上方的“重试”重新读取；失败不会被当成空声音包库。" } }
+      }
+    },
+    "sound-packs.empty.factory-message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore all built-in sound packs from claudi0's factory resources." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可以从 claudi0 的出厂资源恢复全部内置声音包。" } }
+      }
+    },
+    "sound-packs.empty.restore" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore Built-in Sound Packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复内置声音包" } }
+      }
+    },
+    "sound-packs.empty.restore.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore all built-in sound packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复全部内置声音包" } }
+      }
+    },
+    "sound-packs.empty.restore.value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound packs are currently manageable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前没有可管理的声音包" } }
+      }
+    },
+    "sound-packs.empty.restore.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "After restoring, built-in packs can be selected, pinned, and previewed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复后可以选择、星标和试听内置声音包" } }
+      }
+    },
+    "sound-packs.empty.no-factory-message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This build has no factory sound resources; reinstall claudi0 to restore the built-in packs." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前构建没有出厂声音资源；重新安装 claudi0 可恢复内置声音包。" } }
+      }
+    },
+    "sound-packs.empty.reveal" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Sound Pack Folder in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中打开声音包文件夹" } }
+      }
+    },
+    "sound-packs.empty.reveal.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open claudi0 sound pack folder in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中打开 claudi0 声音包文件夹" } }
+      }
+    },
+    "sound-packs.empty.reveal.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This build has no restorable factory resources" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前构建没有可恢复的出厂资源" } }
+      }
+    },
+    "sound-packs.retry-restore" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry Restore “%@”…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试恢复「%@」…" } }
+      }
+    },
+    "sound-packs.retry-restore.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry restoring “%@”" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试恢复「%@」" } }
+      }
+    },
+    "sound-packs.retry-restore.value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Previous restore did not finish" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "上一次恢复未完成" } }
+      }
+    },
+    "sound-packs.retry-restore.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Try the safe built-in sound pack restore again" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "再次尝试安全恢复内置声音包" } }
+      }
+    },
+    "sound-packs.preview" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "试听" } }
+      }
+    },
+    "sound-packs.preview.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview “%@”" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "试听「%@」" } }
+      }
+    },
+    "sound-packs.existing-files" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Existing Files" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已有文件" } }
+      }
+    },
+    "sound-packs.empty-audio" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This pack has no audio yet" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个包里还没有音频" } }
+      }
+    },
+    "sound-packs.choose-bind" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose and Bind File…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择并绑定文件…" } }
+      }
+    },
+    "sound-packs.choose-bind.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose and bind a file for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为 %@ 选择并绑定文件" } }
+      }
+    },
+    "sound-packs.choose-bind.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The file is checked through the safe import path first" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "文件会先通过安全导入检查" } }
+      }
+    },
+    "sound-packs.clear-binding" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear Binding" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除绑定" } }
+      }
+    },
+    "sound-packs.clear-binding.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear %@ sound binding" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除 %@ 的声音绑定" } }
+      }
+    },
+    "sound-packs.clear-binding.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only remove the manifest mapping; audio files are not deleted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只移除 manifest 映射，不删除音频文件" } }
+      }
+    },
+    "sound-packs.reveal-mapping" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中显示" } }
+      }
+    },
+    "sound-packs.reveal-mapping.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show %@ sound file in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在访达中显示 %@ 的声音文件" } }
+      }
+    },
+    "sound-packs.reveal-mapping.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Locate the mapped file inside the safe pack directory" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "定位当前映射的安全包内文件" } }
+      }
+    },
+    "sound-packs.mapping.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ sound mapping" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 的声音映射" } }
+      }
+    },
+    "sound-packs.mapping.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose an existing file, bind a new file, clear the binding, or show it in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择已有文件、绑定新文件、清除绑定或在访达中显示" } }
+      }
+    },
+    "sound-packs.orphan.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unused Audio" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未被使用的音频" } }
+      }
+    },
+    "sound-packs.orphan.readonly" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in sound packs are read-only. Copy as My Pack before assigning or deleting audio." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置声音包是只读的；请先复制为我的包，再分配或删除这些音频。" } }
+      }
+    },
+    "sound-packs.orphan.unused" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · Unused" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · 未被使用" } }
+      }
+    },
+    "sound-packs.orphan.assign" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Assign…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "分配…" } }
+      }
+    },
+    "sound-packs.orphan.assign.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Assign %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "分配 %@" } }
+      }
+    },
+    "sound-packs.orphan.assign.value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not used by an event yet" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未被事件使用" } }
+      }
+    },
+    "sound-packs.orphan.assign.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose the event that should use this audio" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择要使用这个音频的事件" } }
+      }
+    },
+    "sound-packs.orphan.delete" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "删除" } }
+      }
+    },
+    "sound-packs.orphan.delete.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Delete %@ permanently" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "永久删除 %@" } }
+      }
+    },
+    "sound-packs.orphan.delete.value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not used by an event yet" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未被事件使用" } }
+      }
+    },
+    "sound-packs.orphan.delete.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A confirmation that cannot be undone appears first" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会先显示不可撤销的确认" } }
+      }
+    },
+    "sound-packs.coverage.unmapped" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not configured" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未配置" } }
+      }
+    },
+    "sound-packs.coverage.broken" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · File missing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · 文件丢失" } }
+      }
+    },
+    "sound-packs.pack.active" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Currently in use" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前正在使用" } }
+      }
+    },
+    "sound-packs.pack.complete" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld events configured" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个事件均已配置" } }
+      }
+    },
+    "sound-packs.pack.partial" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld events configured, %lld missing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 个事件已配置，缺 %lld 个" } }
+      }
+    },
+    "sound-packs.pack.broken" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack unavailable: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包不可用：%@" } }
+      }
+    },
+    "sound-packs.pack.modified" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in pack modified" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置包已被修改" } }
+      }
+    },
+    "sound-packs.pack.panel-visible" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shown in the panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示在主面板" } }
+      }
+    },
+    "sound-packs.pack.not-used" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not pinned, not in use" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未固定，未使用" } }
+      }
+    },
+    "sound-packs.event.present" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@, sound %@, %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@，声音 %@，%@" } }
+      }
+    },
+    "sound-packs.event.unmapped" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@, no sound configured, %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@，未配置声音，%@" } }
+      }
+    },
+    "sound-packs.event.broken" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@, error, sound file %@ is missing, %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@，错误，声音文件 %@ 丢失，%@" } }
+      }
+    },
+    "sound-packs.operation.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Operation failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作失败" } }
+      }
+    },
+    "sound-packs.action.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ failed: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@失败：%@" } }
+      }
+    },
+    "sound-packs.inventory.pack-not-found" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack “%@” was not found." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包「%@」已找不到。" } }
+      }
+    },
+    "sound-packs.inventory.manifest-unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "manifest.json could not be read safely: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "manifest.json 无法安全读取：%@" } }
+      }
+    },
+    "sound-packs.inventory.directory-unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack directory could not be read: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包目录无法读取：%@" } }
+      }
+    },
+    "sound-packs.missing-count" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld missing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "缺 %lld 个" } }
+      }
+    },
+    "sound-packs.file-missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "File missing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "文件丢失" } }
+      }
+    },
+    "sound-packs.builtin.copy-explanation" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in packs are read-only. Copy this pack to create an editable version." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置声音包是只读的；复制后才能创建可编辑副本。" } }
+      }
+    },
+    "sound-packs.builtin.copy-help" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy this built-in pack before adding or changing audio." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先复制这个内置包，再添加或修改音频。" } }
+      }
+    },
+    "sound-packs.can-choose-file" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose an audio file to map to this event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择要绑定到此事件的音频文件" } }
+      }
+    },
+    "sound-packs.status.background" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Background: " } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "后台操作：" } }
+      }
+    },
+    "sound-packs.status.action.add-audio" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Add Audio" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "添加音频" } }
+      }
+    },
+    "sound-packs.status.action.update-stars" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Update Stars" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "更新星标" } }
+      }
+    },
+    "sound-packs.status.action.restore-builtins" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore Built-in Sound Packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复内置声音包" } }
+      }
+    },
+    "sound-packs.status.action.restore-factory" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restore Factory Sound" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复出厂声音" } }
+      }
+    },
+    "sound-packs.status.action.copy-pack" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy as My Pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制为我的包" } }
+      }
+    },
+    "sound-packs.status.action.use-pack" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use This Pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用这个包" } }
+      }
+    },
+    "sound-packs.status.audio-imported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Added %@ audio file(s) to “%@”; they start unused. Assign them from event menus." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已向「%@」添加 %@ 个音频；它们会先显示为未被使用，请从事件菜单分配。" } }
+      }
+    },
+    "sound-packs.status.audio-partial" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” imported %@; %@ were rejected: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "「%@」已导入 %@ 个，另有 %@ 个未导入：%@" } }
+      }
+    },
+    "sound-packs.status.batch-restored" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restored %@ built-in sound pack(s)." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已恢复 %@ 个内置声音包。" } }
+      }
+    },
+    "sound-packs.status.batch-restored.salvage" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restored %@ built-in sound pack(s). Previous contents were moved intact to %@; no files were deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已恢复 %@ 个内置声音包。恢复前的内容已原样搬到 %@；一个文件都没删。" } }
+      }
+    },
+    "sound-packs.status.batch-partial" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restored %@ built-in sound pack(s); %@ failed: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已恢复 %@ 个；%@ 个失败：%@" } }
+      }
+    },
+    "sound-packs.status.batch-partial.salvage" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restored %@ built-in sound pack(s); %@ failed: %@. Previous contents were moved intact to %@; no files were deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已恢复 %@ 个；%@ 个失败：%@。恢复前的内容已原样搬到 %@；一个文件都没删。" } }
+      }
+    },
+    "sound-packs.status.factory-restored" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” was restored to the factory version. No installed contents needed to be moved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "「%@」已恢复为出厂版本。此前没有已安装内容，因此没有文件需要搬走。" } }
+      }
+    },
+    "sound-packs.status.factory-restored.salvage" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” was restored to the factory version. Previous contents were moved intact to %@; no files were deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "「%@」已恢复为出厂版本。恢复前的内容已原样搬到 %@；一个文件都没删。" } }
+      }
+    },
+    "sound-packs.status.pack-copied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Created and selected “%@”. The built-in pack is unchanged; choose Use This Pack or pin it when needed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已创建并选中「%@」。原内置包未更改；当前使用的包与面板显示未改变。需要时点「用这个包」或左侧星标。" } }
+      }
+    },
+    "sound-packs.status.pack-used" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Now using “%@”. The starred list did not change." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现在使用「%@」。星标列表没有改变。" } }
+      }
+    },
+    "onboarding.claude-code-not-installed.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code was not found" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没找到 Claude Code" } }
+      }
+    },
+    "onboarding.claude-code-not-installed.body" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 needs Claude Code to play sound cues. Install it using the official guide, then return and choose Redetect." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 得先有 Claude Code 才能配合报声音。按官方指引装好以后，回来点一下重新检测就行。" } }
+      }
+    },
+    "onboarding.helper-missing.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "One last small step" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "还差最后一小步" } }
+      }
+    },
+    "onboarding.helper-missing.body" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The small helper that plays sounds is not installed. Choose Repair and claudi0 will add it without changing anything else." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "负责放声音的小助手还没装上。点一下，claudi0 会帮你补上，其它设置都不会动。" } }
+      }
+    },
+    "onboarding.settings-not-writable.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "We cannot change these settings yet" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这份设置我们暂时改不了" } }
+      }
+    },
+    "onboarding.settings-not-writable.body" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code's configuration file is not writable right now. claudi0 will not force it. Fix the permission, then choose Redetect." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code 的配置文件目前不允许写入，claudi0 不会硬闯。改好权限后，回来点一下重新检测。" } }
+      }
+    },
+    "onboarding.settings-parse-failure.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The configuration looks unusual" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置文件看着有点乱" } }
+      }
+    },
+    "onboarding.settings-parse-failure.body" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code's configuration format is not what claudi0 expected, so it stopped without touching the file. Check it, then return and choose Redetect." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code 的配置文件格式跟预期不太一样，claudi0 怕越改越乱，先停手没有碰它。检查一下这个文件，弄好后回来点一下重新检测。" } }
+      }
+    },
+    "onboarding.not-installed.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Give Claude Code a voice" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "让 Claude Code 学会开口" } }
+      }
+    },
+    "onboarding.not-installed.body" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "After setup, you will hear cues when work finishes, a response is needed, or execution is interrupted. Your existing settings stay in place, with an automatic backup you can undo at any time." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接上以后，干完活、要你确认、被打断了都会有声音提示——不用回头盯屏幕也知道进度。原来的其它设置都会保留，还会自动留一份备份，随时可以一键撤销。" } }
+      }
+    },
+    "onboarding.installed.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Everything is connected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已经接好了" } }
+      }
+    },
+    "onboarding.installed.body" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Claude Code now plays the matching sound when work finishes, a response is needed, or execution is interrupted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现在 Claude Code 干完活、要确认、被打断了都会响对应的声音。" } }
+      }
+    },
+    "onboarding.action.redetect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redetect" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重新检测" } }
+      }
+    },
+    "onboarding.action.repair" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Repair" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "修复" } }
+      }
+    },
+    "onboarding.action.take-over" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connect Claude Code" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接管 Claude Code" } }
+      }
+    },
+    "onboarding.action.disconnect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnect" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开连接" } }
+      }
+    },
+    "onboarding.action.reveal-reason" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "View reason" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "查看原因" } }
+      }
+    },
+    "onboarding.reason.expand" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expand reason" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "展开原因" } }
+      }
+    },
+    "onboarding.reason.collapse" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Collapse reason" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收起原因" } }
+      }
+    },
+    "onboarding.action.running.take-over" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connecting…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在接管…" } }
+      }
+    },
+    "onboarding.action.running.disconnect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnecting…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在断开…" } }
+      }
+    },
+    "onboarding.failure.helper-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The bundled helper was not found, so nothing was changed. Open claudi0 from Applications and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没找到 claudi0 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 claudi0 再试一次。" } }
+      }
+    },
+    "onboarding.failure.setup" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This step could not finish. claudi0 stopped without changing Claude Code's configuration. View the reason below, or try again to continue safely." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这一步没能完成。claudi0 已经停下，没有改动 Claude Code 的配置。看看下面的原因，或者再点一次 —— 它会接着上次继续，不会重复安装。" } }
+      }
+    },
+    "onboarding.failure.disconnect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not disconnect; your configuration was not changed. View the reason below, or try again later." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没能断开，你的配置一个字都没动。看看下面的原因，或者稍后再试一次。" } }
+      }
+    },
+    "onboarding.failure.disconnect-nothing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not disconnect: claudi0 could not recognize the settings it previously added, so it stopped without changing anything." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没能断开：claudi0 没能认出自己之前留下的设置，所以停手了，什么都没改。" } }
+      }
+    },
+    "onboarding.notice.salvaged" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack “%@” could not be read, likely because an earlier install was interrupted. claudi0 moved it intact to %@ — no files were deleted — and installed a clean copy." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "「%@」这个声音包读不出来了（多半是上一次安装被中断留下的残骸）。claudi0 把它原样搬到了 %@ —— 一个文件都没删 —— 并重新装了一份干净的。" } }
+      }
+    },
+    "onboarding.notice.repaired" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your previously selected pack “%@” is no longer available, so claudi0 selected “%@” for now. It may not include every event. The event rows show what is missing, and you can choose another pack below." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你之前选的「%@」已经不在了，claudi0 先替你换成了「%@」。它未必每个事件都有声音，事件行里会标出哪些还缺。你随时可以在下面的声音包里换成别的。" } }
+      }
+    },
+    "feedback.redetected-sources" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound sources redetected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已重新检测声音来源" } }
+      }
+    },
+    "feedback.copy-hooks.succeeded" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copied /hooks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制 /hooks" } }
+      }
+    },
+    "feedback.copy-hooks.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not copy /hooks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法复制 /hooks" } }
+      }
+    },
+    "feedback.mute-cancelled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unmuted %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已取消「%@」静音" } }
+      }
+    },
+    "feedback.open-sound-mapping" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Opened sound mapping for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已打开「%@」声音映射" } }
+      }
+    },
+    "feedback.copy-configuration-path.succeeded" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configuration path copied" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制配置路径" } }
+      }
+    },
+    "feedback.copy-configuration-path.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not copy configuration path" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法复制配置路径" } }
+      }
+    },
+    "feedback.operation-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Operation failed: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "操作失败：%@" } }
+      }
+    },
+    "feedback.receipt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Received a real receipt for the current installation: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收到当前代次真实回执：%@" } }
+      }
+    },
+    "feedback.disconnected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnected %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已断开 %@" } }
+      }
+    },
+    "feedback.connected.receipt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ connected; a real receipt arrived for the current installation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 已连接，当前代次已收到真实回执" } }
+      }
+    },
+    "feedback.awaiting-confirmation" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 is ready; waiting for %@ to confirm" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 已写好，等待 %@ 确认" } }
+      }
+    },
+    "feedback.repaired-waiting" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ connection repaired; waiting for the first real event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已修复 %@ 连接，等待首个真实事件" } }
+      }
+    },
+    "feedback.configured-waiting" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ connection configured; waiting for the first real event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已配置 %@ 连接，等待首个真实事件" } }
+      }
+    },
+    "feedback.host-state-updated" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound source state updated" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "宿主状态已更新" } }
+      }
+    },
+    "panel.base-label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 面板" } }
+      }
+    },
+    "window.integrations.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · Integrations" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · 集成" } }
+      }
+    },
+    "integrations.disconnect.confirm" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnect %@?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开 %@？" } }
+      }
+    },
+    "integrations.disconnect.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnect sound source?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开声音来源？" } }
+      }
+    },
+    "integrations.disconnect.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only this sound source's Claudio connection is removed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只移除这个声音来源的 claudi0 连接" } }
+      }
+    },
+    "integrations.disconnect.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only %@'s Claudio connection is removed; the other source, sound packs, and mute settings are unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只移除 %@ 的 claudi0 连接；另一个声音来源、声音包和静音设置不会改变。" } }
+      }
+    },
+    "integrations.copy-path.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy %@ configuration path" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制 %@ 配置路径" } }
+      }
+    },
+    "integrations.no-receipt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No real receipt for the current installation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "暂无当前安装代次的真实回执" } }
+      }
+    },
+    "integrations.master-volume-zero" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Master volume is zero; raise it in the menu-bar panel and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "主音量为零；请在菜单栏面板中调高主音量后再试。" } }
+      }
+    },
+    "integrations.unsupported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ is not supported by this sound source; this is not a connection error." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 不是这个声音来源支持的能力；这不是连接错误，无需修复。" } }
+      }
+    },
+    "integrations.store-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound source status is temporarily unavailable. Redetect and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音来源状态暂时不可用，请重新检测。" } }
+      }
+    },
+    "integrations.recovery-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "There is no recovery action available for this state." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前状态没有可执行的恢复动作。" } }
+      }
+    },
+    "integrations.mute-fallback-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not unmute the current event." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法取消当前事件静音。" } }
+      }
+    },
+    "integrations.manager-provided-source" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Provided by the host integration manager" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "由宿主集成管理器提供" } }
+      }
+    },
+    "window.sound-packs.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · Sound Packs" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · 声音包" } }
+      }
+    }
+  },
+  "version" : "1.0"
+}

@@ -453,7 +453,8 @@ func runViewWiringSuites() {
             headerAt < sourcesAt && sourcesAt < operationalAt,
             "Panel 必须恒按 header → 双声音来源 → 运行控制渲染；宿主断开/损坏不得门控后两者")
         expect(
-            panel.contains("ForEach(hostIntegrations.content.sourceRows)")
+            panel.contains("ForEach(localizedHostRows)")
+                && panel.contains("hostIntegrations.content.sourceRows")
                 && panel.contains("onManageIntegrations(.hostSource(row.host))")
                 && !panel.contains("manageIntegrationsRow"),
             "双宿主条必须来自共享 presentation、直接打开 retained IntegrationsWindow，且不保留重复底部入口")
@@ -1916,19 +1917,24 @@ func runViewWiringSuites() {
             !panelCollapsed.contains("packCards.first(where:"),
             "PanelView 不得再从 packCards.first(where:) 取当前包名；当前包未加星时它不在显示集")
         expect(
-            rawCollapsed.contains(
-                "let packName = selectedPackDisplayName let base = \"claudi0 面板，2 个声音来源，\\(audibleEventSummary)\" "
-                    + "guard !packName.isEmpty else { return base } return \"\\(base)，当前声音包 \\(packName)\""),
+            rawCollapsed.contains("let packName = selectedPackDisplayName")
+                && rawCollapsed.contains("l10n.format(.panelHeader")
+                && rawCollapsed.contains("l10n.format(.panelHeaderWithPack")
+                && rawCollapsed.contains("audibleEventSummary")
+                && rawCollapsed.contains("let separator = languageStore.language == .english")
+                && rawCollapsed.contains("return \"\\(withPack)\\(separator)\\(audibleEventSummary)\""),
             "headerAccessibilityLabel 必须同时说明双声音来源、诚实库状态并消费 selectedPackDisplayName")
         expect(
-            rawCollapsed.contains(
-                "case .events: if panelModel.libraryPresentationState.hasUsableSnapshot { Text(\"\\(selectedPackDisplayName) · 事件\")"),
+            rawCollapsed.contains("case .events")
+                && rawCollapsed.contains("panelModel.libraryPresentationState.hasUsableSnapshot")
+                && rawCollapsed.contains("selectedPackDisplayName")
+                && rawCollapsed.contains("l10n.text(.panelEvents)"),
             "「{当前包名} · 事件」必须只在 `.events` 且库事实可用时渲染，并消费同一个 selectedPackDisplayName；"
                 + "needsPack/失败态不得出现「 · 事件」半截")
 
         // 节结构 + T8 真窗口动作 + 专属虚线形制。
         guard
-            let soundTitleAt = rawCollapsed.range(of: "Text(\"声音包\")")?.lowerBound,
+            let soundTitleAt = rawCollapsed.range(of: "Text(l10n.text(.panelSoundPacks))")?.lowerBound,
             let rawGalleryAt = rawCollapsed.range(of: "PanelPackSectionView(")?.lowerBound,
             let manageBody = closureBody(
                 after: "private var manageSoundsRow: some View", in: panelCollapsed),
@@ -1955,10 +1961,10 @@ func runViewWiringSuites() {
             manageBody.contains(".focused($focusedTarget, equals: .manageSounds)"),
             "管理声音包按钮本体必须认领 .manageSounds 焦点身份，否则纯模型会再次指向一个无 owner 的幽灵目标")
         expect(
-            rawManageBody.contains(".accessibilityLabel(\"管理声音包\")"),
+            rawManageBody.contains(".accessibilityLabel(l10n.text(.panelManageSoundPacks))"),
             ".manageSounds 的 VoiceOver 名称必须是「管理声音包」；零行首焦点不得播报成断开连接或卸载")
         expect(
-            rawManageBody.contains(".accessibilityHint(\"打开声音包管理窗口\")"),
+            rawManageBody.contains(".accessibilityHint(l10n.text(.panelManageSoundPacksHint))"),
             "T8 的 VoiceOver hint 必须如实说明点击后打开管理窗口，不得继续声称会去访达")
         expect(
             !rawManageBody.contains("断开连接") && !rawManageBody.contains("卸载"),
@@ -1974,7 +1980,7 @@ func runViewWiringSuites() {
         // 同一份 copy 同时送给可见 Text 与 accessibilityLabel，不能在 SwiftUI 里另写一套。
         expect(
             panelCollapsed.contains(
-                "let copy = needsPackNoticeCopy(hasVisiblePackChoices: !panelModel.packCards.isEmpty)"),
+                "let copy = needsPackNoticeCopy( hasVisiblePackChoices: !panelModel.packCards.isEmpty, language: languageStore.language)"),
             "needsPack 的有包/零行选择必须交给可单测的 needsPackNoticeCopy，且轴来自真实显示集是否为空")
         expect(
             panelCollapsed.contains("Text(copy.message)"),
@@ -2212,11 +2218,11 @@ func runViewWiringSuites() {
         }
         expect(
             row.contains("Button(action: onOpenEditor)")
-                && row.contains("打开声音包窗口并定位到这个事件")
+                && row.contains("l10n.text(.eventEditorHint)")
                 && !row.contains("清除绑定"),
             "面板事件身份区必须是唯一编辑入口，且本身不再执行映射写入")
         expect(
-            window.contains("Button(\"清除绑定\", role: .destructive)")
+            window.contains("Button(l10n.text(.soundPacksClearBinding), role: .destructive)")
                 && window.contains("model.clearSelectedEventBinding(row.event)")
                 && window.contains(".disabled(!hasBinding(row.coverage))"),
             "窗口必须允许 present/broken 清除绑定，并经唯一窗口 model 写路径落地")
@@ -2245,7 +2251,7 @@ func runViewWiringSuites() {
                 && gallery.components(separatedBy: "galleryFrame(").count - 1 == 7,
             "声音包画廊必须渲染生产窗口，并覆盖内置、自有、空库及四种非 ready 库状态")
         expect(
-            rootGallery.contains("SoundPacksWindowStateGalleryView()"),
+            rootGallery.contains("SoundPacksWindowStateGalleryView(language: language)"),
             "全产品根画廊必须实际挂入声音包窗口画廊")
         expect(
             flatModel.contains("public init( previewConfig:")
@@ -2354,7 +2360,9 @@ func runViewWiringSuites() {
                 && !panel.contains("Menu {\n            Picker"),
             "方案 C 必须移除旧的 Menu + Picker 界面文字入口")
         expect(
-            flatPanel.contains("InterfaceTextSizeControl(selection: interfaceTextSizeBinding)")
+            flatPanel.contains("InterfaceTextSizeControl(")
+                && flatPanel.contains("selection: interfaceTextSizeBinding")
+                && flatPanel.contains("languageStore: languageStore")
                 && flatPanel.contains(
                     "private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize>"),
             "Panel 必须把实时 ClaudioInterfaceTextSize Binding 传给新控件")
@@ -2380,9 +2388,10 @@ func runViewWiringSuites() {
             "步进内容必须在边界切换时把焦点移到另一侧仍可用按钮")
         expect(
             flatStepper.contains("managesFocus: Bool = true")
-                && gallery.contains("InterfaceTextSizeStepperContent(")
-                && gallery.contains("managesFocus: false")
-                && flatPanel.contains("InterfaceTextSizeStepperContent(selection: $selection)"),
+                && gallery.contains("InterfaceSettingsPopoverContent(")
+                && flatStepper.contains("managesFocus: false")
+                && flatStepper.contains("InterfaceTextSizeStepperContent(")
+                && flatStepper.contains("showsTitle: false"),
             "State Gallery 与生产 Popover 必须复用同一份 stepper content")
     }
 
@@ -2408,13 +2417,13 @@ func runViewWiringSuites() {
         }
         expect(
             window.contains("ForEach(model.selectedAudioFiles)")
-                && window.contains(#""\(file.fileName) · 未被使用""#)
+                && window.contains("l10n.format(.soundPacksOrphanUnused, file.fileName)")
                 && window.contains("model.assignSelectedAudioFile(file.fileName, to: row.event)"),
             "窗口映射菜单必须列出包内音频、标识孤儿并经窗口 model 绑定")
         expect(
             window.contains("model.selectedAudioInventoryState.isLoading")
                 && window.contains("ProgressView()")
-                && window.contains(#"Text("正在读取包内音频…")"#),
+                && window.contains("l10n.text(.soundPacksAudioLoading)"),
             "按需清单未完成时必须显示真 loading，不能把临时空数组说成空包")
         expect(
             !row.contains("selectedAudioFiles")
@@ -2470,7 +2479,7 @@ func runViewWiringSuites() {
         let flat = collapsingWhitespace(view)
         expect(
             flat.contains("model.selectedAudioFiles.filter(\\.isOrphan)")
-                && flat.contains(#"Text("\(file.fileName) · 未被使用")"#),
+                && flat.contains("l10n.format(.soundPacksOrphanUnused, file.fileName)"),
             "窗口必须只把未引用项列进孤儿区，并逐字点名文件")
         expect(
             flat.contains("model.assignSelectedAudioFile(file.fileName, to: event)"),
@@ -2480,8 +2489,8 @@ func runViewWiringSuites() {
             "事件行必须保留 Menu/试听的 VoiceOver 子节点；内置只读行也有真实试听控件")
         expect(
             flat.contains(".confirmationDialog(")
-                && flat.contains(#"Button("永久删除", role: .destructive)"#)
-                && flat.contains("此操作无法撤销"),
+                && flat.contains("Button(l10n.text(.soundPacksDeleteButton), role: .destructive)")
+                && flat.contains("l10n.format(.soundPacksDeleteMessage"),
             "删除必须是 destructive confirmation，并明确告知不可撤销")
         expect(
             flat.contains("deleteSelectedOrphanAudioFileAfterConfirmation(")
@@ -2582,7 +2591,7 @@ func runViewWiringSuites() {
         }
         expect(
             previewBody.contains(".disabled(!previewAvailability.isAvailable)")
-                && previewBody.contains(".accessibilityHint(previewAvailability.accessibilityHint)"),
+                && previewBody.contains("localizedEventPreviewHint(previewAvailability, language: language)"),
             "试听按钮必须由独立可试听状态结构性禁用并给出具体原因")
 
         // 行级分组必须是 .contain（a11y-architect FIX 1 既有纪律，EventRowView 头部 doc comment
@@ -2620,7 +2629,7 @@ func runViewWiringSuites() {
         }
         expect(
             identityBody.contains(
-                "HStack(spacing: 6) { ClaudioEventGlyph(event: row.event) Text(row.event.displayName)"),
+                "HStack(spacing: 6) { ClaudioEventGlyph(event: row.event) Text(localizedEventName(row.event, language: language))"),
             "事件字形与标题之间必须使用修正版 6pt 间距")
         expect(
             indicatorBody.contains("HStack(spacing: 4) { ForEach(hostIndicators)"),
@@ -2782,7 +2791,7 @@ func runViewWiringSuites() {
                 && window.contains(".eventPreview(row.event)")
                 && window.contains("previewAvailability(for: row)")
                 && window.contains(".disabled(!availability.isAvailable)")
-                && windowRaw.contains("试听"),
+                && window.contains("l10n.text(.soundPacksPreview)"),
             "管理窗口每条事件必须把安全解析、共享 player、可操作态与独立焦点槽接成真实试听按钮")
         expect(
             window.contains("model.forkSelectedFactoryPack()")
@@ -2790,11 +2799,11 @@ func runViewWiringSuites() {
                 && window.contains("model.restoreAllFactoryPacksAfterConfirmation()"),
             "复制、显式启用与空态全部恢复必须接到各自的 model action")
         expect(
-            windowRaw.contains("复制为我的包")
-                && windowRaw.contains("+ 添加音频…")
-                && windowRaw.contains("用这个包")
-                && windowRaw.contains("恢复内置声音包")
-                && windowRaw.contains("显示在面板"),
+            window.contains("l10n.text(.soundPacksCopy)")
+                && window.contains("l10n.text(.soundPacksAddAudio)")
+                && window.contains("l10n.text(.soundPacksUse)")
+                && window.contains("l10n.text(.soundPacksEmptyRestore)")
+                && window.contains("l10n.text(.soundPacksPanelVisible)"),
             "侧栏语义标题、底部动作栏与空态主行动的用户标签必须全部真实可见")
         expect(
             window.contains("ForEach(model.windowStatuses)")
@@ -2813,20 +2822,19 @@ func runViewWiringSuites() {
         let flat = collapsingWhitespace(view)
         expect(
             flat.contains("if model.selectedPackIsBuiltinReadOnly")
-                && flat.contains(#"Button("恢复出厂声音…")"#),
+                && flat.contains("Button(l10n.text(.soundPacksRestore))"),
             "恢复入口必须只在内置包详情中出现，并用带省略号的明确动作标签预告后续确认")
         expect(
             flat.contains(".confirmationDialog(")
-                && flat.contains(#"Button("替换并恢复出厂声音", role: .destructive)"#)
-                && flat.contains("一个文件都不会删除")
-                && flat.contains("完成后会显示实际路径"),
+                && flat.contains("Button(l10n.text(.soundPacksRestoreButton), role: .destructive)")
+                && flat.contains("factoryRestoreConfirmationMessage(request)"),
             "替换必须有 destructive confirmation，并在执行前说清旧目录会搬走、零删除和路径告知")
         expect(
             flat.contains("restoreSelectedFactoryPackAfterConfirmation(")
                 && flat.contains("expectedPackID: request.packID"),
             "只有确认对话框的 destructive action 才能触发 restore，且必须带确认时的包 id 防陈旧选择")
         expect(
-            flat.contains(#"Button("重试恢复「\(displayName)」…")"#)
+            flat.contains("l10n.format(.soundPacksRetryRestore, displayName)")
                 && flat.contains("retryFailedFactoryPackRestoreAfterConfirmation(")
                 && flat.contains(#"ForEach(packIDs, id: \.self)"#)
                 && flat.contains("equals: .retryFactoryRestore(packID: packID)"),

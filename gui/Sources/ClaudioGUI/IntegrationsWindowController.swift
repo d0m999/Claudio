@@ -1,5 +1,6 @@
 import AppKit
 import ClaudioGUICore
+import ClaudioLocalization
 import Combine
 import SwiftUI
 
@@ -12,14 +13,17 @@ import SwiftUI
 @MainActor
 final class IntegrationsWindowController: NSObject, NSWindowDelegate {
     private let model: IntegrationsWindowModel
+    private let languageStore: ClaudioLanguageStore
     private let focusCoordinator = IntegrationsWindowFocusCoordinator()
     private var window: NSWindow?
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
     private var handbackTracker = RetainedWindowHandbackTracker<NSRunningApplication>()
     private var externalActivationCancellable: AnyCancellable?
+    private var languageCancellable: AnyCancellable?
 
-    init(model: IntegrationsWindowModel) {
+    init(model: IntegrationsWindowModel, languageStore: ClaudioLanguageStore) {
         self.model = model
+        self.languageStore = languageStore
         super.init()
 
         // A retained standard window may stay visible while the user visits several other apps.
@@ -41,6 +45,13 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
                         isWindowVisible: self.window?.isVisible == true,
                         isCurrentApplication: application.processIdentifier
                             == ProcessInfo.processInfo.processIdentifier)
+                }
+            }
+
+        languageCancellable = languageStore.$language
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.updateWindowTitle()
                 }
             }
     }
@@ -104,13 +115,14 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
     private func makeWindow() -> NSWindow {
         let content = IntegrationsWindowView(
             model: model,
-            focusCoordinator: focusCoordinator)
+            focusCoordinator: focusCoordinator,
+            languageStore: languageStore)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 840, height: 620),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = "claudi0 · 集成"
+        window.title = ClaudioL10n(language: languageStore.language).text(.integrationsWindowTitle)
         window.contentMinSize = NSSize(width: 640, height: 520)
         window.contentViewController = NSHostingController(rootView: content)
         window.isReleasedWhenClosed = false
@@ -120,6 +132,10 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
         window.center()
         self.window = window
         return window
+    }
+
+    private func updateWindowTitle() {
+        window?.title = ClaudioL10n(language: languageStore.language).text(.integrationsWindowTitle)
     }
 
 }

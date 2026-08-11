@@ -19,13 +19,17 @@ public struct NeedsPackNoticeCopy: Sendable, Equatable {
 /// - With visible pack choices, the primary action is selecting one of those rows.
 /// - With zero rows, the only useful recovery action is the always-rendered
 ///   "管理声音包…" button, which reveals the packs folder during T7's phase-1 bridge.
-public func needsPackNoticeCopy(hasVisiblePackChoices: Bool) -> NeedsPackNoticeCopy {
-    let instruction =
+public func needsPackNoticeCopy(
+    hasVisiblePackChoices: Bool,
+    language: ClaudioAppLanguage = .zhHans
+) -> NeedsPackNoticeCopy {
+    let l10n = ClaudioL10n(language: language)
+    let message = l10n.text(
         hasVisiblePackChoices
-        ? "点一个声音包，claudi0 会建好配置。"
-        : "选择「管理声音包…」，在访达中添加声音包后再回来选择。"
-    let message = "还没有选中任何声音包。\(instruction)"
+            ? .panelSelectPackWithChoicesMessage
+            : .panelSelectPackWithoutChoicesMessage)
     return NeedsPackNoticeCopy(
         message: message,
-        accessibilityLabel: "先选包。\(message)")
+        accessibilityLabel: "\(l10n.text(.panelSelectPack))。\(message)")
 }
+import ClaudioLocalization

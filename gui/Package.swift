@@ -11,6 +11,7 @@ import PackageDescription
 //   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
 let package = Package(
     name: "claudio-gui",
+    defaultLocalization: "zh-Hans",
     platforms: [.macOS(.v12)],  // ENGINEERING.md: macOS 12+ floor, matching helper/Package.swift.
     // The release workflow ships only ClaudioGUI. Declaring it explicitly is what lets
     // `.github/workflows/release.yml` build with `--product ClaudioGUI` instead of a bare
@@ -28,11 +29,21 @@ let package = Package(
         .package(path: "../helper")
     ],
     targets: [
+        // Explicit-language localization is kept in its own resource-bearing target so the
+        // menu-bar panel and both retained windows share one catalog and one persisted language
+        // store. The views never consult Locale.current or the system App language preference.
+        .target(
+            name: "ClaudioLocalization",
+            resources: [
+                .process("Resources")
+            ]
+        ),
         // Pure-Foundation state/view-model layer: shared, testable domain types (no
         // SwiftUI dependency) — mirrors `helper/Sources/ClaudioCore`'s shape exactly.
         .target(
             name: "ClaudioGUICore",
             dependencies: [
+                "ClaudioLocalization",
                 .product(name: "ClaudioCore", package: "helper")
             ]
         ),
@@ -42,6 +53,7 @@ let package = Package(
         .target(
             name: "ClaudioGUIComponents",
             dependencies: [
+                "ClaudioLocalization",
                 "ClaudioGUICore",
                 .product(name: "ClaudioCore", package: "helper"),
             ]
@@ -51,6 +63,7 @@ let package = Package(
         .target(
             name: "SoundPacksWindow",
             dependencies: [
+                "ClaudioLocalization",
                 "ClaudioGUICore",
                 "ClaudioGUIComponents",
                 .product(name: "ClaudioCore", package: "helper"),
@@ -68,6 +81,7 @@ let package = Package(
         .executableTarget(
             name: "ClaudioGUI",
             dependencies: [
+                "ClaudioLocalization",
                 "ClaudioGUICore",
                 "ClaudioGUIComponents",
                 "SoundPacksWindow",
@@ -91,6 +105,7 @@ let package = Package(
         .executableTarget(
             name: "claudio-gui-tests",
             dependencies: [
+                "ClaudioLocalization",
                 "ClaudioGUICore",
                 .product(name: "ClaudioCore", package: "helper"),
             ],

@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import SwiftUI
 
 /// The panel's master-volume control row (PLAN-MASTER-VOLUME.md 阶段 D; DESIGN.md「控件行
@@ -46,6 +47,7 @@ public struct MasterVolumeRow: View {
     /// `EventRowView`'s own `focusedTarget` parameter exactly.
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
     public let adaptation: PanelLayoutAdaptation
+    public let language: ClaudioAppLanguage
 
     @Environment(\.colorScheme) private var colorScheme
     /// Dynamic-Type scale factor for this row's fixed `.system(size:)` text (a11y fix) — see
@@ -64,13 +66,15 @@ public struct MasterVolumeRow: View {
         onCommit: @escaping (Double) -> Double?,
         focusCoordinator: PanelFocusCoordinator,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
-        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard)
+        adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
+        language: ClaudioAppLanguage = .zhHans
     ) {
         self.diskVolume = diskVolume
         self.onCommit = onCommit
         self.focusCoordinator = focusCoordinator
         self.focusedTarget = focusedTarget
         self.adaptation = adaptation
+        self.language = language
         _session = State(initialValue: VolumeDragSession(baseline: diskVolume))
     }
 
@@ -133,7 +137,7 @@ public struct MasterVolumeRow: View {
     }
 
     private var label: some View {
-        Text("主音量")
+        Text(ClaudioL10n(language: language).text(.panelMasterVolume))
             .font(.system(size: 13 * typeScale))
             .foregroundColor(ClaudioColor.text(colorScheme))
             // Purely visual — the slider below carries the identical label through its own
@@ -198,7 +202,7 @@ public struct MasterVolumeRow: View {
         // to discount "走查 ⑨ 欠账" the one time it actually means something (`/codex review 8771946`).
         .tint(ClaudioColor.clay(colorScheme))
         .focused(focusedTarget, equals: .masterVolume)
-        .accessibilityLabel("主音量")
+        .accessibilityLabel(ClaudioL10n(language: language).text(.panelMasterVolume))
         // The readout macOS's own system volume slider uses — no on-screen "80%" text (D15).
         .accessibilityValue("\(Int((session.draft * 100).rounded()))%")
     }

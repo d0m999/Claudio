@@ -2,13 +2,20 @@
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioLocalization
 import SwiftUI
 
 /// Production-shape gallery for the full mapping editor, including all library availability
 /// states. All data is injected; no preview frame reads or writes user paths.
 @MainActor
 public struct SoundPacksWindowStateGalleryView: View {
-    public init() {}
+    @StateObject private var languageStore = ClaudioLanguageStore()
+
+    public init(language: ClaudioAppLanguage = .zhHans) {
+        let store = ClaudioLanguageStore(defaults: UserDefaults())
+        store.setLanguage(language)
+        _languageStore = StateObject(wrappedValue: store)
+    }
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -42,7 +49,8 @@ public struct SoundPacksWindowStateGalleryView: View {
         SoundPacksWindowView(
             model: model,
             userPacksDirectory: previewEnvironment.userPacksDirectory,
-            focusCoordinator: SoundPacksWindowFocusCoordinator())
+            focusCoordinator: SoundPacksWindowFocusCoordinator(),
+            languageStore: languageStore)
             .frame(width: 760, height: 560)
     }
 

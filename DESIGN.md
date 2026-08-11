@@ -211,6 +211,8 @@
 - **界面文字步进调节（方案 C · 2026-08-05）**：面板标题栏右侧固定 `Aa⌄` 原生触发器（约 54×32pt），子 Popover 固定 280pt 宽；触发器不直接显示当前档位，当前值只经 VoiceOver value 暴露。内容依次为「界面文字」标题、分隔线、固定横向列的小 `A` / 当前档位 / 大 `A`，以及四个仅表达状态的圆点。两侧为原生中性 bordered 按钮，点击相邻档位后即时写入共享 `@AppStorage`，Popover 保持打开；紧凑档聚焦大 `A`，其余档位聚焦小 `A`，触达边界时焦点转移到仍可用的一侧。
   - 小 `A` 向前一步、大 `A` 向后一步；两端禁用、不循环、不 Toast、不自定义动画。当前档位使用 semibold，`第 n 档，共 4 档` 使用等宽数字；圆点同时用尺寸 / 外环和 clay 状态表达，且从 VoiceOver 树隐藏。
   - `panel.options` 容器与 `panel.options.text-size` 触发器保持稳定标识，并新增 `.decrease` / `.increase` / `.status` 子标识。控件不加入 `PanelFocusTarget`，所以面板首次打开仍落在第一个可操作声音来源；子 Popover 关闭时焦点回到 `Aa⌄`。非法持久化值仍只在读取时回落为标准，下一次调节才写回合法 raw value。
+  - **语言切换（2026-08-11）**：方案 C 的 280pt 子 Popover 在标题下固定显示原生 segmented control `中文 | English`；双选项持续可见，入口仍为 `Aa⌄`。默认语言固定为简体中文，选择持久化到 `Claudio.InterfaceLanguage`，由 app-lifetime `ClaudioLanguageStore` 同时注入面板、声音包窗口与集成窗口；切换只重新投影当前内存状态，不重启、不重读磁盘、不关闭 Popover。所有显示文案经显式 `ClaudioL10n` 查找，英文缺项回退中文并在测试环境报错。
+  - 语言 selector 打开时取得焦点，切换后焦点留在 selector，`Tab` 进入四档文字大小控件；`Esc` 先关闭子 Popover，父 Popover 关闭时清理子状态并把焦点交还 `Aa⌄`。State Gallery 覆盖 `2 × 4` 八种语言/字号组合；真实 macOS 的 VoiceOver、Full Keyboard Access、主题、强调色和最大字号仍需人工走查。
 
 ### 双宿主菜单栏面板（现行）
 
@@ -452,3 +454,4 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 | 2026-08-07 | 菜单栏事件行删除来源副标题，改为共享能力矩阵驱动的 Claude Code / Codex 只读 Logo；`notification` 的全产品名称统一为“待响应” | Logo 只表达“该工具当前是否连接并支持此事件”，不成为 claudi0 品牌或交互开关。`.audible/.muted/.missingSound/.legacy` 彩色，其余状态与缺格灰色；22/19pt、间距 5pt、无框无底无 hover。VoiceOver 信息合并进既有事件编辑入口，焦点顺序不变；底层 `notification` 契约不变。两枚 24×24 母版生成 template PDF，以兼容 macOS 12。 |
 | 2026-08-10 | 采用批准稿 C 修正版，收紧事件区排版并替换 Codex 几何 | **替代 2026-08-07 的 22/19pt、5pt 规格与社区 Codex 几何记录**：事件标题标准档定为 12.5pt SF Pro Rounded medium，并经 `@ScaledMetric(relativeTo: .body)` 响应四档界面文字；两种布局的宿主 Logo 统一 18×18pt，Logo 间距 4pt，事件字形与标题间距 6pt，标准行 37pt、两行 52pt。Codex 母版改用批准的 OpenAI 2025 Blossom；Claude Spark、状态语义、VoiceOver 合并方式、映射胶囊、试听、静音、能力矩阵与底层事件键均不变。 |
 | 2026-08-05 | 「界面文字」采用方案 C 步进调节：固定 `Aa⌄` 触发器 + 固定 280pt 子 Popover + 原生两侧 A 按钮 | 方案 C 在保持暖色原生面板的同时减少一层菜单；实时 `Binding<ClaudioInterfaceTextSize>` 继续写入共享 `@AppStorage`，四档、非法值回退、跨窗口同步和现有 Panel 首焦点契约不变。 |
+| 2026-08-11 | 在方案 C 内加入中英文即时切换，并将语言状态提升为 app-lifetime 共享投影 | 入口不变，280pt 子 Popover 增加始终可见的 `中文 | English` 原生分段控件；默认简体中文，显式语言 key 与 `Localizable.xcstrings` 管理所有 GUI 自有文案。面板与两个 retained 管理窗口共享同一 `ClaudioLanguageStore`，切换不触发 I/O、宿主动作或窗口重建；SwiftPM 与组装 `.app` 均 fail-closed 解析唯一 `*_ClaudioLocalization.bundle`。自动测试覆盖 key/参数/复数、两语言四字号画廊、窗口标题和共享展示投影；原生人工验收保持独立，不以 build/harness 代替。 |

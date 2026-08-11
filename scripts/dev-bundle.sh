@@ -46,12 +46,27 @@ find_unique_gui_resource_bundle() {
   printf '%s\n' "${candidates[0]}"
 }
 
+find_unique_localization_bundle() {
+  local search_dir="$1"
+  local -a candidates=()
+  shopt -s nullglob
+  candidates=("$search_dir"/*_ClaudioLocalization.bundle)
+  shopt -u nullglob
+  if [[ ${#candidates[@]} -ne 1 || ! -d "${candidates[0]:-}" ]]; then
+    echo "❌ expected exactly one *_ClaudioLocalization.bundle in $search_dir; found ${#candidates[@]}" >&2
+    return 1
+  fi
+  printf '%s\n' "${candidates[0]}"
+}
+
 GUI_BIN_DIR="$(gui_build --show-bin-path)"
 GUI_RESOURCE_BUNDLE="$(find_unique_gui_resource_bundle "$GUI_BIN_DIR")"
+LOCALIZATION_BUNDLE="$(find_unique_localization_bundle "$GUI_BIN_DIR")"
 
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/packs"
 cp "$GUI_BIN_DIR/ClaudioGUI" "$APP/Contents/MacOS/claudi0-app"
 cp -R "$GUI_RESOURCE_BUNDLE" "$APP/Contents/Resources/$(basename "$GUI_RESOURCE_BUNDLE")"
+cp -R "$LOCALIZATION_BUNDLE" "$APP/Contents/Resources/$(basename "$LOCALIZATION_BUNDLE")"
 cp "$(swift build -c release --package-path helper --product claudio --show-bin-path)/claudio" \
    "$APP/Contents/Resources/bin/claudi0"
 # 旧入口继续可执行，但只保留一个 helper Mach-O；相对链接在 app/DMG 搬动后仍然成立。

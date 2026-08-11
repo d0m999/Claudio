@@ -1,4 +1,5 @@
 import ClaudioCore
+import ClaudioLocalization
 import Foundation
 
 // MARK: - 声音来源行
@@ -21,24 +22,29 @@ public struct HostSourceRowPresentation: Identifiable, Sendable, Equatable {
     public let readinessText: String
     public let detailText: String?
     public let status: HostSourceRowStatus
+    public let accessibilityLabel: String
+    public let supportedCount: Int?
+    public let totalCount: Int?
 
     public init(
         host: HostID,
         title: String,
         readinessText: String,
         detailText: String?,
-        status: HostSourceRowStatus
+        status: HostSourceRowStatus,
+        accessibilityLabel: String? = nil,
+        supportedCount: Int? = nil,
+        totalCount: Int? = nil
     ) {
         self.host = host
         self.title = title
         self.readinessText = readinessText
         self.detailText = detailText
         self.status = status
-    }
-
-    /// 不依赖颜色或圆点：宿主、能力数、连接状态和必要限定语都进入同一句播报。
-    public var accessibilityLabel: String {
-        [title, readinessText, detailText].compactMap { $0 }.joined(separator: "，")
+        self.accessibilityLabel = accessibilityLabel
+            ?? [title, readinessText, detailText].compactMap { $0 }.joined(separator: "，")
+        self.supportedCount = supportedCount
+        self.totalCount = totalCount
     }
 }
 
@@ -62,14 +68,20 @@ private func hostSourceRowPresentation(
     let readinessText: String
     let detailText: String?
     let status: HostSourceRowStatus
+    var supportedCount: Int?
+    var totalCount: Int?
 
     switch summary {
     case .ready(let supported, let total):
+        supportedCount = supported
+        totalCount = total
         readinessText = "\(supported)/\(total) 已就绪"
         detailText = host == .codex ? "执行中断暂无事件" : nil
         status = .ready
 
     case .awaitingActivation(let supported, let total):
+        supportedCount = supported
+        totalCount = total
         readinessText = "\(supported)/\(total) 已配置"
         detailText = host == .codex
             ? "在 Codex 输入 /hooks，确认后再提交一次提示词"
@@ -77,6 +89,8 @@ private func hostSourceRowPresentation(
         status = .awaitingActivation
 
     case .legacy(let supported, let total):
+        supportedCount = supported
+        totalCount = total
         readinessText = "\(supported)/\(total) 旧版连接"
         detailText = host == .claudeCode
             ? "四个旧版事件可听；任务开始需升级"
@@ -84,11 +98,15 @@ private func hostSourceRowPresentation(
         status = .legacy
 
     case .notConnected(let supported, let total):
+        supportedCount = supported
+        totalCount = total
         readinessText = "\(supported)/\(total) 未连接"
         detailText = nil
         status = .notConnected
 
     case .needsAttention(let supported, let total, let reason):
+        supportedCount = supported
+        totalCount = total
         readinessText = "\(supported)/\(total) 需要处理"
         detailText = reason
         status = .needsAttention
@@ -99,7 +117,9 @@ private func hostSourceRowPresentation(
         title: host.displayName,
         readinessText: readinessText,
         detailText: detailText,
-        status: status)
+        status: status,
+        supportedCount: supportedCount,
+        totalCount: totalCount)
 }
 
 // MARK: - 5 × 2 可听能力矩阵
@@ -578,18 +598,60 @@ public enum IntegrationsFeedbackKind: Sendable, Equatable {
     case failure
 }
 
+/// Semantic copy for a short-lived banner. Keeping the key and arguments instead of a rendered
+/// string lets retained windows re-project an already-visible feedback item when the interface
+/// language changes; literal text is reserved for external/domain error data.
+public indirect enum IntegrationsFeedbackText: Sendable, Equatable {
+    case localized(key: ClaudioL10nKey, arguments: [String])
+    case literal(String)
+    case stateChange(
+        message: IntegrationsFeedbackText,
+        hostRow: HostSourceRowPresentation,
+        capabilityCells: [HostCapabilityCellPresentation])
+
+    public func resolve(language: ClaudioAppLanguage) -> String {
+        switch self {
+        case .localized(let key, let arguments):
+            return ClaudioL10n(language: language).format(key, arguments: arguments)
+        case .literal(let value):
+            return value
+        case .stateChange(let message, let hostRow, let capabilityCells):
+            let localizedRow = localizedHostSourceRow(hostRow, language: language)
+            let localizedCells = capabilityCells.map {
+                localizedCapabilityCell($0, language: language)
+            }
+            return integrationsStateChangeAccessibilityLabel(
+                message: message.resolve(language: language),
+                hostRow: localizedRow,
+                capabilityCells: localizedCells)
+        }
+    }
+}
+
 public struct IntegrationsFeedback: Identifiable, Sendable, Equatable {
     public var id: UInt64 { revision }
     public let revision: UInt64
     public let host: HostID
     public let kind: IntegrationsFeedbackKind
-    public let message: String
-    public let accessibilityAnnouncement: String?
+    public let text: IntegrationsFeedbackText
+    public let accessibilityText: IntegrationsFeedbackText?
     public let expiresAt: Date
 
     public var isDismissible: Bool { true }
+    public var message: String { text.resolve(language: .zhHans) }
+    public func message(language: ClaudioAppLanguage) -> String {
+        text.resolve(language: language)
+    }
+    public var accessibilityAnnouncement: String? {
+        accessibilityText?.resolve(language: .zhHans)
+    }
+    public func localizedAccessibilityLabel(language: ClaudioAppLanguage) -> String {
+        let message = text.resolve(language: language)
+        let announcement = accessibilityText?.resolve(language: language)
+        return announcement ?? "\(host.displayName)\(language == .english ? ", " : "，")\(message)"
+    }
     public var accessibilityLabel: String {
-        accessibilityAnnouncement ?? "\(host.displayName)，\(message)"
+        localizedAccessibilityLabel(language: .zhHans)
     }
 
     public init(
@@ -600,11 +662,28 @@ public struct IntegrationsFeedback: Identifiable, Sendable, Equatable {
         accessibilityAnnouncement: String? = nil,
         expiresAt: Date
     ) {
+        self.init(
+            revision: revision,
+            host: host,
+            kind: kind,
+            text: .literal(message),
+            accessibilityText: accessibilityAnnouncement.map(IntegrationsFeedbackText.literal),
+            expiresAt: expiresAt)
+    }
+
+    public init(
+        revision: UInt64,
+        host: HostID,
+        kind: IntegrationsFeedbackKind,
+        text: IntegrationsFeedbackText,
+        accessibilityText: IntegrationsFeedbackText? = nil,
+        expiresAt: Date
+    ) {
         self.revision = revision
         self.host = host
         self.kind = kind
-        self.message = message
-        self.accessibilityAnnouncement = accessibilityAnnouncement
+        self.text = text
+        self.accessibilityText = accessibilityText
         self.expiresAt = expiresAt
     }
 }
@@ -615,8 +694,12 @@ public struct IntegrationsFeedback: Identifiable, Sendable, Equatable {
 public struct IntegrationsFeedbackRequest: Sendable, Equatable {
     public let host: HostID
     public let kind: IntegrationsFeedbackKind
-    public let message: String
-    public let accessibilityAnnouncement: String?
+    public let text: IntegrationsFeedbackText
+    public let accessibilityText: IntegrationsFeedbackText?
+    public var message: String { text.resolve(language: .zhHans) }
+    public var accessibilityAnnouncement: String? {
+        accessibilityText?.resolve(language: .zhHans)
+    }
 
     public init(
         host: HostID,
@@ -624,10 +707,36 @@ public struct IntegrationsFeedbackRequest: Sendable, Equatable {
         message: String,
         accessibilityAnnouncement: String? = nil
     ) {
+        self.init(
+            host: host,
+            kind: kind,
+            text: .literal(message),
+            accessibilityText: accessibilityAnnouncement.map(IntegrationsFeedbackText.literal))
+    }
+
+    public init(
+        host: HostID,
+        kind: IntegrationsFeedbackKind,
+        text: IntegrationsFeedbackText,
+        accessibilityText: IntegrationsFeedbackText? = nil
+    ) {
         self.host = host
         self.kind = kind
-        self.message = message
-        self.accessibilityAnnouncement = accessibilityAnnouncement
+        self.text = text
+        self.accessibilityText = accessibilityText
+    }
+
+    public init(
+        host: HostID,
+        kind: IntegrationsFeedbackKind,
+        text: IntegrationsFeedbackText,
+        accessibilityAnnouncement: String?
+    ) {
+        self.init(
+            host: host,
+            kind: kind,
+            text: text,
+            accessibilityText: accessibilityAnnouncement.map(IntegrationsFeedbackText.literal))
     }
 }
 
@@ -714,8 +823,8 @@ public struct IntegrationsFeedbackModel: Sendable, Equatable {
             revision: revision,
             host: request.host,
             kind: request.kind,
-            message: request.message,
-            accessibilityAnnouncement: request.accessibilityAnnouncement,
+            text: request.text,
+            accessibilityText: request.accessibilityText,
             expiresAt: now.addingTimeInterval(integrationsFeedbackLifetime))
         return revision
     }
@@ -759,6 +868,15 @@ public struct IntegrationsFeedbackAnnouncementModel: Sendable, Equatable {
         lastAnnouncedRevision = feedback.revision
         return feedback.accessibilityLabel
     }
+
+    public mutating func consume(
+        _ feedback: IntegrationsFeedback?,
+        language: ClaudioAppLanguage
+    ) -> String? {
+        guard let feedback, feedback.revision != lastAnnouncedRevision else { return nil }
+        lastAnnouncedRevision = feedback.revision
+        return feedback.localizedAccessibilityLabel(language: language)
+    }
 }
 
 // MARK: - 当前操作状态
@@ -770,17 +888,22 @@ public struct IntegrationsInFlightPresentation: Sendable, Equatable {
     public let host: HostID
     public let statusText: String
     public let accessibilityLabel: String
+    /// Repairing a legacy installation is semantically an upgrade. Keep this fact typed so the
+    /// localized view never infers it by comparing a Chinese status string.
+    public let isUpgrade: Bool
 
     public init(
         action: IntegrationsWindowInspectorAction,
         host: HostID,
         statusText: String,
-        accessibilityLabel: String
+        accessibilityLabel: String,
+        isUpgrade: Bool = false
     ) {
         self.action = action
         self.host = host
         self.statusText = statusText
         self.accessibilityLabel = accessibilityLabel
+        self.isUpgrade = isUpgrade
     }
 }
 
@@ -793,25 +916,31 @@ public func integrationsInFlightPresentation(
 ) -> IntegrationsInFlightPresentation? {
     let host: HostID
     let statusText: String
+    let isUpgrade: Bool
     switch action {
     case .copyHooksCommand:
         return nil
     case .redetect:
         host = selectedHost
         statusText = "重新检测中"
+        isUpgrade = false
     case .connect(let target):
         host = target
         statusText = "连接中"
+        isUpgrade = false
     case .repair(let target):
         host = target
-        statusText = hostStatus == .legacy ? "升级中" : "修复中"
+        isUpgrade = hostStatus == .legacy
+        statusText = isUpgrade ? "升级中" : "修复中"
     case .disconnect(let target):
         host = target
         statusText = "断开中"
+        isUpgrade = false
     }
     return IntegrationsInFlightPresentation(
         action: action,
         host: host,
         statusText: statusText,
-        accessibilityLabel: "\(host.displayName)，\(statusText)")
+        accessibilityLabel: "\(host.displayName)，\(statusText)",
+        isUpgrade: isUpgrade)
 }

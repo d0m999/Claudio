@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import Combine
 import SwiftUI
 
@@ -16,6 +17,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private let environment: AudioImportEnvironment
     private let soundPackLibrary: SoundPackLibrary
     private let refreshCoordinator: SoundPacksRefreshCoordinator
+    private let languageStore: ClaudioLanguageStore
     private lazy var model: SoundPacksWindowModel = SoundPacksWindowModel(
         configFile: configFile,
         lockFile: lockFile,
@@ -33,6 +35,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Bool)?
     private var isClosingWindow = false
     private var externalActivationCancellable: AnyCancellable?
+    private var languageCancellable: AnyCancellable?
     private var selectionAnnouncementCancellable: AnyCancellable?
     private var libraryStateAnnouncementCancellable: AnyCancellable?
     private var windowStatusAnnouncementCancellable: AnyCancellable?
@@ -47,13 +50,15 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
         soundPackLibrary: SoundPackLibrary,
-        refreshCoordinator: SoundPacksRefreshCoordinator
+        refreshCoordinator: SoundPacksRefreshCoordinator,
+        languageStore: ClaudioLanguageStore
     ) {
         self.configFile = configFile
         self.lockFile = lockFile
         self.environment = environment
         self.soundPackLibrary = soundPackLibrary
         self.refreshCoordinator = refreshCoordinator
+        self.languageStore = languageStore
         userPacksDirectory = environment.userPacksDirectory
         super.init()
 
@@ -77,6 +82,13 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                     self.handbackApplication = application
                 }
             }
+
+        languageCancellable = languageStore.$language
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.updateWindowTitle()
+                }
+            }
     }
 
     public func showWindow(
@@ -91,6 +103,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         if let application {
             handbackApplication = application
         }
+
         let wasAlreadyCreated = window != nil
         let wasVisible = window?.isVisible == true
         let presentedWindow = window ?? makeWindow()
@@ -198,13 +211,14 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         let content = SoundPacksWindowView(
             model: model,
             userPacksDirectory: userPacksDirectory,
-            focusCoordinator: focusCoordinator)
+            focusCoordinator: focusCoordinator,
+            languageStore: languageStore)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 560),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = "claudi0 · 声音包"
+        window.title = ClaudioL10n(language: languageStore.language).text(.soundPacksWindowTitle)
         window.contentMinSize = NSSize(width: 640, height: 480)
         window.contentViewController = NSHostingController(rootView: content)
         window.isReleasedWhenClosed = false
@@ -256,6 +270,10 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         return window
     }
 
+    private func updateWindowTitle() {
+        window?.title = ClaudioL10n(language: languageStore.language).text(.soundPacksWindowTitle)
+    }
+
     private func resolvePendingRouteIfPossible(
         libraryState: SoundPackLibraryPresentationState
     ) {
@@ -297,8 +315,10 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         else { return }
         let event: SoundPacksWindowAnnouncementMoment =
             status.severity == .failure
-            ? .writeFailed(action: status.action, reason: status.message)
-            : .writeSucceeded(message: status.message)
+            ? .writeFailed(
+                action: status.action(language: languageStore.language),
+                reason: status.message(language: languageStore.language))
+            : .writeSucceeded(message: status.message(language: languageStore.language))
         SoundPacksWindowAccessibilityBridge.post(
             event,
             facts: accessibilityFacts(),

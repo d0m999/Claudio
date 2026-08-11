@@ -69,7 +69,9 @@ func runIntegrationsWindowWiringSuites() {
             menu.contains("private let integrationsWindowController: IntegrationsWindowController"),
             "MenuBarController 必须 app-lifetime 持有唯一详情窗 controller")
         expect(
-            menu.components(separatedBy: "IntegrationsWindowController(model:").count - 1 == 1,
+            menu.components(separatedBy: "let integrationsWindowController = IntegrationsWindowController(").count - 1 == 1
+                && menu.contains("model: integrationsModel")
+                && menu.contains("languageStore: languageStore"),
             "IntegrationsWindowController 只能初始化一次")
         expect(
             panel.contains("HostSourceRowView(")
@@ -178,8 +180,9 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             menu.contains("private let integrationsModel: IntegrationsWindowModel")
                 && menu.contains("self.integrationsModel = integrationsModel")
-                && menu.contains(
-                    "IntegrationsWindowController(model: integrationsModel)"),
+                && menu.contains("let integrationsWindowController = IntegrationsWindowController(")
+                && menu.contains("model: integrationsModel")
+                && menu.contains("languageStore: languageStore"),
             "MenuBarController 必须与 retained controller 共享同一个 model 实例")
         expect(
             menu.contains("let content = self.hostIntegrations.replace(state: state)")
@@ -192,7 +195,8 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             model.contains("integrationsReceiptTransitions(from: content, to: replacement)")
                 && model.contains("presentFeedbackSequence(")
-                && model.contains("收到当前代次真实回执"),
+                && model.contains("key: .feedbackReceipt")
+                && model.contains("stateChangeAccessibilityText("),
             "外部刷新同帧发现多个当前代次回执时必须逐条生成短暂可关闭反馈")
         expect(
             store.contains(
@@ -201,7 +205,7 @@ func runIntegrationsWindowWiringSuites() {
                 && model.contains("receiptTransition.event")
                 && model.contains("currentFacts.latestReceiptEvidence")
                 && model.contains("newEvidence != oldEvidence")
-                && model.contains("integrationsStateChangeAccessibilityLabel(")
+                && model.contains("stateChangeAccessibilityText(")
                 && model.contains("capabilityCells:")
                 && model.contains("selectedCapabilityEvent(for: host)"),
             "真实回执/refresh 主动播报必须从共享 host row 与 matrix cell 组合完整上下文")
@@ -257,7 +261,7 @@ func runIntegrationsWindowWiringSuites() {
         }
         let catchBody = String(performBody[catchStart...])
         expect(
-            catchBody.contains("stateChangeAccessibilityAnnouncement(")
+            catchBody.contains("stateChangeAccessibilityText(")
                 && catchBody.contains("in: content")
                 && catchBody.contains("event: selectedCapabilityEvent(for: host)"),
             "失败 catch 也必须从当前共享 content 补齐事件、连接状态和 qualification")
@@ -436,7 +440,8 @@ func runIntegrationsWindowWiringSuites() {
             "popover 与 window 必须从同一注入矩阵投影")
         expect(
             panel.contains("@ObservedObject private var hostIntegrations")
-                && panel.contains("ForEach(hostIntegrations.content.sourceRows)"),
+                && panel.contains("ForEach(localizedHostRows)")
+                && panel.contains("hostIntegrations.content.sourceRows"),
             "Panel 必须观察共享 presentation，而非自建宿主状态")
         let sourceSection: String
         if let start = panel.range(of: "private var hostSourcesSection")?.lowerBound,
@@ -471,10 +476,11 @@ func runIntegrationsWindowWiringSuites() {
                 && row.contains("eventHostIndicatorAssetName(for: host)")
                 && row.contains("hostIconResourceBundle.image(forResource:")
                 && row.contains("image.isTemplate = true")
-                && row.contains("hostIndicators.map(\\.accessibilityLabel)"),
+                && row.contains("hostIndicators.map")
+                && row.contains("localizedHostName(indicator.host"),
             "共享宿主投影必须同时驱动打包资源中的 Logo 与事件编辑入口 VoiceOver label")
         expect(
-            row.contains("row.event.displayName")
+            row.contains("localizedEventName(row.event, language: language)")
                 && !row.contains("func eventDisplayName"),
             "EventRowView 必须直接复用 Event.displayName，禁止保留第二份中文 switch")
         expect(
@@ -650,7 +656,7 @@ func runIntegrationsWindowWiringSuites() {
         }
 
         expect(
-            view.contains("ForEach(model.content.sourceRows)")
+            view.contains("ForEach(localizedSourceRows)")
                 && view.contains("sourceSummaryButton"),
             "顶部宿主摘要必须由固定两行 presentation 同一视图生成")
         expect(
@@ -664,7 +670,7 @@ func runIntegrationsWindowWiringSuites() {
                 && view.contains("narrowCapabilityTable"),
             "真实视图必须消费纯模型的两种 Dynamic Type 布局，而不是只在测试里声明")
         expect(
-            view.contains("ForEach(model.content.matrix.rows)")
+            view.contains("ForEach(localizedMatrix.rows)")
                 && view.contains("ForEach(row.cells)"),
             "标准与最大布局都必须遍历同一份 adapter 驱动的事件行/宿主格")
         expect(view.contains("ScrollView(.vertical"), "窗口内容必须允许纵向增长")
@@ -694,8 +700,8 @@ func runIntegrationsWindowWiringSuites() {
             return
         }
 
-        for label in ["配置来源", "原生事件", "最近真实回执"] {
-            expect(view.contains("\"\(label)\""), "inspector 必须显示字段：\(label)")
+        for key in ["integrationsConfigurationSource", "integrationsNativeEvent", "integrationsRecentReceipt"] {
+            expect(view.contains("l10n.text(.\(key))"), "inspector 必须显示本地化字段 key：\(key)")
         }
         expect(
             model.contains("nativeEvents.joined(separator: \"、\")"),
@@ -706,14 +712,14 @@ func runIntegrationsWindowWiringSuites() {
                 && model.contains(".redetect"),
             "Codex 待确认必须由状态事实补齐复制 /hooks 与重新检测")
         expect(
-            view.contains("integrationsInspectorActionTitle(action")
+            view.contains("localizedInspectorActionTitle(action")
                 && model.contains(".copyHooksCommand"),
             "Codex 待授权必须通过统一动作标题渲染复制 /hooks")
         expect(
-            view.contains("Label(\"重新检测\", systemImage: \"arrow.clockwise\")"),
+            view.contains("Label(l10n.text(.integrationsRedetect), systemImage: \"arrow.clockwise\")"),
             "重新检测必须位于窗口工具栏")
         expect(
-            view.contains("integrationsInspectorActionTitle(")
+            view.contains("localizedInspectorActionTitle(")
                 && view.contains("hostStatus: selectedHostStatus"),
             "repair 按钮必须从纯状态标题投影 legacy 的“升级连接”，不能一律写修复")
         expect(
@@ -768,12 +774,13 @@ func runIntegrationsWindowWiringSuites() {
             view.contains("Text(qualification)"),
             "“仅授权请求”等限定语还必须可见，不能只藏在 VoiceOver")
         expect(
-            view.contains(".accessibilityLabel(feedback.accessibilityLabel)"),
+            view.contains("feedback.localizedAccessibilityLabel(language: languageStore.language)"),
             "短暂状态必须把宿主与结果作为完整独立 label 暴露给 VoiceOver")
         expect(
-            view.components(separatedBy: "NSAccessibility.post(").count - 1 == 1
+                view.components(separatedBy: "NSAccessibility.post(").count - 1 == 1
                 && view.contains("notification: .announcementRequested")
-                && view.contains("feedbackAnnouncer.consume(model.feedback)"),
+                && view.contains("feedbackAnnouncer.consume(")
+                && view.contains("language: languageStore.language"),
             "反馈 revision 变化必须经唯一主动播报出口开口；关闭/到期由纯去重器吞掉")
     }
 
@@ -893,10 +900,10 @@ func runIntegrationsWindowWiringSuites() {
             view.contains("model.inFlightOperation")
                 && view.contains("operation.host == row.host")
                 && view.contains("ProgressView()")
-                && view.contains("Text(operation.statusText)"),
+                && view.contains("Text(localizedInFlightStatus(operation))"),
             "只有目标宿主卡必须显示原生进度与连接中/升级中/修复中/断开中文案")
         expect(
-            view.contains("return \"\\(row.accessibilityLabel)，\\(operation.statusText)\""),
+            view.contains("return \"\\(row.accessibilityLabel)\\(separator)\\(localizedInFlightStatus(operation))\""),
             "当前操作限定语必须进入宿主卡 VoiceOver label")
         expect(
             !view.contains("rotationEffect") && !view.contains("repeatForever"),

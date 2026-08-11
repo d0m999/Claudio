@@ -1,5 +1,6 @@
 import ClaudioGUICore
 import ClaudioGUIComponents
+import ClaudioLocalization
 import SwiftUI
 
 // MARK: - 面板共享组件（2026-07-15 前端设计冗余审计 · A 类修复）
@@ -105,6 +106,7 @@ struct ActionNoticeRow: View {
 struct ActionFailureRow: View {
     let message: String
     let detail: String?
+    let language: ClaudioAppLanguage
     let isShowingDetail: Bool
     /// 这条失败行自己该不该长出一颗「查看原因」—— 由纯函数
     /// ``onboardingShowsFailureDetailToggle(state:actionState:)`` 决定，**不是视图猜的**。
@@ -115,6 +117,24 @@ struct ActionFailureRow: View {
 
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
+
+    init(
+        message: String,
+        detail: String?,
+        language: ClaudioAppLanguage = .zhHans,
+        isShowingDetail: Bool,
+        showsDetailToggle: Bool,
+        onToggleDetail: @escaping () -> Void,
+        focusedTarget: FocusState<PanelFocusTarget?>.Binding
+    ) {
+        self.message = message
+        self.detail = detail
+        self.language = language
+        self.isShowingDetail = isShowingDetail
+        self.showsDetailToggle = showsDetailToggle
+        self.onToggleDetail = onToggleDetail
+        self.focusedTarget = focusedTarget
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -132,7 +152,9 @@ struct ActionFailureRow: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(message)
-                .accessibilityHint(isShowingDetail ? "收起原因" : "展开原因")
+                .accessibilityHint(
+                    ClaudioL10n(language: language).text(
+                        isShowingDetail ? .onboardingReasonCollapse : .onboardingReasonExpand))
                 .focused(focusedTarget, equals: .revealDetail)
             } else {
                 FailureRow(message: message)
@@ -182,11 +204,6 @@ struct PanelHeader: View {
     /// （包名来自 `PanelConfigController.selectedPackMetadata`，独立于 packCards 显示集）；
     /// 其余状态或没有当前包名时一律是 ``baseLabel``。
     let accessibilityLabel: String
-
-    /// 非 `.installed` 时那句 header —— 面板还没接管，没有「当前声音包」可报。
-    /// 一个常量而不是两处字面量：`PanelView.headerAccessibilityLabel` 的 guard 分支与
-    /// `OnboardingView` 的 header 读的是**同一个**它。
-    static let baseLabel = "claudi0 面板"
 
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1

@@ -324,9 +324,9 @@ public func onboardingShowsFailureDetailToggle(
 /// 用「什么时候该忘掉它」回答，而不是用「什么时候该看不见它」。
 public func onboardingVisibleFailure(
     actionState: OnboardingActionState
-) -> (message: String, detail: String?)? {
-    guard case .failed(_, let message, let detail) = actionState else { return nil }
-    return (message, detail)
+) -> (action: OnboardingDiskAction, message: String, detail: String?)? {
+    guard case .failed(let action, let message, let detail) = actionState else { return nil }
+    return (action, message, detail)
 }
 
 /// 此刻该被画出来的那些告知 —— ``onboardingVisibleFailure(actionState:)`` 的**孪生兄弟**，

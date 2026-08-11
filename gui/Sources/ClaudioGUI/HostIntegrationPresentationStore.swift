@@ -1,5 +1,6 @@
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import Combine
 import Foundation
 
@@ -96,7 +97,7 @@ enum HostIntegrationPresentationError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .storeUnavailable:
-            "声音来源状态暂时不可用，请重新检测。"
+            ClaudioL10n(language: .zhHans).text(.integrationsStoreUnavailable)
         case .recoveryFailed(let message):
             message
         }
@@ -115,7 +116,9 @@ private func integrationWindowContent(
                 row.host,
                 IntegrationsWindowHostInspectorFacts(
                     host: row.host,
-                    configurationSource: configurationSources[row.host] ?? "由宿主集成管理器提供",
+                    configurationSource: configurationSources[row.host]
+                        ?? ClaudioL10n(language: .zhHans).text(
+                            .integrationsManagerProvidedSource),
                     latestReceiptText: snapshots[row.host].flatMap(hostLatestReceiptText),
                     latestReceiptEvidence: snapshots[row.host].flatMap(hostLatestReceiptEvidence),
                     actions: integrationsInspectorActions(for: row))

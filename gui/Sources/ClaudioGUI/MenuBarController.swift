@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import Combine
 import SoundPacksWindow
 import SwiftUI
@@ -59,6 +60,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let soundPackLibrary: SoundPackLibrary
     private let soundPacksWindowController: SoundPacksWindowController
     private let integrationsWindowController: IntegrationsWindowController
+    private let languageStore: ClaudioLanguageStore
     private let integrationsModel: IntegrationsWindowModel
     private let actionRouter: MenuBarActionRouter
     private let hostIntegrations: HostIntegrationPresentationStore
@@ -97,13 +99,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         integrationMatrixProvider: HostIntegrationMatrixProvider,
         integrationActionProvider: HostIntegrationActionProvider
     ) {
+        let languageStore = ClaudioLanguageStore()
         let soundPacksRefreshCoordinator = SoundPacksRefreshCoordinator()
         let soundPackLibrary = SoundPackLibrary(environment: audioEnvironment)
         let soundPacksWindowController = SoundPacksWindowController(
             configFile: ClaudioPaths.configFile,
             environment: audioEnvironment,
             soundPackLibrary: soundPackLibrary,
-            refreshCoordinator: soundPacksRefreshCoordinator)
+            refreshCoordinator: soundPacksRefreshCoordinator,
+            languageStore: languageStore)
         let actionRouter = MenuBarActionRouter()
         let integrationsMuteController = EventMuteController()
         let hostIntegrations = HostIntegrationPresentationStore(
@@ -125,7 +129,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 return IntegrationsWindowActionOutcome(
                     content: content,
                     feedbackKind: .information,
-                    feedbackMessage: "已重新检测声音来源")
+                    feedbackText: .localized(key: .feedbackRedetectedSources, arguments: []))
             },
             actionHandler: IntegrationsWindowActionHandler {
                 [weak actionRouter, weak hostIntegrations] action in
@@ -138,7 +142,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 return IntegrationsWindowActionOutcome(
                     content: content,
                     feedbackKind: outcome.feedbackKind,
-                    feedbackMessage: outcome.feedbackMessage)
+                    feedbackText: outcome.feedbackText)
             },
             recoveryHandler: IntegrationsWindowRecoveryHandler {
                 [weak actionRouter, weak hostIntegrations, weak soundPacksRefreshCoordinator]
@@ -156,27 +160,35 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                         return IntegrationsWindowActionOutcome(
                             content: content,
                             feedbackKind: .success,
-                            feedbackMessage: "已取消「\(event.displayName)」静音")
+                            feedbackText: .localized(
+                                key: .feedbackMuteCancelled,
+                                arguments: [event.displayName]))
                     } else {
                         throw HostIntegrationPresentationError.recoveryFailed(
                             integrationsMuteController.lastError?.description
-                                ?? "无法取消当前事件静音。")
+                                ?? ClaudioL10n(language: .zhHans).text(
+                                    .integrationsMuteFallbackFailed))
                     }
                 case .configureSound(_, let event):
                     actionRouter?.requestSoundPacksFromIntegrations(event: event)
                     return IntegrationsWindowActionOutcome(
                         content: hostIntegrations.content,
                         feedbackKind: .information,
-                        feedbackMessage: "已打开「\(event.displayName)」声音映射")
+                        feedbackText: .localized(
+                            key: .feedbackOpenSoundMapping,
+                            arguments: [event.displayName]))
                 case .connect, .upgrade, .repair, .redetect, .explainMasterVolumeZero,
                     .explainUnsupported, .none:
-                    throw HostIntegrationPresentationError.recoveryFailed("当前状态没有可执行的恢复动作。")
+                    throw HostIntegrationPresentationError.recoveryFailed(
+                        ClaudioL10n(language: .zhHans).text(.integrationsRecoveryUnavailable))
                 }
             },
             onContentChanged: { [weak hostIntegrations] content in
                 hostIntegrations?.replace(content: content)
             })
-        let integrationsWindowController = IntegrationsWindowController(model: integrationsModel)
+        let integrationsWindowController = IntegrationsWindowController(
+            model: integrationsModel,
+            languageStore: languageStore)
 
         // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
         // capture `self` — we're still pre-`super.init()` here).
@@ -191,6 +203,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             audioEnvironment: audioEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
+            languageStore: languageStore,
             soundPackLibrary: soundPackLibrary,
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
             onManageSounds: { [weak actionRouter] route, focusTarget in
@@ -228,6 +241,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.soundPackLibrary = soundPackLibrary
         self.soundPacksWindowController = soundPacksWindowController
         self.integrationsWindowController = integrationsWindowController
+        self.languageStore = languageStore
         self.integrationsModel = integrationsModel
         self.actionRouter = actionRouter
         self.hostIntegrations = hostIntegrations
@@ -323,7 +337,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     @objc private func togglePopover() {
         if popover.isShown {
-            popover.performClose(nil)
+            // `performClose` can leave a nested SwiftUI child popover alive. `close()` cascades
+            // through the child first and guarantees `popoverDidClose` clears pending window
+            // transitions and local child focus state.
+            popover.close()
         } else {
             showPopover()
         }

@@ -1,4 +1,5 @@
 import ClaudioGUICore
+import ClaudioLocalization
 import Foundation
 
 // Dependency-free test harness — mirrors `helper/Tests/ClaudioCoreTests/main.swift`
@@ -58,6 +59,7 @@ func suite(_ name: String, _ body: @MainActor () async -> Void) async {
 }
 
 runOnboardingStateSuites()
+runLocalizationSuites()
 runOnboardingCopySuites()
 runOnboardingDetectorSuites()
 await runOnboardingViewModelSuites()

@@ -1,6 +1,7 @@
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioLocalization
 import SwiftUI
 
 /// The pack switching gallery (ENGINEERING.md T15 D3; DESIGN.md「声音包行 Pack Row」/「包行四态」:
@@ -22,6 +23,7 @@ import SwiftUI
 public struct PackGalleryView: View {
     public let cards: [PackCard]
     public let onSelect: (PackCard) -> Void
+    public let language: ClaudioAppLanguage
 
     /// The SHARED focus-state binding every row reports into (a11y-architect FIX 4):
     /// `PanelView` owns the actual `@FocusState` and passes its projected binding down here
@@ -43,11 +45,13 @@ public struct PackGalleryView: View {
         cards: [PackCard],
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
         adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
+        language: ClaudioAppLanguage = .zhHans,
         onSelect: @escaping (PackCard) -> Void = { _ in }
     ) {
         self.cards = cards
         self.focusedTarget = focusedTarget
         self.adaptation = adaptation
+        self.language = language
         self.onSelect = onSelect
     }
 
@@ -56,6 +60,7 @@ public struct PackGalleryView: View {
             ForEach(Array(cards.prefix(maxStarredPacks)), id: \.id) { card in
                 PackCardView(
                     card: card, focusedTarget: focusedTarget, adaptation: adaptation,
+                    language: language,
                     onSelect: { onSelect(card) })
             }
         }
@@ -90,6 +95,7 @@ private struct PackCardView: View {
     /// See ``PackGalleryView``'s own `adaptation` doc comment — this is that same value,
     /// threaded straight through, never re-derived here.
     let adaptation: PanelLayoutAdaptation
+    let language: ClaudioAppLanguage
     let onSelect: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     /// Dynamic-Type scale factor for this row's fixed `.system(size:)` text (a11y fix) — see
@@ -143,8 +149,10 @@ private struct PackCardView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityValue(card.isSelected ? "使用中" : "未使用")
-        .accessibilityHint("切换为当前运行声音包")
+        .accessibilityValue(card.isSelected
+            ? ClaudioL10n(language: language).text(.soundPacksUsing)
+            : ClaudioL10n(language: language).text(.soundPacksUseValue))
+        .accessibilityHint(ClaudioL10n(language: language).text(.soundPacksUseHint))
         .accessibilityIdentifier("panel.pack.\(card.id)")
         .accessibilityAddTraits(card.isSelected ? [.isButton, .isSelected] : .isButton)
         // a11y-architect FIX 4: this row's `.packCard(id:)` slot — `panelFocusOrder(_:)`'s
@@ -207,7 +215,9 @@ private struct PackCardView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .font(.system(size: 10 * typeScale))
                         .foregroundColor(ClaudioColor.warning(colorScheme))
-                    Text("缺 \(missingCount) 个")
+                        Text(ClaudioL10n(language: language).format(
+                            .soundPacksMissingCount,
+                            Int64(missingCount)))
                         .font(ClaudioTheme.font(.caption))
                         .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 }
@@ -230,7 +240,7 @@ private struct PackCardView: View {
         case .cc0:
             return "CC0"
         case .modified:
-            return "⚠ 已修改"
+            return "⚠ " + ClaudioL10n(language: language).text(.soundPacksPackModified)
         }
     }
 
@@ -260,7 +270,7 @@ private struct PackCardView: View {
             Image(systemName: "xmark.circle.fill")
                 .font(.system(size: 11 * typeScale))
                 .foregroundColor(ClaudioColor.error(colorScheme))
-            Text("文件丢失")
+            Text(ClaudioL10n(language: language).text(.soundPacksFileMissing))
                 .font(ClaudioTheme.font(.caption))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
         }
@@ -275,38 +285,14 @@ private struct PackCardView: View {
     /// order as ``metaSlot``'s two sub-slots, both read off the same ``metaSlots`` value so
     /// the spoken label can never diverge from what's rendered (/codex review d6dafe8 P2).
     private var accessibilityLabel: String {
-        let name = card.name ?? card.id
-        let licenseSuffix: String
-        switch metaSlots.license {
-        case .none:
-            licenseSuffix = ""
-        case .cc0:
-            licenseSuffix = "，CC0 授权"
-        case .modified:
-            licenseSuffix = "，⚠ 已修改"
-        }
-        let stateSuffix: String
-        switch card.state {
-        case .complete: stateSuffix = ""
-        case .partial(let present, let total): stateSuffix = "，\(present)/\(total) 可用，缺少：\(missingEventNames)"
-        case .broken: stateSuffix = "，文件丢失"
-        }
-        return card.isSelected
-            ? "当前声音包 \(name)\(licenseSuffix)\(stateSuffix)"
-            : "声音包 \(name)，点按切换\(licenseSuffix)\(stateSuffix)"
+        localizedSoundPacksPackAccessibilityLabel(
+            displayName: card.name ?? card.id,
+            isActivePack: card.isSelected,
+            state: card.state,
+            license: metaSlots.license,
+            language: language)
     }
 
-    /// Chinese semantic display names (``Event/displayName``) of every
-    /// ``Event`` NOT in ``PackCard/presentEvents``, in ``Event/allCases`` order — a11y-
-    /// architect FIX 7 (LOW): "N/5 可用" alone told VoiceOver a COUNT but never WHICH of
-    /// the five events that count refers to. Only ever read from the `.partial` branch of
-    /// ``accessibilityLabel`` above.
-    private var missingEventNames: String {
-        Event.allCases
-            .filter { !card.presentEvents.contains($0) }
-            .map(\.displayName)
-            .joined(separator: "、")
-    }
 }
 
 /// The 5-slot coverage track (DESIGN.md「5-slot 覆盖轨」): ``Event/allCases``' fixed order, one

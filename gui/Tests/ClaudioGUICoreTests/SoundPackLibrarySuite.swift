@@ -524,8 +524,9 @@ func runSoundPackLibrarySuites() async {
             source.contains(
                 "SoundPacksWindowController(\n            configFile: ClaudioPaths.configFile,\n            environment: audioEnvironment,\n            soundPackLibrary: soundPackLibrary"
             )
+                && source.contains("languageStore: languageStore")
                 && source.contains(
-                    "PanelView(\n            audioEnvironment: audioEnvironment,\n            focusCoordinator: focusCoordinator,\n            hostIntegrations: hostIntegrations,\n            soundPackLibrary: soundPackLibrary"
+                    "PanelView(\n            audioEnvironment: audioEnvironment,\n            focusCoordinator: focusCoordinator,\n            hostIntegrations: hostIntegrations,\n            languageStore: languageStore,\n            soundPackLibrary: soundPackLibrary"
                 ),
             "同一个局部实例必须同时注入管理窗口与面板")
         expect(

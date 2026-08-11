@@ -2,6 +2,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioLocalization
 import SwiftUI
 
 /// Retained standard-window surface for capability comparison, diagnosis and in-place recovery.
@@ -10,6 +11,7 @@ import SwiftUI
 struct IntegrationsWindowView: View {
     @ObservedObject var model: IntegrationsWindowModel
     @ObservedObject var focusCoordinator: IntegrationsWindowFocusCoordinator
+    @ObservedObject var languageStore: ClaudioLanguageStore
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
@@ -19,6 +21,75 @@ struct IntegrationsWindowView: View {
     @State private var handledFocusRequestRevision = 0
     @State private var feedbackAnnouncer = IntegrationsFeedbackAnnouncementModel()
     @State private var pendingDisconnectHost: HostID?
+
+    private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
+
+    private var localizedSourceRows: [HostSourceRowPresentation] {
+        localizedHostSourceRows(model.content.sourceRows, language: languageStore.language)
+    }
+
+    private var localizedMatrix: HostCapabilityMatrixPresentation {
+        localizedCapabilityMatrix(model.content.matrix, language: languageStore.language)
+    }
+
+    private var localizedInspector: IntegrationsWindowInspectorPresentation? {
+        guard let raw = model.inspector else { return nil }
+        let localizedRow = localizedSourceRows.first(where: { $0.host == raw.host })
+        let localizedCell: HostCapabilityCellPresentation?
+        if case .capability(_, let event) = raw.selection {
+            localizedCell = localizedMatrix.cell(host: raw.host, event: event)
+        } else {
+            localizedCell = nil
+        }
+        let title: String
+        let connectionText: String
+        let nativeEventText: String?
+        let qualificationText: String?
+        let accessibilityLabel: String
+        switch raw.selection {
+        case .host:
+            title = localizedRow?.title ?? raw.title
+            connectionText = localizedRow?.readinessText ?? raw.connectionText
+            nativeEventText = raw.nativeEventText
+            qualificationText = localizedRow?.detailText
+            accessibilityLabel = localizedRow?.accessibilityLabel ?? raw.accessibilityLabel
+        case .capability(_, let event):
+            title = "\(localizedEventName(event, language: languageStore.language)) · "
+                + (localizedRow?.title ?? raw.host.displayName)
+            connectionText = localizedCell?.statusText ?? raw.connectionText
+            nativeEventText = localizedCell?.nativeEventText
+            qualificationText = localizedCell?.qualificationText
+            accessibilityLabel = localizedCell?.accessibilityLabel ?? raw.accessibilityLabel
+        }
+        return IntegrationsWindowInspectorPresentation(
+            selection: raw.selection,
+            host: raw.host,
+            title: title,
+            connectionText: connectionText,
+            configurationSource: localizedConfigurationSource(
+                raw.configurationSource,
+                language: languageStore.language),
+            nativeEventText: nativeEventText,
+            latestReceiptText: localizedLatestReceiptText(
+                raw.latestReceiptText,
+                language: languageStore.language),
+            qualificationText: qualificationText,
+            accessibilityLabel: accessibilityLabel,
+            actions: raw.actions)
+    }
+
+    private func localizedInFlightStatus(_ operation: IntegrationsInFlightPresentation) -> String {
+        switch operation.action {
+        case .redetect: return l10n.text(.actionRedetectInProgress)
+        case .connect: return l10n.text(.actionConnectInProgress)
+        case .repair:
+            return operation.isUpgrade
+                ? l10n.text(.actionUpgradeInProgress)
+                : l10n.text(.actionRepairInProgress)
+        case .disconnect: return l10n.text(.actionDisconnectInProgress)
+        case .copyHooksCommand: return operation.statusText
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -46,36 +117,38 @@ struct IntegrationsWindowView: View {
                 Button {
                     perform(.redetect)
                 } label: {
-                    Label("重新检测", systemImage: "arrow.clockwise")
+                    Label(l10n.text(.integrationsRedetect), systemImage: "arrow.clockwise")
                 }
                 .disabled(model.isPerformingAction)
-                .accessibilityLabel("重新检测两个声音来源")
-                .accessibilityHint("只重新读取连接、能力和真实回执，不修改配置")
+                .accessibilityLabel(l10n.text(.integrationsRedetectLabel))
+                .accessibilityHint(l10n.text(.integrationsRedetectHint))
                 .accessibilityIdentifier("integrations.redetect")
             }
         }
         .confirmationDialog(
-            pendingDisconnectHost.map { "断开 \($0.displayName)？" } ?? "断开声音来源？",
+            pendingDisconnectHost.map {
+                l10n.format(.integrationsDisconnectConfirm, $0.displayName)
+            } ?? l10n.text(.integrationsDisconnectTitle),
             isPresented: Binding(
                 get: { pendingDisconnectHost != nil },
                 set: { if !$0 { pendingDisconnectHost = nil } }),
             titleVisibility: .visible,
             presenting: pendingDisconnectHost
         ) { host in
-            Button("断开 \(host.displayName)", role: .destructive) {
+            Button(l10n.format(.actionDisconnect, host.displayName), role: .destructive) {
                 pendingDisconnectHost = nil
                 perform(.disconnect(host))
             }
-            .accessibilityLabel("确认断开 \(host.displayName)")
-            .accessibilityHint("只移除这个宿主的 claudi0 连接")
+            .accessibilityLabel(l10n.format(.integrationsDisconnectConfirm, host.displayName))
+            .accessibilityHint(l10n.text(.integrationsDisconnectHint))
             .accessibilityIdentifier("integrations.confirm-disconnect.\(host.rawValue)")
-            Button("取消", role: .cancel) {
+            Button(l10n.text(.commonCancel), role: .cancel) {
                 pendingDisconnectHost = nil
             }
-            .accessibilityLabel("取消断开 \(host.displayName)")
+            .accessibilityLabel(l10n.format(.actionDisconnect, host.displayName))
             .accessibilityIdentifier("integrations.cancel-disconnect.\(host.rawValue)")
         } message: { host in
-            Text("只移除 \(host.displayName) 的 claudi0 连接；另一个宿主、声音包和静音设置不会改变。")
+            Text(l10n.format(.integrationsDisconnectMessage, host.displayName))
         }
         .onReceive(focusCoordinator.$requestRevision) { revision in
             guard revision > handledFocusRequestRevision else { return }
@@ -123,13 +196,13 @@ struct IntegrationsWindowView: View {
 
     private var sourceSummary: some View {
         HStack(spacing: 10) {
-            ForEach(model.content.sourceRows) { row in
+            ForEach(localizedSourceRows) { row in
                 sourceSummaryButton(row)
                     .frame(maxWidth: .infinity)
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("声音来源摘要")
+        .accessibilityLabel(l10n.text(.integrationsSourcesSummary))
     }
 
     private func sourceSummaryButton(_ row: HostSourceRowPresentation) -> some View {
@@ -152,7 +225,7 @@ struct IntegrationsWindowView: View {
                     if let operation = model.inFlightOperation, operation.host == row.host {
                         HStack(spacing: 5) {
                             ProgressView().controlSize(.small).accessibilityHidden(true)
-                            Text(operation.statusText)
+                            Text(localizedInFlightStatus(operation))
                                 .font(ClaudioTheme.font(.caption).weight(.semibold))
                         }
                     }
@@ -178,8 +251,9 @@ struct IntegrationsWindowView: View {
         .buttonStyle(.plain)
         .focused($focusedTarget, equals: .hostCard(row.host))
         .accessibilityLabel(sourceRowAccessibilityLabel(row))
-        .accessibilityValue(model.selection == selection ? "已选择" : "未选择")
-        .accessibilityHint("选择后查看这个宿主的配置证据与连接操作")
+        .accessibilityValue(
+            l10n.text(model.selection == selection ? .integrationsSelected : .integrationsNotSelected))
+        .accessibilityHint(l10n.text(.integrationsCellHint))
         .accessibilityAddTraits(model.selection == selection ? .isSelected : [])
         .accessibilityIdentifier("integrations.host.\(row.host.rawValue)")
     }
@@ -189,23 +263,25 @@ struct IntegrationsWindowView: View {
             Image(systemName: "scope")
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            Text(model.inspector?.title ?? "选择一个声音来源或能力")
+            Text(localizedInspector?.title ?? l10n.text(.integrationsSelectionEmpty))
                 .font(ClaudioTheme.font(.secondary).weight(.semibold))
                 .lineLimit(interfaceTextSize == .maximum ? 3 : 1)
             Spacer(minLength: 8)
-            if let text = model.inspector?.connectionText {
+            if let text = localizedInspector?.connectionText {
                 ClaudioStatusCapsule(text, isEmphasized: false)
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "当前选择，\(model.inspector?.accessibilityLabel ?? "尚未选择")")
+            languageStore.language == .english
+                ? "\(l10n.text(.integrationsSelectionLabel)), \(localizedInspector?.accessibilityLabel ?? l10n.text(.integrationsSelectionEmpty))"
+                : "\(l10n.text(.integrationsSelectionLabel))，\(localizedInspector?.accessibilityLabel ?? l10n.text(.integrationsSelectionEmpty))")
     }
 
     @ViewBuilder
     private var capabilitySection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("可听能力")
+            Text(l10n.text(.integrationsCapability))
                 .font(ClaudioTheme.font(.sectionTitle))
                 .accessibilityAddTraits(.isHeader)
             if usesNarrowCapabilityTable {
@@ -221,9 +297,9 @@ struct IntegrationsWindowView: View {
         if #available(macOS 13.0, *) {
             Grid(horizontalSpacing: 0, verticalSpacing: 0) {
                 GridRow {
-                    Text("事件")
+                    Text(l10n.text(.integrationsEvent))
                         .frame(width: 118, alignment: .leading)
-                    ForEach(model.content.matrix.hostColumns, id: \.self) { host in
+                    ForEach(localizedMatrix.hostColumns, id: \.self) { host in
                         Text(host.displayName)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -231,7 +307,7 @@ struct IntegrationsWindowView: View {
                 .font(ClaudioTheme.font(.caption).weight(.semibold))
                 .foregroundStyle(.secondary)
                 Divider().gridCellColumns(3)
-                ForEach(model.content.matrix.rows) { row in
+                    ForEach(localizedMatrix.rows) { row in
                     GridRow {
                         eventIdentity(row.event, title: row.title)
                             .frame(width: 118, alignment: .leading)
@@ -252,15 +328,15 @@ struct IntegrationsWindowView: View {
     private var legacyCapabilityMatrix: some View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
-                Text("事件").frame(width: 118, alignment: .leading)
-                ForEach(model.content.matrix.hostColumns, id: \.self) { host in
+                Text(l10n.text(.integrationsEvent)).frame(width: 118, alignment: .leading)
+                ForEach(localizedMatrix.hostColumns, id: \.self) { host in
                     Text(host.displayName).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .font(ClaudioTheme.font(.caption).weight(.semibold))
             .foregroundStyle(.secondary)
             Divider()
-            ForEach(model.content.matrix.rows) { row in
+            ForEach(localizedMatrix.rows) { row in
                 HStack(spacing: 0) {
                     eventIdentity(row.event, title: row.title)
                         .frame(width: 118, alignment: .leading)
@@ -276,7 +352,7 @@ struct IntegrationsWindowView: View {
 
     private var narrowCapabilityTable: some View {
         VStack(spacing: 0) {
-            ForEach(model.content.matrix.rows) { row in
+            ForEach(localizedMatrix.rows) { row in
                 VStack(alignment: .leading, spacing: 7) {
                     eventIdentity(row.event, title: row.title)
                         .accessibilityAddTraits(.isHeader)
@@ -344,8 +420,9 @@ struct IntegrationsWindowView: View {
         .buttonStyle(.plain)
         .focused($focusedTarget, equals: .capabilityCell(host: cell.host, event: cell.event))
         .accessibilityLabel(cell.accessibilityLabel)
-        .accessibilityValue(model.selection == selection ? "已选择" : "未选择")
-        .accessibilityHint("选择后查看证据和当前状态对应的恢复动作")
+        .accessibilityValue(
+            l10n.text(model.selection == selection ? .integrationsSelected : .integrationsNotSelected))
+        .accessibilityHint(l10n.text(.integrationsCellHint))
         .accessibilityAddTraits(model.selection == selection ? .isSelected : [])
         .accessibilityIdentifier(
             "integrations.capability.\(cell.host.rawValue).\(cell.event.rawValue)")
@@ -353,10 +430,10 @@ struct IntegrationsWindowView: View {
 
     @ViewBuilder
     private var inspectorSection: some View {
-        if let inspector = model.inspector {
+        if let inspector = localizedInspector {
             VStack(alignment: .leading, spacing: 13) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("检查器")
+                    Text(l10n.text(.integrationsInspector))
                         .font(ClaudioTheme.font(.caption))
                         .foregroundStyle(.secondary)
                     Text(inspector.title)
@@ -373,12 +450,12 @@ struct IntegrationsWindowView: View {
                 .accessibilityLabel(inspector.accessibilityLabel)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    evidenceRow(label: "连接状态", value: inspector.connectionText)
+                    evidenceRow(label: l10n.text(.integrationsConnection), value: inspector.connectionText)
                     configurationEvidenceRow(inspector)
-                    evidenceRow(label: "原生事件", value: inspector.nativeEventText ?? "选择一个事件查看")
+                    evidenceRow(label: l10n.text(.integrationsNativeEvent), value: inspector.nativeEventText ?? l10n.text(.integrationsChooseEvent))
                     evidenceRow(
-                        label: "最近真实回执",
-                        value: inspector.latestReceiptText ?? "暂无当前安装代次的真实回执")
+                        label: l10n.text(.integrationsRecentReceipt),
+                        value: inspector.latestReceiptText ?? l10n.text(.integrationsNoReceipt))
                 }
 
                 if let feedback = model.feedback {
@@ -407,11 +484,15 @@ struct IntegrationsWindowView: View {
                 .font(ClaudioTheme.font(.caption))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(label == "原生事件" ? ClaudioTheme.font(.technical) : ClaudioTheme.font(.caption))
+                .font(label == l10n.text(.integrationsNativeEvent)
+                    ? ClaudioTheme.font(.technical)
+                    : ClaudioTheme.font(.caption))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(label)，\(value)")
+        .accessibilityLabel(languageStore.language == .english
+            ? "\(label), \(value)"
+            : "\(label)，\(value)")
     }
 
     private func configurationEvidenceRow(
@@ -420,7 +501,7 @@ struct IntegrationsWindowView: View {
         let fullPath = inspector.configurationSource
         let shortPath = abbreviatedConfigurationPath(fullPath)
         return VStack(alignment: .leading, spacing: 3) {
-            Text("配置来源")
+            Text(l10n.text(.integrationsConfigurationSource))
                 .font(ClaudioTheme.font(.caption))
                 .foregroundStyle(.secondary)
             HStack(spacing: 6) {
@@ -429,7 +510,7 @@ struct IntegrationsWindowView: View {
                     .textSelection(.enabled)
                     .lineLimit(2)
                     .help(fullPath)
-                    .accessibilityLabel("配置来源")
+                    .accessibilityLabel(l10n.text(.integrationsConfigurationSource))
                     .accessibilityValue(fullPath)
                 Spacer(minLength: 4)
                 Button {
@@ -442,9 +523,9 @@ struct IntegrationsWindowView: View {
                 }
                 .buttonStyle(.borderless)
                 .focused($focusedTarget, equals: .copyConfigurationPath(inspector.host))
-                .accessibilityLabel("复制 \(inspector.host.displayName) 配置路径")
+                .accessibilityLabel(l10n.format(.integrationsCopyPathLabel, inspector.host.displayName))
                 .accessibilityValue(fullPath)
-                .accessibilityHint("把完整路径复制到剪贴板")
+                .accessibilityHint(l10n.text(.integrationsCopyPathHint))
                 .accessibilityIdentifier("integrations.copy-path.\(inspector.host.rawValue)")
             }
         }
@@ -456,13 +537,15 @@ struct IntegrationsWindowView: View {
         case .none:
             EmptyView()
         case .explainMasterVolumeZero:
-            Text("主音量为零；请在菜单栏面板中调高主音量后再试。")
+                Text(l10n.text(.integrationsMasterVolumeZero))
                 .font(ClaudioTheme.font(.secondary))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("integrations.recovery.master-volume-zero")
         case .explainUnsupported(_, let event):
-            Text("\(event.displayName) 不是这个宿主支持的能力；这不是连接错误，无需修复。")
+                Text(l10n.format(
+                    .integrationsUnsupported,
+                    localizedEventName(event, language: languageStore.language)))
                 .font(ClaudioTheme.font(.secondary))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -473,7 +556,7 @@ struct IntegrationsWindowView: View {
     }
 
     private func recoveryButton(_ action: IntegrationsRecoveryAction) -> some View {
-        Button(action.title ?? "恢复") {
+        Button(localizedRecoveryTitle(action)) {
             performRecovery(action)
         }
         .buttonStyle(.borderedProminent)
@@ -481,7 +564,7 @@ struct IntegrationsWindowView: View {
         .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
         .disabled(model.isPerformingAction)
         .focused($focusedTarget, equals: .recoveryAction(action))
-        .accessibilityLabel(action.title ?? "恢复当前能力")
+        .accessibilityLabel(localizedRecoveryTitle(action))
         .accessibilityHint(recoveryAccessibilityHint(action))
         .accessibilityIdentifier("integrations.recovery.primary")
     }
@@ -491,11 +574,12 @@ struct IntegrationsWindowView: View {
             Image(systemName: feedbackSymbol(feedback.kind))
                 .foregroundColor(feedbackColor(feedback.kind))
                 .accessibilityHidden(true)
-            Text(feedback.message)
+            Text(feedback.message(language: languageStore.language))
                 .font(ClaudioTheme.font(.secondary))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .fixedSize(horizontal: false, vertical: true)
-                .accessibilityLabel(feedback.accessibilityLabel)
+                .accessibilityLabel(
+                    feedback.localizedAccessibilityLabel(language: languageStore.language))
             Button {
                 model.dismissFeedback(revision: feedback.revision)
             } label: {
@@ -504,7 +588,7 @@ struct IntegrationsWindowView: View {
             }
             .buttonStyle(.plain)
             .focused($focusedTarget, equals: .dismissFeedback(revision: feedback.revision))
-            .accessibilityLabel("关闭状态反馈")
+            .accessibilityLabel(l10n.text(.integrationsCloseFeedback))
             .accessibilityIdentifier("integrations.feedback.dismiss")
         }
         .padding(10)
@@ -517,22 +601,23 @@ struct IntegrationsWindowView: View {
     private func inspectorButton(_ action: IntegrationsWindowInspectorAction) -> some View {
         switch action {
         case .disconnect(let host):
-            Button("断开 \(host.displayName)", role: .destructive) {
+            Button(l10n.format(.actionDisconnect, host.displayName), role: .destructive) {
                 pendingDisconnectHost = host
             }
             .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .inspectorAction(action))
             .disabled(model.isPerformingAction)
-            .accessibilityHint("会先确认；只移除这个宿主的 claudi0 连接")
+            .accessibilityLabel(l10n.format(.actionDisconnect, host.displayName))
+            .accessibilityHint(l10n.text(.actionDisconnectHint))
             .accessibilityIdentifier("integrations.disconnect.\(host.rawValue)")
         default:
-            Button(integrationsInspectorActionTitle(action, hostStatus: selectedHostStatus)) {
+            Button(localizedInspectorActionTitle(action, hostStatus: selectedHostStatus)) {
                 perform(action)
             }
             .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .inspectorAction(action))
             .disabled(model.isPerformingAction)
-            .accessibilityLabel(integrationsInspectorActionTitle(action, hostStatus: selectedHostStatus))
+            .accessibilityLabel(localizedInspectorActionTitle(action, hostStatus: selectedHostStatus))
             .accessibilityHint(inspectorActionAccessibilityHint(action))
             .accessibilityIdentifier("integrations.action.\(actionIdentifier(action))")
         }
@@ -548,7 +633,9 @@ struct IntegrationsWindowView: View {
 
     private func announceFeedbackIfNeeded() {
         guard model.isWindowVisible, model.isWindowKey, NSApp.isActive else { return }
-        guard let sentence = feedbackAnnouncer.consume(model.feedback) else { return }
+        guard let sentence = feedbackAnnouncer.consume(
+            model.feedback,
+            language: languageStore.language) else { return }
         NSAccessibility.post(
             element: NSApp as Any,
             notification: .announcementRequested,
@@ -562,7 +649,8 @@ struct IntegrationsWindowView: View {
         guard let operation = model.inFlightOperation, operation.host == row.host else {
             return row.accessibilityLabel
         }
-        return "\(row.accessibilityLabel)，\(operation.statusText)"
+        let separator = languageStore.language == .english ? ", " : "，"
+        return "\(row.accessibilityLabel)\(separator)\(localizedInFlightStatus(operation))"
     }
 
     private var focusScope: IntegrationsWindowFocusScope {
@@ -645,21 +733,21 @@ struct IntegrationsWindowView: View {
 
     private var feedbackAnimation: Animation? {
         switch integrationsFeedbackTransition(reduceMotionEnabled: reduceMotion) {
-        case .opacity: .easeOut(duration: 0.16)
-        case .immediate: nil
+        case .opacity: return .easeOut(duration: 0.16)
+        case .immediate: return nil
         }
     }
 
     private func recoveryAccessibilityHint(_ action: IntegrationsRecoveryAction) -> String {
         switch action {
-        case .unmute: "只取消当前事件静音；不会改变声音映射"
-        case .explainMasterVolumeZero: "请在菜单栏面板中调高主音量"
-        case .configureSound: "打开声音包窗口并定位到当前事件"
-        case .connect: "连接当前宿主"
-        case .upgrade: "把旧版连接升级到当前格式"
-        case .repair: "修复当前宿主的 claudi0 连接"
-        case .redetect: "重新读取当前连接状态"
-        case .explainUnsupported, .none: ""
+        case .unmute: return l10n.text(.actionUnmuteHint)
+        case .explainMasterVolumeZero: return l10n.text(.integrationsMasterVolumeZero)
+        case .configureSound: return l10n.text(.actionConfigureSoundHint)
+        case .connect: return l10n.text(.actionConnectHint)
+        case .upgrade: return l10n.text(.actionUpgradeHint)
+        case .repair: return l10n.text(.actionRepairHint)
+        case .redetect: return l10n.text(.actionRedetectHint)
+        case .explainUnsupported, .none: return ""
         }
     }
 
@@ -667,11 +755,39 @@ struct IntegrationsWindowView: View {
         _ action: IntegrationsWindowInspectorAction
     ) -> String {
         switch action {
-        case .copyHooksCommand: "把 /hooks 复制到剪贴板，以便在 Codex 中完成授权"
-        case .connect: "连接这个宿主"
-        case .repair: "修复或升级这个宿主的连接"
-        case .redetect: "重新读取连接状态"
-        case .disconnect: "会先显示影响范围确认"
+        case .copyHooksCommand: return l10n.text(.actionCopyHooksHint)
+        case .connect: return l10n.text(.actionConnectHint)
+        case .repair: return l10n.text(.actionRepairHint)
+        case .redetect: return l10n.text(.actionRedetectHint)
+        case .disconnect: return l10n.text(.actionDisconnectHint)
+        }
+    }
+
+    private func localizedRecoveryTitle(_ action: IntegrationsRecoveryAction) -> String {
+        switch action {
+        case .unmute: return l10n.text(.actionUnmute)
+        case .configureSound: return l10n.text(.actionConfigureSound)
+        case .connect(let host): return l10n.format(.actionConnect, host.displayName)
+        case .upgrade: return l10n.text(.actionUpgrade)
+        case .repair(let host): return l10n.format(.actionRepair, host.displayName)
+        case .redetect: return l10n.text(.actionRedetect)
+        case .explainMasterVolumeZero, .explainUnsupported, .none: return ""
+        }
+    }
+
+    private func localizedInspectorActionTitle(
+        _ action: IntegrationsWindowInspectorAction,
+        hostStatus: HostSourceRowStatus?
+    ) -> String {
+        switch action {
+        case .copyHooksCommand: return l10n.text(.actionCopyHooks)
+        case .redetect: return l10n.text(.actionRedetect)
+        case .connect(let host): return l10n.format(.actionConnect, host.displayName)
+        case .repair(let host):
+            return hostStatus == .legacy
+                ? l10n.text(.actionUpgrade)
+                : l10n.format(.actionRepair, host.displayName)
+        case .disconnect(let host): return l10n.format(.actionDisconnect, host.displayName)
         }
     }
 

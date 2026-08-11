@@ -2,6 +2,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioLocalization
 import SwiftUI
 
 /// The menu-bar panel's always-operational dual-host surface. Host rows and event coverage are
@@ -49,6 +50,8 @@ public struct PanelView: View {
     /// Shared with the retained integrations window. Both surfaces render the same immutable
     /// adapter-derived presentation instead of probing host files independently.
     @ObservedObject private var hostIntegrations: HostIntegrationPresentationStore
+    /// App-lifetime explicit language state shared with both retained management windows.
+    @ObservedObject private var languageStore: ClaudioLanguageStore
 
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
@@ -90,6 +93,7 @@ public struct PanelView: View {
         lockFile: URL = ClaudioPaths.configLockFile,
         focusCoordinator: PanelFocusCoordinator = PanelFocusCoordinator(),
         hostIntegrations: HostIntegrationPresentationStore,
+        languageStore: ClaudioLanguageStore,
         soundPackLibrary: SoundPackLibrary,
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
         onManageSounds: @escaping @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void,
@@ -102,6 +106,7 @@ public struct PanelView: View {
         self.lockFile = lockFile
         self.focusCoordinator = focusCoordinator
         self.hostIntegrations = hostIntegrations
+        self.languageStore = languageStore
         self.soundPackLibrary = soundPackLibrary
         self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
         self.onManageSounds = onManageSounds
@@ -203,8 +208,11 @@ public struct PanelView: View {
                 // 先复核可见代次，再消费去重器或 post。
                 guard coordinator.hideCount == hideCount else { return }
                 let packName = panelModel.selectedPackMetadata.displayName
-                let base = "claudi0 面板，\(sourceCount) 个声音来源"
-                let header = packName.isEmpty ? base : "\(base)，当前声音包 \(packName)"
+                let l10n = ClaudioL10n(language: languageStore.language)
+                let base = l10n.format(.panelHeader, Int64(sourceCount))
+                let header = packName.isEmpty
+                    ? base
+                    : l10n.format(.panelHeaderWithPack, Int64(sourceCount), packName as NSString)
                 guard
                     let sentence = announcer.consume(
                         dualHostPanelAnnouncement(header: header),
@@ -230,7 +238,9 @@ public struct PanelView: View {
                 Spacer(minLength: 8)
                 interfaceOptionsMenu
             }
-            Text(selectedPackDisplayName.isEmpty ? "尚未选择声音包" : selectedPackDisplayName)
+            Text(selectedPackDisplayName.isEmpty
+                ? l10n.text(.panelSelectedPackNone)
+                : selectedPackDisplayName)
                 .font(.system(size: 14 * typeScale, weight: .semibold, design: .rounded))
                 .foregroundColor(ClaudioTheme.text(colorScheme))
                 .lineLimit(2)
@@ -242,8 +252,12 @@ public struct PanelView: View {
     }
 
     private var interfaceOptionsMenu: some View {
-        InterfaceTextSizeControl(selection: interfaceTextSizeBinding)
+        InterfaceTextSizeControl(
+            selection: interfaceTextSizeBinding,
+            languageStore: languageStore)
     }
+
+    private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
     private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize> {
         Binding(
@@ -253,17 +267,21 @@ public struct PanelView: View {
 
     private var headerAccessibilityLabel: String {
         let packName = selectedPackDisplayName
-        let base = "claudi0 面板，2 个声音来源，\(audibleEventSummary)"
-        guard !packName.isEmpty else { return base }
-        return "\(base)，当前声音包 \(packName)"
+        let base = l10n.format(.panelHeader, Int64(hostIntegrations.content.sourceRows.count))
+        let withPack = packName.isEmpty
+            ? base
+            : l10n.format(.panelHeaderWithPack, Int64(hostIntegrations.content.sourceRows.count), packName as NSString)
+        let separator = languageStore.language == .english ? ", " : "，"
+        return "\(withPack)\(separator)\(audibleEventSummary)"
     }
 
     private var hostSourcesSection: some View {
         HStack(alignment: .top, spacing: 8) {
-            ForEach(hostIntegrations.content.sourceRows) { row in
+            ForEach(localizedHostRows) { row in
                 HostSourceRowView(
                     row: row,
                     typeScale: typeScale,
+                    language: languageStore.language,
                     focusedTarget: $focusedTarget,
                     equalizedHeight: hostSourceCardHeight,
                     onSelect: { onManageIntegrations(.hostSource(row.host)) })
@@ -276,7 +294,13 @@ public struct PanelView: View {
             hostSourceCardHeight = maximum
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("声音来源")
+        .accessibilityLabel(l10n.text(.panelSources))
+    }
+
+    private var localizedHostRows: [HostSourceRowPresentation] {
+        localizedHostSourceRows(
+            hostIntegrations.content.sourceRows,
+            language: languageStore.language)
     }
 
     private var audibleEventCount: Int {
@@ -288,9 +312,10 @@ public struct PanelView: View {
     }
 
     private var audibleEventSummary: String {
-        panelAudibleEventSummary(
+        localizedPanelAudibleEventSummary(
             audibleEventCount: audibleEventCount,
-            libraryState: panelModel.libraryPresentationState)
+            libraryState: panelModel.libraryPresentationState,
+            language: languageStore.language)
     }
 
     /// Header 与事件区标题共用这一份 current-pack 读数。它不看 `packCards`：星标显示集可合法地
@@ -321,18 +346,21 @@ public struct PanelView: View {
             switch panelModel.configState.topContent {
             case .events:
                 if panelModel.libraryPresentationState.hasUsableSnapshot {
-                    Text("\(selectedPackDisplayName) · 事件")
+                        Text("\(selectedPackDisplayName) · \(l10n.text(.panelEvents))")
                         .font(.system(size: 11 * typeScale, weight: .semibold))
                         .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                     ForEach(panelModel.eventRows, id: \.event) { row in
                         EventRowView(
                             row: row,
-                            hostIndicators: eventHostIndicatorPresentations(
-                                event: row.event,
-                                matrix: hostIntegrations.content.matrix),
+                            hostIndicators: localizedEventHostIndicators(
+                                eventHostIndicatorPresentations(
+                                    event: row.event,
+                                    matrix: hostIntegrations.content.matrix),
+                                language: languageStore.language),
                             previewAvailability: eventPreviewAvailability(
                                 coverage: row.coverage,
                                 masterVolume: panelModel.config.masterVolume),
+                            language: languageStore.language,
                             focusedTarget: $focusedTarget,
                             adaptation: layoutAdaptation,
                             onOpenEditor: {
@@ -372,7 +400,8 @@ public struct PanelView: View {
                     },
                     focusCoordinator: focusCoordinator,
                     focusedTarget: $focusedTarget,
-                    adaptation: layoutAdaptation)
+                    adaptation: layoutAdaptation,
+                    language: languageStore.language)
             case .needsPack:
                 needsPackNotice
             case .configFailure(let reason):
@@ -413,7 +442,7 @@ public struct PanelView: View {
             // 换句话说：**移动这个 `ForEach` 到画廊下方，就等于把那句文案变成谎话。** 要改位置，
             // 先改文案。（`runSetupNoticeSuites` 钉住了「文案里有『下面的声音包』」这一半；另一半
             // ——「它真的在下面」—— 只有这条注释和你的眼睛守着。）
-            Text("声音包")
+            Text(l10n.text(.panelSoundPacks))
                 .font(.system(size: 11 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
             if let reason = soundPackLibraryRefreshFailureReason {
@@ -437,6 +466,7 @@ public struct PanelView: View {
             typeScale: typeScale,
             focusedTarget: $focusedTarget,
             adaptation: layoutAdaptation,
+            language: languageStore.language,
             onSelect: {
                 let outcome = panelModel.switchPack(to: $0.id)
                 soundPacksRefreshCoordinator.completePanelPackSwitch(outcome)
@@ -446,19 +476,19 @@ public struct PanelView: View {
     private var soundPackLibraryRefreshFailureReason: String? {
         switch panelModel.libraryPresentationState {
         case .refreshFailed(let reason):
-            return "刷新失败，正在显示上次结果。\(reason)"
+            return "\(l10n.text(.panelRetry))\(languageStore.language == .english ? ": " : "：")\(reason)"
         case .loading, .ready, .refreshing, .loadFailed:
             return nil
         }
     }
 
     private var soundPackLibraryRetryButton: some View {
-        Button("重试读取") {
+        Button(l10n.text(.panelRetry)) {
             panelModel.retrySoundPackLibraryRefresh()
         }
         .buttonStyle(.bordered)
-        .accessibilityLabel("重试读取声音包")
-        .accessibilityHint("在后台重新读取；已有结果会继续显示")
+        .accessibilityLabel(l10n.text(.panelRetry))
+        .accessibilityHint(l10n.text(.panelRetryHint))
         .accessibilityIdentifier("panel.packs.retry")
     }
 
@@ -466,11 +496,11 @@ public struct PanelView: View {
     private var libraryEventFactsPlaceholder: some View {
         switch panelModel.libraryPresentationState {
         case .loading:
-            Text("正在读取事件声音状态…")
+            Text(l10n.text(.panelLoadingEvents))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                .accessibilityLabel("正在读取事件声音状态")
+                .accessibilityLabel(l10n.text(.panelLoadingEvents))
         case .loadFailed:
-            Text("事件声音状态暂不可用；请在声音包区域重试读取。")
+            Text(l10n.text(.panelUnavailableEvents))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
         case .ready, .refreshing, .refreshFailed:
@@ -482,9 +512,11 @@ public struct PanelView: View {
     /// `PackGalleryView` 仍然照常渲染在下面；有包行时主行动是「点一个声音包」，零行时则指向仍在
     /// 屏幕上的「管理声音包…」。这里只负责说清楚温度 + 主行动 + 上下文（DESIGN.md 空态三要素）。
     private var needsPackNotice: some View {
-        let copy = needsPackNoticeCopy(hasVisiblePackChoices: !panelModel.packCards.isEmpty)
+        let copy = needsPackNoticeCopy(
+            hasVisiblePackChoices: !panelModel.packCards.isEmpty,
+            language: languageStore.language)
         return VStack(alignment: .leading, spacing: 4) {
-            Text("先选包")
+            Text(l10n.text(.panelSelectPack))
                 .font(.system(size: 13 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.text(colorScheme))
             Text(copy.message)
@@ -502,7 +534,7 @@ public struct PanelView: View {
         Button {
             onManageSounds(.overview, .manageSounds)
         } label: {
-            Text("管理声音包…")
+            Text(l10n.text(.panelManageSoundPacks))
                 .font(.system(size: 11 * typeScale))
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: 24)
@@ -517,8 +549,8 @@ public struct PanelView: View {
                     ClaudioColor.hairlineStrong(colorScheme),
                     style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
         )
-        .accessibilityLabel("管理声音包")
-        .accessibilityHint("打开声音包管理窗口")
+        .accessibilityLabel(l10n.text(.panelManageSoundPacks))
+        .accessibilityHint(l10n.text(.panelManageSoundPacksHint))
         .accessibilityIdentifier("panel.manage-sound-packs")
         .focused($focusedTarget, equals: .manageSounds)
     }
@@ -544,14 +576,14 @@ public struct PanelView: View {
             Button {
                 NSWorkspace.shared.activateFileViewerSelecting([configFile])
             } label: {
-                Text("在访达中显示 config.json")
+                Text(l10n.text(.panelRevealConfig))
                     .font(.system(size: 11 * typeScale))
             }
             .buttonStyle(.plain)
             .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-            .accessibilityLabel("在访达中显示 claudi0 配置")
+            .accessibilityLabel(l10n.text(.panelRevealConfig))
             .accessibilityValue(configFile.path)
-            .accessibilityHint("在访达中定位 config.json，方便手工修正")
+            .accessibilityHint(l10n.text(.panelRevealConfigHint))
             .accessibilityIdentifier("panel.reveal-config")
             // 它是这张卡上唯一的 bespoke 修复动作，渲染在面板最顶端 —— 所以它必须在焦点序里，且开局
             // 焦点就落在它上面（`.malformed`/`.unwritable` 时 `applyFirstFocus` 走 `.configReveal`）。
@@ -720,8 +752,10 @@ public struct PanelView: View {
 /// The panel-only trigger for the shared interface-text preference. Its trigger is intentionally
 /// outside ``PanelFocusTarget``: the panel still opens on its first sound-source control, while
 /// closing this child popover can return focus to this local trigger.
+@MainActor
 struct InterfaceTextSizeControl: View {
     @Binding var selection: ClaudioInterfaceTextSize
+    @ObservedObject var languageStore: ClaudioLanguageStore
 
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isTriggerFocused: Bool
@@ -747,17 +781,28 @@ struct InterfaceTextSizeControl: View {
         .frame(width: 54, height: 32)
         .contentShape(Rectangle())
         .focused($isTriggerFocused)
-        .accessibilityLabel("界面文字")
-        .accessibilityValue(selection.displayName)
-        .accessibilityHint("调整 claudi0 三个界面的文字大小")
+        .accessibilityLabel(ClaudioL10n(language: languageStore.language).text(.interfaceTitle))
+        .accessibilityValue(
+            "\(languageStore.language.selfName)\(languageStore.language == .english ? ", " : "，")"
+                + selection.localizedDisplayName(languageStore.language))
+        .accessibilityHint(ClaudioL10n(language: languageStore.language).text(.panelOptionsHint))
         .accessibilityIdentifier("panel.options.text-size")
         .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
-            InterfaceTextSizeStepperContent(selection: $selection)
+            InterfaceSettingsPopoverContent(
+                selection: $selection,
+                languageStore: languageStore)
         }
         .onChange(of: isPopoverPresented) { presented in
             if !presented {
                 isTriggerFocused = true
             }
+        }
+        .onDisappear {
+            // Parent NSPopover.close() can dismiss this nested child without emitting a useful
+            // SwiftUI focus transition. Clear the local state so reopening always starts from
+            // the current language segment and never targets a vanished child control.
+            isPopoverPresented = false
+            isTriggerFocused = false
         }
     }
 }
@@ -779,6 +824,7 @@ private struct HostSourceCardHeightPreferenceKey: PreferenceKey {
 private struct HostSourceRowView: View {
     let row: HostSourceRowPresentation
     let typeScale: CGFloat
+    let language: ClaudioAppLanguage
     var focusedTarget: FocusState<PanelFocusTarget?>.Binding
     let equalizedHeight: CGFloat?
     let onSelect: @MainActor () -> Void
@@ -805,7 +851,7 @@ private struct HostSourceRowView: View {
         .focused(focusedTarget, equals: .hostSource(row.host))
         .accessibilityLabel(row.accessibilityLabel)
         .accessibilityValue(row.readinessText)
-        .accessibilityHint("打开该声音来源的连接与诊断详情")
+        .accessibilityHint(ClaudioL10n(language: language).text(.hostDetailsHint))
         .accessibilityIdentifier("panel.host.\(row.host.rawValue)")
     }
 

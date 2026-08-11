@@ -2,6 +2,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioLocalization
 import Foundation
 import SwiftUI
 
@@ -10,7 +11,7 @@ import SwiftUI
 /// `Contents/Resources`. Resolve that packaged location explicitly and keep `.module` only as the
 /// development/Xcode Preview fallback. The assembly scripts enforce the same exactly-one contract.
 private let hostIconResourceBundle: Bundle = {
-    guard Bundle.main.bundleURL.lastPathComponent == "claudi0.app" else {
+    guard Bundle.main.bundleURL.pathExtension == "app" else {
         return .module
     }
     guard let resourcesURL = Bundle.main.resourceURL else {
@@ -27,7 +28,7 @@ private let hostIconResourceBundle: Bundle = {
         .filter { $0.lastPathComponent.hasSuffix("_ClaudioGUI.bundle") }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
     } catch {
-        preconditionFailure("Cannot inspect claudi0.app resources: \(error)")
+            preconditionFailure("Cannot inspect Claudio app resources: \(error)")
     }
 
     guard candidates.count == 1 else {
@@ -46,6 +47,7 @@ public struct EventRowView: View {
     public let row: EventRow
     public let hostIndicators: [EventHostIndicatorPresentation]
     public let previewAvailability: EventPreviewAvailability
+    public let language: ClaudioAppLanguage
     public let adaptation: PanelLayoutAdaptation
     public let onOpenEditor: () -> Void
     public let onPreview: () -> Void
@@ -63,6 +65,7 @@ public struct EventRowView: View {
         row: EventRow,
         hostIndicators: [EventHostIndicatorPresentation] = [],
         previewAvailability: EventPreviewAvailability? = nil,
+        language: ClaudioAppLanguage = .zhHans,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
         adaptation: PanelLayoutAdaptation = panelLayoutAdaptation(for: .standard),
         onOpenEditor: @escaping () -> Void = {},
@@ -73,6 +76,7 @@ public struct EventRowView: View {
         self.hostIndicators = hostIndicators
         self.previewAvailability = previewAvailability
             ?? eventPreviewAvailability(coverage: row.coverage, masterVolume: 1)
+        self.language = language
         self.focusedTarget = focusedTarget
         self.adaptation = adaptation
         self.onOpenEditor = onOpenEditor
@@ -107,11 +111,13 @@ public struct EventRowView: View {
         .accessibilityElement(children: .contain)
     }
 
+    private var l10n: ClaudioL10n { ClaudioL10n(language: language) }
+
     private var identityButton: some View {
         Button(action: onOpenEditor) {
             HStack(spacing: 6) {
                 ClaudioEventGlyph(event: row.event)
-                Text(row.event.displayName)
+                Text(localizedEventName(row.event, language: language))
                     .font(.system(size: eventTitleSize, design: .rounded).weight(.medium))
                     .foregroundColor(ClaudioTheme.text(colorScheme))
                     .lineLimit(1)
@@ -126,7 +132,7 @@ public struct EventRowView: View {
         .focused(focusedTarget, equals: .eventSound(row.event))
         .accessibilityLabel(identityAccessibilityLabel)
         .accessibilityValue(coverageText)
-        .accessibilityHint("打开声音包窗口并定位到这个事件")
+        .accessibilityHint(l10n.text(.eventEditorHint))
         .accessibilityIdentifier("panel.event.\(row.event.rawValue).editor")
     }
 
@@ -134,7 +140,9 @@ public struct EventRowView: View {
         ClaudioStatusCapsule(coverageText)
             .fixedSize()
             .help(coverageHelp)
-            .accessibilityLabel("映射状态，\(coverageHelp)")
+            .accessibilityLabel(language == .english
+                ? "\(coverageText), \(coverageHelp)"
+                : "\(coverageText)，\(coverageHelp)")
     }
 
     private var hostIndicatorGroup: some View {
@@ -146,7 +154,7 @@ public struct EventRowView: View {
                     .scaledToFit()
                     .frame(width: hostIndicatorSize, height: hostIndicatorSize)
                     .foregroundColor(hostIndicatorColor(indicator))
-                    .help(indicator.helpText)
+                    .help(localizedEventHostIndicatorStatus(indicator.state, language: language))
                     .accessibilityHidden(true)
             }
         }
@@ -165,13 +173,16 @@ public struct EventRowView: View {
                 : ClaudioTheme.secondaryText(colorScheme))
         .disabled(!previewAvailability.isAvailable)
         .focused(focusedTarget, equals: .eventAction(row.event))
-        .help(previewAvailability.accessibilityHint)
-        .accessibilityLabel("试听 \(row.event.displayName)")
+        .help(localizedEventPreviewHint(previewAvailability, language: language))
+        .accessibilityLabel(
+            l10n.format(
+                .eventPreviewLabel,
+                localizedEventName(row.event, language: language) as NSString))
         .accessibilityValue(
             previewAvailability.isAvailable
-                ? "可以试听；事件\(row.enabled ? "已启用" : "已静音")"
-                : previewAvailability.unavailableReason ?? "不可试听")
-        .accessibilityHint(previewAvailability.accessibilityHint)
+                ? l10n.text(row.enabled ? .eventPreviewAvailableEnabled : .eventPreviewAvailableMuted)
+                : l10n.text(.eventPreviewUnavailable))
+        .accessibilityHint(localizedEventPreviewHint(previewAvailability, language: language))
         .accessibilityIdentifier("panel.event.\(row.event.rawValue).preview")
     }
 
@@ -186,24 +197,40 @@ public struct EventRowView: View {
         }
         .buttonStyle(ClaudioIconButtonStyle())
         .focused(focusedTarget, equals: .eventMute(row.event))
-        .help(row.enabled ? "静音真实事件自动播放" : "恢复真实事件自动播放")
+        .help(
+            row.enabled
+                ? l10n.format(.eventMute, localizedEventName(row.event, language: language) as NSString)
+                : l10n.format(.eventUnmute, localizedEventName(row.event, language: language) as NSString))
         .accessibilityLabel(
-            row.enabled ? "静音 \(row.event.displayName) 自动播放" : "取消静音 \(row.event.displayName) 自动播放")
-        .accessibilityValue(row.enabled ? "已启用" : "已静音")
-        .accessibilityHint("只影响宿主真实事件；不影响手工试听")
+            row.enabled
+                ? l10n.format(.eventMute, localizedEventName(row.event, language: language) as NSString)
+                : l10n.format(.eventUnmute, localizedEventName(row.event, language: language) as NSString))
+        .accessibilityValue(l10n.text(row.enabled ? .eventEnabled : .eventMuted))
+        .accessibilityHint(l10n.text(.eventMuteHint))
         .accessibilityAddTraits(row.enabled ? [] : .isSelected)
         .accessibilityIdentifier("panel.event.\(row.event.rawValue).mute")
     }
 
     private var identityAccessibilityLabel: String {
-        var parts = [
-            eventRowIdentityAccessibilityLabel(
-                eventDisplayName: row.event.displayName,
-                coverage: row.coverage,
-                enabled: row.enabled)
-        ]
-        parts.append(contentsOf: hostIndicators.map(\.accessibilityLabel))
-        return parts.joined(separator: "，")
+        let sound: String
+        switch row.coverage {
+        case .present(let fileName):
+            sound = l10n.format(.eventCoveragePresentFile, fileName as NSString)
+        case .unmapped:
+            sound = l10n.text(.eventCoverageUnmapped)
+        case .broken:
+            sound = l10n.text(.eventCoverageBroken)
+        }
+        let state = l10n.text(row.enabled ? .eventEnabled : .eventMuted)
+        var parts = [localizedEventName(row.event, language: language), sound, state]
+        parts.append(contentsOf: hostIndicators.map { indicator in
+            let host = localizedHostName(indicator.host, language: language)
+            let status = localizedEventHostIndicatorStatus(indicator.state, language: language)
+            return [host, status, indicator.qualificationText]
+                .compactMap { $0 }
+                .joined(separator: language == .english ? ", " : "，")
+        })
+        return parts.joined(separator: language == .english ? ", " : "，")
     }
 
     private func hostIndicatorColor(_ indicator: EventHostIndicatorPresentation) -> Color {
@@ -225,17 +252,20 @@ public struct EventRowView: View {
 
     private var coverageText: String {
         switch row.coverage {
-        case .present: "已映射"
-        case .unmapped: "未配置"
-        case .broken: "需修复"
+        case .present: l10n.text(.eventCoveragePresent)
+        case .unmapped: l10n.text(.eventCoverageUnmapped)
+        case .broken: l10n.text(.eventCoverageBroken)
         }
     }
 
     private var coverageHelp: String {
         switch row.coverage {
-        case .present(let fileName): "已映射 \(fileName)"
-        case .unmapped: "尚未绑定声音文件"
-        case .broken(let fileName): "\(fileName) 缺失或损坏"
+        case .present(let fileName):
+            return l10n.format(.eventCoveragePresentFile, fileName as NSString)
+        case .unmapped:
+            return l10n.text(.eventPreviewUnmapped)
+        case .broken(let fileName):
+            return l10n.format(.eventCoverageBrokenFile, fileName as NSString)
         }
     }
 }

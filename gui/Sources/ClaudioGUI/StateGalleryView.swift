@@ -2,6 +2,7 @@
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioLocalization
 import SoundPacksWindow
 import SwiftUI
 
@@ -42,8 +43,10 @@ import SwiftUI
                     InterfaceTextSizeGalleryView()
                     MasterVolumeGalleryView()
                     PackCardGalleryView()
-                    GallerySection(title: "Sound Packs Window (7 production states)") {
-                        SoundPacksWindowStateGalleryView()
+                    ForEach(ClaudioAppLanguage.allCases) { language in
+                        GallerySection(title: "Sound Packs Window · \(language.selfName) (7 production states)") {
+                            SoundPacksWindowStateGalleryView(language: language)
+                        }
                     }
                     HostIntegrationGalleryView()
                 }
@@ -285,10 +288,13 @@ import SwiftUI
 
     struct InterfaceTextSizeGalleryView: View {
         var body: some View {
-            GallerySection(title: "ClaudioInterfaceTextSize (4)") {
-                ForEach(PreviewFixtures.interfaceTextSizes) { size in
-                    GalleryFrame(caption: ".\(size.rawValue) · \(size.displayName)") {
-                        InterfaceTextSizeFrame(size: size)
+            GallerySection(title: "Interface Popover (2 languages × 4 sizes)") {
+                ForEach(ClaudioAppLanguage.allCases) { language in
+                    ForEach(PreviewFixtures.interfaceTextSizes) { size in
+                        GalleryFrame(
+                            caption: "\(language.selfName) · .\(size.rawValue) · \(size.displayName)") {
+                            InterfaceTextSizeFrame(size: size, language: language)
+                        }
                     }
                 }
             }
@@ -297,19 +303,30 @@ import SwiftUI
 
     private struct InterfaceTextSizeFrame: View {
         let size: ClaudioInterfaceTextSize
+        let language: ClaudioAppLanguage
+        @StateObject private var languageStore: ClaudioLanguageStore
         @FocusState private var focusedTarget: PanelFocusTarget?
+
+        init(size: ClaudioInterfaceTextSize, language: ClaudioAppLanguage) {
+            self.size = size
+            self.language = language
+            let store = ClaudioLanguageStore(defaults: UserDefaults())
+            store.setLanguage(language)
+            _languageStore = StateObject(wrappedValue: store)
+        }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
-                InterfaceTextSizeStepperContent(
+                InterfaceSettingsPopoverContent(
                     selection: .constant(size),
-                    managesFocus: false)
-                Text("claudi0 · 当前声音包 极简铃 · 4 个可听事件")
+                    languageStore: languageStore)
+                Text(panelSummary)
                     .font(ClaudioTheme.font(.productTitle))
                 EventRowView(
                     row: PreviewFixtures.eventRows[0],
                     hostIndicators: interfaceTextHostIndicators,
                     previewAvailability: .available(fileName: "stop.mp3"),
+                    language: language,
                     focusedTarget: $focusedTarget,
                     adaptation: panelLayoutAdaptation(for: panelTier))
             }
@@ -317,6 +334,12 @@ import SwiftUI
                 width: size == .maximum ? CGFloat(widenedPanelWidth) : CGFloat(standardPanelWidth),
                 alignment: .leading)
             .environment(\.dynamicTypeSize, size.dynamicTypeSize)
+        }
+
+        private var panelSummary: String {
+            let l10n = ClaudioL10n(language: language)
+            let header = l10n.format(.panelHeaderWithPack, Int64(2), "极简铃" as NSString)
+            return "\(header) · \(l10n.plural(.panelAudibleEventsCount, count: 4))"
         }
 
         private var panelTier: PanelTypeSizeTier {
@@ -372,7 +395,8 @@ import SwiftUI
                     onCommit: { _ in nil },
                     focusCoordinator: PanelFocusCoordinator(),
                     focusedTarget: $focusedTarget,
-                    adaptation: panelLayoutAdaptation(for: .standard))
+                    adaptation: panelLayoutAdaptation(for: .standard),
+                    language: .zhHans)
                 if case .failed(_, let message) = state {
                     FailureRow(message: message)
                 }
@@ -437,7 +461,7 @@ import SwiftUI
             // `PackCardView` itself is `private` to `PackGalleryView.swift` — a single-card
             // array is the only way to render exactly one card via the public
             // `PackGalleryView` API, never a second, parallel card-rendering path.
-            PackGalleryView(cards: [card], focusedTarget: $focusedTarget)
+            PackGalleryView(cards: [card], focusedTarget: $focusedTarget, language: .zhHans)
         }
     }
 
@@ -461,11 +485,13 @@ import SwiftUI
     struct HostIntegrationGalleryView: View {
         var body: some View {
             GallerySection(
-                title: "Host integrations (\(PreviewFixtures.hostIntegrationScenarios.count))"
+                title: "Host integrations · 2 languages (\(PreviewFixtures.hostIntegrationScenarios.count))"
             ) {
-                ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
-                    GalleryFrame(caption: "\(scenario.id) · \(scenario.title)") {
-                        HostIntegrationStateFrame(scenario: scenario)
+                ForEach(ClaudioAppLanguage.allCases) { language in
+                    ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
+                        GalleryFrame(caption: "\(language.selfName) · \(scenario.id) · \(scenario.title)") {
+                            HostIntegrationStateFrame(scenario: scenario, language: language)
+                        }
                     }
                 }
             }
@@ -475,8 +501,15 @@ import SwiftUI
     private struct HostIntegrationStateFrame: View {
         @StateObject private var model: IntegrationsWindowModel
         @StateObject private var focusCoordinator = IntegrationsWindowFocusCoordinator()
+        @StateObject private var languageStore: ClaudioLanguageStore
 
-        init(scenario: PreviewFixtures.HostIntegrationScenario) {
+        init(
+            scenario: PreviewFixtures.HostIntegrationScenario,
+            language: ClaudioAppLanguage
+        ) {
+            let languageStore = ClaudioLanguageStore(defaults: UserDefaults())
+            languageStore.setLanguage(language)
+            _languageStore = StateObject(wrappedValue: languageStore)
             let store = HostIntegrationPresentationStore(
                 state: scenario.state,
                 configurationSources: [
@@ -499,7 +532,8 @@ import SwiftUI
         var body: some View {
             IntegrationsWindowView(
                 model: model,
-                focusCoordinator: focusCoordinator)
+                focusCoordinator: focusCoordinator,
+                languageStore: languageStore)
                 .frame(width: 680, height: 640)
         }
     }

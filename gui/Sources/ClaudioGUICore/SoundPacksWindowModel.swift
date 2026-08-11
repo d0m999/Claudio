@@ -1,4 +1,5 @@
 import ClaudioCore
+import ClaudioLocalization
 import Combine
 import Foundation
 
@@ -36,6 +37,44 @@ public enum SoundPacksWindowStatusSeverity: Int, Sendable, Equatable {
     case notice
 }
 
+/// Semantic text for retained management-window feedback. The compatibility `String` accessors
+/// below intentionally resolve with the default language so existing core/announcement tests
+/// keep their source-language contract; SwiftUI and AppKit callers resolve the same stored value
+/// with the current app language instead of retaining a translated snapshot.
+public enum SoundPacksWindowStatusText: Sendable, Equatable {
+    case literal(String)
+    case localized(key: ClaudioL10nKey, arguments: [String], background: Bool)
+
+    public func resolve(language: ClaudioAppLanguage) -> String {
+        switch self {
+        case .literal(let value):
+            return value
+        case .localized(let key, let arguments, let background):
+            let l10n = ClaudioL10n(language: language)
+            let value = l10n.format(key, arguments: arguments)
+            guard background else { return value }
+            return l10n.text(.soundPacksStatusBackground) + value
+        }
+    }
+
+    public static func localized(
+        _ key: ClaudioL10nKey,
+        _ arguments: String...,
+        background: Bool = false
+    ) -> Self {
+        .localized(key: key, arguments: arguments, background: background)
+    }
+
+    public func asBackgroundOperation() -> Self {
+        switch self {
+        case .literal(let value):
+            return .literal("后台操作：" + value)
+        case .localized(let key, let arguments, _):
+            return .localized(key: key, arguments: arguments, background: true)
+        }
+    }
+}
+
 public enum SoundPacksWindowStatusKind: String, Sendable, Equatable, Hashable {
     case audio
     case factoryRestore
@@ -54,13 +93,65 @@ public struct SoundPacksWindowStatus: Identifiable, Sendable, Equatable {
     public let kind: SoundPacksWindowStatusKind
     public let severity: SoundPacksWindowStatusSeverity
     public let revision: Int
-    public let action: String
-    public let message: String
+    public let actionText: SoundPacksWindowStatusText
+    public let messageText: SoundPacksWindowStatusText
     public let packID: String?
     public let actionID: Int?
     public let recovery: SoundPacksWindowStatusRecovery?
 
     public var id: Int { revision }
+
+    public var action: String { actionText.resolve(language: .zhHans) }
+    public var message: String { messageText.resolve(language: .zhHans) }
+
+    public func action(language: ClaudioAppLanguage) -> String {
+        actionText.resolve(language: language)
+    }
+
+    public func message(language: ClaudioAppLanguage) -> String {
+        messageText.resolve(language: language)
+    }
+
+    public init(
+        kind: SoundPacksWindowStatusKind,
+        severity: SoundPacksWindowStatusSeverity,
+        revision: Int,
+        action: String,
+        message: String,
+        packID: String? = nil,
+        actionID: Int? = nil,
+        recovery: SoundPacksWindowStatusRecovery? = nil
+    ) {
+        self.init(
+            kind: kind,
+            severity: severity,
+            revision: revision,
+            actionText: .literal(action),
+            messageText: .literal(message),
+            packID: packID,
+            actionID: actionID,
+            recovery: recovery)
+    }
+
+    public init(
+        kind: SoundPacksWindowStatusKind,
+        severity: SoundPacksWindowStatusSeverity,
+        revision: Int,
+        actionText: SoundPacksWindowStatusText,
+        messageText: SoundPacksWindowStatusText,
+        packID: String? = nil,
+        actionID: Int? = nil,
+        recovery: SoundPacksWindowStatusRecovery? = nil
+    ) {
+        self.kind = kind
+        self.severity = severity
+        self.revision = revision
+        self.actionText = actionText
+        self.messageText = messageText
+        self.packID = packID
+        self.actionID = actionID
+        self.recovery = recovery
+    }
 }
 
 public struct PackForkOutcome: Sendable, Equatable {
@@ -820,14 +911,16 @@ public final class SoundPacksWindowModel: ObservableObject {
         }
 
         if isLatestAction {
-            let backgroundPrefix = isStillInspectingTarget ? "" : "后台操作："
             if batch.rejected.isEmpty {
                 setWindowStatus(
                     kind: .audio,
                     severity: .notice,
-                    action: "添加音频",
-                    message: "\(backgroundPrefix)已向「\(targetName)」添加 \(batch.accepted.count) 个音频；"
-                        + "它们会先显示为未被使用，请从事件菜单分配。",
+                    actionText: .localized(.soundPacksStatusAddAudio),
+                    messageText: .localized(
+                        .soundPacksStatusAudioImported,
+                        targetName,
+                        "\(batch.accepted.count)",
+                        background: !isStillInspectingTarget),
                     packID: isStillInspectingTarget ? expectedPackID : nil,
                     actionID: actionRevision)
             } else {
@@ -835,14 +928,20 @@ public final class SoundPacksWindowModel: ObservableObject {
                     "\($0.sourceFileName)：\($0.reason.message)"
                 }.joined(separator: "；")
                 let message =
-                    "\(backgroundPrefix)「\(targetName)」已导入 \(batch.accepted.count) 个，"
+                    "「\(targetName)」已导入 \(batch.accepted.count) 个，"
                     + "另有 \(batch.rejected.count) 个未导入：\(rejectionDetails)"
                 audioActionError = .importRejected(message: message)
                 setWindowStatus(
                     kind: .audio,
                     severity: .failure,
-                    action: "添加音频",
-                    message: message,
+                    actionText: .localized(.soundPacksStatusAddAudio),
+                    messageText: .localized(
+                        .soundPacksStatusAudioPartial,
+                        targetName,
+                        "\(batch.accepted.count)",
+                        "\(batch.rejected.count)",
+                        rejectionDetails,
+                        background: !isStillInspectingTarget),
                     packID: isStillInspectingTarget ? expectedPackID : nil,
                     actionID: actionRevision)
             }
@@ -936,8 +1035,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             setWindowStatus(
                 kind: .starredPacks,
                 severity: .failure,
-                action: "更新星标",
-                message: soundPacksWindowStarredPacksFailureReason(error))
+                actionText: .localized(.soundPacksStatusUpdateStars),
+                messageText: .literal(soundPacksWindowStarredPacksFailureReason(error)))
             completeSynchronousWrite(.failed)
         }
         return result
@@ -1484,23 +1583,20 @@ public final class SoundPacksWindowModel: ObservableObject {
     }
 
     private func publishFactoryBatchRestoreStatus() {
-        let retainedSuccessNotice: String
-        if factoryBatchRetainedSalvages.isEmpty {
-            retainedSuccessNotice = ""
-        } else {
-            retainedSuccessNotice =
-                " 恢复前的内容已原样搬到 "
-                + factoryBatchRetainedSalvages.map(\.movedTo).joined(separator: "；")
-                + "；一个文件都没删。"
-        }
+        let retainedSalvagePaths = factoryBatchRetainedSalvages
+            .map(\.movedTo)
+            .joined(separator: "；")
         if factoryBatchRestoreFailures.isEmpty {
             setWindowStatus(
                 kind: .factoryBatchRestore,
                 severity: .notice,
-                action: "恢复内置声音包",
-                message:
-                    "已恢复 \(factoryBatchRestoredCount) 个内置声音包。"
-                    + retainedSuccessNotice)
+                actionText: .localized(.soundPacksStatusRestoreBuiltins),
+                messageText: factoryBatchRetainedSalvages.isEmpty
+                    ? .localized(.soundPacksStatusBatchRestored, "\(factoryBatchRestoredCount)")
+                    : .localized(
+                        .soundPacksStatusBatchRestoredWithSalvage,
+                        "\(factoryBatchRestoredCount)",
+                        retainedSalvagePaths))
             return
         }
 
@@ -1513,11 +1609,19 @@ public final class SoundPacksWindowModel: ObservableObject {
         setWindowStatus(
             kind: .factoryBatchRestore,
             severity: .failure,
-            action: "恢复内置声音包",
-            message:
-                "已恢复 \(factoryBatchRestoredCount) 个；"
-                + "\(factoryBatchRestoreFailures.count) 个失败：\(details)"
-                + retainedSuccessNotice,
+            actionText: .localized(.soundPacksStatusRestoreBuiltins),
+            messageText: factoryBatchRetainedSalvages.isEmpty
+                ? .localized(
+                    .soundPacksStatusBatchPartial,
+                    "\(factoryBatchRestoredCount)",
+                    "\(factoryBatchRestoreFailures.count)",
+                    details)
+                : .localized(
+                    .soundPacksStatusBatchPartialWithSalvage,
+                    "\(factoryBatchRestoredCount)",
+                    "\(factoryBatchRestoreFailures.count)",
+                    details,
+                    retainedSalvagePaths),
             recovery: .retryFactoryRestores(
                 packIDs: factoryBatchRestoreFailures.map(\.packID)))
     }
@@ -1567,8 +1671,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             setWindowStatus(
                 kind: .audio,
                 severity: .failure,
-                action: "音频操作",
-                message: error.message,
+                actionText: .localized(.soundPacksStatusAddAudio),
+                messageText: .literal(error.message),
                 packID: selectedPackID)
             completeSynchronousWrite(.failed)
             if refreshAfterFailure, let invalidatingPackID {
@@ -1601,11 +1705,21 @@ public final class SoundPacksWindowModel: ObservableObject {
             // clears old pack-scoped status when that changes selection, so publish the success
             // notice after the reload to keep the new outcome visible.
             factoryRestoreNotice = visibleOutcome
+            let retainedSalvagePaths = visibleOutcome.retainedSalvages
+                .map(\.movedTo)
+                .joined(separator: "；")
             setWindowStatus(
                 kind: .factoryRestore,
                 severity: .notice,
-                action: "恢复出厂声音",
-                message: factoryPackRestoreNoticeMessage(visibleOutcome),
+                actionText: .localized(.soundPacksStatusRestoreFactory),
+                messageText: visibleOutcome.retainedSalvages.isEmpty
+                    ? .localized(
+                        .soundPacksStatusFactoryRestored,
+                        visibleOutcome.restoredPackID)
+                    : .localized(
+                        .soundPacksStatusFactoryRestoredWithSalvage,
+                        visibleOutcome.restoredPackID,
+                        retainedSalvagePaths),
                 packID: visibleOutcome.restoredPackID)
             return .success(visibleOutcome)
         case .failure(let error):
@@ -1632,8 +1746,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             setWindowStatus(
                 kind: .factoryRestore,
                 severity: .failure,
-                action: "恢复出厂声音",
-                message: visibleError.message,
+                actionText: .localized(.soundPacksStatusRestoreFactory),
+                messageText: .literal(visibleError.message),
                 recovery: factoryRestoreRetryPackID.map {
                     .retryFactoryRestores(packIDs: [$0])
                 })
@@ -1659,8 +1773,10 @@ public final class SoundPacksWindowModel: ObservableObject {
             setWindowStatus(
                 kind: .packFork,
                 severity: .notice,
-                action: "复制为我的包",
-                message: packForkNoticeMessage(outcome),
+                actionText: .localized(.soundPacksStatusCopyPack),
+                messageText: .localized(
+                    .soundPacksStatusPackCopied,
+                    outcome.displayName),
                 packID: outcome.newPackID)
         case .failure(let error):
             packForkNotice = nil
@@ -1668,8 +1784,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             setWindowStatus(
                 kind: .packFork,
                 severity: .failure,
-                action: "复制为我的包",
-                message: error.message)
+                actionText: .localized(.soundPacksStatusCopyPack),
+                messageText: .literal(error.message))
             if publishCompletion { completeSynchronousWrite(.failed) }
         }
         return result
@@ -1685,16 +1801,18 @@ public final class SoundPacksWindowModel: ObservableObject {
             setWindowStatus(
                 kind: .packUse,
                 severity: .notice,
-                action: "用这个包",
-                message: "现在使用「\(displayName(for: packID))」。星标列表没有改变。",
+                actionText: .localized(.soundPacksStatusUsePack),
+                messageText: .localized(
+                    .soundPacksStatusPackUsed,
+                    displayName(for: packID)),
                 packID: packID)
         case .failure(let error):
             packUseActionError = error
             setWindowStatus(
                 kind: .packUse,
                 severity: .failure,
-                action: "用这个包",
-                message: error.message,
+                actionText: .localized(.soundPacksStatusUsePack),
+                messageText: .literal(error.message),
                 packID: selectedPackID)
             completeSynchronousWrite(.failed)
         }
@@ -1715,13 +1833,32 @@ public final class SoundPacksWindowModel: ObservableObject {
         actionID: Int? = nil,
         recovery: SoundPacksWindowStatusRecovery? = nil
     ) {
+        setWindowStatus(
+            kind: kind,
+            severity: severity,
+            actionText: .literal(action),
+            messageText: .literal(message),
+            packID: packID,
+            actionID: actionID,
+            recovery: recovery)
+    }
+
+    private func setWindowStatus(
+        kind: SoundPacksWindowStatusKind,
+        severity: SoundPacksWindowStatusSeverity,
+        actionText: SoundPacksWindowStatusText,
+        messageText: SoundPacksWindowStatusText,
+        packID: String? = nil,
+        actionID: Int? = nil,
+        recovery: SoundPacksWindowStatusRecovery? = nil
+    ) {
         statusRevision += 1
         statusByKind[kind] = SoundPacksWindowStatus(
             kind: kind,
             severity: severity,
             revision: statusRevision,
-            action: action,
-            message: message,
+            actionText: actionText,
+            messageText: messageText,
             packID: packID,
             actionID: actionID,
             recovery: recovery)
@@ -1742,16 +1879,12 @@ public final class SoundPacksWindowModel: ObservableObject {
             clearWindowStatus(.audio)
             return
         }
-        let message =
-            status.message.hasPrefix("后台操作：")
-            ? status.message
-            : "后台操作：" + status.message
         statusByKind[.audio] = SoundPacksWindowStatus(
             kind: status.kind,
             severity: status.severity,
             revision: status.revision,
-            action: status.action,
-            message: message,
+            actionText: status.actionText,
+            messageText: status.messageText.asBackgroundOperation(),
             packID: nil,
             actionID: status.actionID,
             recovery: status.recovery)

@@ -1,4 +1,5 @@
 import ClaudioGUICore
+import ClaudioLocalization
 import SwiftUI
 
 /// The onboarding panel (ENGINEERING.md T7): renders whichever ``OnboardingState`` the
@@ -15,6 +16,7 @@ import SwiftUI
 /// decision stranded inside SwiftUI, the exact shape T16 修复⑥ already sank out of a view once.
 public struct OnboardingView: View {
     @ObservedObject private var viewModel: OnboardingViewModel
+    private let language: ClaudioAppLanguage
     @Environment(\.colorScheme) private var colorScheme
     /// T17c：in-flight spinner 是这棵视图树里唯一的动画，必须 gate 住「减弱动态效果」——
     /// 见 ``PanelView`` 的 reduced-motion 段（那条绊线正是被 T17 踩响的）。
@@ -31,8 +33,13 @@ public struct OnboardingView: View {
     /// (no default) since `PanelView` is this view's only real call site.
     private let focusedTarget: FocusState<PanelFocusTarget?>.Binding
 
-    public init(viewModel: OnboardingViewModel, focusedTarget: FocusState<PanelFocusTarget?>.Binding) {
+    public init(
+        viewModel: OnboardingViewModel,
+        language: ClaudioAppLanguage = .zhHans,
+        focusedTarget: FocusState<PanelFocusTarget?>.Binding
+    ) {
         self.viewModel = viewModel
+        self.language = language
         self.focusedTarget = focusedTarget
     }
 
@@ -64,11 +71,11 @@ public struct OnboardingView: View {
     private var header: some View {
         PanelHeader(
             showsTakenOverDot: viewModel.state.showsHeaderTakenOverDot,
-            accessibilityLabel: PanelHeader.baseLabel)
+            accessibilityLabel: ClaudioL10n(language: language).text(.panelBaseLabel))
     }
 
     private var card: some View {
-        let copy = viewModel.copy
+        let copy = localizedOnboardingCopy(for: viewModel.state, language: language)
         let accent = stateAccentColor(viewModel.state.accent, colorScheme)
         let primaryIntent = onboardingPrimaryIntent(for: viewModel.state)
         let secondaryIntent = onboardingSecondaryIntent(for: viewModel.state)
@@ -107,8 +114,13 @@ public struct OnboardingView: View {
             // 都在位）—— 那条失败于是一个像素都没有。见
             // ``onboardingVisibleFailure(actionState:)`` 的完整推导。
             if let failure = onboardingVisibleFailure(actionState: viewModel.actionState) {
+                let failureMessage = localizedOnboardingActionFailureMessage(
+                    action: failure.action,
+                    message: failure.message,
+                    language: language)
                 ActionFailureRow(
-                    message: failure.message, detail: failure.detail,
+                    message: failureMessage, detail: failure.detail,
+                    language: language,
                     isShowingDetail: viewModel.isShowingDetail,
                     showsDetailToggle: onboardingShowsFailureDetailToggle(
                         state: viewModel.state, actionState: viewModel.actionState),
@@ -124,7 +136,8 @@ public struct OnboardingView: View {
             // 不是这张卡。**但它仍然必须画在这里**：正是「我推理出这个格子不可达，所以不画它」这句话，
             // 在 T17c 里造出了两个无人认领的格子。两边都无条件画，「不可达」就不需要任何人去证明。
             ForEach(Array(onboardingVisibleNotices(actionState: viewModel.actionState).enumerated()), id: \.offset) { _, notice in
-                ActionNoticeRow(message: notice.message)
+                ActionNoticeRow(
+                    message: localizedSetupNoticeMessage(notice, language: language))
             }
 
             if let primaryTitle = copy.primaryActionTitle {
@@ -199,7 +212,7 @@ public struct OnboardingView: View {
 
     private func runningTitle(for intent: OnboardingActionIntent?) -> String? {
         guard let action = intent?.diskAction else { return nil }
-        return onboardingActionRunningTitle(action)
+        return localizedOnboardingActionRunningTitle(action, language: language)
     }
 
     private func detailText(_ detail: String) -> some View {
