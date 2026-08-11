@@ -1,4 +1,5 @@
 import ClaudioCore
+import ClaudioLocalization
 import Combine
 import Foundation
 
@@ -393,56 +394,72 @@ public struct SoundPacksWindowAnnouncementFacts: Sendable, Equatable {
 /// write failures.
 public func soundPacksWindowAnnouncement(
     _ moment: SoundPacksWindowAnnouncementMoment,
-    facts: SoundPacksWindowAnnouncementFacts
+    facts: SoundPacksWindowAnnouncementFacts,
+    language: ClaudioAppLanguage = .zhHans
 ) -> String {
+    let l10n = ClaudioL10n(language: language)
     switch moment {
     case .windowOpened:
         switch facts.libraryPresentationState {
         case .loading:
-            return "声音包管理窗口。正在读取声音包。"
+            return l10n.text(.soundPacksAnnouncementWindowLoading)
         case .loadFailed(let reason):
-            return "声音包管理窗口。\(libraryFailureAnnouncement(reason: reason, refresh: false))"
+            return l10n.format(
+                .soundPacksAnnouncementWindowFailure,
+                libraryFailureAnnouncement(reason: reason, refresh: false, language: language))
         case .refreshFailed(let reason):
-            return "声音包管理窗口。\(libraryFailureAnnouncement(reason: reason, refresh: true))"
+            return l10n.format(
+                .soundPacksAnnouncementWindowFailure,
+                libraryFailureAnnouncement(reason: reason, refresh: true, language: language))
         case .ready, .refreshing:
             break
         }
         guard facts.packCount > 0 else {
-            return "声音包管理窗口。没有可管理的声音包。"
+            return l10n.text(.soundPacksAnnouncementWindowEmpty)
         }
         if let selectedPackName = facts.selectedPackName {
-            return "声音包管理窗口。共 \(facts.packCount) 个声音包。正在检查「\(selectedPackName)」。"
+            return l10n.format(
+                .soundPacksAnnouncementWindowSelected,
+                "\(facts.packCount)",
+                selectedPackName)
         }
-        return "声音包管理窗口。共 \(facts.packCount) 个声音包。尚未选择要检查的声音包。"
+        return l10n.format(.soundPacksAnnouncementWindowUnselected, "\(facts.packCount)")
     case .libraryStateChanged:
         switch facts.libraryPresentationState {
         case .loading:
-            return "正在读取声音包。"
+            return l10n.text(.soundPacksAnnouncementLibraryLoading)
         case .refreshing:
-            return "正在后台刷新声音包；当前结果仍可使用。"
+            return l10n.text(.soundPacksAnnouncementLibraryRefreshing)
         case .loadFailed(let reason):
-            return libraryFailureAnnouncement(reason: reason, refresh: false)
+            return libraryFailureAnnouncement(reason: reason, refresh: false, language: language)
         case .refreshFailed(let reason):
-            return libraryFailureAnnouncement(reason: reason, refresh: true)
+            return libraryFailureAnnouncement(reason: reason, refresh: true, language: language)
         case .ready:
             if facts.packCount == 0 {
-                return "声音包读取完成。没有可管理的声音包。"
+                return l10n.text(.soundPacksAnnouncementLibraryReadyEmpty)
             }
-            return "声音包读取完成。共 \(facts.packCount) 个声音包。"
+            return l10n.format(.soundPacksAnnouncementLibraryReadyCount, "\(facts.packCount)")
         }
     case .selectionChanged:
         guard let selectedPackName = facts.selectedPackName else {
-            return "尚未选择要检查的声音包。"
+            return l10n.text(.soundPacksAnnouncementSelectionNone)
         }
-        return "正在检查「\(selectedPackName)」。"
+        return l10n.format(.soundPacksAnnouncementSelectionSelected, selectedPackName)
     case .writeSucceeded(let message):
         return message
     case .writeFailed(let action, let reason):
-        return soundPacksWindowFailureAccessibilityLabel(action: action, reason: reason)
+        return localizedSoundPacksFailureAccessibilityLabel(
+            action: action,
+            reason: reason,
+            language: language)
     }
 }
 
-private func libraryFailureAnnouncement(reason: String, refresh: Bool) -> String {
+private func libraryFailureAnnouncement(
+    reason: String,
+    refresh: Bool,
+    language: ClaudioAppLanguage
+) -> String {
     let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
     let normalizedReason: String
     if trimmed.last.map({ "。！？!?".contains($0) }) == true {
@@ -450,8 +467,9 @@ private func libraryFailureAnnouncement(reason: String, refresh: Bool) -> String
     } else {
         normalizedReason = trimmed
     }
+    let l10n = ClaudioL10n(language: language)
     if refresh {
-        return "刷新声音包失败，正在显示上次结果：\(normalizedReason)。可以重试。"
+        return l10n.format(.soundPacksAnnouncementLibraryRefreshFailed, normalizedReason)
     }
-    return "读取声音包失败：\(normalizedReason)。可以重试。"
+    return l10n.format(.soundPacksAnnouncementLibraryLoadFailed, normalizedReason)
 }

@@ -139,6 +139,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             SoundPacksWindowAccessibilityBridge.post(
                 .windowOpened,
                 facts: accessibilityFacts(),
+                language: languageStore.language,
                 window: presentedWindow)
         }
         if wasVisible, effectiveRoute != .overview {
@@ -239,6 +240,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                     SoundPacksWindowAccessibilityBridge.post(
                         .selectionChanged,
                         facts: self.accessibilityFacts(selectedPackID: selectedPackID),
+                        language: self.languageStore.language,
                         window: window)
                 }
             }
@@ -255,6 +257,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                         facts: self.accessibilityFacts(
                             selectedPackID: self.model.selectedPackID,
                             libraryPresentationState: libraryState),
+                        language: self.languageStore.language,
                         window: window)
                 }
             }
@@ -322,6 +325,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         SoundPacksWindowAccessibilityBridge.post(
             event,
             facts: accessibilityFacts(),
+            language: languageStore.language,
             window: window
         ) { [weak self] didPost in
             self?.statusAnnouncementTracker.finishAttempt(

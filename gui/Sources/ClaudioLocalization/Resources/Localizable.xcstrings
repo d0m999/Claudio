@@ -1516,6 +1516,210 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@失败：%@" } }
       }
     },
+    "sound-packs.announcement.library.load-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not load sound packs: %@. You can try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "读取声音包失败：%@。可以重试。" } }
+      }
+    },
+    "sound-packs.announcement.library.loading" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Loading sound packs." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在读取声音包。" } }
+      }
+    },
+    "sound-packs.announcement.library.ready.count" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound packs loaded. %@ sound packs." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包读取完成。共 %@ 个声音包。" } }
+      }
+    },
+    "sound-packs.announcement.library.ready.empty" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound packs loaded. No sound packs are available to manage." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包读取完成。没有可管理的声音包。" } }
+      }
+    },
+    "sound-packs.announcement.library.refresh-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not refresh sound packs; showing the previous results: %@. You can try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新声音包失败，正在显示上次结果：%@。可以重试。" } }
+      }
+    },
+    "sound-packs.announcement.library.refreshing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refreshing sound packs in the background; current results remain available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在后台刷新声音包；当前结果仍可使用。" } }
+      }
+    },
+    "sound-packs.announcement.selection.none" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound pack is selected for inspection." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "尚未选择要检查的声音包。" } }
+      }
+    },
+    "sound-packs.announcement.selection.selected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Inspecting “%@”." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在检查「%@」。" } }
+      }
+    },
+    "sound-packs.announcement.window.empty" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Packs window. No sound packs are available to manage." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包管理窗口。没有可管理的声音包。" } }
+      }
+    },
+    "sound-packs.announcement.window.failure" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Packs window. %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包管理窗口。%@" } }
+      }
+    },
+    "sound-packs.announcement.window.loading" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Packs window. Loading sound packs." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包管理窗口。正在读取声音包。" } }
+      }
+    },
+    "sound-packs.announcement.window.selected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Packs window. %@ sound packs. Inspecting “%@”." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包管理窗口。共 %@ 个声音包。正在检查「%@」。" } }
+      }
+    },
+    "sound-packs.announcement.window.unselected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Packs window. %@ sound packs. No sound pack is selected for inspection." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包管理窗口。共 %@ 个声音包。尚未选择要检查的声音包。" } }
+      }
+    },
+    "sound-packs.audio-error.builtin-read-only" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in sound packs are read-only. Copy this as My Pack before editing audio." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置声音包是只读的；请先复制为我的包，再修改音频。" } }
+      }
+    },
+    "sound-packs.audio-error.no-selected-pack" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound pack is selected." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有选中的声音包。" } }
+      }
+    },
+    "sound-packs.audio-error.not-in-inventory" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "“%@” is no longer available in this sound pack. Refresh and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "「%@」已不在这个声音包的可用音频列表里，请刷新后重试。" } }
+      }
+    },
+    "sound-packs.audio-error.selection-changed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack being inspected changed. No files were deleted; select the current pack and try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在查看的声音包已经改变，未删除任何文件；请在当前包里重新选择。" } }
+      }
+    },
+    "sound-packs.bind-error.file-not-found" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Audio file “%@” is no longer in the sound pack." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "音频「%@」已不在声音包里。" } }
+      }
+    },
+    "sound-packs.bind-error.lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Another operation is using this sound pack. Try again shortly." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包正被另一个操作占用，请稍后重试。" } }
+      }
+    },
+    "sound-packs.bind-error.lock-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not acquire the sound pack lock (errno %@)." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法取得声音包锁（errno %@）。" } }
+      }
+    },
+    "sound-packs.bind-error.manifest-unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "manifest.json could not be read safely; assignment stopped: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "manifest.json 无法安全读取，分配已中止：%@" } }
+      }
+    },
+    "sound-packs.bind-error.pack-not-found" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack “%@” is no longer available, so audio cannot be assigned." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包「%@」已找不到，无法分配音频。" } }
+      }
+    },
+    "sound-packs.bind-error.unsafe-file-name" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This audio file name is unsafe and cannot be written to the sound pack manifest." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个音频文件名不安全，无法写入声音包清单。" } }
+      }
+    },
+    "sound-packs.bind-error.write-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not write the sound pack manifest: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法写入声音包清单：%@" } }
+      }
+    },
+    "sound-packs.delete-error.builtin-read-only" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in sound packs are read-only. Copy this as My Pack before deleting audio." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置声音包是只读的；请先复制为我的包，再删除音频。" } }
+      }
+    },
+    "sound-packs.delete-error.directory-unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack directory could not be read. No files were deleted: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包目录无法读取，未删除任何文件：%@" } }
+      }
+    },
+    "sound-packs.delete-error.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Permanent deletion failed: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "永久删除失败：%@" } }
+      }
+    },
+    "sound-packs.delete-error.file-not-found" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Audio file “%@” is no longer in the sound pack." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "音频「%@」已经不在声音包里。" } }
+      }
+    },
+    "sound-packs.delete-error.lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Another operation is using this sound pack. No files were deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包正被另一个操作占用，未删除任何文件。" } }
+      }
+    },
+    "sound-packs.delete-error.lock-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not acquire the sound pack lock (errno %@). No files were deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法取得声音包锁（errno %@），未删除任何文件。" } }
+      }
+    },
+    "sound-packs.delete-error.manifest-unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "manifest.json could not be read safely. No files were deleted: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "manifest.json 无法安全读取，未删除任何文件：%@" } }
+      }
+    },
+    "sound-packs.delete-error.pack-not-found" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack “%@” is no longer available. No files were deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包「%@」已找不到，未删除任何文件。" } }
+      }
+    },
+    "sound-packs.delete-error.still-referenced" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Audio file “%@” is still referenced by an event and cannot be deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "音频「%@」仍被事件引用，不能删除。" } }
+      }
+    },
+    "sound-packs.delete-error.unsafe-file-name" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This audio file name is unsafe. No files were deleted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个音频文件名不安全，未删除任何文件。" } }
+      }
+    },
     "sound-packs.inventory.pack-not-found" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack “%@” was not found." } },

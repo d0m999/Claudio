@@ -1,5 +1,6 @@
 import AppKit
 import ClaudioGUICore
+import ClaudioLocalization
 
 /// The standard window's single AppKit announcement exit.
 ///
@@ -11,6 +12,7 @@ enum SoundPacksWindowAccessibilityBridge {
     static func post(
         _ moment: SoundPacksWindowAnnouncementMoment,
         facts: SoundPacksWindowAnnouncementFacts,
+        language: ClaudioAppLanguage,
         window: NSWindow,
         completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
@@ -21,7 +23,10 @@ enum SoundPacksWindowAccessibilityBridge {
             priority = .medium
         }
 
-        let announcement = soundPacksWindowAnnouncement(moment, facts: facts)
+        let announcement = soundPacksWindowAnnouncement(
+            moment,
+            facts: facts,
+            language: language)
         let priorityValue = priority.rawValue
         DispatchQueue.main.async { [weak window] in
             MainActor.assumeIsolated {

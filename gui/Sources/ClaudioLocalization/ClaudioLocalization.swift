@@ -361,6 +361,40 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksEventBroken: Self = "sound-packs.event.broken"
     public static let soundPacksOperationFailed: Self = "sound-packs.operation.failed"
     public static let soundPacksActionFailed: Self = "sound-packs.action.failed"
+    public static let soundPacksAnnouncementWindowLoading: Self = "sound-packs.announcement.window.loading"
+    public static let soundPacksAnnouncementWindowFailure: Self = "sound-packs.announcement.window.failure"
+    public static let soundPacksAnnouncementWindowEmpty: Self = "sound-packs.announcement.window.empty"
+    public static let soundPacksAnnouncementWindowSelected: Self = "sound-packs.announcement.window.selected"
+    public static let soundPacksAnnouncementWindowUnselected: Self = "sound-packs.announcement.window.unselected"
+    public static let soundPacksAnnouncementLibraryLoading: Self = "sound-packs.announcement.library.loading"
+    public static let soundPacksAnnouncementLibraryRefreshing: Self = "sound-packs.announcement.library.refreshing"
+    public static let soundPacksAnnouncementLibraryLoadFailed: Self = "sound-packs.announcement.library.load-failed"
+    public static let soundPacksAnnouncementLibraryRefreshFailed: Self = "sound-packs.announcement.library.refresh-failed"
+    public static let soundPacksAnnouncementLibraryReadyEmpty: Self = "sound-packs.announcement.library.ready.empty"
+    public static let soundPacksAnnouncementLibraryReadyCount: Self = "sound-packs.announcement.library.ready.count"
+    public static let soundPacksAnnouncementSelectionNone: Self = "sound-packs.announcement.selection.none"
+    public static let soundPacksAnnouncementSelectionSelected: Self = "sound-packs.announcement.selection.selected"
+    public static let soundPacksAudioErrorNoSelectedPack: Self = "sound-packs.audio-error.no-selected-pack"
+    public static let soundPacksAudioErrorSelectionChanged: Self = "sound-packs.audio-error.selection-changed"
+    public static let soundPacksAudioErrorBuiltinReadOnly: Self = "sound-packs.audio-error.builtin-read-only"
+    public static let soundPacksAudioErrorNotInInventory: Self = "sound-packs.audio-error.not-in-inventory"
+    public static let soundPacksBindErrorPackNotFound: Self = "sound-packs.bind-error.pack-not-found"
+    public static let soundPacksBindErrorUnsafeFileName: Self = "sound-packs.bind-error.unsafe-file-name"
+    public static let soundPacksBindErrorFileNotFound: Self = "sound-packs.bind-error.file-not-found"
+    public static let soundPacksBindErrorManifestUnreadable: Self = "sound-packs.bind-error.manifest-unreadable"
+    public static let soundPacksBindErrorWriteFailed: Self = "sound-packs.bind-error.write-failed"
+    public static let soundPacksBindErrorLockBusy: Self = "sound-packs.bind-error.lock-busy"
+    public static let soundPacksBindErrorLockFailed: Self = "sound-packs.bind-error.lock-failed"
+    public static let soundPacksDeleteErrorBuiltinReadOnly: Self = "sound-packs.delete-error.builtin-read-only"
+    public static let soundPacksDeleteErrorPackNotFound: Self = "sound-packs.delete-error.pack-not-found"
+    public static let soundPacksDeleteErrorManifestUnreadable: Self = "sound-packs.delete-error.manifest-unreadable"
+    public static let soundPacksDeleteErrorDirectoryUnreadable: Self = "sound-packs.delete-error.directory-unreadable"
+    public static let soundPacksDeleteErrorUnsafeFileName: Self = "sound-packs.delete-error.unsafe-file-name"
+    public static let soundPacksDeleteErrorFileNotFound: Self = "sound-packs.delete-error.file-not-found"
+    public static let soundPacksDeleteErrorStillReferenced: Self = "sound-packs.delete-error.still-referenced"
+    public static let soundPacksDeleteErrorFailed: Self = "sound-packs.delete-error.failed"
+    public static let soundPacksDeleteErrorLockBusy: Self = "sound-packs.delete-error.lock-busy"
+    public static let soundPacksDeleteErrorLockFailed: Self = "sound-packs.delete-error.lock-failed"
     public static let soundPacksInventoryPackNotFound: Self = "sound-packs.inventory.pack-not-found"
     public static let soundPacksInventoryManifestUnreadable: Self = "sound-packs.inventory.manifest-unreadable"
     public static let soundPacksInventoryDirectoryUnreadable: Self = "sound-packs.inventory.directory-unreadable"
@@ -488,7 +522,24 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksPackPartial, .soundPacksPackBroken, .soundPacksPackModified,
         .soundPacksPanelVisible, .soundPacksPackNotUsed, .soundPacksEventPresent,
         .soundPacksEventUnmapped, .soundPacksEventBroken, .soundPacksOperationFailed,
-        .soundPacksActionFailed, .soundPacksInventoryPackNotFound,
+        .soundPacksActionFailed, .soundPacksAnnouncementWindowLoading,
+        .soundPacksAnnouncementWindowFailure, .soundPacksAnnouncementWindowEmpty,
+        .soundPacksAnnouncementWindowSelected, .soundPacksAnnouncementWindowUnselected,
+        .soundPacksAnnouncementLibraryLoading, .soundPacksAnnouncementLibraryRefreshing,
+        .soundPacksAnnouncementLibraryLoadFailed, .soundPacksAnnouncementLibraryRefreshFailed,
+        .soundPacksAnnouncementLibraryReadyEmpty, .soundPacksAnnouncementLibraryReadyCount,
+        .soundPacksAnnouncementSelectionNone, .soundPacksAnnouncementSelectionSelected,
+        .soundPacksAudioErrorNoSelectedPack, .soundPacksAudioErrorSelectionChanged,
+        .soundPacksAudioErrorBuiltinReadOnly, .soundPacksAudioErrorNotInInventory,
+        .soundPacksBindErrorPackNotFound, .soundPacksBindErrorUnsafeFileName,
+        .soundPacksBindErrorFileNotFound, .soundPacksBindErrorManifestUnreadable,
+        .soundPacksBindErrorWriteFailed, .soundPacksBindErrorLockBusy,
+        .soundPacksBindErrorLockFailed, .soundPacksDeleteErrorBuiltinReadOnly,
+        .soundPacksDeleteErrorPackNotFound, .soundPacksDeleteErrorManifestUnreadable,
+        .soundPacksDeleteErrorDirectoryUnreadable, .soundPacksDeleteErrorUnsafeFileName,
+        .soundPacksDeleteErrorFileNotFound, .soundPacksDeleteErrorStillReferenced,
+        .soundPacksDeleteErrorFailed, .soundPacksDeleteErrorLockBusy,
+        .soundPacksDeleteErrorLockFailed, .soundPacksInventoryPackNotFound,
         .soundPacksInventoryManifestUnreadable, .soundPacksInventoryDirectoryUnreadable,
         .soundPacksMissingCount, .soundPacksFileMissing, .soundPacksBuiltinCopyExplanation,
         .soundPacksBuiltinCopyHelp, .soundPacksCanChooseFile, .soundPacksStatusBackground,

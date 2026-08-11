@@ -1,5 +1,6 @@
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import Foundation
 
 @MainActor
@@ -399,6 +400,106 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             success == restoreNotice,
             "恢复成功的 VoiceOver 播报必须逐字复用可见 salvage 路径告知，不能另写一份会漂移的文案")
+
+        let englishOpened = soundPacksWindowAnnouncement(
+            .windowOpened,
+            facts: SoundPacksWindowAnnouncementFacts(
+                packCount: 2,
+                selectedPackName: "My Pack"),
+            language: .english)
+        expect(
+            englishOpened == "Sound Packs window. 2 sound packs. Inspecting “My Pack”.",
+            "英语窗口打开播报必须经 catalog 解析，实得 \(englishOpened)")
+
+        let englishLibraryFailure = soundPacksWindowAnnouncement(
+            .libraryStateChanged,
+            facts: SoundPacksWindowAnnouncementFacts(
+                packCount: 2,
+                selectedPackName: "My Pack",
+                libraryPresentationState: .refreshFailed(reason: "Disk unavailable。")),
+            language: .english)
+        expect(
+            englishLibraryFailure
+                == "Could not refresh sound packs; showing the previous results: Disk unavailable. You can try again.",
+            "英语库状态播报必须翻译模板但保留失败原因，实得 \(englishLibraryFailure)")
+
+        let englishSelection = soundPacksWindowAnnouncement(
+            .selectionChanged,
+            facts: SoundPacksWindowAnnouncementFacts(
+                packCount: 2,
+                selectedPackName: "Another Pack"),
+            language: .english)
+        expect(
+            englishSelection == "Inspecting “Another Pack”.",
+            "英语选择播报不能保留中文模板，实得 \(englishSelection)")
+
+        let englishFailure = soundPacksWindowAnnouncement(
+            .writeFailed(
+                action: "Add Audio",
+                reason: "Built-in sound packs are read-only."),
+            facts: SoundPacksWindowAnnouncementFacts(
+                packCount: 2,
+                selectedPackName: "Another Pack"),
+            language: .english)
+        expect(
+            englishFailure == "Add Audio failed: Built-in sound packs are read-only.",
+            "英语写入失败播报必须使用英文失败句式，不能与中文后缀混用，实得 \(englishFailure)")
+    }
+
+    suite("SoundPacksWindow a11y：音频操作错误保留为可随语言切换解析的语义文本") {
+        let applicationOwnedErrors: [SoundPacksWindowAudioActionError] = [
+            .noSelectedPack,
+            .selectionChanged,
+            .builtinReadOnly(packID: "builtin"),
+            .notInInventory(fileName: "missing.wav"),
+            .bind(.packNotFound(packID: "missing-pack")),
+            .bind(.unsafeFileName),
+            .bind(.fileNotFound(fileName: "missing.wav")),
+            .bind(.manifestUnreadable(reason: "bad json")),
+            .bind(.writeFailed(reason: "disk full")),
+            .bind(.lockBusy),
+            .bind(.lockFailed(errno: 5)),
+            .delete(.builtinReadOnly(packID: "builtin")),
+            .delete(.packNotFound(packID: "missing-pack")),
+            .delete(.manifestUnreadable(reason: "bad json")),
+            .delete(.directoryUnreadable(reason: "permission denied")),
+            .delete(.unsafeFileName),
+            .delete(.fileNotFound(fileName: "missing.wav")),
+            .delete(.stillReferenced(fileName: "used.wav")),
+            .delete(.deleteFailed(reason: "disk error")),
+            .delete(.lockBusy),
+            .delete(.lockFailed(errno: 5)),
+        ]
+        for error in applicationOwnedErrors {
+            guard case .localized(_, _, _) = error.statusText else {
+                expect(false, "应用自有音频失败不能在模型里固化为 literal：\(error)")
+                continue
+            }
+            expect(true, "应用自有音频失败保留了可本地化表示")
+        }
+
+        let readOnly = SoundPacksWindowAudioActionError.builtinReadOnly(packID: "builtin")
+        expect(
+            readOnly.message(language: .english)
+                == "Built-in sound packs are read-only. Copy this as My Pack before editing audio.",
+            "内置包只读错误在英语界面必须显示英文详情")
+        expect(
+            SoundPacksWindowAudioActionError.delete(.stillReferenced(fileName: "used.wav"))
+                .statusText.resolve(language: .english)
+                == "Audio file “used.wav” is still referenced by an event and cannot be deleted.",
+            "删除失败在英语界面必须显示英文详情")
+
+        let status = SoundPacksWindowStatus(
+            kind: .audio,
+            severity: .failure,
+            revision: 1,
+            actionText: .localized(.soundPacksStatusAddAudio),
+            messageText: readOnly.statusText)
+        expect(
+            status.action(language: .english) == "Add Audio"
+                && status.message(language: .english)
+                    == "Built-in sound packs are read-only. Copy this as My Pack before editing audio.",
+            "可见失败行必须从同一语义状态按当前语言解析")
     }
 
     suite("SoundPacksWindow a11y：新窗口 target 不得耦合任何面板专用 a11y 类型") {
@@ -517,13 +618,23 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             bridge.contains("DispatchQueue.main.async")
                 && bridge.contains("window.isKeyWindow")
-                && bridge.contains("NSAccessibility.post"),
+                && bridge.contains("NSAccessibility.post")
+                && bridge.contains("language: ClaudioAppLanguage")
+                && bridge.contains("soundPacksWindowAnnouncement(\n            moment,\n            facts: facts,\n            language: language)"),
             "播报必须延后一趟等窗口进入 AX 树，并在真正 post 前重新确认仍是 key window")
         expect(
             controller.contains("model.$windowStatuses")
                 && controller.contains("status.severity == .failure")
                 && controller.contains(
-                    ".writeSucceeded(message: status.message(language: languageStore.language))"),
+                    ".writeSucceeded(message: status.message(language: languageStore.language))")
+                && controller.contains(
+                    "facts: accessibilityFacts(),\n                language: languageStore.language,\n                window: presentedWindow")
+                && controller.contains(
+                    "facts: self.accessibilityFacts(selectedPackID: selectedPackID),\n                        language: self.languageStore.language,\n                        window: window")
+                && controller.contains(
+                    "libraryPresentationState: libraryState),\n                        language: self.languageStore.language,\n                        window: window")
+                && controller.contains(
+                    "facts: accessibilityFacts(),\n            language: languageStore.language,\n            window: window"),
             "恢复、音频、星标、复制和启用必须共用一个 revision 驱动的 VoiceOver 出口")
         expect(
             controller.contains("width: 760, height: 560")

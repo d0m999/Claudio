@@ -12,23 +12,36 @@ public enum SoundPacksWindowAudioActionError: Error, Sendable, Equatable {
     case delete(OrphanAudioDeleteError)
     case importRejected(message: String)
 
-    public var message: String {
+    /// Keep application-owned failures semantic until the retained window resolves them. This
+    /// lets an already-visible failure change language with the rest of the window rather than
+    /// preserving whichever language happened to be active when the write failed.
+    public var statusText: SoundPacksWindowStatusText {
         switch self {
         case .noSelectedPack:
-            return "没有选中的声音包。"
+            return .localized(.soundPacksAudioErrorNoSelectedPack)
         case .selectionChanged:
-            return "正在查看的声音包已经改变，未删除任何文件；请在当前包里重新选择。"
+            return .localized(.soundPacksAudioErrorSelectionChanged)
         case .builtinReadOnly:
-            return "内置声音包是只读的；请先复制为我的包，再修改音频。"
+            return .localized(.soundPacksAudioErrorBuiltinReadOnly)
         case .notInInventory(let fileName):
-            return "「\(fileName)」已不在这个声音包的可用音频列表里，请刷新后重试。"
+            return .localized(.soundPacksAudioErrorNotInInventory, fileName)
         case .bind(let error):
-            return soundPacksWindowBindErrorMessage(error)
+            return soundPacksWindowBindErrorText(error)
         case .delete(let error):
-            return soundPacksWindowDeleteErrorMessage(error)
+            return soundPacksWindowDeleteErrorText(error)
         case .importRejected(let message):
-            return message
+            // Import batches already retain their user-visible partial-result status with a
+            // catalog key. Keep an opaque external rejection literal rather than pretending it
+            // is an application-owned reason we can translate safely.
+            return .literal(message)
         }
+    }
+
+    /// Compatibility projection for callers that have not yet adopted explicit language input.
+    public var message: String { message(language: .zhHans) }
+
+    public func message(language: ClaudioAppLanguage) -> String {
+        statusText.resolve(language: language)
     }
 }
 
@@ -265,47 +278,51 @@ public struct FactoryPackBatchRestoreOutcome: Sendable, Equatable {
     }
 }
 
-private func soundPacksWindowBindErrorMessage(_ error: ManifestBindError) -> String {
+private func soundPacksWindowBindErrorText(
+    _ error: ManifestBindError
+) -> SoundPacksWindowStatusText {
     switch error {
     case .packNotFound(let packID):
-        return "声音包「\(packID)」已找不到，无法分配音频。"
+        return .localized(.soundPacksBindErrorPackNotFound, packID)
     case .unsafeFileName:
-        return "这个音频文件名不安全，无法写入声音包清单。"
+        return .localized(.soundPacksBindErrorUnsafeFileName)
     case .fileNotFound(let fileName):
-        return "音频「\(fileName)」已不在声音包里。"
+        return .localized(.soundPacksBindErrorFileNotFound, fileName)
     case .manifestUnreadable(let reason):
-        return "manifest.json 无法安全读取，分配已中止：\(reason)"
+        return .localized(.soundPacksBindErrorManifestUnreadable, reason)
     case .writeFailed(let reason):
-        return "无法写入声音包清单：\(reason)"
+        return .localized(.soundPacksBindErrorWriteFailed, reason)
     case .lockBusy:
-        return "声音包正被另一个操作占用，请稍后重试。"
+        return .localized(.soundPacksBindErrorLockBusy)
     case .lockFailed(let errno):
-        return "无法取得声音包锁（errno \(errno)）。"
+        return .localized(.soundPacksBindErrorLockFailed, "\(errno)")
     }
 }
 
-private func soundPacksWindowDeleteErrorMessage(_ error: OrphanAudioDeleteError) -> String {
+private func soundPacksWindowDeleteErrorText(
+    _ error: OrphanAudioDeleteError
+) -> SoundPacksWindowStatusText {
     switch error {
     case .builtinReadOnly:
-        return "内置声音包是只读的；请先复制为我的包，再删除音频。"
+        return .localized(.soundPacksDeleteErrorBuiltinReadOnly)
     case .packNotFound(let packID):
-        return "声音包「\(packID)」已找不到，未删除任何文件。"
+        return .localized(.soundPacksDeleteErrorPackNotFound, packID)
     case .manifestUnreadable(let reason):
-        return "manifest.json 无法安全读取，未删除任何文件：\(reason)"
+        return .localized(.soundPacksDeleteErrorManifestUnreadable, reason)
     case .directoryUnreadable(let reason):
-        return "声音包目录无法读取，未删除任何文件：\(reason)"
+        return .localized(.soundPacksDeleteErrorDirectoryUnreadable, reason)
     case .unsafeFileName:
-        return "这个音频文件名不安全，未删除任何文件。"
+        return .localized(.soundPacksDeleteErrorUnsafeFileName)
     case .fileNotFound(let fileName):
-        return "音频「\(fileName)」已经不在声音包里。"
+        return .localized(.soundPacksDeleteErrorFileNotFound, fileName)
     case .stillReferenced(let fileName):
-        return "音频「\(fileName)」仍被事件引用，不能删除。"
+        return .localized(.soundPacksDeleteErrorStillReferenced, fileName)
     case .deleteFailed(let reason):
-        return "永久删除失败：\(reason)"
+        return .localized(.soundPacksDeleteErrorFailed, reason)
     case .lockBusy:
-        return "声音包正被另一个操作占用，未删除任何文件。"
+        return .localized(.soundPacksDeleteErrorLockBusy)
     case .lockFailed(let errno):
-        return "无法取得声音包锁（errno \(errno)），未删除任何文件。"
+        return .localized(.soundPacksDeleteErrorLockFailed, "\(errno)")
     }
 }
 
@@ -1672,7 +1689,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 kind: .audio,
                 severity: .failure,
                 actionText: .localized(.soundPacksStatusAddAudio),
-                messageText: .literal(error.message),
+                messageText: error.statusText,
                 packID: selectedPackID)
             completeSynchronousWrite(.failed)
             if refreshAfterFailure, let invalidatingPackID {
