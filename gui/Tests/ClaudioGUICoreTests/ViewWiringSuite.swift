@@ -2618,12 +2618,13 @@ func runViewWiringSuites() {
             "事件标题必须是可缩放的 12.5pt Rounded medium、最多两行并自然长高")
         expect(
             flat.contains("if adaptation.eventActionsMoveBelow")
-                && flat.contains("ZStack(alignment: .topTrailing)")
+                && flat.contains("ZStack(alignment: .trailing)")
                 && flat.contains("actionButtons .padding(.leading, 24 + identitySpacing)"),
-            "紧凑/标准/较大必须把动作覆盖在右上；仅最大档把动作移到标签下方")
+            "紧凑/标准/较大必须把动作放在整行右侧并垂直居中；仅最大档把动作移到标签下方")
 
         guard
             let identityBody = closureBody(after: "private var identityButton: some View", in: flat),
+            let statusBody = closureBody(after: "private var statusChips", in: flat),
             let indicatorBody = closureBody(
                 after: "private func hostIndicatorChip", in: flat)
         else {
@@ -2632,12 +2633,27 @@ func runViewWiringSuites() {
         }
         expect(
             identityBody.contains(
-                "HStack(alignment: .top, spacing: identitySpacing) { ClaudioEventGlyph(event: row.event) VStack")
-                && identityBody.contains("hostIndicatorGroup coverageChip")
+                "HStack(alignment: .center, spacing: identitySpacing) { ClaudioEventGlyph(event: row.event) VStack")
+                && identityBody.contains("statusChips")
+                && (identityBody.contains(
+                        ".padding(.trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)")
+                    || identityBody.contains(
+                        ".padding( .trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"))
                 && identityBody.contains(".frame(maxWidth: .infinity, alignment: .leading)")
                 && identityBody.contains(".contentShape(Rectangle())")
-                && !identityBody.contains(".lineLimit(1)"),
-            "同一身份按钮必须覆盖字形、完整双行标题、宿主/映射标签与剩余空白")
+                && !identityBody.contains(".lineLimit(1)")
+                && !identityBody.contains("HStack(alignment: .top, spacing: identitySpacing)")
+                && !identityBody.contains("minHeight: ClaudioTheme.Metrics.iconTarget"),
+            "同一身份按钮必须让字形相对完整文案居中，覆盖双行标题、宿主/映射标签与剩余空白")
+        expect(
+            !flat.contains("ZStack(alignment: .topTrailing)"),
+            "普通事件行不得回退为右上动作覆盖")
+        expect(
+            statusBody.contains("hostIndicatorGroup coverageChip")
+                && statusBody.contains(
+                    "if adaptation.rowWrapsToTwoLines && !adaptation.eventActionsMoveBelow")
+                && statusBody.contains("VStack(alignment: .leading, spacing: chipSpacing)"),
+            "较大字号必须把映射芯片放到宿主芯片下一行，并保留最大档横排")
         expect(
             flat.contains("private let hostIndicatorSize: CGFloat = 12")
                 && flat.contains("private let chipSpacing: CGFloat = 4")

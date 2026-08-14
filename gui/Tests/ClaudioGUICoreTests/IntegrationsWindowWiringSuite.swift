@@ -466,6 +466,7 @@ func runIntegrationsWindowWiringSuites() {
             expect(false, "缺少 Panel/EventRow 源")
             return
         }
+        let rowLayout = collapsingWhitespace(strippingComments(row).codeWithoutStringLiterals)
         expect(
             panel.contains("eventHostIndicatorPresentations(")
                 && panel.contains("matrix: hostIntegrations.content.matrix"),
@@ -485,12 +486,30 @@ func runIntegrationsWindowWiringSuites() {
                 && !row.contains("func eventDisplayName"),
             "EventRowView 必须直接复用 Event.displayName，禁止保留第二份中文 switch")
         expect(
-            row.contains("private let identitySpacing: CGFloat = 6")
-                && row.contains("HStack(alignment: .top, spacing: identitySpacing)")
-                && row.contains(".lineLimit(2)")
-                && row.contains(".fixedSize(horizontal: false, vertical: true)")
-                && row.contains("actionOverlayClearance"),
-            "事件身份区必须保留 6pt 字形间距、最多两行完整标题，并只为右上动作预留标题宽度")
+            rowLayout.contains("private let identitySpacing: CGFloat = 6")
+                && rowLayout.contains("HStack(alignment: .center, spacing: identitySpacing)")
+                && rowLayout.contains(".lineLimit(2)")
+                && rowLayout.contains(".fixedSize(horizontal: false, vertical: true)")
+                && rowLayout.contains("ZStack(alignment: .trailing)")
+                && (rowLayout.contains(
+                        ".padding(.trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)")
+                    || rowLayout.contains(
+                        ".padding( .trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"))
+                && !rowLayout.contains("ZStack(alignment: .topTrailing)")
+                && !rowLayout.contains("HStack(alignment: .top, spacing: identitySpacing)")
+                && !rowLayout.contains("minHeight: ClaudioTheme.Metrics.iconTarget"),
+            "事件身份区必须让字形相对完整文案居中、保留 6pt 间距与双行标题，并由文案栈预留动作区")
+        expect(
+            row.contains("private var statusChips")
+                && row.contains("if adaptation.rowWrapsToTwoLines && !adaptation.eventActionsMoveBelow")
+                && row.contains("VStack(alignment: .leading, spacing: chipSpacing)"),
+            "较大字号事件行必须把映射芯片下移，不能在 312pt 面板中固定横排溢出")
+        expect(
+            row.contains(".accessibilityValue(coverageAccessibilityValue)")
+                && row.contains("private var coverageAccessibilityValue")
+                && row.contains("case .unmapped, .broken:")
+                && row.contains("coverageHelp"),
+            "隐藏的映射芯片详情必须聚合进事件编辑入口的 VoiceOver value")
         expect(
             panel.contains("panelTypeSizeTier(for: interfaceTextSize)"),
             "Panel 必须复用可测试的四档字号映射，不能在 SwiftUI 里保留第二份 switch")

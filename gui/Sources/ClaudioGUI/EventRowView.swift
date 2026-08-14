@@ -95,9 +95,9 @@ public struct EventRowView: View {
                         .padding(.leading, 24 + identitySpacing)
                 }
             } else {
-                // Actions occupy only the title layer. The identity button remains the full row
-                // surface underneath, while the chips retain the entire second-line width.
-                ZStack(alignment: .topTrailing) {
+                // Center ordinary actions against the complete identity stack. The trailing
+                // clearance on that stack keeps both the title and chips clear of the overlay.
+                ZStack(alignment: .trailing) {
                     identityButton
                     actionButtons
                 }
@@ -111,7 +111,7 @@ public struct EventRowView: View {
 
     private var identityButton: some View {
         Button(action: onOpenEditor) {
-            HStack(alignment: .top, spacing: identitySpacing) {
+            HStack(alignment: .center, spacing: identitySpacing) {
                 ClaudioEventGlyph(event: row.event)
                 VStack(alignment: .leading, spacing: 6) {
                     Text(localizedEventName(row.event, language: language))
@@ -121,20 +121,14 @@ public struct EventRowView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .multilineTextAlignment(.leading)
                         .layoutPriority(1)
-                        .padding(
-                            .trailing,
-                            adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)
-                        .frame(
-                            maxWidth: .infinity,
-                            minHeight: ClaudioTheme.Metrics.iconTarget,
-                            alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
 
-                    HStack(spacing: chipSpacing) {
-                        hostIndicatorGroup
-                        coverageChip
-                    }
+                    statusChips
                     .accessibilityHidden(true)
                 }
+                .padding(
+                    .trailing,
+                    adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -144,13 +138,31 @@ public struct EventRowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .focused(focusedTarget, equals: .eventSound(row.event))
         .accessibilityLabel(identityAccessibilityLabel)
-        .accessibilityValue(coverageText)
+        .accessibilityValue(coverageAccessibilityValue)
         .accessibilityHint(l10n.text(.eventEditorHint))
         .accessibilityIdentifier("panel.event.\(row.event.rawValue).editor")
     }
 
     private var actionOverlayClearance: CGFloat {
         (ClaudioTheme.Metrics.iconTarget * 2) + 6
+    }
+
+    @ViewBuilder
+    private var statusChips: some View {
+        if adaptation.rowWrapsToTwoLines && !adaptation.eventActionsMoveBelow {
+            // `.large` maps to `.largest`: keep the 312pt panel, but give the mapping chip its
+            // own line so two host chips plus "Not configured"/"Needs repair" never overflow at
+            // `.xxLarge`. The maximum tier is wider and already moves actions below the row.
+            VStack(alignment: .leading, spacing: chipSpacing) {
+                hostIndicatorGroup
+                coverageChip
+            }
+        } else {
+            HStack(spacing: chipSpacing) {
+                hostIndicatorGroup
+                coverageChip
+            }
+        }
     }
 
     private var actionButtons: some View {
@@ -334,6 +346,16 @@ public struct EventRowView: View {
         case .present: l10n.text(.eventCoveragePresent)
         case .unmapped: l10n.text(.eventCoverageUnmapped)
         case .broken: l10n.text(.eventCoverageBroken)
+        }
+    }
+
+    private var coverageAccessibilityValue: String {
+        switch row.coverage {
+        case .present:
+            return coverageText
+        case .unmapped, .broken:
+            return [coverageText, coverageHelp]
+                .joined(separator: language == .english ? ", " : "，")
         }
     }
 
