@@ -287,15 +287,21 @@ public enum EventHostIndicatorState: Sendable, Equatable {
 public struct EventHostIndicatorPresentation: Identifiable, Sendable, Equatable {
     public var id: HostID { host }
     public let host: HostID
+    /// Short visual-only name for the event-row chip. Help and VoiceOver continue to resolve the
+    /// full localized host name from ``host`` rather than exposing this compact label.
+    public let compactDisplayName: String
     public let state: EventHostIndicatorState
     public let qualificationText: String?
 
     public init(
         host: HostID,
         state: EventHostIndicatorState,
+        compactDisplayName: String? = nil,
         qualificationText: String? = nil
     ) {
         self.host = host
+        self.compactDisplayName = compactDisplayName
+            ?? eventHostIndicatorCompactDisplayName(for: host)
         self.state = state
         self.qualificationText = qualificationText
     }
@@ -306,6 +312,15 @@ public struct EventHostIndicatorPresentation: Identifiable, Sendable, Equatable 
         [host.displayName, state.statusText, qualificationText]
             .compactMap { $0 }
             .joined(separator: "，")
+    }
+}
+
+/// Compact names are a presentation projection, not host-capability logic. The exhaustive switch
+/// ensures a newly supported host cannot silently inherit a misleading event-row label.
+public func eventHostIndicatorCompactDisplayName(for host: HostID) -> String {
+    switch host {
+    case .claudeCode: "Claude"
+    case .codex: "Codex"
     }
 }
 

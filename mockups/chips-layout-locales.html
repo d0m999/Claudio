@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claudio — C layout locale and type-scale mockups</title>
+  <style>
+    :root {
+      --ink: #302b27;
+      --muted: #766b60;
+      --panel: #fffcf7;
+      --line: #e6e0d8;
+      --clay: #c4633c;
+      --green: #2f9e50;
+      --blue: #1478d4;
+      --amber: #b97000;
+      --indigo: #5b59d6;
+      --soft-blue: #e5f0fc;
+      --soft-green: #e9f5eb;
+      --soft-amber: #f5ead6;
+      --soft-clay: #fae9e1;
+      --soft-indigo: #ecebfc;
+      --error: #e0453a;
+      --soft-error: rgba(224,69,58,.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      padding: 30px;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background:
+        linear-gradient(rgba(255,255,255,.16) 1px, transparent 1px) 0 0 / 100% 38px,
+        radial-gradient(circle at 18% 0%, rgba(255,255,255,.48), transparent 40%),
+        #d9c9a4;
+    }
+
+    .board-header,
+    .filter-bar,
+    .state-grid {
+      width: min(1120px, calc(100vw - 60px));
+      margin-inline: auto;
+    }
+
+    .board-header { margin-bottom: 18px; }
+    .kicker { color: var(--clay); font-size: 12px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+    h1 { margin: 7px 0 5px; font-size: clamp(25px, 3vw, 38px); letter-spacing: -.045em; }
+    .board-header p { max-width: 730px; margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+
+    .filter-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 7px;
+      margin-bottom: 22px;
+    }
+
+    .filter-label { margin-right: 3px; color: var(--muted); font-size: 12px; font-weight: 750; }
+    .filter-button {
+      padding: 7px 11px;
+      border: 1px solid rgba(118,107,96,.28);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(255,252,247,.6);
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .filter-button:hover,
+    .filter-button.active { border-color: var(--clay); color: var(--clay); background: #fff3eb; }
+    .filter-button:focus-visible { outline: 3px solid rgba(196,99,60,.24); outline-offset: 2px; }
+
+    .state-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(360px, 1fr));
+      gap: 24px;
+      align-items: start;
+    }
+
+    .state-card.is-hidden { display: none; }
+    .state-caption { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; min-height: 38px; padding: 0 3px 9px; }
+    .state-caption strong { font-size: 15px; }
+    .state-caption span { color: var(--muted); font-size: 11px; }
+
+    .panel {
+      --scale: 1;
+      width: 100%;
+      padding: 23px 21px 28px;
+      border: 1px solid rgba(115,101,84,.55);
+      border-radius: 29px;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.9), rgba(255,252,247,.95) 45%, rgba(255,249,241,.97)),
+        var(--panel);
+      box-shadow: 0 16px 34px rgba(76,62,40,.18), 0 2px 5px rgba(76,62,40,.1);
+    }
+
+    .panel.size-compact { --scale: .92; }
+    .panel.size-large { --scale: 1.13; }
+    .panel.size-maximum { --scale: 1.28; }
+
+    .topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+    .wordmark { display: inline-flex; align-items: center; height: 39px; color: #292522; font-size: 31px; font-weight: 700; letter-spacing: -2.2px; line-height: 1; }
+    .wordmark img { width: 39px; height: 39px; margin-left: -2px; }
+    .language-button { min-width: 69px; height: 39px; border: 0; border-radius: 13px; color: var(--clay); background: #fff4eb; font-size: 18px; font-weight: 750; }
+    .heading { margin-top: 12px; }
+    .heading h2 { margin: 0; font-size: calc(23px * var(--scale)); letter-spacing: -.04em; }
+    .heading p { margin: 5px 0 0; color: var(--muted); font-size: calc(15px * var(--scale)); font-weight: 600; }
+
+    .host-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 8px; margin-top: 18px; }
+    .host-card { min-height: 108px; padding: 11px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,253,249,.58); }
+    .host-card-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .host-card-title h3 { margin: 0; font-size: calc(15px * var(--scale)); white-space: nowrap; }
+    .status-dot { width: 13px; height: 13px; flex: 0 0 13px; border-radius: 50%; }
+    .status-dot.pending { background: #81776d; }
+    .status-dot.ready { background: var(--green); }
+    .host-readiness { margin: 9px 0 0; color: var(--muted); font-size: calc(12px * var(--scale)); font-weight: 700; }
+    .host-detail { margin: 5px 0 0; color: var(--muted); font-size: calc(11px * var(--scale)); line-height: 1.3; }
+
+    .section-title { margin: 19px 0 8px; color: var(--muted); font-size: calc(15px * var(--scale)); font-weight: 750; }
+
+    .event-row {
+      position: relative;
+      display: grid;
+      grid-template-columns: calc(31px * var(--scale)) minmax(0,1fr);
+      gap: 0 calc(9px * var(--scale));
+      align-items: start;
+      min-height: calc(73px * var(--scale));
+      padding: calc(10px * var(--scale)) 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .event-row:last-child { border-bottom: 0; }
+    .event-icon { display: grid; place-items: center; width: calc(31px * var(--scale)); height: calc(31px * var(--scale)); border-radius: calc(10px * var(--scale)); }
+    .event-icon svg { width: calc(20px * var(--scale)); height: calc(20px * var(--scale)); }
+    .event-icon.task { color: var(--blue); background: var(--soft-blue); }
+    .event-icon.complete { color: var(--green); background: var(--soft-green); }
+    .event-icon.interrupted { color: var(--amber); background: var(--soft-amber); }
+    .event-icon.response { color: var(--clay); background: var(--soft-clay); }
+    .event-icon.subtask { color: var(--indigo); background: var(--soft-indigo); }
+    .row-main { min-width: 0; }
+    .event-title { min-width: 0; min-height: calc(28px * var(--scale)); margin: 1px 0 0; padding-right: 62px; font-size: calc(15px * var(--scale)); line-height: 1.2; letter-spacing: -.02em; overflow-wrap: break-word; }
+    .chips { display: flex; flex-wrap: nowrap; gap: 4px; margin-top: 6px; }
+    .chip { display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: rgba(255,255,255,.48); font-size: calc(9px * var(--scale)); font-weight: 750; line-height: 1; white-space: nowrap; }
+    .chip.host.connected { border-color: transparent; background: color-mix(in srgb, var(--host-color) 12%, transparent); }
+    .chip.host.disconnected { border-color: var(--muted); background: transparent; }
+    .chip.coverage-present { background: rgba(255,255,255,.78); }
+    .chip.coverage-unmapped { border-style: dashed; border-color: var(--muted); background: transparent; }
+    .chip.coverage-broken { border-color: var(--error); color: var(--muted); background: var(--soft-error); }
+    .repair-icon { width: calc(10px * var(--scale)); height: calc(10px * var(--scale)); color: var(--error); }
+    .event-actions { position: absolute; top: calc(10px * var(--scale)); right: 0; display: inline-flex; align-items: center; gap: 6px; }
+    .icon-button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+    .icon-button:hover { color: var(--clay); }
+    .icon-button.mute { color: var(--clay); }
+    .icon-button:disabled { color: #aaa096; cursor: not-allowed; }
+    .icon-button svg { width: calc(18px * var(--scale)); height: calc(18px * var(--scale)); }
+
+    .size-maximum .host-grid { grid-template-columns: 1fr; }
+    .size-maximum .event-title { padding-right: 0; }
+    .size-maximum .event-actions { position: static; grid-column: 2; justify-content: flex-start; margin-top: calc(8px * var(--scale)); }
+
+    .volume { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 12px; margin-top: 13px; }
+    .volume label { font-size: calc(15px * var(--scale)); }
+    input[type="range"] { width: 100%; height: 4px; accent-color: var(--clay); }
+    .pack-title { margin-top: 18px; }
+    .pack-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 61px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.7); }
+    .pack-name { font-size: calc(15px * var(--scale)); font-weight: 750; white-space: nowrap; }
+    .pack-code { margin-left: 7px; color: var(--muted); font-family: ui-monospace, monospace; font-size: calc(11px * var(--scale)); }
+    .swatches { display: flex; gap: 4px; }
+    .swatch { width: calc(18px * var(--scale)); height: calc(9px * var(--scale)); border-radius: 999px; }
+    .swatch.blue { background: var(--blue); }
+    .swatch.green { background: var(--green); }
+    .swatch.amber { background: var(--amber); }
+    .swatch.clay { background: var(--clay); }
+    .swatch.indigo { background: var(--indigo); }
+
+    .host-icon { display: block; width: 12px; height: 12px; flex: 0 0 12px; color: var(--muted); background: currentColor; -webkit-mask: var(--host-icon) center / contain no-repeat; mask: var(--host-icon) center / contain no-repeat; }
+    .host-icon.claude { --host-icon: url("../assets/host-icons/claude.svg"); }
+    .host-icon.codex { --host-icon: url("../assets/host-icons/codex.svg"); }
+    .chip.host.connected .host-icon { color: var(--host-color); }
+
+    @media (max-width: 800px) {
+      body { padding: 20px 14px; }
+      .board-header, .filter-bar, .state-grid { width: 100%; }
+      .state-grid { grid-template-columns: minmax(340px, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <header class="board-header">
+    <div class="kicker">Claudio · C layout</div>
+    <h1>Localization &amp; type-scale mockups</h1>
+    <p>同一套“小标签布局”分别展示 English / 简体中文、四档字号，并在每个面板混排 Mapped / Not configured / Needs repair。最大字号会把操作控件移到标签下方。</p>
+  </header>
+
+  <nav class="filter-bar" aria-label="Mockup filters">
+    <span class="filter-label">显示：</span>
+    <button class="filter-button active" data-filter="all">全部</button>
+    <button class="filter-button" data-filter="en">English</button>
+    <button class="filter-button" data-filter="zh">简体中文</button>
+    <button class="filter-button" data-filter="compact">Compact</button>
+    <button class="filter-button" data-filter="standard">Standard</button>
+    <button class="filter-button" data-filter="large">Large</button>
+    <button class="filter-button" data-filter="maximum">Maximum</button>
+  </nav>
+
+  <main class="state-grid" aria-label="C layout mockup states"></main>
+
+  <script>
+    const events = [
+      { en: 'Task start', zh: '任务开始', kind: 'task', icon: 'task' },
+      { en: 'Turn complete', zh: '本轮结束', kind: 'complete', icon: 'complete' },
+      { en: 'Execution interrupted', zh: '执行中断', kind: 'interrupted', icon: 'interrupted' },
+      { en: 'Needs response', zh: '待响应', kind: 'response', icon: 'response' },
+      { en: 'Subtask complete', zh: '子任务结束', kind: 'subtask', icon: 'subtask' }
+    ];
+
+    const copy = {
+      en: {
+        locale: 'English',
+        button: 'Aa⌄',
+        count: '5 audible events',
+        section: '皮卡丘 · Events',
+        readinessA: '5/5 configured',
+        readinessB: '4/5 ready',
+        detail: 'Submit a prompt to Claude Code to confirm the connection',
+        mapped: 'Mapped',
+        unmapped: 'Not configured',
+        broken: 'Needs repair',
+        volume: 'Master volume',
+        packs: 'Sound Packs',
+        preview: 'Preview',
+        mute: 'Mute',
+        unmute: 'Unmute',
+        pack: '极简铃音'
+      },
+      zh: {
+        locale: '简体中文',
+        button: '中⌄',
+        count: '5 个可听事件',
+        section: '皮卡丘 · 事件',
+        readinessA: '5/5 已配置',
+        readinessB: '4/5 就绪',
+        detail: '提交一次提示词给 Claude Code 以确认连接',
+        mapped: '已映射',
+        unmapped: '未配置',
+        broken: '需修复',
+        volume: '主音量',
+        packs: '声音包',
+        preview: '试听',
+        mute: '静音',
+        unmute: '取消静音',
+        pack: '极简铃音'
+      }
+    };
+
+    const sizeLabel = { compact: 'Compact', standard: 'Standard', large: 'Large', maximum: 'Maximum' };
+    const sizeNote = {
+      compact: '紧凑字号 · 右上操作 + 完整标签',
+      standard: '默认字号 · 最多两行标题 + 标签',
+      large: '较大字号 · 行高随内容增长',
+      maximum: '最大字号 · 操作控件下移'
+    };
+
+    const iconSVG = {
+      task: '<svg viewBox="0 0 24 24" fill="none"><path d="m4 11 15-7-6 16-2.2-6.8L4 11Z" fill="currentColor"/><path d="m10.8 13.2 8.2-9.2" stroke="white" stroke-width="1.2" opacity=".8"/></svg>',
+      complete: '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="m8 12 2.5 2.5L16.5 9" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      interrupted: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"/><rect x="14" y="4" width="5" height="16" rx="1.5"/></svg>',
+      response: '<svg viewBox="0 0 24 24" fill="none"><path d="M6 17h12l-1.2-2.1V10a4.8 4.8 0 0 0-9.6 0v4.9L6 17Z" fill="currentColor"/><path d="M10 19h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="17.5" cy="7" r="2.2" fill="currentColor"/></svg>',
+      subtask: '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="m8 12 2.5 2.5L16.5 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    };
+
+    const hostIcon = (host) => `<span class="host-icon ${host}" aria-hidden="true"></span>`;
+    const eventIcon = (event) => `<span class="event-icon ${event.kind}" aria-hidden="true">${iconSVG[event.icon]}</span>`;
+    const repairIcon = '<svg class="repair-icon" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1 11 10H1L6 1Z" fill="currentColor"/><path d="M6 4v3" stroke="white" stroke-width="1.2" stroke-linecap="round"/><circle cx="6" cy="8.6" r=".7" fill="white"/></svg>';
+
+    function actions(event, text, coverage) {
+      const unavailable = coverage !== 'present';
+      return `<div class="event-actions">
+        <button class="icon-button play" type="button" ${unavailable ? 'disabled' : ''} aria-label="${text.preview} ${event[text.localeKey]}">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>
+        </button>
+        <button class="icon-button mute" type="button" aria-label="${text.mute} ${event[text.localeKey]}">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 10h4l5-4v12l-5-4H4v-4Z" fill="currentColor"/><path d="m17 9 4 6m0-6-4 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>`;
+    }
+
+    function panelMarkup(locale, size) {
+      const text = { ...copy[locale], localeKey: locale };
+      const coverageOrder = ['present', 'unmapped', 'broken', 'present', 'unmapped'];
+      const eventRows = events.map((event, index) => {
+        const coverage = coverageOrder[index];
+        const claudeState = coverage === 'unmapped' ? 'disconnected' : 'connected';
+        const codexState = coverage === 'present' ? 'connected' : 'disconnected';
+        const statusText = coverage === 'present' ? text.mapped : coverage === 'unmapped' ? text.unmapped : text.broken;
+        return `<article class="event-row">
+        ${eventIcon(event)}
+        <div class="row-main">
+          <h3 class="event-title">${event[locale]}</h3>
+          <div class="chips">
+            <span class="chip host ${claudeState}" style="--host-color:#bd6549" title="Claude Code · ${claudeState}">${hostIcon('claude')}Claude</span>
+            <span class="chip host ${codexState}" style="--host-color:#318a50" title="Codex · ${codexState}">${hostIcon('codex')}Codex</span>
+            <span class="chip coverage-${coverage}">${coverage === 'broken' ? repairIcon : ''}${statusText}</span>
+          </div>
+        </div>
+        ${actions(event, text, coverage)}
+      </article>`;
+      }).join('');
+
+      return `<div class="panel size-${size}" data-locale="${locale}" data-size="${size}">
+        <header class="topbar">
+          <div class="wordmark" aria-label="claudio">claudi<img src="../assets/branding/claudi0-mark.svg" alt="o"></div>
+          <button class="language-button" type="button" aria-label="Interface language">${text.button}</button>
+        </header>
+        <section class="heading"><h2>皮卡丘</h2><p>${text.count}</p></section>
+        <section class="host-grid" aria-label="Host integrations">
+          <article class="host-card"><div class="host-card-title"><span class="status-dot pending"></span><h3>Claude Code</h3></div><p class="host-readiness">${text.readinessA}</p><p class="host-detail">${text.detail}</p></article>
+          <article class="host-card"><div class="host-card-title"><span class="status-dot ready"></span><h3>Codex</h3></div><p class="host-readiness">${text.readinessB}</p></article>
+        </section>
+        <section aria-label="Events"><h3 class="section-title">${text.section}</h3><div class="event-list">${eventRows}</div></section>
+        <section class="volume"><label>${text.volume}</label><input type="range" min="0" max="100" value="72" aria-label="${text.volume}"></section>
+        <h3 class="section-title pack-title">${text.packs}</h3>
+        <article class="pack-card"><div class="pack-name">${text.pack}<span class="pack-code">CC0</span></div><div class="swatches" aria-label="Event colors"><span class="swatch blue"></span><span class="swatch green"></span><span class="swatch amber"></span><span class="swatch clay"></span><span class="swatch indigo"></span></div></article>
+      </div>`;
+    }
+
+    const states = [
+      ['en', 'compact'], ['zh', 'compact'],
+      ['en', 'standard'], ['zh', 'standard'],
+      ['en', 'large'], ['zh', 'large'],
+      ['en', 'maximum'], ['zh', 'maximum']
+    ];
+
+    const grid = document.querySelector('.state-grid');
+    grid.innerHTML = states.map(([locale, size]) => `<section class="state-card" data-locale="${locale}" data-size="${size}">
+      <div class="state-caption"><strong>${copy[locale].locale} · ${sizeLabel[size]}</strong><span>${sizeNote[size]}</span></div>
+      ${panelMarkup(locale, size)}
+    </section>`).join('');
+
+    document.querySelectorAll('.filter-button').forEach((button) => {
+      button.addEventListener('click', () => {
+        document.querySelectorAll('.filter-button').forEach((item) => item.classList.remove('active'));
+        button.classList.add('active');
+        const filter = button.dataset.filter;
+        document.querySelectorAll('.state-card').forEach((card) => {
+          const visible = filter === 'all' || card.dataset.locale === filter || card.dataset.size === filter;
+          card.classList.toggle('is-hidden', !visible);
+        });
+      });
+    });
+
+    document.querySelectorAll('.mute').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.classList.toggle('is-muted');
+        const row = button.closest('.event-row');
+        const name = row.querySelector('.event-title').textContent;
+        const locale = button.closest('.panel').dataset.locale;
+        button.setAttribute('aria-label', `${button.classList.contains('is-muted') ? copy[locale].unmute || 'Unmute' : copy[locale].mute} ${name}`);
+      });
+    });
+
+    document.querySelectorAll('.play').forEach((button) => {
+      button.addEventListener('click', () => button.animate([
+        { transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }
+      ], { duration: 220, easing: 'ease-out' }));
+    });
+  </script>
+</body>
+</html>

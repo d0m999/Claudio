@@ -1,4 +1,5 @@
 import ClaudioCore
+import ClaudioLocalization
 import Foundation
 
 // This entire catalog is DEBUG-only: its only consumers are the DEBUG-gated state gallery
@@ -411,7 +412,7 @@ public enum PreviewFixtures {
     public static let eventHostIndicatorScenarios: [EventHostIndicatorScenario] = [
         eventHostIndicatorScenario(
             id: "full-color",
-            title: "双宿主已连接 · 标准 Logo 18pt",
+            title: "双宿主已连接 · 标签 Logo 12pt",
             event: .stop,
             sourceScenarioID: "dual-connected",
             tier: .standard),
@@ -435,11 +436,59 @@ public enum PreviewFixtures {
             tier: .standard),
         eventHostIndicatorScenario(
             id: "awaiting-narrow",
-            title: "Codex 待激活 · 窄版两行 · Logo 18pt",
+            title: "Codex 待激活 · 较大字号 · 标签 Logo 12pt",
             event: .notification,
             sourceScenarioID: "codex-awaiting",
             tier: .largest),
     ]
+
+    /// One production event-row sample inside the C-layout locale/type-size gallery. Each sample
+    /// carries the same composed host state production consumes, so disconnected/degraded chips
+    /// cannot be mocked independently from the capability matrix.
+    public struct EventRowLayoutSample: Identifiable, Sendable, Equatable {
+        public var id: Event { row.event }
+        public let row: EventRow
+        public let state: HostIntegrationPresentationState
+
+        public init(row: EventRow, state: HostIntegrationPresentationState) {
+            self.row = row
+            self.state = state
+        }
+    }
+
+    /// One language × interface-text-size frame. Every frame deliberately mixes all three
+    /// `CoverageState` shapes in one panel; across the eight frames this gives the visual truth
+    /// source the complete 2 languages × 4 sizes × 3 mapping states grid.
+    public struct EventRowLayoutScenario: Identifiable, Sendable, Equatable {
+        public let id: String
+        public let language: ClaudioAppLanguage
+        public let interfaceTextSize: ClaudioInterfaceTextSize
+        public let samples: [EventRowLayoutSample]
+        public let adaptation: PanelLayoutAdaptation
+
+        public init(
+            id: String,
+            language: ClaudioAppLanguage,
+            interfaceTextSize: ClaudioInterfaceTextSize,
+            samples: [EventRowLayoutSample],
+            adaptation: PanelLayoutAdaptation
+        ) {
+            self.id = id
+            self.language = language
+            self.interfaceTextSize = interfaceTextSize
+            self.samples = samples
+            self.adaptation = adaptation
+        }
+    }
+
+    public static let eventRowLayoutScenarios: [EventRowLayoutScenario] =
+        ClaudioAppLanguage.allCases.flatMap { language in
+            interfaceTextSizes.map { interfaceTextSize in
+                eventRowLayoutScenario(
+                    language: language,
+                    interfaceTextSize: interfaceTextSize)
+            }
+        }
 
     private static let hostIntegrationInstallationID = UUID(
         uuidString: "00000000-0000-4000-8000-0000000000C1")!
@@ -518,6 +567,45 @@ public enum PreviewFixtures {
             adaptation: panelLayoutAdaptation(for: tier))
     }
 
+    private static func eventRowLayoutScenario(
+        language: ClaudioAppLanguage,
+        interfaceTextSize: ClaudioInterfaceTextSize
+    ) -> EventRowLayoutScenario {
+        func state(_ scenarioID: String) -> HostIntegrationPresentationState {
+            guard let source = hostIntegrationScenarios.first(where: { $0.id == scenarioID })
+            else {
+                preconditionFailure("missing host integration fixture: \(scenarioID)")
+            }
+            return source.state
+        }
+
+        return EventRowLayoutScenario(
+            id: "\(language.rawValue)-\(interfaceTextSize.rawValue)",
+            language: language,
+            interfaceTextSize: interfaceTextSize,
+            samples: [
+                // Longest current English event title; production has enough room for its full
+                // two-line rendering at every tier rather than truncating it with an ellipsis.
+                EventRowLayoutSample(
+                    row: EventRow(
+                        event: .stopFailure,
+                        coverage: .present(fileName: "execution-interrupted.mp3"),
+                        enabled: true),
+                    state: state("dual-connected")),
+                EventRowLayoutSample(
+                    row: EventRow(event: .notification, coverage: .unmapped, enabled: true),
+                    state: state("dual-disconnected")),
+                EventRowLayoutSample(
+                    row: EventRow(
+                        event: .subagentStop,
+                        coverage: .broken(fileName: "subagent-stop.mp3"),
+                        enabled: false),
+                    state: state("single-side-connection-failure")),
+            ],
+            adaptation: panelLayoutAdaptation(
+                for: panelTypeSizeTier(for: interfaceTextSize)))
+    }
+
     // MARK: - Compile-time exhaustiveness guards
 
     /// Runs every `_coverage(_:)` guard below against its matching fixture array and RETURNS
@@ -561,6 +649,9 @@ public enum PreviewFixtures {
         }
         for scenario in eventHostIndicatorScenarios {
             visited.insert("eventHostIndicator.\(scenario.id)")
+        }
+        for scenario in eventRowLayoutScenarios {
+            visited.insert("eventRowLayout.\(scenario.id)")
         }
         return visited
     }

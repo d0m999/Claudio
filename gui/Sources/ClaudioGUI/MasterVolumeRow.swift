@@ -82,10 +82,9 @@ public struct MasterVolumeRow: View {
         Group {
             if adaptation.rowWrapsToTwoLines {
                 // "更大" tier (D17/D44 — the term is `.largest`, NOT `.larger`): label on top,
-                // the slider spanning the full row below — the same two-line degradation
-                // `EventRowView` already applies, reusing `rowWrapsToTwoLines` verbatim rather
-                // than inventing a second layout field for this row (DESIGN.md「控件行」:
-                // "不为控件行新立布局字段").
+                // the slider spanning the full row below. Master-volume and pack rows continue
+                // to share `rowWrapsToTwoLines`; EventRow's separate maximum-only action placement
+                // does not change this control-row contract (DESIGN.md「控件行」).
                 VStack(alignment: .leading, spacing: 2) {
                     label
                     slider

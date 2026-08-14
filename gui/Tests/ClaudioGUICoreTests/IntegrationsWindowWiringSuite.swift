@@ -473,6 +473,7 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             row.contains("ForEach(hostIndicators)")
                 && row.contains("hostIndicatorImage(for: indicator.host)")
+                && row.contains("Text(indicator.compactDisplayName)")
                 && row.contains("eventHostIndicatorAssetName(for: host)")
                 && row.contains("hostIconResourceBundle.image(forResource:")
                 && row.contains("image.isTemplate = true")
@@ -484,14 +485,15 @@ func runIntegrationsWindowWiringSuites() {
                 && !row.contains("func eventDisplayName"),
             "EventRowView 必须直接复用 Event.displayName，禁止保留第二份中文 switch")
         expect(
-            row.components(separatedBy: "HStack(spacing: 6)").count - 1 == 3
-                && row.contains("HStack(spacing: 4)")
-                && row.contains("Spacer(minLength: 0)")
-                && row.contains(".layoutPriority(1)"),
-            "标准 286pt 内容宽度必须压缩行内空白并优先保留完整事件标题")
+            row.contains("private let identitySpacing: CGFloat = 6")
+                && row.contains("HStack(alignment: .top, spacing: identitySpacing)")
+                && row.contains(".lineLimit(2)")
+                && row.contains(".fixedSize(horizontal: false, vertical: true)")
+                && row.contains("actionOverlayClearance"),
+            "事件身份区必须保留 6pt 字形间距、最多两行完整标题，并只为右上动作预留标题宽度")
         expect(
-            panel.contains("case .large: .largest"),
-            "较大界面文字必须进入既有两行降级，不能继续在 312pt 单行内截断事件标题")
+            panel.contains("panelTypeSizeTier(for: interfaceTextSize)"),
+            "Panel 必须复用可测试的四档字号映射，不能在 SwiftUI 里保留第二份 switch")
         for forbidden in [
             "EventHostCoveragePresentation", "hostCoverage", "宿主覆盖未检测",
             "两个来源", "仅 Claude Code", "PermissionRequest", "HostID.allCases",
@@ -516,13 +518,21 @@ func runIntegrationsWindowWiringSuites() {
             indicatorGroup.contains(".accessibilityHidden(true)"),
             "Logo 自身必须从 VoiceOver 树隐藏，由事件编辑入口统一播报")
         expect(
-            indicatorGroup.contains("HStack(spacing: 4)")
-                && row.contains("private let hostIndicatorSize: CGFloat = 18")
-                && !row.contains("adaptation.rowWrapsToTwoLines ? 19 : 22")
-                && row.contains("secondaryText(colorScheme).opacity(0.75)"),
-            "Logo 必须统一使用 4pt 间距、18pt 几何与 text-2 @75% 灰色")
-        for forbidden in [".background(", ".overlay(", ".animation(", ".onHover("] {
-            expect(!indicatorGroup.contains(forbidden), "Logo 必须无框、无底、无 hover 动画：\(forbidden)")
+            indicatorGroup.contains("HStack(spacing: chipSpacing)")
+                && row.contains("private let chipSpacing: CGFloat = 4")
+                && row.contains("private let hostIndicatorSize: CGFloat = 12")
+                && indicatorGroup.contains("ClaudioTheme.font(.caption).weight(.semibold)")
+                && indicatorGroup.contains(".padding(.horizontal, 6)")
+                && indicatorGroup.contains(".padding(.vertical, 3)")
+                && indicatorGroup.contains("RoundedRectangle(cornerRadius: 6)"),
+            "宿主标签必须使用 4pt 间距、12pt PDF Logo、caption semibold 与 6/3/6 几何")
+        expect(
+            indicatorGroup.contains("indicator.state.usesActiveColor")
+                && indicatorGroup.contains("activeColor.opacity(0.12)")
+                && indicatorGroup.contains("ClaudioTheme.secondaryText(colorScheme)"),
+            "连接宿主必须使用宿主色浅底，非连接宿主必须使用中性描边")
+        for forbidden in [".animation(", ".onHover("] {
+            expect(!indicatorGroup.contains(forbidden), "宿主标签不得添加 hover 动画：\(forbidden)")
         }
     }
 
@@ -946,11 +956,14 @@ func runIntegrationsWindowWiringSuites() {
                 && gallery.contains("hostIndicators: eventHostIndicatorPresentations("),
             "EventRow Logo gallery 必须遍历 catalog 并渲染生产 EventRowView")
         expect(
-            gallery.contains("ForEach(PreviewFixtures.interfaceTextSizes)")
-                && gallery.contains("hostIndicators: interfaceTextHostIndicators")
-                && gallery.contains("panelLayoutAdaptation(for: panelTier)")
-                && gallery.contains("case .large: .largest"),
-            "四档界面文字帧必须带真实宿主 Logo，并复用生产行布局降级")
+            fixtures.contains("eventRowLayoutScenarios")
+                && fixtures.contains("ClaudioAppLanguage.allCases.flatMap")
+                && fixtures.contains("interfaceTextSizes.map")
+                && gallery.contains("ForEach(PreviewFixtures.eventRowLayoutScenarios)")
+                && gallery.contains("ForEach(scenario.samples)")
+                && gallery.contains("hostIndicators: localizedEventHostIndicators(")
+                && gallery.contains("adaptation: scenario.adaptation"),
+            "双语四档界面文字帧必须同帧渲染三种映射状态、真实宿主标签与生产布局")
         expect(
             fixtures.contains("title: \"claudi0 已写好，等待 Codex 确认\"")
                 && !fixtures.contains("title: \"Codex 已写好，等待 /hooks 确认\""),

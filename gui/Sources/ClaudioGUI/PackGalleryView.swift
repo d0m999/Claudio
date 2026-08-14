@@ -77,7 +77,7 @@ public struct PackGalleryView: View {
 /// ``PanelTypeSizeTier/standard``/``PanelTypeSizeTier/larger``:
 /// `[包名][meta 槽] Spacer [覆盖轨 / broken 状态行]`（一行）；从 ``PanelTypeSizeTier/largest``
 /// 起（`adaptation.rowWrapsToTwoLines`）改两行：`[包名][meta 槽]` 上、`[覆盖轨 / broken 状态行]`
-/// 下 —— 与 ``EventRowView``同一条降级规则 (ENGINEERING.md「无障碍规格 · Dynamic Type + 降级规则」)。
+/// 下 —— 继续服从面板既有的累计降级规则 (ENGINEERING.md「无障碍规格 · Dynamic Type + 降级规则」)。
 /// DESIGN.md now defines the selected/broken/partial visual language (「包行四态」); where a
 /// pixel choice still isn't pinned there — the mockup itself omits meta labels entirely, a
 /// documented OMISSION not a reversal (DESIGN.md's own "省略不是推翻" note) — every derivation
@@ -115,8 +115,8 @@ private struct PackCardView: View {
         Button(action: onSelect) {
             Group {
                 if adaptation.rowWrapsToTwoLines {
-                    // "更大" 及以上 tier：包名/meta 上、trailing slot 下 —— 与 ``EventRowView``
-                    // 同一条两行降级 (ENGINEERING.md「无障碍规格 · Dynamic Type + 降级规则」)；否则
+                    // "更大" 及以上 tier：包名/meta 上、trailing slot 下 —— 服从既有
+                    // `rowWrapsToTwoLines` 降级；否则
                     // 最大字号下覆盖轨/broken 状态行会先把包名挤裁切或溢出，违背"不裁切、不溢出"。
                     VStack(alignment: .leading, spacing: 4) {
                         nameAndMeta

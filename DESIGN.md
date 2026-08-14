@@ -180,7 +180,7 @@
 ## Spacing（间距）
 
 - **基准单位**：4px。
-- **密度**：comfortable-compact（菜单栏面板要紧凑但不挤）。普通控件行高 ~28pt；事件行标准档最小高度 **37pt**，较大文字两行布局保持 **52pt**；面板内边距 12–13pt。
+- **密度**：comfortable-compact（菜单栏面板要紧凑但不挤）。普通控件行高 ~28pt；事件行由“最多两行标题 + 一行小标签”自然决定高度，不再用 37/52pt 固定高度裁切内容；面板内边距 12–13pt。
 - **阶梯**：2 · 4 · 8 · 12 · 16 · 24 · 32 · 48。
 
 ## Layout（布局）
@@ -190,7 +190,7 @@
 - **面板材质（关键决策）**：**近实心暖表面（`panel`）+ 1px `hairline-strong` 描边 + 柔和阴影**，**不用**满毛玻璃 vibrancy —— 因为 vibrancy 会被壁纸「染色」，而 claudi0 是颜色即语义的产品，事件色必须显示为真色（参照 Itsycal 的实心表面做法）。
 - **圆角阶梯**（**⚠ 2026-07-17 糖果盘上调，现行见「现行视觉皮肤：糖果盘」②；下列 v1 值存档**）：〔v1 存档〕控件 / 芯片 6px · 卡片 / 行 10px · 面板 14–16px · 开关 / 声音芯片 pill(999)；覆盖轨 slot 两档：面板行档 = **胶囊（pill 999 档的半高应用）**；管理窗口微型档 9×9 radius 2（阶梯外微几何）。〔糖果盘现行〕控件 / 芯片 6 · **行卡 13** · tile 11 · **面板 18** · 微型 tile 9 · 开关 / 胶囊 pill(999)；覆盖轨改**横排糖豆胶囊**（present 实心 ≈14×7、missing 空壳 + 斜杠，见 ⑥）。
 - **最大内容宽（营销）**：~1060px。
-- **行结构（每事件行）**：`[事件字形 tile 24pt, 事件色, 圆角6] · [事件名 SF Pro Rounded 12.5pt medium（标准档，随界面文字缩放） + 原始 id JetBrains Mono 10] · [声音文件名 mono] · [波形] · [圆形试听键 speaker.wave.2, 事件色]`。此为 `present` 态的完整结构；事件行共有三态 `CoverageState{present | unmapped | broken}`，`unmapped` / `broken` 收起文件名 / 波形、试听禁用、行尾出「导入绑定」入口（详见 State Components 的「事件行三态」条）。
+- **行结构（每事件行，C 小标签方案）**：`[事件字形 tile 24pt] · [事件名 SF Pro Rounded 12.5pt medium（随四档界面文字缩放，最多两行、纵向自然增长） / [Claude] [Codex] [映射状态]] · [试听] [静音]`。事件字形、标题、宿主标签、映射标签及其余空白共同构成一个事件身份按钮；只有试听、静音是独立按钮。紧凑 / 标准 / 较大档把两枚动作覆盖在右上，只从标题层预留宽度，不挤占第二层标签；最大档通过 `PanelLayoutAdaptation.eventActionsMoveBelow` 把动作移到标签下方。文件名、原始 id、波形与映射写入只存在于 Sound Packs Window。
 - **控件行（Control Row）—— 面板里一切非事件的设置行**（主音量滑块 · 未来的开关 / 步进器 / 行内按钮）。**这一节管的是既成事实，不是新发明**：`OnboardingView` 主 CTA 早已是「原生外壳 + `.tint(clay)`」，此处只是把它升格成全 App 规则。
   - **原生外壳，不自绘**：`Slider` / `Button` / `Toggle` / `Stepper` 一律保留系统绘制的**轨道 · 拇指 · 焦点环 · 按下态 · hover**。品牌强调**只经 `.tint(ClaudioColor.clay(colorScheme))` 一个入口**施加。理由同「App 内 UI = 系统 SF Pro」：自绘控件会连带丢掉 macOS 的焦点环、按下反馈与辅助功能行为，为一点视觉自由付整套原生正确性的账。**先例**：`OnboardingView.swift:102-103` `.buttonStyle(.borderedProminent) + .tint(clay)`。故本设计系统**不定义**轨道高度 / 拇指直径 / 焦点环 —— 那不是我们的决策面。
   - **行解剖**：`[标签 SF Pro 13 · text] · Spacer · [原生控件]`。行高 ~28pt、内边距沿用面板 12–13pt、**无分隔线**（面板全局零 `Divider`，与事件行、包行一致）。**关键：控件行没有事件色 tile** —— 这是它与事件行的唯一结构差别，也是它不会被误读成「第五个事件行」的全部依据。
@@ -212,7 +212,7 @@
   - 小 `A` 向前一步、大 `A` 向后一步；两端禁用、不循环、不 Toast、不自定义动画。当前档位使用 semibold，`第 n 档，共 4 档` 使用等宽数字；圆点同时用尺寸 / 外环和 clay 状态表达，且从 VoiceOver 树隐藏。
   - `panel.options` 容器与 `panel.options.text-size` 触发器保持稳定标识，并新增 `.decrease` / `.increase` / `.status` 子标识。控件不加入 `PanelFocusTarget`，所以面板首次打开仍落在第一个可操作声音来源；子 Popover 关闭时焦点回到 `Aa⌄`。非法持久化值仍只在读取时回落为标准，下一次调节才写回合法 raw value。
   - **语言切换（2026-08-11）**：方案 C 的 280pt 子 Popover 在标题下固定显示原生 segmented control `中文 | English`；双选项持续可见，入口仍为 `Aa⌄`。默认语言固定为简体中文，选择持久化到 `Claudio.InterfaceLanguage`，由 app-lifetime `ClaudioLanguageStore` 同时注入面板、声音包窗口与集成窗口；切换只重新投影当前内存状态，不重启、不重读磁盘、不关闭 Popover。所有显示文案经显式 `ClaudioL10n` 查找，英文缺项回退中文并在测试环境报错。
-  - 语言 selector 打开时取得焦点，切换后焦点留在 selector，`Tab` 进入四档文字大小控件；`Esc` 先关闭子 Popover，父 Popover 关闭时清理子状态并把焦点交还 `Aa⌄`。State Gallery 覆盖 `2 × 4` 八种语言/字号组合；真实 macOS 的 VoiceOver、Full Keyboard Access、主题、强调色和最大字号仍需人工走查。
+  - 语言 selector 打开时取得焦点，切换后焦点留在 selector，`Tab` 进入四档文字大小控件；`Esc` 先关闭子 Popover，父 Popover 关闭时清理子状态并把焦点交还 `Aa⌄`。State Gallery 以八个面板覆盖 `2 种语言 × 4 档字号`，且每个面板同帧混排三种事件映射态；真实 macOS 的 VoiceOver、Full Keyboard Access、主题、强调色和最大字号仍需人工走查。
 
 ### 双宿主菜单栏面板（现行）
 
@@ -225,11 +225,12 @@ claudi0                            2 个声音来源
 Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 
 当前声音包 · 事件
-任务开始       [Claude Logo] [Codex Logo]  已映射  ▶  )))
-本轮结束       [Claude Logo] [Codex Logo]  已映射  ▶  )))
-执行中断       [Claude Logo] [Codex Logo 灰]  已映射  ▶  )))
-待响应         [Claude Logo] [Codex Logo]  已映射  ▶  )))
-子任务结束     [Claude Logo] [Codex Logo]  已映射  ▶  )))
+[任务开始                               ]  ▶  )))
+ [Claude] [Codex] [已映射]
+[本轮结束                               ]  ▶  )))
+ [Claude] [Codex] [未配置]
+[执行中断                               ]  ▶  )))
+ [Claude] [Codex] [⚠ 需修复]
 ```
 
 - **来源条永久存在**：Claude Code 与 Codex 必须由同一个组件、同一高度、同一点击面积渲染为等权双列；异常时才展开说明，未安装、待确认、legacy、损坏或断开不隐藏整格。
@@ -239,13 +240,12 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 - **焦点顺序**：Claude Code → Codex → 任务开始身份/试听/静音 → 其余事件身份/试听/静音（均按 `Event.allCases`）→ 主音量 → 声音包 → 管理入口。面板内不放连接、修复或断开；破坏性断开只存在于详情窗口末尾。
 - **状态反馈**：连接、刷新与真实回执变化使用短暂且可关闭的反馈；开启 Reduce Motion 时只做瞬时状态替换。VoiceOver 播报须带宿主名、语义事件、连接状态及能力限定语，尤其是「Codex，待响应，仅授权请求」。
 
-**事件行宿主 Logo（事实状态，不是品牌）**
+**事件行宿主小标签（事实状态，不是品牌）**
 
-- 第一列固定为 `[事件字形] [事件标题] [弹性空白] [宿主 Logo 组]`；删除“两个来源 / 仅 Claude Code”等来源副标题，也不显示“宿主覆盖未检测”兜底。映射胶囊、试听与静音仍保持原位。Logo 顺序只取共享能力矩阵的 `hostColumns`，View 不保留 Claude/Codex 对照表。
-- Logo 是只读状态指示：无边框、无底色、无 hover 动画，不提供切换，也不新增键盘焦点。事件标题标准档为 **12.5pt、SF Pro Rounded、medium**，经 `@ScaledMetric(relativeTo: .body)` 响应四档「界面文字」设置；标准单行与窄版两行的 Logo 均为 **18×18pt**，Logo 间距 **4pt**，事件字形与标题间距 **6pt**。标准行最小高度 **37pt**，两行布局保持 **52pt**；Logo 不得挤压映射胶囊。
-- 彩色表示宿主已连接并支持该事件：矩阵 `.audible`、`.muted`、`.missingSound` 使用连接色，`.legacy` 使用连接色但鼠标帮助明确“旧版连接”。静音或缺少声音继续由静音键 / 映射胶囊表达，不得把宿主误画成断开。
-- 灰色表示 `.notConnected`、`.awaitingActivation`、`.unsupported`、`.degraded` 或矩阵缺格；统一使用当前主题 `text-2` **75%**。鼠标帮助分别为“未连接 / 待激活 / 此事件不支持 / 需处理”。灰色不是唯一信号：Logo 从 VoiceOver 树隐藏，完整工具名、连接状态与能力限定语合并进事件编辑入口的 label。
-- 连接状态色（**claudi0 状态色，不是官方品牌色**）：Claude 暗/亮 `#E48667 / #BD6549`；Codex 暗/亮 `#79C995 / #318A50`。四个实色与 `text-2 @75%` 均须对暗色面板、亮色渐变最深端达到非文本 **≥3:1**。
+- 宿主顺序只取共享能力矩阵的 `hostColumns`，`EventHostIndicatorPresentation.compactDisplayName` 只把视觉名压成 `Claude` / `Codex`；View 不判断宿主能力。完整本地化宿主名、状态与能力限定语继续用于 `help` 和事件身份按钮的 VoiceOver label。
+- 每枚标签使用 caption semibold、6pt 横向 / 3pt 纵向内边距、6pt 圆角与 **12×12pt** template PDF Logo；两枚标签间距 4pt，事件字形与标题列间距 6pt。标签只读、无 hover 动画、无独立按钮或焦点，并从 VoiceOver 子树隐藏。
+- `EventHostIndicatorState.connected` 与 `.legacy` 使用宿主状态色 12% 浅底；`.notConnected`、`.awaitingActivation`、`.unsupported`、`.needsAttention` 或矩阵缺格使用透明底 + `text-2` 中性描边。填充 / 描边形状与完整 `help` 同时编码状态，颜色不是唯一信号。静音或缺少声音仍由静音键 / 映射标签表达，不得把宿主误画成断开。
+- 连接状态色（**claudi0 状态色，不是官方品牌色**）：Claude 暗/亮 `#E48667 / #BD6549`；Codex 暗/亮 `#79C995 / #318A50`。宿主名正文始终用 `text-2` 保持 ≥4.5:1；状态色只用于 Logo / 浅底等非文本图形并保持 ≥3:1。
 - 几何母版与来源记录在 `assets/host-icons/README.md`：Claude Spark 按 [Anthropic Press Kit](https://www.anthropic.com/press-kit) 校验；Codex 使用批准的 **OpenAI 2025 Blossom**，按 [OpenAI Design Guidelines](https://openai.com/brand/) 校验。商标分别归 Anthropic PBC 与 OpenAI；这里只用于说明事实归属，不表示背书，也不成为 claudi0 品牌资产。OpenAI 要求的 Blossom 保持单色；这里的绿色/灰色只表达 claudi0 的宿主状态，不宣称是官方品牌配色。macOS 12 运行时只加载由母版生成的单色 template PDF，不直接依赖系统 SVG 解码。
 - 静音按钮使用批准的 24×24 自绘扬声器：正常态始终有两道声波；静音态两道声波降至 **24%** 并叠加斜线。按钮的颜色、动作、焦点身份与 VoiceOver 文案不变。
 
@@ -294,7 +294,7 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 > 这些是 `/design-consultation` 首版未覆盖、由设计评审补入词汇表的组件。**全部由既有 token 派生，勿另立新色 / 新圆角。**
 
 - **空态卡**：面板内居中列 —— 44px（radius 12）图标块（态色 15% 底 + 态色字形）→ 标题 SF Pro semibold 15 → 正文 `text-2` 12.5 → 主 CTA（黏土实心 pill radius 9 全宽）+ 次 CTA（ghost：透明 + `hairline-strong` 描边）。**空态三要素：温度 + 主行动 + 上下文。** 旧版全屏宿主 onboarding 卡不再承担连接：双宿主连接状态始终留在两条来源行，解释与动作进入 `IntegrationsWindow`；空态卡继续用于声音包/配置等真正没有可操作内容的场景。
-- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：面板以中文语义名、只读宿主 Logo、紧凑映射状态、试听与自动事件静音呈现三态；点击事件身份进入完整映射编辑器。`present` 可试听；`unmapped` 显「未配置」；`broken` 显「需修复」。静音与覆盖态正交，且不再禁用手工试听。文件名、manifest ID、导入/拖放/清除绑定只在 Sound Packs Window 中出现。
+- **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：面板以本地化事件名、只读宿主小标签、映射标签、试听与自动事件静音呈现三态；点击完整身份区进入对应映射编辑器。标签统一为 caption semibold、6/3pt 内边距、6pt 圆角：`present` 显 `Mapped / 已映射`，中性实底；`unmapped` 显 `Not configured / 未配置`，透明底 + 中性虚线；`broken` 显 `Needs repair / 需修复`，`error` 12% 浅底 + 实线 + 真红错误图标（正文仍用 `text-2`）。`present` 的试听资格继续由 `EventPreviewAvailability` 决定；`unmapped` / `broken` 试听禁用并在 help / VoiceOver 给出原因。静音与覆盖态正交。文件名、manifest ID、导入/拖放/清除绑定只在 Sound Packs Window 中出现。
 - **错误态用色（关键约束）**：app 自身错误（宿主配置不可读 / 写不进、已连接宿主的 helper 损坏）用 UI 语义 `error #FF453A`（真红）；**绝不用于声音事件层**（执行中断永远琥珀）。宿主未安装、未连接与 Codex 等待 `/hooks` 确认用 `surface-2` + `text-2`，不上真红或品牌黏土；Codex 已激活的正常 `4/5` 来源状态与 Claude Code `5/5` 同样用 `success`，只有不支持的 `StopFailure` 格用 `text-2`。
 - **拖入 drop-zone**（**⚠ 2026-07-15 起收窄存档 · 面板级 drop-zone 已拍板删除**，见 Decisions Log 与 PLAN-SOUND-MANAGER T1。本条样式自此只规范**事件行的行内拖放目标**，不再是任何全宽面板组件 —— 全宽虚线形制已让渡给「管理声音包…」入口的专属语义，见「面板显示集 · 星标」条。hover 配色拍板作为既有决议原样保留，仍被「控件行 · 对比度」引用为先例）：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → **边框** 转黏土 + `clay-soft` 底，**文案保持 `text-2` 不变**。
   - ✅ **已拍板（2026-07-11 `/ship`）—— hover 反馈由边框 + 底色承载，文字不转黏土**。此前本条写的是「边框 / **文字**转黏土」，与上面「事件行三态」条的「行内文字始终保 ≥ 4.5:1 对比度」自相矛盾：实测亮色 `clay` `#C4633C` 对 `panel` `#FFFDF8` = **3.97:1** —— 过图标 / 边框的 ≥3:1，**不过**正文的 ≥4.5:1。曾列的三个解法中取**解法 1**（本条原本自己标的推荐项）：
@@ -455,3 +455,4 @@ Claude Code  ● 5/5 已就绪  │  Codex  ● 4/5 已就绪  ›
 | 2026-08-10 | 采用批准稿 C 修正版，收紧事件区排版并替换 Codex 几何 | **替代 2026-08-07 的 22/19pt、5pt 规格与社区 Codex 几何记录**：事件标题标准档定为 12.5pt SF Pro Rounded medium，并经 `@ScaledMetric(relativeTo: .body)` 响应四档界面文字；两种布局的宿主 Logo 统一 18×18pt，Logo 间距 4pt，事件字形与标题间距 6pt，标准行 37pt、两行 52pt。Codex 母版改用批准的 OpenAI 2025 Blossom；Claude Spark、状态语义、VoiceOver 合并方式、映射胶囊、试听、静音、能力矩阵与底层事件键均不变。 |
 | 2026-08-05 | 「界面文字」采用方案 C 步进调节：固定 `Aa⌄` 触发器 + 固定 280pt 子 Popover + 原生两侧 A 按钮 | 方案 C 在保持暖色原生面板的同时减少一层菜单；实时 `Binding<ClaudioInterfaceTextSize>` 继续写入共享 `@AppStorage`，四档、非法值回退、跨窗口同步和现有 Panel 首焦点契约不变。 |
 | 2026-08-11 | 在方案 C 内加入中英文即时切换，并将语言状态提升为 app-lifetime 共享投影 | 入口不变，280pt 子 Popover 增加始终可见的 `中文 | English` 原生分段控件；默认简体中文，显式语言 key 与 `Localizable.xcstrings` 管理所有 GUI 自有文案。面板与两个 retained 管理窗口共享同一 `ClaudioLanguageStore`，切换不触发 I/O、宿主动作或窗口重建；SwiftPM 与组装 `.app` 均 fail-closed 解析唯一 `*_ClaudioLocalization.bundle`。自动测试覆盖 key/参数/复数、两语言四字号画廊、窗口标题和共享展示投影；原生人工验收保持独立，不以 build/harness 代替。 |
+| 2026-08-14 | 事件行采用 C 小标签重排，替代 2026-08-10 的独立 18pt Logo / 37–52pt 固定行方案 | 标题最多两行且不再单行省略；Claude/Codex 的 12pt PDF Logo 与紧凑名、映射三态共同进入完整事件身份按钮。宿主连接态为状态色浅底、非连接态为中性描边；映射 `present/unmapped/broken` 分别为实底/虚线/错误图标实线。紧凑、标准、较大动作覆盖右上，仅最大档通过 `eventActionsMoveBelow` 下移；焦点仍为身份→试听→静音。State Gallery 与 HTML 基准覆盖双语 × 四字号 × 三映射态；不改变能力矩阵、CoverageState、音频或 manifest 写入。 |

@@ -288,13 +288,14 @@ import SwiftUI
 
     struct InterfaceTextSizeGalleryView: View {
         var body: some View {
-            GallerySection(title: "Interface Popover (2 languages × 4 sizes)") {
-                ForEach(ClaudioAppLanguage.allCases) { language in
-                    ForEach(PreviewFixtures.interfaceTextSizes) { size in
-                        GalleryFrame(
-                            caption: "\(language.selfName) · .\(size.rawValue) · \(size.displayName)") {
-                            InterfaceTextSizeFrame(size: size, language: language)
-                        }
+            GallerySection(
+                title: "Interface + EventRow C layout (2 languages × 4 sizes × 3 mapping states)"
+            ) {
+                ForEach(PreviewFixtures.eventRowLayoutScenarios) { scenario in
+                    GalleryFrame(
+                        caption: "\(scenario.language.selfName) · .\(scenario.interfaceTextSize.rawValue)"
+                    ) {
+                        InterfaceTextSizeFrame(scenario: scenario)
                     }
                 }
             }
@@ -302,59 +303,50 @@ import SwiftUI
     }
 
     private struct InterfaceTextSizeFrame: View {
-        let size: ClaudioInterfaceTextSize
-        let language: ClaudioAppLanguage
+        let scenario: PreviewFixtures.EventRowLayoutScenario
         @StateObject private var languageStore: ClaudioLanguageStore
         @FocusState private var focusedTarget: PanelFocusTarget?
 
-        init(size: ClaudioInterfaceTextSize, language: ClaudioAppLanguage) {
-            self.size = size
-            self.language = language
+        init(scenario: PreviewFixtures.EventRowLayoutScenario) {
+            self.scenario = scenario
             let store = ClaudioLanguageStore(defaults: UserDefaults())
-            store.setLanguage(language)
+            store.setLanguage(scenario.language)
             _languageStore = StateObject(wrappedValue: store)
         }
 
         var body: some View {
             VStack(alignment: .leading, spacing: 12) {
                 InterfaceSettingsPopoverContent(
-                    selection: .constant(size),
+                    selection: .constant(scenario.interfaceTextSize),
                     languageStore: languageStore)
                 Text(panelSummary)
                     .font(ClaudioTheme.font(.productTitle))
-                EventRowView(
-                    row: PreviewFixtures.eventRows[0],
-                    hostIndicators: interfaceTextHostIndicators,
-                    previewAvailability: .available(fileName: "stop.mp3"),
-                    language: language,
-                    focusedTarget: $focusedTarget,
-                    adaptation: panelLayoutAdaptation(for: panelTier))
+                ForEach(scenario.samples) { sample in
+                    EventRowView(
+                        row: sample.row,
+                        hostIndicators: localizedEventHostIndicators(
+                            eventHostIndicatorPresentations(
+                                event: sample.row.event,
+                                matrix: hostCapabilityMatrixPresentation(from: sample.state.matrix)),
+                            language: scenario.language),
+                        previewAvailability: eventPreviewAvailability(
+                            coverage: sample.row.coverage,
+                            masterVolume: 1),
+                        language: scenario.language,
+                        focusedTarget: $focusedTarget,
+                        adaptation: scenario.adaptation)
+                }
             }
             .frame(
-                width: size == .maximum ? CGFloat(widenedPanelWidth) : CGFloat(standardPanelWidth),
+                width: CGFloat(scenario.adaptation.panelWidth),
                 alignment: .leading)
-            .environment(\.dynamicTypeSize, size.dynamicTypeSize)
+            .environment(\.dynamicTypeSize, scenario.interfaceTextSize.dynamicTypeSize)
         }
 
         private var panelSummary: String {
-            let l10n = ClaudioL10n(language: language)
+            let l10n = ClaudioL10n(language: scenario.language)
             let header = l10n.format(.panelHeaderWithPack, Int64(2), "极简铃" as NSString)
             return "\(header) · \(l10n.plural(.panelAudibleEventsCount, count: 4))"
-        }
-
-        private var panelTier: PanelTypeSizeTier {
-            switch size {
-            case .compact, .standard: .standard
-            case .large: .largest
-            case .maximum: .maximum
-            }
-        }
-
-        private var interfaceTextHostIndicators: [EventHostIndicatorPresentation] {
-            let source = PreviewFixtures.eventHostIndicatorScenarios[0]
-            return eventHostIndicatorPresentations(
-                event: PreviewFixtures.eventRows[0].event,
-                matrix: hostCapabilityMatrixPresentation(from: source.state.matrix))
         }
     }
 

@@ -57,9 +57,11 @@ public struct EventRowView: View {
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var eventTitleSize: CGFloat = 12.5
 
-    /// Host marks are factual status indicators, not controls. Keep their geometry fixed while
-    /// the event title follows the panel's four interface-text tiers.
-    private let hostIndicatorSize: CGFloat = 18
+    /// Host chips are factual status indicators, not controls. The PDF Logo remains fixed while
+    /// its caption and the event title follow the panel's four interface-text tiers.
+    private let hostIndicatorSize: CGFloat = 12
+    private let identitySpacing: CGFloat = 6
+    private let chipSpacing: CGFloat = 4
 
     public init(
         row: EventRow,
@@ -86,28 +88,22 @@ public struct EventRowView: View {
 
     public var body: some View {
         Group {
-            if adaptation.rowWrapsToTwoLines {
+            if adaptation.eventActionsMoveBelow {
                 VStack(alignment: .leading, spacing: 6) {
                     identityButton
-                    HStack(spacing: 6) {
-                        coverageCapsule
-                        Spacer(minLength: 6)
-                        previewButton
-                        muteButton
-                    }
+                    actionButtons
+                        .padding(.leading, 24 + identitySpacing)
                 }
             } else {
-                // The standard panel leaves 286pt after padding. Keep the gaps compact so the
-                // fixed status/Logo/action slots still leave the longest event title intact.
-                HStack(spacing: 6) {
+                // Actions occupy only the title layer. The identity button remains the full row
+                // surface underneath, while the chips retain the entire second-line width.
+                ZStack(alignment: .topTrailing) {
                     identityButton
-                    coverageCapsule
-                    previewButton
-                    muteButton
+                    actionButtons
                 }
             }
         }
-        .frame(minHeight: adaptation.rowWrapsToTwoLines ? 52 : 37)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
     }
 
@@ -115,16 +111,33 @@ public struct EventRowView: View {
 
     private var identityButton: some View {
         Button(action: onOpenEditor) {
-            HStack(spacing: 6) {
+            HStack(alignment: .top, spacing: identitySpacing) {
                 ClaudioEventGlyph(event: row.event)
-                Text(localizedEventName(row.event, language: language))
-                    .font(.system(size: eventTitleSize, design: .rounded).weight(.medium))
-                    .foregroundColor(ClaudioTheme.text(colorScheme))
-                    .lineLimit(1)
-                    .layoutPriority(1)
-                Spacer(minLength: 0)
-                hostIndicatorGroup
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(localizedEventName(row.event, language: language))
+                        .font(.system(size: eventTitleSize, design: .rounded).weight(.medium))
+                        .foregroundColor(ClaudioTheme.text(colorScheme))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .multilineTextAlignment(.leading)
+                        .layoutPriority(1)
+                        .padding(
+                            .trailing,
+                            adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)
+                        .frame(
+                            maxWidth: .infinity,
+                            minHeight: ClaudioTheme.Metrics.iconTarget,
+                            alignment: .topLeading)
+
+                    HStack(spacing: chipSpacing) {
+                        hostIndicatorGroup
+                        coverageChip
+                    }
+                    .accessibilityHidden(true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -136,29 +149,84 @@ public struct EventRowView: View {
         .accessibilityIdentifier("panel.event.\(row.event.rawValue).editor")
     }
 
-    private var coverageCapsule: some View {
-        ClaudioStatusCapsule(coverageText)
-            .fixedSize()
-            .help(coverageHelp)
-            .accessibilityLabel(language == .english
-                ? "\(coverageText), \(coverageHelp)"
-                : "\(coverageText)，\(coverageHelp)")
+    private var actionOverlayClearance: CGFloat {
+        (ClaudioTheme.Metrics.iconTarget * 2) + 6
+    }
+
+    private var actionButtons: some View {
+        HStack(spacing: 6) {
+            previewButton
+            muteButton
+        }
+        .fixedSize()
+    }
+
+    private var coverageChip: some View {
+        HStack(spacing: 4) {
+            if case .broken = row.coverage {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(ClaudioTheme.error(colorScheme))
+                    .accessibilityHidden(true)
+            }
+            Text(coverageText)
+        }
+        .font(ClaudioTheme.font(.caption).weight(.semibold))
+        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(coverageChipFillColor))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(coverageChipBorderColor, style: coverageChipStrokeStyle))
+        .fixedSize()
+        .help(coverageHelp)
+        .accessibilityHidden(true)
     }
 
     private var hostIndicatorGroup: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: chipSpacing) {
             ForEach(hostIndicators) { indicator in
-                hostIndicatorImage(for: indicator.host)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .frame(width: hostIndicatorSize, height: hostIndicatorSize)
-                    .foregroundColor(hostIndicatorColor(indicator))
-                    .help(localizedEventHostIndicatorStatus(indicator.state, language: language))
-                    .accessibilityHidden(true)
+                hostIndicatorChip(indicator)
             }
         }
         .fixedSize()
+        .accessibilityHidden(true)
+    }
+
+    private func hostIndicatorChip(
+        _ indicator: EventHostIndicatorPresentation
+    ) -> some View {
+        let activeColor = hostIndicatorColor(indicator)
+        return HStack(spacing: 4) {
+            hostIndicatorImage(for: indicator.host)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: hostIndicatorSize, height: hostIndicatorSize)
+                .foregroundColor(activeColor)
+            Text(indicator.compactDisplayName)
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+        }
+        .font(ClaudioTheme.font(.caption).weight(.semibold))
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    indicator.state.usesActiveColor
+                        ? activeColor.opacity(0.12)
+                        : Color.clear))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .strokeBorder(
+                    indicator.state.usesActiveColor
+                        ? Color.clear
+                        : ClaudioTheme.secondaryText(colorScheme),
+                    lineWidth: 1))
+        .fixedSize()
+        .help(hostIndicatorHelp(indicator))
         .accessibilityHidden(true)
     }
 
@@ -235,10 +303,21 @@ public struct EventRowView: View {
 
     private func hostIndicatorColor(_ indicator: EventHostIndicatorPresentation) -> Color {
         guard indicator.state.usesActiveColor else {
-            return ClaudioTheme.secondaryText(colorScheme).opacity(0.75)
+            return ClaudioTheme.secondaryText(colorScheme)
         }
         let palette = eventHostIndicatorPalette(for: indicator.host)
         return Color(hex: colorScheme == .dark ? palette.darkHex : palette.lightHex)
+    }
+
+    private func hostIndicatorHelp(_ indicator: EventHostIndicatorPresentation) -> String {
+        let separator = language == .english ? ", " : "，"
+        return [
+            localizedHostName(indicator.host, language: language),
+            localizedEventHostIndicatorStatus(indicator.state, language: language),
+            indicator.qualificationText,
+        ]
+        .compactMap { $0 }
+        .joined(separator: separator)
     }
 
     private func hostIndicatorImage(for host: HostID) -> Image {
@@ -266,6 +345,37 @@ public struct EventRowView: View {
             return l10n.text(.eventPreviewUnmapped)
         case .broken(let fileName):
             return l10n.format(.eventCoverageBrokenFile, fileName as NSString)
+        }
+    }
+
+    private var coverageChipFillColor: Color {
+        switch row.coverage {
+        case .present:
+            ClaudioTheme.elevated(colorScheme)
+        case .unmapped:
+            Color.clear
+        case .broken:
+            ClaudioTheme.error(colorScheme).opacity(0.12)
+        }
+    }
+
+    private var coverageChipBorderColor: Color {
+        switch row.coverage {
+        case .present:
+            ClaudioTheme.hairline(colorScheme)
+        case .unmapped:
+            ClaudioTheme.secondaryText(colorScheme)
+        case .broken:
+            ClaudioTheme.error(colorScheme)
+        }
+    }
+
+    private var coverageChipStrokeStyle: StrokeStyle {
+        switch row.coverage {
+        case .present, .broken:
+            StrokeStyle(lineWidth: 1)
+        case .unmapped:
+            StrokeStyle(lineWidth: 1, dash: [3, 2])
         }
     }
 }

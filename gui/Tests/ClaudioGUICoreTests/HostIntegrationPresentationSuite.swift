@@ -254,6 +254,9 @@ func runHostIntegrationPresentationSuites() {
             indicators.map(\.host) == [.codex, .claudeCode],
             "Logo 顺序必须逐字服从 matrix.hostColumns，实得 \(indicators.map(\.host))")
         expect(
+            indicators.map(\.compactDisplayName) == ["Codex", "Claude"],
+            "紧凑视觉名必须随共享投影及宿主列顺序输出")
+        expect(
             indicators[0].state == .unsupported && !indicators[0].state.usesActiveColor,
             "缺失的 Codex 格必须保留 Logo 并 fail closed 为灰色不支持")
         expect(indicators[1].state == .connected, "存在的 Claude Code 可听格必须保持彩色")
@@ -281,6 +284,12 @@ func runHostIntegrationPresentationSuites() {
     }
 
     suite("宿主 Logo 资源与状态色：HostID 穷举映射固定到两枚 template PDF") {
+        expect(
+            eventHostIndicatorCompactDisplayName(for: .claudeCode) == "Claude",
+            "Claude Code 只在事件行视觉标签中缩写为 Claude")
+        expect(
+            eventHostIndicatorCompactDisplayName(for: .codex) == "Codex",
+            "Codex 的事件行视觉标签错误")
         expect(eventHostIndicatorAssetName(for: .claudeCode) == "claude", "Claude 资源名错误")
         expect(eventHostIndicatorAssetName(for: .codex) == "codex", "Codex 资源名错误")
         expect(

@@ -2595,7 +2595,7 @@ func runViewWiringSuites() {
             "试听按钮必须由独立可试听状态结构性禁用并给出具体原因")
 
         // 行级分组必须是 .contain（a11y-architect FIX 1 既有纪律，EventRowView 头部 doc comment
-        // 早有记录）—— 这是「试听 ▶ / fileNameMenu / 静音钮三者各自独立可达」的结构性前提：没有它，
+        // 早有记录）—— 这是「事件身份 / 试听 ▶ / 静音钮三者各自独立可达」的结构性前提：没有它，
         // 上面三条即使各自成立，行级 .combine 照样会把它们重新合并成一整块。
         expect(
             row.contains(".accessibilityElement(children: .contain)"),
@@ -2604,7 +2604,7 @@ func runViewWiringSuites() {
                 + "禁用的试听 ▶ 会被合并进行摘要而不是单独播报「变灰」")
     }
 
-    suite("EventRowView：C 修正版锁定标题、Logo 几何与行高，Logo 保持只读") {
+    suite("EventRowView：C 小标签布局锁定双行标题、身份区范围与最大档动作重排") {
         guard let rowSource = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift") else {
             expect(false, "读不到 EventRowView.swift")
             return
@@ -2612,40 +2612,85 @@ func runViewWiringSuites() {
         let flat = collapsingWhitespace(rowSource)
         expect(
             flat.contains("@ScaledMetric(relativeTo: .body) private var eventTitleSize: CGFloat = 12.5")
-                && flat.contains(".font(.system(size: eventTitleSize, design: .rounded).weight(.medium))"),
-            "事件标题必须是 12.5pt SF Pro Rounded medium，并通过 @ScaledMetric 响应四档界面文字")
+                && flat.contains(".font(.system(size: eventTitleSize, design: .rounded).weight(.medium))")
+                && flat.contains(".lineLimit(2)")
+                && flat.contains(".fixedSize(horizontal: false, vertical: true)"),
+            "事件标题必须是可缩放的 12.5pt Rounded medium、最多两行并自然长高")
         expect(
-            flat.contains("private let hostIndicatorSize: CGFloat = 18")
-                && flat.contains(".frame(minHeight: adaptation.rowWrapsToTwoLines ? 52 : 37)"),
-            "Logo 必须统一 18pt；标准行最小高度 37pt，两行布局保持 52pt")
+            flat.contains("if adaptation.eventActionsMoveBelow")
+                && flat.contains("ZStack(alignment: .topTrailing)")
+                && flat.contains("actionButtons .padding(.leading, 24 + identitySpacing)"),
+            "紧凑/标准/较大必须把动作覆盖在右上；仅最大档把动作移到标签下方")
 
         guard
             let identityBody = closureBody(after: "private var identityButton: some View", in: flat),
             let indicatorBody = closureBody(
-                after: "private var hostIndicatorGroup: some View", in: flat)
+                after: "private func hostIndicatorChip", in: flat)
         else {
-            expect(false, "切不出事件身份或宿主 Logo 视图体")
+            expect(false, "切不出事件身份或宿主标签视图体")
             return
         }
         expect(
             identityBody.contains(
-                "HStack(spacing: 6) { ClaudioEventGlyph(event: row.event) Text(localizedEventName(row.event, language: language))"),
-            "事件字形与标题之间必须使用修正版 6pt 间距")
+                "HStack(alignment: .top, spacing: identitySpacing) { ClaudioEventGlyph(event: row.event) VStack")
+                && identityBody.contains("hostIndicatorGroup coverageChip")
+                && identityBody.contains(".frame(maxWidth: .infinity, alignment: .leading)")
+                && identityBody.contains(".contentShape(Rectangle())")
+                && !identityBody.contains(".lineLimit(1)"),
+            "同一身份按钮必须覆盖字形、完整双行标题、宿主/映射标签与剩余空白")
         expect(
-            indicatorBody.contains("HStack(spacing: 4) { ForEach(hostIndicators)"),
-            "宿主 Logo 之间必须使用修正版 4pt 间距")
+            flat.contains("private let hostIndicatorSize: CGFloat = 12")
+                && flat.contains("private let chipSpacing: CGFloat = 4")
+                && indicatorBody.contains("Text(indicator.compactDisplayName)")
+                && indicatorBody.contains("ClaudioTheme.font(.caption).weight(.semibold)")
+                && indicatorBody.contains(".padding(.horizontal, 6)")
+                && indicatorBody.contains(".padding(.vertical, 3)")
+                && indicatorBody.contains("RoundedRectangle(cornerRadius: 6)"),
+            "宿主标签必须使用投影短名、12pt PDF Logo、caption semibold 与 6/3/6 几何")
         for forbidden in [
             "Button(", ".buttonStyle(", ".focused(", ".onHover(", ".hoverEffect(",
-            ".background(", ".overlay(", ".border(", ".stroke(",
         ] {
             expect(
                 !indicatorBody.contains(forbidden),
-                "宿主 Logo 组不得出现独立交互或装饰 \(forbidden)，否则会改变只读状态语义")
+                "宿主标签不得出现独立交互 \(forbidden)，否则会改变只读状态语义")
         }
     }
 
+    suite("EventRowView：映射标签三态由文字、形状与颜色联合编码且隐藏独立 AX 节点") {
+        guard let rowSource = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift") else {
+            expect(false, "读不到 EventRowView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(rowSource)
+        guard let chipBody = closureBody(after: "private var coverageChip: some View", in: flat)
+        else {
+            expect(false, "切不出 coverageChip")
+            return
+        }
+        expect(
+            chipBody.contains("if case .broken = row.coverage")
+                && chipBody.contains("Image(systemName:")
+                && chipBody.contains("Text(coverageText)")
+                && chipBody.contains("ClaudioTheme.font(.caption).weight(.semibold)")
+                && chipBody.contains(".padding(.horizontal, 6)")
+                && chipBody.contains(".padding(.vertical, 3)")
+                && chipBody.contains("RoundedRectangle(cornerRadius: 6)"),
+            "映射标签必须保留状态文字，并给 broken 增加错误图标及统一小标签几何")
+        expect(
+            flat.contains("case .present: ClaudioTheme.elevated(colorScheme)")
+                && flat.contains("case .unmapped: Color.clear")
+                && flat.contains("case .broken: ClaudioTheme.error(colorScheme).opacity(0.12)")
+                && flat.contains("StrokeStyle(lineWidth: 1, dash: [3, 2])")
+                && flat.contains("case .broken: ClaudioTheme.error(colorScheme)"),
+            "present/unmapped/broken 必须分别使用中性实底、透明虚线与错误浅底实线")
+        expect(
+            chipBody.contains(".help(coverageHelp)")
+                && chipBody.contains(".accessibilityHidden(true)"),
+            "映射标签必须保留完整 help，但由身份按钮聚合播报而不是新增 VoiceOver 停靠点")
+    }
+
     suite(
-        "EventRowView：三槽焦点身份各自恰好一个 owner、owner 正确、且源码顺序 = 文件名 Menu → 试听 ▶ → 静音钮（PLAN-SOUND-MANAGER.md §2.5 三槽焦点 / /codex review dcab3de,7e97bc4 P2）"
+        "EventRowView：三槽焦点身份各自恰好一个 owner、owner 正确、且源码顺序 = 事件身份 → 试听 ▶ → 静音钮（PLAN-SOUND-MANAGER.md §2.5 三槽焦点 / /codex review dcab3de,7e97bc4 P2）"
     ) {
         // structural check（理由同本文件头部）：EventRowView 住在不可 import 的 ClaudioGUI
         // executableTarget，够不着行为级测试，三槽焦点接线只能读源码结构。`PanelFocusOrderSuite` 钉的
@@ -2681,14 +2726,14 @@ func runViewWiringSuites() {
         }
 
         // ② owner 正确：eventSound 归 identityButton，eventMute 归 muteButton，eventAction 归 previewButton。
-        guard let menuBody = closureBody(after: "private var identityButton: some View", in: flat)
+        guard let identityBody = closureBody(after: "private var identityButton: some View", in: flat)
         else {
             expect(false, "切不出 identityButton 的属性体")
             return
         }
         expect(
-            menuBody.contains(".focused(focusedTarget, equals: .eventSound(row.event))"),
-            "事件身份编辑入口必须是 `.eventSound` 的 owner。实际是：\(menuBody)")
+            identityBody.contains(".focused(focusedTarget, equals: .eventSound(row.event))"),
+            "事件身份编辑入口必须是 `.eventSound` 的 owner。实际是：\(identityBody)")
 
         guard let muteBody = closureBody(after: "private var muteButton: some View", in: flat)
         else {
@@ -2708,21 +2753,22 @@ func runViewWiringSuites() {
             previewBody.contains(".focused(focusedTarget, equals: .eventAction(row.event))"),
             "试听按钮必须是 `.eventAction` 的唯一 owner。实际是：\(previewBody)")
 
-        // ③ 非换行布局仍按编辑入口 → 试听 → 静音的可读顺序渲染。
+        // ③ 两种布局都先声明身份区，再声明动作组；动作组内部仍是试听 → 静音。
         guard let body = closureBody(after: "public var body: some View", in: flat),
             let menuAt = body.range(of: "identityButton")?.lowerBound,
-            let previewAt = body.range(of: "previewButton")?.lowerBound,
-            let muteAt = body.range(of: "muteButton")?.lowerBound
+            let actionsAt = body.range(of: "actionButtons")?.lowerBound,
+            let actionsBody = closureBody(after: "private var actionButtons: some View", in: flat),
+            let previewAt = actionsBody.range(of: "previewButton")?.lowerBound,
+            let muteAt = actionsBody.range(of: "muteButton")?.lowerBound
         else {
-            expect(false, "EventRowView.body 必须包含编辑、试听、静音三颗控件")
+            expect(false, "EventRowView 必须包含身份区与按试听→静音排列的动作组")
             return
         }
         expect(
-            menuAt < previewAt && previewAt < muteAt,
-            "trailing 的三槽源码顺序必须是 文件名 Menu → 试听 ▶ → 静音钮（与 `panelFocusOrder` 的 "
-                + "eventSound → eventAction → eventMute 一致）—— 顺序对调，Tab 键顺序与视觉从左到右就"
-                + "对不上。实际位置：menu=\(menuAt) preview=\(previewAt) mute=\(muteAt)")
-        }
+            menuAt < actionsAt && previewAt < muteAt,
+            "三槽源码顺序必须是事件身份 → 试听 ▶ → 静音钮（与 panelFocusOrder 一致）。"
+                + "实际位置：identity=\(menuAt) actions=\(actionsAt) preview=\(previewAt) mute=\(muteAt)")
+    }
 
     suite("声音包窗口剩余动作：共享 picker/player、底部动作栏、异步身份与统一公告均接到生产视图") {
         let componentsPicker =

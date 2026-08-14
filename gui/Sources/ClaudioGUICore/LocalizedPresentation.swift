@@ -179,6 +179,7 @@ public func localizedEventHostIndicator(
     EventHostIndicatorPresentation(
         host: indicator.host,
         state: indicator.state,
+        compactDisplayName: indicator.compactDisplayName,
         qualificationText: localizedQualification(indicator.qualificationText, language: language))
 }
 

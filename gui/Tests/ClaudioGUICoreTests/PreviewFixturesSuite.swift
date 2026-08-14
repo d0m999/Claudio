@@ -1,5 +1,6 @@
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import Foundation
 
 // MARK: - PreviewFixtures: single-source-of-truth + exhaustiveness (ENGINEERING.md T14 D1/D3)
@@ -81,6 +82,14 @@ func runPreviewFixturesSuites() {
             "eventHostIndicator.all-gray",
             "eventHostIndicator.legacy",
             "eventHostIndicator.awaiting-narrow",
+            "eventRowLayout.zh-Hans-compact",
+            "eventRowLayout.zh-Hans-standard",
+            "eventRowLayout.zh-Hans-large",
+            "eventRowLayout.zh-Hans-maximum",
+            "eventRowLayout.en-compact",
+            "eventRowLayout.en-standard",
+            "eventRowLayout.en-large",
+            "eventRowLayout.en-maximum",
         ]
         expect(
             visited == expected,
@@ -179,7 +188,7 @@ func runPreviewFixturesSuites() {
                 + " \(Set(Event.allCases).subtracting(events).map(\.cliName).sorted())")
     }
 
-    suite("PreviewFixtures.eventHostIndicatorScenarios covers full/mixed/gray/legacy/awaiting and both row layouts") {
+    suite("PreviewFixtures.eventHostIndicatorScenarios covers full/mixed/gray/legacy/awaiting chip states") {
         let scenarios = PreviewFixtures.eventHostIndicatorScenarios
         expect(
             scenarios.map(\.id)
@@ -217,11 +226,67 @@ func runPreviewFixturesSuites() {
                 .rowWrapsToTwoLines == true,
             "待激活帧必须检查窄版两行布局")
         expect(
-            scenarios.first(where: { $0.id == "full-color" })?.title.contains("Logo 18pt") == true
+            scenarios.first(where: { $0.id == "full-color" })?.title.contains("Logo 12pt") == true
                 && scenarios.first(where: { $0.id == "awaiting-narrow" })?.title
-                    .contains("Logo 18pt") == true
-                && scenarios.allSatisfy { !$0.title.contains("22pt") && !$0.title.contains("19pt") },
-            "Preview fixture 描述必须统一使用修正版 18pt Logo，不能留下旧的 22/19pt 规格")
+                    .contains("Logo 12pt") == true
+                && scenarios.allSatisfy {
+                    !$0.title.contains("22pt") && !$0.title.contains("19pt")
+                        && !$0.title.contains("18pt")
+                },
+            "Preview fixture 描述必须统一使用小标签 12pt Logo，不能留下旧尺寸")
+    }
+
+    suite("PreviewFixtures.eventRowLayoutScenarios covers 2 languages × 4 sizes × 3 coverage states") {
+        let scenarios = PreviewFixtures.eventRowLayoutScenarios
+        expect(scenarios.count == 8, "事件行 C 布局必须恰好有 8 个语言×字号面板")
+
+        let languageAndSize = Set(scenarios.map {
+            "\($0.language.rawValue)-\($0.interfaceTextSize.rawValue)"
+        })
+        let expectedLanguageAndSize = Set(
+            ClaudioAppLanguage.allCases.flatMap { language in
+                ClaudioInterfaceTextSize.allCases.map { size in
+                    "\(language.rawValue)-\(size.rawValue)"
+                }
+            })
+        expect(
+            languageAndSize == expectedLanguageAndSize,
+            "事件行 C 布局缺少语言×字号组合：\(expectedLanguageAndSize.subtracting(languageAndSize))")
+
+        for scenario in scenarios {
+            expect(
+                Set(scenario.samples.map { coverageStateLabel($0.row.coverage) })
+                    == ["present", "unmapped", "broken"],
+                "每个面板必须同帧混排 present/unmapped/broken：\(scenario.id)")
+            expect(
+                scenario.samples.first?.row.event == .stopFailure,
+                "每个字号与语言帧都必须渲染最长英文标题 Execution interrupted")
+
+            let disconnectedSample = scenario.samples.first {
+                if case .unmapped = $0.row.coverage { return true }
+                return false
+            }
+            let disconnectedIndicators = disconnectedSample.map {
+                eventHostIndicatorPresentations(
+                    event: $0.row.event,
+                    matrix: hostCapabilityMatrixPresentation(from: $0.state.matrix))
+            } ?? []
+            expect(
+                !disconnectedIndicators.isEmpty
+                    && disconnectedIndicators.allSatisfy { $0.state == .notConnected },
+                "unmapped 样例必须同时覆盖双宿主未连接标签：\(scenario.id)")
+        }
+
+        for size in ClaudioInterfaceTextSize.allCases {
+            let layouts = scenarios
+                .filter { $0.interfaceTextSize == size }
+                .map(\.adaptation.eventActionsMoveBelow)
+            let expected = size == .maximum
+            expect(
+                layouts.count == ClaudioAppLanguage.allCases.count
+                    && layouts.allSatisfy { $0 == expected },
+                "\(size.rawValue) 的双语动作布局错误：\(layouts)")
+        }
     }
 
     // MARK: - PackCard: PackCardState × isSelected, every combination — plus the coverage

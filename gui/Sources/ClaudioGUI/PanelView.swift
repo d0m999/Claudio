@@ -607,11 +607,7 @@ public struct PanelView: View {
     private var typeScale: CGFloat { CGFloat(interfaceTextSize.scale) }
 
     private var typeSizeTier: PanelTypeSizeTier {
-        switch interfaceTextSize {
-        case .compact, .standard: .standard
-        case .large: .largest
-        case .maximum: .maximum
-        }
+        panelTypeSizeTier(for: interfaceTextSize)
     }
 
     private var layoutAdaptation: PanelLayoutAdaptation { panelLayoutAdaptation(for: typeSizeTier) }
