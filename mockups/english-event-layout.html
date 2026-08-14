@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claudio — English event layout mockup</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #302b27;
+      --muted: #766b60;
+      --muted-strong: #6b6055;
+      --panel: #fffcf7;
+      --panel-deep: #fffaf2;
+      --line: #e6e0d8;
+      --line-strong: #ddd5cb;
+      --clay: #c4633c;
+      --blue: #1478d4;
+      --green: #2f9e50;
+      --amber: #b97000;
+      --indigo: #5b59d6;
+      --soft-blue: #e5f0fc;
+      --soft-green: #e9f5eb;
+      --soft-amber: #f5ead6;
+      --soft-clay: #fae9e1;
+      --soft-indigo: #ecebfc;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      display: grid;
+      place-items: center;
+      background:
+        linear-gradient(rgba(255, 255, 255, .16) 1px, transparent 1px) 0 0 / 100% 38px,
+        radial-gradient(circle at 20% 0%, rgba(255,255,255,.42), transparent 42%),
+        #d9c9a4;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button, input { font: inherit; }
+
+    .popover {
+      width: min(624px, calc(100vw - 32px));
+      padding: 28px 26px 34px;
+      border: 1px solid rgba(115, 101, 84, .55);
+      border-radius: 34px;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.88), rgba(255,252,247,.94) 44%, rgba(255,249,241,.96)),
+        var(--panel);
+      box-shadow: 0 18px 42px rgba(76, 62, 40, .24), 0 2px 5px rgba(76, 62, 40, .12);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .wordmark {
+      display: inline-flex;
+      align-items: center;
+      height: 48px;
+      color: #292522;
+      font-size: 38px;
+      font-weight: 700;
+      letter-spacing: -2.6px;
+      line-height: 1;
+    }
+
+    .wordmark-mark {
+      width: 48px;
+      height: 48px;
+      margin-left: -2px;
+      object-fit: contain;
+    }
+
+    .language-button {
+      min-width: 104px;
+      height: 58px;
+      border: 0;
+      border-radius: 17px;
+      color: var(--clay);
+      background: rgba(255, 247, 239, .86);
+      font-size: 28px;
+      font-weight: 650;
+      letter-spacing: -.8px;
+      cursor: pointer;
+    }
+
+    .language-button span {
+      display: inline-block;
+      margin-left: 4px;
+      font-size: 22px;
+      transform: translateY(-1px);
+    }
+
+    .language-button:hover,
+    .language-button:focus-visible { background: #fff0e4; outline: 3px solid rgba(196,99,60,.22); }
+
+    .panel-heading { margin-top: 13px; }
+
+    h1, h2, p { margin: 0; }
+
+    h1 {
+      font-size: 28px;
+      line-height: 1.1;
+      letter-spacing: -.7px;
+    }
+
+    .audible-count {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 21px;
+      font-weight: 550;
+      letter-spacing: .1px;
+    }
+
+    .host-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-top: 23px;
+    }
+
+    .host-card {
+      min-height: 135px;
+      padding: 16px 16px 15px;
+      border: 2px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 253, 249, .58);
+    }
+
+    .host-card-head {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .host-status {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      flex: 0 0 22px;
+      border-radius: 50%;
+      color: white;
+      font-size: 15px;
+      font-weight: 800;
+    }
+
+    .host-status.pending { background: var(--muted); font-size: 14px; }
+    .host-status.ready { background: var(--green); }
+
+    .host-name {
+      font-size: 23px;
+      font-weight: 700;
+      letter-spacing: -.25px;
+    }
+
+    .host-readiness {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 19px;
+      font-weight: 650;
+    }
+
+    .host-detail {
+      max-width: 245px;
+      margin-top: 7px;
+      color: var(--muted);
+      font-size: 17px;
+      font-weight: 520;
+      line-height: 1.28;
+    }
+
+    .section-title {
+      margin-top: 25px;
+      color: var(--muted-strong);
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: .1px;
+    }
+
+    .event-list {
+      display: grid;
+      gap: 10px;
+      margin-top: 13px;
+    }
+
+    .event-row {
+      display: grid;
+      grid-template-columns: 50px minmax(0, 1fr) 174px;
+      align-items: center;
+      min-height: 112px;
+      padding: 15px 16px;
+      border: 2px solid var(--line);
+      border-radius: 22px;
+      background: rgba(255, 254, 251, .66);
+      transition: border-color .16s ease, background .16s ease, transform .16s ease;
+    }
+
+    .event-row:hover {
+      border-color: #d8cec3;
+      background: rgba(255, 255, 255, .9);
+      transform: translateY(-1px);
+    }
+
+    .event-icon {
+      display: grid;
+      place-items: center;
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+    }
+
+    .event-icon svg { width: 24px; height: 24px; }
+    .event-icon.task { color: var(--blue); background: var(--soft-blue); }
+    .event-icon.complete { color: var(--green); background: var(--soft-green); }
+    .event-icon.interrupted { color: var(--amber); background: var(--soft-amber); }
+    .event-icon.response { color: var(--clay); background: var(--soft-clay); }
+    .event-icon.subtask { color: var(--indigo); background: var(--soft-indigo); }
+
+    .event-title {
+      min-width: 0;
+      padding-right: 14px;
+      font-size: 22px;
+      font-weight: 650;
+      letter-spacing: -.35px;
+      line-height: 1.17;
+      overflow-wrap: break-word;
+    }
+
+    .event-meta {
+      display: flex;
+      min-width: 0;
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 11px;
+    }
+
+    .host-indicators {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      height: 24px;
+    }
+
+    .host-icon {
+      display: block;
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      object-fit: contain;
+    }
+
+    .host-icon.claude {
+      filter: invert(48%) sepia(42%) saturate(735%) hue-rotate(91deg) brightness(86%) contrast(88%);
+    }
+
+    .host-icon.codex {
+      opacity: .62;
+    }
+
+    .controls {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 17px;
+    }
+
+    .mapping {
+      padding: 6px 12px 7px;
+      border: 2px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      background: rgba(255, 255, 255, .46);
+      font-size: 17px;
+      font-weight: 650;
+      line-height: 1;
+    }
+
+    .icon-button {
+      display: grid;
+      place-items: center;
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: 0;
+      color: var(--muted-strong);
+      background: transparent;
+      cursor: pointer;
+    }
+
+    .icon-button:hover,
+    .icon-button:focus-visible { color: var(--clay); outline: 3px solid rgba(196,99,60,.18); outline-offset: 3px; border-radius: 8px; }
+    .icon-button svg { width: 25px; height: 25px; }
+    .icon-button.mute { color: var(--clay); }
+    .icon-button.mute.is-muted { color: #8e867d; }
+
+    .volume-section { margin-top: 18px; }
+
+    .volume-row {
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr);
+      align-items: center;
+      gap: 23px;
+    }
+
+    .volume-label { font-size: 22px; letter-spacing: -.3px; }
+
+    input[type="range"] {
+      width: 100%;
+      height: 6px;
+      accent-color: var(--clay);
+      cursor: pointer;
+    }
+
+    .packs-title { margin-top: 23px; }
+
+    .pack-card {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      min-height: 101px;
+      margin-top: 17px;
+      padding: 18px 21px;
+      border: 2px solid var(--line);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, .78);
+    }
+
+    .pack-name {
+      display: flex;
+      align-items: baseline;
+      gap: 17px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .pack-code {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 16px;
+      font-weight: 700;
+    }
+
+    .pack-swatches { display: flex; gap: 7px; }
+    .swatch { width: 28px; height: 14px; border-radius: 999px; }
+    .swatch.blue { background: var(--blue); }
+    .swatch.green { background: var(--green); }
+    .swatch.amber { background: var(--amber); }
+    .swatch.clay { background: var(--clay); }
+    .swatch.indigo { background: var(--indigo); }
+
+    .mockup-note {
+      margin-top: 14px;
+      color: rgba(118, 107, 96, .72);
+      font-size: 12px;
+      text-align: center;
+    }
+
+    @media (max-width: 570px) {
+      body { padding: 12px; }
+      .popover { width: 100%; padding: 22px 17px 26px; border-radius: 27px; }
+      .wordmark { font-size: 32px; }
+      .wordmark-mark { width: 42px; height: 42px; }
+      .host-grid { gap: 9px; }
+      .host-card { padding: 13px 12px; border-radius: 19px; }
+      .host-name { font-size: 18px; }
+      .host-readiness { font-size: 16px; }
+      .host-detail { font-size: 14px; }
+      .event-row { grid-template-columns: 43px minmax(0, 1fr) 145px; padding-inline: 12px; }
+      .event-title { font-size: 18px; padding-right: 8px; }
+      .controls { gap: 9px; }
+      .mapping { font-size: 14px; padding-inline: 9px; }
+      .pack-name { gap: 8px; font-size: 18px; }
+      .pack-swatches { gap: 4px; }
+      .swatch { width: 21px; height: 11px; }
+    }
+
+    @media (max-width: 410px) {
+      .event-row { grid-template-columns: 42px minmax(0, 1fr); min-height: 126px; }
+      .event-meta { grid-column: 2; align-items: flex-start; }
+      .host-indicators, .controls { justify-content: flex-start; }
+      .event-title { font-size: 17px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="popover" aria-label="Claudio English event layout mockup">
+    <header class="topbar">
+      <div class="wordmark" aria-label="claudio">
+        claudi<img class="wordmark-mark" src="../assets/branding/claudi0-mark.svg" alt="o">
+      </div>
+      <button class="language-button" type="button" aria-label="Interface language">Aa<span>⌄</span></button>
+    </header>
+
+    <section class="panel-heading">
+      <h1>皮卡丘</h1>
+      <p class="audible-count">5 audible events</p>
+    </section>
+
+    <section class="host-grid" aria-label="Host integrations">
+      <article class="host-card">
+        <div class="host-card-head">
+          <span class="host-status pending" aria-hidden="true">◷</span>
+          <h2 class="host-name">Claude Code</h2>
+        </div>
+        <p class="host-readiness">5/5 configured</p>
+        <p class="host-detail">Submit a prompt to Claude Code to confirm the connection</p>
+      </article>
+      <article class="host-card">
+        <div class="host-card-head">
+          <span class="host-status ready" aria-hidden="true">✓</span>
+          <h2 class="host-name">Codex</h2>
+        </div>
+        <p class="host-readiness">4/5 ready</p>
+      </article>
+    </section>
+
+    <section aria-labelledby="events-heading">
+      <h2 class="section-title" id="events-heading">皮卡丘 · Events</h2>
+      <div class="event-list">
+        <article class="event-row">
+          <span class="event-icon task" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="m4 11 15-7-6 16-2.2-6.8L4 11Z" fill="currentColor"/><path d="m10.8 13.2 8.2-9.2" stroke="white" stroke-width="1.2" opacity=".8"/></svg>
+          </span>
+          <h3 class="event-title">Task start</h3>
+          <div class="event-meta">
+            <div class="host-indicators" aria-label="Claude and Codex">
+              <img class="host-icon codex" src="../assets/host-icons/codex.svg" alt="Codex">
+              <img class="host-icon claude" src="../assets/host-icons/claude.svg" alt="Claude Code">
+            </div>
+            <div class="controls">
+              <span class="mapping">Mapped</span>
+              <button class="icon-button play" type="button" aria-label="Preview Task start">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>
+              </button>
+              <button class="icon-button mute" type="button" aria-label="Mute Task start">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 10h4l5-4v12l-5-4H4v-4Z" fill="currentColor"/><path d="m17 9 4 6m0-6-4 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <article class="event-row">
+          <span class="event-icon complete" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="m8 12 2.5 2.5L16.5 9" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <h3 class="event-title">Turn complete</h3>
+          <div class="event-meta">
+            <div class="host-indicators" aria-label="Claude and Codex">
+              <img class="host-icon codex" src="../assets/host-icons/codex.svg" alt="Codex">
+              <img class="host-icon claude" src="../assets/host-icons/claude.svg" alt="Claude Code">
+            </div>
+            <div class="controls">
+              <span class="mapping">Mapped</span>
+              <button class="icon-button play" type="button" aria-label="Preview Turn complete">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>
+              </button>
+              <button class="icon-button mute" type="button" aria-label="Mute Turn complete">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 10h4l5-4v12l-5-4H4v-4Z" fill="currentColor"/><path d="m17 9 4 6m0-6-4 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <article class="event-row">
+          <span class="event-icon interrupted" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"/><rect x="14" y="4" width="5" height="16" rx="1.5"/></svg>
+          </span>
+          <h3 class="event-title">Execution interrupted</h3>
+          <div class="event-meta">
+            <div class="host-indicators" aria-label="Claude and Codex">
+              <img class="host-icon codex" src="../assets/host-icons/codex.svg" alt="Codex">
+              <img class="host-icon claude" src="../assets/host-icons/claude.svg" alt="Claude Code">
+            </div>
+            <div class="controls">
+              <span class="mapping">Mapped</span>
+              <button class="icon-button play" type="button" aria-label="Preview Execution interrupted">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>
+              </button>
+              <button class="icon-button mute" type="button" aria-label="Mute Execution interrupted">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 10h4l5-4v12l-5-4H4v-4Z" fill="currentColor"/><path d="m17 9 4 6m0-6-4 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <article class="event-row">
+          <span class="event-icon response" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><path d="M6 17h12l-1.2-2.1V10a4.8 4.8 0 0 0-9.6 0v4.9L6 17Z" fill="currentColor"/><path d="M10 19h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="17.5" cy="7" r="2.2" fill="currentColor"/></svg>
+          </span>
+          <h3 class="event-title">Needs response</h3>
+          <div class="event-meta">
+            <div class="host-indicators" aria-label="Claude and Codex">
+              <img class="host-icon codex" src="../assets/host-icons/codex.svg" alt="Codex">
+              <img class="host-icon claude" src="../assets/host-icons/claude.svg" alt="Claude Code">
+            </div>
+            <div class="controls">
+              <span class="mapping">Mapped</span>
+              <button class="icon-button play" type="button" aria-label="Preview Needs response">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>
+              </button>
+              <button class="icon-button mute" type="button" aria-label="Mute Needs response">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 10h4l5-4v12l-5-4H4v-4Z" fill="currentColor"/><path d="m17 9 4 6m0-6-4 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+
+        <article class="event-row">
+          <span class="event-icon subtask" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="m8 12 2.5 2.5L16.5 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </span>
+          <h3 class="event-title">Subtask complete</h3>
+          <div class="event-meta">
+            <div class="host-indicators" aria-label="Claude and Codex">
+              <img class="host-icon codex" src="../assets/host-icons/codex.svg" alt="Codex">
+              <img class="host-icon claude" src="../assets/host-icons/claude.svg" alt="Claude Code">
+            </div>
+            <div class="controls">
+              <span class="mapping">Mapped</span>
+              <button class="icon-button play" type="button" aria-label="Preview Subtask complete">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>
+              </button>
+              <button class="icon-button mute" type="button" aria-label="Mute Subtask complete">
+                <svg viewBox="0 0 24 24" fill="none"><path d="M4 10h4l5-4v12l-5-4H4v-4Z" fill="currentColor"/><path d="m17 9 4 6m0-6-4 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="volume-section" aria-label="Master volume">
+      <div class="volume-row">
+        <label class="volume-label" for="volume">Master volume</label>
+        <input id="volume" type="range" min="0" max="100" value="72">
+      </div>
+    </section>
+
+    <section aria-labelledby="packs-heading">
+      <h2 class="section-title packs-title" id="packs-heading">Sound Packs</h2>
+      <article class="pack-card">
+        <div class="pack-name"><span>极简铃音</span><span class="pack-code">CC0</span></div>
+        <div class="pack-swatches" aria-label="Event colors">
+          <span class="swatch blue"></span><span class="swatch green"></span><span class="swatch amber"></span><span class="swatch clay"></span><span class="swatch indigo"></span>
+        </div>
+      </article>
+    </section>
+  </main>
+
+  <script>
+    document.querySelectorAll('.mute').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.classList.toggle('is-muted');
+        const eventName = button.closest('.event-row').querySelector('.event-title').textContent;
+        const muted = button.classList.contains('is-muted');
+        button.setAttribute('aria-label', `${muted ? 'Unmute' : 'Mute'} ${eventName}`);
+      });
+    });
+
+    document.querySelectorAll('.play').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.animate([
+          { transform: 'scale(1)' },
+          { transform: 'scale(1.18)' },
+          { transform: 'scale(1)' }
+        ], { duration: 220, easing: 'ease-out' });
+      });
+    });
+  </script>
+</body>
+</html>

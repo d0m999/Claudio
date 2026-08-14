@@ -1,0 +1,424 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claudio event layout variants</title>
+  <style>
+    :root {
+      --ink: #302b27;
+      --muted: #766b60;
+      --quiet: #a09890;
+      --panel: #fffcf7;
+      --surface: rgba(255, 255, 255, .66);
+      --line: #e6e0d8;
+      --clay: #c4633c;
+      --green: #2f9e50;
+      --blue: #1478d4;
+      --amber: #b97000;
+      --indigo: #5b59d6;
+      --soft-blue: #e5f0fc;
+      --soft-green: #e9f5eb;
+      --soft-amber: #f5ead6;
+      --soft-clay: #fae9e1;
+      --soft-indigo: #ecebfc;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 100%; background: #d9c9a4; }
+
+    body {
+      margin: 0;
+      padding: 30px;
+      color: var(--ink);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background:
+        linear-gradient(rgba(255, 255, 255, .16) 1px, transparent 1px) 0 0 / 100% 38px,
+        radial-gradient(circle at 18% 0%, rgba(255,255,255,.48), transparent 40%),
+        #d9c9a4;
+    }
+
+    .board-header {
+      width: min(1230px, calc(100vw - 60px));
+      margin: 0 auto 22px;
+    }
+
+    .board-kicker {
+      color: var(--clay);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    .board-header h1 {
+      margin: 7px 0 5px;
+      font-size: clamp(25px, 3vw, 38px);
+      letter-spacing: -.045em;
+    }
+
+    .board-header p {
+      max-width: 680px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
+    .board {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(340px, 1fr));
+      gap: 22px;
+      width: min(1230px, calc(100vw - 60px));
+      margin: 0 auto;
+      overflow-x: auto;
+      align-items: start;
+    }
+
+    .variant { min-width: 340px; }
+
+    .variant-label {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      min-height: 45px;
+      padding: 0 3px 10px;
+    }
+
+    .variant-label strong { font-size: 16px; }
+    .variant-label span { color: var(--muted); font-size: 12px; }
+
+    .panel {
+      padding: 22px 20px 26px;
+      border: 1px solid rgba(115, 101, 84, .55);
+      border-radius: 29px;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.9), rgba(255,252,247,.95) 45%, rgba(255,249,241,.97)),
+        var(--panel);
+      box-shadow: 0 16px 34px rgba(76, 62, 40, .18), 0 2px 5px rgba(76, 62, 40, .1);
+    }
+
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .wordmark {
+      display: inline-flex;
+      align-items: center;
+      height: 38px;
+      color: #292522;
+      font-size: 31px;
+      font-weight: 700;
+      letter-spacing: -2.2px;
+      line-height: 1;
+    }
+
+    .wordmark img { width: 38px; height: 38px; margin-left: -2px; }
+
+    .language-button {
+      min-width: 67px;
+      height: 38px;
+      border: 0;
+      border-radius: 13px;
+      color: var(--clay);
+      background: #fff4eb;
+      font-size: 19px;
+      font-weight: 750;
+      cursor: pointer;
+    }
+
+    .heading { margin-top: 11px; }
+    .heading h2 { margin: 0; font-size: 23px; letter-spacing: -.04em; }
+    .heading p { margin: 5px 0 0; color: var(--muted); font-size: 15px; font-weight: 600; }
+
+    .host-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 17px;
+    }
+
+    .host-card {
+      min-height: 104px;
+      padding: 11px 11px 10px;
+      border: 1px solid var(--line);
+      border-radius: 15px;
+      background: rgba(255, 253, 249, .58);
+    }
+
+    .host-card-title { display: flex; align-items: center; gap: 6px; min-width: 0; }
+    .host-card-title h3 { margin: 0; font-size: 15px; white-space: nowrap; }
+    .status-dot { width: 13px; height: 13px; flex: 0 0 13px; border-radius: 50%; }
+    .status-dot.pending { background: #81776d; }
+    .status-dot.ready { background: var(--green); }
+    .host-readiness { margin: 9px 0 0; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .host-detail { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.27; }
+
+    .section-title {
+      margin: 19px 0 8px;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 750;
+    }
+
+    .event-icon {
+      display: grid;
+      place-items: center;
+      width: 31px;
+      height: 31px;
+      flex: 0 0 31px;
+      border-radius: 10px;
+    }
+
+    .event-icon svg { width: 20px; height: 20px; }
+    .event-icon.task { color: var(--blue); background: var(--soft-blue); }
+    .event-icon.complete { color: var(--green); background: var(--soft-green); }
+    .event-icon.interrupted { color: var(--amber); background: var(--soft-amber); }
+    .event-icon.response { color: var(--clay); background: var(--soft-clay); }
+    .event-icon.subtask { color: var(--indigo); background: var(--soft-indigo); }
+
+    .event-title { min-width: 0; margin: 0; font-size: 15px; line-height: 1.2; letter-spacing: -.02em; }
+
+    .host-icons { display: inline-flex; align-items: center; gap: 5px; }
+    .host-icon { display: block; width: 17px; height: 17px; object-fit: contain; flex: 0 0 17px; }
+    .host-icon.claude { filter: invert(48%) sepia(42%) saturate(735%) hue-rotate(91deg) brightness(86%) contrast(88%); }
+    .host-icon.codex { opacity: .56; }
+
+    .event-actions { display: inline-flex; align-items: center; gap: 8px; }
+    .map-word { color: var(--muted); font-size: 11px; font-weight: 700; }
+    .icon-button { display: grid; place-items: center; width: 23px; height: 23px; padding: 0; border: 0; color: var(--muted); background: transparent; cursor: pointer; }
+    .icon-button:hover { color: var(--clay); }
+    .icon-button.mute { color: var(--clay); }
+    .icon-button svg { width: 18px; height: 18px; }
+
+    /* A: calm hierarchy, no row cards, metadata below the title. */
+    .layout-a .event-row {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      gap: 0 9px;
+      align-items: center;
+      min-height: 69px;
+      padding: 11px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .layout-a .event-row:last-child { border-bottom: 0; }
+    .layout-a .event-icon { grid-row: span 2; }
+    .layout-a .row-main { min-width: 0; }
+    .layout-a .row-meta { display: flex; align-items: center; gap: 7px; margin-top: 6px; color: var(--muted); }
+    .layout-a .row-meta .host-icons { margin-left: 1px; }
+    .layout-a .event-actions { grid-column: 3; grid-row: 1 / span 2; }
+
+    /* B: an actual mapping table, with the host legend paid for once. */
+    .layout-b .matrix-head,
+    .layout-b .event-row {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) 31px 31px 45px;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .layout-b .matrix-head {
+      padding: 0 0 8px;
+      border-bottom: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 9px;
+      font-weight: 800;
+      text-align: center;
+    }
+
+    .layout-b .matrix-head .matrix-label { text-align: left; }
+    .layout-b .matrix-host { display: grid; justify-items: center; gap: 2px; }
+    .layout-b .matrix-host .host-icon { width: 15px; height: 15px; }
+    .layout-b .event-row { min-height: 58px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+    .layout-b .event-row:last-child { border-bottom: 0; }
+    .layout-b .event-icon { width: 28px; height: 28px; border-radius: 9px; }
+    .layout-b .event-icon svg { width: 18px; height: 18px; }
+    .mapping-dot { width: 9px; height: 9px; justify-self: center; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px rgba(47,158,80,.12); }
+    .mapping-dot.inactive { background: #b1aaa2; box-shadow: 0 0 0 3px rgba(118,107,96,.1); }
+    .layout-b .event-actions { justify-content: flex-end; gap: 3px; }
+
+    /* C: small chips, but no oversized capsules or duplicate cards. */
+    .layout-c .event-row {
+      display: grid;
+      grid-template-columns: 36px minmax(0, 1fr) auto;
+      gap: 0 9px;
+      align-items: center;
+      min-height: 73px;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .layout-c .event-row:last-child { border-bottom: 0; }
+    .layout-c .event-icon { align-self: start; margin-top: 1px; }
+    .layout-c .chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .layout-c .chip { padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: rgba(255,255,255,.48); font-size: 9px; font-weight: 750; line-height: 1; }
+    .layout-c .chip.host { border-color: rgba(47,158,80,.28); color: #3c8750; }
+    .layout-c .event-actions { grid-column: 3; grid-row: 1 / span 2; }
+
+    .volume { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 12px; margin-top: 13px; }
+    .volume label { font-size: 15px; }
+    input[type="range"] { width: 100%; height: 4px; accent-color: var(--clay); }
+    .pack-title { margin-top: 18px; }
+    .pack-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 61px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 15px; background: rgba(255,255,255,.7); }
+    .pack-name { font-size: 15px; font-weight: 750; white-space: nowrap; }
+    .pack-code { margin-left: 7px; color: var(--muted); font-family: ui-monospace, monospace; font-size: 11px; }
+    .swatches { display: flex; gap: 4px; }
+    .swatch { width: 18px; height: 9px; border-radius: 999px; }
+    .swatch.blue { background: var(--blue); }
+    .swatch.green { background: var(--green); }
+    .swatch.amber { background: var(--amber); }
+    .swatch.clay { background: var(--clay); }
+    .swatch.indigo { background: var(--indigo); }
+
+    @media (max-width: 760px) {
+      body { padding: 20px 14px; }
+      .board-header, .board { width: 100%; }
+      .board { grid-template-columns: repeat(3, minmax(320px, 1fr)); gap: 16px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="board-header">
+    <div class="board-kicker">Claudio · layout exploration</div>
+    <h1>English event rows</h1>
+    <p>三种候选布局，同一组内容和同一套 Claudio 视觉语汇。重点比较：英文长标题、映射信息和操作控件的关系。</p>
+  </header>
+
+  <main class="board" aria-label="Event row layout variants">
+    <section class="variant">
+      <div class="variant-label"><strong>A · 层级信息</strong><span>推荐</span></div>
+      <div class="panel layout-a" data-layout="a"></div>
+    </section>
+    <section class="variant">
+      <div class="variant-label"><strong>B · 映射矩阵</strong><span>最清晰</span></div>
+      <div class="panel layout-b" data-layout="b"></div>
+    </section>
+    <section class="variant">
+      <div class="variant-label"><strong>C · 小标签</strong><span>最现代</span></div>
+      <div class="panel layout-c" data-layout="c"></div>
+    </section>
+  </main>
+
+  <script>
+    const events = [
+      { name: 'Task start', kind: 'task', icon: 'task' },
+      { name: 'Turn complete', kind: 'complete', icon: 'complete' },
+      { name: 'Execution interrupted', kind: 'interrupted', icon: 'interrupted' },
+      { name: 'Needs response', kind: 'response', icon: 'response' },
+      { name: 'Subtask complete', kind: 'subtask', icon: 'subtask' }
+    ];
+
+    const iconSVG = {
+      task: '<svg viewBox="0 0 24 24" fill="none"><path d="m4 11 15-7-6 16-2.2-6.8L4 11Z" fill="currentColor"/><path d="m10.8 13.2 8.2-9.2" stroke="white" stroke-width="1.2" opacity=".8"/></svg>',
+      complete: '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="m8 12 2.5 2.5L16.5 9" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      interrupted: '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"/><rect x="14" y="4" width="5" height="16" rx="1.5"/></svg>',
+      response: '<svg viewBox="0 0 24 24" fill="none"><path d="M6 17h12l-1.2-2.1V10a4.8 4.8 0 0 0-9.6 0v4.9L6 17Z" fill="currentColor"/><path d="M10 19h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="17.5" cy="7" r="2.2" fill="currentColor"/></svg>',
+      subtask: '<svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="m8 12 2.5 2.5L16.5 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    };
+
+    const hostIcon = (host, label, extra = '') => `<img class="host-icon ${host} ${extra}" src="../assets/host-icons/${host === 'claude' ? 'claude' : 'codex'}.svg" alt="${label}">`;
+
+    const actionButtons = (name) => `
+      <div class="event-actions">
+        <button class="icon-button play" type="button" aria-label="Preview ${name}">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="m8 5 11 7-11 7V5Z"/></svg>
+        </button>
+        <button class="icon-button mute" type="button" aria-label="Mute ${name}">
+          <svg viewBox="0 0 24 24" fill="none"><path d="M4 10h4l5-4v12l-5-4H4v-4Z" fill="currentColor"/><path d="m17 9 4 6m0-6-4 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
+      </div>`;
+
+    const eventIcon = (event) => `<span class="event-icon ${event.kind}" aria-hidden="true">${iconSVG[event.icon]}</span>`;
+
+    const commonStart = `
+      <header class="topbar">
+        <div class="wordmark" aria-label="claudio">claudi<img src="../assets/branding/claudi0-mark.svg" alt="o"></div>
+        <button class="language-button" type="button" aria-label="Interface language">Aa⌄</button>
+      </header>
+      <section class="heading"><h2>皮卡丘</h2><p>5 audible events</p></section>
+      <section class="host-grid" aria-label="Host integrations">
+        <article class="host-card">
+          <div class="host-card-title"><span class="status-dot pending"></span><h3>Claude Code</h3></div>
+          <p class="host-readiness">5/5 configured</p>
+          <p class="host-detail">Submit a prompt to Claude Code to confirm the connection</p>
+        </article>
+        <article class="host-card">
+          <div class="host-card-title"><span class="status-dot ready"></span><h3>Codex</h3></div>
+          <p class="host-readiness">4/5 ready</p>
+        </article>
+      </section>
+      <section aria-label="Events"><h3 class="section-title">皮卡丘 · Events</h3>`;
+
+    const commonEnd = `
+      </section>
+      <section class="volume"><label>Master volume</label><input type="range" min="0" max="100" value="72" aria-label="Master volume"></section>
+      <h3 class="section-title pack-title">Sound Packs</h3>
+      <article class="pack-card"><div class="pack-name">极简铃音 <span class="pack-code">CC0</span></div><div class="swatches" aria-label="Event colors"><span class="swatch blue"></span><span class="swatch green"></span><span class="swatch amber"></span><span class="swatch clay"></span><span class="swatch indigo"></span></div></article>`;
+
+    function renderA() {
+      return events.map((event) => `
+        <article class="event-row">
+          ${eventIcon(event)}
+          <div class="row-main">
+            <h4 class="event-title">${event.name}</h4>
+            <div class="row-meta"><span class="map-word">Mapped</span><span>·</span><span class="host-icons">${hostIcon('claude', 'Claude Code')} ${hostIcon('codex', 'Codex')}</span></div>
+          </div>
+          ${actionButtons(event.name)}
+        </article>`).join('');
+    }
+
+    function renderB() {
+      const head = `
+        <div class="matrix-head"><span></span><span class="matrix-label">Event</span><span class="matrix-host">${hostIcon('claude', 'Claude Code')}<span>Claude</span></span><span class="matrix-host">${hostIcon('codex', 'Codex')}<span>Codex</span></span><span></span></div>`;
+      const rows = events.map((event) => `
+        <article class="event-row">
+          ${eventIcon(event)}
+          <h4 class="event-title">${event.name}</h4>
+          <span class="mapping-dot" title="Mapped to Claude Code"></span>
+          <span class="mapping-dot ${event.kind === 'interrupted' ? 'inactive' : ''}" title="${event.kind === 'interrupted' ? 'Not mapped to Codex' : 'Mapped to Codex'}"></span>
+          ${actionButtons(event.name)}
+        </article>`).join('');
+      return head + rows;
+    }
+
+    function renderC() {
+      return events.map((event) => `
+        <article class="event-row">
+          ${eventIcon(event)}
+          <div class="row-main">
+            <h4 class="event-title">${event.name}</h4>
+            <div class="chips"><span class="chip host">Claude</span><span class="chip host">Codex</span><span class="chip">Mapped</span></div>
+          </div>
+          ${actionButtons(event.name)}
+        </article>`).join('');
+    }
+
+    document.querySelectorAll('.panel').forEach((panel) => {
+      const layout = panel.dataset.layout;
+      const rows = layout === 'a' ? renderA() : layout === 'b' ? renderB() : renderC();
+      panel.innerHTML = commonStart + rows + commonEnd;
+    });
+
+    document.querySelectorAll('.mute').forEach((button) => {
+      button.addEventListener('click', () => {
+        button.classList.toggle('is-muted');
+        const name = button.closest('.event-row').querySelector('.event-title').textContent;
+        button.setAttribute('aria-label', `${button.classList.contains('is-muted') ? 'Unmute' : 'Mute'} ${name}`);
+      });
+    });
+
+    document.querySelectorAll('.play').forEach((button) => {
+      button.addEventListener('click', () => button.animate([
+        { transform: 'scale(1)' }, { transform: 'scale(1.18)' }, { transform: 'scale(1)' }
+      ], { duration: 220, easing: 'ease-out' }));
+    });
+  </script>
+</body>
+</html>

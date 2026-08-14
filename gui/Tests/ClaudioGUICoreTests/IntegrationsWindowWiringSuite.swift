@@ -501,9 +501,10 @@ func runIntegrationsWindowWiringSuites() {
             "事件身份区必须让字形相对完整文案居中、保留 6pt 间距与双行标题，并由文案栈预留动作区")
         expect(
             row.contains("private var statusChips")
-                && row.contains("if adaptation.rowWrapsToTwoLines && !adaptation.eventActionsMoveBelow")
-                && row.contains("VStack(alignment: .leading, spacing: chipSpacing)"),
-            "较大字号事件行必须把映射芯片下移，不能在 312pt 面板中固定横排溢出")
+                && row.contains("if adaptation.eventActionsMoveBelow")
+                && row.contains("VStack(alignment: .leading, spacing: chipSpacing)")
+                && row.contains("HStack(spacing: chipSpacing)"),
+            "312pt 的普通字号事件行必须把映射芯片下移，不能在动作区旁固定横排溢出")
         expect(
             row.contains(".accessibilityValue(coverageAccessibilityValue)")
                 && row.contains("private var coverageAccessibilityValue")

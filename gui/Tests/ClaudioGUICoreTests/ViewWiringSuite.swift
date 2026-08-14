@@ -2650,10 +2650,10 @@ func runViewWiringSuites() {
             "普通事件行不得回退为右上动作覆盖")
         expect(
             statusBody.contains("hostIndicatorGroup coverageChip")
-                && statusBody.contains(
-                    "if adaptation.rowWrapsToTwoLines && !adaptation.eventActionsMoveBelow")
-                && statusBody.contains("VStack(alignment: .leading, spacing: chipSpacing)"),
-            "较大字号必须把映射芯片放到宿主芯片下一行，并保留最大档横排")
+                && statusBody.contains("if adaptation.eventActionsMoveBelow")
+                && statusBody.contains("VStack(alignment: .leading, spacing: chipSpacing)")
+                && statusBody.contains("HStack(spacing: chipSpacing)"),
+            "312pt 的紧凑/标准/较大档必须把映射芯片放到宿主芯片下一行；最大档可保留横排")
         expect(
             flat.contains("private let hostIndicatorSize: CGFloat = 12")
                 && flat.contains("private let chipSpacing: CGFloat = 4")

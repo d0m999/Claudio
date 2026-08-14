@@ -149,16 +149,18 @@ public struct EventRowView: View {
 
     @ViewBuilder
     private var statusChips: some View {
-        if adaptation.rowWrapsToTwoLines && !adaptation.eventActionsMoveBelow {
-            // `.large` maps to `.largest`: keep the 312pt panel, but give the mapping chip its
-            // own line so two host chips plus "Not configured"/"Needs repair" never overflow at
-            // `.xxLarge`. The maximum tier is wider and already moves actions below the row.
-            VStack(alignment: .leading, spacing: chipSpacing) {
+        if adaptation.eventActionsMoveBelow {
+            // The maximum tier is wider and already moves actions below the row, so the three
+            // status chips can stay on one line without competing with the action buttons.
+            HStack(spacing: chipSpacing) {
                 hostIndicatorGroup
                 coverageChip
             }
         } else {
-            HStack(spacing: chipSpacing) {
+            // Every 312pt tier keeps actions overlaid on the trailing edge. Put the mapping chip
+            // on its own line so the two host chips and English "Not configured"/"Needs repair"
+            // never compete for the 224pt identity-column width left by those actions.
+            VStack(alignment: .leading, spacing: chipSpacing) {
                 hostIndicatorGroup
                 coverageChip
             }
