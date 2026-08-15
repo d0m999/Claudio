@@ -1,25 +1,13 @@
 name: Release
 
-# 触发：push 一个形如 vX.Y.Z 的 tag（例如 `git tag v1.0.0 && git push origin v1.0.0`）。
-# 链路：build 出 universal（arm64 + x86_64）的 helper CLI 与 `ClaudioGUI` 可执行文件
-#   → 各自两个架构分别 `swift build`，再手动 `lipo -create` 合并
-#   → 组装未签名 ad-hoc `claudi0.app`
-#   → 打 DMG
-#   → 建 GitHub Release 并上传 DMG
-#   → 更新自建 Homebrew tap（`<owner>/homebrew-tap`）里的 cask formula。
-#
-# v1 范围（ENGINEERING.md Distribution Plan）：未签名 ad-hoc 分发，不做代码签名 / 公证。
-# 参考了 narlei/claudecodenotify 的 release.yml / homebrew.yml 结构（只读查看，未 fork）。
-
 on:
   push:
     tags:
       - "v*.*.*"
 
 permissions:
-  contents: write
+  contents: read
 
-# 同一 tag/ref 不并发跑两份 release。
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -28,50 +16,125 @@ env:
   APP_NAME: claudi0
   APP_EXECUTABLE: claudi0-app
   CASK_NAME: claudi0
-  # 品牌改名不迁移 bundle identity，保留现有 UserDefaults 与窗口状态。
+  # Preserve the existing bundle identity so upgrades retain UserDefaults and window state.
   BUNDLE_ID: com.claudio.app
-  MACOS_DEPLOYMENT_TARGET: "12.0" # 对齐 helper/Package.swift · gui/Package.swift 的 .macOS(.v12)
+  DMG_SIGNING_IDENTIFIER: com.claudio.app.dmg
+  MACOS_DEPLOYMENT_TARGET: "12.0"
 
 jobs:
   build:
-    name: Build universal binary + DMG
+    name: Build, sign, notarize, and release
     runs-on: macos-14
+    permissions:
+      contents: write
     outputs:
-      version: ${{ steps.ver.outputs.version }}
-      tag: ${{ steps.ver.outputs.tag }}
-      dmg_name: ${{ steps.dmg.outputs.dmg_name }}
-      sha256: ${{ steps.dmg.outputs.sha256 }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      dmg_name: ${{ steps.checksum.outputs.dmg_name }}
+      sha256: ${{ steps.checksum.outputs.sha256 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Derive version from tag
-        id: ver
+      - name: Validate tag and derive version
+        id: version
+        shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          if [ -z "$VERSION" ]; then
-            echo "::error::empty version parsed from tag '$TAG'"
+          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+            echo "::error::release must run from a tag ref"
             exit 1
           fi
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::release tag must match vMAJOR.MINOR.PATCH exactly: $TAG"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Building ${{ env.APP_NAME }} $VERSION (tag $TAG)"
+          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
+          echo "CLAUDIO_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Building $APP_NAME $VERSION"
+
+      - name: Validate Apple credentials and create temporary keychain
+        env:
+          CERTIFICATE_BASE64: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+          NOTARY_API_KEY_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for variable_name in \
+            CERTIFICATE_BASE64 \
+            CERTIFICATE_PASSWORD \
+            NOTARY_API_KEY_BASE64 \
+            NOTARY_KEY_ID \
+            NOTARY_ISSUER_ID; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              missing+=("$variable_name")
+            fi
+          done
+          if [[ ${#missing[@]} -ne 0 ]]; then
+            echo "::error::missing required Apple release credentials: ${missing[*]}"
+            exit 1
+          fi
+
+          KEYCHAIN_PATH="$RUNNER_TEMP/claudio-signing.keychain-db"
+          CERTIFICATE_PATH="$RUNNER_TEMP/claudio-developer-id.p12"
+          NOTARY_KEY_PATH="$RUNNER_TEMP/claudio-notary-api-key.p8"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          echo "::add-mask::$KEYCHAIN_PASSWORD"
+
+          printf '%s' "$CERTIFICATE_BASE64" | base64 --decode > "$CERTIFICATE_PATH"
+          printf '%s' "$NOTARY_API_KEY_BASE64" | base64 --decode > "$NOTARY_KEY_PATH"
+          chmod 600 "$CERTIFICATE_PATH" "$NOTARY_KEY_PATH"
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERTIFICATE_PATH" \
+            -k "$KEYCHAIN_PATH" \
+            -P "$CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign \
+            -T /usr/bin/security
+          security set-key-partition-list \
+            -S apple-tool:,apple:,codesign: \
+            -s \
+            -k "$KEYCHAIN_PASSWORD" \
+            "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH"
+
+          IDENTITIES="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" \
+            | sed -n 's/.*"\(Developer ID Application:.*\)"/\1/p')"
+          IDENTITY_COUNT="$(printf '%s\n' "$IDENTITIES" | sed '/^$/d' | wc -l | tr -d ' ')"
+          if [[ "$IDENTITY_COUNT" != "1" ]]; then
+            echo "::error::expected exactly one Developer ID Application identity; found $IDENTITY_COUNT"
+            exit 1
+          fi
+          SIGNING_IDENTITY="$(printf '%s\n' "$IDENTITIES" | sed -n '1p')"
+          echo "::add-mask::$SIGNING_IDENTITY"
+          echo "SIGNING_IDENTITY=$SIGNING_IDENTITY" >> "$GITHUB_ENV"
+          echo "SIGNING_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+          echo "SIGNING_CERTIFICATE_PATH=$CERTIFICATE_PATH" >> "$GITHUB_ENV"
+          echo "NOTARY_KEY_PATH=$NOTARY_KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Toolchain
         run: swift --version
 
-      # --- helper (claudio CLI)：两个架构各自单独 `swift build`，再手动 lipo 合并 ---
-      - name: Build helper (claudio CLI) — arm64
+      - name: Build helper (arm64)
         working-directory: helper
         run: swift build -c release --arch arm64 --product claudio
 
-      - name: Build helper (claudio CLI) — x86_64
+      - name: Build helper (x86_64)
         working-directory: helper
         run: swift build -c release --arch x86_64 --product claudio
 
-      - name: Lipo-merge helper into universal `claudio`
+      - name: Merge universal helper
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist/bin
@@ -81,23 +144,17 @@ jobs:
             -output dist/bin/claudio
           strip -x dist/bin/claudio
           chmod +x dist/bin/claudio
-          echo "claudio archs: $(lipo -archs dist/bin/claudio)"
 
-      # --- gui (ClaudioGUI 菜单栏 app)：同样两个架构各自单独 `swift build`，再手动 lipo 合并 ---
-      #
-      # `--product ClaudioGUI` 不是可省的修饰：裸 `swift build -c release` 会连
-      # `claudio-gui-tests` 一起编，而那个 target 引用 `#if DEBUG` 门后的 `PreviewFixtures`，
-      # Release 下**编不过**（它本来也不该进 Release）。发版要的是 app，不是测试 harness。
-      # 见 gui/Package.swift 的 products 段与 PreviewFixtures.swift 顶部。
-      - name: Build gui (ClaudioGUI) — arm64
+      - name: Build GUI (arm64)
         working-directory: gui
         run: swift build -c release --arch arm64 --product ClaudioGUI
 
-      - name: Build gui (ClaudioGUI) — x86_64
+      - name: Build GUI (x86_64)
         working-directory: gui
         run: swift build -c release --arch x86_64 --product ClaudioGUI
 
-      - name: Lipo-merge gui into universal `ClaudioGUI`
+      - name: Merge universal GUI
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist/app-bin
@@ -107,16 +164,18 @@ jobs:
             -output dist/app-bin/ClaudioGUI
           strip -x dist/app-bin/ClaudioGUI
           chmod +x dist/app-bin/ClaudioGUI
-          echo "ClaudioGUI archs: $(lipo -archs dist/app-bin/ClaudioGUI)"
 
-      - name: Assemble claudi0.app
+      - name: Assemble app bundle
+        shell: bash
         run: |
           set -euo pipefail
-          APP="dist/${{ env.APP_NAME }}.app"
-          rm -rf "$APP"
+          APP="dist/$APP_NAME.app"
+          if [[ -e "$APP" ]]; then
+            echo "::error::unexpected pre-existing app bundle: $APP"
+            exit 1
+          fi
           mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/packs"
-
-          cp dist/app-bin/ClaudioGUI "$APP/Contents/MacOS/${{ env.APP_EXECUTABLE }}"
+          cp dist/app-bin/ClaudioGUI "$APP/Contents/MacOS/$APP_EXECUTABLE"
 
           find_unique_gui_resource_bundle() {
             local search_dir="$1"
@@ -166,14 +225,9 @@ jobs:
           cp -R "$ARM_LOCALIZATION_BUNDLE" \
             "$APP/Contents/Resources/$(basename "$ARM_LOCALIZATION_BUNDLE")"
 
-          # 新品牌入口为 `claudi0`；同时保留 `claudio` bundle alias，避免旧版安装说明失效。
-          # shared runtime 仍装到 ~/.claudio/bin/claudio，确保现有 hooks 精确匹配。
           cp dist/bin/claudio "$APP/Contents/Resources/bin/claudi0"
           ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
-
-          # 内置声音包只读随 app bundle 分发（ENGINEERING.md 工程落地细节②：声音包存储根 + 查找顺序）。
-          cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
-          cp packs/LICENSES.md "$APP/Contents/Resources/packs/LICENSES.md"
+          bash scripts/copy-bundled-packs.sh packs "$APP/Contents/Resources/packs"
           cp assets/branding/claudi0.icns "$APP/Contents/Resources/claudi0.icns"
 
           cat > "$APP/Contents/Info.plist" <<PLIST
@@ -181,127 +235,258 @@ jobs:
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0">
           <dict>
-            <key>CFBundleName</key><string>${{ env.APP_NAME }}</string>
-            <key>CFBundleDisplayName</key><string>${{ env.APP_NAME }}</string>
-            <key>CFBundleIdentifier</key><string>${{ env.BUNDLE_ID }}</string>
-            <key>CFBundleVersion</key><string>${{ steps.ver.outputs.version }}</string>
-            <key>CFBundleShortVersionString</key><string>${{ steps.ver.outputs.version }}</string>
-            <key>CFBundleExecutable</key><string>${{ env.APP_EXECUTABLE }}</string>
+            <key>CFBundleName</key><string>$APP_NAME</string>
+            <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+            <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
+            <key>CFBundleVersion</key><string>$CLAUDIO_VERSION</string>
+            <key>CFBundleShortVersionString</key><string>$CLAUDIO_VERSION</string>
+            <key>CFBundleExecutable</key><string>$APP_EXECUTABLE</string>
             <key>CFBundleIconFile</key><string>claudi0.icns</string>
             <key>CFBundlePackageType</key><string>APPL</string>
-            <key>LSMinimumSystemVersion</key><string>${{ env.MACOS_DEPLOYMENT_TARGET }}</string>
+            <key>LSMinimumSystemVersion</key><string>$MACOS_DEPLOYMENT_TARGET</string>
             <key>LSUIElement</key><true/>
           </dict>
           </plist>
           PLIST
-
           printf 'APPL????' > "$APP/Contents/PkgInfo"
 
-      - name: Verify release size budget
-        run: bash scripts/check-release-size.sh "dist/${{ env.APP_NAME }}.app"
-
-      - name: Ad-hoc codesign (v1 未签名/无公证 — 见 ENGINEERING.md Distribution Plan)
+      - name: Verify unified version and release size budget
+        shell: bash
         run: |
           set -euo pipefail
-          codesign --force --deep --sign - "dist/${{ env.APP_NAME }}.app"
-          codesign --verify --verbose "dist/${{ env.APP_NAME }}.app"
+          APP="dist/$APP_NAME.app"
+          CLI_VERSION="$("$APP/Contents/Resources/bin/claudi0" --version)"
+          SHORT_VERSION="$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")"
+          BUNDLE_VERSION="$(plutil -extract CFBundleVersion raw "$APP/Contents/Info.plist")"
+          for ACTUAL_VERSION in "$CLI_VERSION" "$SHORT_VERSION" "$BUNDLE_VERSION"; do
+            if [[ "$ACTUAL_VERSION" != "$CLAUDIO_VERSION" ]]; then
+              echo "::error::release version mismatch: expected=$CLAUDIO_VERSION actual=$ACTUAL_VERSION"
+              exit 1
+            fi
+          done
+          bash scripts/check-release-size.sh "$APP"
 
-      - name: Verify universal binaries (arm64 + x86_64)
+      - name: Verify universal binaries
+        shell: bash
         run: |
           set -euo pipefail
-          for BIN in "dist/${{ env.APP_NAME }}.app/Contents/MacOS/${{ env.APP_EXECUTABLE }}" \
-                     "dist/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudi0" \
-                     "dist/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudio"; do
-            ARCHS="$(lipo -archs "$BIN")"
-            echo "$BIN archs: $ARCHS"
-            echo "$ARCHS" | grep -q x86_64 && echo "$ARCHS" | grep -q arm64 \
-              || { echo "::error::$BIN is not a universal binary: $ARCHS"; exit 1; }
+          APP="dist/$APP_NAME.app"
+          for BINARY in \
+            "$APP/Contents/MacOS/$APP_EXECUTABLE" \
+            "$APP/Contents/Resources/bin/claudi0" \
+            "$APP/Contents/Resources/bin/claudio"; do
+            ARCHS="$(lipo -archs "$BINARY")"
+            echo "$BINARY architectures: $ARCHS"
+            if [[ " $ARCHS " != *" arm64 "* || " $ARCHS " != *" x86_64 "* ]]; then
+              echo "::error::$BINARY is not an arm64+x86_64 universal binary"
+              exit 1
+            fi
           done
 
-      - name: Build DMG
-        id: dmg
+      - name: Sign app with Developer ID and hardened runtime
+        shell: bash
         run: |
           set -euo pipefail
-          DMG_NAME="${{ env.APP_NAME }}-${{ steps.ver.outputs.version }}.dmg"
-          STAGE="$(mktemp -d)"
-          cp -R "dist/${{ env.APP_NAME }}.app" "$STAGE/"
-          ln -s /Applications "$STAGE/Applications"
-          hdiutil create -volname "${{ env.APP_NAME }}" -srcfolder "$STAGE" -ov -format UDZO "dist/$DMG_NAME"
-          rm -rf "$STAGE"
+          APP="dist/$APP_NAME.app"
+          codesign \
+            --force \
+            --options runtime \
+            --timestamp \
+            --sign "$SIGNING_IDENTITY" \
+            "$APP/Contents/Resources/bin/claudi0"
+          codesign \
+            --force \
+            --options runtime \
+            --timestamp \
+            --sign "$SIGNING_IDENTITY" \
+            "$APP"
+          codesign --verify --deep --strict --verbose=2 "$APP"
 
-          SHA256="$(shasum -a 256 "dist/$DMG_NAME" | awk '{print $1}')"
+      - name: Build and sign DMG
+        id: dmg
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="dist/$APP_NAME.app"
+          DMG_NAME="$APP_NAME-$CLAUDIO_VERSION.dmg"
+          DMG_PATH="dist/$DMG_NAME"
+          STAGE="$(mktemp -d "$RUNNER_TEMP/claudio-dmg-stage.XXXXXX")"
+          cleanup_stage() {
+            rm -rf "$STAGE"
+          }
+          trap cleanup_stage EXIT
+          ditto "$APP" "$STAGE/$APP_NAME.app"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create \
+            -volname "$APP_NAME" \
+            -srcfolder "$STAGE" \
+            -ov \
+            -format UDZO \
+            "$DMG_PATH"
+          codesign \
+            --force \
+            --timestamp \
+            --identifier "$DMG_SIGNING_IDENTIFIER" \
+            --sign "$SIGNING_IDENTITY" \
+            "$DMG_PATH"
+          codesign --verify --verbose=2 "$DMG_PATH"
+          hdiutil verify "$DMG_PATH"
+          echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
+          echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
+
+      - name: Notarize, staple, and assess release
+        env:
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="dist/$APP_NAME.app"
+          DMG_PATH="dist/$DMG_NAME"
+          NOTARY_RESULT_PATH="$RUNNER_TEMP/claudio-notary-result.json"
+          NOTARY_LOG_PATH="$RUNNER_TEMP/claudio-notary-log.json"
+          xcrun notarytool submit "$DMG_PATH" \
+            --key "$NOTARY_KEY_PATH" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID" \
+            --wait \
+            --output-format json > "$NOTARY_RESULT_PATH"
+          NOTARY_STATUS="$(jq -er '.status' "$NOTARY_RESULT_PATH")"
+          SUBMISSION_ID="$(jq -er '.id' "$NOTARY_RESULT_PATH")"
+          if [[ "$NOTARY_STATUS" != "Accepted" ]]; then
+            echo "::error::notarization was not accepted: $NOTARY_STATUS"
+            exit 1
+          fi
+          xcrun notarytool log "$SUBMISSION_ID" "$NOTARY_LOG_PATH" \
+            --key "$NOTARY_KEY_PATH" \
+            --key-id "$NOTARY_KEY_ID" \
+            --issuer "$NOTARY_ISSUER_ID"
+          jq . "$NOTARY_LOG_PATH"
+          xcrun stapler staple "$DMG_PATH"
+          xcrun stapler validate "$DMG_PATH"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --verbose=2 "$DMG_PATH"
+          spctl --assess --type execute --verbose=4 "$APP"
+          spctl --assess \
+            --type open \
+            --context context:primary-signature \
+            --verbose=4 \
+            "$DMG_PATH"
+
+      - name: Generate and verify checksums
+        id: checksum
+        shell: bash
+        run: |
+          set -euo pipefail
+          DMG_PATH="dist/$DMG_NAME"
+          SHA256="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
+          printf '%s  %s\n' "$SHA256" "$DMG_NAME" > dist/SHA256SUMS.txt
+          (
+            cd dist
+            shasum -a 256 -c SHA256SUMS.txt
+          )
           echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
-          echo "DMG: dist/$DMG_NAME  sha256=$SHA256"
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
-          gh release create "${{ steps.ver.outputs.tag }}" \
-            "dist/${{ steps.dmg.outputs.dmg_name }}" \
-            --title "${{ env.APP_NAME }} ${{ steps.ver.outputs.version }}" \
-            --notes "未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点\"仍要打开\"。打开 claudi0，点面板里的「接管 Claude Code」即可完成安装（追加、不覆盖、自动备份）。也可在 Terminal 跑 \`/Applications/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudi0 setup\`，两者等价（详见 docs/distribution.md）。"
+          gh release create "$RELEASE_TAG" \
+            "dist/$DMG_NAME" \
+            dist/SHA256SUMS.txt \
+            --verify-tag \
+            --title "$APP_NAME $CLAUDIO_VERSION" \
+            --generate-notes
+
+      - name: Clean temporary signing material
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PATH="${SIGNING_KEYCHAIN_PATH:-$RUNNER_TEMP/claudio-signing.keychain-db}"
+          CERTIFICATE_PATH="${SIGNING_CERTIFICATE_PATH:-$RUNNER_TEMP/claudio-developer-id.p12}"
+          API_KEY_PATH="${NOTARY_KEY_PATH:-$RUNNER_TEMP/claudio-notary-api-key.p8}"
+          if [[ -e "$KEYCHAIN_PATH" ]]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+          rm -f "$CERTIFICATE_PATH" "$API_KEY_PATH"
 
   update-cask:
-    name: Update Homebrew tap cask
+    name: Update optional Homebrew tap
+    if: vars.HOMEBREW_TAP_ENABLED == 'true'
     needs: build
     runs-on: macos-14
+    permissions:
+      contents: read
     steps:
-      # 需自建 ${{ github.repository_owner }}/homebrew-tap 仓库（v1 尚未创建 —— 该仓库就绪前，
-      # 本 job 会在 checkout 这一步因仓库不存在 / token 缺失而失败，这是预期行为，不影响上面
-      # build job 的 Release 发布）。并在本仓库 Settings > Secrets and variables > Actions 里
-      # 配置一个对 homebrew-tap 仓库有 push 权限的 secret：HOMEBREW_TAP_TOKEN（PAT 或
-      # fine-grained token，scope 只给 homebrew-tap 一个仓库的 contents:write）。
+      - name: Validate Homebrew token
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$TAP_TOKEN" ]]; then
+            echo "::error::HOMEBREW_TAP_ENABLED is true but HOMEBREW_TAP_TOKEN is missing"
+            exit 1
+          fi
+
       - name: Checkout tap repository
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/homebrew-tap
+          repository: d0m999/homebrew-tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          ref: main
           path: homebrew-tap
 
-      - name: Write cask formula
+      - name: Write and push cask
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          SHA256: ${{ needs.build.outputs.sha256 }}
+        shell: bash
         run: |
           set -euo pipefail
-          mkdir -p homebrew-tap/Casks
-          cat > "homebrew-tap/Casks/${{ env.CASK_NAME }}.rb" <<CASK
-          cask "${{ env.CASK_NAME }}" do
-            version "${{ needs.build.outputs.version }}"
-            sha256 "${{ needs.build.outputs.sha256 }}"
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::invalid cask version: $VERSION"
+            exit 1
+          fi
+          if [[ ! "$SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::invalid cask SHA-256"
+            exit 1
+          fi
 
-            url "https://github.com/${{ github.repository }}/releases/download/v#{version}/${{ env.APP_NAME }}-#{version}.dmg"
-            name "${{ env.APP_NAME }}"
-            desc "Claude Code + Codex 语义化提示音 · 策展声音包"
-            homepage "https://github.com/${{ github.repository }}"
+          mkdir -p homebrew-tap/Casks
+          cat > "homebrew-tap/Casks/$CASK_NAME.rb" <<CASK
+          cask "$CASK_NAME" do
+            version "$VERSION"
+            sha256 "$SHA256"
+
+            url "https://github.com/d0m999/Claudio/releases/download/v#{version}/$APP_NAME-#{version}.dmg"
+            name "$APP_NAME"
+            desc "Semantic sound cues for Claude Code and Codex"
+            homepage "https://github.com/d0m999/Claudio"
 
             depends_on macos: ">= :monterey"
 
-            app "${{ env.APP_NAME }}.app"
+            app "$APP_NAME.app"
 
-            postflight do
-              system_command "/usr/bin/xattr",
-                             args: ["-dr", "com.apple.quarantine", "#{appdir}/${{ env.APP_NAME }}.app"],
-                             must_succeed: false
-            end
-
-            caveats do
-              <<~EOS
-                未签名 ad-hoc 构建（v1，无公证）。若被 Gatekeeper 拦截：
-                系统设置 > 隐私与安全性 > 下滑找到被拦的 ${{ env.APP_NAME }} > 点"仍要打开"。
-
-                打开 ${{ env.APP_NAME }}，点菜单栏面板里的「接管 Claude Code」即可 —— 它会装好放声音的
-                小助手、复制内置声音包、并追加（不覆盖、自动备份）Claude Code 的 hook 配置。
-                也可以在 Terminal 里跑 #{appdir}/${{ env.APP_NAME }}.app/Contents/Resources/bin/claudi0 setup，
-                两者做的是同一件事（详见 docs/distribution.md）。
-              EOS
-            end
+            caveats <<~EOS
+              Open $APP_NAME and connect Claude Code and Codex from the menu bar panel.
+              Uninstalling the cask intentionally preserves ~/.claudio and host configuration;
+              disconnect hosts first if you want to remove Claudio's hook entries.
+            EOS
           end
           CASK
 
           cd homebrew-tap
+          if [[ -z "$(git status --porcelain -- "Casks/$CASK_NAME.rb")" ]]; then
+            echo "Cask is already current"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add "Casks/${{ env.CASK_NAME }}.rb"
-          git commit -m "Update ${{ env.CASK_NAME }} cask to ${{ needs.build.outputs.version }}" || echo "No changes to commit"
-          git push
+          git add "Casks/$CASK_NAME.rb"
+          git commit -m "Update $CASK_NAME cask to $VERSION"
+          git push origin HEAD:refs/heads/main

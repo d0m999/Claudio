@@ -1,0 +1,73 @@
+name: Bug report
+description: Report a reproducible Claudio app, CLI, sound, or data-preservation problem.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Do not paste prompts, responses, full host configuration, receipts, private paths, signing material, or unredacted logs. Report security issues through SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: Claudio version
+      description: Run `~/.claudio/bin/claudi0 --version`, or state that this is a source build.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS and architecture
+      placeholder: "macOS 15.x, Apple Silicon arm64"
+    validations:
+      required: true
+  - type: dropdown
+    id: install_method
+    attributes:
+      label: Installation method
+      options:
+        - GitHub Release DMG
+        - Homebrew cask
+        - Local source build
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the visible behavior and impact.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      placeholder: |
+        1. Open ...
+        2. Choose ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Include only relevant, redacted `claudi0 doctor` or `integrations status` output. Do not attach configuration files or receipts.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I removed prompts, responses, private paths, identifiers, and credentials.
+          required: true
+        - label: I verified this is not a security vulnerability requiring private disclosure.
+          required: true

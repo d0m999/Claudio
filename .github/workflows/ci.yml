@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Test and build
+    runs-on: macos-14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Validate string catalog JSON
+        run: jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
+
+      - name: Verify development version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(swift run --package-path helper claudio --version)"
+          if [[ "$VERSION" != "0.0.0-dev" ]]; then
+            echo "::error::development CLI version must be 0.0.0-dev; got $VERSION"
+            exit 1
+          fi
+
+      - name: Run helper harness
+        run: swift run --package-path helper claudio-tests
+
+      - name: Run GUI harness
+        run: swift run --package-path gui claudio-gui-tests
+
+      - name: Build ClaudioGUI (Debug)
+        run: swift build -c debug --package-path gui --product ClaudioGUI
+
+      - name: Build ClaudioGUI (Release)
+        run: swift build -c release --package-path gui --product ClaudioGUI
+
+      - name: Assemble local release-layout app
+        run: bash scripts/dev-bundle.sh
+
+      - name: Verify release size budget
+        run: bash scripts/check-release-size.sh dist/claudi0.app

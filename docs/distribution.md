@@ -1,126 +1,72 @@
-# claudi0 安装指南
+# claudi0 分发、安装与恢复指南
 
-> 本文档描述 v1 发布后的安装流程；`.github/workflows/release.yml` 尚未真正跑过一次 tag release，
-> 下方的 Homebrew tap / GitHub Releases 链接在首个版本发布前不会有实际内容。
+**支持范围：** macOS 12+，Apple Silicon 与 Intel。正式 Release 为 universal、Developer ID 签名并经过 Apple notarization 的 DMG。
 
-**Supported:** macOS 12+，v1 为未签名 ad-hoc 构建
+产品概览与快速开始见 [中文 README](../README.zh-CN.md)；本文聚焦安装、宿主配置边界、修复和卸载。
 
----
+## 安装方式一：GitHub Release DMG（主渠道）
 
-## 免责声明：当前未签名
+1. 从 [GitHub Releases](https://github.com/d0m999/Claudio/releases) 下载同一版本的 `claudi0-<version>.dmg` 和 `SHA256SUMS.txt`。
+2. 在下载目录验证：
 
-claudi0 v1 分发的是**未签名 ad-hoc 构建**（开发者签名，非 Apple Developer 签名）。这意味着：
-- 首次打开时，macOS 会拦截并要求你确认才能运行
-- **这不是 bug，是苹果对未签名应用的安全审查**
-- 我们即将上线 Apple Developer 签名 + 公证（预计接下来的版本），消除这个摩擦
+   ```bash
+   shasum -a 256 -c SHA256SUMS.txt
+   ```
 
-**适用人群**：这个版本面向熟悉 macOS 系统的技术用户，能自行绕过 Gatekeeper。面向非技术用户的零摩擦版本将在签名公证完成后推出。
+3. 双击挂载 DMG，把 `claudi0.app` 拖入 `/Applications`。
+4. 从“应用程序”启动。Claudio 是菜单栏 app，不显示 Dock 主窗口。
 
----
+Release workflow 对 tag 使用严格的 `vMAJOR.MINOR.PATCH` 校验，并把同一版本注入 CLI、app `Info.plist`、DMG 名称、Release 标题与 cask。缺少签名或 notarization 凭据时直接失败，不会回退为 ad-hoc 发布。
 
-## 安装方式 1：Homebrew（推荐，若 tap 已配置）
+## 安装方式二：Homebrew（可选渠道）
+
+只有在对应 Release 启用了外部 tap 时才使用：
 
 ```bash
-brew tap d0m999/homebrew-tap
-brew install --cask claudi0
+brew install --cask d0m999/tap/claudi0
 ```
 
-首次打开时，按下方【在新系统上打开】或【在旧系统上打开】的指引操作。
+Homebrew tap 不是 GitHub Release 的前置条件。tap job 未启用或被跳过时，不影响已经完成的签名、公证和 GitHub Release。cask 不包含 `zap`，卸载时不会自动删除 `~/.claudio/`。
 
----
+## 首次启动与宿主连接
 
-## 安装方式 2：手动下载 DMG
+首次启动只准备 shared runtime：
 
-1. **下载最新 DMG**  
-   前往 [GitHub Releases](https://github.com/d0m999/Claudio/releases) 找到最新版本的 `claudi0-<version>.dmg`
+- 把 helper 与内置声音包安全发布到 `~/.claudio/`；
+- 尚未选择声音包时选择一个可用的默认包；
+- 检查 helper 是否为可执行正规文件；
+- 不自动连接 Claude Code 或 Codex。
 
-2. **挂载 DMG**  
-   下载完成后双击 `claudi0-<version>.dmg`，会在桌面出现一个虚拟磁盘
+面板始终把两个宿主作为等权声音来源。Codex `4/5` 是正常能力，不是故障：当前缺少与 `StopFailure` 对应的原生事件。
 
-3. **拖入应用文件夹**  
-   打开虚拟磁盘后，拖 `claudi0.app` 到 `/Applications` 文件夹（需要有写入权限）
+### Claude Code
 
-4. **打开应用**  
-   前往 `/Applications`，找到 `claudi0.app`，按下方指引操作
+在 Claude Code 详情中点“连接”。Claudio 会向 `~/.claude/settings.json` 外科式追加自己的 hook：
 
----
+- 保留已有 hook、matcher、数组顺序及未知字段；
+- 首次修改已有文件前创建 `settings.json.claudio.bak`；
+- 重复连接不会制造重复条目或双响；
+- 旧的 `claudio play` 连接会显示为 legacy，需要显式升级才获得真实回执。
 
-## macOS 第一次打开时：绕过 Gatekeeper
+连接后在 Claude Code 提交一条真实提示词。只有当前 installation ID 的回调产生回执后，状态才是已激活；写好 JSON 本身不是激活证据。
 
-### 在新系统上打开（macOS Sequoia 15 及更新版本，含 26）
+### Codex
 
-1. **打开 claudi0 时收到拦截**
-   > `"claudi0" 无法打开，因为 Apple 无法检查是否包含恶意软件。`
+在 Codex 详情中点“连接”。Claudio 只在 `~/.codex/hooks.json` 中管理 `UserPromptSubmit`、`Stop`、`PermissionRequest` 和 `SubagentStop` command hook；不会接管 `notify`，不会写私有 trust 数据，也不会删除第三方 hook。
 
-2. **进入系统设置 > 隐私与安全性**
+写入后：
 
-3. **下滑找到被拦的 claudi0**
-   在"安全性"部分你会看到这条信息：
-   ```
-   "claudi0" 已被阻止，因为来自身份不明的开发者
-   ```
-   旁边会有一个按钮
+1. 在 Codex 运行 `/hooks`；
+2. 确认 Claudio hooks；
+3. 提交一条真实提示词；
+4. 在 Claudio 点“重新检测”。
 
-4. **点击"仍要打开"**  
-   系统会要求你输入密码确认，完成后 claudi0 就能正常打开
+只有当前 installation ID 的 `UserPromptSubmit` 回执才能证明新增任务开始 hook 已激活。其它当前代次回执仍用于最近事件诊断，但不能代替首次确认。
 
-5. **后续打开直接运行**  
-   第一次绕过后，下次直接双击 `claudi0.app` 打开，不会再拦截
-
-### 在旧系统上打开（macOS Sonoma 14 及更早版本）
-
-1. **右键点击 claudi0.app**
-
-2. **选择"打开"**  
-   （而非左键双击）
-
-3. **在弹出的对话框中再点"打开"**  
-   系统会要求确认身份
-
-4. **后续打开直接运行**
-
-> **注意**：这个方式（右键打开）只在 macOS Sonoma 14 及更早版本上有效。从 macOS Sequoia 15 起，苹果收紧了 Gatekeeper 检查，右键打开不再能绕过，必须走系统设置路径（苹果的版本号从 15 直接跳到了 26，中间没有 16–25）。
-
----
-
-## 首次安装后：先准备声音，再分别连接宿主
-
-1. **打开 claudi0**（菜单栏会出现 Orbit Zero 图标）。首次启动只准备共享 runtime：把 helper 与内置声音包放进 `~/.claudio/`、修复 quarantine，并在尚未选包时选择默认包。它**不会静默改写** Claude Code 或 Codex 配置。
-2. 点菜单栏图标。面板始终显示两条等权声音来源：
-
-   ```text
-   Claude Code    5/5 …
-   Codex          4/5 …
-   ```
-
-   Codex `4/5` 是正常能力，不是故障：当前没有与「执行中断」对应的 `StopFailure` 原生事件。
-3. 点击任一来源行打开「声音来源」详情窗口，然后分别连接需要的宿主。
-
-### 连接 Claude Code
-
-点 Claude Code 卡片里的「连接」。claudi0 只向 `~/.claude/settings.json` 追加自己的 hook：
-
-- 保留原有 hook、matcher 与数组顺序
-- 首次写入前建立一次性备份
-- 重复连接不会重复安装或制造双响
-- 旧的 `claudio play` 连接继续有效，并显示为 legacy；需要真实回执时可在详情窗口点「升级连接」
-
-### 连接 Codex
-
-点 Codex 卡片里的「连接」。claudi0 只在 `~/.codex/hooks.json` 中管理自己的 `UserPromptSubmit`、`Stop`、`PermissionRequest` 与 `SubagentStop` command hook；不会接管单命令 `notify`，也不会读写私有 trust 数据或删除第三方 hook。
-
-写入完成后会显示：
-
-> **claudi0 已写好，等待 Codex 确认**
-
-在 Codex 中运行 `/hooks` 并确认 claudi0 hooks，然后再提交一次提示词。详情窗口提供「复制 `/hooks`」和「重新检测」。只有当前 installation ID 的 `UserPromptSubmit` 回执才能证明新增的任务开始 hook 已激活并点亮绿色连接；仅仅写好 JSON，或只有旧的 Stop 等回执，都不算激活。其它当前代次回执仍会作为最新事件诊断显示。
-
-Codex 的「待响应」只覆盖 `PermissionRequest`（**仅授权请求**）。`UserPromptSubmit` 是任务开始，不计入「待响应」；`Stop` 只写「本轮结束」，不承诺任务已经完成。
-
-### 也可以走 Terminal
+### Terminal 等价命令
 
 ```bash
-# 查看两个宿主
+# 查看 shared runtime 与两个宿主
 /Applications/claudi0.app/Contents/Resources/bin/claudi0 integrations status
 
 # 分别连接
@@ -128,26 +74,89 @@ Codex 的「待响应」只覆盖 `PermissionRequest`（**仅授权请求**）�
 /Applications/claudi0.app/Contents/Resources/bin/claudi0 integrations connect codex
 ```
 
-`claudi0 setup` 保留旧版兼容行为：它会准备 shared runtime 并连接 Claude Code，**不会替你激活 Codex**。`claudi0 install` / `uninstall` 也仍是 Claude Code 兼容别名。旧 hooks 继续调用 `~/.claudio/bin/claudio`，改名不会让现有连接失效。
+`claudi0 setup` 只保留旧版兼容语义：准备 shared runtime 并连接 Claude Code legacy hooks，不会替用户激活 Codex。旧 hooks 继续调用 `~/.claudio/bin/claudio`，品牌入口 `~/.claudio/bin/claudi0` 与它并存。
 
-> **关于 Gatekeeper 隔离（macOS 会给下载来的文件盖一个 `com.apple.quarantine` 章）**：
-> 这个章如果留在 `~/.claudio/bin/claudio` 上，Claude Code 每次执行 hook 时都会被系统**直接杀掉**——
-> 没有任何报错，你只会觉得"装好了但就是不响"。所以 shared bootstrap（以及兼容的 `setup`）在复制完成后会
-> **自动解除隔离并回头验证一次**；万一没解掉，它会**报错并且不写任何 hook**，而不是留给你一个
-> 看起来装好了、实际永远静音的安装。`claudi0 doctor` 也会把"被隔离的二进制"报成硬失败。
+## 用户文件与真实回执
 
----
+- Claudio 自有状态：`~/.claudio/`。
+- Claude Code 配置：`~/.claude/settings.json`；一次性备份为相邻的 `.claudio.bak`。
+- Codex hooks：`~/.codex/hooks.json`；一次性备份为相邻的 `.claudio.bak`。
+- 回执：`~/.claudio/integrations/receipts/<host>/<event>.json`，权限 `0600`。
 
-## 卸载
+回执只包含 installation ID、宿主/事件、时间和脱敏播放结果；不包含提示词、响应内容、项目路径、会话内容或音频绝对路径。不要手改回执伪造激活状态。
 
-### 通过 Homebrew
+## Gatekeeper 与完整性排障
 
-先在「声音来源」详情窗口分别断开已连接的宿主，或运行：
+正式 Release 已签名和公证，正常安装不需要“仍要打开”，也不依赖 `xattr` 清除 quarantine。如果 macOS 拒绝打开：
+
+```bash
+spctl --assess --type open --context context:primary-signature -vv claudi0-<version>.dmg
+codesign --verify --deep --strict --verbose=2 /Applications/claudi0.app
+```
+
+同时重新核对 `SHA256SUMS.txt`。任何失败都应视为下载损坏、非官方构建或 Release 完整性问题；删除该文件，从官方 Release 重新下载，并在仍可复现时提交 issue。不要把关闭 Gatekeeper 或清除 quarantine 当作安装步骤。
+
+本地运行 `scripts/dev-bundle.sh` 得到的是 ad-hoc 开发包，只用于当前机器走查；它不具备正式 Release 的身份、公证和跨架构保证。
+
+## 声音不响或 hook 未激活
+
+1. 用面板的试听按钮检查播放链。试听绕过宿主 hook。
+2. 运行：
+
+   ```bash
+   ~/.claudio/bin/claudi0 integrations status
+   ~/.claudio/bin/claudi0 doctor
+   tail -20 ~/.claudio/claudio.log
+   ```
+
+3. Claude Code 连接后必须提交一条新提示词。
+4. Codex 必须先通过 `/hooks` 确认，再提交提示词；`4/5` 无需修复。
+5. 检查系统输出音量、Claudio 主音量和逐事件静音。
+
+只有 shared runtime 不可用或已连接宿主损坏才会让新版 `doctor` 返回失败；未安装或未连接的宿主是提示状态。
+
+## 从 app bundle 修复 shared runtime
+
+helper 或内置声音包缺失时，运行：
+
+```bash
+/Applications/claudi0.app/Contents/Resources/bin/claudi0 setup
+```
+
+一定要使用 app bundle 内的路径。`~/.claudio/bin/claudi0 setup` 看不到 `Contents/Resources/packs/`，无法补回缺失的 factory pack。
+
+`setup` 会：
+
+- 原子更新 helper，并校验它可执行；
+- 复制缺失的内置包，不覆盖同名用户自定义包；
+- 把残缺包原样搬到 `packs/.<id>.broken-…` 后再装干净副本；
+- 在当前选择已失效时换到一个确实可解析的包并明确报告；
+- 幂等补齐 Claude Code legacy hooks。
+
+如果没有任何可用包、helper 不可执行或 `config.json` 无法安全解析，`setup` 会在新增 hook 前失败关闭，不留下“看似连接但永远静音”的状态。
+
+## 更新
+
+Homebrew：
+
+```bash
+brew upgrade --cask claudi0
+```
+
+DMG：下载新版本并把新的 `claudi0.app` 拖入 `/Applications` 覆盖旧 app。
+
+更新不会覆盖 `~/.claudio/`、用户声音包、宿主配置、回执或备份。更新后可用 `claudi0 integrations status` 重新检测。
+
+## 断开与卸载
+
+先分别断开宿主：
 
 ```bash
 ~/.claudio/bin/claudi0 integrations disconnect claude-code
 ~/.claudio/bin/claudi0 integrations disconnect codex
 ```
+
+断开一个宿主只删除该宿主中 Claudio 自己的条目；不会删除另一宿主、第三方 hooks、声音包或 shared runtime。`claudi0 uninstall` 仍只是断开 Claude Code legacy hooks 的兼容别名。
 
 然后卸载 app：
 
@@ -155,111 +164,29 @@ Codex 的「待响应」只覆盖 `PermissionRequest`（**仅授权请求**）�
 brew uninstall --cask claudi0
 ```
 
-断开一个宿主只删除该宿主的 claudi0 条目；不会删除另一宿主、第三方 hooks、声音包或 `~/.claudio/` shared runtime。`claudi0 uninstall` 仍可作为断开 Claude Code 的兼容别名。
+或把 `/Applications/claudi0.app` 移到废纸篓。
 
-### 手动卸载
+两种方式都保留 `~/.claudio/`。要彻底清理，先备份需要的声音包，再运行 `open ~/.claudio` 并在 Finder 中手动移到废纸篓。界面偏好可用 `defaults delete com.claudio.app` 单独清除。
 
-1. 在「声音来源」详情窗口分别断开已连接的宿主，或运行：
-   ```bash
-   ~/.claudio/bin/claudi0 integrations disconnect claude-code
-   ~/.claudio/bin/claudi0 integrations disconnect codex
-   ```
-2. 拖 `claudi0.app` 到回收站（从 `/Applications` 删除）。
+## 从一次性备份恢复宿主配置
 
----
-
-## 故障排除
-
-### 我已经点过"仍要打开"，但 claudi0 还是打不开
-
-1. 确认你是在**系统设置 > 隐私与安全性** 中点的，而不是在通知框里
-2. 如果仍不行，尝试在终端里直接运行：
-   ```bash
-   open /Applications/claudi0.app
-   ```
-3. 看是否有其他错误信息
-
-### claudi0 打开了但没发声
-
-1. 在面板确认目标宿主已连接；也可以运行 `~/.claudio/bin/claudi0 integrations status`。未安装/未连接是提示，不是 shared runtime 故障。
-2. 如果 Codex 显示「claudi0 已写好，等待 Codex 确认」，先运行 `/hooks` 完成确认，再提交一次提示词并点「重新检测」。`4/5` 本身不需要修复。
-3. 确认系统音量以及 claudi0 的主音量/对应事件没有静音。
-4. 在 claudi0 面板里找到当前声音包，点对应事件的试听按钮 ▶。试听会绕过宿主 hook，能帮助区分「播放链坏了」和「宿主还没激活」。
-5. 运行 `~/.claudio/bin/claudi0 doctor`，分别查看 shared runtime、Claude Code 与 Codex。只有 shared runtime 不可用或已连接宿主损坏才会返回失败。
-
-### 重跑一次 `setup` 可以修复 shared runtime 与 Claude Code 兼容连接（**从 app bundle 里跑**）
-
-`setup` 是幂等兼容入口，会修复 helper、声音包、当前选包和 Claude Code 连接。Codex 始终通过 `integrations connect codex` / 详情窗口单独管理，并仍需要 `/hooks` 确认。
+`.claudio.bak` 是首次写入前的原始快照，不会吸收之后由宿主、用户或第三方工具写入的变化。先断开 Claudio，再比较：
 
 ```bash
-/Applications/claudi0.app/Contents/Resources/bin/claudi0 setup
+diff -u ~/.claude/settings.json.claudio.bak ~/.claude/settings.json
+diff -u ~/.codex/hooks.json.claudio.bak ~/.codex/hooks.json
 ```
 
-> ⚠️ **一定要从 app bundle 里跑这条路径**，不要跑 `~/.claudio/bin/claudi0 setup`。
-> 两者的区别只有一个，但很致命：**只有 app bundle 里的那份看得见内置声音包**（它们躺在
-> `claudi0.app/Contents/Resources/packs/`）。从 `~/.claudio/bin/` 跑的那份没有内置包可复制 ——
-> 如果你的问题恰恰是「声音包不见了」，它就修不好。
+不要无条件覆盖当前配置。只有在明确接受丢弃首次连接之后的修改时，才应退出对应宿主、另存当前文件并手动恢复备份。
 
-它会做这几件事（每一件都会在输出里如实说出来）：
+## 相关文档
 
-- 二进制不在 / 被 macOS 隔离 → 重新复制、解除隔离，并**回头验证一次**（没解掉就报错，绝不写 hooks）
-- 内置声音包不在 → 复制回来；严格 pristine 的 `minimal-chime 1.0.0` 会原子升级为含「任务开始」的 `1.1.0`，任何格式化、额外文件或音频变化都视为自定义并保持不变；若所在卷不支持原子目录交换，则安全保留 1.0.0 并继续启动
-- 上一次安装被中断留下的**残缺包** → 原样搬到一个备份目录（`packs/.<id>.broken-…`，**一个文件都不删**），
-  再装一份干净的；输出里会告诉你搬到哪儿了
-- 你选中的那个包已经不在了 / 读不出来 → 替你换上一个能响的，并打印一行 ⚠ 告诉你换的是哪个
-  （你随时可以在面板的声音包列表里换回去）
-- Claude Code 的 claudi0 hooks 不在 → 补上（不会覆盖你自己的配置）
-
-**它绝不会做的事**：在一台注定发不出声音的机器上写 Claude Code hooks 然后告诉你「装好了」。
-只要这次安装注定是哑的（一个能用的声音包都没有、二进制被隔离、`config.json` 读不出来），
-它会**大声失败并且不新增 Claude Code hook** —— 一个看起来装好了、实际永远静音的安装，比一次诚实的报错糟糕得多。
-
-### 需要诊断日志
-
-```bash
-# 查看最近的错误日志
-tail -20 ~/.claudio/claudio.log
-
-# 或运行自检
-~/.claudio/bin/claudi0 doctor
-
-# 查看两宿主状态（机器可读时加 --json）
-~/.claudio/bin/claudi0 integrations status
-```
-
-真实回执位于 `~/.claudio/integrations/receipts/<host>/<event>.json`，权限为 `0600`。它只含 installation ID、宿主/事件、时间和脱敏播放结果；不会保存提示词、响应内容、项目路径、会话内容或音频绝对路径。不要通过手改回执强行点亮连接——只有当前 installation 的真实 hook 回调才有效。
-
----
-
-## 即将推出：签名版本
-
-我们计划在近期上线 **Apple Developer 签名 + 公证** 的版本，这样新系统打开时就没有 Gatekeeper 拦截了。签名版本发布后，无需任何绕过步骤，就能像其他 App Store 应用一样直接打开。
-
----
-
-## 更新到新版本
-
-### 通过 Homebrew
-
-```bash
-brew upgrade claudi0
-```
-
-### 手动更新
-
-1. 下载新的 `claudi0-<version>.dmg`
-2. 挂载 DMG
-3. 拖新的 `claudi0.app` 到 `/Applications`，覆盖旧版本
-4. 完成
-
-你之前配置的声音包、Claude Code / Codex 的 claudi0 条目与真实回执会保留。共享配置在 `~/.claudio/`，宿主条目仍分别位于各自配置文件中；更新后可用 `claudi0 integrations status` 重新检测。
-
----
-
-## 相关链接
-
-- **项目主页**：[GitHub](https://github.com/d0m999/Claudio)
-- **问题报告**：[Issues](https://github.com/d0m999/Claudio/issues)
-- **设计文档**：[DESIGN.md](../DESIGN.md)
-- **工程规范**：[ENGINEERING.md](../ENGINEERING.md)
-- **声音包标准**：[pack-standard.md](./pack-standard.md)
+- [README](../README.md)
+- [中文 README](../README.zh-CN.md)
+- [贡献指南](../CONTRIBUTING.md)
+- [安全策略](../SECURITY.md)
+- [工程规范](../ENGINEERING.md)
+- [声音包标准](pack-standard.md)
+- [Apple：Packaging Mac software for distribution](https://developer.apple.com/documentation/xcode/packaging-mac-software-for-distribution)
+- [Apple：Notarizing macOS software before distribution](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution)
+- [GitHub：Licensing a repository](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository)

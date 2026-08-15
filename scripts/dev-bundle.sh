@@ -4,6 +4,12 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+REQUESTED_VERSION="${CLAUDIO_VERSION:-}"
+if [[ -n "$REQUESTED_VERSION" && ! "$REQUESTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    echo "❌ CLAUDIO_VERSION must be an unprefixed MAJOR.MINOR.PATCH value" >&2
+    exit 2
+fi
+
 GUI_NATIVE_HOST_CARD_PROBE=false
 if [[ $# -eq 1 && "$1" == "--native-host-card-probe" ]]; then
     GUI_NATIVE_HOST_CARD_PROBE=true
@@ -67,15 +73,24 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Reso
 cp "$GUI_BIN_DIR/ClaudioGUI" "$APP/Contents/MacOS/claudi0-app"
 cp -R "$GUI_RESOURCE_BUNDLE" "$APP/Contents/Resources/$(basename "$GUI_RESOURCE_BUNDLE")"
 cp -R "$LOCALIZATION_BUNDLE" "$APP/Contents/Resources/$(basename "$LOCALIZATION_BUNDLE")"
-cp "$(swift build -c release --package-path helper --product claudio --show-bin-path)/claudio" \
-   "$APP/Contents/Resources/bin/claudi0"
+HELPER_BIN_DIR="$(swift build -c release --package-path helper --product claudio --show-bin-path)"
+HELPER_BINARY="$HELPER_BIN_DIR/claudio"
+BUNDLE_VERSION="$("$HELPER_BINARY" --version)"
+if [[ "$BUNDLE_VERSION" != "0.0.0-dev" && ! "$BUNDLE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+    echo "❌ helper returned an invalid embedded version: $BUNDLE_VERSION" >&2
+    exit 1
+fi
+if [[ -n "$REQUESTED_VERSION" && "$BUNDLE_VERSION" != "$REQUESTED_VERSION" ]]; then
+    echo "❌ helper version mismatch: requested=$REQUESTED_VERSION embedded=$BUNDLE_VERSION" >&2
+    exit 1
+fi
+cp "$HELPER_BINARY" "$APP/Contents/Resources/bin/claudi0"
 # 旧入口继续可执行，但只保留一个 helper Mach-O；相对链接在 app/DMG 搬动后仍然成立。
 ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
-cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"
-cp packs/LICENSES.md "$APP/Contents/Resources/packs/LICENSES.md"
+bash scripts/copy-bundled-packs.sh packs "$APP/Contents/Resources/packs"
 cp assets/branding/claudi0.icns "$APP/Contents/Resources/claudi0.icns"
 
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -83,8 +98,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>CFBundleName</key><string>claudi0</string>
   <key>CFBundleDisplayName</key><string>claudi0</string>
   <key>CFBundleIdentifier</key><string>com.claudio.app</string>
-  <key>CFBundleVersion</key><string>0.0.0-dev</string>
-  <key>CFBundleShortVersionString</key><string>0.0.0-dev</string>
+  <key>CFBundleVersion</key><string>$BUNDLE_VERSION</string>
+  <key>CFBundleShortVersionString</key><string>$BUNDLE_VERSION</string>
   <key>CFBundleExecutable</key><string>claudi0-app</string>
   <key>CFBundleIconFile</key><string>claudi0.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>

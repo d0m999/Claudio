@@ -1,4 +1,5 @@
 import ArgumentParser
+import ClaudioCore
 
 /// `claudi0` — Claude Code 与 Codex 共用的声音中心 helper。
 ///
@@ -9,7 +10,7 @@ struct Claudio: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "claudi0",
         abstract: "claudi0 — Claude Code 与 Codex 的语义化提示音中心。",
-        version: "0.0.1",
+        version: ClaudioVersion.current,
         subcommands: [
             Doctor.self, Play.self, Hook.self, Integrations.self,
             Install.self, Uninstall.self, Use.self, Setup.self,

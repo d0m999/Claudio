@@ -77,8 +77,11 @@ func runReleaseLayoutSuites() {
     suite("release.yml 真的把 helper 放在 GUI 会去找的那个位置") {
         let workflow = repositoryRoot()
             .appendingPathComponent(".github/workflows/release.yml")
+        let packCopyScriptURL = repositoryRoot()
+            .appendingPathComponent("scripts/copy-bundled-packs.sh")
         guard let data = try? Data(contentsOf: workflow),
-            let yaml = String(data: data, encoding: .utf8)
+            let yaml = String(data: data, encoding: .utf8),
+            let packCopyScript = try? String(contentsOf: packCopyScriptURL, encoding: .utf8)
         else {
             expect(
                 false,
@@ -107,18 +110,18 @@ func runReleaseLayoutSuites() {
                 + "所有测试会绿、CI 会绿、DMG 会照常签发，然后 CTA 在每一台用户机器上报「找不到小助手」。"
                 + "实际的 cp 行：\(copyLines)")
 
-        // `performFirstRunSetup` 从 helper 路径去掉两级、拼 `packs` 反推内置包目录。
+        // `performFirstRunSetup` 从 helper 路径去掉两级、拼 `packs` 反推内置包目录。发布流程通过
+        // 独立脚本遍历所有 pack，而不是把当前唯一的 minimal-chime 写死在 workflow 里。
         expect(
-            copyLines.contains { $0.contains("Contents/Resources/packs") },
-            "release.yml 里没有任何一条 `cp` 把内置包复制进 \"Contents/Resources/packs\" —— 包目录是从"
-                + "helper 路径反推出来的（去掉两级 + packs），放错地方会让 setup 一个包都复制不出来，"
-                + "而且**不报错**。实际的 cp 行：\(copyLines)")
+            yaml.contains(
+                #"bash scripts/copy-bundled-packs.sh packs "$APP/Contents/Resources/packs""#),
+            "release.yml 必须把所有内置包交给 fail-closed 遍历脚本复制到 Contents/Resources/packs")
         expect(
-            copyLines.contains {
-                $0.contains("packs/LICENSES.md")
-                    && $0.contains("Contents/Resources/packs/LICENSES.md")
-            },
-            "release.yml 必须把内置音频来源与 CC0 台账一起装入 app bundle。实际的 cp 行：\(copyLines)")
+            packCopyScript.contains(#"entries=("$SOURCE_ROOT"/*)"#)
+                && packCopyScript.contains(#"cp -R "$entry" "$DESTINATION_ROOT/$entry_name""#)
+                && packCopyScript.contains(
+                    #"cp "$SOURCE_ROOT/LICENSES.md" "$DESTINATION_ROOT/LICENSES.md""#),
+            "内置包脚本必须遍历全部顶层 pack，并把音频许可台账一起装入 app bundle")
         expect(
             yaml.contains("swift build -c release --arch arm64 --product claudio")
                 && yaml.contains("swift build -c release --arch x86_64 --product claudio"),
@@ -144,7 +147,7 @@ func runReleaseLayoutSuites() {
             yaml.contains("APP_EXECUTABLE: claudi0-app"),
             "GUI bundle 可执行文件必须使用 claudi0-app，与内置 claudi0 helper 明确分开")
         expect(
-            yaml.contains("<key>CFBundleExecutable</key><string>${{ env.APP_EXECUTABLE }}</string>"),
+            yaml.contains("<key>CFBundleExecutable</key><string>$APP_EXECUTABLE</string>"),
             "Info.plist 必须把 CFBundleExecutable 绑定到 APP_EXECUTABLE")
         expect(
             yaml.contains("strip -x dist/bin/claudio")
@@ -289,13 +292,15 @@ func runReleaseLayoutSuites() {
         let taskStartURL = root.appendingPathComponent("packs/minimal-chime/task_start.mp3")
         let licensesURL = root.appendingPathComponent("packs/LICENSES.md")
         let devBundleURL = root.appendingPathComponent("scripts/dev-bundle.sh")
+        let packCopyScriptURL = root.appendingPathComponent("scripts/copy-bundled-packs.sh")
 
         guard
             let manifestData = try? Data(contentsOf: manifestURL),
             let manifest = try? JSONSerialization.jsonObject(with: manifestData) as? [String: Any],
             let events = manifest["events"] as? [String: String],
             let licenses = try? String(contentsOf: licensesURL, encoding: .utf8),
-            let devBundle = try? String(contentsOf: devBundleURL, encoding: .utf8)
+            let devBundle = try? String(contentsOf: devBundleURL, encoding: .utf8),
+            let packCopyScript = try? String(contentsOf: packCopyScriptURL, encoding: .utf8)
         else {
             expect(false, "读不到内置包 manifest、许可证台账或 dev bundle 脚本")
             return
@@ -323,10 +328,12 @@ func runReleaseLayoutSuites() {
             "LICENSES.md 必须绑定 task_start 的来源、许可与最终 SHA256")
 
         expect(
-            devBundle.contains("cp -R packs/minimal-chime")
-                && devBundle.contains("cp packs/LICENSES.md")
+            devBundle.contains("bash scripts/copy-bundled-packs.sh")
+                && packCopyScript.contains(#"entries=("$SOURCE_ROOT"/*)"#)
+                && packCopyScript.contains("LICENSES.md")
+                && !packCopyScript.contains("packs/minimal-chime")
                 && devBundle.contains("--package-path helper --product claudio"),
-            "dev bundle 必须复制 1.1.0 包与许可证，并显式构建 claudio helper product")
+            "dev bundle 必须遍历复制所有 pack 与许可证，并显式构建 claudio helper product")
         expect(
             devBundle.contains("strip -x")
                 && devBundle.contains("bash scripts/check-release-size.sh")
@@ -455,22 +462,7 @@ func runReleaseLayoutSuites() {
         expect(icnsData?.prefix(4) == Data("icns".utf8), "claudi0.icns 必须是有效的 icns 容器")
     }
 
-    // ⚠️ **钉 `release.yml`，不是 `Casks/claudi0.rb`**（T17c 对抗评审）。
-    //
-    // 上一版这条断言读的是 `Casks/claudi0.rb` —— 而那个文件**自己的第 1 行**就写着「参考模板，
-    // 非本仓库直接生效的 Homebrew tap」。真正 `brew install` 会用到的 cask，是下面这个 workflow 的
-    // update-cask job 用 here-doc **生成并推到 tap 仓库**的那一份。于是：把 release.yml 里的 `-dr`
-    // 改回 `-d` → 所有测试全绿、CI 全绿、DMG 照常签发 → 每一位 brew 用户拿到的 bundle 里，
-    // 那个嵌套的 helper 仍然带着 com.apple.quarantine → 复制到 `~/.claudio/bin/` 之后被 Gatekeeper
-    // 每次 SIGKILL（实测 exit=137，零 stderr）。
-    //
-    // 这个 suite 存在的全部理由，是它文件头写下的那句话：「一个跨 yml 与二进制的生产者/消费者契约，
-    // 只有一种回归网可能存在 —— 真的去读那个 yml」。上一条 `cp` 断言做到了，这一条没有：它去读了
-    // 一份仓库自己声明为「不是安装源」的模板。绊线钉在诱饵上，等于没钉。
-    //
-    // `Casks/claudi0.rb` 仍然一起钉 —— 它是人读的参考，漂了同样是 bug（这次评审正是先发现它的
-    // caveats 与 release.yml 生成的那份已经反向漂移：一个说「点接管即可」，一个说「面板不会自动接管」）。
-    suite("release.yml 生成的 cask（brew 真正装的那份）必须递归解除隔离（-dr）") {
+    suite("release.yml 必须 Developer ID 签名、公证并失败关闭，不能回退 ad-hoc") {
         let yml = repositoryRoot().appendingPathComponent(".github/workflows/release.yml")
         guard let data = try? Data(contentsOf: yml),
             let yaml = String(data: data, encoding: .utf8)
@@ -479,36 +471,107 @@ func runReleaseLayoutSuites() {
             return
         }
 
-        // 只看真正的 xattr 参数行，不做全文 grep —— 与上面 `cp` 那条同一条纪律：一次文本断言若不
-        // 区分「代码」与「谈论代码的文字」（注释、release notes 的散文），它断的就不是代码。
-        let xattrArgLines = yaml
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { $0.hasPrefix("args:") && $0.contains("com.apple.quarantine") }
+        expect(
+            yaml.contains("APPLE_DEVELOPER_ID_CERTIFICATE_BASE64")
+                && yaml.contains("APPLE_DEVELOPER_ID_CERTIFICATE_PASSWORD")
+                && yaml.contains("APPLE_NOTARY_API_KEY_BASE64")
+                && yaml.contains("APPLE_NOTARY_KEY_ID")
+                && yaml.contains("APPLE_NOTARY_ISSUER_ID")
+                && yaml.contains("missing required Apple release credentials"),
+            "签名或公证凭据缺失时 release 必须在构建前失败关闭")
+        expect(
+            yaml.contains("--options runtime")
+                && yaml.contains("--timestamp")
+                && yaml.contains("Developer ID Application")
+                && yaml.contains("xcrun notarytool submit")
+                && yaml.contains("xcrun stapler staple")
+                && yaml.contains("xcrun stapler validate")
+                && yaml.contains("spctl --assess"),
+            "release 必须完成 hardened runtime 签名、容器公证、staple 与 Gatekeeper 验证")
+        expect(
+            !yaml.contains("codesign --force --deep --sign -")
+                && !yaml.contains("/usr/bin/xattr")
+                && !yaml.contains("com.apple.quarantine"),
+            "正式发布不得回退 ad-hoc 签名，也不得靠清除 quarantine 绕过 Gatekeeper")
+        expect(
+            yaml.contains("SHA256SUMS.txt")
+                && yaml.contains("HOMEBREW_TAP_ENABLED == 'true'")
+                && yaml.contains("security delete-keychain"),
+            "release 必须上传校验和、让 tap 保持可选，并始终清理临时 keychain")
 
+        // GitHub expressions are evaluated before the shell starts. Keeping them out of every
+        // run body prevents a tag-derived value from becoming shell source code.
+        let lines = yaml.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var runBodyLines: [String] = []
+        var runIndent: Int?
+        for line in lines {
+            let indent = line.prefix { $0 == " " }.count
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if let activeIndent = runIndent {
+                if !trimmed.isEmpty && indent <= activeIndent {
+                    runIndent = nil
+                } else {
+                    runBodyLines.append(line)
+                    continue
+                }
+            }
+            if trimmed == "run: |" || trimmed.hasPrefix("run: ") {
+                runIndent = indent
+            }
+        }
         expect(
-            !xattrArgLines.isEmpty,
-            "release.yml 的 update-cask here-doc 里必须有一条 xattr 的 args: 行 —— 找不到它，"
-                + "说明 cask 模板被改动过，这条断言已经失去了它要保护的对象")
-        expect(
-            xattrArgLines.allSatisfy {
-                $0.contains("\"-dr\"") || $0.contains("\"-rd\"") || $0.contains("--recursive")
-            },
-            "release.yml 生成给 tap 的 cask，其 postflight 必须递归解除隔离 —— 非递归的 `xattr -d` "
-                + "只剥 .app 目录自己那一层，剥不掉 Contents/Resources/bin/claudio 上的章，"
-                + "而一个带 com.apple.quarantine 的 helper 会被 Gatekeeper 在每次 hook 执行时 SIGKILL"
-                + "（实测 exit=137）。实际的 args 行：\(xattrArgLines)")
-
-        // 这份 here-doc 的 caveats 是**每一位 brew 用户看到的第一屏引导**。T17 把 CTA 接线之后，
-        // 它一度还在原样告诉用户「面板暂不会自动接管，需在 Terminal 跑 setup」—— 主分发渠道的
-        // 第一句话与产品的实际行为相反，而且正是这次提交花了整个 T17 去消灭的那句话。
-        expect(
-            !yaml.contains("暂不会自动接管"),
-            "release.yml 生成给 tap 的 cask，其 caveats 仍在告诉 brew 用户「菜单栏面板暂不会自动接管」"
-                + " —— CTA 早已接线（T17）。这句话会印在主分发渠道的第一屏上")
+            runBodyLines.allSatisfy { !$0.contains("${{") },
+            "run 脚本体不得直接包含 GitHub expression；不可信值必须先经 env 传入并校验")
     }
 
-    suite("Casks/claudi0.rb（人读的参考模板）与 release.yml 生成的那份不得漂移") {
+    suite("开发、tag、CLI、Info.plist、DMG 与 CI 共用同一版本契约") {
+        let root = repositoryRoot()
+        let releaseURL = root.appendingPathComponent(".github/workflows/release.yml")
+        let ciURL = root.appendingPathComponent(".github/workflows/ci.yml")
+        let packageURL = root.appendingPathComponent("helper/Package.swift")
+        let cliURL = root.appendingPathComponent("helper/Sources/claudio/Claudio.swift")
+        guard
+            let release = try? String(contentsOf: releaseURL, encoding: .utf8),
+            let ci = try? String(contentsOf: ciURL, encoding: .utf8),
+            let package = try? String(contentsOf: packageURL, encoding: .utf8),
+            let cli = try? String(contentsOf: cliURL, encoding: .utf8)
+        else {
+            expect(false, "读不到版本源、CLI 或 CI/release workflow")
+            return
+        }
+
+        expect(
+            package.contains(#"?? "0.0.0-dev""#)
+                && package.contains(#"environment["CLAUDIO_VERSION"]"#)
+                && cli.contains("version: ClaudioVersion.current"),
+            "开发默认版本必须只由 Package.swift 注入 ClaudioVersion，并由 CLI 直接消费")
+        expect(
+            release.contains(
+                #"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$"#)
+                && release.contains(#"echo "CLAUDIO_VERSION=$VERSION" >> "$GITHUB_ENV""#)
+                && release.contains(
+                    "<key>CFBundleShortVersionString</key><string>$CLAUDIO_VERSION</string>")
+                && release.contains(#"DMG_NAME="$APP_NAME-$CLAUDIO_VERSION.dmg""#)
+                && release.contains(#"--title "$APP_NAME $CLAUDIO_VERSION""#),
+            "严格 tag 派生的同一版本必须进入构建环境、Info.plist、DMG 与 Release 标题")
+        expect(
+            release.contains(#"CLI_VERSION="$("$APP/Contents/Resources/bin/claudi0" --version)""#)
+                && release.contains("release version mismatch"),
+            "发布组装后必须执行 CLI/Info.plist 版本一致性门禁")
+        expect(
+            ci.contains("push:")
+                && ci.contains("pull_request:")
+                && ci.contains("swift run --package-path helper claudio-tests")
+                && ci.contains("swift run --package-path gui claudio-gui-tests")
+                && ci.contains("swift build -c debug --package-path gui --product ClaudioGUI")
+                && ci.contains("swift build -c release --package-path gui --product ClaudioGUI")
+                && ci.contains("jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings")
+                && ci.contains("bash scripts/check-release-size.sh dist/claudi0.app")
+                && ci.contains("git diff --check"),
+            "push/PR CI 必须覆盖双 harness、双配置 GUI 构建、catalog、体积与 whitespace")
+    }
+
+    suite("Homebrew cask 保持可选、签名分发且卸载不删除用户数据") {
         let cask = repositoryRoot().appendingPathComponent("Casks/claudi0.rb")
         guard let data = try? Data(contentsOf: cask),
             let ruby = String(data: data, encoding: .utf8)
@@ -518,15 +581,16 @@ func runReleaseLayoutSuites() {
         }
 
         expect(
-            ruby.contains("\"-dr\"") || ruby.contains("\"-rd\"") || ruby.contains("--recursive"),
-            "参考模板也必须写 -dr，否则它会教下一个人写错的那一版")
-
-        // caveats 漂移过一次（T17c 逮到）：T17 把「点面板里的接管即可」写进了这份模板，却没写进
-        // release.yml 那份 here-doc —— 于是真实的 brew 用户会被告知「面板暂不会自动接管，请去
-        // Terminal 跑 setup」，正是这次提交花了整个 T17 去消灭的那句话。两份手写副本必然漂移，
-        // 这条断言钉住的是它们**关于同一件事的说法**必须一致。
+            ruby.contains(#"depends_on macos: ">= :monterey""#)
+                && ruby.contains(#"app "claudi0.app""#)
+                && ruby.contains("claudi0-#{version}.dmg")
+                && ruby.contains("sha256"),
+            "cask 必须绑定真实版本化 DMG、SHA-256、macOS 12+ 与 app artifact")
         expect(
-            !ruby.contains("暂不会自动接管"),
-            "参考模板的 caveats 仍在说「面板暂不会自动接管」—— CTA 早已接线（T17）")
+            !ruby.contains("xattr")
+                && !ruby.contains("com.apple.quarantine")
+                && !ruby.contains("zap trash:")
+                && ruby.contains("preserves ~/.claudio"),
+            "cask 不得绕过 Gatekeeper，也不得在卸载时删除 ~/.claudio 用户数据")
     }
 }

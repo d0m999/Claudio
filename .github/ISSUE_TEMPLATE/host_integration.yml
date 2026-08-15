@@ -1,0 +1,77 @@
+name: Host integration problem
+description: Report a Claude Code or Codex connection, activation, receipt, or hook issue.
+title: "[Integration]: "
+labels:
+  - integration
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A written hook is not the same as an active hook. Please complete the real-event checks below, but never paste the contents of `settings.json`, `hooks.json`, receipt files, prompts, or responses.
+  - type: dropdown
+    id: host
+    attributes:
+      label: Host
+      options:
+        - Claude Code
+        - Codex
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Claudio and host versions
+      placeholder: "claudi0 0.1.0; Claude Code 2.x / Codex ..."
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: macOS and architecture
+      placeholder: "macOS 15.x, Intel x86_64"
+    validations:
+      required: true
+  - type: dropdown
+    id: state
+    attributes:
+      label: Claudio state
+      options:
+        - Not connected
+        - Configured, awaiting a real receipt
+        - Legacy connection
+        - Incomplete or conflicting configuration
+        - Active, but an event is missing or silent
+        - Shared runtime damaged
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps and visible messages
+      description: Describe actions and UI/CLI messages without pasting raw configuration.
+    validations:
+      required: true
+  - type: textarea
+    id: status
+    attributes:
+      label: Redacted status output
+      description: Paste redacted `claudi0 integrations status` or `claudi0 doctor` output only.
+      render: shell
+  - type: checkboxes
+    id: activation
+    attributes:
+      label: Activation checks
+      options:
+        - label: After connecting, I submitted a new real prompt in the affected host.
+        - label: For Codex, I ran `/hooks` and confirmed Claudio hooks before submitting the prompt.
+        - label: I used Re-detect or reran `integrations status` after the real event.
+        - label: I did not manually edit a receipt to force the state.
+          required: true
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy checklist
+      options:
+        - label: I removed prompts, responses, private paths, installation IDs, and credentials.
+          required: true
