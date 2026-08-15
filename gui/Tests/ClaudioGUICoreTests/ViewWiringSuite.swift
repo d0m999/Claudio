@@ -2703,6 +2703,18 @@ func runViewWiringSuites() {
             chipBody.contains(".help(coverageHelp)")
                 && chipBody.contains(".accessibilityHidden(true)"),
             "映射标签必须保留完整 help，但由身份按钮聚合播报而不是新增 VoiceOver 停靠点")
+        guard
+            let accessibilityValueBody = closureBody(
+                after: "private var coverageAccessibilityValue: String", in: flat)
+        else {
+            expect(false, "切不出 coverageAccessibilityValue")
+            return
+        }
+        expect(
+            accessibilityValueBody.contains("case .present: return coverageText")
+                && accessibilityValueBody.contains("case .unmapped, .broken: return coverageHelp")
+                && !accessibilityValueBody.contains("coverageText, coverageHelp"),
+            "unmapped/broken 的 VoiceOver value 只能补充修复指引；映射状态已由 identity label 播报，禁止重复")
     }
 
     suite(

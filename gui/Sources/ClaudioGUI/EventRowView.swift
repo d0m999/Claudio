@@ -356,8 +356,7 @@ public struct EventRowView: View {
         case .present:
             return coverageText
         case .unmapped, .broken:
-            return [coverageText, coverageHelp]
-                .joined(separator: language == .english ? ", " : "，")
+            return coverageHelp
         }
     }
 
