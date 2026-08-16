@@ -18,12 +18,41 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Toolchain
         run: swift --version
 
       - name: Check patch whitespace
-        run: git diff --check
+        shell: bash
+        env:
+          CLAUDIO_CI_EVENT_NAME: ${{ github.event_name }}
+          CLAUDIO_CI_PUSH_BEFORE: ${{ github.event.before }}
+          CLAUDIO_CI_PUSH_HEAD: ${{ github.sha }}
+          CLAUDIO_CI_PR_BASE: ${{ github.event.pull_request.base.sha }}
+          CLAUDIO_CI_PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$CLAUDIO_CI_EVENT_NAME" == "pull_request" ]]; then
+            base="$CLAUDIO_CI_PR_BASE"
+            head="$CLAUDIO_CI_PR_HEAD"
+          else
+            base="$CLAUDIO_CI_PUSH_BEFORE"
+            head="$CLAUDIO_CI_PUSH_HEAD"
+          fi
+
+          if [[ -z "$base" || -z "$head" ]]; then
+            echo "::error::unable to determine the revision range for whitespace validation"
+            exit 1
+          fi
+
+          if [[ "$base" =~ ^0+$ ]]; then
+            git diff-tree --check --root -r "$head"
+          else
+            git diff --check "$base" "$head"
+          fi
 
       - name: Validate string catalog JSON
         run: jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings

@@ -50,7 +50,7 @@ for entry in "${entries[@]}"; do
         and (.id | type == "string" and test("^[a-z0-9][a-z0-9-]*$"))
         and (.name | type == "string" and length > 0)
         and (.author | type == "string" and length > 0)
-        and (.license | type == "string" and length > 0)
+        and (.license == "CC0-1.0")
         and (.version | type == "string" and length > 0)
         and (.events | type == "object" and length > 0)
         and ([
