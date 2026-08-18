@@ -4,7 +4,7 @@
 
 Claudio is a local-first macOS sound center for Claude Code and Codex. It turns host lifecycle events into distinct, controllable sound cues, while keeping host configuration, sound packs, diagnostics, and activation evidence visible to you.
 
-![Claudio menu bar panel preview showing Claude Code and Codex status plus five semantic sound events](docs/images/claudi0-overview.png)
+![claudi0 product overview for Claude Code and Codex](docs/images/claudi0-github-intro.png)
 
 _Interface preview. The native app follows your selected Claudio language and macOS appearance._
 
