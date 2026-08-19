@@ -41,16 +41,23 @@ func runPrivateDirectorySuites() {
         withTempDirectory { scratch in
             let target = scratch.appendingPathComponent("target", isDirectory: true)
             try! FileManager.default.createDirectory(at: target, withIntermediateDirectories: false)
+            let redirectedLeaf = target.appendingPathComponent("receipts", isDirectory: true)
+            try! FileManager.default.createDirectory(at: redirectedLeaf, withIntermediateDirectories: false)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: redirectedLeaf.path)
             let link = scratch.appendingPathComponent("link", isDirectory: true)
             createSymlink(at: link, pointingTo: target)
             do {
                 try ensurePrivateDirectoryTree(at: link.appendingPathComponent("receipts"))
-                expect(false, "symlink 中间层不得被跟随")
+                expect(false, "最终目录已存在时也不得跟随 symlink 中间层")
             } catch let error as PrivateDirectoryError {
                 expect(error == .unsafeNode(path: link.path), "必须点名 symlink 层，got \(error)")
             } catch {
                 expect(false, "必须保留 typed PrivateDirectoryError，got \(error)")
             }
+            expect(
+                privateDirectoryPermissions(redirectedLeaf) == 0o755,
+                "拒绝中间 symlink 前不得 chmod 其外部目标")
 
             let file = scratch.appendingPathComponent("plain")
             try! Data("x".utf8).write(to: file)

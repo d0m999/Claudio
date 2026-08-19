@@ -100,6 +100,24 @@ public final class FileLock {
         attemptLock() == .acquired
     }
 
+    /// Acquires the exclusive lock, waiting for an active owner when necessary. Bootstrap uses
+    /// this variant because its journal protocol cannot safely skip a live owner; `play` keeps
+    /// using ``attemptLock()`` / ``withNonBlockingLock(path:_:)`` for latency-sensitive debounce.
+    @discardableResult
+    public func lock() -> LockAttempt {
+        let firstAttempt = attemptLock()
+        switch firstAttempt {
+        case .acquired, .failed:
+            return firstAttempt
+        case .busy:
+            while flock(descriptor, LOCK_EX) != 0 {
+                let code = errno
+                guard code == EINTR else { return .failed(errno: code) }
+            }
+            return .acquired
+        }
+    }
+
     /// Releases the lock (if held) and closes the underlying file descriptor. Safe to
     /// call multiple times, and safe to call even if the lock was never acquired.
     public func unlock() {

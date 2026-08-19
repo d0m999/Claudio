@@ -124,11 +124,37 @@ public struct BootstrapReportStore: Sendable {
 
     @discardableResult
     public func append(events: [BootstrapReportEvent]) throws -> BootstrapReportRecord? {
-        guard !events.isEmpty else { return nil }
+        try append(BootstrapReportRecord(events: events))
+    }
+
+    /// Publishes a report whose identity is already durable elsewhere (the bootstrap journal).
+    /// Repeating this call after a process dies between publication and journal removal returns
+    /// the original record rather than consuming another queue slot or duplicating side effects.
+    @discardableResult
+    public func append(
+        id: UUID,
+        createdAt: Date,
+        events: [BootstrapReportEvent]
+    ) throws -> BootstrapReportRecord? {
+        try append(BootstrapReportRecord(id: id, createdAt: createdAt, events: events))
+    }
+
+    private func append(_ candidate: BootstrapReportRecord) throws -> BootstrapReportRecord? {
+        guard !candidate.events.isEmpty else { return nil }
         var existing = try records()
-        let candidate = BootstrapReportRecord(events: events)
+        if let persisted = existing.first(where: { $0.id == candidate.id }) {
+            // UUIDs make a collision vanishingly unlikely, but accepting a different payload for
+            // the same durable journal ID would hide facts. Fail closed instead.
+            guard persisted.events == candidate.events else {
+                throw BootstrapReportStoreError.invalidRecord(
+                    path: directory.appendingPathComponent("\(candidate.id.uuidString).json").path)
+            }
+            return persisted
+        }
         if candidate.isPureFailure,
-            let index = existing.lastIndex(where: { $0.isPureFailure && $0.events == events })
+            let index = existing.lastIndex(where: {
+                $0.isPureFailure && $0.events == candidate.events
+            })
         {
             existing[index].occurrenceCount += 1
             try write(existing[index])
@@ -310,14 +336,57 @@ private func progressAfterFailure(
         packSelection: selection)
 }
 
+/// The journal's own lock is deliberately separate from `packs.lock` and `settings.lock`: it
+/// protects the larger recovery -> bootstrap -> report-publication protocol, not one individual
+/// file mutation. Unlike `play`'s debounce lock, bootstrap waits for the active owner because a
+/// skip would either lose setup work or misclassify a live journal as a crashed process.
+private func withBootstrapJournalLock<T>(
+    environment: SetupEnvironment,
+    _ body: () -> T
+) -> Result<T, BootstrapReportStoreError> {
+    let journal = environment.bootstrapJournalFile
+    let lockFile = journal.deletingLastPathComponent()
+        .appendingPathComponent(".\(journal.lastPathComponent).lock")
+    do {
+        try ensurePrivateDirectoryTree(at: lockFile.deletingLastPathComponent())
+    } catch {
+        return .failure(.io(reason: "无法准备 bootstrap 锁目录：\(error)"))
+    }
+    let lock = FileLock(path: lockFile.path)
+    switch lock.lock() {
+    case .acquired:
+        defer { lock.unlock() }
+        return .success(body())
+    case .busy:
+        // `lock()` waits after its initial non-blocking probe, so this is unreachable. Keep a
+        // fail-closed branch in case a future implementation grows an explicit cancellation path.
+        return .failure(.io(reason: "bootstrap 锁在等待后仍处于忙碌状态"))
+    case .failed(let code):
+        return .failure(.io(reason: "无法获取 bootstrap 锁：\(String(cString: strerror(code)))"))
+    }
+}
+
 /// Journaled bootstrap entry point used by the app/manager. The compatibility Result API remains
 /// available for older CLI/tests, but new callers retain facts even when a later step fails.
 public func performSharedRuntimeBootstrapExecution(
     environment: SetupEnvironment
 ) -> SharedRuntimeBootstrapExecution {
+    switch withBootstrapJournalLock(environment: environment, {
+        performSharedRuntimeBootstrapExecutionLocked(environment: environment)
+    }) {
+    case .success(let execution): return execution
+    case .failure(let error):
+        return .failed(
+            error: .reportingUnavailable(reason: error.description),
+            progress: SharedRuntimeBootstrapProgress())
+    }
+}
+
+private func performSharedRuntimeBootstrapExecutionLocked(
+    environment: SetupEnvironment
+) -> SharedRuntimeBootstrapExecution {
     let store = BootstrapReportStore(directory: environment.bootstrapReportsDirectory)
     do {
-        try store.ensureCapacity()
         if let previous = readJournal(at: environment.bootstrapJournalFile) {
             if previous.state == .inProgress || !previous.events.isEmpty {
                 var recoveryEvents = previous.events
@@ -348,12 +417,21 @@ public func performSharedRuntimeBootstrapExecution(
                 } else if recoveryEvents.isEmpty {
                     recoveryEvents = [.failure(code: "interrupted_bootstrap")]
                 }
-                if !recoveryEvents.isEmpty { _ = try store.append(events: recoveryEvents) }
+                if !recoveryEvents.isEmpty {
+                    _ = try store.append(
+                        id: previous.id,
+                        createdAt: previous.startedAt,
+                        events: recoveryEvents)
+                }
             }
             try removeRegularFile(environment.bootstrapJournalFile)
         } else if FileManager.default.fileExists(atPath: environment.bootstrapJournalFile.path) {
             throw BootstrapReportStoreError.invalidRecord(path: environment.bootstrapJournalFile.path)
         }
+        // Reconcile an already-published final journal before checking capacity. A crash after
+        // append but before unlink must be able to remove its journal even when it occupied the
+        // last queue slot.
+        try store.ensureCapacity()
     } catch {
         return .failed(
             error: .reportingUnavailable(reason: String(describing: error)),
@@ -407,7 +485,11 @@ public func performSharedRuntimeBootstrapExecution(
         execution: execution, helperPath: environment.claudioBinaryDestination)
     do {
         try writeJournal(journal, at: environment.bootstrapJournalFile)
-        _ = try store.append(events: journal.events)
+        _ = try store.append(
+            id: journal.id,
+            createdAt: journal.startedAt,
+            events: journal.events)
+        try environment.afterBootstrapReportPublished()
         try removeRegularFile(environment.bootstrapJournalFile)
     } catch {
         // Keep the final journal as the recovery source for the next launch. Never erase facts

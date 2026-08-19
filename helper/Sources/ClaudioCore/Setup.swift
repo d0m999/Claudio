@@ -49,6 +49,9 @@ public struct SetupEnvironment: Sendable {
     /// Test-only-style interruption seam immediately after the durable journal exists and before
     /// bootstrap mutates user content. Production uses the no-op default.
     public let afterBootstrapJournalPersisted: @Sendable () throws -> Void
+    /// Test seam immediately after the final report has been published and before its journal is
+    /// removed. It proves replay is idempotent across that otherwise tiny crash window.
+    public let afterBootstrapReportPublished: @Sendable () throws -> Void
     /// Test seam immediately before the second pristine check. Production is a no-op;
     /// tests use it to model another process changing the destination while staging is built.
     public let beforePristinePackFinalVerification: @Sendable () -> Void
@@ -76,6 +79,7 @@ public struct SetupEnvironment: Sendable {
         bootstrapJournalFile: URL? = nil,
         bootstrapReportsDirectory: URL? = nil,
         afterBootstrapJournalPersisted: @escaping @Sendable () throws -> Void = {},
+        afterBootstrapReportPublished: @escaping @Sendable () throws -> Void = {},
         beforePristinePackFinalVerification: @escaping @Sendable () -> Void = {},
         beforePristinePackAtomicExchange: @escaping @Sendable () -> Void = {},
         replacePristinePack: @escaping @Sendable (URL, URL) throws -> Void = {
@@ -113,6 +117,7 @@ public struct SetupEnvironment: Sendable {
         self.bootstrapReportsDirectory = bootstrapReportsDirectory
             ?? inferredRoot.appendingPathComponent("bootstrap-reports", isDirectory: true)
         self.afterBootstrapJournalPersisted = afterBootstrapJournalPersisted
+        self.afterBootstrapReportPublished = afterBootstrapReportPublished
         self.beforePristinePackFinalVerification = beforePristinePackFinalVerification
         self.beforePristinePackAtomicExchange = beforePristinePackAtomicExchange
         self.replacePristinePack = replacePristinePack

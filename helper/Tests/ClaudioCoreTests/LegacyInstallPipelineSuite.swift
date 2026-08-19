@@ -47,4 +47,26 @@ func runLegacyInstallPipelineSuites() {
                 "every semantic warning must have a CLI line")
         }
     }
+
+    suite("legacy install preflight follows play's lenient optional-config decoding") {
+        withTempDirectory { root in
+            let config = root.appendingPathComponent("config.json")
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            writeFixture(
+                #"{ "selected_pack": "usable", "master_volume": "wrong", "events": [] }"#,
+                to: config)
+            writeFixture(
+                #"{ "id": "usable", "events": { "stop": "stop.mp3" } }"#,
+                to: packs.appendingPathComponent("usable/manifest.json"))
+            writeFixture("sound", to: packs.appendingPathComponent("usable/stop.mp3"))
+
+            guard case .success(let report) = legacyInstallPipelineReport(
+                configFile: config, userPacksDirectory: packs)
+            else {
+                expect(false, "可播放包不得被仅写配置才关心的可选字段类型拒绝")
+                return
+            }
+            expect(report.packID == "usable" && report.playableEvents == [.stop], "预检必须保留播放路径的选择与事件")
+        }
+    }
 }

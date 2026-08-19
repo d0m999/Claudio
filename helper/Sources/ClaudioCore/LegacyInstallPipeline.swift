@@ -50,13 +50,11 @@ public func legacyInstallPipelineReport(
     userPacksDirectory: URL = ClaudioPaths.packsDirectory,
     bundledPacksDirectory: URL? = nil
 ) -> Result<LegacyInstallPipelineReport, LegacyInstallPipelineError> {
-    switch probeConfigRewritable(configFile: configFile) {
-    case .absent:
+    // This command writes only `settings.json`. Its gate must therefore match the tolerant
+    // read path used by `playSoundEvent`, not the strict JSON round-trip policy reserved for
+    // mutations of `config.json` itself.
+    guard FileManager.default.fileExists(atPath: configFile.path) else {
         return .failure(.configMissing(path: configFile.path))
-    case .malformed(let reason):
-        return .failure(.configUnreadable(reason: reason))
-    case .rewritable, .unwritable:
-        break
     }
 
     guard case .success(let configData) = readConfigFileBounded(at: configFile) else {

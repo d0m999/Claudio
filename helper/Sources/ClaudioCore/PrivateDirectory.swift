@@ -38,6 +38,12 @@ private func ensurePrivateDirectory(
     _ directory: URL,
     tightenExistingLeaf: Bool
 ) throws {
+    // `lstat(directory)` only protects the leaf. If (for example) `root/link/receipts`
+    // already exists, it reports the target `receipts` directory and silently hides `link`.
+    // Walk every existing lexical component first so no caller can be redirected outside the
+    // Claudio-owned tree before the final O_NOFOLLOW open/fchmod below.
+    try validateExistingDirectoryComponents(of: directory)
+
     var status = stat()
     let inspection = directory.withUnsafeFileSystemRepresentation { path -> Int32 in
         guard let path else {
@@ -81,6 +87,54 @@ private func ensurePrivateDirectory(
     }
     // EEXIST 可能来自同用户竞态。重新以 no-follow fd 校验真实终态，而非相信先前 lstat。
     try tightenPrivateDirectory(directory)
+}
+
+/// Validates the existing prefix of an absolute directory path without following any component.
+/// Once a component is absent, the remaining suffix is necessarily absent too and the recursive
+/// creator above owns its construction. This intentionally does not chmod ancestors: callers may
+/// start below `$HOME`, `/tmp`, or another user-owned directory.
+private func validateExistingDirectoryComponents(of directory: URL) throws {
+    let components = directory.pathComponents
+    guard components.first == "/" else {
+        throw PrivateDirectoryError.unsafeNode(path: directory.path)
+    }
+
+    var current = URL(fileURLWithPath: "/", isDirectory: true)
+    for component in components.dropFirst() {
+        current.appendPathComponent(component, isDirectory: true)
+        var status = stat()
+        let inspected = current.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else {
+                errno = EINVAL
+                return -1
+            }
+            return Darwin.lstat(path, &status)
+        }
+        if inspected != 0 {
+            let code = errno
+            if code == ENOENT { return }
+            throw PrivateDirectoryError.operationFailed(path: current.path, errno: code)
+        }
+        guard status.st_mode & S_IFMT == S_IFDIR
+            || isApprovedMacOSSystemDirectoryAlias(current)
+        else {
+            throw PrivateDirectoryError.unsafeNode(path: current.path)
+        }
+    }
+}
+
+/// `/var`, `/tmp`, and `/etc` are stable macOS namespace aliases into `/private`; test fixtures
+/// and legitimate callers can be rooted there. They are the only intermediate symlinks accepted,
+/// and only when their literal payload is exactly Apple's expected one. User-controlled aliases
+/// (including every component below them) remain fail-closed.
+private func isApprovedMacOSSystemDirectoryAlias(_ url: URL) -> Bool {
+    let expectedPayloads = [
+        "/var": "private/var",
+        "/tmp": "private/tmp",
+        "/etc": "private/etc",
+    ]
+    guard let expected = expectedPayloads[url.path] else { return false }
+    return (try? FileManager.default.destinationOfSymbolicLink(atPath: url.path)) == expected
 }
 
 private func tightenPrivateDirectory(_ directory: URL) throws {

@@ -253,9 +253,6 @@ public struct ConfigFileTransaction {
             {
                 return .failure(.danglingSymlink(path: file.path))
             }
-            if case .notWritable(let reason) = probeSettingsWritable(settingsFile: file) {
-                return .failure(.notWritable(reason: reason))
-            }
             return performUpdate(
                 mutate,
                 betweenReadAndWrite: betweenReadAndWrite,
@@ -291,6 +288,14 @@ public struct ConfigFileTransaction {
         case .replace(let replacement, let replacementValue):
             nextRoot = replacement
             value = replacementValue
+        }
+
+        // A read-only transaction can still safely establish that there is no work to do.
+        // Probe publication capability only once the schema mutation has explicitly requested a
+        // replacement; otherwise idempotent uninstall would incorrectly fail before returning
+        // `.notInstalled`.
+        if case .notWritable(let reason) = probeSettingsWritable(settingsFile: file) {
+            return .failure(.notWritable(reason: reason))
         }
 
         let encoded: Data

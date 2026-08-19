@@ -1069,6 +1069,27 @@ func runSettingsInstallerSuites() {
         }
     }
 
+    suite("uninstallClaudioHooks: read-only settings.json without Claudio hooks remains idempotent") {
+        withTempDirectory { root in
+            let settingsFile = root.appendingPathComponent("settings.json")
+            let lockFile = root.appendingPathComponent("settings.lock")
+            let original = #"{ "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "vibe-island stop" } ] } ] } }"#
+            writeFixture(original, to: settingsFile)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o400], ofItemAtPath: settingsFile.path)
+            defer {
+                try? FileManager.default.setAttributes(
+                    [.posixPermissions: 0o600], ofItemAtPath: settingsFile.path)
+            }
+
+            let result = uninstallClaudioHooks(
+                settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
+                lockFile: lockFile)
+            expect(result == .success(.notInstalled), "无需替换时只读配置必须仍返回 .notInstalled，got \(result)")
+            expect(readRawString(at: settingsFile) == original, "幂等卸载不得改动只读配置")
+        }
+    }
+
     suite("installClaudioHooks: missing parent directory aborts via the writability probe, no crash") {
         withTempDirectory { root in
             let settingsFile = root.appendingPathComponent("no-such-dir", isDirectory: true)

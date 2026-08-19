@@ -1,5 +1,6 @@
 import ClaudioCore
 import Darwin
+import Dispatch
 import Foundation
 
 private enum InjectedBootstrapInterruption: Error {
@@ -9,10 +10,12 @@ private enum InjectedBootstrapInterruption: Error {
 @MainActor
 private func bootstrapEnvironment(
     root: URL,
-    afterJournal: @escaping @Sendable () throws -> Void = {}
+    executablePath: URL? = nil,
+    afterJournal: @escaping @Sendable () throws -> Void = {},
+    afterReport: @escaping @Sendable () throws -> Void = {}
 ) -> SetupEnvironment {
     SetupEnvironment(
-        executablePath: root.appendingPathComponent("bin/claudio"),
+        executablePath: executablePath ?? root.appendingPathComponent("bin/claudio"),
         claudioBinaryDestination: root.appendingPathComponent("bin/claudio"),
         userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true),
         configFile: root.appendingPathComponent("config.json"),
@@ -20,7 +23,8 @@ private func bootstrapEnvironment(
         configLockFile: root.appendingPathComponent("config.lock"),
         settingsLockFile: root.appendingPathComponent("settings.lock"),
         packsLockFile: root.appendingPathComponent("packs.lock"),
-        afterBootstrapJournalPersisted: afterJournal)
+        afterBootstrapJournalPersisted: afterJournal,
+        afterBootstrapReportPublished: afterReport)
 }
 
 private func publishHealthyBootstrapRuntime(at root: URL) {
@@ -177,6 +181,77 @@ func runBootstrapReportSuites() {
             expect(
                 !FileManager.default.fileExists(atPath: interrupted.bootstrapJournalFile.path),
                 "健康空 journal 必须自动清理")
+        }
+    }
+
+    suite("bootstrap journal：最终 report 已写入而 journal 尚在时按 journal ID 幂等恢复") {
+        withTempDirectory { root in
+            let resources = root.appendingPathComponent("app/Resources", isDirectory: true)
+            let source = resources.appendingPathComponent("bin/claudio")
+            writeBootstrapFixture("helper", to: source)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o700], ofItemAtPath: source.path)
+            let bundledPack = resources.appendingPathComponent("packs/shipped", isDirectory: true)
+            writeBootstrapFixture(
+                #"{"id":"shipped","events":{"stop":"stop.mp3"}}"#,
+                to: bundledPack.appendingPathComponent("manifest.json"))
+            writeBootstrapFixture("audio", to: bundledPack.appendingPathComponent("stop.mp3"))
+
+            let interrupted = bootstrapEnvironment(
+                root: root,
+                executablePath: source,
+                afterReport: { throw InjectedBootstrapInterruption.stop })
+            guard case .completed = performSharedRuntimeBootstrapExecution(environment: interrupted)
+            else {
+                expect(false, "report 后中断前 bootstrap 本身必须已完成")
+                return
+            }
+            let store = BootstrapReportStore(directory: interrupted.bootstrapReportsDirectory)
+            let beforeRecovery = try! store.records()
+            expect(beforeRecovery.count == 1, "journal 删除前必须已经只有一条最终报告")
+            guard let report = beforeRecovery.first else { return }
+            expect(
+                FileManager.default.fileExists(atPath: interrupted.bootstrapJournalFile.path),
+                "report 已发布后的中断必须保留最终 journal 供重试")
+
+            _ = performSharedRuntimeBootstrapExecution(environment: bootstrapEnvironment(root: root))
+            let afterRecovery = try! store.records()
+            expect(
+                afterRecovery.count == 1
+                    && afterRecovery.first?.id == report.id
+                    && afterRecovery.first?.occurrenceCount == 1,
+                "journal replay 必须识别已发布的同一 ID，不能重复入队或合并计数")
+            expect(
+                !FileManager.default.fileExists(atPath: interrupted.bootstrapJournalFile.path),
+                "幂等重放后必须删除已确认发布的最终 journal")
+        }
+    }
+
+    suite("bootstrap journal：第二个调用等待活跃 owner，不把其 journal 误报为中断") {
+        withTempDirectory { root in
+            publishHealthyBootstrapRuntime(at: root)
+            let environment = bootstrapEnvironment(root: root)
+            let lock = FileLock(path: root.appendingPathComponent(".bootstrap-journal.json.lock").path)
+            expect(lock.tryLock(), "测试必须先持有 bootstrap journal 锁")
+
+            let started = DispatchSemaphore(value: 0)
+            let finished = DispatchSemaphore(value: 0)
+            DispatchQueue.global().async {
+                started.signal()
+                _ = performSharedRuntimeBootstrapExecution(environment: environment)
+                finished.signal()
+            }
+            _ = started.wait(timeout: .now() + 1)
+            expect(
+                finished.wait(timeout: .now() + 0.1) == .timedOut,
+                "持锁期间第二个 bootstrap 不得读取/恢复 live journal")
+            lock.unlock()
+            expect(
+                finished.wait(timeout: .now() + 5) == .success,
+                "释放锁后等待中的 bootstrap 必须继续完成")
+            expect(
+                (try! BootstrapReportStore(directory: environment.bootstrapReportsDirectory).records()).isEmpty,
+                "仅锁竞争不能生成 interrupted_bootstrap 报告")
         }
     }
 }

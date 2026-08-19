@@ -45,12 +45,10 @@ public struct ClaudioOrbitZeroMark: View {
             Ellipse()
                 .stroke(ClaudioTheme.clay(colorScheme).opacity(0.10), lineWidth: size * 0.13)
                 .frame(width: size * 0.82, height: size * 0.94)
-                .offset(x: -size * 0.22)
 
             Ellipse()
                 .stroke(ClaudioTheme.clay(colorScheme), lineWidth: max(1.4, size * 0.10))
                 .frame(width: size * 0.56, height: size * 0.88)
-                .offset(x: -size * 0.22)
 
             // 斜轨故意穿过字形，静态时也保留“正在运行”的方向感。
             Ellipse()
@@ -59,13 +57,13 @@ public struct ClaudioOrbitZeroMark: View {
                     lineWidth: max(0.75, size * 0.035))
                 .frame(width: size * 1.48, height: size * 0.50)
                 .rotationEffect(.degrees(-16))
-                .offset(x: size * 0.10)
 
             Circle()
                 .fill(ClaudioTheme.clay(colorScheme))
                 .frame(width: max(2, size * 0.12), height: max(2, size * 0.12))
                 .offset(x: size * 0.56, y: -size * 0.34)
         }
+        .offset(x: -size * 0.22)
         .frame(width: size * 1.36, height: size)
         .accessibilityHidden(true)
     }
