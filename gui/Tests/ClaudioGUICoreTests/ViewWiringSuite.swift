@@ -2263,6 +2263,7 @@ func runViewWiringSuites() {
     suite("三界面无障碍护栏：每个交互构造都有显式非空 Name 与稳定 identifier") {
         let paths = [
             "gui/Sources/ClaudioGUI/PanelView.swift",
+            "gui/Sources/ClaudioGUI/PanelQuitFooter.swift",
             "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift",
             "gui/Sources/ClaudioGUI/EventRowView.swift",
             "gui/Sources/ClaudioGUI/PackGalleryView.swift",
@@ -2304,6 +2305,8 @@ func runViewWiringSuites() {
                 "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
             let packs = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
+            let footer = codeOnly(
+                "gui/Sources/ClaudioGUI/PanelQuitFooter.swift"),
             let textSizeStepper = codeOnly(
                 "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift")
         else {
@@ -2317,6 +2320,7 @@ func runViewWiringSuites() {
         ] {
             expect(panel.contains(identifier), "主面板缺少稳定 AX identifier：\(identifier)")
         }
+        expect(footer.contains("panel.quit"), "固定退出 footer 缺少稳定 AX identifier：panel.quit")
         for identifier in [
             "panel.options.text-size.decrease", "panel.options.text-size.increase",
             "panel.options.text-size.status",
@@ -2341,6 +2345,110 @@ func runViewWiringSuites() {
         ] {
             expect(packs.contains(identifier), "声音包窗口缺少稳定 AX identifier：\(identifier)")
         }
+    }
+
+    suite("Panel 固定退出入口：footer 位于 ScrollView 之后并完整转发 required onQuit") {
+        guard
+            let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let footer = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelQuitFooter.swift")
+        else {
+            expect(false, "读不到 PanelView/PanelQuitFooter")
+            return
+        }
+        let flatPanel = collapsingWhitespace(panel)
+        guard
+            let body = closureBody(after: "public var body: some View", in: panel),
+            let scrollBody = closureBody(
+                after: "ScrollView(.vertical, showsIndicators: true)", in: body),
+            let scrollAt = body.range(of: "ScrollView(.vertical, showsIndicators: true)")?.lowerBound,
+            let footerAt = body.range(of: "PanelQuitFooter(")?.lowerBound
+        else {
+            expect(false, "无法切出 PanelView 根布局或 ScrollView")
+            return
+        }
+        expect(panel.contains("VStack(spacing: 0)"), "PanelView 根布局必须是零间距 VStack")
+        expect(scrollAt < footerAt, "footer 必须作为 ScrollView 后面的同级节点")
+        expect(
+            braceDepth(of: "ScrollView(.vertical, showsIndicators: true)", in: body)
+                == braceDepth(of: "PanelQuitFooter(", in: body),
+            "footer 与 ScrollView 必须处于同一花括号层级，不能嵌进其他条件容器")
+        expect(!scrollBody.contains("PanelQuitFooter("), "footer 不得放进可滚动内容")
+        expect(
+            flatPanel.contains("private let onQuit: @MainActor () -> Void")
+                && flatPanel.contains("onQuit: @escaping @MainActor () -> Void,")
+                && !flatPanel.contains("onQuit: @escaping @MainActor () -> Void =")
+                && flatPanel.contains("self.onQuit = onQuit")
+                && flatPanel.contains("PanelQuitFooter(")
+                && flatPanel.contains("onQuit: onQuit"),
+            "PanelView.onQuit 必须无默认值、保存并完整转发给 footer")
+        expect(
+            footer.contains("let onQuit: @MainActor () -> Void")
+                && footer.contains("Button(action: onQuit)"),
+            "PanelQuitFooter 的按钮 action 只能调用显式注入的 onQuit")
+    }
+
+    suite("退出生命周期：SwiftUI 只发意图，唯一 composition root 正常 terminate 且不预关闭") {
+        guard
+            let menu = codeWithoutStrings("gui/Sources/ClaudioGUI/MenuBarController.swift"),
+            let footer = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelQuitFooter.swift"),
+            let quitBody = closureBody(after: "onQuit:", in: menu)
+        else {
+            expect(false, "读不到退出接线或无法切出 onQuit 闭包")
+            return
+        }
+        expect(
+            collapsingWhitespace(quitBody) == "NSApp.terminate(nil)",
+            "composition root 的退出闭包必须且只能调用 NSApp.terminate(nil)，实际：\(quitBody)")
+        for forbidden in ["popover.close()", "performClose", "notePanelHidden()", "exit(", "_exit(", "abort(", "killall"] {
+            expect(
+                !quitBody.contains(forbidden),
+                "退出闭包不得预关闭面板或直接杀进程，命中：\(forbidden)")
+            expect(
+                !footer.contains(forbidden),
+                "SwiftUI footer 不得接管应用生命周期，命中：\(forbidden)")
+        }
+    }
+
+    suite("退出按钮 AX 与焦点：精确 label/hint/id、图标隐藏，quit 明确不是事件焦点") {
+        guard
+            let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let footer = codeOnly("gui/Sources/ClaudioGUI/PanelQuitFooter.swift")
+        else {
+            expect(false, "读不到 PanelView/PanelQuitFooter")
+            return
+        }
+        let flatFooter = collapsingWhitespace(footer)
+        expect(
+            flatFooter.contains(".focused(focusedTarget, equals: .quitApplication)")
+                && footer.contains(".accessibilityLabel(l10n.text(.panelQuitApplication))")
+                && footer.contains(".accessibilityHint(l10n.text(.panelQuitApplicationHint))")
+                && footer.contains(".accessibilityIdentifier(\"panel.quit\")")
+                && footer.contains(".help(l10n.text(.panelQuitApplicationHint))"),
+            "退出按钮必须接入末位焦点，并带精确本地化 AX/help 语义")
+        expect(
+            flatFooter.contains("Image(systemName: \"power\") .accessibilityHidden(true)"),
+            "power 图标必须从 AX 树隐藏，避免 VoiceOver 重复朗读")
+        expect(
+            collapsingWhitespace(panel).contains(
+                "case .none, .onboardingPrimaryAction, .onboardingSecondaryAction, .hostSource, .masterVolume, .packCard, .manageSounds, .revealDetail, .disconnect, .configReveal, .quitApplication: return false"),
+            "PanelView.isEventFocusTarget 必须明确把 quitApplication 归为 false")
+    }
+
+    suite("State Gallery：直接复用生产 PanelQuitFooter，覆盖双语四字号与 312/360pt") {
+        guard let gallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift") else {
+            expect(false, "读不到 StateGalleryView")
+            return
+        }
+        let flat = collapsingWhitespace(gallery)
+        expect(
+            gallery.contains("PanelQuitFooter(")
+                && gallery.contains("ForEach(ClaudioAppLanguage.allCases)")
+                && gallery.contains("ForEach(ClaudioInterfaceTextSize.allCases)"),
+            "State Gallery 必须直接渲染生产 footer 的 2×4 组合")
+        expect(
+            flat.contains("panelLayoutAdaptation( for: panelTypeSizeTier(for: interfaceTextSize)).panelWidth")
+                && gallery.contains("onQuit: {}"),
+            "gallery 宽度必须来自 312/360 布局真相源，退出闭包必须无副作用")
     }
 
     suite("PanelView：界面文字使用方案 C 原生子 Popover 与实时 Binding，旧 Picker 路径已移除") {

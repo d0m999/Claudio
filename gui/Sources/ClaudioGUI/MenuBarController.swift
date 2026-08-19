@@ -217,6 +217,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             onAudibilityInputsChanged: { [weak actionRouter] in
                 actionRouter?.audibilityInputsChanged()
             },
+            onQuit: {
+                NSApp.terminate(nil)
+            },
             // T15 D5「极大 → 加宽 popover」, now actually in effect (TODOS.md:257): `PanelView`
             // widens ITSELF to `widenedPanelWidth` (360pt) at the `.maximum` Dynamic Type tier,
             // but this AppKit popover around it kept its hardcoded 312pt `contentSize` — so the

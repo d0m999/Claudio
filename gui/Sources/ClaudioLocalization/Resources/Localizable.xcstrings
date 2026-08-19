@@ -610,6 +610,18 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开声音包管理窗口" } }
       }
     },
+    "panel.quit-application" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quit claudi0" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "退出 claudi0" } }
+      }
+    },
+    "panel.quit-application.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Closes the panel and quits the app." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关闭面板并退出整个应用。" } }
+      }
+    },
     "panel.options.hint" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Adjust text size across the three Claudio interfaces" } },

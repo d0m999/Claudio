@@ -38,18 +38,20 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case masterVolume
     case packCard(id: String)
     /// 列表下方全宽虚线「管理声音包…」（PLAN-SOUND-MANAGER.md T7）。它在 operational panel
-    /// 的四种 configState 都无条件渲染，焦点序中紧跟全部 pack cards、排在 `.disconnect` 之前。
+    /// 的四种 configState 都无条件渲染，焦点序中紧跟全部 pack cards、排在固定 footer 的
+    /// `.quitApplication` 之前。
     /// 阶段 1 动作为在访达中显示 packs 目录，无写副作用，因此 in-flight 期间也恒可操作。
     case manageSounds
     /// 一条失败行上的「查看原因」（T17）—— 它是一个**可聚焦控件**，不是装饰：WCAG 2.1.1 要求
     /// 键盘用户也能展开那条原因，而这个仓库已经为「成功/拒绝之后只剩鼠标可用」记过一条 P3 账。
     case revealDetail
-    /// 运行态面板尾部的「断开连接」（T17，**授权的设计变更**）。
+    /// 旧单宿主面板的「断开连接」焦点身份（T17 历史兼容）。
     ///
     /// 它此前是 `OnboardingCopy(.installed).secondaryActionTitle`，而 `.installed` 状态下
     /// `PanelView` 渲染的是 `operationalPanel`、**根本不渲染 `OnboardingView`** —— 于是这颗按钮
-    /// 在整个 shipping app 里没有一个像素，只活在 state gallery 里。而 `.notInstalled` 的正文
-    /// 白纸黑字向用户承诺「随时可以一键撤销」。T17 给了它一个真入口，那句承诺才不是谎话。
+    /// 在当时的 shipping app 里没有一个像素，只活在 state gallery 里。双宿主收敛后，断开动作已移入
+    /// `IntegrationsWindow`，现行 operational order 不再 append 本 target；它只保留给旧 onboarding/
+    /// 兼容调用方。面板真正的无条件末位是 `.quitApplication`。
     case disconnect
     /// 「诚实失败态」卡片上的「在访达中显示 config.json」（/codex review P1，26bba37 follow-up）。
     ///
@@ -65,6 +67,8 @@ public enum PanelFocusTarget: Sendable, Hashable {
     /// 无条件 append 且恒可操作的 `.manageSounds` 才负责后者。`.configReveal` 只负责让
     /// `.malformed`/`.unwritable` 的首焦点跟随那张视觉最靠上的失败卡。
     case configReveal
+    /// 固定 footer 的退出按钮。它只存在于 operational 面板，恰好一次且永远排在全部条件内容之后。
+    case quitApplication
 }
 
 /// Everything ``panelFocusOrder(_:)`` needs to know about the panel's CURRENT shape —
@@ -125,7 +129,8 @@ public enum PanelFocusScope: Sendable, Equatable {
 /// order must track visual order, not an arbitrary model-first convenience — PLAN-SOUND-
 /// MANAGER.md §2.5/T2 grew this from two slots to three), then every pack gallery card
 /// (in ``availablePacks(config:environment:)``'s own order), then the always-rendered
-/// ``PanelFocusTarget/manageSounds``, and finally ``PanelFocusTarget/disconnect``. On
+/// ``PanelFocusTarget/manageSounds``, and finally the fixed footer's
+/// ``PanelFocusTarget/quitApplication``. On
 /// `.malformed`/`.unwritable` the 诚实失败卡's ``PanelFocusTarget/configReveal`` LEADS the whole
 /// operational list — it renders above every row/card, so visual order puts it first.
 /// `order.first` is where focus lands the instant the panel opens (ENGINEERING.md: "打开
@@ -170,6 +175,8 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         order.append(.manageSounds)
         // 旧版动作失败的详情槽仍由兼容调用方显式声明；新双宿主面板不再传这个 flag。
         if hasDetailToggle { order.append(.revealDetail) }
+        // footer 恒显且位于滚动区之后；任何条件内容都不得跑到它后面。
+        order.append(.quitApplication)
         return order
     }
 }
@@ -232,7 +239,8 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 /// `ctaOperable == false` because its Finder reveal has no write side effect. Earlier visible
 /// controls still win in visual order — an event row's `.eventSound`, a `.needsPack` panel's
 /// first pack card, or a config-failure panel's `.configReveal` — but zero rows / zero cards /
-/// no slider now lands safely on `.manageSounds`, never the disabled-or-destructive `.disconnect`.
+/// no slider now lands safely on `.manageSounds`; the always-operable `.quitApplication` follows
+/// it without changing the existing opening-focus priority.
 ///
 /// `.malformed`/`.unwritable` remain a stronger, state-specific case: their 诚实失败卡 leads with
 /// `.configReveal` (在访达中显示 config.json), which is also unconditionally operable during
@@ -287,7 +295,8 @@ public func panelFirstFocusTarget(
             // `.manageSounds` operability arm 同理。这让 `.malformed`/`.unwritable` 这两态
             // 的 operational scope 永不返回 nil，即便断开动作在飞。
             return true
-        case .hostSource, .eventMute, .packCard, .masterVolume, .manageSounds:
+        case .hostSource, .eventMute, .packCard, .masterVolume, .manageSounds,
+            .quitApplication:
             return true
         }
     }

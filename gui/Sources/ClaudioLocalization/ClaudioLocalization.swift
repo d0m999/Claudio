@@ -123,6 +123,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let panelSoundPacks: Self = "panel.sound-packs"
     public static let panelManageSoundPacks: Self = "panel.manage-sound-packs"
     public static let panelManageSoundPacksHint: Self = "panel.manage-sound-packs.hint"
+    public static let panelQuitApplication: Self = "panel.quit-application"
+    public static let panelQuitApplicationHint: Self = "panel.quit-application.hint"
     public static let panelRetry: Self = "panel.retry"
     public static let panelRetryHint: Self = "panel.retry.hint"
     public static let panelLoadingEvents: Self = "panel.loading-events"
@@ -473,7 +475,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .interfaceTextSizeLarge, .panelOptionsHint,
         .panelTitle, .panelBaseLabel, .panelHeader, .panelHeaderWithPack, .panelSources, .panelSelectedPackNone, .panelAudibleEventsLoading,
         .panelAudibleEventsUnavailable, .panelAudibleEventsCount, .panelEvents, .panelSoundPacks,
-        .panelManageSoundPacks, .panelManageSoundPacksHint, .panelRetry, .panelRetryHint,
+        .panelManageSoundPacks, .panelManageSoundPacksHint, .panelQuitApplication,
+        .panelQuitApplicationHint, .panelRetry, .panelRetryHint,
         .panelLoadingEvents, .panelUnavailableEvents, .panelSelectPack, .panelSelectPackMessage,
         .panelSelectPackWithChoicesMessage, .panelSelectPackWithoutChoicesMessage,
         .panelPacksLoading, .panelPacksNoPinnedTitle, .panelPacksNoPinnedMessage,

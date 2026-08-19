@@ -56,6 +56,16 @@ func runLocalizationSuites() {
         expect(
             english.plural(.panelAudibleEventsCount, count: 2) == "2 audible events",
             "English other plural entry must resolve")
+        expect(
+            chinese.text(.panelQuitApplication) == "退出 claudi0",
+            "quit accessibility label must use the exact approved Chinese copy")
+        expect(
+            english.text(.panelQuitApplication) == "Quit claudi0",
+            "quit accessibility label must have the approved English copy")
+        expect(
+            !chinese.text(.panelQuitApplicationHint).isEmpty
+                && !english.text(.panelQuitApplicationHint).isEmpty,
+            "quit accessibility hint must exist in both product languages")
 
         let values = ClaudioL10n.catalogValues()
         let pluralValues = ClaudioL10n.catalogPluralValues()

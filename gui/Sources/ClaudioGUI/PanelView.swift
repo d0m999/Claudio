@@ -75,6 +75,7 @@ public struct PanelView: View {
     private let onManageSounds: @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void
     private let onManageIntegrations: @MainActor (PanelFocusTarget) -> Void
     private let onAudibilityInputsChanged: @MainActor () -> Void
+    private let onQuit: @MainActor () -> Void
 
     /// Reports this panel's CURRENT ``PanelLayoutAdaptation/panelWidth`` to whoever owns the
     /// AppKit container around it — in production, ``MenuBarController``, which resizes its
@@ -99,6 +100,7 @@ public struct PanelView: View {
         onManageSounds: @escaping @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void,
         onManageIntegrations: @escaping @MainActor (PanelFocusTarget) -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
+        onQuit: @escaping @MainActor () -> Void,
         onPanelWidthChange: @escaping (Double) -> Void = { _ in }
     ) {
         self.audioEnvironment = audioEnvironment
@@ -112,6 +114,7 @@ public struct PanelView: View {
         self.onManageSounds = onManageSounds
         self.onManageIntegrations = onManageIntegrations
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
+        self.onQuit = onQuit
         self.onPanelWidthChange = onPanelWidthChange
         // Construct the shared `ClaudioGUIComponents` player here. Both GUI surfaces reuse the
         // same retention/volume implementation while owning independent playback lifetimes.
@@ -133,13 +136,20 @@ public struct PanelView: View {
     }
 
     public var body: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 12) {
-                header
-                hostSourcesSection
-                operationalPanel
+        VStack(spacing: 0) {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 12) {
+                    header
+                    hostSourcesSection
+                    operationalPanel
+                }
+                .padding(13)
             }
-            .padding(13)
+            PanelQuitFooter(
+                language: languageStore.language,
+                typeScale: typeScale,
+                focusedTarget: $focusedTarget,
+                onQuit: onQuit)
         }
         .frame(width: layoutAdaptation.panelWidth)
         .background(ClaudioTheme.panelGradient(colorScheme))
@@ -700,7 +710,8 @@ public struct PanelView: View {
         case .eventSound, .eventMute, .eventAction:
             return true
         case .none, .onboardingPrimaryAction, .onboardingSecondaryAction, .hostSource,
-            .masterVolume, .packCard, .manageSounds, .revealDetail, .disconnect, .configReveal:
+            .masterVolume, .packCard, .manageSounds, .revealDetail, .disconnect, .configReveal,
+            .quitApplication:
             return false
         }
     }

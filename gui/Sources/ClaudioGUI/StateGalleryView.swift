@@ -41,6 +41,7 @@ import SwiftUI
                     EventHostIndicatorGalleryView()
                     PanelPackSectionGalleryView()
                     InterfaceTextSizeGalleryView()
+                    PanelQuitFooterGalleryView()
                     MasterVolumeGalleryView()
                     PackCardGalleryView()
                     ForEach(ClaudioAppLanguage.allCases) { language in
@@ -350,6 +351,45 @@ import SwiftUI
         }
     }
 
+    // MARK: - Fixed panel quit footer (2 languages × 4 interface text sizes)
+
+    struct PanelQuitFooterGalleryView: View {
+        var body: some View {
+            GallerySection(title: "Panel quit footer (2 languages × 4 sizes · 312/360pt)") {
+                ForEach(ClaudioAppLanguage.allCases) { language in
+                    ForEach(ClaudioInterfaceTextSize.allCases) { interfaceTextSize in
+                        GalleryFrame(
+                            caption: "\(language.selfName) · .\(interfaceTextSize.rawValue)"
+                        ) {
+                            PanelQuitFooterStateFrame(
+                                language: language,
+                                interfaceTextSize: interfaceTextSize)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private struct PanelQuitFooterStateFrame: View {
+        let language: ClaudioAppLanguage
+        let interfaceTextSize: ClaudioInterfaceTextSize
+        @FocusState private var focusedTarget: PanelFocusTarget?
+
+        var body: some View {
+            PanelQuitFooter(
+                language: language,
+                typeScale: CGFloat(interfaceTextSize.scale),
+                focusedTarget: $focusedTarget,
+                onQuit: {})
+                .frame(
+                    width: CGFloat(
+                        panelLayoutAdaptation(
+                            for: panelTypeSizeTier(for: interfaceTextSize)).panelWidth))
+                .environment(\.dynamicTypeSize, interfaceTextSize.dynamicTypeSize)
+        }
+    }
+
     // MARK: - MasterVolumeState (6 fixtures, PLAN-MASTER-VOLUME.md D33/D38)
 
     struct MasterVolumeGalleryView: View {
@@ -651,6 +691,15 @@ import SwiftUI
             Group {
                 MasterVolumeGalleryView().preferredColorScheme(.light)
                 MasterVolumeGalleryView().preferredColorScheme(.dark)
+            }
+        }
+    }
+
+    struct PanelQuitFooterGalleryView_Previews: PreviewProvider {
+        static var previews: some View {
+            Group {
+                PanelQuitFooterGalleryView().preferredColorScheme(.light)
+                PanelQuitFooterGalleryView().preferredColorScheme(.dark)
             }
         }
     }

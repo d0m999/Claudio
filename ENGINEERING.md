@@ -375,6 +375,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - **仅当用户开启了系统「键盘导航 / Full Keyboard Access」时成立**：打开焦点落首个可操作项；Tab / Shift+Tab 遍历；空格 / 回车触发。**这不是可以靠代码兜底的事**：面板里可聚焦控件**绝大多数**是 SwiftUI `Button`（activate-focusable），而 macOS 默认不把键盘焦点给 Button，Apple 明说「唯一能用 Tab 够到它们的办法是全局打开键盘导航」。`.focusable()` 是 no-op（默认 interactions 就是 `.activate`）。原文把这两档写成一档，等于对默认设置下的用户撒谎。
     - ⚠️ **阶段 D 起这句话有了一个例外，而这个例外还没人核实**（2026-07-14，`/codex review 8771946` 完备性批评）：`MasterVolumeRow` 的 `Slider` 是面板里**唯一的非 Button 可聚焦控件**，它已被排进焦点序（`PanelFocusOrder` 的 `.masterVolume`）并绑了 `.focused(...)`。上面那套理由（`.activate` interactions、`.focusable()` 是 no-op）是 **Button 专属**的，根本不描述一个由 `NSSlider` 支撑的 **value-adjust** 控件 —— AppKit 里 NSSlider 在 FKA **关闭**时是否进 key view loop，与 Button 不是同一个答案，而我们**没有验过**。在验之前，本节对滑块的键盘可达性**不作承诺**。（VoiceOver 那一档不受影响：VO 自己的光标不依赖 FKA，滑块的 label/value 已按上一条落地。）已记入 TODOS。
   - **~~关闭后焦点回菜单栏 status item~~ → 关闭后把前台交还给打开面板前的那个 app**。原条款按字面**实现不了**：`statusItem.button` 活在系统持有的 `NSStatusBarWindow` 里，它的 `canBecomeKeyWindow` 是 false，而 AppKit 只把键盘事件投给 key window 的 first responder —— 对一个永不 key 的 window 设 first responder 等于没设（它在 AX 里也不挂在 app 的 window 树下，挂在 `AXExtrasMenuBar`，VO 光标同样不跟）。这条契约真正要的是「面板关了，键盘得有人接着」，而唯一能接的是用户来的那个 app。见 `MenuBarController.popoverDidClose`。
+  - **固定退出 footer（2026-08-19）**：`PanelView` 的 `onQuit` 是无默认值的 `@MainActor` 退出意图，SwiftUI 的 `PanelQuitFooter` 只调用该闭包；唯一 composition root `MenuBarController` 注入 `NSApp.terminate(nil)`。退出链不得先调 `popover.close()` / `performClose` / `notePanelHidden()`，也不得使用 `exit` / `_exit` / `abort` / `killall`。正常 AppKit termination 会同步发布 `NSApplication.willTerminateNotification`，现有 `MasterVolumeRow` 订阅继续在该通知上 `flush()`；不复制第二套音量冲刷。`Esc` 仍走 `.transient` popover 关闭路径，只关面板。`PanelFocusTarget.quitApplication` 仅在 operational 序列出现，所有条件内容之后无条件追加，因此恰好一次且永远末位；首次焦点仍由前面的宿主/修复/包卡/`.manageSounds` 决定。
   - 焦点态可见（系统焦点环，勿去除）。
 
 - **T15 决议：菜单栏面板每次打开，必然抢一次前台（NSApp.activate），这是无障碍的必要代价**（2026-07-11 真机 + 对抗评审）。
@@ -902,7 +903,7 @@ Claude Code 的 `hooks.<Event>` 是数组，用户或别的工具可能已挂 ho
   - **焦点与 VoiceOver**：in-flight 期间 CTA 被禁用，`panelFirstFocusTarget(_:ctaOperable:)` 因此不能把首焦点交给它（否则键盘用户按完空格 caret 就搁浅了）；CTA 的开始 / 失败 / 成功三个时刻各自主动 `NSAccessibility.post(.announcementRequested)` —— 「光有 label 不会被播报」这条推理本仓库已经为「面板打开」付过一次账，T17 新增了三个同类时刻。
   - **错误文案两个字段**：`message`（安心叙事，过 T7 禁词表）+ `technicalDetail`（`SetupError` / `SettingsUpdateError` 原话，只在「查看原因」披露之后）。直接渲染 `SetupError.description` 会一句话踩中禁词表两个词（「settings.json」「hook」）。
 
-  **【授权的设计变更】「断开连接」拿到一个真入口。** 它此前**在整个 shipping app 里没有一个像素**：`OnboardingCopy(.installed).secondaryActionTitle` 写着「断开连接」，但 `.installed` 时 `PanelView` 渲染的是 `operationalPanel`、**根本不渲染 `OnboardingView`** —— 那颗按钮只活在 state gallery 里。而 `.notInstalled` 的正文白纸黑字向用户承诺「随时可以**一键撤销**」。现在运行态面板底部有一行 ghost「断开连接」，进 `PanelFocusTarget` / `panelFocusOrder` 尾部 / 画廊。用户拍板通过。
+  **【历史决议；现行已替代】「断开连接」曾拿到运行态面板底部 ghost 入口。** 它此前**在整个 shipping app 里没有一个像素**：`OnboardingCopy(.installed).secondaryActionTitle` 写着「断开连接」，但 `.installed` 时 `PanelView` 渲染的是 `operationalPanel`、**根本不渲染 `OnboardingView`**。该入口后来随双宿主面板收敛而移入 `IntegrationsWindow` 的宿主检查器，现行 operational `panelFocusOrder` 不再追加 `.disconnect`；2026-08-19 新增的固定 `.quitApplication` 才是面板焦点序的末位。`PanelFocusTarget.disconnect` 仅保留旧 onboarding/兼容模型语义，不能再描述成运行态末位。
 
   **【P0，实测，非推理】`com.apple.quarantine` 会让每一个 hook 被 Gatekeeper SIGKILL —— 而面板报「已经接好了」。**（新增 `helper/Sources/ClaudioCore/Quarantine.swift`）
 

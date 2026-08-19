@@ -1546,10 +1546,10 @@ func runOnboardingActionsFixSuites() {
         // 跟主音量无关，显式给 true 只是让这个 fixture 继续代表「滑块真的渲染在屏幕上」那一半（`/codex
         // review` P1 修复后，.masterVolume 不再是 .operational scope 里的恒定行为，见
         // PanelFocusOrderSuite 对 hasMasterVolume: false 那一半的测试）。零事件行只是 fixture，
-        // 生产恒 4 行。T7 的管理钮在包列表后无条件渲染，失败行仍位于最终的断开连接之上。
+        // 生产恒 5 行。T7 的管理钮在包列表后无条件渲染，兼容失败详情之后是固定退出 footer。
         expect(
-            operational == [.masterVolume, .manageSounds, .revealDetail],
-            "运行态：声音来源入口已收敛到顶部宿主条，底部只保留声音包管理与兼容失败详情。得到 \(operational)")
+            operational == [.masterVolume, .manageSounds, .revealDetail, .quitApplication],
+            "运行态：滚动区保留声音包管理与兼容失败详情，固定退出入口永远末位。得到 \(operational)")
 
         let withoutToggle = panelFocusOrder(
             .operational(events: [], packCardIDs: [], hasDetailToggle: false, hasMasterVolume: true))

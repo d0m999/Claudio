@@ -37,7 +37,7 @@ func runPanelFocusOrderSuites() {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true))
         let expected: [PanelFocusTarget] =
             Event.allCases.flatMap { [.eventSound($0), .eventAction($0), .eventMute($0)]
-            } + [.masterVolume, .manageSounds]
+            } + [.masterVolume, .manageSounds, .quitApplication]
         expect(order == expected, "got \(order)")
     }
 
@@ -60,7 +60,7 @@ func runPanelFocusOrderSuites() {
         ] + Event.allCases.flatMap {
             [.eventSound($0), .eventAction($0), .eventMute($0)]
         } + [
-            .masterVolume, .packCard(id: "minimal-chime"), .manageSounds,
+            .masterVolume, .packCard(id: "minimal-chime"), .manageSounds, .quitApplication,
         ]
         expect(order == expected, "production focus order drifted: \(order)")
         expect(
@@ -77,19 +77,20 @@ func runPanelFocusOrderSuites() {
             "production opening focus 必须落 Claude 来源行")
     }
 
-    suite("panelFocusOrder: operational — gallery cards come right after the master volume slider, then 管理声音包, with 断开连接 last") {
+    suite("panelFocusOrder: operational — gallery cards come right after the master volume slider, then 管理声音包, with 退出应用 last") {
         let order = panelFocusOrder(
             .operational(events: Event.allCases, packCardIDs: ["alpha-pack", "zeta-pack"], hasMasterVolume: true))
-        // rows (sound+action+mute per event) + the master volume slider; then the pack cards; 断开连接 last.
+        // rows (sound+action+mute per event) + the master volume slider; then cards, management, quit.
         // `.dropZone` used to sit between the slider and the cards — it left with `AudioDropZoneView`
         // (cc59d52 / PLAN-SOUND-MANAGER T1), so the cards now follow the slider directly.
         let rowCount = Event.allCases.count * 3 + 1  // +1 for .masterVolume
         expect(
             order[rowCount...].elementsEqual([
                 .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"), .manageSounds,
+                .quitApplication,
             ]),
             "gallery cards must follow the master volume slider in their given order, 管理声音包"
-                + " must follow the cards, and 断开连接 sits last, got \(order)")
+                + " must follow the cards, and 退出应用 sits last, got \(order)")
     }
 
     suite("panelFocusOrder: .masterVolume's position is pinned — right after the last row's .eventMute, right before the first pack card") {
@@ -107,15 +108,15 @@ func runPanelFocusOrderSuites() {
                 + " between them left with AudioDropZoneView, T1), got \(order[masterVolumeIndex + 1])")
     }
 
-    suite("panelFocusOrder: operational — total count is 3×events + masterVolume + cards + manageSounds + disconnect") {
+    suite("panelFocusOrder: operational — total count is 3×events + masterVolume + cards + manageSounds + quitApplication") {
         let order = panelFocusOrder(
             .operational(events: Event.allCases, packCardIDs: ["a", "b", "c"], hasMasterVolume: true))
-        // +1 masterVolume, +3 cards, +1 管理声音包。3× events
+        // +1 masterVolume, +3 cards, +1 管理声音包, +1 退出应用。3× events
         // since PLAN-SOUND-MANAGER.md §2.5/T2 grew each row from 2 slots (action, mute) to 3
         // (sound, action, mute).
         expect(
-            order.count == Event.allCases.count * 3 + 1 + 3 + 1,
-            "expected \(Event.allCases.count * 3 + 1 + 3 + 1) items, got \(order.count)")
+            order.count == Event.allCases.count * 3 + 1 + 3 + 1 + 1,
+            "expected \(Event.allCases.count * 3 + 1 + 3 + 1 + 1) items, got \(order.count)")
     }
 
     suite("panelFocusOrder: onboarding vs operational produce structurally different orders") {
@@ -129,11 +130,11 @@ func runPanelFocusOrderSuites() {
             "onboarding's order must never contain an operational-only target")
     }
 
-    suite("panelFocusOrder: an empty operational panel (no cards, hasMasterVolume: false, no config-failure notice) is [.manageSounds, .disconnect]") {
+    suite("panelFocusOrder: an empty operational panel (no cards, hasMasterVolume: false, no config-failure notice) is [.manageSounds, .quitApplication]") {
         // /codex review P1 (2626083/47459a7): .masterVolume must not appear when the slider is not
         // on screen. cc59d52 (PLAN-SOUND-MANAGER T1) additionally removed `.dropZone` — the panel
         // no longer has a bottom drop affordance. T7's real, always-rendered 管理声音包 control
-        // replaces the safe bottom landing, ahead of the destructive 断开连接 row.
+        // replaces the safe bottom landing; the fixed quit footer follows without taking first focus.
         //
         // This is the `.needsPack`-with-nothing shape ONLY. `.malformed`/`.unwritable` also render
         // zero rows / no slider, but they carry the 诚实失败卡's `.configReveal` (hasConfigFailureNotice:
@@ -141,41 +142,41 @@ func runPanelFocusOrderSuites() {
         // fixture at the default `hasConfigFailureNotice: false` is what makes it the needsPack case.
         let order = panelFocusOrder(.operational(events: [], packCardIDs: [], hasMasterVolume: false))
         expect(
-            order == [.manageSounds],
+            order == [.manageSounds, .quitApplication],
             "with hasMasterVolume false, zero rows and zero cards, 管理声音包 must be the first"
-                + " safe target and 断开连接 must remain last, got \(order)")
+                + " safe target and 退出应用 must remain last, got \(order)")
     }
 
-    suite("panelFocusOrder: an empty-rows operational panel with hasMasterVolume: true still surfaces the slider ahead of 断开连接") {
+    suite("panelFocusOrder: an empty-rows operational panel with hasMasterVolume: true still surfaces the slider ahead of quit") {
         // The flip side of the test above: hasMasterVolume, not `events` being non-empty, is
         // what gates .masterVolume. Zero rows is only a fixture (production's true .operational
         // state always has 5, see the .masterVolume position test above) — this pins the flag's
         // OWN behavior independent of row count.
         let order = panelFocusOrder(.operational(events: [], packCardIDs: [], hasMasterVolume: true))
         expect(
-            order == [.masterVolume, .manageSounds],
+            order == [.masterVolume, .manageSounds, .quitApplication],
             "with hasMasterVolume true, the slider still claims its slot even with zero rows,"
-                + " ahead of 管理声音包 and 断开连接, got \(order)")
+                + " ahead of 管理声音包 and 退出应用, got \(order)")
     }
 
     // MARK: - .configReveal (/codex review P1, 26bba37 follow-up): the 诚实失败卡's
     // 「在访达中显示 config.json」 is a real focus target that LEADS the order on
     // `.malformed`/`.unwritable` — the two states that render the failure card at the panel top.
 
-    suite("panelFocusOrder: the config-failure shape (.malformed/.unwritable, no cards) leads with .configReveal, then .manageSounds, then .disconnect") {
+    suite("panelFocusOrder: the config-failure shape (.malformed/.unwritable, no cards) leads with .configReveal, then .manageSounds, then .quitApplication") {
         // These two states render `configFailureNotice` at the TOP of the panel; its reveal button
         // is visually first, so it must lead the focus order. No pack cards installed here →
-        // .configReveal, then the always-rendered .manageSounds, then .disconnect. Contrast the
+        // .configReveal, then the always-rendered .manageSounds, then .quitApplication. Contrast the
         // .needsPack-nothing shape above: it has NO failure notice and so leads with .manageSounds.
         let order = panelFocusOrder(
             .operational(events: [], packCardIDs: [], hasMasterVolume: false, hasConfigFailureNotice: true))
         expect(
-            order == [.configReveal, .manageSounds],
+            order == [.configReveal, .manageSounds, .quitApplication],
             ".configReveal must lead the config-failure shape, with 管理声音包 still present"
-                + " ahead of 断开连接, got \(order)")
+                + " ahead of 退出应用, got \(order)")
     }
 
-    suite("panelFocusOrder: the config-failure shape WITH pack cards leads with .configReveal, then cards, .manageSounds, and 断开连接 (never folds into the plain .needsPack card order)") {
+    suite("panelFocusOrder: the config-failure shape WITH pack cards leads with .configReveal, then cards, .manageSounds, and .quitApplication (never folds into the plain .needsPack card order)") {
         // `.malformed`/`.unwritable` can still have packs installed (the gallery renders in every
         // configState). The reveal button is above the gallery, so .configReveal leads, THEN the
         // cards. This is the exact case the pre-fix tests wrongly folded into the .needsPack
@@ -187,10 +188,35 @@ func runPanelFocusOrderSuites() {
         expect(
             order == [
                 .configReveal, .packCard(id: "alpha-pack"), .packCard(id: "zeta-pack"),
-                .manageSounds,
+                .manageSounds, .quitApplication,
             ],
             ".configReveal must lead, ahead of the pack cards; 管理声音包 must follow the cards"
-                + " and remain ahead of 断开连接, got \(order)")
+                + " and 退出应用 must remain last, got \(order)")
+    }
+
+    suite("panelFocusOrder: quit appears exactly once and is always last in every operational shape, never onboarding") {
+        let operationalShapes: [PanelFocusScope] = [
+            .operational(events: Event.allCases, packCardIDs: [], hasMasterVolume: true),
+            .operational(events: [], packCardIDs: [], hasMasterVolume: false),
+            .operational(
+                events: [], packCardIDs: ["alpha-pack"], hasMasterVolume: false,
+                hasConfigFailureNotice: true, hostSources: HostID.allCases),
+        ]
+        for scope in operationalShapes {
+            let order = panelFocusOrder(scope)
+            expect(
+                order.filter { $0 == .quitApplication }.count == 1,
+                "every operational order must contain quit exactly once, got \(order)")
+            expect(order.last == .quitApplication, "quit must always be last, got \(order)")
+        }
+        for scope in [
+            PanelFocusScope.onboarding(hasPrimaryAction: true, hasSecondaryAction: true),
+            .onboarding(hasPrimaryAction: false, hasSecondaryAction: false),
+        ] {
+            expect(
+                !panelFocusOrder(scope).contains(.quitApplication),
+                "onboarding must never contain quit: \(panelFocusOrder(scope))")
+        }
     }
 
     // MARK: - panelFirstFocusTarget (ENGINEERING.md「无障碍规格」"打开焦点落首个可操作项"). Before
@@ -243,7 +269,7 @@ func runPanelFocusOrderSuites() {
         let fullOrder = panelFocusOrder(scope)
         let expected: [PanelFocusTarget] =
             Event.allCases.flatMap { [.eventSound($0), .eventAction($0), .eventMute($0)]
-            } + [.masterVolume, .manageSounds]
+            } + [.masterVolume, .manageSounds, .quitApplication]
         expect(fullOrder == expected, "the full order (incl. the disabled action) must be unchanged, got \(fullOrder)")
         expect(fullOrder.contains(.eventAction(first)), "the disabled action must remain a Tab stop")
     }
@@ -274,13 +300,13 @@ func runPanelFocusOrderSuites() {
             "onboarding first focus is unaffected by action operability, got \(String(describing: target))")
     }
 
-    suite("panelFirstFocusTarget: empty operational panel, hasMasterVolume false, no cards, no config-failure notice → first focus is .manageSounds, never .disconnect") {
+    suite("panelFirstFocusTarget: empty operational panel, hasMasterVolume false, no cards, no config-failure notice → first focus stays .manageSounds ahead of quit") {
         // /codex review P1 (2626083/47459a7): zero events is NOT "unreachable in shipping code" —
         // `PanelView.applyFirstFocus` passes `rows: []`, `hasMasterVolume: false` whenever
         // `configState` is `.needsPack` (first launch before a pack is picked). cc59d52
         // (PLAN-SOUND-MANAGER T1) removed `.dropZone` (its view was deleted), so with no rows, no
         // cards and no slider, T7's always-rendered `.manageSounds` is the first safe, useful
-        // operable target. The destructive `.disconnect` remains present but must never win.
+        // operable target. The fixed `.quitApplication` follows but must never win opening focus.
         //
         // This is `.needsPack` ONLY. `.malformed`/`.unwritable` share the zero-rows/no-slider shape
         // but ADD the 诚实失败卡's `.configReveal` (hasConfigFailureNotice: true), which leads —
@@ -290,10 +316,10 @@ func runPanelFocusOrderSuites() {
         expect(
             panelFirstFocusTarget(scope) == .manageSounds,
             "with no rows/cards/slider/failure-notice, first focus must be the safe 管理声音包"
-                + " control, never 断开连接, got \(String(describing: panelFirstFocusTarget(scope)))")
+                + " control, ahead of quit, got \(String(describing: panelFirstFocusTarget(scope)))")
         expect(
-            panelFocusOrder(scope) == [.manageSounds],
-            "零事件、零包状态只能保留声音包恢复入口，不得制造不可见的详情窗焦点")
+            panelFocusOrder(scope) == [.manageSounds, .quitApplication],
+            "零事件、零包状态应保留声音包恢复入口，并把退出入口固定在末位")
     }
 
     suite("panelFirstFocusTarget: the config-failure shape (.malformed/.unwritable, no cards) → first focus is .configReveal, never 断开连接 (26bba37 follow-up)") {
