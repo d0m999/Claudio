@@ -65,6 +65,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let actionRouter: MenuBarActionRouter
     private let hostIntegrations: HostIntegrationPresentationStore
     private let hostIntegrationMatrixProvider: HostIntegrationMatrixProvider
+    private let bootstrapReports: BootstrapReportPresentationStore
     private var hostIntegrationRefreshTask: Task<Void, Never>?
     private var appActivationCancellable: AnyCancellable?
     private var hostIntegrationRefreshRevision: UInt64 = 0
@@ -116,6 +117,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 .claudeCode: ClaudioPaths.claudeSettingsFile.path,
                 .codex: ClaudioPaths.codexHooksFile.path,
             ])
+        let bootstrapReports = BootstrapReportPresentationStore()
         let integrationsModel = IntegrationsWindowModel(
             content: hostIntegrations.content,
             refreshHandler: IntegrationsWindowRefreshHandler {
@@ -203,6 +205,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             audioEnvironment: audioEnvironment,
             focusCoordinator: focusCoordinator,
             hostIntegrations: hostIntegrations,
+            bootstrapReports: bootstrapReports,
             languageStore: languageStore,
             soundPackLibrary: soundPackLibrary,
             soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
@@ -213,6 +216,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             },
             onManageIntegrations: { [weak actionRouter] target in
                 actionRouter?.requestIntegrationsWindow(returnFocusTo: target)
+            },
+            onRetryBootstrap: { [weak actionRouter] in
+                actionRouter?.owner?.requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
             },
             onAudibilityInputsChanged: { [weak actionRouter] in
                 actionRouter?.audibilityInputsChanged()
@@ -249,6 +255,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.actionRouter = actionRouter
         self.hostIntegrations = hostIntegrations
         self.hostIntegrationMatrixProvider = integrationMatrixProvider
+        self.bootstrapReports = bootstrapReports
         // `.transient`: AppKit closes the popover on a click outside it, on an app switch,
         // and — ONLY once the popover's window is key — on Esc. That last clause is the whole
         // catch: `.transient` alone does NOT buy "Esc 关闭", because a status-item popover in
@@ -311,6 +318,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 // opening the popover while bootstrap is in flight cancels this task and starts a
                 // newer refresh, but cancellation must not discard the completed disk mutation.
                 if bootstrapSharedRuntime {
+                    self?.bootstrapReports.reload()
                     self?.soundPackLibrary.invalidate(packIDs: [])
                     self?.soundPacksRefreshCoordinator.completeSharedRuntimeBootstrap()
                 }

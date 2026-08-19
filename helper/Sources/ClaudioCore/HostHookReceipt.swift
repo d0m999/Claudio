@@ -267,8 +267,7 @@ public struct HostHookReceiptStore: Sendable {
     ) -> Result<HostHookReceiptWriteOutcome, HostHookReceiptStoreError> {
         let directory = destination.deletingLastPathComponent()
         do {
-            try FileManager.default.createDirectory(
-                at: directory, withIntermediateDirectories: true)
+            try ensurePrivateDirectoryTree(at: directory)
         } catch {
             return .failure(.directoryCreationFailure(reason: error.localizedDescription))
         }

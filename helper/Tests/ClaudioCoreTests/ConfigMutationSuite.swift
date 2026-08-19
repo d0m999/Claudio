@@ -30,6 +30,7 @@ private func readRawConfigJSON(_ url: URL) -> [String: Any]? {
 @MainActor
 private func makePackDirectory(at url: URL) {
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    writeFixture(#"{ "id": "test-pack", "events": {} }"#, to: url.appendingPathComponent("manifest.json"))
 }
 
 /// 磁盘上那份文件的**原始文本**——「逐字保留」这句话说的是字节，不是「解析回来相等」。

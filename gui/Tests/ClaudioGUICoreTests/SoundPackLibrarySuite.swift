@@ -526,7 +526,7 @@ func runSoundPackLibrarySuites() async {
             )
                 && source.contains("languageStore: languageStore")
                 && source.contains(
-                    "PanelView(\n            audioEnvironment: audioEnvironment,\n            focusCoordinator: focusCoordinator,\n            hostIntegrations: hostIntegrations,\n            languageStore: languageStore,\n            soundPackLibrary: soundPackLibrary"
+                    "PanelView(\n            audioEnvironment: audioEnvironment,\n            focusCoordinator: focusCoordinator,\n            hostIntegrations: hostIntegrations,\n            bootstrapReports: bootstrapReports,\n            languageStore: languageStore,\n            soundPackLibrary: soundPackLibrary"
                 ),
             "同一个局部实例必须同时注入管理窗口与面板")
         expect(
@@ -1335,6 +1335,7 @@ func runSoundPackLibrarySuites() async {
                     }
                 },
                 "salvage 后 publish 失败仍改变磁盘，必须刷新并暴露 retry")
+            await library.waitUntilIdleForTesting()
             expect(
                 scanner.requests.last?.invalidatedPackIDs == ["factory-a"],
                 "失败但已 salvage 的 restore 必须失效 factory-a")
@@ -1359,6 +1360,7 @@ func runSoundPackLibrarySuites() async {
                     }
                 },
                 "retry 成功必须扫描一次、恢复包并清除 retry")
+            await library.waitUntilIdleForTesting()
             expect(
                 scanner.requests.last?.invalidatedPackIDs == ["factory-a"],
                 "restore retry 必须精确失效 factory-a")
@@ -1370,18 +1372,20 @@ func runSoundPackLibrarySuites() async {
                 expect(false, "fork 必须成功：\(fork)")
                 return
             }
+            let forkPublished = await waitForLibraryCondition {
+                await MainActor.run {
+                    scanner.callCount >= previousCallCount + 1
+                        && window.packCards.contains { $0.id == forkOutcome.newPackID }
+                        && window.selectedPackID == forkOutcome.newPackID
+                }
+            }
+            await library.waitUntilIdleForTesting()
             expect(
-                await waitForLibraryCondition {
-                    await MainActor.run {
-                        scanner.callCount == previousCallCount + 1
-                            && window.packCards.contains { $0.id == forkOutcome.newPackID }
-                            && window.selectedPackID == forkOutcome.newPackID
-                    }
-                },
-                "fork 成功必须扫描一次并选择新副本")
+                forkPublished,
+                "fork 成功必须扫描一次并选择新副本；calls=\(scanner.callCount)/\(previousCallCount) cards=\(window.packCards.map(\.id)) selected=\(String(describing: window.selectedPackID)) requests=\(scanner.requests.map { Array($0.invalidatedPackIDs).sorted() })")
             expect(
                 scanner.requests.last?.invalidatedPackIDs == [forkOutcome.newPackID],
-                "fork 必须只失效新发布的 pack id")
+                "fork 必须只失效新发布的 pack id；requests=\(scanner.requests.map { Array($0.invalidatedPackIDs).sorted() })")
 
             previousCallCount = scanner.callCount
             let batch = window.restoreAllFactoryPacksAfterConfirmation()

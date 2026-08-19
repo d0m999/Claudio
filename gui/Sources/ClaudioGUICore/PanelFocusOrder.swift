@@ -36,6 +36,11 @@ public enum PanelFocusTarget: Sendable, Hashable {
     /// row's action/mute pair and before the pack gallery cards, aligning with the panel's visual
     /// layout (the slider row sits between the event rows and the pack gallery).
     case masterVolume
+    case bootstrapReportRetry(id: String)
+    case bootstrapReportDiagnostics(id: String)
+    case bootstrapReportReveal(id: String)
+    case bootstrapReportManageSounds(id: String)
+    case bootstrapReportAcknowledge(id: String)
     case packCard(id: String)
     /// 列表下方全宽虚线「管理声音包…」（PLAN-SOUND-MANAGER.md T7）。它在 operational panel
     /// 的四种 configState 都无条件渲染，焦点序中紧跟全部 pack cards、排在固定 footer 的
@@ -116,7 +121,7 @@ public enum PanelFocusScope: Sendable, Equatable {
     case operational(
         events: [Event], packCardIDs: [String], hasDetailToggle: Bool = false,
         hasMasterVolume: Bool = false, hasConfigFailureNotice: Bool = false,
-        hostSources: [HostID] = [])
+        hostSources: [HostID] = [], bootstrapReportActions: [PanelFocusTarget] = [])
 }
 
 /// The panel's Tab/Shift+Tab traversal order for its current ``PanelFocusScope`` —
@@ -147,7 +152,7 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
 
     case .operational(
         let events, let packCardIDs, let hasDetailToggle, let hasMasterVolume,
-        let hasConfigFailureNotice, let hostSources):
+        let hasConfigFailureNotice, let hostSources, let bootstrapReportActions):
         var order: [PanelFocusTarget] = []
         // The two source rows are always the first visual and keyboard controls. Connection
         // failures alter their copy, never their presence or priority.
@@ -170,6 +175,8 @@ public func panelFocusOrder(_ scope: PanelFocusScope) -> [PanelFocusTarget] {
         // （`/codex review` 2626083/47459a7 抓到的 P1：这里曾经无条件 append，`.needsPack`/
         // `.malformed`/`.unwritable` 下会把首焦点指向一个不存在的控件）。
         if hasMasterVolume { order.append(.masterVolume) }
+        // 持久 bootstrap 报告画在声音包区域上方；它的原生按钮按同一视觉顺序进入键盘序。
+        order.append(contentsOf: bootstrapReportActions)
         order.append(contentsOf: packCardIDs.map { .packCard(id: $0) })
         // T7 的真控件在全部四种 configState 下恒渲染，故这里也恒 append。
         order.append(.manageSounds)
@@ -295,7 +302,9 @@ public func panelFirstFocusTarget(
             // `.manageSounds` operability arm 同理。这让 `.malformed`/`.unwritable` 这两态
             // 的 operational scope 永不返回 nil，即便断开动作在飞。
             return true
-        case .hostSource, .eventMute, .packCard, .masterVolume, .manageSounds,
+        case .hostSource, .eventMute, .packCard, .masterVolume, .bootstrapReportRetry,
+            .bootstrapReportDiagnostics, .bootstrapReportReveal,
+            .bootstrapReportManageSounds, .bootstrapReportAcknowledge, .manageSounds,
             .quitApplication:
             return true
         }
@@ -343,12 +352,13 @@ public func panelFirstFocusTarget(
 public func panelOpeningFocus(
     rows: [EventRow], packCardIDs: [String], ctaOperable: Bool = true,
     hasDetailToggle: Bool = false, hasMasterVolume: Bool = false,
-    hasConfigFailureNotice: Bool = false, hostSources: [HostID] = []
+    hasConfigFailureNotice: Bool = false, hostSources: [HostID] = [],
+    bootstrapReportActions: [PanelFocusTarget] = []
 ) -> PanelFocusTarget? {
     let scope = PanelFocusScope.operational(
         events: rows.map(\.event), packCardIDs: packCardIDs, hasDetailToggle: hasDetailToggle,
         hasMasterVolume: hasMasterVolume, hasConfigFailureNotice: hasConfigFailureNotice,
-        hostSources: hostSources)
+        hostSources: hostSources, bootstrapReportActions: bootstrapReportActions)
     let nonOperableActionEvents = Set(rows.filter { !$0.eventActionOperable }.map(\.event))
     return panelFirstFocusTarget(
         scope, nonOperableActionEvents: nonOperableActionEvents, ctaOperable: ctaOperable)

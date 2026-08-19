@@ -88,7 +88,7 @@ private func invalidFactoryContentsReason(packID: String, source: URL) -> String
     for fileName in Set(manifest.events.values).sorted() {
         guard
             let file = safePackFileURL(fileName, in: source),
-            regularFileExists(at: file)
+            nonEmptyRegularFileExists(at: file)
         else {
             return "出厂清单声明的音频「\(fileName)」不存在、不是正规文件或越出声音包目录"
         }
@@ -143,9 +143,7 @@ public func restoreFactoryPack(
         isDirectory: true)
 
     do {
-        try fileManager.createDirectory(
-            at: environment.userPacksDirectory,
-            withIntermediateDirectories: true)
+        try ensurePrivateDirectoryTree(at: environment.userPacksDirectory)
         // Same reserved same-pid cleanup used by Setup.swift and PackFork.swift. Old scratch
         // directories from other pids are never globbed or touched.
         try? fileManager.removeItem(at: staging)

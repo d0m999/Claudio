@@ -240,8 +240,7 @@ public func importAudioFile(
     let persistOutcome = withNonBlockingLock(path: environment.packsLockFile.path) {
         () -> AudioImportOutcome? in
         do {
-            try fileManager.createDirectory(
-                at: userPackDirectory, withIntermediateDirectories: true)
+            try ensurePrivateDirectoryExists(at: userPackDirectory)
             while true {
                 let uniqueDestinationURL: URL
                 switch allocateUniqueDestinationURL(

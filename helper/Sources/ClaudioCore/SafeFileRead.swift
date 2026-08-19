@@ -229,3 +229,19 @@ public func regularFileExists(at url: URL) -> Bool {
     }
     return statted && (status.st_mode & S_IFMT) == S_IFREG
 }
+
+/// Runtime/GUI “能发声”最低共同真值：目标必须是正规文件且字节数大于零。
+///
+/// 与 ``regularFileExists(at:)`` 一样只做一次 `stat(2)` 并跟随包内合法 symlink；它不声称完成
+/// 音频头检查或解码验证。普通目录 inventory 仍使用 ``regularFileExists(at:)``，只有播放、覆盖度、
+/// manifest 绑定后的可用性与 doctor 使用本谓词。
+public func nonEmptyRegularFileExists(at url: URL) -> Bool {
+    var status = stat()
+    let statted = url.withUnsafeFileSystemRepresentation { pathPointer -> Bool in
+        guard let pathPointer else { return false }
+        return stat(pathPointer, &status) == 0
+    }
+    return statted
+        && (status.st_mode & S_IFMT) == S_IFREG
+        && status.st_size > 0
+}

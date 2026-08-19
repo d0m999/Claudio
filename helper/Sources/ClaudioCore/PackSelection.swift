@@ -11,7 +11,7 @@ import Foundation
 /// 这样的 config，这里会答 ``PackSelectionStatus/selected(packID:)``（selected_pack 好好的），但它
 /// 的 `master_volume` 是字符串，写路径会 fail closed——只问「读」这一半会让面板以为一切正常，
 /// 而用户点下去的每一次静音 / 切包都注定失败（见 ``probeConfigRewritable(configFile:)`` 的文档）。
-public enum PackSelectionStatus: Sendable, Equatable {
+public enum PackSelectionStatus: Sendable, Equatable, Codable {
     /// 文件不存在，或者存在但 `selected_pack` 是空串——两者是同一件事：还没有人选过包。
     case notSelected
     /// `selected_pack` 是一个非空字符串。这里**不**判断它是否真解析得出一个包目录——那是

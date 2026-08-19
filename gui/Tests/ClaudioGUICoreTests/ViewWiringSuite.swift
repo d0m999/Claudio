@@ -319,6 +319,14 @@ func runViewWiringSuites() {
                 && branding.contains(".accessibilityHidden(true)"),
             "完整字标必须由共享组件绘制；轨道细节不拆成 VoiceOver 节点，字标本身仍有 claudi0 文本替代")
 
+        let normalizedBranding = collapsingWhitespace(branding)
+        expect(
+            normalizedBranding.components(separatedBy: ".offset(x: -size * 0.22)").count - 1 == 1
+                && normalizedBranding.contains(
+                    "} .offset(x: -size * 0.22) .frame(width: size * 1.36, height: size)")
+                && !normalizedBranding.contains(".offset(x: size * 0.10)"),
+            "Orbit Zero 的光晕、0、斜轨与信号点必须先共享 ZStack 中心，再由整个图形组统一左移；不得恢复旧的斜轨横向偏移")
+
         expect(
             panel.components(separatedBy: "ClaudioOrbitWordmark(").count - 1 == 1
                 && sharedHeader.components(separatedBy: "ClaudioOrbitWordmark(").count - 1 == 1
@@ -2198,7 +2206,7 @@ func runViewWiringSuites() {
         expect(
             flat.contains("private func playPreview(for row: EventRow)")
                 && flat.contains("safePackFileURL(")
-                && flat.contains("regularFileExists(at: resolvedFile)")
+                && flat.contains("nonEmptyRegularFileExists(at: resolvedFile)")
                 && flat.contains("previewVolume(for: panelModel.config)"),
             "面板试听必须在点击时安全解析文件并读取最新主音量")
         expect(
@@ -2430,7 +2438,7 @@ func runViewWiringSuites() {
             "power 图标必须从 AX 树隐藏，避免 VoiceOver 重复朗读")
         expect(
             collapsingWhitespace(panel).contains(
-                "case .none, .onboardingPrimaryAction, .onboardingSecondaryAction, .hostSource, .masterVolume, .packCard, .manageSounds, .revealDetail, .disconnect, .configReveal, .quitApplication: return false"),
+                "case .none, .onboardingPrimaryAction, .onboardingSecondaryAction, .hostSource, .masterVolume, .bootstrapReportRetry, .bootstrapReportDiagnostics, .bootstrapReportReveal, .bootstrapReportManageSounds, .bootstrapReportAcknowledge, .packCard, .manageSounds, .revealDetail, .disconnect, .configReveal, .quitApplication: return false"),
             "PanelView.isEventFocusTarget 必须明确把 quitApplication 归为 false")
     }
 

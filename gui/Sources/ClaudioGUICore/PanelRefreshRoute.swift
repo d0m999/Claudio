@@ -199,7 +199,7 @@ public func packSwitchRefreshRoute(after error: UseError) -> PanelRefreshRoute {
         return .noRefresh
     case .lockFailed, .configReadFailure, .configWriteFailure:
         return .configOnly
-    case .packNotFound:
+    case .packNotFound, .manifestUnreadable:
         return .full
     }
 }

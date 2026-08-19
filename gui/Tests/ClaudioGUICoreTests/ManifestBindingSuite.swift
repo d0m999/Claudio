@@ -1718,12 +1718,11 @@ func runManifestBindingSuites() async {
             writeFixture(#"{"selected_pack": "pack-cleared"}"#, to: configFile)
             let clearedIntegrity = checkPackIntegrity(
                 configFile: configFile, userPacksDirectory: userPacks, bundledPacksDirectory: nil)
-            guard case .complete(let clearedPackID, let clearedEvents) = clearedIntegrity else {
-                expect(false, "doctor must report pack-cleared as .complete — a cleared key is no longer declared, so it can never appear on the missing-files list, got \(clearedIntegrity)")
+            guard case .noSupportedEvents(let clearedPackID) = clearedIntegrity else {
+                expect(false, "doctor must warn when no supported events remain, got \(clearedIntegrity)")
                 return
             }
             expect(clearedPackID == "pack-cleared", "the packID on the report must be pack-cleared")
-            expect(clearedEvents.isEmpty, "no events remain declared after the clear, got \(clearedEvents)")
         }
     }
 
@@ -1762,12 +1761,11 @@ func runManifestBindingSuites() async {
             // ① doctor：manifest 什么都没声明 → 没有缺失文件 → .complete（问的是「声明的文件在不在」）。
             let integrity = checkPackIntegrity(
                 configFile: configFile, userPacksDirectory: userPacks, bundledPacksDirectory: nil)
-            guard case .complete(let packID, let events) = integrity else {
-                expect(false, "doctor must report an events:{} pack as .complete, got \(integrity)")
+            guard case .noSupportedEvents(let packID) = integrity else {
+                expect(false, "doctor must warn for an events:{} pack, got \(integrity)")
                 return
             }
             expect(packID == "my-pack", "packID on the report must be my-pack")
-            expect(events.isEmpty, "no events remain declared, got \(events)")
 
             // ② play：五个事件全静默（问的是「这个事件要不要出声」，unmapped = 刻意静默）。
             let playEnvironment = PlayEnvironment(

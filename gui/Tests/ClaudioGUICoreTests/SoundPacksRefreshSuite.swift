@@ -601,8 +601,10 @@ func runSoundPacksRefreshSuites() async {
                 return
             }
             expect(
-                window.packCards.isEmpty && window.selectedPackID == nil,
-                "packNotFound 必须先重读为空态，不能继续展示幽灵包")
+                window.packCards.count == 1
+                    && window.packCards.first?.availability == .missingSelectedPlaceholder
+                    && window.selectedPackID == "only-pack",
+                "packNotFound 后必须保留选中且 broken 的缺失包 placeholder")
             expect(
                 window.audioActionError?.message.contains("声音包「only-pack」已找不到") == true,
                 "即使重读后进入空态，真实拒删原因仍必须留在窗口级错误状态")
@@ -979,11 +981,12 @@ func runSoundPacksRefreshSuites() async {
                     + "实得 \(message)")
             expect(window.factoryRestoreNotice == nil, "失败不能同时伪装成成功告知")
             expect(
-                !window.packCards.contains(where: { $0.id == "minimal-chime" }),
-                "旧树已经搬到 salvage 后，窗口必须重读并停止展示不存在的 active 路径")
+                window.packCards.first(where: { $0.id == "minimal-chime" })?.availability
+                    == .missingSelectedPlaceholder,
+                "旧树搬走后必须把 active 路径降级为缺失 placeholder")
             expect(
-                window.selectedPackID == "other-pack",
-                "原包活动路径缺失后，窗口应如实落到仍存在的 fallback 包；恢复失败提示必须另带原包身份")
+                window.selectedPackID == "minimal-chime",
+                "窗口必须保留 config 的缺失选择，让用户明确恢复或另选")
             expect(
                 coordinator.panelReloadRevision == 1,
                 "旧树已经搬到 salvage 后，面板必须收到一次 full reload 以显示磁盘真相")
@@ -1533,7 +1536,9 @@ func runSoundPacksRefreshSuites() async {
                 lockFile: root.appendingPathComponent("config.lock"),
                 environment: soundPacksEnvironment(packs, factoryPacksDirectory: factory),
                 refreshCoordinator: coordinator)
-            expect(model.packCards.isEmpty, "precondition: empty window")
+            expect(
+                model.packCards.map(\.id) == ["missing"],
+                "precondition: missing config selection is represented by a placeholder")
 
             let outcome = model.restoreAllFactoryPacksAfterConfirmation()
             expect(outcome.restoredPackIDs == ["good"], "good factory ID must restore")
@@ -1551,7 +1556,7 @@ func runSoundPacksRefreshSuites() async {
                     "partial status must expose successful salvage path and no-delete truth")
             }
             expect(coordinator.panelReloadRevision == 1, "batch must publish exactly one final refresh")
-            expect(model.packCards.map(\.id) == ["good"], "successful partial result must be visible")
+            expect(model.packCards.map(\.id) == ["good", "missing"], "successful partial result and placeholder must be visible")
             expect(
                 model.windowStatuses.first?.severity == .failure
                     && model.windowStatuses.first?.message.contains("broken") == true,
@@ -1592,7 +1597,7 @@ func runSoundPacksRefreshSuites() async {
                 lockFile: root.appendingPathComponent("config.lock"),
                 environment: environment,
                 refreshCoordinator: coordinator)
-            expect(model.packCards.isEmpty, "precondition: batch restore starts from empty state")
+            expect(model.packCards.map(\.id) == ["missing"], "precondition: batch restore starts with the selected placeholder")
 
             let outcome = model.restoreAllFactoryPacksAfterConfirmation()
             guard
@@ -1611,7 +1616,7 @@ func runSoundPacksRefreshSuites() async {
                         == "user-only",
                 "batch failure state must retain the exact salvage that contains the displaced bytes")
             expect(
-                model.packCards.map(\.id) == ["b-good"]
+                model.packCards.map(\.id) == ["b-good", "missing"]
                     && model.factoryRestoreRetryPackIDs == ["a-failed"],
                 "successful sibling makes the library nonempty, but must not hide the failed pack retry")
             let failureStatus = model.windowStatuses.first(where: {
@@ -1638,7 +1643,7 @@ func runSoundPacksRefreshSuites() async {
                     && retryOutcome.retainedSalvages == [salvage],
                 "successful batch retry must carry the original salvage into its final outcome")
             expect(
-                model.packCards.map(\.id) == ["a-failed", "b-good"]
+                model.packCards.map(\.id) == ["a-failed", "b-good", "missing"]
                     && model.factoryRestoreRetryPackIDs.isEmpty,
                 "successful retry must restore the missing card and clear only the completed recovery")
             let successStatus = model.windowStatuses.first(where: {
@@ -1693,7 +1698,8 @@ func runSoundPacksRefreshSuites() async {
                 return
             }
             expect(
-                model.packCards.isEmpty
+                model.packCards.count == 1
+                    && model.packCards.first?.availability == .missingSelectedPlaceholder
                     && model.factoryRestoreRetryPackIDs == ["recover-me"],
                 "批量 publish 失败必须留下缺失包的窗口级恢复状态")
 
@@ -1705,8 +1711,9 @@ func runSoundPacksRefreshSuites() async {
                 to: packs.appendingPathComponent("recover-me/first-external.wav"))
             model.reload(followActivePack: false)
             expect(
-                model.selectedPackID == "recover-me",
-                "外部重建后 reload 必须重新提供同 ID 的单包详情恢复入口")
+                model.packCards.contains(where: { $0.id == "recover-me" })
+                    && model.selectPackForInspection("recover-me"),
+                "外部重建后 reload 必须提供可显式选择的同 ID 单包详情入口")
 
             let failedOnce = model.restoreSelectedFactoryPackAfterConfirmation(
                 expectedPackID: "recover-me")
@@ -1746,7 +1753,8 @@ func runSoundPacksRefreshSuites() async {
                 to: packs.appendingPathComponent("recover-me/second-external.wav"))
             model.reload(followActivePack: false)
             expect(
-                model.selectedPackID == "recover-me"
+                model.selectPackForInspection("recover-me")
+                    && model.selectedPackID == "recover-me"
                     && model.factoryRestoreActionError == nil
                     && model.factoryRestoreRetryPackIDs == ["recover-me"]
                     && model.windowStatuses.first(where: {
@@ -1852,6 +1860,9 @@ func runSoundPacksRefreshSuites() async {
                 batch.restoredPackIDs == ["b-single"]
                     && batch.failures.map(\.packID) == ["a-batch"],
                 "precondition: first publish fails for A while sorted sibling B succeeds")
+            expect(
+                model.selectPackForInspection("b-single"),
+                "缺失选择 placeholder 不得隐式跳到 sibling；测试显式选择 B 后再恢复")
             let singleFailure = model.restoreSelectedFactoryPackAfterConfirmation(
                 expectedPackID: "b-single")
             guard case .failure = singleFailure else {
@@ -1864,7 +1875,7 @@ func runSoundPacksRefreshSuites() async {
                     return ids
                 }.flatMap { $0 } == ["b-single", "a-batch"]
                     && model.factoryRestoreRetryPackIDs == ["b-single", "a-batch"],
-                "B 的单包失败较新，视觉状态与重试焦点都必须先 B 后 A")
+                "B 的单包失败较新，视觉状态与重试焦点都必须先 B 后 A，实得 \(model.factoryRestoreRetryPackIDs)")
 
             let batchRetry = model.retryFailedFactoryPackRestoreAfterConfirmation(
                 expectedPackID: "a-batch")
@@ -1891,15 +1902,17 @@ func runSoundPacksRefreshSuites() async {
             expect(
                 visibleRecoveryIDs == ["a-batch", "b-single"]
                     && model.factoryRestoreRetryPackIDs == visibleRecoveryIDs
-                    && model.packCards.isEmpty
+                    && model.packCards.count == 1
+                    && model.packCards.first?.availability == .missingSelectedPlaceholder
                     && recoveryStatusKinds == [.factoryBatchRestore, .factoryRestore]
                     && recoveryStatuses[0].revision > recoveryStatuses[1].revision
-                    && Array(focusOrder.prefix(2))
+                    && Array(focusOrder.prefix(3))
                         == [
+                            .packList,
                             .retryFactoryRestore(packID: "a-batch"),
                             .retryFactoryRestore(packID: "b-single"),
                         ],
-                "A 重试后成为第一条视觉状态，焦点投影必须同步变为 A→B，不能固定单包优先")
+                "A 重试后成为第一条视觉状态，焦点投影必须同步变为 A→B，不能固定单包优先；visible=\(visibleRecoveryIDs) retry=\(model.factoryRestoreRetryPackIDs) cards=\(model.packCards.map(\.id))")
         }
     }
 

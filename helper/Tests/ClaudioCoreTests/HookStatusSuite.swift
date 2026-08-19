@@ -36,7 +36,7 @@ func runHookStatusSuites() {
             let installResult = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(installResult == .success(.installed), "setup: install must succeed")
+            expect(installResult.map(\.didInstall) == .success(true), "setup: install must succeed")
 
             let status = detectHookInstallStatus(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath)
@@ -184,7 +184,7 @@ func runHookStatusSuites() {
             let installResult = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(installResult == .success(.installed), "setup: install must succeed")
+            expect(installResult.map(\.didInstall) == .success(true), "setup: install must succeed")
 
             let afterInstall = detectHookInstallStatus(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath)
@@ -213,7 +213,7 @@ func runHookStatusSuites() {
 
             let installResult = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: staleBinaryPath, lockFile: lockFile)
-            expect(installResult == .success(.installed), "setup: install (stale path) must succeed")
+            expect(installResult.map(\.didInstall) == .success(true), "setup: install (stale path) must succeed")
 
             // Querying with today's binary path must not match yesterday's — this is the
             // same exact-match-only contract `claudioHookCommand` enforces for

@@ -7,6 +7,7 @@ public enum SoundPacksWindowAudioActionError: Error, Sendable, Equatable {
     case noSelectedPack
     case selectionChanged
     case builtinReadOnly(packID: String)
+    case packUnavailable(packID: String)
     case notInInventory(fileName: String)
     case bind(ManifestBindError)
     case delete(OrphanAudioDeleteError)
@@ -23,6 +24,8 @@ public enum SoundPacksWindowAudioActionError: Error, Sendable, Equatable {
             return .localized(.soundPacksAudioErrorSelectionChanged)
         case .builtinReadOnly:
             return .localized(.soundPacksAudioErrorBuiltinReadOnly)
+        case .packUnavailable(let packID):
+            return .literal("声音包 \(packID) 当前不在磁盘上")
         case .notInInventory(let fileName):
             return .localized(.soundPacksAudioErrorNotInInventory, fileName)
         case .bind(let error):
@@ -507,6 +510,17 @@ public final class SoundPacksWindowModel: ObservableObject {
         selectedPackID.map(builtinPackIDs.contains) ?? false
     }
 
+    public var selectedPackIsMissingPlaceholder: Bool {
+        guard let selectedPackID else { return false }
+        return packCards.first(where: { $0.id == selectedPackID })?.availability
+            == .missingSelectedPlaceholder
+    }
+
+    public var selectedPackCanRestoreFactory: Bool {
+        guard let selectedPackID else { return false }
+        return builtinPackIDs.contains(selectedPackID)
+    }
+
     public var factoryPackIDs: [String] { builtinPackIDs.sorted() }
 
     public var hasFactoryPacks: Bool { !builtinPackIDs.isEmpty }
@@ -608,7 +622,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         configState = loadedState
         config = loadedConfig
         if !readSource.readsSharedSnapshot {
-            let loadedCards = availablePacks(config: loadedConfig, environment: environment)
+            let loadedCards = availablePacks(
+                config: loadedConfig, environment: environment,
+                synthesizeMissingSelectedPlaceholder: true)
             let initialSelection =
                 loadedCards.contains(where: { $0.id == loadedConfig.selectedPack })
                 ? loadedConfig.selectedPack
@@ -887,6 +903,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard selectedPackID == expectedPackID else {
             return .failure(.selectionChanged)
         }
+        guard !selectedPackIsMissingPlaceholder else {
+            return .failure(.packUnavailable(packID: expectedPackID))
+        }
         guard !builtinPackIDs.contains(expectedPackID) else {
             return .failure(.builtinReadOnly(packID: expectedPackID))
         }
@@ -986,7 +1005,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 userPacksDirectory: environment.userPacksDirectory,
                 bundledPacksDirectory: environment.bundledPacksDirectory),
             let resolvedFile = safePackFileURL(fileName, in: packDirectory),
-            regularFileExists(at: resolvedFile)
+            nonEmptyRegularFileExists(at: resolvedFile)
         else {
             reload(followActivePack: false)
             return nil
@@ -1106,7 +1125,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         let previousSelection = selectedPackID
         let loadedState = loadPanelConfig(from: configFile)
         let loadedConfig = loadedState.resolvedConfig
-        let loadedCards = availablePacks(config: loadedConfig, environment: environment)
+        let loadedCards = availablePacks(
+            config: loadedConfig, environment: environment,
+            synthesizeMissingSelectedPlaceholder: true)
 
         let nextSelection: String?
         if followActivePack,
@@ -1273,6 +1294,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard let selectedPackID else {
             return finishAudioAction(.failure(.noSelectedPack))
         }
+        guard !selectedPackIsMissingPlaceholder else {
+            return finishAudioAction(.failure(.packUnavailable(packID: selectedPackID)))
+        }
         guard !builtinPackIDs.contains(selectedPackID) else {
             return finishAudioAction(.failure(.builtinReadOnly(packID: selectedPackID)))
         }
@@ -1292,6 +1316,9 @@ public final class SoundPacksWindowModel: ObservableObject {
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
         guard let selectedPackID else {
             return finishAudioAction(.failure(.noSelectedPack))
+        }
+        guard !selectedPackIsMissingPlaceholder else {
+            return finishAudioAction(.failure(.packUnavailable(packID: selectedPackID)))
         }
         guard selectedPackID == importedFile.packID else {
             return finishAudioAction(.failure(.selectionChanged))
@@ -1334,6 +1361,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard let selectedPackID else {
             return finishAudioAction(.failure(.noSelectedPack))
         }
+        guard !selectedPackIsMissingPlaceholder else {
+            return finishAudioAction(.failure(.packUnavailable(packID: selectedPackID)))
+        }
         guard !builtinPackIDs.contains(selectedPackID) else {
             return finishAudioAction(.failure(.builtinReadOnly(packID: selectedPackID)))
         }
@@ -1363,6 +1393,9 @@ public final class SoundPacksWindowModel: ObservableObject {
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
         guard let selectedPackID else {
             return finishAudioAction(.failure(.noSelectedPack))
+        }
+        guard !selectedPackIsMissingPlaceholder else {
+            return finishAudioAction(.failure(.packUnavailable(packID: selectedPackID)))
         }
         guard selectedPackID == expectedPackID else {
             return finishAudioAction(.failure(.selectionChanged))
@@ -1928,6 +1961,14 @@ public final class SoundPacksWindowModel: ObservableObject {
     }
 
     private func reloadSelectedAudioInventory(packID: String) {
+        if packCards.first(where: { $0.id == packID })?.availability
+            == .missingSelectedPlaceholder
+        {
+            audioInventoryTask?.cancel()
+            selectedAudioInventoryPackID = nil
+            selectedAudioInventoryState = .ready([])
+            return
+        }
         if readSource.readsSharedSnapshot {
             audioInventoryTask?.cancel()
             let previous = selectedAudioInventoryPackID == packID ? selectedAudioFiles : nil

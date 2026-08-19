@@ -36,6 +36,17 @@ public protocol HostIntegrationAdapter: Sendable {
 public protocol SharedRuntimeBootstrapping: Sendable {
     func inspect() -> SharedRuntimeHealth
     func bootstrap() -> Result<SharedRuntimeBootstrapOutcome, SetupError>
+    func bootstrapExecution() -> SharedRuntimeBootstrapExecution
+}
+
+public extension SharedRuntimeBootstrapping {
+    func bootstrapExecution() -> SharedRuntimeBootstrapExecution {
+        switch bootstrap() {
+        case .success(let outcome): .completed(outcome)
+        case .failure(let error):
+            .failed(error: error, progress: SharedRuntimeBootstrapProgress())
+        }
+    }
 }
 
 /// 固定 helper 的共享事实：manager 与 doctor 都必须拒绝 symlink、目录、空存根、
@@ -102,7 +113,7 @@ public struct SystemSharedRuntimeBootstrapper: SharedRuntimeBootstrapping {
             return .damaged(reason: "当前声音包不存在：\(packID)")
         case .manifestUnreadable(let packID, let reason):
             return .damaged(reason: "声音包 \(packID) 的 manifest 无法读取：\(reason)")
-        case .incomplete:
+        case .incomplete, .noSupportedEvents:
             // partial 声音包不是整个共享 runtime 损坏：其他事件仍可播放。
             // HostIntegrationManagerBridge 会把同一份 manifest 的逐事件 coverage
             // 交给 AudibilityMatrix，只让真正缺音的格子显示 missingSound。
@@ -112,6 +123,10 @@ public struct SystemSharedRuntimeBootstrapper: SharedRuntimeBootstrapping {
 
     public func bootstrap() -> Result<SharedRuntimeBootstrapOutcome, SetupError> {
         performSharedRuntimeBootstrap(environment: environment)
+    }
+
+    public func bootstrapExecution() -> SharedRuntimeBootstrapExecution {
+        performSharedRuntimeBootstrapExecution(environment: environment)
     }
 }
 
@@ -129,6 +144,7 @@ public actor HostIntegrationManager {
     private var nextOperationRevision: UInt64
     private var latestOperationRevisions: [HostID: UInt64]
     private var inFlightOperations: [HostID: InFlightOperation]
+    private var latestBootstrapExecution: SharedRuntimeBootstrapExecution?
 
     public init(
         adapters: [any HostIntegrationAdapter],
@@ -141,6 +157,7 @@ public actor HostIntegrationManager {
         self.nextOperationRevision = 0
         self.latestOperationRevisions = [:]
         self.inFlightOperations = [:]
+        self.latestBootstrapExecution = nil
     }
 
     public func capabilities() -> [HostID: [HostCapabilityBinding]] {
@@ -152,10 +169,12 @@ public actor HostIntegrationManager {
     /// GUI 首启入口：只自举共享 runtime，不连接或改写任何宿主配置，然后刷新两侧事实。
     @discardableResult
     public func bootstrapSharedRuntime() async -> [HostIntegrationSnapshot] {
-        switch bootstrapper.bootstrap() {
-        case .success:
+        let execution = bootstrapper.bootstrapExecution()
+        latestBootstrapExecution = execution
+        switch execution {
+        case .completed:
             runtime = bootstrapper.inspect()
-        case .failure(let error):
+        case .failed(let error, _):
             runtime = .damaged(reason: error.description)
         }
         return await refresh(usingCurrentRuntime: true)
@@ -164,6 +183,10 @@ public actor HostIntegrationManager {
     public func refresh() async -> [HostIntegrationSnapshot] {
         runtime = bootstrapper.inspect()
         return await refresh(usingCurrentRuntime: true)
+    }
+
+    public func lastBootstrapExecution() -> SharedRuntimeBootstrapExecution? {
+        latestBootstrapExecution
     }
 
     public func snapshots() -> [HostIntegrationSnapshot] {
@@ -185,10 +208,12 @@ public actor HostIntegrationManager {
     ) async -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
         let operationRevision = beginOperation(.connecting, host: host)
         if runtime != .ready {
-            switch bootstrapper.bootstrap() {
-            case .success:
+            let execution = bootstrapper.bootstrapExecution()
+            latestBootstrapExecution = execution
+            switch execution {
+            case .completed:
                 runtime = bootstrapper.inspect()
-            case .failure(let error):
+            case .failed(let error, _):
                 runtime = .damaged(reason: error.description)
             }
             if runtime != .ready {

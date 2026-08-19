@@ -303,7 +303,7 @@ public func bindEventToManifest(
     guard let resolvedFile = safePackFileURL(fileName, in: userPackDirectory) else {
         return .failure(.unsafeFileName)
     }
-    guard regularFileExists(at: resolvedFile) else {
+    guard nonEmptyRegularFileExists(at: resolvedFile) else {
         return .failure(.fileNotFound(fileName: fileName))
     }
 

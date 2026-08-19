@@ -71,8 +71,7 @@ public final class FileLock {
                 // (e.g. `EACCES`) is a real failure that a directory creation wouldn't
                 // fix, and must fall straight through to `.failed` below.
                 let parentDirectory = URL(fileURLWithPath: path).deletingLastPathComponent()
-                try? FileManager.default.createDirectory(
-                    at: parentDirectory, withIntermediateDirectories: true)
+                try? ensurePrivateDirectoryTree(at: parentDirectory)
                 opened = open(path, O_CREAT | O_RDWR, 0o600)
             }
             // If the directory creation above failed too (e.g. permission denied, or a

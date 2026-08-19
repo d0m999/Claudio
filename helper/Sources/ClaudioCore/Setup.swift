@@ -44,6 +44,11 @@ public struct SetupEnvironment: Sendable {
     public let packsLockFile: URL
     /// 取 ``packsLockFile`` 的有界重试策略 —— 见 ``PacksLockRetry``（为什么只有这一侧重试）。
     public let packsLockRetry: PacksLockRetry
+    public let bootstrapJournalFile: URL
+    public let bootstrapReportsDirectory: URL
+    /// Test-only-style interruption seam immediately after the durable journal exists and before
+    /// bootstrap mutates user content. Production uses the no-op default.
+    public let afterBootstrapJournalPersisted: @Sendable () throws -> Void
     /// Test seam immediately before the second pristine check. Production is a no-op;
     /// tests use it to model another process changing the destination while staging is built.
     public let beforePristinePackFinalVerification: @Sendable () -> Void
@@ -68,6 +73,9 @@ public struct SetupEnvironment: Sendable {
         settingsLockFile: URL = ClaudioPaths.settingsLockFile,
         packsLockFile: URL = ClaudioPaths.packsLockFile,
         packsLockRetry: PacksLockRetry = PacksLockRetry(),
+        bootstrapJournalFile: URL? = nil,
+        bootstrapReportsDirectory: URL? = nil,
+        afterBootstrapJournalPersisted: @escaping @Sendable () throws -> Void = {},
         beforePristinePackFinalVerification: @escaping @Sendable () -> Void = {},
         beforePristinePackAtomicExchange: @escaping @Sendable () -> Void = {},
         replacePristinePack: @escaping @Sendable (URL, URL) throws -> Void = {
@@ -98,6 +106,13 @@ public struct SetupEnvironment: Sendable {
         self.settingsLockFile = settingsLockFile
         self.packsLockFile = packsLockFile
         self.packsLockRetry = packsLockRetry
+        let inferredRoot = claudioBinaryDestination.deletingLastPathComponent()
+            .deletingLastPathComponent()
+        self.bootstrapJournalFile = bootstrapJournalFile
+            ?? inferredRoot.appendingPathComponent("bootstrap-journal.json")
+        self.bootstrapReportsDirectory = bootstrapReportsDirectory
+            ?? inferredRoot.appendingPathComponent("bootstrap-reports", isDirectory: true)
+        self.afterBootstrapJournalPersisted = afterBootstrapJournalPersisted
         self.beforePristinePackFinalVerification = beforePristinePackFinalVerification
         self.beforePristinePackAtomicExchange = beforePristinePackAtomicExchange
         self.replacePristinePack = replacePristinePack
@@ -377,8 +392,7 @@ private func publishBundledPacks(
         // no-ops if it already exists) does the same work as calling it once per pack,
         // minus the redundant mkdir/stat syscalls.
         do {
-            try FileManager.default.createDirectory(
-                at: environment.userPacksDirectory, withIntermediateDirectories: true)
+            try ensurePrivateDirectoryTree(at: environment.userPacksDirectory)
         } catch {
             return .failure(
                 .packCopyFailure(reason: "创建 ~/.claudio/packs 失败：\(error.localizedDescription)")
@@ -542,7 +556,7 @@ public func packSelectionPlan(
     status: PackIntegrityStatus, usablePackIDs: [String]
 ) -> PackSelectionPlan {
     switch status {
-    case .complete, .incomplete:
+    case .complete, .incomplete, .noSupportedEvents:
         // 「内容」层的缺口（某个事件没声音 / 声明了但文件不在）**不是**坏管道：面板的五行覆盖度会把它
         // 逐行画成 `.unmapped` / `.broken`，用户看得见、拖一个文件进去就能修。拦住他只会把他挡在
         // 唯一能修好它的界面之外。
@@ -652,7 +666,7 @@ public enum SetupOutcome: Sendable, Equatable {
 /// 消失了，而 Claudio 报告的是成功（T17e 第二轮对抗评审）。
 ///
 /// 现在它是 outcome 的一等公民：CLI 会把它印成一行 ⚠，连同**绝对路径**和一句「一个文件都没有删」。
-public struct SalvagedPack: Sendable, Equatable {
+public struct SalvagedPack: Sendable, Equatable, Codable {
     public let packID: String
     /// 它现在在哪儿 —— 绝对路径，用户复制粘贴就能去看。
     public let movedTo: String
@@ -664,7 +678,7 @@ public struct SalvagedPack: Sendable, Equatable {
 }
 
 /// 这次 setup 对 `selected_pack` 实际做了什么（``PackSelectionPlan`` 里那三条**成功**分支的结果）。
-public enum PackSelectionOutcome: Sendable, Equatable {
+public enum PackSelectionOutcome: Sendable, Equatable, Codable {
     /// 用户已有的选择好好的 —— 一个字节都没动。
     case untouched
     /// 首次自举挑了一个默认包。
@@ -784,6 +798,7 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
     case configUnusable(reason: String)
     case useFailure(UseError)
     case installFailure(SettingsUpdateError)
+    case reportingUnavailable(reason: String)
 
     public var description: String {
         switch self {
@@ -814,6 +829,8 @@ public enum SetupError: Error, Sendable, Equatable, CustomStringConvertible {
             "首次默认选包失败：\(error.description)"
         case .installFailure(let error):
             "写 settings.json hooks 失败：\(error.description)"
+        case .reportingUnavailable(let reason):
+            "无法安全记录本次启动修复，已在修改用户内容前停止：\(reason)"
         }
     }
 }
@@ -1049,10 +1066,10 @@ public func performSharedRuntimeBootstrap(
 /// with exactly the same outcome and error mapping as before.
 public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupOutcome, SetupError> {
     let bootstrap: SharedRuntimeBootstrapOutcome
-    switch performSharedRuntimeBootstrap(environment: environment) {
-    case .success(let outcome):
+    switch performSharedRuntimeBootstrapExecution(environment: environment) {
+    case .completed(let outcome):
         bootstrap = outcome
-    case .failure(let error):
+    case .failed(let error, _):
         return .failure(error)
     }
 
@@ -1068,6 +1085,12 @@ public func performFirstRunSetup(environment: SetupEnvironment) -> Result<SetupO
                 salvaged: bootstrap.salvaged, packSelection: bootstrap.packSelection,
                 hooksOutcome: hooksOutcome))
     case .failure(let error):
+        let progress = SharedRuntimeBootstrapExecution.completed(bootstrap)
+        let progressEvents = bootstrapReportEvents(
+            execution: progress, helperPath: environment.claudioBinaryDestination)
+        _ = try? BootstrapReportStore(directory: environment.bootstrapReportsDirectory)
+            .appendFailure(
+                code: bootstrapErrorCode(.installFailure(error)), preserving: progressEvents)
         return .failure(.installFailure(error))
     }
 }
@@ -1179,8 +1202,7 @@ private func copySelfToFixedLocation(from source: URL, to destination: URL) -> R
         .appendingPathComponent(
             ".\(destination.lastPathComponent).tmp-\(ProcessInfo.processInfo.processIdentifier)")
     do {
-        try fileManager.createDirectory(
-            at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ensurePrivateDirectoryTree(at: destination.deletingLastPathComponent())
         try? fileManager.removeItem(at: staging)
         try fileManager.copyItem(at: source, to: staging)
         // 执行位在**发布之前**打上。上一版是在 copy 到最终路径**之后**才 chmod，于是「存在但不可

@@ -61,6 +61,12 @@ func runConfigConcurrencySuites() {
                 at: userPacks.appendingPathComponent("second-pack", isDirectory: true),
                 withIntermediateDirectories: true)
             writeFixture(
+                #"{ "id": "minimal-chime", "events": {} }"#,
+                to: userPacks.appendingPathComponent("minimal-chime/manifest.json"))
+            writeFixture(
+                #"{ "id": "second-pack", "events": {} }"#,
+                to: userPacks.appendingPathComponent("second-pack/manifest.json"))
+            writeFixture(
                 #"""
                 { "selected_pack": "minimal-chime", "master_volume": 0.5, "night_dim": true,
                   "events": { "stop": true }, "starred_packs": ["minimal-chime"] }

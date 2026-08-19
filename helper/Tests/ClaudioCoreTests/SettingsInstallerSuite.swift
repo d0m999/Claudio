@@ -364,7 +364,14 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result == .success(.installed), "fresh install should report .installed, got \(result)")
+            expect(result.map(\.didInstall) == .success(true), "fresh install should report .installed, got \(result)")
+            expect(
+                result.map(\.backupOutcome) == .success(.some(.notNeeded)),
+                "fresh install 必须明确报告原文件不存在、无需备份")
+            let freshMessage = (try? result.get()).map(legacyHooksOutcomeMessage)
+            expect(
+                freshMessage?.contains("无需创建备份") == true,
+                "CLI 纯摘要不得在 fresh 安装时声称备份存在")
 
             let json = readJSONObject(at: settingsFile)
             for event in Event.legacyLifecycleCases {
@@ -391,7 +398,10 @@ func runSettingsInstallerSuites() {
             let first = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(first == .success(.installed), "first install should be .installed")
+            expect(first.map(\.didInstall) == .success(true), "first install should be .installed")
+            expect(
+                first.map(\.backupOutcome) == .success(.some(.notNeeded)),
+                "第一次创建原本不存在的配置必须报告 notNeeded")
 
             let second = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
@@ -423,7 +433,7 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result == .success(.installed), "install should succeed, got \(result)")
+            expect(result.map(\.didInstall) == .success(true), "install should succeed, got \(result)")
 
             let json = readJSONObject(at: settingsFile)
             let stopFailureGroups = hooksArray(json, event: "StopFailure") ?? []
@@ -465,7 +475,7 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result == .success(.installed), "install alongside other hooks should be .installed")
+            expect(result.map(\.didInstall) == .success(true), "install alongside other hooks should be .installed")
 
             let json = readJSONObject(at: settingsFile)
 
@@ -508,7 +518,7 @@ func runSettingsInstallerSuites() {
             let first = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(first == .success(.installed), "first install should be .installed")
+            expect(first.map(\.didInstall) == .success(true), "first install should be .installed")
             expect(
                 readRawString(at: backupFile) == originalContent,
                 "backup must hold the exact pre-claudio original bytes")
@@ -529,8 +539,12 @@ func runSettingsInstallerSuites() {
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
             expect(
-                second == .success(.installed),
+                second.map(\.didInstall) == .success(true),
                 "second install must perform a real write (missing events re-added), got \(second)")
+            expect(
+                second.map(\.backupOutcome)
+                    == .success(.some(.preservedExisting(path: backupFile.path))),
+                "第二次真实写必须报告 preservedExisting")
             expect(
                 readRawString(at: backupFile) == originalContent,
                 "backup must remain the FIRST original even after a later real write ('一次性')")
@@ -905,7 +919,7 @@ func runSettingsInstallerSuites() {
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
             expect(
-                result == .success(.installed),
+                result.map(\.didInstall) == .success(true),
                 "install must self-heal past a typeless leftover (a real write, not .alreadyInstalled), got \(result)")
 
             let json = readJSONObject(at: settingsFile)
@@ -1139,7 +1153,7 @@ func runSettingsInstallerSuites() {
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
             expect(
-                result == .success(.installed),
+                result.map(\.didInstall) == .success(true),
                 "first-run install must succeed (not .lockFailed) even when the lock file's"
                     + " directory has never been created, got \(result)")
             expect(
@@ -1192,7 +1206,7 @@ func runSettingsInstallerSuites() {
             let installResult = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(installResult == .success(.installed), "install should succeed, got \(installResult)")
+            expect(installResult.map(\.didInstall) == .success(true), "install should succeed, got \(installResult)")
 
             let afterInstall = readJSONObject(at: settingsFile)
             for event in Event.legacyLifecycleCases {
@@ -1275,7 +1289,7 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile,
                 claudioBinaryPath: "/Users/tester/.claudio-OLD/bin/claudio", lockFile: lockFile)
-            expect(result == .success(.installed), "expected .installed, got \(result)")
+            expect(result.map(\.didInstall) == .success(true), "expected .installed, got \(result)")
         }
     }
 
@@ -1308,7 +1322,7 @@ func runSettingsInstallerSuites() {
                 let installed = installClaudioHooks(
                     settingsFile: settingsFile, claudioBinaryPath: binary, lockFile: lockFile)
                 expect(
-                    installed == .success(.installed),
+                    installed.map(\.didInstall) == .success(true),
                     "install must succeed for home \(home), got \(installed)")
 
                 let removed = uninstallClaudioHooks(
@@ -1529,7 +1543,7 @@ func runSettingsInstallerSuites() {
                     try? original.write(to: settingsFile, atomically: true, encoding: .utf8)
                 })
             expect(ran, "the betweenReadAndWrite seam must have been invoked")
-            expect(result == .success(.installed), "a byte-identical rewrite must not abort, got \(result)")
+            expect(result.map(\.didInstall) == .success(true), "a byte-identical rewrite must not abort, got \(result)")
         }
     }
     #endif  // DEBUG — seam-driven suites
@@ -1551,7 +1565,7 @@ func runSettingsInstallerSuites() {
             let result = installClaudioHooks(
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
-            expect(result == .success(.installed), "expected .installed, got \(result)")
+            expect(result.map(\.didInstall) == .success(true), "expected .installed, got \(result)")
 
             expect(
                 (try? FileManager.default.destinationOfSymbolicLink(atPath: settingsFile.path))
@@ -1599,11 +1613,8 @@ func runSettingsInstallerSuites() {
     }
 
     suite(
-        "installClaudioHooks: a DANGLING settings.json symlink still installs. loadRoot's"
-            + " fileExists follows the link and reports absent, so this is the ordinary fresh-install"
-            + " path — pinned because the obvious hardening of atomicWrite's nil re-read (an `lstat`"
-            + " that does NOT follow the link, and so sees the link node and calls it a concurrent"
-            + " creation) would silently turn this into a permanent .concurrentModification"
+        "installClaudioHooks: a DANGLING settings.json symlink fails closed and preserves the"
+            + " dotfiles node instead of replacing it with a regular file"
     ) {
         withTempDirectory { root in
             let target = root.appendingPathComponent("dotfiles/settings.json")
@@ -1620,14 +1631,14 @@ func runSettingsInstallerSuites() {
                 settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath,
                 lockFile: lockFile)
             expect(
-                result == .success(.installed),
-                "a dangling settings.json symlink is an absent file, not a concurrent"
-                    + " modification, got \(result)")
+                result == .failure(
+                    .readFailure(reason: "悬空符号链接：\(settingsFile.path)")),
+                "dangling symlink 必须显式失败关闭，got \(result)")
             expect(
-                detectHookInstallStatus(
-                    settingsFile: settingsFile, claudioBinaryPath: testClaudioBinaryPath)
-                    == .installed,
-                "the hooks must be readable back through the same path install was given")
+                (try? FileManager.default.destinationOfSymbolicLink(atPath: settingsFile.path))
+                    != nil
+                    && !FileManager.default.fileExists(atPath: target.path),
+                "失败后 symlink 节点必须保留，且不得越权创建目标")
         }
     }
 }

@@ -7,8 +7,10 @@ import Foundation
 // (`resolvePackDirectory`), then writes `config.json`: fresh-create when absent, or
 // update-only-`selected_pack`-preserve-the-rest when one already exists.
 
+@MainActor
 private func makePackDirectory(at url: URL) {
     try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    writeFixture(#"{ "id": "test-pack", "events": {} }"#, to: url.appendingPathComponent("manifest.json"))
 }
 
 @MainActor
@@ -203,6 +205,47 @@ func runUseSuites() {
                 rawContents?.contains("old-pack") == true,
                 "a lock-contended call must never touch config.json — the prior selection must survive untouched"
             )
+        }
+    }
+
+    suite("selectPack: unreadable manifest fails before config mutation and preserves exact bytes") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let original = #"{ "selected_pack": "old", "master_volume": 0.37 }"#
+            writeFixture(original, to: configFile)
+            let pack = root.appendingPathComponent("packs/broken", isDirectory: true)
+            try? FileManager.default.createDirectory(at: pack, withIntermediateDirectories: true)
+            writeFixture("{ broken", to: pack.appendingPathComponent("manifest.json"))
+
+            let result = selectPack(
+                "broken", configFile: configFile,
+                userPacksDirectory: root.appendingPathComponent("packs"),
+                lockFile: root.appendingPathComponent("config.lock"))
+            guard case .failure(.manifestUnreadable(let packID, _)) = result else {
+                expect(false, "broken manifest must return manifestUnreadable, got \(result)")
+                return
+            }
+            expect(packID == "broken", "typed failure must retain pack id")
+            expect(
+                (try? String(contentsOf: configFile, encoding: .utf8)) == original,
+                "manifest rejection must leave config byte-for-byte unchanged")
+        }
+    }
+
+    suite("nonEmptyRegularFileExists rejects empty regular files, directories, and FIFO") {
+        withTempDirectory { root in
+            let empty = root.appendingPathComponent("empty.mp3")
+            let nonempty = root.appendingPathComponent("sound.mp3")
+            let directory = root.appendingPathComponent("directory.mp3")
+            let fifo = root.appendingPathComponent("fifo.mp3")
+            writeFixture("", to: empty)
+            writeFixture("bytes", to: nonempty)
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            _ = mkfifo(fifo.path, 0o600)
+            expect(!nonEmptyRegularFileExists(at: empty), "zero-byte regular file is not playable")
+            expect(nonEmptyRegularFileExists(at: nonempty), "non-empty regular file is playable truth")
+            expect(!nonEmptyRegularFileExists(at: directory), "directory is not playable")
+            expect(!nonEmptyRegularFileExists(at: fifo), "FIFO is not playable")
         }
     }
 }

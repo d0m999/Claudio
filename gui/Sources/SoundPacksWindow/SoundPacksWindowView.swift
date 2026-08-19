@@ -501,6 +501,7 @@ struct SoundPacksWindowView: View {
         .accessibilityValue(userPacksDirectory.appendingPathComponent(card.id).path)
         .accessibilityHint(l10n.text(.soundPacksRevealHint))
         .accessibilityIdentifier("sound-packs.reveal-selected")
+        .disabled(card.availability == .missingSelectedPlaceholder)
     }
 
     private func factoryRestoreButton(_ card: PackCard) -> some View {
@@ -546,7 +547,11 @@ struct SoundPacksWindowView: View {
     @ViewBuilder
     private func packActions(_ card: PackCard, includeFlexibleSpace: Bool) -> some View {
         let displayName = SelectedPackMetadata(id: card.id, name: card.name).displayName
-        if model.selectedPackIsBuiltinReadOnly {
+        if model.selectedPackIsMissingPlaceholder {
+            if model.selectedPackCanRestoreFactory {
+                factoryRestoreButton(card)
+            }
+        } else if model.selectedPackIsBuiltinReadOnly {
             Button(l10n.text(.soundPacksCopy)) {
                 model.forkSelectedFactoryPack()
             }
@@ -568,7 +573,7 @@ struct SoundPacksWindowView: View {
                 : l10n.text(.soundPacksAddAudio)) {
                 chooseAndImportAudio()
             }
-            .disabled(isImportingAudio)
+            .disabled(isImportingAudio || !canEditSelectedPack)
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .fixedSize(horizontal: false, vertical: true)
             .focused($focusedTarget, equals: .addAudio)
@@ -1171,9 +1176,10 @@ struct SoundPacksWindowView: View {
             orphanFileNames: canEditSelectedPack
                 ? model.selectedAudioFiles.filter(\.isOrphan).map(\.fileName) : [],
             canEditSelectedPack: canEditSelectedPack,
-            canForkFactoryPack: model.selectedPackIsBuiltinReadOnly,
+            canForkFactoryPack:
+                model.selectedPackIsBuiltinReadOnly && !model.selectedPackIsMissingPlaceholder,
             canAddAudio: canEditSelectedPack,
-            canRestoreFactoryPack: model.selectedPackIsBuiltinReadOnly,
+            canRestoreFactoryPack: model.selectedPackCanRestoreFactory,
             canUseSelectedPack: selectedCard?.isSelected == false,
             canRestoreAllFactoryPacks:
                 allowsEmptyLibraryActions && model.packCards.isEmpty && model.hasFactoryPacks,
@@ -1234,7 +1240,7 @@ struct SoundPacksWindowView: View {
     }
 
     private var canEditSelectedPack: Bool {
-        selectedCard != nil && !model.selectedPackIsBuiltinReadOnly
+        selectedCard?.availability == .installed && !model.selectedPackIsBuiltinReadOnly
     }
 
     private func licenseBadgeLabel(_ badge: PackRowLicenseBadge) -> String? {

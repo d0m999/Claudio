@@ -14,7 +14,15 @@ import Foundation
 public enum ClaudioPaths {
     /// The current user's home directory — the anchor for every path below.
     private static var home: URL {
-        FileManager.default.homeDirectoryForCurrentUser
+        #if DEBUG
+        // 真实 CLI 子进程测试同时隔离 ~/.claude 与 ~/.codex。Release 完全不编译该入口。
+        if let testHome = ProcessInfo.processInfo.environment["CLAUDIO_TEST_HOME"],
+            testHome.hasPrefix("/")
+        {
+            return URL(fileURLWithPath: testHome, isDirectory: true)
+        }
+        #endif
+        return FileManager.default.homeDirectoryForCurrentUser
     }
 
     /// `~/.claudio/` — root of all Claudio-owned state.
@@ -143,6 +151,15 @@ public enum ClaudioPaths {
 
     public static var receiptsDirectory: URL {
         integrationsDirectory.appendingPathComponent("receipts", isDirectory: true)
+    }
+
+    /// 未确认的 shared-bootstrap 诊断状态；只含 Claudio 私有、可删除的语义记录。
+    public static var bootstrapReportsDirectory: URL {
+        root.appendingPathComponent("bootstrap-reports", isDirectory: true)
+    }
+
+    public static var bootstrapJournalFile: URL {
+        root.appendingPathComponent("bootstrap-journal.json")
     }
 
     public static var receiptLocksDirectory: URL {

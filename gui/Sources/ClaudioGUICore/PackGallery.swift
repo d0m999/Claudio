@@ -39,6 +39,13 @@ public enum PackCardState: Sendable, Equatable {
     case broken(reason: String)
 }
 
+/// Whether a card is backed by an installed directory or is the synthetic full-library
+/// representation of a `selected_pack` that is currently missing from disk.
+public enum PackCardAvailability: Sendable, Equatable {
+    case installed
+    case missingSelectedPlaceholder
+}
+
 /// What a pack row's trailing "coverage track" position renders, derived purely from
 /// ``PackCardState`` — PLAN-SOUND-MANAGER.md T4's a11y/layout model, resolving a 2026-07-17
 /// Codex catch: DESIGN.md's "覆盖轨恒显（含 complete）" and "`broken` 不渲染轨" read as
@@ -158,6 +165,7 @@ public struct PackCard: Sendable, Equatable {
     /// like ``EventRow/enabled`` stays orthogonal to ``CoverageState`` (决议③'s pattern,
     /// reapplied here).
     public let isSelected: Bool
+    public let availability: PackCardAvailability
 
     public init(
         id: String,
@@ -166,7 +174,8 @@ public struct PackCard: Sendable, Equatable {
         factoryIntegrity: Bool? = nil,
         presentEvents: Set<Event>,
         state: PackCardState,
-        isSelected: Bool
+        isSelected: Bool,
+        availability: PackCardAvailability = .installed
     ) {
         self.id = id
         self.name = name
@@ -175,6 +184,7 @@ public struct PackCard: Sendable, Equatable {
         self.presentEvents = presentEvents
         self.state = state
         self.isSelected = isSelected
+        self.availability = availability
     }
 }
 
@@ -398,7 +408,8 @@ public enum PackCardReadScope: Sendable, Equatable {
 public func availablePacks(
     config: ClaudioConfig,
     environment: AudioImportEnvironment,
-    scope: PackCardReadScope = .fullLibrary
+    scope: PackCardReadScope = .fullLibrary,
+    synthesizeMissingSelectedPlaceholder: Bool = false
 ) -> [PackCard] {
     var seenIDs: Set<String> = []
     var orderedIDs: [String] = []
@@ -421,7 +432,29 @@ public func availablePacks(
             starredPacks: config.starredPacks,
             defaultStarredPackIDs: environment.builtinPackIDs)
     }
-    return displayedIDs.map { buildPackCard(id: $0, config: config, environment: environment) }
+    var cards = displayedIDs.map {
+        buildPackCard(id: $0, config: config, environment: environment)
+    }
+    if synthesizeMissingSelectedPlaceholder,
+        scope == .fullLibrary,
+        isSafePackID(config.selectedPack),
+        !config.selectedPack.isEmpty,
+        !seenIDs.contains(config.selectedPack)
+    {
+        cards.append(missingSelectedPackPlaceholder(packID: config.selectedPack))
+    }
+    return cards
+}
+
+public func missingSelectedPackPlaceholder(packID: String) -> PackCard {
+    PackCard(
+        id: packID,
+        name: nil,
+        isCC0: false,
+        presentEvents: [],
+        state: .broken(reason: "当前选中的声音包不在磁盘上"),
+        isSelected: true,
+        availability: .missingSelectedPlaceholder)
 }
 
 /// Computes T17's future starred panel display set from already-enumerated pack ids, before any

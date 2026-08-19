@@ -540,7 +540,7 @@ func runSetupNoticeLifecycleSuites() async {
                     ],
                     packSelection: .repairedDeadSelection(
                         removed: "wobbuffet", selected: "minimal-chime"),
-                    hooksOutcome: .installed)))
+                    hooksOutcome: .installed(backup: .notNeeded))))
         return runner
     }
 
@@ -552,7 +552,7 @@ func runSetupNoticeLifecycleSuites() async {
                 .completed(
                     copiedBinary: true, copiedPacks: ["minimal-chime"], salvaged: [],
                     packSelection: .selectedDefault(packID: "minimal-chime"),
-                    hooksOutcome: .installed)))
+                    hooksOutcome: .installed(backup: .notNeeded))))
         return runner
     }
 
@@ -725,7 +725,7 @@ func runPanelAnnouncementLifecycleSuites() async {
                 .completed(
                     copiedBinary: true, copiedPacks: [], salvaged: [],
                     packSelection: .repairedDeadSelection(removed: "pikachu", selected: "lofi"),
-                    hooksOutcome: .installed)))
+                    hooksOutcome: .installed(backup: .notNeeded))))
         return runner
     }
 

@@ -567,7 +567,7 @@ func runOnboardingActionsSuites() {
             expect(copiedBinary, "必须真的复制了二进制")
             expect(copiedPacks == ["minimal-chime"], "必须复制了内置包，得到 \(copiedPacks)")
             expect(packSelection == .selectedDefault(packID: "minimal-chime"), "首次必须挑一个默认包，得到 \(String(describing: packSelection))")
-            expect(hooks == .installed, "必须真的写了 hooks，得到 \(hooks)")
+            expect(hooks.didInstall, "必须真的写了 hooks，得到 \(hooks)")
 
             // ① **装进去的是哪个二进制** —— 这是 T17 的整个要害。断言字节，不是断言「文件存在」。
             let installed = readString(targets.onboarding.claudioBinaryPath)
@@ -1610,7 +1610,7 @@ func runSetupNoticeSuites() {
         .tookOver(
             .completed(
                 copiedBinary: true, copiedPacks: [], salvaged: salvaged,
-                packSelection: packSelection, hooksOutcome: .installed))
+                packSelection: packSelection, hooksOutcome: .installed(backup: .notNeeded)))
     }
 
     // ── 真值表 ────────────────────────────────────────────────────────────────────────

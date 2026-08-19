@@ -211,6 +211,7 @@ private let byteWritingMembers = [
 private let byteWritingFunctions = [
     "open", "creat", "fopen", "fdopen", "freopen", "write", "pwrite", "writev",
     "fwrite", "fputs", "fputc", "fprintf", "truncate", "ftruncate", "mkstemp", "mmap",
+    "mkdir", "fchmod",
     // `copyfile(2)` —— `/codex review 3af8d5f` 红队实测：`copyfile(src, dst, nil, COPYFILE_DATA)` 把 src
     // 的字节 truncate + 就地写进 dst 的同一个 inode（无 temp+rename），被 kill 会在最终路径留半截文件，
     // 而它既没有 `.write(` 也没有 O_ token，上一版全绿。它是纯 Foundation 自由函数，写盘表面的一员。
@@ -488,13 +489,18 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // 有界只读：`open(O_RDONLY | O_NOFOLLOW | O_NONBLOCK)`。它是**读者**，不是写者 ——
     // `O_RDONLY` 刻意不在 ④ 的写意图 flag 里。
     "helper/Sources/ClaudioCore/SafeFileRead.swift": ["open("],
-    // `settings.json` 的原子写 + `.claudio.bak` 的一次性原子备份。
-    "helper/Sources/ClaudioCore/SettingsInstaller.swift": [".write("],
     // Claude/Codex 配置事务：0600 起步的私有 staging fd 完整写入并 fsync；一次性备份用
     // RENAME_EXCL 发布；卷不支持该 flag 时，同目录 link(2) 仍以 EEXIST 保证不覆盖。
     // 最终配置用同目录 rename 替换，且两者都保留原文件权限。
     "helper/Sources/ClaudioCore/ConfigFileTransaction.swift": [
-        "link(", "mkstemp(", "rename(", "renameatx_np(", "unlink(", "write(",
+        "fchmod(", "link(", "mkstemp(", "rename(", "renameatx_np(", "unlink(", "write(",
+    ],
+    // Claudio 自有目录逐层 mkdir；最终节点以 O_NOFOLLOW|O_DIRECTORY 打开并 fchmod 0700。
+    "helper/Sources/ClaudioCore/PrivateDirectory.swift": ["fchmod(", "mkdir(", "open("],
+    // Bootstrap report/journal：0600 staging 完整写入并 fsync，随后同目录 rename 原子发布；
+    // unlink 仅删除精确 UUID 报告、已调和 journal 或失败 staging。
+    "helper/Sources/ClaudioCore/BootstrapReport.swift": [
+        "fchmod(", "mkstemp(", "rename(", "unlink(", "write(",
     ],
     // 已知旧版 codex-notify：私有同目录 staging 写入后恢复执行权限，再以 rename(2) 原子替换。
     // 写入前在同一宿主锁内重读并比较预期内容，未知或并发修改版本 fail closed。
@@ -502,7 +508,7 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     // 回执与 active installation 标记从 mkstemp(3) 创建瞬间就是 0600；完整 write(2) + fsync
     // 后才以 rename(2) 原子替换稳定路径。unlink(2) 清 staging 及精确匹配的断开代次标记。
     "helper/Sources/ClaudioCore/HostHookReceipt.swift": [
-        "mkstemp(", "rename(", "unlink(", "write(",
+        "fchmod(", "mkstemp(", "rename(", "unlink(", "write(",
     ],
     // 二进制与内置包的复制。**两处都是 staging + 同卷 rename**（`copyItem` 进暂存 → `moveItem` /
     // `replaceItemAt` 发布）。pristine minimal-chime 升级更严格：`renameatx_np(RENAME_SWAP)`
@@ -546,7 +552,6 @@ private let contentReplacingWriteSites: [String: Int] = [
     "helper/Sources/ClaudioCore/ConfigMutation.swift": 1,
     "helper/Sources/ClaudioCore/Log.swift": 2,
     "helper/Sources/ClaudioCore/Play.swift": 1,
-    "helper/Sources/ClaudioCore/SettingsInstaller.swift": 2,
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": 1,
     "gui/Sources/ClaudioGUICore/AudioImport.swift": 1,
     "gui/Sources/ClaudioGUICore/ManifestBinding.swift": 1,

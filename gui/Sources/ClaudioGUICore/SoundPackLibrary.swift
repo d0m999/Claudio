@@ -132,7 +132,7 @@ public struct SoundPackLibrarySnapshot: Sendable, Equatable {
             let factsByID = Dictionary(uniqueKeysWithValues: facts.map { ($0.id, $0) })
             selectedFacts = ids.compactMap { factsByID[$0] }
         }
-        return selectedFacts.map { fact in
+        var cards = selectedFacts.map { fact in
             PackCard(
                 id: fact.id,
                 name: fact.name,
@@ -145,6 +145,14 @@ public struct SoundPackLibrarySnapshot: Sendable, Equatable {
                 state: fact.cardState,
                 isSelected: fact.id == config.selectedPack)
         }
+        if scope == .fullLibrary,
+            isSafePackID(config.selectedPack),
+            !config.selectedPack.isEmpty,
+            fact(for: config.selectedPack) == nil
+        {
+            cards.append(missingSelectedPackPlaceholder(packID: config.selectedPack))
+        }
+        return cards
     }
 
     /// Projects the latest mute flags over cached per-event disk coverage.

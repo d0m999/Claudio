@@ -16,7 +16,9 @@
 3. 双击挂载 DMG，把 `claudi0.app` 拖入 `/Applications`。
 4. 从“应用程序”启动。Claudio 是菜单栏 app，不显示 Dock 主窗口。
 
-Release workflow 对 tag 使用严格的 `vMAJOR.MINOR.PATCH` 校验，并把同一版本注入 CLI、app `Info.plist`、DMG 名称、Release 标题与 cask。缺少签名或 notarization 凭据时直接失败，不会回退为 ad-hoc 发布。
+Release workflow 有两条严格分离的路径：从 `main` 手动运行 `workflow_dispatch(version=0.1.0)` 只生成带 commit SHA 的签名、公证 RC artifact，不创建 tag、GitHub Release 或更新 tap；只有严格的 `vMAJOR.MINOR.PATCH` tag 才进入 publish job。两条路径都把同一版本注入 CLI、app `Info.plist` 和 DMG 名称，并从最终挂载 DMG 复验架构、版本、资源、symlink、签名、公证票据和校验和。缺少 Apple 凭据时直接失败，不回退为 ad-hoc 发布。
+
+`0.1.0` 的人工与真机门禁记录在 [`release-acceptance-0.1.0.md`](release-acceptance-0.1.0.md)。RC workflow 通过不等于首发验收通过；Intel/macOS 12、VoiceOver、真实宿主和真实回执缺一项都不得创建首发 tag。
 
 ## 安装方式二：Homebrew（可选渠道）
 

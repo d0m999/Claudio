@@ -50,6 +50,106 @@ func runConfigFileTransactionSuites() {
         }
     }
 
+    suite("ConfigFileTransaction typed report：备份逐一继承 0600/0640/0644，fresh 明确 notNeeded") {
+        withTempDirectory { directory in
+            for mode: Int in [0o600, 0o640, 0o644] {
+                let file = directory.appendingPathComponent("mode-\(mode).json")
+                let lock = directory.appendingPathComponent("mode-\(mode).lock")
+                let backup = directory.appendingPathComponent("mode-\(mode).json.claudio.bak")
+                let original = Data("{\"mode\":\(mode)}".utf8)
+                try! original.write(to: file)
+                try! FileManager.default.setAttributes(
+                    [.posixPermissions: mode], ofItemAtPath: file.path)
+                let transaction = ConfigFileTransaction(
+                    file: file, lockFile: lock, backupFile: backup)
+                let result: Result<ConfigFileTransactionReport<String>, ConfigFileTransactionError> =
+                    transaction.update { root in
+                        var next = root
+                        next["changed"] = true
+                        return .replace(next, "typed")
+                    }
+                guard case .success(let report) = result else {
+                    expect(false, "mode \(String(mode, radix: 8)) typed 写入必须成功，got \(result)")
+                    continue
+                }
+                expect(report.outcome == .written && report.value == "typed", "typed payload 必须保真")
+                expect(
+                    report.backup == .created(path: backup.path),
+                    "首次真实写必须报告 created，got \(report.backup)")
+                expect(transactionPermissions(at: backup) == mode, "备份必须继承 mode \(String(mode, radix: 8))")
+                expect(transactionPermissions(at: file) == mode, "目标也必须保留 mode \(String(mode, radix: 8))")
+
+                let preservedBytes = try! Data(contentsOf: backup)
+                let second: Result<ConfigFileTransactionReport<Int>, ConfigFileTransactionError> =
+                    transaction.update { root in
+                        var next = root
+                        next["changedAgain"] = true
+                        return .replace(next, 2)
+                    }
+                expect(
+                    second.map(\.backup) == .success(.preservedExisting(path: backup.path)),
+                    "已有正规备份必须报告 preservedExisting，got \(second)")
+                expect((try? Data(contentsOf: backup)) == preservedBytes, "preservedExisting 不得覆盖原备份")
+            }
+
+            let fresh = directory.appendingPathComponent("fresh.json")
+            let freshBackup = directory.appendingPathComponent("fresh.json.claudio.bak")
+            let freshTransaction = ConfigFileTransaction(
+                file: fresh,
+                lockFile: directory.appendingPathComponent("fresh.lock"),
+                backupFile: freshBackup)
+            let freshResult: Result<ConfigFileTransactionReport<String>, ConfigFileTransactionError> =
+                freshTransaction.update { root in
+                    var next = root
+                    next["fresh"] = true
+                    return .replace(next, "fresh")
+                }
+            expect(
+                freshResult.map(\.backup) == .success(.notNeeded)
+                    && !FileManager.default.fileExists(atPath: freshBackup.path),
+                "原文件不存在时必须明确 notNeeded，不能制造空备份")
+        }
+    }
+
+    suite("ConfigFileTransaction：已有备份若为 symlink、目录或 FIFO 必须失败关闭") {
+        withTempDirectory { directory in
+            let file = directory.appendingPathComponent("settings.json")
+            let lock = directory.appendingPathComponent("settings.lock")
+            let backup = directory.appendingPathComponent("settings.json.claudio.bak")
+            let original = Data("{\"owner\":\"user\"}".utf8)
+
+            for kind in ["symlink", "directory", "fifo"] {
+                try? FileManager.default.removeItem(at: file)
+                try? FileManager.default.removeItem(at: backup)
+                try! original.write(to: file)
+                switch kind {
+                case "symlink":
+                    createSymlink(
+                        at: backup,
+                        pointingTo: directory.appendingPathComponent("backup-target"))
+                case "directory":
+                    try! FileManager.default.createDirectory(at: backup, withIntermediateDirectories: false)
+                default:
+                    makeFIFO(at: backup)
+                }
+                let before = try! Data(contentsOf: file)
+                let result = ConfigFileTransaction(
+                    file: file, lockFile: lock, backupFile: backup
+                ).update { root in
+                    var next = root
+                    next["claudio"] = true
+                    return .replace(next)
+                }
+                guard case .failure(.backupFailure(let reason)) = result else {
+                    expect(false, "\(kind) 备份必须以 backupFailure 拒绝，got \(result)")
+                    continue
+                }
+                expect(reason.contains("不是正规文件"), "typed 原因必须指出非正规备份，got \(reason)")
+                expect((try? Data(contentsOf: file)) == before, "\(kind) 备份失败时源配置必须逐字不变")
+            }
+        }
+    }
+
     suite("ConfigFileTransaction：空文件、畸形 JSON、只读与锁争用全部失败关闭") {
         withTempDirectory { directory in
             let file = directory.appendingPathComponent("hooks.json")

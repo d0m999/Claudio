@@ -50,6 +50,7 @@ public struct PanelView: View {
     /// Shared with the retained integrations window. Both surfaces render the same immutable
     /// adapter-derived presentation instead of probing host files independently.
     @ObservedObject private var hostIntegrations: HostIntegrationPresentationStore
+    @ObservedObject private var bootstrapReports: BootstrapReportPresentationStore
     /// App-lifetime explicit language state shared with both retained management windows.
     @ObservedObject private var languageStore: ClaudioLanguageStore
 
@@ -74,6 +75,7 @@ public struct PanelView: View {
     private let soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator
     private let onManageSounds: @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void
     private let onManageIntegrations: @MainActor (PanelFocusTarget) -> Void
+    private let onRetryBootstrap: @MainActor () -> Void
     private let onAudibilityInputsChanged: @MainActor () -> Void
     private let onQuit: @MainActor () -> Void
 
@@ -94,11 +96,13 @@ public struct PanelView: View {
         lockFile: URL = ClaudioPaths.configLockFile,
         focusCoordinator: PanelFocusCoordinator = PanelFocusCoordinator(),
         hostIntegrations: HostIntegrationPresentationStore,
+        bootstrapReports: BootstrapReportPresentationStore,
         languageStore: ClaudioLanguageStore,
         soundPackLibrary: SoundPackLibrary,
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
         onManageSounds: @escaping @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void,
         onManageIntegrations: @escaping @MainActor (PanelFocusTarget) -> Void,
+        onRetryBootstrap: @escaping @MainActor () -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
         onQuit: @escaping @MainActor () -> Void,
         onPanelWidthChange: @escaping (Double) -> Void = { _ in }
@@ -108,11 +112,13 @@ public struct PanelView: View {
         self.lockFile = lockFile
         self.focusCoordinator = focusCoordinator
         self.hostIntegrations = hostIntegrations
+        self.bootstrapReports = bootstrapReports
         self.languageStore = languageStore
         self.soundPackLibrary = soundPackLibrary
         self.soundPacksRefreshCoordinator = soundPacksRefreshCoordinator
         self.onManageSounds = onManageSounds
         self.onManageIntegrations = onManageIntegrations
+        self.onRetryBootstrap = onRetryBootstrap
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
         self.onQuit = onQuit
         self.onPanelWidthChange = onPanelWidthChange
@@ -180,6 +186,11 @@ public struct PanelView: View {
             applyFirstFocus()
             announcePanelSummary()
         }
+        .onChange(of: bootstrapReports.records) { _ in
+            guard focusCoordinator.showCount > focusCoordinator.hideCount else { return }
+            applyFirstFocus()
+            announcePanelSummary()
+        }
         // T15 D5 「极大 → 加宽 popover」: SwiftUI already widened ITSELF (`.frame(width:)` above);
         // this tells the AppKit popover around it to follow (see ``onPanelWidthChange``).
         .onChange(of: layoutAdaptation.panelWidth) { newWidth in
@@ -223,9 +234,15 @@ public struct PanelView: View {
                 let header = packName.isEmpty
                     ? base
                     : l10n.format(.panelHeaderWithPack, Int64(sourceCount), packName as NSString)
+                let pendingReports = bootstrapReports.pendingAnnouncementRecords()
+                let reports = pendingReports.map(bootstrapReportAnnouncement).joined(separator: " ")
+                let candidate = [dualHostPanelAnnouncement(header: header), reports]
+                    .compactMap { $0 }
+                    .filter { !$0.isEmpty }
+                    .joined(separator: " ")
                 guard
                     let sentence = announcer.consume(
-                        dualHostPanelAnnouncement(header: header),
+                        candidate,
                         openCount: coordinator.showCount)
                 else { return }
                 NSAccessibility.post(
@@ -235,6 +252,7 @@ public struct PanelView: View {
                         .announcement: sentence,
                         .priority: NSAccessibilityPriorityLevel.high.rawValue,
                     ])
+                bootstrapReports.markAnnounced(pendingReports)
             }
         }
     }
@@ -452,6 +470,7 @@ public struct PanelView: View {
             // 换句话说：**移动这个 `ForEach` 到画廊下方，就等于把那句文案变成谎话。** 要改位置，
             // 先改文案。（`runSetupNoticeSuites` 钉住了「文案里有『下面的声音包』」这一半；另一半
             // ——「它真的在下面」—— 只有这条注释和你的眼睛守着。）
+            bootstrapReportSection
             Text(l10n.text(.panelSoundPacks))
                 .font(.system(size: 11 * typeScale, weight: .semibold))
                 .foregroundColor(ClaudioColor.textSecondary(colorScheme))
@@ -466,6 +485,157 @@ public struct PanelView: View {
                 soundPackLibraryRetryButton
             }
             manageSoundsRow
+        }
+    }
+
+    @ViewBuilder
+    private var bootstrapReportSection: some View {
+        if let error = bootstrapReports.acknowledgementError {
+            FailureRow(message: error)
+        }
+        ForEach(bootstrapReports.records) { record in
+            let reportID = record.id.uuidString
+            let failure = record.events.contains { event in
+                if case .failure = event { return true }
+                return false
+            }
+            VStack(alignment: .leading, spacing: 7) {
+                Text(bootstrapReportMessage(record))
+                    .font(.system(size: 11 * typeScale, weight: .medium))
+                    .foregroundStyle(failure ? Color.red : Color.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                HStack(spacing: 8) {
+                    if failure {
+                        Button(languageStore.language == .english ? "Retry" : "重试") {
+                            onRetryBootstrap()
+                        }
+                        .accessibilityIdentifier("bootstrap-report.retry")
+                        .focused($focusedTarget, equals: .bootstrapReportRetry(id: reportID))
+                        Button(languageStore.language == .english
+                            ? "Connections & diagnostics" : "打开连接与诊断") {
+                            onManageIntegrations(.hostSource(.claudeCode))
+                        }
+                        .accessibilityIdentifier("bootstrap-report.diagnostics")
+                        .focused(
+                            $focusedTarget,
+                            equals: .bootstrapReportDiagnostics(id: reportID))
+                    }
+                    if let path = bootstrapReportRevealPath(record) {
+                        Button(languageStore.language == .english ? "Show in Finder" : "在 Finder 中显示") {
+                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                        }
+                        .accessibilityIdentifier("bootstrap-report.reveal")
+                        .focused($focusedTarget, equals: .bootstrapReportReveal(id: reportID))
+                    }
+                    if record.events.contains(where: { event in
+                        if case .selectionChanged = event { return true }
+                        return false
+                    }) {
+                        Button(languageStore.language == .english ? "Manage sounds" : "管理声音包") {
+                            onManageSounds(.overview, .manageSounds)
+                        }
+                        .accessibilityIdentifier("bootstrap-report.manage-sounds")
+                        .focused(
+                            $focusedTarget,
+                            equals: .bootstrapReportManageSounds(id: reportID))
+                    }
+                    Spacer(minLength: 0)
+                    Button(languageStore.language == .english ? "Got it" : "知道了") {
+                        bootstrapReports.acknowledge(record.id)
+                    }
+                    .accessibilityIdentifier("bootstrap-report.acknowledge")
+                    .focused(
+                        $focusedTarget,
+                        equals: .bootstrapReportAcknowledge(id: reportID))
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding(9)
+            .background((failure ? Color.red : Color.orange).opacity(0.09))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(bootstrapReportMessage(record))
+        }
+    }
+
+    private func bootstrapReportMessage(_ record: BootstrapReportRecord) -> String {
+        let english = languageStore.language == .english
+        let parts = record.events.map { event -> String in
+            switch event {
+            case .failure(let code):
+                return english ? "Startup repair failed (\(code))." : "启动修复失败（\(code)）。"
+            case .helperCopied:
+                return english ? "The helper was installed." : "helper 已完成安装。"
+            case .packPublished(let packID):
+                return english ? "Installed sound pack \(packID)." : "已发布声音包 \(packID)。"
+            case .packSalvaged(let packID, let movedTo):
+                return english
+                    ? "Moved unreadable pack \(packID) to \(movedTo); no files were deleted."
+                    : "无法读取的声音包 \(packID) 已搬到 \(movedTo)，没有删除任何文件。"
+            case .selectionChanged(let removed, let selected):
+                if let removed {
+                    return english
+                        ? "The missing selection \(removed) was replaced with \(selected)."
+                        : "缺失的选中包 \(removed) 已自动改为 \(selected)。"
+                }
+                return english ? "Selected \(selected)." : "已自动选择 \(selected)。"
+            }
+        }
+        let count = record.occurrenceCount > 1
+            ? (english ? " Repeated \(record.occurrenceCount) times." : " 已重复 \(record.occurrenceCount) 次。")
+            : ""
+        return parts.joined(separator: " ") + count
+    }
+
+    private func bootstrapReportRevealPath(_ record: BootstrapReportRecord) -> String? {
+        record.events.compactMap { event in
+            if case .packSalvaged(_, let movedTo) = event { return movedTo }
+            return nil
+        }.first
+    }
+
+    private func bootstrapReportAnnouncement(_ record: BootstrapReportRecord) -> String {
+        let english = languageStore.language == .english
+        var actions: [String] = []
+        if record.events.contains(where: { if case .failure = $0 { return true }; return false }) {
+            actions.append(english ? "Retry" : "重试")
+            actions.append(english ? "Connections and diagnostics" : "打开连接与诊断")
+        }
+        if bootstrapReportRevealPath(record) != nil {
+            actions.append(english ? "Show in Finder" : "在 Finder 中显示")
+        }
+        if record.events.contains(where: {
+            if case .selectionChanged = $0 { return true }
+            return false
+        }) {
+            actions.append(english ? "Manage sounds" : "管理声音包")
+        }
+        actions.append(english ? "Got it" : "知道了")
+        let actionSummary = english
+            ? "Available actions: \(actions.joined(separator: ", "))."
+            : "可用操作：\(actions.joined(separator: "、"))。"
+        return bootstrapReportMessage(record) + " " + actionSummary
+    }
+
+    private var bootstrapReportFocusActions: [PanelFocusTarget] {
+        bootstrapReports.records.flatMap { record in
+            let id = record.id.uuidString
+            var actions: [PanelFocusTarget] = []
+            if record.events.contains(where: { if case .failure = $0 { return true }; return false }) {
+                actions.append(.bootstrapReportRetry(id: id))
+                actions.append(.bootstrapReportDiagnostics(id: id))
+            }
+            if bootstrapReportRevealPath(record) != nil {
+                actions.append(.bootstrapReportReveal(id: id))
+            }
+            if record.events.contains(where: {
+                if case .selectionChanged = $0 { return true }
+                return false
+            }) {
+                actions.append(.bootstrapReportManageSounds(id: id))
+            }
+            actions.append(.bootstrapReportAcknowledge(id: id))
+            return actions
         }
     }
 
@@ -687,7 +857,8 @@ public struct PanelView: View {
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
             hasDetailToggle: hasDetailToggle, hasMasterVolume: content.showsEventContent,
             hasConfigFailureNotice: content.hasConfigFailureNotice,
-            hostSources: hostSources)
+            hostSources: hostSources,
+            bootstrapReportActions: bootstrapReportFocusActions)
         let visibleOrder = panelFocusOrder(
             .operational(
                 events: visibleRows.map(\.event),
@@ -695,7 +866,8 @@ public struct PanelView: View {
                 hasDetailToggle: hasDetailToggle,
                 hasMasterVolume: content.showsEventContent,
                 hasConfigFailureNotice: content.hasConfigFailureNotice,
-                hostSources: hostSources))
+                hostSources: hostSources,
+                bootstrapReportActions: bootstrapReportFocusActions))
         if let requestedTarget = focusCoordinator.requestedTarget,
             visibleOrder.contains(requestedTarget)
         {
@@ -710,8 +882,9 @@ public struct PanelView: View {
         case .eventSound, .eventMute, .eventAction:
             return true
         case .none, .onboardingPrimaryAction, .onboardingSecondaryAction, .hostSource,
-            .masterVolume, .packCard, .manageSounds, .revealDetail, .disconnect, .configReveal,
-            .quitApplication:
+            .masterVolume, .bootstrapReportRetry, .bootstrapReportDiagnostics,
+            .bootstrapReportReveal, .bootstrapReportManageSounds, .bootstrapReportAcknowledge,
+            .packCard, .manageSounds, .revealDetail, .disconnect, .configReveal, .quitApplication:
             return false
         }
     }
@@ -738,7 +911,7 @@ public struct PanelView: View {
                 id: panelModel.config.selectedPack, userPacksDirectory: audioEnvironment.userPacksDirectory,
                 bundledPacksDirectory: audioEnvironment.bundledPacksDirectory),
             let resolvedFile = safePackFileURL(fileName, in: packDirectory),
-            regularFileExists(at: resolvedFile)
+            nonEmptyRegularFileExists(at: resolvedFile)
         else {
             panelModel.reload()
             return

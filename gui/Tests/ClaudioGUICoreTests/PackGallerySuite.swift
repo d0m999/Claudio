@@ -41,6 +41,30 @@ private func writeCompletePack(named id: String, at userPacks: URL, name: String
 
 @MainActor
 func runPackGallerySuites() {
+    suite("full library synthesizes a selected broken placeholder for a missing selected_pack") {
+        withTempDirectory { root in
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
+            let config = ClaudioConfig(selectedPack: "missing-selected")
+            let full = availablePacks(
+                config: config, environment: environment, scope: .fullLibrary,
+                synthesizeMissingSelectedPlaceholder: true)
+            let placeholder = full.first { $0.id == "missing-selected" }
+            expect(placeholder?.isSelected == true, "placeholder must preserve config selection")
+            expect(
+                placeholder?.availability == .missingSelectedPlaceholder,
+                "full library must expose missing-selected placeholder")
+            guard case .broken = placeholder?.state else {
+                expect(false, "placeholder must be visibly broken")
+                return
+            }
+            let panel = availablePacks(
+                config: config, environment: environment, scope: .panelStarredDisplay)
+            expect(
+                !panel.contains(where: { $0.id == "missing-selected" }),
+                "starred-only panel projection must not inject the placeholder")
+        }
+    }
     suite("starredPackDisplayIDs: absent defaults, explicit empty, disk intersection, de-duplication, and defensive cap") {
         let installedInOrder = ["a", "b", "c", "d", "e"]
         let missingKeyFixture = try! JSONDecoder().decode(

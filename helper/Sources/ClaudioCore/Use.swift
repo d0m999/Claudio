@@ -25,6 +25,7 @@ public enum UseOutcome: Sendable, Equatable {
 public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidPackID(String)
     case packNotFound(String)
+    case manifestUnreadable(packID: String, reason: String)
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
     case lockBusy
@@ -36,6 +37,8 @@ public enum UseError: Error, Sendable, Equatable, CustomStringConvertible {
             "\"\(id)\" 不是合法的声音包 id（不能为空、不能是 . / ..、不能含路径分隔符）"
         case .packNotFound(let id):
             "找不到声音包 \"\(id)\"（~/.claudio/packs/\(id)/ 不存在）"
+        case .manifestUnreadable(let packID, let reason):
+            "声音包 \"\(packID)\" 的 manifest.json 无法安全读取或解析，未修改 config.json：\(reason)"
         case .configReadFailure(let reason):
             "config.json 读取失败，已中止（未修改文件）：\(reason)"
         case .configWriteFailure(let reason):
@@ -71,12 +74,15 @@ public func selectPack(
     lockFile: URL = ClaudioPaths.configLockFile
 ) -> Result<UseOutcome, UseError> {
     guard isSafePackID(packID) else { return .failure(.invalidPackID(packID)) }
-    guard
+    guard let packDirectory =
         resolvePackDirectory(
             id: packID, userPacksDirectory: userPacksDirectory,
-            bundledPacksDirectory: bundledPacksDirectory) != nil
+            bundledPacksDirectory: bundledPacksDirectory)
     else {
         return .failure(.packNotFound(packID))
+    }
+    if case .failure(let error) = loadPackManifest(in: packDirectory) {
+        return .failure(.manifestUnreadable(packID: packID, reason: error.reason))
     }
 
     let outcome = withNonBlockingLock(path: lockFile.path) {

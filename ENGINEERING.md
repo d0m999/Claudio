@@ -64,6 +64,10 @@ claudi0 hook <host> <native-event> --installation-id <uuid>
 
 `SharedRuntimeBootstrap` 只负责 helper、内置声音包、默认选包和 quarantine 修复；断开任一宿主都不得删除这些共享资产。
 
+所有生产 bootstrap 入口先在 `~/.claudio/bootstrap-journal.json` 写入带磁盘基线的 `0600` journal，再允许修改用户内容。进程中断后，下次启动按 helper、包目录和 `config.json` 的实际状态调和；有副作用时生成版本化语义报告，无副作用且 runtime 健康时清理空 journal。报告存于 `~/.claudio/bootstrap-reports/<UUID>.json`：目录 `0700`、文件 `0600`、单条上限 64 KiB、最多 32 条未确认；纯失败按语义合并计数，搬移等不可逆事实不得被覆盖。队列损坏、满载或 journal 无法安全发布时，bootstrap 在新的用户内容修改前失败关闭。
+
+`SharedRuntimeBootstrapExecution` 始终携带部分进度；`HostIntegrationManager` 分离稳定宿主快照与本次执行结果，启动和显式 connect/repair 发布执行结果，普通 refresh 只读。GUI 的 app-lifetime report store 只在「知道了」成功删除文件后移除呈现，不复活旧 onboarding view model。
+
 内置 `minimal-chime` 为 `1.1.0`。bootstrap 只原子升级可证明为 byte-pristine 的 `1.0.0`：真实目录、根集合恰为旧 manifest + 四个旧 MP3、全部正规文件、manifest 与私有 v1.0 baseline 字节一致、旧音频先比尺寸再有界逐字节对照当前 bundle。格式化 manifest、extra、symlink/FIFO/subdir 或任一音频变化都视为自定义并完全保持不变。升级在 `packs.lock` 内同目录 staging，复验目标仍 pristine 后用 `renameatx_np(..., RENAME_SWAP)` 交换目录；若网络/FUSE 卷以 `ENOTSUP`/`ENOSYS` 明确拒绝该原语，则保留 1.0.0、清理 staging 并继续 bootstrap，不采用有缺口且可能覆盖外部编辑的两步 rename。其他失败保留旧包并返回可重试错误，不创建永久 salvage。
 
 宿主配置统一经 `ConfigFileTransaction`：每个配置文件使用独立非阻塞锁、一次性备份、受限读取与解析、compare-and-swap 外部修改检测、符号链接防护及同目录原子替换。dotfiles 符号链接保留链接节点并写其已解析目标；dangling link 没有安全目标，明确 fail closed。一次性备份优先使用 `RENAME_EXCL`，文件系统不支持时只回退到同目录 `link(2)`，仍以 `EEXIST` 拒绝覆盖。adapter 只实现自身 schema 变换：

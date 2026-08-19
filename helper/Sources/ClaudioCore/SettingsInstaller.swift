@@ -61,12 +61,22 @@ public func claudioHookCommand(for event: Event, claudioBinaryPath: String) -> S
 
 public enum InstallOutcome: Sendable, Equatable {
     /// At least one event's hook was newly appended.
-    case installed
+    case installed(backup: ConfigBackupOutcome)
     /// Every event already had our exact hook command; nothing changed.
     case alreadyInstalled
     /// A complete modern Claude Code connection already exists. The legacy compatibility
     /// command is an idempotent success and must not append a second playback chain.
     case modernConnectionPresent
+
+    public var didInstall: Bool {
+        if case .installed = self { return true }
+        return false
+    }
+
+    public var backupOutcome: ConfigBackupOutcome? {
+        guard case .installed(let backup) = self else { return nil }
+        return backup
+    }
 }
 
 public enum UninstallOutcome: Sendable, Equatable {
@@ -180,21 +190,18 @@ private func installClaudioHooksLocked(
     guard !binaryPathContradictsItsNamespace(claudioBinaryPath) else {
         return .failure(.unsweepableBinaryPath(path: claudioBinaryPath))
     }
-    if case .notWritable(let reason) = probeSettingsWritable(settingsFile: settingsFile) {
-        return .failure(.notWritable(reason: reason))
-    }
-
-    let outcome = withNonBlockingLock(path: lockFile.path) {
-        performInstall(
-            settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath,
-            betweenReadAndWrite: betweenReadAndWrite)
-    }
-
-    switch outcome {
-    case .ran(let result): return result
-    case .skipped: return .failure(.lockBusy)
-    case .failed(let errno): return .failure(.lockFailed(errno: errno))
-    }
+    let backupFile = settingsFile.deletingLastPathComponent()
+        .appendingPathComponent(settingsFile.lastPathComponent + ".claudio.bak")
+    let transaction = ConfigFileTransaction(
+        file: settingsFile,
+        lockFile: lockFile,
+        backupFile: backupFile,
+        symlinkPolicy: .preserveTarget,
+        maximumBytes: 1 << 20)
+    return performInstall(
+        transaction: transaction,
+        claudioBinaryPath: claudioBinaryPath,
+        betweenReadAndWrite: betweenReadAndWrite)
 }
 
 /// Removes every legacy hook entry claudio itself could plausibly have written, for any of the
@@ -239,17 +246,18 @@ private func uninstallClaudioHooksLocked(
     settingsFile: URL, claudioBinaryPath: String, lockFile: URL,
     betweenReadAndWrite: (() -> Void)?
 ) -> Result<UninstallOutcome, SettingsUpdateError> {
-    let outcome = withNonBlockingLock(path: lockFile.path) {
-        performUninstall(
-            settingsFile: settingsFile, claudioBinaryPath: claudioBinaryPath,
-            betweenReadAndWrite: betweenReadAndWrite)
+    guard FileManager.default.fileExists(atPath: settingsFile.path) else {
+        return .success(.notInstalled)
     }
-
-    switch outcome {
-    case .ran(let result): return result
-    case .skipped: return .failure(.lockBusy)
-    case .failed(let errno): return .failure(.lockFailed(errno: errno))
-    }
+    let transaction = ConfigFileTransaction(
+        file: settingsFile,
+        lockFile: lockFile,
+        symlinkPolicy: .preserveTarget,
+        maximumBytes: 1 << 20)
+    return performUninstall(
+        transaction: transaction,
+        claudioBinaryPath: claudioBinaryPath,
+        betweenReadAndWrite: betweenReadAndWrite)
 }
 
 // MARK: - Read-only hook-install detection (GUI onboarding, T7)
@@ -306,16 +314,23 @@ public func detectHookInstallStatus(
 
 // MARK: - Locked critical sections
 
+private enum InstallMutationResult: Sendable {
+    case installed
+    case alreadyInstalled
+    case modernConnectionPresent
+}
+
 private func performInstall(
-    settingsFile: URL, claudioBinaryPath: String, betweenReadAndWrite: (() -> Void)? = nil
+    transaction: ConfigFileTransaction,
+    claudioBinaryPath: String,
+    betweenReadAndWrite: (() -> Void)? = nil
 ) -> Result<InstallOutcome, SettingsUpdateError> {
-    switch loadRoot(from: settingsFile) {
-    case .failure(let error):
-        return .failure(error)
-    case .success(let loaded):
-        let originalRoot = loaded.root
+    var semanticError: SettingsUpdateError?
+    let mutate: ([String: Any]) -> ConfigFileTypedMutation<InstallMutationResult> = {
+        originalRoot in
         if let shapeError = validateHooksShape(originalRoot) {
-            return .failure(shapeError)
+            semanticError = shapeError
+            return .unchanged(.alreadyInstalled)
         }
         if let claudioRoot = claudioNamespaceRoot(forBinaryPath: claudioBinaryPath) {
             if containsRelocatedClaudeCodeHooks(
@@ -323,11 +338,11 @@ private func performInstall(
                 claudioRoot: claudioRoot,
                 claudioBinaryPath: claudioBinaryPath)
             {
-                return .failure(
-                    .modernConnectionNeedsRepair(
+                semanticError = .modernConnectionNeedsRepair(
                         reason:
                             "同一 claudi0 root 下仍有旧 helper 路径的 modern callback，"
-                            + "可能与新连接同时执行"))
+                            + "可能与新连接同时执行")
+                return .unchanged(.alreadyInstalled)
             }
             switch inspectClaudeCodeHooks(
                 root: originalRoot,
@@ -335,19 +350,21 @@ private func performInstall(
                 claudioBinaryPath: claudioBinaryPath)
             {
             case .success(.configured):
-                return .success(.modernConnectionPresent)
+                return .unchanged(.modernConnectionPresent)
             case .success(.partial(_, let missing, let hasLegacyEntries))
                 where missing.count < HostCapabilityCatalog.bindings(for: .claudeCode).count:
                 let detail = hasLegacyEntries
                     ? "现代与 legacy hook 同时存在，可能重复播放"
                     : "现代 hook 不完整，缺少 \(missing.joined(separator: ", "))"
-                return .failure(.modernConnectionNeedsRepair(reason: detail))
+                semanticError = .modernConnectionNeedsRepair(reason: detail)
+                return .unchanged(.alreadyInstalled)
             case .success(.conflict(let reason)):
-                return .failure(.modernConnectionNeedsRepair(reason: reason))
+                semanticError = .modernConnectionNeedsRepair(reason: reason)
+                return .unchanged(.alreadyInstalled)
             case .failure(let error):
-                return .failure(
-                    .modernConnectionNeedsRepair(
-                        reason: "现代/legacy hooks 无法安全检查：\(error.description)"))
+                semanticError = .modernConnectionNeedsRepair(
+                    reason: "现代/legacy hooks 无法安全检查：\(error.description)")
+                return .unchanged(.alreadyInstalled)
             case .success(.notConfigured), .success(.legacyConnected), .success(.partial):
                 break
             }
@@ -362,24 +379,26 @@ private func performInstall(
             anyChanged = anyChanged || changed
         }
 
-        guard anyChanged else { return .success(.alreadyInstalled) }
+        guard anyChanged else { return .unchanged(.alreadyInstalled) }
+        return .replace(root, .installed)
+    }
 
-        // Seam fires immediately after the read (before the backup), so a test can model an
-        // external writer landing anywhere in the read-modify-write window — the widest, and
-        // therefore strictest, placement. It exercises BOTH the backup's fidelity (below) and
-        // `atomicWrite`'s optimistic abort in one deterministic net.
-        betweenReadAndWrite?()
-        if case .failure(let error) = backupOriginalIfNeeded(
-            settingsFile: settingsFile, originalData: loaded.rawData)
-        {
-            return .failure(error)
+    let updated: Result<ConfigFileTransactionReport<InstallMutationResult>, ConfigFileTransactionError>
+    #if DEBUG
+    updated = transaction.update(mutate, betweenReadAndWrite: betweenReadAndWrite)
+    #else
+    updated = transaction.update(mutate)
+    #endif
+    if let semanticError { return .failure(semanticError) }
+    switch updated {
+    case .failure(let error):
+        return .failure(mapTransactionError(error))
+    case .success(let report):
+        switch report.value {
+        case .installed: return .success(.installed(backup: report.backup))
+        case .alreadyInstalled: return .success(.alreadyInstalled)
+        case .modernConnectionPresent: return .success(.modernConnectionPresent)
         }
-        if case .failure(let error) = atomicWrite(
-            root: root, to: settingsFile, expectedCurrentData: loaded.rawData)
-        {
-            return .failure(error)
-        }
-        return .success(.installed)
     }
 }
 
@@ -387,25 +406,22 @@ private func performInstall(
 /// see ``uninstallClaudioHooks(settingsFile:claudioBinaryPath:lockFile:)``. A path naming no
 /// root is fail-closed: nothing matches, nothing is written, `.notInstalled`.
 private func performUninstall(
-    settingsFile: URL, claudioBinaryPath: String, betweenReadAndWrite: (() -> Void)? = nil
+    transaction: ConfigFileTransaction,
+    claudioBinaryPath: String,
+    betweenReadAndWrite: (() -> Void)? = nil
 ) -> Result<UninstallOutcome, SettingsUpdateError> {
-    guard FileManager.default.fileExists(atPath: settingsFile.path) else {
-        return .success(.notInstalled)
-    }
-
-    switch loadRoot(from: settingsFile) {
-    case .failure(let error):
-        return .failure(error)
-    case .success(let loaded):
-        let originalRoot = loaded.root
+    var semanticError: SettingsUpdateError?
+    let mutate: ([String: Any]) -> ConfigFileTypedMutation<UninstallOutcome> = {
+        originalRoot in
         if let shapeError = validateHooksShape(originalRoot) {
-            return .failure(shapeError)
+            semanticError = shapeError
+            return .unchanged(.notInstalled)
         }
         // Deliberately AFTER load+validate: a corrupt `settings.json` must still surface its
         // error rather than be masked as "nothing installed" just because the caller handed us
         // a binary path that names no root.
         guard let claudioRoot = claudioNamespaceRoot(forBinaryPath: claudioBinaryPath) else {
-            return .success(.notInstalled)
+            return .unchanged(.notInstalled)
         }
 
         var root = originalRoot
@@ -417,15 +433,37 @@ private func performUninstall(
             totalRemoved += removed
         }
 
-        guard totalRemoved > 0 else { return .success(.notInstalled) }
+        guard totalRemoved > 0 else { return .unchanged(.notInstalled) }
+        return .replace(root, .uninstalled(count: totalRemoved))
+    }
 
-        betweenReadAndWrite?()
-        if case .failure(let error) = atomicWrite(
-            root: root, to: settingsFile, expectedCurrentData: loaded.rawData)
-        {
-            return .failure(error)
-        }
-        return .success(.uninstalled(count: totalRemoved))
+    let updated: Result<ConfigFileTransactionReport<UninstallOutcome>, ConfigFileTransactionError>
+    #if DEBUG
+    updated = transaction.update(mutate, betweenReadAndWrite: betweenReadAndWrite)
+    #else
+    updated = transaction.update(mutate)
+    #endif
+    if let semanticError { return .failure(semanticError) }
+    return updated
+        .map(\.value)
+        .mapError(mapTransactionError)
+}
+
+private func mapTransactionError(_ error: ConfigFileTransactionError) -> SettingsUpdateError {
+    switch error {
+    case .notWritable(let reason): return .notWritable(reason: reason)
+    case .readFailure(let path): return .readFailure(reason: path)
+    case .parseFailure(let reason): return .parseFailure(reason: reason)
+    case .malformedTopLevel(let path):
+        return .parseFailure(reason: "顶层必须是 JSON object：\(path)")
+    case .mutationRejected(let reason): return .writeFailure(reason: reason)
+    case .backupFailure(let reason): return .backupFailure(reason: reason)
+    case .writeFailure(let reason): return .writeFailure(reason: reason)
+    case .concurrentModification(let path): return .concurrentModification(path: path)
+    case .symlinkRejected(let path): return .readFailure(reason: "拒绝符号链接：\(path)")
+    case .danglingSymlink(let path): return .readFailure(reason: "悬空符号链接：\(path)")
+    case .lockBusy: return .lockBusy
+    case .lockFailed(let code): return .lockFailed(errno: code)
     }
 }
 
@@ -587,107 +625,4 @@ private func removeHookEntries(
     }
     root[hooksKey] = hooksSection
     return (root, removed)
-}
-
-// MARK: - Backup + atomic write
-
-/// Snapshots the pre-claudio original to `settings.json.claudio.bak`, but only the first time
-/// (an existing backup is left alone — "一次性备份"). Writes `originalData` — the exact bytes
-/// ``loadRoot(from:)`` read, and the same baseline ``atomicWrite(root:to:expectedCurrentData:)``
-/// compares against — rather than RE-READING the file here. A re-read could snapshot bytes an
-/// external writer changed between the load and this call; `atomicWrite` would then reject the
-/// write as `.concurrentModification`, but this one-shot backup would already hold content claudio
-/// never operated on and would never refresh it. Backing up the read bytes keeps `.claudio.bak`
-/// byte-identical to what install actually saw, whatever an outside writer does in the window.
-/// `nil` means the file didn't exist at load time — a fresh install has no original to preserve.
-/// A symlinked `settings.json` needs no special-casing: `loadRoot` already read through the link
-/// to the target's content, exactly what a dotfiles backup should capture.
-///
-/// A failed write (e.g. the directory isn't writable even though the file itself is — creating a
-/// new sibling entry needs directory write permission, not just file write permission) must abort
-/// the whole install rather than being silently swallowed: proceeding to overwrite `settings.json`
-/// without a successful backup defeats the entire safety net.
-///
-/// ## `.atomic` 不是这里的装饰 —— 它是「一次性备份」这条纪律的**前提**
-///
-/// 上面那道 `fileExists` 闸门认得的只有「有没有这个文件」，认不出「这是一份**残缺**的备份」。而这
-/// 份文件按设计**永不刷新**（这正是「一次性」的含义）。两条合起来意味着：一次被打断的非原子写
-/// 会留下一个半截文件，而它会**永久**冒充那份备份 —— 下一次 install 照常把 hooks 写进
-/// `settings.json`，用户 pre-claudio 配置的**唯一一份副本**就此永久残缺，
-/// 而没有任何代码会去发现它：`.claudio.bak` **没有任何程序化读者**（卸载刻意不从它还原），它整个
-/// 存在的意义就是在用户需要的那一天替他把东西还回去 —— 而 CLI 的「备份见 settings.json.claudio.bak」、
-/// onboarding 的信任文案、`docs/distribution.md` 三处都向他承诺过它。
-///
-/// `Data.write(options: .atomic)` 写同目录临时文件 + `rename(2)`。`rename` 对**目录项**是原子的，
-/// 于是**进程被 kill** 之后这条路径上只有两种终态：**没有备份**（下一次 install 会重新做一份对的），
-/// 或者**一份完整的备份**。
-///
-/// ⚠️ **掉电不在此列，别再声称它**（`/codex review 3af8d5f` —— 两个模型独立命中；本条注释的上一版
-/// 白纸黑字写着「进程被 kill、机器掉电」，而那是措辞比覆盖范围大的第十五次）。全仓**没有任何
-/// `fsync` / `F_FULLFSYNC`**，而 POSIX 不保证掉电时临时文件的**数据块**先于 `rename` 的目录项落盘 ——
-/// 掉电这一半，`.atomic` **给不了**。要它就得显式 fsync（文件 + 目录），那是另一条 TODO。
-///
-/// ## 这条不变量由 `AtomicWriteSuite` 钉住 —— 而它钉的是什么，请照字面读
-///
-/// 它是一道**围栏**：「能把字节送进一个文件、或把一个文件放到一条路径上」的**每一个**调用，
-/// 必须出现在它的台账里并写着理由。所以新增一处 `Data.write(to:)` 而不带 `.atomic` 会当场红，
-/// 而新增一处 `FileManager.createFile` / `fopen("w")` / `OutputStream` —— 那些**上一版绊线完全看不见**
-/// 的写法 —— 同样会当场红（台账对不上）。**认不出 ⇒ 红，不是 ⇒ 绿。**
-///
-/// 它**不**保证的：围栏的词汇表本身仍是一张枚举出来的清单（故意过宽），一个它没听说过的写盘 API
-/// 仍可能溜过去。真要闭合，只能上 SwiftSyntax。别把这条注释读成比它更大的东西。
-private func backupOriginalIfNeeded(
-    settingsFile: URL, originalData: Data?
-) -> Result<Void, SettingsUpdateError> {
-    guard let originalData else { return .success(()) }
-    let fileManager = FileManager.default
-    let backupFile = settingsFile.deletingLastPathComponent()
-        .appendingPathComponent(settingsFile.lastPathComponent + ".claudio.bak")
-    guard !fileManager.fileExists(atPath: backupFile.path) else { return .success(()) }
-    do {
-        try originalData.write(to: backupFile, options: .atomic)
-        return .success(())
-    } catch {
-        return .failure(.backupFailure(reason: error.localizedDescription))
-    }
-}
-
-/// Writes `root` to `settingsFile` atomically. `Data.write(options:.atomic)` writes a
-/// temp file **in the same directory** and `rename(2)`s it into place, which is exactly
-/// the "临时文件同目录 + rename" contract (ENGINEERING.md 工程落地细节 ⑤).
-private func atomicWrite(
-    root: [String: Any], to settingsFile: URL, expectedCurrentData: Data?
-) -> Result<Void, SettingsUpdateError> {
-    // Optimistic-concurrency check ([9]): settings.json has writers that do NOT honor claudio's
-    // settings.lock — Claude Code itself, and the user's editor. Re-read the bytes immediately
-    // before writing; if they no longer match what this operation loaded, another writer changed
-    // the file mid read-modify-write, so abort rather than clobber it — this file has no uninstall
-    // backup. This shrinks the race to the microseconds between this re-read and the rename; it
-    // cannot be closed fully without a lock every external writer respects (none exists).
-    //
-    // ⚠️ The GUI is NOT on that list, and listing it (as this comment did until the 阶段 A 锁分离
-    // review) is a dangerous falsehood: every GUI write to settings.json goes through
-    // `installClaudioHooks` / `uninstallClaudioHooks` — i.e. through *this* function, under
-    // `settings.lock` — because `OnboardingActionEnvironment.settingsLockFile` defaults to
-    // `ClaudioPaths.settingsLockFile` and `PanelView` never overrides it. Naming the GUI as a
-    // lock-ignoring writer invites the next person to add an unlocked settings.json write path on
-    // the GUI side ("it never honored the lock anyway") — and one clobber of this file is
-    // unrecoverable user config. helper and GUI take the SAME settings.lock. Keep it that way.
-    let currentData = try? Data(contentsOf: settingsFile)
-    guard currentData == expectedCurrentData else {
-        return .failure(.concurrentModification(path: settingsFile.path))
-    }
-    do {
-        let data = try JSONSerialization.data(
-            withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
-        // Resolve symlinks so a settings.json that IS a symlink (dotfiles: stow/chezmoi) has its
-        // TARGET rewritten in place ([D]). Writing the raw path with .atomic does temp+rename ON
-        // the symlink, replacing the link itself with a regular file and silently diverging from
-        // the dotfiles repo. A non-symlink path resolves to itself, so the common case is unchanged.
-        let realFile = settingsFile.resolvingSymlinksInPath()
-        try data.write(to: realFile, options: .atomic)
-        return .success(())
-    } catch {
-        return .failure(.writeFailure(reason: error.localizedDescription))
-    }
 }

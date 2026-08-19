@@ -435,7 +435,7 @@ private func runMinimalChimeUpgradeSuites() {
                     return
                 }
                 expect(copiedPacks.isEmpty, "连接重试仍不得误报声音包升级")
-                expect(hooksOutcome == .installed, "保留 1.0.0 后必须继续完成宿主连接")
+                expect(hooksOutcome.didInstall, "保留 1.0.0 后必须继续完成宿主连接")
             }
         }
     }
@@ -714,7 +714,7 @@ func runSetupSuites() {
             expect(copiedBinary, "binary should be copied when running from inside a bundle")
             expect(copiedPacks == ["minimal-chime"], "the bundled pack should be copied, got \(copiedPacks)")
             expect(packSelection == .selectedDefault(packID: "minimal-chime"), "a fresh config.json should default-select the copied pack")
-            expect(hooksOutcome == .installed, "a fresh settings.json should get hooks installed")
+            expect(hooksOutcome.didInstall, "a fresh settings.json should get hooks installed")
 
             expect(
                 FileManager.default.fileExists(atPath: environment.claudioBinaryDestination.path),
@@ -818,7 +818,7 @@ func runSetupSuites() {
                     == .success(
                         .completed(
                             copiedBinary: false, copiedPacks: [], salvaged: [], packSelection: .selectedDefault(packID: "minimal-chime"),
-                            hooksOutcome: .installed)),
+                            hooksOutcome: .installed(backup: .notNeeded))),
                 "re-running setup from the already-installed location must skip copy steps, got \(result)"
             )
         }
@@ -1116,17 +1116,14 @@ func runSetupSuites() {
     }
 
     suite(
-        "performFirstRunSetup: a binary destination whose parent directory is blocked by a regular file fails with .binaryCopyFailure"
+        "performFirstRunSetup: blocked runtime parent fails closed at the bootstrap journal before binary copy"
     ) {
         withTempDirectory { root in
             let (executablePath, _) = makeBundleFixture(at: root.appendingPathComponent("bundle"))
             // A regular file occupies the path where the binary destination's containing
             // directory needs to be created — `createDirectory` cannot turn a file into a
-            // directory, so `copySelfToFixedLocation` surfaces a real error via
-            // `.binaryCopyFailure` (mirrors `PlaySuite`'s equivalent blocking-file fixture
-            // for `.lockFailed`). Every other suite in this file only exercises
-            // `performFirstRunSetup`'s `.success` side — this is its top-level `.failure`
-            // passthrough at the binary-copy step.
+            // directory. Journaled bootstrap must now stop even earlier: if it cannot durably
+            // record partial effects, it must not attempt the binary copy at all.
             let blockingFile = root.appendingPathComponent("blocking-file")
             writeFixture("not a directory", to: blockingFile)
             let claudioRoot = root.appendingPathComponent("claudio-root", isDirectory: true)
@@ -1142,10 +1139,10 @@ func runSetupSuites() {
                 packsLockFile: injectedSetupPacksLock(under: root))
 
             let result = performFirstRunSetup(environment: environment)
-            guard case .failure(.binaryCopyFailure) = result else {
+            guard case .failure(.reportingUnavailable) = result else {
                 expect(
                     false,
-                    "a blocked binary destination parent must fail with .binaryCopyFailure, got \(result)"
+                    "a blocked runtime parent must fail with .reportingUnavailable, got \(result)"
                 )
                 return
             }
@@ -1463,7 +1460,7 @@ func runSetupPackSelectionSuites() {
                     == .repairedDeadSelection(removed: "wobbuffet", selected: "minimal-chime"),
                 "「我替你换了包」必须被结构化地说出来（CLI 会把它印成一行 ⚠），got \(packSelection)")
             expect(
-                hooksOutcome == .installed,
+                hooksOutcome.didInstall,
                 "hooks 必须照写——否则他永远进不了 .installed，也就永远看不到画廊")
 
             let data = try? Data(contentsOf: environment.configFile)
@@ -1608,7 +1605,7 @@ func runSetupPackSelectionSuites() {
                 "残骸必须被挪开、包被重新复制一遍（上一版会因为「目录已存在」而永远跳过它），got \(copiedPacks)"
             )
             expect(packSelection == .selectedDefault(packID: "minimal-chime"), "got \(packSelection)")
-            expect(hooksOutcome == .installed, "治好之后必须真的装上")
+            expect(hooksOutcome.didInstall, "治好之后必须真的装上")
             // **搬走一个用户目录，必须被说出来。** 那个目录里完全可能装着他自己导入的、磁盘上唯一一份
             // 音频（`AudioImport` 就是往 packs/<id>/ 里写转码后的字节）。上一版把它搬进一个点开头的隐藏
             // 目录、然后一个字都不说 —— 而 `PackGallery` 显式过滤点开头目录，于是它在**任何界面里都不
@@ -1810,7 +1807,7 @@ func runSetupPackSelectionSuites() {
                 "fixture 自检：这台机器此刻必须真的是 .incomplete（声明了 stop.mp3、文件不在），"
                     + "否则这条防线什么都没防到")
             expect(packSelection == .selectedDefault(packID: "minimal-chime"), "got \(packSelection)")
-            expect(hooksOutcome == .installed, "照常写 hooks")
+            expect(hooksOutcome.didInstall, "照常写 hooks")
         }
     }
 
@@ -1831,11 +1828,10 @@ func runSetupPackSelectionSuites() {
                 checkPackIntegrity(
                     configFile: environment.configFile,
                     userPacksDirectory: environment.userPacksDirectory,
-                    bundledPacksDirectory: nil) == .complete(packID: "empty-pack", events: []),
-                "fixture 自检：空 manifest 在 checkPackIntegrity 眼里是 .complete(events: [])——"
-                    + "这条防线防的正是「判据要求 events 非空」这个变异")
+                    bundledPacksDirectory: nil) == .noSupportedEvents(packID: "empty-pack"),
+                "fixture 自检：空 manifest 必须是可修复 warning，而不能假称 complete")
             expect(packSelection == .selectedDefault(packID: "empty-pack"), "got \(packSelection)")
-            expect(hooksOutcome == .installed, "照常写 hooks")
+            expect(hooksOutcome.didInstall, "照常写 hooks")
         }
     }
 

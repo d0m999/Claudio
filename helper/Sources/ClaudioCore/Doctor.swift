@@ -101,6 +101,8 @@ public enum PackIntegrityStatus: Sendable, Equatable {
     case packNotFound(packID: String)
     /// The pack directory exists, but its `manifest.json` couldn't be read/parsed.
     case manifestUnreadable(packID: String, reason: String)
+    /// Manifest 可读，但没有声明任何当前 runtime 支持的事件键。
+    case noSupportedEvents(packID: String)
     /// The manifest parsed, but one or more declared event audio files are missing.
     case incomplete(packID: String, missingFiles: [String])
     /// The manifest parsed and every declared event audio file exists.
@@ -153,8 +155,16 @@ public func checkPackIntegrity(
         return .manifestUnreadable(packID: config.selectedPack, reason: error.reason)
     }
 
-    let missingFiles =
-        manifest.events.values
+    let supportedMappings = Event.allCases.compactMap { event -> (event: Event, file: String)? in
+        guard let file = manifest.events[event.manifestKey] else { return nil }
+        return (event, file)
+    }
+    guard !supportedMappings.isEmpty else {
+        return .noSupportedEvents(packID: config.selectedPack)
+    }
+
+    let missingFiles = Set(
+        supportedMappings.map(\.file)
         .filter { eventFile in
             // An event value must resolve to a file *inside* the pack directory. A
             // manifest that points at `../shared/stop.mp3` (a third-party pack escaping
@@ -165,12 +175,14 @@ public func checkPackIntegrity(
             // 必须是**正规文件**，不能只是「路径上有东西」：`fileExists(atPath:)` 对一个名叫
             // `stop.mp3` 的**目录**（以及 FIFO / socket / 设备）一律回答 `true`，于是 doctor 会把
             // 一个根本发不出声的包报成 complete（`/codex review` [P2]）。见 ``regularFileExists(at:)``。
-            return !regularFileExists(at: resolved)
-        }
+            return !nonEmptyRegularFileExists(at: resolved)
+        })
         .sorted()
 
     if missingFiles.isEmpty {
-        return .complete(packID: config.selectedPack, events: manifest.events.keys.sorted())
+        return .complete(
+            packID: config.selectedPack,
+            events: supportedMappings.map { $0.event.manifestKey }.sorted())
     }
     return .incomplete(packID: config.selectedPack, missingFiles: missingFiles)
 }
@@ -668,17 +680,16 @@ extension PackIntegrityStatus {
             return DoctorCheckResult(
                 name: "pack", severity: .warning,
                 message: "⚠ 声音包 `\(packID)` 的 manifest.json 解析失败：\(reason)")
+        case .noSupportedEvents(let packID):
+            return DoctorCheckResult(
+                name: "pack", severity: .warning,
+                message: "⚠ 声音包 `\(packID)` 没有声明任何当前支持的事件声音")
         case .incomplete(let packID, let missingFiles):
             return DoctorCheckResult(
                 name: "pack", severity: .warning,
                 message: "⚠ 声音包 `\(packID)` 缺少音频文件：\(missingFiles.joined(separator: ", "))")
         case .complete(let packID, let events):
-            let message: String
-            if events.isEmpty {
-                message = "✓ 声音包 `\(packID)` 未声明事件；无需检查音频文件"
-            } else {
-                message = "✓ 声音包 `\(packID)` 完整（\(events.joined(separator: ", "))）"
-            }
+            let message = "✓ 声音包 `\(packID)` 完整（\(events.joined(separator: ", "))）"
             return DoctorCheckResult(
                 name: "pack", severity: .ok,
                 message: message)

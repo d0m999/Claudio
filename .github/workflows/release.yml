@@ -1,6 +1,12 @@
 name: Release
 
 on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "RC version (strict MAJOR.MINOR.PATCH; first RC is 0.1.0)"
+        required: true
+        type: string
   push:
     tags:
       - "v*.*.*"
@@ -23,10 +29,10 @@ env:
 
 jobs:
   build:
-    name: Build, sign, notarize, and release
+    name: Build, sign, notarize, and verify
     runs-on: macos-14
     permissions:
-      contents: write
+      contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
@@ -36,21 +42,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate tag and derive version
+      - name: Validate ref and derive version
         id: version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_REF" != refs/tags/* ]]; then
-            echo "::error::release must run from a tag ref"
-            exit 1
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+              echo "::error::RC dispatch must run from main"
+              exit 1
+            fi
+            VERSION="$DISPATCH_VERSION"
+            if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::RC version must match MAJOR.MINOR.PATCH exactly: $VERSION"
+              exit 1
+            fi
+            if [[ "$VERSION" != "0.1.0" ]]; then
+              echo "::error::the first release-candidate lane is fixed to 0.1.0"
+              exit 1
+            fi
+            TAG=""
+          else
+            if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+              echo "::error::publish build must run from a tag ref"
+              exit 1
+            fi
+            TAG="${GITHUB_REF#refs/tags/}"
+            if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+              echo "::error::release tag must match vMAJOR.MINOR.PATCH exactly: $TAG"
+              exit 1
+            fi
+            VERSION="${TAG#v}"
           fi
-          TAG="${GITHUB_REF#refs/tags/}"
-          if [[ ! "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-            echo "::error::release tag must match vMAJOR.MINOR.PATCH exactly: $TAG"
-            exit 1
-          fi
-          VERSION="${TAG#v}"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
@@ -124,6 +149,16 @@ jobs:
 
       - name: Toolchain
         run: swift --version
+
+      - name: Run complete helper, GUI, and localization contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          swift run --package-path helper claudio-tests
+          swift run --package-path gui claudio-gui-tests
+          bash scripts/test-hook-cli-contract.sh
+          bash scripts/test-legacy-install-cli-contract.sh
+          jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
 
       - name: Build helper (arm64)
         working-directory: helper
@@ -388,18 +423,46 @@ jobs:
           echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
 
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Mount final DMG and verify shipped bytes
         shell: bash
         run: |
           set -euo pipefail
-          gh release create "$RELEASE_TAG" \
-            "dist/$DMG_NAME" \
-            dist/SHA256SUMS.txt \
-            --verify-tag \
-            --title "$APP_NAME $CLAUDIO_VERSION" \
-            --generate-notes
+          DMG_PATH="dist/$DMG_NAME"
+          MOUNT_DIR="$(mktemp -d "$RUNNER_TEMP/claudio-dmg-mount.XXXXXX")"
+          cleanup_mount() {
+            hdiutil detach "$MOUNT_DIR" >/dev/null 2>&1 || true
+            rmdir "$MOUNT_DIR" >/dev/null 2>&1 || true
+          }
+          trap cleanup_mount EXIT
+          hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_DIR" "$DMG_PATH"
+          APP="$MOUNT_DIR/$APP_NAME.app"
+          test -d "$APP"
+          test -d "$APP/Contents/Resources/packs/minimal-chime"
+          test "$(readlink "$APP/Contents/Resources/bin/claudio")" = "claudi0"
+          for BINARY in \
+            "$APP/Contents/MacOS/$APP_EXECUTABLE" \
+            "$APP/Contents/Resources/bin/claudi0" \
+            "$APP/Contents/Resources/bin/claudio"; do
+            ARCHS="$(lipo -archs "$BINARY")"
+            [[ " $ARCHS " == *" arm64 "* && " $ARCHS " == *" x86_64 "* ]]
+          done
+          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" \
+            = "$CLAUDIO_VERSION"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign --verify --verbose=2 "$DMG_PATH"
+          spctl --assess --type execute --verbose=4 "$APP"
+          xcrun stapler validate "$DMG_PATH"
+          (cd dist && shasum -a 256 -c SHA256SUMS.txt)
+
+      - name: Upload commit-bound release candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: claudi0-${{ github.event_name == 'workflow_dispatch' && 'rc' || 'tag' }}-${{ github.sha }}
+          path: |
+            dist/${{ steps.checksum.outputs.dmg_name }}
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Clean temporary signing material
         if: always()
@@ -414,10 +477,46 @@ jobs:
           fi
           rm -f "$CERTIFICATE_PATH" "$API_KEY_PATH"
 
+  publish:
+    name: Publish tag-only GitHub Release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: build
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - name: Download the verified tag artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: claudi0-tag-${{ github.sha }}
+          path: release-dist
+
+      - name: Reverify artifact and create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.build.outputs.tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+          CLAUDIO_VERSION: ${{ needs.build.outputs.version }}
+          DMG_NAME: ${{ needs.build.outputs.dmg_name }}
+          EXPECTED_SHA: ${{ needs.build.outputs.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd release-dist
+          shasum -a 256 -c SHA256SUMS.txt
+          ACTUAL_SHA="$(shasum -a 256 "$DMG_NAME" | awk '{print $1}')"
+          test "$ACTUAL_SHA" = "$EXPECTED_SHA"
+          gh release create "$RELEASE_TAG" \
+            "$DMG_NAME" \
+            SHA256SUMS.txt \
+            --verify-tag \
+            --title "$APP_NAME $CLAUDIO_VERSION" \
+            --generate-notes
+
   update-cask:
     name: Update optional Homebrew tap
-    if: vars.HOMEBREW_TAP_ENABLED == 'true'
-    needs: build
+    if: startsWith(github.ref, 'refs/tags/') && vars.HOMEBREW_TAP_ENABLED == 'true'
+    needs: [build, publish]
     runs-on: macos-14
     permissions:
       contents: read

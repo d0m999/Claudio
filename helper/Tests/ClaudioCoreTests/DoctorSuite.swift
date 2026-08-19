@@ -565,7 +565,7 @@ func runDoctorSuites() {
     }
 
     suite(
-        "checkPackIntegrity: an empty events object remains .complete and doctor explains that no audio was declared"
+        "checkPackIntegrity: an empty events object is selectable but warns that no supported audio is mapped"
     ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -582,8 +582,8 @@ func runDoctorSuites() {
             let status = checkPackIntegrity(
                 configFile: configFile, userPacksDirectory: packsDir, bundledPacksDirectory: nil)
             expect(
-                status == .complete(packID: "minimal-chime", events: []),
-                "an empty events object is a legal all-silent pack: doctor must keep .complete, got \(status)"
+                status == .noSupportedEvents(packID: "minimal-chime"),
+                "an empty events object is legal but must not be described as complete, got \(status)"
             )
 
             let report = runDoctorChecks(
@@ -599,11 +599,10 @@ func runDoctorSuites() {
                         result: .completed(exitCode: 0, stdout: "2.1.206 (Claude Code)")),
                     currentMacOSVersion: { SemanticVersion(major: 15, minor: 0, patch: 0) }))
             let packResult = report.results.first { $0.name == "pack" }
-            expect(packResult?.severity == .ok, "the empty pack remains an ok doctor result")
+            expect(packResult?.severity == .warning, "the empty pack must remain repairable but warn")
             expect(
-                packResult?.message
-                    == "✓ 声音包 `minimal-chime` 未声明事件；无需检查音频文件",
-                "doctor must explain that its ok result means no audio was declared, not imply 0/5 coverage is complete"
+                packResult?.message.contains("没有声明任何当前支持的事件声音") == true,
+                "doctor must explain why the selectable pack cannot currently make sound"
             )
         }
     }

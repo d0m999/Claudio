@@ -343,7 +343,7 @@ func runSoundPacksWindowStarredPacksSuites() {
         expect(
             panel.contains("scope: .panelStarredDisplay")
                 && gallery.contains("case .panelStarredDisplay")
-                && gallery.contains("displayedIDs.map { buildPackCard"),
+                && gallery.contains("var cards = displayedIDs.map"),
             "≤4 过滤必须在 PanelConfigController.reloadConfigReadModel 的 availablePacks 调用生效，并先于 buildPackCard")
         expect(
             !view.contains("starredPackDisplayIDs("),

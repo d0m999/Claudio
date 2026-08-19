@@ -216,8 +216,7 @@ public func forkPack(
         // same call ahead of its copy loop: `forkPack` may run before the user has ever
         // imported anything of their own, in which case `userPacksDirectory` might not exist
         // yet at all.
-        try FileManager.default.createDirectory(
-            at: environment.userPacksDirectory, withIntermediateDirectories: true)
+        try ensurePrivateDirectoryTree(at: environment.userPacksDirectory)
     } catch {
         return .failure(.copyFailed(reason: error.localizedDescription))
     }

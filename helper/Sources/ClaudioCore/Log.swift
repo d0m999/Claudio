@@ -106,8 +106,7 @@ private func rotateIfNeeded(logFile: URL, maxBytes: Int) {
 /// can't be opened, or the write is short/fails — callers treat that as "line not written"
 /// rather than silently reporting success.
 private func rawAppend(_ line: String, to logFile: URL) -> Bool {
-    try? FileManager.default.createDirectory(
-        at: logFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? ensurePrivateDirectoryTree(at: logFile.deletingLastPathComponent())
     guard let data = line.data(using: .utf8) else { return false }
     let fd = open(logFile.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
     guard fd != -1 else { return false }

@@ -93,6 +93,29 @@ func runPanelFocusOrderSuites() {
                 + " must follow the cards, and 退出应用 sits last, got \(order)")
     }
 
+    suite("panelFocusOrder: bootstrap 报告按钮按视觉顺序位于音量与声音包之间") {
+        let actions: [PanelFocusTarget] = [
+            .bootstrapReportRetry(id: "report-a"),
+            .bootstrapReportDiagnostics(id: "report-a"),
+            .bootstrapReportReveal(id: "report-a"),
+            .bootstrapReportManageSounds(id: "report-a"),
+            .bootstrapReportAcknowledge(id: "report-a"),
+        ]
+        let order = panelFocusOrder(
+            .operational(
+                events: [], packCardIDs: ["minimal-chime"], hasMasterVolume: true,
+                bootstrapReportActions: actions))
+        expect(
+            order == [.masterVolume] + actions
+                + [.packCard(id: "minimal-chime"), .manageSounds, .quitApplication],
+            "报告中的原生按钮必须全部进入现有 Tab/Shift-Tab 顺序，got \(order)")
+        expect(
+            panelOpeningFocus(
+                rows: [], packCardIDs: [], hasMasterVolume: false,
+                bootstrapReportActions: actions) == actions.first,
+            "没有更靠前控件时，首焦点必须落在第一颗报告按钮")
+    }
+
     suite("panelFocusOrder: .masterVolume's position is pinned — right after the last row's .eventMute, right before the first pack card") {
         let order = panelFocusOrder(.operational(events: Event.allCases, packCardIDs: ["alpha-pack"], hasMasterVolume: true))
         guard let masterVolumeIndex = order.firstIndex(of: .masterVolume) else {

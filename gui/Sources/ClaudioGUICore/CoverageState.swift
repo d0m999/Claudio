@@ -188,7 +188,7 @@ private func coverageState(
 ) -> CoverageState {
     guard let fileName = manifest.events[event.manifestKey] else { return .unmapped }
     guard let resolved = safePackFileURL(fileName, in: packDirectory),
-        regularFileExists(at: resolved)
+        nonEmptyRegularFileExists(at: resolved)
     else {
         return .broken(fileName: fileName)
     }

@@ -13,6 +13,41 @@ public enum ConfigFileTransactionOutcome: Sendable, Equatable {
     case written
 }
 
+/// 一次性备份在本次事务里的真实结果。路径是最终磁盘路径，不携带本地化文案，CLI/GUI
+/// 可以各自决定如何呈现。
+public enum ConfigBackupOutcome: Sendable, Equatable {
+    /// 原文件不存在，或该事务没有配置备份路径。
+    case notNeeded
+    /// 本次事务创建了逐字节备份。
+    case created(path: String)
+    /// 一份正规文件备份已经存在，本次明确保留且没有覆盖。
+    case preservedExisting(path: String)
+}
+
+/// 让 schema 层在同一次事务中返回 typed 语义结果；JSON object 仍由事务层统一编码。
+public enum ConfigFileTypedMutation<Value> {
+    case unchanged(Value)
+    case replace([String: Any], Value)
+}
+
+public struct ConfigFileTransactionReport<Value: Sendable>: Sendable {
+    public let outcome: ConfigFileTransactionOutcome
+    public let backup: ConfigBackupOutcome
+    public let value: Value
+
+    public init(
+        outcome: ConfigFileTransactionOutcome,
+        backup: ConfigBackupOutcome,
+        value: Value
+    ) {
+        self.outcome = outcome
+        self.backup = backup
+        self.value = value
+    }
+}
+
+extension ConfigFileTransactionReport: Equatable where Value: Equatable {}
+
 public enum ConfigFileTransactionError: Error, Sendable, Equatable, CustomStringConvertible {
     case notWritable(reason: String)
     case readFailure(path: String)
@@ -151,7 +186,23 @@ public struct ConfigFileTransaction {
     public func update(
         _ mutate: ([String: Any]) -> ConfigFileMutation
     ) -> Result<ConfigFileTransactionOutcome, ConfigFileTransactionError> {
-        updateLocked(mutate, betweenReadAndWrite: nil)
+        updateTypedLocked(
+            { root in
+                switch mutate(root) {
+                case .unchanged: return .unchanged(())
+                case .replace(let replacement): return .replace(replacement, ())
+                }
+            },
+            betweenReadAndWrite: nil
+        ).map(\.outcome)
+    }
+
+    /// Typed schema mutation/report overload. Existing ``update(_:)`` callers keep their
+    /// original surface; writers that must report backup truth use this overload.
+    public func update<Value: Sendable>(
+        _ mutate: ([String: Any]) -> ConfigFileTypedMutation<Value>
+    ) -> Result<ConfigFileTransactionReport<Value>, ConfigFileTransactionError> {
+        updateTypedLocked(mutate, betweenReadAndWrite: nil)
     }
 
     #if DEBUG
@@ -160,23 +211,40 @@ public struct ConfigFileTransaction {
         betweenReadAndWrite: (() -> Void)?,
         beforeFinalPublish: (() -> Void)? = nil
     ) -> Result<ConfigFileTransactionOutcome, ConfigFileTransactionError> {
-        updateLocked(
+        updateTypedLocked(
+            { root in
+                switch mutate(root) {
+                case .unchanged: return .unchanged(())
+                case .replace(let replacement): return .replace(replacement, ())
+                }
+            },
+            betweenReadAndWrite: betweenReadAndWrite,
+            beforeFinalPublish: beforeFinalPublish
+        ).map(\.outcome)
+    }
+
+    public func update<Value: Sendable>(
+        _ mutate: ([String: Any]) -> ConfigFileTypedMutation<Value>,
+        betweenReadAndWrite: (() -> Void)?,
+        beforeFinalPublish: (() -> Void)? = nil
+    ) -> Result<ConfigFileTransactionReport<Value>, ConfigFileTransactionError> {
+        updateTypedLocked(
             mutate,
             betweenReadAndWrite: betweenReadAndWrite,
             beforeFinalPublish: beforeFinalPublish)
     }
     #endif
 
-    private func updateLocked(
-        _ mutate: ([String: Any]) -> ConfigFileMutation,
+    private func updateTypedLocked<Value: Sendable>(
+        _ mutate: ([String: Any]) -> ConfigFileTypedMutation<Value>,
         betweenReadAndWrite: (() -> Void)?,
         beforeFinalPublish: (() -> Void)? = nil
-    ) -> Result<ConfigFileTransactionOutcome, ConfigFileTransactionError> {
+    ) -> Result<ConfigFileTransactionReport<Value>, ConfigFileTransactionError> {
         let locked = withNonBlockingLock(path: lockFile.path) {
             // Keep the policy gate under the same lock as the snapshot. Checking only before
             // `flock` leaves a TOCTOU window where the leaf can become a symlink before read.
             if symlinkPolicy == .reject, isSymbolicLink(at: file) {
-                return Result<ConfigFileTransactionOutcome, ConfigFileTransactionError>.failure(
+                return Result<ConfigFileTransactionReport<Value>, ConfigFileTransactionError>.failure(
                     .symlinkRejected(path: file.path))
             }
             if symlinkPolicy == .preserveTarget,
@@ -200,11 +268,11 @@ public struct ConfigFileTransaction {
         }
     }
 
-    private func performUpdate(
-        _ mutate: ([String: Any]) -> ConfigFileMutation,
+    private func performUpdate<Value: Sendable>(
+        _ mutate: ([String: Any]) -> ConfigFileTypedMutation<Value>,
         betweenReadAndWrite: (() -> Void)?,
         beforeFinalPublish: (() -> Void)?
-    ) -> Result<ConfigFileTransactionOutcome, ConfigFileTransactionError> {
+    ) -> Result<ConfigFileTransactionReport<Value>, ConfigFileTransactionError> {
         let loaded: (root: [String: Any], snapshot: FileSnapshot)
         switch loadJSONObject() {
         case .success(let value): loaded = value
@@ -212,11 +280,17 @@ public struct ConfigFileTransaction {
         }
 
         let nextRoot: [String: Any]
+        let value: Value
         switch mutate(loaded.root) {
-        case .unchanged:
-            return .success(.unchanged)
-        case .replace(let replacement):
+        case .unchanged(let unchangedValue):
+            return .success(
+                ConfigFileTransactionReport(
+                    outcome: .unchanged,
+                    backup: .notNeeded,
+                    value: unchangedValue))
+        case .replace(let replacement, let replacementValue):
             nextRoot = replacement
+            value = replacementValue
         }
 
         let encoded: Data
@@ -234,6 +308,15 @@ public struct ConfigFileTransaction {
         }
 
         betweenReadAndWrite?()
+        let loadedDestination = URL(fileURLWithPath: loaded.snapshot.resolvedDestinationPath)
+        let backupOutcome: ConfigBackupOutcome
+        switch prepareBackup(
+            original: loaded.snapshot.contents,
+            source: loadedDestination)
+        {
+        case .success(let outcome): backupOutcome = outcome
+        case .failure(let error): return .failure(error)
+        }
         // The policy check must live inside the transaction lock and be repeated at the
         // publication boundary. A regular file can be replaced by an identical-byte symlink
         // after the initial read; byte-only CAS would otherwise accept it and rename over the
@@ -243,22 +326,6 @@ public struct ConfigFileTransaction {
         }
         guard currentSnapshot() == loaded.snapshot else {
             return .failure(.concurrentModification(path: file.path))
-        }
-
-        let loadedDestination = URL(fileURLWithPath: loaded.snapshot.resolvedDestinationPath)
-        if let backupFile, case .bytes(let original) = loaded.snapshot.contents,
-            !FileManager.default.fileExists(atPath: backupFile.path)
-        {
-            do {
-                try secureAtomicPublish(
-                    original,
-                    to: backupFile,
-                    permissions: filePermissions(at: loadedDestination),
-                    replaceExisting: false,
-                    exclusiveRename: exclusiveRename)
-            } catch {
-                return .failure(.backupFailure(reason: error.localizedDescription))
-            }
         }
 
         do {
@@ -280,11 +347,58 @@ public struct ConfigFileTransaction {
                         throw ConfigFileTransactionError.concurrentModification(path: file.path)
                     }
                 })
-            return .success(.written)
+            return .success(
+                ConfigFileTransactionReport(
+                    outcome: .written,
+                    backup: backupOutcome,
+                    value: value))
         } catch let error as ConfigFileTransactionError {
             return .failure(error)
         } catch {
             return .failure(.writeFailure(reason: error.localizedDescription))
+        }
+    }
+
+    private func prepareBackup(
+        original: FileContentsSnapshot,
+        source: URL
+    ) -> Result<ConfigBackupOutcome, ConfigFileTransactionError> {
+        guard let backupFile, case .bytes(let bytes) = original else {
+            return .success(.notNeeded)
+        }
+
+        var status = stat()
+        let inspection = backupFile.withUnsafeFileSystemRepresentation { path -> Int32 in
+            guard let path else {
+                errno = EINVAL
+                return -1
+            }
+            return Darwin.lstat(path, &status)
+        }
+        if inspection == 0 {
+            guard status.st_mode & S_IFMT == S_IFREG else {
+                return .failure(
+                    .backupFailure(
+                        reason: "已有备份不是正规文件，拒绝覆盖：\(backupFile.path)"))
+            }
+            return .success(.preservedExisting(path: backupFile.path))
+        }
+        guard errno == ENOENT else {
+            return .failure(
+                .backupFailure(
+                    reason: "无法安全检查已有备份：\(backupFile.path)（errno \(errno)）"))
+        }
+
+        do {
+            try secureAtomicPublish(
+                bytes,
+                to: backupFile,
+                permissions: filePermissions(at: source),
+                replaceExisting: false,
+                exclusiveRename: exclusiveRename)
+            return .success(.created(path: backupFile.path))
+        } catch {
+            return .failure(.backupFailure(reason: error.localizedDescription))
         }
     }
 

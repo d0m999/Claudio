@@ -1,8 +1,26 @@
 # TODOS
 
+> **台账状态审计（2026-08-19，基于 `HEAD 1c23fa5`）**
+>
+> `TODOS.md` 最近一次整体维护是 `299ab14`（2026-08-06）。本次对照当前工作树、相关源代码/测试和 `git log` 重新核对：
+>
+> - 标题带 `✅`，或本记录中明确标为「已解决 / 已被替代 / 设计否决」的条目，不再作为待执行任务；原文保留为历史证据。
+> - 未标记且没有本记录明确关闭说明的条目，继续视为开放项。
+> - 「源码 / harness 已通过」不等于 native SwiftUI、VoiceOver、真实 release 下载路径或正式验收；人工验收项继续保留。
+> - 本次确认已过期或已关闭的旧条目：升级锁窗口、CI 无测试、T3 措辞、`ViewWiringSuite` body、Cask zap、release 注入/硬编码包名、namespace guard、旧 Dynamic Type 映射、quarantine fail-open、async header 捕获、settings 目录探测，以及旧 `AudioDropZoneView` / `PanelView.disconnectRow` 接线描述。此前把仅活在 onboarding 内存态的 GUI repair notice 误判为已解决；本轮已改由持久化 bootstrap report 真正接管。
+> - 本次确认部分完成、需要按当前实现重写的条目：`AudioImportViewModel` 完成顺序、`SystemCommandRunner` 超时回收、绑定失败孤儿文件、PackCardView VoiceOver、state gallery disconnect 帧、字号阶梯和旧 drop-zone 规范。
+> - 仍待执行的主线包括：FileWriteWatch 的 fail-open、未关闭的 T3 守卫、legacy hook 历史清扫、doctor/输出完整性、绑定失败回滚、`ClaudioGUI` executable target 的接线回归网，以及 native Dynamic Type / FKA / 焦点 / VoiceOver / StateGallery 验收。跨重启 bootstrap 留痕、私有目录/备份权限、声音包可播放真值与缺失选中包 placeholder 已在本轮落地；人工和外部发布验收仍未通过。
+> - `DesignTokens` 规范化和 NSPanel 逃生路线仍分别是待决策 / 条件性记录，不应误当成本轮已授权的实现任务。
+>
+> 本次只更新台账状态，不代表代码、真机 VoiceOver、正式 release 或外部验收已经完成。
+
 ## 静默失败
 
-### 一条接管失败只活在内存里 —— app 一退出就没了，而磁盘上那半成品还在
+### ✅ 已解决（2026-08-19）：bootstrap 失败与不可逆副作用跨重启留痕
+
+**Resolution:** `performSharedRuntimeBootstrapExecution` 在修改用户内容前建立 journal，并把 helper、包发布、搬移目录、选包变化和失败语义写入 `~/.claudio/bootstrap-reports/`。报告文件为 `0600`、目录为 `0700`，单条 64 KiB、最多 32 条；纯失败按语义合并，搬移记录不覆盖。`MenuBarController` 持有 app-lifetime store，面板在声音包区域上方提供重试、诊断、Finder、管理声音包和只有原子删除成功才生效的“知道了”。旧 `OnboardingActionState` 告知只能解决同进程可见性，不能作为跨重启关闭证据；此前将它审计为“GUI 已解决”是误判。
+
+以下保留为修复前根因记录：
 
 **What:** `OnboardingActionState.failed` 是 `OnboardingViewModel` 的一个 `@Published` 属性，**不落盘**。T17d 保证了它活到「用户真的看过一次」为止，但那条命的上限是**进程的寿命**。用户点「接管」→ 切走 → 安装在后台失败 → **他直接 ⌘Q 退出了 Claudio**（或重启电脑）→ 下次启动 `actionState` 是 `.idle`，那条失败原因**永远消失**。
 
@@ -413,7 +431,7 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 **Priority:** P3
 **Depends on:** None
 
-### 升级窗口：旧 CLI（拿 play.lock 写 config）与新 GUI（拿 config.lock）并存时会丢一次设置更新
+### ~~升级窗口：旧 CLI（拿 play.lock 写 config）与新 GUI（拿 config.lock）并存时会丢一次设置更新~~ ✅ 已被锁分离取代（2026-08-19 审计；`803c639`）
 
 **What:** 两把不同的锁之间，原子 rename **只防撕裂、不防 lost update**。旧 `~/.claudio/bin/claudio` 拿 play.lock
 写 config.json，新 GUI 拿 config.lock 写同一个文件 —— 它们不互相串行。最坏是丢一次设置更新，且**报 `.success`**（静默）。
@@ -449,7 +467,7 @@ claudio 任何锁的并发读者**（Claude Code 每个事件都读它），所�
 **Priority:** P3（需要一个不拿 config.lock 的外部写者，恰好落进读→rename 那几微秒；且后果是「旧 config 复活」，不是数据损坏）
 **Depends on:** None
 
-### CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0
+### ~~CI 一次测试都不跑 —— 全部绊线、变异钉子、穷尽性断言在 CI 上的执行次数是 0~~ ✅ 已解决（2026-08-19 审计；`080ebd4` / `c7a129c`）
 
 **What:** `.github/workflows/` 里**只有** `release.yml`，只由 tag 触发，且只跑 `swift build`（arm64 / x86_64 各一次 + `--product ClaudioGUI`）。没有任何 job 跑 `swift run claudio-tests` 或 `claudio-gui-tests`。没有 `on: push` / `on: pull_request`。
 
@@ -736,7 +754,7 @@ struct` 一行，是 `/codex review ae494b1` P2-2 打出来的，不是绊线响
 **Priority:** P3
 **Depends on:** 无
 
-### T3 守卫的措辞必须在它**每一种**开火情形下都为真（`count == N` 那一类的教训）
+### ~~T3 守卫的措辞必须在它**每一种**开火情形下都为真（`count == N` 那一类的教训）~~ ✅ 已解决（2026-07-20；本次审计确认已关闭）
 
 **What:** 给字面量清单上锁时，第一反应写的是 `count == N`。红队打掉了：`count == N` 唯一独占的触发面
 是清单**变长**，而那是覆盖**改进**不是缺陷；更坏的是它开火时印的诊断逐句为假（说「少了空前缀那根
@@ -818,7 +836,7 @@ struct` 一行，是 `/codex review ae494b1` P2-2 打出来的，不是绊线响
 **Priority:** P2（#1 是全仓唯一杀得掉 M12 的 fixture，#9 能整条撤销 `abbf48e` 那一轮的修复）
 **Depends on:** 无
 
-### `ViewWiringSuite` 的文本绊线只挡得住「整行被删」，挡不住「body 被掏空」
+### ~~`ViewWiringSuite` 的文本绊线只挡得住「整行被删」，挡不住「body 被掏空」~~ ✅ 实质已关闭（2026-08-19 审计；剩余接线项已分流）
 
 **What:** `ViewWiringSuite` 断言的是 `panel.contains(".onChange(of: onboardingViewModel.state)")` —— 那行文本还在。它不断言那行**做了什么**。
 
@@ -935,7 +953,9 @@ GUI 侧的切包画廊只列**解析得出来**的包，所以主动线暂时安
 **Priority:** P2
 **Depends on:** None
 
-### GUI 从不告诉用户「我替你换了声音包」「我搬走了你的包目录」—— 那两句 ⚠ 只有 CLI 有
+### ~~GUI 从不告诉用户「我替你换了声音包」「我搬走了你的包目录」—— 那两句 ⚠ 只有 CLI 有~~ ✅ 真正解决（2026-08-19 bootstrap report；此前 T17f/g/h 只解决同进程内存态）
+
+**更正：** 2026-08-19 早先的审计把 `OnboardingActionState.reported` / 运行态 notice 当成现行完整解法，忽略了它退出 app 后即丢失。现在由持久化 `BootstrapReportRecord` 承接；下面关于旧实现的文字保留为历史。
 
 **What:** T17e 会在两种情形下**替用户做主**，并把这两件事都结构化地带在 `SetupOutcome` 里
 （`.repairedDeadSelection(removed:selected:)` 和 `salvaged: [SalvagedPack]`），`printSetupSummary` 各印一行 ⚠。
@@ -1079,7 +1099,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P2
 **Depends on:** None
 
-### `Casks/claudio.rb` 没有 `zap` —— 「重新安装 Claudio」修不好任何一种中毒态
+### ~~`Casks/claudio.rb` 没有 `zap` —— 「重新安装 Claudio」修不好任何一种中毒态~~ ✅ 设计否决，不再执行（2026-08-19 审计；保留用户配置是当前策略）
 
 **What:** cask 里没有 `zap` stanza，`postflight` 只跑 `xattr -dr`。于是 `brew uninstall --cask claudio` /
 `brew reinstall` **一个字节都不碰 `~/.claudio/`**（config.json、packs/、残骸全在），也不碰 `settings.json` 里的 hooks。
@@ -1097,7 +1117,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### release.yml 多处 `${{ }}` 表达式直接拼进 shell 脚本，存在脚本注入模式
+### ~~release.yml 多处 `${{ }}` 表达式直接拼进 shell 脚本，存在脚本注入模式~~ ✅ 已解决（2026-08-19 审计；`080ebd4`）
 
 **What:** `.github/workflows/release.yml` 的 build job（约 58/127-128/160/177-180 行）和 update-cask job（约 205-206/240 行）把 `steps.ver.outputs.version` 等从 git tag 派生的值直接用 `${{ }}` 模板展开进多行 `run:` 脚本体，而不是走 `env:` 再引用 shell 变量。
 
@@ -1109,7 +1129,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### release.yml 打包 Resources/packs 时硬编码了包名，加新包容易漏
+### ~~release.yml 打包 Resources/packs 时硬编码了包名，加新包容易漏~~ ✅ 已解决（2026-08-19 审计；`080ebd4`）
 
 **What:** "Assemble Claudio.app" 步骤用 `cp -R packs/minimal-chime "$APP/Contents/Resources/packs/minimal-chime"` 硬编码单个包名，没有遍历仓库 `packs/` 下所有包目录，也没有校验 app bundle 里的包集合跟仓库里的包集合一致。
 
@@ -1121,7 +1141,9 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P4
 **Depends on:** 加第二个内置包之前应该处理掉
 
-### AudioImportViewModel 并发 handleDrop() 的完成顺序竞态
+### AudioImportViewModel 并发 handleDrop() 的完成顺序竞态（生产路径已有 revision 保护，通用语义仍待收口）
+
+**Status（2026-08-19）：** 部分完成。Sound Packs Window 的生产导入路径已经用 `audioImportActionRevision` 保护新旧操作顺序；通用 `AudioImportViewModel.handleDrop()` 仍需决定是删除/归档，还是补齐「最新操作获胜、旧完成不能覆盖新状态」的契约与测试。以下 What / Why 保留为原始发现。
 
 **What:** `handleDrop(sourceURL:...)` / `handleDrop(requests:)` 都把耗时工作丢进 `Task.detached`，只有 `@Published state` 的写回在主 actor。如果同一个 view-model 实例上两次 drop 重叠触发（比如探测时长慢的文件 vs. 快的文件），两个 detached task 完成顺序不保证跟触发顺序一致，`state` 最终可能反映的是较早那次 drop 的结果，不是最近一次。
 
@@ -1169,7 +1191,9 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** T7 / 菜单栏 app 真正复用 CommandRunning
 
-### SystemCommandRunner 超时后只 terminate() 不强制回收，忽略 SIGTERM 的子进程会失控
+### SystemCommandRunner 超时后只 terminate() 不强制回收，忽略 SIGTERM 的子进程仍可能失控
+
+**Status（2026-08-19）：** 部分完成。`SystemCommandRunner` 已加入 `terminationHandler` 和 deadline-bounded 的输出排空；但超时后仍没有 bounded wait，必要时也没有升级到 `SIGKILL` 并完成回收。以下 What / Why 是原始发现，当前只保留剩余硬化项（相关修复：`72d0765`）。
 
 **What:** `SystemCommandRunner.run` 的超时路径只调用 `process.terminate()`（发 SIGTERM）就返回，不 `waitpid`、也不在子进程赖着不退时升级为 SIGKILL。一个 `trap "" TERM` 或需要时间清理的子进程会被报成 `.timedOut`，但真实进程仍在后台继续跑。另一处相关：`drainToEOF` 之后的 `exited.wait`（`VersionCompatibility.swift:210-214`）——若排空 stdout 几乎耗尽 deadline，即使已 `sawEOF`、子进程只差微秒就退出，`exited.wait` 拿到约 0 的剩余时间也可能返回 `.timedOut`，于是 doctor 显示"无法核实版本"而非那个（可能低于下限的）真实版本。
 
@@ -1181,7 +1205,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** T7 / 菜单栏 app 真正 in-process 复用 CommandRunning
 
-### install 对完全不在 `.claudio` 命名空间的二进制路径不设 unsweepable 守卫
+### ~~install 对完全不在 `.claudio` 命名空间的二进制路径不设 unsweepable 守卫~~ ✅ 已解决（2026-08-19 审计；`001a6e6`）
 
 **What:** `binaryPathContradictsItsNamespace` 只拦"在命名空间内但形状会让 uninstall 认不出"的路径（`..`、相对路径、below-root 元字符）。一个**根本不含 `.claudio` 分量**的路径（如 `/usr/local/bin/claudio`）返回 `false`——install 照装，但 `claudioNamespaceRoot` 对它推不出 root，uninstall fail-closed（nil root → `.notInstalled`），永远清不掉这条 hook。
 
@@ -1340,7 +1364,9 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### T16/T15 GUI 小项：绑定失败留孤儿文件 + doc-comment 的 D 编号引用不存在
+### T16/T15 GUI 小项：用户可见绑定错误已并入 ManifestBindError 主条目，孤儿文件回滚与 doc-comment D 编号仍待处理
+
+**Status（2026-08-19）：** 部分完成。绑定失败的用户可见错误已由下方 `ManifestBindError` 条目统一跟踪；当前仍开放的是失败后的孤儿文件清理/回滚，以及过期的 doc-comment D 编号引用。
 
 **What:** ① `EventRowImportViewModel`：导入成功但随后 `bindEventToManifest` 失败时，已复制进包目录的音频文件会留下、不被任何事件引用（孤儿文件）——**文件本身仍未清理**，非安全问题，纯整洁。② T15/T16 新文件里约 26 处 doc-comment 引用「ENGINEERING.md T15 D3/D4」等 D 编号，但 ENGINEERING.md 无此细分——溯源/可读性 nit，读者按 D 编号 grep 会落空。
 
@@ -1352,7 +1378,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P4
 **Depends on:** None
 
-### `DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:` 而非 `@unknown default:`
+### ~~`DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:` 而非 `@unknown default:`~~ ✅ 已被替代（2026-08-19 审计；`4122c94`）
 
 **What:** `PanelView.swift` 的 `typeSizeTier` 用 `switch dynamicTypeSize { … default: .maximum }`。`DynamicTypeSize` 是非 frozen 的 SwiftUI 枚举，裸 `default:` 会把未来 SDK 新增的档位静默并进 `.maximum`，无编译期提示——与本仓库处处刻意穷尽 `switch`（`StateGalleryView`/`PreviewFixtures` 明确不写 `default:`）的自律不符。
 
@@ -1382,7 +1408,9 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P1（D17/D44 是已拍板的验收决议，真机验证不通过意味着「阶段 D 已交付」这句话目前不成立；范围已从「主音量行」扩到全部三个 Dynamic Type 降级消费者，优先级不降）
 **Depends on:** 先查清 `typeSizeTier` 读的具体 API 再定修法；可能与上一条「`DynamicTypeSize → PanelTypeSizeTier` 映射用裸 `default:`」共用一次修复窗口；修好后 `EventRowView`/`PackGalleryView` 需要各自的真机复测（目前只有主音量行被验证过失效）
 
-### ~~PackCardView 的 CC0 徽标 VoiceOver 听不到~~ ✅ CC0 半已修（2026-07-24，`/codex review d6dafe8`）；子槽图标未 `accessibilityHidden` 半 —— 现有结构下可能已非问题，未装机实测
+### PackCardView 的 CC0 徽标标签已修，但子槽图标与 native VoiceOver 仍待验证
+
+**Status（2026-08-19）：** 部分完成。CC0 徽标的 VoiceOver 标签已在 `d6dafe8` 后修复；子槽图标的可访问性归属以及真实 macOS VoiceOver 行为没有装机实测，不能按源码或 harness 结果关闭。
 
 **What（原文，2026-07-11 pre-T4/T5 组件形态）：** `PackCardView` 的 `eventGrid` 每个字形都 `.accessibilityHidden(true)`（已由卡片自身 `accessibilityLabel` 汇总），但 `statusLine` 的 `xmark.circle.fill` +「文件丢失」、`CC0` 徽标、`N/4` 计数都**未**隐藏，可能作为冗余/自动生成 label 的 VoiceOver 停靠泄漏；且 `CC0` 根本没进 `accessibilityLabel`，VoiceOver 用户完全听不到「这是 CC0 包」。
 
@@ -1411,7 +1439,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** ~~P4~~ 已关闭
 **Depends on:** None
 
-### 导入区（AudioDropZoneView）成功/拒绝后不再可键盘/VoiceOver 触发，只剩拖拽
+### ~~导入区（AudioDropZoneView）成功/拒绝后不再可键盘/VoiceOver 触发，只剩拖拽~~ ✅ 旧生产接线已被 Sound Packs Window 替代；当前三界面 native a11y 见 T2 条目（2026-08-19 审计）
 
 **What:** `AudioDropZoneView` 新增的"点按打开 `NSOpenPanel`"只挂在 `promptLabel`（初始 `.idle`/prompt 态）。`AudioImportViewModel` 一次成功或拒绝后停在 `.success`/`.reject`，内容切到非按钮行，键盘/VoiceOver 用户无法再次点按导入区重试或继续加声音，只有鼠标拖拽还能用。
 
@@ -1497,7 +1525,9 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P2
 **Depends on:** None
 
-### state gallery 给「断开连接」画的是一帧 app 里不存在的画面
+### state gallery 的 `.running(.disconnect)` 仍不是当前生产画面（旧 `PanelView.disconnectRow` 描述已过期）
+
+**Status（2026-08-19）：** 部分完成。当前生产断开连接入口已位于 retained `IntegrationsWindow`；state gallery 仍用 `OnboardingView` 承载该状态，尚未补上真实生产 surface 的视觉帧。
 
 **What:** `.running(.disconnect)` 那一帧用 `.installed` 承载，渲染的是 `OnboardingView`。但真实 app 在 `.installed` 时渲染的是 `operationalPanel`（`OnboardingView` 根本不出现）——真正 ship 的那颗「断开连接」按钮（在 `PanelView.disconnectRow` 里）**一帧都没有**。
 
@@ -1509,7 +1539,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### `hasQuarantineAttribute` 是 fail-open：任何 errno 都被折叠成「没被隔离」
+### ~~`hasQuarantineAttribute` 是 fail-open：任何 errno 都被折叠成「没被隔离」~~ ✅ 已解决（2026-08-19 审计；`72d68e7`）
 
 **What:** `getxattr(url.path, name, nil, 0, 0, XATTR_NOFOLLOW) >= 0` —— `ENOATTR` / `ENOENT` / `EPERM` / `EACCES` / `EIO` **全部**返回 -1，函数一律报 `false`（干净）。实测确认（Darwin 25.5）：穿一个 0000 权限的目录去读一个确实带章的文件 → `rc=-1 errno=13 (EACCES)` → 函数说「没被隔离」。
 
@@ -1549,7 +1579,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### 「断开连接」ghost 按钮偏离 DESIGN.md，且「次 CTA」这一个角色现在有~~两~~**五**套渲染
+### ~~旧 `PanelView.disconnectRow` ghost 按钮偏离 DESIGN.md 的条目~~ ✅ 原生产接线已移除，原条目过期（2026-08-19 审计）
 
 **What:** 四条，都在 `PanelView.disconnectRow`：① 圆角 `cornerRadius: 8` 不在 DESIGN.md 的圆角阶梯上（控件 6 / 卡片·行 10 / onboarding 图标块 12 / 面板 15 —— 全 app 其余 `RoundedRectangle` 无一例外落在 token 上）；② 字号 `11` 是「次要 / 状态」那一档（面板里 `errorNotice` / `ActionFailureRow` 的说明文字正是 11），而控件标签最接近的档是「行标签 13」—— 这颗按钮的标签比面板里任何一颗别的按钮都小，跟它旁边的失败说明一样大；③ `.buttonStyle(.plain)` 剥掉了 AppKit 的全部反馈，只补了一层**静态**描边 —— 一颗全宽的、不可撤销的破坏性按钮，鼠标压下去屏幕上没有任何变化（本仓库对同类命中区已有成熟的 token 化 hover：`AudioDropZoneView` 的「边框转 clay + `clay-soft` 底」）；④ 同一个「次 CTA」语义角色，`OnboardingView` 里仍是 `.buttonStyle(.bordered)`（macOS 系统灰底按钮），而 DESIGN.md 写的是「次 CTA（ghost：透明 + `hairline-strong` 描边）」。
 
@@ -1595,7 +1625,7 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P3
 **Depends on:** None
 
-### 面板句里的 `header` 在 async **外**捕获，其余三个事实在 async **内**重读 —— 一个陈旧的 header 拼得到一个崭新的 state 上
+### ~~面板句里的 `header` 在 async **外**捕获，其余三个事实在 async **内**重读 —— 一个陈旧的 header 拼得到一个崭新的 state 上~~ ✅ 已解决（2026-08-19 审计；当前事实在 async 内统一获取）
 
 **What:** `PanelAnnouncementFacts` 的 `state` 由 view-model 供给，但 `header` 仍在视图侧先算成字符串；`PanelView.headerAccessibilityLabel` 自己**又分了一次 `state == .installed`**：
 
@@ -1782,7 +1812,9 @@ VoiceOver 验证，不再需要迁移 `config` / `packCards`。
 **Priority:** P2
 **Depends on:** None（与「DesignTokens 规范化」合做最划算）
 
-### 字号阶梯：DESIGN.md 定义 4 档，代码在用 8 档 —— 而 DESIGN.md 自己也有两处互相矛盾
+### 字号阶梯：原「代码在用 8 档」描述已过期，但固定字面量与 DESIGN.md 矛盾仍待收口
+
+**Status（2026-08-19）：** 部分完成。当前持久化接口字号已收敛为四档；但字号实现仍有 `9` / `11.5` / `12.5` 等固定字面量，且 `DESIGN.md` 仍有两处阶梯定义冲突。以下 What / Why 按当前残余问题理解，不再把旧的「8 档」计数当作事实。
 
 **What:** DESIGN.md「字号阶梯」表里，App 内只有四档：**面板标题 14–15 · 行标签 13 · 次要/状态 11 · 数据/事件 id 10–12**。
 
@@ -1846,7 +1878,9 @@ if onboardingViewModel.state == .installed {
 **Priority:** P2
 **Depends on:** None（与「state gallery 画 app 里不存在的画面」那条同源，一起修最划算）
 
-### 「拖一个音频文件到这儿」这一个语义，有两套互不相认的虚线规格
+### 「拖一个音频文件到这儿」的旧虚线规格条目已过期，当前 drop targets 需按 Sound Packs Window + EventRowView 重写
+
+**Status（2026-08-19）：** 需重写。原文依赖已移除的 `AudioDropZoneView`；当前仍可讨论 `SoundPacksWindow` 与 `EventRowView.importAffordance` 的统一规范，但不能直接按原文执行。
 
 **What:** 面板里有两个 drop 目标，视觉语言是两套：
 
@@ -2060,7 +2094,7 @@ chmod 到 0600 的用户（它可以装着 API key —— hook 命令、`env` �
 **Priority:** P2
 **Depends on:** None
 
-### `probeSettingsWritable` 探的是**文件**能不能写，而备份与原子写要的是**目录**能不能写
+### ~~`probeSettingsWritable` 探的是**文件**能不能写，而备份与原子写要的是**目录**能不能写~~ ✅ 已解决（2026-08-19 审计；`b5dc506`）
 
 **What:** `probeSettingsWritable`（`SettingsInstaller.swift:548`）对 `settings.json` **这个文件**调
 `isWritableFile`（底下是 `access(W_OK)`）。但 `.claudio.bak` 的创建、以及 `.atomic` 的「同目录临时文件 +
@@ -2253,6 +2287,8 @@ D43 把 `.configMissing` 从 `errorNotice` 里滤掉，理由是「那张空态�
 ## 声音包管理（PLAN-SOUND-MANAGER.md）落地债
 
 ### T2 文件名 Menu 已迁入 Sound Packs Window；新三界面 VoiceOver 真机走查仍未做（2026-08-02）
+
+**Status（2026-08-19）：** 部分完成。迁移本身已完成；Sound Packs Window、EventRowView、PackCardView 三个当前生产 surface 的 native VoiceOver 走查仍待执行。
 
 **2026-08-02 更新：** 主面板不再渲染文件名 `Menu`；事件身份按钮只负责显式路由。完整文件菜单、清除绑定和拖放都在 Sound Packs Window。原字符串级测试保留历史契约，新人工验收应覆盖三个生产界面的唯一名称、Hint、Selected trait、稳定 identifier 与焦点返回。
 

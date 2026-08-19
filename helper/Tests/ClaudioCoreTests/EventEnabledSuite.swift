@@ -277,6 +277,9 @@ func runEventEnabledSuites() {
             try? FileManager.default.createDirectory(
                 at: userPacks.appendingPathComponent("minimal-chime", isDirectory: true),
                 withIntermediateDirectories: true)
+            writeFixture(
+                #"{ "id": "minimal-chime", "events": {} }"#,
+                to: userPacks.appendingPathComponent("minimal-chime/manifest.json"))
 
             let selectResult = selectPack(
                 "minimal-chime", configFile: configFile, userPacksDirectory: userPacks,

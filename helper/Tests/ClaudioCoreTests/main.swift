@@ -63,6 +63,8 @@ runFileLockSuites()
 runDoctorSuites()
 runDualHostDoctorSuites()
 runSettingsInstallerSuites()
+runPrivateDirectorySuites()
+runBootstrapReportSuites()
 runPathsSuites()
 runSourceScannerSuites()
 runLockSeparationSuites()
@@ -85,6 +87,7 @@ runPackSelectionSuites()
 runMasterVolumeSuites()
 runStarredPacksSuites()
 runConfigConcurrencySuites()
+runLegacyInstallPipelineSuites()
 
 // MARK: - Summary
 

@@ -7,9 +7,11 @@ import Foundation
 // The pure display-set seam below is therefore exercised directly: it operates solely on ids and
 // has no URL/FileManager parameter, so a future caller cannot turn panel rendering into a writer.
 
+@MainActor
 private func makeStarredPackDirectory(_ id: String, under root: URL) {
-    try? FileManager.default.createDirectory(
-        at: root.appendingPathComponent(id, isDirectory: true), withIntermediateDirectories: true)
+    let directory = root.appendingPathComponent(id, isDirectory: true)
+    try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    writeFixture(#"{ "id": "test-pack", "events": {} }"#, to: directory.appendingPathComponent("manifest.json"))
 }
 
 private func readStarredPackIDs(from configFile: URL) -> [String]? {

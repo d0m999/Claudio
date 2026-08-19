@@ -295,7 +295,7 @@ private func resolveAudioFile(
         // 必须是**正规文件**：一个名叫 `stop.mp3` 的目录 / FIFO 会让 `fileExists` 回答 `true`，
         // 于是 `play` 兴高采烈地去 spawn afplay，而事件触发时根本没有声音（`/codex review` [P2]）。
         // 见 ``regularFileExists(at:)``。
-        regularFileExists(at: audioFile)
+        nonEmptyRegularFileExists(at: audioFile)
     else { return nil }
     return audioFile
 }
@@ -363,7 +363,6 @@ private func readLastPlayedTimestamp(from stateFile: URL) -> Date? {
 /// Must only ever be called from inside `play.lock`'s critical section — see
 /// ``readLastPlayedTimestamp(from:)``.
 private func writeLastPlayedTimestamp(_ date: Date, to stateFile: URL) {
-    try? FileManager.default.createDirectory(
-        at: stateFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? ensurePrivateDirectoryTree(at: stateFile.deletingLastPathComponent())
     try? String(date.timeIntervalSince1970).write(to: stateFile, atomically: true, encoding: .utf8)
 }

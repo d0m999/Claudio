@@ -211,8 +211,7 @@ func updateConfigJSON(
     }
 
     do {
-        try FileManager.default.createDirectory(
-            at: configFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try ensurePrivateDirectoryExists(at: configFile.deletingLastPathComponent())
         try data.write(to: configFile, options: .atomic)
     } catch {
         return .failure(.writeFailed(reason: error.localizedDescription))
