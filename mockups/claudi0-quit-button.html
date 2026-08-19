@@ -1,0 +1,837 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#d9c9a4">
+  <title>claudi0 — 固定退出按钮 Mockup</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --canvas: #d9c9a4;
+      --canvas-ink: #443b32;
+      --canvas-muted: #75685a;
+      --panel-top: #fffdfa;
+      --panel-bottom: #fbf7f1;
+      --surface: #ffffff;
+      --surface-hover: #f5eee6;
+      --surface-pressed: #eee3d8;
+      --text: #2b2620;
+      --text-2: #75685a;
+      --text-muted: #ab9e8e;
+      --hairline: rgba(60, 44, 32, .09);
+      --hairline-strong: rgba(60, 44, 32, .16);
+      --clay: #c4633c;
+      --focus: #0a84ff;
+      --green: #288b43;
+      --blue: #0a72d0;
+      --amber: #ac6900;
+      --indigo: #5b59d6;
+      --shadow: rgba(76, 62, 40, .22);
+      --panel-width: 624px;
+      --panel-radius: 36px;
+      --control-radius: 16px;
+      --row-radius: 26px;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "PingFang SC", "Helvetica Neue", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --canvas: #100f0e;
+        --canvas-ink: #f0ece5;
+        --canvas-muted: #b7b1a8;
+        --panel-top: #1a1815;
+        --panel-bottom: #181613;
+        --surface: #24211e;
+        --surface-hover: #2c2824;
+        --surface-pressed: #342e29;
+        --text: #f0ece5;
+        --text-2: #b7b1a8;
+        --text-muted: #8d877f;
+        --hairline: rgba(255, 247, 235, .09);
+        --hairline-strong: rgba(255, 247, 235, .18);
+        --clay: #d97757;
+        --focus: #82b8ff;
+        --green: #36d465;
+        --blue: #2387f3;
+        --amber: #ffa200;
+        --indigo: #7779ff;
+        --shadow: rgba(0, 0, 0, .5);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    html { min-width: 320px; min-height: 100%; }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 32px;
+      color: var(--canvas-ink);
+      background:
+        linear-gradient(rgba(255, 255, 255, .14) 1px, transparent 1px) 0 0 / 100% 38px,
+        radial-gradient(circle at 24% 0%, rgba(255, 255, 255, .42), transparent 38%),
+        var(--canvas);
+      -webkit-font-smoothing: antialiased;
+    }
+
+    button { font: inherit; }
+
+    .board {
+      display: grid;
+      grid-template-columns: minmax(624px, 704px) minmax(300px, 430px);
+      gap: clamp(30px, 5vw, 72px);
+      width: min(1240px, 100%);
+      margin: 0 auto;
+      align-items: center;
+    }
+
+    .stage {
+      display: grid;
+      justify-items: center;
+      min-width: 0;
+    }
+
+    .panel-caption {
+      display: flex;
+      justify-content: space-between;
+      width: var(--panel-width);
+      margin-bottom: 12px;
+      padding: 0 4px;
+      color: var(--canvas-muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .025em;
+    }
+
+    .panel-shell {
+      position: relative;
+      display: grid;
+      grid-template-rows: minmax(0, 1fr) auto;
+      width: var(--panel-width);
+      height: min(960px, calc(100vh - 88px));
+      min-height: 720px;
+      overflow: hidden;
+      border: 2px solid var(--hairline-strong);
+      border-radius: var(--panel-radius);
+      background: linear-gradient(180deg, var(--panel-top), var(--panel-bottom));
+      box-shadow: 0 28px 70px var(--shadow), 0 4px 12px rgba(76, 62, 40, .1);
+    }
+
+    .panel-shell::before {
+      position: absolute;
+      z-index: 3;
+      top: -15px;
+      left: 50%;
+      width: 28px;
+      height: 28px;
+      border-top: 2px solid var(--hairline-strong);
+      border-left: 2px solid var(--hairline-strong);
+      background: var(--panel-top);
+      content: "";
+      transform: translateX(-50%) rotate(45deg);
+    }
+
+    .panel-scroll {
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+      scrollbar-gutter: stable;
+    }
+
+    .panel-content {
+      display: grid;
+      gap: 24px;
+      padding: 26px 26px 22px;
+    }
+
+    .panel-header {
+      display: grid;
+      gap: 8px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+    }
+
+    .wordmark {
+      display: inline-flex;
+      align-items: center;
+      height: 44px;
+      color: var(--text);
+      font-size: 38px;
+      font-weight: 750;
+      letter-spacing: -2.8px;
+      line-height: 1;
+    }
+
+    .wordmark img {
+      width: 47px;
+      height: 47px;
+      margin-left: -6px;
+    }
+
+    .interface-button {
+      width: 108px;
+      height: 64px;
+      border: 1px solid transparent;
+      border-radius: 18px;
+      color: var(--clay);
+      background: color-mix(in srgb, var(--clay) 7%, transparent);
+      font-size: 29px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .interface-button:hover { background: color-mix(in srgb, var(--clay) 12%, transparent); }
+
+    .pack-title {
+      margin: 10px 0 0;
+      color: var(--text);
+      font-size: 28px;
+      font-weight: 720;
+      letter-spacing: -.02em;
+    }
+
+    .summary {
+      margin: 0;
+      color: var(--text-2);
+      font-size: 22px;
+      line-height: 1.35;
+    }
+
+    .source-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .source-card {
+      min-height: 126px;
+      padding: 20px;
+      border: 2px solid var(--hairline-strong);
+      border-radius: var(--row-radius);
+      background: color-mix(in srgb, var(--surface) 82%, transparent);
+    }
+
+    .source-heading {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--text);
+      font-size: 24px;
+      font-weight: 720;
+    }
+
+    .source-heading img { width: 28px; height: 28px; }
+
+    .source-status {
+      margin: 10px 0 0;
+      color: var(--text-2);
+      font-size: 19px;
+      font-weight: 650;
+    }
+
+    .section-title {
+      margin: 0 0 12px;
+      color: var(--text-2);
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .event-list { display: grid; gap: 12px; }
+
+    .event-row {
+      display: grid;
+      grid-template-columns: 54px minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 16px;
+      min-height: 90px;
+      padding: 16px 18px;
+      border: 2px solid var(--hairline-strong);
+      border-radius: var(--row-radius);
+      background: color-mix(in srgb, var(--surface) 76%, transparent);
+    }
+
+    .event-tile {
+      display: grid;
+      place-items: center;
+      width: 54px;
+      height: 54px;
+      border-radius: 18px;
+      color: var(--event-color);
+      background: color-mix(in srgb, var(--event-color) 15%, var(--panel-top));
+    }
+
+    .event-tile svg { width: 28px; height: 28px; fill: currentColor; }
+
+    .event-copy { min-width: 0; }
+
+    .event-name {
+      overflow: hidden;
+      color: var(--text);
+      font-size: 23px;
+      font-weight: 700;
+      letter-spacing: -.015em;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .event-tags {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .tag {
+      padding: 4px 10px;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 999px;
+      color: var(--text-2);
+      background: color-mix(in srgb, var(--surface) 78%, transparent);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .event-actions {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--text-2);
+    }
+
+    .event-action {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 0;
+      color: inherit;
+      background: transparent;
+      font-size: 22px;
+    }
+
+    .volume-row {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      min-height: 56px;
+      color: var(--text);
+      font-size: 21px;
+    }
+
+    .volume-row strong { font-weight: 650; }
+
+    .volume-track {
+      position: relative;
+      flex: 1;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--hairline-strong);
+    }
+
+    .volume-track::before {
+      position: absolute;
+      inset: 0 30% 0 0;
+      border-radius: inherit;
+      background: var(--clay);
+      content: "";
+    }
+
+    .volume-track::after {
+      position: absolute;
+      top: 50%;
+      left: 70%;
+      width: 28px;
+      height: 28px;
+      border: 1px solid var(--hairline-strong);
+      border-radius: 50%;
+      background: var(--surface);
+      box-shadow: 0 2px 5px rgba(0, 0, 0, .16);
+      content: "";
+      transform: translate(-50%, -50%);
+    }
+
+    .pack-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+    .pack-card {
+      min-height: 72px;
+      padding: 16px;
+      border: 2px solid var(--hairline-strong);
+      border-radius: 20px;
+      color: var(--text);
+      background: color-mix(in srgb, var(--surface) 72%, transparent);
+      font-size: 19px;
+      font-weight: 650;
+    }
+
+    .pack-card.active { border-color: color-mix(in srgb, var(--clay) 58%, transparent); }
+
+    .manage-button {
+      width: 100%;
+      min-height: 58px;
+      margin-top: 14px;
+      border: 2px dashed var(--hairline-strong);
+      border-radius: 16px;
+      color: var(--text-2);
+      background: transparent;
+      font-size: 19px;
+      font-weight: 600;
+    }
+
+    .quit-footer {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      justify-content: flex-end;
+      padding: 5px 14px 9px;
+      background:
+        linear-gradient(180deg, color-mix(in srgb, var(--panel-bottom) 0%, transparent), var(--panel-bottom) 24%);
+    }
+
+    .quit-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: auto;
+      min-height: 50px;
+      padding: 0 10px;
+      border: 1px solid transparent;
+      border-radius: var(--control-radius);
+      color: var(--text-2);
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      transition: color 120ms ease, background-color 120ms ease, transform 80ms ease;
+    }
+
+    .quit-button:hover,
+    .quit-button.force-hover {
+      color: var(--text);
+      background: var(--surface-hover);
+    }
+
+    .quit-button:active {
+      background: var(--surface-pressed);
+      transform: scale(.995);
+    }
+
+    .quit-button:focus-visible,
+    .quit-button.force-focus {
+      color: var(--text);
+      background: var(--surface-hover);
+      outline: 4px solid color-mix(in srgb, var(--focus) 72%, transparent);
+      outline-offset: -4px;
+    }
+
+    .power-icon {
+      width: 24px;
+      height: 24px;
+      color: currentColor;
+    }
+
+    .quit-label {
+      font-size: 18px;
+      font-weight: 620;
+      white-space: nowrap;
+    }
+
+    .notes { align-self: center; }
+
+    .kicker {
+      margin: 0 0 9px;
+      color: var(--clay);
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: .14em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      max-width: 420px;
+      margin: 0;
+      color: var(--canvas-ink);
+      font-size: clamp(32px, 4vw, 52px);
+      font-weight: 760;
+      letter-spacing: -.05em;
+      line-height: .98;
+    }
+
+    .lede {
+      max-width: 420px;
+      margin: 18px 0 26px;
+      color: var(--canvas-muted);
+      font-size: 16px;
+      line-height: 1.55;
+    }
+
+    .control-group {
+      display: grid;
+      gap: 10px;
+      margin: 20px 0;
+    }
+
+    .control-label {
+      color: var(--canvas-muted);
+      font-size: 12px;
+      font-weight: 750;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .segmented {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
+    }
+
+    .segmented button {
+      min-height: 34px;
+      padding: 7px 12px;
+      border: 1px solid color-mix(in srgb, var(--canvas-ink) 22%, transparent);
+      border-radius: 999px;
+      color: var(--canvas-muted);
+      background: color-mix(in srgb, var(--panel-top) 58%, transparent);
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .segmented button:hover,
+    .segmented button[aria-pressed="true"] {
+      border-color: var(--clay);
+      color: var(--clay);
+      background: color-mix(in srgb, var(--panel-top) 88%, transparent);
+    }
+
+    .segmented button:focus-visible,
+    .interface-button:focus-visible,
+    .manage-button:focus-visible {
+      outline: 3px solid color-mix(in srgb, var(--focus) 70%, transparent);
+      outline-offset: 2px;
+    }
+
+    .spec-list {
+      display: grid;
+      gap: 12px;
+      margin: 28px 0 0;
+      padding: 0;
+      list-style: none;
+    }
+
+    .spec-list li {
+      display: grid;
+      grid-template-columns: 9px 1fr;
+      gap: 11px;
+      color: var(--canvas-muted);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .spec-list li::before {
+      width: 7px;
+      height: 7px;
+      margin-top: 7px;
+      border-radius: 50%;
+      background: var(--clay);
+      content: "";
+    }
+
+    .demo-status {
+      min-height: 21px;
+      margin: 18px 0 0;
+      color: var(--clay);
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    @media (max-width: 1060px) {
+      body { padding: 24px; }
+      .board { grid-template-columns: 1fr; }
+      .notes { width: min(var(--panel-width), 100%); margin: 0 auto; order: -1; }
+      .stage { margin-top: 12px; }
+      .panel-shell { height: 820px; }
+    }
+
+    @media (max-width: 680px) {
+      body { padding: 18px 12px 28px; }
+      .stage { overflow: hidden; }
+      .panel-caption { width: min(100%, 624px); }
+      .panel-shell {
+        width: min(624px, calc(100vw - 24px));
+        height: 760px;
+        min-height: 640px;
+        border-radius: 28px;
+      }
+      .panel-content { padding-inline: 20px; }
+      .source-grid, .pack-grid { grid-template-columns: 1fr; }
+      .event-row { grid-template-columns: 48px minmax(0, 1fr) auto; padding-inline: 14px; }
+      .event-tags .tag:nth-child(-n+2) { display: none; }
+      .quit-footer { padding-inline: 9px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="board">
+    <section class="stage" aria-labelledby="mockup-caption">
+      <div class="panel-caption" id="mockup-caption">
+        <span>主面板 · 2× 视觉稿</span>
+        <span>312pt 标准宽度</span>
+      </div>
+
+      <article class="panel-shell" aria-label="claudi0 菜单栏面板退出按钮 mockup">
+        <div class="panel-scroll" tabindex="0" aria-label="可滚动的面板内容">
+          <div class="panel-content">
+            <header class="panel-header">
+              <div class="topbar">
+                <div class="wordmark" aria-label="claudi0">
+                  claudi<img src="../assets/branding/claudi0-mark.svg" alt="o">
+                </div>
+                <button class="interface-button" type="button" aria-label="界面设置">Aa⌄</button>
+              </div>
+              <h2 class="pack-title" data-i18n="pack">皮卡丘</h2>
+              <p class="summary" data-i18n="summary">5 个可听事件</p>
+            </header>
+
+            <section aria-labelledby="sources-title">
+              <h3 class="section-title" id="sources-title" data-i18n="sources">声音来源</h3>
+              <div class="source-grid">
+                <article class="source-card">
+                  <div class="source-heading">
+                    <img src="../assets/host-icons/claude.svg" alt="">
+                    <span>Claude Code</span>
+                  </div>
+                  <p class="source-status" data-i18n="claude-status">5/5 已配置</p>
+                </article>
+                <article class="source-card">
+                  <div class="source-heading">
+                    <img src="../assets/host-icons/codex.svg" alt="">
+                    <span>Codex</span>
+                  </div>
+                  <p class="source-status" data-i18n="codex-status">4/5 就绪</p>
+                </article>
+              </div>
+            </section>
+
+            <section aria-labelledby="events-title">
+              <h3 class="section-title" id="events-title" data-i18n="events">皮卡丘 · 事件</h3>
+              <div class="event-list">
+                <article class="event-row" style="--event-color: var(--blue)">
+                  <div class="event-tile" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M21.9 2.6 3.7 10.2c-1.2.5-1.1 1.2-.2 1.5l4.7 1.5 1.8 5.6c.2.7.1 1 .8 1 .5 0 .7-.2 1-.5l2.3-2.2 4.8 3.5c.9.5 1.5.2 1.7-.8l3.1-14.8c.3-1.3-.5-1.9-1.8-1.4Z"/></svg>
+                  </div>
+                  <div class="event-copy">
+                    <div class="event-name" data-i18n="event-1">任务开始</div>
+                    <div class="event-tags"><span class="tag">Claude</span><span class="tag">Codex</span><span class="tag" data-i18n="mapped">已映射</span></div>
+                  </div>
+                  <div class="event-actions" aria-hidden="true"><span>▶</span><span>⌁</span></div>
+                </article>
+
+                <article class="event-row" style="--event-color: var(--green)">
+                  <div class="event-tile" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm-1.2 14.6-4-4 1.5-1.5 2.5 2.5 5-5 1.5 1.5-6.5 6.5Z"/></svg>
+                  </div>
+                  <div class="event-copy">
+                    <div class="event-name" data-i18n="event-2">轮次完成</div>
+                    <div class="event-tags"><span class="tag">Claude</span><span class="tag">Codex</span><span class="tag" data-i18n="mapped">已映射</span></div>
+                  </div>
+                  <div class="event-actions" aria-hidden="true"><span>▶</span><span>⌁</span></div>
+                </article>
+
+                <article class="event-row" style="--event-color: var(--amber)">
+                  <div class="event-tile" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M7 4h3v16H7V4Zm7 0h3v16h-3V4Z"/></svg>
+                  </div>
+                  <div class="event-copy">
+                    <div class="event-name" data-i18n="event-3">执行已中断</div>
+                    <div class="event-tags"><span class="tag">Claude</span><span class="tag">Codex</span><span class="tag" data-i18n="mapped">已映射</span></div>
+                  </div>
+                  <div class="event-actions" aria-hidden="true"><span>▶</span><span>⌁</span></div>
+                </article>
+
+                <article class="event-row" style="--event-color: var(--clay)">
+                  <div class="event-tile" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M12 2a7 7 0 0 0-7 7v4l-2 3v1h18v-1l-2-3V9a7 7 0 0 0-7-7Zm0 20a3 3 0 0 0 2.8-2H9.2A3 3 0 0 0 12 22Z"/></svg>
+                  </div>
+                  <div class="event-copy">
+                    <div class="event-name" data-i18n="event-4">需要回复</div>
+                    <div class="event-tags"><span class="tag">Claude</span><span class="tag">Codex</span><span class="tag" data-i18n="mapped">已映射</span></div>
+                  </div>
+                  <div class="event-actions" aria-hidden="true"><span>▶</span><span>⌁</span></div>
+                </article>
+
+                <article class="event-row" style="--event-color: var(--indigo)">
+                  <div class="event-tile" aria-hidden="true">
+                    <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20Zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16Zm-1.2 11.7-3.4-3.4 1.4-1.4 2 2 4.4-4.4 1.4 1.4-5.8 5.8Z"/></svg>
+                  </div>
+                  <div class="event-copy">
+                    <div class="event-name" data-i18n="event-5">子任务完成</div>
+                    <div class="event-tags"><span class="tag">Claude</span><span class="tag">Codex</span><span class="tag" data-i18n="mapped">已映射</span></div>
+                  </div>
+                  <div class="event-actions" aria-hidden="true"><span>▶</span><span>⌁</span></div>
+                </article>
+              </div>
+            </section>
+
+            <section aria-labelledby="volume-title">
+              <h3 class="section-title" id="volume-title" data-i18n="controls">声音控制</h3>
+              <div class="volume-row"><strong data-i18n="volume">主音量</strong><div class="volume-track" aria-hidden="true"></div></div>
+            </section>
+
+            <section aria-labelledby="packs-title">
+              <h3 class="section-title" id="packs-title" data-i18n="packs">声音包</h3>
+              <div class="pack-grid">
+                <div class="pack-card active" data-i18n="pack">皮卡丘</div>
+                <div class="pack-card">Minimal Chime</div>
+              </div>
+              <button class="manage-button" type="button" data-i18n="manage">管理声音包…</button>
+            </section>
+          </div>
+        </div>
+
+        <footer class="quit-footer">
+          <button class="quit-button" id="quit-button" type="button" aria-label="退出 claudi0" aria-describedby="demo-status">
+            <svg class="power-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+              <path d="M12 2v10"></path>
+              <path d="M18.36 5.64a9 9 0 1 1-12.72 0"></path>
+            </svg>
+            <span class="quit-label" data-i18n="quit">关闭</span>
+          </button>
+        </footer>
+      </article>
+    </section>
+
+    <aside class="notes" aria-labelledby="page-title">
+      <p class="kicker">UI mockup · fixed footer</p>
+      <h1 id="page-title">关闭入口，小而清楚。</h1>
+      <p class="lede">面板内容独立滚动，紧凑的关闭入口固定在右下角。它不与“管理声音包…”争夺层级，也不占用标题栏空间。</p>
+
+      <div class="control-group">
+        <div class="control-label">文案</div>
+        <div class="segmented" role="group" aria-label="切换文案语言">
+          <button type="button" data-language="zh" aria-pressed="true">中文</button>
+          <button type="button" data-language="en" aria-pressed="false">English</button>
+        </div>
+      </div>
+
+      <div class="control-group">
+        <div class="control-label">退出行状态</div>
+        <div class="segmented" role="group" aria-label="切换退出按钮状态">
+          <button type="button" data-state="rest" aria-pressed="true">默认</button>
+          <button type="button" data-state="hover" aria-pressed="false">Hover</button>
+          <button type="button" data-state="focus" aria-pressed="false">键盘焦点</button>
+        </div>
+      </div>
+
+      <ul class="spec-list">
+        <li>右下角紧凑呈现，不随中间内容滚走；无常驻分隔线。</li>
+        <li>中性文字与 power 图标，不使用错误红或品牌强调色。</li>
+        <li>仅保留 power 图标与“关闭”两个字，不留大块空白。</li>
+        <li>点击后直接正常退出，不增加确认框。</li>
+      </ul>
+
+      <p class="demo-status" id="demo-status" role="status" aria-live="polite"></p>
+    </aside>
+  </main>
+
+  <script>
+    const copy = {
+      zh: {
+        pack: "皮卡丘",
+        summary: "5 个可听事件",
+        sources: "声音来源",
+        "claude-status": "5/5 已配置",
+        "codex-status": "4/5 就绪",
+        events: "皮卡丘 · 事件",
+        mapped: "已映射",
+        "event-1": "任务开始",
+        "event-2": "轮次完成",
+        "event-3": "执行已中断",
+        "event-4": "需要回复",
+        "event-5": "子任务完成",
+        controls: "声音控制",
+        volume: "主音量",
+        packs: "声音包",
+        manage: "管理声音包…",
+        quit: "关闭",
+        "quit-label": "退出 claudi0",
+        demo: "Mockup 演示：真实 App 会在这里正常退出。"
+      },
+      en: {
+        pack: "Pikachu",
+        summary: "5 audible events",
+        sources: "Sound Sources",
+        "claude-status": "5/5 configured",
+        "codex-status": "4/5 ready",
+        events: "Pikachu · Events",
+        mapped: "Mapped",
+        "event-1": "Task start",
+        "event-2": "Turn complete",
+        "event-3": "Execution interrupted",
+        "event-4": "Needs response",
+        "event-5": "Subtask complete",
+        controls: "Sound Controls",
+        volume: "Master volume",
+        packs: "Sound Packs",
+        manage: "Manage Sound Packs…",
+        quit: "Close",
+        "quit-label": "Quit claudi0",
+        demo: "Mockup only: the real app would quit normally here."
+      }
+    };
+
+    let language = "zh";
+    const quitButton = document.querySelector("#quit-button");
+    const status = document.querySelector("#demo-status");
+
+    function setLanguage(nextLanguage) {
+      language = nextLanguage;
+      document.documentElement.lang = language === "zh" ? "zh-Hans" : "en";
+      document.querySelectorAll("[data-i18n]").forEach((element) => {
+        const key = element.dataset.i18n;
+        if (copy[language][key]) element.textContent = copy[language][key];
+      });
+      document.querySelectorAll("[data-language]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.language === language));
+      });
+      quitButton.setAttribute("aria-label", copy[language]["quit-label"]);
+      status.textContent = "";
+    }
+
+    function setState(state) {
+      quitButton.classList.toggle("force-hover", state === "hover");
+      quitButton.classList.toggle("force-focus", state === "focus");
+      document.querySelectorAll("[data-state]").forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.state === state));
+      });
+      if (state === "focus") quitButton.focus({ preventScroll: true });
+      else quitButton.blur();
+    }
+
+    document.querySelectorAll("[data-language]").forEach((button) => {
+      button.addEventListener("click", () => setLanguage(button.dataset.language));
+    });
+
+    document.querySelectorAll("[data-state]").forEach((button) => {
+      button.addEventListener("click", () => setState(button.dataset.state));
+    });
+
+    quitButton.addEventListener("click", () => {
+      status.textContent = copy[language].demo;
+    });
+  </script>
+</body>
+</html>
