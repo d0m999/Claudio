@@ -1,0 +1,793 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claudio · Native macOS AI app manager prototype</title>
+  <style>
+    :root {
+      --window: #fbfbfd;
+      --sidebar: #f1f1f3;
+      --sidebar-deep: #e5e5e7;
+      --group: #f5f5f6;
+      --group-hover: #ededf0;
+      --text: #1d1d1f;
+      --secondary: #6e6e73;
+      --tertiary: #98989d;
+      --separator: #d8d8dc;
+      --blue: #0a84ff;
+      --green: #34c759;
+      --orange: #ff9f0a;
+      --red: #ff453a;
+      --purple: #af52de;
+      --teal: #30b0c7;
+      --shadow: 0 30px 80px rgba(0, 0, 0, .22), 0 2px 12px rgba(0, 0, 0, .12);
+    }
+
+    * { box-sizing: border-box; }
+    html { min-width: 1024px; background: #d7d7da; }
+    body {
+      min-width: 1024px;
+      min-height: 100vh;
+      margin: 0;
+      padding: 30px;
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background:
+        radial-gradient(circle at 50% -20%, rgba(255,255,255,.8), transparent 48%),
+        linear-gradient(#e1e1e3, #d4d4d7);
+    }
+    button, input, select { font: inherit; }
+    button { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, select:focus-visible, input:focus-visible { outline: 3px solid rgba(10,132,255,.35); outline-offset: 2px; }
+
+    .window {
+      position: relative;
+      display: grid;
+      grid-template-columns: 252px minmax(0, 1fr);
+      width: min(1240px, calc(100vw - 60px));
+      min-height: 820px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 1px solid rgba(0,0,0,.18);
+      border-radius: 18px;
+      background: var(--window);
+      box-shadow: var(--shadow);
+    }
+
+    .traffic-lights {
+      position: absolute;
+      z-index: 5;
+      top: 17px;
+      left: 17px;
+      display: flex;
+      gap: 8px;
+    }
+    .traffic-light { width: 13px; height: 13px; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0,0,0,.13); }
+    .traffic-light.red { background: #ff5f57; }
+    .traffic-light.yellow { background: #febc2e; }
+    .traffic-light.green { background: #28c840; }
+
+    .sidebar {
+      min-height: 820px;
+      padding: 58px 13px 18px;
+      border-right: 1px solid rgba(0,0,0,.08);
+      background: rgba(239,239,241,.88);
+    }
+    .sidebar-brand { display: flex; align-items: center; gap: 9px; padding: 0 9px 19px; }
+    .brand-mark { display: block; width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px; object-fit: cover; box-shadow: 0 1px 2px rgba(0,0,0,.14); }
+    .brand-name { font-size: 15px; font-weight: 750; letter-spacing: -.02em; }
+    .sidebar-group { margin-top: 14px; }
+    .sidebar-heading { padding: 0 10px 6px; color: var(--secondary); font-size: 11px; font-weight: 700; }
+    .sidebar-heading.first { display: none; }
+    .sidebar-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      min-height: 37px;
+      padding: 6px 10px;
+      border: 0;
+      border-radius: 9px;
+      color: #454548;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 520;
+    }
+    .sidebar-item:hover { background: rgba(255,255,255,.65); }
+    .sidebar-item.active { color: var(--text); background: #d6d6d8; font-weight: 680; box-shadow: inset 0 0 0 1px rgba(0,0,0,.035); }
+    .sidebar-icon { display: grid; place-items: center; width: 25px; height: 25px; flex: 0 0 25px; border-radius: 7px; color: #fff; line-height: 1; box-shadow: inset 0 .5px 0 rgba(255,255,255,.22), inset 0 0 0 .5px rgba(0,0,0,.08), 0 1px 1px rgba(0,0,0,.08); }
+    .sidebar-symbol { width: 15px; height: 15px; overflow: visible; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; }
+    .sidebar-symbol .symbol-fill { fill: currentColor; stroke: none; }
+    .sidebar-icon.gray { background: #858589; }
+    .sidebar-icon.blue { background: #20aee2; }
+    .sidebar-icon.red { background: #ff3b47; }
+    .sidebar-icon.purple { background: #6f59e8; }
+    .sidebar-icon.green { background: #2fca5b; }
+    .sidebar-icon.pink { background: #f53573; }
+    .sidebar-icon.violet { background: #bb4ed9; }
+    .sidebar-separator { height: 1px; margin: 13px 9px; background: rgba(0,0,0,.08); }
+    .sidebar-foot { display: flex; align-items: center; gap: 7px; margin-top: 18px; padding: 8px 10px; color: var(--tertiary); font-size: 10px; font-weight: 650; }
+    .sidebar-foot-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+
+    .content {
+      min-width: 0;
+      min-height: 820px;
+      padding: 60px 52px 52px;
+      overflow: auto;
+      background: var(--window);
+    }
+    .content-inner { width: min(820px, 100%); margin: 0 auto; }
+    .page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
+    .page-header h1 { margin: 0; font-size: 30px; font-weight: 720; letter-spacing: -.045em; line-height: 1.1; }
+    .page-header p { max-width: 620px; margin: 8px 0 0; color: var(--secondary); font-size: 13px; line-height: 1.45; }
+    .page-header-actions { display: flex; align-items: center; gap: 9px; padding-top: 2px; }
+    .demo-label { color: var(--tertiary); font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .plain-button, .blue-button {
+      min-height: 31px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .plain-button { color: var(--text); background: #e8e8eb; box-shadow: inset 0 0 0 1px rgba(0,0,0,.05); }
+    .plain-button:hover { background: #dedee1; }
+    .blue-button { color: #fff; background: var(--blue); box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+    .blue-button:hover { background: #0077ed; }
+
+    .section-label { margin: 0 0 8px 4px; color: var(--secondary); font-size: 13px; font-weight: 650; }
+    .section-label + .settings-group { margin-top: 0; }
+    .settings-group { margin: 24px 0 0; overflow: hidden; border-radius: 12px; background: var(--group); box-shadow: inset 0 0 0 1px rgba(0,0,0,.035); }
+    .settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 20px; min-height: 57px; padding: 10px 18px; border-bottom: 1px solid var(--separator); }
+    .settings-row:last-child { border-bottom: 0; }
+    .settings-row.tall { min-height: 70px; }
+    .settings-row:hover { background: rgba(255,255,255,.32); }
+    .row-title { color: var(--text); font-size: 14px; font-weight: 560; }
+    .row-caption { margin-top: 4px; color: var(--secondary); font-size: 12px; line-height: 1.35; }
+    .row-caption code, .code { color: var(--secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; }
+    .row-control { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 100px; }
+    .row-value { color: var(--secondary); font-size: 13px; white-space: nowrap; }
+    select.native-select { min-width: 108px; padding: 6px 26px 6px 10px; border: 0; border-radius: 7px; color: var(--text); background: #e8e8eb; font-size: 13px; font-weight: 520; }
+    .native-range { width: 190px; accent-color: var(--blue); }
+    .range-value { min-width: 44px; color: var(--secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-align: right; }
+    .toggle { position: relative; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: #c7c7cc; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+    .toggle::after { position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%; content: ""; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .16s ease; }
+    .toggle.on { background: var(--green); }
+    .toggle.on::after { transform: translateX(16px); }
+    .toggle.blue.on { background: var(--blue); }
+
+    .app-list { overflow: hidden; border-radius: 12px; background: var(--group); box-shadow: inset 0 0 0 1px rgba(0,0,0,.035); }
+    .app-row { display: grid; grid-template-columns: minmax(0,1fr) auto 62px 38px; align-items: center; gap: 13px; min-height: 58px; padding: 0 18px; border: 0; border-bottom: 1px solid var(--separator); color: var(--text); background: transparent; }
+    .app-row:last-child { border-bottom: 0; }
+    .app-row:hover { background: var(--group-hover); }
+    .app-row-select { display: flex; align-items: center; min-width: 0; min-height: 58px; padding: 8px 0; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+    .app-row.selected { background: #e8e8eb; }
+    .app-name { font-size: 14px; font-weight: 650; }
+    .app-coverage { color: var(--secondary); font-size: 11px; font-weight: 650; white-space: nowrap; }
+    .app-connect-toggle { justify-self: end; }
+    .status { display: inline-flex; align-items: center; gap: 6px; color: var(--secondary); font-size: 11px; font-weight: 650; white-space: nowrap; }
+    .status-dot { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; color: #fff; background: var(--tertiary); font-size: 10px; font-weight: 800; line-height: 1; }
+    .status-dot::after { content: "·"; }
+    .status.ready { color: #258c3f; }
+    .status.ready .status-dot { background: var(--green); }
+    .status.ready .status-dot::after { content: "✓"; }
+    .status.waiting { color: #a76e00; }
+    .status.waiting .status-dot { background: var(--orange); }
+    .status.waiting .status-dot::after { content: "!"; }
+    .status.partial { color: #b05c29; }
+    .status.partial .status-dot { background: var(--orange); }
+    .status.partial .status-dot::after { content: "!"; }
+    .status.unavailable { color: var(--secondary); }
+    .status.unavailable .status-dot::after { content: "–"; }
+    .app-hint { margin: 14px 4px 0; color: var(--secondary); font-size: 12px; line-height: 1.4; }
+
+    .detail-header { display: flex; align-items: center; gap: 12px; margin-bottom: 17px; }
+    .detail-title { font-size: 17px; font-weight: 680; letter-spacing: -.025em; }
+    .detail-subtitle { margin-top: 4px; color: var(--secondary); font-size: 11px; }
+    .detail-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+    .event-row { display: grid; grid-template-columns: 27px minmax(0,1fr) auto 84px; align-items: center; gap: 11px; min-height: 60px; padding: 9px 18px; border-bottom: 1px solid var(--separator); }
+    .event-row.scoped { grid-template-columns: 27px minmax(0,1fr) auto 38px 106px; }
+    .event-row.preview { grid-template-columns: 27px minmax(0,1fr) auto 84px; }
+    .event-row:last-child { border-bottom: 0; }
+    .event-symbol { display: grid; place-items: center; width: 25px; height: 25px; border-radius: 7px; color: var(--blue); background: #dceeff; font-size: 12px; font-weight: 800; }
+    .event-symbol.green { color: #258c3f; background: #dff5e3; }
+    .event-symbol.orange { color: #a76e00; background: #fff0d2; }
+    .event-symbol.purple { color: #8642ab; background: #f0ddfa; }
+    .event-name { font-size: 13px; font-weight: 600; }
+    .event-code { margin-top: 4px; color: var(--secondary); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; }
+    .event-coverage { color: var(--secondary); font-size: 11px; white-space: nowrap; }
+    .event-sound { color: var(--blue); font-size: 11px; font-weight: 650; text-align: right; }
+    .event-sound .plain-button { min-width: 100px; padding-inline: 8px; }
+    .event-layout { display: grid; grid-template-columns: 224px minmax(0,1fr); align-items: start; gap: 14px; }
+    .event-app-nav { position: sticky; top: 0; min-width: 0; max-height: 548px; padding: 8px; overflow: auto; border-radius: 12px; background: var(--group); box-shadow: inset 0 0 0 1px rgba(0,0,0,.035); }
+    .event-app-nav-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding: 5px 6px 9px; }
+    .scope-eyebrow { color: var(--tertiary); font-size: 10px; font-weight: 700; }
+    .event-app-nav-title { margin-top: 3px; color: var(--text); font-size: 12px; font-weight: 680; }
+    .event-app-count { color: var(--tertiary); font-size: 10px; line-height: 1.35; text-align: right; white-space: nowrap; }
+    .event-app-picker { display: grid; gap: 2px; }
+    .event-app-option { display: block; width: 100%; min-height: 58px; padding: 8px 10px; border: 0; border-radius: 9px; color: var(--secondary); background: transparent; cursor: pointer; text-align: left; }
+    .event-app-option:hover { background: var(--group-hover); }
+    .event-app-option.active { color: var(--text); background: #dedee1; box-shadow: inset 0 0 0 1px rgba(0,0,0,.045); }
+    .event-app-option-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .event-app-option .app-name { display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 650; }
+    .event-app-option-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px; }
+    .event-app-option .status { gap: 4px; font-size: 10px; }
+    .event-app-option .status-dot { width: 14px; height: 14px; font-size: 9px; }
+    .event-app-option .app-coverage { color: var(--tertiary); font-size: 10px; font-weight: 650; white-space: nowrap; }
+    .event-app-option.active .app-coverage { color: var(--secondary); }
+    .event-app-nav-foot { margin: 8px 6px 2px; padding-top: 8px; border-top: 1px solid var(--separator); color: var(--tertiary); font-size: 10px; line-height: 1.4; }
+    .event-detail { min-width: 0; }
+    .event-detail-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 2px 18px; }
+    .event-detail-title { color: var(--text); font-size: 17px; font-weight: 680; letter-spacing: -.025em; }
+    .event-detail-subtitle { margin-top: 4px; color: var(--secondary); font-size: 11px; }
+    .event-toggle { justify-self: end; }
+    .info-callout { display: flex; align-items: flex-start; gap: 9px; margin-top: 13px; padding: 11px 13px; border-radius: 10px; color: var(--secondary); background: #f2f2f4; font-size: 11px; line-height: 1.45; }
+    .info-icon { display: grid; place-items: center; width: 17px; height: 17px; flex: 0 0 17px; border-radius: 50%; color: #fff; background: var(--secondary); font-size: 11px; font-weight: 800; }
+
+    .empty-page { padding: 30px 4px; color: var(--secondary); }
+    .empty-page h2 { margin: 0; color: var(--text); font-size: 20px; font-weight: 680; }
+    .empty-page p { max-width: 560px; margin: 8px 0 0; font-size: 13px; line-height: 1.5; }
+    .mini-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 24px; }
+    .mini-stat { padding: 17px; border-radius: 12px; background: var(--group); }
+    .mini-stat strong { display: block; font-size: 23px; font-weight: 720; letter-spacing: -.05em; }
+    .mini-stat span { display: block; margin-top: 5px; color: var(--secondary); font-size: 11px; }
+    .toast { position: fixed; right: 24px; bottom: 22px; padding: 10px 13px; border-radius: 9px; color: #fff; background: rgba(30,30,32,.92); font-size: 12px; font-weight: 600; opacity: 0; transform: translateY(8px); pointer-events: none; transition: opacity .16s ease, transform .16s ease; }
+    .toast.visible { opacity: 1; transform: translateY(0); }
+
+    /* 桌面菜单栏弹窗：与设置页共享 apps / eventsByApp 状态，但保留更紧凑的深色面板层级。 */
+    .panel-surface[hidden] { display: none; }
+    .panel-surface {
+      width: min(624px, calc(100vw - 56px));
+      min-height: 720px;
+      margin: 0 auto;
+      overflow: hidden;
+      border: 2px solid #6b6862;
+      border-radius: 31px;
+      color: #f0ece5;
+      background:
+        linear-gradient(145deg, rgba(255,255,255,.018), transparent 42%),
+        #191816;
+      box-shadow: 0 24px 70px rgba(0,0,0,.54);
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Rounded", "PingFang SC", "Helvetica Neue", sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .panel-content { display: grid; gap: 19px; padding: 22px 27px 18px; }
+    .panel-topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
+    .panel-wordmark { display: inline-flex; align-items: center; height: 43px; color: #f0ece5; font-size: 35px; font-weight: 730; letter-spacing: -2.3px; line-height: 1; }
+    .panel-wordmark img { width: 52px; height: 52px; margin-left: -7px; }
+    .panel-interface-button { min-width: 104px; height: 54px; border: 0; border-radius: 13px; color: #e37e5d; background: #211c18; font-size: 28px; font-weight: 720; cursor: pointer; }
+    .panel-interface-button:hover { background: #2a211c; }
+    .panel-heading { margin-top: 5px; }
+    .panel-heading h1 { margin: 0; font-size: 27px; font-weight: 720; letter-spacing: -.7px; line-height: 1.2; }
+    .panel-summary { margin: 6px 0 0; color: #b7b1a8; font-size: 20px; font-weight: 590; }
+    .panel-section { display: grid; gap: 9px; }
+    .panel-section-title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .panel-section-title { margin: 0; color: #b7b1a8; font-size: 19px; font-weight: 720; letter-spacing: -.1px; }
+    .panel-section-caption { color: #8d877f; font-size: 11px; font-weight: 600; text-align: right; }
+    .panel-scope-wrap { position: relative; }
+    .panel-scope-button {
+      display: flex;
+      align-items: center;
+      width: 100%;
+      min-height: 68px;
+      padding: 12px 15px;
+      border: 2px solid #47423e;
+      border-radius: 18px;
+      color: #f0ece5;
+      background: rgba(36,33,30,.78);
+      text-align: left;
+      cursor: pointer;
+    }
+    .panel-scope-button:hover, .panel-scope-button[aria-expanded="true"] { border-color: #77736d; background: #2c2824; }
+    .panel-scope-copy { display: grid; min-width: 0; gap: 4px; }
+    .panel-scope-name { overflow: hidden; font-size: 21px; font-weight: 720; text-overflow: ellipsis; white-space: nowrap; }
+    .panel-scope-detail { color: #b7b1a8; font-size: 14px; font-weight: 620; }
+    .panel-scope-button .status { margin-left: auto; }
+    .panel-chevron { margin-left: 13px; color: #b7b1a8; font-size: 22px; line-height: 1; transform: translateY(-2px); }
+    .panel-scope-menu {
+      position: absolute;
+      z-index: 10;
+      top: calc(100% + 7px);
+      right: 0;
+      left: 0;
+      display: grid;
+      gap: 3px;
+      max-height: 260px;
+      padding: 7px;
+      overflow: auto;
+      border: 1px solid #6b6862;
+      border-radius: 16px;
+      background: #24211e;
+      box-shadow: 0 16px 32px rgba(0,0,0,.42);
+    }
+    .panel-scope-menu[hidden] { display: none; }
+    .panel-app-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 53px;
+      padding: 8px 10px;
+      border: 0;
+      border-radius: 11px;
+      color: #b7b1a8;
+      background: transparent;
+      text-align: left;
+      cursor: pointer;
+    }
+    .panel-app-option:hover, .panel-app-option.active { color: #f0ece5; background: #342e29; }
+    .panel-app-option-copy { display: grid; min-width: 0; gap: 3px; }
+    .panel-app-option-name { overflow: hidden; font-size: 15px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
+    .panel-app-option-meta { color: #8d877f; font-size: 11px; font-weight: 600; }
+    .panel-app-option .status { margin-left: auto; }
+    .panel-surface .status { display: inline-flex; align-items: center; gap: 6px; color: #b7b1a8; font-size: 12px; font-weight: 650; white-space: nowrap; }
+    .panel-surface .status-dot { display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; color: #191816; background: #8d877f; font-size: 11px; font-weight: 900; }
+    .panel-surface .status-dot::after { content: "·"; }
+    .panel-surface .status.ready { color: #72df8b; }
+    .panel-surface .status.ready .status-dot { color: #122318; background: #36d465; }
+    .panel-surface .status.ready .status-dot::after { content: "✓"; }
+    .panel-surface .status.waiting { color: #ffbd59; }
+    .panel-surface .status.waiting .status-dot { color: #2d2310; background: #ffa200; }
+    .panel-surface .status.waiting .status-dot::after { content: "!"; }
+    .panel-surface .status.partial { color: #ffbd59; }
+    .panel-surface .status.partial .status-dot { color: #2d2310; background: #ffa200; }
+    .panel-surface .status.partial .status-dot::after { content: "!"; }
+    .panel-surface .status.unavailable { color: #8d877f; }
+    .panel-surface .status.unavailable .status-dot::after { content: "–"; }
+    .panel-event-list { display: grid; }
+    .panel-event-row { display: grid; grid-template-columns: 48px minmax(0,1fr) auto; align-items: center; gap: 12px; min-height: 89px; padding: 12px 0; border-bottom: 1px solid #47423e; }
+    .panel-event-row:last-child { border-bottom: 0; }
+    .panel-event-row.is-disabled .panel-event-title { color: #b7b1a8; }
+    .panel-event-icon { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 13px; }
+    .panel-event-icon svg { width: 29px; height: 29px; }
+    .panel-event-icon.task { color: #2387f3; background: #192d48; }
+    .panel-event-icon.complete { color: #36d465; background: #183d25; }
+    .panel-event-icon.interrupted { color: #ffa200; background: #3c2c16; }
+    .panel-event-icon.response { color: #e37e5d; background: #3b2823; }
+    .panel-event-icon.subtask { color: #6567ed; background: #292742; }
+    .panel-event-copy { display: grid; min-width: 0; gap: 7px; }
+    .panel-event-title { overflow: hidden; color: #f0ece5; font-size: 21px; font-weight: 710; letter-spacing: -.35px; line-height: 1.08; text-overflow: ellipsis; white-space: nowrap; }
+    .panel-event-meta { display: flex; align-items: center; min-width: 0; gap: 7px; color: #8d877f; font-size: 11px; font-weight: 620; white-space: nowrap; }
+    .panel-event-code { overflow: hidden; color: #b7b1a8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-overflow: ellipsis; }
+    .panel-event-state { padding: 3px 7px; border-radius: 7px; color: #72df8b; background: #293229; font-size: 10px; font-weight: 700; }
+    .panel-event-state.partial { color: #ffbd59; background: #3c2c16; }
+    .panel-event-state.unavailable { color: #8d877f; background: #2d2925; }
+    .panel-event-sound { overflow: hidden; max-width: 100px; color: #b7b1a8; text-overflow: ellipsis; }
+    .panel-event-sound.is-empty { color: #8d877f; }
+    .panel-event-actions { display: inline-flex; align-items: center; gap: 7px; }
+    .panel-icon-button { display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 0; border-radius: 10px; color: #c2bfb8; background: transparent; cursor: pointer; }
+    .panel-icon-button:hover { background: rgba(255,255,255,.06); }
+    .panel-icon-button.muted { color: #e37e5d; }
+    .panel-icon-button:disabled { color: #625d57; cursor: default; }
+    .panel-icon-button svg { width: 27px; height: 27px; }
+    .panel-icon-button.muted svg { width: 32px; height: 32px; }
+    .panel-controls { display: grid; gap: 0; border: 2px solid #47423e; border-radius: 18px; background: rgba(36,33,30,.72); overflow: hidden; }
+    .panel-control-row { display: grid; grid-template-columns: minmax(0,1fr) minmax(190px, 1fr); align-items: center; gap: 15px; min-height: 70px; padding: 12px 15px; border-bottom: 1px solid #47423e; }
+    .panel-control-row:last-child { border-bottom: 0; }
+    .panel-control-copy { display: grid; gap: 4px; }
+    .panel-control-copy strong { color: #f0ece5; font-size: 17px; font-weight: 680; }
+    .panel-control-copy small { color: #8d877f; font-size: 11px; line-height: 1.3; }
+    .panel-range { display: grid; grid-template-columns: minmax(80px,1fr) auto; align-items: center; gap: 10px; }
+    .panel-range input { width: 100%; height: 6px; accent-color: #e37e5d; cursor: pointer; }
+    .panel-range output { min-width: 38px; color: #b7b1a8; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; text-align: right; }
+    .panel-control-action { min-width: 71px; min-height: 34px; padding: 0 11px; border: 1px solid #6b6862; border-radius: 10px; color: #f0ece5; background: #342e29; font-size: 12px; font-weight: 680; cursor: pointer; }
+    .panel-control-action:hover { background: #403832; }
+    .panel-footer { display: flex; justify-content: flex-end; padding: 0 14px 10px; }
+    .panel-close { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 43px; padding: 0 9px; border: 0; border-radius: 12px; color: #b7b1a8; background: transparent; font-size: 17px; font-weight: 620; cursor: pointer; }
+    .panel-close:hover { color: #f0ece5; background: #2c2824; }
+    .panel-close svg { width: 23px; height: 23px; }
+    html.panel-mode { min-width: 320px; background: #0f0f0e; }
+    body.panel-mode { min-width: 320px; padding: 28px; background: radial-gradient(circle at 50% -10%, #2a2824 0, transparent 35%), #0f0f0e; }
+    body.panel-mode .window { display: none; }
+    body.panel-mode .toast { right: 24px; bottom: 22px; }
+    @media (max-width: 620px) {
+      body.panel-mode { padding: 10px; }
+      .panel-surface { width: min(624px, calc(100vw - 20px)); border-radius: 28px; }
+      .panel-content { padding-inline: 20px; }
+      .panel-event-row { grid-template-columns: 44px minmax(0,1fr) auto; gap: 9px; }
+      .panel-event-icon { width: 44px; height: 44px; }
+      .panel-event-title { font-size: 18px; }
+      .panel-event-sound { display: none; }
+      .panel-icon-button { width: 38px; }
+      .panel-control-row { grid-template-columns: minmax(0,1fr); }
+      .panel-range { grid-template-columns: minmax(0,1fr) auto; }
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --window: #252627;
+        --sidebar: #202223;
+        --sidebar-deep: #303233;
+        --group: #2d2f30;
+        --group-hover: #37393a;
+        --text: #f2f2f4;
+        --secondary: #a5a6aa;
+        --tertiary: #85878a;
+        --separator: #414345;
+        --green: #30d158;
+        --purple: #bf5af2;
+        --shadow: 0 30px 80px rgba(0,0,0,.46), 0 2px 12px rgba(0,0,0,.3);
+      }
+      html { background: #121314; }
+      body { background: radial-gradient(circle at 50% -20%, rgba(255,255,255,.08), transparent 48%), linear-gradient(#2e3031, #161718); }
+      .window { border-color: rgba(255,255,255,.14); }
+      .sidebar { background: rgba(31,33,34,.9); border-right-color: rgba(255,255,255,.08); }
+      .sidebar-item { color: #d7d7da; }
+      .sidebar-item:hover { background: rgba(255,255,255,.08); }
+      .sidebar-item.active { color: var(--text); background: #3a3c3d; box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+      .sidebar-separator { background: rgba(255,255,255,.1); }
+      .plain-button, select.native-select { color: var(--text); background: #3a3c3d; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+      .plain-button:hover { background: #454748; }
+      .settings-row:hover { background: rgba(255,255,255,.04); }
+      .app-row.selected { background: #3a3c3d; }
+      .event-app-option.active { color: var(--text); background: #3a3c3d; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
+      .info-callout { background: #303233; }
+    }
+
+    @media (max-width: 1100px) {
+      body { padding: 14px; }
+      .window { width: calc(100vw - 28px); grid-template-columns: 220px minmax(0,1fr); }
+      .content { padding-inline: 36px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="window">
+    <div class="traffic-lights" aria-hidden="true"><span class="traffic-light red"></span><span class="traffic-light yellow"></span><span class="traffic-light green"></span></div>
+    <aside class="sidebar">
+      <div class="sidebar-brand"><img class="brand-mark" src="../assets/branding/claudi0-app-icon.svg" alt="claudi0"><span class="brand-name">Claudio</span></div>
+      <nav id="sidebar-nav" aria-label="Claudio 设置">
+        <div class="sidebar-group">
+          <button class="sidebar-item" type="button" data-page="general"><span class="sidebar-icon gray"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3.2l1.7 1.2 2.1-.2.8 2 1.9.9-.2 2.1 1.2 1.7-1.2 1.7.2 2.1-1.9.9-.8 2-2.1-.2L12 20.8l-1.7-1.2-2.1.2-.8-2-1.9-.9.2-2.1L4.5 12l1.2-1.7-.2-2.1 1.9-.9.8-2 2.1.2L12 3.2z"></path><circle cx="12" cy="12" r="3.1"></circle></svg></span>通用</button>
+          <button class="sidebar-item active" type="button" data-page="apps"><span class="sidebar-icon blue"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m8 3 1.2 3.8L13 8l-3.8 1.2L8 13l-1.2-3.8L3 8l3.8-1.2L8 3z"></path><path d="m17 13.5.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3z"></path></svg></span>集成</button>
+          <button class="sidebar-item" type="button" data-page="events"><span class="sidebar-icon red"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3.5 13h3l1.7-6 3.1 10 1.7-5h3"></path><path d="M17 8.5c1.7.7 2.8 2 3.4 3.5-.6 1.5-1.7 2.8-3.4 3.5"></path></svg></span>事件与提示音</button>
+          <button class="sidebar-item" type="button" data-page="notifications"><span class="sidebar-icon purple"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6.2 17.4h11.6l-1.7-2.1v-3.7a4.1 4.1 0 0 0-8.2 0v3.7l-1.7 2.1z"></path><path d="M9.8 20.2h4.4"></path><path d="M12 4.2v-1"></path></svg></span>通知</button>
+          <button class="sidebar-item" type="button" data-page="display"><span class="sidebar-icon purple"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3.5" y="4.5" width="17" height="12" rx="2"></rect><path d="M9 20h6M12 16.5V20"></path></svg></span>显示</button>
+          <button class="sidebar-item" type="button" data-page="sounds"><span class="sidebar-icon green"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 10h3l4-3v10l-4-3H4z"></path><path d="M15 9c1.7 1.3 1.7 4.7 0 6M17.5 6.5c3.4 2.8 3.4 8.2 0 11"></path></svg></span>声音</button>
+          <button class="sidebar-item" type="button" data-page="usage"><span class="sidebar-icon pink"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 18.5h16"></path><path d="M6.5 16.5v-4M10.5 16.5V8M14.5 16.5v-2.5M18.5 16.5V5.5"></path></svg></span>用量</button>
+        </div>
+        <div class="sidebar-separator"></div>
+        <div class="sidebar-heading">高级</div>
+        <div class="sidebar-group" style="margin-top:0">
+          <button class="sidebar-item" type="button" data-page="shortcuts"><span class="sidebar-icon violet"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="5.5" width="18" height="13" rx="2.3"></rect><path d="M6.5 10h.01M9.5 10h.01M12.5 10h.01M15.5 10h.01M18 10h.01M6.5 14h.01M9.5 14h.01M12.5 14h5.5"></path></svg></span>快捷键</button>
+        </div>
+        <div class="sidebar-separator"></div>
+        <div class="sidebar-heading">Claudio</div>
+        <div class="sidebar-group" style="margin-top:0">
+          <button class="sidebar-item" type="button" data-page="about"><span class="sidebar-icon blue"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 10.8v5.3"></path><circle class="symbol-fill" cx="12" cy="7.6" r=".8"></circle></svg></span>关于</button>
+        </div>
+      </nav>
+      <div class="sidebar-foot"><span class="sidebar-foot-dot"></span>本地优先 · 无网络客户端</div>
+    </aside>
+    <main class="content"><div id="page-root" class="content-inner"></div></main>
+  </div>
+  <main id="panel-surface" class="panel-surface" hidden aria-label="claudi0 桌面弹窗原型"></main>
+  <div id="toast" class="toast" role="status"></div>
+
+  <script>
+    /*
+     * PROTOTYPE QUESTION:
+     * Can a multi-AI-app manager feel like a native macOS Settings pane while
+     * keeping event coverage, real receipt state, and sound rules visible?
+     * Claudi0 owns the app/event/sound surface; host-product-specific controls
+     * are intentionally excluded. State is in memory only.
+     * This replaces the previous card-dashboard direction.
+     */
+    const apps = [
+      { id: 'claude', name: 'Claude Code', mechanism: '原生 hooks', coverage: '5/5', state: 'ready', stateLabel: '已激活', enabled: true },
+      { id: 'codex', name: 'Codex', mechanism: '原生 hooks', coverage: '4/5', state: 'ready', stateLabel: '已激活', enabled: true },
+      { id: 'workbuddy', name: 'WorkBuddy', mechanism: '原生 command hooks', coverage: '3/5', state: 'waiting', stateLabel: '待回执', enabled: true },
+      { id: 'chatgpt', name: 'ChatGPT · Codex', mechanism: '原生 hooks · Codex view', coverage: '3+1/5', state: 'waiting', stateLabel: '待回执', enabled: true }
+    ];
+    const eventDefinitions = [
+      { id: 'task_start', name: '任务开始', code: 'UserPromptSubmit', symbol: '↗', tone: '', sound: '轻提示 · 01' },
+      { id: 'stop', name: '响应结束', code: 'Stop', symbol: '✓', tone: 'green', sound: '木琴 · 02' },
+      { id: 'stop_failure', name: '执行中断', code: 'StopFailure', symbol: '!', tone: 'orange', sound: '低音 · 03' },
+      { id: 'notification', name: '待响应', code: 'Notification', symbol: '•', tone: 'orange', sound: '铃声 · 04' },
+      { id: 'subagent_stop', name: '子任务完成', code: 'SubagentStop', symbol: '⌁', tone: 'purple', sound: '短音 · 05' }
+    ];
+    function buildAppEvents(overrides) {
+      return eventDefinitions.map(event => ({
+        ...event,
+        availability: 'ready',
+        coverage: '明确支持',
+        enabled: true,
+        ...(overrides[event.id] || {})
+      }));
+    }
+    const eventsByApp = {
+      claude: buildAppEvents({}),
+      codex: buildAppEvents({
+        stop_failure: { availability: 'unavailable', coverage: '未提供', enabled: false, sound: '未设置' }
+      }),
+      workbuddy: buildAppEvents({
+        stop_failure: { availability: 'partial', coverage: '候选 / 部分', enabled: false },
+        notification: { availability: 'unavailable', coverage: '未配置', enabled: false, sound: '未设置' },
+        subagent_stop: { availability: 'unavailable', coverage: '未配置', enabled: false, sound: '未设置' }
+      }),
+      chatgpt: buildAppEvents({
+        task_start: { coverage: 'Codex view' },
+        stop: { coverage: 'Codex view' },
+        stop_failure: { availability: 'unavailable', coverage: '未提供', enabled: false, sound: '未设置' },
+        notification: { availability: 'partial', coverage: 'Codex view', enabled: true },
+        subagent_stop: { coverage: 'Codex view' }
+      })
+    };
+    const pages = {};
+    const initialQuery = new URLSearchParams(window.location.search);
+    const isPanelSurface = initialQuery.get('surface') === 'panel';
+    let activePage = initialQuery.get('page') || 'events';
+    let selectedApp = initialQuery.get('app') || 'workbuddy';
+    let panelSelectedApp = initialQuery.get('panelApp') || selectedApp;
+    let toastTimer;
+
+    function status(state, label) { return `<span class="status ${state}"><span class="status-dot"></span>${label}</span>`; }
+    function appStatus(app) { return app.enabled ? status(app.state, app.stateLabel) : status('unavailable', '已停用'); }
+    function appById(id) { return apps.find(app => app.id === id) || apps[0]; }
+    function eventsForApp(id) { return eventsByApp[id] || eventsByApp.claude; }
+    function eventById(appId, eventId) { return eventsForApp(appId).find(event => event.id === eventId); }
+
+    const panelEventKinds = {
+      task_start: 'task',
+      stop: 'complete',
+      stop_failure: 'interrupted',
+      notification: 'response',
+      subagent_stop: 'subtask'
+    };
+    const panelEventIcons = {
+      task: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m3 11 18-8-7 18-3-7-8-3Z" fill="currentColor"/><path d="m11 14 10-11" stroke="#d9eaff" stroke-width="1.2" opacity=".82"/></svg>',
+      complete: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="currentColor"/><path d="m8 12 2.6 2.7L16.7 9" stroke="#122318" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+      interrupted: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="12" r="9"/><rect x="8" y="7" width="3" height="10" rx="1" fill="#38280d"/><rect x="13" y="7" width="3" height="10" rx="1" fill="#38280d"/></svg>',
+      response: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 17h12l-1.2-2.2v-4.6a4.8 4.8 0 0 0-9.6 0v4.6L6 17Z" fill="currentColor"/><path d="M10 19h4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="17.5" cy="7" r="2.3" fill="currentColor"/></svg>',
+      subtask: '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2"/><path d="m8 12 2.5 2.7L16.5 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+    };
+    const panelPlayIcon = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m7 4 13 8-13 8V4Z"/></svg>';
+    const panelSpeakerIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4V9Z" fill="currentColor"/><path d="M16 9.5c1.5 1.4 1.5 3.6 0 5M18.5 7c3 2.7 3 7.3 0 10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    const panelMutedIcon = '<svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3 9h4l5-4v6.2M12 16v3l-5-4H3V9" fill="currentColor"/><path d="m5 4 15 16M17 10c.8 1.1.8 2.4.2 3.5M19 7.5c2.1 2.4 2.3 5.7.8 8.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+    const panelPowerIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M12 2v10"/><path d="M18.36 5.64a9 9 0 1 1-12.72 0"/></svg>';
+
+    function panelEventStateClass(event) { return event.availability === 'ready' ? '' : event.availability; }
+    function panelEventKind(event) { return panelEventKinds[event.id] || 'task'; }
+    function panelRenderEvent(event, app) {
+      const kind = panelEventKind(event);
+      const unavailable = event.availability === 'unavailable';
+      const soundMissing = event.sound === '未设置';
+      const stateText = event.coverage;
+      return `<article class="panel-event-row ${!event.enabled ? 'is-disabled' : ''}">
+        <span class="panel-event-icon ${kind}" aria-hidden="true">${panelEventIcons[kind]}</span>
+        <div class="panel-event-copy">
+          <div class="panel-event-title">${event.name}</div>
+          <div class="panel-event-meta"><code class="panel-event-code">${event.code}</code><span class="panel-event-state ${panelEventStateClass(event)}">${stateText}</span><span class="panel-event-sound ${soundMissing ? 'is-empty' : ''}">${event.sound}</span></div>
+        </div>
+        <div class="panel-event-actions">
+          <button class="panel-icon-button" type="button" data-panel-action="play" data-panel-event="${event.id}" data-panel-app="${app.id}" aria-label="试听 ${event.name}" ${soundMissing ? 'disabled' : ''}>${panelPlayIcon}</button>
+          <button class="panel-icon-button ${event.enabled ? '' : 'muted'}" type="button" data-panel-action="mute" data-panel-event="${event.id}" data-panel-app="${app.id}" aria-pressed="${event.enabled ? 'false' : 'true'}" aria-label="${event.enabled ? '静音' : '取消静音'} ${event.name}" ${unavailable ? 'disabled' : ''}>${event.enabled ? panelSpeakerIcon : panelMutedIcon}</button>
+        </div>
+      </article>`;
+    }
+
+    function panelMarkup() {
+      const app = appById(panelSelectedApp);
+      const appEvents = eventsForApp(app.id);
+      return `<div class="panel-content">
+        <header class="panel-topbar">
+          <div class="panel-wordmark" aria-label="claudi0">claudi<img src="../assets/branding/claudi0-mark.svg" alt="0"></div>
+          <button class="panel-interface-button" type="button" data-panel-action="language" aria-label="界面语言">Aa⌄</button>
+        </header>
+        <section class="panel-heading" aria-labelledby="panel-pack-name"><h1 id="panel-pack-name">皮卡丘</h1><p class="panel-summary">${apps.length} 个已接入应用 · ${eventDefinitions.length} 个可听事件</p></section>
+        <section class="panel-section" aria-labelledby="panel-scope-title">
+          <div class="panel-section-title-row"><h2 class="panel-section-title" id="panel-scope-title">当前管理对象</h2><span class="panel-section-caption">事件与声音按 app 独立保存</span></div>
+          <div class="panel-scope-wrap">
+            <button class="panel-scope-button" type="button" data-panel-scope-toggle aria-expanded="false" aria-controls="panel-app-menu">
+              <span class="panel-scope-copy"><span class="panel-scope-name">${app.name}</span><span class="panel-scope-detail">${app.coverage} · ${app.stateLabel}</span></span>
+              ${appStatus(app)}<span class="panel-chevron" aria-hidden="true">⌄</span>
+            </button>
+            <div id="panel-app-menu" class="panel-scope-menu" hidden>${apps.map(item => `<button class="panel-app-option ${item.id === app.id ? 'active' : ''}" type="button" data-panel-app="${item.id}"><span class="panel-app-option-copy"><span class="panel-app-option-name">${item.name}</span><span class="panel-app-option-meta">${item.coverage} · ${item.stateLabel}</span></span>${appStatus(item)}</button>`).join('')}</div>
+          </div>
+        </section>
+        <section class="panel-section" aria-labelledby="panel-events-title">
+          <div class="panel-section-title-row"><h2 class="panel-section-title" id="panel-events-title">${app.name} · 事件</h2><span class="panel-section-caption">${app.coverage} 可映射</span></div>
+          <div class="panel-event-list">${appEvents.map(event => panelRenderEvent(event, app)).join('')}</div>
+        </section>
+        <section class="panel-controls" aria-label="播放设置">
+          <div class="panel-control-row"><div class="panel-control-copy"><strong>主音量</strong><small>全局音量；事件开关仍按当前 app 独立保存。</small></div><div class="panel-range"><input type="range" min="0" max="100" value="68" data-panel-range aria-label="主音量"><output data-panel-range-value>68%</output></div></div>
+          <div class="panel-control-row"><div class="panel-control-copy"><strong>声音包 · 皮卡丘</strong><small>5 个事件 · 在「声音」中管理和导入声音包。</small></div><button class="panel-control-action" type="button" data-panel-action="open-settings">打开设置</button></div>
+        </section>
+      </div>
+      <footer class="panel-footer"><button class="panel-close" type="button" data-panel-action="close" aria-label="关闭 claudi0">${panelPowerIcon}<span>关闭</span></button></footer>`;
+    }
+
+    function renderPanel() {
+      const surface = document.querySelector('#panel-surface');
+      if (!surface) return;
+      surface.innerHTML = panelMarkup();
+      surface.hidden = false;
+      try { const url = new URL(window.location.href); url.searchParams.set('surface', 'panel'); url.searchParams.set('panelApp', panelSelectedApp); window.history.replaceState({}, '', url); } catch (_) {}
+    }
+
+    pages.general = () => `<header class="page-header"><div><h1>通用</h1><p>Claudio 的启动和界面行为。</p></div><span class="demo-label">原生风格原型</span></header>
+      <div class="section-label">系统</div><section class="settings-group">
+        <div class="settings-row"><div class="row-title">登录时打开</div><div class="row-control"><button class="toggle" type="button" data-toggle="登录时打开" aria-pressed="false"></button></div></div>
+        <div class="settings-row"><div class="row-title">App 语言</div><div class="row-control"><select class="native-select" aria-label="App 语言"><option>跟随系统</option><option>简体中文</option><option>English</option></select></div></div>
+      </section>
+      <div class="section-label" style="margin-top:34px">显示</div><section class="settings-group">
+        <div class="settings-row"><div class="row-title">全屏时隐藏</div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="全屏时隐藏" aria-pressed="true"></button></div></div>
+        <div class="settings-row tall"><div><div class="row-title">空闲时自动隐藏</div><div class="row-caption">没有 Agent 工作满 30 秒后隐藏；有新活动时重新显示。</div></div><div class="row-control"><button class="toggle" type="button" data-toggle="空闲时自动隐藏" aria-pressed="false"></button></div></div>
+      </section>`;
+
+    pages.apps = () => {
+      const app = appById(selectedApp);
+      const connectionDescription = app.state === 'ready' ? '当前安装实例已取得真实宿主事件回执。' : '当前安装实例已配置，等待真实宿主事件回执。';
+      return `<header class="page-header"><div><h1>集成</h1><p>管理 Claudio 连接的应用、连接方式和事件能力。</p></div><div class="page-header-actions"><span class="demo-label">演示数据</span></div></header>
+        <div class="section-label">Agent</div>
+        <section class="app-list">${apps.map(item => `<div class="app-row ${item.id === selectedApp ? 'selected' : ''}"><button class="app-row-select" type="button" data-app="${item.id}"><span class="app-name">${item.name}</span></button>${appStatus(item)}<span class="app-coverage">${item.coverage}</span><button class="toggle blue app-connect-toggle ${item.enabled ? 'on' : ''}" type="button" data-app-toggle="${item.id}" aria-pressed="${item.enabled ? 'true' : 'false'}" aria-label="${item.enabled ? '停用' : '启用'} ${item.name}"></button></div>`).join('')}</section>
+        <p class="app-hint">管理 Claudio 与每个应用的连接方式。事件开关和提示音仍在「事件与提示音」中按 app 独立保存。</p>
+        <div class="section-label" style="margin-top:30px">${app.name} · 连接</div>
+        <section class="settings-group">
+          <div class="settings-row tall"><div><div class="row-title">连接状态</div><div class="row-caption">${connectionDescription}</div></div><div class="row-control">${appStatus(app)}<button class="plain-button" type="button" data-action="refresh">重新检测</button></div></div>
+          <div class="settings-row"><div><div class="row-title">接入方式</div><div class="row-caption">${app.mechanism} · 只处理事件标识和播放结果，不读取提示词或响应正文</div></div><div class="row-control"><span class="row-value">${app.coverage}</span></div></div>
+          <div class="settings-row"><div><div class="row-title">事件与提示音</div><div class="row-caption">只修改 ${app.name}；其他 app 的事件开关和声音保持不变</div></div><div class="row-control"><button class="plain-button" type="button" data-page-target="events" data-app-target="${app.id}">管理事件</button></div></div>
+        </section>
+        <div class="info-callout"><span class="info-icon">i</span><span>“已配置”不等于“已激活”：只有当前安装实例产生真实 receipt，状态才会变为已激活。普通 Chat 不继承 Codex view 的 hooks。</span></div>`;
+    };
+
+    pages.events = () => {
+      const app = appById(selectedApp);
+      const appEvents = eventsForApp(app.id);
+      return `<header class="page-header"><div><h1>事件与提示音</h1><p>按 app 单独管理事件映射、启用状态和声音选择；当前配置不会影响其他 app。</p></div><div class="page-header-actions"><span class="demo-label">演示数据</span><button class="plain-button" type="button" data-action="play-all">试听全部</button></div></header>
+        <div class="event-layout">
+          <aside class="event-app-nav" aria-label="选择管理对象">
+            <div class="event-app-nav-head"><div><div class="scope-eyebrow">管理对象</div><div class="event-app-nav-title">集成</div></div><span class="event-app-count">${apps.length} 个已接入</span></div>
+            <div class="event-app-picker" role="listbox" aria-label="集成列表">${apps.map(item => `<button class="event-app-option ${item.id === app.id ? 'active' : ''}" type="button" role="option" aria-selected="${item.id === app.id ? 'true' : 'false'}" data-event-app="${item.id}"><span class="event-app-option-head"><span class="app-name">${item.name}</span><span class="app-coverage">${item.coverage}</span></span><span class="event-app-option-foot">${appStatus(item)}<span class="app-coverage">查看事件</span></span></button>`).join('')}</div>
+            <div class="event-app-nav-foot">列表纵向滚动；即使接入 10+ 个 app，也保持同一套独立事件管理方式。</div>
+          </aside>
+          <section class="event-detail">
+            <div class="event-detail-header"><div><div class="scope-eyebrow">当前管理对象</div><div class="event-detail-title">${app.name}</div><div class="event-detail-subtitle">${app.mechanism}</div></div>${appStatus(app)}</div>
+            <div class="section-label">${app.name} · 事件规则</div><section class="settings-group">${appEvents.map(event => `<div class="event-row scoped"><span class="event-symbol ${event.tone}">${event.symbol}</span><span><span class="event-name">${event.name}</span><span class="event-code">${event.code}</span></span><span class="event-coverage">${status(event.availability, event.coverage)}</span><button class="toggle event-toggle ${event.enabled ? 'on' : ''}" type="button" data-event-toggle="${event.id}" data-event-app-id="${app.id}" aria-pressed="${event.enabled ? 'true' : 'false'}" aria-label="${event.enabled ? '关闭' : '开启'} ${event.name}"></button><span class="event-sound"><button class="plain-button" type="button" data-action="play" data-event="${event.id}" data-app-id="${app.id}">${event.sound}</button></span></div>`).join('')}</section>
+            <div class="section-label" style="margin-top:30px">${app.name} · 播放设置</div><section class="settings-group">
+              <div class="settings-row"><div><div class="row-title">${app.name} 事件提示音</div><div class="row-caption">只影响这个 app；其他 app 使用各自的开关</div></div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="${app.name} 事件提示音" aria-pressed="true"></button></div></div>
+              <div class="settings-row"><div class="row-title">${app.name} 主音量</div><div class="row-control"><input class="native-range" type="range" min="0" max="100" value="68" data-range="${app.name} 主音量"><span class="range-value" data-range-value="${app.name} 主音量">68%</span></div></div>
+              <div class="settings-row"><div><div class="row-title">声音包</div><div class="row-caption">当前使用 Paimon · 声音包资源可复用，事件绑定仍按 app 独立保存</div></div><div class="row-control"><button class="plain-button" type="button" data-action="sound-packs">管理</button></div></div>
+            </section>
+            <div class="info-callout"><span class="info-icon">i</span><span>切换左侧 app 后，右侧的事件列表、开关、覆盖状态和提示音都会切换到该 app 的独立配置；不会写入其他 app。</span></div>
+          </section>
+        </div>`;
+    };
+
+    pages.notifications = () => `<header class="page-header"><div><h1>通知</h1><p>控制 Claudio 在不同宿主状态下如何提醒你。</p></div></header>
+      <div class="section-label">通知行为</div><section class="settings-group">
+        <div class="settings-row"><div><div class="row-title">任务开始时通知</div><div class="row-caption">仅播放声音，不显示系统横幅</div></div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="任务开始时通知" aria-pressed="true"></button></div></div>
+        <div class="settings-row"><div><div class="row-title">响应结束时通知</div><div class="row-caption">宿主完成一轮响应后提示</div></div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="响应结束时通知" aria-pressed="true"></button></div></div>
+        <div class="settings-row tall"><div><div class="row-title">等待输入时通知</div><div class="row-caption">仅对官方提供的 Notification 或 PermissionRequest 子集生效</div></div><div class="row-control"><button class="toggle" type="button" data-toggle="等待输入时通知" aria-pressed="false"></button></div></div>
+      </section>
+      <div class="section-label" style="margin-top:34px">静默</div><section class="settings-group">
+        <div class="settings-row"><div class="row-title">专注模式中静音</div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="专注模式中静音" aria-pressed="true"></button></div></div>
+        <div class="settings-row"><div class="row-title">会议期间静音</div><div class="row-control"><button class="toggle" type="button" data-toggle="会议期间静音" aria-pressed="false"></button></div></div>
+      </section>`;
+
+    pages.display = () => `<header class="page-header"><div><h1>显示</h1><p>控制 Claudio 面板和菜单栏图标的外观。</p></div></header><div class="section-label">面板</div><section class="settings-group"><div class="settings-row"><div class="row-title">面板宽度</div><div class="row-control"><select class="native-select"><option>跟随内容</option><option>紧凑</option><option>宽松</option></select></div></div><div class="settings-row"><div class="row-title">菜单栏显示状态点</div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="菜单栏显示状态点" aria-pressed="true"></button></div></div></section>`;
+    pages.sounds = () => `<header class="page-header"><div><h1>声音</h1><p>管理声音包、试听和每个语义事件的默认声音。</p></div><div class="page-header-actions"><button class="blue-button" type="button" data-action="import">导入声音包</button></div></header><div class="section-label">声音包</div><section class="settings-group"><div class="settings-row tall"><div><div class="row-title">Paimon</div><div class="row-caption">内置 · 5 个事件 · 当前使用</div></div><div class="row-control"><button class="plain-button" type="button" data-action="preview-pack">试听</button><span class="status ready"><span class="status-dot"></span>当前</span></div></div><div class="settings-row tall"><div><div class="row-title">Minimal</div><div class="row-caption">内置 · 简短而低干扰</div></div><div class="row-control"><button class="plain-button" type="button" data-action="preview-pack">试听</button><button class="plain-button" type="button" data-action="select-pack">使用</button></div></div></section>`;
+    pages.usage = () => `<header class="page-header"><div><h1>用量</h1><p>只统计本地收到的事件和提示音播放，不上传宿主内容。</p></div></header><div class="mini-stat-grid"><div class="mini-stat"><strong>128</strong><span>本周事件</span></div><div class="mini-stat"><strong>96</strong><span>已播放提示音</span></div><div class="mini-stat"><strong>0 B</strong><span>网络上传</span></div></div><div class="section-label" style="margin-top:30px">数据范围</div><section class="settings-group"><div class="settings-row tall"><div><div class="row-title">本地诊断日志</div><div class="row-caption">只保留事件标识、时间和脱敏播放结果，不保存提示词或响应正文。</div></div><div class="row-control"><button class="plain-button" type="button" data-action="logs">打开日志</button></div></div></section>`;
+
+    ['shortcuts', 'about'].forEach(page => {
+      const names = { shortcuts: ['快捷键', '为 Claudio 面板、试听和静音操作设置全局键盘快捷键。'], about: ['关于 Claudio', 'AI app 事件提示音中心 · 原生 macOS 风格原型。'] };
+      pages[page] = () => `<div class="empty-page"><h2>${names[page][0]}</h2><p>${names[page][1]}</p><div class="info-callout"><span class="info-icon">i</span><span>这个页面属于新原生 UI 的导航骨架，后续接入真实数据模型时保留同样的设置行结构。</span></div></div>`;
+    });
+
+    function setPage(page) {
+      activePage = pages[page] ? page : 'apps';
+      try { const url = new URL(window.location.href); url.searchParams.set('page', activePage); url.searchParams.set('app', selectedApp); window.history.replaceState({}, '', url); } catch (_) {}
+      document.querySelector('#page-root').innerHTML = pages[activePage]();
+      document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === activePage));
+    }
+    function showToast(message) {
+      const toast = document.querySelector('#toast');
+      toast.textContent = message;
+      toast.classList.add('visible');
+      window.clearTimeout(toastTimer);
+      toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2200);
+    }
+
+    document.addEventListener('click', event => {
+      const panelScopeToggle = event.target.closest('[data-panel-scope-toggle]');
+      if (panelScopeToggle) {
+        const menu = document.querySelector('#panel-app-menu');
+        if (menu) {
+          const expanded = panelScopeToggle.getAttribute('aria-expanded') === 'true';
+          panelScopeToggle.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+          menu.hidden = expanded;
+        }
+        return;
+      }
+      const panelAppOption = event.target.closest('[data-panel-app]');
+      if (panelAppOption) {
+        panelSelectedApp = panelAppOption.dataset.panelApp;
+        selectedApp = panelSelectedApp;
+        renderPanel();
+        showToast(`正在查看 ${appById(panelSelectedApp).name} 的独立事件`);
+        return;
+      }
+      const panelAction = event.target.closest('[data-panel-action]');
+      if (panelAction) {
+        const name = panelAction.dataset.panelAction;
+        const app = appById(panelAction.dataset.panelApp || panelSelectedApp);
+        const item = panelAction.dataset.panelEvent ? eventById(app.id, panelAction.dataset.panelEvent) : null;
+        if (name === 'mute' && item && item.availability !== 'unavailable') {
+          item.enabled = !item.enabled;
+          renderPanel();
+          showToast(`${app.name} · ${item.name} 已${item.enabled ? '开启' : '静音'}`);
+        }
+        else if (name === 'play' && item) showToast(`${app.name} · 正在试听 ${item.name}`);
+        else if (name === 'open-settings') window.location.href = `${window.location.pathname}?page=events&app=${app.id}`;
+        else if (name === 'language') showToast('界面语言设置将在正式面板中打开');
+        else if (name === 'close') showToast('原型演示：关闭菜单栏面板');
+        return;
+      }
+      const pageButton = event.target.closest('[data-page]');
+      if (pageButton) { setPage(pageButton.dataset.page); return; }
+      const eventAppButton = event.target.closest('[data-event-app]');
+      if (eventAppButton) { selectedApp = eventAppButton.dataset.eventApp; setPage('events'); showToast(`正在管理 ${appById(selectedApp).name} 的事件`); return; }
+      const appToggle = event.target.closest('[data-app-toggle]');
+      if (appToggle) {
+        const app = appById(appToggle.dataset.appToggle);
+        app.enabled = !app.enabled;
+        setPage('apps');
+        showToast(`${app.name} 已${app.enabled ? '启用' : '停用'}`);
+        return;
+      }
+      const eventToggle = event.target.closest('[data-event-toggle]');
+      if (eventToggle) {
+        const item = eventById(eventToggle.dataset.eventAppId, eventToggle.dataset.eventToggle);
+        if (item) { item.enabled = !item.enabled; setPage('events'); showToast(`${appById(eventToggle.dataset.eventAppId).name} · ${item.name} 已${item.enabled ? '开启' : '关闭'}`); }
+        return;
+      }
+      const pageTarget = event.target.closest('[data-page-target]');
+      if (pageTarget) { if (pageTarget.dataset.appTarget) selectedApp = pageTarget.dataset.appTarget; setPage(pageTarget.dataset.pageTarget); return; }
+      const appButton = event.target.closest('[data-app]');
+      if (appButton) { selectedApp = appButton.dataset.app; setPage('apps'); showToast(`已查看 ${appById(selectedApp).name}`); return; }
+      const toggle = event.target.closest('[data-toggle]');
+      if (toggle) { toggle.classList.toggle('on'); toggle.setAttribute('aria-pressed', toggle.classList.contains('on') ? 'true' : 'false'); showToast(`${toggle.dataset.toggle}已${toggle.classList.contains('on') ? '开启' : '关闭'}`); return; }
+      const action = event.target.closest('[data-action]');
+      if (!action) return;
+      const name = action.dataset.action;
+      if (name === 'play' || name === 'play-all') {
+        const appName = action.dataset.appId ? appById(action.dataset.appId).name : appById(selectedApp).name;
+        const eventName = action.dataset.event ? eventById(action.dataset.appId || selectedApp, action.dataset.event)?.name || action.dataset.event : '全部事件';
+        showToast(`${appName} · 正在试听${eventName === '全部事件' ? eventName : ` ${eventName}`}`);
+      }
+      else if (name === 'refresh') showToast('已重新检测；真实激活仍需宿主 receipt');
+      else if (name === 'inspect') showToast('原型占位：只读查看宿主配置');
+      else if (name === 'sound-packs') setPage('sounds');
+      else if (name === 'import') showToast('原型占位：选择本地声音包');
+      else if (name === 'preview-pack') showToast('正在试听声音包');
+      else if (name === 'select-pack') showToast('已选择 Minimal（演示状态）');
+      else showToast('原型占位：此操作将在正式 UI 接入');
+    });
+    document.addEventListener('input', event => {
+      const panelRange = event.target.closest('[data-panel-range]');
+      if (panelRange) {
+        const output = document.querySelector('[data-panel-range-value]');
+        if (output) output.textContent = `${panelRange.value}%`;
+        return;
+      }
+      const range = event.target.closest('[data-range]');
+      if (!range) return;
+      const output = document.querySelector(`[data-range-value="${range.dataset.range}"]`);
+      if (!output) return;
+      output.textContent = range.dataset.range.includes('主音量') ? `${range.value}%` : `${(Number(range.value) / 100).toFixed(2)}s`;
+    });
+
+    if (isPanelSurface) {
+      document.documentElement.classList.add('panel-mode');
+      document.body.classList.add('panel-mode');
+      renderPanel();
+    } else {
+      setPage(activePage);
+    }
+  </script>
+</body>
+</html>

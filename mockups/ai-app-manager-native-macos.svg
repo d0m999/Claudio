@@ -1,0 +1,392 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1240" height="820" viewBox="0 0 1240 820">
+  <title>Claudio · 事件与提示音 · 纵向 app 管理 · 原生 macOS 风格 Figma import frame</title>
+  <desc>可导入 Figma 的静态主画板。事件与提示音页使用可滚动的纵向 app 列表，右侧只展示当前 app 的独立事件规则和播放设置。</desc>
+  <defs>
+    <filter id="windowShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity=".2"/>
+    </filter>
+    <clipPath id="windowClip"><rect x="0" y="0" width="1240" height="820" rx="18"/></clipPath>
+  </defs>
+
+  <rect width="1240" height="820" rx="18" fill="#252627" filter="url(#windowShadow)"/>
+  <g clip-path="url(#windowClip)">
+    <rect width="252" height="820" fill="#202223"/>
+    <rect x="251" width="1" height="820" fill="#414345"/>
+    <rect x="252" width="988" height="820" fill="#252627"/>
+
+    <g id="traffic-lights">
+      <circle cx="25" cy="23" r="6.5" fill="#ff5f57"/>
+      <circle cx="46" cy="23" r="6.5" fill="#febc2e"/>
+      <circle cx="67" cy="23" r="6.5" fill="#28c840"/>
+    </g>
+
+    <g id="sidebar-brand">
+      <svg x="23" y="58" width="28" height="28" viewBox="0 0 1024 1024" role="img" aria-labelledby="claudi0SidebarIconTitle claudi0SidebarIconDesc">
+        <title id="claudi0SidebarIconTitle">claudi0 icon</title>
+        <desc id="claudi0SidebarIconDesc">Orbit Zero app icon</desc>
+        <rect x="72" y="72" width="880" height="880" rx="210" fill="#2B2620"/>
+        <rect x="77" y="77" width="870" height="870" rx="205" fill="none" stroke="#FFFDF4" stroke-opacity=".07" stroke-width="10"/>
+        <g fill="none" stroke="#C4633C">
+          <ellipse cx="512" cy="512" rx="236" ry="340" stroke-width="54" opacity=".10"/>
+          <ellipse cx="512" cy="512" rx="194" ry="320" stroke-width="34" opacity=".18"/>
+          <ellipse cx="512" cy="512" rx="170" ry="300" stroke-width="66"/>
+        </g>
+        <ellipse cx="512" cy="512" rx="356" ry="128" transform="rotate(-16 512 512)" fill="none" stroke="#F1E9DF" stroke-opacity=".74" stroke-width="20"/>
+        <circle cx="755" cy="303" r="22" fill="#C4633C"/>
+      </svg>
+      <text x="61" y="71" fill="#f2f2f4" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="15" font-weight="750">Claudio</text>
+    </g>
+
+    <g id="sidebar-items" font-family="-apple-system, BlinkMacSystemFont, sans-serif">
+      <rect x="13" y="123" width="226" height="37" rx="9" fill="transparent"/>
+      <rect x="22" y="129" width="25" height="25" rx="7" fill="#858589"/>
+      <g transform="translate(22 129) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.2l1.7 1.2 2.1-.2.8 2 1.9.9-.2 2.1 1.2 1.7-1.2 1.7.2 2.1-1.9.9-.8 2-2.1-.2L12 20.8l-1.7-1.2-2.1.2-.8-2-1.9-.9.2-2.1L4.5 12l1.2-1.7-.2-2.1 1.9-.9.8-2 2.1.2L12 3.2z"/><circle cx="12" cy="12" r="3.1"/></g>
+      <text x="57" y="147" fill="#d7d7da" font-size="14" font-weight="520">通用</text>
+
+      <rect x="13" y="163" width="226" height="37" rx="9" fill="transparent"/>
+      <rect x="22" y="169" width="25" height="25" rx="7" fill="#20aee2"/>
+      <g transform="translate(22 169) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="m8 3 1.2 3.8L13 8l-3.8 1.2L8 13l-1.2-3.8L3 8l3.8-1.2L8 3z"/><path d="m17 13.5.7 2.3 2.3.7-2.3.7-.7 2.3-.7-2.3-2.3-.7 2.3-.7.7-2.3z"/></g>
+      <text x="57" y="187" fill="#d7d7da" font-size="14" font-weight="520">集成</text>
+
+      <rect x="13" y="203" width="226" height="37" rx="9" fill="#3a3c3d"/>
+      <rect x="22" y="209" width="25" height="25" rx="7" fill="#ff3b47"/>
+      <g transform="translate(22 209) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 13h3l1.7-6 3.1 10 1.7-5h3"/><path d="M17 8.5c1.7.7 2.8 2 3.4 3.5-.6 1.5-1.7 2.8-3.4 3.5"/></g>
+      <text x="57" y="226" fill="#f2f2f4" font-size="14" font-weight="680">事件与提示音</text>
+
+      <rect x="22" y="249" width="25" height="25" rx="7" fill="#6f59e8"/>
+      <g transform="translate(22 249) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M6.2 17.4h11.6l-1.7-2.1v-3.7a4.1 4.1 0 0 0-8.2 0v3.7l-1.7 2.1z"/><path d="M9.8 20.2h4.4"/><path d="M12 4.2v-1"/></g>
+      <text x="57" y="266" fill="#d7d7da" font-size="14" font-weight="520">通知</text>
+
+      <rect x="22" y="289" width="25" height="25" rx="7" fill="#6f59e8"/>
+      <g transform="translate(22 289) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="4.5" width="17" height="12" rx="2"/><path d="M9 20h6M12 16.5V20"/></g>
+      <text x="57" y="306" fill="#d7d7da" font-size="14" font-weight="520">显示</text>
+
+      <rect x="22" y="329" width="25" height="25" rx="7" fill="#2fca5b"/>
+      <g transform="translate(22 329) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10h3l4-3v10l-4-3H4z"/><path d="M15 9c1.7 1.3 1.7 4.7 0 6M17.5 6.5c3.4 2.8 3.4 8.2 0 11"/></g>
+      <text x="57" y="346" fill="#d7d7da" font-size="14" font-weight="520">声音</text>
+
+      <rect x="22" y="369" width="25" height="25" rx="7" fill="#f53573"/>
+      <g transform="translate(22 369) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><path d="M4 18.5h16"/><path d="M6.5 16.5v-4M10.5 16.5V8M14.5 16.5v-2.5M18.5 16.5V5.5"/></g>
+      <text x="57" y="386" fill="#d7d7da" font-size="14" font-weight="520">用量</text>
+      <line x1="22" y1="413" x2="230" y2="413" stroke="#414345"/>
+      <text x="23" y="439" fill="#a5a6aa" font-size="11" font-weight="700">高级</text>
+
+      <rect x="22" y="450" width="25" height="25" rx="7" fill="#bb4ed9"/>
+      <g transform="translate(22 450) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5.5" width="18" height="13" rx="2.3"/><path d="M6.5 10h.01M9.5 10h.01M12.5 10h.01M15.5 10h.01M18 10h.01M6.5 14h.01M9.5 14h.01M12.5 14h5.5"/></g>
+      <text x="57" y="467" fill="#d7d7da" font-size="14" font-weight="520">快捷键</text>
+      <line x1="22" y1="492" x2="230" y2="492" stroke="#414345"/>
+      <text x="23" y="518" fill="#a5a6aa" font-size="11" font-weight="700">Claudio</text>
+      <rect x="22" y="529" width="25" height="25" rx="7" fill="#20aee2"/>
+      <g transform="translate(22 529) scale(1.041667)" fill="none" stroke="#ffffff" stroke-width="1.65" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 10.8v5.3"/><circle cx="12" cy="7.6" r=".8" fill="#ffffff" stroke="none"/></g>
+      <text x="57" y="546" fill="#d7d7da" font-size="14" font-weight="520">关于</text>
+      <circle cx="27" cy="727" r="3.5" fill="#34c759"/>
+      <text x="38" y="731" fill="#85878a" font-size="10" font-weight="650">本地优先 · 无网络客户端</text>
+    </g>
+
+    <g id="agent-content" font-family="-apple-system, BlinkMacSystemFont, sans-serif" style="display:none">
+      <text x="304" y="99" fill="#f2f2f4" font-size="30" font-weight="720">集成</text>
+      <text x="304" y="125" fill="#a5a6aa" font-size="13">管理 Claudio 连接的应用、连接方式和事件能力。</text>
+      <text x="1055" y="98" fill="#85878a" text-anchor="end" font-size="10" font-weight="700">演示数据</text>
+
+      <text x="308" y="174" fill="#a5a6aa" font-size="13" font-weight="650">Agent</text>
+      <rect x="304" y="187" width="852" height="352" rx="12" fill="#2d2f30" stroke="#414345"/>
+      <line x1="304" y1="261" x2="1156" y2="261" stroke="#414345"/>
+      <line x1="304" y1="335" x2="1156" y2="335" stroke="#414345"/>
+      <line x1="304" y1="409" x2="1156" y2="409" stroke="#414345"/>
+      <line x1="304" y1="483" x2="1156" y2="483" stroke="#414345"/>
+      <rect x="304" y="335" width="852" height="74" fill="#3a3c3d"/>
+
+      <g id="agent-claude-row">
+        <text x="322" y="221" fill="#f2f2f4" font-size="14" font-weight="650">Claude Code</text>
+        <circle cx="847" cy="224" r="10" fill="#30d158"/><text x="847" y="228" fill="#142218" text-anchor="middle" font-size="11" font-weight="900">✓</text>
+        <text x="864" y="228" fill="#72df8b" font-size="11" font-weight="650">已激活</text>
+        <text x="1042" y="228" fill="#a5a6aa" text-anchor="end" font-size="11" font-weight="650">5/5</text>
+        <rect x="1095" y="213" width="38" height="22" rx="11" fill="#0a84ff"/><circle cx="1122" cy="224" r="9" fill="#f4f5f6"/>
+      </g>
+      <g id="agent-codex-row">
+        <text x="322" y="295" fill="#f2f2f4" font-size="14" font-weight="650">Codex</text>
+        <circle cx="847" cy="298" r="10" fill="#30d158"/><text x="847" y="302" fill="#142218" text-anchor="middle" font-size="11" font-weight="900">✓</text>
+        <text x="864" y="302" fill="#72df8b" font-size="11" font-weight="650">已激活</text>
+        <text x="1042" y="302" fill="#a5a6aa" text-anchor="end" font-size="11" font-weight="650">4/5</text>
+        <rect x="1095" y="287" width="38" height="22" rx="11" fill="#0a84ff"/><circle cx="1122" cy="298" r="9" fill="#f4f5f6"/>
+      </g>
+      <g id="agent-workbuddy-row">
+        <text x="322" y="369" fill="#f2f2f4" font-size="14" font-weight="650">WorkBuddy</text>
+        <circle cx="847" cy="372" r="10" fill="#ff9f0a"/><text x="847" y="376" fill="#2d2310" text-anchor="middle" font-size="11" font-weight="900">!</text>
+        <text x="864" y="376" fill="#ffbd59" font-size="11" font-weight="650">待回执</text>
+        <text x="1042" y="376" fill="#a5a6aa" text-anchor="end" font-size="11" font-weight="650">3/5</text>
+        <rect x="1095" y="361" width="38" height="22" rx="11" fill="#0a84ff"/><circle cx="1122" cy="372" r="9" fill="#f4f5f6"/>
+      </g>
+      <g id="agent-chatgpt-row">
+        <text x="322" y="443" fill="#f2f2f4" font-size="14" font-weight="650">ChatGPT · Codex</text>
+        <circle cx="847" cy="446" r="10" fill="#ff9f0a"/><text x="847" y="450" fill="#2d2310" text-anchor="middle" font-size="11" font-weight="900">!</text>
+        <text x="864" y="450" fill="#ffbd59" font-size="11" font-weight="650">待回执</text>
+        <text x="1042" y="450" fill="#a5a6aa" text-anchor="end" font-size="11" font-weight="650">3+1/5</text>
+        <rect x="1095" y="435" width="38" height="22" rx="11" fill="#0a84ff"/><circle cx="1122" cy="446" r="9" fill="#f4f5f6"/>
+      </g>
+
+      <text x="308" y="564" fill="#a5a6aa" font-size="12">管理 Claudio 与每个应用的连接方式。</text>
+      <text x="308" y="607" fill="#a5a6aa" font-size="13" font-weight="650">WorkBuddy · 连接</text>
+      <rect x="304" y="620" width="852" height="166" rx="12" fill="#2d2f30" stroke="#414345"/>
+      <line x1="304" y1="690" x2="1156" y2="690" stroke="#414345"/>
+      <line x1="304" y1="738" x2="1156" y2="738" stroke="#414345"/>
+      <text x="322" y="650" fill="#f2f2f4" font-size="14" font-weight="560">连接状态</text>
+      <text x="322" y="669" fill="#a5a6aa" font-size="11">当前安装实例已配置，等待真实宿主事件回执。</text>
+      <circle cx="902" cy="650" r="10" fill="#ff9f0a"/><text x="902" y="654" fill="#2d2310" text-anchor="middle" font-size="11" font-weight="900">!</text>
+      <text x="918" y="654" fill="#ffbd59" font-size="11" font-weight="650">待回执</text>
+      <rect x="1023" y="635" width="72" height="31" rx="7" fill="#3a3c3d"/><text x="1059" y="655" fill="#f2f2f4" text-anchor="middle" font-size="12" font-weight="650">重新检测</text>
+      <text x="322" y="720" fill="#f2f2f4" font-size="14" font-weight="560">接入方式</text>
+      <text x="322" y="735" fill="#a5a6aa" font-size="11">原生 command hooks · 3/5 个事件可映射</text>
+      <text x="322" y="770" fill="#f2f2f4" font-size="14" font-weight="560">事件与提示音</text>
+      <text x="322" y="785" fill="#a5a6aa" font-size="11">只修改 WorkBuddy，其他 app 的配置保持不变。</text>
+    </g>
+
+    <g id="main-content" font-family="-apple-system, BlinkMacSystemFont, sans-serif" style="display:none">
+      <text x="304" y="99" fill="#1d1d1f" font-size="30" font-weight="720">集成</text>
+      <text x="304" y="125" fill="#6e6e73" font-size="13">管理多个应用的连接、原生事件能力和真实激活回执。</text>
+      <text x="1055" y="98" fill="#98989d" text-anchor="end" font-size="10" font-weight="700">演示数据</text>
+
+      <text x="308" y="174" fill="#6e6e73" font-size="13" font-weight="650">已接入的宿主</text>
+      <rect x="304" y="187" width="852" height="296" rx="12" fill="#f5f5f6" stroke="#e3e3e5"/>
+      <line x1="304" y1="261" x2="1156" y2="261" stroke="#d8d8dc"/>
+      <line x1="304" y1="335" x2="1156" y2="335" stroke="#d8d8dc"/>
+      <line x1="304" y1="409" x2="1156" y2="409" stroke="#d8d8dc"/>
+
+      <g id="claude-row">
+        <text x="322" y="221" fill="#1d1d1f" font-size="14" font-weight="650">Claude Code</text>
+        <circle cx="874" cy="224" r="3.5" fill="#34c759"/>
+        <text x="884" y="228" fill="#258c3f" font-size="11" font-weight="650">已激活</text>
+        <text x="1041" y="228" fill="#6e6e73" text-anchor="end" font-size="11" font-weight="650">5/5</text>
+        <text x="1138" y="228" fill="#0a84ff" text-anchor="end" font-size="12" font-weight="650">详情</text>
+      </g>
+      <g id="codex-row">
+        <text x="322" y="295" fill="#1d1d1f" font-size="14" font-weight="650">Codex</text>
+        <circle cx="874" cy="298" r="3.5" fill="#34c759"/>
+        <text x="884" y="302" fill="#258c3f" font-size="11" font-weight="650">已激活</text>
+        <text x="1041" y="302" fill="#6e6e73" text-anchor="end" font-size="11" font-weight="650">4/5</text>
+        <text x="1138" y="302" fill="#0a84ff" text-anchor="end" font-size="12" font-weight="650">详情</text>
+      </g>
+      <g id="workbuddy-row">
+        <text x="322" y="369" fill="#1d1d1f" font-size="14" font-weight="650">WorkBuddy</text>
+        <circle cx="874" cy="372" r="3.5" fill="#ff9f0a"/>
+        <text x="884" y="376" fill="#a76e00" font-size="11" font-weight="650">待回执</text>
+        <text x="1041" y="376" fill="#6e6e73" text-anchor="end" font-size="11" font-weight="650">3/5</text>
+        <text x="1138" y="376" fill="#0a84ff" text-anchor="end" font-size="12" font-weight="650">详情</text>
+      </g>
+      <g id="chatgpt-row">
+        <text x="322" y="443" fill="#1d1d1f" font-size="14" font-weight="650">ChatGPT · Codex</text>
+        <circle cx="874" cy="446" r="3.5" fill="#ff9f0a"/>
+        <text x="884" y="450" fill="#a76e00" font-size="11" font-weight="650">待回执</text>
+        <text x="1041" y="450" fill="#6e6e73" text-anchor="end" font-size="11" font-weight="650">3+1/5</text>
+        <text x="1138" y="450" fill="#0a84ff" text-anchor="end" font-size="12" font-weight="650">详情</text>
+      </g>
+
+      <text x="308" y="526" fill="#6e6e73" font-size="13" font-weight="650">WorkBuddy · 接入详情</text>
+      <rect x="304" y="540" width="852" height="104" rx="12" fill="#f5f5f6" stroke="#e3e3e5"/>
+      <line x1="304" y1="592" x2="1156" y2="592" stroke="#d8d8dc"/>
+      <text x="322" y="571" fill="#1d1d1f" font-size="14" font-weight="560">连接状态</text>
+      <text x="322" y="588" fill="#6e6e73" font-size="12">当前安装实例等待真实宿主事件回执</text>
+      <circle cx="902" cy="571" r="3.5" fill="#ff9f0a"/>
+      <text x="912" y="575" fill="#a76e00" font-size="11" font-weight="650">待回执</text>
+      <rect x="1023" y="555" width="72" height="31" rx="7" fill="#e8e8eb"/>
+      <text x="1059" y="575" fill="#1d1d1f" text-anchor="middle" font-size="12" font-weight="650">重新检测</text>
+      <text x="322" y="624" fill="#1d1d1f" font-size="14" font-weight="560">宿主配置</text>
+      <text x="1150" y="624" fill="#6e6e73" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">~/.workbuddy/settings.json</text>
+
+      <text x="308" y="688" fill="#6e6e73" font-size="13" font-weight="650">原生事件</text>
+      <rect x="304" y="702" width="852" height="82" rx="12" fill="#f5f5f6" stroke="#e3e3e5"/>
+      <text x="322" y="735" fill="#0a84ff" font-size="14" font-weight="800">↗</text>
+      <text x="350" y="730" fill="#1d1d1f" font-size="13" font-weight="600">任务开始</text>
+      <text x="350" y="747" fill="#6e6e73" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">UserPromptSubmit</text>
+      <text x="938" y="738" fill="#258c3f" font-size="11" font-weight="650">明确支持</text>
+      <text x="1138" y="738" fill="#0a84ff" text-anchor="end" font-size="11" font-weight="650">轻提示 · 01</text>
+    </g>
+
+    <g id="event-management-content" font-family="-apple-system, BlinkMacSystemFont, sans-serif">
+      <text x="304" y="99" fill="#f2f2f4" font-size="30" font-weight="720">事件与提示音</text>
+      <text x="304" y="125" fill="#a5a6aa" font-size="13">按 app 单独管理事件映射、启用状态和声音选择；当前配置不会影响其他 app。</text>
+      <text x="1055" y="98" fill="#85878a" text-anchor="end" font-size="10" font-weight="700">演示数据</text>
+      <rect x="1070" y="80" width="83" height="31" rx="7" fill="#3a3c3d"/>
+      <text x="1111.5" y="100" fill="#f2f2f4" text-anchor="middle" font-size="12" font-weight="650">试听全部</text>
+
+      <rect x="304" y="162" width="218" height="620" rx="12" fill="#2d2f30" stroke="#414345"/>
+      <text x="316" y="184" fill="#85878a" font-size="10" font-weight="700">管理对象</text>
+      <text x="316" y="203" fill="#f2f2f4" font-size="12" font-weight="680">集成</text>
+      <text x="510" y="184" fill="#85878a" text-anchor="end" font-size="10">4 个已接入</text>
+
+      <g id="event-app-list-claude">
+        <rect x="312" y="214" width="202" height="58" rx="9" fill="transparent"/>
+        <text x="322" y="238" fill="#f2f2f4" font-size="12" font-weight="650">Claude Code</text>
+        <circle cx="329" cy="256" r="7" fill="#30d158"/><text x="329" y="259" fill="#142218" text-anchor="middle" font-size="8" font-weight="900">✓</text>
+        <text x="341" y="259" fill="#72df8b" font-size="10" font-weight="650">已激活</text>
+        <text x="504" y="259" fill="#85878a" text-anchor="end" font-size="10" font-weight="650">5/5</text>
+      </g>
+      <g id="event-app-list-codex">
+        <rect x="312" y="274" width="202" height="58" rx="9" fill="transparent"/>
+        <text x="322" y="298" fill="#f2f2f4" font-size="12" font-weight="650">Codex</text>
+        <circle cx="329" cy="316" r="7" fill="#30d158"/><text x="329" y="319" fill="#142218" text-anchor="middle" font-size="8" font-weight="900">✓</text>
+        <text x="341" y="319" fill="#72df8b" font-size="10" font-weight="650">已激活</text>
+        <text x="504" y="319" fill="#85878a" text-anchor="end" font-size="10" font-weight="650">4/5</text>
+      </g>
+      <g id="event-app-list-workbuddy">
+        <rect x="312" y="334" width="202" height="58" rx="9" fill="#3a3c3d"/>
+        <text x="322" y="358" fill="#ffffff" font-size="12" font-weight="680">WorkBuddy</text>
+        <circle cx="329" cy="376" r="7" fill="#ff9f0a"/><text x="329" y="379" fill="#2d2310" text-anchor="middle" font-size="8" font-weight="900">!</text>
+        <text x="341" y="379" fill="#ffbd59" font-size="10" font-weight="650">待回执</text>
+        <text x="504" y="379" fill="#a5a6aa" text-anchor="end" font-size="10" font-weight="650">3/5</text>
+      </g>
+      <g id="event-app-list-chatgpt">
+        <rect x="312" y="394" width="202" height="58" rx="9" fill="transparent"/>
+        <text x="322" y="418" fill="#f2f2f4" font-size="12" font-weight="650">ChatGPT · Codex</text>
+        <circle cx="329" cy="436" r="7" fill="#ff9f0a"/><text x="329" y="439" fill="#2d2310" text-anchor="middle" font-size="8" font-weight="900">!</text>
+        <text x="341" y="439" fill="#ffbd59" font-size="10" font-weight="650">待回执</text>
+        <text x="504" y="439" fill="#a5a6aa" text-anchor="end" font-size="10" font-weight="650">3+1/5</text>
+      </g>
+      <line x1="316" y1="464" x2="510" y2="464" stroke="#414345"/>
+      <text x="316" y="488" fill="#85878a" font-size="10">列表纵向滚动</text>
+      <text x="316" y="504" fill="#85878a" font-size="10">10+ 个 app 仍保持独立管理</text>
+
+      <g id="event-detail-panel">
+        <text x="536" y="184" fill="#85878a" font-size="10" font-weight="700">当前管理对象</text>
+        <text x="536" y="204" fill="#f2f2f4" font-size="17" font-weight="680">WorkBuddy</text>
+        <text x="536" y="221" fill="#a5a6aa" font-size="11">原生 command hooks</text>
+        <circle cx="1078" cy="195" r="9" fill="#ff9f0a"/><text x="1078" y="199" fill="#2d2310" text-anchor="middle" font-size="9" font-weight="900">!</text>
+        <text x="1093" y="199" fill="#ffbd59" font-size="11" font-weight="650">待回执</text>
+
+        <text x="540" y="250" fill="#a5a6aa" font-size="13" font-weight="650">WorkBuddy · 事件规则</text>
+        <rect x="536" y="262" width="620" height="295" rx="12" fill="#2d2f30" stroke="#414345"/>
+        <line x1="536" y1="321" x2="1156" y2="321" stroke="#414345"/>
+        <line x1="536" y1="380" x2="1156" y2="380" stroke="#414345"/>
+        <line x1="536" y1="439" x2="1156" y2="439" stroke="#414345"/>
+        <line x1="536" y1="498" x2="1156" y2="498" stroke="#414345"/>
+
+        <g id="vertical-scoped-task-start">
+          <rect x="548" y="279" width="25" height="25" rx="7" fill="#dceeff"/><text x="560.5" y="296" fill="#0a84ff" text-anchor="middle" font-size="13" font-weight="800">↗</text>
+          <text x="584" y="291" fill="#f2f2f4" font-size="12" font-weight="600">任务开始</text><text x="584" y="307" fill="#a5a6aa" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">UserPromptSubmit</text>
+          <text x="830" y="298" fill="#72df8b" font-size="10" font-weight="650">明确支持</text><rect x="954" y="282" width="34" height="20" rx="10" fill="#30d158"/><circle cx="978" cy="292" r="8" fill="#ffffff"/>
+          <rect x="1008" y="278" width="116" height="28" rx="7" fill="#3a3c3d"/><text x="1066" y="296" fill="#0a84ff" text-anchor="middle" font-size="10" font-weight="650">轻提示 · 01</text>
+        </g>
+        <g id="vertical-scoped-stop">
+          <rect x="548" y="338" width="25" height="25" rx="7" fill="#dff5e3"/><text x="560.5" y="355" fill="#258c3f" text-anchor="middle" font-size="13" font-weight="800">✓</text>
+          <text x="584" y="350" fill="#f2f2f4" font-size="12" font-weight="600">响应结束</text><text x="584" y="366" fill="#a5a6aa" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">Stop</text>
+          <text x="830" y="357" fill="#72df8b" font-size="10" font-weight="650">明确支持</text><rect x="954" y="341" width="34" height="20" rx="10" fill="#30d158"/><circle cx="978" cy="351" r="8" fill="#ffffff"/>
+          <rect x="1008" y="337" width="116" height="28" rx="7" fill="#3a3c3d"/><text x="1066" y="355" fill="#0a84ff" text-anchor="middle" font-size="10" font-weight="650">木琴 · 02</text>
+        </g>
+        <g id="vertical-scoped-stop-failure">
+          <rect x="548" y="397" width="25" height="25" rx="7" fill="#fff0d2"/><text x="560.5" y="414" fill="#a76e00" text-anchor="middle" font-size="13" font-weight="800">!</text>
+          <text x="584" y="409" fill="#f2f2f4" font-size="12" font-weight="600">执行中断</text><text x="584" y="425" fill="#a5a6aa" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">StopFailure</text>
+          <text x="830" y="416" fill="#ffbd59" font-size="10" font-weight="650">候选 / 部分</text><rect x="954" y="400" width="34" height="20" rx="10" fill="#85878a"/><circle cx="964" cy="410" r="8" fill="#ffffff"/>
+          <rect x="1008" y="396" width="116" height="28" rx="7" fill="#3a3c3d"/><text x="1066" y="414" fill="#0a84ff" text-anchor="middle" font-size="10" font-weight="650">低音 · 03</text>
+        </g>
+        <g id="vertical-scoped-notification">
+          <rect x="548" y="456" width="25" height="25" rx="7" fill="#fff0d2"/><text x="560.5" y="473" fill="#a76e00" text-anchor="middle" font-size="13" font-weight="800">•</text>
+          <text x="584" y="468" fill="#f2f2f4" font-size="12" font-weight="600">待响应</text><text x="584" y="484" fill="#a5a6aa" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">Notification</text>
+          <text x="830" y="475" fill="#85878a" font-size="10" font-weight="650">未配置</text><rect x="954" y="459" width="34" height="20" rx="10" fill="#85878a"/><circle cx="964" cy="469" r="8" fill="#ffffff"/>
+          <rect x="1008" y="455" width="116" height="28" rx="7" fill="#3a3c3d"/><text x="1066" y="473" fill="#85878a" text-anchor="middle" font-size="10" font-weight="650">未设置</text>
+        </g>
+        <g id="vertical-scoped-subagent-stop">
+          <rect x="548" y="515" width="25" height="25" rx="7" fill="#f0ddfa"/><text x="560.5" y="532" fill="#8642ab" text-anchor="middle" font-size="13" font-weight="800">⌁</text>
+          <text x="584" y="527" fill="#f2f2f4" font-size="12" font-weight="600">子任务完成</text><text x="584" y="543" fill="#a5a6aa" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">SubagentStop</text>
+          <text x="830" y="534" fill="#85878a" font-size="10" font-weight="650">未配置</text><rect x="954" y="518" width="34" height="20" rx="10" fill="#85878a"/><circle cx="964" cy="528" r="8" fill="#ffffff"/>
+          <rect x="1008" y="514" width="116" height="28" rx="7" fill="#3a3c3d"/><text x="1066" y="532" fill="#85878a" text-anchor="middle" font-size="10" font-weight="650">未设置</text>
+        </g>
+
+        <text x="540" y="584" fill="#a5a6aa" font-size="13" font-weight="650">WorkBuddy · 播放设置</text>
+        <rect x="536" y="596" width="620" height="126" rx="12" fill="#2d2f30" stroke="#414345"/>
+        <line x1="536" y1="638" x2="1156" y2="638" stroke="#414345"/>
+        <line x1="536" y1="680" x2="1156" y2="680" stroke="#414345"/>
+        <text x="550" y="622" fill="#f2f2f4" font-size="12" font-weight="560">WorkBuddy 事件提示音</text><text x="550" y="634" fill="#a5a6aa" font-size="10">只影响这个 app；其他 app 使用各自的开关</text>
+        <rect x="1100" y="607" width="38" height="22" rx="11" fill="#0a84ff"/><circle cx="1127" cy="618" r="9" fill="#ffffff"/>
+        <text x="550" y="665" fill="#f2f2f4" font-size="12" font-weight="560">WorkBuddy 主音量</text><rect x="948" y="659" width="132" height="4" rx="2" fill="#85878a"/><rect x="948" y="659" width="90" height="4" rx="2" fill="#0a84ff"/><circle cx="1038" cy="661" r="6.5" fill="#ffffff" stroke="#0a84ff" stroke-width="2"/><text x="1118" y="666" fill="#a5a6aa" text-anchor="end" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">68%</text>
+        <text x="550" y="707" fill="#f2f2f4" font-size="12" font-weight="560">声音包</text><text x="550" y="718" fill="#a5a6aa" font-size="10">Paimon · 事件绑定按 app 独立保存</text><rect x="1075" y="691" width="63" height="26" rx="7" fill="#3a3c3d"/><text x="1106.5" y="708" fill="#f2f2f4" text-anchor="middle" font-size="10" font-weight="650">管理</text>
+
+        <rect x="536" y="738" width="620" height="44" rx="10" fill="#303233"/><circle cx="553" cy="760" r="8.5" fill="#85878a"/><text x="553" y="764" fill="#ffffff" text-anchor="middle" font-size="10" font-weight="800">i</text>
+        <text x="570" y="757" fill="#a5a6aa" font-size="10">切换左侧 app 后只切换当前配置，不会修改其他 app 的事件或提示音。</text>
+        <text x="570" y="772" fill="#a5a6aa" font-size="10">每个 app 的设置和状态独立保存。</text>
+      </g>
+    </g>
+
+    <g id="event-management-content-legacy" font-family="-apple-system, BlinkMacSystemFont, sans-serif" style="display:none">
+      <text x="304" y="99" fill="#1d1d1f" font-size="30" font-weight="720">事件与提示音</text>
+      <text x="304" y="125" fill="#6e6e73" font-size="13">按 AI app 独立管理事件映射、开关和提示音，不共享配置。</text>
+      <text x="1055" y="98" fill="#98989d" text-anchor="end" font-size="10" font-weight="700">演示数据</text>
+      <rect x="1070" y="80" width="83" height="31" rx="7" fill="#e8e8eb"/>
+      <text x="1111.5" y="100" fill="#1d1d1f" text-anchor="middle" font-size="12" font-weight="650">试听全部</text>
+
+      <text x="308" y="174" fill="#6e6e73" font-size="13" font-weight="650">当前管理对象</text>
+      <rect x="304" y="187" width="852" height="76" rx="12" fill="#f5f5f6" stroke="#e3e3e5"/>
+      <line x1="514" y1="199" x2="514" y2="251" stroke="#d8d8dc"/>
+      <line x1="714" y1="199" x2="714" y2="251" stroke="#d8d8dc"/>
+      <line x1="914" y1="199" x2="914" y2="251" stroke="#d8d8dc"/>
+      <g id="scope-claude">
+        <rect x="314" y="197" width="190" height="56" rx="9" fill="transparent"/>
+        <text x="322" y="226" fill="#454548" font-size="12" font-weight="620">Claude Code</text>
+        <text x="322" y="242" fill="#98989d" font-size="10">5/5 · 已激活</text>
+      </g>
+      <g id="scope-codex">
+        <rect x="514" y="197" width="200" height="56" rx="9" fill="transparent"/>
+        <text x="522" y="226" fill="#454548" font-size="12" font-weight="620">Codex</text>
+        <text x="522" y="242" fill="#98989d" font-size="10">4/5 · 已激活</text>
+      </g>
+      <g id="scope-workbuddy">
+        <rect x="714" y="197" width="200" height="56" rx="9" fill="#dedee1"/>
+        <text x="722" y="226" fill="#1d1d1f" font-size="12" font-weight="680">WorkBuddy</text>
+        <text x="722" y="242" fill="#a76e00" font-size="10">3/5 · 待回执</text>
+      </g>
+      <g id="scope-chatgpt">
+        <rect x="914" y="197" width="232" height="56" rx="9" fill="transparent"/>
+        <text x="922" y="226" fill="#454548" font-size="12" font-weight="620">ChatGPT · Codex</text>
+        <text x="922" y="242" fill="#98989d" font-size="10">3+1/5 · 待回执</text>
+      </g>
+
+      <text x="308" y="292" fill="#6e6e73" font-size="13" font-weight="650">WorkBuddy · 事件规则</text>
+      <rect x="304" y="306" width="852" height="295" rx="12" fill="#f5f5f6" stroke="#e3e3e5"/>
+      <line x1="304" y1="365" x2="1156" y2="365" stroke="#d8d8dc"/>
+      <line x1="304" y1="424" x2="1156" y2="424" stroke="#d8d8dc"/>
+      <line x1="304" y1="483" x2="1156" y2="483" stroke="#d8d8dc"/>
+      <line x1="304" y1="542" x2="1156" y2="542" stroke="#d8d8dc"/>
+      <line x1="304" y1="601" x2="1156" y2="601" stroke="#d8d8dc"/>
+
+      <g id="scoped-task-start">
+        <rect x="322" y="323" width="25" height="25" rx="7" fill="#dceeff"/><text x="334.5" y="340" fill="#0a84ff" text-anchor="middle" font-size="13" font-weight="800">↗</text>
+        <text x="359" y="335" fill="#1d1d1f" font-size="13" font-weight="600">任务开始</text><text x="359" y="351" fill="#6e6e73" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">UserPromptSubmit</text>
+        <text x="835" y="341" fill="#258c3f" font-size="11" font-weight="650">明确支持</text><rect x="967" y="324" width="34" height="20" rx="10" fill="#34c759"/><circle cx="991" cy="334" r="8" fill="#ffffff"/>
+        <rect x="1021" y="320" width="116" height="28" rx="7" fill="#e8e8eb"/><text x="1079" y="338" fill="#0a84ff" text-anchor="middle" font-size="11" font-weight="650">轻提示 · 01</text>
+      </g>
+      <g id="scoped-stop">
+        <rect x="322" y="382" width="25" height="25" rx="7" fill="#dff5e3"/><text x="334.5" y="399" fill="#258c3f" text-anchor="middle" font-size="13" font-weight="800">✓</text>
+        <text x="359" y="394" fill="#1d1d1f" font-size="13" font-weight="600">响应结束</text><text x="359" y="410" fill="#6e6e73" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">Stop</text>
+        <text x="835" y="400" fill="#258c3f" font-size="11" font-weight="650">明确支持</text><rect x="967" y="383" width="34" height="20" rx="10" fill="#34c759"/><circle cx="991" cy="393" r="8" fill="#ffffff"/>
+        <rect x="1021" y="379" width="116" height="28" rx="7" fill="#e8e8eb"/><text x="1079" y="397" fill="#0a84ff" text-anchor="middle" font-size="11" font-weight="650">木琴 · 02</text>
+      </g>
+      <g id="scoped-stop-failure">
+        <rect x="322" y="441" width="25" height="25" rx="7" fill="#fff0d2"/><text x="334.5" y="458" fill="#a76e00" text-anchor="middle" font-size="13" font-weight="800">!</text>
+        <text x="359" y="453" fill="#1d1d1f" font-size="13" font-weight="600">执行中断</text><text x="359" y="469" fill="#6e6e73" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">StopFailure</text>
+        <text x="835" y="459" fill="#a76e00" font-size="11" font-weight="650">候选 / 部分</text><rect x="967" y="442" width="34" height="20" rx="10" fill="#c7c7cc"/><circle cx="977" cy="452" r="8" fill="#ffffff"/>
+        <rect x="1021" y="438" width="116" height="28" rx="7" fill="#e8e8eb"/><text x="1079" y="456" fill="#0a84ff" text-anchor="middle" font-size="11" font-weight="650">低音 · 03</text>
+      </g>
+      <g id="scoped-notification">
+        <rect x="322" y="500" width="25" height="25" rx="7" fill="#fff0d2"/><text x="334.5" y="517" fill="#a76e00" text-anchor="middle" font-size="13" font-weight="800">•</text>
+        <text x="359" y="512" fill="#1d1d1f" font-size="13" font-weight="600">待响应</text><text x="359" y="528" fill="#6e6e73" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">Notification</text>
+        <text x="835" y="518" fill="#98989d" font-size="11" font-weight="650">未配置</text><rect x="967" y="501" width="34" height="20" rx="10" fill="#c7c7cc"/><circle cx="977" cy="511" r="8" fill="#ffffff"/>
+        <rect x="1021" y="497" width="116" height="28" rx="7" fill="#e8e8eb"/><text x="1079" y="515" fill="#98989d" text-anchor="middle" font-size="11" font-weight="650">未设置</text>
+      </g>
+      <g id="scoped-subagent-stop">
+        <rect x="322" y="559" width="25" height="25" rx="7" fill="#f0ddfa"/><text x="334.5" y="576" fill="#8642ab" text-anchor="middle" font-size="13" font-weight="800">⌁</text>
+        <text x="359" y="571" fill="#1d1d1f" font-size="13" font-weight="600">子任务完成</text><text x="359" y="587" fill="#6e6e73" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">SubagentStop</text>
+        <text x="835" y="577" fill="#98989d" font-size="11" font-weight="650">未配置</text><rect x="967" y="560" width="34" height="20" rx="10" fill="#c7c7cc"/><circle cx="977" cy="570" r="8" fill="#ffffff"/>
+        <rect x="1021" y="556" width="116" height="28" rx="7" fill="#e8e8eb"/><text x="1079" y="574" fill="#98989d" text-anchor="middle" font-size="11" font-weight="650">未设置</text>
+      </g>
+
+      <text x="308" y="640" fill="#6e6e73" font-size="13" font-weight="650">WorkBuddy · 播放设置</text>
+      <rect x="304" y="654" width="852" height="96" rx="12" fill="#f5f5f6" stroke="#e3e3e5"/><line x1="304" y1="702" x2="1156" y2="702" stroke="#d8d8dc"/>
+      <text x="322" y="684" fill="#1d1d1f" font-size="14" font-weight="560">WorkBuddy 事件提示音</text><text x="322" y="697" fill="#6e6e73" font-size="11">只影响这个 app；其他 app 使用各自的开关</text>
+      <rect x="1095" y="673" width="38" height="22" rx="11" fill="#0a84ff"/><circle cx="1122" cy="684" r="9" fill="#ffffff"/>
+      <text x="322" y="731" fill="#1d1d1f" font-size="14" font-weight="560">WorkBuddy 主音量</text><rect x="870" y="723" width="190" height="4" rx="2" fill="#d0d0d4"/><rect x="870" y="723" width="129" height="4" rx="2" fill="#0a84ff"/><circle cx="999" cy="725" r="7" fill="#ffffff" stroke="#0a84ff" stroke-width="2"/><text x="1091" y="730" fill="#6e6e73" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">68%</text>
+
+      <rect x="304" y="765" width="852" height="38" rx="10" fill="#f2f2f4"/><circle cx="325" cy="784" r="8.5" fill="#6e6e73"/><text x="325" y="788" fill="#ffffff" text-anchor="middle" font-size="10" font-weight="800">i</text>
+      <text x="342" y="788" fill="#6e6e73" font-size="11">切换 app 后只切换当前配置，不会修改其他 app 的事件、开关或提示音。</text>
+    </g>
+  </g>
+</svg>
