@@ -35,3 +35,17 @@ Follow the existing concise, imperative convention: `feat: ...`, `fix: ...`, `do
 ## Security & Configuration
 
 Never commit prompts, responses, host configuration, receipts, logs, signing credentials, or personal/licensed sound packs. Preserve unknown JSON fields, third-party hooks, backups, receipts, and user data unless an explicit migration requires otherwise.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in this repo's GitHub Issues via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five default canonical triage labels without overrides. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo with root-level `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
