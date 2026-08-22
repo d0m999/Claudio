@@ -56,7 +56,16 @@ public final class FileLock {
     @discardableResult
     public func attemptLock() -> LockAttempt {
         if descriptor == -1 {
-            var opened = open(path, O_CREAT | O_RDWR, 0o600)
+            // `open(2)` can also be interrupted by a signal. Keep retrying here so an
+            // `EINTR` never escapes as a lock failure while `descriptor` is still -1.
+            func openLockFile() -> Int32 {
+                while true {
+                    let opened = open(path, O_CREAT | O_RDWR, 0o600)
+                    if opened != -1 || errno != EINTR { return opened }
+                }
+            }
+
+            var opened = openLockFile()
             if opened == -1 && errno == ENOENT {
                 // Self-heal: `O_CREAT` only ever creates the leaf file, never a missing
                 // *parent* directory — and nothing else in Claudio proactively creates
@@ -72,7 +81,7 @@ public final class FileLock {
                 // fix, and must fall straight through to `.failed` below.
                 let parentDirectory = URL(fileURLWithPath: path).deletingLastPathComponent()
                 try? ensurePrivateDirectoryTree(at: parentDirectory)
-                opened = open(path, O_CREAT | O_RDWR, 0o600)
+                opened = openLockFile()
             }
             // If the directory creation above failed too (e.g. permission denied, or a
             // path component collides with an existing file), this retried `open` fails
@@ -107,7 +116,7 @@ public final class FileLock {
     public func lock() -> LockAttempt {
         let firstAttempt = attemptLock()
         switch firstAttempt {
-        case .acquired, .failed:
+        case .acquired:
             return firstAttempt
         case .busy:
             while flock(descriptor, LOCK_EX) != 0 {
@@ -115,6 +124,17 @@ public final class FileLock {
                 guard code == EINTR else { return .failed(errno: code) }
             }
             return .acquired
+        case .failed(let code) where code == EINTR && descriptor != -1:
+            // The non-blocking probe can itself be interrupted by a signal. The descriptor is
+            // already open at this point, so continue with the same blocking acquisition path
+            // instead of misreporting a transient EINTR as a bootstrap failure.
+            while flock(descriptor, LOCK_EX) != 0 {
+                let retryCode = errno
+                guard retryCode == EINTR else { return .failed(errno: retryCode) }
+            }
+            return .acquired
+        case .failed:
+            return firstAttempt
         }
     }
 

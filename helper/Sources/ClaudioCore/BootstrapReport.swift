@@ -124,7 +124,7 @@ public struct BootstrapReportStore: Sendable {
 
     @discardableResult
     public func append(events: [BootstrapReportEvent]) throws -> BootstrapReportRecord? {
-        try append(BootstrapReportRecord(events: events))
+        try append(BootstrapReportRecord(events: events), mergingPureFailures: true)
     }
 
     /// Publishes a report whose identity is already durable elsewhere (the bootstrap journal).
@@ -136,10 +136,18 @@ public struct BootstrapReportStore: Sendable {
         createdAt: Date,
         events: [BootstrapReportEvent]
     ) throws -> BootstrapReportRecord? {
-        try append(BootstrapReportRecord(id: id, createdAt: createdAt, events: events))
+        // A journal ID is durable identity, so this path must never collapse into an unrelated
+        // pure-failure record. If publication succeeds and journal removal is interrupted, the
+        // next replay must either find this exact ID or publish a distinct record with its own ID.
+        try append(
+            BootstrapReportRecord(id: id, createdAt: createdAt, events: events),
+            mergingPureFailures: false)
     }
 
-    private func append(_ candidate: BootstrapReportRecord) throws -> BootstrapReportRecord? {
+    private func append(
+        _ candidate: BootstrapReportRecord,
+        mergingPureFailures: Bool
+    ) throws -> BootstrapReportRecord? {
         guard !candidate.events.isEmpty else { return nil }
         var existing = try records()
         if let persisted = existing.first(where: { $0.id == candidate.id }) {
@@ -151,7 +159,8 @@ public struct BootstrapReportStore: Sendable {
             }
             return persisted
         }
-        if candidate.isPureFailure,
+        if mergingPureFailures,
+            candidate.isPureFailure,
             let index = existing.lastIndex(where: {
                 $0.isPureFailure && $0.events == candidate.events
             })

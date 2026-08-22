@@ -89,6 +89,27 @@ func runBootstrapReportSuites() {
         }
     }
 
+    suite("BootstrapReportStore：带 journal ID 的纯失败不与无身份记录合并") {
+        withTempDirectory { directory in
+            let store = BootstrapReportStore(directory: directory)
+            let events: [BootstrapReportEvent] = [.failure(code: "same_failure")]
+            let ordinary = try! store.append(events: events)
+            let journalID = UUID()
+            let journal = try! store.append(
+                id: journalID,
+                createdAt: Date(),
+                events: events)
+
+            expect(ordinary?.occurrenceCount == 1, "普通纯失败首次发布必须从 1 次开始")
+            expect(journal?.id == journalID, "journal-backed 纯失败必须保留 journal ID")
+            let records = try! store.records()
+            expect(records.count == 2, "带 journal ID 的纯失败不得合并进无身份记录")
+            expect(
+                records.contains { $0.id == journalID && $0.occurrenceCount == 1 },
+                "journal-backed 纯失败重放身份必须独立保留")
+        }
+    }
+
     suite("BootstrapReportStore：32 条上限、损坏文件与 symlink 都失败关闭") {
         withTempDirectory { root in
             let directory = root.appendingPathComponent("reports", isDirectory: true)
