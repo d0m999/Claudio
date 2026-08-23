@@ -443,6 +443,39 @@ func runReleaseLayoutSuites() {
         }
     }
 
+    suite("release-size 默认预算与文档使用同一 2026-08-23 重基线") {
+        let root = repositoryRoot()
+        let gateURL = root.appendingPathComponent("scripts/check-release-size.sh")
+        let environmentURL = root.appendingPathComponent("docs/ENV.md")
+        let budgetURL = root.appendingPathComponent("docs/performance/release-size-budget.md")
+        guard
+            let gate = try? String(contentsOf: gateURL, encoding: .utf8),
+            let environment = try? String(contentsOf: environmentURL, encoding: .utf8),
+            let budget = try? String(contentsOf: budgetURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 release-size 门禁或它的环境/基线文档")
+            return
+        }
+
+        expect(
+            gate.contains(
+                #"GUI_BYTES_PER_ARCH="${CLAUDIO_GUI_BYTES_PER_ARCH:-5500000}""#)
+                && gate.contains(
+                    #"HELPER_BYTES_PER_ARCH="${CLAUDIO_HELPER_BYTES_PER_ARCH:-3250000}""#)
+                && environment.contains("default `5500000`")
+                && environment.contains("default `3250000`")
+                && budget.contains("`5,500,000 B`")
+                && budget.contains("`3,250,000 B`")
+                && budget.contains("`4,223,128 B`")
+                && budget.contains("`2,466,184 B`")
+                && budget.contains("`435,818 B`")
+                && budget.contains("`7,125,130 B`")
+                && budget.contains("`4,348,424 B`")
+                && budget.contains("`2,563,896 B`")
+                && budget.contains("`14,055,562 B`"),
+            "脚本默认值、ENV reference 与实测基线必须一起重定，不能只抬高门禁数字")
+    }
+
     suite("Orbit Zero App 图标母版与 icns 都在仓库中") {
         let branding = repositoryRoot().appendingPathComponent("assets/branding", isDirectory: true)
         let svg = branding.appendingPathComponent("claudi0-app-icon.svg")
@@ -569,6 +602,21 @@ func runReleaseLayoutSuites() {
                 && ci.contains("bash scripts/check-release-size.sh dist/claudi0.app")
                 && ci.contains("git diff --check"),
             "push/PR CI 必须覆盖双 harness、双配置 GUI 构建、catalog、体积与 whitespace")
+
+        let xcodeDeveloperDirectory =
+            "DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer"
+        let swift6VersionPattern = #"Apple\ Swift\ version\ 6\."#
+        expect(
+            ci.contains("name: Test and build\n    runs-on: macos-15")
+                && release.contains(
+                    "name: Build, sign, notarize, and verify\n    runs-on: macos-15")
+                && ci.contains(xcodeDeveloperDirectory)
+                && release.contains(xcodeDeveloperDirectory)
+                && ci.contains(swift6VersionPattern)
+                && release.contains(swift6VersionPattern)
+                && ci.contains("::error::Swift 6 is required")
+                && release.contains("::error::Swift 6 is required"),
+            "CI 与 release 构建必须固定 macos-15/Xcode 16.4，并在执行 SwiftPM 前失败关闭非 Swift 6 工具链")
     }
 
     suite("Homebrew cask 保持可选、签名分发且卸载不删除用户数据") {

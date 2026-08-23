@@ -35,9 +35,10 @@ prepare_root() {
   mkdir -p "$root/integrations/installations"
   cat > "$root/integrations/installations/$host.json" <<JSON
 {
-  "schema": 1,
+  "schema": 2,
   "host": "$host",
-  "installation_id": "$INSTALLATION_ID"
+  "installation_id": "$INSTALLATION_ID",
+  "scope_fingerprint": "test-hook-cli-contract:$host"
 }
 JSON
 

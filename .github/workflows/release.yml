@@ -30,7 +30,9 @@ env:
 jobs:
   build:
     name: Build, sign, notarize, and verify
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     permissions:
       contents: read
     outputs:
@@ -148,7 +150,15 @@ jobs:
           echo "NOTARY_KEY_PATH=$NOTARY_KEY_PATH" >> "$GITHUB_ENV"
 
       - name: Toolchain
-        run: swift --version
+        shell: bash
+        run: |
+          set -euo pipefail
+          SWIFT_VERSION="$(swift --version)"
+          printf '%s\n' "$SWIFT_VERSION"
+          if [[ ! "$SWIFT_VERSION" =~ Apple\ Swift\ version\ 6\. ]]; then
+            echo "::error::Swift 6 is required; selected toolchain reported: $SWIFT_VERSION"
+            exit 1
+          fi
 
       - name: Run complete helper, GUI, and localization contracts
         shell: bash

@@ -2,8 +2,8 @@
 
 发布流程在 codesign 前执行 `scripts/check-release-size.sh`。门禁按 Mach-O 架构数线性放大：
 
-- `claudi0-app`：每架构最多 `4,000,000 B`；
-- `claudi0` helper：每架构最多 `2,500,000 B`；
+- `claudi0-app`：每架构最多 `5,500,000 B`；
+- `claudi0` helper：每架构最多 `3,250,000 B`；
 - app 内其余正规文件合计预留 `1,000,000 B`；
 - GUI 与 helper 必须包含相同架构；`Contents/Resources/bin/claudio` 必须是精确指向同目录 `claudi0` 的相对符号链接。
 
@@ -21,3 +21,32 @@ arm64 Release bundle 在剥离本地符号、移除重复 helper Mach-O 后：
 | app bundle 正规文件合计 | — | `5,170,981 B` |
 
 同一流程生成的 arm64 + x86_64 universal bundle 为：GUI `6,142,616 B`、helper `3,771,352 B`、非可执行资源 `303,285 B`、bundle 正规文件合计 `10,217,253 B`，均在对应的双架构预算内。门禁逐架构检查 Mach-O slice，资源预算独立于可执行文件剩余额度；负向测试把资源预算压到 `1 B` 时会按预期拒绝。体积门禁只约束最终 app bundle，不把 developer-only benchmark product 计入分发物。
+
+## 2026-08-23 功能增长重基线
+
+在保留 8 月 6 日基线之后新增的本地化、WorkBuddy 集成、激活回执与无障碍界面合同的前提下，
+使用 `91eb5fd` 的 arm64 Release 产物重新测量。下列数字均来自 `strip -x` 之后、codesign 之前；
+这与 CI 和 release workflow 执行体积门禁的时点相同。
+
+| 项目 | arm64 实测 | 新预算 | 基线占预算 |
+|---|---:|---:|---:|
+| GUI | `4,223,128 B` | `5,500,000 B` | `76.8%` |
+| helper | `2,466,184 B` | `3,250,000 B` | `75.9%` |
+| 非可执行资源 | `435,818 B` | `1,000,000 B` | `43.6%` |
+| 单架构 app bundle 正规文件合计 | `7,125,130 B` | `9,750,000 B` | `73.1%` |
+
+同一源树和 Swift 6.3 工具链的交叉构建也通过了真实 universal 门禁：
+
+| 项目 | arm64 slice | x86_64 slice | universal 文件 |
+|---|---:|---:|---:|
+| GUI | `4,223,128 B` | `4,348,424 B` | `8,581,272 B` |
+| helper | `2,466,184 B` | `2,563,896 B` | `5,038,472 B` |
+
+非可执行资源仍为 `435,818 B`，universal app bundle 正规文件合计为 `14,055,562 B`，低于
+双架构总预算 `18,500,000 B`。
+
+本次只重定默认预算，没有放宽逐切片、架构一致性、资源独立上限、legacy helper 符号链接或
+bundle 总量门禁。GUI 与 helper 分别保留 `1,276,872 B` 和 `783,816 B` 余量；资源预算保持
+不变。本地 Swift 6.3 交叉构建不能替代首次 GitHub Xcode 16.4 release 的真实回执；正式流程
+仍会逐架构失败关闭。环境变量覆盖继续只用于受控测试和本地探针，默认 CI 路径不设置这些
+覆盖值。
