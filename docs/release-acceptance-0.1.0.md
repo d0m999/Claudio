@@ -33,12 +33,12 @@ JSON 只保留摘要和版本/身份字段，不保存 WorkBuddy 配置、备份
 
 ### 当前只读基线
 
-以下摘要由 2026-08-23 的一次真实只读运行生成；`Commit SHA` 是采集时 checkout 的 HEAD，最终提交后应重新运行
-入口并以新输出为准。命令 stdout 未作为原始证据文件写入仓库；本节与入口脚本是可重建的脱敏证据指针。
+以下摘要由 2026-08-23、绑定已提交 Issue #14 implementation commit 的一次真实只读运行生成；后续仅账本
+提交不改变该实现事实。命令 stdout 未作为原始证据文件写入仓库；本节与入口脚本是可重建的脱敏证据指针。
 
 | 字段 | 结果 | 证据等级 |
 |---|---|---|
-| Commit SHA（采集时） | `fea13a0eabba90f7fe56a5c9783880d5d77aa88f` | static configuration |
+| Commit SHA（preflight 采集 commit） | `ea7794c72333ac39be179d88f235c6487ea1d003` | static configuration |
 | Claudio version | `0.0.0-dev` | static configuration |
 | WorkBuddy bundle | `com.workbuddy.workbuddy`，version `5.3.14`，build `5.3.14`，`/Applications/WorkBuddy.app` | static configuration |
 | macOS / CPU | `26.6.2` / `arm64` | static configuration |
