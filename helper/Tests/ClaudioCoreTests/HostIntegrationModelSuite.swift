@@ -20,6 +20,77 @@ func runHostIntegrationModelSuites() {
             "空版本身份必须失败关闭")
     }
 
+    suite("activation scope：GUI PATH 缺少用户目录时仍从绝对路径探测 Claude 与 Codex") {
+        withTempDirectory { root in
+            let claude = root.appendingPathComponent(".local/bin/claude")
+            let codex = root.appendingPathComponent(
+                ".nvm/versions/node/v22.5.0/bin/codex")
+            let node = codex.deletingLastPathComponent().appendingPathComponent("node")
+            writeFixture("#!/bin/sh\nexit 0\n", to: claude)
+            writeFixture("#!/usr/bin/env node\n", to: codex)
+            writeFixture("#!/bin/sh\nprintf 'codex-cli 0.43.0\\n'\n", to: node)
+            for executable in [claude, codex, node] {
+                try! FileManager.default.setAttributes(
+                    [.posixPermissions: 0o755],
+                    ofItemAtPath: executable.path)
+            }
+
+            let locator = HostExecutableLocator.standard(
+                environmentPath: "/usr/bin:/bin",
+                homeDirectory: root)
+            let claudeRunner = ActivationScopeCommandRunner(
+                result: .completed(exitCode: 0, stdout: "2.1.207 (Claude Code)\n"))
+            let codexRunner = ActivationScopeCommandRunner(
+                result: .completed(exitCode: 0, stdout: "codex-cli 0.42.0\n"))
+            let claudeScope = HostActivationScope.claudeCode(
+                executableLocator: locator,
+                commandRunner: claudeRunner)
+            let codexScope = HostActivationScope.codex(
+                executableLocator: locator,
+                commandRunner: codexRunner)
+
+            expect(
+                claudeRunner.executablePaths == [claude.resolvingSymlinksInPath().path],
+                "Claude scope 必须直接执行 ~/.local/bin 的绝对路径，不能交给 GUI PATH 查找")
+            expect(
+                codexRunner.executablePaths == [codex.resolvingSymlinksInPath().path],
+                "Codex scope 必须从 NVM 目录解析绝对路径，不能依赖 Finder PATH")
+            expect(
+                claudeScope?.contains("host=2.1.207 (Claude Code)") == true,
+                "Claude 绝对路径版本输出必须进入 scope")
+            expect(
+                codexScope?.contains("host=cli=codex-cli 0.42.0") == true,
+                "Codex 绝对路径版本输出必须进入 scope")
+
+            let nvmOnlyLocator = HostExecutableLocator(
+                searchDirectories: [codex.deletingLastPathComponent()])
+            expect(
+                HostActivationScope.codex(executableLocator: nvmOnlyLocator)?
+                    .contains("host=cli=codex-cli 0.43.0") == true,
+                "绝对 npm shim 的 /usr/bin/env node 必须从解析后的 NVM 目录启动")
+        }
+    }
+
+    suite("activation scope：候选不是可执行普通文件时继续失败关闭") {
+        withTempDirectory { root in
+            let directoryCandidate = root.appendingPathComponent("bin/claude", isDirectory: true)
+            try! FileManager.default.createDirectory(
+                at: directoryCandidate,
+                withIntermediateDirectories: true)
+            let locator = HostExecutableLocator(
+                searchDirectories: [directoryCandidate.deletingLastPathComponent()])
+            let runner = ActivationScopeCommandRunner(
+                result: .completed(exitCode: 0, stdout: "2.1.207 (Claude Code)\n"))
+
+            expect(
+                HostActivationScope.claudeCode(
+                    executableLocator: locator,
+                    commandRunner: runner) == nil,
+                "同名目录不得被当成宿主 CLI")
+            expect(runner.executablePaths.isEmpty, "无安全绝对路径时不得启动版本子进程")
+        }
+    }
+
     suite("宿主能力目录：接口能力与当前实现分离") {
         let claude = HostCapabilityCatalog.bindings(for: .claudeCode)
         let codex = HostCapabilityCatalog.bindings(for: .codex)
@@ -305,6 +376,33 @@ func runHostIntegrationModelSuites() {
                 matrix.cell(host: .claudeCode, event: .stop)?.state == .audible,
                 "仍有文件的本轮结束格必须保持 audible")
         }
+    }
+}
+
+private final class ActivationScopeCommandRunner: CommandRunning, @unchecked Sendable {
+    private let lock = NSLock()
+    private let result: CommandRunResult
+    private var recordedExecutablePaths: [String] = []
+
+    init(result: CommandRunResult) {
+        self.result = result
+    }
+
+    var executablePaths: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedExecutablePaths
+    }
+
+    func run(
+        executablePath: String,
+        arguments: [String],
+        timeout: TimeInterval
+    ) -> CommandRunResult {
+        lock.lock()
+        recordedExecutablePaths.append(executablePath)
+        lock.unlock()
+        return result
     }
 }
 

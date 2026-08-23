@@ -631,11 +631,16 @@ func runIntegrationsWindowWiringSuites() {
             "恢复返回 false 时不得无条件 return，必须继续 handback 或 deactivate")
     }
 
-    suite("检查器证据：真实 snapshot receipt 与两个实际配置路径由共享 store 投影") {
-        guard let store = integrationsSource(
-            "gui/Sources/ClaudioGUI/HostIntegrationPresentationStore.swift")
+    suite("检查器证据：稳定 surface 注入真实路径，AX 占位不合成伪配置来源") {
+        guard
+            let store = integrationsSource(
+                "gui/Sources/ClaudioGUI/HostIntegrationPresentationStore.swift"),
+            let menu = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
+            let model = integrationsSource(
+                "gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift"),
+            let view = integrationsSource("gui/Sources/ClaudioGUI/IntegrationsWindowView.swift")
         else {
-            expect(false, "缺少 HostIntegrationPresentationStore")
+            expect(false, "缺少 integrations store/menu/model/view")
             return
         }
         expect(
@@ -643,9 +648,20 @@ func runIntegrationsWindowWiringSuites() {
                 && store.contains("flatMap(hostLatestReceiptText)"),
             "最近真实回执必须来自 manager snapshot，不得由 View 读 receipts")
         expect(
-            store.contains("configurationSources[row.host]")
+            store.contains("configurationSource: configurationSources[row.host]")
+                && !store.contains("integrationsManagerProvidedSource")
                 && store.contains("latestReceiptText:"),
-            "检查器必须从共享 store 注入实际配置来源与回执")
+            "共享 store 必须保留可空配置来源，不能用说明文字填充缺项")
+        expect(
+            menu.contains(".claudeCode: ClaudioPaths.claudeSettingsFile.path")
+                && menu.contains(".codex: ClaudioPaths.codexHooksFile.path")
+                && menu.contains(".workBuddy: ClaudioPaths.workBuddySettingsFile.path"),
+            "三个 native-hook surface 必须各注入真实配置路径")
+        expect(
+            model.contains("guard let inspector, let configurationSource")
+                && view.contains("if let configurationSource = inspector.configurationSource")
+                && view.contains("configurationPathHost: model.inspector?.configurationSource == nil"),
+            "无配置来源的 AX inspector 不得复制、不渲染路径控件，也不得进入焦点环")
     }
 
     suite("IntegrationsWindow boundary：视图与 controller 只消费注入 presentation，不自行读宿主配置") {
@@ -676,7 +692,7 @@ func runIntegrationsWindowWiringSuites() {
             "重新检测与连接动作必须经注入 handler 回到共享 manager seam")
     }
 
-    suite("IntegrationsWindow layout：紧凑双宿主摘要；标准 5×2 表格，最大文字纵向双宿主行；只有纵向滚动") {
+    suite("IntegrationsWindow layout：五列按可读宽度切换矩阵/事件卡，只有纵向滚动") {
         guard
             let view = integrationsSource(
                 "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift")
@@ -696,7 +712,8 @@ func runIntegrationsWindowWiringSuites() {
             "两条宿主摘要必须共享实现并各自占满等宽槽")
         expect(
             view.contains("usesNarrowCapabilityTable")
-                && view.contains("case .eventCards = layoutAdaptation.mode")
+                && view.contains(
+                    "case .eventCards = layoutAdaptation(availableWidth: availableWidth).mode")
                 && view.contains("standardCapabilityMatrix")
                 && view.contains("narrowCapabilityTable"),
             "真实视图必须消费纯模型的两种 Dynamic Type 布局，而不是只在测试里声明")
@@ -711,9 +728,10 @@ func runIntegrationsWindowWiringSuites() {
             view.contains("interfaceTextSize == .maximum ? 3 : 1"),
             "只有固定选择摘要可在非最大文字时单行；最大文字必须放开为三行")
         expect(
-            view.contains("interfaceTextSize == .maximum")
+            view.contains("availableWidth: Double(availableWidth)")
+                && view.contains("hostCount: localizedMatrix.hostColumns.count")
                 && view.contains("integrationsWindowLayoutAdaptation"),
-            "Claudio 最大文字档必须真实映射到 presentation 的 eventCards 决策")
+            "视图必须把真实内容宽度与动态 surface 数交给 eventCards 决策")
         expect(
             view.contains("width >= 760 && interfaceTextSize != .maximum")
                 && view.contains("if usesSideBySideLayout(width: geometry.size.width)")
@@ -747,7 +765,8 @@ func runIntegrationsWindowWiringSuites() {
                 && model.contains(".copyHooksCommand"),
             "Codex 待授权必须通过统一动作标题渲染复制 /hooks")
         expect(
-            view.contains("Label(l10n.text(.integrationsRedetect), systemImage: \"arrow.clockwise\")"),
+            view.contains(
+                "Label(l10n.text(.integrationsRedetect), systemImage: \"arrow.clockwise\")"),
             "重新检测必须位于窗口工具栏")
         expect(
             view.contains("localizedInspectorActionTitle(")
@@ -782,8 +801,10 @@ func runIntegrationsWindowWiringSuites() {
             "打开焦点必须取纯模型焦点序第一项")
         expect(
             view.contains("integrationsWindowFocusOrder(focusScope)")
+                && view.contains("hostSurfacePresentationOrder(from: model.content.sourceRows)")
+                && model.contains("firstPresentedHost(in: content)")
                 && model.contains("IntegrationsWindowFocusCoordinator"),
-            "焦点恢复与控件消失后的 reconcile 必须复用同一纯顺序")
+            "初选、焦点恢复与 reconcile 必须复用 Product → Surface 纯顺序")
     }
 
     suite("IntegrationsWindow VoiceOver：宿主、格子与短暂反馈都提供完整独立 label") {

@@ -46,7 +46,7 @@ public struct ClaudeCodeIntegrationEnvironment: Sendable {
         self.claudioBinaryPath = claudioBinaryPath
         self.claudioRoot = claudioRoot
         self.receiptStore = receiptStore
-        self.scopeFingerprint = scopeFingerprint ?? HostActivationScope.claudeCode
+        self.scopeFingerprint = scopeFingerprint ?? { HostActivationScope.claudeCode() }
         self.availability = availability
     }
 }
@@ -107,7 +107,7 @@ public struct CodexIntegrationEnvironment: Sendable {
         self.claudioBinaryPath = claudioBinaryPath
         self.claudioRoot = claudioRoot
         self.receiptStore = receiptStore
-        self.scopeFingerprint = scopeFingerprint ?? HostActivationScope.codex
+        self.scopeFingerprint = scopeFingerprint ?? { HostActivationScope.codex() }
         self.availability = availability
         self.beforeLegacyWrapperFinalPublish = beforeLegacyWrapperFinalPublish
     }
@@ -152,8 +152,8 @@ public struct ClaudeCodeIntegrationAdapter: HostIntegrationAdapter {
         let activeID = environment.receiptStore.currentInstallationID(host: .claudeCode)
         let reusableInstallationID =
             environment.receiptStore.currentInstallationScopeFingerprint(host: .claudeCode)
-            == scopeFingerprint
-            ? activeID : nil
+                == scopeFingerprint
+                ? activeID : nil
         let transaction = ConfigFileTransaction(
             file: environment.settingsFile,
             lockFile: environment.lockFile,
@@ -295,8 +295,8 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
         let activeID = environment.receiptStore.currentInstallationID(host: .codex)
         let reusableInstallationID =
             environment.receiptStore.currentInstallationScopeFingerprint(host: .codex)
-            == scopeFingerprint
-            ? activeID : nil
+                == scopeFingerprint
+                ? activeID : nil
         let wrapperContext = inspectLegacyWrapperContext(environment: environment)
         if case .conflict(let reason) = wrapperContext {
             return .failure(.migrationConflict(reason: reason))

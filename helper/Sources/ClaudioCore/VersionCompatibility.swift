@@ -161,8 +161,14 @@ public struct SystemCommandRunner: CommandRunning {
     /// grow this process's memory while we drain it to EOF. Bytes past the cap are read (so
     /// the child never blocks on a full pipe, and EOF still arrives) and dropped.
     private static let maximumOutputBytes = 1 << 20
+    private let environmentOverrides: [String: String]
 
-    public init() {}
+    /// Overrides are merged into the inherited environment. Host-version probing uses this to
+    /// prepend resolved version-manager directories to `PATH`, allowing an absolute npm shim with
+    /// `#!/usr/bin/env node` to find its sibling runtime without consulting the GUI process PATH.
+    public init(environmentOverrides: [String: String] = [:]) {
+        self.environmentOverrides = environmentOverrides
+    }
 
     public func run(
         executablePath: String, arguments: [String], timeout: TimeInterval
@@ -170,6 +176,11 @@ public struct SystemCommandRunner: CommandRunning {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
         process.arguments = arguments
+        if !environmentOverrides.isEmpty {
+            var environment = ProcessInfo.processInfo.environment
+            environment.merge(environmentOverrides) { _, replacement in replacement }
+            process.environment = environment
+        }
         process.standardInput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         let outputPipe = Pipe()

@@ -112,7 +112,14 @@ func runHostIntegrationPresentationSuites() {
             },
             "两个 Desktop AX surface 必须作为 GUI-only Beta 不可用占位出现")
         let groups = hostSourceProductGroups(from: rows)
+        let visualOrder = hostSurfacePresentationOrder(from: rows)
         expect(groups.map(\.product) == HostProductID.allCases, "来源必须按产品稳定分组")
+        expect(
+            visualOrder
+                == [
+                    .codex, .chatGPTDesktopAX, .claudeCode, .claudeDesktopAX, .workBuddy,
+                ],
+            "Product → Surface 必须形成来源卡、矩阵与焦点共用的唯一视觉顺序")
         expect(
             groups.first(where: { $0.product == .chatGPT })?.surfaces.map(\.host)
                 == [.codex, .chatGPTDesktopAX],
@@ -186,14 +193,17 @@ func runHostIntegrationPresentationSuites() {
     }
 
     suite("可听能力矩阵：严格由五个语义行 × registry 宿主单元组成") {
-        let presentation = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
+        let visualOrder = hostSurfacePresentationOrder()
+        let presentation = hostCapabilityMatrixPresentation(
+            from: hostPresentationMatrix(),
+            hostOrder: visualOrder)
 
-        expect(presentation.hostColumns == HostID.allCases, "矩阵宿主列必须来自 HostID.allCases")
+        expect(presentation.hostColumns == visualOrder, "矩阵宿主列必须服从 Product → Surface 视觉序")
         expect(presentation.rows.map(\.event) == Event.allCases, "矩阵事件行必须来自 Event.allCases")
         expect(presentation.rows.count == 5, "矩阵必须有五个事件行")
         expect(
-            presentation.rows.allSatisfy { $0.cells.map(\.host) == HostID.allCases },
-            "每个事件行必须按 registry 顺序提供全部单元")
+            presentation.rows.allSatisfy { $0.cells.map(\.host) == visualOrder },
+            "每个事件行必须按同一视觉顺序提供全部单元")
         expect(
             presentation.rows.flatMap(\.cells).count == Event.allCases.count
                 * HostID.allCases.count,
@@ -491,17 +501,32 @@ func runHostIntegrationPresentationSuites() {
         }
     }
 
-    suite("IntegrationsWindow Dynamic Type：标准矩阵与最大字号卡片都消费动态宿主数") {
-        let standard = integrationsWindowLayoutAdaptation(for: .standard)
-        let maximum = integrationsWindowLayoutAdaptation(for: .maximum)
+    suite("IntegrationsWindow 布局：默认五列改用事件卡，足够宽才显示矩阵") {
+        let defaultWindowCapabilityWidth = 840.0 - max(300.0, 840.0 * 0.39) - 41.0
+        let defaultWindow = integrationsWindowLayoutAdaptation(
+            for: .standard,
+            availableWidth: defaultWindowCapabilityWidth)
+        let wide = integrationsWindowLayoutAdaptation(
+            for: .standard,
+            availableWidth: 1_000)
+        let maximum = integrationsWindowLayoutAdaptation(
+            for: .maximum,
+            availableWidth: 1_000)
 
         expect(
-            standard.mode
+            defaultWindow.mode
+                == .eventCards(
+                    cardCount: Event.allCases.count,
+                    hostRowsPerCard: HostID.allCases.count),
+            "默认 840px 左右分栏的五列空间不足，必须使用纵向事件卡，实得 \(defaultWindow.mode)")
+        expect(!defaultWindow.allowsHorizontalScrolling, "默认窗口不得用横向滚动隐藏拥挤")
+        expect(
+            wide.mode
                 == .capabilityMatrix(
                     eventRowCount: Event.allCases.count,
                     hostColumnCount: HostID.allCases.count),
-            "标准字号必须保留完整动态矩阵，实得 \(standard.mode)")
-        expect(!standard.allowsHorizontalScrolling, "标准字号不应依赖横向滚动")
+            "每个宿主列达到可读宽度后应恢复完整动态矩阵，实得 \(wide.mode)")
+        expect(!wide.allowsHorizontalScrolling, "宽窗口矩阵也不应依赖横向滚动")
         expect(
             maximum.mode
                 == .eventCards(
@@ -512,9 +537,13 @@ func runHostIntegrationPresentationSuites() {
     }
 
     suite("IntegrationsWindow 焦点序：宿主摘要领先、矩阵逐行、检查器视觉序随后，断开永远最后") {
-        let matrix = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
+        let visualOrder = hostSurfacePresentationOrder()
+        let matrix = hostCapabilityMatrixPresentation(
+            from: hostPresentationMatrix(),
+            hostOrder: visualOrder)
         let scope = IntegrationsWindowFocusScope(
             matrix: matrix,
+            hostOrder: visualOrder,
             inspectorActions: [
                 .disconnect(.codex), .copyHooksCommand, .redetect, .connect(.claudeCode),
             ],
@@ -523,16 +552,16 @@ func runHostIntegrationPresentationSuites() {
             feedbackRevision: 7)
         let order = integrationsWindowFocusOrder(scope)
         let expectedCells = Event.allCases.flatMap { event in
-            HostID.allCases.map {
+            visualOrder.map {
                 IntegrationsWindowFocusTarget.capabilityCell(host: $0, event: event)
             }
         }
 
-        let hostCount = HostID.allCases.count
+        let hostCount = visualOrder.count
         let cellCount = Event.allCases.count * hostCount
         expect(
-            Array(order.prefix(hostCount)) == HostID.allCases.map { .hostCard($0) },
-            "焦点必须先按视觉序经过所有等权宿主卡")
+            Array(order.prefix(hostCount)) == visualOrder.map { .hostCard($0) },
+            "焦点必须先按 Product → Surface 视觉序经过所有等权宿主卡")
         expect(
             Array(order.dropFirst(hostCount).prefix(cellCount)) == expectedCells,
             "焦点随后必须按事件行、宿主列遍历全部真实矩阵单元")

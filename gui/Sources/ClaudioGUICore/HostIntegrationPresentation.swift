@@ -69,11 +69,31 @@ public struct HostSourceProductGroupPresentation: Identifiable, Sendable, Equata
     }
 }
 
+/// Product → Surface 的唯一视觉顺序。`HostID.allCases` 是稳定 registry 顺序，但产品分组、
+/// 矩阵列、初始选择和键盘遍历都必须消费这里的呈现顺序，不能分别推导。
+public func hostSurfacePresentationOrder(
+    hosts: [HostID] = HostID.allCases
+) -> [HostID] {
+    HostProductID.allCases.flatMap { product in
+        hosts.filter { $0.descriptor.product == product }
+    }
+}
+
+public func hostSurfacePresentationOrder(
+    from rows: [HostSourceRowPresentation]
+) -> [HostID] {
+    hostSurfacePresentationOrder(hosts: rows.map(\.host))
+}
+
 public func hostSourceProductGroups(
     from rows: [HostSourceRowPresentation]
 ) -> [HostSourceProductGroupPresentation] {
     HostProductID.allCases.compactMap { product in
-        let surfaces = rows.filter { $0.host.descriptor.product == product }
+        let surfaces: [HostSourceRowPresentation] = hostSurfacePresentationOrder(from: rows)
+            .compactMap { host in
+                guard host.descriptor.product == product else { return nil }
+                return rows.first(where: { $0.host == host })
+            }
         guard !surfaces.isEmpty else { return nil }
         return HostSourceProductGroupPresentation(
             product: product,
@@ -279,7 +299,7 @@ public struct HostCapabilityEventRowPresentation: Identifiable, Sendable, Equata
     }
 }
 
-/// 标准布局按 `hostColumns` 画两列；最大字号复用相同 `rows`，只把每行重排成事件卡。
+/// 标准布局按 `hostColumns` 画动态列；事件卡布局复用相同 `rows`，只改变几何。
 public struct HostCapabilityMatrixPresentation: Sendable, Equatable {
     public let hostColumns: [HostID]
     public let rows: [HostCapabilityEventRowPresentation]
@@ -301,15 +321,17 @@ public struct HostCapabilityMatrixPresentation: Sendable, Equatable {
 /// 此处不会按宿主或事件补写任何原生事件名。
 public func hostCapabilityMatrixPresentation(
     from matrix: AudibilityMatrix,
-    mutedReason: HostCapabilityMuteReason = .eventDisabled
+    mutedReason: HostCapabilityMuteReason = .eventDisabled,
+    hostOrder: [HostID]? = nil
 ) -> HostCapabilityMatrixPresentation {
-    HostCapabilityMatrixPresentation(
-        hostColumns: HostID.allCases,
+    let orderedHosts = hostOrder ?? HostID.allCases
+    return HostCapabilityMatrixPresentation(
+        hostColumns: orderedHosts,
         rows: matrix.rows.map { row in
             HostCapabilityEventRowPresentation(
                 event: row.event,
                 title: row.event.displayName,
-                cells: HostID.allCases.compactMap { host in
+                cells: orderedHosts.compactMap { host in
                     row.cells.first(where: { $0.host == host }).map { cell in
                         HostCapabilityCellPresentation(
                             cell: cell,
@@ -569,17 +591,27 @@ public struct IntegrationsWindowLayoutAdaptation: Sendable, Equatable {
     }
 }
 
-/// 最大字号只改变几何：五行变五张卡，每张仍消费同一行的两个真实宿主格；两个布局都不把
-/// 横向滚动当作文字放不下时的退路。
+/// 矩阵的 118pt 事件列之外，每个 Host Surface 至少需要 156pt 才能同时容纳状态 glyph、
+/// `UserPromptSubmit` 等原生事件和限定语。达不到时复用事件卡，不用横向滚动掩盖不可读列。
+public let integrationsWindowEventColumnWidth = 118.0
+public let integrationsWindowMinimumHostColumnWidth = 156.0
+
 public func integrationsWindowLayoutAdaptation(
     for tier: IntegrationsWindowTypeSizeTier,
+    availableWidth: Double,
     eventCount: Int = Event.allCases.count,
     hostCount: Int = HostID.allCases.count
 ) -> IntegrationsWindowLayoutAdaptation {
     let mode: IntegrationsWindowLayoutMode
     switch tier {
     case .standard:
-        mode = .capabilityMatrix(eventRowCount: eventCount, hostColumnCount: hostCount)
+        let requiredWidth =
+            integrationsWindowEventColumnWidth
+            + integrationsWindowMinimumHostColumnWidth * Double(hostCount)
+        mode =
+            availableWidth >= requiredWidth
+            ? .capabilityMatrix(eventRowCount: eventCount, hostColumnCount: hostCount)
+            : .eventCards(cardCount: eventCount, hostRowsPerCard: hostCount)
     case .maximum:
         mode = .eventCards(cardCount: eventCount, hostRowsPerCard: hostCount)
     }
@@ -665,6 +697,7 @@ public enum IntegrationsWindowFocusTarget: Sendable, Hashable {
 /// retained window 的键盘环被 popover 的关闭/恢复规则污染。
 public struct IntegrationsWindowFocusScope: Sendable, Equatable {
     public let matrix: HostCapabilityMatrixPresentation
+    public let hostOrder: [HostID]
     public let inspectorActions: [IntegrationsWindowInspectorAction]
     public let recoveryAction: IntegrationsRecoveryAction
     public let configurationPathHost: HostID?
@@ -672,12 +705,14 @@ public struct IntegrationsWindowFocusScope: Sendable, Equatable {
 
     public init(
         matrix: HostCapabilityMatrixPresentation,
+        hostOrder: [HostID]? = nil,
         inspectorActions: [IntegrationsWindowInspectorAction],
         recoveryAction: IntegrationsRecoveryAction = .none,
         configurationPathHost: HostID? = nil,
         feedbackRevision: UInt64? = nil
     ) {
         self.matrix = matrix
+        self.hostOrder = hostOrder ?? matrix.hostColumns
         self.inspectorActions = inspectorActions
         self.recoveryAction = recoveryAction
         self.configurationPathHost = configurationPathHost
@@ -685,16 +720,21 @@ public struct IntegrationsWindowFocusScope: Sendable, Equatable {
     }
 }
 
-/// 从上到下遍历两张宿主摘要与矩阵，再进入检查器。即使调用者把断开动作夹在中间，函数也
-/// 会把全部破坏性动作移到末尾；视图不能无意中让首焦点或普通 Tab 流先撞上断开。
+/// 从上到下按 Product → Surface 遍历来源摘要与矩阵，再进入检查器。即使调用者把断开动作
+/// 夹在中间，函数也会把全部破坏性动作移到末尾；普通 Tab 流不能先撞上断开。
 public func integrationsWindowFocusOrder(
     _ scope: IntegrationsWindowFocusScope
 ) -> [IntegrationsWindowFocusTarget] {
-    var order = HostID.allCases.map(IntegrationsWindowFocusTarget.hostCard)
+    let declaredHosts = scope.hostOrder.filter { scope.matrix.hostColumns.contains($0) }
+    let remainingHosts = scope.matrix.hostColumns.filter { !declaredHosts.contains($0) }
+    let orderedHosts = declaredHosts + remainingHosts
+    var order = orderedHosts.map(IntegrationsWindowFocusTarget.hostCard)
     order.append(
         contentsOf: scope.matrix.rows.flatMap { row in
-            row.cells.map {
-                IntegrationsWindowFocusTarget.capabilityCell(host: $0.host, event: $0.event)
+            orderedHosts.compactMap { host in
+                row.cells.first(where: { $0.host == host }).map {
+                    IntegrationsWindowFocusTarget.capabilityCell(host: $0.host, event: $0.event)
+                }
             }
         })
     if let host = scope.configurationPathHost {

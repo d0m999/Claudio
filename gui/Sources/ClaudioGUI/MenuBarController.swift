@@ -116,6 +116,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             configurationSources: [
                 .claudeCode: ClaudioPaths.claudeSettingsFile.path,
                 .codex: ClaudioPaths.codexHooksFile.path,
+                .workBuddy: ClaudioPaths.workBuddySettingsFile.path,
             ])
         let bootstrapReports = BootstrapReportPresentationStore()
         let integrationsModel = IntegrationsWindowModel(

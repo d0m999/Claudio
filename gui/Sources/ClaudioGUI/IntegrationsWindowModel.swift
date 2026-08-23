@@ -20,7 +20,7 @@ enum IntegrationsWindowSelection: Sendable, Hashable {
 /// manager; this window never opens a host configuration or receipt file itself.
 struct IntegrationsWindowHostInspectorFacts: Sendable, Equatable {
     let host: HostID
-    let configurationSource: String
+    let configurationSource: String?
     let latestReceiptText: String?
     let latestReceiptEvidence: HostReceiptEvidence?
     let actions: [IntegrationsWindowInspectorAction]
@@ -31,7 +31,7 @@ struct IntegrationsWindowInspectorPresentation: Sendable, Equatable {
     let host: HostID
     let title: String
     let connectionText: String
-    let configurationSource: String
+    let configurationSource: String?
     let nativeEventText: String?
     let latestReceiptText: String?
     let qualificationText: String?
@@ -259,7 +259,7 @@ final class IntegrationsWindowModel: ObservableObject {
         self.clipboardWriter = clipboardWriter
         self.onContentChanged = onContentChanged
         inFlightOperation = nil
-        selection = .host(content.sourceRows.first?.host ?? .claudeCode)
+        selection = .host(firstPresentedHost(in: content) ?? .claudeCode)
     }
 
     deinit {
@@ -464,8 +464,10 @@ final class IntegrationsWindowModel: ObservableObject {
     }
 
     func copyConfigurationPath() {
-        guard let inspector else { return }
-        let didCopy = clipboardWriter(inspector.configurationSource)
+        guard let inspector, let configurationSource = inspector.configurationSource else {
+            return
+        }
+        let didCopy = clipboardWriter(configurationSource)
         presentFeedback(
             host: inspector.host,
             kind: didCopy ? .information : .failure,
@@ -489,7 +491,7 @@ final class IntegrationsWindowModel: ObservableObject {
         content = replacement
         onContentChanged(replacement)
         if !replacement.contains(selection) {
-            selection = .host(replacement.sourceRows.first?.host ?? .claudeCode)
+            selection = .host(firstPresentedHost(in: replacement) ?? .claudeCode)
         }
     }
 
@@ -606,6 +608,10 @@ final class IntegrationsWindowModel: ObservableObject {
             arguments: [error.localizedDescription])
     }
 
+}
+
+private func firstPresentedHost(in content: IntegrationsWindowContent) -> HostID? {
+    hostSurfacePresentationOrder(from: content.sourceRows).first
 }
 
 private struct IntegrationsReceiptTransition {

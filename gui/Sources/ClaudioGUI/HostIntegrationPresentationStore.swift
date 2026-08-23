@@ -116,9 +116,7 @@ private func integrationWindowContent(
                 row.host,
                 IntegrationsWindowHostInspectorFacts(
                     host: row.host,
-                    configurationSource: configurationSources[row.host]
-                        ?? ClaudioL10n(language: .zhHans).text(
-                            .integrationsManagerProvidedSource),
+                    configurationSource: configurationSources[row.host],
                     latestReceiptText: snapshots[row.host].flatMap(hostLatestReceiptText),
                     latestReceiptEvidence: snapshots[row.host].flatMap(hostLatestReceiptEvidence),
                     actions: integrationsInspectorActions(for: row))
@@ -128,6 +126,7 @@ private func integrationWindowContent(
         sourceRows: sourceRows,
         matrix: hostCapabilityMatrixPresentation(
             from: state.matrix,
-            mutedReason: state.masterVolumeIsZero ? .masterVolumeZero : .eventDisabled),
+            mutedReason: state.masterVolumeIsZero ? .masterVolumeZero : .eventDisabled,
+            hostOrder: hostSurfacePresentationOrder(from: sourceRows)),
         inspectorFacts: facts)
 }

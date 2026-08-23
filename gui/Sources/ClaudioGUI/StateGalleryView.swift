@@ -547,6 +547,7 @@ import SwiftUI
                 configurationSources: [
                     .claudeCode: "~/.claude/settings.json",
                     .codex: "~/.codex/hooks.json",
+                    .workBuddy: "~/.workbuddy/settings.json",
                 ])
             let content = store.content
             let unchanged = IntegrationsWindowActionOutcome(

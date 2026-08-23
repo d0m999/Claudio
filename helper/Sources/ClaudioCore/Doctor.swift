@@ -357,9 +357,12 @@ public struct DoctorIntegrationsEnvironment: Sendable {
                 && isDirectory.boolValue
                 ? .available : .unavailable(reason: "未检测到 WorkBuddy Desktop")
         },
-        claudeScopeFingerprint: @escaping @Sendable () -> String? = HostActivationScope
-            .claudeCode,
-        codexScopeFingerprint: @escaping @Sendable () -> String? = HostActivationScope.codex,
+        claudeScopeFingerprint: @escaping @Sendable () -> String? = {
+            HostActivationScope.claudeCode()
+        },
+        codexScopeFingerprint: @escaping @Sendable () -> String? = {
+            HostActivationScope.codex()
+        },
         workBuddyScopeFingerprint: @escaping @Sendable () -> String? = HostActivationScope
             .workBuddy
     ) {

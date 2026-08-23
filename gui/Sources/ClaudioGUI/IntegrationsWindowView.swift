@@ -72,9 +72,9 @@ struct IntegrationsWindowView: View {
             host: raw.host,
             title: title,
             connectionText: connectionText,
-            configurationSource: localizedConfigurationSource(
-                raw.configurationSource,
-                language: languageStore.language),
+            configurationSource: raw.configurationSource.map {
+                localizedConfigurationSource($0, language: languageStore.language)
+            },
             nativeEventText: nativeEventText,
             latestReceiptText: localizedLatestReceiptText(
                 raw.latestReceiptText,
@@ -112,7 +112,7 @@ struct IntegrationsWindowView: View {
                 if usesSideBySideLayout(width: geometry.size.width) {
                     sideBySideContent(width: geometry.size.width)
                 } else {
-                    stackedContent
+                    stackedContent(width: geometry.size.width)
                 }
             }
         }
@@ -201,24 +201,26 @@ struct IntegrationsWindowView: View {
     }
 
     private func sideBySideContent(width: CGFloat) -> some View {
-        HStack(spacing: 0) {
+        let inspectorWidth = max(300, width * 0.39)
+        let capabilityWidth = max(0, width - inspectorWidth - 41)
+        return HStack(spacing: 0) {
             ScrollView(.vertical, showsIndicators: true) {
-                capabilitySection.padding(20)
+                capabilitySection(availableWidth: capabilityWidth).padding(20)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
             ScrollView(.vertical, showsIndicators: true) {
                 inspectorSection.padding(20)
             }
-            .frame(width: max(300, width * 0.39))
+            .frame(width: inspectorWidth)
             .frame(maxHeight: .infinity)
         }
     }
 
-    private var stackedContent: some View {
+    private func stackedContent(width: CGFloat) -> some View {
         ScrollView(.vertical, showsIndicators: true) {
             VStack(alignment: .leading, spacing: 18) {
-                capabilitySection
+                capabilitySection(availableWidth: max(0, width - 40))
                 Divider()
                 inspectorSection
             }
@@ -327,12 +329,12 @@ struct IntegrationsWindowView: View {
     }
 
     @ViewBuilder
-    private var capabilitySection: some View {
+    private func capabilitySection(availableWidth: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(l10n.text(.integrationsCapability))
                 .font(ClaudioTheme.font(.sectionTitle))
                 .accessibilityAddTraits(.isHeader)
-            if usesNarrowCapabilityTable {
+            if usesNarrowCapabilityTable(availableWidth: availableWidth) {
                 narrowCapabilityTable
             } else {
                 standardCapabilityMatrix
@@ -502,7 +504,9 @@ struct IntegrationsWindowView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     evidenceRow(
                         label: l10n.text(.integrationsConnection), value: inspector.connectionText)
-                    configurationEvidenceRow(inspector)
+                    if let configurationSource = inspector.configurationSource {
+                        configurationEvidenceRow(inspector, source: configurationSource)
+                    }
                     evidenceRow(
                         label: l10n.text(.integrationsNativeEvent),
                         value: inspector.nativeEventText ?? l10n.text(.integrationsChooseEvent))
@@ -552,9 +556,10 @@ struct IntegrationsWindowView: View {
     }
 
     private func configurationEvidenceRow(
-        _ inspector: IntegrationsWindowInspectorPresentation
+        _ inspector: IntegrationsWindowInspectorPresentation,
+        source: String
     ) -> some View {
-        let fullPath = inspector.configurationSource
+        let fullPath = source
         let shortPath = abbreviatedConfigurationPath(fullPath)
         return VStack(alignment: .leading, spacing: 3) {
             Text(l10n.text(.integrationsConfigurationSource))
@@ -732,9 +737,11 @@ struct IntegrationsWindowView: View {
     private var focusScope: IntegrationsWindowFocusScope {
         IntegrationsWindowFocusScope(
             matrix: model.content.matrix,
+            hostOrder: hostSurfacePresentationOrder(from: model.content.sourceRows),
             inspectorActions: visibleInspectorActions,
             recoveryAction: primaryRecoveryAction,
-            configurationPathHost: model.inspector?.host,
+            configurationPathHost: model.inspector?.configurationSource == nil
+                ? nil : model.inspector?.host,
             feedbackRevision: model.feedback?.revision)
     }
 
@@ -792,12 +799,15 @@ struct IntegrationsWindowView: View {
         interfaceTextSize == .maximum ? .maximum : .standard
     }
 
-    private var layoutAdaptation: IntegrationsWindowLayoutAdaptation {
-        integrationsWindowLayoutAdaptation(for: typeSizeTier)
+    private func layoutAdaptation(availableWidth: CGFloat) -> IntegrationsWindowLayoutAdaptation {
+        integrationsWindowLayoutAdaptation(
+            for: typeSizeTier,
+            availableWidth: Double(availableWidth),
+            hostCount: localizedMatrix.hostColumns.count)
     }
 
-    private var usesNarrowCapabilityTable: Bool {
-        if case .eventCards = layoutAdaptation.mode { return true }
+    private func usesNarrowCapabilityTable(availableWidth: CGFloat) -> Bool {
+        if case .eventCards = layoutAdaptation(availableWidth: availableWidth).mode { return true }
         return false
     }
 
