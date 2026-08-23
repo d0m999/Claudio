@@ -86,6 +86,45 @@ private final class ChatAXThreadSafeCounter: @unchecked Sendable {
     }
 }
 
+private final class ChatAXConcurrentSamplerProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var starts = 0
+    private var active = 0
+    private var maximumActive = 0
+
+    func begin() {
+        lock.lock()
+        starts += 1
+        active += 1
+        maximumActive = max(maximumActive, active)
+        lock.unlock()
+    }
+
+    func finish() {
+        lock.lock()
+        active -= 1
+        lock.unlock()
+    }
+
+    var snapshot: (starts: Int, active: Int, maximumActive: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (starts, active, maximumActive)
+    }
+}
+
+@MainActor
+private func chatAXEventually(
+    attempts: Int = 1_000,
+    condition: () -> Bool
+) async -> Bool {
+    for _ in 0..<attempts {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return condition()
+}
+
 @MainActor
 private final class ChatAXFixtureObserver: ChatAXTraceObserving {
     private(set) var startCount = 0
@@ -527,59 +566,352 @@ func runChatAXTracerSuites() async {
         gate.release(recoveredLease)
     }
 
-    suite("Chat AX tracer deferred query gate：contention 合并且不冒充 target drift") {
-        var gate = ChatAXDeferredSystemQueryGate()
+    suite("Chat AX tracer event query gate：每代只运行一个并合并最新 successor") {
+        var gate = ChatAXEventQueryGate()
         expect(
-            gate.enqueue(nowMilliseconds: 0, timeoutMilliseconds: 500) == nil,
-            "未启动 session 不得积压 AX event")
+            gate.enqueue(elapsedMilliseconds: 10) == nil,
+            "未启动 session 不得创建 event query")
         gate.beginSession()
         guard
-            let first = gate.enqueue(nowMilliseconds: 100, timeoutMilliseconds: 500),
-            let coalesced = gate.enqueue(nowMilliseconds: 200, timeoutMilliseconds: 500)
+            case .start(let first)? = gate.enqueue(elapsedMilliseconds: 100),
+            case .coalesced(let second)? = gate.enqueue(elapsedMilliseconds: 200),
+            case .coalesced(let latest)? = gate.enqueue(elapsedMilliseconds: 300)
         else {
-            expect(false, "活跃 session 必须能建立 deferred query request")
+            expect(false, "第一条 event 必须启动，后续 event 必须合并")
             return
         }
-        expect(first == coalesced, "同一 session 的 contention event 必须合并为一次复验")
-        expect(gate.hasPendingRequest, "worker busy 时 pending request 必须保持可重试")
+        expect(first.elapsedMilliseconds == 100, "active request 必须保留 callback 抵达时间")
+        expect(latest.elapsedMilliseconds == 300, "coalescing 必须保留最新 callback 的抵达时间")
+        expect(second != latest, "更新 pending 必须产生独立 token，让旧结果可判 stale")
         expect(
-            gate.decide(
-                first,
-                nowMilliseconds: 300,
-                workerLeaseAvailable: false) == .waiting,
-            "同 session worker 正常持 lease 只能等待，不能当成 identity mismatch")
+            gate.complete(first) == .start(latest),
+            "active 完成后只能启动最新 coalesced successor")
         expect(
-            gate.decide(
-                first,
-                nowMilliseconds: 400,
-                workerLeaseAvailable: true) == .ready,
-            "lease 释放后合并请求必须只放行一次 exact query")
-        expect(
-            !gate.hasPendingRequest
-                && gate.decide(
-                    first,
-                    nowMilliseconds: 401,
-                    workerLeaseAvailable: true) == .stale,
-            "已消费 request 不得 duplicate")
+            gate.complete(second) == .stale,
+            "被后续 callback 替换的 pending token 永不得提交")
+        expect(gate.complete(latest) == .idle, "successor 完成后 gate 必须恢复 idle")
 
-        guard let expiring = gate.enqueue(nowMilliseconds: 1_000, timeoutMilliseconds: 500)
-        else {
-            expect(false, "ready 后必须允许下一次独立 event")
+        guard case .start(let oldGeneration)? = gate.enqueue(elapsedMilliseconds: 400) else {
+            expect(false, "idle gate 必须允许下一次 query")
+            return
+        }
+        gate.endSession()
+        gate.beginSession()
+        guard case .start(let newGeneration)? = gate.enqueue(elapsedMilliseconds: 500) else {
+            expect(false, "restart 必须允许新 generation query")
             return
         }
         expect(
-            gate.decide(
-                expiring,
-                nowMilliseconds: 1_500,
-                workerLeaseAvailable: false) == .expired,
-            "超过有界等待仍拿不到 lease 必须明确过期")
-        gate.endSession()
+            gate.complete(oldGeneration) == .stale,
+            "stop/restart 后迟到旧结果不得清理或提交新 generation")
+        expect(gate.complete(newGeneration) == .idle, "新 generation 必须独立完成")
+    }
+
+    await suite("Chat AX tracer event coordinator：后台 heartbeat 与 storm latest-wins") {
+        let permits = DispatchSemaphore(value: 0)
+        let probe = ChatAXConcurrentSamplerProbe()
+        var committed: [(elapsedMilliseconds: Int, sample: Int)] = []
+        var invalidationCount = 0
+        let coordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            contentionTimeoutMilliseconds: 750,
+            attemptTimeoutNanoseconds: 2_000_000_000,
+            sampler: { input in
+                probe.begin()
+                defer { probe.finish() }
+                _ = chatAXBlockingValidationSample(permits)
+                return input
+            },
+            didProduce: { elapsedMilliseconds, sample in
+                committed.append((elapsedMilliseconds, sample))
+            },
+            didInvalidate: {
+                invalidationCount += 1
+            })
+        coordinator.beginSession()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            permits.signal()
+            permits.signal()
+        }
+
+        let enqueueStartedAt = ProcessInfo.processInfo.systemUptime
+        coordinator.enqueue(1, elapsedMilliseconds: 123)
+        let enqueueElapsed = ProcessInfo.processInfo.systemUptime - enqueueStartedAt
+        let mainActorHeartbeat = ChatAXThreadSafeCounter()
+        Task { @MainActor in
+            mainActorHeartbeat.increment()
+        }
+        for value in 2...1_001 {
+            coordinator.enqueue(value, elapsedMilliseconds: 122 + value)
+        }
         expect(
-            gate.decide(
-                expiring,
-                nowMilliseconds: 1_501,
-                workerLeaseAvailable: true) == .stale,
-            "stop/restart 后旧 generation 的 deferred event 必须丢弃")
+            enqueueElapsed < 0.1,
+            "阻塞 sampler 必须在后台运行，MainActor enqueue 不得等待")
+        expect(
+            await chatAXEventually { probe.snapshot.starts == 1 },
+            "notification storm 期间只能启动第一个 sampler")
+        expect(
+            await chatAXEventually {
+                mainActorHeartbeat.value == 1 && probe.snapshot.active == 1
+            },
+            "阻塞 sampler 未释放时，后排入的独立 MainActor heartbeat 仍必须运行")
+        expect(
+            probe.snapshot.starts == 1 && committed.isEmpty,
+            "active sampler 阻塞时 1000 条 callback 只能 latest-wins 合并，不能堆 worker")
+
+        permits.signal()
+        expect(
+            await chatAXEventually {
+                committed.count == 1 && probe.snapshot.starts == 2
+            },
+            "active 完成后必须只启动一个 latest successor")
+        permits.signal()
+        expect(
+            await chatAXEventually { committed.count == 2 },
+            "latest successor 必须可以独立完成")
+        expect(
+            committed.map(\.sample) == [1, 1_001]
+                && committed.map(\.elapsedMilliseconds) == [123, 1_123],
+            "storm 只能提交首条与最新 payload，并保留各自 callback arrival time")
+        expect(
+            probe.snapshot.maximumActive == 1 && invalidationCount == 0,
+            "event sampler 必须 single-flight，正常 coalescing 不得 invalidate")
+        coordinator.endSession()
+    }
+
+    await suite("Chat AX tracer event coordinator：shared lease busy 只延后并可恢复") {
+        let systemGate = ChatAXSystemQueryWorkerGate.shared
+        guard let blockingLease = systemGate.acquire() else {
+            expect(false, "deferred fixture 必须先取得唯一 shared lease")
+            return
+        }
+        let samplerStarts = ChatAXThreadSafeCounter()
+        var committed: [(elapsedMilliseconds: Int, sample: Int)] = []
+        var invalidationCount = 0
+        let coordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            contentionTimeoutMilliseconds: 2_000,
+            attemptTimeoutNanoseconds: 500_000_000,
+            retryInterval: 0.005,
+            sampler: { input in
+                samplerStarts.increment()
+                return input
+            },
+            didProduce: { elapsedMilliseconds, sample in
+                committed.append((elapsedMilliseconds, sample))
+            },
+            didInvalidate: {
+                invalidationCount += 1
+            })
+        coordinator.beginSession()
+        coordinator.enqueue(17, elapsedMilliseconds: 321)
+        try? await Task.sleep(nanoseconds: 40_000_000)
+        expect(
+            samplerStarts.value == 0 && committed.isEmpty && invalidationCount == 0,
+            "shared lease contention 不得启动 sampler、emit 或冒充 identity drift")
+
+        systemGate.release(blockingLease)
+        expect(
+            await chatAXEventually { committed.count == 1 },
+            "shared lease 恢复后 common-mode retry 必须完成原请求")
+        expect(
+            samplerStarts.value == 1
+                && committed.first?.elapsedMilliseconds == 321
+                && committed.first?.sample == 17
+                && invalidationCount == 0,
+            "deferred recovery 必须只采样并提交一次，且保留 arrival time")
+        coordinator.endSession()
+    }
+
+    await suite("Chat AX tracer event coordinator：contention 总期限到期只失效一次") {
+        let systemGate = ChatAXSystemQueryWorkerGate.shared
+        guard let blockingLease = systemGate.acquire() else {
+            expect(false, "expiry fixture 必须先取得唯一 shared lease")
+            return
+        }
+        let samplerStarts = ChatAXThreadSafeCounter()
+        var commitCount = 0
+        var invalidationCount = 0
+        let coordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            contentionTimeoutMilliseconds: 100,
+            attemptTimeoutNanoseconds: 500_000_000,
+            retryInterval: 0.005,
+            sampler: { input in
+                samplerStarts.increment()
+                return input
+            },
+            didProduce: { _, _ in
+                commitCount += 1
+            },
+            didInvalidate: {
+                invalidationCount += 1
+            })
+        coordinator.beginSession()
+        coordinator.enqueue(18, elapsedMilliseconds: 322)
+        expect(
+            await chatAXEventually { invalidationCount == 1 },
+            "shared lease 超过 bounded contention deadline 必须确定 fail closed")
+        expect(
+            samplerStarts.value == 0 && commitCount == 0,
+            "contention expiry 前后都不得绕过 shared lease 启动 sampler")
+
+        systemGate.release(blockingLease)
+        try? await Task.sleep(nanoseconds: 30_000_000)
+        expect(
+            samplerStarts.value == 0 && commitCount == 0 && invalidationCount == 1,
+            "expired request 在 lease 恢复后不得复活或重复 invalidate")
+        coordinator.endSession()
+    }
+
+    await suite("Chat AX tracer event coordinator：timeout 与 unreadable 只失效一次") {
+        let permits = DispatchSemaphore(value: 0)
+        let probe = ChatAXConcurrentSamplerProbe()
+        var timeoutCommits = 0
+        var timeoutInvalidations = 0
+        let timeoutCoordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            contentionTimeoutMilliseconds: 500,
+            attemptTimeoutNanoseconds: 20_000_000,
+            sampler: { input in
+                probe.begin()
+                defer { probe.finish() }
+                _ = chatAXBlockingValidationSample(permits)
+                return input
+            },
+            didProduce: { _, _ in
+                timeoutCommits += 1
+            },
+            didInvalidate: {
+                timeoutInvalidations += 1
+            })
+        timeoutCoordinator.beginSession()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            permits.signal()
+        }
+        timeoutCoordinator.enqueue(1, elapsedMilliseconds: 10)
+        expect(
+            await chatAXEventually { probe.snapshot.starts == 1 },
+            "timeout fixture 必须真的启动阻塞 sampler")
+        expect(
+            await chatAXEventually { timeoutInvalidations == 1 },
+            "attempt timeout 必须确定 fail closed")
+        permits.signal()
+        expect(
+            await chatAXEventually { probe.snapshot.active == 0 },
+            "迟到 worker 必须最终退出并归还 shared lease")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        expect(
+            timeoutCommits == 0 && timeoutInvalidations == 1,
+            "timeout 后的迟到 completion 不得 emit 或重复 invalidate")
+        timeoutCoordinator.endSession()
+
+        var unreadableCommits = 0
+        var unreadableInvalidations = 0
+        let unreadableCoordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            sampler: { _ in nil },
+            didProduce: { _, _ in
+                unreadableCommits += 1
+            },
+            didInvalidate: {
+                unreadableInvalidations += 1
+            })
+        unreadableCoordinator.beginSession()
+        unreadableCoordinator.enqueue(2, elapsedMilliseconds: 20)
+        expect(
+            await chatAXEventually { unreadableInvalidations == 1 },
+            "unreadable/mismatch 的 nil sample 必须确定 fail closed")
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        expect(
+            unreadableCommits == 0 && unreadableInvalidations == 1,
+            "nil sample 不得 emit 或重复 invalidate")
+        unreadableCoordinator.endSession()
+    }
+
+    await suite("Chat AX tracer event coordinator：stop/restart 丢弃旧 generation 结果") {
+        let oldPermit = DispatchSemaphore(value: 0)
+        let probe = ChatAXConcurrentSamplerProbe()
+        var committed: [(elapsedMilliseconds: Int, sample: Int)] = []
+        var invalidationCount = 0
+        let coordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            contentionTimeoutMilliseconds: 2_000,
+            attemptTimeoutNanoseconds: 1_000_000_000,
+            retryInterval: 0.005,
+            sampler: { input in
+                probe.begin()
+                defer { probe.finish() }
+                if input == 1 {
+                    _ = chatAXBlockingValidationSample(oldPermit)
+                }
+                return input
+            },
+            didProduce: { elapsedMilliseconds, sample in
+                committed.append((elapsedMilliseconds, sample))
+            },
+            didInvalidate: {
+                invalidationCount += 1
+            })
+        coordinator.beginSession()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+            oldPermit.signal()
+        }
+        coordinator.enqueue(1, elapsedMilliseconds: 100)
+        expect(
+            await chatAXEventually { probe.snapshot.starts == 1 },
+            "旧 generation sampler 必须已进入运行态")
+
+        coordinator.endSession()
+        coordinator.beginSession()
+        coordinator.enqueue(2, elapsedMilliseconds: 200)
+        try? await Task.sleep(nanoseconds: 20_000_000)
+        expect(
+            committed.isEmpty && invalidationCount == 0 && probe.snapshot.starts == 1,
+            "旧 worker 未退出时新 generation 必须 deferred，不能堆第二个 worker")
+        oldPermit.signal()
+        expect(
+            await chatAXEventually { committed.count == 1 },
+            "旧 worker 退出后新 generation 必须独立恢复")
+        expect(
+            committed.first?.sample == 2
+                && committed.first?.elapsedMilliseconds == 200
+                && invalidationCount == 0
+                && probe.snapshot.maximumActive == 1,
+            "旧 generation 的迟到结果不得 emit、invalidate 或清除新请求")
+        coordinator.endSession()
+    }
+
+    await suite("Chat AX tracer event coordinator：reentrant restart 不启动旧 successor") {
+        let oldSuccessorStarts = ChatAXThreadSafeCounter()
+        let newGenerationStarts = ChatAXThreadSafeCounter()
+        var committed: [Int] = []
+        var invalidationCount = 0
+        var coordinator: ChatAXEventQueryCoordinator<Int, Int>!
+        coordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            sampler: { input in
+                if input == 2 { oldSuccessorStarts.increment() }
+                if input == 3 { newGenerationStarts.increment() }
+                return input
+            },
+            didProduce: { _, sample in
+                committed.append(sample)
+                if sample == 1 {
+                    coordinator.endSession()
+                    coordinator.beginSession()
+                    coordinator.enqueue(3, elapsedMilliseconds: 300)
+                }
+            },
+            didInvalidate: {
+                invalidationCount += 1
+            })
+        coordinator.beginSession()
+        coordinator.enqueue(1, elapsedMilliseconds: 100)
+        coordinator.enqueue(2, elapsedMilliseconds: 200)
+        expect(
+            await chatAXEventually { committed.count == 2 },
+            "didProduce 内 stop/restart 后的新 generation 必须独立完成")
+        expect(
+            committed == [1, 3]
+                && oldSuccessorStarts.value == 0
+                && newGenerationStarts.value == 1
+                && invalidationCount == 0,
+            "reentrant callback 后必须重验 generation，不能启动已 promote 的旧 successor")
+        coordinator.endSession()
     }
 
     await suite("Chat AX tracer deadline：调用者预先取消时绝不启动 detached query") {
@@ -933,6 +1265,99 @@ func runChatAXTracerSuites() async {
             negativeFixture.flatMap { negativeDetector.consume($0).semanticEvents }.isEmpty,
             "没有提交关联的结构变化不得猜成 semantic event")
 
+        var nonnegativeTimeDetector = ChatAXCandidateDetector()
+        let negativeTimeOutcome = nonnegativeTimeDetector.consume(
+            ChatAXStructuralSignal(
+                sequence: 1, elapsedMilliseconds: -1, windowOrdinal: 3,
+                kind: .composerSubmitted))
+        let recoveredTimeOutcome = nonnegativeTimeDetector.consume(
+            ChatAXStructuralSignal(
+                sequence: 1, elapsedMilliseconds: Int.max, windowOrdinal: 3,
+                kind: .composerSubmitted))
+        expect(
+            !negativeTimeOutcome.acceptedSignal && recoveredTimeOutcome.acceptedSignal,
+            "负 elapsed 必须 fail closed 且不能推进 sequence，避免后续 association 算术溢出")
+
+        var expiredSubmitDetector = ChatAXCandidateDetector(
+            submitAssociationMilliseconds: 1_000,
+            completionStabilityMilliseconds: 500)
+        let expiredSubmitEvents = [
+            ChatAXStructuralSignal(
+                sequence: 1, elapsedMilliseconds: 0, windowOrdinal: 4,
+                kind: .composerSubmitted),
+            ChatAXStructuralSignal(
+                sequence: 2, elapsedMilliseconds: 2_000, windowOrdinal: 4,
+                kind: .composerSubmitted),
+            ChatAXStructuralSignal(
+                sequence: 3, elapsedMilliseconds: 2_100, windowOrdinal: 4,
+                kind: .generationControl(isVisible: true)),
+        ].flatMap { expiredSubmitDetector.consume($0).semanticEvents }
+        expect(
+            expiredSubmitEvents
+                == [
+                    ChatAXDetectedSemanticEvent(
+                        signalSequence: 3,
+                        windowOrdinal: 4,
+                        event: .taskStart)
+                ],
+            "过期 pending submit 必须由下一次真实 submit 替换并恰好关联一次 task start")
+
+        var expiredEpochDetector = ChatAXCandidateDetector(
+            submitAssociationMilliseconds: 1_000,
+            completionStabilityMilliseconds: 500)
+        _ = expiredEpochDetector.consume(
+            ChatAXStructuralSignal(
+                sequence: 1, elapsedMilliseconds: 0, windowOrdinal: 6,
+                kind: .composerSubmitted))
+        _ = expiredEpochDetector.consume(
+            ChatAXStructuralSignal(
+                sequence: 2, elapsedMilliseconds: 100, windowOrdinal: 6,
+                kind: .assistantRegion(structureRevision: 88, isStable: true)))
+        _ = expiredEpochDetector.consume(
+            ChatAXStructuralSignal(
+                sequence: 3, elapsedMilliseconds: 2_000, windowOrdinal: 6,
+                kind: .composerSubmitted))
+        expect(
+            expiredEpochDetector.assistantEpochState(forWindowOrdinal: 6)
+                == ChatAXAssistantEpochState(),
+            "替换过期 submit 必须通过 production seam 清空旧 assistant epoch")
+
+        var duplicateSubmitDetector = ChatAXCandidateDetector(
+            submitAssociationMilliseconds: 1_000,
+            completionStabilityMilliseconds: 500)
+        let duplicateSubmitEvents = [
+            ChatAXStructuralSignal(
+                sequence: 1, elapsedMilliseconds: 0, windowOrdinal: 5,
+                kind: .composerSubmitted),
+            ChatAXStructuralSignal(
+                sequence: 2, elapsedMilliseconds: 900, windowOrdinal: 5,
+                kind: .composerSubmitted),
+            ChatAXStructuralSignal(
+                sequence: 3, elapsedMilliseconds: 1_500, windowOrdinal: 5,
+                kind: .generationControl(isVisible: true)),
+        ].flatMap { duplicateSubmitDetector.consume($0).semanticEvents }
+        expect(
+            duplicateSubmitEvents.isEmpty,
+            "关联窗内 duplicate submit 不得刷新 pending 时间戳后伪造 task start")
+
+        var boundarySubmitDetector = ChatAXCandidateDetector(
+            submitAssociationMilliseconds: 1_000,
+            completionStabilityMilliseconds: 500)
+        let boundarySubmitEvents = [
+            ChatAXStructuralSignal(
+                sequence: 1, elapsedMilliseconds: 0, windowOrdinal: 7,
+                kind: .composerSubmitted),
+            ChatAXStructuralSignal(
+                sequence: 2, elapsedMilliseconds: 1_000, windowOrdinal: 7,
+                kind: .composerSubmitted),
+            ChatAXStructuralSignal(
+                sequence: 3, elapsedMilliseconds: 1_501, windowOrdinal: 7,
+                kind: .generationControl(isVisible: true)),
+        ].flatMap { boundarySubmitDetector.consume($0).semanticEvents }
+        expect(
+            boundarySubmitEvents.isEmpty,
+            "恰好位于 association 边界的 submit 仍是 duplicate，不得按 >= 提前换 epoch")
+
         var epochDetector = ChatAXCandidateDetector(
             submitAssociationMilliseconds: 1_000,
             completionStabilityMilliseconds: 500)
@@ -1205,9 +1630,19 @@ func runChatAXTracerSuites() async {
             let deadlineRegion = chatAXBracedDeclarationRegion(
                 "package enum ChatAXRuntimeValidationDeadline {", in: core),
             let cancellationGateRegion = chatAXBracedDeclarationRegion(
-                "package final class ChatAXRuntimeValidationCancellationGate", in: core)
+                "package final class ChatAXRuntimeValidationCancellationGate", in: core),
+            let eventCoordinatorRegion = chatAXBracedDeclarationRegion(
+                "package final class ChatAXEventQueryCoordinator", in: core),
+            let eventLaunchRegion = chatAXFunctionRegion(
+                "private func launch(", in: eventCoordinatorRegion),
+            let eventFinishRegion = chatAXFunctionRegion(
+                "private func finish(", in: eventCoordinatorRegion),
+            let eventCommitRegion = chatAXFunctionRegion(
+                "private func commit(", in: eventCoordinatorRegion),
+            let eventRetryScheduleRegion = chatAXFunctionRegion(
+                "private func scheduleRetry(", in: eventCoordinatorRegion)
         else {
-            expect(false, "必须能定位 runtime deadline 的并发仲裁实现")
+            expect(false, "必须能定位 runtime deadline 与 event coordinator 的并发实现")
             return
         }
         let deadlineUsesFirstWinner: (String) -> Bool = { region in
@@ -1263,6 +1698,89 @@ func runChatAXTracerSuites() async {
         expect(
             !deadlineUsesFirstWinner(missingCallerCancellationMutation),
             "deadline source gate 必须拒绝预取消 caller 启动 detached query")
+
+        let eventCoordinatorIsGenerationScoped: (String, String, String, String) -> Bool = {
+            launchRegion, finishRegion, commitRegion, retryRegion in
+            guard
+                let detachedRange = launchRegion.range(of: "Task.detached"),
+                let deadlineRange = launchRegion.range(
+                    of: "ChatAXRuntimeValidationDeadline.run("),
+                let activeCheckRange = finishRegion.range(of: "gate.isActive(entry.request)"),
+                let taskClearRange = finishRegion.range(of: "activeTask = nil"),
+                let completeRange = commitRegion.range(of: "gate.complete(entry.request)"),
+                let produceRange = commitRegion.range(of: "didProduce(")
+            else {
+                return false
+            }
+            return detachedRange.lowerBound < deadlineRange.lowerBound
+                && activeCheckRange.lowerBound < taskClearRange.lowerBound
+                && finishRegion.contains("case .deferred:\n            scheduleRetry(entry)")
+                && finishRegion.contains(
+                    "case .cancelled, .timedOut:\n            failActive(entry.request)")
+                && finishRegion.contains("guard let sample else")
+                && finishRegion.components(separatedBy: "failActive(entry.request)").count - 1
+                    == 2
+                && retryRegion.contains("RunLoop.main.add(retryTimer, forMode: .common)")
+                && completeRange.lowerBound < produceRange.lowerBound
+                && commitRegion.components(separatedBy: "didProduce(").count - 1 == 1
+                && commitRegion.contains("gate.isActive(successor.request)")
+        }
+        expect(
+            eventCoordinatorIsGenerationScoped(
+                eventLaunchRegion,
+                eventFinishRegion,
+                eventCommitRegion,
+                eventRetryScheduleRegion),
+            "event query 必须 detached+deadline single-flight，按 generation 提交并 common-mode retry")
+        let synchronousEventMutation = eventLaunchRegion.replacingOccurrences(
+            of: "Task.detached", with: "Task")
+        expect(
+            !eventCoordinatorIsGenerationScoped(
+                synchronousEventMutation,
+                eventFinishRegion,
+                eventCommitRegion,
+                eventRetryScheduleRegion),
+            "event coordinator source gate 必须拒绝回退到 MainActor 继承 task")
+        let contentionInvalidationMutation = eventFinishRegion.replacingOccurrences(
+            of: "case .deferred:\n            scheduleRetry(entry)",
+            with: "case .deferred:\n            failActive(entry.request)")
+        expect(
+            !eventCoordinatorIsGenerationScoped(
+                eventLaunchRegion,
+                contentionInvalidationMutation,
+                eventCommitRegion,
+                eventRetryScheduleRegion),
+            "shared lease busy 只能有界 retry，不能冒充 target mismatch")
+        let defaultModeEventRetryMutation = eventRetryScheduleRegion.replacingOccurrences(
+            of: "RunLoop.main.add(retryTimer, forMode: .common)",
+            with: "RunLoop.main.add(retryTimer, forMode: .default)")
+        expect(
+            !eventCoordinatorIsGenerationScoped(
+                eventLaunchRegion,
+                eventFinishRegion,
+                eventCommitRegion,
+                defaultModeEventRetryMutation),
+            "event deferred retry 不得退回 default-only run-loop mode")
+        let staleTaskClearMutation = eventFinishRegion.replacingOccurrences(
+            of: "gate.isActive(entry.request)", with: "true")
+        expect(
+            !eventCoordinatorIsGenerationScoped(
+                eventLaunchRegion,
+                staleTaskClearMutation,
+                eventCommitRegion,
+                eventRetryScheduleRegion),
+            "迟到旧 completion 不得清除新 generation 的 active task")
+        let prematureProduceMutation = eventCommitRegion.replacingOccurrences(
+            of: "let completion = gate.complete(entry.request)",
+            with: "didProduce(entry.request.elapsedMilliseconds, sample)\n"
+                + "        let completion = gate.complete(entry.request)")
+        expect(
+            !eventCoordinatorIsGenerationScoped(
+                eventLaunchRegion,
+                eventFinishRegion,
+                prematureProduceMutation,
+                eventRetryScheduleRegion),
+            "event result 必须先通过 generation complete，再允许发布 evidence")
     }
 
     suite("Chat AX tracer 系统边界：只用有界非正文 AX 事实且从不弹权限") {
@@ -1390,6 +1908,19 @@ func runChatAXTracerSuites() async {
                 "private struct SystemChatAXAttributeReader", in: runtime),
             let surfaceReaderTypeRegion = chatAXBracedDeclarationRegion(
                 "private struct SystemChatAXSurfaceSignatureReader", in: runtime),
+            let runtimeApplicationVerifierTypeRegion = chatAXBracedDeclarationRegion(
+                "private enum SystemChatAXRuntimeApplicationVerifier", in: runtime),
+            let runtimeApplicationMatchesRegion = chatAXFunctionRegion(
+                "static func matches(", in: runtimeApplicationVerifierTypeRegion),
+            let runtimeApplicationArchitectureRegion = chatAXFunctionRegion(
+                "static func architecture(", in: runtimeApplicationVerifierTypeRegion),
+            let eventQuerySamplerTypeRegion = chatAXBracedDeclarationRegion(
+                "private enum SystemChatAXEventQuerySampler", in: runtime),
+            let eventQuerySampleRegion = chatAXFunctionRegion(
+                "static func sample(", in: eventQuerySamplerTypeRegion),
+            let eventElementPIDRegion = chatAXFunctionRegion(
+                "private static func elementProcessIdentifier(",
+                in: eventQuerySamplerTypeRegion),
             let runtimeSamplerTypeRegion = chatAXBracedDeclarationRegion(
                 "private enum SystemChatAXRuntimeSampler", in: runtime),
             let observerTypeRegion = chatAXBracedDeclarationRegion(
@@ -1404,11 +1935,6 @@ func runChatAXTracerSuites() async {
                 "private func inspectStableFrameworkSet(", in: observerTypeRegion),
             let frameworkIdentityRegion = chatAXFunctionRegion(
                 "private func inspectFrameworkIdentity(", in: observerTypeRegion),
-            let revalidationRegion = chatAXFunctionRegion(
-                "private func surfaceStillMatches(\n"
-                    + "        _ target: ChatAXObservedTarget,\n"
-                    + "        applicationElement:",
-                in: observerTypeRegion),
             let startupBindingRegion = chatAXFunctionRegion(
                 "private func startupRuntimeStillMatches(", in: observerTypeRegion),
             let scheduleValidationRegion = chatAXFunctionRegion(
@@ -1429,12 +1955,14 @@ func runChatAXTracerSuites() async {
             let stopRegion = chatAXFunctionRegion("func stop()", in: observerTypeRegion),
             let handleRegion = chatAXFunctionRegion(
                 "fileprivate func handle(", in: observerTypeRegion),
-            let processObservedElementRegion = chatAXFunctionRegion(
-                "private func processObservedElement(", in: observerTypeRegion),
-            let enqueueDeferredEventRegion = chatAXFunctionRegion(
-                "private func enqueueDeferredEvent(", in: observerTypeRegion),
-            let retryDeferredEventRegion = chatAXFunctionRegion(
-                "private func retryDeferredEvent(", in: observerTypeRegion),
+            let commitObservedEventRegion = chatAXFunctionRegion(
+                "private func commitObservedEvent(", in: observerTypeRegion),
+            let elapsedSignalRegion = chatAXFunctionRegion(
+                "private func emitSignal(\n"
+                    + "        kind: ChatAXStructuralSignalKind,\n"
+                    + "        windowOrdinal: Int,\n"
+                    + "        elapsedMilliseconds:",
+                in: observerTypeRegion),
             let destroyedRegion = chatAXBracedDeclarationRegion(
                 "if targetWasDestroyed", in: handleRegion)
         else {
@@ -1725,12 +2253,14 @@ func runChatAXTracerSuites() async {
             targetStillMatchesRegion,
             startupBindingRegion,
             runtimeSamplerTypeRegion,
+            eventQuerySamplerTypeRegion,
             runningCodeRegion,
             dynamicCodeRegion,
             dynamicSigningRegion,
             importedSigningRegion,
             processIncarnationRegion,
             normalizedPathRegion,
+            runtimeApplicationVerifierTypeRegion,
             runtimeApplicationRegion,
             architectureRegion,
             surfaceReaderTypeRegion,
@@ -1788,11 +2318,20 @@ func runChatAXTracerSuites() async {
                 && runtimeConclusiveFailureInvalidates(finishValidationRegion)
                 && targetStillMatchesRegion.contains("SystemChatAXRuntimeSampler.sample(")
                 && runtimeSamplerBracketsSurface(runtimeSamplerTypeRegion)
-                && runtimeApplicationRegion.contains("architecture(for: application)")
-                && runtimeApplicationRegion.contains("normalizedPath(bundleURL)")
-                && runtimeApplicationRegion.contains("currentProcessIncarnation(")
-                && runtimeApplicationRegion.contains(
+                && runtimeSamplerBracketsSurface(eventQuerySampleRegion)
+                && eventQuerySampleRegion.contains(
+                    "SystemChatAXRuntimeApplicationVerifier.matches(")
+                && runtimeApplicationMatchesRegion.contains("architecture(for: application)")
+                && runtimeApplicationMatchesRegion.contains("normalizedPath(bundleURL)")
+                && runtimeApplicationMatchesRegion.contains("currentProcessIncarnation(")
+                && runtimeApplicationMatchesRegion.contains(
                     "== binding.runtimeFacts.processIncarnation")
+                && runtimeApplicationRegion.contains(
+                    "SystemChatAXRuntimeApplicationVerifier.matches(")
+                && architectureRegion.contains(
+                    "SystemChatAXRuntimeApplicationVerifier.architecture(")
+                && runtimeApplicationArchitectureRegion.contains(
+                    "application.executableArchitecture")
                 && !observerTypeRegion.contains("launchDate")
                 && startRegion.contains("validationGate.beginSession()")
                 && stopRegion.contains("validationTask?.cancel()")
@@ -1828,12 +2367,8 @@ func runChatAXTracerSuites() async {
                 && ownsGlobalSystemQueryLease(startRegion, "startupRuntimeStillMatches(")
                 && ownsGlobalSystemQueryLease(
                     targetStillMatchesRegion,
-                    "SystemChatAXRuntimeSampler.sample(")
-                && ownsGlobalSystemQueryLease(handleRegion, "processObservedElement(")
-                && ownsGlobalSystemQueryLease(
-                    retryDeferredEventRegion,
-                    "processObservedElement("),
-            "full inspection、startup、同步复验与事件查询必须共用全局 system-query lease")
+                    "SystemChatAXRuntimeSampler.sample("),
+            "full inspection、startup 与同步复验必须共用全局 system-query lease")
         let unleasedStartupMutation = startRegion.replacingOccurrences(
             of: "let workerLease = workerGate.acquire()",
             with: "let workerLease = workerGate.uncheckedLease()")
@@ -1842,42 +2377,11 @@ func runChatAXTracerSuites() async {
                 unleasedStartupMutation,
                 "startupRuntimeStillMatches("),
             "真实 startup 入口不得绕过旧阻塞 worker 的 single-flight gate")
-        let contentionDefersWithoutInvalidating: (String) -> Bool = { region in
-            guard
-                let busyBranch = chatAXBracedDeclarationRegion(
-                    "guard let workerLease = workerGate.acquire() else",
-                    in: region)
-            else {
-                return false
-            }
-            return busyBranch.contains("enqueueDeferredEvent(element)")
-                && !busyBranch.contains("invalidateTarget()")
-        }
         expect(
-            contentionDefersWithoutInvalidating(handleRegion)
-                && targetStillMatchesRegion.contains("return .deferred")
-                && enqueueDeferredEventRegion.contains(
-                    "deferredSystemQueryGate.enqueue(")
-                && enqueueDeferredEventRegion.contains(
-                    "RunLoop.main.add(deferredEventTimer, forMode: .common)")
-                && retryDeferredEventRegion.contains("case .waiting:")
-                && retryDeferredEventRegion.contains("case .ready:")
-                && stopRegion.contains("deferredEventTimer?.invalidate()")
-                && stopRegion.contains("deferredSystemQueryGate.endSession()"),
-            "正常 timer contention 必须在 common modes 合并延后；只有 exact mismatch/过期才可 stop")
-        let defaultModeRetryMutation = enqueueDeferredEventRegion.replacingOccurrences(
-            of: "RunLoop.main.add(deferredEventTimer, forMode: .common)",
-            with: "RunLoop.main.add(deferredEventTimer, forMode: .default)")
-        expect(
-            !defaultModeRetryMutation.contains(
-                "RunLoop.main.add(deferredEventTimer, forMode: .common)"),
-            "deferred retry 不得退回 default-only run-loop mode")
-        let contentionInvalidationMutation = handleRegion.replacingOccurrences(
-            of: "enqueueDeferredEvent(element)\n            return",
-            with: "invalidateTarget()\n            return")
-        expect(
-            !contentionDefersWithoutInvalidating(contentionInvalidationMutation),
-            "event 入口不得把 shared lease busy 冒充 identity drift")
+            targetStillMatchesRegion.contains("return .deferred")
+                && !handleRegion.contains("ChatAXSystemQueryWorkerGate")
+                && !handleRegion.contains("workerGate.acquire()"),
+            "event callback 不得在 MainActor 争抢 lease；周期同步复验的 contention 仍须 deferred")
         let axReadsStopAfterCancellation: (String, String) -> Bool = {
             readerRegion, readBudgetRegion in
             guard
@@ -1915,6 +2419,33 @@ func runChatAXTracerSuites() async {
                 && runtimeFactsRegion.components(
                     separatedBy: "Task.isCancelled"
                 ).count - 1 >= 5
+        }
+        let eventSamplerUsesBoundedCancellation: (String, String) -> Bool = {
+            sampleRegion, pidRegion in
+            chatAXFunctionContainsMarkersInOrder(
+                [
+                    "!Task.isCancelled",
+                    "runningRuntimeFacts(",
+                    "!Task.isCancelled",
+                    "SystemChatAXReadBudget()",
+                    "elementProcessIdentifier(",
+                    "!Task.isCancelled",
+                    "readAnchorFacts(",
+                    "ChatAXSurfaceVerifier.verifyChat(",
+                    "!Task.isCancelled",
+                    "reader.integer(",
+                    "!Task.isCancelled",
+                    "runningRuntimeFacts(",
+                    "factsAfter == factsBefore",
+                    "SystemChatAXRuntimeApplicationVerifier.matches(",
+                    "!Task.isCancelled",
+                ],
+                inFunction: "static func sample(",
+                source: sampleRegion)
+                && chatAXFunctionContainsMarkersInOrder(
+                    ["prepareForMessaging(element)", "AXUIElementGetPid(", "Task.isCancelled"],
+                    inFunction: "private static func elementProcessIdentifier(",
+                    source: pidRegion)
         }
         let securityCallsStopAfterCancellation: (String) -> Bool = { readerRegion in
             chatAXFunctionContainsMarkersInOrder(
@@ -1959,6 +2490,9 @@ func runChatAXTracerSuites() async {
                 && runtimeSamplerStopsAfterCancellation(
                     runtimeSamplerTypeRegion,
                     runningCodeRegion)
+                && eventSamplerUsesBoundedCancellation(
+                    eventQuerySampleRegion,
+                    eventElementPIDRegion)
                 && securityCallsStopAfterCancellation(codeReaderTypeRegion),
             "timeout/stop 后恢复的旧 worker 必须在每个 sampler phase 与 AX query 边界停止")
         let uncancelledReaderMutation = attributeReaderTypeRegion.replacingOccurrences(
@@ -1983,6 +2517,14 @@ func runChatAXTracerSuites() async {
                 uncancelledSamplerMutation,
                 runningCodeRegion),
             "取消契约必须拒绝 runtime sampler 在 phase 间忽略 timeout")
+        let uncancelledEventSamplerMutation = eventQuerySampleRegion.replacingOccurrences(
+            of: "!Task.isCancelled",
+            with: "true")
+        expect(
+            !eventSamplerUsesBoundedCancellation(
+                uncancelledEventSamplerMutation,
+                eventElementPIDRegion),
+            "取消契约必须拒绝 event sampler 在 PID/surface/window phase 间忽略 timeout")
         let uncancelledDynamicRegion = dynamicCodeRegion.replacingOccurrences(
             of: "!Task.isCancelled",
             with: "true")
@@ -2079,7 +2621,7 @@ func runChatAXTracerSuites() async {
         }
         for (declaration, typeRegion) in [
             ("private func belongsToTarget(", surfaceReaderTypeRegion),
-            ("private func elementBelongsToTarget(", observerTypeRegion),
+            ("private static func elementProcessIdentifier(", eventQuerySamplerTypeRegion),
         ] {
             expect(
                 chatAXFunctionContainsMarkersInOrder(
@@ -2087,6 +2629,52 @@ func runChatAXTracerSuites() async {
                     inFunction: declaration,
                     source: typeRegion),
                 "\(declaration) 必须在 PID query 前消费同一端到端预算")
+        }
+        let eventSamplerReusesSingleAXBudget: (String) -> Bool = { region in
+            guard
+                region.components(separatedBy: "SystemChatAXReadBudget()").count - 1 == 1,
+                region.components(separatedBy: "budget: budget").count - 1 == 2,
+                let factsRange = region.range(of: "let factsBefore ="),
+                let budgetRange = region.range(of: "let budget = SystemChatAXReadBudget()"),
+                let pidRange = region.range(of: "elementProcessIdentifier(")
+            else {
+                return false
+            }
+            return factsRange.lowerBound < budgetRange.lowerBound
+                && budgetRange.lowerBound < pidRange.lowerBound
+                && region.contains("SystemChatAXSurfaceSignatureReader(budget: budget)")
+                && !region.contains("SystemChatAXSurfaceSignatureReader()")
+        }
+        expect(
+            eventSamplerReusesSingleAXBudget(eventQuerySampleRegion),
+            "event PID、surface 与 window 必须在 runtime facts 后共享同一个 AX deadline budget")
+        let splitEventBudgetMutation = eventQuerySampleRegion.replacingOccurrences(
+            of: "SystemChatAXSurfaceSignatureReader(budget: budget)",
+            with: "SystemChatAXSurfaceSignatureReader()")
+        expect(
+            !eventSamplerReusesSingleAXBudget(splitEventBudgetMutation),
+            "event sampler 不得为 surface 另起一份 AX budget")
+        if let integerRegion = chatAXFunctionRegion(
+            "func integer(", in: attributeReaderTypeRegion)
+        {
+            let distinguishesMissingIntegerFromFailure: (String) -> Bool = { region in
+                region.contains("Result<Int?, ChatAXAttributeReadFailure>")
+                    && region.contains("result == .attributeUnsupported || result == .noValue")
+                    && region.contains("return .success(nil)")
+                    && region.components(separatedBy: "return .failure(.unreadable)").count - 1
+                        == 3
+            }
+            expect(
+                distinguishesMissingIntegerFromFailure(integerRegion),
+                "AXWindowNumber 缺失可降级为 0，但 query/type/budget 失败必须保持 unreadable")
+            let maskedIntegerFailureMutation = integerRegion.replacingOccurrences(
+                of: "return .failure(.unreadable)",
+                with: "return .success(nil)")
+            expect(
+                !distinguishesMissingIntegerFromFailure(maskedIntegerFailureMutation),
+                "typed integer gate 必须拒绝把真实 AX 错误伪装成无 window number")
+        } else {
+            expect(false, "必须能定位 typed integer reader")
         }
         expect(
             chatAXFunctionContainsMarkersInOrder(
@@ -2169,6 +2757,44 @@ func runChatAXTracerSuites() async {
         expect(
             stopRegion.contains("pendingInspection = nil"),
             "full inspection cache 必须是一次性的，stop 后不能授权未来 start")
+        let productionEventCoordinatorIsWired: (String, String) -> Bool = {
+            startSource, stopSource in
+            guard
+                let constructionRange = startSource.range(
+                    of: "ChatAXEventQueryCoordinator<"),
+                let beginRange = startSource.range(of: "eventQueryCoordinator.beginSession()"),
+                let sourceRange = startSource.range(of: "CFRunLoopAddSource("),
+                let endRange = stopSource.range(of: "eventQueryCoordinator?.endSession()"),
+                let clearRange = stopSource.range(of: "eventQueryCoordinator = nil"),
+                let targetClearRange = stopSource.range(of: "target = nil")
+            else {
+                return false
+            }
+            return constructionRange.lowerBound < beginRange.lowerBound
+                && beginRange.lowerBound < sourceRange.lowerBound
+                && startSource.contains("SystemChatAXEventQuerySampler.sample(request)")
+                && startSource.contains("[weak self] elapsedMilliseconds, sample")
+                && startSource.contains("self?.commitObservedEvent(")
+                && startSource.contains("[weak self] in")
+                && startSource.contains("self?.invalidateTarget()")
+                && endRange.lowerBound < clearRange.lowerBound
+                && clearRange.lowerBound < targetClearRange.lowerBound
+        }
+        expect(
+            productionEventCoordinatorIsWired(startRegion, stopRegion),
+            "真实 observer 必须把 sampler/commit/invalidation 接到同一 generation coordinator")
+        let missingEventBeginMutation = startRegion.replacingOccurrences(
+            of: "eventQueryCoordinator.beginSession()",
+            with: "_ = eventQueryCoordinator")
+        expect(
+            !productionEventCoordinatorIsWired(missingEventBeginMutation, stopRegion),
+            "AXObserver source 生效前必须启动 event coordinator session")
+        let missingEventEndMutation = stopRegion.replacingOccurrences(
+            of: "eventQueryCoordinator?.endSession()",
+            with: "_ = eventQueryCoordinator")
+        expect(
+            !productionEventCoordinatorIsWired(startRegion, missingEventEndMutation),
+            "stop 必须先推进 event generation，再清理 target 与 callback")
         let stopsWithoutMessagingDestroyedApplication: (String) -> Bool = { region in
             guard
                 let observerRegion = chatAXBracedDeclarationRegion(
@@ -2193,47 +2819,108 @@ func runChatAXTracerSuites() async {
         expect(
             !stopsWithoutMessagingDestroyedApplication(missingRegistrationGuardMutation),
             "销毁边界契约必须拒绝继续用失效 application element 注销通知")
-        let validatesSurfaceBeforeUnrelatedSignal: (String) -> Bool = { region in
-            let normalized = region.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            let verification = "surfaceStillMatches(target)"
-            let emission = "emitSignal(kind: .unrelatedStructureChanged"
+        let mainActorEventCallbackOnlyEnqueues: (String) -> Bool = { region in
             guard
-                normalized.contains(
-                    "guard elementBelongsToTarget(element, target: target), \(verification) else"),
-                region.components(separatedBy: verification).count - 1 == 1,
-                region.components(separatedBy: emission).count - 1 == 1,
-                let verificationRange = region.range(of: verification),
-                let emissionRange = region.range(of: emission)
+                let arrivalRange = region.range(
+                    of: "let arrivalElapsedMilliseconds = traceElapsedMilliseconds"),
+                let destroyedRange = region.range(of: "if targetWasDestroyed"),
+                let requestRange = region.range(of: "let request = SystemChatAXEventQueryRequest("),
+                let enqueueRange = region.range(of: "eventQueryCoordinator.enqueue(")
             else {
                 return false
             }
-            return verificationRange.upperBound < emissionRange.lowerBound
+            let prohibited = [
+                "workerGate.acquire(",
+                "ChatAXSystemQueryWorkerGate",
+                "SystemChatAXAttributeReader",
+                "SystemChatAXSurfaceSignatureReader",
+                "SystemChatAXCodeIdentityReader",
+                "SystemChatAXRuntimeApplicationVerifier",
+                "AXUIElementGetPid(",
+                "AXUIElementCopyAttributeValue(",
+                "surfaceStillMatches(",
+                "elementBelongsToTarget(",
+                "emitSignal(kind: .unrelatedStructureChanged",
+            ]
+            return arrivalRange.lowerBound < destroyedRange.lowerBound
+                && destroyedRange.lowerBound < requestRange.lowerBound
+                && requestRange.lowerBound < enqueueRange.lowerBound
+                && region.components(separatedBy: "traceElapsedMilliseconds").count - 1 == 1
+                && region.contains("runtimeBinding: runtimeBinding")
+                && region.contains("approvedAttributes: approvedAttributes")
+                && region.contains("elapsedMilliseconds: arrivalElapsedMilliseconds")
+                && prohibited.allSatisfy { !region.contains($0) }
+        }
+        let backgroundEventSampleIsExact: (String) -> Bool = { region in
+            region.components(separatedBy: "runningRuntimeFacts(").count - 1 == 2
+                && region.contains("factsBefore == request.runtimeBinding.runtimeFacts")
+                && region.contains(
+                    "elementProcessIdentifier(request.element, reader: reader) "
+                        + "== processIdentifier")
+                && region.contains("readAnchorFacts(")
+                && region.contains("ChatAXSurfaceVerifier.verifyChat(")
+                && region.contains(
+                    "verifiedSurface.signature == request.target.identity.surfaceSignature")
+                && region.contains("case .success(let rawWindowOrdinal) = reader.integer(")
+                && region.contains("factsAfter == factsBefore")
+                && region.contains("SystemChatAXRuntimeApplicationVerifier.matches(")
+                && !region.contains("emitSignal(")
+        }
+        let eventCommitUsesArrivalTime: (String, String) -> Bool = {
+            commitRegion, emitterRegion in
+            guard
+                let pidRange = commitRegion.range(
+                    of: "sample.processIdentifier == target.processIdentifier"),
+                let runtimeRange = commitRegion.range(
+                    of: "sample.runtimeFacts == runtimeBinding.runtimeFacts"),
+                let surfaceRange = commitRegion.range(
+                    of: "sample.surfaceSignature == target.identity.surfaceSignature"),
+                let emissionRange = commitRegion.range(
+                    of: "emitSignal(")
+            else {
+                return false
+            }
+            return pidRange.lowerBound < runtimeRange.lowerBound
+                && runtimeRange.lowerBound < surfaceRange.lowerBound
+                && surfaceRange.lowerBound < emissionRange.lowerBound
+                && commitRegion.contains("elapsedMilliseconds: elapsedMilliseconds")
+                && !commitRegion.contains("traceElapsedMilliseconds")
+                && emitterRegion.contains("elapsedMilliseconds: elapsedMilliseconds")
+                && !emitterRegion.contains("traceElapsedMilliseconds")
+                && chatAXFunctionContainsMarkersInOrder(
+                    ["let sequence = nextSequence", "nextSequence += 1", "receive?("],
+                    inFunction: "private func emitSignal(",
+                    source: emitterRegion)
         }
         expect(
-            validatesSurfaceBeforeUnrelatedSignal(processObservedElementRegion)
-                && runtime.components(
-                    separatedBy: "processObservedElement("
-                ).count - 1 == 3
-                && handleRegion.components(
-                    separatedBy: "processObservedElement("
-                ).count - 1 == 1
-                && retryDeferredEventRegion.components(
-                    separatedBy: "processObservedElement("
-                ).count - 1 == 1,
-            "每个非销毁结构通知都必须在发布信号前立即复核 surface")
-        let reorderedSurfaceMutation =
-            processObservedElementRegion
-            .replacingOccurrences(of: "surfaceStillMatches(target)", with: "__SURFACE_CHECK__")
-            .replacingOccurrences(
-                of: "emitSignal(kind: .unrelatedStructureChanged",
-                with: "surfaceStillMatches(target); __UNRELATED_EMIT__"
-            )
-            .replacingOccurrences(
-                of: "__SURFACE_CHECK__",
-                with: "emitSignal(kind: .unrelatedStructureChanged")
+            mainActorEventCallbackOnlyEnqueues(handleRegion)
+                && backgroundEventSampleIsExact(eventQuerySampleRegion)
+                && eventCommitUsesArrivalTime(
+                    commitObservedEventRegion,
+                    elapsedSignalRegion)
+                && runtime.components(separatedBy: ".unrelatedStructureChanged").count - 1
+                    == 1,
+            "非销毁 callback 必须只捕获 arrival 并 enqueue；后台 exact 复核后才能按抵达时间提交")
+        let directMainActorQueryMutation = handleRegion.replacingOccurrences(
+            of: "let request = SystemChatAXEventQueryRequest(",
+            with: "_ = SystemChatAXCodeIdentityReader.runningRuntimeFacts("
+                + "processIdentifier: target.processIdentifier)\n"
+                + "        let request = SystemChatAXEventQueryRequest(")
         expect(
-            !validatesSurfaceBeforeUnrelatedSignal(reorderedSurfaceMutation),
-            "surface 契约必须拒绝先发布信号、后验证 identity 的等价变异")
+            !mainActorEventCallbackOnlyEnqueues(directMainActorQueryMutation),
+            "source gate 必须拒绝在 MainActor callback 恢复 PID/surface/runtime query")
+        let missingEventSurfaceMutation = eventQuerySampleRegion.replacingOccurrences(
+            of: "verifiedSurface.signature == request.target.identity.surfaceSignature",
+            with: "true")
+        expect(
+            !backgroundEventSampleIsExact(missingEventSurfaceMutation),
+            "event sampler 必须拒绝只取到某个 surface 而不 exact 匹配 allowlist 摘要")
+        let completionTimestampMutation = commitObservedEventRegion.replacingOccurrences(
+            of: "elapsedMilliseconds: elapsedMilliseconds",
+            with: "elapsedMilliseconds: traceElapsedMilliseconds")
+        expect(
+            !eventCommitUsesArrivalTime(completionTimestampMutation, elapsedSignalRegion),
+            "event evidence 不得把后台 sampler 完成时间伪装成 callback 抵达时间")
         let recordsExitWithoutDestroyedElementQuery: (String) -> Bool = { region in
             let normalized = region.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             let applicationDestroyedDeclaration =
@@ -2245,19 +2932,22 @@ func runChatAXTracerSuites() async {
                 let invalidElementRange = applicationDestroyedRegion.range(
                     of: "self.applicationElement = nil"),
                 let emissionRange = applicationDestroyedRegion.range(
-                    of: "emitSignal(kind: .applicationExited, windowOrdinal: 0)"),
+                    of: "emitSignal("),
                 let invalidationRange = region.range(of: "invalidateTarget()")
             else {
                 return false
             }
             return normalized.contains("invalidateTarget()")
-                && applicationDestroyedRegion.contains(
-                    "emitSignal(kind: .applicationExited, windowOrdinal: 0)")
+                && normalized.contains("kind: .applicationExited")
+                && normalized.contains("windowOrdinal: 0")
+                && normalized.contains(
+                    "elapsedMilliseconds: arrivalElapsedMilliseconds")
                 && region.components(separatedBy: "emitSignal(").count - 1 == 1
                 && region.components(separatedBy: "invalidateTarget()").count - 1 == 1
                 && invalidElementRange.upperBound < emissionRange.lowerBound
                 && applicationDestroyedRange.upperBound < invalidationRange.lowerBound
                 && !region.contains("element:")
+                && !region.contains("eventQueryCoordinator")
                 && !region.contains("SystemChatAXAttributeReader")
                 && !region.contains("prepareForMessaging")
                 && !region.contains("AXUIElementGetPid")
@@ -2267,8 +2957,10 @@ func runChatAXTracerSuites() async {
             recordsExitWithoutDestroyedElementQuery(destroyedRegion),
             "destroyed callback 必须只记录已知退出事实，不能再 query 失效 AX element")
         let destroyedElementQueryMutation = destroyedRegion.replacingOccurrences(
-            of: "emitSignal(kind: .applicationExited, windowOrdinal: 0)",
-            with: "emitSignal(kind: .applicationExited, element: element)")
+            of: "self.applicationElement = nil",
+            with: "var destroyedPID: pid_t = 0\n"
+                + "                AXUIElementGetPid(element, &destroyedPID)\n"
+                + "                self.applicationElement = nil")
         expect(
             !recordsExitWithoutDestroyedElementQuery(destroyedElementQueryMutation),
             "destroyed-element 契约必须拒绝回退到通用 AX emitter")
@@ -2280,8 +2972,14 @@ func runChatAXTracerSuites() async {
             "非 application destroyed callback 不得伪造 application-exit evidence")
         let lateInvalidElementMutation = destroyedRegion.replacingOccurrences(
             of: "self.applicationElement = nil\n"
-                + "                emitSignal(kind: .applicationExited, windowOrdinal: 0)",
-            with: "emitSignal(kind: .applicationExited, windowOrdinal: 0)\n"
+                + "                emitSignal(\n"
+                + "                    kind: .applicationExited,\n"
+                + "                    windowOrdinal: 0,\n"
+                + "                    elapsedMilliseconds: arrivalElapsedMilliseconds)",
+            with: "emitSignal(\n"
+                + "                    kind: .applicationExited,\n"
+                + "                    windowOrdinal: 0,\n"
+                + "                    elapsedMilliseconds: arrivalElapsedMilliseconds)\n"
                 + "                self.applicationElement = nil")
         expect(
             !recordsExitWithoutDestroyedElementQuery(lateInvalidElementMutation),
@@ -2345,9 +3043,13 @@ func runChatAXTracerSuites() async {
             !distinguishesMissingFrameworkFromUnreadable(missingAsUnreadableMutation),
             "framework path 分类契约必须拒绝把 missing 与 unreadable 重新折叠")
         expect(
-            revalidationRegion.contains("readAnchorFacts(")
-                && revalidationRegion.contains("ChatAXSurfaceVerifier.verifyChat("),
-            "运行中复核必须重新观察 facts 并走同一个 exact verifier")
+            runtimeSamplerTypeRegion.contains("readAnchorFacts(")
+                && runtimeSamplerTypeRegion.contains("ChatAXSurfaceVerifier.verifyChat(")
+                && eventQuerySampleRegion.contains("readAnchorFacts(")
+                && eventQuerySampleRegion.contains("ChatAXSurfaceVerifier.verifyChat(")
+                && !observerTypeRegion.contains("surfaceStillMatches(")
+                && !observerTypeRegion.contains("elementBelongsToTarget("),
+            "周期与 event 后台复核必须共用 exact surface verifier，observer 不得保留 dead 快捷路径")
         expect(
             !runtime.contains("surface: .chatGPTDesktopAX")
                 && !runtime.contains("surfaceSignatures.first"),

@@ -235,77 +235,86 @@ package enum ChatAXRuntimeValidationDeadlineOutcome<Value: Sendable>: Sendable {
 
 extension ChatAXRuntimeValidationDeadlineOutcome: Equatable where Value: Equatable {}
 
-package struct ChatAXDeferredSystemQueryGate: Sendable {
+package struct ChatAXEventQueryGate: Sendable {
     package struct Request: Equatable, Sendable {
         fileprivate let generation: UInt64
         fileprivate let identifier: UInt64
-        fileprivate let deadlineMilliseconds: Int
+        package let elapsedMilliseconds: Int
     }
 
-    package enum Decision: Equatable, Sendable {
+    package enum EnqueueDecision: Equatable, Sendable {
+        case start(Request)
+        case coalesced(Request)
+    }
+
+    package enum CompletionDecision: Equatable, Sendable {
         case stale
-        case waiting
-        case ready
-        case expired
+        case idle
+        case start(Request)
     }
 
     private var generation: UInt64 = 0
     private var nextIdentifier: UInt64 = 0
     private var sessionIsActive = false
+    private var activeRequest: Request?
     private var pendingRequest: Request?
 
     package init() {}
 
-    package var hasPendingRequest: Bool { pendingRequest != nil }
-
     package mutating func beginSession() {
         generation &+= 1
+        activeRequest = nil
         pendingRequest = nil
         sessionIsActive = true
     }
 
     package mutating func endSession() {
         generation &+= 1
+        activeRequest = nil
         pendingRequest = nil
         sessionIsActive = false
     }
 
     package mutating func enqueue(
-        nowMilliseconds: Int,
-        timeoutMilliseconds: Int
-    ) -> Request? {
-        guard sessionIsActive, nowMilliseconds >= 0, timeoutMilliseconds >= 0 else { return nil }
-        if let pendingRequest { return pendingRequest }
-        let (candidateDeadline, overflowed) = nowMilliseconds.addingReportingOverflow(
-            timeoutMilliseconds)
+        elapsedMilliseconds: Int
+    ) -> EnqueueDecision? {
+        guard sessionIsActive, elapsedMilliseconds >= 0 else { return nil }
         nextIdentifier &+= 1
         let request = Request(
             generation: generation,
             identifier: nextIdentifier,
-            deadlineMilliseconds: overflowed ? Int.max : candidateDeadline)
-        pendingRequest = request
-        return request
+            elapsedMilliseconds: elapsedMilliseconds)
+        guard activeRequest == nil else {
+            pendingRequest = request
+            return .coalesced(request)
+        }
+        activeRequest = request
+        return .start(request)
     }
 
-    package mutating func decide(
-        _ request: Request,
-        nowMilliseconds: Int,
-        workerLeaseAvailable: Bool
-    ) -> Decision {
+    package mutating func complete(
+        _ request: Request
+    ) -> CompletionDecision {
         guard
             sessionIsActive,
             request.generation == generation,
-            pendingRequest == request
+            activeRequest == request
         else {
             return .stale
         }
-        if nowMilliseconds >= request.deadlineMilliseconds {
-            pendingRequest = nil
-            return .expired
+        if let pendingRequest {
+            activeRequest = pendingRequest
+            self.pendingRequest = nil
+            return .start(pendingRequest)
         }
-        guard workerLeaseAvailable else { return .waiting }
-        pendingRequest = nil
-        return .ready
+        activeRequest = nil
+        return .idle
+    }
+
+    package func isActive(_ request: Request) -> Bool {
+        sessionIsActive
+            && request.generation == generation
+            && activeRequest == request
     }
 }
 
@@ -369,6 +378,225 @@ package enum ChatAXRuntimeValidationDeadline {
         } onCancel: {
             cancellationGate.cancel()
         }
+    }
+}
+
+@MainActor
+package final class ChatAXEventQueryCoordinator<Payload: Sendable, Sample: Sendable> {
+    private struct Entry: Sendable {
+        let request: ChatAXEventQueryGate.Request
+        let payload: Payload
+        let contentionDeadlineMilliseconds: Int
+    }
+
+    private let contentionTimeoutMilliseconds: Int
+    private let attemptTimeoutNanoseconds: UInt64
+    private let retryInterval: TimeInterval
+    private let clockMilliseconds: @Sendable () -> Int
+    private let sampler: @Sendable (Payload) async -> Sample?
+    private let didProduce: (Int, Sample) -> Void
+    private let didInvalidate: () -> Void
+
+    private var gate = ChatAXEventQueryGate()
+    private var activeEntry: Entry?
+    private var pendingEntry: Entry?
+    private var activeTask: Task<Void, Never>?
+    private var retryTimer: Timer?
+
+    package init(
+        contentionTimeoutMilliseconds: Int = 750,
+        attemptTimeoutNanoseconds: UInt64 = 500_000_000,
+        retryInterval: TimeInterval = 0.025,
+        clockMilliseconds: @escaping @Sendable () -> Int = {
+            max(0, Int(ProcessInfo.processInfo.systemUptime * 1_000))
+        },
+        sampler: @escaping @Sendable (Payload) async -> Sample?,
+        didProduce: @escaping (Int, Sample) -> Void,
+        didInvalidate: @escaping () -> Void
+    ) {
+        self.contentionTimeoutMilliseconds = max(0, contentionTimeoutMilliseconds)
+        self.attemptTimeoutNanoseconds = max(1, attemptTimeoutNanoseconds)
+        self.retryInterval = max(0.001, retryInterval)
+        self.clockMilliseconds = clockMilliseconds
+        self.sampler = sampler
+        self.didProduce = didProduce
+        self.didInvalidate = didInvalidate
+    }
+
+    package func beginSession() {
+        cancelScheduledWork()
+        activeEntry = nil
+        pendingEntry = nil
+        gate.beginSession()
+    }
+
+    package func endSession() {
+        gate.endSession()
+        cancelScheduledWork()
+        activeEntry = nil
+        pendingEntry = nil
+    }
+
+    package func enqueue(
+        _ payload: Payload,
+        elapsedMilliseconds: Int
+    ) {
+        guard
+            let decision = gate.enqueue(
+                elapsedMilliseconds: elapsedMilliseconds)
+        else {
+            return
+        }
+        let nowMilliseconds = max(0, clockMilliseconds())
+        let (candidateDeadline, overflowed) = nowMilliseconds.addingReportingOverflow(
+            contentionTimeoutMilliseconds)
+        let deadlineMilliseconds = overflowed ? Int.max : candidateDeadline
+        switch decision {
+        case .start(let request):
+            let entry = Entry(
+                request: request,
+                payload: payload,
+                contentionDeadlineMilliseconds: deadlineMilliseconds)
+            activeEntry = entry
+            launch(entry)
+        case .coalesced(let request):
+            pendingEntry = Entry(
+                request: request,
+                payload: payload,
+                contentionDeadlineMilliseconds: deadlineMilliseconds)
+        }
+    }
+
+    private func launch(_ entry: Entry) {
+        guard
+            gate.isActive(entry.request),
+            activeEntry?.request == entry.request,
+            activeTask == nil,
+            retryTimer == nil
+        else {
+            return
+        }
+        let remainingMilliseconds =
+            entry.contentionDeadlineMilliseconds - max(0, clockMilliseconds())
+        guard remainingMilliseconds > 0 else {
+            failActive(entry.request)
+            return
+        }
+        let (remainingNanoseconds, overflowed) = UInt64(remainingMilliseconds)
+            .multipliedReportingOverflow(by: 1_000_000)
+        let timeoutNanoseconds = min(
+            attemptTimeoutNanoseconds,
+            overflowed ? UInt64.max : remainingNanoseconds)
+        let sampler = self.sampler
+        activeTask = Task.detached { [weak self] in
+            let outcome = await ChatAXRuntimeValidationDeadline.run(
+                timeoutNanoseconds: timeoutNanoseconds
+            ) {
+                await sampler(entry.payload)
+            }
+            guard !Task.isCancelled else { return }
+            await self?.finish(entry, outcome: outcome)
+        }
+    }
+
+    private func finish(
+        _ entry: Entry,
+        outcome: ChatAXRuntimeValidationDeadlineOutcome<Sample?>
+    ) {
+        guard
+            gate.isActive(entry.request),
+            activeEntry?.request == entry.request
+        else {
+            return
+        }
+        activeTask = nil
+        switch outcome {
+        case .deferred:
+            scheduleRetry(entry)
+        case .cancelled, .timedOut:
+            failActive(entry.request)
+        case .completed(let sample):
+            guard let sample else {
+                failActive(entry.request)
+                return
+            }
+            commit(entry, sample: sample)
+        }
+    }
+
+    private func commit(_ entry: Entry, sample: Sample) {
+        let completion = gate.complete(entry.request)
+        let successor: Entry?
+        switch completion {
+        case .stale:
+            return
+        case .idle:
+            activeEntry = nil
+            pendingEntry = nil
+            successor = nil
+        case .start(let request):
+            guard let pendingEntry, pendingEntry.request == request else {
+                failActive(request)
+                return
+            }
+            activeEntry = pendingEntry
+            self.pendingEntry = nil
+            successor = pendingEntry
+        }
+        didProduce(entry.request.elapsedMilliseconds, sample)
+        if let successor,
+            gate.isActive(successor.request),
+            activeEntry?.request == successor.request
+        {
+            launch(successor)
+        }
+    }
+
+    private func scheduleRetry(_ entry: Entry) {
+        guard
+            gate.isActive(entry.request),
+            activeEntry?.request == entry.request,
+            max(0, clockMilliseconds()) < entry.contentionDeadlineMilliseconds
+        else {
+            failActive(entry.request)
+            return
+        }
+        let retryTimer = Timer(timeInterval: retryInterval, repeats: false) {
+            [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.retry(entry)
+            }
+        }
+        self.retryTimer = retryTimer
+        RunLoop.main.add(retryTimer, forMode: .common)
+    }
+
+    private func retry(_ entry: Entry) {
+        guard
+            gate.isActive(entry.request),
+            activeEntry?.request == entry.request
+        else {
+            return
+        }
+        retryTimer?.invalidate()
+        retryTimer = nil
+        launch(entry)
+    }
+
+    private func failActive(_ request: ChatAXEventQueryGate.Request) {
+        guard gate.isActive(request) else { return }
+        gate.endSession()
+        cancelScheduledWork()
+        activeEntry = nil
+        pendingEntry = nil
+        didInvalidate()
+    }
+
+    private func cancelScheduledWork() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+        activeTask?.cancel()
+        activeTask = nil
     }
 }
 
@@ -835,6 +1063,7 @@ package struct ChatAXCandidateDetector: Sendable {
         _ signal: ChatAXStructuralSignal
     ) -> ChatAXCandidateDetectionOutcome {
         guard signal.sequence > lastSequence,
+            signal.elapsedMilliseconds >= 0,
             signal.elapsedMilliseconds >= lastElapsedMilliseconds,
             signal.windowOrdinal >= 0
         else {
@@ -856,7 +1085,11 @@ package struct ChatAXCandidateDetector: Sendable {
         var detected: [ChatAXDetectedSemanticEvent] = []
         switch signal.kind {
         case .composerSubmitted:
-            if state.phase == .idle, state.submittedAt == nil {
+            let pendingSubmitHasExpired =
+                state.submittedAt.map {
+                    signal.elapsedMilliseconds - $0 > submitAssociationMilliseconds
+                } ?? true
+            if state.phase == .idle, pendingSubmitHasExpired {
                 state.submittedAt = signal.elapsedMilliseconds
                 state.assistantEpoch.resetForNewSubmit()
             }

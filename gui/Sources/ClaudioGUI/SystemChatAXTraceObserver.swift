@@ -358,22 +358,23 @@ private struct SystemChatAXAttributeReader {
     func integer(
         _ attribute: ChatAXApprovedAttribute,
         from element: AXUIElement
-    ) -> Int? {
+    ) -> Result<Int?, ChatAXAttributeReadFailure> {
         guard approvedAttributes.contains(attribute), prepareForMessaging(element) else {
-            return nil
+            return .failure(.unreadable)
         }
         var value: CFTypeRef?
-        guard
-            AXUIElementCopyAttributeValue(
-                element,
-                (attribute as ChatAXApprovedAttribute).rawValue as CFString,
-                &value) == .success,
-            !Task.isCancelled,
-            let number = value as? NSNumber
-        else {
-            return nil
+        let result = AXUIElementCopyAttributeValue(
+            element,
+            (attribute as ChatAXApprovedAttribute).rawValue as CFString,
+            &value)
+        guard !Task.isCancelled else { return .failure(.unreadable) }
+        if result == .attributeUnsupported || result == .noValue {
+            return .success(nil)
         }
-        return number.intValue
+        guard result == .success, let number = value as? NSNumber else {
+            return .failure(.unreadable)
+        }
+        return .success(number.intValue)
     }
 }
 
@@ -383,7 +384,13 @@ private struct SystemChatAXSurfaceSignatureReader {
         .identifier, .role, .subrole,
     ]
 
-    private let reader = SystemChatAXAttributeReader(approvedAttributes: approvedAttributes)
+    private let reader: SystemChatAXAttributeReader
+
+    init(budget: SystemChatAXReadBudget = SystemChatAXReadBudget()) {
+        reader = SystemChatAXAttributeReader(
+            approvedAttributes: Self.approvedAttributes,
+            budget: budget)
+    }
 
     func readAnchorFacts(
         applicationElement: AXUIElement,
@@ -504,6 +511,138 @@ private struct SystemChatAXRuntimeSample: Equatable, Sendable {
     let surfaceSignature: ChatAXSurfaceSignature
 }
 
+private struct SystemChatAXEventQueryRequest: @unchecked Sendable {
+    let element: AXUIElement
+    let applicationElement: AXUIElement
+    let target: ChatAXObservedTarget
+    let runtimeBinding: SystemChatAXRuntimeBinding
+    let approvedAttributes: Set<ChatAXApprovedAttribute>
+}
+
+private struct SystemChatAXEventQuerySample: Equatable, Sendable {
+    let processIdentifier: pid_t
+    let runtimeFacts: SystemChatAXRuntimeFacts
+    let surfaceSignature: ChatAXSurfaceSignature
+    let windowOrdinal: Int
+}
+
+private enum SystemChatAXRuntimeApplicationVerifier {
+    static func matches(
+        target: ChatAXObservedTarget,
+        binding: SystemChatAXRuntimeBinding
+    ) -> Bool {
+        guard
+            !Task.isCancelled,
+            target.processIdentifier == binding.processIdentifier,
+            target.identity.bundleIdentifier
+                == binding.runtimeFacts.signingFacts.signedBundleIdentity.bundleIdentifier,
+            target.identity.codeSignature
+                == binding.runtimeFacts.signingFacts.signedBundleIdentity.codeSignature,
+            target.identity.shortVersion
+                == binding.runtimeFacts.signingFacts.signedBundleIdentity.shortVersion,
+            target.identity.build
+                == binding.runtimeFacts.signingFacts.signedBundleIdentity.build,
+            target.identity.architecture == binding.architecture,
+            let application = NSRunningApplication(
+                processIdentifier: binding.processIdentifier),
+            !application.isTerminated,
+            !Task.isCancelled,
+            application.bundleIdentifier == target.identity.bundleIdentifier,
+            architecture(for: application) == binding.architecture,
+            let bundleURL = application.bundleURL,
+            SystemChatAXCodeIdentityReader.normalizedPath(bundleURL) == binding.bundlePath,
+            !Task.isCancelled,
+            SystemChatAXCodeIdentityReader.currentProcessIncarnation(
+                processIdentifier: binding.processIdentifier)
+                == binding.runtimeFacts.processIncarnation
+        else {
+            return false
+        }
+        return true
+    }
+
+    static func architecture(
+        for application: NSRunningApplication
+    ) -> ChatAXCPUArchitecture? {
+        switch application.executableArchitecture {
+        case NSBundleExecutableArchitectureARM64:
+            .arm64
+        case NSBundleExecutableArchitectureX86_64:
+            .intel64
+        default:
+            nil
+        }
+    }
+}
+
+private enum SystemChatAXEventQuerySampler {
+    static func sample(
+        _ request: SystemChatAXEventQueryRequest
+    ) -> SystemChatAXEventQuerySample? {
+        let processIdentifier = request.target.processIdentifier
+        guard
+            !Task.isCancelled,
+            request.runtimeBinding.processIdentifier == processIdentifier,
+            let factsBefore = SystemChatAXCodeIdentityReader.runningRuntimeFacts(
+                processIdentifier: processIdentifier),
+            factsBefore == request.runtimeBinding.runtimeFacts,
+            !Task.isCancelled
+        else {
+            return nil
+        }
+        let budget = SystemChatAXReadBudget()
+        let reader = SystemChatAXAttributeReader(
+            approvedAttributes: request.approvedAttributes,
+            budget: budget)
+        guard
+            elementProcessIdentifier(request.element, reader: reader) == processIdentifier,
+            !Task.isCancelled,
+            let anchorFacts = SystemChatAXSurfaceSignatureReader(budget: budget).readAnchorFacts(
+                applicationElement: request.applicationElement,
+                expectedProcessIdentifier: processIdentifier),
+            let verifiedSurface = ChatAXSurfaceVerifier.verifyChat(
+                anchorFacts: anchorFacts,
+                allowedSignatures: [request.target.identity.surfaceSignature]),
+            !Task.isCancelled,
+            case .success(let rawWindowOrdinal) = reader.integer(
+                .windowNumber,
+                from: request.element),
+            !Task.isCancelled,
+            let factsAfter = SystemChatAXCodeIdentityReader.runningRuntimeFacts(
+                processIdentifier: processIdentifier),
+            factsAfter == factsBefore,
+            verifiedSurface.signature == request.target.identity.surfaceSignature,
+            !Task.isCancelled,
+            SystemChatAXRuntimeApplicationVerifier.matches(
+                target: request.target,
+                binding: request.runtimeBinding),
+            !Task.isCancelled
+        else {
+            return nil
+        }
+        return SystemChatAXEventQuerySample(
+            processIdentifier: processIdentifier,
+            runtimeFacts: factsBefore,
+            surfaceSignature: verifiedSurface.signature,
+            windowOrdinal: max(0, rawWindowOrdinal ?? 0))
+    }
+
+    private static func elementProcessIdentifier(
+        _ element: AXUIElement,
+        reader: SystemChatAXAttributeReader
+    ) -> pid_t? {
+        guard reader.prepareForMessaging(element) else { return nil }
+        var observedProcessIdentifier: pid_t = 0
+        guard
+            AXUIElementGetPid(element, &observedProcessIdentifier) == .success,
+            !Task.isCancelled
+        else {
+            return nil
+        }
+        return observedProcessIdentifier
+    }
+}
+
 private enum SystemChatAXRuntimeSampler {
     static func sample(
         processIdentifier: pid_t,
@@ -583,9 +722,8 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
     private var validationTimer: Timer?
     private var validationTask: Task<Void, Never>?
     private var validationGate = ChatAXRuntimeValidationGate()
-    private var deferredSystemQueryGate = ChatAXDeferredSystemQueryGate()
-    private var deferredEventTimer: Timer?
-    private var deferredEventElement: AXUIElement?
+    private var eventQueryCoordinator:
+        ChatAXEventQueryCoordinator<SystemChatAXEventQueryRequest, SystemChatAXEventQuerySample>?
     private var runtimeBinding: SystemChatAXRuntimeBinding?
     private var pendingInspection: SystemChatAXInspectedBinding?
     private var startedAt = ProcessInfo.processInfo.systemUptime
@@ -713,8 +851,24 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         self.receive = receive
         self.targetDidInvalidate = targetDidInvalidate
         runtimeBinding = inspectedBinding.runtimeBinding
+        let eventQueryCoordinator = ChatAXEventQueryCoordinator<
+            SystemChatAXEventQueryRequest,
+            SystemChatAXEventQuerySample
+        >(
+            sampler: { request in
+                SystemChatAXEventQuerySampler.sample(request)
+            },
+            didProduce: { [weak self] elapsedMilliseconds, sample in
+                self?.commitObservedEvent(
+                    sample,
+                    elapsedMilliseconds: elapsedMilliseconds)
+            },
+            didInvalidate: { [weak self] in
+                self?.invalidateTarget()
+            })
+        self.eventQueryCoordinator = eventQueryCoordinator
+        eventQueryCoordinator.beginSession()
         validationGate.beginSession()
-        deferredSystemQueryGate.beginSession()
         axObserver = createdObserver
         self.applicationElement = applicationElement
         registeredNotifications = registered
@@ -739,10 +893,8 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         validationTask?.cancel()
         validationTask = nil
         validationGate.endSession()
-        deferredEventTimer?.invalidate()
-        deferredEventTimer = nil
-        deferredEventElement = nil
-        deferredSystemQueryGate.endSession()
+        eventQueryCoordinator?.endSession()
+        eventQueryCoordinator = nil
         if let axObserver {
             if let applicationElement {
                 for notification in registeredNotifications {
@@ -768,125 +920,83 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         targetWasDestroyed: Bool
     ) {
         guard let target else { return }
+        let arrivalElapsedMilliseconds = traceElapsedMilliseconds
         if targetWasDestroyed {
             if let applicationElement, CFEqual(element, applicationElement) {
                 self.applicationElement = nil
-                emitSignal(kind: .applicationExited, windowOrdinal: 0)
+                emitSignal(
+                    kind: .applicationExited,
+                    windowOrdinal: 0,
+                    elapsedMilliseconds: arrivalElapsedMilliseconds)
             }
             invalidateTarget()
             return
         }
-        if deferredSystemQueryGate.hasPendingRequest {
-            enqueueDeferredEvent(element)
-            return
-        }
-        let workerGate = ChatAXSystemQueryWorkerGate.shared
-        guard let workerLease = workerGate.acquire() else {
-            enqueueDeferredEvent(element)
-            return
-        }
-        defer { workerGate.release(workerLease) }
-        processObservedElement(element, target: target)
-    }
-
-    private func processObservedElement(
-        _ element: AXUIElement,
-        target: ChatAXObservedTarget
-    ) {
-        guard elementBelongsToTarget(element, target: target), surfaceStillMatches(target) else {
-            invalidateTarget()
-            return
-        }
-        emitSignal(kind: .unrelatedStructureChanged, element: element)
-    }
-
-    private func enqueueDeferredEvent(_ element: AXUIElement) {
         guard
-            let request = deferredSystemQueryGate.enqueue(
-                nowMilliseconds: systemUptimeMilliseconds,
-                timeoutMilliseconds: 750)
+            let applicationElement,
+            let runtimeBinding,
+            let eventQueryCoordinator
         else {
             invalidateTarget()
             return
         }
-        deferredEventElement = element
-        guard deferredEventTimer == nil else { return }
-        let deferredEventTimer = Timer(timeInterval: 0.025, repeats: true) {
-            [weak self] _ in
-            MainActor.assumeIsolated {
-                self?.retryDeferredEvent(request)
-            }
-        }
-        self.deferredEventTimer = deferredEventTimer
-        RunLoop.main.add(deferredEventTimer, forMode: .common)
-    }
-
-    private func retryDeferredEvent(
-        _ request: ChatAXDeferredSystemQueryGate.Request
-    ) {
-        guard let element = deferredEventElement, let target else {
-            clearDeferredEvent()
-            return
-        }
-        let workerGate = ChatAXSystemQueryWorkerGate.shared
-        let workerLease = workerGate.acquire()
-        let decision = deferredSystemQueryGate.decide(
+        let request = SystemChatAXEventQueryRequest(
+            element: element,
+            applicationElement: applicationElement,
+            target: target,
+            runtimeBinding: runtimeBinding,
+            approvedAttributes: approvedAttributes)
+        eventQueryCoordinator.enqueue(
             request,
-            nowMilliseconds: systemUptimeMilliseconds,
-            workerLeaseAvailable: workerLease != nil)
-        switch decision {
-        case .waiting:
-            return
-        case .ready:
-            guard let workerLease else {
-                clearDeferredEvent()
-                invalidateTarget()
-                return
-            }
-            clearDeferredEvent()
-            defer { workerGate.release(workerLease) }
-            processObservedElement(element, target: target)
-        case .expired:
-            if let workerLease {
-                workerGate.release(workerLease)
-            }
-            clearDeferredEvent()
+            elapsedMilliseconds: arrivalElapsedMilliseconds)
+    }
+
+    private func commitObservedEvent(
+        _ sample: SystemChatAXEventQuerySample,
+        elapsedMilliseconds: Int
+    ) {
+        guard
+            let target,
+            let runtimeBinding,
+            sample.processIdentifier == target.processIdentifier,
+            sample.runtimeFacts == runtimeBinding.runtimeFacts,
+            sample.surfaceSignature == target.identity.surfaceSignature
+        else {
             invalidateTarget()
-        case .stale:
-            if let workerLease {
-                workerGate.release(workerLease)
-            }
-            clearDeferredEvent()
+            return
         }
-    }
-
-    private func clearDeferredEvent() {
-        deferredEventTimer?.invalidate()
-        deferredEventTimer = nil
-        deferredEventElement = nil
-    }
-
-    private var systemUptimeMilliseconds: Int {
-        max(0, Int(ProcessInfo.processInfo.systemUptime * 1_000))
-    }
-
-    private func emitSignal(kind: ChatAXStructuralSignalKind, element: AXUIElement) {
-        let reader = SystemChatAXAttributeReader(approvedAttributes: approvedAttributes)
-        let windowOrdinal = max(0, reader.integer(.windowNumber, from: element) ?? 0)
-        emitSignal(kind: kind, windowOrdinal: windowOrdinal)
+        emitSignal(
+            kind: .unrelatedStructureChanged,
+            windowOrdinal: sample.windowOrdinal,
+            elapsedMilliseconds: elapsedMilliseconds)
     }
 
     private func emitSignal(kind: ChatAXStructuralSignalKind, windowOrdinal: Int) {
-        let elapsed = max(
-            0,
-            Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000))
+        emitSignal(
+            kind: kind,
+            windowOrdinal: windowOrdinal,
+            elapsedMilliseconds: traceElapsedMilliseconds)
+    }
+
+    private func emitSignal(
+        kind: ChatAXStructuralSignalKind,
+        windowOrdinal: Int,
+        elapsedMilliseconds: Int
+    ) {
+        let sequence = nextSequence
+        nextSequence += 1
         receive?(
             ChatAXStructuralSignal(
-                sequence: nextSequence,
-                elapsedMilliseconds: elapsed,
+                sequence: sequence,
+                elapsedMilliseconds: elapsedMilliseconds,
                 windowOrdinal: windowOrdinal,
                 kind: kind))
-        nextSequence += 1
+    }
+
+    private var traceElapsedMilliseconds: Int {
+        max(
+            0,
+            Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000))
     }
 
     private func scheduleBoundTargetValidation() {
@@ -967,69 +1077,13 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         return .matches
     }
 
-    private func surfaceStillMatches(_ target: ChatAXObservedTarget) -> Bool {
-        guard let applicationElement else { return false }
-        return surfaceStillMatches(target, applicationElement: applicationElement)
-    }
-
-    private func surfaceStillMatches(
-        _ target: ChatAXObservedTarget,
-        applicationElement: AXUIElement
-    ) -> Bool {
-        guard
-            let anchorFacts = SystemChatAXSurfaceSignatureReader().readAnchorFacts(
-                applicationElement: applicationElement,
-                expectedProcessIdentifier: target.processIdentifier),
-            let verifiedSurface = ChatAXSurfaceVerifier.verifyChat(
-                anchorFacts: anchorFacts,
-                allowedSignatures: [target.identity.surfaceSignature])
-        else {
-            return false
-        }
-        return verifiedSurface.signature == target.identity.surfaceSignature
-    }
-
     private func runtimeApplicationStillMatches(
         target: ChatAXObservedTarget,
         binding: SystemChatAXRuntimeBinding
     ) -> Bool {
-        guard
-            target.processIdentifier == binding.processIdentifier,
-            target.identity.bundleIdentifier
-                == binding.runtimeFacts.signingFacts.signedBundleIdentity.bundleIdentifier,
-            target.identity.codeSignature
-                == binding.runtimeFacts.signingFacts.signedBundleIdentity.codeSignature,
-            target.identity.shortVersion
-                == binding.runtimeFacts.signingFacts.signedBundleIdentity.shortVersion,
-            target.identity.build
-                == binding.runtimeFacts.signingFacts.signedBundleIdentity.build,
-            target.identity.architecture == binding.architecture,
-            let application = NSRunningApplication(
-                processIdentifier: binding.processIdentifier),
-            !application.isTerminated,
-            application.bundleIdentifier == target.identity.bundleIdentifier,
-            architecture(for: application) == binding.architecture,
-            let bundleURL = application.bundleURL,
-            SystemChatAXCodeIdentityReader.normalizedPath(bundleURL) == binding.bundlePath,
-            SystemChatAXCodeIdentityReader.currentProcessIncarnation(
-                processIdentifier: binding.processIdentifier)
-                == binding.runtimeFacts.processIncarnation
-        else {
-            return false
-        }
-        return true
-    }
-
-    private func elementBelongsToTarget(
-        _ element: AXUIElement,
-        target: ChatAXObservedTarget
-    ) -> Bool {
-        let reader = SystemChatAXAttributeReader(approvedAttributes: [])
-        guard reader.prepareForMessaging(element) else { return false }
-        var observedProcessIdentifier: pid_t = 0
-        return AXUIElementGetPid(element, &observedProcessIdentifier) == .success
-            && !Task.isCancelled
-            && observedProcessIdentifier == target.processIdentifier
+        SystemChatAXRuntimeApplicationVerifier.matches(
+            target: target,
+            binding: binding)
     }
 
     private func inspectIdentities(
@@ -1217,14 +1271,7 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
     private func architecture(
         for application: NSRunningApplication
     ) -> ChatAXCPUArchitecture? {
-        switch application.executableArchitecture {
-        case NSBundleExecutableArchitectureARM64:
-            .arm64
-        case NSBundleExecutableArchitectureX86_64:
-            .intel64
-        default:
-            nil
-        }
+        SystemChatAXRuntimeApplicationVerifier.architecture(for: application)
     }
 
 }
