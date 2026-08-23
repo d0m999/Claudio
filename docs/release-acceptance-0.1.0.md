@@ -35,12 +35,13 @@ WorkBuddy 配置、备份、prompt、response、receipt 原文件或日志。入
 
 ### 当前只读基线
 
-以下摘要由 2026-08-23、绑定已提交 Issue #14 implementation commit 的一次真实只读运行生成；后续仅账本
+以下摘要由 2026-08-23、绑定已提交 Issue #14 hardening commit 的一次真实只读运行生成；后续仅账本
 提交不改变该实现事实。命令 stdout 未作为原始证据文件写入仓库；本节与入口脚本是可重建的脱敏证据指针。
 
 | 字段 | 结果 | 证据等级 |
 |---|---|---|
-| Commit SHA（preflight 采集 commit） | `ea7794c72333ac39be179d88f235c6487ea1d003` | static configuration |
+| Collected at | `2026-08-23T15:00:59Z` | static configuration |
+| Commit SHA（preflight 采集 commit） | `91eb5fdcb200a529259d701bad66d796134b6e09` | static configuration |
 | Claudio version | `0.0.0-dev` | static configuration |
 | WorkBuddy bundle | `com.workbuddy.workbuddy`，version `5.3.14`，build `5.3.14`，`/Applications/WorkBuddy.app` | static configuration |
 | macOS / CPU | `26.6.2` / `arm64` | static configuration |
