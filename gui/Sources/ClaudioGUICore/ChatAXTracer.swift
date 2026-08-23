@@ -1,30 +1,383 @@
+#if DEBUG
 import ClaudioCore
 import CryptoKit
 import Foundation
 
-public enum ChatAXCPUArchitecture: String, Codable, Sendable {
+package enum ChatAXCPUArchitecture: String, Codable, Sendable {
     case arm64
     case intel64 = "x86_64"
 }
 
-public struct ChatAXCodeSignature: Codable, Equatable, Sendable {
-    public let teamIdentifier: String
-    public let signingIdentifier: String
-    public let cdHash: String
+package struct ChatAXCodeSignature: Codable, Equatable, Sendable {
+    package let teamIdentifier: String
+    package let signingIdentifier: String
+    package let cdHash: String
 
-    public init(teamIdentifier: String, signingIdentifier: String, cdHash: String) {
+    package init(teamIdentifier: String, signingIdentifier: String, cdHash: String) {
         self.teamIdentifier = teamIdentifier
         self.signingIdentifier = signingIdentifier
         self.cdHash = cdHash
     }
 }
 
-public struct ChatAXFrameworkIdentity: Codable, Equatable, Hashable, Sendable {
-    public let name: String
-    public let shortVersion: String
-    public let build: String
+package struct ChatAXSignedBundleIdentity: Equatable, Sendable {
+    package let bundleIdentifier: String
+    package let codeSignature: ChatAXCodeSignature
+    package let shortVersion: String
+    package let build: String
 
-    public init(name: String, shortVersion: String, build: String) {
+    package init(
+        bundleIdentifier: String,
+        codeSignature: ChatAXCodeSignature,
+        shortVersion: String,
+        build: String
+    ) {
+        self.bundleIdentifier = bundleIdentifier
+        self.codeSignature = codeSignature
+        self.shortVersion = shortVersion
+        self.build = build
+    }
+}
+
+package enum ChatAXCodeIdentityBinding {
+    package static func bind(
+        runningBefore: ChatAXSignedBundleIdentity?,
+        diskBefore: ChatAXSignedBundleIdentity?,
+        runningAfter: ChatAXSignedBundleIdentity?,
+        diskAfter: ChatAXSignedBundleIdentity?
+    ) -> ChatAXSignedBundleIdentity? {
+        guard
+            let runningBefore,
+            let diskBefore,
+            let runningAfter,
+            let diskAfter,
+            runningBefore == diskBefore,
+            diskBefore == runningAfter,
+            runningAfter == diskAfter
+        else {
+            return nil
+        }
+        return runningBefore
+    }
+}
+
+package struct ChatAXRuntimeValidationGate: Sendable {
+    package struct Request: Equatable, Sendable {
+        fileprivate let generation: UInt64
+        fileprivate let identifier: UInt64
+    }
+
+    private var generation: UInt64 = 0
+    private var nextIdentifier: UInt64 = 0
+    private var pendingRequest: Request?
+    private var sessionIsActive = false
+
+    package init() {}
+
+    package mutating func beginSession() {
+        generation &+= 1
+        pendingRequest = nil
+        sessionIsActive = true
+    }
+
+    package mutating func endSession() {
+        generation &+= 1
+        pendingRequest = nil
+        sessionIsActive = false
+    }
+
+    package mutating func beginValidation() -> Request? {
+        guard sessionIsActive, pendingRequest == nil else { return nil }
+        nextIdentifier &+= 1
+        let request = Request(
+            generation: generation,
+            identifier: nextIdentifier)
+        pendingRequest = request
+        return request
+    }
+
+    package mutating func finishValidation(_ request: Request) -> Bool {
+        guard sessionIsActive, request.generation == generation, pendingRequest == request else {
+            return false
+        }
+        pendingRequest = nil
+        return true
+    }
+}
+
+package final class ChatAXRuntimeValidationWinner: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hasWinner = false
+
+    package init() {}
+
+    package func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !hasWinner else { return false }
+        hasWinner = true
+        return true
+    }
+}
+
+package final class ChatAXSystemQueryWorkerGate: @unchecked Sendable {
+    package struct Lease: Sendable {
+        fileprivate let identifier: UInt64
+    }
+
+    package static let shared = ChatAXSystemQueryWorkerGate()
+
+    private let lock = NSLock()
+    private var nextIdentifier: UInt64 = 0
+    private var activeLease: Lease?
+
+    private init() {}
+
+    package func acquire() -> Lease? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard activeLease == nil else { return nil }
+        nextIdentifier &+= 1
+        let lease = Lease(identifier: nextIdentifier)
+        activeLease = lease
+        return lease
+    }
+
+    package func release(_ lease: Lease) {
+        lock.lock()
+        if activeLease?.identifier == lease.identifier {
+            activeLease = nil
+        }
+        lock.unlock()
+    }
+}
+
+package final class ChatAXRuntimeValidationCancellationGate: @unchecked Sendable {
+    private enum State {
+        case awaitingLease
+        case cancelledBeforeLease
+        case pending(ChatAXSystemQueryWorkerGate.Lease)
+        case running(ChatAXSystemQueryWorkerGate.Lease)
+        case terminal
+    }
+
+    private let lock = NSLock()
+    private let workerGate: ChatAXSystemQueryWorkerGate
+    private var state: State = .awaitingLease
+
+    package init(workerGate: ChatAXSystemQueryWorkerGate = .shared) {
+        self.workerGate = workerGate
+    }
+
+    package func bind(_ lease: ChatAXSystemQueryWorkerGate.Lease) -> Bool {
+        lock.lock()
+        switch state {
+        case .awaitingLease:
+            state = .pending(lease)
+            lock.unlock()
+            return true
+        case .cancelledBeforeLease:
+            state = .terminal
+            lock.unlock()
+            workerGate.release(lease)
+            return false
+        case .pending, .running, .terminal:
+            lock.unlock()
+            return false
+        }
+    }
+
+    package func cancel() {
+        lock.lock()
+        let leaseToRelease: ChatAXSystemQueryWorkerGate.Lease?
+        switch state {
+        case .awaitingLease:
+            state = .cancelledBeforeLease
+            leaseToRelease = nil
+        case .pending(let lease):
+            state = .terminal
+            leaseToRelease = lease
+        case .cancelledBeforeLease, .running, .terminal:
+            leaseToRelease = nil
+        }
+        lock.unlock()
+        if let leaseToRelease {
+            workerGate.release(leaseToRelease)
+        }
+    }
+
+    package func beginOperation() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard case .pending(let lease) = state else { return false }
+        state = .running(lease)
+        return true
+    }
+
+    package func finishOperation() {
+        lock.lock()
+        guard case .running(let lease) = state else {
+            lock.unlock()
+            return
+        }
+        state = .terminal
+        lock.unlock()
+        workerGate.release(lease)
+    }
+}
+
+package enum ChatAXRuntimeValidationDeadlineOutcome<Value: Sendable>: Sendable {
+    case completed(Value)
+    case deferred
+    case timedOut
+    case cancelled
+}
+
+extension ChatAXRuntimeValidationDeadlineOutcome: Equatable where Value: Equatable {}
+
+package struct ChatAXDeferredSystemQueryGate: Sendable {
+    package struct Request: Equatable, Sendable {
+        fileprivate let generation: UInt64
+        fileprivate let identifier: UInt64
+        fileprivate let deadlineMilliseconds: Int
+    }
+
+    package enum Decision: Equatable, Sendable {
+        case stale
+        case waiting
+        case ready
+        case expired
+    }
+
+    private var generation: UInt64 = 0
+    private var nextIdentifier: UInt64 = 0
+    private var sessionIsActive = false
+    private var pendingRequest: Request?
+
+    package init() {}
+
+    package var hasPendingRequest: Bool { pendingRequest != nil }
+
+    package mutating func beginSession() {
+        generation &+= 1
+        pendingRequest = nil
+        sessionIsActive = true
+    }
+
+    package mutating func endSession() {
+        generation &+= 1
+        pendingRequest = nil
+        sessionIsActive = false
+    }
+
+    package mutating func enqueue(
+        nowMilliseconds: Int,
+        timeoutMilliseconds: Int
+    ) -> Request? {
+        guard sessionIsActive, nowMilliseconds >= 0, timeoutMilliseconds >= 0 else { return nil }
+        if let pendingRequest { return pendingRequest }
+        let (candidateDeadline, overflowed) = nowMilliseconds.addingReportingOverflow(
+            timeoutMilliseconds)
+        nextIdentifier &+= 1
+        let request = Request(
+            generation: generation,
+            identifier: nextIdentifier,
+            deadlineMilliseconds: overflowed ? Int.max : candidateDeadline)
+        pendingRequest = request
+        return request
+    }
+
+    package mutating func decide(
+        _ request: Request,
+        nowMilliseconds: Int,
+        workerLeaseAvailable: Bool
+    ) -> Decision {
+        guard
+            sessionIsActive,
+            request.generation == generation,
+            pendingRequest == request
+        else {
+            return .stale
+        }
+        if nowMilliseconds >= request.deadlineMilliseconds {
+            pendingRequest = nil
+            return .expired
+        }
+        guard workerLeaseAvailable else { return .waiting }
+        pendingRequest = nil
+        return .ready
+    }
+}
+
+package enum ChatAXRuntimeValidationDeadline {
+    private static let workerGate = ChatAXSystemQueryWorkerGate.shared
+
+    package static func run<Value: Sendable>(
+        timeoutNanoseconds: UInt64,
+        operation: @escaping @Sendable () async -> Value
+    ) async -> ChatAXRuntimeValidationDeadlineOutcome<Value> {
+        let cancellationGate = ChatAXRuntimeValidationCancellationGate()
+        return await withTaskCancellationHandler {
+            guard !Task.isCancelled else { return .cancelled }
+            guard timeoutNanoseconds > 0 else { return .timedOut }
+            guard let workerLease = workerGate.acquire() else {
+                return Task.isCancelled ? .cancelled : .deferred
+            }
+            guard cancellationGate.bind(workerLease) else { return .cancelled }
+            if Task.isCancelled {
+                cancellationGate.cancel()
+                return .cancelled
+            }
+            let winner = ChatAXRuntimeValidationWinner()
+            let results = AsyncStream<ChatAXRuntimeValidationDeadlineOutcome<Value>>(
+                bufferingPolicy: .bufferingOldest(1)
+            ) { continuation in
+                let operationTask = Task.detached {
+                    guard cancellationGate.beginOperation() else { return }
+                    defer { cancellationGate.finishOperation() }
+                    guard !Task.isCancelled else { return }
+                    let value = await operation()
+                    guard !Task.isCancelled else { return }
+                    let operationWon = winner.claim()
+                    cancellationGate.finishOperation()
+                    guard operationWon else { return }
+                    continuation.yield(.completed(value))
+                    continuation.finish()
+                }
+                let timeoutTask = Task.detached {
+                    do {
+                        try await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    } catch {
+                        return
+                    }
+                    guard winner.claim() else { return }
+                    cancellationGate.cancel()
+                    continuation.yield(.timedOut)
+                    continuation.finish()
+                }
+                continuation.onTermination = { @Sendable _ in
+                    cancellationGate.cancel()
+                    operationTask.cancel()
+                    timeoutTask.cancel()
+                }
+            }
+            for await result in results {
+                guard !Task.isCancelled else { return .cancelled }
+                return result
+            }
+            return .cancelled
+        } onCancel: {
+            cancellationGate.cancel()
+        }
+    }
+}
+
+package struct ChatAXFrameworkIdentity: Codable, Equatable, Hashable, Sendable {
+    package let name: String
+    package let shortVersion: String
+    package let build: String
+
+    package init(name: String, shortVersion: String, build: String) {
         self.name = name
         self.shortVersion = shortVersion
         self.build = build
@@ -32,10 +385,10 @@ public struct ChatAXFrameworkIdentity: Codable, Equatable, Hashable, Sendable {
 }
 
 /// 由封闭、非正文 AX 结构事实生成的 SHA-256。只保留摘要，不导出原始 identifier。
-public struct ChatAXSurfaceSignature: Codable, Equatable, Hashable, RawRepresentable, Sendable {
-    public let rawValue: String
+package struct ChatAXSurfaceSignature: Codable, Equatable, Hashable, RawRepresentable, Sendable {
+    package let rawValue: String
 
-    public init?(rawValue: String) {
+    package init?(rawValue: String) {
         guard
             rawValue.range(
                 of: "^[0-9a-f]{64}$",
@@ -46,7 +399,7 @@ public struct ChatAXSurfaceSignature: Codable, Equatable, Hashable, RawRepresent
         self.rawValue = rawValue
     }
 
-    public init(from decoder: any Decoder) throws {
+    package init(from decoder: any Decoder) throws {
         let container = try decoder.singleValueContainer()
         let rawValue = try container.decode(String.self)
         guard let signature = ChatAXSurfaceSignature(rawValue: rawValue) else {
@@ -57,7 +410,7 @@ public struct ChatAXSurfaceSignature: Codable, Equatable, Hashable, RawRepresent
         self = signature
     }
 
-    public func encode(to encoder: any Encoder) throws {
+    package func encode(to encoder: any Encoder) throws {
         var container = encoder.singleValueContainer()
         try container.encode(rawValue)
     }
@@ -160,17 +513,17 @@ package enum ChatAXSurfaceVerifier {
 }
 
 /// Tracer 只接受调用方已经从非 AX 内容边界取得的版本身份；这里没有 UI tree 或正文槽位。
-public struct ChatAXTargetIdentity: Codable, Equatable, Sendable {
-    public let bundleIdentifier: String
-    public let codeSignature: ChatAXCodeSignature
-    public let shortVersion: String
-    public let build: String
-    public let frameworks: [ChatAXFrameworkIdentity]
-    public let architecture: ChatAXCPUArchitecture
-    public let surface: HostSurfaceID
-    public let surfaceSignature: ChatAXSurfaceSignature
+package struct ChatAXTargetIdentity: Codable, Equatable, Sendable {
+    package let bundleIdentifier: String
+    package let codeSignature: ChatAXCodeSignature
+    package let shortVersion: String
+    package let build: String
+    package let frameworks: [ChatAXFrameworkIdentity]
+    package let architecture: ChatAXCPUArchitecture
+    package let surface: HostSurfaceID
+    package let surfaceSignature: ChatAXSurfaceSignature
 
-    public init(
+    package init(
         bundleIdentifier: String,
         codeSignature: ChatAXCodeSignature,
         shortVersion: String,
@@ -214,12 +567,12 @@ extension ChatAXTargetIdentity {
     }
 }
 
-public struct ChatAXInspectionRequirements: Equatable, Sendable {
-    public let bundleIdentifiers: Set<String>
-    public let frameworkNameSets: Set<Set<String>>
-    public let surfaceSignatures: Set<ChatAXSurfaceSignature>
+package struct ChatAXInspectionRequirements: Equatable, Sendable {
+    package let bundleIdentifiers: Set<String>
+    package let frameworkNameSets: Set<Set<String>>
+    package let surfaceSignatures: Set<ChatAXSurfaceSignature>
 
-    public init(
+    package init(
         bundleIdentifiers: Set<String>,
         frameworkNameSets: Set<Set<String>>,
         surfaceSignatures: Set<ChatAXSurfaceSignature>
@@ -230,11 +583,11 @@ public struct ChatAXInspectionRequirements: Equatable, Sendable {
     }
 }
 
-public struct ChatAXObservedTarget: Equatable, Sendable {
-    public let processIdentifier: Int32
-    public let identity: ChatAXTargetIdentity
+package struct ChatAXObservedTarget: Equatable, Sendable {
+    package let processIdentifier: Int32
+    package let identity: ChatAXTargetIdentity
 
-    public init(processIdentifier: Int32, identity: ChatAXTargetIdentity) {
+    package init(processIdentifier: Int32, identity: ChatAXTargetIdentity) {
         self.processIdentifier = processIdentifier
         self.identity = identity
     }
@@ -242,11 +595,11 @@ public struct ChatAXObservedTarget: Equatable, Sendable {
 
 /// 同一运行 PID 的完整 framework projections。空 candidates 且无 unreadable projection
 /// 表示身份事实可读但不匹配；不可读 projection 只有在没有 exact candidate 时才决定错误类别。
-public struct ChatAXTargetInspection: Equatable, Sendable {
-    public let candidates: [ChatAXObservedTarget]
-    public let hasUnreadableProjection: Bool
+package struct ChatAXTargetInspection: Equatable, Sendable {
+    package let candidates: [ChatAXObservedTarget]
+    package let hasUnreadableProjection: Bool
 
-    public init(
+    package init(
         candidates: [ChatAXObservedTarget],
         hasUnreadableProjection: Bool
     ) {
@@ -281,14 +634,14 @@ package func chatAXFrameworkBundlePathState(
     return resourceValues.isDirectory == true ? .directory : .unreadable
 }
 
-public struct ChatAXVersionAllowlist: Sendable {
+package struct ChatAXVersionAllowlist: Sendable {
     private let identities: [ChatAXTargetIdentity]
 
-    public init(identities: [ChatAXTargetIdentity]) {
+    package init(identities: [ChatAXTargetIdentity]) {
         self.identities = identities
     }
 
-    public var inspectionRequirements: ChatAXInspectionRequirements {
+    package var inspectionRequirements: ChatAXInspectionRequirements {
         let chatIdentities = identities.filter { $0.surface == .chatGPTDesktopAX }
         return ChatAXInspectionRequirements(
             bundleIdentifiers: Set(chatIdentities.map(\.bundleIdentifier)),
@@ -297,7 +650,7 @@ public struct ChatAXVersionAllowlist: Sendable {
             surfaceSignatures: Set(chatIdentities.map(\.surfaceSignature)))
     }
 
-    public func allows(_ candidate: ChatAXTargetIdentity) -> Bool {
+    package func allows(_ candidate: ChatAXTargetIdentity) -> Bool {
         guard candidate.hasCompleteVersionIdentity else { return false }
         return identities.contains { allowed in
             let allowedFrameworks = allowed.frameworks.sorted(by: frameworkIdentityPrecedes)
@@ -316,11 +669,11 @@ public struct ChatAXVersionAllowlist: Sendable {
 }
 
 /// Debug tracer 的三项显式启动输入；普通 app、后台进程和测试 harness 都不会生成请求。
-public struct ChatAXDebugLaunchRequest: Sendable {
-    public let scenarioNumber: Int
-    public let allowlist: ChatAXVersionAllowlist
+package struct ChatAXDebugLaunchRequest: Sendable {
+    package let scenarioNumber: Int
+    package let allowlist: ChatAXVersionAllowlist
 
-    public init?(environment: [String: String]) {
+    package init?(environment: [String: String]) {
         guard environment["CLAUDIO_CHAT_AX_TRACER_EXPLICIT_ENABLE"] == "1",
             let scenarioText = environment["CLAUDIO_CHAT_AX_TRACER_SCENARIO"],
             let scenarioNumber = Int(scenarioText), scenarioNumber >= 0,
@@ -362,7 +715,7 @@ extension ChatAXTargetIdentity {
 }
 
 /// 读取正文才能确认类型的属性不会出现在这里；observer 只能接收这个封闭枚举。
-public enum ChatAXApprovedAttribute: String, CaseIterable, Codable, Hashable, Sendable {
+package enum ChatAXApprovedAttribute: String, CaseIterable, Codable, Hashable, Sendable {
     case role = "AXRole"
     case subrole = "AXSubrole"
     case identifier = "AXIdentifier"
@@ -380,7 +733,7 @@ package enum ChatAXApprovedRelation: String, CaseIterable, Sendable {
 }
 
 /// 候选检测器的输入是封闭的结构/状态事实；类型上没有任意 AXValue 或文本字段。
-public enum ChatAXStructuralSignalKind: Codable, Equatable, Sendable {
+package enum ChatAXStructuralSignalKind: Codable, Equatable, Sendable {
     case composerSubmitted
     case generationControl(isVisible: Bool)
     case assistantRegion(structureRevision: Int, isStable: Bool)
@@ -389,7 +742,7 @@ public enum ChatAXStructuralSignalKind: Codable, Equatable, Sendable {
     case windowClosed
     case applicationExited
 
-    public var requiredAttributes: Set<ChatAXApprovedAttribute> {
+    package var requiredAttributes: Set<ChatAXApprovedAttribute> {
         switch self {
         case .composerSubmitted, .generationControl:
             [.identifier, .enabled]
@@ -407,25 +760,45 @@ public enum ChatAXStructuralSignalKind: Codable, Equatable, Sendable {
     }
 }
 
-public struct ChatAXDetectedSemanticEvent: Codable, Equatable, Sendable {
-    public let signalSequence: Int
-    public let windowOrdinal: Int
-    public let event: Event
+package struct ChatAXDetectedSemanticEvent: Codable, Equatable, Sendable {
+    package let signalSequence: Int
+    package let windowOrdinal: Int
+    package let event: Event
 
-    public init(signalSequence: Int, windowOrdinal: Int, event: Event) {
+    package init(signalSequence: Int, windowOrdinal: Int, event: Event) {
         self.signalSequence = signalSequence
         self.windowOrdinal = windowOrdinal
         self.event = event
     }
 }
 
-public struct ChatAXCandidateDetectionOutcome: Equatable, Sendable {
-    public let acceptedSignal: Bool
-    public let semanticEvents: [ChatAXDetectedSemanticEvent]
+package struct ChatAXCandidateDetectionOutcome: Equatable, Sendable {
+    package let acceptedSignal: Bool
+    package let semanticEvents: [ChatAXDetectedSemanticEvent]
 
-    public init(acceptedSignal: Bool, semanticEvents: [ChatAXDetectedSemanticEvent]) {
+    package init(acceptedSignal: Bool, semanticEvents: [ChatAXDetectedSemanticEvent]) {
         self.acceptedSignal = acceptedSignal
         self.semanticEvents = semanticEvents
+    }
+}
+
+package struct ChatAXAssistantEpochState: Equatable, Sendable {
+    package var isStable: Bool
+    package var structureRevision: Int?
+    package var completionCandidateAt: Int?
+
+    package init(
+        isStable: Bool = false,
+        structureRevision: Int? = nil,
+        completionCandidateAt: Int? = nil
+    ) {
+        self.isStable = isStable
+        self.structureRevision = structureRevision
+        self.completionCandidateAt = completionCandidateAt
+    }
+
+    package mutating func resetForNewSubmit() {
+        self = ChatAXAssistantEpochState()
     }
 }
 
@@ -438,21 +811,19 @@ private struct ChatAXWindowCandidateState: Sendable {
     var phase: Phase = .idle
     var submittedAt: Int?
     var generationControlIsVisible = false
-    var assistantRegionIsStable = false
-    var assistantStructureRevision: Int?
-    var completionCandidateAt: Int?
+    var assistantEpoch = ChatAXAssistantEpochState()
 }
 
 /// 从脱敏 fixture 与真实 observer 共用的结构信号中识别候选事件；不含计时器或文本猜测。
-public struct ChatAXCandidateDetector: Sendable {
-    public let submitAssociationMilliseconds: Int
-    public let completionStabilityMilliseconds: Int
+package struct ChatAXCandidateDetector: Sendable {
+    package let submitAssociationMilliseconds: Int
+    package let completionStabilityMilliseconds: Int
 
     private var lastSequence = 0
     private var lastElapsedMilliseconds = -1
     private var windows: [Int: ChatAXWindowCandidateState] = [:]
 
-    public init(
+    package init(
         submitAssociationMilliseconds: Int = 1_000,
         completionStabilityMilliseconds: Int = 500
     ) {
@@ -460,7 +831,7 @@ public struct ChatAXCandidateDetector: Sendable {
         self.completionStabilityMilliseconds = max(0, completionStabilityMilliseconds)
     }
 
-    public mutating func consume(
+    package mutating func consume(
         _ signal: ChatAXStructuralSignal
     ) -> ChatAXCandidateDetectionOutcome {
         guard signal.sequence > lastSequence,
@@ -487,14 +858,12 @@ public struct ChatAXCandidateDetector: Sendable {
         case .composerSubmitted:
             if state.phase == .idle, state.submittedAt == nil {
                 state.submittedAt = signal.elapsedMilliseconds
-                state.assistantRegionIsStable = false
-                state.assistantStructureRevision = nil
-                state.completionCandidateAt = nil
+                state.assistantEpoch.resetForNewSubmit()
             }
         case .generationControl(let isVisible):
             state.generationControlIsVisible = isVisible
             if isVisible {
-                state.completionCandidateAt = nil
+                state.assistantEpoch.completionCandidateAt = nil
                 if state.phase == .idle, let submittedAt = state.submittedAt {
                     let elapsed = signal.elapsedMilliseconds - submittedAt
                     if elapsed >= 0, elapsed <= submitAssociationMilliseconds {
@@ -509,21 +878,21 @@ public struct ChatAXCandidateDetector: Sendable {
                         state.submittedAt = nil
                     }
                 }
-            } else if state.phase == .generating, state.assistantRegionIsStable,
-                state.completionCandidateAt == nil
+            } else if state.phase == .generating, state.assistantEpoch.isStable,
+                state.assistantEpoch.completionCandidateAt == nil
             {
-                state.completionCandidateAt = signal.elapsedMilliseconds
+                state.assistantEpoch.completionCandidateAt = signal.elapsedMilliseconds
             }
         case .assistantRegion(let structureRevision, let isStable):
-            let structureChanged = state.assistantStructureRevision != structureRevision
-            state.assistantStructureRevision = structureRevision
-            state.assistantRegionIsStable = isStable
+            let structureChanged = state.assistantEpoch.structureRevision != structureRevision
+            state.assistantEpoch.structureRevision = structureRevision
+            state.assistantEpoch.isStable = isStable
             if !isStable {
-                state.completionCandidateAt = nil
+                state.assistantEpoch.completionCandidateAt = nil
             } else if state.phase == .generating, !state.generationControlIsVisible,
-                (state.completionCandidateAt == nil || structureChanged)
+                (state.assistantEpoch.completionCandidateAt == nil || structureChanged)
             {
-                state.completionCandidateAt = signal.elapsedMilliseconds
+                state.assistantEpoch.completionCandidateAt = signal.elapsedMilliseconds
             }
         case .unrelatedStructureChanged, .stabilityCheckpoint:
             break
@@ -540,8 +909,8 @@ public struct ChatAXCandidateDetector: Sendable {
         if canConfirmCompletion,
             state.phase == .generating,
             !state.generationControlIsVisible,
-            state.assistantRegionIsStable,
-            let completionCandidateAt = state.completionCandidateAt,
+            state.assistantEpoch.isStable,
+            let completionCandidateAt = state.assistantEpoch.completionCandidateAt,
             signal.elapsedMilliseconds - completionCandidateAt >= completionStabilityMilliseconds
         {
             detected.append(
@@ -555,22 +924,35 @@ public struct ChatAXCandidateDetector: Sendable {
         }
         return ChatAXCandidateDetectionOutcome(acceptedSignal: true, semanticEvents: detected)
     }
+
+    package func assistantEpochState(
+        forWindowOrdinal windowOrdinal: Int
+    ) -> ChatAXAssistantEpochState? {
+        windows[windowOrdinal]?.assistantEpoch
+    }
 }
 
 /// 真实 AX 或脱敏 fixture observer 的唯一边界；它只能发布已收窄的结构信号。
-public enum ChatAXTargetInspectionFailure: Error, Equatable, Sendable {
+package enum ChatAXTargetInspectionFailure: Error, Equatable, Sendable {
     case targetUnavailable
     case ambiguousTargets
     case identityUnreadable
 }
 
+package enum ChatAXTargetRevalidationOutcome: Equatable, Sendable {
+    case matches
+    case mismatch
+    case deferred
+}
+
 @MainActor
-public protocol ChatAXTraceObserving: AnyObject {
+package protocol ChatAXTraceObserving: AnyObject {
     /// 成功值可包含同一 PID 的多个 framework projection；空且无 unreadable projection
     /// 表示 identity/surface 已可读但不匹配，base identity 读取失败才直接返回 failure。
     func inspectTarget(
         requirements: ChatAXInspectionRequirements
     ) -> Result<ChatAXTargetInspection, ChatAXTargetInspectionFailure>
+    func targetStillMatches(_ target: ChatAXObservedTarget) -> ChatAXTargetRevalidationOutcome
     func start(
         target: ChatAXObservedTarget,
         approvedAttributes: Set<ChatAXApprovedAttribute>,
@@ -580,7 +962,7 @@ public protocol ChatAXTraceObserving: AnyObject {
     func stop()
 }
 
-public enum ChatAXTracerStartFailure: Equatable, Sendable {
+package enum ChatAXTracerStartFailure: Equatable, Sendable {
     case guiNotAlive
     case invalidScenario
     case targetInspectionFailed(ChatAXTargetInspectionFailure)
@@ -589,17 +971,17 @@ public enum ChatAXTracerStartFailure: Equatable, Sendable {
     case observerStartFailed
 }
 
-public enum ChatAXTracerStartOutcome: Equatable, Sendable {
+package enum ChatAXTracerStartOutcome: Equatable, Sendable {
     case started
     case refused(ChatAXTracerStartFailure)
 }
 
-public struct ChatAXTraceCounts: Codable, Equatable, Sendable {
-    public let signalCount: Int
-    public let taskStartCount: Int
-    public let stopCount: Int
+package struct ChatAXTraceCounts: Codable, Equatable, Sendable {
+    package let signalCount: Int
+    package let taskStartCount: Int
+    package let stopCount: Int
 
-    public init(signalCount: Int, taskStartCount: Int, stopCount: Int) {
+    package init(signalCount: Int, taskStartCount: Int, stopCount: Int) {
         self.signalCount = signalCount
         self.taskStartCount = taskStartCount
         self.stopCount = stopCount
@@ -607,14 +989,14 @@ public struct ChatAXTraceCounts: Codable, Equatable, Sendable {
 }
 
 /// 可导出的唯一 tracer 证据形状；不含正文、权限、声音、日志或 Current Activation。
-public struct ChatAXTraceEvidence: Codable, Equatable, Sendable {
-    public let targetIdentity: ChatAXTargetIdentity
-    public let scenarioNumber: Int
-    public let signals: [ChatAXStructuralSignal]
-    public let semanticEvents: [ChatAXDetectedSemanticEvent]
-    public let counts: ChatAXTraceCounts
+package struct ChatAXTraceEvidence: Codable, Equatable, Sendable {
+    package let targetIdentity: ChatAXTargetIdentity
+    package let scenarioNumber: Int
+    package let signals: [ChatAXStructuralSignal]
+    package let semanticEvents: [ChatAXDetectedSemanticEvent]
+    package let counts: ChatAXTraceCounts
 
-    public init(
+    package init(
         targetIdentity: ChatAXTargetIdentity,
         scenarioNumber: Int,
         signals: [ChatAXStructuralSignal],
@@ -629,23 +1011,88 @@ public struct ChatAXTraceEvidence: Codable, Equatable, Sendable {
     }
 }
 
+@MainActor
+package final class ChatAXTraceAccumulator {
+    private var signals: [ChatAXStructuralSignal] = []
+    private var semanticEvents: [ChatAXDetectedSemanticEvent] = []
+    private var taskStartCount = 0
+    private var stopCount = 0
+
+    package private(set) var materializedSnapshotCount = 0
+
+    package init() {}
+
+    package func reset() {
+        signals = []
+        semanticEvents = []
+        taskStartCount = 0
+        stopCount = 0
+        materializedSnapshotCount = 0
+    }
+
+    package func append(
+        _ signal: ChatAXStructuralSignal,
+        semanticEvents newSemanticEvents: [ChatAXDetectedSemanticEvent]
+    ) {
+        signals.append(signal)
+        semanticEvents.append(contentsOf: newSemanticEvents)
+        for semanticEvent in newSemanticEvents {
+            switch semanticEvent.event {
+            case .taskStart:
+                taskStartCount += 1
+            case .stop:
+                stopCount += 1
+            default:
+                break
+            }
+        }
+    }
+
+    package func snapshot(
+        targetIdentity: ChatAXTargetIdentity,
+        scenarioNumber: Int
+    ) -> ChatAXTraceEvidence {
+        materializedSnapshotCount += 1
+        return ChatAXTraceEvidence(
+            targetIdentity: targetIdentity,
+            scenarioNumber: scenarioNumber,
+            signals: signals,
+            semanticEvents: semanticEvents,
+            counts: ChatAXTraceCounts(
+                signalCount: signals.count,
+                taskStartCount: taskStartCount,
+                stopCount: stopCount))
+    }
+}
+
 /// 不接入 `HostIntegrationAdapter` 的 GUI-only spike session；构造与 GUI 启动均保持关闭。
 @MainActor
-public final class ChatAXTracerSession {
-    public private(set) var isRunning = false
-    public private(set) var isExplicitlyEnabled = false
-    public private(set) var evidence: ChatAXTraceEvidence?
+package final class ChatAXTracerSession {
+    package private(set) var isRunning = false
+    package private(set) var isExplicitlyEnabled = false
+    package var evidence: ChatAXTraceEvidence? {
+        if let finalizedEvidence { return finalizedEvidence }
+        guard let evidenceTargetIdentity, let evidenceScenarioNumber else { return nil }
+        return accumulator.snapshot(
+            targetIdentity: evidenceTargetIdentity,
+            scenarioNumber: evidenceScenarioNumber)
+    }
+    package var evidenceMaterializationCount: Int {
+        accumulator.materializedSnapshotCount
+    }
 
     private let allowlist: ChatAXVersionAllowlist
     private let observer: any ChatAXTraceObserving
     private var guiIsAlive = false
     private var observedTarget: ChatAXObservedTarget?
     private var scenarioNumber: Int?
+    private var evidenceTargetIdentity: ChatAXTargetIdentity?
+    private var evidenceScenarioNumber: Int?
+    private var finalizedEvidence: ChatAXTraceEvidence?
     private var detector = ChatAXCandidateDetector()
-    private var signals: [ChatAXStructuralSignal] = []
-    private var semanticEvents: [ChatAXDetectedSemanticEvent] = []
+    private let accumulator = ChatAXTraceAccumulator()
 
-    public init(
+    package init(
         allowlist: ChatAXVersionAllowlist,
         observer: any ChatAXTraceObserving
     ) {
@@ -653,11 +1100,11 @@ public final class ChatAXTracerSession {
         self.observer = observer
     }
 
-    public func guiDidBecomeAlive() {
+    package func guiDidBecomeAlive() {
         guiIsAlive = true
     }
 
-    public func beginExplicitTrace(
+    package func beginExplicitTrace(
         scenarioNumber: Int
     ) -> ChatAXTracerStartOutcome {
         guard guiIsAlive else { return .refused(.guiNotAlive) }
@@ -685,11 +1132,12 @@ public final class ChatAXTracerSession {
         isExplicitlyEnabled = true
         observedTarget = target
         self.scenarioNumber = scenarioNumber
+        evidenceTargetIdentity = target.identity
+        evidenceScenarioNumber = scenarioNumber
+        finalizedEvidence = nil
         detector = ChatAXCandidateDetector()
-        signals = []
-        semanticEvents = []
+        accumulator.reset()
         isRunning = true
-        refreshEvidence()
         guard
             observer.start(
                 target: target,
@@ -706,7 +1154,10 @@ public final class ChatAXTracerSession {
             isExplicitlyEnabled = false
             observedTarget = nil
             self.scenarioNumber = nil
-            evidence = nil
+            evidenceTargetIdentity = nil
+            evidenceScenarioNumber = nil
+            finalizedEvidence = nil
+            accumulator.reset()
             return .refused(.observerStartFailed)
         }
         guard isRunning else {
@@ -715,25 +1166,22 @@ public final class ChatAXTracerSession {
         return .started
     }
 
-    public func revalidateTarget() {
+    package func revalidateTarget() {
         guard isRunning else { return }
-        guard
-            case .success(let inspection) = observer.inspectTarget(
-                requirements: allowlist.inspectionRequirements),
-            let observedTarget,
-            inspection.candidates.contains(observedTarget),
-            allowlist.allows(observedTarget.identity)
-        else {
+        guard let observedTarget, allowlist.allows(observedTarget.identity) else {
             stopAndDisable()
             return
         }
+        if observer.targetStillMatches(observedTarget) == .mismatch {
+            stopAndDisable()
+        }
     }
 
-    public func endExplicitTrace() {
+    package func endExplicitTrace() {
         stopAndDisable()
     }
 
-    public func guiWillTerminate() {
+    package func guiWillTerminate() {
         guiIsAlive = false
         stopAndDisable()
     }
@@ -742,46 +1190,38 @@ public final class ChatAXTracerSession {
         guard isRunning else { return }
         let outcome = detector.consume(signal)
         guard outcome.acceptedSignal else { return }
-        signals.append(signal)
-        semanticEvents.append(contentsOf: outcome.semanticEvents)
-        refreshEvidence()
+        accumulator.append(signal, semanticEvents: outcome.semanticEvents)
         if case .applicationExited = signal.kind {
             stopAndDisable()
         }
     }
 
-    private func refreshEvidence() {
-        guard let observedTarget, let scenarioNumber else { return }
-        evidence = ChatAXTraceEvidence(
-            targetIdentity: observedTarget.identity,
-            scenarioNumber: scenarioNumber,
-            signals: signals,
-            semanticEvents: semanticEvents,
-            counts: ChatAXTraceCounts(
-                signalCount: signals.count,
-                taskStartCount: semanticEvents.count(where: { $0.event == .taskStart }),
-                stopCount: semanticEvents.count(where: { $0.event == .stop })))
-    }
-
     private func stopAndDisable() {
         if isRunning {
             observer.stop()
+            if let evidenceTargetIdentity, let evidenceScenarioNumber {
+                finalizedEvidence = accumulator.snapshot(
+                    targetIdentity: evidenceTargetIdentity,
+                    scenarioNumber: evidenceScenarioNumber)
+            }
         }
         isRunning = false
         isExplicitlyEnabled = false
         observedTarget = nil
         scenarioNumber = nil
+        evidenceTargetIdentity = nil
+        evidenceScenarioNumber = nil
         detector = ChatAXCandidateDetector()
     }
 }
 
-public struct ChatAXStructuralSignal: Codable, Equatable, Sendable {
-    public let sequence: Int
-    public let elapsedMilliseconds: Int
-    public let windowOrdinal: Int
-    public let kind: ChatAXStructuralSignalKind
+package struct ChatAXStructuralSignal: Codable, Equatable, Sendable {
+    package let sequence: Int
+    package let elapsedMilliseconds: Int
+    package let windowOrdinal: Int
+    package let kind: ChatAXStructuralSignalKind
 
-    public init(
+    package init(
         sequence: Int,
         elapsedMilliseconds: Int,
         windowOrdinal: Int,
@@ -793,3 +1233,4 @@ public struct ChatAXStructuralSignal: Codable, Equatable, Sendable {
         self.kind = kind
     }
 }
+#endif
