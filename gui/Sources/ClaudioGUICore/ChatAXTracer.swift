@@ -216,16 +216,16 @@ extension ChatAXTargetIdentity {
 
 public struct ChatAXInspectionRequirements: Equatable, Sendable {
     public let bundleIdentifiers: Set<String>
-    public let frameworkNames: Set<String>
+    public let frameworkNameSets: Set<Set<String>>
     public let surfaceSignatures: Set<ChatAXSurfaceSignature>
 
     public init(
         bundleIdentifiers: Set<String>,
-        frameworkNames: Set<String>,
+        frameworkNameSets: Set<Set<String>>,
         surfaceSignatures: Set<ChatAXSurfaceSignature>
     ) {
         self.bundleIdentifiers = bundleIdentifiers
-        self.frameworkNames = frameworkNames
+        self.frameworkNameSets = frameworkNameSets
         self.surfaceSignatures = surfaceSignatures
     }
 }
@@ -240,6 +240,47 @@ public struct ChatAXObservedTarget: Equatable, Sendable {
     }
 }
 
+/// 同一运行 PID 的完整 framework projections。空 candidates 且无 unreadable projection
+/// 表示身份事实可读但不匹配；不可读 projection 只有在没有 exact candidate 时才决定错误类别。
+public struct ChatAXTargetInspection: Equatable, Sendable {
+    public let candidates: [ChatAXObservedTarget]
+    public let hasUnreadableProjection: Bool
+
+    public init(
+        candidates: [ChatAXObservedTarget],
+        hasUnreadableProjection: Bool
+    ) {
+        self.candidates = candidates
+        self.hasUnreadableProjection = hasUnreadableProjection
+    }
+}
+
+package enum ChatAXFrameworkBundlePathState: Equatable, Sendable {
+    case missing
+    case directory
+    case unreadable
+}
+
+/// Foundation may bridge a missing-path failure as a dynamic `NSError`, so classify it by
+/// Cocoa domain/code instead of relying on a conditional `CocoaError` cast.
+package func chatAXFrameworkBundlePathState(
+    at url: URL
+) -> ChatAXFrameworkBundlePathState {
+    let resourceValues: URLResourceValues
+    do {
+        resourceValues = try url.resourceValues(forKeys: [.isDirectoryKey])
+    } catch {
+        let error = error as NSError
+        if error.domain == NSCocoaErrorDomain,
+            error.code == CocoaError.Code.fileReadNoSuchFile.rawValue
+        {
+            return .missing
+        }
+        return .unreadable
+    }
+    return resourceValues.isDirectory == true ? .directory : .unreadable
+}
+
 public struct ChatAXVersionAllowlist: Sendable {
     private let identities: [ChatAXTargetIdentity]
 
@@ -251,7 +292,8 @@ public struct ChatAXVersionAllowlist: Sendable {
         let chatIdentities = identities.filter { $0.surface == .chatGPTDesktopAX }
         return ChatAXInspectionRequirements(
             bundleIdentifiers: Set(chatIdentities.map(\.bundleIdentifier)),
-            frameworkNames: Set(chatIdentities.flatMap(\.frameworks).map(\.name)),
+            frameworkNameSets: Set(
+                chatIdentities.map { Set($0.frameworks.map(\.name)) }),
             surfaceSignatures: Set(chatIdentities.map(\.surfaceSignature)))
     }
 
@@ -357,8 +399,10 @@ public enum ChatAXStructuralSignalKind: Codable, Equatable, Sendable {
             [.role, .identifier]
         case .stabilityCheckpoint:
             []
-        case .windowClosed, .applicationExited:
+        case .windowClosed:
             [.windowNumber]
+        case .applicationExited:
+            []
         }
     }
 }
@@ -443,6 +487,9 @@ public struct ChatAXCandidateDetector: Sendable {
         case .composerSubmitted:
             if state.phase == .idle, state.submittedAt == nil {
                 state.submittedAt = signal.elapsedMilliseconds
+                state.assistantRegionIsStable = false
+                state.assistantStructureRevision = nil
+                state.completionCandidateAt = nil
             }
         case .generationControl(let isVisible):
             state.generationControlIsVisible = isVisible
@@ -519,9 +566,11 @@ public enum ChatAXTargetInspectionFailure: Error, Equatable, Sendable {
 
 @MainActor
 public protocol ChatAXTraceObserving: AnyObject {
+    /// 成功值可包含同一 PID 的多个 framework projection；空且无 unreadable projection
+    /// 表示 identity/surface 已可读但不匹配，base identity 读取失败才直接返回 failure。
     func inspectTarget(
         requirements: ChatAXInspectionRequirements
-    ) -> Result<ChatAXObservedTarget, ChatAXTargetInspectionFailure>
+    ) -> Result<ChatAXTargetInspection, ChatAXTargetInspectionFailure>
     func start(
         target: ChatAXObservedTarget,
         approvedAttributes: Set<ChatAXApprovedAttribute>,
@@ -615,14 +664,21 @@ public final class ChatAXTracerSession {
         guard !isRunning else { return .refused(.alreadyRunning) }
         guard scenarioNumber >= 0 else { return .refused(.invalidScenario) }
 
-        let target: ChatAXObservedTarget
+        let inspection: ChatAXTargetInspection
         switch observer.inspectTarget(requirements: allowlist.inspectionRequirements) {
-        case .success(let inspectedTarget):
-            target = inspectedTarget
+        case .success(let result):
+            inspection = result
         case .failure(let failure):
             return .refused(.targetInspectionFailed(failure))
         }
-        guard allowlist.allows(target.identity) else {
+        guard
+            let target = inspection.candidates.first(where: {
+                allowlist.allows($0.identity)
+            })
+        else {
+            if inspection.hasUnreadableProjection {
+                return .refused(.targetInspectionFailed(.identityUnreadable))
+            }
             return .refused(.allowlistMismatch)
         }
 
@@ -662,10 +718,11 @@ public final class ChatAXTracerSession {
     public func revalidateTarget() {
         guard isRunning else { return }
         guard
-            case .success(let target) = observer.inspectTarget(
+            case .success(let inspection) = observer.inspectTarget(
                 requirements: allowlist.inspectionRequirements),
-            target == observedTarget,
-            allowlist.allows(target.identity)
+            let observedTarget,
+            inspection.candidates.contains(observedTarget),
+            allowlist.allows(observedTarget.identity)
         else {
             stopAndDisable()
             return

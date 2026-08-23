@@ -49,9 +49,9 @@ struct ClaudioGUIApp: App {
 final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var hostIntegrationBridge: HostIntegrationManagerBridge?
-#if DEBUG
+    #if DEBUG
     private var chatAXTracer: ChatAXTracerSession?
-#endif
+    #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `.accessory`: no Dock icon, no menu bar application menu — the correct activation
@@ -92,11 +92,11 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         // native probe build can inject a fixed state to exercise unequal natural card heights
         // without reading or mutating the user's real host configuration. The production build
         // does not compile that injection path.
-#if CLAUDIO_NATIVE_HOST_CARD_PROBE
+        #if CLAUDIO_NATIVE_HOST_CARD_PROBE
         let nativeProbeState = nativeHostCardProbeState()
-#else
+        #else
         let nativeProbeState: HostIntegrationPresentationState? = nil
-#endif
+        #endif
         let disconnectedSnapshots = HostID.allCases.map {
             HostIntegrationSnapshot.disconnected(host: $0)
         }
@@ -157,14 +157,14 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
             hostIntegrationState: initialIntegrationState,
             integrationMatrixProvider: integrationMatrixProvider,
             integrationActionProvider: integrationActionProvider)
-#if DEBUG
+        #if DEBUG
         chatAXTracer = startExplicitChatAXTracerIfConfigured(
             environment: ProcessInfo.processInfo.environment)
-#endif
+        #endif
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-#if DEBUG
+        #if DEBUG
         chatAXTracer?.guiWillTerminate()
         if let evidence = chatAXTracer?.evidence {
             let encoder = JSONEncoder()
@@ -176,7 +176,7 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         chatAXTracer = nil
-#endif
+        #endif
     }
 }
 

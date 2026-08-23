@@ -25,7 +25,8 @@ private final class ChatAXFixtureObserver: ChatAXTraceObserving {
     private var targetDidInvalidate: (() -> Void)?
     private let signalsOnStart: [ChatAXStructuralSignal]
     private let startSucceeds: Bool
-    var observedTarget: ChatAXObservedTarget?
+    var observedTargets: [ChatAXObservedTarget]?
+    var hasUnreadableProjection = false
     var inspectionFailure: ChatAXTargetInspectionFailure?
 
     init(
@@ -34,7 +35,7 @@ private final class ChatAXFixtureObserver: ChatAXTraceObserving {
         startSucceeds: Bool = true,
         inspectionFailure: ChatAXTargetInspectionFailure? = nil
     ) {
-        self.observedTarget = observedTarget
+        observedTargets = observedTarget.map { [$0] }
         self.signalsOnStart = signalsOnStart
         self.startSucceeds = startSucceeds
         self.inspectionFailure = inspectionFailure
@@ -42,13 +43,16 @@ private final class ChatAXFixtureObserver: ChatAXTraceObserving {
 
     func inspectTarget(
         requirements: ChatAXInspectionRequirements
-    ) -> Result<ChatAXObservedTarget, ChatAXTargetInspectionFailure> {
+    ) -> Result<ChatAXTargetInspection, ChatAXTargetInspectionFailure> {
         inspectedRequirements = requirements
         if let inspectionFailure {
             return .failure(inspectionFailure)
         }
-        guard let observedTarget else { return .failure(.targetUnavailable) }
-        return .success(observedTarget)
+        guard let observedTargets else { return .failure(.targetUnavailable) }
+        return .success(
+            ChatAXTargetInspection(
+                candidates: observedTargets,
+                hasUnreadableProjection: hasUnreadableProjection))
     }
 
     func start(
@@ -80,6 +84,10 @@ private final class ChatAXFixtureObserver: ChatAXTraceObserving {
 
     func invalidateTarget() {
         targetDidInvalidate?()
+    }
+
+    func setObservedTarget(_ target: ChatAXObservedTarget?) {
+        observedTargets = target.map { [$0] }
     }
 }
 
@@ -201,7 +209,19 @@ func runChatAXTracerSuites() {
             (try? JSONDecoder().decode(ChatAXSurfaceSignature.self, from: invalidJSON)) == nil,
             "JSON 入口也必须拒绝非 canonical 摘要")
 
-        let chatIdentity = chatAXIdentity()
+        let chatIdentity = chatAXIdentity(
+            frameworks: [
+                ChatAXFrameworkIdentity(
+                    name: "FixtureWeb.framework", shortVersion: "7.8.9", build: "89")
+            ])
+        let secondChatIdentity = chatAXIdentity(
+            shortVersion: "2.0.0",
+            build: "900",
+            frameworks: [
+                ChatAXFrameworkIdentity(
+                    name: "NextWeb.framework", shortVersion: "9.0.0", build: "900")
+            ],
+            surfaceSignature: chatAXSurfaceSignature("c"))
         let adjacentSurfaceIdentity = chatAXIdentity(
             bundleIdentifier: "com.example.shared-app.adjacent",
             frameworks: [
@@ -211,13 +231,79 @@ func runChatAXTracerSuites() {
             surface: .codex,
             surfaceSignature: chatAXSurfaceSignature("b"))
         let requirements = ChatAXVersionAllowlist(
-            identities: [chatIdentity, adjacentSurfaceIdentity]
+            identities: [chatIdentity, secondChatIdentity, adjacentSurfaceIdentity]
         ).inspectionRequirements
         expect(
             requirements.bundleIdentifiers == [chatIdentity.bundleIdentifier]
-                && requirements.frameworkNames == ["FixtureWeb.framework"]
-                && requirements.surfaceSignatures == [chatAXSurfaceSignature("a")],
-            "系统 inspection 只能收到 allowlist 中普通 Chat 的精确候选集合")
+                && requirements.frameworkNameSets
+                    == [
+                        ["FixtureWeb.framework"],
+                        ["NextWeb.framework"],
+                    ]
+                && requirements.surfaceSignatures
+                    == [chatAXSurfaceSignature("a"), chatAXSurfaceSignature("c")],
+            "系统 inspection 必须保留每条普通 Chat identity 自己的 framework 集合")
+    }
+
+    suite("Chat AX tracer inspection candidates：异构 framework projection 独立 exact 命中") {
+        let legacyIdentity = chatAXIdentity(
+            frameworks: [
+                ChatAXFrameworkIdentity(
+                    name: "LegacyWeb.framework", shortVersion: "1", build: "10")
+            ])
+        let currentIdentity = chatAXIdentity(
+            shortVersion: "2.0.0",
+            build: "900",
+            frameworks: [
+                ChatAXFrameworkIdentity(
+                    name: "NextWeb.framework", shortVersion: "2", build: "20")
+            ],
+            surfaceSignature: chatAXSurfaceSignature("c"))
+        let observer = ChatAXFixtureObserver(observedTarget: nil)
+        observer.observedTargets = [
+            chatAXObservedTarget(identity: chatAXIdentity(build: "unlisted")),
+            chatAXObservedTarget(identity: currentIdentity),
+        ]
+        let tracer = ChatAXTracerSession(
+            allowlist: ChatAXVersionAllowlist(
+                identities: [legacyIdentity, currentIdentity]),
+            observer: observer)
+        tracer.guiDidBecomeAlive()
+
+        expect(
+            tracer.beginExplicitTrace(scenarioNumber: 33) == .started,
+            "不同 framework 集的当前版本必须能从多个观察 projection 中独立命中")
+        expect(
+            observer.startedTarget?.identity == currentIdentity,
+            "session 必须把 exact current projection 交给 observer，而不是候选列表第一项")
+        tracer.endExplicitTrace()
+    }
+
+    suite("Chat AX tracer framework path：真实 Foundation 错误区分 missing 与 unreadable") {
+        let fixtureRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "claudio-chat-ax-framework-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: fixtureRoot) }
+
+        expect(
+            chatAXFrameworkBundlePathState(
+                at: fixtureRoot.appendingPathComponent("Missing.framework", isDirectory: true))
+                == .missing,
+            "不存在路径的 NSError bridge 必须稳定分类为 missing，而不是 unreadable")
+        try! FileManager.default.createDirectory(
+            at: fixtureRoot, withIntermediateDirectories: true)
+        let frameworkDirectory = fixtureRoot.appendingPathComponent(
+            "Present.framework", isDirectory: true)
+        try! FileManager.default.createDirectory(
+            at: frameworkDirectory, withIntermediateDirectories: false)
+        expect(
+            chatAXFrameworkBundlePathState(at: frameworkDirectory) == .directory,
+            "真实目录必须允许后续读取 Bundle metadata")
+        let malformedFramework = fixtureRoot.appendingPathComponent(
+            "Malformed.framework", isDirectory: false)
+        try! Data().write(to: malformedFramework)
+        expect(
+            chatAXFrameworkBundlePathState(at: malformedFramework) == .unreadable,
+            "已存在但不是目录的 framework path 必须保持 unreadable")
     }
 
     suite("Chat AX tracer surface canonicalization：固定 anchor vector 且任一结构漂移改摘要") {
@@ -352,6 +438,12 @@ func runChatAXTracerSuites() {
             kind: .generationControl(isVisible: true))
         expect(signal.kind.requiredAttributes == [.identifier, .enabled], "信号只声明必要属性")
         expect(signal.sequence == 7 && signal.windowOrdinal == 2, "信号只携带时序与结构编号")
+        expect(
+            ChatAXStructuralSignalKind.applicationExited.requiredAttributes.isEmpty,
+            "application exit 来自 lifecycle notification，不得声明 destroyed-element 查询")
+        expect(
+            ChatAXStructuralSignalKind.windowClosed.requiredAttributes == [.windowNumber],
+            "仍存活的 window close 信号可以保留 window ordinal 契约")
     }
 
     suite("Chat AX tracer 候选检测：脱敏正控恰好一次 submit/end，负控与重复零事件") {
@@ -420,6 +512,85 @@ func runChatAXTracerSuites() {
         expect(
             negativeFixture.flatMap { negativeDetector.consume($0).semanticEvents }.isEmpty,
             "没有提交关联的结构变化不得猜成 semantic event")
+
+        var epochDetector = ChatAXCandidateDetector(
+            submitAssociationMilliseconds: 1_000,
+            completionStabilityMilliseconds: 500)
+        let staleEpochFixture = [
+            ChatAXStructuralSignal(
+                sequence: 1, elapsedMilliseconds: 0, windowOrdinal: 8,
+                kind: .assistantRegion(structureRevision: 99, isStable: true)),
+            ChatAXStructuralSignal(
+                sequence: 2, elapsedMilliseconds: 100, windowOrdinal: 8,
+                kind: .composerSubmitted),
+            ChatAXStructuralSignal(
+                sequence: 3, elapsedMilliseconds: 150, windowOrdinal: 8,
+                kind: .generationControl(isVisible: true)),
+            ChatAXStructuralSignal(
+                sequence: 4, elapsedMilliseconds: 200, windowOrdinal: 8,
+                kind: .generationControl(isVisible: false)),
+            ChatAXStructuralSignal(
+                sequence: 5, elapsedMilliseconds: 800, windowOrdinal: 8,
+                kind: .stabilityCheckpoint),
+        ]
+        let staleEpochEvents = staleEpochFixture.flatMap {
+            epochDetector.consume($0).semanticEvents
+        }
+        expect(
+            staleEpochEvents.map(\.event) == [.taskStart],
+            "旧 assistant stable 事实不得替新 generation 伪造 stop")
+        let currentEpochEvents = [
+            ChatAXStructuralSignal(
+                sequence: 6, elapsedMilliseconds: 900, windowOrdinal: 8,
+                kind: .assistantRegion(structureRevision: 100, isStable: true)),
+            ChatAXStructuralSignal(
+                sequence: 7, elapsedMilliseconds: 1_400, windowOrdinal: 8,
+                kind: .stabilityCheckpoint),
+            ChatAXStructuralSignal(
+                sequence: 8, elapsedMilliseconds: 1_500, windowOrdinal: 8,
+                kind: .stabilityCheckpoint),
+        ].flatMap { epochDetector.consume($0).semanticEvents }
+        expect(
+            currentEpochEvents.map(\.event) == [.stop],
+            "本 epoch 新 assistant stable 事实必须仍只确认一次 stop")
+
+        guard
+            let rawCore = chatAXSource(
+                "gui/Sources/ClaudioGUICore/ChatAXTracer.swift")
+        else {
+            expect(false, "必须能读取 detector production source 才能验证完整 epoch reset")
+            return
+        }
+        let scannedCore = strippingComments(rawCore)
+        guard scannedCore.unmodeledConstructs.isEmpty,
+            let consumeRegion = chatAXFunctionRegion(
+                "public mutating func consume(",
+                in: scannedCore.codeWithoutStringLiterals),
+            let submitRegion = chatAXBracedDeclarationRegion(
+                "if state.phase == .idle, state.submittedAt == nil",
+                in: consumeRegion)
+        else {
+            expect(false, "必须能定位真实 composer submit epoch block")
+            return
+        }
+        let resetsCompleteEpoch: (String) -> Bool = { region in
+            [
+                "state.assistantRegionIsStable = false",
+                "state.assistantStructureRevision = nil",
+                "state.completionCandidateAt = nil",
+            ].allSatisfy { region.components(separatedBy: $0).count - 1 == 1 }
+        }
+        expect(resetsCompleteEpoch(submitRegion), "新 submit 必须清空完整 assistant epoch 状态")
+        for removedReset in [
+            "state.assistantRegionIsStable = false",
+            "state.assistantStructureRevision = nil",
+            "state.completionCandidateAt = nil",
+        ] {
+            let incompleteReset = submitRegion.replacingOccurrences(of: removedReset, with: "")
+            expect(
+                !resetsCompleteEpoch(incompleteReset),
+                "epoch reset 契约必须拒绝删除 \(removedReset)")
+        }
     }
 
     suite("Chat AX tracer 生命周期：默认关闭，且只在 GUI+显式启用+allowlist 命中时运行") {
@@ -451,27 +622,53 @@ func runChatAXTracerSuites() {
                 "target inspection failure 必须原样保留：\(inspectionFailure)")
         }
         observer.inspectionFailure = nil
-        observer.observedTarget = chatAXObservedTarget(
-            identity: chatAXIdentity(build: "mismatch"))
+        observer.setObservedTarget(
+            chatAXObservedTarget(
+                identity: chatAXIdentity(build: "mismatch"))
+        )
         expect(
             tracer.beginExplicitTrace(scenarioNumber: 1) == .refused(.allowlistMismatch),
             "身份失配不得触碰 observer")
-        observer.observedTarget = chatAXObservedTarget(
-            identity: chatAXIdentity(surface: .codex))
+        observer.setObservedTarget(
+            chatAXObservedTarget(
+                identity: chatAXIdentity(surface: .codex))
+        )
         expect(
             tracer.beginExplicitTrace(scenarioNumber: 1) == .refused(.allowlistMismatch),
             "同 PID 的 Codex surface 负控不得被重新标成 Chat")
-        observer.observedTarget = chatAXObservedTarget(
-            identity: chatAXIdentity(surfaceSignature: chatAXSurfaceSignature("b")))
+        observer.setObservedTarget(
+            chatAXObservedTarget(
+                identity: chatAXIdentity(surfaceSignature: chatAXSurfaceSignature("b")))
+        )
         expect(
             tracer.beginExplicitTrace(scenarioNumber: 1) == .refused(.allowlistMismatch),
             "同 PID、版本与 Chat 常量但 Work/Codex 摘要失配时仍必须 fail closed")
+        observer.observedTargets = []
+        expect(
+            tracer.beginExplicitTrace(scenarioNumber: 1) == .refused(.allowlistMismatch),
+            "surface facts 可读但没有 verified Chat 候选时必须归类 allowlist mismatch")
+        observer.hasUnreadableProjection = true
+        expect(
+            tracer.beginExplicitTrace(scenarioNumber: 1)
+                == .refused(.targetInspectionFailed(.identityUnreadable)),
+            "没有 exact 候选且存在真实不可读 projection 时必须保留 identityUnreadable")
+        observer.observedTargets = [
+            chatAXObservedTarget(identity: chatAXIdentity(build: "mismatch"))
+        ]
+        expect(
+            tracer.beginExplicitTrace(scenarioNumber: 1)
+                == .refused(.targetInspectionFailed(.identityUnreadable)),
+            "非 exact 候选不得掩盖另一个可能匹配但不可读的 projection")
         expect(observer.startCount == 0, "allowlist 失败必须在 observer 边界之前返回")
 
-        observer.observedTarget = chatAXObservedTarget()
+        observer.hasUnreadableProjection = true
+        observer.observedTargets = [
+            chatAXObservedTarget(identity: chatAXIdentity(build: "mismatch")),
+            chatAXObservedTarget(),
+        ]
         expect(
             tracer.beginExplicitTrace(scenarioNumber: 1) == .started,
-            "三项门禁都满足后才能启动")
+            "同一 PID 的多个 framework projection 中必须选择完整 exact match")
         expect(tracer.isRunning && observer.startCount == 1, "显式启用必须只启动一次 observer")
         expect(
             observer.startedTarget == chatAXObservedTarget()
@@ -487,16 +684,23 @@ func runChatAXTracerSuites() {
         expect(
             tracer.isRunning && observer.startCount == 1 && observer.stopCount == 0,
             "重复启动不得新建 observer，也不得停止当前 session")
+        tracer.revalidateTarget()
+        expect(
+            tracer.isRunning && observer.stopCount == 0,
+            "原 exact projection 仍存在时，无关 unreadable projection 不得误停 session")
+        observer.hasUnreadableProjection = false
 
-        observer.observedTarget = chatAXObservedTarget(
-            identity: chatAXIdentity(surfaceSignature: chatAXSurfaceSignature("b")))
+        observer.setObservedTarget(
+            chatAXObservedTarget(
+                identity: chatAXIdentity(surfaceSignature: chatAXSurfaceSignature("b")))
+        )
         tracer.revalidateTarget()
         expect(!tracer.isRunning && observer.stopCount == 1, "运行中 surface 失配必须确定 stop")
         observer.invalidateTarget()
         tracer.revalidateTarget()
         expect(observer.stopCount == 1, "同一次 surface 漂移只能触发一次 stop")
 
-        observer.observedTarget = chatAXObservedTarget()
+        observer.setObservedTarget(chatAXObservedTarget())
         expect(
             tracer.beginExplicitTrace(scenarioNumber: 2) == .started,
             "失配停止后必须再次显式调用，不能自动恢复")
@@ -609,15 +813,24 @@ func runChatAXTracerSuites() {
                 "private struct SystemChatAXSurfaceSignatureReader", in: runtime),
             let observerTypeRegion = chatAXBracedDeclarationRegion(
                 "final class SystemChatAXTraceObserver: ChatAXTraceObserving", in: runtime),
+            let inspectionRegion = chatAXFunctionRegion(
+                "func inspectTarget(", in: observerTypeRegion),
             let identityRegion = chatAXFunctionRegion(
-                "private func identity(", in: observerTypeRegion),
+                "private func inspectIdentities(", in: observerTypeRegion),
+            let frameworkSetRegion = chatAXFunctionRegion(
+                "private func inspectFrameworkSet(", in: observerTypeRegion),
+            let frameworkIdentityRegion = chatAXFunctionRegion(
+                "private func inspectFrameworkIdentity(", in: observerTypeRegion),
             let revalidationRegion = chatAXFunctionRegion(
                 "private func surfaceStillMatches(", in: observerTypeRegion),
             let anchorRegion = chatAXFunctionRegion(
                 "func readAnchorFacts(", in: surfaceReaderTypeRegion),
             let startRegion = chatAXFunctionRegion("func start(", in: observerTypeRegion),
+            let stopRegion = chatAXFunctionRegion("func stop()", in: observerTypeRegion),
             let handleRegion = chatAXFunctionRegion(
-                "fileprivate func handle(", in: observerTypeRegion)
+                "fileprivate func handle(", in: observerTypeRegion),
+            let destroyedRegion = chatAXBracedDeclarationRegion(
+                "if targetWasDestroyed", in: handleRegion)
         else {
             expect(false, "必须能定位 production identity、observer 与 surface 复核函数")
             return
@@ -717,6 +930,30 @@ func runChatAXTracerSuites() {
         expect(
             !hasExactNotificationSet(reducedNotificationMutation),
             "通知契约必须拒绝只保留 layout notification 的等价变异")
+        let stopsWithoutMessagingDestroyedApplication: (String) -> Bool = { region in
+            guard
+                let observerRegion = chatAXBracedDeclarationRegion(
+                    "if let axObserver", in: region),
+                let registrationRegion = chatAXBracedDeclarationRegion(
+                    "if let applicationElement", in: observerRegion),
+                let registrationRange = observerRegion.range(of: registrationRegion),
+                let runLoopRemovalRange = observerRegion.range(of: "CFRunLoopRemoveSource(")
+            else {
+                return false
+            }
+            return observerRegion.contains("if let axObserver {")
+                && registrationRegion.contains("AXObserverRemoveNotification(")
+                && registrationRange.upperBound < runLoopRemovalRange.lowerBound
+        }
+        expect(
+            stopsWithoutMessagingDestroyedApplication(stopRegion),
+            "stop 必须能在 application element 已销毁时跳过 AX 注销，但仍移除 run-loop source")
+        let missingRegistrationGuardMutation = stopRegion.replacingOccurrences(
+            of: "if let applicationElement {",
+            with: "if true {")
+        expect(
+            !stopsWithoutMessagingDestroyedApplication(missingRegistrationGuardMutation),
+            "销毁边界契约必须拒绝继续用失效 application element 注销通知")
         let validatesSurfaceBeforeUnrelatedSignal: (String) -> Bool = { region in
             let normalized = region.split(whereSeparator: \.isWhitespace).joined(separator: " ")
             let verification = "surfaceStillMatches(target)"
@@ -749,11 +986,115 @@ func runChatAXTracerSuites() {
         expect(
             !validatesSurfaceBeforeUnrelatedSignal(reorderedSurfaceMutation),
             "surface 契约必须拒绝先发布信号、后验证 identity 的等价变异")
+        let recordsExitWithoutDestroyedElementQuery: (String) -> Bool = { region in
+            let normalized = region.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            let applicationDestroyedDeclaration =
+                "if let applicationElement, CFEqual(element, applicationElement)"
+            guard
+                let applicationDestroyedRegion = chatAXBracedDeclarationRegion(
+                    applicationDestroyedDeclaration, in: region),
+                let applicationDestroyedRange = region.range(of: applicationDestroyedRegion),
+                let invalidElementRange = applicationDestroyedRegion.range(
+                    of: "self.applicationElement = nil"),
+                let emissionRange = applicationDestroyedRegion.range(
+                    of: "emitSignal(kind: .applicationExited, windowOrdinal: 0)"),
+                let invalidationRange = region.range(of: "invalidateTarget()")
+            else {
+                return false
+            }
+            return normalized.contains("invalidateTarget()")
+                && applicationDestroyedRegion.contains(
+                    "emitSignal(kind: .applicationExited, windowOrdinal: 0)")
+                && region.components(separatedBy: "emitSignal(").count - 1 == 1
+                && region.components(separatedBy: "invalidateTarget()").count - 1 == 1
+                && invalidElementRange.upperBound < emissionRange.lowerBound
+                && applicationDestroyedRange.upperBound < invalidationRange.lowerBound
+                && !region.contains("element:")
+                && !region.contains("SystemChatAXAttributeReader")
+                && !region.contains("prepareForMessaging")
+                && !region.contains("AXUIElementGetPid")
+                && !region.contains("AXUIElementCopyAttributeValue")
+        }
+        expect(
+            recordsExitWithoutDestroyedElementQuery(destroyedRegion),
+            "destroyed callback 必须只记录已知退出事实，不能再 query 失效 AX element")
+        let destroyedElementQueryMutation = destroyedRegion.replacingOccurrences(
+            of: "emitSignal(kind: .applicationExited, windowOrdinal: 0)",
+            with: "emitSignal(kind: .applicationExited, element: element)")
+        expect(
+            !recordsExitWithoutDestroyedElementQuery(destroyedElementQueryMutation),
+            "destroyed-element 契约必须拒绝回退到通用 AX emitter")
+        let broadExitMutation = destroyedRegion.replacingOccurrences(
+            of: "if let applicationElement, CFEqual(element, applicationElement)",
+            with: "if targetWasDestroyed")
+        expect(
+            !recordsExitWithoutDestroyedElementQuery(broadExitMutation),
+            "非 application destroyed callback 不得伪造 application-exit evidence")
+        let lateInvalidElementMutation = destroyedRegion.replacingOccurrences(
+            of: "self.applicationElement = nil\n"
+                + "                emitSignal(kind: .applicationExited, windowOrdinal: 0)",
+            with: "emitSignal(kind: .applicationExited, windowOrdinal: 0)\n"
+                + "                self.applicationElement = nil")
+        expect(
+            !recordsExitWithoutDestroyedElementQuery(lateInvalidElementMutation),
+            "application destroyed 必须在同步 receive 可能调用 stop 之前清空失效引用")
+        let missingInvalidationMutation = destroyedRegion.replacingOccurrences(
+            of: "invalidateTarget()", with: "")
+        expect(
+            !recordsExitWithoutDestroyedElementQuery(missingInvalidationMutation),
+            "destroyed callback 必须始终确定 invalidate")
+        let preservesReadableSurfaceMismatch: (String) -> Bool = { region in
+            let verifier = "ChatAXSurfaceVerifier.verifyChat("
+            let mismatch = "return .candidates([], hasUnreadableProjection: false)"
+            guard
+                region.components(separatedBy: verifier).count - 1 == 1,
+                region.components(separatedBy: mismatch).count - 1 == 1,
+                let verifierRange = region.range(of: verifier),
+                let mismatchRange = region.range(of: mismatch)
+            else {
+                return false
+            }
+            return verifierRange.upperBound < mismatchRange.lowerBound
+        }
         expect(
             identityRegion.contains("readAnchorFacts(")
-                && identityRegion.contains("ChatAXSurfaceVerifier.verifyChat(")
+                && preservesReadableSurfaceMismatch(identityRegion)
+                && identityRegion.contains("requirements.frameworkNameSets.sorted")
+                && identityRegion.contains("hasUnreadableProjection = true")
                 && identityRegion.contains("ChatAXTargetIdentity.observedChatGPTDesktopAX("),
-            "production identity 必须把观察 facts 经 exact verifier 送入受限 Chat factory")
+            "production identity 必须区分可读 mismatch，并逐 framework 集构造 verified 候选")
+        let collapsedMismatchMutation = identityRegion.replacingOccurrences(
+            of: "return .candidates([], hasUnreadableProjection: false)",
+            with: "return .unreadable")
+        expect(
+            !preservesReadableSurfaceMismatch(collapsedMismatchMutation),
+            "surface mismatch 契约必须拒绝重新折叠为 identityUnreadable")
+        expect(
+            inspectionRegion.contains(
+                "case .candidates(let candidates, let containsUnreadableProjection)")
+                && inspectionRegion.contains("ChatAXTargetInspection(")
+                && inspectionRegion.contains("return .success("),
+            "system inspection 必须把零或多个可读候选交给公共 seam 进行 exact 选择")
+        let distinguishesMissingFrameworkFromUnreadable: (String) -> Bool = { region in
+            region.contains("chatAXFrameworkBundlePathState(at: url)")
+                && region.contains("case .missing:")
+                && region.components(separatedBy: "return .missing").count - 1 == 1
+                && region.contains("case .unreadable:")
+                && region.contains("return .unreadable")
+                && !region.contains("fileExists(")
+        }
+        expect(
+            distinguishesMissingFrameworkFromUnreadable(frameworkIdentityRegion)
+                && frameworkSetRegion.contains(
+                    "if hasMissingFramework { return .mismatch }")
+                && frameworkSetRegion.contains(
+                    "if hasUnreadableFramework { return .unreadable }"),
+            "framework path absent 才是 mismatch；权限、I/O 或 metadata 失败必须保持 unreadable")
+        let missingAsUnreadableMutation = frameworkIdentityRegion.replacingOccurrences(
+            of: "return .missing", with: "return .unreadable")
+        expect(
+            !distinguishesMissingFrameworkFromUnreadable(missingAsUnreadableMutation),
+            "framework path 分类契约必须拒绝把 missing 与 unreadable 重新折叠")
         expect(
             revalidationRegion.contains("readAnchorFacts(")
                 && revalidationRegion.contains("ChatAXSurfaceVerifier.verifyChat("),
@@ -765,21 +1106,21 @@ func runChatAXTracerSuites() {
 
         let decoyRuntime = """
             private final class DecoyObserver {
-                private func identity() {
+                private func inspectIdentities() {
                     readAnchorFacts()
                     ChatAXSurfaceVerifier.verifyChat()
                     ChatAXTargetIdentity.observedChatGPTDesktopAX()
                 }
             }
             final class SystemChatAXTraceObserver: ChatAXTraceObserving {
-                private func identity() { bypassVerification() }
+                private func inspectIdentities() { bypassVerification() }
             }
             """
         let decoyCode = strippingComments(decoyRuntime).codeWithoutStringLiterals
         let realObserver = chatAXBracedDeclarationRegion(
             "final class SystemChatAXTraceObserver: ChatAXTraceObserving", in: decoyCode)
         let realIdentity = realObserver.flatMap {
-            chatAXFunctionRegion("private func identity(", in: $0)
+            chatAXFunctionRegion("private func inspectIdentities(", in: $0)
         }
         expect(
             realIdentity?.contains("ChatAXSurfaceVerifier.verifyChat(") == false,

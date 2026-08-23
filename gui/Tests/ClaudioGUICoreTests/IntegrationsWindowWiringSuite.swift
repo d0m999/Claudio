@@ -69,7 +69,9 @@ func runIntegrationsWindowWiringSuites() {
             menu.contains("private let integrationsWindowController: IntegrationsWindowController"),
             "MenuBarController 必须 app-lifetime 持有唯一详情窗 controller")
         expect(
-            menu.components(separatedBy: "let integrationsWindowController = IntegrationsWindowController(").count - 1 == 1
+            menu.components(
+                separatedBy: "let integrationsWindowController = IntegrationsWindowController("
+            ).count - 1 == 1
                 && menu.contains("model: integrationsModel")
                 && menu.contains("languageStore: languageStore"),
             "IntegrationsWindowController 只能初始化一次")
@@ -82,7 +84,8 @@ func runIntegrationsWindowWiringSuites() {
             menu.contains("pendingIntegrationsWindowFocusTarget")
                 && menu.contains("popoverDidClose")
                 && menu.contains(
-                    "integrationsWindowController.showWindow { [weak self] latestHandbackApplication in"),
+                    "integrationsWindowController.showWindow { [weak self] latestHandbackApplication in"
+                ),
             "详情窗必须在 popoverDidClose 后展示，不能与 transient close 竞态")
         expect(
             menu.contains("restorePanelFocus(")
@@ -229,8 +232,9 @@ func runIntegrationsWindowWiringSuites() {
     }
 
     suite("IntegrationsWindow action outcome：除 copy 外成功/失败都注入刷新后的完整播报上下文") {
-        guard let model = integrationsSource(
-            "gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift")
+        guard
+            let model = integrationsSource(
+                "gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift")
         else {
             expect(false, "缺少 IntegrationsWindowModel.swift")
             return
@@ -315,15 +319,16 @@ func runIntegrationsWindowWiringSuites() {
 
         expect(
             app.contains(
-                "#if CLAUDIO_NATIVE_HOST_CARD_PROBE\n"
+                "        #if CLAUDIO_NATIVE_HOST_CARD_PROBE\n"
                     + "        let nativeProbeState = nativeHostCardProbeState()\n"
-                    + "#else\n"
+                    + "        #else\n"
                     + "        let nativeProbeState: HostIntegrationPresentationState? = nil\n"
-                    + "#endif"),
+                    + "        #endif"),
             "production 编译分支必须明确关闭 native host-card 状态注入")
         expect(
             app.contains("#if CLAUDIO_NATIVE_HOST_CARD_PROBE\n/// Fixed, side-effect-free state")
-                && app.contains("ProcessInfo.processInfo.environment[\"CLAUDIO_TEST_HOST_CARD_STATE\"]"),
+                && app.contains(
+                    "ProcessInfo.processInfo.environment[\"CLAUDIO_TEST_HOST_CARD_STATE\"]"),
             "测试环境变量的读取必须只存在于专用 probe 编译分支")
         expect(
             bundle.contains("GUI_NATIVE_HOST_CARD_PROBE=true")
@@ -344,7 +349,8 @@ func runIntegrationsWindowWiringSuites() {
 
         guard
             let restoreStart = script.range(of: "restore_test_state()"),
-            let snapshotGuard = script.range(of: #"if [[ "$STATE_SNAPSHOT_COMPLETE" != true ]]; then"#),
+            let snapshotGuard = script.range(
+                of: #"if [[ "$STATE_SNAPSHOT_COMPLETE" != true ]]; then"#),
             let firstRestore = script.range(of: #"if [[ "$HAD_TEXT_SIZE" == true ]]; then"#),
             let appearanceRead = script.range(
                 of: #"PREVIOUS_APPEARANCE="$(defaults read "#),
@@ -390,8 +396,10 @@ func runIntegrationsWindowWiringSuites() {
             "启动必须只走共享 bootstrap + inspect")
         let menuCode = strippingComments(menu).codeWithoutStringLiterals
         let refreshBody: String
-        if let start = menuCode.range(of: "fileprivate func requestHostIntegrationRefresh")?.lowerBound,
-            let end = menuCode.range(of: "fileprivate func publishHostIntegrationState")?.lowerBound,
+        if let start = menuCode.range(of: "fileprivate func requestHostIntegrationRefresh")?
+            .lowerBound,
+            let end = menuCode.range(of: "fileprivate func publishHostIntegrationState")?
+                .lowerBound,
             start < end
         {
             refreshBody = String(menuCode[start..<end])
@@ -492,9 +500,11 @@ func runIntegrationsWindowWiringSuites() {
                 && rowLayout.contains(".fixedSize(horizontal: false, vertical: true)")
                 && rowLayout.contains("ZStack(alignment: .trailing)")
                 && (rowLayout.contains(
-                        ".padding(.trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)")
+                    ".padding(.trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"
+                )
                     || rowLayout.contains(
-                        ".padding( .trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"))
+                        ".padding( .trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"
+                    ))
                 && !rowLayout.contains("ZStack(alignment: .topTrailing)")
                 && !rowLayout.contains("HStack(alignment: .top, spacing: identitySpacing)")
                 && !rowLayout.contains("minHeight: ClaudioTheme.Metrics.iconTarget"),
@@ -531,7 +541,9 @@ func runIntegrationsWindowWiringSuites() {
         }
         let indicatorGroup = String(row[indicatorStart..<indicatorEnd])
         expect(!indicatorGroup.contains("Button("), "Logo 组不得包含独立 Button")
-        expect(!indicatorGroup.contains("bundle: .module"), "Logo 组不得直接走 SwiftPM 的 Bundle.module 根目录查找")
+        expect(
+            !indicatorGroup.contains("bundle: .module"), "Logo 组不得直接走 SwiftPM 的 Bundle.module 根目录查找"
+        )
         expect(!indicatorGroup.contains(".focused("), "Logo 组不得新增焦点 owner")
         expect(!indicatorGroup.contains("PanelFocusTarget"), "Logo 组不得新增 PanelFocusTarget")
         expect(
@@ -660,7 +672,8 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             model.contains("guard let inspector, let configurationSource")
                 && view.contains("if let configurationSource = inspector.configurationSource")
-                && view.contains("configurationPathHost: model.inspector?.configurationSource == nil"),
+                && view.contains(
+                    "configurationPathHost: model.inspector?.configurationSource == nil"),
             "无配置来源的 AX inspector 不得复制、不渲染路径控件，也不得进入焦点环")
     }
 
@@ -749,7 +762,10 @@ func runIntegrationsWindowWiringSuites() {
             return
         }
 
-        for key in ["integrationsConfigurationSource", "integrationsNativeEvent", "integrationsRecentReceipt"] {
+        for key in [
+            "integrationsConfigurationSource", "integrationsNativeEvent",
+            "integrationsRecentReceipt",
+        ] {
             expect(view.contains("l10n.text(.\(key))"), "inspector 必须显示本地化字段 key：\(key)")
         }
         expect(
@@ -829,7 +845,7 @@ func runIntegrationsWindowWiringSuites() {
             view.contains("feedback.localizedAccessibilityLabel(language: languageStore.language)"),
             "短暂状态必须把宿主与结果作为完整独立 label 暴露给 VoiceOver")
         expect(
-                view.components(separatedBy: "NSAccessibility.post(").count - 1 == 1
+            view.components(separatedBy: "NSAccessibility.post(").count - 1 == 1
                 && view.contains("notification: .announcementRequested")
                 && view.contains("feedbackAnnouncer.consume(")
                 && view.contains("language: languageStore.language"),
@@ -955,7 +971,9 @@ func runIntegrationsWindowWiringSuites() {
                 && view.contains("Text(localizedInFlightStatus(operation))"),
             "只有目标宿主卡必须显示原生进度与连接中/升级中/修复中/断开中文案")
         expect(
-            view.contains("return \"\\(row.accessibilityLabel)\\(separator)\\(localizedInFlightStatus(operation))\""),
+            view.contains(
+                "return \"\\(row.accessibilityLabel)\\(separator)\\(localizedInFlightStatus(operation))\""
+            ),
             "当前操作限定语必须进入宿主卡 VoiceOver label")
         expect(
             !view.contains("rotationEffect") && !view.contains("repeatForever"),

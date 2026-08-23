@@ -237,6 +237,25 @@ private struct SystemChatAXSurfaceSignatureReader {
     }
 }
 
+private enum SystemChatAXIdentityInspection {
+    case candidates(
+        [ChatAXTargetIdentity],
+        hasUnreadableProjection: Bool)
+    case unreadable
+}
+
+private enum SystemChatAXFrameworkIdentityInspection {
+    case observed(ChatAXFrameworkIdentity)
+    case missing
+    case unreadable
+}
+
+private enum SystemChatAXFrameworkSetInspection {
+    case candidate([ChatAXFrameworkIdentity])
+    case mismatch
+    case unreadable
+}
+
 @MainActor
 final class SystemChatAXTraceObserver: ChatAXTraceObserving {
     private var axObserver: AXObserver?
@@ -252,7 +271,7 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
 
     func inspectTarget(
         requirements: ChatAXInspectionRequirements
-    ) -> Result<ChatAXObservedTarget, ChatAXTargetInspectionFailure> {
+    ) -> Result<ChatAXTargetInspection, ChatAXTargetInspectionFailure> {
         let applications = requirements.bundleIdentifiers
             .flatMap { NSRunningApplication.runningApplications(withBundleIdentifier: $0) }
         let uniqueApplications = Dictionary(
@@ -266,17 +285,23 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         guard uniqueApplications.count == 1, let application = uniqueApplications.first else {
             return .failure(.ambiguousTargets)
         }
-        guard
-            let identity = identity(
-                for: application,
-                requirements: requirements)
-        else {
+        let identities: [ChatAXTargetIdentity]
+        let hasUnreadableProjection: Bool
+        switch inspectIdentities(for: application, requirements: requirements) {
+        case .candidates(let candidates, let containsUnreadableProjection):
+            identities = candidates
+            hasUnreadableProjection = containsUnreadableProjection
+        case .unreadable:
             return .failure(.identityUnreadable)
         }
         return .success(
-            ChatAXObservedTarget(
-                processIdentifier: application.processIdentifier,
-                identity: identity))
+            ChatAXTargetInspection(
+                candidates: identities.map {
+                    ChatAXObservedTarget(
+                        processIdentifier: application.processIdentifier,
+                        identity: $0)
+                },
+                hasUnreadableProjection: hasUnreadableProjection))
     }
 
     func start(
@@ -344,9 +369,11 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
     func stop() {
         validationTimer?.invalidate()
         validationTimer = nil
-        if let axObserver, let applicationElement {
-            for notification in registeredNotifications {
-                AXObserverRemoveNotification(axObserver, applicationElement, notification)
+        if let axObserver {
+            if let applicationElement {
+                for notification in registeredNotifications {
+                    AXObserverRemoveNotification(axObserver, applicationElement, notification)
+                }
             }
             CFRunLoopRemoveSource(
                 CFRunLoopGetMain(), AXObserverGetRunLoopSource(axObserver), .commonModes)
@@ -367,7 +394,8 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         guard let target else { return }
         if targetWasDestroyed {
             if let applicationElement, CFEqual(element, applicationElement) {
-                emitSignal(kind: .applicationExited, element: element)
+                self.applicationElement = nil
+                emitSignal(kind: .applicationExited, windowOrdinal: 0)
             }
             invalidateTarget()
             return
@@ -382,6 +410,10 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
     private func emitSignal(kind: ChatAXStructuralSignalKind, element: AXUIElement) {
         let reader = SystemChatAXAttributeReader(approvedAttributes: approvedAttributes)
         let windowOrdinal = max(0, reader.integer(.windowNumber, from: element) ?? 0)
+        emitSignal(kind: kind, windowOrdinal: windowOrdinal)
+    }
+
+    private func emitSignal(kind: ChatAXStructuralSignalKind, windowOrdinal: Int) {
         let elapsed = max(
             0,
             Int((ProcessInfo.processInfo.systemUptime - startedAt) * 1_000))
@@ -412,17 +444,20 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         guard
             let application = NSRunningApplication(
                 processIdentifier: target.processIdentifier),
-            !application.isTerminated,
-            let observedIdentity = identity(
-                for: application,
-                requirements: ChatAXInspectionRequirements(
-                    bundleIdentifiers: [target.identity.bundleIdentifier],
-                    frameworkNames: Set(target.identity.frameworks.map(\.name)),
-                    surfaceSignatures: [target.identity.surfaceSignature]))
+            !application.isTerminated
         else {
             return false
         }
-        return observedIdentity == target.identity
+        let requirements = ChatAXInspectionRequirements(
+            bundleIdentifiers: [target.identity.bundleIdentifier],
+            frameworkNameSets: [Set(target.identity.frameworks.map(\.name))],
+            surfaceSignatures: [target.identity.surfaceSignature])
+        switch inspectIdentities(for: application, requirements: requirements) {
+        case .candidates(let identities, _):
+            return identities.contains(target.identity)
+        case .unreadable:
+            return false
+        }
     }
 
     private func surfaceStillMatches(_ target: ChatAXObservedTarget) -> Bool {
@@ -451,10 +486,10 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
             && observedProcessIdentifier == target.processIdentifier
     }
 
-    private func identity(
+    private func inspectIdentities(
         for application: NSRunningApplication,
         requirements: ChatAXInspectionRequirements
-    ) -> ChatAXTargetIdentity? {
+    ) -> SystemChatAXIdentityInspection {
         guard
             let bundleURL = application.bundleURL,
             let bundle = Bundle(url: bundleURL),
@@ -467,44 +502,96 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
             let anchorFacts = SystemChatAXSurfaceSignatureReader().readAnchorFacts(
                 applicationElement: AXUIElementCreateApplication(
                     application.processIdentifier),
-                expectedProcessIdentifier: application.processIdentifier),
+                expectedProcessIdentifier: application.processIdentifier)
+        else {
+            return .unreadable
+        }
+        guard
             let verifiedSurface = ChatAXSurfaceVerifier.verifyChat(
                 anchorFacts: anchorFacts,
                 allowedSignatures: requirements.surfaceSignatures)
         else {
-            return nil
+            return .candidates([], hasUnreadableProjection: false)
         }
 
         let frameworksDirectory =
             bundleURL
             .appendingPathComponent("Contents", isDirectory: true)
             .appendingPathComponent("Frameworks", isDirectory: true)
-        let frameworks = requirements.frameworkNames.sorted().compactMap { name in
-            frameworkIdentity(
-                at: frameworksDirectory.appendingPathComponent(name, isDirectory: true),
-                name: name)
+        var identities: [ChatAXTargetIdentity] = []
+        var hasUnreadableProjection = false
+        for frameworkNames in requirements.frameworkNameSets.sorted(by: {
+            $0.sorted().lexicographicallyPrecedes($1.sorted())
+        }) {
+            switch inspectFrameworkSet(named: frameworkNames, in: frameworksDirectory) {
+            case .candidate(let frameworks):
+                identities.append(
+                    ChatAXTargetIdentity.observedChatGPTDesktopAX(
+                        bundleIdentifier: bundleIdentifier,
+                        codeSignature: codeSignature,
+                        shortVersion: shortVersion,
+                        build: build,
+                        frameworks: frameworks,
+                        architecture: architecture,
+                        verifiedSurface: verifiedSurface))
+            case .mismatch:
+                break
+            case .unreadable:
+                hasUnreadableProjection = true
+            }
         }
-        guard frameworks.count == requirements.frameworkNames.count else { return nil }
-        return ChatAXTargetIdentity.observedChatGPTDesktopAX(
-            bundleIdentifier: bundleIdentifier,
-            codeSignature: codeSignature,
-            shortVersion: shortVersion,
-            build: build,
-            frameworks: frameworks,
-            architecture: architecture,
-            verifiedSurface: verifiedSurface)
+        return .candidates(
+            identities,
+            hasUnreadableProjection: hasUnreadableProjection)
     }
 
-    private func frameworkIdentity(at url: URL, name: String) -> ChatAXFrameworkIdentity? {
+    private func inspectFrameworkSet(
+        named frameworkNames: Set<String>,
+        in frameworksDirectory: URL
+    ) -> SystemChatAXFrameworkSetInspection {
+        var frameworks: [ChatAXFrameworkIdentity] = []
+        var hasMissingFramework = false
+        var hasUnreadableFramework = false
+        for name in frameworkNames.sorted() {
+            switch inspectFrameworkIdentity(
+                at: frameworksDirectory.appendingPathComponent(name, isDirectory: true),
+                name: name)
+            {
+            case .observed(let framework):
+                frameworks.append(framework)
+            case .missing:
+                hasMissingFramework = true
+            case .unreadable:
+                hasUnreadableFramework = true
+            }
+        }
+        if hasMissingFramework { return .mismatch }
+        if hasUnreadableFramework { return .unreadable }
+        return .candidate(frameworks)
+    }
+
+    private func inspectFrameworkIdentity(
+        at url: URL,
+        name: String
+    ) -> SystemChatAXFrameworkIdentityInspection {
+        switch chatAXFrameworkBundlePathState(at: url) {
+        case .missing:
+            return .missing
+        case .unreadable:
+            return .unreadable
+        case .directory:
+            break
+        }
         guard
             let bundle = Bundle(url: url),
             let shortVersion = bundle.object(
                 forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
             let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String
         else {
-            return nil
+            return .unreadable
         }
-        return ChatAXFrameworkIdentity(name: name, shortVersion: shortVersion, build: build)
+        return .observed(
+            ChatAXFrameworkIdentity(name: name, shortVersion: shortVersion, build: build))
     }
 
     private func architecture(
