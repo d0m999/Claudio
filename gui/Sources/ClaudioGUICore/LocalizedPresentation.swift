@@ -38,6 +38,7 @@ private func localizedHostReadiness(
     case .awaitingActivation: key = .hostConfigured
     case .legacy: key = .hostLegacy
     case .notConnected: key = .hostNotConnected
+    case .unavailable: key = .hostUnavailable
     case .needsAttention: key = .hostNeedsAttention
     }
     return l10n.format(key, Int64(supported), Int64(total))
@@ -64,20 +65,25 @@ private func localizedHostDetail(
         case .claudeCode: return nil
         case .codex: return l10n.text(.hostCodexReadyDetail)
         case .workBuddy: return l10n.text(.hostWorkBuddyReadyDetail)
+        case .chatGPTDesktopAX, .claudeDesktopAX: return nil
         }
     case .awaitingActivation:
         switch row.host {
         case .claudeCode: return l10n.text(.hostClaudeAwaitingDetail)
         case .codex: return l10n.text(.hostCodexAwaitingDetail)
         case .workBuddy: return l10n.text(.hostWorkBuddyAwaitingDetail)
+        case .chatGPTDesktopAX, .claudeDesktopAX: return nil
         }
     case .legacy:
         switch row.host {
         case .claudeCode: return l10n.text(.hostClaudeLegacyDetail)
         case .codex, .workBuddy: return l10n.text(.hostCodexLegacyDetail)
+        case .chatGPTDesktopAX, .claudeDesktopAX: return nil
         }
     case .notConnected:
         return nil
+    case .unavailable:
+        return l10n.text(.hostAccessibilityBetaUnavailableDetail)
     case .needsAttention:
         // This reason is supplied by the host integration manager and is retained as domain
         // data. It must not be guessed or translated by the GUI.
@@ -145,6 +151,7 @@ private func localizedQualification(
         "接口部分支持，当前版本尚未实现":
             "Partially supported by the interface; not implemented yet",
         "此宿主未声明该能力": "This host does not declare this capability",
+        "Accessibility Beta 候选尚未实现": "Accessibility Beta candidate is not implemented",
     ]
     if language == .english {
         return english[value] ?? value

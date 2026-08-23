@@ -129,7 +129,9 @@ public func connectClaudeCodeHooks(
     root: [String: Any],
     claudioRoot: String,
     claudioBinaryPath: String,
-    installationID: UUID
+    installationID: UUID,
+    reusableInstallationID: UUID? = nil,
+    requiresReusableInstallationID: Bool = false
 ) -> Result<HostHooksJSONMutation, HostHooksTransformError> {
     let inspection: ClaudeCodeHooksInspection
     switch inspectClaudeCodeHooks(
@@ -144,14 +146,20 @@ public func connectClaudeCodeHooks(
         root: root,
         claudioRoot: claudioRoot,
         claudioBinaryPath: claudioBinaryPath)
-    if case .configured = inspection, !hasRelocatedModern {
+    if case .configured(let configuredID) = inspection,
+        (!requiresReusableInstallationID || configuredID == reusableInstallationID),
+        !hasRelocatedModern
+    {
         return .success(HostHooksJSONMutation(root: root, changed: false))
     }
     let chosenInstallationID: UUID
-    if case .configured(let currentID) = inspection {
+    if case .configured(let currentID) = inspection,
+        (!requiresReusableInstallationID || currentID == reusableInstallationID)
+    {
         chosenInstallationID = currentID
     } else if case .partial(let currentID?, _, let hasLegacyEntries) = inspection,
-        !hasLegacyEntries
+        !hasLegacyEntries,
+        (!requiresReusableInstallationID || currentID == reusableInstallationID)
     {
         // 纯能力升级（例如 4 个现代 hook 补上 UserPromptSubmit）沿用唯一现有代次；
         // fresh connect / legacy upgrade / mixed repair 才创建新代次。

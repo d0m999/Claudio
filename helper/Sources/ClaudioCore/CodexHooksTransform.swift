@@ -79,7 +79,9 @@ public enum CodexHooksTransform {
         claudioBinaryPath: String,
         claudioRoot: String,
         externallyManagedNativeEvents: Set<String> = [],
-        externalInstallationID: UUID? = nil
+        externalInstallationID: UUID? = nil,
+        reusableInstallationID: UUID? = nil,
+        requiresReusableInstallationID: Bool = false
     ) -> CodexHooksTransformResult {
         switch loadAndInspect(
             data,
@@ -100,12 +102,44 @@ public enum CodexHooksTransform {
                 return CodexHooksTransformResult(
                     data: data, status: loaded.status, changed: false)
             case .complete:
-                if !loaded.hasRelocatedOwnedCommands, !loaded.hasLegacyPromptNotification {
+                if (!requiresReusableInstallationID
+                    || loaded.status.installationID == reusableInstallationID),
+                    !loaded.hasRelocatedOwnedCommands,
+                    !loaded.hasLegacyPromptNotification
+                {
                     return CodexHooksTransformResult(
                         data: data, status: loaded.status, changed: false)
                 }
             case .absent, .partial:
                 break
+            }
+
+            if requiresReusableInstallationID,
+                let existingID = loaded.status.installationID,
+                existingID != reusableInstallationID,
+                existingID != installationID
+            {
+                let swept = disconnect(data, claudioRoot: claudioRoot)
+                guard swept.changed, let sweptData = swept.data else {
+                    return CodexHooksTransformResult(
+                        data: data,
+                        status: .malformed(reason: "无法安全轮换 Codex installation ID"),
+                        changed: false)
+                }
+                let rebuilt = connect(
+                    sweptData,
+                    installationID: installationID,
+                    claudioBinaryPath: claudioBinaryPath,
+                    claudioRoot: claudioRoot,
+                    externallyManagedNativeEvents: externallyManagedNativeEvents,
+                    externalInstallationID: externalInstallationID,
+                    reusableInstallationID: installationID,
+                    requiresReusableInstallationID: true)
+                return CodexHooksTransformResult(
+                    data: rebuilt.data,
+                    status: rebuilt.status,
+                    changed: rebuilt.changed,
+                    removedCount: swept.removedCount + rebuilt.removedCount)
             }
 
             if loaded.hasRelocatedOwnedCommands {
@@ -133,7 +167,9 @@ public enum CodexHooksTransform {
                     claudioBinaryPath: claudioBinaryPath,
                     claudioRoot: claudioRoot,
                     externallyManagedNativeEvents: externallyManagedNativeEvents,
-                    externalInstallationID: externalInstallationID)
+                    externalInstallationID: externalInstallationID,
+                    reusableInstallationID: reusableInstallationID,
+                    requiresReusableInstallationID: requiresReusableInstallationID)
                 return CodexHooksTransformResult(
                     data: rebuilt.data,
                     status: rebuilt.status,
@@ -549,5 +585,14 @@ public enum CodexHooksTransform {
         guard JSONSerialization.isValidJSONObject(root) else { return nil }
         return try? JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+    }
+}
+
+extension CodexHooksConfigurationStatus {
+    var installationID: UUID? {
+        switch self {
+        case .complete(let id), .partial(let id, _): id
+        case .absent, .malformed, .conflictingInstallationIDs, .conflict: nil
+        }
     }
 }

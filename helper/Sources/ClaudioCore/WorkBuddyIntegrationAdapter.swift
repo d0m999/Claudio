@@ -46,19 +46,7 @@ public struct WorkBuddyIntegrationEnvironment: Sendable {
         self.claudioRoot = claudioRoot
         self.receiptStore = receiptStore
         self.availability = availability
-        self.scopeFingerprint =
-            scopeFingerprint ?? {
-                guard let bundle = Bundle(path: "/Applications/WorkBuddy.app"),
-                    let version = bundle.object(
-                        forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-                    !version.isEmpty
-                else { return nil }
-                let bindingSchema = HostCapabilityCatalog.bindings(for: .workBuddy)
-                    .filter(\.isAudibleCapability)
-                    .map(\.id.rawValue)
-                    .joined(separator: ",")
-                return "app=\(version);runtime=\(ClaudioVersion.current);bindings=\(bindingSchema)"
-            }
+        self.scopeFingerprint = scopeFingerprint ?? HostActivationScope.workBuddy
     }
 }
 
@@ -91,6 +79,11 @@ public struct WorkBuddyIntegrationAdapter: HostIntegrationAdapter {
                 return .failure(
                     .configuration(reason: "无法读取 WorkBuddy/Claudio 版本身份；已拒绝写入连接"))
             }
+            let activeID = environment.receiptStore.currentInstallationID(host: .workBuddy)
+            let reusableInstallationID =
+                environment.receiptStore.currentInstallationScopeFingerprint(host: .workBuddy)
+                == scopeFingerprint
+                ? activeID : nil
             let transaction = ConfigFileTransaction(
                 file: environment.settingsFile,
                 lockFile: environment.lockFile,
@@ -103,7 +96,9 @@ public struct WorkBuddyIntegrationAdapter: HostIntegrationAdapter {
                     root: root,
                     claudioRoot: environment.claudioRoot,
                     claudioBinaryPath: environment.claudioBinaryPath,
-                    installationID: requestedInstallationID)
+                    installationID: requestedInstallationID,
+                    reusableInstallationID: reusableInstallationID,
+                    requiresReusableInstallationID: true)
                 {
                 case .failure(let error):
                     transformError = error
@@ -165,6 +160,10 @@ public struct WorkBuddyIntegrationAdapter: HostIntegrationAdapter {
                 return .success(
                     inspectWorkBuddySnapshot(environment: environment, runtime: runtime))
             }
+            guard let installationID else {
+                return .success(
+                    inspectWorkBuddySnapshot(environment: environment, runtime: runtime))
+            }
             let transaction = ConfigFileTransaction(
                 file: environment.settingsFile,
                 lockFile: environment.lockFile,
@@ -172,7 +171,11 @@ public struct WorkBuddyIntegrationAdapter: HostIntegrationAdapter {
                 symlinkPolicy: .preserveTarget)
             var transformError: HostHooksTransformError?
             let result = transaction.update { root in
-                switch disconnectWorkBuddyHooks(root: root, claudioRoot: environment.claudioRoot) {
+                switch disconnectWorkBuddyHooks(
+                    root: root,
+                    claudioBinaryPath: environment.claudioBinaryPath,
+                    installationID: installationID)
+                {
                 case .failure(let error):
                     transformError = error
                     return .unchanged
@@ -217,26 +220,13 @@ public func inspectWorkBuddySnapshot(
             configuration = .conflict(reason: reason)
         }
     }
-    if configuration == .configured,
-        environment.receiptStore.currentInstallationID(host: .workBuddy) == installationID
-    {
-        guard let currentScope = environment.scopeFingerprint() else {
-            configuration = .conflict(reason: "无法读取 WorkBuddy/Claudio 版本身份，请修复连接")
-            return makeIntegrationSnapshot(
-                host: .workBuddy,
-                runtime: runtime,
-                availability: availability,
-                configuration: configuration,
-                installationID: installationID,
-                file: environment.settingsFile,
-                receiptStore: environment.receiptStore)
-        }
-        if environment.receiptStore.currentInstallationScopeFingerprint(host: .workBuddy)
-            != currentScope
-        {
-            configuration = .conflict(reason: "WorkBuddy 或 Claudio 版本已变化，旧回执已失效；请修复连接")
-        }
-    }
+    let currentScope = configuration == .configured ? environment.scopeFingerprint() : nil
+    configuration = validatedActivationConfiguration(
+        host: .workBuddy,
+        configuration: configuration,
+        installationID: installationID,
+        currentScope: currentScope,
+        receiptStore: environment.receiptStore)
     return makeIntegrationSnapshot(
         host: .workBuddy,
         runtime: runtime,
@@ -244,7 +234,8 @@ public func inspectWorkBuddySnapshot(
         configuration: configuration,
         installationID: installationID,
         file: environment.settingsFile,
-        receiptStore: environment.receiptStore)
+        receiptStore: environment.receiptStore,
+        scopeFingerprint: currentScope)
 }
 
 private enum WorkBuddyRootLoad {

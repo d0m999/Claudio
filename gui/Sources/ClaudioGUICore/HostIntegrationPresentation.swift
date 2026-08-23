@@ -11,6 +11,7 @@ public enum HostSourceRowStatus: Sendable, Equatable {
     case awaitingActivation
     case legacy
     case notConnected
+    case unavailable
     case needsAttention
 }
 
@@ -49,6 +50,38 @@ public struct HostSourceRowPresentation: Identifiable, Sendable, Equatable {
     }
 }
 
+/// IntegrationsWindow 的 Product → Surface 分组。产品只负责分组，选择、能力和回执仍以
+/// `HostID` / `HostSurfaceID` 为粒度。
+public struct HostSourceProductGroupPresentation: Identifiable, Sendable, Equatable {
+    public var id: HostProductID { product }
+    public let product: HostProductID
+    public let title: String
+    public let surfaces: [HostSourceRowPresentation]
+
+    public init(
+        product: HostProductID,
+        title: String,
+        surfaces: [HostSourceRowPresentation]
+    ) {
+        self.product = product
+        self.title = title
+        self.surfaces = surfaces
+    }
+}
+
+public func hostSourceProductGroups(
+    from rows: [HostSourceRowPresentation]
+) -> [HostSourceProductGroupPresentation] {
+    HostProductID.allCases.compactMap { product in
+        let surfaces = rows.filter { $0.host.descriptor.product == product }
+        guard !surfaces.isEmpty else { return nil }
+        return HostSourceProductGroupPresentation(
+            product: product,
+            title: product.displayName,
+            surfaces: surfaces)
+    }
+}
+
 /// 按稳定 registry 生成所有已出货来源行。宿主是否连接只改变行内状态，不改变行的存在。
 public func hostSourceRowPresentations(
     from matrix: AudibilityMatrix
@@ -67,6 +100,16 @@ private func hostSourceRowPresentation(
     host: HostID,
     summary: HostReadinessSummary
 ) -> HostSourceRowPresentation {
+    if host.descriptor.mechanism == .accessibilityBeta {
+        return HostSourceRowPresentation(
+            host: host,
+            title: host.displayName,
+            readinessText: "0/\(Event.allCases.count) 暂不可用",
+            detailText: "GUI-only Beta 候选；Accessibility 观察器与权限流程尚未实现",
+            status: .unavailable,
+            supportedCount: 0,
+            totalCount: Event.allCases.count)
+    }
     let readinessText: String
     let detailText: String?
     let status: HostSourceRowStatus
@@ -82,6 +125,7 @@ private func hostSourceRowPresentation(
         case .claudeCode: detailText = nil
         case .codex: detailText = "执行中断暂无事件"
         case .workBuddy: detailText = "当前版本已实现 2/5；其余能力尚未启用"
+        case .chatGPTDesktopAX, .claudeDesktopAX: detailText = nil
         }
         status = .ready
 
@@ -93,6 +137,7 @@ private func hostSourceRowPresentation(
         case .claudeCode: detailText = "请向 Claude Code 提交一次提示词以确认连接"
         case .codex: detailText = "在 Codex 输入 /hooks，确认后再提交一次提示词"
         case .workBuddy: detailText = "请向 WorkBuddy 提交一次提示词以确认连接"
+        case .chatGPTDesktopAX, .claudeDesktopAX: detailText = nil
         }
         status = .awaitingActivation
 
@@ -103,6 +148,7 @@ private func hostSourceRowPresentation(
         switch host {
         case .claudeCode: detailText = "四个旧版事件可听；任务开始需升级"
         case .codex, .workBuddy: detailText = "可听，但暂无真实回执"
+        case .chatGPTDesktopAX, .claudeDesktopAX: detailText = nil
         }
         status = .legacy
 
@@ -343,6 +389,8 @@ public func eventHostIndicatorCompactDisplayName(for host: HostID) -> String {
     case .claudeCode: "Claude"
     case .codex: "Codex"
     case .workBuddy: "Buddy"
+    case .chatGPTDesktopAX: "ChatGPT"
+    case .claudeDesktopAX: "Claude AX"
     }
 }
 
@@ -352,6 +400,8 @@ public func eventHostIndicatorAssetName(for host: HostID) -> String {
     case .claudeCode: "claude"
     case .codex: "codex"
     case .workBuddy: "workbuddy"
+    case .chatGPTDesktopAX: "codex"
+    case .claudeDesktopAX: "claude"
     }
 }
 
@@ -380,6 +430,14 @@ public func eventHostIndicatorPalette(for host: HostID) -> EventHostIndicatorPal
         EventHostIndicatorPalette(
             lightHex: ClaudioColorHex.workBuddyIndicatorLight,
             darkHex: ClaudioColorHex.workBuddyIndicatorDark)
+    case .chatGPTDesktopAX:
+        EventHostIndicatorPalette(
+            lightHex: ClaudioColorHex.codexIndicatorLight,
+            darkHex: ClaudioColorHex.codexIndicatorDark)
+    case .claudeDesktopAX:
+        EventHostIndicatorPalette(
+            lightHex: ClaudioColorHex.claudeIndicatorLight,
+            darkHex: ClaudioColorHex.claudeIndicatorDark)
     }
 }
 
@@ -391,6 +449,7 @@ private func defaultQualificationText(_ qualification: HostCapabilityQualificati
     case .interfaceSupportedNotImplemented: "接口支持，当前版本尚未实现"
     case .interfacePartiallySupportedNotImplemented: "接口部分支持，当前版本尚未实现"
     case .undeclaredCapability: "此宿主未声明该能力"
+    case .accessibilityBetaUnavailable: "Accessibility Beta 候选尚未实现"
     }
 }
 
@@ -401,7 +460,9 @@ public func eventHostIndicatorPresentations(
     matrix: HostCapabilityMatrixPresentation
 ) -> [EventHostIndicatorPresentation] {
     let row = matrix.rows.first(where: { $0.event == event })
-    return matrix.hostColumns.map { host in
+    return matrix.hostColumns.filter {
+        $0.descriptor.mechanism == .nativeHooks
+    }.map { host in
         guard let cell = row?.cells.first(where: { $0.host == host }) else {
             return EventHostIndicatorPresentation(host: host, state: .unsupported)
         }
@@ -565,6 +626,8 @@ public func integrationsInspectorActions(
         return [.redetect, .clearReceiptHistory(row.host), .disconnect(row.host)]
     case .notConnected:
         return [.connect(row.host), .clearReceiptHistory(row.host)]
+    case .unavailable:
+        return []
     case .needsAttention:
         return [
             .redetect, .repair(row.host), .clearReceiptHistory(row.host), .disconnect(row.host),

@@ -222,7 +222,7 @@ public struct PanelView: View {
         let announcer = self.announcer
         let coordinator = focusCoordinator
         let panelModel = self.panelModel
-        let sourceCount = hostIntegrations.content.sourceRows.count
+        let sourceCount = panelHostSourceRows.count
         let hideCount = coordinator.hideCount
         DispatchQueue.main.async {
             // `DispatchQueue.main.async` 让 AppKit 先完成 key-window/AX 交接。该闭包
@@ -301,12 +301,12 @@ public struct PanelView: View {
 
     private var headerAccessibilityLabel: String {
         let packName = selectedPackDisplayName
-        let base = l10n.format(.panelHeader, Int64(hostIntegrations.content.sourceRows.count))
+        let base = l10n.format(.panelHeader, Int64(panelHostSourceRows.count))
         let withPack =
             packName.isEmpty
             ? base
             : l10n.format(
-                .panelHeaderWithPack, Int64(hostIntegrations.content.sourceRows.count),
+                .panelHeaderWithPack, Int64(panelHostSourceRows.count),
                 packName as NSString)
         let separator = languageStore.language == .english ? ", " : "，"
         return "\(withPack)\(separator)\(audibleEventSummary)"
@@ -337,8 +337,12 @@ public struct PanelView: View {
 
     private var localizedHostRows: [HostSourceRowPresentation] {
         localizedHostSourceRows(
-            hostIntegrations.content.sourceRows,
+            panelHostSourceRows,
             language: languageStore.language)
+    }
+
+    private var panelHostSourceRows: [HostSourceRowPresentation] {
+        hostIntegrations.content.sourceRows.filter { $0.status != .unavailable }
     }
 
     private var audibleEventCount: Int {
@@ -505,7 +509,7 @@ public struct PanelView: View {
     }
 
     private var selectableSoundSourceRows: [HostSourceRowPresentation] {
-        hostIntegrations.content.sourceRows.filter { $0.status != .notConnected }
+        panelHostSourceRows.filter { $0.status != .notConnected }
     }
 
     private var soundSurfaceSelector: some View {
@@ -928,7 +932,7 @@ public struct PanelView: View {
         let visibleRows: [EventRow] =
             content.showsEventContent && panelModel.libraryPresentationState.hasUsableSnapshot
             ? panelModel.eventRows : []
-        let hostSources = hostIntegrations.content.sourceRows.map(\.host)
+        let hostSources = panelHostSourceRows.map(\.host)
         let openingTarget = panelOpeningFocus(
             rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id),
             ctaOperable: ctaOperable,
@@ -1172,6 +1176,7 @@ private struct HostSourceRowView: View {
         case .awaitingActivation: "clock.fill"
         case .legacy: "clock.arrow.circlepath"
         case .notConnected: "circle"
+        case .unavailable: "lock.circle"
         case .needsAttention: "exclamationmark.circle.fill"
         }
     }
@@ -1198,7 +1203,7 @@ private struct HostSourceRowView: View {
     private var statusColor: Color {
         switch row.status {
         case .ready: ClaudioColor.success(colorScheme)
-        case .awaitingActivation, .legacy, .notConnected:
+        case .awaitingActivation, .legacy, .notConnected, .unavailable:
             ClaudioColor.textSecondary(colorScheme)
         case .needsAttention: ClaudioColor.error(colorScheme)
         }

@@ -61,12 +61,13 @@ func runPanelFocusOrderSuites() {
     }
 
     suite("panelFocusOrder: production registry 顺序领先五事件与声音控制") {
+        let panelHostSources: [HostID] = [.claudeCode, .codex, .workBuddy]
         let order = panelFocusOrder(
             .operational(
                 events: Event.allCases,
                 packCardIDs: ["minimal-chime"],
                 hasMasterVolume: true,
-                hostSources: HostID.allCases))
+                hostSources: panelHostSources))
         let expected: [PanelFocusTarget] =
             [
                 .hostSource(.claudeCode), .hostSource(.codex), .hostSource(.workBuddy),
@@ -81,13 +82,13 @@ func runPanelFocusOrderSuites() {
             panelFirstFocusTarget(
                 .operational(
                     events: [], packCardIDs: [], hasMasterVolume: false,
-                    hasConfigFailureNotice: true, hostSources: HostID.allCases))
+                    hasConfigFailureNotice: true, hostSources: panelHostSources))
                 == .hostSource(.claudeCode),
             "宿主行必须领先 config 修复卡；一侧坏掉也不能让焦点跳过来源区")
         expect(
             panelOpeningFocus(
                 rows: [], packCardIDs: [], hasMasterVolume: false,
-                hostSources: HostID.allCases) == .hostSource(.claudeCode),
+                hostSources: panelHostSources) == .hostSource(.claudeCode),
             "production opening focus 必须落 Claude 来源行")
     }
 

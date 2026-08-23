@@ -1,6 +1,8 @@
 import ClaudioCore
 import Foundation
 
+private let hostHookRunnerTestScope = "test-scope-v1"
+
 private final class HostHookRunnerSpawner: ProcessSpawning, @unchecked Sendable {
     private let succeeds: Bool
     private(set) var callCount = 0
@@ -53,7 +55,10 @@ func runHostHookRunnerSuites() {
             expect(failed?.receiptWritten == true, "播放失败不能抹掉真实 hook 回执")
             expect(
                 ready.receiptStore.receiptEvidence(
-                    host: .codex, nativeEvent: "PermissionRequest", installationID: id) != nil,
+                    host: .codex,
+                    nativeEvent: "PermissionRequest",
+                    installationID: id,
+                    scopeFingerprint: hostHookRunnerTestScope) != nil,
                 "播放失败的真实回调仍应形成 activation evidence")
 
             let missingRoot = root.appendingPathComponent("missing-case", isDirectory: true)
@@ -227,7 +232,9 @@ private func makeHostHookRunnerEnvironment(
         locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
     if let activeInstallationID,
         case .failure(let error) = receiptStore.activate(
-            host: host, installationID: activeInstallationID)
+            host: host,
+            installationID: activeInstallationID,
+            scopeFingerprint: hostHookRunnerTestScope)
     {
         expect(false, "测试 fixture 无法发布当前 installation：\(error.description)")
     }

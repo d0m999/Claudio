@@ -39,6 +39,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let codex = CodexIntegrationAdapter(
                 environment: CodexIntegrationEnvironment(
@@ -49,6 +50,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             let claudeSnapshot = await claude.inspect(runtime: .ready)
@@ -90,6 +92,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             let snapshot = await adapter.inspect(runtime: .ready)
@@ -132,6 +135,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             let before = await adapter.inspect(runtime: .ready)
@@ -173,6 +177,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             guard case .success(let connected) = await adapter.connect(runtime: .ready),
                 let installationID = connected.installationID
@@ -258,6 +263,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             let snapshot = await adapter.inspect(runtime: .ready)
@@ -315,6 +321,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             let legacy = await adapter.inspect(runtime: .ready)
@@ -398,6 +405,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             guard case .success(let connected) = await adapter.connect(runtime: .ready),
                 let installationID = connected.installationID
@@ -474,6 +482,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             let before = await adapter.inspect(runtime: .ready)
@@ -608,22 +617,39 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             let inspected = await adapter.inspect(runtime: .ready)
-            expect(inspected.configuration == .configured, "modern hooks 完整时应已连接")
-            expect(inspected.installationID == installationID, "必须保留 modern hooks 的代次")
-            guard case .success(let connected) = await adapter.connect(runtime: .ready) else {
-                expect(false, "notifier-only 与完整 modern hooks 必须可幂等 reconnect")
+            guard case .conflict = inspected.configuration else {
+                expect(false, "缺少匹配 marker 时完整 modern hooks 也必须失败关闭")
                 return
             }
-            expect(connected.installationID == installationID, "reconnect 不得换代")
+            expect(inspected.installationID == installationID, "必须保留 modern hooks 的代次")
+            guard case .success(let connected) = await adapter.connect(runtime: .ready) else {
+                expect(false, "显式 repair 必须为失配 modern hooks 安全换代")
+                return
+            }
+            guard let repairedID = connected.installationID else {
+                expect(false, "repair 必须返回实际发布的新代次")
+                return
+            }
+            expect(repairedID != installationID, "marker 缺失时 repair 必须换代")
             expect(
                 (try? Data(contentsOf: wrapper)) == wrapperBefore,
                 "notifier-only wrapper 没有 Claudio Stop 分支，不得被重写")
             expect(
-                (try? Data(contentsOf: paths.codexHooks)) == hooksBefore,
-                "完整 modern hooks 必须幂等保持 bytes")
+                (try? Data(contentsOf: paths.codexHooks)) != hooksBefore,
+                "换代必须重写四条受管 hook 的 installation ID")
+            let repairedHooks = try! Data(contentsOf: paths.codexHooks)
+            guard case .success(let repeated) = await adapter.connect(runtime: .ready) else {
+                expect(false, "精确匹配当前 marker/scope 后 reconnect 必须幂等")
+                return
+            }
+            expect(repeated.installationID == repairedID, "精确匹配时不得再次换代")
+            expect(
+                try! Data(contentsOf: paths.codexHooks) == repairedHooks,
+                "精确匹配的重复连接必须保持 hooks bytes")
         }
     }
 
@@ -651,6 +677,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available },
                     beforeLegacyWrapperFinalPublish: {
                         try! externalWrapper.write(to: wrapper)
@@ -704,6 +731,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             guard
@@ -727,8 +755,13 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let codexID = UUID(uuidString: "42424242-2222-4222-8222-222222222222")!
             guard
                 case .success = paths.receipts.activate(
-                    host: .claudeCode, installationID: claudeID),
-                case .success = paths.receipts.activate(host: .codex, installationID: codexID)
+                    host: .claudeCode,
+                    installationID: claudeID,
+                    scopeFingerprint: "test-scope-v1"),
+                case .success = paths.receipts.activate(
+                    host: .codex,
+                    installationID: codexID,
+                    scopeFingerprint: "test-scope-v1")
             else {
                 expect(false, "测试前提：两个宿主 marker 必须可发布")
                 return
@@ -740,6 +773,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let codex = CodexIntegrationAdapter(
                 environment: CodexIntegrationEnvironment(
@@ -750,6 +784,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             guard case .success = await claude.disconnect(runtime: .ready),
@@ -784,6 +819,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let codex = CodexIntegrationAdapter(
                 environment: CodexIntegrationEnvironment(
@@ -794,6 +830,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             for snapshot in [
@@ -850,6 +887,19 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 claudioBinaryPath: paths.binary.path,
                 claudioRoot: paths.claudioRoot.path)
             try! codexMutation.data!.write(to: paths.codexHooks)
+            guard
+                case .success = paths.receipts.activate(
+                    host: .claudeCode,
+                    installationID: installationID,
+                    scopeFingerprint: "test-scope-v1"),
+                case .success = paths.receipts.activate(
+                    host: .codex,
+                    installationID: installationID,
+                    scopeFingerprint: "test-scope-v1")
+            else {
+                expect(false, "测试前提：已连接配置必须发布匹配 marker/scope")
+                return
+            }
 
             let claudeParent = paths.claudeSettings.deletingLastPathComponent()
             let codexParent = paths.codexHooks.deletingLastPathComponent()
@@ -871,6 +921,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let codex = CodexIntegrationAdapter(
                 environment: CodexIntegrationEnvironment(
@@ -881,6 +932,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             for snapshot in [
@@ -928,9 +980,13 @@ func runConcreteHostIntegrationAdapterSuites() async {
             try! codexMutation.data!.write(to: paths.codexHooks)
             guard
                 case .success = paths.receipts.activate(
-                    host: .claudeCode, installationID: claudeMarkerID),
+                    host: .claudeCode,
+                    installationID: claudeMarkerID,
+                    scopeFingerprint: "test-scope-v1"),
                 case .success = paths.receipts.activate(
-                    host: .codex, installationID: codexMarkerID)
+                    host: .codex,
+                    installationID: codexMarkerID,
+                    scopeFingerprint: "test-scope-v1")
             else {
                 expect(false, "双宿主漂移 marker fixture 必须发布")
                 return
@@ -943,6 +999,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let codex = CodexIntegrationAdapter(
                 environment: CodexIntegrationEnvironment(
@@ -953,6 +1010,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             guard case .success = await claude.disconnect(runtime: .ready),
@@ -987,6 +1045,74 @@ func runConcreteHostIntegrationAdapterSuites() async {
             expect(
                 paths.receipts.store(lateCodex) == .failure(.staleInstallation),
                 "Codex 迟到漂移回执必须被拒绝")
+        }
+    }
+
+    await asyncSuite("双 adapter：版本 scope 变化使旧连接失效，显式 repair 必须换代") {
+        await withAsyncTempDirectory { root in
+            let paths = makeAdapterFixture(root: root)
+            writeAdapterJSON([:], to: paths.claudeSettings)
+            writeAdapterJSON([:], to: paths.codexHooks)
+            let claudeScope = AdapterMutableScope("claude-scope-v1")
+            let codexScope = AdapterMutableScope("codex-scope-v1")
+            let claude = ClaudeCodeIntegrationAdapter(
+                environment: ClaudeCodeIntegrationEnvironment(
+                    settingsFile: paths.claudeSettings,
+                    lockFile: root.appendingPathComponent("claude.lock"),
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    scopeFingerprint: { claudeScope.value },
+                    availability: { .available }))
+            let codex = CodexIntegrationAdapter(
+                environment: CodexIntegrationEnvironment(
+                    hooksFile: paths.codexHooks,
+                    lockFile: root.appendingPathComponent("codex.lock"),
+                    configFile: root.appendingPathComponent("config.toml"),
+                    legacyNotifyWrapper: root.appendingPathComponent("codex-notify"),
+                    claudioBinaryPath: paths.binary.path,
+                    claudioRoot: paths.claudioRoot.path,
+                    receiptStore: paths.receipts,
+                    scopeFingerprint: { codexScope.value },
+                    availability: { .available }))
+            guard
+                case .success(let initialClaude) = await claude.connect(runtime: .ready),
+                let initialClaudeID = initialClaude.installationID,
+                case .success(let initialCodex) = await codex.connect(runtime: .ready),
+                let initialCodexID = initialCodex.installationID
+            else {
+                expect(false, "测试前提：两个 v1 scope 必须可连接")
+                return
+            }
+
+            claudeScope.value = "claude-scope-v2"
+            codexScope.value = "codex-scope-v2"
+            for snapshot in [
+                await claude.inspect(runtime: .ready),
+                await codex.inspect(runtime: .ready),
+            ] {
+                guard case .conflict(let reason) = snapshot.configuration else {
+                    expect(false, "scope 变化必须使旧连接失败关闭，got \(snapshot.configuration)")
+                    continue
+                }
+                expect(reason.contains("版本已变化") && reason.contains("旧回执已失效"), "冲突必须可修复")
+            }
+
+            guard
+                case .success(let repairedClaude) = await claude.connect(runtime: .ready),
+                case .success(let repairedCodex) = await codex.connect(runtime: .ready)
+            else {
+                expect(false, "显式 repair 必须恢复两个 scope")
+                return
+            }
+            expect(repairedClaude.installationID != initialClaudeID, "Claude repair 必须换代")
+            expect(repairedCodex.installationID != initialCodexID, "Codex repair 必须换代")
+            expect(
+                paths.receipts.currentInstallationScopeFingerprint(host: .claudeCode)
+                    == "claude-scope-v2"
+                    && paths.receipts.currentInstallationScopeFingerprint(host: .codex)
+                        == "codex-scope-v2",
+                "repair 必须发布新 scope marker")
         }
     }
 
@@ -1038,6 +1164,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let codex = CodexIntegrationAdapter(
                 environment: CodexIntegrationEnvironment(
@@ -1049,6 +1176,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let claudeBefore = try! Data(contentsOf: paths.claudeSettings)
             let codexBefore = try! Data(contentsOf: paths.codexHooks)
@@ -1090,6 +1218,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             guard case .success(let connected) = await adapter.connect(runtime: .ready),
                 let installationID = connected.installationID
@@ -1140,6 +1269,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             let result = await adapter.connect(runtime: .ready)
@@ -1176,6 +1306,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             guard case .success(let connected) = await adapter.connect(runtime: .ready),
                 let installationID = connected.installationID
@@ -1222,6 +1353,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let codex = CodexIntegrationAdapter(
                 environment: CodexIntegrationEnvironment(
@@ -1232,6 +1364,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: paths.receipts,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
             let manager = HostIntegrationManager(
                 adapters: [claude, codex], bootstrapper: ReadyRuntimeBootstrapper())
@@ -1246,11 +1379,12 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 return
             }
             let connected = await manager.snapshots()
+            let registeredHosts: Set<HostID> = [.claudeCode, .codex]
             expect(
-                connected.filter { $0.host != .workBuddy }
+                connected.filter { registeredHosts.contains($0.host) }
                     .allSatisfy { $0.configuration == .configured }
-                    && connected.first(where: { $0.host == .workBuddy })?.configuration
-                        == .notConfigured,
+                    && connected.filter { !registeredHosts.contains($0.host) }
+                        .allSatisfy { $0.configuration == .notConfigured },
                 "已注册两侧必须保留连接；缺 adapter 的稳定注册表项必须诚实未配置")
         }
     }
@@ -1362,5 +1496,25 @@ private struct ReadyRuntimeBootstrapper: SharedRuntimeBootstrapping {
                 copiedPacks: [],
                 salvaged: [],
                 packSelection: .untouched))
+    }
+}
+
+private final class AdapterMutableScope: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: String
+
+    init(_ value: String) { stored = value }
+
+    var value: String {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return stored
+        }
+        set {
+            lock.lock()
+            stored = newValue
+            lock.unlock()
+        }
     }
 }

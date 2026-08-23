@@ -1,6 +1,8 @@
 import ClaudioCore
 import Foundation
 
+private let hostHookReceiptTestScope = "test-scope-v1"
+
 @MainActor
 func runHostHookReceiptSuites() {
     suite("HostHookReceipt：最小脱敏 JSON 可形成当前 installation 的真实 activation evidence") {
@@ -10,7 +12,11 @@ func runHostHookReceiptSuites() {
                 locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
             let installationID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
             let timestamp = Date(timeIntervalSince1970: 1_800_000_000)
-            guard case .success = store.activate(host: .codex, installationID: installationID)
+            guard
+                case .success = store.activate(
+                    host: .codex,
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope)
             else {
                 expect(false, "测试前提：必须先发布当前 Codex installation")
                 return
@@ -50,7 +56,7 @@ func runHostHookReceiptSuites() {
                     "semantic_event", "timestamp", "playback_result",
                 ],
                 "回执 schema 必须是封闭白名单，禁止 prompt/content/project/session/audio path 字段")
-            expect(object["schema"] as? Int == 1, "首版回执 schema 必须固定为 1")
+            expect(object["schema"] as? Int == 2, "当前回执 schema 必须固定为 2")
             expect(object["host"] as? String == "codex", "宿主必须使用稳定 HostID token")
             expect(
                 object["semantic_event"] as? String == "notification",
@@ -68,7 +74,8 @@ func runHostHookReceiptSuites() {
             expect(
                 store.receiptEvidence(
                     host: .codex, nativeEvent: "PermissionRequest",
-                    installationID: installationID)
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope)
                     == HostReceiptEvidence(
                         bindingID: HostCapabilityCatalog.binding(
                             host: .codex, nativeEvent: "PermissionRequest")!.id,
@@ -89,7 +96,9 @@ func runHostHookReceiptSuites() {
             let installationID = UUID(uuidString: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")!
             guard
                 case .success = store.activate(
-                    host: .claudeCode, installationID: installationID)
+                    host: .claudeCode,
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope)
             else {
                 expect(false, "测试前提：必须先发布当前 Claude Code installation")
                 return
@@ -152,7 +161,9 @@ func runHostHookReceiptSuites() {
                     "write-failure-installation-locks"))
             guard
                 case .success = unwritableStore.activate(
-                    host: .claudeCode, installationID: installationID)
+                    host: .claudeCode,
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope)
             else {
                 expect(false, "测试前提：回执目录失败不应被 installation marker 失败遮蔽")
                 return
@@ -173,7 +184,9 @@ func runHostHookReceiptSuites() {
                     "lock-failure-installation-locks"))
             guard
                 case .success = lockFailureStore.activate(
-                    host: .claudeCode, installationID: installationID)
+                    host: .claudeCode,
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope)
             else {
                 expect(false, "测试前提：事件锁失败不应被 installation marker 失败遮蔽")
                 return
@@ -194,7 +207,11 @@ func runHostHookReceiptSuites() {
             let installationID = UUID(uuidString: "45454545-4545-4545-8545-454545454545")!
             let permissionTimestamp = Date(timeIntervalSince1970: 1_800_000_100.1234)
             let subagentTimestamp = Date(timeIntervalSince1970: 1_800_000_100.1235)
-            guard case .success = store.activate(host: .codex, installationID: installationID)
+            guard
+                case .success = store.activate(
+                    host: .codex,
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope)
             else {
                 expect(false, "测试前提：必须先发布当前 Codex installation")
                 return
@@ -220,11 +237,13 @@ func runHostHookReceiptSuites() {
             let permissionEvidence = store.receiptEvidence(
                 host: .codex,
                 nativeEvent: "PermissionRequest",
-                installationID: installationID)
+                installationID: installationID,
+                scopeFingerprint: hostHookReceiptTestScope)
             let subagentEvidence = store.receiptEvidence(
                 host: .codex,
                 nativeEvent: "SubagentStop",
-                installationID: installationID)
+                installationID: installationID,
+                scopeFingerprint: hostHookReceiptTestScope)
             expect(
                 permissionEvidence?.timestamp == permissionTimestamp,
                 "PermissionRequest 小数秒必须逐值 round-trip")
@@ -255,19 +274,23 @@ func runHostHookReceiptSuites() {
         }
     }
 
-    suite("HostHookReceipt：旧版秒级 ISO-8601 回执仍可解码为 activation evidence") {
+    suite("HostHookReceipt：旧 schema-1 回执可解码但不能升级为当前 activation evidence") {
         withTempDirectory { root in
             let store = HostHookReceiptStore(
                 receiptsRoot: root.appendingPathComponent("receipts", isDirectory: true),
                 locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
             let installationID = UUID(uuidString: "56565656-5656-4656-8656-565656565656")!
-            guard case .success = store.activate(host: .codex, installationID: installationID),
+            guard
+                case .success = store.activate(
+                    host: .codex,
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope),
                 let file = store.receiptFile(host: .codex, nativeEvent: "PermissionRequest")
             else {
                 expect(false, "测试前提：必须发布 installation 并取得回执路径")
                 return
             }
-            writeFixture(
+            let legacyJSON =
                 """
                 {
                   "schema": 1,
@@ -278,22 +301,27 @@ func runHostHookReceiptSuites() {
                   "timestamp": "2027-01-15T08:00:00Z",
                   "playback_result": "played"
                 }
-                """, to: file)
+                """
+            writeFixture(legacyJSON, to: file)
+            let historyFile = store.historyRoot
+                .appendingPathComponent(HostSurfaceID.codex.rawValue, isDirectory: true)
+                .appendingPathComponent("legacy-schema-1.json")
+            writeFixture(legacyJSON, to: historyFile)
 
             expect(
                 store.receiptEvidence(
                     host: .codex,
                     nativeEvent: "PermissionRequest",
-                    installationID: installationID)
-                    == HostReceiptEvidence(
-                        bindingID: HostCapabilityCatalog.binding(
-                            host: .codex, nativeEvent: "PermissionRequest")!.id,
-                        installationID: installationID,
-                        nativeEvent: "PermissionRequest",
-                        event: .notification,
-                        timestamp: Date(timeIntervalSince1970: 1_800_000_000),
-                        playbackResult: .played),
-                "升级后必须继续读取旧版无小数秒的 schema-1 回执")
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope) == nil,
+                "旧 schema-1 回执只能作为历史记录，不能点亮当前 activation")
+            let history = store.receiptHistory(host: .codex)
+            expect(history.count == 1, "旧 schema-1 无 binding_id 回执仍须保留为脱敏历史")
+            expect(
+                history.first?.bindingID
+                    == HostEventBindingID(
+                        rawValue: "legacy:codex:PermissionRequest"),
+                "旧回执不得合成当前 catalog binding ID")
         }
     }
 
@@ -304,7 +332,12 @@ func runHostHookReceiptSuites() {
                 locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
             let currentID = UUID(uuidString: "12345678-1234-4234-8234-123456789abc")!
             let staleID = UUID(uuidString: "87654321-4321-4321-8321-cba987654321")!
-            guard case .success = store.activate(host: .codex, installationID: currentID) else {
+            guard
+                case .success = store.activate(
+                    host: .codex,
+                    installationID: currentID,
+                    scopeFingerprint: hostHookReceiptTestScope)
+            else {
                 expect(false, "测试前提：必须先发布当前 Codex installation")
                 return
             }
@@ -318,12 +351,14 @@ func runHostHookReceiptSuites() {
             expect(store.store(receipt) == .success(.written), "播放失败也应留下脱敏真实回执")
             expect(
                 store.receiptEvidence(
-                    host: .codex, nativeEvent: "PermissionRequest", installationID: currentID)
+                    host: .codex, nativeEvent: "PermissionRequest", installationID: currentID,
+                    scopeFingerprint: hostHookReceiptTestScope)
                     != nil,
                 "播放失败不抹掉 hook 已真实触发这一 activation 事实")
             expect(
                 store.receiptEvidence(
-                    host: .codex, nativeEvent: "PermissionRequest", installationID: staleID)
+                    host: .codex, nativeEvent: "PermissionRequest", installationID: staleID,
+                    scopeFingerprint: hostHookReceiptTestScope)
                     == nil,
                 "旧配置或断开后的迟到回调不能点亮当前 installation")
 
@@ -335,7 +370,8 @@ func runHostHookReceiptSuites() {
             writeFixture("{broken json", to: file)
             expect(
                 store.receiptEvidence(
-                    host: .codex, nativeEvent: "PermissionRequest", installationID: currentID)
+                    host: .codex, nativeEvent: "PermissionRequest", installationID: currentID,
+                    scopeFingerprint: hostHookReceiptTestScope)
                     == nil,
                 "损坏 JSON 必须失败关闭")
 
@@ -353,7 +389,8 @@ func runHostHookReceiptSuites() {
                 """, to: file)
             expect(
                 store.receiptEvidence(
-                    host: .codex, nativeEvent: "PermissionRequest", installationID: currentID)
+                    host: .codex, nativeEvent: "PermissionRequest", installationID: currentID,
+                    scopeFingerprint: hostHookReceiptTestScope)
                     == nil,
                 "路径与内容宿主不匹配时不能形成 evidence")
 
@@ -371,7 +408,8 @@ func runHostHookReceiptSuites() {
                 """, to: file)
             expect(
                 store.receiptEvidence(
-                    host: .codex, nativeEvent: "PermissionRequest", installationID: currentID)
+                    host: .codex, nativeEvent: "PermissionRequest", installationID: currentID,
+                    scopeFingerprint: hostHookReceiptTestScope)
                     == nil,
                 "路径与内容原生/语义事件不匹配时不能形成 evidence")
         }
@@ -386,7 +424,12 @@ func runHostHookReceiptSuites() {
             let currentID = UUID(uuidString: "02020202-2222-4222-8222-222222222222")!
             let currentTimestamp = Date(timeIntervalSince1970: 1_800_000_030)
             let lateTimestamp = Date(timeIntervalSince1970: 1_800_000_999)
-            guard case .success = store.activate(host: .codex, installationID: currentID) else {
+            guard
+                case .success = store.activate(
+                    host: .codex,
+                    installationID: currentID,
+                    scopeFingerprint: hostHookReceiptTestScope)
+            else {
                 expect(false, "测试前提：必须发布重连后的当前 installation")
                 return
             }
@@ -418,7 +461,8 @@ func runHostHookReceiptSuites() {
                 "时间更晚的旧进程回执也必须按 installation ID 拒绝")
             expect(
                 store.receiptEvidence(
-                    host: .codex, nativeEvent: "Stop", installationID: currentID)
+                    host: .codex, nativeEvent: "Stop", installationID: currentID,
+                    scopeFingerprint: hostHookReceiptTestScope)
                     == HostReceiptEvidence(
                         bindingID: HostCapabilityCatalog.binding(
                             host: .codex, nativeEvent: "Stop")!.id,
@@ -437,7 +481,11 @@ func runHostHookReceiptSuites() {
                 receiptsRoot: root.appendingPathComponent("receipts", isDirectory: true),
                 locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
             let installationID = UUID(uuidString: "03030303-3333-4333-8333-333333333333")!
-            guard case .success = store.activate(host: .claudeCode, installationID: installationID),
+            guard
+                case .success = store.activate(
+                    host: .claudeCode,
+                    installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope),
                 case .success = store.deactivate(
                     host: .claudeCode, installationID: installationID)
             else {
@@ -457,7 +505,8 @@ func runHostHookReceiptSuites() {
                 "断开后的在途 hook 不得再写入稳定回执")
             expect(
                 store.receiptEvidence(
-                    host: .claudeCode, nativeEvent: "Stop", installationID: installationID)
+                    host: .claudeCode, nativeEvent: "Stop", installationID: installationID,
+                    scopeFingerprint: hostHookReceiptTestScope)
                     == nil,
                 "迟到回执不得重新点亮已断开的 installation")
         }
@@ -476,7 +525,8 @@ func runHostHookReceiptSuites() {
                 expect(false, "测试前提：WorkBuddy installation 必须发布")
                 return
             }
-            let base = Date()
+            let base = Date(
+                timeIntervalSince1970: floor(Date().timeIntervalSince1970))
             for index in 0..<25 {
                 let receipt = HostHookReceipt(
                     installationID: installationID,

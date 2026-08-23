@@ -686,9 +686,10 @@ func runIntegrationsWindowWiringSuites() {
         }
 
         expect(
-            view.contains("ForEach(localizedSourceRows)")
+            view.contains("ForEach(localizedProductGroups)")
+                && view.contains("ForEach(group.surfaces)")
                 && view.contains("sourceSummaryButton"),
-            "顶部宿主摘要必须由固定两行 presentation 同一视图生成")
+            "顶部来源摘要必须按动态 Product → Surface 分组生成")
         expect(
             view.contains("sourceSummaryButton(row)")
                 && view.contains(".frame(maxWidth: .infinity"),

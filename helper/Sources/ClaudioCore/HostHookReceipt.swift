@@ -14,7 +14,8 @@ public enum HostHookPlaybackResult: String, Codable, Sendable, Equatable {
 
 /// 一次真实宿主 hook 回调留下的最小回执。
 public struct HostHookReceipt: Codable, Sendable, Equatable {
-    public static let currentSchema = 1
+    public static let legacySchema = 1
+    public static let currentSchema = 2
 
     public let schema: Int
     public let installationID: UUID
@@ -40,8 +41,12 @@ public struct HostHookReceipt: Codable, Sendable, Equatable {
         self.host = host
         self.bindingID =
             bindingID
-            ?? HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)?.id
-            ?? HostEventBindingID(rawValue: "legacy:\(host.rawValue):\(nativeEvent)")
+            ?? (
+                schema == Self.currentSchema
+                    ? HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)?.id
+                    : Self.legacyBindingID(host: host, nativeEvent: nativeEvent)
+            )
+            ?? Self.legacyBindingID(host: host, nativeEvent: nativeEvent)
         self.nativeEvent = nativeEvent
         self.semanticEvent = semanticEvent
         self.timestamp = timestamp
@@ -70,8 +75,11 @@ public struct HostHookReceipt: Codable, Sendable, Equatable {
         playbackResult = try container.decode(HostHookPlaybackResult.self, forKey: .playbackResult)
         bindingID =
             try container.decodeIfPresent(HostEventBindingID.self, forKey: .bindingID)
-            ?? HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)?.id
-            ?? HostEventBindingID(rawValue: "legacy:\(host.rawValue):\(nativeEvent)")
+            ?? Self.legacyBindingID(host: host, nativeEvent: nativeEvent)
+    }
+
+    static func legacyBindingID(host: HostID, nativeEvent: String) -> HostEventBindingID {
+        HostEventBindingID(rawValue: "legacy:\(host.rawValue):\(nativeEvent)")
     }
 }
 
@@ -83,6 +91,7 @@ public enum HostHookReceiptWriteOutcome: Sendable, Equatable {
 /// `Result` 并立即退出。
 public enum HostHookReceiptStoreError: Error, Sendable, Equatable, CustomStringConvertible {
     case invalidReceipt
+    case invalidScopeFingerprint
     case staleInstallation
     case encodingFailure(reason: String)
     case lockBusy
@@ -94,6 +103,8 @@ public enum HostHookReceiptStoreError: Error, Sendable, Equatable, CustomStringC
         switch self {
         case .invalidReceipt:
             "回执字段与宿主能力映射不一致"
+        case .invalidScopeFingerprint:
+            "当前激活缺少有效的版本 scope"
         case .staleInstallation:
             "回执 installation ID 不是当前连接代次"
         case .encodingFailure(let reason):
@@ -156,8 +167,11 @@ public struct HostHookReceiptStore: Sendable {
     public func activate(
         host: HostID,
         installationID: UUID,
-        scopeFingerprint: String? = nil
+        scopeFingerprint: String
     ) -> Result<Void, HostHookReceiptStoreError> {
+        guard !scopeFingerprint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .failure(.invalidScopeFingerprint)
+        }
         let marker = ActiveHostInstallation(
             schema: ActiveHostInstallation.currentSchema,
             host: host,
@@ -302,12 +316,11 @@ public struct HostHookReceiptStore: Sendable {
                 case .success(let data) = readRegularFileBounded(
                     at: file, maxBytes: 1 << 16, followSymlink: false),
                 let receipt = try? Self.decode(data),
-                receipt.schema == HostHookReceipt.currentSchema,
                 receipt.host == host,
                 let binding = HostCapabilityCatalog.binding(
                     host: host, nativeEvent: receipt.nativeEvent),
-                binding.id == receipt.bindingID,
-                binding.event == receipt.semanticEvent
+                binding.event == receipt.semanticEvent,
+                Self.isValidHistoricalReceipt(receipt, binding: binding)
             else { return nil }
             return receipt
         }
@@ -342,10 +355,12 @@ public struct HostHookReceiptStore: Sendable {
     public func receiptEvidence(
         host: HostID,
         nativeEvent: String,
-        installationID: UUID
+        installationID: UUID,
+        scopeFingerprint: String
     ) -> HostReceiptEvidence? {
         guard
             currentInstallationID(host: host) == installationID,
+            currentInstallationScopeFingerprint(host: host) == scopeFingerprint,
             let expectedBinding = HostCapabilityCatalog.binding(
                 host: host, nativeEvent: nativeEvent),
             let file = receiptFile(host: host, nativeEvent: nativeEvent),
@@ -564,17 +579,36 @@ public struct HostHookReceiptStore: Sendable {
 }
 
 private struct ActiveHostInstallation: Codable {
-    static let currentSchema = 1
+    static let currentSchema = 2
     let schema: Int
     let host: HostID
     let installationID: UUID
-    let scopeFingerprint: String?
+    let scopeFingerprint: String
 
     private enum CodingKeys: String, CodingKey {
         case schema
         case host
         case installationID = "installation_id"
         case scopeFingerprint = "scope_fingerprint"
+    }
+}
+
+extension HostHookReceiptStore {
+    private static func isValidHistoricalReceipt(
+        _ receipt: HostHookReceipt,
+        binding: HostCapabilityBinding
+    ) -> Bool {
+        switch receipt.schema {
+        case HostHookReceipt.currentSchema:
+            return receipt.bindingID == binding.id
+        case HostHookReceipt.legacySchema:
+            return receipt.bindingID == binding.id
+                || receipt.bindingID
+                    == HostHookReceipt.legacyBindingID(
+                        host: receipt.host, nativeEvent: receipt.nativeEvent)
+        default:
+            return false
+        }
     }
 }
 

@@ -10,6 +10,7 @@ public struct ClaudeCodeIntegrationEnvironment: Sendable {
     public let claudioRoot: String
     public let receiptStore: HostHookReceiptStore
     public let availability: @Sendable () -> HostAvailability
+    public let scopeFingerprint: @Sendable () -> String?
 
     public init(
         settingsFile: URL = ClaudioPaths.claudeSettingsFile,
@@ -23,6 +24,7 @@ public struct ClaudeCodeIntegrationEnvironment: Sendable {
             locksRoot: ClaudioPaths.receiptLocksDirectory,
             installationsRoot: ClaudioPaths.activeInstallationsDirectory,
             installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory),
+        scopeFingerprint: (@Sendable () -> String?)? = nil,
         availability: @escaping @Sendable () -> HostAvailability = {
             let directory = ClaudioPaths.claudeSettingsFile.deletingLastPathComponent()
             var isDirectory: ObjCBool = false
@@ -44,6 +46,7 @@ public struct ClaudeCodeIntegrationEnvironment: Sendable {
         self.claudioBinaryPath = claudioBinaryPath
         self.claudioRoot = claudioRoot
         self.receiptStore = receiptStore
+        self.scopeFingerprint = scopeFingerprint ?? HostActivationScope.claudeCode
         self.availability = availability
     }
 }
@@ -59,6 +62,7 @@ public struct CodexIntegrationEnvironment: Sendable {
     public let claudioRoot: String
     public let receiptStore: HostHookReceiptStore
     public let availability: @Sendable () -> HostAvailability
+    public let scopeFingerprint: @Sendable () -> String?
     /// Testable publication-boundary seam. Production uses the default no-op; regression tests
     /// inject a non-cooperating writer after staging is complete and before the final expected-byte
     /// check. Keeping it in the environment mirrors the existing injected host/filesystem facts.
@@ -78,6 +82,7 @@ public struct CodexIntegrationEnvironment: Sendable {
             locksRoot: ClaudioPaths.receiptLocksDirectory,
             installationsRoot: ClaudioPaths.activeInstallationsDirectory,
             installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory),
+        scopeFingerprint: (@Sendable () -> String?)? = nil,
         availability: @escaping @Sendable () -> HostAvailability = {
             let directory = ClaudioPaths.codexHooksFile.deletingLastPathComponent()
             var isDirectory: ObjCBool = false
@@ -102,6 +107,7 @@ public struct CodexIntegrationEnvironment: Sendable {
         self.claudioBinaryPath = claudioBinaryPath
         self.claudioRoot = claudioRoot
         self.receiptStore = receiptStore
+        self.scopeFingerprint = scopeFingerprint ?? HostActivationScope.codex
         self.availability = availability
         self.beforeLegacyWrapperFinalPublish = beforeLegacyWrapperFinalPublish
     }
@@ -139,6 +145,15 @@ public struct ClaudeCodeIntegrationAdapter: HostIntegrationAdapter {
         if case .unavailable(let reason) = environment.availability() {
             return .failure(.hostUnavailable(reason: reason))
         }
+        guard let scopeFingerprint = environment.scopeFingerprint() else {
+            return .failure(
+                .configuration(reason: "无法读取 Claude Code/Claudio 版本身份；已拒绝写入连接"))
+        }
+        let activeID = environment.receiptStore.currentInstallationID(host: .claudeCode)
+        let reusableInstallationID =
+            environment.receiptStore.currentInstallationScopeFingerprint(host: .claudeCode)
+            == scopeFingerprint
+            ? activeID : nil
         let transaction = ConfigFileTransaction(
             file: environment.settingsFile,
             lockFile: environment.lockFile,
@@ -146,17 +161,27 @@ public struct ClaudeCodeIntegrationAdapter: HostIntegrationAdapter {
             symlinkPolicy: .preserveTarget)
         let requestedID = UUID()
         var transformError: HostHooksTransformError?
+        var resultingInstallationID: UUID?
         let result = transaction.update { root in
             switch connectClaudeCodeHooks(
                 root: root,
                 claudioRoot: environment.claudioRoot,
                 claudioBinaryPath: environment.claudioBinaryPath,
-                installationID: requestedID)
+                installationID: requestedID,
+                reusableInstallationID: reusableInstallationID,
+                requiresReusableInstallationID: true)
             {
             case .failure(let error):
                 transformError = error
                 return .unchanged
             case .success(let mutation):
+                if case .success(.configured(let id)) = inspectClaudeCodeHooks(
+                    root: mutation.root,
+                    claudioRoot: environment.claudioRoot,
+                    claudioBinaryPath: environment.claudioBinaryPath)
+                {
+                    resultingInstallationID = id
+                }
                 return mutation.changed ? .replace(mutation.root) : .unchanged
             }
         }
@@ -164,15 +189,14 @@ public struct ClaudeCodeIntegrationAdapter: HostIntegrationAdapter {
             return .failure(.configuration(reason: transformError.description))
         }
         if case .failure(let error) = result { return .failure(.transaction(error)) }
-        let configured = inspectClaudeSnapshot(environment: environment, runtime: runtime)
-        guard configured.configuration == .configured,
-            let installationID = configured.installationID
-        else {
+        guard let installationID = resultingInstallationID else {
             return .failure(
                 .configuration(reason: "Claude Code 写入后未形成完整的 claudi0 installation ID"))
         }
         if case .failure(let error) = environment.receiptStore.activate(
-            host: .claudeCode, installationID: installationID)
+            host: .claudeCode,
+            installationID: installationID,
+            scopeFingerprint: scopeFingerprint)
         {
             return .failure(
                 .configuration(reason: "Claude Code 当前连接代次发布失败：\(error.description)"))
@@ -264,6 +288,15 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
         if case .unavailable(let reason) = environment.availability() {
             return .failure(.hostUnavailable(reason: reason))
         }
+        guard let scopeFingerprint = environment.scopeFingerprint() else {
+            return .failure(
+                .configuration(reason: "无法读取 Codex/Claudio 版本身份；已拒绝写入连接"))
+        }
+        let activeID = environment.receiptStore.currentInstallationID(host: .codex)
+        let reusableInstallationID =
+            environment.receiptStore.currentInstallationScopeFingerprint(host: .codex)
+            == scopeFingerprint
+            ? activeID : nil
         let wrapperContext = inspectLegacyWrapperContext(environment: environment)
         if case .conflict(let reason) = wrapperContext {
             return .failure(.migrationConflict(reason: reason))
@@ -283,6 +316,7 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
         let wrapperPlan: LegacyWrapperPlan
         switch legacyWrapperPlan(
             context: wrapperContext, plainHooksStatus: plainStatus, requestedID: requestedID,
+            reusableInstallationID: reusableInstallationID,
             environment: environment)
         {
         case .failure(.conflict(let reason)):
@@ -313,18 +347,34 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
             backupFile: environment.backupFile,
             symlinkPolicy: .preserveTarget)
         var transformFailure: String?
+        var resultingInstallationID: UUID?
         let result = transaction.update { root in
             guard let original = integrationJSONData(root) else {
                 transformFailure = "Codex hooks.json 无法安全序列化"
                 return .unchanged
             }
+            var transformInput = original
+            if reusableInstallationID == nil,
+                let configuredID = plainStatus.installationID,
+                configuredID != wrapperPlan.installationID
+            {
+                let swept = CodexHooksTransform.disconnect(
+                    original, claudioRoot: environment.claudioRoot)
+                guard swept.changed, let data = swept.data else {
+                    transformFailure = "无法安全轮换 Codex installation ID"
+                    return .unchanged
+                }
+                transformInput = data
+            }
             let transformed = CodexHooksTransform.connect(
-                original,
+                transformInput,
                 installationID: wrapperPlan.installationID,
                 claudioBinaryPath: environment.claudioBinaryPath,
                 claudioRoot: environment.claudioRoot,
                 externallyManagedNativeEvents: wrapperPlan.externallyManagedEvents,
-                externalInstallationID: wrapperPlan.externalInstallationID)
+                externalInstallationID: wrapperPlan.externalInstallationID,
+                reusableInstallationID: reusableInstallationID,
+                requiresReusableInstallationID: true)
             if case .malformed(let reason) = transformed.status {
                 transformFailure = reason
                 return .unchanged
@@ -337,6 +387,7 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
                 transformFailure = reason
                 return .unchanged
             }
+            resultingInstallationID = transformed.status.installationID
             guard transformed.changed else { return .unchanged }
             guard let data = transformed.data,
                 let next = integrationJSONObject(data)
@@ -358,15 +409,14 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
                 appliedMutation: appliedWrapperMutation,
                 environment: environment)
         }
-        let configured = inspectCodexSnapshot(environment: environment, runtime: runtime)
-        guard configured.configuration == .configured,
-            let installationID = configured.installationID
-        else {
+        guard let installationID = resultingInstallationID else {
             return .failure(
                 .configuration(reason: "Codex 写入后未形成完整的 claudi0 installation ID"))
         }
         if case .failure(let error) = environment.receiptStore.activate(
-            host: .codex, installationID: installationID)
+            host: .codex,
+            installationID: installationID,
+            scopeFingerprint: scopeFingerprint)
         {
             return .failure(
                 .configuration(reason: "Codex 当前连接代次发布失败：\(error.description)"))
@@ -482,7 +532,7 @@ public func inspectClaudeSnapshot(
 ) -> HostIntegrationSnapshot {
     let availability = environment.availability()
     let rootResult = loadIntegrationJSONObject(at: environment.settingsFile)
-    let configuration: HostConfigurationState
+    var configuration: HostConfigurationState
     var installationID: UUID?
     switch rootResult {
     case .missing:
@@ -517,6 +567,13 @@ public func inspectClaudeSnapshot(
             configuration = .conflict(reason: reason)
         }
     }
+    let currentScope = configuration == .configured ? environment.scopeFingerprint() : nil
+    configuration = validatedActivationConfiguration(
+        host: .claudeCode,
+        configuration: configuration,
+        installationID: installationID,
+        currentScope: currentScope,
+        receiptStore: environment.receiptStore)
     return makeIntegrationSnapshot(
         host: .claudeCode,
         runtime: runtime,
@@ -524,7 +581,8 @@ public func inspectClaudeSnapshot(
         configuration: configuration,
         installationID: installationID,
         file: environment.settingsFile,
-        receiptStore: environment.receiptStore)
+        receiptStore: environment.receiptStore,
+        scopeFingerprint: currentScope)
 }
 
 /// Codex adapter、doctor 与 GUI 共用的只读事实入口；包含 legacy codex-notify
@@ -541,7 +599,7 @@ public func inspectCodexSnapshot(
         wrapperContext: wrapperContext,
         claudioRoot: environment.claudioRoot,
         claudioBinaryPath: environment.claudioBinaryPath)
-    let configuration: HostConfigurationState
+    var configuration: HostConfigurationState
     let installationID: UUID?
     switch status {
     case .absent:
@@ -563,6 +621,13 @@ public func inspectCodexSnapshot(
         configuration = .unreadable(reason: reason)
         installationID = nil
     }
+    let currentScope = configuration == .configured ? environment.scopeFingerprint() : nil
+    configuration = validatedActivationConfiguration(
+        host: .codex,
+        configuration: configuration,
+        installationID: installationID,
+        currentScope: currentScope,
+        receiptStore: environment.receiptStore)
     return makeIntegrationSnapshot(
         host: .codex,
         runtime: runtime,
@@ -570,7 +635,8 @@ public func inspectCodexSnapshot(
         configuration: configuration,
         installationID: installationID,
         file: environment.hooksFile,
-        receiptStore: environment.receiptStore)
+        receiptStore: environment.receiptStore,
+        scopeFingerprint: currentScope)
 }
 
 private func codexConfigurationStatus(
@@ -634,7 +700,8 @@ func makeIntegrationSnapshot(
     configuration: HostConfigurationState,
     installationID: UUID?,
     file: URL,
-    receiptStore: HostHookReceiptStore
+    receiptStore: HostHookReceiptStore,
+    scopeFingerprint: String?
 ) -> HostIntegrationSnapshot {
     let writability: HostConfigWritability
     if leafNodeIsSymbolicLink(at: file),
@@ -655,7 +722,7 @@ func makeIntegrationSnapshot(
     let activation: HostActivationEvidence
     let bindingActivations: [HostEventBindingID: HostActivationEvidence]
     let latestReceipt: HostReceiptEvidence?
-    if let installationID, configuration == .configured {
+    if let installationID, let scopeFingerprint, configuration == .configured {
         let implementedBindings = HostCapabilityCatalog.bindings(for: host)
             .filter(\.isAudibleCapability)
         let evidenceByBinding = Dictionary(
@@ -664,7 +731,8 @@ func makeIntegrationSnapshot(
                     receiptStore.receiptEvidence(
                         host: host,
                         nativeEvent: nativeEvent,
-                        installationID: installationID)
+                        installationID: installationID,
+                        scopeFingerprint: scopeFingerprint)
                 }
                 return (
                     binding.id,
@@ -680,7 +748,8 @@ func makeIntegrationSnapshot(
                 return receiptStore.receiptEvidence(
                     host: host,
                     nativeEvent: nativeEvent,
-                    installationID: installationID)
+                    installationID: installationID,
+                    scopeFingerprint: scopeFingerprint)
             }
             .max { $0.timestamp < $1.timestamp }
         let taskStartNativeEvent = HostCapabilityCatalog.binding(host: host, event: .taskStart)?
@@ -689,7 +758,8 @@ func makeIntegrationSnapshot(
             receiptStore.receiptEvidence(
                 host: host,
                 nativeEvent: nativeEvent,
-                installationID: installationID)
+                installationID: installationID,
+                scopeFingerprint: scopeFingerprint)
         }
         activation =
             taskStartEvidence.map(HostActivationEvidence.observed)
@@ -709,6 +779,28 @@ func makeIntegrationSnapshot(
         bindingActivations: bindingActivations,
         latestReceipt: latestReceipt,
         installationID: installationID)
+}
+
+func validatedActivationConfiguration(
+    host: HostID,
+    configuration: HostConfigurationState,
+    installationID: UUID?,
+    currentScope: String?,
+    receiptStore: HostHookReceiptStore
+) -> HostConfigurationState {
+    guard configuration == .configured else { return configuration }
+    guard let installationID,
+        receiptStore.currentInstallationID(host: host) == installationID
+    else {
+        return .conflict(reason: "\(host.displayName) 当前连接代次缺失或错位；请修复连接")
+    }
+    guard let currentScope else {
+        return .conflict(reason: "无法读取 \(host.displayName)/Claudio 版本身份；请修复连接")
+    }
+    guard receiptStore.currentInstallationScopeFingerprint(host: host) == currentScope else {
+        return .conflict(reason: "\(host.displayName) 或 Claudio 版本已变化，旧回执已失效；请修复连接")
+    }
+    return configuration
 }
 
 private enum IntegrationDataLoad {
@@ -836,6 +928,7 @@ private func legacyWrapperPlan(
     context: LegacyWrapperContext,
     plainHooksStatus: CodexHooksConfigurationStatus,
     requestedID: UUID,
+    reusableInstallationID: UUID?,
     environment: CodexIntegrationEnvironment
 ) -> Result<LegacyWrapperPlan, LegacyWrapperPlanningError> {
     switch context {
@@ -853,13 +946,14 @@ private func legacyWrapperPlan(
         let chosenID: UUID
         switch state {
         case .migrated(let installationID):
-            chosenID = installationID
+            chosenID =
+                installationID == reusableInstallationID ? installationID : requestedID
         case .legacyPlayStop:
             switch plainHooksStatus {
             case .absent:
                 chosenID = requestedID
             case .partial(let existingID, let missing) where missing.contains("Stop"):
-                chosenID = existingID
+                chosenID = existingID == reusableInstallationID ? existingID : requestedID
             case .malformed(let reason):
                 return .failure(.conflict(reason))
             case .conflict(let reason):
@@ -875,7 +969,7 @@ private func legacyWrapperPlan(
             case .absent:
                 chosenID = requestedID
             case .partial(let existingID, _), .complete(let existingID):
-                chosenID = existingID
+                chosenID = existingID == reusableInstallationID ? existingID : requestedID
             case .malformed(let reason):
                 return .failure(.conflict(reason))
             case .conflict(let reason):
@@ -889,8 +983,22 @@ private func legacyWrapperPlan(
         let externallyManagedEvents: Set<String>
         let externalInstallationID: UUID?
         switch state {
-        case .migrated:
-            replacement = nil
+        case .migrated(let existingID):
+            if existingID == chosenID {
+                replacement = nil
+            } else {
+                switch migrateLegacyCodexNotifyWrapper(
+                    configTOML: configData,
+                    wrapper: wrapperData,
+                    claudioRoot: environment.claudioRoot,
+                    claudioBinaryPath: environment.claudioBinaryPath,
+                    installationID: chosenID)
+                {
+                case .success(let data): replacement = data
+                case .failure(let reason):
+                    return .failure(.conflict(legacyConflictText(reason)))
+                }
+            }
             externallyManagedEvents = ["Stop"]
             externalInstallationID = chosenID
         case .legacyPlayStop:

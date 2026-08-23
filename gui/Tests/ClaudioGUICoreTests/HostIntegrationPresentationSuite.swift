@@ -9,7 +9,16 @@ private func hostPresentationSnapshot(
     _ host: HostID,
     activation: HostActivationEvidence? = nil
 ) -> HostIntegrationSnapshot {
-    let binding = HostCapabilityCatalog.bindings(for: host).first { $0.isAudibleCapability }!
+    guard let binding = HostCapabilityCatalog.bindings(for: host).first(where: \.isAudibleCapability)
+    else {
+        return HostIntegrationSnapshot(
+            host: host,
+            runtime: .ready,
+            availability: .unavailable(reason: "Beta candidate unavailable"),
+            configuration: .notConfigured,
+            writability: .unknown,
+            activation: .none)
+    }
     let evidence =
         activation
         ?? .observed(
@@ -95,6 +104,27 @@ func runHostIntegrationPresentationSuites() {
         expect(
             rows[2].detailText == "当前版本已实现 2/5；其余能力尚未启用",
             "接口能力与已实现能力不得混成假 5/5")
+        expect(
+            rows.suffix(2).allSatisfy {
+                $0.status == .unavailable
+                    && $0.host.descriptor.mechanism == .accessibilityBeta
+                    && $0.host.descriptor.controlSurface == .guiOnly
+            },
+            "两个 Desktop AX surface 必须作为 GUI-only Beta 不可用占位出现")
+        let groups = hostSourceProductGroups(from: rows)
+        expect(groups.map(\.product) == HostProductID.allCases, "来源必须按产品稳定分组")
+        expect(
+            groups.first(where: { $0.product == .chatGPT })?.surfaces.map(\.host)
+                == [.codex, .chatGPTDesktopAX],
+            "ChatGPT 产品必须动态包含 Codex 与 Desktop AX 两个 surface")
+        expect(
+            groups.first(where: { $0.product == .claude })?.surfaces.map(\.host)
+                == [.claudeCode, .claudeDesktopAX],
+            "Claude 产品必须动态包含 Code 与 Desktop AX 两个 surface")
+        expect(
+            integrationsInspectorActions(for: rows[3]).isEmpty
+                && integrationsInspectorActions(for: rows[4]).isEmpty,
+            "未实现的 AX 占位不得暴露伪连接或清理动作")
     }
 
     suite("声音来源行：缺少一个快照也不能隐藏该宿主；Codex 待确认文案固定") {
@@ -286,7 +316,10 @@ func runHostIntegrationPresentationSuites() {
         let codexNotification = notification.first(where: { $0.host == .codex })
         let codexInterruption = interruption.first(where: { $0.host == .codex })
 
-        expect(notification.map(\.host) == matrix.hostColumns, "生产矩阵也必须保持宿主列顺序")
+        expect(
+            notification.map(\.host)
+                == matrix.hostColumns.filter { $0.descriptor.mechanism == .nativeHooks },
+            "菜单栏只展示可配置 native surface，并保持其 registry 顺序")
         expect(
             codexNotification?.qualificationText == "仅授权请求"
                 && codexNotification?.accessibilityLabel == "Codex，已连接，仅授权请求",

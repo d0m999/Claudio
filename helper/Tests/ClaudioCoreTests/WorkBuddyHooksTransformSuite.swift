@@ -128,16 +128,38 @@ func runWorkBuddyHooksTransformSuites() {
                 ],
                 claudioRoot: workBuddyTransformRoot,
                 claudioBinaryPath: workBuddyTransformBinary,
-                installationID: workBuddyTransformID),
-            case .success(let disconnected) = disconnectWorkBuddyHooks(
-                root: connected.root,
-                claudioRoot: workBuddyTransformRoot)
+                installationID: workBuddyTransformID)
         else {
-            expect(false, "连接与断开 fixture 必须成功")
+            expect(false, "连接 fixture 必须成功")
+            return
+        }
+        let staleID = UUID(uuidString: "CCCCCCCC-1111-4222-8333-444444444444")!
+        let staleStop = hostIntegrationHookCommand(
+            host: .workBuddy,
+            nativeEvent: "Stop",
+            installationID: staleID,
+            claudioBinaryPath: workBuddyTransformBinary)!
+        var rootWithStaleGeneration = connected.root
+        var hooks = rootWithStaleGeneration["hooks"] as! [String: Any]
+        var stopGroups = hooks["Stop"] as! [Any]
+        stopGroups.append([
+            "hooks": [["type": "command", "command": staleStop]]
+        ])
+        hooks["Stop"] = stopGroups
+        rootWithStaleGeneration["hooks"] = hooks
+        guard
+            case .success(let disconnected) = disconnectWorkBuddyHooks(
+                root: rootWithStaleGeneration,
+                claudioBinaryPath: workBuddyTransformBinary,
+                installationID: workBuddyTransformID)
+        else {
+            expect(false, "精确断开 fixture 必须成功")
             return
         }
         expect(disconnected.removedCount == 2, "断开必须精确移除两条自有 hook")
-        expect(workBuddyOwnedCommands(disconnected.root).isEmpty, "断开后不得残留自有 hook")
+        expect(
+            workBuddyOwnedCommands(disconnected.root).map(\.installationID) == [staleID],
+            "断开只能删除当前 binary/host/installation，必须保留其它代次")
         expect((disconnected.root["sandbox"] as? [String: Any])?["keep"] as? Int == 1, "未知配置必须保留")
     }
 }

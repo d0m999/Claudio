@@ -501,8 +501,19 @@ public enum PreviewFixtures {
         activation: HostActivationEvidence? = nil,
         operation: HostOperationState = .idle
     ) -> HostIntegrationSnapshot {
-        let binding = HostCapabilityCatalog.bindings(for: host)
-            .first(where: \.isAudibleCapability)!
+        guard
+            let binding = HostCapabilityCatalog.bindings(for: host)
+                .first(where: \.isAudibleCapability)
+        else {
+            return HostIntegrationSnapshot(
+                host: host,
+                runtime: runtime,
+                availability: .unavailable(reason: "Beta candidate unavailable"),
+                configuration: .notConfigured,
+                writability: .unknown,
+                activation: .none,
+                operation: operation)
+        }
         let resolvedActivation =
             activation
             ?? .observed(

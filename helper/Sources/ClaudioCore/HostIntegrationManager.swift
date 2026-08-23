@@ -169,7 +169,7 @@ public actor HostIntegrationManager {
     public func capabilities() -> [HostID: [HostCapabilityBinding]] {
         Dictionary(
             uniqueKeysWithValues: HostID.allCases.map { host in
-                (host, adapters[host]?.capabilities ?? [])
+                (host, adapters[host]?.capabilities ?? HostCapabilityCatalog.bindings(for: host))
             })
     }
 

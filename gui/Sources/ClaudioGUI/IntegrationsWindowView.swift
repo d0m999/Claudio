@@ -33,6 +33,10 @@ struct IntegrationsWindowView: View {
         localizedCapabilityMatrix(model.content.matrix, language: languageStore.language)
     }
 
+    private var localizedProductGroups: [HostSourceProductGroupPresentation] {
+        hostSourceProductGroups(from: localizedSourceRows)
+    }
+
     private var localizedInspector: IntegrationsWindowInspectorPresentation? {
         guard let raw = model.inspector else { return nil }
         let localizedRow = localizedSourceRows.first(where: { $0.host == raw.host })
@@ -224,10 +228,20 @@ struct IntegrationsWindowView: View {
     }
 
     private var sourceSummary: some View {
-        HStack(spacing: 10) {
-            ForEach(localizedSourceRows) { row in
-                sourceSummaryButton(row)
-                    .frame(maxWidth: .infinity)
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(localizedProductGroups) { group in
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(group.title)
+                        .font(ClaudioTheme.font(.caption).weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityAddTraits(.isHeader)
+                    ForEach(group.surfaces) { row in
+                        sourceSummaryButton(row)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(group.title)
             }
         }
         .accessibilityElement(children: .contain)
@@ -340,7 +354,7 @@ struct IntegrationsWindowView: View {
                 }
                 .font(ClaudioTheme.font(.caption).weight(.semibold))
                 .foregroundStyle(.secondary)
-                Divider().gridCellColumns(3)
+                Divider().gridCellColumns(localizedMatrix.hostColumns.count + 1)
                 ForEach(localizedMatrix.rows) { row in
                     GridRow {
                         eventIdentity(row.event, title: row.title)
@@ -351,7 +365,7 @@ struct IntegrationsWindowView: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }
-                    Divider().gridCellColumns(3)
+                    Divider().gridCellColumns(localizedMatrix.hostColumns.count + 1)
                 }
             }
         } else {
@@ -875,6 +889,7 @@ struct IntegrationsWindowView: View {
         case .awaitingActivation: "clock.fill"
         case .legacy: "arrow.triangle.2.circlepath.circle"
         case .notConnected: "link.badge.plus"
+        case .unavailable: "lock.circle"
         case .needsAttention: "exclamationmark.circle.fill"
         }
     }
@@ -882,7 +897,8 @@ struct IntegrationsWindowView: View {
     private func sourceStatusColor(_ status: HostSourceRowStatus) -> Color {
         switch status {
         case .ready: ClaudioTheme.success(colorScheme)
-        case .awaitingActivation, .legacy, .notConnected: ClaudioTheme.secondaryText(colorScheme)
+        case .awaitingActivation, .legacy, .notConnected, .unavailable:
+            ClaudioTheme.secondaryText(colorScheme)
         case .needsAttention: ClaudioTheme.error(colorScheme)
         }
     }

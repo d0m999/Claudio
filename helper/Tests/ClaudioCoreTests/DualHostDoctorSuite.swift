@@ -5,6 +5,7 @@ private let dualHostDoctorCurrentID =
     UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
 private let dualHostDoctorStaleID =
     UUID(uuidString: "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE")!
+private let dualHostDoctorScope = "test-scope-v1"
 
 private struct DualHostDoctorFixture {
     let claudioRoot: URL
@@ -23,7 +24,10 @@ private struct DualHostDoctorFixture {
             receiptStore: receiptStore,
             claudeAvailability: { .available },
             codexAvailability: { .available },
-            workBuddyAvailability: { .available })
+            workBuddyAvailability: { .available },
+            claudeScopeFingerprint: { dualHostDoctorScope },
+            codexScopeFingerprint: { dualHostDoctorScope },
+            workBuddyScopeFingerprint: { dualHostDoctorScope })
     }
 }
 
@@ -94,7 +98,9 @@ private func writeCompleteCodexDoctorHooks(
     }
     try! data.write(to: fixture.codexHooks)
     if case .failure(let error) = fixture.receiptStore.activate(
-        host: .codex, installationID: installationID)
+        host: .codex,
+        installationID: installationID,
+        scopeFingerprint: dualHostDoctorScope)
     {
         expect(false, "测试 fixture 无法发布当前 Codex installation：\(error.description)")
     }
@@ -588,7 +594,9 @@ func runDualHostDoctorSuites() {
             try! hooksData.write(to: fixture.codexHooks)
             guard
                 case .success = fixture.receiptStore.activate(
-                    host: .codex, installationID: dualHostDoctorCurrentID)
+                    host: .codex,
+                    installationID: dualHostDoctorCurrentID,
+                    scopeFingerprint: dualHostDoctorScope)
             else {
                 expect(false, "测试前提：migrated wrapper 的当前 installation 必须先发布")
                 return
@@ -602,6 +610,7 @@ func runDualHostDoctorSuites() {
                     claudioBinaryPath: fixture.claudioBinary.path,
                     claudioRoot: fixture.claudioRoot.path,
                     receiptStore: fixture.receiptStore,
+                    scopeFingerprint: { dualHostDoctorScope },
                     availability: { .available }),
                 runtime: .ready)
             expect(

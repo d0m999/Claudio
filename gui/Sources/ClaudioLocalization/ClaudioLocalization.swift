@@ -156,6 +156,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let hostConfigured: Self = "host.configured"
     public static let hostLegacy: Self = "host.legacy"
     public static let hostNotConnected: Self = "host.not-connected"
+    public static let hostUnavailable: Self = "host.unavailable"
     public static let hostNeedsAttention: Self = "host.needs-attention"
     public static let hostCodexReadyDetail: Self = "host.codex.ready-detail"
     public static let hostCodexAwaitingDetail: Self = "host.codex.awaiting-detail"
@@ -164,6 +165,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let hostCodexLegacyDetail: Self = "host.codex.legacy-detail"
     public static let hostWorkBuddyReadyDetail: Self = "host.workbuddy.ready-detail"
     public static let hostWorkBuddyAwaitingDetail: Self = "host.workbuddy.awaiting-detail"
+    public static let hostAccessibilityBetaUnavailableDetail: Self =
+        "host.accessibility-beta.unavailable-detail"
     public static let eventTaskStart: Self = "event.task-start"
     public static let eventStop: Self = "event.stop"
     public static let eventStopFailure: Self = "event.stop-failure"
@@ -628,10 +631,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksStatusBatchPartial, .soundPacksStatusBatchPartialWithSalvage,
         .soundPacksStatusFactoryRestored, .soundPacksStatusFactoryRestoredWithSalvage,
         .soundPacksStatusPackCopied, .soundPacksStatusPackUsed,
-        .hostReady, .hostConfigured, .hostLegacy, .hostNotConnected,
+        .hostReady, .hostConfigured, .hostLegacy, .hostNotConnected, .hostUnavailable,
         .hostNeedsAttention, .hostCodexReadyDetail, .hostCodexAwaitingDetail,
         .hostClaudeAwaitingDetail, .hostClaudeLegacyDetail, .hostCodexLegacyDetail,
         .hostWorkBuddyReadyDetail, .hostWorkBuddyAwaitingDetail,
+        .hostAccessibilityBetaUnavailableDetail,
         .panelSoundScope, .panelGlobalDefaults, .panelResetSurface, .panelResetSurfaceHint,
         .eventTaskStart, .eventStop, .eventStopFailure, .eventNotification, .eventSubagentStop,
         .eventEditorHint, .eventCoveragePresent, .eventCoverageUnmapped, .eventCoverageBroken,

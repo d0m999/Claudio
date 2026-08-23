@@ -5,12 +5,16 @@ public enum HostID: String, CaseIterable, Codable, Sendable, Hashable {
     case claudeCode = "claude-code"
     case codex = "codex"
     case workBuddy = "workbuddy"
+    case chatGPTDesktopAX = "chatgpt-desktop-ax"
+    case claudeDesktopAX = "claude-desktop-ax"
 
     public var displayName: String {
         switch self {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
         case .workBuddy: "WorkBuddy"
+        case .chatGPTDesktopAX: "ChatGPT Desktop (AX Beta)"
+        case .claudeDesktopAX: "Claude Desktop (AX Beta)"
         }
     }
 
@@ -32,6 +36,14 @@ public enum HostID: String, CaseIterable, Codable, Sendable, Hashable {
             HostIntegrationDescriptor(
                 host: self, product: .workBuddy, surface: .workBuddy,
                 mechanism: .nativeHooks, maturity: .stable, controlSurface: .shared)
+        case .chatGPTDesktopAX:
+            HostIntegrationDescriptor(
+                host: self, product: .chatGPT, surface: .chatGPTDesktopAX,
+                mechanism: .accessibilityBeta, maturity: .beta, controlSurface: .guiOnly)
+        case .claudeDesktopAX:
+            HostIntegrationDescriptor(
+                host: self, product: .claude, surface: .claudeDesktopAX,
+                mechanism: .accessibilityBeta, maturity: .beta, controlSurface: .guiOnly)
         }
     }
 }
@@ -41,6 +53,14 @@ public enum HostProductID: String, CaseIterable, Codable, Sendable, Hashable {
     case chatGPT
     case claude
     case workBuddy = "workbuddy"
+
+    public var displayName: String {
+        switch self {
+        case .chatGPT: "ChatGPT"
+        case .claude: "Claude"
+        case .workBuddy: "WorkBuddy"
+        }
+    }
 }
 
 /// 一条稳定、可持久化的事件来源。它比产品更细，声音覆盖和回执均以它为作用域。
@@ -48,6 +68,8 @@ public enum HostSurfaceID: String, CaseIterable, Codable, Sendable, Hashable {
     case claudeCode = "claude-code"
     case codex = "codex"
     case workBuddy = "workbuddy"
+    case chatGPTDesktopAX = "chatgpt-desktop-ax"
+    case claudeDesktopAX = "claude-desktop-ax"
 }
 
 public enum HostIntegrationMechanism: String, Codable, Sendable, Equatable {
@@ -112,6 +134,7 @@ public enum HostCapabilityQualificationID: String, Codable, Sendable, Equatable,
     case interfaceSupportedNotImplemented = "interface_supported_not_implemented"
     case interfacePartiallySupportedNotImplemented = "interface_partially_supported_not_implemented"
     case undeclaredCapability = "undeclared_capability"
+    case accessibilityBetaUnavailable = "accessibility_beta_unavailable"
 }
 
 /// receipt 的稳定主键。schema revision 进入 raw value，binding 语义变化后旧证据自然失效。
@@ -223,6 +246,16 @@ public enum HostCapabilityCatalog {
                     support: .supported, implementation: .notImplemented,
                     qualification: .interfaceSupportedNotImplemented),
             ]
+        case .chatGPTDesktopAX, .claudeDesktopAX:
+            return Event.allCases.map { event in
+                HostCapabilityBinding(
+                    host: host,
+                    event: event,
+                    nativeEvent: nil,
+                    support: .unsupported,
+                    implementation: .notImplemented,
+                    qualification: .accessibilityBetaUnavailable)
+            }
         }
     }
 

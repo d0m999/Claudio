@@ -139,6 +139,7 @@ public func handleHostHook(
 private func redactedReceiptStoreError(_ error: HostHookReceiptStoreError) -> String {
     switch error {
     case .invalidReceipt: "invalid_receipt"
+    case .invalidScopeFingerprint: "invalid_scope_fingerprint"
     case .staleInstallation: "stale_installation"
     case .encodingFailure: "encoding_failure"
     case .lockBusy: "lock_busy"

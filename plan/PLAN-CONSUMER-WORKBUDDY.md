@@ -8,7 +8,8 @@
 
 ## 1. 用户结果
 
-- Apps/集成窗口永久列出 Claude Code、Codex、WorkBuddy 三个稳定 adapter；未安装不等于消失。
+- Apps/集成窗口永久列出 Claude Code、Codex、WorkBuddy 三个稳定 native adapter，并在 Claude / ChatGPT
+  产品下列出 GUI-only AX Beta 不可用占位；未安装不等于消失，占位也不冒充可连接 adapter。
 - WorkBuddy 永久显示五个公共事件，首发诚实标为 2/5 已实现，不用接口声明伪造 5/5。
 - popup 只显示当前已配置或可用的事件来源，并允许选择全局默认或某个 surface 的声音配置。
 - Events/popup 可编辑已实现事件的 pack 和静音；未实现/不支持事件禁用，不提供假按钮。
@@ -43,11 +44,13 @@ WorkBuddy 首发绑定：
   代次冲突全部 fail closed。
 - Connect/Repair/Disconnect 均为显式动作；Inspect 只读。首次连接不创建 surface 声音覆盖，
   不自动试听。Disconnect 保留声音偏好与历史回执。
+- scope 或 marker 失配时 Connect/Repair 必须轮换 installation；Disconnect 只删除当前
+  binary/host/binding/installation 的命令，保留同 root 的其它代次。
 
 ### 2.3 回执与失效
 
-- current evidence 必须同时匹配 schema、installation、host/surface、`HostEventBindingID`、原生事件
-  和公共事件。
+- current evidence 必须同时匹配 schema 2、installation、host/surface、scope、`HostEventBindingID`、
+  原生事件和公共事件；schema 1 只可进入历史。
 - WorkBuddy scope fingerprint 绑定 Desktop version、`ClaudioVersion.current` 与已实现 binding 集合。
 - app/runtime/binding 变化使旧 activation 失效；普通 claudi0 app 重启不失效。
 - 稳定 current 回执用于矩阵；历史回执只用于诊断，不得反向点亮 activation。
@@ -65,8 +68,8 @@ WorkBuddy 首发绑定：
 ## 3. UI 分工
 
 - popup：当前 surface 摘要、Global/Surface scope、pack、事件静音、试听和 reset；不显示全局假 `3/5`。
-- Apps/集成窗口：连接、授权、scope/version 失效、binding 状态、latest receipt、Repair、Disconnect、
-  回执历史清除。
+- Apps/集成窗口：按 Product → Surface 分组展示连接、授权、scope/version 失效、binding 状态、
+  latest receipt、Repair、Disconnect、回执历史清除；AX Beta 只显示不可用说明，不提供假动作。
 - Events：声音/pack/静音/试听；只列配置或可用 surface；AX 未生产化前完全隐藏。
 - 视觉遵循原生 macOS 信息层级；HTML 为交互主原型，SVG 为只读快照，SwiftUI 视觉批准另行验收。
 
@@ -74,8 +77,8 @@ WorkBuddy 首发绑定：
 
 - helper 测试覆盖 transform 幂等、未知字段、第三方 hook、错位/冲突、两条 binding、版本 scope、
   disconnect、surface 解析/写入、回执历史边界与 doctor 三行。
-- GUI 测试覆盖动态三宿主矩阵、WorkBuddy 2/5、surface effective profile、定向写、reset、全局音量、
-  本地化、焦点与 destructive confirmation 接线。
+- GUI 测试覆盖动态五 surface 矩阵与 Product → Surface 分组、WorkBuddy 2/5、AX 不可用占位、
+  surface effective profile、定向写、reset、全局音量、本地化、焦点与 destructive confirmation 接线。
 - 必须通过：
 
 ```bash

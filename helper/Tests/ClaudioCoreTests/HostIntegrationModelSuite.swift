@@ -4,6 +4,22 @@ import Foundation
 
 @MainActor
 func runHostIntegrationModelSuites() {
+    suite("activation scope：宿主版本、Claudio 版本与当前 binding schema 共同决定身份") {
+        let v1 = HostActivationScope.fingerprint(host: .claudeCode, hostVersion: " 2.1.206\n")
+        let v2 = HostActivationScope.fingerprint(host: .claudeCode, hostVersion: "2.1.207")
+        expect(v1 != nil && v1 != v2, "宿主版本变化必须改变 activation scope")
+        expect(
+            v1?.contains("surface=claude-code") == true
+                && v1?.contains("claudio=\(ClaudioVersion.current)") == true
+                && HostCapabilityCatalog.bindings(for: .claudeCode)
+                    .filter(\.isAudibleCapability)
+                    .allSatisfy { v1?.contains($0.id.rawValue) == true },
+            "scope 必须绑定 surface、Claudio 版本与所有当前可听 binding")
+        expect(
+            HostActivationScope.fingerprint(host: .claudeCode, hostVersion: "  \n") == nil,
+            "空版本身份必须失败关闭")
+    }
+
     suite("宿主能力目录：接口能力与当前实现分离") {
         let claude = HostCapabilityCatalog.bindings(for: .claudeCode)
         let codex = HostCapabilityCatalog.bindings(for: .codex)
@@ -41,6 +57,24 @@ func runHostIntegrationModelSuites() {
         expect(
             workBuddy.filter(\.isDeclaredCapability).count == 5,
             "官方接口能力必须保留在目录中，不能被当前实现数覆盖")
+        for host in [HostID.chatGPTDesktopAX, .claudeDesktopAX] {
+            let descriptor = host.descriptor
+            let bindings = HostCapabilityCatalog.bindings(for: host)
+            expect(
+                descriptor.mechanism == .accessibilityBeta
+                    && descriptor.maturity == .beta
+                    && descriptor.controlSurface == .guiOnly,
+                "\(host.displayName) 必须是 GUI-only Accessibility Beta surface")
+            expect(
+                bindings.map(\.event) == Event.allCases
+                    && bindings.allSatisfy {
+                        $0.support == .unsupported
+                            && $0.implementation == .notImplemented
+                            && $0.qualification == .accessibilityBetaUnavailable
+                            && $0.nativeEvent == nil
+                    },
+                "AX 候选必须完整占位但不得伪造原生事件或实现能力")
+        }
     }
 
     suite("原生事件归一化：UserPromptSubmit 映射任务开始，未知事件与 Codex StopFailure 拒绝") {

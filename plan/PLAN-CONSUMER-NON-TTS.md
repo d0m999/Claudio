@@ -26,16 +26,19 @@
 
 - `HostProductID`、`HostSurfaceID`、descriptor、`HostEventBindingID` 与 implementation/qualifier
   已进入 Core；固定公共事件仍为五个。
+- registry 现含 Claude Code、Codex、WorkBuddy 三个稳定 native-hook surface，以及归入 Claude / ChatGPT
+  产品的两个 GUI-only AX Beta 不可用占位；完整窗口按 Product → Surface 分组，popup 不显示不可用占位。
 - WorkBuddy 稳定展示五行，但首发只有 `UserPromptSubmit → task_start` 与 `Stop → stop` 两条已实现；
   `StopFailure`、`SubagentStop` 为接口支持但尚未实现，`Notification` 为部分支持且尚未实现。
 - WorkBuddy 连接只外科式管理用户级 `~/.workbuddy/settings.json` 中属于当前 installation 的两条
   command hook；第三方条目和未知 JSON 保留。
-- activation 按 installation、surface、binding 和 scope fingerprint 判定；WorkBuddy/Claudio
-  版本或绑定集合变化会使旧证据失效，显式 Repair 才发布新 scope。
+- 三个 native adapter 的 activation 均按 installation、surface、binding 和 scope fingerprint 判定；
+  宿主/Claudio 版本或绑定集合变化会使旧证据失效，显式 Repair 轮换 installation 后才发布新 scope。
+- current receipt 使用 schema 2；schema 1 旧回执只保留为脱敏历史，不能合成当前 binding 或点亮 activation。
 - 脱敏回执历史与 current activation 分离：每 surface 最多 20 条、保留 30 天、断开保留，
   集成窗口提供确认后清除动作。
 - `surface_overrides` 对 pack/事件使用稀疏继承；损坏覆盖 fail closed；`master_volume` 仅全局。
-- popup 只为已配置/可用来源提供声音 scope；完整窗口始终列出所有已发布 adapter。
+- popup 只为已配置/可用来源提供声音 scope；完整窗口始终列出稳定 native surface 与 AX Beta 占位。
 - helper 与 GUI 的依赖无关测试、本地 GUI product build 和 localization JSON 必须作为本地代码证据。
 
 ## 4. 尚不能宣称完成的证据

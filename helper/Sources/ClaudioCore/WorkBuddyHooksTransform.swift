@@ -66,14 +66,17 @@ public func connectWorkBuddyHooks(
     root: [String: Any],
     claudioRoot: String,
     claudioBinaryPath: String,
-    installationID: UUID
+    installationID: UUID,
+    reusableInstallationID: UUID? = nil,
+    requiresReusableInstallationID: Bool = false
 ) -> Result<HostHooksJSONMutation, HostHooksTransformError> {
     let inspection: WorkBuddyHooksInspection
     switch inspectWorkBuddyHooks(root: root, claudioBinaryPath: claudioBinaryPath) {
     case .success(let value): inspection = value
     case .failure(let error): return .failure(error)
     }
-    if case .configured = inspection,
+    if case .configured(let configuredID) = inspection,
+        (!requiresReusableInstallationID || configuredID == reusableInstallationID),
         !containsRelocatedWorkBuddyHooks(
             root: root,
             claudioRoot: claudioRoot,
@@ -84,8 +87,14 @@ public func connectWorkBuddyHooks(
 
     let chosenID: UUID
     switch inspection {
-    case .configured(let id), .partial(let id?, _): chosenID = id
-    case .notConfigured, .partial(nil, _), .conflict: chosenID = installationID
+    case .configured(let id)
+    where !requiresReusableInstallationID || id == reusableInstallationID:
+        chosenID = id
+    case .partial(let id?, _)
+    where !requiresReusableInstallationID || id == reusableInstallationID:
+        chosenID = id
+    case .configured, .notConfigured, .partial, .conflict:
+        chosenID = installationID
     }
 
     var next = root
@@ -93,8 +102,10 @@ public func connectWorkBuddyHooks(
     var removed = 0
     for nativeEvent in Array(hooks.keys) {
         guard let groups = hooks[nativeEvent] as? [Any] else { continue }
-        let filtered = filterWorkBuddyOwnedEntries(
-            groups: groups, claudioRoot: claudioRoot, removed: &removed)
+        let filtered = filterWorkBuddyEntries(groups: groups, removed: &removed) { command in
+            matchedHostHookCommand(inHookCommand: command, claudioRoot: claudioRoot)?.host
+                == .workBuddy
+        }
         if filtered.isEmpty {
             hooks.removeValue(forKey: nativeEvent)
         } else {
@@ -123,7 +134,8 @@ public func connectWorkBuddyHooks(
 
 public func disconnectWorkBuddyHooks(
     root: [String: Any],
-    claudioRoot: String
+    claudioBinaryPath: String,
+    installationID: UUID
 ) -> Result<HostHooksJSONMutation, HostHooksTransformError> {
     let hooks: [String: Any]
     switch validatedWorkBuddyHooks(in: root) {
@@ -136,8 +148,13 @@ public func disconnectWorkBuddyHooks(
     var removed = 0
     for nativeEvent in Array(nextHooks.keys) {
         guard let groups = nextHooks[nativeEvent] as? [Any] else { continue }
-        let filtered = filterWorkBuddyOwnedEntries(
-            groups: groups, claudioRoot: claudioRoot, removed: &removed)
+        let filtered = filterWorkBuddyEntries(groups: groups, removed: &removed) { command in
+            guard
+                let match = matchedCurrentHostHookCommand(
+                    inHookCommand: command, claudioBinaryPath: claudioBinaryPath)
+            else { return false }
+            return match.host == .workBuddy && match.installationID == installationID
+        }
         if filtered.isEmpty {
             nextHooks.removeValue(forKey: nativeEvent)
         } else {
@@ -202,10 +219,10 @@ private func containsRelocatedWorkBuddyHooks(
     return false
 }
 
-private func filterWorkBuddyOwnedEntries(
+private func filterWorkBuddyEntries(
     groups: [Any],
-    claudioRoot: String,
-    removed: inout Int
+    removed: inout Int,
+    shouldRemove: (String) -> Bool
 ) -> [Any] {
     var filteredGroups: [Any] = []
     for value in groups {
@@ -216,8 +233,7 @@ private func filterWorkBuddyOwnedEntries(
         }
         let kept = entries.filter { value in
             guard let command = (value as? [String: Any])?["command"] as? String,
-                matchedHostHookCommand(inHookCommand: command, claudioRoot: claudioRoot)?.host
-                    == .workBuddy
+                shouldRemove(command)
             else { return true }
             removed += 1
             return false

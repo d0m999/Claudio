@@ -29,7 +29,7 @@ _Avoid_: 声音包库
 _Avoid_: 已安装声音包、Bundled Lookup Pack
 
 **宿主产品（Host Product）**:
-向用户提供 AI 工作流的产品身份，例如 Claude、Codex 或 WorkBuddy。产品不直接拥有统一事件能力；能力属于它的具体事件来源。
+向用户提供 AI 工作流的产品身份，例如 Claude、ChatGPT 或 WorkBuddy。产品不直接拥有统一事件能力；能力属于它的具体事件来源。
 _Avoid_: 用产品名代替具体 surface
 
 **事件来源（Host Surface）**:

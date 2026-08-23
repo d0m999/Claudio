@@ -319,6 +319,9 @@ public struct DoctorIntegrationsEnvironment: Sendable {
     public let claudeAvailability: @Sendable () -> HostAvailability
     public let codexAvailability: @Sendable () -> HostAvailability
     public let workBuddyAvailability: @Sendable () -> HostAvailability
+    public let claudeScopeFingerprint: @Sendable () -> String?
+    public let codexScopeFingerprint: @Sendable () -> String?
+    public let workBuddyScopeFingerprint: @Sendable () -> String?
 
     public init(
         claudeSettingsFile: URL = ClaudioPaths.claudeSettingsFile,
@@ -353,7 +356,12 @@ public struct DoctorIntegrationsEnvironment: Sendable {
                 atPath: "/Applications/WorkBuddy.app", isDirectory: &isDirectory)
                 && isDirectory.boolValue
                 ? .available : .unavailable(reason: "未检测到 WorkBuddy Desktop")
-        }
+        },
+        claudeScopeFingerprint: @escaping @Sendable () -> String? = HostActivationScope
+            .claudeCode,
+        codexScopeFingerprint: @escaping @Sendable () -> String? = HostActivationScope.codex,
+        workBuddyScopeFingerprint: @escaping @Sendable () -> String? = HostActivationScope
+            .workBuddy
     ) {
         self.claudeSettingsFile = claudeSettingsFile
         self.codexHooksFile = codexHooksFile
@@ -374,6 +382,9 @@ public struct DoctorIntegrationsEnvironment: Sendable {
         self.claudeAvailability = claudeAvailability
         self.codexAvailability = codexAvailability
         self.workBuddyAvailability = workBuddyAvailability
+        self.claudeScopeFingerprint = claudeScopeFingerprint
+        self.codexScopeFingerprint = codexScopeFingerprint
+        self.workBuddyScopeFingerprint = workBuddyScopeFingerprint
     }
 }
 
@@ -493,6 +504,7 @@ public func hostIntegrationDoctorResults(
             claudioBinaryPath: environment.claudioBinaryPath,
             claudioRoot: environment.claudioRoot,
             receiptStore: environment.receiptStore,
+            scopeFingerprint: environment.claudeScopeFingerprint,
             availability: environment.claudeAvailability),
         runtime: runtime)
     let codex = inspectCodexSnapshot(
@@ -503,6 +515,7 @@ public func hostIntegrationDoctorResults(
             claudioBinaryPath: environment.claudioBinaryPath,
             claudioRoot: environment.claudioRoot,
             receiptStore: environment.receiptStore,
+            scopeFingerprint: environment.codexScopeFingerprint,
             availability: environment.codexAvailability),
         runtime: runtime)
     let workBuddy = inspectWorkBuddySnapshot(
@@ -513,7 +526,7 @@ public func hostIntegrationDoctorResults(
             claudioBinaryPath: environment.claudioBinaryPath,
             claudioRoot: environment.claudioRoot,
             receiptStore: environment.receiptStore,
-            scopeFingerprint: { "doctor-read-only" },
+            scopeFingerprint: environment.workBuddyScopeFingerprint,
             availability: environment.workBuddyAvailability),
         runtime: runtime)
     return [
@@ -634,6 +647,8 @@ private func doctorHostResult(
                     "⚠ Claude Code 已配置，请提交一次提示词以确认连接"
                 case .workBuddy:
                     "⚠ WorkBuddy 已配置，请提交一次提示词以确认 task_start 回执"
+                case .chatGPTDesktopAX, .claudeDesktopAX:
+                    "⚠ \(host.displayName) 尚未提供可激活的 adapter"
                 }
             return DoctorCheckResult(
                 name: name, severity: .warning,
@@ -646,6 +661,7 @@ private func doctorHostResult(
             case .codex: "；执行中断暂无事件，待响应仅授权请求"
             case .workBuddy: "；当前仅 task_start 与 stop 已实现"
             case .claudeCode: ""
+            case .chatGPTDesktopAX, .claudeDesktopAX: "；Beta 候选尚未实现"
             }
         return DoctorCheckResult(
             name: name, severity: .ok,

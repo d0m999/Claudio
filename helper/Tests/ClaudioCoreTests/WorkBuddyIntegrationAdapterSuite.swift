@@ -94,7 +94,9 @@ func runWorkBuddyIntegrationAdapterSuites() async {
                     receiptStore: store,
                     scopeFingerprint: { scope.value },
                     availability: { .available }))
-            guard case .success = await adapter.connect(runtime: .ready) else {
+            guard case .success(let initial) = await adapter.connect(runtime: .ready),
+                let initialID = initial.installationID
+            else {
                 expect(false, "测试前提：v1 scope 必须连接")
                 return
             }
@@ -110,6 +112,7 @@ func runWorkBuddyIntegrationAdapterSuites() async {
                 return
             }
             expect(repaired.configuration == .configured, "repair 后必须恢复 configured")
+            expect(repaired.installationID != initialID, "scope 失配 repair 必须轮换 installation ID")
             expect(
                 store.currentInstallationScopeFingerprint(host: .workBuddy) == "scope-v2",
                 "新版本 scope 必须原子发布")
