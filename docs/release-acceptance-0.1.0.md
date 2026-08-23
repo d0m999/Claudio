@@ -29,7 +29,9 @@ scripts/workbuddy-acceptance-preflight.sh --json
 
 入口按只读顺序采集 WorkBuddy `Inspect`、`integrations status` 与 `doctor`，输出脱敏 Markdown 或 JSON；
 它不会调用 `Connect`、`Repair`、`Disconnect`，不会写入用户配置、创建声音覆盖、备份配置或自动试听。
-JSON 只保留摘要和版本/身份字段，不保存 WorkBuddy 配置、备份、prompt、response、receipt 原文件或日志。
+Markdown 与 JSON 均记录 CLI、GUI 和 doctor 状态及证据等级；两者只保留摘要和版本/身份字段，不保存
+WorkBuddy 配置、备份、prompt、response、receipt 原文件或日志。入口默认绑定规范化的当前 `git HEAD`；
+可选 `--commit-sha <SHA>` 只是当前 `HEAD` 的期望断言，不能用来覆盖或伪造实际 commit 身份。
 
 ### 当前只读基线
 

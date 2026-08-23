@@ -119,7 +119,9 @@ extension Claudio {
             @Flag(name: .long, help: "输出机器可读 JSON；默认输出脱敏 Markdown")
             var json = false
 
-            @Option(name: .long, help: "当前 checkout 的 commit SHA；省略时只读读取 git HEAD")
+            @Option(
+                name: .long,
+                help: "期望的当前 checkout commit SHA；必须解析为 git HEAD")
             var commitSHA: String?
 
             mutating func run() async throws {
@@ -310,58 +312,33 @@ private func makeSystemIntegrationManager() -> HostIntegrationManager {
 private func makeWorkBuddyAcceptancePreflight(
     explicitCommitSHA: String?
 ) async throws -> WorkBuddyAcceptancePreflight {
-    let statusSnapshots = await makeSystemIntegrationManager().refresh()
-    guard let statusSnapshot = statusSnapshots.first(where: { $0.host == .workBuddy }) else {
-        throw ValidationError("integrations status 未返回 WorkBuddy surface")
-    }
-
-    // 三个事实入口都必须保持只读：manager.refresh() 对应 integrations status；显式调用
-    // adapter 的 inspect 对应 Inspect；runDoctorChecks 只做 probe/read。这里没有调用
-    // HostIntegrationManager 的 connect、disconnect 或任何播放入口。
-    let workBuddyEnvironment = WorkBuddyIntegrationEnvironment()
-    let inspectedSnapshot = inspectWorkBuddySnapshot(
-        environment: workBuddyEnvironment,
-        runtime: statusSnapshot.runtime)
-    let doctor = runDoctorChecks(
-        environment: DoctorEnvironment(integrations: DoctorIntegrationsEnvironment()))
-    let workBuddyDoctor = doctor.results.first { $0.name == "host-workbuddy" }?.severity ?? .failure
-
-    return WorkBuddyAcceptancePreflight(
-        commitSHA: try acceptanceCommitSHA(explicit: explicitCommitSHA),
-        claudioVersion: ClaudioVersion.current,
-        workBuddy: WorkBuddyApplicationIdentity.detect(),
-        machine: WorkBuddyMachineIdentity.current(),
-        inspectedSnapshot: inspectedSnapshot,
-        statusSnapshot: statusSnapshot,
-        workBuddyDoctor: workBuddyDoctor,
-        overallDoctor: overallDoctorSeverity(doctor),
-        scopeFingerprint: HostActivationScope.workBuddy())
-}
-
-private func acceptanceCommitSHA(explicit: String?) throws -> String {
-    let candidate: String
-    if let explicit {
-        candidate = explicit.trimmingCharacters(in: .whitespacesAndNewlines)
-    } else {
-        let result = SystemCommandRunner().run(
-            executablePath: "/usr/bin/git",
-            arguments: ["rev-parse", "--verify", "HEAD"],
-            timeout: 1.0)
-        guard case .completed(let exitCode, let stdout) = result, exitCode == 0 else {
-            throw ValidationError("无法只读读取当前 checkout 的 git HEAD；请显式传入 --commit-sha")
+    try await WorkBuddyAcceptancePreflightCollector.collect(
+        expectedCommitSHA: explicitCommitSHA
+    ) {
+        let statusSnapshots = await makeSystemIntegrationManager().refresh()
+        guard let statusSnapshot = statusSnapshots.first(where: { $0.host == .workBuddy }) else {
+            throw ValidationError("integrations status 未返回 WorkBuddy surface")
         }
-        candidate = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-    guard candidate.range(of: "^[0-9a-fA-F]{7,64}$", options: .regularExpression) != nil else {
-        throw ValidationError("commit SHA 必须是 7 到 64 位十六进制字符串")
-    }
-    return candidate
-}
 
-private func overallDoctorSeverity(_ report: DoctorReport) -> DoctorSeverity {
-    if report.hasFailure { return .failure }
-    if report.results.contains(where: { $0.severity == .warning }) { return .warning }
-    return .ok
+        // 三个事实入口都必须保持只读：manager.refresh() 对应 integrations status；显式调用
+        // adapter 的 inspect 对应 Inspect；runDoctorChecks 只做 probe/read。这里没有调用
+        // HostIntegrationManager 的 connect、disconnect 或任何播放入口。
+        let workBuddyEnvironment = WorkBuddyIntegrationEnvironment()
+        let inspectedSnapshot = inspectWorkBuddySnapshot(
+            environment: workBuddyEnvironment,
+            runtime: statusSnapshot.runtime)
+        let doctor = runDoctorChecks(
+            environment: DoctorEnvironment(integrations: DoctorIntegrationsEnvironment()))
+
+        return WorkBuddyAcceptancePreflightFacts(
+            claudioVersion: ClaudioVersion.current,
+            workBuddy: WorkBuddyApplicationIdentity.detect(),
+            machine: WorkBuddyMachineIdentity.current(),
+            inspectedSnapshot: inspectedSnapshot,
+            statusSnapshot: statusSnapshot,
+            doctor: doctor,
+            scopeFingerprint: HostActivationScope.workBuddy())
+    }
 }
 
 private func integrationSnapshotText(_ snapshot: HostIntegrationSnapshot) -> String {

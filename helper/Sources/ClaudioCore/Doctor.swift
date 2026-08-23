@@ -226,7 +226,7 @@ public func safePackFileURL(_ relativeFile: String, in packDirectory: URL) -> UR
 
 // MARK: - Combined report
 
-public enum DoctorSeverity: String, Sendable, Equatable {
+public enum DoctorSeverity: String, Codable, Sendable, Equatable {
     case ok
     case warning
     case failure
@@ -236,15 +236,31 @@ public struct DoctorCheckResult: Sendable, Equatable {
     public let name: String
     public let severity: DoctorSeverity
     public let message: String
+
+    public init(name: String, severity: DoctorSeverity, message: String) {
+        self.name = name
+        self.severity = severity
+        self.message = message
+    }
 }
 
 public struct DoctorReport: Sendable, Equatable {
     public let results: [DoctorCheckResult]
 
+    public init(results: [DoctorCheckResult]) {
+        self.results = results
+    }
+
     /// `true` iff a **hard** problem was found；双宿主模式还包括共享 runtime 不可用与
     /// 已连接宿主的配置/可写性损坏。
     public var hasFailure: Bool {
         results.contains { $0.severity == .failure }
+    }
+
+    public var overallSeverity: DoctorSeverity {
+        if hasFailure { return .failure }
+        if results.contains(where: { $0.severity == .warning }) { return .warning }
+        return .ok
     }
 }
 

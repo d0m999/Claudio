@@ -1,5 +1,82 @@
 import Foundation
 
+public enum AcceptanceCommitIdentityError: Error, Sendable, Equatable, LocalizedError {
+    case malformedExpected(String)
+    case currentCommitUnavailable
+    case expectedCommitUnavailable(String)
+    case expectedCommitMismatch(expected: String, current: String)
+
+    public var errorDescription: String? {
+        switch self {
+        case .malformedExpected(let value):
+            "期望的 commit SHA 必须是 7 到 64 位十六进制字符串：\(value)"
+        case .currentCommitUnavailable:
+            "无法只读解析当前 checkout 的 git HEAD"
+        case .expectedCommitUnavailable(let value):
+            "期望的 commit SHA 无法解析为当前仓库中的 commit：\(value)"
+        case .expectedCommitMismatch(let expected, let current):
+            "期望的 commit \(expected) 与当前 HEAD \(current) 不一致"
+        }
+    }
+}
+
+/// 将验收证据绑定到当前 checkout 的规范化 commit 身份。显式 SHA 只是断言，不能覆盖 HEAD。
+public enum AcceptanceCommitIdentity {
+    public static func resolve(
+        expected: String?,
+        commandRunner: any CommandRunning = SystemCommandRunner()
+    ) throws -> String {
+        let normalizedExpected: String?
+        if let expected {
+            let candidate = expected.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard candidate.range(of: "^[0-9a-fA-F]{7,64}$", options: .regularExpression) != nil
+            else {
+                throw AcceptanceCommitIdentityError.malformedExpected(candidate)
+            }
+            normalizedExpected = candidate
+        } else {
+            normalizedExpected = nil
+        }
+
+        let current = try resolveCommit(
+            revision: "HEAD", commandRunner: commandRunner,
+            unavailable: .currentCommitUnavailable)
+        guard let normalizedExpected else { return current }
+
+        let expectedCommit = try resolveCommit(
+            revision: normalizedExpected, commandRunner: commandRunner,
+            unavailable: .expectedCommitUnavailable(normalizedExpected))
+        guard expectedCommit == current else {
+            throw AcceptanceCommitIdentityError.expectedCommitMismatch(
+                expected: expectedCommit, current: current)
+        }
+        return current
+    }
+
+    private static func resolveCommit(
+        revision: String,
+        commandRunner: any CommandRunning,
+        unavailable: AcceptanceCommitIdentityError
+    ) throws -> String {
+        let result = commandRunner.run(
+            executablePath: "/usr/bin/git",
+            arguments: ["rev-parse", "--verify", "\(revision)^{commit}"],
+            timeout: 1.0)
+        guard case .completed(let exitCode, let stdout) = result, exitCode == 0 else {
+            throw unavailable
+        }
+        let commit = stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard
+            commit.range(
+                of: "^(?:[0-9a-fA-F]{40}|[0-9a-fA-F]{64})$",
+                options: .regularExpression) != nil
+        else {
+            throw unavailable
+        }
+        return commit.lowercased()
+    }
+}
+
 /// 验收证据的强度层级。只读 preflight 可以记录静态配置事实，但不能自行生成
 /// Current Activation、RC 或人工正式验收证据。
 public enum AcceptanceEvidenceLevel: String, Codable, Sendable, Equatable {
@@ -21,6 +98,67 @@ public enum WorkBuddyPreflightBindingState: String, Codable, Sendable, Equatable
     case awaitingReceipt = "awaiting_receipt"
     case currentActivation = "current_activation"
     case notImplemented = "not_implemented"
+}
+
+public enum WorkBuddyPreflightAvailabilityState: String, Codable, Sendable, Equatable {
+    case available
+    case unavailable
+}
+
+public enum WorkBuddyPreflightRuntimeState: String, Codable, Sendable, Equatable {
+    case ready
+    case unavailable
+    case damaged
+}
+
+public enum WorkBuddyPreflightWritabilityState: String, Codable, Sendable, Equatable {
+    case writable
+    case notWritable = "not_writable"
+    case unknown
+}
+
+public enum WorkBuddyPreflightConfigurationState: String, Codable, Sendable, Equatable {
+    case notConfigured = "not_configured"
+    case legacyConnected = "legacy_connected"
+    case configured
+    case incomplete
+    case unreadable
+    case conflict
+}
+
+public enum WorkBuddyPreflightActivationState: String, Codable, Sendable, Equatable {
+    case none
+    case awaitingReceipt = "awaiting_receipt"
+    case observed
+}
+
+public enum WorkBuddyPreflightSoundResultState: String, Codable, Sendable, Equatable {
+    case notTested = "not_tested"
+    case played
+    case muted
+    case debounced
+    case notReady = "not_ready"
+    case unsupportedEvent = "unsupported_event"
+    case playbackFailed = "playback_failed"
+
+    fileprivate init(_ result: HostHookPlaybackResult) {
+        switch result {
+        case .played: self = .played
+        case .muted: self = .muted
+        case .debounced: self = .debounced
+        case .notReady: self = .notReady
+        case .unsupportedEvent: self = .unsupportedEvent
+        case .playbackFailed: self = .playbackFailed
+        }
+    }
+}
+
+public enum WorkBuddyPreflightCollectionState: String, Codable, Sendable, Equatable {
+    case collected
+}
+
+public enum WorkBuddyPreflightGUIState: String, Codable, Sendable, Equatable {
+    case notRun = "not_run"
 }
 
 /// WorkBuddy Desktop 的最小版本身份。只读取应用 bundle metadata，不读取宿主配置或 UI 内容。
@@ -113,19 +251,19 @@ public struct WorkBuddyMachineIdentity: Codable, Sendable, Equatable {
 }
 
 public struct WorkBuddyPreflightObservation: Codable, Sendable, Equatable {
-    public let available: String
-    public let runtime: String
-    public let writability: String
-    public let configuration: String
-    public let activation: String
+    public let available: WorkBuddyPreflightAvailabilityState
+    public let runtime: WorkBuddyPreflightRuntimeState
+    public let writability: WorkBuddyPreflightWritabilityState
+    public let configuration: WorkBuddyPreflightConfigurationState
+    public let activation: WorkBuddyPreflightActivationState
     public let installationID: UUID?
 
     public init(
-        available: String,
-        runtime: String,
-        writability: String,
-        configuration: String,
-        activation: String,
+        available: WorkBuddyPreflightAvailabilityState,
+        runtime: WorkBuddyPreflightRuntimeState,
+        writability: WorkBuddyPreflightWritabilityState,
+        configuration: WorkBuddyPreflightConfigurationState,
+        activation: WorkBuddyPreflightActivationState,
         installationID: UUID?
     ) {
         self.available = available
@@ -217,13 +355,13 @@ public struct WorkBuddyPreflightBinding: Codable, Sendable, Equatable {
 public struct WorkBuddyPreflightSoundResult: Codable, Sendable, Equatable {
     public let event: Event
     public let nativeEvent: String
-    public let result: String
+    public let result: WorkBuddyPreflightSoundResultState
     public let evidenceLevel: AcceptanceEvidenceLevel
 
     public init(
         event: Event,
         nativeEvent: String,
-        result: String,
+        result: WorkBuddyPreflightSoundResultState,
         evidenceLevel: AcceptanceEvidenceLevel
     ) {
         self.event = event
@@ -241,15 +379,15 @@ public struct WorkBuddyPreflightSoundResult: Codable, Sendable, Equatable {
 }
 
 public struct WorkBuddyPreflightCLIStatus: Codable, Sendable, Equatable {
-    public let integrationsStatus: String
-    public let doctor: String
-    public let workBuddyDoctor: String
+    public let integrationsStatus: WorkBuddyPreflightCollectionState
+    public let doctor: DoctorSeverity
+    public let workBuddyDoctor: DoctorSeverity
     public let evidenceLevel: AcceptanceEvidenceLevel
 
     public init(
-        integrationsStatus: String,
-        doctor: String,
-        workBuddyDoctor: String,
+        integrationsStatus: WorkBuddyPreflightCollectionState,
+        doctor: DoctorSeverity,
+        workBuddyDoctor: DoctorSeverity,
         evidenceLevel: AcceptanceEvidenceLevel
     ) {
         self.integrationsStatus = integrationsStatus
@@ -267,10 +405,10 @@ public struct WorkBuddyPreflightCLIStatus: Codable, Sendable, Equatable {
 }
 
 public struct WorkBuddyPreflightGUIStatus: Codable, Sendable, Equatable {
-    public let state: String
+    public let state: WorkBuddyPreflightGUIState
     public let evidenceLevel: AcceptanceEvidenceLevel
 
-    public init(state: String, evidenceLevel: AcceptanceEvidenceLevel) {
+    public init(state: WorkBuddyPreflightGUIState, evidenceLevel: AcceptanceEvidenceLevel) {
         self.state = state
         self.evidenceLevel = evidenceLevel
     }
@@ -330,6 +468,61 @@ public struct WorkBuddyPreflightSafety: Codable, Sendable, Equatable {
         case invokedMutatingActions = "invoked_mutating_actions"
         case automaticAudioPreview = "automatic_audio_preview"
         case rawUserDataPersisted = "raw_user_data_persisted"
+    }
+}
+
+/// 只读 preflight 在 commit 身份通过校验后才允许采集的宿主事实。
+public struct WorkBuddyAcceptancePreflightFacts: Sendable {
+    public let claudioVersion: String
+    public let workBuddy: WorkBuddyApplicationIdentity
+    public let machine: WorkBuddyMachineIdentity
+    public let inspectedSnapshot: HostIntegrationSnapshot
+    public let statusSnapshot: HostIntegrationSnapshot
+    public let doctor: DoctorReport
+    public let scopeFingerprint: String?
+
+    public init(
+        claudioVersion: String,
+        workBuddy: WorkBuddyApplicationIdentity,
+        machine: WorkBuddyMachineIdentity,
+        inspectedSnapshot: HostIntegrationSnapshot,
+        statusSnapshot: HostIntegrationSnapshot,
+        doctor: DoctorReport,
+        scopeFingerprint: String?
+    ) {
+        self.claudioVersion = claudioVersion
+        self.workBuddy = workBuddy
+        self.machine = machine
+        self.inspectedSnapshot = inspectedSnapshot
+        self.statusSnapshot = statusSnapshot
+        self.doctor = doctor
+        self.scopeFingerprint = scopeFingerprint
+    }
+}
+
+/// 先将证据绑定到当前 checkout，再执行只读宿主探测并组装报告。
+public enum WorkBuddyAcceptancePreflightCollector {
+    public static func collect(
+        expectedCommitSHA: String?,
+        commandRunner: any CommandRunning = SystemCommandRunner(),
+        collectFacts: @Sendable () async throws -> WorkBuddyAcceptancePreflightFacts
+    ) async throws -> WorkBuddyAcceptancePreflight {
+        let commitSHA = try AcceptanceCommitIdentity.resolve(
+            expected: expectedCommitSHA, commandRunner: commandRunner)
+        let facts = try await collectFacts()
+        let workBuddyDoctor =
+            facts.doctor.results.first { $0.name == "host-workbuddy" }?.severity ?? .failure
+
+        return WorkBuddyAcceptancePreflight(
+            commitSHA: commitSHA,
+            claudioVersion: facts.claudioVersion,
+            workBuddy: facts.workBuddy,
+            machine: facts.machine,
+            inspectedSnapshot: facts.inspectedSnapshot,
+            statusSnapshot: facts.statusSnapshot,
+            workBuddyDoctor: workBuddyDoctor,
+            overallDoctor: facts.doctor.overallSeverity,
+            scopeFingerprint: facts.scopeFingerprint)
     }
 }
 
@@ -427,12 +620,12 @@ public struct WorkBuddyAcceptancePreflight: Codable, Sendable, Equatable {
             .filter(\.isAudibleCapability)
             .compactMap { Self.soundResult(binding: $0, snapshot: statusSnapshot) }
         self.cli = WorkBuddyPreflightCLIStatus(
-            integrationsStatus: "collected",
-            doctor: overallDoctor.rawValue,
-            workBuddyDoctor: workBuddyDoctor.rawValue,
+            integrationsStatus: .collected,
+            doctor: overallDoctor,
+            workBuddyDoctor: workBuddyDoctor,
             evidenceLevel: .staticConfiguration)
         self.gui = WorkBuddyPreflightGUIStatus(
-            state: "not_run", evidenceLevel: .manualAcceptance)
+            state: .notRun, evidenceLevel: .manualAcceptance)
         self.evidence = WorkBuddyPreflightEvidenceSummary(
             staticConfiguration: .recorded,
             currentActivation: currentActivation,
@@ -459,7 +652,7 @@ public struct WorkBuddyAcceptancePreflight: Codable, Sendable, Equatable {
                 "| `\(binding.event.cliName)` | `\(nativeEvent)` | `\(binding.implementation.rawValue)` | `\(binding.state.rawValue)` |"
         }.joined(separator: "\n")
         let soundRows = soundResults.map { result in
-            "| `\(result.event.cliName)` | `\(result.result)` | `\(result.evidenceLevel.rawValue)` |"
+            "| `\(result.event.cliName)` | `\(result.result.rawValue)` | `\(result.evidenceLevel.rawValue)` |"
         }.joined(separator: "\n")
         return """
             # WorkBuddy read-only acceptance preflight
@@ -477,8 +670,8 @@ public struct WorkBuddyAcceptancePreflight: Codable, Sendable, Equatable {
 
             | Source | available | runtime | writability | configuration | activation |
             |---|---|---|---|---|---|
-            | Inspect | `\(inspect.available)` | `\(inspect.runtime)` | `\(inspect.writability)` | `\(inspect.configuration)` | `\(inspect.activation)` |
-            | integrations status | `\(integrationsStatus.available)` | `\(integrationsStatus.runtime)` | `\(integrationsStatus.writability)` | `\(integrationsStatus.configuration)` | `\(integrationsStatus.activation)` |
+            | Inspect | `\(inspect.available.rawValue)` | `\(inspect.runtime.rawValue)` | `\(inspect.writability.rawValue)` | `\(inspect.configuration.rawValue)` | `\(inspect.activation.rawValue)` |
+            | integrations status | `\(integrationsStatus.available.rawValue)` | `\(integrationsStatus.runtime.rawValue)` | `\(integrationsStatus.writability.rawValue)` | `\(integrationsStatus.configuration.rawValue)` | `\(integrationsStatus.activation.rawValue)` |
 
             Observations agree: `\(observationsAgree)`.
 
@@ -493,6 +686,15 @@ public struct WorkBuddyAcceptancePreflight: Codable, Sendable, Equatable {
             | Event | Result | Evidence |
             |---|---|---|
             \(soundRows)
+
+            ## CLI and GUI status
+
+            | Surface | State | Evidence |
+            |---|---|---|
+            | integrations status | `\(cli.integrationsStatus.rawValue)` | `\(cli.evidenceLevel.rawValue)` |
+            | overall doctor | `\(cli.doctor.rawValue)` | `\(cli.evidenceLevel.rawValue)` |
+            | WorkBuddy doctor | `\(cli.workBuddyDoctor.rawValue)` | `\(cli.evidenceLevel.rawValue)` |
+            | GUI | `\(gui.state.rawValue)` | `\(gui.evidenceLevel.rawValue)` |
 
             ## Evidence levels
 
@@ -559,14 +761,14 @@ public struct WorkBuddyAcceptancePreflight: Codable, Sendable, Equatable {
         snapshot: HostIntegrationSnapshot
     ) -> WorkBuddyPreflightSoundResult? {
         guard let nativeEvent = binding.nativeEvent else { return nil }
-        let result: String
+        let result: WorkBuddyPreflightSoundResultState
         let evidenceLevel: AcceptanceEvidenceLevel
         switch snapshot.activation(for: binding) {
         case .observed(let evidence):
-            result = evidence.playbackResult.rawValue
+            result = WorkBuddyPreflightSoundResultState(evidence.playbackResult)
             evidenceLevel = .currentActivation
         case .none, .awaitingReceipt:
-            result = "not_tested"
+            result = .notTested
             evidenceLevel = .staticConfiguration
         }
         return WorkBuddyPreflightSoundResult(
@@ -576,45 +778,55 @@ public struct WorkBuddyAcceptancePreflight: Codable, Sendable, Equatable {
             evidenceLevel: evidenceLevel)
     }
 
-    private static func availabilityStatus(_ availability: HostAvailability) -> String {
+    private static func availabilityStatus(
+        _ availability: HostAvailability
+    ) -> WorkBuddyPreflightAvailabilityState {
         switch availability {
-        case .available: "available"
-        case .unavailable: "unavailable"
+        case .available: .available
+        case .unavailable: .unavailable
         }
     }
 
-    private static func runtimeStatus(_ runtime: SharedRuntimeHealth) -> String {
+    private static func runtimeStatus(
+        _ runtime: SharedRuntimeHealth
+    ) -> WorkBuddyPreflightRuntimeState {
         switch runtime {
-        case .ready: "ready"
-        case .unavailable: "unavailable"
-        case .damaged: "damaged"
+        case .ready: .ready
+        case .unavailable: .unavailable
+        case .damaged: .damaged
         }
     }
 
-    private static func writabilityStatus(_ writability: HostConfigWritability) -> String {
+    private static func writabilityStatus(
+        _ writability: HostConfigWritability
+    ) -> WorkBuddyPreflightWritabilityState {
         switch writability {
-        case .writable: "writable"
-        case .notWritable: "not_writable"
-        case .unknown: "unknown"
+        case .writable: .writable
+        case .notWritable: .notWritable
+        case .unknown: .unknown
         }
     }
 
-    private static func configurationStatus(_ configuration: HostConfigurationState) -> String {
+    private static func configurationStatus(
+        _ configuration: HostConfigurationState
+    ) -> WorkBuddyPreflightConfigurationState {
         switch configuration {
-        case .notConfigured: "not_configured"
-        case .legacyConnected: "legacy_connected"
-        case .configured: "configured"
-        case .incomplete: "incomplete"
-        case .unreadable: "unreadable"
-        case .conflict: "conflict"
+        case .notConfigured: .notConfigured
+        case .legacyConnected: .legacyConnected
+        case .configured: .configured
+        case .incomplete: .incomplete
+        case .unreadable: .unreadable
+        case .conflict: .conflict
         }
     }
 
-    private static func activationStatus(_ activation: HostActivationEvidence) -> String {
+    private static func activationStatus(
+        _ activation: HostActivationEvidence
+    ) -> WorkBuddyPreflightActivationState {
         switch activation {
-        case .none: "none"
-        case .awaitingReceipt: "awaiting_receipt"
-        case .observed: "observed"
+        case .none: .none
+        case .awaitingReceipt: .awaitingReceipt
+        case .observed: .observed
         }
     }
 }
