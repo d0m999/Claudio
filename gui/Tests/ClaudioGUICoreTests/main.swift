@@ -23,7 +23,7 @@ import Foundation
 // `PanelTypeSizeSuite.swift`, `PanelAccessibilitySuite.swift`, `PanelConfigSuite.swift`,
 // `PanelFocusCoordinatorSuite.swift`,
 // `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`,
-// `VolumeDragSessionSuite.swift`, `PanelWriteFailuresSuite.swift`).
+// `ChatAXTracerSuite.swift`, `VolumeDragSessionSuite.swift`, `PanelWriteFailuresSuite.swift`).
 
 var totalChecks = 0
 var failures = 0
@@ -74,6 +74,7 @@ runPanelAnnouncementSuites()
 runReleaseLayoutSuites()
 runSourceScannerSuites()
 runViewWiringSuites()
+runChatAXTracerSuites()
 runAudioFormatSniffSuites()
 runAudioImportSuites()
 runAudioImportBatchSuites()

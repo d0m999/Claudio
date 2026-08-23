@@ -49,6 +49,9 @@ struct ClaudioGUIApp: App {
 final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
     private var menuBarController: MenuBarController?
     private var hostIntegrationBridge: HostIntegrationManagerBridge?
+#if DEBUG
+    private var chatAXTracer: ChatAXTracerSession?
+#endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // `.accessory`: no Dock icon, no menu bar application menu — the correct activation
@@ -154,6 +157,26 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
             hostIntegrationState: initialIntegrationState,
             integrationMatrixProvider: integrationMatrixProvider,
             integrationActionProvider: integrationActionProvider)
+#if DEBUG
+        chatAXTracer = startExplicitChatAXTracerIfConfigured(
+            environment: ProcessInfo.processInfo.environment)
+#endif
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+#if DEBUG
+        chatAXTracer?.guiWillTerminate()
+        if let evidence = chatAXTracer?.evidence {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            if let data = try? encoder.encode(evidence),
+                let json = String(data: data, encoding: .utf8)
+            {
+                print(json)
+            }
+        }
+        chatAXTracer = nil
+#endif
     }
 }
 
