@@ -1,5 +1,6 @@
 import ClaudioCore
 import ClaudioGUICore
+import CoreFoundation
 import Dispatch
 import Foundation
 
@@ -121,6 +122,20 @@ private func chatAXEventually(
     for _ in 0..<attempts {
         if condition() { return true }
         try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return condition()
+}
+
+@MainActor
+private func chatAXPumpRunLoop(
+    mode: RunLoop.Mode,
+    until deadline: Date,
+    condition: () -> Bool
+) -> Bool {
+    while !condition(), Date() < deadline {
+        _ = RunLoop.main.run(
+            mode: mode,
+            before: min(deadline, Date(timeIntervalSinceNow: 0.01)))
     }
     return condition()
 }
@@ -721,6 +736,69 @@ func runChatAXTracerSuites() async {
         coordinator.endSession()
     }
 
+    await suite("Chat AX tracer event coordinator：deferred retry 在 common run-loop mode 恢复") {
+        let trackingMode = RunLoop.Mode("ChatAXEventTrackingTestMode")
+        CFRunLoopAddCommonMode(
+            CFRunLoopGetMain(),
+            CFRunLoopMode(rawValue: trackingMode.rawValue as CFString))
+        let systemGate = ChatAXSystemQueryWorkerGate.shared
+        guard let blockingLease = systemGate.acquire() else {
+            expect(false, "common-mode fixture 必须先取得 shared lease")
+            return
+        }
+        let samplerStarts = ChatAXThreadSafeCounter()
+        let clockReads = ChatAXThreadSafeCounter()
+        var committed: [Int] = []
+        var invalidationCount = 0
+        let coordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            contentionTimeoutMilliseconds: 1_000,
+            attemptTimeoutNanoseconds: 500_000_000,
+            retryInterval: 0.05,
+            clockMilliseconds: {
+                clockReads.increment()
+                return 1_000
+            },
+            sampler: { input in
+                samplerStarts.increment()
+                return input
+            },
+            didProduce: { _, sample in
+                committed.append(sample)
+            },
+            didInvalidate: {
+                invalidationCount += 1
+            })
+        coordinator.beginSession()
+        coordinator.enqueue(23, elapsedMilliseconds: 456)
+        expect(
+            await chatAXEventually { clockReads.value >= 3 },
+            "释放 lease 前必须确认首次 attempt 已 deferred 且 retry timer 已排入")
+        expect(
+            clockReads.value >= 3
+                && samplerStarts.value == 0
+                && committed.isEmpty
+                && invalidationCount == 0,
+            "已安装 retry 时仍不得绕过 busy lease 偷跑 sampler")
+
+        systemGate.release(blockingLease)
+        let retryFiredInTrackingMode = chatAXPumpRunLoop(
+            mode: trackingMode,
+            until: Date(timeIntervalSinceNow: 0.75)
+        ) {
+            samplerStarts.value == 1
+        }
+        expect(
+            retryFiredInTrackingMode,
+            "common-mode retry 必须只泵 event-tracking mode 也能启动；default-only timer 会失败")
+        expect(
+            await chatAXEventually { committed == [23] },
+            "tracking-mode retry 启动后必须正常提交原请求")
+        expect(
+            samplerStarts.value == 1 && invalidationCount == 0,
+            "common-mode 恢复必须只运行并提交一次，不得误失效")
+        coordinator.endSession()
+    }
+
     await suite("Chat AX tracer event coordinator：contention 总期限到期只失效一次") {
         let systemGate = ChatAXSystemQueryWorkerGate.shared
         guard let blockingLease = systemGate.acquire() else {
@@ -912,6 +990,35 @@ func runChatAXTracerSuites() async {
                 && invalidationCount == 0,
             "reentrant callback 后必须重验 generation，不能启动已 promote 的旧 successor")
         coordinator.endSession()
+        coordinator = nil
+    }
+
+    await suite("Chat AX tracer event coordinator：先 promote successor 再发布 reentrant callback") {
+        var committed: [Int] = []
+        var invalidationCount = 0
+        var coordinator: ChatAXEventQueryCoordinator<Int, Int>!
+        coordinator = ChatAXEventQueryCoordinator<Int, Int>(
+            sampler: { input in input },
+            didProduce: { _, sample in
+                committed.append(sample)
+                if sample == 1 {
+                    coordinator.enqueue(3, elapsedMilliseconds: 300)
+                }
+            },
+            didInvalidate: {
+                invalidationCount += 1
+            })
+        coordinator.beginSession()
+        coordinator.enqueue(1, elapsedMilliseconds: 100)
+        coordinator.enqueue(2, elapsedMilliseconds: 200)
+        expect(
+            await chatAXEventually { committed.count == 3 },
+            "首个 publish 内重入 enqueue 后，既有 successor 与新 pending 都必须完成")
+        expect(
+            committed == [1, 2, 3] && invalidationCount == 0,
+            "coordinator 必须在 didProduce 前 promote 既有 successor，不能被重入请求覆盖")
+        coordinator.endSession()
+        coordinator = nil
     }
 
     await suite("Chat AX tracer deadline：调用者预先取消时绝不启动 detached query") {
@@ -1626,161 +1733,6 @@ func runChatAXTracerSuites() async {
                     .split(whereSeparator: { !$0.isLetter })
                     .contains("public"),
             "Debug-only tracer 的跨 target API 必须收窄为 package")
-        guard
-            let deadlineRegion = chatAXBracedDeclarationRegion(
-                "package enum ChatAXRuntimeValidationDeadline {", in: core),
-            let cancellationGateRegion = chatAXBracedDeclarationRegion(
-                "package final class ChatAXRuntimeValidationCancellationGate", in: core),
-            let eventCoordinatorRegion = chatAXBracedDeclarationRegion(
-                "package final class ChatAXEventQueryCoordinator", in: core),
-            let eventLaunchRegion = chatAXFunctionRegion(
-                "private func launch(", in: eventCoordinatorRegion),
-            let eventFinishRegion = chatAXFunctionRegion(
-                "private func finish(", in: eventCoordinatorRegion),
-            let eventCommitRegion = chatAXFunctionRegion(
-                "private func commit(", in: eventCoordinatorRegion),
-            let eventRetryScheduleRegion = chatAXFunctionRegion(
-                "private func scheduleRetry(", in: eventCoordinatorRegion)
-        else {
-            expect(false, "必须能定位 runtime deadline 与 event coordinator 的并发实现")
-            return
-        }
-        let deadlineUsesFirstWinner: (String) -> Bool = { region in
-            region.contains(".bufferingOldest(1)")
-                && !region.contains(".bufferingNewest(")
-                && region.components(separatedBy: "winner.claim()").count - 1 == 2
-                && region.contains("workerGate.acquire()")
-                && region.contains("cancellationGate.bind(workerLease)")
-                && region.contains("defer { cancellationGate.finishOperation() }")
-                && region.components(separatedBy: "cancellationGate.cancel()").count - 1
-                    == 4
-                && !region.contains("workerGate.release(workerLease)")
-                && region.contains("return Task.isCancelled ? .cancelled : .deferred")
-                && region.contains("withTaskCancellationHandler")
-                && region.contains("cancellationGate.beginOperation()")
-                && region.contains("onCancel:")
-                && region.contains("!Task.isCancelled")
-        }
-        expect(
-            deadlineUsesFirstWinner(deadlineRegion),
-            "operation/timeout 只能由第一个 winner 提交，后到结果不得覆盖")
-        let pendingLeaseCancellationIsImmediate: (String) -> Bool = { region in
-            region.contains("case .pending(let lease):")
-                && region.contains("state = .terminal")
-                && region.contains("workerGate.release(leaseToRelease)")
-                && region.contains("case .running(let lease) = state")
-                && region.contains("workerGate.release(lease)")
-        }
-        expect(
-            pendingLeaseCancellationIsImmediate(cancellationGateRegion),
-            "未开始 worker 的 cancel/timeout 必须同步释放 lease，running worker 才延后释放")
-        let leakedPendingLeaseMutation = cancellationGateRegion.replacingOccurrences(
-            of: "workerGate.release(leaseToRelease)",
-            with: "_ = leaseToRelease")
-        expect(
-            !pendingLeaseCancellationIsImmediate(leakedPendingLeaseMutation),
-            "pending worker 从未启动也不得把 lease 遗留给未来 executor 调度")
-        let newestBufferMutation = deadlineRegion.replacingOccurrences(
-            of: ".bufferingOldest(1)",
-            with: ".bufferingNewest(1)")
-        expect(
-            !deadlineUsesFirstWinner(newestBufferMutation),
-            "deadline source gate 必须拒绝恢复后到结果覆盖首个结果的 buffer")
-        let missingWorkerLeaseMutation = deadlineRegion.replacingOccurrences(
-            of: "workerGate.acquire()",
-            with: "workerGate.uncheckedLease()")
-        expect(
-            !deadlineUsesFirstWinner(missingWorkerLeaseMutation),
-            "deadline source gate 必须拒绝为旧阻塞 sampler 堆叠新 worker")
-        let missingCallerCancellationMutation = deadlineRegion.replacingOccurrences(
-            of: "cancellationGate.beginOperation()",
-            with: "true")
-        expect(
-            !deadlineUsesFirstWinner(missingCallerCancellationMutation),
-            "deadline source gate 必须拒绝预取消 caller 启动 detached query")
-
-        let eventCoordinatorIsGenerationScoped: (String, String, String, String) -> Bool = {
-            launchRegion, finishRegion, commitRegion, retryRegion in
-            guard
-                let detachedRange = launchRegion.range(of: "Task.detached"),
-                let deadlineRange = launchRegion.range(
-                    of: "ChatAXRuntimeValidationDeadline.run("),
-                let activeCheckRange = finishRegion.range(of: "gate.isActive(entry.request)"),
-                let taskClearRange = finishRegion.range(of: "activeTask = nil"),
-                let completeRange = commitRegion.range(of: "gate.complete(entry.request)"),
-                let produceRange = commitRegion.range(of: "didProduce(")
-            else {
-                return false
-            }
-            return detachedRange.lowerBound < deadlineRange.lowerBound
-                && activeCheckRange.lowerBound < taskClearRange.lowerBound
-                && finishRegion.contains("case .deferred:\n            scheduleRetry(entry)")
-                && finishRegion.contains(
-                    "case .cancelled, .timedOut:\n            failActive(entry.request)")
-                && finishRegion.contains("guard let sample else")
-                && finishRegion.components(separatedBy: "failActive(entry.request)").count - 1
-                    == 2
-                && retryRegion.contains("RunLoop.main.add(retryTimer, forMode: .common)")
-                && completeRange.lowerBound < produceRange.lowerBound
-                && commitRegion.components(separatedBy: "didProduce(").count - 1 == 1
-                && commitRegion.contains("gate.isActive(successor.request)")
-        }
-        expect(
-            eventCoordinatorIsGenerationScoped(
-                eventLaunchRegion,
-                eventFinishRegion,
-                eventCommitRegion,
-                eventRetryScheduleRegion),
-            "event query 必须 detached+deadline single-flight，按 generation 提交并 common-mode retry")
-        let synchronousEventMutation = eventLaunchRegion.replacingOccurrences(
-            of: "Task.detached", with: "Task")
-        expect(
-            !eventCoordinatorIsGenerationScoped(
-                synchronousEventMutation,
-                eventFinishRegion,
-                eventCommitRegion,
-                eventRetryScheduleRegion),
-            "event coordinator source gate 必须拒绝回退到 MainActor 继承 task")
-        let contentionInvalidationMutation = eventFinishRegion.replacingOccurrences(
-            of: "case .deferred:\n            scheduleRetry(entry)",
-            with: "case .deferred:\n            failActive(entry.request)")
-        expect(
-            !eventCoordinatorIsGenerationScoped(
-                eventLaunchRegion,
-                contentionInvalidationMutation,
-                eventCommitRegion,
-                eventRetryScheduleRegion),
-            "shared lease busy 只能有界 retry，不能冒充 target mismatch")
-        let defaultModeEventRetryMutation = eventRetryScheduleRegion.replacingOccurrences(
-            of: "RunLoop.main.add(retryTimer, forMode: .common)",
-            with: "RunLoop.main.add(retryTimer, forMode: .default)")
-        expect(
-            !eventCoordinatorIsGenerationScoped(
-                eventLaunchRegion,
-                eventFinishRegion,
-                eventCommitRegion,
-                defaultModeEventRetryMutation),
-            "event deferred retry 不得退回 default-only run-loop mode")
-        let staleTaskClearMutation = eventFinishRegion.replacingOccurrences(
-            of: "gate.isActive(entry.request)", with: "true")
-        expect(
-            !eventCoordinatorIsGenerationScoped(
-                eventLaunchRegion,
-                staleTaskClearMutation,
-                eventCommitRegion,
-                eventRetryScheduleRegion),
-            "迟到旧 completion 不得清除新 generation 的 active task")
-        let prematureProduceMutation = eventCommitRegion.replacingOccurrences(
-            of: "let completion = gate.complete(entry.request)",
-            with: "didProduce(entry.request.elapsedMilliseconds, sample)\n"
-                + "        let completion = gate.complete(entry.request)")
-        expect(
-            !eventCoordinatorIsGenerationScoped(
-                eventLaunchRegion,
-                eventFinishRegion,
-                prematureProduceMutation,
-                eventRetryScheduleRegion),
-            "event result 必须先通过 generation complete，再允许发布 evidence")
     }
 
     suite("Chat AX tracer 系统边界：只用有界非正文 AX 事实且从不弹权限") {
@@ -2757,11 +2709,13 @@ func runChatAXTracerSuites() async {
         expect(
             stopRegion.contains("pendingInspection = nil"),
             "full inspection cache 必须是一次性的，stop 后不能授权未来 start")
-        let productionEventCoordinatorIsWired: (String, String) -> Bool = {
-            startSource, stopSource in
+        let productionEventCoordinatorIsWired: (String, String, String) -> Bool = {
+            observerSource, startSource, stopSource in
             guard
                 let constructionRange = startSource.range(
                     of: "ChatAXEventQueryCoordinator<"),
+                let retentionRange = startSource.range(
+                    of: "self.eventQueryCoordinator = eventQueryCoordinator"),
                 let beginRange = startSource.range(of: "eventQueryCoordinator.beginSession()"),
                 let sourceRange = startSource.range(of: "CFRunLoopAddSource("),
                 let endRange = stopSource.range(of: "eventQueryCoordinator?.endSession()"),
@@ -2770,7 +2724,20 @@ func runChatAXTracerSuites() async {
             else {
                 return false
             }
-            return constructionRange.lowerBound < beginRange.lowerBound
+            return observerSource.components(
+                separatedBy: "private var eventQueryCoordinator:"
+            ).count - 1 == 1
+                && !observerSource.contains("weak var eventQueryCoordinator")
+                && !observerSource.contains("unowned var eventQueryCoordinator")
+                && startSource.components(
+                    separatedBy: "self.eventQueryCoordinator = eventQueryCoordinator"
+                ).count - 1 == 1
+                && startSource.components(
+                    separatedBy: "self.eventQueryCoordinator ="
+                ).count - 1 == 1
+                && callArguments(of: "endSession", in: startSource).isEmpty
+                && constructionRange.lowerBound < retentionRange.lowerBound
+                && retentionRange.lowerBound < beginRange.lowerBound
                 && beginRange.lowerBound < sourceRange.lowerBound
                 && startSource.contains("SystemChatAXEventQuerySampler.sample(request)")
                 && startSource.contains("[weak self] elapsedMilliseconds, sample")
@@ -2781,20 +2748,64 @@ func runChatAXTracerSuites() async {
                 && clearRange.lowerBound < targetClearRange.lowerBound
         }
         expect(
-            productionEventCoordinatorIsWired(startRegion, stopRegion),
+            productionEventCoordinatorIsWired(observerTypeRegion, startRegion, stopRegion),
             "真实 observer 必须把 sampler/commit/invalidation 接到同一 generation coordinator")
         let missingEventBeginMutation = startRegion.replacingOccurrences(
             of: "eventQueryCoordinator.beginSession()",
             with: "_ = eventQueryCoordinator")
         expect(
-            !productionEventCoordinatorIsWired(missingEventBeginMutation, stopRegion),
+            !productionEventCoordinatorIsWired(
+                observerTypeRegion, missingEventBeginMutation, stopRegion),
             "AXObserver source 生效前必须启动 event coordinator session")
+        let endedEventSessionDuringStartMutation = startRegion.replacingOccurrences(
+            of: "eventQueryCoordinator.beginSession()",
+            with: "eventQueryCoordinator.beginSession()\n"
+                + "        eventQueryCoordinator.endSession()")
+        expect(
+            !productionEventCoordinatorIsWired(
+                observerTypeRegion, endedEventSessionDuringStartMutation, stopRegion),
+            "start 不能在 run-loop source 生效前结束 event coordinator session")
+        let optionallyEndedEventSessionDuringStartMutation = startRegion.replacingOccurrences(
+            of: "eventQueryCoordinator.beginSession()",
+            with: "eventQueryCoordinator.beginSession()\n"
+                + "        self.eventQueryCoordinator?.endSession()")
+        expect(
+            !productionEventCoordinatorIsWired(
+                observerTypeRegion,
+                optionallyEndedEventSessionDuringStartMutation,
+                stopRegion),
+            "start 不能经 Optional property 提前结束 event coordinator session")
         let missingEventEndMutation = stopRegion.replacingOccurrences(
             of: "eventQueryCoordinator?.endSession()",
             with: "_ = eventQueryCoordinator")
         expect(
-            !productionEventCoordinatorIsWired(startRegion, missingEventEndMutation),
+            !productionEventCoordinatorIsWired(
+                observerTypeRegion, startRegion, missingEventEndMutation),
             "stop 必须先推进 event generation，再清理 target 与 callback")
+        let missingEventRetentionMutation = startRegion.replacingOccurrences(
+            of: "self.eventQueryCoordinator = eventQueryCoordinator",
+            with: "_ = eventQueryCoordinator")
+        expect(
+            !productionEventCoordinatorIsWired(
+                observerTypeRegion, missingEventRetentionMutation, stopRegion),
+            "start 必须持有 event coordinator，不能让局部实例在首个 callback 前释放")
+        let weakEventCoordinatorMutation = observerTypeRegion.replacingOccurrences(
+            of: "private var eventQueryCoordinator:",
+            with: "private weak var eventQueryCoordinator:")
+        expect(
+            !productionEventCoordinatorIsWired(
+                weakEventCoordinatorMutation, startRegion, stopRegion),
+            "event coordinator property 必须强持有 session，不能退化为 weak storage")
+        for emptyValue in ["nil", ".none", "Optional.none"] {
+            let clearedEventCoordinatorMutation = startRegion.replacingOccurrences(
+                of: "eventQueryCoordinator.beginSession()",
+                with: "eventQueryCoordinator.beginSession()\n"
+                    + "        self.eventQueryCoordinator = \(emptyValue)")
+            expect(
+                !productionEventCoordinatorIsWired(
+                    observerTypeRegion, clearedEventCoordinatorMutation, stopRegion),
+                "start 不得以任何 Optional 空值清空刚持有的 coordinator")
+        }
         let stopsWithoutMessagingDestroyedApplication: (String) -> Bool = { region in
             guard
                 let observerRegion = chatAXBracedDeclarationRegion(
@@ -2824,24 +2835,31 @@ func runChatAXTracerSuites() async {
                 let arrivalRange = region.range(
                     of: "let arrivalElapsedMilliseconds = traceElapsedMilliseconds"),
                 let destroyedRange = region.range(of: "if targetWasDestroyed"),
+                let destroyedBranch = chatAXBracedDeclarationRegion(
+                    "if targetWasDestroyed", in: region),
+                let destroyedBranchRange = region.range(of: destroyedBranch),
                 let requestRange = region.range(of: "let request = SystemChatAXEventQueryRequest("),
                 let enqueueRange = region.range(of: "eventQueryCoordinator.enqueue(")
             else {
                 return false
             }
-            let prohibited = [
-                "workerGate.acquire(",
-                "ChatAXSystemQueryWorkerGate",
-                "SystemChatAXAttributeReader",
-                "SystemChatAXSurfaceSignatureReader",
-                "SystemChatAXCodeIdentityReader",
-                "SystemChatAXRuntimeApplicationVerifier",
-                "AXUIElementGetPid(",
-                "AXUIElementCopyAttributeValue(",
-                "surfaceStillMatches(",
-                "elementBelongsToTarget(",
-                "emitSignal(kind: .unrelatedStructureChanged",
-            ]
+            let nonDestroyed = String(region[destroyedBranchRange.upperBound...])
+            let requiredBindingGuard = """
+                guard
+                            let applicationElement,
+                            let runtimeBinding,
+                            let eventQueryCoordinator
+                        else
+                """
+            guard
+                let failureBranch = chatAXBracedDeclarationRegion(
+                    requiredBindingGuard, in: nonDestroyed),
+                let failureBranchRange = nonDestroyed.range(of: failureBranch),
+                let nonDestroyedRequestRange = nonDestroyed.range(
+                    of: "let request = SystemChatAXEventQueryRequest(")
+            else {
+                return false
+            }
             return arrivalRange.lowerBound < destroyedRange.lowerBound
                 && destroyedRange.lowerBound < requestRange.lowerBound
                 && requestRange.lowerBound < enqueueRange.lowerBound
@@ -2849,10 +2867,26 @@ func runChatAXTracerSuites() async {
                 && region.contains("runtimeBinding: runtimeBinding")
                 && region.contains("approvedAttributes: approvedAttributes")
                 && region.contains("elapsedMilliseconds: arrivalElapsedMilliseconds")
-                && prohibited.allSatisfy { !region.contains($0) }
+                && callArguments(of: "invalidateTarget", in: nonDestroyed).count == 1
+                && callArguments(of: "invalidateTarget", in: failureBranch).count == 1
+                && failureBranch.components(separatedBy: "return").count - 1 == 1
+                && failureBranchRange.upperBound < nonDestroyedRequestRange.lowerBound
+                && callArguments(
+                    of: "SystemChatAXEventQueryRequest", in: nonDestroyed
+                ).count == 1
+                && callArguments(
+                    of: "eventQueryCoordinator.enqueue", in: nonDestroyed
+                ).count == 1
+                && nonDestroyed.filter { $0 == "(" }.count == 3
+                && !nonDestroyed.contains("emitSignal(")
         }
         let backgroundEventSampleIsExact: (String) -> Bool = { region in
-            region.components(separatedBy: "runningRuntimeFacts(").count - 1 == 2
+            let integerReads = callArguments(
+                of: "reader.integer",
+                in: region
+            ).map(collapsingWhitespace)
+            let normalized = collapsingWhitespace(region)
+            return region.components(separatedBy: "runningRuntimeFacts(").count - 1 == 2
                 && region.contains("factsBefore == request.runtimeBinding.runtimeFacts")
                 && region.contains(
                     "elementProcessIdentifier(request.element, reader: reader) "
@@ -2862,6 +2896,8 @@ func runChatAXTracerSuites() async {
                 && region.contains(
                     "verifiedSurface.signature == request.target.identity.surfaceSignature")
                 && region.contains("case .success(let rawWindowOrdinal) = reader.integer(")
+                && integerReads == [".windowNumber, from: request.element"]
+                && normalized.contains("windowOrdinal: max(0, rawWindowOrdinal ?? 0)")
                 && region.contains("factsAfter == factsBefore")
                 && region.contains("SystemChatAXRuntimeApplicationVerifier.matches(")
                 && !region.contains("emitSignal(")
@@ -2909,12 +2945,76 @@ func runChatAXTracerSuites() async {
         expect(
             !mainActorEventCallbackOnlyEnqueues(directMainActorQueryMutation),
             "source gate 必须拒绝在 MainActor callback 恢复 PID/surface/runtime query")
+        let directSamplerWrapperMutations = [
+            "_ = SystemChatAXEventQuerySampler.sample(request)",
+            """
+            _ = SystemChatAXRuntimeSampler.sample(
+                processIdentifier: target.processIdentifier,
+                expectedSurfaceSignature: target.identity.surfaceSignature)
+            """,
+            "_ = runtimeApplicationStillMatches(target: target, binding: runtimeBinding)",
+        ]
+        for query in directSamplerWrapperMutations {
+            let mutation = handleRegion.replacingOccurrences(
+                of: "eventQueryCoordinator.enqueue(",
+                with: "\(query)\n        eventQueryCoordinator.enqueue(")
+            expect(
+                !mainActorEventCallbackOnlyEnqueues(mutation),
+                "source gate 必须拒绝 MainActor callback 通过现成 sampler/verifier 同步查询")
+        }
+        let relocatedInvalidationMutation =
+            handleRegion
+            .replacingOccurrences(
+                of: "else {\n            invalidateTarget()\n            return\n        }",
+                with:
+                    "else {\n            return\n        }"
+            )
+            .replacingOccurrences(
+                of: "elapsedMilliseconds: arrivalElapsedMilliseconds)",
+                with: "elapsedMilliseconds: arrivalElapsedMilliseconds)\n"
+                    + "        invalidateTarget()")
+        expect(
+            !mainActorEventCallbackOnlyEnqueues(relocatedInvalidationMutation),
+            "normal callback 不得在 enqueue 后无条件 invalidate；失效只属于 guard failure")
+        let decoyFailureBranchMutation =
+            handleRegion
+            .replacingOccurrences(
+                of: "else {\n            invalidateTarget()\n            return\n        }",
+                with:
+                    "else {\n            return\n        }"
+            )
+            .replacingOccurrences(
+                of: "        guard\n            let applicationElement,",
+                with: """
+                            if target.processIdentifier >= 0 {
+                            } else {
+                                invalidateTarget()
+                                return
+                            }
+                            guard
+                                let applicationElement,
+                    """)
+        expect(
+            !mainActorEventCallbackOnlyEnqueues(decoyFailureBranchMutation),
+            "失效分支必须绑定真实 runtime-state guard，不能由无关 decoy else 代替")
         let missingEventSurfaceMutation = eventQuerySampleRegion.replacingOccurrences(
             of: "verifiedSurface.signature == request.target.identity.surfaceSignature",
             with: "true")
         expect(
             !backgroundEventSampleIsExact(missingEventSurfaceMutation),
             "event sampler 必须拒绝只取到某个 surface 而不 exact 匹配 allowlist 摘要")
+        let wrongWindowAttributeMutation = eventQuerySampleRegion.replacingOccurrences(
+            of: ".windowNumber,",
+            with: ".enabled,")
+        expect(
+            !backgroundEventSampleIsExact(wrongWindowAttributeMutation),
+            "event sampler 必须精确读取 AXWindowNumber，不能接受其他 NSNumber-compatible 属性")
+        let discardedWindowOrdinalMutation = eventQuerySampleRegion.replacingOccurrences(
+            of: "windowOrdinal: max(0, rawWindowOrdinal ?? 0)",
+            with: "windowOrdinal: 0")
+        expect(
+            !backgroundEventSampleIsExact(discardedWindowOrdinalMutation),
+            "event sampler 必须把 typed window number 写入 sample，不能读取后硬编码为零")
         let completionTimestampMutation = commitObservedEventRegion.replacingOccurrences(
             of: "elapsedMilliseconds: elapsedMilliseconds",
             with: "elapsedMilliseconds: traceElapsedMilliseconds")
@@ -2946,12 +3046,10 @@ func runChatAXTracerSuites() async {
                 && region.components(separatedBy: "invalidateTarget()").count - 1 == 1
                 && invalidElementRange.upperBound < emissionRange.lowerBound
                 && applicationDestroyedRange.upperBound < invalidationRange.lowerBound
-                && !region.contains("element:")
-                && !region.contains("eventQueryCoordinator")
-                && !region.contains("SystemChatAXAttributeReader")
-                && !region.contains("prepareForMessaging")
-                && !region.contains("AXUIElementGetPid")
-                && !region.contains("AXUIElementCopyAttributeValue")
+                && callArguments(of: "CFEqual", in: region).count == 1
+                && callArguments(of: "emitSignal", in: region).count == 1
+                && callArguments(of: "invalidateTarget", in: region).count == 1
+                && region.filter { $0 == "(" }.count == 3
         }
         expect(
             recordsExitWithoutDestroyedElementQuery(destroyedRegion),
@@ -2964,6 +3062,15 @@ func runChatAXTracerSuites() async {
         expect(
             !recordsExitWithoutDestroyedElementQuery(destroyedElementQueryMutation),
             "destroyed-element 契约必须拒绝回退到通用 AX emitter")
+        let destroyedSamplerMutation = destroyedRegion.replacingOccurrences(
+            of: "self.applicationElement = nil",
+            with: "_ = SystemChatAXRuntimeSampler.sample(\n"
+                + "                    processIdentifier: target.processIdentifier,\n"
+                + "                    expectedSurfaceSignature: target.identity.surfaceSignature)\n"
+                + "                self.applicationElement = nil")
+        expect(
+            !recordsExitWithoutDestroyedElementQuery(destroyedSamplerMutation),
+            "destroyed-element 契约必须拒绝通过现成 sampler wrapper 间接查询")
         let broadExitMutation = destroyedRegion.replacingOccurrences(
             of: "if let applicationElement, CFEqual(element, applicationElement)",
             with: "if targetWasDestroyed")
