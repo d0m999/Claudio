@@ -75,6 +75,71 @@ WorkBuddy 配置、备份、prompt、response、receipt 原文件或日志。入
 本次安全摘要为 `read_only=true`、`invoked_mutating_actions=[]`、`automatic_audio_preview=false`、
 `raw_user_data_persisted=false`。未连接、未形成 Current Activation 和未执行人工/RC 验收均保持原样，不能由本地绿色测试推断为通过。
 
+## WorkBuddy 真实回调闭环（Issue #15）
+
+本节记录 2026-08-24（Asia/Singapore）在单独明确授权后，对当前 WorkBuddy installation
+执行的一次可逆 Connect → 两条真实回调 → GUI 核对 → Disconnect 闭环。只保存脱敏摘要和
+本机证据指针，不保存 WorkBuddy 配置、备份内容、prompt、response、receipt 原文件或日志。
+本节通过不改变本账本顶部的 `0.1.0` 整体“未通过”状态，也不构成 RC 或正式发布验收。
+
+### 执行身份与写入前基线
+
+| 字段 | 结果 | 证据等级 |
+|---|---|---|
+| Issue #14 依赖 | 已关闭；Issue #15 原生 `blocked_by=0` 后才继续 | tracker state |
+| 写入授权 | 已在本 ticket 执行会话中单独取得；授权仅覆盖本次可逆 WorkBuddy Connect/Disconnect | manual authorization |
+| 写入前 preflight | commit `91eb5fdcb200a529259d701bad66d796134b6e09`；`available` / `ready` / `writable` / `not_configured` / `none` | static configuration |
+| WorkBuddy | `com.workbuddy.workbuddy`，version/build `5.3.14`，surface `workbuddy` | static configuration |
+| 本机备份 | Issue #15 独立 pre-Connect 备份位于 Git 外，为正规文件、mode `0600` | local-only evidence |
+| 备份完整性 | 独立备份与一次性 `settings.json.claudio.bak` 均逐字节匹配写入前配置 | local-only integrity |
+| 写入前 hook 基线 | 9 条既有 hook；Claudio/WorkBuddy 自有条目为 0 | redacted structural summary |
+
+### Connect、真实回调与同源状态
+
+Connect 只新增当前 Claudio root/binary 下的两条自有 command hook；写入后共有 11 条 hook，
+其中且仅其中 2 条属于当前 WorkBuddy installation。未知顶层字段与全部第三方 hook 的规范化
+JSON 哈希保持不变。Connect 后 configuration 为 `configured`，两条 binding 均先进入
+`awaiting_receipt`，没有把静态配置冒充 Current Activation。
+
+| Native event → Claudio Event | Binding ID | Current receipt | Sound outcome |
+|---|---|---|---|
+| `UserPromptSubmit` → `task_start` | `workbuddy:UserPromptSubmit:task_start:none:v1` | schema 2；current installation 与 scope 全部匹配 | `muted` |
+| `Stop` → `stop` | `workbuddy:Stop:stop:none:v1` | schema 2；current installation 与 scope 全部匹配 | `muted` |
+
+两条 receipt 均为正规文件、mode `0600`，且 host、surface、installation、binding、schema、
+native event、公共 Event 与完整 scope fingerprint 全部匹配。当前 effective profile 无 WorkBuddy
+Surface 覆盖，`task_start` 与 `stop` 均继承全局显式静音值，因此两个 `muted` outcome 一致。
+只有第一条 receipt 时，`Stop` 仍为 awaiting；Stop receipt 到达后，CLI status 与 doctor 才
+分别显示两条 current activation 和 `WorkBuddy 2/5 已就绪`。在 Stop 人工步骤中，用户确认
+为形成可停止任务又手动提交一次任务并点击 Stop；最终 latest `UserPromptSubmit` 与 latest `Stop`
+因此构成同一组明确人工触发、匹配当前 scope 的 current evidence。更早的一组历史继续按保留契约
+存在，但不参与最终闭环的人工 provenance 断言。配置始终只有一个对应自有 hook，不存在重复安装
+条目。
+
+GUI 人工核对确认两条 `muted` current receipt、2/5 状态，以及 `StopFailure`、`Notification`、
+`SubagentStop` 始终为 notImplemented。GUI 没有单独展示或人工抄录完整 installation UUID 与
+scope fingerprint；这两个匹配事实来自 CLI、active-installation marker 与 receipt 的交叉核对，
+不把 UI 可见性夸大为完整原始身份展示。
+
+### Disconnect 与保留性证明
+
+Disconnect 后的只读 preflight 采集于 `2026-08-23T16:37:37Z`，绑定 commit
+`c88c02a892e4479efc6fc0f433db60955e12044d`。WorkBuddy 回到 `not_configured`、
+Current Activation `none`，active installation marker 已移除；两条 binding 回到
+`implemented_not_activated`，三条未实现能力保持不变。
+
+| 保留项 | Disconnect 后结果 |
+|---|---|
+| WorkBuddy 未知字段与第三方 hooks | Disconnect 后规范化 JSON 摘要与写入前一致；9 条既有 hook 全部保留，自有条目为 0 |
+| 声音默认值与 Surface 覆盖 | Disconnect 后规范化配置摘要与写入前一致 |
+| 备份 | 独立 pre-Connect 备份与一次性 WorkBuddy 备份均保留 |
+| 脱敏证据 | 两个 latest receipt 与 retained receipt history 均保留；Disconnect 后因 current installation 已撤销，历史不能重新点亮 Current Activation |
+| 其它宿主 | 既有 Claude Code / Codex installation 与冲突状态未修改；doctor 总体 failure 仍来自这两个 #15 范围外事实 |
+
+本闭环未发现需要放宽 receipt、scope、配置事务或 fail-closed 契约的缺陷。执行中一度使用了
+会把 JSON 布尔 `false` 错当回退条件的 `jq //` 诊断表达式；改用 `has(key)` 后确认 effective
+profile 与两个 `muted` receipt 一致，该诊断错误未修改任何产品代码或用户配置。
+
 ## 自动化与分发门禁
 
 - [ ] `workflow_dispatch(version=0.1.0)` 从 `main` 完成，且只产生 SHA 绑定的 Actions artifact。
