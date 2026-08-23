@@ -37,6 +37,7 @@ func runHostIntegrationModelSuites() {
 
             let locator = HostExecutableLocator.standard(
                 environmentPath: "/usr/bin:/bin",
+                environment: [:],
                 homeDirectory: root)
             let claudeRunner = ActivationScopeCommandRunner(
                 result: .completed(exitCode: 0, stdout: "2.1.207 (Claude Code)\n"))
@@ -50,10 +51,10 @@ func runHostIntegrationModelSuites() {
                 commandRunner: codexRunner)
 
             expect(
-                claudeRunner.executablePaths == [claude.resolvingSymlinksInPath().path],
+                claudeRunner.executablePaths == [claude.path],
                 "Claude scope 必须直接执行 ~/.local/bin 的绝对路径，不能交给 GUI PATH 查找")
             expect(
-                codexRunner.executablePaths == [codex.resolvingSymlinksInPath().path],
+                codexRunner.executablePaths == [codex.path],
                 "Codex scope 必须从 NVM 目录解析绝对路径，不能依赖 Finder PATH")
             expect(
                 claudeScope?.contains("host=2.1.207 (Claude Code)") == true,
@@ -68,6 +69,74 @@ func runHostIntegrationModelSuites() {
                 HostActivationScope.codex(executableLocator: nvmOnlyLocator)?
                     .contains("host=cli=codex-cli 0.43.0") == true,
                 "绝对 npm shim 的 /usr/bin/env node 必须从解析后的 NVM 目录启动")
+        }
+    }
+
+    suite("activation scope：Volta/mise dispatcher 必须通过原始 shim 路径执行") {
+        withTempDirectory { root in
+            let shimDirectory = root.appendingPathComponent(".volta/bin", isDirectory: true)
+            let dispatcher = shimDirectory.appendingPathComponent("volta-shim")
+            let claude = shimDirectory.appendingPathComponent("claude")
+            let codex = shimDirectory.appendingPathComponent("codex")
+            writeFixture(
+                """
+                #!/bin/sh
+                case "${0##*/}" in
+                    claude) printf '2.1.207 (Claude Code)\\n' ;;
+                    codex) printf 'codex-cli 0.42.0\\n' ;;
+                    *) exit 64 ;;
+                esac
+                """,
+                to: dispatcher)
+            try! FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: dispatcher.path)
+            try! FileManager.default.createSymbolicLink(
+                atPath: claude.path,
+                withDestinationPath: dispatcher.path)
+            try! FileManager.default.createSymbolicLink(
+                atPath: codex.path,
+                withDestinationPath: dispatcher.path)
+
+            let locator = HostExecutableLocator(searchDirectories: [shimDirectory])
+            let claudeScope = HostActivationScope.claudeCode(executableLocator: locator)
+            let codexScope = HostActivationScope.codex(executableLocator: locator)
+
+            expect(locator.executablePath(command: "claude") == claude.path, "必须保留 claude shim 路径")
+            expect(locator.executablePath(command: "codex") == codex.path, "必须保留 codex shim 路径")
+            expect(
+                claudeScope?.contains("host=2.1.207 (Claude Code)") == true,
+                "Claude dispatcher 必须根据 argv[0] 生成版本身份")
+            expect(
+                codexScope?.contains("host=cli=codex-cli 0.42.0") == true,
+                "Codex dispatcher 必须根据 argv[0] 生成版本身份")
+        }
+    }
+
+    suite("activation scope：mise 自定义、XDG、默认与兼容 shim 目录均可发现") {
+        withTempDirectory { root in
+            let miseDataDirectory = root.appendingPathComponent("custom-mise", isDirectory: true)
+            let xdgDataDirectory = root.appendingPathComponent("xdg-data", isDirectory: true)
+            let locator = HostExecutableLocator.standard(
+                environmentPath: "/usr/bin:/bin",
+                environment: [
+                    "MISE_DATA_DIR": miseDataDirectory.path,
+                    "XDG_DATA_HOME": xdgDataDirectory.path,
+                ],
+                homeDirectory: root)
+            let paths = locator.searchDirectories.map(\.path)
+            let expectedMisePaths = [
+                miseDataDirectory.appendingPathComponent("shims", isDirectory: true).path,
+                xdgDataDirectory.appendingPathComponent("mise/shims", isDirectory: true).path,
+                root.appendingPathComponent(".local/share/mise/shims", isDirectory: true).path,
+                root.appendingPathComponent(".mise/shims", isDirectory: true).path,
+            ]
+            let positions = expectedMisePaths.compactMap { paths.firstIndex(of: $0) }
+
+            expect(positions.count == expectedMisePaths.count, "mise 的四种数据目录必须全部进入候选")
+            expect(
+                zip(positions, positions.dropFirst()).allSatisfy { $0.0 < $0.1 },
+                "mise 候选必须按显式配置、XDG、默认、兼容目录排序")
         }
     }
 

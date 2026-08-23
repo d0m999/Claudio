@@ -1,8 +1,9 @@
 import Foundation
 
 /// Resolves host CLIs without assuming a Finder/LaunchServices process inherited the user's shell
-/// `PATH`. Every returned path is absolute and points at an executable regular file; callers can
-/// therefore invoke it directly instead of handing a bare command back to `/usr/bin/env`.
+/// `PATH`. Every returned path is absolute and resolves to an executable regular file; callers can
+/// invoke that exact path, including its shim basename, instead of handing a bare command back to
+/// `/usr/bin/env`.
 public struct HostExecutableLocator: Sendable {
     public let searchDirectories: [URL]
 
@@ -21,11 +22,13 @@ public struct HostExecutableLocator: Sendable {
     }
 
     /// GUI `PATH` remains the first choice when it is useful. Explicit per-user installation roots
-    /// then cover native installers and common Node version managers before system package-manager
-    /// roots. NVM versions are numeric-descending so a GUI process with no shell-selected version
-    /// still makes a deterministic choice.
+    /// then cover native installers and common Node version managers, including configured and
+    /// default mise data roots, before system package-manager roots. NVM versions are
+    /// numeric-descending so a GUI process with no shell-selected version still makes a
+    /// deterministic choice.
     public static func standard(
         environmentPath: String? = ProcessInfo.processInfo.environment["PATH"],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
         fileManager: FileManager = .default
     ) -> HostExecutableLocator {
@@ -39,7 +42,15 @@ public struct HostExecutableLocator: Sendable {
             ".codex/bin",
             ".volta/bin",
             ".asdf/shims",
-            ".mise/shims",
+        ].map { homeDirectory.appendingPathComponent($0, isDirectory: true) }
+        let miseDirectories = [
+            absoluteDirectory(environment["MISE_DATA_DIR"]),
+            absoluteDirectory(environment["XDG_DATA_HOME"])?
+                .appendingPathComponent("mise", isDirectory: true),
+            homeDirectory.appendingPathComponent(".local/share/mise", isDirectory: true),
+            homeDirectory.appendingPathComponent(".mise", isDirectory: true),
+        ].compactMap { $0?.appendingPathComponent("shims", isDirectory: true) }
+        let remainingUserDirectories = [
             ".fnm/current/bin",
             ".npm-global/bin",
             "Library/pnpm",
@@ -56,24 +67,31 @@ public struct HostExecutableLocator: Sendable {
         ]
         return HostExecutableLocator(
             searchDirectories:
-                pathDirectories + userDirectories + nvmDirectories + systemDirectories)
+                pathDirectories + userDirectories + miseDirectories + remainingUserDirectories
+                + nvmDirectories + systemDirectories)
     }
 
     public func executablePath(command: String, fileManager: FileManager = .default) -> String? {
         guard !command.isEmpty, !command.contains("/") else { return nil }
         for directory in searchDirectories {
             let candidate = directory.appendingPathComponent(command, isDirectory: false)
-                .resolvingSymlinksInPath()
                 .standardizedFileURL
+            let validationTarget = candidate.resolvingSymlinksInPath().standardizedFileURL
             var isDirectory: ObjCBool = false
-            guard fileManager.fileExists(atPath: candidate.path, isDirectory: &isDirectory),
+            guard fileManager.fileExists(atPath: validationTarget.path, isDirectory: &isDirectory),
                 !isDirectory.boolValue,
-                fileManager.isExecutableFile(atPath: candidate.path),
-                (try? candidate.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+                fileManager.isExecutableFile(atPath: validationTarget.path),
+                (try? validationTarget.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile)
+                    == true
             else { continue }
             return candidate.path
         }
         return nil
+    }
+
+    private static func absoluteDirectory(_ path: String?) -> URL? {
+        guard let path, path.hasPrefix("/") else { return nil }
+        return URL(fileURLWithPath: path, isDirectory: true)
     }
 
     private static func nvmNodeBinDirectories(
@@ -173,8 +191,10 @@ public enum HostActivationScope {
         guard let executablePath = executableLocator.executablePath(command: command) else {
             return nil
         }
-        let resolvedRunner = commandRunner ?? SystemCommandRunner(
-            environmentOverrides: ["PATH": executableLocator.executableSearchPath])
+        let resolvedRunner =
+            commandRunner
+            ?? SystemCommandRunner(
+                environmentOverrides: ["PATH": executableLocator.executableSearchPath])
         switch resolvedRunner.run(
             executablePath: executablePath,
             arguments: ["--version"],
