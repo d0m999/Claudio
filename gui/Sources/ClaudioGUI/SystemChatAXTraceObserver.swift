@@ -6,15 +6,104 @@ import ClaudioGUICore
 import Foundation
 import Security
 
-/// 系统 AX 边界只接受封闭枚举，调用方无法传入任意属性名。
+private enum ChatAXAttributeReadFailure: Error {
+    case unreadable
+}
+
+private final class SystemChatAXReadBudget {
+    private static let totalSeconds: TimeInterval = 0.25
+    private static let maximumQuerySeconds: Float = 0.05
+    private static let minimumQuerySeconds: TimeInterval = 0.001
+
+    private let deadline: TimeInterval
+
+    init(startedAt: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        deadline = startedAt + Self.totalSeconds
+    }
+
+    var hasRemainingTime: Bool {
+        deadline - ProcessInfo.processInfo.systemUptime >= Self.minimumQuerySeconds
+    }
+
+    func prepareForMessaging(_ element: AXUIElement) -> Bool {
+        let remaining = deadline - ProcessInfo.processInfo.systemUptime
+        guard remaining >= Self.minimumQuerySeconds else { return false }
+        return AXUIElementSetMessagingTimeout(
+            element,
+            min(Self.maximumQuerySeconds, Float(remaining))) == .success
+    }
+}
+
 private struct SystemChatAXAttributeReader {
     let approvedAttributes: Set<ChatAXApprovedAttribute>
+    private let budget: SystemChatAXReadBudget
+
+    init(
+        approvedAttributes: Set<ChatAXApprovedAttribute>,
+        budget: SystemChatAXReadBudget = SystemChatAXReadBudget()
+    ) {
+        self.approvedAttributes = approvedAttributes
+        self.budget = budget
+    }
+
+    func prepareForMessaging(_ element: AXUIElement) -> Bool {
+        budget.prepareForMessaging(element)
+    }
+
+    var hasRemainingTime: Bool { budget.hasRemainingTime }
+
+    func element(
+        _ relation: ChatAXApprovedRelation,
+        from element: AXUIElement
+    ) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard
+            prepareForMessaging(element),
+            AXUIElementCopyAttributeValue(element, relation.rawValue as CFString, &value)
+                == .success,
+            let value,
+            CFGetTypeID(value) == AXUIElementGetTypeID()
+        else {
+            return nil
+        }
+        return unsafeDowncast(value, to: AXUIElement.self)
+    }
+
+    func string(
+        _ attribute: ChatAXApprovedAttribute,
+        from element: AXUIElement,
+        maximumUTF8Count: Int
+    ) -> Result<String?, ChatAXAttributeReadFailure> {
+        guard approvedAttributes.contains(attribute), prepareForMessaging(element) else {
+            return .failure(.unreadable)
+        }
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(
+            element, attribute.rawValue as CFString, &value)
+        if result == .attributeUnsupported || result == .noValue {
+            return .success(nil)
+        }
+        guard result == .success, let string = value as? String else {
+            return .failure(.unreadable)
+        }
+        guard
+            !string.isEmpty,
+            string.utf8.count <= maximumUTF8Count,
+            string == string.trimmingCharacters(in: .whitespacesAndNewlines),
+            !string.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+        else {
+            return .failure(.unreadable)
+        }
+        return .success(string)
+    }
 
     func integer(
         _ attribute: ChatAXApprovedAttribute,
         from element: AXUIElement
     ) -> Int? {
-        guard approvedAttributes.contains(attribute) else { return nil }
+        guard approvedAttributes.contains(attribute), prepareForMessaging(element) else {
+            return nil
+        }
         var value: CFTypeRef?
         guard
             AXUIElementCopyAttributeValue(element, attribute.rawValue as CFString, &value)
@@ -24,6 +113,127 @@ private struct SystemChatAXAttributeReader {
             return nil
         }
         return number.intValue
+    }
+}
+
+/// 只沿当前焦点到当前窗口的 parent 链寻找最靠近窗口的已标识 anchor；绝不请求 children 或正文属性。
+private struct SystemChatAXSurfaceSignatureReader {
+    private static let approvedAttributes: Set<ChatAXApprovedAttribute> = [
+        .identifier, .role, .subrole,
+    ]
+
+    private let reader = SystemChatAXAttributeReader(approvedAttributes: approvedAttributes)
+
+    func readAnchorFacts(
+        applicationElement: AXUIElement,
+        expectedProcessIdentifier: pid_t
+    ) -> ChatAXSurfaceAnchorFacts? {
+        guard
+            reader.prepareForMessaging(applicationElement),
+            belongsToTarget(applicationElement, expectedProcessIdentifier)
+        else {
+            return nil
+        }
+        guard
+            let focusedWindow = reader.element(.focusedWindow, from: applicationElement),
+            let focusedElement = reader.element(.focusedUIElement, from: applicationElement),
+            belongsToTarget(focusedWindow, expectedProcessIdentifier),
+            belongsToTarget(focusedElement, expectedProcessIdentifier),
+            let sampledLineage = lineage(
+                from: focusedElement,
+                through: focusedWindow,
+                expectedProcessIdentifier: expectedProcessIdentifier),
+            let facts = anchorFacts(in: sampledLineage),
+            let confirmedWindow = reader.element(.focusedWindow, from: applicationElement),
+            let confirmedElement = reader.element(.focusedUIElement, from: applicationElement),
+            CFEqual(confirmedWindow, focusedWindow),
+            CFEqual(confirmedElement, focusedElement),
+            let confirmedLineage = lineage(
+                from: confirmedElement,
+                through: confirmedWindow,
+                expectedProcessIdentifier: expectedProcessIdentifier),
+            lineagesAreEqual(sampledLineage, confirmedLineage),
+            anchorFacts(in: confirmedLineage) == facts,
+            reader.hasRemainingTime
+        else {
+            return nil
+        }
+        return facts
+    }
+
+    private func lineage(
+        from focusedElement: AXUIElement,
+        through focusedWindow: AXUIElement,
+        expectedProcessIdentifier: pid_t
+    ) -> [AXUIElement]? {
+        var lineage = [focusedElement]
+        var current = focusedElement
+        if CFEqual(current, focusedWindow) { return lineage }
+
+        for _ in 0..<ChatAXSurfaceAnchorFacts.maximumAnchorDepth {
+            guard
+                let parent = reader.element(.parent, from: current),
+                belongsToTarget(parent, expectedProcessIdentifier),
+                !lineage.contains(where: { CFEqual($0, parent) })
+            else {
+                return nil
+            }
+            lineage.append(parent)
+            if CFEqual(parent, focusedWindow) { return lineage }
+            current = parent
+        }
+        return nil
+    }
+
+    private func lineagesAreEqual(_ lhs: [AXUIElement], _ rhs: [AXUIElement]) -> Bool {
+        lhs.count == rhs.count && zip(lhs, rhs).allSatisfy(CFEqual)
+    }
+
+    private func anchorFacts(in focusedToWindowLineage: [AXUIElement])
+        -> ChatAXSurfaceAnchorFacts?
+    {
+        let windowToFocused = focusedToWindowLineage.reversed()
+        guard let window = windowToFocused.first else { return nil }
+        guard
+            case .success(let windowRole?) = reader.string(
+                .role, from: window, maximumUTF8Count: 128),
+            case .success(let windowSubrole) = reader.string(
+                .subrole, from: window, maximumUTF8Count: 128)
+        else {
+            return nil
+        }
+
+        for (depth, element) in windowToFocused.dropFirst().enumerated() {
+            guard
+                case .success(let role?) = reader.string(
+                    .role, from: element, maximumUTF8Count: 128),
+                case .success(let subrole) = reader.string(
+                    .subrole, from: element, maximumUTF8Count: 128),
+                case .success(let identifier) = reader.string(
+                    .identifier, from: element, maximumUTF8Count: 256)
+            else {
+                return nil
+            }
+            guard let identifier else { continue }
+            return ChatAXSurfaceAnchorFacts(
+                windowRole: windowRole,
+                windowSubrole: windowSubrole,
+                anchorRole: role,
+                anchorSubrole: subrole,
+                anchorIdentifier: identifier,
+                anchorDepth: depth + 1)
+        }
+        return nil
+    }
+
+    private func belongsToTarget(
+        _ element: AXUIElement,
+        _ expectedProcessIdentifier: pid_t
+    ) -> Bool {
+        guard reader.prepareForMessaging(element) else { return false }
+        var observedProcessIdentifier: pid_t = 0
+        return AXUIElementGetPid(element, &observedProcessIdentifier) == .success
+            && observedProcessIdentifier == expectedProcessIdentifier
     }
 }
 
@@ -59,7 +269,7 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         guard
             let identity = identity(
                 for: application,
-                requiredFrameworkNames: requirements.frameworkNames)
+                requirements: requirements)
         else {
             return .failure(.identityUnreadable)
         }
@@ -90,6 +300,9 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         }
 
         let applicationElement = AXUIElementCreateApplication(target.processIdentifier)
+        let attributeReader = SystemChatAXAttributeReader(
+            approvedAttributes: approvedAttributes)
+        guard attributeReader.prepareForMessaging(applicationElement) else { return false }
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         let notifications: [CFString] = [
             kAXFocusedUIElementChangedNotification as CFString,
@@ -101,7 +314,12 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         let registered = notifications.filter {
             AXObserverAddNotification(createdObserver, applicationElement, $0, refcon) == .success
         }
-        guard !registered.isEmpty else { return false }
+        guard registered.count == notifications.count, targetStillMatches(target) else {
+            for notification in registered {
+                AXObserverRemoveNotification(createdObserver, applicationElement, notification)
+            }
+            return false
+        }
 
         self.target = target
         self.approvedAttributes = approvedAttributes
@@ -142,14 +360,26 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
         targetDidInvalidate = nil
     }
 
-    fileprivate func handle(element: AXUIElement, targetWasDestroyed: Bool) {
-        guard target != nil else { return }
-        let kind: ChatAXStructuralSignalKind
+    fileprivate func handle(
+        element: AXUIElement,
+        targetWasDestroyed: Bool
+    ) {
+        guard let target else { return }
         if targetWasDestroyed {
-            kind = .applicationExited
-        } else {
-            kind = .unrelatedStructureChanged
+            if let applicationElement, CFEqual(element, applicationElement) {
+                emitSignal(kind: .applicationExited, element: element)
+            }
+            invalidateTarget()
+            return
         }
+        guard elementBelongsToTarget(element, target: target), surfaceStillMatches(target) else {
+            invalidateTarget()
+            return
+        }
+        emitSignal(kind: .unrelatedStructureChanged, element: element)
+    }
+
+    private func emitSignal(kind: ChatAXStructuralSignalKind, element: AXUIElement) {
         let reader = SystemChatAXAttributeReader(approvedAttributes: approvedAttributes)
         let windowOrdinal = max(0, reader.integer(.windowNumber, from: element) ?? 0)
         let elapsed = max(
@@ -162,9 +392,6 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
                 windowOrdinal: windowOrdinal,
                 kind: kind))
         nextSequence += 1
-        if case .applicationExited = kind {
-            invalidateTarget()
-        }
     }
 
     private func validateBoundTarget() {
@@ -188,16 +415,45 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
             !application.isTerminated,
             let observedIdentity = identity(
                 for: application,
-                requiredFrameworkNames: Set(target.identity.frameworks.map(\.name)))
+                requirements: ChatAXInspectionRequirements(
+                    bundleIdentifiers: [target.identity.bundleIdentifier],
+                    frameworkNames: Set(target.identity.frameworks.map(\.name)),
+                    surfaceSignatures: [target.identity.surfaceSignature]))
         else {
             return false
         }
         return observedIdentity == target.identity
     }
 
+    private func surfaceStillMatches(_ target: ChatAXObservedTarget) -> Bool {
+        guard
+            let applicationElement,
+            let anchorFacts = SystemChatAXSurfaceSignatureReader().readAnchorFacts(
+                applicationElement: applicationElement,
+                expectedProcessIdentifier: target.processIdentifier),
+            let verifiedSurface = ChatAXSurfaceVerifier.verifyChat(
+                anchorFacts: anchorFacts,
+                allowedSignatures: [target.identity.surfaceSignature])
+        else {
+            return false
+        }
+        return verifiedSurface.signature == target.identity.surfaceSignature
+    }
+
+    private func elementBelongsToTarget(
+        _ element: AXUIElement,
+        target: ChatAXObservedTarget
+    ) -> Bool {
+        let reader = SystemChatAXAttributeReader(approvedAttributes: [])
+        guard reader.prepareForMessaging(element) else { return false }
+        var observedProcessIdentifier: pid_t = 0
+        return AXUIElementGetPid(element, &observedProcessIdentifier) == .success
+            && observedProcessIdentifier == target.processIdentifier
+    }
+
     private func identity(
         for application: NSRunningApplication,
-        requiredFrameworkNames: Set<String>
+        requirements: ChatAXInspectionRequirements
     ) -> ChatAXTargetIdentity? {
         guard
             let bundleURL = application.bundleURL,
@@ -207,7 +463,14 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
                 forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
             let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
             let codeSignature = codeSignature(at: bundleURL),
-            let architecture = architecture(for: application)
+            let architecture = architecture(for: application),
+            let anchorFacts = SystemChatAXSurfaceSignatureReader().readAnchorFacts(
+                applicationElement: AXUIElementCreateApplication(
+                    application.processIdentifier),
+                expectedProcessIdentifier: application.processIdentifier),
+            let verifiedSurface = ChatAXSurfaceVerifier.verifyChat(
+                anchorFacts: anchorFacts,
+                allowedSignatures: requirements.surfaceSignatures)
         else {
             return nil
         }
@@ -216,20 +479,20 @@ final class SystemChatAXTraceObserver: ChatAXTraceObserving {
             bundleURL
             .appendingPathComponent("Contents", isDirectory: true)
             .appendingPathComponent("Frameworks", isDirectory: true)
-        let frameworks = requiredFrameworkNames.sorted().compactMap { name in
+        let frameworks = requirements.frameworkNames.sorted().compactMap { name in
             frameworkIdentity(
                 at: frameworksDirectory.appendingPathComponent(name, isDirectory: true),
                 name: name)
         }
-        guard frameworks.count == requiredFrameworkNames.count else { return nil }
-        return ChatAXTargetIdentity(
+        guard frameworks.count == requirements.frameworkNames.count else { return nil }
+        return ChatAXTargetIdentity.observedChatGPTDesktopAX(
             bundleIdentifier: bundleIdentifier,
             codeSignature: codeSignature,
             shortVersion: shortVersion,
             build: build,
             frameworks: frameworks,
             architecture: architecture,
-            surface: .chatGPTDesktopAX)
+            verifiedSurface: verifiedSurface)
     }
 
     private func frameworkIdentity(at url: URL, name: String) -> ChatAXFrameworkIdentity? {
@@ -302,7 +565,9 @@ private func systemChatAXObserverCallback(
         .takeUnretainedValue()
     let targetWasDestroyed = notification == kAXUIElementDestroyedNotification as CFString
     MainActor.assumeIsolated {
-        traceObserver.handle(element: element, targetWasDestroyed: targetWasDestroyed)
+        traceObserver.handle(
+            element: element,
+            targetWasDestroyed: targetWasDestroyed)
     }
 }
 

@@ -1,4 +1,5 @@
 import ClaudioCore
+import CryptoKit
 import Foundation
 
 public enum ChatAXCPUArchitecture: String, Codable, Sendable {
@@ -30,6 +31,134 @@ public struct ChatAXFrameworkIdentity: Codable, Equatable, Hashable, Sendable {
     }
 }
 
+/// 由封闭、非正文 AX 结构事实生成的 SHA-256。只保留摘要，不导出原始 identifier。
+public struct ChatAXSurfaceSignature: Codable, Equatable, Hashable, RawRepresentable, Sendable {
+    public let rawValue: String
+
+    public init?(rawValue: String) {
+        guard
+            rawValue.range(
+                of: "^[0-9a-f]{64}$",
+                options: .regularExpression) != nil
+        else {
+            return nil
+        }
+        self.rawValue = rawValue
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        let rawValue = try container.decode(String.self)
+        guard let signature = ChatAXSurfaceSignature(rawValue: rawValue) else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Chat AX surface signature must be a lowercase SHA-256 digest")
+        }
+        self = signature
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(rawValue)
+    }
+}
+
+/// GUI system adapter 与同包测试共享的 typed seam；原始 facts 只在调用栈内存活。
+package struct ChatAXSurfaceAnchorFacts: Equatable, Sendable {
+    package static let maximumAnchorDepth = 8
+
+    package let windowRole: String
+    package let windowSubrole: String?
+    package let anchorRole: String
+    package let anchorSubrole: String?
+    package let anchorIdentifier: String
+    package let anchorDepth: Int
+
+    package init?(
+        windowRole: String,
+        windowSubrole: String?,
+        anchorRole: String,
+        anchorSubrole: String?,
+        anchorIdentifier: String,
+        anchorDepth: Int
+    ) {
+        guard
+            Self.isValid(windowRole, maximumUTF8Count: 128),
+            Self.isValidOptional(windowSubrole, maximumUTF8Count: 128),
+            Self.isValid(anchorRole, maximumUTF8Count: 128),
+            Self.isValidOptional(anchorSubrole, maximumUTF8Count: 128),
+            Self.isValid(anchorIdentifier, maximumUTF8Count: 256),
+            (1...Self.maximumAnchorDepth).contains(anchorDepth)
+        else {
+            return nil
+        }
+        self.windowRole = windowRole
+        self.windowSubrole = windowSubrole
+        self.anchorRole = anchorRole
+        self.anchorSubrole = anchorSubrole
+        self.anchorIdentifier = anchorIdentifier
+        self.anchorDepth = anchorDepth
+    }
+
+    fileprivate var canonicalRepresentation: String {
+        [
+            "claudio.chat-ax-surface.v1",
+            "windowRole=\(Self.encode(windowRole))",
+            "windowSubrole=\(Self.encode(windowSubrole))",
+            "anchorRole=\(Self.encode(anchorRole))",
+            "anchorSubrole=\(Self.encode(anchorSubrole))",
+            "anchorIdentifier=\(Self.encode(anchorIdentifier))",
+            "anchorDepth=i\(anchorDepth)",
+        ].joined(separator: "\n")
+    }
+
+    private static func isValidOptional(_ value: String?, maximumUTF8Count: Int) -> Bool {
+        guard let value else { return true }
+        return isValid(value, maximumUTF8Count: maximumUTF8Count)
+    }
+
+    private static func isValid(_ value: String, maximumUTF8Count: Int) -> Bool {
+        !value.isEmpty
+            && value.utf8.count <= maximumUTF8Count
+            && value == value.trimmingCharacters(in: .whitespacesAndNewlines)
+            && !value.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
+    }
+
+    private static func encode(_ value: String?) -> String {
+        guard let value else { return "n" }
+        return "s\(value.utf8.count):\(value)"
+    }
+}
+
+extension ChatAXSurfaceSignature {
+    package static func v1(anchorFacts: ChatAXSurfaceAnchorFacts) -> ChatAXSurfaceSignature {
+        let digest = SHA256.hash(data: Data(anchorFacts.canonicalRepresentation.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return ChatAXSurfaceSignature(rawValue: digest)!
+    }
+}
+
+/// 只有 exact allowlist 验证器能创建；system adapter 不能自行把任意摘要标成 Chat。
+package struct ChatAXVerifiedChatSurface: Equatable, Sendable {
+    package let signature: ChatAXSurfaceSignature
+
+    fileprivate init(signature: ChatAXSurfaceSignature) {
+        self.signature = signature
+    }
+}
+
+package enum ChatAXSurfaceVerifier {
+    package static func verifyChat(
+        anchorFacts: ChatAXSurfaceAnchorFacts,
+        allowedSignatures: Set<ChatAXSurfaceSignature>
+    ) -> ChatAXVerifiedChatSurface? {
+        let observedSignature = ChatAXSurfaceSignature.v1(anchorFacts: anchorFacts)
+        guard allowedSignatures.contains(observedSignature) else { return nil }
+        return ChatAXVerifiedChatSurface(signature: observedSignature)
+    }
+}
+
 /// Tracer 只接受调用方已经从非 AX 内容边界取得的版本身份；这里没有 UI tree 或正文槽位。
 public struct ChatAXTargetIdentity: Codable, Equatable, Sendable {
     public let bundleIdentifier: String
@@ -39,6 +168,7 @@ public struct ChatAXTargetIdentity: Codable, Equatable, Sendable {
     public let frameworks: [ChatAXFrameworkIdentity]
     public let architecture: ChatAXCPUArchitecture
     public let surface: HostSurfaceID
+    public let surfaceSignature: ChatAXSurfaceSignature
 
     public init(
         bundleIdentifier: String,
@@ -47,7 +177,8 @@ public struct ChatAXTargetIdentity: Codable, Equatable, Sendable {
         build: String,
         frameworks: [ChatAXFrameworkIdentity],
         architecture: ChatAXCPUArchitecture,
-        surface: HostSurfaceID
+        surface: HostSurfaceID,
+        surfaceSignature: ChatAXSurfaceSignature
     ) {
         self.bundleIdentifier = bundleIdentifier
         self.codeSignature = codeSignature
@@ -56,16 +187,46 @@ public struct ChatAXTargetIdentity: Codable, Equatable, Sendable {
         self.frameworks = frameworks
         self.architecture = architecture
         self.surface = surface
+        self.surfaceSignature = surfaceSignature
+    }
+}
+
+extension ChatAXTargetIdentity {
+    /// 系统 adapter 的唯一 Chat 构造入口；surface 与摘要都来自不可伪造的 verified wrapper。
+    package static func observedChatGPTDesktopAX(
+        bundleIdentifier: String,
+        codeSignature: ChatAXCodeSignature,
+        shortVersion: String,
+        build: String,
+        frameworks: [ChatAXFrameworkIdentity],
+        architecture: ChatAXCPUArchitecture,
+        verifiedSurface: ChatAXVerifiedChatSurface
+    ) -> ChatAXTargetIdentity {
+        ChatAXTargetIdentity(
+            bundleIdentifier: bundleIdentifier,
+            codeSignature: codeSignature,
+            shortVersion: shortVersion,
+            build: build,
+            frameworks: frameworks,
+            architecture: architecture,
+            surface: .chatGPTDesktopAX,
+            surfaceSignature: verifiedSurface.signature)
     }
 }
 
 public struct ChatAXInspectionRequirements: Equatable, Sendable {
     public let bundleIdentifiers: Set<String>
     public let frameworkNames: Set<String>
+    public let surfaceSignatures: Set<ChatAXSurfaceSignature>
 
-    public init(bundleIdentifiers: Set<String>, frameworkNames: Set<String>) {
+    public init(
+        bundleIdentifiers: Set<String>,
+        frameworkNames: Set<String>,
+        surfaceSignatures: Set<ChatAXSurfaceSignature>
+    ) {
         self.bundleIdentifiers = bundleIdentifiers
         self.frameworkNames = frameworkNames
+        self.surfaceSignatures = surfaceSignatures
     }
 }
 
@@ -87,9 +248,11 @@ public struct ChatAXVersionAllowlist: Sendable {
     }
 
     public var inspectionRequirements: ChatAXInspectionRequirements {
-        ChatAXInspectionRequirements(
-            bundleIdentifiers: Set(identities.map(\.bundleIdentifier)),
-            frameworkNames: Set(identities.flatMap(\.frameworks).map(\.name)))
+        let chatIdentities = identities.filter { $0.surface == .chatGPTDesktopAX }
+        return ChatAXInspectionRequirements(
+            bundleIdentifiers: Set(chatIdentities.map(\.bundleIdentifier)),
+            frameworkNames: Set(chatIdentities.flatMap(\.frameworks).map(\.name)),
+            surfaceSignatures: Set(chatIdentities.map(\.surfaceSignature)))
     }
 
     public func allows(_ candidate: ChatAXTargetIdentity) -> Bool {
@@ -105,6 +268,7 @@ public struct ChatAXVersionAllowlist: Sendable {
                 && allowed.architecture == candidate.architecture
                 && allowed.surface == .chatGPTDesktopAX
                 && candidate.surface == .chatGPTDesktopAX
+                && allowed.surfaceSignature == candidate.surfaceSignature
         }
     }
 }
@@ -164,6 +328,13 @@ public enum ChatAXApprovedAttribute: String, CaseIterable, Codable, Hashable, Se
     case selected = "AXSelected"
     case focused = "AXFocused"
     case windowNumber = "AXWindowNumber"
+}
+
+/// Surface 取样允许沿用的全部 AX 关系；不包含 children 或任意调用方字符串。
+package enum ChatAXApprovedRelation: String, CaseIterable, Sendable {
+    case focusedUIElement = "AXFocusedUIElement"
+    case focusedWindow = "AXFocusedWindow"
+    case parent = "AXParent"
 }
 
 /// 候选检测器的输入是封闭的结构/状态事实；类型上没有任意 AXValue 或文本字段。
@@ -362,8 +533,9 @@ public protocol ChatAXTraceObserving: AnyObject {
 
 public enum ChatAXTracerStartFailure: Equatable, Sendable {
     case guiNotAlive
-    case targetUnavailable
-    case identityMismatch
+    case invalidScenario
+    case targetInspectionFailed(ChatAXTargetInspectionFailure)
+    case allowlistMismatch
     case alreadyRunning
     case observerStartFailed
 }
@@ -441,17 +613,17 @@ public final class ChatAXTracerSession {
     ) -> ChatAXTracerStartOutcome {
         guard guiIsAlive else { return .refused(.guiNotAlive) }
         guard !isRunning else { return .refused(.alreadyRunning) }
-        guard scenarioNumber >= 0 else { return .refused(.identityMismatch) }
+        guard scenarioNumber >= 0 else { return .refused(.invalidScenario) }
 
         let target: ChatAXObservedTarget
         switch observer.inspectTarget(requirements: allowlist.inspectionRequirements) {
         case .success(let inspectedTarget):
             target = inspectedTarget
-        case .failure:
-            return .refused(.targetUnavailable)
+        case .failure(let failure):
+            return .refused(.targetInspectionFailed(failure))
         }
         guard allowlist.allows(target.identity) else {
-            return .refused(.identityMismatch)
+            return .refused(.allowlistMismatch)
         }
 
         isExplicitlyEnabled = true
@@ -481,7 +653,9 @@ public final class ChatAXTracerSession {
             evidence = nil
             return .refused(.observerStartFailed)
         }
-        guard isRunning else { return .refused(.targetUnavailable) }
+        guard isRunning else {
+            return .refused(.targetInspectionFailed(.targetUnavailable))
+        }
         return .started
     }
 
