@@ -72,6 +72,8 @@ public enum ClaudioColorHex {
     public static let claudeIndicatorLight = "BD6549"
     public static let codexIndicatorDark = "79C995"
     public static let codexIndicatorLight = "318A50"
+    public static let workBuddyIndicatorDark = "8DB5FF"
+    public static let workBuddyIndicatorLight = "3B6FC4"
 
     // MARK: UI 语义色（DESIGN.md「UI 语义色（提示 / 校验，独立于事件层）」表）
 

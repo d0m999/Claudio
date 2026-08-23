@@ -15,8 +15,10 @@ func runHostHookReceiptSuites() {
                 expect(false, "测试前提：必须先发布当前 Codex installation")
                 return
             }
-            let markerPermissions = (try? FileManager.default.attributesOfItem(
-                atPath: store.installationFile(host: .codex).path))?[.posixPermissions] as? NSNumber
+            let markerPermissions =
+                (try? FileManager.default.attributesOfItem(
+                    atPath: store.installationFile(host: .codex).path))?[.posixPermissions]
+                as? NSNumber
             expect(
                 markerPermissions.map { $0.intValue & 0o777 } == 0o600,
                 "active installation 标记也必须从最终路径保持 0600")
@@ -44,8 +46,8 @@ func runHostHookReceiptSuites() {
 
             expect(
                 Set(object.keys) == [
-                    "schema", "installation_id", "host", "native_event", "semantic_event",
-                    "timestamp", "playback_result",
+                    "schema", "installation_id", "host", "binding_id", "native_event",
+                    "semantic_event", "timestamp", "playback_result",
                 ],
                 "回执 schema 必须是封闭白名单，禁止 prompt/content/project/session/audio path 字段")
             expect(object["schema"] as? Int == 1, "首版回执 schema 必须固定为 1")
@@ -57,8 +59,9 @@ func runHostHookReceiptSuites() {
                 !String(decoding: data, as: UTF8.self).contains(root.path),
                 "脱敏播放结果与整份回执都不得泄露任何绝对路径")
 
-            let permissions = (try? FileManager.default.attributesOfItem(
-                atPath: receiptFile.path))?[.posixPermissions] as? NSNumber
+            let permissions =
+                (try? FileManager.default.attributesOfItem(
+                    atPath: receiptFile.path))?[.posixPermissions] as? NSNumber
             expect(
                 permissions.map { $0.intValue & 0o777 } == 0o600,
                 "最终回执权限必须是 0600，got \(permissions?.stringValue ?? "<missing>")")
@@ -67,6 +70,8 @@ func runHostHookReceiptSuites() {
                     host: .codex, nativeEvent: "PermissionRequest",
                     installationID: installationID)
                     == HostReceiptEvidence(
+                        bindingID: HostCapabilityCatalog.binding(
+                            host: .codex, nativeEvent: "PermissionRequest")!.id,
                         installationID: installationID,
                         nativeEvent: "PermissionRequest",
                         event: .notification,
@@ -82,8 +87,9 @@ func runHostHookReceiptSuites() {
                 receiptsRoot: root.appendingPathComponent("receipts", isDirectory: true),
                 locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
             let installationID = UUID(uuidString: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")!
-            guard case .success = store.activate(
-                host: .claudeCode, installationID: installationID)
+            guard
+                case .success = store.activate(
+                    host: .claudeCode, installationID: installationID)
             else {
                 expect(false, "测试前提：必须先发布当前 Claude Code installation")
                 return
@@ -144,8 +150,9 @@ func runHostHookReceiptSuites() {
                 installationsRoot: root.appendingPathComponent("write-failure-installations"),
                 installationLocksRoot: root.appendingPathComponent(
                     "write-failure-installation-locks"))
-            guard case .success = unwritableStore.activate(
-                host: .claudeCode, installationID: installationID)
+            guard
+                case .success = unwritableStore.activate(
+                    host: .claudeCode, installationID: installationID)
             else {
                 expect(false, "测试前提：回执目录失败不应被 installation marker 失败遮蔽")
                 return
@@ -164,8 +171,9 @@ func runHostHookReceiptSuites() {
                 installationsRoot: root.appendingPathComponent("lock-failure-installations"),
                 installationLocksRoot: root.appendingPathComponent(
                     "lock-failure-installation-locks"))
-            guard case .success = lockFailureStore.activate(
-                host: .claudeCode, installationID: installationID)
+            guard
+                case .success = lockFailureStore.activate(
+                    host: .claudeCode, installationID: installationID)
             else {
                 expect(false, "测试前提：事件锁失败不应被 installation marker 失败遮蔽")
                 return
@@ -278,6 +286,8 @@ func runHostHookReceiptSuites() {
                     nativeEvent: "PermissionRequest",
                     installationID: installationID)
                     == HostReceiptEvidence(
+                        bindingID: HostCapabilityCatalog.binding(
+                            host: .codex, nativeEvent: "PermissionRequest")!.id,
                         installationID: installationID,
                         nativeEvent: "PermissionRequest",
                         event: .notification,
@@ -317,7 +327,8 @@ func runHostHookReceiptSuites() {
                     == nil,
                 "旧配置或断开后的迟到回调不能点亮当前 installation")
 
-            guard let file = store.receiptFile(host: .codex, nativeEvent: "PermissionRequest") else {
+            guard let file = store.receiptFile(host: .codex, nativeEvent: "PermissionRequest")
+            else {
                 expect(false, "PermissionRequest 必须有回执路径")
                 return
             }
@@ -409,6 +420,8 @@ func runHostHookReceiptSuites() {
                 store.receiptEvidence(
                     host: .codex, nativeEvent: "Stop", installationID: currentID)
                     == HostReceiptEvidence(
+                        bindingID: HostCapabilityCatalog.binding(
+                            host: .codex, nativeEvent: "Stop")!.id,
                         installationID: currentID,
                         nativeEvent: "Stop",
                         event: .stop,
@@ -447,6 +460,78 @@ func runHostHookReceiptSuites() {
                     host: .claudeCode, nativeEvent: "Stop", installationID: installationID)
                     == nil,
                 "迟到回执不得重新点亮已断开的 installation")
+        }
+    }
+
+    suite("HostHookReceiptStore：历史按 surface 保留 20 条 / 30 天，断开保留且可显式清除") {
+        withTempDirectory { root in
+            let store = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
+            let installationID = UUID(uuidString: "04040404-4444-4444-8444-444444444444")!
+            guard
+                case .success = store.activate(
+                    host: .workBuddy, installationID: installationID, scopeFingerprint: "v1")
+            else {
+                expect(false, "测试前提：WorkBuddy installation 必须发布")
+                return
+            }
+            let base = Date()
+            for index in 0..<25 {
+                let receipt = HostHookReceipt(
+                    installationID: installationID,
+                    host: .workBuddy,
+                    nativeEvent: "UserPromptSubmit",
+                    semanticEvent: .taskStart,
+                    timestamp: base.addingTimeInterval(Double(index)),
+                    playbackResult: .played)
+                expect(store.store(receipt) == .success(.written), "第 \(index) 条回执必须可写")
+            }
+
+            let bounded = store.receiptHistory(host: .workBuddy, now: base)
+            expect(
+                bounded.count == HostHookReceiptStore.historyLimitPerSurface,
+                "每个 surface 只保留最近 20 条，得到 \(bounded.count)")
+            expect(
+                bounded.first?.timestamp == base.addingTimeInterval(24),
+                "历史 API 必须按事件时间倒序返回最近回执")
+
+            guard
+                case .success = store.deactivate(
+                    host: .workBuddy, installationID: installationID)
+            else {
+                expect(false, "断开必须成功撤销 activation")
+                return
+            }
+            expect(
+                store.receiptHistory(host: .workBuddy, now: base).count
+                    == HostHookReceiptStore.historyLimitPerSurface,
+                "断开只撤销 activation，不得删除脱敏历史")
+
+            let historyDirectory = store.historyRoot.appendingPathComponent(
+                HostSurfaceID.workBuddy.rawValue, isDirectory: true)
+            if let expired = try? FileManager.default.contentsOfDirectory(
+                at: historyDirectory, includingPropertiesForKeys: nil
+            ).first {
+                try? FileManager.default.setAttributes(
+                    [.modificationDate: base.addingTimeInterval(-31 * 24 * 60 * 60)],
+                    ofItemAtPath: expired.path)
+            } else {
+                expect(false, "测试前提：历史目录必须含回执")
+            }
+            expect(
+                store.receiptHistory(host: .workBuddy, now: base).count
+                    == HostHookReceiptStore.historyLimitPerSurface - 1,
+                "超过 30 天的历史必须在读取时失效")
+
+            if case .failure(let error) = store.clearReceiptHistory(host: .workBuddy) {
+                expect(false, "用户显式清除必须成功：\(error.description)")
+            }
+            expect(store.receiptHistory(host: .workBuddy, now: base).isEmpty, "清除后历史必须为空")
+            expect(
+                store.receiptFile(host: .workBuddy, nativeEvent: "UserPromptSubmit")
+                    .map { FileManager.default.fileExists(atPath: $0.path) } == true,
+                "清除历史不得删除 current 稳定回执")
         }
     }
 }

@@ -57,6 +57,8 @@ public struct PanelView: View {
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
     private var interfaceTextSizeRaw = ClaudioInterfaceTextSize.defaultValue.rawValue
+    @AppStorage("claudio.panel.selected-surface")
+    private var selectedSurfaceRaw = "global"
     /// The two host cards share the tallest measured natural card height. The measurement is
     /// kept at the panel level so a width, text-size, or host-state change re-runs the same
     /// equalization for both buttons.
@@ -174,6 +176,7 @@ public struct PanelView: View {
         // `popoverDidShow` 的 AppKit 时序：一个没实测过的语义。`showCount` 是这两个信号里可靠的那个
         // （见 ``PanelFocusCoordinator`` 的文档），所以播报只挂它。
         .onAppear {
+            synchronizeSelectedSoundSurface()
             applyFirstFocus()
             onPanelWidthChange(layoutAdaptation.panelWidth)
         }
@@ -231,7 +234,8 @@ public struct PanelView: View {
                 let packName = panelModel.selectedPackMetadata.displayName
                 let l10n = ClaudioL10n(language: languageStore.language)
                 let base = l10n.format(.panelHeader, Int64(sourceCount))
-                let header = packName.isEmpty
+                let header =
+                    packName.isEmpty
                     ? base
                     : l10n.format(.panelHeaderWithPack, Int64(sourceCount), packName as NSString)
                 let pendingReports = bootstrapReports.pendingAnnouncementRecords()
@@ -266,12 +270,14 @@ public struct PanelView: View {
                 Spacer(minLength: 8)
                 interfaceOptionsMenu
             }
-            Text(selectedPackDisplayName.isEmpty
-                ? l10n.text(.panelSelectedPackNone)
-                : selectedPackDisplayName)
-                .font(.system(size: 14 * typeScale, weight: .semibold, design: .rounded))
-                .foregroundColor(ClaudioTheme.text(colorScheme))
-                .lineLimit(2)
+            Text(
+                selectedPackDisplayName.isEmpty
+                    ? l10n.text(.panelSelectedPackNone)
+                    : selectedPackDisplayName
+            )
+            .font(.system(size: 14 * typeScale, weight: .semibold, design: .rounded))
+            .foregroundColor(ClaudioTheme.text(colorScheme))
+            .lineLimit(2)
             Text(audibleEventSummary)
                 .font(.system(size: 11 * typeScale, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
@@ -296,9 +302,12 @@ public struct PanelView: View {
     private var headerAccessibilityLabel: String {
         let packName = selectedPackDisplayName
         let base = l10n.format(.panelHeader, Int64(hostIntegrations.content.sourceRows.count))
-        let withPack = packName.isEmpty
+        let withPack =
+            packName.isEmpty
             ? base
-            : l10n.format(.panelHeaderWithPack, Int64(hostIntegrations.content.sourceRows.count), packName as NSString)
+            : l10n.format(
+                .panelHeaderWithPack, Int64(hostIntegrations.content.sourceRows.count),
+                packName as NSString)
         let separator = languageStore.language == .english ? ", " : "，"
         return "\(withPack)\(separator)\(audibleEventSummary)"
     }
@@ -312,8 +321,9 @@ public struct PanelView: View {
                     language: languageStore.language,
                     focusedTarget: $focusedTarget,
                     equalizedHeight: hostSourceCardHeight,
-                    onSelect: { onManageIntegrations(.hostSource(row.host)) })
-                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                    onSelect: { onManageIntegrations(.hostSource(row.host)) }
+                )
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
         }
         .onPreferenceChange(HostSourceCardHeightPreferenceKey.self) { heights in
@@ -335,7 +345,8 @@ public struct PanelView: View {
         panelModel.eventRows.filter {
             eventPreviewAvailability(
                 coverage: $0.coverage,
-                masterVolume: panelModel.config.masterVolume).isAvailable
+                masterVolume: panelModel.config.masterVolume
+            ).isAvailable
         }.count
     }
 
@@ -357,6 +368,7 @@ public struct PanelView: View {
     @ViewBuilder
     private var operationalPanel: some View {
         VStack(alignment: .leading, spacing: 8) {
+            soundSurfaceSelector
             // D23 定稿④：路由到已经存在的自救路径，零新机制。`configState.topContent` 决定这一块顶部
             // 内容显示什么——`.events`（= `.operational`）是今天这五行事件覆盖度 + 主音量滑块；`.needsPack`
             //（还没有人选过包）换成画廊空态「先选包」，`PackGalleryView` 本身仍然照常渲染在下面（自救路径
@@ -374,7 +386,7 @@ public struct PanelView: View {
             switch panelModel.configState.topContent {
             case .events:
                 if panelModel.libraryPresentationState.hasUsableSnapshot {
-                        Text("\(selectedPackDisplayName) · \(l10n.text(.panelEvents))")
+                    Text("\(selectedPackDisplayName) · \(l10n.text(.panelEvents))")
                         .font(.system(size: 11 * typeScale, weight: .semibold))
                         .foregroundColor(ClaudioColor.textSecondary(colorScheme))
                     ForEach(panelModel.eventRows, id: \.event) { row in
@@ -451,11 +463,15 @@ public struct PanelView: View {
             ForEach(
                 Array(
                     panelWriteFailures(
-                        muteError: panelModel.muteError, packSwitchError: panelModel.packSwitchError,
+                        muteError: panelModel.muteError,
+                        packSwitchError: panelModel.packSwitchError,
                         masterVolumeError: panelModel.masterVolumeError
                     ).enumerated()), id: \.offset
             ) { _, message in
                 FailureRow(message: message)
+            }
+            if let issue = panelModel.surfaceSoundIssue {
+                FailureRow(message: issue)
             }
             // T17f：**这里是告知真正的家 —— 而且位置本身是它文案的一部分。**
             //
@@ -488,6 +504,51 @@ public struct PanelView: View {
         }
     }
 
+    private var selectableSoundSourceRows: [HostSourceRowPresentation] {
+        hostIntegrations.content.sourceRows.filter { $0.status != .notConnected }
+    }
+
+    private var soundSurfaceSelector: some View {
+        HStack(spacing: 8) {
+            Picker(l10n.text(.panelSoundScope), selection: $selectedSurfaceRaw) {
+                Text(l10n.text(.panelGlobalDefaults)).tag("global")
+                ForEach(selectableSoundSourceRows) { row in
+                    Text(localizedHostName(row.host, language: languageStore.language))
+                        .tag(row.host.surfaceID.rawValue)
+                }
+            }
+            .labelsHidden()
+            .accessibilityLabel(l10n.text(.panelSoundScope))
+            .accessibilityIdentifier("panel.sound-scope")
+            .onChange(of: selectedSurfaceRaw) { rawValue in
+                panelModel.selectSoundSurface(
+                    rawValue == "global" ? nil : HostSurfaceID(rawValue: rawValue))
+            }
+
+            if panelModel.selectedSurface != nil {
+                Button(l10n.text(.panelResetSurface)) {
+                    panelModel.resetSelectedSurfaceOverrides()
+                    onAudibilityInputsChanged()
+                }
+                .buttonStyle(.borderless)
+                .help(l10n.text(.panelResetSurfaceHint))
+                .accessibilityLabel(l10n.text(.panelResetSurface))
+                .accessibilityIdentifier("panel.sound-scope.reset")
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(l10n.text(.panelSoundScope))
+    }
+
+    private func synchronizeSelectedSoundSurface() {
+        let available = selectableSoundSourceRows.map { $0.host.surfaceID.rawValue }
+        if selectedSurfaceRaw != "global", !available.contains(selectedSurfaceRaw) {
+            selectedSurfaceRaw = available.first ?? "global"
+        }
+        panelModel.selectSoundSurface(
+            selectedSurfaceRaw == "global" ? nil : HostSurfaceID(rawValue: selectedSurfaceRaw))
+    }
+
     @ViewBuilder
     private var bootstrapReportSection: some View {
         if let error = bootstrapReports.acknowledgementError {
@@ -511,8 +572,10 @@ public struct PanelView: View {
                         }
                         .accessibilityIdentifier("bootstrap-report.retry")
                         .focused($focusedTarget, equals: .bootstrapReportRetry(id: reportID))
-                        Button(languageStore.language == .english
-                            ? "Connections & diagnostics" : "打开连接与诊断") {
+                        Button(
+                            languageStore.language == .english
+                                ? "Connections & diagnostics" : "打开连接与诊断"
+                        ) {
                             onManageIntegrations(.hostSource(.claudeCode))
                         }
                         .accessibilityIdentifier("bootstrap-report.diagnostics")
@@ -521,8 +584,12 @@ public struct PanelView: View {
                             equals: .bootstrapReportDiagnostics(id: reportID))
                     }
                     if let path = bootstrapReportRevealPath(record) {
-                        Button(languageStore.language == .english ? "Show in Finder" : "在 Finder 中显示") {
-                            NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
+                        Button(
+                            languageStore.language == .english ? "Show in Finder" : "在 Finder 中显示"
+                        ) {
+                            NSWorkspace.shared.activateFileViewerSelecting([
+                                URL(fileURLWithPath: path)
+                            ])
                         }
                         .accessibilityIdentifier("bootstrap-report.reveal")
                         .focused($focusedTarget, equals: .bootstrapReportReveal(id: reportID))
@@ -581,8 +648,11 @@ public struct PanelView: View {
                 return english ? "Selected \(selected)." : "已自动选择 \(selected)。"
             }
         }
-        let count = record.occurrenceCount > 1
-            ? (english ? " Repeated \(record.occurrenceCount) times." : " 已重复 \(record.occurrenceCount) 次。")
+        let count =
+            record.occurrenceCount > 1
+            ? (english
+                ? " Repeated \(record.occurrenceCount) times."
+                : " 已重复 \(record.occurrenceCount) 次。")
             : ""
         return parts.joined(separator: " ") + count
     }
@@ -597,7 +667,9 @@ public struct PanelView: View {
     private func bootstrapReportAnnouncement(_ record: BootstrapReportRecord) -> String {
         let english = languageStore.language == .english
         var actions: [String] = []
-        if record.events.contains(where: { if case .failure = $0 { return true }; return false }) {
+        if record.events.contains(where: {
+            if case .failure = $0 { return true }; return false
+        }) {
             actions.append(english ? "Retry" : "重试")
             actions.append(english ? "Connections and diagnostics" : "打开连接与诊断")
         }
@@ -611,7 +683,8 @@ public struct PanelView: View {
             actions.append(english ? "Manage sounds" : "管理声音包")
         }
         actions.append(english ? "Got it" : "知道了")
-        let actionSummary = english
+        let actionSummary =
+            english
             ? "Available actions: \(actions.joined(separator: ", "))."
             : "可用操作：\(actions.joined(separator: "、"))。"
         return bootstrapReportMessage(record) + " " + actionSummary
@@ -621,7 +694,9 @@ public struct PanelView: View {
         bootstrapReports.records.flatMap { record in
             let id = record.id.uuidString
             var actions: [PanelFocusTarget] = []
-            if record.events.contains(where: { if case .failure = $0 { return true }; return false }) {
+            if record.events.contains(where: {
+                if case .failure = $0 { return true }; return false
+            }) {
                 actions.append(.bootstrapReportRetry(id: id))
                 actions.append(.bootstrapReportDiagnostics(id: id))
             }
@@ -656,7 +731,8 @@ public struct PanelView: View {
     private var soundPackLibraryRefreshFailureReason: String? {
         switch panelModel.libraryPresentationState {
         case .refreshFailed(let reason):
-            return "\(l10n.text(.panelRetry))\(languageStore.language == .english ? ": " : "：")\(reason)"
+            return
+                "\(l10n.text(.panelRetry))\(languageStore.language == .english ? ": " : "：")\(reason)"
         case .loading, .ready, .refreshing, .loadFailed:
             return nil
         }
@@ -854,7 +930,8 @@ public struct PanelView: View {
             ? panelModel.eventRows : []
         let hostSources = hostIntegrations.content.sourceRows.map(\.host)
         let openingTarget = panelOpeningFocus(
-            rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id), ctaOperable: ctaOperable,
+            rows: visibleRows, packCardIDs: panelModel.packCards.map(\.id),
+            ctaOperable: ctaOperable,
             hasDetailToggle: hasDetailToggle, hasMasterVolume: content.showsEventContent,
             hasConfigFailureNotice: content.hasConfigFailureNotice,
             hostSources: hostSources,
@@ -908,7 +985,8 @@ public struct PanelView: View {
     private func playPreview(for row: EventRow) {
         guard case .present(let fileName) = row.coverage,
             let packDirectory = resolvePackDirectory(
-                id: panelModel.config.selectedPack, userPacksDirectory: audioEnvironment.userPacksDirectory,
+                id: panelModel.config.selectedPack,
+                userPacksDirectory: audioEnvironment.userPacksDirectory,
                 bundledPacksDirectory: audioEnvironment.bundledPacksDirectory),
             let resolvedFile = safePackFileURL(fileName, in: packDirectory),
             nonEmptyRegularFileExists(at: resolvedFile)
@@ -919,7 +997,8 @@ public struct PanelView: View {
         // D2: 试听 must play at the panel's current master volume, not NSSound's own default
         // of 1.0 — read at the moment of the click (`panelModel.config` is always the
         // just-reloaded truth), not cached anywhere.
-        previewPlayer.play(fileAt: resolvedFile, volume: Float(previewVolume(for: panelModel.config)))
+        previewPlayer.play(
+            fileAt: resolvedFile, volume: Float(previewVolume(for: panelModel.config)))
     }
 
     // toggleMute / switchPack / reload / reloadConfigOnly 已搬进 `ClaudioGUICore.PanelConfigController`
@@ -964,7 +1043,8 @@ struct InterfaceTextSizeControl: View {
         .accessibilityLabel(ClaudioL10n(language: languageStore.language).text(.interfaceTitle))
         .accessibilityValue(
             "\(languageStore.language.selfName)\(languageStore.language == .english ? ", " : "，")"
-                + selection.localizedDisplayName(languageStore.language))
+                + selection.localizedDisplayName(languageStore.language)
+        )
         .accessibilityHint(ClaudioL10n(language: languageStore.language).text(.panelOptionsHint))
         .accessibilityIdentifier("panel.options.text-size")
         .popover(isPresented: $isPopoverPresented, arrowEdge: .bottom) {
@@ -1041,10 +1121,12 @@ private struct HostSourceRowView: View {
             .frame(height: equalizedHeight, alignment: .topLeading)
             .background(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                    .fill(ClaudioTheme.elevated(colorScheme).opacity(0.88)))
+                    .fill(ClaudioTheme.elevated(colorScheme).opacity(0.88))
+            )
             .overlay(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                    .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1))
+                    .stroke(ClaudioTheme.hairline(colorScheme), lineWidth: 1)
+            )
             .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
     }
 

@@ -480,8 +480,7 @@
     const apps = [
       { id: 'claude', name: 'Claude Code', mechanism: '原生 hooks', coverage: '5/5', state: 'ready', stateLabel: '已激活', enabled: true },
       { id: 'codex', name: 'Codex', mechanism: '原生 hooks', coverage: '4/5', state: 'ready', stateLabel: '已激活', enabled: true },
-      { id: 'workbuddy', name: 'WorkBuddy', mechanism: '原生 command hooks', coverage: '3/5', state: 'waiting', stateLabel: '待回执', enabled: true },
-      { id: 'chatgpt', name: 'ChatGPT · Codex', mechanism: '原生 hooks · Codex view', coverage: '3+1/5', state: 'waiting', stateLabel: '待回执', enabled: true }
+      { id: 'workbuddy', name: 'WorkBuddy', mechanism: '原生 command hooks', coverage: '2/5', state: 'waiting', stateLabel: '待回执', enabled: true }
     ];
     const eventDefinitions = [
       { id: 'task_start', name: '任务开始', code: 'UserPromptSubmit', symbol: '↗', tone: '', sound: '轻提示 · 01' },
@@ -505,18 +504,13 @@
         stop_failure: { availability: 'unavailable', coverage: '未提供', enabled: false, sound: '未设置' }
       }),
       workbuddy: buildAppEvents({
-        stop_failure: { availability: 'partial', coverage: '候选 / 部分', enabled: false },
-        notification: { availability: 'unavailable', coverage: '未配置', enabled: false, sound: '未设置' },
-        subagent_stop: { availability: 'unavailable', coverage: '未配置', enabled: false, sound: '未设置' }
-      }),
-      chatgpt: buildAppEvents({
-        task_start: { coverage: 'Codex view' },
-        stop: { coverage: 'Codex view' },
-        stop_failure: { availability: 'unavailable', coverage: '未提供', enabled: false, sound: '未设置' },
-        notification: { availability: 'partial', coverage: 'Codex view', enabled: true },
-        subagent_stop: { coverage: 'Codex view' }
+        stop_failure: { availability: 'unavailable', coverage: '接口支持 · 未实现', enabled: false, sound: '未设置' },
+        notification: { availability: 'partial', coverage: '部分支持 · 未实现', enabled: false, sound: '未设置' },
+        subagent_stop: { availability: 'unavailable', coverage: '接口支持 · 未实现', enabled: false, sound: '未设置' }
       })
     };
+    const globalSoundScope = { id: 'global', name: '全局默认', mechanism: '声音默认值', coverage: '5 个事件', state: 'ready', stateLabel: '默认', enabled: true };
+    eventsByApp.global = buildAppEvents({});
     const pages = {};
     const initialQuery = new URLSearchParams(window.location.search);
     const isPanelSurface = initialQuery.get('surface') === 'panel';
@@ -528,6 +522,7 @@
     function status(state, label) { return `<span class="status ${state}"><span class="status-dot"></span>${label}</span>`; }
     function appStatus(app) { return app.enabled ? status(app.state, app.stateLabel) : status('unavailable', '已停用'); }
     function appById(id) { return apps.find(app => app.id === id) || apps[0]; }
+    function panelAppById(id) { return id === 'global' ? globalSoundScope : appById(id); }
     function eventsForApp(id) { return eventsByApp[id] || eventsByApp.claude; }
     function eventById(appId, eventId) { return eventsForApp(appId).find(event => event.id === eventId); }
 
@@ -554,7 +549,7 @@
     function panelEventKind(event) { return panelEventKinds[event.id] || 'task'; }
     function panelRenderEvent(event, app) {
       const kind = panelEventKind(event);
-      const unavailable = event.availability === 'unavailable';
+      const unavailable = event.availability !== 'ready';
       const soundMissing = event.sound === '未设置';
       const stateText = event.coverage;
       return `<article class="panel-event-row ${!event.enabled ? 'is-disabled' : ''}">
@@ -571,22 +566,22 @@
     }
 
     function panelMarkup() {
-      const app = appById(panelSelectedApp);
+      const app = panelAppById(panelSelectedApp);
       const appEvents = eventsForApp(app.id);
       return `<div class="panel-content">
         <header class="panel-topbar">
           <div class="panel-wordmark" aria-label="claudi0">claudi<img src="../assets/branding/claudi0-mark.svg" alt="0"></div>
           <button class="panel-interface-button" type="button" data-panel-action="language" aria-label="界面语言">Aa⌄</button>
         </header>
-        <section class="panel-heading" aria-labelledby="panel-pack-name"><h1 id="panel-pack-name">皮卡丘</h1><p class="panel-summary">${apps.length} 个已接入应用 · ${eventDefinitions.length} 个可听事件</p></section>
+        <section class="panel-heading" aria-labelledby="panel-pack-name"><h1 id="panel-pack-name">皮卡丘</h1><p class="panel-summary">${apps.length} 个已发布来源 · ${eventDefinitions.length} 个声音事件</p></section>
         <section class="panel-section" aria-labelledby="panel-scope-title">
-          <div class="panel-section-title-row"><h2 class="panel-section-title" id="panel-scope-title">当前管理对象</h2><span class="panel-section-caption">事件与声音按 app 独立保存</span></div>
+          <div class="panel-section-title-row"><h2 class="panel-section-title" id="panel-scope-title">声音作用域</h2><span class="panel-section-caption">缺失字段继承全局默认</span></div>
           <div class="panel-scope-wrap">
             <button class="panel-scope-button" type="button" data-panel-scope-toggle aria-expanded="false" aria-controls="panel-app-menu">
               <span class="panel-scope-copy"><span class="panel-scope-name">${app.name}</span><span class="panel-scope-detail">${app.coverage} · ${app.stateLabel}</span></span>
               ${appStatus(app)}<span class="panel-chevron" aria-hidden="true">⌄</span>
             </button>
-            <div id="panel-app-menu" class="panel-scope-menu" hidden>${apps.map(item => `<button class="panel-app-option ${item.id === app.id ? 'active' : ''}" type="button" data-panel-app="${item.id}"><span class="panel-app-option-copy"><span class="panel-app-option-name">${item.name}</span><span class="panel-app-option-meta">${item.coverage} · ${item.stateLabel}</span></span>${appStatus(item)}</button>`).join('')}</div>
+            <div id="panel-app-menu" class="panel-scope-menu" hidden>${[globalSoundScope, ...apps].map(item => `<button class="panel-app-option ${item.id === app.id ? 'active' : ''}" type="button" data-panel-app="${item.id}"><span class="panel-app-option-copy"><span class="panel-app-option-name">${item.name}</span><span class="panel-app-option-meta">${item.coverage} · ${item.stateLabel}</span></span>${appStatus(item)}</button>`).join('')}</div>
           </div>
         </section>
         <section class="panel-section" aria-labelledby="panel-events-title">
@@ -595,7 +590,7 @@
         </section>
         <section class="panel-controls" aria-label="播放设置">
           <div class="panel-control-row"><div class="panel-control-copy"><strong>主音量</strong><small>全局音量；事件开关仍按当前 app 独立保存。</small></div><div class="panel-range"><input type="range" min="0" max="100" value="68" data-panel-range aria-label="主音量"><output data-panel-range-value>68%</output></div></div>
-          <div class="panel-control-row"><div class="panel-control-copy"><strong>声音包 · 皮卡丘</strong><small>5 个事件 · 在「声音」中管理和导入声音包。</small></div><button class="panel-control-action" type="button" data-panel-action="open-settings">打开设置</button></div>
+          <div class="panel-control-row"><div class="panel-control-copy"><strong>声音包 · 皮卡丘</strong><small>${app.id === 'global' ? '全局默认' : `${app.name} 稀疏覆盖`} · 在「声音」中管理资源。</small></div><div><button class="panel-control-action" type="button" data-panel-action="open-settings">打开设置</button>${app.id === 'global' ? '' : '<button class="panel-control-action" type="button" data-panel-action="reset-surface">重置为全局</button>'}</div></div>
         </section>
       </div>
       <footer class="panel-footer"><button class="panel-close" type="button" data-panel-action="close" aria-label="关闭 claudi0">${panelPowerIcon}<span>关闭</span></button></footer>`;
@@ -631,6 +626,7 @@
           <div class="settings-row tall"><div><div class="row-title">连接状态</div><div class="row-caption">${connectionDescription}</div></div><div class="row-control">${appStatus(app)}<button class="plain-button" type="button" data-action="refresh">重新检测</button></div></div>
           <div class="settings-row"><div><div class="row-title">接入方式</div><div class="row-caption">${app.mechanism} · 只处理事件标识和播放结果，不读取提示词或响应正文</div></div><div class="row-control"><span class="row-value">${app.coverage}</span></div></div>
           <div class="settings-row"><div><div class="row-title">事件与提示音</div><div class="row-caption">只修改 ${app.name}；其他 app 的事件开关和声音保持不变</div></div><div class="row-control"><button class="plain-button" type="button" data-page-target="events" data-app-target="${app.id}">管理事件</button></div></div>
+          <div class="settings-row"><div><div class="row-title">脱敏回执历史</div><div class="row-caption">每个来源最多保留 20 条、30 天；清除不影响当前连接或声音偏好</div></div><div class="row-control"><button class="plain-button" type="button" data-action="clear-receipts">清除历史…</button></div></div>
         </section>
         <div class="info-callout"><span class="info-icon">i</span><span>“已配置”不等于“已激活”：只有当前安装实例产生真实 receipt，状态才会变为已激活。普通 Chat 不继承 Codex view 的 hooks。</span></div>`;
     };
@@ -647,11 +643,11 @@
           </aside>
           <section class="event-detail">
             <div class="event-detail-header"><div><div class="scope-eyebrow">当前管理对象</div><div class="event-detail-title">${app.name}</div><div class="event-detail-subtitle">${app.mechanism}</div></div>${appStatus(app)}</div>
-            <div class="section-label">${app.name} · 事件规则</div><section class="settings-group">${appEvents.map(event => `<div class="event-row scoped"><span class="event-symbol ${event.tone}">${event.symbol}</span><span><span class="event-name">${event.name}</span><span class="event-code">${event.code}</span></span><span class="event-coverage">${status(event.availability, event.coverage)}</span><button class="toggle event-toggle ${event.enabled ? 'on' : ''}" type="button" data-event-toggle="${event.id}" data-event-app-id="${app.id}" aria-pressed="${event.enabled ? 'true' : 'false'}" aria-label="${event.enabled ? '关闭' : '开启'} ${event.name}"></button><span class="event-sound"><button class="plain-button" type="button" data-action="play" data-event="${event.id}" data-app-id="${app.id}">${event.sound}</button></span></div>`).join('')}</section>
+            <div class="section-label">${app.name} · 事件规则</div><section class="settings-group">${appEvents.map(event => `<div class="event-row scoped"><span class="event-symbol ${event.tone}">${event.symbol}</span><span><span class="event-name">${event.name}</span><span class="event-code">${event.code}</span></span><span class="event-coverage">${status(event.availability, event.coverage)}</span><button class="toggle event-toggle ${event.enabled ? 'on' : ''}" type="button" data-event-toggle="${event.id}" data-event-app-id="${app.id}" aria-pressed="${event.enabled ? 'true' : 'false'}" aria-label="${event.enabled ? '关闭' : '开启'} ${event.name}" ${event.availability === 'ready' ? '' : 'disabled'}></button><span class="event-sound"><button class="plain-button" type="button" data-action="play" data-event="${event.id}" data-app-id="${app.id}" ${event.availability === 'ready' && event.sound !== '未设置' ? '' : 'disabled'}>${event.sound}</button></span></div>`).join('')}</section>
             <div class="section-label" style="margin-top:30px">${app.name} · 播放设置</div><section class="settings-group">
-              <div class="settings-row"><div><div class="row-title">${app.name} 事件提示音</div><div class="row-caption">只影响这个 app；其他 app 使用各自的开关</div></div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="${app.name} 事件提示音" aria-pressed="true"></button></div></div>
-              <div class="settings-row"><div class="row-title">${app.name} 主音量</div><div class="row-control"><input class="native-range" type="range" min="0" max="100" value="68" data-range="${app.name} 主音量"><span class="range-value" data-range-value="${app.name} 主音量">68%</span></div></div>
-              <div class="settings-row"><div><div class="row-title">声音包</div><div class="row-caption">当前使用 Paimon · 声音包资源可复用，事件绑定仍按 app 独立保存</div></div><div class="row-control"><button class="plain-button" type="button" data-action="sound-packs">管理</button></div></div>
+              <div class="settings-row"><div><div class="row-title">${app.name} 事件提示音</div><div class="row-caption">只覆盖当前来源；缺失事件开关继承全局默认</div></div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="${app.name} 事件提示音" aria-pressed="true"></button></div></div>
+              <div class="settings-row"><div><div class="row-title">主音量（全局）</div><div class="row-caption">所有来源共用唯一主音量轴</div></div><div class="row-control"><input class="native-range" type="range" min="0" max="100" value="68" data-range="主音量"><span class="range-value" data-range-value="主音量">68%</span></div></div>
+              <div class="settings-row"><div><div class="row-title">声音包</div><div class="row-caption">当前使用 Paimon · 当前来源缺失覆盖时继承全局默认</div></div><div class="row-control"><button class="plain-button" type="button" data-action="sound-packs">管理</button></div></div>
             </section>
             <div class="info-callout"><span class="info-icon">i</span><span>切换左侧 app 后，右侧的事件列表、开关、覆盖状态和提示音都会切换到该 app 的独立配置；不会写入其他 app。</span></div>
           </section>
@@ -708,13 +704,13 @@
         panelSelectedApp = panelAppOption.dataset.panelApp;
         selectedApp = panelSelectedApp;
         renderPanel();
-        showToast(`正在查看 ${appById(panelSelectedApp).name} 的独立事件`);
+        showToast(`正在查看 ${panelAppById(panelSelectedApp).name} 的声音配置`);
         return;
       }
       const panelAction = event.target.closest('[data-panel-action]');
       if (panelAction) {
         const name = panelAction.dataset.panelAction;
-        const app = appById(panelAction.dataset.panelApp || panelSelectedApp);
+        const app = panelAppById(panelAction.dataset.panelApp || panelSelectedApp);
         const item = panelAction.dataset.panelEvent ? eventById(app.id, panelAction.dataset.panelEvent) : null;
         if (name === 'mute' && item && item.availability !== 'unavailable') {
           item.enabled = !item.enabled;
@@ -723,6 +719,7 @@
         }
         else if (name === 'play' && item) showToast(`${app.name} · 正在试听 ${item.name}`);
         else if (name === 'open-settings') window.location.href = `${window.location.pathname}?page=events&app=${app.id}`;
+        else if (name === 'reset-surface') showToast(`${app.name} 已重置为继承全局默认`);
         else if (name === 'language') showToast('界面语言设置将在正式面板中打开');
         else if (name === 'close') showToast('原型演示：关闭菜单栏面板');
         return;
@@ -760,6 +757,9 @@
         showToast(`${appName} · 正在试听${eventName === '全部事件' ? eventName : ` ${eventName}`}`);
       }
       else if (name === 'refresh') showToast('已重新检测；真实激活仍需宿主 receipt');
+      else if (name === 'clear-receipts') {
+        if (window.confirm(`清除 ${appById(selectedApp).name} 的脱敏回执历史？当前连接和声音偏好不会改变。`)) showToast('已清除脱敏回执历史（原型状态）');
+      }
       else if (name === 'inspect') showToast('原型占位：只读查看宿主配置');
       else if (name === 'sound-packs') setPage('sounds');
       else if (name === 'import') showToast('原型占位：选择本地声音包');

@@ -166,7 +166,8 @@ func runPanelConfigControllerSuites() {
             expect(
                 controller.eventRows.first(where: { $0.event == .stop })?.enabled == true,
                 "前提：stop 那行初始 enabled 必须是 true，得到 "
-                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.enabled))")
+                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.enabled))"
+            )
 
             controller.toggleMute(.stop)
 
@@ -188,7 +189,8 @@ func runPanelConfigControllerSuites() {
                 controller.eventRows.first(where: { $0.event == .stop })?.enabled == false,
                 "eventRows 里 stop 那行必须重算成 disabled —— 它还是 true = 读模型没重算，面板会顶着一个"
                     + "翻转前的旧开关。得到 "
-                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.enabled))")
+                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.enabled))"
+            )
         }
     }
 
@@ -204,7 +206,8 @@ func runPanelConfigControllerSuites() {
             let packsDir = root.appendingPathComponent("packs")
             // 真包：stop + notification 都映到存在的文件 → 两行覆盖都是 .present（不是空 packs 的 .unmapped）。
             writeFixture(
-                #"{ "selected_pack": "real-pack", "master_volume": 0.42, "events": {} }"#, to: configFile)
+                #"{ "selected_pack": "real-pack", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
             writeFixture(
                 #"{ "id": "real-pack", "events": { "stop": "stop.mp3", "notification": "notif.mp3" } }"#,
                 to: packsDir.appendingPathComponent("real-pack/manifest.json"))
@@ -214,12 +217,19 @@ func runPanelConfigControllerSuites() {
                 configFile: configFile, lockFile: lockFile, environment: makeEnvironment(packsDir))
 
             // 前提：两事件都 enabled，两行覆盖都 .present。
-            expect(controller.config.isEnabled(.stop) && controller.config.isEnabled(.notification),
+            expect(
+                controller.config.isEnabled(.stop) && controller.config.isEnabled(.notification),
                 "前提：stop 与 notification 初始都必须 enabled")
             for event in [Event.stop, Event.notification] {
-                if case .present = controller.eventRows.first(where: { $0.event == event })?.coverage {} else {
-                    expect(false, "前提：\(event) 那行初始覆盖必须是 .present（真包映了它），得到 "
-                        + "\(String(describing: controller.eventRows.first(where: { $0.event == event })?.coverage))")
+                if case .present = controller.eventRows.first(where: { $0.event == event })?
+                    .coverage
+                {
+                } else {
+                    expect(
+                        false,
+                        "前提：\(event) 那行初始覆盖必须是 .present（真包映了它），得到 "
+                            + "\(String(describing: controller.eventRows.first(where: { $0.event == event })?.coverage))"
+                    )
                 }
             }
 
@@ -243,11 +253,17 @@ func runPanelConfigControllerSuites() {
             //    （文档承诺「coverage 按定义不变」）。把 `coverage: row.coverage` 改成 `.broken(...)` → 两行覆盖
             //    都被谎报成 .broken（试听键被禁用、徽标错）→ 这两条红。
             for event in [Event.stop, Event.notification] {
-                if case .present = controller.eventRows.first(where: { $0.event == event })?.coverage {} else {
-                    expect(false, "一次静音之后 \(event) 那行覆盖必须**原样**还是 .present —— 它变了 = "
-                        + "reloadEnabledFlags 没把 coverage 原样带过来（红队实测：改成 .broken）。整列事件行的"
-                        + "覆盖态谎报成打包错误、试听键被禁用。得到 "
-                        + "\(String(describing: controller.eventRows.first(where: { $0.event == event })?.coverage))")
+                if case .present = controller.eventRows.first(where: { $0.event == event })?
+                    .coverage
+                {
+                } else {
+                    expect(
+                        false,
+                        "一次静音之后 \(event) 那行覆盖必须**原样**还是 .present —— 它变了 = "
+                            + "reloadEnabledFlags 没把 coverage 原样带过来（红队实测：改成 .broken）。整列事件行的"
+                            + "覆盖态谎报成打包错误、试听键被禁用。得到 "
+                            + "\(String(describing: controller.eventRows.first(where: { $0.event == event })?.coverage))"
+                    )
                 }
             }
 
@@ -260,19 +276,23 @@ func runPanelConfigControllerSuites() {
             expect(
                 controller.eventRows.first(where: { $0.event == .notification })?.enabled == false,
                 "被 toggle 的 .notification 那行读模型 enabled 必须是 false。得到 "
-                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .notification })?.enabled))")
+                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .notification })?.enabled))"
+            )
             expect(
                 controller.eventRows.first(where: { $0.event == .stop })?.enabled == true,
                 "**没被碰**的 .stop 那行读模型 enabled 必须**原样还是 true** —— 它变 false = reloadEnabledFlags 把"
                     + "非目标行的 enabled 也算错了（红队实测：常量 false → 点一个静音、面板五行全显示 muted）。"
-                    + "得到 \(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.enabled))")
+                    + "得到 \(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.enabled))"
+            )
         }
     }
 
     // 变异 #1（执行）：面板打开着的时候 config.json 被外部删掉，点静音 → 写盘 fail closed（.configMissing）
     // → 路由 .full → reload() 必须重载 configState 让它从 .operational 翻到 .needsPack。删掉 reload() 里那行
     // configState 重载 → configState 停在陈旧的 .operational → 面板顶着五行活控件撒谎，这条当场红。
-    suite("PanelConfigController.toggleMute + 外部删除：reload() 必须把 configState 翻到 .needsPack（钉死红队 #1 执行）") {
+    suite(
+        "PanelConfigController.toggleMute + 外部删除：reload() 必须把 configState 翻到 .needsPack（钉死红队 #1 执行）"
+    ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
@@ -457,7 +477,8 @@ func runPanelConfigControllerSuites() {
             // 初始 pack-a（映 stop）；磁盘上另有 pack-b（映 notification）。两包覆盖**不同**，好让 eventRows
             // 在切包后可观测地变化。两个都建真目录 + manifest，让 selectPack 的 resolvePackDirectory 放行。
             writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {}, "starred_packs": ["pack-a", "pack-b"] }"#, to: configFile)
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {}, "starred_packs": ["pack-a", "pack-b"] }"#,
+                to: configFile)
             writeFixture(
                 #"{ "id": "pack-a", "name": "包 A", "events": { "stop": "stop.mp3" } }"#,
                 to: packsDir.appendingPathComponent("pack-a/manifest.json"))
@@ -474,9 +495,13 @@ func runPanelConfigControllerSuites() {
                 afterFullReload: { afterFullReloadConfigs.append($0) })
 
             // 前提：初始 pack-a 时 .stop 是 .present（manifest 映了它、文件在）。切到 pack-b 后它该变。
-            if case .present = controller.eventRows.first(where: { $0.event == .stop })?.coverage {} else {
-                expect(false, "前提：pack-a 下 .stop 覆盖必须是 .present，得到 "
-                    + "\(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.coverage))")
+            if case .present = controller.eventRows.first(where: { $0.event == .stop })?.coverage {
+            } else {
+                expect(
+                    false,
+                    "前提：pack-a 下 .stop 覆盖必须是 .present，得到 "
+                        + "\(String(describing: controller.eventRows.first(where: { $0.event == .stop })?.coverage))"
+                )
             }
 
             // 先制造一次失败，让 packSwitchError 非 nil（清错要观测的正是它随后被清）。
@@ -501,16 +526,22 @@ func runPanelConfigControllerSuites() {
 
             // ③ configState：顶部路由据它渲染。
             guard case .operational(let onDisk) = controller.configState else {
-                expect(false, "成功切包后 configState 必须是 .operational(pack-b)，得到 \(controller.configState)")
+                expect(
+                    false, "成功切包后 configState 必须是 .operational(pack-b)，得到 \(controller.configState)"
+                )
                 return
             }
-            expect(onDisk.selectedPack == "pack-b", "configState 里的 config 也必须是 pack-b，得到 \(onDisk.selectedPack)")
+            expect(
+                onDisk.selectedPack == "pack-b",
+                "configState 里的 config 也必须是 pack-b，得到 \(onDisk.selectedPack)")
 
             // ④ eventRows：全量 reload 必须**重算**逐事件覆盖。pack-b 不映 .stop → .stop 掉成 .unmapped。
             // 删 `eventRows = packCoverage(...)` → eventRows 停在 pack-a 的 .stop=.present → 这条红。
             if case .present = controller.eventRows.first(where: { $0.event == .stop })?.coverage {
-                expect(false, "切到 pack-b（不映 stop）后，.stop 那行覆盖必须重算成非 .present —— 它还是 "
-                    + ".present = eventRows 没重算，事件行停在旧包 pack-a。")
+                expect(
+                    false,
+                    "切到 pack-b（不映 stop）后，.stop 那行覆盖必须重算成非 .present —— 它还是 "
+                        + ".present = eventRows 没重算，事件行停在旧包 pack-a。")
             }
 
             // ⑤ packCards：画廊高亮据 isSelected（= id == config.selectedPack）。删 `packCards = availablePacks(...)`
@@ -519,7 +550,8 @@ func runPanelConfigControllerSuites() {
                 controller.packCards.first(where: { $0.isSelected })?.id == "pack-b",
                 "成功切包后画廊的『当前选中』必须是 pack-b —— 它还是 pack-a = packCards 没重算，画廊对"
                     + "『哪个是当前包』撒谎。得到 "
-                    + "\(String(describing: controller.packCards.first(where: { $0.isSelected })?.id))")
+                    + "\(String(describing: controller.packCards.first(where: { $0.isSelected })?.id))"
+            )
 
             // ⑥ 独立 selectedPackMetadata 也必须随全量 reload 走到新包，且从新包 manifest 读到真名。
             // 它不能靠 packCards 的 selected 行反推：T17 的星标显示集会合法地隐去当前包。
@@ -560,7 +592,8 @@ func runPanelConfigControllerSuites() {
             let lockFile = root.appendingPathComponent("config.lock")
             let packsDir = root.appendingPathComponent("packs")
             writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
             writeFixture(
                 #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
                 to: packsDir.appendingPathComponent("pack-a/manifest.json"))
@@ -603,14 +636,17 @@ func runPanelConfigControllerSuites() {
     // 用一份**存在但畸形**的 config 触发一个**非 .configMissing** 的失败（.configMissing 会被面板故意滤掉、
     // 且走 .full 重路由，测不到 republish 该带的那类「要给用户看」的错误）——畸形 config 存在，静音写盘会
     // fail closed 成读失败，muteError 必须带上它。
-    suite("PanelConfigController.toggleMute 真失败：muteError 必须把非 .configMissing 的错误 republish 上来（红队 round3）") {
+    suite(
+        "PanelConfigController.toggleMute 真失败：muteError 必须把非 .configMissing 的错误 republish 上来（红队 round3）"
+    ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
             // config.json 存在、但 master_volume 是字符串（读得动结构、写路径 fail closed）——静音写盘会
             // 失败成一个**非 .configMissing** 的错误（要给用户看的那类），不是「文件不存在」。
             writeFixture(
-                #"{ "selected_pack": "minimal-chime", "master_volume": "oops", "events": {} }"#, to: configFile)
+                #"{ "selected_pack": "minimal-chime", "master_volume": "oops", "events": {} }"#,
+                to: configFile)
             let controller = PanelConfigController(
                 configFile: configFile, lockFile: lockFile,
                 environment: makeEnvironment(root.appendingPathComponent("packs")))
@@ -621,8 +657,10 @@ func runPanelConfigControllerSuites() {
 
             // republish 必须把这次真失败带上来。删掉那行 / 写成 nil → muteError 恒 nil → 这条红。
             guard let surfaced = controller.muteError else {
-                expect(false, "一次真·静音失败（畸形 config，非 .configMissing）后，muteError 必须非 nil —— "
-                    + "它还是 nil = republish 那行被删/掏空，面板永不渲染 errorNotice = 静默吞错复活")
+                expect(
+                    false,
+                    "一次真·静音失败（畸形 config，非 .configMissing）后，muteError 必须非 nil —— "
+                        + "它还是 nil = republish 那行被删/掏空，面板永不渲染 errorNotice = 静默吞错复活")
                 return
             }
             // 且它必须是要给用户看的那类，不是被面板滤掉的 .configMissing。
@@ -731,7 +769,8 @@ func runPanelConfigControllerSuites() {
             let lockFile = root.appendingPathComponent("config.lock")
             let packsDir = root.appendingPathComponent("packs")
             writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
             // 两个包都真的在磁盘上 —— 否则 selectPack 会停在 .packNotFound，这条测试就测不到 config 那一格。
             writeFixture(
                 #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
@@ -935,7 +974,8 @@ func runPanelConfigControllerSuites() {
             let lockFile = claudioDir.appendingPathComponent("config.lock")
             let packsDir = root.appendingPathComponent("packs")
             writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
             // pack-b 真的在磁盘上 —— 否则 selectPack 会提前停在 .packNotFound（那一格**该**走 .full），
             // 这条测试就测不到锁那一步了。
             writeFixture(
@@ -1046,7 +1086,8 @@ func runPanelConfigControllerSuites() {
             let lockFile = root.appendingPathComponent("config.lock")
             let packsDir = root.appendingPathComponent("packs")
             writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#, to: configFile)
+                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
             writeFixture(
                 #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
                 to: packsDir.appendingPathComponent("pack-a/manifest.json"))
@@ -1136,7 +1177,8 @@ func runPanelConfigControllerSuites() {
                 return
             }
             expect(onDisk.selectedPack == "pack-a", "得到 \(onDisk.selectedPack)")
-            expect(controller.config.selectedPack == "pack-a", "得到 \(controller.config.selectedPack)")
+            expect(
+                controller.config.selectedPack == "pack-a", "得到 \(controller.config.selectedPack)")
             expect(
                 controller.packCards.isEmpty,
                 "首次选中个人包不会隐式加星：没有 starred_packs 且没有内置默认时，面板列表必须保持零行")
@@ -1189,7 +1231,8 @@ func runPanelConfigControllerSuites() {
         }
     }
 
-    suite("PanelConfigController.setMasterVolume + config 缺失：.configMissing 全量重路由到 .needsPack（D43）") {
+    suite("PanelConfigController.setMasterVolume + config 缺失：.configMissing 全量重路由到 .needsPack（D43）")
+    {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
@@ -1244,7 +1287,8 @@ func runPanelConfigControllerSuites() {
 
             // 磁盘上此刻是一份坏 config —— 这是这条断言不恒真的全部理由：任何一次 reload 都会把
             // configState 翻成 .malformed。它仍是 .operational，就证明了那次 reload 没有发生。
-            writeFixture(#"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
             let holder = FileLock(path: lockFile.path)
             expect(holder.tryLock(), "test setup：holder 必须先拿到 config.lock")
 
@@ -1283,7 +1327,8 @@ func runPanelConfigControllerSuites() {
                 return
             }
 
-            writeFixture(#"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
+            writeFixture(
+                #"{ "selected_pack": "minimal-chime", "master_volume": "loud" }"#, to: configFile)
 
             let landed = controller.setMasterVolume(0.5)
 
@@ -1346,6 +1391,85 @@ func runPanelConfigControllerSuites() {
                 controller.masterVolumeError == nil,
                 "一次成功写盘后 masterVolumeError 必须是 nil —— 非 nil = republish 没在成功时清错，上一次"
                     + "失败的红字会残留在一次成功操作之后。得到 \(String(describing: controller.masterVolumeError))")
+        }
+    }
+
+    suite("PanelConfigController surface profile：稀疏继承、定向写、全局音量与 reset 边界") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                """
+                {
+                  "selected_pack": "global-pack",
+                  "master_volume": 0.42,
+                  "events": { "stop": true },
+                  "surface_overrides": {
+                    "workbuddy": {
+                      "selected_pack": "surface-pack",
+                      "events": { "stop": false }
+                    }
+                  },
+                  "future_key": { "preserve": true }
+                }
+                """,
+                to: configFile)
+            for pack in ["global-pack", "surface-pack", "next-pack"] {
+                writeFixture(
+                    """
+                    { "id": "\(pack)", "name": "\(pack)", "events": { "stop": "stop.mp3" } }
+                    """,
+                    to: packsDir.appendingPathComponent("\(pack)/manifest.json"))
+                writeFixture("audio", to: packsDir.appendingPathComponent("\(pack)/stop.mp3"))
+            }
+            let controller = PanelConfigController(
+                configFile: configFile,
+                lockFile: lockFile,
+                environment: makeEnvironment(packsDir))
+
+            controller.selectSoundSurface(.workBuddy)
+            expect(controller.selectedSurface == .workBuddy, "popup 必须记住当前 surface")
+            expect(controller.config.selectedPack == "surface-pack", "WorkBuddy 必须投影自己的 pack")
+            expect(!controller.config.isEnabled(.stop), "WorkBuddy 的 stop 覆盖必须优先于全局默认")
+
+            expect(controller.setMasterVolume(0.6) == 0.6, "master volume 始终是全局设置")
+            var onDisk = loadPanelConfig(from: configFile).resolvedConfig
+            expect(onDisk.masterVolume == 0.6, "master_volume 必须写在顶层")
+            expect(
+                onDisk.surfaceOverrides[HostSurfaceID.workBuddy.rawValue]?.selectedPack
+                    == "surface-pack",
+                "写全局音量不得重写 surface pack")
+
+            controller.toggleMute(.stop)
+            onDisk = loadPanelConfig(from: configFile).resolvedConfig
+            expect(onDisk.isEnabled(.stop), "surface 静音动作不得改顶层 stop")
+            expect(
+                onDisk.surfaceOverrides[HostSurfaceID.workBuddy.rawValue]?.eventsEnabled["stop"]
+                    == true,
+                "surface 静音动作必须只改 WorkBuddy.stop")
+
+            expect(controller.switchPack(to: "next-pack") == .succeeded, "surface 切包必须成功")
+            onDisk = loadPanelConfig(from: configFile).resolvedConfig
+            expect(onDisk.selectedPack == "global-pack", "surface 切包不得改全局 selected_pack")
+            expect(
+                onDisk.surfaceOverrides[HostSurfaceID.workBuddy.rawValue]?.selectedPack
+                    == "next-pack",
+                "surface 切包必须落到 WorkBuddy 稀疏覆盖")
+
+            controller.resetSelectedSurfaceOverrides()
+            onDisk = loadPanelConfig(from: configFile).resolvedConfig
+            expect(
+                onDisk.surfaceOverrides[HostSurfaceID.workBuddy.rawValue] == nil,
+                "reset 必须删除空 surface override，而不是留下空 object")
+            expect(
+                controller.config.selectedPack == "global-pack"
+                    && controller.config.isEnabled(.stop),
+                "reset 后 WorkBuddy 必须重新继承全局 pack 与事件开关")
+            let raw =
+                try! JSONSerialization.jsonObject(with: Data(contentsOf: configFile))
+                as! [String: Any]
+            expect(raw["future_key"] != nil, "所有 surface 写路径必须保留未知顶层字段")
         }
     }
 }

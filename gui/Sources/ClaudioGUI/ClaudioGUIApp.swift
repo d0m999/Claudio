@@ -117,12 +117,15 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         // single branchless token, `.main`, with no decision in it and nothing to get wrong.
         //
         // `nil` under `swift run ClaudioGUI` (no bundled helper) 也不伪造成功：bootstrapper
-        // 会检查固定 helper 路径，不可用时通过双宿主 snapshot 呈现 runtime 损坏。
+        // 会检查固定 helper 路径，不可用时通过动态 adapter snapshot 呈现 runtime 损坏。
         let bundledHelper = bundledHelperBinary(in: .main)
         let setupEnvironment = SetupEnvironment(
             executablePath: bundledHelper ?? ClaudioPaths.claudioBinary)
         let integrationManager = HostIntegrationManager(
-            adapters: [ClaudeCodeIntegrationAdapter(), CodexIntegrationAdapter()],
+            adapters: [
+                ClaudeCodeIntegrationAdapter(), CodexIntegrationAdapter(),
+                WorkBuddyIntegrationAdapter(),
+            ],
             bootstrapper: SystemSharedRuntimeBootstrapper(environment: setupEnvironment))
         let integrationBridge = HostIntegrationManagerBridge(
             manager: integrationManager,

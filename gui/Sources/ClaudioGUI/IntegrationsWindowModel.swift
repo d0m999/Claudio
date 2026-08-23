@@ -138,12 +138,11 @@ struct IntegrationsWindowActionOutcome: Sendable, Equatable {
 }
 
 struct IntegrationsWindowRefreshHandler: Sendable {
-    private let operation:
-        @MainActor @Sendable () async throws -> IntegrationsWindowActionOutcome
+    private let operation: @MainActor @Sendable () async throws -> IntegrationsWindowActionOutcome
 
     init(
-        _ operation: @escaping
-            @MainActor @Sendable () async throws -> IntegrationsWindowActionOutcome
+        _ operation:
+            @escaping @MainActor @Sendable () async throws -> IntegrationsWindowActionOutcome
     ) {
         self.operation = operation
     }
@@ -160,9 +159,9 @@ struct IntegrationsWindowActionHandler: Sendable {
             -> IntegrationsWindowActionOutcome
 
     init(
-        _ operation: @escaping
-            @MainActor @Sendable (IntegrationsWindowInspectorAction) async throws
-                -> IntegrationsWindowActionOutcome
+        _ operation:
+            @escaping @MainActor @Sendable (IntegrationsWindowInspectorAction) async throws
+            -> IntegrationsWindowActionOutcome
     ) {
         self.operation = operation
     }
@@ -181,9 +180,9 @@ struct IntegrationsWindowRecoveryHandler: Sendable {
             -> IntegrationsWindowActionOutcome
 
     init(
-        _ operation: @escaping
-            @MainActor @Sendable (IntegrationsRecoveryAction) async throws
-                -> IntegrationsWindowActionOutcome
+        _ operation:
+            @escaping @MainActor @Sendable (IntegrationsRecoveryAction) async throws
+            -> IntegrationsWindowActionOutcome
     ) {
         self.operation = operation
     }
@@ -249,8 +248,9 @@ final class IntegrationsWindowModel: ObservableObject {
         actionHandler: IntegrationsWindowActionHandler,
         recoveryHandler: IntegrationsWindowRecoveryHandler? = nil,
         clipboardWriter: IntegrationsWindowClipboardWriter = .system,
-        onContentChanged: @escaping @MainActor @Sendable
-            (IntegrationsWindowContent) -> Void = { _ in }
+        onContentChanged: @escaping @MainActor @Sendable (IntegrationsWindowContent) -> Void = {
+            _ in
+        }
     ) {
         self.content = content
         self.refreshHandler = refreshHandler
@@ -287,8 +287,7 @@ final class IntegrationsWindowModel: ObservableObject {
     var inspectorActions: [IntegrationsWindowInspectorAction] {
         guard let inspector else { return [] }
         var actions = inspector.actions
-        if
-            inspector.host == .codex,
+        if inspector.host == .codex,
             let row = content.sourceRows.first(where: { $0.host == .codex }),
             row.status == .awaitingActivation
         {
@@ -315,21 +314,22 @@ final class IntegrationsWindowModel: ObservableObject {
         let receiptTransitions = integrationsReceiptTransitions(from: content, to: replacement)
         replaceContent(replacement)
         if isWindowVisible, !receiptTransitions.isEmpty {
-            presentFeedbackSequence(receiptTransitions.map { receiptTransition in
-                IntegrationsFeedbackRequest(
-                    host: receiptTransition.host,
-                    kind: .information,
-                    text: .localized(
-                        key: .feedbackReceipt,
-                        arguments: [receiptTransition.receipt]),
-                    accessibilityText: stateChangeAccessibilityText(
-                        in: replacement,
+            presentFeedbackSequence(
+                receiptTransitions.map { receiptTransition in
+                    IntegrationsFeedbackRequest(
                         host: receiptTransition.host,
-                        event: receiptTransition.event,
-                        message: .localized(
+                        kind: .information,
+                        text: .localized(
                             key: .feedbackReceipt,
-                            arguments: [receiptTransition.receipt])))
-            })
+                            arguments: [receiptTransition.receipt]),
+                        accessibilityText: stateChangeAccessibilityText(
+                            in: replacement,
+                            host: receiptTransition.host,
+                            event: receiptTransition.event,
+                            message: .localized(
+                                key: .feedbackReceipt,
+                                arguments: [receiptTransition.receipt])))
+                })
         }
     }
 
@@ -372,26 +372,28 @@ final class IntegrationsWindowModel: ObservableObject {
             } else {
                 outcome = try await actionHandler(action)
             }
-            let receiptTransitions = action == .redetect
+            let receiptTransitions =
+                action == .redetect
                 ? integrationsReceiptTransitions(from: content, to: outcome.content)
                 : []
             replaceContent(outcome.content)
             if !receiptTransitions.isEmpty {
-                presentFeedbackSequence(receiptTransitions.map { receiptTransition in
-                    IntegrationsFeedbackRequest(
-                        host: receiptTransition.host,
-                        kind: .information,
-                        text: .localized(
-                            key: .feedbackReceipt,
-                            arguments: [receiptTransition.receipt]),
-                        accessibilityText: stateChangeAccessibilityText(
-                            in: outcome.content,
+                presentFeedbackSequence(
+                    receiptTransitions.map { receiptTransition in
+                        IntegrationsFeedbackRequest(
                             host: receiptTransition.host,
-                            event: receiptTransition.event,
-                            message: .localized(
+                            kind: .information,
+                            text: .localized(
                                 key: .feedbackReceipt,
-                                arguments: [receiptTransition.receipt])))
-                })
+                                arguments: [receiptTransition.receipt]),
+                            accessibilityText: stateChangeAccessibilityText(
+                                in: outcome.content,
+                                host: receiptTransition.host,
+                                event: receiptTransition.event,
+                                message: .localized(
+                                    key: .feedbackReceipt,
+                                    arguments: [receiptTransition.receipt])))
+                    })
             } else {
                 presentFeedback(
                     host: host,
@@ -632,10 +634,12 @@ private func integrationsReceiptTransitions(
     }
 }
 
-private extension IntegrationsWindowInspectorAction {
-    var host: HostID? {
+extension IntegrationsWindowInspectorAction {
+    fileprivate var host: HostID? {
         switch self {
-        case .connect(let host), .repair(let host), .disconnect(let host): host
+        case .connect(let host), .repair(let host), .disconnect(let host),
+            .clearReceiptHistory(let host):
+            host
         case .copyHooksCommand, .redetect: nil
         }
     }

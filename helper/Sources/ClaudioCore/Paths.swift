@@ -9,8 +9,8 @@ import Foundation
 /// space would get split by the shell and break the hook. `~/.claudio/` is safe under
 /// both shell and argv execution models.
 ///
-/// The **only** exception is `settings.json` itself, which stays where Claude Code put
-/// it: `~/.claude/settings.json`.
+/// The only exceptions are host-owned configuration files. They stay under each host's
+/// documented user configuration root and are modified only through their exact adapter.
 public enum ClaudioPaths {
     /// The current user's home directory — the anchor for every path below.
     private static var home: URL {
@@ -135,6 +135,11 @@ public enum ClaudioPaths {
         root.appendingPathComponent("codex-hooks.lock")
     }
 
+    /// WorkBuddy Desktop hooks 配置拥有独立锁；不与 standalone CodeBuddy、Claude 或 Codex 共用。
+    public static var workBuddyIntegrationLockFile: URL {
+        root.appendingPathComponent("workbuddy-hooks.lock")
+    }
+
     /// 宿主级连接/断开事务锁。配置文件自己的锁只保护一次 JSON
     /// read-modify-write；这把独立锁覆盖「配置变换 + legacy wrapper 迁移
     /// + active installation marker 发布/撤销」的整个操作，防止两个 CLI/GUI
@@ -256,6 +261,13 @@ public enum ClaudioPaths {
         home
             .appendingPathComponent(".codex", isDirectory: true)
             .appendingPathComponent("config.toml")
+    }
+
+    /// WorkBuddy Desktop 的用户级配置。项目级 `.workbuddy` / `.codebuddy` 永不由 Claudio 写入。
+    public static var workBuddySettingsFile: URL {
+        home
+            .appendingPathComponent(".workbuddy", isDirectory: true)
+            .appendingPathComponent("settings.json")
     }
 
     public static var legacyCodexNotifyWrapper: URL {

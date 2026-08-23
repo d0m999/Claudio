@@ -11,16 +11,19 @@ private struct DualHostDoctorFixture {
     let claudioBinary: URL
     let claudeSettings: URL
     let codexHooks: URL
+    let workBuddySettings: URL
     let receiptStore: HostHookReceiptStore
 
     var environment: DoctorIntegrationsEnvironment {
         DoctorIntegrationsEnvironment(
             claudeSettingsFile: claudeSettings,
             codexHooksFile: codexHooks,
+            workBuddySettingsFile: workBuddySettings,
             claudioRoot: claudioRoot.path,
             receiptStore: receiptStore,
             claudeAvailability: { .available },
-            codexAvailability: { .available })
+            codexAvailability: { .available },
+            workBuddyAvailability: { .available })
     }
 }
 
@@ -39,15 +42,19 @@ private func makeDualHostDoctorFixture(under root: URL) -> DualHostDoctorFixture
     let claudioRoot = root.appendingPathComponent(".claudio", isDirectory: true)
     let claudeSettings = root.appendingPathComponent(".claude/settings.json")
     let codexHooks = root.appendingPathComponent(".codex/hooks.json")
+    let workBuddySettings = root.appendingPathComponent(".workbuddy/settings.json")
     try! FileManager.default.createDirectory(
         at: claudeSettings.deletingLastPathComponent(), withIntermediateDirectories: true)
     try! FileManager.default.createDirectory(
         at: codexHooks.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try! FileManager.default.createDirectory(
+        at: workBuddySettings.deletingLastPathComponent(), withIntermediateDirectories: true)
     return DualHostDoctorFixture(
         claudioRoot: claudioRoot,
         claudioBinary: claudioRoot.appendingPathComponent("bin/claudio"),
         claudeSettings: claudeSettings,
         codexHooks: codexHooks,
+        workBuddySettings: workBuddySettings,
         receiptStore: HostHookReceiptStore(
             receiptsRoot: claudioRoot.appendingPathComponent(
                 "integrations/receipts", isDirectory: true),
@@ -196,15 +203,18 @@ func runDualHostDoctorSuites() {
 
             let claudeSettings = root.appendingPathComponent("missing-claude/settings.json")
             let codexHooks = root.appendingPathComponent("missing-codex/hooks.json")
+            let workBuddySettings = root.appendingPathComponent("missing-workbuddy/settings.json")
             let integrations = DoctorIntegrationsEnvironment(
                 claudeSettingsFile: claudeSettings,
                 codexHooksFile: codexHooks,
+                workBuddySettingsFile: workBuddySettings,
                 claudioRoot: root.appendingPathComponent(".claudio").path,
                 receiptStore: HostHookReceiptStore(
                     receiptsRoot: root.appendingPathComponent("receipts"),
                     locksRoot: root.appendingPathComponent("receipt-locks")),
                 claudeAvailability: { .unavailable(reason: "未检测到 Claude Code 配置目录") },
-                codexAvailability: { .unavailable(reason: "未检测到 Codex 配置目录") })
+                codexAvailability: { .unavailable(reason: "未检测到 Codex 配置目录") },
+                workBuddyAvailability: { .unavailable(reason: "未检测到 WorkBuddy Desktop") })
             let report = runDoctorChecks(
                 environment: DoctorEnvironment(
                     afplayPath: afplay.path,
@@ -224,19 +234,21 @@ func runDualHostDoctorSuites() {
                 !FileManager.default.fileExists(
                     atPath: claudeSettings.deletingLastPathComponent().path)
                     && !FileManager.default.fileExists(
-                        atPath: codexHooks.deletingLastPathComponent().path),
+                        atPath: codexHooks.deletingLastPathComponent().path)
+                    && !FileManager.default.fileExists(
+                        atPath: workBuddySettings.deletingLastPathComponent().path),
                 "fixture 与 doctor 都不得创建未安装宿主的配置目录")
             let hostRows = report.results.filter { $0.name.hasPrefix("host-") }
-            expect(hostRows.count == 2, "完整 doctor 仍必须固定输出两条宿主行")
+            expect(hostRows.count == 3, "完整 doctor 必须固定输出三条宿主行")
             expect(
                 hostRows.allSatisfy { $0.severity == .warning },
-                "双宿主均未安装只能是 warning，got \(hostRows)")
+                "全部宿主均未安装只能是 warning，got \(hostRows)")
             expect(
                 !report.results.contains { $0.name == "settings.json" },
                 "注入双宿主事实源后必须停用旧 Claude-only settings hard check")
             expect(
                 !report.hasFailure,
-                "共享 afplay/helper 就绪时，两个未安装宿主不得让完整 doctor 非零退出")
+                "共享 afplay/helper 就绪时，未安装宿主不得让完整 doctor 非零退出")
         }
     }
 
@@ -245,10 +257,10 @@ func runDualHostDoctorSuites() {
             let fixture = makeDualHostDoctorFixture(under: root)
             let results = hostIntegrationDoctorResults(environment: fixture.environment)
 
-            expect(results.count == 2, "无论连接状态如何都必须固定返回两个宿主结果")
+            expect(results.count == 3, "无论连接状态如何都必须固定返回三个宿主结果")
             expect(
-                results.map(\.name) == ["host-claude-code", "host-codex"],
-                "doctor 行顺序必须固定为 Claude Code、Codex")
+                results.map(\.name) == ["host-claude-code", "host-codex", "host-workbuddy"],
+                "doctor 行顺序必须固定为 Claude Code、Codex、WorkBuddy")
             expect(
                 results.allSatisfy { $0.severity == .warning },
                 "双未连是 warning，不是成功假绿或 hard failure，got \(results)")
@@ -265,13 +277,15 @@ func runDualHostDoctorSuites() {
             let unavailableEnvironment = DoctorIntegrationsEnvironment(
                 claudeSettingsFile: fixture.claudeSettings,
                 codexHooksFile: fixture.codexHooks,
+                workBuddySettingsFile: fixture.workBuddySettings,
                 claudioRoot: fixture.claudioRoot.path,
                 receiptStore: fixture.receiptStore,
                 claudeAvailability: { .available },
-                codexAvailability: { .unavailable(reason: "Codex 配置目录已断开") })
+                codexAvailability: { .unavailable(reason: "Codex 配置目录已断开") },
+                workBuddyAvailability: { .available })
 
             let results = hostIntegrationDoctorResults(environment: unavailableEnvironment)
-            expect(results.count == 2, "单侧不可用不能吞掉另一宿主 doctor 行")
+            expect(results.count == 3, "单侧不可用不能吞掉其他宿主 doctor 行")
             expect(
                 dualHostDoctorResult(results, host: .claudeCode)?.severity == .warning,
                 "未连接 Claude Code 仍只是 warning")
@@ -385,14 +399,18 @@ func runDualHostDoctorSuites() {
             var hooks: [String: Any] = [:]
             for event in Event.legacyLifecycleCases {
                 let binding = HostCapabilityCatalog.binding(host: .claudeCode, event: event)!
-                hooks[binding.nativeEvent!] = [[
-                    "hooks": [[
-                        "type": "command",
-                        "command": claudioHookCommand(
-                            for: event,
-                            claudioBinaryPath: fixture.claudioBinary.path),
-                    ]]
-                ]]
+                hooks[binding.nativeEvent!] = [
+                    [
+                        "hooks": [
+                            [
+                                "type": "command",
+                                "command": claudioHookCommand(
+                                    for: event,
+                                    claudioBinaryPath: fixture.claudioBinary.path),
+                            ]
+                        ]
+                    ]
+                ]
             }
             writeDualHostDoctorJSON(["hooks": hooks], to: fixture.claudeSettings)
 
@@ -409,11 +427,12 @@ func runDualHostDoctorSuites() {
     suite("双宿主 doctor：Claude modern/legacy 混装给出 conflict，绝不显示空缺失列表") {
         withTempDirectory { root in
             let fixture = makeDualHostDoctorFixture(under: root)
-            guard case .success(let modern) = connectClaudeCodeHooks(
-                root: [:],
-                claudioRoot: fixture.claudioRoot.path,
-                claudioBinaryPath: fixture.claudioBinary.path,
-                installationID: dualHostDoctorCurrentID)
+            guard
+                case .success(let modern) = connectClaudeCodeHooks(
+                    root: [:],
+                    claudioRoot: fixture.claudioRoot.path,
+                    claudioBinaryPath: fixture.claudioBinary.path,
+                    installationID: dualHostDoctorCurrentID)
             else {
                 expect(false, "测试前提：必须生成完整现代 Claude 配置")
                 return
@@ -422,11 +441,13 @@ func runDualHostDoctorSuites() {
             var hooks = mixed["hooks"] as! [String: Any]
             var stopGroups = hooks["Stop"] as! [Any]
             stopGroups.append([
-                "hooks": [[
-                    "type": "command",
-                    "command": claudioHookCommand(
-                        for: .stop, claudioBinaryPath: fixture.claudioBinary.path),
-                ]]
+                "hooks": [
+                    [
+                        "type": "command",
+                        "command": claudioHookCommand(
+                            for: .stop, claudioBinaryPath: fixture.claudioBinary.path),
+                    ]
+                ]
             ])
             hooks["Stop"] = stopGroups
             mixed["hooks"] = hooks
@@ -451,14 +472,18 @@ func runDualHostDoctorSuites() {
             var hooks: [String: Any] = [:]
             for event in Event.legacyLifecycleCases {
                 let binding = HostCapabilityCatalog.binding(host: .claudeCode, event: event)!
-                hooks[binding.nativeEvent!] = [[
-                    "hooks": [[
-                        "type": "command",
-                        "command": claudioHookCommand(
-                            for: event,
-                            claudioBinaryPath: fixture.claudioBinary.path),
-                    ]]
-                ]]
+                hooks[binding.nativeEvent!] = [
+                    [
+                        "hooks": [
+                            [
+                                "type": "command",
+                                "command": claudioHookCommand(
+                                    for: event,
+                                    claudioBinaryPath: fixture.claudioBinary.path),
+                            ]
+                        ]
+                    ]
+                ]
             }
             writeDualHostDoctorJSON(["hooks": hooks], to: fixture.claudeSettings)
             try! FileManager.default.setAttributes(
@@ -499,8 +524,9 @@ func runDualHostDoctorSuites() {
                 staleCodex?.message.contains("再提交一次提示词") == true,
                 "旧代次存在时仍必须显示当前代次待确认")
 
-            guard let receiptFile = fixture.receiptStore.receiptFile(
-                host: .codex, nativeEvent: "UserPromptSubmit")
+            guard
+                let receiptFile = fixture.receiptStore.receiptFile(
+                    host: .codex, nativeEvent: "UserPromptSubmit")
             else {
                 expect(false, "UserPromptSubmit 必须有稳定回执路径")
                 return
@@ -560,8 +586,9 @@ func runDualHostDoctorSuites() {
                 return
             }
             try! hooksData.write(to: fixture.codexHooks)
-            guard case .success = fixture.receiptStore.activate(
-                host: .codex, installationID: dualHostDoctorCurrentID)
+            guard
+                case .success = fixture.receiptStore.activate(
+                    host: .codex, installationID: dualHostDoctorCurrentID)
             else {
                 expect(false, "测试前提：migrated wrapper 的当前 installation 必须先发布")
                 return

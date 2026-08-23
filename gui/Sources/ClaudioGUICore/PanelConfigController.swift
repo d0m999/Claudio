@@ -40,6 +40,9 @@ public final class PanelConfigController: ObservableObject {
     @Published public private(set) var configState: PanelConfigState
     /// 读模型（`packCoverage` / `availablePacks`）算什么用的那份 config —— 不是决定哪个顶层视图渲染的。
     @Published public private(set) var config: ClaudioConfig
+    /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
+    @Published public private(set) var selectedSurface: HostSurfaceID?
+    @Published public private(set) var surfaceSoundIssue: String?
     @Published public private(set) var eventRows: [EventRow]
     @Published public private(set) var packCards: [PackCard]
     @Published public private(set) var packSectionState: PanelPackSectionState
@@ -95,6 +98,7 @@ public final class PanelConfigController: ObservableObject {
     /// 管理窗口成功写发布的 revision。订阅只做 ``reload()``，绝不降级到
     /// ``reloadConfigOnly()``，因为 manifest 与未来的星标写都可能改变 `packCards`。
     private var soundPacksRefreshCancellable: AnyCancellable?
+    private var baseConfig: ClaudioConfig
 
     public convenience init(
         configFile: URL,
@@ -161,6 +165,9 @@ public final class PanelConfigController: ObservableObject {
         let loadedConfig = loadedState.resolvedConfig
         self.configState = loadedState
         self.config = loadedConfig
+        self.baseConfig = loadedConfig
+        self.selectedSurface = nil
+        self.surfaceSoundIssue = nil
         if !readSource.readsSharedSnapshot {
             self.eventRows = packCoverage(
                 packID: loadedConfig.selectedPack, config: loadedConfig, environment: environment)
@@ -219,6 +226,25 @@ public final class PanelConfigController: ObservableObject {
     /// 位置上两套测试全绿。搬过来后，`PanelConfigControllerSuite` 对这三样各有一条行为断言。
     public func toggleMute(_ event: Event) {
         let currentlyEnabled = eventRows.first(where: { $0.event == event })?.enabled ?? true
+        if let selectedSurface {
+            switch setSurfaceEventEnabled(
+                event,
+                enabled: !currentlyEnabled,
+                surface: selectedSurface,
+                configFile: configFile,
+                lockFile: lockFile)
+            {
+            case .success:
+                muteError = nil
+                surfaceSoundIssue = nil
+                reloadConfigOnly()
+                soundPacksRefreshCoordinator?.completePanelConfigChange(.changed)
+            case .failure(let error):
+                surfaceSoundIssue = error.description
+                reloadConfigOnly()
+            }
+            return
+        }
         let succeeded = muteController.setEnabled(event, enabled: !currentlyEnabled)
         // republish：面板读 `panelModel.muteError`，不直接读 muteController（那会开幽灵实例的口，见 muteError 文档）。
         // setEnabled 成功把 lastError 清 nil、失败记下错误，所以此刻读它就是这次写盘的结果。
@@ -277,6 +303,29 @@ public final class PanelConfigController: ObservableObject {
     /// - Returns: 切包的真实落盘结局。窗口同步只消费这个 outcome；调用返回本身绝不等于成功。
     @discardableResult
     public func switchPack(to packID: String) -> PanelPackSwitchOutcome {
+        if let selectedSurface {
+            switch setSurfacePack(
+                packID,
+                surface: selectedSurface,
+                configFile: configFile,
+                userPacksDirectory: environment.userPacksDirectory,
+                bundledPacksDirectory: environment.bundledPacksDirectory,
+                lockFile: lockFile)
+            {
+            case .success:
+                packSwitchError = nil
+                surfaceSoundIssue = nil
+                reload(refreshSoundPackLibrary: false)
+                return .succeeded
+            case .failure(let error):
+                surfaceSoundIssue = error.description
+                let mapped = surfaceUseError(error)
+                // surface 专属错误由 `surfaceSoundIssue` 单一呈现；不要同时塞进全局切包错误，
+                // 否则同一失败会在 popup 连续渲染两次。
+                packSwitchError = nil
+                return .failed(mapped)
+            }
+        }
         switch selectPack(
             packID, configFile: configFile, userPacksDirectory: environment.userPacksDirectory,
             bundledPacksDirectory: environment.bundledPacksDirectory, lockFile: lockFile)
@@ -353,6 +402,10 @@ public final class PanelConfigController: ObservableObject {
     public func reloadConfigOnly() {
         let previousSelectedPack = config.selectedPack
         let reloaded = loadPanelConfig(from: configFile)
+        if selectedSurface != nil {
+            reload(using: reloaded)
+            return
+        }
         let selectedPackChanged: Bool
         switch reloaded {
         case .operational(let reloadedConfig):
@@ -383,9 +436,50 @@ public final class PanelConfigController: ObservableObject {
         }
 
         configState = reloaded
-        config = reloaded.resolvedConfig
+        baseConfig = reloaded.resolvedConfig
+        applyEffectiveConfig()
         eventRows = eventRows.map { row in
             EventRow(event: row.event, coverage: row.coverage, enabled: config.isEnabled(row.event))
+        }
+    }
+
+    /// 切换 popup 当前声音作用域。只改变读模型投影，不写 config；用户动作才物化稀疏覆盖。
+    public func selectSoundSurface(_ surface: HostSurfaceID?) {
+        guard selectedSurface != surface else { return }
+        selectedSurface = surface
+        surfaceSoundIssue = nil
+        applyEffectiveConfig()
+        if let librarySnapshot {
+            applySnapshot(librarySnapshot)
+        } else if !readSource.readsSharedSnapshot {
+            eventRows = packCoverage(
+                packID: config.selectedPack,
+                config: config,
+                environment: environment)
+            let loadedPackSection = Self.loadPackSection(config: config, environment: environment)
+            packCards = loadedPackSection.cards
+            packSectionState = loadedPackSection.state
+            selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
+            selectedPackMetadata = ClaudioGUICore.selectedPackMetadata(
+                packID: config.selectedPack,
+                environment: environment)
+        }
+    }
+
+    public func resetSelectedSurfaceOverrides() {
+        guard let selectedSurface else { return }
+        switch resetSurfaceSoundOverride(
+            surface: selectedSurface,
+            configFile: configFile,
+            lockFile: lockFile)
+        {
+        case .success:
+            surfaceSoundIssue = nil
+            reload(refreshSoundPackLibrary: false)
+            soundPacksRefreshCoordinator?.completePanelConfigChange(.changed)
+        case .failure(let error):
+            surfaceSoundIssue = error.description
+            reloadConfigOnly()
         }
     }
 
@@ -393,7 +487,8 @@ public final class PanelConfigController: ObservableObject {
     /// 不含跨-view-model 协调（那是 `afterFullReload` 的事）。
     private func reloadConfigReadModel(using loadedState: PanelConfigState) {
         configState = loadedState
-        config = configState.resolvedConfig
+        baseConfig = configState.resolvedConfig
+        applyEffectiveConfig()
         #if DEBUG
         guard readSource.readsSharedSnapshot else {
             eventRows = packCoverage(
@@ -419,6 +514,26 @@ public final class PanelConfigController: ObservableObject {
             }
             selectedPackIsBuiltinReadOnly = false
             selectedPackMetadata = SelectedPackMetadata(id: config.selectedPack, name: nil)
+        }
+    }
+
+    private func applyEffectiveConfig() {
+        switch baseConfig.resolveSoundProfile(for: selectedSurface) {
+        case .success(let profile):
+            var effective = baseConfig
+            effective.selectedPack = profile.selectedPack
+            effective.eventsEnabled = profile.eventsEnabled
+            config = effective
+        case .failure:
+            config = ClaudioConfig(
+                selectedPack: "",
+                masterVolume: baseConfig.masterVolume,
+                eventsEnabled: Dictionary(
+                    uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) }))
+            if let selectedSurface {
+                surfaceSoundIssue =
+                    "\(selectedSurface.rawValue) 的声音覆盖已损坏；已停止该来源播放，未回退到全局默认"
+            }
         }
     }
 
@@ -514,5 +629,19 @@ public final class PanelConfigController: ObservableObject {
                 pinnedCards: [],
                 availablePackCount: fullLibrary.count)
         )
+    }
+}
+
+private func surfaceUseError(_ error: SurfaceSoundMutationError) -> UseError {
+    switch error {
+    case .invalidPackID(let id): .invalidPackID(id)
+    case .packNotFound(let id): .packNotFound(id)
+    case .manifestUnreadable(let id, let reason):
+        .manifestUnreadable(packID: id, reason: reason)
+    case .configReadFailure(let reason): .configReadFailure(reason: reason)
+    case .configWriteFailure(let reason): .configWriteFailure(reason: reason)
+    case .configMissing: .configReadFailure(reason: error.description)
+    case .lockBusy: .lockBusy
+    case .lockFailed(let errno): .lockFailed(errno: errno)
     }
 }

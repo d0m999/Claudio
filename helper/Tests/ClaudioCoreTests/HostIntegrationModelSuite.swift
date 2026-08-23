@@ -1,12 +1,13 @@
-import Darwin
 import ClaudioCore
+import Darwin
 import Foundation
 
 @MainActor
 func runHostIntegrationModelSuites() {
-    suite("双宿主能力目录：Claude Code 5/5、Codex 严格 4/5") {
+    suite("宿主能力目录：接口能力与当前实现分离") {
         let claude = HostCapabilityCatalog.bindings(for: .claudeCode)
         let codex = HostCapabilityCatalog.bindings(for: .codex)
+        let workBuddy = HostCapabilityCatalog.bindings(for: .workBuddy)
 
         expect(claude.map(\.event) == Event.allCases, "Claude Code 必须按五个语义事件的稳定顺序给出能力")
         expect(
@@ -21,7 +22,7 @@ func runHostIntegrationModelSuites() {
             codex.first(where: { $0.event == .stopFailure })
                 == HostCapabilityBinding(
                     host: .codex, event: .stopFailure, nativeEvent: nil,
-                    support: .unsupported, qualification: "Codex 暂无执行中断事件"),
+                    support: .unsupported, qualification: .codexStopFailureUnavailable),
             "Codex StopFailure 必须 unsupported，不能降级映射到 Stop")
         expect(
             codex.first(where: { $0.event == .notification })?.nativeEvent == "PermissionRequest",
@@ -30,8 +31,16 @@ func runHostIntegrationModelSuites() {
             codex.first(where: { $0.event == .notification })?.support == .partial,
             "Codex PermissionRequest 必须标成 partial，而不是完整 Notification")
         expect(
-            codex.first(where: { $0.event == .notification })?.qualification == "仅授权请求",
-            "可见文案与 VoiceOver 共用的限定语必须是“仅授权请求”")
+            codex.first(where: { $0.event == .notification })?.qualification
+                == .permissionRequestOnly,
+            "Core 必须输出稳定 qualification token，不持有本地化文案")
+        expect(workBuddy.map(\.event) == Event.allCases, "WorkBuddy 必须始终展示五个语义事件")
+        expect(
+            workBuddy.filter(\.isAudibleCapability).map(\.event) == [.taskStart, .stop],
+            "WorkBuddy 首发只能执行 task_start 与 stop")
+        expect(
+            workBuddy.filter(\.isDeclaredCapability).count == 5,
+            "官方接口能力必须保留在目录中，不能被当前实现数覆盖")
     }
 
     suite("原生事件归一化：UserPromptSubmit 映射任务开始，未知事件与 Codex StopFailure 拒绝") {
@@ -60,10 +69,9 @@ func runHostIntegrationModelSuites() {
     }
 
     suite("AudibilityMatrix 完全消费 adapter 能力数据，Codex 4/5 是中性就绪") {
-        let readySnapshots = [
-            HostIntegrationSnapshot.connectedForTesting(host: .claudeCode),
-            HostIntegrationSnapshot.connectedForTesting(host: .codex),
-        ]
+        let readySnapshots = HostID.allCases.map {
+            HostIntegrationSnapshot.connectedForTesting(host: $0)
+        }
         let coverage = Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) })
         let enabled = Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) })
         let matrix = AudibilityMatrix.make(
@@ -76,17 +84,22 @@ func runHostIntegrationModelSuites() {
             enabledEvents: enabled)
 
         expect(matrix.rows.count == 5, "矩阵必须有五张语义事件行")
-        expect(matrix.rows.allSatisfy { $0.cells.count == 2 }, "每个事件必须永久保留两条宿主子行")
-        expect(matrix.summary(for: .claudeCode) == .ready(supported: 5, total: 5), "Claude 5/5 ready")
+        expect(
+            matrix.rows.allSatisfy { $0.cells.count == HostID.allCases.count },
+            "每个事件必须永久保留所有已出货宿主子行")
+        expect(
+            matrix.summary(for: .claudeCode) == .ready(supported: 5, total: 5), "Claude 5/5 ready")
         expect(matrix.summary(for: .codex) == .ready(supported: 4, total: 5), "Codex 4/5 是正常 ready")
+        expect(
+            matrix.summary(for: .workBuddy) == .ready(supported: 2, total: 5),
+            "WorkBuddy 当前实现必须诚实显示 2/5")
         expect(
             matrix.cell(host: .codex, event: .stopFailure)?.state == .unsupported,
             "Codex 执行中断格必须以中性 unsupported 存在")
         expect(
             matrix.cell(host: .codex, event: .notification)?.accessibilityLabel
-                == "Codex，待响应，仅授权请求，部分支持，已连接，可听",
-            "VoiceOver 必须说出宿主、声音语义、限定语、支持级别、连接状态和可听状态，"
-                + "但不拿原生 key 当主文案")
+                == "Codex，待响应，permission_request_only，部分支持，已连接，可听",
+            "Core 诊断必须使用稳定限定 token；GUI localization 再投影人类文案")
 
         var mutated = HostCapabilityCatalog.bindings(for: .codex)
         mutated.removeAll { $0.event == .subagentStop }
@@ -219,7 +232,8 @@ func runHostIntegrationModelSuites() {
         withTempDirectory { root in
             let fixture = makeSharedRuntimeFixture(root: root, missingEvent: .notification)
             writeSharedRuntimeExecutable(at: fixture.helper)
-            let runtime = SystemSharedRuntimeBootstrapper(environment: fixture.environment).inspect()
+            let runtime = SystemSharedRuntimeBootstrapper(environment: fixture.environment)
+                .inspect()
             expect(
                 runtime == .ready,
                 "partial 声音包仍能播放其他事件，不得把共享 runtime 整体判 damaged")

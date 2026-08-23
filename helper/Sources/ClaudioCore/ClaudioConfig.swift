@@ -23,17 +23,27 @@ public struct ClaudioConfig: Codable, Equatable, Sendable {
     /// on the panel route, where ``probeConfigRewritable(configFile:)`` has already stopped that
     /// malformed config before it can enter the read model. `play`/`doctor` do not consume stars.
     public var starredPacks: [String]?
+    /// 每个事件来源的稀疏覆盖。缺失字段继承顶层默认；无效条目不会被降级成继承。
+    public var surfaceOverrides: [String: SurfaceSoundOverride]
+    public var invalidSurfaceOverrideKeys: Set<String>
+    public var surfaceOverridesMalformed: Bool
 
     public init(
         selectedPack: String,
         masterVolume: Double = ClaudioConfig.defaultMasterVolume,
         eventsEnabled: [String: Bool] = [:],
-        starredPacks: [String]? = nil
+        starredPacks: [String]? = nil,
+        surfaceOverrides: [String: SurfaceSoundOverride] = [:],
+        invalidSurfaceOverrideKeys: Set<String> = [],
+        surfaceOverridesMalformed: Bool = false
     ) {
         self.selectedPack = selectedPack
         self.masterVolume = masterVolume
         self.eventsEnabled = eventsEnabled
         self.starredPacks = starredPacks
+        self.surfaceOverrides = surfaceOverrides
+        self.invalidSurfaceOverrideKeys = invalidSurfaceOverrideKeys
+        self.surfaceOverridesMalformed = surfaceOverridesMalformed
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -41,6 +51,7 @@ public struct ClaudioConfig: Codable, Equatable, Sendable {
         case masterVolume = "master_volume"
         case eventsEnabled = "events"
         case starredPacks = "starred_packs"
+        case surfaceOverrides = "surface_overrides"
     }
 
     /// Decodes leniently: `selected_pack` is the only required field. A missing or
@@ -64,10 +75,42 @@ public struct ClaudioConfig: Codable, Equatable, Sendable {
             ?? ClaudioConfig.defaultMasterVolume
         eventsEnabled = (try? container.decode([String: Bool].self, forKey: .eventsEnabled)) ?? [:]
         starredPacks = (try? container.decode([String].self, forKey: .starredPacks)) ?? nil
+        surfaceOverrides = [:]
+        invalidSurfaceOverrideKeys = []
+        surfaceOverridesMalformed = false
+        if container.contains(.surfaceOverrides) {
+            do {
+                let overrides = try container.nestedContainer(
+                    keyedBy: SurfaceSoundDynamicCodingKey.self,
+                    forKey: .surfaceOverrides)
+                for key in overrides.allKeys {
+                    do {
+                        surfaceOverrides[key.stringValue] = try overrides.decode(
+                            SurfaceSoundOverride.self,
+                            forKey: key)
+                    } catch {
+                        invalidSurfaceOverrideKeys.insert(key.stringValue)
+                    }
+                }
+            } catch {
+                surfaceOverridesMalformed = true
+            }
+        }
     }
 
     /// Whether `event` should play, honoring the opt-out default described above.
     public func isEnabled(_ event: Event) -> Bool {
         eventsEnabled[event.cliName] ?? true
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(selectedPack, forKey: .selectedPack)
+        try container.encode(masterVolume, forKey: .masterVolume)
+        try container.encode(eventsEnabled, forKey: .eventsEnabled)
+        try container.encodeIfPresent(starredPacks, forKey: .starredPacks)
+        if !surfaceOverrides.isEmpty {
+            try container.encode(surfaceOverrides, forKey: .surfaceOverrides)
+        }
     }
 }

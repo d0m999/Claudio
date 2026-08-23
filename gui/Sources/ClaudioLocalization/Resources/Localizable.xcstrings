@@ -43,6 +43,30 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重试" } }
       }
     },
+    "panel.sound-scope" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound scope" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音作用域" } }
+      }
+    },
+    "panel.global-defaults" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Global defaults" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全局默认" } }
+      }
+    },
+    "panel.reset-surface" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reset" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "重置" } }
+      }
+    },
+    "panel.reset-surface.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove this source's sound overrides and inherit global defaults" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除该来源的声音覆盖并继承全局默认" } }
+      }
+    },
     "host.details.hint" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Open connection and diagnostics for this source" } },
@@ -107,6 +131,18 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Audible, but no real receipt yet" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "可听，但暂无真实回执" } }
+      }
+    },
+    "host.workbuddy.ready-detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "2/5 events are implemented in this version; the others are not enabled" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前版本已实现 2/5；其余能力尚未启用" } }
+      }
+    },
+    "host.workbuddy.awaiting-detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Submit a prompt to WorkBuddy to confirm the connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请向 WorkBuddy 提交一次提示词以确认连接" } }
       }
     },
     "event.task-start" : {
@@ -790,6 +826,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开 %@" } }
       }
     },
+    "action.clear-receipt-history" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear %@ receipt history" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除 %@ 回执历史" } }
+      }
+    },
     "action.copy-hooks.hint" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy /hooks to the clipboard so Codex can complete authorization" } },
@@ -824,6 +866,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "A confirmation appears first; only this sound source's Claudio connection is removed" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会先确认；只移除这个声音来源的 claudi0 连接" } }
+      }
+    },
+    "action.clear-receipt-history.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A confirmation appears first; this permanently removes only the retained, redacted receipt history" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会先确认；只永久移除已保留的脱敏回执历史" } }
       }
     },
     "action.unmute" : {
@@ -878,6 +926,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnecting" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开中" } }
+      }
+    },
+    "action.clear-receipt-history.in-progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clearing receipt history" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除回执历史中" } }
       }
     },
     "sound-packs.confirm.delete.title" : {
@@ -2134,6 +2188,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "宿主状态已更新" } }
       }
     },
+    "feedback.receipt-history-cleared" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ receipt history cleared" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除 %@ 回执历史" } }
+      }
+    },
     "panel.base-label" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 panel" } },
@@ -2150,6 +2210,24 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Disconnect %@?" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "断开 %@？" } }
+      }
+    },
+    "integrations.clear-receipt-history.confirm" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear %@ receipt history?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除 %@ 回执历史？" } }
+      }
+    },
+    "integrations.clear-receipt-history.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear receipt history?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除回执历史？" } }
+      }
+    },
+    "integrations.clear-receipt-history.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes %@'s retained, redacted receipt history. The current connection, sound packs, and settings are unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这会永久移除 %@ 已保留的脱敏回执历史。当前连接、声音包和设置不会改变。" } }
       }
     },
     "integrations.disconnect.title" : {

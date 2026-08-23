@@ -63,6 +63,8 @@ public struct SystemProcessSpawner: ProcessSpawning {
 /// `~/.claudio` config/packs or spawn the real system `afplay` (see `PlaySuite.swift`).
 /// Defaults point at the real machine paths via ``ClaudioPaths``.
 public struct PlayEnvironment: Sendable {
+    /// `nil` 表示 legacy/global 播放；现代宿主回调始终传入稳定 surface ID。
+    public let surfaceID: HostSurfaceID?
     public let afplayPath: String
     public let lockFile: URL
     public let configFile: URL
@@ -103,6 +105,7 @@ public struct PlayEnvironment: Sendable {
     public let spawnResultObserver: (@Sendable (Bool) -> Void)?
 
     public init(
+        surfaceID: HostSurfaceID? = nil,
         afplayPath: String = "/usr/bin/afplay",
         lockFile: URL = ClaudioPaths.playLockFile,
         configFile: URL = ClaudioPaths.configFile,
@@ -117,6 +120,7 @@ public struct PlayEnvironment: Sendable {
         logLockFile: URL = ClaudioPaths.logLockFile,
         spawnResultObserver: (@Sendable (Bool) -> Void)? = nil
     ) {
+        self.surfaceID = surfaceID
         self.afplayPath = afplayPath
         self.lockFile = lockFile
         self.configFile = configFile
@@ -191,14 +195,19 @@ public func playSoundEvent(
     guard let event = Event(cliName: eventName) else { return .unknownEvent }
     let preparation: PreparedPlay
     if let config = loadPlayConfig(from: environment.configFile) {
-        if !config.isEnabled(event) {
-            preparation = .silent(.disabled(event: event))
-        } else if let audioFile = resolveAudioFile(
-            for: event, config: config, environment: environment)
-        {
-            preparation = .ready(config: config, audioFile: audioFile)
-        } else {
+        switch config.resolveSoundProfile(for: environment.surfaceID) {
+        case .failure:
             preparation = .silent(.notReady)
+        case .success(let profile):
+            if !profile.isEnabled(event) {
+                preparation = .silent(.disabled(event: event))
+            } else if let audioFile = resolveAudioFile(
+                for: event, packID: profile.selectedPack, environment: environment)
+            {
+                preparation = .ready(config: config, audioFile: audioFile)
+            } else {
+                preparation = .silent(.notReady)
+            }
         }
     } else {
         preparation = .silent(.notReady)
@@ -270,7 +279,8 @@ private func performDebouncedPlay(
         appendLogLine(
             event: event.cliName,
             reason: "play.lock 获取失败（errno \(code)）",
-            timestamp: environment.now(), to: environment.logFile, lockFile: environment.logLockFile)
+            timestamp: environment.now(), to: environment.logFile, lockFile: environment.logLockFile
+        )
         return .lockFailed(errno: code)
     }
 }
@@ -281,12 +291,12 @@ private func performDebouncedPlay(
 /// `playSoundEvent` reports as ``PlayOutcome/notReady``.
 private func resolveAudioFile(
     for event: Event,
-    config: ClaudioConfig,
+    packID: String,
     environment: PlayEnvironment
 ) -> URL? {
     guard
         let packDirectory = resolvePackDirectory(
-            id: config.selectedPack,
+            id: packID,
             userPacksDirectory: environment.userPacksDirectory,
             bundledPacksDirectory: environment.bundledPacksDirectory),
         let manifest = loadPlayManifest(from: packDirectory),

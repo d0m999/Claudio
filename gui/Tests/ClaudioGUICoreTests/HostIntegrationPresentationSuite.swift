@@ -10,13 +10,15 @@ private func hostPresentationSnapshot(
     activation: HostActivationEvidence? = nil
 ) -> HostIntegrationSnapshot {
     let binding = HostCapabilityCatalog.bindings(for: host).first { $0.isAudibleCapability }!
-    let evidence = activation ?? .observed(
-        HostReceiptEvidence(
-            installationID: hostPresentationInstallationID,
-            nativeEvent: binding.nativeEvent!,
-            event: binding.event,
-            timestamp: Date(timeIntervalSince1970: 100),
-            playbackResult: .played))
+    let evidence =
+        activation
+        ?? .observed(
+            HostReceiptEvidence(
+                installationID: hostPresentationInstallationID,
+                nativeEvent: binding.nativeEvent!,
+                event: binding.event,
+                timestamp: Date(timeIntervalSince1970: 100),
+                playbackResult: .played))
     let latestReceipt: HostReceiptEvidence?
     if case .observed(let observed) = evidence {
         latestReceipt = observed
@@ -40,10 +42,11 @@ private func hostPresentationMatrix(
 ) -> AudibilityMatrix {
     AudibilityMatrix.make(
         snapshots: snapshots ?? HostID.allCases.map { hostPresentationSnapshot($0) },
-        capabilities: capabilities ?? Dictionary(
-            uniqueKeysWithValues: HostID.allCases.map {
-                ($0, HostCapabilityCatalog.bindings(for: $0))
-            }),
+        capabilities: capabilities
+            ?? Dictionary(
+                uniqueKeysWithValues: HostID.allCases.map {
+                    ($0, HostCapabilityCatalog.bindings(for: $0))
+                }),
         soundCoverage: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }),
         enabledEvents: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }))
 }
@@ -66,15 +69,17 @@ func runHostIntegrationPresentationSuites() {
             Set(Event.allCases.map(\.displayName)).count == Event.allCases.count,
             "五个声音语义名称必须互不重复")
         for (event, title) in expected {
-            expect(event.displayName == title, "\(event.rawValue) 应显示 \(title)，实得 \(event.displayName)")
+            expect(
+                event.displayName == title, "\(event.rawValue) 应显示 \(title)，实得 \(event.displayName)"
+            )
         }
     }
 
-    suite("声音来源行：Claude Code 与 Codex 永久等权出现，4/5 是正常 ready") {
+    suite("声音来源行：稳定 registry 永久等权出现，能力数是实现事实") {
         let rows = hostSourceRowPresentations(from: hostPresentationMatrix())
 
-        expect(rows.count == 2, "声音来源必须固定两行，实得 \(rows.count)")
-        expect(rows.map(\.host) == [.claudeCode, .codex], "宿主行顺序必须固定为 Claude Code → Codex")
+        expect(rows.count == HostID.allCases.count, "声音来源必须覆盖稳定 registry，实得 \(rows.count)")
+        expect(rows.map(\.host) == HostID.allCases, "宿主行顺序必须服从稳定 registry")
         expect(rows[0].title == "Claude Code", "第一行标题必须是 Claude Code")
         expect(rows[0].readinessText == "5/5 已就绪", "Claude Code 应显示 5/5 已就绪")
         expect(rows[0].status == .ready, "Claude Code 完整连接应使用 ready 状态")
@@ -85,12 +90,17 @@ func runHostIntegrationPresentationSuites() {
         expect(
             rows[1].accessibilityLabel == "Codex，4/5 已就绪，执行中断暂无事件",
             "宿主行 VoiceOver 必须完整读出宿主、能力与限定，实得 \(rows[1].accessibilityLabel)")
+        expect(rows[2].title == "WorkBuddy", "第三行标题必须是 WorkBuddy")
+        expect(rows[2].readinessText == "2/5 已就绪", "WorkBuddy 当前实现必须显示 2/5")
+        expect(
+            rows[2].detailText == "当前版本已实现 2/5；其余能力尚未启用",
+            "接口能力与已实现能力不得混成假 5/5")
     }
 
     suite("声音来源行：缺少一个快照也不能隐藏该宿主；Codex 待确认文案固定") {
         let onlyClaude = hostSourceRowPresentations(
             from: hostPresentationMatrix(snapshots: [hostPresentationSnapshot(.claudeCode)]))
-        expect(onlyClaude.map(\.host) == HostID.allCases, "单宿主连接时仍须保留两条声音来源行")
+        expect(onlyClaude.map(\.host) == HostID.allCases, "单宿主连接时仍须保留全部声音来源行")
         expect(onlyClaude[1].status == .notConnected, "没有 Codex 快照应呈现未连接")
         expect(onlyClaude[1].readinessText == "4/5 未连接", "未连接仍须保留 Codex 的 4/5 能力事实")
 
@@ -110,7 +120,7 @@ func runHostIntegrationPresentationSuites() {
             "Codex 待确认文案必须逐字固定，实得 \(String(describing: awaiting[1].detailText))")
     }
 
-    suite("legacy 检查器：必须提供升级连接 + 重探 + 末尾断开，并复用 repair seam") {
+    suite("legacy 检查器：必须提供升级、重探、清除历史与末尾断开，并复用 repair seam") {
         let legacySnapshot = HostIntegrationSnapshot(
             host: .claudeCode,
             runtime: .ready,
@@ -129,8 +139,11 @@ func runHostIntegrationPresentationSuites() {
             legacy.detailText == "四个旧版事件可听；任务开始需升级",
             "legacy 行的可见与无障碍摘要必须直接指出任务开始需要升级")
         expect(
-            actions == [.repair(.claudeCode), .redetect, .disconnect(.claudeCode)],
-            "legacy 必须可升级、可重探且破坏性断开在末尾，实得 \(actions)")
+            actions == [
+                .repair(.claudeCode), .redetect, .clearReceiptHistory(.claudeCode),
+                .disconnect(.claudeCode),
+            ],
+            "legacy 必须可升级、可重探、可清除历史且破坏性断开在末尾，实得 \(actions)")
         expect(
             integrationsInspectorActionTitle(
                 .repair(.claudeCode), hostStatus: legacy.status) == "升级连接",
@@ -142,7 +155,7 @@ func runHostIntegrationPresentationSuites() {
             "真实损坏态仍应显示修复，不能一律叫升级")
     }
 
-    suite("可听能力矩阵：严格由五个语义行 × 两个宿主单元组成") {
+    suite("可听能力矩阵：严格由五个语义行 × registry 宿主单元组成") {
         let presentation = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
 
         expect(presentation.hostColumns == HostID.allCases, "矩阵宿主列必须来自 HostID.allCases")
@@ -150,13 +163,15 @@ func runHostIntegrationPresentationSuites() {
         expect(presentation.rows.count == 5, "矩阵必须有五个事件行")
         expect(
             presentation.rows.allSatisfy { $0.cells.map(\.host) == HostID.allCases },
-            "每个事件行必须按 Claude Code → Codex 提供两个单元")
+            "每个事件行必须按 registry 顺序提供全部单元")
         expect(
-            presentation.rows.flatMap(\.cells).count == 10,
-            "标准矩阵必须完整提供 5×2 共十个单元")
+            presentation.rows.flatMap(\.cells).count == Event.allCases.count
+                * HostID.allCases.count,
+            "标准矩阵必须完整提供全部事件与宿主组合")
 
         let permission = presentation.cell(host: .codex, event: .notification)
-        expect(permission?.nativeEventText == "PermissionRequest", "Codex 待响应必须显示原生 PermissionRequest")
+        expect(
+            permission?.nativeEventText == "PermissionRequest", "Codex 待响应必须显示原生 PermissionRequest")
         expect(permission?.qualificationText == "仅授权请求", "可见文案必须显示“仅授权请求”")
         let permissionLabel = permission?.accessibilityLabel ?? ""
         for required in [
@@ -195,18 +210,19 @@ func runHostIntegrationPresentationSuites() {
     }
 
     suite("菜单栏事件宿主 Logo：8 种矩阵状态按固定规则映射彩色或灰色") {
-        let cases: [(
-            AudibilityCellState, EventHostIndicatorState, Bool, String
-        )] = [
-            (.audible, .connected, true, "已连接"),
-            (.muted, .connected, true, "已连接"),
-            (.missingSound, .connected, true, "已连接"),
-            (.legacy, .legacy, true, "旧版连接"),
-            (.notConnected, .notConnected, false, "未连接"),
-            (.awaitingActivation, .awaitingActivation, false, "待激活"),
-            (.unsupported, .unsupported, false, "此事件不支持"),
-            (.degraded, .needsAttention, false, "需处理"),
-        ]
+        let cases:
+            [(
+                AudibilityCellState, EventHostIndicatorState, Bool, String
+            )] = [
+                (.audible, .connected, true, "已连接"),
+                (.muted, .connected, true, "已连接"),
+                (.missingSound, .connected, true, "已连接"),
+                (.legacy, .legacy, true, "旧版连接"),
+                (.notConnected, .notConnected, false, "未连接"),
+                (.awaitingActivation, .awaitingActivation, false, "待激活"),
+                (.unsupported, .unsupported, false, "此事件不支持"),
+                (.degraded, .needsAttention, false, "需处理"),
+            ]
 
         for (cellState, expectedState, expectedColor, expectedHelp) in cases {
             let matrix = HostCapabilityMatrixPresentation(
@@ -219,14 +235,15 @@ func runHostIntegrationPresentationSuites() {
                             HostCapabilityCellPresentation(
                                 host: .claudeCode,
                                 event: .stop,
-                                state: cellState),
-                        ]),
+                                state: cellState)
+                        ])
                 ])
             let indicators = eventHostIndicatorPresentations(event: .stop, matrix: matrix)
             expect(indicators.count == 1, "每个 hostColumns 项必须生成一枚 Logo")
             expect(
                 indicators.first?.state == expectedState,
-                "\(cellState) 应映射为 \(expectedState)，实得 \(String(describing: indicators.first?.state))")
+                "\(cellState) 应映射为 \(expectedState)，实得 \(String(describing: indicators.first?.state))"
+            )
             expect(
                 indicators.first?.state.usesActiveColor == expectedColor,
                 "\(cellState) 的彩色规则错误")
@@ -245,8 +262,8 @@ func runHostIntegrationPresentationSuites() {
                         HostCapabilityCellPresentation(
                             host: .claudeCode,
                             event: .stop,
-                            state: .audible),
-                    ]),
+                            state: .audible)
+                    ])
             ])
         let indicators = eventHostIndicatorPresentations(event: .stop, matrix: matrix)
 
@@ -441,17 +458,23 @@ func runHostIntegrationPresentationSuites() {
         }
     }
 
-    suite("IntegrationsWindow Dynamic Type：标准为 5×2 矩阵，最大字号重排为五张双宿主事件卡且从不横滚") {
+    suite("IntegrationsWindow Dynamic Type：标准矩阵与最大字号卡片都消费动态宿主数") {
         let standard = integrationsWindowLayoutAdaptation(for: .standard)
         let maximum = integrationsWindowLayoutAdaptation(for: .maximum)
 
         expect(
-            standard.mode == .capabilityMatrix(eventRowCount: 5, hostColumnCount: 2),
-            "标准字号必须保留 5×2 矩阵，实得 \(standard.mode)")
+            standard.mode
+                == .capabilityMatrix(
+                    eventRowCount: Event.allCases.count,
+                    hostColumnCount: HostID.allCases.count),
+            "标准字号必须保留完整动态矩阵，实得 \(standard.mode)")
         expect(!standard.allowsHorizontalScrolling, "标准字号不应依赖横向滚动")
         expect(
-            maximum.mode == .eventCards(cardCount: 5, hostRowsPerCard: 2),
-            "最大字号必须重排为五张事件卡、每张两条宿主子行，实得 \(maximum.mode)")
+            maximum.mode
+                == .eventCards(
+                    cardCount: Event.allCases.count,
+                    hostRowsPerCard: HostID.allCases.count),
+            "最大字号必须重排为事件卡并保留全部宿主子行，实得 \(maximum.mode)")
         expect(!maximum.allowsHorizontalScrolling, "最大字号严禁横向滚动或裁切")
     }
 
@@ -467,17 +490,21 @@ func runHostIntegrationPresentationSuites() {
             feedbackRevision: 7)
         let order = integrationsWindowFocusOrder(scope)
         let expectedCells = Event.allCases.flatMap { event in
-            HostID.allCases.map { IntegrationsWindowFocusTarget.capabilityCell(host: $0, event: event) }
+            HostID.allCases.map {
+                IntegrationsWindowFocusTarget.capabilityCell(host: $0, event: event)
+            }
         }
 
+        let hostCount = HostID.allCases.count
+        let cellCount = Event.allCases.count * hostCount
         expect(
-            Array(order.prefix(2)) == [.hostCard(.claudeCode), .hostCard(.codex)],
-            "焦点必须先按视觉序经过两张等权宿主卡")
+            Array(order.prefix(hostCount)) == HostID.allCases.map { .hostCard($0) },
+            "焦点必须先按视觉序经过所有等权宿主卡")
         expect(
-            Array(order.dropFirst(2).prefix(10)) == expectedCells,
-            "焦点随后必须按事件行、宿主列遍历十个真实矩阵单元")
+            Array(order.dropFirst(hostCount).prefix(cellCount)) == expectedCells,
+            "焦点随后必须按事件行、宿主列遍历全部真实矩阵单元")
         expect(
-            order.dropFirst(12).prefix(6) == [
+            order.dropFirst(hostCount + cellCount).prefix(6) == [
                 .copyConfigurationPath(.codex),
                 .dismissFeedback(revision: 7),
                 .recoveryAction(.repair(.codex)),
@@ -652,6 +679,7 @@ func runHostIntegrationPresentationSuites() {
             (.repair(.claudeCode), .needsAttention, "修复中"),
             (.repair(.claudeCode), .legacy, "升级中"),
             (.disconnect(.codex), .ready, "断开中"),
+            (.clearReceiptHistory(.workBuddy), .ready, "清除回执历史中"),
         ]
         for (action, status, expected) in cases {
             let operation = integrationsInFlightPresentation(

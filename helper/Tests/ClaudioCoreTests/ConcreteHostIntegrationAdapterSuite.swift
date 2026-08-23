@@ -17,9 +17,11 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     nativeEvent: binding.nativeEvent!,
                     installationID: installationID,
                     claudioBinaryPath: staleBinary.path)!
-                claudeHooks[binding.nativeEvent!] = [[
-                    "hooks": [["type": "command", "command": command]]
-                ]]
+                claudeHooks[binding.nativeEvent!] = [
+                    [
+                        "hooks": [["type": "command", "command": command]]
+                    ]
+                ]
             }
             writeAdapterJSON(["hooks": claudeHooks], to: paths.claudeSettings)
 
@@ -116,7 +118,8 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     nativeEvent: binding.nativeEvent!,
                     installationID: installationID,
                     claudioBinaryPath: paths.binary.path)!
-                let entry: [String: Any] = index.isMultiple(of: 2)
+                let entry: [String: Any] =
+                    index.isMultiple(of: 2)
                     ? ["type": "prompt", "command": command]
                     : ["command": command]
                 hooks[binding.nativeEvent!] = [["hooks": [entry]]]
@@ -223,11 +226,12 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let paths = makeAdapterFixture(root: root)
             let installationID = UUID(
                 uuidString: "34343434-4444-4444-8444-444444444444")!
-            guard case .success(let modern) = connectClaudeCodeHooks(
-                root: [:],
-                claudioRoot: paths.claudioRoot.path,
-                claudioBinaryPath: paths.binary.path,
-                installationID: installationID)
+            guard
+                case .success(let modern) = connectClaudeCodeHooks(
+                    root: [:],
+                    claudioRoot: paths.claudioRoot.path,
+                    claudioBinaryPath: paths.binary.path,
+                    installationID: installationID)
             else {
                 expect(false, "测试前提：必须生成完整现代 Claude 配置")
                 return
@@ -236,11 +240,13 @@ func runConcreteHostIntegrationAdapterSuites() async {
             var hooks = mixed["hooks"] as! [String: Any]
             var stopGroups = hooks["Stop"] as! [Any]
             stopGroups.append([
-                "hooks": [[
-                    "type": "command",
-                    "command": claudioHookCommand(
-                        for: .stop, claudioBinaryPath: paths.binary.path),
-                ]]
+                "hooks": [
+                    [
+                        "type": "command",
+                        "command": claudioHookCommand(
+                            for: .stop, claudioBinaryPath: paths.binary.path),
+                    ]
+                ]
             ])
             hooks["Stop"] = stopGroups
             mixed["hooks"] = hooks
@@ -258,7 +264,8 @@ func runConcreteHostIntegrationAdapterSuites() async {
             guard case .conflict(let reason) = snapshot.configuration else {
                 expect(
                     false,
-                    "mixed modern/legacy 必须是 conflict，不能是 incomplete([])，got \(snapshot.configuration)")
+                    "mixed modern/legacy 必须是 conflict，不能是 incomplete([])，got \(snapshot.configuration)"
+                )
                 return
             }
             expect(
@@ -274,25 +281,29 @@ func runConcreteHostIntegrationAdapterSuites() async {
         await withAsyncTempDirectory { root in
             let paths = makeAdapterFixture(root: root)
             let third: [String: Any] = [
-                "matcher": "third", "hooks": [["type": "command", "command": "echo third"]]
+                "matcher": "third", "hooks": [["type": "command", "command": "echo third"]],
             ]
             let legacyTaskStart = claudioHookCommand(
                 for: .notification, claudioBinaryPath: paths.binary.path)
             var hooks: [String: Any] = [
                 "Stop": [third],
-                "UserPromptSubmit": [[
-                    "hooks": [["type": "command", "command": legacyTaskStart]]
-                ]],
+                "UserPromptSubmit": [
+                    [
+                        "hooks": [["type": "command", "command": legacyTaskStart]]
+                    ]
+                ],
             ]
             for event in Event.legacyLifecycleCases {
                 let binding = HostCapabilityCatalog.binding(host: .claudeCode, event: event)!
                 var groups = (hooks[binding.nativeEvent!] as? [Any]) ?? []
                 groups.append([
-                    "hooks": [[
-                        "type": "command",
-                        "command": claudioHookCommand(
-                            for: event, claudioBinaryPath: paths.binary.path),
-                    ]]
+                    "hooks": [
+                        [
+                            "type": "command",
+                            "command": claudioHookCommand(
+                                for: event, claudioBinaryPath: paths.binary.path),
+                        ]
+                    ]
                 ])
                 hooks[binding.nativeEvent!] = groups
             }
@@ -364,13 +375,17 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 "notify": ["third-notifier", "--keep"],
                 "trust": ["private": "opaque"],
                 "hooks": [
-                    "Stop": [[
-                        "matcher": "third",
-                        "hooks": [["type": "command", "command": "echo foreign"]],
-                    ]],
-                    "AfterTool": [[
-                        "hooks": [["type": "command", "command": "echo after"]]
-                    ]],
+                    "Stop": [
+                        [
+                            "matcher": "third",
+                            "hooks": [["type": "command", "command": "echo foreign"]],
+                        ]
+                    ],
+                    "AfterTool": [
+                        [
+                            "hooks": [["type": "command", "command": "echo after"]]
+                        ]
+                    ],
                 ],
             ]
             writeAdapterJSON(original, to: paths.codexHooks)
@@ -439,14 +454,17 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let config = adapterPreviousNotifyConfig(wrapperPath: wrapper.path)
             writeFixture(config, to: configFile)
             let originalConfig = try! Data(contentsOf: configFile)
-            writeAdapterJSON([
-                "hooks": [
-                    "Stop": [[
-                        "matcher": "third",
-                        "hooks": [["type": "command", "command": "echo foreign"]],
-                    ]]
-                ]
-            ], to: paths.codexHooks)
+            writeAdapterJSON(
+                [
+                    "hooks": [
+                        "Stop": [
+                            [
+                                "matcher": "third",
+                                "hooks": [["type": "command", "command": "echo foreign"]],
+                            ]
+                        ]
+                    ]
+                ], to: paths.codexHooks)
             let adapter = CodexIntegrationAdapter(
                 environment: CodexIntegrationEnvironment(
                     hooksFile: paths.codexHooks,
@@ -480,7 +498,8 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 migrated.contains(" hook codex Stop --installation-id \(firstID.uuidString) "),
                 "旧 play stop 分支必须升级为带 installation ID 的 Stop hook")
             expect(try! Data(contentsOf: configFile) == originalConfig, "config.toml 必须逐字不变")
-            let permissions = try! FileManager.default.attributesOfItem(atPath: wrapper.path)[.posixPermissions]
+            let permissions =
+                try! FileManager.default.attributesOfItem(atPath: wrapper.path)[.posixPermissions]
                 as? NSNumber
             expect(permissions?.intValue == 0o755, "原 wrapper 执行权限必须保留")
             let connectedHooks = readAdapterJSON(paths.codexHooks)["hooks"] as? [String: Any]
@@ -552,14 +571,16 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let notifierLine = "echo notifier \"$payload\" >/dev/null 2>&1 &"
             let legacyWrapper = Data(
                 knownAdapterLegacyWrapper(
-                    binaryPath: paths.binary.path, notifierLine: notifierLine).utf8)
+                    binaryPath: paths.binary.path, notifierLine: notifierLine
+                ).utf8)
             let config = Data(adapterPreviousNotifyConfig(wrapperPath: wrapper.path).utf8)
-            guard case .success(let notifierOnly) =
-                removeClaudioBranchFromLegacyCodexNotifyWrapper(
-                    configTOML: config,
-                    wrapper: legacyWrapper,
-                    claudioRoot: paths.claudioRoot.path,
-                    claudioBinaryPath: paths.binary.path)
+            guard
+                case .success(let notifierOnly) =
+                    removeClaudioBranchFromLegacyCodexNotifyWrapper(
+                        configTOML: config,
+                        wrapper: legacyWrapper,
+                        claudioRoot: paths.claudioRoot.path,
+                        claudioBinaryPath: paths.binary.path)
             else {
                 expect(false, "测试前提：已知旧 wrapper 必须可转为 notifier-only")
                 return
@@ -635,8 +656,9 @@ func runConcreteHostIntegrationAdapterSuites() async {
                         try! externalWrapper.write(to: wrapper)
                     }))
 
-            guard case .failure(.migrationConflict(let reason)) =
-                await adapter.connect(runtime: .ready)
+            guard
+                case .failure(.migrationConflict(let reason)) =
+                    await adapter.connect(runtime: .ready)
             else {
                 expect(false, "staging 后 wrapper 被外部修改必须拒绝最终 rename")
                 return
@@ -661,8 +683,9 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let wrapper = paths.claudioRoot.appendingPathComponent("bin/codex-notify")
             let modified = knownAdapterLegacyWrapper(
                 binaryPath: paths.binary.path,
-                notifierLine: "echo third \"$payload\" >/dev/null 2>&1 &")
-                .replacingOccurrences(of: "payload=${1-}", with: "payload=$1")
+                notifierLine: "echo third \"$payload\" >/dev/null 2>&1 &"
+            )
+            .replacingOccurrences(of: "payload=${1-}", with: "payload=$1")
             writeFixture(modified, to: wrapper)
             writeFixture(adapterPreviousNotifyConfig(wrapperPath: wrapper.path), to: configFile)
             let originalHooks: [String: Any] = [
@@ -683,15 +706,17 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     receiptStore: paths.receipts,
                     availability: { .available }))
 
-            guard case .failure(.migrationConflict(let reason)) =
-                await adapter.connect(runtime: .ready)
+            guard
+                case .failure(.migrationConflict(let reason)) =
+                    await adapter.connect(runtime: .ready)
             else {
                 expect(false, "未知 wrapper 必须拒绝连接")
                 return
             }
             expect(reason.contains("未知或已被修改"), "冲突理由必须可排障")
             expect(try! Data(contentsOf: paths.codexHooks) == before, "冲突时 hooks.json 必须零写入")
-            expect(try! String(contentsOf: wrapper, encoding: .utf8) == modified, "冲突时 wrapper 必须零写入")
+            expect(
+                try! String(contentsOf: wrapper, encoding: .utf8) == modified, "冲突时 wrapper 必须零写入")
         }
     }
 
@@ -700,8 +725,9 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let paths = makeAdapterFixture(root: root)
             let claudeID = UUID(uuidString: "41414141-1111-4111-8111-111111111111")!
             let codexID = UUID(uuidString: "42424242-2222-4222-8222-222222222222")!
-            guard case .success = paths.receipts.activate(
-                host: .claudeCode, installationID: claudeID),
+            guard
+                case .success = paths.receipts.activate(
+                    host: .claudeCode, installationID: claudeID),
                 case .success = paths.receipts.activate(host: .codex, installationID: codexID)
             else {
                 expect(false, "测试前提：两个宿主 marker 必须可发布")
@@ -795,8 +821,10 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 expect(false, "dangling symlink 不得到真正连接时才意外成功")
                 return
             }
-            expect(!FileManager.default.fileExists(atPath: missingClaudeTarget.path), "不得创建 Claude 目标")
-            expect(!FileManager.default.fileExists(atPath: missingCodexTarget.path), "不得创建 Codex 目标")
+            expect(
+                !FileManager.default.fileExists(atPath: missingClaudeTarget.path), "不得创建 Claude 目标")
+            expect(
+                !FileManager.default.fileExists(atPath: missingCodexTarget.path), "不得创建 Codex 目标")
         }
     }
 
@@ -805,11 +833,12 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let paths = makeAdapterFixture(root: root)
             let installationID = UUID(
                 uuidString: "40404040-4040-4040-8040-404040404040")!
-            guard case .success(let claudeMutation) = connectClaudeCodeHooks(
-                root: [:],
-                claudioRoot: paths.claudioRoot.path,
-                claudioBinaryPath: paths.binary.path,
-                installationID: installationID)
+            guard
+                case .success(let claudeMutation) = connectClaudeCodeHooks(
+                    root: [:],
+                    claudioRoot: paths.claudioRoot.path,
+                    claudioBinaryPath: paths.binary.path,
+                    installationID: installationID)
             else {
                 expect(false, "测试前提：必须生成 Claude modern hooks")
                 return
@@ -880,11 +909,12 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let codexMarkerID = UUID(
                 uuidString: "44444444-2222-4222-8222-222222222222")!
 
-            guard case .success(let claudeMutation) = connectClaudeCodeHooks(
-                root: [:],
-                claudioRoot: paths.claudioRoot.path,
-                claudioBinaryPath: paths.binary.path,
-                installationID: claudeConfigID)
+            guard
+                case .success(let claudeMutation) = connectClaudeCodeHooks(
+                    root: [:],
+                    claudioRoot: paths.claudioRoot.path,
+                    claudioBinaryPath: paths.binary.path,
+                    installationID: claudeConfigID)
             else {
                 expect(false, "Claude fixture 必须生成现代配置")
                 return
@@ -896,8 +926,9 @@ func runConcreteHostIntegrationAdapterSuites() async {
                 claudioBinaryPath: paths.binary.path,
                 claudioRoot: paths.claudioRoot.path)
             try! codexMutation.data!.write(to: paths.codexHooks)
-            guard case .success = paths.receipts.activate(
-                host: .claudeCode, installationID: claudeMarkerID),
+            guard
+                case .success = paths.receipts.activate(
+                    host: .claudeCode, installationID: claudeMarkerID),
                 case .success = paths.receipts.activate(
                     host: .codex, installationID: codexMarkerID)
             else {
@@ -979,8 +1010,9 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     receiptStore: failingStore,
                     availability: { .available }))
 
-            guard case .failure(.configuration(let reason)) =
-                await adapter.connect(runtime: .ready)
+            guard
+                case .failure(.configuration(let reason)) =
+                    await adapter.connect(runtime: .ready)
             else {
                 expect(false, "marker 无法私密发布时 connect 必须返回 configuration failure")
                 return
@@ -1039,7 +1071,9 @@ func runConcreteHostIntegrationAdapterSuites() async {
 
             expect(try! Data(contentsOf: paths.claudeSettings) == claudeBefore, "Claude 争用不得改配置")
             expect(try! Data(contentsOf: paths.codexHooks) == codexBefore, "Codex 争用不得改配置")
-            expect(paths.receipts.currentInstallationID(host: .claudeCode) == nil, "Claude 争用不得发布 marker")
+            expect(
+                paths.receipts.currentInstallationID(host: .claudeCode) == nil,
+                "Claude 争用不得发布 marker")
             expect(paths.receipts.currentInstallationID(host: .codex) == nil, "Codex 争用不得发布 marker")
         }
     }
@@ -1176,7 +1210,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
         }
     }
 
-    await asyncSuite("HostIntegrationManager：两宿主永久存在，并行连接与单侧失败互不冻结") {
+    await asyncSuite("HostIntegrationManager：注册表宿主永久存在，已注册 adapter 可并行连接") {
         await withAsyncTempDirectory { root in
             let paths = makeAdapterFixture(root: root)
             writeAdapterJSON([:], to: paths.claudeSettings)
@@ -1213,8 +1247,11 @@ func runConcreteHostIntegrationAdapterSuites() async {
             }
             let connected = await manager.snapshots()
             expect(
-                connected.allSatisfy { $0.configuration == .configured },
-                "两侧连接后快照都必须保留")
+                connected.filter { $0.host != .workBuddy }
+                    .allSatisfy { $0.configuration == .configured }
+                    && connected.first(where: { $0.host == .workBuddy })?.configuration
+                        == .notConfigured,
+                "已注册两侧必须保留连接；缺 adapter 的稳定注册表项必须诚实未配置")
         }
     }
 }
@@ -1298,20 +1335,21 @@ private func adapterPreviousNotifyConfig(wrapperPath: String) -> String {
     let json = String(
         data: try! JSONSerialization.data(withJSONObject: [wrapperPath]),
         encoding: .utf8)!
-    let tomlArgument = json
+    let tomlArgument =
+        json
         .replacingOccurrences(of: "\\", with: "\\\\")
         .replacingOccurrences(of: "\"", with: "\\\"")
     return """
-    notify = [
-      "/Applications/Previous Notify.app/Contents/MacOS/previous-notify",
-      "turn-ended",
-      "--previous-notify",
-      "\(tomlArgument)",
-    ]
+        notify = [
+          "/Applications/Previous Notify.app/Contents/MacOS/previous-notify",
+          "turn-ended",
+          "--previous-notify",
+          "\(tomlArgument)",
+        ]
 
-    [projects."/tmp/example"]
-    trust_hash = "opaque"
-    """
+        [projects."/tmp/example"]
+        trust_hash = "opaque"
+        """
 }
 
 private struct ReadyRuntimeBootstrapper: SharedRuntimeBootstrapping {

@@ -92,7 +92,8 @@ public enum PreviewFixtures {
         .failed(
             action: .takeOver,
             message: "这一步没能完成，claudi0 已经停下、没有留下半成品。看看下面的原因，或者稍后再试一次。",
-            detail: "写 settings.json hooks 失败：settings.json 存在但不可写：/Users/demo/.claude/settings.json"),
+            detail:
+                "写 settings.json hooks 失败：settings.json 存在但不可写：/Users/demo/.claude/settings.json"),
         .failed(
             action: .takeOver,
             message: "没找到 claudi0 随身带的那个小助手，所以什么都没有改动。请从「应用程序」里打开 claudi0 再试一次。",
@@ -502,13 +503,15 @@ public enum PreviewFixtures {
     ) -> HostIntegrationSnapshot {
         let binding = HostCapabilityCatalog.bindings(for: host)
             .first(where: \.isAudibleCapability)!
-        let resolvedActivation = activation ?? .observed(
-            HostReceiptEvidence(
-                installationID: hostIntegrationInstallationID,
-                nativeEvent: binding.nativeEvent!,
-                event: binding.event,
-                timestamp: Date(timeIntervalSince1970: 1_721_980_800),
-                playbackResult: .played))
+        let resolvedActivation =
+            activation
+            ?? .observed(
+                HostReceiptEvidence(
+                    installationID: hostIntegrationInstallationID,
+                    nativeEvent: binding.nativeEvent!,
+                    event: binding.event,
+                    timestamp: Date(timeIntervalSince1970: 1_721_980_800),
+                    playbackResult: .played))
         return HostIntegrationSnapshot(
             host: host,
             runtime: runtime,
@@ -526,12 +529,16 @@ public enum PreviewFixtures {
         title: String,
         snapshots: [HostIntegrationSnapshot]
     ) -> HostIntegrationScenario {
+        let snapshotByHost = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.host, $0) })
+        let normalizedSnapshots = HostID.allCases.map { host in
+            snapshotByHost[host] ?? .disconnected(host: host)
+        }
         let capabilities = Dictionary(
             uniqueKeysWithValues: HostID.allCases.map {
                 ($0, HostCapabilityCatalog.bindings(for: $0))
             })
         let matrix = AudibilityMatrix.make(
-            snapshots: snapshots,
+            snapshots: normalizedSnapshots,
             capabilities: capabilities,
             soundCoverage: Dictionary(
                 uniqueKeysWithValues: Event.allCases.map { ($0, true) }),
@@ -541,7 +548,7 @@ public enum PreviewFixtures {
             id: id,
             title: title,
             state: HostIntegrationPresentationState(
-                snapshots: snapshots,
+                snapshots: normalizedSnapshots,
                 matrix: matrix))
     }
 
@@ -630,7 +637,9 @@ public enum PreviewFixtures {
     /// is a claim nobody re-checks; `/codex review 8771946`.)
     public static func assertExhaustive() -> Set<String> {
         var visited: Set<String> = []
-        for state in onboardingStates { visited.insert("onboarding.\(onboardingStateCoverage(state))") }
+        for state in onboardingStates {
+            visited.insert("onboarding.\(onboardingStateCoverage(state))")
+        }
         for state in onboardingActionStates {
             visited.insert("onboardingAction.\(onboardingActionStateCoverage(state))")
         }
@@ -643,7 +652,9 @@ public enum PreviewFixtures {
         for size in interfaceTextSizes {
             visited.insert("interfaceText.\(interfaceTextSizeCoverage(size))")
         }
-        for state in masterVolumeStates { visited.insert("masterVolume.\(masterVolumeStateCoverage(state))") }
+        for state in masterVolumeStates {
+            visited.insert("masterVolume.\(masterVolumeStateCoverage(state))")
+        }
         for scenario in hostIntegrationScenarios {
             visited.insert("hostIntegration.\(scenario.id)")
         }

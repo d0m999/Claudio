@@ -96,7 +96,8 @@ private actor BridgeAdapter: HostIntegrationAdapter {
         }
         let installationID = UUID(uuidString: "00000000-0000-4000-8000-0000000000B1")!
         let binding = capabilities.first(where: { $0.isAudibleCapability })!
-        let activation: HostActivationEvidence = observesReceipt
+        let activation: HostActivationEvidence =
+            observesReceipt
             ? .observed(
                 HostReceiptEvidence(
                     installationID: installationID,
@@ -126,6 +127,7 @@ private func bridgeFixture(
     bootstrapper: BridgeBootstrapper,
     claude: BridgeAdapter,
     codex: BridgeAdapter,
+    receiptStore: HostHookReceiptStore,
     configFile: URL,
     packDirectory: URL
 ) {
@@ -148,11 +150,15 @@ private func bridgeFixture(
         userPacksDirectory: packs,
         durationProbe: StubDurationProbe(fixedDuration: 0.1),
         packsLockFile: root.appendingPathComponent("packs.lock"))
+    let receiptStore = HostHookReceiptStore(
+        receiptsRoot: root.appendingPathComponent("integrations/receipts"),
+        locksRoot: root.appendingPathComponent("integrations/receipt-locks"))
     let bridge = HostIntegrationManagerBridge(
         manager: manager,
         configFile: config,
-        audioEnvironment: audioEnvironment)
-    return (bridge, bootstrapper, claude, codex, config, pack)
+        audioEnvironment: audioEnvironment,
+        receiptStore: receiptStore)
+    return (bridge, bootstrapper, claude, codex, receiptStore, config, pack)
 }
 
 @MainActor
@@ -180,7 +186,9 @@ func runHostIntegrationManagerBridgeSuites() async {
         }
     }
 
-    await suite("HostIntegrationManagerBridge 动作：connect/repair/disconnect 只写目标 adapter，repair 复用 connect") {
+    await suite(
+        "HostIntegrationManagerBridge 动作：connect/repair/disconnect 只写目标 adapter，repair 复用 connect"
+    ) {
         await withTempDirectory { root in
             let fixture = bridgeFixture(root: root)
             _ = await fixture.bridge.refresh()
@@ -228,6 +236,44 @@ func runHostIntegrationManagerBridgeSuites() async {
         }
     }
 
+    await suite("HostIntegrationManagerBridge 清除历史：只删目标 surface 历史并返回可见反馈") {
+        await withTempDirectory { root in
+            let fixture = bridgeFixture(root: root)
+            let installationID = UUID(uuidString: "10101010-1010-4010-8010-101010101010")!
+            guard
+                case .success = fixture.receiptStore.activate(
+                    host: .workBuddy,
+                    installationID: installationID,
+                    scopeFingerprint: "bridge-test")
+            else {
+                expect(false, "测试前提：临时 WorkBuddy installation 必须发布")
+                return
+            }
+            let receipt = HostHookReceipt(
+                installationID: installationID,
+                host: .workBuddy,
+                nativeEvent: "UserPromptSubmit",
+                semanticEvent: .taskStart,
+                timestamp: Date(),
+                playbackResult: .played)
+            expect(
+                fixture.receiptStore.store(receipt) == .success(.written),
+                "测试前提：临时历史回执必须写入")
+
+            let outcome = try? await fixture.bridge.perform(.clearReceiptHistory(.workBuddy))
+
+            expect(
+                fixture.receiptStore.receiptHistory(host: .workBuddy).isEmpty,
+                "清除动作必须落到注入的目标 surface 历史目录")
+            expect(
+                outcome?.feedbackMessage == "已清除 WorkBuddy 回执历史",
+                "清除成功必须返回可见、宿主限定反馈")
+            expect(
+                fixture.receiptStore.currentInstallationID(host: .workBuddy) == installationID,
+                "清除历史不得撤销当前 activation marker")
+        }
+    }
+
     await suite("HostIntegrationManagerBridge 动作失败：仍返回双宿主新状态与 failure 反馈，不冻结另一侧") {
         await withTempDirectory { root in
             let fixture = bridgeFixture(root: root, claudeFailsConnect: true)
@@ -250,7 +296,9 @@ func runHostIntegrationManagerBridgeSuites() async {
         }
     }
 
-    await suite("HostIntegrationManagerBridge 矩阵：真实 config + manifest 依次投影 audible、muted、missingSound") {
+    await suite(
+        "HostIntegrationManagerBridge 矩阵：真实 config + manifest 依次投影 audible、muted、missingSound"
+    ) {
         await withTempDirectory { root in
             let fixture = bridgeFixture(root: root, initiallyConnected: true)
             writeFixture(
@@ -309,6 +357,42 @@ func runHostIntegrationManagerBridgeSuites() async {
             expect(
                 state.matrix.cell(host: .codex, event: .stopFailure)?.state == .unsupported,
                 "全局静音不得把 Codex 不支持的 StopFailure 误画成 muted")
+        }
+    }
+
+    await suite("HostIntegrationManagerBridge 矩阵：每个 surface 消费自己的 effective pack") {
+        await withTempDirectory { root in
+            let fixture = bridgeFixture(root: root, initiallyConnected: true)
+            let codexPack = fixture.packDirectory.deletingLastPathComponent()
+                .appendingPathComponent("codex-only")
+            writeFixture(
+                """
+                {
+                  "selected_pack": "dual",
+                  "events": { "notification": true },
+                  "surface_overrides": {
+                    "codex": { "selected_pack": "codex-only" }
+                  }
+                }
+                """,
+                to: fixture.configFile)
+            writeFixture(
+                #"{"id":"dual","events":{"notification":"notification.mp3"}}"#,
+                to: fixture.packDirectory.appendingPathComponent("manifest.json"))
+            writeFixture(
+                "audio", to: fixture.packDirectory.appendingPathComponent("notification.mp3"))
+            writeFixture(
+                #"{"id":"codex-only","events":{}}"#,
+                to: codexPack.appendingPathComponent("manifest.json"))
+
+            let state = await fixture.bridge.refresh()
+
+            expect(
+                state.matrix.cell(host: .claudeCode, event: .notification)?.state == .audible,
+                "Claude Code 未覆盖时必须继续继承全局 dual pack")
+            expect(
+                state.matrix.cell(host: .codex, event: .notification)?.state == .missingSound,
+                "Codex 必须消费 codex-only 覆盖，不能错误复用全局 dual pack")
         }
     }
 }

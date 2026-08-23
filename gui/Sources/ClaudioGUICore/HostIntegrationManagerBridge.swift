@@ -51,11 +51,13 @@ public struct HostIntegrationMutationOutcome: Sendable, Equatable {
 
 public enum HostIntegrationManagerBridgeError: LocalizedError, Sendable, Equatable {
     case action(HostIntegrationActionError)
+    case receiptHistory(HostHookReceiptStoreError)
     case unsupportedAction
 
     public var errorDescription: String? {
         switch self {
         case .action(let error): error.description
+        case .receiptHistory(let error): error.description
         case .unsupportedAction: "这个动作不应交给宿主连接管理器。"
         }
     }
@@ -67,18 +69,25 @@ public actor HostIntegrationManagerBridge {
     private let manager: HostIntegrationManager
     private let configFile: URL
     private let audioEnvironment: AudioImportEnvironment
+    private let receiptStore: HostHookReceiptStore
 
     public init(
         manager: HostIntegrationManager,
         configFile: URL,
-        audioEnvironment: AudioImportEnvironment
+        audioEnvironment: AudioImportEnvironment,
+        receiptStore: HostHookReceiptStore = HostHookReceiptStore(
+            receiptsRoot: ClaudioPaths.receiptsDirectory,
+            locksRoot: ClaudioPaths.receiptLocksDirectory,
+            installationsRoot: ClaudioPaths.activeInstallationsDirectory,
+            installationLocksRoot: ClaudioPaths.activeInstallationLocksDirectory)
     ) {
         self.manager = manager
         self.configFile = configFile
         self.audioEnvironment = audioEnvironment
+        self.receiptStore = receiptStore
     }
 
-    /// 首启只自举共享 runtime，再 inspect 两个宿主；绝不隐式调用任何 adapter 的 `connect`。
+    /// 首启只自举共享 runtime，再 inspect 全部已发布 adapter；绝不隐式调用 `connect`。
     public func bootstrapSharedRuntime() async -> HostIntegrationPresentationState {
         let snapshots = await manager.bootstrapSharedRuntime()
         return await presentationState(snapshots: snapshots)
@@ -92,6 +101,17 @@ public actor HostIntegrationManagerBridge {
     public func perform(
         _ action: IntegrationsWindowInspectorAction
     ) async throws -> HostIntegrationMutationOutcome {
+        if case .clearReceiptHistory(let host) = action {
+            if case .failure(let error) = receiptStore.clearReceiptHistory(host: host) {
+                throw HostIntegrationManagerBridgeError.receiptHistory(error)
+            }
+            return HostIntegrationMutationOutcome(
+                state: await refresh(),
+                feedbackKind: .information,
+                feedbackText: .localized(
+                    key: .feedbackReceiptHistoryCleared,
+                    arguments: [host.displayName]))
+        }
         let result: Result<HostIntegrationSnapshot, HostIntegrationActionError>
 
         switch action {
@@ -101,12 +121,12 @@ public actor HostIntegrationManagerBridge {
             result = await manager.connect(requestedHost)
         case .disconnect(let requestedHost):
             result = await manager.disconnect(requestedHost)
-        case .copyHooksCommand, .redetect:
+        case .copyHooksCommand, .redetect, .clearReceiptHistory:
             throw HostIntegrationManagerBridgeError.unsupportedAction
         }
 
         if case .failure(let error) = result {
-            // Manager 已经把失败侧重新 inspect；再刷新两侧，把失败发生期间另一宿主的新回执也
+            // Manager 已经把失败侧重新 inspect；再刷新全部来源，把失败期间其他来源的新回执也
             // 一并带回 MainActor。失败是可呈现 outcome，不是“保留旧 content”的异常捷径。
             let state = await refresh()
             return HostIntegrationMutationOutcome(
@@ -117,7 +137,7 @@ public actor HostIntegrationManagerBridge {
                     arguments: [error.description]))
         }
 
-        // 动作只写一侧，但完成后刷新两侧，使另一宿主的新回执或外部配置变化不会被冻结。
+        // 动作只写一侧，但完成后刷新全部来源，使其他来源的新回执或外部配置变化不会被冻结。
         let state = await refresh()
         return HostIntegrationMutationOutcome(
             state: state,
@@ -130,32 +150,50 @@ public actor HostIntegrationManagerBridge {
     ) async -> HostIntegrationPresentationState {
         let capabilities = await manager.capabilities()
         let config = loadPanelConfig(from: configFile).resolvedConfig
-        let eventRows = packCoverage(
-            packID: config.selectedPack,
-            config: config,
-            environment: audioEnvironment)
-        let coverage = Dictionary(uniqueKeysWithValues: eventRows.map { row in
-            let hasSound: Bool
-            if case .present = row.coverage {
-                hasSound = true
-            } else {
-                hasSound = false
-            }
-            return (row.event, hasSound)
-        })
+        var coverageByHost: [HostID: [Event: Bool]] = [:]
+        var enabledByHost: [HostID: [Event: Bool]] = [:]
         // `master_volume == 0` 表示总输出无声，与逐事件 enabled 正交；它不是另一颗“全局静音”
         // 控件。把两轴在进入唯一矩阵前合成；`AudibilityMatrix` 仍先判 unsupported，因此 Codex
         // StopFailure 不会被误画成 muted。
         let masterVolumeAllowsAudio = config.masterVolume > 0
-        let enabled = Dictionary(
-            uniqueKeysWithValues: eventRows.map {
-                ($0.event, $0.enabled && masterVolumeAllowsAudio)
-            })
+        for host in HostID.allCases {
+            switch config.resolveSoundProfile(for: host.surfaceID) {
+            case .success(let profile):
+                var effectiveConfig = config
+                effectiveConfig.selectedPack = profile.selectedPack
+                effectiveConfig.eventsEnabled = profile.eventsEnabled
+                let rows = packCoverage(
+                    packID: profile.selectedPack,
+                    config: effectiveConfig,
+                    environment: audioEnvironment)
+                coverageByHost[host] = Dictionary(
+                    uniqueKeysWithValues: rows.map { row in
+                        let hasSound: Bool
+                        if case .present = row.coverage {
+                            hasSound = true
+                        } else {
+                            hasSound = false
+                        }
+                        return (row.event, hasSound)
+                    })
+                enabledByHost[host] = Dictionary(
+                    uniqueKeysWithValues: rows.map {
+                        ($0.event, $0.enabled && masterVolumeAllowsAudio)
+                    })
+            case .failure:
+                // 显式损坏的 surface 覆盖必须与播放链一样 fail closed；不能为了让 UI 好看
+                // 而回退到全局 pack 或全局事件开关。
+                coverageByHost[host] = Dictionary(
+                    uniqueKeysWithValues: Event.allCases.map { ($0, false) })
+                enabledByHost[host] = Dictionary(
+                    uniqueKeysWithValues: Event.allCases.map { ($0, false) })
+            }
+        }
         let matrix = AudibilityMatrix.make(
             snapshots: snapshots,
             capabilities: capabilities,
-            soundCoverage: coverage,
-            enabledEvents: enabled)
+            soundCoverageByHost: coverageByHost,
+            enabledEventsByHost: enabledByHost)
         return HostIntegrationPresentationState(
             snapshots: snapshots,
             matrix: matrix,
@@ -193,15 +231,17 @@ private func mutationFeedbackText(
     return .localized(key: .feedbackConfiguredWaiting, arguments: [host.displayName])
 }
 
-private extension IntegrationsWindowInspectorAction {
-    var host: HostID? {
+extension IntegrationsWindowInspectorAction {
+    fileprivate var host: HostID? {
         switch self {
-        case .connect(let host), .repair(let host), .disconnect(let host): host
+        case .connect(let host), .repair(let host), .disconnect(let host),
+            .clearReceiptHistory(let host):
+            host
         case .copyHooksCommand, .redetect: nil
         }
     }
 
-    var isDisconnect: Bool {
+    fileprivate var isDisconnect: Bool {
         if case .disconnect = self { return true }
         return false
     }

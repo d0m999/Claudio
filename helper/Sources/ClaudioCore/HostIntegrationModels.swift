@@ -4,12 +4,90 @@ import Foundation
 public enum HostID: String, CaseIterable, Codable, Sendable, Hashable {
     case claudeCode = "claude-code"
     case codex = "codex"
+    case workBuddy = "workbuddy"
 
     public var displayName: String {
         switch self {
         case .claudeCode: "Claude Code"
         case .codex: "Codex"
+        case .workBuddy: "WorkBuddy"
         }
+    }
+
+    public var surfaceID: HostSurfaceID {
+        HostSurfaceID(rawValue: rawValue)!
+    }
+
+    public var descriptor: HostIntegrationDescriptor {
+        switch self {
+        case .claudeCode:
+            HostIntegrationDescriptor(
+                host: self, product: .claude, surface: .claudeCode,
+                mechanism: .nativeHooks, maturity: .stable, controlSurface: .shared)
+        case .codex:
+            HostIntegrationDescriptor(
+                host: self, product: .chatGPT, surface: .codex,
+                mechanism: .nativeHooks, maturity: .stable, controlSurface: .shared)
+        case .workBuddy:
+            HostIntegrationDescriptor(
+                host: self, product: .workBuddy, surface: .workBuddy,
+                mechanism: .nativeHooks, maturity: .stable, controlSurface: .shared)
+        }
+    }
+}
+
+/// 用户识别的产品品牌。能力与偏好不直接绑定产品；它只负责把多个 surface 分组。
+public enum HostProductID: String, CaseIterable, Codable, Sendable, Hashable {
+    case chatGPT
+    case claude
+    case workBuddy = "workbuddy"
+}
+
+/// 一条稳定、可持久化的事件来源。它比产品更细，声音覆盖和回执均以它为作用域。
+public enum HostSurfaceID: String, CaseIterable, Codable, Sendable, Hashable {
+    case claudeCode = "claude-code"
+    case codex = "codex"
+    case workBuddy = "workbuddy"
+}
+
+public enum HostIntegrationMechanism: String, Codable, Sendable, Equatable {
+    case nativeHooks = "native_hooks"
+    case accessibilityBeta = "accessibility_beta"
+}
+
+public enum HostIntegrationMaturity: String, Codable, Sendable, Equatable {
+    case stable
+    case beta
+}
+
+public enum HostIntegrationControlSurface: String, Codable, Sendable, Equatable {
+    case shared
+    case guiOnly = "gui_only"
+}
+
+/// Core 只携带稳定 token；展示名由 localization 层决定。
+public struct HostIntegrationDescriptor: Codable, Sendable, Equatable, Hashable {
+    public let host: HostID
+    public let product: HostProductID
+    public let surface: HostSurfaceID
+    public let mechanism: HostIntegrationMechanism
+    public let maturity: HostIntegrationMaturity
+    public let controlSurface: HostIntegrationControlSurface
+
+    public init(
+        host: HostID,
+        product: HostProductID,
+        surface: HostSurfaceID,
+        mechanism: HostIntegrationMechanism,
+        maturity: HostIntegrationMaturity,
+        controlSurface: HostIntegrationControlSurface
+    ) {
+        self.host = host
+        self.product = product
+        self.surface = surface
+        self.mechanism = mechanism
+        self.maturity = maturity
+        self.controlSurface = controlSurface
     }
 }
 
@@ -20,29 +98,69 @@ public enum HostCapabilitySupport: String, Codable, Sendable, Equatable {
     case unsupported
 }
 
+/// 官方接口声明与 claudi0 当前实现是两条独立事实。
+public enum HostCapabilityImplementation: String, Codable, Sendable, Equatable {
+    case implemented
+    case notImplemented = "not_implemented"
+}
+
+/// 限定语稳定 token；GUI 负责把它本地化为用户文案。
+public enum HostCapabilityQualificationID: String, Codable, Sendable, Equatable, Hashable {
+    case codexStopFailureUnavailable = "codex.stop_failure_unavailable"
+    case permissionRequestOnly = "permission_request_only"
+    case notificationMatchersOnly = "notification_matchers_only"
+    case interfaceSupportedNotImplemented = "interface_supported_not_implemented"
+    case interfacePartiallySupportedNotImplemented = "interface_partially_supported_not_implemented"
+    case undeclaredCapability = "undeclared_capability"
+}
+
+/// receipt 的稳定主键。schema revision 进入 raw value，binding 语义变化后旧证据自然失效。
+public struct HostEventBindingID: RawRepresentable, Codable, Sendable, Equatable, Hashable {
+    public let rawValue: String
+
+    public init(rawValue: String) {
+        self.rawValue = rawValue
+    }
+}
+
 /// 一个宿主原生事件与声音包语义之间的唯一映射。
 public struct HostCapabilityBinding: Codable, Sendable, Equatable, Hashable {
+    public let id: HostEventBindingID
     public let host: HostID
     public let event: Event
     public let nativeEvent: String?
     public let support: HostCapabilitySupport
-    public let qualification: String?
+    public let implementation: HostCapabilityImplementation
+    public let qualification: HostCapabilityQualificationID?
 
     public init(
         host: HostID,
         event: Event,
         nativeEvent: String?,
         support: HostCapabilitySupport,
-        qualification: String? = nil
+        implementation: HostCapabilityImplementation = .implemented,
+        qualification: HostCapabilityQualificationID? = nil,
+        schemaRevision: Int = 1
     ) {
+        let nativeToken = nativeEvent ?? "none"
+        let qualifierToken = qualification?.rawValue ?? "none"
+        self.id = HostEventBindingID(
+            rawValue:
+                "\(host.rawValue):\(nativeToken):\(event.rawValue):\(qualifierToken):v\(schemaRevision)"
+        )
         self.host = host
         self.event = event
         self.nativeEvent = nativeEvent
         self.support = support
+        self.implementation = implementation
         self.qualification = qualification
     }
 
     public var isAudibleCapability: Bool {
+        nativeEvent != nil && support != .unsupported && implementation == .implemented
+    }
+
+    public var isDeclaredCapability: Bool {
         nativeEvent != nil && support != .unsupported
     }
 }
@@ -77,21 +195,47 @@ public enum HostCapabilityCatalog {
                     host: host, event: .stop, nativeEvent: "Stop", support: .supported),
                 HostCapabilityBinding(
                     host: host, event: .stopFailure, nativeEvent: nil,
-                    support: .unsupported, qualification: "Codex 暂无执行中断事件"),
+                    support: .unsupported, qualification: .codexStopFailureUnavailable),
                 HostCapabilityBinding(
                     host: host, event: .notification, nativeEvent: "PermissionRequest",
-                    support: .partial, qualification: "仅授权请求"),
+                    support: .partial, qualification: .permissionRequestOnly),
                 HostCapabilityBinding(
                     host: host, event: .subagentStop, nativeEvent: "SubagentStop",
                     support: .supported),
+            ]
+        case .workBuddy:
+            return [
+                HostCapabilityBinding(
+                    host: host, event: .taskStart, nativeEvent: "UserPromptSubmit",
+                    support: .supported),
+                HostCapabilityBinding(
+                    host: host, event: .stop, nativeEvent: "Stop", support: .supported),
+                HostCapabilityBinding(
+                    host: host, event: .stopFailure, nativeEvent: "StopFailure",
+                    support: .supported, implementation: .notImplemented,
+                    qualification: .interfaceSupportedNotImplemented),
+                HostCapabilityBinding(
+                    host: host, event: .notification, nativeEvent: "Notification",
+                    support: .partial, implementation: .notImplemented,
+                    qualification: .interfacePartiallySupportedNotImplemented),
+                HostCapabilityBinding(
+                    host: host, event: .subagentStop, nativeEvent: "SubagentStop",
+                    support: .supported, implementation: .notImplemented,
+                    qualification: .interfaceSupportedNotImplemented),
             ]
         }
     }
 
     public static func semanticEvent(host: HostID, nativeEvent: String) -> Event? {
         bindings(for: host).first {
-            $0.nativeEvent == nativeEvent && $0.support != .unsupported
+            $0.nativeEvent == nativeEvent && $0.isAudibleCapability
         }?.event
+    }
+
+    public static func binding(host: HostID, nativeEvent: String) -> HostCapabilityBinding? {
+        bindings(for: host).first {
+            $0.nativeEvent == nativeEvent && $0.isAudibleCapability
+        }
     }
 
     public static func binding(host: HostID, event: Event) -> HostCapabilityBinding? {
@@ -125,7 +269,15 @@ public enum HostConfigWritability: Codable, Sendable, Equatable {
     case unknown
 }
 
+public enum HostAuthorizationState: Codable, Sendable, Equatable {
+    case notRequired
+    case permissionRequired
+    case denied
+    case granted
+}
+
 public struct HostReceiptEvidence: Codable, Sendable, Equatable {
+    public let bindingID: HostEventBindingID
     public let installationID: UUID
     public let nativeEvent: String
     public let event: Event
@@ -139,6 +291,23 @@ public struct HostReceiptEvidence: Codable, Sendable, Equatable {
         timestamp: Date,
         playbackResult: HostHookPlaybackResult
     ) {
+        self.bindingID = HostEventBindingID(rawValue: "legacy:\(nativeEvent):\(event.rawValue)")
+        self.installationID = installationID
+        self.nativeEvent = nativeEvent
+        self.event = event
+        self.timestamp = timestamp
+        self.playbackResult = playbackResult
+    }
+
+    public init(
+        bindingID: HostEventBindingID,
+        installationID: UUID,
+        nativeEvent: String,
+        event: Event,
+        timestamp: Date,
+        playbackResult: HostHookPlaybackResult
+    ) {
+        self.bindingID = bindingID
         self.installationID = installationID
         self.nativeEvent = nativeEvent
         self.event = event
@@ -167,7 +336,9 @@ public struct HostIntegrationSnapshot: Codable, Sendable, Equatable {
     public let availability: HostAvailability
     public let configuration: HostConfigurationState
     public let writability: HostConfigWritability
+    public let authorization: HostAuthorizationState
     public let activation: HostActivationEvidence
+    public let bindingActivations: [HostEventBindingID: HostActivationEvidence]
     /// 当前 installation 全部受支持事件里时间最新的脱敏回执。它只负责诊断展示；
     /// 宿主激活门槛由 ``activation`` 独立表达，旧 lifecycle 回执不能点亮任务开始能力。
     public let latestReceipt: HostReceiptEvidence?
@@ -180,7 +351,9 @@ public struct HostIntegrationSnapshot: Codable, Sendable, Equatable {
         availability: HostAvailability,
         configuration: HostConfigurationState,
         writability: HostConfigWritability,
+        authorization: HostAuthorizationState = .notRequired,
         activation: HostActivationEvidence,
+        bindingActivations: [HostEventBindingID: HostActivationEvidence] = [:],
         latestReceipt: HostReceiptEvidence? = nil,
         operation: HostOperationState = .idle,
         installationID: UUID? = nil
@@ -190,10 +363,18 @@ public struct HostIntegrationSnapshot: Codable, Sendable, Equatable {
         self.availability = availability
         self.configuration = configuration
         self.writability = writability
+        self.authorization = authorization
         self.activation = activation
+        self.bindingActivations = bindingActivations
         self.latestReceipt = latestReceipt
         self.operation = operation
         self.installationID = installationID
+    }
+
+    public var descriptor: HostIntegrationDescriptor { host.descriptor }
+
+    public func activation(for binding: HostCapabilityBinding) -> HostActivationEvidence {
+        bindingActivations[binding.id] ?? activation
     }
 
     public static func disconnected(host: HostID) -> HostIntegrationSnapshot {
@@ -257,7 +438,7 @@ public struct AudibilityCell: Identifiable, Codable, Sendable, Equatable {
         case .unsupported:
             support = "不支持"
         }
-        let qualifier = binding.qualification.map { "，\($0)" } ?? ""
+        let qualifier = binding.qualification.map { "，\($0.rawValue)" } ?? ""
         let connection: String
         let audibility: String
         switch state {
@@ -314,6 +495,23 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
         soundCoverage: [Event: Bool],
         enabledEvents: [Event: Bool]
     ) -> AudibilityMatrix {
+        make(
+            snapshots: snapshots,
+            capabilities: capabilities,
+            soundCoverageByHost: Dictionary(
+                uniqueKeysWithValues: HostID.allCases.map { ($0, soundCoverage) }),
+            enabledEventsByHost: Dictionary(
+                uniqueKeysWithValues: HostID.allCases.map { ($0, enabledEvents) }))
+    }
+
+    /// surface-aware 入口。每个宿主格消费自己的 effective pack/事件开关；调用方不得先把
+    /// 多个 surface 压成一份全局配置，否则矩阵会与真实播放链分叉。
+    public static func make(
+        snapshots: [HostIntegrationSnapshot],
+        capabilities: [HostID: [HostCapabilityBinding]],
+        soundCoverageByHost: [HostID: [Event: Bool]],
+        enabledEventsByHost: [HostID: [Event: Bool]]
+    ) -> AudibilityMatrix {
         let snapshotByHost = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.host, $0) })
         var summaries: [HostID: HostReadinessSummary] = [:]
         for host in HostID.allCases {
@@ -322,7 +520,8 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
             let legacySupported = bindings.filter {
                 $0.isAudibleCapability && Event.legacyLifecycleCases.contains($0.event)
             }.count
-            let supported = snapshotByHost[host]?.configuration == .legacyConnected
+            let supported =
+                snapshotByHost[host]?.configuration == .legacyConnected
                 ? legacySupported
                 : configuredSupported
             summaries[host] = readinessSummary(
@@ -333,15 +532,17 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
             AudibilityEventRow(
                 event: event,
                 cells: HostID.allCases.map { host in
-                    let binding = capabilities[host]?.first(where: { $0.event == event })
+                    let binding =
+                        capabilities[host]?.first(where: { $0.event == event })
                         ?? HostCapabilityBinding(
                             host: host, event: event, nativeEvent: nil, support: .unsupported,
-                            qualification: "此宿主未声明该能力")
+                            qualification: .undeclaredCapability)
                     let state = cellState(
                         binding: binding, snapshot: snapshotByHost[host],
-                        hasSound: soundCoverage[event] ?? false,
-                        enabled: enabledEvents[event] ?? true)
-                    let detail = state == .degraded
+                        hasSound: soundCoverageByHost[host]?[event] ?? false,
+                        enabled: enabledEventsByHost[host]?[event] ?? true)
+                    let detail =
+                        state == .degraded
                             && snapshotByHost[host]?.configuration == .legacyConnected
                             && !Event.legacyLifecycleCases.contains(event)
                         ? "旧版连接未安装此事件，请升级连接"
@@ -438,7 +639,9 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
             if !enabled { return .muted }
             return hasSound ? .legacy : .missingSound
         case .configured:
-            guard case .observed = snapshot.activation else { return .awaitingActivation }
+            guard case .observed = snapshot.activation(for: binding) else {
+                return .awaitingActivation
+            }
             if !enabled { return .muted }
             return hasSound ? .audible : .missingSound
         case .incomplete, .unreadable, .conflict:

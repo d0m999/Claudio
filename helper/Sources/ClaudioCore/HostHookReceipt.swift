@@ -19,6 +19,7 @@ public struct HostHookReceipt: Codable, Sendable, Equatable {
     public let schema: Int
     public let installationID: UUID
     public let host: HostID
+    public let bindingID: HostEventBindingID
     public let nativeEvent: String
     public let semanticEvent: Event
     public let timestamp: Date
@@ -28,6 +29,7 @@ public struct HostHookReceipt: Codable, Sendable, Equatable {
         schema: Int = HostHookReceipt.currentSchema,
         installationID: UUID,
         host: HostID,
+        bindingID: HostEventBindingID? = nil,
         nativeEvent: String,
         semanticEvent: Event,
         timestamp: Date,
@@ -36,6 +38,10 @@ public struct HostHookReceipt: Codable, Sendable, Equatable {
         self.schema = schema
         self.installationID = installationID
         self.host = host
+        self.bindingID =
+            bindingID
+            ?? HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)?.id
+            ?? HostEventBindingID(rawValue: "legacy:\(host.rawValue):\(nativeEvent)")
         self.nativeEvent = nativeEvent
         self.semanticEvent = semanticEvent
         self.timestamp = timestamp
@@ -46,10 +52,26 @@ public struct HostHookReceipt: Codable, Sendable, Equatable {
         case schema
         case installationID = "installation_id"
         case host
+        case bindingID = "binding_id"
         case nativeEvent = "native_event"
         case semanticEvent = "semantic_event"
         case timestamp
         case playbackResult = "playback_result"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schema = try container.decode(Int.self, forKey: .schema)
+        installationID = try container.decode(UUID.self, forKey: .installationID)
+        host = try container.decode(HostID.self, forKey: .host)
+        nativeEvent = try container.decode(String.self, forKey: .nativeEvent)
+        semanticEvent = try container.decode(Event.self, forKey: .semanticEvent)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        playbackResult = try container.decode(HostHookPlaybackResult.self, forKey: .playbackResult)
+        bindingID =
+            try container.decodeIfPresent(HostEventBindingID.self, forKey: .bindingID)
+            ?? HostCapabilityCatalog.binding(host: host, nativeEvent: nativeEvent)?.id
+            ?? HostEventBindingID(rawValue: "legacy:\(host.rawValue):\(nativeEvent)")
     }
 }
 
@@ -91,24 +113,34 @@ public enum HostHookReceiptStoreError: Error, Sendable, Equatable, CustomStringC
 /// 真实 hook 回执的注入式存储。生产调用方传
 /// `~/.claudio/integrations/receipts` 与独立锁目录；测试只传临时目录。
 public struct HostHookReceiptStore: Sendable {
+    public static let historyLimitPerSurface = 20
+    public static let historyRetention: TimeInterval = 30 * 24 * 60 * 60
+
     public let receiptsRoot: URL
     public let locksRoot: URL
     public let installationsRoot: URL
     public let installationLocksRoot: URL
+    public let historyRoot: URL
 
     public init(
         receiptsRoot: URL,
         locksRoot: URL,
         installationsRoot: URL? = nil,
-        installationLocksRoot: URL? = nil
+        installationLocksRoot: URL? = nil,
+        historyRoot: URL? = nil
     ) {
         self.receiptsRoot = receiptsRoot
         self.locksRoot = locksRoot
         let integrationsRoot = receiptsRoot.deletingLastPathComponent()
-        self.installationsRoot = installationsRoot
+        self.installationsRoot =
+            installationsRoot
             ?? integrationsRoot.appendingPathComponent("installations", isDirectory: true)
-        self.installationLocksRoot = installationLocksRoot
+        self.installationLocksRoot =
+            installationLocksRoot
             ?? integrationsRoot.appendingPathComponent("installation-locks", isDirectory: true)
+        self.historyRoot =
+            historyRoot
+            ?? integrationsRoot.appendingPathComponent("receipt-history", isDirectory: true)
     }
 
     public func installationFile(host: HostID) -> URL {
@@ -123,12 +155,14 @@ public struct HostHookReceiptStore: Sendable {
     /// 仍匹配时才可替换稳定事件回执，从源头拒绝断开/重连后的迟到旧进程。
     public func activate(
         host: HostID,
-        installationID: UUID
+        installationID: UUID,
+        scopeFingerprint: String? = nil
     ) -> Result<Void, HostHookReceiptStoreError> {
         let marker = ActiveHostInstallation(
             schema: ActiveHostInstallation.currentSchema,
             host: host,
-            installationID: installationID)
+            installationID: installationID,
+            scopeFingerprint: scopeFingerprint)
         let data: Data
         do {
             data = try Self.markerEncoder.encode(marker)
@@ -162,25 +196,33 @@ public struct HostHookReceiptStore: Sendable {
     }
 
     public func currentInstallationID(host: HostID) -> UUID? {
-        currentInstallationIDUnlocked(host: host)
+        currentInstallationUnlocked(host: host)?.installationID
+    }
+
+    public func currentInstallationScopeFingerprint(host: HostID) -> String? {
+        currentInstallationUnlocked(host: host)?.scopeFingerprint
     }
 
     /// 每个宿主原生事件拥有独立 JSON。未知/unsupported 事件没有路径，避免把外部输入当文件名。
     public func receiptFile(host: HostID, nativeEvent: String) -> URL? {
-        guard HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: nativeEvent) != nil else {
+        guard HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: nativeEvent) != nil
+        else {
             return nil
         }
-        return receiptsRoot
+        return
+            receiptsRoot
             .appendingPathComponent(host.rawValue, isDirectory: true)
             .appendingPathComponent("\(nativeEvent).json")
     }
 
     /// 与 JSON 一一对应的非阻塞独立锁；一个事件的争用不会吞掉同宿主或另一宿主的事件。
     public func lockFile(host: HostID, nativeEvent: String) -> URL? {
-        guard HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: nativeEvent) != nil else {
+        guard HostCapabilityCatalog.semanticEvent(host: host, nativeEvent: nativeEvent) != nil
+        else {
             return nil
         }
-        return locksRoot
+        return
+            locksRoot
             .appendingPathComponent(host.rawValue, isDirectory: true)
             .appendingPathComponent("\(nativeEvent).lock")
     }
@@ -189,8 +231,10 @@ public struct HostHookReceiptStore: Sendable {
         _ receipt: HostHookReceipt
     ) -> Result<HostHookReceiptWriteOutcome, HostHookReceiptStoreError> {
         guard receipt.schema == HostHookReceipt.currentSchema,
-            HostCapabilityCatalog.semanticEvent(
-                host: receipt.host, nativeEvent: receipt.nativeEvent) == receipt.semanticEvent,
+            let binding = HostCapabilityCatalog.binding(
+                host: receipt.host, nativeEvent: receipt.nativeEvent),
+            binding.event == receipt.semanticEvent,
+            binding.id == receipt.bindingID,
             let destination = receiptFile(
                 host: receipt.host, nativeEvent: receipt.nativeEvent),
             let lock = lockFile(host: receipt.host, nativeEvent: receipt.nativeEvent)
@@ -213,7 +257,13 @@ public struct HostHookReceiptStore: Sendable {
                     .staleInstallation)
             }
             let eventLocked = withNonBlockingLock(path: lock.path) {
-                publish(data, to: destination)
+                switch publish(data, to: destination) {
+                case .failure(let error):
+                    return Result<HostHookReceiptWriteOutcome, HostHookReceiptStoreError>.failure(
+                        error)
+                case .success:
+                    return archive(receipt, data: data)
+                }
             }
             switch eventLocked {
             case .ran(let result): return result
@@ -228,6 +278,63 @@ public struct HostHookReceiptStore: Sendable {
         }
     }
 
+    /// 返回与当前 activation 解耦的脱敏历史。断开或版本失效不会删除它；只保留最近 30 天、
+    /// 每个 surface 最多 20 条。损坏或非 regular file 会被忽略，绝不提升为当前连接证据。
+    public func receiptHistory(host: HostID, now: Date = Date()) -> [HostHookReceipt] {
+        let directory = historyDirectory(host: host)
+        guard
+            let files = try? FileManager.default.contentsOfDirectory(
+                at: directory,
+                includingPropertiesForKeys: [
+                    .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey,
+                ],
+                options: [.skipsHiddenFiles])
+        else { return [] }
+        let cutoff = now.addingTimeInterval(-Self.historyRetention)
+        return files.compactMap { file -> HostHookReceipt? in
+            guard
+                let values = try? file.resourceValues(forKeys: [
+                    .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey,
+                ]),
+                values.isRegularFile == true,
+                values.isSymbolicLink != true,
+                (values.contentModificationDate ?? .distantPast) >= cutoff,
+                case .success(let data) = readRegularFileBounded(
+                    at: file, maxBytes: 1 << 16, followSymlink: false),
+                let receipt = try? Self.decode(data),
+                receipt.schema == HostHookReceipt.currentSchema,
+                receipt.host == host,
+                let binding = HostCapabilityCatalog.binding(
+                    host: host, nativeEvent: receipt.nativeEvent),
+                binding.id == receipt.bindingID,
+                binding.event == receipt.semanticEvent
+            else { return nil }
+            return receipt
+        }
+        .sorted { $0.timestamp > $1.timestamp }
+        .prefix(Self.historyLimitPerSurface)
+        .map { $0 }
+    }
+
+    /// 用户显式清除某个 surface 的历史；当前稳定回执与 activation marker 不受影响。
+    public func clearReceiptHistory(
+        host: HostID
+    ) -> Result<Void, HostHookReceiptStoreError> {
+        let locked = withNonBlockingLock(path: installationLockFile(host: host).path) {
+            let directory = historyDirectory(host: host)
+            guard FileManager.default.fileExists(atPath: directory.path) else {
+                return Result<Void, HostHookReceiptStoreError>.success(())
+            }
+            do {
+                try FileManager.default.removeItem(at: directory)
+                return .success(())
+            } catch {
+                return .failure(.writeFailure(reason: error.localizedDescription))
+            }
+        }
+        return flattenInstallationLock(locked)
+    }
+
     /// 只有当前 installation、请求的宿主/原生事件、catalog 语义和 schema 全部匹配时，
     /// 才把磁盘回执提升为结构化 evidence。是否可用作 activation 由 adapter 另行限制为
     /// `UserPromptSubmit`；其它受支持事件只进入 latest diagnosis。损坏、旧代次或错位文件全部
@@ -239,7 +346,7 @@ public struct HostHookReceiptStore: Sendable {
     ) -> HostReceiptEvidence? {
         guard
             currentInstallationID(host: host) == installationID,
-            let expectedEvent = HostCapabilityCatalog.semanticEvent(
+            let expectedBinding = HostCapabilityCatalog.binding(
                 host: host, nativeEvent: nativeEvent),
             let file = receiptFile(host: host, nativeEvent: nativeEvent),
             case .success(let data) = readRegularFileBounded(
@@ -248,12 +355,14 @@ public struct HostHookReceiptStore: Sendable {
             receipt.schema == HostHookReceipt.currentSchema,
             receipt.installationID == installationID,
             receipt.host == host,
+            receipt.bindingID == expectedBinding.id,
             receipt.nativeEvent == nativeEvent,
-            receipt.semanticEvent == expectedEvent
+            receipt.semanticEvent == expectedBinding.event
         else {
             return nil
         }
         return HostReceiptEvidence(
+            bindingID: receipt.bindingID,
             installationID: receipt.installationID,
             nativeEvent: receipt.nativeEvent,
             event: receipt.semanticEvent,
@@ -321,6 +430,72 @@ public struct HostHookReceiptStore: Sendable {
         return .success(.written)
     }
 
+    private func historyDirectory(host: HostID) -> URL {
+        historyRoot.appendingPathComponent(host.surfaceID.rawValue, isDirectory: true)
+    }
+
+    private func archive(
+        _ receipt: HostHookReceipt,
+        data: Data
+    ) -> Result<HostHookReceiptWriteOutcome, HostHookReceiptStoreError> {
+        let directory = historyDirectory(host: receipt.host)
+        let timestamp = UInt64(max(0, receipt.timestamp.timeIntervalSince1970) * 1_000_000)
+        let destination = directory.appendingPathComponent(
+            "\(timestamp)-\(UUID().uuidString.lowercased()).json")
+        switch publish(data, to: destination) {
+        case .failure(let error):
+            return .failure(error)
+        case .success:
+            return pruneHistory(host: receipt.host, now: Date())
+        }
+    }
+
+    private func pruneHistory(
+        host: HostID,
+        now: Date
+    ) -> Result<HostHookReceiptWriteOutcome, HostHookReceiptStoreError> {
+        let directory = historyDirectory(host: host)
+        let keys: Set<URLResourceKey> = [
+            .contentModificationDateKey, .isRegularFileKey, .isSymbolicLinkKey,
+        ]
+        let files: [URL]
+        do {
+            files = try FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: Array(keys), options: [.skipsHiddenFiles]
+            )
+        } catch {
+            return .failure(.writeFailure(reason: error.localizedDescription))
+        }
+        let cutoff = now.addingTimeInterval(-Self.historyRetention)
+        let regular = files.compactMap { file -> (url: URL, modified: Date, event: Date)? in
+            guard let values = try? file.resourceValues(forKeys: keys),
+                values.isRegularFile == true,
+                values.isSymbolicLink != true
+            else { return nil }
+            let eventDate: Date
+            if case .success(let data) = readRegularFileBounded(
+                at: file, maxBytes: 1 << 16, followSymlink: false),
+                let receipt = try? Self.decode(data)
+            {
+                eventDate = receipt.timestamp
+            } else {
+                eventDate = .distantPast
+            }
+            return (file, values.contentModificationDate ?? .distantPast, eventDate)
+        }.sorted {
+            $0.event == $1.event ? $0.modified > $1.modified : $0.event > $1.event
+        }
+        for (index, entry) in regular.enumerated()
+        where entry.modified < cutoff || index >= Self.historyLimitPerSurface {
+            do {
+                try FileManager.default.removeItem(at: entry.url)
+            } catch {
+                return .failure(.writeFailure(reason: error.localizedDescription))
+            }
+        }
+        return .success(.written)
+    }
+
     private static func encode(_ receipt: HostHookReceipt) throws -> Data {
         let encoder = JSONEncoder()
         // `.iso8601` drops all fractional seconds, while `ISO8601DateFormatter` with
@@ -355,6 +530,10 @@ public struct HostHookReceiptStore: Sendable {
     }
 
     private func currentInstallationIDUnlocked(host: HostID) -> UUID? {
+        currentInstallationUnlocked(host: host)?.installationID
+    }
+
+    private func currentInstallationUnlocked(host: HostID) -> ActiveHostInstallation? {
         guard
             case .success(let data) = readRegularFileBounded(
                 at: installationFile(host: host), maxBytes: 1 << 12, followSymlink: false),
@@ -362,7 +541,7 @@ public struct HostHookReceiptStore: Sendable {
             marker.schema == ActiveHostInstallation.currentSchema,
             marker.host == host
         else { return nil }
-        return marker.installationID
+        return marker
     }
 
     private func flattenInstallationLock(
@@ -389,11 +568,13 @@ private struct ActiveHostInstallation: Codable {
     let schema: Int
     let host: HostID
     let installationID: UUID
+    let scopeFingerprint: String?
 
     private enum CodingKeys: String, CodingKey {
         case schema
         case host
         case installationID = "installation_id"
+        case scopeFingerprint = "scope_fingerprint"
     }
 }
 

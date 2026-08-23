@@ -21,6 +21,7 @@ struct IntegrationsWindowView: View {
     @State private var handledFocusRequestRevision = 0
     @State private var feedbackAnnouncer = IntegrationsFeedbackAnnouncementModel()
     @State private var pendingDisconnectHost: HostID?
+    @State private var pendingReceiptHistoryHost: HostID?
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
@@ -54,7 +55,8 @@ struct IntegrationsWindowView: View {
             qualificationText = localizedRow?.detailText
             accessibilityLabel = localizedRow?.accessibilityLabel ?? raw.accessibilityLabel
         case .capability(_, let event):
-            title = "\(localizedEventName(event, language: languageStore.language)) · "
+            title =
+                "\(localizedEventName(event, language: languageStore.language)) · "
                 + (localizedRow?.title ?? raw.host.displayName)
             connectionText = localizedCell?.statusText ?? raw.connectionText
             nativeEventText = localizedCell?.nativeEventText
@@ -87,6 +89,7 @@ struct IntegrationsWindowView: View {
                 ? l10n.text(.actionUpgradeInProgress)
                 : l10n.text(.actionRepairInProgress)
         case .disconnect: return l10n.text(.actionDisconnectInProgress)
+        case .clearReceiptHistory: return l10n.text(.actionClearReceiptHistoryInProgress)
         case .copyHooksCommand: return operation.statusText
         }
     }
@@ -149,6 +152,32 @@ struct IntegrationsWindowView: View {
             .accessibilityIdentifier("integrations.cancel-disconnect.\(host.rawValue)")
         } message: { host in
             Text(l10n.format(.integrationsDisconnectMessage, host.displayName))
+        }
+        .confirmationDialog(
+            pendingReceiptHistoryHost.map {
+                l10n.format(.integrationsClearReceiptHistoryConfirm, $0.displayName)
+            } ?? l10n.text(.integrationsClearReceiptHistoryTitle),
+            isPresented: Binding(
+                get: { pendingReceiptHistoryHost != nil },
+                set: { if !$0 { pendingReceiptHistoryHost = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingReceiptHistoryHost
+        ) { host in
+            Button(l10n.format(.actionClearReceiptHistory, host.displayName), role: .destructive) {
+                pendingReceiptHistoryHost = nil
+                perform(.clearReceiptHistory(host))
+            }
+            .accessibilityLabel(
+                l10n.format(.integrationsClearReceiptHistoryConfirm, host.displayName)
+            )
+            .accessibilityHint(l10n.text(.actionClearReceiptHistoryHint))
+            .accessibilityIdentifier("integrations.confirm-clear-receipts.\(host.rawValue)")
+            Button(l10n.text(.commonCancel), role: .cancel) {
+                pendingReceiptHistoryHost = nil
+            }
+            .accessibilityIdentifier("integrations.cancel-clear-receipts.\(host.rawValue)")
+        } message: { host in
+            Text(l10n.format(.integrationsClearReceiptHistoryMessage, host.displayName))
         }
         .onReceive(focusCoordinator.$requestRevision) { revision in
             guard revision > handledFocusRequestRevision else { return }
@@ -238,13 +267,15 @@ struct IntegrationsWindowView: View {
             .background(
                 model.selection.host == row.host
                     ? ClaudioTheme.clay(colorScheme).opacity(0.1)
-                    : Color.clear)
+                    : Color.clear
+            )
             .overlay(alignment: .bottom) {
                 Rectangle()
                     .fill(
                         model.selection.host == row.host
                             ? ClaudioTheme.clay(colorScheme)
-                            : ClaudioTheme.hairline(colorScheme))
+                            : ClaudioTheme.hairline(colorScheme)
+                    )
                     .frame(height: model.selection.host == row.host ? 2 : 1)
             }
         }
@@ -252,7 +283,9 @@ struct IntegrationsWindowView: View {
         .focused($focusedTarget, equals: .hostCard(row.host))
         .accessibilityLabel(sourceRowAccessibilityLabel(row))
         .accessibilityValue(
-            l10n.text(model.selection == selection ? .integrationsSelected : .integrationsNotSelected))
+            l10n.text(
+                model.selection == selection ? .integrationsSelected : .integrationsNotSelected)
+        )
         .accessibilityHint(l10n.text(.integrationsCellHint))
         .accessibilityAddTraits(model.selection == selection ? .isSelected : [])
         .accessibilityIdentifier("integrations.host.\(row.host.rawValue)")
@@ -275,7 +308,8 @@ struct IntegrationsWindowView: View {
         .accessibilityLabel(
             languageStore.language == .english
                 ? "\(l10n.text(.integrationsSelectionLabel)), \(localizedInspector?.accessibilityLabel ?? l10n.text(.integrationsSelectionEmpty))"
-                : "\(l10n.text(.integrationsSelectionLabel))，\(localizedInspector?.accessibilityLabel ?? l10n.text(.integrationsSelectionEmpty))")
+                : "\(l10n.text(.integrationsSelectionLabel))，\(localizedInspector?.accessibilityLabel ?? l10n.text(.integrationsSelectionEmpty))"
+        )
     }
 
     @ViewBuilder
@@ -307,7 +341,7 @@ struct IntegrationsWindowView: View {
                 .font(ClaudioTheme.font(.caption).weight(.semibold))
                 .foregroundStyle(.secondary)
                 Divider().gridCellColumns(3)
-                    ForEach(localizedMatrix.rows) { row in
+                ForEach(localizedMatrix.rows) { row in
                     GridRow {
                         eventIdentity(row.event, title: row.title)
                             .frame(width: 118, alignment: .leading)
@@ -421,7 +455,9 @@ struct IntegrationsWindowView: View {
         .focused($focusedTarget, equals: .capabilityCell(host: cell.host, event: cell.event))
         .accessibilityLabel(cell.accessibilityLabel)
         .accessibilityValue(
-            l10n.text(model.selection == selection ? .integrationsSelected : .integrationsNotSelected))
+            l10n.text(
+                model.selection == selection ? .integrationsSelected : .integrationsNotSelected)
+        )
         .accessibilityHint(l10n.text(.integrationsCellHint))
         .accessibilityAddTraits(model.selection == selection ? .isSelected : [])
         .accessibilityIdentifier(
@@ -450,9 +486,12 @@ struct IntegrationsWindowView: View {
                 .accessibilityLabel(inspector.accessibilityLabel)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    evidenceRow(label: l10n.text(.integrationsConnection), value: inspector.connectionText)
+                    evidenceRow(
+                        label: l10n.text(.integrationsConnection), value: inspector.connectionText)
                     configurationEvidenceRow(inspector)
-                    evidenceRow(label: l10n.text(.integrationsNativeEvent), value: inspector.nativeEventText ?? l10n.text(.integrationsChooseEvent))
+                    evidenceRow(
+                        label: l10n.text(.integrationsNativeEvent),
+                        value: inspector.nativeEventText ?? l10n.text(.integrationsChooseEvent))
                     evidenceRow(
                         label: l10n.text(.integrationsRecentReceipt),
                         value: inspector.latestReceiptText ?? l10n.text(.integrationsNoReceipt))
@@ -484,15 +523,18 @@ struct IntegrationsWindowView: View {
                 .font(ClaudioTheme.font(.caption))
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(label == l10n.text(.integrationsNativeEvent)
-                    ? ClaudioTheme.font(.technical)
-                    : ClaudioTheme.font(.caption))
+                .font(
+                    label == l10n.text(.integrationsNativeEvent)
+                        ? ClaudioTheme.font(.technical)
+                        : ClaudioTheme.font(.caption)
+                )
                 .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(languageStore.language == .english
-            ? "\(label), \(value)"
-            : "\(label)，\(value)")
+        .accessibilityLabel(
+            languageStore.language == .english
+                ? "\(label), \(value)"
+                : "\(label)，\(value)")
     }
 
     private func configurationEvidenceRow(
@@ -523,7 +565,9 @@ struct IntegrationsWindowView: View {
                 }
                 .buttonStyle(.borderless)
                 .focused($focusedTarget, equals: .copyConfigurationPath(inspector.host))
-                .accessibilityLabel(l10n.format(.integrationsCopyPathLabel, inspector.host.displayName))
+                .accessibilityLabel(
+                    l10n.format(.integrationsCopyPathLabel, inspector.host.displayName)
+                )
                 .accessibilityValue(fullPath)
                 .accessibilityHint(l10n.text(.integrationsCopyPathHint))
                 .accessibilityIdentifier("integrations.copy-path.\(inspector.host.rawValue)")
@@ -537,19 +581,21 @@ struct IntegrationsWindowView: View {
         case .none:
             EmptyView()
         case .explainMasterVolumeZero:
-                Text(l10n.text(.integrationsMasterVolumeZero))
+            Text(l10n.text(.integrationsMasterVolumeZero))
                 .font(ClaudioTheme.font(.secondary))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("integrations.recovery.master-volume-zero")
         case .explainUnsupported(_, let event):
-                Text(l10n.format(
+            Text(
+                l10n.format(
                     .integrationsUnsupported,
-                    localizedEventName(event, language: languageStore.language)))
-                .font(ClaudioTheme.font(.secondary))
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("integrations.recovery.explanation")
+                    localizedEventName(event, language: languageStore.language))
+            )
+            .font(ClaudioTheme.font(.secondary))
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier("integrations.recovery.explanation")
         default:
             recoveryButton(primaryRecoveryAction)
         }
@@ -584,7 +630,9 @@ struct IntegrationsWindowView: View {
                 model.dismissFeedback(revision: feedback.revision)
             } label: {
                 Image(systemName: "xmark")
-                    .frame(minWidth: ClaudioTheme.Metrics.iconTarget, minHeight: ClaudioTheme.Metrics.iconTarget)
+                    .frame(
+                        minWidth: ClaudioTheme.Metrics.iconTarget,
+                        minHeight: ClaudioTheme.Metrics.iconTarget)
             }
             .buttonStyle(.plain)
             .focused($focusedTarget, equals: .dismissFeedback(revision: feedback.revision))
@@ -610,6 +658,16 @@ struct IntegrationsWindowView: View {
             .accessibilityLabel(l10n.format(.actionDisconnect, host.displayName))
             .accessibilityHint(l10n.text(.actionDisconnectHint))
             .accessibilityIdentifier("integrations.disconnect.\(host.rawValue)")
+        case .clearReceiptHistory(let host):
+            Button(l10n.format(.actionClearReceiptHistory, host.displayName), role: .destructive) {
+                pendingReceiptHistoryHost = host
+            }
+            .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
+            .focused($focusedTarget, equals: .inspectorAction(action))
+            .disabled(model.isPerformingAction)
+            .accessibilityLabel(l10n.format(.actionClearReceiptHistory, host.displayName))
+            .accessibilityHint(l10n.text(.actionClearReceiptHistoryHint))
+            .accessibilityIdentifier("integrations.clear-receipts.\(host.rawValue)")
         default:
             Button(localizedInspectorActionTitle(action, hostStatus: selectedHostStatus)) {
                 perform(action)
@@ -617,7 +675,9 @@ struct IntegrationsWindowView: View {
             .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .inspectorAction(action))
             .disabled(model.isPerformingAction)
-            .accessibilityLabel(localizedInspectorActionTitle(action, hostStatus: selectedHostStatus))
+            .accessibilityLabel(
+                localizedInspectorActionTitle(action, hostStatus: selectedHostStatus)
+            )
             .accessibilityHint(inspectorActionAccessibilityHint(action))
             .accessibilityIdentifier("integrations.action.\(actionIdentifier(action))")
         }
@@ -633,9 +693,11 @@ struct IntegrationsWindowView: View {
 
     private func announceFeedbackIfNeeded() {
         guard model.isWindowVisible, model.isWindowKey, NSApp.isActive else { return }
-        guard let sentence = feedbackAnnouncer.consume(
-            model.feedback,
-            language: languageStore.language) else { return }
+        guard
+            let sentence = feedbackAnnouncer.consume(
+                model.feedback,
+                language: languageStore.language)
+        else { return }
         NSAccessibility.post(
             element: NSApp as Any,
             notification: .announcementRequested,
@@ -680,8 +742,10 @@ struct IntegrationsWindowView: View {
     }
 
     private func isDestructive(_ action: IntegrationsWindowInspectorAction) -> Bool {
-        if case .disconnect = action { return true }
-        return false
+        switch action {
+        case .disconnect, .clearReceiptHistory: true
+        default: false
+        }
     }
 
     private func duplicatesRecovery(_ action: IntegrationsWindowInspectorAction) -> Bool {
@@ -760,6 +824,7 @@ struct IntegrationsWindowView: View {
         case .repair: return l10n.text(.actionRepairHint)
         case .redetect: return l10n.text(.actionRedetectHint)
         case .disconnect: return l10n.text(.actionDisconnectHint)
+        case .clearReceiptHistory: return l10n.text(.actionClearReceiptHistoryHint)
         }
     }
 
@@ -788,6 +853,8 @@ struct IntegrationsWindowView: View {
                 ? l10n.text(.actionUpgrade)
                 : l10n.format(.actionRepair, host.displayName)
         case .disconnect(let host): return l10n.format(.actionDisconnect, host.displayName)
+        case .clearReceiptHistory(let host):
+            return l10n.format(.actionClearReceiptHistory, host.displayName)
         }
     }
 
@@ -798,6 +865,7 @@ struct IntegrationsWindowView: View {
         case .connect(let host): "connect.\(host.rawValue)"
         case .repair(let host): "repair.\(host.rawValue)"
         case .disconnect(let host): "disconnect.\(host.rawValue)"
+        case .clearReceiptHistory(let host): "clear-receipts.\(host.rawValue)"
         }
     }
 

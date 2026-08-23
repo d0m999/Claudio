@@ -36,7 +36,8 @@ public final class ClaudioLanguageStore: ObservableObject {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        language = ClaudioAppLanguage(storedValue: defaults.string(forKey: ClaudioAppLanguage.defaultsKey))
+        language = ClaudioAppLanguage(
+            storedValue: defaults.string(forKey: ClaudioAppLanguage.defaultsKey))
     }
 
     public func setLanguage(_ language: ClaudioAppLanguage) {
@@ -65,15 +66,17 @@ public enum ClaudioLocalizationBundleLocator {
             preconditionFailure("Claudio app is missing Contents/Resources")
         }
 
-        let candidates = (try? FileManager.default.contentsOfDirectory(
-            at: resourcesURL,
-            includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles]
-        ).filter { $0.lastPathComponent.hasSuffix(resourceBundleSuffix) }) ?? []
+        let candidates =
+            (try? FileManager.default.contentsOfDirectory(
+                at: resourcesURL,
+                includingPropertiesForKeys: [.isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            ).filter { $0.lastPathComponent.hasSuffix(resourceBundleSuffix) }) ?? []
 
         guard candidates.count == 1 else {
             preconditionFailure(
-                "Expected exactly one \(resourceBundleSuffix) in Contents/Resources, found \(candidates.count)")
+                "Expected exactly one \(resourceBundleSuffix) in Contents/Resources, found \(candidates.count)"
+            )
         }
         guard let bundle = Bundle(url: candidates[0]) else {
             preconditionFailure("Cannot load Claudio localization bundle at \(candidates[0].path)")
@@ -137,11 +140,17 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let panelPacksReadFailed: Self = "panel.packs.read-failed"
     public static let panelSelectPack: Self = "panel.select-pack.title"
     public static let panelSelectPackMessage: Self = "panel.select-pack.message"
-    public static let panelSelectPackWithChoicesMessage: Self = "panel.select-pack.message.with-choices"
-    public static let panelSelectPackWithoutChoicesMessage: Self = "panel.select-pack.message.without-choices"
+    public static let panelSelectPackWithChoicesMessage: Self =
+        "panel.select-pack.message.with-choices"
+    public static let panelSelectPackWithoutChoicesMessage: Self =
+        "panel.select-pack.message.without-choices"
     public static let panelRevealConfig: Self = "panel.reveal-config"
     public static let panelRevealConfigHint: Self = "panel.reveal-config.hint"
     public static let panelMasterVolume: Self = "panel.master-volume"
+    public static let panelSoundScope: Self = "panel.sound-scope"
+    public static let panelGlobalDefaults: Self = "panel.global-defaults"
+    public static let panelResetSurface: Self = "panel.reset-surface"
+    public static let panelResetSurfaceHint: Self = "panel.reset-surface.hint"
     public static let hostDetailsHint: Self = "host.details.hint"
     public static let hostReady: Self = "host.ready"
     public static let hostConfigured: Self = "host.configured"
@@ -153,6 +162,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let hostClaudeAwaitingDetail: Self = "host.claude.awaiting-detail"
     public static let hostClaudeLegacyDetail: Self = "host.claude.legacy-detail"
     public static let hostCodexLegacyDetail: Self = "host.codex.legacy-detail"
+    public static let hostWorkBuddyReadyDetail: Self = "host.workbuddy.ready-detail"
+    public static let hostWorkBuddyAwaitingDetail: Self = "host.workbuddy.awaiting-detail"
     public static let eventTaskStart: Self = "event.task-start"
     public static let eventStop: Self = "event.stop"
     public static let eventStopFailure: Self = "event.stop-failure"
@@ -205,6 +216,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let actionRepairHint: Self = "action.repair.hint"
     public static let actionDisconnect: Self = "action.disconnect"
     public static let actionDisconnectHint: Self = "action.disconnect.hint"
+    public static let actionClearReceiptHistory: Self = "action.clear-receipt-history"
+    public static let actionClearReceiptHistoryHint: Self = "action.clear-receipt-history.hint"
     public static let actionUnmute: Self = "action.unmute"
     public static let actionUnmuteHint: Self = "action.unmute.hint"
     public static let actionConfigureSound: Self = "action.configure-sound"
@@ -214,8 +227,16 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let actionUpgradeInProgress: Self = "action.upgrade.in-progress"
     public static let actionRepairInProgress: Self = "action.repair.in-progress"
     public static let actionDisconnectInProgress: Self = "action.disconnect.in-progress"
+    public static let actionClearReceiptHistoryInProgress: Self =
+        "action.clear-receipt-history.in-progress"
     public static let soundPacksWindowTitle: Self = "window.sound-packs.title"
     public static let integrationsWindowTitle: Self = "window.integrations.title"
+    public static let integrationsClearReceiptHistoryConfirm: Self =
+        "integrations.clear-receipt-history.confirm"
+    public static let integrationsClearReceiptHistoryTitle: Self =
+        "integrations.clear-receipt-history.title"
+    public static let integrationsClearReceiptHistoryMessage: Self =
+        "integrations.clear-receipt-history.message"
     public static let integrationsRedetect: Self = "integrations.redetect"
     public static let integrationsRedetectLabel: Self = "integrations.redetect.label"
     public static let integrationsRedetectHint: Self = "integrations.redetect.hint"
@@ -246,7 +267,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let integrationsStoreUnavailable: Self = "integrations.store-unavailable"
     public static let integrationsRecoveryUnavailable: Self = "integrations.recovery-unavailable"
     public static let integrationsMuteFallbackFailed: Self = "integrations.mute-fallback-failed"
-    public static let integrationsManagerProvidedSource: Self = "integrations.manager-provided-source"
+    public static let integrationsManagerProvidedSource: Self =
+        "integrations.manager-provided-source"
     public static let soundPacksTitle: Self = "sound-packs.title"
     public static let commonCancel: Self = "common.cancel"
     public static let commonConfirm: Self = "common.confirm"
@@ -263,7 +285,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksRestoreButton: Self = "sound-packs.confirm.restore.button"
     public static let soundPacksRestoreLabel: Self = "sound-packs.confirm.restore.label"
     public static let soundPacksRestoreHint: Self = "sound-packs.confirm.restore.hint"
-    public static let soundPacksRestoreSelectedMessage: Self = "sound-packs.confirm.restore.selected"
+    public static let soundPacksRestoreSelectedMessage: Self =
+        "sound-packs.confirm.restore.selected"
     public static let soundPacksRestoreRetryMessage: Self = "sound-packs.confirm.restore.retry"
     public static let soundPacksRestoreAllMessage: Self = "sound-packs.confirm.restore.all"
     public static let soundPacksLibraryLoading: Self = "sound-packs.library.loading"
@@ -309,7 +332,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksUseValue: Self = "sound-packs.use.value"
     public static let soundPacksUseHint: Self = "sound-packs.use.hint"
     public static let soundPacksEmptyLoadingMessage: Self = "sound-packs.empty.loading-message"
-    public static let soundPacksEmptyLoadFailedMessage: Self = "sound-packs.empty.load-failed-message"
+    public static let soundPacksEmptyLoadFailedMessage: Self =
+        "sound-packs.empty.load-failed-message"
     public static let soundPacksEmptyFactoryMessage: Self = "sound-packs.empty.factory-message"
     public static let soundPacksEmptyRestore: Self = "sound-packs.empty.restore"
     public static let soundPacksEmptyRestoreLabel: Self = "sound-packs.empty.restore.label"
@@ -363,74 +387,116 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksEventBroken: Self = "sound-packs.event.broken"
     public static let soundPacksOperationFailed: Self = "sound-packs.operation.failed"
     public static let soundPacksActionFailed: Self = "sound-packs.action.failed"
-    public static let soundPacksAnnouncementWindowLoading: Self = "sound-packs.announcement.window.loading"
-    public static let soundPacksAnnouncementWindowFailure: Self = "sound-packs.announcement.window.failure"
-    public static let soundPacksAnnouncementWindowEmpty: Self = "sound-packs.announcement.window.empty"
-    public static let soundPacksAnnouncementWindowSelected: Self = "sound-packs.announcement.window.selected"
-    public static let soundPacksAnnouncementWindowUnselected: Self = "sound-packs.announcement.window.unselected"
-    public static let soundPacksAnnouncementLibraryLoading: Self = "sound-packs.announcement.library.loading"
-    public static let soundPacksAnnouncementLibraryRefreshing: Self = "sound-packs.announcement.library.refreshing"
-    public static let soundPacksAnnouncementLibraryLoadFailed: Self = "sound-packs.announcement.library.load-failed"
-    public static let soundPacksAnnouncementLibraryRefreshFailed: Self = "sound-packs.announcement.library.refresh-failed"
-    public static let soundPacksAnnouncementLibraryReadyEmpty: Self = "sound-packs.announcement.library.ready.empty"
-    public static let soundPacksAnnouncementLibraryReadyCount: Self = "sound-packs.announcement.library.ready.count"
-    public static let soundPacksAnnouncementSelectionNone: Self = "sound-packs.announcement.selection.none"
-    public static let soundPacksAnnouncementSelectionSelected: Self = "sound-packs.announcement.selection.selected"
-    public static let soundPacksAudioErrorNoSelectedPack: Self = "sound-packs.audio-error.no-selected-pack"
-    public static let soundPacksAudioErrorSelectionChanged: Self = "sound-packs.audio-error.selection-changed"
-    public static let soundPacksAudioErrorBuiltinReadOnly: Self = "sound-packs.audio-error.builtin-read-only"
-    public static let soundPacksAudioErrorNotInInventory: Self = "sound-packs.audio-error.not-in-inventory"
-    public static let soundPacksBindErrorPackNotFound: Self = "sound-packs.bind-error.pack-not-found"
-    public static let soundPacksBindErrorUnsafeFileName: Self = "sound-packs.bind-error.unsafe-file-name"
-    public static let soundPacksBindErrorFileNotFound: Self = "sound-packs.bind-error.file-not-found"
-    public static let soundPacksBindErrorManifestUnreadable: Self = "sound-packs.bind-error.manifest-unreadable"
+    public static let soundPacksAnnouncementWindowLoading: Self =
+        "sound-packs.announcement.window.loading"
+    public static let soundPacksAnnouncementWindowFailure: Self =
+        "sound-packs.announcement.window.failure"
+    public static let soundPacksAnnouncementWindowEmpty: Self =
+        "sound-packs.announcement.window.empty"
+    public static let soundPacksAnnouncementWindowSelected: Self =
+        "sound-packs.announcement.window.selected"
+    public static let soundPacksAnnouncementWindowUnselected: Self =
+        "sound-packs.announcement.window.unselected"
+    public static let soundPacksAnnouncementLibraryLoading: Self =
+        "sound-packs.announcement.library.loading"
+    public static let soundPacksAnnouncementLibraryRefreshing: Self =
+        "sound-packs.announcement.library.refreshing"
+    public static let soundPacksAnnouncementLibraryLoadFailed: Self =
+        "sound-packs.announcement.library.load-failed"
+    public static let soundPacksAnnouncementLibraryRefreshFailed: Self =
+        "sound-packs.announcement.library.refresh-failed"
+    public static let soundPacksAnnouncementLibraryReadyEmpty: Self =
+        "sound-packs.announcement.library.ready.empty"
+    public static let soundPacksAnnouncementLibraryReadyCount: Self =
+        "sound-packs.announcement.library.ready.count"
+    public static let soundPacksAnnouncementSelectionNone: Self =
+        "sound-packs.announcement.selection.none"
+    public static let soundPacksAnnouncementSelectionSelected: Self =
+        "sound-packs.announcement.selection.selected"
+    public static let soundPacksAudioErrorNoSelectedPack: Self =
+        "sound-packs.audio-error.no-selected-pack"
+    public static let soundPacksAudioErrorSelectionChanged: Self =
+        "sound-packs.audio-error.selection-changed"
+    public static let soundPacksAudioErrorBuiltinReadOnly: Self =
+        "sound-packs.audio-error.builtin-read-only"
+    public static let soundPacksAudioErrorNotInInventory: Self =
+        "sound-packs.audio-error.not-in-inventory"
+    public static let soundPacksBindErrorPackNotFound: Self =
+        "sound-packs.bind-error.pack-not-found"
+    public static let soundPacksBindErrorUnsafeFileName: Self =
+        "sound-packs.bind-error.unsafe-file-name"
+    public static let soundPacksBindErrorFileNotFound: Self =
+        "sound-packs.bind-error.file-not-found"
+    public static let soundPacksBindErrorManifestUnreadable: Self =
+        "sound-packs.bind-error.manifest-unreadable"
     public static let soundPacksBindErrorWriteFailed: Self = "sound-packs.bind-error.write-failed"
     public static let soundPacksBindErrorLockBusy: Self = "sound-packs.bind-error.lock-busy"
     public static let soundPacksBindErrorLockFailed: Self = "sound-packs.bind-error.lock-failed"
-    public static let soundPacksDeleteErrorBuiltinReadOnly: Self = "sound-packs.delete-error.builtin-read-only"
-    public static let soundPacksDeleteErrorPackNotFound: Self = "sound-packs.delete-error.pack-not-found"
-    public static let soundPacksDeleteErrorManifestUnreadable: Self = "sound-packs.delete-error.manifest-unreadable"
-    public static let soundPacksDeleteErrorDirectoryUnreadable: Self = "sound-packs.delete-error.directory-unreadable"
-    public static let soundPacksDeleteErrorUnsafeFileName: Self = "sound-packs.delete-error.unsafe-file-name"
-    public static let soundPacksDeleteErrorFileNotFound: Self = "sound-packs.delete-error.file-not-found"
-    public static let soundPacksDeleteErrorStillReferenced: Self = "sound-packs.delete-error.still-referenced"
+    public static let soundPacksDeleteErrorBuiltinReadOnly: Self =
+        "sound-packs.delete-error.builtin-read-only"
+    public static let soundPacksDeleteErrorPackNotFound: Self =
+        "sound-packs.delete-error.pack-not-found"
+    public static let soundPacksDeleteErrorManifestUnreadable: Self =
+        "sound-packs.delete-error.manifest-unreadable"
+    public static let soundPacksDeleteErrorDirectoryUnreadable: Self =
+        "sound-packs.delete-error.directory-unreadable"
+    public static let soundPacksDeleteErrorUnsafeFileName: Self =
+        "sound-packs.delete-error.unsafe-file-name"
+    public static let soundPacksDeleteErrorFileNotFound: Self =
+        "sound-packs.delete-error.file-not-found"
+    public static let soundPacksDeleteErrorStillReferenced: Self =
+        "sound-packs.delete-error.still-referenced"
     public static let soundPacksDeleteErrorFailed: Self = "sound-packs.delete-error.failed"
     public static let soundPacksDeleteErrorLockBusy: Self = "sound-packs.delete-error.lock-busy"
     public static let soundPacksDeleteErrorLockFailed: Self = "sound-packs.delete-error.lock-failed"
     public static let soundPacksInventoryPackNotFound: Self = "sound-packs.inventory.pack-not-found"
-    public static let soundPacksInventoryManifestUnreadable: Self = "sound-packs.inventory.manifest-unreadable"
-    public static let soundPacksInventoryDirectoryUnreadable: Self = "sound-packs.inventory.directory-unreadable"
+    public static let soundPacksInventoryManifestUnreadable: Self =
+        "sound-packs.inventory.manifest-unreadable"
+    public static let soundPacksInventoryDirectoryUnreadable: Self =
+        "sound-packs.inventory.directory-unreadable"
     public static let soundPacksMissingCount: Self = "sound-packs.missing-count"
     public static let soundPacksFileMissing: Self = "sound-packs.file-missing"
-    public static let soundPacksBuiltinCopyExplanation: Self = "sound-packs.builtin.copy-explanation"
+    public static let soundPacksBuiltinCopyExplanation: Self =
+        "sound-packs.builtin.copy-explanation"
     public static let soundPacksBuiltinCopyHelp: Self = "sound-packs.builtin.copy-help"
     public static let soundPacksCanChooseFile: Self = "sound-packs.can-choose-file"
     public static let soundPacksStatusBackground: Self = "sound-packs.status.background"
     public static let soundPacksStatusAddAudio: Self = "sound-packs.status.action.add-audio"
     public static let soundPacksStatusUpdateStars: Self = "sound-packs.status.action.update-stars"
-    public static let soundPacksStatusRestoreBuiltins: Self = "sound-packs.status.action.restore-builtins"
-    public static let soundPacksStatusRestoreFactory: Self = "sound-packs.status.action.restore-factory"
+    public static let soundPacksStatusRestoreBuiltins: Self =
+        "sound-packs.status.action.restore-builtins"
+    public static let soundPacksStatusRestoreFactory: Self =
+        "sound-packs.status.action.restore-factory"
     public static let soundPacksStatusCopyPack: Self = "sound-packs.status.action.copy-pack"
     public static let soundPacksStatusUsePack: Self = "sound-packs.status.action.use-pack"
     public static let soundPacksStatusAudioImported: Self = "sound-packs.status.audio-imported"
     public static let soundPacksStatusAudioPartial: Self = "sound-packs.status.audio-partial"
     public static let soundPacksStatusBatchRestored: Self = "sound-packs.status.batch-restored"
-    public static let soundPacksStatusBatchRestoredWithSalvage: Self = "sound-packs.status.batch-restored.salvage"
+    public static let soundPacksStatusBatchRestoredWithSalvage: Self =
+        "sound-packs.status.batch-restored.salvage"
     public static let soundPacksStatusBatchPartial: Self = "sound-packs.status.batch-partial"
-    public static let soundPacksStatusBatchPartialWithSalvage: Self = "sound-packs.status.batch-partial.salvage"
+    public static let soundPacksStatusBatchPartialWithSalvage: Self =
+        "sound-packs.status.batch-partial.salvage"
     public static let soundPacksStatusFactoryRestored: Self = "sound-packs.status.factory-restored"
-    public static let soundPacksStatusFactoryRestoredWithSalvage: Self = "sound-packs.status.factory-restored.salvage"
+    public static let soundPacksStatusFactoryRestoredWithSalvage: Self =
+        "sound-packs.status.factory-restored.salvage"
     public static let soundPacksStatusPackCopied: Self = "sound-packs.status.pack-copied"
     public static let soundPacksStatusPackUsed: Self = "sound-packs.status.pack-used"
 
-    public static let onboardingClaudeCodeNotInstalledTitle: Self = "onboarding.claude-code-not-installed.title"
-    public static let onboardingClaudeCodeNotInstalledBody: Self = "onboarding.claude-code-not-installed.body"
+    public static let onboardingClaudeCodeNotInstalledTitle: Self =
+        "onboarding.claude-code-not-installed.title"
+    public static let onboardingClaudeCodeNotInstalledBody: Self =
+        "onboarding.claude-code-not-installed.body"
     public static let onboardingHelperMissingTitle: Self = "onboarding.helper-missing.title"
     public static let onboardingHelperMissingBody: Self = "onboarding.helper-missing.body"
-    public static let onboardingSettingsNotWritableTitle: Self = "onboarding.settings-not-writable.title"
-    public static let onboardingSettingsNotWritableBody: Self = "onboarding.settings-not-writable.body"
-    public static let onboardingSettingsParseFailureTitle: Self = "onboarding.settings-parse-failure.title"
-    public static let onboardingSettingsParseFailureBody: Self = "onboarding.settings-parse-failure.body"
+    public static let onboardingSettingsNotWritableTitle: Self =
+        "onboarding.settings-not-writable.title"
+    public static let onboardingSettingsNotWritableBody: Self =
+        "onboarding.settings-not-writable.body"
+    public static let onboardingSettingsParseFailureTitle: Self =
+        "onboarding.settings-parse-failure.title"
+    public static let onboardingSettingsParseFailureBody: Self =
+        "onboarding.settings-parse-failure.body"
     public static let onboardingNotInstalledTitle: Self = "onboarding.not-installed.title"
     public static let onboardingNotInstalledBody: Self = "onboarding.not-installed.body"
     public static let onboardingInstalledTitle: Self = "onboarding.installed.title"
@@ -443,11 +509,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let onboardingReasonExpand: Self = "onboarding.reason.expand"
     public static let onboardingReasonCollapse: Self = "onboarding.reason.collapse"
     public static let onboardingActionRunningTakeOver: Self = "onboarding.action.running.take-over"
-    public static let onboardingActionRunningDisconnect: Self = "onboarding.action.running.disconnect"
-    public static let onboardingFailureHelperUnavailable: Self = "onboarding.failure.helper-unavailable"
+    public static let onboardingActionRunningDisconnect: Self =
+        "onboarding.action.running.disconnect"
+    public static let onboardingFailureHelperUnavailable: Self =
+        "onboarding.failure.helper-unavailable"
     public static let onboardingFailureSetup: Self = "onboarding.failure.setup"
     public static let onboardingFailureDisconnect: Self = "onboarding.failure.disconnect"
-    public static let onboardingFailureDisconnectNothing: Self = "onboarding.failure.disconnect-nothing"
+    public static let onboardingFailureDisconnectNothing: Self =
+        "onboarding.failure.disconnect-nothing"
     public static let onboardingNoticeSalvaged: Self = "onboarding.notice.salvaged"
     public static let onboardingNoticeRepaired: Self = "onboarding.notice.repaired"
 
@@ -456,8 +525,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let feedbackCopyHooksFailed: Self = "feedback.copy-hooks.failed"
     public static let feedbackMuteCancelled: Self = "feedback.mute-cancelled"
     public static let feedbackOpenSoundMapping: Self = "feedback.open-sound-mapping"
-    public static let feedbackCopyConfigurationPathSucceeded: Self = "feedback.copy-configuration-path.succeeded"
-    public static let feedbackCopyConfigurationPathFailed: Self = "feedback.copy-configuration-path.failed"
+    public static let feedbackCopyConfigurationPathSucceeded: Self =
+        "feedback.copy-configuration-path.succeeded"
+    public static let feedbackCopyConfigurationPathFailed: Self =
+        "feedback.copy-configuration-path.failed"
     public static let feedbackOperationFailed: Self = "feedback.operation-failed"
     public static let feedbackReceipt: Self = "feedback.receipt"
     public static let feedbackDisconnected: Self = "feedback.disconnected"
@@ -466,6 +537,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let feedbackRepairedWaiting: Self = "feedback.repaired-waiting"
     public static let feedbackConfiguredWaiting: Self = "feedback.configured-waiting"
     public static let feedbackHostStateUpdated: Self = "feedback.host-state-updated"
+    public static let feedbackReceiptHistoryCleared: Self = "feedback.receipt-history-cleared"
 
     public static let allKnown: [Self] = [
         .interfaceTitle, .interfaceLanguage, .interfaceChinese, .interfaceEnglish,
@@ -473,7 +545,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .interfaceTextSizeCurrent, .interfaceTextSizeLevel, .interfaceTextSizeMinimum,
         .interfaceTextSizeMaximum, .interfaceTextSizeCompact, .interfaceTextSizeStandard,
         .interfaceTextSizeLarge, .panelOptionsHint,
-        .panelTitle, .panelBaseLabel, .panelHeader, .panelHeaderWithPack, .panelSources, .panelSelectedPackNone, .panelAudibleEventsLoading,
+        .panelTitle, .panelBaseLabel, .panelHeader, .panelHeaderWithPack, .panelSources,
+        .panelSelectedPackNone, .panelAudibleEventsLoading,
         .panelAudibleEventsUnavailable, .panelAudibleEventsCount, .panelEvents, .panelSoundPacks,
         .panelManageSoundPacks, .panelManageSoundPacksHint, .panelQuitApplication,
         .panelQuitApplicationHint, .panelRetry, .panelRetryHint,
@@ -481,7 +554,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelSelectPackWithChoicesMessage, .panelSelectPackWithoutChoicesMessage,
         .panelPacksLoading, .panelPacksNoPinnedTitle, .panelPacksNoPinnedMessage,
         .panelPacksNoneTitle, .panelPacksNoneMessage, .panelPacksReadFailed,
-        .panelRevealConfig, .panelRevealConfigHint, .panelMasterVolume, .hostDetailsHint, .soundPacksWindowTitle,
+        .panelRevealConfig, .panelRevealConfigHint, .panelMasterVolume, .hostDetailsHint,
+        .soundPacksWindowTitle,
         .integrationsWindowTitle, .integrationsRedetect, .integrationsRedetectLabel,
         .integrationsRedetectHint, .integrationsSourcesSummary, .integrationsSelectionEmpty,
         .integrationsSelectionLabel, .integrationsCapability, .integrationsEvent,
@@ -557,6 +631,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .hostReady, .hostConfigured, .hostLegacy, .hostNotConnected,
         .hostNeedsAttention, .hostCodexReadyDetail, .hostCodexAwaitingDetail,
         .hostClaudeAwaitingDetail, .hostClaudeLegacyDetail, .hostCodexLegacyDetail,
+        .hostWorkBuddyReadyDetail, .hostWorkBuddyAwaitingDetail,
+        .panelSoundScope, .panelGlobalDefaults, .panelResetSurface, .panelResetSurfaceHint,
         .eventTaskStart, .eventStop, .eventStopFailure, .eventNotification, .eventSubagentStop,
         .eventEditorHint, .eventCoveragePresent, .eventCoverageUnmapped, .eventCoverageBroken,
         .eventCoveragePresentFile, .eventCoverageBrokenFile, .eventPreviewLabel,
@@ -570,7 +646,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .hostPlaybackUnsupported, .hostPlaybackFailed, .actionCopyHooks, .actionCopyHooksHint,
         .actionRedetect, .actionRedetectHint, .actionConnect, .actionConnectHint,
         .actionUpgrade, .actionUpgradeHint, .actionRepair, .actionRepairHint,
-        .actionDisconnect, .actionDisconnectHint, .actionUnmute, .actionUnmuteHint,
+        .actionDisconnect, .actionDisconnectHint, .actionClearReceiptHistory,
+        .actionClearReceiptHistoryHint, .actionUnmute, .actionUnmuteHint,
         .actionConfigureSound, .actionConfigureSoundHint, .integrationsDisconnectConfirm,
         .integrationsDisconnectTitle, .integrationsDisconnectHint, .integrationsDisconnectMessage,
         .integrationsCopyPathLabel,
@@ -579,6 +656,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .integrationsMuteFallbackFailed, .integrationsManagerProvidedSource,
         .actionRedetectInProgress, .actionConnectInProgress, .actionUpgradeInProgress,
         .actionRepairInProgress, .actionDisconnectInProgress,
+        .actionClearReceiptHistoryInProgress, .integrationsClearReceiptHistoryConfirm,
+        .integrationsClearReceiptHistoryTitle, .integrationsClearReceiptHistoryMessage,
         .onboardingClaudeCodeNotInstalledTitle, .onboardingClaudeCodeNotInstalledBody,
         .onboardingHelperMissingTitle, .onboardingHelperMissingBody,
         .onboardingSettingsNotWritableTitle, .onboardingSettingsNotWritableBody,
@@ -597,7 +676,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .feedbackCopyConfigurationPathSucceeded, .feedbackCopyConfigurationPathFailed,
         .feedbackOperationFailed, .feedbackReceipt, .feedbackDisconnected,
         .feedbackConnectedReceipt, .feedbackAwaitingConfirmation, .feedbackRepairedWaiting,
-        .feedbackConfiguredWaiting, .feedbackHostStateUpdated
+        .feedbackConfiguredWaiting, .feedbackHostStateUpdated, .feedbackReceiptHistoryCleared,
     ]
 }
 
@@ -711,7 +790,8 @@ public struct ClaudioL10n {
 
     public func format(_ key: ClaudioL10nKey, _ arguments: CVarArg...) -> String {
         let value = resolve(key.rawValue, pluralCategory: nil)
-        return String(format: value, locale: Locale(identifier: language.rawValue), arguments: arguments)
+        return String(
+            format: value, locale: Locale(identifier: language.rawValue), arguments: arguments)
     }
 
     public func format(_ key: ClaudioL10nKey, arguments: [String]) -> String {

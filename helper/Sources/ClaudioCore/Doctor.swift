@@ -165,19 +165,22 @@ public func checkPackIntegrity(
 
     let missingFiles = Set(
         supportedMappings.map(\.file)
-        .filter { eventFile in
-            // An event value must resolve to a file *inside* the pack directory. A
-            // manifest that points at `../shared/stop.mp3` (a third-party pack escaping
-            // its own directory) must be treated as missing, never as a satisfied file —
-            // otherwise `doctor` would falsely report the pack `.complete` off an
-            // out-of-pack file (T1 review P2).
-            guard let resolved = safePackFileURL(eventFile, in: packDirectory) else { return true }
-            // 必须是**正规文件**，不能只是「路径上有东西」：`fileExists(atPath:)` 对一个名叫
-            // `stop.mp3` 的**目录**（以及 FIFO / socket / 设备）一律回答 `true`，于是 doctor 会把
-            // 一个根本发不出声的包报成 complete（`/codex review` [P2]）。见 ``regularFileExists(at:)``。
-            return !nonEmptyRegularFileExists(at: resolved)
-        })
-        .sorted()
+            .filter { eventFile in
+                // An event value must resolve to a file *inside* the pack directory. A
+                // manifest that points at `../shared/stop.mp3` (a third-party pack escaping
+                // its own directory) must be treated as missing, never as a satisfied file —
+                // otherwise `doctor` would falsely report the pack `.complete` off an
+                // out-of-pack file (T1 review P2).
+                guard let resolved = safePackFileURL(eventFile, in: packDirectory) else {
+                    return true
+                }
+                // 必须是**正规文件**，不能只是「路径上有东西」：`fileExists(atPath:)` 对一个名叫
+                // `stop.mp3` 的**目录**（以及 FIFO / socket / 设备）一律回答 `true`，于是 doctor 会把
+                // 一个根本发不出声的包报成 complete（`/codex review` [P2]）。见 ``regularFileExists(at:)``。
+                return !nonEmptyRegularFileExists(at: resolved)
+            }
+    )
+    .sorted()
 
     if missingFiles.isEmpty {
         return .complete(
@@ -273,8 +276,8 @@ public struct DoctorEnvironment: Sendable {
     /// simulate both above- and below-floor versions without needing to run on that actual
     /// OS. Defaults to the real ``SemanticVersion/currentMacOS()``.
     public let currentMacOSVersion: @Sendable () -> SemanticVersion
-    /// 双宿主检查为显式注入，保证旧测试与嵌入方不会意外读取真实 HOME。CLI 的 production
-    /// 入口传 ``DoctorIntegrationsEnvironment`` 默认值，自动覆盖 Claude Code 与 Codex。
+    /// 宿主检查为显式注入，保证旧测试与嵌入方不会意外读取真实 HOME。CLI 的 production
+    /// 入口传 ``DoctorIntegrationsEnvironment`` 默认值，自动覆盖全部已发布 adapter。
     public let integrations: DoctorIntegrationsEnvironment?
 
     public init(
@@ -308,17 +311,20 @@ public struct DoctorIntegrationsEnvironment: Sendable {
     public let claudeSettingsFile: URL
     public let codexHooksFile: URL
     public let codexConfigFile: URL
+    public let workBuddySettingsFile: URL
     public let legacyCodexNotifyWrapper: URL
     public let claudioRoot: String
     public let claudioBinaryPath: String
     public let receiptStore: HostHookReceiptStore
     public let claudeAvailability: @Sendable () -> HostAvailability
     public let codexAvailability: @Sendable () -> HostAvailability
+    public let workBuddyAvailability: @Sendable () -> HostAvailability
 
     public init(
         claudeSettingsFile: URL = ClaudioPaths.claudeSettingsFile,
         codexHooksFile: URL = ClaudioPaths.codexHooksFile,
         codexConfigFile: URL? = nil,
+        workBuddySettingsFile: URL = ClaudioPaths.workBuddySettingsFile,
         legacyCodexNotifyWrapper: URL? = nil,
         claudioRoot: String = ClaudioPaths.root.path,
         claudioBinaryPath: String? = nil,
@@ -340,22 +346,34 @@ public struct DoctorIntegrationsEnvironment: Sendable {
             return FileManager.default.fileExists(
                 atPath: directory.path, isDirectory: &isDirectory) && isDirectory.boolValue
                 ? .available : .unavailable(reason: "未检测到 Codex 配置目录")
+        },
+        workBuddyAvailability: @escaping @Sendable () -> HostAvailability = {
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(
+                atPath: "/Applications/WorkBuddy.app", isDirectory: &isDirectory)
+                && isDirectory.boolValue
+                ? .available : .unavailable(reason: "未检测到 WorkBuddy Desktop")
         }
     ) {
         self.claudeSettingsFile = claudeSettingsFile
         self.codexHooksFile = codexHooksFile
-        self.codexConfigFile = codexConfigFile
+        self.codexConfigFile =
+            codexConfigFile
             ?? codexHooksFile.deletingLastPathComponent().appendingPathComponent("config.toml")
-        self.legacyCodexNotifyWrapper = legacyCodexNotifyWrapper
+        self.workBuddySettingsFile = workBuddySettingsFile
+        self.legacyCodexNotifyWrapper =
+            legacyCodexNotifyWrapper
             ?? URL(fileURLWithPath: claudioRoot, isDirectory: true)
-                .appendingPathComponent("bin/codex-notify")
+            .appendingPathComponent("bin/codex-notify")
         self.claudioRoot = claudioRoot
-        self.claudioBinaryPath = claudioBinaryPath
+        self.claudioBinaryPath =
+            claudioBinaryPath
             ?? URL(fileURLWithPath: claudioRoot, isDirectory: true)
-                .appendingPathComponent("bin/claudio").path
+            .appendingPathComponent("bin/claudio").path
         self.receiptStore = receiptStore
         self.claudeAvailability = claudeAvailability
         self.codexAvailability = codexAvailability
+        self.workBuddyAvailability = workBuddyAvailability
     }
 }
 
@@ -370,8 +388,9 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
                     fileURLWithPath: environment.claudioBinaryPath),
                 userPacksDirectory: environment.userPacksDirectory,
                 configFile: environment.configFile,
-                settingsFile: environment.settingsFile))
-            .inspect()
+                settingsFile: environment.settingsFile)
+        )
+        .inspect()
     }
 
     // (c) afplay 在位 — hard failure if missing.
@@ -420,7 +439,8 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
             )
         case .notWritable(let reason):
             results.append(
-                DoctorCheckResult(name: "settings.json", severity: .failure, message: "✗ \(reason)"))
+                DoctorCheckResult(name: "settings.json", severity: .failure, message: "✗ \(reason)")
+            )
         }
     }
 
@@ -459,8 +479,8 @@ public func runDoctorChecks(environment: DoctorEnvironment = DoctorEnvironment()
     return DoctorReport(results: results)
 }
 
-/// 双宿主 doctor 事实层。未安装/未连接、健康 runtime 上的 legacy/待确认是 warning；完整连接是 ok；
-/// 已连接侧的配置损坏、缺 hook、不可写或共享 runtime 不可用是 failure。始终返回两条宿主行。
+/// 宿主 doctor 事实层。未安装/未连接、健康 runtime 上的 legacy/待确认是 warning；完整连接是 ok；
+/// 已连接侧的配置损坏、缺 hook、不可写或共享 runtime 不可用是 failure。始终按 catalog 顺序返回一行。
 public func hostIntegrationDoctorResults(
     environment: DoctorIntegrationsEnvironment,
     runtime: SharedRuntimeHealth = .ready
@@ -485,9 +505,21 @@ public func hostIntegrationDoctorResults(
             receiptStore: environment.receiptStore,
             availability: environment.codexAvailability),
         runtime: runtime)
+    let workBuddy = inspectWorkBuddySnapshot(
+        environment: WorkBuddyIntegrationEnvironment(
+            settingsFile: environment.workBuddySettingsFile,
+            lockFile: environment.workBuddySettingsFile.deletingLastPathComponent()
+                .appendingPathComponent("claudio-integration.lock"),
+            claudioBinaryPath: environment.claudioBinaryPath,
+            claudioRoot: environment.claudioRoot,
+            receiptStore: environment.receiptStore,
+            scopeFingerprint: { "doctor-read-only" },
+            availability: environment.workBuddyAvailability),
+        runtime: runtime)
     return [
         doctorHostResult(snapshot: claude),
         doctorHostResult(snapshot: codex),
+        doctorHostResult(snapshot: workBuddy),
     ]
 }
 
@@ -571,7 +603,8 @@ private func doctorHostResult(
     case .incomplete(let missing):
         return DoctorCheckResult(
             name: name, severity: .failure,
-            message: "✗ \(host.displayName) 已有 claudi0 配置但缺少 hook：\(missing.joined(separator: ", "))")
+            message:
+                "✗ \(host.displayName) 已有 claudi0 配置但缺少 hook：\(missing.joined(separator: ", "))")
     case .unreadable(let reason), .conflict(let reason):
         return DoctorCheckResult(
             name: name, severity: .failure,
@@ -593,20 +626,32 @@ private func doctorHostResult(
                 message: "✗ \(host.displayName) 已配置但缺少 installation ID")
         }
         guard case .observed = snapshot.activation else {
+            let pendingMessage =
+                switch host {
+                case .codex:
+                    "⚠ Codex：在 Codex 输入 /hooks，确认后再提交一次提示词"
+                case .claudeCode:
+                    "⚠ Claude Code 已配置，请提交一次提示词以确认连接"
+                case .workBuddy:
+                    "⚠ WorkBuddy 已配置，请提交一次提示词以确认 task_start 回执"
+                }
             return DoctorCheckResult(
                 name: name, severity: .warning,
-                message: host == .codex
-                    ? "⚠ Codex：在 Codex 输入 /hooks，确认后再提交一次提示词"
-                    : "⚠ Claude Code 已配置，请提交一次提示词以确认连接")
+                message: pendingMessage)
         }
-        let supported = HostCapabilityCatalog.bindings(for: host).filter(\.isAudibleCapability).count
-        let qualifier = host == .codex ? "；执行中断暂无事件，待响应仅授权请求" : ""
+        let supported = HostCapabilityCatalog.bindings(for: host).filter(\.isAudibleCapability)
+            .count
+        let qualifier =
+            switch host {
+            case .codex: "；执行中断暂无事件，待响应仅授权请求"
+            case .workBuddy: "；当前仅 task_start 与 stop 已实现"
+            case .claudeCode: ""
+            }
         return DoctorCheckResult(
             name: name, severity: .ok,
             message: "✓ \(host.displayName) \(supported)/\(Event.allCases.count) 已就绪\(qualifier)")
     }
 }
-
 
 /// (g) 把 ``probeConfigRewritable(configFile:)`` 的判定讲成 `doctor` 的一行话。
 ///

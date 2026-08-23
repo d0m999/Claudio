@@ -33,10 +33,12 @@ public struct ClaudeCodeIntegrationEnvironment: Sendable {
     ) {
         self.settingsFile = settingsFile
         self.lockFile = lockFile
-        self.operationLockFile = operationLockFile
+        self.operationLockFile =
+            operationLockFile
             ?? lockFile.deletingLastPathComponent().appendingPathComponent(
                 "\(HostID.claudeCode.rawValue)-operation.lock")
-        self.backupFile = backupFile
+        self.backupFile =
+            backupFile
             ?? settingsFile.deletingLastPathComponent().appendingPathComponent(
                 settingsFile.lastPathComponent + ".claudio.bak")
         self.claudioBinaryPath = claudioBinaryPath
@@ -87,10 +89,12 @@ public struct CodexIntegrationEnvironment: Sendable {
     ) {
         self.hooksFile = hooksFile
         self.lockFile = lockFile
-        self.operationLockFile = operationLockFile
+        self.operationLockFile =
+            operationLockFile
             ?? lockFile.deletingLastPathComponent().appendingPathComponent(
                 "\(HostID.codex.rawValue)-operation.lock")
-        self.backupFile = backupFile
+        self.backupFile =
+            backupFile
             ?? hooksFile.deletingLastPathComponent().appendingPathComponent(
                 hooksFile.lastPathComponent + ".claudio.bak")
         self.configFile = configFile
@@ -161,7 +165,8 @@ public struct ClaudeCodeIntegrationAdapter: HostIntegrationAdapter {
         }
         if case .failure(let error) = result { return .failure(.transaction(error)) }
         let configured = inspectClaudeSnapshot(environment: environment, runtime: runtime)
-        guard configured.configuration == .configured, let installationID = configured.installationID
+        guard configured.configuration == .configured,
+            let installationID = configured.installationID
         else {
             return .failure(
                 .configuration(reason: "Claude Code 写入后未形成完整的 claudi0 installation ID"))
@@ -189,7 +194,8 @@ public struct ClaudeCodeIntegrationAdapter: HostIntegrationAdapter {
         // Marker 是 hook 写回执时真正执行的当前代次闸门。若它与配置 ID 漂移，
         // 必须优先撤销 marker；否则按配置 ID 调 deactivate 会成功 no-op，随后删掉
         // 配置却留下仍能接受迟到回执的孤儿 marker。
-        let installationID = environment.receiptStore.currentInstallationID(host: .claudeCode)
+        let installationID =
+            environment.receiptStore.currentInstallationID(host: .claudeCode)
             ?? inspectClaudeSnapshot(environment: environment, runtime: runtime).installationID
         // 先撤销代次，再删配置。若回执锁忙，本次断开零配置写；
         // 一旦 marker 已撤销，任何迟到旧 hook 都不能再制造有效证据。
@@ -353,7 +359,8 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
                 environment: environment)
         }
         let configured = inspectCodexSnapshot(environment: environment, runtime: runtime)
-        guard configured.configuration == .configured, let installationID = configured.installationID
+        guard configured.configuration == .configured,
+            let installationID = configured.installationID
         else {
             return .failure(
                 .configuration(reason: "Codex 写入后未形成完整的 claudi0 installation ID"))
@@ -380,7 +387,8 @@ public struct CodexIntegrationAdapter: HostIntegrationAdapter {
     ) -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
         // 与 Claude 同一不变量：先撤销真正控制回执写入的 marker，即使它与
         // hooks.json 当前 ID 不一致；宿主级 operation lock 防止新连接在这里交错。
-        let installationID = environment.receiptStore.currentInstallationID(host: .codex)
+        let installationID =
+            environment.receiptStore.currentInstallationID(host: .codex)
             ?? inspectCodexSnapshot(environment: environment, runtime: runtime).installationID
         let wrapperContext = inspectLegacyWrapperContext(environment: environment)
         if case .conflict(let reason) = wrapperContext {
@@ -619,7 +627,7 @@ private func codexConfigurationStatus(
     }
 }
 
-private func makeIntegrationSnapshot(
+func makeIntegrationSnapshot(
     host: HostID,
     runtime: SharedRuntimeHealth,
     availability: HostAvailability,
@@ -645,14 +653,31 @@ private func makeIntegrationSnapshot(
     }
 
     let activation: HostActivationEvidence
+    let bindingActivations: [HostEventBindingID: HostActivationEvidence]
     let latestReceipt: HostReceiptEvidence?
     if let installationID, configuration == .configured {
-        let supportedNativeEvents = HostCapabilityCatalog.bindings(for: host)
+        let implementedBindings = HostCapabilityCatalog.bindings(for: host)
             .filter(\.isAudibleCapability)
-            .compactMap(\.nativeEvent)
-        latestReceipt = supportedNativeEvents
-            .compactMap { nativeEvent in
-                receiptStore.receiptEvidence(
+        let evidenceByBinding = Dictionary(
+            uniqueKeysWithValues: implementedBindings.map { binding in
+                let evidence = binding.nativeEvent.flatMap { nativeEvent in
+                    receiptStore.receiptEvidence(
+                        host: host,
+                        nativeEvent: nativeEvent,
+                        installationID: installationID)
+                }
+                return (
+                    binding.id,
+                    evidence.map(HostActivationEvidence.observed)
+                        ?? .awaitingReceipt(installationID: installationID)
+                )
+            })
+        bindingActivations = evidenceByBinding
+        latestReceipt =
+            implementedBindings
+            .compactMap { binding in
+                guard let nativeEvent = binding.nativeEvent else { return nil }
+                return receiptStore.receiptEvidence(
                     host: host,
                     nativeEvent: nativeEvent,
                     installationID: installationID)
@@ -666,10 +691,12 @@ private func makeIntegrationSnapshot(
                 nativeEvent: nativeEvent,
                 installationID: installationID)
         }
-        activation = taskStartEvidence.map(HostActivationEvidence.observed)
+        activation =
+            taskStartEvidence.map(HostActivationEvidence.observed)
             ?? .awaitingReceipt(installationID: installationID)
     } else {
         activation = .none
+        bindingActivations = [:]
         latestReceipt = nil
     }
     return HostIntegrationSnapshot(
@@ -679,6 +706,7 @@ private func makeIntegrationSnapshot(
         configuration: configuration,
         writability: writability,
         activation: activation,
+        bindingActivations: bindingActivations,
         latestReceipt: latestReceipt,
         installationID: installationID)
 }
@@ -1044,15 +1072,15 @@ private func legacyConflictText(_ reason: LegacyCodexNotifyMigrationConflictReas
     }
 }
 
-private extension IntegrationDataLoad {
-    var isFailure: Bool {
+extension IntegrationDataLoad {
+    fileprivate var isFailure: Bool {
         if case .failure = self { return true }
         return false
     }
 }
 
-private extension LegacyWrapperWriteError {
-    var reason: String {
+extension LegacyWrapperWriteError {
+    fileprivate var reason: String {
         if case .failed(let reason) = self { return reason }
         return "旧 codex-notify 写入失败"
     }

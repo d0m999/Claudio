@@ -41,21 +41,23 @@ public struct HostSourceRowPresentation: Identifiable, Sendable, Equatable {
         self.readinessText = readinessText
         self.detailText = detailText
         self.status = status
-        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityLabel =
+            accessibilityLabel
             ?? [title, readinessText, detailText].compactMap { $0 }.joined(separator: "，")
         self.supportedCount = supportedCount
         self.totalCount = totalCount
     }
 }
 
-/// 固定生成 Claude Code、Codex 两条等权来源行。宿主是否连接只改变行内状态，不改变行的存在。
+/// 按稳定 registry 生成所有已出货来源行。宿主是否连接只改变行内状态，不改变行的存在。
 public func hostSourceRowPresentations(
     from matrix: AudibilityMatrix
 ) -> [HostSourceRowPresentation] {
     HostID.allCases.map { host in
         let fallbackSupported = HostCapabilityCatalog.bindings(for: host)
             .filter(\.isAudibleCapability).count
-        let summary = matrix.summary(for: host)
+        let summary =
+            matrix.summary(for: host)
             ?? .notConnected(supported: fallbackSupported, total: Event.allCases.count)
         return hostSourceRowPresentation(host: host, summary: summary)
     }
@@ -76,25 +78,32 @@ private func hostSourceRowPresentation(
         supportedCount = supported
         totalCount = total
         readinessText = "\(supported)/\(total) 已就绪"
-        detailText = host == .codex ? "执行中断暂无事件" : nil
+        switch host {
+        case .claudeCode: detailText = nil
+        case .codex: detailText = "执行中断暂无事件"
+        case .workBuddy: detailText = "当前版本已实现 2/5；其余能力尚未启用"
+        }
         status = .ready
 
     case .awaitingActivation(let supported, let total):
         supportedCount = supported
         totalCount = total
         readinessText = "\(supported)/\(total) 已配置"
-        detailText = host == .codex
-            ? "在 Codex 输入 /hooks，确认后再提交一次提示词"
-            : "请向 Claude Code 提交一次提示词以确认连接"
+        switch host {
+        case .claudeCode: detailText = "请向 Claude Code 提交一次提示词以确认连接"
+        case .codex: detailText = "在 Codex 输入 /hooks，确认后再提交一次提示词"
+        case .workBuddy: detailText = "请向 WorkBuddy 提交一次提示词以确认连接"
+        }
         status = .awaitingActivation
 
     case .legacy(let supported, let total):
         supportedCount = supported
         totalCount = total
         readinessText = "\(supported)/\(total) 旧版连接"
-        detailText = host == .claudeCode
-            ? "四个旧版事件可听；任务开始需升级"
-            : "可听，但暂无真实回执"
+        switch host {
+        case .claudeCode: detailText = "四个旧版事件可听；任务开始需升级"
+        case .codex, .workBuddy: detailText = "可听，但暂无真实回执"
+        }
         status = .legacy
 
     case .notConnected(let supported, let total):
@@ -122,7 +131,7 @@ private func hostSourceRowPresentation(
         totalCount: totalCount)
 }
 
-// MARK: - 5 × 2 可听能力矩阵
+// MARK: - 动态 5 × N 可听能力矩阵
 
 /// `.muted` 格仍需保留它由哪一条独立音量轴造成，否则恢复动作会把总音量为零
 /// 误当成逐事件静音，并在没有改变可听事实时返回成功。
@@ -148,7 +157,8 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         cell: AudibilityCell,
         muteReason: HostCapabilityMuteReason? = nil
     ) {
-        let resolvedMuteReason = cell.state == .muted
+        let resolvedMuteReason =
+            cell.state == .muted
             ? (muteReason ?? .eventDisabled)
             : nil
         host = cell.host
@@ -156,12 +166,19 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         state = cell.state
         self.muteReason = resolvedMuteReason
         nativeEventText = cell.binding.nativeEvent
-        qualificationText = cell.binding.qualification
+        qualificationText = cell.binding.qualification.map(defaultQualificationText)
         statusText = hostCapabilityStatusText(cell.state, muteReason: resolvedMuteReason)
         detailText = cell.detail
-        accessibilityLabel = resolvedMuteReason == .masterVolumeZero
-            ? "\(cell.accessibilityLabel)，原因：主音量为零"
-            : cell.accessibilityLabel
+        let defaultLabel =
+            cell.binding.qualification.map { qualification in
+                cell.accessibilityLabel.replacingOccurrences(
+                    of: qualification.rawValue,
+                    with: defaultQualificationText(qualification))
+            } ?? cell.accessibilityLabel
+        accessibilityLabel =
+            resolvedMuteReason == .masterVolumeZero
+            ? "\(defaultLabel)，原因：主音量为零"
+            : defaultLabel
     }
 
     /// Preview/test initializer for presentation-only state galleries and pure recovery tests.
@@ -177,7 +194,8 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         detailText: String? = nil,
         accessibilityLabel: String? = nil
     ) {
-        let resolvedMuteReason = state == .muted
+        let resolvedMuteReason =
+            state == .muted
             ? (muteReason ?? .eventDisabled)
             : nil
         self.host = host
@@ -186,16 +204,18 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         self.muteReason = resolvedMuteReason
         self.nativeEventText = nativeEventText
         self.qualificationText = qualificationText
-        self.statusText = statusText
+        self.statusText =
+            statusText
             ?? hostCapabilityStatusText(state, muteReason: resolvedMuteReason)
         self.detailText = detailText
-        self.accessibilityLabel = accessibilityLabel
+        self.accessibilityLabel =
+            accessibilityLabel
             ?? "\(host.displayName)，\(event.displayName)，"
-                + "\(hostCapabilityStatusText(state, muteReason: resolvedMuteReason))"
+            + "\(hostCapabilityStatusText(state, muteReason: resolvedMuteReason))"
     }
 }
 
-/// 同一个声音语义下的两条宿主子行。最大 Dynamic Type 直接把该值渲染成一张事件卡。
+/// 同一个声音语义下的动态宿主子行。最大 Dynamic Type 直接把该值渲染成一张事件卡。
 public struct HostCapabilityEventRowPresentation: Identifiable, Sendable, Equatable {
     public var id: Event { event }
     public let event: Event
@@ -300,7 +320,8 @@ public struct EventHostIndicatorPresentation: Identifiable, Sendable, Equatable 
         qualificationText: String? = nil
     ) {
         self.host = host
-        self.compactDisplayName = compactDisplayName
+        self.compactDisplayName =
+            compactDisplayName
             ?? eventHostIndicatorCompactDisplayName(for: host)
         self.state = state
         self.qualificationText = qualificationText
@@ -321,6 +342,7 @@ public func eventHostIndicatorCompactDisplayName(for host: HostID) -> String {
     switch host {
     case .claudeCode: "Claude"
     case .codex: "Codex"
+    case .workBuddy: "Buddy"
     }
 }
 
@@ -329,6 +351,7 @@ public func eventHostIndicatorAssetName(for host: HostID) -> String {
     switch host {
     case .claudeCode: "claude"
     case .codex: "codex"
+    case .workBuddy: "workbuddy"
     }
 }
 
@@ -353,6 +376,21 @@ public func eventHostIndicatorPalette(for host: HostID) -> EventHostIndicatorPal
         EventHostIndicatorPalette(
             lightHex: ClaudioColorHex.codexIndicatorLight,
             darkHex: ClaudioColorHex.codexIndicatorDark)
+    case .workBuddy:
+        EventHostIndicatorPalette(
+            lightHex: ClaudioColorHex.workBuddyIndicatorLight,
+            darkHex: ClaudioColorHex.workBuddyIndicatorDark)
+    }
+}
+
+private func defaultQualificationText(_ qualification: HostCapabilityQualificationID) -> String {
+    switch qualification {
+    case .codexStopFailureUnavailable: "Codex 暂无执行中断事件"
+    case .permissionRequestOnly: "仅授权请求"
+    case .notificationMatchersOnly: "仅通知匹配器"
+    case .interfaceSupportedNotImplemented: "接口支持，当前版本尚未实现"
+    case .interfacePartiallySupportedNotImplemented: "接口部分支持，当前版本尚未实现"
+    case .undeclaredCapability: "此宿主未声明该能力"
     }
 }
 
@@ -495,10 +533,13 @@ public enum IntegrationsWindowInspectorAction: Sendable, Hashable {
     case connect(HostID)
     case repair(HostID)
     case disconnect(HostID)
+    case clearReceiptHistory(HostID)
 
     fileprivate var isDestructive: Bool {
-        if case .disconnect = self { return true }
-        return false
+        switch self {
+        case .disconnect, .clearReceiptHistory: true
+        default: false
+        }
     }
 }
 
@@ -509,18 +550,25 @@ public func integrationsInspectorActions(
 ) -> [IntegrationsWindowInspectorAction] {
     switch row.status {
     case .ready:
-        return [.redetect, .disconnect(row.host)]
+        return [.redetect, .clearReceiptHistory(row.host), .disconnect(row.host)]
     case .legacy:
-        return [.repair(row.host), .redetect, .disconnect(row.host)]
+        return [
+            .repair(row.host), .redetect, .clearReceiptHistory(row.host), .disconnect(row.host),
+        ]
     case .awaitingActivation:
         if row.host == .codex {
-            return [.copyHooksCommand, .redetect, .disconnect(row.host)]
+            return [
+                .copyHooksCommand, .redetect, .clearReceiptHistory(row.host),
+                .disconnect(row.host),
+            ]
         }
-        return [.redetect, .disconnect(row.host)]
+        return [.redetect, .clearReceiptHistory(row.host), .disconnect(row.host)]
     case .notConnected:
-        return [.connect(row.host)]
+        return [.connect(row.host), .clearReceiptHistory(row.host)]
     case .needsAttention:
-        return [.redetect, .repair(row.host), .disconnect(row.host)]
+        return [
+            .redetect, .repair(row.host), .clearReceiptHistory(row.host), .disconnect(row.host),
+        ]
     }
 }
 
@@ -537,6 +585,7 @@ public func integrationsInspectorActionTitle(
     case .repair(let host):
         hostStatus == .legacy ? "升级连接" : "修复 \(host.displayName) 连接"
     case .disconnect(let host): "断开 \(host.displayName)"
+    case .clearReceiptHistory(let host): "清除 \(host.displayName) 回执历史"
     }
 }
 
@@ -579,11 +628,12 @@ public func integrationsWindowFocusOrder(
     _ scope: IntegrationsWindowFocusScope
 ) -> [IntegrationsWindowFocusTarget] {
     var order = HostID.allCases.map(IntegrationsWindowFocusTarget.hostCard)
-    order.append(contentsOf: scope.matrix.rows.flatMap { row in
-        row.cells.map {
-            IntegrationsWindowFocusTarget.capabilityCell(host: $0.host, event: $0.event)
-        }
-    })
+    order.append(
+        contentsOf: scope.matrix.rows.flatMap { row in
+            row.cells.map {
+                IntegrationsWindowFocusTarget.capabilityCell(host: $0.host, event: $0.event)
+            }
+        })
     if let host = scope.configurationPathHost {
         order.append(.copyConfigurationPath(host))
     }
@@ -593,12 +643,14 @@ public func integrationsWindowFocusOrder(
     if scope.recoveryAction.title != nil {
         order.append(.recoveryAction(scope.recoveryAction))
     }
-    order.append(contentsOf: scope.inspectorActions.filter { !$0.isDestructive }.map {
-        .inspectorAction($0)
-    })
-    order.append(contentsOf: scope.inspectorActions.filter(\.isDestructive).map {
-        .inspectorAction($0)
-    })
+    order.append(
+        contentsOf: scope.inspectorActions.filter { !$0.isDestructive }.map {
+            .inspectorAction($0)
+        })
+    order.append(
+        contentsOf: scope.inspectorActions.filter(\.isDestructive).map {
+            .inspectorAction($0)
+        })
     return order
 }
 
@@ -766,7 +818,8 @@ public func integrationsStateChangeAccessibilityLabel(
 ) -> String {
     var clauses = [hostRow.accessibilityLabel]
     clauses.append(
-        contentsOf: capabilityCells
+        contentsOf:
+            capabilityCells
             .filter { $0.host == hostRow.host }
             .map(\.accessibilityLabel))
     if !message.isEmpty { clauses.append(message) }
@@ -808,11 +861,13 @@ public struct IntegrationsFeedbackModel: Sendable, Equatable {
         now: Date
     ) -> UInt64 {
         presentSequence(
-            [IntegrationsFeedbackRequest(
-                host: host,
-                kind: kind,
-                message: message,
-                accessibilityAnnouncement: accessibilityAnnouncement)],
+            [
+                IntegrationsFeedbackRequest(
+                    host: host,
+                    kind: kind,
+                    message: message,
+                    accessibilityAnnouncement: accessibilityAnnouncement)
+            ],
             now: now)!
     }
 
@@ -950,6 +1005,10 @@ public func integrationsInFlightPresentation(
     case .disconnect(let target):
         host = target
         statusText = "断开中"
+        isUpgrade = false
+    case .clearReceiptHistory(let target):
+        host = target
+        statusText = "清除回执历史中"
         isUpgrade = false
     }
     return IntegrationsInFlightPresentation(

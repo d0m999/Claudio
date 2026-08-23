@@ -9,7 +9,7 @@ extension Claudio {
         static let configuration = CommandConfiguration(
             abstract: "宿主 hook 回调：严格映射、宿主级去抖、写最小真实回执并立即退出。")
 
-        @Argument(help: "宿主：claude-code / codex") var host: String
+        @Argument(help: "宿主：claude-code / codex / workbuddy") var host: String
         @Argument(help: "宿主原生事件名") var nativeEvent: String
         @Option(name: .long, help: "当前连接 installation UUID") var installationID: String
 
@@ -28,12 +28,12 @@ extension Claudio {
 
     struct Integrations: AsyncParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "查看、连接或断开 Claude Code 与 Codex 声音来源。",
+            abstract: "查看、连接或断开已出货的声音来源。",
             subcommands: [Status.self, Connect.self, Disconnect.self])
 
         struct Status: AsyncParsableCommand {
             static let configuration = CommandConfiguration(
-                abstract: "只读检查共享 runtime 与两个宿主。")
+                abstract: "只读检查共享 runtime 与全部已出货宿主。")
 
             @Flag(name: .long, help: "输出机器可读 JSON") var json = false
 
@@ -62,7 +62,7 @@ extension Claudio {
             static let configuration = CommandConfiguration(
                 abstract: "连接指定宿主；先幂等自举共享 runtime。")
 
-            @Argument(help: "claude-code / codex") var host: String
+            @Argument(help: "claude-code / codex / workbuddy") var host: String
 
             mutating func run() async throws {
                 guard let hostID = HostID(rawValue: host) else {
@@ -87,7 +87,7 @@ extension Claudio {
             static let configuration = CommandConfiguration(
                 abstract: "只摘除指定宿主的 claudi0 条目，保留共享 runtime 与第三方配置。")
 
-            @Argument(help: "claude-code / codex") var host: String
+            @Argument(help: "claude-code / codex / workbuddy") var host: String
 
             mutating func run() async throws {
                 guard let hostID = HostID(rawValue: host) else {
@@ -111,7 +111,7 @@ extension Claudio {
     /// （T6）。硬问题（afplay 缺 / settings.json 不可写）才让退出码非 0。
     struct Doctor: ParsableCommand {
         static let configuration = CommandConfiguration(
-            abstract: "只读自检 shared runtime、声音包、Claude Code 与 Codex；不写入、不播放。"
+            abstract: "只读自检 shared runtime、声音包与已出货宿主；不写入、不播放。"
         )
 
         func run() throws {
@@ -208,7 +208,23 @@ extension Claudio {
             abstract: "切换当前声音包（写入 ~/.claudio/config.json）。"
         )
         @Argument(help: "声音包 id") var packID: String
+        @Option(name: .long, help: "可选 surface：claude-code / codex / workbuddy")
+        var surface: String?
         func run() throws {
+            if let surface {
+                guard let surfaceID = HostSurfaceID(rawValue: surface) else {
+                    print("✗ 未知 surface：\(surface)")
+                    throw ExitCode.failure
+                }
+                switch setSurfacePack(packID, surface: surfaceID) {
+                case .success:
+                    print("✓ 已将 \(surface) 的声音包覆盖切换为 \"\(packID)\"")
+                case .failure(let error):
+                    print("✗ \(error.description)")
+                    throw ExitCode.failure
+                }
+                return
+            }
             switch selectPack(packID) {
             case .success(.selected(let id)):
                 print("✓ 已切换到声音包 \"\(id)\"")
@@ -255,7 +271,10 @@ extension Claudio {
 
 private func makeSystemIntegrationManager() -> HostIntegrationManager {
     HostIntegrationManager(
-        adapters: [ClaudeCodeIntegrationAdapter(), CodexIntegrationAdapter()],
+        adapters: [
+            ClaudeCodeIntegrationAdapter(), CodexIntegrationAdapter(),
+            WorkBuddyIntegrationAdapter(),
+        ],
         bootstrapper: SystemSharedRuntimeBootstrapper(
             environment: SetupEnvironment(executablePath: currentExecutablePath())))
 }

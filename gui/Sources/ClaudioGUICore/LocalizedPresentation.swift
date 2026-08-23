@@ -27,9 +27,10 @@ private func localizedHostReadiness(
     language: ClaudioAppLanguage
 ) -> String {
     let l10n = ClaudioL10n(language: language)
-    let counts = row.supportedCount.flatMap { supported in
-        row.totalCount.map { total in (supported, total) }
-    } ?? parseHostCounts(row.readinessText)
+    let counts =
+        row.supportedCount.flatMap { supported in
+            row.totalCount.map { total in (supported, total) }
+        } ?? parseHostCounts(row.readinessText)
     guard let (supported, total) = counts else { return row.readinessText }
     let key: ClaudioL10nKey
     switch row.status {
@@ -59,15 +60,22 @@ private func localizedHostDetail(
     let l10n = ClaudioL10n(language: language)
     switch row.status {
     case .ready:
-        return row.host == .codex ? l10n.text(.hostCodexReadyDetail) : nil
+        switch row.host {
+        case .claudeCode: return nil
+        case .codex: return l10n.text(.hostCodexReadyDetail)
+        case .workBuddy: return l10n.text(.hostWorkBuddyReadyDetail)
+        }
     case .awaitingActivation:
-        return row.host == .codex
-            ? l10n.text(.hostCodexAwaitingDetail)
-            : l10n.text(.hostClaudeAwaitingDetail)
+        switch row.host {
+        case .claudeCode: return l10n.text(.hostClaudeAwaitingDetail)
+        case .codex: return l10n.text(.hostCodexAwaitingDetail)
+        case .workBuddy: return l10n.text(.hostWorkBuddyAwaitingDetail)
+        }
     case .legacy:
-        return row.host == .claudeCode
-            ? l10n.text(.hostClaudeLegacyDetail)
-            : l10n.text(.hostCodexLegacyDetail)
+        switch row.host {
+        case .claudeCode: return l10n.text(.hostClaudeLegacyDetail)
+        case .codex, .workBuddy: return l10n.text(.hostCodexLegacyDetail)
+        }
     case .notConnected:
         return nil
     case .needsAttention:
@@ -91,7 +99,8 @@ public func localizedHostSourceRow(
         readinessText: readiness,
         detailText: detail,
         status: row.status,
-        accessibilityLabel: [title, readiness, detail].compactMap { $0 }.joined(separator: separator),
+        accessibilityLabel: [title, readiness, detail].compactMap { $0 }.joined(
+            separator: separator),
         supportedCount: row.supportedCount,
         totalCount: row.totalCount)
 }
@@ -128,8 +137,17 @@ private func localizedQualification(
     language: ClaudioAppLanguage
 ) -> String? {
     guard let value else { return nil }
-    if value == "仅授权请求" {
-        return language == .english ? "Authorization request only" : value
+    let english: [String: String] = [
+        "Codex 暂无执行中断事件": "Codex has no interruption event",
+        "仅授权请求": "Authorization request only",
+        "仅通知匹配器": "Notification matchers only",
+        "接口支持，当前版本尚未实现": "Supported by the interface; not implemented yet",
+        "接口部分支持，当前版本尚未实现":
+            "Partially supported by the interface; not implemented yet",
+        "此宿主未声明该能力": "This host does not declare this capability",
+    ]
+    if language == .english {
+        return english[value] ?? value
     }
     return value
 }
@@ -238,7 +256,8 @@ public func localizedLatestReceiptText(
     }
     let localizedHost = pieces[0]
     let localizedEvent = event.map { localizedEventName($0, language: language) } ?? pieces[1]
-    let localizedResult = result.map { localizedPlaybackResult($0, language: language) } ?? pieces[3]
+    let localizedResult =
+        result.map { localizedPlaybackResult($0, language: language) } ?? pieces[3]
     return "\(localizedHost) · \(localizedEvent) · \(pieces[2]) · \(localizedResult)"
 }
 
@@ -284,11 +303,12 @@ public func localizedSoundPacksPackAccessibilityLabel(
     case .complete:
         facts.append(l10n.format(.soundPacksPackComplete, Int64(Event.allCases.count)))
     case .partial(let present, let total):
-        facts.append(l10n.format(
-            .soundPacksPackPartial,
-            Int64(present),
-            Int64(total),
-            Int64(max(0, total - present))))
+        facts.append(
+            l10n.format(
+                .soundPacksPackPartial,
+                Int64(present),
+                Int64(total),
+                Int64(max(0, total - present))))
     case .broken(let reason):
         facts.append(l10n.format(.soundPacksPackBroken, reason))
     }
@@ -327,7 +347,8 @@ public func localizedSoundPacksFailureAccessibilityLabel(
     if action.isEmpty {
         return reason.isEmpty ? l10n.text(.soundPacksOperationFailed) : reason
     }
-    return reason.isEmpty ? l10n.format(.soundPacksActionFailed, action, "")
+    return reason.isEmpty
+        ? l10n.format(.soundPacksActionFailed, action, "")
         : l10n.format(.soundPacksActionFailed, action, reason)
 }
 

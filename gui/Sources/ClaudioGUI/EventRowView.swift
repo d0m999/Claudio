@@ -28,12 +28,13 @@ private let hostIconResourceBundle: Bundle = {
         .filter { $0.lastPathComponent.hasSuffix("_ClaudioGUI.bundle") }
         .sorted { $0.lastPathComponent < $1.lastPathComponent }
     } catch {
-            preconditionFailure("Cannot inspect Claudio app resources: \(error)")
+        preconditionFailure("Cannot inspect Claudio app resources: \(error)")
     }
 
     guard candidates.count == 1 else {
         preconditionFailure(
-            "Expected exactly one *_ClaudioGUI.bundle in Contents/Resources, found \(candidates.count)")
+            "Expected exactly one *_ClaudioGUI.bundle in Contents/Resources, found \(candidates.count)"
+        )
     }
     guard let bundle = Bundle(url: candidates[0]) else {
         preconditionFailure("Cannot load GUI resource bundle at \(candidates[0].path)")
@@ -76,7 +77,8 @@ public struct EventRowView: View {
     ) {
         self.row = row
         self.hostIndicators = hostIndicators
-        self.previewAvailability = previewAvailability
+        self.previewAvailability =
+            previewAvailability
             ?? eventPreviewAvailability(coverage: row.coverage, masterVolume: 1)
         self.language = language
         self.focusedTarget = focusedTarget
@@ -124,11 +126,9 @@ public struct EventRowView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
 
                     statusChips
-                    .accessibilityHidden(true)
+                        .accessibilityHidden(true)
                 }
-                .padding(
-                    .trailing,
-                    adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)
+                .padding(.trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -190,10 +190,12 @@ public struct EventRowView: View {
         .padding(.vertical, 3)
         .background(
             RoundedRectangle(cornerRadius: 6)
-                .fill(coverageChipFillColor))
+                .fill(coverageChipFillColor)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
-                .stroke(coverageChipBorderColor, style: coverageChipStrokeStyle))
+                .stroke(coverageChipBorderColor, style: coverageChipStrokeStyle)
+        )
         .fixedSize()
         .help(coverageHelp)
         .accessibilityHidden(true)
@@ -231,14 +233,16 @@ public struct EventRowView: View {
                 .fill(
                     indicator.state.usesActiveColor
                         ? activeColor.opacity(0.12)
-                        : Color.clear))
+                        : Color.clear)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 6)
                 .strokeBorder(
                     indicator.state.usesActiveColor
                         ? Color.clear
                         : ClaudioTheme.secondaryText(colorScheme),
-                    lineWidth: 1))
+                    lineWidth: 1)
+        )
         .fixedSize()
         .help(hostIndicatorHelp(indicator))
         .accessibilityHidden(true)
@@ -252,18 +256,22 @@ public struct EventRowView: View {
         .foregroundColor(
             previewAvailability.isAvailable
                 ? ClaudioTheme.event(row.event, colorScheme)
-                : ClaudioTheme.secondaryText(colorScheme))
+                : ClaudioTheme.secondaryText(colorScheme)
+        )
         .disabled(!previewAvailability.isAvailable)
         .focused(focusedTarget, equals: .eventAction(row.event))
         .help(localizedEventPreviewHint(previewAvailability, language: language))
         .accessibilityLabel(
             l10n.format(
                 .eventPreviewLabel,
-                localizedEventName(row.event, language: language) as NSString))
+                localizedEventName(row.event, language: language) as NSString)
+        )
         .accessibilityValue(
             previewAvailability.isAvailable
-                ? l10n.text(row.enabled ? .eventPreviewAvailableEnabled : .eventPreviewAvailableMuted)
-                : l10n.text(.eventPreviewUnavailable))
+                ? l10n.text(
+                    row.enabled ? .eventPreviewAvailableEnabled : .eventPreviewAvailableMuted)
+                : l10n.text(.eventPreviewUnavailable)
+        )
         .accessibilityHint(localizedEventPreviewHint(previewAvailability, language: language))
         .accessibilityIdentifier("panel.event.\(row.event.rawValue).preview")
     }
@@ -274,19 +282,26 @@ public struct EventRowView: View {
                 isMuted: !row.enabled,
                 color: row.enabled
                     ? ClaudioTheme.secondaryText(colorScheme)
-                    : ClaudioTheme.clay(colorScheme))
-                .accessibilityHidden(true)
+                    : ClaudioTheme.clay(colorScheme)
+            )
+            .accessibilityHidden(true)
         }
         .buttonStyle(ClaudioIconButtonStyle())
         .focused(focusedTarget, equals: .eventMute(row.event))
         .help(
             row.enabled
-                ? l10n.format(.eventMute, localizedEventName(row.event, language: language) as NSString)
-                : l10n.format(.eventUnmute, localizedEventName(row.event, language: language) as NSString))
+                ? l10n.format(
+                    .eventMute, localizedEventName(row.event, language: language) as NSString)
+                : l10n.format(
+                    .eventUnmute, localizedEventName(row.event, language: language) as NSString)
+        )
         .accessibilityLabel(
             row.enabled
-                ? l10n.format(.eventMute, localizedEventName(row.event, language: language) as NSString)
-                : l10n.format(.eventUnmute, localizedEventName(row.event, language: language) as NSString))
+                ? l10n.format(
+                    .eventMute, localizedEventName(row.event, language: language) as NSString)
+                : l10n.format(
+                    .eventUnmute, localizedEventName(row.event, language: language) as NSString)
+        )
         .accessibilityValue(l10n.text(row.enabled ? .eventEnabled : .eventMuted))
         .accessibilityHint(l10n.text(.eventMuteHint))
         .accessibilityAddTraits(row.enabled ? [] : .isSelected)
@@ -305,13 +320,14 @@ public struct EventRowView: View {
         }
         let state = l10n.text(row.enabled ? .eventEnabled : .eventMuted)
         var parts = [localizedEventName(row.event, language: language), sound, state]
-        parts.append(contentsOf: hostIndicators.map { indicator in
-            let host = localizedHostName(indicator.host, language: language)
-            let status = localizedEventHostIndicatorStatus(indicator.state, language: language)
-            return [host, status, indicator.qualificationText]
-                .compactMap { $0 }
-                .joined(separator: language == .english ? ", " : "，")
-        })
+        parts.append(
+            contentsOf: hostIndicators.map { indicator in
+                let host = localizedHostName(indicator.host, language: language)
+                let status = localizedEventHostIndicatorStatus(indicator.state, language: language)
+                return [host, status, indicator.qualificationText]
+                    .compactMap { $0 }
+                    .joined(separator: language == .english ? ", " : "，")
+            })
         return parts.joined(separator: language == .english ? ", " : "，")
     }
 
@@ -335,6 +351,9 @@ public struct EventRowView: View {
     }
 
     private func hostIndicatorImage(for host: HostID) -> Image {
+        if host == .workBuddy {
+            return Image(systemName: "briefcase.fill")
+        }
         let assetName = eventHostIndicatorAssetName(for: host)
         guard let image = hostIconResourceBundle.image(forResource: NSImage.Name(assetName)) else {
             preconditionFailure("Missing host indicator resource: \(assetName).pdf")

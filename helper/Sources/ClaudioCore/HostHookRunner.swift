@@ -20,9 +20,10 @@ public struct HostHookEnvironment: Sendable {
     ) {
         self.host = host
         self.playEnvironment = playEnvironment
-        self.taskStartDebounceStateFile = taskStartDebounceStateFile
+        self.taskStartDebounceStateFile =
+            taskStartDebounceStateFile
             ?? playEnvironment.debounceStateFile.deletingLastPathComponent()
-                .appendingPathComponent("task-start.state")
+            .appendingPathComponent("task-start.state")
         self.taskStartDebounceInterval = taskStartDebounceInterval
         self.receiptStore = receiptStore
         self.now = now
@@ -34,6 +35,7 @@ public func systemHostHookEnvironment(for host: HostID) -> HostHookEnvironment {
     HostHookEnvironment(
         host: host,
         playEnvironment: PlayEnvironment(
+            surfaceID: host.surfaceID,
             lockFile: ClaudioPaths.hostPlayLockFile(host),
             debounceStateFile: ClaudioPaths.hostDebounceStateFile(host)),
         taskStartDebounceStateFile: ClaudioPaths.hostTaskStartDebounceStateFile(host),
@@ -82,6 +84,7 @@ public func handleHostHook(
     let base = environment.playEnvironment
     let isTaskStart = event == .taskStart
     let observedPlayEnvironment = PlayEnvironment(
+        surfaceID: base.surfaceID,
         afplayPath: base.afplayPath,
         lockFile: base.lockFile,
         configFile: base.configFile,

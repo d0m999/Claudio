@@ -180,7 +180,9 @@ func runPreviewFixturesSuites() {
     // `Event.allCases` (compiler-synthesized), not a hand-written list, so a fifth event turns
     // this red without anyone needing to remember this file exists.
 
-    suite("PreviewFixtures.eventRows covers every Event case (the gallery is the EXHAUSTIVE visual truth source — an unrendered event is an unreviewed event)") {
+    suite(
+        "PreviewFixtures.eventRows covers every Event case (the gallery is the EXHAUSTIVE visual truth source — an unrendered event is an unreviewed event)"
+    ) {
         let events = Set(PreviewFixtures.eventRows.map(\.event))
         expect(
             events == Set(Event.allCases),
@@ -188,7 +190,9 @@ func runPreviewFixturesSuites() {
                 + " \(Set(Event.allCases).subtracting(events).map(\.cliName).sorted())")
     }
 
-    suite("PreviewFixtures.eventHostIndicatorScenarios covers full/mixed/gray/legacy/awaiting chip states") {
+    suite(
+        "PreviewFixtures.eventHostIndicatorScenarios covers full/mixed/gray/legacy/awaiting chip states"
+    ) {
         let scenarios = PreviewFixtures.eventHostIndicatorScenarios
         expect(
             scenarios.map(\.id)
@@ -206,8 +210,8 @@ func runPreviewFixturesSuites() {
             indicators("full-color").allSatisfy(\.state.usesActiveColor),
             "full-color 帧必须两枚 Logo 都彩色")
         expect(
-            indicators("mixed").map(\.state) == [.connected, .unsupported],
-            "mixed 帧必须是 Claude 彩色、Codex 不支持灰色")
+            indicators("mixed").map(\.state) == [.connected, .unsupported, .unsupported],
+            "mixed 帧必须是 Claude 彩色、Codex/WorkBuddy 未实现格灰色")
         expect(
             indicators("all-gray").allSatisfy { !$0.state.usesActiveColor },
             "all-gray 帧必须两枚 Logo 都灰色")
@@ -236,13 +240,16 @@ func runPreviewFixturesSuites() {
             "Preview fixture 描述必须统一使用小标签 12pt Logo，不能留下旧尺寸")
     }
 
-    suite("PreviewFixtures.eventRowLayoutScenarios covers 2 languages × 4 sizes × 3 coverage states") {
+    suite(
+        "PreviewFixtures.eventRowLayoutScenarios covers 2 languages × 4 sizes × 3 coverage states"
+    ) {
         let scenarios = PreviewFixtures.eventRowLayoutScenarios
         expect(scenarios.count == 8, "事件行 C 布局必须恰好有 8 个语言×字号面板")
 
-        let languageAndSize = Set(scenarios.map {
-            "\($0.language.rawValue)-\($0.interfaceTextSize.rawValue)"
-        })
+        let languageAndSize = Set(
+            scenarios.map {
+                "\($0.language.rawValue)-\($0.interfaceTextSize.rawValue)"
+            })
         let expectedLanguageAndSize = Set(
             ClaudioAppLanguage.allCases.flatMap { language in
                 ClaudioInterfaceTextSize.allCases.map { size in
@@ -266,19 +273,27 @@ func runPreviewFixturesSuites() {
                 if case .unmapped = $0.row.coverage { return true }
                 return false
             }
-            let disconnectedIndicators = disconnectedSample.map {
-                eventHostIndicatorPresentations(
-                    event: $0.row.event,
-                    matrix: hostCapabilityMatrixPresentation(from: $0.state.matrix))
-            } ?? []
+            let disconnectedIndicators =
+                disconnectedSample.map {
+                    eventHostIndicatorPresentations(
+                        event: $0.row.event,
+                        matrix: hostCapabilityMatrixPresentation(from: $0.state.matrix))
+                } ?? []
             expect(
                 !disconnectedIndicators.isEmpty
-                    && disconnectedIndicators.allSatisfy { $0.state == .notConnected },
-                "unmapped 样例必须同时覆盖双宿主未连接标签：\(scenario.id)")
+                    && disconnectedIndicators.allSatisfy { indicator in
+                        let implemented =
+                            HostCapabilityCatalog.binding(
+                                host: indicator.host,
+                                event: disconnectedSample!.row.event)?.isAudibleCapability == true
+                        return indicator.state == (implemented ? .notConnected : .unsupported)
+                    },
+                "unmapped 样例必须区分已实现能力未连接与未实现能力：\(scenario.id)")
         }
 
         for size in ClaudioInterfaceTextSize.allCases {
-            let layouts = scenarios
+            let layouts =
+                scenarios
                 .filter { $0.interfaceTextSize == size }
                 .map(\.adaptation.eventActionsMoveBelow)
             let expected = size == .maximum
@@ -295,8 +310,12 @@ func runPreviewFixturesSuites() {
     // present-or-absent; a `.broken` card renders a status row instead and reaches no track at
     // all, so its `presentEvents` must NOT count toward this exhaustiveness check).
 
-    suite("PreviewFixtures.packCards' coverage track renders every Event in BOTH present and absent styles (scoped to .track-resolving cards — .broken renders no track at all)") {
-        let trackCards = PreviewFixtures.packCards.filter { packRowTrailingSlot(for: $0.state) == .track }
+    suite(
+        "PreviewFixtures.packCards' coverage track renders every Event in BOTH present and absent styles (scoped to .track-resolving cards — .broken renders no track at all)"
+    ) {
+        let trackCards = PreviewFixtures.packCards.filter {
+            packRowTrailingSlot(for: $0.state) == .track
+        }
         expect(
             trackCards.count == 4,
             "fixture premise: exactly the two .complete + two .partial cards resolve to .track,"
@@ -308,7 +327,8 @@ func runPreviewFixturesSuites() {
         expect(
             present == Set(Event.allCases),
             "every event must appear PRESENT on at least one .track-resolving card (the"
-                + " .complete cards), missing \(Set(Event.allCases).subtracting(present).map(\.cliName).sorted())")
+                + " .complete cards), missing \(Set(Event.allCases).subtracting(present).map(\.cliName).sorted())"
+        )
 
         let absent = trackCards.reduce(into: Set<Event>()) { accumulated, card in
             accumulated.formUnion(Set(Event.allCases).subtracting(card.presentEvents))
@@ -323,7 +343,9 @@ func runPreviewFixturesSuites() {
     // MARK: - MasterVolumeState (PLAN-MASTER-VOLUME.md D33/D38): 6 fixtures, both cases covered,
     // including at least one 「行 + 错误行」组合帧 (D39) — the hardest-to-reproduce-by-hand state.
 
-    suite("PreviewFixtures.masterVolumeStates covers both MasterVolumeState cases, exactly 6 fixtures (D38)") {
+    suite(
+        "PreviewFixtures.masterVolumeStates covers both MasterVolumeState cases, exactly 6 fixtures (D38)"
+    ) {
         expect(
             PreviewFixtures.masterVolumeStates.count == 6,
             "D38 pins the gallery's master-volume family at exactly 6 frames, got"
@@ -344,7 +366,8 @@ func runPreviewFixturesSuites() {
                 + " its own frame, not be silently folded away")
     }
 
-    suite("PreviewFixtures.packCards covers every PackCardState case × isSelected (true and false)") {
+    suite("PreviewFixtures.packCards covers every PackCardState case × isSelected (true and false)")
+    {
         let combos = Set(
             PreviewFixtures.packCards.map { card in
                 "\(packCardStateLabel(card.state))-\(card.isSelected)"
@@ -360,7 +383,9 @@ func runPreviewFixturesSuites() {
         )
     }
 
-    suite("PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density and all text sizes") {
+    suite(
+        "PreviewFixtures covers panel pack loading/four-result rendering plus 1-row/4-row density and all text sizes"
+    ) {
         expect(
             PreviewFixtures.panelPackSectionStates.count == 6,
             "包区域必须包含加载、pinned 1 行/4 行、无固定、无包、读取失败六帧")
@@ -398,29 +423,32 @@ func runPreviewFixturesSuites() {
             "双宿主 gallery scenario ID 必须唯一")
     }
 
-    suite("Host integration fixtures: every frame is a catalog-driven 5×2 AudibilityMatrix") {
+    suite("Host integration fixtures: every frame is a catalog-driven dynamic AudibilityMatrix") {
         for scenario in PreviewFixtures.hostIntegrationScenarios {
             expect(
                 scenario.state.snapshots.map(\.host) == HostID.allCases,
-                "\(scenario.id) 必须同时带 Claude Code/Codex 快照")
+                "\(scenario.id) 必须同时带全部已出货宿主快照")
             expect(
                 scenario.state.matrix.rows.map(\.event) == Event.allCases,
                 "\(scenario.id) 必须由 Event.allCases 生成五行")
             for row in scenario.state.matrix.rows {
                 expect(
                     row.cells.map(\.host) == HostID.allCases,
-                    "\(scenario.id)/\(row.event) 必须由两宿主生成两格")
+                    "\(scenario.id)/\(row.event) 必须由 registry 生成全部格子")
                 for cell in row.cells {
                     expect(
-                        cell.binding == HostCapabilityCatalog.binding(
-                            host: cell.host, event: row.event),
+                        cell.binding
+                            == HostCapabilityCatalog.binding(
+                                host: cell.host, event: row.event),
                         "\(scenario.id)/\(cell.host)/\(row.event) 必须直接复用 catalog binding")
                 }
             }
         }
     }
 
-    suite("Host integration fixtures: 4/5 stays normal; awaiting, legacy and failures stay distinct") {
+    suite(
+        "Host integration fixtures: 4/5 stays normal; awaiting, legacy and failures stay distinct"
+    ) {
         func scenario(_ id: String) -> PreviewFixtures.HostIntegrationScenario? {
             PreviewFixtures.hostIntegrationScenarios.first(where: { $0.id == id })
         }

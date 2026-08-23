@@ -22,6 +22,7 @@ public enum HostIntegrationActionError: Error, Sendable, Equatable, CustomString
 /// UI、CLI、doctor 面向宿主配置的唯一 seam。adapter 自己拥有原生事件与 schema；调用方只看快照。
 public protocol HostIntegrationAdapter: Sendable {
     var host: HostID { get }
+    var descriptor: HostIntegrationDescriptor { get }
     var capabilities: [HostCapabilityBinding] { get }
 
     func inspect(runtime: SharedRuntimeHealth) async -> HostIntegrationSnapshot
@@ -33,14 +34,18 @@ public protocol HostIntegrationAdapter: Sendable {
     ) async -> Result<HostIntegrationSnapshot, HostIntegrationActionError>
 }
 
+extension HostIntegrationAdapter {
+    public var descriptor: HostIntegrationDescriptor { host.descriptor }
+}
+
 public protocol SharedRuntimeBootstrapping: Sendable {
     func inspect() -> SharedRuntimeHealth
     func bootstrap() -> Result<SharedRuntimeBootstrapOutcome, SetupError>
     func bootstrapExecution() -> SharedRuntimeBootstrapExecution
 }
 
-public extension SharedRuntimeBootstrapping {
-    func bootstrapExecution() -> SharedRuntimeBootstrapExecution {
+extension SharedRuntimeBootstrapping {
+    public func bootstrapExecution() -> SharedRuntimeBootstrapExecution {
         switch bootstrap() {
         case .success(let outcome): .completed(outcome)
         case .failure(let error):
@@ -130,7 +135,8 @@ public struct SystemSharedRuntimeBootstrapper: SharedRuntimeBootstrapping {
     }
 }
 
-/// 双 adapter 的唯一协调者。刷新始终返回两个宿主，单侧失败不会短路另一侧；bootstrap 只运行共享层。
+/// 已发布 adapter 的唯一协调者。刷新始终返回稳定 registry，单侧失败不会短路其他来源；
+/// bootstrap 只运行共享层。
 public actor HostIntegrationManager {
     private struct InFlightOperation {
         let revision: UInt64
@@ -161,12 +167,17 @@ public actor HostIntegrationManager {
     }
 
     public func capabilities() -> [HostID: [HostCapabilityBinding]] {
-        Dictionary(uniqueKeysWithValues: HostID.allCases.map { host in
-            (host, adapters[host]?.capabilities ?? [])
-        })
+        Dictionary(
+            uniqueKeysWithValues: HostID.allCases.map { host in
+                (host, adapters[host]?.capabilities ?? [])
+            })
     }
 
-    /// GUI 首启入口：只自举共享 runtime，不连接或改写任何宿主配置，然后刷新两侧事实。
+    public func descriptors() -> [HostIntegrationDescriptor] {
+        HostID.allCases.map { adapters[$0]?.descriptor ?? $0.descriptor }
+    }
+
+    /// GUI 首启入口：只自举共享 runtime，不连接或改写任何宿主配置，然后刷新全部来源事实。
     @discardableResult
     public func bootstrapSharedRuntime() async -> [HostIntegrationSnapshot] {
         let execution = bootstrapper.bootstrapExecution()
@@ -308,7 +319,8 @@ public actor HostIntegrationManager {
                 refreshed[host] = cached
                 continue
             }
-            let snapshot = inspected[host]
+            let snapshot =
+                inspected[host]
                 ?? HostIntegrationSnapshot(
                     host: host,
                     runtime: currentRuntime,
@@ -330,7 +342,8 @@ public actor HostIntegrationManager {
         let revision = nextOperationRevision
         latestOperationRevisions[host] = revision
         inFlightOperations[host] = InFlightOperation(revision: revision, state: operation)
-        let base = cachedSnapshots[host]
+        let base =
+            cachedSnapshots[host]
             ?? HostIntegrationSnapshot(
                 host: host,
                 runtime: runtime,
@@ -349,7 +362,8 @@ public actor HostIntegrationManager {
     ) {
         guard latestOperationRevisions[host] == revision else { return }
         inFlightOperations.removeValue(forKey: host)
-        let base = cachedSnapshots[host]
+        let base =
+            cachedSnapshots[host]
             ?? HostIntegrationSnapshot(
                 host: host,
                 runtime: runtime,
@@ -372,7 +386,9 @@ private func snapshotWithOperation(
         availability: snapshot.availability,
         configuration: snapshot.configuration,
         writability: snapshot.writability,
+        authorization: snapshot.authorization,
         activation: snapshot.activation,
+        bindingActivations: snapshot.bindingActivations,
         latestReceipt: snapshot.latestReceipt,
         operation: operation,
         installationID: snapshot.installationID)

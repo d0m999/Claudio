@@ -126,7 +126,8 @@ public enum ConfigRewritability: Sendable, Equatable {
 /// 只读探针：`configFile` 现在能不能被写路径安全重写。**一个字节都不写**，走的是 `updateConfigJSON`
 /// 用的同一份 ``parseRewritableConfig(_:path:)``——「能不能写」的定义只有一个，不存在 doctor 说能、
 /// 真去写又失败（或反过来）的可能。
-public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> ConfigRewritability {
+public func probeConfigRewritable(configFile: URL = ClaudioPaths.configFile) -> ConfigRewritability
+{
     guard FileManager.default.fileExists(atPath: configFile.path) else { return .absent }
     guard case .success(let data) = readConfigFileBounded(at: configFile) else {
         return .malformed(reason: unreadableConfigReason(path: configFile.path))
@@ -220,7 +221,6 @@ func updateConfigJSON(
     return .success(())
 }
 
-
 /// 把 `data` 解析成一张**可以被安全重写**的顶层 JSON 表，否则 fail closed。
 ///
 /// 「可以被安全重写」= 我们认识的每一个键都长成我们认识的样子。不认识的键（`night_dim`、
@@ -311,6 +311,48 @@ private func parseRewritableConfig(
         }
     }
 
+    if let rawSurfaceOverrides = json["surface_overrides"] {
+        guard let surfaceOverrides = rawSurfaceOverrides as? [String: Any] else {
+            return .failure(
+                .unreadable(
+                    reason: "\(path) 的 surface_overrides 必须是 JSON 对象"
+                        + "（当前是\(describeJSONValue(rawSurfaceOverrides))）。请手工修正该值，"
+                        + "\(configRebuildHint)。"))
+        }
+        for (surface, rawOverride) in surfaceOverrides {
+            guard let override = rawOverride as? [String: Any] else {
+                return .failure(
+                    .unreadable(
+                        reason: "\(path) 的 surface_overrides.\(surface) 必须是 JSON 对象"
+                            + "（当前是\(describeJSONValue(rawOverride))）。请手工修正该值，"
+                            + "\(configRebuildHint)。"))
+            }
+            if let selectedPack = override["selected_pack"], !(selectedPack is String) {
+                return .failure(
+                    .unreadable(
+                        reason: "\(path) 的 surface_overrides.\(surface).selected_pack 必须是字符串"
+                            + "（当前是\(describeJSONValue(selectedPack))）。请手工修正该值，"
+                            + "\(configRebuildHint)。"))
+            }
+            if let rawEvents = override["events"] {
+                guard let events = rawEvents as? [String: Any] else {
+                    return .failure(
+                        .unreadable(
+                            reason: "\(path) 的 surface_overrides.\(surface).events 必须是 JSON 对象"
+                                + "（当前是\(describeJSONValue(rawEvents))）。请手工修正该值，"
+                                + "\(configRebuildHint)。"))
+                }
+                for (event, value) in events where !isJSONBoolean(value) {
+                    return .failure(
+                        .unreadable(
+                            reason: "\(path) 的 surface_overrides.\(surface).events.\(event)"
+                                + " 必须是 true/false（当前是\(describeJSONValue(value))）。"
+                                + "请手工修正该值，\(configRebuildHint)。"))
+                }
+            }
+        }
+    }
+
     // 最后：整棵树里不能有「读得进来、却写不出去」的值。见 ``firstUnwritableJSONValue(in:keyPath:depth:)``。
     // 这一条必须在**读侧**：写侧那道 `isValidJSONObject` 只能防崩，防不了假绿——`probeConfigRewritable`
     // 走的正是这个函数，它要是放行了，`doctor` 就会对着一份写下去会失败的文件打印「✓ 可安全重写」。
@@ -351,7 +393,6 @@ private func describeJSONValue(_ value: Any) -> String {
     if value is NSNull { return "null" }
     return "一个无法识别的值"
 }
-
 
 /// 这个值是不是一个 JSON 数字。刻意把布尔排除在外（见 ``isJSONBoolean(_:)``）：`master_volume:
 /// true` 不是「音量 1.0」，是一份坏文件。
