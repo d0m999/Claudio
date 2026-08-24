@@ -67,8 +67,9 @@ private func runReleaseSizeGate(
     } catch {
         return ReleaseSizeProcessResult(status: -1, output: error.localizedDescription)
     }
-    let output = String(
-        data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    let output =
+        String(
+            data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
     return ReleaseSizeProcessResult(status: process.terminationStatus, output: output)
 }
 
@@ -102,7 +103,8 @@ func runReleaseLayoutSuites() {
 
         expect(!copyLines.isEmpty, "release.yml 里一条 `cp` 都没有？「Assemble claudi0.app」那步没了？")
 
-        let helperDestination = "Contents/Resources/\(bundledHelperSubdirectory)/\(claudioHelperBinaryName)"
+        let helperDestination =
+            "Contents/Resources/\(bundledHelperSubdirectory)/\(claudioHelperBinaryName)"
         expect(
             copyLines.contains { $0.contains(helperDestination) },
             "release.yml 里没有任何一条 `cp` 把 helper 复制到 \"\(helperDestination)\"。"
@@ -196,7 +198,8 @@ func runReleaseLayoutSuites() {
                 && eventRow.contains("image.isTemplate = true"),
             "只有真实 macOS app 才能从 Contents/Resources 解析唯一 GUI resource bundle；"
                 + "Xcode Preview 与 SwiftPM 开发进程必须回退到 Bundle.module；改名 app 也必须可用")
-        let pdfNames = resources
+        let pdfNames =
+            resources
             .filter { $0.pathExtension.lowercased() == "pdf" }
             .map(\.lastPathComponent)
             .sorted()
@@ -277,7 +280,8 @@ func runReleaseLayoutSuites() {
         expect(
             release.contains("gui/.build/arm64-apple-macosx/release")
                 && release.contains("gui/.build/x86_64-apple-macosx/release")
-                && release.contains(#"diff -qr "$ARM_GUI_RESOURCE_BUNDLE" "$X86_GUI_RESOURCE_BUNDLE""#)
+                && release.contains(
+                    #"diff -qr "$ARM_GUI_RESOURCE_BUNDLE" "$X86_GUI_RESOURCE_BUNDLE""#)
                 && release.contains(#"cp -R "$ARM_GUI_RESOURCE_BUNDLE""#),
             "release 必须分别解析双架构资源 bundle、确认完全一致后再复制")
         expect(
@@ -316,7 +320,9 @@ func runReleaseLayoutSuites() {
             events["task_start"] == "task_start.mp3",
             "task_start 必须映射独立音频，不能 fallback 到其它事件")
 
-        let taskStartValues = try? taskStartURL.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey])
+        let taskStartValues = try? taskStartURL.resourceValues(forKeys: [
+            .isRegularFileKey, .fileSizeKey,
+        ])
         expect(
             taskStartValues?.isRegularFile == true && (taskStartValues?.fileSize ?? 0) > 0,
             "task_start.mp3 必须作为非空正规文件进入仓库")
@@ -324,7 +330,8 @@ func runReleaseLayoutSuites() {
             licenses.contains("Audio/confirmation_003.ogg")
                 && licenses.contains("https://kenney.nl/assets/interface-sounds")
                 && licenses.contains("CC0-1.0")
-                && licenses.contains("c96fbbd8a2f34fe480e1f7b09ddd9392740fe44af43ca400889636ba802701d2"),
+                && licenses.contains(
+                    "c96fbbd8a2f34fe480e1f7b09ddd9392740fe44af43ca400889636ba802701d2"),
             "LICENSES.md 必须绑定 task_start 的来源、许可与最终 SHA256")
 
         expect(
@@ -598,7 +605,8 @@ func runReleaseLayoutSuites() {
                 && ci.contains("swift run --package-path gui claudio-gui-tests")
                 && ci.contains("swift build -c debug --package-path gui --product ClaudioGUI")
                 && ci.contains("swift build -c release --package-path gui --product ClaudioGUI")
-                && ci.contains("jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings")
+                && ci.contains(
+                    "jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings")
                 && ci.contains("bash scripts/check-release-size.sh dist/claudi0.app")
                 && ci.contains("git diff --check"),
             "push/PR CI 必须覆盖双 harness、双配置 GUI 构建、catalog、体积与 whitespace")
