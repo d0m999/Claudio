@@ -27,9 +27,20 @@ team、secure timestamp 和 hardened runtime；app 先独立 notarize/staple，�
 notarize/staple 的 DMG。workflow 从最终只读挂载 DMG 重新核对 app 字节、架构、helper/Info.plist
 版本、资源、symlink、签名、Gatekeeper、公证票据、体积和校验和。RC artifact 额外包含
 `RC_MANIFEST.json`，用于把 run、artifact、commit、版本、DMG 文件名和 SHA-256 绑定起来；下载后用
-`scripts/verify-release-candidate.sh` 对照 GitHub 当前 run/artifact 元数据、官方 artifact archive
-SHA-256 digest 和本地解压字节复验。缺少任一 Apple 凭据（包括 `APPLE_DEVELOPER_TEAM_ID`）时直接
-失败，不回退为 ad-hoc 发布。
+`scripts/verify-release-candidate.sh` 从唯一验收账本读取期望 identity，对照 GitHub 当前 main run、
+精确 release workflow ID/path、artifact 元数据、官方 artifact archive SHA-256 digest 和本地解压
+字节复验。调用者不能用独立参数覆盖账本中的 run、commit 或 artifact：
+
+```bash
+bash scripts/verify-release-candidate.sh \
+  --artifact-dir <downloaded-artifact-directory> \
+  --ledger docs/release-acceptance-0.1.0.md
+```
+
+复验器在下载前拒绝 GitHub API 声明超过 25 MiB 的 artifact，并在解析或哈希前限制
+ledger/manifest、checksum 与 DMG 的大小；这些边界为当前 release size budget 保留了余量。
+
+缺少任一 Apple 凭据（包括 `APPLE_DEVELOPER_TEAM_ID`）时直接失败，不回退为 ad-hoc 发布。
 
 `0.1.0` 的人工与真机门禁记录在 [`release-acceptance-0.1.0.md`](release-acceptance-0.1.0.md)。RC workflow 通过不等于首发验收通过；Intel/macOS 12、VoiceOver、真实宿主和真实回执缺一项都不得创建首发 tag。
 

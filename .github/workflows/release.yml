@@ -367,29 +367,6 @@ jobs:
         run: |
           set -euo pipefail
           APP="dist/$APP_NAME.app"
-          verify_signed_executable() {
-            local executable="$1"
-            local signature_details
-            codesign --verify --strict --verbose=2 "$executable"
-            signature_details="$(codesign -d --verbose=4 "$executable" 2>&1)"
-            if ! grep -Fq "Authority=Developer ID Application:" <<< "$signature_details"; then
-              echo "::error::not signed by a Developer ID Application identity: $executable"
-              exit 1
-            fi
-            if ! grep -Fq "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$signature_details"; then
-              echo "::error::unexpected Developer ID team for $executable"
-              exit 1
-            fi
-            if ! grep -Fq "flags=0x10000(runtime)" <<< "$signature_details"; then
-              echo "::error::hardened runtime is missing from $executable"
-              exit 1
-            fi
-            if ! grep -Fq "Timestamp=" <<< "$signature_details" \
-              || grep -Fq "Timestamp=none" <<< "$signature_details"; then
-              echo "::error::secure timestamp is missing from $executable"
-              exit 1
-            fi
-          }
           codesign \
             --force \
             --options runtime \
@@ -402,9 +379,9 @@ jobs:
             --timestamp \
             --sign "$SIGNING_IDENTITY" \
             "$APP"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          verify_signed_executable "$APP/Contents/Resources/bin/claudi0"
-          verify_signed_executable "$APP"
+          bash scripts/verify-release-signature.sh \
+            executable "$EXPECTED_TEAM_ID" "$APP/Contents/Resources/bin/claudi0"
+          bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$APP"
 
       - name: Notarize and staple app
         env:
@@ -442,21 +419,7 @@ jobs:
             --identifier "$DMG_SIGNING_IDENTIFIER" \
             --sign "$SIGNING_IDENTITY" \
             "$DMG_PATH"
-          codesign --verify --verbose=2 "$DMG_PATH"
-          DMG_SIGNATURE_DETAILS="$(codesign -d --verbose=4 "$DMG_PATH" 2>&1)"
-          if ! grep -Fq "Authority=Developer ID Application:" <<< "$DMG_SIGNATURE_DETAILS"; then
-            echo "::error::DMG is not signed by a Developer ID Application identity"
-            exit 1
-          fi
-          if ! grep -Fq "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$DMG_SIGNATURE_DETAILS"; then
-            echo "::error::DMG is signed by an unexpected Developer ID team"
-            exit 1
-          fi
-          if ! grep -Fq "Timestamp=" <<< "$DMG_SIGNATURE_DETAILS" \
-            || grep -Fq "Timestamp=none" <<< "$DMG_SIGNATURE_DETAILS"; then
-            echo "::error::secure timestamp is missing from DMG"
-            exit 1
-          fi
+          bash scripts/verify-release-signature.sh dmg "$EXPECTED_TEAM_ID" "$DMG_PATH"
           hdiutil verify "$DMG_PATH"
           echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
           echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
@@ -491,29 +454,44 @@ jobs:
           RC_VERSION: ${{ steps.version.outputs.version }}
           RC_DMG_NAME: ${{ steps.checksum.outputs.dmg_name }}
           RC_DMG_SHA256: ${{ steps.checksum.outputs.sha256 }}
+          RC_TARGET_COMMIT: ${{ inputs.target_commit }}
+          RC_AUTHORIZATION_ATTESTED: ${{ inputs.release_authorized }}
+          RC_WORKFLOW_PATH: .github/workflows/release.yml
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$RC_TARGET_COMMIT" != "$GITHUB_SHA" \
+            || "$RC_AUTHORIZATION_ATTESTED" != "true" \
+            || "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::RC manifest identity no longer matches the validated dispatch inputs"
+            exit 1
+          fi
           ARTIFACT_NAME="claudi0-rc-$GITHUB_SHA"
           RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
           jq -n \
             --arg workflow_name "$GITHUB_WORKFLOW" \
+            --arg workflow_path "$RC_WORKFLOW_PATH" \
             --arg workflow_event "$GITHUB_EVENT_NAME" \
+            --arg workflow_ref "$GITHUB_REF" \
             --arg workflow_run_id "$GITHUB_RUN_ID" \
             --arg workflow_run_url "$RUN_URL" \
             --arg artifact_name "$ARTIFACT_NAME" \
+            --arg target_commit "$RC_TARGET_COMMIT" \
             --arg commit_sha "$GITHUB_SHA" \
             --arg version "$RC_VERSION" \
             --arg dmg_name "$RC_DMG_NAME" \
             --arg dmg_sha256 "$RC_DMG_SHA256" \
-            --argjson authorization_attested true '
+            --argjson authorization_attested "$RC_AUTHORIZATION_ATTESTED" '
               {
-                schema: 1,
+                schema: 2,
                 workflow_name: $workflow_name,
+                workflow_path: $workflow_path,
                 workflow_event: $workflow_event,
+                workflow_ref: $workflow_ref,
                 workflow_run_id: $workflow_run_id,
                 workflow_run_url: $workflow_run_url,
                 artifact_name: $artifact_name,
+                target_commit: $target_commit,
                 commit_sha: $commit_sha,
                 version: $version,
                 dmg_name: $dmg_name,
@@ -552,26 +530,14 @@ jobs:
           done
           for BINARY in \
             "$APP/Contents/MacOS/$APP_EXECUTABLE" \
-            "$APP/Contents/Resources/bin/claudi0" \
-            "$APP/Contents/Resources/bin/claudio"; do
+            "$APP/Contents/Resources/bin/claudi0"; do
             ARCHS="$(lipo -archs "$BINARY")"
             [[ " $ARCHS " == *" arm64 "* && " $ARCHS " == *" x86_64 "* ]]
-            codesign --verify --strict --verbose=2 "$BINARY"
-            SIGNATURE_DETAILS="$(codesign -d --verbose=4 "$BINARY" 2>&1)"
-            grep -Fq "Authority=Developer ID Application:" <<< "$SIGNATURE_DETAILS"
-            grep -Fq "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$SIGNATURE_DETAILS"
-            grep -Fq "flags=0x10000(runtime)" <<< "$SIGNATURE_DETAILS"
-            grep -Fq "Timestamp=" <<< "$SIGNATURE_DETAILS"
-            ! grep -Fq "Timestamp=none" <<< "$SIGNATURE_DETAILS"
+            bash scripts/verify-release-signature.sh executable "$EXPECTED_TEAM_ID" "$BINARY"
           done
           bash scripts/check-release-size.sh "$APP"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign --verify --verbose=2 "$DMG_PATH"
-          DMG_SIGNATURE_DETAILS="$(codesign -d --verbose=4 "$DMG_PATH" 2>&1)"
-          grep -Fq "Authority=Developer ID Application:" <<< "$DMG_SIGNATURE_DETAILS"
-          grep -Fq "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$DMG_SIGNATURE_DETAILS"
-          grep -Fq "Timestamp=" <<< "$DMG_SIGNATURE_DETAILS"
-          ! grep -Fq "Timestamp=none" <<< "$DMG_SIGNATURE_DETAILS"
+          bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$APP"
+          bash scripts/verify-release-signature.sh dmg "$EXPECTED_TEAM_ID" "$DMG_PATH"
           spctl --assess --type execute --verbose=4 "$APP"
           spctl --assess \
             --type open \

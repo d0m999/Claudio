@@ -43,38 +43,44 @@ private func runReleaseSizeGate(
         environmentOverrides: environment)
 }
 
+private func loadReleaseWorkflowSource(root: URL = guiTestRepositoryRoot()) -> String? {
+    let workflowURL = root.appendingPathComponent(".github/workflows/release.yml")
+    return try? String(contentsOf: workflowURL, encoding: .utf8)
+}
+
 private struct ReleaseWorkflowSources {
     let workflow: String
     let notarizeScript: String
+    let signatureScript: String
 
     init?(root: URL = guiTestRepositoryRoot()) {
-        let workflowURL = root.appendingPathComponent(".github/workflows/release.yml")
         let notarizeScriptURL = root.appendingPathComponent(
             "scripts/notarize-release-artifact.sh")
-        guard let workflow = try? String(contentsOf: workflowURL, encoding: .utf8),
-            let notarizeScript = try? String(contentsOf: notarizeScriptURL, encoding: .utf8)
+        let signatureScriptURL = root.appendingPathComponent(
+            "scripts/verify-release-signature.sh")
+        guard let workflow = loadReleaseWorkflowSource(root: root),
+            let notarizeScript = try? String(contentsOf: notarizeScriptURL, encoding: .utf8),
+            let signatureScript = try? String(contentsOf: signatureScriptURL, encoding: .utf8)
         else {
             return nil
         }
         self.workflow = workflow
         self.notarizeScript = notarizeScript
+        self.signatureScript = signatureScript
     }
 }
 
 @MainActor
 func runReleaseLayoutSuites() {
     suite("release.yml 真的把 helper 放在 GUI 会去找的那个位置") {
-        let workflow = guiTestRepositoryRoot()
-            .appendingPathComponent(".github/workflows/release.yml")
         let packCopyScriptURL = guiTestRepositoryRoot()
             .appendingPathComponent("scripts/copy-bundled-packs.sh")
-        guard let data = try? Data(contentsOf: workflow),
-            let yaml = String(data: data, encoding: .utf8),
+        guard let yaml = loadReleaseWorkflowSource(),
             let packCopyScript = try? String(contentsOf: packCopyScriptURL, encoding: .utf8)
         else {
             expect(
                 false,
-                "读不到 \(workflow.path) —— 这个 suite 唯一的价值就是读它，读不到就等于没测。"
+                "读不到 release workflow —— 这个 suite 唯一的价值就是读它，读不到就等于没测。"
                     + "（`#filePath` 推仓库根失败了？）")
             return
         }
@@ -498,6 +504,7 @@ func runReleaseLayoutSuites() {
         }
         let yaml = sources.workflow
         let notarizeScript = sources.notarizeScript
+        let signatureScript = sources.signatureScript
 
         expect(
             yaml.contains("APPLE_DEVELOPER_ID_CERTIFICATE_BASE64")
@@ -510,8 +517,10 @@ func runReleaseLayoutSuites() {
         expect(
             yaml.contains("--options runtime")
                 && yaml.contains("--timestamp")
-                && yaml.contains("Developer ID Application")
                 && yaml.contains("bash scripts/notarize-release-artifact.sh")
+                && yaml.contains("bash scripts/verify-release-signature.sh")
+                && signatureScript.contains("Developer ID Application")
+                && signatureScript.contains("flags=0x10000(runtime)")
                 && notarizeScript.contains("xcrun notarytool submit")
                 && notarizeScript.contains("xcrun stapler staple")
                 && notarizeScript.contains("xcrun stapler validate")
@@ -554,11 +563,8 @@ func runReleaseLayoutSuites() {
     }
 
     suite("RC dispatch 必须绑定单独授权、精确 main commit 与 0.1.0 输入") {
-        let yml = guiTestRepositoryRoot().appendingPathComponent(".github/workflows/release.yml")
-        guard let data = try? Data(contentsOf: yml),
-            let yaml = String(data: data, encoding: .utf8)
-        else {
-            expect(false, "读不到 \(yml.path)")
+        guard let yaml = loadReleaseWorkflowSource() else {
+            expect(false, "读不到 release workflow")
             return
         }
 
@@ -579,10 +585,63 @@ func runReleaseLayoutSuites() {
                 && yaml.contains("GITHUB_RUN_ID")
                 && yaml.contains("GITHUB_SERVER_URL")
                 && yaml.contains("GITHUB_REPOSITORY")
-                && yaml.contains(#"--argjson authorization_attested true"#)
+                && yaml.contains("RC_TARGET_COMMIT: ${{ inputs.target_commit }}")
+                && yaml.contains(
+                    "RC_AUTHORIZATION_ATTESTED: ${{ inputs.release_authorized }}")
+                && yaml.contains("RC_WORKFLOW_PATH: .github/workflows/release.yml")
+                && yaml.contains(#"--arg target_commit "$RC_TARGET_COMMIT""#)
+                && yaml.contains(#"--arg workflow_ref "$GITHUB_REF""#)
+                && yaml.contains(#"--arg workflow_path "$RC_WORKFLOW_PATH""#)
+                && yaml.contains(
+                    #"--argjson authorization_attested "$RC_AUTHORIZATION_ATTESTED""#)
+                && !yaml.contains(#"--argjson authorization_attested true"#)
                 && yaml.contains(#"dist/RC_MANIFEST.json"#),
             "RC artifact 必须携带 run/artifact/commit/version/DMG/checksum 的机器可读清单，"
-                + "并明确只记录已取得授权的 attestation")
+                + "并记录经过前置校验的真实 dispatch identity，不能重新硬编码 attestation")
+    }
+
+    suite("RC verifier 文档入口必须只从唯一验收账本读取 identity") {
+        let root = guiTestRepositoryRoot()
+        let verifierURL = root.appendingPathComponent("scripts/verify-release-candidate.sh")
+        let ledgerURL = root.appendingPathComponent("docs/release-acceptance-0.1.0.md")
+        let distributionURL = root.appendingPathComponent("docs/distribution.md")
+        guard let verifier = try? String(contentsOf: verifierURL, encoding: .utf8),
+            let ledger = try? String(contentsOf: ledgerURL, encoding: .utf8),
+            let distribution = try? String(contentsOf: distributionURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 RC verifier、唯一验收账本或分发文档")
+            return
+        }
+
+        expect(
+            verifier.contains("--artifact-dir")
+                && verifier.contains("--ledger")
+                && !verifier.contains("--run-id")
+                && !verifier.contains("--commit-sha"),
+            "verifier public contract 必须由 ledger 提供期望 identity，不能保留可覆盖账本的参数")
+        let requiredLedgerFields = [
+            "RC version",
+            "Release workflow path",
+            "Release workflow ID",
+            "Workflow ref",
+            "Workflow inputs",
+            "Commit SHA",
+            "GitHub Actions run URL",
+            "GitHub Actions run ID",
+            "Actions artifact 名称",
+            "DMG 文件名",
+            "DMG SHA-256",
+        ]
+        expect(
+            requiredLedgerFields.allSatisfy { ledger.contains("| \($0) |") },
+            "唯一验收账本必须声明 verifier 严格解析的全部规范 RC identity 字段")
+        for source in [ledger, distribution] {
+            expect(
+                source.contains("--ledger docs/release-acceptance-0.1.0.md")
+                    && !source.contains("--run-id <workflow-run-id>")
+                    && !source.contains("--commit-sha <commit-sha>"),
+                "账本与分发文档必须展示 ledger-first verifier 命令，不能让调用者重填 identity")
+        }
     }
 
     suite("RC 必须分别公证 app/DMG，并从最终挂载容器复验完整分发契约") {
@@ -594,6 +653,7 @@ func runReleaseLayoutSuites() {
         }
         let yaml = sources.workflow
         let notarizeScript = sources.notarizeScript
+        let signatureScript = sources.signatureScript
         guard
             let contributorReference = try? String(
                 contentsOf: contributorReferenceURL, encoding: .utf8),
@@ -615,8 +675,8 @@ func runReleaseLayoutSuites() {
         expect(
             yaml.contains("APPLE_DEVELOPER_TEAM_ID")
                 && yaml.contains("EXPECTED_TEAM_ID")
-                && yaml.contains(#"TeamIdentifier=$EXPECTED_TEAM_ID"#)
-                && yaml.contains("flags=0x10000(runtime)"),
+                && signatureScript.contains(#"TeamIdentifier=$expected_team_id"#)
+                && signatureScript.contains("flags=0x10000(runtime)"),
             "app 与 helper 必须核对获批 Developer ID team 和 hardened-runtime flag，"
                 + "不能把任意可用签名身份当成正确身份")
         expect(
@@ -630,28 +690,42 @@ func runReleaseLayoutSuites() {
             "RC 必须先公证并 staple app，再把该 app 放入另行公证/staple 的 DMG；"
                 + "只公证外层 DMG 不满足 app 票据契约")
         expect(
-            yaml.contains(#"grep -Fq "Timestamp=""#)
-                && yaml.contains(#"grep -Fq "Timestamp=none""#)
-                && finalVerification.contains(#"grep -Fq "Timestamp=""#)
-                && finalVerification.contains(#"grep -Fq "Timestamp=none""#),
+            signatureScript.contains(#"grep -Fq "Timestamp=""#)
+                && signatureScript.contains(#"grep -Fq "Timestamp=none""#)
+                && yaml.components(
+                    separatedBy: "bash scripts/verify-release-signature.sh"
+                ).count - 1 == 6,
             "helper、app、DMG 及最终挂载容器必须复验 secure timestamp；"
-                + "仅在签名命令中传 --timestamp 不是成品证据")
+                + "所有工作流调用必须共用同一 fail-closed verifier")
         expect(
             contributorReference.contains("scripts/notarize-release-artifact.sh")
-                && contributorReference.contains("scripts/verify-release-candidate.sh"),
-            "docs/CONTRIBUTING.md 的当前脚本清单必须登记 #18 新增的公证与 RC 复验入口")
+                && contributorReference.contains("scripts/verify-release-candidate.sh")
+                && contributorReference.contains("scripts/verify-release-signature.sh"),
+            "docs/CONTRIBUTING.md 的当前脚本清单必须登记 #18 新增的签名、公证与 RC 复验入口")
         expect(
             finalVerification.contains(#"diff -qr "dist/$APP_NAME.app" "$APP""#)
                 && finalVerification.contains(
                     #"CLI_VERSION="$("$APP/Contents/Resources/bin/claudi0" --version)""#)
                 && finalVerification.contains("CFBundleShortVersionString")
                 && finalVerification.contains("CFBundleVersion")
-                && finalVerification.contains(#"codesign --verify --strict --verbose=2 "$BINARY""#)
+                && finalVerification.contains(
+                    #"bash scripts/verify-release-signature.sh executable "$EXPECTED_TEAM_ID" "$BINARY""#
+                )
+                && finalVerification.contains(
+                    #""$APP/Contents/Resources/bin/claudi0"; do"#)
+                && !finalVerification.contains(
+                    #""$APP/Contents/Resources/bin/claudio"; do"#)
+                && finalVerification.contains(
+                    #"bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$APP""#)
+                && finalVerification.contains(
+                    #"bash scripts/verify-release-signature.sh dmg "$EXPECTED_TEAM_ID" "$DMG_PATH""#
+                )
                 && finalVerification.contains(#"xcrun stapler validate "$APP""#)
                 && finalVerification.contains(#"xcrun stapler validate "$DMG_PATH""#)
                 && finalVerification.contains(#"bash scripts/check-release-size.sh "$APP""#),
-            "最终只读挂载 DMG 必须逐字节对照 app，并复验 helper 版本/签名、双 Info.plist 版本、"
-                + "app/DMG staple 与体积；构建目录里的较早检查不能替代最终容器")
+            "最终只读挂载 DMG 必须逐字节对照 app，并复验真实 Mach-O helper 版本/签名、"
+                + "精确 alias 目标、双 Info.plist 版本、app/DMG staple 与体积；"
+                + "构建目录里的较早检查不能替代最终容器")
     }
 
     suite("开发、tag、CLI、Info.plist、DMG 与 CI 共用同一版本契约") {

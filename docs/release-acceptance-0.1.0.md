@@ -6,8 +6,14 @@
 
 | 字段 | 结果 |
 |---|---|
+| RC version | `0.1.0` |
+| Release workflow path | `.github/workflows/release.yml` |
+| Release workflow ID | `310455860` |
+| Workflow ref | `refs/heads/main` |
+| Workflow inputs | 待填 |
 | Commit SHA | 待填 |
-| GitHub Actions run URL / ID | 待填 |
+| GitHub Actions run URL | 待填 |
+| GitHub Actions run ID | 待填 |
 | Actions artifact 名称 | `claudi0-rc-<commit-sha>`（待下载核对） |
 | DMG 文件名 | `claudi0-0.1.0.dmg`（待核对） |
 | DMG SHA-256 | 待填 |
@@ -143,6 +149,8 @@ profile 与两个 `muted` receipt 一致，该诊断错误未修改任何产品�
 ## 自动化与分发门禁
 
 触发前必须先在本节顶部记录目标 `main` commit、`0.1.0`、三项 workflow 输入和单独运行授权。
+`Workflow inputs` 使用无空白单行 JSON：
+`{"version":"0.1.0","target_commit":"<approved-40-character-main-sha>","release_authorized":true}`。
 只有目标 commit 已存在于远程 `main` 且授权已取得，才可执行；`release_authorized=true` 只是该授权的
 attestation，不是授权来源：
 
@@ -153,16 +161,14 @@ gh workflow run release.yml --ref main \
   -f release_authorized=true
 ```
 
-运行成功并下载 `claudi0-rc-<commit-sha>` 后，使用 artifact 自带的 `RC_MANIFEST.json` 做二次绑定：
+运行成功后，先在顶部填入 run URL、run ID、artifact 名称、最终 DMG 文件名和 SHA-256；下载
+`claudi0-rc-<commit-sha>` 后，再以本账本作为唯一期望身份源，对 artifact 自带的
+`RC_MANIFEST.json` 做二次绑定：
 
 ```bash
 bash scripts/verify-release-candidate.sh \
   --artifact-dir <downloaded-artifact-directory> \
-  --run-id <workflow-run-id> \
-  --run-url <workflow-run-url> \
-  --artifact-name claudi0-rc-<commit-sha> \
-  --commit-sha <commit-sha> \
-  --version 0.1.0
+  --ledger docs/release-acceptance-0.1.0.md
 ```
 
 - [ ] 三项 dispatch 输入与单独授权已预先记录；`target_commit` 同时匹配远程 `main` 触发 SHA 和 checkout HEAD。

@@ -40,7 +40,8 @@ does not assume XCTest or Swift Testing.
 | `scripts/test-host-card-height.sh` | Native AppKit screenshot regression probe |
 | `scripts/benchmark-sound-pack-library.sh` | Measure cold/cached/incremental pack-library performance |
 | `scripts/notarize-release-artifact.sh APP_OR_DMG` | Notarize, staple, and assess one signed release container |
-| `scripts/verify-release-candidate.sh ...` | Bind a downloaded RC to its live run, artifact digest, manifest, and checksum |
+| `scripts/verify-release-signature.sh KIND TEAM_ID ARTIFACT` | Verify one Developer ID release signature |
+| `scripts/verify-release-candidate.sh --artifact-dir DIR --ledger LEDGER` | Bind a downloaded RC to its acceptance ledger and live evidence |
 | `scripts/generate-brand-assets.swift` | Generate branding raster/icon assets |
 | `scripts/generate-host-icon-pdf.swift INPUT.svg OUTPUT.pdf` | Convert a host SVG to a 24×24 PDF |
 | `scripts/scan-host-card-height.swift SCREENSHOT.png` | Scan the host-card border rows in a screenshot |
