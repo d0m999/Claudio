@@ -18,3 +18,7 @@ local-packs/
 
 # Workflow 用的临时 worktree（Agent isolation: worktree）
 .claude/worktrees/
+
+# Local research documents — keep on this machine, never commit
+docs/research/
+docs/*research*.md
