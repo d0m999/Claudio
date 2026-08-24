@@ -35,6 +35,19 @@ remove_stale_report() {
     /bin/rm -f -- "$report_name"
 }
 
+# The expectation is private child-script state. A new public pre-RC run must establish its own
+# identity before exporting it to nested scripts.
+unset CLAUDIO_PINNED_OUTPUT_DIRECTORY_IDENTITY
+output_directory_identity="$(
+    claudio_with_pinned_output_directory \
+        "$repo_root" "$output_directory" claudio_output_directory_identity "."
+)" || fail "cannot pin the local pre-RC output directory"
+if [[ ! "$output_directory_identity" =~ ^[0-9]+:[0-9]+$ ]]; then
+    fail "local pre-RC output directory identity is invalid"
+fi
+readonly output_directory_identity
+export CLAUDIO_PINNED_OUTPUT_DIRECTORY_IDENTITY="$output_directory_identity"
+
 # Even an early tool, contract, or HEAD failure must not leave an older success looking current.
 claudio_with_pinned_output_directory \
     "$repo_root" "$output_directory" remove_stale_report
@@ -99,8 +112,6 @@ run_bound_step() {
     "$@"
     assert_checkout_identity "$expected_commit"
 }
-
-claudio_with_pinned_output_directory "$repo_root" "$output_directory" true
 
 macos_version="$(sw_vers -productVersion)"
 cpu_architecture="$(uname -m)"

@@ -1,6 +1,101 @@
 import Foundation
 
 @MainActor
+private struct LocalPreRCScriptFixture {
+    let fakeBin: URL
+    let repository: URL
+    let scripts: URL
+
+    private let fileManager = FileManager.default
+    private let sourceRoot = guiTestRepositoryRoot()
+
+    init(root: URL) {
+        fakeBin = root.appendingPathComponent("fake-bin")
+        repository = root.appendingPathComponent("repository")
+        scripts = repository.appendingPathComponent("scripts")
+        try? fileManager.createDirectory(at: fakeBin, withIntermediateDirectories: true)
+        try? fileManager.createDirectory(at: scripts, withIntermediateDirectories: true)
+    }
+
+    func copyProductionFiles(_ names: [String], executableNames: Set<String> = []) {
+        for name in names {
+            let destination = scripts.appendingPathComponent(name)
+            try? fileManager.copyItem(
+                at: sourceRoot.appendingPathComponent("scripts/\(name)"),
+                to: destination)
+            if executableNames.contains(name) {
+                makeExecutable(destination)
+            }
+        }
+    }
+
+    func installExecutable(_ contents: String, at url: URL) {
+        writeFixture(contents, to: url)
+        makeExecutable(url)
+    }
+
+    func installLocalPreRCEntry(
+        devBundleScript: String?,
+        jqScript: String,
+        bashScript: String? = nil
+    ) {
+        var productionFiles = [
+            "local-pre-rc.sh", "pinned-output-directory.sh",
+            "local-pre-rc-contract.json",
+        ]
+        var executableNames: Set<String> = ["local-pre-rc.sh"]
+        if devBundleScript == nil {
+            productionFiles.append("dev-bundle.sh")
+            executableNames.insert("dev-bundle.sh")
+        }
+        copyProductionFiles(productionFiles, executableNames: executableNames)
+        if let devBundleScript {
+            installExecutable(
+                devBundleScript, at: scripts.appendingPathComponent("dev-bundle.sh"))
+        }
+        installExecutable(
+            "#!/bin/bash\nexit 0\n",
+            at: scripts.appendingPathComponent("check-release-size.sh"))
+        installExecutable(
+            #"""
+            #!/bin/bash
+            if [[ "$1" == "rev-parse" ]]; then
+                echo "$FIXED_COMMIT"
+            fi
+            exit 0
+            """#,
+            at: fakeBin.appendingPathComponent("git"))
+        installExecutable(
+            "#!/bin/bash\necho 15.6\n", at: fakeBin.appendingPathComponent("sw_vers"))
+        installExecutable(
+            "#!/bin/bash\necho arm64\n", at: fakeBin.appendingPathComponent("uname"))
+        installExecutable(
+            "#!/bin/bash\nexit 0\n", at: fakeBin.appendingPathComponent("swift"))
+        installExecutable(
+            "#!/bin/bash\necho arm64\n", at: fakeBin.appendingPathComponent("lipo"))
+        installExecutable(
+            "#!/bin/bash\necho Signature=adhoc\necho 'TeamIdentifier=not set'\n",
+            at: fakeBin.appendingPathComponent("codesign"))
+        installExecutable(jqScript, at: fakeBin.appendingPathComponent("jq"))
+        if let bashScript {
+            installExecutable(bashScript, at: fakeBin.appendingPathComponent("bash"))
+        }
+    }
+
+    func environment(_ overrides: [String: String]) -> [String: String] {
+        var environment = overrides
+        let inheritedPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
+        environment["PATH"] = "\(fakeBin.path):\(inheritedPath)"
+        return environment
+    }
+
+    private func makeExecutable(_ url: URL) {
+        try? fileManager.setAttributes(
+            [.posixPermissions: 0o755], ofItemAtPath: url.path)
+    }
+}
+
+@MainActor
 func runLocalPreRCSuites() {
     suite("本机 pre-RC：公开入口把全部 gate 绑定到同一 clean HEAD") {
         let root = guiTestRepositoryRoot()
@@ -271,10 +366,9 @@ func runLocalPreRCSuites() {
     suite("本机 pre-RC：报告 trap 不得删除替换后目录中的外部报告") {
         withTempDirectory { fixtureRoot in
             let fileManager = FileManager.default
-            let sourceRoot = guiTestRepositoryRoot()
-            let repository = fixtureRoot.appendingPathComponent("repository")
-            let scripts = repository.appendingPathComponent("scripts")
-            let fakeBin = fixtureRoot.appendingPathComponent("fake-bin")
+            let fixture = LocalPreRCScriptFixture(root: fixtureRoot)
+            let repository = fixture.repository
+            let scripts = fixture.scripts
             let externalOutput = fixtureRoot.appendingPathComponent("external-output")
             let movedOutput = repository.appendingPathComponent("original-dist")
             let externalReport = externalOutput.appendingPathComponent(
@@ -282,94 +376,37 @@ func runLocalPreRCSuites() {
             let externalSentinel = Data("external-report-must-survive-trap".utf8)
             let fixedCommit = String(repeating: "a", count: 40)
 
-            try? fileManager.createDirectory(at: scripts, withIntermediateDirectories: true)
-            try? fileManager.createDirectory(at: fakeBin, withIntermediateDirectories: true)
-            try? fileManager.createDirectory(
-                at: externalOutput, withIntermediateDirectories: true)
-            for name in [
-                "local-pre-rc.sh", "pinned-output-directory.sh",
-                "local-pre-rc-contract.json",
-            ] {
-                try? fileManager.copyItem(
-                    at: sourceRoot.appendingPathComponent("scripts/\(name)"),
-                    to: scripts.appendingPathComponent(name))
-            }
-            writeFixture(
-                #"""
-                #!/bin/bash
-                mkdir -p dist/claudi0.app/Contents/MacOS \
-                    dist/claudi0.app/Contents/Resources/bin
-                : > dist/claudi0.app/Contents/MacOS/claudi0-app
-                : > dist/claudi0.app/Contents/Resources/bin/claudi0
-                """#,
-                to: scripts.appendingPathComponent("dev-bundle.sh"))
-            writeFixture(
-                "#!/bin/bash\nexit 0\n",
-                to: scripts.appendingPathComponent(
-                    "check-release-size.sh"))
-            writeFixture(
-                #"""
-                #!/bin/bash
-                if [[ "$1" == "rev-parse" ]]; then
-                    echo "$FIXED_COMMIT"
-                fi
-                exit 0
-                """#,
-                to: fakeBin.appendingPathComponent("git"))
-            writeFixture(
-                "#!/bin/bash\necho 15.6\n",
-                to: fakeBin.appendingPathComponent(
-                    "sw_vers"))
-            writeFixture(
-                "#!/bin/bash\necho arm64\n",
-                to: fakeBin.appendingPathComponent(
-                    "uname"))
-            writeFixture("#!/bin/bash\nexit 0\n", to: fakeBin.appendingPathComponent("swift"))
-            writeFixture("#!/bin/bash\necho arm64\n", to: fakeBin.appendingPathComponent("lipo"))
-            writeFixture(
-                "#!/bin/bash\necho Signature=adhoc\necho 'TeamIdentifier=not set'\n",
-                to: fakeBin.appendingPathComponent("codesign"))
-            writeFixture(
-                #"""
-                #!/bin/bash
-                if [[ " $* " == *" --arg commit_sha "* ]]; then
-                    /bin/mv "$FIXTURE_REPOSITORY/dist" \
-                        "$FIXTURE_REPOSITORY/original-dist"
-                    /bin/ln -s "$EXTERNAL_OUTPUT" "$FIXTURE_REPOSITORY/dist"
-                    echo '{}'
-                fi
-                exit 0
-                """#,
-                to: fakeBin.appendingPathComponent("jq"))
+            fixture.installLocalPreRCEntry(
+                devBundleScript:
+                    #"""
+                    #!/bin/bash
+                    mkdir -p dist/claudi0.app/Contents/MacOS \
+                        dist/claudi0.app/Contents/Resources/bin
+                    : > dist/claudi0.app/Contents/MacOS/claudi0-app
+                    : > dist/claudi0.app/Contents/Resources/bin/claudi0
+                    """#,
+                jqScript:
+                    #"""
+                    #!/bin/bash
+                    if [[ " $* " == *" --arg commit_sha "* ]]; then
+                        /bin/mv "$FIXTURE_REPOSITORY/dist" \
+                            "$FIXTURE_REPOSITORY/original-dist"
+                        /bin/ln -s "$EXTERNAL_OUTPUT" "$FIXTURE_REPOSITORY/dist"
+                        echo '{}'
+                    fi
+                    exit 0
+                    """#)
             writeFixture(externalSentinel, to: externalReport)
 
-            let executableFixtures = [
-                scripts.appendingPathComponent("dev-bundle.sh"),
-                scripts.appendingPathComponent("check-release-size.sh"),
-                fakeBin.appendingPathComponent("git"),
-                fakeBin.appendingPathComponent("sw_vers"),
-                fakeBin.appendingPathComponent("uname"),
-                fakeBin.appendingPathComponent("swift"),
-                fakeBin.appendingPathComponent("lipo"),
-                fakeBin.appendingPathComponent("codesign"),
-                fakeBin.appendingPathComponent("jq"),
-            ]
-            for fixture in executableFixtures {
-                try? fileManager.setAttributes(
-                    [.posixPermissions: 0o755], ofItemAtPath: fixture.path)
-            }
-
-            let inheritedPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
             let result = runTestProcess(
                 executableURL: URL(fileURLWithPath: "/bin/bash"),
                 arguments: [scripts.appendingPathComponent("local-pre-rc.sh").path],
                 currentDirectoryURL: repository,
-                environmentOverrides: [
+                environmentOverrides: fixture.environment([
                     "EXTERNAL_OUTPUT": externalOutput.path,
                     "FIXED_COMMIT": fixedCommit,
                     "FIXTURE_REPOSITORY": repository.path,
-                    "PATH": "\(fakeBin.path):\(inheritedPath)",
-                ])
+                ]))
             expect(
                 result.status == 1
                     && result.output.contains("output directory"),
@@ -389,6 +426,166 @@ func runLocalPreRCSuites() {
                         $0.lastPathComponent.hasPrefix(".local-pre-rc-report.")
                     }),
                 "失败 trap 必须从已钉住的原目录清掉临时报告与未完成的最终报告")
+        }
+    }
+
+    suite("本机 pre-RC：继承错误 identity 仍必须先清理旧报告") {
+        withTempDirectory { fixtureRoot in
+            let fileManager = FileManager.default
+            let fixture = LocalPreRCScriptFixture(root: fixtureRoot)
+            let staleReport = fixture.repository.appendingPathComponent(
+                "dist/local-pre-rc-report.json")
+
+            fixture.installLocalPreRCEntry(
+                devBundleScript: "#!/bin/bash\nexit 0\n",
+                jqScript: "#!/bin/bash\nexit 0\n")
+            writeFixture("stale-success", to: staleReport)
+
+            let result = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [fixture.scripts.appendingPathComponent("local-pre-rc.sh").path],
+                currentDirectoryURL: fixture.repository,
+                environmentOverrides: fixture.environment([
+                    "CLAUDIO_PINNED_OUTPUT_DIRECTORY_IDENTITY": "0:0",
+                    "FIXED_COMMIT": "not-a-canonical-commit",
+                ]))
+            expect(
+                result.status == 1
+                    && result.output.contains(
+                        "current git HEAD is not a canonical 40-character commit SHA"),
+                "公开入口必须忽略继承 identity，并在后续 gate 正常失败：\(result.output)")
+            expect(
+                !fileManager.fileExists(atPath: staleReport.path),
+                "即使调用环境带错误 identity，也必须先删除旧成功报告")
+        }
+    }
+
+    suite("本机 pre-RC：跨 gate 替换普通目录必须保留首次身份") {
+        withTempDirectory { fixtureRoot in
+            let fileManager = FileManager.default
+            let fixture = LocalPreRCScriptFixture(root: fixtureRoot)
+            let repository = fixture.repository
+            let scripts = fixture.scripts
+            let movedApp = repository.appendingPathComponent(
+                "original-dist/claudi0.app/Contents/MacOS/claudi0-app")
+            let replacementSentinel = repository.appendingPathComponent(
+                "dist/replacement-sentinel")
+            let releaseSizeMarker = fixtureRoot.appendingPathComponent("release-size-ran")
+            let sentinel = Data("replacement-directory-must-remain-untouched".utf8)
+            let fixedCommit = String(repeating: "b", count: 40)
+
+            fixture.installLocalPreRCEntry(
+                devBundleScript:
+                    #"""
+                    #!/bin/bash
+                    mkdir -p dist/claudi0.app/Contents/MacOS \
+                        dist/claudi0.app/Contents/Resources/bin
+                    : > dist/claudi0.app/Contents/MacOS/claudi0-app
+                    : > dist/claudi0.app/Contents/Resources/bin/claudi0
+                    """#,
+                jqScript:
+                    #"""
+                    #!/bin/bash
+                    if [[ " $* " == *" --arg commit_sha "* ]]; then
+                        echo '{}'
+                    fi
+                    exit 0
+                    """#,
+                bashScript:
+                    #"""
+                    #!/bin/bash
+                    if [[ "${1##*/}" == "dev-bundle.sh" ]]; then
+                        /bin/bash "$@" || exit $?
+                        /bin/mv "$FIXTURE_REPOSITORY/dist" \
+                            "$FIXTURE_REPOSITORY/original-dist"
+                        /bin/mkdir "$FIXTURE_REPOSITORY/dist"
+                        /usr/bin/printf '%s' "$REPLACEMENT_SENTINEL_CONTENT" \
+                            > "$REPLACEMENT_SENTINEL"
+                        exit 0
+                    fi
+                    if [[ "${1##*/}" == "check-release-size.sh" ]]; then
+                        /usr/bin/printf 'replacement-output-was-used' \
+                            > "$REPLACEMENT_SENTINEL"
+                        : > "$RELEASE_SIZE_MARKER"
+                        exit 0
+                    fi
+                    exec /bin/bash "$@"
+                    """#)
+
+            let result = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [scripts.appendingPathComponent("local-pre-rc.sh").path],
+                currentDirectoryURL: repository,
+                environmentOverrides: fixture.environment([
+                    "FIXED_COMMIT": fixedCommit,
+                    "FIXTURE_REPOSITORY": repository.path,
+                    "REPLACEMENT_SENTINEL": replacementSentinel.path,
+                    "REPLACEMENT_SENTINEL_CONTENT": String(
+                        decoding: sentinel, as: UTF8.self),
+                    "RELEASE_SIZE_MARKER": releaseSizeMarker.path,
+                ]))
+            expect(
+                result.status == 1
+                    && result.output.contains("output directory changed after validation"),
+                "跨 gate 普通目录替换必须在下一项输出操作前失败关闭：\(result.output)")
+            expect(
+                (try? Data(contentsOf: replacementSentinel)) == sentinel,
+                "下一项 gate 不得改写重新创建的 dist 中的哨兵")
+            expect(
+                !fileManager.fileExists(atPath: releaseSizeMarker.path),
+                "身份不匹配时 release-size gate 不得开始执行")
+            expect(
+                fileManager.fileExists(atPath: movedApp.path),
+                "已完成的 dev-bundle 必须留在首次钉住的输出目录对象")
+        }
+    }
+
+    suite("本机 pre-RC：嵌套 dev-bundle 必须继承首次身份") {
+        withTempDirectory { fixtureRoot in
+            let fixture = LocalPreRCScriptFixture(root: fixtureRoot)
+            let repository = fixture.repository
+            let scripts = fixture.scripts
+            let replacementAppSentinel = repository.appendingPathComponent(
+                "dist/claudi0.app/Contents/Info.plist")
+            let sentinel = Data("replacement-app-must-remain-untouched".utf8)
+            let fixedCommit = String(repeating: "c", count: 40)
+
+            fixture.installLocalPreRCEntry(
+                devBundleScript: nil,
+                jqScript:
+                    #"""
+                    #!/bin/bash
+                    if [[ "$1" == "empty" && "$2" == *"Localizable.xcstrings" ]]; then
+                        /bin/mv "$FIXTURE_REPOSITORY/dist" \
+                            "$FIXTURE_REPOSITORY/original-dist"
+                        /bin/mkdir -p "${REPLACEMENT_APP_SENTINEL%/*}"
+                        /usr/bin/printf '%s' "$REPLACEMENT_SENTINEL_CONTENT" \
+                            > "$REPLACEMENT_APP_SENTINEL"
+                    fi
+                    if [[ " $* " == *" --arg commit_sha "* ]]; then
+                        echo '{}'
+                    fi
+                    exit 0
+                    """#)
+
+            let result = runTestProcess(
+                executableURL: URL(fileURLWithPath: "/bin/bash"),
+                arguments: [scripts.appendingPathComponent("local-pre-rc.sh").path],
+                currentDirectoryURL: repository,
+                environmentOverrides: fixture.environment([
+                    "FIXED_COMMIT": fixedCommit,
+                    "FIXTURE_REPOSITORY": repository.path,
+                    "REPLACEMENT_APP_SENTINEL": replacementAppSentinel.path,
+                    "REPLACEMENT_SENTINEL_CONTENT": String(
+                        decoding: sentinel, as: UTF8.self),
+                ]))
+            expect(
+                result.status == 1
+                    && result.output.contains("output directory changed after validation"),
+                "嵌套 dev-bundle 必须在清理替换目录前拒绝新的 identity：\(result.output)")
+            expect(
+                (try? Data(contentsOf: replacementAppSentinel)) == sentinel,
+                "嵌套 dev-bundle 不得删除或覆盖替换目录中的 app 哨兵")
         }
     }
 
@@ -438,10 +635,10 @@ func runLocalPreRCSuites() {
     suite("dev-bundle：进入 dist 后替换父路径仍不写仓库外 app") {
         withTempDirectory { fixtureRoot in
             let fileManager = FileManager.default
-            let sourceRoot = guiTestRepositoryRoot()
-            let repository = fixtureRoot.appendingPathComponent("repository")
-            let scripts = repository.appendingPathComponent("scripts")
-            let fakeBin = fixtureRoot.appendingPathComponent("fake-bin")
+            let fixture = LocalPreRCScriptFixture(root: fixtureRoot)
+            let repository = fixture.repository
+            let scripts = fixture.scripts
+            let fakeBin = fixture.fakeBin
             let guiBin = fixtureRoot.appendingPathComponent("gui-bin")
             let helperBin = fixtureRoot.appendingPathComponent("helper-bin")
             let externalOutput = fixtureRoot.appendingPathComponent("external-output")
@@ -454,8 +651,6 @@ func runLocalPreRCSuites() {
             let swapMarker = fixtureRoot.appendingPathComponent("did-swap-output")
             let sentinel = Data("external-app-must-survive-late-swap".utf8)
 
-            try? fileManager.createDirectory(at: scripts, withIntermediateDirectories: true)
-            try? fileManager.createDirectory(at: fakeBin, withIntermediateDirectories: true)
             try? fileManager.createDirectory(at: guiBin, withIntermediateDirectories: true)
             try? fileManager.createDirectory(at: helperBin, withIntermediateDirectories: true)
             try? fileManager.createDirectory(
@@ -467,29 +662,27 @@ func runLocalPreRCSuites() {
             try? fileManager.createDirectory(
                 at: repository.appendingPathComponent("packs"),
                 withIntermediateDirectories: true)
-            try? fileManager.copyItem(
-                at: sourceRoot.appendingPathComponent("scripts/dev-bundle.sh"),
-                to: scripts.appendingPathComponent("dev-bundle.sh"))
-            try? fileManager.copyItem(
-                at: sourceRoot.appendingPathComponent("scripts/pinned-output-directory.sh"),
-                to: scripts.appendingPathComponent("pinned-output-directory.sh"))
+            fixture.copyProductionFiles(
+                ["dev-bundle.sh", "pinned-output-directory.sh"],
+                executableNames: ["dev-bundle.sh"])
 
             writeFixture("gui-binary", to: guiBin.appendingPathComponent("ClaudioGUI"))
-            writeFixture(
-                "#!/bin/bash\necho 0.0.0-dev\n", to: helperBin.appendingPathComponent("claudio"))
-            writeFixture(
+            fixture.installExecutable(
+                "#!/bin/bash\necho 0.0.0-dev\n",
+                at: helperBin.appendingPathComponent("claudio"))
+            fixture.installExecutable(
                 "#!/bin/bash\nexit 0\n",
-                to: scripts.appendingPathComponent(
+                at: scripts.appendingPathComponent(
                     "copy-bundled-packs.sh"))
-            writeFixture(
+            fixture.installExecutable(
                 "#!/bin/bash\nexit 0\n",
-                to: scripts.appendingPathComponent(
+                at: scripts.appendingPathComponent(
                     "check-release-size.sh"))
             writeFixture(
                 Data("fixture-icon".utf8),
                 to: repository.appendingPathComponent("assets/branding/claudi0.icns"))
             writeFixture(sentinel, to: externalAppSentinel)
-            writeFixture(
+            fixture.installExecutable(
                 #"""
                 #!/bin/bash
                 if [[ ! -e "$SWAP_MARKER" ]]; then
@@ -507,43 +700,27 @@ func runLocalPreRCSuites() {
                 fi
                 exit 0
                 """#,
-                to: fakeBin.appendingPathComponent("swift"))
-            writeFixture("#!/bin/bash\nexit 0\n", to: fakeBin.appendingPathComponent("strip"))
-            writeFixture(
-                "#!/bin/bash\nexit 0\n", to: fakeBin.appendingPathComponent("codesign"))
-            writeFixture(
+                at: fakeBin.appendingPathComponent("swift"))
+            fixture.installExecutable(
+                "#!/bin/bash\nexit 0\n", at: fakeBin.appendingPathComponent("strip"))
+            fixture.installExecutable(
+                "#!/bin/bash\nexit 0\n", at: fakeBin.appendingPathComponent("codesign"))
+            fixture.installExecutable(
                 "#!/bin/bash\necho arm64\n",
-                to: fakeBin.appendingPathComponent(
+                at: fakeBin.appendingPathComponent(
                     "uname"))
 
-            let executableFixtures = [
-                scripts.appendingPathComponent("dev-bundle.sh"),
-                scripts.appendingPathComponent("copy-bundled-packs.sh"),
-                scripts.appendingPathComponent("check-release-size.sh"),
-                helperBin.appendingPathComponent("claudio"),
-                fakeBin.appendingPathComponent("swift"),
-                fakeBin.appendingPathComponent("strip"),
-                fakeBin.appendingPathComponent("codesign"),
-                fakeBin.appendingPathComponent("uname"),
-            ]
-            for fixture in executableFixtures {
-                try? fileManager.setAttributes(
-                    [.posixPermissions: 0o755], ofItemAtPath: fixture.path)
-            }
-
-            let inheritedPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin"
             let result = runTestProcess(
                 executableURL: URL(fileURLWithPath: "/bin/bash"),
                 arguments: [scripts.appendingPathComponent("dev-bundle.sh").path],
                 currentDirectoryURL: repository,
-                environmentOverrides: [
+                environmentOverrides: fixture.environment([
                     "EXTERNAL_OUTPUT": externalOutput.path,
                     "FIXTURE_REPOSITORY": repository.path,
                     "GUI_BIN": guiBin.path,
                     "HELPER_BIN": helperBin.path,
-                    "PATH": "\(fakeBin.path):\(inheritedPath)",
                     "SWAP_MARKER": swapMarker.path,
-                ])
+                ]))
             expect(
                 result.status == 1
                     && result.output.contains("output directory changed after validation"),

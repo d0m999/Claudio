@@ -31,6 +31,7 @@ claudio_with_pinned_output_directory() {
 
     local candidate
     local command_status
+    local expected_identity="${CLAUDIO_PINNED_OUTPUT_DIRECTORY_IDENTITY:-}"
     local pinned_identity
     local pinned_physical
     local repository_root_physical
@@ -65,6 +66,10 @@ claudio_with_pinned_output_directory() {
             echo "❌ cannot read pinned output directory identity: $relative_output" >&2
             return 1
         }
+        if [[ -n "$expected_identity" && "$pinned_identity" != "$expected_identity" ]]; then
+            echo "❌ output directory changed after validation: $candidate" >&2
+            return 1
+        fi
 
         "$@"
         command_status=$?
