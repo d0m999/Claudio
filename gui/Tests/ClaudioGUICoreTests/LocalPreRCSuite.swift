@@ -1,5 +1,8 @@
 import Foundation
 
+private let pinnedOutputIdentityEnvironmentKey =
+    "CLAUDIO_PINNED_OUTPUT_DIRECTORY_IDENTITY"
+
 @MainActor
 private struct LocalPreRCScriptFixture {
     let fakeBin: URL
@@ -288,7 +291,8 @@ func runLocalPreRCSuites() {
                     "EXTERNAL_OUTPUT": externalOutput.path,
                     "FIXTURE_REPOSITORY": repository.path,
                     "PINNED_OUTPUT_HELPER": helper.path,
-                ])
+                ],
+                environmentKeysToRemove: [pinnedOutputIdentityEnvironmentKey])
             expect(
                 result.status == 1
                     && result.output.contains("output directory changed after validation"),
@@ -349,7 +353,8 @@ func runLocalPreRCSuites() {
                     "FIXTURE_REPOSITORY": repository.path,
                     "PINNED_OUTPUT_HELPER": helper.path,
                     "REPLACEMENT_SENTINEL": String(decoding: replacementSentinel, as: UTF8.self),
-                ])
+                ],
+                environmentKeysToRemove: [pinnedOutputIdentityEnvironmentKey])
             expect(
                 result.status == 1
                     && result.output.contains("output directory changed after validation"),
@@ -621,7 +626,8 @@ func runLocalPreRCSuites() {
             let result = runTestProcess(
                 executableURL: URL(fileURLWithPath: "/bin/bash"),
                 arguments: [devBundle.path],
-                currentDirectoryURL: repository)
+                currentDirectoryURL: repository,
+                environmentKeysToRemove: [pinnedOutputIdentityEnvironmentKey])
             expect(
                 result.status == 1
                     && result.output.contains("output directory must not be a symbolic link"),
@@ -720,7 +726,8 @@ func runLocalPreRCSuites() {
                     "GUI_BIN": guiBin.path,
                     "HELPER_BIN": helperBin.path,
                     "SWAP_MARKER": swapMarker.path,
-                ]))
+                ]),
+                environmentKeysToRemove: [pinnedOutputIdentityEnvironmentKey])
             expect(
                 result.status == 1
                     && result.output.contains("output directory changed after validation"),

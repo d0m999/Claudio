@@ -17,13 +17,17 @@ func runTestProcess(
     executableURL: URL,
     arguments: [String],
     currentDirectoryURL: URL? = nil,
-    environmentOverrides: [String: String] = [:]
+    environmentOverrides: [String: String] = [:],
+    environmentKeysToRemove: Set<String> = []
 ) -> TestProcessResult {
     let process = Process()
     process.executableURL = executableURL
     process.arguments = arguments
     process.currentDirectoryURL = currentDirectoryURL
     var environment = ProcessInfo.processInfo.environment
+    for key in environmentKeysToRemove {
+        environment.removeValue(forKey: key)
+    }
     environment.merge(environmentOverrides) { _, new in new }
     process.environment = environment
     let pipe = Pipe()
