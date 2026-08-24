@@ -151,6 +151,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请向 WorkBuddy 提交一次提示词以确认连接" } }
       }
     },
+    "host.workbuddy.conflict-detail" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A WorkBuddy hook conflicts with a Claudio entry" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "检测到与 Claudio 条目冲突的 WorkBuddy hook" } }
+      }
+    },
     "event.task-start" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Task start" } },

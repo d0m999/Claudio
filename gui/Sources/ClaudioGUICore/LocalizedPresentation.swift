@@ -82,8 +82,13 @@ private func localizedHostDetail(
     case .notConnected:
         return nil
     case .needsAttention:
-        // This reason is supplied by the host integration manager and is retained as domain
-        // data. It must not be guessed or translated by the GUI.
+        if row.host == .workBuddy,
+            row.detailText == "检测到与 Claudio 条目冲突的 WorkBuddy hook"
+        {
+            return l10n.text(.hostWorkBuddyConflictDetail)
+        }
+        // Unknown reasons are supplied by the host integration manager and retained as domain
+        // data. The GUI localizes only fixed product copy it owns; it never guesses at literals.
         return row.detailText
     }
 }

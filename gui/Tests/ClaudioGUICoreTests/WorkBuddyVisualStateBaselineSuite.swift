@@ -249,7 +249,7 @@ func runWorkBuddyVisualStateBaselineSuites() {
         let conflict = WorkBuddyLocalizedExpectation(
             englishReadiness: "2/5 needs attention",
             chineseReadiness: "2/5 需要处理",
-            englishDetail: "检测到与 Claudio 条目冲突的 WorkBuddy hook",
+            englishDetail: "A WorkBuddy hook conflicts with a Claudio entry",
             chineseDetail: "检测到与 Claudio 条目冲突的 WorkBuddy hook",
             englishImplementedCellTitles: ["Needs attention", "Needs attention"],
             chineseImplementedCellTitles: ["需要处理", "需要处理"],
@@ -341,19 +341,29 @@ func runWorkBuddyVisualStateBaselineSuites() {
                     "\(scenario.id)/\(event) 双语限定语必须明确当前版本尚未实现")
             }
         }
+
+        let literalDiagnostic = "WorkBuddy diagnostic literal 42"
+        let literalRow = HostSourceRowPresentation(
+            host: .workBuddy,
+            title: "WorkBuddy",
+            readinessText: "2/5 需要处理",
+            detailText: literalDiagnostic,
+            status: .needsAttention,
+            supportedCount: 2,
+            totalCount: 5)
+        expect(
+            localizedHostSourceRow(literalRow, language: .english).detailText == literalDiagnostic
+                && localizedHostSourceRow(literalRow, language: .zhHans).detailText
+                    == literalDiagnostic,
+            "未知或外部领域诊断必须保持 literal，GUI 不得猜测或吞掉原文")
     }
 
-    suite("WorkBuddy pre-RC wiring：七态进入生产详情窗 gallery，连接路径没有自动试听 seam") {
+    suite("WorkBuddy pre-RC wiring：七态进入生产详情窗双语 gallery") {
         let root = guiTestRepositoryRoot()
         let galleryURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/StateGalleryView.swift")
-        let bridgeURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioGUICore/HostIntegrationManagerBridge.swift")
-        guard
-            let gallery = try? String(contentsOf: galleryURL, encoding: .utf8),
-            let bridge = try? String(contentsOf: bridgeURL, encoding: .utf8)
-        else {
-            expect(false, "读不到 WorkBuddy state gallery 或 manager bridge wiring")
+        guard let gallery = try? String(contentsOf: galleryURL, encoding: .utf8) else {
+            expect(false, "读不到 WorkBuddy state gallery wiring")
             return
         }
 
@@ -362,15 +372,229 @@ func runWorkBuddyVisualStateBaselineSuites() {
                 && gallery.contains("HostIntegrationStateFrame(")
                 && gallery.contains("state: scenario.state"),
             "七个 WorkBuddy fixture 必须经生产 IntegrationsWindowView 进入双语 state gallery")
+    }
 
-        let bridgeCode = strippingComments(bridge)
-        expect(bridgeCode.unmodeledConstructs.isEmpty, "bridge source scanner 必须理解全部源码构造")
-        let code = bridgeCode.codeWithoutStringLiterals
+    suite("WorkBuddy pre-RC wiring：Inspector destructive 动作消费唯一双语标题投影") {
+        let root = guiTestRepositoryRoot()
+        let viewURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift")
+        guard let view = try? String(contentsOf: viewURL, encoding: .utf8) else {
+            expect(false, "读不到 IntegrationsWindowView production wiring")
+            return
+        }
+
+        let strippedView = strippingComments(view)
+        expect(strippedView.unmodeledConstructs.isEmpty, "IntegrationsWindowView scanner 必须理解源码")
+        let code = strippedView.codeWithoutStringLiterals
+        guard
+            let disconnectStart = code.range(of: ".confirmationDialog(")?.lowerBound,
+            let clearStart = code.range(
+                of: ".confirmationDialog(",
+                range: code.index(after: disconnectStart)..<code.endIndex
+            )?.lowerBound,
+            let confirmationsEnd = code.range(
+                of: ".onReceive(", range: clearStart..<code.endIndex
+            )?.lowerBound,
+            let start = code.range(of: "private func inspectorButton(")?.lowerBound,
+            let end = code.range(of: "private func perform(", range: start..<code.endIndex)?
+                .lowerBound,
+            disconnectStart < clearStart,
+            clearStart < confirmationsEnd,
+            start < end
+        else {
+            expect(false, "无法定位 production confirmation/inspectorButton wiring")
+            return
+        }
+        let destructiveConfirmations = [
+            (
+                "Disconnect", ".disconnect(host)",
+                String(code[disconnectStart..<clearStart])
+            ),
+            (
+                "Clear Receipt History", ".clearReceiptHistory(host)",
+                String(code[clearStart..<confirmationsEnd])
+            ),
+        ]
+        let inspectorButton = String(code[start..<end])
+
+        for (name, expectedAction, confirmation) in destructiveConfirmations {
+            expect(
+                confirmation.contains("let title = localizedInspectorActionTitle("),
+                "\(name) confirmation 必须生成共享 Inspector 动作标题")
+            expect(
+                confirmation.contains("\(expectedAction), hostStatus: selectedHostStatus)"),
+                "\(name) confirmation 必须把准确 action 交给共享标题投影")
+            expect(
+                confirmation.contains("Button(title, role: .destructive)"),
+                "\(name) confirmation 的可见标题必须消费共享投影")
+            expect(
+                confirmation.contains(".accessibilityLabel(title)"),
+                "\(name) confirmation 的 accessibility label 必须消费同一投影")
+        }
         expect(
-            !code.contains("NSSound")
-                && !code.contains("AVAudio")
-                && !code.contains("previewPlayer")
-                && !code.contains(".play("),
-            "Host Connect/Repair/Disconnect bridge 不得获得播放或自动试听能力")
+            inspectorButton.components(separatedBy: "localizedInspectorActionTitle(").count - 1
+                == 1,
+            "全部 Inspector 分支必须只生成一次共享标题，不得各自复制 localization")
+        expect(
+            !inspectorButton.contains(".actionDisconnect,")
+                && !inspectorButton.contains(".actionClearReceiptHistory,"),
+            "Disconnect/Clear Receipt History 不得绕过共享标题投影直接格式化")
+        expect(
+            inspectorButton.components(separatedBy: "Button(title, role: .destructive)").count
+                - 1 == 2,
+            "两个 production Inspector destructive 按钮必须分别消费共享标题")
+        expect(
+            inspectorButton.components(separatedBy: ".accessibilityLabel(title)").count - 1
+                == 3,
+            "两个 destructive 分支与普通分支必须分别消费共享 accessibility label")
+    }
+
+    suite("WorkBuddy pre-RC wiring：完整生产动作链不获得自动试听能力") {
+        struct Route {
+            let name: String
+            let path: String
+            let start: String
+            let end: String
+            let forwarding: String
+            let mutationAnchor: String
+        }
+
+        let routes = [
+            Route(
+                name: "View Disconnect confirmation",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
+                start: "pendingDisconnectHost.map {",
+                end: "pendingReceiptHistoryHost.map {",
+                forwarding: "perform(.disconnect(host))",
+                mutationAnchor: "perform(.disconnect(host))"),
+            Route(
+                name: "View Clear confirmation",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
+                start: "pendingReceiptHistoryHost.map {",
+                end: ".onReceive(",
+                forwarding: "perform(.clearReceiptHistory(host))",
+                mutationAnchor: "perform(.clearReceiptHistory(host))"),
+            Route(
+                name: "View Recovery button",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
+                start: "private func recoveryButton(",
+                end: "private func feedbackRow(",
+                forwarding: "performRecovery(action)",
+                mutationAnchor: "performRecovery(action)"),
+            Route(
+                name: "View Inspector button",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
+                start: "private func inspectorButton(",
+                end: "private func perform(",
+                forwarding: "perform(action)",
+                mutationAnchor: "perform(action)"),
+            Route(
+                name: "View Inspector forwarding",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
+                start: "private func perform(",
+                end: "private func performRecovery(",
+                forwarding: "model.perform(action)",
+                mutationAnchor: "model.perform(action)"),
+            Route(
+                name: "View Recovery forwarding",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
+                start: "private func performRecovery(",
+                end: "private func announceFeedbackIfNeeded(",
+                forwarding: "model.performRecovery(action)",
+                mutationAnchor: "model.performRecovery(action)"),
+            Route(
+                name: "Model Inspector action",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift",
+                start: "func perform(_ action:",
+                end: "func performRecovery(",
+                forwarding: "actionHandler(action)",
+                mutationAnchor: "actionHandler(action)"),
+            Route(
+                name: "Model Recovery Connect",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift",
+                start: "case .connect(let host):",
+                end: "case .upgrade(let host), .repair(let host):",
+                forwarding: "await perform(.connect(host))",
+                mutationAnchor: "await perform(.connect(host))"),
+            Route(
+                name: "Model Recovery Repair",
+                path: "gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift",
+                start: "case .upgrade(let host), .repair(let host):",
+                end: "case .redetect:",
+                forwarding: "await perform(.repair(host))",
+                mutationAnchor: "await perform(.repair(host))"),
+            Route(
+                name: "MenuBar composition",
+                path: "gui/Sources/ClaudioGUI/MenuBarController.swift",
+                start: "actionHandler: IntegrationsWindowActionHandler",
+                end: "recoveryHandler: IntegrationsWindowRecoveryHandler",
+                forwarding: "integrationActionProvider(action)",
+                mutationAnchor: "integrationActionProvider(action)"),
+            Route(
+                name: "App provider",
+                path: "gui/Sources/ClaudioGUI/ClaudioGUIApp.swift",
+                start: "let integrationActionProvider = HostIntegrationActionProvider",
+                end: "menuBarController = MenuBarController",
+                forwarding: "integrationBridge.perform(action)",
+                mutationAnchor: "integrationBridge.perform(action)"),
+            Route(
+                name: "Manager bridge",
+                path: "gui/Sources/ClaudioGUICore/HostIntegrationManagerBridge.swift",
+                start: "public func perform(",
+                end: "private func presentationState(",
+                forwarding: "manager.connect(requestedHost)",
+                mutationAnchor: "manager.connect(requestedHost)"),
+        ]
+        let playbackTokens = [
+            "NSSound", "AVAudio", "AudioPreviewPlaying", "previewPlayer", "audioPlayer",
+            "soundPlayer", "audioEnvironment", ".play(", "playSound(",
+        ]
+        let root = guiTestRepositoryRoot()
+
+        @MainActor
+        func routeBody(_ source: String, route: Route) -> String? {
+            let stripped = strippingComments(source)
+            expect(
+                stripped.unmodeledConstructs.isEmpty,
+                "\(route.name) action-route scanner 必须理解全部源码构造")
+            let code = stripped.codeWithoutStringLiterals
+            guard
+                let start = code.range(of: route.start)?.lowerBound,
+                let end = code.range(of: route.end, range: start..<code.endIndex)?.lowerBound,
+                start < end
+            else {
+                expect(false, "无法定位 \(route.name) production action route")
+                return nil
+            }
+            return String(code[start..<end])
+        }
+
+        for route in routes {
+            let sourceURL = root.appendingPathComponent(route.path)
+            guard let source = try? String(contentsOf: sourceURL, encoding: .utf8),
+                let body = routeBody(source, route: route)
+            else {
+                expect(false, "读不到 \(route.name) production action route")
+                continue
+            }
+            let violations = playbackTokens.filter(body.contains)
+            expect(
+                body.contains(route.forwarding),
+                "\(route.name) 必须保持真实 Inspector action 转发链")
+            expect(
+                violations.isEmpty,
+                "\(route.name) 的 Connect/Repair/Disconnect 路由不得获得播放依赖：\(violations)")
+
+            guard let insertion = source.range(of: route.mutationAnchor)?.lowerBound else {
+                expect(false, "无法构造 \(route.name) no-preview mutation")
+                continue
+            }
+            var mutated = source
+            mutated.insert(contentsOf: "\nNSSound.beep()\n", at: insertion)
+            guard let mutatedBody = routeBody(mutated, route: route) else { continue }
+            expect(
+                playbackTokens.filter(mutatedBody.contains) == ["NSSound"],
+                "\(route.name) 守卫必须能抓到作用域内注入的播放调用")
+        }
     }
 }

@@ -142,11 +142,13 @@ struct IntegrationsWindowView: View {
             titleVisibility: .visible,
             presenting: pendingDisconnectHost
         ) { host in
-            Button(l10n.format(.actionDisconnect, host.displayName), role: .destructive) {
+            let title = localizedInspectorActionTitle(
+                .disconnect(host), hostStatus: selectedHostStatus)
+            Button(title, role: .destructive) {
                 pendingDisconnectHost = nil
                 perform(.disconnect(host))
             }
-            .accessibilityLabel(l10n.format(.integrationsDisconnectConfirm, host.displayName))
+            .accessibilityLabel(title)
             .accessibilityHint(l10n.text(.integrationsDisconnectHint))
             .accessibilityIdentifier("integrations.confirm-disconnect.\(host.rawValue)")
             Button(l10n.text(.commonCancel), role: .cancel) {
@@ -167,13 +169,13 @@ struct IntegrationsWindowView: View {
             titleVisibility: .visible,
             presenting: pendingReceiptHistoryHost
         ) { host in
-            Button(l10n.format(.actionClearReceiptHistory, host.displayName), role: .destructive) {
+            let title = localizedInspectorActionTitle(
+                .clearReceiptHistory(host), hostStatus: selectedHostStatus)
+            Button(title, role: .destructive) {
                 pendingReceiptHistoryHost = nil
                 perform(.clearReceiptHistory(host))
             }
-            .accessibilityLabel(
-                l10n.format(.integrationsClearReceiptHistoryConfirm, host.displayName)
-            )
+            .accessibilityLabel(title)
             .accessibilityHint(l10n.text(.actionClearReceiptHistoryHint))
             .accessibilityIdentifier("integrations.confirm-clear-receipts.\(host.rawValue)")
             Button(l10n.text(.commonCancel), role: .cancel) {
@@ -666,37 +668,36 @@ struct IntegrationsWindowView: View {
 
     @ViewBuilder
     private func inspectorButton(_ action: IntegrationsWindowInspectorAction) -> some View {
+        let title = localizedInspectorActionTitle(action, hostStatus: selectedHostStatus)
         switch action {
         case .disconnect(let host):
-            Button(l10n.format(.actionDisconnect, host.displayName), role: .destructive) {
+            Button(title, role: .destructive) {
                 pendingDisconnectHost = host
             }
             .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .inspectorAction(action))
             .disabled(model.isPerformingAction)
-            .accessibilityLabel(l10n.format(.actionDisconnect, host.displayName))
+            .accessibilityLabel(title)
             .accessibilityHint(l10n.text(.actionDisconnectHint))
             .accessibilityIdentifier("integrations.disconnect.\(host.rawValue)")
         case .clearReceiptHistory(let host):
-            Button(l10n.format(.actionClearReceiptHistory, host.displayName), role: .destructive) {
+            Button(title, role: .destructive) {
                 pendingReceiptHistoryHost = host
             }
             .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .inspectorAction(action))
             .disabled(model.isPerformingAction)
-            .accessibilityLabel(l10n.format(.actionClearReceiptHistory, host.displayName))
+            .accessibilityLabel(title)
             .accessibilityHint(l10n.text(.actionClearReceiptHistoryHint))
             .accessibilityIdentifier("integrations.clear-receipts.\(host.rawValue)")
         default:
-            Button(localizedInspectorActionTitle(action, hostStatus: selectedHostStatus)) {
+            Button(title) {
                 perform(action)
             }
             .frame(maxWidth: .infinity, minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .inspectorAction(action))
             .disabled(model.isPerformingAction)
-            .accessibilityLabel(
-                localizedInspectorActionTitle(action, hostStatus: selectedHostStatus)
-            )
+            .accessibilityLabel(title)
             .accessibilityHint(inspectorActionAccessibilityHint(action))
             .accessibilityIdentifier("integrations.action.\(actionIdentifier(action))")
         }
