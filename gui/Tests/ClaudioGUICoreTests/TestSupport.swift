@@ -748,7 +748,7 @@ func withTempDirectory<T>(_ body: (URL) throws -> T) rethrows -> T {
 /// sync overload above stays for every non-async suite; an async closure at the call site
 /// selects this one.
 @MainActor
-func withTempDirectory<T>(_ body: (URL) async throws -> T) async rethrows -> T {
+func withTempDirectory<T: Sendable>(_ body: (URL) async throws -> T) async rethrows -> T {
     let directory = FileManager.default.temporaryDirectory
         .appendingPathComponent("claudio-gui-tests-\(UUID().uuidString)", isDirectory: true)
     try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

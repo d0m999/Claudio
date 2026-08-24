@@ -165,9 +165,10 @@ func runPanelFocusOrderSuites() {
         // +1 masterVolume, +3 cards, +1 管理声音包, +1 退出应用。3× events
         // since PLAN-SOUND-MANAGER.md §2.5/T2 grew each row from 2 slots (action, mute) to 3
         // (sound, action, mute).
+        let expectedCount = Event.allCases.count * 3 + 6
         expect(
-            order.count == Event.allCases.count * 3 + 1 + 3 + 1 + 1,
-            "expected \(Event.allCases.count * 3 + 1 + 3 + 1 + 1) items, got \(order.count)")
+            order.count == expectedCount,
+            "expected \(expectedCount) items, got \(order.count)")
     }
 
     suite("panelFocusOrder: onboarding vs operational produce structurally different orders") {
