@@ -60,8 +60,8 @@ func runPanelFocusOrderSuites() {
         )
     }
 
-    suite("panelFocusOrder: production registry 顺序领先五事件与声音控制") {
-        let panelHostSources: [HostID] = [.claudeCode, .codex, .workBuddy]
+    suite("panelFocusOrder: production 视觉顺序领先五事件与声音控制") {
+        let panelHostSources: [HostID] = [.codex, .claudeCode, .workBuddy]
         let order = panelFocusOrder(
             .operational(
                 events: Event.allCases,
@@ -70,7 +70,7 @@ func runPanelFocusOrderSuites() {
                 hostSources: panelHostSources))
         let expected: [PanelFocusTarget] =
             [
-                .hostSource(.claudeCode), .hostSource(.codex), .hostSource(.workBuddy),
+                .hostSource(.codex), .hostSource(.claudeCode), .hostSource(.workBuddy),
             ]
             + Event.allCases.flatMap {
                 [.eventSound($0), .eventAction($0), .eventMute($0)]
@@ -83,13 +83,13 @@ func runPanelFocusOrderSuites() {
                 .operational(
                     events: [], packCardIDs: [], hasMasterVolume: false,
                     hasConfigFailureNotice: true, hostSources: panelHostSources))
-                == .hostSource(.claudeCode),
+                == .hostSource(.codex),
             "宿主行必须领先 config 修复卡；一侧坏掉也不能让焦点跳过来源区")
         expect(
             panelOpeningFocus(
                 rows: [], packCardIDs: [], hasMasterVolume: false,
-                hostSources: panelHostSources) == .hostSource(.claudeCode),
-            "production opening focus 必须落 Claude 来源行")
+                hostSources: panelHostSources) == .hostSource(.codex),
+            "production opening focus 必须落 Codex 来源行")
     }
 
     suite(

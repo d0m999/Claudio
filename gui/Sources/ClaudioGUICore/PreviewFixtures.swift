@@ -21,7 +21,7 @@ import Foundation
 /// The **single canonical catalog** of concrete sample values for every case of every per-feature
 /// state family (ENGINEERING.md T14 D1, plus PLAN-MASTER-VOLUME.md D33/D38's ``MasterVolumeState``):
 /// ``OnboardingState``, ``OnboardingActionState``, ``DropZoneState``, ``EventRow``/``CoverageState``,
-/// ``PackCard``/``PackCardState``, ``MasterVolumeState``，以及双宿主集成场景。
+/// ``PackCard``/``PackCardState``、``MasterVolumeState``，以及全部产品宿主集成场景。
 ///
 /// 权威清单是 ``assertExhaustive()`` 实际遍历的那几个数组 —— **不是**这段散文里的族数。原文写死了
 /// 「all five」，而它在 T17 加进 `OnboardingActionState` 那天就已经数错，阶段 D 又添一族
@@ -283,9 +283,9 @@ public enum PreviewFixtures {
             ).description),
     ]
 
-    // MARK: - Host integrations (Claude Code + Codex)
+    // MARK: - Host integrations (all products)
 
-    /// 双宿主状态展柜的一帧。`state` 同时携带宿主快照与 Core 合成的可听矩阵，
+    /// 全部产品宿主状态展柜的一帧。`state` 同时携带宿主快照与 Core 合成的可听矩阵，
     /// 因此宿主卡、矩阵格和检查器不会在预览中分裂成三套事实。
     public struct HostIntegrationScenario: Identifiable, Sendable, Equatable {
         public let id: String
@@ -303,12 +303,12 @@ public enum PreviewFixtures {
         }
     }
 
-    /// 双宿主产品态的最小验收名册。每帧都通过 ``hostIntegrationScenario`` 调用
+    /// 全部产品宿主态的最小验收名册。每帧都通过 ``hostIntegrationScenario`` 调用
     /// ``HostCapabilityCatalog`` + ``AudibilityMatrix.make`` 构建；这里不允许手写
     /// ``AudibilityCell``，因此删除 Codex 映射会直接改变展柜里的真实格子。
     public static let hostIntegrationScenarios: [HostIntegrationScenario] = [
         hostIntegrationScenario(
-            id: "dual-disconnected",
+            id: "all-products-disconnected",
             title: "全部产品宿主未连接",
             snapshots: HostID.productVisibleCases.map {
                 HostIntegrationSnapshot.disconnected(host: $0)
@@ -328,7 +328,7 @@ public enum PreviewFixtures {
                 hostIntegrationSnapshot(host: .codex),
             ]),
         hostIntegrationScenario(
-            id: "dual-connected",
+            id: "all-products-connected",
             title: "全部产品宿主已连接",
             snapshots: HostID.productVisibleCases.map { hostIntegrationSnapshot(host: $0) }),
         hostIntegrationScenario(
@@ -388,7 +388,7 @@ public enum PreviewFixtures {
             ]),
     ]
 
-    /// 菜单栏事件行宿主 Logo 的五个视觉事实态。每帧复用上面的真实双宿主矩阵，并明确携带
+    /// 菜单栏事件行宿主 Logo 的五个视觉事实态。每帧复用上面的真实全产品矩阵，并明确携带
     /// 标准或窄版布局；Gallery 不在 View 里手写任一状态或宿主能力。
     public struct EventHostIndicatorScenario: Identifiable, Sendable, Equatable {
         public let id: String
@@ -415,21 +415,21 @@ public enum PreviewFixtures {
     public static let eventHostIndicatorScenarios: [EventHostIndicatorScenario] = [
         eventHostIndicatorScenario(
             id: "full-color",
-            title: "双宿主已连接 · 标签 Logo 12pt",
+            title: "全部产品宿主已连接 · 标签 Logo 12pt",
             event: .stop,
-            sourceScenarioID: "dual-connected",
+            sourceScenarioID: "all-products-connected",
             tier: .standard),
         eventHostIndicatorScenario(
             id: "mixed",
             title: "Claude 可用 · Codex 此事件不支持",
             event: .stopFailure,
-            sourceScenarioID: "dual-connected",
+            sourceScenarioID: "all-products-connected",
             tier: .standard),
         eventHostIndicatorScenario(
             id: "all-gray",
-            title: "双宿主未连接",
+            title: "全部产品宿主未连接",
             event: .stop,
-            sourceScenarioID: "dual-disconnected",
+            sourceScenarioID: "all-products-disconnected",
             tier: .standard),
         eventHostIndicatorScenario(
             id: "legacy",
@@ -611,10 +611,10 @@ public enum PreviewFixtures {
                         event: .stopFailure,
                         coverage: .present(fileName: "execution-interrupted.mp3"),
                         enabled: true),
-                    state: state("dual-connected")),
+                    state: state("all-products-connected")),
                 EventRowLayoutSample(
                     row: EventRow(event: .notification, coverage: .unmapped, enabled: true),
-                    state: state("dual-disconnected")),
+                    state: state("all-products-disconnected")),
                 EventRowLayoutSample(
                     row: EventRow(
                         event: .subagentStop,

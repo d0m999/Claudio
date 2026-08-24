@@ -182,8 +182,8 @@ func runHostIntegrationManagerBridgeSuites() async {
                 "首启状态必须同代返回三条产品宿主快照")
             expect(
                 hostSourceRowPresentations(from: state.matrix).map(\.host)
-                    == HostID.productVisibleCases,
-                "首启矩阵不得隐藏任一产品宿主，也不得显示 AX identity")
+                    == [.codex, .claudeCode, .workBuddy],
+                "首启产品来源必须服从唯一视觉序，且不得显示 AX identity")
         }
     }
 
@@ -275,7 +275,7 @@ func runHostIntegrationManagerBridgeSuites() async {
         }
     }
 
-    await suite("HostIntegrationManagerBridge 动作失败：仍返回双宿主新状态与 failure 反馈，不冻结另一侧") {
+    await suite("HostIntegrationManagerBridge 动作失败：仍返回全产品新状态与 failure 反馈，不冻结另一侧") {
         await withTempDirectory { root in
             let fixture = bridgeFixture(root: root, claudeFailsConnect: true)
             _ = await fixture.bridge.refresh()

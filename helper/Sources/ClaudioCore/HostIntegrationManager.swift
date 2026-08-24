@@ -217,6 +217,7 @@ public actor HostIntegrationManager {
     public func connect(
         _ host: HostID
     ) async -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
+        if let error = productActionError(for: host) { return .failure(error) }
         let operationRevision = beginOperation(.connecting, host: host)
         if runtime != .ready {
             let execution = bootstrapper.bootstrapExecution()
@@ -265,6 +266,7 @@ public actor HostIntegrationManager {
     public func disconnect(
         _ host: HostID
     ) async -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
+        if let error = productActionError(for: host) { return .failure(error) }
         let operationRevision = beginOperation(.disconnecting, host: host)
         guard let adapter = adapters[host] else {
             let error = HostIntegrationActionError.hostUnavailable(
@@ -291,6 +293,12 @@ public actor HostIntegrationManager {
             }
             return .failure(error)
         }
+    }
+
+    private func productActionError(for host: HostID) -> HostIntegrationActionError? {
+        guard !HostID.productVisibleCases.contains(host) else { return nil }
+        return .hostUnavailable(
+            reason: "\(host.displayName) 仅供兼容解码和隔离诊断，不能执行产品集成动作")
     }
 
     private func refresh(usingCurrentRuntime: Bool) async -> [HostIntegrationSnapshot] {

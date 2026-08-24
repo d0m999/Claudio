@@ -9,7 +9,8 @@ private func hostPresentationSnapshot(
     _ host: HostID,
     activation: HostActivationEvidence? = nil
 ) -> HostIntegrationSnapshot {
-    guard let binding = HostCapabilityCatalog.bindings(for: host).first(where: \.isAudibleCapability)
+    guard
+        let binding = HostCapabilityCatalog.bindings(for: host).first(where: \.isAudibleCapability)
     else {
         return HostIntegrationSnapshot(
             host: host,
@@ -62,7 +63,7 @@ private func hostPresentationMatrix(
 
 @MainActor
 func runHostIntegrationPresentationSuites() {
-    suite("双宿主事件文案：五个 UI 名称统一为声音语义，不泄漏宿主原生事件名") {
+    suite("事件文案：五个 UI 名称统一为声音语义，不泄漏宿主原生事件名") {
         let expected: [(Event, String)] = [
             (.taskStart, "任务开始"),
             (.stop, "本轮结束"),
@@ -86,25 +87,29 @@ func runHostIntegrationPresentationSuites() {
 
     suite("声音来源行：产品 registry 永久等权出现，能力数是实现事实") {
         let rows = hostSourceRowPresentations(from: hostPresentationMatrix())
+        let expectedVisualOrder: [HostID] = [.codex, .claudeCode, .workBuddy]
 
         expect(
             rows.count == HostID.productVisibleCases.count,
             "声音来源必须覆盖产品 registry，实得 \(rows.count)")
-        expect(rows.map(\.host) == HostID.productVisibleCases, "宿主行顺序必须服从产品 registry")
-        expect(rows[0].title == "Claude Code", "第一行标题必须是 Claude Code")
-        expect(rows[0].readinessText == "5/5 已就绪", "Claude Code 应显示 5/5 已就绪")
-        expect(rows[0].status == .ready, "Claude Code 完整连接应使用 ready 状态")
-        expect(rows[1].title == "Codex", "第二行标题必须是 Codex")
-        expect(rows[1].readinessText == "4/5 已就绪", "Codex 正常能力事实应显示 4/5 已就绪")
-        expect(rows[1].status == .ready, "Codex 的 4/5 不得降级成 warning 或 needsAttention")
-        expect(rows[1].detailText == "执行中断暂无事件", "Codex ready 行必须诚实说明缺少执行中断事件")
+        expect(rows.map(\.host) == expectedVisualOrder, "宿主行必须服从唯一 Product → Surface 视觉序")
+        let claude = rows.first(where: { $0.host == .claudeCode })!
+        let codex = rows.first(where: { $0.host == .codex })!
+        let workBuddy = rows.first(where: { $0.host == .workBuddy })!
+        expect(claude.title == "Claude Code", "Claude 来源标题必须是 Claude Code")
+        expect(claude.readinessText == "5/5 已就绪", "Claude Code 应显示 5/5 已就绪")
+        expect(claude.status == .ready, "Claude Code 完整连接应使用 ready 状态")
+        expect(codex.title == "Codex", "Codex 来源标题必须是 Codex")
+        expect(codex.readinessText == "4/5 已就绪", "Codex 正常能力事实应显示 4/5 已就绪")
+        expect(codex.status == .ready, "Codex 的 4/5 不得降级成 warning 或 needsAttention")
+        expect(codex.detailText == "执行中断暂无事件", "Codex ready 行必须诚实说明缺少执行中断事件")
         expect(
-            rows[1].accessibilityLabel == "Codex，4/5 已就绪，执行中断暂无事件",
-            "宿主行 VoiceOver 必须完整读出宿主、能力与限定，实得 \(rows[1].accessibilityLabel)")
-        expect(rows[2].title == "WorkBuddy", "第三行标题必须是 WorkBuddy")
-        expect(rows[2].readinessText == "2/5 已就绪", "WorkBuddy 当前实现必须显示 2/5")
+            codex.accessibilityLabel == "Codex，4/5 已就绪，执行中断暂无事件",
+            "宿主行 VoiceOver 必须完整读出宿主、能力与限定，实得 \(codex.accessibilityLabel)")
+        expect(workBuddy.title == "WorkBuddy", "WorkBuddy 来源标题必须是 WorkBuddy")
+        expect(workBuddy.readinessText == "2/5 已就绪", "WorkBuddy 当前实现必须显示 2/5")
         expect(
-            rows[2].detailText == "当前版本已实现 2/5；其余能力尚未启用",
+            workBuddy.detailText == "当前版本已实现 2/5；其余能力尚未启用",
             "接口能力与已实现能力不得混成假 5/5")
         expect(
             rows.allSatisfy { $0.host.descriptor.mechanism == .nativeHooks },
@@ -133,10 +138,13 @@ func runHostIntegrationPresentationSuites() {
         let onlyClaude = hostSourceRowPresentations(
             from: hostPresentationMatrix(snapshots: [hostPresentationSnapshot(.claudeCode)]))
         expect(
-            onlyClaude.map(\.host) == HostID.productVisibleCases,
+            onlyClaude.map(\.host) == [.codex, .claudeCode, .workBuddy],
             "单宿主连接时仍须保留全部产品声音来源行")
-        expect(onlyClaude[1].status == .notConnected, "没有 Codex 快照应呈现未连接")
-        expect(onlyClaude[1].readinessText == "4/5 未连接", "未连接仍须保留 Codex 的 4/5 能力事实")
+        let disconnectedCodex = onlyClaude.first(where: { $0.host == .codex })!
+        expect(disconnectedCodex.status == .notConnected, "没有 Codex 快照应呈现未连接")
+        expect(
+            disconnectedCodex.readinessText == "4/5 未连接",
+            "未连接仍须保留 Codex 的 4/5 能力事实")
 
         let awaiting = hostSourceRowPresentations(
             from: hostPresentationMatrix(
@@ -147,11 +155,12 @@ func runHostIntegrationPresentationSuites() {
                         activation: .awaitingReceipt(
                             installationID: hostPresentationInstallationID)),
                 ]))
-        expect(awaiting[1].status == .awaitingActivation, "等待首个真实回执必须是待确认状态")
-        expect(awaiting[1].readinessText == "4/5 已配置", "待确认不得冒充已连接")
+        let awaitingCodex = awaiting.first(where: { $0.host == .codex })!
+        expect(awaitingCodex.status == .awaitingActivation, "等待首个真实回执必须是待确认状态")
+        expect(awaitingCodex.readinessText == "4/5 已配置", "待确认不得冒充已连接")
         expect(
-            awaiting[1].detailText == "在 Codex 输入 /hooks，确认后再提交一次提示词",
-            "Codex 待确认文案必须逐字固定，实得 \(String(describing: awaiting[1].detailText))")
+            awaitingCodex.detailText == "在 Codex 输入 /hooks，确认后再提交一次提示词",
+            "Codex 待确认文案必须逐字固定，实得 \(String(describing: awaitingCodex.detailText))")
     }
 
     suite("legacy 检查器：必须提供升级、重探、清除历史与末尾断开，并复用 repair seam") {
@@ -191,9 +200,7 @@ func runHostIntegrationPresentationSuites() {
 
     suite("可听能力矩阵：严格由五个语义行 × registry 宿主单元组成") {
         let visualOrder = hostSurfacePresentationOrder()
-        let presentation = hostCapabilityMatrixPresentation(
-            from: hostPresentationMatrix(),
-            hostOrder: visualOrder)
+        let presentation = hostCapabilityMatrixPresentation(from: hostPresentationMatrix())
 
         expect(presentation.hostColumns == visualOrder, "矩阵宿主列必须服从 Product → Surface 视觉序")
         expect(presentation.rows.map(\.event) == Event.allCases, "矩阵事件行必须来自 Event.allCases")

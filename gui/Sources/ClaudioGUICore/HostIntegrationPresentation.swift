@@ -11,7 +11,6 @@ public enum HostSourceRowStatus: Sendable, Equatable {
     case awaitingActivation
     case legacy
     case notConnected
-    case unavailable
     case needsAttention
 }
 
@@ -102,11 +101,11 @@ public func hostSourceProductGroups(
     }
 }
 
-/// 按产品可见 registry 生成所有已出货来源行。宿主是否连接只改变行内状态，不改变行的存在。
+/// 按唯一 Surface 视觉顺序生成所有已出货来源行。宿主是否连接只改变行内状态，不改变行的存在。
 public func hostSourceRowPresentations(
     from matrix: AudibilityMatrix
 ) -> [HostSourceRowPresentation] {
-    HostID.productVisibleCases.map { host in
+    hostSurfacePresentationOrder().map { host in
         let fallbackSupported = HostCapabilityCatalog.bindings(for: host)
             .filter(\.isAudibleCapability).count
         let summary =
@@ -120,16 +119,6 @@ private func hostSourceRowPresentation(
     host: HostID,
     summary: HostReadinessSummary
 ) -> HostSourceRowPresentation {
-    if host.descriptor.mechanism == .accessibilityBeta {
-        return HostSourceRowPresentation(
-            host: host,
-            title: host.displayName,
-            readinessText: "0/\(Event.allCases.count) 暂不可用",
-            detailText: "GUI-only Beta 候选；Accessibility 观察器与权限流程尚未实现",
-            status: .unavailable,
-            supportedCount: 0,
-            totalCount: Event.allCases.count)
-    }
     let readinessText: String
     let detailText: String?
     let status: HostSourceRowStatus
@@ -324,7 +313,7 @@ public func hostCapabilityMatrixPresentation(
     mutedReason: HostCapabilityMuteReason = .eventDisabled,
     hostOrder: [HostID]? = nil
 ) -> HostCapabilityMatrixPresentation {
-    let orderedHosts = hostOrder ?? HostID.productVisibleCases
+    let orderedHosts = hostOrder ?? hostSurfacePresentationOrder()
     return HostCapabilityMatrixPresentation(
         hostColumns: orderedHosts,
         rows: matrix.rows.map { row in
@@ -658,8 +647,6 @@ public func integrationsInspectorActions(
         return [.redetect, .clearReceiptHistory(row.host), .disconnect(row.host)]
     case .notConnected:
         return [.connect(row.host), .clearReceiptHistory(row.host)]
-    case .unavailable:
-        return []
     case .needsAttention:
         return [
             .redetect, .repair(row.host), .clearReceiptHistory(row.host), .disconnect(row.host),

@@ -899,7 +899,6 @@ struct IntegrationsWindowView: View {
         case .awaitingActivation: "clock.fill"
         case .legacy: "arrow.triangle.2.circlepath.circle"
         case .notConnected: "link.badge.plus"
-        case .unavailable: "lock.circle"
         case .needsAttention: "exclamationmark.circle.fill"
         }
     }
@@ -907,7 +906,7 @@ struct IntegrationsWindowView: View {
     private func sourceStatusColor(_ status: HostSourceRowStatus) -> Color {
         switch status {
         case .ready: ClaudioTheme.success(colorScheme)
-        case .awaitingActivation, .legacy, .notConnected, .unavailable:
+        case .awaitingActivation, .legacy, .notConnected:
             ClaudioTheme.secondaryText(colorScheme)
         case .needsAttention: ClaudioTheme.error(colorScheme)
         }

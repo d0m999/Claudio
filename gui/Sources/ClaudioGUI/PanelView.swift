@@ -5,8 +5,8 @@ import ClaudioGUICore
 import ClaudioLocalization
 import SwiftUI
 
-/// The menu-bar panel's always-operational dual-host surface. Host rows and event coverage are
-/// projected from the shared adapter manager; this view never probes Claude Code or Codex files.
+/// The menu-bar panel's always-operational all-product surface. Host rows and event coverage are
+/// projected from the shared adapter manager; this view never probes host configuration files.
 /// Pack completeness, focus order, contrast and Dynamic Type decisions are likewise made in
 /// `ClaudioGUICore`/`ClaudioCore` before this view renders. This file lays out those facts, wires
 /// the tested sound-pack controls, and resolves preview playback via
@@ -342,7 +342,7 @@ public struct PanelView: View {
     }
 
     private var panelHostSourceRows: [HostSourceRowPresentation] {
-        hostIntegrations.content.sourceRows.filter { $0.status != .unavailable }
+        hostIntegrations.content.sourceRows
     }
 
     private var audibleEventCount: Int {
@@ -1176,7 +1176,6 @@ private struct HostSourceRowView: View {
         case .awaitingActivation: "clock.fill"
         case .legacy: "clock.arrow.circlepath"
         case .notConnected: "circle"
-        case .unavailable: "lock.circle"
         case .needsAttention: "exclamationmark.circle.fill"
         }
     }
@@ -1203,7 +1202,7 @@ private struct HostSourceRowView: View {
     private var statusColor: Color {
         switch row.status {
         case .ready: ClaudioColor.success(colorScheme)
-        case .awaitingActivation, .legacy, .notConnected, .unavailable:
+        case .awaitingActivation, .legacy, .notConnected:
             ClaudioColor.textSecondary(colorScheme)
         case .needsAttention: ClaudioColor.error(colorScheme)
         }

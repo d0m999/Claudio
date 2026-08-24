@@ -27,12 +27,12 @@ import Foundation
 func runPreviewFixturesSuites() {
     // Replaces the former `expect(true, ...)` tautology (T14 review 修复②), which could never
     // fail yet still counted as a check. `assertExhaustive()` now RETURNS the `family.case`
-    // labels its state-family guards and dual-host scenario catalog actually visited, so this
+    // labels its state-family guards and all-product scenario catalog actually visited, so this
     // compares that set against
     // the complete expected roster: a fixture array that stops covering one of its enum's cases
     // (a case whose `switch` branch exists but is never REACHED — which compiles perfectly)
     // turns this red.
-    suite("PreviewFixtures.assertExhaustive() visits every case plus all dual-host scenarios") {
+    suite("PreviewFixtures.assertExhaustive() visits every case plus all-product scenarios") {
         let visited = PreviewFixtures.assertExhaustive()
         let expected: Set<String> = [
             "onboarding.claudeCodeNotInstalled", "onboarding.helperMissing",
@@ -67,10 +67,10 @@ func runPreviewFixturesSuites() {
             // 「行 + 错误行」组合帧——D16「音量 0 = 全局静音」这类最难手动复现的态——落地前零仓库内
             // 视觉验证，而这条断言仍会全绿（因为其余五族依然完美覆盖它们自己的 case）。
             "masterVolume.value", "masterVolume.failed",
-            "hostIntegration.dual-disconnected",
+            "hostIntegration.all-products-disconnected",
             "hostIntegration.claude-only",
             "hostIntegration.codex-only",
-            "hostIntegration.dual-connected",
+            "hostIntegration.all-products-connected",
             "hostIntegration.codex-awaiting",
             "hostIntegration.claude-legacy",
             "hostIntegration.codex-normal-4-of-5",
@@ -93,7 +93,7 @@ func runPreviewFixturesSuites() {
         ]
         expect(
             visited == expected,
-            "the shipped fixtures must exercise every state case and dual-host scenario;"
+            "the shipped fixtures must exercise every state case and all-product scenario;"
                 + " missing \(expected.subtracting(visited)), unexpected \(visited.subtracting(expected))"
         )
     }
@@ -208,13 +208,13 @@ func runPreviewFixturesSuites() {
 
         expect(
             indicators("full-color").allSatisfy(\.state.usesActiveColor),
-            "full-color 帧必须两枚 Logo 都彩色")
+            "full-color 帧必须三枚产品 Logo 都彩色")
         expect(
-            indicators("mixed").map(\.state) == [.connected, .unsupported, .unsupported],
-            "mixed 帧必须是 Claude 彩色、Codex/WorkBuddy 未实现格灰色")
+            indicators("mixed").map(\.state) == [.unsupported, .connected, .unsupported],
+            "mixed 帧必须按视觉序显示 Codex 灰色、Claude 彩色、WorkBuddy 灰色")
         expect(
             indicators("all-gray").allSatisfy { !$0.state.usesActiveColor },
-            "all-gray 帧必须两枚 Logo 都灰色")
+            "all-gray 帧必须三枚产品 Logo 都灰色")
         expect(
             indicators("legacy").contains(where: { $0.state == .legacy }),
             "legacy 帧必须真的投影旧版连接")
@@ -399,14 +399,14 @@ func runPreviewFixturesSuites() {
             "state gallery 必须逐档渲染 Claudio 的全部四档界面文字")
     }
 
-    // MARK: - Dual-host integration scenarios
+    // MARK: - All-product integration scenarios
 
     suite("PreviewFixtures.hostIntegrationScenarios pins the complete 10-state product roster") {
         let expectedIDs = [
-            "dual-disconnected",
+            "all-products-disconnected",
             "claude-only",
             "codex-only",
-            "dual-connected",
+            "all-products-connected",
             "codex-awaiting",
             "claude-legacy",
             "codex-normal-4-of-5",
@@ -417,10 +417,10 @@ func runPreviewFixturesSuites() {
         let scenarios = PreviewFixtures.hostIntegrationScenarios
         expect(
             scenarios.map(\.id) == expectedIDs,
-            "双宿主 gallery 必须按稳定顺序覆盖 10 个产品态，实得 \(scenarios.map(\.id))")
+            "全部产品 gallery 必须按稳定顺序覆盖 10 个产品态，实得 \(scenarios.map(\.id))")
         expect(
             Set(scenarios.map(\.id)).count == scenarios.count,
-            "双宿主 gallery scenario ID 必须唯一")
+            "全部产品 gallery scenario ID 必须唯一")
     }
 
     suite("Host integration fixtures: every frame is a catalog-driven dynamic AudibilityMatrix") {
@@ -428,6 +428,13 @@ func runPreviewFixturesSuites() {
             expect(
                 scenario.state.snapshots.map(\.host) == HostID.productVisibleCases,
                 "\(scenario.id) 必须同时带全部已出货宿主快照")
+            let presentation = hostCapabilityMatrixPresentation(from: scenario.state.matrix)
+            expect(
+                presentation.hostColumns == [.codex, .claudeCode, .workBuddy]
+                    && presentation.rows.allSatisfy {
+                        $0.cells.map(\.host) == [.codex, .claudeCode, .workBuddy]
+                    },
+                "\(scenario.id) preview 必须服从生产 Product → Surface 视觉序")
             expect(
                 scenario.state.matrix.rows.map(\.event) == Event.allCases,
                 "\(scenario.id) 必须由 Event.allCases 生成五行")
@@ -453,13 +460,13 @@ func runPreviewFixturesSuites() {
             PreviewFixtures.hostIntegrationScenarios.first(where: { $0.id == id })
         }
 
-        let disconnected = scenario("dual-disconnected")
+        let disconnected = scenario("all-products-disconnected")
         expect(
             disconnected?.state.matrix.summary(for: .claudeCode)
                 == .notConnected(supported: 5, total: 5)
                 && disconnected?.state.matrix.summary(for: .codex)
                     == .notConnected(supported: 4, total: 5),
-            "双未连必须保留两宿主各自的 5/5 与 4/5 能力事实")
+            "全部产品未连接必须保留各来源自己的能力事实")
         let claudeOnly = scenario("claude-only")
         expect(
             claudeOnly?.state.matrix.summary(for: .claudeCode)
@@ -474,13 +481,15 @@ func runPreviewFixturesSuites() {
                 && codexOnly?.state.matrix.summary(for: .codex)
                     == .ready(supported: 4, total: 5),
             "Codex-only 必须一侧 notConnected、一侧正常 4/5 ready")
-        let dualConnected = scenario("dual-connected")
+        let allProductsConnected = scenario("all-products-connected")
         expect(
-            dualConnected?.state.matrix.summary(for: .claudeCode)
+            allProductsConnected?.state.matrix.summary(for: .claudeCode)
                 == .ready(supported: 5, total: 5)
-                && dualConnected?.state.matrix.summary(for: .codex)
-                    == .ready(supported: 4, total: 5),
-            "双连接必须同时显示 Claude 5/5 与 Codex 4/5 ready")
+                && allProductsConnected?.state.matrix.summary(for: .codex)
+                    == .ready(supported: 4, total: 5)
+                && allProductsConnected?.state.matrix.summary(for: .workBuddy)
+                    == .ready(supported: 2, total: 5),
+            "全部产品连接必须同时保留 Claude 5/5、Codex 4/5 与 WorkBuddy 2/5")
 
         let codexNormal = scenario("codex-normal-4-of-5")
         expect(

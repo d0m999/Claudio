@@ -79,7 +79,7 @@ func runIntegrationsWindowWiringSuites() {
             panel.contains("HostSourceRowView(")
                 && panel.contains("onManageIntegrations(.hostSource(row.host))")
                 && !panel.contains("manageIntegrationsRow"),
-            "两条宿主状态条必须把精确触发 target 交给 AppKit shell，且不保留重复底部入口")
+            "所有产品宿主状态条必须把精确触发 target 交给 AppKit shell，且不保留重复底部入口")
         expect(
             menu.contains("pendingIntegrationsWindowFocusTarget")
                 && menu.contains("popoverDidClose")
@@ -214,7 +214,7 @@ func runIntegrationsWindowWiringSuites() {
             "真实回执/refresh 主动播报必须从共享 host row 与 matrix cell 组合完整上下文")
     }
 
-    suite("Panel 双宿主来源行：与其余面板控件共用 Dynamic Type scale") {
+    suite("Panel 全部产品来源行：与其余面板控件共用 Dynamic Type scale") {
         guard let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "缺少 PanelView.swift")
             return
@@ -223,7 +223,7 @@ func runIntegrationsWindowWiringSuites() {
             panel.contains("HostSourceRowView(")
                 && panel.contains("typeScale: typeScale")
                 && panel.contains("let typeScale: CGFloat"),
-            "两条来源行必须接收 Panel 的 @ScaledMetric，而不是固定字号孤岛")
+            "所有产品来源行必须接收 Panel 的 @ScaledMetric，而不是固定字号孤岛")
         expect(
             panel.contains("size: 11.5 * typeScale")
                 && panel.contains("size: 9.5 * typeScale")
@@ -292,7 +292,7 @@ func runIntegrationsWindowWiringSuites() {
         expect(menu.contains("popover.close()"), "两个管理窗口都必须先可靠关闭 transient popover")
     }
 
-    suite("App 默认事实：明确构造两条 disconnected snapshot，禁止伪造 connected") {
+    suite("App 默认事实：明确构造三条 disconnected snapshot，禁止伪造 connected") {
         guard let app = integrationsSource("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift") else {
             expect(false, "缺少 ClaudioGUIApp.swift")
             return
@@ -301,7 +301,7 @@ func runIntegrationsWindowWiringSuites() {
             app.contains("let disconnectedSnapshots = HostID.productVisibleCases.map")
                 && app.contains("HostIntegrationSnapshot.disconnected(host: $0)")
                 && app.contains("AudibilityMatrix.make("),
-            "默认 shell 必须从两个明确 disconnected snapshot 生成矩阵")
+            "默认 shell 必须从三个明确 disconnected 产品 snapshot 生成矩阵")
         expect(
             !app.contains("connectedForTesting"),
             "production AppDelegate 绝不能为展示效果伪造 connected")
@@ -980,7 +980,7 @@ func runIntegrationsWindowWiringSuites() {
             "进行中状态不得自绘旋转动画；使用尊重系统设置的原生 ProgressView")
     }
 
-    suite("State Gallery：双宿主场景用 catalog + AudibilityMatrix 生成，并渲染真实详情窗") {
+    suite("State Gallery：全产品场景用 catalog + AudibilityMatrix 生成，并渲染真实详情窗") {
         guard
             let fixtures = integrationsSource(
                 "gui/Sources/ClaudioGUICore/PreviewFixtures.swift"),
@@ -993,7 +993,7 @@ func runIntegrationsWindowWiringSuites() {
             fixtures.contains("hostIntegrationScenarios")
                 && fixtures.contains("HostCapabilityCatalog.bindings(for:")
                 && fixtures.contains("AudibilityMatrix.make("),
-            "双宿主 fixture 必须由 adapter catalog 与 Core 矩阵组合")
+            "全产品 fixture 必须由 adapter catalog 与 Core 矩阵组合")
         expect(
             !fixtures.contains("AudibilityCell("),
             "PreviewFixtures 不得手写任何矩阵格，否则第四格会与 adapter 漂移")

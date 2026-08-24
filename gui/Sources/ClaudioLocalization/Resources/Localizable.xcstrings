@@ -97,12 +97,6 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 未连接" } }
       }
     },
-    "host.unavailable" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld unavailable" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 暂不可用" } }
-      }
-    },
     "host.needs-attention" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld needs attention" } },
@@ -149,12 +143,6 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Submit a prompt to WorkBuddy to confirm the connection" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请向 WorkBuddy 提交一次提示词以确认连接" } }
-      }
-    },
-    "host.accessibility-beta.unavailable-detail" : {
-      "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "GUI-only Beta candidate; Accessibility observation and permission flow are not implemented" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "GUI-only Beta 候选；Accessibility 观察器与权限流程尚未实现" } }
       }
     },
     "event.task-start" : {

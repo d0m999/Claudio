@@ -8,8 +8,9 @@ import SwiftUI
 
     /// The repo-internal SwiftUI state gallery (ENGINEERING.md T14 D2) — the in-repo VISUAL
     /// TRUTH SOURCE. Renders ONE frame per ``PreviewFixtures`` value across the app's
-    /// current per-feature state families and dual-host scenarios, plus an explicitly labelled
-    /// archive for the still-supported Claude-only legacy onboarding components (``OnboardingState``, ``OnboardingActionState``,
+    /// current per-feature state families and all-product host scenarios, plus an explicitly
+    /// labelled archive for the still-supported Claude-only legacy onboarding components
+    /// (``OnboardingState``, ``OnboardingActionState``,
     /// ``DropZoneState``, ``EventRow``/``CoverageState``, ``PackCard``/``PackCardState``,
     /// ``MasterVolumeState`` — PLAN-MASTER-VOLUME.md D33/D38), EXCLUSIVELY off
     /// `PreviewFixtures` — no ad-hoc values are constructed anywhere in this file. See
@@ -510,9 +511,9 @@ import SwiftUI
         }
     }
 
-    // MARK: - Host integrations (10 dual-host scenarios)
+    // MARK: - Host integrations (10 all-product scenarios)
 
-    /// 双宿主展柜直接渲染生产 ``IntegrationsWindowView``：宿主卡、可听矩阵、检查器和
+    /// 全部产品宿主展柜直接渲染生产 ``IntegrationsWindowView``：宿主卡、可听矩阵、检查器和
     /// Dynamic Type 重排全都走同一份视图，不在 gallery 复制第二套展示组件。
     struct HostIntegrationGalleryView: View {
         var body: some View {

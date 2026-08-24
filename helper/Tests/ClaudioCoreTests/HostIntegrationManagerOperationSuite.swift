@@ -18,6 +18,51 @@ func runHostIntegrationManagerOperationSuites() async {
             "descriptor registry 必须只覆盖正常产品表面")
     }
 
+    await asyncSuite("HostIntegrationManager：产品动作入口拒绝 AX identity 且零副作用") {
+        for host in [HostID.chatGPTDesktopAX, .claudeDesktopAX] {
+            let adapter = ForbiddenOperationHostIntegrationAdapter(host: host)
+            let manager = HostIntegrationManager(
+                adapters: [adapter], bootstrapper: OperationReadyRuntimeBootstrapper())
+            let snapshotsBeforeRejectedActions = await manager.snapshots()
+
+            let connectResult = await manager.connect(host)
+            let disconnectResult = await manager.disconnect(host)
+            guard case .failure(.hostUnavailable(_)) = connectResult,
+                case .failure(.hostUnavailable(_)) = disconnectResult
+            else {
+                expect(
+                    false,
+                    "AX identity 的 connect/disconnect 必须在 manager 边界失败关闭：\(host)")
+                continue
+            }
+            let calls = await adapter.operationCalls()
+            expect(
+                calls.connect == 0 && calls.disconnect == 0,
+                "拒绝 AX identity 不得调用 adapter，实得 \(calls)")
+            let snapshotsAfterRejectedActions = await manager.snapshots()
+            expect(
+                snapshotsAfterRejectedActions == snapshotsBeforeRejectedActions
+                    && snapshotsAfterRejectedActions.map(\.host) == HostID.productVisibleCases
+                    && snapshotsAfterRejectedActions.allSatisfy { $0.operation == .idle },
+                "拒绝 AX identity 不得改变三项产品 snapshot 或留下 operation 状态")
+        }
+
+        let bootstrapper = OperationUnavailableCountingBootstrapper()
+        let adapter = ForbiddenOperationHostIntegrationAdapter(host: .chatGPTDesktopAX)
+        let manager = HostIntegrationManager(adapters: [adapter], bootstrapper: bootstrapper)
+        let result = await manager.connect(.chatGPTDesktopAX)
+        guard case .failure(.hostUnavailable(_)) = result else {
+            expect(false, "拒绝 AX identity 必须优先于共享 runtime 修复")
+            return
+        }
+        expect(
+            bootstrapper.bootstrapCount() == 0,
+            "拒绝 AX identity 不得启动共享 runtime bootstrap")
+        expect(
+            await adapter.operationCalls().connect == 0,
+            "runtime 不可用时也不得把 AX identity 交给 adapter")
+    }
+
     await asyncSuite("HostIntegrationManager：连接进行中可观察，失败保持到显式刷新") {
         let adapter = ControlledHostIntegrationAdapter(
             host: .claudeCode,
@@ -235,7 +280,8 @@ private actor ControlledHostIntegrationAdapter: HostIntegrationAdapter {
     }
 
     private func snapshot(runtime: SharedRuntimeHealth) -> HostIntegrationSnapshot {
-        let latestReceipt = connected
+        let latestReceipt =
+            connected
             ? HostReceiptEvidence(
                 installationID: installationID,
                 nativeEvent: "Stop",
@@ -254,6 +300,75 @@ private actor ControlledHostIntegrationAdapter: HostIntegrationAdapter {
                 : .none,
             latestReceipt: latestReceipt,
             installationID: connected ? installationID : nil)
+    }
+}
+
+private actor ForbiddenOperationHostIntegrationAdapter: HostIntegrationAdapter {
+    nonisolated let host: HostID
+    nonisolated let capabilities: [HostCapabilityBinding]
+
+    private var connectCalls = 0
+    private var disconnectCalls = 0
+
+    init(host: HostID) {
+        self.host = host
+        self.capabilities = HostCapabilityCatalog.bindings(for: host)
+    }
+
+    func inspect(runtime: SharedRuntimeHealth) -> HostIntegrationSnapshot {
+        snapshot(runtime: runtime)
+    }
+
+    func connect(
+        runtime: SharedRuntimeHealth
+    ) -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
+        connectCalls += 1
+        return .success(snapshot(runtime: runtime))
+    }
+
+    func disconnect(
+        runtime: SharedRuntimeHealth
+    ) -> Result<HostIntegrationSnapshot, HostIntegrationActionError> {
+        disconnectCalls += 1
+        return .success(snapshot(runtime: runtime))
+    }
+
+    func operationCalls() -> (connect: Int, disconnect: Int) {
+        (connectCalls, disconnectCalls)
+    }
+
+    private func snapshot(runtime: SharedRuntimeHealth) -> HostIntegrationSnapshot {
+        HostIntegrationSnapshot(
+            host: host,
+            runtime: runtime,
+            availability: .unavailable(reason: "诊断 identity fixture"),
+            configuration: .notConfigured,
+            writability: .unknown,
+            activation: .none)
+    }
+}
+
+private final class OperationUnavailableCountingBootstrapper: SharedRuntimeBootstrapping,
+    @unchecked Sendable
+{
+    private let lock = NSLock()
+    private var bootstrapCalls = 0
+
+    func inspect() -> SharedRuntimeHealth {
+        .unavailable(reason: "fixture runtime unavailable")
+    }
+
+    func bootstrap() -> Result<SharedRuntimeBootstrapOutcome, SetupError> {
+        lock.lock()
+        bootstrapCalls += 1
+        lock.unlock()
+        return .failure(.binaryCopyFailure(reason: "fixture bootstrap must not run"))
+    }
+
+    func bootstrapCount() -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return bootstrapCalls
     }
 }
 

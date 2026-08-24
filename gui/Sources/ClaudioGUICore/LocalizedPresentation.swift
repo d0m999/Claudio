@@ -38,7 +38,6 @@ private func localizedHostReadiness(
     case .awaitingActivation: key = .hostConfigured
     case .legacy: key = .hostLegacy
     case .notConnected: key = .hostNotConnected
-    case .unavailable: key = .hostUnavailable
     case .needsAttention: key = .hostNeedsAttention
     }
     return l10n.format(key, Int64(supported), Int64(total))
@@ -82,8 +81,6 @@ private func localizedHostDetail(
         }
     case .notConnected:
         return nil
-    case .unavailable:
-        return l10n.text(.hostAccessibilityBetaUnavailableDetail)
     case .needsAttention:
         // This reason is supplied by the host integration manager and is retained as domain
         // data. It must not be guessed or translated by the GUI.
