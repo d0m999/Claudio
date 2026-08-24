@@ -511,19 +511,34 @@ import SwiftUI
         }
     }
 
-    // MARK: - Host integrations (10 all-product scenarios)
+    // MARK: - Host integrations (all-product + WorkBuddy pre-RC scenarios)
 
     /// 全部产品宿主展柜直接渲染生产 ``IntegrationsWindowView``：宿主卡、可听矩阵、检查器和
     /// Dynamic Type 重排全都走同一份视图，不在 gallery 复制第二套展示组件。
     struct HostIntegrationGalleryView: View {
         var body: some View {
+            let scenarioCount =
+                PreviewFixtures.hostIntegrationScenarios.count
+                + PreviewFixtures.workBuddyVisualScenarios.count
             GallerySection(
-                title: "Host integrations · 2 languages (\(PreviewFixtures.hostIntegrationScenarios.count))"
+                title: "Host integrations · 2 languages (\(scenarioCount))"
             ) {
                 ForEach(ClaudioAppLanguage.allCases) { language in
                     ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
                         GalleryFrame(caption: "\(language.selfName) · \(scenario.id) · \(scenario.title)") {
                             HostIntegrationStateFrame(scenario: scenario, language: language)
+                        }
+                    }
+                    ForEach(PreviewFixtures.workBuddyVisualScenarios) { scenario in
+                        GalleryFrame(
+                            caption: "\(language.selfName) · \(scenario.id) · \(scenario.title)"
+                        ) {
+                            HostIntegrationStateFrame(
+                                scenario: PreviewFixtures.HostIntegrationScenario(
+                                    id: scenario.id,
+                                    title: scenario.title,
+                                    state: scenario.state),
+                                language: language)
                         }
                     }
                 }

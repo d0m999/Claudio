@@ -303,6 +303,37 @@ public enum PreviewFixtures {
         }
     }
 
+    /// #65 的 WorkBuddy pre-RC 阶段名册。raw value 同时是稳定 fixture ID；新增阶段必须先扩展
+    /// `allCases`，使 focused suite 与 state gallery 一起 fail closed。
+    public enum WorkBuddyVisualPhase: String, CaseIterable, Sendable, Equatable, Hashable {
+        case disconnected = "workbuddy.disconnected"
+        case awaitingActivation = "workbuddy.awaiting"
+        case taskStartCurrent = "workbuddy.task-start-current"
+        case allImplementedBindingsCurrent = "workbuddy.two-bindings-current"
+        case conflict = "workbuddy.conflict"
+        case repairedAwaitingActivation = "workbuddy.repaired-awaiting"
+        case disconnectedAfterAction = "workbuddy.disconnected-after-action"
+    }
+
+    /// WorkBuddy 验收矩阵的一帧。它仍携带全部 Product/Surface 快照；`phase` 只命名本帧要
+    /// 突出的 WorkBuddy 事实，不会把产品身份、surface 或 binding 压成一个 UI-only 状态。
+    public struct WorkBuddyVisualScenario: Identifiable, Sendable, Equatable {
+        public var id: String { phase.rawValue }
+        public let phase: WorkBuddyVisualPhase
+        public let title: String
+        public let state: HostIntegrationPresentationState
+
+        public init(
+            phase: WorkBuddyVisualPhase,
+            title: String,
+            state: HostIntegrationPresentationState
+        ) {
+            self.phase = phase
+            self.title = title
+            self.state = state
+        }
+    }
+
     /// 全部产品宿主态的最小验收名册。每帧都通过 ``hostIntegrationScenario`` 调用
     /// ``HostCapabilityCatalog`` + ``AudibilityMatrix.make`` 构建；这里不允许手写
     /// ``AudibilityCell``，因此删除 Codex 映射会直接改变展柜里的真实格子。
@@ -387,6 +418,11 @@ public enum PreviewFixtures {
                 hostIntegrationSnapshot(host: .codex),
             ]),
     ]
+
+    /// #65 的确定性 WorkBuddy 状态基线。每帧由真实 catalog 与 `AudibilityMatrix` 合成；
+    /// Repair/Disconnect 是动作完成后的事实态，不会在 preview 中执行宿主写入。
+    public static let workBuddyVisualScenarios: [WorkBuddyVisualScenario] =
+        WorkBuddyVisualPhase.allCases.map(workBuddyVisualScenario)
 
     /// 菜单栏事件行宿主 Logo 的五个视觉事实态。每帧复用上面的真实全产品矩阵，并明确携带
     /// 标准或窄版布局；Gallery 不在 View 里手写任一状态或宿主能力。
@@ -496,6 +532,9 @@ public enum PreviewFixtures {
     private static let hostIntegrationInstallationID = UUID(
         uuidString: "00000000-0000-4000-8000-0000000000C1")!
 
+    private static let workBuddyVisualInstallationID = UUID(
+        uuidString: "00000000-0000-4000-8000-000000000065")!
+
     private static func hostIntegrationSnapshot(
         host: HostID,
         runtime: SharedRuntimeHealth = .ready,
@@ -563,6 +602,124 @@ public enum PreviewFixtures {
             state: HostIntegrationPresentationState(
                 snapshots: normalizedSnapshots,
                 matrix: matrix))
+    }
+
+    private static func workBuddyVisualScenario(
+        _ phase: WorkBuddyVisualPhase
+    ) -> WorkBuddyVisualScenario {
+        let title: String
+        let snapshot: HostIntegrationSnapshot
+        let awaiting = HostActivationEvidence.awaitingReceipt(
+            installationID: workBuddyVisualInstallationID)
+
+        switch phase {
+        case .disconnected:
+            title = "WorkBuddy 未连接"
+            snapshot = .disconnected(host: .workBuddy)
+        case .awaitingActivation:
+            title = "WorkBuddy 已配置，等待回执"
+            snapshot = workBuddyVisualSnapshot(
+                activation: awaiting,
+                bindingActivations: workBuddyImplementedBindingActivations(
+                    taskStart: awaiting,
+                    stop: awaiting))
+        case .taskStartCurrent:
+            title = "WorkBuddy 仅 task_start current"
+            let taskStart = workBuddyVisualReceipt(event: .taskStart, timestamp: 1_721_980_801)
+            snapshot = workBuddyVisualSnapshot(
+                activation: .observed(taskStart),
+                bindingActivations: workBuddyImplementedBindingActivations(
+                    taskStart: .observed(taskStart),
+                    stop: awaiting),
+                latestReceipt: taskStart)
+        case .allImplementedBindingsCurrent:
+            title = "WorkBuddy 两条 binding current"
+            let taskStart = workBuddyVisualReceipt(event: .taskStart, timestamp: 1_721_980_801)
+            let stop = workBuddyVisualReceipt(event: .stop, timestamp: 1_721_980_802)
+            snapshot = workBuddyVisualSnapshot(
+                activation: .observed(taskStart),
+                bindingActivations: workBuddyImplementedBindingActivations(
+                    taskStart: .observed(taskStart),
+                    stop: .observed(stop)),
+                latestReceipt: stop)
+        case .conflict:
+            title = "WorkBuddy 配置冲突，可 Repair"
+            snapshot = workBuddyVisualSnapshot(
+                configuration: .conflict(reason: "检测到与 Claudio 条目冲突的 WorkBuddy hook"),
+                activation: .none)
+        case .repairedAwaitingActivation:
+            title = "WorkBuddy Repair 后等待回执"
+            snapshot = workBuddyVisualSnapshot(
+                activation: awaiting,
+                bindingActivations: workBuddyImplementedBindingActivations(
+                    taskStart: awaiting,
+                    stop: awaiting))
+        case .disconnectedAfterAction:
+            title = "WorkBuddy Disconnect 后未连接"
+            snapshot = .disconnected(host: .workBuddy)
+        }
+
+        let state = hostIntegrationScenario(
+            id: phase.rawValue,
+            title: title,
+            snapshots: [snapshot]
+        ).state
+        return WorkBuddyVisualScenario(phase: phase, title: title, state: state)
+    }
+
+    private static func workBuddyVisualSnapshot(
+        configuration: HostConfigurationState = .configured,
+        activation: HostActivationEvidence,
+        bindingActivations: [HostEventBindingID: HostActivationEvidence] = [:],
+        latestReceipt: HostReceiptEvidence? = nil
+    ) -> HostIntegrationSnapshot {
+        HostIntegrationSnapshot(
+            host: .workBuddy,
+            runtime: .ready,
+            availability: .available,
+            configuration: configuration,
+            writability: .writable,
+            activation: activation,
+            bindingActivations: bindingActivations,
+            latestReceipt: latestReceipt,
+            installationID: workBuddyVisualInstallationID)
+    }
+
+    private static func workBuddyImplementedBindingActivations(
+        taskStart: HostActivationEvidence,
+        stop: HostActivationEvidence
+    ) -> [HostEventBindingID: HostActivationEvidence] {
+        [
+            workBuddyVisualBinding(for: .taskStart).id: taskStart,
+            workBuddyVisualBinding(for: .stop).id: stop,
+        ]
+    }
+
+    private static func workBuddyVisualReceipt(
+        event: Event,
+        timestamp: TimeInterval
+    ) -> HostReceiptEvidence {
+        let binding = workBuddyVisualBinding(for: event)
+        guard let nativeEvent = binding.nativeEvent else {
+            preconditionFailure("WorkBuddy visual fixture requires a native event for \(event)")
+        }
+        return HostReceiptEvidence(
+            bindingID: binding.id,
+            installationID: workBuddyVisualInstallationID,
+            nativeEvent: nativeEvent,
+            event: event,
+            timestamp: Date(timeIntervalSince1970: timestamp),
+            playbackResult: .played)
+    }
+
+    private static func workBuddyVisualBinding(for event: Event) -> HostCapabilityBinding {
+        guard
+            let binding = HostCapabilityCatalog.binding(host: .workBuddy, event: event),
+            binding.isAudibleCapability
+        else {
+            preconditionFailure("WorkBuddy visual fixture requires an implemented \(event) binding")
+        }
+        return binding
     }
 
     private static func eventHostIndicatorScenario(
@@ -670,6 +827,9 @@ public enum PreviewFixtures {
         }
         for scenario in hostIntegrationScenarios {
             visited.insert("hostIntegration.\(scenario.id)")
+        }
+        for scenario in workBuddyVisualScenarios {
+            visited.insert("workBuddyVisual.\(scenario.id)")
         }
         for scenario in eventHostIndicatorScenarios {
             visited.insert("eventHostIndicator.\(scenario.id)")

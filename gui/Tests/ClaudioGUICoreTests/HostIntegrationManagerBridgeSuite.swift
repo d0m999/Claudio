@@ -127,6 +127,7 @@ private func bridgeFixture(
     bootstrapper: BridgeBootstrapper,
     claude: BridgeAdapter,
     codex: BridgeAdapter,
+    workBuddy: BridgeAdapter,
     receiptStore: HostHookReceiptStore,
     configFile: URL,
     packDirectory: URL
@@ -143,8 +144,12 @@ private func bridgeFixture(
         host: .codex,
         connected: initiallyConnected,
         observesReceipt: codexObservesReceipt)
+    let workBuddy = BridgeAdapter(
+        host: .workBuddy,
+        connected: initiallyConnected,
+        observesReceipt: false)
     let manager = HostIntegrationManager(
-        adapters: [claude, codex],
+        adapters: [claude, codex, workBuddy],
         bootstrapper: bootstrapper)
     let audioEnvironment = AudioImportEnvironment(
         userPacksDirectory: packs,
@@ -158,7 +163,7 @@ private func bridgeFixture(
         configFile: config,
         audioEnvironment: audioEnvironment,
         receiptStore: receiptStore)
-    return (bridge, bootstrapper, claude, codex, receiptStore, config, pack)
+    return (bridge, bootstrapper, claude, codex, workBuddy, receiptStore, config, pack)
 }
 
 @MainActor
@@ -170,13 +175,16 @@ func runHostIntegrationManagerBridgeSuites() async {
             let bootstrapCounts = fixture.bootstrapper.counts()
             let claudeCounts = await fixture.claude.counts()
             let codexCounts = await fixture.codex.counts()
+            let workBuddyCounts = await fixture.workBuddy.counts()
 
             expect(bootstrapCounts.bootstrap == 1, "首启必须恰好调用一次共享 bootstrap")
             expect(bootstrapCounts.inspect >= 2, "manager 初始化与 bootstrap 后必须探测 runtime")
             expect(claudeCounts.connect == 0, "首启不得自动 connect Claude Code")
             expect(codexCounts.connect == 0, "首启不得自动 connect Codex")
+            expect(workBuddyCounts.connect == 0, "首启不得自动 connect WorkBuddy")
             expect(claudeCounts.inspect == 1, "首启必须 inspect Claude Code")
             expect(codexCounts.inspect == 1, "首启必须 inspect Codex")
+            expect(workBuddyCounts.inspect == 1, "首启必须 inspect WorkBuddy")
             expect(
                 state.snapshots.map(\.host) == HostID.productVisibleCases,
                 "首启状态必须同代返回三条产品宿主快照")
@@ -197,14 +205,18 @@ func runHostIntegrationManagerBridgeSuites() async {
             _ = try? await fixture.bridge.perform(.connect(.claudeCode))
             var claudeCounts = await fixture.claude.counts()
             var codexCounts = await fixture.codex.counts()
+            var workBuddyCounts = await fixture.workBuddy.counts()
             expect(claudeCounts.connect == 1, "connect Claude Code 必须只调用 Claude adapter")
             expect(codexCounts.connect == 0, "connect Claude Code 不得写 Codex")
+            expect(workBuddyCounts.connect == 0, "connect Claude Code 不得写 WorkBuddy")
 
             let repair = try? await fixture.bridge.perform(.repair(.codex))
             claudeCounts = await fixture.claude.counts()
             codexCounts = await fixture.codex.counts()
+            workBuddyCounts = await fixture.workBuddy.counts()
             expect(claudeCounts.connect == 1, "repair Codex 不得再次 connect Claude Code")
             expect(codexCounts.connect == 1, "repair 必须复用目标 adapter 的 connect")
+            expect(workBuddyCounts.connect == 0, "repair Codex 不得 connect WorkBuddy")
             expect(
                 repair?.feedbackMessage == "Codex 已连接，当前代次已收到真实回执",
                 "刷新后已有当前代次回执时，反馈不得还说等待确认")
@@ -212,12 +224,117 @@ func runHostIntegrationManagerBridgeSuites() async {
             let disconnected = try? await fixture.bridge.perform(.disconnect(.claudeCode))
             claudeCounts = await fixture.claude.counts()
             codexCounts = await fixture.codex.counts()
+            workBuddyCounts = await fixture.workBuddy.counts()
             expect(claudeCounts.disconnect == 1, "disconnect 必须调用目标 Claude adapter")
             expect(codexCounts.disconnect == 0, "disconnect Claude Code 不得写 Codex")
+            expect(workBuddyCounts.disconnect == 0, "disconnect Claude Code 不得写 WorkBuddy")
             expect(
                 disconnected?.state.snapshots.first(where: { $0.host == .codex })?
                     .configuration == .configured,
                 "断开一侧后刷新不得清空另一侧状态")
+        }
+    }
+
+    await suite("WorkBuddy 动作：只改变连接事实，不创建或删除 Surface 声音覆盖") {
+        await withTempDirectory { root in
+            let fixture = bridgeFixture(root: root)
+            let originalConfig = Data(
+                """
+                {
+                  "selected_pack": "dual",
+                  "events": { "task_start": true, "stop": true },
+                  "surface_overrides": {
+                    "workbuddy": { "selected_pack": "workbuddy-custom" }
+                  },
+                  "future_field": { "preserve": true }
+                }
+                """.utf8)
+            writeFixture(originalConfig, to: fixture.configFile)
+
+            let connected = try? await fixture.bridge.perform(.connect(.workBuddy))
+            var workBuddyCounts = await fixture.workBuddy.counts()
+            var claudeCounts = await fixture.claude.counts()
+            var codexCounts = await fixture.codex.counts()
+            expect(workBuddyCounts.connect == 1, "Connect 必须只调用 WorkBuddy adapter")
+            expect(
+                claudeCounts.connect == 0 && codexCounts.connect == 0,
+                "Connect WorkBuddy 不得写 Claude Code 或 Codex adapter")
+            expect(
+                (try? Data(contentsOf: fixture.configFile)) == originalConfig,
+                "Connect 不得隐式创建、重写或删除 Surface 声音覆盖")
+            expect(
+                connected?.state.matrix.summary(for: .workBuddy)
+                    == .awaitingActivation(supported: 2, total: 5),
+                "Connect 后 WorkBuddy 必须进入 2/5 awaiting，不得伪造真实回执")
+
+            let repaired = try? await fixture.bridge.perform(.repair(.workBuddy))
+            workBuddyCounts = await fixture.workBuddy.counts()
+            claudeCounts = await fixture.claude.counts()
+            codexCounts = await fixture.codex.counts()
+            expect(workBuddyCounts.connect == 2, "Repair 必须复用 WorkBuddy connect seam")
+            expect(
+                claudeCounts.connect == 0 && codexCounts.connect == 0,
+                "Repair WorkBuddy 不得 connect Claude Code 或 Codex adapter")
+            expect(
+                (try? Data(contentsOf: fixture.configFile)) == originalConfig,
+                "Repair 不得把连接动作扩张成声音偏好写入")
+            let expectedRepair = PreviewFixtures.workBuddyVisualScenarios.first {
+                $0.phase == .repairedAwaitingActivation
+            }
+            let repairedRow = repaired.flatMap {
+                hostSourceRowPresentations(from: $0.state.matrix).first { $0.host == .workBuddy }
+            }
+            let expectedRepairRow = expectedRepair.flatMap {
+                hostSourceRowPresentations(from: $0.state.matrix).first { $0.host == .workBuddy }
+            }
+            expect(
+                repairedRow == expectedRepairRow,
+                "真实 Repair outcome 必须接入 repaired-awaiting fixture 的 WorkBuddy 来源行")
+            expect(
+                Event.allCases.map {
+                    repaired?.state.matrix.cell(host: .workBuddy, event: $0)?.state
+                }
+                    == Event.allCases.map {
+                        expectedRepair?.state.matrix.cell(host: .workBuddy, event: $0)?.state
+                    },
+                "真实 Repair outcome 的五格状态必须与 repaired-awaiting fixture 完全一致")
+
+            let disconnected = try? await fixture.bridge.perform(.disconnect(.workBuddy))
+            workBuddyCounts = await fixture.workBuddy.counts()
+            claudeCounts = await fixture.claude.counts()
+            codexCounts = await fixture.codex.counts()
+            expect(workBuddyCounts.disconnect == 1, "Disconnect 必须只调用 WorkBuddy adapter")
+            expect(
+                claudeCounts.disconnect == 0 && codexCounts.disconnect == 0,
+                "Disconnect WorkBuddy 不得写 Claude Code 或 Codex adapter")
+            expect(
+                (try? Data(contentsOf: fixture.configFile)) == originalConfig,
+                "Disconnect 不得删除既有 Surface 声音覆盖或未来字段")
+            expect(
+                disconnected?.state.matrix.summary(for: .workBuddy)
+                    == .notConnected(supported: 2, total: 5),
+                "Disconnect 后必须回到 WorkBuddy 2/5 未连接态")
+        }
+    }
+
+    await suite("WorkBuddy Connect：缺少 Surface override 时也不隐式创建") {
+        await withTempDirectory { root in
+            let fixture = bridgeFixture(root: root)
+            let originalConfig = Data(
+                """
+                {
+                  "selected_pack": "dual",
+                  "events": { "task_start": true, "stop": true },
+                  "future_field": { "preserve": true }
+                }
+                """.utf8)
+            writeFixture(originalConfig, to: fixture.configFile)
+
+            _ = try? await fixture.bridge.perform(.connect(.workBuddy))
+
+            expect(
+                (try? Data(contentsOf: fixture.configFile)) == originalConfig,
+                "Connect 不得在缺少 override 时创建 WorkBuddy Surface 声音覆盖")
         }
     }
 

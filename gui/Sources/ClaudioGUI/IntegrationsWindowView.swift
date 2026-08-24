@@ -868,18 +868,10 @@ struct IntegrationsWindowView: View {
         _ action: IntegrationsWindowInspectorAction,
         hostStatus: HostSourceRowStatus?
     ) -> String {
-        switch action {
-        case .copyHooksCommand: return l10n.text(.actionCopyHooks)
-        case .redetect: return l10n.text(.actionRedetect)
-        case .connect(let host): return l10n.format(.actionConnect, host.displayName)
-        case .repair(let host):
-            return hostStatus == .legacy
-                ? l10n.text(.actionUpgrade)
-                : l10n.format(.actionRepair, host.displayName)
-        case .disconnect(let host): return l10n.format(.actionDisconnect, host.displayName)
-        case .clearReceiptHistory(let host):
-            return l10n.format(.actionClearReceiptHistory, host.displayName)
-        }
+        localizedIntegrationsInspectorActionTitle(
+            action,
+            hostStatus: hostStatus,
+            language: languageStore.language)
     }
 
     private func actionIdentifier(_ action: IntegrationsWindowInspectorAction) -> String {

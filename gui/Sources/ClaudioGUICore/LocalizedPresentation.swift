@@ -115,6 +115,28 @@ public func localizedHostSourceRows(
     rows.map { localizedHostSourceRow($0, language: language) }
 }
 
+/// Integrations 检查器动作的唯一双语可见标题投影。SwiftUI 与自动化基线都消费这个 seam，
+/// 避免视图内的私有映射与 pre-RC 验收文案分叉。
+public func localizedIntegrationsInspectorActionTitle(
+    _ action: IntegrationsWindowInspectorAction,
+    hostStatus: HostSourceRowStatus?,
+    language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    switch action {
+    case .copyHooksCommand: return l10n.text(.actionCopyHooks)
+    case .redetect: return l10n.text(.actionRedetect)
+    case .connect(let host): return l10n.format(.actionConnect, host.displayName)
+    case .repair(let host):
+        return hostStatus == .legacy
+            ? l10n.text(.actionUpgrade)
+            : l10n.format(.actionRepair, host.displayName)
+    case .disconnect(let host): return l10n.format(.actionDisconnect, host.displayName)
+    case .clearReceiptHistory(let host):
+        return l10n.format(.actionClearReceiptHistory, host.displayName)
+    }
+}
+
 public func localizedCellStatus(
     _ cell: HostCapabilityCellPresentation,
     language: ClaudioAppLanguage
