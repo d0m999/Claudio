@@ -178,11 +178,12 @@ func runHostIntegrationManagerBridgeSuites() async {
             expect(claudeCounts.inspect == 1, "首启必须 inspect Claude Code")
             expect(codexCounts.inspect == 1, "首启必须 inspect Codex")
             expect(
-                state.snapshots.map(\.host) == HostID.allCases,
-                "首启状态必须同代返回两条宿主快照")
+                state.snapshots.map(\.host) == HostID.productVisibleCases,
+                "首启状态必须同代返回三条产品宿主快照")
             expect(
-                hostSourceRowPresentations(from: state.matrix).map(\.host) == HostID.allCases,
-                "首启矩阵不得隐藏任一宿主")
+                hostSourceRowPresentations(from: state.matrix).map(\.host)
+                    == HostID.productVisibleCases,
+                "首启矩阵不得隐藏任一产品宿主，也不得显示 AX identity")
         }
     }
 
@@ -288,8 +289,8 @@ func runHostIntegrationManagerBridgeSuites() async {
                 outcome?.feedbackMessage.contains("fixture 拒绝连接") == true,
                 "失败反馈必须保留 manager 的具体原因")
             expect(
-                outcome?.state.snapshots.map(\.host) == HostID.allCases,
-                "单侧失败仍必须同代返回两条宿主快照")
+                outcome?.state.snapshots.map(\.host) == HostID.productVisibleCases,
+                "单侧失败仍必须同代返回三条产品宿主快照")
             expect(
                 codexAfter > codexBefore,
                 "Claude 连接失败后仍必须刷新 Codex，不能把另一侧冻结在旧状态")

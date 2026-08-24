@@ -50,10 +50,10 @@ private func hostPresentationMatrix(
     capabilities: [HostID: [HostCapabilityBinding]]? = nil
 ) -> AudibilityMatrix {
     AudibilityMatrix.make(
-        snapshots: snapshots ?? HostID.allCases.map { hostPresentationSnapshot($0) },
+        snapshots: snapshots ?? HostID.productVisibleCases.map { hostPresentationSnapshot($0) },
         capabilities: capabilities
             ?? Dictionary(
-                uniqueKeysWithValues: HostID.allCases.map {
+                uniqueKeysWithValues: HostID.productVisibleCases.map {
                     ($0, HostCapabilityCatalog.bindings(for: $0))
                 }),
         soundCoverage: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }),
@@ -84,11 +84,13 @@ func runHostIntegrationPresentationSuites() {
         }
     }
 
-    suite("声音来源行：稳定 registry 永久等权出现，能力数是实现事实") {
+    suite("声音来源行：产品 registry 永久等权出现，能力数是实现事实") {
         let rows = hostSourceRowPresentations(from: hostPresentationMatrix())
 
-        expect(rows.count == HostID.allCases.count, "声音来源必须覆盖稳定 registry，实得 \(rows.count)")
-        expect(rows.map(\.host) == HostID.allCases, "宿主行顺序必须服从稳定 registry")
+        expect(
+            rows.count == HostID.productVisibleCases.count,
+            "声音来源必须覆盖产品 registry，实得 \(rows.count)")
+        expect(rows.map(\.host) == HostID.productVisibleCases, "宿主行顺序必须服从产品 registry")
         expect(rows[0].title == "Claude Code", "第一行标题必须是 Claude Code")
         expect(rows[0].readinessText == "5/5 已就绪", "Claude Code 应显示 5/5 已就绪")
         expect(rows[0].status == .ready, "Claude Code 完整连接应使用 ready 状态")
@@ -105,39 +107,34 @@ func runHostIntegrationPresentationSuites() {
             rows[2].detailText == "当前版本已实现 2/5；其余能力尚未启用",
             "接口能力与已实现能力不得混成假 5/5")
         expect(
-            rows.suffix(2).allSatisfy {
-                $0.status == .unavailable
-                    && $0.host.descriptor.mechanism == .accessibilityBeta
-                    && $0.host.descriptor.controlSurface == .guiOnly
-            },
-            "两个 Desktop AX surface 必须作为 GUI-only Beta 不可用占位出现")
+            rows.allSatisfy { $0.host.descriptor.mechanism == .nativeHooks },
+            "普通声音来源不得显示 Desktop AX Beta 占位")
         let groups = hostSourceProductGroups(from: rows)
         let visualOrder = hostSurfacePresentationOrder(from: rows)
         expect(groups.map(\.product) == HostProductID.allCases, "来源必须按产品稳定分组")
         expect(
             visualOrder
-                == [
-                    .codex, .chatGPTDesktopAX, .claudeCode, .claudeDesktopAX, .workBuddy,
-                ],
+                == [.codex, .claudeCode, .workBuddy],
             "Product → Surface 必须形成来源卡、矩阵与焦点共用的唯一视觉顺序")
         expect(
             groups.first(where: { $0.product == .chatGPT })?.surfaces.map(\.host)
-                == [.codex, .chatGPTDesktopAX],
-            "ChatGPT 产品必须动态包含 Codex 与 Desktop AX 两个 surface")
+                == [.codex],
+            "ChatGPT 产品在普通 UI 中只能包含 Codex surface")
         expect(
             groups.first(where: { $0.product == .claude })?.surfaces.map(\.host)
-                == [.claudeCode, .claudeDesktopAX],
-            "Claude 产品必须动态包含 Code 与 Desktop AX 两个 surface")
+                == [.claudeCode],
+            "Claude 产品在普通 UI 中只能包含 Claude Code surface")
         expect(
-            integrationsInspectorActions(for: rows[3]).isEmpty
-                && integrationsInspectorActions(for: rows[4]).isEmpty,
-            "未实现的 AX 占位不得暴露伪连接或清理动作")
+            Set(rows.map(\.host)).isDisjoint(with: [.chatGPTDesktopAX, .claudeDesktopAX]),
+            "AX identity 不得通过产品分组重新进入普通 UI")
     }
 
     suite("声音来源行：缺少一个快照也不能隐藏该宿主；Codex 待确认文案固定") {
         let onlyClaude = hostSourceRowPresentations(
             from: hostPresentationMatrix(snapshots: [hostPresentationSnapshot(.claudeCode)]))
-        expect(onlyClaude.map(\.host) == HostID.allCases, "单宿主连接时仍须保留全部声音来源行")
+        expect(
+            onlyClaude.map(\.host) == HostID.productVisibleCases,
+            "单宿主连接时仍须保留全部产品声音来源行")
         expect(onlyClaude[1].status == .notConnected, "没有 Codex 快照应呈现未连接")
         expect(onlyClaude[1].readinessText == "4/5 未连接", "未连接仍须保留 Codex 的 4/5 能力事实")
 
@@ -206,7 +203,7 @@ func runHostIntegrationPresentationSuites() {
             "每个事件行必须按同一视觉顺序提供全部单元")
         expect(
             presentation.rows.flatMap(\.cells).count == Event.allCases.count
-                * HostID.allCases.count,
+                * HostID.productVisibleCases.count,
             "标准矩阵必须完整提供全部事件与宿主组合")
 
         let permission = presentation.cell(host: .codex, event: .notification)
@@ -230,7 +227,7 @@ func runHostIntegrationPresentationSuites() {
 
     suite("可听能力矩阵：删除 adapter 映射会暴露缺失，不得由 GUI 硬编码补回第四格") {
         var capabilities = Dictionary(
-            uniqueKeysWithValues: HostID.allCases.map {
+            uniqueKeysWithValues: HostID.productVisibleCases.map {
                 ($0, HostCapabilityCatalog.bindings(for: $0))
             })
         capabilities[.codex] = capabilities[.codex]?.filter { $0.event != .notification }
@@ -501,7 +498,7 @@ func runHostIntegrationPresentationSuites() {
         }
     }
 
-    suite("IntegrationsWindow 布局：默认五列改用事件卡，足够宽才显示矩阵") {
+    suite("IntegrationsWindow 布局：默认三列改用事件卡，足够宽才显示矩阵") {
         let defaultWindowCapabilityWidth = 840.0 - max(300.0, 840.0 * 0.39) - 41.0
         let defaultWindow = integrationsWindowLayoutAdaptation(
             for: .standard,
@@ -517,21 +514,21 @@ func runHostIntegrationPresentationSuites() {
             defaultWindow.mode
                 == .eventCards(
                     cardCount: Event.allCases.count,
-                    hostRowsPerCard: HostID.allCases.count),
-            "默认 840px 左右分栏的五列空间不足，必须使用纵向事件卡，实得 \(defaultWindow.mode)")
+                    hostRowsPerCard: HostID.productVisibleCases.count),
+            "默认 840px 左右分栏的三列空间不足，必须使用纵向事件卡，实得 \(defaultWindow.mode)")
         expect(!defaultWindow.allowsHorizontalScrolling, "默认窗口不得用横向滚动隐藏拥挤")
         expect(
             wide.mode
                 == .capabilityMatrix(
                     eventRowCount: Event.allCases.count,
-                    hostColumnCount: HostID.allCases.count),
+                    hostColumnCount: HostID.productVisibleCases.count),
             "每个宿主列达到可读宽度后应恢复完整动态矩阵，实得 \(wide.mode)")
         expect(!wide.allowsHorizontalScrolling, "宽窗口矩阵也不应依赖横向滚动")
         expect(
             maximum.mode
                 == .eventCards(
                     cardCount: Event.allCases.count,
-                    hostRowsPerCard: HostID.allCases.count),
+                    hostRowsPerCard: HostID.productVisibleCases.count),
             "最大字号必须重排为事件卡并保留全部宿主子行，实得 \(maximum.mode)")
         expect(!maximum.allowsHorizontalScrolling, "最大字号严禁横向滚动或裁切")
     }

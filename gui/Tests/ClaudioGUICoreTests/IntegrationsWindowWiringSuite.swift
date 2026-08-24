@@ -298,7 +298,7 @@ func runIntegrationsWindowWiringSuites() {
             return
         }
         expect(
-            app.contains("let disconnectedSnapshots = HostID.allCases.map")
+            app.contains("let disconnectedSnapshots = HostID.productVisibleCases.map")
                 && app.contains("HostIntegrationSnapshot.disconnected(host: $0)")
                 && app.contains("AudibilityMatrix.make("),
             "默认 shell 必须从两个明确 disconnected snapshot 生成矩阵")
@@ -705,7 +705,7 @@ func runIntegrationsWindowWiringSuites() {
             "重新检测与连接动作必须经注入 handler 回到共享 manager seam")
     }
 
-    suite("IntegrationsWindow layout：五列按可读宽度切换矩阵/事件卡，只有纵向滚动") {
+    suite("IntegrationsWindow layout：三列按可读宽度切换矩阵/事件卡，只有纵向滚动") {
         guard
             let view = integrationsSource(
                 "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift")
@@ -722,7 +722,7 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             view.contains("sourceSummaryButton(row)")
                 && view.contains(".frame(maxWidth: .infinity"),
-            "两条宿主摘要必须共享实现并各自占满等宽槽")
+            "三条产品宿主摘要必须共享实现并各自占满等宽槽")
         expect(
             view.contains("usesNarrowCapabilityTable")
                 && view.contains(

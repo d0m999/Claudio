@@ -1,15 +1,15 @@
 # PLAN — WorkBuddy 正式集成与 surface 声音配置
 
-> 状态：**本地实现完成，真实 WorkBuddy 回执验收待执行**
+> 状态：**2/5 真实 WorkBuddy callback 闭环已完成并 Disconnect；Current Activation 为 none**
 >
-> 更新：2026-08-23
+> 更新：2026-08-24
 >
 > 不授权 commit、push、发布或修改真实 `~/.workbuddy/settings.json`。
 
 ## 1. 用户结果
 
-- Apps/集成窗口永久列出 Claude Code、Codex、WorkBuddy 三个稳定 native adapter，并在 Claude / ChatGPT
-  产品下列出 GUI-only AX Beta 不可用占位；未安装不等于消失，占位也不冒充可连接 adapter。
+- Apps/集成窗口永久列出 Claude Code、Codex、WorkBuddy 三个产品可见 native adapter；未安装不等于
+  消失。AX identity 只保留兼容解码和隔离 `DEBUG` tracer，不进入正常产品 registry 或普通 UI。
 - WorkBuddy 永久显示五个公共事件，首发诚实标为 2/5 已实现，不用接口声明伪造 5/5。
 - popup 只显示当前已配置或可用的事件来源，并允许选择全局默认或某个 surface 的声音配置。
 - Events/popup 可编辑已实现事件的 pack 和静音；未实现/不支持事件禁用，不提供假按钮。
@@ -68,8 +68,8 @@ WorkBuddy 首发绑定：
 ## 3. UI 分工
 
 - popup：当前 surface 摘要、Global/Surface scope、pack、事件静音、试听和 reset；不显示全局假 `3/5`。
-- Apps/集成窗口：按 Product → Surface 分组展示连接、授权、scope/version 失效、binding 状态、
-  latest receipt、Repair、Disconnect、回执历史清除；AX Beta 只显示不可用说明，不提供假动作。
+- Apps/集成窗口：按 Product → Surface 分组展示连接、scope/version 失效、binding 状态、
+  latest receipt、Repair、Disconnect、回执历史清除；只列三个产品可见 native surface。
 - Events：声音/pack/静音/试听；只列配置或可用 surface；AX 未生产化前完全隐藏。
 - 视觉遵循原生 macOS 信息层级；HTML 为交互主原型，SVG 为只读快照，SwiftUI 视觉批准另行验收。
 
@@ -77,8 +77,9 @@ WorkBuddy 首发绑定：
 
 - helper 测试覆盖 transform 幂等、未知字段、第三方 hook、错位/冲突、两条 binding、版本 scope、
   disconnect、surface 解析/写入、回执历史边界与 doctor 三行。
-- GUI 测试覆盖动态五 surface 矩阵与 Product → Surface 分组、WorkBuddy 2/5、AX 不可用占位、
-  surface effective profile、定向写、reset、全局音量、本地化、焦点与 destructive confirmation 接线。
+- GUI 测试覆盖动态三 surface 矩阵与 Product → Surface 分组、WorkBuddy 2/5、AX 不进入普通 UI、
+  历史 AX token 可解码、surface effective profile、定向写、reset、全局音量、本地化、焦点与
+  destructive confirmation 接线；既有 AX tracer 隔离测试继续执行。
 - 必须通过：
 
 ```bash
@@ -89,8 +90,24 @@ jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
 git diff --check
 ```
 
-## 5. 真实验收（尚未授权/执行）
+## 5. 真实验收结果（Issue #15）
 
-在单独授权后，记录 WorkBuddy/Claudio 精确版本，备份真实配置，显式 Connect，分别触发
-`UserPromptSubmit` 与 `Stop`，验证两条 current-binding receipt、声音结果、doctor 和 UI；再 Disconnect
-并验证第三方条目、未知配置、surface 偏好和历史保留。没有这份 receipt 前，只能称本地实现完成。
+2026-08-24 在单独授权下已完成可逆 Connect → callback → GUI 核对 → Disconnect：
+
+- `UserPromptSubmit → task_start` 与 `Stop → stop` 均产生 schema 2、匹配当前
+  binding/installation/scope 的真实回执；声音结果因有效配置继承全局静音而均为 `muted`。
+- GUI 人工核对确认 WorkBuddy 为 2/5；`StopFailure`、`Notification`、`SubagentStop` 始终为
+  `notImplemented`，没有用接口声明伪造实现。
+- Disconnect 后自有 hooks 与 active installation marker 已移除，Current Activation 为 `none`；
+  第三方 hooks、未知字段、声音偏好、备份和脱敏历史按契约保留。
+- 本闭环是历史真实宿主证据，不是当前激活、RC、发布或正式验收。
+
+完整脱敏证据与时间线只记录在
+[0.1.0 验收账本](../docs/release-acceptance-0.1.0.md#workbuddy-真实回调闭环issue-15)。
+
+## 6. 剩余三个事件的 evidence-first 门
+
+`StopFailure`、`Notification`、`SubagentStop` 必须分别创建独立计划/Issue。每项在实现前都要取得
+当前 WorkBuddy 版本的可重复触发证据、最小且不含用户内容的 callback contract、负向/重复触发结果和
+fail-closed 停止条件；实现后再分别验证 binding、installation、scope、GUI/声音和可逆 Disconnect。
+任一事件通过都不能把 WorkBuddy 状态提前写成 5/5。

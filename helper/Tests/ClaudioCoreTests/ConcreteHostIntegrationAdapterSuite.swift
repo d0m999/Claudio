@@ -1370,7 +1370,9 @@ func runConcreteHostIntegrationAdapterSuites() async {
             let manager = HostIntegrationManager(
                 adapters: [claude, codex], bootstrapper: ReadyRuntimeBootstrapper())
             let initial = await manager.refresh()
-            expect(initial.map(\.host) == HostID.allCases, "刷新必须固定返回两宿主")
+            expect(
+                initial.map(\.host) == HostID.productVisibleCases,
+                "刷新必须固定返回三个正常产品宿主")
 
             async let claudeResult = manager.connect(.claudeCode)
             async let codexResult = manager.connect(.codex)

@@ -626,7 +626,7 @@ private func integrationsReceiptTransitions(
     from previous: IntegrationsWindowContent,
     to current: IntegrationsWindowContent
 ) -> [IntegrationsReceiptTransition] {
-    HostID.allCases.compactMap { host in
+    HostID.productVisibleCases.compactMap { host in
         let oldEvidence = previous.inspectorFacts[host]?.latestReceiptEvidence
         guard let currentFacts = current.inspectorFacts[host],
             let newEvidence = currentFacts.latestReceiptEvidence,

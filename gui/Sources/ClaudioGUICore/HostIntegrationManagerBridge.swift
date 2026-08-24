@@ -156,7 +156,7 @@ public actor HostIntegrationManagerBridge {
         // 控件。把两轴在进入唯一矩阵前合成；`AudibilityMatrix` 仍先判 unsupported，因此 Codex
         // StopFailure 不会被误画成 muted。
         let masterVolumeAllowsAudio = config.masterVolume > 0
-        for host in HostID.allCases {
+        for host in HostID.productVisibleCases {
             switch config.resolveSoundProfile(for: host.surfaceID) {
             case .success(let profile):
                 var effectiveConfig = config

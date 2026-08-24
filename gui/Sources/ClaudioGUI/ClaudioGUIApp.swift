@@ -97,11 +97,11 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         #else
         let nativeProbeState: HostIntegrationPresentationState? = nil
         #endif
-        let disconnectedSnapshots = HostID.allCases.map {
+        let disconnectedSnapshots = HostID.productVisibleCases.map {
             HostIntegrationSnapshot.disconnected(host: $0)
         }
         let hostCapabilities = Dictionary(
-            uniqueKeysWithValues: HostID.allCases.map { host in
+            uniqueKeysWithValues: HostID.productVisibleCases.map { host in
                 (host, HostCapabilityCatalog.bindings(for: host))
             })
         let disconnectedMatrix = AudibilityMatrix.make(
@@ -224,7 +224,7 @@ private func nativeHostCardProbeState() -> HostIntegrationPresentationState? {
         activation: .none)
     let snapshots = [claudeSnapshot, codexSnapshot]
     let capabilities = Dictionary(
-        uniqueKeysWithValues: HostID.allCases.map { host in
+        uniqueKeysWithValues: HostID.productVisibleCases.map { host in
             (host, HostCapabilityCatalog.bindings(for: host))
         })
     let matrix = AudibilityMatrix.make(

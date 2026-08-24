@@ -269,7 +269,7 @@ func runPanelFocusOrderSuites() {
             .operational(events: [], packCardIDs: [], hasMasterVolume: false),
             .operational(
                 events: [], packCardIDs: ["alpha-pack"], hasMasterVolume: false,
-                hasConfigFailureNotice: true, hostSources: HostID.allCases),
+                hasConfigFailureNotice: true, hostSources: HostID.productVisibleCases),
         ]
         for scope in operationalShapes {
             let order = panelFocusOrder(scope)

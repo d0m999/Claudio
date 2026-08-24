@@ -3,20 +3,19 @@ import Foundation
 
 @MainActor
 func runHostIntegrationManagerOperationSuites() async {
-    await asyncSuite("HostIntegrationManager：缺 adapter 的 GUI-only surface 仍保留 registry 能力占位") {
+    await asyncSuite("HostIntegrationManager：registry 只发布正常产品表面，AX 仅保留直接诊断目录") {
         let manager = HostIntegrationManager(
             adapters: [], bootstrapper: OperationReadyRuntimeBootstrapper())
         let capabilities = await manager.capabilities()
         let descriptors = await manager.descriptors()
         expect(
-            capabilities[.chatGPTDesktopAX]
-                == HostCapabilityCatalog.bindings(for: .chatGPTDesktopAX)
-                && capabilities[.claudeDesktopAX]
-                    == HostCapabilityCatalog.bindings(for: .claudeDesktopAX),
-            "缺少可执行 adapter 不得让 AX Beta surface 从能力 registry 消失")
+            Set(capabilities.keys) == Set(HostID.productVisibleCases)
+                && capabilities[.chatGPTDesktopAX] == nil
+                && capabilities[.claudeDesktopAX] == nil,
+            "manager 能力 registry 不得发布 AX Beta identity")
         expect(
-            descriptors.map(\.host) == HostID.allCases,
-            "descriptor registry 必须动态覆盖全部 Product → Surface")
+            descriptors.map(\.host) == HostID.productVisibleCases,
+            "descriptor registry 必须只覆盖正常产品表面")
     }
 
     await asyncSuite("HostIntegrationManager：连接进行中可观察，失败保持到显式刷新") {

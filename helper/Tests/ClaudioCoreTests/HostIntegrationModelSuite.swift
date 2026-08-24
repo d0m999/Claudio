@@ -217,6 +217,30 @@ func runHostIntegrationModelSuites() {
         }
     }
 
+    suite("宿主 registry：正常产品只列三项，AX identity 仅保留兼容解码与隔离诊断") {
+        expect(
+            HostID.productVisibleCases == [.claudeCode, .codex, .workBuddy],
+            "正常产品 registry 必须固定为三个 native-hook surface")
+        expect(
+            HostID.productVisibleCases.allSatisfy {
+                $0.descriptor.mechanism == .nativeHooks
+                    && $0.descriptor.maturity == .stable
+                    && $0.descriptor.controlSurface == .shared
+            },
+            "产品可见 registry 不得混入 AX Beta 或 GUI-only identity")
+        expect(
+            HostID(rawValue: "chatgpt-desktop-ax") == .chatGPTDesktopAX
+                && HostID(rawValue: "claude-desktop-ax") == .claudeDesktopAX
+                && HostSurfaceID(rawValue: "chatgpt-desktop-ax") == .chatGPTDesktopAX
+                && HostSurfaceID(rawValue: "claude-desktop-ax") == .claudeDesktopAX,
+            "隐藏 AX 不得破坏历史 token 与 DEBUG tracer identity 的解码")
+        expect(
+            Set(HostID.productVisibleCases).isDisjoint(with: [
+                .chatGPTDesktopAX, .claudeDesktopAX,
+            ]),
+            "AX identity 不得重新进入正常产品 registry")
+    }
+
     suite("原生事件归一化：UserPromptSubmit 映射任务开始，未知事件与 Codex StopFailure 拒绝") {
         expect(
             HostCapabilityCatalog.semanticEvent(host: .claudeCode, nativeEvent: "UserPromptSubmit")
@@ -243,6 +267,7 @@ func runHostIntegrationModelSuites() {
     }
 
     suite("AudibilityMatrix 完全消费 adapter 能力数据，Codex 4/5 是中性就绪") {
+        // 故意输入全部兼容 identity，证明矩阵只投影正常产品 registry。
         let readySnapshots = HostID.allCases.map {
             HostIntegrationSnapshot.connectedForTesting(host: $0)
         }
@@ -259,8 +284,15 @@ func runHostIntegrationModelSuites() {
 
         expect(matrix.rows.count == 5, "矩阵必须有五张语义事件行")
         expect(
-            matrix.rows.allSatisfy { $0.cells.count == HostID.allCases.count },
+            matrix.rows.allSatisfy { $0.cells.count == HostID.productVisibleCases.count },
             "每个事件必须永久保留所有已出货宿主子行")
+        expect(
+            matrix.rows.allSatisfy { $0.cells.map(\.host) == HostID.productVisibleCases },
+            "兼容输入中的 AX identity 不得进入产品可听矩阵")
+        expect(
+            matrix.summary(for: .chatGPTDesktopAX) == nil
+                && matrix.cell(host: .claudeDesktopAX, event: .stop) == nil,
+            "产品矩阵不得为 AX identity 生成摘要或格子")
         expect(
             matrix.summary(for: .claudeCode) == .ready(supported: 5, total: 5), "Claude 5/5 ready")
         expect(matrix.summary(for: .codex) == .ready(supported: 4, total: 5), "Codex 4/5 是正常 ready")
@@ -294,7 +326,7 @@ func runHostIntegrationModelSuites() {
     }
 
     suite("AudibilityMatrix：未安装且未连接是中性空态，不是 degraded") {
-        let snapshots = HostID.allCases.map { host in
+        let snapshots = HostID.productVisibleCases.map { host in
             HostIntegrationSnapshot(
                 host: host,
                 runtime: .ready,
@@ -306,7 +338,7 @@ func runHostIntegrationModelSuites() {
         let matrix = AudibilityMatrix.make(
             snapshots: snapshots,
             capabilities: Dictionary(
-                uniqueKeysWithValues: HostID.allCases.map {
+                uniqueKeysWithValues: HostID.productVisibleCases.map {
                     ($0, HostCapabilityCatalog.bindings(for: $0))
                 }),
             soundCoverage: Dictionary(uniqueKeysWithValues: Event.allCases.map { ($0, true) }),

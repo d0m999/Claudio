@@ -135,7 +135,7 @@ public struct SystemSharedRuntimeBootstrapper: SharedRuntimeBootstrapping {
     }
 }
 
-/// 已发布 adapter 的唯一协调者。刷新始终返回稳定 registry，单侧失败不会短路其他来源；
+/// 已发布 adapter 的唯一协调者。刷新始终返回产品可见 registry，单侧失败不会短路其他来源；
 /// bootstrap 只运行共享层。
 public actor HostIntegrationManager {
     private struct InFlightOperation {
@@ -168,13 +168,13 @@ public actor HostIntegrationManager {
 
     public func capabilities() -> [HostID: [HostCapabilityBinding]] {
         Dictionary(
-            uniqueKeysWithValues: HostID.allCases.map { host in
+            uniqueKeysWithValues: HostID.productVisibleCases.map { host in
                 (host, adapters[host]?.capabilities ?? HostCapabilityCatalog.bindings(for: host))
             })
     }
 
     public func descriptors() -> [HostIntegrationDescriptor] {
-        HostID.allCases.map { adapters[$0]?.descriptor ?? $0.descriptor }
+        HostID.productVisibleCases.map { adapters[$0]?.descriptor ?? $0.descriptor }
     }
 
     /// GUI 首启入口：只自举共享 runtime，不连接或改写任何宿主配置，然后刷新全部来源事实。
@@ -201,7 +201,7 @@ public actor HostIntegrationManager {
     }
 
     public func snapshots() -> [HostIntegrationSnapshot] {
-        HostID.allCases.map { host in
+        HostID.productVisibleCases.map { host in
             cachedSnapshots[host]
                 ?? HostIntegrationSnapshot(
                     host: host,
@@ -301,7 +301,7 @@ public actor HostIntegrationManager {
         // connecting/disconnecting/failed 或刚完成的新事实覆盖回 idle。
         let operationRevisionsAtStart = latestOperationRevisions
         let activeHostsAtStart = Set(inFlightOperations.keys)
-        let availableAdapters = HostID.allCases.compactMap { adapters[$0] }
+        let availableAdapters = HostID.productVisibleCases.compactMap { adapters[$0] }
         var inspected: [HostID: HostIntegrationSnapshot] = [:]
         await withTaskGroup(of: HostIntegrationSnapshot.self) { group in
             for adapter in availableAdapters {
@@ -310,7 +310,7 @@ public actor HostIntegrationManager {
             for await snapshot in group { inspected[snapshot.host] = snapshot }
         }
         var refreshed: [HostID: HostIntegrationSnapshot] = [:]
-        for host in HostID.allCases {
+        for host in HostID.productVisibleCases {
             let operationChangedWhileRefreshing =
                 latestOperationRevisions[host] != operationRevisionsAtStart[host]
             if activeHostsAtStart.contains(host) || operationChangedWhileRefreshing,
@@ -331,7 +331,7 @@ public actor HostIntegrationManager {
             refreshed[host] = snapshotWithOperation(snapshot, operation: .idle)
         }
         cachedSnapshots = refreshed
-        return HostID.allCases.compactMap { refreshed[$0] }
+        return HostID.productVisibleCases.compactMap { refreshed[$0] }
     }
 
     private func beginOperation(

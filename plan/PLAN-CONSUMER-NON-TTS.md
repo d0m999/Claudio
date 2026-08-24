@@ -1,60 +1,159 @@
-# PLAN — 普通用户 AI 终端兼容（非 TTS）路线图
+# PLAN — 非 TTS 宿主提示音：状态与决策索引
 
-> 状态：**WorkBuddy 2/5 真实宿主闭环完成并已断开；Chat AX Issue #17 得到技术 no-go**
+> 状态：**AX 路线技术 no-go；WorkBuddy 2/5 历史真实闭环完成、当前已断开**
 >
 > 更新：2026-08-24
 >
-> 本文件是路线图与证据索引，不再混合正式 adapter 实现和 AX 探索。
+> 本文件只维护跨宿主结论、状态、决策门和权威证据入口。每个新 Host Surface 或剩余事件
+> 必须使用独立计划/Issue；不得在本索引里顺带授权实现、宿主写入或真实验收。
 
-## 1. 已选择的交付顺序
+## 1. 当前决策
 
-1. 已交付 WorkBuddy 正式 command-hook adapter、动态宿主/事件绑定模型、surface 声音配置与诚实 UI。
-2. 已取得两条真实 WorkBuddy 回执，完成可逆 Connect → callback → GUI 核对 → Disconnect 验收。
-3. ChatGPT Chat 的只读 Accessibility 可行性 spike 已在单独授权后执行，并在 identity 门失败关闭。
-4. 当前技术 no-go 不满足生产计划门槛；本路线图不授权继续 AX 监听或权限申请。
+1. 正常产品 registry 只包含 Claude Code、Codex、WorkBuddy。ChatGPT Desktop AX 与
+   Claude Desktop AX 保留为兼容解码和 `DEBUG` 诊断 identity，不再进入普通 UI、manager
+   descriptor/capability registry 或可听能力矩阵。
+2. Issue #16 只证明隔离 tracer、脱敏 fixture、隐私边界和生命周期契约；它没有证明真实
+   ChatGPT 集成可用。
+3. Issue #17 在当前 ChatGPT `26.818.31338` / `6892` 上无法形成稳定 surface identity，
+   observer 启动次数为 0，结论是 fail-closed 技术 no-go。AX 不进入可用、发布或生产阶段。
+4. WorkBuddy 已完成 `UserPromptSubmit → task_start`、`Stop → stop` 两条真实回调闭环，
+   随后已 Disconnect；历史回执保留，但 Current Activation 为 `none`。
+5. WorkBuddy 剩余三个事件逐事件进入独立 evidence-first 计划/Issue；在真实宿主证据成立前，
+   不实现、不接线，也不承诺 5/5。
 
-## 2. 子计划
+## 2. 五轴状态矩阵
 
-- [PLAN-CONSUMER-WORKBUDDY.md](PLAN-CONSUMER-WORKBUDDY.md)：正式 adapter、绑定、回执、
-  surface 声音偏好、popup/集成窗口、doctor、测试与真实验收边界。
-- [PLAN-CONSUMER-AX-SPIKE.md](PLAN-CONSUMER-AX-SPIKE.md)：ChatGPT Chat 首个只读 AX spike，
-  版本签名、场景矩阵、隐私边界和停止条件。
-- 描述式 TTS 不在本路线图内，见
-  [PLAN-CONSUMER-TTS-EXECUTION.md](PLAN-CONSUMER-TTS-EXECUTION.md)。
+| Host Surface | 宿主接口 | Claudio 实现 | 历史真实回执 | 带时间戳的当前激活 | 生产/正式验收 |
+|---|---|---|---|---|---|
+| Claude Code | 五个正式 hook 事件 | 5/5 native adapter | 本计划不重验，见发布验收账本 | 本计划未采集当前回执，不推断 | 未通过 |
+| Codex | 4/5；无 `StopFailure`，`PermissionRequest` 仅部分覆盖 Notification | 4/5 native adapter | 本计划不重验，见发布验收账本 | 本计划未采集当前回执，不推断 | 未通过 |
+| WorkBuddy | 五个事件已声明；Notification 为 partial | 2/5 native adapter | 2026-08-24 Issue #15：两条匹配当前 installation/scope 的真实回执 | Disconnect 后为 `none` | 未通过；不构成 RC 或正式验收 |
+| ChatGPT Desktop AX | Issue #17 当前版本无法形成稳定 surface identity | 仅有隔离 `DEBUG` tracer；无 adapter、权限 UX 或生产声音链 | 无真实生命周期回执；其余场景 `not_evaluated` | 不适用 | 技术 no-go |
+| Claude Desktop AX | 本计划未验证任何可用接口 | 仅保留诊断 identity，无产品实现 | 无 | 无 | 未评估且不在路线图中 |
 
-## 3. 当前本地实现事实
+矩阵中的五列是独立事实。接口声明、代码存在、历史回执、当前激活、发布/正式验收之间不能互相替代。
 
-- `HostProductID`、`HostSurfaceID`、descriptor、`HostEventBindingID` 与 implementation/qualifier
-  已进入 Core；固定公共事件仍为五个。
-- registry 现含 Claude Code、Codex、WorkBuddy 三个稳定 native-hook surface，以及归入 Claude / ChatGPT
-  产品的两个 GUI-only AX Beta 不可用占位；完整窗口按 Product → Surface 分组，popup 不显示不可用占位。
-- WorkBuddy 稳定展示五行，但首发只有 `UserPromptSubmit → task_start` 与 `Stop → stop` 两条已实现；
-  `StopFailure`、`SubagentStop` 为接口支持但尚未实现，`Notification` 为部分支持且尚未实现。
-- WorkBuddy 连接只外科式管理用户级 `~/.workbuddy/settings.json` 中属于当前 installation 的两条
-  command hook；第三方条目和未知 JSON 保留。
-- 三个 native adapter 的 activation 均按 installation、surface、binding 和 scope fingerprint 判定；
-  宿主/Claudio 版本或绑定集合变化会使旧证据失效，显式 Repair 轮换 installation 后才发布新 scope。
-- current receipt 使用 schema 2；schema 1 旧回执只保留为脱敏历史，不能合成当前 binding 或点亮 activation。
-- 脱敏回执历史与 current activation 分离：每 surface 最多 20 条、保留 30 天、断开保留，
-  集成窗口提供确认后清除动作。
-- `surface_overrides` 对 pack/事件使用稀疏继承；损坏覆盖 fail closed；`master_volume` 仅全局。
-- popup 只为已配置/可用来源提供声音 scope；完整窗口始终列出稳定 native surface 与 AX Beta 占位。
-- ChatGPT Chat 隔离 tracer 已作为 `DEBUG`、GUI-only、默认关闭的工具进入代码；只有 GUI 存活、
-  三项显式启动输入完整且精确 allowlist/surface identity 命中时才会启动 observer。脱敏 fixture 已走通
-  observer → detector → 受限 evidence 路径；这仍不是授权后的真实 ChatGPT 场景证据。
-- helper 与 GUI 的依赖无关测试、本地 GUI product build 和 localization JSON 必须作为本地代码证据。
+## 3. What already exists
 
-## 4. 已完成与仍未完成的证据边界
+- `HostProductID`、`HostSurfaceID`、`HostID`、descriptor 和 `HostEventBindingID` 已提供稳定身份；
+  AX token 继续可解码，以免删除历史偏好或诊断证据。
+- `HostID.productVisibleCases` 是正常产品 registry 的唯一真相源；manager、Core 矩阵、GUI 默认值、
+  preview 与回执反馈只消费这三个表面。
+- WorkBuddy adapter 已外科式管理当前 installation 的两条 command hook，并复用配置锁、备份、CAS、
+  symlink 与未知 JSON 保留契约。
+- schema 2 current receipt、历史回执、installation/scope fingerprint 和 Disconnect 保留规则已经存在；
+  历史证据不会重新点亮 Current Activation。
+- Chat AX tracer 已被限制为 `DEBUG`、GUI-only、默认关闭，并有 fixture、privacy 与 lifecycle 测试；
+  它继续作为诊断工具存在，不转化为产品 surface。
 
-- Issue #15 已在单独授权下完成真实 WorkBuddy 2/5 callback 闭环；Disconnect 后 Current Activation
-  已清空，自有 hooks 已移除，第三方 hooks、未知字段、声音配置、备份与脱敏历史均按契约保留。
-- 未做签名发行包、Intel/Apple Silicon 双架构或外部正式验收。
-- Issue #17 已在单独授权和用户手动授予 Accessibility 后执行：当前 ChatGPT
-  `26.818.31338` / `6892` 的 surface identity preflight 连续 10 次无法形成 stable anchor facts，
-  observer 启动次数为 0，按 fail-closed 条款得到技术 no-go。其余真实场景为 `not_evaluated`，没有读取
-  prompt、response、会话标题、剪贴板或完整 UI tree；见
-  [脱敏结果](../docs/chat-ax-spike-issue-17.md)。
-- HTML/SVG 是设计基线，不等于 SwiftUI 视觉验收；正式视觉批准仍需人工检查真实 app。
+## 4. 产品路径与测试边界
 
-本地代码完成、一次真实宿主验收、当前激活、真实 AX 矩阵、发布和正式验收是独立状态，任何一个不能
-替代另一个。
+```text
+HostID.allCases（5 个兼容/诊断 identity）
+├── productVisibleCases（3 个正常产品 surface）
+│   ├── HostIntegrationManager descriptor/capability/snapshot registry
+│   ├── AudibilityMatrix
+│   └── Integrations UI / preview / receipt feedback
+└── Desktop AX（2 个）
+    ├── 历史 token 与偏好继续可解码
+    └── DEBUG tracer 直接使用；不得进入普通产品路径
+
+用户打开 Apps/集成窗口
+└── 只看到 Claude Code / Codex / WorkBuddy
+    ├── WorkBuddy 仍诚实显示 2/5
+    └── 不出现 ChatGPT/Claude Desktop AX 占位或假连接动作
+```
+
+代码实施必须覆盖：产品 registry 唯一真相源、manager 与矩阵过滤、GUI 分组/布局/焦点、preview、
+历史 AX token 解码、DEBUG tracer 隔离以及 Release 路径无 tracer 启动。
+
+## 5. 后续决策门
+
+### 5.1 新 ChatGPT 机制
+
+任何 browser extension、Responses API/Codex、自有 consumer 或其他机制都必须创建新的
+`HostSurfaceID`，并在独立计划/Issue 中依次取得：
+
+1. 明确实现和外部写入授权；
+2. 数据最小化、禁止持久化 prompt/response、生命周期与撤销契约；
+3. 精确产品/版本/安装身份的只读 preflight；
+4. 失败关闭的事件映射和进程边界；
+5. fixture、负向测试、真实 callback、Current Activation、GUI/声音人工核对与 Disconnect 证明。
+
+新机制不得继承 AX 的权限、fixture、Issue #16/#17 证据或 production 资格。调研结论只作为入口判断，
+被 `.gitignore` 排除的本机调研文档不作为 tracked plan 的权威依赖。
+
+### 5.2 WorkBuddy 剩余事件
+
+`StopFailure`、`Notification`、`SubagentStop` 分别建立独立诊断/验收 Issue。每个 Issue 必须先证明：
+
+- 当前 WorkBuddy 版本确实发出该原生事件，并记录可重复的最小触发步骤；
+- callback payload 足以做确定性映射，同时不保存用户内容；
+- 不触发、重复触发、宿主失败和过期 scope 都能 fail closed；
+- 实现后产生匹配 binding/installation/scope 的真实回执，完成 GUI/声音核对并可逆 Disconnect。
+
+三项不得合并成一个“5/5”任务。某一项通过不为另外两项提供证据。
+
+## 6. 本地验证
+
+```bash
+swift run --package-path helper claudio-tests
+swift run --package-path gui claudio-gui-tests
+swift build -c debug --package-path gui --product ClaudioGUI
+jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
+git diff --check
+```
+
+原生 SwiftUI、VoiceOver、键盘/焦点、Intel/Apple Silicon、真实宿主 callback 和正式 RC 仍属于独立人工证据。
+
+## Implementation Tasks
+
+Synthesized from this review's findings. Each task derives from a specific finding above.
+
+- [x] **T1 (P1, human: ~2h / CC: ~20min)** — ClaudioCore — 建立唯一产品可见 surface registry
+  - Surfaced by: Architecture Review — `HostID.allCases` 同时承担兼容身份与产品 registry，导致 AX 泄漏。
+  - Files: `helper/Sources/ClaudioCore/`、`helper/Tests/ClaudioCoreTests/`
+  - Verify: helper harness 证明三项产品 registry 与两项 AX token 兼容解码。
+- [x] **T2 (P1, human: ~3h / CC: ~30min)** — ClaudioGUICore — 统一过滤普通 UI 与矩阵
+  - Surfaced by: Code Quality Review — manager、矩阵、GUI、preview 各自消费 `allCases`。
+  - Files: `gui/Sources/`、`gui/Tests/ClaudioGUICoreTests/`
+  - Verify: GUI harness 证明三个产品表面、无 AX 占位、动态布局与 tracer 隔离。
+- [x] **T3 (P1, human: ~2h / CC: ~20min)** — Plans — 同步五轴状态和 WorkBuddy 实证
+  - Surfaced by: Architecture Review — 旧计划混合路线图、实现细节和过期验收状态。
+  - Files: `plan/`
+  - Verify: tracked plan 不链接 ignored research，且明确历史回执不等于当前激活。
+- [x] **T4 (P1, human: ~2h / CC: ~45min)** — Verification — 执行完整本地回归
+  - Surfaced by: Test Review — 部分 UI 过滤会留下 manager/矩阵泄漏或破坏历史解码。
+  - Files: `helper/Tests/`、`gui/Tests/`
+  - Verify: helper、GUI、debug build、localization JSON 和 `git diff --check` 全部通过。
+
+## NOT in scope
+
+- 继续或放宽 AX observer、申请生产 Accessibility 权限：Issue #17 已触发停止条件。
+- 删除 AX enum/token、历史偏好、fixture 或脱敏证据：它们仍承担兼容和诊断职责。
+- 实现 WorkBuddy 剩余三个事件：尚无逐事件真实宿主证据。
+- 创建 browser extension、Responses API consumer 或新的 ChatGPT surface：需要独立计划、授权和隐私契约。
+- 修改真实宿主配置、重新 Connect、生成真实回执或自动试听：本次代码/文档任务不授权宿主写入。
+- commit、push、release、签名、公证或正式验收：这些是独立动作和状态。
+
+## 7. 权威证据入口
+
+- [WorkBuddy 计划](PLAN-CONSUMER-WORKBUDDY.md)
+- [AX spike 计划与停止条件](PLAN-CONSUMER-AX-SPIKE.md)
+- [0.1.0 验收账本与 Issue #15 真实闭环](../docs/release-acceptance-0.1.0.md)
+- [Issue #17 脱敏 no-go 结果](../docs/chat-ax-spike-issue-17.md)
+
+## GSTACK REVIEW REPORT
+
+| Review | Trigger | Why | Runs | Status | Findings |
+|--------|---------|-----|------|--------|----------|
+| CEO Review | `/plan-ceo-review` | Scope & strategy | 0 | — | 未运行 |
+| Codex Review | `/codex review` | Independent 2nd opinion | 1 | CLEAR | 同会话反向检查；无方案冲突，补强兼容解码边界 |
+| Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR | 8 issues，0 critical gaps，全部折叠并实现 |
+| Design Review | `/plan-design-review` | UI/UX gaps | 2 | CLEAR | 最近评分 3/10 → 9/10，3 decisions |
+| DX Review | `/plan-devex-review` | Developer experience gaps | 0 | — | 未运行 |
+
+- **CODEX:** 当前会话已运行 free in-host challenge；确认隐藏产品入口时必须保留 AX token 与历史数据解码。
+- **VERDICT:** CODEX + ENG + DESIGN CLEARED；本轮代码、计划与自动化验证已完成。
+
+NO UNRESOLVED DECISIONS

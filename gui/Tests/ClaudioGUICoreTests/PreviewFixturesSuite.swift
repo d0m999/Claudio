@@ -426,14 +426,14 @@ func runPreviewFixturesSuites() {
     suite("Host integration fixtures: every frame is a catalog-driven dynamic AudibilityMatrix") {
         for scenario in PreviewFixtures.hostIntegrationScenarios {
             expect(
-                scenario.state.snapshots.map(\.host) == HostID.allCases,
+                scenario.state.snapshots.map(\.host) == HostID.productVisibleCases,
                 "\(scenario.id) 必须同时带全部已出货宿主快照")
             expect(
                 scenario.state.matrix.rows.map(\.event) == Event.allCases,
                 "\(scenario.id) 必须由 Event.allCases 生成五行")
             for row in scenario.state.matrix.rows {
                 expect(
-                    row.cells.map(\.host) == HostID.allCases,
+                    row.cells.map(\.host) == HostID.productVisibleCases,
                     "\(scenario.id)/\(row.event) 必须由 registry 生成全部格子")
                 for cell in row.cells {
                     expect(
@@ -514,7 +514,7 @@ func runPreviewFixturesSuites() {
             "一侧 degraded 不得冻结另一侧")
 
         let sharedFailure = scenario("shared-runtime-failure")
-        for host in HostID.allCases {
+        for host in HostID.productVisibleCases {
             if case .needsAttention = sharedFailure?.state.matrix.summary(for: host) {
                 expect(true, "共享 runtime 损坏必须影响 \(host.displayName)")
             } else {

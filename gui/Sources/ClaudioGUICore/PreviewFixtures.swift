@@ -309,8 +309,10 @@ public enum PreviewFixtures {
     public static let hostIntegrationScenarios: [HostIntegrationScenario] = [
         hostIntegrationScenario(
             id: "dual-disconnected",
-            title: "双宿主未连接",
-            snapshots: HostID.allCases.map { HostIntegrationSnapshot.disconnected(host: $0) }),
+            title: "全部产品宿主未连接",
+            snapshots: HostID.productVisibleCases.map {
+                HostIntegrationSnapshot.disconnected(host: $0)
+            }),
         hostIntegrationScenario(
             id: "claude-only",
             title: "仅 Claude Code 已连接",
@@ -327,8 +329,8 @@ public enum PreviewFixtures {
             ]),
         hostIntegrationScenario(
             id: "dual-connected",
-            title: "双宿主已连接",
-            snapshots: HostID.allCases.map { hostIntegrationSnapshot(host: $0) }),
+            title: "全部产品宿主已连接",
+            snapshots: HostID.productVisibleCases.map { hostIntegrationSnapshot(host: $0) }),
         hostIntegrationScenario(
             id: "codex-awaiting",
             title: "claudi0 已写好，等待 Codex 确认",
@@ -368,7 +370,7 @@ public enum PreviewFixtures {
         hostIntegrationScenario(
             id: "shared-runtime-failure",
             title: "共享 helper 损坏",
-            snapshots: HostID.allCases.map {
+            snapshots: HostID.productVisibleCases.map {
                 hostIntegrationSnapshot(
                     host: $0,
                     runtime: .damaged(reason: "claudi0 helper 损坏"))
@@ -541,11 +543,11 @@ public enum PreviewFixtures {
         snapshots: [HostIntegrationSnapshot]
     ) -> HostIntegrationScenario {
         let snapshotByHost = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.host, $0) })
-        let normalizedSnapshots = HostID.allCases.map { host in
+        let normalizedSnapshots = HostID.productVisibleCases.map { host in
             snapshotByHost[host] ?? .disconnected(host: host)
         }
         let capabilities = Dictionary(
-            uniqueKeysWithValues: HostID.allCases.map {
+            uniqueKeysWithValues: HostID.productVisibleCases.map {
                 ($0, HostCapabilityCatalog.bindings(for: $0))
             })
         let matrix = AudibilityMatrix.make(

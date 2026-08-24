@@ -69,10 +69,10 @@ public struct HostSourceProductGroupPresentation: Identifiable, Sendable, Equata
     }
 }
 
-/// Product → Surface 的唯一视觉顺序。`HostID.allCases` 是稳定 registry 顺序，但产品分组、
-/// 矩阵列、初始选择和键盘遍历都必须消费这里的呈现顺序，不能分别推导。
+/// Product → Surface 的唯一视觉顺序。正常产品 registry、产品分组、矩阵列、初始选择和
+/// 键盘遍历都必须消费这里的呈现顺序，不能分别推导或把诊断 identity 混入普通 UI。
 public func hostSurfacePresentationOrder(
-    hosts: [HostID] = HostID.allCases
+    hosts: [HostID] = HostID.productVisibleCases
 ) -> [HostID] {
     HostProductID.allCases.flatMap { product in
         hosts.filter { $0.descriptor.product == product }
@@ -102,11 +102,11 @@ public func hostSourceProductGroups(
     }
 }
 
-/// 按稳定 registry 生成所有已出货来源行。宿主是否连接只改变行内状态，不改变行的存在。
+/// 按产品可见 registry 生成所有已出货来源行。宿主是否连接只改变行内状态，不改变行的存在。
 public func hostSourceRowPresentations(
     from matrix: AudibilityMatrix
 ) -> [HostSourceRowPresentation] {
-    HostID.allCases.map { host in
+    HostID.productVisibleCases.map { host in
         let fallbackSupported = HostCapabilityCatalog.bindings(for: host)
             .filter(\.isAudibleCapability).count
         let summary =
@@ -324,7 +324,7 @@ public func hostCapabilityMatrixPresentation(
     mutedReason: HostCapabilityMuteReason = .eventDisabled,
     hostOrder: [HostID]? = nil
 ) -> HostCapabilityMatrixPresentation {
-    let orderedHosts = hostOrder ?? HostID.allCases
+    let orderedHosts = hostOrder ?? HostID.productVisibleCases
     return HostCapabilityMatrixPresentation(
         hostColumns: orderedHosts,
         rows: matrix.rows.map { row in
@@ -600,7 +600,7 @@ public func integrationsWindowLayoutAdaptation(
     for tier: IntegrationsWindowTypeSizeTier,
     availableWidth: Double,
     eventCount: Int = Event.allCases.count,
-    hostCount: Int = HostID.allCases.count
+    hostCount: Int = HostID.productVisibleCases.count
 ) -> IntegrationsWindowLayoutAdaptation {
     let mode: IntegrationsWindowLayoutMode
     switch tier {

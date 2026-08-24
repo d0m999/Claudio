@@ -1,12 +1,18 @@
 import Foundation
 
-/// Claudio 可以连接的宿主。raw value 同时是 CLI 稳定 token。
+/// Claudio 已知的宿主身份。raw value 同时是 CLI 与历史数据的稳定 token。
+///
+/// `allCases` 包含仅供兼容解码和隔离诊断使用的身份；正常产品 registry 必须使用
+/// ``productVisibleCases``，不能把诊断身份当作可用集成表面。
 public enum HostID: String, CaseIterable, Codable, Sendable, Hashable {
     case claudeCode = "claude-code"
     case codex = "codex"
     case workBuddy = "workbuddy"
     case chatGPTDesktopAX = "chatgpt-desktop-ax"
     case claudeDesktopAX = "claude-desktop-ax"
+
+    /// 正常产品表面唯一真相源。AX identity 继续可解码，但不会进入 manager、矩阵或普通 UI。
+    public static let productVisibleCases: [HostID] = [.claudeCode, .codex, .workBuddy]
 
     public var displayName: String {
         switch self {
@@ -532,9 +538,9 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
             snapshots: snapshots,
             capabilities: capabilities,
             soundCoverageByHost: Dictionary(
-                uniqueKeysWithValues: HostID.allCases.map { ($0, soundCoverage) }),
+                uniqueKeysWithValues: HostID.productVisibleCases.map { ($0, soundCoverage) }),
             enabledEventsByHost: Dictionary(
-                uniqueKeysWithValues: HostID.allCases.map { ($0, enabledEvents) }))
+                uniqueKeysWithValues: HostID.productVisibleCases.map { ($0, enabledEvents) }))
     }
 
     /// surface-aware 入口。每个宿主格消费自己的 effective pack/事件开关；调用方不得先把
@@ -547,7 +553,7 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
     ) -> AudibilityMatrix {
         let snapshotByHost = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.host, $0) })
         var summaries: [HostID: HostReadinessSummary] = [:]
-        for host in HostID.allCases {
+        for host in HostID.productVisibleCases {
             let bindings = capabilities[host] ?? []
             let configuredSupported = bindings.filter(\.isAudibleCapability).count
             let legacySupported = bindings.filter {
@@ -564,7 +570,7 @@ public struct AudibilityMatrix: Codable, Sendable, Equatable {
         let rows = Event.allCases.map { event in
             AudibilityEventRow(
                 event: event,
-                cells: HostID.allCases.map { host in
+                cells: HostID.productVisibleCases.map { host in
                     let binding =
                         capabilities[host]?.first(where: { $0.event == event })
                         ?? HostCapabilityBinding(
