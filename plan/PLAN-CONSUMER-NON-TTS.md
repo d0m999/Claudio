@@ -1,6 +1,6 @@
 # PLAN — 普通用户 AI 终端兼容（非 TTS）路线图
 
-> 状态：**WorkBuddy 2/5 真实宿主闭环完成并已断开；AX tracer 工具完成，真实矩阵未执行**
+> 状态：**WorkBuddy 2/5 真实宿主闭环完成并已断开；Chat AX Issue #17 得到技术 no-go**
 >
 > 更新：2026-08-24
 >
@@ -10,8 +10,8 @@
 
 1. 已交付 WorkBuddy 正式 command-hook adapter、动态宿主/事件绑定模型、surface 声音配置与诚实 UI。
 2. 已取得两条真实 WorkBuddy 回执，完成可逆 Connect → callback → GUI 核对 → Disconnect 验收。
-3. 只有重新获得明确授权后，才执行 ChatGPT Chat 的只读 Accessibility 可行性 spike。
-4. AX spike 达到版本矩阵和零误报门槛后，另开生产计划；本路线图不授权 AX 监听或权限申请。
+3. ChatGPT Chat 的只读 Accessibility 可行性 spike 已在单独授权后执行，并在 identity 门失败关闭。
+4. 当前技术 no-go 不满足生产计划门槛；本路线图不授权继续 AX 监听或权限申请。
 
 ## 2. 子计划
 
@@ -49,8 +49,11 @@
 - Issue #15 已在单独授权下完成真实 WorkBuddy 2/5 callback 闭环；Disconnect 后 Current Activation
   已清空，自有 hooks 已移除，第三方 hooks、未知字段、声音配置、备份与脱敏历史均按契约保留。
 - 未做签名发行包、Intel/Apple Silicon 双架构或外部正式验收。
-- Issue #17 尚未获得本轮授权执行：未申请 Accessibility 权限、未对真实 ChatGPT 启动 AX observer、
-  未运行每场景至少 10 次的矩阵，也未读取任何 ChatGPT UI 树。
+- Issue #17 已在单独授权和用户手动授予 Accessibility 后执行：当前 ChatGPT
+  `26.818.31338` / `6892` 的 surface identity preflight 连续 10 次无法形成 stable anchor facts，
+  observer 启动次数为 0，按 fail-closed 条款得到技术 no-go。其余真实场景为 `not_evaluated`，没有读取
+  prompt、response、会话标题、剪贴板或完整 UI tree；见
+  [脱敏结果](../docs/chat-ax-spike-issue-17.md)。
 - HTML/SVG 是设计基线，不等于 SwiftUI 视觉验收；正式视觉批准仍需人工检查真实 app。
 
 本地代码完成、一次真实宿主验收、当前激活、真实 AX 矩阵、发布和正式验收是独立状态，任何一个不能
