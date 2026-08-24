@@ -1,8 +1,8 @@
 # PLAN — WorkBuddy 正式集成与 surface 声音配置
 
-> 状态：**2/5 真实 WorkBuddy callback 闭环已完成并 Disconnect；Current Activation 为 none**
+> 状态：**2/5 pre-RC 状态/可访问性自动化已收口；历史 callback 已闭环并 Disconnect；Current Activation 为 none**
 >
-> 更新：2026-08-24
+> 更新：2026-08-25
 >
 > 不授权 commit、push、发布或修改真实 `~/.workbuddy/settings.json`。
 
@@ -83,12 +83,34 @@ WorkBuddy 首发绑定：
 - 必须通过：
 
 ```bash
+bash scripts/local-pre-rc.sh
 swift run --package-path helper claudio-tests
 swift run --package-path gui claudio-gui-tests
 swift build -c debug --package-path gui --product ClaudioGUI
 jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
 git diff --check
 ```
+
+### Pre-RC 证据与正式验收链
+
+- Issue #65 已固化七个 WorkBuddy 状态、双语 presentation、fixture 与生产 wiring；它是
+  automated evidence，不是 Issue #20 的原生视觉批准。
+- Issue #66 已固化焦点顺序、可访问性语义、动作 owner 与播报去重；它是 automated evidence，
+  不证明 Issue #21 的真实 Tab/Shift-Tab、Full Keyboard Access 或 VoiceOver 播报。
+- 上述实现连同 Issue #64 发布合同已在 clean checkout 的 `scripts/local-pre-rc.sh` 中聚合通过；
+  产物只有当前架构与 ad-hoc 身份，证据等级为 `pre_rc_only`。精确 commit、架构与计数只维护在
+  唯一验收账本。
+
+| Issue | 当前状态 | 保持未验证的正式事实 |
+|---|---|---|
+| #18 | `OPEN` | 签名 universal RC |
+| #19 | `OPEN` | Apple Silicon 与 Intel WorkBuddy RC 真机矩阵 |
+| #20 | `OPEN` | 原生 SwiftUI 视觉矩阵 |
+| #21 | `OPEN` | 键盘、焦点归还与 VoiceOver 矩阵 |
+| #22 | `OPEN` | 正式路线图验收与人工批准 |
+
+完整 commit、命令、结果与证据分层只维护在
+[0.1.0 验收账本](../docs/release-acceptance-0.1.0.md#pre-rc-自动化基线issues-6466)，不创建第二份账本。
 
 ## 5. 真实验收结果（Issue #15）
 

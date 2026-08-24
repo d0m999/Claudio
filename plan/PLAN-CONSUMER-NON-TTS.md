@@ -1,8 +1,8 @@
 # PLAN — 非 TTS 宿主提示音：状态与决策索引
 
-> 状态：**AX 路线技术 no-go；WorkBuddy 2/5 历史真实闭环完成、当前已断开**
+> 状态：**pre-RC 自动化基线已收口；AX 技术 no-go；WorkBuddy 2/5 历史闭环完成、当前已断开**
 >
-> 更新：2026-08-24
+> 更新：2026-08-25
 >
 > 本文件只维护跨宿主结论、状态、决策门和权威证据入口。每个新 Host Surface 或剩余事件
 > 必须使用独立计划/Issue；不得在本索引里顺带授权实现、宿主写入或真实验收。
@@ -20,6 +20,8 @@
    随后已 Disconnect；历史回执保留，但 Current Activation 为 `none`。
 5. WorkBuddy 剩余三个事件逐事件进入独立 evidence-first 计划/Issue；在真实宿主证据成立前，
    不实现、不接线，也不承诺 5/5。
+6. Issues #64–#66 的自动化、状态模型与 wiring 基线已聚合验证；结论仅为 `pre_rc_only`，
+   不改变 Issues #18–#22 的正式验收状态。精确 commit 与计数只维护在唯一验收账本。
 
 ## 2. 五轴状态矩阵
 
@@ -97,6 +99,7 @@ HostID.allCases（5 个兼容/诊断 identity）
 ## 6. 本地验证
 
 ```bash
+bash scripts/local-pre-rc.sh
 swift run --package-path helper claudio-tests
 swift run --package-path gui claudio-gui-tests
 swift build -c debug --package-path gui --product ClaudioGUI
@@ -104,7 +107,22 @@ jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
 git diff --check
 ```
 
-原生 SwiftUI、VoiceOver、键盘/焦点、Intel/Apple Silicon、真实宿主 callback 和正式 RC 仍属于独立人工证据。
+2026-08-25 的聚合入口已在 clean checkout 上通过全部 gate。该结果只属于 automated / local
+dev-bundle；精确 commit 与计数见唯一验收账本。原生 SwiftUI、VoiceOver、键盘/焦点、
+Intel/Apple Silicon RC、真实宿主 callback 和正式批准仍属于独立证据。
+
+### 6.1 正式验收 issue 链
+
+| Issue | 当前状态 | 未验证事实 |
+|---|---|---|
+| #18 | `OPEN` | signed universal RC、Developer ID、notarization、stapling、Gatekeeper |
+| #19 | `OPEN` | Apple Silicon 与 Intel 真机上的 WorkBuddy RC |
+| #20 | `OPEN` | 原生 SwiftUI 视觉矩阵与截图证据 |
+| #21 | `OPEN` | Full Keyboard Access、焦点归还与 VoiceOver 矩阵 |
+| #22 | `OPEN` | 正式路线图验收与人工批准 |
+
+唯一分层状态与 commit 清单见
+[0.1.0 验收账本](../docs/release-acceptance-0.1.0.md#pre-rc-自动化基线issues-6466)。
 
 ## Implementation Tasks
 

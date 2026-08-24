@@ -24,6 +24,54 @@
 | 截图目录或附件 | 待填 |
 | 脱敏 receipt 目录或附件 | 待填 |
 
+## Pre-RC 自动化基线（Issues #64–#66）
+
+2026-08-25 在 clean checkout 上运行 `bash scripts/local-pre-rc.sh`，入口在每个 gate 前后都复验
+同一 commit `6fda317c59a217ec86fdf492a89ba4f50a62fc37`。本节只保存可重建的脱敏摘要；
+不提交 `dist/` 报告、命令 stdout、用户数据或原始日志。下表中的 ticket commits 是实现来源；“当前结果”
+均绑定上述聚合 commit，不表示在每个历史 commit 上分别重跑。
+
+聚合入口依次执行以下仓库命令：
+
+```bash
+git diff --check
+swift run --package-path helper claudio-tests
+swift run --package-path gui claudio-gui-tests
+swift build -c debug --package-path gui --product ClaudioGUI
+jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
+bash scripts/dev-bundle.sh
+bash scripts/check-release-size.sh dist/claudi0.app
+```
+
+| Ticket | 实现 commits | 当前命令与结果 | 证据等级 |
+|---|---|---|---|
+| #64 本机发布合同 | `fbbe71e2f8de52092d5fce55c61cce1606500eb1`、`badbb10a6e73394e42f8390daceb4e7bb526af45`、`14c2b2e02f7d1734d6f131d017fb2b6aae0beb52`、`6fda317c59a217ec86fdf492a89ba4f50a62fc37` | `bash scripts/local-pre-rc.sh`：patch whitespace、helper `2537/2537`、GUI `6173/6173`、Debug build、localization、dev-bundle 与 release-size 全部通过 | automated + local dev-bundle；`pre_rc_only` |
+| #65 WorkBuddy 视觉状态 | `51aba19e673b4d68c90fd27d3a0196dd9ef1fad3`、`04fe1c6306962ffef6e22fd2d2d7195524cfd46f` | GUI harness、Debug build、localization 与 `git diff --check` 在聚合入口中通过 | automated presentation / fixture / wiring；不是人工视觉验收 |
+| #66 WorkBuddy 键盘与可访问性 | `e75f3ef90134c42c684df1ff5e15ab748c63b6fc` | GUI harness、Debug build、localization 与 `git diff --check` 在聚合入口中通过 | automated model / wiring；不证明真实键盘或 VoiceOver |
+
+### 证据层级
+
+| 层级 | 当前值 | 边界 |
+|---|---|---|
+| Automated | `passed` at `6fda317c59a217ec86fdf492a89ba4f50a62fc37` | harness、Debug build、localization 与静态 wiring/model contracts |
+| Local dev-bundle | `passed`；macOS `26.6.2`、`arm64`、ad-hoc | 只有当前架构开发包；universal 与 Developer ID 为 `not_satisfied` |
+| Real callback | Issue #15 历史闭环已记录；Disconnect 后 Current Activation 为 `none` | 真实回调不升级为 RC 或当前激活 |
+| Signed RC | `not_evaluated`；Issue #18 `OPEN` | 未生成、下载或复验签名 universal RC |
+| Manual acceptance | `not_evaluated`；Issues #19–#22 `OPEN` | 双架构真机、视觉、键盘/VoiceOver 与正式批准均未完成 |
+
+Local dev-bundle 的 notarization、stapling、Gatekeeper、DMG checksum 与 Intel hardware 全部保持
+`not_evaluated`；它不提供 universal、Developer ID、notarized、stapled、Gatekeeper 或 Intel 证据。
+
+### 正式验收缺口
+
+| Issue | 当前状态 | 账本状态 |
+|---|---|---|
+| #18 签名 universal RC | `OPEN` | `not_evaluated` |
+| #19 Apple Silicon 与 Intel WorkBuddy RC | `OPEN` | `not_evaluated` |
+| #20 原生 SwiftUI 视觉矩阵 | `OPEN` | `not_evaluated`；48 帧与附加 spot check 均保持待验 |
+| #21 键盘与 VoiceOver 矩阵 | `OPEN` | `not_evaluated`；24 条键盘与 12 条 VoiceOver 流程均保持待验 |
+| #22 正式路线图验收 | `OPEN` | `not_evaluated`；等待前置正式证据与人工批准 |
+
 ## WorkBuddy 只读 preflight（Issue #14）
 
 本节是同一份 release acceptance ledger 的 WorkBuddy 扩展，不创建第二份验收真相源。可重复入口为：
