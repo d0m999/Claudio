@@ -85,6 +85,34 @@ func runHostIntegrationPresentationSuites() {
         }
     }
 
+    suite("AX unavailable qualification：能力格与事件宿主指示器使用同一双语文案") {
+        let sourceText = "Accessibility Beta 候选尚未实现"
+        let cell = HostCapabilityCellPresentation(
+            host: .chatGPTDesktopAX,
+            event: .taskStart,
+            state: .unsupported,
+            qualificationText: sourceText)
+        let indicator = EventHostIndicatorPresentation(
+            host: .chatGPTDesktopAX,
+            state: .unsupported,
+            qualificationText: sourceText)
+
+        let chineseCell = localizedCapabilityCell(cell, language: .zhHans)
+        let englishCell = localizedCapabilityCell(cell, language: .english)
+        let chineseIndicator = localizedEventHostIndicator(indicator, language: .zhHans)
+        let englishIndicator = localizedEventHostIndicator(indicator, language: .english)
+
+        expect(
+            chineseCell.qualificationText == "Accessibility Beta 候选尚未实现"
+                && chineseIndicator.qualificationText == "Accessibility Beta 候选尚未实现",
+            "AX unavailable qualification 的能力格与事件宿主指示器必须共享 zh-Hans 文案")
+        expect(
+            englishCell.qualificationText == "Accessibility Beta candidate is not implemented"
+                && englishIndicator.qualificationText
+                    == "Accessibility Beta candidate is not implemented",
+            "AX unavailable qualification 的能力格与事件宿主指示器必须共享 English 文案")
+    }
+
     suite("声音来源行：产品 registry 永久等权出现，能力数是实现事实") {
         let rows = hostSourceRowPresentations(from: hostPresentationMatrix())
         let expectedVisualOrder: [HostID] = [.codex, .claudeCode, .workBuddy]

@@ -140,6 +140,9 @@ private func localizedQualification(
     language: ClaudioAppLanguage
 ) -> String? {
     guard let value else { return nil }
+    if value == "Accessibility Beta 候选尚未实现" {
+        return ClaudioL10n(language: language).text(.qualificationAccessibilityBetaUnavailable)
+    }
     let english: [String: String] = [
         "Codex 暂无执行中断事件": "Codex has no interruption event",
         "仅授权请求": "Authorization request only",
@@ -148,7 +151,6 @@ private func localizedQualification(
         "接口部分支持，当前版本尚未实现":
             "Partially supported by the interface; not implemented yet",
         "此宿主未声明该能力": "This host does not declare this capability",
-        "Accessibility Beta 候选尚未实现": "Accessibility Beta candidate is not implemented",
     ]
     if language == .english {
         return english[value] ?? value

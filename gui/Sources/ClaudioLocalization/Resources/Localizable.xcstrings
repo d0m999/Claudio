@@ -73,6 +73,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开该声音来源的连接与诊断详情" } }
       }
     },
+    "qualification.accessibility-beta-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Accessibility Beta candidate is not implemented" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Accessibility Beta 候选尚未实现" } }
+      }
+    },
     "host.ready" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld ready" } },

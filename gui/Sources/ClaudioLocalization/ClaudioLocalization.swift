@@ -164,6 +164,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let hostCodexLegacyDetail: Self = "host.codex.legacy-detail"
     public static let hostWorkBuddyReadyDetail: Self = "host.workbuddy.ready-detail"
     public static let hostWorkBuddyAwaitingDetail: Self = "host.workbuddy.awaiting-detail"
+    public static let qualificationAccessibilityBetaUnavailable: Self =
+        "qualification.accessibility-beta-unavailable"
     public static let eventTaskStart: Self = "event.task-start"
     public static let eventStop: Self = "event.stop"
     public static let eventStopFailure: Self = "event.stop-failure"
@@ -632,6 +634,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .hostCodexReadyDetail, .hostCodexAwaitingDetail,
         .hostClaudeAwaitingDetail, .hostClaudeLegacyDetail, .hostCodexLegacyDetail,
         .hostWorkBuddyReadyDetail, .hostWorkBuddyAwaitingDetail,
+        .qualificationAccessibilityBetaUnavailable,
         .panelSoundScope, .panelGlobalDefaults, .panelResetSurface, .panelResetSurfaceHint,
         .eventTaskStart, .eventStop, .eventStopFailure, .eventNotification, .eventSubagentStop,
         .eventEditorHint, .eventCoveragePresent, .eventCoverageUnmapped, .eventCoverageBroken,

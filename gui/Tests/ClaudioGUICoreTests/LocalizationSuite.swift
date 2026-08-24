@@ -67,6 +67,19 @@ func runLocalizationSuites() {
                 && !english.text(.panelQuitApplicationHint).isEmpty,
             "quit accessibility hint must exist in both product languages")
 
+        let axUnavailableQualification = ClaudioL10nKey(
+            rawValue: "qualification.accessibility-beta-unavailable")
+        expect(
+            ClaudioL10nKey.allKnown.contains(axUnavailableQualification),
+            "Accessibility Beta unavailable qualification must be a registered catalog key")
+        expect(
+            chinese.text(axUnavailableQualification) == "Accessibility Beta 候选尚未实现",
+            "Accessibility Beta unavailable qualification must have approved zh-Hans copy")
+        expect(
+            english.text(axUnavailableQualification)
+                == "Accessibility Beta candidate is not implemented",
+            "Accessibility Beta unavailable qualification must have approved English copy")
+
         let values = ClaudioL10n.catalogValues()
         let pluralValues = ClaudioL10n.catalogPluralValues()
         let knownKeys = ClaudioL10nKey.allKnown.map(\.rawValue)
