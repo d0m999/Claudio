@@ -48,6 +48,20 @@ private func chatAXLowLevelAttributeQueriesAreClosed(_ rawSource: String) -> Boo
         && normalizedElementReader.contains("_ relation: ChatAXApprovedRelation")
         && normalizedStringReader.contains("_ attribute: ChatAXApprovedAttribute")
         && normalizedIntegerReader.contains("_ attribute: ChatAXApprovedAttribute")
+        && normalizedIntegerReader.components(
+            separatedBy: "ChatAXWindowOrdinalDecoder.decode(value)"
+        ).count - 1 == 1
+        && normalizedIntegerReader.contains(
+            "let ordinal = ChatAXWindowOrdinalDecoder.decode(value)")
+        && !normalizedIntegerReader.contains(".intValue")
+        && !normalizedIntegerReader.contains("value as")
+        && !normalizedIntegerReader.contains("??")
+        && normalizedIntegerReader.components(separatedBy: "return").count - 1 == 5
+        && normalizedIntegerReader.components(separatedBy: ".success(").count - 1 == 2
+        && normalizedIntegerReader.contains(
+            "guard result == .success, let value, "
+                + "let ordinal = ChatAXWindowOrdinalDecoder.decode(value) else { "
+                + "return .failure(.unreadable) } return .success(ordinal)")
         && !normalizedElementReader.contains("let relation =")
         && !normalizedElementReader.contains("var relation =")
         && !normalizedStringReader.contains("let attribute =")
@@ -1267,6 +1281,170 @@ func runChatAXTracerSuites() async {
             "anchor 必须是窗口下的有界 descendant")
     }
 
+    suite("Chat AX tracer event surface：callback lineage 必须绑定同一 Chat anchor/window") {
+        let sampleID = UUID(uuidString: "00000000-0000-0000-0000-000000000053")!
+        let otherSampleID = UUID(uuidString: "00000000-0000-0000-0000-000000000054")!
+        let node: (Int, UUID) -> ChatAXLineageNodeIdentity = { ordinal, namespace in
+            ChatAXLineageNodeIdentity(sampleID: namespace, ordinal: ordinal)
+        }
+        let focusedLeaf = node(1, sampleID)
+        let eventLeaf = node(2, sampleID)
+        let otherEventLeaf = node(3, sampleID)
+        let anchor = node(4, sampleID)
+        let otherAnchor = node(5, sampleID)
+        let window = node(6, sampleID)
+        let otherWindow = node(7, sampleID)
+        let focusedLineage = [focusedLeaf, anchor, window]
+        let eventLineage = [eventLeaf, anchor, window]
+        guard
+            let facts = ChatAXSurfaceAnchorFacts(
+                windowRole: "AXWindow",
+                windowSubrole: "AXStandardWindow",
+                anchorRole: "AXGroup",
+                anchorSubrole: nil,
+                anchorIdentifier: "chat-surface-root",
+                anchorDepth: 1),
+            let driftedFacts = ChatAXSurfaceAnchorFacts(
+                windowRole: "AXWindow",
+                windowSubrole: "AXStandardWindow",
+                anchorRole: "AXGroup",
+                anchorSubrole: nil,
+                anchorIdentifier: "codex-surface-root",
+                anchorDepth: 1)
+        else {
+            expect(false, "event surface fixtures 必须合法")
+            return
+        }
+        let makeSample:
+            (
+                [ChatAXLineageNodeIdentity],
+                [ChatAXLineageNodeIdentity],
+                [ChatAXLineageNodeIdentity],
+                [ChatAXLineageNodeIdentity],
+                ChatAXSurfaceAnchorFacts,
+                ChatAXSurfaceAnchorFacts,
+                Int
+            ) -> ChatAXEventSurfaceBindingSample = {
+                focusedBefore,
+                focusedAfter,
+                eventBefore,
+                eventAfter,
+                factsBefore,
+                factsAfter,
+                windowOrdinal in
+                ChatAXEventSurfaceBindingSample(
+                    focusedBefore: ChatAXSurfaceLineageSample(
+                        nodes: focusedBefore, anchorFacts: factsBefore),
+                    focusedAfter: ChatAXSurfaceLineageSample(
+                        nodes: focusedAfter, anchorFacts: factsAfter),
+                    eventBefore: eventBefore,
+                    eventAfter: eventAfter,
+                    windowOrdinal: windowOrdinal)
+            }
+        let stableSample = makeSample(
+            focusedLineage,
+            focusedLineage,
+            eventLineage,
+            eventLineage,
+            facts,
+            facts,
+            42)
+        let signature = ChatAXSurfaceSignature.v1(anchorFacts: facts)
+        let verified = ChatAXEventSurfaceBindingVerifier.verify(
+            stableSample,
+            allowedSignatures: [signature])
+        expect(
+            verified?.surfaceSignature == signature && verified?.windowOrdinal == 42,
+            "同一 sample、anchor 与 window 内的不同 descendant event 必须 exact 通过")
+
+        let maximumDepthLineage = (20...28).map { node($0, sampleID) }
+        if let maximumDepthFacts = ChatAXSurfaceAnchorFacts(
+            windowRole: "AXWindow",
+            windowSubrole: nil,
+            anchorRole: "AXGroup",
+            anchorSubrole: nil,
+            anchorIdentifier: "deep-chat-surface-root",
+            anchorDepth: ChatAXSurfaceAnchorFacts.maximumAnchorDepth)
+        {
+            let maximumDepthSample = makeSample(
+                maximumDepthLineage,
+                maximumDepthLineage,
+                maximumDepthLineage,
+                maximumDepthLineage,
+                maximumDepthFacts,
+                maximumDepthFacts,
+                99)
+            expect(
+                ChatAXEventSurfaceBindingVerifier.verify(
+                    maximumDepthSample,
+                    allowedSignatures: [
+                        ChatAXSurfaceSignature.v1(anchorFacts: maximumDepthFacts)
+                    ])?.windowOrdinal == 99,
+                "maximumAnchorDepth 的边界 lineage 必须可验证，不能有 off-by-one")
+        } else {
+            expect(false, "maximum depth fixture 必须合法")
+        }
+
+        let tooDeep = (10...19).map { node($0, sampleID) }
+        let crossNamespaceEvent = [
+            node(2, otherSampleID),
+            node(4, otherSampleID),
+            node(6, otherSampleID),
+        ]
+        let invalidSamples = [
+            makeSample(
+                focusedLineage, focusedLineage,
+                [eventLeaf, anchor, otherWindow], [eventLeaf, anchor, otherWindow],
+                facts, facts, 42),
+            makeSample(
+                focusedLineage, focusedLineage,
+                [eventLeaf, otherAnchor, window], [eventLeaf, otherAnchor, window],
+                facts, facts, 42),
+            makeSample(
+                focusedLineage, focusedLineage,
+                [eventLeaf, window], [eventLeaf, window],
+                facts, facts, 42),
+            makeSample(
+                [focusedLeaf, anchor, focusedLeaf, window],
+                [focusedLeaf, anchor, focusedLeaf, window],
+                eventLineage, eventLineage, facts, facts, 42),
+            makeSample(
+                tooDeep, tooDeep, eventLineage, eventLineage, facts, facts, 42),
+            makeSample(
+                focusedLineage, [focusedLeaf, otherAnchor, window],
+                eventLineage, eventLineage, facts, facts, 42),
+            makeSample(
+                focusedLineage, focusedLineage,
+                eventLineage, [otherEventLeaf, anchor, window], facts, facts, 42),
+            makeSample(
+                focusedLineage, focusedLineage,
+                eventLineage, eventLineage, facts, driftedFacts, 42),
+            makeSample(
+                focusedLineage, focusedLineage,
+                crossNamespaceEvent, crossNamespaceEvent, facts, facts, 42),
+            makeSample(
+                focusedLineage, focusedLineage,
+                [node(-1, sampleID), anchor, window],
+                [node(-1, sampleID), anchor, window],
+                facts, facts, 42),
+            makeSample(
+                focusedLineage, focusedLineage,
+                eventLineage, eventLineage, facts, facts, -1),
+        ]
+        for invalidSample in invalidSamples {
+            expect(
+                ChatAXEventSurfaceBindingVerifier.verify(
+                    invalidSample,
+                    allowedSignatures: [signature]) == nil,
+                "other window/anchor、drift、loop、depth、namespace 或负 ordinal 必须拒绝")
+        }
+        expect(
+            ChatAXEventSurfaceBindingVerifier.verify(
+                stableSample,
+                allowedSignatures: [chatAXSurfaceSignature("b")]) == nil,
+            "未列入 allowlist 的 surface signature 必须拒绝")
+    }
+
     suite("Chat AX tracer 属性边界：只暴露审查后的结构/状态元数据") {
         let allowedNames = Set(ChatAXApprovedAttribute.allCases.map(\.rawValue))
         expect(
@@ -1303,6 +1481,55 @@ func runChatAXTracerSuites() async {
         expect(
             ChatAXStructuralSignalKind.windowClosed.requiredAttributes == [.windowNumber],
             "仍存活的 window close 信号可以保留 window ordinal 契约")
+    }
+
+    suite("Chat AX tracer window ordinal：只接受无损、非负的整数 CFNumber") {
+        let accepted: [(CFTypeRef, Int)] = [
+            (NSNumber(value: 0), 0),
+            (NSNumber(value: Int8(1)), 1),
+            (NSNumber(value: Int16(2)), 2),
+            (NSNumber(value: Int32(3)), 3),
+            (NSNumber(value: Int64(4)), 4),
+            (NSNumber(value: 7), 7),
+            (NSNumber(value: UInt8.max), Int(UInt8.max)),
+            (NSNumber(value: UInt16.max), Int(UInt16.max)),
+            (NSNumber(value: UInt32.max), Int(UInt32.max)),
+            (NSNumber(value: Int.max), Int.max),
+            (NSNumber(value: UInt64(Int.max)), Int.max),
+        ]
+        for (value, expected) in accepted {
+            expect(
+                ChatAXWindowOrdinalDecoder.decode(value) == expected,
+                "合法整数 CFNumber 必须无损解码为 window ordinal：\(expected)")
+        }
+
+        let rejected: [CFTypeRef] = [
+            kCFBooleanFalse,
+            kCFBooleanTrue,
+            NSNumber(value: -1),
+            NSNumber(value: Int.min),
+            NSNumber(value: Float(3.75)),
+            NSNumber(value: Float(3.0)),
+            NSNumber(value: Float.nan),
+            NSNumber(value: Float.infinity),
+            NSNumber(value: -Float.infinity),
+            NSNumber(value: 3.75),
+            NSNumber(value: 3.0),
+            NSNumber(value: Double.nan),
+            NSNumber(value: Double.infinity),
+            NSNumber(value: -Double.infinity),
+            NSNumber(value: UInt64(Int.max) + 1),
+            NSNumber(value: UInt64.max),
+            NSDecimalNumber(string: "3"),
+            NSDecimalNumber.notANumber,
+            "7" as CFString,
+            kCFNull,
+        ]
+        for value in rejected {
+            expect(
+                ChatAXWindowOrdinalDecoder.decode(value) == nil,
+                "boolean、浮点、负数、溢出或非数字 CF value 必须 fail closed")
+        }
     }
 
     suite("Chat AX tracer 候选检测：脱敏正控恰好一次 submit/end，负控与重复零事件") {
@@ -1713,20 +1940,114 @@ func runChatAXTracerSuites() async {
         expect(request?.allowlist.allows(identity) == true, "显式 allowlist 必须保留精确身份")
     }
 
-    suite("Chat AX tracer release boundary：Core 只在 DEBUG 编译且无 public API") {
+    suite("Chat AX tracer release boundary：Core/GUI whole-file DEBUG 且无 public API") {
         guard
             let rawCore = chatAXSource(
-                "gui/Sources/ClaudioGUICore/ChatAXTracer.swift")
+                "gui/Sources/ClaudioGUICore/ChatAXTracer.swift"),
+            let rawRuntime = chatAXSource(
+                "gui/Sources/ClaudioGUI/SystemChatAXTraceObserver.swift")
         else {
-            expect(false, "必须能读取 tracer Core source 才能验证 release 编译边界")
+            expect(false, "必须能读取 tracer Core 与 GUI source 才能验证 release 编译边界")
             return
         }
-        let trimmedCore = rawCore.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasWholeFileDebugBoundary: (String) -> Bool = { rawSource in
+            let scanned = strippingComments(rawSource)
+            guard scanned.unmodeledConstructs.isEmpty else { return false }
+            let lines = scanned.codeWithoutStringLiterals
+                .split(separator: "\n", omittingEmptySubsequences: false)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            guard lines.first == "#if DEBUG", lines.last == "#endif" else {
+                return false
+            }
+            let conditionalKeywords = ["#if", "#elseif", "#else", "#endif"]
+            let conditionalDirectives = lines.compactMap { line in
+                conditionalKeywords.first { keyword in
+                    guard line.hasPrefix(keyword) else { return false }
+                    let remainder = line.dropFirst(keyword.count)
+                    guard let first = remainder.first else { return true }
+                    return first.isWhitespace
+                        || ((keyword == "#if" || keyword == "#elseif") && first == "(")
+                }
+            }
+            return conditionalDirectives == ["#if", "#endif"]
+        }
+        let splitDebugBoundary: (String) -> String = { rawSource in
+            var mutation = rawSource
+            if let opening = mutation.range(of: "#if DEBUG\n") {
+                mutation.replaceSubrange(opening, with: "#if DEBUG\n#endif\n")
+            }
+            if let closing = mutation.range(of: "\n#endif", options: .backwards) {
+                mutation.replaceSubrange(closing, with: "\n#if DEBUG\n#endif")
+            }
+            return mutation
+        }
         let scannedCore = strippingComments(rawCore)
         let core = scannedCore.codeWithoutStringLiterals
         expect(
-            trimmedCore.hasPrefix("#if DEBUG\n") && trimmedCore.hasSuffix("#endif"),
-            "完整 tracer Core 必须由单一 DEBUG 编译边界包围")
+            hasWholeFileDebugBoundary(rawCore) && hasWholeFileDebugBoundary(rawRuntime),
+            "完整 tracer Core 与 GUI observer 必须各由单一 DEBUG 编译边界包围")
+        expect(
+            !hasWholeFileDebugBoundary(splitDebugBoundary(rawCore)),
+            "Core gate 必须拒绝两个空 DEBUG guard 夹着 Release declarations 的 mutation")
+        expect(
+            !hasWholeFileDebugBoundary(splitDebugBoundary(rawRuntime)),
+            "GUI gate 必须拒绝两个空 DEBUG guard 夹着 Release declarations 的 mutation")
+        for (name, source) in [("Core", rawCore), ("GUI", rawRuntime)] {
+            let beforeGuardMutation = "private let releaseLeak = 1\n" + source
+            expect(
+                !hasWholeFileDebugBoundary(beforeGuardMutation),
+                "\(name) DEBUG guard 前出现任何真实 declaration 都必须失败")
+            let afterGuardMutation = source + "\nprivate let releaseLeak = 1\n"
+            expect(
+                !hasWholeFileDebugBoundary(afterGuardMutation),
+                "\(name) DEBUG guard 后出现任何真实 declaration 都必须失败")
+            let movedDeclarationMutation = source.replacingOccurrences(
+                of: "#if DEBUG\n",
+                with: "#if DEBUG\n#endif\nprivate let releaseLeak = 1\n#if DEBUG\n")
+            expect(
+                !hasWholeFileDebugBoundary(movedDeclarationMutation),
+                "\(name) declaration 被移到 outer DEBUG guard 之外必须失败")
+        }
+        let nestedDecoyMutation = rawCore.replacingOccurrences(
+            of: "#if DEBUG\n",
+            with: "#if DEBUG\n#if DEBUG\n#endif\n")
+        expect(
+            !hasWholeFileDebugBoundary(nestedDecoyMutation),
+            "第二对 nested/decoy DEBUG directives 不得被单一 whole-file gate 接受")
+        let tabbedElseifLeakMutation = rawCore.replacingOccurrences(
+            of: "\n#endif",
+            with: "\n#elseif\t!DEBUG\nprivate let releaseLeak = 1\n#endif")
+        expect(
+            !hasWholeFileDebugBoundary(tabbedElseifLeakMutation),
+            "tab 分隔的合法 #elseif 也必须被识别，不能藏匿 Release declaration")
+        let parenthesizedElseifLeakMutation = rawCore.replacingOccurrences(
+            of: "\n#endif",
+            with: "\n#elseif(!DEBUG)\nprivate let releaseLeak = 1\n#endif")
+        expect(
+            !hasWholeFileDebugBoundary(parenthesizedElseifLeakMutation),
+            "无空格的合法 #elseif(...) 也必须被识别，不能藏匿 Release declaration")
+        let tabbedElseLeakMutation = rawRuntime.replacingOccurrences(
+            of: "\n#endif",
+            with: "\n#else\t\nprivate let releaseLeak = 1\n#endif")
+        expect(
+            !hasWholeFileDebugBoundary(tabbedElseLeakMutation),
+            "带 trailing tab 的 #else 也必须被识别，不能绕过 GUI whole-file gate")
+        let commentDecoyControl =
+            "// #if DEBUG\n// #endif\n" + rawCore
+            + "\n/* #if DEBUG\n#endif */\n"
+        expect(
+            hasWholeFileDebugBoundary(commentDecoyControl),
+            "注释中的条件编译字样不能污染真实 whole-file directive 计数")
+        let stringDecoyDeclaration =
+            "private let directiveDecoy = \"\"\"\n"
+            + "#elseif !DEBUG\n#else\n#endif\n\"\"\"\n"
+        let stringDecoyControl = rawRuntime.replacingOccurrences(
+            of: "#if DEBUG\n",
+            with: "#if DEBUG\n" + stringDecoyDeclaration)
+        expect(
+            hasWholeFileDebugBoundary(stringDecoyControl),
+            "字符串中的条件编译字样不能污染真实 whole-file directive 计数")
         expect(
             scannedCore.unmodeledConstructs.isEmpty
                 && !core
@@ -1754,6 +2075,34 @@ func runChatAXTracerSuites() async {
         expect(
             chatAXLowLevelAttributeQueriesAreClosed(rawRuntime),
             "每个低层 AX attribute query 都必须且只能位于 typed reader")
+        let permissiveIntegerBridgeMutation = rawRuntime.replacingOccurrences(
+            of: "let ordinal = ChatAXWindowOrdinalDecoder.decode(value)",
+            with: "let ordinal = (value as? NSNumber)?.intValue")
+        expect(
+            !chatAXLowLevelAttributeQueriesAreClosed(permissiveIntegerBridgeMutation),
+            "typed reader 不能绕过 exact decoder，把 boolean/float 经 NSNumber 静默转整数")
+        let decoyDecoderMutation = rawRuntime.replacingOccurrences(
+            of: "let ordinal = ChatAXWindowOrdinalDecoder.decode(value)",
+            with: """
+                _ = ChatAXWindowOrdinalDecoder.decode(value)
+                            let ordinal = (value as? NSNumber)?.intValue
+                """)
+        expect(
+            !chatAXLowLevelAttributeQueriesAreClosed(decoyDecoderMutation),
+            "保留一次 decoder decoy 也不能掩护实际 NSNumber.intValue 数据流")
+        let fallbackBridgeMutation = rawRuntime.replacingOccurrences(
+            of: "let ordinal = ChatAXWindowOrdinalDecoder.decode(value)",
+            with: "let ordinal = ChatAXWindowOrdinalDecoder.decode(value) ?? (value as? Int)")
+        expect(
+            !chatAXLowLevelAttributeQueriesAreClosed(fallbackBridgeMutation),
+            "decoder 返回 nil 后不得通过 CF bridge 回退，把 boolean 重新解释为 Int")
+        let earlyIntegerSuccessMutation = rawRuntime.replacingOccurrences(
+            of: "        guard\n            result == .success,",
+            with: "        if result == .success { return .success(0) }\n"
+                + "        guard\n            result == .success,")
+        expect(
+            !chatAXLowLevelAttributeQueriesAreClosed(earlyIntegerSuccessMutation),
+            "typed reader 不得在 decoder guard 前新增早退 success 路径")
         let rawTitleOutsideReaderMutation = rawRuntime.replacingOccurrences(
             of: "\n#endif",
             with: """
@@ -1860,6 +2209,14 @@ func runChatAXTracerSuites() async {
                 "private struct SystemChatAXAttributeReader", in: runtime),
             let surfaceReaderTypeRegion = chatAXBracedDeclarationRegion(
                 "private struct SystemChatAXSurfaceSignatureReader", in: runtime),
+            let elementIdentityMapTypeRegion = chatAXBracedDeclarationRegion(
+                "private final class SystemChatAXElementIdentityMap", in: runtime),
+            let eventBindingRegion = chatAXFunctionRegion(
+                "func readVerifiedEventBinding(", in: surfaceReaderTypeRegion),
+            let focusedLineageRegion = chatAXFunctionRegion(
+                "private func focusedLineageSnapshot(", in: surfaceReaderTypeRegion),
+            let lineageRegion = chatAXFunctionRegion(
+                "private func lineage(", in: surfaceReaderTypeRegion),
             let runtimeApplicationVerifierTypeRegion = chatAXBracedDeclarationRegion(
                 "private enum SystemChatAXRuntimeApplicationVerifier", in: runtime),
             let runtimeApplicationMatchesRegion = chatAXFunctionRegion(
@@ -1870,9 +2227,6 @@ func runChatAXTracerSuites() async {
                 "private enum SystemChatAXEventQuerySampler", in: runtime),
             let eventQuerySampleRegion = chatAXFunctionRegion(
                 "static func sample(", in: eventQuerySamplerTypeRegion),
-            let eventElementPIDRegion = chatAXFunctionRegion(
-                "private static func elementProcessIdentifier(",
-                in: eventQuerySamplerTypeRegion),
             let runtimeSamplerTypeRegion = chatAXBracedDeclarationRegion(
                 "private enum SystemChatAXRuntimeSampler", in: runtime),
             let observerTypeRegion = chatAXBracedDeclarationRegion(
@@ -2256,7 +2610,8 @@ func runChatAXTracerSuites() async {
         }
         let runtimeSamplerBracketsSurface: (String) -> Bool = { region in
             region.components(separatedBy: "runningRuntimeFacts(").count - 1 == 2
-                && region.contains("readAnchorFacts(")
+                && (region.contains("readAnchorFacts(")
+                    || region.contains("readVerifiedEventBinding("))
                 && region.contains("factsAfter == factsBefore")
         }
         expect(
@@ -2373,22 +2728,20 @@ func runChatAXTracerSuites() async {
                 ).count - 1 >= 5
         }
         let eventSamplerUsesBoundedCancellation: (String, String) -> Bool = {
-            sampleRegion, pidRegion in
+            sampleRegion, surfaceRegion in
             chatAXFunctionContainsMarkersInOrder(
                 [
                     "!Task.isCancelled",
                     "runningRuntimeFacts(",
+                    "factsBefore == request.runtimeBinding.runtimeFacts",
                     "!Task.isCancelled",
                     "SystemChatAXReadBudget()",
-                    "elementProcessIdentifier(",
-                    "!Task.isCancelled",
-                    "readAnchorFacts(",
-                    "ChatAXSurfaceVerifier.verifyChat(",
-                    "!Task.isCancelled",
-                    "reader.integer(",
+                    "readVerifiedEventBinding(",
                     "!Task.isCancelled",
                     "runningRuntimeFacts(",
                     "factsAfter == factsBefore",
+                    "verifiedBinding.surfaceSignature == request.target.identity.surfaceSignature",
+                    "!Task.isCancelled",
                     "SystemChatAXRuntimeApplicationVerifier.matches(",
                     "!Task.isCancelled",
                 ],
@@ -2396,8 +2749,19 @@ func runChatAXTracerSuites() async {
                 source: sampleRegion)
                 && chatAXFunctionContainsMarkersInOrder(
                     ["prepareForMessaging(element)", "AXUIElementGetPid(", "Task.isCancelled"],
-                    inFunction: "private static func elementProcessIdentifier(",
-                    source: pidRegion)
+                    inFunction: "private func belongsToTarget(",
+                    source: surfaceRegion)
+                && chatAXFunctionContainsMarkersInOrder(
+                    [
+                        "focusedLineageSnapshot(",
+                        "lineage(",
+                        "reader.integer(",
+                        "lineage(",
+                        "focusedLineageSnapshot(",
+                        "reader.hasRemainingTime",
+                    ],
+                    inFunction: "func readVerifiedEventBinding(",
+                    source: surfaceRegion)
         }
         let securityCallsStopAfterCancellation: (String) -> Bool = { readerRegion in
             chatAXFunctionContainsMarkersInOrder(
@@ -2444,7 +2808,7 @@ func runChatAXTracerSuites() async {
                     runningCodeRegion)
                 && eventSamplerUsesBoundedCancellation(
                     eventQuerySampleRegion,
-                    eventElementPIDRegion)
+                    surfaceReaderTypeRegion)
                 && securityCallsStopAfterCancellation(codeReaderTypeRegion),
             "timeout/stop 后恢复的旧 worker 必须在每个 sampler phase 与 AX query 边界停止")
         let uncancelledReaderMutation = attributeReaderTypeRegion.replacingOccurrences(
@@ -2475,7 +2839,7 @@ func runChatAXTracerSuites() async {
         expect(
             !eventSamplerUsesBoundedCancellation(
                 uncancelledEventSamplerMutation,
-                eventElementPIDRegion),
+                surfaceReaderTypeRegion),
             "取消契约必须拒绝 event sampler 在 PID/surface/window phase 间忽略 timeout")
         let uncancelledDynamicRegion = dynamicCodeRegion.replacingOccurrences(
             of: "!Task.isCancelled",
@@ -2571,38 +2935,36 @@ func runChatAXTracerSuites() async {
                     source: attributeReaderTypeRegion),
                 "\(declaration) 必须在每次 AX query 前消费同一端到端预算")
         }
-        for (declaration, typeRegion) in [
-            ("private func belongsToTarget(", surfaceReaderTypeRegion),
-            ("private static func elementProcessIdentifier(", eventQuerySamplerTypeRegion),
-        ] {
-            expect(
-                chatAXFunctionContainsMarkersInOrder(
-                    ["prepareForMessaging(element)", "AXUIElementGetPid("],
-                    inFunction: declaration,
-                    source: typeRegion),
-                "\(declaration) 必须在 PID query 前消费同一端到端预算")
-        }
+        expect(
+            chatAXFunctionContainsMarkersInOrder(
+                ["prepareForMessaging(element)", "AXUIElementGetPid("],
+                inFunction: "private func belongsToTarget(",
+                source: surfaceReaderTypeRegion),
+            "lineage 中每个 element 必须在 PID query 前消费同一端到端预算")
         let eventSamplerReusesSingleAXBudget: (String) -> Bool = { region in
+            let normalized = collapsingWhitespace(region)
             guard
                 region.components(separatedBy: "SystemChatAXReadBudget()").count - 1 == 1,
-                region.components(separatedBy: "budget: budget").count - 1 == 2,
+                region.components(separatedBy: "budget: budget").count - 1 == 1,
                 let factsRange = region.range(of: "let factsBefore ="),
                 let budgetRange = region.range(of: "let budget = SystemChatAXReadBudget()"),
-                let pidRange = region.range(of: "elementProcessIdentifier(")
+                let bindingRange = region.range(of: "readVerifiedEventBinding(")
             else {
                 return false
             }
             return factsRange.lowerBound < budgetRange.lowerBound
-                && budgetRange.lowerBound < pidRange.lowerBound
-                && region.contains("SystemChatAXSurfaceSignatureReader(budget: budget)")
+                && budgetRange.lowerBound < bindingRange.lowerBound
+                && normalized.contains(
+                    "SystemChatAXSurfaceSignatureReader( budget: budget, "
+                        + "approvedAttributes: request.approvedAttributes )")
                 && !region.contains("SystemChatAXSurfaceSignatureReader()")
         }
         expect(
             eventSamplerReusesSingleAXBudget(eventQuerySampleRegion),
             "event PID、surface 与 window 必须在 runtime facts 后共享同一个 AX deadline budget")
         let splitEventBudgetMutation = eventQuerySampleRegion.replacingOccurrences(
-            of: "SystemChatAXSurfaceSignatureReader(budget: budget)",
-            with: "SystemChatAXSurfaceSignatureReader()")
+            of: "budget: budget,",
+            with: "budget: SystemChatAXReadBudget(),")
         expect(
             !eventSamplerReusesSingleAXBudget(splitEventBudgetMutation),
             "event sampler 不得为 surface 另起一份 AX budget")
@@ -2610,9 +2972,17 @@ func runChatAXTracerSuites() async {
             "func integer(", in: attributeReaderTypeRegion)
         {
             let distinguishesMissingIntegerFromFailure: (String) -> Bool = { region in
-                region.contains("Result<Int?, ChatAXAttributeReadFailure>")
-                    && region.contains("result == .attributeUnsupported || result == .noValue")
-                    && region.contains("return .success(nil)")
+                let normalized = collapsingWhitespace(region)
+                return region.contains("Result<Int?, ChatAXAttributeReadFailure>")
+                    && normalized.contains(
+                        "if result == .attributeUnsupported || result == .noValue { "
+                            + "return .success(nil) }")
+                    && normalized.contains(
+                        "guard result == .success, let value, "
+                            + "let ordinal = ChatAXWindowOrdinalDecoder.decode(value) else { "
+                            + "return .failure(.unreadable) } return .success(ordinal)")
+                    && normalized.components(separatedBy: "return").count - 1 == 5
+                    && normalized.components(separatedBy: ".success(").count - 1 == 2
                     && region.components(separatedBy: "return .failure(.unreadable)").count - 1
                         == 3
             }
@@ -2625,6 +2995,36 @@ func runChatAXTracerSuites() async {
             expect(
                 !distinguishesMissingIntegerFromFailure(maskedIntegerFailureMutation),
                 "typed integer gate 必须拒绝把真实 AX 错误伪装成无 window number")
+            let swappedMissingAndTypeFailureMutation =
+                integerRegion
+                .replacingOccurrences(
+                    of: """
+                        if result == .attributeUnsupported || result == .noValue {
+                                    return .success(nil)
+                                }
+                        """,
+                    with: """
+                        if result == .attributeUnsupported || result == .noValue {
+                                    return .failure(.unreadable)
+                                }
+                        """
+                )
+                .replacingOccurrences(
+                    of: """
+                        let ordinal = ChatAXWindowOrdinalDecoder.decode(value)
+                                else {
+                                    return .failure(.unreadable)
+                                }
+                        """,
+                    with: """
+                        let ordinal = ChatAXWindowOrdinalDecoder.decode(value)
+                                else {
+                                    return .success(nil)
+                                }
+                        """)
+            expect(
+                !distinguishesMissingIntegerFromFailure(swappedMissingAndTypeFailureMutation),
+                "缺失 fallback 与类型失败分支不能对调后仍让分类 gate 假绿")
         } else {
             expect(false, "必须能定位 typed integer reader")
         }
@@ -2640,8 +3040,9 @@ func runChatAXTracerSuites() async {
                 && runtime.contains("maximumQuerySeconds"),
             "每次 AX 快照必须同时受端到端 deadline 与单查询 timeout 约束")
         expect(
-            anchorRegion.contains("lineagesAreEqual(")
-                && anchorRegion.components(separatedBy: "anchorFacts(in:").count - 1 == 2
+            anchorRegion.components(separatedBy: "focusedLineageSnapshot(").count - 1 == 2
+                && anchorRegion.contains("lineagesAreEqual(before.elements, after.elements)")
+                && anchorRegion.contains("before.anchorFacts == after.anchorFacts")
                 && anchorRegion.contains("expectedProcessIdentifier"),
             "surface facts 必须逐元素核对 PID，并对完整 lineage/facts 做前后双快照")
         let requiredNotifications = [
@@ -2880,27 +3281,65 @@ func runChatAXTracerSuites() async {
                 && nonDestroyed.filter { $0 == "(" }.count == 3
                 && !nonDestroyed.contains("emitSignal(")
         }
-        let backgroundEventSampleIsExact: (String) -> Bool = { region in
+        let backgroundEventSampleIsExact: (String, String, String, String, String) -> Bool = {
+            sampleRegion, bindingRegion, identityMapRegion, focusedRegion, parentRegion in
             let integerReads = callArguments(
                 of: "reader.integer",
-                in: region
+                in: bindingRegion
             ).map(collapsingWhitespace)
-            let normalized = collapsingWhitespace(region)
-            return region.components(separatedBy: "runningRuntimeFacts(").count - 1 == 2
-                && region.contains("factsBefore == request.runtimeBinding.runtimeFacts")
-                && region.contains(
-                    "elementProcessIdentifier(request.element, reader: reader) "
-                        + "== processIdentifier")
-                && region.contains("readAnchorFacts(")
-                && region.contains("ChatAXSurfaceVerifier.verifyChat(")
-                && region.contains(
-                    "verifiedSurface.signature == request.target.identity.surfaceSignature")
-                && region.contains("case .success(let rawWindowOrdinal) = reader.integer(")
-                && integerReads == [".windowNumber, from: request.element"]
-                && normalized.contains("windowOrdinal: max(0, rawWindowOrdinal ?? 0)")
-                && region.contains("factsAfter == factsBefore")
-                && region.contains("SystemChatAXRuntimeApplicationVerifier.matches(")
-                && !region.contains("emitSignal(")
+            let normalizedSample = collapsingWhitespace(sampleRegion)
+            let normalizedBinding = collapsingWhitespace(bindingRegion)
+            return sampleRegion.components(separatedBy: "runningRuntimeFacts(").count - 1 == 2
+                && sampleRegion.contains("factsBefore == request.runtimeBinding.runtimeFacts")
+                && sampleRegion.contains("readVerifiedEventBinding(")
+                && sampleRegion.contains("eventElement: request.element")
+                && sampleRegion.contains("applicationElement: request.applicationElement")
+                && sampleRegion.contains(
+                    "allowedSignatures: [request.target.identity.surfaceSignature]")
+                && sampleRegion.contains(
+                    "verifiedBinding.surfaceSignature == request.target.identity.surfaceSignature")
+                && normalizedSample.contains(
+                    "surfaceSignature: verifiedBinding.surfaceSignature, "
+                        + "windowOrdinal: verifiedBinding.windowOrdinal")
+                && sampleRegion.contains("factsAfter == factsBefore")
+                && sampleRegion.contains("SystemChatAXRuntimeApplicationVerifier.matches(")
+                && bindingRegion.components(
+                    separatedBy: "focusedLineageSnapshot("
+                ).count - 1 == 2
+                && normalizedBinding.contains(
+                    "let eventBefore = lineage( from: eventElement, "
+                        + "through: focusedBefore.window")
+                && normalizedBinding.contains(
+                    "let eventAfter = lineage( from: eventElement, "
+                        + "through: focusedBefore.window")
+                && bindingRegion.components(separatedBy: "from: eventElement").count - 1 == 2
+                && bindingRegion.components(
+                    separatedBy: "through: focusedBefore.window"
+                ).count - 1 == 2
+                && integerReads == [".windowNumber, from: focusedBefore.window"]
+                && bindingRegion.components(
+                    separatedBy: "SystemChatAXElementIdentityMap()"
+                ).count - 1 == 1
+                && bindingRegion.components(
+                    separatedBy: "identityMap.identities(for:"
+                ).count - 1 == 4
+                && bindingRegion.components(
+                    separatedBy: "ChatAXEventSurfaceBindingVerifier.verify("
+                ).count - 1 == 1
+                && normalizedBinding.contains("windowOrdinal: rawWindowOrdinal ?? 0")
+                && identityMapRegion.components(separatedBy: "CFEqual(").count - 1 == 1
+                && identityMapRegion.contains("private let sampleID = UUID()")
+                && identityMapRegion.contains("representatives.firstIndex(")
+                && identityMapRegion.contains("representatives.append(element)")
+                && focusedRegion.contains("let focusedWindow = reader.element(")
+                && focusedRegion.contains("let focusedElement = reader.element(")
+                && focusedRegion.contains("let elements = lineage(")
+                && parentRegion.contains(
+                    "belongsToTarget(focusedElement, expectedProcessIdentifier)")
+                && parentRegion.contains(
+                    "belongsToTarget(focusedWindow, expectedProcessIdentifier)")
+                && parentRegion.contains("let parent = reader.element(.parent, from: current)")
+                && !sampleRegion.contains("emitSignal(")
         }
         let eventCommitUsesArrivalTime: (String, String) -> Bool = {
             commitRegion, emitterRegion in
@@ -2930,7 +3369,12 @@ func runChatAXTracerSuites() async {
         }
         expect(
             mainActorEventCallbackOnlyEnqueues(handleRegion)
-                && backgroundEventSampleIsExact(eventQuerySampleRegion)
+                && backgroundEventSampleIsExact(
+                    eventQuerySampleRegion,
+                    eventBindingRegion,
+                    elementIdentityMapTypeRegion,
+                    focusedLineageRegion,
+                    lineageRegion)
                 && eventCommitUsesArrivalTime(
                     commitObservedEventRegion,
                     elapsedSignalRegion)
@@ -2998,23 +3442,104 @@ func runChatAXTracerSuites() async {
             !mainActorEventCallbackOnlyEnqueues(decoyFailureBranchMutation),
             "失效分支必须绑定真实 runtime-state guard，不能由无关 decoy else 代替")
         let missingEventSurfaceMutation = eventQuerySampleRegion.replacingOccurrences(
-            of: "verifiedSurface.signature == request.target.identity.surfaceSignature",
+            of: "verifiedBinding.surfaceSignature == request.target.identity.surfaceSignature",
             with: "true")
         expect(
-            !backgroundEventSampleIsExact(missingEventSurfaceMutation),
+            !backgroundEventSampleIsExact(
+                missingEventSurfaceMutation,
+                eventBindingRegion,
+                elementIdentityMapTypeRegion,
+                focusedLineageRegion,
+                lineageRegion),
             "event sampler 必须拒绝只取到某个 surface 而不 exact 匹配 allowlist 摘要")
-        let wrongWindowAttributeMutation = eventQuerySampleRegion.replacingOccurrences(
+        let wrongWindowAttributeMutation = eventBindingRegion.replacingOccurrences(
             of: ".windowNumber,",
             with: ".enabled,")
         expect(
-            !backgroundEventSampleIsExact(wrongWindowAttributeMutation),
+            !backgroundEventSampleIsExact(
+                eventQuerySampleRegion,
+                wrongWindowAttributeMutation,
+                elementIdentityMapTypeRegion,
+                focusedLineageRegion,
+                lineageRegion),
             "event sampler 必须精确读取 AXWindowNumber，不能接受其他 NSNumber-compatible 属性")
-        let discardedWindowOrdinalMutation = eventQuerySampleRegion.replacingOccurrences(
-            of: "windowOrdinal: max(0, rawWindowOrdinal ?? 0)",
+        let wrongWindowElementMutation = eventBindingRegion.replacingOccurrences(
+            of: "from: focusedBefore.window",
+            with: "from: eventElement")
+        expect(
+            !backgroundEventSampleIsExact(
+                eventQuerySampleRegion,
+                wrongWindowElementMutation,
+                elementIdentityMapTypeRegion,
+                focusedLineageRegion,
+                lineageRegion),
+            "window ordinal 必须来自 verified focused window，不能来自任意 callback element")
+        let wrongEventElementMutation = eventQuerySampleRegion.replacingOccurrences(
+            of: "eventElement: request.element",
+            with: "eventElement: request.applicationElement")
+        expect(
+            !backgroundEventSampleIsExact(
+                wrongEventElementMutation,
+                eventBindingRegion,
+                elementIdentityMapTypeRegion,
+                focusedLineageRegion,
+                lineageRegion),
+            "event binding 必须从真实 callback element 起步，不能用 application focus 替代")
+        let discardedWindowOrdinalMutation = eventBindingRegion.replacingOccurrences(
+            of: "windowOrdinal: rawWindowOrdinal ?? 0",
             with: "windowOrdinal: 0")
         expect(
-            !backgroundEventSampleIsExact(discardedWindowOrdinalMutation),
+            !backgroundEventSampleIsExact(
+                eventQuerySampleRegion,
+                discardedWindowOrdinalMutation,
+                elementIdentityMapTypeRegion,
+                focusedLineageRegion,
+                lineageRegion),
             "event sampler 必须把 typed window number 写入 sample，不能读取后硬编码为零")
+        let reusedEventAfterMutation = eventBindingRegion.replacingOccurrences(
+            of: "let eventAfter = lineage(",
+            with: "let eventAfter = eventBefore; _ = lineage(")
+        expect(
+            !backgroundEventSampleIsExact(
+                eventQuerySampleRegion,
+                reusedEventAfterMutation,
+                elementIdentityMapTypeRegion,
+                focusedLineageRegion,
+                lineageRegion),
+            "event lineage 必须在 window read 后重新采样，不能复用 before 快照")
+        let splitIdentityMapMutation = eventBindingRegion.replacingOccurrences(
+            of: "eventAfter: identityMap.identities(for: eventAfter)",
+            with: "eventAfter: SystemChatAXElementIdentityMap().identities(for: eventAfter)")
+        expect(
+            !backgroundEventSampleIsExact(
+                eventQuerySampleRegion,
+                splitIdentityMapMutation,
+                elementIdentityMapTypeRegion,
+                focusedLineageRegion,
+                lineageRegion),
+            "四条 lineage 必须共用一个 opaque identity namespace")
+        let pointerIdentityMutation = elementIdentityMapTypeRegion.replacingOccurrences(
+            of: "CFEqual($0, element)",
+            with: "$0 === element")
+        expect(
+            !backgroundEventSampleIsExact(
+                eventQuerySampleRegion,
+                eventBindingRegion,
+                pointerIdentityMutation,
+                focusedLineageRegion,
+                lineageRegion),
+            "AX element identity 必须使用 CFEqual，不能退化为 wrapper 指针相等")
+        let wrongLineageEndpointMutation = eventBindingRegion.replacingOccurrences(
+            of: "through: focusedBefore.window",
+            with: "through: eventElement")
+        expect(
+            !backgroundEventSampleIsExact(
+                eventQuerySampleRegion,
+                wrongLineageEndpointMutation,
+                elementIdentityMapTypeRegion,
+                focusedLineageRegion,
+                lineageRegion),
+            "event parent lineage 必须终止于 verified focused window")
         let completionTimestampMutation = commitObservedEventRegion.replacingOccurrences(
             of: "elapsedMilliseconds: elapsedMilliseconds",
             with: "elapsedMilliseconds: traceElapsedMilliseconds")
@@ -3152,8 +3677,8 @@ func runChatAXTracerSuites() async {
         expect(
             runtimeSamplerTypeRegion.contains("readAnchorFacts(")
                 && runtimeSamplerTypeRegion.contains("ChatAXSurfaceVerifier.verifyChat(")
-                && eventQuerySampleRegion.contains("readAnchorFacts(")
-                && eventQuerySampleRegion.contains("ChatAXSurfaceVerifier.verifyChat(")
+                && eventQuerySampleRegion.contains("readVerifiedEventBinding(")
+                && eventBindingRegion.contains("ChatAXEventSurfaceBindingVerifier.verify(")
                 && !observerTypeRegion.contains("surfaceStillMatches(")
                 && !observerTypeRegion.contains("elementBelongsToTarget("),
             "周期与 event 后台复核必须共用 exact surface verifier，observer 不得保留 dead 快捷路径")

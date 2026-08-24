@@ -1,5 +1,6 @@
 #if DEBUG
 import ClaudioCore
+import CoreFoundation
 import CryptoKit
 import Foundation
 
@@ -740,6 +741,114 @@ package enum ChatAXSurfaceVerifier {
     }
 }
 
+/// 一次 system query 内由 `CFEqual` 建立的 opaque element 等价类；不会进入 evidence。
+package struct ChatAXLineageNodeIdentity: Equatable, Hashable, Sendable {
+    package let sampleID: UUID
+    package let ordinal: Int
+
+    package init(sampleID: UUID, ordinal: Int) {
+        self.sampleID = sampleID
+        self.ordinal = ordinal
+    }
+}
+
+/// leaf → window 的有界 lineage，以及从这条 lineage 本身读取的 surface anchor facts。
+package struct ChatAXSurfaceLineageSample: Equatable, Sendable {
+    package let nodes: [ChatAXLineageNodeIdentity]
+    package let anchorFacts: ChatAXSurfaceAnchorFacts
+
+    package init(
+        nodes: [ChatAXLineageNodeIdentity],
+        anchorFacts: ChatAXSurfaceAnchorFacts
+    ) {
+        self.nodes = nodes
+        self.anchorFacts = anchorFacts
+    }
+}
+
+package struct ChatAXEventSurfaceBindingSample: Equatable, Sendable {
+    package let focusedBefore: ChatAXSurfaceLineageSample
+    package let focusedAfter: ChatAXSurfaceLineageSample
+    package let eventBefore: [ChatAXLineageNodeIdentity]
+    package let eventAfter: [ChatAXLineageNodeIdentity]
+    package let windowOrdinal: Int
+
+    package init(
+        focusedBefore: ChatAXSurfaceLineageSample,
+        focusedAfter: ChatAXSurfaceLineageSample,
+        eventBefore: [ChatAXLineageNodeIdentity],
+        eventAfter: [ChatAXLineageNodeIdentity],
+        windowOrdinal: Int
+    ) {
+        self.focusedBefore = focusedBefore
+        self.focusedAfter = focusedAfter
+        self.eventBefore = eventBefore
+        self.eventAfter = eventAfter
+        self.windowOrdinal = windowOrdinal
+    }
+}
+
+/// 只有稳定 callback lineage 与 verified Chat anchor/window 同源时才能创建。
+package struct ChatAXVerifiedEventSurfaceBinding: Equatable, Sendable {
+    package let surfaceSignature: ChatAXSurfaceSignature
+    package let windowOrdinal: Int
+
+    fileprivate init(
+        surfaceSignature: ChatAXSurfaceSignature,
+        windowOrdinal: Int
+    ) {
+        self.surfaceSignature = surfaceSignature
+        self.windowOrdinal = windowOrdinal
+    }
+}
+
+package enum ChatAXEventSurfaceBindingVerifier {
+    package static func verify(
+        _ sample: ChatAXEventSurfaceBindingSample,
+        allowedSignatures: Set<ChatAXSurfaceSignature>
+    ) -> ChatAXVerifiedEventSurfaceBinding? {
+        let lineages = [
+            sample.focusedBefore.nodes,
+            sample.focusedAfter.nodes,
+            sample.eventBefore,
+            sample.eventAfter,
+        ]
+        guard
+            sample.windowOrdinal >= 0,
+            lineages.allSatisfy({
+                !$0.isEmpty
+                    && $0.count <= ChatAXSurfaceAnchorFacts.maximumAnchorDepth + 1
+                    && Set($0).count == $0.count
+                    && $0.allSatisfy { $0.ordinal >= 0 }
+            }),
+            let sampleID = lineages.first?.first?.sampleID,
+            lineages.joined().allSatisfy({ $0.sampleID == sampleID }),
+            sample.focusedBefore == sample.focusedAfter,
+            sample.eventBefore == sample.eventAfter,
+            let focusedWindow = sample.focusedBefore.nodes.last,
+            sample.eventBefore.last == focusedWindow,
+            sample.focusedBefore.anchorFacts == sample.focusedAfter.anchorFacts
+        else {
+            return nil
+        }
+        let anchorIndex =
+            sample.focusedBefore.nodes.count - 1
+            - sample.focusedBefore.anchorFacts.anchorDepth
+        guard
+            sample.focusedBefore.nodes.indices.contains(anchorIndex),
+            sample.eventBefore.contains(sample.focusedBefore.nodes[anchorIndex]),
+            let verifiedSurface = ChatAXSurfaceVerifier.verifyChat(
+                anchorFacts: sample.focusedBefore.anchorFacts,
+                allowedSignatures: allowedSignatures)
+        else {
+            return nil
+        }
+        return ChatAXVerifiedEventSurfaceBinding(
+            surfaceSignature: verifiedSurface.signature,
+            windowOrdinal: sample.windowOrdinal)
+    }
+}
+
 /// Tracer 只接受调用方已经从非 AX 内容边界取得的版本身份；这里没有 UI tree 或正文槽位。
 package struct ChatAXTargetIdentity: Codable, Equatable, Sendable {
     package let bundleIdentifier: String
@@ -958,6 +1067,29 @@ package enum ChatAXApprovedRelation: String, CaseIterable, Sendable {
     case focusedUIElement = "AXFocusedUIElement"
     case focusedWindow = "AXFocusedWindow"
     case parent = "AXParent"
+}
+
+/// `AXWindowNumber` 的唯一数值入口；缺失值由 system reader 单独表示，错误类型绝不转换。
+package enum ChatAXWindowOrdinalDecoder {
+    package static func decode(_ value: CFTypeRef) -> Int? {
+        guard
+            CFGetTypeID(value) == CFNumberGetTypeID(),
+            let number = value as? NSNumber,
+            !CFNumberIsFloatType(number)
+        else {
+            return nil
+        }
+        switch String(cString: number.objCType) {
+        case "c", "s", "i", "l", "q":
+            let rawValue = number.int64Value
+            guard rawValue >= 0 else { return nil }
+            return Int(exactly: rawValue)
+        case "C", "S", "I", "L", "Q":
+            return Int(exactly: number.uint64Value)
+        default:
+            return nil
+        }
+    }
 }
 
 /// 候选检测器的输入是封闭的结构/状态事实；类型上没有任意 AXValue 或文本字段。

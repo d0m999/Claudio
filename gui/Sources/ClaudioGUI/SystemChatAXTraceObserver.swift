@@ -371,24 +371,61 @@ private struct SystemChatAXAttributeReader {
         if result == .attributeUnsupported || result == .noValue {
             return .success(nil)
         }
-        guard result == .success, let number = value as? NSNumber else {
+        guard
+            result == .success,
+            let value,
+            let ordinal = ChatAXWindowOrdinalDecoder.decode(value)
+        else {
             return .failure(.unreadable)
         }
-        return .success(number.intValue)
+        return .success(ordinal)
     }
 }
 
-/// 只沿当前焦点到当前窗口的 parent 链寻找最靠近窗口的已标识 anchor；绝不请求 children 或正文属性。
+private struct SystemChatAXSurfaceLineageSnapshot {
+    let elements: [AXUIElement]
+    let anchorFacts: ChatAXSurfaceAnchorFacts
+
+    var window: AXUIElement { elements[elements.count - 1] }
+}
+
+/// 把一次 query 中 `CFEqual` 的 AX object 映射为 Core 可验证、但不可持久化的 opaque token。
+private final class SystemChatAXElementIdentityMap {
+    private let sampleID = UUID()
+    private var representatives: [AXUIElement] = []
+
+    func identities(
+        for elements: [AXUIElement]
+    ) -> [ChatAXLineageNodeIdentity] {
+        elements.map(identity(for:))
+    }
+
+    private func identity(
+        for element: AXUIElement
+    ) -> ChatAXLineageNodeIdentity {
+        if let ordinal = representatives.firstIndex(where: { CFEqual($0, element) }) {
+            return ChatAXLineageNodeIdentity(sampleID: sampleID, ordinal: ordinal)
+        }
+        let ordinal = representatives.count
+        representatives.append(element)
+        return ChatAXLineageNodeIdentity(sampleID: sampleID, ordinal: ordinal)
+    }
+}
+
+/// 只沿 element → window 的 parent 链寻找最靠近窗口的已标识 anchor；绝不请求 children 或正文属性。
 private struct SystemChatAXSurfaceSignatureReader {
     private static let approvedAttributes: Set<ChatAXApprovedAttribute> = [
-        .identifier, .role, .subrole,
+        .identifier, .role, .subrole, .windowNumber,
     ]
 
     private let reader: SystemChatAXAttributeReader
 
-    init(budget: SystemChatAXReadBudget = SystemChatAXReadBudget()) {
+    init(
+        budget: SystemChatAXReadBudget = SystemChatAXReadBudget(),
+        approvedAttributes: Set<ChatAXApprovedAttribute> = Self.approvedAttributes
+    ) {
         reader = SystemChatAXAttributeReader(
-            approvedAttributes: Self.approvedAttributes,
+            approvedAttributes: approvedAttributes.intersection(Self.approvedAttributes),
             budget: budget)
     }
 
@@ -397,36 +434,83 @@ private struct SystemChatAXSurfaceSignatureReader {
         expectedProcessIdentifier: pid_t
     ) -> ChatAXSurfaceAnchorFacts? {
         guard
-            reader.prepareForMessaging(applicationElement),
-            belongsToTarget(applicationElement, expectedProcessIdentifier)
-        else {
-            return nil
-        }
-        guard
-            let focusedWindow = reader.element(.focusedWindow, from: applicationElement),
-            let focusedElement = reader.element(.focusedUIElement, from: applicationElement),
-            belongsToTarget(focusedWindow, expectedProcessIdentifier),
-            belongsToTarget(focusedElement, expectedProcessIdentifier),
-            let sampledLineage = lineage(
-                from: focusedElement,
-                through: focusedWindow,
+            let before = focusedLineageSnapshot(
+                applicationElement: applicationElement,
                 expectedProcessIdentifier: expectedProcessIdentifier),
-            let facts = anchorFacts(in: sampledLineage),
-            let confirmedWindow = reader.element(.focusedWindow, from: applicationElement),
-            let confirmedElement = reader.element(.focusedUIElement, from: applicationElement),
-            CFEqual(confirmedWindow, focusedWindow),
-            CFEqual(confirmedElement, focusedElement),
-            let confirmedLineage = lineage(
-                from: confirmedElement,
-                through: confirmedWindow,
+            let after = focusedLineageSnapshot(
+                applicationElement: applicationElement,
                 expectedProcessIdentifier: expectedProcessIdentifier),
-            lineagesAreEqual(sampledLineage, confirmedLineage),
-            anchorFacts(in: confirmedLineage) == facts,
+            lineagesAreEqual(before.elements, after.elements),
+            before.anchorFacts == after.anchorFacts,
             reader.hasRemainingTime
         else {
             return nil
         }
-        return facts
+        return before.anchorFacts
+    }
+
+    func readVerifiedEventBinding(
+        applicationElement: AXUIElement,
+        eventElement: AXUIElement,
+        expectedProcessIdentifier: pid_t,
+        allowedSignatures: Set<ChatAXSurfaceSignature>
+    ) -> ChatAXVerifiedEventSurfaceBinding? {
+        guard
+            let focusedBefore = focusedLineageSnapshot(
+                applicationElement: applicationElement,
+                expectedProcessIdentifier: expectedProcessIdentifier),
+            let eventBefore = lineage(
+                from: eventElement,
+                through: focusedBefore.window,
+                expectedProcessIdentifier: expectedProcessIdentifier),
+            case .success(let rawWindowOrdinal) = reader.integer(
+                .windowNumber,
+                from: focusedBefore.window),
+            let eventAfter = lineage(
+                from: eventElement,
+                through: focusedBefore.window,
+                expectedProcessIdentifier: expectedProcessIdentifier),
+            let focusedAfter = focusedLineageSnapshot(
+                applicationElement: applicationElement,
+                expectedProcessIdentifier: expectedProcessIdentifier),
+            reader.hasRemainingTime
+        else {
+            return nil
+        }
+        let identityMap = SystemChatAXElementIdentityMap()
+        return ChatAXEventSurfaceBindingVerifier.verify(
+            ChatAXEventSurfaceBindingSample(
+                focusedBefore: ChatAXSurfaceLineageSample(
+                    nodes: identityMap.identities(for: focusedBefore.elements),
+                    anchorFacts: focusedBefore.anchorFacts),
+                focusedAfter: ChatAXSurfaceLineageSample(
+                    nodes: identityMap.identities(for: focusedAfter.elements),
+                    anchorFacts: focusedAfter.anchorFacts),
+                eventBefore: identityMap.identities(for: eventBefore),
+                eventAfter: identityMap.identities(for: eventAfter),
+                windowOrdinal: rawWindowOrdinal ?? 0),
+            allowedSignatures: allowedSignatures)
+    }
+
+    private func focusedLineageSnapshot(
+        applicationElement: AXUIElement,
+        expectedProcessIdentifier: pid_t
+    ) -> SystemChatAXSurfaceLineageSnapshot? {
+        guard
+            belongsToTarget(applicationElement, expectedProcessIdentifier),
+            let focusedWindow = reader.element(.focusedWindow, from: applicationElement),
+            let focusedElement = reader.element(.focusedUIElement, from: applicationElement),
+            let elements = lineage(
+                from: focusedElement,
+                through: focusedWindow,
+                expectedProcessIdentifier: expectedProcessIdentifier),
+            let facts = anchorFacts(in: elements)
+        else {
+            return nil
+        }
+        return SystemChatAXSurfaceLineageSnapshot(
+            elements: elements,
+            anchorFacts: facts)
     }
 
     private func lineage(
@@ -434,6 +518,12 @@ private struct SystemChatAXSurfaceSignatureReader {
         through focusedWindow: AXUIElement,
         expectedProcessIdentifier: pid_t
     ) -> [AXUIElement]? {
+        guard
+            belongsToTarget(focusedElement, expectedProcessIdentifier),
+            belongsToTarget(focusedWindow, expectedProcessIdentifier)
+        else {
+            return nil
+        }
         var lineage = [focusedElement]
         var current = focusedElement
         if CFEqual(current, focusedWindow) { return lineage }
@@ -591,27 +681,20 @@ private enum SystemChatAXEventQuerySampler {
             return nil
         }
         let budget = SystemChatAXReadBudget()
-        let reader = SystemChatAXAttributeReader(
-            approvedAttributes: request.approvedAttributes,
-            budget: budget)
         guard
-            elementProcessIdentifier(request.element, reader: reader) == processIdentifier,
-            !Task.isCancelled,
-            let anchorFacts = SystemChatAXSurfaceSignatureReader(budget: budget).readAnchorFacts(
+            let verifiedBinding = SystemChatAXSurfaceSignatureReader(
+                budget: budget,
+                approvedAttributes: request.approvedAttributes
+            ).readVerifiedEventBinding(
                 applicationElement: request.applicationElement,
-                expectedProcessIdentifier: processIdentifier),
-            let verifiedSurface = ChatAXSurfaceVerifier.verifyChat(
-                anchorFacts: anchorFacts,
+                eventElement: request.element,
+                expectedProcessIdentifier: processIdentifier,
                 allowedSignatures: [request.target.identity.surfaceSignature]),
-            !Task.isCancelled,
-            case .success(let rawWindowOrdinal) = reader.integer(
-                .windowNumber,
-                from: request.element),
             !Task.isCancelled,
             let factsAfter = SystemChatAXCodeIdentityReader.runningRuntimeFacts(
                 processIdentifier: processIdentifier),
             factsAfter == factsBefore,
-            verifiedSurface.signature == request.target.identity.surfaceSignature,
+            verifiedBinding.surfaceSignature == request.target.identity.surfaceSignature,
             !Task.isCancelled,
             SystemChatAXRuntimeApplicationVerifier.matches(
                 target: request.target,
@@ -623,23 +706,8 @@ private enum SystemChatAXEventQuerySampler {
         return SystemChatAXEventQuerySample(
             processIdentifier: processIdentifier,
             runtimeFacts: factsBefore,
-            surfaceSignature: verifiedSurface.signature,
-            windowOrdinal: max(0, rawWindowOrdinal ?? 0))
-    }
-
-    private static func elementProcessIdentifier(
-        _ element: AXUIElement,
-        reader: SystemChatAXAttributeReader
-    ) -> pid_t? {
-        guard reader.prepareForMessaging(element) else { return nil }
-        var observedProcessIdentifier: pid_t = 0
-        guard
-            AXUIElementGetPid(element, &observedProcessIdentifier) == .success,
-            !Task.isCancelled
-        else {
-            return nil
-        }
-        return observedProcessIdentifier
+            surfaceSignature: verifiedBinding.surfaceSignature,
+            windowOrdinal: verifiedBinding.windowOrdinal)
     }
 }
 
