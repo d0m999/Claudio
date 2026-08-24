@@ -1134,6 +1134,7 @@ func runConcreteHostIntegrationAdapterSuites() async {
                     claudioBinaryPath: paths.binary.path,
                     claudioRoot: paths.claudioRoot.path,
                     receiptStore: failingStore,
+                    scopeFingerprint: { "test-scope-v1" },
                     availability: { .available }))
 
             guard
