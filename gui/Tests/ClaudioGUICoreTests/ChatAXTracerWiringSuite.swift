@@ -12,6 +12,55 @@ private func chatAXWiringSource(_ relativePath: String) -> String? {
         encoding: .utf8)
 }
 
+private func chatAXTypechecksInDebugAndRelease(_ source: String) -> (
+    succeeded: Bool, diagnostics: String
+) {
+    let fileManager = FileManager.default
+    let fixtureDirectory = fileManager.temporaryDirectory.appendingPathComponent(
+        "claudio-chat-ax-wiring-\(UUID().uuidString)", isDirectory: true)
+    let fixture = fixtureDirectory.appendingPathComponent("Mutation.swift")
+
+    do {
+        try fileManager.createDirectory(
+            at: fixtureDirectory, withIntermediateDirectories: true)
+        try source.write(to: fixture, atomically: true, encoding: .utf8)
+    } catch {
+        return (false, "无法创建 mutation fixture：\(error)")
+    }
+    defer { try? fileManager.removeItem(at: fixtureDirectory) }
+
+    var diagnostics: [String] = []
+    for (configuration, compilerArguments) in [
+        ("Debug", ["-DDEBUG"]),
+        ("Release", []),
+    ] {
+        let process = Process()
+        let standardError = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
+        process.arguments =
+            ["swiftc", "-swift-version", "6", "-typecheck"] + compilerArguments
+            + [fixture.path]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = standardError
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch {
+            diagnostics.append("\(configuration)：无法启动 swiftc：\(error)")
+            continue
+        }
+
+        let errorData = standardError.fileHandleForReading.readDataToEndOfFile()
+        if process.terminationStatus != 0 {
+            let errorText = String(data: errorData, encoding: .utf8) ?? "无诊断信息"
+            diagnostics.append(
+                "\(configuration)：swiftc rc=\(process.terminationStatus)：\(errorText)")
+        }
+    }
+    return (diagnostics.isEmpty, diagnostics.joined(separator: "\n"))
+}
+
 private enum ChatAXConditionalDirective {
     case debugIf
     case otherIf
@@ -200,11 +249,12 @@ private func hasSingleOccurrenceDirectlyInsideDebug(
     guard scanned.unmodeledConstructs.isEmpty else { return false }
     let code = scanned.codeWithoutStringLiterals
     guard code.components(separatedBy: marker).count - 1 == 1,
-        let functionRegion = chatAXFunctionRegion(declaration, in: code)
+        let functionRegion = chatAXFunctionRegion(declaration, in: code),
+        functionRegion.components(separatedBy: marker).count - 1 == 1
     else {
         return false
     }
-    return hasSingleOccurrenceDirectlyInsideDebug(marker, in: functionRegion)
+    return hasSingleOccurrenceDirectlyInsideDebug(marker, in: code)
 }
 
 private func hasSingleOccurrenceDirectlyInsideDebug(
@@ -217,11 +267,12 @@ private func hasSingleOccurrenceDirectlyInsideDebug(
     guard scanned.unmodeledConstructs.isEmpty else { return false }
     let code = scanned.codeWithoutStringLiterals
     guard code.components(separatedBy: marker).count - 1 == 1,
-        let typeRegion = chatAXBracedDeclarationRegion(typeDeclaration, in: code)
+        let typeRegion = chatAXBracedDeclarationRegion(typeDeclaration, in: code),
+        typeRegion.components(separatedBy: marker).count - 1 == 1
     else {
         return false
     }
-    return hasSingleOccurrenceDirectlyInsideDebug(marker, in: typeRegion)
+    return hasSingleOccurrenceDirectlyInsideDebug(marker, in: code)
 }
 
 private func hasSingleOccurrenceDirectlyInsideDebug(
@@ -236,11 +287,12 @@ private func hasSingleOccurrenceDirectlyInsideDebug(
     let code = scanned.codeWithoutStringLiterals
     guard code.components(separatedBy: marker).count - 1 == 1,
         let typeRegion = chatAXBracedDeclarationRegion(typeDeclaration, in: code),
-        let functionRegion = chatAXFunctionRegion(functionDeclaration, in: typeRegion)
+        let functionRegion = chatAXFunctionRegion(functionDeclaration, in: typeRegion),
+        functionRegion.components(separatedBy: marker).count - 1 == 1
     else {
         return false
     }
-    return hasSingleOccurrenceDirectlyInsideDebug(marker, in: functionRegion)
+    return hasSingleOccurrenceDirectlyInsideDebug(marker, in: code)
 }
 
 @MainActor
@@ -283,6 +335,12 @@ func runChatAXTracerWiringSuites() {
             """
         let delegateDeclaration =
             "final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate"
+        let alternateBranchTypecheck = chatAXTypechecksInDebugAndRelease(
+            parenthesizedElseifLifecycleLeak)
+        expect(
+            alternateBranchTypecheck.succeeded,
+            "alternate-branch mutation 必须能在 Debug/Release 下实际 typecheck："
+                + alternateBranchTypecheck.diagnostics)
         expect(
             !hasSingleOccurrenceDirectlyInsideDebug(
                 "private var chatAXTracer: ChatAXTracerSession?",
@@ -472,6 +530,54 @@ func runChatAXTracerWiringSuites() {
                 inFunction: "func applicationDidFinishLaunching(",
                 source: correctLifecycleFunction),
             "目标 lifecycle 函数自己的 DEBUG region 内调用必须命中")
+
+        let outerAlternateBranchLifecycleRelocation = """
+            import AppKit
+            #if DEBUG
+            #elseif(!DEBUG)
+            final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
+            #if DEBUG
+            private var chatAXTracer: ChatAXTracerSession?
+            #endif
+            func applicationDidFinishLaunching(_ notification: Notification) {
+            #if DEBUG
+            chatAXTracer = startExplicitChatAXTracerIfConfigured()
+            #endif
+            }
+            func applicationWillTerminate(_ notification: Notification) {
+            #if DEBUG
+            chatAXTracer?.guiWillTerminate()
+            #endif
+            }
+            }
+            #endif
+            """
+        let relocationTypecheck = chatAXTypechecksInDebugAndRelease(
+            outerAlternateBranchLifecycleRelocation)
+        expect(
+            relocationTypecheck.succeeded,
+            "lifecycle relocation mutation 必须能在 Debug/Release 下实际 typecheck："
+                + relocationTypecheck.diagnostics)
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "private var chatAXTracer: ChatAXTracerSession?",
+                inType: delegateDeclaration,
+                source: outerAlternateBranchLifecycleRelocation),
+            "外层 #elseif(!DEBUG) 中不可达的 DEBUG owner 不得假冒 lifecycle wiring")
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "chatAXTracer = startExplicitChatAXTracerIfConfigured()",
+                inFunction: "func applicationDidFinishLaunching(_ notification: Notification)",
+                inType: delegateDeclaration,
+                source: outerAlternateBranchLifecycleRelocation),
+            "外层 #elseif(!DEBUG) 中不可达的 DEBUG start 不得假冒 lifecycle wiring")
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "chatAXTracer?.guiWillTerminate()",
+                inFunction: "func applicationWillTerminate(_ notification: Notification)",
+                inType: delegateDeclaration,
+                source: outerAlternateBranchLifecycleRelocation),
+            "外层 #elseif(!DEBUG) 中不可达的 DEBUG stop 不得假冒 lifecycle wiring")
 
         let dummyOwnerType = """
             final class DummyDelegate {
