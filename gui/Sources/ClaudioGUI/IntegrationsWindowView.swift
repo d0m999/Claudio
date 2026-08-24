@@ -130,6 +130,7 @@ struct IntegrationsWindowView: View {
                 .accessibilityLabel(l10n.text(.integrationsRedetectLabel))
                 .accessibilityHint(l10n.text(.integrationsRedetectHint))
                 .accessibilityIdentifier("integrations.redetect")
+                .focused($focusedTarget, equals: .toolbarRedetect)
             }
         }
         .confirmationDialog(

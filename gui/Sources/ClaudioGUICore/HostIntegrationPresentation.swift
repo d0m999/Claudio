@@ -674,6 +674,7 @@ public func integrationsInspectorActionTitle(
 public enum IntegrationsWindowFocusTarget: Sendable, Hashable {
     case hostCard(HostID)
     case capabilityCell(host: HostID, event: Event)
+    case toolbarRedetect
     case recoveryAction(IntegrationsRecoveryAction)
     case copyConfigurationPath(HostID)
     case dismissFeedback(revision: UInt64)
@@ -707,8 +708,8 @@ public struct IntegrationsWindowFocusScope: Sendable, Equatable {
     }
 }
 
-/// 从上到下按 Product → Surface 遍历来源摘要与矩阵，再进入检查器。即使调用者把断开动作
-/// 夹在中间，函数也会把全部破坏性动作移到末尾；普通 Tab 流不能先撞上断开。
+/// 从上到下按 Product → Surface 遍历来源摘要与矩阵，再进入工具栏与检查器。即使调用者把
+/// 断开动作夹在中间，函数也会把全部破坏性动作移到末尾；普通 Tab 流不能先撞上断开。
 public func integrationsWindowFocusOrder(
     _ scope: IntegrationsWindowFocusScope
 ) -> [IntegrationsWindowFocusTarget] {
@@ -724,6 +725,7 @@ public func integrationsWindowFocusOrder(
                 }
             }
         })
+    order.append(.toolbarRedetect)
     if let host = scope.configurationPathHost {
         order.append(.copyConfigurationPath(host))
     }

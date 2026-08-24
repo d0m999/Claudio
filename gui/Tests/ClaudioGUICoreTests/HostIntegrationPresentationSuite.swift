@@ -568,7 +568,7 @@ func runHostIntegrationPresentationSuites() {
         expect(!maximum.allowsHorizontalScrolling, "最大字号严禁横向滚动或裁切")
     }
 
-    suite("IntegrationsWindow 焦点序：宿主摘要领先、矩阵逐行、检查器视觉序随后，断开永远最后") {
+    suite("IntegrationsWindow 焦点序：宿主摘要领先、矩阵逐行、工具栏与检查器随后") {
         let visualOrder = hostSurfacePresentationOrder()
         let matrix = hostCapabilityMatrixPresentation(
             from: hostPresentationMatrix(),
@@ -598,7 +598,8 @@ func runHostIntegrationPresentationSuites() {
             Array(order.dropFirst(hostCount).prefix(cellCount)) == expectedCells,
             "焦点随后必须按事件行、宿主列遍历全部真实矩阵单元")
         expect(
-            order.dropFirst(hostCount + cellCount).prefix(6) == [
+            order.dropFirst(hostCount + cellCount).prefix(7) == [
+                .toolbarRedetect,
                 .copyConfigurationPath(.codex),
                 .dismissFeedback(revision: 7),
                 .recoveryAction(.repair(.codex)),
@@ -606,7 +607,7 @@ func runHostIntegrationPresentationSuites() {
                 .inspectorAction(.redetect),
                 .inspectorAction(.connect(.claudeCode)),
             ],
-            "配置路径、反馈、主恢复与非破坏检查器动作应按视觉序排在断开之前")
+            "工具栏、配置路径、反馈、主恢复与非破坏动作应按纯焦点序排在断开之前")
         expect(
             order.last == .inspectorAction(.disconnect(.codex)),
             "破坏性的断开必须无条件位于详情窗焦点序末尾")

@@ -25,7 +25,8 @@ import Foundation
 // `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`,
 // `ReleaseCandidateArtifactSuite.swift`,
 // `ChatAXTracerSuite.swift`, `ChatAXTracerWiringSuite.swift`,
-// `VolumeDragSessionSuite.swift`, `PanelWriteFailuresSuite.swift`).
+// `WorkBuddyKeyboardAccessibilitySuite.swift`, `VolumeDragSessionSuite.swift`,
+// `PanelWriteFailuresSuite.swift`).
 
 var totalChecks = 0
 var failures = 0
@@ -103,6 +104,7 @@ runProductUIModelsSuites()
 runPanelAccessibilitySuites()
 runHostIntegrationPresentationSuites()
 runWorkBuddyVisualStateBaselineSuites()
+runWorkBuddyKeyboardAccessibilitySuites()
 await runHostIntegrationManagerBridgeSuites()
 runIntegrationsWindowWiringSuites()
 runRetainedWindowHandbackTrackerSuites()
