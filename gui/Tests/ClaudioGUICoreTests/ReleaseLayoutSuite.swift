@@ -329,15 +329,16 @@ func runReleaseLayoutSuites() {
             "LICENSES.md 必须绑定 task_start 的来源、许可与最终 SHA256")
 
         expect(
-            devBundle.contains("bash scripts/copy-bundled-packs.sh")
+            devBundle.contains(#"bash "$repo_root/scripts/copy-bundled-packs.sh""#)
                 && packCopyScript.contains(#"entries=("$SOURCE_ROOT"/*)"#)
                 && packCopyScript.contains("LICENSES.md")
                 && !packCopyScript.contains("packs/minimal-chime")
-                && devBundle.contains("--package-path helper --product claudio"),
+                && devBundle.contains(
+                    #"--package-path "$repo_root/helper" --product claudio"#),
             "dev bundle 必须遍历复制所有 pack 与许可证，并显式构建 claudio helper product")
         expect(
             devBundle.contains("strip -x")
-                && devBundle.contains("bash scripts/check-release-size.sh")
+                && devBundle.contains(#"bash "$repo_root/scripts/check-release-size.sh""#)
                 && devBundle.contains(#"ln -s claudi0 "$APP/Contents/Resources/bin/claudio""#),
             "dev bundle 必须与正式发布一样 strip 并执行体积门禁")
     }

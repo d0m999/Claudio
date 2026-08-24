@@ -2,7 +2,11 @@
 # 本地走查用的 ad-hoc claudi0.app —— release.yml「Assemble claudi0.app」的单架构等价物。
 # CI 那份用 lipo 合双架构；走查只需要本机这一个架构。
 set -euo pipefail
-cd "$(dirname "$0")/.."
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+repo_root="$(cd -- "$script_dir/.." && pwd -P)"
+source "$script_dir/pinned-output-directory.sh"
+cd "$repo_root"
 
 REQUESTED_VERSION="${CLAUDIO_VERSION:-}"
 if [[ -n "$REQUESTED_VERSION" && ! "$REQUESTED_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
@@ -20,24 +24,12 @@ fi
 
 gui_build() {
     if [[ "$GUI_NATIVE_HOST_CARD_PROBE" == true ]]; then
-        swift build -c release --package-path gui --product ClaudioGUI \
+        swift build -c release --package-path "$repo_root/gui" --product ClaudioGUI \
             -Xswiftc -DCLAUDIO_NATIVE_HOST_CARD_PROBE "$@"
     else
-        swift build -c release --package-path gui --product ClaudioGUI "$@"
+        swift build -c release --package-path "$repo_root/gui" --product ClaudioGUI "$@"
     fi
 }
-
-APP="dist/claudi0.app"
-LEGACY_APP="dist/Claudio.app"
-
-# 建之前先清旧 bundle：若下面任一 `swift build` 因编译错误退出（set -e），旧 dist/claudi0.app
-# 不能留在原地——否则走查者会 `open` 到上一次成功构建的旧二进制，却以为测的是这次改动。
-rm -rf "$APP" "$LEGACY_APP"
-
-# 两个 `--product` 都不是可省的修饰：裸 `swift build -c release` 会连各自的测试
-# executable 一起建，而测试会引用 `#if DEBUG` 门控的 fixture，Release 下编译不过。
-gui_build
-swift build -c release --package-path helper --product claudio
 
 find_unique_gui_resource_bundle() {
   local search_dir="$1"
@@ -65,30 +57,53 @@ find_unique_localization_bundle() {
   printf '%s\n' "${candidates[0]}"
 }
 
-GUI_BIN_DIR="$(gui_build --show-bin-path)"
-GUI_RESOURCE_BUNDLE="$(find_unique_gui_resource_bundle "$GUI_BIN_DIR")"
-LOCALIZATION_BUNDLE="$(find_unique_localization_bundle "$GUI_BIN_DIR")"
+assemble_dev_bundle() {
+    local APP="claudi0.app"
+    local LEGACY_APP="Claudio.app"
+    local BUNDLE_VERSION
+    local GUI_BIN_DIR
+    local GUI_RESOURCE_BUNDLE
+    local HELPER_BINARY
+    local HELPER_BIN_DIR
+    local LOCALIZATION_BUNDLE
 
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Resources/packs"
-cp "$GUI_BIN_DIR/ClaudioGUI" "$APP/Contents/MacOS/claudi0-app"
-cp -R "$GUI_RESOURCE_BUNDLE" "$APP/Contents/Resources/$(basename "$GUI_RESOURCE_BUNDLE")"
-cp -R "$LOCALIZATION_BUNDLE" "$APP/Contents/Resources/$(basename "$LOCALIZATION_BUNDLE")"
-HELPER_BIN_DIR="$(swift build -c release --package-path helper --product claudio --show-bin-path)"
-HELPER_BINARY="$HELPER_BIN_DIR/claudio"
-BUNDLE_VERSION="$("$HELPER_BINARY" --version)"
-if [[ "$BUNDLE_VERSION" != "0.0.0-dev" && ! "$BUNDLE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
-    echo "❌ helper returned an invalid embedded version: $BUNDLE_VERSION" >&2
-    exit 1
-fi
-if [[ -n "$REQUESTED_VERSION" && "$BUNDLE_VERSION" != "$REQUESTED_VERSION" ]]; then
-    echo "❌ helper version mismatch: requested=$REQUESTED_VERSION embedded=$BUNDLE_VERSION" >&2
-    exit 1
-fi
-cp "$HELPER_BINARY" "$APP/Contents/Resources/bin/claudi0"
-# 旧入口继续可执行，但只保留一个 helper Mach-O；相对链接在 app/DMG 搬动后仍然成立。
-ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
-bash scripts/copy-bundled-packs.sh packs "$APP/Contents/Resources/packs"
-cp assets/branding/claudi0.icns "$APP/Contents/Resources/claudi0.icns"
+    # 建之前先清旧 bundle：若下面任一 `swift build` 因编译错误退出（set -e），旧 app
+    # 不能留在原地——否则走查者会 `open` 到上一次成功构建的旧二进制，却以为测的是这次改动。
+    rm -rf "$APP" "$LEGACY_APP"
+
+    # 两个 `--product` 都不是可省的修饰：裸 `swift build -c release` 会连各自的测试
+    # executable 一起建，而测试会引用 `#if DEBUG` 门控的 fixture，Release 下编译不过。
+    gui_build
+    swift build -c release --package-path "$repo_root/helper" --product claudio
+
+    GUI_BIN_DIR="$(gui_build --show-bin-path)"
+    GUI_RESOURCE_BUNDLE="$(find_unique_gui_resource_bundle "$GUI_BIN_DIR")"
+    LOCALIZATION_BUNDLE="$(find_unique_localization_bundle "$GUI_BIN_DIR")"
+
+    mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" \
+        "$APP/Contents/Resources/packs"
+    cp "$GUI_BIN_DIR/ClaudioGUI" "$APP/Contents/MacOS/claudi0-app"
+    cp -R "$GUI_RESOURCE_BUNDLE" "$APP/Contents/Resources/$(basename "$GUI_RESOURCE_BUNDLE")"
+    cp -R "$LOCALIZATION_BUNDLE" "$APP/Contents/Resources/$(basename "$LOCALIZATION_BUNDLE")"
+    HELPER_BIN_DIR="$(swift build -c release --package-path "$repo_root/helper" \
+        --product claudio --show-bin-path)"
+    HELPER_BINARY="$HELPER_BIN_DIR/claudio"
+    BUNDLE_VERSION="$("$HELPER_BINARY" --version)"
+    if [[ "$BUNDLE_VERSION" != "0.0.0-dev" \
+        && ! "$BUNDLE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+        echo "❌ helper returned an invalid embedded version: $BUNDLE_VERSION" >&2
+        return 1
+    fi
+    if [[ -n "$REQUESTED_VERSION" && "$BUNDLE_VERSION" != "$REQUESTED_VERSION" ]]; then
+        echo "❌ helper version mismatch: requested=$REQUESTED_VERSION embedded=$BUNDLE_VERSION" >&2
+        return 1
+    fi
+    cp "$HELPER_BINARY" "$APP/Contents/Resources/bin/claudi0"
+    # 旧入口继续可执行，但只保留一个 helper Mach-O；相对链接在 app/DMG 搬动后仍然成立。
+    ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
+    bash "$repo_root/scripts/copy-bundled-packs.sh" "$repo_root/packs" \
+        "$APP/Contents/Resources/packs"
+    cp "$repo_root/assets/branding/claudi0.icns" "$APP/Contents/Resources/claudi0.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -108,11 +123,14 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
-printf 'APPL????' > "$APP/Contents/PkgInfo"
+    printf 'APPL????' > "$APP/Contents/PkgInfo"
 
-strip -x "$APP/Contents/MacOS/claudi0-app" "$APP/Contents/Resources/bin/claudi0"
-bash scripts/check-release-size.sh "$APP"
+    strip -x "$APP/Contents/MacOS/claudi0-app" "$APP/Contents/Resources/bin/claudi0"
+    bash "$repo_root/scripts/check-release-size.sh" "$APP"
 
-codesign --force --deep --sign - "$APP"
-codesign --verify --verbose "$APP"
-echo "✅ ${APP}（$(uname -m)）—— 用 open ${APP} 启动（菜单栏出现 Orbit Zero 图标）"
+    codesign --force --deep --sign - "$APP"
+    codesign --verify --verbose "$APP"
+    echo "✅ dist/${APP}（$(uname -m)）—— 用 open dist/${APP} 启动（菜单栏出现 Orbit Zero 图标）"
+}
+
+claudio_with_pinned_output_directory "$repo_root" "dist" assemble_dev_bundle

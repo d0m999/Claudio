@@ -13,22 +13,31 @@ fi
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/.." && pwd -P)"
+source "$script_dir/pinned-output-directory.sh"
 cd "$repo_root"
 
 readonly contract_path="scripts/local-pre-rc-contract.json"
 readonly report_path="dist/local-pre-rc-report.json"
 readonly app_path="dist/claudi0.app"
+readonly output_directory="dist"
+readonly report_name="local-pre-rc-report.json"
+readonly app_name="claudi0.app"
 
 fail() {
     echo "❌ $*" >&2
     exit 1
 }
 
-if [[ -d "$report_path" && ! -L "$report_path" ]]; then
-    fail "local pre-RC report path must not be a directory: $report_path"
-fi
+remove_stale_report() {
+    if [[ -d "$report_name" && ! -L "$report_name" ]]; then
+        fail "local pre-RC report path must not be a directory: $report_path"
+    fi
+    /bin/rm -f -- "$report_name"
+}
+
 # Even an early tool, contract, or HEAD failure must not leave an older success looking current.
-/bin/rm -f -- "$report_path"
+claudio_with_pinned_output_directory \
+    "$repo_root" "$output_directory" remove_stale_report
 
 for required_tool in git sw_vers uname swift jq bash lipo codesign; do
     command -v "$required_tool" >/dev/null 2>&1 \
@@ -91,10 +100,7 @@ run_bound_step() {
     assert_checkout_identity "$expected_commit"
 }
 
-mkdir -p "$(dirname "$report_path")"
-if [[ -L "$report_path" || -d "$report_path" ]]; then
-    fail "local pre-RC report path must not be a symlink or directory: $report_path"
-fi
+claudio_with_pinned_output_directory "$repo_root" "$output_directory" true
 
 macos_version="$(sw_vers -productVersion)"
 cpu_architecture="$(uname -m)"
@@ -111,19 +117,23 @@ run_bound_step "ClaudioGUI Debug build" \
 run_bound_step "localization catalog" \
     jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings
 run_bound_step "current-architecture ad-hoc dev bundle" bash scripts/dev-bundle.sh
-run_bound_step "release-size gate" bash scripts/check-release-size.sh dist/claudi0.app
+run_bound_step "release-size gate" claudio_with_pinned_output_directory \
+    "$repo_root" "$output_directory" bash "$repo_root/scripts/check-release-size.sh" "$app_name"
 
-readonly gui_binary="$app_path/Contents/MacOS/claudi0-app"
-readonly helper_binary="$app_path/Contents/Resources/bin/claudi0"
-gui_architectures="$(lipo -archs "$gui_binary")"
-helper_architectures="$(lipo -archs "$helper_binary")"
+readonly gui_binary="$app_name/Contents/MacOS/claudi0-app"
+readonly helper_binary="$app_name/Contents/Resources/bin/claudi0"
+gui_architectures="$(claudio_with_pinned_output_directory \
+    "$repo_root" "$output_directory" lipo -archs "$gui_binary")"
+helper_architectures="$(claudio_with_pinned_output_directory \
+    "$repo_root" "$output_directory" lipo -archs "$helper_binary")"
 if [[ "$gui_architectures" != "$cpu_architecture" \
     || "$helper_architectures" != "$cpu_architecture" ]]; then
     fail "dev bundle must contain only the current architecture: machine=$cpu_architecture "\
 "gui=[$gui_architectures] helper=[$helper_architectures]"
 fi
 
-signature_details="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
+signature_details="$(claudio_with_pinned_output_directory \
+    "$repo_root" "$output_directory" codesign -dv --verbose=4 "$app_name" 2>&1)"
 if ! grep -q '^Signature=adhoc$' <<<"$signature_details"; then
     fail "dev bundle must carry an ad-hoc signature"
 fi
@@ -132,57 +142,66 @@ if ! grep -q '^TeamIdentifier=not set$' <<<"$signature_details"; then
 fi
 assert_checkout_identity "$expected_commit"
 
-temporary_report="$(mktemp "$(dirname "$report_path")/.local-pre-rc-report.XXXXXX")"
-report_is_current=false
-cleanup_temporary_report() {
-    local exit_status=$?
-    /bin/rm -f -- "$temporary_report"
-    if [[ "$report_is_current" != true ]]; then
-        /bin/rm -f -- "$report_path"
-    fi
-    return "$exit_status"
-}
-trap cleanup_temporary_report EXIT
+publish_report() {
+    local temporary_report
+    local report_is_current=false
 
-jq \
-    --arg commit_sha "$expected_commit" \
-    --arg macos_version "$macos_version" \
-    --arg cpu_architecture "$cpu_architecture" \
-    --arg app_path "$app_path" \
-    --arg gui_architecture "$gui_architectures" \
-    --arg helper_architecture "$helper_architectures" \
-    '. + {
-      commit_sha: $commit_sha,
-      checkout: {
-        clean: true,
-        head_verified_before_and_after_each_step: true
-      },
-      machine: {
-        macos_version: $macos_version,
-        cpu_architecture: $cpu_architecture
-      },
-      bundle: {
-        path: $app_path,
-        gui_architectures: [$gui_architecture],
-        helper_architectures: [$helper_architecture],
-        signature: "ad_hoc"
-      },
-      checks: [
-        {id: "patch_whitespace", status: "passed"},
-        {id: "helper_harness", status: "passed"},
-        {id: "gui_harness", status: "passed"},
-        {id: "gui_debug_build", status: "passed"},
-        {id: "localization_catalog", status: "passed"},
-        {id: "dev_bundle", status: "passed"},
-        {id: "release_size", status: "passed"}
-      ]
-    }' "$contract_path" > "$temporary_report"
-jq empty "$temporary_report"
-assert_checkout_identity "$expected_commit"
-mv -f -- "$temporary_report" "$report_path"
-assert_checkout_identity "$expected_commit"
-report_is_current=true
-trap - EXIT
+    temporary_report="$(mktemp ".local-pre-rc-report.XXXXXX")"
+    cleanup_temporary_report() {
+        local exit_status=$?
+        /bin/rm -f -- "$temporary_report"
+        if [[ "$report_is_current" != true ]]; then
+            /bin/rm -f -- "$report_name"
+        fi
+        return "$exit_status"
+    }
+    trap cleanup_temporary_report EXIT
+
+    jq \
+        --arg commit_sha "$expected_commit" \
+        --arg macos_version "$macos_version" \
+        --arg cpu_architecture "$cpu_architecture" \
+        --arg app_path "$app_path" \
+        --arg gui_architecture "$gui_architectures" \
+        --arg helper_architecture "$helper_architectures" \
+        '. + {
+          commit_sha: $commit_sha,
+          checkout: {
+            clean: true,
+            head_verified_before_and_after_each_step: true
+          },
+          machine: {
+            macos_version: $macos_version,
+            cpu_architecture: $cpu_architecture
+          },
+          bundle: {
+            path: $app_path,
+            gui_architectures: [$gui_architecture],
+            helper_architectures: [$helper_architecture],
+            signature: "ad_hoc"
+          },
+          checks: [
+            {id: "patch_whitespace", status: "passed"},
+            {id: "helper_harness", status: "passed"},
+            {id: "gui_harness", status: "passed"},
+            {id: "gui_debug_build", status: "passed"},
+            {id: "localization_catalog", status: "passed"},
+            {id: "dev_bundle", status: "passed"},
+            {id: "release_size", status: "passed"}
+          ]
+        }' "$repo_root/$contract_path" > "$temporary_report"
+    jq empty "$temporary_report"
+    assert_checkout_identity "$expected_commit"
+    mv -f -- "$temporary_report" "$report_name"
+    assert_checkout_identity "$expected_commit"
+    claudio_assert_pinned_output_binding \
+        "$repo_root/$output_directory" "$(claudio_output_directory_identity ".")"
+    report_is_current=true
+    trap - EXIT
+}
+
+claudio_with_pinned_output_directory \
+    "$repo_root" "$output_directory" publish_report
 
 echo "✅ local pre-RC verification passed for $expected_commit"
 echo "   report: $report_path"
