@@ -12,6 +12,75 @@ private func chatAXWiringSource(_ relativePath: String) -> String? {
         encoding: .utf8)
 }
 
+private enum ChatAXConditionalDirective {
+    case debugIf
+    case otherIf
+    case elseifBranch
+    case elseBranch
+    case endif
+    case invalid
+    case notDirective
+}
+
+private struct ChatAXConditionalFrame {
+    var isDirectDebugBranch: Bool
+    var sawElse = false
+}
+
+private func chatAXPoundIdentifier(in line: String) -> (token: Substring, payload: Substring)? {
+    guard line.first == "#" else { return nil }
+    var tokenEnd = line.index(after: line.startIndex)
+    while tokenEnd < line.endIndex {
+        let character = line[tokenEnd]
+        guard character.isLetter || character.isNumber || character == "_" else { break }
+        tokenEnd = line.index(after: tokenEnd)
+    }
+    guard tokenEnd > line.index(after: line.startIndex) else { return nil }
+    return (line[..<tokenEnd], line[tokenEnd...])
+}
+
+private func chatAXIsDirectDebugCondition(_ rawCondition: Substring) -> Bool {
+    var condition = String(rawCondition).trimmingCharacters(in: .whitespacesAndNewlines)
+    while condition.first == "(" && condition.last == ")" {
+        condition = String(condition.dropFirst().dropLast())
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    return condition == "DEBUG"
+}
+
+private func chatAXConditionalDirective(in rawLine: String) -> ChatAXConditionalDirective {
+    let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let directive = chatAXPoundIdentifier(in: line) else { return .notDirective }
+    switch directive.token {
+    case "#if":
+        let condition = directive.payload
+        guard !condition.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .invalid
+        }
+        guard condition.first?.isWhitespace == true || condition.first == "(" else {
+            return .invalid
+        }
+        return chatAXIsDirectDebugCondition(condition) ? .debugIf : .otherIf
+    case "#elseif":
+        let condition = directive.payload
+        guard !condition.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .invalid
+        }
+        guard condition.first?.isWhitespace == true || condition.first == "(" else {
+            return .invalid
+        }
+        return .elseifBranch
+    case "#else":
+        return directive.payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? .elseBranch : .invalid
+    case "#endif":
+        return directive.payload.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? .endif : .invalid
+    default:
+        return .notDirective
+    }
+}
+
 private func hasSingleOccurrenceDirectlyInsideDebug(
     _ marker: String,
     in source: String
@@ -20,31 +89,44 @@ private func hasSingleOccurrenceDirectlyInsideDebug(
     let scanned = strippingComments(source)
     guard scanned.unmodeledConstructs.isEmpty else { return false }
 
-    var conditionalStack: [Bool] = []
+    var conditionalStack: [ChatAXConditionalFrame] = []
     var markerLocations: [Bool] = []
     for sourceLine in scanned.codeWithoutStringLiterals.split(
         separator: "\n", omittingEmptySubsequences: false
     ) {
         let line = String(sourceLine)
-        let directive = line.trimmingCharacters(in: .whitespaces)
-        if directive.hasPrefix("#if ") {
-            conditionalStack.append(directive == "#if DEBUG")
+        switch chatAXConditionalDirective(in: line) {
+        case .debugIf:
+            conditionalStack.append(ChatAXConditionalFrame(isDirectDebugBranch: true))
             continue
-        }
-        if directive.hasPrefix("#elseif ") || directive == "#else" {
-            guard !conditionalStack.isEmpty else { return false }
-            conditionalStack[conditionalStack.count - 1] = false
+        case .otherIf:
+            conditionalStack.append(ChatAXConditionalFrame(isDirectDebugBranch: false))
             continue
-        }
-        if directive == "#endif" {
+        case .elseifBranch:
+            guard !conditionalStack.isEmpty, !conditionalStack[conditionalStack.count - 1].sawElse
+            else { return false }
+            conditionalStack[conditionalStack.count - 1].isDirectDebugBranch = false
+            continue
+        case .elseBranch:
+            guard !conditionalStack.isEmpty, !conditionalStack[conditionalStack.count - 1].sawElse
+            else { return false }
+            conditionalStack[conditionalStack.count - 1].isDirectDebugBranch = false
+            conditionalStack[conditionalStack.count - 1].sawElse = true
+            continue
+        case .endif:
             guard conditionalStack.popLast() != nil else { return false }
             continue
+        case .invalid:
+            return false
+        case .notDirective:
+            break
         }
 
         let occurrenceCount = line.components(separatedBy: marker).count - 1
         markerLocations.append(
             contentsOf: repeatElement(
-                conditionalStack == [true],
+                conditionalStack.count == 1
+                    && conditionalStack[0].isDirectDebugBranch,
                 count: occurrenceCount))
     }
     guard conditionalStack.isEmpty else { return false }
@@ -173,6 +255,157 @@ func runChatAXTracerWiringSuites() {
             hasSingleOccurrenceDirectlyInsideDebug(
                 "let tracerOwner = makeTracer()", in: directDebug),
             "直接 #if DEBUG region 内的代码必须命中")
+
+        let parenthesizedElseifLifecycleLeak = """
+            import AppKit
+            final class ChatAXTracerSession {
+                func guiWillTerminate() {}
+            }
+            func startExplicitChatAXTracerIfConfigured() -> ChatAXTracerSession? { nil }
+            final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
+            #if DEBUG
+            #elseif(!DEBUG)
+            private var chatAXTracer: ChatAXTracerSession?
+            #endif
+            func applicationDidFinishLaunching(_ notification: Notification) {
+            #if DEBUG
+            #elseif(!DEBUG)
+            chatAXTracer = startExplicitChatAXTracerIfConfigured()
+            #endif
+            }
+            func applicationWillTerminate(_ notification: Notification) {
+            #if DEBUG
+            #elseif(!DEBUG)
+            chatAXTracer?.guiWillTerminate()
+            #endif
+            }
+            }
+            """
+        let delegateDeclaration =
+            "final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate"
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "private var chatAXTracer: ChatAXTracerSession?",
+                inType: delegateDeclaration,
+                source: parenthesizedElseifLifecycleLeak),
+            "#elseif(!DEBUG) 内的 tracer owner 不得假冒 DEBUG-only wiring")
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "chatAXTracer = startExplicitChatAXTracerIfConfigured()",
+                inFunction: "func applicationDidFinishLaunching(_ notification: Notification)",
+                inType: delegateDeclaration,
+                source: parenthesizedElseifLifecycleLeak),
+            "#elseif(!DEBUG) 内的 tracer start 不得假冒 DEBUG-only wiring")
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "chatAXTracer?.guiWillTerminate()",
+                inFunction: "func applicationWillTerminate(_ notification: Notification)",
+                inType: delegateDeclaration,
+                source: parenthesizedElseifLifecycleLeak),
+            "#elseif(!DEBUG) 内的 tracer stop 不得假冒 DEBUG-only wiring")
+
+        let alternateDirectiveVariants = [
+            (
+                "tab 分隔",
+                parenthesizedElseifLifecycleLeak.replacingOccurrences(
+                    of: "#elseif(!DEBUG)", with: "#elseif\t!DEBUG")
+            ),
+            (
+                "块注释分隔",
+                parenthesizedElseifLifecycleLeak.replacingOccurrences(
+                    of: "#elseif(!DEBUG)", with: "#elseif/**/(!DEBUG)")
+            ),
+        ]
+        for (label, mutation) in alternateDirectiveVariants {
+            expect(
+                !hasSingleOccurrenceDirectlyInsideDebug(
+                    "private var chatAXTracer: ChatAXTracerSession?",
+                    inType: delegateDeclaration,
+                    source: mutation),
+                "\(label)的 alternate branch owner 不得假冒 DEBUG-only wiring")
+            expect(
+                !hasSingleOccurrenceDirectlyInsideDebug(
+                    "chatAXTracer = startExplicitChatAXTracerIfConfigured()",
+                    inFunction:
+                        "func applicationDidFinishLaunching(_ notification: Notification)",
+                    inType: delegateDeclaration,
+                    source: mutation),
+                "\(label)的 alternate branch start 不得假冒 DEBUG-only wiring")
+            expect(
+                !hasSingleOccurrenceDirectlyInsideDebug(
+                    "chatAXTracer?.guiWillTerminate()",
+                    inFunction: "func applicationWillTerminate(_ notification: Notification)",
+                    inType: delegateDeclaration,
+                    source: mutation),
+                "\(label)的 alternate branch stop 不得假冒 DEBUG-only wiring")
+        }
+
+        for directDebugVariant in [
+            "#if(DEBUG)\nlet tracerOwner = makeTracer()\n#endif",
+            "#if\tDEBUG\nlet tracerOwner = makeTracer()\n#endif",
+        ] {
+            expect(
+                hasSingleOccurrenceDirectlyInsideDebug(
+                    "let tracerOwner = makeTracer()", in: directDebugVariant),
+                "括号或 tab 形式的直接 DEBUG condition 必须命中")
+        }
+
+        let directivePrefixDecoy = """
+            #if DEBUG
+            #ifAvailable()
+            let tracerOwner = makeTracer()
+            #endif
+            """
+        expect(
+            hasSingleOccurrenceDirectlyInsideDebug(
+                "let tracerOwner = makeTracer()", in: directivePrefixDecoy),
+            "只共享 #if 文本前缀的 freestanding macro 不得污染条件栈")
+
+        let duplicateElse = """
+            #if DEBUG
+            let tracerOwner = makeTracer()
+            #else
+            #else
+            #endif
+            """
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "let tracerOwner = makeTracer()", in: duplicateElse),
+            "重复 #else 的畸形条件结构必须 fail closed")
+
+        let elseifAfterElse = """
+            #if DEBUG
+            let tracerOwner = makeTracer()
+            #else
+            #elseif(!DEBUG)
+            #endif
+            """
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "let tracerOwner = makeTracer()", in: elseifAfterElse),
+            "#else 后再出现 #elseif 的畸形条件结构必须 fail closed")
+
+        for malformedDirective in ["#elseif!DEBUG", "#else()", "#endif()"] {
+            let malformedStructure = """
+                #if DEBUG
+                let tracerOwner = makeTracer()
+                \(malformedDirective)
+                #endif
+                """
+            expect(
+                !hasSingleOccurrenceDirectlyInsideDebug(
+                    "let tracerOwner = makeTracer()", in: malformedStructure),
+                "已知 conditional directive 的非法 payload 必须 fail closed")
+        }
+
+        let unterminatedDebug = """
+            #if DEBUG
+            let tracerOwner = makeTracer()
+            """
+        expect(
+            !hasSingleOccurrenceDirectlyInsideDebug(
+                "let tracerOwner = makeTracer()", in: unterminatedDebug),
+            "未闭合条件栈必须 fail closed")
 
         let commentDecoy = """
             // #if DEBUG
