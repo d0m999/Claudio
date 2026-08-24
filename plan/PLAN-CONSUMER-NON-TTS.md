@@ -1,15 +1,15 @@
 # PLAN — 普通用户 AI 终端兼容（非 TTS）路线图
 
-> 状态：**WorkBuddy 本地实现完成；真实宿主验收与 AX spike 未执行**
+> 状态：**WorkBuddy 2/5 真实宿主闭环完成并已断开；AX tracer 工具完成，真实矩阵未执行**
 >
-> 更新：2026-08-23
+> 更新：2026-08-24
 >
 > 本文件是路线图与证据索引，不再混合正式 adapter 实现和 AX 探索。
 
 ## 1. 已选择的交付顺序
 
-1. 先交付 WorkBuddy 正式 command-hook adapter、动态宿主/事件绑定模型、surface 声音配置与诚实 UI。
-2. 取得真实 WorkBuddy 回执，完成独立的运行时验收。
+1. 已交付 WorkBuddy 正式 command-hook adapter、动态宿主/事件绑定模型、surface 声音配置与诚实 UI。
+2. 已取得两条真实 WorkBuddy 回执，完成可逆 Connect → callback → GUI 核对 → Disconnect 验收。
 3. 只有重新获得明确授权后，才执行 ChatGPT Chat 的只读 Accessibility 可行性 spike。
 4. AX spike 达到版本矩阵和零误报门槛后，另开生产计划；本路线图不授权 AX 监听或权限申请。
 
@@ -39,13 +39,19 @@
   集成窗口提供确认后清除动作。
 - `surface_overrides` 对 pack/事件使用稀疏继承；损坏覆盖 fail closed；`master_volume` 仅全局。
 - popup 只为已配置/可用来源提供声音 scope；完整窗口始终列出稳定 native surface 与 AX Beta 占位。
+- ChatGPT Chat 隔离 tracer 已作为 `DEBUG`、GUI-only、默认关闭的工具进入代码；只有 GUI 存活、
+  三项显式启动输入完整且精确 allowlist/surface identity 命中时才会启动 observer。脱敏 fixture 已走通
+  observer → detector → 受限 evidence 路径；这仍不是授权后的真实 ChatGPT 场景证据。
 - helper 与 GUI 的依赖无关测试、本地 GUI product build 和 localization JSON 必须作为本地代码证据。
 
-## 4. 尚不能宣称完成的证据
+## 4. 已完成与仍未完成的证据边界
 
-- 尚未写入真实 `~/.workbuddy/settings.json`，也未取得当前 WorkBuddy 版本的真实 callback receipt。
+- Issue #15 已在单独授权下完成真实 WorkBuddy 2/5 callback 闭环；Disconnect 后 Current Activation
+  已清空，自有 hooks 已移除，第三方 hooks、未知字段、声音配置、备份与脱敏历史均按契约保留。
 - 未做签名发行包、Intel/Apple Silicon 双架构或外部正式验收。
-- 未申请 Accessibility 权限、未启动 AX observer、未读取任何 ChatGPT UI 树。
+- Issue #17 尚未获得本轮授权执行：未申请 Accessibility 权限、未对真实 ChatGPT 启动 AX observer、
+  未运行每场景至少 10 次的矩阵，也未读取任何 ChatGPT UI 树。
 - HTML/SVG 是设计基线，不等于 SwiftUI 视觉验收；正式视觉批准仍需人工检查真实 app。
 
-本地代码完成、真实宿主激活、发布和正式验收是四个独立状态，任何一个不能替代另一个。
+本地代码完成、一次真实宿主验收、当前激活、真实 AX 矩阵、发布和正式验收是独立状态，任何一个不能
+替代另一个。
