@@ -17,6 +17,7 @@
 | `bash scripts/check-release-size.sh dist/claudi0.app` | 检查 app 的架构和体积预算 |
 | `bash scripts/test-hook-cli-contract.sh` | 校验真实 CLI hook 的 exit/output 和 Debug root 隔离 |
 | `bash scripts/test-legacy-install-cli-contract.sh` | 校验 legacy install 的用户配置保持契约 |
+| `bash scripts/verify-release-candidate.sh ...` | 对照 GitHub run/artifact 元数据复验已下载 RC |
 | `bash scripts/benchmark-sound-pack-library.sh` | 构建并运行 Release sound-pack benchmark |
 | `git diff --check` | 检查 patch whitespace |
 
@@ -38,6 +39,8 @@ does not assume XCTest or Swift Testing.
 | `scripts/test-legacy-install-cli-contract.sh` | Test legacy install with isolated `CLAUDIO_TEST_*` roots |
 | `scripts/test-host-card-height.sh` | Native AppKit screenshot regression probe |
 | `scripts/benchmark-sound-pack-library.sh` | Measure cold/cached/incremental pack-library performance |
+| `scripts/notarize-release-artifact.sh APP_OR_DMG` | Notarize, staple, and assess one signed release container |
+| `scripts/verify-release-candidate.sh ...` | Bind a downloaded RC to its live run, artifact digest, manifest, and checksum |
 | `scripts/generate-brand-assets.swift` | Generate branding raster/icon assets |
 | `scripts/generate-host-icon-pdf.swift INPUT.svg OUTPUT.pdf` | Convert a host SVG to a 24×24 PDF |
 | `scripts/scan-host-card-height.swift SCREENSHOT.png` | Scan the host-card border rows in a screenshot |

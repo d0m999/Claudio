@@ -23,6 +23,7 @@ import Foundation
 // `PanelTypeSizeSuite.swift`, `PanelAccessibilitySuite.swift`, `PanelConfigSuite.swift`,
 // `PanelFocusCoordinatorSuite.swift`,
 // `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`,
+// `ReleaseCandidateArtifactSuite.swift`,
 // `ChatAXTracerSuite.swift`, `ChatAXTracerWiringSuite.swift`,
 // `VolumeDragSessionSuite.swift`, `PanelWriteFailuresSuite.swift`).
 
@@ -73,6 +74,7 @@ runOnboardingActionsFixSuites()
 runSetupNoticeSuites()
 runPanelAnnouncementSuites()
 runReleaseLayoutSuites()
+runReleaseCandidateArtifactSuites()
 runSourceScannerSuites()
 runViewWiringSuites()
 runChatAXTracerWiringSuites()

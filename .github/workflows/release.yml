@@ -7,6 +7,15 @@ on:
         description: "RC version (strict MAJOR.MINOR.PATCH; first RC is 0.1.0)"
         required: true
         type: string
+      target_commit:
+        description: "Exact 40-character main commit SHA approved for this RC"
+        required: true
+        type: string
+      release_authorized:
+        description: "Confirm separate authorization to run the RC workflow was obtained"
+        required: true
+        default: false
+        type: boolean
   push:
     tags:
       - "v*.*.*"
@@ -48,12 +57,30 @@ jobs:
         id: version
         env:
           DISPATCH_VERSION: ${{ inputs.version }}
+          DISPATCH_TARGET_COMMIT: ${{ inputs.target_commit }}
+          DISPATCH_AUTHORIZED: ${{ inputs.release_authorized }}
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
             if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
               echo "::error::RC dispatch must run from main"
+              exit 1
+            fi
+            if ! [[ "$DISPATCH_AUTHORIZED" == "true" ]]; then
+              echo "::error::RC dispatch requires separately obtained release authorization"
+              exit 1
+            fi
+            if ! [[ "$DISPATCH_TARGET_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::target_commit must be an exact lowercase 40-character commit SHA"
+              exit 1
+            fi
+            if ! [[ "$DISPATCH_TARGET_COMMIT" == "$GITHUB_SHA" ]]; then
+              echo "::error::target_commit does not match the workflow trigger SHA"
+              exit 1
+            fi
+            if ! [[ "$(git rev-parse HEAD)" == "$DISPATCH_TARGET_COMMIT" ]]; then
+              echo "::error::checked out commit does not match target_commit"
               exit 1
             fi
             VERSION="$DISPATCH_VERSION"
@@ -91,6 +118,7 @@ jobs:
           NOTARY_API_KEY_BASE64: ${{ secrets.APPLE_NOTARY_API_KEY_BASE64 }}
           NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+          EXPECTED_TEAM_ID: ${{ secrets.APPLE_DEVELOPER_TEAM_ID }}
         shell: bash
         run: |
           set -euo pipefail
@@ -100,13 +128,18 @@ jobs:
             CERTIFICATE_PASSWORD \
             NOTARY_API_KEY_BASE64 \
             NOTARY_KEY_ID \
-            NOTARY_ISSUER_ID; do
+            NOTARY_ISSUER_ID \
+            EXPECTED_TEAM_ID; do
             if [[ -z "${!variable_name:-}" ]]; then
               missing+=("$variable_name")
             fi
           done
           if [[ ${#missing[@]} -ne 0 ]]; then
             echo "::error::missing required Apple release credentials: ${missing[*]}"
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_TEAM_ID" =~ ^[A-Z0-9]{10}$ ]]; then
+            echo "::error::APPLE_DEVELOPER_TEAM_ID must be a 10-character Apple team ID"
             exit 1
           fi
 
@@ -148,6 +181,7 @@ jobs:
           echo "SIGNING_KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
           echo "SIGNING_CERTIFICATE_PATH=$CERTIFICATE_PATH" >> "$GITHUB_ENV"
           echo "NOTARY_KEY_PATH=$NOTARY_KEY_PATH" >> "$GITHUB_ENV"
+          echo "EXPECTED_TEAM_ID=$EXPECTED_TEAM_ID" >> "$GITHUB_ENV"
 
       - name: Toolchain
         shell: bash
@@ -333,6 +367,29 @@ jobs:
         run: |
           set -euo pipefail
           APP="dist/$APP_NAME.app"
+          verify_signed_executable() {
+            local executable="$1"
+            local signature_details
+            codesign --verify --strict --verbose=2 "$executable"
+            signature_details="$(codesign -d --verbose=4 "$executable" 2>&1)"
+            if ! grep -Fq "Authority=Developer ID Application:" <<< "$signature_details"; then
+              echo "::error::not signed by a Developer ID Application identity: $executable"
+              exit 1
+            fi
+            if ! grep -Fq "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$signature_details"; then
+              echo "::error::unexpected Developer ID team for $executable"
+              exit 1
+            fi
+            if ! grep -Fq "flags=0x10000(runtime)" <<< "$signature_details"; then
+              echo "::error::hardened runtime is missing from $executable"
+              exit 1
+            fi
+            if ! grep -Fq "Timestamp=" <<< "$signature_details" \
+              || grep -Fq "Timestamp=none" <<< "$signature_details"; then
+              echo "::error::secure timestamp is missing from $executable"
+              exit 1
+            fi
+          }
           codesign \
             --force \
             --options runtime \
@@ -346,6 +403,17 @@ jobs:
             --sign "$SIGNING_IDENTITY" \
             "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
+          verify_signed_executable "$APP/Contents/Resources/bin/claudi0"
+          verify_signed_executable "$APP"
+
+      - name: Notarize and staple app
+        env:
+          NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/notarize-release-artifact.sh "dist/$APP_NAME.app"
 
       - name: Build and sign DMG
         id: dmg
@@ -375,48 +443,32 @@ jobs:
             --sign "$SIGNING_IDENTITY" \
             "$DMG_PATH"
           codesign --verify --verbose=2 "$DMG_PATH"
+          DMG_SIGNATURE_DETAILS="$(codesign -d --verbose=4 "$DMG_PATH" 2>&1)"
+          if ! grep -Fq "Authority=Developer ID Application:" <<< "$DMG_SIGNATURE_DETAILS"; then
+            echo "::error::DMG is not signed by a Developer ID Application identity"
+            exit 1
+          fi
+          if ! grep -Fq "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$DMG_SIGNATURE_DETAILS"; then
+            echo "::error::DMG is signed by an unexpected Developer ID team"
+            exit 1
+          fi
+          if ! grep -Fq "Timestamp=" <<< "$DMG_SIGNATURE_DETAILS" \
+            || grep -Fq "Timestamp=none" <<< "$DMG_SIGNATURE_DETAILS"; then
+            echo "::error::secure timestamp is missing from DMG"
+            exit 1
+          fi
           hdiutil verify "$DMG_PATH"
           echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
           echo "DMG_NAME=$DMG_NAME" >> "$GITHUB_ENV"
 
-      - name: Notarize, staple, and assess release
+      - name: Notarize, staple, and assess DMG
         env:
           NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
           NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
         shell: bash
         run: |
           set -euo pipefail
-          APP="dist/$APP_NAME.app"
-          DMG_PATH="dist/$DMG_NAME"
-          NOTARY_RESULT_PATH="$RUNNER_TEMP/claudio-notary-result.json"
-          NOTARY_LOG_PATH="$RUNNER_TEMP/claudio-notary-log.json"
-          xcrun notarytool submit "$DMG_PATH" \
-            --key "$NOTARY_KEY_PATH" \
-            --key-id "$NOTARY_KEY_ID" \
-            --issuer "$NOTARY_ISSUER_ID" \
-            --wait \
-            --output-format json > "$NOTARY_RESULT_PATH"
-          NOTARY_STATUS="$(jq -er '.status' "$NOTARY_RESULT_PATH")"
-          SUBMISSION_ID="$(jq -er '.id' "$NOTARY_RESULT_PATH")"
-          if [[ "$NOTARY_STATUS" != "Accepted" ]]; then
-            echo "::error::notarization was not accepted: $NOTARY_STATUS"
-            exit 1
-          fi
-          xcrun notarytool log "$SUBMISSION_ID" "$NOTARY_LOG_PATH" \
-            --key "$NOTARY_KEY_PATH" \
-            --key-id "$NOTARY_KEY_ID" \
-            --issuer "$NOTARY_ISSUER_ID"
-          jq . "$NOTARY_LOG_PATH"
-          xcrun stapler staple "$DMG_PATH"
-          xcrun stapler validate "$DMG_PATH"
-          codesign --verify --deep --strict --verbose=2 "$APP"
-          codesign --verify --verbose=2 "$DMG_PATH"
-          spctl --assess --type execute --verbose=4 "$APP"
-          spctl --assess \
-            --type open \
-            --context context:primary-signature \
-            --verbose=4 \
-            "$DMG_PATH"
+          bash scripts/notarize-release-artifact.sh "dist/$DMG_NAME"
 
       - name: Generate and verify checksums
         id: checksum
@@ -433,6 +485,44 @@ jobs:
           echo "dmg_name=$DMG_NAME" >> "$GITHUB_OUTPUT"
           echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
 
+      - name: Write commit-bound RC manifest
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          RC_VERSION: ${{ steps.version.outputs.version }}
+          RC_DMG_NAME: ${{ steps.checksum.outputs.dmg_name }}
+          RC_DMG_SHA256: ${{ steps.checksum.outputs.sha256 }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARTIFACT_NAME="claudi0-rc-$GITHUB_SHA"
+          RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          jq -n \
+            --arg workflow_name "$GITHUB_WORKFLOW" \
+            --arg workflow_event "$GITHUB_EVENT_NAME" \
+            --arg workflow_run_id "$GITHUB_RUN_ID" \
+            --arg workflow_run_url "$RUN_URL" \
+            --arg artifact_name "$ARTIFACT_NAME" \
+            --arg commit_sha "$GITHUB_SHA" \
+            --arg version "$RC_VERSION" \
+            --arg dmg_name "$RC_DMG_NAME" \
+            --arg dmg_sha256 "$RC_DMG_SHA256" \
+            --argjson authorization_attested true '
+              {
+                schema: 1,
+                workflow_name: $workflow_name,
+                workflow_event: $workflow_event,
+                workflow_run_id: $workflow_run_id,
+                workflow_run_url: $workflow_run_url,
+                artifact_name: $artifact_name,
+                commit_sha: $commit_sha,
+                version: $version,
+                dmg_name: $dmg_name,
+                dmg_sha256: $dmg_sha256,
+                authorization_attested: $authorization_attested
+              }
+            ' > dist/RC_MANIFEST.json
+          jq empty dist/RC_MANIFEST.json
+
       - name: Mount final DMG and verify shipped bytes
         shell: bash
         run: |
@@ -447,20 +537,48 @@ jobs:
           hdiutil attach -nobrowse -readonly -mountpoint "$MOUNT_DIR" "$DMG_PATH"
           APP="$MOUNT_DIR/$APP_NAME.app"
           test -d "$APP"
+          diff -qr "dist/$APP_NAME.app" "$APP"
           test -d "$APP/Contents/Resources/packs/minimal-chime"
           test "$(readlink "$APP/Contents/Resources/bin/claudio")" = "claudi0"
+          CLI_VERSION="$("$APP/Contents/Resources/bin/claudi0" --version)"
+          SHORT_VERSION="$(plutil -extract CFBundleShortVersionString raw \
+            "$APP/Contents/Info.plist")"
+          BUNDLE_VERSION="$(plutil -extract CFBundleVersion raw "$APP/Contents/Info.plist")"
+          for ACTUAL_VERSION in "$CLI_VERSION" "$SHORT_VERSION" "$BUNDLE_VERSION"; do
+            if [[ "$ACTUAL_VERSION" != "$CLAUDIO_VERSION" ]]; then
+              echo "::error::final DMG version mismatch: expected=$CLAUDIO_VERSION actual=$ACTUAL_VERSION"
+              exit 1
+            fi
+          done
           for BINARY in \
             "$APP/Contents/MacOS/$APP_EXECUTABLE" \
             "$APP/Contents/Resources/bin/claudi0" \
             "$APP/Contents/Resources/bin/claudio"; do
             ARCHS="$(lipo -archs "$BINARY")"
             [[ " $ARCHS " == *" arm64 "* && " $ARCHS " == *" x86_64 "* ]]
+            codesign --verify --strict --verbose=2 "$BINARY"
+            SIGNATURE_DETAILS="$(codesign -d --verbose=4 "$BINARY" 2>&1)"
+            grep -Fq "Authority=Developer ID Application:" <<< "$SIGNATURE_DETAILS"
+            grep -Fq "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$SIGNATURE_DETAILS"
+            grep -Fq "flags=0x10000(runtime)" <<< "$SIGNATURE_DETAILS"
+            grep -Fq "Timestamp=" <<< "$SIGNATURE_DETAILS"
+            ! grep -Fq "Timestamp=none" <<< "$SIGNATURE_DETAILS"
           done
-          test "$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")" \
-            = "$CLAUDIO_VERSION"
+          bash scripts/check-release-size.sh "$APP"
           codesign --verify --deep --strict --verbose=2 "$APP"
           codesign --verify --verbose=2 "$DMG_PATH"
+          DMG_SIGNATURE_DETAILS="$(codesign -d --verbose=4 "$DMG_PATH" 2>&1)"
+          grep -Fq "Authority=Developer ID Application:" <<< "$DMG_SIGNATURE_DETAILS"
+          grep -Fq "TeamIdentifier=$EXPECTED_TEAM_ID" <<< "$DMG_SIGNATURE_DETAILS"
+          grep -Fq "Timestamp=" <<< "$DMG_SIGNATURE_DETAILS"
+          ! grep -Fq "Timestamp=none" <<< "$DMG_SIGNATURE_DETAILS"
           spctl --assess --type execute --verbose=4 "$APP"
+          spctl --assess \
+            --type open \
+            --context context:primary-signature \
+            --verbose=4 \
+            "$DMG_PATH"
+          xcrun stapler validate "$APP"
           xcrun stapler validate "$DMG_PATH"
           (cd dist && shasum -a 256 -c SHA256SUMS.txt)
 
@@ -471,6 +589,7 @@ jobs:
           path: |
             dist/${{ steps.checksum.outputs.dmg_name }}
             dist/SHA256SUMS.txt
+            dist/RC_MANIFEST.json
           if-no-files-found: error
           retention-days: 30
 

@@ -16,7 +16,20 @@
 3. 双击挂载 DMG，把 `claudi0.app` 拖入 `/Applications`。
 4. 从“应用程序”启动。Claudio 是菜单栏 app，不显示 Dock 主窗口。
 
-Release workflow 有两条严格分离的路径：从 `main` 手动运行 `workflow_dispatch(version=0.1.0)` 只生成带 commit SHA 的签名、公证 RC artifact，不创建 tag、GitHub Release 或更新 tap；只有严格的 `vMAJOR.MINOR.PATCH` tag 才进入 publish job。两条路径都把同一版本注入 CLI、app `Info.plist` 和 DMG 名称，并从最终挂载 DMG 复验架构、版本、资源、symlink、签名、公证票据和校验和。缺少 Apple 凭据时直接失败，不回退为 ad-hoc 发布。
+Release workflow 有两条严格分离的路径：从 `main` 手动运行 RC `workflow_dispatch` 只生成带
+commit SHA 的签名、公证 artifact，不创建 tag、GitHub Release 或更新 tap；只有严格的
+`vMAJOR.MINOR.PATCH` tag 才进入 publish job。RC dispatch 必须同时提供 `version=0.1.0`、获批的
+40 位 `target_commit` 和 `release_authorized=true`；最后一项只是“已另行取得运行授权”的记录，
+不能自行替代授权。workflow 会把目标 SHA 与触发 SHA、checkout HEAD 同时核对，任一漂移即失败。
+
+两条路径都把同一版本注入 CLI、app `Info.plist` 和 DMG 名称。helper 与 app 分别核对 Developer ID
+team、secure timestamp 和 hardened runtime；app 先独立 notarize/staple，再进入另行签名、
+notarize/staple 的 DMG。workflow 从最终只读挂载 DMG 重新核对 app 字节、架构、helper/Info.plist
+版本、资源、symlink、签名、Gatekeeper、公证票据、体积和校验和。RC artifact 额外包含
+`RC_MANIFEST.json`，用于把 run、artifact、commit、版本、DMG 文件名和 SHA-256 绑定起来；下载后用
+`scripts/verify-release-candidate.sh` 对照 GitHub 当前 run/artifact 元数据、官方 artifact archive
+SHA-256 digest 和本地解压字节复验。缺少任一 Apple 凭据（包括 `APPLE_DEVELOPER_TEAM_ID`）时直接
+失败，不回退为 ad-hoc 发布。
 
 `0.1.0` 的人工与真机门禁记录在 [`release-acceptance-0.1.0.md`](release-acceptance-0.1.0.md)。RC workflow 通过不等于首发验收通过；Intel/macOS 12、VoiceOver、真实宿主和真实回执缺一项都不得创建首发 tag。
 

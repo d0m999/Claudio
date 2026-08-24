@@ -142,10 +142,35 @@ profile 与两个 `muted` receipt 一致，该诊断错误未修改任何产品�
 
 ## 自动化与分发门禁
 
-- [ ] `workflow_dispatch(version=0.1.0)` 从 `main` 完成，且只产生 SHA 绑定的 Actions artifact。
+触发前必须先在本节顶部记录目标 `main` commit、`0.1.0`、三项 workflow 输入和单独运行授权。
+只有目标 commit 已存在于远程 `main` 且授权已取得，才可执行；`release_authorized=true` 只是该授权的
+attestation，不是授权来源：
+
+```bash
+gh workflow run release.yml --ref main \
+  -f version=0.1.0 \
+  -f target_commit=<approved-40-character-main-sha> \
+  -f release_authorized=true
+```
+
+运行成功并下载 `claudi0-rc-<commit-sha>` 后，使用 artifact 自带的 `RC_MANIFEST.json` 做二次绑定：
+
+```bash
+bash scripts/verify-release-candidate.sh \
+  --artifact-dir <downloaded-artifact-directory> \
+  --run-id <workflow-run-id> \
+  --run-url <workflow-run-url> \
+  --artifact-name claudi0-rc-<commit-sha> \
+  --commit-sha <commit-sha> \
+  --version 0.1.0
+```
+
+- [ ] 三项 dispatch 输入与单独授权已预先记录；`target_commit` 同时匹配远程 `main` 触发 SHA 和 checkout HEAD。
+- [ ] RC workflow 完成，且只产生 SHA 绑定的 Actions artifact；未创建 tag、Release 或 tap 更新。
 - [ ] helper / GUI harness、CLI 子进程 contracts、universal build、签名、公证、staple、checksum 全部通过。
-- [ ] workflow 从最终挂载 DMG 复验 app/helper 架构、版本、资源、symlink、`codesign`、`spctl`、`stapler` 和 SHA-256。
-- [ ] 从 Actions 下载的 DMG 与记录中的 SHA-256 一致。
+- [ ] helper/app 的 Developer ID team 与 hardened runtime 匹配；app 与 DMG 分别 notarize/staple 通过。
+- [ ] workflow 从最终挂载 DMG 复验 app/helper 架构、版本、资源、symlink、`codesign`、`spctl`、`stapler`、体积和 SHA-256。
+- [ ] 下载后的 verifier 同时匹配 live run、artifact、官方 archive digest、commit、版本、DMG 文件名、manifest/checksum 和实际 DMG 字节。
 - [ ] Apple Silicon 当前系统完成安装、启动、基础播放。
 - [ ] Intel / macOS 12 完成安装、启动、基础播放。
 - [ ] 隔离测试账户连接真实 Claude Code 与 Codex；Claude 为 5/5、Codex 为 4/5。

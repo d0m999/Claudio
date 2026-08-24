@@ -1,9 +1,48 @@
 import Foundation
 
-// Shared fixture helpers for the dependency-free harness (see `main.swift`). Mirrors
-// `helper/Tests/ClaudioCoreTests/TestSupport.swift` — duplicated rather than shared
-// across packages, since each package's test executable is private to its own build
-// (same reasoning `helper/` already established).
+struct TestProcessResult {
+    let status: Int32
+    let output: String
+}
+
+func guiTestRepositoryRoot(file: StaticString = #filePath) -> URL {
+    URL(fileURLWithPath: "\(file)")
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+}
+
+func runTestProcess(
+    executableURL: URL,
+    arguments: [String],
+    currentDirectoryURL: URL? = nil,
+    environmentOverrides: [String: String] = [:]
+) -> TestProcessResult {
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = arguments
+    process.currentDirectoryURL = currentDirectoryURL
+    var environment = ProcessInfo.processInfo.environment
+    environment.merge(environmentOverrides) { _, new in new }
+    process.environment = environment
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return TestProcessResult(status: -1, output: error.localizedDescription)
+    }
+    let output =
+        String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    return TestProcessResult(status: process.terminationStatus, output: output)
+}
+
+// The scanner support below mirrors `helper/Tests/ClaudioCoreTests/TestSupport.swift` — duplicated
+// rather than shared across packages because each package's test executable is private to its own
+// build. The process helpers above are GUI-harness-only support for release contract suites.
 
 // MARK: - 源码扫描器：剥注释，**但认识字符串字面量**
 //
