@@ -15,6 +15,7 @@
 | `jq empty gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings` | 校验 localization JSON |
 | `bash scripts/dev-bundle.sh` | 组装当前架构、ad-hoc 签名的 `dist/claudi0.app` |
 | `bash scripts/check-release-size.sh dist/claudi0.app` | 检查 app 的架构和体积预算 |
+| `bash scripts/local-pre-rc.sh` | 在 clean HEAD 上运行本机 pre-RC 基线并写入 `dist/local-pre-rc-report.json` |
 | `bash scripts/test-hook-cli-contract.sh` | 校验真实 CLI hook 的 exit/output 和 Debug root 隔离 |
 | `bash scripts/test-legacy-install-cli-contract.sh` | 校验 legacy install 的用户配置保持契约 |
 | `bash scripts/verify-release-candidate.sh ...` | 对照 GitHub run/artifact 元数据复验已下载 RC |
@@ -34,6 +35,7 @@ does not assume XCTest or Swift Testing.
 |---|---|
 | `scripts/dev-bundle.sh [--native-host-card-probe]` | Build the local inspection bundle; never a release artifact |
 | `scripts/check-release-size.sh [APP]` | Enforce per-architecture GUI/helper and bundle budgets |
+| `scripts/local-pre-rc.sh` | Run the commit-bound local pre-RC gates and write `dist/local-pre-rc-report.json` |
 | `scripts/copy-bundled-packs.sh SOURCE DEST` | Validate the license ledger and copy all bundled packs |
 | `scripts/test-hook-cli-contract.sh` | Run Debug/Release hook subprocess contract checks |
 | `scripts/test-legacy-install-cli-contract.sh` | Test legacy install with isolated `CLAUDIO_TEST_*` roots |

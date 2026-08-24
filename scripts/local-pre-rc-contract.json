@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "evidence_class": "local_pre_rc",
+  "qualification": "pre_rc_only",
+  "formal_release_candidate": false,
+  "formal_evidence": {
+    "universal": "not_satisfied",
+    "developer_id": "not_satisfied",
+    "notarization": "not_evaluated",
+    "stapling": "not_evaluated",
+    "gatekeeper": "not_evaluated",
+    "dmg_checksum": "not_evaluated",
+    "intel_hardware": "not_evaluated"
+  },
+  "limitations": [
+    "single_current_architecture_dev_bundle",
+    "ad_hoc_signature_only",
+    "no_notarization_evidence",
+    "no_stapling_evidence",
+    "no_gatekeeper_evidence",
+    "no_dmg_checksum_evidence",
+    "no_intel_hardware_evidence"
+  ]
+}

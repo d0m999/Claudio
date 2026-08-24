@@ -44,6 +44,24 @@ ledger/manifest、checksum 与 DMG 的大小；这些边界为当前 release siz
 
 `0.1.0` 的人工与真机门禁记录在 [`release-acceptance-0.1.0.md`](release-acceptance-0.1.0.md)。RC workflow 通过不等于首发验收通过；Intel/macOS 12、VoiceOver、真实宿主和真实回执缺一项都不得创建首发 tag。
 
+## 本机 pre-RC 基线
+
+在已经提交且没有 tracked/untracked 改动的 clean checkout 上运行：
+
+```bash
+bash scripts/local-pre-rc.sh
+jq . dist/local-pre-rc-report.json
+```
+
+入口会在每个 gate 前后复验同一个 40 位 `HEAD`，并记录当前 macOS、CPU 架构、dev bundle
+架构和 ad-hoc 签名。它依次运行 patch whitespace、双 harness、Debug GUI build、localization、
+`dev-bundle` 与 release-size gate；任何失败、HEAD 漂移或非 clean checkout 都不会留下旧的成功报告。
+
+报告固定标记为 `pre_rc_only`：单架构结果不满足 universal，ad-hoc 签名不满足 Developer ID；
+notarization、stapling、Gatekeeper、DMG checksum 与 Intel 真机均为 `not_evaluated`。该入口不运行
+GitHub release workflow、不读取 Apple/GitHub secrets，也不能替代签名 universal RC、#18/#19
+账本或正式人工验收。
+
 ## 安装方式二：Homebrew（可选渠道）
 
 只有在对应 Release 启用了外部 tap 时才使用：
