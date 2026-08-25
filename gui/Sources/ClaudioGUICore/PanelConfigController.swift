@@ -43,6 +43,11 @@ public final class PanelConfigController: ObservableObject {
     /// `nil` 是全局默认 profile；非 nil 时 `config` 是该 surface 的 effective 投影。
     @Published public private(set) var selectedSurface: HostSurfaceID?
     @Published public private(set) var surfaceSoundIssue: String?
+    public var selectedSurfaceProfileIsMalformed: Bool {
+        guard let selectedSurface else { return false }
+        return baseConfig.surfaceOverridesMalformed
+            || baseConfig.invalidSurfaceOverrideKeys.contains(selectedSurface.rawValue)
+    }
     @Published public private(set) var eventRows: [EventRow]
     @Published public private(set) var packCards: [PackCard]
     @Published public private(set) var packSectionState: PanelPackSectionState
@@ -119,6 +124,57 @@ public final class PanelConfigController: ObservableObject {
     }
 
     #if DEBUG
+    /// Deterministic state-gallery initializer. It never observes or scans a library and uses only
+    /// the injected read model; preview paths should point at `/dev/null` so accidental actions
+    /// fail closed without touching user configuration.
+    public init(
+        previewConfigState: PanelConfigState,
+        effectiveConfig: ClaudioConfig? = nil,
+        selectedSurface: HostSurfaceID? = nil,
+        surfaceSoundIssue: String? = nil,
+        eventRows: [EventRow] = [],
+        selectedPackMetadata: SelectedPackMetadata? = nil,
+        libraryPresentationState: SoundPackLibraryPresentationState = .ready,
+        environment: AudioImportEnvironment
+    ) {
+        let baseConfig = previewConfigState.resolvedConfig
+        let config = effectiveConfig ?? baseConfig
+        let configFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.json")
+        let lockFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.lock")
+
+        self.configFile = configFile
+        self.lockFile = lockFile
+        self.environment = environment
+        self.soundPackLibrary = SoundPackLibrary(environment: environment)
+        self.readSource = .directDiskFixture
+        self.builtinPackIDs = []
+        self.librarySnapshot = nil
+        self.libraryObservationTask = nil
+        self.muteController = EventMuteController(configFile: configFile, lockFile: lockFile)
+        self.masterVolumeController = MasterVolumeController(
+            configFile: configFile,
+            lockFile: lockFile)
+        self.soundPacksRefreshCoordinator = nil
+        self.afterFullReload = { _ in }
+        self.soundPacksRefreshCancellable = nil
+        self.baseConfig = baseConfig
+
+        self.configState = previewConfigState
+        self.config = config
+        self.selectedSurface = selectedSurface
+        self.surfaceSoundIssue = surfaceSoundIssue
+        self.eventRows = eventRows
+        self.packCards = []
+        self.packSectionState = .noPacks
+        self.selectedPackIsBuiltinReadOnly = false
+        self.selectedPackMetadata = selectedPackMetadata
+            ?? SelectedPackMetadata(id: config.selectedPack, name: nil)
+        self.libraryPresentationState = libraryPresentationState
+        self.packSwitchError = nil
+        self.muteError = nil
+        self.masterVolumeError = nil
+    }
+
     /// Compatibility initializer for the existing synchronous disk-behavior harness. Production
     /// composition is structurally required to inject the one app-lifetime library.
     public convenience init(

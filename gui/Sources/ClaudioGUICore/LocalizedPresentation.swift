@@ -202,6 +202,8 @@ public func localizedCapabilityCell(
         event: cell.event,
         state: cell.state,
         muteReason: cell.muteReason,
+        support: cell.support,
+        implementation: cell.implementation,
         nativeEventText: cell.nativeEventText,
         qualificationText: qualification,
         statusText: status,

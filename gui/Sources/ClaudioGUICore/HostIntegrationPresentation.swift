@@ -202,6 +202,10 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
     public let event: Event
     public let state: AudibilityCellState
     public let muteReason: HostCapabilityMuteReason?
+    /// 宿主接口声明与当前实现状态是两条独立事实。SwiftUI 必须消费这两个字段，不能从
+    /// `qualificationText` / `statusText` 的本地化字符串反推能力。
+    public let support: HostCapabilitySupport
+    public let implementation: HostCapabilityImplementation
     public let nativeEventText: String?
     public let qualificationText: String?
     public let statusText: String
@@ -220,6 +224,8 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         event = cell.event
         state = cell.state
         self.muteReason = resolvedMuteReason
+        support = cell.binding.support
+        implementation = cell.binding.implementation
         nativeEventText = cell.binding.nativeEvent
         qualificationText = cell.binding.qualification.map(defaultQualificationText)
         statusText = hostCapabilityStatusText(cell.state, muteReason: resolvedMuteReason)
@@ -243,6 +249,8 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         event: Event,
         state: AudibilityCellState,
         muteReason: HostCapabilityMuteReason? = nil,
+        support: HostCapabilitySupport = .supported,
+        implementation: HostCapabilityImplementation = .implemented,
         nativeEventText: String? = nil,
         qualificationText: String? = nil,
         statusText: String? = nil,
@@ -257,6 +265,8 @@ public struct HostCapabilityCellPresentation: Identifiable, Sendable, Equatable 
         self.event = event
         self.state = state
         self.muteReason = resolvedMuteReason
+        self.support = support
+        self.implementation = implementation
         self.nativeEventText = nativeEventText
         self.qualificationText = qualificationText
         self.statusText =

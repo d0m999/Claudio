@@ -67,11 +67,26 @@ WorkBuddy 首发绑定：
 
 ## 3. UI 分工
 
-- popup：当前 surface 摘要、Global/Surface scope、pack、事件静音、试听和 reset；不显示全局假 `3/5`。
+- popup：按最终 HTML 原型使用标题摘要、全宽 Global/Surface 作用域菜单、当前来源五个事件、
+  两行播放设置组与固定退出 footer；标准宽 312pt、maximum 360pt、高度 400–560pt，并继续支持
+  系统浅色/深色。生产面板不再挂载三张来源卡片、紧凑 `Picker`、宿主 chips、声音包画廊或旧
+  「管理声音包」行。
+- WorkBuddy 作用域稳定显示五行：`UserPromptSubmit`、`Stop` 为已实现且可配置/试听；
+  `StopFailure`、`Notification`、`SubagentStop` 显式标为未实现，试听与静音均禁用。Global 行显示
+  claudi0 事件 ID 与「全局默认」，不得伪造宿主原生事件名或全局假 `3/5`。
+- popup 的声音设置入口携带 `HostSurfaceID?` 与 effective pack。Global「使用此包」写顶层
+  `selected_pack`；WorkBuddy 下写稀疏 `surface_overrides[workbuddy].selected_pack`；reset 定向删除
+  WorkBuddy 覆盖并清掉空 object。未知字段保留，未知/AX scope fail closed，绝不静默写到 Global。
 - Apps/集成窗口：按 Product → Surface 分组展示连接、scope/version 失效、binding 状态、
   latest receipt、Repair、Disconnect、回执历史清除；只列三个产品可见 native surface。
-- Events：声音/pack/静音/试听；只列配置或可用 surface；AX 未生产化前完全隐藏。
+- 来源菜单只列 Global 与已配置或可用 surface；`.notConnected` 仍在集成窗口但不进入 popup。
+  首次/失效选择回落首个可用来源，没有可用来源时回落 Global。
 - 视觉遵循原生 macOS 信息层级；HTML 为交互主原型，SVG 为只读快照，SwiftUI 视觉批准另行验收。
+
+生产焦点顺序为 `soundScope → bootstrap/config recovery → 可用事件试听/静音 → masterVolume →
+openSoundSettings → resetSurface（条件）→ quitApplication`。打开集成窗口时，Host 预选与返回面板
+焦点是两个独立参数；打开声音设置后焦点返回「打开设置」。本轮自动化和本地构建不代表 Issue #20
+的签名 RC 原生视觉验收，真实 Tab/Shift-Tab、VoiceOver、增加对比度、降低透明度与双架构仍需人工证据。
 
 ## 4. 本地验收
 

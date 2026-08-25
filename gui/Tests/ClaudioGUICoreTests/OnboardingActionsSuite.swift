@@ -1540,22 +1540,13 @@ func runOnboardingActionsFixSuites() {
             onboarding == [.revealDetail, .onboardingPrimaryAction],
             "失败行画在按钮上方，焦点序跟随视觉序。得到 \(onboarding)")
 
-        let operational = panelFocusOrder(
-            .operational(events: [], packCardIDs: [], hasDetailToggle: true, hasMasterVolume: true))
-        // hasMasterVolume: true —— 这条测试关心的是 manageSounds/revealDetail/disconnect 的相对顺序，
-        // 跟主音量无关，显式给 true 只是让这个 fixture 继续代表「滑块真的渲染在屏幕上」那一半（`/codex
-        // review` P1 修复后，.masterVolume 不再是 .operational scope 里的恒定行为，见
-        // PanelFocusOrderSuite 对 hasMasterVolume: false 那一半的测试）。零事件行只是 fixture，
-        // 生产恒 5 行。T7 的管理钮在包列表后无条件渲染，兼容失败详情之后是固定退出 footer。
-        expect(
-            operational == [.masterVolume, .manageSounds, .revealDetail, .quitApplication],
-            "运行态：滚动区保留声音包管理与兼容失败详情，固定退出入口永远末位。得到 \(operational)")
-
         let withoutToggle = panelFocusOrder(
-            .operational(events: [], packCardIDs: [], hasDetailToggle: false, hasMasterVolume: true))
+            .operational(
+                events: [], hasMasterVolume: false, hasOpenSoundSettings: true,
+                hasResetSurface: false))
         expect(
             !withoutToggle.contains(.revealDetail),
-            "没有失败行时不该凭空多一个焦点位。得到 \(withoutToggle)")
+            "新生产面板已删除旧运行态失败详情槽，不得凭空出现。得到 \(withoutToggle)")
     }
 
     suite("被隔离的 helper：面板绝不能报 .installed（doctor 已经硬失败了，面板不能继续撒谎）") {

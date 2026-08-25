@@ -34,6 +34,7 @@ import SwiftUI
         var body: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
+                    ProductionPanelGalleryView()
                     GallerySection(title: "Legacy Claude-only onboarding archive（非生产 Panel）") {
                         OnboardingGalleryView()
                         OnboardingActionGalleryView()
@@ -58,6 +59,166 @@ import SwiftUI
             // untokenized default window background — see ``GalleryFrame``'s note for why that
             // background was a correctness bug in a file DESIGN.md calls the 视觉真相源.
             .background(ClaudioColor.panel(colorScheme))
+        }
+    }
+
+    // MARK: - Production Agent panel (2 languages × 4 sizes × critical states)
+
+    private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable {
+        case workBuddy = "WorkBuddy 2/5 operational"
+        case needsPack = "needsPack recovery"
+        case configFailure = "config failure"
+        case libraryFailure = "sound library failure"
+        case surfaceFailure = "WorkBuddy surface override failure"
+
+        var id: String { rawValue }
+    }
+
+    struct ProductionPanelGalleryView: View {
+        var body: some View {
+            GallerySection(
+                title: "Production Agent Panel · 2 languages × 4 sizes × 5 critical states"
+            ) {
+                ForEach(ClaudioAppLanguage.allCases) { language in
+                    ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                        ForEach(ProductionPanelGalleryScenario.allCases) { scenario in
+                            GalleryFrame(
+                                caption: "\(language.selfName) · \(textSize.rawValue) · \(scenario.rawValue)"
+                            ) {
+                                ProductionPanelStateFrame(
+                                    language: language,
+                                    textSize: textSize,
+                                    scenario: scenario)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private struct ProductionPanelStateFrame: View {
+        let language: ClaudioAppLanguage
+        let textSize: ClaudioInterfaceTextSize
+        let scenario: ProductionPanelGalleryScenario
+
+        @StateObject private var focusCoordinator: PanelFocusCoordinator
+        @StateObject private var hostIntegrations: HostIntegrationPresentationStore
+        @StateObject private var bootstrapReports: BootstrapReportPresentationStore
+        @StateObject private var languageStore: ClaudioLanguageStore
+        private let panelModel: PanelConfigController
+        private let selectedScope: PanelSoundScopeID
+
+        init(
+            language: ClaudioAppLanguage,
+            textSize: ClaudioInterfaceTextSize,
+            scenario: ProductionPanelGalleryScenario
+        ) {
+            self.language = language
+            self.textSize = textSize
+            self.scenario = scenario
+
+            let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
+                $0.phase == .allImplementedBindingsCurrent
+            }!.state
+            _focusCoordinator = StateObject(wrappedValue: PanelFocusCoordinator())
+            _hostIntegrations = StateObject(
+                wrappedValue: HostIntegrationPresentationStore(
+                    state: hostState,
+                    configurationSources: [:]))
+            _bootstrapReports = StateObject(
+                wrappedValue: BootstrapReportPresentationStore(
+                    store: BootstrapReportStore(
+                        directory: URL(fileURLWithPath: "/dev/null/claudio-preview-reports"))))
+            _languageStore = StateObject(
+                wrappedValue: ClaudioLanguageStore(previewLanguage: language))
+
+            let baseConfig = ClaudioConfig(
+                selectedPack: "gallery-pack",
+                masterVolume: 0.8,
+                eventsEnabled: Dictionary(
+                    uniqueKeysWithValues: Event.allCases.map { ($0.cliName, true) }))
+            let presentRows = Event.allCases.map {
+                EventRow(
+                    event: $0,
+                    coverage: .present(fileName: "\($0.cliName).aiff"),
+                    enabled: true)
+            }
+
+            switch scenario {
+            case .workBuddy:
+                selectedScope = .surface(.workBuddy)
+                panelModel = PanelConfigController(
+                    previewConfigState: .operational(baseConfig),
+                    selectedSurface: .workBuddy,
+                    eventRows: presentRows,
+                    selectedPackMetadata: SelectedPackMetadata(
+                        id: "gallery-pack",
+                        name: "Orbit Signals"),
+                    environment: previewAudioImportEnvironment)
+            case .needsPack:
+                selectedScope = .global
+                panelModel = PanelConfigController(
+                    previewConfigState: .needsPack,
+                    libraryPresentationState: .ready,
+                    environment: previewAudioImportEnvironment)
+            case .configFailure:
+                selectedScope = .global
+                panelModel = PanelConfigController(
+                    previewConfigState: .malformed(
+                        reason: language == .english
+                            ? "config.json contains an invalid master_volume value."
+                            : "config.json 的 master_volume 值无效。"),
+                    libraryPresentationState: .ready,
+                    environment: previewAudioImportEnvironment)
+            case .libraryFailure:
+                selectedScope = .global
+                panelModel = PanelConfigController(
+                    previewConfigState: .operational(baseConfig),
+                    selectedPackMetadata: SelectedPackMetadata(
+                        id: "gallery-pack",
+                        name: "Orbit Signals"),
+                    libraryPresentationState: .loadFailed(
+                        reason: language == .english
+                            ? "The sound pack library could not be read."
+                            : "无法读取声音包库。"),
+                    environment: previewAudioImportEnvironment)
+            case .surfaceFailure:
+                var invalidBase = baseConfig
+                invalidBase.invalidSurfaceOverrideKeys = [HostSurfaceID.workBuddy.rawValue]
+                let failedEffective = ClaudioConfig(
+                    selectedPack: "",
+                    masterVolume: baseConfig.masterVolume,
+                    eventsEnabled: Dictionary(
+                        uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) }))
+                selectedScope = .surface(.workBuddy)
+                panelModel = PanelConfigController(
+                    previewConfigState: .operational(invalidBase),
+                    effectiveConfig: failedEffective,
+                    selectedSurface: .workBuddy,
+                    surfaceSoundIssue: language == .english
+                        ? "The WorkBuddy sound override is damaged; playback stopped without falling back to Global."
+                        : "WorkBuddy 的声音覆盖已损坏；已停止播放，且未回退到 Global。",
+                    eventRows: Event.allCases.map {
+                        EventRow(event: $0, coverage: .unmapped, enabled: false)
+                    },
+                    libraryPresentationState: .ready,
+                    environment: previewAudioImportEnvironment)
+            }
+        }
+
+        var body: some View {
+            PanelView(
+                previewPanelModel: panelModel,
+                previewScope: selectedScope,
+                previewTextSize: textSize,
+                audioEnvironment: previewAudioImportEnvironment,
+                focusCoordinator: focusCoordinator,
+                hostIntegrations: hostIntegrations,
+                bootstrapReports: bootstrapReports,
+                languageStore: languageStore)
+                .frame(height: 560)
         }
     }
 

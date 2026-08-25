@@ -121,14 +121,18 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         {
         case .resolved(let resolvedRoute):
             pendingRoute = nil
-            if case .editEvent(let packID, _) = resolvedRoute {
-                effectiveRoute = model.selectPackForInspection(packID) ? resolvedRoute : .overview
+            model.setManagedSurface(resolvedRoute.surface)
+            if let packID = resolvedRoute.editTarget?.packID {
+                effectiveRoute =
+                    model.selectPackForInspection(packID)
+                    ? resolvedRoute : .overview(surface: resolvedRoute.surface)
             } else {
                 effectiveRoute = resolvedRoute
             }
         case .pending(let route):
             pendingRoute = route
-            effectiveRoute = .overview
+            model.setManagedSurface(route.surface)
+            effectiveRoute = .overview(surface: route.surface)
         }
         NSApp.activate(ignoringOtherApps: true)
         isPresentingWindow = true
@@ -142,7 +146,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                 language: languageStore.language,
                 window: presentedWindow)
         }
-        if wasVisible, effectiveRoute != .overview {
+        if wasVisible, !effectiveRoute.isOverview {
             focusCoordinator.requestRoute(effectiveRoute)
         }
         announceLatestWindowStatusIfNeeded(in: presentedWindow)
@@ -290,12 +294,13 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             return
         case .resolved(let route):
             self.pendingRoute = nil
-            if case .editEvent(let packID, _) = route,
+            model.setManagedSurface(route.surface)
+            if let packID = route.editTarget?.packID,
                 model.selectPackForInspection(packID)
             {
                 focusCoordinator.requestRoute(route)
-            } else if route == .overview {
-                focusCoordinator.requestRoute(.overview)
+            } else if route.isOverview {
+                focusCoordinator.requestRoute(.overview(surface: route.surface))
             }
         }
     }

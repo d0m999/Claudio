@@ -76,12 +76,12 @@ func runIntegrationsWindowWiringSuites() {
                 && menu.contains("languageStore: languageStore"),
             "IntegrationsWindowController 只能初始化一次")
         expect(
-            panel.contains("HostSourceRowView(")
-                && panel.contains("onManageIntegrations(.hostSource(row.host))")
-                && !panel.contains("manageIntegrationsRow"),
-            "所有产品宿主状态条必须把精确触发 target 交给 AppKit shell，且不保留重复底部入口")
+            panel.contains("onManageIntegrations(diagnosticsHost, .soundScope)")
+                && panel.contains("panel.sound-scope.integrations")
+                && !panel.contains("HostSourceRowView("),
+            "作用域菜单底部入口必须把预选 Host 与返回 soundScope 焦点分别交给 AppKit shell")
         expect(
-            menu.contains("pendingIntegrationsWindowFocusTarget")
+            menu.contains("pendingIntegrationsWindowPresentation")
                 && menu.contains("popoverDidClose")
                 && menu.contains(
                     "integrationsWindowController.showWindow { [weak self] latestHandbackApplication in"
@@ -93,7 +93,7 @@ func runIntegrationsWindowWiringSuites() {
                 && menu.contains("focusCoordinator.requestFocus(target: restoredTarget)"),
             "关闭详情窗必须重开面板并恢复原始宿主行/管理入口")
 
-        guard let integrationBranch = menu.range(of: "if let integrationsFocusTarget") else {
+        guard let integrationBranch = menu.range(of: "if let integrationsPresentation") else {
             expect(false, "找不到 integrations handoff 分支")
             return
         }
@@ -145,7 +145,7 @@ func runIntegrationsWindowWiringSuites() {
             "详情窗关闭时不得直接激活外部 app；先恢复 popover，等它正常关闭后再偿还 handback")
     }
 
-    suite("MenuBar shell：点宿主行先选中对应详情，管理入口保留现有选择") {
+    suite("MenuBar shell：预选 Host 与返回面板焦点是两个独立参数") {
         guard let menu = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift") else {
             expect(false, "缺少 MenuBarController.swift")
             return
@@ -163,11 +163,11 @@ func runIntegrationsWindowWiringSuites() {
         let normalized = handoff.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
         expect(
             normalized.contains(
-                "if case .hostSource(let host) = target { integrationsModel.select(.host(host)) }"),
-            "宿主行触发必须在关 popover 前把 retained window 选到对应宿主")
+                "if let host { integrationsModel.select(.host(host)) }"),
+            "显式 preselect Host 时必须在关 popover前选中 retained window")
         expect(
             handoff.components(separatedBy: "integrationsModel.select(").count - 1 == 1,
-            "handoff 里只允许 hostSource 分支改选择；底部管理入口必须保留现有 inspector")
+            "handoff 里只能由独立 preselect 参数改变 inspector 选择")
     }
 
     suite("Retained IntegrationsWindow：后台/bootstrap/popover 刷新同时替换 store 与已保留 model") {
@@ -214,21 +214,21 @@ func runIntegrationsWindowWiringSuites() {
             "真实回执/refresh 主动播报必须从共享 host row 与 matrix cell 组合完整上下文")
     }
 
-    suite("Panel 全部产品来源行：与其余面板控件共用 Dynamic Type scale") {
+    suite("Panel 全宽作用域菜单：与事件行共用 Dynamic Type 与 312/360pt 布局") {
         guard let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "缺少 PanelView.swift")
             return
         }
         expect(
-            panel.contains("HostSourceRowView(")
-                && panel.contains("typeScale: typeScale")
-                && panel.contains("let typeScale: CGFloat"),
-            "所有产品来源行必须接收 Panel 的 @ScaledMetric，而不是固定字号孤岛")
+            panel.contains("private var soundScopeMenu: some View")
+                && panel.contains("12.5 * typeScale")
+                && panel.contains("10.5 * typeScale")
+                && panel.contains("layoutAdaptation.panelWidth"),
+            "作用域标题/状态必须跟随面板文字档位与宽度真相源")
         expect(
-            panel.contains("size: 11.5 * typeScale")
-                && panel.contains("size: 9.5 * typeScale")
-                && panel.contains("minHeight: 48 * typeScale"),
-            "来源行标题、状态与几何必须一起随最大 Dynamic Type 放大")
+            panel.contains("adaptation.eventActionsMoveBelow")
+                && panel.contains("layoutAdaptation.rowWrapsToTwoLines"),
+            "large/maximum 必须分别允许元数据换行与事件动作下移")
     }
 
     suite("IntegrationsWindow action outcome：除 copy 外成功/失败都注入刷新后的完整播报上下文") {
@@ -448,12 +448,12 @@ func runIntegrationsWindowWiringSuites() {
             "popover 与 window 必须从同一注入矩阵投影")
         expect(
             panel.contains("@ObservedObject private var hostIntegrations")
-                && panel.contains("ForEach(localizedHostRows)")
+                && panel.contains("panelSoundScopePresentations(")
                 && panel.contains("hostIntegrations.content.sourceRows"),
             "Panel 必须观察共享 presentation，而非自建宿主状态")
         let sourceSection: String
-        if let start = panel.range(of: "private var hostSourcesSection")?.lowerBound,
-            let end = panel.range(of: "// MARK: - Operational panel")?.lowerBound,
+        if let start = panel.range(of: "private var soundScopePresentations")?.lowerBound,
+            let end = panel.range(of: "// MARK: - Main content")?.lowerBound,
             start < end
         {
             sourceSection = String(panel[start..<end])
@@ -466,106 +466,42 @@ func runIntegrationsWindowWiringSuites() {
         }
     }
 
-    suite("事件行宿主 Logo：Panel 只投影共享矩阵；Logo 只读且状态合并进编辑入口") {
+    suite("事件行单一作用域：Panel 消费 catalog 呈现且不再挂载宿主 Logo/chips") {
         guard
-            let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift"),
-            let row = integrationsSource("gui/Sources/ClaudioGUI/EventRowView.swift")
+            let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift")
         else {
-            expect(false, "缺少 Panel/EventRow 源")
+            expect(false, "缺少 Panel 源")
             return
         }
-        let rowLayout = collapsingWhitespace(strippingComments(row).codeWithoutStringLiterals)
         expect(
-            panel.contains("eventHostIndicatorPresentations(")
-                && panel.contains("matrix: hostIntegrations.content.matrix"),
-            "五条事件行必须从共享 manager 矩阵投影宿主 Logo")
+            panel.contains("panelEventPresentations(")
+                && panel.contains("scope: selectedScope.scope")
+                && panel.contains("PanelAgentEventRow("),
+            "五条事件行必须由当前 scope 与 HostCapabilityCatalog 纯呈现模型生成")
         expect(
-            row.contains("ForEach(hostIndicators)")
-                && row.contains("hostIndicatorImage(for: indicator.host)")
-                && row.contains("Text(indicator.compactDisplayName)")
-                && row.contains("eventHostIndicatorAssetName(for: host)")
-                && row.contains("hostIconResourceBundle.image(forResource:")
-                && row.contains("image.isTemplate = true")
-                && row.contains("hostIndicators.map")
-                && row.contains("localizedHostName(indicator.host"),
-            "共享宿主投影必须同时驱动打包资源中的 Logo 与事件编辑入口 VoiceOver label")
+            !panel.contains("eventHostIndicatorPresentations(")
+                && !panel.contains("hostIndicatorImage(")
+                && !panel.contains("EventRowView("),
+            "旧宿主 chips/Logo 与整行编辑入口不得继续挂载在生产面板")
+        let rowSection = String(
+            panel[panel.range(of: "private struct PanelAgentEventRow")!.lowerBound...])
         expect(
-            row.contains("localizedEventName(row.event, language: language)")
-                && !row.contains("func eventDisplayName"),
-            "EventRowView 必须直接复用 Event.displayName，禁止保留第二份中文 switch")
+            rowSection.contains("if adaptation.eventActionsMoveBelow")
+                && rowSection.contains("actions.padding(.leading, 30)")
+                && rowSection.contains("Text(presentation.nativeEventText)")
+                && rowSection.contains("design: .monospaced")
+                && rowSection.contains("Text(presentation.capabilityText)")
+                && rowSection.contains("Text(presentation.soundFileText)"),
+            "maximum 必须把动作移到下一行，身份区必须呈现原生事件、能力标签与声音文件")
         expect(
-            rowLayout.contains("private let identitySpacing: CGFloat = 6")
-                && rowLayout.contains("HStack(alignment: .center, spacing: identitySpacing)")
-                && rowLayout.contains(".lineLimit(2)")
-                && rowLayout.contains(".fixedSize(horizontal: false, vertical: true)")
-                && rowLayout.contains("ZStack(alignment: .trailing)")
-                && (rowLayout.contains(
-                    ".padding(.trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"
-                )
-                    || rowLayout.contains(
-                        ".padding( .trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"
-                    ))
-                && !rowLayout.contains("ZStack(alignment: .topTrailing)")
-                && !rowLayout.contains("HStack(alignment: .top, spacing: identitySpacing)")
-                && !rowLayout.contains("minHeight: ClaudioTheme.Metrics.iconTarget"),
-            "事件身份区必须让字形相对完整文案居中、保留 6pt 间距与双行标题，并由文案栈预留动作区")
-        expect(
-            row.contains("private var statusChips")
-                && row.contains("if adaptation.eventActionsMoveBelow")
-                && row.contains("VStack(alignment: .leading, spacing: chipSpacing)")
-                && row.contains("HStack(spacing: chipSpacing)"),
-            "312pt 的普通字号事件行必须把映射芯片下移，不能在动作区旁固定横排溢出")
-        expect(
-            row.contains(".accessibilityValue(coverageAccessibilityValue)")
-                && row.contains("private var coverageAccessibilityValue")
-                && row.contains("case .unmapped, .broken:")
-                && row.contains("coverageHelp"),
-            "隐藏的映射芯片详情必须聚合进事件编辑入口的 VoiceOver value")
+            rowSection.contains(".disabled(!presentation.controls.previewEnabled)")
+                && rowSection.contains(".disabled(!presentation.controls.muteEnabled)")
+                && rowSection.contains(".eventPreview(presentation.event)")
+                && rowSection.contains(".eventMute(presentation.event)"),
+            "视图和焦点顺序必须共同消费 PanelEventControlAvailability")
         expect(
             panel.contains("panelTypeSizeTier(for: interfaceTextSize)"),
             "Panel 必须复用可测试的四档字号映射，不能在 SwiftUI 里保留第二份 switch")
-        for forbidden in [
-            "EventHostCoveragePresentation", "hostCoverage", "宿主覆盖未检测",
-            "两个来源", "仅 Claude Code", "PermissionRequest", "HostID.allCases",
-        ] {
-            expect(!row.contains(forbidden), "EventRowView 不得硬编码宿主矩阵：\(forbidden)")
-        }
-
-        guard
-            let indicatorStart = row.range(of: "private var hostIndicatorGroup")?.lowerBound,
-            let indicatorEnd = row.range(of: "private var previewButton")?.lowerBound,
-            indicatorStart < indicatorEnd
-        else {
-            expect(false, "无法定位 EventRowView 的只读 Logo 组")
-            return
-        }
-        let indicatorGroup = String(row[indicatorStart..<indicatorEnd])
-        expect(!indicatorGroup.contains("Button("), "Logo 组不得包含独立 Button")
-        expect(
-            !indicatorGroup.contains("bundle: .module"), "Logo 组不得直接走 SwiftPM 的 Bundle.module 根目录查找"
-        )
-        expect(!indicatorGroup.contains(".focused("), "Logo 组不得新增焦点 owner")
-        expect(!indicatorGroup.contains("PanelFocusTarget"), "Logo 组不得新增 PanelFocusTarget")
-        expect(
-            indicatorGroup.contains(".accessibilityHidden(true)"),
-            "Logo 自身必须从 VoiceOver 树隐藏，由事件编辑入口统一播报")
-        expect(
-            indicatorGroup.contains("HStack(spacing: chipSpacing)")
-                && row.contains("private let chipSpacing: CGFloat = 4")
-                && row.contains("private let hostIndicatorSize: CGFloat = 12")
-                && indicatorGroup.contains("ClaudioTheme.font(.caption).weight(.semibold)")
-                && indicatorGroup.contains(".padding(.horizontal, 6)")
-                && indicatorGroup.contains(".padding(.vertical, 3)")
-                && indicatorGroup.contains("RoundedRectangle(cornerRadius: 6)"),
-            "宿主标签必须使用 4pt 间距、12pt PDF Logo、caption semibold 与 6/3/6 几何")
-        expect(
-            indicatorGroup.contains("indicator.state.usesActiveColor")
-                && indicatorGroup.contains("activeColor.opacity(0.12)")
-                && indicatorGroup.contains("ClaudioTheme.secondaryText(colorScheme)"),
-            "连接宿主必须使用宿主色浅底，非连接宿主必须使用中性描边")
-        for forbidden in [".animation(", ".onHover("] {
-            expect(!indicatorGroup.contains(forbidden), "宿主标签不得添加 hover 动画：\(forbidden)")
-        }
     }
 
     suite("事件静音按钮：使用批准的 24×24 双声波矢量，不回退到 SF Symbol") {
@@ -614,7 +550,7 @@ func runIntegrationsWindowWiringSuites() {
                 && panel.contains("onAudibilityInputsChanged()"),
             "切包、导入、绑定、重开及管理窗口通知的全量 reload 必须更新矩阵")
         expect(
-            panel.contains("panelModel.toggleMute(row.event)")
+            panel.contains("panelModel.toggleMute(event.event)")
                 && panel.components(separatedBy: "onAudibilityInputsChanged()").count >= 3,
             "静音的 configOnly 路径也必须显式更新矩阵")
         expect(

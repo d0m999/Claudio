@@ -120,6 +120,87 @@ private func soundPacksEnvironment(
 
 @MainActor
 func runSoundPacksRefreshSuites() async {
+    suite("SoundPacksWindow scope：Global/Surface 定向切包并保留未知字段，错误 scope 不误写 Global") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let lockFile = root.appendingPathComponent("config.lock")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{"selected_pack":"pack-a","future":{"keep":true},"surface_overrides":{"codex":{"events":{"stop":false},"future_surface":7}}}"#,
+                to: configFile)
+            for id in ["pack-a", "pack-b"] {
+                writeFixture(
+                    "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"events\":{}}",
+                    to: packs.appendingPathComponent("\(id)/manifest.json"))
+            }
+
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: lockFile,
+                environment: soundPacksEnvironment(packs),
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+
+            expect(model.managedSurface == nil, "窗口默认必须明确管理 Global")
+            expect(model.selectPackForInspection("pack-b"), "前提：pack-b 必须可选")
+            expect(model.useSelectedPack() == .success(.selected(packID: "pack-b")),
+                "Global 的用这个包必须成功")
+
+            model.setManagedSurface(.codex)
+            expect(model.selectedPackID == "pack-b", "Codex 未覆盖 selected_pack 时必须继承 Global")
+            expect(model.selectPackForInspection("pack-a"), "前提：pack-a 必须可选")
+            expect(model.useSelectedPack() == .success(.selected(packID: "pack-a")),
+                "Surface 的用这个包必须写稀疏覆盖")
+
+            let beforeInvalid = try! Data(contentsOf: configFile)
+            model.setManagedSurface(.chatGPTDesktopAX)
+            expect(model.selectPackForInspection("pack-b"), "错误 scope 下仍可浏览库")
+            expect(
+                model.useSelectedPack() == .failure(.invalidScope(.chatGPTDesktopAX)),
+                "诊断专用 AX scope 必须显式失败")
+            expect(try! Data(contentsOf: configFile) == beforeInvalid,
+                "错误 scope 的写入尝试不得改变任何 config 字节")
+
+            let object = try! JSONSerialization.jsonObject(
+                with: Data(contentsOf: configFile)) as! [String: Any]
+            let future = object["future"] as! [String: Any]
+            let surfaces = object["surface_overrides"] as! [String: Any]
+            let codex = surfaces[HostSurfaceID.codex.rawValue] as! [String: Any]
+            let events = codex["events"] as! [String: Any]
+            expect(object["selected_pack"] as? String == "pack-b",
+                "Surface 写不得改回 Global selected_pack")
+            expect(codex["selected_pack"] as? String == "pack-a",
+                "Codex 必须只物化自己的 selected_pack")
+            expect(events["stop"] as? Bool == false, "Surface sibling events 必须保留")
+            expect(codex["future_surface"] as? Int == 7, "Surface 未知字段必须保留")
+            expect(future["keep"] as? Bool == true, "顶层未知字段必须保留")
+            expect(surfaces[HostSurfaceID.chatGPTDesktopAX.rawValue] == nil,
+                "错误 scope 不得制造 AX override")
+        }
+    }
+
+    suite("SoundPacksWindow route：overview/editEvent 降级时始终保留 Surface") {
+        let route = SoundPacksWindowRoute.editEvent(
+            surface: .workBuddy,
+            packID: "missing",
+            event: .stop)
+        expect(route.surface == .workBuddy && route.editTarget?.event == .stop,
+            "editEvent 路由必须同时携带 scope 与事件")
+        expect(
+            resolveSoundPacksWindowRoute(
+                route,
+                availablePackIDs: [],
+                libraryState: .ready) == .resolved(.overview(surface: .workBuddy)),
+            "目标包缺失降级 overview 时不得丢失 WorkBuddy scope")
+        expect(
+            resolveSoundPacksWindowRoute(
+                route,
+                availablePackIDs: [],
+                libraryState: .loading) == .pending(route),
+            "library 尚未证明缺失时必须保留完整 pending route")
+        expect(isValidSoundPacksWindowSurface(.codex), "产品 Surface 必须可管理")
+        expect(!isValidSoundPacksWindowSurface(.chatGPTDesktopAX), "AX identity 必须被写入白名单拒绝")
+    }
+
     suite("SoundPacksWindow show policy：首开不 reload、隐藏重开 reload、已可见只前置") {
         expect(
             !shouldReloadSoundPacksWindowOnShow(
@@ -1969,6 +2050,7 @@ func runSoundPacksRefreshSuites() async {
                 "读不到 SoundPacksWindowController.swift、SoundPacksWindowView.swift 或 SoundPacksWindowModel.swift")
             return
         }
+        let controllerFlat = collapsingWhitespace(controller)
 
         expect(controller.contains("@MainActor"), "NSWindow owner 必须显式 @MainActor")
         expect(model.contains("@MainActor"), "窗口 model 必须显式 @MainActor")
@@ -2001,9 +2083,10 @@ func runSoundPacksRefreshSuites() async {
             controller.contains("shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible)"),
             "首焦点与 windowOpened 必须共用真实 hidden→visible 判定")
         expect(
-            controller.contains(
-                "effectiveRoute = model.selectPackForInspection(packID) ? resolvedRoute : .overview")
+            controllerFlat.contains(
+                "effectiveRoute = model.selectPackForInspection(packID) ? resolvedRoute : .overview(surface: resolvedRoute.surface)")
                 && controller.contains("pendingRoute = route")
+                && controller.contains("model.setManagedSurface(resolvedRoute.surface)")
                 && controller.contains("resolvePendingRouteIfPossible")
                 && controller.contains("requestInitialFocus(route: effectiveRoute)")
                 && controller.contains("focusCoordinator.requestRoute(effectiveRoute)"),
@@ -2060,7 +2143,7 @@ func runSoundPacksRefreshSuites() async {
             "窗口 owner 可延后焦点恢复，但不得自行启动后台 manifest/config 写路径")
     }
 
-    suite(".manageSounds：保留按钮位置/焦点，只把 Finder 动作改为 pending-close 窗口 presentation") {
+    suite(".openSoundSettings：携带当前 Surface，并通过 pending-close 展示 retained window") {
         guard
             let panel = soundPacksCode("gui/Sources/ClaudioGUI/PanelView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift"),
@@ -2073,17 +2156,19 @@ func runSoundPacksRefreshSuites() async {
             return
         }
 
+        let panelFlat = collapsingWhitespace(panel)
         expect(
-            panel.contains("onManageSounds(.overview, .manageSounds)"),
-            "manageSoundsRow 必须调用注入的真窗口入口")
+            panelFlat.contains(
+                "onManageSounds( .overview(surface: selectedScope.scope.surface), .openSoundSettings)"),
+            "打开设置必须把当前 Surface 与精确返回焦点交给真窗口入口")
         expect(
             !panel.contains(
                 "NSWorkspace.shared.activateFileViewerSelecting([audioEnvironment.userPacksDirectory])"
             ),
             "T7 的 Finder 中间态必须被真窗口替换")
         expect(
-            panel.contains(".focused($focusedTarget, equals: .manageSounds)"),
-            "T7 的 .manageSounds 焦点契约不得因换动作而丢失")
+            panel.contains(".focused($focusedTarget, equals: .openSoundSettings)"),
+            "打开设置必须认领 .openSoundSettings 焦点契约")
         expect(
             requestBody.contains("pendingSoundPacksWindowPresentation = (route, target)")
                 && requestBody.contains("popover.close()"),

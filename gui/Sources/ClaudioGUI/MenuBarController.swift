@@ -19,12 +19,12 @@ private final class MenuBarActionRouter {
         owner?.requestSoundPacksWindowPresentation(route: route, returnFocusTo: target)
     }
 
-    func requestIntegrationsWindow(returnFocusTo target: PanelFocusTarget) {
-        owner?.requestIntegrationsWindowPresentation(returnFocusTo: target)
+    func requestIntegrationsWindow(preselect host: HostID?, returnFocusTo target: PanelFocusTarget) {
+        owner?.requestIntegrationsWindowPresentation(preselect: host, returnFocusTo: target)
     }
 
-    func requestSoundPacksFromIntegrations(event: Event) {
-        owner?.requestSoundPacksFromIntegrations(event: event)
+    func requestSoundPacksFromIntegrations(host: HostID, event: Event) {
+        owner?.requestSoundPacksFromIntegrations(host: host, event: event)
     }
 
     func audibilityInputsChanged() {
@@ -87,7 +87,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         (route: SoundPacksWindowRoute, focusTarget: PanelFocusTarget)?
     /// The exact panel trigger is carried through the close callback. A value here also means the
     /// integrations window must be presented only after `popoverDidClose` finishes.
-    private var pendingIntegrationsWindowFocusTarget: PanelFocusTarget?
+    private var pendingIntegrationsWindowPresentation:
+        (host: HostID?, focusTarget: PanelFocusTarget)?
     /// Set by the retained integrations window's close callback and consumed by the next
     /// `popoverDidShow`, so focus restoration is one-shot rather than sticky across later opens.
     private var pendingRestoredPanelFocusTarget: PanelFocusTarget?
@@ -172,8 +173,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                                 ?? ClaudioL10n(language: .zhHans).text(
                                     .integrationsMuteFallbackFailed))
                     }
-                case .configureSound(_, let event):
-                    actionRouter?.requestSoundPacksFromIntegrations(event: event)
+                case .configureSound(let host, let event):
+                    actionRouter?.requestSoundPacksFromIntegrations(host: host, event: event)
                     return IntegrationsWindowActionOutcome(
                         content: hostIntegrations.content,
                         feedbackKind: .information,
@@ -215,8 +216,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                     route: route,
                     returnFocusTo: focusTarget)
             },
-            onManageIntegrations: { [weak actionRouter] target in
-                actionRouter?.requestIntegrationsWindow(returnFocusTo: target)
+            onManageIntegrations: { [weak actionRouter] host, target in
+                actionRouter?.requestIntegrationsWindow(preselect: host, returnFocusTo: target)
             },
             onRetryBootstrap: { [weak actionRouter] in
                 actionRouter?.owner?.requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
@@ -421,7 +422,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         route: SoundPacksWindowRoute,
         returnFocusTo target: PanelFocusTarget
     ) {
-        pendingIntegrationsWindowFocusTarget = nil
+        pendingIntegrationsWindowPresentation = nil
         pendingSoundPacksWindowPresentation = (route, target)
 
         guard popover.isShown else {
@@ -450,16 +451,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// the original foreground-app debt. Its close callback first reopens the popover and restores
     /// the exact trigger; the later ordinary popover close finally returns activation to that app.
     fileprivate func requestIntegrationsWindowPresentation(
+        preselect host: HostID?,
         returnFocusTo target: PanelFocusTarget
     ) {
         pendingSoundPacksWindowPresentation = nil
-        pendingIntegrationsWindowFocusTarget = target
-        if case .hostSource(let host) = target {
+        pendingIntegrationsWindowPresentation = (host, target)
+        if let host {
             integrationsModel.select(.host(host))
         }
 
         guard popover.isShown else {
-            pendingIntegrationsWindowFocusTarget = nil
+            pendingIntegrationsWindowPresentation = nil
             integrationsWindowController.showWindow { [weak self] latestHandbackApplication in
                 _ = self?.restorePanelFocus(
                     to: target, latestHandbackApplication: latestHandbackApplication)
@@ -471,11 +473,16 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     /// 集成检查器的“配置声音”保持当前窗口上下文，并把声音包窗口直接路由到当前包的目标事件。
     /// 声音包窗口关闭后重新激活仍然可见的集成窗口，不经过菜单栏 popover。
-    fileprivate func requestSoundPacksFromIntegrations(event: Event) {
-        let selectedPackID = loadClaudioConfig(from: ClaudioPaths.configFile)?.selectedPack ?? ""
+    fileprivate func requestSoundPacksFromIntegrations(host: HostID, event: Event) {
+        let base = loadClaudioConfig(from: ClaudioPaths.configFile)
+        let selectedPackID: String
+        switch base?.resolveSoundProfile(for: host.surfaceID) {
+        case .success(let profile)?: selectedPackID = profile.selectedPack
+        case .failure?, nil: selectedPackID = ""
+        }
         let route: SoundPacksWindowRoute = selectedPackID.isEmpty
-            ? .overview
-            : .editEvent(packID: selectedPackID, event: event)
+            ? .overview(surface: host.surfaceID)
+            : .editEvent(surface: host.surfaceID, packID: selectedPackID, event: event)
         soundPacksWindowController.showWindow(
             route: route,
             returnFocusTo: nil
@@ -544,12 +551,12 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         // 必须在任何早返回之前通知 MasterVolumeRow 冲刷拖动会话。
         focusCoordinator.notePanelHidden()
 
-        let integrationsFocusTarget = pendingIntegrationsWindowFocusTarget
-        pendingIntegrationsWindowFocusTarget = nil
-        if let integrationsFocusTarget {
+        let integrationsPresentation = pendingIntegrationsWindowPresentation
+        pendingIntegrationsWindowPresentation = nil
+        if let integrationsPresentation {
             integrationsWindowController.showWindow { [weak self] latestHandbackApplication in
                 _ = self?.restorePanelFocus(
-                    to: integrationsFocusTarget,
+                    to: integrationsPresentation.focusTarget,
                     latestHandbackApplication: latestHandbackApplication)
             }
             return

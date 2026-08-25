@@ -67,6 +67,162 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除该来源的声音覆盖并继承全局默认" } }
       }
     },
+    "panel.global.name" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Global" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "全局" } }
+      }
+    },
+    "panel.global.status" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld global defaults" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 全局默认" } }
+      }
+    },
+    "panel.header.summary" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · Published sources: %lld · Sound events: 5" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %lld 个已发布来源 · 5 个声音事件" } }
+      }
+    },
+    "panel.connections-diagnostics" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connections & Diagnostics…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "连接与诊断…" } }
+      }
+    },
+    "panel.custom-sound-overrides" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Custom sound overrides" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自定义声音覆盖" } }
+      }
+    },
+    "panel.needs-pack.settings-message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose a sound pack in Settings to enable previews and master volume." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请在设置中选择声音包，以启用试听与主音量。" } }
+      }
+    },
+    "panel.playback-settings" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playback settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放设置" } }
+      }
+    },
+    "panel.master-volume.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Applies to previews and event playback" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "同时作用于试听与事件播放" } }
+      }
+    },
+    "panel.sound-pack.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包" } }
+      }
+    },
+    "panel.open-settings" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开设置" } }
+      }
+    },
+    "panel.global-inheritance" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Default for sources without an override" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未覆盖来源的全局默认" } }
+      }
+    },
+    "panel.surface-override" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Override for this source" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此来源的稀疏覆盖" } }
+      }
+    },
+    "panel.surface-override-damaged" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@'s sound override is damaged. Playback and event writes are stopped without falling back to Global." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 的声音覆盖已损坏；已停止播放和事件写入，且未回退到 Global。" } }
+      }
+    },
+    "panel.inherited-global" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Inherited from Global" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "继承 Global" } }
+      }
+    },
+    "panel.no-sound-assigned" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound assigned" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未配置声音" } }
+      }
+    },
+    "panel.missing-sound" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Missing: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "文件缺失：%@" } }
+      }
+    },
+    "panel.no-native-event" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No native event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无原生事件" } }
+      }
+    },
+    "panel.capability.supported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface supported" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口支持" } }
+      }
+    },
+    "panel.capability.partial" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface partially supported" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口部分支持" } }
+      }
+    },
+    "panel.capability.unsupported" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unsupported" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不支持" } }
+      }
+    },
+    "panel.capability.supported-not-implemented" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface supported · Not implemented" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口支持 · 未实现" } }
+      }
+    },
+    "panel.capability.partial-not-implemented" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface partially supported · Not implemented" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口部分支持 · 未实现" } }
+      }
+    },
+    "panel.capability.unsupported-not-implemented" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unsupported · Not implemented" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "不支持 · 未实现" } }
+      }
+    },
+    "window.sound-packs.managing-scope" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Managing %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在管理 %@" } }
+      }
+    },
+    "window.sound-packs.invalid-scope" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unknown sound scope %@. Writes are stopped; Global and Surface settings were not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知声音作用域 %@，已停止写入；Global 与 Surface 均未改变。" } }
+      }
+    },
+    "window.sound-packs.damaged-scope" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@'s sound override is damaged. Writes are stopped without falling back to Global." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 的声音覆盖已损坏；已停止该来源写入，且未回退到 Global。" } }
+      }
+    },
     "host.details.hint" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Open connection and diagnostics for this source" } },

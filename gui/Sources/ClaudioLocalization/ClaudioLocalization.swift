@@ -40,6 +40,14 @@ public final class ClaudioLanguageStore: ObservableObject {
             storedValue: defaults.string(forKey: ClaudioAppLanguage.defaultsKey))
     }
 
+    #if DEBUG
+    /// State-gallery initializer that does not read the app's real language preference.
+    public init(previewLanguage: ClaudioAppLanguage) {
+        self.defaults = UserDefaults(suiteName: "com.orbitzero.claudio.state-gallery")!
+        self.language = previewLanguage
+    }
+    #endif
+
     public func setLanguage(_ language: ClaudioAppLanguage) {
         guard self.language != language else { return }
         self.language = language
@@ -147,8 +155,34 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let panelRevealConfig: Self = "panel.reveal-config"
     public static let panelRevealConfigHint: Self = "panel.reveal-config.hint"
     public static let panelMasterVolume: Self = "panel.master-volume"
+    public static let panelMasterVolumeDescription: Self = "panel.master-volume.description"
     public static let panelSoundScope: Self = "panel.sound-scope"
     public static let panelGlobalDefaults: Self = "panel.global-defaults"
+    public static let panelGlobalName: Self = "panel.global.name"
+    public static let panelGlobalStatus: Self = "panel.global.status"
+    public static let panelHeaderSummary: Self = "panel.header.summary"
+    public static let panelConnectionsDiagnostics: Self = "panel.connections-diagnostics"
+    public static let panelCustomSoundOverrides: Self = "panel.custom-sound-overrides"
+    public static let panelNeedsPackSettingsMessage: Self = "panel.needs-pack.settings-message"
+    public static let panelPlaybackSettings: Self = "panel.playback-settings"
+    public static let panelSoundPackLabel: Self = "panel.sound-pack.label"
+    public static let panelOpenSettings: Self = "panel.open-settings"
+    public static let panelGlobalInheritance: Self = "panel.global-inheritance"
+    public static let panelSurfaceOverride: Self = "panel.surface-override"
+    public static let panelSurfaceOverrideDamaged: Self = "panel.surface-override-damaged"
+    public static let panelInheritedGlobal: Self = "panel.inherited-global"
+    public static let panelNoSoundAssigned: Self = "panel.no-sound-assigned"
+    public static let panelMissingSound: Self = "panel.missing-sound"
+    public static let panelNoNativeEvent: Self = "panel.no-native-event"
+    public static let panelCapabilitySupported: Self = "panel.capability.supported"
+    public static let panelCapabilityPartial: Self = "panel.capability.partial"
+    public static let panelCapabilityUnsupported: Self = "panel.capability.unsupported"
+    public static let panelCapabilitySupportedNotImplemented: Self =
+        "panel.capability.supported-not-implemented"
+    public static let panelCapabilityPartialNotImplemented: Self =
+        "panel.capability.partial-not-implemented"
+    public static let panelCapabilityUnsupportedNotImplemented: Self =
+        "panel.capability.unsupported-not-implemented"
     public static let panelResetSurface: Self = "panel.reset-surface"
     public static let panelResetSurfaceHint: Self = "panel.reset-surface.hint"
     public static let hostDetailsHint: Self = "host.details.hint"
@@ -233,6 +267,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let actionClearReceiptHistoryInProgress: Self =
         "action.clear-receipt-history.in-progress"
     public static let soundPacksWindowTitle: Self = "window.sound-packs.title"
+    public static let soundPacksManagingScope: Self = "window.sound-packs.managing-scope"
+    public static let soundPacksInvalidScope: Self = "window.sound-packs.invalid-scope"
+    public static let soundPacksDamagedScope: Self = "window.sound-packs.damaged-scope"
     public static let integrationsWindowTitle: Self = "window.integrations.title"
     public static let integrationsClearReceiptHistoryConfirm: Self =
         "integrations.clear-receipt-history.confirm"
@@ -557,8 +594,18 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelSelectPackWithChoicesMessage, .panelSelectPackWithoutChoicesMessage,
         .panelPacksLoading, .panelPacksNoPinnedTitle, .panelPacksNoPinnedMessage,
         .panelPacksNoneTitle, .panelPacksNoneMessage, .panelPacksReadFailed,
-        .panelRevealConfig, .panelRevealConfigHint, .panelMasterVolume, .hostDetailsHint,
-        .soundPacksWindowTitle,
+        .panelRevealConfig, .panelRevealConfigHint, .panelMasterVolume,
+        .panelMasterVolumeDescription, .panelHeaderSummary, .panelConnectionsDiagnostics,
+        .panelCustomSoundOverrides, .panelNeedsPackSettingsMessage, .panelPlaybackSettings,
+        .panelSoundPackLabel, .panelOpenSettings, .panelGlobalInheritance,
+        .panelSurfaceOverride, .panelSurfaceOverrideDamaged, .panelInheritedGlobal,
+        .panelNoSoundAssigned,
+        .panelMissingSound, .panelNoNativeEvent, .panelCapabilitySupported,
+        .panelCapabilityPartial, .panelCapabilityUnsupported,
+        .panelCapabilitySupportedNotImplemented, .panelCapabilityPartialNotImplemented,
+        .panelCapabilityUnsupportedNotImplemented, .hostDetailsHint,
+        .soundPacksWindowTitle, .soundPacksManagingScope, .soundPacksInvalidScope,
+        .soundPacksDamagedScope,
         .integrationsWindowTitle, .integrationsRedetect, .integrationsRedetectLabel,
         .integrationsRedetectHint, .integrationsSourcesSummary, .integrationsSelectionEmpty,
         .integrationsSelectionLabel, .integrationsCapability, .integrationsEvent,
@@ -637,7 +684,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .hostWorkBuddyReadyDetail, .hostWorkBuddyAwaitingDetail,
         .hostWorkBuddyConflictDetail,
         .qualificationAccessibilityBetaUnavailable,
-        .panelSoundScope, .panelGlobalDefaults, .panelResetSurface, .panelResetSurfaceHint,
+        .panelSoundScope, .panelGlobalDefaults, .panelGlobalName, .panelGlobalStatus,
+        .panelResetSurface, .panelResetSurfaceHint,
         .eventTaskStart, .eventStop, .eventStopFailure, .eventNotification, .eventSubagentStop,
         .eventEditorHint, .eventCoveragePresent, .eventCoverageUnmapped, .eventCoverageBroken,
         .eventCoveragePresentFile, .eventCoverageBrokenFile, .eventPreviewLabel,

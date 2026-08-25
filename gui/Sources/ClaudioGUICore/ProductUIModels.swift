@@ -298,10 +298,49 @@ public func localizedEventPreviewHint(
     }
 }
 
-/// 保留的声音包窗口只接受显式路由；`.overview` 不改变当前检查上下文，`.editEvent` 才定位包与事件。
-public enum SoundPacksWindowRoute: Sendable, Equatable, Hashable {
-    case overview
-    case editEvent(packID: String, event: Event)
+/// 保留的声音包窗口只接受显式路由。每条路由都携带声音作用域；`nil` 明确表示 Global，
+/// 不是“缺少 scope”。窗口必须先验证非 nil Surface 属于产品 registry，才允许任何配置写入。
+public struct SoundPacksWindowRoute: Sendable, Equatable, Hashable {
+    public enum Destination: Sendable, Equatable, Hashable {
+        case overview
+        case editEvent(packID: String, event: Event)
+    }
+
+    public let surface: HostSurfaceID?
+    public let destination: Destination
+
+    public init(surface: HostSurfaceID?, destination: Destination) {
+        self.surface = surface
+        self.destination = destination
+    }
+
+    /// 兼容现有 Global 调用点的显式值；它仍真实携带 `surface == nil`。
+    public static let overview = SoundPacksWindowRoute(surface: nil, destination: .overview)
+
+    public static func overview(surface: HostSurfaceID?) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(surface: surface, destination: .overview)
+    }
+
+    public static func editEvent(packID: String, event: Event) -> SoundPacksWindowRoute {
+        editEvent(surface: nil, packID: packID, event: event)
+    }
+
+    public static func editEvent(
+        surface: HostSurfaceID?,
+        packID: String,
+        event: Event
+    ) -> SoundPacksWindowRoute {
+        SoundPacksWindowRoute(
+            surface: surface,
+            destination: .editEvent(packID: packID, event: event))
+    }
+
+    public var editTarget: (packID: String, event: Event)? {
+        guard case .editEvent(let packID, let event) = destination else { return nil }
+        return (packID, event)
+    }
+
+    public var isOverview: Bool { destination == .overview }
 }
 
 public enum SoundPacksWindowRouteResolution: Sendable, Equatable {
@@ -317,10 +356,17 @@ public func resolveSoundPacksWindowRoute(
     availablePackIDs: Set<String>,
     libraryState: SoundPackLibraryPresentationState
 ) -> SoundPacksWindowRouteResolution {
-    guard case .editEvent(let packID, _) = route else { return .resolved(route) }
+    guard let packID = route.editTarget?.packID else { return .resolved(route) }
     if availablePackIDs.contains(packID) { return .resolved(route) }
-    if libraryState == .ready { return .resolved(.overview) }
+    if libraryState == .ready { return .resolved(.overview(surface: route.surface)) }
     return .pending(route)
+}
+
+/// SoundPacksWindow 可管理的 Surface 白名单。诊断专用 AX identity 即使能被解码，也不能
+/// 借一个错误路由获得 config 写权限。
+public func isValidSoundPacksWindowSurface(_ surface: HostSurfaceID?) -> Bool {
+    guard let surface else { return true }
+    return HostID.productVisibleCases.contains { $0.surfaceID == surface }
 }
 
 /// 能力矩阵当前格子的首要恢复意图。它只描述产品动作，不执行 host/config I/O。

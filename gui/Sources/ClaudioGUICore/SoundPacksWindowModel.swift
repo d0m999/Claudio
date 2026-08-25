@@ -240,12 +240,17 @@ public struct SoundPacksWindowAudioImportCompletion: Sendable, Equatable {
 
 public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
     case noSelectedPack
+    case invalidScope(HostSurfaceID)
     case use(UseError)
+    case surface(SurfaceSoundMutationError)
 
     public var message: String {
         switch self {
         case .noSelectedPack: return "没有选中的声音包，当前使用项未改变。"
+        case .invalidScope(let surface):
+            return "未知声音作用域 \(surface.rawValue)，已停止写入；Global 与 Surface 均未改变。"
         case .use(let error): return error.description
+        case .surface(let error): return error.description
         }
     }
 }
@@ -440,6 +445,17 @@ private func factoryPackRestoreSalvage(
 public final class SoundPacksWindowModel: ObservableObject {
     @Published public private(set) var configState: PanelConfigState
     @Published public private(set) var config: ClaudioConfig
+    /// `nil` 明确表示正在管理 Global；非 nil 只有产品 registry Surface 才能获得写权限。
+    @Published public private(set) var managedSurface: HostSurfaceID?
+    @Published public private(set) var managedScopeFailureReason: String?
+    public var managedScopeIsInvalid: Bool {
+        !isValidSoundPacksWindowSurface(managedSurface)
+    }
+    public var managedSurfaceProfileIsMalformed: Bool {
+        guard let managedSurface else { return false }
+        return baseConfig.surfaceOverridesMalformed
+            || baseConfig.invalidSurfaceOverrideKeys.contains(managedSurface.rawValue)
+    }
     @Published public private(set) var packCards: [PackCard]
     @Published public private(set) var selectedPackID: String?
     @Published public private(set) var selectedEventRows: [EventRow]
@@ -556,6 +572,7 @@ public final class SoundPacksWindowModel: ObservableObject {
     private var factoryBatchRestoreFailures: [FactoryPackBatchRestoreFailure] = []
     private var factoryBatchRestoredCount = 0
     private var factoryBatchRetainedSalvages: [SalvagedPack] = []
+    private var baseConfig: ClaudioConfig
 
     private var factoryRestoreRetainedSalvages: [SalvagedPack] {
         guard case .restore(_, _, let retainedSalvages)? = factoryRestoreActionError
@@ -621,6 +638,9 @@ public final class SoundPacksWindowModel: ObservableObject {
 
         configState = loadedState
         config = loadedConfig
+        baseConfig = loadedConfig
+        managedSurface = nil
+        managedScopeFailureReason = nil
         if !readSource.readsSharedSnapshot {
             let loadedCards = availablePacks(
                 config: loadedConfig, environment: environment,
@@ -731,6 +751,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         self.refreshCoordinator = refreshCoordinator
         configState = previewConfig.selectedPack.isEmpty ? .needsPack : .operational(previewConfig)
         config = previewConfig
+        baseConfig = previewConfig
+        managedSurface = nil
+        managedScopeFailureReason = nil
         self.packCards = packCards
         self.selectedPackID = selectedPackID
         self.selectedEventRows = selectedEventRows
@@ -752,6 +775,17 @@ public final class SoundPacksWindowModel: ObservableObject {
     @discardableResult
     public func selectPackForInspection(_ packID: String) -> Bool {
         selectPackForInspection(packID, selectionAnnouncementSuppression: nil)
+    }
+
+    /// 窗口路由先调用此方法再选择包。未知/诊断 Surface 保留为显式错误态，绝不降级到 Global。
+    public func setManagedSurface(_ surface: HostSurfaceID?) {
+        guard managedSurface != surface || managedScopeFailureReason != nil else { return }
+        managedSurface = surface
+        let loadedState = loadPanelConfig(from: configFile)
+        configState = loadedState
+        baseConfig = loadedState.resolvedConfig
+        applyManagedScopeConfig()
+        reload(followActivePack: true, refreshSoundPackLibrary: false)
     }
 
     /// The public entry point represents a user-owned selection, so it cancels both halves of a
@@ -882,15 +916,34 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard let selectedPackID else {
             return finishPackUse(.failure(.noSelectedPack))
         }
-        let result = selectPack(
-            selectedPackID,
-            configFile: configFile,
-            userPacksDirectory: environment.userPacksDirectory,
-            bundledPacksDirectory: environment.bundledPacksDirectory,
-            lockFile: lockFile)
-        switch result {
-        case .success(let outcome): return finishPackUse(.success(outcome))
-        case .failure(let error): return finishPackUse(.failure(.use(error)))
+        guard isValidSoundPacksWindowSurface(managedSurface) else {
+            return finishPackUse(.failure(.invalidScope(managedSurface!)))
+        }
+        if let managedSurface {
+            switch setSurfacePack(
+                selectedPackID,
+                surface: managedSurface,
+                configFile: configFile,
+                userPacksDirectory: environment.userPacksDirectory,
+                bundledPacksDirectory: environment.bundledPacksDirectory,
+                lockFile: lockFile)
+            {
+            case .success:
+                return finishPackUse(.success(.selected(packID: selectedPackID)))
+            case .failure(let error):
+                return finishPackUse(.failure(.surface(error)))
+            }
+        } else {
+            let result = selectPack(
+                selectedPackID,
+                configFile: configFile,
+                userPacksDirectory: environment.userPacksDirectory,
+                bundledPacksDirectory: environment.bundledPacksDirectory,
+                lockFile: lockFile)
+            switch result {
+            case .success(let outcome): return finishPackUse(.success(outcome))
+            case .failure(let error): return finishPackUse(.failure(.use(error)))
+            }
         }
     }
 
@@ -1098,7 +1151,8 @@ public final class SoundPacksWindowModel: ObservableObject {
         #endif
         pendingFollowActivePack = pendingFollowActivePack || followActivePack
         configState = loadPanelConfig(from: configFile)
-        config = configState.resolvedConfig
+        baseConfig = configState.resolvedConfig
+        applyManagedScopeConfig()
         if let librarySnapshot {
             applySnapshot(librarySnapshot, followActivePack: pendingFollowActivePack)
         }
@@ -1125,21 +1179,25 @@ public final class SoundPacksWindowModel: ObservableObject {
         let previousSelection = selectedPackID
         let loadedState = loadPanelConfig(from: configFile)
         let loadedConfig = loadedState.resolvedConfig
+        configState = loadedState
+        baseConfig = loadedConfig
+        applyManagedScopeConfig()
+        let scopedConfig = config
         let loadedCards = availablePacks(
-            config: loadedConfig, environment: environment,
+            config: scopedConfig, environment: environment,
             synthesizeMissingSelectedPlaceholder: true)
 
         let nextSelection: String?
         if followActivePack,
-            loadedCards.contains(where: { $0.id == loadedConfig.selectedPack })
+            loadedCards.contains(where: { $0.id == scopedConfig.selectedPack })
         {
-            nextSelection = loadedConfig.selectedPack
+            nextSelection = scopedConfig.selectedPack
         } else if let previousSelection,
             loadedCards.contains(where: { $0.id == previousSelection })
         {
             nextSelection = previousSelection
-        } else if loadedCards.contains(where: { $0.id == loadedConfig.selectedPack }) {
-            nextSelection = loadedConfig.selectedPack
+        } else if loadedCards.contains(where: { $0.id == scopedConfig.selectedPack }) {
+            nextSelection = scopedConfig.selectedPack
         } else {
             nextSelection = loadedCards.first?.id
         }
@@ -1156,17 +1214,15 @@ public final class SoundPacksWindowModel: ObservableObject {
             }
         }
 
-        configState = loadedState
-        config = loadedConfig
         packCards = loadedCards
         starredPackIDs = soundPacksWindowStarredPackIDs(
             installedPackIDs: loadedCards.map(\.id),
-            starredPacks: loadedConfig.starredPacks,
+            starredPacks: scopedConfig.starredPacks,
             defaultStarredPackIDs: builtinPackIDs)
         selectedPackID = nextSelection
         selectedEventRows =
             nextSelection.map {
-                packCoverage(packID: $0, config: loadedConfig, environment: environment)
+                packCoverage(packID: $0, config: scopedConfig, environment: environment)
             } ?? []
         if let nextSelection {
             reloadSelectedAudioInventory(packID: nextSelection)
@@ -1282,6 +1338,39 @@ public final class SoundPacksWindowModel: ObservableObject {
         } else {
             selectedAudioInventoryState = .idle
             selectedAudioInventoryPackID = nil
+        }
+    }
+
+    /// 从完整 base config 投影当前管理作用域。Surface 只替换 effective pack/events；星标、
+    /// 未知字段写入边界与顶层配置事实仍归 base。坏覆盖与非产品 Surface 均 fail closed。
+    private func applyManagedScopeConfig() {
+        guard isValidSoundPacksWindowSurface(managedSurface) else {
+            let surface = managedSurface!
+            managedScopeFailureReason =
+                "未知声音作用域 \(surface.rawValue)，已停止写入；不会回退到 Global。"
+            var failed = baseConfig
+            failed.selectedPack = ""
+            failed.eventsEnabled = Dictionary(
+                uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) })
+            config = failed
+            return
+        }
+        switch baseConfig.resolveSoundProfile(for: managedSurface) {
+        case .success(let profile):
+            managedScopeFailureReason = nil
+            var effective = baseConfig
+            effective.selectedPack = profile.selectedPack
+            effective.eventsEnabled = profile.eventsEnabled
+            config = effective
+        case .failure:
+            let name = managedSurface?.rawValue ?? "global"
+            managedScopeFailureReason =
+                "\(name) 的声音覆盖已损坏；已停止该来源写入，不会回退到 Global。"
+            var failed = baseConfig
+            failed.selectedPack = ""
+            failed.eventsEnabled = Dictionary(
+                uniqueKeysWithValues: Event.allCases.map { ($0.cliName, false) })
+            config = failed
         }
     }
 
@@ -2019,7 +2108,8 @@ public final class SoundPacksWindowModel: ObservableObject {
                 reload(followActivePack: false)
             } else {
                 configState = loadPanelConfig(from: configFile)
-                config = configState.resolvedConfig
+                baseConfig = configState.resolvedConfig
+                applyManagedScopeConfig()
                 if let librarySnapshot {
                     applySnapshot(librarySnapshot, followActivePack: false)
                 }

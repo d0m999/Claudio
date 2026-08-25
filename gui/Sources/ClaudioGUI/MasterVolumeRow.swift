@@ -6,8 +6,8 @@ import SwiftUI
 
 /// The panel's master-volume control row (PLAN-MASTER-VOLUME.md 阶段 D; DESIGN.md「控件行
 /// （Control Row）」节): `[「主音量」SF Pro 13] · Spacer · [Slider]` — no event-color tile, no
-/// speaker glyph, no percentage readout (D15; the readout is delivered exclusively through
-/// ``accessibilityValue``, same as macOS's own system volume slider).
+/// speaker glyph. Agent 面板重构后百分比同时可见并继续作为 ``accessibilityValue``；拖动提交、
+/// 回滚与关闭前 flush 的既有语义不变。
 ///
 /// Every DECISION this row would otherwise have to make itself already happened elsewhere and
 /// is independently unit-tested:
@@ -30,6 +30,8 @@ public struct MasterVolumeRow: View {
     /// hand-edited `config.json` would leave the slider showing a value the disk no longer has,
     /// forever (D11's "unchanged means unwritten" means it would never self-heal on its own).
     public let diskVolume: Double
+    /// `.needsPack` 等恢复态仍显示这行上下文，但禁止写入并从焦点顺序移除。
+    public let isEnabled: Bool
     /// Writes `volume` through ``PanelConfigController/setMasterVolume(_:)`` and returns the
     /// **landed** (clamped) value on success, `nil` on failure — this view never calls
     /// `ClaudioCore` itself, it only resolves ``VolumeDragSession/commitSucceeded(_:)``/
@@ -63,6 +65,7 @@ public struct MasterVolumeRow: View {
 
     public init(
         diskVolume: Double,
+        isEnabled: Bool = true,
         onCommit: @escaping (Double) -> Double?,
         focusCoordinator: PanelFocusCoordinator,
         focusedTarget: FocusState<PanelFocusTarget?>.Binding,
@@ -70,6 +73,7 @@ public struct MasterVolumeRow: View {
         language: ClaudioAppLanguage = .zhHans
     ) {
         self.diskVolume = diskVolume
+        self.isEnabled = isEnabled
         self.onCommit = onCommit
         self.focusCoordinator = focusCoordinator
         self.focusedTarget = focusedTarget
@@ -98,6 +102,7 @@ public struct MasterVolumeRow: View {
             }
         }
         .frame(minHeight: adaptation.rowWrapsToTwoLines ? 44 : 28)
+        .disabled(!isEnabled)
         // Rule 5 / D21 — see `diskVolume`'s own doc comment above.
         .onChange(of: diskVolume) { newValue in
             session.rebase(to: newValue)
@@ -136,44 +141,46 @@ public struct MasterVolumeRow: View {
     }
 
     private var label: some View {
-        Text(ClaudioL10n(language: language).text(.panelMasterVolume))
-            .font(.system(size: 13 * typeScale))
-            .foregroundColor(ClaudioColor.text(colorScheme))
-            // Purely visual — the slider below carries the identical label through its own
-            // ``accessibilityLabel``, and VoiceOver reads a label when the cursor LANDS on a
-            // control, not on this static text. Leaving this un-hidden would give VoiceOver a
-            // second, redundant "主音量" stop right before the actual control.
-            .accessibilityHidden(true)
+        VStack(alignment: .leading, spacing: 1) {
+            Text(ClaudioL10n(language: language).text(.panelMasterVolume))
+                .font(.system(size: 12.5 * typeScale, weight: .medium, design: .rounded))
+                .foregroundColor(ClaudioColor.text(colorScheme))
+            Text(ClaudioL10n(language: language).text(.panelMasterVolumeDescription))
+                .font(.system(size: 9.5 * typeScale, design: .rounded))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityHidden(true)
     }
 
     private var slider: some View {
-        Slider(
-            value: Binding(
-                get: { session.draft },
-                set: { newValue in
-                    // D26: the binding's setter is also where VoiceOver's adjustable
-                    // increment/decrement and the keyboard's arrow keys arrive — SwiftUI reports
-                    // those exactly like a value change through this same setter, with no
-                    // matching "began"/"ended" bracket. Routing on `session.isDragging` sends a
-                    // real mouse/trackpad drag to `drag(to:)` (no commit yet) and everything else
-                    // straight through `adjust(to:)` (commits immediately) — the dual gate
-                    // `VolumeDragSession` itself documents.
-                    if session.isDragging {
-                        session.drag(to: newValue)
+        HStack(spacing: 7) {
+            Slider(
+                value: Binding(
+                    get: { session.draft },
+                    set: { newValue in
+                        if session.isDragging {
+                            session.drag(to: newValue)
+                        } else {
+                            commit(session.adjust(to: newValue))
+                        }
+                    }
+                ),
+                in: 0...1,
+                onEditingChanged: { editing in
+                    if editing {
+                        session.begin()
                     } else {
-                        commit(session.adjust(to: newValue))
+                        commit(session.end())
                     }
                 }
-            ),
-            in: 0...1,
-            onEditingChanged: { editing in
-                if editing {
-                    session.begin()
-                } else {
-                    commit(session.end())
-                }
-            }
-        )
+            )
+            Text("\(Int((session.draft * 100).rounded()))%")
+                .font(.system(size: 10.5 * typeScale, design: .monospaced))
+                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .frame(width: 38, alignment: .trailing)
+                .accessibilityHidden(true)
+        }
         // D4: the sole brand-accent entry point for a native control — never a hand-drawn
         // track/thumb (DESIGN.md「控件行」: 原生外壳，不自绘).
         //
@@ -202,8 +209,8 @@ public struct MasterVolumeRow: View {
         .tint(ClaudioColor.clay(colorScheme))
         .focused(focusedTarget, equals: .masterVolume)
         .accessibilityLabel(ClaudioL10n(language: language).text(.panelMasterVolume))
-        // The readout macOS's own system volume slider uses — no on-screen "80%" text (D15).
         .accessibilityValue("\(Int((session.draft * 100).rounded()))%")
+        .accessibilityIdentifier("panel.master-volume")
     }
 
     /// Rule 2 (both `focusCoordinator.hideCount` and `willTerminateNotification` funnel here):

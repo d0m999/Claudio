@@ -54,6 +54,7 @@ struct SoundPacksWindowView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            managedScopeBar
             libraryStatusBar
             Group {
                 if layoutAdaptation.stacksPrimaryRegions {
@@ -177,6 +178,49 @@ struct SoundPacksWindowView: View {
         } message: { request in
             Text(factoryRestoreConfirmationMessage(request))
         }
+    }
+
+    private var managedScopeBar: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 7) {
+                Image(systemName: model.managedSurface == nil ? "globe" : "square.stack.3d.up.fill")
+                    .foregroundColor(ClaudioTheme.clay(colorScheme))
+                    .accessibilityHidden(true)
+                Text(l10n.format(.soundPacksManagingScope, managedScopeName))
+                    .font(.system(.subheadline, design: .rounded).weight(.semibold))
+                    .foregroundColor(ClaudioTheme.text(colorScheme))
+                Spacer(minLength: 0)
+            }
+            if let reason = localizedManagedScopeFailure {
+                FailureRow(message: reason)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(ClaudioTheme.elevated(colorScheme))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(
+            l10n.format(.soundPacksManagingScope, managedScopeName))
+        .accessibilityIdentifier("sound-packs.managed-scope")
+    }
+
+    private var managedScopeName: String {
+        guard let surface = model.managedSurface else {
+            return l10n.text(.panelGlobalName)
+        }
+        return HostID.productVisibleCases.first(where: { $0.surfaceID == surface })?.displayName
+            ?? surface.rawValue
+    }
+
+    private var localizedManagedScopeFailure: String? {
+        guard let reason = model.managedScopeFailureReason else { return nil }
+        if model.managedScopeIsInvalid, let surface = model.managedSurface {
+            return l10n.format(.soundPacksInvalidScope, surface.rawValue)
+        }
+        if model.managedSurfaceProfileIsMalformed {
+            return l10n.format(.soundPacksDamagedScope, managedScopeName)
+        }
+        return reason
     }
 
     @ViewBuilder
@@ -417,7 +461,7 @@ struct SoundPacksWindowView: View {
                         }
                     }
                     .onChange(of: handledFocusRequestRevision) { _ in
-                        guard case .editEvent(_, let event) = requestedRoute else { return }
+                        guard let event = requestedRoute.editTarget?.event else { return }
                         DispatchQueue.main.async {
                             withAnimation(.easeOut(duration: 0.14)) {
                                 proxy.scrollTo("event-\(event.rawValue)", anchor: .center)
@@ -1190,7 +1234,7 @@ struct SoundPacksWindowView: View {
     }
 
     private func applyInitialFocus() {
-        switch requestedRoute {
+        switch requestedRoute.destination {
         case .overview:
             focusedTarget = soundPacksWindowFirstFocusTarget(focusScope)
         case .editEvent(_, let event):
