@@ -66,6 +66,7 @@ import SwiftUI
 
     private enum ProductionPanelGalleryScenario: String, CaseIterable, Identifiable {
         case workBuddy = "WorkBuddy 2/5 operational"
+        case workBuddyAwaitingExpanded = "WorkBuddy awaiting · scope expanded"
         case needsPack = "needsPack recovery"
         case configFailure = "config failure"
         case libraryFailure = "sound library failure"
@@ -77,7 +78,7 @@ import SwiftUI
     struct ProductionPanelGalleryView: View {
         var body: some View {
             GallerySection(
-                title: "Production Agent Panel · 2 languages × 4 sizes × 5 critical states"
+                title: "Production Agent Panel · 2 languages × 4 sizes × 6 critical states"
             ) {
                 ForEach(ClaudioAppLanguage.allCases) { language in
                     ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
@@ -109,6 +110,7 @@ import SwiftUI
         @StateObject private var languageStore: ClaudioLanguageStore
         private let panelModel: PanelConfigController
         private let selectedScope: PanelSoundScopeID
+        private let soundScopeExpanded: Bool
 
         init(
             language: ClaudioAppLanguage,
@@ -119,9 +121,13 @@ import SwiftUI
             self.textSize = textSize
             self.scenario = scenario
 
+            let hostPhase: PreviewFixtures.WorkBuddyVisualPhase =
+                scenario == .workBuddyAwaitingExpanded
+                ? .awaitingActivation : .allImplementedBindingsCurrent
             let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
-                $0.phase == .allImplementedBindingsCurrent
+                $0.phase == hostPhase
             }!.state
+            soundScopeExpanded = scenario == .workBuddyAwaitingExpanded
             _focusCoordinator = StateObject(wrappedValue: PanelFocusCoordinator())
             _hostIntegrations = StateObject(
                 wrappedValue: HostIntegrationPresentationStore(
@@ -147,7 +153,7 @@ import SwiftUI
             }
 
             switch scenario {
-            case .workBuddy:
+            case .workBuddy, .workBuddyAwaitingExpanded:
                 selectedScope = .surface(.workBuddy)
                 panelModel = PanelConfigController(
                     previewConfigState: .operational(baseConfig),
@@ -213,6 +219,7 @@ import SwiftUI
                 previewPanelModel: panelModel,
                 previewScope: selectedScope,
                 previewTextSize: textSize,
+                previewSoundScopeExpanded: soundScopeExpanded,
                 audioEnvironment: previewAudioImportEnvironment,
                 focusCoordinator: focusCoordinator,
                 hostIntegrations: hostIntegrations,

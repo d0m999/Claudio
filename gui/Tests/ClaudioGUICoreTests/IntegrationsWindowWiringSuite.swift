@@ -59,7 +59,9 @@ func runIntegrationsWindowWiringSuites() {
     suite("MenuBar shell：唯一 retained IntegrationsWindow，经 popover close 交接并精确恢复触发控件") {
         guard
             let menu = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
-            let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift")
+            let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let scopePicker = integrationsSource(
+                "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift")
         else {
             expect(false, "缺少 MenuBarController/PanelView")
             return
@@ -77,7 +79,7 @@ func runIntegrationsWindowWiringSuites() {
             "IntegrationsWindowController 只能初始化一次")
         expect(
             panel.contains("onManageIntegrations(diagnosticsHost, .soundScope)")
-                && panel.contains("panel.sound-scope.integrations")
+                && scopePicker.contains("panel.sound-scope.integrations")
                 && !panel.contains("HostSourceRowView("),
             "作用域菜单底部入口必须把预选 Host 与返回 soundScope 焦点分别交给 AppKit shell")
         expect(
@@ -215,16 +217,24 @@ func runIntegrationsWindowWiringSuites() {
     }
 
     suite("Panel 全宽作用域菜单：与事件行共用 Dynamic Type 与 312/360pt 布局") {
-        guard let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift") else {
-            expect(false, "缺少 PanelView.swift")
+        guard
+            let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let scopePicker = integrationsSource(
+                "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift")
+        else {
+            expect(false, "缺少 PanelView.swift/PanelSoundScopePicker.swift")
             return
         }
         expect(
-            panel.contains("private var soundScopeMenu: some View")
-                && panel.contains("12.5 * typeScale")
-                && panel.contains("10.5 * typeScale")
+            panel.contains("private var soundScopePicker: some View")
                 && panel.contains("layoutAdaptation.panelWidth"),
-            "作用域标题/状态必须跟随面板文字档位与宽度真相源")
+            "作用域选择器必须挂在与事件行相同的 312/360pt 面板宽度真相源内")
+        expect(
+            scopePicker.contains("13.5 : 11.5) * typeScale")
+                && scopePicker.contains("10.5 : 9.5) * typeScale")
+                && scopePicker.contains(".frame(maxWidth: .infinity")
+                && scopePicker.contains("minHeight: max(50, 50 * typeScale)"),
+            "作用域主次文字与整行点击目标必须跟随面板文字档位，并保持全宽触发器")
         expect(
             panel.contains("adaptation.eventActionsMoveBelow")
                 && panel.contains("layoutAdaptation.rowWrapsToTwoLines"),

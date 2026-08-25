@@ -49,6 +49,78 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音作用域" } }
       }
     },
+    "panel.sound-scope.inheritance-caption" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Missing fields inherit global defaults" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "缺失字段继承全局默认" } }
+      }
+    },
+    "panel.sound-scope.expand-hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show sound scope options" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "展开声音作用域选项" } }
+      }
+    },
+    "panel.sound-scope.collapse-hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Hide sound scope options" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收起声音作用域选项" } }
+      }
+    },
+    "panel.sound-scope.global-coverage" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld events" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个事件" } }
+      }
+    },
+    "panel.sound-scope.status.default" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Default" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "默认" } }
+      }
+    },
+    "panel.sound-scope.status.active" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Active" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已激活" } }
+      }
+    },
+    "panel.sound-scope.status.awaiting-receipt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Awaiting receipt" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "待回执" } }
+      }
+    },
+    "panel.sound-scope.status.legacy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Legacy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "旧版" } }
+      }
+    },
+    "panel.sound-scope.status.not-connected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not connected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未连接" } }
+      }
+    },
+    "panel.sound-scope.status.needs-attention" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Needs attention" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要处理" } }
+      }
+    },
+    "panel.events.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · Events" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · 事件" } }
+      }
+    },
+    "panel.events.mappable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld mappable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld/%lld 可映射" } }
+      }
+    },
     "panel.global-defaults" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Global defaults" } },
@@ -81,8 +153,8 @@
     },
     "panel.header.summary" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · Published sources: %lld · Sound events: 5" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %lld 个已发布来源 · 5 个声音事件" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld published sources · 5 sound events" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%lld 个已发布来源 · 5 个声音事件" } }
       }
     },
     "panel.connections-diagnostics" : {

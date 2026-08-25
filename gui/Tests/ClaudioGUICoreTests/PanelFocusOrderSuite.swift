@@ -17,6 +17,16 @@ private func focusEventPresentations(
 
 @MainActor
 func runPanelFocusOrderSuites() {
+    suite("声音作用域浮层焦点：Global → registry Surface → 连接与诊断") {
+        let scopes: [PanelSoundScopeID] = [
+            .global, .surface(.codex), .surface(.claudeCode), .surface(.workBuddy),
+        ]
+        expect(
+            panelSoundScopePickerFocusOrder(scopes: scopes)
+                == scopes.map(PanelSoundScopePickerFocusTarget.scope) + [.integrations],
+            "浮层焦点顺序必须由当前可见作用域生成，并把诊断入口固定在末尾")
+    }
+
     suite("panelFocusOrder：onboarding 兼容顺序保持失败详情 → 主动作 → 次动作") {
         expect(
             panelFocusOrder(

@@ -43,12 +43,40 @@ func runPanelPresentationSuites() {
         expect(
             scopes.map(\.scope) == [.global, .surface(.codex), .surface(.workBuddy)],
             "作用域菜单必须遵守 Global → Codex → Claude Code → WorkBuddy，并过滤未连接项：\(scopes.map(\.scope))")
-        expect(scopes[0].compactStatusText == "5/5 全局默认", "Global 必须显示五事件全局默认")
-        expect(scopes[1].compactStatusText == "4/5 已就绪", "Codex 必须显示 4/5 能力事实")
-        expect(scopes[2].compactStatusText == "2/5 已配置", "WorkBuddy 待确认仍显示 2/5")
+        expect(scopes[0].name == "全局默认", "Global 作用域必须使用完整名称")
+        expect(
+            scopes[0].coverageText == "5 个事件" && scopes[0].stateText == "默认"
+                && scopes[0].summaryText == "5 个事件 · 默认",
+            "Global 必须把事件数与默认状态分开投影")
+        expect(
+            scopes[1].coverageText == "4/5" && scopes[1].stateText == "已激活"
+                && scopes[1].summaryText == "4/5 · 已激活",
+            "Codex 必须显示 4/5 与当前激活事实")
+        expect(
+            scopes[2].status == .awaitingActivation && scopes[2].stateText == "待回执"
+                && scopes[2].summaryText == "2/5 · 待回执",
+            "WorkBuddy 必须保留 awaitingActivation 语义并使用面板专属待回执文案")
         expect(
             !scopes.contains(where: { $0.scope == .surface(.claudeCode) }),
             "即使磁盘残留 Surface 覆盖，notConnected 也不得进入 popup")
+    }
+
+    suite("面板作用域文案：英文同样分离覆盖数与状态，不回退共享 readiness 文案") {
+        let scopes = panelSoundScopePresentations(
+            sourceRows: [
+                panelPresentationRow(.workBuddy, status: .awaitingActivation, supported: 2)
+            ],
+            config: ClaudioConfig(selectedPack: "pack"),
+            language: .english)
+
+        expect(scopes[0].name == "Global defaults", "英文 Global 必须使用完整名称")
+        expect(scopes[0].summaryText == "5 events · Default", "英文 Global 摘要错误")
+        expect(
+            scopes[1].summaryText == "2/5 · Awaiting receipt",
+            "英文等待态不得继续显示 configured")
+        expect(
+            scopes[1].accessibilityLabel.contains("Awaiting receipt"),
+            "AX 文案必须消费与屏幕相同的面板状态投影")
     }
 
     suite("面板作用域恢复：显式 Global/合法历史值保留，首次与失效值选首个可用来源") {

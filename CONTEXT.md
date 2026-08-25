@@ -51,3 +51,11 @@ _Avoid_: 默认 surface、全局 profile 实例
 **Surface 声音覆盖（Surface Sound Override）**:
 `surface_overrides` 中按稳定 `HostSurfaceID` 保存的稀疏 pack/事件配置。缺键表示继承声音默认值；显式损坏必须 fail closed，不能静默继承。
 _Avoid_: 完整复制的 per-app config、per-surface 主音量
+
+**声音作用域（Sound Scope）**:
+用户当前查看和修改声音偏好的目标，只能是声音默认值或一个事件来源。声音默认值不是伪造的事件来源；切换声音作用域不改变连接配置或当前激活。
+_Avoid_: App、宿主产品、连接状态、默认 surface
+
+**有效声音配置（Effective Sound Profile）**:
+把声音默认值与一个可选的 Surface 声音覆盖逐字段解析后得到的 pack 与事件开关结果。它不单独持久化，主音量仍是独立的全局轴。
+_Avoid_: 完整 surface config、持久化 profile、覆盖副本

@@ -157,6 +157,22 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let panelMasterVolume: Self = "panel.master-volume"
     public static let panelMasterVolumeDescription: Self = "panel.master-volume.description"
     public static let panelSoundScope: Self = "panel.sound-scope"
+    public static let panelSoundScopeInheritanceCaption: Self =
+        "panel.sound-scope.inheritance-caption"
+    public static let panelSoundScopeExpandHint: Self = "panel.sound-scope.expand-hint"
+    public static let panelSoundScopeCollapseHint: Self = "panel.sound-scope.collapse-hint"
+    public static let panelSoundScopeGlobalCoverage: Self = "panel.sound-scope.global-coverage"
+    public static let panelSoundScopeStatusDefault: Self = "panel.sound-scope.status.default"
+    public static let panelSoundScopeStatusActive: Self = "panel.sound-scope.status.active"
+    public static let panelSoundScopeStatusAwaitingReceipt: Self =
+        "panel.sound-scope.status.awaiting-receipt"
+    public static let panelSoundScopeStatusLegacy: Self = "panel.sound-scope.status.legacy"
+    public static let panelSoundScopeStatusNotConnected: Self =
+        "panel.sound-scope.status.not-connected"
+    public static let panelSoundScopeStatusNeedsAttention: Self =
+        "panel.sound-scope.status.needs-attention"
+    public static let panelEventsTitle: Self = "panel.events.title"
+    public static let panelEventsMappable: Self = "panel.events.mappable"
     public static let panelGlobalDefaults: Self = "panel.global-defaults"
     public static let panelGlobalName: Self = "panel.global.name"
     public static let panelGlobalStatus: Self = "panel.global.status"
@@ -684,7 +700,13 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .hostWorkBuddyReadyDetail, .hostWorkBuddyAwaitingDetail,
         .hostWorkBuddyConflictDetail,
         .qualificationAccessibilityBetaUnavailable,
-        .panelSoundScope, .panelGlobalDefaults, .panelGlobalName, .panelGlobalStatus,
+        .panelSoundScope, .panelSoundScopeInheritanceCaption, .panelSoundScopeExpandHint,
+        .panelSoundScopeCollapseHint, .panelSoundScopeGlobalCoverage,
+        .panelSoundScopeStatusDefault, .panelSoundScopeStatusActive,
+        .panelSoundScopeStatusAwaitingReceipt, .panelSoundScopeStatusLegacy,
+        .panelSoundScopeStatusNotConnected, .panelSoundScopeStatusNeedsAttention,
+        .panelEventsTitle, .panelEventsMappable,
+        .panelGlobalDefaults, .panelGlobalName, .panelGlobalStatus,
         .panelResetSurface, .panelResetSurfaceHint,
         .eventTaskStart, .eventStop, .eventStopFailure, .eventNotification, .eventSubagentStop,
         .eventEditorHint, .eventCoveragePresent, .eventCoverageUnmapped, .eventCoverageBroken,

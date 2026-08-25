@@ -32,8 +32,9 @@ public struct PanelSoundScopePresentation: Sendable, Equatable, Identifiable {
     public let supportedCount: Int
     public let totalCount: Int
     public let status: HostSourceRowStatus
-    public let statusText: String
-    public let compactStatusText: String
+    public let coverageText: String
+    public let stateText: String
+    public let summaryText: String
     public let hasSparseOverride: Bool
     public let accessibilityLabel: String
 
@@ -44,8 +45,9 @@ public struct PanelSoundScopePresentation: Sendable, Equatable, Identifiable {
         supportedCount: Int,
         totalCount: Int,
         status: HostSourceRowStatus,
-        statusText: String,
-        compactStatusText: String,
+        coverageText: String,
+        stateText: String,
+        summaryText: String,
         hasSparseOverride: Bool,
         accessibilityLabel: String
     ) {
@@ -55,8 +57,9 @@ public struct PanelSoundScopePresentation: Sendable, Equatable, Identifiable {
         self.supportedCount = supportedCount
         self.totalCount = totalCount
         self.status = status
-        self.statusText = statusText
-        self.compactStatusText = compactStatusText
+        self.coverageText = coverageText
+        self.stateText = stateText
+        self.summaryText = summaryText
         self.hasSparseOverride = hasSparseOverride
         self.accessibilityLabel = accessibilityLabel
     }
@@ -71,11 +74,12 @@ public func panelSoundScopePresentations(
 ) -> [PanelSoundScopePresentation] {
     let l10n = ClaudioL10n(language: language)
     let separator = language == .english ? ", " : "，"
-    let globalName = l10n.text(.panelGlobalName)
-    let globalStatus = l10n.format(
-        .panelGlobalStatus,
-        Int64(Event.allCases.count),
+    let globalName = l10n.text(.panelGlobalDefaults)
+    let globalCoverage = l10n.format(
+        .panelSoundScopeGlobalCoverage,
         Int64(Event.allCases.count))
+    let globalState = l10n.text(.panelSoundScopeStatusDefault)
+    let globalSummary = [globalCoverage, globalState].joined(separator: " · ")
     let global = PanelSoundScopePresentation(
         scope: .global,
         host: nil,
@@ -83,10 +87,11 @@ public func panelSoundScopePresentations(
         supportedCount: Event.allCases.count,
         totalCount: Event.allCases.count,
         status: .ready,
-        statusText: globalStatus,
-        compactStatusText: globalStatus,
+        coverageText: globalCoverage,
+        stateText: globalState,
+        summaryText: globalSummary,
         hasSparseOverride: false,
-        accessibilityLabel: [globalName, globalStatus].joined(separator: separator))
+        accessibilityLabel: [globalName, globalSummary].joined(separator: separator))
 
     let byHost = Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.host, $0) })
     let surfaces = hostSurfacePresentationOrder().compactMap {
@@ -99,8 +104,11 @@ public func panelSoundScopePresentations(
         let row = localizedHostSourceRow(raw, language: language)
         let supported = row.supportedCount ?? 0
         let total = row.totalCount ?? Event.allCases.count
+        let coverage = "\(supported)/\(total)"
+        let state = panelSoundScopeStateText(row.status, l10n: l10n)
+        let summary = [coverage, state].joined(separator: " · ")
         let overrideText: String? = hasOverride ? l10n.text(.panelCustomSoundOverrides) : nil
-        let accessibility = [row.title, row.readinessText, overrideText]
+        let accessibility = [row.title, summary, overrideText]
             .compactMap { $0 }
             .joined(separator: separator)
         return PanelSoundScopePresentation(
@@ -110,12 +118,26 @@ public func panelSoundScopePresentations(
             supportedCount: supported,
             totalCount: total,
             status: row.status,
-            statusText: row.readinessText,
-            compactStatusText: row.readinessText,
+            coverageText: coverage,
+            stateText: state,
+            summaryText: summary,
             hasSparseOverride: hasOverride,
             accessibilityLabel: accessibility)
     }
     return [global] + surfaces
+}
+
+private func panelSoundScopeStateText(
+    _ status: HostSourceRowStatus,
+    l10n: ClaudioL10n
+) -> String {
+    switch status {
+    case .ready: l10n.text(.panelSoundScopeStatusActive)
+    case .awaitingActivation: l10n.text(.panelSoundScopeStatusAwaitingReceipt)
+    case .legacy: l10n.text(.panelSoundScopeStatusLegacy)
+    case .notConnected: l10n.text(.panelSoundScopeStatusNotConnected)
+    case .needsAttention: l10n.text(.panelSoundScopeStatusNeedsAttention)
+    }
 }
 
 /// 持久化选择的恢复规则：显式 `global` 永远保留；合法历史 Surface 原样恢复；从未选择或

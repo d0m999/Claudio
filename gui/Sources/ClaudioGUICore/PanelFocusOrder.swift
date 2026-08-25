@@ -31,6 +31,19 @@ public enum PanelFocusTarget: Sendable, Hashable {
     case manageSounds
 }
 
+/// 作用域浮层存在期间的临时焦点空间。收起后仍只向生产面板暴露一个 `.soundScope`
+/// 焦点目标，避免把当前可见来源数固化进主面板焦点模型。
+public enum PanelSoundScopePickerFocusTarget: Sendable, Equatable, Hashable {
+    case scope(PanelSoundScopeID)
+    case integrations
+}
+
+public func panelSoundScopePickerFocusOrder(
+    scopes: [PanelSoundScopeID]
+) -> [PanelSoundScopePickerFocusTarget] {
+    scopes.map(PanelSoundScopePickerFocusTarget.scope) + [.integrations]
+}
+
 public enum PanelFocusScope: Sendable, Equatable {
     case onboarding(
         hasPrimaryAction: Bool,

@@ -221,7 +221,10 @@
 **400–560pt** 自适应；生产视图中没有硬编码 hex。
 
 ```text
-Orbit Zero                  当前包 · N 个已发布来源 · 5 个声音事件   Aa⌄
+Orbit Zero                                                            Aa⌄
+当前包
+N 个已发布来源 · 5 个声音事件
+声音作用域                                      缺失字段继承全局默认
 [ Global / Claude Code / Codex / WorkBuddy · 覆盖数 · 图标 + 状态      ⌄ ]
 [ bootstrap / config recovery（条件出现）                              ]
 [ glyph  任务开始   UserPromptSubmit  已实现  task_start.aiff   ▶   ))) ]
@@ -235,13 +238,24 @@ Orbit Zero                  当前包 · N 个已发布来源 · 5 个声音事�
                                                          [关闭]
 ```
 
-- **作用域菜单**：全宽原生 `Menu` 固定包含 Global，并按 registry 顺序加入已配置或可用的
-  Surface；`.notConnected` 不进入 popup，但继续在 Integrations Window 中出现。合法历史选择原样
-  恢复；首次或失效值取首个可用 Surface，没有可用来源时取 Global。Global 与显式选择使用不同
-  持久化值。
-- **菜单收起态与菜单项**：来源名、覆盖数、状态图标与状态文字必须同时出现，不能只靠颜色。
-  菜单底部「连接与诊断…」在 Global 下定位首个可用来源，否则定位当前来源；返回时精确聚焦
-  声音作用域按钮。
+- **作用域选择器**：独立显示「声音作用域」标题与「缺失字段继承全局默认」说明；其下是全宽
+  自绘触发卡，不使用会收缩为固有内容宽度、且无法承载两行选项的系统 `Menu`。选择器固定包含
+  「全局默认」，并按 registry 顺序加入已配置或可用的 Surface；`.notConnected` 不进入选择器，
+  但继续在 Integrations Window 中出现。合法历史选择原样恢复；首次或失效值取首个可用 Surface，
+  没有可用来源时取全局默认。两者使用不同持久化值，切换只改变当前读写目标，不创建覆盖，
+  也不改变连接或当前激活。
+- **收起态与浮层选项**：触发卡左侧显示名称与「覆盖数 · 状态」，右侧同时显示语义图标、状态文字
+  和 chevron，不能只靠颜色。展开层与触发卡等宽，覆盖下方事件区而不改变面板布局；选项保持
+  两行信息、当前项背景和右侧状态，来源增长时在限定高度内滚动。选择、`Esc`、点击选择器外部或
+  焦点离开后收起并把焦点还给触发卡；方向键按「全局默认 → registry Surface → 连接与诊断」
+  移动，`Return` / `Space` 执行。菜单底部「连接与诊断…」在全局默认下定位首个可用来源，
+  否则定位当前来源；关闭 retained window 后精确聚焦声音作用域触发卡。
+- **状态文案**：作用域选择器使用面板专属的简洁事实文案：全局默认为「默认」，当前代次真实回执
+  完整的来源为「已激活」，已配置但缺当前代次真实回执为「待回执」；旧版与损坏状态仍分别显示
+  「旧版」和「需要处理」。这些只是 `HostSourceRowStatus` 的可见投影，不能反向改变回执事实。
+- **头部与事件区**：头部的「已发布来源」固定统计 registry 已出货的产品可见 Surface，不得拿当前
+  可选作用域数代替。事件区标题显示「当前作用域名称 · 事件」，右侧显示其覆盖数；全局默认显示
+  `5 个事件`，Surface 显示 `supported/total 可映射`。
 - **单来源五事件**：列表永远按 `Event.allCases` 显示五行。Global 显示 claudi0 事件 ID 与
   「全局默认」，不伪造宿主原生名；Surface 显示原生事件、接口支持与当前实现。WorkBuddy 必须
   诚实呈现 `2/5`：`UserPromptSubmit`、`Stop` 可试听/静音，其余三项标为未实现且两个动作都禁用。
@@ -255,10 +269,12 @@ Orbit Zero                  当前包 · N 个已发布来源 · 5 个声音事�
 - **异常态**：bootstrap 报告位于作用域和事件区之间；`.needsPack` 由「打开设置」恢复；
   `.configFailure` 只提供原因与 Finder 修复入口并禁用配置写入；声音库 loading/failed 显示进度或
   重试，不恢复旧画廊；损坏的 Surface 覆盖 fail closed，但保留定向 reset。
-- **焦点顺序**：`soundScope → bootstrap/config recovery → 各事件可用试听/静音 →
+- **焦点顺序**：收起时为 `soundScope → bootstrap/config recovery → 各事件可用试听/静音 →
   masterVolume → openSoundSettings → resetSurface（条件）→ quitApplication`。生产面板不再生成
-  `hostSource`、`eventSound`、`packCard` 或 `manageSounds` 焦点。
-- **退出语义**：footer 固定在滚动区外；「关闭」仍表示正常退出 Claudio，`Esc` 只收起 popover。
+  `hostSource`、`eventSound`、`packCard` 或 `manageSounds` 焦点；展开作用域选择器时，临时在
+  `soundScope` 后插入各可见选项与「连接与诊断」。
+- **退出语义**：footer 固定在滚动区外；「关闭」仍表示正常退出 Claudio。`Esc` 先收起已展开的
+  作用域选择器或子 popover，没有子层时才收起主 popover。
   打开 retained window 后，关闭窗口必须把焦点还给精确触发控件。
 
 ### 五事件 × 三个产品 Surface 可听能力

@@ -419,6 +419,8 @@ func runViewWiringSuites() {
     suite("PanelView 单作用域边界：无宿主探测，固定呈现 scope/报告/当前来源内容") {
         guard
             let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let scopePicker = codeOnly(
+                "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
             let menu = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let integrationsView = codeOnly(
                 "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
@@ -451,11 +453,13 @@ func runViewWiringSuites() {
         let body = panel[bodyStart..<headerStart]
         guard
             let headerAt = body.range(of: "header")?.lowerBound,
-            let scopeAt = body.range(of: "soundScopeMenu")?.lowerBound,
+            let scopeAt = body.range(of: "soundScopePicker")?.lowerBound,
             let bootstrapAt = body.range(of: "bootstrapReportSection")?.lowerBound,
             let contentAt = body.range(of: "mainContent")?.lowerBound
         else {
-            expect(false, "Panel body 必须同时含 header、soundScopeMenu、bootstrapReportSection、mainContent")
+            expect(
+                false,
+                "Panel body 必须同时含 header、soundScopePicker、bootstrapReportSection、mainContent")
             return
         }
         expect(
@@ -464,16 +468,23 @@ func runViewWiringSuites() {
         expect(
             panel.contains("panelSoundScopePresentations(")
                 && panel.contains("hostIntegrations.content.sourceRows")
-                && panel.contains("ForEach(soundScopePresentations)")
+                && panel.contains("PanelSoundScopePicker(")
+                && panel.contains("scopes: soundScopePresentations")
+                && panel.contains("isExpanded: $isSoundScopeMenuExpanded")
                 && panel.contains("onManageIntegrations(diagnosticsHost, .soundScope)"),
-            "全宽作用域菜单必须来自共享来源 presentation，并把诊断定位与返回焦点分开传递")
+            "全宽作用域选择器必须来自共享来源 presentation，并把诊断定位与返回焦点分开传递")
         expect(
-            panel.contains("Menu {")
-                && panel.contains(".frame(maxWidth: .infinity, alignment: .leading)")
-                && panel.contains("panel.sound-scope")
+            scopePicker.contains("ForEach(scopes)")
+                && scopePicker.contains(".frame(maxWidth: .infinity")
+                && scopePicker.contains(".frame(height: 0, alignment: .top)")
+                && scopePicker.contains("PanelSoundScopeOutsideClickMonitor(")
+                && scopePicker.contains(".onMoveCommand(perform: moveMenuFocus)")
+                && scopePicker.contains(".onExitCommand")
+                && scopePicker.contains("panel.sound-scope")
+                && !scopePicker.contains("Menu {")
                 && !panel.contains("HostSourceRowView(")
                 && !panel.contains("PanelPackSectionView("),
-            "生产面板必须挂载全宽 Menu，且不再挂载来源卡片或包画廊")
+            "生产面板必须挂载不推移布局、可退出的全宽自绘选择器，且不再挂载来源卡片或包画廊")
         expect(
             panel.contains("configWritesAllowed: panelModel.surfaceSoundIssue == nil")
                 && panel.contains(".bootstrapReportManageSounds(id: reportID)"),
@@ -1872,9 +1883,14 @@ func runViewWiringSuites() {
                 "private var selectedPackDisplayName: String { panelModel.selectedPackMetadata.displayName }"),
             "当前 effective 包名必须来自 selectedPackMetadata，不得从旧显示集反推")
         expect(
-            panelCollapsed.contains("l10n.format(.panelHeaderSummary, pack, Int64(publishedSurfaceCount))")
-                && panelCollapsed.contains("Text(l10n.text(.panelEvents))"),
-            "标题摘要与事件区必须消费新的双语键")
+            panelCollapsed.contains("Text(selectedPackHeading)")
+                && panelCollapsed.contains(
+                    "l10n.format(.panelHeaderSummary, Int64(publishedSurfaceCount))")
+                && panelCollapsed.contains("HostID.productVisibleCases.count")
+                && panelCollapsed.contains(
+                    "l10n.format(.panelEventsTitle, selectedScope.name)")
+                && panelCollapsed.contains(".panelEventsMappable"),
+            "标题必须分离当前包与已发布来源计数，事件区必须标明当前作用域与可映射覆盖")
         expect(
             panelCollapsed.contains("case .needsPack: needsPackNotice playbackSettings(masterVolumeEnabled: false)")
                 && panelCollapsed.contains("Text(l10n.text(.panelNeedsPackSettingsMessage))"),
@@ -2219,6 +2235,8 @@ func runViewWiringSuites() {
 
         guard
             let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let scopePicker = codeOnly(
+                "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
             let integrations = codeOnly(
                 "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
             let packs = codeOnly(
@@ -2233,14 +2251,20 @@ func runViewWiringSuites() {
         }
         for identifier in [
             "panel.options", "panel.options.text-size", "panel.reveal-config",
-            "panel.sound-scope", "panel.sound-scope.integrations",
-            #"panel.sound-scope.item.\(scope.scope.storedValue)"#,
             #"panel.event.\(presentation.event.rawValue).row"#,
             #"panel.event.\(presentation.event.rawValue).preview"#,
             #"panel.event.\(presentation.event.rawValue).mute"#,
             "panel.sound-settings.open", "panel.sound-settings.reset-surface",
         ] {
             expect(panel.contains(identifier), "主面板缺少稳定 AX identifier：\(identifier)")
+        }
+        for identifier in [
+            "panel.sound-scope", "panel.sound-scope.integrations",
+            #"panel.sound-scope.item.\(scope.scope.storedValue)"#,
+        ] {
+            expect(
+                scopePicker.contains(identifier),
+                "声音作用域选择器缺少稳定 AX identifier：\(identifier)")
         }
         expect(footer.contains("panel.quit"), "固定退出 footer 缺少稳定 AX identifier：panel.quit")
         for identifier in [
@@ -2368,12 +2392,14 @@ func runViewWiringSuites() {
                 && gallery.contains("ForEach(ClaudioInterfaceTextSize.allCases)"),
             "State Gallery 必须直接渲染生产 footer 的 2×4 组合")
         expect(
-            flat.contains("panelLayoutAdaptation( for: panelTypeSizeTier(for: interfaceTextSize)).panelWidth")
+            flat.contains("panelLayoutAdaptation(")
+                && flat.contains("for: panelTypeSizeTier(for: interfaceTextSize)")
+                && flat.contains(").panelWidth")
                 && gallery.contains("onQuit: {}"),
             "gallery 宽度必须来自 312/360 布局真相源，退出闭包必须无副作用")
     }
 
-    suite("State Gallery：生产 Agent 面板覆盖双语四字号与五个关键状态") {
+    suite("State Gallery：生产 Agent 面板覆盖双语四字号与六个关键状态") {
         guard let gallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift") else {
             expect(false, "读不到 StateGalleryView")
             return
@@ -2386,12 +2412,14 @@ func runViewWiringSuites() {
             "previewPanelModel:",
             "PreviewFixtures.workBuddyVisualScenarios",
             ".allImplementedBindingsCurrent",
+            ".awaitingActivation",
+            "previewSoundScopeExpanded: soundScopeExpanded",
         ] {
             expect(gallery.contains(required), "生产 Panel 画廊缺少 wiring：\(required)")
         }
         for scenario in [
-            "case workBuddy", "case needsPack", "case configFailure", "case libraryFailure",
-            "case surfaceFailure",
+            "case workBuddy", "case workBuddyAwaitingExpanded", "case needsPack",
+            "case configFailure", "case libraryFailure", "case surfaceFailure",
         ] {
             expect(gallery.contains(scenario), "生产 Panel 画廊缺少关键状态：\(scenario)")
         }

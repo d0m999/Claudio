@@ -10,6 +10,7 @@ import SwiftUI
 public struct PanelView: View {
     @StateObject private var announcer: PanelAnnouncer
     @StateObject private var panelModel: PanelConfigController
+    @State private var isSoundScopeMenuExpanded = false
     @FocusState private var focusedTarget: PanelFocusTarget?
 
     @ObservedObject private var focusCoordinator: PanelFocusCoordinator
@@ -85,6 +86,7 @@ public struct PanelView: View {
         previewPanelModel: PanelConfigController,
         previewScope: PanelSoundScopeID,
         previewTextSize: ClaudioInterfaceTextSize,
+        previewSoundScopeExpanded: Bool = false,
         audioEnvironment: AudioImportEnvironment,
         focusCoordinator: PanelFocusCoordinator,
         hostIntegrations: HostIntegrationPresentationStore,
@@ -103,6 +105,7 @@ public struct PanelView: View {
             store: defaults)
         _announcer = StateObject(wrappedValue: PanelAnnouncer())
         _panelModel = StateObject(wrappedValue: previewPanelModel)
+        _isSoundScopeMenuExpanded = State(initialValue: previewSoundScopeExpanded)
         self.audioEnvironment = audioEnvironment
         self.configFile = URL(fileURLWithPath: "/dev/null/claudio-panel-preview-config.json")
         self.focusCoordinator = focusCoordinator
@@ -124,7 +127,7 @@ public struct PanelView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 12) {
                     header
-                    soundScopeMenu
+                    soundScopePicker
                     bootstrapReportSection
                     mainContent
                     writeFailures
@@ -150,6 +153,7 @@ public struct PanelView: View {
             onPanelWidthChange(layoutAdaptation.panelWidth)
         }
         .onChange(of: focusCoordinator.showCount) { _ in
+            isSoundScopeMenuExpanded = false
             panelModel.reload()
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
@@ -181,10 +185,14 @@ public struct PanelView: View {
             HStack(alignment: .center) {
                 ClaudioOrbitWordmark(height: 22 * typeScale)
                 Spacer(minLength: 8)
-                InterfaceTextSizeControl(
+            InterfaceTextSizeControl(
                     selection: interfaceTextSizeBinding,
                     languageStore: languageStore)
             }
+            Text(selectedPackHeading)
+                .font(.system(size: 14.5 * typeScale, weight: .semibold, design: .rounded))
+                .foregroundColor(ClaudioTheme.text(colorScheme))
+                .lineLimit(2)
             Text(headerSummary)
                 .font(.system(size: 11 * typeScale, design: .rounded))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
@@ -194,13 +202,18 @@ public struct PanelView: View {
     }
 
     private var headerSummary: String {
-        let pack = selectedPackDisplayName.isEmpty
+        l10n.format(.panelHeaderSummary, Int64(publishedSurfaceCount))
+    }
+
+    private var selectedPackHeading: String {
+        selectedPackDisplayName.isEmpty
             ? l10n.text(.panelSelectedPackNone) : selectedPackDisplayName
-        return l10n.format(.panelHeaderSummary, pack, Int64(publishedSurfaceCount))
     }
 
     private var headerAccessibilityLabel: String {
         l10n.text(.panelTitle)
+            + (languageStore.language == .english ? ", " : "，")
+            + selectedPackHeading
             + (languageStore.language == .english ? ", " : "，")
             + headerSummary
     }
@@ -244,68 +257,21 @@ public struct PanelView: View {
     }
 
     private var publishedSurfaceCount: Int {
-        max(0, soundScopePresentations.count - 1)
+        HostID.productVisibleCases.count
     }
 
-    private var soundScopeMenu: some View {
-        Menu {
-            ForEach(soundScopePresentations) { scope in
-                Button {
-                    selectSoundScope(scope.scope)
-                } label: {
-                    HStack {
-                        Label(scope.name, systemImage: statusSymbol(scope.status))
-                        Text(scope.compactStatusText)
-                        if scope.scope == selectedScope.scope {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-                .accessibilityLabel(scope.accessibilityLabel)
-                .accessibilityIdentifier("panel.sound-scope.item.\(scope.scope.storedValue)")
-            }
-            Divider()
-            Button {
+    private var soundScopePicker: some View {
+        PanelSoundScopePicker(
+            scopes: soundScopePresentations,
+            selectedScope: selectedScope,
+            typeScale: typeScale,
+            language: languageStore.language,
+            isExpanded: $isSoundScopeMenuExpanded,
+            focusedTarget: $focusedTarget,
+            onSelect: selectSoundScope,
+            onManageIntegrations: {
                 onManageIntegrations(diagnosticsHost, .soundScope)
-            } label: {
-                Label(l10n.text(.panelConnectionsDiagnostics), systemImage: "stethoscope")
-            }
-            .accessibilityLabel(l10n.text(.panelConnectionsDiagnostics))
-            .accessibilityIdentifier("panel.sound-scope.integrations")
-        } label: {
-            HStack(spacing: 9) {
-                Image(systemName: statusSymbol(selectedScope.status))
-                    .foregroundColor(statusColor(selectedScope.status))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(selectedScope.name)
-                        .font(.system(size: 12.5 * typeScale, weight: .semibold, design: .rounded))
-                        .foregroundColor(ClaudioTheme.text(colorScheme))
-                    Text(selectedScope.compactStatusText)
-                        .font(.system(size: 10.5 * typeScale, design: .rounded))
-                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                }
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10 * typeScale, weight: .semibold))
-                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                    .accessibilityHidden(true)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(ClaudioTheme.elevated(colorScheme))
-            .overlay(
-                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
-                    .strokeBorder(ClaudioTheme.hairline(colorScheme), lineWidth: 1))
-            .clipShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .focused($focusedTarget, equals: .soundScope)
-        .accessibilityLabel(l10n.text(.panelSoundScope))
-        .accessibilityValue(selectedScope.accessibilityLabel)
-        .accessibilityIdentifier("panel.sound-scope")
+            })
     }
 
     private var diagnosticsHost: HostID? {
@@ -330,25 +296,6 @@ public struct PanelView: View {
             selectedSurfaceRaw = storedValue
         }
         panelModel.selectSoundSurface(resolved.surface)
-    }
-
-    private func statusSymbol(_ status: HostSourceRowStatus) -> String {
-        switch status {
-        case .ready: "checkmark.circle.fill"
-        case .awaitingActivation: "clock.fill"
-        case .legacy: "arrow.triangle.2.circlepath.circle.fill"
-        case .notConnected: "minus.circle"
-        case .needsAttention: "exclamationmark.triangle.fill"
-        }
-    }
-
-    private func statusColor(_ status: HostSourceRowStatus) -> Color {
-        switch status {
-        case .ready: ClaudioTheme.success(colorScheme)
-        case .awaitingActivation, .legacy: ClaudioColor.warning(colorScheme)
-        case .notConnected: ClaudioTheme.secondaryText(colorScheme)
-        case .needsAttention: ClaudioTheme.error(colorScheme)
-        }
     }
 
     // MARK: - Main content
@@ -382,10 +329,16 @@ public struct PanelView: View {
 
     private var eventSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text(l10n.text(.panelEvents))
-                .font(.system(size: 11 * typeScale, weight: .semibold, design: .rounded))
-                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                .padding(.bottom, 4)
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(l10n.format(.panelEventsTitle, selectedScope.name))
+                    .font(.system(size: 11 * typeScale, weight: .semibold, design: .rounded))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                Spacer(minLength: 4)
+                Text(eventCoverageSummary)
+                    .font(.system(size: 8.5 * typeScale, weight: .medium, design: .rounded))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+            }
+            .padding(.bottom, 4)
             ForEach(Array(eventPresentations.enumerated()), id: \.element.id) { index, event in
                 PanelAgentEventRow(
                     presentation: event,
@@ -408,6 +361,14 @@ public struct PanelView: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("panel.events.single-scope")
+    }
+
+    private var eventCoverageSummary: String {
+        if selectedScope.scope == .global { return selectedScope.coverageText }
+        return l10n.format(
+            .panelEventsMappable,
+            Int64(selectedScope.supportedCount),
+            Int64(selectedScope.totalCount))
     }
 
     @ViewBuilder
