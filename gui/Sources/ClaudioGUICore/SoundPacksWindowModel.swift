@@ -1655,8 +1655,10 @@ public final class SoundPacksWindowModel: ObservableObject {
         expectedPackID: String
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
         guard writesAllowed else {
-            return finishFactoryRestore(
-                .failure(.writesStopped(statusText: writesStoppedStatusText)))
+            // The confirmation can outlive its scope. Reject the stale write without finishing
+            // the existing recovery lifecycle: that state owns the missing pack's retry identity
+            // and every salvage path the user still needs after the scope is repaired.
+            return .failure(.writesStopped(statusText: writesStoppedStatusText))
         }
         if factoryRestoreRetryPackID == expectedPackID {
             guard builtinPackIDs.contains(expectedPackID) else {
@@ -1679,11 +1681,6 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// restore remains independently fail-closed; UI refresh is emitted once after the batch.
     @discardableResult
     public func restoreAllFactoryPacksAfterConfirmation() -> FactoryPackBatchRestoreOutcome {
-        factoryBatchRestoreFailures = []
-        factoryBatchRestoredCount = 0
-        factoryBatchRetainedSalvages = []
-        clearWindowStatus(.factoryBatchRestore)
-
         let ids = factoryPackIDs
         guard writesAllowed else {
             let failures = ids.map {
@@ -1694,10 +1691,15 @@ public final class SoundPacksWindowModel: ObservableObject {
             let outcome = FactoryPackBatchRestoreOutcome(
                 restoredPacks: [],
                 failures: failures)
-            factoryBatchRestoreFailures = failures
-            publishFactoryBatchRestoreStatus()
+            // A stale confirmation is not a new batch attempt. Keep the previous failures,
+            // retry payload, completion count, and salvage paths intact for the repaired scope.
             return outcome
         }
+
+        factoryBatchRestoreFailures = []
+        factoryBatchRestoredCount = 0
+        factoryBatchRetainedSalvages = []
+        clearWindowStatus(.factoryBatchRestore)
         beginSoundPackMutation(packIDs: Set(ids))
         var restored: [FactoryPackRestoreOutcome] = []
         var failures: [FactoryPackBatchRestoreFailure] = []

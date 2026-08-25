@@ -1183,6 +1183,31 @@ func runSoundPacksRefreshSuites() async {
                 #"{ "id": "minimal-chime", "events": {} }"#,
                 to: installed.appendingPathComponent("manifest.json"))
             writeFixture("mine-again", to: installed.appendingPathComponent("second-user.wav"))
+            let retainedFailure = window.factoryRestoreActionError
+            let retainedStatus = window.windowStatuses.first(where: {
+                $0.kind == .factoryRestore
+            })
+            window.setManagedSurface(.chatGPTDesktopAX)
+            expect(!window.writesAllowed, "前提：重试确认打开后 scope 已变为无效")
+            let rejectedRetry = window.retryFailedFactoryPackRestoreAfterConfirmation(
+                expectedPackID: "minimal-chime")
+            guard case .failure(.writesStopped) = rejectedRetry else {
+                expect(false, "无效 scope 必须拒绝确认框里的陈旧重试，实得 \(rejectedRetry)")
+                return
+            }
+            expect(
+                window.factoryRestoreActionError == retainedFailure
+                    && window.factoryRestoreRetryPackIDs == ["minimal-chime"]
+                    && window.windowStatuses.first(where: { $0.kind == .factoryRestore })
+                        == retainedStatus,
+                "拒绝陈旧重试不得覆盖原 pack ID、retry recovery 或 salvage 路径")
+            expect(
+                window.factoryRestoreActionError?.message.contains(salvaged.movedTo) == true
+                    && coordinator.panelReloadRevision == 1,
+                "writes-stopped 早退必须保留可告知 salvage，且不得发布虚假磁盘刷新")
+
+            window.setManagedSurface(nil)
+            expect(window.writesAllowed, "修复 scope 后必须重新允许原恢复生命周期继续")
             let retried = window.retryFailedFactoryPackRestoreAfterConfirmation(
                 expectedPackID: "minimal-chime")
             guard case .success(let retryOutcome) = retried else {
@@ -1814,6 +1839,35 @@ func runSoundPacksRefreshSuites() async {
             expect(
                 model.factoryRestoreActionError == nil,
                 "batch retry state must not masquerade as the selected-pack restore error")
+
+            let retainedBatchStatus = model.windowStatuses.first(where: {
+                $0.kind == .factoryBatchRestore
+            })
+            model.setManagedSurface(.chatGPTDesktopAX)
+            expect(!model.writesAllowed, "前提：批量确认打开后 scope 已变为无效")
+            let rejectedBatch = model.restoreAllFactoryPacksAfterConfirmation()
+            expect(
+                !rejectedBatch.failures.isEmpty
+                    && rejectedBatch.failures.allSatisfy {
+                        if case .writesStopped = $0.error { return true }
+                        return false
+                    },
+                "无效 scope 必须拒绝确认框里的整批恢复")
+            expect(
+                model.factoryRestoreRetryPackIDs == ["a-failed"]
+                    && model.windowStatuses.first(where: {
+                        $0.kind == .factoryBatchRestore
+                    }) == retainedBatchStatus,
+                "拒绝陈旧批量确认不得清空已有 failure、retry recovery 或 batch salvage 状态")
+            expect(
+                model.windowStatuses.first(where: {
+                    $0.kind == .factoryBatchRestore
+                })?.message.contains(salvage.movedTo) == true
+                    && coordinator.panelReloadRevision == 1,
+                "批量 writes-stopped 早退必须保留 salvage 路径，且不得发布虚假刷新")
+
+            model.setManagedSurface(nil)
+            expect(model.writesAllowed, "修复 scope 后必须重新允许原批量失败继续重试")
 
             let retry = model.retryFailedFactoryPackRestoreAfterConfirmation(
                 expectedPackID: "a-failed")
