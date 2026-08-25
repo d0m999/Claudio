@@ -65,6 +65,41 @@ public struct PanelSoundScopePresentation: Sendable, Equatable, Identifiable {
     }
 }
 
+/// 声音作用域浮层在当前滚动视口内的尺寸决策。诊断入口与浮层 chrome 固定保留，只有
+/// 作用域选项区随剩余高度收缩并在 SwiftUI 层滚动。
+public struct PanelSoundScopeMenuLayout: Sendable, Equatable {
+    public let optionHeight: Double
+    public let optionsContentHeight: Double
+    public let optionsHeight: Double
+    public let diagnosticsHeight: Double
+    public let totalHeight: Double
+}
+
+public func panelSoundScopeMenuLayout(
+    scopeCount: Int,
+    typeScale: Double,
+    availableHeight: Double
+) -> PanelSoundScopeMenuLayout {
+    let count = max(0, scopeCount)
+    let scale = max(1, typeScale)
+    let optionHeight = max(46, 46 * typeScale)
+    let diagnosticsHeight = max(34, 34 * typeScale)
+    let chromeHeight: Double = 21
+    let optionsContentHeight =
+        Double(count) * optionHeight + Double(max(0, count - 1)) * 3
+    let designOptionsLimit = max(0, 250 * scale - diagnosticsHeight - chromeHeight)
+    let viewportOptionsLimit = max(0, availableHeight - diagnosticsHeight - chromeHeight)
+    let optionsHeight = min(optionsContentHeight, designOptionsLimit, viewportOptionsLimit)
+    return PanelSoundScopeMenuLayout(
+        optionHeight: optionHeight,
+        optionsContentHeight: optionsContentHeight,
+        optionsHeight: optionsHeight,
+        diagnosticsHeight: diagnosticsHeight,
+        totalHeight: min(
+            max(0, availableHeight),
+            optionsHeight + diagnosticsHeight + chromeHeight))
+}
+
 /// Global 恒在；普通 Surface 只在“已配置或可用”时进入 popup。`.notConnected` 仍由
 /// IntegrationsWindow 完整呈现，不会因为 popup 过滤而丢失诊断入口。
 public func panelSoundScopePresentations(

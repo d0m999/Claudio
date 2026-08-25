@@ -5,12 +5,16 @@ import ClaudioGUICore
 import ClaudioLocalization
 import SwiftUI
 
+private let panelScrollViewportCoordinateSpace = "panel.scroll-viewport"
+
 /// 菜单栏 Agent 集成面板。生产树只呈现一个当前作用域的五行事件与两行播放设置；
 /// 连接/诊断和完整声音编辑继续由两个 retained window 负责。
 public struct PanelView: View {
     @StateObject private var announcer: PanelAnnouncer
     @StateObject private var panelModel: PanelConfigController
     @State private var isSoundScopeMenuExpanded = false
+    @State private var scrollViewportHeight: CGFloat = 0
+    @State private var soundScopePickerBottom: CGFloat = 0
     @FocusState private var focusedTarget: PanelFocusTarget?
 
     @ObservedObject private var focusCoordinator: PanelFocusCoordinator
@@ -127,12 +131,39 @@ public struct PanelView: View {
             ScrollView(.vertical, showsIndicators: true) {
                 VStack(alignment: .leading, spacing: 12) {
                     header
-                    soundScopePicker
+                    soundScopePicker(
+                        availableMenuHeight: max(
+                            0,
+                            scrollViewportHeight - soundScopePickerBottom - 5)
+                    )
+                    .background(
+                        GeometryReader { pickerGeometry in
+                            Color.clear.preference(
+                                key: PanelSoundScopePickerBottomPreferenceKey.self,
+                                value: pickerGeometry.frame(
+                                    in: .named(panelScrollViewportCoordinateSpace)
+                                ).maxY)
+                        }
+                    )
                     bootstrapReportSection
                     mainContent
                     writeFailures
                 }
                 .padding(13)
+            }
+            .coordinateSpace(name: panelScrollViewportCoordinateSpace)
+            .background(
+                GeometryReader { scrollViewport in
+                    Color.clear.preference(
+                        key: PanelScrollViewportHeightPreferenceKey.self,
+                        value: scrollViewport.size.height)
+                }
+            )
+            .onPreferenceChange(PanelScrollViewportHeightPreferenceKey.self) {
+                scrollViewportHeight = $0
+            }
+            .onPreferenceChange(PanelSoundScopePickerBottomPreferenceKey.self) {
+                soundScopePickerBottom = $0
             }
             PanelQuitFooter(
                 language: languageStore.language,
@@ -260,12 +291,13 @@ public struct PanelView: View {
         HostID.productVisibleCases.count
     }
 
-    private var soundScopePicker: some View {
+    private func soundScopePicker(availableMenuHeight: CGFloat) -> some View {
         PanelSoundScopePicker(
             scopes: soundScopePresentations,
             selectedScope: selectedScope,
             typeScale: typeScale,
             language: languageStore.language,
+            availableMenuHeight: availableMenuHeight,
             isExpanded: $isSoundScopeMenuExpanded,
             focusedTarget: $focusedTarget,
             onSelect: selectSoundScope,
@@ -754,6 +786,22 @@ public struct PanelView: View {
     private var typeScale: CGFloat { CGFloat(interfaceTextSize.scale) }
     private var layoutAdaptation: PanelLayoutAdaptation {
         panelLayoutAdaptation(for: panelTypeSizeTier(for: interfaceTextSize))
+    }
+}
+
+private struct PanelSoundScopePickerBottomPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
+private struct PanelScrollViewportHeightPreferenceKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
     }
 }
 

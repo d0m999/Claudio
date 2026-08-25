@@ -226,7 +226,7 @@ func runIntegrationsWindowWiringSuites() {
             return
         }
         expect(
-            panel.contains("private var soundScopePicker: some View")
+            panel.contains("private func soundScopePicker(availableMenuHeight: CGFloat)")
                 && panel.contains("layoutAdaptation.panelWidth"),
             "作用域选择器必须挂在与事件行相同的 312/360pt 面板宽度真相源内")
         expect(
@@ -239,6 +239,58 @@ func runIntegrationsWindowWiringSuites() {
             panel.contains("adaptation.eventActionsMoveBelow")
                 && panel.contains("layoutAdaptation.rowWrapsToTwoLines"),
             "large/maximum 必须分别允许元数据换行与事件动作下移")
+    }
+
+    suite("Panel 作用域浮层：限制在滚动视口内，状态正文用 text-2，收起归还触发卡焦点") {
+        guard
+            let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let scopePicker = integrationsSource(
+                "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift")
+        else {
+            expect(false, "缺少 PanelView.swift/PanelSoundScopePicker.swift")
+            return
+        }
+
+        expect(
+            panel.contains("GeometryReader { scrollViewport in")
+                && panel.contains(".coordinateSpace(name: panelScrollViewportCoordinateSpace)")
+                && panel.contains("availableMenuHeight: max(")
+                && panel.contains("scrollViewportHeight - soundScopePickerBottom")
+                && panel.contains("value: scrollViewport.size.height"),
+            "作用域菜单必须消费固定 footer 上方滚动视口的真实剩余高度")
+        expect(
+            scopePicker.contains("panelSoundScopeMenuLayout(")
+                && scopePicker.contains("availableHeight: Double(availableMenuHeight)")
+                && scopePicker.contains(".frame(height: CGFloat(menuLayout.optionsHeight))"),
+            "菜单选项区必须由可测试布局策略按剩余高度限流")
+
+        guard
+            let statusStart = scopePicker.range(of: "private func statusBadge(")?.lowerBound,
+            let statusEnd = scopePicker.range(of: "private func statusSymbol(")?.lowerBound,
+            statusStart < statusEnd
+        else {
+            expect(false, "无法定位 statusBadge")
+            return
+        }
+        let statusBadge = String(scopePicker[statusStart..<statusEnd])
+        expect(
+            statusBadge.contains("Image(systemName: statusSymbol(scope))")
+                && statusBadge.contains(".foregroundColor(statusColor(scope.status))")
+                && statusBadge.contains("Text(scope.stateText)")
+                && statusBadge.contains(
+                    ".foregroundColor(ClaudioTheme.secondaryText(colorScheme))"),
+            "语义色只能用于状态图标；10.5pt 状态正文必须使用 text-2")
+        expect(
+            !statusBadge.contains("}\n        .foregroundColor(statusColor(scope.status))"),
+            "不得再给整个 badge 统一施加 success/warning/error")
+
+        expect(
+            scopePicker.contains("private func dismissMenuAndRestoreTriggerFocus()")
+                && scopePicker.components(
+                    separatedBy: "dismissMenuAndRestoreTriggerFocus"
+                ).count >= 7
+                && !scopePicker.contains("dismissMenu(returnFocus: false)"),
+            "选择、Esc、外部点击和焦点离开后的收起都必须归还声音作用域触发卡焦点")
     }
 
     suite("IntegrationsWindow action outcome：除 copy 外成功/失败都注入刷新后的完整播报上下文") {

@@ -12,6 +12,7 @@ struct PanelSoundScopePicker: View {
     let selectedScope: PanelSoundScopePresentation
     let typeScale: CGFloat
     let language: ClaudioAppLanguage
+    let availableMenuHeight: CGFloat
     @Binding var isExpanded: Bool
     let focusedTarget: FocusState<PanelFocusTarget?>.Binding
     let onSelect: (PanelSoundScopeID) -> Void
@@ -37,8 +38,8 @@ struct PanelSoundScopePicker: View {
             .background(
                 PanelSoundScopeOutsideClickMonitor(
                     isActive: isExpanded,
-                    protectedOverflowHeight: menuHeight + 5,
-                    onOutsideClick: { dismissMenu(returnFocus: false) }))
+                    protectedOverflowHeight: CGFloat(menuLayout.totalHeight) + 5,
+                    onOutsideClick: dismissMenuAndRestoreTriggerFocus))
         }
         .zIndex(isExpanded ? 100 : 0)
         .onChange(of: isExpanded) { expanded in
@@ -52,7 +53,7 @@ struct PanelSoundScopePicker: View {
             guard isExpanded, target == nil, focusedTarget.wrappedValue != .soundScope else {
                 return
             }
-            dismissMenu(returnFocus: false)
+            dismissMenuAndRestoreTriggerFocus()
         }
         .onDisappear {
             isExpanded = false
@@ -124,26 +125,33 @@ struct PanelSoundScopePicker: View {
 
     private var menu: some View {
         VStack(spacing: 0) {
-            ScrollView(.vertical, showsIndicators: scopes.count > 4) {
+            ScrollView(
+                .vertical,
+                showsIndicators: menuLayout.optionsHeight < menuLayout.optionsContentHeight
+            ) {
                 VStack(spacing: 3) {
                     ForEach(scopes) { scope in
                         scopeOption(scope)
                     }
                 }
             }
-            .frame(height: menuOptionsHeight)
+            .frame(height: CGFloat(menuLayout.optionsHeight))
 
             Divider()
                 .padding(.vertical, 4)
 
             Button {
-                dismissMenu(returnFocus: true)
+                dismissMenuAndRestoreTriggerFocus()
                 onManageIntegrations()
             } label: {
                 Label(l10n.text(.panelConnectionsDiagnostics), systemImage: "stethoscope")
                     .font(.system(size: 10.5 * typeScale, weight: .medium, design: .rounded))
                     .foregroundColor(ClaudioTheme.text(colorScheme))
-                    .frame(maxWidth: .infinity, minHeight: diagnosticsHeight, alignment: .leading)
+                    .frame(
+                        maxWidth: .infinity,
+                        minHeight: CGFloat(menuLayout.diagnosticsHeight),
+                        alignment: .leading
+                    )
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -153,6 +161,8 @@ struct PanelSoundScopePicker: View {
         }
         .padding(6)
         .frame(maxWidth: .infinity)
+        .frame(height: CGFloat(menuLayout.totalHeight), alignment: .top)
+        .clipped()
         .background(ClaudioTheme.surface(colorScheme))
         .overlay(
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.section)
@@ -165,7 +175,7 @@ struct PanelSoundScopePicker: View {
             y: 6
         )
         .onMoveCommand(perform: moveMenuFocus)
-        .onExitCommand { dismissMenu(returnFocus: true) }
+        .onExitCommand(perform: dismissMenuAndRestoreTriggerFocus)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.panelSoundScope))
     }
@@ -176,7 +186,7 @@ struct PanelSoundScopePicker: View {
         let target = PanelSoundScopePickerFocusTarget.scope(scope.scope)
         return Button {
             onSelect(scope.scope)
-            dismissMenu(returnFocus: true)
+            dismissMenuAndRestoreTriggerFocus()
         } label: {
             HStack(spacing: 9) {
                 scopeIdentity(scope, prominent: false)
@@ -185,7 +195,11 @@ struct PanelSoundScopePicker: View {
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, minHeight: optionHeight, alignment: .leading)
+            .frame(
+                maxWidth: .infinity,
+                minHeight: CGFloat(menuLayout.optionHeight),
+                alignment: .leading
+            )
             .contentShape(RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control))
             .background(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
@@ -230,12 +244,13 @@ struct PanelSoundScopePicker: View {
         HStack(spacing: 5) {
             Image(systemName: statusSymbol(scope))
                 .font(.system(size: 13 * typeScale, weight: .semibold))
+                .foregroundColor(statusColor(scope.status))
                 .accessibilityHidden(true)
             Text(scope.stateText)
                 .font(.system(size: 10.5 * typeScale, weight: .semibold, design: .rounded))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .lineLimit(1)
         }
-        .foregroundColor(statusColor(scope.status))
         .fixedSize()
     }
 
@@ -259,13 +274,12 @@ struct PanelSoundScopePicker: View {
         }
     }
 
-    private var optionHeight: CGFloat { max(46, 46 * typeScale) }
-    private var diagnosticsHeight: CGFloat { max(34, 34 * typeScale) }
-    private var menuOptionsHeight: CGFloat {
-        let content = CGFloat(scopes.count) * optionHeight + CGFloat(max(0, scopes.count - 1)) * 3
-        return min(content, 250 * max(1, typeScale) - diagnosticsHeight - 21)
+    private var menuLayout: PanelSoundScopeMenuLayout {
+        panelSoundScopeMenuLayout(
+            scopeCount: scopes.count,
+            typeScale: Double(typeScale),
+            availableHeight: Double(availableMenuHeight))
     }
-    private var menuHeight: CGFloat { menuOptionsHeight + diagnosticsHeight + 21 }
 
     private var menuFocusOrder: [PanelSoundScopePickerFocusTarget] {
         panelSoundScopePickerFocusOrder(scopes: scopes.map(\.scope))
@@ -293,13 +307,11 @@ struct PanelSoundScopePicker: View {
         focusedMenuTarget = menuFocusOrder[nextIndex]
     }
 
-    private func dismissMenu(returnFocus: Bool) {
+    private func dismissMenuAndRestoreTriggerFocus() {
         guard isExpanded else { return }
         isExpanded = false
         focusedMenuTarget = nil
-        if returnFocus {
-            DispatchQueue.main.async { focusedTarget.wrappedValue = .soundScope }
-        }
+        DispatchQueue.main.async { focusedTarget.wrappedValue = .soundScope }
     }
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: language) }

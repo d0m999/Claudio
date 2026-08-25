@@ -25,6 +25,21 @@ private func panelPresentationEventRows(
 
 @MainActor
 func runPanelPresentationSuites() {
+    suite("声音作用域菜单：最大字号按滚动视口剩余高度裁定选项区，诊断入口固定可见") {
+        let layout = panelSoundScopeMenuLayout(
+            scopeCount: 4,
+            typeScale: ClaudioInterfaceTextSize.maximum.scale,
+            availableHeight: 160)
+
+        expect(layout.totalHeight == 160, "菜单总高必须精确受剩余视口 160pt 限制：\(layout)")
+        expect(
+            layout.optionsHeight < layout.optionsContentHeight,
+            "四来源最大字号必须把溢出的选项留在内部滚动区")
+        expect(
+            abs(layout.diagnosticsHeight - 48.28) < 0.000_1,
+            "视口裁切不得压缩底部连接与诊断入口：\(layout.diagnosticsHeight)")
+    }
+
     suite("面板作用域：Global 恒在、Surface 按 registry 排序，notConnected 一律过滤") {
         let config = ClaudioConfig(
             selectedPack: "pack",
