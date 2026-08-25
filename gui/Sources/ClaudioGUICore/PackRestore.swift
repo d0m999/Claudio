@@ -28,6 +28,8 @@ public struct FactoryPackRestoreOutcome: Sendable, Equatable {
 }
 
 public enum FactoryPackRestoreError: Error, Sendable, Equatable {
+    /// The retained management window rejected the action before any disk mutation.
+    case writesStopped(reason: String)
     /// Refused before any disk write.
     case unsafePackID(packID: String)
     /// No app-bundled factory root was supplied.

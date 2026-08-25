@@ -79,6 +79,24 @@ func runPanelPresentationSuites() {
         expect(
             resolvedPanelSoundScopeSelection(storedValue: nil, scopes: [scopes[0]]) == .global,
             "没有可用来源时必须回退 Global")
+
+        let pendingFallback = resolvedPanelSoundScopeSelection(
+            storedValue: "unselected",
+            scopes: [scopes[0]])
+        expect(
+            panelSoundScopeStoredValueToPersist(
+                storedValue: "unselected",
+                resolvedSelection: pendingFallback) == nil,
+            "首次宿主刷新尚未完成时只能临时显示 Global，必须保留 unselected 未决状态")
+
+        let firstAvailable = resolvedPanelSoundScopeSelection(
+            storedValue: "unselected",
+            scopes: scopes)
+        expect(
+            panelSoundScopeStoredValueToPersist(
+                storedValue: "unselected",
+                resolvedSelection: firstAvailable) == HostSurfaceID.codex.rawValue,
+            "首个可用来源到达后才应把首次自动选择持久化")
     }
 
     suite("WorkBuddy 五行：仅 UserPromptSubmit/Stop 可操作，其余显式未实现") {

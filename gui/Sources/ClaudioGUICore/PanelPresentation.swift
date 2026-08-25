@@ -133,6 +133,18 @@ public func resolvedPanelSoundScopeSelection(
     return scopes.first(where: { $0.scope.surface != nil })?.scope ?? .global
 }
 
+/// `unselected` / missing means the first host refresh has not yet established whether a Surface
+/// is available. Global remains a safe transient presentation, but only a real Surface arrival or
+/// an explicit user choice may turn that pending marker into a persisted selection.
+public func panelSoundScopeStoredValueToPersist(
+    storedValue: String?,
+    resolvedSelection: PanelSoundScopeID
+) -> String? {
+    let isPendingFirstSelection = storedValue == nil || storedValue == "unselected"
+    if isPendingFirstSelection, resolvedSelection == .global { return nil }
+    return resolvedSelection.storedValue
+}
+
 /// 事件行两个写/试听动作的唯一可用性投影。视图与焦点顺序必须消费同一实例。
 public struct PanelEventControlAvailability: Sendable, Equatable {
     public let previewEnabled: Bool

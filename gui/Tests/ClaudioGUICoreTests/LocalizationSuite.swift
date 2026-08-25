@@ -66,6 +66,34 @@ func runLocalizationSuites() {
             !chinese.text(.panelQuitApplicationHint).isEmpty
                 && !english.text(.panelQuitApplicationHint).isEmpty,
             "quit accessibility hint must exist in both product languages")
+        expect(
+            chinese.text(.soundPacksCardHint) == "选择后在右侧查看"
+                && english.text(.soundPacksCardHint) == "Select to inspect on the right",
+            "sound-pack rows must not advertise the removed panel-star action")
+        expect(
+            chinese.text(.soundPacksUseHint) == "明确切换当前使用的声音包"
+                && english.text(.soundPacksUseHint) == "Explicitly switch the active sound pack",
+            "use-pack help must describe only the active-pack action")
+        expect(
+            chinese.text(.soundPacksEmptyRestoreHint) == "恢复后可以选择和试听内置声音包"
+                && english.text(.soundPacksEmptyRestoreHint)
+                    == "After restoring, built-in packs can be selected and previewed",
+            "factory-restore help must not promise a removed pinning control")
+        expect(
+            chinese.format(.soundPacksStatusPackCopied, "示例")
+                == "已创建并选中「示例」。原内置包未更改；需要时可点「用这个包」。"
+                && english.format(.soundPacksStatusPackCopied, "Example")
+                    == "Created and selected “Example”. The built-in pack is unchanged; choose Use This Pack when needed.",
+            "copy completion must not direct users to a removed star control")
+        expect(
+            chinese.format(.soundPacksStatusPackUsed, "示例") == "现在使用「示例」。"
+                && english.format(.soundPacksStatusPackUsed, "Example")
+                    == "Now using “Example”.",
+            "use completion must not mention the compatibility-only starred list")
+        expect(
+            chinese.text(.soundPacksPackNotUsed) == "未使用"
+                && english.text(.soundPacksPackNotUsed) == "Not in use",
+            "pack accessibility values must not expose removed pinning state")
 
         let axUnavailableQualification = ClaudioL10nKey(
             rawValue: "qualification.accessibility-beta-unavailable")

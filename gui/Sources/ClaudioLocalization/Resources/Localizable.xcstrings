@@ -1236,8 +1236,8 @@
     },
     "sound-packs.card.hint" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select to inspect on the right; stars only control panel visibility" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择后在右侧查看；星标只控制主面板显示" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Select to inspect on the right" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择后在右侧查看" } }
       }
     },
     "sound-packs.star.pin" : {
@@ -1416,8 +1416,8 @@
     },
     "sound-packs.use.hint" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Explicitly switch the active sound pack; this does not add a star" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "明确切换当前使用的声音包；不会自动添加星标" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Explicitly switch the active sound pack" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "明确切换当前使用的声音包" } }
       }
     },
     "sound-packs.empty.loading-message" : {
@@ -1458,8 +1458,8 @@
     },
     "sound-packs.empty.restore.hint" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "After restoring, built-in packs can be selected, pinned, and previewed" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复后可以选择、星标和试听内置声音包" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "After restoring, built-in packs can be selected and previewed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "恢复后可以选择和试听内置声音包" } }
       }
     },
     "sound-packs.empty.no-factory-message" : {
@@ -1716,8 +1716,8 @@
     },
     "sound-packs.pack.not-used" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not pinned, not in use" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未固定，未使用" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not in use" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未使用" } }
       }
     },
     "sound-packs.event.present" : {
@@ -2094,14 +2094,14 @@
     },
     "sound-packs.status.pack-copied" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Created and selected “%@”. The built-in pack is unchanged; choose Use This Pack or pin it when needed." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已创建并选中「%@」。原内置包未更改；当前使用的包与面板显示未改变。需要时点「用这个包」或左侧星标。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Created and selected “%@”. The built-in pack is unchanged; choose Use This Pack when needed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已创建并选中「%@」。原内置包未更改；需要时可点「用这个包」。" } }
       }
     },
     "sound-packs.status.pack-used" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Now using “%@”. The starred list did not change." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现在使用「%@」。星标列表没有改变。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Now using “%@”." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现在使用「%@」。" } }
       }
     },
     "onboarding.claude-code-not-installed.title" : {

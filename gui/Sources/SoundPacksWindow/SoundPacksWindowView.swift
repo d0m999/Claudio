@@ -214,13 +214,8 @@ struct SoundPacksWindowView: View {
 
     private var localizedManagedScopeFailure: String? {
         guard let reason = model.managedScopeFailureReason else { return nil }
-        if model.managedScopeIsInvalid, let surface = model.managedSurface {
-            return l10n.format(.soundPacksInvalidScope, surface.rawValue)
-        }
-        if model.managedSurfaceProfileIsMalformed {
-            return l10n.format(.soundPacksDamagedScope, managedScopeName)
-        }
-        return reason
+        return model.managedScopeFailureStatusText?.resolve(language: languageStore.language)
+            ?? reason
     }
 
     @ViewBuilder
@@ -278,43 +273,19 @@ struct SoundPacksWindowView: View {
 
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text(l10n.text(.soundPacksSidebarTitle))
-                    .font(.headline)
-                Spacer(minLength: 8)
-                Text(l10n.format(
-                    .soundPacksSidebarStars,
-                    Int64(model.starredPackIDs.count),
-                    Int64(maxStarredPacks)))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(l10n.format(
-                .soundPacksSidebarLabel) + (languageStore.language == .english ? ", " : "，") + l10n.format(
-                    .soundPacksSidebarStars,
-                    Int64(model.starredPackIDs.count),
-                    Int64(maxStarredPacks)))
-            .accessibilityAddTraits(.isHeader)
-            .padding(.horizontal, 10)
-            .padding(.top, 10)
+            Text(l10n.text(.soundPacksSidebarTitle))
+                .font(.headline)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.horizontal, 10)
+                .padding(.top, 10)
 
             List(selection: selection) {
                 ForEach(model.packCards, id: \.id) { card in
-                    let starControl = model.starControl(for: card)
                     HStack(spacing: 6) {
-                        starButton(card, control: starControl)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
                                 .lineLimit(layoutAdaptation.packNameLineLimit)
                                 .fixedSize(horizontal: false, vertical: true)
-                            if let reason = starControl.disabledReason {
-                                Text(reason)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .accessibilityHidden(true)
-                            }
                         }
                         Spacer(minLength: 4)
                         if card.isSelected {
@@ -346,44 +317,6 @@ struct SoundPacksWindowView: View {
             .accessibilityHint(l10n.text(.soundPacksSidebarHint))
             .accessibilityIdentifier("sound-packs.pack-list")
         }
-    }
-
-    private func starButton(
-        _ card: PackCard,
-        control: SoundPacksWindowStarControl
-    ) -> some View {
-        let displayName = SelectedPackMetadata(id: card.id, name: card.name).displayName
-        return Button {
-            model.toggleStarredPack(card.id)
-        } label: {
-            Image(systemName: control.isStarred ? "star.fill" : "star")
-                .font(.system(size: 13, weight: .semibold))
-                .frame(
-                    minWidth: ClaudioTheme.Metrics.iconTarget,
-                    minHeight: ClaudioTheme.Metrics.iconTarget
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.borderless)
-        .disabled(!control.isEnabled)
-        .help(control.disabledReason ?? "")
-        .accessibilityLabel(
-            control.isStarred
-            ? l10n.format(.soundPacksStarUnpin, displayName)
-                : l10n.format(.soundPacksStarPin, displayName)
-        )
-        .accessibilityHint(
-            control.disabledReason
-                ?? (control.isStarred
-                    ? l10n.text(.soundPacksStarUnpinHint)
-                    : l10n.text(.soundPacksStarPinHint))
-        )
-        .accessibilityValue(
-            control.isStarred
-                ? l10n.text(.soundPacksStarPinned)
-                : l10n.text(.soundPacksStarUnpinned))
-        .accessibilityAddTraits(control.isStarred ? .isSelected : [])
-        .accessibilityIdentifier("sound-packs.pack.\(card.id).star")
     }
 
     @ViewBuilder
@@ -556,6 +489,7 @@ struct SoundPacksWindowView: View {
                 displayName: displayName,
                 kind: .selectedPack)
         }
+        .disabled(!model.writesAllowed)
         .frame(minHeight: ClaudioTheme.Metrics.compactControlHeight)
         .focused($focusedTarget, equals: .restoreFactoryPack)
         .accessibilityLabel(l10n.format(.soundPacksRestorePackLabel, displayName))
@@ -599,6 +533,7 @@ struct SoundPacksWindowView: View {
             Button(l10n.text(.soundPacksCopy)) {
                 model.forkSelectedFactoryPack()
             }
+            .disabled(!model.writesAllowed)
             .buttonStyle(.borderedProminent)
             .tint(ClaudioSharedColor.clay(colorScheme))
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -640,6 +575,7 @@ struct SoundPacksWindowView: View {
             Button(l10n.text(.soundPacksUse)) {
                 model.useSelectedPack()
             }
+            .disabled(!model.writesAllowed)
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
             .focused($focusedTarget, equals: .useSelectedPack)
             .accessibilityLabel(l10n.format(.soundPacksUseLabel, displayName))
@@ -650,6 +586,7 @@ struct SoundPacksWindowView: View {
             Button(l10n.text(.soundPacksUse)) {
                 model.useSelectedPack()
             }
+            .disabled(!model.writesAllowed)
             .buttonStyle(.borderedProminent)
             .tint(ClaudioSharedColor.clay(colorScheme))
             .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -674,7 +611,7 @@ struct SoundPacksWindowView: View {
     }
 
     private func chooseAndImportAudio() {
-        guard let expectedPackID = model.selectedPackID else { return }
+        guard canEditSelectedPack, let expectedPackID = model.selectedPackID else { return }
         let requests = runAudioOpenPanel(allowsMultipleSelection: true).map {
             AudioImportRequest(sourceURL: $0, suggestedFileName: $0.lastPathComponent)
         }
@@ -793,6 +730,7 @@ struct SoundPacksWindowView: View {
                         displayName: l10n.text(.soundPacksEmptyRestoreLabel),
                         kind: .allFactoryPacks)
                 }
+                .disabled(!model.writesAllowed)
                 .buttonStyle(.borderedProminent)
                 .tint(ClaudioSharedColor.clay(colorScheme))
                 .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
@@ -870,6 +808,7 @@ struct SoundPacksWindowView: View {
                             displayName: displayName,
                             kind: .failedPublishRetry)
                     }
+                    .disabled(!model.writesAllowed)
                     .frame(minHeight: ClaudioTheme.Metrics.regularControlHeight)
                     .focused(
                         $focusedTarget,
@@ -1221,16 +1160,19 @@ struct SoundPacksWindowView: View {
                 ? model.selectedAudioFiles.filter(\.isOrphan).map(\.fileName) : [],
             canEditSelectedPack: canEditSelectedPack,
             canForkFactoryPack:
-                model.selectedPackIsBuiltinReadOnly && !model.selectedPackIsMissingPlaceholder,
+                model.writesAllowed && model.selectedPackIsBuiltinReadOnly
+                && !model.selectedPackIsMissingPlaceholder,
             canAddAudio: canEditSelectedPack,
-            canRestoreFactoryPack: model.selectedPackCanRestoreFactory,
-            canUseSelectedPack: selectedCard?.isSelected == false,
+            canRestoreFactoryPack: model.writesAllowed && model.selectedPackCanRestoreFactory,
+            canUseSelectedPack: model.writesAllowed && selectedCard?.isSelected == false,
             canRestoreAllFactoryPacks:
-                allowsEmptyLibraryActions && model.packCards.isEmpty && model.hasFactoryPacks,
+                model.writesAllowed && allowsEmptyLibraryActions && model.packCards.isEmpty
+                && model.hasFactoryPacks,
             canRevealPacksDirectory:
                 allowsEmptyLibraryActions && model.packCards.isEmpty && !model.hasFactoryPacks,
             canRetryLibraryLoad: model.libraryPresentationState.canRetry,
-            retryFactoryRestorePackIDs: model.factoryRestoreRetryPackIDs)
+            retryFactoryRestorePackIDs:
+                model.writesAllowed ? model.factoryRestoreRetryPackIDs : [])
     }
 
     private func applyInitialFocus() {
@@ -1285,6 +1227,7 @@ struct SoundPacksWindowView: View {
 
     private var canEditSelectedPack: Bool {
         selectedCard?.availability == .installed && !model.selectedPackIsBuiltinReadOnly
+            && model.writesAllowed
     }
 
     private func licenseBadgeLabel(_ badge: PackRowLicenseBadge) -> String? {
@@ -1331,7 +1274,6 @@ struct SoundPacksWindowView: View {
                 .soundPacksSidebarViewing,
                 SelectedPackMetadata(id: card.id, name: card.name).displayName))
         }
-        if model.starredPackIDs.contains(card.id) { values.append(l10n.text(.soundPacksPanelVisible)) }
         if card.isSelected { values.append(l10n.text(.soundPacksUsing)) }
         return values.isEmpty ? l10n.text(.soundPacksPackNotUsed) : values.joined(separator: languageStore.language == .english ? ", " : "，")
     }

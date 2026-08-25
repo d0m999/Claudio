@@ -598,11 +598,10 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && view.contains("packActionBar(card, stacks: stacksDetail)"),
             "Claudio 四档文字偏好和真实 detail 宽度必须共同驱动详情重排")
         expect(
-            view.contains("ClaudioTheme.Metrics.iconTarget")
-                && view.contains("ClaudioTheme.Metrics.regularControlHeight")
+            view.contains("ClaudioTheme.Metrics.regularControlHeight")
                 && view.contains(".accessibilityLabel(packAccessibilityLabel(card))")
                 && view.contains("localizedSoundPacksEventAccessibilityLabel("),
-            "macOS 28/32pt 控件目标、包行状态与事件失败状态必须真正接进窗口视图")
+            "macOS 32pt 控件目标、包行状态与事件失败状态必须真正接进窗口视图")
 
         guard
             let responderIndex = controller.range(of: "makeFirstResponder")?.lowerBound,

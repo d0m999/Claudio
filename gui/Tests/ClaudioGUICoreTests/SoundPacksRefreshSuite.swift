@@ -120,8 +120,8 @@ private func soundPacksEnvironment(
 
 @MainActor
 func runSoundPacksRefreshSuites() async {
-    suite("SoundPacksWindow scope：Global/Surface 定向切包并保留未知字段，错误 scope 不误写 Global") {
-        withTempDirectory { root in
+    await suite("SoundPacksWindow scope：Global/Surface 定向切包并保留未知字段，错误 scope 不误写 Global") {
+        await withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let lockFile = root.appendingPathComponent("config.lock")
             let packs = root.appendingPathComponent("packs")
@@ -133,6 +133,7 @@ func runSoundPacksRefreshSuites() async {
                     "{\"id\":\"\(id)\",\"name\":\"\(id)\",\"events\":{}}",
                     to: packs.appendingPathComponent("\(id)/manifest.json"))
             }
+            writeFixture("audio", to: packs.appendingPathComponent("pack-b/tone.aiff"))
 
             let model = SoundPacksWindowModel(
                 configFile: configFile,
@@ -153,12 +154,75 @@ func runSoundPacksRefreshSuites() async {
 
             let beforeInvalid = try! Data(contentsOf: configFile)
             model.setManagedSurface(.chatGPTDesktopAX)
+            expect(!model.writesAllowed, "诊断专用 AX scope 必须统一关闭窗口写能力")
             expect(model.selectPackForInspection("pack-b"), "错误 scope 下仍可浏览库")
             expect(
                 model.useSelectedPack() == .failure(.invalidScope(.chatGPTDesktopAX)),
                 "诊断专用 AX scope 必须显式失败")
+            guard case .failure(.writesStopped) = model.toggleStarredPack("pack-b") else {
+                expect(false, "错误 scope 下星标写必须由 model 显式拒绝")
+                return
+            }
+            let manifestFile = packs.appendingPathComponent("pack-b/manifest.json")
+            let beforeManifest = try! Data(contentsOf: manifestFile)
+            guard
+                case .failure(.writesStopped) = model.assignSelectedAudioFile(
+                    "tone.aiff",
+                    to: .stop)
+            else {
+                expect(false, "错误 scope 下声音映射写必须由 model 显式拒绝")
+                return
+            }
+            guard case .failure(.writesStopped) = model.clearSelectedEventBinding(.stop) else {
+                expect(false, "错误 scope 下清除映射必须由 model 显式拒绝")
+                return
+            }
+            guard
+                case .failure(.writesStopped) =
+                    model
+                    .deleteSelectedOrphanAudioFileAfterConfirmation(
+                        "tone.aiff",
+                        expectedPackID: "pack-b")
+            else {
+                expect(false, "错误 scope 下删除音频必须由 model 显式拒绝")
+                return
+            }
+            let importedSource = root.appendingPathComponent("import.aiff")
+            writeFixture("import", to: importedSource)
+            guard
+                case .failure(.writesStopped) = await model.importSelectedAudioFiles(
+                    [
+                        AudioImportRequest(
+                            sourceURL: importedSource,
+                            suggestedFileName: "import.aiff")
+                    ],
+                    expectedPackID: "pack-b")
+            else {
+                expect(false, "错误 scope 下导入音频必须由 model 显式拒绝")
+                return
+            }
+            guard case .failure(.writesStopped) = model.forkSelectedFactoryPack() else {
+                expect(false, "错误 scope 下复制声音包必须在资格检查前被拒绝")
+                return
+            }
+            guard
+                case .failure(.writesStopped) = model
+                    .restoreSelectedFactoryPackAfterConfirmation(expectedPackID: "pack-b")
+            else {
+                expect(false, "错误 scope 下恢复声音包必须在资格检查前被拒绝")
+                return
+            }
+            let invalidScopeStatus = model.windowStatuses.last(where: {
+                $0.kind == .factoryRestore
+            })
+            expect(
+                invalidScopeStatus?.message(language: .english)
+                    == "Unknown sound scope chatgpt-desktop-ax. Writes are stopped; Global and Surface settings were not changed.",
+                "错误 scope 的窗口状态与 VoiceOver 文案必须按当前语言解析，不能冻结为中文 literal")
             expect(try! Data(contentsOf: configFile) == beforeInvalid,
                 "错误 scope 的写入尝试不得改变任何 config 字节")
+            expect(try! Data(contentsOf: manifestFile) == beforeManifest,
+                "错误 scope 的写入尝试不得改变任何声音包 manifest 字节")
 
             let object = try! JSONSerialization.jsonObject(
                 with: Data(contentsOf: configFile)) as! [String: Any]
@@ -176,6 +240,18 @@ func runSoundPacksRefreshSuites() async {
             expect(surfaces[HostSurfaceID.chatGPTDesktopAX.rawValue] == nil,
                 "错误 scope 不得制造 AX override")
         }
+    }
+
+    suite("SoundPacksWindow 无效 scope：整体损坏配置仍以未知 scope 对齐 UI 与 VoiceOver") {
+        let statusText = soundPacksWindowScopeFailureStatusText(
+            managedSurface: .chatGPTDesktopAX,
+            config: ClaudioConfig(
+                selectedPack: "pack-a",
+                surfaceOverridesMalformed: true))
+        expect(
+            statusText?.resolve(language: .english)
+                == "Unknown sound scope chatgpt-desktop-ax. Writes are stopped; Global and Surface settings were not changed.",
+            "未知 scope 与整体损坏并存时，屏幕 banner、状态与 VoiceOver 必须共同优先报告未知 scope")
     }
 
     suite("SoundPacksWindow route：overview/editEvent 降级时始终保留 Surface") {
@@ -199,6 +275,32 @@ func runSoundPacksRefreshSuites() async {
             "library 尚未证明缺失时必须保留完整 pending route")
         expect(isValidSoundPacksWindowSurface(.codex), "产品 Surface 必须可管理")
         expect(!isValidSoundPacksWindowSurface(.chatGPTDesktopAX), "AX identity 必须被写入白名单拒绝")
+    }
+
+    suite("SoundPacksWindow 无效 scope：生产视图统一移除全部写焦点并禁用变更控件") {
+        guard
+            let view = soundPacksCode(
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
+        else {
+            expect(false, "读不到 SoundPacksWindowView.swift")
+            return
+        }
+        let flat = collapsingWhitespace(view)
+        expect(
+            flat.contains(
+                "selectedCard?.availability == .installed && !model.selectedPackIsBuiltinReadOnly && model.writesAllowed"
+            ),
+            "映射、导入、拖放与孤儿文件写控件必须共同消费 model.writesAllowed")
+        expect(
+            flat.contains(".disabled(!model.writesAllowed)")
+                && flat.contains("canForkFactoryPack: model.writesAllowed")
+                && flat.contains("canRestoreFactoryPack: model.writesAllowed")
+                && flat.contains("canUseSelectedPack: model.writesAllowed")
+                && flat.contains("canRestoreAllFactoryPacks: model.writesAllowed")
+                && flat.contains(
+                    "retryFactoryRestorePackIDs: model.writesAllowed ? model.factoryRestoreRetryPackIDs : []"
+                ),
+            "复制、恢复、使用与重试必须同时禁用真实控件和对应键盘焦点")
     }
 
     suite("SoundPacksWindow show policy：首开不 reload、隐藏重开 reload、已可见只前置") {

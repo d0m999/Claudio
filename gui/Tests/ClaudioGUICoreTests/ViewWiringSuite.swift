@@ -2120,6 +2120,32 @@ func runViewWiringSuites() {
             "窗口必须允许 present/broken 清除绑定，并经唯一窗口 model 写路径落地")
     }
 
+    suite("生产面板事件行：复用批准的 24pt 双波纹静音图标，不回退 SF Symbols") {
+        guard
+            let panel = codeOnly("gui/Sources/ClaudioGUI/PanelView.swift"),
+            let legacyRow = codeOnly("gui/Sources/ClaudioGUI/EventRowView.swift"),
+            let icon = codeOnly("gui/Sources/ClaudioGUI/EventMuteSpeakerIcon.swift")
+        else {
+            expect(false, "读不到生产面板、旧事件行或共享静音图标组件")
+            return
+        }
+        expect(
+            panel.contains("EventMuteSpeakerIcon(")
+                && legacyRow.contains("EventMuteSpeakerIcon("),
+            "生产与历史事件行必须复用同一个批准组件")
+        expect(
+            !panel.contains("speaker.wave.2.fill")
+                && !panel.contains("speaker.slash.fill"),
+            "生产面板静音按钮不得回退为 SF Symbols")
+        expect(
+            icon.contains("struct EventMuteSpeakerIcon: View")
+                && icon.components(separatedBy: "SpeakerWaveShape(").count - 1 == 2
+                && icon.contains("color.opacity(isMuted ? 0.24 : 1)")
+                && icon.contains("SpeakerSlashShape()")
+                && icon.contains(".frame(width: 24, height: 24)"),
+            "共享组件必须保留 24×24、双声波、静音弱化与斜线几何")
+    }
+
     suite("全状态画廊：声音包窗口用生产视图覆盖内容与库可用性七态，且预览不读用户磁盘") {
         guard
             let gallery = codeOnly(
@@ -2233,7 +2259,7 @@ func runViewWiringSuites() {
             expect(integrations.contains(identifier), "集成窗口缺少稳定 AX identifier：\(identifier)")
         }
         for identifier in [
-            "sound-packs.pack-list", #"sound-packs.pack.\(card.id).star"#,
+            "sound-packs.pack-list",
             "sound-packs.restore-selected-factory-pack", "sound-packs.fork-selected-pack",
             "sound-packs.add-audio", "sound-packs.use-selected-pack",
             #"sound-packs.event.\(row.event.rawValue).mapping"#,
@@ -2909,7 +2935,7 @@ func runViewWiringSuites() {
                 && window.contains("l10n.text(.soundPacksAddAudio)")
                 && window.contains("l10n.text(.soundPacksUse)")
                 && window.contains("l10n.text(.soundPacksEmptyRestore)")
-                && window.contains("l10n.text(.soundPacksPanelVisible)"),
+                && !window.contains("l10n.text(.soundPacksPanelVisible)"),
             "侧栏语义标题、底部动作栏与空态主行动的用户标签必须全部真实可见")
         expect(
             window.contains("ForEach(model.windowStatuses)")

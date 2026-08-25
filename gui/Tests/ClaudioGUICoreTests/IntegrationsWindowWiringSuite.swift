@@ -505,30 +505,35 @@ func runIntegrationsWindowWiringSuites() {
     }
 
     suite("事件静音按钮：使用批准的 24×24 双声波矢量，不回退到 SF Symbol") {
-        guard let row = integrationsSource("gui/Sources/ClaudioGUI/EventRowView.swift") else {
-            expect(false, "缺少 EventRowView 源")
+        guard
+            let row = integrationsSource("gui/Sources/ClaudioGUI/EventRowView.swift"),
+            let icon = integrationsSource(
+                "gui/Sources/ClaudioGUI/EventMuteSpeakerIcon.swift")
+        else {
+            expect(false, "缺少 EventRowView 或共享 EventMuteSpeakerIcon 源")
             return
         }
         expect(
             row.contains("EventMuteSpeakerIcon(")
-                && row.contains("SpeakerBodyShape")
-                && row.contains("SpeakerWaveShape(radius: 4")
-                && row.contains("SpeakerWaveShape(radius: 8"),
+                && icon.contains("SpeakerBodyShape")
+                && icon.contains("SpeakerWaveShape(radius: 4")
+                && icon.contains("SpeakerWaveShape(radius: 8"),
             "静音按钮必须由扬声器本体与两道声波组成")
         expect(
-            row.contains("x: 3.5, y: 9")
-                && row.contains("x: 12.5, y: 19")
-                && row.contains("startX: 16, startY: 9.2, endY: 14.8")
-                && row.contains("startX: 18.8, startY: 6.5, endY: 17.5"),
+            icon.contains("x: 3.5, y: 9")
+                && icon.contains("x: 12.5, y: 19")
+                && icon.contains("startX: 16, startY: 9.2, endY: 14.8")
+                && icon.contains("startX: 18.8, startY: 6.5, endY: 17.5"),
             "扬声器与两道声波必须钉住批准 mockup 的 24×24 几何")
         expect(
-            row.contains("isMuted ? 0.24 : 1")
-                && row.contains("x: 4, y: 4.5")
-                && row.contains("x: 20, y: 20")
-                && row.contains("lineWidth: 2.1"),
+            icon.contains("isMuted ? 0.24 : 1")
+                && icon.contains("x: 4, y: 4.5")
+                && icon.contains("x: 20, y: 20")
+                && icon.contains("lineWidth: 2.1"),
             "静音态必须把声波降至 24% 并叠加批准斜线")
         expect(
-            !row.contains("speaker.wave.2") && !row.contains("speaker.slash.fill"),
+            !row.contains("speaker.wave.2") && !row.contains("speaker.slash.fill")
+                && !icon.contains("speaker.wave.2") && !icon.contains("speaker.slash.fill"),
             "事件静音按钮不得回退到旧 SF Symbol")
     }
 

@@ -14,6 +14,7 @@ public enum SetStarredPacksOutcome: Sendable, Equatable {
 /// deliberately mirror ``SetEventEnabledError``: the same `config.json` and same lock must not
 /// grow divergent explanations for identical failures.
 public enum SetStarredPacksError: Error, Sendable, Equatable, CustomStringConvertible {
+    case writesStopped(reason: String)
     case configReadFailure(reason: String)
     case configWriteFailure(reason: String)
     case lockBusy
@@ -24,6 +25,8 @@ public enum SetStarredPacksError: Error, Sendable, Equatable, CustomStringConver
 
     public var description: String {
         switch self {
+        case .writesStopped(let reason):
+            reason
         case .configReadFailure(let reason):
             "config.json 读取失败，已中止（未修改文件）：\(reason)"
         case .configWriteFailure(let reason):

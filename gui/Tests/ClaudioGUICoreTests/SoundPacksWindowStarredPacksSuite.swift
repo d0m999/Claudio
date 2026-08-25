@@ -325,7 +325,7 @@ func runSoundPacksWindowStarredPacksSuites() {
         }
     }
 
-    suite("T17 接线：面板在 availablePacks 的 id 层过滤，窗口星标写走 full reload、共享 FailureRow 与窗口 VO") {
+    suite("星标兼容：旧配置读写保留，但生产窗口不再提供失效的面板显示动作") {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
@@ -346,33 +346,27 @@ func runSoundPacksWindowStarredPacksSuites() {
                 && gallery.contains("var cards = displayedIDs.map"),
             "≤4 过滤必须在 PanelConfigController.reloadConfigReadModel 的 availablePacks 调用生效，并先于 buildPackCard")
         expect(
-            !view.contains("starredPackDisplayIDs("),
-            "窗口不得复用 prefix(4) 的面板显示集作为星标状态源")
+            !view.contains("starredPackDisplayIDs(")
+                && !view.contains("starButton")
+                && !view.contains("model.toggleStarredPack(card.id)")
+                && !view.contains(".soundPacksSidebarStars")
+                && !view.contains(".soundPacksPanelVisible")
+                && !view.contains(".soundPacksStarPin")
+                && !view.contains(".soundPacksStarUnpin"),
+            "生产窗口不得再呈现星标计数、按钮或任何『显示在面板』语义")
         expect(
             model.contains("ClaudioCore.toggleStarredPack(")
                 && model.contains("completeSynchronousWrite(.succeeded)")
                 && model.contains("completeSynchronousWrite(.failed)"),
             "窗口星标写必须走锁内原子 membership writer；成功 full refresh，失败保留状态但不假刷新")
         expect(
-            view.contains("private func starButton")
-                && view.contains(".disabled(!control.isEnabled)")
-                && view.contains(".help(control.disabledReason ?? \"\")")
-                && view.contains("if let reason = starControl.disabledReason")
-                && view.contains("Text(reason)")
-                && view.contains(".accessibilityHidden(true)")
-                && view.contains(".accessibilityHint(")
-                && view.contains("model.toggleStarredPack(card.id)")
-                && !view.contains(".opacity(control.isEnabled")
-                && view.contains("FailureRow(message: reason)"),
-            "禁用 ☆ 的原因必须同时以 macOS hover、就地可见文字和既有 VoiceOver hint 提供；"
-                + "不得靠降低整行透明度表达禁用，星标失败仍接到共享 FailureRow")
-        expect(
             model.contains("kind: .starredPacks")
                 && model.contains(
-                    "messageText: .literal(soundPacksWindowStarredPacksFailureReason(error))")
+                    "messageText = .literal(soundPacksWindowStarredPacksFailureReason(error))")
+                && model.contains("messageText = writesStoppedStatusText")
                 && controller.contains("model.$windowStatuses")
                 && controller.contains("status.action(language: languageStore.language)")
                 && controller.contains("status.message(language: languageStore.language)"),
-            "星标失败必须用 FailureRow 同一句 reason 进入统一状态与唯一 VoiceOver bridge")
+            "兼容写入口失败仍须进入统一状态与唯一 VoiceOver bridge")
     }
 }

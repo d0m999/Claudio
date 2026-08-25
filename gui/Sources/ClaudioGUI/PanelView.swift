@@ -322,8 +322,12 @@ public struct PanelView: View {
         let resolved = resolvedPanelSoundScopeSelection(
             storedValue: selectedSurfaceRaw,
             scopes: soundScopePresentations)
-        if selectedSurfaceRaw != resolved.storedValue {
-            selectedSurfaceRaw = resolved.storedValue
+        if let storedValue = panelSoundScopeStoredValueToPersist(
+            storedValue: selectedSurfaceRaw,
+            resolvedSelection: resolved),
+            selectedSurfaceRaw != storedValue
+        {
+            selectedSurfaceRaw = storedValue
         }
         panelModel.selectSoundSurface(resolved.surface)
     }
@@ -915,13 +919,15 @@ private struct PanelAgentEventRow: View {
             .accessibilityIdentifier("panel.event.\(presentation.event.rawValue).preview")
 
             Button(action: onToggleMute) {
-                Image(systemName: presentation.enabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                    .accessibilityHidden(true)
+                EventMuteSpeakerIcon(
+                    isMuted: !presentation.enabled,
+                    color: presentation.enabled
+                        ? ClaudioTheme.secondaryText(colorScheme)
+                        : ClaudioTheme.clay(colorScheme)
+                )
+                .accessibilityHidden(true)
             }
             .buttonStyle(ClaudioIconButtonStyle())
-            .foregroundColor(
-                presentation.enabled
-                    ? ClaudioTheme.secondaryText(colorScheme) : ClaudioTheme.clay(colorScheme))
             .disabled(!presentation.controls.muteEnabled)
             .focused(focusedTarget, equals: .eventMute(presentation.event))
             .accessibilityLabel(

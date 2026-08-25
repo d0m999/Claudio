@@ -4,6 +4,7 @@ import Combine
 import Foundation
 
 public enum SoundPacksWindowAudioActionError: Error, Sendable, Equatable {
+    case writesStopped(statusText: SoundPacksWindowStatusText)
     case noSelectedPack
     case selectionChanged
     case builtinReadOnly(packID: String)
@@ -18,6 +19,8 @@ public enum SoundPacksWindowAudioActionError: Error, Sendable, Equatable {
     /// preserving whichever language happened to be active when the write failed.
     public var statusText: SoundPacksWindowStatusText {
         switch self {
+        case .writesStopped(let statusText):
+            return statusText
         case .noSelectedPack:
             return .localized(.soundPacksAudioErrorNoSelectedPack)
         case .selectionChanged:
@@ -177,6 +180,7 @@ public struct PackForkOutcome: Sendable, Equatable {
 }
 
 public enum SoundPacksWindowPackForkActionError: Error, Sendable, Equatable {
+    case writesStopped(statusText: SoundPacksWindowStatusText)
     case noSelectedPack
     case notBuiltin(packID: String)
     case occupancyReadFailed(reason: String)
@@ -187,6 +191,8 @@ public enum SoundPacksWindowPackForkActionError: Error, Sendable, Equatable {
 
     public var message: String {
         switch self {
+        case .writesStopped(let statusText):
+            return statusText.resolve(language: .zhHans)
         case .noSelectedPack:
             return "没有选中的内置声音包，未创建任何副本。"
         case .notBuiltin:
@@ -201,6 +207,13 @@ public enum SoundPacksWindowPackForkActionError: Error, Sendable, Equatable {
             return "副本「\(newID)」已经安全写入，但暂时无法在窗口中读取；请在访达中检查后重开窗口。"
         case .fork(let error):
             return packForkFailureMessage(error)
+        }
+    }
+
+    public var statusText: SoundPacksWindowStatusText {
+        switch self {
+        case .writesStopped(let statusText): return statusText
+        default: return .literal(message)
         }
     }
 }
@@ -227,8 +240,7 @@ private func packForkFailureMessage(_ error: PackForkError) -> String {
 }
 
 public func packForkNoticeMessage(_ outcome: PackForkOutcome) -> String {
-    "已创建并选中「\(outcome.displayName)」。原内置包未更改；当前使用的包与面板显示未改变。"
-        + "需要时点「用这个包」或左侧星标。"
+    "已创建并选中「\(outcome.displayName)」。原内置包未更改；需要时可点「用这个包」。"
 }
 
 public struct SoundPacksWindowAudioImportCompletion: Sendable, Equatable {
@@ -241,18 +253,23 @@ public struct SoundPacksWindowAudioImportCompletion: Sendable, Equatable {
 public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
     case noSelectedPack
     case invalidScope(HostSurfaceID)
+    case writesStopped(statusText: SoundPacksWindowStatusText)
     case use(UseError)
     case surface(SurfaceSoundMutationError)
 
-    public var message: String {
+    public var statusText: SoundPacksWindowStatusText {
         switch self {
-        case .noSelectedPack: return "没有选中的声音包，当前使用项未改变。"
+        case .noSelectedPack:
+            return .literal("没有选中的声音包，当前使用项未改变。")
         case .invalidScope(let surface):
-            return "未知声音作用域 \(surface.rawValue)，已停止写入；Global 与 Surface 均未改变。"
-        case .use(let error): return error.description
-        case .surface(let error): return error.description
+            return .localized(.soundPacksInvalidScope, surface.rawValue)
+        case .writesStopped(let statusText): return statusText
+        case .use(let error): return .literal(error.description)
+        case .surface(let error): return .literal(error.description)
         }
     }
+
+    public var message: String { statusText.resolve(language: .zhHans) }
 }
 
 public struct FactoryPackBatchRestoreFailure: Sendable, Equatable {
@@ -335,6 +352,7 @@ private func soundPacksWindowDeleteErrorText(
 }
 
 public enum SoundPacksWindowFactoryRestoreActionError: Error, Sendable, Equatable {
+    case writesStopped(statusText: SoundPacksWindowStatusText)
     case noSelectedPack
     case selectionChanged
     case notBuiltin(packID: String)
@@ -349,6 +367,8 @@ public enum SoundPacksWindowFactoryRestoreActionError: Error, Sendable, Equatabl
 
     public var message: String {
         switch self {
+        case .writesStopped(let statusText):
+            return statusText.resolve(language: .zhHans)
         case .noSelectedPack:
             return "没有选中的声音包，未恢复任何内容。"
         case .selectionChanged:
@@ -361,6 +381,13 @@ public enum SoundPacksWindowFactoryRestoreActionError: Error, Sendable, Equatabl
                 + factoryPackRestoreErrorMessage(
                     error,
                     retainedSalvages: retainedSalvages)
+        }
+    }
+
+    public var statusText: SoundPacksWindowStatusText {
+        switch self {
+        case .writesStopped(let statusText): return statusText
+        default: return .literal(message)
         }
     }
 }
@@ -388,6 +415,8 @@ private func factoryPackRestoreErrorMessage(
 ) -> String {
     let message: String
     switch error {
+    case .writesStopped(let reason):
+        message = reason
     case .unsafePackID:
         message = "声音包标识不安全，恢复已中止，磁盘内容未更改。"
     case .factoryUnavailable:
@@ -435,6 +464,32 @@ private func factoryPackRestoreSalvage(
     return salvaged
 }
 
+/// One semantic projection shared by the visible scope banner and every rejected write status.
+/// Invalid/diagnostic identities take precedence over config damage so VoiceOver cannot describe
+/// a different failure from the one shown on screen.
+public func soundPacksWindowScopeFailureStatusText(
+    managedSurface: HostSurfaceID?,
+    config: ClaudioConfig
+) -> SoundPacksWindowStatusText? {
+    guard isValidSoundPacksWindowSurface(managedSurface) else {
+        return .localized(
+            .soundPacksInvalidScope,
+            managedSurface?.rawValue ?? "Global")
+    }
+    guard let managedSurface else { return nil }
+    guard
+        config.surfaceOverridesMalformed
+            || config.invalidSurfaceOverrideKeys.contains(managedSurface.rawValue)
+    else {
+        return nil
+    }
+    let displayName =
+        HostID.productVisibleCases.first(where: {
+            $0.surfaceID == managedSurface
+        })?.displayName ?? managedSurface.rawValue
+    return .localized(.soundPacksDamagedScope, displayName)
+}
+
 /// 管理窗口的磁盘读模型。它列出完整包库，不应用面板的星标显示集，也不持有 `NSWindow`。
 ///
 /// config 投影与所有写 completion 都在 `@MainActor` 同步完成；声音包读取由共享
@@ -450,6 +505,21 @@ public final class SoundPacksWindowModel: ObservableObject {
     @Published public private(set) var managedScopeFailureReason: String?
     public var managedScopeIsInvalid: Bool {
         !isValidSoundPacksWindowSurface(managedSurface)
+    }
+    /// Every production mutation consumes this one fail-closed scope decision. Browsing, preview,
+    /// Finder reveal, and route changes remain read-only and available when writes are stopped.
+    public var writesAllowed: Bool { managedScopeFailureReason == nil }
+    public var managedScopeFailureStatusText: SoundPacksWindowStatusText? {
+        soundPacksWindowScopeFailureStatusText(
+            managedSurface: managedSurface,
+            config: baseConfig)
+    }
+    private var writesStoppedStatusText: SoundPacksWindowStatusText {
+        managedScopeFailureStatusText
+            ?? .localized(.soundPacksDamagedScope, managedSurface?.rawValue ?? "Global")
+    }
+    private var writesStoppedReason: String {
+        writesStoppedStatusText.resolve(language: .zhHans)
     }
     public var managedSurfaceProfileIsMalformed: Bool {
         guard let managedSurface else { return false }
@@ -839,6 +909,10 @@ public final class SoundPacksWindowModel: ObservableObject {
         packForkActionError = nil
         clearWindowStatus(.packFork)
 
+        guard writesAllowed else {
+            return finishPackFork(.failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
+
         guard let sourcePackID = selectedPackID else {
             return finishPackFork(.failure(.noSelectedPack))
         }
@@ -919,6 +993,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard isValidSoundPacksWindowSurface(managedSurface) else {
             return finishPackUse(.failure(.invalidScope(managedSurface!)))
         }
+        guard writesAllowed else {
+            return finishPackUse(.failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
         if let managedSurface {
             switch setSurfacePack(
                 selectedPackID,
@@ -953,6 +1030,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         _ requests: [AudioImportRequest],
         expectedPackID: String
     ) async -> Result<SoundPacksWindowAudioImportCompletion, SoundPacksWindowAudioActionError> {
+        guard writesAllowed else {
+            return .failure(.writesStopped(statusText: writesStoppedStatusText))
+        }
         guard selectedPackID == expectedPackID else {
             return .failure(.selectionChanged)
         }
@@ -1084,7 +1164,11 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func toggleStarredPack(
         _ packID: String
     ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
-        finishStarredPacksUpdate(
+        guard writesAllowed else {
+            return finishStarredPacksUpdate(
+                .failure(.writesStopped(reason: writesStoppedReason)))
+        }
+        return finishStarredPacksUpdate(
             ClaudioCore.toggleStarredPack(
                 packID,
                 configFile: configFile,
@@ -1100,7 +1184,11 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func updateStarredPacks(
         to ids: [String]
     ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
-        finishStarredPacksUpdate(
+        guard writesAllowed else {
+            return finishStarredPacksUpdate(
+                .failure(.writesStopped(reason: writesStoppedReason)))
+        }
+        return finishStarredPacksUpdate(
             setStarredPacks(
                 ids,
                 configFile: configFile,
@@ -1121,11 +1209,17 @@ public final class SoundPacksWindowModel: ObservableObject {
             completeSynchronousWrite(.succeeded)
         case .failure(let error):
             starredPacksError = error
+            let messageText: SoundPacksWindowStatusText
+            if case .writesStopped = error {
+                messageText = writesStoppedStatusText
+            } else {
+                messageText = .literal(soundPacksWindowStarredPacksFailureReason(error))
+            }
             setWindowStatus(
                 kind: .starredPacks,
                 severity: .failure,
                 actionText: .localized(.soundPacksStatusUpdateStars),
-                messageText: .literal(soundPacksWindowStarredPacksFailureReason(error)))
+                messageText: messageText)
             completeSynchronousWrite(.failed)
         }
         return result
@@ -1380,6 +1474,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         _ fileName: String,
         to event: Event
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
+        guard writesAllowed else {
+            return finishAudioAction(.failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
         guard let selectedPackID else {
             return finishAudioAction(.failure(.noSelectedPack))
         }
@@ -1403,6 +1500,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         _ importedFile: ImportedAudioFile,
         to event: Event
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
+        guard writesAllowed else {
+            return finishAudioAction(.failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
         guard let selectedPackID else {
             return finishAudioAction(.failure(.noSelectedPack))
         }
@@ -1447,6 +1547,9 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func clearSelectedEventBinding(
         _ event: Event
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
+        guard writesAllowed else {
+            return finishAudioAction(.failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
         guard let selectedPackID else {
             return finishAudioAction(.failure(.noSelectedPack))
         }
@@ -1480,6 +1583,9 @@ public final class SoundPacksWindowModel: ObservableObject {
         _ fileName: String,
         expectedPackID: String
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
+        guard writesAllowed else {
+            return finishAudioAction(.failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
         guard let selectedPackID else {
             return finishAudioAction(.failure(.noSelectedPack))
         }
@@ -1521,6 +1627,10 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func restoreSelectedFactoryPackAfterConfirmation(
         expectedPackID: String
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
+        guard writesAllowed else {
+            return finishFactoryRestore(
+                .failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
         guard let selectedPackID else {
             return finishFactoryRestore(.failure(.noSelectedPack))
         }
@@ -1544,6 +1654,10 @@ public final class SoundPacksWindowModel: ObservableObject {
     public func retryFailedFactoryPackRestoreAfterConfirmation(
         expectedPackID: String
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
+        guard writesAllowed else {
+            return finishFactoryRestore(
+                .failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
         if factoryRestoreRetryPackID == expectedPackID {
             guard builtinPackIDs.contains(expectedPackID) else {
                 return finishFactoryRestore(.failure(.notBuiltin(packID: expectedPackID)))
@@ -1571,6 +1685,19 @@ public final class SoundPacksWindowModel: ObservableObject {
         clearWindowStatus(.factoryBatchRestore)
 
         let ids = factoryPackIDs
+        guard writesAllowed else {
+            let failures = ids.map {
+                FactoryPackBatchRestoreFailure(
+                    packID: $0,
+                    error: .writesStopped(reason: writesStoppedReason))
+            }
+            let outcome = FactoryPackBatchRestoreOutcome(
+                restoredPacks: [],
+                failures: failures)
+            factoryBatchRestoreFailures = failures
+            publishFactoryBatchRestoreStatus()
+            return outcome
+        }
         beginSoundPackMutation(packIDs: Set(ids))
         var restored: [FactoryPackRestoreOutcome] = []
         var failures: [FactoryPackBatchRestoreFailure] = []
@@ -1722,7 +1849,8 @@ public final class SoundPacksWindowModel: ObservableObject {
     }
 
     private func publishFactoryBatchRestoreStatus() {
-        let retainedSalvagePaths = factoryBatchRetainedSalvages
+        let retainedSalvagePaths =
+            factoryBatchRetainedSalvages
             .map(\.movedTo)
             .joined(separator: "；")
         if factoryBatchRestoreFailures.isEmpty {
@@ -1736,6 +1864,18 @@ public final class SoundPacksWindowModel: ObservableObject {
                         .soundPacksStatusBatchRestoredWithSalvage,
                         "\(factoryBatchRestoredCount)",
                         retainedSalvagePaths))
+            return
+        }
+
+        if factoryBatchRestoreFailures.allSatisfy({ failure in
+            if case .writesStopped = failure.error { return true }
+            return false
+        }) {
+            setWindowStatus(
+                kind: .factoryBatchRestore,
+                severity: .failure,
+                actionText: .localized(.soundPacksStatusRestoreBuiltins),
+                messageText: writesStoppedStatusText)
             return
         }
 
@@ -1886,7 +2026,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 kind: .factoryRestore,
                 severity: .failure,
                 actionText: .localized(.soundPacksStatusRestoreFactory),
-                messageText: .literal(visibleError.message),
+                messageText: visibleError.statusText,
                 recovery: factoryRestoreRetryPackID.map {
                     .retryFactoryRestores(packIDs: [$0])
                 })
@@ -1924,7 +2064,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 kind: .packFork,
                 severity: .failure,
                 actionText: .localized(.soundPacksStatusCopyPack),
-                messageText: .literal(error.message))
+                messageText: error.statusText)
             if publishCompletion { completeSynchronousWrite(.failed) }
         }
         return result
@@ -1951,7 +2091,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 kind: .packUse,
                 severity: .failure,
                 actionText: .localized(.soundPacksStatusUsePack),
-                messageText: .literal(error.message),
+                messageText: error.statusText,
                 packID: selectedPackID)
             completeSynchronousWrite(.failed)
         }
@@ -2134,7 +2274,7 @@ private func factoryRestorePackID(
 ) -> String? {
     switch error {
     case .restore(let packID, _, _): return packID
-    case .noSelectedPack, .selectionChanged, .notBuiltin: return nil
+    case .writesStopped, .noSelectedPack, .selectionChanged, .notBuiltin: return nil
     }
 }
 
