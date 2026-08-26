@@ -68,14 +68,18 @@
 
 ## 全产品界面职责（现行 · 2026-08-26）
 
-四个界面不再互相复制职责：
+产品只保留两个顶层 surface，不再以多个平行窗口复制职责：
 
-- **菜单栏主面板**只负责选择 Global/Surface 声音作用域、扫读当前来源的五个事件、试听、自动播放静音、主音量与当前 effective pack。它不再渲染三张来源卡片、宿主 chips、紧凑 `Picker`、声音包画廊或旧「管理声音包」行；播放设置组的「打开设置」携带当前 scope 进入「事件与提示音」。
-- **事件与提示音窗口**对应原型 `page=events&app=<scope>`：保留 Global/Surface 选择，显示同源五事件、原生事件、实现能力、当前声音以及可用的试听/静音。未实现事件的动作禁用；逐事件音频映射委托 Sound Packs Window，不另造写路径。页面级 AI 生成服务只管理 BYOK 状态；可生成事件使用“描述 → 3 个候选与命名 → 明确采用”的两步闭环，内部声音方案完全隐藏。生成写入仅允许明确 Surface 的独立用户包；Global、内置包和共享包显示可见原因并 fail closed。
-- **Sound Packs Window** 是唯一完整映射编辑器。窗口路由携带 `HostSurfaceID?`，明确显示正在管理 Global 或具体来源；「使用此包」在 Global 写顶层 `selected_pack`，在 Surface 写稀疏覆盖。包内事件映射仍修改声音包内容，不制造 per-surface manifest 副本；未知 scope 必须 fail closed。
-- **Integrations Window** 负责三产品 Surface 的五事件能力比较、连接证据、诊断与就地恢复。来源菜单底部的「连接与诊断…」预选当前来源，但其预选参数与返回面板的焦点目标相互独立。重新检测只在工具栏，破坏性断开只在检查器末尾并说明具体影响范围。
+- **菜单栏主面板**只负责选择 Global/Surface 声音作用域、扫读当前来源的五个事件、试听、自动播放静音、主音量与当前 effective pack。它不再渲染三张来源卡片、宿主 chips、紧凑 `Picker`、声音包画廊或旧「管理声音包」行；播放设置组的「打开设置」携带当前 scope 深链接到统一设置的「事件与提示音」。
+- **统一设置窗口**对应仓库内原型 `mockups/ai-app-manager-native-macos.html`，以固定侧栏承载「通用、集成、事件与提示音、通知、显示、声音、用量、快捷键、关于」九个真实目的页。窗口在 app 生命周期内复用，所有菜单与页间动作只提交类型化路由；关闭后由这一处统一归还焦点。
+  - **集成**复用现有 capability、连接、回执与恢复事实，按 Host Product 分组但以 `HostSurfaceID` 为动作目标。
+  - **事件与提示音**保留 Global/Surface、五事件、试听/静音和 effective profile；AI 使用“描述 → 3 个候选与命名 → 明确采用”，内部声音方案隐藏。
+  - **声音**迁入完整 Sound Packs 编辑能力，并继续是唯一包级映射写入面；Global 写顶层 `selected_pack`，Surface 写稀疏覆盖，不制造 per-surface manifest 副本。
+  - **通用、通知、显示、用量、快捷键、关于**不得是占位或演示常量；各自的真实事实源、权限、失败、持久化和验收边界见 `plan/PLAN-SETTINGS-EXPERIENCE.md`。
 
-共享基线：菜单栏面板独占 `#FFFDFA → #FBF7F1` 糖果盘渐变，标准窗口使用温暖实色与少量分组；字体统一 SF Pro Rounded，只有 manifest ID、原生事件与路径使用等宽字体；圆角固定为 18 / 13 / 11；图标按钮至少 28×28pt。claudi0 自有「界面文字」提供紧凑、标准、较大、最大四档并注入四个界面，不能再把 macOS 的 SwiftUI `dynamicTypeSize` 描述成会自动跟随系统文字大小。
+共享基线：菜单栏面板独占 `#FFFDFA → #FBF7F1` 糖果盘渐变，统一设置使用温暖实色与少量分组；字体统一 SF Pro Rounded，只有 manifest ID、原生事件与路径使用等宽字体；圆角固定为 18 / 13 / 11；图标按钮至少 28×28pt。claudi0 自有「界面文字」提供紧凑、标准、较大、最大四档并注入两个顶层 surface，不能再把 macOS 的 SwiftUI `dynamicTypeSize` 描述成会自动跟随系统文字大小。
+
+下文 `Sound Packs Window` 与 `Integrations Window` 的详细解剖继续规范其可复用内容与领域交互；其中关于独立窗口 ownership、尺寸和焦点 handback 的文字自统一设置迁移完成后仅作历史记录，不再是生产形态。
 
 **试听与静音正交**：事件静音只阻止宿主真实事件自动播放。安全可读的映射文件在主音量非零时始终可手工试听；主音量为零、未映射、文件缺失/损坏或安全校验失败必须显示明确原因。
 
@@ -379,7 +383,7 @@ N 个已发布来源 · 5 个声音事件
 - **内边距 / 圆角**：沿用面板 12–13pt、卡片 radius 10、控件 radius 6。
 - ⚠️ **展柜 artifact 现状**：DESIGN.md 顶部链接的「设计系统预览」artifact 画的是决议前的旧版，与当前 v1 范围有出入，且不在仓库 / CI 不可验。视觉真相源改为**仓库内 state gallery**（SwiftUI Preview 目录，与状态测试共用 fixtures，见 ENGINEERING T14）；外部展柜降为可选快照。
 
-## Sound Packs Window（管理窗口 · 2026-07-15 新增）
+## Sound Packs Window（历史窗口解剖；内容迁入「声音」目的页）
 
 > **本文档在此之前是「零窗口规范」的** —— 从 Product Context 到 Layout 到 State Components，全部只谈那个 312pt 的 `NSPopover` 面板。这一节是第一次为一个**真窗口**立规矩，因此它明确划出面板与窗口的**职责边界**，而不是把面板的规矩复制一份。
 
@@ -401,7 +405,7 @@ N 个已发布来源 · 5 个声音事件
 - **窗口的失败呈现（2026-07-17）**：窗口内每一条写路径（星标钮、「用这个包」、复制为我的包、恢复出厂）失败时必须**就地可见** —— 复用 `FailureRow` 的**组件与 token 层**（真红只上图标、文案 `text-2`、reason 可执行且与 `probeConfigRewritable` **逐字同句**）。⚠ 下一条「不许复用面板的」禁令，禁的是**焦点序 / Dynamic Type / VoiceOver 播报模型**，不禁组件与 token 复用 —— 在此显式划界，防读者把它读成「连 `FailureRow` 都要重造」（那才是又一份手抄副本的开端）。失败行的 VoiceOver 播报走窗口自己的播报策略（PLAN T9）。
 - **窗口的无障碍是一整个新面（不许复用面板的）**：`PanelFocusTarget` / `PanelLayoutAdaptation` / `PanelAnnouncement` 全部是**面板专用**的模型。窗口需要自己的焦点序、Dynamic Type 降级规则与 VoiceOver 播报策略。**别把面板那套硬套过来** —— 面板的规则（312pt、`rowWrapsToTwoLines`、`.maximum` 加宽到 360pt）是从「一个 popover」的约束里长出来的，窗口没有那个约束。
 
-## Integrations Window（声音来源详情窗口 · 多 Agent）
+## Integrations Window（历史窗口解剖；内容迁入「集成」目的页）
 
 `IntegrationsWindow` 是按需创建、关闭后保留的标准 macOS 窗口：窗口对象复用、`isReleasedWhenClosed = false`。从 popover 打开时先记录精确的焦点恢复目标，再可靠关闭 transient popover；只在 `popoverDidClose` 后展示标准窗口，避免 key-window 竞态。它与 `SoundPacksWindow` 并列：前者解释「宿主 × 原生事件 × 连接证据」，后者管理「声音包 × 文件」。
 
@@ -479,3 +483,4 @@ N 个已发布来源 · 5 个声音事件
 | 2026-08-05 | 「界面文字」采用方案 C 步进调节：固定 `Aa⌄` 触发器 + 固定 280pt 子 Popover + 原生两侧 A 按钮 | 方案 C 在保持暖色原生面板的同时减少一层菜单；实时 `Binding<ClaudioInterfaceTextSize>` 继续写入共享 `@AppStorage`，四档、非法值回退、跨窗口同步和现有 Panel 首焦点契约不变。 |
 | 2026-08-11 | 在方案 C 内加入中英文即时切换，并将语言状态提升为 app-lifetime 共享投影 | 入口不变，280pt 子 Popover 增加始终可见的 `中文 | English` 原生分段控件；默认简体中文，显式语言 key 与 `Localizable.xcstrings` 管理所有 GUI 自有文案。面板与两个 retained 管理窗口共享同一 `ClaudioLanguageStore`，切换不触发 I/O、宿主动作或窗口重建；SwiftPM 与组装 `.app` 均 fail-closed 解析唯一 `*_ClaudioLocalization.bundle`。自动测试覆盖 key/参数/复数、两语言四字号画廊、窗口标题和共享展示投影；原生人工验收保持独立，不以 build/harness 代替。 |
 | 2026-08-14 | 事件行采用 C 小标签重排，替代 2026-08-10 的独立 18pt Logo / 37–52pt 固定行方案 | 标题最多两行且不再单行省略；Claude/Codex 的 12pt PDF Logo 与紧凑名、映射三态共同进入完整事件身份按钮。宿主连接态为状态色浅底、非连接态为中性描边；映射 `present/unmapped/broken` 分别为实底/虚线/错误图标实线。紧凑、标准、较大动作覆盖右上，仅最大档通过 `eventActionsMoveBelow` 下移；焦点仍为身份→试听→静音。State Gallery 与 HTML 基准覆盖双语 × 四字号 × 三映射态；不改变能力矩阵、CoverageState、音频或 manifest 写入。 |
+| 2026-08-26 | 设置体验统一为一个 app-lifetime retained window，以固定侧栏完整承载九个目的页；独立 Integrations/EventSettings/SoundPacks 窗口在等价迁移后退役 | 用户以仓库内 `ai-app-manager-native-macos.html` 完整原型为视觉 SoT，并要求图示九项全部开发。原型负责导航、视觉层级与交互形态；`CONTEXT.md`、ADR 和真实模型负责 Surface 身份、写入、安全与能力事实。所有页必须有真实数据、失败与权限语义，不允许 placeholder 或演示常量；完整规格与依赖见 `plan/PLAN-SETTINGS-EXPERIENCE.md`。 |
