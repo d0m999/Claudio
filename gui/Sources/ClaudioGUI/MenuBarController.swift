@@ -245,14 +245,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             },
             onAdoptAICue: {
                 [weak soundPacksWindowController, weak eventSettingsModel, weak actionRouter]
-                candidate, displayName, target in
+                request in
                 guard let soundPacksWindowController else {
                     return .failure(.ineligible(.writesStopped))
                 }
-                let result = await soundPacksWindowController.adoptAICue(
-                    candidate: candidate,
-                    displayName: displayName,
-                    target: target)
+                let result = await soundPacksWindowController.adoptAICue(request)
                 if case .success = result {
                     eventSettingsModel?.reload()
                     actionRouter?.audibilityInputsChanged()

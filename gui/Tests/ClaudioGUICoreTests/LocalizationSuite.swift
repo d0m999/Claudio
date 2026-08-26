@@ -108,6 +108,22 @@ func runLocalizationSuites() {
                 == "Accessibility Beta candidate is not implemented",
             "Accessibility Beta unavailable qualification must have approved English copy")
 
+        expect(
+            chinese.text(.aiCueCredentialPrivacy)
+                == "声音描述和生成指令会由本机直接发送给 ElevenLabs；生成可能由 ElevenLabs 向你的账户收费；数据留存及是否用于模型改进，以你的 ElevenLabs 账户设置和其条款为准。"
+                && english.text(.aiCueCredentialPrivacy)
+                    == "Your sound description and generation instructions are sent directly to ElevenLabs. ElevenLabs may charge your account for generation. Retention and model-improvement use follow your ElevenLabs account and their terms.",
+            "首次保存凭据前，两种语言必须同时披露直连、潜在费用与供应商数据边界")
+        expect(
+            chinese.text(.aiCueEligibilityGlobal) == "请选择一个明确的事件来源，以隔离生成声音。"
+                && english.text(.aiCueEligibilityGlobal)
+                    == "Choose a specific event source to keep generated sounds isolated.",
+            "AI 提示音资格文案必须使用事件来源领域词汇，不得退回应用来源")
+        expect(
+            chinese.format(.aiCueCandidateDuration, "1.2") == "1.2 秒"
+                && english.format(.aiCueCandidateDuration, "1.2") == "1.2 s",
+            "候选时长单位必须由 localization catalog 按当前语言呈现")
+
         let values = ClaudioL10n.catalogValues()
         let pluralValues = ClaudioL10n.catalogPluralValues()
         let knownKeys = ClaudioL10nKey.allKnown.map(\.rawValue)

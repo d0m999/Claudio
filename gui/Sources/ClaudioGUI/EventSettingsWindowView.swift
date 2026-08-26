@@ -18,11 +18,10 @@ struct EventSettingsWindowView: View {
     let audioEnvironment: AudioImportEnvironment
     let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     let onAudibilityInputsChanged: @MainActor () -> Void
-    let onAdoptAICue: @MainActor (
-        AICueCandidate,
-        AICueDisplayName,
-        AICueAdoptionTarget
-    ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError>
+    let onAdoptAICue:
+        @MainActor (AICueAdoptionRequest) async -> Result<
+            AICueAdoptionOutcome, AICueAdoptionError
+        >
 
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(ClaudioInterfaceTextSize.defaultsKey)

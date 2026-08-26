@@ -37,11 +37,10 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
     private let audioEnvironment: AudioImportEnvironment
     private let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     private let onAudibilityInputsChanged: @MainActor () -> Void
-    private let onAdoptAICue: @MainActor (
-        AICueCandidate,
-        AICueDisplayName,
-        AICueAdoptionTarget
-    ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError>
+    private let onAdoptAICue:
+        @MainActor (AICueAdoptionRequest) async -> Result<
+            AICueAdoptionOutcome, AICueAdoptionError
+        >
     private let selection = EventSettingsWindowSelection()
     private var window: NSWindow?
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
@@ -57,11 +56,10 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
         audioEnvironment: AudioImportEnvironment,
         onConfigureSound: @escaping @MainActor (SoundPacksWindowRoute) -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
-        onAdoptAICue: @escaping @MainActor (
-            AICueCandidate,
-            AICueDisplayName,
-            AICueAdoptionTarget
-        ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError>
+        onAdoptAICue:
+            @escaping @MainActor (AICueAdoptionRequest) async -> Result<
+                AICueAdoptionOutcome, AICueAdoptionError
+            >
     ) {
         self.model = model
         self.hostIntegrations = hostIntegrations

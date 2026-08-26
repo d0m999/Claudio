@@ -26,6 +26,22 @@ public enum AICueAdoptionEligibility: Sendable, Equatable {
     case ineligible(AICueAdoptionIneligibility)
 }
 
+public struct AICueAdoptionRequest: Sendable, Equatable {
+    public let candidate: AICueCandidate
+    public let displayName: AICueDisplayName
+    public let target: AICueAdoptionTarget
+
+    public init(
+        candidate: AICueCandidate,
+        displayName: AICueDisplayName,
+        target: AICueAdoptionTarget
+    ) {
+        self.candidate = candidate
+        self.displayName = displayName
+        self.target = target
+    }
+}
+
 /// Pure fail-closed proof that a pack-wide manifest mutation affects only the requested surface.
 public func aiCueAdoptionEligibility(
     surface: HostSurfaceID?,
@@ -71,8 +87,13 @@ public func aiCueAdoptionEligibility(
     case .failure:
         return .ineligible(.configurationUnavailable)
     }
-    for host in HostID.productVisibleCases {
-        let candidateSurface = host.surfaceID
+    var consumerSurfaceTokens = Set(HostID.productVisibleCases.map(\.surfaceID.rawValue))
+    consumerSurfaceTokens.formUnion(config.surfaceOverrides.keys)
+    consumerSurfaceTokens.formUnion(config.invalidSurfaceOverrideKeys)
+    for token in consumerSurfaceTokens.sorted() {
+        guard let candidateSurface = HostSurfaceID(rawValue: token) else {
+            return .ineligible(.configurationUnavailable)
+        }
         switch config.resolveSoundProfile(for: candidateSurface) {
         case .success(let profile):
             if candidateSurface != surface, profile.selectedPack == packID {

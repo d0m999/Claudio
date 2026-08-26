@@ -1579,6 +1579,137 @@ func runSoundPackLibrarySuites() async {
         expect(replayedSnapshot.facts.first?.name == "观察后新结果", "重放必须携带最终快照")
     }
 
+    await suite("SoundPackLibrary：显式新鲜度请求等待下一次终态而不是重放旧快照") {
+        let scanner = ScriptedSoundPackScanner([
+            .success([libraryFacts(name: "采用前旧事实")]),
+            .success([libraryFacts(name: "采用前新事实")]),
+        ])
+        let library = SoundPackLibrary(
+            scanner: SoundPackLibraryScanner(operation: scanner.scan))
+        let recorder = SoundPackLibraryStateRecorder()
+        let observation = recordLibraryStates(from: library, into: recorder)
+        defer { observation.cancel() }
+
+        await library.requestRefresh(trigger: .initial)
+        expect(
+            await waitForLibraryCondition {
+                await recorder.containsReadyPack(named: "采用前旧事实")
+            },
+            "前提：首次快照必须已经发布")
+
+        let refreshed = await library.refreshSnapshot(trigger: .windowPresentation)
+        guard case .ready(let snapshot) = refreshed else {
+            expect(false, "显式新鲜度请求必须返回 terminal ready，实得 \(refreshed)")
+            return
+        }
+        expect(snapshot.facts.first?.name == "采用前新事实", "等待结果必须来自本次新扫描")
+        expect(scanner.requests.count == 2, "一次显式新鲜度请求必须恰好追加一次扫描")
+    }
+
+    await suite("SoundPackLibrary：显式新鲜度等待者加入在途刷新并只接收合并后的终态") {
+        let scanner = BlockingSoundPackScanner(
+            firstFacts: [libraryFacts(name: "等待者加入前旧事实")],
+            laterFacts: [libraryFacts(name: "等待者请求后的新事实")])
+        let library = SoundPackLibrary(
+            scanner: SoundPackLibraryScanner(operation: scanner.scan))
+        let recorder = SoundPackLibraryStateRecorder()
+        let observation = recordLibraryStates(from: library, into: recorder)
+        defer { observation.cancel() }
+
+        await library.requestRefresh(trigger: .initial)
+        expect(scanner.waitUntilFirstScanEntered(), "前提：第一次扫描必须保持在途")
+        let awaitedRefresh = Task {
+            await library.refreshSnapshot(trigger: .windowPresentation)
+        }
+        await library.waitUntilRefreshWaiterIsRegisteredForTesting()
+        scanner.allowFirstScanToFinish()
+
+        let refreshed = await awaitedRefresh.value
+        guard case .ready(let snapshot) = refreshed else {
+            expect(false, "在途等待者必须收到 coalesced terminal ready，实得 \(refreshed)")
+            return
+        }
+        expect(snapshot.facts.first?.name == "等待者请求后的新事实", "等待者不得收到加入前的旧终态")
+        expect(scanner.callCount == 2, "在途等待者与其他观察请求必须只合并成一次 follow-up")
+        expect(
+            !(await recorder.containsReadyPack(
+                named: "等待者加入前旧事实", before: "等待者请求后的新事实")),
+            "代表请求之前的在途结果不得短暂发布或提前恢复等待者")
+    }
+
+    await suite("SoundPacksWindowModel：延迟返回的旧刷新 waiter 不得覆盖更高 revision") {
+        await withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            writeFixture(
+                #"{"selected_pack":"workbuddy-pack","events":{}}"#,
+                to: configFile)
+            let scanner = ScriptedSoundPackScanner([
+                .success([libraryFacts(id: "workbuddy-pack", name: "旧 revision")]),
+                .success([libraryFacts(id: "workbuddy-pack", name: "新 revision")]),
+            ])
+            let library = SoundPackLibrary(
+                scanner: SoundPackLibraryScanner(operation: scanner.scan))
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true),
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                packsLockFile: root.appendingPathComponent("packs.lock"))
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                soundPackLibrary: library,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+
+            expect(
+                await waitForLibraryCondition {
+                    await MainActor.run { model.packCards.first?.name == "旧 revision" }
+                },
+                "前提：模型必须先消费初始 revision")
+            let replayStream = await library.states()
+            var replayIterator = replayStream.makeAsyncIterator()
+            guard case .ready(let oldSnapshot)? = await replayIterator.next() else {
+                expect(false, "必须能捕获初始 ready snapshot")
+                return
+            }
+
+            guard
+                case .ready(let newSnapshot) =
+                    await library.refreshSnapshot(trigger: .windowPresentation)
+            else {
+                expect(false, "第二次扫描必须发布更高 ready revision")
+                return
+            }
+            expect(newSnapshot.revision > oldSnapshot.revision, "fixture 必须建立严格 revision 顺序")
+            expect(
+                await waitForLibraryCondition {
+                    await MainActor.run {
+                        model.libraryPresentationState == .ready
+                            && model.packCards.first?.name == "新 revision"
+                    }
+                },
+                "前提：观察流必须先把更高 revision 应用到模型")
+
+            expect(
+                model.applyAICueAdoptionSnapshotForTesting(oldSnapshot),
+                "旧 waiter 返回时仍可继续使用模型已持有的更新 ready snapshot")
+            expect(model.packCards.first?.name == "新 revision", "旧 waiter 结果不得把模型降级")
+
+            model.consumeSoundPackLibraryStateForTesting(.loading(previous: oldSnapshot))
+            expect(
+                model.libraryPresentationState == .ready
+                    && model.packCards.first?.name == "新 revision",
+                "延迟的旧 loading observation 不得覆盖 waiter 已应用的更高 revision")
+            model.consumeSoundPackLibraryStateForTesting(
+                .failed(
+                    previous: oldSnapshot,
+                    error: .scanFailed(reason: "延迟旧失败")))
+            expect(
+                model.libraryPresentationState == .ready
+                    && model.packCards.first?.name == "新 revision",
+                "延迟的旧 failed observation 不得覆盖 waiter 已应用的更高 revision")
+        }
+    }
+
     await suite("SoundPackLibrary：写入失效使在途旧结果不可发布，并且最多追加一次扫描") {
         let scanner = BlockingSoundPackScanner(
             firstFacts: [libraryFacts(name: "旧结果")],

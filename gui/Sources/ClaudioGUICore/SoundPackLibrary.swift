@@ -456,6 +456,7 @@ public actor SoundPackLibrary {
     private var refreshInFlight = false
     private var activeInvalidationRevision: UInt64?
     private var followUpRequired = false
+    private var refreshWaiters: [CheckedContinuation<SoundPackLibraryState, Never>] = []
     private var inventoryCache: [String: CachedAudioInventory] = [:]
     private var inventoryLRU: [String] = []
     private let inventoryCacheCapacity = 4
@@ -510,6 +511,18 @@ public actor SoundPackLibrary {
         startRefresh()
     }
 
+    /// Requests a disk scan and returns only after the request is represented by a terminal state.
+    /// If another scan is already in flight, the request joins the single coalesced follow-up scan
+    /// instead of accepting that earlier scan's potentially stale result.
+    public func refreshSnapshot(
+        trigger: SoundPackLibraryRefreshTrigger
+    ) async -> SoundPackLibraryState {
+        await withCheckedContinuation { continuation in
+            refreshWaiters.append(continuation)
+            requestRefresh(trigger: trigger)
+        }
+    }
+
     /// Hydrates a newly attached consumer without turning a replayable ready snapshot into a new
     /// disk scan. Explicit presentation/activation refreshes continue to use `requestRefresh`.
     public func loadIfNeeded(trigger: SoundPackLibraryRefreshTrigger) {
@@ -529,6 +542,12 @@ public actor SoundPackLibrary {
 
     public func inventoryCacheCountForTesting() -> Int {
         inventoryCache.count
+    }
+
+    /// Suspends on the actor until a `refreshSnapshot` caller has installed its continuation and
+    /// requested the in-flight follow-up. This is synchronization, not a wall-clock delay.
+    public func waitUntilRefreshWaiterIsRegisteredForTesting() async {
+        while refreshWaiters.isEmpty { await Task.yield() }
     }
     #endif
 
@@ -627,6 +646,7 @@ public actor SoundPackLibrary {
             return
         }
 
+        let terminalState: SoundPackLibraryState
         switch result {
         case .success(let output):
             let candidateSnapshotRevision = nextSnapshotRevision &+ 1
@@ -638,40 +658,46 @@ public actor SoundPackLibrary {
             #if DEBUG
             beforeReadyPublication()
             #endif
+            let readyState = SoundPackLibraryState.ready(next)
             guard
                 invalidationMailbox.acknowledgeAndPerform(
                     invalidation.revision,
                     {
                         nextSnapshotRevision = candidateSnapshotRevision
                         snapshot = next
-                        publish(.ready(next))
+                        publish(readyState)
                     })
             else {
                 followUpRequired = false
                 startRefresh()
                 return
             }
+            terminalState = readyState
         case .failure(let error):
             #if DEBUG
             beforeFailurePublication()
             #endif
+            let failedState = SoundPackLibraryState.failed(previous: snapshot, error: error)
             guard
                 invalidationMailbox.performIfCurrent(
                     invalidation.revision,
                     {
-                        publish(.failed(previous: snapshot, error: error))
+                        publish(failedState)
                     })
             else {
                 followUpRequired = false
                 startRefresh()
                 return
             }
+            terminalState = failedState
         }
 
         if followUpRequired {
             followUpRequired = false
             startRefresh()
+            return
         }
+        resumeRefreshWaiters(with: terminalState)
     }
 
     private func publish(_ next: SoundPackLibraryState) {
@@ -679,6 +705,12 @@ public actor SoundPackLibrary {
         for continuation in continuations.values {
             continuation.yield(next)
         }
+    }
+
+    private func resumeRefreshWaiters(with state: SoundPackLibraryState) {
+        let waiters = refreshWaiters
+        refreshWaiters.removeAll()
+        for waiter in waiters { waiter.resume(returning: state) }
     }
 
     private func touchInventoryCache(_ packID: String) {

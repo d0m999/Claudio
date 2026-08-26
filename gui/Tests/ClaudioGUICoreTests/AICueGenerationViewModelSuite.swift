@@ -168,25 +168,28 @@ func runAICueGenerationViewModelSuites() async {
             await waitForAICueViewModel { viewModel.phase == .candidatesReady }
             viewModel.updateDisplayName("木琴完成")
             let imported = aiCueImportedFixture(root: root, packID: target.packID)
-            var receivedName: String?
+            var receivedRequest: AICueAdoptionRequest?
 
-            viewModel.adopt(candidateID: generation.candidates[1].id) {
-                candidate, displayName, receivedTarget in
-                receivedName = displayName.value
-                expect(candidate.id == generation.candidates[1].id, "采用必须使用用户选中的候选")
-                expect(receivedTarget == target, "采用必须携带生成前冻结的三元目标")
+            viewModel.adopt(candidateID: generation.candidates[1].id) { request in
+                receivedRequest = request
+                expect(
+                    request.candidate.id == generation.candidates[1].id,
+                    "采用请求必须使用用户选中的候选")
+                expect(request.target == target, "采用请求必须携带生成前冻结的三元目标")
                 return .success(
                     AICueAdoptionOutcome(
-                        target: receivedTarget,
+                        target: request.target,
                         importedFile: imported,
-                        finalDisplayName: displayName.value))
+                        finalDisplayName: request.displayName.value))
             }
             expect(viewModel.phase == .adopting, "采用操作必须立即进入忙状态")
             expect(
                 viewModel.adoptingCandidateID == generation.candidates[1].id,
                 "忙状态必须只标识用户实际采用的候选")
             await waitForAICueViewModel { viewModel.phase == .applied }
-            expect(receivedName == "木琴完成", "采用必须使用候选阶段确认后的名称")
+            expect(
+                receivedRequest?.displayName.value == "木琴完成",
+                "采用请求必须使用候选阶段确认后的名称")
             expect(viewModel.adoptionOutcome?.finalDisplayName == "木琴完成", "完成态必须返回真实最终名称")
             expect(viewModel.generation == nil, "采用成功后不得保留已失效的临时文件引用")
             expect(viewModel.adoptingCandidateID == nil, "成功终态必须清理采用中的候选身份")
@@ -209,7 +212,7 @@ func runAICueGenerationViewModelSuites() async {
         await waitForAICueViewModel { viewModel.phase == .candidatesReady }
         viewModel.updateDisplayName("木琴完成")
 
-        viewModel.adopt(candidateID: generation.candidates[0].id) { _, _, _ in
+        viewModel.adopt(candidateID: generation.candidates[0].id) { _ in
             .failure(.ineligible(.targetChanged))
         }
         expect(

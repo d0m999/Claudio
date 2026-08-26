@@ -1212,8 +1212,8 @@
     },
     "ai-cue.credential.privacy" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description and generation instructions are sent directly to ElevenLabs. Retention and model-improvement use follow your ElevenLabs account and their terms." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述和生成指令会由本机直接发送给 ElevenLabs；数据留存及是否用于模型改进，以你的 ElevenLabs 账户设置和其条款为准。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description and generation instructions are sent directly to ElevenLabs. ElevenLabs may charge your account for generation. Retention and model-improvement use follow your ElevenLabs account and their terms." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述和生成指令会由本机直接发送给 ElevenLabs；生成可能由 ElevenLabs 向你的账户收费；数据留存及是否用于模型改进，以你的 ElevenLabs 账户设置和其条款为准。" } }
       }
     },
     "ai-cue.credential.keychain" : {
@@ -1248,8 +1248,8 @@
     },
     "ai-cue.eligibility.global" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose a specific app source to keep generated sounds isolated." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请选择一个明确的应用来源，以隔离生成声音。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose a specific event source to keep generated sounds isolated." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请选择一个明确的事件来源，以隔离生成声音。" } }
       }
     },
     "ai-cue.eligibility.builtin" : {
@@ -1358,6 +1358,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "C · Restrained" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "C · 克制" } }
+      }
+    },
+    "ai-cue.candidate.duration" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ s" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 秒" } }
       }
     },
     "ai-cue.use-for-event" : {

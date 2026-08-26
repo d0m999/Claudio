@@ -404,7 +404,7 @@ struct EventSettingsAICueComposerView: View {
     private func candidateDuration(_ candidate: AICueCandidate) -> String {
         let seconds = Double(candidate.durationMilliseconds) / 1_000
         let value = String(format: "%.1f", seconds)
-        return languageStore.language == .zhHans ? "\(value) 秒" : "\(value) s"
+        return l10n.format(.aiCueCandidateDuration, value)
     }
 
     private func candidatePreviewLabel(_ candidate: AICueCandidate) -> String {

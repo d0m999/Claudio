@@ -2636,15 +2636,27 @@ func runViewWiringSuites() {
                 && candidatesBody.contains("aiCueRegenerate"),
             "第二步必须同时承载最终命名、三候选和显式重新生成")
         expect(
+            flatAIView.contains("l10n.format(.aiCueCandidateDuration, value)"),
+            "候选时长必须消费 localization catalog，不能在 SwiftUI 中按语言手工拼接单位")
+        expect(
             flatView.contains("stopCandidatePreview()")
                 && flatView.contains("aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)")
                 && flatController.contains("aiCueViewModel.endSession()"),
             "采用、关闭和作用域变化必须停止试听并清理未采用候选")
         expect(
+            flatView.contains("let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
+                && flatController.contains(
+                    "private let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
+                && !flatView.contains(
+                    "AICueCandidate, AICueDisplayName, AICueAdoptionTarget")
+                && !flatController.contains(
+                    "AICueCandidate, AICueDisplayName, AICueAdoptionTarget"),
+            "候选、名称和采用目标必须作为单一领域请求跨越 SwiftUI/AppKit 边界")
+        expect(
             flatMenu.contains("AICueKeychainCredentialVault(")
                 && flatMenu.contains("ElevenLabsAICueProvider(")
                 && flatMenu.contains("AICueGenerationEngine(")
-                && flatMenu.contains("soundPacksWindowController.adoptAICue("),
+                && flatMenu.contains("soundPacksWindowController.adoptAICue(request)"),
             "composition root 必须接通 Keychain、固定 provider、生成引擎与既有声音包采用链")
     }
 

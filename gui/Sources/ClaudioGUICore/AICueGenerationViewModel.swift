@@ -212,11 +212,10 @@ public final class AICueGenerationViewModel: ObservableObject {
 
     public func adopt(
         candidateID: UUID,
-        using operation: @escaping @MainActor (
-            AICueCandidate,
-            AICueDisplayName,
-            AICueAdoptionTarget
-        ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError>
+        using operation:
+            @escaping @MainActor (AICueAdoptionRequest) async -> Result<
+                AICueAdoptionOutcome, AICueAdoptionError
+            >
     ) {
         guard
             phase == .candidatesReady,
@@ -241,8 +240,12 @@ public final class AICueGenerationViewModel: ObservableObject {
         adoptingCandidateID = candidateID
         let revision = sessionRevision
         let generator = self.generator
+        let request = AICueAdoptionRequest(
+            candidate: candidate,
+            displayName: name,
+            target: target)
         adoptionTask = Task { [weak self] in
-            let result = await operation(candidate, name, target)
+            let result = await operation(request)
             guard let self else {
                 await generator.discard(generationID: generation.id)
                 return

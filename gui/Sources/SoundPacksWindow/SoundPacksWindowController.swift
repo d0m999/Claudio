@@ -157,16 +157,10 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     /// disk-backed model and package-lock publication path as manual sound-pack editing without
     /// forcing the management window onscreen.
     public func adoptAICue(
-        candidate: AICueCandidate,
-        displayName: AICueDisplayName,
-        target: AICueAdoptionTarget
+        _ request: AICueAdoptionRequest
     ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
-        model.setManagedSurface(target.surface)
-        model.reload(followActivePack: true)
-        return await model.adoptAICue(
-            candidate: candidate,
-            displayName: displayName,
-            target: target)
+        model.setManagedSurface(request.target.surface)
+        return await model.adoptAICue(request)
     }
 
     public func windowDidBecomeKey(_ notification: Notification) {

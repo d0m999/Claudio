@@ -19,6 +19,27 @@ private final class AICueBlockingDurationProbe: AudioDurationProbing, @unchecked
     func allowCompletion() { resume.signal() }
 }
 
+private final class AICueRefreshFailureScanner: @unchecked Sendable {
+    private let lock = NSLock()
+    private let initialFacts: [SoundPackFacts]
+    private var callCount = 0
+
+    init(initialFacts: [SoundPackFacts]) {
+        self.initialFacts = initialFacts
+    }
+
+    func scan(_ request: SoundPackLibraryScanRequest) -> Result<
+        [SoundPackFacts], SoundPackLibraryError
+    > {
+        lock.lock()
+        callCount += 1
+        let currentCall = callCount
+        lock.unlock()
+        if currentCall == 1 { return .success(initialFacts) }
+        return .failure(.scanFailed(reason: "模拟采用前刷新失败"))
+    }
+}
+
 @MainActor
 func runAICueAdoptionSuites() async {
     suite("AI 提示音采用资格：只允许明确 surface 的独立、可编辑、有效用户包") {
@@ -81,6 +102,90 @@ func runAICueAdoptionSuites() async {
                 builtinPackIDs: [])
                 == .ineligible(.sharedPack(consumers: [.surface(.codex)])),
             "其他来源有效选择同一个包时必须 fail closed")
+
+        var globalShared = isolated
+        globalShared.selectedPack = "workbuddy-pack"
+        expect(
+            aiCueAdoptionEligibility(
+                surface: .workBuddy,
+                event: .stop,
+                selectedPackID: "workbuddy-pack",
+                config: globalShared,
+                packCards: cards,
+                builtinPackIDs: [])
+                == .ineligible(.sharedPack(consumers: [.global])),
+            "Global Sound Defaults 选择目标包时必须保留既有共享检测")
+
+        var diagnosticShared = isolated
+        diagnosticShared.surfaceOverrides[HostSurfaceID.chatGPTDesktopAX.rawValue] =
+            SurfaceSoundOverride(selectedPack: "workbuddy-pack")
+        expect(
+            aiCueAdoptionEligibility(
+                surface: .workBuddy,
+                event: .stop,
+                selectedPackID: "workbuddy-pack",
+                config: diagnosticShared,
+                packCards: cards,
+                builtinPackIDs: [])
+                == .ineligible(
+                    .sharedPack(consumers: [.surface(.chatGPTDesktopAX)])),
+            "诊断 Surface 的有效 override 也必须作为 pack-wide 消费者参与隔离审核")
+
+        var multipleSharedConsumers = diagnosticShared
+        multipleSharedConsumers.surfaceOverrides[HostSurfaceID.codex.rawValue] =
+            SurfaceSoundOverride(selectedPack: "workbuddy-pack")
+        expect(
+            aiCueAdoptionEligibility(
+                surface: .workBuddy,
+                event: .stop,
+                selectedPackID: "workbuddy-pack",
+                config: multipleSharedConsumers,
+                packCards: cards,
+                builtinPackIDs: [])
+                == .ineligible(
+                    .sharedPack(
+                        consumers: [
+                            .surface(.chatGPTDesktopAX),
+                            .surface(.codex),
+                        ])),
+            "共享消费者顺序必须按稳定 Surface token 决定，不能依赖字典迭代")
+
+        var unknownOverride = isolated
+        unknownOverride.surfaceOverrides["future-surface"] = SurfaceSoundOverride(
+            selectedPack: "unrelated-pack")
+        expect(
+            aiCueAdoptionEligibility(
+                surface: .workBuddy,
+                event: .stop,
+                selectedPackID: "workbuddy-pack",
+                config: unknownOverride,
+                packCards: cards,
+                builtinPackIDs: []) == .ineligible(.configurationUnavailable),
+            "无法分类的未来 override token 必须 fail closed，即使当前值看似未共享目标包")
+
+        var malformedOverride = isolated
+        malformedOverride.invalidSurfaceOverrideKeys.insert("future-malformed")
+        expect(
+            aiCueAdoptionEligibility(
+                surface: .workBuddy,
+                event: .stop,
+                selectedPackID: "workbuddy-pack",
+                config: malformedOverride,
+                packCards: cards,
+                builtinPackIDs: []) == .ineligible(.configurationUnavailable),
+            "损坏的原始 override token 必须在任何 pack-wide 写入前 fail closed")
+
+        var malformedOverridesStructure = isolated
+        malformedOverridesStructure.surfaceOverridesMalformed = true
+        expect(
+            aiCueAdoptionEligibility(
+                surface: .workBuddy,
+                event: .stop,
+                selectedPackID: "workbuddy-pack",
+                config: malformedOverridesStructure,
+                packCards: cards,
+                builtinPackIDs: []) == .ineligible(.configurationUnavailable),
+            "整体 surface_overrides 结构损坏时必须在任何写入前 fail closed")
         expect(
             aiCueAdoptionEligibility(
                 surface: .workBuddy,
@@ -198,9 +303,10 @@ func runAICueAdoptionSuites() async {
             let target = try! fixture.model.captureAICueAdoptionTarget(for: .stop).get()
             let candidate = aiCueCandidate(at: fixture.candidateFile)
             let result = await fixture.model.adoptAICue(
-                candidate: candidate,
-                displayName: try! AICueDisplayName("小猫两声"),
-                target: target)
+                AICueAdoptionRequest(
+                    candidate: candidate,
+                    displayName: try! AICueDisplayName("小猫两声"),
+                    target: target))
             guard case .success(let outcome) = result else {
                 expect(false, "完整导入与绑定必须成功")
                 return
@@ -215,6 +321,152 @@ func runAICueAdoptionSuites() async {
         }
     }
 
+    await suite("AI 提示音采用闭环：采用前等待新鲜快照并在导入前拒绝磁盘损坏包") {
+        await withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            let configFile = root.appendingPathComponent("config.json")
+            let config = ClaudioConfig(
+                selectedPack: "global-pack",
+                surfaceOverrides: [
+                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                        selectedPack: "workbuddy-pack"),
+                    HostSurfaceID.codex.rawValue: SurfaceSoundOverride(
+                        selectedPack: "codex-pack"),
+                    HostSurfaceID.claudeCode.rawValue: SurfaceSoundOverride(
+                        selectedPack: "claude-pack"),
+                ])
+            writeFixture(try! JSONEncoder().encode(config), to: configFile)
+            for id in ["global-pack", "codex-pack", "claude-pack"] {
+                writeFixture(
+                    "{\"id\":\"\(id)\",\"events\":{}}",
+                    to: packs.appendingPathComponent("\(id)/manifest.json"))
+            }
+            let targetManifest = packs.appendingPathComponent(
+                "workbuddy-pack/manifest.json")
+            writeFixture(
+                #"{"id":"workbuddy-pack","events":{"stop":"old.mp3"}}"#,
+                to: targetManifest)
+            writeFixture(
+                validMP3ID3Data(),
+                to: packs.appendingPathComponent("workbuddy-pack/old.mp3"))
+            let candidateFile = root.appendingPathComponent("provider-candidate.mp3")
+            writeFixture(validMP3ID3Data(), to: candidateFile)
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: packs,
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                packsLockFile: injectedPacksLock(under: root))
+            let library = SoundPackLibrary(environment: environment)
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                soundPackLibrary: library,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            model.setManagedSurface(.workBuddy)
+
+            expect(
+                await synchronizeAICueModelWithLibrary(model, library: library),
+                "前提：旧共享快照必须先同步进模型")
+            if case .eligible = model.aiCueAdoptionEligibility(for: .stop) {
+                expect(true, "前提：旧共享快照必须先证明目标可采用")
+            } else {
+                expect(false, "前提：旧共享快照必须先证明目标可采用")
+            }
+            let target = try! model.captureAICueAdoptionTarget(for: .stop).get()
+            let beforeFiles = Set(
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: targetManifest.deletingLastPathComponent().path)) ?? [])
+            writeFixture("not-json", to: targetManifest)
+
+            let result = await model.adoptAICue(
+                AICueAdoptionRequest(
+                    candidate: aiCueCandidate(at: candidateFile),
+                    displayName: try! AICueDisplayName("新鲜度提示音"),
+                    target: target))
+            expect(
+                result == .failure(.ineligible(.packBroken(packID: "workbuddy-pack"))),
+                "采用必须用本次磁盘扫描看到 broken pack，不能继续沿用旧 eligible 快照")
+            let afterFiles = Set(
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: targetManifest.deletingLastPathComponent().path)) ?? [])
+            expect(afterFiles == beforeFiles, "新鲜度拒绝必须发生在候选导入与任何文件发布之前")
+        }
+    }
+
+    await suite("AI 提示音采用闭环：采用前共享库刷新失败时不回退旧快照") {
+        await withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            let configFile = root.appendingPathComponent("config.json")
+            let config = ClaudioConfig(
+                selectedPack: "global-pack",
+                surfaceOverrides: [
+                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                        selectedPack: "workbuddy-pack"),
+                    HostSurfaceID.codex.rawValue: SurfaceSoundOverride(
+                        selectedPack: "codex-pack"),
+                    HostSurfaceID.claudeCode.rawValue: SurfaceSoundOverride(
+                        selectedPack: "claude-pack"),
+                ])
+            writeFixture(try! JSONEncoder().encode(config), to: configFile)
+            let targetManifest = packs.appendingPathComponent(
+                "workbuddy-pack/manifest.json")
+            let originalManifest = #"{"id":"workbuddy-pack","events":{"stop":"old.mp3"}}"#
+            writeFixture(originalManifest, to: targetManifest)
+            writeFixture(
+                validMP3ID3Data(),
+                to: packs.appendingPathComponent("workbuddy-pack/old.mp3"))
+            let candidateFile = root.appendingPathComponent("provider-candidate.mp3")
+            writeFixture(validMP3ID3Data(), to: candidateFile)
+
+            let scanner = AICueRefreshFailureScanner(
+                initialFacts: [
+                    "global-pack", "workbuddy-pack", "codex-pack", "claude-pack",
+                ].map(aiCuePackFacts))
+            let library = SoundPackLibrary(
+                scanner: SoundPackLibraryScanner(operation: scanner.scan))
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: packs,
+                durationProbe: StubDurationProbe(fixedDuration: 1),
+                packsLockFile: injectedPacksLock(under: root))
+            let model = SoundPacksWindowModel(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                soundPackLibrary: library,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            model.setManagedSurface(.workBuddy)
+
+            expect(
+                await synchronizeAICueModelWithLibrary(model, library: library),
+                "前提：首次成功快照必须同步进模型")
+            if case .eligible = model.aiCueAdoptionEligibility(for: .stop) {
+                expect(true, "前提：首次成功快照必须允许捕获采用目标")
+            } else {
+                expect(false, "前提：首次成功快照必须允许捕获采用目标")
+            }
+            let target = try! model.captureAICueAdoptionTarget(for: .stop).get()
+            let beforeManifest = try! Data(contentsOf: targetManifest)
+            let beforeFiles = Set(
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: targetManifest.deletingLastPathComponent().path)) ?? [])
+
+            let result = await model.adoptAICue(
+                AICueAdoptionRequest(
+                    candidate: aiCueCandidate(at: candidateFile),
+                    displayName: try! AICueDisplayName("刷新失败提示音"),
+                    target: target))
+            expect(
+                result == .failure(.ineligible(.configurationUnavailable)),
+                "采用前刷新失败必须 fail closed，不能用旧 eligible 快照继续导入")
+            expect(try! Data(contentsOf: targetManifest) == beforeManifest, "刷新失败不得改写旧事件绑定")
+            let afterFiles = Set(
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: targetManifest.deletingLastPathComponent().path)) ?? [])
+            expect(afterFiles == beforeFiles, "刷新失败必须发生在候选导入与任何文件发布之前")
+            expect(FileManager.default.fileExists(atPath: candidateFile.path), "刷新失败不得删除私有候选")
+        }
+    }
+
     await suite("AI 提示音采用闭环：导入期间目标损坏时旧声音保留，孤儿文件如实返回") {
         await withTempDirectory { root in
             let probe = AICueBlockingDurationProbe()
@@ -223,9 +475,10 @@ func runAICueAdoptionSuites() async {
             let candidate = aiCueCandidate(at: fixture.candidateFile)
             let task = Task { @MainActor in
                 await fixture.model.adoptAICue(
-                    candidate: candidate,
-                    displayName: try! AICueDisplayName("竞态提示音"),
-                    target: target)
+                    AICueAdoptionRequest(
+                        candidate: candidate,
+                        displayName: try! AICueDisplayName("竞态提示音"),
+                        target: target))
             }
             await Task.yield()
             expect(probe.waitUntilEntered(), "采用必须到达注入的导入时长闸门")
@@ -247,6 +500,19 @@ func runAICueAdoptionSuites() async {
     }
 }
 
+@MainActor
+private func synchronizeAICueModelWithLibrary(
+    _ model: SoundPacksWindowModel,
+    library: SoundPackLibrary
+) async -> Bool {
+    await library.loadIfNeeded(trigger: .initial)
+    await library.waitUntilIdleForTesting()
+    let stream = await library.states()
+    var iterator = stream.makeAsyncIterator()
+    guard case .ready(let snapshot)? = await iterator.next() else { return false }
+    return model.applyAICueAdoptionSnapshotForTesting(snapshot)
+}
+
 private func aiCuePackCard(id: String) -> PackCard {
     PackCard(
         id: id,
@@ -255,6 +521,17 @@ private func aiCuePackCard(id: String) -> PackCard {
         presentEvents: [],
         state: .partial(present: 0, total: Event.allCases.count),
         isSelected: false)
+}
+
+private func aiCuePackFacts(id: String) -> SoundPackFacts {
+    SoundPackFacts(
+        id: id,
+        name: id,
+        isCC0: false,
+        factoryIntegrity: nil,
+        eventCoverage: [.stop: .present(fileName: "old.mp3")],
+        cardState: .partial(present: 1, total: Event.allCases.count),
+        audioInventory: .deferred)
 }
 
 private struct AICueAdoptionFixture {

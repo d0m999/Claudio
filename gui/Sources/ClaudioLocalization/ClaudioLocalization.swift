@@ -312,6 +312,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueCandidateClear: Self = "ai-cue.candidate.clear"
     public static let aiCueCandidateBrisk: Self = "ai-cue.candidate.brisk"
     public static let aiCueCandidateRestrained: Self = "ai-cue.candidate.restrained"
+    public static let aiCueCandidateDuration: Self = "ai-cue.candidate.duration"
     public static let aiCueUseForEvent: Self = "ai-cue.use-for-event"
     public static let aiCueRegenerate: Self = "ai-cue.regenerate"
     public static let aiCueAppliedTitle: Self = "ai-cue.applied.title"
@@ -689,7 +690,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueDescriptionHelp, .aiCueDescriptionPlaceholder, .aiCueGenerateCandidates,
         .aiCueGenerating, .aiCueDescriptionSummary, .aiCueModifyDescription, .aiCueNameLabel,
         .aiCueNameHelp, .aiCueCandidateClear, .aiCueCandidateBrisk, .aiCueCandidateRestrained,
-        .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle, .aiCueAppliedMessage,
+        .aiCueCandidateDuration, .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle,
+        .aiCueAppliedMessage,
         .aiCueErrorDescriptionRequired, .aiCueErrorDescriptionTooLong,
         .aiCueErrorSpeechNeedsText, .aiCueErrorCredentialRequired,
         .aiCueErrorCredentialInvalid, .aiCueErrorCredentialUnavailable, .aiCueErrorCredits,

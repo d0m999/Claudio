@@ -1328,6 +1328,21 @@ public final class SoundPacksWindowModel: ObservableObject {
     #endif
 
     private func consumeLibraryState(_ state: SoundPackLibraryState) {
+        if let currentRevision = librarySnapshot?.revision {
+            let incomingRevision: UInt64?
+            switch state {
+            case .unloaded:
+                incomingRevision = nil
+            case .loading(let previous):
+                incomingRevision = previous?.revision
+            case .ready(let snapshot):
+                incomingRevision = snapshot.revision
+            case .failed(let previous, _):
+                incomingRevision = previous?.revision
+            }
+            guard let incomingRevision, incomingRevision >= currentRevision else { return }
+        }
+
         switch state {
         case .unloaded:
             libraryPresentationState = .loading
@@ -1542,10 +1557,14 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// before one atomic name+event manifest mutation. A failed second phase leaves the old event
     /// mapping untouched and reports the already-imported file honestly as an orphan.
     public func adoptAICue(
-        candidate: AICueCandidate,
-        displayName: AICueDisplayName,
-        target: AICueAdoptionTarget
+        _ request: AICueAdoptionRequest
     ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
+        let candidate = request.candidate
+        let displayName = request.displayName
+        let target = request.target
+        guard await refreshAICueAdoptionSnapshot() else {
+            return .failure(.ineligible(.configurationUnavailable))
+        }
         switch captureAICueAdoptionTarget(for: target.event) {
         case .success(let current) where current == target:
             break
@@ -1616,6 +1635,55 @@ public final class SoundPacksWindowModel: ObservableObject {
                     reason: .manifest(error)))
         }
     }
+
+    private func refreshAICueAdoptionSnapshot() async -> Bool {
+        #if DEBUG
+        guard readSource.readsSharedSnapshot else {
+            reloadSynchronously(followActivePack: true)
+            return true
+        }
+        #endif
+
+        pendingFollowActivePack = true
+        let refreshed = await soundPackLibrary.refreshSnapshot(trigger: .windowPresentation)
+        configState = loadPanelConfig(from: configFile)
+        baseConfig = configState.resolvedConfig
+        applyManagedScopeConfig()
+        guard case .ready(let snapshot) = refreshed else { return false }
+        return applyReadySnapshotForAICueAdoption(snapshot)
+    }
+
+    /// The observation stream may apply a later library state before the refresh waiter resumes on
+    /// MainActor. Never let that older waiter result roll the model back. A later refresh/failure at
+    /// the same or a higher revision is also a reason to stop instead of reviving stale ready UI.
+    private func applyReadySnapshotForAICueAdoption(
+        _ refreshedSnapshot: SoundPackLibrarySnapshot
+    ) -> Bool {
+        if let currentSnapshot = librarySnapshot,
+            currentSnapshot.revision >= refreshedSnapshot.revision
+        {
+            guard libraryPresentationState == .ready else { return false }
+            applySnapshot(currentSnapshot, followActivePack: pendingFollowActivePack)
+            pendingFollowActivePack = false
+            return true
+        }
+        consumeLibraryState(.ready(refreshedSnapshot))
+        return true
+    }
+
+    #if DEBUG
+    /// Deterministic seam for proving that a delayed refresh waiter cannot replace a newer state.
+    public func applyAICueAdoptionSnapshotForTesting(
+        _ snapshot: SoundPackLibrarySnapshot
+    ) -> Bool {
+        pendingFollowActivePack = true
+        return applyReadySnapshotForAICueAdoption(snapshot)
+    }
+
+    public func consumeSoundPackLibraryStateForTesting(_ state: SoundPackLibraryState) {
+        consumeLibraryState(state)
+    }
+    #endif
 
     @discardableResult
     private func bindSelectedAudioFile(
