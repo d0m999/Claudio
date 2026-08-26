@@ -63,6 +63,16 @@ func runPreviewFixturesSuites() {
             "panelPack.noPinned", "panelPack.noPacks", "panelPack.readFailed",
             "interfaceText.compact", "interfaceText.standard",
             "interfaceText.large", "interfaceText.maximum",
+            "settingsRoute.general", "settingsRoute.integrations",
+            "settingsRoute.events-and-sounds", "settingsRoute.notifications",
+            "settingsRoute.display", "settingsRoute.sounds", "settingsRoute.usage",
+            "settingsRoute.shortcuts", "settingsRoute.about",
+            "settingsRouteFailure.invalid-surface",
+            "settingsRouteFailure.stale-surface",
+            "settingsRouteFailure.stale-sound-scope",
+            "settingsRouteFailure.stale-event",
+            "settingsRouteFailure.invalid-sound-pack-id",
+            "settingsRouteFailure.stale-sound-pack",
             // 第六族（PLAN-MASTER-VOLUME.md D33/D38）：主音量控件行的展示态。少了它，写失败之后的
             // 「行 + 错误行」组合帧——D16「音量 0 = 全局静音」这类最难手动复现的态——落地前零仓库内
             // 视觉验证，而这条断言仍会全绿（因为其余五族依然完美覆盖它们自己的 case）。
@@ -404,6 +414,51 @@ func runPreviewFixturesSuites() {
         expect(
             PreviewFixtures.interfaceTextSizes == ClaudioInterfaceTextSize.allCases,
             "state gallery 必须逐档渲染 Claudio 的全部四档界面文字")
+    }
+
+    suite("PreviewFixtures.settingsRouteScenarios pins the fixed nine-slot route gallery") {
+        let scenarios = PreviewFixtures.settingsRouteScenarios
+        expect(scenarios.count == 9, "统一设置 gallery 必须恰好有九个 route slot")
+        expect(
+            scenarios.map(\.destination) == SettingsDestination.allCases,
+            "统一设置 gallery 必须按固定 sidebar 顺序覆盖全部目的页")
+        expect(
+            Set(scenarios.map(\.id)).count == scenarios.count,
+            "统一设置 gallery scenario ID 必须唯一")
+        expect(
+            scenarios.allSatisfy { $0.route.destination == $0.destination },
+            "每个 gallery route 必须保留其对应目的页")
+        expect(
+            scenarios.allSatisfy {
+                resolveSettingsRoute(
+                    $0.route,
+                    availability: PreviewFixtures.settingsRouteAvailability
+                ).failure == nil
+            },
+            "九个目的页基础槽位必须全部呈现 ready route")
+    }
+
+    suite("PreviewFixtures.settingsRouteFailureScenarios covers every visible failure case") {
+        let scenarios = PreviewFixtures.settingsRouteFailureScenarios
+        let expectedIDs = [
+            "invalid-surface", "stale-surface", "stale-sound-scope", "stale-event",
+            "invalid-sound-pack-id", "stale-sound-pack",
+        ]
+        expect(scenarios.map(\.id) == expectedIDs, "统一设置 gallery 必须覆盖全部六种失败态")
+        expect(
+            Set(scenarios.map(\.id)).count == scenarios.count,
+            "统一设置失败 gallery scenario ID 必须唯一")
+        for scenario in scenarios {
+            let resolution = resolveSettingsRoute(
+                scenario.route,
+                availability: scenario.availability)
+            expect(
+                resolution.failure == scenario.expectedFailure,
+                "\(scenario.id) 必须解析为其共享 fixture 指定的失败态")
+            expect(
+                resolution.route == scenario.route,
+                "\(scenario.id) 必须原样保留请求路由而不回退")
+        }
     }
 
     // MARK: - All-product integration scenarios

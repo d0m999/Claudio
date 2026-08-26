@@ -1,4 +1,5 @@
 #if DEBUG
+import AppKit
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
@@ -35,6 +36,7 @@ import SwiftUI
             ScrollView {
                 VStack(alignment: .leading, spacing: 28) {
                     ProductionPanelGalleryView()
+                    SettingsWindowRouteGalleryView()
                     GallerySection(title: "Legacy Claude-only onboarding archive（非生产 Panel）") {
                         OnboardingGalleryView()
                         OnboardingActionGalleryView()
@@ -59,6 +61,65 @@ import SwiftUI
             // untokenized default window background — see ``GalleryFrame``'s note for why that
             // background was a correctness bug in a file DESIGN.md calls the 视觉真相源.
             .background(ClaudioColor.panel(colorScheme))
+        }
+    }
+
+    // MARK: - Unified Settings route skeleton (DEBUG only)
+
+    struct SettingsWindowRouteGalleryView: View {
+        var body: some View {
+            GallerySection(title: "Unified Settings · 9 typed route slots") {
+                ForEach(ClaudioAppLanguage.allCases) { language in
+                    ForEach(PreviewFixtures.settingsRouteScenarios) { scenario in
+                        GalleryFrame(
+                            caption: "\(language.selfName) · \(scenario.destination.rawValue)"
+                        ) {
+                            SettingsWindowRouteFrame(
+                                route: scenario.route,
+                                availability: PreviewFixtures.settingsRouteAvailability,
+                                language: language)
+                        }
+                    }
+                }
+            }
+            GallerySection(title: "Unified Settings · 6 visible route failures") {
+                ForEach(ClaudioAppLanguage.allCases) { language in
+                    ForEach(PreviewFixtures.settingsRouteFailureScenarios) { scenario in
+                        GalleryFrame(caption: "\(language.selfName) · \(scenario.id)") {
+                            SettingsWindowRouteFrame(
+                                route: scenario.route,
+                                availability: scenario.availability,
+                                language: language)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @MainActor
+    private struct SettingsWindowRouteFrame: View {
+        @StateObject private var model: SettingsWindowPresentationModel<NSRunningApplication>
+        @StateObject private var languageStore: ClaudioLanguageStore
+
+        init(
+            route: SettingsRoute,
+            availability: SettingsRouteAvailability,
+            language: ClaudioAppLanguage
+        ) {
+            _model = StateObject(
+                wrappedValue: SettingsWindowPresentationModel(
+                    initialRoute: route,
+                    availability: availability))
+            _languageStore = StateObject(
+                wrappedValue: ClaudioLanguageStore(previewLanguage: language))
+        }
+
+        var body: some View {
+            SettingsWindowView(model: model, languageStore: languageStore)
+                .frame(
+                    width: SettingsWindowGeometry.minimumWidth,
+                    height: SettingsWindowGeometry.minimumHeight)
         }
     }
 

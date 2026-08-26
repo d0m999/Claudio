@@ -244,6 +244,131 @@ public enum PreviewFixtures {
     /// Claudio 专属界面文字的全部四档；gallery 用同一个动态字号映射渲染代表内容。
     public static let interfaceTextSizes = ClaudioInterfaceTextSize.allCases
 
+    // MARK: - Unified Settings routes (#86)
+
+    public struct SettingsRouteScenario: Identifiable, Sendable, Equatable {
+        public var id: SettingsDestination { destination }
+        public let destination: SettingsDestination
+        public let route: SettingsRoute
+
+        public init(destination: SettingsDestination, route: SettingsRoute) {
+            self.destination = destination
+            self.route = route
+        }
+    }
+
+    public struct SettingsRouteFailureScenario: Identifiable, Sendable, Equatable {
+        public let id: String
+        public let route: SettingsRoute
+        public let availability: SettingsRouteAvailability
+        public let expectedFailure: SettingsRouteFailure
+
+        public init(
+            id: String,
+            route: SettingsRoute,
+            availability: SettingsRouteAvailability,
+            expectedFailure: SettingsRouteFailure
+        ) {
+            self.id = id
+            self.route = route
+            self.availability = availability
+            self.expectedFailure = expectedFailure
+        }
+    }
+
+    public static let settingsRouteAvailability = SettingsRouteAvailability(
+        integrationSurfaces: Set(HostID.productVisibleCases.map(\.surfaceID)),
+        eventScopes: Set(
+            [PanelSoundScopeID.global]
+                + HostID.productVisibleCases.map { .surface($0.surfaceID) }),
+        soundScopes: Set(
+            [PanelSoundScopeID.global]
+                + HostID.productVisibleCases.map { .surface($0.surfaceID) }),
+        soundPackIDs: ["gallery-pack"],
+        events: Set(Event.allCases))
+
+    /// One ready route slot per fixed destination, in sidebar order.
+    public static let settingsRouteScenarios: [SettingsRouteScenario] =
+        SettingsDestination.allCases.map { destination in
+            let route: SettingsRoute
+            switch destination {
+            case .integrations:
+                route = .integrations(surface: .workBuddy)
+            case .eventsAndSounds:
+                route = .events(scope: .surface(.workBuddy), event: .notification)
+            case .sounds:
+                route = .sounds(
+                    .editEvent(
+                        surface: .workBuddy,
+                        packID: "gallery-pack",
+                        event: .stop))
+            default:
+                route = .destination(destination)
+            }
+            return SettingsRouteScenario(destination: destination, route: route)
+        }
+
+    /// Every visible failure shape in ``SettingsRouteFailure``. Each frame retains its requested
+    /// destination and carries only the availability change needed to make that target stale.
+    public static let settingsRouteFailureScenarios: [SettingsRouteFailureScenario] = {
+        let surfaceLimited = SettingsRouteAvailability(
+            integrationSurfaces: [.workBuddy],
+            eventScopes: [.global, .surface(.workBuddy)],
+            soundScopes: [.global, .surface(.workBuddy)],
+            soundPackIDs: settingsRouteAvailability.soundPackIDs,
+            events: settingsRouteAvailability.events)
+        let globalEventScopeMissing = SettingsRouteAvailability(
+            integrationSurfaces: settingsRouteAvailability.integrationSurfaces,
+            eventScopes: [.surface(.workBuddy)],
+            soundScopes: settingsRouteAvailability.soundScopes,
+            soundPackIDs: settingsRouteAvailability.soundPackIDs,
+            events: settingsRouteAvailability.events)
+        let eventMissing = SettingsRouteAvailability(
+            integrationSurfaces: settingsRouteAvailability.integrationSurfaces,
+            eventScopes: settingsRouteAvailability.eventScopes,
+            soundScopes: settingsRouteAvailability.soundScopes,
+            soundPackIDs: settingsRouteAvailability.soundPackIDs,
+            events: Set(Event.allCases.filter { $0 != .stopFailure }))
+
+        return [
+            SettingsRouteFailureScenario(
+                id: "invalid-surface",
+                route: .integrations(surface: .chatGPTDesktopAX),
+                availability: settingsRouteAvailability,
+                expectedFailure: .invalidSurface(.chatGPTDesktopAX)),
+            SettingsRouteFailureScenario(
+                id: "stale-surface",
+                route: .events(scope: .surface(.codex), event: .stop),
+                availability: surfaceLimited,
+                expectedFailure: .staleSurface(.codex)),
+            SettingsRouteFailureScenario(
+                id: "stale-sound-scope",
+                route: .events(scope: .global, event: .stop),
+                availability: globalEventScopeMissing,
+                expectedFailure: .staleSoundScope(.global)),
+            SettingsRouteFailureScenario(
+                id: "stale-event",
+                route: .events(scope: .surface(.workBuddy), event: .stopFailure),
+                availability: eventMissing,
+                expectedFailure: .staleEvent(.stopFailure)),
+            SettingsRouteFailureScenario(
+                id: "invalid-sound-pack-id",
+                route: .sounds(
+                    .editEvent(surface: .workBuddy, packID: "   ", event: .stop)),
+                availability: settingsRouteAvailability,
+                expectedFailure: .invalidSoundPackID),
+            SettingsRouteFailureScenario(
+                id: "stale-sound-pack",
+                route: .sounds(
+                    .editEvent(
+                        surface: .workBuddy,
+                        packID: "removed-pack",
+                        event: .stop)),
+                availability: settingsRouteAvailability,
+                expectedFailure: .staleSoundPack("removed-pack")),
+        ]
+    }()
+
     // MARK: - MasterVolumeState (PLAN-MASTER-VOLUME.md 阶段 D, D33/D38/D39)
     //
     // 主音量控件行在 state gallery 里的展示态。**这不是生产代码里一个真实存在的状态机**——生产端
@@ -822,6 +947,13 @@ public enum PreviewFixtures {
         for size in interfaceTextSizes {
             visited.insert("interfaceText.\(interfaceTextSizeCoverage(size))")
         }
+        for scenario in settingsRouteScenarios {
+            visited.insert("settingsRoute.\(scenario.destination.rawValue)")
+        }
+        for scenario in settingsRouteFailureScenarios {
+            visited.insert(
+                "settingsRouteFailure.\(settingsRouteFailureCoverage(scenario.expectedFailure))")
+        }
         for state in masterVolumeStates {
             visited.insert("masterVolume.\(masterVolumeStateCoverage(state))")
         }
@@ -838,6 +970,19 @@ public enum PreviewFixtures {
             visited.insert("eventRowLayout.\(scenario.id)")
         }
         return visited
+    }
+
+    /// Exhaustive over every visible Settings route failure. Adding a new failure case breaks
+    /// this switch until the shared fixture catalog and gallery render it.
+    static func settingsRouteFailureCoverage(_ failure: SettingsRouteFailure) -> String {
+        switch failure {
+        case .invalidSurface: "invalid-surface"
+        case .staleSurface: "stale-surface"
+        case .staleSoundScope: "stale-sound-scope"
+        case .staleEvent: "stale-event"
+        case .invalidSoundPackID: "invalid-sound-pack-id"
+        case .staleSoundPack: "stale-sound-pack"
+        }
     }
 
     /// Exhaustive over every ``OnboardingActionState`` case — no `default:` — recursing into

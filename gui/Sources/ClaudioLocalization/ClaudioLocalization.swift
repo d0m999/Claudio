@@ -346,6 +346,28 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventSettingsTitle: Self = "event-settings.title"
     public static let eventSettingsWindowTitle: Self = "window.event-settings.title"
     public static let integrationsWindowTitle: Self = "window.integrations.title"
+    public static let settingsWindowTitle: Self = "window.settings.title"
+    public static let settingsDestinationGeneral: Self = "settings.destination.general"
+    public static let settingsDestinationIntegrations: Self =
+        "settings.destination.integrations"
+    public static let settingsDestinationEventsAndSounds: Self =
+        "settings.destination.events-and-sounds"
+    public static let settingsDestinationNotifications: Self =
+        "settings.destination.notifications"
+    public static let settingsDestinationDisplay: Self = "settings.destination.display"
+    public static let settingsDestinationSounds: Self = "settings.destination.sounds"
+    public static let settingsDestinationUsage: Self = "settings.destination.usage"
+    public static let settingsDestinationShortcuts: Self = "settings.destination.shortcuts"
+    public static let settingsDestinationAbout: Self = "settings.destination.about"
+    public static let settingsRouteIdentity: Self = "settings.route.identity"
+    public static let settingsRouteReady: Self = "settings.route.ready"
+    public static let settingsRouteInvalidSurface: Self = "settings.route.invalid-surface"
+    public static let settingsRouteStaleSurface: Self = "settings.route.stale-surface"
+    public static let settingsRouteStaleScope: Self = "settings.route.stale-scope"
+    public static let settingsRouteStaleEvent: Self = "settings.route.stale-event"
+    public static let settingsRouteInvalidPack: Self = "settings.route.invalid-pack"
+    public static let settingsRouteStalePack: Self = "settings.route.stale-pack"
+    public static let settingsRouteReturnToSidebar: Self = "settings.route.return-to-sidebar"
     public static let integrationsClearReceiptHistoryConfirm: Self =
         "integrations.clear-receipt-history.confirm"
     public static let integrationsClearReceiptHistoryTitle: Self =
@@ -701,6 +723,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksWindowTitle, .soundPacksManagingScope, .soundPacksInvalidScope,
         .soundPacksDamagedScope,
         .eventSettingsTitle, .eventSettingsWindowTitle, .integrationsWindowTitle,
+        .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
+        .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
+        .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
+        .settingsDestinationShortcuts, .settingsDestinationAbout, .settingsRouteIdentity,
+        .settingsRouteReady, .settingsRouteInvalidSurface, .settingsRouteStaleSurface,
+        .settingsRouteStaleScope, .settingsRouteStaleEvent, .settingsRouteInvalidPack,
+        .settingsRouteStalePack,
+        .settingsRouteReturnToSidebar,
         .integrationsRedetect,
         .integrationsRedetectLabel,
         .integrationsRedetectHint, .integrationsSourcesSummary, .integrationsSelectionEmpty,

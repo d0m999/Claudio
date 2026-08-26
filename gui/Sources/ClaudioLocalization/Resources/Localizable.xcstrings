@@ -2890,6 +2890,120 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "由宿主集成管理器提供" } }
       }
     },
+    "settings.destination.about" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "About" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关于" } }
+      }
+    },
+    "settings.destination.display" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Display" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示" } }
+      }
+    },
+    "settings.destination.events-and-sounds" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Events & Sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件与提示音" } }
+      }
+    },
+    "settings.destination.general" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "General" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "通用" } }
+      }
+    },
+    "settings.destination.integrations" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Integrations" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "集成" } }
+      }
+    },
+    "settings.destination.notifications" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Notifications" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "通知" } }
+      }
+    },
+    "settings.destination.shortcuts" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shortcuts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快捷键" } }
+      }
+    },
+    "settings.destination.sounds" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音" } }
+      }
+    },
+    "settings.destination.usage" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Usage" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用量" } }
+      }
+    },
+    "settings.route.identity" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stable route" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "稳定路由" } }
+      }
+    },
+    "settings.route.invalid-pack" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This sound-pack target is invalid. No other pack was selected." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个声音包目标无效；未选择其他声音包。" } }
+      }
+    },
+    "settings.route.invalid-surface" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The surface %@ is not available to this destination. No other surface was selected." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surface %@ 不可用于这个目的页；未选择其他 Surface。" } }
+      }
+    },
+    "settings.route.ready" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Typed route validation passed; no fallback was applied." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "类型化路由验证通过；未发生静默回退。" } }
+      }
+    },
+    "settings.route.return-to-sidebar" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Return focus to sidebar" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将焦点返回侧栏" } }
+      }
+    },
+    "settings.route.stale-pack" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack %@ is no longer available. No other pack was selected." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包 %@ 已不可用；未选择其他声音包。" } }
+      }
+    },
+    "settings.route.stale-event" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The event %@ is no longer available. No other event was selected." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件 %@ 已不可用；未选择其他事件。" } }
+      }
+    },
+    "settings.route.stale-scope" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound scope %@ is no longer available. No other scope was selected." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音作用域 %@ 已不可用；未选择其他作用域。" } }
+      }
+    },
+    "settings.route.stale-surface" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The surface %@ is no longer available. No other surface was selected." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surface %@ 已不可用；未选择其他 Surface。" } }
+      }
+    },
+    "window.settings.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · 设置" } }
+      }
+    },
     "window.sound-packs.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · Sound Packs" } },
