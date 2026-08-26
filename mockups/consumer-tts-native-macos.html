@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>Claudio TTS prototype moved</title>
+</head>
+<body>
+  <p>正在打开已融入旧设置 UI 的 TTS 原型…</p>
+  <script>
+    /* THROWAWAY PROTOTYPE REDIRECT: the selected inline core loop is the only route. */
+    const source = new URLSearchParams(window.location.search);
+    const stage = source.get('stage') || 'prompt';
+    const credential = source.get('credential');
+    const destination = new URL('ai-app-manager-native-macos.html', window.location.href);
+    destination.searchParams.set('page', 'events');
+    destination.searchParams.set('app', 'workbuddy');
+    destination.searchParams.set('prototype', 'tts');
+    destination.searchParams.set('stage', stage);
+    if (credential) destination.searchParams.set('credential', credential);
+    window.location.replace(destination);
+  </script>
+</body>
+</html>

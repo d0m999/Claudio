@@ -21,7 +21,7 @@ enum SoundPackReadSource: Sendable {
 }
 
 /// Claudio 自己的界面文字偏好。macOS SwiftUI 的 `dynamicTypeSize` 不会跟随系统文字大小，
-/// 因此三个产品界面共享这一个显式、可持久化的四档设置。
+/// 因此四个产品界面共享这一个显式、可持久化的四档设置。
 public enum ClaudioInterfaceTextSize: String, CaseIterable, Codable, Sendable, Identifiable {
     case compact
     case standard

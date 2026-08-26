@@ -153,6 +153,22 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         isPresentingWindow = false
     }
 
+    /// Headless adoption entry used by the retained Events & Sounds window. It reuses the same
+    /// disk-backed model and package-lock publication path as manual sound-pack editing without
+    /// forcing the management window onscreen.
+    public func adoptAICue(
+        candidate: AICueCandidate,
+        displayName: AICueDisplayName,
+        target: AICueAdoptionTarget
+    ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
+        model.setManagedSurface(target.surface)
+        model.reload(followActivePack: true)
+        return await model.adoptAICue(
+            candidate: candidate,
+            displayName: displayName,
+            target: target)
+    }
+
     public func windowDidBecomeKey(_ notification: Notification) {
         guard
             !isPresentingWindow,

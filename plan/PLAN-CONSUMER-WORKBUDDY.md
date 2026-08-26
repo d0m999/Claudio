@@ -74,9 +74,11 @@ WorkBuddy 首发绑定：
 - WorkBuddy 作用域稳定显示五行：`UserPromptSubmit`、`Stop` 为已实现且可配置/试听；
   `StopFailure`、`Notification`、`SubagentStop` 显式标为未实现，试听与静音均禁用。Global 行显示
   claudi0 事件 ID 与「全局默认」，不得伪造宿主原生事件名或全局假 `3/5`。
-- popup 的声音设置入口携带 `HostSurfaceID?` 与 effective pack。Global「使用此包」写顶层
-  `selected_pack`；WorkBuddy 下写稀疏 `surface_overrides[workbuddy].selected_pack`；reset 定向删除
-  WorkBuddy 覆盖并清掉空 object。未知字段保留，未知/AX scope fail closed，绝不静默写到 Global。
+- popup 的「打开设置」携带 `PanelSoundScopeID` 进入保留的「事件与提示音」窗口；该窗口对应
+  HTML 原型 `page=events&app=<scope>`，继续显示五事件、能力、当前声音与试听/静音。逐事件编辑再携带
+  `HostSurfaceID?` 与 effective pack 委托 Sound Packs Window。Global「使用此包」写顶层 `selected_pack`；
+  WorkBuddy 下写稀疏 `surface_overrides[workbuddy].selected_pack`；reset 定向删除 WorkBuddy 覆盖并清掉空
+  object。未知字段保留，未知/AX scope fail closed，绝不静默写到 Global。
 - Apps/集成窗口：按 Product → Surface 分组展示连接、scope/version 失效、binding 状态、
   latest receipt、Repair、Disconnect、回执历史清除；只列三个产品可见 native surface。
 - 来源菜单只列 Global 与已配置或可用 surface；`.notConnected` 仍在集成窗口但不进入 popup。
@@ -85,7 +87,8 @@ WorkBuddy 首发绑定：
 
 生产焦点顺序为 `soundScope → bootstrap/config recovery → 可用事件试听/静音 → masterVolume →
 openSoundSettings → resetSurface（条件）→ quitApplication`。打开集成窗口时，Host 预选与返回面板
-焦点是两个独立参数；打开声音设置后焦点返回「打开设置」。本轮自动化和本地构建不代表 Issue #20
+焦点是两个独立参数；关闭「事件与提示音」后焦点返回「打开设置」，关闭其委托的 Sound Packs Window
+则返回事件窗口。本轮自动化和本地构建不代表 Issue #20
 的签名 RC 原生视觉验收，真实 Tab/Shift-Tab、VoiceOver、增加对比度、降低透明度与双架构仍需人工证据。
 
 ## 4. 本地验收

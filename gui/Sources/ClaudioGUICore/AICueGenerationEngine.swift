@@ -1,0 +1,388 @@
+import ClaudioCore
+import Darwin
+import Foundation
+
+public struct AICueTemporaryAudioAsset: Sendable, Equatable {
+    public let fileURL: URL
+    public let byteCount: Int
+    public let sniffedFormat: AudioFormat
+
+    public init(fileURL: URL, byteCount: Int, sniffedFormat: AudioFormat) {
+        self.fileURL = fileURL
+        self.byteCount = byteCount
+        self.sniffedFormat = sniffedFormat
+    }
+}
+
+public struct AICueCandidateProvenance: Sendable, Equatable {
+    public let providerID: AICueProviderID
+    public let modelID: String
+    public let generationID: UUID
+    public let requestOrdinal: Int
+    public let providerRequestID: String?
+
+    public init(
+        providerID: AICueProviderID,
+        modelID: String,
+        generationID: UUID,
+        requestOrdinal: Int,
+        providerRequestID: String?
+    ) {
+        self.providerID = providerID
+        self.modelID = modelID
+        self.generationID = generationID
+        self.requestOrdinal = requestOrdinal
+        self.providerRequestID = providerRequestID
+    }
+}
+
+public struct AICueCandidate: Identifiable, Sendable, Equatable {
+    public let id: UUID
+    public let variant: AICueVariant
+    public let asset: AICueTemporaryAudioAsset
+    public let durationMilliseconds: Int
+    public let mediaType: String
+    public let provenance: AICueCandidateProvenance
+
+    public init(
+        id: UUID,
+        variant: AICueVariant,
+        asset: AICueTemporaryAudioAsset,
+        durationMilliseconds: Int,
+        mediaType: String,
+        provenance: AICueCandidateProvenance
+    ) {
+        self.id = id
+        self.variant = variant
+        self.asset = asset
+        self.durationMilliseconds = durationMilliseconds
+        self.mediaType = mediaType
+        self.provenance = provenance
+    }
+}
+
+public struct AICueGeneration: Identifiable, Sendable, Equatable {
+    public let id: UUID
+    public let plan: AICueSoundPlan
+    public let candidates: [AICueCandidate]
+    public let generatedAt: Date
+
+    public init(
+        id: UUID,
+        plan: AICueSoundPlan,
+        candidates: [AICueCandidate],
+        generatedAt: Date
+    ) {
+        self.id = id
+        self.plan = plan
+        self.candidates = candidates
+        self.generatedAt = generatedAt
+    }
+}
+
+public enum AICueGenerationError: Error, Sendable, Equatable {
+    case validation(AICueValidationError)
+    case credentialRequired
+    case credentialUnavailable
+    case provider(AICueProviderError)
+    case audioTooLarge
+    case unsupportedAudio
+    case audioDurationUnavailable
+    case audioTooLong
+    case temporaryStorageUnavailable
+    case cancelled
+}
+
+package protocol AICueRetrySleeping: Sendable {
+    func sleep(seconds: Int) async throws
+}
+
+public protocol AICueGenerating: Sendable {
+    func generate(description: String, locale: String) async throws -> AICueGeneration
+    func discard(generationID: UUID) async
+    func discardAll() async
+}
+
+private struct AICueSystemRetrySleeper: AICueRetrySleeping {
+    func sleep(seconds: Int) async throws {
+        try await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+    }
+}
+
+/// Owns the all-or-nothing lifetime of one three-candidate generation. The actor retains only
+/// private temporary-directory identities; descriptions and SoundPlans remain in the returned
+/// in-memory generation and are never serialized here.
+public actor AICueGenerationEngine: AICueGenerating {
+    private static let maximumAudioBytes = 5 * 1_024 * 1_024
+    private static let maximumDurationSeconds = 3.0
+    private static let staleLifetime: TimeInterval = 24 * 60 * 60
+
+    private let vault: any AICueCredentialVault
+    private let provider: any AICueProvider
+    private let temporaryRoot: URL
+    private let durationProbe: any AudioDurationProbing
+    private let retrySleeper: any AICueRetrySleeping
+    private let planner = AICueSoundPlanner()
+    private let compiler = ElevenLabsAICueRequestCompiler()
+    private var activeDirectories: [UUID: URL] = [:]
+
+    public init(
+        vault: any AICueCredentialVault,
+        provider: any AICueProvider,
+        temporaryRoot: URL,
+        durationProbe: any AudioDurationProbing
+    ) {
+        self.vault = vault
+        self.provider = provider
+        self.temporaryRoot = temporaryRoot
+        self.durationProbe = durationProbe
+        retrySleeper = AICueSystemRetrySleeper()
+    }
+
+    package init(
+        vault: any AICueCredentialVault,
+        provider: any AICueProvider,
+        temporaryRoot: URL,
+        durationProbe: any AudioDurationProbing,
+        retrySleeper: any AICueRetrySleeping
+    ) {
+        self.vault = vault
+        self.provider = provider
+        self.temporaryRoot = temporaryRoot
+        self.durationProbe = durationProbe
+        self.retrySleeper = retrySleeper
+    }
+
+    public func generate(
+        description: String,
+        locale: String
+    ) async throws -> AICueGeneration {
+        let request: AICueGenerationRequest
+        let plan: AICueSoundPlan
+        do {
+            request = try AICueGenerationRequest(description: description, locale: locale)
+            plan = try planner.makePlan(for: request)
+        } catch let error as AICueValidationError {
+            throw AICueGenerationError.validation(error)
+        } catch {
+            throw AICueGenerationError.temporaryStorageUnavailable
+        }
+
+        let credential: SensitiveCredentialInput
+        do {
+            guard let stored = try await vault.credential(for: request.providerID) else {
+                throw AICueGenerationError.credentialRequired
+            }
+            credential = stored
+        } catch let error as AICueGenerationError {
+            throw error
+        } catch {
+            throw AICueGenerationError.credentialUnavailable
+        }
+
+        do {
+            try Task.checkCancellation()
+        } catch {
+            throw AICueGenerationError.cancelled
+        }
+
+        let generationID = UUID()
+        let directory = temporaryRoot.appendingPathComponent(
+            "generation-\(generationID.uuidString.lowercased())",
+            isDirectory: true)
+        do {
+            try ensurePrivateDirectoryTree(at: temporaryRoot)
+            purgeStaleDirectories(now: Date())
+            try ensurePrivateDirectoryTree(at: directory)
+        } catch {
+            throw AICueGenerationError.temporaryStorageUnavailable
+        }
+        activeDirectories[generationID] = directory
+        var succeeded = false
+        defer {
+            if !succeeded {
+                activeDirectories.removeValue(forKey: generationID)
+                try? FileManager.default.removeItem(at: directory)
+            }
+        }
+
+        var candidates: [AICueCandidate] = []
+        candidates.reserveCapacity(AICueGenerationRequest.candidateCount)
+        for variant in AICueVariant.allCases {
+            do {
+                try Task.checkCancellation()
+            } catch {
+                throw AICueGenerationError.cancelled
+            }
+            let compiled = compiler.compile(plan: plan, variant: variant)
+            let response: AICueProviderAudioResponse
+            do {
+                response = try await generateWithConservativeRetry(
+                    request: compiled,
+                    credential: credential)
+            } catch let error as AICueProviderError {
+                if error == .cancelled { throw AICueGenerationError.cancelled }
+                throw AICueGenerationError.provider(error)
+            } catch is CancellationError {
+                throw AICueGenerationError.cancelled
+            } catch {
+                throw AICueGenerationError.provider(.transportFailure)
+            }
+
+            let candidate = try validateAndPersist(
+                response: response,
+                variant: variant,
+                generationID: generationID,
+                directory: directory)
+            candidates.append(candidate)
+        }
+
+        guard candidates.count == AICueGenerationRequest.candidateCount else {
+            throw AICueGenerationError.provider(.transportFailure)
+        }
+        succeeded = true
+        return AICueGeneration(
+            id: generationID,
+            plan: plan,
+            candidates: candidates,
+            generatedAt: Date())
+    }
+
+    public func discard(generationID: UUID) {
+        guard let directory = activeDirectories.removeValue(forKey: generationID) else { return }
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    public func discardAll() {
+        let directories = Array(activeDirectories.values)
+        activeDirectories.removeAll()
+        for directory in directories {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    private func generateWithConservativeRetry(
+        request: ElevenLabsAICueCompiledRequest,
+        credential: SensitiveCredentialInput
+    ) async throws -> AICueProviderAudioResponse {
+        do {
+            return try await provider.generateCandidate(request: request, credential: credential)
+        } catch AICueProviderError.rateLimited(let retryAfter?)
+            where (1...5).contains(retryAfter)
+        {
+            try await retrySleeper.sleep(seconds: retryAfter)
+            try Task.checkCancellation()
+            // Exactly one retry. A second 429, like every other failure, escapes immediately.
+            return try await provider.generateCandidate(request: request, credential: credential)
+        }
+    }
+
+    private func validateAndPersist(
+        response: AICueProviderAudioResponse,
+        variant: AICueVariant,
+        generationID: UUID,
+        directory: URL
+    ) throws -> AICueCandidate {
+        guard response.data.count <= Self.maximumAudioBytes else {
+            throw AICueGenerationError.audioTooLarge
+        }
+        guard let format = sniffAudioFormat(response.data) else {
+            throw AICueGenerationError.unsupportedAudio
+        }
+        let fileURL = directory.appendingPathComponent(
+            "candidate-\(variant.ordinal).\(format.rawValue)")
+        do {
+            try writePrivateFileWithoutReplacing(response.data, to: fileURL)
+        } catch {
+            throw AICueGenerationError.temporaryStorageUnavailable
+        }
+        guard
+            let duration = durationProbe.probeDuration(of: fileURL),
+            duration.isFinite,
+            duration > 0
+        else {
+            throw AICueGenerationError.audioDurationUnavailable
+        }
+        guard duration <= Self.maximumDurationSeconds else {
+            throw AICueGenerationError.audioTooLong
+        }
+
+        return AICueCandidate(
+            id: UUID(),
+            variant: variant,
+            asset: AICueTemporaryAudioAsset(
+                fileURL: fileURL,
+                byteCount: response.data.count,
+                sniffedFormat: format),
+            durationMilliseconds: Int((duration * 1_000).rounded()),
+            mediaType: response.mediaType,
+            provenance: AICueCandidateProvenance(
+                providerID: .elevenLabs,
+                modelID: response.modelID,
+                generationID: generationID,
+                requestOrdinal: variant.ordinal,
+                providerRequestID: response.requestID))
+    }
+
+    private func purgeStaleDirectories(now: Date) {
+        guard
+            let contents = try? FileManager.default.contentsOfDirectory(
+                at: temporaryRoot,
+                includingPropertiesForKeys: [
+                    .contentModificationDateKey, .isDirectoryKey, .isSymbolicLinkKey,
+                ],
+                options: [.skipsHiddenFiles])
+        else { return }
+        let active = Set(activeDirectories.values.map(\.standardizedFileURL))
+        for candidate in contents where candidate.lastPathComponent.hasPrefix("generation-") {
+            let standardized = candidate.standardizedFileURL
+            guard !active.contains(standardized) else { continue }
+            guard
+                let values = try? candidate.resourceValues(forKeys: [
+                    .contentModificationDateKey, .isDirectoryKey, .isSymbolicLinkKey,
+                ]),
+                values.isDirectory == true,
+                values.isSymbolicLink != true,
+                let modified = values.contentModificationDate,
+                now.timeIntervalSince(modified) > Self.staleLifetime
+            else { continue }
+            try? FileManager.default.removeItem(at: candidate)
+        }
+    }
+}
+
+private func writePrivateFileWithoutReplacing(_ data: Data, to url: URL) throws {
+    let descriptor = url.withUnsafeFileSystemRepresentation { path -> Int32 in
+        guard let path else {
+            errno = EINVAL
+            return -1
+        }
+        return Darwin.open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+    }
+    guard descriptor >= 0 else { throw AICueGenerationError.temporaryStorageUnavailable }
+    var shouldUnlink = true
+    defer {
+        _ = Darwin.close(descriptor)
+        if shouldUnlink { _ = url.withUnsafeFileSystemRepresentation(Darwin.unlink) }
+    }
+
+    let writeSucceeded = data.withUnsafeBytes { rawBuffer -> Bool in
+        guard var pointer = rawBuffer.baseAddress else { return data.isEmpty }
+        var remaining = rawBuffer.count
+        while remaining > 0 {
+            let written = Darwin.write(descriptor, pointer, remaining)
+            if written < 0 {
+                if errno == EINTR { continue }
+                return false
+            }
+            guard written > 0 else { return false }
+            remaining -= written
+            pointer = pointer.advanced(by: written)
+        }
+        return true
+    }
+    guard writeSucceeded, Darwin.fchmod(descriptor, 0o600) == 0 else {
+        throw AICueGenerationError.temporaryStorageUnavailable
+    }
+    shouldUnlink = false
+}

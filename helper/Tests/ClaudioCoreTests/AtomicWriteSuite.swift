@@ -342,15 +342,15 @@ private func callOpenParens(of name: String, member: Bool, in source: String) ->
 
 // MARK: - 围栏之内：内容替换式写盘的形状判定
 
-/// `source` 里每一处 `.write(…)` 调用的**实参文本**（左括号后到配平右括号前）。
+/// `source` 里指定调用的**实参文本**（左括号后到配平右括号前）。
 ///
 /// 按**配平括号**取，不按行 —— 一次跨行的写调用按行取只看得到半截实参，看不到下一行的
 /// `options: .atomic`，会把一次合法的原子写判成非原子 → 假红 → 有人来「修」检测器 → 修松了 → 假绿。
 ///
 /// 输入是**清空过字符串字面量**的代码，所以数括号是安全的：字符串里的 `(` 到不了这里。
-private func writeCallArguments(in code: String) -> [String] {
+private func callArguments(of name: String, member: Bool, in code: String) -> [String] {
     var calls: [String] = []
-    for openParen in callOpenParens(of: "write", member: true, in: code) {
+    for openParen in callOpenParens(of: name, member: member, in: code) {
         var depth = 1
         var index = code.index(after: openParen)
         while index < code.endIndex, depth > 0 {
@@ -372,6 +372,25 @@ private func writeCallArguments(in code: String) -> [String] {
         calls.append(String(code[code.index(after: openParen)..<index]))
     }
     return calls
+}
+
+/// `source` 里每一处 `.write(…)` 成员调用。内容替换原子性检查仍只消费成员形状；POSIX
+/// `Darwin.write(...)` 与裸 `write(...)` 的专用计数由 `rawPOSIXWriteCallArguments` 统一完成。
+private func writeCallArguments(in code: String) -> [String] {
+    callArguments(of: "write", member: true, in: code)
+}
+
+private func rawPOSIXWriteCallArguments(in code: String) -> [String] {
+    let qualified = callArguments(of: "write", member: true, in: code)
+        .filter { !isContentReplacingWrite($0) }
+    let unqualified = callArguments(of: "write", member: false, in: code)
+    return qualified + unqualified
+}
+
+private func openCallArguments(in code: String) -> [String] {
+    return
+        callArguments(of: "open", member: true, in: code)
+        + callArguments(of: "open", member: false, in: code)
 }
 
 /// `arguments` 按**顶层逗号**（括号 / 方括号 / 花括号深度为 0 的那些）切开、逐段 trim。
@@ -418,6 +437,9 @@ private func isContentReplacingWrite(_ arguments: String) -> Bool {
 /// - `Data.write(to:options:)` → `options` 的**值**必须是一个**字面**含 `.atomic` 的选项字面量。
 /// - `String.write(to:atomically:encoding:)` / `write(toFile:atomically:encoding:)` → `atomically:`
 ///   必须**字面**是 `true`。
+///
+/// Foundation 不支持把 `.atomic` 与 `.withoutOverwriting` 组合：当前实现会直接 fatalError，而不是
+/// 抛出可处理错误。因此即使数组里含 `.atomic`，只要同时含 `.withoutOverwriting` 也必须判为不安全。
 private func isAtomicWrite(_ arguments: String) -> Bool {
     for argument in topLevelArguments(arguments) {
         if argument.hasPrefix("options:") {
@@ -453,7 +475,7 @@ private func optionsValueIsAtomic(_ value: String) -> Bool {
     guard trimmed.hasPrefix("["), trimmed.hasSuffix("]") else { return false }
     let elements = topLevelArguments(String(trimmed.dropFirst().dropLast()))
     guard !elements.isEmpty, elements.allSatisfy(isSimpleOptionMember) else { return false }
-    return elements.contains(".atomic")
+    return elements.contains(".atomic") && !elements.contains(".withoutOverwriting")
 }
 
 private func isSimpleOptionMember(_ element: String) -> Bool {
@@ -534,6 +556,13 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     ],
     // 包 manifest 的原子写。
     "gui/Sources/ClaudioGUICore/ManifestBinding.swift": [".write("],
+    // AI 提示音候选只在随机、私有 generation 目录中首次创建：O_EXCL + O_NOFOLLOW 禁止覆盖，
+    // 完整短写循环后把 fd 固定为 0600；任一步失败立即 unlink。`.atomic` 单独会替换已有路径，
+    // 与 `.withoutOverwriting` 组合则会 fatalError，不能替代这里的不可覆盖首次创建；具体形状由
+    // suite ⑤ 逐项钉死。
+    "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift": [
+        ".write(", "fchmod(", "open(", "write(",
+    ],
     // 星标删除：锁内重验后的单目录项 `unlink(2)`；不跟随 symlink，也不递归删除目录。
     "gui/Sources/ClaudioGUICore/PackGallery.swift": ["unlink("],
     // T6 forkPack：出厂包整份目录拷进调用独占 staging（`.copyItem(`），成功后用
@@ -565,10 +594,56 @@ private let writeIntentOpenFlags = ["O_WRONLY", "O_RDWR", "O_APPEND"]
 ///
 /// - `Log.swift` —— 日志追加（`O_APPEND` 上的单次 `write(2)`，追加不是替换）。
 /// - `FileLock.swift` —— 锁文件本身（`flock(2)` 要一个 fd）。
+/// - `AICueGenerationEngine.swift` —— 私有随机目录中的 O_EXCL 首次候选创建；suite ⑤ 审计其
+///   no-follow、0600、短写循环与失败删除契约。
 private let rawWriteFileDescriptorHolders: Set<String> = [
     "helper/Sources/ClaudioCore/Log.swift",
     "helper/Sources/ClaudioCore/FileLock.swift",
+    "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift",
 ]
+
+private func isAuditedPrivateInitialWrite(path: String, arguments: String) -> Bool {
+    path == "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift"
+        && arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+            == "descriptor, pointer, remaining"
+}
+
+private func unauditedNonContentReplacingWrites(
+    path: String,
+    arguments: [String]
+) -> [String] {
+    var consumedAuditedSite = false
+    return arguments.filter { candidate in
+        guard
+            !consumedAuditedSite,
+            isAuditedPrivateInitialWrite(path: path, arguments: candidate)
+        else { return true }
+        consumedAuditedSite = true
+        return false
+    }
+}
+
+private func functionBody(named name: String, in source: String) -> String? {
+    guard
+        let signature = source.range(of: "func \(name)("),
+        let openBrace = source[signature.upperBound...].firstIndex(of: "{")
+    else { return nil }
+
+    var depth = 1
+    var index = source.index(after: openBrace)
+    while index < source.endIndex {
+        switch source[index] {
+        case "{": depth += 1
+        case "}": depth -= 1
+        default: break
+        }
+        if depth == 0 {
+            return String(source[source.index(after: openBrace)..<index])
+        }
+        index = source.index(after: index)
+    }
+    return nil
+}
 
 // MARK: - Suites
 
@@ -650,19 +725,21 @@ func runAtomicWriteSuites() {
     suite("写盘绊线②：围栏之内 —— 每一处内容替换式写盘都必须原子，且**每个文件几处**是钉死的") {
         var sites: [String: Int] = [:]
         for (path, source) in scanned {
-            for arguments in writeCallArguments(in: source.codeWithoutStringLiterals) {
-                // 不带路径标签的写（`FileHandle.write(_:)` / `.write(contentsOf:)`）—— 一次
-                // `FileHandle(forWritingTo: configFile)` 就能绕开这整条不变量。不静默跳过。
-                guard isContentReplacingWrite(arguments) else {
-                    expect(
-                        false,
-                        "\(path) 有一处这条绊线读不懂的写调用：`.write(\(arguments))` —— 它的第一个实参"
-                            + "既不是 `to:` 也不是 `toFile:`，所以它不是「把一条路径的内容整个换掉」。"
-                            + "但它**也不是**能放过去的东西：一次 `FileHandle(forWritingTo: configFile)` "
-                            + "就从这条不变量底下整个走过去了。要么改用 `Data.write(to:options:.atomic)`，"
-                            + "要么在这里就地为它写一条断言 —— 别让它无声无息")
-                    continue
-                }
+            let argumentsInFile = writeCallArguments(in: source.codeWithoutStringLiterals)
+            let nonContentReplacing = argumentsInFile.filter { !isContentReplacingWrite($0) }
+            for arguments in unauditedNonContentReplacingWrites(
+                path: path,
+                arguments: nonContentReplacing)
+            {
+                expect(
+                    false,
+                    "\(path) 有一处这条绊线读不懂的写调用：`.write(\(arguments))` —— 它的第一个实参"
+                        + "既不是 `to:` 也不是 `toFile:`，所以它不是「把一条路径的内容整个换掉」。"
+                        + "但它**也不是**能放过去的东西：一次 `FileHandle(forWritingTo: configFile)` "
+                        + "就从这条不变量底下整个走过去了。要么改用 `Data.write(to:options:.atomic)`，"
+                        + "要么在这里就地为它写一条断言 —— 别让它无声无息")
+            }
+            for arguments in argumentsInFile where isContentReplacingWrite(arguments) {
                 sites[path, default: 0] += 1
                 expect(
                     isAtomicWrite(arguments),
@@ -728,7 +805,7 @@ func runAtomicWriteSuites() {
         // —— 四种合法原子写法，一处都不许误判（假红会被人删掉，删掉之后真正的非原子写也就没人守了）——
         let legal = [
             "try data.write(to: configFile, options: .atomic)",
-            "try data.write(to: f, options: [.atomic, .withoutOverwriting])",
+            "try data.write(to: f, options: [.atomic, .completeFileProtection])",
             "try? String(stamp).write(to: stateFile, atomically: true, encoding: .utf8)",
             "try s.write(toFile: path, atomically: true, encoding: .utf8)",
         ]
@@ -742,12 +819,15 @@ func runAtomicWriteSuites() {
         }
 
         // —— fail closed：读不出确切形状 ⇒ 非原子。上一版这几条**全是假绿** ——
+        // 最后一条另有硬边界：Foundation 的 `.atomic + .withoutOverwriting` 会 fatalError，不能作为
+        // O_EXCL 首次创建的高层替代品。
         let failClosed = [
             "try s.write(to: f, atomically: false, encoding: .utf8)",
             "try data.write(to: f, options: writeOptions)",
             "try data.write(to: f, options: fast ? [] : .atomic)",
             "try data.write(to: f, options: .atomicUnlessSandboxed)",
             "try data.write(to: f, options: makeOptions(.atomic))",
+            "try data.write(to: f, options: [.atomic, .withoutOverwriting])",
         ]
         for source in failClosed {
             let arguments = writeCallArguments(in: pipeline(source))
@@ -826,11 +906,55 @@ func runAtomicWriteSuites() {
                 "围栏误伤：`\(source)` → \(tokens.sorted())。它不是一次写盘，而一条假红最后总是"
                     + "被删掉的那一个 —— 删掉之后，真正的写盘也就没人围了")
         }
+
+        let duplicatePrivateWrites = pipeline(
+            """
+            _ = Darwin.write(descriptor, pointer, remaining)
+            _ = Darwin.write(descriptor, pointer, remaining)
+            """)
+        let duplicateArguments = writeCallArguments(in: duplicatePrivateWrites)
+            .filter { !isContentReplacingWrite($0) }
+        expect(
+            unauditedNonContentReplacingWrites(
+                path: "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift",
+                arguments: duplicateArguments
+            ).count == 1,
+            "AI 提示音的裸写豁免只能消费一个已审计调用点；同文件复制第二处同形 write(2) 必须变红")
+
+        let duplicateRawWriters = pipeline(
+            """
+            let first = Darwin.open(path, O_WRONLY | O_CREAT, 0o600)
+            _ = Darwin.write(first, pointer, remaining)
+            let flags = O_WRONLY | O_TRUNC
+            let second = open(otherPath, flags)
+            _ = write(second, pointer, remaining)
+            """)
+        expect(
+            rawPOSIXWriteCallArguments(in: duplicateRawWriters).count == 2
+                && openCallArguments(in: duplicateRawWriters).count == 2,
+            "POSIX 裸写调用点计数必须同时识别 qualified/unqualified write 与写意图 open；"
+                + "即使第二个 open 的 flags 来自变量，token Set 已存在时新增裸写者也必须变红")
+
+        let scopedFunctions = pipeline(
+            """
+            private func target() {
+                _ = Darwin.write(descriptor, pointer, remaining)
+            }
+            private func decoy() {
+                _ = Darwin.fchmod(descriptor, 0o600)
+            }
+            """)
+        let targetBody = functionBody(named: "target", in: scopedFunctions)
+        expect(
+            targetBody?.contains("Darwin.write(descriptor, pointer, remaining)") == true
+                && targetBody?.contains("Darwin.fchmod(descriptor, 0o600)") == false,
+            "函数体审计必须在配平花括号处停止；相邻函数里的安全 token 不能替目标写者补齐契约")
     }
 
-    suite("写盘绊线④：写意图的裸 fd —— 只有 Log（日志追加）与 FileLock（锁文件）可以持有") {
+    suite("写盘绊线④：写意图的裸 fd —— 只允许逐文件登记并由专门不变量审计") {
         // 围栏（①）已经把 `open(` 围住了：谁在 open 都得在台账里。这一条再往里钉一层：那几个 open
-        // 里，**带写意图**的只能是这两个。`SafeFileRead` / `AudioImport` 的 `open` 是 `O_RDONLY`。
+        // 里，**带写意图**的只能是登记过的三个。`SafeFileRead` / `AudioImport` 的 `open` 是
+        // `O_RDONLY`。
         var holders: Set<String> = []
         for (path, source) in scanned {
             let code = source.codeWithoutStringLiterals
@@ -842,12 +966,84 @@ func runAtomicWriteSuites() {
                 + "期望 \(rawWriteFileDescriptorHolders.sorted())，实际 \(holders.sorted())。"
                 + "多出来的那个文件在用 `open(2)` + `write(2)` 写盘 —— 要么改用"
                 + "`Data.write(to:options:.atomic)`，要么在这里加进名单并写清为什么非裸写不可"
-                + "（Log 是因为追加不是替换，FileLock 是因为 `flock(2)` 要一个 fd）")
+                + "（Log 是追加，FileLock 需要 `flock(2)`，AI 候选则由 suite ⑤ 单独审计）")
         // 反恒真：flag 表被清空 / `code` 全是空串 → `holders` 为空集；而空集与一个非空期望集不相等，
         // 上面那条会红。但如果有人把期望集也改空，两个空集就相等了 —— 所以正面钉一次「名单非空」。
         expect(
-            !rawWriteFileDescriptorHolders.isEmpty && holders.count >= 2,
-            "裸写名单空了 —— 两个空集相等，上面那条断言于是恒真。Log 与 FileLock 都真的在裸写，"
-                + "它们必须被这条绊线看见")
+            !rawWriteFileDescriptorHolders.isEmpty && holders.count >= 3,
+            "裸写名单空了 —— 两个空集相等，上面那条断言于是恒真。Log、FileLock 与 AI 候选写者"
+                + "都真的在裸写，它们必须被这条绊线看见")
+    }
+
+    suite("写盘绊线⑤：AI 提示音临时候选只做私有、不可覆盖、失败即删除的首次创建") {
+        let path = "gui/Sources/ClaudioGUICore/AICueGenerationEngine.swift"
+        guard
+            let source = scanned[path]?.codeWithoutStringLiterals,
+            let writerBody = functionBody(named: "writePrivateFileWithoutReplacing", in: source)
+        else {
+            expect(false, "读不到 \(path)，无法审计 AI 提示音临时候选写入")
+            return
+        }
+
+        let requiredSafetyShapes = [
+            "O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC",
+            "Darwin.open(path, O_WRONLY",
+            "Darwin.write(descriptor, pointer, remaining)",
+            "if errno == EINTR { continue }",
+            "Darwin.fchmod(descriptor, 0o600) == 0",
+            "if shouldUnlink { _ = url.withUnsafeFileSystemRepresentation(Darwin.unlink) }",
+        ]
+        for shape in requiredSafetyShapes {
+            expect(
+                writerBody.contains(shape),
+                "AI 提示音裸 fd 写入缺少安全形状：`\(shape)`。这条路径不是稳定文件的内容替换："
+                    + "它只在随机 generation 目录内 O_EXCL 首次创建 0600 候选；任何短写、错误或权限"
+                    + "设置失败都必须 unlink，完整生成返回前也已有运行时测试复验三个文件")
+        }
+        expect(
+            source.components(separatedBy: "writePrivateFileWithoutReplacing(").count == 3,
+            "AI 提示音私有候选写者必须恰好一处声明、一处生产调用；新增调用可能把这项临时文件豁免"
+                + "误用于稳定路径，必须重新审计")
+        expect(
+            writerBody.contains("while remaining > 0")
+                && writerBody.contains("remaining -= written")
+                && writerBody.contains("pointer = pointer.advanced(by: written)"),
+            "AI 提示音私有候选必须循环处理短写，不能把一次 write(2) 当成完整写入")
+        let rawWrites = writeCallArguments(in: writerBody).filter { !isContentReplacingWrite($0) }
+        expect(
+            rawWrites.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                == ["descriptor, pointer, remaining"],
+            "AI 提示音私有候选函数体内必须恰好一个已审计 write(2) 调用点")
+
+        let fileRawWrites = rawPOSIXWriteCallArguments(in: source)
+        let bodyRawWrites = rawPOSIXWriteCallArguments(in: writerBody)
+        expect(
+            fileRawWrites.count == 1 && bodyRawWrites.count == 1
+                && fileRawWrites[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                    == "descriptor, pointer, remaining",
+            "AI 提示音生产文件必须只有目标函数体内这一处 POSIX write；新增 qualified/unqualified"
+                + " 裸写调用都必须变红")
+
+        let fileOpens = openCallArguments(in: source)
+        let bodyOpens = openCallArguments(in: writerBody)
+        expect(
+            fileOpens.count == 1 && bodyOpens.count == 1,
+            "AI 提示音生产文件必须只有目标函数体内这一处已审计 open；无法静态分类 flags 的新增调用"
+                + "也必须 fail closed，不能被 token 集合掩盖")
+
+        let orderedSafetyShapes = [
+            "var shouldUnlink = true",
+            "let writeSucceeded = data.withUnsafeBytes",
+            "Darwin.write(descriptor, pointer, remaining)",
+            "guard writeSucceeded, Darwin.fchmod(descriptor, 0o600) == 0",
+            "shouldUnlink = false",
+        ]
+        let orderedOffsets = orderedSafetyShapes.compactMap { writerBody.range(of: $0)?.lowerBound }
+        expect(
+            orderedOffsets.count == orderedSafetyShapes.count
+                && zip(orderedOffsets, orderedOffsets.dropFirst()).allSatisfy { pair in
+                    pair.0 < pair.1
+                },
+            "AI 提示音候选只能在完整写入并固定 0600 后解除失败 unlink；安全步骤顺序改变必须变红")
     }
 }

@@ -20,6 +20,7 @@ public struct SoundPackFacts: Sendable, Equatable {
     public let isCC0: Bool
     public let factoryIntegrity: Bool?
     public let eventCoverage: [Event: CoverageState]
+    public let eventAudioDisplayNames: [Event: String]
     public let cardState: PackCardState
     public let audioInventory: SoundPackAudioInventory
 
@@ -33,6 +34,7 @@ public struct SoundPackFacts: Sendable, Equatable {
         isCC0: Bool,
         factoryIntegrity: Bool?,
         eventCoverage: [Event: CoverageState],
+        eventAudioDisplayNames: [Event: String] = [:],
         cardState: PackCardState,
         audioInventory: SoundPackAudioInventory
     ) {
@@ -42,6 +44,7 @@ public struct SoundPackFacts: Sendable, Equatable {
             isCC0: isCC0,
             factoryIntegrity: factoryIntegrity,
             eventCoverage: eventCoverage,
+            eventAudioDisplayNames: eventAudioDisplayNames,
             cardState: cardState,
             audioInventory: audioInventory,
             declaredAudioFileNames: [],
@@ -55,6 +58,7 @@ public struct SoundPackFacts: Sendable, Equatable {
         isCC0: Bool,
         factoryIntegrity: Bool?,
         eventCoverage: [Event: CoverageState],
+        eventAudioDisplayNames: [Event: String],
         cardState: PackCardState,
         audioInventory: SoundPackAudioInventory,
         declaredAudioFileNames: [String],
@@ -66,6 +70,7 @@ public struct SoundPackFacts: Sendable, Equatable {
         self.isCC0 = isCC0
         self.factoryIntegrity = factoryIntegrity
         self.eventCoverage = eventCoverage
+        self.eventAudioDisplayNames = eventAudioDisplayNames
         self.cardState = cardState
         self.audioInventory = audioInventory
         self.declaredAudioFileNames = declaredAudioFileNames
@@ -80,6 +85,7 @@ public struct SoundPackFacts: Sendable, Equatable {
             isCC0: isCC0,
             factoryIntegrity: factoryIntegrity,
             eventCoverage: eventCoverage,
+            eventAudioDisplayNames: eventAudioDisplayNames,
             cardState: cardState,
             audioInventory: audioInventory,
             declaredAudioFileNames: declaredAudioFileNames,
@@ -162,7 +168,8 @@ public struct SoundPackLibrarySnapshot: Sendable, Equatable {
             EventRow(
                 event: event,
                 coverage: coverage[event] ?? .unmapped,
-                enabled: config.isEnabled(event))
+                enabled: config.isEnabled(event),
+                audioDisplayName: fact(for: packID)?.eventAudioDisplayNames[event])
         }
     }
 
@@ -893,6 +900,7 @@ private func readSoundPackFacts(
         isCC0: false,
         factoryIntegrity: nil,
         eventCoverage: [:],
+        eventAudioDisplayNames: [:],
         cardState: .broken(reason: reason),
         audioInventory: .unavailable(.manifestUnreadable(reason: reason)),
         declaredAudioFileNames: [],
@@ -965,6 +973,10 @@ private func readSoundPackFactsOnce(
         config: ClaudioConfig(selectedPack: ""))
     let eventCoverage = Dictionary(
         uniqueKeysWithValues: coverageRows.map { ($0.event, $0.coverage) })
+    let eventAudioDisplayNames = Dictionary(
+        uniqueKeysWithValues: coverageRows.compactMap { row in
+            row.audioDisplayName.map { (row.event, $0) }
+        })
     let presentCount = eventCoverage.values.filter(\.previewEnabled).count
     let cardState: PackCardState =
         presentCount == Event.allCases.count
@@ -984,6 +996,7 @@ private func readSoundPackFactsOnce(
             currentManifestData: manifestData,
             builtinPackIDs: factoryPackIDs),
         eventCoverage: eventCoverage,
+        eventAudioDisplayNames: eventAudioDisplayNames,
         cardState: cardState,
         audioInventory: .deferred,
         declaredAudioFileNames: declaredAudioFileNames,
@@ -1012,6 +1025,7 @@ private func brokenSoundPackFacts(
             currentManifestData: nil,
             builtinPackIDs: factoryPackIDs),
         eventCoverage: [:],
+        eventAudioDisplayNames: [:],
         cardState: .broken(reason: reason),
         audioInventory: .unavailable(inventoryError),
         declaredAudioFileNames: [],

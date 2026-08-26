@@ -17,6 +17,38 @@ public struct PackManifest: Decodable, Equatable, Sendable {
     /// directory (e.g. `"stop.mp3"`). A missing event key means silent fallback for
     /// that event — not a pack error (ENGINEERING.md: "缺失 event → 该事件静默，不报错").
     public let events: [String: String]
+    /// Optional user-facing names keyed by audio filename. The runtime never uses these values to
+    /// resolve or play files; only current event filenames are retained so a third-party manifest
+    /// cannot turn this small read model into an unbounded metadata cache.
+    public let audioNames: [String: String]
+
+    public init(id: String, events: [String: String], audioNames: [String: String] = [:]) {
+        self.id = id
+        self.events = events
+        self.audioNames = audioNames
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case events
+        case audioNames = "audio_names"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        let decodedEvents = try container.decode([String: String].self, forKey: .events)
+        events = decodedEvents
+        let decodedNames = try container.decodeIfPresent(
+            [String: String].self,
+            forKey: .audioNames) ?? [:]
+        let currentFiles = Set(Event.allCases.compactMap { decodedEvents[$0.manifestKey] })
+        audioNames = decodedNames.filter { fileName, displayName in
+            currentFiles.contains(fileName)
+                && fileName.utf8.count <= 1_024
+                && displayName.utf8.count <= 1_024
+        }
+    }
 }
 
 /// Whether `id` is a safe pack id: a single, non-escaping path component. Rejects the

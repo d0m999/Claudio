@@ -356,6 +356,39 @@ func runPanelConfigControllerSuites() {
         }
     }
 
+    suite("PanelConfigController 轻量刷新：AI 提示音名称不因静音或 config-only 重投影丢失") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let packsDir = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "named-pack", "master_volume": 0.42, "events": {} }"#,
+                to: configFile)
+            writeFixture(
+                #"{ "id": "named-pack", "events": { "stop": "generated.mp3" }, "audio_names": { "generated.mp3": "小猫两声" } }"#,
+                to: packsDir.appendingPathComponent("named-pack/manifest.json"))
+            writeFixture("audio", to: packsDir.appendingPathComponent("named-pack/generated.mp3"))
+            let controller = PanelConfigController(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: makeEnvironment(packsDir))
+
+            expect(
+                controller.eventRows.first(where: { $0.event == .stop })?.audioDisplayName
+                    == "小猫两声",
+                "前提：初次包投影必须读到 manifest 的用户名称")
+            controller.toggleMute(.stop)
+            expect(
+                controller.eventRows.first(where: { $0.event == .stop })?.audioDisplayName
+                    == "小猫两声",
+                "静音成功后的轻量刷新必须保留名称元数据")
+            controller.reloadConfigOnly()
+            expect(
+                controller.eventRows.first(where: { $0.event == .stop })?.audioDisplayName
+                    == "小猫两声",
+                "显式 config-only 重投影也不能把名称降级回底层文件名")
+        }
+    }
+
     suite("PanelConfigController.reloadConfigOnly 遇到外部切包：升级为全量重载并 retarget 到新包") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")

@@ -190,6 +190,20 @@ private func performManifestMutation(
         }
     }
 
+    // Optional AI cue display metadata is just as untrusted as `events`. Existing malformed
+    // content must stop every manifest writer; silently replacing it with `{}` would erase user
+    // metadata while reporting a successful bind.
+    if let rawAudioNames = json["audio_names"] {
+        guard let names = rawAudioNames as? [String: Any] else {
+            return .failure(
+                .manifestUnreadable(reason: "manifest.json 的 audio_names 字段不是 JSON 对象"))
+        }
+        guard names.values.allSatisfy({ $0 is String }) else {
+            return .failure(
+                .manifestUnreadable(reason: "manifest.json 的 audio_names 存在非字符串取值，无法安全改写"))
+        }
+    }
+
     // Fail CLOSED 校验 3/3：顶层 `id` 缺失 / 非字符串 / 空。
     guard let id = json["id"] as? String, !id.isEmpty else {
         return .failure(
@@ -312,6 +326,96 @@ public func bindEventToManifest(
         var events = (json["events"] as? [String: Any]) ?? [:]
         events[event.manifestKey] = fileName
         json["events"] = events
+    }
+}
+
+public struct AICueManifestBindingOutcome: Sendable, Equatable {
+    public let event: Event
+    public let fileName: String
+    public let finalDisplayName: String
+
+    public init(event: Event, fileName: String, finalDisplayName: String) {
+        self.event = event
+        self.fileName = fileName
+        self.finalDisplayName = finalDisplayName
+    }
+}
+
+/// Publishes the event mapping and its user-facing AI cue name in one manifest transaction. The
+/// name is metadata only; file resolution continues to consume `events[event]` exclusively.
+@MainActor
+public func bindAICueToManifest(
+    event: Event,
+    fileName: String,
+    displayName: AICueDisplayName,
+    packID: String,
+    environment: AudioImportEnvironment
+) -> Result<AICueManifestBindingOutcome, ManifestBindError> {
+    let userPackDirectory: URL
+    switch resolveUserPackDirectory(packID: packID, environment: environment) {
+    case .success(let directory): userPackDirectory = directory
+    case .failure(let error): return .failure(error)
+    }
+    guard let resolvedFile = safePackFileURL(fileName, in: userPackDirectory) else {
+        return .failure(.unsafeFileName)
+    }
+    guard nonEmptyRegularFileExists(at: resolvedFile) else {
+        return .failure(.fileNotFound(fileName: fileName))
+    }
+
+    var finalDisplayName = displayName.value
+    let result = mutateManifestJSON(
+        at: userPackDirectory,
+        lockFile: environment.packsLockFile
+    ) { json in
+        var events = (json["events"] as? [String: Any]) ?? [:]
+        var audioNames = (json["audio_names"] as? [String: Any]) ?? [:]
+        let occupiedNames = audioNames.compactMap { key, value -> String? in
+            guard key != fileName else { return nil }
+            return value as? String
+        }
+        finalDisplayName = uniqueAICueDisplayName(
+            requested: displayName.value,
+            occupiedNames: occupiedNames)
+        events[event.manifestKey] = fileName
+        audioNames[fileName] = finalDisplayName
+        json["events"] = events
+        json["audio_names"] = audioNames
+    }
+    switch result {
+    case .success:
+        return .success(
+            AICueManifestBindingOutcome(
+                event: event,
+                fileName: fileName,
+                finalDisplayName: finalDisplayName))
+    case .failure(let error):
+        return .failure(error)
+    }
+}
+
+private func uniqueAICueDisplayName(
+    requested: String,
+    occupiedNames: [String]
+) -> String {
+    let locale = Locale(identifier: "en_US_POSIX")
+    let comparisonKey: (String) -> String = { value in
+        value.folding(
+            options: [.caseInsensitive, .diacriticInsensitive, .widthInsensitive],
+            locale: locale)
+    }
+    let occupied = Set(occupiedNames.map(comparisonKey))
+    guard occupied.contains(comparisonKey(requested)) else { return requested }
+    // Every ordinal produces a distinct folded suffix. With N occupied names, one of the first
+    // N + 1 suffix candidates must therefore be free; the manifest's 1 MiB read ceiling also
+    // keeps this loop tightly bounded for untrusted input without an arbitrary saturation point.
+    var ordinal = 2
+    while true {
+        let suffix = " \(ordinal)"
+        let prefixLimit = max(1, AICueDisplayName.maximumCharacters - suffix.count)
+        let candidate = String(requested.prefix(prefixLimit)) + suffix
+        if !occupied.contains(comparisonKey(candidate)) { return candidate }
+        ordinal += 1
     }
 }
 

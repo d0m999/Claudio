@@ -5,6 +5,7 @@ import Foundation
 @MainActor
 public protocol AudioPreviewPlaying: AnyObject {
     func play(fileAt url: URL, volume: Float)
+    func stop()
 }
 
 /// Retains the active `NSSound`; a local value would deallocate immediately and cut playback off.
@@ -15,9 +16,15 @@ public final class NSSoundAudioPreviewPlayer: AudioPreviewPlaying {
     public init() {}
 
     public func play(fileAt url: URL, volume: Float) {
+        currentSound?.stop()
         let sound = NSSound(contentsOf: url, byReference: true)
         sound?.volume = volume
         currentSound = sound
         sound?.play()
+    }
+
+    public func stop() {
+        currentSound?.stop()
+        currentSound = nil
     }
 }

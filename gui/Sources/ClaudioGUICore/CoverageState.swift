@@ -72,11 +72,20 @@ public struct EventRow: Sendable, Equatable {
     public let event: Event
     public let coverage: CoverageState
     public let enabled: Bool
+    /// Optional user-facing asset name. Playback and containment continue to use only the
+    /// filename carried by `coverage`; this metadata can never become a path.
+    public let audioDisplayName: String?
 
-    public init(event: Event, coverage: CoverageState, enabled: Bool) {
+    public init(
+        event: Event,
+        coverage: CoverageState,
+        enabled: Bool,
+        audioDisplayName: String? = nil
+    ) {
         self.event = event
         self.coverage = coverage
         self.enabled = enabled
+        self.audioDisplayName = audioDisplayName
     }
 }
 
@@ -159,10 +168,14 @@ public func packCoverage(
     config: ClaudioConfig
 ) -> [EventRow] {
     Event.allCases.map { event in
-        EventRow(
+        let displayName = manifest.events[event.manifestKey]
+            .flatMap { manifest.audioNames[$0] }
+            .flatMap { try? AICueDisplayName($0).value }
+        return EventRow(
             event: event,
             coverage: coverageState(for: event, manifest: manifest, packDirectory: packDirectory),
-            enabled: config.isEnabled(event))
+            enabled: config.isEnabled(event),
+            audioDisplayName: displayName)
     }
 }
 

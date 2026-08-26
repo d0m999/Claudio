@@ -1518,6 +1518,105 @@ public final class SoundPacksWindowModel: ObservableObject {
         return bindSelectedAudioFile(importedFile.fileName, to: event, packID: selectedPackID)
     }
 
+    public func aiCueAdoptionEligibility(for event: Event) -> AICueAdoptionEligibility {
+        guard writesAllowed else { return .ineligible(.writesStopped) }
+        return ClaudioGUICore.aiCueAdoptionEligibility(
+            surface: managedSurface,
+            event: event,
+            selectedPackID: selectedPackID,
+            config: baseConfig,
+            packCards: packCards,
+            builtinPackIDs: builtinPackIDs)
+    }
+
+    public func captureAICueAdoptionTarget(
+        for event: Event
+    ) -> Result<AICueAdoptionTarget, AICueAdoptionIneligibility> {
+        switch aiCueAdoptionEligibility(for: event) {
+        case .eligible(let target): return .success(target)
+        case .ineligible(let reason): return .failure(reason)
+        }
+    }
+
+    /// Imports the chosen private candidate first, then re-proves the explicit target immediately
+    /// before one atomic name+event manifest mutation. A failed second phase leaves the old event
+    /// mapping untouched and reports the already-imported file honestly as an orphan.
+    public func adoptAICue(
+        candidate: AICueCandidate,
+        displayName: AICueDisplayName,
+        target: AICueAdoptionTarget
+    ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
+        switch captureAICueAdoptionTarget(for: target.event) {
+        case .success(let current) where current == target:
+            break
+        case .success:
+            return .failure(.ineligible(.targetChanged))
+        case .failure(let reason):
+            return .failure(.ineligible(reason))
+        }
+
+        let importRequest = AudioImportRequest(
+            sourceURL: candidate.asset.fileURL,
+            suggestedFileName:
+                "ai-cue-\(candidate.id.uuidString.lowercased())."
+                + candidate.asset.sniffedFormat.rawValue)
+        let completion: SoundPacksWindowAudioImportCompletion
+        switch await importSelectedAudioFiles([importRequest], expectedPackID: target.packID) {
+        case .failure(let error):
+            return .failure(.importUnavailable(error))
+        case .success(let result):
+            completion = result
+        }
+        guard let imported = completion.result.accepted.first else {
+            if let rejection = completion.result.rejected.first {
+                return .failure(.importRejected(rejection.reason))
+            }
+            return .failure(
+                .importUnavailable(
+                    .importRejected(message: "生成候选未能导入，当前声音未改变。")))
+        }
+
+        switch captureAICueAdoptionTarget(for: target.event) {
+        case .success(let current) where current == target:
+            break
+        case .success:
+            return .failure(
+                .importedButNotBound(
+                    imported: imported,
+                    reason: .ineligible(.targetChanged)))
+        case .failure(let reason):
+            return .failure(
+                .importedButNotBound(
+                    imported: imported,
+                    reason: .ineligible(reason)))
+        }
+
+        beginSoundPackMutation(packIDs: [target.packID])
+        switch bindAICueToManifest(
+            event: target.event,
+            fileName: imported.fileName,
+            displayName: displayName,
+            packID: target.packID,
+            environment: environment)
+        {
+        case .success(let binding):
+            _ = finishAudioAction(.success(()), invalidatingPackID: target.packID)
+            return .success(
+                AICueAdoptionOutcome(
+                    target: target,
+                    importedFile: imported,
+                    finalDisplayName: binding.finalDisplayName))
+        case .failure(let error):
+            _ = finishAudioAction(
+                .failure(.bind(error)),
+                invalidatingPackID: target.packID)
+            return .failure(
+                .importedButNotBound(
+                    imported: imported,
+                    reason: .manifest(error)))
+        }
+    }
+
     @discardableResult
     private func bindSelectedAudioFile(
         _ fileName: String,

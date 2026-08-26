@@ -495,7 +495,11 @@ public final class PanelConfigController: ObservableObject {
         baseConfig = reloaded.resolvedConfig
         applyEffectiveConfig()
         eventRows = eventRows.map { row in
-            EventRow(event: row.event, coverage: row.coverage, enabled: config.isEnabled(row.event))
+            EventRow(
+                event: row.event,
+                coverage: row.coverage,
+                enabled: config.isEnabled(row.event),
+                audioDisplayName: row.audioDisplayName)
         }
     }
 
@@ -520,6 +524,22 @@ public final class PanelConfigController: ObservableObject {
                 packID: config.selectedPack,
                 environment: environment)
         }
+    }
+
+    /// Fail-closed projection for the Events & Sounds AI affordance. The controller already owns
+    /// the only coherent tuple of base config, effective surface profile, pack facts, and factory
+    /// identities, so the SwiftUI layer never reconstructs adoption authorization from labels.
+    public func aiCueAdoptionEligibility(for event: Event) -> AICueAdoptionEligibility {
+        guard case .operational = configState, surfaceSoundIssue == nil else {
+            return .ineligible(.writesStopped)
+        }
+        return ClaudioGUICore.aiCueAdoptionEligibility(
+            surface: selectedSurface,
+            event: event,
+            selectedPackID: config.selectedPack,
+            config: baseConfig,
+            packCards: packCards,
+            builtinPackIDs: builtinPackIDs)
     }
 
     public func resetSelectedSurfaceOverrides() {

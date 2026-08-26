@@ -275,6 +275,62 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let actionUnmuteHint: Self = "action.unmute.hint"
     public static let actionConfigureSound: Self = "action.configure-sound"
     public static let actionConfigureSoundHint: Self = "action.configure-sound.hint"
+    public static let aiCueGenerateAction: Self = "ai-cue.action.generate"
+    public static let aiCueGenerateHint: Self = "ai-cue.action.generate.hint"
+    public static let aiCueServiceTitle: Self = "ai-cue.service.title"
+    public static let aiCueServiceSubtitle: Self = "ai-cue.service.subtitle"
+    public static let aiCueServiceChecking: Self = "ai-cue.service.checking"
+    public static let aiCueServiceMissing: Self = "ai-cue.service.missing"
+    public static let aiCueServiceConfigured: Self = "ai-cue.service.configured"
+    public static let aiCueServiceUnavailable: Self = "ai-cue.service.unavailable"
+    public static let aiCueConfigureKey: Self = "ai-cue.credential.configure"
+    public static let aiCueManageKey: Self = "ai-cue.credential.manage"
+    public static let aiCueCredentialTitle: Self = "ai-cue.credential.title"
+    public static let aiCueCredentialKeyLabel: Self = "ai-cue.credential.key-label"
+    public static let aiCueCredentialPrivacy: Self = "ai-cue.credential.privacy"
+    public static let aiCueCredentialKeychain: Self = "ai-cue.credential.keychain"
+    public static let aiCueCredentialValidateSave: Self = "ai-cue.credential.validate-save"
+    public static let aiCueCredentialDelete: Self = "ai-cue.credential.delete"
+    public static let aiCueCredentialDeleteTitle: Self = "ai-cue.credential.delete-title"
+    public static let aiCueCredentialDeleteMessage: Self = "ai-cue.credential.delete-message"
+    public static let aiCueEligibilityGlobal: Self = "ai-cue.eligibility.global"
+    public static let aiCueEligibilityBuiltin: Self = "ai-cue.eligibility.builtin"
+    public static let aiCueEligibilityShared: Self = "ai-cue.eligibility.shared"
+    public static let aiCueEligibilityUnavailable: Self = "ai-cue.eligibility.unavailable"
+    public static let aiCueComposerTitle: Self = "ai-cue.composer.title"
+    public static let aiCueStageDescription: Self = "ai-cue.stage.description"
+    public static let aiCueStageCandidates: Self = "ai-cue.stage.candidates"
+    public static let aiCueDescriptionLabel: Self = "ai-cue.description.label"
+    public static let aiCueDescriptionHelp: Self = "ai-cue.description.help"
+    public static let aiCueDescriptionPlaceholder: Self = "ai-cue.description.placeholder"
+    public static let aiCueGenerateCandidates: Self = "ai-cue.generate-candidates"
+    public static let aiCueGenerating: Self = "ai-cue.generating"
+    public static let aiCueDescriptionSummary: Self = "ai-cue.description.summary"
+    public static let aiCueModifyDescription: Self = "ai-cue.description.modify"
+    public static let aiCueNameLabel: Self = "ai-cue.name.label"
+    public static let aiCueNameHelp: Self = "ai-cue.name.help"
+    public static let aiCueCandidateClear: Self = "ai-cue.candidate.clear"
+    public static let aiCueCandidateBrisk: Self = "ai-cue.candidate.brisk"
+    public static let aiCueCandidateRestrained: Self = "ai-cue.candidate.restrained"
+    public static let aiCueUseForEvent: Self = "ai-cue.use-for-event"
+    public static let aiCueRegenerate: Self = "ai-cue.regenerate"
+    public static let aiCueAppliedTitle: Self = "ai-cue.applied.title"
+    public static let aiCueAppliedMessage: Self = "ai-cue.applied.message"
+    public static let aiCueErrorDescriptionRequired: Self = "ai-cue.error.description-required"
+    public static let aiCueErrorDescriptionTooLong: Self = "ai-cue.error.description-too-long"
+    public static let aiCueErrorSpeechNeedsText: Self = "ai-cue.error.speech-needs-text"
+    public static let aiCueErrorCredentialRequired: Self = "ai-cue.error.credential-required"
+    public static let aiCueErrorCredentialInvalid: Self = "ai-cue.error.credential-invalid"
+    public static let aiCueErrorCredentialUnavailable: Self = "ai-cue.error.credential-unavailable"
+    public static let aiCueErrorCredits: Self = "ai-cue.error.credits"
+    public static let aiCueErrorRateLimited: Self = "ai-cue.error.rate-limited"
+    public static let aiCueErrorAudioInvalid: Self = "ai-cue.error.audio-invalid"
+    public static let aiCueErrorGeneration: Self = "ai-cue.error.generation"
+    public static let aiCueErrorNameRequired: Self = "ai-cue.error.name-required"
+    public static let aiCueErrorNameInvalid: Self = "ai-cue.error.name-invalid"
+    public static let aiCueErrorAdoptionTarget: Self = "ai-cue.error.adoption-target"
+    public static let aiCueErrorAdoptionPartial: Self = "ai-cue.error.adoption-partial"
+    public static let aiCueErrorAdoption: Self = "ai-cue.error.adoption"
     public static let actionRedetectInProgress: Self = "action.redetect.in-progress"
     public static let actionConnectInProgress: Self = "action.connect.in-progress"
     public static let actionUpgradeInProgress: Self = "action.upgrade.in-progress"
@@ -286,6 +342,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksManagingScope: Self = "window.sound-packs.managing-scope"
     public static let soundPacksInvalidScope: Self = "window.sound-packs.invalid-scope"
     public static let soundPacksDamagedScope: Self = "window.sound-packs.damaged-scope"
+    public static let eventSettingsTitle: Self = "event-settings.title"
+    public static let eventSettingsWindowTitle: Self = "window.event-settings.title"
     public static let integrationsWindowTitle: Self = "window.integrations.title"
     public static let integrationsClearReceiptHistoryConfirm: Self =
         "integrations.clear-receipt-history.confirm"
@@ -620,9 +678,29 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelCapabilityPartial, .panelCapabilityUnsupported,
         .panelCapabilitySupportedNotImplemented, .panelCapabilityPartialNotImplemented,
         .panelCapabilityUnsupportedNotImplemented, .hostDetailsHint,
+        .aiCueGenerateAction, .aiCueGenerateHint, .aiCueServiceTitle, .aiCueServiceSubtitle,
+        .aiCueServiceChecking, .aiCueServiceMissing, .aiCueServiceConfigured,
+        .aiCueServiceUnavailable, .aiCueConfigureKey, .aiCueManageKey, .aiCueCredentialTitle,
+        .aiCueCredentialKeyLabel, .aiCueCredentialPrivacy, .aiCueCredentialKeychain,
+        .aiCueCredentialValidateSave, .aiCueCredentialDelete, .aiCueCredentialDeleteTitle,
+        .aiCueCredentialDeleteMessage, .aiCueEligibilityGlobal, .aiCueEligibilityBuiltin,
+        .aiCueEligibilityShared, .aiCueEligibilityUnavailable, .aiCueComposerTitle,
+        .aiCueStageDescription, .aiCueStageCandidates, .aiCueDescriptionLabel,
+        .aiCueDescriptionHelp, .aiCueDescriptionPlaceholder, .aiCueGenerateCandidates,
+        .aiCueGenerating, .aiCueDescriptionSummary, .aiCueModifyDescription, .aiCueNameLabel,
+        .aiCueNameHelp, .aiCueCandidateClear, .aiCueCandidateBrisk, .aiCueCandidateRestrained,
+        .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle, .aiCueAppliedMessage,
+        .aiCueErrorDescriptionRequired, .aiCueErrorDescriptionTooLong,
+        .aiCueErrorSpeechNeedsText, .aiCueErrorCredentialRequired,
+        .aiCueErrorCredentialInvalid, .aiCueErrorCredentialUnavailable, .aiCueErrorCredits,
+        .aiCueErrorRateLimited, .aiCueErrorAudioInvalid, .aiCueErrorGeneration,
+        .aiCueErrorNameRequired, .aiCueErrorNameInvalid, .aiCueErrorAdoptionTarget,
+        .aiCueErrorAdoptionPartial, .aiCueErrorAdoption,
         .soundPacksWindowTitle, .soundPacksManagingScope, .soundPacksInvalidScope,
         .soundPacksDamagedScope,
-        .integrationsWindowTitle, .integrationsRedetect, .integrationsRedetectLabel,
+        .eventSettingsTitle, .eventSettingsWindowTitle, .integrationsWindowTitle,
+        .integrationsRedetect,
+        .integrationsRedetectLabel,
         .integrationsRedetectHint, .integrationsSourcesSummary, .integrationsSelectionEmpty,
         .integrationsSelectionLabel, .integrationsCapability, .integrationsEvent,
         .integrationsInspector, .integrationsConnection, .integrationsNativeEvent,

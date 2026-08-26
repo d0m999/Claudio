@@ -45,6 +45,9 @@ let package = Package(
             dependencies: [
                 "ClaudioLocalization",
                 .product(name: "ClaudioCore", package: "helper")
+            ],
+            linkerSettings: [
+                .linkedFramework("Security")
             ]
         ),
         // Small shared SwiftUI component/token surface. Both the executable panel and the standard

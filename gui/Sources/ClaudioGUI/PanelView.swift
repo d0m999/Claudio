@@ -7,8 +7,27 @@ import SwiftUI
 
 private let panelScrollViewportCoordinateSpace = "panel.scroll-viewport"
 
+/// Keeps the production config-lock identity in the same guarded source as PanelView's config
+/// writer while allowing another read-model projection for the retained event settings window.
+@MainActor
+func makeEventSettingsConfigController(
+    configFile: URL,
+    environment: AudioImportEnvironment,
+    soundPackLibrary: SoundPackLibrary,
+    soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
+    afterFullReload: @escaping @MainActor (ClaudioConfig) -> Void
+) -> PanelConfigController {
+    PanelConfigController(
+        configFile: configFile,
+        lockFile: ClaudioPaths.configLockFile,
+        environment: environment,
+        soundPackLibrary: soundPackLibrary,
+        afterFullReload: afterFullReload,
+        soundPacksRefreshCoordinator: soundPacksRefreshCoordinator)
+}
+
 /// 菜单栏 Agent 集成面板。生产树只呈现一个当前作用域的五行事件与两行播放设置；
-/// 连接/诊断和完整声音编辑继续由两个 retained window 负责。
+/// 连接/诊断、事件设置和完整声音编辑继续由 retained window 负责。
 public struct PanelView: View {
     @StateObject private var announcer: PanelAnnouncer
     @StateObject private var panelModel: PanelConfigController
@@ -33,6 +52,7 @@ public struct PanelView: View {
     private let configFile: URL
     private let previewPlayer: AudioPreviewPlaying
     private let onManageSounds: @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void
+    private let onOpenEventSettings: @MainActor (EventSettingsWindowRoute, PanelFocusTarget) -> Void
     private let onManageIntegrations: @MainActor (HostID?, PanelFocusTarget) -> Void
     private let onRetryBootstrap: @MainActor () -> Void
     private let onAudibilityInputsChanged: @MainActor () -> Void
@@ -50,6 +70,11 @@ public struct PanelView: View {
         soundPackLibrary: SoundPackLibrary,
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
         onManageSounds: @escaping @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void,
+        onOpenEventSettings:
+            @escaping @MainActor (
+                EventSettingsWindowRoute,
+                PanelFocusTarget
+            ) -> Void,
         onManageIntegrations: @escaping @MainActor (HostID?, PanelFocusTarget) -> Void,
         onRetryBootstrap: @escaping @MainActor () -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
@@ -63,6 +88,7 @@ public struct PanelView: View {
         self.bootstrapReports = bootstrapReports
         self.languageStore = languageStore
         self.onManageSounds = onManageSounds
+        self.onOpenEventSettings = onOpenEventSettings
         self.onManageIntegrations = onManageIntegrations
         self.onRetryBootstrap = onRetryBootstrap
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
@@ -118,6 +144,7 @@ public struct PanelView: View {
         self.languageStore = languageStore
         self.previewPlayer = NSSoundAudioPreviewPlayer()
         self.onManageSounds = { _, _ in }
+        self.onOpenEventSettings = { _, _ in }
         self.onManageIntegrations = { _, _ in }
         self.onRetryBootstrap = {}
         self.onAudibilityInputsChanged = {}
@@ -535,8 +562,8 @@ public struct PanelView: View {
     private var soundPackActions: some View {
         HStack(spacing: 6) {
             Button(l10n.text(.panelOpenSettings)) {
-                onManageSounds(
-                    .overview(surface: selectedScope.scope.surface),
+                onOpenEventSettings(
+                    EventSettingsWindowRoute(scope: selectedScope.scope),
                     .openSoundSettings)
             }
             .buttonStyle(.bordered)
@@ -757,13 +784,11 @@ public struct PanelView: View {
     }
 
     private func playPreview(for row: EventRow) {
-        guard case .present(let fileName) = row.coverage,
-            let packDirectory = resolvePackDirectory(
-                id: panelModel.config.selectedPack,
-                userPacksDirectory: audioEnvironment.userPacksDirectory,
-                bundledPacksDirectory: audioEnvironment.bundledPacksDirectory),
-            let file = safePackFileURL(fileName, in: packDirectory),
-            nonEmptyRegularFileExists(at: file)
+        guard
+            let file = eventPreviewFileURL(
+                row: row,
+                packID: panelModel.config.selectedPack,
+                environment: audioEnvironment)
         else {
             panelModel.reload()
             return

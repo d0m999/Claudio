@@ -23,6 +23,83 @@ public enum PanelSoundScopeID: Sendable, Equatable, Hashable, Identifiable {
     }
 }
 
+/// Retained“事件与提示音”窗口的显式入口。路由直接携带声音作用域，避免把展示名称或
+/// Host Product 重新解析成配置写入目标。
+public struct EventSettingsWindowRoute: Sendable, Equatable, Hashable {
+    public let scope: PanelSoundScopeID
+
+    public init(scope: PanelSoundScopeID) {
+        self.scope = scope
+    }
+
+    public var surface: HostSurfaceID? { scope.surface }
+
+    public func soundPacksRoute(packID: String, event: Event) -> SoundPacksWindowRoute {
+        .editEvent(surface: surface, packID: packID, event: event)
+    }
+}
+
+/// Resolves the file that both event surfaces may preview. Keeping the stale-coverage recheck in
+/// one place prevents the panel and retained window from drifting on symlink or empty-file safety.
+public func eventPreviewFileURL(
+    row: EventRow,
+    packID: String,
+    environment: AudioImportEnvironment
+) -> URL? {
+    guard case .present(let fileName) = row.coverage,
+        let packDirectory = resolvePackDirectory(
+            id: packID,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory),
+        let file = safePackFileURL(fileName, in: packDirectory),
+        nonEmptyRegularFileExists(at: file)
+    else { return nil }
+    return file
+}
+
+/// Stable focus identities for the retained Events & Sounds window. The first scope is always the
+/// deterministic entry point; event controls follow the visible row order through SwiftUI's key
+/// view loop.
+public enum EventSettingsFocusTarget: Sendable, Equatable, Hashable {
+    case scope(PanelSoundScopeID)
+    case manageSoundPacks
+    case generateAICue(Event)
+    case configure(Event)
+    case preview(Event)
+    case mute(Event)
+}
+
+public func eventSettingsFirstFocusTarget(
+    scopes: [PanelSoundScopeID]
+) -> EventSettingsFocusTarget? {
+    scopes.first.map(EventSettingsFocusTarget.scope)
+}
+
+/// A standard window has its own width-driven degradation rules. Unlike
+/// ``PanelLayoutAdaptation``, this value never carries the menu-bar popover's fixed width or
+/// waveform decisions into a resizable window.
+public struct EventSettingsWindowLayout: Sendable, Equatable {
+    public let metadataStacks: Bool
+    public let actionsMoveBelow: Bool
+
+    public init(metadataStacks: Bool, actionsMoveBelow: Bool) {
+        self.metadataStacks = metadataStacks
+        self.actionsMoveBelow = actionsMoveBelow
+    }
+}
+
+public func eventSettingsWindowLayout(
+    availableWidth: Double,
+    typeScale: Double
+) -> EventSettingsWindowLayout {
+    let safeWidth = availableWidth.isFinite && availableWidth > 0 ? availableWidth : 0
+    let safeScale = typeScale.isFinite && typeScale > 0 ? typeScale : 1
+    let normalizedWidth = safeWidth / safeScale
+    return EventSettingsWindowLayout(
+        metadataStacks: normalizedWidth < 560,
+        actionsMoveBelow: normalizedWidth < 500)
+}
+
 /// 全宽声音作用域菜单的一项。状态仍是语义枚举；图标与颜色只在 SwiftUI 层选择。
 public struct PanelSoundScopePresentation: Sendable, Equatable, Identifiable {
     public var id: PanelSoundScopeID { scope }
@@ -85,10 +162,16 @@ public func panelSoundScopeMenuLayout(
     let optionHeight = max(46, 46 * typeScale)
     let diagnosticsHeight = max(34, 34 * typeScale)
     let chromeHeight: Double = 21
+    let designHeightLimit = 250 * scale
+    let effectiveAvailableHeight =
+        availableHeight.isFinite && availableHeight > 0
+        ? availableHeight : designHeightLimit
     let optionsContentHeight =
         Double(count) * optionHeight + Double(max(0, count - 1)) * 3
-    let designOptionsLimit = max(0, 250 * scale - diagnosticsHeight - chromeHeight)
-    let viewportOptionsLimit = max(0, availableHeight - diagnosticsHeight - chromeHeight)
+    let designOptionsLimit = max(0, designHeightLimit - diagnosticsHeight - chromeHeight)
+    let viewportOptionsLimit = max(
+        0,
+        effectiveAvailableHeight - diagnosticsHeight - chromeHeight)
     let optionsHeight = min(optionsContentHeight, designOptionsLimit, viewportOptionsLimit)
     return PanelSoundScopeMenuLayout(
         optionHeight: optionHeight,
@@ -96,7 +179,7 @@ public func panelSoundScopeMenuLayout(
         optionsHeight: optionsHeight,
         diagnosticsHeight: diagnosticsHeight,
         totalHeight: min(
-            max(0, availableHeight),
+            effectiveAvailableHeight,
             optionsHeight + diagnosticsHeight + chromeHeight))
 }
 
@@ -188,6 +271,16 @@ public func resolvedPanelSoundScopeSelection(
         return exact.scope
     }
     return scopes.first(where: { $0.scope.surface != nil })?.scope ?? .global
+}
+
+/// Keeps the retained Events & Sounds route on a currently visible sound scope. A Surface may
+/// disappear while the window remains open; resolving through the same rule as the panel prevents
+/// a fallback label from continuing to write to the stale Surface.
+public func resolvedEventSettingsScope(
+    route: EventSettingsWindowRoute,
+    scopes: [PanelSoundScopePresentation]
+) -> PanelSoundScopeID {
+    resolvedPanelSoundScopeSelection(storedValue: route.scope.storedValue, scopes: scopes)
 }
 
 /// `unselected` / missing means the first host refresh has not yet established whether a Surface
@@ -287,7 +380,7 @@ public func panelEventPresentations(
         }
         let soundFileText: String
         switch row.coverage {
-        case .present(let fileName): soundFileText = fileName
+        case .present(let fileName): soundFileText = row.audioDisplayName ?? fileName
         case .unmapped: soundFileText = l10n.text(.panelNoSoundAssigned)
         case .broken(let fileName):
             soundFileText = l10n.format(.panelMissingSound, fileName)

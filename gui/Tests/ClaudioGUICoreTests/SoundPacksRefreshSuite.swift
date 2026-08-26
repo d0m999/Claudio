@@ -2299,12 +2299,12 @@ func runSoundPacksRefreshSuites() async {
             "窗口 owner 可延后焦点恢复，但不得自行启动后台 manifest/config 写路径")
     }
 
-    suite(".openSoundSettings：携带当前 Surface，并通过 pending-close 展示 retained window") {
+    suite(".openSoundSettings：携带当前 Sound Scope，并通过 pending-close 展示事件设置窗口") {
         guard
             let panel = soundPacksCode("gui/Sources/ClaudioGUI/PanelView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let requestBody = soundPacksFunctionBody(
-                after: "fileprivate func requestSoundPacksWindowPresentation(", in: menu),
+                after: "fileprivate func requestEventSettingsWindowPresentation(", in: menu),
             let closeBody = soundPacksFunctionBody(
                 after: "func popoverDidClose(_ notification: Notification)", in: menu)
         else {
@@ -2315,8 +2315,8 @@ func runSoundPacksRefreshSuites() async {
         let panelFlat = collapsingWhitespace(panel)
         expect(
             panelFlat.contains(
-                "onManageSounds( .overview(surface: selectedScope.scope.surface), .openSoundSettings)"),
-            "打开设置必须把当前 Surface 与精确返回焦点交给真窗口入口")
+                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"),
+            "打开设置必须把当前 Sound Scope 与精确返回焦点交给事件设置窗口")
         expect(
             !panel.contains(
                 "NSWorkspace.shared.activateFileViewerSelecting([audioEnvironment.userPacksDirectory])"
@@ -2326,19 +2326,15 @@ func runSoundPacksRefreshSuites() async {
             panel.contains(".focused($focusedTarget, equals: .openSoundSettings)"),
             "打开设置必须认领 .openSoundSettings 焦点契约")
         expect(
-            requestBody.contains("pendingSoundPacksWindowPresentation = (route, target)")
+            requestBody.contains("pendingEventSettingsWindowPresentation = (route, target)")
                 && requestBody.contains("popover.close()"),
             "管理入口必须先记 pending，再强制关闭 transient popover；performClose 可能因 nested "
                 + "popover/child window 失败并留下幽灵 pending")
         expect(
             !requestBody.contains("popover.performClose"),
             "自家窗口导航不得用可拒绝的 performClose；失败后没有 didClose 可消费 pending")
-        expect(
-            closeBody.contains("let previous = previousApp")
-                && closeBody.contains("previousApp = nil"),
-            "popoverDidClose 必须取出并清掉 previous app，普通关闭偿还、窗口导航则转交")
         if let pendingAt = requestBody.range(
-            of: "pendingSoundPacksWindowPresentation = (route, target)"
+            of: "pendingEventSettingsWindowPresentation = (route, target)"
         )?.lowerBound,
             let closeAt = requestBody.range(of: "popover.close()")?.lowerBound
         {
@@ -2349,19 +2345,19 @@ func runSoundPacksRefreshSuites() async {
             expect(false, "管理入口必须同时包含 pending 与强制 close")
         }
         expect(
-            closeBody.contains("if let soundPacksPresentation")
-                && closeBody.contains("route: soundPacksPresentation.route")
-                && closeBody.contains("returnFocusTo: previous"),
-            "popover 关闭完成后必须把 previous-app handback 债务转交给单窗口 owner")
+            closeBody.contains("if let eventSettingsPresentation")
+                && closeBody.contains("route: eventSettingsPresentation.route")
+                && closeBody.contains("to: eventSettingsPresentation.focusTarget"),
+            "事件设置窗口关闭后必须重开面板并恢复精确触发控件")
         if let showAt = closeBody.range(
-            of: "soundPacksWindowController.showWindow("
+            of: "eventSettingsWindowController.showWindow("
         )?.lowerBound,
             let returnAt = closeBody[showAt...].range(of: "return")?.lowerBound,
             let handbackGuardAt = closeBody.range(of: "guard NSApp.isActive")?.lowerBound
         {
             expect(
                 showAt < returnAt && returnAt < handbackGuardAt,
-                "自家窗口 presentation 必须先于 previous-app handback guard 并直接 return")
+                "事件设置窗口 presentation 必须先于 previous-app handback guard 并直接 return")
         } else {
             expect(
                 false,

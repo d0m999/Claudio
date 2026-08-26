@@ -397,6 +397,259 @@
       .panel-range { grid-template-columns: minmax(0,1fr) auto; }
     }
 
+    /*
+     * THROWAWAY TTS PROTOTYPE:
+     * The selected inline core loop is embedded in the existing Events page,
+     * gated by ?prototype=tts. The original page is unchanged without it.
+     * Question: can the internal sound plan stay hidden while users describe
+     * first, then name the chosen cue beside its candidates, with BYOK service
+     * configuration kept outside the per-event generation form?
+     */
+    .tts-prototype-mode .window,
+    .tts-prototype-mode .sidebar,
+    .tts-prototype-mode .content { min-height: 900px; }
+    .tts-prototype-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      min-height: 24px;
+      padding: 0 8px;
+      border-radius: 999px;
+      color: #6e4b9e;
+      background: rgba(175,82,222,.11);
+      font-size: 10px;
+      font-weight: 750;
+      white-space: nowrap;
+    }
+    .tts-service-card {
+      display: grid;
+      grid-template-columns: 34px minmax(0,1fr) auto auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 58px;
+      margin: -13px 0 22px;
+      padding: 9px 11px;
+      border: 1px solid var(--separator);
+      border-radius: 11px;
+      background: var(--group);
+    }
+    .tts-service-icon {
+      display: grid;
+      place-items: center;
+      width: 31px;
+      height: 31px;
+      border-radius: 9px;
+      color: var(--blue);
+      background: rgba(10,132,255,.11);
+      font-size: 15px;
+      font-weight: 750;
+    }
+    .tts-service-copy { min-width: 0; }
+    .tts-service-title { color: var(--text); font-size: 12px; font-weight: 700; }
+    .tts-service-meta { margin-top: 3px; color: var(--secondary); font-size: 10px; line-height: 1.35; }
+    .tts-service-status { display: inline-flex; align-items: center; gap: 5px; color: #a76e00; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .tts-service-status::before { width: 7px; height: 7px; border-radius: 50%; content: ""; background: var(--orange); }
+    .tts-service-status.ready { color: #258c3f; }
+    .tts-service-status.ready::before { background: var(--green); }
+    .tts-event-group { overflow: visible; }
+    .event-row.tts-event-row { grid-template-columns: 27px minmax(0,1fr) auto 38px minmax(126px, 168px); }
+    .event-row.tts-event-row .event-code { display: block; }
+    .event-row.tts-event-row.selected {
+      background: rgba(10,132,255,.075);
+      box-shadow: inset 3px 0 0 var(--blue);
+    }
+    .tts-sound-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; }
+    .tts-sound-actions .plain-button { min-width: 0; max-width: 91px; overflow: hidden; padding-inline: 8px; text-overflow: ellipsis; white-space: nowrap; }
+    .tts-create-button {
+      min-height: 29px;
+      padding: 0 8px;
+      border: 0;
+      border-radius: 7px;
+      color: var(--blue);
+      background: rgba(10,132,255,.10);
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+    .tts-create-button:hover { background: rgba(10,132,255,.17); }
+    .tts-create-button:disabled { color: var(--tertiary); background: transparent; cursor: default; }
+    .tts-inline {
+      padding: 15px 16px 16px;
+      border-bottom: 1px solid var(--separator);
+      background: rgba(10,132,255,.035);
+    }
+    .tts-inline-head,
+    .tts-card-head,
+    .tts-action-row,
+    .tts-request-summary,
+    .tts-status-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .tts-inline-head { margin-bottom: 12px; }
+    .tts-inline-title { color: var(--text); font-size: 13px; font-weight: 700; }
+    .tts-inline-meta { margin-top: 3px; color: var(--secondary); font-size: 10px; line-height: 1.35; }
+    .tts-link-button {
+      padding: 4px 6px;
+      border: 0;
+      color: var(--blue);
+      background: transparent;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .tts-link-button:hover { text-decoration: underline; }
+    .tts-steps { display: flex; align-items: center; gap: 6px; margin-bottom: 11px; }
+    .tts-step {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      color: var(--tertiary);
+      font-size: 10px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+    .tts-step::after { width: 18px; height: 1px; margin-left: 1px; content: ""; background: var(--separator); }
+    .tts-step:last-child::after { display: none; }
+    .tts-step-number { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 50%; color: var(--secondary); background: var(--group-hover); font-size: 9px; }
+    .tts-step.active { color: var(--text); }
+    .tts-step.active .tts-step-number { color: #fff; background: var(--blue); }
+    .tts-step.done { color: var(--secondary); }
+    .tts-step.done .tts-step-number { color: #fff; background: var(--green); }
+    .tts-card {
+      padding: 12px;
+      border: 1px solid var(--separator);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--window) 88%, transparent);
+    }
+    .tts-card + .tts-card { margin-top: 9px; }
+    .tts-card-title { color: var(--text); font-size: 12px; font-weight: 700; }
+    .tts-helper { color: var(--secondary); font-size: 10px; line-height: 1.4; }
+    .tts-prompt-label { display: block; margin-bottom: 6px; color: var(--secondary); font-size: 10px; font-weight: 700; }
+    .tts-name-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; }
+    .tts-name-field { min-width: 0; }
+    .tts-name-input,
+    .tts-secret-input {
+      display: block;
+      width: 100%;
+      min-height: 34px;
+      padding: 7px 9px;
+      border: 1px solid var(--separator);
+      border-radius: 8px;
+      color: var(--text);
+      background: var(--window);
+      font-size: 11px;
+    }
+    .tts-name-input:focus,
+    .tts-secret-input:focus { outline: 3px solid rgba(10,132,255,.20); border-color: var(--blue); }
+    .tts-name-hint { padding-bottom: 8px; color: var(--tertiary); font-size: 9px; text-align: right; white-space: nowrap; }
+    .tts-prompt {
+      display: block;
+      width: 100%;
+      min-height: 74px;
+      resize: vertical;
+      padding: 9px 10px;
+      border: 1px solid var(--separator);
+      border-radius: 8px;
+      color: var(--text);
+      background: var(--window);
+      font: 12px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+    }
+    .tts-prompt:focus { outline: 3px solid rgba(10,132,255,.20); border-color: var(--blue); }
+    .tts-prompt-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 9px; }
+    .tts-error { min-height: 14px; color: var(--red); font-size: 10px; }
+    .tts-primary-button,
+    .tts-secondary-button,
+    .tts-icon-button,
+    .tts-small-button {
+      border: 0;
+      border-radius: 7px;
+      cursor: pointer;
+      font-weight: 680;
+    }
+    .tts-primary-button { min-height: 31px; padding: 0 12px; color: #fff; background: var(--blue); font-size: 11px; }
+    .tts-primary-button:hover { background: #0077ed; }
+    .tts-secondary-button { min-height: 31px; padding: 0 11px; color: var(--text); background: var(--group-hover); font-size: 11px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.04); }
+    .tts-secondary-button:hover { filter: brightness(.96); }
+    .tts-small-button { min-height: 27px; padding: 0 8px; color: var(--blue); background: rgba(10,132,255,.10); font-size: 10px; white-space: nowrap; }
+    .tts-icon-button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; color: var(--blue); background: var(--group-hover); font-size: 10px; }
+    .tts-icon-button.playing { color: #fff; background: var(--blue); }
+    .tts-request-summary {
+      display: grid;
+      gap: 7px;
+      min-height: 56px;
+      margin-bottom: 9px;
+      padding: 10px;
+      border: 1px solid var(--separator);
+      border-radius: 9px;
+      background: color-mix(in srgb, var(--window) 88%, transparent);
+    }
+    .tts-name-support { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+    .tts-name-support .tts-error { flex: 0 0 auto; text-align: right; }
+    .tts-summary-description { display: flex; align-items: center; justify-content: space-between; min-width: 0; gap: 8px; padding-top: 7px; border-top: 1px solid var(--separator); color: var(--secondary); font-size: 10px; line-height: 1.45; }
+    .tts-summary-description strong { color: var(--text); }
+    .tts-summary-line { display: flex; align-items: center; min-width: 0; gap: 6px; }
+    .tts-summary-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .tts-candidate-list { display: grid; gap: 6px; }
+    .tts-candidate-row {
+      display: grid;
+      grid-template-columns: 28px minmax(0,1fr) 68px auto;
+      align-items: center;
+      gap: 8px;
+      min-height: 50px;
+      padding: 6px 8px;
+      border: 1px solid var(--separator);
+      border-radius: 9px;
+      background: var(--window);
+      cursor: default;
+    }
+    .tts-candidate-name { color: var(--text); font-size: 11px; font-weight: 700; }
+    .tts-candidate-meta { margin-top: 3px; color: var(--secondary); font-size: 9px; white-space: nowrap; }
+    .tts-sim-badge { color: #6e4b9e; font-weight: 700; }
+    .tts-wave { display: flex; align-items: center; justify-content: center; gap: 2px; height: 24px; color: var(--blue); }
+    .tts-wave i { display: block; width: 2px; border-radius: 2px; background: currentColor; opacity: .62; }
+    .tts-wave i:nth-child(1), .tts-wave i:nth-child(7) { height: 7px; }
+    .tts-wave i:nth-child(2), .tts-wave i:nth-child(6) { height: 14px; }
+    .tts-wave i:nth-child(3), .tts-wave i:nth-child(5) { height: 20px; }
+    .tts-wave i:nth-child(4) { height: 11px; }
+    .tts-action-row { margin-top: 10px; }
+    .tts-spinner { width: 24px; height: 24px; margin-bottom: 9px; border: 3px solid rgba(10,132,255,.16); border-top-color: var(--blue); border-radius: 50%; animation: tts-spin .8s linear infinite; }
+    @keyframes tts-spin { to { transform: rotate(360deg); } }
+    .tts-generation { display: grid; min-height: 116px; place-items: center; text-align: center; }
+    .tts-status { padding: 15px; border-radius: 10px; background: var(--group); }
+    .tts-status.success { background: rgba(52,199,89,.10); }
+    .tts-status.failure { background: rgba(255,69,58,.09); }
+    .tts-status-symbol { display: grid; place-items: center; width: 25px; height: 25px; flex: 0 0 25px; border-radius: 50%; color: #fff; background: var(--green); font-size: 12px; font-weight: 800; }
+    .tts-status.failure .tts-status-symbol { background: var(--red); }
+    .tts-modal-backdrop {
+      position: fixed;
+      z-index: 50;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: rgba(0,0,0,.34);
+      backdrop-filter: blur(5px);
+    }
+    .tts-modal {
+      width: min(460px, calc(100vw - 48px));
+      overflow: hidden;
+      border: 1px solid rgba(0,0,0,.18);
+      border-radius: 14px;
+      background: var(--window);
+      box-shadow: 0 24px 70px rgba(0,0,0,.34), 0 2px 10px rgba(0,0,0,.16);
+    }
+    .tts-modal-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 18px 18px 12px; }
+    .tts-modal-title { color: var(--text); font-size: 16px; font-weight: 730; letter-spacing: -.02em; }
+    .tts-modal-copy { margin-top: 5px; color: var(--secondary); font-size: 11px; line-height: 1.45; }
+    .tts-modal-close { width: 25px; height: 25px; padding: 0; border: 0; border-radius: 50%; color: var(--secondary); background: var(--group-hover); cursor: pointer; font-size: 13px; }
+    .tts-modal-body { display: grid; gap: 12px; padding: 0 18px 16px; }
+    .tts-provider-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding: 8px 10px; border-radius: 9px; background: var(--group); }
+    .tts-provider-label { color: var(--secondary); font-size: 10px; font-weight: 650; }
+    .tts-provider-value { color: var(--text); font-size: 11px; font-weight: 700; text-align: right; }
+    .tts-modal-note { padding: 9px 10px; border-radius: 9px; color: var(--secondary); background: rgba(10,132,255,.075); font-size: 10px; line-height: 1.45; }
+    .tts-modal-actions { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 12px 18px 16px; border-top: 1px solid var(--separator); }
+    .tts-danger-button { min-height: 31px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--red); background: rgba(255,69,58,.09); cursor: pointer; font-size: 11px; font-weight: 680; }
+    .tts-confirm-delete { padding: 12px; border-radius: 9px; color: var(--text); background: rgba(255,69,58,.08); font-size: 11px; line-height: 1.45; }
+
     @media (prefers-color-scheme: dark) {
       :root {
         --window: #252627;
@@ -426,12 +679,19 @@
       .app-row.selected { background: #3a3c3d; }
       .event-app-option.active { color: var(--text); background: #3a3c3d; box-shadow: inset 0 0 0 1px rgba(255,255,255,.06); }
       .info-callout { background: #303233; }
+      .tts-prototype-tag, .tts-sim-badge { color: #d8a7f0; }
+      .tts-card { background: rgba(37,38,39,.94); }
+      .tts-secondary-button { box-shadow: inset 0 0 0 1px rgba(255,255,255,.05); }
+      .tts-modal { border-color: rgba(255,255,255,.15); }
     }
 
     @media (max-width: 1100px) {
       body { padding: 14px; }
       .window { width: calc(100vw - 28px); grid-template-columns: 220px minmax(0,1fr); }
       .content { padding-inline: 36px; }
+      .event-row.tts-event-row { grid-template-columns: 27px minmax(0,1fr) auto 38px minmax(118px, 148px); }
+      .tts-service-card { grid-template-columns: 34px minmax(0,1fr) auto; }
+      .tts-service-status { display: none; }
     }
   </style>
 </head>
@@ -461,7 +721,7 @@
           <button class="sidebar-item" type="button" data-page="about"><span class="sidebar-icon blue"><svg class="sidebar-symbol" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8.5"></circle><path d="M12 10.8v5.3"></path><circle class="symbol-fill" cx="12" cy="7.6" r=".8"></circle></svg></span>关于</button>
         </div>
       </nav>
-      <div class="sidebar-foot"><span class="sidebar-foot-dot"></span>本地优先 · 无网络客户端</div>
+      <div class="sidebar-foot"><span class="sidebar-foot-dot"></span><span id="sidebar-foot-copy">本地优先 · 无网络客户端</span></div>
     </aside>
     <main class="content"><div id="page-root" class="content-inner"></div></main>
   </div>
@@ -518,6 +778,81 @@
     let selectedApp = initialQuery.get('app') || 'workbuddy';
     let panelSelectedApp = initialQuery.get('panelApp') || selectedApp;
     let toastTimer;
+    const isTTSPrototype = initialQuery.get('prototype') === 'tts';
+    const ttsStages = ['prompt', 'interpreting', 'generating', 'candidates', 'importing', 'applied', 'failed'];
+    const ttsCandidates = [
+      { id: 'A', name: '清晰', duration: '1.2 秒' },
+      { id: 'B', name: '轻快', duration: '1.4 秒' },
+      { id: 'C', name: '克制', duration: '1.6 秒' }
+    ];
+    const ttsBindings = {
+      task_start: { file: 'light-01.aiff', label: '轻提示 · 01' },
+      stop: { file: 'xylophone-02.aiff', label: '木琴 · 02' }
+    };
+    const initialTTSStageKey = initialQuery.get('stage') || 'prompt';
+    const initialTTSStage = ttsStages.includes(initialTTSStageKey) ? initialTTSStageKey : 'prompt';
+    const initialTTSCredentialValue = initialQuery.get('credential');
+    const initialTTSCredentialReady = initialTTSCredentialValue
+      ? initialTTSCredentialValue === 'ready'
+      : initialTTSStage !== 'prompt';
+    let ttsTransitionTimer;
+    let ttsCredentialState = {
+      ready: initialTTSCredentialReady,
+      modalOpen: false,
+      confirmDelete: false
+    };
+
+    function ttsDefaultsForEvent(eventId) {
+      if (eventId === 'task_start') {
+        return {
+          cueName: '轻铃开始处理',
+          prompt: '先响一声轻铃，再轻声说“开始处理”',
+          soundPlan: {
+            soundDescription: '轻铃一声后，轻声说出指定台词',
+            spokenContent: '开始处理',
+            language: '简体中文',
+            styleDescription: '轻柔、清晰',
+            targetDuration: '2 秒以内'
+          }
+        };
+      }
+      return {
+        cueName: '小猫两声',
+        prompt: '一只小猫短促地叫两声，第二声稍高，不要背景音乐',
+        soundPlan: {
+          soundDescription: '小猫短促叫两声，第二声稍高',
+          spokenContent: null,
+          language: null,
+          styleDescription: '自然、干净',
+          targetDuration: '约 1.5 秒'
+        }
+      };
+    }
+
+    function makeTTSState(stage = 'prompt', eventId = 'stop') {
+      const defaults = ttsDefaultsForEvent(eventId);
+      const hasConfirmedPlan = ['generating', 'candidates', 'importing', 'applied', 'failed'].includes(stage);
+      return {
+        stage,
+        eventId,
+        cueName: defaults.cueName,
+        cueNameIsManual: false,
+        nameError: '',
+        prompt: defaults.prompt,
+        promptError: '',
+        soundPlan: { ...defaults.soundPlan },
+        confirmedSoundPlan: hasConfirmedPlan ? { ...defaults.soundPlan } : null,
+        selectedCandidate: ['importing', 'applied'].includes(stage) ? 'B' : null,
+        playing: null,
+        inlineOpen: true
+      };
+    }
+
+    let ttsState = makeTTSState(initialTTSStage);
+    if (isTTSPrototype && initialTTSStage === 'applied') {
+      ttsBindings.stop = { file: 'cue-stop-b.aiff', label: '小猫两声' };
+      eventsByApp.workbuddy.find(item => item.id === 'stop').sound = ttsBindings.stop.label;
+    }
 
     function status(state, label) { return `<span class="status ${state}"><span class="status-dot"></span>${label}</span>`; }
     function appStatus(app) { return app.enabled ? status(app.state, app.stateLabel) : status('unavailable', '已停用'); }
@@ -631,9 +966,297 @@
         <div class="info-callout"><span class="info-icon">i</span><span>“已配置”不等于“已激活”：只有当前安装实例产生真实 receipt，状态才会变为已激活。普通 Chat 不继承 Codex view 的 hooks。</span></div>`;
     };
 
+    function ttsEscape(value) {
+      return String(value ?? '').replace(/[&<>"]/g, character => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'
+      })[character]);
+    }
+
+    function currentTTSEvent() {
+      return eventById('workbuddy', ttsState.eventId) || eventById('workbuddy', 'stop');
+    }
+
+    function currentTTSBinding() {
+      return ttsBindings[ttsState.eventId] || { file: 'unbound.aiff', label: '未设置' };
+    }
+
+    function ttsWave() {
+      return '<span class="tts-wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>';
+    }
+
+    function syncTTSURL() {
+      if (!isTTSPrototype) return;
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('prototype', 'tts');
+        url.searchParams.delete('variant');
+        url.searchParams.set('stage', ttsState.stage);
+        url.searchParams.set('credential', ttsCredentialState.ready ? 'ready' : 'missing');
+        url.searchParams.set('page', 'events');
+        url.searchParams.set('app', 'workbuddy');
+        window.history.replaceState({}, '', url);
+      } catch (_) {}
+    }
+
+    function ttsDurationFromPrompt(prompt, fallback) {
+      const duration = prompt.match(/(\d+(?:\.\d+)?)\s*秒\s*(以内|内)?/);
+      if (!duration) return fallback;
+      return `${duration[1]} 秒${duration[2] ? '以内' : ''}`;
+    }
+
+    function ttsLanguageForText(text) {
+      return /[\u3400-\u9fff]/.test(text) ? '简体中文' : 'English';
+    }
+
+    function interpretTTSPrompt(prompt) {
+      const quoted = prompt.match(/[“\"]([^”\"]+)[”\"]/);
+      const spokenContent = quoted?.[1]?.trim() || null;
+      if (/小猫|猫叫/.test(prompt)) {
+        return {
+          soundDescription: '小猫短促叫两声，第二声稍高',
+          spokenContent: null,
+          language: null,
+          styleDescription: '自然、干净',
+          targetDuration: ttsDurationFromPrompt(prompt, '约 1.5 秒')
+        };
+      }
+      if (/木质|敲击/.test(prompt)) {
+        return {
+          soundDescription: '清脆的木质敲击两下',
+          spokenContent: null,
+          language: null,
+          styleDescription: '清脆、干净',
+          targetDuration: ttsDurationFromPrompt(prompt, '1 秒以内')
+        };
+      }
+      if (spokenContent && /铃/.test(prompt)) {
+        return {
+          soundDescription: '轻铃一声后，轻声说出指定台词',
+          spokenContent,
+          language: ttsLanguageForText(spokenContent),
+          styleDescription: '轻柔、清晰',
+          targetDuration: ttsDurationFromPrompt(prompt, '2 秒以内')
+        };
+      }
+      if (spokenContent) {
+        const tones = ['温和', '克制', '清晰', '轻快', '轻声'].filter(tone => prompt.includes(tone));
+        const voice = prompt.includes('女声') ? '女声' : prompt.includes('男声') ? '男声' : '人声';
+        const styleDescription = tones.length ? tones.join('、') : '自然、清晰';
+        return {
+          soundDescription: `${styleDescription}的${voice}说出指定台词`,
+          spokenContent,
+          language: ttsLanguageForText(spokenContent),
+          styleDescription,
+          targetDuration: ttsDurationFromPrompt(prompt, '2 秒以内')
+        };
+      }
+      return {
+        soundDescription: prompt.replace(/[，,]?\s*\d+(?:\.\d+)?\s*秒\s*(?:以内|内)?/g, '').trim(),
+        spokenContent: null,
+        language: null,
+        styleDescription: '自然、干净',
+        targetDuration: ttsDurationFromPrompt(prompt, '约 1.5 秒')
+      };
+    }
+
+    function normalizeTTSSoundPlan(plan, prompt) {
+      const soundDescription = String(plan.soundDescription || '').trim() || prompt.trim();
+      const spokenContent = String(plan.spokenContent || '').trim() || null;
+      const styleDescription = String(plan.styleDescription || '').trim() || '自然、干净';
+      const rawDuration = String(plan.targetDuration || '约 1.5 秒');
+      const durationMatch = rawDuration.match(/(\d+(?:\.\d+)?)\s*秒/);
+      const durationSeconds = durationMatch
+        ? Math.min(3, Math.max(0.5, Number(durationMatch[1])))
+        : 1.5;
+      const durationLabel = Number.isInteger(durationSeconds)
+        ? String(durationSeconds)
+        : durationSeconds.toFixed(1);
+      return {
+        soundDescription,
+        spokenContent,
+        language: spokenContent ? plan.language || ttsLanguageForText(spokenContent) : null,
+        styleDescription,
+        targetDuration: rawDuration.includes('约')
+          ? `约 ${durationLabel} 秒`
+          : `${durationLabel} 秒以内`
+      };
+    }
+
+    function suggestedTTSCueName(prompt, plan) {
+      const spokenContent = String(plan.spokenContent || '').trim();
+      if (/小猫|猫叫/.test(prompt)) return '小猫两声';
+      if (/木质|敲击/.test(prompt)) return '木质双击';
+      if (spokenContent && /铃/.test(prompt)) return `轻铃${spokenContent}`.slice(0, 24);
+      if (spokenContent) return spokenContent.slice(0, 24);
+      const compact = String(plan.soundDescription || prompt)
+        .replace(/[，。,.!?！？；;：“”\"']/g, '')
+        .replace(/\s+/g, '')
+        .trim();
+      return compact.slice(0, 24) || '我的 AI 提示音';
+    }
+
+    function validateTTSCueName(value) {
+      const name = String(value || '').trim();
+      if (!name) return '请先为最终提示音命名。';
+      if (name.length > 40) return '提示音名称最多 40 个字符。';
+      if (/[\u0000-\u001f\u007f]/.test(name)) return '提示音名称不能包含控制字符。';
+      return '';
+    }
+
+    function activeTTSSoundPlan() {
+      return ttsState.confirmedSoundPlan || ttsState.soundPlan;
+    }
+
+    function renderTTSSteps() {
+      const current = ttsState.stage === 'prompt' ? 0 : 1;
+      const steps = [
+        ['prompt', '描述'],
+        ['candidates', '试听并命名']
+      ];
+      return `<div class="tts-steps" aria-label="生成步骤">${steps.map(([id, label], index) => {
+        const stateClass = index < current ? 'done' : index === current ? 'active' : '';
+        return `<span class="tts-step ${stateClass}"><span class="tts-step-number">${index < current ? '✓' : index + 1}</span>${label}</span>`;
+      }).join('')}</div>`;
+    }
+
+    function renderTTSServiceCard() {
+      const ready = ttsCredentialState.ready;
+      return `<section class="tts-service-card" aria-label="AI 声音生成服务">
+        <span class="tts-service-icon" aria-hidden="true">⌁</span>
+        <span class="tts-service-copy"><span class="tts-service-title">AI 声音生成服务 · 自备 API Key</span><span class="tts-service-meta">${ready ? '已存入 macOS 钥匙串；生成时由本机直连固定的首发服务' : '首次生成前配置一次；不会写入设置文件、日志或提示音 manifest'}</span></span>
+        <span class="tts-service-status ${ready ? 'ready' : ''}">${ready ? '已配置' : '未配置'}</span>
+        <button class="tts-secondary-button" type="button" data-tts-action="manage-credential">${ready ? '管理' : '配置 API Key'}</button>
+      </section>`;
+    }
+
+    function renderTTSCredentialModal() {
+      if (!ttsCredentialState.modalOpen) return '';
+      if (ttsCredentialState.confirmDelete) {
+        return `<div class="tts-modal-backdrop"><section class="tts-modal" role="dialog" aria-modal="true" aria-labelledby="tts-key-title">
+          <div class="tts-modal-head"><div><div id="tts-key-title" class="tts-modal-title">删除 API Key？</div><div class="tts-modal-copy">删除后不能继续生成新候选；已经采用并保存的提示音不会受影响。</div></div><button class="tts-modal-close" type="button" data-tts-action="close-credential" aria-label="关闭">×</button></div>
+          <div class="tts-modal-body"><div class="tts-confirm-delete">正式版会从 macOS 钥匙串删除该凭据，并立即让后续生成失败关闭；不会删除现有提示音。</div></div>
+          <div class="tts-modal-actions"><button class="tts-secondary-button" type="button" data-tts-action="cancel-delete-credential">取消</button><button class="tts-danger-button" type="button" data-tts-action="confirm-delete-credential">确认删除</button></div>
+        </section></div>`;
+      }
+      const configured = ttsCredentialState.ready;
+      return `<div class="tts-modal-backdrop"><section class="tts-modal" role="dialog" aria-modal="true" aria-labelledby="tts-key-title">
+        <div class="tts-modal-head"><div><div id="tts-key-title" class="tts-modal-title">${configured ? '管理 API Key' : '连接 AI 声音生成服务'}</div><div class="tts-modal-copy">首版固定使用一个 Claudio 支持的生成服务，只需要配置自己的 API Key。</div></div><button class="tts-modal-close" type="button" data-tts-action="close-credential" aria-label="关闭">×</button></div>
+        <div class="tts-modal-body">
+          <div class="tts-provider-row"><span><span class="tts-provider-label">生成服务</span><span class="tts-service-meta" style="display:block">不允许自定义 API 地址</span></span><span class="tts-provider-value">首发声音生成服务</span></div>
+          <label><span class="tts-prompt-label">${configured ? '输入新的 API Key 以替换' : 'API Key'}</span><input id="tts-api-key-input" class="tts-secret-input" type="password" autocomplete="new-password" spellcheck="false" placeholder="原型中输入任意 8 位演示字符"></label>
+          <span id="tts-api-key-error" class="tts-error" role="alert"></span>
+          <div class="tts-modal-note">正式版中，明文只在验证与钥匙串写入期间短暂存在；view model、日志、配置文件和提示音 manifest 都拿不到它。本原型不会联网或保存，请勿输入真实 Key。</div>
+        </div>
+        <div class="tts-modal-actions">${configured ? '<button class="tts-danger-button" type="button" data-tts-action="delete-credential">删除 API Key</button>' : '<span></span>'}<span style="display:flex;gap:7px"><button class="tts-secondary-button" type="button" data-tts-action="close-credential">取消</button><button class="tts-primary-button" type="button" data-tts-action="save-credential">${configured ? '验证并替换' : '验证并保存'}</button></span></div>
+      </section></div>`;
+    }
+
+    function renderTTSPrompt() {
+      return `<section class="tts-card">
+        <label class="tts-prompt-label" for="tts-prompt-input">声音描述 · 可以是语音、动物叫声、音效或混合声音</label>
+        <textarea id="tts-prompt-input" class="tts-prompt" data-tts-field="prompt" placeholder="例如：一只小猫短促地叫两声，第二声稍高，不要背景音乐">${ttsEscape(ttsState.prompt)}</textarea>
+        <div class="tts-prompt-actions"><span class="tts-error">${ttsEscape(ttsState.promptError)}</span><button class="tts-primary-button" type="button" data-tts-action="generate">生成 3 个候选</button></div>
+        <div class="tts-helper">先专注描述想听到的声音；下一步试听候选并确认提示音名称。后台会隐藏解释并检查描述。</div>
+      </section>`;
+    }
+
+    function renderTTSRequestSummary() {
+      const hasNameError = Boolean(ttsState.nameError);
+      return `<section class="tts-request-summary">
+        <div class="tts-name-row"><label class="tts-name-field" for="tts-final-name"><span class="tts-prompt-label">提示音名称</span><input id="tts-final-name" class="tts-name-input" type="text" maxlength="40" required data-tts-field="final-name" value="${ttsEscape(ttsState.cueName)}" aria-invalid="${hasNameError}" aria-describedby="tts-final-name-help tts-final-name-error"></label><span class="tts-name-hint">采用候选时保存到「我的提示音」</span></div>
+        <div class="tts-name-support"><span id="tts-final-name-help" class="tts-helper">系统已根据描述提供建议；可直接修改，改名不会重新生成。</span><span id="tts-final-name-error" class="tts-error" role="alert">${ttsEscape(ttsState.nameError)}</span></div>
+        <div class="tts-summary-description"><span class="tts-summary-line"><strong>你的描述</strong><span class="tts-summary-value">${ttsEscape(ttsState.prompt)}</span></span><button class="tts-link-button" type="button" data-tts-action="edit-prompt">修改描述</button></div>
+      </section>`;
+    }
+
+    function renderTTSPlayButton(candidate) {
+      const playing = ttsState.playing === candidate.id;
+      return `<button class="tts-icon-button ${playing ? 'playing' : ''}" type="button" data-tts-action="play-candidate" data-tts-candidate="${candidate.id}" aria-label="${playing ? '停止' : '试听'}候选 ${candidate.id}">${playing ? '■' : '▶'}</button>`;
+    }
+
+    function renderTTSCandidates() {
+      const rows = ttsCandidates.map(candidate => `<div class="tts-candidate-row">
+        ${renderTTSPlayButton(candidate)}
+        <span><span class="tts-candidate-name">${candidate.id} · ${candidate.name}</span><span class="tts-candidate-meta"><span class="tts-sim-badge">BYOK 原型候选</span> · ${candidate.duration}</span></span>
+        ${ttsWave()}
+        <button class="tts-small-button" type="button" data-tts-action="adopt" data-tts-candidate="${candidate.id}">采用并保存</button>
+      </div>`).join('');
+      return `${renderTTSRequestSummary()}<div class="tts-candidate-list">${rows}</div>
+        <div class="tts-action-row"><span class="tts-helper">不自动播放 · 同时最多试听一个 · 采用前先停止试听</span><span style="display:flex;align-items:center;gap:6px"><button class="tts-link-button" type="button" data-tts-action="simulate-failure">预览失败态</button><button class="tts-secondary-button" type="button" data-tts-action="regenerate">重新生成</button></span></div>`;
+    }
+
+    function renderTTSGeneration() {
+      const interpreting = ttsState.stage === 'interpreting';
+      const title = interpreting ? '正在理解你的声音描述…' : '正在请求声音生成服务…';
+      const helper = interpreting
+        ? '后台会识别语音、动物叫声、音效或混合声音，并自动补齐生成所需参数；名称将在候选生成后建议。'
+        : '正式版由本机读取钥匙串并直连服务；原型只模拟请求，不会使用真实 API Key。';
+      return `<section class="tts-card tts-generation"><div><span class="tts-spinner" style="display:inline-block"></span><div class="tts-card-title">${title}</div><div class="tts-helper" style="margin-top:5px">${helper}</div></div></section>`;
+    }
+
+    function renderTTSStatus() {
+      const binding = currentTTSBinding();
+      if (ttsState.stage === 'importing') {
+        return `<section class="tts-card tts-generation"><div><span class="tts-spinner" style="display:inline-block"></span><div class="tts-card-title">正在安全采用候选 ${ttsState.selectedCandidate}…</div><div class="tts-helper" style="margin-top:5px">停止试听 → AudioImport 校验 → manifest bind；完成前仍使用 ${ttsEscape(binding.label)}。</div></div></section>`;
+      }
+      if (ttsState.stage === 'applied') {
+        return `<section class="tts-status success"><div class="tts-status-line"><span class="tts-status-symbol">✓</span><span style="flex:1"><span class="tts-card-title">“${ttsEscape(binding.label)}”已用于“${ttsEscape(currentTTSEvent().name)}”</span><span class="tts-helper" style="display:block;margin-top:4px">已保存到「我的提示音」；${ttsEscape(binding.file)} 已通过 AudioImport 并写入 manifest，另外两个临时候选已清理。</span></span></div><div class="tts-action-row"><span class="tts-helper">旧绑定只有在完整采用成功后才被替换。</span><button class="tts-secondary-button" type="button" data-tts-action="reset">再生成一次</button></div></section>`;
+      }
+      return `<section class="tts-status failure"><div class="tts-status-line"><span class="tts-status-symbol">!</span><span style="flex:1"><span class="tts-card-title">AudioImport · 时长校验失败</span><span class="tts-helper" style="display:block;margin-top:4px">候选没有写入 manifest；“${ttsEscape(currentTTSEvent().name)}”仍在使用 ${ttsEscape(binding.label)}（${ttsEscape(binding.file)}）。</span></span></div><div class="tts-action-row"><span class="tts-helper">失败不会产生假刷新，也不会改动其他 app。</span><button class="tts-secondary-button" type="button" data-tts-action="retry">返回候选</button></div></section>`;
+    }
+
+    function renderTTSFlow() {
+      if (ttsState.stage === 'prompt') return `${renderTTSSteps()}${renderTTSPrompt()}`;
+      if (['interpreting', 'generating'].includes(ttsState.stage)) return `${renderTTSSteps()}${renderTTSGeneration()}`;
+      if (['importing', 'applied', 'failed'].includes(ttsState.stage)) return `${renderTTSSteps()}${renderTTSStatus()}`;
+      return `${renderTTSSteps()}${renderTTSCandidates()}`;
+    }
+
+    function renderTTSInline() {
+      const event = currentTTSEvent();
+      return `<div class="tts-inline">
+        <div class="tts-inline-head"><div><div class="tts-inline-title">✦ 为“${ttsEscape(event.name)}”生成 AI 提示音</div><div class="tts-inline-meta">语音、动物叫声、音效或混合声音 · 保存到「我的提示音」</div></div><button class="tts-link-button" type="button" data-tts-action="collapse-inline">收起</button></div>
+        ${renderTTSFlow()}
+      </div>`;
+    }
+
+    function renderTTSEventRow(event, app) {
+      const available = event.availability === 'ready';
+      const selected = ttsState.eventId === event.id && available;
+      const binding = ttsBindings[event.id];
+      const soundLabel = binding?.label || event.sound;
+      const soundActions = available
+        ? `<span class="tts-sound-actions"><button class="plain-button" type="button" data-action="play" data-event="${event.id}" data-app-id="${app.id}">${ttsEscape(soundLabel)}</button><button class="tts-create-button" type="button" data-tts-action="open-event" data-tts-event="${event.id}">✦ 描述生成</button></span>`
+        : `<span class="tts-sound-actions"><button class="plain-button" type="button" disabled>${ttsEscape(event.sound)}</button><button class="tts-create-button" type="button" disabled>不可生成</button></span>`;
+      return `<div class="event-row scoped tts-event-row ${selected ? 'selected' : ''}"><span class="event-symbol ${event.tone}">${event.symbol}</span><span><span class="event-name">${event.name}</span><span class="event-code">${event.code}</span></span><span class="event-coverage">${status(event.availability, event.coverage)}</span><button class="toggle event-toggle ${event.enabled ? 'on' : ''}" type="button" data-event-toggle="${event.id}" data-event-app-id="${app.id}" aria-pressed="${event.enabled ? 'true' : 'false'}" aria-label="${event.enabled ? '关闭' : '开启'} ${event.name}" ${available ? '' : 'disabled'}></button>${soundActions}</div>${selected && ttsState.inlineOpen ? renderTTSInline() : ''}`;
+    }
+
+    function renderTTSPage(app, appEvents) {
+      return `<header class="page-header"><div><h1>事件与提示音</h1><p>按 app 单独管理事件映射、启用状态和声音选择；在明确支持的事件上，可用自然语言生成不超过 3 秒的 AI 提示音。</p></div><div class="page-header-actions"><span class="tts-prototype-tag">AI 提示音核心闭环原型</span><button class="plain-button" type="button" data-action="play-all">试听全部</button></div></header>
+        ${renderTTSServiceCard()}
+        <div class="event-layout">
+          <aside class="event-app-nav" aria-label="选择管理对象">
+            <div class="event-app-nav-head"><div><div class="scope-eyebrow">管理对象</div><div class="event-app-nav-title">集成</div></div><span class="event-app-count">${apps.length} 个已接入</span></div>
+            <div class="event-app-picker" role="listbox" aria-label="集成列表">${apps.map(item => `<button class="event-app-option ${item.id === app.id ? 'active' : ''}" type="button" role="option" aria-selected="${item.id === app.id ? 'true' : 'false'}" data-event-app="${item.id}"><span class="event-app-option-head"><span class="app-name">${item.name}</span><span class="app-coverage">${item.coverage}</span></span><span class="event-app-option-foot">${appStatus(item)}<span class="app-coverage">查看事件</span></span></button>`).join('')}</div>
+            <div class="event-app-nav-foot">AI 生成只作用于右侧当前 app 的所选事件；其他 app 与未选事件保持不变。</div>
+          </aside>
+          <section class="event-detail">
+            <div class="event-detail-header"><div><div class="scope-eyebrow">当前管理对象</div><div class="event-detail-title">${app.name}</div><div class="event-detail-subtitle">${app.mechanism}</div></div><span style="display:flex;align-items:center;gap:8px"><span class="tts-prototype-tag">我的提示音 · 可编辑</span>${appStatus(app)}</span></div>
+            <div class="section-label">${app.name} · 事件规则</div><section class="settings-group tts-event-group">${appEvents.map(event => renderTTSEventRow(event, app)).join('')}</section>
+            <div class="section-label" style="margin-top:30px">${app.name} · 播放设置</div><section class="settings-group">
+              <div class="settings-row"><div><div class="row-title">${app.name} 事件提示音</div><div class="row-caption">只覆盖当前来源；缺失事件开关继承全局默认</div></div><div class="row-control"><button class="toggle blue on" type="button" data-toggle="${app.name} 事件提示音" aria-pressed="true"></button></div></div>
+              <div class="settings-row"><div><div class="row-title">主音量（全局）</div><div class="row-caption">所有来源共用唯一主音量轴</div></div><div class="row-control"><input class="native-range" type="range" min="0" max="100" value="68" data-range="主音量"><span class="range-value" data-range-value="主音量">68%</span></div></div>
+              <div class="settings-row"><div><div class="row-title">声音包</div><div class="row-caption">当前使用「我的提示音」· 用户声音包，源自内置 Paimon 副本</div></div><div class="row-control"><button class="plain-button" type="button" data-action="sound-packs">管理</button></div></div>
+            </section>
+            <div class="info-callout"><span class="info-icon">i</span><span>声音描述只用于所选事件的本次生成；采用时只保存提示音名称和最终音频。候选采用成功前保留旧声音，未采用候选在关闭或重新生成时清理。</span></div>
+          </section>
+        </div>${renderTTSCredentialModal()}`;
+    }
+
     pages.events = () => {
       const app = appById(selectedApp);
       const appEvents = eventsForApp(app.id);
+      if (isTTSPrototype && app.id === 'workbuddy') return renderTTSPage(app, appEvents);
       return `<header class="page-header"><div><h1>事件与提示音</h1><p>按 app 单独管理事件映射、启用状态和声音选择；当前配置不会影响其他 app。</p></div><div class="page-header-actions"><span class="demo-label">演示数据</span><button class="plain-button" type="button" data-action="play-all">试听全部</button></div></header>
         <div class="event-layout">
           <aside class="event-app-nav" aria-label="选择管理对象">
@@ -679,6 +1302,7 @@
       try { const url = new URL(window.location.href); url.searchParams.set('page', activePage); url.searchParams.set('app', selectedApp); window.history.replaceState({}, '', url); } catch (_) {}
       document.querySelector('#page-root').innerHTML = pages[activePage]();
       document.querySelectorAll('[data-page]').forEach(button => button.classList.toggle('active', button.dataset.page === activePage));
+      if (isTTSPrototype && activePage === 'events' && selectedApp === 'workbuddy') syncTTSURL();
     }
     function showToast(message) {
       const toast = document.querySelector('#toast');
@@ -688,7 +1312,187 @@
       toastTimer = window.setTimeout(() => toast.classList.remove('visible'), 2200);
     }
 
+    function rerenderTTS() {
+      if (!isTTSPrototype) return;
+      setPage('events');
+    }
+
+    function setTTSStage(stage) {
+      window.clearTimeout(ttsTransitionTimer);
+      ttsState.stage = stage;
+      if (stage !== 'candidates') ttsState.playing = null;
+      rerenderTTS();
+    }
+
+    function resetTTSFlow() {
+      window.clearTimeout(ttsTransitionTimer);
+      const eventId = ttsState.eventId;
+      const prompt = ttsState.prompt;
+      const cueName = ttsState.cueName;
+      const cueNameIsManual = ttsState.cueNameIsManual;
+      ttsState = makeTTSState('prompt', eventId);
+      ttsState.prompt = prompt;
+      ttsState.cueName = cueName;
+      ttsState.cueNameIsManual = cueNameIsManual;
+      rerenderTTS();
+    }
+
+    function openTTSEvent(eventId) {
+      const item = eventById('workbuddy', eventId);
+      if (!item || item.availability !== 'ready') return;
+      if (ttsState.eventId !== eventId) {
+        ttsState = makeTTSState('prompt', eventId);
+      }
+      ttsState.inlineOpen = true;
+      rerenderTTS();
+    }
+
+    function beginTTSGeneration() {
+      const prompt = ttsState.prompt.trim();
+      if (!prompt) {
+        ttsState.promptError = '请描述想听到的声音。';
+        setTTSStage('prompt');
+        return;
+      }
+      if (!ttsCredentialState.ready) {
+        ttsState.promptError = '请先配置 API Key；你的声音描述会保留。';
+        ttsCredentialState.modalOpen = true;
+        ttsCredentialState.confirmDelete = false;
+        rerenderTTS();
+        return;
+      }
+      window.clearTimeout(ttsTransitionTimer);
+      ttsState.prompt = prompt;
+      ttsState.promptError = '';
+      ttsState.nameError = '';
+      ttsState.confirmedSoundPlan = null;
+      ttsState.playing = null;
+      ttsState.stage = 'interpreting';
+      rerenderTTS();
+      ttsTransitionTimer = window.setTimeout(() => {
+        if (ttsState.stage !== 'interpreting') return;
+        const interpretedPlan = interpretTTSPrompt(prompt);
+        ttsState.soundPlan = normalizeTTSSoundPlan(interpretedPlan, prompt);
+        if (!ttsState.cueNameIsManual || !ttsState.cueName.trim()) {
+          ttsState.cueName = suggestedTTSCueName(prompt, ttsState.soundPlan);
+          ttsState.cueNameIsManual = false;
+        }
+        ttsState.confirmedSoundPlan = { ...ttsState.soundPlan };
+        setTTSStage('generating');
+        ttsTransitionTimer = window.setTimeout(() => {
+          if (ttsState.stage === 'generating') setTTSStage('candidates');
+        }, 850);
+      }, 360);
+    }
+
+    function handleTTSAction(target) {
+      const action = target.dataset.ttsAction;
+      if (action === 'reset') return resetTTSFlow();
+      if (action === 'open-event') return openTTSEvent(target.dataset.ttsEvent);
+      if (action === 'manage-credential') {
+        ttsCredentialState.modalOpen = true;
+        ttsCredentialState.confirmDelete = false;
+        rerenderTTS();
+        window.setTimeout(() => document.querySelector('#tts-api-key-input')?.focus(), 0);
+        return;
+      }
+      if (action === 'close-credential') {
+        ttsCredentialState.modalOpen = false;
+        ttsCredentialState.confirmDelete = false;
+        rerenderTTS();
+        return;
+      }
+      if (action === 'save-credential') {
+        const input = document.querySelector('#tts-api-key-input');
+        const error = document.querySelector('#tts-api-key-error');
+        if (!input || input.value.trim().length < 8) {
+          if (error) error.textContent = '原型中请输入至少 8 位演示字符；不要输入真实 Key。';
+          input?.focus();
+          return;
+        }
+        input.value = '';
+        ttsCredentialState.ready = true;
+        ttsCredentialState.modalOpen = false;
+        ttsCredentialState.confirmDelete = false;
+        ttsState.promptError = '';
+        rerenderTTS();
+        showToast('原型状态：API Key 已配置；没有联网或持久化');
+        return;
+      }
+      if (action === 'delete-credential') {
+        ttsCredentialState.confirmDelete = true;
+        rerenderTTS();
+        return;
+      }
+      if (action === 'cancel-delete-credential') {
+        ttsCredentialState.confirmDelete = false;
+        rerenderTTS();
+        return;
+      }
+      if (action === 'confirm-delete-credential') {
+        ttsCredentialState.ready = false;
+        ttsCredentialState.modalOpen = false;
+        ttsCredentialState.confirmDelete = false;
+        rerenderTTS();
+        showToast('原型状态：API Key 已删除；已采用提示音保持不变');
+        return;
+      }
+      if (action === 'collapse-inline') {
+        ttsState.playing = null;
+        ttsState.inlineOpen = false;
+        rerenderTTS();
+        showToast('生成区已收起；当前声音没有改变');
+        return;
+      }
+      if (action === 'edit-prompt') {
+        ttsState.confirmedSoundPlan = null;
+        return setTTSStage('prompt');
+      }
+      if (action === 'generate' || action === 'regenerate') return beginTTSGeneration();
+      if (action === 'play-candidate') {
+        const candidate = target.dataset.ttsCandidate;
+        ttsState.playing = ttsState.playing === candidate ? null : candidate;
+        rerenderTTS();
+        return;
+      }
+      if (action === 'simulate-failure') return setTTSStage('failed');
+      if (action === 'retry') return setTTSStage('candidates');
+      if (action === 'adopt') {
+        const nameError = validateTTSCueName(ttsState.cueName);
+        if (nameError) {
+          ttsState.nameError = nameError;
+          rerenderTTS();
+          window.setTimeout(() => document.querySelector('#tts-final-name')?.focus(), 0);
+          return;
+        }
+        ttsState.cueName = ttsState.cueName.trim();
+        if (target.dataset.ttsCandidate) ttsState.selectedCandidate = target.dataset.ttsCandidate;
+        ttsState.stage = 'importing';
+        ttsState.playing = null;
+        rerenderTTS();
+        ttsTransitionTimer = window.setTimeout(() => {
+          if (ttsState.stage !== 'importing') return;
+          const candidateID = ttsState.selectedCandidate;
+          const eventID = ttsState.eventId;
+          const binding = {
+            file: `cue-${eventID}-${candidateID.toLowerCase()}.aiff`,
+            label: ttsState.cueName
+          };
+          ttsBindings[eventID] = binding;
+          const eventItem = eventById('workbuddy', eventID);
+          if (eventItem) eventItem.sound = binding.label;
+          ttsState.stage = 'applied';
+          rerenderTTS();
+        }, 850);
+      }
+    }
+
     document.addEventListener('click', event => {
+      const ttsAction = event.target.closest('[data-tts-action]');
+      if (ttsAction && isTTSPrototype) {
+        handleTTSAction(ttsAction);
+        return;
+      }
       const panelScopeToggle = event.target.closest('[data-panel-scope-toggle]');
       if (panelScopeToggle) {
         const menu = document.querySelector('#panel-app-menu');
@@ -767,7 +1571,39 @@
       else if (name === 'select-pack') showToast('已选择 Minimal（演示状态）');
       else showToast('原型占位：此操作将在正式 UI 接入');
     });
+    document.addEventListener('keydown', event => {
+      if (!isTTSPrototype || event.key !== 'Escape') return;
+      if (ttsCredentialState.modalOpen) {
+        ttsCredentialState.modalOpen = false;
+        ttsCredentialState.confirmDelete = false;
+        rerenderTTS();
+        return;
+      }
+    });
     document.addEventListener('input', event => {
+      const ttsFinalName = event.target.closest('[data-tts-field="final-name"]');
+      if (ttsFinalName && isTTSPrototype) {
+        ttsState.cueName = ttsFinalName.value;
+        ttsState.cueNameIsManual = Boolean(ttsFinalName.value.trim());
+        ttsState.nameError = '';
+        ttsFinalName.setAttribute('aria-invalid', 'false');
+        const nameError = document.querySelector('#tts-final-name-error');
+        if (nameError) nameError.textContent = '';
+        return;
+      }
+      const ttsApiKey = event.target.closest('#tts-api-key-input');
+      if (ttsApiKey && isTTSPrototype) {
+        const error = document.querySelector('#tts-api-key-error');
+        if (error) error.textContent = '';
+        return;
+      }
+      const ttsPrompt = event.target.closest('[data-tts-field="prompt"]');
+      if (ttsPrompt && isTTSPrototype) {
+        ttsState.prompt = ttsPrompt.value;
+        ttsState.promptError = '';
+        ttsState.confirmedSoundPlan = null;
+        return;
+      }
       const panelRange = event.target.closest('[data-panel-range]');
       if (panelRange) {
         const output = document.querySelector('[data-panel-range-value]');
@@ -780,12 +1616,16 @@
       if (!output) return;
       output.textContent = range.dataset.range.includes('主音量') ? `${range.value}%` : `${(Number(range.value) / 100).toFixed(2)}s`;
     });
-
     if (isPanelSurface) {
       document.documentElement.classList.add('panel-mode');
       document.body.classList.add('panel-mode');
       renderPanel();
     } else {
+      if (isTTSPrototype) {
+        document.body.classList.add('tts-prototype-mode');
+        const sidebarFootCopy = document.querySelector('#sidebar-foot-copy');
+        if (sidebarFootCopy) sidebarFootCopy.textContent = 'BYOK · API Key 仅存钥匙串';
+      }
       setPage(activePage);
     }
   </script>

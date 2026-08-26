@@ -25,6 +25,74 @@ private func panelPresentationEventRows(
 
 @MainActor
 func runPanelPresentationSuites() {
+    suite("事件与提示音路由：保留 Global/Surface，并为声音编辑携带同一作用域") {
+        let global = EventSettingsWindowRoute(scope: .global)
+        let workBuddy = EventSettingsWindowRoute(scope: .surface(.workBuddy))
+
+        expect(global.surface == nil, "Global 路由不得伪造 Host Surface")
+        expect(workBuddy.surface == .workBuddy, "WorkBuddy 路由必须保留稳定 surface token")
+        expect(
+            workBuddy.soundPacksRoute(packID: "user-pack", event: .stop)
+                == .editEvent(surface: .workBuddy, packID: "user-pack", event: .stop),
+            "逐事件声音编辑必须把当前 Surface 原样交给声音包窗口")
+        expect(
+            eventSettingsFirstFocusTarget(scopes: [.global, .surface(.workBuddy)])
+                == .scope(.global),
+            "事件设置窗口必须把首个可见作用域作为确定性首焦点")
+        expect(
+            eventSettingsFirstFocusTarget(scopes: []) == nil,
+            "没有作用域时不得伪造焦点身份")
+
+        withTempDirectory { directory in
+            let unavailablePreview = eventPreviewFileURL(
+                row: EventRow(
+                    event: .stop,
+                    coverage: .present(fileName: "missing.mp3"),
+                    enabled: true),
+                packID: "missing-pack",
+                environment: AudioImportEnvironment(
+                    userPacksDirectory: directory.appendingPathComponent("packs"),
+                    durationProbe: StubDurationProbe(fixedDuration: 1),
+                    packsLockFile: directory.appendingPathComponent("packs.lock")))
+            expect(
+                unavailablePreview == nil,
+                "共享试听解析必须在包或文件已经失效时 fail closed")
+        }
+    }
+
+    suite("事件与提示音窗口布局：按窗口可用宽度与文字缩放独立降级") {
+        let regular = eventSettingsWindowLayout(availableWidth: 580, typeScale: 1)
+        let narrow = eventSettingsWindowLayout(availableWidth: 430, typeScale: 1)
+        let maximumText = eventSettingsWindowLayout(availableWidth: 580, typeScale: 1.42)
+
+        expect(
+            !regular.metadataStacks && !regular.actionsMoveBelow,
+            "标准窗口宽度下元数据与动作必须保持行内：\(regular)")
+        expect(
+            narrow.metadataStacks && narrow.actionsMoveBelow,
+            "窄窗口必须把元数据和动作逐级堆叠：\(narrow)")
+        expect(
+            maximumText.metadataStacks && maximumText.actionsMoveBelow,
+            "最大界面文字必须在同一窗口宽度触发窗口自己的降级：\(maximumText)")
+    }
+
+    suite("声音作用域菜单：未取得视口测量时仍提供可见选项与诊断入口") {
+        let unmeasured = panelSoundScopeMenuLayout(
+            scopeCount: 3,
+            typeScale: 1,
+            availableHeight: 0)
+        let invalidMeasurement = panelSoundScopeMenuLayout(
+            scopeCount: 3,
+            typeScale: 1,
+            availableHeight: .nan)
+
+        expect(unmeasured.optionsHeight == 144, "三个标准字号来源必须完整显示：\(unmeasured)")
+        expect(unmeasured.totalHeight == 199, "未测量状态不得把菜单裁成零高：\(unmeasured)")
+        expect(
+            invalidMeasurement == unmeasured,
+            "非有限几何值必须与尚未测量使用同一安全布局：\(invalidMeasurement)")
+    }
+
     suite("声音作用域菜单：最大字号按滚动视口剩余高度裁定选项区，诊断入口固定可见") {
         let layout = panelSoundScopeMenuLayout(
             scopeCount: 4,
@@ -122,6 +190,16 @@ func runPanelPresentationSuites() {
         expect(
             resolvedPanelSoundScopeSelection(storedValue: nil, scopes: [scopes[0]]) == .global,
             "没有可用来源时必须回退 Global")
+        expect(
+            resolvedEventSettingsScope(
+                route: EventSettingsWindowRoute(scope: .surface(.workBuddy)),
+                scopes: Array(scopes.prefix(2))) == .surface(.codex),
+            "窗口保留期间 WorkBuddy 消失时必须规范化到首个可用 Surface，不能继续写旧作用域")
+        expect(
+            resolvedEventSettingsScope(
+                route: EventSettingsWindowRoute(scope: .surface(.workBuddy)),
+                scopes: [scopes[0]]) == .global,
+            "窗口保留期间所有 Surface 消失时必须让路由与写目标一起回退 Global")
 
         let pendingFallback = resolvedPanelSoundScopeSelection(
             storedValue: "unselected",
@@ -229,6 +307,36 @@ func runPanelPresentationSuites() {
             language: .zhHans,
             configWritesAllowed: false)
         expect(readOnly.allSatisfy { !$0.controls.muteEnabled }, "配置不可写时不得展示可操作静音")
+    }
+
+    suite("AI 提示音名称：事件行优先显示用户名称，未命名资产才回退文件名") {
+        let namedRows = Event.allCases.map {
+            EventRow(
+                event: $0,
+                coverage: .present(fileName: "ai-cue.mp3"),
+                enabled: true,
+                audioDisplayName: "小猫两声")
+        }
+        let named = panelEventPresentations(
+            rows: namedRows,
+            scope: .surface(.workBuddy),
+            masterVolume: 0.8,
+            language: .zhHans)
+        let unnamed = panelEventPresentations(
+            rows: panelPresentationEventRows(coverage: .present(fileName: "legacy.aiff")),
+            scope: .surface(.workBuddy),
+            masterVolume: 0.8,
+            language: .zhHans)
+
+        expect(
+            named.allSatisfy { $0.soundFileText == "小猫两声" },
+            "已命名 AI 资产必须把最终用户名称投影到旧事件 UI")
+        expect(
+            named.allSatisfy { $0.accessibilityLabel.contains("小猫两声") },
+            "VoiceOver 必须读出与屏幕一致的最终名称")
+        expect(
+            unnamed.allSatisfy { $0.soundFileText == "legacy.aiff" },
+            "既有未命名资产必须继续显示文件名，不能伪造名称")
     }
 
     suite("能力格显式保留 support/implementation，视图无需从文案反推") {

@@ -260,21 +260,22 @@ private let lockCensusSelfGuardedFile = "PanelView.swift"
 /// 而这正是要的极性：某天 `ClaudioGUICore` 里合法长出一个构造点，实得的键会是
 /// `ClaudioGUICore/<file>`、与期望集合不等 ⇒ **红** ⇒ 有人必须来想清楚「lockLeaks 只扫
 /// `ClaudioGUI`，那个新文件由谁守」。fail-closed，不是遗漏。
-private let expectedProductionLocks: [(file: String, value: String, literal: String?, why: String)] = [
-    (
-        "ClaudioGUIApp.swift", "ClaudioPaths.packsLockFile", nil,
-        "组装根是全 app 唯一该说出真实路径的地方。它若变成别的，两个 manifest.json 写者"
-            + "（接管发布内置包走 helper 的 `performFirstRunSetup`、绑定/解绑走 "
-            + "`mutateManifestJSON`）就不再是同一把 `flock`，跨进程互斥当场断开"
-    ),
-    (
-        "StateGalleryView.swift", "URL(fileURLWithPath: \"\")",
-        "/dev/null/claudio-preview-packs.lock",
-        "preview 用一条**永不解析**的占位路径（`/dev/null/…`，字符串内容由下面那条单独钉）。"
-            + "它若变成 `ClaudioPaths.packsLockFile`，一个 SwiftUI preview 就有了去碰用户 home "
-            + "上那把锁的能力 —— 而 preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它"
-    ),
-]
+private let expectedProductionLocks:
+    [(file: String, value: String, literal: String?, why: String)] = [
+        (
+            "ClaudioGUIApp.swift", "ClaudioPaths.packsLockFile", nil,
+            "组装根是全 app 唯一该说出真实路径的地方。它若变成别的，两个 manifest.json 写者"
+                + "（接管发布内置包走 helper 的 `performFirstRunSetup`、绑定/解绑走 "
+                + "`mutateManifestJSON`）就不再是同一把 `flock`，跨进程互斥当场断开"
+        ),
+        (
+            "StateGalleryView.swift", "URL(fileURLWithPath: \"\")",
+            "/dev/null/claudio-preview-packs.lock",
+            "preview 用一条**永不解析**的占位路径（`/dev/null/…`，字符串内容由下面那条单独钉）。"
+                + "它若变成 `ClaudioPaths.packsLockFile`，一个 SwiftUI preview 就有了去碰用户 home "
+                + "上那把锁的能力 —— 而 preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它"
+        ),
+    ]
 
 /// `ClaudioGUICore` target 下每一个源文件 —— 上面那个 `guiSources()` **看不见**的那一半 GUI。
 ///
@@ -408,9 +409,10 @@ func runViewWiringSuites() {
             consumes == ["PanelView.swift": 1],
             "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
                 + "实得 \(consumes)")
-        let integrations = sources.first {
-            $0.path.hasSuffix("IntegrationsWindowView.swift")
-        }?.code ?? ""
+        let integrations =
+            sources.first {
+                $0.path.hasSuffix("IntegrationsWindowView.swift")
+            }?.code ?? ""
         expect(
             integrations.components(separatedBy: "feedbackAnnouncer.consume(").count - 1 == 1,
             "IntegrationsWindow 的出口必须只经过一处 feedback revision 去重器")
@@ -747,8 +749,9 @@ func runViewWiringSuites() {
         // 编译通过、**2421 条断言全绿**；把用户真实的 `~/.claudio/packs.lock` 挪开再跑，那个文件被
         // **重新创建**出来（0 字节、`0600`，`FileLock` 的 `open(O_CREAT, 0o600)` 签名）。判据是
         // 「把它挪开再看它长不长回来」，不是退出码 —— 那个 0 字节文件在 `stat` 前后是同形的。
-        guard let environment = codeWithoutStrings(
-            "gui/Sources/ClaudioGUICore/AudioImportEnvironment.swift")
+        guard
+            let environment = codeWithoutStrings(
+                "gui/Sources/ClaudioGUICore/AudioImportEnvironment.swift")
         else {
             expect(false, "读不到 AudioImportEnvironment.swift —— 这条 suite 唯一的价值就是读它")
             return
@@ -812,7 +815,8 @@ func runViewWiringSuites() {
         // **相等**判定，不是 `contains`：`maxFileSizeBytes: Int = …` 逐字包含任何它的前缀。
         let audioImportLimitsInitSignature =
             "maxFileSizeBytes: Int = 5 * 1024 * 1024, maxDurationSeconds: Double = 3.0"
-        let nonLockInits = allPublicInits
+        let nonLockInits =
+            allPublicInits
             .filter { argumentValue("packsLockFile", in: $0) == nil }
             .map(collapsingWhitespace)
         expect(
@@ -822,7 +826,8 @@ func runViewWiringSuites() {
                 + "实得 \(nonLockInits) —— 对不上就意味着这个文件里多了一个**可以不传包锁就构造出"
                 + "环境**的入口（便利 init / 第二个 memberwise 风格入口）。那种入口让「漏传 = 编译"
                 + "错误」退回成「漏传 = 静默去用户 home 上开锁」，而测试照样全绿：实测 2456 条一条不红")
-        let initializerArguments = allPublicInits
+        let initializerArguments =
+            allPublicInits
             .filter { argumentValue("packsLockFile", in: $0) != nil }
         expect(
             initializerArguments.count == 1,
@@ -933,8 +938,9 @@ func runViewWiringSuites() {
             "生产同入口的空白正/负控失配：实得 \(controlCensus) —— 单空格、双空格与换行必须命中，"
                 + "无关类型必须保持不命中")
 
-        guard let thisSuite = codeWithoutStrings(
-            "gui/Tests/ClaudioGUICoreTests/ViewWiringSuite.swift")
+        guard
+            let thisSuite = codeWithoutStrings(
+                "gui/Tests/ClaudioGUICoreTests/ViewWiringSuite.swift")
         else {
             expect(false, "读不到 ViewWiringSuite.swift，无法证明生产与控制共用 census 入口")
             return
@@ -1014,7 +1020,10 @@ func runViewWiringSuites() {
             let accounted =
                 calls
                 .compactMap { argumentValue("packsLockFile", in: $0) }
-                .map { "packsLockFile: \($0)".lowercased().components(separatedBy: "lockfile").count - 1 }
+                .map {
+                    "packsLockFile: \($0)".lowercased().components(separatedBy: "lockfile").count
+                        - 1
+                }
                 .reduce(0, +)
             let actual = code.lowercased().components(separatedBy: "lockfile").count - 1
             expect(
@@ -1094,7 +1103,8 @@ func runViewWiringSuites() {
             testSources.count >= 20,
             "在 gui/Tests/ClaudioGUICoreTests 下只数到 \(testSources.count) 个 Swift 文件 —— 这条是"
                 + "**普查**，普查不到文件就永远等不到红，只会安静地绿下去（实测该目录下有三十余个）")
-        let constructionSites = testSources
+        let constructionSites =
+            testSources
             .filter { $0.code.contains(lockDirectoryMarker) }
             .map(\.path)
         expect(
@@ -1226,7 +1236,9 @@ func runViewWiringSuites() {
                 + "两条断言咬合在一起，正是要的那次停顿")
     }
 
-    suite("ClaudioGUIApp.swift 的 AudioImportEnvironment(…) 必须显式传 factoryPacksDirectory —— 否则 builtinPackIDs 生产环境恒为空集") {
+    suite(
+        "ClaudioGUIApp.swift 的 AudioImportEnvironment(…) 必须显式传 factoryPacksDirectory —— 否则 builtinPackIDs 生产环境恒为空集"
+    ) {
         // ## 它治的病（swift-reviewer 终审 blocker，PLAN-SOUND-MANAGER.md T6 验收表实测未过）
         //
         // `factoryPacksDirectory` 有默认值 `nil`（大多数测试 fixture 不需要它，见其 doc）。但生产侧
@@ -1668,7 +1680,8 @@ func runViewWiringSuites() {
     }
 
     suite("OnboardingViewModel 的 actionRunner 仍然是必填的（可选 = T17 那个 bug 换层皮）") {
-        guard let viewModel = codeOnly("gui/Sources/ClaudioGUICore/OnboardingViewModel.swift") else {
+        guard let viewModel = codeOnly("gui/Sources/ClaudioGUICore/OnboardingViewModel.swift")
+        else {
             expect(false, "读不到 OnboardingViewModel.swift")
             return
         }
@@ -1771,7 +1784,8 @@ func runViewWiringSuites() {
         expect(
             collapsingWhitespace(panel).contains(
                 "panelWriteFailures( muteError: panelModel.muteError, packSwitchError:"
-                    + " panelModel.packSwitchError, masterVolumeError: panelModel.masterVolumeError"),
+                    + " panelModel.packSwitchError, masterVolumeError: panelModel.masterVolumeError"
+            ),
             "operationalPanel 必须把三个写者的错误全部喂给 panelWriteFailures(muteError:packSwitchError:"
                 + "masterVolumeError:)（D3 合并列表）—— 少喂一个，那个写者的失败就从错误列表里静默消失。"
                 + ".configMissing 的排除逻辑本身已经下沉进这个纯函数，由 PanelWriteFailuresSuite 钉死")
@@ -1796,7 +1810,8 @@ func runViewWiringSuites() {
         // 写明的退出条件。下面两条断言：正向要求转发 `content.showsEventContent`，反向禁止钉回字面量。
         expect(
             panelCollapsed.contains(
-                "hasMasterVolume: content.showsEventContent && panelModel.libraryPresentationState.hasUsableSnapshot"),
+                "hasMasterVolume: content.showsEventContent && panelModel.libraryPresentationState.hasUsableSnapshot"
+            ),
             "hasMasterVolume 现在必须转发 `content.showsEventContent`（`PanelTopContent` 上单测钉过返回值的投影，"
                 + " = `.events`）—— 钉死字面量 false 会让 .masterVolume 在滑块真的在屏幕上时也永远抢不到焦点，"
                 + "键盘 / VoiceOver 用户走 Tab 会跳过一个明明可操作的控件；换成别的投影名 = render/focus 分叉")
@@ -1848,8 +1863,9 @@ func runViewWiringSuites() {
                 + ".configReveal)` 把开局焦点接到自己身上 —— 删掉它，`.malformed`/`.unwritable` 开局焦点落到一个"
                 + "没有视图认领的 .configReveal（panelFocusOrder 仍排它进序），Reveal 钮永远抢不到键盘 / VoiceOver 焦点")
 
-        guard let focusModel = codeWithoutStrings(
-            "gui/Sources/ClaudioGUICore/PanelFocusOrder.swift")
+        guard
+            let focusModel = codeWithoutStrings(
+                "gui/Sources/ClaudioGUICore/PanelFocusOrder.swift")
         else {
             expect(false, "读不到 PanelFocusOrder.swift")
             return
@@ -1857,10 +1873,11 @@ func runViewWiringSuites() {
         let focusCollapsed = collapsingWhitespace(focusModel)
         expect(
             panelCollapsed.contains(
-                "onManageSounds( .overview(surface: selectedScope.scope.surface), .openSoundSettings)")
+                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"
+            )
                 && panelCollapsed.contains(
                     ".focused($focusedTarget, equals: .openSoundSettings)"),
-            "播放设置必须把当前 Surface 交给声音包窗口，并精确恢复到打开设置按钮")
+            "播放设置必须把当前声音作用域交给事件与提示音窗口，并精确恢复到打开设置按钮")
         expect(
             panelCollapsed.contains("if selectedScope.scope.surface != nil")
                 && panelCollapsed.contains("panelModel.resetSelectedSurfaceOverrides()")
@@ -1868,7 +1885,8 @@ func runViewWiringSuites() {
             "非 Global 必须显示定向 reset，并认领与焦点模型一致的身份")
         expect(
             focusCollapsed.contains("var order: [PanelFocusTarget] = [.soundScope]")
-                && focusCollapsed.contains("if hasOpenSoundSettings { order.append(.openSoundSettings) }")
+                && focusCollapsed.contains(
+                    "if hasOpenSoundSettings { order.append(.openSoundSettings) }")
                 && focusCollapsed.contains("if hasResetSurface { order.append(.resetSurface) }")
                 && focusCollapsed.contains("order.append(.quitApplication)"),
             "焦点模型必须以 soundScope 开始，并以设置/reset/退出收尾")
@@ -1880,7 +1898,8 @@ func runViewWiringSuites() {
             "旧包画廊、管理声音包行及其焦点路径必须从生产面板撤下")
         expect(
             panelCollapsed.contains(
-                "private var selectedPackDisplayName: String { panelModel.selectedPackMetadata.displayName }"),
+                "private var selectedPackDisplayName: String { panelModel.selectedPackMetadata.displayName }"
+            ),
             "当前 effective 包名必须来自 selectedPackMetadata，不得从旧显示集反推")
         expect(
             panelCollapsed.contains("Text(selectedPackHeading)")
@@ -1892,7 +1911,8 @@ func runViewWiringSuites() {
                 && panelCollapsed.contains(".panelEventsMappable"),
             "标题必须分离当前包与已发布来源计数，事件区必须标明当前作用域与可映射覆盖")
         expect(
-            panelCollapsed.contains("case .needsPack: needsPackNotice playbackSettings(masterVolumeEnabled: false)")
+            panelCollapsed.contains(
+                "case .needsPack: needsPackNotice playbackSettings(masterVolumeEnabled: false)")
                 && panelCollapsed.contains("Text(l10n.text(.panelNeedsPackSettingsMessage))"),
             "needsPack 必须保留设置恢复入口，并让主音量 fail closed")
     }
@@ -1987,7 +2007,8 @@ func runViewWiringSuites() {
             "不许新增 closeCount —— PanelFocusCoordinator 今天已经有 hideCount 且 "
                 + "MenuBarController.popoverDidClose 的第一条语句已经是 notePanelHidden()（T17d），语义"
                 + "与这里要的冲刷信号完全一致，复用它")
-        guard let body = closureBody(after: ".onChange(of: focusCoordinator.hideCount)", in: flat) else {
+        guard let body = closureBody(after: ".onChange(of: focusCoordinator.hideCount)", in: flat)
+        else {
             expect(
                 false,
                 "MasterVolumeRow 必须有 .onChange(of: focusCoordinator.hideCount) { … } —— 切不出它的闭包体。"
@@ -2052,7 +2073,8 @@ func runViewWiringSuites() {
                 + ".onChange —— app 正在终止时 SwiftUI 的 update pass 不保证再跑一次，bump 一个 @Published "
                 + "计数器等于什么都没做；.onReceive 是一条独立的 Combine 订阅，NotificationCenter 会在通知"
                 + "post 的同一线程上同步调用它，不依赖任何一次视图重渲染")
-        guard let body = closureBody(after: "NSApplication.willTerminateNotification", in: flat) else {
+        guard let body = closureBody(after: "NSApplication.willTerminateNotification", in: flat)
+        else {
             expect(
                 false,
                 "MasterVolumeRow 必须监听 NSApplication.willTerminateNotification 并同步冲刷 —— 切不出它后面"
@@ -2104,10 +2126,9 @@ func runViewWiringSuites() {
         let flat = collapsingWhitespace(panel)
         expect(
             flat.contains("private func playPreview(for row: EventRow)")
-                && flat.contains("safePackFileURL(")
-                && flat.contains("nonEmptyRegularFileExists(at: file)")
+                && flat.contains("eventPreviewFileURL(")
                 && flat.contains("previewVolume(for: panelModel.config)"),
-            "面板试听必须在点击时安全解析文件并读取最新主音量")
+            "面板试听必须委托共享安全解析并读取最新主音量")
         expect(
             !flat.contains("AudioImportViewModel")
                 && !flat.contains("runAudioOpenPanel")
@@ -2226,7 +2247,8 @@ func runViewWiringSuites() {
                 "\(path) 的交互构造必须逐个有显式 accessibilityLabel；控件 \(controls)，label \(labels)")
             expect(
                 identifiers >= controls,
-                "\(path) 的交互构造必须逐个有稳定 accessibilityIdentifier；控件 \(controls)，identifier \(identifiers)")
+                "\(path) 的交互构造必须逐个有稳定 accessibilityIdentifier；控件 \(controls)，identifier \(identifiers)"
+            )
             expect(
                 !source.contains(".accessibilityLabel(\"\")")
                     && !source.contains(".accessibilityIdentifier(\"\")"),
@@ -2306,7 +2328,8 @@ func runViewWiringSuites() {
             let body = closureBody(after: "public var body: some View", in: panel),
             let scrollBody = closureBody(
                 after: "ScrollView(.vertical, showsIndicators: true)", in: body),
-            let scrollAt = body.range(of: "ScrollView(.vertical, showsIndicators: true)")?.lowerBound,
+            let scrollAt = body.range(of: "ScrollView(.vertical, showsIndicators: true)")?
+                .lowerBound,
             let footerAt = body.range(of: "PanelQuitFooter(")?.lowerBound
         else {
             expect(false, "无法切出 PanelView 根布局或 ScrollView")
@@ -2345,7 +2368,10 @@ func runViewWiringSuites() {
         expect(
             collapsingWhitespace(quitBody) == "NSApp.terminate(nil)",
             "composition root 的退出闭包必须且只能调用 NSApp.terminate(nil)，实际：\(quitBody)")
-        for forbidden in ["popover.close()", "performClose", "notePanelHidden()", "exit(", "_exit(", "abort(", "killall"] {
+        for forbidden in [
+            "popover.close()", "performClose", "notePanelHidden()", "exit(", "_exit(", "abort(",
+            "killall",
+        ] {
             expect(
                 !quitBody.contains(forbidden),
                 "退出闭包不得预关闭面板或直接杀进程，命中：\(forbidden)")
@@ -2481,16 +2507,145 @@ func runViewWiringSuites() {
             "State Gallery 与生产 Popover 必须复用同一份 stepper content")
     }
 
-    suite("PanelView：声音编辑统一从播放设置携带当前 Surface 打开 overview") {
+    suite("PanelView：打开设置携带当前 Sound Scope 进入事件与提示音") {
         guard let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/PanelView.swift") else {
             expect(false, "读不到 PanelView.swift")
             return
         }
         expect(
             collapsingWhitespace(panel).contains(
-                "onManageSounds( .overview(surface: selectedScope.scope.surface), .openSoundSettings)")
-                && !panel.contains(".editEvent("),
-            "生产面板不得保留逐事件编辑入口；打开设置必须携带当前 Surface 并恢复精确焦点")
+                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"
+            )
+                && !collapsingWhitespace(panel).contains(
+                    "onManageSounds( .overview(surface: selectedScope.scope.surface), .openSoundSettings)"
+                ),
+            "打开设置必须进入当前 Sound Scope 的事件与提示音窗口，不得继续打开声音包 overview")
+    }
+
+    suite("事件与提示音：retained window 复用作用域/事件投影，编辑委托声音包窗口") {
+        guard
+            let view = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
+            let viewWithStrings = codeOnly(
+                "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
+            let aiView = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
+            let aiViewWithStrings = codeOnly(
+                "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
+            let controller = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/EventSettingsWindowController.swift"),
+            let menu = codeWithoutStrings("gui/Sources/ClaudioGUI/MenuBarController.swift")
+        else {
+            expect(false, "读不到事件设置窗口或 MenuBarController 源码")
+            return
+        }
+        let flatView = collapsingWhitespace(view)
+        let flatViewWithStrings = collapsingWhitespace(viewWithStrings)
+        let flatAIView = collapsingWhitespace(aiView)
+        let flatAIViewWithStrings = collapsingWhitespace(aiViewWithStrings)
+        let flatController = collapsingWhitespace(controller)
+        let flatMenu = collapsingWhitespace(menu)
+        expect(
+            flatView.contains("panelSoundScopePresentations(")
+                && flatView.contains("panelEventPresentations(")
+                && flatView.contains("scope: selectedScope.scope")
+                && flatView.contains("EventSettingsEventRow("),
+            "事件设置窗口必须消费面板同源的 Sound Scope 与五事件投影")
+        expect(
+            flatView.contains(
+                "EventSettingsWindowRoute(scope: selectedScope.scope) .soundPacksRoute(")
+                && flatView.contains("onConfigureSound("),
+            "逐事件文件编辑必须携带同一作用域委托 SoundPacksWindow")
+        expect(
+            flatView.contains("resolvedEventSettingsScope(route: selection.route, scopes: scopes)")
+                && flatView.contains("scopeProjectionIsAligned")
+                && flatView.contains(".onChange(of: scopes.map(\\.scope))")
+                && flatView.contains("reconcileScopeSelection()"),
+            "Surface 动态消失时必须让 route、读模型与可操作内容共同规范化")
+        expect(
+            flatView.contains("eventSettingsWindowLayout(")
+                && flatView.contains("windowLayout: EventSettingsWindowLayout")
+                && !flatView.contains("PanelLayoutAdaptation"),
+            "标准窗口必须消费自己的宽度降级表，不得复用面板 popover 布局")
+        expect(
+            flatView.contains("onConfigureSound(.overview(surface: selectedScope.scope.surface))")
+                && flatView.contains(".focused($focusedTarget, equals: .manageSoundPacks)")
+                && flatViewWithStrings.contains(
+                    ".accessibilityIdentifier(\"event-settings.manage-sound-packs\")"),
+            "needsPack 必须提供当前作用域的声音包恢复入口及确定性焦点/AX 身份")
+        expect(
+            flatView.contains("panelWriteFailures(")
+                && flatView.contains("FailureRow(message: message)")
+                && flatView.contains("let issue = model.surfaceSoundIssue")
+                && flatView.contains("if !writeFailureMessages.isEmpty")
+                && flatViewWithStrings.contains(
+                    ".accessibilityIdentifier(\"event-settings.write-failures\")"),
+            "Global 与 Surface 的静音写失败必须在事件窗口就地可见")
+        expect(
+            flatController.contains("private var window: NSWindow?")
+                && flatController.contains("window.isReleasedWhenClosed = false")
+                && flatController.contains("func showWindow( route: EventSettingsWindowRoute,")
+                && flatController.contains("func restoreKeyWindow() -> Bool")
+                && flatController.contains("RetainedWindowHandbackTracker<NSRunningApplication>")
+                && flatController.contains("selection.requestInitialFocus()"),
+            "事件设置必须由 app-lifetime retained window 所有并保留 handback 债务")
+        expect(
+            flatView.contains(".onReceive(selection.$focusRequestRevision)")
+                && flatView.contains("eventSettingsFirstFocusTarget(scopes: scopes.map(\\.scope))")
+                && flatView.contains(".focused($focusedTarget, equals: .scope(scope.scope))")
+                && flatView.contains(".accessibilityHint(configureSoundHint)")
+                && flatView.contains(".accessibilityHint(previewHint)")
+                && flatView.contains(".accessibilityHint(muteHint)"),
+            "事件设置窗口必须在每次保留式打开时把首焦点放到第一个 scope，并说明禁用动作的原因")
+        expect(
+            flatMenu.contains("let eventSettingsWindowController = EventSettingsWindowController(")
+                && flatMenu.contains("onOpenEventSettings:")
+                && flatMenu.contains("requestEventSettingsWindow("),
+            "MenuBar composition root 必须构造 retained window 并把面板入口接到 router")
+        expect(
+            flatView.contains("EventSettingsAICueServiceCard(")
+                && flatView.contains("EventSettingsAICueComposerView(")
+                && flatView.contains("model.aiCueAdoptionEligibility(for: event.event)")
+                && flatView.contains(".focused(focusedTarget, equals: .generateAICue(")
+                && flatViewWithStrings.contains(
+                    ".accessibilityIdentifier( \"event-settings.event.")
+                && flatViewWithStrings.contains(".ai-cue\")"),
+            "AI 提示音必须作为事件设置的页面级服务与逐事件动作接入，并消费 fail-closed 采用资格")
+        expect(
+            flatView.contains("EventSettingsAICueCredentialSheet(")
+                && flatView.contains(".onChange(of: aiCueViewModel.requiresCredentialConfiguration)")
+                && flatAIView.contains("SecureField(")
+                && !flatAIViewWithStrings.contains("Toggle(\"Show")
+                && !flatAIViewWithStrings.contains("Toggle(\"显示"),
+            "BYOK 必须使用 SecureField 和页面级凭据表单，缺 key 时保留表单并打开配置且不提供明文显示")
+        guard
+            let descriptionBody = closureBody(after: "private var descriptionStep", in: flatAIView),
+            let candidatesBody = closureBody(after: "private var candidatesStep", in: flatAIView)
+        else {
+            expect(false, "必须能切出 AI 描述阶段与候选阶段")
+            return
+        }
+        expect(
+            descriptionBody.contains("aiCueDescriptionLabel")
+                && descriptionBody.contains("aiCueGenerateCandidates")
+                && !descriptionBody.contains("aiCueNameLabel"),
+            "第一步必须只有声音描述与生成动作，不能提前要求提示音名称")
+        expect(
+            candidatesBody.contains("aiCueNameLabel")
+                && candidatesBody.contains("generation.candidates")
+                && candidatesBody.contains("aiCueRegenerate"),
+            "第二步必须同时承载最终命名、三候选和显式重新生成")
+        expect(
+            flatView.contains("stopCandidatePreview()")
+                && flatView.contains("aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)")
+                && flatController.contains("aiCueViewModel.endSession()"),
+            "采用、关闭和作用域变化必须停止试听并清理未采用候选")
+        expect(
+            flatMenu.contains("AICueKeychainCredentialVault(")
+                && flatMenu.contains("ElevenLabsAICueProvider(")
+                && flatMenu.contains("AICueGenerationEngine(")
+                && flatMenu.contains("soundPacksWindowController.adoptAICue("),
+            "composition root 必须接通 Keychain、固定 provider、生成引擎与既有声音包采用链")
     }
 
     suite("声音包窗口：完整映射菜单列出已有音频并经窗口 model 绑定；面板不消费 inventory") {
@@ -2557,8 +2712,9 @@ func runViewWiringSuites() {
     }
 
     suite("T11：管理窗口孤儿行的删除是显式永久确认，分配与删除都接到窗口 model") {
-        guard let view = codeOnly(
-            "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
+        guard
+            let view = codeOnly(
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
         else {
             expect(false, "读不到 SoundPacksWindowView.swift")
             return
@@ -2678,7 +2834,8 @@ func runViewWiringSuites() {
         }
         expect(
             previewBody.contains(".disabled(!previewAvailability.isAvailable)")
-                && previewBody.contains("localizedEventPreviewHint(previewAvailability, language: language)"),
+                && previewBody.contains(
+                    "localizedEventPreviewHint(previewAvailability, language: language)"),
             "试听按钮必须由独立可试听状态结构性禁用并给出具体原因")
 
         // 行级分组必须是 .contain（a11y-architect FIX 1 既有纪律，EventRowView 头部 doc comment
@@ -2698,8 +2855,10 @@ func runViewWiringSuites() {
         }
         let flat = collapsingWhitespace(rowSource)
         expect(
-            flat.contains("@ScaledMetric(relativeTo: .body) private var eventTitleSize: CGFloat = 12.5")
-                && flat.contains(".font(.system(size: eventTitleSize, design: .rounded).weight(.medium))")
+            flat.contains(
+                "@ScaledMetric(relativeTo: .body) private var eventTitleSize: CGFloat = 12.5")
+                && flat.contains(
+                    ".font(.system(size: eventTitleSize, design: .rounded).weight(.medium))")
                 && flat.contains(".lineLimit(2)")
                 && flat.contains(".fixedSize(horizontal: false, vertical: true)"),
             "事件标题必须是可缩放的 12.5pt Rounded medium、最多两行并自然长高")
@@ -2710,7 +2869,8 @@ func runViewWiringSuites() {
             "紧凑/标准/较大必须把动作放在整行右侧并垂直居中；仅最大档把动作移到标签下方")
 
         guard
-            let identityBody = closureBody(after: "private var identityButton: some View", in: flat),
+            let identityBody = closureBody(
+                after: "private var identityButton: some View", in: flat),
             let statusBody = closureBody(after: "private var statusChips", in: flat),
             let indicatorBody = closureBody(
                 after: "private func hostIndicatorChip", in: flat)
@@ -2720,12 +2880,15 @@ func runViewWiringSuites() {
         }
         expect(
             identityBody.contains(
-                "HStack(alignment: .center, spacing: identitySpacing) { ClaudioEventGlyph(event: row.event) VStack")
+                "HStack(alignment: .center, spacing: identitySpacing) { ClaudioEventGlyph(event: row.event) VStack"
+            )
                 && identityBody.contains("statusChips")
                 && (identityBody.contains(
-                        ".padding(.trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)")
+                    ".padding(.trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"
+                )
                     || identityBody.contains(
-                        ".padding( .trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"))
+                        ".padding( .trailing, adaptation.eventActionsMoveBelow ? 0 : actionOverlayClearance)"
+                    ))
                 && identityBody.contains(".frame(maxWidth: .infinity, alignment: .leading)")
                 && identityBody.contains(".contentShape(Rectangle())")
                 && !identityBody.contains(".lineLimit(1)")
@@ -2831,7 +2994,9 @@ func runViewWiringSuites() {
         func focusOwnerCount(_ target: String) -> Int {
             flat.components(separatedBy: ".focused(focusedTarget, equals: \(target))").count - 1
         }
-        for target in [".eventSound(row.event)", ".eventAction(row.event)", ".eventMute(row.event)"] {
+        for target in [
+            ".eventSound(row.event)", ".eventAction(row.event)", ".eventMute(row.event)",
+        ] {
             let count = focusOwnerCount(target)
             expect(
                 count == 1,
@@ -2841,7 +3006,8 @@ func runViewWiringSuites() {
         }
 
         // ② owner 正确：eventSound 归 identityButton，eventMute 归 muteButton，eventAction 归 previewButton。
-        guard let identityBody = closureBody(after: "private var identityButton: some View", in: flat)
+        guard
+            let identityBody = closureBody(after: "private var identityButton: some View", in: flat)
         else {
             expect(false, "切不出 identityButton 的属性体")
             return
@@ -2882,7 +3048,8 @@ func runViewWiringSuites() {
         expect(
             menuAt < actionsAt && previewAt < muteAt,
             "三槽源码顺序必须是事件身份 → 试听 ▶ → 静音钮（与 panelFocusOrder 一致）。"
-                + "实际位置：identity=\(menuAt) actions=\(actionsAt) preview=\(previewAt) mute=\(muteAt)")
+                + "实际位置：identity=\(menuAt) actions=\(actionsAt) preview=\(previewAt) mute=\(muteAt)"
+        )
     }
 
     suite("声音包窗口剩余动作：共享 picker/player、底部动作栏、异步身份与统一公告均接到生产视图") {
@@ -2890,8 +3057,10 @@ func runViewWiringSuites() {
             "gui/Sources/ClaudioGUIComponents/AudioOpenPanel.swift"
         let componentsPlayer =
             "gui/Sources/ClaudioGUIComponents/AudioPreviewPlayer.swift"
-        let oldPicker = repoRoot().appendingPathComponent("gui/Sources/ClaudioGUI/AudioOpenPanel.swift")
-        let oldPlayer = repoRoot().appendingPathComponent("gui/Sources/ClaudioGUI/AudioPreviewPlayer.swift")
+        let oldPicker = repoRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUI/AudioOpenPanel.swift")
+        let oldPlayer = repoRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUI/AudioPreviewPlayer.swift")
         expect(
             !FileManager.default.fileExists(atPath: oldPicker.path)
                 && !FileManager.default.fileExists(atPath: oldPlayer.path),
@@ -2934,14 +3103,16 @@ func runViewWiringSuites() {
                 && window.contains("previewPlayer.play("),
             "管理窗口导入必须捕获 expectedPackID，经异步 model action 返回可试听文件后才播放；"
                 + "不能按回调时的新选择串包反馈/试听")
-        guard let importAndBindBody = closureBody(after: "private func importAndBind(", in: window) else {
+        guard let importAndBindBody = closureBody(after: "private func importAndBind(", in: window)
+        else {
             expect(false, "必须能切出逐事件导入并绑定的异步完成处理")
             return
         }
         let normalizedImportAndBindBody = collapsingWhitespace(importAndBindBody)
         expect(
             normalizedImportAndBindBody.contains("!completion.completedInBackground")
-                && normalizedImportAndBindBody.contains("completion.targetPackID == model.selectedPackID")
+                && normalizedImportAndBindBody.contains(
+                    "completion.targetPackID == model.selectedPackID")
                 && normalizedImportAndBindBody.contains(
                     "model.assignImportedAudioFile(imported, to: event)"),
             "逐事件绑定必须同时要求目标包仍匹配且 completion 仍属于前台检查会话；"
@@ -2973,8 +3144,9 @@ func runViewWiringSuites() {
     }
 
     suite("T12：管理窗口恢复出厂是内置包专属的显式替换确认，成功/失败告知都在窗口内可见") {
-        guard let view = codeOnly(
-            "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
+        guard
+            let view = codeOnly(
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
         else {
             expect(false, "读不到 SoundPacksWindowView.swift")
             return
