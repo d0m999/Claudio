@@ -226,7 +226,52 @@ func runSettingsNavigationSuites() {
         withExtendedLifetime(cancellable) {}
     }
 
-    suite("Settings shell：尺寸、单滚动、焦点序、DEBUG gallery 与生产隔离") {
+    suite("Settings presentation model：generic 入口只恢复持久化顶层 destination") {
+        let suiteName = "SettingsNavigationSuite.preferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = ClaudioPreferences(
+            defaults: defaults,
+            notificationCenter: NotificationCenter(),
+            availableSettingsDestinations: SettingsDestination.allCases,
+            preferredLanguageIdentifiers: { ["en-US"] })
+        preferences.setLastSettingsDestination(.sounds)
+
+        let availability = SettingsRouteAvailability(
+            integrationSurfaces: [.workBuddy],
+            eventScopes: [.global, .surface(.workBuddy)],
+            soundScopes: [.global, .surface(.workBuddy)],
+            soundPackIDs: ["orbit-pack"],
+            events: Set(Event.allCases))
+        let model = SettingsWindowPresentationModel<String>(
+            preferences: preferences,
+            availability: availability)
+        let generic = model.present(handback: "panel.settings")
+        expect(
+            generic.resolution.route == .destination(.sounds),
+            "generic 设置入口必须恢复上次合法顶层 destination")
+
+        let deepLink = SettingsRoute.integrations(surface: .workBuddy)
+        model.request(deepLink)
+        expect(model.resolution.route == deepLink, "显式深链接必须在当前展示中保留")
+        expect(
+            preferences.lastSettingsDestination == .integrations
+                && defaults.string(forKey: SettingsDestination.defaultsKey) == "integrations",
+            "深链接只能持久化顶层 destination，不得持久化 Surface")
+        expect(
+            defaults.string(forKey: SettingsDestination.defaultsKey)?.contains("workbuddy")
+                == false,
+            "持久化 destination 不得包含可能陈旧的 Surface ID")
+
+        _ = model.close()
+        let reopened = model.present(handback: "panel.settings.reopen")
+        expect(
+            reopened.resolution.route == .destination(.integrations),
+            "generic 重开必须恢复顶层页，而不是陈旧深链接")
+    }
+
+    suite("Settings shell：尺寸、单滚动、焦点序、DEBUG gallery 与生产通用页") {
         expect(
             SettingsWindowGeometry.defaultWidth == 1_240
                 && SettingsWindowGeometry.defaultHeight == 820,
@@ -246,15 +291,16 @@ func runSettingsNavigationSuites() {
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let view = settingsSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
             let gallery = settingsSource("gui/Sources/ClaudioGUI/StateGalleryView.swift"),
-            let menuBar = settingsSource("gui/Sources/ClaudioGUI/MenuBarController.swift")
+            let menuBar = settingsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
+            let app = settingsSource("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift")
         else {
             expect(false, "缺少 Settings window/shell/gallery/production wiring 源文件")
             return
         }
 
         expect(
-            controller.hasPrefix("#if DEBUG"),
-            "统一设置窗口 owner 当前只能进入 DEBUG build")
+            !controller.hasPrefix("#if DEBUG") && !view.hasPrefix("#if DEBUG"),
+            "通用设置窗口与真实通用页必须进入 production build")
         expect(
             controller.contains("window ?? makeWindow()"),
             "AppKit owner 必须复用唯一窗口")
@@ -269,10 +315,26 @@ func runSettingsNavigationSuites() {
             view.components(separatedBy: "ScrollView(").count - 1 == 1,
             "SwiftUI shell 只能有一层主滚动")
         expect(
-            view.contains("ForEach(SettingsDestination.allCases)")
+            view.contains("ForEach(preferences.availableSettingsDestinations)")
                 && view.contains("SettingsWindowFocusTarget.title")
                 && view.contains("SettingsWindowFocusTarget.firstAction"),
             "shell 必须接线固定 sidebar → 标题 → 首个动作焦点序")
+        expect(
+            view.contains("ForEach(ClaudioLanguageMode.allCases)")
+                && view.contains("preferences.setLanguageMode($0)")
+                && view.contains("SettingsWindowFocusTarget.firstAction(.general)"),
+            "通用页必须呈现三种语言模式并把 Picker 接入首个键盘焦点")
+        expect(
+            view.contains("settings.general.language")
+                && view.contains("settings.general.preference-recovery")
+                && view.contains(".accessibilityLabel")
+                && view.contains(".accessibilityHint"),
+            "通用页的选择器与恢复失败态必须有稳定 AX 接线")
+        for forbiddenPreference in ["fullScreenHide", "idleHide", "hiddenStatus"] {
+            expect(
+                !view.contains(forbiddenPreference),
+                "#87 通用页不得提前加入 \(forbiddenPreference)")
+        }
         expect(view.contains("Text(\"claudi0\")"), "设置侧栏必须使用产品品牌 claudi0")
         expect(
             view.contains("resolution.failure") && view.contains("SettingsRouteFailure"),
@@ -286,11 +348,29 @@ func runSettingsNavigationSuites() {
                 && gallery.contains("ForEach(PreviewFixtures.settingsRouteFailureScenarios)"),
             "DEBUG state gallery 必须遍历九个 route slot 与全部可见失败态")
         expect(
-            !menuBar.contains("private let settingsWindowController: SettingsWindowController")
+            menuBar.contains("private let settingsWindowController: SettingsWindowController")
+                && menuBar.contains("let settingsWindowController = SettingsWindowController(")
+                && menuBar.contains("requestSettingsWindowPresentation()")
                 && menuBar.contains("SoundPacksWindowController")
                 && menuBar.contains("EventSettingsWindowController")
                 && menuBar.contains("IntegrationsWindowController"),
-            "production composition 必须保留现有三个窗口入口且不接入半成品设置窗")
+            "production composition 必须接入通用设置，并保留现有三个已交付窗口")
+        expect(
+            app.contains("appDelegate.showSettings()")
+                && app.contains("CommandGroup(replacing: .appSettings)")
+                && !app.contains("CommandGroup(replacing: .appSettings) {}"),
+            "generic Settings 命令必须打开 retained 通用设置窗口，不能再吞掉入口")
+        expect(
+            app.contains(
+                "ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)")
+                && !app.contains("Button(\"Settings…\")"),
+            "generic Settings 命令标题必须消费共享 typed preference 的双语 catalog 投影")
+        expect(
+            controller.contains("preferences: preferences")
+                && controller.contains("preferences.$snapshot")
+                && controller.contains(".map(\\.language)")
+                && controller.contains("self?.updateWindowTitle()"),
+            "Settings owner 必须共享 typed preferences，并在语言投影变化时只更新窗口标题")
     }
 }
 

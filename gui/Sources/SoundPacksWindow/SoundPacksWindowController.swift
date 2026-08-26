@@ -17,7 +17,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private let environment: AudioImportEnvironment
     private let soundPackLibrary: SoundPackLibrary
     private let refreshCoordinator: SoundPacksRefreshCoordinator
-    private let languageStore: ClaudioLanguageStore
+    private let languageStore: ClaudioPreferences
     private lazy var model: SoundPacksWindowModel = SoundPacksWindowModel(
         configFile: configFile,
         lockFile: lockFile,
@@ -51,7 +51,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         environment: AudioImportEnvironment,
         soundPackLibrary: SoundPackLibrary,
         refreshCoordinator: SoundPacksRefreshCoordinator,
-        languageStore: ClaudioLanguageStore
+        languageStore: ClaudioPreferences
     ) {
         self.configFile = configFile
         self.lockFile = lockFile
@@ -83,7 +83,9 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                 }
             }
 
-        languageCancellable = languageStore.$language
+        languageCancellable = languageStore.$snapshot
+            .map(\.language)
+            .removeDuplicates()
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.updateWindowTitle()

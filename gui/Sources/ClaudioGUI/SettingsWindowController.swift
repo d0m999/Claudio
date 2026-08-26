@@ -1,4 +1,3 @@
-#if DEBUG
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
@@ -6,27 +5,32 @@ import ClaudioLocalization
 import Combine
 import SwiftUI
 
-/// App-lifetime owner of the single retained unified Settings window skeleton.
+/// App-lifetime owner of the single retained unified Settings window.
 ///
-/// The owner remains DEBUG-only until real destination views migrate. Its one lazy `NSWindow`
-/// survives close, and every close consumes at most one focus/activation handback.
+/// Its one lazy `NSWindow` survives close, and every close consumes at most one
+/// focus/activation handback. The shared preferences expose only destinations whose real content
+/// has shipped, so future route galleries stay DEBUG-only without hiding General from users.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
-    private let languageStore: ClaudioLanguageStore
+    private let preferences: ClaudioPreferences
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private var window: NSWindow?
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
     private var languageCancellable: AnyCancellable?
 
     init(
-        languageStore: ClaudioLanguageStore,
+        preferences: ClaudioPreferences,
         availability: SettingsRouteAvailability
     ) {
-        self.languageStore = languageStore
-        model = SettingsWindowPresentationModel(availability: availability)
+        self.preferences = preferences
+        model = SettingsWindowPresentationModel(
+            preferences: preferences,
+            availability: availability)
         super.init()
 
-        languageCancellable = languageStore.$language
+        languageCancellable = preferences.$snapshot
+            .map(\.language)
+            .removeDuplicates()
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.updateWindowTitle()
@@ -66,7 +70,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow() -> NSWindow {
-        let content = SettingsWindowView(model: model, languageStore: languageStore)
+        let content = SettingsWindowView(model: model, preferences: preferences)
         let window = NSWindow(
             contentRect: NSRect(
                 x: 0,
@@ -76,7 +80,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false)
-        window.title = ClaudioL10n(language: languageStore.language).text(.settingsWindowTitle)
+        window.title = ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)
         window.contentMinSize = NSSize(
             width: SettingsWindowGeometry.minimumWidth,
             height: SettingsWindowGeometry.minimumHeight)
@@ -84,14 +88,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window.isReleasedWhenClosed = false
         window.autorecalculatesKeyViewLoop = true
         window.delegate = self
-        window.setFrameAutosaveName("Claudio.SettingsWindow.Debug")
+        window.setFrameAutosaveName("Claudio.SettingsWindow")
         window.center()
         self.window = window
         return window
     }
 
     private func updateWindowTitle() {
-        window?.title = ClaudioL10n(language: languageStore.language).text(.settingsWindowTitle)
+        window?.title = ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)
     }
 }
-#endif

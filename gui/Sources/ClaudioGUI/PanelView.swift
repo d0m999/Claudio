@@ -39,7 +39,7 @@ public struct PanelView: View {
     @ObservedObject private var focusCoordinator: PanelFocusCoordinator
     @ObservedObject private var hostIntegrations: HostIntegrationPresentationStore
     @ObservedObject private var bootstrapReports: BootstrapReportPresentationStore
-    @ObservedObject private var languageStore: ClaudioLanguageStore
+    @ObservedObject private var languageStore: ClaudioPreferences
 
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
@@ -66,7 +66,7 @@ public struct PanelView: View {
         focusCoordinator: PanelFocusCoordinator = PanelFocusCoordinator(),
         hostIntegrations: HostIntegrationPresentationStore,
         bootstrapReports: BootstrapReportPresentationStore,
-        languageStore: ClaudioLanguageStore,
+        languageStore: ClaudioPreferences,
         soundPackLibrary: SoundPackLibrary,
         soundPacksRefreshCoordinator: SoundPacksRefreshCoordinator,
         onManageSounds: @escaping @MainActor (SoundPacksWindowRoute, PanelFocusTarget) -> Void,
@@ -121,7 +121,7 @@ public struct PanelView: View {
         focusCoordinator: PanelFocusCoordinator,
         hostIntegrations: HostIntegrationPresentationStore,
         bootstrapReports: BootstrapReportPresentationStore,
-        languageStore: ClaudioLanguageStore
+        languageStore: ClaudioPreferences
     ) {
         let previewKey = UUID().uuidString
         let defaults = UserDefaults(suiteName: "com.orbitzero.claudio.state-gallery")!
@@ -982,7 +982,7 @@ private struct PanelAgentEventRow: View {
 @MainActor
 struct InterfaceTextSizeControl: View {
     @Binding var selection: ClaudioInterfaceTextSize
-    @ObservedObject var languageStore: ClaudioLanguageStore
+    @ObservedObject var languageStore: ClaudioPreferences
 
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var isTriggerFocused: Bool

@@ -100,23 +100,24 @@ import SwiftUI
     @MainActor
     private struct SettingsWindowRouteFrame: View {
         @StateObject private var model: SettingsWindowPresentationModel<NSRunningApplication>
-        @StateObject private var languageStore: ClaudioLanguageStore
+        @StateObject private var languageStore: ClaudioPreferences
 
         init(
             route: SettingsRoute,
             availability: SettingsRouteAvailability,
             language: ClaudioAppLanguage
         ) {
+            let preferences = ClaudioPreferences(previewLanguage: language)
             _model = StateObject(
                 wrappedValue: SettingsWindowPresentationModel(
                     initialRoute: route,
+                    preferences: preferences,
                     availability: availability))
-            _languageStore = StateObject(
-                wrappedValue: ClaudioLanguageStore(previewLanguage: language))
+            _languageStore = StateObject(wrappedValue: preferences)
         }
 
         var body: some View {
-            SettingsWindowView(model: model, languageStore: languageStore)
+            SettingsWindowView(model: model, preferences: languageStore)
                 .frame(
                     width: SettingsWindowGeometry.minimumWidth,
                     height: SettingsWindowGeometry.minimumHeight)
@@ -168,7 +169,7 @@ import SwiftUI
         @StateObject private var focusCoordinator: PanelFocusCoordinator
         @StateObject private var hostIntegrations: HostIntegrationPresentationStore
         @StateObject private var bootstrapReports: BootstrapReportPresentationStore
-        @StateObject private var languageStore: ClaudioLanguageStore
+        @StateObject private var languageStore: ClaudioPreferences
         private let panelModel: PanelConfigController
         private let selectedScope: PanelSoundScopeID
         private let soundScopeExpanded: Bool
@@ -199,7 +200,7 @@ import SwiftUI
                     store: BootstrapReportStore(
                         directory: URL(fileURLWithPath: "/dev/null/claudio-preview-reports"))))
             _languageStore = StateObject(
-                wrappedValue: ClaudioLanguageStore(previewLanguage: language))
+                wrappedValue: ClaudioPreferences(previewLanguage: language))
 
             let baseConfig = ClaudioConfig(
                 selectedPack: "gallery-pack",
@@ -535,12 +536,12 @@ import SwiftUI
 
     private struct InterfaceTextSizeFrame: View {
         let scenario: PreviewFixtures.EventRowLayoutScenario
-        @StateObject private var languageStore: ClaudioLanguageStore
+        @StateObject private var languageStore: ClaudioPreferences
         @FocusState private var focusedTarget: PanelFocusTarget?
 
         init(scenario: PreviewFixtures.EventRowLayoutScenario) {
             self.scenario = scenario
-            let store = ClaudioLanguageStore(defaults: UserDefaults())
+            let store = ClaudioPreferences(defaults: UserDefaults())
             store.setLanguage(scenario.language)
             _languageStore = StateObject(wrappedValue: store)
         }
@@ -778,13 +779,13 @@ import SwiftUI
     private struct HostIntegrationStateFrame: View {
         @StateObject private var model: IntegrationsWindowModel
         @StateObject private var focusCoordinator = IntegrationsWindowFocusCoordinator()
-        @StateObject private var languageStore: ClaudioLanguageStore
+        @StateObject private var languageStore: ClaudioPreferences
 
         init(
             scenario: PreviewFixtures.HostIntegrationScenario,
             language: ClaudioAppLanguage
         ) {
-            let languageStore = ClaudioLanguageStore(defaults: UserDefaults())
+            let languageStore = ClaudioPreferences(defaults: UserDefaults())
             languageStore.setLanguage(language)
             _languageStore = StateObject(wrappedValue: languageStore)
             let store = HostIntegrationPresentationStore(

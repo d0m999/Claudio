@@ -29,9 +29,9 @@ let package = Package(
         .package(path: "../helper")
     ],
     targets: [
-        // Explicit-language localization is kept in its own resource-bearing target so the
-        // menu-bar panel and both retained windows share one catalog and one persisted language
-        // store. The views never consult Locale.current or the system App language preference.
+        // Explicit catalog lookup is kept in its own resource-bearing target. ClaudioGUICore's
+        // typed preference owner projects system or explicit language into this catalog so every
+        // retained surface observes one app-lifetime value.
         .target(
             name: "ClaudioLocalization",
             resources: [

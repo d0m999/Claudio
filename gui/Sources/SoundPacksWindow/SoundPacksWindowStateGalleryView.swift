@@ -9,10 +9,10 @@ import SwiftUI
 /// states. All data is injected; no preview frame reads or writes user paths.
 @MainActor
 public struct SoundPacksWindowStateGalleryView: View {
-    @StateObject private var languageStore = ClaudioLanguageStore()
+    @StateObject private var languageStore = ClaudioPreferences()
 
     public init(language: ClaudioAppLanguage = .zhHans) {
-        let store = ClaudioLanguageStore(defaults: UserDefaults())
+        let store = ClaudioPreferences(defaults: UserDefaults())
         store.setLanguage(language)
         _languageStore = StateObject(wrappedValue: store)
     }

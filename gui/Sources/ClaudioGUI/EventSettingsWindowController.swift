@@ -32,7 +32,7 @@ final class EventSettingsWindowSelection: ObservableObject {
 final class EventSettingsWindowController: NSObject, NSWindowDelegate {
     private let model: PanelConfigController
     private let hostIntegrations: HostIntegrationPresentationStore
-    private let languageStore: ClaudioLanguageStore
+    private let languageStore: ClaudioPreferences
     private let aiCueViewModel: AICueGenerationViewModel
     private let audioEnvironment: AudioImportEnvironment
     private let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
@@ -51,7 +51,7 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
     init(
         model: PanelConfigController,
         hostIntegrations: HostIntegrationPresentationStore,
-        languageStore: ClaudioLanguageStore,
+        languageStore: ClaudioPreferences,
         aiCueViewModel: AICueGenerationViewModel,
         audioEnvironment: AudioImportEnvironment,
         onConfigureSound: @escaping @MainActor (SoundPacksWindowRoute) -> Void,
@@ -89,7 +89,9 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
                 }
             }
 
-        languageCancellable = languageStore.$language
+        languageCancellable = languageStore.$snapshot
+            .map(\.language)
+            .removeDuplicates()
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.updateWindowTitle()

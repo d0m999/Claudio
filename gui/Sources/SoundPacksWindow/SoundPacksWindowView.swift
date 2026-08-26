@@ -36,7 +36,7 @@ struct SoundPacksWindowView: View {
     @ObservedObject var model: SoundPacksWindowModel
     let userPacksDirectory: URL
     @ObservedObject var focusCoordinator: SoundPacksWindowFocusCoordinator
-    @ObservedObject var languageStore: ClaudioLanguageStore
+    @ObservedObject var languageStore: ClaudioPreferences
 
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage(ClaudioInterfaceTextSize.defaultsKey)

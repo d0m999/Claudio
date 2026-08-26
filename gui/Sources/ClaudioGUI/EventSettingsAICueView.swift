@@ -7,7 +7,7 @@ import SwiftUI
 @MainActor
 struct EventSettingsAICueServiceCard: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
-    @ObservedObject var languageStore: ClaudioLanguageStore
+    @ObservedObject var languageStore: ClaudioPreferences
     let onManageCredential: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
@@ -88,7 +88,7 @@ struct EventSettingsAICueServiceCard: View {
 @MainActor
 struct EventSettingsAICueComposerView: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
-    @ObservedObject var languageStore: ClaudioLanguageStore
+    @ObservedObject var languageStore: ClaudioPreferences
     let eventTitle: String
     let playingCandidateID: UUID?
     let onConfigureCredential: () -> Void
@@ -415,7 +415,7 @@ struct EventSettingsAICueComposerView: View {
 @MainActor
 struct EventSettingsAICueCredentialSheet: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
-    @ObservedObject var languageStore: ClaudioLanguageStore
+    @ObservedObject var languageStore: ClaudioPreferences
 
     @Environment(\.presentationMode) private var presentationMode
     @Environment(\.colorScheme) private var colorScheme

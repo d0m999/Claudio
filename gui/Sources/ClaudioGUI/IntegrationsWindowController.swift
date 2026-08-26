@@ -13,7 +13,7 @@ import SwiftUI
 @MainActor
 final class IntegrationsWindowController: NSObject, NSWindowDelegate {
     private let model: IntegrationsWindowModel
-    private let languageStore: ClaudioLanguageStore
+    private let languageStore: ClaudioPreferences
     private let focusCoordinator = IntegrationsWindowFocusCoordinator()
     private var window: NSWindow?
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
@@ -21,7 +21,7 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
     private var externalActivationCancellable: AnyCancellable?
     private var languageCancellable: AnyCancellable?
 
-    init(model: IntegrationsWindowModel, languageStore: ClaudioLanguageStore) {
+    init(model: IntegrationsWindowModel, languageStore: ClaudioPreferences) {
         self.model = model
         self.languageStore = languageStore
         super.init()
@@ -48,7 +48,9 @@ final class IntegrationsWindowController: NSObject, NSWindowDelegate {
                 }
             }
 
-        languageCancellable = languageStore.$language
+        languageCancellable = languageStore.$snapshot
+            .map(\.language)
+            .removeDuplicates()
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.updateWindowTitle()

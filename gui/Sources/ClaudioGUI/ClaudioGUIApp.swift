@@ -1,15 +1,16 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
+import ClaudioLocalization
 import SwiftUI
 
 /// The real menu-bar app entry point (ENGINEERING.md T15 D2) — replaces T7's temporary
 /// `WindowGroup { OnboardingView(...) }` scaffolding, whose own doc comment already flagged
 /// it as disposable ("expected to be replaced wholesale once the menu bar skeleton lands").
-/// A `Scene`-less `App` (`Settings {}` is the smallest legal placeholder `Scene` SwiftUI's
-/// `App` protocol requires — it never actually shows a window; the app's real UI is the
+/// `Settings {}` remains the smallest legal placeholder `Scene` SwiftUI's `App` protocol
+/// requires; its command is redirected to the retained AppKit Settings owner. The app's UI is the
 /// `NSStatusItem`/`NSPopover` ``MenuBarController`` owns, driven entirely by
-/// ``ClaudioGUIAppDelegate``) — a menu-bar-only app has no document window at all.
+/// ``ClaudioGUIAppDelegate``; this menu-bar-only app still has no document window.
 ///
 /// ⚠️ COMPILE-ONLY here (see ``MenuBarController``'s doc comment): the actual menu-bar
 /// icon, popover open/close, and focus behavior are manual-verify on a real Mac.
@@ -21,23 +22,27 @@ struct ClaudioGUIApp: App {
         Settings {
             EmptyView()
         }
-        // Take ⌘, back off the menu. `Settings` is only here because `App` demands a `Scene`,
-        // but SwiftUI still synthesizes a "Settings…" item with a ⌘, key equivalent for it —
-        // and `.accessory` only means the app's menu bar is not DISPLAYED, not that
-        // `NSApp.mainMenu` is absent: key equivalents are dispatched in-process regardless.
-        //
-        // That was harmless only for as long as the app never became active. Since
-        // ``MenuBarController/showPopover()`` started calling `NSApp.activate`, the panel
-        // being open means Claudio is frontmost while the menu bar on screen still belongs to
-        // the app the user was in — so a user reaching for ⌘, (meaning to open THAT app's
-        // preferences) instead opens a blank "claudi0 Settings" window, which takes key and
-        // shoves the transient popover out of existence.
-        //
-        // Only this one item is removed. `NSApp.mainMenu = nil` would take ⌘C/⌘V/⌘X/⌘A down
-        // with it — AppKit text controls reach the pasteboard through those menu items' key
-        // equivalents.
+        // Replace SwiftUI's blank Settings scene command with the retained, typed AppKit owner.
+        // The app is active while its popover is key, so ⌘, is the generic in-app entry; the
+        // controller closes the transient popover before showing Settings and preserves handback.
         .commands {
-            CommandGroup(replacing: .appSettings) {}
+            ClaudioSettingsCommands(
+                preferences: appDelegate.preferences,
+                showSettings: { appDelegate.showSettings() })
+        }
+    }
+}
+
+private struct ClaudioSettingsCommands: Commands {
+    @ObservedObject var preferences: ClaudioPreferences
+    let showSettings: @MainActor () -> Void
+
+    var body: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button(
+                ClaudioL10n(language: preferences.language).text(.settingsWindowTitle) + "…",
+                action: showSettings)
+                .keyboardShortcut(",", modifiers: .command)
         }
     }
 }
@@ -46,7 +51,9 @@ struct ClaudioGUIApp: App {
 /// SwiftUI `Scene`, because the status item + popover are pure AppKit constructs with no
 /// SwiftUI `Scene` counterpart (mirrors how every "menu bar only" SwiftUI app on macOS is
 /// structured: `Scene` bodies model WINDOWS, and this app deliberately has none).
+@MainActor
 final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
+    let preferences = ClaudioPreferences()
     private var menuBarController: MenuBarController?
     private var hostIntegrationBridge: HostIntegrationManagerBridge?
     #if DEBUG
@@ -153,6 +160,7 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menuBarController = MenuBarController(
+            preferences: preferences,
             audioEnvironment: audioEnvironment,
             hostIntegrationState: initialIntegrationState,
             integrationMatrixProvider: integrationMatrixProvider,
@@ -177,6 +185,11 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         }
         chatAXTracer = nil
         #endif
+    }
+
+    @MainActor
+    func showSettings() {
+        menuBarController?.requestSettingsWindowPresentation()
     }
 }
 

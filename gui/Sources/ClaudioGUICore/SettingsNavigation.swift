@@ -283,15 +283,20 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
     @Published public private(set) var routeRequestRevision: UInt64 = 0
 
     private let availability: SettingsRouteAvailability
+    private let preferences: ClaudioPreferences?
     private var lifecycle: SettingsWindowLifecycle<Handback>
 
     public init(
-        initialRoute: SettingsRoute = .destination(.general),
+        initialRoute: SettingsRoute? = nil,
+        preferences: ClaudioPreferences? = nil,
         availability: SettingsRouteAvailability
     ) {
         self.availability = availability
-        lifecycle = SettingsWindowLifecycle(initialRoute: initialRoute)
-        resolution = resolveSettingsRoute(initialRoute, availability: availability)
+        self.preferences = preferences
+        let restoredRoute = initialRoute
+            ?? .destination(preferences?.lastSettingsDestination ?? .general)
+        lifecycle = SettingsWindowLifecycle(initialRoute: restoredRoute)
+        resolution = resolveSettingsRoute(restoredRoute, availability: availability)
     }
 
     @discardableResult
@@ -299,15 +304,22 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
         route: SettingsRoute? = nil,
         handback: Handback? = nil
     ) -> SettingsWindowPresentation {
+        let restoredRoute = route == nil && !lifecycle.isPresented
+            ? SettingsRoute.destination(preferences?.lastSettingsDestination ?? .general)
+            : route
         let presentation = lifecycle.present(
-            route: route,
+            route: restoredRoute,
             availability: availability,
             handback: handback)
+        if let route {
+            preferences?.setLastSettingsDestination(route.destination)
+        }
         publish(presentation)
         return presentation
     }
 
     public func request(_ route: SettingsRoute) {
+        preferences?.setLastSettingsDestination(route.destination)
         publish(lifecycle.request(route: route, availability: availability))
     }
 

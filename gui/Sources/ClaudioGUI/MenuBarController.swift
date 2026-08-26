@@ -72,7 +72,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let soundPacksWindowController: SoundPacksWindowController
     private let eventSettingsWindowController: EventSettingsWindowController
     private let integrationsWindowController: IntegrationsWindowController
-    private let languageStore: ClaudioLanguageStore
+    private let settingsWindowController: SettingsWindowController
+    private let languageStore: ClaudioPreferences
     private let integrationsModel: IntegrationsWindowModel
     private let actionRouter: MenuBarActionRouter
     private let hostIntegrations: HostIntegrationPresentationStore
@@ -104,6 +105,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// integrations window must be presented only after `popoverDidClose` finishes.
     private var pendingIntegrationsWindowPresentation:
         (host: HostID?, focusTarget: PanelFocusTarget)?
+    /// Generic Settings (⌘,) closes the transient popover before presenting the retained window.
+    private var pendingSettingsWindowPresentation = false
     /// Set by the retained integrations window's close callback and consumed by the next
     /// `popoverDidShow`, so focus restoration is one-shot rather than sticky across later opens.
     private var pendingRestoredPanelFocusTarget: PanelFocusTarget?
@@ -111,12 +114,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// 面板 shell 只接收 manager 已组合的宿主事实。内置 helper 的定位与
     /// shared bootstrap 已上移到 AppDelegate 的 composition root，不再经过面板。
     init(
+        preferences: ClaudioPreferences,
         audioEnvironment: AudioImportEnvironment,
         hostIntegrationState: HostIntegrationPresentationState,
         integrationMatrixProvider: HostIntegrationMatrixProvider,
         integrationActionProvider: HostIntegrationActionProvider
     ) {
-        let languageStore = ClaudioLanguageStore()
+        let languageStore = preferences
         let soundPacksRefreshCoordinator = SoundPacksRefreshCoordinator()
         let soundPackLibrary = SoundPackLibrary(environment: audioEnvironment)
         let soundPacksWindowController = SoundPacksWindowController(
@@ -208,6 +212,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let integrationsWindowController = IntegrationsWindowController(
             model: integrationsModel,
             languageStore: languageStore)
+        let settingsWindowController = SettingsWindowController(
+            preferences: languageStore,
+            availability: .empty)
         let eventSettingsModel = makeEventSettingsConfigController(
             configFile: ClaudioPaths.configFile,
             environment: audioEnvironment,
@@ -321,6 +328,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.soundPacksWindowController = soundPacksWindowController
         self.eventSettingsWindowController = eventSettingsWindowController
         self.integrationsWindowController = integrationsWindowController
+        self.settingsWindowController = settingsWindowController
         self.languageStore = languageStore
         self.integrationsModel = integrationsModel
         self.actionRouter = actionRouter
@@ -565,6 +573,24 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.close()
     }
 
+    /// Production generic Settings entry. No explicit route is supplied, so the retained owner
+    /// restores the last legal top-level destination from the shared typed preferences.
+    func requestSettingsWindowPresentation() {
+        pendingEventSettingsWindowPresentation = nil
+        pendingSoundPacksWindowPresentation = nil
+        pendingIntegrationsWindowPresentation = nil
+        pendingSettingsWindowPresentation = true
+
+        guard popover.isShown else {
+            pendingSettingsWindowPresentation = false
+            let previous = previousApp
+            previousApp = nil
+            showSettingsWindow(returnFocusTo: previous)
+            return
+        }
+        popover.close()
+    }
+
     /// 集成检查器的“配置声音”保持当前窗口上下文，并把声音包窗口直接路由到当前包的目标事件。
     /// 声音包窗口关闭后重新激活仍然可见的集成窗口，不经过菜单栏 popover。
     fileprivate func requestSoundPacksFromIntegrations(host: HostID, event: Event) {
@@ -611,6 +637,30 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         return popover.isShown
     }
 
+    private func showSettingsWindow(returnFocusTo application: NSRunningApplication?) {
+        settingsWindowController.showWindow(
+            returnFocusTo: application
+        ) { [weak self] latestHandbackApplication in
+            self?.activateHandbackApplication(latestHandbackApplication)
+        }
+    }
+
+    private func activateHandbackApplication(_ application: NSRunningApplication?) {
+        guard
+            let application,
+            !application.isTerminated,
+            application.processIdentifier != ProcessInfo.processInfo.processIdentifier
+        else { return }
+
+        if #available(macOS 14.0, *) {
+            NSApp.yieldActivation(to: application)
+            application.activate()
+        } else {
+            application.activate(options: [])
+            NSApp.deactivate()
+        }
+    }
+
     // MARK: - NSPopoverDelegate — focus owner (ENGINEERING.md「无障碍规格」, a11y-architect
     // FIX 4)
     //
@@ -655,6 +705,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     func popoverDidClose(_ notification: Notification) {
         // 必须在任何早返回之前通知 MasterVolumeRow 冲刷拖动会话。
         focusCoordinator.notePanelHidden()
+
+        let showSettings = pendingSettingsWindowPresentation
+        pendingSettingsWindowPresentation = false
+        if showSettings {
+            let previous = previousApp
+            previousApp = nil
+            showSettingsWindow(returnFocusTo: previous)
+            return
+        }
 
         let eventSettingsPresentation = pendingEventSettingsWindowPresentation
         pendingEventSettingsWindowPresentation = nil
@@ -706,15 +765,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             previous.processIdentifier != ProcessInfo.processInfo.processIdentifier
         else { return }
 
-        if #available(macOS 14.0, *) {
-            // Cooperative activation (macOS 14+): consent to `previous` taking the foreground
-            // so its `activate()` isn't denied. Yielding resigns ours — no `deactivate()`
-            // needed, and adding one races the handoff.
-            NSApp.yieldActivation(to: previous)
-            previous.activate()
-        } else {
-            previous.activate(options: [])
-            NSApp.deactivate()
-        }
+        activateHandbackApplication(previous)
     }
 }

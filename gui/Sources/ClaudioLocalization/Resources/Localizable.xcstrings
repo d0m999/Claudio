@@ -2944,6 +2944,54 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用量" } }
       }
     },
+    "settings.general.language.chinese" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Simplified Chinese" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "简体中文" } }
+      }
+    },
+    "settings.general.language.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Choose whether claudi0 uses the system language, Simplified Chinese, or English. Changes apply immediately to every open window." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "选择 claudi0 使用系统语言、简体中文或 English。更改会立即应用到所有已打开窗口。" } }
+      }
+    },
+    "settings.general.language.english" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "English" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "English" } }
+      }
+    },
+    "settings.general.language.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Use the arrow keys to choose a language mode. The interface updates immediately." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "使用方向键选择语言模式；界面会立即更新。" } }
+      }
+    },
+    "settings.general.language.system" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Follow System" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "跟随系统" } }
+      }
+    },
+    "settings.general.language.system-projection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "System language currently displays as %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前系统语言显示为 %@。" } }
+      }
+    },
+    "settings.general.language.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Language" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "语言" } }
+      }
+    },
+    "settings.general.preference-recovery" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Some settings could not be read, so safe defaults are in use. Choose again to save a valid value." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "部分设置无法读取，已使用安全默认值；重新选择后会保存有效值。" } }
+      }
+    },
     "settings.route.identity" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Stable route" } },

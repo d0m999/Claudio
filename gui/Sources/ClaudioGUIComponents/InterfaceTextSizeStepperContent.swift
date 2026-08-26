@@ -193,7 +193,7 @@ public struct InterfaceTextSizeStepperContent: View {
 @MainActor
 public struct InterfaceSettingsPopoverContent: View {
     @Binding public var selection: ClaudioInterfaceTextSize
-    @ObservedObject private var languageStore: ClaudioLanguageStore
+    @ObservedObject private var languageStore: ClaudioPreferences
 
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: FocusTarget?
@@ -204,7 +204,7 @@ public struct InterfaceSettingsPopoverContent: View {
 
     public init(
         selection: Binding<ClaudioInterfaceTextSize>,
-        languageStore: ClaudioLanguageStore
+        languageStore: ClaudioPreferences
     ) {
         self._selection = selection
         self.languageStore = languageStore

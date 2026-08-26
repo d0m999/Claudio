@@ -11,7 +11,7 @@ import SwiftUI
 struct IntegrationsWindowView: View {
     @ObservedObject var model: IntegrationsWindowModel
     @ObservedObject var focusCoordinator: IntegrationsWindowFocusCoordinator
-    @ObservedObject var languageStore: ClaudioLanguageStore
+    @ObservedObject var languageStore: ClaudioPreferences
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme

@@ -7,34 +7,11 @@ func runLocalizationSuites() {
         expect(
             ClaudioAppLanguage.allCases == [.zhHans, .english],
             "language enum must expose exactly Simplified Chinese and English")
-        expect(ClaudioAppLanguage.defaultValue == .zhHans, "first launch must default to zh-Hans")
         expect(
-            ClaudioAppLanguage(storedValue: nil) == .zhHans,
-            "missing persisted language must fall back to zh-Hans")
-        expect(
-            ClaudioAppLanguage(storedValue: "invalid") == .zhHans,
-            "invalid persisted language must fall back to zh-Hans")
-        expect(ClaudioAppLanguage(storedValue: "en") == .english, "English raw value must round-trip")
+            ClaudioAppLanguage.defaultValue == .zhHans,
+            "catalog fallback must remain the Simplified Chinese source language")
         expect(ClaudioAppLanguage.zhHans.selfName == "中文", "Chinese segment must use its self-name")
         expect(ClaudioAppLanguage.english.selfName == "English", "English segment must use its self-name")
-
-        let suiteName = "ClaudioLocalizationSuite.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defaults.removePersistentDomain(forName: suiteName)
-        let store = ClaudioLanguageStore(defaults: defaults)
-        expect(store.language == .zhHans, "new language store must publish zh-Hans")
-        store.setLanguage(.english)
-        expect(store.language == .english, "setLanguage must publish immediately")
-        expect(
-            defaults.string(forKey: ClaudioAppLanguage.defaultsKey) == "en",
-            "setLanguage must persist the explicit raw value")
-        let restored = ClaudioLanguageStore(defaults: defaults)
-        expect(restored.language == .english, "a new store must restore the persisted language")
-        defaults.set("not-a-language", forKey: ClaudioAppLanguage.defaultsKey)
-        expect(
-            ClaudioLanguageStore(defaults: defaults).language == .zhHans,
-            "a persisted unknown value must not leak into the UI")
-        defaults.removePersistentDomain(forName: suiteName)
 
         let chinese = ClaudioL10n(language: .zhHans)
         let english = ClaudioL10n(language: .english)

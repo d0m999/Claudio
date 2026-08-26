@@ -1,13 +1,14 @@
-import Combine
 import Foundation
 
-/// The two product languages. This is intentionally not a "follow system" option: Claudio
-/// defaults to Simplified Chinese and remembers the user's explicit choice across launches.
+/// The two resolved product languages. `ClaudioLanguageMode.system` projects the current system
+/// preference onto one of these values before catalog lookup; this enum never carries persistence
+/// intent by itself.
 public enum ClaudioAppLanguage: String, CaseIterable, Codable, Sendable, Identifiable {
     case zhHans = "zh-Hans"
     case english = "en"
 
     public static let defaultsKey = "Claudio.InterfaceLanguage"
+    /// Fail-closed source-language fallback for incomplete catalog entries.
     public static let defaultValue: ClaudioAppLanguage = .zhHans
 
     public var id: String { rawValue }
@@ -21,37 +22,55 @@ public enum ClaudioAppLanguage: String, CaseIterable, Codable, Sendable, Identif
         }
     }
 
+}
+
+/// The persisted language preference. The two explicit raw values intentionally match the
+/// pre-system-mode values so existing choices migrate without rewriting or losing intent.
+public enum ClaudioLanguageMode: String, CaseIterable, Codable, Sendable, Identifiable {
+    case system
+    case zhHans = "zh-Hans"
+    case english = "en"
+
+    public static let defaultValue: ClaudioLanguageMode = .system
+
+    public var id: String { rawValue }
+
     public init(storedValue: String?) {
         self = storedValue.flatMap(Self.init(rawValue:)) ?? Self.defaultValue
     }
-}
 
-/// App-lifetime language state. It is deliberately MainActor-bound because SwiftUI/AppKit owns
-/// the store and every visible surface observes the same published value.
-@MainActor
-public final class ClaudioLanguageStore: ObservableObject {
-    @Published public private(set) var language: ClaudioAppLanguage
-
-    private let defaults: UserDefaults
-
-    public init(defaults: UserDefaults = .standard) {
-        self.defaults = defaults
-        language = ClaudioAppLanguage(
-            storedValue: defaults.string(forKey: ClaudioAppLanguage.defaultsKey))
+    public func resolvedLanguage(
+        preferredLanguageIdentifiers: [String]
+    ) -> ClaudioAppLanguage {
+        switch self {
+        case .zhHans:
+            return .zhHans
+        case .english:
+            return .english
+        case .system:
+            for identifier in preferredLanguageIdentifiers {
+                let languageCode = identifier
+                    .replacingOccurrences(of: "_", with: "-")
+                    .split(separator: "-", maxSplits: 1)
+                    .first?
+                    .lowercased()
+                switch languageCode {
+                case "zh": return .zhHans
+                case "en": return .english
+                default: continue
+                }
+            }
+            return .english
+        }
     }
 
-    #if DEBUG
-    /// State-gallery initializer that does not read the app's real language preference.
-    public init(previewLanguage: ClaudioAppLanguage) {
-        self.defaults = UserDefaults(suiteName: "com.orbitzero.claudio.state-gallery")!
-        self.language = previewLanguage
-    }
-    #endif
-
-    public func setLanguage(_ language: ClaudioAppLanguage) {
-        guard self.language != language else { return }
-        self.language = language
-        defaults.set(language.rawValue, forKey: ClaudioAppLanguage.defaultsKey)
+    public func localizedName(language: ClaudioAppLanguage) -> String {
+        let l10n = ClaudioL10n(language: language)
+        return switch self {
+        case .system: l10n.text(.settingsGeneralLanguageSystem)
+        case .zhHans: l10n.text(.settingsGeneralLanguageChinese)
+        case .english: l10n.text(.settingsGeneralLanguageEnglish)
+        }
     }
 }
 
@@ -359,6 +378,17 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let settingsDestinationUsage: Self = "settings.destination.usage"
     public static let settingsDestinationShortcuts: Self = "settings.destination.shortcuts"
     public static let settingsDestinationAbout: Self = "settings.destination.about"
+    public static let settingsGeneralLanguageTitle: Self = "settings.general.language.title"
+    public static let settingsGeneralLanguageDescription: Self =
+        "settings.general.language.description"
+    public static let settingsGeneralLanguageSystem: Self = "settings.general.language.system"
+    public static let settingsGeneralLanguageChinese: Self = "settings.general.language.chinese"
+    public static let settingsGeneralLanguageEnglish: Self = "settings.general.language.english"
+    public static let settingsGeneralLanguageHint: Self = "settings.general.language.hint"
+    public static let settingsGeneralSystemProjection: Self =
+        "settings.general.language.system-projection"
+    public static let settingsGeneralPreferenceRecovery: Self =
+        "settings.general.preference-recovery"
     public static let settingsRouteIdentity: Self = "settings.route.identity"
     public static let settingsRouteReady: Self = "settings.route.ready"
     public static let settingsRouteInvalidSurface: Self = "settings.route.invalid-surface"
@@ -726,7 +756,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
         .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
-        .settingsDestinationShortcuts, .settingsDestinationAbout, .settingsRouteIdentity,
+        .settingsDestinationShortcuts, .settingsDestinationAbout, .settingsGeneralLanguageTitle,
+        .settingsGeneralLanguageDescription, .settingsGeneralLanguageSystem,
+        .settingsGeneralLanguageChinese, .settingsGeneralLanguageEnglish,
+        .settingsGeneralLanguageHint, .settingsGeneralSystemProjection,
+        .settingsGeneralPreferenceRecovery, .settingsRouteIdentity,
         .settingsRouteReady, .settingsRouteInvalidSurface, .settingsRouteStaleSurface,
         .settingsRouteStaleScope, .settingsRouteStaleEvent, .settingsRouteInvalidPack,
         .settingsRouteStalePack,

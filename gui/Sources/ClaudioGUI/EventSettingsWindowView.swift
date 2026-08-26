@@ -12,7 +12,7 @@ struct EventSettingsWindowView: View {
     @ObservedObject var model: PanelConfigController
     @ObservedObject var selection: EventSettingsWindowSelection
     @ObservedObject var hostIntegrations: HostIntegrationPresentationStore
-    @ObservedObject var languageStore: ClaudioLanguageStore
+    @ObservedObject var languageStore: ClaudioPreferences
     @ObservedObject var aiCueViewModel: AICueGenerationViewModel
 
     let audioEnvironment: AudioImportEnvironment
