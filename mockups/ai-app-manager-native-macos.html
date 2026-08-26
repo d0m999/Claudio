@@ -402,8 +402,8 @@
      * The selected inline core loop is embedded in the existing Events page,
      * gated by ?prototype=tts. The original page is unchanged without it.
      * Question: can the internal sound plan stay hidden while users describe
-     * first, then name the chosen cue beside its candidates, with BYOK service
-     * configuration kept outside the per-event generation form?
+     * first, then name the chosen cue beside its candidates, with an allowlisted
+     * Provider/profile selector and BYOK configuration outside the per-event form?
      */
     .tts-prototype-mode .window,
     .tts-prototype-mode .sidebar,
@@ -423,7 +423,7 @@
     }
     .tts-service-card {
       display: grid;
-      grid-template-columns: 34px minmax(0,1fr) auto auto;
+      grid-template-columns: 34px minmax(0,1fr) auto;
       align-items: center;
       gap: 10px;
       min-height: 58px;
@@ -446,11 +446,43 @@
     }
     .tts-service-copy { min-width: 0; }
     .tts-service-title { color: var(--text); font-size: 12px; font-weight: 700; }
-    .tts-service-meta { margin-top: 3px; color: var(--secondary); font-size: 10px; line-height: 1.35; }
-    .tts-service-status { display: inline-flex; align-items: center; gap: 5px; color: #a76e00; font-size: 10px; font-weight: 700; white-space: nowrap; }
+    .tts-service-meta { margin-top: 3px; color: var(--secondary); font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", sans-serif; font-size: 11px; line-height: 1.35; }
+    .tts-service-status { display: inline-flex; align-items: center; gap: 5px; color: #a76e00; font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", sans-serif; font-size: 11px; font-weight: 700; white-space: nowrap; }
     .tts-service-status::before { width: 7px; height: 7px; border-radius: 50%; content: ""; background: var(--orange); }
     .tts-service-status.ready { color: #258c3f; }
     .tts-service-status.ready::before { background: var(--green); }
+    .tts-service-status.deferred { color: var(--blue); }
+    .tts-service-status.deferred::before { background: var(--blue); }
+    .tts-service-status.rejected { color: var(--red); }
+    .tts-service-status.rejected::before { background: var(--red); }
+    .tts-service-status.unavailable { color: var(--tertiary); }
+    .tts-service-status.unavailable::before { background: var(--tertiary); }
+    .tts-profile-picker {
+      grid-column: 1 / -1;
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0,1fr));
+      gap: 6px;
+      padding-top: 8px;
+      border-top: 1px solid var(--separator);
+    }
+    .tts-profile-option {
+      min-width: 0;
+      padding: 7px 8px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      color: var(--secondary);
+      background: transparent;
+      cursor: pointer;
+      font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", sans-serif;
+      text-align: left;
+    }
+    .tts-profile-option:hover { background: var(--group-hover); }
+    .tts-profile-option.active { border-color: rgba(10,132,255,.34); color: var(--text); background: rgba(10,132,255,.09); }
+    .tts-profile-name { display: block; overflow: hidden; font-size: 11px; font-weight: 730; text-overflow: ellipsis; white-space: nowrap; }
+    .tts-profile-detail { display: block; margin-top: 3px; overflow: hidden; color: var(--tertiary); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .tts-profile-state { display: block; margin-top: 4px; font-size: 11px; font-weight: 700; }
+    .tts-capability-callout { margin-top: 8px; padding: 8px 9px; border-radius: 8px; color: var(--secondary); background: var(--group); font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", sans-serif; font-size: 11px; line-height: 1.4; }
+    .tts-capability-callout.error { color: var(--secondary); background: rgba(255,69,58,.08); box-shadow: inset 3px 0 0 var(--red); }
     .tts-event-group { overflow: visible; }
     .event-row.tts-event-row { grid-template-columns: 27px minmax(0,1fr) auto 38px minmax(126px, 168px); }
     .event-row.tts-event-row .event-code { display: block; }
@@ -643,9 +675,11 @@
     .tts-modal-close { width: 25px; height: 25px; padding: 0; border: 0; border-radius: 50%; color: var(--secondary); background: var(--group-hover); cursor: pointer; font-size: 13px; }
     .tts-modal-body { display: grid; gap: 12px; padding: 0 18px 16px; }
     .tts-provider-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 42px; padding: 8px 10px; border-radius: 9px; background: var(--group); }
-    .tts-provider-label { color: var(--secondary); font-size: 10px; font-weight: 650; }
-    .tts-provider-value { color: var(--text); font-size: 11px; font-weight: 700; text-align: right; }
-    .tts-modal-note { padding: 9px 10px; border-radius: 9px; color: var(--secondary); background: rgba(10,132,255,.075); font-size: 10px; line-height: 1.45; }
+    .tts-provider-label { color: var(--secondary); font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", sans-serif; font-size: 11px; font-weight: 650; }
+    .tts-provider-value { color: var(--text); font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 10px; font-weight: 700; text-align: right; }
+    .tts-provider-contract { display: grid; gap: 6px; padding: 9px 10px; border-radius: 9px; background: var(--group); color: var(--secondary); font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; font-size: 10px; line-height: 1.4; }
+    .tts-provider-contract strong { color: var(--text); font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", sans-serif; font-size: 11px; }
+    .tts-modal-note { padding: 9px 10px; border-radius: 9px; color: var(--secondary); background: rgba(10,132,255,.075); font-family: ui-rounded, -apple-system, BlinkMacSystemFont, "SF Pro Rounded", sans-serif; font-size: 11px; line-height: 1.45; }
     .tts-modal-actions { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 12px 18px 16px; border-top: 1px solid var(--separator); }
     .tts-danger-button { min-height: 31px; padding: 0 10px; border: 0; border-radius: 7px; color: var(--red); background: rgba(255,69,58,.09); cursor: pointer; font-size: 11px; font-weight: 680; }
     .tts-confirm-delete { padding: 12px; border-radius: 9px; color: var(--text); background: rgba(255,69,58,.08); font-size: 11px; line-height: 1.45; }
@@ -692,6 +726,7 @@
       .event-row.tts-event-row { grid-template-columns: 27px minmax(0,1fr) auto 38px minmax(118px, 148px); }
       .tts-service-card { grid-template-columns: 34px minmax(0,1fr) auto; }
       .tts-service-status { display: none; }
+      .tts-profile-picker { grid-template-columns: repeat(2, minmax(0,1fr)); }
     }
   </style>
 </head>
@@ -789,15 +824,95 @@
       task_start: { file: 'light-01.aiff', label: '轻提示 · 01' },
       stop: { file: 'xylophone-02.aiff', label: '木琴 · 02' }
     };
+    const ttsProviderProfiles = [
+      {
+        id: 'elevenlabs-global',
+        name: 'ElevenLabs',
+        region: 'Global',
+        origin: 'https://api.elevenlabs.io',
+        probe: 'GET /v1/models',
+        authentication: 'xi-api-key',
+        credentialSlot: 'elevenlabs',
+        validationPolicy: 'readOnlyProbe',
+        output: 'direct MP3',
+        routes: {
+          speech: { path: '/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb', model: 'eleven_v3', voice: 'JBFqnCBsd6RMkjVDRZzb', locales: ['zh', 'zh-Hans', 'en'] },
+          mixed: { path: '/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb', model: 'eleven_v3', voice: 'JBFqnCBsd6RMkjVDRZzb', locales: ['zh', 'zh-Hans', 'en'] },
+          animal: { path: '/v1/sound-generation', model: 'eleven_text_to_sound_v2', voice: null, locales: ['zh', 'zh-Hans', 'en'] },
+          soundEffect: { path: '/v1/sound-generation', model: 'eleven_text_to_sound_v2', voice: null, locales: ['zh', 'zh-Hans', 'en'] }
+        },
+        disclosure: '本机直连 ElevenLabs Global；描述与生成元数据受其数据处理条款约束，生成可能消耗 ElevenLabs 配额。'
+      },
+      {
+        id: 'minimax-global',
+        name: 'MiniMax',
+        region: 'Global',
+        origin: 'https://api.minimax.io',
+        probe: 'POST /v1/get_voice',
+        authentication: 'Bearer',
+        credentialSlot: 'minimax-global',
+        validationPolicy: 'readOnlyProbe',
+        output: 'JSON hex -> 32 kHz / 128 kbps / mono MP3',
+        routes: {
+          speech: { path: '/v1/t2a_v2', model: 'speech-2.8-hd', voice: 'Chinese (Mandarin)_Reliable_Executive', locales: ['zh', 'zh-Hans'] }
+        },
+        disclosure: '本机直连 MiniMax Global；首批仅 Mandarin speech，数据处理与费用/配额规则独立于 ElevenLabs。'
+      },
+      {
+        id: 'qwen-singapore',
+        name: 'Qwen',
+        region: 'Singapore',
+        origin: 'https://dashscope-intl.aliyuncs.com',
+        probe: null,
+        authentication: 'Bearer',
+        credentialSlot: 'qwen-singapore',
+        validationPolicy: 'deferredUntilExplicitGeneration',
+        output: 'SSE Base64 PCM -> 24 kHz / 16-bit / mono / little-endian WAV',
+        routes: {
+          speech: { path: '/api/v1/services/aigc/multimodal-generation/generation', model: 'qwen3-tts-instruct-flash', voice: 'Cherry', locales: ['zh*', 'en*'], header: 'X-DashScope-SSE: enable' }
+        },
+        disclosure: '本机直连新加坡 DashScope；独立 region key。保存不发模型请求，下一次显式生成才验证并可能计费。'
+      },
+      {
+        id: 'qwen-beijing',
+        name: 'Qwen',
+        region: 'Beijing',
+        origin: 'https://dashscope.aliyuncs.com',
+        probe: null,
+        authentication: 'Bearer',
+        credentialSlot: 'qwen-beijing',
+        validationPolicy: 'deferredUntilExplicitGeneration',
+        output: 'SSE Base64 PCM -> 24 kHz / 16-bit / mono / little-endian WAV',
+        routes: {
+          speech: { path: '/api/v1/services/aigc/multimodal-generation/generation', model: 'qwen3-tts-instruct-flash', voice: 'Cherry', locales: ['zh*', 'en*'], header: 'X-DashScope-SSE: enable' }
+        },
+        disclosure: '本机直连北京 DashScope；不复用 Singapore key。保存不发模型请求，下一次显式生成才验证并可能计费。'
+      }
+    ];
     const initialTTSStageKey = initialQuery.get('stage') || 'prompt';
     const initialTTSStage = ttsStages.includes(initialTTSStageKey) ? initialTTSStageKey : 'prompt';
+    const initialTTSProfileID = initialQuery.get('profile');
+    let selectedTTSProfileID = ttsProviderProfiles.some(profile => profile.id === initialTTSProfileID)
+      ? initialTTSProfileID
+      : 'elevenlabs-global';
+    const ttsCredentialStates = {
+      'elevenlabs-global': 'verified',
+      'minimax-global': 'missing',
+      'qwen-singapore': 'deferred',
+      'qwen-beijing': 'unavailable'
+    };
+    const ttsPendingReplacementPreviousStates = {};
     const initialTTSCredentialValue = initialQuery.get('credential');
-    const initialTTSCredentialReady = initialTTSCredentialValue
-      ? initialTTSCredentialValue === 'ready'
-      : initialTTSStage !== 'prompt';
+    const allowedTTSCredentialStates = ['missing', 'verified', 'deferred', 'rejected', 'pending', 'unavailable'];
+    if (initialTTSCredentialValue === 'ready') ttsCredentialStates[selectedTTSProfileID] = 'verified';
+    else if (allowedTTSCredentialStates.includes(initialTTSCredentialValue)) {
+      ttsCredentialStates[selectedTTSProfileID] = initialTTSCredentialValue;
+    }
+    if (ttsCredentialStates[selectedTTSProfileID] === 'pending') {
+      ttsPendingReplacementPreviousStates[selectedTTSProfileID] = 'verified';
+    }
     let ttsTransitionTimer;
     let ttsCredentialState = {
-      ready: initialTTSCredentialReady,
       modalOpen: false,
       confirmDelete: false
     };
@@ -808,6 +923,7 @@
           cueName: '轻铃开始处理',
           prompt: '先响一声轻铃，再轻声说“开始处理”',
           soundPlan: {
+            modality: 'mixed',
             soundDescription: '轻铃一声后，轻声说出指定台词',
             spokenContent: '开始处理',
             language: '简体中文',
@@ -820,6 +936,7 @@
         cueName: '小猫两声',
         prompt: '一只小猫短促地叫两声，第二声稍高，不要背景音乐',
         soundPlan: {
+          modality: 'animal',
           soundDescription: '小猫短促叫两声，第二声稍高',
           spokenContent: null,
           language: null,
@@ -849,6 +966,18 @@
     }
 
     let ttsState = makeTTSState(initialTTSStage);
+    const initialTTSScenario = initialQuery.get('scenario');
+    if (initialTTSScenario === 'unsupported-modality') {
+      ttsState.prompt = '一只小猫短促地叫两声，不要背景音乐';
+      ttsState.soundPlan = normalizeTTSSoundPlan(interpretTTSPrompt(ttsState.prompt), ttsState.prompt);
+      ttsState.promptError = validateTTSProfileCapability(ttsState.soundPlan);
+      ttsState.stage = 'prompt';
+    } else if (initialTTSScenario === 'unsupported-locale') {
+      ttsState.prompt = '用温和的声音说“Task complete”';
+      ttsState.soundPlan = normalizeTTSSoundPlan(interpretTTSPrompt(ttsState.prompt), ttsState.prompt);
+      ttsState.promptError = validateTTSProfileCapability(ttsState.soundPlan);
+      ttsState.stage = 'prompt';
+    }
     if (isTTSPrototype && initialTTSStage === 'applied') {
       ttsBindings.stop = { file: 'cue-stop-b.aiff', label: '小猫两声' };
       eventsByApp.workbuddy.find(item => item.id === 'stop').sound = ttsBindings.stop.label;
@@ -972,6 +1101,56 @@
       })[character]);
     }
 
+    function currentTTSProfile() {
+      return ttsProviderProfiles.find(profile => profile.id === selectedTTSProfileID) || ttsProviderProfiles[0];
+    }
+
+    function currentTTSCredentialState() {
+      return ttsCredentialStates[selectedTTSProfileID] || 'missing';
+    }
+
+    function ttsValidationIsDeferred(profile = currentTTSProfile()) {
+      return profile.validationPolicy === 'deferredUntilExplicitGeneration';
+    }
+
+    function isTTSCredentialStored(state = currentTTSCredentialState()) {
+      return ['verified', 'deferred', 'rejected', 'pending'].includes(state);
+    }
+
+    function isTTSCredentialUsable(state = currentTTSCredentialState()) {
+      return ['verified', 'deferred', 'pending'].includes(state);
+    }
+
+    function ttsCredentialPresentation(state) {
+      return ({
+        missing: { label: '未配置', className: '' },
+        verified: { label: '已验证并保存', className: 'ready' },
+        deferred: { label: '已保存 · 待生成验证', className: 'deferred' },
+        rejected: { label: '验证被拒绝', className: 'rejected' },
+        pending: { label: '替换 Key 待验证', className: 'deferred' },
+        unavailable: { label: '当前不可用', className: 'unavailable' }
+      })[state] || { label: '未配置', className: '' };
+    }
+
+    function ttsRouteLabels(profile = currentTTSProfile()) {
+      const labels = { speech: '语音', mixed: '混合声音', animal: '动物叫声', soundEffect: '纯音效' };
+      return Object.keys(profile.routes).map(route => labels[route]).join('、');
+    }
+
+    function ttsLocaleIsAllowed(route, language) {
+      if (!language) return true;
+      const locale = language === 'English' ? 'en' : 'zh-Hans';
+      return route.locales.some(allowed => allowed === locale || allowed === locale.split('-')[0] || allowed === `${locale.split('-')[0]}*`);
+    }
+
+    function validateTTSProfileCapability(plan) {
+      const profile = currentTTSProfile();
+      const route = profile.routes[plan.modality];
+      if (!route) return `${profile.name} ${profile.region} 首批只支持 ${ttsRouteLabels(profile)}；“${plan.modality}”不会读取 Key 或发送网络请求。`;
+      if (!ttsLocaleIsAllowed(route, plan.language)) return `${profile.name} ${profile.region} 不支持 ${plan.language}；请切换 profile 或修改台词语言。`;
+      return '';
+    }
+
     function currentTTSEvent() {
       return eventById('workbuddy', ttsState.eventId) || eventById('workbuddy', 'stop');
     }
@@ -991,7 +1170,8 @@
         url.searchParams.set('prototype', 'tts');
         url.searchParams.delete('variant');
         url.searchParams.set('stage', ttsState.stage);
-        url.searchParams.set('credential', ttsCredentialState.ready ? 'ready' : 'missing');
+        url.searchParams.set('profile', selectedTTSProfileID);
+        url.searchParams.set('credential', currentTTSCredentialState());
         url.searchParams.set('page', 'events');
         url.searchParams.set('app', 'workbuddy');
         window.history.replaceState({}, '', url);
@@ -1013,6 +1193,7 @@
       const spokenContent = quoted?.[1]?.trim() || null;
       if (/小猫|猫叫/.test(prompt)) {
         return {
+          modality: 'animal',
           soundDescription: '小猫短促叫两声，第二声稍高',
           spokenContent: null,
           language: null,
@@ -1022,6 +1203,7 @@
       }
       if (/木质|敲击/.test(prompt)) {
         return {
+          modality: 'soundEffect',
           soundDescription: '清脆的木质敲击两下',
           spokenContent: null,
           language: null,
@@ -1031,6 +1213,7 @@
       }
       if (spokenContent && /铃/.test(prompt)) {
         return {
+          modality: 'mixed',
           soundDescription: '轻铃一声后，轻声说出指定台词',
           spokenContent,
           language: ttsLanguageForText(spokenContent),
@@ -1043,6 +1226,7 @@
         const voice = prompt.includes('女声') ? '女声' : prompt.includes('男声') ? '男声' : '人声';
         const styleDescription = tones.length ? tones.join('、') : '自然、清晰';
         return {
+          modality: 'speech',
           soundDescription: `${styleDescription}的${voice}说出指定台词`,
           spokenContent,
           language: ttsLanguageForText(spokenContent),
@@ -1051,6 +1235,7 @@
         };
       }
       return {
+        modality: 'soundEffect',
         soundDescription: prompt.replace(/[，,]?\s*\d+(?:\.\d+)?\s*秒\s*(?:以内|内)?/g, '').trim(),
         spokenContent: null,
         language: null,
@@ -1072,6 +1257,7 @@
         ? String(durationSeconds)
         : durationSeconds.toFixed(1);
       return {
+        modality: plan.modality || (spokenContent ? 'speech' : 'soundEffect'),
         soundDescription,
         spokenContent,
         language: spokenContent ? plan.language || ttsLanguageForText(spokenContent) : null,
@@ -1120,43 +1306,57 @@
     }
 
     function renderTTSServiceCard() {
-      const ready = ttsCredentialState.ready;
+      const profile = currentTTSProfile();
+      const credential = ttsCredentialPresentation(currentTTSCredentialState());
+      const profileOptions = ttsProviderProfiles.map(item => {
+        const state = ttsCredentialPresentation(ttsCredentialStates[item.id]);
+        return `<button class="tts-profile-option ${item.id === profile.id ? 'active' : ''}" type="button" data-tts-action="select-profile" data-tts-profile="${item.id}" aria-pressed="${item.id === profile.id ? 'true' : 'false'}"><span class="tts-profile-name">${item.name} · ${item.region}</span><span class="tts-profile-detail">${ttsRouteLabels(item)}</span><span class="tts-profile-state">${state.label}</span></button>`;
+      }).join('');
       return `<section class="tts-service-card" aria-label="AI 声音生成服务">
         <span class="tts-service-icon" aria-hidden="true">⌁</span>
-        <span class="tts-service-copy"><span class="tts-service-title">AI 声音生成服务 · 自备 API Key</span><span class="tts-service-meta">${ready ? '已存入 macOS 钥匙串；生成时由本机直连固定的首发服务' : '首次生成前配置一次；不会写入设置文件、日志或提示音 manifest'}</span></span>
-        <span class="tts-service-status ${ready ? 'ready' : ''}">${ready ? '已配置' : '未配置'}</span>
-        <button class="tts-secondary-button" type="button" data-tts-action="manage-credential">${ready ? '管理' : '配置 API Key'}</button>
+        <span class="tts-service-copy"><span class="tts-service-title">AI 声音生成服务 · ${profile.name} ${profile.region}</span><span class="tts-service-meta">固定 profile · ${ttsRouteLabels(profile)} · ${ttsValidationIsDeferred(profile) ? '显式生成时验证' : '只读验证'}；不允许自定义 endpoint/model/voice/region</span></span>
+        <span style="display:flex;align-items:center;gap:8px"><span class="tts-service-status ${credential.className}">${credential.label}</span><button class="tts-secondary-button" type="button" data-tts-action="manage-credential" ${currentTTSCredentialState() === 'unavailable' ? 'disabled' : ''}>${currentTTSCredentialState() === 'unavailable' ? '不可配置' : isTTSCredentialStored() ? '管理' : '配置 API Key'}</button></span>
+        <div class="tts-profile-picker" role="group" aria-label="选择 Provider profile">${profileOptions}</div>
       </section>`;
     }
 
     function renderTTSCredentialModal() {
       if (!ttsCredentialState.modalOpen) return '';
+      const profile = currentTTSProfile();
       if (ttsCredentialState.confirmDelete) {
         return `<div class="tts-modal-backdrop"><section class="tts-modal" role="dialog" aria-modal="true" aria-labelledby="tts-key-title">
-          <div class="tts-modal-head"><div><div id="tts-key-title" class="tts-modal-title">删除 API Key？</div><div class="tts-modal-copy">删除后不能继续生成新候选；已经采用并保存的提示音不会受影响。</div></div><button class="tts-modal-close" type="button" data-tts-action="close-credential" aria-label="关闭">×</button></div>
-          <div class="tts-modal-body"><div class="tts-confirm-delete">正式版会从 macOS 钥匙串删除该凭据，并立即让后续生成失败关闭；不会删除现有提示音。</div></div>
+          <div class="tts-modal-head"><div><div id="tts-key-title" class="tts-modal-title">删除 ${profile.name} ${profile.region} API Key？</div><div class="tts-modal-copy">删除后不能继续使用此 profile 生成；其他 profile 和已经采用的提示音不会受影响。</div></div><button class="tts-modal-close" type="button" data-tts-action="close-credential" aria-label="关闭">×</button></div>
+          <div class="tts-modal-body"><div class="tts-confirm-delete">正式版只删除 credential slot <strong>${profile.credentialSlot}</strong> 的 active/pending 凭据；不会跨 profile 删除或修改现有提示音。</div></div>
           <div class="tts-modal-actions"><button class="tts-secondary-button" type="button" data-tts-action="cancel-delete-credential">取消</button><button class="tts-danger-button" type="button" data-tts-action="confirm-delete-credential">确认删除</button></div>
         </section></div>`;
       }
-      const configured = ttsCredentialState.ready;
+      const configured = isTTSCredentialStored();
+      const isDeferred = ttsValidationIsDeferred(profile);
+      const isPending = currentTTSCredentialState() === 'pending';
+      const route = Object.values(profile.routes)[0];
+      const saveLabel = isDeferred ? '保存 API Key' : configured ? '验证并替换' : '验证并保存';
       return `<div class="tts-modal-backdrop"><section class="tts-modal" role="dialog" aria-modal="true" aria-labelledby="tts-key-title">
-        <div class="tts-modal-head"><div><div id="tts-key-title" class="tts-modal-title">${configured ? '管理 API Key' : '连接 AI 声音生成服务'}</div><div class="tts-modal-copy">首版固定使用一个 Claudio 支持的生成服务，只需要配置自己的 API Key。</div></div><button class="tts-modal-close" type="button" data-tts-action="close-credential" aria-label="关闭">×</button></div>
+        <div class="tts-modal-head"><div><div id="tts-key-title" class="tts-modal-title">${configured ? '管理 API Key' : '连接 AI 声音生成服务'}</div><div class="tts-modal-copy">当前只配置 ${profile.name} ${profile.region}；每个 allowlisted profile 使用独立 Keychain slot。</div></div><button class="tts-modal-close" type="button" data-tts-action="close-credential" aria-label="关闭">×</button></div>
         <div class="tts-modal-body">
-          <div class="tts-provider-row"><span><span class="tts-provider-label">生成服务</span><span class="tts-service-meta" style="display:block">不允许自定义 API 地址</span></span><span class="tts-provider-value">首发声音生成服务</span></div>
+          <div class="tts-provider-row"><span><span class="tts-provider-label">Provider profile</span><span class="tts-service-meta" style="display:block">固定 region；不允许自定义 API 地址</span></span><span class="tts-provider-value">${profile.id}</span></div>
+          <div class="tts-provider-contract"><span><strong>Origin/path</strong> · ${profile.origin}${route.path}</span><span><strong>Auth / slot</strong> · ${profile.authentication} / ${profile.credentialSlot}</span><span><strong>Model / voice</strong> · ${route.model} / ${route.voice || 'none'}</span><span><strong>Output</strong> · ${profile.output}</span><span><strong>Routes / locale</strong> · ${Object.keys(profile.routes).join(', ')} / ${route.locales.join(', ')}</span></div>
+          <div class="tts-modal-note">${profile.disclosure} ${isDeferred ? configured ? '本次替换只写 pending slot，不会发模型请求；显式生成成功后才提升为 active，可在此前取消并恢复原 active 状态。' : '首次保存写 stored-unverified active，不会发模型请求或产生生成费用；显式生成成功后才标记 verified。' : `保存前只执行 ${profile.probe}，不会生成音频；验证或写入失败时保留旧 Key。`}</div>
           <label><span class="tts-prompt-label">${configured ? '输入新的 API Key 以替换' : 'API Key'}</span><input id="tts-api-key-input" class="tts-secret-input" type="password" autocomplete="new-password" spellcheck="false" placeholder="原型中输入任意 8 位演示字符"></label>
           <span id="tts-api-key-error" class="tts-error" role="alert"></span>
           <div class="tts-modal-note">正式版中，明文只在验证与钥匙串写入期间短暂存在；view model、日志、配置文件和提示音 manifest 都拿不到它。本原型不会联网或保存，请勿输入真实 Key。</div>
         </div>
-        <div class="tts-modal-actions">${configured ? '<button class="tts-danger-button" type="button" data-tts-action="delete-credential">删除 API Key</button>' : '<span></span>'}<span style="display:flex;gap:7px"><button class="tts-secondary-button" type="button" data-tts-action="close-credential">取消</button><button class="tts-primary-button" type="button" data-tts-action="save-credential">${configured ? '验证并替换' : '验证并保存'}</button></span></div>
+        <div class="tts-modal-actions"><span style="display:flex;gap:7px">${configured ? '<button class="tts-danger-button" type="button" data-tts-action="delete-credential">删除 API Key</button>' : ''}${isPending ? '<button class="tts-secondary-button" type="button" data-tts-action="cancel-pending-credential">取消替换</button>' : ''}</span><span style="display:flex;gap:7px"><button class="tts-secondary-button" type="button" data-tts-action="close-credential">取消</button><button class="tts-primary-button" type="button" data-tts-action="save-credential">${saveLabel}</button></span></div>
       </section></div>`;
     }
 
     function renderTTSPrompt() {
+      const profile = currentTTSProfile();
       return `<section class="tts-card">
         <label class="tts-prompt-label" for="tts-prompt-input">声音描述 · 可以是语音、动物叫声、音效或混合声音</label>
         <textarea id="tts-prompt-input" class="tts-prompt" data-tts-field="prompt" placeholder="例如：一只小猫短促地叫两声，第二声稍高，不要背景音乐">${ttsEscape(ttsState.prompt)}</textarea>
         <div class="tts-prompt-actions"><span class="tts-error">${ttsEscape(ttsState.promptError)}</span><button class="tts-primary-button" type="button" data-tts-action="generate">生成 3 个候选</button></div>
         <div class="tts-helper">先专注描述想听到的声音；下一步试听候选并确认提示音名称。后台会隐藏解释并检查描述。</div>
+        <div class="tts-capability-callout ${ttsState.promptError.includes('不支持') || ttsState.promptError.includes('只支持') ? 'error' : ''}"><strong>${profile.name} ${profile.region}</strong> · routes.keys: ${Object.keys(profile.routes).join(', ')}。不支持的 modality/locale 会在读取 Key 和网络请求前阻止；不会自动 fallback。</div>
       </section>`;
     }
 
@@ -1177,7 +1377,7 @@
     function renderTTSCandidates() {
       const rows = ttsCandidates.map(candidate => `<div class="tts-candidate-row">
         ${renderTTSPlayButton(candidate)}
-        <span><span class="tts-candidate-name">${candidate.id} · ${candidate.name}</span><span class="tts-candidate-meta"><span class="tts-sim-badge">BYOK 原型候选</span> · ${candidate.duration}</span></span>
+        <span><span class="tts-candidate-name">${candidate.id} · ${candidate.name}</span><span class="tts-candidate-meta"><span class="tts-sim-badge">${currentTTSProfile().name} ${currentTTSProfile().region} · 原型候选</span> · ${candidate.duration}</span></span>
         ${ttsWave()}
         <button class="tts-small-button" type="button" data-tts-action="adopt" data-tts-candidate="${candidate.id}">采用并保存</button>
       </div>`).join('');
@@ -1187,10 +1387,10 @@
 
     function renderTTSGeneration() {
       const interpreting = ttsState.stage === 'interpreting';
-      const title = interpreting ? '正在理解你的声音描述…' : '正在请求声音生成服务…';
+      const title = interpreting ? '正在理解你的声音描述…' : `正在请求 ${currentTTSProfile().name} ${currentTTSProfile().region}…`;
       const helper = interpreting
         ? '后台会识别语音、动物叫声、音效或混合声音，并自动补齐生成所需参数；名称将在候选生成后建议。'
-        : '正式版由本机读取钥匙串并直连服务；原型只模拟请求，不会使用真实 API Key。';
+        : `正式版只读取 ${currentTTSProfile().credentialSlot} slot 并直连固定 origin；原型只模拟请求，不会使用真实 API Key。`;
       return `<section class="tts-card tts-generation"><div><span class="tts-spinner" style="display:inline-block"></span><div class="tts-card-title">${title}</div><div class="tts-helper" style="margin-top:5px">${helper}</div></div></section>`;
     }
 
@@ -1354,9 +1554,21 @@
         setTTSStage('prompt');
         return;
       }
-      if (!ttsCredentialState.ready) {
-        ttsState.promptError = '请先配置 API Key；你的声音描述会保留。';
-        ttsCredentialState.modalOpen = true;
+      const interpretedPlan = normalizeTTSSoundPlan(interpretTTSPrompt(prompt), prompt);
+      const capabilityError = validateTTSProfileCapability(interpretedPlan);
+      if (capabilityError) {
+        ttsState.promptError = capabilityError;
+        setTTSStage('prompt');
+        return;
+      }
+      if (!isTTSCredentialUsable()) {
+        const state = currentTTSCredentialState();
+        ttsState.promptError = state === 'unavailable'
+          ? '当前 Provider profile 不可用；不会读取其他 profile 的 Key 或自动 fallback。'
+          : state === 'rejected'
+            ? '当前 profile 的凭据已被拒绝；请替换或删除，描述会保留。'
+            : '请先配置当前 profile 的 API Key；你的声音描述和 profile 选择会保留。';
+        ttsCredentialState.modalOpen = state !== 'unavailable';
         ttsCredentialState.confirmDelete = false;
         rerenderTTS();
         return;
@@ -1371,8 +1583,7 @@
       rerenderTTS();
       ttsTransitionTimer = window.setTimeout(() => {
         if (ttsState.stage !== 'interpreting') return;
-        const interpretedPlan = interpretTTSPrompt(prompt);
-        ttsState.soundPlan = normalizeTTSSoundPlan(interpretedPlan, prompt);
+        ttsState.soundPlan = interpretedPlan;
         if (!ttsState.cueNameIsManual || !ttsState.cueName.trim()) {
           ttsState.cueName = suggestedTTSCueName(prompt, ttsState.soundPlan);
           ttsState.cueNameIsManual = false;
@@ -1380,7 +1591,14 @@
         ttsState.confirmedSoundPlan = { ...ttsState.soundPlan };
         setTTSStage('generating');
         ttsTransitionTimer = window.setTimeout(() => {
-          if (ttsState.stage === 'generating') setTTSStage('candidates');
+          if (ttsState.stage !== 'generating') return;
+          const profile = currentTTSProfile();
+          if (ttsValidationIsDeferred(profile)
+              && ['deferred', 'pending'].includes(currentTTSCredentialState())) {
+            ttsCredentialStates[profile.id] = 'verified';
+            delete ttsPendingReplacementPreviousStates[profile.id];
+          }
+          setTTSStage('candidates');
         }, 850);
       }, 360);
     }
@@ -1389,6 +1607,22 @@
       const action = target.dataset.ttsAction;
       if (action === 'reset') return resetTTSFlow();
       if (action === 'open-event') return openTTSEvent(target.dataset.ttsEvent);
+      if (action === 'select-profile') {
+        const profileID = target.dataset.ttsProfile;
+        if (!ttsProviderProfiles.some(profile => profile.id === profileID) || profileID === selectedTTSProfileID) return;
+        window.clearTimeout(ttsTransitionTimer);
+        const eventID = ttsState.eventId;
+        const prompt = ttsState.prompt;
+        selectedTTSProfileID = profileID;
+        ttsState = makeTTSState('prompt', eventID);
+        ttsState.prompt = prompt;
+        ttsCredentialState.modalOpen = false;
+        ttsCredentialState.confirmDelete = false;
+        rerenderTTS();
+        window.setTimeout(() => document.querySelector(`[data-tts-profile="${profileID}"]`)?.focus(), 0);
+        showToast(`已选择 ${currentTTSProfile().name} ${currentTTSProfile().region}；未采用候选已清理，没有发送请求`);
+        return;
+      }
       if (action === 'manage-credential') {
         ttsCredentialState.modalOpen = true;
         ttsCredentialState.confirmDelete = false;
@@ -1411,12 +1645,34 @@
           return;
         }
         input.value = '';
-        ttsCredentialState.ready = true;
+        const profile = currentTTSProfile();
+        const previousState = currentTTSCredentialState();
+        const wasStored = isTTSCredentialStored();
+        if (ttsValidationIsDeferred(profile) && wasStored) {
+          if (previousState !== 'pending') ttsPendingReplacementPreviousStates[profile.id] = previousState;
+          ttsCredentialStates[profile.id] = 'pending';
+        } else if (ttsValidationIsDeferred(profile)) {
+          ttsCredentialStates[profile.id] = 'deferred';
+        } else {
+          ttsCredentialStates[profile.id] = 'verified';
+        }
         ttsCredentialState.modalOpen = false;
         ttsCredentialState.confirmDelete = false;
         ttsState.promptError = '';
         rerenderTTS();
-        showToast('原型状态：API Key 已配置；没有联网或持久化');
+        showToast(ttsValidationIsDeferred(profile)
+          ? wasStored
+            ? '原型状态：新 Key 已写 pending；旧 active 保留，没有发模型请求'
+            : '原型状态：已写 stored-unverified active；没有发模型请求或产生费用'
+          : '原型状态：已模拟只读验证并保存；没有联网或持久化');
+        return;
+      }
+      if (action === 'cancel-pending-credential') {
+        ttsCredentialStates[selectedTTSProfileID] = ttsPendingReplacementPreviousStates[selectedTTSProfileID] || 'verified';
+        delete ttsPendingReplacementPreviousStates[selectedTTSProfileID];
+        ttsCredentialState.modalOpen = false;
+        rerenderTTS();
+        showToast('原型状态：已取消 pending replacement；旧 active Key 保持不变');
         return;
       }
       if (action === 'delete-credential') {
@@ -1430,7 +1686,8 @@
         return;
       }
       if (action === 'confirm-delete-credential') {
-        ttsCredentialState.ready = false;
+        ttsCredentialStates[selectedTTSProfileID] = 'missing';
+        delete ttsPendingReplacementPreviousStates[selectedTTSProfileID];
         ttsCredentialState.modalOpen = false;
         ttsCredentialState.confirmDelete = false;
         rerenderTTS();
