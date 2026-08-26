@@ -2092,6 +2092,132 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · 文件丢失" } }
       }
     },
+    "sound-packs.pack-delete" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move to Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移到废纸篓" } }
+      }
+    },
+    "sound-packs.pack-delete.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move “%@” to Trash?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将「%@」移到废纸篓？" } }
+      }
+    },
+    "sound-packs.pack-delete.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The entire user sound pack will leave claudi0's library and can be recovered from Trash." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "整个用户声音包会从 claudi0 的库中移除，并可从废纸篓恢复。" } }
+      }
+    },
+    "sound-packs.pack-delete.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move user sound pack “%@” to Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将用户声音包「%@」移到废纸篓" } }
+      }
+    },
+    "sound-packs.pack-delete.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A confirmation appears first; the active or built-in pack cannot be removed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会先显示确认；当前使用或内置声音包不能移除" } }
+      }
+    },
+    "sound-packs.pack-delete.active" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Currently in use; select another pack first" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前正在使用；请先改用其他声音包" } }
+      }
+    },
+    "sound-packs.pack-delete.available" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "User sound pack; recoverable from Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户声音包；可从废纸篓恢复" } }
+      }
+    },
+    "sound-packs.pack-delete.error.no-selection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound pack is selected; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有选中的声音包，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.selection-changed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The inspected sound pack changed; nothing was removed. Confirm again on the current pack." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在查看的声音包已经改变，未移除任何内容；请在当前包上重新确认。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.unsafe-id" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack ID is unsafe; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包标识不安全，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.builtin" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in sound packs are read-only and cannot be removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置声音包为只读，不能移除。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.active" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This sound pack is currently in use; choose another pack first." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个声音包当前正在使用；请先改用其他声音包。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.config-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current sound settings could not be safely revalidated; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法安全复验当前声音设置，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.not-found" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The user sound pack no longer exists; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户声音包已不存在，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.unsafe-entry" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack is not a safe, direct directory; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包不是安全的直接目录，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not move the sound pack to Trash: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法将声音包移到废纸篓：%@" } }
+      }
+    },
+    "sound-packs.pack-delete.error.isolation-retained" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack entry changed during isolation. Nothing was sent to Trash; the suspicious entry remains at %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隔离时声音包目录发生变化，未将任何内容移到废纸篓；可疑条目保留在 %@。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.trash-retained" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Trash failed and claudi0 could not restore the original path (%@). The sound pack remains at %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移到废纸篓失败，且 claudi0 无法恢复原路径（%@）；声音包保留在 %@。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Another sound-settings operation is in progress; nothing was removed. Try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "另一个声音设置操作正在进行，未移除任何内容；请重试。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.lock-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not acquire a required file lock (errno %@); nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法取得所需文件锁（errno %@），未移除任何内容。" } }
+      }
+    },
+    "sound-packs.writing-changes" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving sound changes…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在保存声音更改…" } }
+      }
+    },
     "sound-packs.pack.active" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Currently in use" } },
@@ -2458,6 +2584,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用这个包" } }
       }
     },
+    "sound-packs.status.action.delete-pack" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move Sound Pack to Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将声音包移到废纸篓" } }
+      }
+    },
     "sound-packs.status.audio-imported" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Added %@ audio file(s) to “%@”; they start unused. Assign them from event menus." } },
@@ -2516,6 +2648,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Now using “%@”." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现在使用「%@」。" } }
+      }
+    },
+    "sound-packs.status.pack-trashed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Moved “%@” to Trash." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已将「%@」移到废纸篓。" } }
       }
     },
     "onboarding.claude-code-not-installed.title" : {

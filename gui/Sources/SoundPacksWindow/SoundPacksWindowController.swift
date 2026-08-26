@@ -7,25 +7,15 @@ import SwiftUI
 
 /// App-lifetime owner of the one Sound Packs window.
 ///
-/// `MenuBarController` owns this controller. The `NSWindow` and its disk-backed model are lazy
-/// because most menu-bar sessions never open management, and retained after close so repeated
-/// 「管理声音包…」 actions reuse the same window/model instead of growing a second editor.
+/// `MenuBarController` owns this controller. Its app-lifetime editor model is shared eagerly with
+/// Settings, while only the legacy `NSWindow` is created on demand and retained after close.
+/// Repeated 「管理声音包…」 actions therefore reuse the same window and writable model.
 @MainActor
 public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
-    private let configFile: URL
-    private let lockFile: URL
-    private let environment: AudioImportEnvironment
-    private let soundPackLibrary: SoundPackLibrary
-    private let refreshCoordinator: SoundPacksRefreshCoordinator
+    public let editorOwner: SoundPacksEditorOwner
     private let languageStore: ClaudioPreferences
-    private lazy var model: SoundPacksWindowModel = SoundPacksWindowModel(
-        configFile: configFile,
-        lockFile: lockFile,
-        environment: environment,
-        soundPackLibrary: soundPackLibrary,
-        refreshCoordinator: refreshCoordinator)
+    private var model: SoundPacksWindowModel { editorOwner.model }
     private lazy var focusCoordinator = SoundPacksWindowFocusCoordinator()
-    private let userPacksDirectory: URL
     private var window: NSWindow?
     /// The app that owned the keyboard before Claudio opened its popover. The popover transfers
     /// this debt instead of paying it while the management window is becoming key. It is cleared
@@ -39,13 +29,23 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private var selectionAnnouncementCancellable: AnyCancellable?
     private var libraryStateAnnouncementCancellable: AnyCancellable?
     private var windowStatusAnnouncementCancellable: AnyCancellable?
-    private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
     private var pendingRoute: SoundPacksWindowRoute?
     /// Suppresses the delegate callback during `showWindow` so window-open context is announced
     /// before any result that completed while the retained window was hidden.
     private var isPresentingWindow = false
 
     public init(
+        editorOwner: SoundPacksEditorOwner,
+        languageStore: ClaudioPreferences
+    ) {
+        self.editorOwner = editorOwner
+        self.languageStore = languageStore
+        super.init()
+
+        installLifetimeObservers()
+    }
+
+    public convenience init(
         configFile: URL,
         lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
@@ -53,15 +53,17 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         refreshCoordinator: SoundPacksRefreshCoordinator,
         languageStore: ClaudioPreferences
     ) {
-        self.configFile = configFile
-        self.lockFile = lockFile
-        self.environment = environment
-        self.soundPackLibrary = soundPackLibrary
-        self.refreshCoordinator = refreshCoordinator
-        self.languageStore = languageStore
-        userPacksDirectory = environment.userPacksDirectory
-        super.init()
+        self.init(
+            editorOwner: SoundPacksEditorOwner(
+                configFile: configFile,
+                lockFile: lockFile,
+                environment: environment,
+                soundPackLibrary: soundPackLibrary,
+                refreshCoordinator: refreshCoordinator),
+            languageStore: languageStore)
+    }
 
+    private func installLifetimeObservers() {
         // A standard window may remain visible in the background for a long time. If the user
         // visits another app before returning to close it, the app captured when the window first
         // opened is stale. Track the latest external activation while this window is visible.
@@ -116,24 +118,12 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             model.reload(followActivePack: false)
         }
         let effectiveRoute: SoundPacksWindowRoute
-        switch resolveSoundPacksWindowRoute(
-            route,
-            availablePackIDs: Set(model.packCards.map(\.id)),
-            libraryState: model.libraryPresentationState)
-        {
+        switch editorOwner.apply(route: route) {
         case .resolved(let resolvedRoute):
             pendingRoute = nil
-            model.setManagedSurface(resolvedRoute.surface)
-            if let packID = resolvedRoute.editTarget?.packID {
-                effectiveRoute =
-                    model.selectPackForInspection(packID)
-                    ? resolvedRoute : .overview(surface: resolvedRoute.surface)
-            } else {
-                effectiveRoute = resolvedRoute
-            }
+            effectiveRoute = resolvedRoute
         case .pending(let route):
             pendingRoute = route
-            model.setManagedSurface(route.surface)
             effectiveRoute = .overview(surface: route.surface)
         }
         NSApp.activate(ignoringOtherApps: true)
@@ -144,7 +134,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             focusCoordinator.requestInitialFocus(route: effectiveRoute)
             SoundPacksWindowAccessibilityBridge.post(
                 .windowOpened,
-                facts: accessibilityFacts(),
+                facts: editorOwner.announcementFacts(),
                 language: languageStore.language,
                 window: presentedWindow)
         }
@@ -227,7 +217,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     private func makeWindow() -> NSWindow {
         let content = SoundPacksWindowView(
             model: model,
-            userPacksDirectory: userPacksDirectory,
+            userPacksDirectory: editorOwner.userPacksDirectory,
             focusCoordinator: focusCoordinator,
             languageStore: languageStore)
         let window = NSWindow(
@@ -249,13 +239,14 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             .sink { [weak self] selectedPackID in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    if self.model.consumeSelectionAnnouncementSuppression(for: selectedPackID) {
-                        return
-                    }
-                    guard self.window?.isKeyWindow == true else { return }
+                    let shouldAnnounce = self.editorOwner.shouldAnnounceSelectionChange(
+                        to: selectedPackID)
+                    guard shouldAnnounce, self.window?.isKeyWindow == true else { return }
                     SoundPacksWindowAccessibilityBridge.post(
                         .selectionChanged,
-                        facts: self.accessibilityFacts(selectedPackID: selectedPackID),
+                        facts: self.editorOwner.announcementFacts(
+                            selectedPackID: selectedPackID,
+                            usesEmittedSelection: true),
                         language: self.languageStore.language,
                         window: window)
                 }
@@ -270,8 +261,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
                     guard self.window?.isKeyWindow == true else { return }
                     SoundPacksWindowAccessibilityBridge.post(
                         .libraryStateChanged,
-                        facts: self.accessibilityFacts(
-                            selectedPackID: self.model.selectedPackID,
+                        facts: self.editorOwner.announcementFacts(
                             libraryPresentationState: libraryState),
                         language: self.languageStore.language,
                         window: window)
@@ -294,22 +284,15 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
     }
 
     private func resolvePendingRouteIfPossible(
-        libraryState: SoundPackLibraryPresentationState
+        libraryState _: SoundPackLibraryPresentationState
     ) {
         guard let pendingRoute, window?.isVisible == true else { return }
-        switch resolveSoundPacksWindowRoute(
-            pendingRoute,
-            availablePackIDs: Set(model.packCards.map(\.id)),
-            libraryState: libraryState)
-        {
+        switch editorOwner.apply(route: pendingRoute) {
         case .pending:
             return
         case .resolved(let route):
             self.pendingRoute = nil
-            model.setManagedSurface(route.surface)
-            if let packID = route.editTarget?.packID,
-                model.selectPackForInspection(packID)
-            {
+            if route.editTarget != nil {
                 focusCoordinator.requestRoute(route)
             } else if route.isOverview {
                 focusCoordinator.requestRoute(.overview(surface: route.surface))
@@ -329,7 +312,7 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
         in window: NSWindow
     ) {
         guard
-            statusAnnouncementTracker.beginAttempt(
+            editorOwner.beginStatusAnnouncementAttempt(
                 revision: status.revision,
                 isWindowKey: window.isKeyWindow)
         else { return }
@@ -341,38 +324,14 @@ public final class SoundPacksWindowController: NSObject, NSWindowDelegate {
             : .writeSucceeded(message: status.message(language: languageStore.language))
         SoundPacksWindowAccessibilityBridge.post(
             event,
-            facts: accessibilityFacts(),
+            facts: editorOwner.announcementFacts(),
             language: languageStore.language,
             window: window
         ) { [weak self] didPost in
-            self?.statusAnnouncementTracker.finishAttempt(
+            self?.editorOwner.finishStatusAnnouncementAttempt(
                 revision: status.revision,
                 didPost: didPost)
         }
     }
 
-    private func accessibilityFacts() -> SoundPacksWindowAnnouncementFacts {
-        accessibilityFacts(
-            selectedPackID: model.selectedPackID,
-            libraryPresentationState: model.libraryPresentationState)
-    }
-
-    /// `@Published` emits its new value before the stored property is replaced. Accepting that
-    /// emitted value explicitly keeps a transition to `nil` from accidentally announcing the old
-    /// selection.
-    private func accessibilityFacts(
-        selectedPackID: String?,
-        libraryPresentationState: SoundPackLibraryPresentationState? = nil
-    ) -> SoundPacksWindowAnnouncementFacts {
-        let selectedName = selectedPackID.flatMap { packID in
-            model.packCards.first(where: { $0.id == packID }).map {
-                SelectedPackMetadata(id: $0.id, name: $0.name).displayName
-            }
-        }
-        return SoundPacksWindowAnnouncementFacts(
-            packCount: model.packCards.count,
-            selectedPackName: selectedName,
-            libraryPresentationState:
-                libraryPresentationState ?? model.libraryPresentationState)
-    }
 }

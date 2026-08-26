@@ -123,11 +123,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let languageStore = preferences
         let soundPacksRefreshCoordinator = SoundPacksRefreshCoordinator()
         let soundPackLibrary = SoundPackLibrary(environment: audioEnvironment)
-        let soundPacksWindowController = SoundPacksWindowController(
+        let soundPacksEditorOwner = SoundPacksEditorOwner(
             configFile: ClaudioPaths.configFile,
             environment: audioEnvironment,
             soundPackLibrary: soundPackLibrary,
-            refreshCoordinator: soundPacksRefreshCoordinator,
+            refreshCoordinator: soundPacksRefreshCoordinator)
+        let soundPacksWindowController = SoundPacksWindowController(
+            editorOwner: soundPacksEditorOwner,
             languageStore: languageStore)
         let actionRouter = MenuBarActionRouter()
         let integrationsMuteController = EventMuteController()
@@ -214,7 +216,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             languageStore: languageStore)
         let settingsWindowController = SettingsWindowController(
             preferences: languageStore,
-            availability: .empty)
+            soundPacksEditorOwner: soundPacksEditorOwner)
         let eventSettingsModel = makeEventSettingsConfigController(
             configFile: ClaudioPaths.configFile,
             environment: audioEnvironment,

@@ -522,13 +522,15 @@ func runSoundPackLibrarySuites() async {
             "MenuBarController 必须只构造一个 app-lifetime SoundPackLibrary")
         expect(
             source.contains(
-                "SoundPacksWindowController(\n            configFile: ClaudioPaths.configFile,\n            environment: audioEnvironment,\n            soundPackLibrary: soundPackLibrary"
+                "SoundPacksEditorOwner(\n            configFile: ClaudioPaths.configFile,\n            environment: audioEnvironment,\n            soundPackLibrary: soundPackLibrary"
             )
+                && source.contains("SoundPacksWindowController(\n            editorOwner: soundPacksEditorOwner")
+                && source.contains("soundPacksEditorOwner: soundPacksEditorOwner")
                 && source.contains("languageStore: languageStore")
                 && source.contains(
                     "PanelView(\n            audioEnvironment: audioEnvironment,\n            focusCoordinator: focusCoordinator,\n            hostIntegrations: hostIntegrations,\n            bootstrapReports: bootstrapReports,\n            languageStore: languageStore,\n            soundPackLibrary: soundPackLibrary"
                 ),
-            "同一个局部实例必须同时注入管理窗口与面板")
+            "同一个 library 必须注入面板与唯一 editor owner，Settings/legacy 再共享该 owner")
         expect(
             source.contains("NSApplication.didBecomeActiveNotification")
                 && source.contains("soundPackLibrary.requestRefresh(")

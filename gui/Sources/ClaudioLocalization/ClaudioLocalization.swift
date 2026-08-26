@@ -491,9 +491,43 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksOriginalReadonly: Self = "sound-packs.original-readonly"
     public static let soundPacksAddAudio: Self = "sound-packs.add-audio"
     public static let soundPacksAddingAudio: Self = "sound-packs.adding-audio"
+    public static let soundPacksWritingChanges: Self = "sound-packs.writing-changes"
     public static let soundPacksAddAudioLabel: Self = "sound-packs.add-audio.label"
     public static let soundPacksImporting: Self = "sound-packs.importing"
     public static let soundPacksAddAudioHint: Self = "sound-packs.add-audio.hint"
+    public static let soundPacksPackDelete: Self = "sound-packs.pack-delete"
+    public static let soundPacksPackDeleteTitle: Self = "sound-packs.pack-delete.title"
+    public static let soundPacksPackDeleteMessage: Self = "sound-packs.pack-delete.message"
+    public static let soundPacksPackDeleteLabel: Self = "sound-packs.pack-delete.label"
+    public static let soundPacksPackDeleteHint: Self = "sound-packs.pack-delete.hint"
+    public static let soundPacksPackDeleteActive: Self = "sound-packs.pack-delete.active"
+    public static let soundPacksPackDeleteAvailable: Self = "sound-packs.pack-delete.available"
+    public static let soundPacksPackDeleteNoSelection: Self =
+        "sound-packs.pack-delete.error.no-selection"
+    public static let soundPacksPackDeleteSelectionChanged: Self =
+        "sound-packs.pack-delete.error.selection-changed"
+    public static let soundPacksPackDeleteUnsafeID: Self =
+        "sound-packs.pack-delete.error.unsafe-id"
+    public static let soundPacksPackDeleteBuiltin: Self =
+        "sound-packs.pack-delete.error.builtin"
+    public static let soundPacksPackDeleteErrorActive: Self =
+        "sound-packs.pack-delete.error.active"
+    public static let soundPacksPackDeleteConfigUnavailable: Self =
+        "sound-packs.pack-delete.error.config-unavailable"
+    public static let soundPacksPackDeleteNotFound: Self =
+        "sound-packs.pack-delete.error.not-found"
+    public static let soundPacksPackDeleteUnsafeEntry: Self =
+        "sound-packs.pack-delete.error.unsafe-entry"
+    public static let soundPacksPackDeleteFailed: Self =
+        "sound-packs.pack-delete.error.failed"
+    public static let soundPacksPackDeleteIsolationRetained: Self =
+        "sound-packs.pack-delete.error.isolation-retained"
+    public static let soundPacksPackDeleteTrashRetained: Self =
+        "sound-packs.pack-delete.error.trash-retained"
+    public static let soundPacksPackDeleteLockBusy: Self =
+        "sound-packs.pack-delete.error.lock-busy"
+    public static let soundPacksPackDeleteLockFailed: Self =
+        "sound-packs.pack-delete.error.lock-failed"
     public static let soundPacksUse: Self = "sound-packs.use"
     public static let soundPacksUseLabel: Self = "sound-packs.use.label"
     public static let soundPacksUseValue: Self = "sound-packs.use.value"
@@ -636,6 +670,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "sound-packs.status.action.restore-factory"
     public static let soundPacksStatusCopyPack: Self = "sound-packs.status.action.copy-pack"
     public static let soundPacksStatusUsePack: Self = "sound-packs.status.action.use-pack"
+    public static let soundPacksStatusDeletePack: Self = "sound-packs.status.action.delete-pack"
     public static let soundPacksStatusAudioImported: Self = "sound-packs.status.audio-imported"
     public static let soundPacksStatusAudioPartial: Self = "sound-packs.status.audio-partial"
     public static let soundPacksStatusBatchRestored: Self = "sound-packs.status.batch-restored"
@@ -649,6 +684,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "sound-packs.status.factory-restored.salvage"
     public static let soundPacksStatusPackCopied: Self = "sound-packs.status.pack-copied"
     public static let soundPacksStatusPackUsed: Self = "sound-packs.status.pack-used"
+    public static let soundPacksStatusPackTrashed: Self = "sound-packs.status.pack-trashed"
 
     public static let onboardingClaudeCodeNotInstalledTitle: Self =
         "onboarding.claude-code-not-installed.title"
@@ -788,8 +824,20 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksReveal, .soundPacksRevealLabel, .soundPacksRevealHint, .soundPacksRestore,
         .soundPacksRestorePackLabel, .soundPacksBuiltinValue, .soundPacksRestorePackHint,
         .soundPacksCopy, .soundPacksCopyLabel, .soundPacksOriginalReadonly,
-        .soundPacksAddAudio, .soundPacksAddingAudio, .soundPacksAddAudioLabel,
-        .soundPacksImporting, .soundPacksAddAudioHint, .soundPacksUse, .soundPacksUseLabel,
+        .soundPacksAddAudio, .soundPacksAddingAudio, .soundPacksWritingChanges,
+        .soundPacksAddAudioLabel,
+        .soundPacksImporting, .soundPacksAddAudioHint,
+        .soundPacksPackDelete, .soundPacksPackDeleteTitle, .soundPacksPackDeleteMessage,
+        .soundPacksPackDeleteLabel, .soundPacksPackDeleteHint,
+        .soundPacksPackDeleteActive, .soundPacksPackDeleteAvailable,
+        .soundPacksPackDeleteNoSelection, .soundPacksPackDeleteSelectionChanged,
+        .soundPacksPackDeleteUnsafeID, .soundPacksPackDeleteBuiltin,
+        .soundPacksPackDeleteErrorActive, .soundPacksPackDeleteConfigUnavailable,
+        .soundPacksPackDeleteNotFound, .soundPacksPackDeleteUnsafeEntry,
+        .soundPacksPackDeleteFailed, .soundPacksPackDeleteIsolationRetained,
+        .soundPacksPackDeleteTrashRetained, .soundPacksPackDeleteLockBusy,
+        .soundPacksPackDeleteLockFailed,
+        .soundPacksUse, .soundPacksUseLabel,
         .soundPacksUseValue, .soundPacksUseHint, .soundPacksEmptyLoadingMessage,
         .soundPacksEmptyLoadFailedMessage, .soundPacksEmptyFactoryMessage,
         .soundPacksEmptyRestore, .soundPacksEmptyRestoreLabel, .soundPacksEmptyRestoreValue,
@@ -832,12 +880,13 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksBuiltinCopyHelp, .soundPacksCanChooseFile, .soundPacksStatusBackground,
         .soundPacksStatusAddAudio, .soundPacksStatusUpdateStars,
         .soundPacksStatusRestoreBuiltins, .soundPacksStatusRestoreFactory,
-        .soundPacksStatusCopyPack, .soundPacksStatusUsePack,
+        .soundPacksStatusCopyPack, .soundPacksStatusUsePack, .soundPacksStatusDeletePack,
         .soundPacksStatusAudioImported, .soundPacksStatusAudioPartial,
         .soundPacksStatusBatchRestored, .soundPacksStatusBatchRestoredWithSalvage,
         .soundPacksStatusBatchPartial, .soundPacksStatusBatchPartialWithSalvage,
         .soundPacksStatusFactoryRestored, .soundPacksStatusFactoryRestoredWithSalvage,
         .soundPacksStatusPackCopied, .soundPacksStatusPackUsed,
+        .soundPacksStatusPackTrashed,
         .hostReady, .hostConfigured, .hostLegacy, .hostNotConnected, .hostNeedsAttention,
         .hostCodexReadyDetail, .hostCodexAwaitingDetail,
         .hostClaudeAwaitingDetail, .hostClaudeLegacyDetail, .hostCodexLegacyDetail,

@@ -83,6 +83,10 @@ public struct SettingsRouteAvailability: Sendable, Equatable {
     public let eventScopes: Set<PanelSoundScopeID>
     public let soundScopes: Set<PanelSoundScopeID>
     public let soundPackIDs: Set<String>
+    /// A missing pack ID is stale only after the shared library has published a fresh ready
+    /// snapshot. During first hydration or a refresh failure the route remains pending so a
+    /// temporarily empty projection cannot reject a valid deep link.
+    public let soundPackSnapshotIsFresh: Bool
     public let events: Set<Event>
 
     public init(
@@ -90,12 +94,14 @@ public struct SettingsRouteAvailability: Sendable, Equatable {
         eventScopes: Set<PanelSoundScopeID>,
         soundScopes: Set<PanelSoundScopeID>,
         soundPackIDs: Set<String>,
+        soundPackSnapshotIsFresh: Bool = true,
         events: Set<Event>
     ) {
         self.integrationSurfaces = integrationSurfaces
         self.eventScopes = eventScopes
         self.soundScopes = soundScopes
         self.soundPackIDs = soundPackIDs
+        self.soundPackSnapshotIsFresh = soundPackSnapshotIsFresh
         self.events = events
     }
 
@@ -104,6 +110,7 @@ public struct SettingsRouteAvailability: Sendable, Equatable {
         eventScopes: [.global],
         soundScopes: [.global],
         soundPackIDs: [],
+        soundPackSnapshotIsFresh: false,
         events: Set(Event.allCases))
 }
 
@@ -164,7 +171,8 @@ public func resolveSettingsRoute(
             packID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
             failure = .invalidSoundPackID
-        } else if let packID = soundsRoute.editTarget?.packID,
+        } else if availability.soundPackSnapshotIsFresh,
+            let packID = soundsRoute.editTarget?.packID,
             !availability.soundPackIDs.contains(packID)
         {
             failure = .staleSoundPack(packID)
@@ -282,7 +290,7 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
     @Published public private(set) var resolution: SettingsRouteResolution
     @Published public private(set) var routeRequestRevision: UInt64 = 0
 
-    private let availability: SettingsRouteAvailability
+    private var availability: SettingsRouteAvailability
     private let preferences: ClaudioPreferences?
     private var lifecycle: SettingsWindowLifecycle<Handback>
 
@@ -323,6 +331,18 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
         publish(lifecycle.request(route: route, availability: availability))
     }
 
+    /// Re-resolves the retained stable route against newly published app facts. This never
+    /// increments the explicit route-request revision, so a background library refresh cannot
+    /// steal keyboard focus; it only changes visible pending/failure state in place.
+    public func updateAvailability(_ availability: SettingsRouteAvailability) {
+        guard self.availability != availability else { return }
+        self.availability = availability
+        lifecycle.refresh(availability: availability)
+        if resolution != lifecycle.resolution {
+            resolution = lifecycle.resolution
+        }
+    }
+
     public func close() -> Handback? {
         lifecycle.close()
     }
@@ -353,6 +373,13 @@ public enum SettingsWindowFocusTarget: Sendable, Equatable, Hashable {
 public func settingsWindowFocusOrder(
     selectedDestination: SettingsDestination
 ) -> [SettingsWindowFocusTarget] {
-    SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
-        + [.title(selectedDestination), .firstAction(selectedDestination)]
+    var order = SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
+    order.append(.title(selectedDestination))
+    // The embedded sound-pack editor owns its own route-aware focus identity space. Inventing a
+    // Settings-shell first action for it would point at no rendered control and compete with the
+    // editor's initial-focus request.
+    if selectedDestination != .sounds {
+        order.append(.firstAction(selectedDestination))
+    }
+    return order
 }

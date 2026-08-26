@@ -225,10 +225,10 @@ private let byteWritingFunctions = [
 /// `moveItem` 豁免了，理由是「它们的原子性纪律是另一条（T17e 的 staging + rename）」—— 那句话对那个
 /// 调用点是**字面意义上的假话**。豁免的理由必须对**每一个**被豁免的调用点成立，否则它只是一句托词。
 private let pathPublishingMembers = [
-    "copyItem", "moveItem", "linkItem", "createSymbolicLink", "replaceItem",
+    "copyItem", "moveItem", "linkItem", "createSymbolicLink", "replaceItem", "trashItem",
 ]
 private let pathPublishingFunctions = [
-    "rename", "renameatx_np", "link", "symlink", "unlink",
+    "rename", "renameatx_np", "link", "symlink", "unlink", "mkdirat", "unlinkat",
 ]
 /// 一个子进程能写任何东西。它**出现**会被围栏逮住；它**写了什么**这条绊线看不见（台账里写理由）。
 private let subprocessMembers: [String] = []
@@ -571,6 +571,14 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "gui/Sources/ClaudioGUICore/PackFork.swift": [".copyItem(", "renameatx_np("],
     // 恢复出厂包：完整 factory staging、旧安装 salvage 与同父目录发布。
     "gui/Sources/ClaudioGUICore/PackRestore.swift": [".copyItem(", ".moveItem("],
+    // 用户包移入废纸篓：`open(O_RDONLY | O_DIRECTORY | O_NOFOLLOW)` 只绑定受控 user-packs
+    // 父目录，不持有写意图；`mkdirat(0700)` 创建调用独占的隐藏隔离目录，descriptor-relative
+    // `renameatx_np(..., RENAME_EXCL)` 再把核验过的包原子、不可覆盖地移入其中。只有 device/inode
+    // 与父目录复验通过后才调用可恢复的 `.trashItem(`；Trash 失败及身份异常用同一 rename 原语
+    // 不可覆盖地回滚，`unlinkat(..., AT_REMOVEDIR)` 只清已经为空的隔离目录。
+    "gui/Sources/ClaudioGUICore/UserSoundPackDeletion.swift": [
+        ".trashItem(", "mkdirat(", "open(", "renameatx_np(", "unlinkat(",
+    ],
 ]
 
 /// **内容替换式写盘的调用点台账** —— 哪个文件里有几处 `.write(to:…)` / `.write(toFile:…)`。
@@ -882,7 +890,13 @@ func runAtomicWriteSuites() {
             ("let stream = OutputStream(url: f, append: false)", "OutputStream("),
             ("let h = FileHandle(forWritingTo: configFile)", "FileHandle("),
             ("try fileManager.copyItem(at: source, to: destination)", ".copyItem("),
+            (
+                "try fileManager.trashItem(at: source, resultingItemURL: &result)",
+                ".trashItem("
+            ),
+            ("_ = mkdirat(rootDescriptor, name, 0o700)", "mkdirat("),
             ("let result = Darwin.rename(source, destination)", "rename("),
+            ("_ = unlinkat(rootDescriptor, name, AT_REMOVEDIR)", "unlinkat("),
         ]
         for (source, token) in evasions {
             let tokens = diskWriteSurfaceTokens(in: pipeline(source))

@@ -2193,29 +2193,35 @@ func runSoundPacksRefreshSuites() async {
             "gui/Sources 下只许 shipping app 有一个 @main，实得 \(mainSites)")
     }
 
-    suite("SoundPacksWindow owner：lazy 单窗口、关闭后复用、全体 MainActor") {
+    suite("SoundPacks editor owner：单写模型、legacy 单窗口复用、全体 MainActor") {
         guard
             let controller = soundPacksCode(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"),
+            let owner = soundPacksCode(
+                "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
             let view = soundPacksCode("gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let model = soundPacksCode(
                 "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift")
         else {
             expect(
                 false,
-                "读不到 SoundPacksWindowController.swift、SoundPacksWindowView.swift 或 SoundPacksWindowModel.swift")
+                "读不到 SoundPacksEditorOwner.swift、SoundPacksWindowController.swift、"
+                    + "SoundPacksWindowView.swift 或 SoundPacksWindowModel.swift")
             return
         }
-        let controllerFlat = collapsingWhitespace(controller)
+        let ownerFlat = collapsingWhitespace(owner)
 
-        expect(controller.contains("@MainActor"), "NSWindow owner 必须显式 @MainActor")
+        expect(owner.contains("@MainActor"), "共享编辑 owner 必须显式 @MainActor")
         expect(model.contains("@MainActor"), "窗口 model 必须显式 @MainActor")
         expect(
             controller.contains("private var window: NSWindow?"),
             "owner 必须持有一个 optional NSWindow，按需创建")
         expect(
-            controller.contains("private lazy var model: SoundPacksWindowModel"),
-            "管理窗口 model 必须延迟到首次展示时创建，启动时不得扫描声音包")
+            owner.contains("public final class SoundPacksEditorOwner")
+                && owner.contains("public let model: SoundPacksWindowModel")
+                && controller.contains("public let editorOwner: SoundPacksEditorOwner")
+                && !controller.contains("model = SoundPacksWindowModel("),
+            "Foundation-only owner 与 legacy window 必须共享唯一一个可写 model")
         expect(
             view.contains("packRowMetaSlots(") && view.contains("case .modified:"),
             "管理窗口 license 必须复用 factoryIntegrity 的 modified 优先规则")
@@ -2236,19 +2242,29 @@ func runSoundPacksRefreshSuites() async {
                     + "下面 focus policy 的 `isVisible: wasVisible` 诱饵喂饱")
         }
         expect(
-            controller.contains("shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible)"),
+            controller.contains(
+                "shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible)"),
             "首焦点与 windowOpened 必须共用真实 hidden→visible 判定")
         expect(
-            controllerFlat.contains(
-                "effectiveRoute = model.selectPackForInspection(packID) ? resolvedRoute : .overview(surface: resolvedRoute.surface)")
+            ownerFlat.contains(
+                "guard model.selectPackForInspection(packID) else { return .resolved(.overview(surface: resolvedRoute.surface)) }"
+            )
+                && owner.contains("model.setManagedSurface(route.surface)")
                 && controller.contains("pendingRoute = route")
-                && controller.contains("model.setManagedSurface(resolvedRoute.surface)")
                 && controller.contains("resolvePendingRouteIfPossible")
                 && controller.contains("requestInitialFocus(route: effectiveRoute)")
                 && controller.contains("focusCoordinator.requestRoute(effectiveRoute)"),
             "editEvent 必须等待 library 证明目标存在后再选包；ready 缺失只能降级 overview")
         expect(
-            controller.contains("ClaudioL10n(language: languageStore.language).text(.soundPacksWindowTitle)"),
+            view.contains("@State private var isPerformingWrite = false")
+                && view.contains("soundPacksWritingChanges")
+                && view.contains("sound-packs.write-in-progress")
+                && view.contains("await Task.yield()")
+                && view.contains(".disabled(isPerformingWrite)"),
+            "同步 pack/config 写入必须先让可见进行中状态获得一个 MainActor 渲染机会，并禁用重入")
+        expect(
+            controller.contains(
+                "ClaudioL10n(language: languageStore.language).text(.soundPacksWindowTitle)"),
             "后台标准窗口标题必须保留 claudi0 品牌锚点")
         expect(
             controller.contains("isReleasedWhenClosed = false"),

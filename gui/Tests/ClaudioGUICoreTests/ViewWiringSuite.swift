@@ -3085,6 +3085,8 @@ func runViewWiringSuites() {
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let controller = codeWithoutStrings(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"),
+            let editorOwner = codeWithoutStrings(
+                "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
             let package = source("gui/Package.swift")
         else {
             expect(false, "读不到共享 AppKit 实现、两处消费者、窗口 controller 或 Package.swift")
@@ -3151,7 +3153,8 @@ func runViewWiringSuites() {
         expect(
             window.contains("ForEach(model.windowStatuses)")
                 && controller.contains("model.$windowStatuses")
-                && controller.contains("consumeSelectionAnnouncementSuppression("),
+                && controller.contains("shouldAnnounceSelectionChange(")
+                && editorOwner.contains("consumeSelectionAnnouncementSuppression("),
             "窗口必须从统一 revision 状态投影渲染/播报，并消费 fork 程序化选中的单次公告抑制 token")
     }
 

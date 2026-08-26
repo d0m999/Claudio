@@ -101,6 +101,7 @@ public enum SoundPacksWindowStatusKind: String, Sendable, Equatable, Hashable {
     case starredPacks
     case packFork
     case packUse
+    case packDeletion
 }
 
 public enum SoundPacksWindowStatusRecovery: Sendable, Equatable {
@@ -270,6 +271,36 @@ public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
     }
 
     public var message: String { statusText.resolve(language: .zhHans) }
+}
+
+public enum SoundPacksWindowPackDeletionActionError: Error, Sendable, Equatable {
+    case writesStopped(statusText: SoundPacksWindowStatusText)
+    case noSelectedPack
+    case selectionChanged
+    case delete(UserSoundPackDeletionError)
+
+    public var statusText: SoundPacksWindowStatusText {
+        switch self {
+        case .writesStopped(let statusText): return statusText
+        case .noSelectedPack: return .localized(.soundPacksPackDeleteNoSelection)
+        case .selectionChanged: return .localized(.soundPacksPackDeleteSelectionChanged)
+        case .delete(.unsafePackID): return .localized(.soundPacksPackDeleteUnsafeID)
+        case .delete(.builtinReadOnly): return .localized(.soundPacksPackDeleteBuiltin)
+        case .delete(.activePack): return .localized(.soundPacksPackDeleteErrorActive)
+        case .delete(.configUnavailable): return .localized(.soundPacksPackDeleteConfigUnavailable)
+        case .delete(.packNotFound): return .localized(.soundPacksPackDeleteNotFound)
+        case .delete(.unsafePackEntry): return .localized(.soundPacksPackDeleteUnsafeEntry)
+        case .delete(.trashFailed(let reason)):
+            return .localized(.soundPacksPackDeleteFailed, reason)
+        case .delete(.isolationChangedRetained(let path)):
+            return .localized(.soundPacksPackDeleteIsolationRetained, path)
+        case .delete(.trashFailedRetained(let reason, let path)):
+            return .localized(.soundPacksPackDeleteTrashRetained, reason, path)
+        case .delete(.lockBusy): return .localized(.soundPacksPackDeleteLockBusy)
+        case .delete(.lockFailed(let errno)):
+            return .localized(.soundPacksPackDeleteLockFailed, "\(errno)")
+        }
+    }
 }
 
 public struct FactoryPackBatchRestoreFailure: Sendable, Equatable {
@@ -594,6 +625,11 @@ public final class SoundPacksWindowModel: ObservableObject {
 
     public var selectedPackIsBuiltinReadOnly: Bool {
         selectedPackID.map(builtinPackIDs.contains) ?? false
+    }
+
+    public var selectedPackIsReferenced: Bool {
+        guard let selectedPackID else { return false }
+        return referencedSoundPackIDs(in: baseConfig).contains(selectedPackID)
     }
 
     public var selectedPackIsMissingPlaceholder: Bool {
@@ -1740,6 +1776,35 @@ public final class SoundPacksWindowModel: ObservableObject {
         }
     }
 
+    /// Moves the explicitly confirmed, inactive user pack to Trash through the shared packs lock.
+    /// The expected ID closes the confirmation-to-action selection race; active and built-in
+    /// packs remain fail-closed.
+    @discardableResult
+    public func deleteSelectedUserPackAfterConfirmation(
+        expectedPackID: String
+    ) -> Result<UserSoundPackDeletionOutcome, SoundPacksWindowPackDeletionActionError> {
+        guard writesAllowed else {
+            return finishPackDeletion(
+                .failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
+        guard let selectedPackID else {
+            return finishPackDeletion(.failure(.noSelectedPack))
+        }
+        guard selectedPackID == expectedPackID else {
+            return finishPackDeletion(.failure(.selectionChanged))
+        }
+
+        beginSoundPackMutation(packIDs: [selectedPackID])
+        let result = deleteUserSoundPack(
+            packID: selectedPackID,
+            configFile: configFile,
+            configLockFile: lockFile,
+            environment: environment
+        )
+        .mapError(SoundPacksWindowPackDeletionActionError.delete)
+        return finishPackDeletion(result, invalidatedPackID: selectedPackID)
+    }
+
     /// Executes the irreversible deletion only after the SwiftUI confirmation has completed.
     ///
     /// The explicit method name keeps this action out of any reversible bind/clear path. The core
@@ -2263,6 +2328,40 @@ public final class SoundPacksWindowModel: ObservableObject {
                 messageText: error.statusText,
                 packID: selectedPackID)
             completeSynchronousWrite(.failed)
+        }
+        return result
+    }
+
+    private func finishPackDeletion(
+        _ result: Result<
+            UserSoundPackDeletionOutcome,
+            SoundPacksWindowPackDeletionActionError
+        >,
+        invalidatedPackID: String? = nil
+    ) -> Result<UserSoundPackDeletionOutcome, SoundPacksWindowPackDeletionActionError> {
+        switch result {
+        case .success(let outcome):
+            let name = displayName(for: outcome.packID)
+            completeSynchronousWrite(
+                .succeeded,
+                invalidatingPackIDs: [outcome.packID])
+            setWindowStatus(
+                kind: .packDeletion,
+                severity: .notice,
+                actionText: .localized(.soundPacksStatusDeletePack),
+                messageText: .localized(.soundPacksStatusPackTrashed, name))
+        case .failure(let error):
+            setWindowStatus(
+                kind: .packDeletion,
+                severity: .failure,
+                actionText: .localized(.soundPacksStatusDeletePack),
+                messageText: error.statusText,
+                packID: selectedPackID)
+            completeSynchronousWrite(.failed)
+            if let invalidatedPackID {
+                finishSoundPackMutation(packIDs: [invalidatedPackID])
+                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
+            }
         }
         return result
     }

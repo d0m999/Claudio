@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioGUICore
 import ClaudioLocalization
+import SoundPacksWindow
 import SwiftUI
 
 /// Unified Settings navigation shell. Production preferences expose only migrated destinations;
@@ -9,11 +10,22 @@ import SwiftUI
 struct SettingsWindowView: View {
     @ObservedObject var model: SettingsWindowPresentationModel<NSRunningApplication>
     @ObservedObject var preferences: ClaudioPreferences
+    let soundPacksEditorOwner: SoundPacksEditorOwner?
 
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: preferences.language) }
     private var destination: SettingsDestination { model.resolution.destination }
+
+    init(
+        model: SettingsWindowPresentationModel<NSRunningApplication>,
+        preferences: ClaudioPreferences,
+        soundPacksEditorOwner: SoundPacksEditorOwner? = nil
+    ) {
+        self.model = model
+        self.preferences = preferences
+        self.soundPacksEditorOwner = soundPacksEditorOwner
+    }
 
     var body: some View {
         HStack(spacing: 0) {
@@ -71,31 +83,59 @@ struct SettingsWindowView: View {
         .padding(.top, 20)
     }
 
+    @ViewBuilder
     private var routeSlot: some View {
-        ScrollView(.vertical, showsIndicators: true) {
-            VStack(alignment: .leading, spacing: 24) {
-                Text(destination.localizedName(language: preferences.language))
-                    .font(.system(size: 30, weight: .bold))
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilitySortPriority(2)
-                    .focusable()
-                    .focused(
-                        $focusedTarget,
-                        equals: SettingsWindowFocusTarget.title(destination))
-                    .accessibilityIdentifier("settings.title.\(destination.rawValue)")
+        if destination == .sounds,
+            model.resolution.failure == nil,
+            let soundPacksEditorOwner
+        {
+            VStack(alignment: .leading, spacing: 16) {
+                destinationTitle
 
-                if let failure = model.resolution.failure {
-                    routeFailure(failure)
-                } else if destination == .general {
-                    generalSettings
-                } else {
-                    debugRouteContent
-                }
+                EmbeddedSoundPacksEditorView(
+                    editorOwner: soundPacksEditorOwner,
+                    route: soundsRoute,
+                    routeRequestRevision: model.routeRequestRevision,
+                    languageStore: preferences)
             }
-            .frame(maxWidth: 820, alignment: .leading)
-            .padding(.horizontal, 52)
-            .padding(.vertical, 60)
+            .padding(.horizontal, 28)
+            .padding(.top, 28)
+            .padding(.bottom, 20)
+        } else {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 24) {
+                    destinationTitle
+
+                    if let failure = model.resolution.failure {
+                        routeFailure(failure)
+                    } else if destination == .general {
+                        generalSettings
+                    } else {
+                        debugRouteContent
+                    }
+                }
+                .frame(maxWidth: 820, alignment: .leading)
+                .padding(.horizontal, 52)
+                .padding(.vertical, 60)
+            }
         }
+    }
+
+    private var destinationTitle: some View {
+        Text(destination.localizedName(language: preferences.language))
+            .font(.system(size: 30, weight: .bold))
+            .accessibilityAddTraits(.isHeader)
+            .accessibilitySortPriority(2)
+            .focusable()
+            .focused(
+                $focusedTarget,
+                equals: SettingsWindowFocusTarget.title(destination))
+            .accessibilityIdentifier("settings.title.\(destination.rawValue)")
+    }
+
+    private var soundsRoute: SoundPacksWindowRoute {
+        guard case .sounds(let route) = model.resolution.route else { return .overview }
+        return route
     }
 
     private var generalSettings: some View {

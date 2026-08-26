@@ -17,6 +17,7 @@ public enum SoundPacksWindowFocusTarget: Sendable, Hashable {
     case revealSelectedPack
     case forkFactoryPack
     case addAudio
+    case deleteUserPack
     /// A built-in pack's explicitly-confirmed 「恢复出厂声音…」 button.
     case restoreFactoryPack
     case useSelectedPack
@@ -44,6 +45,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
     public let canEditSelectedPack: Bool
     public let canForkFactoryPack: Bool
     public let canAddAudio: Bool
+    public let canDeleteUserPack: Bool
     public let canRestoreFactoryPack: Bool
     public let canUseSelectedPack: Bool
     public let canRestoreAllFactoryPacks: Bool
@@ -60,6 +62,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         canEditSelectedPack: Bool = false,
         canForkFactoryPack: Bool = false,
         canAddAudio: Bool = false,
+        canDeleteUserPack: Bool = false,
         canRestoreFactoryPack: Bool = false,
         canUseSelectedPack: Bool = false,
         canRestoreAllFactoryPacks: Bool = false,
@@ -75,6 +78,7 @@ public struct SoundPacksWindowFocusScope: Sendable, Equatable {
         self.canEditSelectedPack = canEditSelectedPack
         self.canForkFactoryPack = canForkFactoryPack
         self.canAddAudio = canAddAudio
+        self.canDeleteUserPack = canDeleteUserPack
         self.canRestoreFactoryPack = canRestoreFactoryPack
         self.canUseSelectedPack = canUseSelectedPack
         self.canRestoreAllFactoryPacks = canRestoreAllFactoryPacks
@@ -134,6 +138,9 @@ public func soundPacksWindowFocusOrder(
         }
         if scope.canAddAudio {
             order.append(.addAudio)
+        }
+        if scope.canDeleteUserPack {
+            order.append(.deleteUserPack)
         }
         if scope.canRestoreFactoryPack {
             order.append(.restoreFactoryPack)

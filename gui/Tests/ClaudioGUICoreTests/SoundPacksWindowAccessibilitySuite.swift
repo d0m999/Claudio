@@ -168,6 +168,7 @@ func runSoundPacksWindowAccessibilitySuites() {
             orphanFileNames: ["spare.wav"],
             canEditSelectedPack: true,
             canAddAudio: true,
+            canDeleteUserPack: true,
             canUseSelectedPack: true)
         expect(
             soundPacksWindowFocusOrder(custom)
@@ -175,9 +176,9 @@ func runSoundPacksWindowAccessibilitySuites() {
                     .packList, .revealSelectedPack, .eventAudio(.stop), .eventPreview(.stop),
                     .orphanAssignment(fileName: "spare.wav"),
                     .orphanDeletion(fileName: "spare.wav"),
-                    .addAudio, .useSelectedPack,
+                    .addAudio, .deleteUserPack, .useSelectedPack,
                 ],
-            "custom 焦点必须按列表→Finder→事件/孤儿控件→底部添加/启用动作栏")
+            "custom 焦点必须按列表→Finder→事件/孤儿控件→底部添加/删除/启用动作栏")
 
         expect(
             soundPacksWindowFocusOrder(
@@ -524,6 +525,17 @@ func runSoundPacksWindowAccessibilitySuites() {
         } else {
             expect(false, "读不到窗口专用的 Core a11y 设施")
         }
+        let editorOwnerURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift")
+        if let data = try? Data(contentsOf: editorOwnerURL),
+            let source = String(data: data, encoding: .utf8)
+        {
+            scannedSources.append(
+                (name: "ClaudioGUICore/SoundPacksEditorOwner.swift",
+                 code: strippingComments(source).code))
+        } else {
+            expect(false, "读不到共享 editor owner")
+        }
 
         var forbiddenSites: [String] = []
         var announcementPosts = 0
@@ -568,6 +580,8 @@ func runSoundPacksWindowAccessibilitySuites() {
             let view = sourceByName["SoundPacksWindow/SoundPacksWindowView.swift"],
             let controller = sourceByName[
                 "SoundPacksWindow/SoundPacksWindowController.swift"],
+            let editorOwner = sourceByName[
+                "ClaudioGUICore/SoundPacksEditorOwner.swift"],
             let bridge = sourceByName[
                 "SoundPacksWindow/SoundPacksWindowAccessibilityBridge.swift"]
         else {
@@ -626,14 +640,11 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && controller.contains("status.severity == .failure")
                 && controller.contains(
                     ".writeSucceeded(message: status.message(language: languageStore.language))")
-                && controller.contains(
-                    "facts: accessibilityFacts(),\n                language: languageStore.language,\n                window: presentedWindow")
-                && controller.contains(
-                    "facts: self.accessibilityFacts(selectedPackID: selectedPackID),\n                        language: self.languageStore.language,\n                        window: window")
-                && controller.contains(
-                    "libraryPresentationState: libraryState),\n                        language: self.languageStore.language,\n                        window: window")
-                && controller.contains(
-                    "facts: accessibilityFacts(),\n            language: languageStore.language,\n            window: window"),
+                && controller.contains("facts: editorOwner.announcementFacts()")
+                && controller.contains("facts: self.editorOwner.announcementFacts(")
+                && controller.contains("usesEmittedSelection: true")
+                && controller.contains("libraryPresentationState: libraryState")
+                && editorOwner.contains("public func announcementFacts("),
             "恢复、音频、星标、复制和启用必须共用一个 revision 驱动的 VoiceOver 出口")
         expect(
             controller.contains("width: 760, height: 560")
@@ -642,8 +653,9 @@ func runSoundPacksWindowAccessibilitySuites() {
         expect(
             controller.contains("public func windowDidBecomeKey")
                 && controller.contains("announceLatestWindowStatusIfNeeded(in: keyWindow)")
-                && controller.contains("statusAnnouncementTracker.beginAttempt(")
-                && controller.contains("statusAnnouncementTracker.finishAttempt("),
+                && controller.contains("editorOwner.beginStatusAnnouncementAttempt(")
+                && controller.contains("editorOwner.finishStatusAnnouncementAttempt(")
+                && editorOwner.contains("private var statusAnnouncementTracker"),
             "窗口非 key 期间完成的全局结果必须在重新成为 key 时补播且 revision 去重")
         expect(
             bridge.contains("completion?(false)")
