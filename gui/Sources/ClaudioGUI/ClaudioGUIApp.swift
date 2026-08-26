@@ -175,6 +175,7 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        menuBarController?.applicationWillTerminate()
         #if DEBUG
         chatAXTracer?.guiWillTerminate()
         if let evidence = chatAXTracer?.evidence {

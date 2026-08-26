@@ -23,15 +23,23 @@ public enum PanelSoundScopeID: Sendable, Equatable, Hashable, Identifiable {
     }
 }
 
+public let panelSoundScopeDefaultsKey = "claudio.panel.selected-surface"
+
 /// “事件与提示音”表面的显式入口。路由直接携带声音作用域与可选公共事件，避免把展示
 /// 名称或 Host Product 重新解析成配置写入目标。
 public struct EventSettingsWindowRoute: Sendable, Equatable, Hashable {
     public let scope: PanelSoundScopeID
     public let event: Event?
+    public let unavailableRequestedScopeStoredValue: String?
 
-    public init(scope: PanelSoundScopeID, event: Event? = nil) {
+    public init(
+        scope: PanelSoundScopeID,
+        event: Event? = nil,
+        unavailableRequestedScopeStoredValue: String? = nil
+    ) {
         self.scope = scope
         self.event = event
+        self.unavailableRequestedScopeStoredValue = unavailableRequestedScopeStoredValue
     }
 
     public var surface: HostSurfaceID? { scope.surface }
@@ -373,6 +381,32 @@ public func resolvedPanelSoundScopeSelection(
         return exact.scope
     }
     return scopes.first(where: { $0.scope.surface != nil })?.scope ?? .global
+}
+
+/// Produces the typed Events route used by the global shortcut. Known Surface identities remain
+/// intact so the retained Events page can detect a Surface that disappeared; unknown persisted
+/// identities use a safe current scope while preserving the exact value for a visible reason.
+public func globalShortcutEventSettingsRoute(
+    storedValue: String?,
+    scopes: [PanelSoundScopePresentation]
+) -> EventSettingsWindowRoute {
+    if storedValue == PanelSoundScopeID.global.storedValue {
+        return EventSettingsWindowRoute(scope: .global)
+    }
+    if let storedValue, let surface = HostSurfaceID(rawValue: storedValue) {
+        let requestedScope = PanelSoundScopeID.surface(surface)
+        if scopes.contains(where: { $0.scope == requestedScope }) {
+            return EventSettingsWindowRoute(scope: requestedScope)
+        }
+        return EventSettingsWindowRoute(
+            scope: resolvedPanelSoundScopeSelection(storedValue: storedValue, scopes: scopes),
+            unavailableRequestedScopeStoredValue: storedValue)
+    }
+    let resolved = resolvedPanelSoundScopeSelection(storedValue: storedValue, scopes: scopes)
+    let unavailableValue = storedValue == nil || storedValue == "unselected" ? nil : storedValue
+    return EventSettingsWindowRoute(
+        scope: resolved,
+        unavailableRequestedScopeStoredValue: unavailableValue)
 }
 
 /// Keeps the retained Events & Sounds route on a currently visible sound scope. A Surface may

@@ -50,6 +50,10 @@ private final class MenuBarActionRouter {
     ) -> IntegrationsWindowContent? {
         owner?.publishHostIntegrationState(state)
     }
+
+    func performGlobalShortcut(_ action: GlobalShortcutAction) {
+        owner?.performGlobalShortcut(action)
+    }
 }
 
 /// The real menu-bar shell (ENGINEERING.md T15 D2): an `NSStatusItem` + `NSPopover` hosting
@@ -75,6 +79,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let soundPacksWindowController: SoundPacksWindowController
     private let eventSettingsWindowController: EventSettingsWindowController
     private let settingsWindowController: SettingsWindowController
+    private let eventSettingsModel: PanelConfigController
+    private let globalShortcutRegistrar: CarbonGlobalShortcutRegistrar
+    private let globalShortcutSettings: GlobalShortcutSettingsModel
     private let languageStore: ClaudioPreferences
     private let integrationsModel: IntegrationsWindowModel
     private let actionRouter: MenuBarActionRouter
@@ -84,6 +91,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private var hostIntegrationRefreshTask: Task<Void, Never>?
     private var appActivationCancellable: AnyCancellable?
     private var menuBarIconCancellable: AnyCancellable?
+    private var systemPowerCancellables: Set<AnyCancellable> = []
     private var hostIntegrationRefreshRevision: UInt64 = 0
 
     /// Owned here (not by `PanelView`) so it survives across every popover show/close cycle
@@ -104,6 +112,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// Events & Sounds owns the current typed scope and is shown only after the popover closes.
     private var pendingEventSettingsWindowPresentation:
         (route: EventSettingsWindowRoute, focusTarget: PanelFocusTarget)?
+    /// A global shortcut has no panel focus target, but still preserves the external app owed a
+    /// handback when its retained Events window closes.
+    private var pendingShortcutEventSettingsPresentation:
+        (route: EventSettingsWindowRoute, handbackApplication: NSRunningApplication?)?
     /// The exact panel trigger is carried through the close callback. A value here also means the
     /// unified Settings window must be presented only after `popoverDidClose` finishes.
     private var pendingIntegrationsSettingsPresentation:
@@ -231,6 +243,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             afterFullReload: { [weak actionRouter] _ in
                 actionRouter?.audibilityInputsChanged()
             })
+        let globalShortcutRegistrar = CarbonGlobalShortcutRegistrar()
+        let globalShortcutSettings = GlobalShortcutSettingsModel(
+            adapter: globalShortcutRegistrar.makeAdapter(),
+            persistence: .userDefaults(),
+            actionHandler: { [weak actionRouter] action in
+                actionRouter?.performGlobalShortcut(action)
+            })
         let aiCueVault = AICueKeychainCredentialVault()
         let aiCueElevenLabsProvider = ElevenLabsAICueProvider()
         let aiCueMiniMaxProvider = MiniMaxAICueProvider()
@@ -313,6 +332,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             preferences: languageStore,
             loginItemSettings: loginItemSettings,
             usageSettings: makeUsageSettingsModel(),
+            globalShortcutSettings: globalShortcutSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: unifiedEventSettingsModel,
             eventSettingsSelection: unifiedEventSettingsSelection,
@@ -389,6 +409,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.soundPacksWindowController = soundPacksWindowController
         self.eventSettingsWindowController = eventSettingsWindowController
         self.settingsWindowController = settingsWindowController
+        self.eventSettingsModel = unifiedEventSettingsModel
+        self.globalShortcutRegistrar = globalShortcutRegistrar
+        self.globalShortcutSettings = globalShortcutSettings
         self.languageStore = languageStore
         self.integrationsModel = integrationsModel
         self.actionRouter = actionRouter
@@ -429,6 +452,22 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 }
             }
 
+        let workspaceNotifications = NSWorkspace.shared.notificationCenter
+        workspaceNotifications.publisher(for: NSWorkspace.willSleepNotification)
+            .sink { [weak globalShortcutSettings] _ in
+                MainActor.assumeIsolated {
+                    globalShortcutSettings?.suspend()
+                }
+            }
+            .store(in: &systemPowerCancellables)
+        workspaceNotifications.publisher(for: NSWorkspace.didWakeNotification)
+            .sink { [weak globalShortcutSettings] _ in
+                MainActor.assumeIsolated {
+                    globalShortcutSettings?.resume()
+                }
+            }
+            .store(in: &systemPowerCancellables)
+
         appActivationCancellable = NotificationCenter.default
             .publisher(for: NSApplication.didBecomeActiveNotification)
             .sink { [weak self] _ in
@@ -461,6 +500,11 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     deinit {
         hostIntegrationRefreshTask?.cancel()
+    }
+
+    func applicationWillTerminate() {
+        globalShortcutSettings.suspend()
+        globalShortcutRegistrar.invalidate()
     }
 
     /// 声音包、manifest 或静音配置变化后重算同一份可听矩阵。代次保护避免较慢的旧 refresh
@@ -584,6 +628,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         route: SoundPacksWindowRoute,
         returnFocusTo target: PanelFocusTarget
     ) {
+        pendingShortcutEventSettingsPresentation = nil
         pendingEventSettingsWindowPresentation = nil
         pendingIntegrationsSettingsPresentation = nil
         pendingSoundPacksWindowPresentation = (route, target)
@@ -616,6 +661,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         route: EventSettingsWindowRoute,
         returnFocusTo target: PanelFocusTarget
     ) {
+        pendingShortcutEventSettingsPresentation = nil
         pendingSoundPacksWindowPresentation = nil
         pendingIntegrationsSettingsPresentation = nil
         pendingEventSettingsWindowPresentation = (route, target)
@@ -633,6 +679,72 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.close()
     }
 
+    /// Global-shortcut actions are owned by MenuBarController, not the Settings view that edits
+    /// them. The route reads the panel's stable persisted scope, validates it against the current
+    /// production projection, and deliberately preserves a stale known scope so Events can show
+    /// the visible recovery reason instead of silently guessing another target.
+    fileprivate func performGlobalShortcut(_ action: GlobalShortcutAction) {
+        switch action {
+        case .togglePanel:
+            togglePopover()
+        case .openSettings:
+            requestSettingsWindowPresentation()
+        case .openCurrentScopeEvents:
+            requestCurrentScopeEventsFromShortcut()
+        }
+    }
+
+    private func requestCurrentScopeEventsFromShortcut() {
+        let scopes = panelSoundScopePresentations(
+            sourceRows: hostIntegrations.content.sourceRows,
+            config: eventSettingsModel.config,
+            language: languageStore.language)
+        let storedValue = UserDefaults.standard.string(forKey: panelSoundScopeDefaultsKey)
+        let route = globalShortcutEventSettingsRoute(
+            storedValue: storedValue,
+            scopes: scopes)
+
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        let handback: NSRunningApplication?
+        if frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
+            handback = previousApp
+        } else {
+            handback = frontmost
+        }
+        let presentation = (
+            route: route,
+            handbackApplication: handback
+        )
+        pendingEventSettingsWindowPresentation = nil
+        pendingSoundPacksWindowPresentation = nil
+        pendingIntegrationsSettingsPresentation = nil
+        pendingSettingsWindowPresentation = false
+        pendingShortcutEventSettingsPresentation = presentation
+
+        guard popover.isShown else {
+            pendingShortcutEventSettingsPresentation = nil
+            showEventSettingsFromShortcut(presentation)
+            return
+        }
+        popover.close()
+    }
+
+    private func showEventSettingsFromShortcut(
+        _ presentation: (
+            route: EventSettingsWindowRoute,
+            handbackApplication: NSRunningApplication?
+        )
+    ) {
+        settingsWindowController.showEventSettingsFromGlobalShortcut(
+            presentation.route,
+            returnFocusTo: presentation.handbackApplication
+        ) {
+            [weak self] latestHandbackApplication in
+            self?.activateHandbackApplication(
+                latestHandbackApplication ?? presentation.handbackApplication)
+        }
+    }
+
     /// The Integrations destination follows the same close-before-show rule as other management
     /// routes, but the unified Settings close callback first reopens the panel at the exact trigger;
     /// the later ordinary popover close finally returns activation to the original app.
@@ -640,6 +752,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         preselect host: HostID?,
         returnFocusTo target: PanelFocusTarget
     ) {
+        pendingShortcutEventSettingsPresentation = nil
         pendingEventSettingsWindowPresentation = nil
         pendingSoundPacksWindowPresentation = nil
         pendingIntegrationsSettingsPresentation = (host, target)
@@ -663,6 +776,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// Production generic Settings entry. No explicit route is supplied, so the retained owner
     /// restores the last legal top-level destination from the shared typed preferences.
     func requestSettingsWindowPresentation() {
+        pendingShortcutEventSettingsPresentation = nil
         pendingEventSettingsWindowPresentation = nil
         pendingSoundPacksWindowPresentation = nil
         pendingIntegrationsSettingsPresentation = nil
@@ -806,6 +920,13 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             let previous = previousApp
             previousApp = nil
             showSettingsWindow(route: nil, returnFocusTo: previous)
+            return
+        }
+
+        let shortcutEventPresentation = pendingShortcutEventSettingsPresentation
+        pendingShortcutEventSettingsPresentation = nil
+        if let shortcutEventPresentation {
+            showEventSettingsFromShortcut(shortcutEventPresentation)
             return
         }
 

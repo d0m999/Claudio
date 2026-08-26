@@ -15,6 +15,7 @@ struct SettingsWindowView: View {
     @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
     @ObservedObject var loginItemSettings: LoginItemSettingsModel
     @ObservedObject var usageSettings: UsageSettingsModel
+    @ObservedObject var globalShortcutSettings: GlobalShortcutSettingsModel
     let soundPacksEditorOwner: SoundPacksEditorOwner?
     let eventSettingsModel: PanelConfigController?
     let eventSettingsSelection: EventSettingsWindowSelection?
@@ -43,6 +44,7 @@ struct SettingsWindowView: View {
         dynamicQuietPolicy: DynamicQuietPolicyController,
         loginItemSettings: LoginItemSettingsModel,
         usageSettings: UsageSettingsModel,
+        globalShortcutSettings: GlobalShortcutSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
         eventSettingsModel: PanelConfigController? = nil,
         eventSettingsSelection: EventSettingsWindowSelection? = nil,
@@ -65,6 +67,7 @@ struct SettingsWindowView: View {
         self.dynamicQuietPolicy = dynamicQuietPolicy
         self.loginItemSettings = loginItemSettings
         self.usageSettings = usageSettings
+        self.globalShortcutSettings = globalShortcutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -255,6 +258,11 @@ struct SettingsWindowView: View {
                     } else if destination == .usage {
                         UsageSettingsView(
                             model: usageSettings,
+                            preferences: preferences,
+                            focusedTarget: $focusedTarget)
+                    } else if destination == .shortcuts {
+                        ShortcutSettingsView(
+                            model: globalShortcutSettings,
                             preferences: preferences,
                             focusedTarget: $focusedTarget)
                     } else {

@@ -104,6 +104,7 @@ import SwiftUI
         @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
         @StateObject private var loginItemSettings: LoginItemSettingsModel
         @StateObject private var usageSettings: UsageSettingsModel
+        @StateObject private var globalShortcutSettings: GlobalShortcutSettingsModel
 
         init(
             route: SettingsRoute,
@@ -167,6 +168,16 @@ import SwiftUI
                         clearLog: { .success(usagePresentation) },
                         revealLog: { false },
                         copyLogPath: { true })))
+            _globalShortcutSettings = StateObject(
+                wrappedValue: GlobalShortcutSettingsModel(
+                    adapter: GlobalHotKeyAdapter(
+                        register: { _ in },
+                        unregister: { _ in },
+                        setActionHandler: { _ in }),
+                    persistence: GlobalShortcutPersistenceAdapter(
+                        read: { _ in nil },
+                        persist: { _, _ in }),
+                    actionHandler: { _ in }))
         }
 
         var body: some View {
@@ -175,7 +186,8 @@ import SwiftUI
                 preferences: languageStore,
                 dynamicQuietPolicy: dynamicQuietPolicy,
                 loginItemSettings: loginItemSettings,
-                usageSettings: usageSettings)
+                usageSettings: usageSettings,
+                globalShortcutSettings: globalShortcutSettings)
                 .frame(
                     width: SettingsWindowGeometry.minimumWidth,
                     height: SettingsWindowGeometry.minimumHeight)

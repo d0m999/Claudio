@@ -393,6 +393,7 @@ public enum SettingsWindowFocusTarget: Sendable, Equatable, Hashable {
     case sidebar(SettingsDestination)
     case title(SettingsDestination)
     case firstAction(SettingsDestination)
+    case shortcutAction(GlobalShortcutAction)
 }
 
 public func settingsWindowFocusOrder(

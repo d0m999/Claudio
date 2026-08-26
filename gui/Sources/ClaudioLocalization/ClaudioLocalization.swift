@@ -408,6 +408,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventSettingsManageSounds: Self = "event-settings.manage-sounds"
     public static let eventSettingsManageSoundsHint: Self = "event-settings.manage-sounds.hint"
     public static let eventSettingsWindowTitle: Self = "window.event-settings.title"
+    public static let eventSettingsUnavailableShortcutScope: Self =
+        "event-settings.shortcut-scope.unavailable"
     public static let integrationsWindowTitle: Self = "window.integrations.title"
     public static let settingsWindowTitle: Self = "window.settings.title"
     public static let settingsDestinationGeneral: Self = "settings.destination.general"
@@ -577,6 +579,54 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let settingsUsageFailureLogClear: Self = "settings.usage.failure.log-clear"
     public static let settingsUsageFailureFinder: Self = "settings.usage.failure.finder"
     public static let settingsUsageFailureClipboard: Self = "settings.usage.failure.clipboard"
+    public static let settingsShortcutsDescription: Self = "settings.shortcuts.description"
+    public static let settingsShortcutsRequirement: Self = "settings.shortcuts.requirement"
+    public static let settingsShortcutsActionTogglePanel: Self =
+        "settings.shortcuts.action.toggle-panel"
+    public static let settingsShortcutsActionTogglePanelDescription: Self =
+        "settings.shortcuts.action.toggle-panel.description"
+    public static let settingsShortcutsActionOpenSettings: Self =
+        "settings.shortcuts.action.open-settings"
+    public static let settingsShortcutsActionOpenSettingsDescription: Self =
+        "settings.shortcuts.action.open-settings.description"
+    public static let settingsShortcutsActionOpenCurrentScopeEvents: Self =
+        "settings.shortcuts.action.open-current-scope-events"
+    public static let settingsShortcutsActionOpenCurrentScopeEventsDescription: Self =
+        "settings.shortcuts.action.open-current-scope-events.description"
+    public static let settingsShortcutsUnassigned: Self = "settings.shortcuts.unassigned"
+    public static let settingsShortcutsCurrentValue: Self = "settings.shortcuts.current-value"
+    public static let settingsShortcutsRecord: Self = "settings.shortcuts.record"
+    public static let settingsShortcutsRecording: Self = "settings.shortcuts.recording"
+    public static let settingsShortcutsCancelRecording: Self =
+        "settings.shortcuts.cancel-recording"
+    public static let settingsShortcutsRecordLabel: Self = "settings.shortcuts.record.label"
+    public static let settingsShortcutsCancelRecordingLabel: Self =
+        "settings.shortcuts.cancel-recording.label"
+    public static let settingsShortcutsRecordHint: Self = "settings.shortcuts.record.hint"
+    public static let settingsShortcutsClear: Self = "settings.shortcuts.clear"
+    public static let settingsShortcutsClearLabel: Self = "settings.shortcuts.clear.label"
+    public static let settingsShortcutsFailureInvalidStoredValue: Self =
+        "settings.shortcuts.failure.invalid-stored-value"
+    public static let settingsShortcutsFailurePrimaryModifier: Self =
+        "settings.shortcuts.failure.primary-modifier"
+    public static let settingsShortcutsFailureUnsupportedKey: Self =
+        "settings.shortcuts.failure.unsupported-key"
+    public static let settingsShortcutsFailureSystemReserved: Self =
+        "settings.shortcuts.failure.system-reserved"
+    public static let settingsShortcutsFailureDuplicate: Self =
+        "settings.shortcuts.failure.duplicate"
+    public static let settingsShortcutsFailureConflict: Self =
+        "settings.shortcuts.failure.conflict"
+    public static let settingsShortcutsFailureRegistration: Self =
+        "settings.shortcuts.failure.registration"
+    public static let settingsShortcutsFailureUnregister: Self =
+        "settings.shortcuts.failure.unregister"
+    public static let settingsShortcutsFailurePersistence: Self =
+        "settings.shortcuts.failure.persistence"
+    public static let settingsShortcutsFailurePersistenceCleanup: Self =
+        "settings.shortcuts.failure.persistence-cleanup"
+    public static let settingsShortcutsFailureRollback: Self =
+        "settings.shortcuts.failure.rollback"
     public static let settingsRouteIdentity: Self = "settings.route.identity"
     public static let settingsRouteReady: Self = "settings.route.ready"
     public static let settingsRouteInvalidSurface: Self = "settings.route.invalid-surface"
@@ -991,7 +1041,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .eventSettingsTitle, .eventSettingsPreviewAll, .eventSettingsPreviewAllHint,
         .eventSettingsAutomaticPlayback, .eventSettingsAutomaticPlaybackFor,
         .eventSettingsManageSounds,
-        .eventSettingsManageSoundsHint, .eventSettingsWindowTitle, .integrationsWindowTitle,
+        .eventSettingsManageSoundsHint, .eventSettingsWindowTitle,
+        .eventSettingsUnavailableShortcutScope,
+        .integrationsWindowTitle,
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
         .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
@@ -1030,6 +1082,23 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsNotificationsSnapshotExpired,
         .settingsNotificationsPublicationFailed,
         .settingsNotificationsOpenCalendarPrivacy, .settingsNotificationsOpenEvents,
+        .settingsShortcutsDescription, .settingsShortcutsRequirement,
+        .settingsShortcutsActionTogglePanel, .settingsShortcutsActionTogglePanelDescription,
+        .settingsShortcutsActionOpenSettings, .settingsShortcutsActionOpenSettingsDescription,
+        .settingsShortcutsActionOpenCurrentScopeEvents,
+        .settingsShortcutsActionOpenCurrentScopeEventsDescription,
+        .settingsShortcutsUnassigned, .settingsShortcutsCurrentValue,
+        .settingsShortcutsRecord, .settingsShortcutsRecording,
+        .settingsShortcutsCancelRecording, .settingsShortcutsRecordLabel,
+        .settingsShortcutsCancelRecordingLabel, .settingsShortcutsRecordHint,
+        .settingsShortcutsClear, .settingsShortcutsClearLabel,
+        .settingsShortcutsFailureInvalidStoredValue,
+        .settingsShortcutsFailurePrimaryModifier, .settingsShortcutsFailureUnsupportedKey,
+        .settingsShortcutsFailureSystemReserved,
+        .settingsShortcutsFailureDuplicate, .settingsShortcutsFailureConflict,
+        .settingsShortcutsFailureRegistration, .settingsShortcutsFailureUnregister,
+        .settingsShortcutsFailurePersistence,
+        .settingsShortcutsFailurePersistenceCleanup, .settingsShortcutsFailureRollback,
         .settingsRouteIdentity,
         .settingsRouteReady, .settingsRouteInvalidSurface, .settingsRouteStaleSurface,
         .settingsRouteStaleScope, .settingsRouteStaleEvent, .settingsRouteInvalidPack,

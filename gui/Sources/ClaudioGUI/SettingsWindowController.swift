@@ -18,6 +18,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
     private let loginItemSettings: LoginItemSettingsModel
     private let usageSettings: UsageSettingsModel
+    private let globalShortcutSettings: GlobalShortcutSettingsModel
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private let soundPacksEditorOwner: SoundPacksEditorOwner
     private let eventSettingsModel: PanelConfigController
@@ -50,6 +51,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         preferences: ClaudioPreferences,
         loginItemSettings: LoginItemSettingsModel,
         usageSettings: UsageSettingsModel,
+        globalShortcutSettings: GlobalShortcutSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner,
         eventSettingsModel: PanelConfigController,
         eventSettingsSelection: EventSettingsWindowSelection,
@@ -66,6 +68,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.preferences = preferences
         self.loginItemSettings = loginItemSettings
         self.usageSettings = usageSettings
+        self.globalShortcutSettings = globalShortcutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -172,6 +175,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         isPresentingWindow = false
     }
 
+    /// A global shortcut validates the persisted panel scope before crossing this owner. Unknown
+    /// or no-longer-published scopes still open the real Events destination on the safe fallback
+    /// carried by `route`, while the embedded destination retains the visible recovery reason.
+    func showEventSettingsFromGlobalShortcut(
+        _ route: EventSettingsWindowRoute,
+        returnFocusTo application: NSRunningApplication?,
+        onClose restoration: @escaping @MainActor (NSRunningApplication?) -> Void
+    ) {
+        eventSettingsSelection.select(route)
+        let settingsRoute: SettingsRoute
+        if route.unavailableRequestedScopeStoredValue == nil {
+            settingsRoute = .events(scope: route.scope, event: route.event)
+        } else {
+            settingsRoute = .destination(.eventsAndSounds)
+        }
+        showWindow(
+            route: settingsRoute,
+            returnFocusTo: application,
+            onClose: restoration)
+    }
+
     func windowDidBecomeKey(_ notification: Notification) {
         guard
             !isPresentingWindow,
@@ -217,6 +241,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             dynamicQuietPolicy: dynamicQuietObserver.policy,
             loginItemSettings: loginItemSettings,
             usageSettings: usageSettings,
+            globalShortcutSettings: globalShortcutSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: eventSettingsModel,
             eventSettingsSelection: eventSettingsSelection,

@@ -95,9 +95,9 @@ func runSettingsPreferencesSuites() async {
             isolated.availableSettingsDestinations
                 == [
                     .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds,
-                    .usage,
+                    .usage, .shortcuts,
                 ],
-            "production owner 只能暴露已交付真实内容的通用、集成、事件、通知、显示、声音与用量 destination")
+            "production owner 只能暴露已交付真实内容的通用、集成、事件、通知、显示、声音、用量与快捷键 destination")
         isolated.setLastSettingsDestination(.usage)
         expect(
             isolated.lastSettingsDestination == .usage

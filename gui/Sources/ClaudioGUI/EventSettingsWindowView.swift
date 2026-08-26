@@ -112,6 +112,7 @@ struct EventSettingsWindowView: View {
             }
             reconcileScopeSelection()
         }
+        .onChange(of: selection.route) { _ in reconcileScopeSelection() }
         .onChange(of: scopes.map(\.scope)) { _ in reconcileScopeSelection() }
         .onChange(of: model.config.selectedPack) { _ in
             if presentationContext.includesAICueComposer {
@@ -237,6 +238,23 @@ struct EventSettingsWindowView: View {
             eventHeader
                 .padding(.horizontal, 24)
                 .padding(.vertical, 18)
+            if let unavailableScope = selection.unavailableRequestedScopeStoredValue {
+                Label {
+                    Text(
+                        l10n.format(
+                            .eventSettingsUnavailableShortcutScope,
+                            unavailableScope as NSString)
+                    )
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(ClaudioTheme.error(colorScheme))
+                }
+                .padding(.horizontal, 24)
+                .padding(.bottom, 18)
+                .accessibilityIdentifier("event-settings.shortcut-scope-failure")
+            }
             if presentationContext.includesAICueComposer {
                 EventSettingsAICueServiceCard(
                     viewModel: aiCueViewModel,
@@ -678,7 +696,7 @@ struct EventSettingsWindowView: View {
             closeAICueComposer()
         }
         if selection.route.scope != scope {
-            selection.select(EventSettingsWindowRoute(scope: scope))
+            selection.resolveUnavailableScope(selection.route.scope, to: scope)
             focusedTarget = .scope(scope)
         }
         if model.selectedSurface != scope.surface {

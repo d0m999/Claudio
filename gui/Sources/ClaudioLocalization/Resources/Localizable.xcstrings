@@ -3112,6 +3112,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在同一设置窗口打开当前声音作用域的声音目的页" } }
       }
     },
+    "event-settings.shortcut-scope.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The shortcut's Sound Scope %@ is no longer available. Events opened on a safe available scope; choose a scope to continue." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快捷键指向的声音作用域 %@ 已不可用。事件页已在安全的可用作用域打开；请选择作用域后继续。" } }
+      }
+    },
     "window.event-settings.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · Events & Sounds" } },
@@ -3656,6 +3662,180 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The surface %@ is no longer available. No other surface was selected." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surface %@ 已不可用；未选择其他 Surface。" } }
+      }
+    },
+    "settings.shortcuts.action.open-current-scope-events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Current Sound Scope Events" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开当前声音作用域的事件页" } }
+      }
+    },
+    "settings.shortcuts.action.open-current-scope-events.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Events & Sounds for the panel's current valid Sound Scope." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为面板当前合法的声音作用域打开「事件与提示音」。" } }
+      }
+    },
+    "settings.shortcuts.action.open-settings" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开设置" } }
+      }
+    },
+    "settings.shortcuts.action.open-settings.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the retained unified Settings window." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开保留的统一设置窗口。" } }
+      }
+    },
+    "settings.shortcuts.action.toggle-panel" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show or Hide Panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示或隐藏面板" } }
+      }
+    },
+    "settings.shortcuts.action.toggle-panel.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Toggle the menu-bar panel without opening Settings." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换菜单栏面板，不打开设置。" } }
+      }
+    },
+    "settings.shortcuts.cancel-recording" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel Recording" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消录制" } }
+      }
+    },
+    "settings.shortcuts.cancel-recording.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel recording for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消录制%@" } }
+      }
+    },
+    "settings.shortcuts.clear" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除" } }
+      }
+    },
+    "settings.shortcuts.clear.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear shortcut for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除%@的快捷键" } }
+      }
+    },
+    "settings.shortcuts.current-value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current shortcut: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前快捷键：%@" } }
+      }
+    },
+    "settings.shortcuts.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Register three global shortcuts that remain active after this window closes." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "注册三项全局快捷键；关闭此窗口后仍保持有效。" } }
+      }
+    },
+    "settings.shortcuts.failure.conflict" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS or another app is already using that combination. Any previous shortcut remains unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "macOS 或其他应用已占用这个组合；原快捷键保持不变。" } }
+      }
+    },
+    "settings.shortcuts.failure.duplicate" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "That combination is already assigned to %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个组合已分配给%@。" } }
+      }
+    },
+    "settings.shortcuts.failure.invalid-stored-value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This saved shortcut is damaged or uses an unknown schema and has been disabled. Clear it before recording a replacement." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这项已保存快捷键已损坏或使用未知 schema，现已禁用。请先清除，再录制替代组合。" } }
+      }
+    },
+    "settings.shortcuts.failure.persistence" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The shortcut could not be saved. Any previous shortcut remains unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法保存快捷键；原快捷键保持不变。" } }
+      }
+    },
+    "settings.shortcuts.failure.persistence-cleanup" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The new shortcut is active for this app session but could not be saved or removed. Clear or replace it before continuing." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新快捷键在本次应用会话中仍有效，但无法保存或撤销。请先清除或替换。" } }
+      }
+    },
+    "settings.shortcuts.failure.primary-modifier" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Include Command or Control. Bare keys and Shift/Option-only combinations are not allowed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "组合必须包含 Command 或 Control；不允许裸键或仅 Shift/Option。" } }
+      }
+    },
+    "settings.shortcuts.failure.registration" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS could not register that shortcut. Any previous shortcut remains unchanged; try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "macOS 无法注册该快捷键；原快捷键保持不变。请重试。" } }
+      }
+    },
+    "settings.shortcuts.failure.rollback" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The new shortcut failed and macOS could not restore the previous registration. Record another combination." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新快捷键失败，且 macOS 无法恢复原注册。请录制其他组合。" } }
+      }
+    },
+    "settings.shortcuts.failure.system-reserved" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "That combination is reserved by macOS. Record another combination." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个组合由 macOS 保留。请录制其他组合。" } }
+      }
+    },
+    "settings.shortcuts.failure.unsupported-key" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "That hardware key is not supported for global shortcuts. Record another combination." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "该硬件按键不支持用于全局快捷键。请录制其他组合。" } }
+      }
+    },
+    "settings.shortcuts.failure.unregister" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The previous shortcut could not be unregistered, so no replacement was attempted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法取消原快捷键注册，因此未尝试替换。" } }
+      }
+    },
+    "settings.shortcuts.record" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Record…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "录制…" } }
+      }
+    },
+    "settings.shortcuts.record.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reads one combination in this focused control. Press Escape to cancel." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只在当前聚焦控件内读取一个组合；按 Escape 取消。" } }
+      }
+    },
+    "settings.shortcuts.record.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Record shortcut for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为%@录制快捷键" } }
+      }
+    },
+    "settings.shortcuts.recording" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Press one shortcut combination now, or press Escape to cancel." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现在按下一个快捷键组合，或按 Escape 取消。" } }
+      }
+    },
+    "settings.shortcuts.requirement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Each shortcut must include Command or Control. Accessibility and Input Monitoring are not required." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每项快捷键必须包含 Command 或 Control；无需辅助功能或输入监控权限。" } }
+      }
+    },
+    "settings.shortcuts.unassigned" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not assigned" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未分配" } }
       }
     },
     "settings.usage.action.history-cleared" : {

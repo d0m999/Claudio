@@ -43,7 +43,7 @@ public struct PanelView: View {
 
     @Environment(\.colorScheme) private var colorScheme
     /// `unselected` 只表示从未选择；用户显式选过 Global 后持久化为 `global`。
-    @AppStorage("claudio.panel.selected-surface")
+    @AppStorage(panelSoundScopeDefaultsKey)
     private var selectedSurfaceRaw = "unselected"
 
     private let audioEnvironment: AudioImportEnvironment
