@@ -314,6 +314,47 @@ func runSettingsNavigationSuites() {
             "generic 重开必须恢复顶层页，而不是陈旧深链接")
     }
 
+    suite("Settings embedded lifecycle：使用 publisher 新目的页进入/离开 Integrations") {
+        let availability = SettingsRouteAvailability(
+            integrationSurfaces: [.workBuddy],
+            eventScopes: [.global, .surface(.workBuddy)],
+            soundScopes: [.global, .surface(.workBuddy)],
+            soundPackIDs: [],
+            events: Set(Event.allCases))
+        let model = SettingsWindowPresentationModel<String>(availability: availability)
+        var states: [SettingsEmbeddedDestinationState] = []
+        let cancellable = model.$resolution
+            .map(\.destination)
+            .dropFirst()
+            .sink { emittedDestination in
+                states.append(
+                    settingsEmbeddedDestinationState(
+                        selectedDestination: emittedDestination,
+                        embeddedDestination: .integrations,
+                        windowIsVisible: true,
+                        windowIsKey: true))
+            }
+
+        model.request(.integrations(surface: .workBuddy))
+        model.request(.destination(.general))
+        expect(
+            states
+                == [
+                    SettingsEmbeddedDestinationState(isVisible: true, isKey: true),
+                    SettingsEmbeddedDestinationState(isVisible: false, isKey: false),
+                ],
+            "publisher 的新 destination 必须让同一 retained 窗口进入时可见、离开时立即隐藏")
+        expect(
+            settingsEmbeddedDestinationState(
+                selectedDestination: .integrations,
+                embeddedDestination: .integrations,
+                windowIsVisible: true,
+                windowIsKey: false)
+                == SettingsEmbeddedDestinationState(isVisible: true, isKey: false),
+            "可见但非 key 的 Integrations 必须保留可见事实且关闭公告闸门")
+        withExtendedLifetime(cancellable) {}
+    }
+
     suite("Settings shell：尺寸、单滚动、焦点序、DEBUG gallery 与生产通用页") {
         expect(
             SettingsWindowGeometry.defaultWidth == 1_240
@@ -338,6 +379,11 @@ func runSettingsNavigationSuites() {
                 == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
                     + [.title(.general), .firstAction(.general)],
             "非嵌入目的页必须保留 sidebar、标题、首个动作焦点序")
+        expect(
+            settingsWindowFocusOrder(selectedDestination: .integrations)
+                == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
+                    + [.title(.integrations), .firstAction(.integrations)],
+            "Integrations 必须在嵌入 model 前保留 Settings 内部的管理事件动作")
 
         guard
             let controller = settingsSource(
@@ -419,6 +465,16 @@ func runSettingsNavigationSuites() {
                 && controller.contains("soundPackSnapshotIsFresh: libraryState == .ready"),
             "Sounds destination 必须嵌入完整共享编辑器，并以 shared fresh-ready 快照重解析 route")
         expect(
+            view.contains("IntegrationsWindowView(")
+                && view.contains("integrationsFocusCoordinator")
+                && view.contains("integrationsFocusCoordinator.cancelPendingRequest()")
+                && view.contains("settings.integrations.manage-events")
+                && view.contains("model.request(.events(scope: .surface(host.surfaceID)")
+                && controller.contains("integrationSurfaces: publishedSurfaces")
+                && controller.contains("selectedDestination: destination")
+                && controller.contains("integrationsModel.noteWindowVisibility(state.isVisible)"),
+            "Integrations destination 必须复用完整 model/view、解析 Surface 深链并在窗口内路由 Events")
+        expect(
             controller.contains("soundPackSelectionAnnouncementCancellable")
                 && controller.contains("soundPackLibraryAnnouncementCancellable")
                 && controller.contains("soundPackStatusAnnouncementCancellable")
@@ -480,8 +536,10 @@ func runSettingsNavigationSuites() {
                 && menuBar.contains("soundPacksEditorOwner: soundPacksEditorOwner")
                 && menuBar.contains("SoundPacksWindowController")
                 && menuBar.contains("EventSettingsWindowController")
-                && menuBar.contains("IntegrationsWindowController"),
-            "production composition 必须让 Sounds 与 legacy window 共享唯一 editor owner")
+                && menuBar.contains("integrationsModel: integrationsModel")
+                && !menuBar.contains(
+                    "let integrationsWindowController = IntegrationsWindowController("),
+            "production composition 必须让 Sounds 共享唯一 editor owner，并只把 Integrations model 注入统一窗口")
         expect(
             app.contains("appDelegate.showSettings()")
                 && app.contains("CommandGroup(replacing: .appSettings)")

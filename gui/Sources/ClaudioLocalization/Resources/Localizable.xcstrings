@@ -3268,6 +3268,18 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用量" } }
       }
     },
+    "settings.integrations.manage-events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage Events" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理事件" } }
+      }
+    },
+    "settings.integrations.manage-events.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Opens Events & Sounds for the selected surface and event in this Settings window." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在当前设置窗口中打开所选事件来源和事件的“事件与提示音”。" } }
+      }
+    },
     "settings.notifications.calendar.description" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "When enabled and authorized, only a current non-all-day busy event temporarily suppresses automatic playback. Event details are never retained." } },

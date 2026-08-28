@@ -1,3 +1,5 @@
+import ClaudioCore
+import ClaudioGUICore
 import Foundation
 
 private func integrationsRepositoryRoot(file: StaticString = #filePath) -> URL {
@@ -19,6 +21,51 @@ private func integrationsSource(
 
 @MainActor
 func runIntegrationsWindowWiringSuites() {
+    suite("Integrations focus coordinator：generic 请求首项，Surface 深链请求精确宿主") {
+        let coordinator = IntegrationsWindowFocusCoordinator()
+        expect(
+            coordinator.requestRevision == 0 && coordinator.requestedTarget == nil,
+            "初始不得携带陈旧焦点")
+        coordinator.requestFocus(.hostCard(.workBuddy))
+        expect(
+            coordinator.requestRevision == 1
+                && coordinator.requestedTarget == .hostCard(.workBuddy),
+            "Surface 深链必须把稳定宿主身份与新 revision 一起交给嵌入视图")
+        expect(
+            coordinator.consumeRequest(1) && !coordinator.consumeRequest(1),
+            "每个深链焦点请求必须只被当前挂载视图消费一次")
+
+        coordinator.requestFocus(.hostCard(.codex))
+        coordinator.cancelPendingRequest()
+        expect(
+            coordinator.requestRevision == 2 && coordinator.requestedTarget == nil
+                && !coordinator.consumeRequest(2),
+            "generic route 必须取消未消费的陈旧深链且不发布竞争焦点")
+
+        coordinator.requestInitialFocus()
+        expect(
+            coordinator.requestRevision == 3 && coordinator.requestedTarget == nil
+                && coordinator.consumeRequest(3),
+            "standalone 重开仍必须产生可消费的新首项焦点请求")
+
+        let liveCoordinator = IntegrationsWindowFocusCoordinator()
+        var liveConsumptions: [(revision: Int, target: IntegrationsWindowFocusTarget?)] = []
+        let cancellable = liveCoordinator.$requestRevision
+            .dropFirst()
+            .sink { revision in
+                if liveCoordinator.consumeRequest(revision) {
+                    liveConsumptions.append((revision, liveCoordinator.requestedTarget))
+                }
+            }
+        liveCoordinator.requestFocus(.hostCard(.claudeCode))
+        expect(
+            liveConsumptions.count == 1
+                && liveConsumptions[0].revision == 1
+                && liveConsumptions[0].target == .hostCard(.claudeCode),
+            "真实 @Published sink 必须能在 willSet 时序内一次消费新 revision 与精确 Host")
+        withExtendedLifetime(cancellable) {}
+    }
+
     suite("IntegrationsWindow controller：窗口 retained、重复 show 复用，关闭后只还一次触发控件焦点") {
         guard
             let controller = integrationsSource(
@@ -56,7 +103,7 @@ func runIntegrationsWindowWiringSuites() {
             "集成窗口默认必须是 840×620，且最小保持 640×520")
     }
 
-    suite("MenuBar shell：唯一 retained IntegrationsWindow，经 popover close 交接并精确恢复触发控件") {
+    suite("MenuBar shell：Integrations cutover 到唯一 retained Settings，经 popover close 交接并恢复焦点") {
         guard
             let menu = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let panel = integrationsSource("gui/Sources/ClaudioGUI/PanelView.swift"),
@@ -68,32 +115,25 @@ func runIntegrationsWindowWiringSuites() {
         }
 
         expect(
-            menu.contains("private let integrationsWindowController: IntegrationsWindowController"),
-            "MenuBarController 必须 app-lifetime 持有唯一详情窗 controller")
-        expect(
-            menu.components(
-                separatedBy: "let integrationsWindowController = IntegrationsWindowController("
-            ).count - 1 == 1
-                && menu.contains("model: integrationsModel")
-                && menu.contains("languageStore: languageStore"),
-            "IntegrationsWindowController 只能初始化一次")
+            !menu.contains("private let integrationsWindowController")
+                && !menu.contains("let integrationsWindowController = IntegrationsWindowController(")
+                && menu.contains("integrationsModel: integrationsModel"),
+            "cutover 后 production 不得再创建独立 Integrations window；同一 model 必须注入 Settings")
         expect(
             panel.contains("onManageIntegrations(diagnosticsHost, .soundScope)")
                 && scopePicker.contains("panel.sound-scope.integrations")
                 && !panel.contains("HostSourceRowView("),
             "作用域菜单底部入口必须把预选 Host 与返回 soundScope 焦点分别交给 AppKit shell")
         expect(
-            menu.contains("pendingIntegrationsWindowPresentation")
+            menu.contains("pendingIntegrationsSettingsPresentation")
                 && menu.contains("popoverDidClose")
-                && menu.contains(
-                    "integrationsWindowController.showWindow { [weak self] latestHandbackApplication in"
-                ),
-            "详情窗必须在 popoverDidClose 后展示，不能与 transient close 竞态")
+                && menu.contains("showIntegrationsSettings("),
+            "统一设置必须在 popoverDidClose 后展示，不能与 transient close 竞态")
         expect(
             menu.contains("restorePanelFocus(")
                 && menu.contains("latestHandbackApplication: latestHandbackApplication")
                 && menu.contains("focusCoordinator.requestFocus(target: restoredTarget)"),
-            "关闭详情窗必须重开面板并恢复原始宿主行/管理入口")
+            "关闭统一设置必须重开面板并恢复原始宿主行/管理入口")
 
         guard let integrationBranch = menu.range(of: "if let integrationsPresentation") else {
             expect(false, "找不到 integrations handoff 分支")
@@ -105,17 +145,19 @@ func runIntegrationsWindowWiringSuites() {
                 upTo: suffix.range(of: "let soundPacksPresentation")?.lowerBound
                     ?? suffix.endIndex))
         expect(
-            !branchBeforeSoundPacks.contains("previousApp = nil"),
-            "integrations handoff 不得提前清 activation debt；要等恢复后的 popover 正常关闭")
+            branchBeforeSoundPacks.contains("let previous = previousApp")
+                && branchBeforeSoundPacks.contains("previousApp = nil")
+                && branchBeforeSoundPacks.contains("handbackApplication: previous"),
+            "integrations handoff 必须把 activation debt 转交唯一 Settings owner 后清空原槽")
     }
 
-    suite("IntegrationsWindow handback：可见期间跟踪最近外部 app，关闭后交回 MenuBar 的原债务槽") {
+    suite("Settings Integrations handback：可见期间跟踪最近外部 app，关闭后交回 MenuBar") {
         guard
             let controllerSource = integrationsSource(
-                "gui/Sources/ClaudioGUI/IntegrationsWindowController.swift"),
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let menuSource = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift")
         else {
-            expect(false, "缺少 IntegrationsWindowController/MenuBarController")
+            expect(false, "缺少 SettingsWindowController/MenuBarController")
             return
         }
         let controller = collapsingWhitespace(
@@ -135,7 +177,8 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             controller.contains("if !wasVisible { handbackTracker.beginPresentation() }")
                 && controller.contains("handbackTracker.consumeOnClose()")
-                && controller.contains("restoration?(handbackApplication)"),
+                && controller.contains("handbackTracker.consumeOnClose() ?? originalHandback")
+                && controller.contains("restoration?(handback)"),
             "hidden→visible 才能开新代次，close 必须一次性消费最近 app 并随焦点恢复闭包交回")
         expect(
             menu.contains("if let latestHandbackApplication {")
@@ -153,7 +196,7 @@ func runIntegrationsWindowWiringSuites() {
             return
         }
         guard
-            let start = menu.range(of: "fileprivate func requestIntegrationsWindowPresentation")?
+            let start = menu.range(of: "fileprivate func requestIntegrationsSettingsPresentation")?
                 .lowerBound,
             let end = menu.range(of: "private func restorePanelFocus")?.lowerBound,
             start < end
@@ -172,7 +215,7 @@ func runIntegrationsWindowWiringSuites() {
             "handoff 里只能由独立 preselect 参数改变 inspector 选择")
     }
 
-    suite("Retained IntegrationsWindow：后台/bootstrap/popover 刷新同时替换 store 与已保留 model") {
+    suite("Embedded Integrations：后台/bootstrap/popover 刷新同时替换 store 与已保留 model") {
         guard
             let menu = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let model = integrationsSource("gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift"),
@@ -185,10 +228,9 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             menu.contains("private let integrationsModel: IntegrationsWindowModel")
                 && menu.contains("self.integrationsModel = integrationsModel")
-                && menu.contains("let integrationsWindowController = IntegrationsWindowController(")
-                && menu.contains("model: integrationsModel")
-                && menu.contains("languageStore: languageStore"),
-            "MenuBarController 必须与 retained controller 共享同一个 model 实例")
+                && menu.contains("integrationsModel: integrationsModel")
+                && !menu.contains("let integrationsWindowController = IntegrationsWindowController("),
+            "MenuBarController 必须把同一个 model 实例交给 retained Settings，不能创建第二 owner")
         expect(
             menu.contains("let content = self.hostIntegrations.replace(state: state)")
                 && menu.contains("self.integrationsModel.replaceExternalContent(content)"),
@@ -628,22 +670,24 @@ func runIntegrationsWindowWiringSuites() {
             "集成取消静音成功后必须推进共享 config-only revision，让保留窗口同步 enabled")
     }
 
-    suite("集成→声音包关闭恢复：目标窗口消失时回落普通关闭交接") {
+    suite("集成→事件：恢复动作走统一 Settings typed route，不打开第二窗口") {
         guard
             let menu = integrationsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
-            let soundPacks = integrationsSource(
-                "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift")
+            let settings = integrationsSource(
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
         else {
-            expect(false, "缺少 MenuBarController/SoundPacksWindowController")
+            expect(false, "缺少 MenuBarController/SettingsWindowController")
             return
         }
         expect(
-            menu.contains("self?.integrationsWindowController.restoreKeyWindow() ?? false"),
-            "关闭声音包窗口时必须把集成窗口恢复的真实 Bool 交给 owner")
+            menu.contains("settingsWindowController.request(")
+                && menu.contains(".events(scope: .surface(host.surfaceID), event: event)")
+                && !menu.contains("requestSoundPacksFromIntegrations"),
+            "配置声音恢复必须提交稳定 Surface/Event route，不得再打开独立声音包窗口")
         expect(
-            soundPacks.contains("guard !restoration(previous) else { return }")
-                && soundPacks.contains("self.completeCloseHandoff(to: previous)"),
-            "恢复返回 false 时不得无条件 return，必须继续 handback 或 deactivate")
+            settings.contains("func request(_ route: SettingsRoute)")
+                && settings.contains("model.request(route)"),
+            "统一 Settings owner 必须提供只切 route、不重新 present window 的内部 seam")
     }
 
     suite("检查器证据：稳定 surface 注入真实路径，AX 占位不合成伪配置来源") {
@@ -800,9 +844,11 @@ func runIntegrationsWindowWiringSuites() {
     suite("IntegrationsWindow focus：真实 FocusState 与纯 presentation 同身份、同顺序") {
         guard
             let view = integrationsSource("gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
-            let model = integrationsSource("gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift")
+            let model = integrationsSource("gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift"),
+            let focusCoordinator = integrationsSource(
+                "gui/Sources/ClaudioGUICore/IntegrationsWindowFocus.swift")
         else {
-            expect(false, "缺少 IntegrationsWindow view/model")
+            expect(false, "缺少 IntegrationsWindow view/model/focus coordinator")
             return
         }
 
@@ -816,13 +862,17 @@ func runIntegrationsWindowWiringSuites() {
             expect(view.contains(target), "真实控件缺少纯焦点身份：\(target)")
         }
         expect(
-            view.contains("integrationsWindowFocusOrder(focusScope).first"),
+            view.contains("let order = integrationsWindowFocusOrder(focusScope)")
+                && view.contains("focusedTarget = order.first"),
             "打开焦点必须取纯模型焦点序第一项")
         expect(
             view.contains("integrationsWindowFocusOrder(focusScope)")
+                && view.contains("focusCoordinator.consumeRequest(revision)")
+                && view.contains("focusCoordinator.requestedTarget")
+                && view.contains("order.contains(requestedTarget)")
                 && view.contains("hostSurfacePresentationOrder(from: model.content.sourceRows)")
                 && model.contains("firstPresentedHost(in: content)")
-                && model.contains("IntegrationsWindowFocusCoordinator"),
+                && focusCoordinator.contains("IntegrationsWindowFocusCoordinator"),
             "初选、焦点恢复与 reconcile 必须复用 Product → Surface 纯顺序")
     }
 
@@ -860,7 +910,7 @@ func runIntegrationsWindowWiringSuites() {
             let view = integrationsSource("gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
             let model = integrationsSource("gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift"),
             let controller = integrationsSource(
-                "gui/Sources/ClaudioGUI/IntegrationsWindowController.swift")
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
         else {
             expect(false, "缺少 IntegrationsWindow view/model/controller")
             return
@@ -872,8 +922,9 @@ func runIntegrationsWindowWiringSuites() {
         expect(
             controller.contains("windowDidBecomeKey")
                 && controller.contains("windowDidResignKey")
-                && controller.contains("model.noteWindowVisibility(false)"),
-            "controller 必须把 show/key/close 生命周期交给 model")
+                && controller.contains("integrationsModel.noteWindowVisibility(false)")
+                && controller.contains("integrationsModel.noteWindowKeyState("),
+            "统一 Settings controller 必须把当前 Integrations destination 的 show/key/close 生命周期交给 model")
         expect(
             view.contains("guard model.isWindowVisible, model.isWindowKey, NSApp.isActive")
                 && view.contains(".onChange(of: model.isWindowKey)"),
@@ -1044,9 +1095,9 @@ func runIntegrationsWindowWiringSuites() {
                 "gui/Sources/ClaudioGUI/IntegrationsWindowController.swift") ?? ""
 
         expect(
-            package.contains("retained `IntegrationsWindow`")
+            package.contains("embedded Integrations destination")
                 && package.contains(".executableTarget(\n            name: \"ClaudioGUI\""),
-            "Package target 注释必须明确新窗口仍由唯一 app shell 所有")
+            "Package target 注释必须明确 Integrations 由唯一 Settings owner 承载")
         expect(appSources.contains("@main"), "ClaudioGUIApp 必须继续是唯一入口")
         expect(!controller.contains("@main"), "IntegrationsWindow controller 不得制造第二入口")
     }

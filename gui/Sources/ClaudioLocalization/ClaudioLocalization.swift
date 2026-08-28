@@ -422,6 +422,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let settingsDestinationUsage: Self = "settings.destination.usage"
     public static let settingsDestinationShortcuts: Self = "settings.destination.shortcuts"
     public static let settingsDestinationAbout: Self = "settings.destination.about"
+    public static let settingsIntegrationsManageEvents: Self =
+        "settings.integrations.manage-events"
+    public static let settingsIntegrationsManageEventsHint: Self =
+        "settings.integrations.manage-events.hint"
     public static let settingsGeneralLanguageTitle: Self = "settings.general.language.title"
     public static let settingsGeneralLanguageDescription: Self =
         "settings.general.language.description"
@@ -901,7 +905,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
         .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
-        .settingsDestinationShortcuts, .settingsDestinationAbout, .settingsGeneralLanguageTitle,
+        .settingsDestinationShortcuts, .settingsDestinationAbout,
+        .settingsIntegrationsManageEvents, .settingsIntegrationsManageEventsHint,
+        .settingsGeneralLanguageTitle,
         .settingsGeneralLanguageDescription, .settingsGeneralLanguageSystem,
         .settingsGeneralLanguageChinese, .settingsGeneralLanguageEnglish,
         .settingsGeneralLanguageHint, .settingsGeneralSystemProjection,

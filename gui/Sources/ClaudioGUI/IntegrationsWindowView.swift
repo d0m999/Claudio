@@ -187,7 +187,10 @@ struct IntegrationsWindowView: View {
             Text(l10n.format(.integrationsClearReceiptHistoryMessage, host.displayName))
         }
         .onReceive(focusCoordinator.$requestRevision) { revision in
-            guard revision > handledFocusRequestRevision else { return }
+            guard
+                revision > handledFocusRequestRevision,
+                focusCoordinator.consumeRequest(revision)
+            else { return }
             handledFocusRequestRevision = revision
             applyInitialFocus()
         }
@@ -783,7 +786,14 @@ struct IntegrationsWindowView: View {
     }
 
     private func applyInitialFocus() {
-        focusedTarget = integrationsWindowFocusOrder(focusScope).first
+        let order = integrationsWindowFocusOrder(focusScope)
+        if let requestedTarget = focusCoordinator.requestedTarget,
+            order.contains(requestedTarget)
+        {
+            focusedTarget = requestedTarget
+        } else {
+            focusedTarget = order.first
+        }
     }
 
     private func reconcileFocusWithVisibleControls() {

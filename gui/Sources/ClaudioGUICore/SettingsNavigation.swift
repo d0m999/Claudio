@@ -364,6 +364,31 @@ public enum SettingsWindowGeometry {
     public static let minimumHeight: Double = 640
 }
 
+/// Visibility facts for an editor embedded in the retained Settings window. Callers pass the
+/// destination emitted by the route publisher rather than synchronously reading an `@Published`
+/// property that may still contain its pre-publication value.
+public struct SettingsEmbeddedDestinationState: Sendable, Equatable {
+    public let isVisible: Bool
+    public let isKey: Bool
+
+    public init(isVisible: Bool, isKey: Bool) {
+        self.isVisible = isVisible
+        self.isKey = isKey
+    }
+}
+
+public func settingsEmbeddedDestinationState(
+    selectedDestination: SettingsDestination,
+    embeddedDestination: SettingsDestination,
+    windowIsVisible: Bool,
+    windowIsKey: Bool
+) -> SettingsEmbeddedDestinationState {
+    let isVisible = windowIsVisible && selectedDestination == embeddedDestination
+    return SettingsEmbeddedDestinationState(
+        isVisible: isVisible,
+        isKey: isVisible && windowIsKey)
+}
+
 public enum SettingsWindowFocusTarget: Sendable, Equatable, Hashable {
     case sidebar(SettingsDestination)
     case title(SettingsDestination)
@@ -375,9 +400,9 @@ public func settingsWindowFocusOrder(
 ) -> [SettingsWindowFocusTarget] {
     var order = SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
     order.append(.title(selectedDestination))
-    // Both embedded editors own route-aware focus identity spaces. Inventing a Settings-shell
-    // first action for either would point at no rendered control and compete with the editor's
-    // initial-focus request.
+    // Embedded editors own route-aware focus identity spaces. Inventing a Settings-shell first
+    // action for them would point at no rendered control and compete with their initial-focus
+    // requests. Integrations exposes one real shell-owned route action before its embedded model.
     if selectedDestination != .eventsAndSounds && selectedDestination != .sounds {
         order.append(.firstAction(selectedDestination))
     }

@@ -1,4 +1,5 @@
 import AppKit
+import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
 import SoundPacksWindow
@@ -15,6 +16,8 @@ struct SettingsWindowView: View {
     let eventSettingsModel: PanelConfigController?
     let eventSettingsSelection: EventSettingsWindowSelection?
     let hostIntegrations: HostIntegrationPresentationStore?
+    let integrationsModel: IntegrationsWindowModel?
+    let integrationsFocusCoordinator: IntegrationsWindowFocusCoordinator?
     let aiCueViewModel: AICueGenerationViewModel?
     let audioEnvironment: AudioImportEnvironment?
     let onEventAudibilityInputsChanged: (@MainActor () -> Void)?
@@ -39,6 +42,8 @@ struct SettingsWindowView: View {
         eventSettingsModel: PanelConfigController? = nil,
         eventSettingsSelection: EventSettingsWindowSelection? = nil,
         hostIntegrations: HostIntegrationPresentationStore? = nil,
+        integrationsModel: IntegrationsWindowModel? = nil,
+        integrationsFocusCoordinator: IntegrationsWindowFocusCoordinator? = nil,
         aiCueViewModel: AICueGenerationViewModel? = nil,
         audioEnvironment: AudioImportEnvironment? = nil,
         onEventAudibilityInputsChanged: (@MainActor () -> Void)? = nil,
@@ -57,6 +62,8 @@ struct SettingsWindowView: View {
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
         self.hostIntegrations = hostIntegrations
+        self.integrationsModel = integrationsModel
+        self.integrationsFocusCoordinator = integrationsFocusCoordinator
         self.aiCueViewModel = aiCueViewModel
         self.audioEnvironment = audioEnvironment
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
@@ -80,7 +87,26 @@ struct SettingsWindowView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
         .onReceive(model.$routeRequestRevision) { _ in
-            if destination == .eventsAndSounds,
+            if destination == .integrations,
+                let integrationsModel,
+                let integrationsFocusCoordinator
+            {
+                guard model.resolution.failure == nil else {
+                    focusedTarget = SettingsWindowFocusTarget.title(destination)
+                    return
+                }
+                if case .integrations(let surface) = model.resolution.route,
+                    let host = HostID.productVisibleCases.first(where: {
+                        $0.surfaceID == surface
+                    })
+                {
+                    integrationsModel.select(.host(host))
+                    integrationsFocusCoordinator.requestFocus(.hostCard(host))
+                } else {
+                    integrationsFocusCoordinator.cancelPendingRequest()
+                    focusedTarget = SettingsWindowFocusTarget.title(destination)
+                }
+            } else if destination == .eventsAndSounds,
                 let eventSettingsSelection,
                 let eventSettingsModel
             {
@@ -137,7 +163,34 @@ struct SettingsWindowView: View {
 
     @ViewBuilder
     private var routeSlot: some View {
-        if destination == .eventsAndSounds,
+        if destination == .integrations,
+            model.resolution.failure == nil,
+            let integrationsModel,
+            let integrationsFocusCoordinator
+        {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    destinationTitle
+                    Spacer(minLength: 16)
+                    Button(l10n.text(.settingsIntegrationsManageEvents)) {
+                        manageSelectedIntegrationEvents(in: integrationsModel)
+                    }
+                    .focused(
+                        $focusedTarget,
+                        equals: SettingsWindowFocusTarget.firstAction(.integrations)
+                    )
+                    .accessibilityHint(l10n.text(.settingsIntegrationsManageEventsHint))
+                    .accessibilityIdentifier("settings.integrations.manage-events")
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+
+                IntegrationsWindowView(
+                    model: integrationsModel,
+                    focusCoordinator: integrationsFocusCoordinator,
+                    languageStore: preferences)
+            }
+        } else if destination == .eventsAndSounds,
             model.resolution.failure == nil,
             let soundPacksEditorOwner,
             let eventSettingsModel,
@@ -221,6 +274,18 @@ struct SettingsWindowView: View {
     private var eventSettingsRoute: EventSettingsWindowRoute? {
         guard case .events(let scope, let event) = model.resolution.route else { return nil }
         return EventSettingsWindowRoute(scope: scope, event: event)
+    }
+
+    private func manageSelectedIntegrationEvents(in integrationsModel: IntegrationsWindowModel) {
+        let host = integrationsModel.selection.host
+        let event: Event?
+        switch integrationsModel.selection {
+        case .host:
+            event = nil
+        case .capability(_, let selectedEvent):
+            event = selectedEvent
+        }
+        model.request(.events(scope: .surface(host.surfaceID), event: event))
     }
 
     private var generalSettings: some View {

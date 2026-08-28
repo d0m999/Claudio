@@ -19,8 +19,11 @@ private final class MenuBarActionRouter {
         owner?.requestSoundPacksWindowPresentation(route: route, returnFocusTo: target)
     }
 
-    func requestIntegrationsWindow(preselect host: HostID?, returnFocusTo target: PanelFocusTarget) {
-        owner?.requestIntegrationsWindowPresentation(preselect: host, returnFocusTo: target)
+    func requestIntegrationsSettings(
+        preselect host: HostID?,
+        returnFocusTo target: PanelFocusTarget
+    ) {
+        owner?.requestIntegrationsSettingsPresentation(preselect: host, returnFocusTo: target)
     }
 
     func requestEventSettingsWindow(
@@ -30,8 +33,8 @@ private final class MenuBarActionRouter {
         owner?.requestEventSettingsWindowPresentation(route: route, returnFocusTo: target)
     }
 
-    func requestSoundPacksFromIntegrations(host: HostID, event: Event) {
-        owner?.requestSoundPacksFromIntegrations(host: host, event: event)
+    func requestEventsFromIntegrations(host: HostID, event: Event) {
+        owner?.requestEventsFromIntegrations(host: host, event: event)
     }
 
     func requestSoundPacksFromEventSettings(route: SoundPacksWindowRoute) {
@@ -71,7 +74,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let soundPackLibrary: SoundPackLibrary
     private let soundPacksWindowController: SoundPacksWindowController
     private let eventSettingsWindowController: EventSettingsWindowController
-    private let integrationsWindowController: IntegrationsWindowController
     private let settingsWindowController: SettingsWindowController
     private let languageStore: ClaudioPreferences
     private let integrationsModel: IntegrationsWindowModel
@@ -102,8 +104,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private var pendingEventSettingsWindowPresentation:
         (route: EventSettingsWindowRoute, focusTarget: PanelFocusTarget)?
     /// The exact panel trigger is carried through the close callback. A value here also means the
-    /// integrations window must be presented only after `popoverDidClose` finishes.
-    private var pendingIntegrationsWindowPresentation:
+    /// unified Settings window must be presented only after `popoverDidClose` finishes.
+    private var pendingIntegrationsSettingsPresentation:
         (host: HostID?, focusTarget: PanelFocusTarget)?
     /// Generic Settings (⌘,) closes the transient popover before presenting the retained window.
     private var pendingSettingsWindowPresentation = false
@@ -195,7 +197,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                                     .integrationsMuteFallbackFailed))
                     }
                 case .configureSound(let host, let event):
-                    actionRouter?.requestSoundPacksFromIntegrations(host: host, event: event)
+                    actionRouter?.requestEventsFromIntegrations(host: host, event: event)
                     return IntegrationsWindowActionOutcome(
                         content: hostIntegrations.content,
                         feedbackKind: .information,
@@ -211,9 +213,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             onContentChanged: { [weak hostIntegrations] content in
                 hostIntegrations?.replace(content: content)
             })
-        let integrationsWindowController = IntegrationsWindowController(
-            model: integrationsModel,
-            languageStore: languageStore)
         let legacyEventSettingsModel = makeEventSettingsConfigController(
             configFile: ClaudioPaths.configFile,
             environment: audioEnvironment,
@@ -314,6 +313,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             eventSettingsModel: unifiedEventSettingsModel,
             eventSettingsSelection: unifiedEventSettingsSelection,
             hostIntegrations: hostIntegrations,
+            integrationsModel: integrationsModel,
             aiCueViewModel: aiCueViewModel,
             audioEnvironment: audioEnvironment,
             onEventAudibilityInputsChanged: { [weak actionRouter] in
@@ -349,7 +349,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                     returnFocusTo: focusTarget)
             },
             onManageIntegrations: { [weak actionRouter] host, target in
-                actionRouter?.requestIntegrationsWindow(preselect: host, returnFocusTo: target)
+                actionRouter?.requestIntegrationsSettings(preselect: host, returnFocusTo: target)
             },
             onRetryBootstrap: { [weak actionRouter] in
                 actionRouter?.owner?.requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
@@ -384,7 +384,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         self.soundPackLibrary = soundPackLibrary
         self.soundPacksWindowController = soundPacksWindowController
         self.eventSettingsWindowController = eventSettingsWindowController
-        self.integrationsWindowController = integrationsWindowController
         self.settingsWindowController = settingsWindowController
         self.languageStore = languageStore
         self.integrationsModel = integrationsModel
@@ -557,7 +556,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         returnFocusTo target: PanelFocusTarget
     ) {
         pendingEventSettingsWindowPresentation = nil
-        pendingIntegrationsWindowPresentation = nil
+        pendingIntegrationsSettingsPresentation = nil
         pendingSoundPacksWindowPresentation = (route, target)
 
         guard popover.isShown else {
@@ -589,7 +588,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         returnFocusTo target: PanelFocusTarget
     ) {
         pendingSoundPacksWindowPresentation = nil
-        pendingIntegrationsWindowPresentation = nil
+        pendingIntegrationsSettingsPresentation = nil
         pendingEventSettingsWindowPresentation = (route, target)
 
         guard popover.isShown else {
@@ -605,26 +604,28 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.close()
     }
 
-    /// The integrations window follows the same close-before-show rule as SoundPacks, but keeps
-    /// the original foreground-app debt. Its close callback first reopens the popover and restores
-    /// the exact trigger; the later ordinary popover close finally returns activation to that app.
-    fileprivate func requestIntegrationsWindowPresentation(
+    /// The Integrations destination follows the same close-before-show rule as other management
+    /// routes, but the unified Settings close callback first reopens the panel at the exact trigger;
+    /// the later ordinary popover close finally returns activation to the original app.
+    fileprivate func requestIntegrationsSettingsPresentation(
         preselect host: HostID?,
         returnFocusTo target: PanelFocusTarget
     ) {
         pendingEventSettingsWindowPresentation = nil
         pendingSoundPacksWindowPresentation = nil
-        pendingIntegrationsWindowPresentation = (host, target)
+        pendingIntegrationsSettingsPresentation = (host, target)
         if let host {
             integrationsModel.select(.host(host))
         }
 
         guard popover.isShown else {
-            pendingIntegrationsWindowPresentation = nil
-            integrationsWindowController.showWindow { [weak self] latestHandbackApplication in
-                _ = self?.restorePanelFocus(
-                    to: target, latestHandbackApplication: latestHandbackApplication)
-            }
+            pendingIntegrationsSettingsPresentation = nil
+            let previous = previousApp
+            previousApp = nil
+            showIntegrationsSettings(
+                preselect: host,
+                returnFocusTo: target,
+                handbackApplication: previous)
             return
         }
         popover.close()
@@ -635,37 +636,24 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     func requestSettingsWindowPresentation() {
         pendingEventSettingsWindowPresentation = nil
         pendingSoundPacksWindowPresentation = nil
-        pendingIntegrationsWindowPresentation = nil
+        pendingIntegrationsSettingsPresentation = nil
         pendingSettingsWindowPresentation = true
 
         guard popover.isShown else {
             pendingSettingsWindowPresentation = false
             let previous = previousApp
             previousApp = nil
-            showSettingsWindow(returnFocusTo: previous)
+            showSettingsWindow(route: nil, returnFocusTo: previous)
             return
         }
         popover.close()
     }
 
-    /// 集成检查器的“配置声音”保持当前窗口上下文，并把声音包窗口直接路由到当前包的目标事件。
-    /// 声音包窗口关闭后重新激活仍然可见的集成窗口，不经过菜单栏 popover。
-    fileprivate func requestSoundPacksFromIntegrations(host: HostID, event: Event) {
-        let base = loadClaudioConfig(from: ClaudioPaths.configFile)
-        let selectedPackID: String
-        switch base?.resolveSoundProfile(for: host.surfaceID) {
-        case .success(let profile)?: selectedPackID = profile.selectedPack
-        case .failure?, nil: selectedPackID = ""
-        }
-        let route: SoundPacksWindowRoute = selectedPackID.isEmpty
-            ? .overview(surface: host.surfaceID)
-            : .editEvent(surface: host.surfaceID, packID: selectedPackID, event: event)
-        soundPacksWindowController.showWindow(
-            route: route,
-            returnFocusTo: nil
-        ) { [weak self] _ in
-            self?.integrationsWindowController.restoreKeyWindow() ?? false
-        }
+    /// Integrations recovery stays inside the one retained Settings window. It carries stable
+    /// Surface/Event identities and leaves Events to resolve its existing sound/config owner.
+    fileprivate func requestEventsFromIntegrations(host: HostID, event: Event) {
+        settingsWindowController.request(
+            .events(scope: .surface(host.surfaceID), event: event))
     }
 
     /// Per-event editing is still owned by SoundPacksWindow. Closing it restores the retained
@@ -683,9 +671,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         to target: PanelFocusTarget,
         latestHandbackApplication: NSRunningApplication?
     ) -> Bool {
-        // The integrations window may have remained visible while the user visited another app.
-        // Preserve the original debt when no such activation occurred; otherwise the latest app
-        // becomes the recipient after the restored popover eventually closes.
+        // Unified Settings may have remained visible while the user visited another app. Preserve
+        // the original debt when no such activation occurred; otherwise the latest app becomes the
+        // recipient after the restored popover eventually closes.
         if let latestHandbackApplication {
             previousApp = latestHandbackApplication
         }
@@ -694,11 +682,31 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         return popover.isShown
     }
 
-    private func showSettingsWindow(returnFocusTo application: NSRunningApplication?) {
+    private func showSettingsWindow(
+        route: SettingsRoute?,
+        returnFocusTo application: NSRunningApplication?
+    ) {
         settingsWindowController.showWindow(
+            route: route,
             returnFocusTo: application
         ) { [weak self] latestHandbackApplication in
             self?.activateHandbackApplication(latestHandbackApplication)
+        }
+    }
+
+    private func showIntegrationsSettings(
+        preselect host: HostID?,
+        returnFocusTo target: PanelFocusTarget,
+        handbackApplication: NSRunningApplication?
+    ) {
+        let selectedHost = host ?? integrationsModel.selection.host
+        settingsWindowController.showWindow(
+            route: .integrations(surface: selectedHost.surfaceID),
+            returnFocusTo: handbackApplication
+        ) { [weak self] latestHandbackApplication in
+            _ = self?.restorePanelFocus(
+                to: target,
+                latestHandbackApplication: latestHandbackApplication)
         }
     }
 
@@ -768,7 +776,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         if showSettings {
             let previous = previousApp
             previousApp = nil
-            showSettingsWindow(returnFocusTo: previous)
+            showSettingsWindow(route: nil, returnFocusTo: previous)
             return
         }
 
@@ -785,14 +793,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             return
         }
 
-        let integrationsPresentation = pendingIntegrationsWindowPresentation
-        pendingIntegrationsWindowPresentation = nil
+        let integrationsPresentation = pendingIntegrationsSettingsPresentation
+        pendingIntegrationsSettingsPresentation = nil
         if let integrationsPresentation {
-            integrationsWindowController.showWindow { [weak self] latestHandbackApplication in
-                _ = self?.restorePanelFocus(
-                    to: integrationsPresentation.focusTarget,
-                    latestHandbackApplication: latestHandbackApplication)
-            }
+            let previous = previousApp
+            previousApp = nil
+            showIntegrationsSettings(
+                preselect: integrationsPresentation.host,
+                returnFocusTo: integrationsPresentation.focusTarget,
+                handbackApplication: previous)
             return
         }
 

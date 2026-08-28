@@ -214,16 +214,6 @@ struct IntegrationsWindowClipboardWriter: Sendable {
     }
 }
 
-/// Monotonic hand-off from the retained AppKit controller to this window's own `FocusState`.
-@MainActor
-final class IntegrationsWindowFocusCoordinator: ObservableObject {
-    @Published private(set) var requestRevision = 0
-
-    func requestInitialFocus() {
-        requestRevision += 1
-    }
-}
-
 @MainActor
 final class IntegrationsWindowModel: ObservableObject {
     @Published private(set) var content: IntegrationsWindowContent

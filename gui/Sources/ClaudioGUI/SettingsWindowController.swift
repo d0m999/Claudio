@@ -9,8 +9,10 @@ import SwiftUI
 /// App-lifetime owner of the single retained unified Settings window.
 ///
 /// Its one lazy `NSWindow` survives close, and every close consumes at most one
-/// focus/activation handback. The shared preferences expose only destinations whose real content
-/// has shipped, so future route galleries stay DEBUG-only without hiding General from users.
+/// focus/activation handback. While visible it preserves the most recently activated external app,
+/// so migrated destinations keep the same handback contract as their former retained windows. The
+/// shared preferences expose only destinations whose real content has shipped, so future route
+/// galleries stay DEBUG-only without hiding General from users.
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
@@ -19,6 +21,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let eventSettingsModel: PanelConfigController
     private let eventSettingsSelection: EventSettingsWindowSelection
     private let hostIntegrations: HostIntegrationPresentationStore
+    private let integrationsModel: IntegrationsWindowModel
+    private let integrationsFocusCoordinator = IntegrationsWindowFocusCoordinator()
     private let aiCueViewModel: AICueGenerationViewModel
     private let audioEnvironment: AudioImportEnvironment
     private let onEventAudibilityInputsChanged: @MainActor () -> Void
@@ -30,7 +34,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
     private var isPresentingWindow = false
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
+    private var handbackTracker = RetainedWindowHandbackTracker<NSRunningApplication>()
+    private var externalActivationCancellable: AnyCancellable?
     private var languageCancellable: AnyCancellable?
+    private var integrationsRouteCancellable: AnyCancellable?
     private var soundPackAvailabilityCancellable: AnyCancellable?
     private var soundsRouteAnnouncementCancellable: AnyCancellable?
     private var soundPackSelectionAnnouncementCancellable: AnyCancellable?
@@ -43,6 +50,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         eventSettingsModel: PanelConfigController,
         eventSettingsSelection: EventSettingsWindowSelection,
         hostIntegrations: HostIntegrationPresentationStore,
+        integrationsModel: IntegrationsWindowModel,
         aiCueViewModel: AICueGenerationViewModel,
         audioEnvironment: AudioImportEnvironment,
         onEventAudibilityInputsChanged: @escaping @MainActor () -> Void,
@@ -56,6 +64,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
         self.hostIntegrations = hostIntegrations
+        self.integrationsModel = integrationsModel
         self.aiCueViewModel = aiCueViewModel
         self.audioEnvironment = audioEnvironment
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
@@ -66,8 +75,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             availability: settingsRouteAvailability(
                 packIDs: Set(soundPacksEditorOwner.model.packCards.map(\.id)),
                 libraryState: soundPacksEditorOwner.model.libraryPresentationState,
-                eventSurfaces: Set(hostIntegrations.content.sourceRows.map { $0.host.surfaceID })))
+                publishedSurfaces: Set(
+                    hostIntegrations.content.sourceRows.map { $0.host.surfaceID })))
         super.init()
+
+        externalActivationCancellable = NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .sink { [weak self] notification in
+                MainActor.assumeIsolated {
+                    guard
+                        let self,
+                        let application =
+                            notification.userInfo?[NSWorkspace.applicationUserInfoKey]
+                            as? NSRunningApplication
+                    else { return }
+                    self.handbackTracker.noteExternalActivation(
+                        application,
+                        isWindowVisible: self.window?.isVisible == true,
+                        isCurrentApplication: application.processIdentifier
+                            == ProcessInfo.processInfo.processIdentifier)
+                }
+            }
 
         languageCancellable = preferences.$snapshot
             .map(\.language)
@@ -75,6 +103,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     self?.updateWindowTitle()
+                }
+            }
+
+        integrationsRouteCancellable = model.$resolution
+            .map(\.destination)
+            .removeDuplicates()
+            .sink { [weak self] destination in
+                MainActor.assumeIsolated {
+                    self?.updateIntegrationsPresentationState(
+                        selectedDestination: destination)
                 }
             }
 
@@ -87,7 +125,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 settingsRouteAvailability(
                     packIDs: Set(cards.map(\.id)),
                     libraryState: libraryState,
-                    eventSurfaces: Set(
+                    publishedSurfaces: Set(
                         integrationContent.sourceRows.map { $0.host.surfaceID }))
             }
             .removeDuplicates()
@@ -107,11 +145,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     ) {
         focusRestoration = restoration
         isPresentingWindow = true
+        let wasVisible = window?.isVisible == true
         let presentation = model.present(route: route, handback: application)
         let presentedWindow = window ?? makeWindow()
+        if !wasVisible {
+            handbackTracker.beginPresentation()
+        }
 
         NSApp.activate(ignoringOtherApps: true)
         presentedWindow.makeKeyAndOrderFront(nil)
+        updateIntegrationsPresentationState()
         if !presentation.wasAlreadyPresented {
             presentedWindow.makeFirstResponder(presentedWindow.contentViewController?.view)
         }
@@ -128,7 +171,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             let keyWindow = notification.object as? NSWindow,
             keyWindow === window
         else { return }
+        updateIntegrationsPresentationState()
         announceLatestSoundPackStatusIfNeeded(in: keyWindow)
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        guard
+            let changedWindow = notification.object as? NSWindow,
+            changedWindow === window
+        else { return }
+        updateIntegrationsPresentationState()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -137,7 +189,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             closingWindow === window
         else { return }
 
-        let handback = model.close()
+        integrationsModel.noteWindowVisibility(false)
+        let originalHandback = model.close()
+        let handback = handbackTracker.consumeOnClose() ?? originalHandback
         let restoration = focusRestoration
         focusRestoration = nil
         aiCueViewModel.endSession()
@@ -157,6 +211,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             eventSettingsModel: eventSettingsModel,
             eventSettingsSelection: eventSettingsSelection,
             hostIntegrations: hostIntegrations,
+            integrationsModel: integrationsModel,
+            integrationsFocusCoordinator: integrationsFocusCoordinator,
             aiCueViewModel: aiCueViewModel,
             audioEnvironment: audioEnvironment,
             onEventAudibilityInputsChanged: onEventAudibilityInputsChanged,
@@ -189,6 +245,23 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func updateWindowTitle() {
         window?.title = ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)
+    }
+
+    /// In-window actions submit a typed route without creating or presenting another window.
+    func request(_ route: SettingsRoute) {
+        model.request(route)
+    }
+
+    private func updateIntegrationsPresentationState(
+        selectedDestination: SettingsDestination? = nil
+    ) {
+        let state = settingsEmbeddedDestinationState(
+            selectedDestination: selectedDestination ?? model.resolution.destination,
+            embeddedDestination: .integrations,
+            windowIsVisible: window?.isVisible == true,
+            windowIsKey: window?.isKeyWindow == true)
+        integrationsModel.noteWindowVisibility(state.isVisible)
+        integrationsModel.noteWindowKeyState(state.isKey)
     }
 
     private func installSoundPackAnnouncementObservers() {
@@ -318,14 +391,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 private func settingsRouteAvailability(
     packIDs: Set<String>,
     libraryState: SoundPackLibraryPresentationState,
-    eventSurfaces: Set<HostSurfaceID>
+    publishedSurfaces: Set<HostSurfaceID>
 ) -> SettingsRouteAvailability {
     let productScopes = HostID.productVisibleCases.map {
         PanelSoundScopeID.surface($0.surfaceID)
     }
     return SettingsRouteAvailability(
-        integrationSurfaces: [],
-        eventScopes: Set([PanelSoundScopeID.global] + eventSurfaces.map(PanelSoundScopeID.surface)),
+        integrationSurfaces: publishedSurfaces,
+        eventScopes: Set(
+            [PanelSoundScopeID.global]
+                + publishedSurfaces.map(PanelSoundScopeID.surface)),
         soundScopes: Set([PanelSoundScopeID.global] + productScopes),
         soundPackIDs: packIDs,
         soundPackSnapshotIsFresh: libraryState == .ready,
