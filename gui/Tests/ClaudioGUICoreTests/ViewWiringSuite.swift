@@ -336,8 +336,9 @@ func runViewWiringSuites() {
             "运行面板与首次启动共享标题必须各调用同一份 Orbit Zero 字标，不能退回两份手写 Text logo")
 
         expect(
-            menuBarIcon.contains("drawOrbitZero()")
+            menuBarIcon.contains("drawOrbitZero(showsStatusDot: showsStatusDot)")
                 && menuBarIcon.contains("rotation.rotate(byDegrees: 16)")
+                && menuBarIcon.contains("if showsStatusDot")
                 && menuBarIcon.contains("image.isTemplate = true"),
             "菜单栏必须使用同源 Orbit Zero 减法几何，并保持 template image 自动适配亮暗菜单栏")
     }
@@ -496,7 +497,7 @@ func runViewWiringSuites() {
             let showStart = panel.range(
                 of: ".onChange(of: focusCoordinator.showCount)")?.lowerBound,
             let widthStart = panel.range(
-                of: ".onChange(of: layoutAdaptation.panelWidth)")?.lowerBound,
+                of: ".onChange(of: panelWidth)")?.lowerBound,
             showStart < widthStart
         else {
             expect(false, "无法定位面板打开 handler")

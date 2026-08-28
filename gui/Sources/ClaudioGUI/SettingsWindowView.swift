@@ -90,6 +90,7 @@ struct SettingsWindowView: View {
             minHeight: SettingsWindowGeometry.minimumHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
+        .environment(\.dynamicTypeSize, preferences.interfaceTextSize.dynamicTypeSize)
         .onReceive(model.$routeRequestRevision) { _ in
             if destination == .integrations,
                 let integrationsModel,
@@ -246,6 +247,8 @@ struct SettingsWindowView: View {
                         generalSettings
                     } else if destination == .notifications {
                         notificationsSettings
+                    } else if destination == .display {
+                        displaySettings
                     } else {
                         debugRouteContent
                     }
@@ -348,6 +351,68 @@ struct SettingsWindowView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .accessibilityIdentifier("settings.general.preference-recovery")
             }
+        }
+        .frame(maxWidth: 560, alignment: .leading)
+    }
+
+    private var displaySettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            InterfaceTextSizeStepperContent(
+                selection: interfaceTextSizeBinding,
+                managesFocus: false,
+                language: preferences.language
+            )
+            .focused(
+                $focusedTarget,
+                equals: SettingsWindowFocusTarget.firstAction(.display)
+            )
+            .accessibilityHint(l10n.text(.settingsDisplay.textSizeDescription))
+            .accessibilityIdentifier("settings.display.text-size")
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                Picker(
+                    l10n.text(.settingsDisplay.panelWidthTitle),
+                    selection: panelWidthPreferenceBinding
+                ) {
+                    Text(
+                        ClaudioPanelWidthPreference.automatic.localizedDisplayName(
+                            preferences.language)
+                    )
+                    .tag(ClaudioPanelWidthPreference.automatic)
+                    Text(
+                        ClaudioPanelWidthPreference.compact.localizedDisplayName(
+                            preferences.language)
+                    )
+                    .tag(ClaudioPanelWidthPreference.compact)
+                    Text(
+                        ClaudioPanelWidthPreference.roomy.localizedDisplayName(
+                            preferences.language)
+                    )
+                    .tag(ClaudioPanelWidthPreference.roomy)
+                }
+                .accessibilityHint(l10n.text(.settingsDisplay.panelWidthDescription))
+                .accessibilityIdentifier("settings.display.panel-width")
+
+                if panelWidthResolution.isClamped {
+                    Text(
+                        l10n.format(
+                            .settingsDisplay.panelWidthClamped,
+                            Int64(panelWidthResolution.effectiveWidth)))
+                        .foregroundColor(.secondary)
+                        .accessibilityIdentifier("settings.display.panel-width.clamped")
+                }
+            }
+
+            Divider()
+
+            Toggle(
+                l10n.text(.settingsDisplay.statusDotTitle),
+                isOn: menuBarStatusDotBinding
+            )
+            .accessibilityHint(l10n.text(.settingsDisplay.statusDotDescription))
+            .accessibilityIdentifier("settings.display.status-dot")
         }
         .frame(maxWidth: 560, alignment: .leading)
     }
@@ -473,6 +538,31 @@ struct SettingsWindowView: View {
         Binding(
             get: { dynamicQuietPolicy.presentation.focusIsEnabled },
             set: { dynamicQuietPolicy.setFocusEnabled($0) })
+    }
+
+    private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize> {
+        Binding(
+            get: { preferences.interfaceTextSize },
+            set: { preferences.setInterfaceTextSize($0) })
+    }
+
+    private var panelWidthPreferenceBinding: Binding<ClaudioPanelWidthPreference> {
+        Binding(
+            get: { preferences.panelWidthPreference },
+            set: { preferences.setPanelWidthPreference($0) })
+    }
+
+    private var menuBarStatusDotBinding: Binding<Bool> {
+        Binding(
+            get: { preferences.showsMenuBarStatusDot },
+            set: { preferences.setShowsMenuBarStatusDot($0) })
+    }
+
+    private var panelWidthResolution: (effectiveWidth: Double, isClamped: Bool) {
+        ClaudioGUICore.panelWidthResolution(
+            preference: preferences.panelWidthPreference,
+            language: preferences.language,
+            interfaceTextSize: preferences.interfaceTextSize)
     }
 
     private var calendarQuietBinding: Binding<Bool> {

@@ -42,8 +42,6 @@ public struct PanelView: View {
     @ObservedObject private var languageStore: ClaudioPreferences
 
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
-    private var interfaceTextSizeRaw = ClaudioInterfaceTextSize.defaultValue.rawValue
     /// `unselected` 只表示从未选择；用户显式选过 Global 后持久化为 `global`。
     @AppStorage("claudio.panel.selected-surface")
     private var selectedSurfaceRaw = "unselected"
@@ -110,12 +108,11 @@ public struct PanelView: View {
 
     #if DEBUG
     /// Deterministic production-composition initializer used only by the state gallery. The
-    /// injected model owns every visible state; callbacks are inert and AppStorage keys are unique
-    /// so frames cannot change the user's real panel preferences or each other.
+    /// injected model owns every visible state; callbacks are inert and the injected typed
+    /// preferences are isolated so frames cannot change the user's real panel preferences.
     init(
         previewPanelModel: PanelConfigController,
         previewScope: PanelSoundScopeID,
-        previewTextSize: ClaudioInterfaceTextSize,
         previewSoundScopeExpanded: Bool = false,
         audioEnvironment: AudioImportEnvironment,
         focusCoordinator: PanelFocusCoordinator,
@@ -125,10 +122,6 @@ public struct PanelView: View {
     ) {
         let previewKey = UUID().uuidString
         let defaults = UserDefaults(suiteName: "com.orbitzero.claudio.state-gallery")!
-        _interfaceTextSizeRaw = AppStorage(
-            wrappedValue: previewTextSize.rawValue,
-            "claudio.preview.text-size.\(previewKey)",
-            store: defaults)
         _selectedSurfaceRaw = AppStorage(
             wrappedValue: previewScope.storedValue,
             "claudio.preview.selected-surface.\(previewKey)",
@@ -198,7 +191,7 @@ public struct PanelView: View {
                 focusedTarget: $focusedTarget,
                 onQuit: onQuit)
         }
-        .frame(width: layoutAdaptation.panelWidth)
+        .frame(width: panelWidth)
         .background(ClaudioTheme.panelGradient(colorScheme))
         .overlay(
             RoundedRectangle(cornerRadius: ClaudioTheme.Radius.panel)
@@ -208,7 +201,7 @@ public struct PanelView: View {
         .onAppear {
             synchronizeSelectedSoundSurface()
             applyFirstFocus()
-            onPanelWidthChange(layoutAdaptation.panelWidth)
+            onPanelWidthChange(panelWidth)
         }
         .onChange(of: focusCoordinator.showCount) { _ in
             isSoundScopeMenuExpanded = false
@@ -229,7 +222,7 @@ public struct PanelView: View {
         .onChange(of: panelModel.libraryPresentationState) { _ in
             if isEventFocusTarget(focusedTarget) { applyFirstFocus() }
         }
-        .onChange(of: layoutAdaptation.panelWidth) { width in
+        .onChange(of: panelWidth) { width in
             onPanelWidthChange(width)
         }
         .accessibilityElement(children: .contain)
@@ -800,17 +793,22 @@ public struct PanelView: View {
 
     private var selectedPackDisplayName: String { panelModel.selectedPackMetadata.displayName }
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
-    private var interfaceTextSize: ClaudioInterfaceTextSize {
-        ClaudioInterfaceTextSize(storedValue: interfaceTextSizeRaw)
-    }
+    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
     private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize> {
         Binding(
-            get: { ClaudioInterfaceTextSize(storedValue: interfaceTextSizeRaw) },
-            set: { interfaceTextSizeRaw = $0.rawValue })
+            get: { languageStore.interfaceTextSize },
+            set: { languageStore.setInterfaceTextSize($0) })
     }
     private var typeScale: CGFloat { CGFloat(interfaceTextSize.scale) }
     private var layoutAdaptation: PanelLayoutAdaptation {
         panelLayoutAdaptation(for: panelTypeSizeTier(for: interfaceTextSize))
+    }
+    private var panelWidth: Double {
+        panelWidthResolution(
+            preference: languageStore.panelWidthPreference,
+            language: languageStore.language,
+            interfaceTextSize: interfaceTextSize
+        ).effectiveWidth
     }
 }
 

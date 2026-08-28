@@ -269,8 +269,9 @@ func runIntegrationsWindowWiringSuites() {
         }
         expect(
             panel.contains("private func soundScopePicker(availableMenuHeight: CGFloat)")
-                && panel.contains("layoutAdaptation.panelWidth"),
-            "作用域选择器必须挂在与事件行相同的 312/360pt 面板宽度真相源内")
+                && panel.contains(".frame(width: panelWidth)")
+                && panel.contains("panelWidthResolution("),
+            "作用域选择器必须挂在与事件行相同的安全解析面板宽度真相源内")
         expect(
             scopePicker.contains("13.5 : 11.5) * typeScale")
                 && scopePicker.contains("10.5 : 9.5) * typeScale")

@@ -83,6 +83,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let bootstrapReports: BootstrapReportPresentationStore
     private var hostIntegrationRefreshTask: Task<Void, Never>?
     private var appActivationCancellable: AnyCancellable?
+    private var menuBarIconCancellable: AnyCancellable?
     private var hostIntegrationRefreshRevision: UInt64 = 0
 
     /// Owned here (not by `PanelView`) so it survives across every popover show/close cycle
@@ -400,13 +401,14 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         // for the measurement and the fix; this line used to claim Esc came for free here.
         popover.behavior = .transient
 
-        statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
+        self.statusItem = statusItem
         // Template image, auto light/dark. The 16pt Orbit Zero reduction lives in
         // `MenuBarIcon`; panel/onboarding headers use the matching full wordmark.
-        let icon = MenuBarIcon.make()
-        icon.accessibilityDescription = "claudi0"
-        statusItem.button?.image = icon
-        statusItem.button?.setAccessibilityLabel("claudi0")
+        Self.applyMenuBarIcon(
+            showsStatusDot: languageStore.showsMenuBarStatusDot,
+            language: languageStore.language,
+            to: statusItem)
 
         super.init()
 
@@ -414,6 +416,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         popover.delegate = self
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
+
+        menuBarIconCancellable = languageStore.$snapshot
+            .sink { [weak statusItem] snapshot in
+                MainActor.assumeIsolated {
+                    guard let statusItem else { return }
+                    Self.applyMenuBarIcon(
+                        showsStatusDot: snapshot.showsMenuBarStatusDot,
+                        language: snapshot.language,
+                        to: statusItem)
+                }
+            }
 
         appActivationCancellable = NotificationCenter.default
             .publisher(for: NSApplication.didBecomeActiveNotification)
@@ -430,6 +443,19 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
         // GUI 首启只运行共享 bootstrap + 双侧 inspect。宿主连接必须始终来自详情窗里的显式动作。
         requestHostIntegrationRefresh(bootstrapSharedRuntime: true)
+    }
+
+    private static func applyMenuBarIcon(
+        showsStatusDot: Bool,
+        language: ClaudioAppLanguage,
+        to statusItem: NSStatusItem
+    ) {
+        let accessibilityLabel = ClaudioL10n(language: language).text(
+            .settingsDisplay.statusRunning)
+        let icon = MenuBarIcon.make(showsStatusDot: showsStatusDot)
+        icon.accessibilityDescription = accessibilityLabel
+        statusItem.button?.image = icon
+        statusItem.button?.setAccessibilityLabel(accessibilityLabel)
     }
 
     deinit {

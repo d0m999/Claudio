@@ -107,8 +107,6 @@ struct SoundPacksWindowView: View {
     @ObservedObject var languageStore: ClaudioPreferences
 
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
-    private var interfaceTextSizeRaw = ClaudioInterfaceTextSize.defaultValue.rawValue
     @FocusState private var focusedTarget: SoundPacksWindowFocusTarget?
     @State private var handledFocusRequestRevision = 0
     @State private var pendingPermanentDeletion: PermanentAudioDeletionRequest?
@@ -1398,9 +1396,7 @@ struct SoundPacksWindowView: View {
         }
     }
 
-    private var interfaceTextSize: ClaudioInterfaceTextSize {
-        ClaudioInterfaceTextSize(storedValue: interfaceTextSizeRaw)
-    }
+    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
 
     private var layoutAdaptation: SoundPacksWindowLayoutAdaptation {
         soundPacksWindowLayoutAdaptation(for: typeSizeTier)

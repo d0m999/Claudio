@@ -15,8 +15,6 @@ struct IntegrationsWindowView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
-    private var interfaceTextSizeRaw = ClaudioInterfaceTextSize.defaultValue.rawValue
     @FocusState private var focusedTarget: IntegrationsWindowFocusTarget?
     @State private var handledFocusRequestRevision = 0
     @State private var feedbackAnnouncer = IntegrationsFeedbackAnnouncementModel()
@@ -803,9 +801,7 @@ struct IntegrationsWindowView: View {
         }
     }
 
-    private var interfaceTextSize: ClaudioInterfaceTextSize {
-        ClaudioInterfaceTextSize(storedValue: interfaceTextSizeRaw)
-    }
+    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
 
     private var typeSizeTier: IntegrationsWindowTypeSizeTier {
         interfaceTextSize == .maximum ? .maximum : .standard

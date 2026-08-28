@@ -426,6 +426,20 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.integrations.manage-events"
     public static let settingsIntegrationsManageEventsHint: Self =
         "settings.integrations.manage-events.hint"
+    /// One exported namespace avoids a separate public global for every Display leaf in the
+    /// size-constrained menu-bar executable.
+    public static let settingsDisplay = (
+        textSizeDescription: Self("settings.display.text-size.description"),
+        panelWidthTitle: Self("settings.display.panel-width.title"),
+        panelWidthDescription: Self("settings.display.panel-width.description"),
+        panelWidthAutomatic: Self("settings.display.panel-width.automatic"),
+        panelWidthCompact: Self("settings.display.panel-width.compact"),
+        panelWidthRoomy: Self("settings.display.panel-width.roomy"),
+        panelWidthClamped: Self("settings.display.panel-width.clamped"),
+        statusDotTitle: Self("settings.display.status-dot.title"),
+        statusDotDescription: Self("settings.display.status-dot.description"),
+        statusRunning: Self("menu-bar.status.running")
+    )
     public static let settingsGeneralLanguageTitle: Self = "settings.general.language.title"
     public static let settingsGeneralLanguageDescription: Self =
         "settings.general.language.description"
@@ -923,6 +937,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
         .settingsDestinationShortcuts, .settingsDestinationAbout,
         .settingsIntegrationsManageEvents, .settingsIntegrationsManageEventsHint,
+        settingsDisplay.textSizeDescription, settingsDisplay.panelWidthTitle,
+        settingsDisplay.panelWidthDescription, settingsDisplay.panelWidthAutomatic,
+        settingsDisplay.panelWidthCompact, settingsDisplay.panelWidthRoomy,
+        settingsDisplay.panelWidthClamped, settingsDisplay.statusDotTitle,
+        settingsDisplay.statusDotDescription, settingsDisplay.statusRunning,
         .settingsGeneralLanguageTitle,
         .settingsGeneralLanguageDescription, .settingsGeneralLanguageSystem,
         .settingsGeneralLanguageChinese, .settingsGeneralLanguageEnglish,

@@ -8,33 +8,45 @@ public extension SettingsDestination {
     /// Top-level destinations with production content today. Later destination migrations extend
     /// this list when their real views ship; DEBUG galleries inject `allCases` explicitly.
     static let availableCases: [SettingsDestination] = [
-        .general, .integrations, .eventsAndSounds, .notifications, .sounds,
+        .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds,
     ]
 }
 
 public enum ClaudioPreferenceRecoveryIssue: String, Sendable, Hashable {
     case invalidLanguageMode
     case invalidSettingsDestination
+    case invalidInterfaceTextSize
+    case invalidPanelWidthPreference
+    case invalidMenuBarStatusDot
 }
 
 /// One atomic projection of the Settings preferences currently owned by Claudio. New preference
-/// fields belong here only when their destination ships; this ticket intentionally owns language
-/// mode and the last top-level destination, and nothing else.
+/// fields belong here only when their destination ships; language, navigation, and Display
+/// consumers all observe this single coherent value.
 public struct ClaudioPreferenceSnapshot: Sendable, Equatable {
-    public let languageMode: ClaudioLanguageMode
-    public let language: ClaudioAppLanguage
-    public let lastSettingsDestination: SettingsDestination
-    public let recoveryIssues: Set<ClaudioPreferenceRecoveryIssue>
+    public fileprivate(set) var languageMode: ClaudioLanguageMode
+    public fileprivate(set) var language: ClaudioAppLanguage
+    public fileprivate(set) var lastSettingsDestination: SettingsDestination
+    public fileprivate(set) var interfaceTextSize: ClaudioInterfaceTextSize
+    public fileprivate(set) var panelWidthPreference: ClaudioPanelWidthPreference
+    public fileprivate(set) var showsMenuBarStatusDot: Bool
+    public fileprivate(set) var recoveryIssues: Set<ClaudioPreferenceRecoveryIssue>
 
     public init(
         languageMode: ClaudioLanguageMode,
         language: ClaudioAppLanguage,
         lastSettingsDestination: SettingsDestination,
+        interfaceTextSize: ClaudioInterfaceTextSize,
+        panelWidthPreference: ClaudioPanelWidthPreference,
+        showsMenuBarStatusDot: Bool,
         recoveryIssues: Set<ClaudioPreferenceRecoveryIssue> = []
     ) {
         self.languageMode = languageMode
         self.language = language
         self.lastSettingsDestination = lastSettingsDestination
+        self.interfaceTextSize = interfaceTextSize
+        self.panelWidthPreference = panelWidthPreference
+        self.showsMenuBarStatusDot = showsMenuBarStatusDot
         self.recoveryIssues = recoveryIssues
     }
 }
@@ -52,6 +64,11 @@ public final class ClaudioPreferences: ObservableObject {
     public var lastSettingsDestination: SettingsDestination {
         snapshot.lastSettingsDestination
     }
+    public var interfaceTextSize: ClaudioInterfaceTextSize { snapshot.interfaceTextSize }
+    public var panelWidthPreference: ClaudioPanelWidthPreference {
+        snapshot.panelWidthPreference
+    }
+    public var showsMenuBarStatusDot: Bool { snapshot.showsMenuBarStatusDot }
     public var recoveryIssues: Set<ClaudioPreferenceRecoveryIssue> {
         snapshot.recoveryIssues
     }
@@ -83,6 +100,14 @@ public final class ClaudioPreferences: ObservableObject {
         let destination = parsedDestination.flatMap {
             legalDestinations.contains($0) ? $0 : nil
         } ?? .general
+        let textSizeObject = defaults.object(forKey: ClaudioInterfaceTextSize.defaultsKey)
+        let textSizeRawValue = textSizeObject as? String
+        let interfaceTextSize = ClaudioInterfaceTextSize(storedValue: textSizeRawValue)
+        let panelWidthObject = defaults.object(forKey: ClaudioPanelWidthPreference.defaultsKey)
+        let panelWidthRawValue = panelWidthObject as? String
+        let panelWidthPreference = ClaudioPanelWidthPreference(storedValue: panelWidthRawValue)
+        let statusDotObject = defaults.object(forKey: Self.menuBarStatusDotDefaultsKey)
+        let showsMenuBarStatusDot = statusDotObject as? Bool ?? true
         var recoveryIssues: Set<ClaudioPreferenceRecoveryIssue> = []
         if languageObject != nil {
             if let languageRawValue {
@@ -104,12 +129,28 @@ public final class ClaudioPreferences: ObservableObject {
                 recoveryIssues.insert(.invalidSettingsDestination)
             }
         }
+        if textSizeObject != nil,
+            textSizeRawValue.flatMap(ClaudioInterfaceTextSize.init(rawValue:)) == nil
+        {
+            recoveryIssues.insert(.invalidInterfaceTextSize)
+        }
+        if panelWidthObject != nil,
+            panelWidthRawValue.flatMap(ClaudioPanelWidthPreference.init(rawValue:)) == nil
+        {
+            recoveryIssues.insert(.invalidPanelWidthPreference)
+        }
+        if statusDotObject != nil, statusDotObject is Bool == false {
+            recoveryIssues.insert(.invalidMenuBarStatusDot)
+        }
 
         snapshot = ClaudioPreferenceSnapshot(
             languageMode: languageMode,
             language: languageMode.resolvedLanguage(
                 preferredLanguageIdentifiers: preferredLanguageIdentifiers()),
             lastSettingsDestination: destination,
+            interfaceTextSize: interfaceTextSize,
+            panelWidthPreference: panelWidthPreference,
+            showsMenuBarStatusDot: showsMenuBarStatusDot,
             recoveryIssues: recoveryIssues)
 
         localeCancellable = notificationCenter
@@ -136,13 +177,10 @@ public final class ClaudioPreferences: ObservableObject {
     public func setLanguageMode(_ languageMode: ClaudioLanguageMode) {
         let language = languageMode.resolvedLanguage(
             preferredLanguageIdentifiers: preferredLanguageIdentifiers())
-        var recoveryIssues = snapshot.recoveryIssues
-        recoveryIssues.remove(.invalidLanguageMode)
-        let next = ClaudioPreferenceSnapshot(
-            languageMode: languageMode,
-            language: language,
-            lastSettingsDestination: snapshot.lastSettingsDestination,
-            recoveryIssues: recoveryIssues)
+        var next = snapshot
+        next.languageMode = languageMode
+        next.language = language
+        next.recoveryIssues.remove(.invalidLanguageMode)
         guard next != snapshot else { return }
         defaults.set(languageMode.rawValue, forKey: ClaudioAppLanguage.defaultsKey)
         snapshot = next
@@ -159,15 +197,38 @@ public final class ClaudioPreferences: ObservableObject {
 
     public func setLastSettingsDestination(_ destination: SettingsDestination) {
         guard availableSettingsDestinations.contains(destination) else { return }
-        var recoveryIssues = snapshot.recoveryIssues
-        recoveryIssues.remove(.invalidSettingsDestination)
-        let next = ClaudioPreferenceSnapshot(
-            languageMode: snapshot.languageMode,
-            language: snapshot.language,
-            lastSettingsDestination: destination,
-            recoveryIssues: recoveryIssues)
+        var next = snapshot
+        next.lastSettingsDestination = destination
+        next.recoveryIssues.remove(.invalidSettingsDestination)
         guard next != snapshot else { return }
         defaults.set(destination.rawValue, forKey: SettingsDestination.defaultsKey)
+        snapshot = next
+    }
+
+    public func setInterfaceTextSize(_ interfaceTextSize: ClaudioInterfaceTextSize) {
+        var next = snapshot
+        next.interfaceTextSize = interfaceTextSize
+        next.recoveryIssues.remove(.invalidInterfaceTextSize)
+        guard next != snapshot else { return }
+        defaults.set(interfaceTextSize.rawValue, forKey: ClaudioInterfaceTextSize.defaultsKey)
+        snapshot = next
+    }
+
+    public func setPanelWidthPreference(_ preference: ClaudioPanelWidthPreference) {
+        var next = snapshot
+        next.panelWidthPreference = preference
+        next.recoveryIssues.remove(.invalidPanelWidthPreference)
+        guard next != snapshot else { return }
+        defaults.set(preference.rawValue, forKey: ClaudioPanelWidthPreference.defaultsKey)
+        snapshot = next
+    }
+
+    public func setShowsMenuBarStatusDot(_ showsStatusDot: Bool) {
+        var next = snapshot
+        next.showsMenuBarStatusDot = showsStatusDot
+        next.recoveryIssues.remove(.invalidMenuBarStatusDot)
+        guard next != snapshot else { return }
+        defaults.set(showsStatusDot, forKey: Self.menuBarStatusDotDefaultsKey)
         snapshot = next
     }
 
@@ -176,10 +237,10 @@ public final class ClaudioPreferences: ObservableObject {
         let language = snapshot.languageMode.resolvedLanguage(
             preferredLanguageIdentifiers: preferredLanguageIdentifiers())
         guard language != snapshot.language else { return }
-        snapshot = ClaudioPreferenceSnapshot(
-            languageMode: snapshot.languageMode,
-            language: language,
-            lastSettingsDestination: snapshot.lastSettingsDestination,
-            recoveryIssues: snapshot.recoveryIssues)
+        var next = snapshot
+        next.language = language
+        snapshot = next
     }
+
+    public static let menuBarStatusDotDefaultsKey = "Claudio.MenuBarStatusDot"
 }

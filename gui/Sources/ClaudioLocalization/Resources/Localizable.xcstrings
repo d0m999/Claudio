@@ -3430,6 +3430,60 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "前往事件与提示音" } }
       }
     },
+    "settings.display.panel-width.automatic" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动" } }
+      }
+    },
+    "settings.display.panel-width.clamped" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expanded to %lld pt to keep the current language and text size visible." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已扩展到 %lld pt，避免当前语言和文字档被裁切。" } }
+      }
+    },
+    "settings.display.panel-width.compact" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Compact" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "紧凑" } }
+      }
+    },
+    "settings.display.panel-width.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Explicit widths expand when needed so localized content and controls remain visible." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显式宽度会在需要时扩展，确保本地化内容和控件保持可见。" } }
+      }
+    },
+    "settings.display.panel-width.roomy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Roomy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "宽松" } }
+      }
+    },
+    "settings.display.panel-width.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Panel width" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "面板宽度" } }
+      }
+    },
+    "settings.display.status-dot.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Changes only the Orbit Zero visual variant. claudi0 remains in the menu bar and VoiceOver still reports its complete status." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只改变 Orbit Zero 的视觉变体；claudi0 仍保留在菜单栏中，VoiceOver 仍会播报完整状态。" } }
+      }
+    },
+    "settings.display.status-dot.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show activity dot in menu bar" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在菜单栏显示活动状态点" } }
+      }
+    },
+    "settings.display.text-size.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Applies immediately across every Claudio interface, including the Aa control in the panel." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "立即应用到所有 Claudio 界面，包括面板中的 Aa 控件。" } }
+      }
+    },
     "settings.general.login-item.description" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Let macOS start claudi0 when you sign in. This control always reflects the current system service status." } },
@@ -3602,6 +3656,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The surface %@ is no longer available. No other surface was selected." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surface %@ 已不可用；未选择其他 Surface。" } }
+      }
+    },
+    "menu-bar.status.running" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0, application running" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0，应用正在运行" } }
       }
     },
     "window.settings.title" : {

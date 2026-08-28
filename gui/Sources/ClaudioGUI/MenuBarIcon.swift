@@ -5,19 +5,19 @@ import AppKit
 enum MenuBarIcon {
     private static let canvasSize: CGFloat = 16
 
-    static func make() -> NSImage {
+    static func make(showsStatusDot: Bool) -> NSImage {
         let image = NSImage(
             size: NSSize(width: canvasSize, height: canvasSize),
             flipped: false
         ) { _ in
-            drawOrbitZero()
+            drawOrbitZero(showsStatusDot: showsStatusDot)
             return true
         }
         image.isTemplate = true
         return image
     }
 
-    private static func drawOrbitZero() {
+    private static func drawOrbitZero(showsStatusDot: Bool) {
         NSColor.black.setStroke()
         NSColor.black.setFill()
 
@@ -36,7 +36,10 @@ enum MenuBarIcon {
         orbit.lineCapStyle = .round
         orbit.stroke()
 
-        let dot = NSBezierPath(ovalIn: NSRect(x: 11.95, y: 11.45, width: 1.55, height: 1.55))
-        dot.fill()
+        if showsStatusDot {
+            let dot = NSBezierPath(
+                ovalIn: NSRect(x: 11.95, y: 11.45, width: 1.55, height: 1.55))
+            dot.fill()
+        }
     }
 }

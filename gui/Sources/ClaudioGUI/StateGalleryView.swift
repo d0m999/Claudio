@@ -234,8 +234,9 @@ import SwiftUI
                 wrappedValue: BootstrapReportPresentationStore(
                     store: BootstrapReportStore(
                         directory: URL(fileURLWithPath: "/dev/null/claudio-preview-reports"))))
-            _languageStore = StateObject(
-                wrappedValue: ClaudioPreferences(previewLanguage: language))
+            let languageStore = ClaudioPreferences(previewLanguage: language)
+            languageStore.setInterfaceTextSize(textSize)
+            _languageStore = StateObject(wrappedValue: languageStore)
 
             let baseConfig = ClaudioConfig(
                 selectedPack: "gallery-pack",
@@ -315,7 +316,6 @@ import SwiftUI
             PanelView(
                 previewPanelModel: panelModel,
                 previewScope: selectedScope,
-                previewTextSize: textSize,
                 previewSoundScopeExpanded: soundScopeExpanded,
                 audioEnvironment: previewAudioImportEnvironment,
                 focusCoordinator: focusCoordinator,

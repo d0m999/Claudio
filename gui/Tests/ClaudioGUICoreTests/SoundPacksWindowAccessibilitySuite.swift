@@ -603,7 +603,8 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && !view.contains(".onChange(of: requestedRoute)"),
             "事件滚动必须由单调请求代次驱动，相同 editEvent 重开也要重新定位")
         expect(
-            view.contains("@AppStorage(ClaudioInterfaceTextSize.defaultsKey)")
+            view.contains("languageStore.interfaceTextSize")
+                && !view.contains("@AppStorage(ClaudioInterfaceTextSize.defaultsKey)")
                 && view.contains("interfaceTextSize.dynamicTypeSize")
                 && view.contains("layoutAdaptation.detailMinimumWidth")
                 && view.contains("layoutAdaptation.packNameLineLimit")

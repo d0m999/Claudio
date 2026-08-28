@@ -39,8 +39,6 @@ struct EventSettingsWindowView: View {
     let presentationContext: EventSettingsPresentationContext
 
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
-    private var interfaceTextSizeRaw = ClaudioInterfaceTextSize.defaultValue.rawValue
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var previewPlayer = NSSoundAudioPreviewPlayer()
     @State private var handledFocusRequestRevision = 0
@@ -50,9 +48,7 @@ struct EventSettingsWindowView: View {
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
-    private var interfaceTextSize: ClaudioInterfaceTextSize {
-        ClaudioInterfaceTextSize(storedValue: interfaceTextSizeRaw)
-    }
+    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
     private var scopes: [PanelSoundScopePresentation] {
         panelSoundScopePresentations(
             sourceRows: hostIntegrations.content.sourceRows,
