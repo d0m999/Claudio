@@ -16,6 +16,7 @@ public struct AICueTemporaryAudioAsset: Sendable, Equatable {
 
 public struct AICueCandidateProvenance: Sendable, Equatable {
     public let providerID: AICueProviderID
+    public let profileID: AICueProviderProfileID
     public let modelID: String
     public let generationID: UUID
     public let requestOrdinal: Int
@@ -23,12 +24,14 @@ public struct AICueCandidateProvenance: Sendable, Equatable {
 
     public init(
         providerID: AICueProviderID,
+        profileID: AICueProviderProfileID,
         modelID: String,
         generationID: UUID,
         requestOrdinal: Int,
         providerRequestID: String?
     ) {
         self.providerID = providerID
+        self.profileID = profileID
         self.modelID = modelID
         self.generationID = generationID
         self.requestOrdinal = requestOrdinal
@@ -63,17 +66,20 @@ public struct AICueCandidate: Identifiable, Sendable, Equatable {
 
 public struct AICueGeneration: Identifiable, Sendable, Equatable {
     public let id: UUID
+    public let profileID: AICueProviderProfileID
     public let plan: AICueSoundPlan
     public let candidates: [AICueCandidate]
     public let generatedAt: Date
 
     public init(
         id: UUID,
+        profileID: AICueProviderProfileID,
         plan: AICueSoundPlan,
         candidates: [AICueCandidate],
         generatedAt: Date
     ) {
         self.id = id
+        self.profileID = profileID
         self.plan = plan
         self.candidates = candidates
         self.generatedAt = generatedAt
@@ -82,6 +88,8 @@ public struct AICueGeneration: Identifiable, Sendable, Equatable {
 
 public enum AICueGenerationError: Error, Sendable, Equatable {
     case validation(AICueValidationError)
+    case requestCompilation(AICueProviderRequestCompilationError)
+    case providerUnavailable
     case credentialRequired
     case credentialUnavailable
     case provider(AICueProviderError)
@@ -98,7 +106,11 @@ package protocol AICueRetrySleeping: Sendable {
 }
 
 public protocol AICueGenerating: Sendable {
-    func generate(description: String, locale: String) async throws -> AICueGeneration
+    func generate(
+        description: String,
+        locale: String,
+        providerProfileID: AICueProviderProfileID
+    ) async throws -> AICueGeneration
     func discard(generationID: UUID) async
     func discardAll() async
 }
@@ -119,23 +131,27 @@ public actor AICueGenerationEngine: AICueGenerating {
 
     private let vault: any AICueCredentialVault
     private let provider: any AICueProvider
+    private let registry: AICueProviderRegistry
     private let temporaryRoot: URL
     private let durationProbe: any AudioDurationProbing
     private let retrySleeper: any AICueRetrySleeping
     private let planner = AICueSoundPlanner()
-    private let compiler = ElevenLabsAICueRequestCompiler()
+    private let compiler: AICueProviderRequestCompiler
     private var activeDirectories: [UUID: URL] = [:]
 
     public init(
         vault: any AICueCredentialVault,
         provider: any AICueProvider,
         temporaryRoot: URL,
-        durationProbe: any AudioDurationProbing
+        durationProbe: any AudioDurationProbing,
+        registry: AICueProviderRegistry = AICueProviderRegistry()
     ) {
         self.vault = vault
         self.provider = provider
+        self.registry = registry
         self.temporaryRoot = temporaryRoot
         self.durationProbe = durationProbe
+        compiler = AICueProviderRequestCompiler(registry: registry)
         retrySleeper = AICueSystemRetrySleeper()
     }
 
@@ -144,33 +160,53 @@ public actor AICueGenerationEngine: AICueGenerating {
         provider: any AICueProvider,
         temporaryRoot: URL,
         durationProbe: any AudioDurationProbing,
-        retrySleeper: any AICueRetrySleeping
+        retrySleeper: any AICueRetrySleeping,
+        registry: AICueProviderRegistry = AICueProviderRegistry()
     ) {
         self.vault = vault
         self.provider = provider
+        self.registry = registry
         self.temporaryRoot = temporaryRoot
         self.durationProbe = durationProbe
         self.retrySleeper = retrySleeper
+        compiler = AICueProviderRequestCompiler(registry: registry)
     }
 
     public func generate(
         description: String,
-        locale: String
+        locale: String,
+        providerProfileID: AICueProviderProfileID
     ) async throws -> AICueGeneration {
         let request: AICueGenerationRequest
         let plan: AICueSoundPlan
+        let profile: AICueProviderProfile
+        let compiledRequests: [AICueProviderRequest]
         do {
-            request = try AICueGenerationRequest(description: description, locale: locale)
+            request = try AICueGenerationRequest(
+                description: description,
+                locale: locale,
+                providerProfileID: providerProfileID)
             plan = try planner.makePlan(for: request)
+            profile = try registry.profile(for: providerProfileID)
+            compiledRequests = try AICueVariant.allCases.map {
+                try compiler.compile(plan: plan, profileID: providerProfileID, variant: $0)
+            }
         } catch let error as AICueValidationError {
             throw AICueGenerationError.validation(error)
+        } catch let error as AICueProviderRequestCompilationError {
+            throw AICueGenerationError.requestCompilation(error)
+        } catch is AICueProviderRegistryError {
+            throw AICueGenerationError.requestCompilation(.unknownProfile)
         } catch {
             throw AICueGenerationError.temporaryStorageUnavailable
+        }
+        guard provider.profile.id == profile.id else {
+            throw AICueGenerationError.providerUnavailable
         }
 
         let credential: SensitiveCredentialInput
         do {
-            guard let stored = try await vault.credential(for: request.providerID) else {
+            guard let stored = try await vault.credential(for: profile.providerID) else {
                 throw AICueGenerationError.credentialRequired
             }
             credential = stored
@@ -208,13 +244,12 @@ public actor AICueGenerationEngine: AICueGenerating {
 
         var candidates: [AICueCandidate] = []
         candidates.reserveCapacity(AICueGenerationRequest.candidateCount)
-        for variant in AICueVariant.allCases {
+        for (variant, compiled) in zip(AICueVariant.allCases, compiledRequests) {
             do {
                 try Task.checkCancellation()
             } catch {
                 throw AICueGenerationError.cancelled
             }
-            let compiled = compiler.compile(plan: plan, variant: variant)
             let response: AICueProviderAudioResponse
             do {
                 response = try await generateWithConservativeRetry(
@@ -232,6 +267,7 @@ public actor AICueGenerationEngine: AICueGenerating {
             let candidate = try validateAndPersist(
                 response: response,
                 variant: variant,
+                profile: profile,
                 generationID: generationID,
                 directory: directory)
             candidates.append(candidate)
@@ -243,6 +279,7 @@ public actor AICueGenerationEngine: AICueGenerating {
         succeeded = true
         return AICueGeneration(
             id: generationID,
+            profileID: profile.id,
             plan: plan,
             candidates: candidates,
             generatedAt: Date())
@@ -262,7 +299,7 @@ public actor AICueGenerationEngine: AICueGenerating {
     }
 
     private func generateWithConservativeRetry(
-        request: ElevenLabsAICueCompiledRequest,
+        request: AICueProviderRequest,
         credential: SensitiveCredentialInput
     ) async throws -> AICueProviderAudioResponse {
         do {
@@ -280,6 +317,7 @@ public actor AICueGenerationEngine: AICueGenerating {
     private func validateAndPersist(
         response: AICueProviderAudioResponse,
         variant: AICueVariant,
+        profile: AICueProviderProfile,
         generationID: UUID,
         directory: URL
     ) throws -> AICueCandidate {
@@ -317,7 +355,8 @@ public actor AICueGenerationEngine: AICueGenerating {
             durationMilliseconds: Int((duration * 1_000).rounded()),
             mediaType: response.mediaType,
             provenance: AICueCandidateProvenance(
-                providerID: .elevenLabs,
+                providerID: profile.providerID,
+                profileID: profile.id,
                 modelID: response.modelID,
                 generationID: generationID,
                 requestOrdinal: variant.ordinal,

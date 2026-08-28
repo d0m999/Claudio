@@ -1150,6 +1150,30 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为当前事件描述并生成语音、动物叫声、音效或混合提示音" } }
       }
     },
+    "ai-cue.provider-profile.elevenlabs-global" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs · Global" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs · 全球" } }
+      }
+    },
+    "ai-cue.provider-profile.minimax-global" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "MiniMax · Global" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "MiniMax · 全球" } }
+      }
+    },
+    "ai-cue.provider-profile.qwen-singapore" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · Singapore" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · 新加坡" } }
+      }
+    },
+    "ai-cue.provider-profile.qwen-beijing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · Beijing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · 北京" } }
+      }
+    },
     "ai-cue.service.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "AI sound generation" } },

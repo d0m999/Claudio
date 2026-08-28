@@ -103,8 +103,10 @@ public struct AICueProviderAudioResponse: Sendable, Equatable {
 }
 
 public protocol AICueProvider: AICueCredentialValidating {
+    var profile: AICueProviderProfile { get }
+
     func generateCandidate(
-        request: ElevenLabsAICueCompiledRequest,
+        request: AICueProviderRequest,
         credential: SensitiveCredentialInput
     ) async throws -> AICueProviderAudioResponse
 }
@@ -115,8 +117,14 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
     private static let apiHost = "api.elevenlabs.io"
     private static let maximumModelResponseBytes = 512 * 1_024
     private static let maximumAudioResponseBytes = 5 * 1_024 * 1_024
+    private static let registeredProfile =
+        try! AICueProviderRegistry().profile(for: .elevenLabsGlobal)
 
     private let httpClient: any AICueHTTPClient
+
+    public var profile: AICueProviderProfile {
+        Self.registeredProfile
+    }
 
     public init() {
         httpClient = AICueURLSessionHTTPClient()
@@ -144,35 +152,46 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
             throw AICueProviderError.requiredModelsUnavailable
         }
         let ids = Set(models.compactMap { $0["model_id"] as? String })
+        let requiredModelIDs = Set(profile.routes.values.map(\.modelID))
         guard
-            ids.contains(ElevenLabsAICueRequestCompiler.speechModelID),
-            ids.contains(ElevenLabsAICueRequestCompiler.soundEffectModelID)
+            requiredModelIDs.count == 2,
+            requiredModelIDs.isSubset(of: ids)
         else {
             throw AICueProviderError.requiredModelsUnavailable
         }
     }
 
     public func generateCandidate(
-        request: ElevenLabsAICueCompiledRequest,
+        request: AICueProviderRequest,
         credential: SensitiveCredentialInput
     ) async throws -> AICueProviderAudioResponse {
+        guard
+            request.profileID == profile.id,
+            let route = profile.routes[request.modality]
+        else { throw AICueProviderError.invalidRequest }
+
         let httpRequest: AICueHTTPRequest
-        switch request.route {
-        case .textToSpeech:
+        switch request.modality {
+        case .speech, .mixed:
+            guard let spokenContent = request.spokenContent else {
+                throw AICueProviderError.invalidRequest
+            }
             guard
-                request.modelID == ElevenLabsAICueRequestCompiler.speechModelID,
-                request.voiceID == ElevenLabsAICueRequestCompiler.speechVoiceID,
-                !request.prompt.isEmpty
+                route.modelID == "eleven_v3",
+                route.voiceID == "JBFqnCBsd6RMkjVDRZzb",
+                route.authentication == .elevenLabsAPIKeyHeader,
+                route.transport == .directContainer,
+                !spokenContent.isEmpty,
+                request.languageTag != nil
             else { throw AICueProviderError.invalidRequest }
             let body = try jsonBody([
-                "text": request.prompt,
-                "model_id": ElevenLabsAICueRequestCompiler.speechModelID,
+                "text": spokenContent,
+                "model_id": route.modelID,
             ])
             guard var components = URLComponents(
-                url: try fixedURL(
-                    path:
-                        "/v1/text-to-speech/\(ElevenLabsAICueRequestCompiler.speechVoiceID)"),
-                resolvingAgainstBaseURL: false)
+                url: route.endpoint,
+                resolvingAgainstBaseURL: false
+            )
             else { throw AICueProviderError.invalidRequest }
             components.queryItems = [
                 URLQueryItem(name: "output_format", value: "mp3_44100_128")
@@ -180,12 +199,14 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
             guard let url = components.url else { throw AICueProviderError.invalidRequest }
             httpRequest = generationRequest(url: url, body: body, credential: credential)
 
-        case .soundGeneration:
+        case .animal, .soundEffect:
+            let influence = promptInfluence(for: request.variant)
             guard
-                request.modelID == ElevenLabsAICueRequestCompiler.soundEffectModelID,
-                request.voiceID == nil,
+                route.modelID == "eleven_text_to_sound_v2",
+                route.voiceID == nil,
+                route.authentication == .elevenLabsAPIKeyHeader,
+                route.transport == .directContainer,
                 !request.prompt.isEmpty,
-                let influence = request.promptInfluence,
                 (0...1).contains(influence)
             else { throw AICueProviderError.invalidRequest }
             let duration = min(3, max(0.5, Double(request.targetDurationMilliseconds) / 1_000))
@@ -194,10 +215,10 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
                 "loop": false,
                 "duration_seconds": duration,
                 "prompt_influence": influence,
-                "model_id": ElevenLabsAICueRequestCompiler.soundEffectModelID,
+                "model_id": route.modelID,
             ])
             httpRequest = generationRequest(
-                url: try fixedURL(path: "/v1/sound-generation"),
+                url: route.endpoint,
                 body: body,
                 credential: credential)
         }
@@ -214,8 +235,16 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
         return AICueProviderAudioResponse(
             data: response.body,
             mediaType: mediaType,
-            modelID: request.modelID,
+            modelID: route.modelID,
             requestID: safeOpaqueID(response.headers["request-id"] ?? response.headers["x-request-id"]))
+    }
+
+    private func promptInfluence(for variant: AICueVariant) -> Double {
+        switch variant {
+        case .clear: 0.8
+        case .brisk: 0.65
+        case .restrained: 0.9
+        }
     }
 
     private func generationRequest(

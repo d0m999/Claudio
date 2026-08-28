@@ -597,7 +597,8 @@ private func aiCueCandidate(at fileURL: URL) -> AICueCandidate {
         mediaType: "audio/mpeg",
         provenance: AICueCandidateProvenance(
             providerID: .elevenLabs,
-            modelID: ElevenLabsAICueRequestCompiler.soundEffectModelID,
+            profileID: .elevenLabsGlobal,
+            modelID: "eleven_text_to_sound_v2",
             generationID: generationID,
             requestOrdinal: 1,
             providerRequestID: "fixture"))

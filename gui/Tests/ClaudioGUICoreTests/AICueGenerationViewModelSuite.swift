@@ -52,13 +52,19 @@ private actor ComposerGeneratorFixture: AICueGenerating {
     private var mode: Mode
     private(set) var generateCount = 0
     private(set) var discardedGenerationIDs: [UUID] = []
+    private(set) var requestedProfileIDs: [AICueProviderProfileID] = []
 
     init(mode: Mode) { self.mode = mode }
 
     func setMode(_ mode: Mode) { self.mode = mode }
 
-    func generate(description: String, locale: String) async throws -> AICueGeneration {
+    func generate(
+        description: String,
+        locale: String,
+        providerProfileID: AICueProviderProfileID
+    ) async throws -> AICueGeneration {
         generateCount += 1
+        requestedProfileIDs.append(providerProfileID)
         switch mode {
         case .success(let generation): return generation
         case .failure(let error): throw error
@@ -71,8 +77,12 @@ private actor ComposerGeneratorFixture: AICueGenerating {
 
     func discardAll() async {}
 
-    func facts() -> (generations: Int, discarded: [UUID]) {
-        (generateCount, discardedGenerationIDs)
+    func facts() -> (
+        generations: Int,
+        discarded: [UUID],
+        profileIDs: [AICueProviderProfileID]
+    ) {
+        (generateCount, discardedGenerationIDs, requestedProfileIDs)
     }
 }
 
@@ -83,7 +93,8 @@ func runAICueGenerationViewModelSuites() async {
         let generator = ComposerGeneratorFixture(mode: .failure(.credentialRequired))
         let viewModel = AICueGenerationViewModel(
             credentialManager: credentialManager,
-            generator: generator)
+            generator: generator,
+            providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
         viewModel.updateDescription("一只小猫短促叫两声，不要背景音乐")
         await viewModel.refreshCredentialStatus()
@@ -109,13 +120,32 @@ func runAICueGenerationViewModelSuites() async {
         expect(viewModel.phase == .editing, "保存成功后仍须等待用户再次点击生成")
     }
 
+    await suite("AI 提示音状态层：将 composition root 选择的 profile 原样传给生成器") {
+        let generator = ComposerGeneratorFixture(
+            mode: .failure(.requestCompilation(.unsupportedModality)))
+        let viewModel = AICueGenerationViewModel(
+            credentialManager: ComposerCredentialManagerFixture(status: .missing),
+            generator: generator,
+            providerProfileID: .qwenSingapore)
+        viewModel.begin(target: aiCueComposerTarget())
+        viewModel.updateDescription("短促木琴完成音效")
+
+        viewModel.startGeneration(locale: "zh-Hans")
+        await waitForAICueViewModel { viewModel.phase != .generating }
+
+        expect(
+            await generator.facts().profileIDs == [.qwenSingapore],
+            "ViewModel 不能把所选 profile 隐式改回 ElevenLabs")
+    }
+
     await suite("AI 提示音状态层：候选完整就绪后才建议名称，改名不重新请求") {
         let generation = aiCueComposerGeneration()
         let generator = ComposerGeneratorFixture(mode: .success(generation))
         let viewModel = AICueGenerationViewModel(
             credentialManager: ComposerCredentialManagerFixture(
                 status: .configured(providerID: .elevenLabs)),
-            generator: generator)
+            generator: generator,
+            providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
         viewModel.updateDescription("短促木琴完成音效")
         expect(viewModel.displayName.isEmpty, "第一步不得预先要求提示音名称")
@@ -137,7 +167,8 @@ func runAICueGenerationViewModelSuites() async {
         let viewModel = AICueGenerationViewModel(
             credentialManager: ComposerCredentialManagerFixture(
                 status: .configured(providerID: .elevenLabs)),
-            generator: generator)
+            generator: generator,
+            providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
         viewModel.updateDescription("短促木琴")
         viewModel.startGeneration(locale: "zh-Hans")
@@ -160,7 +191,8 @@ func runAICueGenerationViewModelSuites() async {
             let viewModel = AICueGenerationViewModel(
                 credentialManager: ComposerCredentialManagerFixture(
                     status: .configured(providerID: .elevenLabs)),
-                generator: generator)
+                generator: generator,
+                providerProfileID: .elevenLabsGlobal)
             let target = aiCueComposerTarget()
             viewModel.begin(target: target)
             viewModel.updateDescription("短促木琴")
@@ -205,7 +237,8 @@ func runAICueGenerationViewModelSuites() async {
         let viewModel = AICueGenerationViewModel(
             credentialManager: ComposerCredentialManagerFixture(
                 status: .configured(providerID: .elevenLabs)),
-            generator: generator)
+            generator: generator,
+            providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
         viewModel.updateDescription("短促木琴")
         viewModel.startGeneration(locale: "zh-Hans")
@@ -234,7 +267,8 @@ func runAICueGenerationViewModelSuites() async {
             saveMode: .fail(.invalidCredential))
         let viewModel = AICueGenerationViewModel(
             credentialManager: credentials,
-            generator: ComposerGeneratorFixture(mode: .failure(.credentialRequired)))
+            generator: ComposerGeneratorFixture(mode: .failure(.credentialRequired)),
+            providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
         viewModel.updateDescription("两声猫叫")
 
@@ -279,13 +313,15 @@ private func aiCueComposerGeneration(root: URL? = nil) -> AICueGeneration {
             mediaType: "audio/mpeg",
             provenance: AICueCandidateProvenance(
                 providerID: .elevenLabs,
-                modelID: ElevenLabsAICueRequestCompiler.soundEffectModelID,
+                profileID: .elevenLabsGlobal,
+                modelID: "eleven_text_to_sound_v2",
                 generationID: generationID,
                 requestOrdinal: variant.ordinal,
                 providerRequestID: nil))
     }
     return AICueGeneration(
         id: generationID,
+        profileID: .elevenLabsGlobal,
         plan: plan,
         candidates: candidates,
         generatedAt: Date(timeIntervalSince1970: 1))

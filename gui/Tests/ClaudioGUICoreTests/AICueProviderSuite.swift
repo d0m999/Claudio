@@ -155,8 +155,13 @@ func runAICueProviderSuites() async {
         let provider = ElevenLabsAICueProvider(httpClient: client)
         let plan = try! AICueSoundPlanner().makePlan(
             for: try! AICueGenerationRequest(
-                description: "用清晰中文说“本轮结束”", locale: "zh-Hans"))
-        let compiled = ElevenLabsAICueRequestCompiler().compile(plan: plan, variant: .clear)
+                description: "用清晰中文说“本轮结束”",
+                locale: "zh-Hans",
+                providerProfileID: .elevenLabsGlobal))
+        let compiled = try! AICueProviderRequestCompiler().compile(
+            plan: plan,
+            profileID: .elevenLabsGlobal,
+            variant: .clear)
 
         let response = try! await provider.generateCandidate(
             request: compiled,
@@ -167,7 +172,7 @@ func runAICueProviderSuites() async {
         expect(request.method == .post, "生成必须是 POST")
         expect(
             request.url.path
-                == "/v1/text-to-speech/\(ElevenLabsAICueRequestCompiler.speechVoiceID)",
+                == "/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb",
             "语音必须使用固定 voice endpoint")
         expect(
             URLComponents(url: request.url, resolvingAgainstBaseURL: false)?
@@ -175,8 +180,8 @@ func runAICueProviderSuites() async {
                     $0.name == "output_format" && $0.value == "mp3_44100_128"
                 }) == true,
             "语音输出必须固定为 mp3_44100_128")
-        expect(body["model_id"] as? String == ElevenLabsAICueRequestCompiler.speechModelID, "model 必须固定为 eleven_v3")
-        expect((body["text"] as? String)?.contains("本轮结束") == true, "正文必须包含明确台词")
+        expect(body["model_id"] as? String == "eleven_v3", "model 必须固定为 eleven_v3")
+        expect(body["text"] as? String == "本轮结束", "正文必须只逐字发送明确台词")
         expect(
             request.body.map { !String(decoding: $0, as: UTF8.self).contains("workbuddy") } == true,
             "provider body 不得包含 surface token")
@@ -195,8 +200,13 @@ func runAICueProviderSuites() async {
         let provider = ElevenLabsAICueProvider(httpClient: client)
         let plan = try! AICueSoundPlanner().makePlan(
             for: try! AICueGenerationRequest(
-                description: "一只小猫短促叫两声，不要背景音乐", locale: "zh-Hans"))
-        let compiled = ElevenLabsAICueRequestCompiler().compile(plan: plan, variant: .brisk)
+                description: "一只小猫短促叫两声，不要背景音乐",
+                locale: "zh-Hans",
+                providerProfileID: .elevenLabsGlobal))
+        let compiled = try! AICueProviderRequestCompiler().compile(
+            plan: plan,
+            profileID: .elevenLabsGlobal,
+            variant: .brisk)
 
         _ = try! await provider.generateCandidate(
             request: compiled,
@@ -204,11 +214,13 @@ func runAICueProviderSuites() async {
         let request = await client.requests()[0]
         let body = try! JSONSerialization.jsonObject(with: request.body!) as! [String: Any]
         expect(request.url.path == "/v1/sound-generation", "动物/音效必须使用固定 sound endpoint")
-        expect(body["model_id"] as? String == ElevenLabsAICueRequestCompiler.soundEffectModelID, "音效 model 必须固定")
+        expect(
+            body["model_id"] as? String == "eleven_text_to_sound_v2",
+            "音效 model 必须固定")
         expect(body["loop"] as? Bool == false, "提示音不得请求 loop")
         let duration = body["duration_seconds"] as? Double
         expect(duration != nil && duration! >= 0.5 && duration! <= 3, "请求时长必须夹在 0.5...3 秒")
-        expect(body["prompt_influence"] as? Double == compiled.promptInfluence, "A/B/C 影响强度必须进入请求")
+        expect(body["prompt_influence"] as? Double == 0.65, "A/B/C 影响强度必须进入请求")
     }
 
     await suite("ElevenLabs adapter：认证、额度、权限、限流和服务错误只返回脱敏分类") {
@@ -258,8 +270,13 @@ func runAICueProviderSuites() async {
             let provider = ElevenLabsAICueProvider(httpClient: client)
             let plan = try! AICueSoundPlanner().makePlan(
                 for: try! AICueGenerationRequest(
-                    description: "短促木琴音效", locale: "zh-Hans"))
-            let compiled = ElevenLabsAICueRequestCompiler().compile(plan: plan, variant: .clear)
+                    description: "短促木琴音效",
+                    locale: "zh-Hans",
+                    providerProfileID: .elevenLabsGlobal))
+            let compiled = try! AICueProviderRequestCompiler().compile(
+                plan: plan,
+                profileID: .elevenLabsGlobal,
+                variant: .clear)
             var rejected = false
             do {
                 _ = try await provider.generateCandidate(

@@ -239,7 +239,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             durationProbe: audioEnvironment.durationProbe)
         let aiCueViewModel = AICueGenerationViewModel(
             credentialManager: aiCueCredentialManager,
-            generator: aiCueGenerator)
+            generator: aiCueGenerator,
+            providerProfileID: .elevenLabsGlobal)
         let eventSettingsWindowController = EventSettingsWindowController(
             model: eventSettingsModel,
             hostIntegrations: hostIntegrations,

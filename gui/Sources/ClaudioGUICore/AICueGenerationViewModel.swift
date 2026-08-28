@@ -45,16 +45,19 @@ public final class AICueGenerationViewModel: ObservableObject {
 
     private let credentialManager: any AICueCredentialManaging
     private let generator: any AICueGenerating
+    private let providerProfileID: AICueProviderProfileID
     private var sessionRevision: UInt64 = 0
     private var generationTask: Task<Void, Never>?
     private var adoptionTask: Task<Void, Never>?
 
     public init(
         credentialManager: any AICueCredentialManaging,
-        generator: any AICueGenerating
+        generator: any AICueGenerating,
+        providerProfileID: AICueProviderProfileID
     ) {
         self.credentialManager = credentialManager
         self.generator = generator
+        self.providerProfileID = providerProfileID
     }
 
     public var requiresCredentialConfiguration: Bool {
@@ -166,12 +169,16 @@ public final class AICueGenerationViewModel: ObservableObject {
         let revision = sessionRevision
         let description = soundDescription
         let generator = self.generator
+        let providerProfileID = self.providerProfileID
 
         generationTask = Task { [weak self] in
             let result: Result<AICueGeneration, AICueGenerationError>
             do {
                 result = .success(
-                    try await generator.generate(description: description, locale: locale))
+                    try await generator.generate(
+                        description: description,
+                        locale: locale,
+                        providerProfileID: providerProfileID))
             } catch let error as AICueGenerationError {
                 result = .failure(error)
             } catch is CancellationError {

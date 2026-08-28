@@ -296,6 +296,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let actionConfigureSoundHint: Self = "action.configure-sound.hint"
     public static let aiCueGenerateAction: Self = "ai-cue.action.generate"
     public static let aiCueGenerateHint: Self = "ai-cue.action.generate.hint"
+    public static let aiCueProviderProfileElevenLabsGlobal: Self =
+        "ai-cue.provider-profile.elevenlabs-global"
+    public static let aiCueProviderProfileMiniMaxGlobal: Self =
+        "ai-cue.provider-profile.minimax-global"
+    public static let aiCueProviderProfileQwenSingapore: Self =
+        "ai-cue.provider-profile.qwen-singapore"
+    public static let aiCueProviderProfileQwenBeijing: Self =
+        "ai-cue.provider-profile.qwen-beijing"
     public static let aiCueServiceTitle: Self = "ai-cue.service.title"
     public static let aiCueServiceSubtitle: Self = "ai-cue.service.subtitle"
     public static let aiCueServiceChecking: Self = "ai-cue.service.checking"
@@ -797,7 +805,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelCapabilityPartial, .panelCapabilityUnsupported,
         .panelCapabilitySupportedNotImplemented, .panelCapabilityPartialNotImplemented,
         .panelCapabilityUnsupportedNotImplemented, .hostDetailsHint,
-        .aiCueGenerateAction, .aiCueGenerateHint, .aiCueServiceTitle, .aiCueServiceSubtitle,
+        .aiCueGenerateAction, .aiCueGenerateHint, .aiCueProviderProfileElevenLabsGlobal,
+        .aiCueProviderProfileMiniMaxGlobal, .aiCueProviderProfileQwenSingapore,
+        .aiCueProviderProfileQwenBeijing, .aiCueServiceTitle, .aiCueServiceSubtitle,
         .aiCueServiceChecking, .aiCueServiceMissing, .aiCueServiceConfigured,
         .aiCueServiceUnavailable, .aiCueConfigureKey, .aiCueManageKey, .aiCueCredentialTitle,
         .aiCueCredentialKeyLabel, .aiCueCredentialPrivacy, .aiCueCredentialKeychain,

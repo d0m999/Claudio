@@ -570,7 +570,7 @@ private func aiCueFailureText(
         return l10n.text(.aiCueErrorDescriptionRequired)
     case .generation(.validation(.descriptionTooLong)):
         return l10n.text(.aiCueErrorDescriptionTooLong)
-    case .generation(.validation(.spokenContentRequiresQuotes)):
+    case .generation(.validation(.spokenContentRequired)):
         return l10n.text(.aiCueErrorSpeechNeedsText)
     case .generation(.credentialRequired):
         return l10n.text(.aiCueErrorCredentialRequired)
