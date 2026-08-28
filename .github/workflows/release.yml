@@ -226,11 +226,11 @@ jobs:
 
       - name: Build GUI (arm64)
         working-directory: gui
-        run: swift build -c release --arch arm64 --product ClaudioGUI
+        run: swift build -c release --arch arm64 --product ClaudioGUI -Xswiftc -Osize
 
       - name: Build GUI (x86_64)
         working-directory: gui
-        run: swift build -c release --arch x86_64 --product ClaudioGUI
+        run: swift build -c release --arch x86_64 --product ClaudioGUI -Xswiftc -Osize
 
       - name: Merge universal GUI
         shell: bash

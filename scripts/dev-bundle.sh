@@ -25,9 +25,10 @@ fi
 gui_build() {
     if [[ "$GUI_NATIVE_HOST_CARD_PROBE" == true ]]; then
         swift build -c release --package-path "$repo_root/gui" --product ClaudioGUI \
-            -Xswiftc -DCLAUDIO_NATIVE_HOST_CARD_PROBE "$@"
+            -Xswiftc -Osize -Xswiftc -DCLAUDIO_NATIVE_HOST_CARD_PROBE "$@"
     else
-        swift build -c release --package-path "$repo_root/gui" --product ClaudioGUI "$@"
+        swift build -c release --package-path "$repo_root/gui" --product ClaudioGUI \
+            -Xswiftc -Osize "$@"
     fi
 }
 

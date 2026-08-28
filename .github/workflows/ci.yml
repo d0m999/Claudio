@@ -87,7 +87,7 @@ jobs:
         run: swift build -c debug --package-path gui --product ClaudioGUI
 
       - name: Build ClaudioGUI (Release)
-        run: swift build -c release --package-path gui --product ClaudioGUI
+        run: swift build -c release --package-path gui --product ClaudioGUI -Xswiftc -Osize
 
       - name: Assemble local release-layout app
         run: bash scripts/dev-bundle.sh

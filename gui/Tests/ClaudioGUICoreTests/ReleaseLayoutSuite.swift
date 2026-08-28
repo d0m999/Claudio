@@ -48,6 +48,39 @@ private func loadReleaseWorkflowSource(root: URL = guiTestRepositoryRoot()) -> S
     return try? String(contentsOf: workflowURL, encoding: .utf8)
 }
 
+private func logicalCommandLines(in source: String) -> [String] {
+    var lines: [String] = []
+    var pending = ""
+
+    for rawLine in source.split(separator: "\n", omittingEmptySubsequences: false) {
+        let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
+        let continues = trimmed.hasSuffix("\\")
+        let fragment = continues
+            ? String(trimmed.dropLast()).trimmingCharacters(in: .whitespaces)
+            : trimmed
+        pending = pending.isEmpty ? fragment : "\(pending) \(fragment)"
+        if !continues {
+            lines.append(pending)
+            pending = ""
+        }
+    }
+
+    if !pending.isEmpty {
+        lines.append(pending)
+    }
+    return lines
+}
+
+private func isReleaseGUIBuildCommand(_ command: String) -> Bool {
+    command.contains("swift build")
+        && command.contains("-c release")
+        && command.contains("--product ClaudioGUI")
+}
+
+private func usesSwiftSizeOptimization(_ command: String) -> Bool {
+    command.contains("-Xswiftc -Osize")
+}
+
 private struct ReleaseWorkflowSources {
     let workflow: String
     let notarizeScript: String
@@ -155,6 +188,77 @@ func runReleaseLayoutSuites() {
         expect(
             yaml.contains("bash scripts/check-release-size.sh"),
             "release workflow 必须在签名前执行可执行负载体积门禁")
+    }
+
+    suite("分发脚本只对 Release ClaudioGUI 完整依赖图启用体积优化") {
+        let root = guiTestRepositoryRoot()
+        guard
+            let dev = try? String(
+                contentsOf: root.appendingPathComponent("scripts/dev-bundle.sh"), encoding: .utf8),
+            let ci = try? String(
+                contentsOf: root.appendingPathComponent(".github/workflows/ci.yml"),
+                encoding: .utf8),
+            let release = try? String(
+                contentsOf: root.appendingPathComponent(".github/workflows/release.yml"),
+                encoding: .utf8)
+        else {
+            expect(false, "读不到 dev、CI 或 release 分发入口")
+            return
+        }
+
+        let devCommands = logicalCommandLines(in: dev)
+        let ciCommands = logicalCommandLines(in: ci)
+        let releaseCommands = logicalCommandLines(in: release)
+        let devReleaseGUICommands = devCommands.filter(isReleaseGUIBuildCommand)
+        let ciReleaseGUICommands = ciCommands.filter(isReleaseGUIBuildCommand)
+        let releaseGUICommands = releaseCommands.filter(isReleaseGUIBuildCommand)
+        expect(
+            devReleaseGUICommands.count == 2
+                && devReleaseGUICommands.allSatisfy(usesSwiftSizeOptimization),
+            "dev bundle 的普通与原生 probe Release GUI 构建必须都使用 -Osize")
+        expect(
+            ciReleaseGUICommands.count == 1
+                && ciReleaseGUICommands.allSatisfy(usesSwiftSizeOptimization),
+            "CI Release GUI 构建必须使用 -Osize")
+        expect(
+            releaseGUICommands.count == 2
+                && releaseGUICommands.allSatisfy(usesSwiftSizeOptimization)
+                && releaseGUICommands.contains { $0.contains("--arch arm64") }
+                && releaseGUICommands.contains { $0.contains("--arch x86_64") },
+            "双架构 release GUI 构建必须使用同一 -Osize 合同")
+
+        let optimizedCommands = [devCommands, ciCommands, releaseCommands]
+            .flatMap { $0 }
+            .filter(usesSwiftSizeOptimization)
+        expect(
+            optimizedCommands.count == 5
+                && optimizedCommands.allSatisfy(isReleaseGUIBuildCommand),
+            "-Osize 只能出现在五条 Release ClaudioGUI 命令，不能扩散到 Debug、harness、"
+                + "LoginItem 或 helper；实际命令：\(optimizedCommands)")
+    }
+
+    suite("体积优化合同跨行与参数调序仍会拒绝错误目标") {
+        let commands = logicalCommandLines(
+            in: """
+                swift build --product ClaudioGUI \
+                    -Xswiftc -Osize --arch arm64 -c release
+                swift build -Xswiftc -Osize -c release \
+                    --product claudio --arch arm64
+                swift build --product ClaudioGUI -Xswiftc -Osize -c debug
+                """)
+            .filter(usesSwiftSizeOptimization)
+
+        guard commands.count == 3 else {
+            expect(false, "fixture 的三条体积优化命令都必须被归一化，实得 \(commands)")
+            return
+        }
+        expect(
+            isReleaseGUIBuildCommand(commands[0]),
+            "跨行且参数调序后的 Release ClaudioGUI 必须仍被识别为唯一允许目标")
+        expect(
+            !isReleaseGUIBuildCommand(commands[1])
+                && !isReleaseGUIBuildCommand(commands[2]),
+            "跨行 helper 与 Debug ClaudioGUI 的 -Osize 必须被识别为错误扩散")
     }
 
     suite("HostIcons：SwiftPM、开发 bundle 与双架构 release 都 fail closed 复制同一资源 bundle") {
