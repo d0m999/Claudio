@@ -89,8 +89,9 @@ func runDisplayPreferencesSuites() {
             preferences.availableSettingsDestinations
                 == [
                     .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds,
+                    .usage,
                 ],
-            "production owner 必须在现有目的页中暴露已交付的 Display destination")
+            "production owner 必须在现有目的页中暴露已交付的 Display 与 Usage destination")
 
         var firstConsumer: [ClaudioPreferenceSnapshot] = []
         var secondConsumer: [ClaudioPreferenceSnapshot] = []

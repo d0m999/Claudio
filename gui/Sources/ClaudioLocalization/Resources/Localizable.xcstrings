@@ -3658,6 +3658,288 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surface %@ 已不可用；未选择其他 Surface。" } }
       }
     },
+    "settings.usage.action.history-cleared" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained receipt history was cleared. Current activation and stable receipts were not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除保留的回执历史；当前激活与稳定回执未改变。" } }
+      }
+    },
+    "settings.usage.action.in-progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Working…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "处理中…" } }
+      }
+    },
+    "settings.usage.action.log-cleared" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log was cleared. Receipt history was not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除诊断日志；回执历史未改变。" } }
+      }
+    },
+    "settings.usage.action.log-path-copied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log path copied." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制诊断日志路径。" } }
+      }
+    },
+    "settings.usage.action.log-revealed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log revealed in Finder." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已在 Finder 中显示诊断日志。" } }
+      }
+    },
+    "settings.usage.clear.history" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear retained history" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除保留历史" } }
+      }
+    },
+    "settings.usage.clear.history.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes only the retained, redacted history for visible Host Surfaces. It does not change connection markers, Current Activation, stable receipts, sounds, Provider preferences, or Keychain credentials." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这只会永久移除可见 Host Surface 保留的脱敏历史；不会改变连接 marker、当前激活、稳定回执、声音、Provider 偏好或 Keychain 凭据。" } }
+      }
+    },
+    "settings.usage.clear.history.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear retained receipt history?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除保留的回执历史？" } }
+      }
+    },
+    "settings.usage.clear.log" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear diagnostic log" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除诊断日志" } }
+      }
+    },
+    "settings.usage.clear.log.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes only the rolling diagnostic log. Retained receipt history and every connection, sound, Provider, and credential fact remain unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这只会永久移除滚动诊断日志；保留的回执历史以及所有连接、声音、Provider 与凭据事实均保持不变。" } }
+      }
+    },
+    "settings.usage.clear.log.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear diagnostic log?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除诊断日志？" } }
+      }
+    },
+    "settings.usage.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A limited local activity view derived only from retained, redacted receipts and the rolling diagnostic log." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只根据保留的脱敏回执与滚动诊断日志生成的有限本地活动视图。" } }
+      }
+    },
+    "settings.usage.failure.clipboard" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The log path could not be copied to the clipboard." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法将日志路径复制到剪贴板。" } }
+      }
+    },
+    "settings.usage.failure.finder" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Finder could not reveal the diagnostic log. The path may not exist." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Finder 无法显示诊断日志；路径可能不存在。" } }
+      }
+    },
+    "settings.usage.failure.history-clear" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained history could not be cleared. The last visible facts were preserved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法清除保留历史；已保留上次可见事实。" } }
+      }
+    },
+    "settings.usage.failure.history-lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Receipt history is busy. Nothing visible was changed; try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "回执历史锁正忙；可见事实未改变，请重试。" } }
+      }
+    },
+    "settings.usage.failure.log-clear" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log could not be cleared. The last visible facts were preserved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法清除诊断日志；已保留上次可见事实。" } }
+      }
+    },
+    "settings.usage.failure.log-lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log is busy. Nothing visible was changed; try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志锁正忙；可见事实未改变，请重试。" } }
+      }
+    },
+    "settings.usage.history.damaged" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld damaged or unsafe history items were excluded." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已排除 %lld 条损坏或不安全的历史项。" } }
+      }
+    },
+    "settings.usage.history.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No retained-history path exists for this Surface." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个 Surface 的保留历史路径不存在。" } }
+      }
+    },
+    "settings.usage.history.none" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No retained receipt proves local activity in this window." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前保留窗口内没有回执可证明本地活动。" } }
+      }
+    },
+    "settings.usage.history.result-count" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ %lld" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ %lld" } }
+      }
+    },
+    "settings.usage.history.surface-count" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld retained receipts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留 %lld 条回执" } }
+      }
+    },
+    "settings.usage.history.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained local activity" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留的本地活动" } }
+      }
+    },
+    "settings.usage.history.unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained history is unreadable; no activity was inferred." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留历史不可读；未推断任何活动。" } }
+      }
+    },
+    "settings.usage.log.available" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log exists · %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志存在 · %@" } }
+      }
+    },
+    "settings.usage.log.copy-path" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy path" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制路径" } }
+      }
+    },
+    "settings.usage.log.damaged" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log exists · %@ · %lld malformed lines excluded" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志存在 · %@ · 已排除 %lld 行损坏内容" } }
+      }
+    },
+    "settings.usage.log.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows file existence, size, and at most five redacted failure categories. Raw reasons are not displayed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只显示文件是否存在、大小和最多五条脱敏失败分类；不展示原始原因。" } }
+      }
+    },
+    "settings.usage.log.failure.other" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Other local failure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "其他本地失败" } }
+      }
+    },
+    "settings.usage.log.failure.playback-launch" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playback process could not start" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放进程无法启动" } }
+      }
+    },
+    "settings.usage.log.failure.playback-lock" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playback lock failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放锁失败" } }
+      }
+    },
+    "settings.usage.log.failure.receipt-write" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redacted receipt could not be written" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "脱敏回执无法写入" } }
+      }
+    },
+    "settings.usage.log.failure.summary" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@" } }
+      }
+    },
+    "settings.usage.log.failure.unknown-event" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unknown event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知事件" } }
+      }
+    },
+    "settings.usage.log.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log path does not exist." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志路径不存在。" } }
+      }
+    },
+    "settings.usage.log.no-failures" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No readable recent failure summary." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有可读的近期失败摘要。" } }
+      }
+    },
+    "settings.usage.log.reveal" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reveal in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在 Finder 中显示" } }
+      }
+    },
+    "settings.usage.log.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志" } }
+      }
+    },
+    "settings.usage.log.unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log is unreadable or unsafe; no failure detail was inferred." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志不可读或不安全；未推断失败详情。" } }
+      }
+    },
+    "settings.usage.privacy.billing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 does not display or estimate a unified bill. Review costs, quotas, retention, model-improvement use, and regional rules with the corresponding provider." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 不展示或推算统一账单。费用、配额、留存、模型改进使用与地区规则需向对应供应商核对。" } }
+      }
+    },
+    "settings.usage.privacy.host" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Host prompts and responses are not stored in receipts and are not sent to AI cue providers by this activity view." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "宿主 prompt 与 response 不进入回执，本活动视图也不会把它们发送给 AI 提示音供应商。" } }
+      }
+    },
+    "settings.usage.privacy.provider" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only an explicit AI cue generation sends the user's sound description and required generation metadata to the selected allowlisted Provider/profile." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只有用户显式发起 AI 提示音生成，声音描述与必要生成元数据才会发往所选 allowlisted Provider/profile。" } }
+      }
+    },
+    "settings.usage.privacy.provider-disclosure" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@ · region %@ — review this provider's own costs, quota, retention, data-use, and regional terms; another profile's facts do not apply." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@ · 地区 %@ — 需单独查看该供应商的费用、配额、留存、数据使用与地区条款；其他 profile 的事实不适用。" } }
+      }
+    },
+    "settings.usage.privacy.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Privacy and Provider boundaries" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐私与 Provider 边界" } }
+      }
+    },
+    "settings.usage.refresh" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh local facts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新本地事实" } }
+      }
+    },
+    "settings.usage.scope-notice" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This is not complete usage or a weekly total. Each Host Surface contributes at most 20 receipts retained for at most 30 days." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这不是完整用量或本周总量。每个 Host Surface 最多投影 20 条、最多 30 天的保留回执。" } }
+      }
+    },
     "menu-bar.status.running" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0, application running" } },

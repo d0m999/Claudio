@@ -312,6 +312,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let settingsWindowController = SettingsWindowController(
             preferences: languageStore,
             loginItemSettings: loginItemSettings,
+            usageSettings: makeUsageSettingsModel(),
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: unifiedEventSettingsModel,
             eventSettingsSelection: unifiedEventSettingsSelection,

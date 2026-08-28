@@ -17,6 +17,7 @@ import SwiftUI
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
     private let loginItemSettings: LoginItemSettingsModel
+    private let usageSettings: UsageSettingsModel
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private let soundPacksEditorOwner: SoundPacksEditorOwner
     private let eventSettingsModel: PanelConfigController
@@ -48,6 +49,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     init(
         preferences: ClaudioPreferences,
         loginItemSettings: LoginItemSettingsModel,
+        usageSettings: UsageSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner,
         eventSettingsModel: PanelConfigController,
         eventSettingsSelection: EventSettingsWindowSelection,
@@ -63,6 +65,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     ) {
         self.preferences = preferences
         self.loginItemSettings = loginItemSettings
+        self.usageSettings = usageSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -213,6 +216,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             preferences: preferences,
             dynamicQuietPolicy: dynamicQuietObserver.policy,
             loginItemSettings: loginItemSettings,
+            usageSettings: usageSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: eventSettingsModel,
             eventSettingsSelection: eventSettingsSelection,

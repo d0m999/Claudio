@@ -103,6 +103,7 @@ import SwiftUI
         @StateObject private var languageStore: ClaudioPreferences
         @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
         @StateObject private var loginItemSettings: LoginItemSettingsModel
+        @StateObject private var usageSettings: UsageSettingsModel
 
         init(
             route: SettingsRoute,
@@ -145,6 +146,27 @@ import SwiftUI
                         setEnabled: { enabled in
                             enabled ? .enabled : .disabled
                         })))
+            let usagePresentation = UsageActivityPresentation(
+                surfaces: HostID.productVisibleCases.map {
+                    UsageSurfaceActivity(
+                        host: $0,
+                        retainedCount: 0,
+                        events: [],
+                        sourceState: .missing)
+                },
+                log: UsageDiagnosticLogSnapshot(
+                    path: "/Users/example/.claudio/claudio.log",
+                    state: .missing,
+                    failures: []))
+            _usageSettings = StateObject(
+                wrappedValue: UsageSettingsModel(
+                    initialPresentation: usagePresentation,
+                    operations: UsageSettingsOperations(
+                        load: { usagePresentation },
+                        clearHistory: { .success(usagePresentation) },
+                        clearLog: { .success(usagePresentation) },
+                        revealLog: { false },
+                        copyLogPath: { true })))
         }
 
         var body: some View {
@@ -152,7 +174,8 @@ import SwiftUI
                 model: model,
                 preferences: languageStore,
                 dynamicQuietPolicy: dynamicQuietPolicy,
-                loginItemSettings: loginItemSettings)
+                loginItemSettings: loginItemSettings,
+                usageSettings: usageSettings)
                 .frame(
                     width: SettingsWindowGeometry.minimumWidth,
                     height: SettingsWindowGeometry.minimumHeight)

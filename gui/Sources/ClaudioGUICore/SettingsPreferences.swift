@@ -8,7 +8,7 @@ public extension SettingsDestination {
     /// Top-level destinations with production content today. Later destination migrations extend
     /// this list when their real views ship; DEBUG galleries inject `allCases` explicitly.
     static let availableCases: [SettingsDestination] = [
-        .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds,
+        .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds, .usage,
     ]
 }
 

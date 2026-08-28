@@ -14,6 +14,7 @@ struct SettingsWindowView: View {
     @ObservedObject var preferences: ClaudioPreferences
     @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
     @ObservedObject var loginItemSettings: LoginItemSettingsModel
+    @ObservedObject var usageSettings: UsageSettingsModel
     let soundPacksEditorOwner: SoundPacksEditorOwner?
     let eventSettingsModel: PanelConfigController?
     let eventSettingsSelection: EventSettingsWindowSelection?
@@ -41,6 +42,7 @@ struct SettingsWindowView: View {
         preferences: ClaudioPreferences,
         dynamicQuietPolicy: DynamicQuietPolicyController,
         loginItemSettings: LoginItemSettingsModel,
+        usageSettings: UsageSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
         eventSettingsModel: PanelConfigController? = nil,
         eventSettingsSelection: EventSettingsWindowSelection? = nil,
@@ -62,6 +64,7 @@ struct SettingsWindowView: View {
         self.preferences = preferences
         self.dynamicQuietPolicy = dynamicQuietPolicy
         self.loginItemSettings = loginItemSettings
+        self.usageSettings = usageSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -249,6 +252,11 @@ struct SettingsWindowView: View {
                         notificationsSettings
                     } else if destination == .display {
                         displaySettings
+                    } else if destination == .usage {
+                        UsageSettingsView(
+                            model: usageSettings,
+                            preferences: preferences,
+                            focusedTarget: $focusedTarget)
                     } else {
                         debugRouteContent
                     }

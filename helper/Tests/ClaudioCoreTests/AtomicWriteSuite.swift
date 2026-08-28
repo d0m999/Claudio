@@ -529,8 +529,13 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": [".write(", "rename("],
     // 回执与 active installation 标记从 mkstemp(3) 创建瞬间就是 0600；完整 write(2) + fsync
     // 后才以 rename(2) 原子替换稳定路径。unlink(2) 清 staging 及精确匹配的断开代次标记。
+    // open/openat 仅以 O_RDONLY 绑定 history 身份，不获得写权限。批量历史清理持有全部产品
+    // installation locks：先以 `.staging-*` 隔离，失败反向 renameatx_np；全部 Surface 落位后
+    // 再以一次 renameatx_np 发布 `.clear-*` commit marker。commit 后 unlinkat 在 descriptor 下
+    // 有界递归回收文件/目录；中断 tombstone 留待下次重试，不再伪报可回滚 failure。
     "helper/Sources/ClaudioCore/HostHookReceipt.swift": [
-        "fchmod(", "mkstemp(", "rename(", "unlink(", "write(",
+        "fchmod(", "mkdirat(", "mkstemp(", "open(", "rename(", "renameatx_np(", "unlink(",
+        "unlinkat(", "write(",
     ],
     // 二进制与内置包的复制。**两处都是 staging + 同卷 rename**（`copyItem` 进暂存 → `moveItem` /
     // `replaceItemAt` 发布）。pristine minimal-chime 升级更严格：`renameatx_np(RENAME_SWAP)`
@@ -565,6 +570,9 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     ],
     // 星标删除：锁内重验后的单目录项 `unlink(2)`；不跟随 symlink，也不递归删除目录。
     "gui/Sources/ClaudioGUICore/PackGallery.swift": ["unlink("],
+    // Usage 日志清理：与 append/rotation 共用 log lock，只 unlink 固定日志叶路径；ENOENT 成功。
+    // History 清理由 ClaudioCore 的 HostHookReceiptStore 既有安全原语负责，不在这里重复登记。
+    "gui/Sources/ClaudioGUICore/UsageActivity.swift": ["unlink("],
     // T6 forkPack：出厂包整份目录拷进调用独占 staging（`.copyItem(`），成功后用
     // `renameatx_np(..., RENAME_EXCL)` 做同卷、原子、不可覆盖的目录发布。manifest 本身的写
     // 已记在 `ManifestBinding.swift`，这里不重复记。

@@ -517,6 +517,66 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.notifications.open-calendar-privacy"
     public static let settingsNotificationsOpenEvents: Self =
         "settings.notifications.open-events"
+    public static let settingsUsageDescription: Self = "settings.usage.description"
+    public static let settingsUsageScopeNotice: Self = "settings.usage.scope-notice"
+    public static let settingsUsageRefresh: Self = "settings.usage.refresh"
+    public static let settingsUsageHistoryTitle: Self = "settings.usage.history.title"
+    public static let settingsUsageSurfaceCount: Self = "settings.usage.history.surface-count"
+    public static let settingsUsageHistoryNone: Self = "settings.usage.history.none"
+    public static let settingsUsageHistoryMissing: Self = "settings.usage.history.missing"
+    public static let settingsUsageHistoryDamaged: Self = "settings.usage.history.damaged"
+    public static let settingsUsageHistoryUnreadable: Self = "settings.usage.history.unreadable"
+    public static let settingsUsageResultCount: Self = "settings.usage.history.result-count"
+    public static let settingsUsageLogTitle: Self = "settings.usage.log.title"
+    public static let settingsUsageLogDescription: Self = "settings.usage.log.description"
+    public static let settingsUsageLogAvailable: Self = "settings.usage.log.available"
+    public static let settingsUsageLogMissing: Self = "settings.usage.log.missing"
+    public static let settingsUsageLogDamaged: Self = "settings.usage.log.damaged"
+    public static let settingsUsageLogUnreadable: Self = "settings.usage.log.unreadable"
+    public static let settingsUsageLogNoFailures: Self = "settings.usage.log.no-failures"
+    public static let settingsUsageLogFailurePlaybackLaunch: Self =
+        "settings.usage.log.failure.playback-launch"
+    public static let settingsUsageLogFailurePlaybackLock: Self =
+        "settings.usage.log.failure.playback-lock"
+    public static let settingsUsageLogFailureReceiptWrite: Self =
+        "settings.usage.log.failure.receipt-write"
+    public static let settingsUsageLogFailureOther: Self = "settings.usage.log.failure.other"
+    public static let settingsUsageLogFailureUnknownEvent: Self =
+        "settings.usage.log.failure.unknown-event"
+    public static let settingsUsageLogFailureSummary: Self =
+        "settings.usage.log.failure.summary"
+    public static let settingsUsageRevealLog: Self = "settings.usage.log.reveal"
+    public static let settingsUsageCopyLogPath: Self = "settings.usage.log.copy-path"
+    public static let settingsUsageClearHistory: Self = "settings.usage.clear.history"
+    public static let settingsUsageClearLog: Self = "settings.usage.clear.log"
+    public static let settingsUsageClearHistoryTitle: Self =
+        "settings.usage.clear.history.title"
+    public static let settingsUsageClearHistoryMessage: Self =
+        "settings.usage.clear.history.message"
+    public static let settingsUsageClearLogTitle: Self = "settings.usage.clear.log.title"
+    public static let settingsUsageClearLogMessage: Self = "settings.usage.clear.log.message"
+    public static let settingsUsagePrivacyTitle: Self = "settings.usage.privacy.title"
+    public static let settingsUsagePrivacyHost: Self = "settings.usage.privacy.host"
+    public static let settingsUsagePrivacyProvider: Self = "settings.usage.privacy.provider"
+    public static let settingsUsagePrivacyBilling: Self = "settings.usage.privacy.billing"
+    public static let settingsUsageProviderDisclosure: Self =
+        "settings.usage.privacy.provider-disclosure"
+    public static let settingsUsageActionInProgress: Self = "settings.usage.action.in-progress"
+    public static let settingsUsageActionHistoryCleared: Self =
+        "settings.usage.action.history-cleared"
+    public static let settingsUsageActionLogCleared: Self = "settings.usage.action.log-cleared"
+    public static let settingsUsageActionLogRevealed: Self = "settings.usage.action.log-revealed"
+    public static let settingsUsageActionLogPathCopied: Self =
+        "settings.usage.action.log-path-copied"
+    public static let settingsUsageFailureHistoryLockBusy: Self =
+        "settings.usage.failure.history-lock-busy"
+    public static let settingsUsageFailureLogLockBusy: Self =
+        "settings.usage.failure.log-lock-busy"
+    public static let settingsUsageFailureHistoryClear: Self =
+        "settings.usage.failure.history-clear"
+    public static let settingsUsageFailureLogClear: Self = "settings.usage.failure.log-clear"
+    public static let settingsUsageFailureFinder: Self = "settings.usage.failure.finder"
+    public static let settingsUsageFailureClipboard: Self = "settings.usage.failure.clipboard"
     public static let settingsRouteIdentity: Self = "settings.route.identity"
     public static let settingsRouteReady: Self = "settings.route.ready"
     public static let settingsRouteInvalidSurface: Self = "settings.route.invalid-surface"
@@ -1119,6 +1179,27 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .feedbackOperationFailed, .feedbackReceipt, .feedbackDisconnected,
         .feedbackConnectedReceipt, .feedbackAwaitingConfirmation, .feedbackRepairedWaiting,
         .feedbackConfiguredWaiting, .feedbackHostStateUpdated, .feedbackReceiptHistoryCleared,
+        .settingsUsageDescription, .settingsUsageScopeNotice, .settingsUsageRefresh,
+        .settingsUsageHistoryTitle, .settingsUsageSurfaceCount, .settingsUsageHistoryNone,
+        .settingsUsageHistoryMissing, .settingsUsageHistoryDamaged,
+        .settingsUsageHistoryUnreadable, .settingsUsageResultCount, .settingsUsageLogTitle,
+        .settingsUsageLogDescription, .settingsUsageLogAvailable, .settingsUsageLogMissing,
+        .settingsUsageLogDamaged, .settingsUsageLogUnreadable,
+        .settingsUsageLogNoFailures, .settingsUsageLogFailurePlaybackLaunch,
+        .settingsUsageLogFailurePlaybackLock, .settingsUsageLogFailureReceiptWrite,
+        .settingsUsageLogFailureOther, .settingsUsageLogFailureUnknownEvent,
+        .settingsUsageLogFailureSummary, .settingsUsageRevealLog,
+        .settingsUsageCopyLogPath, .settingsUsageClearHistory, .settingsUsageClearLog,
+        .settingsUsageClearHistoryTitle, .settingsUsageClearHistoryMessage,
+        .settingsUsageClearLogTitle, .settingsUsageClearLogMessage,
+        .settingsUsagePrivacyTitle, .settingsUsagePrivacyHost,
+        .settingsUsagePrivacyProvider, .settingsUsagePrivacyBilling,
+        .settingsUsageProviderDisclosure, .settingsUsageActionInProgress,
+        .settingsUsageActionHistoryCleared, .settingsUsageActionLogCleared,
+        .settingsUsageActionLogRevealed, .settingsUsageActionLogPathCopied,
+        .settingsUsageFailureHistoryLockBusy, .settingsUsageFailureLogLockBusy,
+        .settingsUsageFailureHistoryClear, .settingsUsageFailureLogClear,
+        .settingsUsageFailureFinder, .settingsUsageFailureClipboard,
     ]
 }
 
