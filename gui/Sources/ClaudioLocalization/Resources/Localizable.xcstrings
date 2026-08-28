@@ -3430,6 +3430,78 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "前往事件与提示音" } }
       }
     },
+    "settings.general.login-item.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Let macOS start claudi0 when you sign in. This control always reflects the current system service status." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "让 macOS 在你登录时启动 claudi0。此控件始终反映当前系统服务状态。" } }
+      }
+    },
+    "settings.general.login-item.failure.disable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS could not remove claudi0 from login items. The previous status is still shown; retry the operation." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "macOS 无法从登录项中移除 claudi0。当前仍显示原状态；请重试。" } }
+      }
+    },
+    "settings.general.login-item.failure.enable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS could not add claudi0 to login items. The previous status is still shown; retry or review Login Items in System Settings." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "macOS 无法将 claudi0 添加到登录项。当前仍显示原状态；请重试或在系统设置中检查登录项。" } }
+      }
+    },
+    "settings.general.login-item.failure.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The signed embedded LoginItem is missing or damaged. Reinstall claudi0 before changing this setting." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "签名内嵌 LoginItem 缺失或损坏。请重新安装 claudi0 后再更改此设置。" } }
+      }
+    },
+    "settings.general.login-item.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable or disable the macOS login service. The switch changes only after the system call succeeds." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用或停用 macOS 登录服务。只有系统调用成功后开关才会改变。" } }
+      }
+    },
+    "settings.general.login-item.open-settings" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Login Items Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开登录项设置" } }
+      }
+    },
+    "settings.general.login-item.open-settings.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the Login Items panel so you can approve claudi0." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开登录项面板，以便批准 claudi0。" } }
+      }
+    },
+    "settings.general.login-item.status.disabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not registered with macOS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未向 macOS 注册" } }
+      }
+    },
+    "settings.general.login-item.status.enabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enabled by macOS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已由 macOS 启用" } }
+      }
+    },
+    "settings.general.login-item.status.requires-approval" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Registered, but macOS is waiting for your approval in Login Items settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已注册，但 macOS 正等待你在登录项设置中批准" } }
+      }
+    },
+    "settings.general.login-item.status.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Login item service is unavailable in this installation. Reinstall claudi0." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此安装中的登录项服务不可用。请重新安装 claudi0。" } }
+      }
+    },
+    "settings.general.login-item.toggle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open claudi0 at login" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录时打开 claudi0" } }
+      }
+    },
     "settings.general.language.chinese" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Simplified Chinese" } },

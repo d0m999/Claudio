@@ -232,6 +232,14 @@ jobs:
         working-directory: gui
         run: swift build -c release --arch x86_64 --product ClaudioGUI -Xswiftc -Osize
 
+      - name: Build LoginItem (arm64)
+        working-directory: gui
+        run: swift build -c release --arch arm64 --product ClaudioLoginItem
+
+      - name: Build LoginItem (x86_64)
+        working-directory: gui
+        run: swift build -c release --arch x86_64 --product ClaudioLoginItem
+
       - name: Merge universal GUI
         shell: bash
         run: |
@@ -243,6 +251,18 @@ jobs:
             -output dist/app-bin/ClaudioGUI
           strip -x dist/app-bin/ClaudioGUI
           chmod +x dist/app-bin/ClaudioGUI
+
+      - name: Merge universal LoginItem
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/app-bin
+          lipo -create \
+            gui/.build/arm64-apple-macosx/release/ClaudioLoginItem \
+            gui/.build/x86_64-apple-macosx/release/ClaudioLoginItem \
+            -output dist/app-bin/ClaudioLoginItem
+          strip -x dist/app-bin/ClaudioLoginItem
+          chmod +x dist/app-bin/ClaudioLoginItem
 
       - name: Assemble app bundle
         shell: bash
@@ -333,6 +353,8 @@ jobs:
           </plist>
           PLIST
           printf 'APPL????' > "$APP/Contents/PkgInfo"
+          bash scripts/assemble-login-item.sh \
+            dist/app-bin/ClaudioLoginItem "$APP" "$CLAUDIO_VERSION"
 
       - name: Verify unified version and release size budget
         shell: bash
@@ -342,7 +364,17 @@ jobs:
           CLI_VERSION="$("$APP/Contents/Resources/bin/claudi0" --version)"
           SHORT_VERSION="$(plutil -extract CFBundleShortVersionString raw "$APP/Contents/Info.plist")"
           BUNDLE_VERSION="$(plutil -extract CFBundleVersion raw "$APP/Contents/Info.plist")"
-          for ACTUAL_VERSION in "$CLI_VERSION" "$SHORT_VERSION" "$BUNDLE_VERSION"; do
+          LOGIN_ITEM_PLIST="$APP/Contents/Library/LoginItems/claudi0 LoginItem.app/Contents/Info.plist"
+          LOGIN_ITEM_SHORT_VERSION="$(plutil -extract CFBundleShortVersionString raw \
+            "$LOGIN_ITEM_PLIST")"
+          LOGIN_ITEM_BUNDLE_VERSION="$(plutil -extract CFBundleVersion raw \
+            "$LOGIN_ITEM_PLIST")"
+          for ACTUAL_VERSION in \
+            "$CLI_VERSION" \
+            "$SHORT_VERSION" \
+            "$BUNDLE_VERSION" \
+            "$LOGIN_ITEM_SHORT_VERSION" \
+            "$LOGIN_ITEM_BUNDLE_VERSION"; do
             if [[ "$ACTUAL_VERSION" != "$CLAUDIO_VERSION" ]]; then
               echo "::error::release version mismatch: expected=$CLAUDIO_VERSION actual=$ACTUAL_VERSION"
               exit 1
@@ -358,7 +390,8 @@ jobs:
           for BINARY in \
             "$APP/Contents/MacOS/$APP_EXECUTABLE" \
             "$APP/Contents/Resources/bin/claudi0" \
-            "$APP/Contents/Resources/bin/claudio"; do
+            "$APP/Contents/Resources/bin/claudio" \
+            "$APP/Contents/Library/LoginItems/claudi0 LoginItem.app/Contents/MacOS/claudi0-login-item"; do
             ARCHS="$(lipo -archs "$BINARY")"
             echo "$BINARY architectures: $ARCHS"
             if [[ " $ARCHS " != *" arm64 "* || " $ARCHS " != *" x86_64 "* ]]; then
@@ -372,6 +405,7 @@ jobs:
         run: |
           set -euo pipefail
           APP="dist/$APP_NAME.app"
+          LOGIN_ITEM_APP="$APP/Contents/Library/LoginItems/claudi0 LoginItem.app"
           codesign \
             --force \
             --options runtime \
@@ -382,11 +416,18 @@ jobs:
             --force \
             --options runtime \
             --timestamp \
+            --sign "$SIGNING_IDENTITY" \
+            "$LOGIN_ITEM_APP"
+          codesign \
+            --force \
+            --options runtime \
+            --timestamp \
             --entitlements gui/ClaudioGUI.entitlements \
             --sign "$SIGNING_IDENTITY" \
             "$APP"
           bash scripts/verify-release-signature.sh \
             executable "$EXPECTED_TEAM_ID" "$APP/Contents/Resources/bin/claudi0"
+          bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$LOGIN_ITEM_APP"
           bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$APP"
 
       - name: Notarize and staple app
@@ -523,12 +564,24 @@ jobs:
           test -d "$APP"
           diff -qr "dist/$APP_NAME.app" "$APP"
           test -d "$APP/Contents/Resources/packs/minimal-chime"
+          LOGIN_ITEM_APP="$APP/Contents/Library/LoginItems/claudi0 LoginItem.app"
+          LOGIN_ITEM_PLIST="$LOGIN_ITEM_APP/Contents/Info.plist"
+          test -d "$LOGIN_ITEM_APP"
           test "$(readlink "$APP/Contents/Resources/bin/claudio")" = "claudi0"
           CLI_VERSION="$("$APP/Contents/Resources/bin/claudi0" --version)"
           SHORT_VERSION="$(plutil -extract CFBundleShortVersionString raw \
             "$APP/Contents/Info.plist")"
           BUNDLE_VERSION="$(plutil -extract CFBundleVersion raw "$APP/Contents/Info.plist")"
-          for ACTUAL_VERSION in "$CLI_VERSION" "$SHORT_VERSION" "$BUNDLE_VERSION"; do
+          LOGIN_ITEM_SHORT_VERSION="$(plutil -extract CFBundleShortVersionString raw \
+            "$LOGIN_ITEM_PLIST")"
+          LOGIN_ITEM_BUNDLE_VERSION="$(plutil -extract CFBundleVersion raw \
+            "$LOGIN_ITEM_PLIST")"
+          for ACTUAL_VERSION in \
+            "$CLI_VERSION" \
+            "$SHORT_VERSION" \
+            "$BUNDLE_VERSION" \
+            "$LOGIN_ITEM_SHORT_VERSION" \
+            "$LOGIN_ITEM_BUNDLE_VERSION"; do
             if [[ "$ACTUAL_VERSION" != "$CLAUDIO_VERSION" ]]; then
               echo "::error::final DMG version mismatch: expected=$CLAUDIO_VERSION actual=$ACTUAL_VERSION"
               exit 1
@@ -536,12 +589,14 @@ jobs:
           done
           for BINARY in \
             "$APP/Contents/MacOS/$APP_EXECUTABLE" \
-            "$APP/Contents/Resources/bin/claudi0"; do
+            "$APP/Contents/Resources/bin/claudi0" \
+            "$LOGIN_ITEM_APP/Contents/MacOS/claudi0-login-item"; do
             ARCHS="$(lipo -archs "$BINARY")"
             [[ " $ARCHS " == *" arm64 "* && " $ARCHS " == *" x86_64 "* ]]
             bash scripts/verify-release-signature.sh executable "$EXPECTED_TEAM_ID" "$BINARY"
           done
           bash scripts/check-release-size.sh "$APP"
+          bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$LOGIN_ITEM_APP"
           bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$APP"
           bash scripts/verify-release-signature.sh dmg "$EXPECTED_TEAM_ID" "$DMG_PATH"
           spctl --assess --type execute --verbose=4 "$APP"

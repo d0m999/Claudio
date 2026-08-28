@@ -62,6 +62,23 @@ notarization、stapling、Gatekeeper、DMG checksum 与 Intel 真机均为 `not_
 GitHub release workflow、不读取 Apple/GitHub secrets，也不能替代签名 universal RC、#18/#19
 账本或正式人工验收。
 
+### LoginItem 人工验收门禁
+
+本地 harness、Debug build、bundle 布局和 size gate 只验证实现与组装合同。`dev-bundle.sh` 的
+ad-hoc 签名不能证明 macOS 会在真实登录会话启动 Claudio；以下证据当前均为
+`not_evaluated`，必须在候选 Developer ID 签名 app 上另行记录：
+
+1. macOS 13+ 开启“登录时打开”，分别观察 `enabled` 和 `requiresApproval`；需要批准时从 Claudio
+   打开系统“登录项”页面，批准并返回，确认页面恢复为系统实际状态。
+2. macOS 12 在 `/Applications` 安装候选 app，确认内嵌 LoginItem 有同一签名团队，再开启与取消；
+   退出 Claudio 后重新打开设置，确认状态仍来自系统注册事实。
+3. 每个平台都注销或重启后确认 Claudio 自动出现；再关闭“登录时打开”，重复注销或重启并确认
+   不再自动出现。
+4. 分别记录 Apple Silicon 与 Intel 的 OS 版本、CPU、候选 commit、bundle 路径、签名 identity、
+   登录/重启结果，以及 VoiceOver、键盘和焦点结果。未记录的格子保持 `not_evaluated`。
+
+这些人工结果不得由 ad-hoc bundle、单架构构建、静态源码扫描或 ServiceManagement mock 替代。
+
 ## 安装方式二：Homebrew（可选渠道）
 
 只有在对应 Release 启用了外部 tap 时才使用：

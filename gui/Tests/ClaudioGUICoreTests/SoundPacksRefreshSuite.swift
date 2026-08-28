@@ -2213,7 +2213,7 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
-    suite("SoundPacksWindow 是普通 library target，仓库仍只有一个 @main") {
+    suite("SoundPacksWindow 是普通 library target，只有两个 shipping executable 使用 @main") {
         guard let package = soundPacksCode("gui/Package.swift") else {
             expect(false, "读不到 gui/Package.swift")
             return
@@ -2249,8 +2249,12 @@ func runSoundPacksRefreshSuites() async {
             if code.contains("@main") { mainSites.append(name) }
         }
         expect(
-            mainSites == ["ClaudioGUI/ClaudioGUIApp.swift"],
-            "gui/Sources 下只许 shipping app 有一个 @main，实得 \(mainSites)")
+            mainSites.sorted()
+                == [
+                    "ClaudioGUI/ClaudioGUIApp.swift",
+                    "ClaudioLoginItem/main.swift",
+                ],
+            "gui/Sources 下只许主 app 与内嵌 LoginItem 两个 shipping @main，实得 \(mainSites)")
     }
 
     suite("SoundPacks editor owner：单写模型、legacy 单窗口复用、全体 MainActor") {

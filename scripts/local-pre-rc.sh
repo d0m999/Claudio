@@ -52,7 +52,7 @@ export CLAUDIO_PINNED_OUTPUT_DIRECTORY_IDENTITY="$output_directory_identity"
 claudio_with_pinned_output_directory \
     "$repo_root" "$output_directory" remove_stale_report
 
-for required_tool in git sw_vers uname swift jq bash lipo codesign; do
+for required_tool in git sw_vers uname swift jq bash lipo codesign plutil; do
     command -v "$required_tool" >/dev/null 2>&1 \
         || fail "required tool is unavailable: $required_tool"
 done
@@ -61,6 +61,7 @@ done
 # must never weaken or change the canonical local pre-RC baseline inherited from the scripts.
 unset CLAUDIO_GUI_BYTES_PER_ARCH \
     CLAUDIO_HELPER_BYTES_PER_ARCH \
+    CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH \
     CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES \
     CLAUDIO_LIPO_BIN \
     CLAUDIO_VERSION

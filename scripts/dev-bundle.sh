@@ -32,6 +32,10 @@ gui_build() {
     fi
 }
 
+login_item_build() {
+    swift build -c release --package-path "$repo_root/gui" --product ClaudioLoginItem "$@"
+}
+
 find_unique_gui_resource_bundle() {
   local search_dir="$1"
   local -a candidates=()
@@ -66,6 +70,9 @@ assemble_dev_bundle() {
     local GUI_RESOURCE_BUNDLE
     local HELPER_BINARY
     local HELPER_BIN_DIR
+    local LOGIN_ITEM_APP
+    local LOGIN_ITEM_BIN_DIR
+    local LOGIN_ITEM_BINARY
     local LOCALIZATION_BUNDLE
 
     # 建之前先清旧 bundle：若下面任一 `swift build` 因编译错误退出（set -e），旧 app
@@ -75,6 +82,7 @@ assemble_dev_bundle() {
     # 两个 `--product` 都不是可省的修饰：裸 `swift build -c release` 会连各自的测试
     # executable 一起建，而测试会引用 `#if DEBUG` 门控的 fixture，Release 下编译不过。
     gui_build
+    login_item_build
     swift build -c release --package-path "$repo_root/helper" --product claudio
 
     GUI_BIN_DIR="$(gui_build --show-bin-path)"
@@ -132,16 +140,26 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 PLIST
     printf 'APPL????' > "$APP/Contents/PkgInfo"
 
-    strip -x "$APP/Contents/MacOS/claudi0-app" "$APP/Contents/Resources/bin/claudi0"
+    LOGIN_ITEM_BIN_DIR="$(login_item_build --show-bin-path)"
+    LOGIN_ITEM_BINARY="$LOGIN_ITEM_BIN_DIR/ClaudioLoginItem"
+    bash "$repo_root/scripts/assemble-login-item.sh" \
+        "$LOGIN_ITEM_BINARY" "$APP" "$BUNDLE_VERSION"
+    LOGIN_ITEM_APP="$APP/Contents/Library/LoginItems/claudi0 LoginItem.app"
+
+    strip -x \
+        "$APP/Contents/MacOS/claudi0-app" \
+        "$APP/Contents/Resources/bin/claudi0" \
+        "$LOGIN_ITEM_APP/Contents/MacOS/claudi0-login-item"
     bash "$repo_root/scripts/check-release-size.sh" "$APP"
 
+    codesign --force --sign - "$APP/Contents/Resources/bin/claudi0"
+    codesign --force --sign - "$LOGIN_ITEM_APP"
     codesign \
         --force \
-        --deep \
         --entitlements "$repo_root/gui/ClaudioGUI.entitlements" \
         --sign - \
         "$APP"
-    codesign --verify --verbose "$APP"
+    codesign --verify --deep --strict --verbose "$APP"
     echo "✅ dist/${APP}（$(uname -m)）—— 用 open dist/${APP} 启动（菜单栏出现 Orbit Zero 图标）"
 }
 

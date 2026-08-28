@@ -117,6 +117,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// shared bootstrap 已上移到 AppDelegate 的 composition root，不再经过面板。
     init(
         preferences: ClaudioPreferences,
+        loginItemSettings: LoginItemSettingsModel,
         audioEnvironment: AudioImportEnvironment,
         hostIntegrationState: HostIntegrationPresentationState,
         integrationMatrixProvider: HostIntegrationMatrixProvider,
@@ -309,6 +310,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             onAdoptAICue: adoptAICue)
         let settingsWindowController = SettingsWindowController(
             preferences: languageStore,
+            loginItemSettings: loginItemSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: unifiedEventSettingsModel,
             eventSettingsSelection: unifiedEventSettingsSelection,

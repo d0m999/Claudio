@@ -16,6 +16,7 @@ import SwiftUI
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
+    private let loginItemSettings: LoginItemSettingsModel
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private let soundPacksEditorOwner: SoundPacksEditorOwner
     private let eventSettingsModel: PanelConfigController
@@ -46,6 +47,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     init(
         preferences: ClaudioPreferences,
+        loginItemSettings: LoginItemSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner,
         eventSettingsModel: PanelConfigController,
         eventSettingsSelection: EventSettingsWindowSelection,
@@ -60,6 +62,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             >
     ) {
         self.preferences = preferences
+        self.loginItemSettings = loginItemSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -143,6 +146,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         returnFocusTo application: NSRunningApplication?,
         onClose restoration: @escaping @MainActor (NSRunningApplication?) -> Void
     ) {
+        loginItemSettings.refresh()
         focusRestoration = restoration
         isPresentingWindow = true
         let wasVisible = window?.isVisible == true
@@ -171,6 +175,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             let keyWindow = notification.object as? NSWindow,
             keyWindow === window
         else { return }
+        loginItemSettings.refresh()
         updateIntegrationsPresentationState()
         announceLatestSoundPackStatusIfNeeded(in: keyWindow)
     }
@@ -207,6 +212,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             model: model,
             preferences: preferences,
             dynamicQuietPolicy: dynamicQuietObserver.policy,
+            loginItemSettings: loginItemSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: eventSettingsModel,
             eventSettingsSelection: eventSettingsSelection,

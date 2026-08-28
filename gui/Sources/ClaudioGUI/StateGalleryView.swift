@@ -102,6 +102,7 @@ import SwiftUI
         @StateObject private var model: SettingsWindowPresentationModel<NSRunningApplication>
         @StateObject private var languageStore: ClaudioPreferences
         @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
+        @StateObject private var loginItemSettings: LoginItemSettingsModel
 
         init(
             route: SettingsRoute,
@@ -137,13 +138,21 @@ import SwiftUI
                                 events: []))
                     },
                     publish: { _, _, now in now.addingTimeInterval(12) }))
+            _loginItemSettings = StateObject(
+                wrappedValue: LoginItemSettingsModel(
+                    adapter: makeLoginItemServiceAdapter(
+                        status: { .disabled },
+                        setEnabled: { enabled in
+                            enabled ? .enabled : .disabled
+                        })))
         }
 
         var body: some View {
             SettingsWindowView(
                 model: model,
                 preferences: languageStore,
-                dynamicQuietPolicy: dynamicQuietPolicy)
+                dynamicQuietPolicy: dynamicQuietPolicy,
+                loginItemSettings: loginItemSettings)
                 .frame(
                     width: SettingsWindowGeometry.minimumWidth,
                     height: SettingsWindowGeometry.minimumHeight)

@@ -24,14 +24,18 @@ private func runReleaseSizeGate(
     var environment = [
         "CLAUDIO_GUI_BYTES_PER_ARCH": "100",
         "CLAUDIO_HELPER_BYTES_PER_ARCH": "80",
+        "CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH": "40",
         "CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES": "1000",
         "CLAUDIO_LIPO_BIN": fakeLipo.path,
         "FAKE_GUI_ARCHS": "arm64 x86_64",
         "FAKE_HELPER_ARCHS": "arm64 x86_64",
+        "FAKE_LOGIN_ITEM_ARCHS": "arm64 x86_64",
         "FAKE_GUI_ARM64_BYTES": "100",
         "FAKE_GUI_X86_64_BYTES": "100",
         "FAKE_HELPER_ARM64_BYTES": "80",
         "FAKE_HELPER_X86_64_BYTES": "80",
+        "FAKE_LOGIN_ITEM_ARM64_BYTES": "40",
+        "FAKE_LOGIN_ITEM_X86_64_BYTES": "40",
     ]
     environment.merge(overrides) { _, new in new }
     return runTestProcess(
@@ -155,6 +159,29 @@ func runReleaseLayoutSuites() {
             yaml.contains("swift build -c release --arch arm64 --product claudio")
                 && yaml.contains("swift build -c release --arch x86_64 --product claudio"),
             "helper Release 构建必须显式选择 claudio product，不能顺带编译测试 executable")
+        expect(
+            yaml.contains("swift build -c release --arch arm64 --product ClaudioLoginItem")
+                && yaml.contains(
+                    "swift build -c release --arch x86_64 --product ClaudioLoginItem")
+                && yaml.contains(
+                    #"bash scripts/assemble-login-item.sh \"#)
+                && yaml.contains("Contents/Library/LoginItems/claudi0 LoginItem.app"),
+            "macOS 12 LoginItem 必须双架构构建并内嵌到固定签名布局")
+        expect(
+            yaml.contains(
+                #"""
+                --timestamp \
+                            --sign "$SIGNING_IDENTITY" \
+                            "$LOGIN_ITEM_APP"
+                """#)
+                && yaml.contains(
+                    #"""
+                    --timestamp \
+                                --entitlements gui/ClaudioGUI.entitlements \
+                                --sign "$SIGNING_IDENTITY" \
+                                "$APP"
+                    """#),
+            "release 必须先无主 app entitlements 地签 LoginItem，再以既有 entitlements 签外层 app")
 
         // GUI 自己的可执行文件在 Contents/MacOS/ —— 钉住「两者确实是两个不同的文件」，也就是 T17
         // 那个 bug 的前提。
@@ -441,6 +468,12 @@ func runReleaseLayoutSuites() {
                     #"--package-path "$repo_root/helper" --product claudio"#),
             "dev bundle 必须遍历复制所有 pack 与许可证，并显式构建 claudio helper product")
         expect(
+            devBundle.contains("--product ClaudioLoginItem")
+                && devBundle.contains(#"scripts/assemble-login-item.sh"#)
+                && devBundle.contains(
+                    #"codesign --force --sign - "$LOGIN_ITEM_APP""#),
+            "dev bundle 必须显式构建、组装并在外层 app 前签名 LoginItem")
+        expect(
             devBundle.contains("strip -x")
                 && devBundle.contains(#"bash "$repo_root/scripts/check-release-size.sh""#)
                 && devBundle.contains(#"ln -s claudi0 "$APP/Contents/Resources/bin/claudio""#),
@@ -453,8 +486,25 @@ func runReleaseLayoutSuites() {
             let gui = app.appendingPathComponent("Contents/MacOS/claudi0-app")
             let helper = app.appendingPathComponent("Contents/Resources/bin/claudi0")
             let alias = app.appendingPathComponent("Contents/Resources/bin/claudio")
+            let loginItem = app.appendingPathComponent(
+                "Contents/Library/LoginItems/claudi0 LoginItem.app",
+                isDirectory: true)
+            let loginItemBinary = loginItem.appendingPathComponent(
+                "Contents/MacOS/claudi0-login-item")
+            let loginItemPlist = loginItem.appendingPathComponent("Contents/Info.plist")
             writeFixture("g", to: gui)
             writeFixture("h", to: helper)
+            writeFixture("l", to: loginItemBinary)
+            writeFixture(
+                #"""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <plist version="1.0"><dict>
+                <key>CFBundleIdentifier</key><string>com.claudio.app.login-item</string>
+                <key>CFBundleExecutable</key><string>claudi0-login-item</string>
+                <key>LSMinimumSystemVersion</key><string>12.0</string>
+                </dict></plist>
+                """#,
+                to: loginItemPlist)
             try? FileManager.default.createSymbolicLink(
                 atPath: alias.path, withDestinationPath: "claudi0")
 
@@ -467,6 +517,7 @@ func runReleaseLayoutSuites() {
                   case "$(basename "$2")" in
                     claudi0-app) printf '%s\n' "$FAKE_GUI_ARCHS" ;;
                     claudi0) printf '%s\n' "$FAKE_HELPER_ARCHS" ;;
+                    claudi0-login-item) printf '%s\n' "$FAKE_LOGIN_ITEM_ARCHS" ;;
                     *) exit 2 ;;
                   esac
                   exit 0
@@ -479,6 +530,8 @@ func runReleaseLayoutSuites() {
                   claudi0-app:x86_64) size="$FAKE_GUI_X86_64_BYTES" ;;
                   claudi0:arm64) size="$FAKE_HELPER_ARM64_BYTES" ;;
                   claudi0:x86_64) size="$FAKE_HELPER_X86_64_BYTES" ;;
+                  claudi0-login-item:arm64) size="$FAKE_LOGIN_ITEM_ARM64_BYTES" ;;
+                  claudi0-login-item:x86_64) size="$FAKE_LOGIN_ITEM_X86_64_BYTES" ;;
                   *) exit 3 ;;
                 esac
                 /bin/dd if=/dev/zero of="$output" bs=1 count="$size" 2>/dev/null
@@ -510,6 +563,15 @@ func runReleaseLayoutSuites() {
                 mismatched.status != 0 && mismatched.output.contains("架构不一致"),
                 "GUI/helper 架构不一致必须拒绝：\(mismatched.output)")
 
+            let mismatchedLoginItem = runReleaseSizeGate(
+                app: app,
+                fakeLipo: fakeLipo,
+                overrides: ["FAKE_LOGIN_ITEM_ARCHS": "arm64"])
+            expect(
+                mismatchedLoginItem.status != 0
+                    && mismatchedLoginItem.output.contains("LoginItem 架构不一致"),
+                "GUI/LoginItem 架构不一致必须拒绝：\(mismatchedLoginItem.output)")
+
             try? FileManager.default.removeItem(at: alias)
             try? FileManager.default.createSymbolicLink(
                 atPath: alias.path, withDestinationPath: "wrong-helper")
@@ -527,7 +589,7 @@ func runReleaseLayoutSuites() {
             expect(
                 resourceOverflow.status != 0
                     && resourceOverflow.output.contains("非可执行资源超出体积预算")
-                    && resourceOverflow.output.contains("1001 B > 1000 B"),
+                    && resourceOverflow.output.contains("> 1000 B"),
                 "未使用的 Mach-O 余量不得补贴资源越界：\(resourceOverflow.output)")
             try? FileManager.default.removeItem(at: payload)
 
@@ -546,6 +608,13 @@ func runReleaseLayoutSuites() {
             expect(
                 missing.status != 0 && missing.output.contains("缺少 Release 可执行文件"),
                 "缺 helper 必须在任何预算计算前 fail closed：\(missing.output)")
+            writeFixture("h", to: helper)
+            try? FileManager.default.removeItem(at: loginItemBinary)
+            let missingLoginItem = runReleaseSizeGate(app: app, fakeLipo: fakeLipo)
+            expect(
+                missingLoginItem.status != 0
+                    && missingLoginItem.output.contains("claudi0-login-item"),
+                "缺 LoginItem 必须在任何预算计算前 fail closed：\(missingLoginItem.output)")
         }
     }
 
@@ -568,10 +637,14 @@ func runReleaseLayoutSuites() {
                 #"GUI_BYTES_PER_ARCH="${CLAUDIO_GUI_BYTES_PER_ARCH:-5500000}""#)
                 && gate.contains(
                     #"HELPER_BYTES_PER_ARCH="${CLAUDIO_HELPER_BYTES_PER_ARCH:-3250000}""#)
+                && gate.contains(
+                    #"LOGIN_ITEM_BYTES_PER_ARCH="${CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH:-500000}""#)
                 && environment.contains("default `5500000`")
                 && environment.contains("default `3250000`")
+                && environment.contains("default `500000`")
                 && budget.contains("`5,500,000 B`")
                 && budget.contains("`3,250,000 B`")
+                && budget.contains("`500,000 B`")
                 && budget.contains("`4,223,128 B`")
                 && budget.contains("`2,466,184 B`")
                 && budget.contains("`435,818 B`")
@@ -799,8 +872,8 @@ func runReleaseLayoutSuites() {
                 && signatureScript.contains(#"grep -Fq "Timestamp=none""#)
                 && yaml.components(
                     separatedBy: "bash scripts/verify-release-signature.sh"
-                ).count - 1 == 6,
-            "helper、app、DMG 及最终挂载容器必须复验 secure timestamp；"
+                ).count - 1 == 8,
+            "helper、LoginItem、app、DMG 及最终挂载容器必须复验 secure timestamp；"
                 + "所有工作流调用必须共用同一 fail-closed verifier")
         expect(
             contributorReference.contains("scripts/notarize-release-artifact.sh")
@@ -817,9 +890,12 @@ func runReleaseLayoutSuites() {
                     #"bash scripts/verify-release-signature.sh executable "$EXPECTED_TEAM_ID" "$BINARY""#
                 )
                 && finalVerification.contains(
-                    #""$APP/Contents/Resources/bin/claudi0"; do"#)
+                    #""$LOGIN_ITEM_APP/Contents/MacOS/claudi0-login-item"; do"#)
                 && !finalVerification.contains(
                     #""$APP/Contents/Resources/bin/claudio"; do"#)
+                && finalVerification.contains(
+                    #"bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$LOGIN_ITEM_APP""#
+                )
                 && finalVerification.contains(
                     #"bash scripts/verify-release-signature.sh app "$EXPECTED_TEAM_ID" "$APP""#)
                 && finalVerification.contains(

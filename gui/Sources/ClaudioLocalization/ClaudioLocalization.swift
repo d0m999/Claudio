@@ -437,6 +437,22 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.general.language.system-projection"
     public static let settingsGeneralPreferenceRecovery: Self =
         "settings.general.preference-recovery"
+    /// One exported namespace keeps this feature's catalog surface together without emitting a
+    /// separate public global symbol for every label in the size-constrained menu-bar executable.
+    public static let settingsGeneralLoginItem = (
+        description: Self("settings.general.login-item.description"),
+        toggle: Self("settings.general.login-item.toggle"),
+        hint: Self("settings.general.login-item.hint"),
+        disabled: Self("settings.general.login-item.status.disabled"),
+        enabled: Self("settings.general.login-item.status.enabled"),
+        requiresApproval: Self("settings.general.login-item.status.requires-approval"),
+        unavailable: Self("settings.general.login-item.status.unavailable"),
+        openSettings: Self("settings.general.login-item.open-settings"),
+        openSettingsHint: Self("settings.general.login-item.open-settings.hint"),
+        failureEnable: Self("settings.general.login-item.failure.enable"),
+        failureDisable: Self("settings.general.login-item.failure.disable"),
+        failureMissing: Self("settings.general.login-item.failure.missing")
+    )
     public static let settingsNotificationsFocusTitle: Self =
         "settings.notifications.focus.title"
     public static let settingsNotificationsFocusDescription: Self =
@@ -911,7 +927,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsGeneralLanguageDescription, .settingsGeneralLanguageSystem,
         .settingsGeneralLanguageChinese, .settingsGeneralLanguageEnglish,
         .settingsGeneralLanguageHint, .settingsGeneralSystemProjection,
-        .settingsGeneralPreferenceRecovery, .settingsNotificationsFocusTitle,
+        .settingsGeneralPreferenceRecovery, settingsGeneralLoginItem.description,
+        settingsGeneralLoginItem.toggle,
+        settingsGeneralLoginItem.hint, settingsGeneralLoginItem.disabled,
+        settingsGeneralLoginItem.enabled, settingsGeneralLoginItem.requiresApproval,
+        settingsGeneralLoginItem.unavailable, settingsGeneralLoginItem.openSettings,
+        settingsGeneralLoginItem.openSettingsHint, settingsGeneralLoginItem.failureEnable,
+        settingsGeneralLoginItem.failureDisable, settingsGeneralLoginItem.failureMissing,
+        .settingsNotificationsFocusTitle,
         .settingsNotificationsFocusDescription, .settingsNotificationsCalendarTitle,
         .settingsNotificationsCalendarDescription, .settingsNotificationsPermissionTitle,
         .settingsNotificationsCalendarPermissionTitle,

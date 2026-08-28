@@ -158,9 +158,12 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         let integrationActionProvider = HostIntegrationActionProvider { action in
             try await integrationBridge.perform(action)
         }
+        let loginItemSettings = LoginItemSettingsModel(
+            adapter: makeSystemLoginItemServiceAdapter())
 
         menuBarController = MenuBarController(
             preferences: preferences,
+            loginItemSettings: loginItemSettings,
             audioEnvironment: audioEnvironment,
             hostIntegrationState: initialIntegrationState,
             integrationMatrixProvider: integrationMatrixProvider,

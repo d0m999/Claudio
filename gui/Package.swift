@@ -13,13 +13,14 @@ let package = Package(
     name: "claudio-gui",
     defaultLocalization: "zh-Hans",
     platforms: [.macOS(.v12)],  // ENGINEERING.md: macOS 12+ floor, matching helper/Package.swift.
-    // The release workflow ships only ClaudioGUI. Declaring it explicitly is what lets
-    // `.github/workflows/release.yml` build with `--product ClaudioGUI` instead of a bare
+    // The release workflow builds ClaudioGUI and its macOS 12 LoginItem explicitly. Declaring the
+    // main product lets `.github/workflows/release.yml` use `--product ClaudioGUI` instead of a bare
     // `swift build -c release`: the bare form also builds `claudio-gui-tests`, and that
     // target references `#if DEBUG`-gated symbols (`PreviewFixtures`), so it does not — and
     // is not meant to — compile in Release. Release must build the app, not the harness.
     products: [
         .executable(name: "ClaudioGUI", targets: ["ClaudioGUI"]),
+        .executable(name: "ClaudioLoginItem", targets: ["ClaudioLoginItem"]),
         // Developer-only native benchmark; no bundle/release step copies this product.
         .executable(
             name: "claudio-sound-pack-benchmark",
@@ -94,6 +95,14 @@ let package = Package(
                 // Template PDFs keep the macOS 12 runtime independent of OS-version-specific
                 // SVG decoding. Bundle assembly must copy the generated *_ClaudioGUI.bundle.
                 .process("Resources/HostIcons"),
+            ]
+        ),
+        // macOS 12 compatibility helper. Packaging embeds this executable in a separately signed
+        // Contents/Library/LoginItems app; macOS 13+ registers the main app with SMAppService.
+        .executableTarget(
+            name: "ClaudioLoginItem",
+            linkerSettings: [
+                .linkedFramework("AppKit")
             ]
         ),
         // Tests run as a dependency-free executable harness, exactly like

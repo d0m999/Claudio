@@ -1,5 +1,6 @@
 import AppKit
 import ClaudioCore
+import ClaudioGUIComponents
 import ClaudioGUICore
 import ClaudioLocalization
 import SoundPacksWindow
@@ -12,6 +13,7 @@ struct SettingsWindowView: View {
     @ObservedObject var model: SettingsWindowPresentationModel<NSRunningApplication>
     @ObservedObject var preferences: ClaudioPreferences
     @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
+    @ObservedObject var loginItemSettings: LoginItemSettingsModel
     let soundPacksEditorOwner: SoundPacksEditorOwner?
     let eventSettingsModel: PanelConfigController?
     let eventSettingsSelection: EventSettingsWindowSelection?
@@ -38,6 +40,7 @@ struct SettingsWindowView: View {
         model: SettingsWindowPresentationModel<NSRunningApplication>,
         preferences: ClaudioPreferences,
         dynamicQuietPolicy: DynamicQuietPolicyController,
+        loginItemSettings: LoginItemSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
         eventSettingsModel: PanelConfigController? = nil,
         eventSettingsSelection: EventSettingsWindowSelection? = nil,
@@ -58,6 +61,7 @@ struct SettingsWindowView: View {
         self.model = model
         self.preferences = preferences
         self.dynamicQuietPolicy = dynamicQuietPolicy
+        self.loginItemSettings = loginItemSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -327,6 +331,10 @@ struct SettingsWindowView: View {
                 .accessibilityIdentifier("settings.general.language.system-projection")
             }
 
+            Divider()
+
+            LoginItemSettingsSection(model: loginItemSettings, l10n: l10n)
+
             if !preferences.recoveryIssues.isEmpty {
                 Label {
                     Text(l10n.text(.settingsGeneralPreferenceRecovery))
@@ -579,6 +587,81 @@ struct SettingsWindowView: View {
         case .usage: "chart.bar"
         case .shortcuts: "command"
         case .about: "info.circle"
+        }
+    }
+}
+
+@MainActor
+private struct LoginItemSettingsSection: View {
+    @ObservedObject var model: LoginItemSettingsModel
+    let l10n: ClaudioL10n
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(l10n.text(.settingsGeneralLoginItem.description))
+                .foregroundColor(.secondary)
+
+            Toggle(
+                l10n.text(.settingsGeneralLoginItem.toggle),
+                isOn: enabledBinding
+            )
+            .disabled(!model.projection.registration.canToggle)
+            .accessibilityHint(l10n.text(.settingsGeneralLoginItem.hint))
+            .accessibilityValue(statusText)
+            .accessibilityIdentifier("settings.general.login-item.toggle")
+
+            Text(statusText)
+                .foregroundColor(.secondary)
+
+            if model.projection.registration == .requiresApproval {
+                Button(l10n.text(.settingsGeneralLoginItem.openSettings)) {
+                    model.openSystemSettings()
+                }
+                .accessibilityHint(l10n.text(.settingsGeneralLoginItem.openSettingsHint))
+            }
+
+            if let failure = model.projection.failure {
+                VStack(alignment: .leading, spacing: 8) {
+                    FailureRow(
+                        message: failureText(
+                            failure.reason,
+                            requestedEnabled: failure.requestedEnabled))
+
+                    Button(l10n.text(.commonRetry)) {
+                        model.retryFailedOperation()
+                    }
+                }
+            }
+        }
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { model.projection.registration.isOn },
+            set: { model.setEnabled($0) })
+    }
+
+    private var statusText: String {
+        switch model.projection.registration {
+        case .disabled: l10n.text(.settingsGeneralLoginItem.disabled)
+        case .enabled: l10n.text(.settingsGeneralLoginItem.enabled)
+        case .requiresApproval: l10n.text(.settingsGeneralLoginItem.requiresApproval)
+        case .unavailable: l10n.text(.settingsGeneralLoginItem.unavailable)
+        }
+    }
+
+    private func failureText(
+        _ reason: LoginItemOperationFailureReason,
+        requestedEnabled: Bool
+    ) -> String {
+        switch reason {
+        case .embeddedLoginItemMissing:
+            l10n.text(.settingsGeneralLoginItem.failureMissing)
+        case .systemRejected:
+            l10n.text(
+                requestedEnabled
+                    ? .settingsGeneralLoginItem.failureEnable
+                    : .settingsGeneralLoginItem.failureDisable)
         }
     }
 }
