@@ -303,6 +303,8 @@ jobs:
           fi
           cp -R "$ARM_LOCALIZATION_BUNDLE" \
             "$APP/Contents/Resources/$(basename "$ARM_LOCALIZATION_BUNDLE")"
+          cp -R gui/AppResources/en.lproj "$APP/Contents/Resources/en.lproj"
+          cp -R gui/AppResources/zh-Hans.lproj "$APP/Contents/Resources/zh-Hans.lproj"
 
           cp dist/bin/claudio "$APP/Contents/Resources/bin/claudi0"
           ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
@@ -324,6 +326,8 @@ jobs:
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>LSMinimumSystemVersion</key><string>$MACOS_DEPLOYMENT_TARGET</string>
             <key>NSFocusStatusUsageDescription</key><string>claudi0 uses only whether Focus is active to temporarily quiet automatic sounds. It never stores the Focus name.</string>
+            <key>NSCalendarsUsageDescription</key><string>claudi0 checks only whether a non-all-day busy event is active to temporarily quiet automatic sounds. It never stores event details.</string>
+            <key>NSCalendarsFullAccessUsageDescription</key><string>claudi0 checks only whether a non-all-day busy event is active to temporarily quiet automatic sounds. It never stores event details.</string>
             <key>LSUIElement</key><true/>
           </dict>
           </plist>

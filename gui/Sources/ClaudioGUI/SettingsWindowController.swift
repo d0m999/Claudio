@@ -26,7 +26,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         @MainActor (AICueAdoptionRequest) async -> Result<
             AICueAdoptionOutcome, AICueAdoptionError
         >
-    private let focusQuietObserver: FocusQuietSystemObserver
+    private let dynamicQuietObserver: DynamicQuietSystemObserver
     private var window: NSWindow?
     private var isPresentingWindow = false
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
@@ -60,7 +60,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.audioEnvironment = audioEnvironment
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
         self.onAdoptAICue = onAdoptAICue
-        focusQuietObserver = FocusQuietSystemObserver()
+        dynamicQuietObserver = DynamicQuietSystemObserver()
         model = SettingsWindowPresentationModel(
             preferences: preferences,
             availability: settingsRouteAvailability(
@@ -152,7 +152,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let content = SettingsWindowView(
             model: model,
             preferences: preferences,
-            focusQuietPolicy: focusQuietObserver.policy,
+            dynamicQuietPolicy: dynamicQuietObserver.policy,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: eventSettingsModel,
             eventSettingsSelection: eventSettingsSelection,

@@ -10,7 +10,7 @@ import SwiftUI
 struct SettingsWindowView: View {
     @ObservedObject var model: SettingsWindowPresentationModel<NSRunningApplication>
     @ObservedObject var preferences: ClaudioPreferences
-    @ObservedObject var focusQuietPolicy: FocusQuietPolicyController
+    @ObservedObject var dynamicQuietPolicy: DynamicQuietPolicyController
     let soundPacksEditorOwner: SoundPacksEditorOwner?
     let eventSettingsModel: PanelConfigController?
     let eventSettingsSelection: EventSettingsWindowSelection?
@@ -34,7 +34,7 @@ struct SettingsWindowView: View {
     init(
         model: SettingsWindowPresentationModel<NSRunningApplication>,
         preferences: ClaudioPreferences,
-        focusQuietPolicy: FocusQuietPolicyController,
+        dynamicQuietPolicy: DynamicQuietPolicyController,
         soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
         eventSettingsModel: PanelConfigController? = nil,
         eventSettingsSelection: EventSettingsWindowSelection? = nil,
@@ -52,7 +52,7 @@ struct SettingsWindowView: View {
     ) {
         self.model = model
         self.preferences = preferences
-        self.focusQuietPolicy = focusQuietPolicy
+        self.dynamicQuietPolicy = dynamicQuietPolicy
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -324,16 +324,55 @@ struct SettingsWindowView: View {
             )
             .accessibilityIdentifier("settings.notifications.focus-toggle")
 
+            Toggle(isOn: calendarQuietBinding) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(l10n.text(.settingsNotificationsCalendarTitle))
+                        .font(.headline)
+                    Text(l10n.text(.settingsNotificationsCalendarDescription))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .accessibilityIdentifier("settings.notifications.calendar-toggle")
+
             Divider()
 
             settingsStatusRow(
                 title: l10n.text(.settingsNotificationsPermissionTitle),
                 value: focusAuthorizationText)
             settingsStatusRow(
+                title: l10n.text(.settingsNotificationsCalendarPermissionTitle),
+                value: calendarAuthorizationText)
+            if dynamicQuietPolicy.presentation.calendarAuthorization == .denied
+                || dynamicQuietPolicy.presentation.calendarAuthorization == .restricted
+            {
+                Button(l10n.text(.settingsNotificationsOpenCalendarPrivacy)) {
+                    openCalendarPrivacySettings()
+                }
+                .accessibilityIdentifier("settings.notifications.calendar-privacy")
+            }
+            settingsStatusRow(
                 title: l10n.text(.settingsNotificationsCurrentReasonTitle),
-                value: focusCurrentReasonText)
+                value: dynamicQuietCurrentReasonText)
+            settingsStatusRow(
+                title: l10n.text(.settingsNotificationsSnapshotHealthTitle),
+                value: snapshotHealthText)
 
-            if focusQuietPolicy.presentation.publicationFailed {
+            if dynamicQuietPolicy.presentation.hasObserverFailure,
+                dynamicQuietPolicy.presentation.currentReason != .observerFailure
+            {
+                Label {
+                    Text(l10n.text(.settingsNotificationsReasonObserverFailure))
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                }
+                .accessibilityIdentifier("settings.notifications.observer-failure")
+            }
+
+            if dynamicQuietPolicy.presentation.snapshotHealth != .current {
                 Label {
                     Text(l10n.text(.settingsNotificationsPublicationFailed))
                         .fixedSize(horizontal: false, vertical: true)
@@ -354,17 +393,23 @@ struct SettingsWindowView: View {
         }
         .frame(maxWidth: 620, alignment: .leading)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("settings.notifications.focus-policy")
+        .accessibilityIdentifier("settings.notifications.dynamic-quiet-policy")
     }
 
     private var focusQuietBinding: Binding<Bool> {
         Binding(
-            get: { focusQuietPolicy.presentation.isEnabled },
-            set: { focusQuietPolicy.setEnabled($0) })
+            get: { dynamicQuietPolicy.presentation.focusIsEnabled },
+            set: { dynamicQuietPolicy.setFocusEnabled($0) })
+    }
+
+    private var calendarQuietBinding: Binding<Bool> {
+        Binding(
+            get: { dynamicQuietPolicy.presentation.calendarIsEnabled },
+            set: { dynamicQuietPolicy.setCalendarEnabled($0) })
     }
 
     private var focusAuthorizationText: String {
-        switch focusQuietPolicy.presentation.authorization {
+        switch dynamicQuietPolicy.presentation.focusAuthorization {
         case .notRequested: l10n.text(.settingsNotificationsPermissionNotRequested)
         case .authorized: l10n.text(.settingsNotificationsPermissionAuthorized)
         case .denied: l10n.text(.settingsNotificationsPermissionDenied)
@@ -372,14 +417,42 @@ struct SettingsWindowView: View {
         }
     }
 
-    private var focusCurrentReasonText: String {
-        switch focusQuietPolicy.presentation.currentReason {
-        case .policyDisabled: l10n.text(.settingsNotificationsReasonDisabled)
+    private var calendarAuthorizationText: String {
+        switch dynamicQuietPolicy.presentation.calendarAuthorization {
+        case .notRequested: l10n.text(.settingsNotificationsPermissionNotRequested)
+        case .authorized: l10n.text(.settingsNotificationsPermissionAuthorized)
+        case .denied: l10n.text(.settingsNotificationsPermissionDenied)
+        case .restricted: l10n.text(.settingsNotificationsPermissionRestricted)
+        }
+    }
+
+    private var dynamicQuietCurrentReasonText: String {
+        switch dynamicQuietPolicy.presentation.currentReason {
+        case .policiesDisabled: l10n.text(.settingsNotificationsReasonDisabled)
         case .permissionRequired: l10n.text(.settingsNotificationsReasonPermissionRequired)
         case .noDynamicQuiet: l10n.text(.settingsNotificationsReasonInactive)
         case .focusActive: l10n.text(.settingsNotificationsReasonFocusActive)
+        case .calendarBusy: l10n.text(.settingsNotificationsReasonCalendarBusy)
+        case .focusAndCalendarBusy:
+            l10n.text(.settingsNotificationsReasonFocusAndCalendarBusy)
         case .observerFailure: l10n.text(.settingsNotificationsReasonObserverFailure)
         }
+    }
+
+    private var snapshotHealthText: String {
+        switch dynamicQuietPolicy.presentation.snapshotHealth {
+        case .current: l10n.text(.settingsNotificationsSnapshotCurrent)
+        case .publicationFailed: l10n.text(.settingsNotificationsSnapshotPublicationFailed)
+        case .expired: l10n.text(.settingsNotificationsSnapshotExpired)
+        }
+    }
+
+    private func openCalendarPrivacySettings() {
+        guard
+            let url = URL(
+                string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars")
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func settingsStatusRow(title: String, value: String) -> some View {

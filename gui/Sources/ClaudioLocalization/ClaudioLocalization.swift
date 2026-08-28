@@ -437,8 +437,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.notifications.focus.title"
     public static let settingsNotificationsFocusDescription: Self =
         "settings.notifications.focus.description"
+    public static let settingsNotificationsCalendarTitle: Self =
+        "settings.notifications.calendar.title"
+    public static let settingsNotificationsCalendarDescription: Self =
+        "settings.notifications.calendar.description"
     public static let settingsNotificationsPermissionTitle: Self =
         "settings.notifications.permission.title"
+    public static let settingsNotificationsCalendarPermissionTitle: Self =
+        "settings.notifications.calendar.permission.title"
     public static let settingsNotificationsPermissionNotRequested: Self =
         "settings.notifications.permission.not-requested"
     public static let settingsNotificationsPermissionAuthorized: Self =
@@ -457,10 +463,24 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.notifications.reason.inactive"
     public static let settingsNotificationsReasonFocusActive: Self =
         "settings.notifications.reason.focus-active"
+    public static let settingsNotificationsReasonCalendarBusy: Self =
+        "settings.notifications.reason.calendar-busy"
+    public static let settingsNotificationsReasonFocusAndCalendarBusy: Self =
+        "settings.notifications.reason.focus-and-calendar-busy"
     public static let settingsNotificationsReasonObserverFailure: Self =
         "settings.notifications.reason.observer-failure"
+    public static let settingsNotificationsSnapshotHealthTitle: Self =
+        "settings.notifications.snapshot-health.title"
+    public static let settingsNotificationsSnapshotCurrent: Self =
+        "settings.notifications.snapshot-health.current"
+    public static let settingsNotificationsSnapshotPublicationFailed: Self =
+        "settings.notifications.snapshot-health.publication-failed"
+    public static let settingsNotificationsSnapshotExpired: Self =
+        "settings.notifications.snapshot-health.expired"
     public static let settingsNotificationsPublicationFailed: Self =
         "settings.notifications.publication-failed"
+    public static let settingsNotificationsOpenCalendarPrivacy: Self =
+        "settings.notifications.open-calendar-privacy"
     public static let settingsNotificationsOpenEvents: Self =
         "settings.notifications.open-events"
     public static let settingsRouteIdentity: Self = "settings.route.identity"
@@ -886,14 +906,22 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsGeneralLanguageChinese, .settingsGeneralLanguageEnglish,
         .settingsGeneralLanguageHint, .settingsGeneralSystemProjection,
         .settingsGeneralPreferenceRecovery, .settingsNotificationsFocusTitle,
-        .settingsNotificationsFocusDescription, .settingsNotificationsPermissionTitle,
+        .settingsNotificationsFocusDescription, .settingsNotificationsCalendarTitle,
+        .settingsNotificationsCalendarDescription, .settingsNotificationsPermissionTitle,
+        .settingsNotificationsCalendarPermissionTitle,
         .settingsNotificationsPermissionNotRequested,
         .settingsNotificationsPermissionAuthorized, .settingsNotificationsPermissionDenied,
         .settingsNotificationsPermissionRestricted, .settingsNotificationsCurrentReasonTitle,
         .settingsNotificationsReasonDisabled,
         .settingsNotificationsReasonPermissionRequired, .settingsNotificationsReasonInactive,
-        .settingsNotificationsReasonFocusActive, .settingsNotificationsReasonObserverFailure,
-        .settingsNotificationsPublicationFailed, .settingsNotificationsOpenEvents,
+        .settingsNotificationsReasonFocusActive, .settingsNotificationsReasonCalendarBusy,
+        .settingsNotificationsReasonFocusAndCalendarBusy,
+        .settingsNotificationsReasonObserverFailure, .settingsNotificationsSnapshotHealthTitle,
+        .settingsNotificationsSnapshotCurrent,
+        .settingsNotificationsSnapshotPublicationFailed,
+        .settingsNotificationsSnapshotExpired,
+        .settingsNotificationsPublicationFailed,
+        .settingsNotificationsOpenCalendarPrivacy, .settingsNotificationsOpenEvents,
         .settingsRouteIdentity,
         .settingsRouteReady, .settingsRouteInvalidSurface, .settingsRouteStaleSurface,
         .settingsRouteStaleScope, .settingsRouteStaleEvent, .settingsRouteInvalidPack,

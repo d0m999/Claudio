@@ -668,6 +668,14 @@ func runLocalPreRCSuites() {
             try? fileManager.createDirectory(
                 at: repository.appendingPathComponent("packs"),
                 withIntermediateDirectories: true)
+            writeFixture(
+                "calendar privacy",
+                to: repository.appendingPathComponent(
+                    "gui/AppResources/en.lproj/InfoPlist.strings"))
+            writeFixture(
+                "日历隐私",
+                to: repository.appendingPathComponent(
+                    "gui/AppResources/zh-Hans.lproj/InfoPlist.strings"))
             fixture.copyProductionFiles(
                 ["dev-bundle.sh", "pinned-output-directory.sh"],
                 executableNames: ["dev-bundle.sh"])

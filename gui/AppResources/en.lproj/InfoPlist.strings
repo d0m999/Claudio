@@ -1,0 +1,2 @@
+"NSCalendarsUsageDescription" = "claudi0 checks only whether a non-all-day busy event is active to temporarily quiet automatic sounds. It never stores event details.";
+"NSCalendarsFullAccessUsageDescription" = "claudi0 checks only whether a non-all-day busy event is active to temporarily quiet automatic sounds. It never stores event details.";

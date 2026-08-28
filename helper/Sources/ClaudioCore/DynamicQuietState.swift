@@ -3,27 +3,30 @@ import Foundation
 
 /// GUI 与短生命周期 helper 之间唯一允许交换的动态静默事实。
 ///
-/// 字段刻意固定为 schema、revision、expiry 与布尔原因；Focus 名称、宿主内容、路径和任何
-/// 日历字段都没有进入这个类型的表达能力。第一阶段只交付 Focus 原因，未来原因必须由自己的
-/// ticket 扩展 schema，而不能把私人字段塞进一个自由字典。
+/// 字段刻意固定为 schema、revision、expiry 与两个布尔原因；Focus 名称、宿主内容、路径和
+/// 日历私密字段都没有进入这个类型的表达能力。原因只能通过 schema 演进成为布尔字段，不能把
+/// 私人内容塞进一个自由字典。
 public struct DynamicQuietSnapshot: Codable, Sendable, Equatable {
-    public static let currentSchema = 1
+    public static let currentSchema = 2
     public static let maximumLifetime: TimeInterval = 30
 
     public let schema: Int
     public let revision: UInt64
     public let expiresAtEpochSeconds: TimeInterval
     public let focusActive: Bool
+    public let calendarBusy: Bool
 
     public init(
         revision: UInt64,
         expiresAtEpochSeconds: TimeInterval,
-        focusActive: Bool
+        focusActive: Bool,
+        calendarBusy: Bool
     ) {
         schema = Self.currentSchema
         self.revision = revision
         self.expiresAtEpochSeconds = expiresAtEpochSeconds
         self.focusActive = focusActive
+        self.calendarBusy = calendarBusy
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -31,6 +34,7 @@ public struct DynamicQuietSnapshot: Codable, Sendable, Equatable {
         case revision
         case expiresAtEpochSeconds = "expires_at"
         case focusActive = "focus_active"
+        case calendarBusy = "calendar_busy"
     }
 }
 
@@ -163,7 +167,7 @@ public func dynamicQuietDecision(
             {
                 return .rejected(.revisionStateWriteFailed)
             }
-            return snapshot.focusActive ? .quiet : .inactive
+            return snapshot.focusActive || snapshot.calendarBusy ? .quiet : .inactive
         }
     }
 }
@@ -174,7 +178,7 @@ public enum DynamicQuietPublicationError: String, Error, Sendable, Equatable {
     case writeFailed = "write_failed"
 }
 
-/// GUI 侧的单写者。每次 publication 都生成严格递增 revision、短 TTL、精确四字段 JSON，
+/// GUI 侧的单写者。每次 publication 都生成严格递增 revision、短 TTL、精确五字段 JSON，
 /// 再经 0600 staging + fsync + rename 原子发布。失败不推进内存 revision，也不会报告假成功。
 public final class DynamicQuietSnapshotPublisher {
     public let snapshotFile: URL
@@ -188,6 +192,7 @@ public final class DynamicQuietSnapshotPublisher {
 
     public func publish(
         focusActive: Bool,
+        calendarBusy: Bool = false,
         now: Date = Date(),
         lifetime: TimeInterval = 12
     ) -> Result<DynamicQuietSnapshot, DynamicQuietPublicationError> {
@@ -218,7 +223,8 @@ public final class DynamicQuietSnapshotPublisher {
         let snapshot = DynamicQuietSnapshot(
             revision: floor + 1,
             expiresAtEpochSeconds: now.addingTimeInterval(lifetime).timeIntervalSince1970,
-            focusActive: focusActive)
+            focusActive: focusActive,
+            calendarBusy: calendarBusy)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(snapshot),
@@ -252,7 +258,8 @@ private func readStrictDynamicQuietSnapshot(
     guard
         let object = try? JSONSerialization.jsonObject(with: data),
         let dictionary = object as? [String: Any],
-        Set(dictionary.keys) == ["schema", "revision", "expires_at", "focus_active"]
+        Set(dictionary.keys)
+            == ["schema", "revision", "expires_at", "focus_active", "calendar_busy"]
     else {
         return .failure(.malformed)
     }
@@ -266,6 +273,8 @@ private func readStrictDynamicQuietSnapshot(
         expiry.isFinite,
         let focusValue = dictionary["focus_active"],
         isJSONBoolean(focusValue),
+        let calendarValue = dictionary["calendar_busy"],
+        isJSONBoolean(calendarValue),
         let snapshot = try? JSONDecoder().decode(DynamicQuietSnapshot.self, from: data),
         snapshot.revision == revision,
         snapshot.expiresAtEpochSeconds == expiry

@@ -4,7 +4,7 @@ import Foundation
 
 @MainActor
 func runDynamicQuietStateSuites() {
-    suite("Dynamic Quiet publication：四字段最小快照、私有权限与有效 Focus 判定") {
+    suite("Dynamic Quiet publication：五字段最小快照、私有权限与组合原因判定") {
         withTempDirectory { root in
             let paths = dynamicQuietTestPaths(root)
             let now = Date(timeIntervalSince1970: 10_000)
@@ -22,15 +22,20 @@ func runDynamicQuietStateSuites() {
                     with: Data(contentsOf: paths.snapshot))) as? [String: Any]
             expect(
                 Set(object.map { Array($0.keys) } ?? [])
-                    == ["schema", "revision", "expires_at", "focus_active"],
-                "快照只能含 schema/revision/expiry/Focus 布尔原因")
+                    == ["schema", "revision", "expires_at", "focus_active", "calendar_busy"],
+                "快照只能含 schema/revision/expiry/两个布尔原因")
             let serialized =
                 String(
                     data: (try? Data(contentsOf: paths.snapshot)) ?? Data(), encoding: .utf8) ?? ""
-            for forbidden in ["focus_name", "host", "path", "calendar", "title"] {
+            for forbidden in [
+                "focus_name", "host", "path", "calendar_title", "calendar_id", "title",
+                "location", "url", "attendee", "notes",
+            ] {
                 expect(!serialized.contains(forbidden), "快照不得包含私人字段 \(forbidden)")
             }
-            expect(snapshot.schema == 1 && snapshot.focusActive, "发布结果必须是 Focus active v1")
+            expect(
+                snapshot.schema == 2 && snapshot.focusActive && !snapshot.calendarBusy,
+                "发布结果必须是 Focus-only v2")
             expect(fileMode(paths.directory) == 0o700, "动态静默目录必须是 0700")
             expect(fileMode(paths.snapshot) == 0o600, "动态静默快照必须从发布起就是 0600")
             expect(
@@ -39,16 +44,27 @@ func runDynamicQuietStateSuites() {
             expect(fileMode(paths.revision) == 0o600, "helper revision 水位必须是 0600")
 
             guard
-                case .success(let inactive) = publisher.publish(
-                    focusActive: false, now: now, lifetime: 12)
+                case .success(let calendarOnly) = publisher.publish(
+                    focusActive: false, calendarBusy: true, now: now, lifetime: 12)
             else {
-                expect(false, "关闭原因快照必须发布成功")
+                expect(false, "Calendar-only 原因快照必须发布成功")
                 return
             }
-            expect(inactive.revision > snapshot.revision, "每次 publication revision 必须递增")
+            expect(calendarOnly.revision > snapshot.revision, "每次 publication revision 必须递增")
+            expect(
+                dynamicQuietDecision(environment: paths.environment(now: now)) == .quiet,
+                "有效 Calendar busy 必须抑制 automatic playback")
+
+            guard
+                case .success = publisher.publish(
+                    focusActive: false, calendarBusy: false, now: now, lifetime: 12)
+            else {
+                expect(false, "关闭组合原因快照必须发布成功")
+                return
+            }
             expect(
                 dynamicQuietDecision(environment: paths.environment(now: now)) == .inactive,
-                "有效 false 快照必须恢复正常 automatic playback")
+                "两个 false 原因必须恢复正常 automatic playback")
         }
     }
 
@@ -63,7 +79,7 @@ func runDynamicQuietStateSuites() {
                 "损坏 JSON 必须拒绝")
 
             writeFixture(
-                #"{"schema":1,"revision":1,"expires_at":20012,"focus_active":true,"focus_name":"Private"}"#,
+                #"{"schema":2,"revision":1,"expires_at":20012,"focus_active":true,"calendar_busy":false,"focus_name":"Private"}"#,
                 to: paths.snapshot)
             expect(
                 dynamicQuietDecision(environment: paths.environment(now: now))
@@ -71,7 +87,7 @@ func runDynamicQuietStateSuites() {
                 "任何额外私人字段都必须因精确 key set 被拒绝")
 
             writeFixture(
-                #"{"schema":1,"revision":2,"expires_at":19999,"focus_active":true}"#,
+                #"{"schema":2,"revision":2,"expires_at":19999,"focus_active":true,"calendar_busy":false}"#,
                 to: paths.snapshot)
             expect(
                 dynamicQuietDecision(environment: paths.environment(now: now))
@@ -79,7 +95,7 @@ func runDynamicQuietStateSuites() {
                 "过期快照不得继续静默")
 
             writeFixture(
-                #"{"schema":1,"revision":3,"expires_at":20100,"focus_active":true}"#,
+                #"{"schema":2,"revision":3,"expires_at":20100,"focus_active":true,"calendar_busy":false}"#,
                 to: paths.snapshot)
             expect(
                 dynamicQuietDecision(environment: paths.environment(now: now))
@@ -207,7 +223,7 @@ func runDynamicQuietStateSuites() {
                     == .rejected(.unsafeDirectory),
                 "snapshot 路径含用户 symlink 目录时必须拒绝")
             writeFixture(
-                #"{"schema":2,"revision":\#(snapshot.revision + 1),"expires_at":50012,"focus_active":true}"#,
+                #"{"schema":3,"revision":\#(snapshot.revision + 1),"expires_at":50012,"focus_active":true,"calendar_busy":false}"#,
                 to: outsidePaths.snapshot)
             expect(
                 dynamicQuietDecision(environment: outsidePaths.environment(now: now))

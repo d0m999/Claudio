@@ -3268,6 +3268,24 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用量" } }
       }
     },
+    "settings.notifications.calendar.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "When enabled and authorized, only a current non-all-day busy event temporarily suppresses automatic playback. Event details are never retained." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启并授权后，只有当前非全天 busy 事件会临时抑制自动播放；事件详情不会被保留。" } }
+      }
+    },
+    "settings.notifications.calendar.permission.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Calendar permission" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日历权限" } }
+      }
+    },
+    "settings.notifications.calendar.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quiet automatic sounds while Calendar is busy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日历忙碌时静默自动提示音" } }
+      }
+    },
     "settings.notifications.focus.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Quiet automatic sounds during Focus" } },
@@ -3340,16 +3358,58 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 正在抑制自动提示音" } }
       }
     },
+    "settings.notifications.reason.calendar-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Calendar busy is suppressing automatic sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日历忙碌正在抑制自动提示音" } }
+      }
+    },
+    "settings.notifications.reason.focus-and-calendar-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus and Calendar busy are suppressing automatic sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 与日历忙碌正在共同抑制自动提示音" } }
+      }
+    },
     "settings.notifications.reason.observer-failure" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus observer unavailable; automatic sounds continue" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus observer 不可用；自动提示音继续播放" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A Dynamic Quiet State observer is unavailable; automatic sounds continue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Dynamic Quiet State observer 不可用；自动提示音继续播放" } }
+      }
+    },
+    "settings.notifications.snapshot-health.current" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前有效" } }
+      }
+    },
+    "settings.notifications.snapshot-health.expired" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expired; automatic sounds continue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已过期；自动提示音继续播放" } }
+      }
+    },
+    "settings.notifications.snapshot-health.publication-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh failed; the previous snapshot remains short-lived" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新失败；之前的快照仍会按短有效期过期" } }
+      }
+    },
+    "settings.notifications.snapshot-health.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Snapshot status" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快照状态" } }
       }
     },
     "settings.notifications.publication-failed" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Dynamic Quiet State could not be published. Automatic sounds continue after any previous snapshot expires." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法发布 Dynamic Quiet State；之前的快照过期后，自动提示音会继续播放。" } }
+      }
+    },
+    "settings.notifications.open-calendar-privacy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Calendar Privacy Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开日历隐私设置" } }
       }
     },
     "settings.notifications.open-events" : {

@@ -85,6 +85,9 @@ assemble_dev_bundle() {
     cp "$GUI_BIN_DIR/ClaudioGUI" "$APP/Contents/MacOS/claudi0-app"
     cp -R "$GUI_RESOURCE_BUNDLE" "$APP/Contents/Resources/$(basename "$GUI_RESOURCE_BUNDLE")"
     cp -R "$LOCALIZATION_BUNDLE" "$APP/Contents/Resources/$(basename "$LOCALIZATION_BUNDLE")"
+    cp -R "$repo_root/gui/AppResources/en.lproj" "$APP/Contents/Resources/en.lproj"
+    cp -R "$repo_root/gui/AppResources/zh-Hans.lproj" \
+        "$APP/Contents/Resources/zh-Hans.lproj"
     HELPER_BIN_DIR="$(swift build -c release --package-path "$repo_root/helper" \
         --product claudio --show-bin-path)"
     HELPER_BINARY="$HELPER_BIN_DIR/claudio"
@@ -120,6 +123,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
   <key>NSFocusStatusUsageDescription</key><string>claudi0 uses only whether Focus is active to temporarily quiet automatic sounds. It never stores the Focus name.</string>
+  <key>NSCalendarsUsageDescription</key><string>claudi0 checks only whether a non-all-day busy event is active to temporarily quiet automatic sounds. It never stores event details.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>claudi0 checks only whether a non-all-day busy event is active to temporarily quiet automatic sounds. It never stores event details.</string>
   <key>LSUIElement</key><true/>
 </dict>
 </plist>

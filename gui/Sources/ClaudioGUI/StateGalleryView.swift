@@ -101,7 +101,7 @@ import SwiftUI
     private struct SettingsWindowRouteFrame: View {
         @StateObject private var model: SettingsWindowPresentationModel<NSRunningApplication>
         @StateObject private var languageStore: ClaudioPreferences
-        @StateObject private var focusQuietPolicy: FocusQuietPolicyController
+        @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
 
         init(
             route: SettingsRoute,
@@ -115,26 +115,35 @@ import SwiftUI
                     preferences: preferences,
                     availability: availability))
             _languageStore = StateObject(wrappedValue: preferences)
-            _focusQuietPolicy = StateObject(
-                wrappedValue: FocusQuietPolicyController(
+            _dynamicQuietPolicy = StateObject(
+                wrappedValue: DynamicQuietPolicyController(
                     defaults: UserDefaults(),
-                    readSystemState: {
+                    readFocusState: {
                         FocusQuietSystemState(authorization: .authorized, isFocused: false)
                     },
-                    requestAuthorization: { completion in
+                    requestFocusAuthorization: { completion in
                         completion(
                             FocusQuietSystemState(
                                 authorization: .authorized,
                                 isFocused: false))
                     },
-                    publish: { _, _ in true }))
+                    readCalendarState: { _ in
+                        CalendarQuietSystemState(authorization: .authorized, events: [])
+                    },
+                    requestCalendarAuthorization: { completion in
+                        completion(
+                            CalendarQuietSystemState(
+                                authorization: .authorized,
+                                events: []))
+                    },
+                    publish: { _, _, now in now.addingTimeInterval(12) }))
         }
 
         var body: some View {
             SettingsWindowView(
                 model: model,
                 preferences: languageStore,
-                focusQuietPolicy: focusQuietPolicy)
+                dynamicQuietPolicy: dynamicQuietPolicy)
                 .frame(
                     width: SettingsWindowGeometry.minimumWidth,
                     height: SettingsWindowGeometry.minimumHeight)
