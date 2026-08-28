@@ -8,24 +8,24 @@ private actor GenerationVaultFixture: AICueCredentialVault {
 
     init(configured: Bool) { self.configured = configured }
 
-    func containsCredential(for providerID: AICueProviderID) async throws -> Bool { configured }
-    func credential(for providerID: AICueProviderID) async throws -> SensitiveCredentialInput? {
+    func containsCredential(in slotID: AICueCredentialSlotID) async throws -> Bool { configured }
+    func credential(in slotID: AICueCredentialSlotID) async throws -> SensitiveCredentialInput? {
         credentialReadCount += 1
         return configured ? try! SensitiveCredentialInput("fixture-generation-key") : nil
     }
     func replaceCredential(
         _ credential: SensitiveCredentialInput,
-        for providerID: AICueProviderID
+        in slotID: AICueCredentialSlotID
     ) async throws {}
-    func deleteCredential(for providerID: AICueProviderID) async throws {}
+    func deleteCredential(in slotID: AICueCredentialSlotID) async throws {}
 
     func reads() -> Int { credentialReadCount }
 }
 
 private actor GenerationSlowVaultFixture: AICueCredentialVault {
-    func containsCredential(for providerID: AICueProviderID) async throws -> Bool { true }
+    func containsCredential(in slotID: AICueCredentialSlotID) async throws -> Bool { true }
 
-    func credential(for providerID: AICueProviderID) async throws -> SensitiveCredentialInput? {
+    func credential(in slotID: AICueCredentialSlotID) async throws -> SensitiveCredentialInput? {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.2) {
                 continuation.resume(returning: try! SensitiveCredentialInput("fixture-key"))
@@ -35,10 +35,10 @@ private actor GenerationSlowVaultFixture: AICueCredentialVault {
 
     func replaceCredential(
         _ credential: SensitiveCredentialInput,
-        for providerID: AICueProviderID
+        in slotID: AICueCredentialSlotID
     ) async throws {}
 
-    func deleteCredential(for providerID: AICueProviderID) async throws {}
+    func deleteCredential(in slotID: AICueCredentialSlotID) async throws {}
 }
 
 private enum GenerationProviderStep: Sendable {
@@ -51,10 +51,15 @@ private actor GenerationProviderFixture: AICueProvider {
     private var captured: [AICueProviderRequest] = []
     private var capturedDeadlines: [AICueGenerationDeadline] = []
 
-    nonisolated let profile: AICueProviderProfile = try! AICueProviderRegistry().profile(
-        for: .elevenLabsGlobal)
+    nonisolated let profile: AICueProviderProfile
 
-    init(steps: [GenerationProviderStep]) { self.steps = steps }
+    init(
+        steps: [GenerationProviderStep],
+        profileID: AICueProviderProfileID = .elevenLabsGlobal
+    ) {
+        self.steps = steps
+        profile = try! AICueProviderRegistry().profile(for: profileID)
+    }
 
     func validateCredential(_ credential: SensitiveCredentialInput) async throws {}
 
@@ -80,6 +85,43 @@ private actor GenerationProviderFixture: AICueProvider {
 
     func requests() -> [AICueProviderRequest] { captured }
     func deadlines() -> [AICueGenerationDeadline] { capturedDeadlines }
+}
+
+private actor GenerationCredentialLeaseManagerFixture: AICueGenerationCredentialManaging {
+    private let lease: AICueGenerationCredential
+    private(set) var readCount = 0
+    private(set) var validationCount = 0
+    private(set) var failures: [AICueProviderError] = []
+
+    init(profileID: AICueProviderProfileID, source: AICueGenerationCredentialSource) {
+        lease = AICueGenerationCredential(
+            profileID: profileID,
+            credential: try! SensitiveCredentialInput("fixture-pending-key"),
+            source: source,
+            revision: 0)
+    }
+
+    func credentialForGeneration(
+        for profileID: AICueProviderProfileID
+    ) async throws -> AICueGenerationCredential {
+        readCount += 1
+        return lease
+    }
+
+    func generationDidValidate(_ lease: AICueGenerationCredential) async throws {
+        validationCount += 1
+    }
+
+    func generation(
+        _ lease: AICueGenerationCredential,
+        didFailWith error: AICueProviderError
+    ) async {
+        failures.append(error)
+    }
+
+    func facts() -> (reads: Int, validations: Int, failures: [AICueProviderError]) {
+        (readCount, validationCount, failures)
+    }
 }
 
 private actor GenerationRetrySleeperFixture: AICueRetrySleeping {
@@ -569,6 +611,99 @@ func runAICueGenerationEngineSuites() async {
             expect(await provider.requests().count == 3, "整次 generation 最多只能多发一个请求")
             expect(await sleeper.observedDelays() == [1], "整次 generation 最多只能 sleep 一次")
             expect(generationDirectories(in: tempRoot).isEmpty, "第二次 429 不能发布首个 partial candidate")
+        }
+    }
+
+    await suite("AI 提示音生成：deferred lease 在完整三候选成功后只验证一次") {
+        await withTempDirectory { root in
+            let audio = validMP3ID3Data()
+            let credentials = GenerationCredentialLeaseManagerFixture(
+                profileID: .qwenSingapore,
+                source: .pending)
+            let provider = GenerationProviderFixture(
+                steps: [.success(audio), .success(audio), .success(audio)],
+                profileID: .qwenSingapore)
+            let engine = AICueGenerationEngine(
+                credentialManager: credentials,
+                provider: provider,
+                temporaryRoot: root.appendingPathComponent("pending-success", isDirectory: true),
+                durationProbe: StubDurationProbe(fixedDuration: 1))
+
+            let generation = try! await engine.generate(
+                description: "请说\"完成\"",
+                locale: "zh-Hans",
+                providerProfileID: .qwenSingapore,
+                deadline: .startingNow())
+            let facts = await credentials.facts()
+            expect(generation.candidates.count == 3, "deferred key 成功仍必须完整发布三候选")
+            expect(facts.reads == 1, "一次显式生成只能租用一次当前 profile key")
+            expect(facts.validations == 1, "完整 generation 成功后只能提升/验证一次")
+            expect(facts.failures.isEmpty, "成功路径不得回写失败状态")
+        }
+    }
+
+    await suite("AI 提示音生成：后续非 401 失败不提升 pending") {
+        await withTempDirectory { root in
+            let credentials = GenerationCredentialLeaseManagerFixture(
+                profileID: .qwenSingapore,
+                source: .pending)
+            let provider = GenerationProviderFixture(
+                steps: [.success(validMP3ID3Data()), .failure(.forbidden)],
+                profileID: .qwenSingapore)
+            let engine = AICueGenerationEngine(
+                credentialManager: credentials,
+                provider: provider,
+                temporaryRoot: root.appendingPathComponent(
+                    "pending-late-failure",
+                    isDirectory: true),
+                durationProbe: StubDurationProbe(fixedDuration: 1))
+
+            var forbidden = false
+            do {
+                _ = try await engine.generate(
+                    description: "请说\"完成\"",
+                    locale: "zh-Hans",
+                    providerProfileID: .qwenSingapore,
+                    deadline: .startingNow())
+            } catch AICueGenerationError.provider(.forbidden) {
+                forbidden = true
+            } catch {}
+            let facts = await credentials.facts()
+            expect(forbidden, "第二候选 403 必须原样结束 generation")
+            expect(facts.validations == 0, "完整三候选成功前不得提升 pending")
+            expect(facts.failures == [.forbidden], "非 401 失败仍须交给 manager 保留 pending")
+        }
+    }
+
+    await suite("AI 提示音生成：pending 401 不自动 fallback 到旧 key") {
+        await withTempDirectory { root in
+            let credentials = GenerationCredentialLeaseManagerFixture(
+                profileID: .qwenBeijing,
+                source: .pending)
+            let provider = GenerationProviderFixture(
+                steps: [.failure(.invalidCredential), .success(validMP3ID3Data())],
+                profileID: .qwenBeijing)
+            let engine = AICueGenerationEngine(
+                credentialManager: credentials,
+                provider: provider,
+                temporaryRoot: root.appendingPathComponent("pending-401", isDirectory: true),
+                durationProbe: StubDurationProbe(fixedDuration: 1))
+
+            var rejected = false
+            do {
+                _ = try await engine.generate(
+                    description: "请说\"完成\"",
+                    locale: "zh-Hans",
+                    providerProfileID: .qwenBeijing,
+                    deadline: .startingNow())
+            } catch AICueGenerationError.provider(.invalidCredential) {
+                rejected = true
+            } catch {}
+            let facts = await credentials.facts()
+            expect(rejected, "pending 明确 401 必须原样结束本次显式生成")
+            expect(await provider.requests().count == 1, "401 后不得自动读取旧 key 或 fallback 重试")
+            expect(facts.reads == 1 && facts.validations == 0, "401 不得提升 pending")
+            expect(facts.failures == [.invalidCredential], "401 必须回写给凭据状态机")
         }
     }
 

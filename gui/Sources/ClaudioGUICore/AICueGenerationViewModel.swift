@@ -11,7 +11,9 @@ public enum AICueComposerPhase: Sendable, Equatable {
 
 public enum AICueCredentialActivity: Sendable, Equatable {
     case idle
-    case validating
+    case probing
+    case saving
+    case pendingReplacement
     case deleting
 }
 
@@ -34,6 +36,7 @@ public final class AICueGenerationViewModel: ObservableObject {
     @Published public private(set) var credentialStatus: AICueCredentialStatus?
     @Published public private(set) var credentialActivity: AICueCredentialActivity = .idle
     @Published public private(set) var credentialFailure: AICueCredentialFailure?
+    @Published public private(set) var providerProfileID: AICueProviderProfileID
     @Published public private(set) var phase: AICueComposerPhase = .editing
     @Published public private(set) var adoptingCandidateID: UUID?
     @Published public private(set) var soundDescription = ""
@@ -45,7 +48,8 @@ public final class AICueGenerationViewModel: ObservableObject {
 
     private let credentialManager: any AICueCredentialManaging
     private let generator: any AICueGenerating
-    private let providerProfileID: AICueProviderProfileID
+    private let registry: AICueProviderRegistry
+    private let providerPreferences: AICueProviderPreferences
     private var sessionRevision: UInt64 = 0
     private var generationTask: Task<Void, Never>?
     private var adoptionTask: Task<Void, Never>?
@@ -53,11 +57,25 @@ public final class AICueGenerationViewModel: ObservableObject {
     public init(
         credentialManager: any AICueCredentialManaging,
         generator: any AICueGenerating,
-        providerProfileID: AICueProviderProfileID
+        providerProfileID: AICueProviderProfileID? = nil,
+        registry: AICueProviderRegistry = AICueProviderRegistry(),
+        providerPreferences: AICueProviderPreferences = AICueProviderPreferences()
     ) {
         self.credentialManager = credentialManager
         self.generator = generator
-        self.providerProfileID = providerProfileID
+        self.registry = registry
+        self.providerPreferences = providerPreferences
+        let preferredProfileID = providerProfileID ?? providerPreferences.selectedProfileID()
+        self.providerProfileID =
+            (try? registry.profile(for: preferredProfileID).id)
+            ?? providerPreferences.selectedProfileID()
+    }
+
+    public var providerProfile: AICueProviderProfile {
+        guard let profile = try? registry.profile(for: providerProfileID) else {
+            preconditionFailure("Selected provider profile did not come from the registry")
+        }
+        return profile
     }
 
     public var requiresCredentialConfiguration: Bool {
@@ -108,19 +126,39 @@ public final class AICueGenerationViewModel: ObservableObject {
     }
 
     public func refreshCredentialStatus() async {
-        credentialStatus = await credentialManager.status(for: .elevenLabs)
+        credentialStatus = await credentialManager.status(for: providerProfileID)
+    }
+
+    /// A profile switch is an explicit region/provider choice. It persists only the allowlisted ID,
+    /// cancels the old generation and invalidates every unadopted candidate without touching an
+    /// already adopted sound.
+    public func selectProviderProfile(_ profileID: AICueProviderProfileID) throws {
+        guard profileID != providerProfileID else { return }
+        _ = try registry.profile(for: profileID)
+        try providerPreferences.select(profileID)
+        invalidateVisibleGeneration()
+        providerProfileID = profileID
+        credentialStatus = nil
+        credentialFailure = nil
     }
 
     /// Saving is never coupled to generation. A successful save clears only a credential-required
     /// message; the description and explicit second click remain intact.
-    public func validateAndSave(_ credential: SensitiveCredentialInput) async {
+    public func saveCredential(_ credential: SensitiveCredentialInput) async {
         guard credentialActivity == .idle else { return }
-        credentialActivity = .validating
+        let profile = try? registry.profile(for: providerProfileID)
+        switch (profile?.credentialValidationPolicy, credentialStatus) {
+        case (.readOnlyProbe, _): credentialActivity = .probing
+        case (.deferredUntilExplicitGeneration, .stored):
+            credentialActivity = .pendingReplacement
+        default: credentialActivity = .saving
+        }
         credentialFailure = nil
         defer { credentialActivity = .idle }
         do {
-            try await credentialManager.validateAndSave(credential, for: .elevenLabs)
-            credentialStatus = await credentialManager.status(for: .elevenLabs)
+            credentialStatus = try await credentialManager.save(
+                credential,
+                for: providerProfileID)
             switch failure {
             case .generation(.credentialRequired), .generation(.credentialUnavailable):
                 failure = nil
@@ -128,10 +166,10 @@ public final class AICueGenerationViewModel: ObservableObject {
                 break
             }
         } catch let error as AICueProviderError {
-            credentialStatus = await credentialManager.status(for: .elevenLabs)
+            credentialStatus = await credentialManager.status(for: providerProfileID)
             credentialFailure = .provider(error)
         } catch {
-            credentialStatus = await credentialManager.status(for: .elevenLabs)
+            credentialStatus = await credentialManager.status(for: providerProfileID)
             credentialFailure = .storageUnavailable
         }
     }
@@ -144,10 +182,24 @@ public final class AICueGenerationViewModel: ObservableObject {
         credentialFailure = nil
         defer { credentialActivity = .idle }
         do {
-            try await credentialManager.delete(for: .elevenLabs)
+            try await credentialManager.delete(for: providerProfileID)
             credentialStatus = .missing
         } catch {
-            credentialStatus = await credentialManager.status(for: .elevenLabs)
+            credentialStatus = await credentialManager.status(for: providerProfileID)
+            credentialFailure = .storageUnavailable
+        }
+    }
+
+    public func cancelPendingCredentialReplacement() async {
+        guard credentialActivity == .idle else { return }
+        credentialActivity = .pendingReplacement
+        credentialFailure = nil
+        defer { credentialActivity = .idle }
+        do {
+            try await credentialManager.cancelPendingReplacement(for: providerProfileID)
+            credentialStatus = await credentialManager.status(for: providerProfileID)
+        } catch {
+            credentialStatus = await credentialManager.status(for: providerProfileID)
             credentialFailure = .storageUnavailable
         }
     }

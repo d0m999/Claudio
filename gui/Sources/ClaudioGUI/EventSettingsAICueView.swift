@@ -15,6 +15,7 @@ struct EventSettingsAICueServiceCard: View {
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
     var body: some View {
+        let status = statusPresentation
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 Image(systemName: "sparkles")
@@ -29,17 +30,22 @@ struct EventSettingsAICueServiceCard: View {
                     Text(l10n.text(.aiCueServiceTitle))
                         .font(ClaudioTheme.font(.body).weight(.semibold))
                         .foregroundColor(ClaudioTheme.text(colorScheme))
-                    Text(l10n.text(.aiCueServiceSubtitle))
-                        .font(ClaudioTheme.font(.caption))
-                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                        .fixedSize(horizontal: false, vertical: true)
+                    Text(
+                        l10n.format(
+                            .aiCueServiceSubtitle,
+                            l10n.text(viewModel.providerProfile.displayNameKey)
+                        )
+                    )
+                    .font(ClaudioTheme.font(.caption))
+                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
 
             HStack(spacing: 10) {
-                Text(statusText)
+                Text(status.text)
                     .font(ClaudioTheme.font(.caption).weight(.medium))
-                    .foregroundColor(statusColor)
+                    .foregroundColor(status.color)
                     .accessibilityIdentifier("event-settings.ai-cue.credential-status")
                 Spacer(minLength: 8)
                 Button(manageButtonTitle, action: onManageCredential)
@@ -60,25 +66,33 @@ struct EventSettingsAICueServiceCard: View {
         .accessibilityIdentifier("event-settings.ai-cue.service")
     }
 
-    private var statusText: String {
+    private var statusPresentation: (text: String, color: Color) {
         switch viewModel.credentialStatus {
-        case nil: return l10n.text(.aiCueServiceChecking)
-        case .missing: return l10n.text(.aiCueServiceMissing)
-        case .configured: return l10n.text(.aiCueServiceConfigured)
-        case .unavailable: return l10n.text(.aiCueServiceUnavailable)
-        }
-    }
-
-    private var statusColor: Color {
-        switch viewModel.credentialStatus {
-        case .configured: return ClaudioTheme.success(colorScheme)
-        case .unavailable: return ClaudioTheme.error(colorScheme)
-        case nil, .missing: return ClaudioTheme.secondaryText(colorScheme)
+        case nil:
+            return (l10n.text(.aiCueServiceChecking), ClaudioTheme.secondaryText(colorScheme))
+        case .missing:
+            return (l10n.text(.aiCueServiceMissing), ClaudioTheme.secondaryText(colorScheme))
+        case .stored(_, true):
+            return (
+                l10n.text(.aiCueServicePendingReplacement),
+                ClaudioTheme.secondaryText(colorScheme)
+            )
+        case .stored(.verified, false):
+            return (l10n.text(.aiCueServiceStoredVerified), ClaudioTheme.success(colorScheme))
+        case .stored(.deferred, false):
+            return (
+                l10n.text(.aiCueServiceStoredDeferred),
+                ClaudioTheme.secondaryText(colorScheme)
+            )
+        case .stored(.rejected, false):
+            return (l10n.text(.aiCueServiceStoredRejected), ClaudioTheme.error(colorScheme))
+        case .unavailable:
+            return (l10n.text(.aiCueServiceUnavailable), ClaudioTheme.error(colorScheme))
         }
     }
 
     private var manageButtonTitle: String {
-        if case .configured = viewModel.credentialStatus {
+        if case .stored = viewModel.credentialStatus {
             return l10n.text(.aiCueManageKey)
         }
         return l10n.text(.aiCueConfigureKey)
@@ -427,11 +441,11 @@ struct EventSettingsAICueCredentialSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text(l10n.text(.aiCueCredentialTitle))
+            Text(credentialTitle)
                 .font(ClaudioTheme.font(.sectionTitle).weight(.bold))
                 .foregroundColor(ClaudioTheme.text(colorScheme))
 
-            Text(l10n.text(.aiCueCredentialPrivacy))
+            Text(l10n.text(privacyDisclosureKey))
                 .font(ClaudioTheme.font(.body))
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
@@ -455,7 +469,18 @@ struct EventSettingsAICueCredentialSheet: View {
             }
 
             HStack(spacing: 10) {
-                if case .configured = viewModel.credentialStatus {
+                if case .stored(_, true) = viewModel.credentialStatus {
+                    Button(l10n.text(.aiCueCredentialCancelReplacement)) {
+                        Task {
+                            await viewModel.cancelPendingCredentialReplacement()
+                        }
+                    }
+                    .disabled(viewModel.credentialActivity != .idle)
+                    .accessibilityLabel(l10n.text(.aiCueCredentialCancelReplacement))
+                    .accessibilityIdentifier(
+                        "event-settings.ai-cue.credential-cancel-replacement")
+                }
+                if case .stored = viewModel.credentialStatus {
                     Button(l10n.text(.aiCueCredentialDelete), role: .destructive) {
                         confirmsDeletion = true
                     }
@@ -471,12 +496,12 @@ struct EventSettingsAICueCredentialSheet: View {
                 .accessibilityLabel(l10n.text(.commonCancel))
                 .accessibilityIdentifier("event-settings.ai-cue.credential-cancel")
 
-                Button(l10n.text(.aiCueCredentialValidateSave)) {
+                Button(saveButtonTitle) {
                     submitCredential()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(keyInput.isEmpty || viewModel.credentialActivity != .idle)
-                .accessibilityLabel(l10n.text(.aiCueCredentialValidateSave))
+                .accessibilityLabel(saveButtonTitle)
                 .accessibilityIdentifier("event-settings.ai-cue.credential-save")
             }
         }
@@ -499,8 +524,31 @@ struct EventSettingsAICueCredentialSheet: View {
             Text(l10n.text(.aiCueCredentialDeleteMessage))
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(l10n.text(.aiCueCredentialTitle))
+        .accessibilityLabel(credentialTitle)
         .accessibilityIdentifier("event-settings.ai-cue.credential-sheet")
+    }
+
+    private var credentialTitle: String {
+        l10n.format(
+            .aiCueCredentialTitle,
+            l10n.text(viewModel.providerProfile.displayNameKey))
+    }
+
+    private var privacyDisclosureKey: ClaudioL10nKey {
+        switch viewModel.providerProfile.id {
+        case .elevenLabsGlobal: return .aiCueCredentialPrivacy
+        case .miniMaxGlobal: return .aiCueCredentialPrivacyMiniMax
+        case .qwenSingapore: return .aiCueCredentialPrivacyQwenSingapore
+        case .qwenBeijing: return .aiCueCredentialPrivacyQwenBeijing
+        default: preconditionFailure("Provider profile was not resolved through the registry")
+        }
+    }
+
+    private var saveButtonTitle: String {
+        switch viewModel.providerProfile.credentialValidationPolicy {
+        case .readOnlyProbe: return l10n.text(.aiCueCredentialValidateSave)
+        case .deferredUntilExplicitGeneration: return l10n.text(.aiCueCredentialSave)
+        }
     }
 
     private func submitCredential() {
@@ -517,9 +565,9 @@ struct EventSettingsAICueCredentialSheet: View {
         inputError = nil
         keyInput = ""
         Task {
-            await viewModel.validateAndSave(credential)
+            await viewModel.saveCredential(credential)
             if viewModel.credentialFailure == nil,
-                viewModel.credentialStatus == .configured(providerID: .elevenLabs)
+                case .stored = viewModel.credentialStatus
             {
                 presentationMode.wrappedValue.dismiss()
             }

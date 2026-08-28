@@ -37,6 +37,10 @@ public struct AICueCredentialSlotID: RawRepresentable, Hashable, Codable, Sendab
     public static let miniMaxGlobal = AICueCredentialSlotID(rawValue: "minimax-global")
     public static let qwenSingapore = AICueCredentialSlotID(rawValue: "qwen-singapore")
     public static let qwenBeijing = AICueCredentialSlotID(rawValue: "qwen-beijing")
+    package static let qwenSingaporePending =
+        AICueCredentialSlotID(rawValue: "qwen-singapore.pending")
+    package static let qwenBeijingPending =
+        AICueCredentialSlotID(rawValue: "qwen-beijing.pending")
 }
 
 public enum AICueCredentialValidationPolicy: Sendable, Equatable {
@@ -116,6 +120,7 @@ public struct AICueProviderProfile: Sendable, Equatable {
     public let id: AICueProviderProfileID
     public let providerID: AICueProviderID
     public let credentialSlotID: AICueCredentialSlotID
+    package let pendingCredentialSlotID: AICueCredentialSlotID?
     public let credentialValidationPolicy: AICueCredentialValidationPolicy
     public let regionID: String?
     public let displayNameKey: ClaudioL10nKey
@@ -126,6 +131,7 @@ public struct AICueProviderProfile: Sendable, Equatable {
         id: AICueProviderProfileID,
         providerID: AICueProviderID,
         credentialSlotID: AICueCredentialSlotID,
+        pendingCredentialSlotID: AICueCredentialSlotID? = nil,
         credentialValidationPolicy: AICueCredentialValidationPolicy,
         regionID: String?,
         displayNameKey: ClaudioL10nKey,
@@ -135,6 +141,7 @@ public struct AICueProviderProfile: Sendable, Equatable {
         self.id = id
         self.providerID = providerID
         self.credentialSlotID = credentialSlotID
+        self.pendingCredentialSlotID = pendingCredentialSlotID
         self.credentialValidationPolicy = credentialValidationPolicy
         self.regionID = regionID
         self.displayNameKey = displayNameKey

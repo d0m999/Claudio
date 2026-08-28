@@ -229,9 +229,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let aiCueProvider = ElevenLabsAICueProvider()
         let aiCueCredentialManager = AICueCredentialManager(
             vault: aiCueVault,
-            validator: aiCueProvider)
+            validators: [.elevenLabsGlobal: aiCueProvider])
         let aiCueGenerator = AICueGenerationEngine(
-            vault: aiCueVault,
+            credentialManager: aiCueCredentialManager,
             provider: aiCueProvider,
             temporaryRoot: ClaudioPaths.root.appendingPathComponent(
                 "ai-cue-temporary",
@@ -239,8 +239,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             durationProbe: audioEnvironment.durationProbe)
         let aiCueViewModel = AICueGenerationViewModel(
             credentialManager: aiCueCredentialManager,
-            generator: aiCueGenerator,
-            providerProfileID: .elevenLabsGlobal)
+            generator: aiCueGenerator)
         let eventSettingsWindowController = EventSettingsWindowController(
             model: eventSettingsModel,
             hostIntegrations: hostIntegrations,

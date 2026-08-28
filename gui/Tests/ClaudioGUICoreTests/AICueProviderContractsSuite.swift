@@ -122,6 +122,7 @@ func runAICueProviderContractsSuites() {
             "MiniMax profile 必须冻结 global slot、T2A route、voice 与 hex transport")
         expect(
             qwenSingapore.credentialSlotID == .qwenSingapore
+                && qwenSingapore.pendingCredentialSlotID == .qwenSingaporePending
                 && qwenSingapore.regionID == "singapore"
                 && qwenSingapore.credentialValidationPolicy
                     == .deferredUntilExplicitGeneration
@@ -130,6 +131,7 @@ func runAICueProviderContractsSuites() {
             "Qwen Singapore 必须冻结独立 region、slot、deferred policy 与 host")
         expect(
             qwenBeijing.credentialSlotID == .qwenBeijing
+                && qwenBeijing.pendingCredentialSlotID == .qwenBeijingPending
                 && qwenBeijing.regionID == "beijing"
                 && qwenBeijing.routes[.speech]?.endpoint.host == "dashscope.aliyuncs.com",
             "Qwen Beijing 必须冻结独立 region、slot 与 host")

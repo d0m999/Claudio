@@ -1182,8 +1182,8 @@
     },
     "ai-cue.service.subtitle" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs · bring your own API key" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs · 使用你自己的 API Key" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · bring your own API key" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · 使用你自己的 API Key" } }
       }
     },
     "ai-cue.service.checking" : {
@@ -1202,6 +1202,30 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Configured" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已配置" } }
+      }
+    },
+    "ai-cue.service.stored-verified" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved · verified" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存 · 已验证" } }
+      }
+    },
+    "ai-cue.service.stored-deferred" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved · validation deferred" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存 · 待生成验证" } }
+      }
+    },
+    "ai-cue.service.stored-rejected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved · rejected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存 · 验证被拒绝" } }
+      }
+    },
+    "ai-cue.service.pending-replacement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "New key pending first-generation validation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新 Key 待首次生成验证" } }
       }
     },
     "ai-cue.service.unavailable" : {
@@ -1224,8 +1248,8 @@
     },
     "ai-cue.credential.title" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs API Key" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs API Key" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ API Key" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ API Key" } }
       }
     },
     "ai-cue.credential.key-label" : {
@@ -1240,6 +1264,24 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述和生成指令会由本机直接发送给 ElevenLabs；生成可能由 ElevenLabs 向你的账户收费；数据留存及是否用于模型改进，以你的 ElevenLabs 账户设置和其条款为准。" } }
       }
     },
+    "ai-cue.credential.privacy.minimax" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description, Mandarin speech, and generation metadata are sent directly to MiniMax's global service. Generation may consume your MiniMax quota. Data retention and model-improvement use follow MiniMax's terms. Saving first runs a read-only voice-list probe and does not generate audio." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述、普通话台词和生成元数据会由本机直接发送给 MiniMax 全球服务；生成可能消耗你的 MiniMax 配额；数据留存及是否用于模型改进以 MiniMax 条款为准。保存前只执行不生成音频的 voice-list 只读检查。" } }
+      }
+    },
+    "ai-cue.credential.privacy.qwen-singapore" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description, speech, and generation metadata are sent directly to DashScope in Singapore under that region's data-processing, retention, and model-improvement terms. Saving makes no model request and costs no generation quota; the next explicit generation may consume quota and validates this region's separate key." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述、台词和生成元数据会由本机直接发送给新加坡地区的 DashScope，并适用该地区的数据处理、留存及模型改进条款。保存不发模型请求且不消耗生成配额；下一次显式生成可能消耗配额，并验证此地区的独立 Key。" } }
+      }
+    },
+    "ai-cue.credential.privacy.qwen-beijing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description, speech, and generation metadata are sent directly to DashScope in Beijing under that region's data-processing, retention, and model-improvement terms. Saving makes no model request and costs no generation quota; the next explicit generation may consume quota and validates this region's separate key." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述、台词和生成元数据会由本机直接发送给北京地区的 DashScope，并适用该地区的数据处理、留存及模型改进条款。保存不发模型请求且不消耗生成配额；下一次显式生成可能消耗配额，并验证此地区的独立 Key。" } }
+      }
+    },
     "ai-cue.credential.keychain" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The key is stored only in this Mac's Keychain. Claudio cannot display or copy a saved key." } },
@@ -1250,6 +1292,18 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Validate & Save" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "验证并保存" } }
+      }
+    },
+    "ai-cue.credential.save" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save API Key" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存 API Key" } }
+      }
+    },
+    "ai-cue.credential.cancel-replacement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel replacement" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消替换" } }
       }
     },
     "ai-cue.credential.delete" : {

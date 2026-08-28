@@ -309,14 +309,28 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueServiceChecking: Self = "ai-cue.service.checking"
     public static let aiCueServiceMissing: Self = "ai-cue.service.missing"
     public static let aiCueServiceConfigured: Self = "ai-cue.service.configured"
+    public static let aiCueServiceStoredVerified: Self = "ai-cue.service.stored-verified"
+    public static let aiCueServiceStoredDeferred: Self = "ai-cue.service.stored-deferred"
+    public static let aiCueServiceStoredRejected: Self = "ai-cue.service.stored-rejected"
+    public static let aiCueServicePendingReplacement: Self =
+        "ai-cue.service.pending-replacement"
     public static let aiCueServiceUnavailable: Self = "ai-cue.service.unavailable"
     public static let aiCueConfigureKey: Self = "ai-cue.credential.configure"
     public static let aiCueManageKey: Self = "ai-cue.credential.manage"
     public static let aiCueCredentialTitle: Self = "ai-cue.credential.title"
     public static let aiCueCredentialKeyLabel: Self = "ai-cue.credential.key-label"
     public static let aiCueCredentialPrivacy: Self = "ai-cue.credential.privacy"
+    public static let aiCueCredentialPrivacyMiniMax: Self =
+        "ai-cue.credential.privacy.minimax"
+    public static let aiCueCredentialPrivacyQwenSingapore: Self =
+        "ai-cue.credential.privacy.qwen-singapore"
+    public static let aiCueCredentialPrivacyQwenBeijing: Self =
+        "ai-cue.credential.privacy.qwen-beijing"
     public static let aiCueCredentialKeychain: Self = "ai-cue.credential.keychain"
     public static let aiCueCredentialValidateSave: Self = "ai-cue.credential.validate-save"
+    public static let aiCueCredentialSave: Self = "ai-cue.credential.save"
+    public static let aiCueCredentialCancelReplacement: Self =
+        "ai-cue.credential.cancel-replacement"
     public static let aiCueCredentialDelete: Self = "ai-cue.credential.delete"
     public static let aiCueCredentialDeleteTitle: Self = "ai-cue.credential.delete-title"
     public static let aiCueCredentialDeleteMessage: Self = "ai-cue.credential.delete-message"
@@ -809,9 +823,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueProviderProfileMiniMaxGlobal, .aiCueProviderProfileQwenSingapore,
         .aiCueProviderProfileQwenBeijing, .aiCueServiceTitle, .aiCueServiceSubtitle,
         .aiCueServiceChecking, .aiCueServiceMissing, .aiCueServiceConfigured,
-        .aiCueServiceUnavailable, .aiCueConfigureKey, .aiCueManageKey, .aiCueCredentialTitle,
-        .aiCueCredentialKeyLabel, .aiCueCredentialPrivacy, .aiCueCredentialKeychain,
-        .aiCueCredentialValidateSave, .aiCueCredentialDelete, .aiCueCredentialDeleteTitle,
+        .aiCueServiceStoredVerified, .aiCueServiceStoredDeferred, .aiCueServiceStoredRejected,
+        .aiCueServicePendingReplacement, .aiCueServiceUnavailable, .aiCueConfigureKey,
+        .aiCueManageKey, .aiCueCredentialTitle,
+        .aiCueCredentialKeyLabel, .aiCueCredentialPrivacy, .aiCueCredentialPrivacyMiniMax,
+        .aiCueCredentialPrivacyQwenSingapore, .aiCueCredentialPrivacyQwenBeijing,
+        .aiCueCredentialKeychain, .aiCueCredentialValidateSave, .aiCueCredentialSave,
+        .aiCueCredentialCancelReplacement, .aiCueCredentialDelete,
+        .aiCueCredentialDeleteTitle,
         .aiCueCredentialDeleteMessage, .aiCueEligibilityGlobal, .aiCueEligibilityBuiltin,
         .aiCueEligibilityShared, .aiCueEligibilityUnavailable, .aiCueComposerTitle,
         .aiCueStageDescription, .aiCueStageCandidates, .aiCueDescriptionLabel,

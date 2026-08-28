@@ -174,6 +174,7 @@ public struct AICueProviderRegistry: Sendable {
             id: id,
             providerID: .qwen,
             credentialSlotID: slotID,
+            pendingCredentialSlotID: pendingSlotID(for: id),
             credentialValidationPolicy: .deferredUntilExplicitGeneration,
             regionID: regionID,
             displayNameKey: displayNameKey,
@@ -202,5 +203,15 @@ public struct AICueProviderRegistry: Sendable {
             preconditionFailure("Invalid built-in AI cue provider URL")
         }
         return url
+    }
+
+    private static func pendingSlotID(
+        for profileID: AICueProviderProfileID
+    ) -> AICueCredentialSlotID {
+        switch profileID {
+        case .qwenSingapore: return .qwenSingaporePending
+        case .qwenBeijing: return .qwenBeijingPending
+        default: preconditionFailure("Only Qwen profiles own pending credential slots")
+        }
     }
 }

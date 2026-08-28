@@ -18,26 +18,35 @@ private actor ComposerCredentialManagerFixture: AICueCredentialManaging {
         self.saveMode = saveMode
     }
 
-    func status(for providerID: AICueProviderID) async -> AICueCredentialStatus {
+    func status(for profileID: AICueProviderProfileID) async -> AICueCredentialStatus {
         currentStatus
     }
 
-    func validateAndSave(
+    func save(
         _ credential: SensitiveCredentialInput,
-        for providerID: AICueProviderID
-    ) async throws {
+        for profileID: AICueProviderProfileID
+    ) async throws -> AICueCredentialStatus {
         saveCount += 1
         switch saveMode {
         case .succeed:
-            currentStatus = .configured(providerID: providerID)
+            currentStatus = .stored(verification: .verified, hasPendingReplacement: false)
+            return currentStatus
         case .fail(let error):
             throw error
         }
     }
 
-    func delete(for providerID: AICueProviderID) async throws {
+    func delete(for profileID: AICueProviderProfileID) async throws {
         deleteCount += 1
         currentStatus = .missing
+    }
+
+    func cancelPendingReplacement(for profileID: AICueProviderProfileID) async throws {
+        if case .stored(let verification, _) = currentStatus {
+            currentStatus = .stored(
+                verification: verification,
+                hasPendingReplacement: false)
+        }
     }
 
     func counts() -> (saves: Int, deletions: Int) { (saveCount, deleteCount) }
@@ -47,6 +56,7 @@ private actor ComposerGeneratorFixture: AICueGenerating {
     enum Mode: Sendable {
         case success(AICueGeneration)
         case failure(AICueGenerationError)
+        case waitForCancellation
     }
 
     private var mode: Mode
@@ -71,6 +81,13 @@ private actor ComposerGeneratorFixture: AICueGenerating {
         switch mode {
         case .success(let generation): return generation
         case .failure(let error): throw error
+        case .waitForCancellation:
+            do {
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+                throw AICueGenerationError.provider(.transportFailure)
+            } catch {
+                throw AICueGenerationError.cancelled
+            }
         }
     }
 
@@ -110,11 +127,12 @@ func runAICueGenerationViewModelSuites() async {
             "缺 key 必须回到可编辑态并请求配置凭据")
         let attemptsBeforeSave = await generator.facts().generations
 
-        await viewModel.validateAndSave(
+        await viewModel.saveCredential(
             try! SensitiveCredentialInput("fixture-new-key"))
         expect(
-            viewModel.credentialStatus == .configured(providerID: .elevenLabs),
-            "验证保存成功后只投影 configured")
+            viewModel.credentialStatus
+                == .stored(verification: .verified, hasPendingReplacement: false),
+            "验证保存成功后只投影 verified stored")
         expect(
             viewModel.soundDescription == "一只小猫短促叫两声，不要背景音乐",
             "配置 key 不能清掉用户已经写好的描述")
@@ -154,7 +172,7 @@ func runAICueGenerationViewModelSuites() async {
         let generator = ComposerGeneratorFixture(mode: .success(generation))
         let viewModel = AICueGenerationViewModel(
             credentialManager: ComposerCredentialManagerFixture(
-                status: .configured(providerID: .elevenLabs)),
+                status: .stored(verification: .verified, hasPendingReplacement: false)),
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
@@ -177,7 +195,7 @@ func runAICueGenerationViewModelSuites() async {
         let generator = ComposerGeneratorFixture(mode: .success(generation))
         let viewModel = AICueGenerationViewModel(
             credentialManager: ComposerCredentialManagerFixture(
-                status: .configured(providerID: .elevenLabs)),
+                status: .stored(verification: .verified, hasPendingReplacement: false)),
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
@@ -201,7 +219,7 @@ func runAICueGenerationViewModelSuites() async {
             let generator = ComposerGeneratorFixture(mode: .success(generation))
             let viewModel = AICueGenerationViewModel(
                 credentialManager: ComposerCredentialManagerFixture(
-                    status: .configured(providerID: .elevenLabs)),
+                    status: .stored(verification: .verified, hasPendingReplacement: false)),
                 generator: generator,
                 providerProfileID: .elevenLabsGlobal)
             let target = aiCueComposerTarget()
@@ -247,7 +265,7 @@ func runAICueGenerationViewModelSuites() async {
         let generator = ComposerGeneratorFixture(mode: .success(generation))
         let viewModel = AICueGenerationViewModel(
             credentialManager: ComposerCredentialManagerFixture(
-                status: .configured(providerID: .elevenLabs)),
+                status: .stored(verification: .verified, hasPendingReplacement: false)),
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
@@ -274,7 +292,7 @@ func runAICueGenerationViewModelSuites() async {
 
     await suite("AI 提示音状态层：替换 key 失败时保留已配置状态与描述") {
         let credentials = ComposerCredentialManagerFixture(
-            status: .configured(providerID: .elevenLabs),
+            status: .stored(verification: .verified, hasPendingReplacement: false),
             saveMode: .fail(.invalidCredential))
         let viewModel = AICueGenerationViewModel(
             credentialManager: credentials,
@@ -283,16 +301,75 @@ func runAICueGenerationViewModelSuites() async {
         viewModel.begin(target: aiCueComposerTarget())
         viewModel.updateDescription("两声猫叫")
 
-        await viewModel.validateAndSave(
+        await viewModel.saveCredential(
             try! SensitiveCredentialInput("fixture-rejected-key"))
         expect(
-            viewModel.credentialStatus == .configured(providerID: .elevenLabs),
+            viewModel.credentialStatus
+                == .stored(verification: .verified, hasPendingReplacement: false),
             "新 key 验证失败不能把旧已配置状态改成 missing")
         expect(
             viewModel.credentialFailure == .provider(.invalidCredential),
             "provider 拒绝必须投影为不含 key 的语义错误")
         expect(viewModel.soundDescription == "两声猫叫", "凭据失败不得污染生成表单")
         expect(await credentials.counts().saves == 1, "替换只能尝试一次")
+    }
+
+    await suite("AI 提示音状态层：切换 profile 取消生成并使未采用候选失效") {
+        let suiteName = "AICueProviderSwitch.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AICueProviderPreferences(defaults: defaults)
+        let generator = ComposerGeneratorFixture(mode: .waitForCancellation)
+        let viewModel = AICueGenerationViewModel(
+            credentialManager: ComposerCredentialManagerFixture(status: .missing),
+            generator: generator,
+            providerProfileID: .elevenLabsGlobal,
+            providerPreferences: preferences)
+        viewModel.begin(target: aiCueComposerTarget())
+        viewModel.updateDescription("请说\"完成\"")
+        viewModel.startGeneration(locale: "zh-Hans")
+        await waitForAICueViewModel { viewModel.phase == .generating }
+
+        try! viewModel.selectProviderProfile(.qwenBeijing)
+        expect(viewModel.phase == .editing, "切换 profile 必须立即取消旧 generation")
+        expect(viewModel.generation == nil, "切换 profile 必须使所有未采用候选失效")
+        expect(viewModel.soundDescription == "请说\"完成\"", "切换 profile 必须保留用户描述")
+        expect(viewModel.providerProfileID == .qwenBeijing, "选择必须更新当前 profile")
+        expect(
+            AICueProviderPreferences(defaults: defaults).selectedProfileID() == .qwenBeijing,
+            "profile/region 非敏感偏好必须跨实例持久化")
+        await waitForAICueViewModel { viewModel.phase != .generating }
+    }
+
+    suite("AI 提示音状态层：profile 偏好只接受 allowlist 且不含 credential") {
+        let suiteName = "AICueProviderPreference.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let preferences = AICueProviderPreferences(defaults: defaults)
+        try! preferences.select(.qwenSingapore)
+        let profile = try! AICueProviderRegistry().profile(
+            for: preferences.selectedProfileID())
+        expect(profile.regionID == "singapore", "region 必须由选中的 registry profile 派生")
+        expect(
+            throwsProviderPreference {
+                try preferences.select(AICueProviderProfileID(rawValue: "user-endpoint"))
+            },
+            "未知 profile/region 必须 fail closed")
+        let snapshot = String(describing: defaults.dictionaryRepresentation())
+        expect(
+            !snapshot.localizedCaseInsensitiveContains("authorization")
+                && !snapshot.localizedCaseInsensitiveContains("api-key")
+                && snapshot.contains("qwen-singapore"),
+            "偏好快照只能包含非敏感 allowlisted profile ID")
+    }
+}
+
+private func throwsProviderPreference(_ body: () throws -> Void) -> Bool {
+    do {
+        try body()
+        return false
+    } catch {
+        return true
     }
 }
 

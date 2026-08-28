@@ -132,7 +132,7 @@ public actor AICueGenerationEngine: AICueGenerating {
     private static let maximumDurationSeconds = 3.0
     private static let staleLifetime: TimeInterval = 24 * 60 * 60
 
-    private let vault: any AICueCredentialVault
+    private let credentialManager: any AICueGenerationCredentialManaging
     private let provider: any AICueProvider
     private let registry: AICueProviderRegistry
     private let temporaryRoot: URL
@@ -149,13 +149,16 @@ public actor AICueGenerationEngine: AICueGenerating {
         durationProbe: any AudioDurationProbing,
         registry: AICueProviderRegistry = AICueProviderRegistry()
     ) {
-        self.vault = vault
-        self.provider = provider
-        self.registry = registry
-        self.temporaryRoot = temporaryRoot
-        self.durationProbe = durationProbe
-        compiler = AICueProviderRequestCompiler(registry: registry)
-        retrySleeper = AICueSystemRetrySleeper()
+        self.init(
+            credentialManager: AICueCredentialManager(
+                vault: vault,
+                registry: registry,
+                validators: [:]),
+            provider: provider,
+            temporaryRoot: temporaryRoot,
+            durationProbe: durationProbe,
+            retrySleeper: AICueSystemRetrySleeper(),
+            registry: registry)
     }
 
     package init(
@@ -166,7 +169,43 @@ public actor AICueGenerationEngine: AICueGenerating {
         retrySleeper: any AICueRetrySleeping,
         registry: AICueProviderRegistry = AICueProviderRegistry()
     ) {
-        self.vault = vault
+        self.init(
+            credentialManager: AICueCredentialManager(
+                vault: vault,
+                registry: registry,
+                validators: [:]),
+            provider: provider,
+            temporaryRoot: temporaryRoot,
+            durationProbe: durationProbe,
+            retrySleeper: retrySleeper,
+            registry: registry)
+    }
+
+    public init(
+        credentialManager: any AICueGenerationCredentialManaging,
+        provider: any AICueProvider,
+        temporaryRoot: URL,
+        durationProbe: any AudioDurationProbing,
+        registry: AICueProviderRegistry = AICueProviderRegistry()
+    ) {
+        self.init(
+            credentialManager: credentialManager,
+            provider: provider,
+            temporaryRoot: temporaryRoot,
+            durationProbe: durationProbe,
+            retrySleeper: AICueSystemRetrySleeper(),
+            registry: registry)
+    }
+
+    private init(
+        credentialManager: any AICueGenerationCredentialManaging,
+        provider: any AICueProvider,
+        temporaryRoot: URL,
+        durationProbe: any AudioDurationProbing,
+        retrySleeper: any AICueRetrySleeping,
+        registry: AICueProviderRegistry
+    ) {
+        self.credentialManager = credentialManager
         self.provider = provider
         self.registry = registry
         self.temporaryRoot = temporaryRoot
@@ -210,23 +249,23 @@ public actor AICueGenerationEngine: AICueGenerating {
         }
         try requireRemainingBudget(deadline)
 
-        let credential: SensitiveCredentialInput
+        let credentialLease: AICueGenerationCredential
         do {
-            let vault = vault
-            let storedCredential: SensitiveCredentialInput? =
-                try await Self.runBeforeDeadline(deadline) {
-                    try await vault.credential(for: profile.providerID)
-                }
-            guard let stored = storedCredential else {
-                throw AICueGenerationError.credentialRequired
+            let credentialManager = credentialManager
+            credentialLease = try await Self.runBeforeDeadline(deadline) {
+                try await credentialManager.credentialForGeneration(for: profile.id)
             }
-            credential = stored
         } catch AICueProviderError.deadlineExceeded {
             throw AICueGenerationError.deadlineExceeded
         } catch is CancellationError {
             throw AICueGenerationError.cancelled
-        } catch let error as AICueGenerationError {
-            throw error
+        } catch let error as AICueCredentialManagerError {
+            switch error {
+            case .credentialRequired: throw AICueGenerationError.credentialRequired
+            case .stateChanged: throw AICueGenerationError.cancelled
+            case .unknownProfile, .probeUnavailable, .credentialUnavailable:
+                throw AICueGenerationError.credentialUnavailable
+            }
         } catch {
             throw AICueGenerationError.credentialUnavailable
         }
@@ -272,12 +311,15 @@ public actor AICueGenerationEngine: AICueGenerating {
             do {
                 let attempt = try await generateWithConservativeRetry(
                     request: compiled,
-                    credential: credential,
+                    credential: credentialLease.credential,
                     deadline: deadline,
                     allowRetry: retryAvailable)
                 response = attempt.response
                 if attempt.usedRetry { retryAvailable = false }
             } catch let error as AICueProviderError {
+                await credentialManager.generation(
+                    credentialLease,
+                    didFailWith: error)
                 if error == .cancelled { throw AICueGenerationError.cancelled }
                 if error == .deadlineExceeded { throw AICueGenerationError.deadlineExceeded }
                 throw AICueGenerationError.provider(error)
@@ -311,6 +353,25 @@ public actor AICueGenerationEngine: AICueGenerating {
             throw AICueGenerationError.provider(.transportFailure)
         }
         try requireRemainingBudget(deadline)
+        do {
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            throw AICueGenerationError.cancelled
+        }
+
+        // This is the generation's commit point: all three candidates and the shared budget have
+        // passed. Await the local credential mutation directly so cancellation cannot publish a
+        // failed result while a detached loser subsequently deletes the retryable pending item.
+        // Cancellation before this point retains pending; once commit starts, success wins.
+        do {
+            try await credentialManager.generationDidValidate(credentialLease)
+        } catch let error as AICueCredentialManagerError where error == .stateChanged {
+            throw AICueGenerationError.cancelled
+        } catch is CancellationError {
+            throw AICueGenerationError.cancelled
+        } catch {
+            throw AICueGenerationError.credentialUnavailable
+        }
         succeeded = true
         return AICueGeneration(
             id: generationID,
