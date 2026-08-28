@@ -63,3 +63,49 @@ public protocol AICueProvider: AICueCredentialValidating {
         deadline: AICueGenerationDeadline
     ) async throws -> AICueProviderAudioResponse
 }
+
+/// Keeps provider adapters on one redacted transport-error vocabulary. Provider-specific payload
+/// validation stays in each adapter; this seam only maps errors produced before a response body is
+/// exposed to the adapter.
+package enum AICueProviderTransportErrorMapper {
+    package static func map(
+        _ error: Error,
+        unexpectedMediaType: AICueProviderError
+    ) -> AICueProviderError {
+        if let providerError = error as? AICueProviderError { return providerError }
+        if error is CancellationError { return .cancelled }
+        guard let transportError = error as? AICueTransportError else {
+            return .transportFailure
+        }
+        switch transportError {
+        case .httpStatus(let code, let retryAfterSeconds):
+            switch code {
+            case 401: return .invalidCredential
+            case 402: return .insufficientCredits
+            case 403: return .forbidden
+            case 429: return .rateLimited(retryAfterSeconds: retryAfterSeconds)
+            case 500...599: return .serviceUnavailable
+            default: return .invalidRequest
+            }
+        case .unexpectedMediaType:
+            return unexpectedMediaType
+        case .responseTooLarge:
+            return .responseTooLarge
+        case .deadlineExceeded:
+            return .deadlineExceeded
+        case .cancelled:
+            return .cancelled
+        case .invalidRequest, .originMismatch, .pathMismatch, .authenticationHeaderRejected,
+            .redirectRejected, .invalidResponse, .backpressureExceeded, .inactivityTimeout,
+            .transportFailure:
+            return .transportFailure
+        }
+    }
+}
+
+package func sanitizedAICueProviderRequestID(_ value: String?) -> String? {
+    guard let value, !value.isEmpty, value.utf8.count <= 128 else { return nil }
+    let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
+    guard value.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
+    return value
+}

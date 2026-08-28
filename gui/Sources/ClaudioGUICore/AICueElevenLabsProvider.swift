@@ -51,7 +51,9 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
                 authentication: .elevenLabsAPIKeyHeader,
                 credential: credential)
         } catch {
-            throw mapTransportError(error, invalidPayload: .requiredModelsUnavailable)
+            throw AICueProviderTransportErrorMapper.map(
+                error,
+                unexpectedMediaType: .requiredModelsUnavailable)
         }
         guard response.finalURL == request.url else {
             throw AICueProviderError.transportFailure
@@ -110,7 +112,9 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
                 authentication: route.authentication,
                 credential: credential)
         } catch {
-            throw mapTransportError(error, invalidPayload: .invalidAudioResponse)
+            throw AICueProviderTransportErrorMapper.map(
+                error,
+                unexpectedMediaType: .invalidAudioResponse)
         }
         let mediaType = AICueTransportRequestBuilder.normalizedMediaType(
             response.headers["content-type"])
@@ -129,7 +133,7 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
             data: response.body,
             mediaType: mediaType,
             modelID: route.modelID,
-            requestID: safeOpaqueID(
+            requestID: sanitizedAICueProviderRequestID(
                 response.headers["request-id"] ?? response.headers["x-request-id"]))
     }
 
@@ -231,47 +235,6 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
         } catch {
             throw AICueProviderError.invalidRequest
         }
-    }
-
-    private func mapTransportError(
-        _ error: Error,
-        invalidPayload: AICueProviderError
-    ) -> AICueProviderError {
-        if let providerError = error as? AICueProviderError { return providerError }
-        if error is CancellationError { return .cancelled }
-        guard let transportError = error as? AICueTransportError else {
-            return .transportFailure
-        }
-        switch transportError {
-        case .httpStatus(let code, let retryAfterSeconds):
-            switch code {
-            case 401: return .invalidCredential
-            case 402: return .insufficientCredits
-            case 403: return .forbidden
-            case 429: return .rateLimited(retryAfterSeconds: retryAfterSeconds)
-            case 500...599: return .serviceUnavailable
-            default: return .invalidRequest
-            }
-        case .unexpectedMediaType:
-            return invalidPayload
-        case .responseTooLarge:
-            return .responseTooLarge
-        case .deadlineExceeded:
-            return .deadlineExceeded
-        case .cancelled:
-            return .cancelled
-        case .invalidRequest, .originMismatch, .pathMismatch, .authenticationHeaderRejected,
-            .redirectRejected, .invalidResponse, .backpressureExceeded, .inactivityTimeout,
-            .transportFailure:
-            return .transportFailure
-        }
-    }
-
-    private func safeOpaqueID(_ value: String?) -> String? {
-        guard let value, !value.isEmpty, value.utf8.count <= 128 else { return nil }
-        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_."))
-        guard value.unicodeScalars.allSatisfy(allowed.contains) else { return nil }
-        return value
     }
 
     private static func fixedURL(_ value: String) -> URL {
