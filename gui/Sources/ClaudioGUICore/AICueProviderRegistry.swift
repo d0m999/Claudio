@@ -184,7 +184,7 @@ public struct AICueProviderRegistry: Sendable {
                     endpoint: fixedURL(endpoint),
                     modelID: "qwen3-tts-instruct-flash",
                     voiceID: "Cherry",
-                    supportedLanguageTags: ["zh", "zh-Hans", "en"],
+                    supportedLanguageTags: ["zh*", "en*"],
                     authentication: .bearerAPIKey,
                     transport: .ssePCM(
                         AICuePCMFormat(

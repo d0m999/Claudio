@@ -192,6 +192,37 @@ public enum AICueProviderRequestCompilationError: Error, Sendable, Equatable {
     case invalidSoundPlan
 }
 
+package enum AICueLanguageFamily: Sendable, Equatable {
+    case chinese
+    case english
+}
+
+package enum AICueLanguageTagMatcher {
+    package static func matches(_ languageTag: String, allowlist: Set<String>) -> Bool {
+        allowlist.contains { allowedTag in
+            guard allowedTag.hasSuffix("*") else { return allowedTag == languageTag }
+            let prefix = allowedTag.dropLast().lowercased()
+            let normalized = languageTag.lowercased()
+            return normalized == prefix
+                || normalized.hasPrefix("\(prefix)-")
+                || normalized.hasPrefix("\(prefix)_")
+        }
+    }
+
+    package static func family(for languageTag: String) -> AICueLanguageFamily? {
+        let primarySubtag =
+            languageTag
+            .split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .first?
+            .lowercased()
+        switch primarySubtag {
+        case "zh": return .chinese
+        case "en": return .english
+        default: return nil
+        }
+    }
+}
+
 /// Turns one hidden local plan into a provider-neutral A/B/C request. The selected profile is
 /// resolved through the allowlist before any adapter or credential boundary is reached.
 public struct AICueProviderRequestCompiler: Sendable {
@@ -233,7 +264,11 @@ public struct AICueProviderRequestCompiler: Sendable {
             }
             guard
                 let languageTag = plan.languageTag,
-                profile.routes[plan.modality]?.supportedLanguageTags.contains(languageTag) == true
+                profile.routes[plan.modality].map({
+                    AICueLanguageTagMatcher.matches(
+                        languageTag,
+                        allowlist: $0.supportedLanguageTags)
+                }) == true
             else {
                 throw AICueProviderRequestCompilationError.unsupportedLocale
             }
