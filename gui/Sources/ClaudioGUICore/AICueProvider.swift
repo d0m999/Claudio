@@ -84,6 +84,7 @@ public enum AICueProviderError: Error, Sendable, Equatable {
     case invalidRequest
     case invalidAudioResponse
     case responseTooLarge
+    case deadlineExceeded
     case cancelled
     case transportFailure
 }
@@ -107,7 +108,8 @@ public protocol AICueProvider: AICueCredentialValidating {
 
     func generateCandidate(
         request: AICueProviderRequest,
-        credential: SensitiveCredentialInput
+        credential: SensitiveCredentialInput,
+        deadline: AICueGenerationDeadline
     ) async throws -> AICueProviderAudioResponse
 }
 
@@ -163,8 +165,12 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
 
     public func generateCandidate(
         request: AICueProviderRequest,
-        credential: SensitiveCredentialInput
+        credential: SensitiveCredentialInput,
+        deadline: AICueGenerationDeadline
     ) async throws -> AICueProviderAudioResponse {
+        guard
+            deadline.remainingNanoseconds(at: DispatchTime.now().uptimeNanoseconds) != nil
+        else { throw AICueProviderError.deadlineExceeded }
         guard
             request.profileID == profile.id,
             let route = profile.routes[request.modality]

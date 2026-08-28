@@ -154,6 +154,7 @@ public final class AICueGenerationViewModel: ObservableObject {
 
     public func startGeneration(locale: String) {
         guard target != nil, phase != .generating, phase != .adopting else { return }
+        let deadline = AICueGenerationDeadline.startingNow()
 
         generationTask?.cancel()
         if let previous = generation {
@@ -178,7 +179,8 @@ public final class AICueGenerationViewModel: ObservableObject {
                     try await generator.generate(
                         description: description,
                         locale: locale,
-                        providerProfileID: providerProfileID))
+                        providerProfileID: providerProfileID,
+                        deadline: deadline))
             } catch let error as AICueGenerationError {
                 result = .failure(error)
             } catch is CancellationError {

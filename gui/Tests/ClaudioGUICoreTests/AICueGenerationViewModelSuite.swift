@@ -53,6 +53,7 @@ private actor ComposerGeneratorFixture: AICueGenerating {
     private(set) var generateCount = 0
     private(set) var discardedGenerationIDs: [UUID] = []
     private(set) var requestedProfileIDs: [AICueProviderProfileID] = []
+    private(set) var requestedDeadlines: [AICueGenerationDeadline] = []
 
     init(mode: Mode) { self.mode = mode }
 
@@ -61,10 +62,12 @@ private actor ComposerGeneratorFixture: AICueGenerating {
     func generate(
         description: String,
         locale: String,
-        providerProfileID: AICueProviderProfileID
+        providerProfileID: AICueProviderProfileID,
+        deadline: AICueGenerationDeadline
     ) async throws -> AICueGeneration {
         generateCount += 1
         requestedProfileIDs.append(providerProfileID)
+        requestedDeadlines.append(deadline)
         switch mode {
         case .success(let generation): return generation
         case .failure(let error): throw error
@@ -80,9 +83,10 @@ private actor ComposerGeneratorFixture: AICueGenerating {
     func facts() -> (
         generations: Int,
         discarded: [UUID],
-        profileIDs: [AICueProviderProfileID]
+        profileIDs: [AICueProviderProfileID],
+        deadlines: [AICueGenerationDeadline]
     ) {
-        (generateCount, discardedGenerationIDs, requestedProfileIDs)
+        (generateCount, discardedGenerationIDs, requestedProfileIDs, requestedDeadlines)
     }
 }
 
@@ -136,6 +140,13 @@ func runAICueGenerationViewModelSuites() async {
         expect(
             await generator.facts().profileIDs == [.qwenSingapore],
             "ViewModel 不能把所选 profile 隐式改回 ElevenLabs")
+        let deadlines = await generator.facts().deadlines
+        expect(
+            deadlines.count == 1
+                && deadlines[0].expiresAtUptimeNanoseconds
+                    - deadlines[0].startedAtUptimeNanoseconds
+                    == AICueGenerationDeadline.durationNanoseconds,
+            "60 秒 absolute deadline 必须在用户点击入口冻结并传入 engine")
     }
 
     await suite("AI 提示音状态层：候选完整就绪后才建议名称，改名不重新请求") {

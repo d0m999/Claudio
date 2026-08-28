@@ -165,7 +165,8 @@ func runAICueProviderSuites() async {
 
         let response = try! await provider.generateCandidate(
             request: compiled,
-            credential: try! SensitiveCredentialInput("fixture-key"))
+            credential: try! SensitiveCredentialInput("fixture-key"),
+            deadline: .startingNow())
         let requests = await client.requests()
         let request = requests[0]
         let body = try! JSONSerialization.jsonObject(with: request.body!) as! [String: Any]
@@ -210,7 +211,8 @@ func runAICueProviderSuites() async {
 
         _ = try! await provider.generateCandidate(
             request: compiled,
-            credential: try! SensitiveCredentialInput("fixture-key"))
+            credential: try! SensitiveCredentialInput("fixture-key"),
+            deadline: .startingNow())
         let request = await client.requests()[0]
         let body = try! JSONSerialization.jsonObject(with: request.body!) as! [String: Any]
         expect(request.url.path == "/v1/sound-generation", "动物/音效必须使用固定 sound endpoint")
@@ -281,7 +283,8 @@ func runAICueProviderSuites() async {
             do {
                 _ = try await provider.generateCandidate(
                     request: compiled,
-                    credential: try SensitiveCredentialInput("fixture-key"))
+                    credential: try SensitiveCredentialInput("fixture-key"),
+                    deadline: .startingNow())
             } catch AICueProviderError.invalidAudioResponse {
                 rejected = true
             } catch {}

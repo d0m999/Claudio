@@ -1,5 +1,6 @@
 import ClaudioCore
 import Darwin
+import Dispatch
 import Foundation
 
 public struct AICueTemporaryAudioAsset: Sendable, Equatable {
@@ -98,6 +99,7 @@ public enum AICueGenerationError: Error, Sendable, Equatable {
     case audioDurationUnavailable
     case audioTooLong
     case temporaryStorageUnavailable
+    case deadlineExceeded
     case cancelled
 }
 
@@ -109,7 +111,8 @@ public protocol AICueGenerating: Sendable {
     func generate(
         description: String,
         locale: String,
-        providerProfileID: AICueProviderProfileID
+        providerProfileID: AICueProviderProfileID,
+        deadline: AICueGenerationDeadline
     ) async throws -> AICueGeneration
     func discard(generationID: UUID) async
     func discardAll() async
@@ -175,8 +178,10 @@ public actor AICueGenerationEngine: AICueGenerating {
     public func generate(
         description: String,
         locale: String,
-        providerProfileID: AICueProviderProfileID
+        providerProfileID: AICueProviderProfileID,
+        deadline: AICueGenerationDeadline
     ) async throws -> AICueGeneration {
+        try requireRemainingBudget(deadline)
         let request: AICueGenerationRequest
         let plan: AICueSoundPlan
         let profile: AICueProviderProfile
@@ -203,18 +208,29 @@ public actor AICueGenerationEngine: AICueGenerating {
         guard provider.profile.id == profile.id else {
             throw AICueGenerationError.providerUnavailable
         }
+        try requireRemainingBudget(deadline)
 
         let credential: SensitiveCredentialInput
         do {
-            guard let stored = try await vault.credential(for: profile.providerID) else {
+            let vault = vault
+            let storedCredential: SensitiveCredentialInput? =
+                try await Self.runBeforeDeadline(deadline) {
+                    try await vault.credential(for: profile.providerID)
+                }
+            guard let stored = storedCredential else {
                 throw AICueGenerationError.credentialRequired
             }
             credential = stored
+        } catch AICueProviderError.deadlineExceeded {
+            throw AICueGenerationError.deadlineExceeded
+        } catch is CancellationError {
+            throw AICueGenerationError.cancelled
         } catch let error as AICueGenerationError {
             throw error
         } catch {
             throw AICueGenerationError.credentialUnavailable
         }
+        try requireRemainingBudget(deadline)
 
         do {
             try Task.checkCancellation()
@@ -233,6 +249,7 @@ public actor AICueGenerationEngine: AICueGenerating {
         } catch {
             throw AICueGenerationError.temporaryStorageUnavailable
         }
+        try requireRemainingBudget(deadline)
         activeDirectories[generationID] = directory
         var succeeded = false
         defer {
@@ -244,6 +261,7 @@ public actor AICueGenerationEngine: AICueGenerating {
 
         var candidates: [AICueCandidate] = []
         candidates.reserveCapacity(AICueGenerationRequest.candidateCount)
+        var retryAvailable = true
         for (variant, compiled) in zip(AICueVariant.allCases, compiledRequests) {
             do {
                 try Task.checkCancellation()
@@ -252,11 +270,16 @@ public actor AICueGenerationEngine: AICueGenerating {
             }
             let response: AICueProviderAudioResponse
             do {
-                response = try await generateWithConservativeRetry(
+                let attempt = try await generateWithConservativeRetry(
                     request: compiled,
-                    credential: credential)
+                    credential: credential,
+                    deadline: deadline,
+                    allowRetry: retryAvailable)
+                response = attempt.response
+                if attempt.usedRetry { retryAvailable = false }
             } catch let error as AICueProviderError {
                 if error == .cancelled { throw AICueGenerationError.cancelled }
+                if error == .deadlineExceeded { throw AICueGenerationError.deadlineExceeded }
                 throw AICueGenerationError.provider(error)
             } catch is CancellationError {
                 throw AICueGenerationError.cancelled
@@ -264,18 +287,30 @@ public actor AICueGenerationEngine: AICueGenerating {
                 throw AICueGenerationError.provider(.transportFailure)
             }
 
-            let candidate = try validateAndPersist(
-                response: response,
-                variant: variant,
-                profile: profile,
-                generationID: generationID,
-                directory: directory)
+            let durationProbe = durationProbe
+            let candidate: AICueCandidate
+            do {
+                candidate = try await Self.runBeforeDeadline(deadline) {
+                    try Self.validateAndPersist(
+                        response: response,
+                        variant: variant,
+                        profile: profile,
+                        generationID: generationID,
+                        directory: directory,
+                        durationProbe: durationProbe)
+                }
+            } catch AICueProviderError.deadlineExceeded {
+                throw AICueGenerationError.deadlineExceeded
+            } catch is CancellationError {
+                throw AICueGenerationError.cancelled
+            }
             candidates.append(candidate)
         }
 
         guard candidates.count == AICueGenerationRequest.candidateCount else {
             throw AICueGenerationError.provider(.transportFailure)
         }
+        try requireRemainingBudget(deadline)
         succeeded = true
         return AICueGeneration(
             id: generationID,
@@ -300,28 +335,78 @@ public actor AICueGenerationEngine: AICueGenerating {
 
     private func generateWithConservativeRetry(
         request: AICueProviderRequest,
-        credential: SensitiveCredentialInput
-    ) async throws -> AICueProviderAudioResponse {
+        credential: SensitiveCredentialInput,
+        deadline: AICueGenerationDeadline,
+        allowRetry: Bool
+    ) async throws -> (response: AICueProviderAudioResponse, usedRetry: Bool) {
+        let provider = provider
         do {
-            return try await provider.generateCandidate(request: request, credential: credential)
+            let response = try await Self.runBeforeDeadline(deadline) {
+                try await provider.generateCandidate(
+                    request: request,
+                    credential: credential,
+                    deadline: deadline)
+            }
+            return (response, false)
         } catch AICueProviderError.rateLimited(let retryAfter?)
-            where (1...5).contains(retryAfter)
+            where allowRetry && (1...5).contains(retryAfter)
         {
-            try await retrySleeper.sleep(seconds: retryAfter)
+            let retrySleeper = retrySleeper
+            _ = try await Self.runBeforeDeadline(deadline) {
+                try await retrySleeper.sleep(seconds: retryAfter)
+                return true
+            }
             try Task.checkCancellation()
             // Exactly one retry. A second 429, like every other failure, escapes immediately.
-            return try await provider.generateCandidate(request: request, credential: credential)
+            let response = try await Self.runBeforeDeadline(deadline) {
+                try await provider.generateCandidate(
+                    request: request,
+                    credential: credential,
+                    deadline: deadline)
+            }
+            return (response, true)
         }
     }
 
-    private func validateAndPersist(
+    private func requireRemainingBudget(_ deadline: AICueGenerationDeadline) throws {
+        guard
+            deadline.remainingNanoseconds(at: DispatchTime.now().uptimeNanoseconds) != nil
+        else {
+            throw AICueGenerationError.deadlineExceeded
+        }
+    }
+
+    private nonisolated static func runBeforeDeadline<T: Sendable>(
+        _ deadline: AICueGenerationDeadline,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try Task.checkCancellation()
+        guard
+            let remaining = deadline.remainingNanoseconds(
+                at: DispatchTime.now().uptimeNanoseconds)
+        else {
+            throw AICueProviderError.deadlineExceeded
+        }
+        let value = try await AICueDeadlineRaceCoordinator<T>().run(
+            remainingNanoseconds: remaining,
+            operation: operation)
+        guard
+            deadline.remainingNanoseconds(at: DispatchTime.now().uptimeNanoseconds) != nil
+        else {
+            throw AICueProviderError.deadlineExceeded
+        }
+        return value
+    }
+
+    private nonisolated static func validateAndPersist(
         response: AICueProviderAudioResponse,
         variant: AICueVariant,
         profile: AICueProviderProfile,
         generationID: UUID,
-        directory: URL
+        directory: URL,
+        durationProbe: any AudioDurationProbing
     ) throws -> AICueCandidate {
-        guard response.data.count <= Self.maximumAudioBytes else {
+        guard response.data.count <= maximumAudioBytes else {
             throw AICueGenerationError.audioTooLarge
         }
         guard let format = sniffAudioFormat(response.data) else {
@@ -341,7 +426,7 @@ public actor AICueGenerationEngine: AICueGenerating {
         else {
             throw AICueGenerationError.audioDurationUnavailable
         }
-        guard duration <= Self.maximumDurationSeconds else {
+        guard duration <= maximumDurationSeconds else {
             throw AICueGenerationError.audioTooLong
         }
 
@@ -387,6 +472,83 @@ public actor AICueGenerationEngine: AICueGenerating {
             else { continue }
             try? FileManager.default.removeItem(at: candidate)
         }
+    }
+}
+
+/// Resolves at the first terminal result without structurally awaiting a cancelled loser. Provider
+/// transports are still cancelled at the deadline, while a broken/non-cooperative implementation
+/// cannot extend the caller-visible generation budget or publish its late result.
+private final class AICueDeadlineRaceCoordinator<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Value, Error>?
+    private var terminalResult: Result<Value, Error>?
+    private var operationTask: Task<Void, Never>?
+    private var deadlineTask: Task<Void, Never>?
+
+    func run(
+        remainingNanoseconds: UInt64,
+        operation: @escaping @Sendable () async throws -> Value
+    ) async throws -> Value {
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                install(
+                    continuation: continuation,
+                    remainingNanoseconds: remainingNanoseconds,
+                    operation: operation)
+            }
+        } onCancel: {
+            resolve(.failure(CancellationError()))
+        }
+    }
+
+    private func install(
+        continuation: CheckedContinuation<Value, Error>,
+        remainingNanoseconds: UInt64,
+        operation: @escaping @Sendable () async throws -> Value
+    ) {
+        lock.lock()
+        if let terminalResult {
+            lock.unlock()
+            continuation.resume(with: terminalResult)
+            return
+        }
+        self.continuation = continuation
+        operationTask = Task {
+            do {
+                self.resolve(.success(try await operation()))
+            } catch {
+                self.resolve(.failure(error))
+            }
+        }
+        deadlineTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: remainingNanoseconds)
+                self.resolve(.failure(AICueProviderError.deadlineExceeded))
+            } catch {
+                // Losing timer cancellation is expected and has no second terminal result.
+            }
+        }
+        lock.unlock()
+    }
+
+    private func resolve(_ result: Result<Value, Error>) {
+        lock.lock()
+        guard terminalResult == nil else {
+            lock.unlock()
+            return
+        }
+        terminalResult = result
+        let continuation = self.continuation
+        let operationTask = self.operationTask
+        let deadlineTask = self.deadlineTask
+        self.continuation = nil
+        self.operationTask = nil
+        self.deadlineTask = nil
+        lock.unlock()
+
+        operationTask?.cancel()
+        deadlineTask?.cancel()
+        continuation?.resume(with: result)
     }
 }
 
