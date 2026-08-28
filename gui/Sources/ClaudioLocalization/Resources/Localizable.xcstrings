@@ -1234,6 +1234,42 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "钥匙串不可用" } }
       }
     },
+    "ai-cue.provider.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Provider and region" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "生成服务与地区" } }
+      }
+    },
+    "ai-cue.provider.capabilities" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Capabilities: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "支持能力：%@" } }
+      }
+    },
+    "ai-cue.modality.speech" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "speech" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "语音" } }
+      }
+    },
+    "ai-cue.modality.animal" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "animal calls" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "动物叫声" } }
+      }
+    },
+    "ai-cue.modality.sound-effect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "sound effects" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "纯音效" } }
+      }
+    },
+    "ai-cue.modality.mixed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "mixed sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "混合声音" } }
+      }
+    },
     "ai-cue.credential.configure" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure API Key…" } },
@@ -1286,6 +1322,30 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The key is stored only in this Mac's Keychain. Claudio cannot display or copy a saved key." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Key 仅保存在这台 Mac 的钥匙串中；claudi0 不会显示或复制已保存的 Key。" } }
+      }
+    },
+    "ai-cue.credential.probing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Validating before save…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在验证并保存…" } }
+      }
+    },
+    "ai-cue.credential.saving" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving to Keychain…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在保存到钥匙串…" } }
+      }
+    },
+    "ai-cue.credential.updating-replacement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Updating pending replacement…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在更新待验证替换 Key…" } }
+      }
+    },
+    "ai-cue.credential.deleting" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Deleting from Keychain…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在从钥匙串删除…" } }
       }
     },
     "ai-cue.credential.validate-save" : {
@@ -1486,10 +1546,22 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请把需要说出的原文放在引号中，例如“任务完成”。" } }
       }
     },
+    "ai-cue.error.unsupported-modality" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider does not support this type of sound. Keep the description and choose a compatible Provider." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前生成服务不支持这类声音；描述已保留，请选择支持该能力的生成服务。" } }
+      }
+    },
+    "ai-cue.error.unsupported-locale" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider does not support the current language for this speech cue. The description was kept." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前生成服务不支持以当前语言生成这段语音；描述已保留。" } }
+      }
+    },
     "ai-cue.error.credential-required" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure an ElevenLabs API Key before generating." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先配置 ElevenLabs API Key，再生成候选。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure an API Key for the selected Provider before generating." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先为当前生成服务配置 API Key，再生成候选。" } }
       }
     },
     "ai-cue.error.credential-invalid" : {
@@ -1506,14 +1578,14 @@
     },
     "ai-cue.error.credits" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your ElevenLabs account does not have enough credits for this generation." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你的 ElevenLabs 账户额度不足，无法完成本次生成。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider reports insufficient quota for this generation." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前生成服务报告账户额度不足，无法完成本次生成。" } }
       }
     },
     "ai-cue.error.rate-limited" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs is limiting requests. Wait a moment, then generate again explicitly." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs 正在限制请求；请稍后再手动生成。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider is limiting requests. Wait a moment, then generate again explicitly." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前生成服务正在限制请求；请稍后再手动生成。" } }
       }
     },
     "ai-cue.error.audio-invalid" : {

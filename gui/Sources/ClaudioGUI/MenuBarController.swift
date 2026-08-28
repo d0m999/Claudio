@@ -231,17 +231,43 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 actionRouter?.audibilityInputsChanged()
             })
         let aiCueVault = AICueKeychainCredentialVault()
-        let aiCueProvider = ElevenLabsAICueProvider()
+        let aiCueElevenLabsProvider = ElevenLabsAICueProvider()
+        let aiCueMiniMaxProvider = MiniMaxAICueProvider()
+        let aiCueQwenSingaporeProvider = try! QwenAICueProvider(
+            profileID: .qwenSingapore)
+        let aiCueQwenBeijingProvider = try! QwenAICueProvider(
+            profileID: .qwenBeijing)
         let aiCueCredentialManager = AICueCredentialManager(
             vault: aiCueVault,
-            validators: [.elevenLabsGlobal: aiCueProvider])
-        let aiCueGenerator = AICueGenerationEngine(
-            credentialManager: aiCueCredentialManager,
-            provider: aiCueProvider,
-            temporaryRoot: ClaudioPaths.root.appendingPathComponent(
-                "ai-cue-temporary",
-                isDirectory: true),
-            durationProbe: audioEnvironment.durationProbe)
+            validators: [
+                .elevenLabsGlobal: aiCueElevenLabsProvider,
+                .miniMaxGlobal: aiCueMiniMaxProvider,
+            ])
+        let aiCueTemporaryRoot = ClaudioPaths.root.appendingPathComponent(
+            "ai-cue-temporary",
+            isDirectory: true)
+        let aiCueGenerator = try! AICueGenerationDispatcher(generators: [
+            .elevenLabsGlobal: AICueGenerationEngine(
+                credentialManager: aiCueCredentialManager,
+                provider: aiCueElevenLabsProvider,
+                temporaryRoot: aiCueTemporaryRoot,
+                durationProbe: audioEnvironment.durationProbe),
+            .miniMaxGlobal: AICueGenerationEngine(
+                credentialManager: aiCueCredentialManager,
+                provider: aiCueMiniMaxProvider,
+                temporaryRoot: aiCueTemporaryRoot,
+                durationProbe: audioEnvironment.durationProbe),
+            .qwenSingapore: AICueGenerationEngine(
+                credentialManager: aiCueCredentialManager,
+                provider: aiCueQwenSingaporeProvider,
+                temporaryRoot: aiCueTemporaryRoot,
+                durationProbe: audioEnvironment.durationProbe),
+            .qwenBeijing: AICueGenerationEngine(
+                credentialManager: aiCueCredentialManager,
+                provider: aiCueQwenBeijingProvider,
+                temporaryRoot: aiCueTemporaryRoot,
+                durationProbe: audioEnvironment.durationProbe),
+        ])
         let aiCueViewModel = AICueGenerationViewModel(
             credentialManager: aiCueCredentialManager,
             generator: aiCueGenerator)

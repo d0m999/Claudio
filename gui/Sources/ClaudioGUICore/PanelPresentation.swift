@@ -121,18 +121,22 @@ public func eventSettingsPackInheritanceState(
     }
 }
 
-/// The unified Settings projection shares the app-lifetime AI model with the legacy window but
-/// must never own or end that window's composer session.
+/// One composer belongs to an exact Surface/Event route. A different selected Surface, or an
+/// explicit route to a different Event, invalidates the old candidate session.
 public func eventSettingsShouldCloseAICueComposer(
     includesAICueComposer: Bool,
     targetSurface: HostSurfaceID?,
-    selectedSurface: HostSurfaceID?
+    targetEvent: Event? = nil,
+    selectedSurface: HostSurfaceID?,
+    selectedEvent: Event? = nil
 ) -> Bool {
-    includesAICueComposer && targetSurface != selectedSurface
+    guard includesAICueComposer else { return false }
+    if targetSurface != selectedSurface { return true }
+    guard let selectedEvent else { return false }
+    return targetEvent != selectedEvent
 }
 
-/// The legacy composer belongs to one exact Surface/Event tuple. A route projection from another
-/// retained window must never make that session appear under a different Surface.
+/// The composer appears only beneath its exact Surface/Event tuple.
 public func eventSettingsAICueComposerMatches(
     targetSurface: HostSurfaceID?,
     targetEvent: Event?,

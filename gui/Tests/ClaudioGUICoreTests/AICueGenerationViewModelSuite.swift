@@ -49,7 +49,40 @@ private actor ComposerCredentialManagerFixture: AICueCredentialManaging {
         }
     }
 
+    func setStatus(_ status: AICueCredentialStatus) {
+        currentStatus = status
+    }
+
     func counts() -> (saves: Int, deletions: Int) { (saveCount, deleteCount) }
+}
+
+private actor SuspendedCredentialStatusManagerFixture: AICueCredentialManaging {
+    private var statusContinuation: CheckedContinuation<AICueCredentialStatus, Never>?
+
+    func status(for profileID: AICueProviderProfileID) async -> AICueCredentialStatus {
+        await withCheckedContinuation { continuation in
+            statusContinuation = continuation
+        }
+    }
+
+    func save(
+        _ credential: SensitiveCredentialInput,
+        for profileID: AICueProviderProfileID
+    ) async throws -> AICueCredentialStatus {
+        .stored(verification: .verified, hasPendingReplacement: false)
+    }
+
+    func delete(for profileID: AICueProviderProfileID) async throws {}
+
+    func cancelPendingReplacement(for profileID: AICueProviderProfileID) async throws {}
+
+    var hasSuspendedStatusRequest: Bool { statusContinuation != nil }
+
+    func resumeStatus(with status: AICueCredentialStatus) {
+        let continuation = statusContinuation
+        statusContinuation = nil
+        continuation?.resume(returning: status)
+    }
 }
 
 private actor ComposerGeneratorFixture: AICueGenerating {
@@ -109,6 +142,26 @@ private actor ComposerGeneratorFixture: AICueGenerating {
 
 @MainActor
 func runAICueGenerationViewModelSuites() async {
+    await suite("AI 提示音状态层：迟到的同 profile 状态读取不得覆盖新凭据 mutation") {
+        let credentialManager = SuspendedCredentialStatusManagerFixture()
+        let viewModel = AICueGenerationViewModel(
+            credentialManager: credentialManager,
+            generator: ComposerGeneratorFixture(mode: .failure(.credentialRequired)),
+            providerProfileID: .elevenLabsGlobal)
+
+        let staleRefresh = Task { await viewModel.refreshCredentialStatus() }
+        await waitForSuspendedCredentialStatus(credentialManager)
+        await viewModel.saveCredential(
+            try! SensitiveCredentialInput("fixture-newer-key"))
+        await credentialManager.resumeStatus(with: .unavailable)
+        await staleRefresh.value
+
+        expect(
+            viewModel.credentialStatus
+                == .stored(verification: .verified, hasPendingReplacement: false),
+            "旧 status() 完成不能把更新后的同 profile credential 状态覆写回去")
+    }
+
     await suite("AI 提示音状态层：保存 key 保留描述且绝不自动触发计费生成") {
         let credentialManager = ComposerCredentialManagerFixture(status: .missing)
         let generator = ComposerGeneratorFixture(mode: .failure(.credentialRequired))
@@ -167,17 +220,47 @@ func runAICueGenerationViewModelSuites() async {
             "60 秒 absolute deadline 必须在用户点击入口冻结并传入 engine")
     }
 
+    await suite("AI 提示音状态层：生成拒绝后立即投影当前 profile 的 rejected 状态") {
+        let credentialManager = ComposerCredentialManagerFixture(
+            status: .stored(verification: .rejected, hasPendingReplacement: false))
+        let viewModel = AICueGenerationViewModel(
+            credentialManager: credentialManager,
+            generator: ComposerGeneratorFixture(mode: .failure(.provider(.invalidCredential))),
+            providerProfileID: .qwenSingapore)
+        viewModel.begin(target: aiCueComposerTarget())
+        viewModel.updateDescription("清晰地说“完成”")
+
+        viewModel.startGeneration(locale: "zh-Hans")
+        await waitForAICueViewModel {
+            viewModel.phase != .generating
+                && viewModel.credentialStatus
+                    == .stored(verification: .rejected, hasPendingReplacement: false)
+        }
+
+        expect(
+            viewModel.credentialStatus
+                == .stored(verification: .rejected, hasPendingReplacement: false),
+            "明确 401 后 UI 必须刷新当前 profile 状态，不能继续显示 deferred/verified")
+        expect(
+            viewModel.failure == .generation(.provider(.invalidCredential)),
+            "credential 状态刷新不能吞掉可修正的 generation 错误")
+    }
+
     await suite("AI 提示音状态层：候选完整就绪后才建议名称，改名不重新请求") {
         let generation = aiCueComposerGeneration()
         let generator = ComposerGeneratorFixture(mode: .success(generation))
+        let credentialManager = ComposerCredentialManagerFixture(
+            status: .stored(verification: .deferred, hasPendingReplacement: false))
         let viewModel = AICueGenerationViewModel(
-            credentialManager: ComposerCredentialManagerFixture(
-                status: .stored(verification: .verified, hasPendingReplacement: false)),
+            credentialManager: credentialManager,
             generator: generator,
             providerProfileID: .elevenLabsGlobal)
         viewModel.begin(target: aiCueComposerTarget())
         viewModel.updateDescription("短促木琴完成音效")
         expect(viewModel.displayName.isEmpty, "第一步不得预先要求提示音名称")
+        await viewModel.refreshCredentialStatus()
+        await credentialManager.setStatus(
+            .stored(verification: .verified, hasPendingReplacement: false))
 
         viewModel.startGeneration(locale: "zh-Hans")
         await waitForAICueViewModel { viewModel.phase == .candidatesReady }
@@ -188,6 +271,10 @@ func runAICueGenerationViewModelSuites() async {
         expect(viewModel.displayName == "我的木琴", "候选阶段必须允许直接修改最终名称")
         expect(await generator.facts().generations == 1, "只改名称绝不能重新请求 provider")
         expect(viewModel.generation == generation, "只改名称不能清理候选")
+        expect(
+            viewModel.credentialStatus
+                == .stored(verification: .verified, hasPendingReplacement: false),
+            "显式生成验证成功后必须立即刷新当前 profile 的 credential 投影")
     }
 
     await suite("AI 提示音状态层：修改声音描述立即作废并清理旧候选") {
@@ -338,6 +425,10 @@ func runAICueGenerationViewModelSuites() async {
         expect(
             AICueProviderPreferences(defaults: defaults).selectedProfileID() == .qwenBeijing,
             "profile/region 非敏感偏好必须跨实例持久化")
+        expect(
+            viewModel.availableProviderProfiles.map(\.id)
+                == [.elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing],
+            "production UI 的 profile 选择必须直接投影 registry 的完整稳定顺序")
         await waitForAICueViewModel { viewModel.phase != .generating }
     }
 
@@ -441,6 +532,18 @@ private func waitForAICueViewModel(
         await Task.yield()
     }
     expect(false, "等待 AI 提示音状态转换超时")
+}
+
+private func waitForSuspendedCredentialStatus(
+    _ credentialManager: SuspendedCredentialStatusManagerFixture
+) async {
+    for _ in 0..<2_000 {
+        if await credentialManager.hasSuspendedStatusRequest { return }
+        await Task.yield()
+    }
+    await MainActor.run {
+        expect(false, "等待悬挂 credential status 读取超时")
+    }
 }
 
 private func waitForAICueDiscard(

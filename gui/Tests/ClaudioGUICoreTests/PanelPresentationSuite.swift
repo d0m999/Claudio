@@ -103,19 +103,35 @@ func runPanelPresentationSuites() async {
                 includesAICueComposer: false,
                 targetSurface: .workBuddy,
                 selectedSurface: .codex),
-            "统一 Settings 不拥有 composer，scope 不同也不得关闭 legacy AI session")
+            "不呈现 composer 的只读投影不得结束其他表面的 AI session")
         expect(
             eventSettingsShouldCloseAICueComposer(
                 includesAICueComposer: true,
                 targetSurface: .workBuddy,
                 selectedSurface: .codex),
-            "standalone composer 切换到另一 scope 时必须结束旧 session")
+            "composer 切换到另一 scope 时必须结束旧 session")
         expect(
             !eventSettingsShouldCloseAICueComposer(
                 includesAICueComposer: true,
                 targetSurface: .workBuddy,
                 selectedSurface: .workBuddy),
-            "standalone composer 留在同一 scope 时不得误关 session")
+            "composer 留在同一 scope 时不得误关 session")
+        expect(
+            eventSettingsShouldCloseAICueComposer(
+                includesAICueComposer: true,
+                targetSurface: .workBuddy,
+                targetEvent: .stop,
+                selectedSurface: .workBuddy,
+                selectedEvent: .notification),
+            "同一 Surface 显式切换 Event 路由也必须结束旧候选 session")
+        expect(
+            !eventSettingsShouldCloseAICueComposer(
+                includesAICueComposer: true,
+                targetSurface: .workBuddy,
+                targetEvent: .stop,
+                selectedSurface: .workBuddy,
+                selectedEvent: nil),
+            "没有显式 Event 路由变化时不得因可选焦点为空误关 session")
         expect(
             eventSettingsAICueComposerMatches(
                 targetSurface: .workBuddy,

@@ -140,6 +140,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let handback = model.close()
         let restoration = focusRestoration
         focusRestoration = nil
+        aiCueViewModel.endSession()
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
                 restoration?(handback)

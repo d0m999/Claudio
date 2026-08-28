@@ -42,6 +42,38 @@ struct EventSettingsAICueServiceCard: View {
                 }
             }
 
+            Picker(
+                l10n.text(.aiCueProviderLabel),
+                selection: Binding(
+                    get: { viewModel.providerProfileID },
+                    set: { profileID in
+                        try? viewModel.selectProviderProfile(profileID)
+                        Task {
+                            await viewModel.refreshCredentialStatus()
+                        }
+                    })
+            ) {
+                ForEach(viewModel.availableProviderProfiles, id: \.id) { profile in
+                    Text(l10n.text(profile.displayNameKey))
+                        .tag(profile.id)
+                }
+            }
+            .pickerStyle(.menu)
+            .disabled(
+                viewModel.phase == .adopting
+                    || viewModel.credentialActivity != .idle
+            )
+            .accessibilityLabel(l10n.text(.aiCueProviderLabel))
+            .accessibilityValue(l10n.text(viewModel.providerProfile.displayNameKey))
+            .accessibilityHint(capabilityText)
+            .accessibilityIdentifier("event-settings.ai-cue.provider-profile")
+
+            Text(capabilityText)
+                .font(ClaudioTheme.font(.caption))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("event-settings.ai-cue.provider-capabilities")
+
             HStack(spacing: 10) {
                 Text(status.text)
                     .font(ClaudioTheme.font(.caption).weight(.medium))
@@ -67,6 +99,12 @@ struct EventSettingsAICueServiceCard: View {
     }
 
     private var statusPresentation: (text: String, color: Color) {
+        if viewModel.credentialActivity != .idle {
+            return (
+                l10n.text(aiCueCredentialActivityKey(viewModel.credentialActivity)),
+                ClaudioTheme.secondaryText(colorScheme)
+            )
+        }
         switch viewModel.credentialStatus {
         case nil:
             return (l10n.text(.aiCueServiceChecking), ClaudioTheme.secondaryText(colorScheme))
@@ -96,6 +134,14 @@ struct EventSettingsAICueServiceCard: View {
             return l10n.text(.aiCueManageKey)
         }
         return l10n.text(.aiCueConfigureKey)
+    }
+
+    private var capabilityText: String {
+        let modalities = AICueModality.allCases
+            .filter(viewModel.providerProfile.supportedModalities.contains)
+            .map { l10n.text(aiCueModalityKey($0)) }
+            .joined(separator: languageStore.language == .english ? ", " : "，")
+        return l10n.format(.aiCueProviderCapabilities, modalities)
     }
 }
 
@@ -454,6 +500,19 @@ struct EventSettingsAICueCredentialSheet: View {
                 .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .fixedSize(horizontal: false, vertical: true)
 
+            if viewModel.credentialActivity != .idle {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .accessibilityHidden(true)
+                    Text(l10n.text(aiCueCredentialActivityKey(viewModel.credentialActivity)))
+                        .font(ClaudioTheme.font(.caption))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("event-settings.ai-cue.credential-activity")
+            }
+
             Text(l10n.text(.aiCueCredentialKeyLabel))
                 .font(ClaudioTheme.font(.body).weight(.semibold))
             SecureField(l10n.text(.aiCueCredentialKeyLabel), text: $keyInput)
@@ -592,6 +651,27 @@ private func credentialInputErrorText(
     }
 }
 
+private func aiCueCredentialActivityKey(
+    _ activity: AICueCredentialActivity
+) -> ClaudioL10nKey {
+    switch activity {
+    case .idle: return .aiCueServiceChecking
+    case .probing: return .aiCueCredentialProbing
+    case .saving: return .aiCueCredentialSaving
+    case .pendingReplacement: return .aiCueCredentialUpdatingReplacement
+    case .deleting: return .aiCueCredentialDeleting
+    }
+}
+
+private func aiCueModalityKey(_ modality: AICueModality) -> ClaudioL10nKey {
+    switch modality {
+    case .speech: return .aiCueModalitySpeech
+    case .animal: return .aiCueModalityAnimal
+    case .soundEffect: return .aiCueModalitySoundEffect
+    case .mixed: return .aiCueModalityMixed
+    }
+}
+
 private func aiCueCredentialFailureText(
     _ failure: AICueCredentialFailure,
     l10n: ClaudioL10n
@@ -619,6 +699,13 @@ private func aiCueFailureText(
     case .generation(.validation(.descriptionTooLong)):
         return l10n.text(.aiCueErrorDescriptionTooLong)
     case .generation(.validation(.spokenContentRequired)):
+        return l10n.text(.aiCueErrorSpeechNeedsText)
+    case .generation(.validation(.invalidLocale)),
+        .generation(.requestCompilation(.unsupportedLocale)):
+        return l10n.text(.aiCueErrorUnsupportedLocale)
+    case .generation(.requestCompilation(.unsupportedModality)):
+        return l10n.text(.aiCueErrorUnsupportedModality)
+    case .generation(.requestCompilation(.spokenContentRequired)):
         return l10n.text(.aiCueErrorSpeechNeedsText)
     case .generation(.credentialRequired):
         return l10n.text(.aiCueErrorCredentialRequired)

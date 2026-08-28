@@ -10,7 +10,7 @@ enum EventSettingsPresentationContext: Equatable {
     case standaloneWindow
     case unifiedSettings
 
-    var includesAICueComposer: Bool { self == .standaloneWindow }
+    var includesAICueComposer: Bool { true }
     var includesDisconnectedScopes: Bool { self == .unifiedSettings }
     var groupsScopesByHostProduct: Bool { self == .unifiedSettings }
     var includesPlaybackSettings: Bool { self == .unifiedSettings }
@@ -97,6 +97,15 @@ struct EventSettingsWindowView: View {
         .onReceive(selection.$focusRequestRevision) { revision in
             guard revision > handledFocusRequestRevision else { return }
             handledFocusRequestRevision = revision
+            if eventSettingsShouldCloseAICueComposer(
+                includesAICueComposer: presentationContext.includesAICueComposer,
+                targetSurface: aiCueViewModel.target?.surface,
+                targetEvent: aiCueViewModel.target?.event,
+                selectedSurface: selectedScope.scope.surface,
+                selectedEvent: selection.route.event)
+            {
+                closeAICueComposer()
+            }
             focusedTarget = eventSettingsRouteFocusTarget(
                 route: selection.route,
                 scopes: scopes.map(\.scope))
@@ -112,6 +121,9 @@ struct EventSettingsWindowView: View {
             if presentationContext.includesAICueComposer {
                 closeAICueComposer()
             }
+        }
+        .onChange(of: aiCueViewModel.providerProfileID) { _ in
+            stopCandidatePreview()
         }
         .onChange(of: aiCueViewModel.requiresCredentialConfiguration) { required in
             if presentationContext.includesAICueComposer, required {

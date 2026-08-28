@@ -315,6 +315,17 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueServicePendingReplacement: Self =
         "ai-cue.service.pending-replacement"
     public static let aiCueServiceUnavailable: Self = "ai-cue.service.unavailable"
+    public static let aiCueProviderLabel: Self = "ai-cue.provider.label"
+    public static let aiCueProviderCapabilities: Self = "ai-cue.provider.capabilities"
+    public static let aiCueModalitySpeech: Self = "ai-cue.modality.speech"
+    public static let aiCueModalityAnimal: Self = "ai-cue.modality.animal"
+    public static let aiCueModalitySoundEffect: Self = "ai-cue.modality.sound-effect"
+    public static let aiCueModalityMixed: Self = "ai-cue.modality.mixed"
+    public static let aiCueCredentialProbing: Self = "ai-cue.credential.probing"
+    public static let aiCueCredentialSaving: Self = "ai-cue.credential.saving"
+    public static let aiCueCredentialUpdatingReplacement: Self =
+        "ai-cue.credential.updating-replacement"
+    public static let aiCueCredentialDeleting: Self = "ai-cue.credential.deleting"
     public static let aiCueConfigureKey: Self = "ai-cue.credential.configure"
     public static let aiCueManageKey: Self = "ai-cue.credential.manage"
     public static let aiCueCredentialTitle: Self = "ai-cue.credential.title"
@@ -361,6 +372,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueErrorDescriptionRequired: Self = "ai-cue.error.description-required"
     public static let aiCueErrorDescriptionTooLong: Self = "ai-cue.error.description-too-long"
     public static let aiCueErrorSpeechNeedsText: Self = "ai-cue.error.speech-needs-text"
+    public static let aiCueErrorUnsupportedModality: Self =
+        "ai-cue.error.unsupported-modality"
+    public static let aiCueErrorUnsupportedLocale: Self = "ai-cue.error.unsupported-locale"
     public static let aiCueErrorCredentialRequired: Self = "ai-cue.error.credential-required"
     public static let aiCueErrorCredentialInvalid: Self = "ai-cue.error.credential-invalid"
     public static let aiCueErrorCredentialUnavailable: Self = "ai-cue.error.credential-unavailable"
@@ -832,7 +846,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueProviderProfileQwenBeijing, .aiCueServiceTitle, .aiCueServiceSubtitle,
         .aiCueServiceChecking, .aiCueServiceMissing, .aiCueServiceConfigured,
         .aiCueServiceStoredVerified, .aiCueServiceStoredDeferred, .aiCueServiceStoredRejected,
-        .aiCueServicePendingReplacement, .aiCueServiceUnavailable, .aiCueConfigureKey,
+        .aiCueServicePendingReplacement, .aiCueServiceUnavailable, .aiCueProviderLabel,
+        .aiCueProviderCapabilities, .aiCueModalitySpeech, .aiCueModalityAnimal,
+        .aiCueModalitySoundEffect, .aiCueModalityMixed, .aiCueCredentialProbing,
+        .aiCueCredentialSaving, .aiCueCredentialUpdatingReplacement, .aiCueCredentialDeleting,
+        .aiCueConfigureKey,
         .aiCueManageKey, .aiCueCredentialTitle,
         .aiCueCredentialKeyLabel, .aiCueCredentialPrivacy, .aiCueCredentialPrivacyMiniMax,
         .aiCueCredentialPrivacyQwenSingapore, .aiCueCredentialPrivacyQwenBeijing,
@@ -848,7 +866,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueCandidateDuration, .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle,
         .aiCueAppliedMessage,
         .aiCueErrorDescriptionRequired, .aiCueErrorDescriptionTooLong,
-        .aiCueErrorSpeechNeedsText, .aiCueErrorCredentialRequired,
+        .aiCueErrorSpeechNeedsText, .aiCueErrorUnsupportedModality,
+        .aiCueErrorUnsupportedLocale, .aiCueErrorCredentialRequired,
         .aiCueErrorCredentialInvalid, .aiCueErrorCredentialUnavailable, .aiCueErrorCredits,
         .aiCueErrorRateLimited, .aiCueErrorAudioInvalid, .aiCueErrorGeneration,
         .aiCueErrorNameRequired, .aiCueErrorNameInvalid, .aiCueErrorAdoptionTarget,

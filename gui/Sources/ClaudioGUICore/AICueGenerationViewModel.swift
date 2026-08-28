@@ -51,6 +51,7 @@ public final class AICueGenerationViewModel: ObservableObject {
     private let registry: AICueProviderRegistry
     private let providerPreferences: AICueProviderPreferences
     private var sessionRevision: UInt64 = 0
+    private var credentialStatusRevision: UInt64 = 0
     private var generationTask: Task<Void, Never>?
     private var adoptionTask: Task<Void, Never>?
 
@@ -76,6 +77,10 @@ public final class AICueGenerationViewModel: ObservableObject {
             preconditionFailure("Selected provider profile did not come from the registry")
         }
         return profile
+    }
+
+    public var availableProviderProfiles: [AICueProviderProfile] {
+        registry.profiles()
     }
 
     public var requiresCredentialConfiguration: Bool {
@@ -126,16 +131,30 @@ public final class AICueGenerationViewModel: ObservableObject {
     }
 
     public func refreshCredentialStatus() async {
-        credentialStatus = await credentialManager.status(for: providerProfileID)
+        guard credentialActivity == .idle else { return }
+        let profileID = providerProfileID
+        credentialStatusRevision &+= 1
+        let revision = credentialStatusRevision
+        let status = await credentialManager.status(for: profileID)
+        guard
+            providerProfileID == profileID,
+            credentialStatusRevision == revision
+        else { return }
+        credentialStatus = status
     }
 
     /// A profile switch is an explicit region/provider choice. It persists only the allowlisted ID,
     /// cancels the old generation and invalidates every unadopted candidate without touching an
     /// already adopted sound.
     public func selectProviderProfile(_ profileID: AICueProviderProfileID) throws {
-        guard profileID != providerProfileID else { return }
+        guard
+            profileID != providerProfileID,
+            credentialActivity == .idle,
+            phase != .adopting
+        else { return }
         _ = try registry.profile(for: profileID)
         try providerPreferences.select(profileID)
+        credentialStatusRevision &+= 1
         invalidateVisibleGeneration()
         providerProfileID = profileID
         credentialStatus = nil
@@ -146,6 +165,7 @@ public final class AICueGenerationViewModel: ObservableObject {
     /// message; the description and explicit second click remain intact.
     public func saveCredential(_ credential: SensitiveCredentialInput) async {
         guard credentialActivity == .idle else { return }
+        credentialStatusRevision &+= 1
         let profile = try? registry.profile(for: providerProfileID)
         switch (profile?.credentialValidationPolicy, credentialStatus) {
         case (.readOnlyProbe, _): credentialActivity = .probing
@@ -178,6 +198,7 @@ public final class AICueGenerationViewModel: ObservableObject {
         guard credentialActivity == .idle, phase != .generating, phase != .adopting else {
             return
         }
+        credentialStatusRevision &+= 1
         credentialActivity = .deleting
         credentialFailure = nil
         defer { credentialActivity = .idle }
@@ -192,6 +213,7 @@ public final class AICueGenerationViewModel: ObservableObject {
 
     public func cancelPendingCredentialReplacement() async {
         guard credentialActivity == .idle else { return }
+        credentialStatusRevision &+= 1
         credentialActivity = .pendingReplacement
         credentialFailure = nil
         defer { credentialActivity = .idle }
@@ -259,6 +281,7 @@ public final class AICueGenerationViewModel: ObservableObject {
                 self.generation = generation
                 self.displayName = generation.plan.suggestedDisplayName
                 self.phase = .candidatesReady
+                await self.refreshCredentialStatus()
             case .failure(let error):
                 if error == .credentialRequired {
                     self.credentialStatus = .missing
@@ -267,6 +290,7 @@ public final class AICueGenerationViewModel: ObservableObject {
                 }
                 self.phase = .editing
                 self.failure = .generation(error)
+                await self.refreshCredentialStatus()
             }
         }
     }

@@ -2656,7 +2656,8 @@ func runViewWiringSuites() {
                 && flatController.contains("presentationContext: .standaloneWindow"),
             "统一设置必须嵌入同一事件事实/selection 并内部路由 Sounds，legacy window 保留 standalone context")
         expect(
-            flatView.contains("presentationContext.includesAICueComposer")
+            flatView.contains("var includesAICueComposer: Bool { true }")
+                && flatView.contains("presentationContext.includesAICueComposer")
                 && flatView.contains("eventSettingsShouldCloseAICueComposer(")
                 && flatView.contains("eventSettingsAICueComposerMatches(")
                 && flatView.contains("presentationContext.includesPlaybackSettings")
@@ -2680,7 +2681,7 @@ func runViewWiringSuites() {
                 && flatViewWithStrings.contains(
                     ".accessibilityIdentifier( \"event-settings.event.")
                 && flatViewWithStrings.contains(".automatic-playback\")"),
-            "统一设置 Events 必须隐藏 AI composer 并接入试听全部、逐事件自动播放、主音量、pack 与 reset seams")
+            "统一设置 Events 必须接入 AI composer、试听全部、逐事件自动播放、主音量、pack 与 reset seams")
         expect(
             flatView.contains("EventSettingsAICueServiceCard(")
                 && flatView.contains("EventSettingsAICueComposerView(")
@@ -2692,11 +2693,19 @@ func runViewWiringSuites() {
             "AI 提示音必须作为事件设置的页面级服务与逐事件动作接入，并消费 fail-closed 采用资格")
         expect(
             flatView.contains("EventSettingsAICueCredentialSheet(")
-                && flatView.contains(".onChange(of: aiCueViewModel.requiresCredentialConfiguration)")
+                && flatView.contains(
+                    ".onChange(of: aiCueViewModel.requiresCredentialConfiguration)")
+                && flatView.contains(".onChange(of: aiCueViewModel.providerProfileID)")
                 && flatAIView.contains("SecureField(")
+                && flatAIView.contains("viewModel.availableProviderProfiles")
+                && flatAIView.contains("viewModel.selectProviderProfile(profileID)")
+                && flatAIView.contains("aiCueCredentialActivityKey(")
+                && flatAIView.contains("viewModel.providerProfile.supportedModalities")
+                && flatAIViewWithStrings.contains(
+                    "languageStore.language == .english ? \", \" : \"，\"")
                 && !flatAIViewWithStrings.contains("Toggle(\"Show")
                 && !flatAIViewWithStrings.contains("Toggle(\"显示"),
-            "BYOK 必须使用 SecureField 和页面级凭据表单，缺 key 时保留表单并打开配置且不提供明文显示")
+            "BYOK 必须使用 registry profile、独立状态、route-derived 能力与 SecureField，且不提供明文显示")
         guard
             let descriptionBody = closureBody(after: "private var descriptionStep", in: flatAIView),
             let candidatesBody = closureBody(after: "private var candidatesStep", in: flatAIView)
@@ -2719,9 +2728,11 @@ func runViewWiringSuites() {
             "候选时长必须消费 localization catalog，不能在 SwiftUI 中按语言手工拼接单位")
         expect(
             flatView.contains("stopCandidatePreview()")
-                && flatView.contains("aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)")
-                && flatController.contains("aiCueViewModel.endSession()"),
-            "采用、关闭和作用域变化必须停止试听并清理未采用候选")
+                && flatView.contains(
+                    "aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)")
+                && flatController.contains("aiCueViewModel.endSession()")
+                && flatSettingsController.contains("aiCueViewModel.endSession()"),
+            "采用、离开页面、关闭任一 retained window 和作用域变化必须清理未采用候选")
         expect(
             flatView.contains("let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
                 && flatController.contains(
@@ -2733,10 +2744,14 @@ func runViewWiringSuites() {
             "候选、名称和采用目标必须作为单一领域请求跨越 SwiftUI/AppKit 边界")
         expect(
             flatMenu.contains("AICueKeychainCredentialVault(")
-                && flatMenu.contains("ElevenLabsAICueProvider(")
+                && flatMenu.contains("let aiCueElevenLabsProvider = ElevenLabsAICueProvider()")
+                && flatMenu.contains("let aiCueMiniMaxProvider = MiniMaxAICueProvider()")
+                && flatMenu.contains("QwenAICueProvider( profileID: .qwenSingapore)")
+                && flatMenu.contains("QwenAICueProvider( profileID: .qwenBeijing)")
+                && flatMenu.contains("AICueGenerationDispatcher(generators:")
                 && flatMenu.contains("AICueGenerationEngine(")
                 && flatMenu.contains("soundPacksWindowController.adoptAICue(request)"),
-            "composition root 必须接通 Keychain、固定 provider、生成引擎与既有声音包采用链")
+            "composition root 必须接通 Keychain、四个固定 profile/engine 与既有声音包采用链")
     }
 
     suite("声音包窗口：完整映射菜单列出已有音频并经窗口 model 绑定；面板不消费 inventory") {
