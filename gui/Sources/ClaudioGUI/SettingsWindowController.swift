@@ -16,6 +16,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private let soundPacksEditorOwner: SoundPacksEditorOwner
+    private let focusQuietObserver: FocusQuietSystemObserver
     private var window: NSWindow?
     private var isPresentingWindow = false
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
@@ -32,6 +33,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     ) {
         self.preferences = preferences
         self.soundPacksEditorOwner = soundPacksEditorOwner
+        focusQuietObserver = FocusQuietSystemObserver()
         model = SettingsWindowPresentationModel(
             preferences: preferences,
             availability: settingsRouteAvailability(
@@ -116,6 +118,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let content = SettingsWindowView(
             model: model,
             preferences: preferences,
+            focusQuietPolicy: focusQuietObserver.policy,
             soundPacksEditorOwner: soundPacksEditorOwner)
         let window = NSWindow(
             contentRect: NSRect(

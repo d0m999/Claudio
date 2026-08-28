@@ -323,6 +323,7 @@ jobs:
             <key>CFBundleIconFile</key><string>claudi0.icns</string>
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>LSMinimumSystemVersion</key><string>$MACOS_DEPLOYMENT_TARGET</string>
+            <key>NSFocusStatusUsageDescription</key><string>claudi0 uses only whether Focus is active to temporarily quiet automatic sounds. It never stores the Focus name.</string>
             <key>LSUIElement</key><true/>
           </dict>
           </plist>
@@ -377,6 +378,7 @@ jobs:
             --force \
             --options runtime \
             --timestamp \
+            --entitlements gui/ClaudioGUI.entitlements \
             --sign "$SIGNING_IDENTITY" \
             "$APP"
           bash scripts/verify-release-signature.sh \

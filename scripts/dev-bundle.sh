@@ -119,6 +119,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>claudi0.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSFocusStatusUsageDescription</key><string>claudi0 uses only whether Focus is active to temporarily quiet automatic sounds. It never stores the Focus name.</string>
   <key>LSUIElement</key><true/>
 </dict>
 </plist>
@@ -128,7 +129,12 @@ PLIST
     strip -x "$APP/Contents/MacOS/claudi0-app" "$APP/Contents/Resources/bin/claudi0"
     bash "$repo_root/scripts/check-release-size.sh" "$APP"
 
-    codesign --force --deep --sign - "$APP"
+    codesign \
+        --force \
+        --deep \
+        --entitlements "$repo_root/gui/ClaudioGUI.entitlements" \
+        --sign - \
+        "$APP"
     codesign --verify --verbose "$APP"
     echo "✅ dist/${APP}（$(uname -m)）—— 用 open dist/${APP} 启动（菜单栏出现 Orbit Zero 图标）"
 }

@@ -101,6 +101,7 @@ import SwiftUI
     private struct SettingsWindowRouteFrame: View {
         @StateObject private var model: SettingsWindowPresentationModel<NSRunningApplication>
         @StateObject private var languageStore: ClaudioPreferences
+        @StateObject private var focusQuietPolicy: FocusQuietPolicyController
 
         init(
             route: SettingsRoute,
@@ -114,10 +115,26 @@ import SwiftUI
                     preferences: preferences,
                     availability: availability))
             _languageStore = StateObject(wrappedValue: preferences)
+            _focusQuietPolicy = StateObject(
+                wrappedValue: FocusQuietPolicyController(
+                    defaults: UserDefaults(),
+                    readSystemState: {
+                        FocusQuietSystemState(authorization: .authorized, isFocused: false)
+                    },
+                    requestAuthorization: { completion in
+                        completion(
+                            FocusQuietSystemState(
+                                authorization: .authorized,
+                                isFocused: false))
+                    },
+                    publish: { _, _ in true }))
         }
 
         var body: some View {
-            SettingsWindowView(model: model, preferences: languageStore)
+            SettingsWindowView(
+                model: model,
+                preferences: languageStore,
+                focusQuietPolicy: focusQuietPolicy)
                 .frame(
                     width: SettingsWindowGeometry.minimumWidth,
                     height: SettingsWindowGeometry.minimumHeight)

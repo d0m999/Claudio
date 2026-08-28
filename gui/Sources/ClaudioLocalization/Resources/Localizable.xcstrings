@@ -3082,6 +3082,96 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用量" } }
       }
     },
+    "settings.notifications.focus.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quiet automatic sounds during Focus" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 生效时静默自动提示音" } }
+      }
+    },
+    "settings.notifications.focus.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "When enabled and authorized, Focus temporarily suppresses automatic playback. Manual preview always remains available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启并授权后，Focus 会临时抑制自动播放；手工试听始终可用。" } }
+      }
+    },
+    "settings.notifications.permission.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus permission" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 权限" } }
+      }
+    },
+    "settings.notifications.permission.not-requested" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not requested" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未请求" } }
+      }
+    },
+    "settings.notifications.permission.authorized" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Authorized" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已授权" } }
+      }
+    },
+    "settings.notifications.permission.denied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Denied" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已拒绝" } }
+      }
+    },
+    "settings.notifications.permission.restricted" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restricted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "受限制" } }
+      }
+    },
+    "settings.notifications.reason.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current reason" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前原因" } }
+      }
+    },
+    "settings.notifications.reason.disabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Policy off" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "策略已关闭" } }
+      }
+    },
+    "settings.notifications.reason.permission-required" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Permission required; automatic sounds continue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要权限；自动提示音继续播放" } }
+      }
+    },
+    "settings.notifications.reason.inactive" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No dynamic quiet reason" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前无动态静默原因" } }
+      }
+    },
+    "settings.notifications.reason.focus-active" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus is suppressing automatic sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 正在抑制自动提示音" } }
+      }
+    },
+    "settings.notifications.reason.observer-failure" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus observer unavailable; automatic sounds continue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus observer 不可用；自动提示音继续播放" } }
+      }
+    },
+    "settings.notifications.publication-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dynamic Quiet State could not be published. Automatic sounds continue after any previous snapshot expires." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法发布 Dynamic Quiet State；之前的快照过期后，自动提示音会继续播放。" } }
+      }
+    },
+    "settings.notifications.open-events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Events & Sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "前往事件与提示音" } }
+      }
+    },
     "settings.general.language.chinese" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Simplified Chinese" } },

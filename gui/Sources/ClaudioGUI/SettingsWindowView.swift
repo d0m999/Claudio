@@ -10,6 +10,7 @@ import SwiftUI
 struct SettingsWindowView: View {
     @ObservedObject var model: SettingsWindowPresentationModel<NSRunningApplication>
     @ObservedObject var preferences: ClaudioPreferences
+    @ObservedObject var focusQuietPolicy: FocusQuietPolicyController
     let soundPacksEditorOwner: SoundPacksEditorOwner?
 
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
@@ -20,10 +21,12 @@ struct SettingsWindowView: View {
     init(
         model: SettingsWindowPresentationModel<NSRunningApplication>,
         preferences: ClaudioPreferences,
+        focusQuietPolicy: FocusQuietPolicyController,
         soundPacksEditorOwner: SoundPacksEditorOwner? = nil
     ) {
         self.model = model
         self.preferences = preferences
+        self.focusQuietPolicy = focusQuietPolicy
         self.soundPacksEditorOwner = soundPacksEditorOwner
     }
 
@@ -110,6 +113,8 @@ struct SettingsWindowView: View {
                         routeFailure(failure)
                     } else if destination == .general {
                         generalSettings
+                    } else if destination == .notifications {
+                        notificationsSettings
                     } else {
                         debugRouteContent
                     }
@@ -215,6 +220,93 @@ struct SettingsWindowView: View {
             .accessibilitySortPriority(1)
             .accessibilityIdentifier("settings.first-action.\(destination.rawValue)")
         }
+    }
+
+    private var notificationsSettings: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Toggle(isOn: focusQuietBinding) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(l10n.text(.settingsNotificationsFocusTitle))
+                        .font(.headline)
+                    Text(l10n.text(.settingsNotificationsFocusDescription))
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .toggleStyle(.switch)
+            .focused(
+                $focusedTarget,
+                equals: SettingsWindowFocusTarget.firstAction(.notifications)
+            )
+            .accessibilityIdentifier("settings.notifications.focus-toggle")
+
+            Divider()
+
+            settingsStatusRow(
+                title: l10n.text(.settingsNotificationsPermissionTitle),
+                value: focusAuthorizationText)
+            settingsStatusRow(
+                title: l10n.text(.settingsNotificationsCurrentReasonTitle),
+                value: focusCurrentReasonText)
+
+            if focusQuietPolicy.presentation.publicationFailed {
+                Label {
+                    Text(l10n.text(.settingsNotificationsPublicationFailed))
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.red)
+                }
+                .padding(12)
+                .background(Color.red.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .accessibilityIdentifier("settings.notifications.publication-failed")
+            }
+
+            Button(l10n.text(.settingsNotificationsOpenEvents)) {
+                model.request(.destination(.eventsAndSounds))
+            }
+            .accessibilityIdentifier("settings.notifications.open-events")
+        }
+        .frame(maxWidth: 620, alignment: .leading)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("settings.notifications.focus-policy")
+    }
+
+    private var focusQuietBinding: Binding<Bool> {
+        Binding(
+            get: { focusQuietPolicy.presentation.isEnabled },
+            set: { focusQuietPolicy.setEnabled($0) })
+    }
+
+    private var focusAuthorizationText: String {
+        switch focusQuietPolicy.presentation.authorization {
+        case .notRequested: l10n.text(.settingsNotificationsPermissionNotRequested)
+        case .authorized: l10n.text(.settingsNotificationsPermissionAuthorized)
+        case .denied: l10n.text(.settingsNotificationsPermissionDenied)
+        case .restricted: l10n.text(.settingsNotificationsPermissionRestricted)
+        }
+    }
+
+    private var focusCurrentReasonText: String {
+        switch focusQuietPolicy.presentation.currentReason {
+        case .policyDisabled: l10n.text(.settingsNotificationsReasonDisabled)
+        case .permissionRequired: l10n.text(.settingsNotificationsReasonPermissionRequired)
+        case .noDynamicQuiet: l10n.text(.settingsNotificationsReasonInactive)
+        case .focusActive: l10n.text(.settingsNotificationsReasonFocusActive)
+        case .observerFailure: l10n.text(.settingsNotificationsReasonObserverFailure)
+        }
+    }
+
+    private func settingsStatusRow(title: String, value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 16) {
+            Text(title)
+                .foregroundColor(.secondary)
+            Spacer(minLength: 20)
+            Text(value)
+                .multilineTextAlignment(.trailing)
+        }
+        .accessibilityElement(children: .combine)
     }
 
     private var languageModeBinding: Binding<ClaudioLanguageMode> {

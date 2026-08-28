@@ -389,6 +389,36 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.general.language.system-projection"
     public static let settingsGeneralPreferenceRecovery: Self =
         "settings.general.preference-recovery"
+    public static let settingsNotificationsFocusTitle: Self =
+        "settings.notifications.focus.title"
+    public static let settingsNotificationsFocusDescription: Self =
+        "settings.notifications.focus.description"
+    public static let settingsNotificationsPermissionTitle: Self =
+        "settings.notifications.permission.title"
+    public static let settingsNotificationsPermissionNotRequested: Self =
+        "settings.notifications.permission.not-requested"
+    public static let settingsNotificationsPermissionAuthorized: Self =
+        "settings.notifications.permission.authorized"
+    public static let settingsNotificationsPermissionDenied: Self =
+        "settings.notifications.permission.denied"
+    public static let settingsNotificationsPermissionRestricted: Self =
+        "settings.notifications.permission.restricted"
+    public static let settingsNotificationsCurrentReasonTitle: Self =
+        "settings.notifications.reason.title"
+    public static let settingsNotificationsReasonDisabled: Self =
+        "settings.notifications.reason.disabled"
+    public static let settingsNotificationsReasonPermissionRequired: Self =
+        "settings.notifications.reason.permission-required"
+    public static let settingsNotificationsReasonInactive: Self =
+        "settings.notifications.reason.inactive"
+    public static let settingsNotificationsReasonFocusActive: Self =
+        "settings.notifications.reason.focus-active"
+    public static let settingsNotificationsReasonObserverFailure: Self =
+        "settings.notifications.reason.observer-failure"
+    public static let settingsNotificationsPublicationFailed: Self =
+        "settings.notifications.publication-failed"
+    public static let settingsNotificationsOpenEvents: Self =
+        "settings.notifications.open-events"
     public static let settingsRouteIdentity: Self = "settings.route.identity"
     public static let settingsRouteReady: Self = "settings.route.ready"
     public static let settingsRouteInvalidSurface: Self = "settings.route.invalid-surface"
@@ -796,7 +826,16 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsGeneralLanguageDescription, .settingsGeneralLanguageSystem,
         .settingsGeneralLanguageChinese, .settingsGeneralLanguageEnglish,
         .settingsGeneralLanguageHint, .settingsGeneralSystemProjection,
-        .settingsGeneralPreferenceRecovery, .settingsRouteIdentity,
+        .settingsGeneralPreferenceRecovery, .settingsNotificationsFocusTitle,
+        .settingsNotificationsFocusDescription, .settingsNotificationsPermissionTitle,
+        .settingsNotificationsPermissionNotRequested,
+        .settingsNotificationsPermissionAuthorized, .settingsNotificationsPermissionDenied,
+        .settingsNotificationsPermissionRestricted, .settingsNotificationsCurrentReasonTitle,
+        .settingsNotificationsReasonDisabled,
+        .settingsNotificationsReasonPermissionRequired, .settingsNotificationsReasonInactive,
+        .settingsNotificationsReasonFocusActive, .settingsNotificationsReasonObserverFailure,
+        .settingsNotificationsPublicationFailed, .settingsNotificationsOpenEvents,
+        .settingsRouteIdentity,
         .settingsRouteReady, .settingsRouteInvalidSurface, .settingsRouteStaleSurface,
         .settingsRouteStaleScope, .settingsRouteStaleEvent, .settingsRouteInvalidPack,
         .settingsRouteStalePack,
