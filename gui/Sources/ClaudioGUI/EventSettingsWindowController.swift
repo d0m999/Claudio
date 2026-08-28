@@ -2,6 +2,7 @@ import AppKit
 import ClaudioGUICore
 import ClaudioLocalization
 import Combine
+import SoundPacksWindow
 import SwiftUI
 
 @MainActor
@@ -34,6 +35,7 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
     private let hostIntegrations: HostIntegrationPresentationStore
     private let languageStore: ClaudioPreferences
     private let aiCueViewModel: AICueGenerationViewModel
+    private let soundPacksModel: SoundPacksWindowModel
     private let audioEnvironment: AudioImportEnvironment
     private let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     private let onAudibilityInputsChanged: @MainActor () -> Void
@@ -41,7 +43,7 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
         @MainActor (AICueAdoptionRequest) async -> Result<
             AICueAdoptionOutcome, AICueAdoptionError
         >
-    private let selection = EventSettingsWindowSelection()
+    private let selection: EventSettingsWindowSelection
     private var window: NSWindow?
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
     private var handbackTracker = RetainedWindowHandbackTracker<NSRunningApplication>()
@@ -50,9 +52,11 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
 
     init(
         model: PanelConfigController,
+        selection: EventSettingsWindowSelection,
         hostIntegrations: HostIntegrationPresentationStore,
         languageStore: ClaudioPreferences,
         aiCueViewModel: AICueGenerationViewModel,
+        soundPacksModel: SoundPacksWindowModel,
         audioEnvironment: AudioImportEnvironment,
         onConfigureSound: @escaping @MainActor (SoundPacksWindowRoute) -> Void,
         onAudibilityInputsChanged: @escaping @MainActor () -> Void,
@@ -62,9 +66,11 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
             >
     ) {
         self.model = model
+        self.selection = selection
         self.hostIntegrations = hostIntegrations
         self.languageStore = languageStore
         self.aiCueViewModel = aiCueViewModel
+        self.soundPacksModel = soundPacksModel
         self.audioEnvironment = audioEnvironment
         self.onConfigureSound = onConfigureSound
         self.onAudibilityInputsChanged = onAudibilityInputsChanged
@@ -153,10 +159,13 @@ final class EventSettingsWindowController: NSObject, NSWindowDelegate {
             hostIntegrations: hostIntegrations,
             languageStore: languageStore,
             aiCueViewModel: aiCueViewModel,
+            soundPacksModel: soundPacksModel,
             audioEnvironment: audioEnvironment,
             onConfigureSound: onConfigureSound,
             onAudibilityInputsChanged: onAudibilityInputsChanged,
-            onAdoptAICue: onAdoptAICue)
+            onPackSwitch: { _ in },
+            onAdoptAICue: onAdoptAICue,
+            presentationContext: .standaloneWindow)
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 860, height: 640),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],

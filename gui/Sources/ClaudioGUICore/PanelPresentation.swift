@@ -23,13 +23,15 @@ public enum PanelSoundScopeID: Sendable, Equatable, Hashable, Identifiable {
     }
 }
 
-/// Retained“事件与提示音”窗口的显式入口。路由直接携带声音作用域，避免把展示名称或
-/// Host Product 重新解析成配置写入目标。
+/// “事件与提示音”表面的显式入口。路由直接携带声音作用域与可选公共事件，避免把展示
+/// 名称或 Host Product 重新解析成配置写入目标。
 public struct EventSettingsWindowRoute: Sendable, Equatable, Hashable {
     public let scope: PanelSoundScopeID
+    public let event: Event?
 
-    public init(scope: PanelSoundScopeID) {
+    public init(scope: PanelSoundScopeID, event: Event? = nil) {
         self.scope = scope
+        self.event = event
     }
 
     public var surface: HostSurfaceID? { scope.surface }
@@ -62,6 +64,11 @@ public func eventPreviewFileURL(
 /// view loop.
 public enum EventSettingsFocusTarget: Sendable, Equatable, Hashable {
     case scope(PanelSoundScopeID)
+    case event(Event)
+    case previewAll
+    case masterVolume
+    case packPicker
+    case retryLibrary
     case manageSoundPacks
     case generateAICue(Event)
     case configure(Event)
@@ -73,6 +80,96 @@ public func eventSettingsFirstFocusTarget(
     scopes: [PanelSoundScopeID]
 ) -> EventSettingsFocusTarget? {
     scopes.first.map(EventSettingsFocusTarget.scope)
+}
+
+/// Repeated typed deep links must focus the same stable event identity. A stale scope never leaves
+/// focus pointing at a row whose writes would target that stale Surface; it falls back to the first
+/// visible scope and lets the caller present the route failure separately.
+public func eventSettingsRouteFocusTarget(
+    route: EventSettingsWindowRoute,
+    scopes: [PanelSoundScopeID],
+    events: Set<Event> = Set(Event.allCases)
+) -> EventSettingsFocusTarget? {
+    guard scopes.contains(route.scope) else {
+        return eventSettingsFirstFocusTarget(scopes: scopes)
+    }
+    if let event = route.event, events.contains(event) {
+        return .event(event)
+    }
+    return .scope(route.scope)
+}
+
+public enum EventSettingsInheritanceState: Sendable, Equatable {
+    case globalDefault
+    case inheritedGlobal
+    case surfaceOverride
+    case invalidSurfaceOverride
+}
+
+/// Pack inheritance is independent from per-event sparse overrides. An Event-only override must
+/// not make the pack appear overridden, and a malformed Surface still fails closed.
+public func eventSettingsPackInheritanceState(
+    config: ClaudioConfig,
+    scope: PanelSoundScopeID
+) -> EventSettingsInheritanceState {
+    guard let surface = scope.surface else { return .globalDefault }
+    switch config.resolveSoundProfile(for: surface) {
+    case .success(let profile):
+        return profile.inheritedPack ? .inheritedGlobal : .surfaceOverride
+    case .failure:
+        return .invalidSurfaceOverride
+    }
+}
+
+/// The unified Settings projection shares the app-lifetime AI model with the legacy window but
+/// must never own or end that window's composer session.
+public func eventSettingsShouldCloseAICueComposer(
+    includesAICueComposer: Bool,
+    targetSurface: HostSurfaceID?,
+    selectedSurface: HostSurfaceID?
+) -> Bool {
+    includesAICueComposer && targetSurface != selectedSurface
+}
+
+/// The legacy composer belongs to one exact Surface/Event tuple. A route projection from another
+/// retained window must never make that session appear under a different Surface.
+public func eventSettingsAICueComposerMatches(
+    targetSurface: HostSurfaceID?,
+    targetEvent: Event?,
+    selectedSurface: HostSurfaceID?,
+    event: Event
+) -> Bool {
+    guard let targetSurface, let targetEvent, let selectedSurface else { return false }
+    return targetSurface == selectedSurface && targetEvent == event
+}
+
+/// VoiceOver receives the same inheritance fact rendered beside an Event. Keeping the join in
+/// GUICore makes both the no-override and bilingual projections executable without mounting UI.
+public func eventSettingsIdentityAccessibilityLabel(
+    presentationLabel: String,
+    inheritanceText: String?,
+    language: ClaudioAppLanguage
+) -> String {
+    guard let inheritanceText, !inheritanceText.isEmpty else { return presentationLabel }
+    let separator = language == .english ? ", " : "，"
+    return [presentationLabel, inheritanceText].joined(separator: separator)
+}
+
+/// Per-event sparse-override projection for the unified Events page. It consumes the same
+/// `resolveSoundProfile` fail-closed boundary as writes and never infers inheritance from only the
+/// pack field.
+public func eventSettingsInheritanceState(
+    config: ClaudioConfig,
+    scope: PanelSoundScopeID,
+    event: Event
+) -> EventSettingsInheritanceState {
+    guard let surface = scope.surface else { return .globalDefault }
+    switch config.resolveSoundProfile(for: surface) {
+    case .success(let profile):
+        return profile.inheritedEvents.contains(event) ? .inheritedGlobal : .surfaceOverride
+    case .failure:
+        return .invalidSurfaceOverride
+    }
 }
 
 /// A standard window has its own width-driven degradation rules. Unlike
@@ -188,7 +285,8 @@ public func panelSoundScopeMenuLayout(
 public func panelSoundScopePresentations(
     sourceRows: [HostSourceRowPresentation],
     config: ClaudioConfig,
-    language: ClaudioAppLanguage
+    language: ClaudioAppLanguage,
+    includesDisconnected: Bool = false
 ) -> [PanelSoundScopePresentation] {
     let l10n = ClaudioL10n(language: language)
     let separator = language == .english ? ", " : "，"
@@ -215,7 +313,7 @@ public func panelSoundScopePresentations(
     let surfaces = hostSurfacePresentationOrder().compactMap {
         host -> PanelSoundScopePresentation? in
         guard let raw = byHost[host] else { return nil }
-        guard raw.status != .notConnected else { return nil }
+        guard includesDisconnected || raw.status != .notConnected else { return nil }
         let hasOverride =
             config.surfaceOverrides[host.surfaceID.rawValue] != nil
             || config.invalidSurfaceOverrideKeys.contains(host.surfaceID.rawValue)

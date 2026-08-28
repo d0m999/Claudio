@@ -3004,6 +3004,42 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件与提示音" } }
       }
     },
+    "event-settings.preview-all" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview All" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "试听全部" } }
+      }
+    },
+    "event-settings.preview-all.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Play each currently audible event sound in order" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按顺序播放当前真正可听的事件声音" } }
+      }
+    },
+    "event-settings.automatic-playback" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic playback" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动播放" } }
+      }
+    },
+    "event-settings.automatic-playback-for" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic playback for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动播放：%@" } }
+      }
+    },
+    "event-settings.manage-sounds" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage Sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理声音" } }
+      }
+    },
+    "event-settings.manage-sounds.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the Sounds destination for this sound scope" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在同一设置窗口打开当前声音作用域的声音目的页" } }
+      }
+    },
     "window.event-settings.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · Events & Sounds" } },

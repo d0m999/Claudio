@@ -1,4 +1,3 @@
-import AppKit
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
@@ -56,13 +55,6 @@ public struct MasterVolumeRow: View {
     /// `EventRowView`'s `typeScale` for the full rationale.
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
-    /// The drag/commit state machine (阶段 C1). Seeded from ``diskVolume`` exactly once, at this
-    /// row's first insertion into the view tree — `NSHostingController`'s SwiftUI-side state
-    /// persists for the app's whole lifetime (`PanelFocusCoordinator`'s own doc comment), so this
-    /// `@State` survives every popover show/close cycle untouched; only ``VolumeDragSession/rebase(to:)``
-    /// (below) or a user drag ever moves it again.
-    @State private var session: VolumeDragSession
-
     public init(
         diskVolume: Double,
         isEnabled: Bool = true,
@@ -79,7 +71,6 @@ public struct MasterVolumeRow: View {
         self.focusedTarget = focusedTarget
         self.adaptation = adaptation
         self.language = language
-        _session = State(initialValue: VolumeDragSession(baseline: diskVolume))
     }
 
     public var body: some View {
@@ -103,41 +94,6 @@ public struct MasterVolumeRow: View {
         }
         .frame(minHeight: adaptation.rowWrapsToTwoLines ? 44 : 28)
         .disabled(!isEnabled)
-        // Rule 5 / D21 — see `diskVolume`'s own doc comment above.
-        .onChange(of: diskVolume) { newValue in
-            session.rebase(to: newValue)
-        }
-        // D22/D37 — see `focusCoordinator`'s own doc comment above.
-        .onChange(of: focusCoordinator.hideCount) { _ in
-            flush()
-        }
-        // D22-bis (the backstop `.hideCount` cannot cover): the popover is never closed on a
-        // real ⌘Q/logout/shutdown, so `notePanelHidden()` never fires on that path. This has to
-        // be a genuine Combine subscription (`.onReceive`), not `.onChange` on some bumped
-        // counter — the app is mid-termination, and SwiftUI's own update pass is not guaranteed
-        // to run again before the process actually exits, so bumping a `@Published` value would
-        // accomplish nothing. `NotificationCenter`'s publisher calls this closure SYNCHRONOUSLY,
-        // on whatever thread the notification was posted from (main, here) — no dispatch, no
-        // render pass required — so the write this triggers has a chance to actually complete
-        // before termination proceeds.
-        //
-        // Honest limitations (D32) — TWO of them, and neither is "the value lands anyway ✅":
-        //
-        // 1. This covers ⌘Q / logout / shutdown only. A force-quit or `killall` does not deliver
-        //    this notification at all: that drag is simply lost.
-        // 2. Even on the paths it DOES cover, the write can still fail. `setMasterVolume` takes
-        //    `config.lock` NON-blockingly (`flock(LOCK_EX | LOCK_NB)`, `FileLock.swift:85` —
-        //    ENGINEERING.md 决议 1+5 make that mandatory), so a second config writer holding the
-        //    lock at this exact moment returns `.lockBusy`. `commit(_:)` then rolls the draft back
-        //    and `PanelConfigController.masterVolumeError` is set as always — but the app is
-        //    terminating, so that error row has NO AUDIENCE: nobody ever sees it, and the drag is
-        //    silently lost.
-        //
-        // Both windows are known and ACCEPTED (D32), not covered. Do not let a later edit of this
-        // comment — or of ENGINEERING.md — quietly upgrade them into "值照常落盘 ✅".
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            flush()
-        }
     }
 
     private var label: some View {
@@ -154,84 +110,15 @@ public struct MasterVolumeRow: View {
     }
 
     private var slider: some View {
-        HStack(spacing: 7) {
-            Slider(
-                value: Binding(
-                    get: { session.draft },
-                    set: { newValue in
-                        if session.isDragging {
-                            session.drag(to: newValue)
-                        } else {
-                            commit(session.adjust(to: newValue))
-                        }
-                    }
-                ),
-                in: 0...1,
-                onEditingChanged: { editing in
-                    if editing {
-                        session.begin()
-                    } else {
-                        commit(session.end())
-                    }
-                }
-            )
-            Text("\(Int((session.draft * 100).rounded()))%")
-                .font(.system(size: 10.5 * typeScale, design: .monospaced))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
-                .frame(width: 38, alignment: .trailing)
-                .accessibilityHidden(true)
-        }
-        // D4: the sole brand-accent entry point for a native control — never a hand-drawn
-        // track/thumb (DESIGN.md「控件行」: 原生外壳，不自绘).
-        //
-        // Whether `.tint` survives HERE is structurally untestable by CI (D25): `ContrastSuite` is
-        // pure hex math over `ClaudioGUICore`, which does not even link SwiftUI — it cannot see an
-        // NSSlider. The ONLY gate is a human running 走查 ⑨ (set the system accent to red, open the
-        // panel, confirm the fill is clay and not red) — **re-run every time the control row is
-        // touched**, this row's own creation included.
-        //
-        // ✅ VERIFIED on-device for THIS row, 2026-07-14 (8771946), system accent set to red:
-        //   - slider fill        `#AE6E41`  (G−B = 45 — orange-brown), same family as
-        //   - clay glyph         `#B5754A`  in the same panel (so both went through the same
-        //                                    render/screenshot pipeline — this is the comparison
-        //                                    that matters, not raw equality with `#D97757`)
-        //   - system red accent  `#D55A53`  (G−B = 7 — red)
-        //   - positive control first: a BARE `Slider` under the same conditions rendered RED,
-        //     proving the red accent was actually in effect. Without that control, a clay fill
-        //     would "pass" even if the accent had never been applied — the probe has to prove
-        //     itself before it can prove anything else.
-        //   (走查 ⑥ same run: no tick-mark band under the track — the `step:` trap of D24 avoided.)
-        //
-        // This block used to end with "That run is still owed." — written before the run and never
-        // updated after it. DESIGN.md's Decisions Log said the same. Both were false, and in the
-        // worst direction: they cried wolf on a discipline that is real, teaching the next reader
-        // to discount "走查 ⑨ 欠账" the one time it actually means something (`/codex review 8771946`).
-        .tint(ClaudioColor.clay(colorScheme))
-        .focused(focusedTarget, equals: .masterVolume)
-        .accessibilityLabel(ClaudioL10n(language: language).text(.panelMasterVolume))
-        .accessibilityValue("\(Int((session.draft * 100).rounded()))%")
-        .accessibilityIdentifier("panel.master-volume")
-    }
-
-    /// Rule 2 (both `focusCoordinator.hideCount` and `willTerminateNotification` funnel here):
-    /// a dirty session MUST still be flushed even when it never sees a normal `end()`. Safe to
-    /// call unconditionally and repeatedly — a clean session's ``VolumeDragSession/flushPending()``
-    /// returns `nil` and this is a no-op.
-    private func flush() {
-        commit(session.flushPending())
-    }
-
-    /// Resolves a pending commit (from `end()`/`adjust(to:)`/`flush()`) against ``onCommit``:
-    /// success snaps ``session``'s baseline AND draft to the landed value (rule 4's "never show a
-    /// value the disk doesn't have" satisfied the cheap way — the write's own return already tells
-    /// us the truth, no re-read needed); failure rolls `draft` straight back to `baseline` — a
-    /// snap, never animated (D18).
-    private func commit(_ pendingValue: Double?) {
-        guard let pendingValue else { return }
-        if let landed = onCommit(pendingValue) {
-            session.commitSucceeded(landed)
-        } else {
-            session.commitFailed()
-        }
+        SharedMasterVolumeSlider(
+            diskVolume: diskVolume,
+            isEnabled: isEnabled,
+            language: language,
+            focusedTarget: focusedTarget,
+            focusIdentity: .masterVolume,
+            accessibilityIdentifier: "panel.master-volume",
+            percentageWidth: 38,
+            flushRevision: focusCoordinator.hideCount,
+            onCommit: onCommit)
     }
 }

@@ -329,6 +329,11 @@ func runSettingsNavigationSuites() {
                     + [.title(.sounds)],
             "Sounds 先走 sidebar 与标题，再把编辑器内焦点交给其独立 route coordinator")
         expect(
+            settingsWindowFocusOrder(selectedDestination: .eventsAndSounds)
+                == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
+                + [.title(.eventsAndSounds)],
+            "Events 先走 sidebar 与标题，再把精确 scope/Event 焦点交给嵌入页")
+        expect(
             settingsWindowFocusOrder(selectedDestination: .general)
                 == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
                     + [.title(.general), .firstAction(.general)],

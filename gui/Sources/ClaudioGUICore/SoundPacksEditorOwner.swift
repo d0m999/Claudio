@@ -10,6 +10,7 @@ import Foundation
 public final class SoundPacksEditorOwner {
     public let model: SoundPacksWindowModel
     public let userPacksDirectory: URL
+    private let refreshCoordinator: SoundPacksRefreshCoordinator?
     private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
     private var lastSelectionAnnouncementDecision: (packID: String?, shouldAnnounce: Bool)?
 
@@ -27,6 +28,7 @@ public final class SoundPacksEditorOwner {
             soundPackLibrary: soundPackLibrary,
             refreshCoordinator: refreshCoordinator)
         userPacksDirectory = environment.userPacksDirectory
+        self.refreshCoordinator = refreshCoordinator
     }
 
     #if DEBUG
@@ -43,12 +45,14 @@ public final class SoundPacksEditorOwner {
             environment: environment,
             refreshCoordinator: refreshCoordinator)
         userPacksDirectory = environment.userPacksDirectory
+        self.refreshCoordinator = refreshCoordinator
     }
 
     /// Deterministic pending/ready route seam for model fixtures that do not touch user disk.
     public init(model: SoundPacksWindowModel, userPacksDirectory: URL) {
         self.model = model
         self.userPacksDirectory = userPacksDirectory
+        refreshCoordinator = nil
     }
     #endif
 
@@ -76,6 +80,12 @@ public final class SoundPacksEditorOwner {
             }
             return .resolved(resolvedRoute)
         }
+    }
+
+    /// A pack selected from Events still uses the established panel-to-editor refresh contract.
+    /// The Settings shell does not retain a second coordinator or ask the editor to infer writes.
+    public func completePanelPackSwitch(_ outcome: PanelPackSwitchOutcome) {
+        refreshCoordinator?.completePanelPackSwitch(outcome)
     }
 
     /// Coordinates asynchronous status announcements across the Settings and legacy window

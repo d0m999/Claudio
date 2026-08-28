@@ -7,7 +7,9 @@ public extension SettingsDestination {
 
     /// Top-level destinations with production content today. Later destination migrations extend
     /// this list when their real views ship; DEBUG galleries inject `allCases` explicitly.
-    static let availableCases: [SettingsDestination] = [.general, .notifications, .sounds]
+    static let availableCases: [SettingsDestination] = [
+        .general, .eventsAndSounds, .notifications, .sounds,
+    ]
 }
 
 public enum ClaudioPreferenceRecoveryIssue: String, Sendable, Hashable {

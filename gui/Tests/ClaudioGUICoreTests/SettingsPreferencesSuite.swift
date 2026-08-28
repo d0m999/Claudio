@@ -92,8 +92,9 @@ func runSettingsPreferencesSuites() async {
             isolated.languageMode == .system && isolated.lastSettingsDestination == .general,
             "不同 defaults suite 不得互相泄漏偏好")
         expect(
-            isolated.availableSettingsDestinations == [.general, .notifications, .sounds],
-            "production owner 只能暴露已交付真实内容的通用、通知与声音 destination")
+            isolated.availableSettingsDestinations
+                == [.general, .eventsAndSounds, .notifications, .sounds],
+            "production owner 只能暴露已交付真实内容的通用、事件、通知与声音 destination")
         isolated.setLastSettingsDestination(.sounds)
         expect(
             isolated.lastSettingsDestination == .sounds

@@ -16,6 +16,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private let soundPacksEditorOwner: SoundPacksEditorOwner
+    private let eventSettingsModel: PanelConfigController
+    private let eventSettingsSelection: EventSettingsWindowSelection
+    private let hostIntegrations: HostIntegrationPresentationStore
+    private let aiCueViewModel: AICueGenerationViewModel
+    private let audioEnvironment: AudioImportEnvironment
+    private let onEventAudibilityInputsChanged: @MainActor () -> Void
+    private let onAdoptAICue:
+        @MainActor (AICueAdoptionRequest) async -> Result<
+            AICueAdoptionOutcome, AICueAdoptionError
+        >
     private let focusQuietObserver: FocusQuietSystemObserver
     private var window: NSWindow?
     private var isPresentingWindow = false
@@ -29,16 +39,34 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     init(
         preferences: ClaudioPreferences,
-        soundPacksEditorOwner: SoundPacksEditorOwner
+        soundPacksEditorOwner: SoundPacksEditorOwner,
+        eventSettingsModel: PanelConfigController,
+        eventSettingsSelection: EventSettingsWindowSelection,
+        hostIntegrations: HostIntegrationPresentationStore,
+        aiCueViewModel: AICueGenerationViewModel,
+        audioEnvironment: AudioImportEnvironment,
+        onEventAudibilityInputsChanged: @escaping @MainActor () -> Void,
+        onAdoptAICue:
+            @escaping @MainActor (AICueAdoptionRequest) async -> Result<
+                AICueAdoptionOutcome, AICueAdoptionError
+            >
     ) {
         self.preferences = preferences
         self.soundPacksEditorOwner = soundPacksEditorOwner
+        self.eventSettingsModel = eventSettingsModel
+        self.eventSettingsSelection = eventSettingsSelection
+        self.hostIntegrations = hostIntegrations
+        self.aiCueViewModel = aiCueViewModel
+        self.audioEnvironment = audioEnvironment
+        self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
+        self.onAdoptAICue = onAdoptAICue
         focusQuietObserver = FocusQuietSystemObserver()
         model = SettingsWindowPresentationModel(
             preferences: preferences,
             availability: settingsRouteAvailability(
                 packIDs: Set(soundPacksEditorOwner.model.packCards.map(\.id)),
-                libraryState: soundPacksEditorOwner.model.libraryPresentationState))
+                libraryState: soundPacksEditorOwner.model.libraryPresentationState,
+                eventSurfaces: Set(hostIntegrations.content.sourceRows.map { $0.host.surfaceID })))
         super.init()
 
         languageCancellable = preferences.$snapshot
@@ -51,11 +79,16 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             }
 
         soundPackAvailabilityCancellable = soundPacksEditorOwner.model.$packCards
-            .combineLatest(soundPacksEditorOwner.model.$libraryPresentationState)
-            .map { cards, libraryState in
+            .combineLatest(
+                soundPacksEditorOwner.model.$libraryPresentationState,
+                hostIntegrations.$content
+            )
+            .map { cards, libraryState, integrationContent in
                 settingsRouteAvailability(
                     packIDs: Set(cards.map(\.id)),
-                    libraryState: libraryState)
+                    libraryState: libraryState,
+                    eventSurfaces: Set(
+                        integrationContent.sourceRows.map { $0.host.surfaceID }))
             }
             .removeDuplicates()
             .sink { [weak self] availability in
@@ -119,7 +152,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             model: model,
             preferences: preferences,
             focusQuietPolicy: focusQuietObserver.policy,
-            soundPacksEditorOwner: soundPacksEditorOwner)
+            soundPacksEditorOwner: soundPacksEditorOwner,
+            eventSettingsModel: eventSettingsModel,
+            eventSettingsSelection: eventSettingsSelection,
+            hostIntegrations: hostIntegrations,
+            aiCueViewModel: aiCueViewModel,
+            audioEnvironment: audioEnvironment,
+            onEventAudibilityInputsChanged: onEventAudibilityInputsChanged,
+            onEventPackSwitch: { [weak soundPacksEditorOwner] outcome in
+                soundPacksEditorOwner?.completePanelPackSwitch(outcome)
+            },
+            onAdoptAICue: onAdoptAICue)
         let window = NSWindow(
             contentRect: NSRect(
                 x: 0,
@@ -273,14 +316,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
 private func settingsRouteAvailability(
     packIDs: Set<String>,
-    libraryState: SoundPackLibraryPresentationState
+    libraryState: SoundPackLibraryPresentationState,
+    eventSurfaces: Set<HostSurfaceID>
 ) -> SettingsRouteAvailability {
     let productScopes = HostID.productVisibleCases.map {
         PanelSoundScopeID.surface($0.surfaceID)
     }
     return SettingsRouteAvailability(
         integrationSurfaces: [],
-        eventScopes: [.global],
+        eventScopes: Set([PanelSoundScopeID.global] + eventSurfaces.map(PanelSoundScopeID.surface)),
         soundScopes: Set([PanelSoundScopeID.global] + productScopes),
         soundPackIDs: packIDs,
         soundPackSnapshotIsFresh: libraryState == .ready,

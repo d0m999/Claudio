@@ -24,13 +24,14 @@ private func panelPresentationEventRows(
 }
 
 @MainActor
-func runPanelPresentationSuites() {
+func runPanelPresentationSuites() async {
     suite("事件与提示音路由：保留 Global/Surface，并为声音编辑携带同一作用域") {
         let global = EventSettingsWindowRoute(scope: .global)
-        let workBuddy = EventSettingsWindowRoute(scope: .surface(.workBuddy))
+        let workBuddy = EventSettingsWindowRoute(scope: .surface(.workBuddy), event: .stop)
 
         expect(global.surface == nil, "Global 路由不得伪造 Host Surface")
         expect(workBuddy.surface == .workBuddy, "WorkBuddy 路由必须保留稳定 surface token")
+        expect(workBuddy.event == .stop, "设置深链接必须保留稳定公共 Event token")
         expect(
             workBuddy.soundPacksRoute(packID: "user-pack", event: .stop)
                 == .editEvent(surface: .workBuddy, packID: "user-pack", event: .stop),
@@ -42,6 +43,122 @@ func runPanelPresentationSuites() {
         expect(
             eventSettingsFirstFocusTarget(scopes: []) == nil,
             "没有作用域时不得伪造焦点身份")
+        expect(
+            eventSettingsRouteFocusTarget(
+                route: workBuddy,
+                scopes: [.global, .surface(.workBuddy)]) == .event(.stop),
+            "scope/Event 深链接必须把焦点交给精确事件身份")
+        expect(
+            eventSettingsRouteFocusTarget(
+                route: workBuddy,
+                scopes: [.global]) == .scope(.global),
+            "陈旧 Surface 不得留下可写事件焦点，必须回到可见安全 scope")
+
+        let sparseConfig = ClaudioConfig(
+            selectedPack: "global",
+            surfaceOverrides: [
+                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                    eventsEnabled: [Event.stop.cliName: false])
+            ])
+        expect(
+            eventSettingsInheritanceState(
+                config: sparseConfig,
+                scope: .surface(.workBuddy),
+                event: .stop) == .surfaceOverride,
+            "逐 Event 显式覆盖必须可见为 Surface override")
+        expect(
+            eventSettingsInheritanceState(
+                config: sparseConfig,
+                scope: .surface(.workBuddy),
+                event: .taskStart) == .inheritedGlobal,
+            "同 Surface 未覆盖的 Event 必须明确显示继承 Global")
+        expect(
+            eventSettingsPackInheritanceState(
+                config: sparseConfig,
+                scope: .surface(.workBuddy)) == .inheritedGlobal,
+            "只有 Event 覆盖时，声音包仍必须明确显示继承 Global")
+
+        let packOverrideConfig = ClaudioConfig(
+            selectedPack: "global",
+            surfaceOverrides: [
+                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(selectedPack: "surface")
+            ])
+        expect(
+            eventSettingsPackInheritanceState(
+                config: packOverrideConfig,
+                scope: .surface(.workBuddy)) == .surfaceOverride,
+            "只有 selected_pack 覆盖时，声音包才显示 Surface override")
+
+        let invalidOverrideConfig = ClaudioConfig(
+            selectedPack: "global",
+            surfaceOverrides: sparseConfig.surfaceOverrides,
+            invalidSurfaceOverrideKeys: [HostSurfaceID.workBuddy.rawValue])
+        expect(
+            eventSettingsPackInheritanceState(
+                config: invalidOverrideConfig,
+                scope: .surface(.workBuddy)) == .invalidSurfaceOverride,
+            "损坏 Surface 的声音包继承必须 fail closed")
+        expect(
+            !eventSettingsShouldCloseAICueComposer(
+                includesAICueComposer: false,
+                targetSurface: .workBuddy,
+                selectedSurface: .codex),
+            "统一 Settings 不拥有 composer，scope 不同也不得关闭 legacy AI session")
+        expect(
+            eventSettingsShouldCloseAICueComposer(
+                includesAICueComposer: true,
+                targetSurface: .workBuddy,
+                selectedSurface: .codex),
+            "standalone composer 切换到另一 scope 时必须结束旧 session")
+        expect(
+            !eventSettingsShouldCloseAICueComposer(
+                includesAICueComposer: true,
+                targetSurface: .workBuddy,
+                selectedSurface: .workBuddy),
+            "standalone composer 留在同一 scope 时不得误关 session")
+        expect(
+            eventSettingsAICueComposerMatches(
+                targetSurface: .workBuddy,
+                targetEvent: .stop,
+                selectedSurface: .workBuddy,
+                event: .stop),
+            "legacy composer 只在精确 Surface/Event 下显示")
+        expect(
+            !eventSettingsAICueComposerMatches(
+                targetSurface: .workBuddy,
+                targetEvent: .stop,
+                selectedSurface: .codex,
+                event: .stop),
+            "同 Event 的另一 Surface 不得显示或采用 legacy composer session")
+        expect(
+            !eventSettingsAICueComposerMatches(
+                targetSurface: nil,
+                targetEvent: nil,
+                selectedSurface: .workBuddy,
+                event: .stop),
+            "没有 AI target 时不得显示 composer")
+
+        let baseIdentity = "Stop, Claude Code Stop"
+        expect(
+            eventSettingsIdentityAccessibilityLabel(
+                presentationLabel: baseIdentity,
+                inheritanceText: nil,
+                language: .english) == baseIdentity,
+            "Global Event identity 没有继承状态时不得增加空 AX 片段")
+        expect(
+            eventSettingsIdentityAccessibilityLabel(
+                presentationLabel: baseIdentity,
+                inheritanceText: "Inherited from Global",
+                language: .english)
+                == "Stop, Claude Code Stop, Inherited from Global",
+            "英文 Event AX identity 必须包含可见继承状态")
+        expect(
+            eventSettingsIdentityAccessibilityLabel(
+                presentationLabel: "停止，Claude Code Stop",
+                inheritanceText: "继承 Global",
+                language: .zhHans)
+                == "停止，Claude Code Stop，继承 Global",
+            "中文 Event AX identity 必须包含可见继承状态并使用中文分隔")
 
         withTempDirectory { directory in
             let unavailablePreview = eventPreviewFileURL(
@@ -58,6 +175,102 @@ func runPanelPresentationSuites() {
                 unavailablePreview == nil,
                 "共享试听解析必须在包或文件已经失效时 fail closed")
         }
+    }
+
+    suite("事件设置作用域：统一设置显示全部已发布 Surface，面板默认仍过滤未连接来源") {
+        let rows = [
+            panelPresentationRow(.claudeCode, status: .notConnected, supported: 5),
+            panelPresentationRow(.workBuddy, status: .ready, supported: 2),
+        ]
+        let panelScopes = panelSoundScopePresentations(
+            sourceRows: rows,
+            config: ClaudioConfig(selectedPack: "pack"),
+            language: .zhHans)
+        let settingsScopes = panelSoundScopePresentations(
+            sourceRows: rows,
+            config: ClaudioConfig(selectedPack: "pack"),
+            language: .zhHans,
+            includesDisconnected: true)
+
+        expect(
+            panelScopes.map(\.scope) == [.global, .surface(.workBuddy)],
+            "既有面板/standalone 默认必须继续过滤未连接来源")
+        expect(
+            settingsScopes.map(\.scope)
+                == [.global, .surface(.claudeCode), .surface(.workBuddy)],
+            "统一设置必须按 registry 顺序显示全部已发布 Surface")
+    }
+
+    await suite("试听全部：离主线程规划真实文件、保持公共事件顺序并可取消") {
+        withTempDirectory { root in
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            let pack = packs.appendingPathComponent("pack", isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: pack,
+                withIntermediateDirectories: true)
+            try? Data([0x52, 0x49, 0x46, 0x46]).write(
+                to: pack.appendingPathComponent("task.aiff"))
+            try? Data([0x52, 0x49, 0x46, 0x46]).write(
+                to: pack.appendingPathComponent("stop.aiff"))
+            let rows = [
+                EventRow(
+                    event: .taskStart,
+                    coverage: .present(fileName: "task.aiff"),
+                    enabled: true),
+                EventRow(
+                    event: .stop,
+                    coverage: .present(fileName: "stop.aiff"),
+                    enabled: true),
+                EventRow(
+                    event: .subagentStop,
+                    coverage: .present(fileName: "vanished.aiff"),
+                    enabled: true),
+            ]
+            let presentations = panelEventPresentations(
+                rows: rows,
+                scope: .global,
+                masterVolume: 0.8,
+                language: .english)
+            let environment = AudioImportEnvironment(
+                userPacksDirectory: packs,
+                durationProbe: StubDurationProbe(fixedDuration: 0.2),
+                packsLockFile: root.appendingPathComponent("packs.lock"))
+            let plan = makeEventPreviewSequencePlan(
+                presentations: presentations,
+                rows: rows,
+                packID: "pack",
+                environment: environment)
+            expect(
+                plan.map(\.event) == [.taskStart, .stop],
+                "规划必须保持公共事件顺序，并在播放前剔除已失效文件")
+            expect(
+                plan.allSatisfy { $0.delayNanoseconds == 350_000_000 },
+                "每项等待必须消费注入时长并追加固定切换间隔")
+        }
+
+        let coordinator = EventPreviewSequenceCoordinator()
+        let items = [
+            EventPreviewSequenceItem(
+                event: .taskStart,
+                fileURL: URL(fileURLWithPath: "/fixture/task.aiff"),
+                delayNanoseconds: 5_000_000_000),
+            EventPreviewSequenceItem(
+                event: .stop,
+                fileURL: URL(fileURLWithPath: "/fixture/stop.aiff"),
+                delayNanoseconds: 1),
+        ]
+        var played: [Event] = []
+        let run = Task { @MainActor in
+            await coordinator.run(
+                makePlan: { items },
+                onPlay: { played.append($0.event) })
+        }
+        while played.isEmpty {
+            await Task.yield()
+        }
+        coordinator.cancel()
+        expect(await run.value == .cancelled, "scope/单项试听切换必须取消在途序列")
+        expect(played == [.taskStart], "取消后不得继续播放下一公共事件")
     }
 
     suite("事件与提示音窗口布局：按窗口可用宽度与文字缩放独立降级") {

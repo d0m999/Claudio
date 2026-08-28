@@ -493,6 +493,66 @@ func runSoundPacksRefreshSuites() async {
         expect(coordinator.windowContentReloadRevision == 1, "config changed 必须推进内容 revision")
         expect(coordinator.windowReloadRevision == 0, "非切包 config 变化不得伪装成 active pack 切换")
         expect(coordinator.panelReloadRevision == 0, "panel 自己已重读，不得反向再刷一次")
+        expect(coordinator.configFactRevision == 1, "config changed 必须同步推进共享 config fact")
+        expect(coordinator.configFactSource == nil, "外部写者没有 projection token，所有 controller 都应刷新")
+    }
+
+    suite("共享 config fact：双 controller 同步 pack/Event/volume，Surface 投影保持隔离") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let configLock = root.appendingPathComponent("config.lock")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.5, "events": {} }"#,
+                to: configFile)
+            for packID in ["pack-a", "pack-b"] {
+                writeFixture(
+                    """
+                    { "id": "\(packID)", "events": { "stop": "stop.mp3" } }
+                    """,
+                    to: packs.appendingPathComponent("\(packID)/manifest.json"))
+                writeFixture(
+                    "audio",
+                    to: packs.appendingPathComponent("\(packID)/stop.mp3"))
+            }
+
+            let environment = soundPacksEnvironment(packs)
+            let library = SoundPackLibrary(environment: environment)
+            let coordinator = SoundPacksRefreshCoordinator()
+            let legacy = PanelConfigController(
+                configFile: configFile,
+                lockFile: configLock,
+                environment: environment,
+                soundPackLibrary: library,
+                soundPacksRefreshCoordinator: coordinator)
+            let unified = PanelConfigController(
+                configFile: configFile,
+                lockFile: configLock,
+                environment: environment,
+                soundPackLibrary: library,
+                soundPacksRefreshCoordinator: coordinator)
+
+            expect(legacy.switchPack(to: "pack-b") == .succeeded, "legacy 切包前提必须成功")
+            expect(
+                legacy.config.selectedPack == "pack-b" && unified.config.selectedPack == "pack-b",
+                "任一 projection 切包后，peer 必须同步同一 config fact")
+
+            legacy.toggleMute(.stop)
+            expect(
+                !legacy.config.isEnabled(.stop) && !unified.config.isEnabled(.stop),
+                "任一 projection 修改 Event 后，peer 必须同步 enabled 事实")
+
+            legacy.selectSoundSurface(.workBuddy)
+            unified.selectSoundSurface(.codex)
+            expect(legacy.setMasterVolume(0.35) == 0.35, "全局主音量写入前提必须成功")
+            expect(
+                legacy.config.masterVolume == 0.35 && unified.config.masterVolume == 0.35,
+                "唯一全局主音量必须同步到两个 projection")
+            expect(
+                legacy.selectedSurface == .workBuddy && unified.selectedSurface == .codex,
+                "共享 config 刷新不得合并或改写各窗口的 Surface projection")
+            expect(coordinator.configFactRevision == 3, "pack/Event/volume 必须各发布一次 config fact")
+        }
     }
 
     suite("集成取消静音：config-only revision 让保留的声音包窗口重读 enabled") {

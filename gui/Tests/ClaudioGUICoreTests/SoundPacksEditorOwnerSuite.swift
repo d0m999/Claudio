@@ -88,6 +88,28 @@ func runSoundPacksEditorOwnerSuites() {
         }
     }
 
+    suite("SoundPacks editor owner：Events 切包只在真实成功后刷新共享编辑器") {
+        withTempDirectory { root in
+            let coordinator = SoundPacksRefreshCoordinator()
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
+            let owner = SoundPacksEditorOwner(
+                configFile: root.appendingPathComponent("config.json"),
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                refreshCoordinator: coordinator)
+
+            owner.completePanelPackSwitch(.failed(.invalidPackID("bad")))
+            expect(
+                coordinator.windowReloadRevision == 0,
+                "失败的 Events pack 选择不得发布虚假 editor refresh")
+            owner.completePanelPackSwitch(.succeeded)
+            expect(
+                coordinator.windowReloadRevision == 1,
+                "成功的 Events pack 选择必须通知同一 Settings Sounds editor")
+        }
+    }
+
     suite("SoundPacks editor owner：两个 retained presentation 共享公告消费代次") {
         withTempDirectory { root in
             let environment = makeAudioImportEnvironment(

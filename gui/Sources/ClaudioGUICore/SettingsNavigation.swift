@@ -375,10 +375,10 @@ public func settingsWindowFocusOrder(
 ) -> [SettingsWindowFocusTarget] {
     var order = SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
     order.append(.title(selectedDestination))
-    // The embedded sound-pack editor owns its own route-aware focus identity space. Inventing a
-    // Settings-shell first action for it would point at no rendered control and compete with the
-    // editor's initial-focus request.
-    if selectedDestination != .sounds {
+    // Both embedded editors own route-aware focus identity spaces. Inventing a Settings-shell
+    // first action for either would point at no rendered control and compete with the editor's
+    // initial-focus request.
+    if selectedDestination != .eventsAndSounds && selectedDestination != .sounds {
         order.append(.firstAction(selectedDestination))
     }
     return order

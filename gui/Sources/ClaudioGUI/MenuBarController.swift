@@ -214,10 +214,15 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let integrationsWindowController = IntegrationsWindowController(
             model: integrationsModel,
             languageStore: languageStore)
-        let settingsWindowController = SettingsWindowController(
-            preferences: languageStore,
-            soundPacksEditorOwner: soundPacksEditorOwner)
-        let eventSettingsModel = makeEventSettingsConfigController(
+        let legacyEventSettingsModel = makeEventSettingsConfigController(
+            configFile: ClaudioPaths.configFile,
+            environment: audioEnvironment,
+            soundPackLibrary: soundPackLibrary,
+            soundPacksRefreshCoordinator: soundPacksRefreshCoordinator,
+            afterFullReload: { [weak actionRouter] _ in
+                actionRouter?.audibilityInputsChanged()
+            })
+        let unifiedEventSettingsModel = makeEventSettingsConfigController(
             configFile: ClaudioPaths.configFile,
             environment: audioEnvironment,
             soundPackLibrary: soundPackLibrary,
@@ -240,11 +245,35 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let aiCueViewModel = AICueGenerationViewModel(
             credentialManager: aiCueCredentialManager,
             generator: aiCueGenerator)
+        let legacyEventSettingsSelection = EventSettingsWindowSelection()
+        let unifiedEventSettingsSelection = EventSettingsWindowSelection()
+        let adoptAICue:
+            @MainActor (AICueAdoptionRequest) async -> Result<
+                AICueAdoptionOutcome, AICueAdoptionError
+            > = {
+                [
+                    weak soundPacksWindowController, weak legacyEventSettingsModel,
+                    weak unifiedEventSettingsModel, weak actionRouter,
+                ]
+                request in
+                guard let soundPacksWindowController else {
+                    return .failure(.ineligible(.writesStopped))
+                }
+                let result = await soundPacksWindowController.adoptAICue(request)
+                if case .success = result {
+                    legacyEventSettingsModel?.reload()
+                    unifiedEventSettingsModel?.reload()
+                    actionRouter?.audibilityInputsChanged()
+                }
+                return result
+            }
         let eventSettingsWindowController = EventSettingsWindowController(
-            model: eventSettingsModel,
+            model: legacyEventSettingsModel,
+            selection: legacyEventSettingsSelection,
             hostIntegrations: hostIntegrations,
             languageStore: languageStore,
             aiCueViewModel: aiCueViewModel,
+            soundPacksModel: soundPacksEditorOwner.model,
             audioEnvironment: audioEnvironment,
             onConfigureSound: { [weak actionRouter] route in
                 actionRouter?.requestSoundPacksFromEventSettings(route: route)
@@ -252,19 +281,19 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             onAudibilityInputsChanged: { [weak actionRouter] in
                 actionRouter?.audibilityInputsChanged()
             },
-            onAdoptAICue: {
-                [weak soundPacksWindowController, weak eventSettingsModel, weak actionRouter]
-                request in
-                guard let soundPacksWindowController else {
-                    return .failure(.ineligible(.writesStopped))
-                }
-                let result = await soundPacksWindowController.adoptAICue(request)
-                if case .success = result {
-                    eventSettingsModel?.reload()
-                    actionRouter?.audibilityInputsChanged()
-                }
-                return result
-            })
+            onAdoptAICue: adoptAICue)
+        let settingsWindowController = SettingsWindowController(
+            preferences: languageStore,
+            soundPacksEditorOwner: soundPacksEditorOwner,
+            eventSettingsModel: unifiedEventSettingsModel,
+            eventSettingsSelection: unifiedEventSettingsSelection,
+            hostIntegrations: hostIntegrations,
+            aiCueViewModel: aiCueViewModel,
+            audioEnvironment: audioEnvironment,
+            onEventAudibilityInputsChanged: { [weak actionRouter] in
+                actionRouter?.audibilityInputsChanged()
+            },
+            onAdoptAICue: adoptAICue)
 
         // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
         // capture `self` — we're still pre-`super.init()` here).

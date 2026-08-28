@@ -385,6 +385,14 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksInvalidScope: Self = "window.sound-packs.invalid-scope"
     public static let soundPacksDamagedScope: Self = "window.sound-packs.damaged-scope"
     public static let eventSettingsTitle: Self = "event-settings.title"
+    public static let eventSettingsPreviewAll: Self = "event-settings.preview-all"
+    public static let eventSettingsPreviewAllHint: Self = "event-settings.preview-all.hint"
+    public static let eventSettingsAutomaticPlayback: Self =
+        "event-settings.automatic-playback"
+    public static let eventSettingsAutomaticPlaybackFor: Self =
+        "event-settings.automatic-playback-for"
+    public static let eventSettingsManageSounds: Self = "event-settings.manage-sounds"
+    public static let eventSettingsManageSoundsHint: Self = "event-settings.manage-sounds.hint"
     public static let eventSettingsWindowTitle: Self = "window.event-settings.title"
     public static let integrationsWindowTitle: Self = "window.integrations.title"
     public static let settingsWindowTitle: Self = "window.settings.title"
@@ -847,7 +855,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueErrorAdoptionPartial, .aiCueErrorAdoption,
         .soundPacksWindowTitle, .soundPacksManagingScope, .soundPacksInvalidScope,
         .soundPacksDamagedScope,
-        .eventSettingsTitle, .eventSettingsWindowTitle, .integrationsWindowTitle,
+        .eventSettingsTitle, .eventSettingsPreviewAll, .eventSettingsPreviewAllHint,
+        .eventSettingsAutomaticPlayback, .eventSettingsAutomaticPlaybackFor,
+        .eventSettingsManageSounds,
+        .eventSettingsManageSoundsHint, .eventSettingsWindowTitle, .integrationsWindowTitle,
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
         .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,

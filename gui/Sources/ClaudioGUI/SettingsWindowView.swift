@@ -12,6 +12,19 @@ struct SettingsWindowView: View {
     @ObservedObject var preferences: ClaudioPreferences
     @ObservedObject var focusQuietPolicy: FocusQuietPolicyController
     let soundPacksEditorOwner: SoundPacksEditorOwner?
+    let eventSettingsModel: PanelConfigController?
+    let eventSettingsSelection: EventSettingsWindowSelection?
+    let hostIntegrations: HostIntegrationPresentationStore?
+    let aiCueViewModel: AICueGenerationViewModel?
+    let audioEnvironment: AudioImportEnvironment?
+    let onEventAudibilityInputsChanged: (@MainActor () -> Void)?
+    let onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)?
+    let onAdoptAICue:
+        (
+            @MainActor (AICueAdoptionRequest) async -> Result<
+                AICueAdoptionOutcome, AICueAdoptionError
+            >
+        )?
 
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
 
@@ -22,12 +35,33 @@ struct SettingsWindowView: View {
         model: SettingsWindowPresentationModel<NSRunningApplication>,
         preferences: ClaudioPreferences,
         focusQuietPolicy: FocusQuietPolicyController,
-        soundPacksEditorOwner: SoundPacksEditorOwner? = nil
+        soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
+        eventSettingsModel: PanelConfigController? = nil,
+        eventSettingsSelection: EventSettingsWindowSelection? = nil,
+        hostIntegrations: HostIntegrationPresentationStore? = nil,
+        aiCueViewModel: AICueGenerationViewModel? = nil,
+        audioEnvironment: AudioImportEnvironment? = nil,
+        onEventAudibilityInputsChanged: (@MainActor () -> Void)? = nil,
+        onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)? = nil,
+        onAdoptAICue:
+            (
+                @MainActor (AICueAdoptionRequest) async -> Result<
+                    AICueAdoptionOutcome, AICueAdoptionError
+                >
+            )? = nil
     ) {
         self.model = model
         self.preferences = preferences
         self.focusQuietPolicy = focusQuietPolicy
         self.soundPacksEditorOwner = soundPacksEditorOwner
+        self.eventSettingsModel = eventSettingsModel
+        self.eventSettingsSelection = eventSettingsSelection
+        self.hostIntegrations = hostIntegrations
+        self.aiCueViewModel = aiCueViewModel
+        self.audioEnvironment = audioEnvironment
+        self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
+        self.onEventPackSwitch = onEventPackSwitch
+        self.onAdoptAICue = onAdoptAICue
     }
 
     var body: some View {
@@ -46,7 +80,22 @@ struct SettingsWindowView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
         .onReceive(model.$routeRequestRevision) { _ in
-            focusedTarget = SettingsWindowFocusTarget.title(destination)
+            if destination == .eventsAndSounds,
+                let eventSettingsSelection,
+                let eventSettingsModel
+            {
+                guard model.resolution.failure == nil else {
+                    focusedTarget = SettingsWindowFocusTarget.title(destination)
+                    return
+                }
+                if let route = eventSettingsRoute {
+                    eventSettingsSelection.select(route)
+                    eventSettingsModel.selectSoundSurface(route.surface)
+                }
+                eventSettingsSelection.requestInitialFocus()
+            } else if destination != .sounds {
+                focusedTarget = SettingsWindowFocusTarget.title(destination)
+            }
         }
     }
 
@@ -88,7 +137,32 @@ struct SettingsWindowView: View {
 
     @ViewBuilder
     private var routeSlot: some View {
-        if destination == .sounds,
+        if destination == .eventsAndSounds,
+            model.resolution.failure == nil,
+            let soundPacksEditorOwner,
+            let eventSettingsModel,
+            let eventSettingsSelection,
+            let hostIntegrations,
+            let aiCueViewModel,
+            let audioEnvironment,
+            let onEventAudibilityInputsChanged,
+            let onEventPackSwitch,
+            let onAdoptAICue
+        {
+            EventSettingsWindowView(
+                model: eventSettingsModel,
+                selection: eventSettingsSelection,
+                hostIntegrations: hostIntegrations,
+                languageStore: preferences,
+                aiCueViewModel: aiCueViewModel,
+                soundPacksModel: soundPacksEditorOwner.model,
+                audioEnvironment: audioEnvironment,
+                onConfigureSound: { model.request(.sounds($0)) },
+                onAudibilityInputsChanged: onEventAudibilityInputsChanged,
+                onPackSwitch: onEventPackSwitch,
+                onAdoptAICue: onAdoptAICue,
+                presentationContext: .unifiedSettings)
+        } else if destination == .sounds,
             model.resolution.failure == nil,
             let soundPacksEditorOwner
         {
@@ -134,13 +208,19 @@ struct SettingsWindowView: View {
             .focusable()
             .focused(
                 $focusedTarget,
-                equals: SettingsWindowFocusTarget.title(destination))
+                equals: SettingsWindowFocusTarget.title(destination)
+            )
             .accessibilityIdentifier("settings.title.\(destination.rawValue)")
     }
 
     private var soundsRoute: SoundPacksWindowRoute {
         guard case .sounds(let route) = model.resolution.route else { return .overview }
         return route
+    }
+
+    private var eventSettingsRoute: EventSettingsWindowRoute? {
+        guard case .events(let scope, let event) = model.resolution.route else { return nil }
+        return EventSettingsWindowRoute(scope: scope, event: event)
     }
 
     private var generalSettings: some View {
@@ -161,10 +241,12 @@ struct SettingsWindowView: View {
             .pickerStyle(.radioGroup)
             .focused(
                 $focusedTarget,
-                equals: SettingsWindowFocusTarget.firstAction(.general))
+                equals: SettingsWindowFocusTarget.firstAction(.general)
+            )
             .accessibilityLabel(l10n.text(.settingsGeneralLanguageTitle))
             .accessibilityValue(
-                preferences.languageMode.localizedName(language: preferences.language))
+                preferences.languageMode.localizedName(language: preferences.language)
+            )
             .accessibilityHint(l10n.text(.settingsGeneralLanguageHint))
             .accessibilitySortPriority(1)
             .accessibilityIdentifier("settings.general.language")
@@ -174,9 +256,10 @@ struct SettingsWindowView: View {
                     l10n.format(
                         .settingsGeneralSystemProjection,
                         preferences.language.selfName as NSString),
-                    systemImage: "globe")
-                    .foregroundColor(.secondary)
-                    .accessibilityIdentifier("settings.general.language.system-projection")
+                    systemImage: "globe"
+                )
+                .foregroundColor(.secondary)
+                .accessibilityIdentifier("settings.general.language.system-projection")
             }
 
             if !preferences.recoveryIssues.isEmpty {
@@ -216,7 +299,8 @@ struct SettingsWindowView: View {
             }
             .focused(
                 $focusedTarget,
-                equals: SettingsWindowFocusTarget.firstAction(destination))
+                equals: SettingsWindowFocusTarget.firstAction(destination)
+            )
             .accessibilitySortPriority(1)
             .accessibilityIdentifier("settings.first-action.\(destination.rawValue)")
         }
