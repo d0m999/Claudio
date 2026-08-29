@@ -836,20 +836,25 @@ func runHostHookReceiptSuites() {
                             .appendingPathComponent($0.surfaceID.rawValue, isDirectory: true).path)
                 },
                 "提交后的 live Surface 必须全部消失，不能暴露部分清除")
-            let retainedTombstones = (try? FileManager.default.contentsOfDirectory(
-                atPath: cleanupStore.historyRoot.path))?.filter { $0.hasPrefix(".clear-") } ?? []
+            let retainedTombstones =
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: cleanupStore.historyRoot.path))?.filter { $0.hasPrefix(".clear-") }
+                ?? []
             expect(
                 retainedTombstones.count == 1
                     && UUID(
-                        uuidString: String(retainedTombstones[0].dropFirst(".clear-".count))) != nil,
+                        uuidString: String(retainedTombstones[0].dropFirst(".clear-".count)))
+                        != nil,
                 "删除中途失败必须只留下 UUID 命名的私有可重试 tombstone")
 
             expect(
                 hostHookVoidResultSucceeded(
                     cleanupStore.clearReceiptHistory(hosts: HostID.productVisibleCases)),
                 "下一次清理必须先重试已提交 tombstone，再幂等返回成功")
-            let remainingTombstones = (try? FileManager.default.contentsOfDirectory(
-                atPath: cleanupStore.historyRoot.path))?.filter { $0.hasPrefix(".clear-") } ?? []
+            let remainingTombstones =
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: cleanupStore.historyRoot.path))?.filter { $0.hasPrefix(".clear-") }
+                ?? []
             expect(remainingTombstones.isEmpty, "重试必须回收上次部分删除留下的 tombstone")
 
             let recoveryStore = HostHookReceiptStore(
@@ -864,7 +869,8 @@ func runHostHookReceiptSuites() {
                     .appendingPathComponent(interruptedName, isDirectory: true)
                     .appendingPathComponent(
                         HostSurfaceID.workBuddy.rawValue,
-                        isDirectory: true)
+                        isDirectory: true
+                    )
                     .appendingPathComponent("keep.json"))
             writeFixture(
                 "live-codex",
@@ -887,13 +893,15 @@ func runHostHookReceiptSuites() {
                     recoveryStore.historyRoot
                         .appendingPathComponent(
                             HostSurfaceID.workBuddy.rawValue,
-                            isDirectory: true)
+                            isDirectory: true
+                        )
                         .appendingPathComponent("keep.json")) == "interrupted-workbuddy"
                     && fixtureText(
                         recoveryStore.historyRoot
                             .appendingPathComponent(
                                 HostSurfaceID.codex.rawValue,
-                                isDirectory: true)
+                                isDirectory: true
+                            )
                             .appendingPathComponent("keep.json")) == "live-codex",
                 "下次 lock owner 必须先回滚 `.staging-*`，且当前失败仍保留全部 live 历史")
             expect(

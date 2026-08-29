@@ -74,11 +74,9 @@ func runLogSuites() {
 
     suite("parseRecentLogEntries：复用调用方已完成 bounded read 的同一份字节快照") {
         let data = Data(
-            (
-                "broken\n"
-                    + "2023-11-14T22:13:20Z\tstop\tafplay 启动失败：/private/path\n"
-                    + "2023-11-14T22:13:21Z\ttask_start\t回执写入失败（lock_busy）\n"
-            ).utf8)
+            ("broken\n"
+                + "2023-11-14T22:13:20Z\tstop\tafplay 启动失败：/private/path\n"
+                + "2023-11-14T22:13:21Z\ttask_start\t回执写入失败（lock_busy）\n").utf8)
         let entries = parseRecentLogEntries(data, maxLines: 1)
         expect(entries.count == 1, "bounded 字节 parser 仍须跳过损坏行并遵守 maxLines")
         expect(
