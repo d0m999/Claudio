@@ -124,7 +124,8 @@ func runIntegrationsWindowWiringSuites() {
 
         expect(
             !menu.contains("private let integrationsWindowController")
-                && !menu.contains("let integrationsWindowController = IntegrationsWindowController(")
+                && !menu.contains(
+                    "let integrationsWindowController = IntegrationsWindowController(")
                 && menu.contains("integrationsModel: integrationsModel"),
             "cutover 后 production 不得再创建独立 Integrations window；同一 model 必须注入 Settings")
         expect(
@@ -239,7 +240,8 @@ func runIntegrationsWindowWiringSuites() {
             menu.contains("private let integrationsModel: IntegrationsWindowModel")
                 && menu.contains("self.integrationsModel = integrationsModel")
                 && menu.contains("integrationsModel: integrationsModel")
-                && !menu.contains("let integrationsWindowController = IntegrationsWindowController("),
+                && !menu.contains(
+                    "let integrationsWindowController = IntegrationsWindowController("),
             "MenuBarController 必须把同一个 model 实例交给 retained Settings，不能创建第二 owner")
         expect(
             menu.contains("let content = self.hostIntegrations.replace(state: state)")
