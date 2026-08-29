@@ -516,10 +516,20 @@ public func panelEventPresentations(
         }
         let soundFileText: String
         switch row.coverage {
-        case .present(let fileName): soundFileText = row.audioDisplayName ?? fileName
+        case .present(let fileName):
+            if let displayName = row.audioDisplayName {
+                soundFileText = "\(fileName) · \(displayName)"
+            } else {
+                soundFileText = fileName
+            }
         case .unmapped: soundFileText = l10n.text(.panelNoSoundAssigned)
         case .broken(let fileName):
-            soundFileText = l10n.format(.panelMissingSound, fileName)
+            let missingSoundText = l10n.format(.panelMissingSound, fileName)
+            if let displayName = row.audioDisplayName {
+                soundFileText = "\(missingSoundText) · \(displayName)"
+            } else {
+                soundFileText = missingSoundText
+            }
         }
         let enabledText =
             row.enabled

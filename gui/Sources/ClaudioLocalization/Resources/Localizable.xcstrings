@@ -243,14 +243,14 @@
     },
     "panel.capability.supported" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface supported" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口支持" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface supported · Implemented" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口支持 · 已实现" } }
       }
     },
     "panel.capability.partial" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface partially supported" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口部分支持" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface partially supported · Implemented" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口部分支持 · 已实现" } }
       }
     },
     "panel.capability.unsupported" : {

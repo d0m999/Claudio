@@ -455,6 +455,11 @@ func runPanelPresentationSuites() async {
             scope: .surface(.workBuddy),
             masterVolume: 0.8,
             language: .english)
+        let chineseEvents = panelEventPresentations(
+            rows: panelPresentationEventRows(),
+            scope: .surface(.workBuddy),
+            masterVolume: 0.8,
+            language: .zhHans)
 
         expect(events.count == 5, "WorkBuddy 必须稳定显示五行")
         expect(
@@ -463,10 +468,14 @@ func runPanelPresentationSuites() async {
             "WorkBuddy 原生事件名必须来自 catalog")
         for event in events.prefix(2) {
             expect(event.implementation == .implemented, "\(event.event) 必须已实现")
+            expect(event.capabilityText.contains("Implemented"), "能力标签必须说出已实现")
             expect(
                 event.controls.previewEnabled && event.controls.muteEnabled,
                 "\(event.event) 必须同时允许试听与静音")
         }
+        expect(
+            chineseEvents.prefix(2).allSatisfy { $0.capabilityText.contains("已实现") },
+            "简体中文能力标签也必须说出已实现")
         for event in events.suffix(3) {
             expect(event.implementation == .notImplemented, "\(event.event) 必须显式未实现")
             expect(event.capabilityText.contains("Not implemented"), "能力标签必须说出未实现")
@@ -477,12 +486,19 @@ func runPanelPresentationSuites() async {
     }
 
     suite("Codex 4/5：无原生事件的 StopFailure 不得伪装成 claudi0 事件 ID") {
-        let events = panelEventPresentations(
+        let chineseEvents = panelEventPresentations(
             rows: panelPresentationEventRows(),
             scope: .surface(.codex),
             masterVolume: 0.8,
             language: .zhHans)
-        let unsupported = events.first(where: { $0.event == .stopFailure })!
+        let englishEvents = panelEventPresentations(
+            rows: panelPresentationEventRows(),
+            scope: .surface(.codex),
+            masterVolume: 0.8,
+            language: .english)
+        let unsupported = chineseEvents.first(where: { $0.event == .stopFailure })!
+        let chinesePermission = chineseEvents.first(where: { $0.event == .notification })!
+        let englishPermission = englishEvents.first(where: { $0.event == .notification })!
 
         expect(unsupported.support == .unsupported, "Codex StopFailure 必须携带 unsupported 枚举")
         expect(unsupported.nativeEventText == "无原生事件", "不得用 stop_failure 伪造宿主原生事件")
@@ -490,8 +506,14 @@ func runPanelPresentationSuites() async {
             !unsupported.controls.previewEnabled && !unsupported.controls.muteEnabled,
             "Codex 不支持事件的两个动作必须禁用")
         expect(
-            events.filter { $0.controls.muteEnabled }.count == 4,
+            chineseEvents.filter { $0.controls.muteEnabled }.count == 4,
             "Codex 必须只有 4/5 个可配置事件")
+        expect(
+            chinesePermission.capabilityText == "接口部分支持 · 已实现",
+            "Codex PermissionRequest 的中文能力标签必须同时说出 partial 与 implemented")
+        expect(
+            englishPermission.capabilityText == "Interface partially supported · Implemented",
+            "Codex PermissionRequest 的英文能力标签必须同时说出 partial 与 implemented")
     }
 
     suite("Global 行使用 claudi0 事件 ID 与全局默认，不伪造宿主事实") {
@@ -538,7 +560,7 @@ func runPanelPresentationSuites() async {
         expect(readOnly.allSatisfy { !$0.controls.muteEnabled }, "配置不可写时不得展示可操作静音")
     }
 
-    suite("AI 提示音名称：事件行优先显示用户名称，未命名资产才回退文件名") {
+    suite("当前声音：事件行同时显示真实文件名与 AI 提示音名称") {
         let namedRows = Event.allCases.map {
             EventRow(
                 event: $0,
@@ -556,16 +578,40 @@ func runPanelPresentationSuites() async {
             scope: .surface(.workBuddy),
             masterVolume: 0.8,
             language: .zhHans)
+        let namedBrokenRows = Event.allCases.map {
+            EventRow(
+                event: $0,
+                coverage: .broken(fileName: "ai-cue.mp3"),
+                enabled: true,
+                audioDisplayName: "小猫两声")
+        }
+        let namedBroken = panelEventPresentations(
+            rows: namedBrokenRows,
+            scope: .surface(.workBuddy),
+            masterVolume: 0.8,
+            language: .zhHans)
 
         expect(
-            named.allSatisfy { $0.soundFileText == "小猫两声" },
-            "已命名 AI 资产必须把最终用户名称投影到旧事件 UI")
+            named.allSatisfy { $0.soundFileText == "ai-cue.mp3 · 小猫两声" },
+            "已命名 AI 资产必须同时显示真实文件名与最终用户名称")
         expect(
-            named.allSatisfy { $0.accessibilityLabel.contains("小猫两声") },
-            "VoiceOver 必须读出与屏幕一致的最终名称")
+            named.allSatisfy {
+                $0.accessibilityLabel.contains("ai-cue.mp3")
+                    && $0.accessibilityLabel.contains("小猫两声")
+            },
+            "VoiceOver 必须同时读出真实文件名与最终名称")
         expect(
             unnamed.allSatisfy { $0.soundFileText == "legacy.aiff" },
             "既有未命名资产必须继续显示文件名，不能伪造名称")
+        expect(
+            namedBroken.allSatisfy { $0.soundFileText == "文件缺失：ai-cue.mp3 · 小猫两声" },
+            "命名资产缺失时必须同时显示缺失状态、真实文件名与最终名称")
+        expect(
+            namedBroken.allSatisfy {
+                $0.accessibilityLabel.contains("ai-cue.mp3")
+                    && $0.accessibilityLabel.contains("小猫两声")
+            },
+            "命名资产缺失时 VoiceOver 仍必须读出真实文件名与最终名称")
     }
 
     suite("能力格显式保留 support/implementation，视图无需从文案反推") {
