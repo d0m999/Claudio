@@ -207,6 +207,10 @@ public enum SoundPackLibraryState: Sendable, Equatable {
     case failed(previous: SoundPackLibrarySnapshot?, error: SoundPackLibraryError)
 }
 
+enum SoundPackLibraryBrokenReasonToken: String, Sendable {
+    case manifestIdentityMismatch = "sound-pack-library.manifest-identity-mismatch"
+}
+
 public enum SoundPackLibraryRefreshTrigger: Sendable, Equatable {
     case initial
     case panelPresentation
@@ -987,6 +991,16 @@ private func readSoundPackFactsOnce(
             factoryPackIDs: factoryPackIDs,
             packDirectory: packDirectory)
     }
+    guard manifest.id == id else {
+        let reason = SoundPackLibraryBrokenReasonToken.manifestIdentityMismatch.rawValue
+        return brokenSoundPackFacts(
+            id: id,
+            reason: reason,
+            inventoryError: .manifestUnreadable(reason: reason),
+            environment: environment,
+            factoryPackIDs: factoryPackIDs,
+            packDirectory: packDirectory)
+    }
     guard let declaredAudioFileNames = currentEventAudioFileNames(in: manifest) else {
         return brokenSoundPackFacts(
             id: id,
@@ -1074,7 +1088,8 @@ private func installedDeclaredFileNames(
             id: id,
             userPacksDirectory: environment.userPacksDirectory,
             bundledPacksDirectory: environment.bundledPacksDirectory),
-        case .success(let manifest) = loadPackManifest(in: directory)
+        case .success(let manifest) = loadPackManifest(in: directory),
+        manifest.id == id
     else { return [] }
     return currentEventAudioFileNames(in: manifest) ?? []
 }

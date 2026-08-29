@@ -1,3 +1,4 @@
+import ClaudioGUICore
 import ClaudioLocalization
 import Foundation
 
@@ -71,6 +72,15 @@ func runLocalizationSuites() {
             chinese.text(.soundPacksPackNotUsed) == "未使用"
                 && english.text(.soundPacksPackNotUsed) == "Not in use",
             "pack accessibility values must not expose removed pinning state")
+        expect(
+            localizedSoundPackLibraryReason(
+                "sound-pack-library.manifest-identity-mismatch",
+                language: .zhHans) == "manifest 声音包 ID 与所在文件夹不一致"
+                && localizedSoundPackLibraryReason(
+                    "sound-pack-library.manifest-identity-mismatch",
+                    language: .english)
+                    == "The manifest sound pack ID does not match its folder",
+            "manifest identity mismatch must use catalog copy in both product languages")
 
         let axUnavailableQualification = ClaudioL10nKey(
             rawValue: "qualification.accessibility-beta-unavailable")

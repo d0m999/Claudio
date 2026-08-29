@@ -867,6 +867,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksPackComplete: Self = "sound-packs.pack.complete"
     public static let soundPacksPackPartial: Self = "sound-packs.pack.partial"
     public static let soundPacksPackBroken: Self = "sound-packs.pack.broken"
+    public static let soundPacksPackManifestIdentityMismatch: Self =
+        "sound-packs.pack.manifest-identity-mismatch"
     public static let soundPacksPackModified: Self = "sound-packs.pack.modified"
     public static let soundPacksPanelVisible: Self = "sound-packs.pack.panel-visible"
     public static let soundPacksPackNotUsed: Self = "sound-packs.pack.not-used"
@@ -1225,7 +1227,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksOrphanAssignHint, .soundPacksOrphanDelete, .soundPacksOrphanDeleteLabel,
         .soundPacksOrphanDeleteValue, .soundPacksOrphanDeleteHint, .soundPacksCoverageUnmapped,
         .soundPacksCoverageBroken, .soundPacksPackActive, .soundPacksPackComplete,
-        .soundPacksPackPartial, .soundPacksPackBroken, .soundPacksPackModified,
+        .soundPacksPackPartial, .soundPacksPackBroken, .soundPacksPackManifestIdentityMismatch,
+        .soundPacksPackModified,
         .soundPacksPanelVisible, .soundPacksPackNotUsed, .soundPacksEventPresent,
         .soundPacksEventUnmapped, .soundPacksEventBroken, .soundPacksOperationFailed,
         .soundPacksActionFailed, .soundPacksAnnouncementWindowLoading,

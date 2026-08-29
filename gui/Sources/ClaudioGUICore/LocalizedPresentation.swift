@@ -345,7 +345,10 @@ public func localizedSoundPacksPackAccessibilityLabel(
                 Int64(total),
                 Int64(max(0, total - present))))
     case .broken(let reason):
-        facts.append(l10n.format(.soundPacksPackBroken, reason))
+        facts.append(
+            l10n.format(
+                .soundPacksPackBroken,
+                localizedSoundPackLibraryReason(reason, language: language)))
     }
     switch license {
     case .none: break
@@ -353,6 +356,17 @@ public func localizedSoundPacksPackAccessibilityLabel(
     case .modified: facts.append(l10n.text(.soundPacksPackModified))
     }
     return facts.joined(separator: language == .english ? ", " : "，")
+}
+
+public func localizedSoundPackLibraryReason(
+    _ reason: String,
+    language: ClaudioAppLanguage
+) -> String {
+    guard let token = SoundPackLibraryBrokenReasonToken(rawValue: reason) else { return reason }
+    switch token {
+    case .manifestIdentityMismatch:
+        return ClaudioL10n(language: language).text(.soundPacksPackManifestIdentityMismatch)
+    }
 }
 
 public func localizedSoundPacksEventAccessibilityLabel(

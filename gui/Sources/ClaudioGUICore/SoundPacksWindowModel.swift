@@ -1367,18 +1367,9 @@ public final class SoundPacksWindowModel: ObservableObject {
 
     private func consumeLibraryState(_ state: SoundPackLibraryState) {
         if let currentRevision = librarySnapshot?.revision {
-            let incomingRevision: UInt64?
-            switch state {
-            case .unloaded:
-                incomingRevision = nil
-            case .loading(let previous):
-                incomingRevision = previous?.revision
-            case .ready(let snapshot):
-                incomingRevision = snapshot.revision
-            case .failed(let previous, _):
-                incomingRevision = previous?.revision
-            }
-            guard let incomingRevision, incomingRevision >= currentRevision else { return }
+            guard let incomingRevision = state.snapshotRevision,
+                incomingRevision >= currentRevision
+            else { return }
         }
 
         switch state {
@@ -2536,6 +2527,19 @@ public final class SoundPacksWindowModel: ObservableObject {
     private func finishSoundPackMutation(packIDs: Set<String>) {
         guard readSource.readsSharedSnapshot, !packIDs.isEmpty else { return }
         soundPackLibrary.invalidate(packIDs: packIDs)
+    }
+}
+
+extension SoundPackLibraryState {
+    fileprivate var snapshotRevision: UInt64? {
+        switch self {
+        case .unloaded:
+            nil
+        case .loading(let previous), .failed(let previous, _):
+            previous?.revision
+        case .ready(let snapshot):
+            snapshot.revision
+        }
     }
 }
 

@@ -1328,7 +1328,9 @@ struct SoundPacksWindowView: View {
         case .packNotFound(let packID):
             return l10n.format(.soundPacksInventoryPackNotFound, packID)
         case .manifestUnreadable(let reason):
-            return l10n.format(.soundPacksInventoryManifestUnreadable, reason)
+            return l10n.format(
+                .soundPacksInventoryManifestUnreadable,
+                localizedSoundPackLibraryReason(reason, language: languageStore.language))
         case .directoryUnreadable(let reason):
             return l10n.format(.soundPacksInventoryDirectoryUnreadable, reason)
         }

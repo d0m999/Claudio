@@ -323,64 +323,27 @@ func runAICueAdoptionSuites() async {
 
     await suite("AI 提示音采用闭环：采用前等待新鲜快照并在导入前拒绝磁盘损坏包") {
         await withTempDirectory { root in
-            let packs = root.appendingPathComponent("packs", isDirectory: true)
-            let configFile = root.appendingPathComponent("config.json")
-            let config = ClaudioConfig(
-                selectedPack: "global-pack",
-                surfaceOverrides: [
-                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
-                        selectedPack: "workbuddy-pack"),
-                    HostSurfaceID.codex.rawValue: SurfaceSoundOverride(
-                        selectedPack: "codex-pack"),
-                    HostSurfaceID.claudeCode.rawValue: SurfaceSoundOverride(
-                        selectedPack: "claude-pack"),
-                ])
-            writeFixture(try! JSONEncoder().encode(config), to: configFile)
-            for id in ["global-pack", "codex-pack", "claude-pack"] {
-                writeFixture(
-                    "{\"id\":\"\(id)\",\"events\":{}}",
-                    to: packs.appendingPathComponent("\(id)/manifest.json"))
-            }
-            let targetManifest = packs.appendingPathComponent(
-                "workbuddy-pack/manifest.json")
-            writeFixture(
-                #"{"id":"workbuddy-pack","events":{"stop":"old.mp3"}}"#,
-                to: targetManifest)
-            writeFixture(
-                validMP3ID3Data(),
-                to: packs.appendingPathComponent("workbuddy-pack/old.mp3"))
-            let candidateFile = root.appendingPathComponent("provider-candidate.mp3")
-            writeFixture(validMP3ID3Data(), to: candidateFile)
-            let environment = AudioImportEnvironment(
-                userPacksDirectory: packs,
-                durationProbe: StubDurationProbe(fixedDuration: 1),
-                packsLockFile: injectedPacksLock(under: root))
-            let library = SoundPackLibrary(environment: environment)
-            let model = SoundPacksWindowModel(
-                configFile: configFile,
-                lockFile: root.appendingPathComponent("config.lock"),
-                environment: environment,
-                soundPackLibrary: library,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            model.setManagedSurface(.workBuddy)
+            let fixture = aiCueRefreshFixture(root: root)
 
             expect(
-                await synchronizeAICueModelWithLibrary(model, library: library),
+                await synchronizeAICueModelWithLibrary(
+                    fixture.model,
+                    library: fixture.library),
                 "前提：旧共享快照必须先同步进模型")
-            if case .eligible = model.aiCueAdoptionEligibility(for: .stop) {
+            if case .eligible = fixture.model.aiCueAdoptionEligibility(for: .stop) {
                 expect(true, "前提：旧共享快照必须先证明目标可采用")
             } else {
                 expect(false, "前提：旧共享快照必须先证明目标可采用")
             }
-            let target = try! model.captureAICueAdoptionTarget(for: .stop).get()
+            let target = try! fixture.model.captureAICueAdoptionTarget(for: .stop).get()
             let beforeFiles = Set(
                 (try? FileManager.default.contentsOfDirectory(
-                    atPath: targetManifest.deletingLastPathComponent().path)) ?? [])
-            writeFixture("not-json", to: targetManifest)
+                    atPath: fixture.targetManifest.deletingLastPathComponent().path)) ?? [])
+            writeFixture("not-json", to: fixture.targetManifest)
 
-            let result = await model.adoptAICue(
+            let result = await fixture.model.adoptAICue(
                 AICueAdoptionRequest(
-                    candidate: aiCueCandidate(at: candidateFile),
+                    candidate: aiCueCandidate(at: fixture.candidateFile),
                     displayName: try! AICueDisplayName("新鲜度提示音"),
                     target: target))
             expect(
@@ -388,82 +351,92 @@ func runAICueAdoptionSuites() async {
                 "采用必须用本次磁盘扫描看到 broken pack，不能继续沿用旧 eligible 快照")
             let afterFiles = Set(
                 (try? FileManager.default.contentsOfDirectory(
-                    atPath: targetManifest.deletingLastPathComponent().path)) ?? [])
+                    atPath: fixture.targetManifest.deletingLastPathComponent().path)) ?? [])
             expect(afterFiles == beforeFiles, "新鲜度拒绝必须发生在候选导入与任何文件发布之前")
+        }
+    }
+
+    await suite("AI 提示音采用闭环：采用前拒绝 manifest 身份与目录不一致的目标包") {
+        await withTempDirectory { root in
+            let fixture = aiCueRefreshFixture(root: root)
+            expect(
+                await synchronizeAICueModelWithLibrary(
+                    fixture.model,
+                    library: fixture.library),
+                "前提：旧共享快照必须先同步进模型")
+            let target = try! fixture.model.captureAICueAdoptionTarget(for: .stop).get()
+            let changedManifest = #"{"id":"other-pack","events":{"stop":"old.mp3"}}"#
+            writeFixture(changedManifest, to: fixture.targetManifest)
+            let changedBytes = try! Data(contentsOf: fixture.targetManifest)
+            let beforeFiles = Set(
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: fixture.targetManifest.deletingLastPathComponent().path)) ?? [])
+
+            let result = await fixture.model.adoptAICue(
+                AICueAdoptionRequest(
+                    candidate: aiCueCandidate(at: fixture.candidateFile),
+                    displayName: try! AICueDisplayName("身份变化提示音"),
+                    target: target))
+            expect(
+                result == .failure(.ineligible(.packBroken(packID: "workbuddy-pack"))),
+                "新鲜扫描必须在导入前把 manifest 身份变化投影为 broken")
+            expect(
+                try! Data(contentsOf: fixture.targetManifest) == changedBytes,
+                "身份变化失败路径不得改写目标 manifest 或旧事件绑定")
+            let afterFiles = Set(
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: fixture.targetManifest.deletingLastPathComponent().path)) ?? [])
+            expect(afterFiles == beforeFiles, "身份变化失败路径不得导入或发布候选文件")
+            expect(
+                FileManager.default.fileExists(atPath: fixture.candidateFile.path),
+                "身份变化失败路径必须保留私有候选")
         }
     }
 
     await suite("AI 提示音采用闭环：采用前共享库刷新失败时不回退旧快照") {
         await withTempDirectory { root in
-            let packs = root.appendingPathComponent("packs", isDirectory: true)
-            let configFile = root.appendingPathComponent("config.json")
-            let config = ClaudioConfig(
-                selectedPack: "global-pack",
-                surfaceOverrides: [
-                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
-                        selectedPack: "workbuddy-pack"),
-                    HostSurfaceID.codex.rawValue: SurfaceSoundOverride(
-                        selectedPack: "codex-pack"),
-                    HostSurfaceID.claudeCode.rawValue: SurfaceSoundOverride(
-                        selectedPack: "claude-pack"),
-                ])
-            writeFixture(try! JSONEncoder().encode(config), to: configFile)
-            let targetManifest = packs.appendingPathComponent(
-                "workbuddy-pack/manifest.json")
-            let originalManifest = #"{"id":"workbuddy-pack","events":{"stop":"old.mp3"}}"#
-            writeFixture(originalManifest, to: targetManifest)
-            writeFixture(
-                validMP3ID3Data(),
-                to: packs.appendingPathComponent("workbuddy-pack/old.mp3"))
-            let candidateFile = root.appendingPathComponent("provider-candidate.mp3")
-            writeFixture(validMP3ID3Data(), to: candidateFile)
-
             let scanner = AICueRefreshFailureScanner(
                 initialFacts: [
                     "global-pack", "workbuddy-pack", "codex-pack", "claude-pack",
                 ].map(aiCuePackFacts))
-            let library = SoundPackLibrary(
+            let fixture = aiCueRefreshFixture(
+                root: root,
                 scanner: SoundPackLibraryScanner(operation: scanner.scan))
-            let environment = AudioImportEnvironment(
-                userPacksDirectory: packs,
-                durationProbe: StubDurationProbe(fixedDuration: 1),
-                packsLockFile: injectedPacksLock(under: root))
-            let model = SoundPacksWindowModel(
-                configFile: configFile,
-                lockFile: root.appendingPathComponent("config.lock"),
-                environment: environment,
-                soundPackLibrary: library,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            model.setManagedSurface(.workBuddy)
 
             expect(
-                await synchronizeAICueModelWithLibrary(model, library: library),
+                await synchronizeAICueModelWithLibrary(
+                    fixture.model,
+                    library: fixture.library),
                 "前提：首次成功快照必须同步进模型")
-            if case .eligible = model.aiCueAdoptionEligibility(for: .stop) {
+            if case .eligible = fixture.model.aiCueAdoptionEligibility(for: .stop) {
                 expect(true, "前提：首次成功快照必须允许捕获采用目标")
             } else {
                 expect(false, "前提：首次成功快照必须允许捕获采用目标")
             }
-            let target = try! model.captureAICueAdoptionTarget(for: .stop).get()
-            let beforeManifest = try! Data(contentsOf: targetManifest)
+            let target = try! fixture.model.captureAICueAdoptionTarget(for: .stop).get()
+            let beforeManifest = try! Data(contentsOf: fixture.targetManifest)
             let beforeFiles = Set(
                 (try? FileManager.default.contentsOfDirectory(
-                    atPath: targetManifest.deletingLastPathComponent().path)) ?? [])
+                    atPath: fixture.targetManifest.deletingLastPathComponent().path)) ?? [])
 
-            let result = await model.adoptAICue(
+            let result = await fixture.model.adoptAICue(
                 AICueAdoptionRequest(
-                    candidate: aiCueCandidate(at: candidateFile),
+                    candidate: aiCueCandidate(at: fixture.candidateFile),
                     displayName: try! AICueDisplayName("刷新失败提示音"),
                     target: target))
             expect(
                 result == .failure(.ineligible(.configurationUnavailable)),
                 "采用前刷新失败必须 fail closed，不能用旧 eligible 快照继续导入")
-            expect(try! Data(contentsOf: targetManifest) == beforeManifest, "刷新失败不得改写旧事件绑定")
+            expect(
+                try! Data(contentsOf: fixture.targetManifest) == beforeManifest,
+                "刷新失败不得改写旧事件绑定")
             let afterFiles = Set(
                 (try? FileManager.default.contentsOfDirectory(
-                    atPath: targetManifest.deletingLastPathComponent().path)) ?? [])
+                    atPath: fixture.targetManifest.deletingLastPathComponent().path)) ?? [])
             expect(afterFiles == beforeFiles, "刷新失败必须发生在候选导入与任何文件发布之前")
-            expect(FileManager.default.fileExists(atPath: candidateFile.path), "刷新失败不得删除私有候选")
+            expect(
+                FileManager.default.fileExists(atPath: fixture.candidateFile.path),
+                "刷新失败不得删除私有候选")
         }
     }
 
@@ -534,6 +507,30 @@ private func aiCuePackFacts(id: String) -> SoundPackFacts {
         audioInventory: .deferred)
 }
 
+private struct AICueRefreshFixture {
+    let model: SoundPacksWindowModel
+    let library: SoundPackLibrary
+    let targetManifest: URL
+    let candidateFile: URL
+}
+
+@MainActor
+private func aiCueRefreshFixture(
+    root: URL,
+    scanner: SoundPackLibraryScanner? = nil
+) -> AICueRefreshFixture {
+    let disk = aiCueDiskFixture(root: root, durationProbe: StubDurationProbe(fixedDuration: 1))
+    let library =
+        scanner.map { SoundPackLibrary(scanner: $0) }
+        ?? SoundPackLibrary(environment: disk.environment)
+    let model = aiCueFixtureModel(disk: disk, readSource: .shared(library))
+    return AICueRefreshFixture(
+        model: model,
+        library: library,
+        targetManifest: disk.targetManifest,
+        candidateFile: disk.candidateFile)
+}
+
 private struct AICueAdoptionFixture {
     let model: SoundPacksWindowModel
     let targetManifest: URL
@@ -545,6 +542,32 @@ private func aiCueAdoptionFixture(
     root: URL,
     durationProbe: any AudioDurationProbing
 ) -> AICueAdoptionFixture {
+    let disk = aiCueDiskFixture(root: root, durationProbe: durationProbe)
+    let model = aiCueFixtureModel(disk: disk, readSource: .direct)
+    return AICueAdoptionFixture(
+        model: model,
+        targetManifest: disk.targetManifest,
+        candidateFile: disk.candidateFile)
+}
+
+private struct AICueDiskFixture {
+    let configFile: URL
+    let lockFile: URL
+    let environment: AudioImportEnvironment
+    let targetManifest: URL
+    let candidateFile: URL
+}
+
+private enum AICueFixtureReadSource {
+    case direct
+    case shared(SoundPackLibrary)
+}
+
+@MainActor
+private func aiCueDiskFixture(
+    root: URL,
+    durationProbe: any AudioDurationProbing
+) -> AICueDiskFixture {
     let packs = root.appendingPathComponent("packs", isDirectory: true)
     let configFile = root.appendingPathComponent("config.json")
     let config = ClaudioConfig(
@@ -572,16 +595,37 @@ private func aiCueAdoptionFixture(
         userPacksDirectory: packs,
         durationProbe: durationProbe,
         packsLockFile: injectedPacksLock(under: root))
-    let model = SoundPacksWindowModel(
+    return AICueDiskFixture(
         configFile: configFile,
         lockFile: root.appendingPathComponent("config.lock"),
         environment: environment,
-        refreshCoordinator: SoundPacksRefreshCoordinator())
-    model.setManagedSurface(.workBuddy)
-    return AICueAdoptionFixture(
-        model: model,
         targetManifest: targetManifest,
         candidateFile: candidateFile)
+}
+
+@MainActor
+private func aiCueFixtureModel(
+    disk: AICueDiskFixture,
+    readSource: AICueFixtureReadSource
+) -> SoundPacksWindowModel {
+    let model: SoundPacksWindowModel
+    switch readSource {
+    case .direct:
+        model = SoundPacksWindowModel(
+            configFile: disk.configFile,
+            lockFile: disk.lockFile,
+            environment: disk.environment,
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+    case .shared(let library):
+        model = SoundPacksWindowModel(
+            configFile: disk.configFile,
+            lockFile: disk.lockFile,
+            environment: disk.environment,
+            soundPackLibrary: library,
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+    }
+    model.setManagedSurface(.workBuddy)
+    return model
 }
 
 private func aiCueCandidate(at fileURL: URL) -> AICueCandidate {

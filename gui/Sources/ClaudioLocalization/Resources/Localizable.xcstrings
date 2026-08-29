@@ -2428,6 +2428,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包不可用：%@" } }
       }
     },
+    "sound-packs.pack.manifest-identity-mismatch" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The manifest sound pack ID does not match its folder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "manifest 声音包 ID 与所在文件夹不一致" } }
+      }
+    },
     "sound-packs.pack.modified" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in pack modified" } },
