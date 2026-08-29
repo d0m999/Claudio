@@ -1504,6 +1504,42 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 秒" } }
       }
     },
+    "ai-cue.candidate.play-action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Play candidate %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放候选 %@" } }
+      }
+    },
+    "ai-cue.candidate.stop-action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop candidate %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止候选 %@" } }
+      }
+    },
+    "ai-cue.candidate.playback-started" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playing candidate %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在播放候选 %@。" } }
+      }
+    },
+    "ai-cue.candidate.playback-stopped" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stopped candidate %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已停止候选 %@。" } }
+      }
+    },
+    "ai-cue.composer.closed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "AI Cue composer closed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已关闭 AI 提示音编辑器。" } }
+      }
+    },
+    "ai-cue.composer.closed-candidates-cleared" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "AI Cue composer closed; unadopted candidates were cleared." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已关闭 AI 提示音编辑器，并清理未采用候选。" } }
+      }
+    },
     "ai-cue.use-for-event" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Use for this event" } },

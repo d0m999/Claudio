@@ -38,6 +38,9 @@ struct StateGalleryView: View {
                 ProductionPanelGalleryView()
                 SettingsWindowRouteGalleryView()
                 SettingsExperienceGalleryView()
+                EventSettingsLayoutGalleryView()
+                ComplexAccessibilityEnvironmentGalleryView()
+                AICueExperienceGalleryView()
                 GallerySection(title: "Legacy Claude-only onboarding archive（非生产 Panel）") {
                     OnboardingGalleryView()
                     OnboardingActionGalleryView()
@@ -50,10 +53,24 @@ struct StateGalleryView: View {
                 MasterVolumeGalleryView()
                 PackCardGalleryView()
                 ForEach(ClaudioAppLanguage.allCases) { language in
-                    GallerySection(
-                        title: "Sound Packs Window · \(language.selfName) (7 production states)"
-                    ) {
-                        SoundPacksWindowStateGalleryView(language: language)
+                    ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                        ForEach(SettingsGalleryAppearance.allCases) { appearance in
+                            GallerySection(
+                                title:
+                                    "Sounds destination · \(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) (12 production states × 2 widths)"
+                            ) {
+                                if textSize == .standard && appearance == .light {
+                                    SoundPacksWindowStateGalleryView(language: language)
+                                        .environment(\.colorScheme, appearance.colorScheme)
+                                } else {
+                                    SoundPacksWindowStateGalleryView(
+                                        language: language,
+                                        textSize: textSize
+                                    )
+                                    .environment(\.colorScheme, appearance.colorScheme)
+                                }
+                            }
+                        }
                     }
                 }
                 HostIntegrationGalleryView()
@@ -124,6 +141,296 @@ struct SettingsExperienceGalleryView: View {
                 }
             }
         }
+    }
+}
+
+private enum EventSettingsGalleryWidth: String, CaseIterable, Identifiable {
+    case minimum
+    case standard
+
+    var id: String { rawValue }
+    var value: CGFloat { self == .minimum ? 680 : 820 }
+}
+
+private enum SettingsGalleryAppearance: String, CaseIterable, Identifiable {
+    case light
+    case dark
+
+    var id: String { rawValue }
+    var colorScheme: ColorScheme { self == .light ? .light : .dark }
+}
+
+struct EventSettingsLayoutGalleryView: View {
+    var body: some View {
+        GallerySection(
+            title: "Events destination · production mount · 2 languages × 4 text sizes × 2 widths"
+        ) {
+            ForEach(ClaudioAppLanguage.allCases) { language in
+                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                    ForEach(SettingsGalleryAppearance.allCases) { appearance in
+                        ForEach(EventSettingsGalleryWidth.allCases) { width in
+                            GalleryFrame(
+                                caption:
+                                    "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · \(width.rawValue)"
+                            ) {
+                                EventSettingsLayoutFrame(
+                                    language: language,
+                                    textSize: textSize,
+                                    width: width.value
+                                )
+                                .environment(\.colorScheme, appearance.colorScheme)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct ComplexAccessibilityEnvironmentGalleryView: View {
+    var body: some View {
+        GallerySection(
+            title: "Complex Settings · accessibility environment variants"
+        ) {
+            GalleryFrame(caption: "Increase Contrast") {
+                AccessibilityHighContrastGalleryMount(
+                    content: EventSettingsLayoutFrame(
+                        language: .english,
+                        textSize: .standard,
+                        width: EventSettingsGalleryWidth.minimum.value
+                    ))
+            }
+            GalleryFrame(caption: "Reduce Transparency") {
+                EventSettingsLayoutFrame(
+                    language: .zhHans,
+                    textSize: .standard,
+                    width: EventSettingsGalleryWidth.minimum.value
+                )
+                .environment(\.settingsReduceTransparencyOverride, true)
+            }
+            GalleryFrame(caption: "Reduce Motion") {
+                EventSettingsLayoutFrame(
+                    language: .english,
+                    textSize: .maximum,
+                    width: EventSettingsGalleryWidth.minimum.value
+                )
+                .transaction { transaction in
+                    transaction.animation = nil
+                    transaction.disablesAnimations = true
+                }
+            }
+        }
+    }
+}
+
+/// AppKit owns the macOS increased-contrast appearance fact. Hosting the unchanged production
+/// subtree under that system appearance exercises SwiftUI's real `colorSchemeContrast` projection
+/// without adding gallery-only branches to production views.
+private struct AccessibilityHighContrastGalleryMount<Content: View>: NSViewRepresentable {
+    let content: Content
+
+    func makeNSView(context: Context) -> NSHostingView<Content> {
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.appearance = NSAppearance(named: .accessibilityHighContrastAqua)
+        return hostingView
+    }
+
+    func updateNSView(_ hostingView: NSHostingView<Content>, context: Context) {
+        hostingView.rootView = content
+        hostingView.appearance = NSAppearance(named: .accessibilityHighContrastAqua)
+    }
+}
+
+@MainActor
+private struct EventSettingsLayoutFrame: View {
+    @StateObject private var selection: EventSettingsWindowSelection
+    @StateObject private var hostIntegrations: HostIntegrationPresentationStore
+    @StateObject private var languageStore: ClaudioPreferences
+    @StateObject private var aiCueViewModel: AICueGenerationViewModel
+    @StateObject private var soundPacksModel: SoundPacksWindowModel
+    private let panelModel: PanelConfigController
+    private let width: CGFloat
+
+    init(
+        language: ClaudioAppLanguage,
+        textSize: ClaudioInterfaceTextSize,
+        width: CGFloat
+    ) {
+        self.width = width
+        let preferences = ClaudioPreferences(previewLanguage: language)
+        preferences.setInterfaceTextSize(textSize)
+        _languageStore = StateObject(wrappedValue: preferences)
+        _selection = StateObject(
+            wrappedValue: EventSettingsWindowSelection(
+                route: EventSettingsWindowRoute(
+                    scope: .surface(.workBuddy),
+                    event: .stop)))
+
+        let hostState = PreviewFixtures.workBuddyVisualScenarios.first {
+            $0.phase == .allImplementedBindingsCurrent
+        }!.state
+        _hostIntegrations = StateObject(
+            wrappedValue: HostIntegrationPresentationStore(
+                state: hostState,
+                configurationSources: [:]))
+
+        var enabledEvents = Dictionary(
+            uniqueKeysWithValues: Event.allCases.map { ($0.cliName, true) })
+        enabledEvents[Event.notification.cliName] = false
+        let baseConfig = ClaudioConfig(
+            selectedPack: "global-pack",
+            masterVolume: 0.75,
+            eventsEnabled: enabledEvents,
+            surfaceOverrides: [
+                HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                    selectedPack: "workbuddy-private",
+                    eventsEnabled: [Event.notification.cliName: true])
+            ])
+        let effectiveConfig = ClaudioConfig(
+            selectedPack: "workbuddy-private",
+            masterVolume: 0.75,
+            eventsEnabled: Dictionary(
+                uniqueKeysWithValues: Event.allCases.map { ($0.cliName, true) }))
+        let packCards = [
+            PackCard(
+                id: "global-pack",
+                name: "Global Signals",
+                isCC0: false,
+                presentEvents: Set(Event.allCases),
+                state: .complete,
+                isSelected: false),
+            PackCard(
+                id: "workbuddy-private",
+                name: "WorkBuddy Private",
+                isCC0: false,
+                presentEvents: Set(Event.allCases),
+                state: .complete,
+                isSelected: true),
+        ]
+        let rows = Event.allCases.map {
+            EventRow(
+                event: $0,
+                coverage: .present(fileName: "\($0.cliName).mp3"),
+                enabled: true)
+        }
+        panelModel = PanelConfigController(
+            previewConfigState: .operational(baseConfig),
+            effectiveConfig: effectiveConfig,
+            selectedSurface: .workBuddy,
+            eventRows: rows,
+            packCards: packCards,
+            selectedPackMetadata: SelectedPackMetadata(
+                id: "workbuddy-private",
+                name: "WorkBuddy Private"),
+            environment: previewAudioImportEnvironment)
+        _soundPacksModel = StateObject(
+            wrappedValue: SoundPacksWindowModel(
+                previewConfig: baseConfig,
+                packCards: packCards,
+                selectedPackID: "workbuddy-private",
+                selectedEventRows: rows,
+                environment: previewAudioImportEnvironment,
+                refreshCoordinator: SoundPacksRefreshCoordinator()))
+        _aiCueViewModel = StateObject(
+            wrappedValue: AICueGenerationViewModel(
+                previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState))
+    }
+
+    var body: some View {
+        EventSettingsWindowView(
+            model: panelModel,
+            selection: selection,
+            hostIntegrations: hostIntegrations,
+            languageStore: languageStore,
+            aiCueViewModel: aiCueViewModel,
+            soundPacksModel: soundPacksModel,
+            audioEnvironment: previewAudioImportEnvironment,
+            onConfigureSound: { _ in },
+            onAudibilityInputsChanged: {},
+            onPackSwitch: { _ in },
+            onAnnouncement: { _ in },
+            reloadsOnAppear: false,
+            onAdoptAICue: { _ in .failure(.ineligible(.targetChanged)) }
+        )
+        .frame(width: width, height: 640)
+    }
+}
+
+struct AICueExperienceGalleryView: View {
+    var body: some View {
+        GallerySection(
+            title:
+                "Events AI Cue · 4 profiles + credential/composer/failure states · 2 languages × 4 text sizes"
+        ) {
+            ForEach(ClaudioAppLanguage.allCases) { language in
+                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                    ForEach(SettingsGalleryAppearance.allCases) { appearance in
+                        ForEach(PreviewFixtures.aiCueGalleryScenarios) { scenario in
+                            GalleryFrame(
+                                caption:
+                                    "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · \(scenario.rawValue)"
+                            ) {
+                                AICueExperienceStateFrame(
+                                    scenario: scenario,
+                                    language: language,
+                                    textSize: textSize
+                                )
+                                .environment(\.colorScheme, appearance.colorScheme)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+private struct AICueExperienceStateFrame: View {
+    let scenario: PreviewFixtures.AICueGalleryScenario
+    @StateObject private var languageStore: ClaudioPreferences
+    @StateObject private var viewModel: AICueGenerationViewModel
+
+    init(
+        scenario: PreviewFixtures.AICueGalleryScenario,
+        language: ClaudioAppLanguage,
+        textSize: ClaudioInterfaceTextSize
+    ) {
+        self.scenario = scenario
+        let preferences = ClaudioPreferences(previewLanguage: language)
+        preferences.setInterfaceTextSize(textSize)
+        _languageStore = StateObject(wrappedValue: preferences)
+        _viewModel = StateObject(
+            wrappedValue: AICueGenerationViewModel(previewState: scenario.previewState))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            EventSettingsAICueServiceCard(
+                viewModel: viewModel,
+                languageStore: languageStore,
+                onManageCredential: {})
+
+            if scenario.rendersCredentialSheet {
+                EventSettingsAICueCredentialSheet(
+                    viewModel: viewModel,
+                    languageStore: languageStore)
+            } else {
+                EventSettingsAICueComposerView(
+                    viewModel: viewModel,
+                    languageStore: languageStore,
+                    eventTitle: localizedEventName(.stop, language: languageStore.language),
+                    playingCandidateID: scenario.playingCandidateID,
+                    onConfigureCredential: {},
+                    onPreviewCandidate: { _ in },
+                    onAdoptCandidate: { _ in },
+                    onClose: {})
+            }
+        }
+        .frame(width: 720, alignment: .leading)
+        .padding(18)
+        .environment(\.dynamicTypeSize, languageStore.interfaceTextSize.dynamicTypeSize)
     }
 }
 
@@ -1015,23 +1322,37 @@ struct HostIntegrationGalleryView: View {
             title: "Host integrations · 2 languages (\(scenarioCount))"
         ) {
             ForEach(ClaudioAppLanguage.allCases) { language in
-                ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
-                    GalleryFrame(
-                        caption: "\(language.selfName) · \(scenario.id) · \(scenario.title)"
-                    ) {
-                        HostIntegrationStateFrame(scenario: scenario, language: language)
-                    }
-                }
-                ForEach(PreviewFixtures.workBuddyVisualScenarios) { scenario in
-                    GalleryFrame(
-                        caption: "\(language.selfName) · \(scenario.id) · \(scenario.title)"
-                    ) {
-                        HostIntegrationStateFrame(
-                            scenario: PreviewFixtures.HostIntegrationScenario(
-                                id: scenario.id,
-                                title: scenario.title,
-                                state: scenario.state),
-                            language: language)
+                ForEach(ClaudioInterfaceTextSize.allCases) { textSize in
+                    ForEach(SettingsGalleryAppearance.allCases) { appearance in
+                        ForEach(PreviewFixtures.hostIntegrationScenarios) { scenario in
+                            GalleryFrame(
+                                caption:
+                                    "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · \(scenario.id) · \(scenario.title)"
+                            ) {
+                                HostIntegrationStateFrame(
+                                    scenario: scenario,
+                                    language: language,
+                                    textSize: textSize
+                                )
+                                .environment(\.colorScheme, appearance.colorScheme)
+                            }
+                        }
+                        ForEach(PreviewFixtures.workBuddyVisualScenarios) { scenario in
+                            GalleryFrame(
+                                caption:
+                                    "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · \(scenario.id) · \(scenario.title)"
+                            ) {
+                                HostIntegrationStateFrame(
+                                    scenario: PreviewFixtures.HostIntegrationScenario(
+                                        id: scenario.id,
+                                        title: scenario.title,
+                                        state: scenario.state),
+                                    language: language,
+                                    textSize: textSize
+                                )
+                                .environment(\.colorScheme, appearance.colorScheme)
+                            }
+                        }
                     }
                 }
             }
@@ -1046,10 +1367,12 @@ private struct HostIntegrationStateFrame: View {
 
     init(
         scenario: PreviewFixtures.HostIntegrationScenario,
-        language: ClaudioAppLanguage
+        language: ClaudioAppLanguage,
+        textSize: ClaudioInterfaceTextSize = .standard
     ) {
         let languageStore = ClaudioPreferences(defaults: UserDefaults())
         languageStore.setLanguage(language)
+        languageStore.setInterfaceTextSize(textSize)
         _languageStore = StateObject(wrappedValue: languageStore)
         let store = HostIntegrationPresentationStore(
             state: scenario.state,

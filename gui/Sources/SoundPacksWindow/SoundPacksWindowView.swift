@@ -118,6 +118,35 @@ struct SoundPacksWindowView: View {
     @State private var dropTargetEvent: Event?
     @State private var requestedRoute: SoundPacksWindowRoute = .overview
 
+    init(
+        model: SoundPacksWindowModel,
+        userPacksDirectory: URL,
+        focusCoordinator: SoundPacksWindowFocusCoordinator,
+        languageStore: ClaudioPreferences
+    ) {
+        self.model = model
+        self.userPacksDirectory = userPacksDirectory
+        self.focusCoordinator = focusCoordinator
+        self.languageStore = languageStore
+    }
+
+    #if DEBUG
+    init(
+        model: SoundPacksWindowModel,
+        userPacksDirectory: URL,
+        focusCoordinator: SoundPacksWindowFocusCoordinator,
+        languageStore: ClaudioPreferences,
+        previewIsPerformingWrite: Bool
+    ) {
+        self.init(
+            model: model,
+            userPacksDirectory: userPacksDirectory,
+            focusCoordinator: focusCoordinator,
+            languageStore: languageStore)
+        _isPerformingWrite = State(initialValue: previewIsPerformingWrite)
+    }
+    #endif
+
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
     var body: some View {

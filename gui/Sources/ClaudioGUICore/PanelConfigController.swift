@@ -135,6 +135,8 @@ public final class PanelConfigController: ObservableObject {
         selectedSurface: HostSurfaceID? = nil,
         surfaceSoundIssue: String? = nil,
         eventRows: [EventRow] = [],
+        packCards: [PackCard] = [],
+        builtinPackIDs: Set<String> = [],
         selectedPackMetadata: SelectedPackMetadata? = nil,
         libraryPresentationState: SoundPackLibraryPresentationState = .ready,
         environment: AudioImportEnvironment
@@ -149,7 +151,7 @@ public final class PanelConfigController: ObservableObject {
         self.environment = environment
         self.soundPackLibrary = SoundPackLibrary(environment: environment)
         self.readSource = .directDiskFixture
-        self.builtinPackIDs = []
+        self.builtinPackIDs = builtinPackIDs
         self.librarySnapshot = nil
         self.libraryObservationTask = nil
         self.muteController = EventMuteController(configFile: configFile, lockFile: lockFile)
@@ -166,10 +168,11 @@ public final class PanelConfigController: ObservableObject {
         self.selectedSurface = selectedSurface
         self.surfaceSoundIssue = surfaceSoundIssue
         self.eventRows = eventRows
-        self.packCards = []
-        self.packSectionState = .noPacks
-        self.selectedPackIsBuiltinReadOnly = false
-        self.selectedPackMetadata = selectedPackMetadata
+        self.packCards = packCards
+        self.packSectionState = packCards.isEmpty ? .noPacks : .pinned(packCards)
+        self.selectedPackIsBuiltinReadOnly = builtinPackIDs.contains(config.selectedPack)
+        self.selectedPackMetadata =
+            selectedPackMetadata
             ?? SelectedPackMetadata(id: config.selectedPack, name: nil)
         self.libraryPresentationState = libraryPresentationState
         self.packSwitchError = nil

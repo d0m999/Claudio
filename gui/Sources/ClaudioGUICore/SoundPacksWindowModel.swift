@@ -844,6 +844,8 @@ public final class SoundPacksWindowModel: ObservableObject {
         selectedAudioFiles: [PackAudioFile] = [],
         builtinPackIDs: Set<String> = [],
         starredPackIDs: [String] = [],
+        windowStatuses: [SoundPacksWindowStatus] = [],
+        factoryRestoreActionError: SoundPacksWindowFactoryRestoreActionError? = nil,
         libraryPresentationState: SoundPackLibraryPresentationState = .ready,
         environment: AudioImportEnvironment,
         refreshCoordinator: SoundPacksRefreshCoordinator
@@ -868,11 +870,11 @@ public final class SoundPacksWindowModel: ObservableObject {
         starredPacksError = nil
         audioActionError = nil
         factoryRestoreNotice = nil
-        factoryRestoreActionError = nil
+        self.factoryRestoreActionError = factoryRestoreActionError
         packForkNotice = nil
         packForkActionError = nil
         packUseActionError = nil
-        windowStatuses = []
+        self.windowStatuses = windowStatuses
         self.libraryPresentationState = libraryPresentationState
     }
     #endif

@@ -22,6 +22,10 @@ struct EventSettingsWindowView: View {
     let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     let onAudibilityInputsChanged: @MainActor () -> Void
     let onPackSwitch: @MainActor (PanelPackSwitchOutcome) -> Void
+    let onAnnouncement: (@MainActor (String) -> Void)?
+    #if DEBUG
+    var reloadsOnAppear = true
+    #endif
     let onAdoptAICue:
         @MainActor (AICueAdoptionRequest) async -> Result<
             AICueAdoptionOutcome, AICueAdoptionError
@@ -31,6 +35,7 @@ struct EventSettingsWindowView: View {
     @State private var previewPlayer = NSSoundAudioPreviewPlayer()
     @State private var handledFocusRequestRevision = 0
     @State private var playingCandidateID: UUID?
+    @State private var playingCandidateTitle: String?
     @State private var showsCredentialSheet = false
     @State private var previewAllTask: Task<Void, Never>?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
@@ -95,7 +100,13 @@ struct EventSettingsWindowView: View {
                 scopes: scopes.map(\.scope))
         }
         .onAppear {
+            #if DEBUG
+            if reloadsOnAppear {
+                model.reload()
+            }
+            #else
             model.reload()
+            #endif
             reconcileScopeSelection()
         }
         .onChange(of: selection.route) { _ in reconcileScopeSelection() }
@@ -121,9 +132,7 @@ struct EventSettingsWindowView: View {
         }
         .onDisappear {
             stopAllPreviews()
-            previewPlayer.stop()
-            playingCandidateID = nil
-            aiCueViewModel.endSession()
+            closeAICueComposer()
         }
     }
 
@@ -666,8 +675,8 @@ struct EventSettingsWindowView: View {
     }
 
     private func playPreview(_ event: Event) {
+        stopCandidatePreview()
         stopAllPreviews()
-        playingCandidateID = nil
         guard
             let row = model.eventRows.first(where: { $0.event == event }),
             let file = eventPreviewFileURL(
@@ -685,22 +694,32 @@ struct EventSettingsWindowView: View {
         guard case .eligible(let target) = eligibility else { return }
         previewPlayer.stop()
         playingCandidateID = nil
+        playingCandidateTitle = nil
         aiCueViewModel.begin(target: target)
     }
 
     private func closeAICueComposer() {
+        let hadSession = aiCueViewModel.target != nil
+        let clearedCandidates = aiCueViewModel.generation != nil
         stopCandidatePreview()
         aiCueViewModel.endSession()
+        if hadSession {
+            onAnnouncement?(
+                l10n.text(
+                    clearedCandidates
+                        ? .aiCueComposerClosedCandidatesCleared
+                        : .aiCueComposerClosed))
+        }
     }
 
     private func previewAICueCandidate(_ candidate: AICueCandidate) {
+        let togglesCurrentCandidate = playingCandidateID == candidate.id
+        stopCandidatePreview()
         stopAllPreviews()
-        if playingCandidateID == candidate.id {
-            stopCandidatePreview()
+        if togglesCurrentCandidate {
             return
         }
         guard nonEmptyRegularFileExists(at: candidate.asset.fileURL) else {
-            stopCandidatePreview()
             aiCueViewModel.reportCandidateUnavailable()
             return
         }
@@ -708,11 +727,19 @@ struct EventSettingsWindowView: View {
             fileAt: candidate.asset.fileURL,
             volume: Float(previewVolume(for: model.config)))
         playingCandidateID = candidate.id
+        let title = localizedAICueCandidateTitle(
+            candidate.variant,
+            language: languageStore.language)
+        playingCandidateTitle = title
+        onAnnouncement?(
+            l10n.format(
+                .aiCueCandidatePlaybackStarted,
+                title as NSString))
         let candidateID = candidate.id
         let resetDelay = Double(candidate.durationMilliseconds) / 1_000 + 0.15
         DispatchQueue.main.asyncAfter(deadline: .now() + resetDelay) {
             guard playingCandidateID == candidateID else { return }
-            playingCandidateID = nil
+            stopCandidatePreview()
         }
     }
 
@@ -722,8 +749,16 @@ struct EventSettingsWindowView: View {
     }
 
     private func stopCandidatePreview() {
+        let stoppedCandidateTitle = playingCandidateTitle
         previewPlayer.stop()
         playingCandidateID = nil
+        playingCandidateTitle = nil
+        if let stoppedCandidateTitle {
+            onAnnouncement?(
+                l10n.format(
+                    .aiCueCandidatePlaybackStopped,
+                    stoppedCandidateTitle as NSString))
+        }
     }
 
     private func aiCueGenerationIsEnabled(_ eligibility: AICueAdoptionEligibility) -> Bool {

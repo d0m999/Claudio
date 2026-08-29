@@ -161,6 +161,23 @@ func runAICueDomainSuites() {
             },
             "不安全 packID 必须在采用前拒绝")
     }
+
+    suite("AI 候选 VoiceOver：播放与停止动作共享本地化候选身份") {
+        expect(
+            localizedAICueCandidatePreviewAccessibilityLabel(
+                variant: .clear,
+                duration: "1.6 seconds",
+                isPlaying: false,
+                language: .english) == "Play candidate A · Clear · 1.6 seconds",
+            "未播放候选必须公告 Play、候选身份与时长")
+        expect(
+            localizedAICueCandidatePreviewAccessibilityLabel(
+                variant: .brisk,
+                duration: "1.7 秒",
+                isPlaying: true,
+                language: .zhHans) == "停止候选 B · 轻快 · 1.7 秒",
+            "正在播放候选必须公告停止动作、候选身份与时长")
+    }
 }
 
 private func throwsAICueValidation(_ body: () throws -> Void) -> Bool {

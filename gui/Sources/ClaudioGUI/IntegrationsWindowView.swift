@@ -207,18 +207,19 @@ struct IntegrationsWindowView: View {
     private func sideBySideContent(width: CGFloat) -> some View {
         let inspectorWidth = max(300, width * 0.39)
         let capabilityWidth = max(0, width - inspectorWidth - 41)
-        return HStack(spacing: 0) {
-            ScrollView(.vertical, showsIndicators: true) {
-                capabilitySection(availableWidth: capabilityWidth).padding(20)
+        return ScrollView(.vertical, showsIndicators: true) {
+            HStack(alignment: .top, spacing: 0) {
+                capabilitySection(availableWidth: capabilityWidth)
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                Divider()
+                inspectorSection
+                    .padding(20)
+                    .frame(width: inspectorWidth, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            ScrollView(.vertical, showsIndicators: true) {
-                inspectorSection.padding(20)
-            }
-            .frame(width: inspectorWidth)
-            .frame(maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("integrations.main-scroll")
     }
 
     private func stackedContent(width: CGFloat) -> some View {
@@ -231,6 +232,7 @@ struct IntegrationsWindowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
         }
+        .accessibilityIdentifier("integrations.main-scroll")
     }
 
     private var sourceSummary: some View {

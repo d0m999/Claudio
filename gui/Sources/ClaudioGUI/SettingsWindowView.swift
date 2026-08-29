@@ -299,6 +299,7 @@ struct SettingsWindowView: View {
                 onConfigureSound: { model.request(.sounds($0)) },
                 onAudibilityInputsChanged: onEventAudibilityInputsChanged,
                 onPackSwitch: onEventPackSwitch,
+                onAnnouncement: onAnnouncement,
                 onAdoptAICue: onAdoptAICue)
         } else if destination == .sounds,
             model.resolution.failure == nil,

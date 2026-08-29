@@ -153,4 +153,44 @@ func runSoundPacksEditorOwnerSuites() {
                 "同一 emission 的两个 observer 必须共享决定，A→B→A 则重新计算")
         }
     }
+
+    suite("SoundPacks gallery restore failure：retry status 与 model lifecycle 共享身份") {
+        let packID = "minimal-chime"
+        let retryStatus = SoundPacksWindowStatus(
+            kind: .factoryRestore,
+            severity: .failure,
+            revision: 101,
+            action: "恢复出厂声音",
+            message: "发布失败",
+            recovery: .retryFactoryRestores(packIDs: [packID]))
+        let retryError = SoundPacksWindowFactoryRestoreActionError.restore(
+            packID: packID,
+            error: .publishFailed(reason: "发布失败", salvaged: nil),
+            retainedSalvages: [])
+        let model = SoundPacksWindowModel(
+            previewConfig: ClaudioConfig(selectedPack: packID),
+            packCards: [
+                PackCard(
+                    id: packID,
+                    name: "Minimal Chime",
+                    isCC0: true,
+                    presentEvents: Set(Event.allCases),
+                    state: .complete,
+                    isSelected: true)
+            ],
+            selectedPackID: packID,
+            selectedEventRows: [],
+            builtinPackIDs: [packID],
+            windowStatuses: [retryStatus],
+            factoryRestoreActionError: retryError,
+            environment: makeAudioImportEnvironment(
+                userPacksDirectory: URL(fileURLWithPath: "/dev/null/claudio-preview-packs")),
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+
+        expect(
+            model.factoryRestoreRetryPackID == packID
+                && model.factoryRestoreRetryPackIDs == [packID]
+                && model.selectedPackCanRestoreFactory,
+            "可见 Retry、失败 lifecycle 与 builtin selection 必须指向同一 pack")
+    }
 }

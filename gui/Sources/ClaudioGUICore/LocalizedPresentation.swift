@@ -493,3 +493,27 @@ public func localizedSetupNoticeMessage(
         return l10n.format(.onboardingNoticeRepaired, removed, selected)
     }
 }
+
+public func localizedAICueCandidateTitle(
+    _ variant: AICueVariant,
+    language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    switch variant {
+    case .clear: return l10n.text(.aiCueCandidateClear)
+    case .brisk: return l10n.text(.aiCueCandidateBrisk)
+    case .restrained: return l10n.text(.aiCueCandidateRestrained)
+    }
+}
+
+public func localizedAICueCandidatePreviewAccessibilityLabel(
+    variant: AICueVariant,
+    duration: String,
+    isPlaying: Bool,
+    language: ClaudioAppLanguage
+) -> String {
+    let l10n = ClaudioL10n(language: language)
+    let title = localizedAICueCandidateTitle(variant, language: language)
+    let action = isPlaying ? ClaudioL10nKey.aiCueCandidateStopAction : .aiCueCandidatePlayAction
+    return l10n.format(action, title) + " · " + duration
+}

@@ -115,6 +115,33 @@ func runPreviewFixturesSuites() {
             "settingsExperience.about.ready",
             "settingsExperience.about.empty",
             "settingsExperience.about.write-failed",
+            "aiCueGallery.elevenlabs.missing",
+            "aiCueGallery.elevenlabs.verified",
+            "aiCueGallery.minimax.rejected",
+            "aiCueGallery.qwen-singapore.deferred",
+            "aiCueGallery.qwen-beijing.pending-replacement",
+            "aiCueGallery.qwen-beijing.unavailable",
+            "aiCueGallery.elevenlabs.probing",
+            "aiCueGallery.qwen-singapore.saving",
+            "aiCueGallery.qwen-beijing.updating-replacement",
+            "aiCueGallery.minimax.deleting",
+            "aiCueGallery.elevenlabs.probe-failure",
+            "aiCueGallery.qwen-singapore.save-failure",
+            "aiCueGallery.minimax.delete-failure",
+            "aiCueGallery.composer.editing",
+            "aiCueGallery.composer.generating",
+            "aiCueGallery.composer.candidates",
+            "aiCueGallery.composer.playing",
+            "aiCueGallery.composer.adopting",
+            "aiCueGallery.composer.applied",
+            "aiCueGallery.composer.unsupported-modality",
+            "aiCueGallery.composer.unsupported-locale",
+            "aiCueGallery.composer.credential-required",
+            "aiCueGallery.composer.provider-failure",
+            "aiCueGallery.composer.validation-failure",
+            "aiCueGallery.composer.display-name-failure",
+            "aiCueGallery.composer.target-drift",
+            "aiCueGallery.composer.adoption-rollback",
             // 第六族（PLAN-MASTER-VOLUME.md D33/D38）：主音量控件行的展示态。少了它，写失败之后的
             // 「行 + 错误行」组合帧——D16「音量 0 = 全局静音」这类最难手动复现的态——落地前零仓库内
             // 视觉验证，而这条断言仍会全绿（因为其余五族依然完美覆盖它们自己的 case）。
@@ -528,6 +555,54 @@ func runPreviewFixturesSuites() {
                 && PreviewFixtures.SettingsExperienceScenario.notificationsStale.profile
                     .notifications == .stale,
             "gallery scenario 名必须映射真实 fixture 语义，stale 必须保留旧快照而非冒充 unreadable")
+    }
+
+    suite("PreviewFixtures.aiCueGalleryScenarios pins all profiles and visible lifecycle states") {
+        let scenarios = PreviewFixtures.aiCueGalleryScenarios
+        expect(
+            scenarios == PreviewFixtures.AICueGalleryScenario.allCases,
+            "AI Cue gallery 必须由单一 enum roster 完整驱动")
+        expect(
+            Set(scenarios.map(\.providerProfileID))
+                == [
+                    .elevenLabsGlobal, .miniMaxGlobal, .qwenSingapore, .qwenBeijing,
+                ],
+            "AI Cue gallery 必须覆盖四个 allowlisted profile 与两个独立 Qwen region")
+        expect(
+            Set(scenarios.map(\.rawValue)).isSuperset(
+                of: [
+                    "elevenlabs.missing", "elevenlabs.verified", "minimax.rejected",
+                    "qwen-singapore.deferred", "qwen-beijing.pending-replacement",
+                    "qwen-beijing.unavailable", "composer.editing", "composer.generating",
+                    "composer.candidates", "composer.playing", "composer.adopting",
+                    "composer.applied", "composer.unsupported-modality",
+                    "composer.unsupported-locale", "composer.provider-failure",
+                    "composer.validation-failure", "composer.display-name-failure",
+                    "elevenlabs.probe-failure", "qwen-singapore.save-failure",
+                    "minimax.delete-failure", "composer.target-drift",
+                    "composer.adoption-rollback",
+                ]),
+            "AI Cue gallery 不得漏掉凭据、播放/采用或失败族")
+        expect(
+            PreviewFixtures.AICueGalleryScenario.playing.playingCandidateID != nil
+                && PreviewFixtures.AICueGalleryScenario.candidates.playingCandidateID == nil,
+            "playing 必须是候选状态上的正交视觉事实，不能伪造第二个 composer phase")
+        expect(
+            PreviewFixtures.AICueGalleryScenario.qwenBeijingPendingReplacement
+                .previewState.credentialStatus
+                == .stored(verification: .verified, hasPendingReplacement: true),
+            "Qwen pending replacement 必须保留 active verified 与 pending 两条事实")
+        expect(
+            [
+                PreviewFixtures.AICueGalleryScenario.elevenLabsProbeFailure,
+                .qwenSingaporeSaveFailure,
+                .miniMaxDeleteFailure,
+            ].allSatisfy { $0.previewState.credentialFailure != nil },
+            "credential probe/save/delete failure 必须各有真实 credentialFailure fixture")
+        expect(
+            PreviewFixtures.AICueGalleryScenario.displayNameFailure.previewState.failure
+                == .displayName(.displayNameTooLong(maximumCharacters: 40)),
+            "候选采用前的 display-name validation failure 必须进入 gallery")
     }
 
     // MARK: - All-product integration scenarios

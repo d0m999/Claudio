@@ -2210,7 +2210,7 @@ func runViewWiringSuites() {
             "共享组件必须保留 24×24、双声波、静音弱化与斜线几何")
     }
 
-    suite("全状态画廊：声音包窗口用生产视图覆盖内容与库可用性七态，且预览不读用户磁盘") {
+    suite("全状态画廊：声音包窗口用生产视图覆盖复杂库与失败态，且预览不读用户磁盘") {
         guard
             let gallery = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowStateGalleryView.swift"),
@@ -2230,8 +2230,13 @@ func runViewWiringSuites() {
                 && gallery.contains("libraryState: .refreshFailed")
                 && gallery.contains("loadingModel")
                 && gallery.contains("loadFailedModel")
-                && gallery.components(separatedBy: "galleryFrame(").count - 1 == 7,
-            "声音包画廊必须渲染生产窗口，并覆盖内置、自有、空库及四种非 ready 库状态")
+                && gallery.contains("largeLibraryModel")
+                && gallery.contains("brokenPackModel")
+                && gallery.contains("previewIsPerformingWrite: true")
+                && gallery.contains("restoreFailureStatus")
+                && gallery.contains("deletionFailureStatus")
+                && gallery.components(separatedBy: "galleryFrame(").count - 1 == 12,
+            "声音包画廊必须渲染生产窗口，并覆盖 100-pack、broken、写入中、恢复/删除失败及 SWR 状态")
         expect(
             rootGallery.contains("SoundPacksWindowStateGalleryView(language: language)"),
             "全产品根画廊必须实际挂入声音包窗口画廊")

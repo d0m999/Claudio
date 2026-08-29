@@ -366,6 +366,13 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueCandidateBrisk: Self = "ai-cue.candidate.brisk"
     public static let aiCueCandidateRestrained: Self = "ai-cue.candidate.restrained"
     public static let aiCueCandidateDuration: Self = "ai-cue.candidate.duration"
+    public static let aiCueCandidatePlayAction: Self = "ai-cue.candidate.play-action"
+    public static let aiCueCandidateStopAction: Self = "ai-cue.candidate.stop-action"
+    public static let aiCueCandidatePlaybackStarted: Self = "ai-cue.candidate.playback-started"
+    public static let aiCueCandidatePlaybackStopped: Self = "ai-cue.candidate.playback-stopped"
+    public static let aiCueComposerClosed: Self = "ai-cue.composer.closed"
+    public static let aiCueComposerClosedCandidatesCleared: Self =
+        "ai-cue.composer.closed-candidates-cleared"
     public static let aiCueUseForEvent: Self = "ai-cue.use-for-event"
     public static let aiCueRegenerate: Self = "ai-cue.regenerate"
     public static let aiCueAppliedTitle: Self = "ai-cue.applied.title"
@@ -1069,7 +1076,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .aiCueDescriptionHelp, .aiCueDescriptionPlaceholder, .aiCueGenerateCandidates,
         .aiCueGenerating, .aiCueDescriptionSummary, .aiCueModifyDescription, .aiCueNameLabel,
         .aiCueNameHelp, .aiCueCandidateClear, .aiCueCandidateBrisk, .aiCueCandidateRestrained,
-        .aiCueCandidateDuration, .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle,
+        .aiCueCandidateDuration, .aiCueCandidatePlayAction, .aiCueCandidateStopAction,
+        .aiCueCandidatePlaybackStarted, .aiCueCandidatePlaybackStopped, .aiCueComposerClosed,
+        .aiCueComposerClosedCandidatesCleared,
+        .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle,
         .aiCueAppliedMessage,
         .aiCueErrorDescriptionRequired, .aiCueErrorDescriptionTooLong,
         .aiCueErrorSpeechNeedsText, .aiCueErrorUnsupportedModality,

@@ -555,6 +555,16 @@ func runSettingsNavigationSuites() {
                 && gallery.contains("experienceScenario: scenario"),
             "基础六页 gallery 必须用 production Settings view 覆盖双语与四档文字")
         expect(
+            gallery.contains("EventSettingsLayoutGalleryView()")
+                && gallery.contains("AICueExperienceGalleryView()")
+                && gallery.contains("ForEach(PreviewFixtures.aiCueGalleryScenarios)")
+                && gallery.contains("ForEach(SettingsGalleryAppearance.allCases)")
+                && gallery.contains("EventSettingsWindowView(")
+                && gallery.contains("EventSettingsAICueServiceCard(")
+                && gallery.contains("EventSettingsAICueCredentialSheet(")
+                && gallery.contains("EventSettingsAICueComposerView("),
+            "#101 复杂目的页 gallery 必须渲染生产 Events/AI 视图与完整 fixture roster")
+        expect(
             view.contains("SettingsSectionCard")
                 && view.contains("settingsSidebarWidth(")
                 && view.contains(".onMoveCommand")

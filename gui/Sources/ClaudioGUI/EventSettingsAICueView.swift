@@ -75,10 +75,19 @@ struct EventSettingsAICueServiceCard: View {
                 .accessibilityIdentifier("event-settings.ai-cue.provider-capabilities")
 
             HStack(spacing: 10) {
-                Text(status.text)
-                    .font(ClaudioTheme.font(.caption).weight(.medium))
-                    .foregroundColor(status.color)
-                    .accessibilityIdentifier("event-settings.ai-cue.credential-status")
+                HStack(spacing: 6) {
+                    Image(systemName: status.symbol)
+                        .foregroundColor(status.symbolColor)
+                        .accessibilityHidden(true)
+                    Text(status.text)
+                        .font(ClaudioTheme.font(.caption).weight(.medium))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(
+                    l10n.text(viewModel.providerProfile.displayNameKey) + " · " + status.text
+                )
+                .accessibilityIdentifier("event-settings.ai-cue.credential-status")
                 Spacer(minLength: 8)
                 Button(manageButtonTitle, action: onManageCredential)
                     .buttonStyle(.bordered)
@@ -98,34 +107,57 @@ struct EventSettingsAICueServiceCard: View {
         .accessibilityIdentifier("event-settings.ai-cue.service")
     }
 
-    private var statusPresentation: (text: String, color: Color) {
+    private var statusPresentation: (text: String, symbol: String, symbolColor: Color) {
         if viewModel.credentialActivity != .idle {
             return (
                 l10n.text(aiCueCredentialActivityKey(viewModel.credentialActivity)),
+                "clock.arrow.circlepath",
                 ClaudioTheme.secondaryText(colorScheme)
             )
         }
         switch viewModel.credentialStatus {
         case nil:
-            return (l10n.text(.aiCueServiceChecking), ClaudioTheme.secondaryText(colorScheme))
+            return (
+                l10n.text(.aiCueServiceChecking),
+                "clock.arrow.circlepath",
+                ClaudioTheme.secondaryText(colorScheme)
+            )
         case .missing:
-            return (l10n.text(.aiCueServiceMissing), ClaudioTheme.secondaryText(colorScheme))
+            return (
+                l10n.text(.aiCueServiceMissing),
+                "key.slash",
+                ClaudioTheme.secondaryText(colorScheme)
+            )
         case .stored(_, true):
             return (
                 l10n.text(.aiCueServicePendingReplacement),
+                "arrow.triangle.2.circlepath",
                 ClaudioTheme.secondaryText(colorScheme)
             )
         case .stored(.verified, false):
-            return (l10n.text(.aiCueServiceStoredVerified), ClaudioTheme.success(colorScheme))
+            return (
+                l10n.text(.aiCueServiceStoredVerified),
+                "checkmark.circle.fill",
+                ClaudioTheme.success(colorScheme)
+            )
         case .stored(.deferred, false):
             return (
                 l10n.text(.aiCueServiceStoredDeferred),
+                "clock.badge.checkmark",
                 ClaudioTheme.secondaryText(colorScheme)
             )
         case .stored(.rejected, false):
-            return (l10n.text(.aiCueServiceStoredRejected), ClaudioTheme.error(colorScheme))
+            return (
+                l10n.text(.aiCueServiceStoredRejected),
+                "xmark.circle.fill",
+                ClaudioTheme.error(colorScheme)
+            )
         case .unavailable:
-            return (l10n.text(.aiCueServiceUnavailable), ClaudioTheme.error(colorScheme))
+            return (
+                l10n.text(.aiCueServiceUnavailable),
+                "xmark.circle.fill",
+                ClaudioTheme.error(colorScheme)
+            )
         }
     }
 
@@ -381,9 +413,13 @@ struct EventSettingsAICueComposerView: View {
                 "event-settings.ai-cue.candidate.\(candidate.variant.rawValue).preview")
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(candidateTitle(candidate.variant))
-                    .font(ClaudioTheme.font(.body).weight(.semibold))
-                    .foregroundColor(ClaudioTheme.text(colorScheme))
+                Text(
+                    localizedAICueCandidateTitle(
+                        candidate.variant,
+                        language: languageStore.language)
+                )
+                .font(ClaudioTheme.font(.body).weight(.semibold))
+                .foregroundColor(ClaudioTheme.text(colorScheme))
                 Text(candidateDuration(candidate))
                     .font(ClaudioTheme.font(.caption))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
@@ -443,7 +479,7 @@ struct EventSettingsAICueComposerView: View {
                 .accessibilityHidden(true)
             Text(message)
                 .font(ClaudioTheme.font(.caption))
-                .foregroundColor(ClaudioTheme.error(colorScheme))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -453,14 +489,6 @@ struct EventSettingsAICueComposerView: View {
         .accessibilityIdentifier("event-settings.ai-cue.error")
     }
 
-    private func candidateTitle(_ variant: AICueVariant) -> String {
-        switch variant {
-        case .clear: return l10n.text(.aiCueCandidateClear)
-        case .brisk: return l10n.text(.aiCueCandidateBrisk)
-        case .restrained: return l10n.text(.aiCueCandidateRestrained)
-        }
-    }
-
     private func candidateDuration(_ candidate: AICueCandidate) -> String {
         let seconds = Double(candidate.durationMilliseconds) / 1_000
         let value = String(format: "%.1f", seconds)
@@ -468,7 +496,11 @@ struct EventSettingsAICueComposerView: View {
     }
 
     private func candidatePreviewLabel(_ candidate: AICueCandidate) -> String {
-        candidateTitle(candidate.variant) + " · " + candidateDuration(candidate)
+        localizedAICueCandidatePreviewAccessibilityLabel(
+            variant: candidate.variant,
+            duration: candidateDuration(candidate),
+            isPlaying: playingCandidateID == candidate.id,
+            language: languageStore.language)
     }
 }
 
@@ -634,10 +666,16 @@ struct EventSettingsAICueCredentialSheet: View {
     }
 
     private func credentialErrorNotice(_ message: String) -> some View {
-        Text(message)
-            .font(ClaudioTheme.font(.caption))
-            .foregroundColor(ClaudioTheme.error(colorScheme))
-            .accessibilityIdentifier("event-settings.ai-cue.credential-error")
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundColor(ClaudioTheme.error(colorScheme))
+                .accessibilityHidden(true)
+            Text(message)
+                .font(ClaudioTheme.font(.caption))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("event-settings.ai-cue.credential-error")
     }
 }
 
