@@ -532,7 +532,7 @@ func runSoundPacksWindowAccessibilitySuites() {
         {
             scannedSources.append(
                 (name: "ClaudioGUICore/SoundPacksEditorOwner.swift",
-                 code: strippingComments(source).code))
+                    code: strippingComments(source).code))
         } else {
             expect(false, "读不到共享 editor owner")
         }
