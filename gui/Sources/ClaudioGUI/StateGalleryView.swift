@@ -105,6 +105,7 @@ import SwiftUI
         @StateObject private var loginItemSettings: LoginItemSettingsModel
         @StateObject private var usageSettings: UsageSettingsModel
         @StateObject private var globalShortcutSettings: GlobalShortcutSettingsModel
+        @StateObject private var aboutSettings: AboutSettingsModel
 
         init(
             route: SettingsRoute,
@@ -178,6 +179,13 @@ import SwiftUI
                         read: { _ in nil },
                         persist: { _, _ in }),
                     actionHandler: { _ in }))
+            _aboutSettings = StateObject(
+                wrappedValue: AboutSettingsModel(
+                    bundleFacts: PreviewFixtures.aboutBundleFacts,
+                    resources: PreviewFixtures.aboutBundledResources,
+                    pathFacts: PreviewFixtures.aboutPathFacts,
+                    surfaceFacts: PreviewFixtures.aboutSurfaceFacts,
+                    actions: AboutSettingsActions(copy: { _ in true }, open: { _ in true })))
         }
 
         var body: some View {
@@ -187,7 +195,8 @@ import SwiftUI
                 dynamicQuietPolicy: dynamicQuietPolicy,
                 loginItemSettings: loginItemSettings,
                 usageSettings: usageSettings,
-                globalShortcutSettings: globalShortcutSettings)
+                globalShortcutSettings: globalShortcutSettings,
+                aboutSettings: aboutSettings)
                 .frame(
                     width: SettingsWindowGeometry.minimumWidth,
                     height: SettingsWindowGeometry.minimumHeight)

@@ -16,6 +16,7 @@ struct SettingsWindowView: View {
     @ObservedObject var loginItemSettings: LoginItemSettingsModel
     @ObservedObject var usageSettings: UsageSettingsModel
     @ObservedObject var globalShortcutSettings: GlobalShortcutSettingsModel
+    @ObservedObject var aboutSettings: AboutSettingsModel
     let soundPacksEditorOwner: SoundPacksEditorOwner?
     let eventSettingsModel: PanelConfigController?
     let eventSettingsSelection: EventSettingsWindowSelection?
@@ -45,6 +46,7 @@ struct SettingsWindowView: View {
         loginItemSettings: LoginItemSettingsModel,
         usageSettings: UsageSettingsModel,
         globalShortcutSettings: GlobalShortcutSettingsModel,
+        aboutSettings: AboutSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
         eventSettingsModel: PanelConfigController? = nil,
         eventSettingsSelection: EventSettingsWindowSelection? = nil,
@@ -68,6 +70,7 @@ struct SettingsWindowView: View {
         self.loginItemSettings = loginItemSettings
         self.usageSettings = usageSettings
         self.globalShortcutSettings = globalShortcutSettings
+        self.aboutSettings = aboutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -263,6 +266,11 @@ struct SettingsWindowView: View {
                     } else if destination == .shortcuts {
                         ShortcutSettingsView(
                             model: globalShortcutSettings,
+                            preferences: preferences,
+                            focusedTarget: $focusedTarget)
+                    } else if destination == .about {
+                        AboutSettingsView(
+                            model: aboutSettings,
                             preferences: preferences,
                             focusedTarget: $focusedTarget)
                     } else {

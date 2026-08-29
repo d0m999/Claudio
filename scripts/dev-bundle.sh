@@ -115,6 +115,8 @@ assemble_dev_bundle() {
     ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
     bash "$repo_root/scripts/copy-bundled-packs.sh" "$repo_root/packs" \
         "$APP/Contents/Resources/packs"
+    cp "$repo_root/LICENSE" "$APP/Contents/Resources/LICENSE"
+    cp "$repo_root/PRIVACY.md" "$APP/Contents/Resources/PRIVACY.md"
     cp "$repo_root/assets/branding/claudi0.icns" "$APP/Contents/Resources/claudi0.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -124,6 +126,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
   <key>CFBundleName</key><string>claudi0</string>
   <key>CFBundleDisplayName</key><string>claudi0</string>
+  <key>ClaudioBrandName</key><string>Orbit Zero</string>
   <key>CFBundleIdentifier</key><string>com.claudio.app</string>
   <key>CFBundleVersion</key><string>$BUNDLE_VERSION</string>
   <key>CFBundleShortVersionString</key><string>$BUNDLE_VERSION</string>

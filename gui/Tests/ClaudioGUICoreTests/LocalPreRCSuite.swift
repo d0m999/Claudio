@@ -703,6 +703,8 @@ func runLocalPreRCSuites() {
             writeFixture(
                 Data("fixture-icon".utf8),
                 to: repository.appendingPathComponent("assets/branding/claudi0.icns"))
+            writeFixture("fixture-license", to: repository.appendingPathComponent("LICENSE"))
+            writeFixture("fixture-privacy", to: repository.appendingPathComponent("PRIVACY.md"))
             writeFixture(sentinel, to: externalAppSentinel)
             fixture.installExecutable(
                 #"""

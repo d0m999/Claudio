@@ -3226,6 +3226,156 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关于" } }
       }
     },
+    "settings.about.unknown" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unknown" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知" } }
+      }
+    },
+    "settings.about.brand" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Brand" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "品牌" } }
+      }
+    },
+    "settings.about.product" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "App" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用" } }
+      }
+    },
+    "settings.about.version" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Version" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本" } }
+      }
+    },
+    "settings.about.build" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Build" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "构建" } }
+      }
+    },
+    "settings.about.architecture" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Architecture" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "架构" } }
+      }
+    },
+    "settings.about.minimum-macos" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Minimum macOS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最低 macOS" } }
+      }
+    },
+    "settings.about.current-macos" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current macOS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前 macOS" } }
+      }
+    },
+    "settings.about.copy-version" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy Version Information" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制版本信息" } }
+      }
+    },
+    "settings.about.copy-version.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copies the displayed app and system facts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制当前显示的应用与系统事实" } }
+      }
+    },
+    "settings.about.resources.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Resources" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "资源" } }
+      }
+    },
+    "settings.about.resources.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the documents included with this copy of claudi0." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开这份 claudi0 实际随包附带的文档。" } }
+      }
+    },
+    "settings.about.resource.open-source-license" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open-Source License" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开源许可" } }
+      }
+    },
+    "settings.about.resource.sound-attribution" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Attribution" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音归属" } }
+      }
+    },
+    "settings.about.resource.privacy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Privacy Statement" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐私说明" } }
+      }
+    },
+    "settings.about.resource.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ is missing from this app." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前应用缺少“%@”。" } }
+      }
+    },
+    "settings.about.resource.open.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Opens %@ from this app's bundled resources" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从当前应用的随包资源中打开“%@”" } }
+      }
+    },
+    "settings.about.diagnostics.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Safe Diagnostics" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "安全诊断" } }
+      }
+    },
+    "settings.about.diagnostics.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Contains only version, architecture, macOS, published Surface states, and whether fixed app resources exist. It never includes path values or user content." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只包含版本、架构、macOS、已发布 Surface 的语义状态，以及固定应用资源是否存在；绝不包含路径值或用户内容。" } }
+      }
+    },
+    "settings.about.diagnostics.copy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy Safe Diagnostics" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制安全诊断" } }
+      }
+    },
+    "settings.about.diagnostics.copy.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copies exactly the redacted summary shown above" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只复制上方显示的脱敏摘要" } }
+      }
+    },
+    "settings.about.feedback.version-copied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Version information copied." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制版本信息。" } }
+      }
+    },
+    "settings.about.feedback.diagnostics-copied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Safe diagnostics copied." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制安全诊断。" } }
+      }
+    },
+    "settings.about.failure.clipboard" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not write to the clipboard." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法写入剪贴板。" } }
+      }
+    },
+    "settings.about.failure.open" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not open %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法打开“%@”。" } }
+      }
+    },
     "settings.destination.display" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Display" } },

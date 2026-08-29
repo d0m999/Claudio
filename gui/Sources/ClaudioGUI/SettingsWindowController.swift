@@ -19,6 +19,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let loginItemSettings: LoginItemSettingsModel
     private let usageSettings: UsageSettingsModel
     private let globalShortcutSettings: GlobalShortcutSettingsModel
+    private let aboutSettings: AboutSettingsModel
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private let soundPacksEditorOwner: SoundPacksEditorOwner
     private let eventSettingsModel: PanelConfigController
@@ -46,6 +47,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var soundPackSelectionAnnouncementCancellable: AnyCancellable?
     private var soundPackLibraryAnnouncementCancellable: AnyCancellable?
     private var soundPackStatusAnnouncementCancellable: AnyCancellable?
+    private var aboutSurfaceCancellable: AnyCancellable?
 
     init(
         preferences: ClaudioPreferences,
@@ -79,6 +81,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
         self.onAdoptAICue = onAdoptAICue
         dynamicQuietObserver = DynamicQuietSystemObserver()
+        aboutSettings = makeSystemAboutSettingsModel(
+            surfaceFacts: hostIntegrations.safeSurfaceFacts)
         model = SettingsWindowPresentationModel(
             preferences: preferences,
             availability: settingsRouteAvailability(
@@ -145,6 +149,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             }
 
         installSoundPackAnnouncementObservers()
+        aboutSurfaceCancellable = hostIntegrations.$safeSurfaceFacts
+            .removeDuplicates()
+            .sink { [weak self] surfaceFacts in
+                MainActor.assumeIsolated {
+                    self?.aboutSettings.replaceSurfaceFacts(surfaceFacts)
+                }
+            }
     }
 
     func showWindow(
@@ -242,6 +253,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             loginItemSettings: loginItemSettings,
             usageSettings: usageSettings,
             globalShortcutSettings: globalShortcutSettings,
+            aboutSettings: aboutSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: eventSettingsModel,
             eventSettingsSelection: eventSettingsSelection,

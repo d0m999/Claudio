@@ -63,6 +63,7 @@ func suite(_ name: String, _ body: @MainActor () async -> Void) async {
 
 runOnboardingStateSuites()
 runLocalizationSuites()
+runAboutInformationSuites()
 runLoginItemManagementSuites()
 runOnboardingCopySuites()
 runOnboardingDetectorSuites()

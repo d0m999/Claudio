@@ -9,7 +9,7 @@ public extension SettingsDestination {
     /// this list when their real views ship; DEBUG galleries inject `allCases` explicitly.
     static let availableCases: [SettingsDestination] = [
         .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds, .usage,
-        .shortcuts,
+        .shortcuts, .about,
     ]
 }
 

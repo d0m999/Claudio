@@ -424,6 +424,37 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let settingsDestinationUsage: Self = "settings.destination.usage"
     public static let settingsDestinationShortcuts: Self = "settings.destination.shortcuts"
     public static let settingsDestinationAbout: Self = "settings.destination.about"
+    public static let settingsAboutUnknown: Self = "settings.about.unknown"
+    public static let settingsAboutBrand: Self = "settings.about.brand"
+    public static let settingsAboutProduct: Self = "settings.about.product"
+    public static let settingsAboutVersion: Self = "settings.about.version"
+    public static let settingsAboutBuild: Self = "settings.about.build"
+    public static let settingsAboutArchitecture: Self = "settings.about.architecture"
+    public static let settingsAboutMinimumMacOS: Self = "settings.about.minimum-macos"
+    public static let settingsAboutCurrentMacOS: Self = "settings.about.current-macos"
+    public static let settingsAboutCopyVersion: Self = "settings.about.copy-version"
+    public static let settingsAboutCopyVersionHint: Self = "settings.about.copy-version.hint"
+    public static let settingsAboutResourcesTitle: Self = "settings.about.resources.title"
+    public static let settingsAboutResourcesDescription: Self =
+        "settings.about.resources.description"
+    public static let settingsAboutResourceOpenSourceLicense: Self =
+        "settings.about.resource.open-source-license"
+    public static let settingsAboutResourceSoundAttribution: Self =
+        "settings.about.resource.sound-attribution"
+    public static let settingsAboutResourcePrivacy: Self = "settings.about.resource.privacy"
+    public static let settingsAboutResourceMissing: Self = "settings.about.resource.missing"
+    public static let settingsAboutOpenResourceHint: Self = "settings.about.resource.open.hint"
+    public static let settingsAboutDiagnosticsTitle: Self = "settings.about.diagnostics.title"
+    public static let settingsAboutDiagnosticsDescription: Self =
+        "settings.about.diagnostics.description"
+    public static let settingsAboutCopyDiagnostics: Self = "settings.about.diagnostics.copy"
+    public static let settingsAboutCopyDiagnosticsHint: Self =
+        "settings.about.diagnostics.copy.hint"
+    public static let settingsAboutVersionCopied: Self = "settings.about.feedback.version-copied"
+    public static let settingsAboutDiagnosticsCopied: Self =
+        "settings.about.feedback.diagnostics-copied"
+    public static let settingsAboutClipboardFailed: Self = "settings.about.failure.clipboard"
+    public static let settingsAboutOpenFailed: Self = "settings.about.failure.open"
     public static let settingsIntegrationsManageEvents: Self =
         "settings.integrations.manage-events"
     public static let settingsIntegrationsManageEventsHint: Self =
@@ -1049,6 +1080,18 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
         .settingsDestinationShortcuts, .settingsDestinationAbout,
         .settingsIntegrationsManageEvents, .settingsIntegrationsManageEventsHint,
+        .settingsAboutUnknown, .settingsAboutBrand, .settingsAboutProduct,
+        .settingsAboutVersion, .settingsAboutBuild, .settingsAboutArchitecture,
+        .settingsAboutMinimumMacOS, .settingsAboutCurrentMacOS,
+        .settingsAboutCopyVersion, .settingsAboutCopyVersionHint,
+        .settingsAboutResourcesTitle, .settingsAboutResourcesDescription,
+        .settingsAboutResourceOpenSourceLicense, .settingsAboutResourceSoundAttribution,
+        .settingsAboutResourcePrivacy, .settingsAboutResourceMissing,
+        .settingsAboutOpenResourceHint, .settingsAboutDiagnosticsTitle,
+        .settingsAboutDiagnosticsDescription, .settingsAboutCopyDiagnostics,
+        .settingsAboutCopyDiagnosticsHint, .settingsAboutVersionCopied,
+        .settingsAboutDiagnosticsCopied, .settingsAboutClipboardFailed,
+        .settingsAboutOpenFailed,
         settingsDisplay.textSizeDescription, settingsDisplay.panelWidthTitle,
         settingsDisplay.panelWidthDescription, settingsDisplay.panelWidthAutomatic,
         settingsDisplay.panelWidthCompact, settingsDisplay.panelWidthRoomy,

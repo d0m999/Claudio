@@ -98,7 +98,7 @@ The same operations are available from Terminal:
 | `~/.codex/hooks.json` | Codex composable hooks; Claudio edits only owned entries |
 | `~/.codex/hooks.json.claudio.bak` | One-time pre-Claudio backup, when the source file existed |
 
-Claudio's runtime has no network client, telemetry, analytics, or cloud upload path. Sounds, configuration, receipts, and logs stay on the Mac. Receipts contain an installation ID, host/event identifiers, timestamp, and redacted playback result. They do not contain prompts, responses, project paths, session content, or absolute audio paths.
+Claudio's local helper and host-hook runtime have no network client, telemetry, analytics, or cloud upload path. Sounds, configuration, receipts, and logs stay on the Mac. Receipts contain an installation ID, host/event identifiers, timestamp, and redacted playback result. They do not contain prompts, responses, project paths, session content, or absolute audio paths. The optional GUI sound-generation action sends its disclosed request directly to the selected provider only after an explicit Generate action; see [PRIVACY.md](PRIVACY.md) for the complete boundary.
 
 Bundled audio licensing is recorded separately in [packs/LICENSES.md](packs/LICENSES.md).
 

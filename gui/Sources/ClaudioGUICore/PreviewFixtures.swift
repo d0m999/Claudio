@@ -244,6 +244,34 @@ public enum PreviewFixtures {
     /// Claudio 专属界面文字的全部四档；gallery 用同一个动态字号映射渲染代表内容。
     public static let interfaceTextSizes = ClaudioInterfaceTextSize.allCases
 
+    // MARK: - About settings
+
+    public static let aboutBundleFacts = projectAboutBundleFacts(
+        AboutBundleFactsInput(
+            brandName: "Orbit Zero",
+            productName: "claudi0",
+            version: "0.1.0",
+            build: "42",
+            architecture: "arm64",
+            minimumSystemVersion: "12.0",
+            operatingSystemVersion: "15.6.1"))
+
+    public static let aboutBundledResources = AboutBundledResourceKind.allCases.map {
+        AboutBundledResource(
+            kind: $0,
+            url: URL(fileURLWithPath: "/preview/\($0.rawValue)"))
+    }
+
+    public static let aboutPathFacts = AboutPathKind.allCases.map {
+        AboutPathExistenceFact(kind: $0, exists: true)
+    }
+
+    public static let aboutSurfaceFacts = [
+        AboutSurfaceFact(host: .claudeCode, state: .ready),
+        AboutSurfaceFact(host: .codex, state: .awaitingActivation),
+        AboutSurfaceFact(host: .workBuddy, state: .legacy),
+    ].compactMap { $0 }
+
     // MARK: - Unified Settings routes (#86)
 
     public struct SettingsRouteScenario: Identifiable, Sendable, Equatable {

@@ -25,6 +25,28 @@ import Foundation
 
 @MainActor
 func runPreviewFixturesSuites() {
+    suite("PreviewFixtures supplies the complete About state gallery values") {
+        expect(
+            PreviewFixtures.aboutBundleFacts.brandName == "Orbit Zero"
+                && PreviewFixtures.aboutBundleFacts.productName == "claudi0",
+            "About identity fixture must come from the canonical PreviewFixtures catalog")
+        expect(
+            PreviewFixtures.aboutBundledResources.map(\.kind)
+                == AboutBundledResourceKind.allCases
+                && PreviewFixtures.aboutBundledResources.allSatisfy { $0.url != nil },
+            "About resource fixtures must cover every bundled resource kind")
+        expect(
+            PreviewFixtures.aboutPathFacts.map(\.kind) == AboutPathKind.allCases
+                && PreviewFixtures.aboutPathFacts.allSatisfy { $0.exists },
+            "About path fixtures must cover every safe existence fact")
+        expect(
+            PreviewFixtures.aboutSurfaceFacts.map(\.surface)
+                == HostID.productVisibleCases.map(\.surfaceID)
+                && PreviewFixtures.aboutSurfaceFacts.map(\.state)
+                    == [.ready, .awaitingActivation, .legacy],
+            "About Surface fixtures must follow the product registry and cover distinct states")
+    }
+
     // Replaces the former `expect(true, ...)` tautology (T14 review 修复②), which could never
     // fail yet still counted as a check. `assertExhaustive()` now RETURNS the `family.case`
     // labels its state-family guards and all-product scenario catalog actually visited, so this

@@ -200,6 +200,15 @@ func runReleaseLayoutSuites() {
             yaml.contains("APP_NAME: claudi0"),
             "发布 app、DMG 与 Finder 显示名必须统一使用 claudi0")
         expect(
+            yaml.contains("<key>ClaudioBrandName</key><string>Orbit Zero</string>"),
+            "发布 Info.plist 必须携带 About 消费的 Orbit Zero 真实品牌字段")
+        expect(
+            copyLines.contains { $0.contains(#"LICENSE "$APP/Contents/Resources/LICENSE""#) }
+                && copyLines.contains {
+                    $0.contains(#"PRIVACY.md "$APP/Contents/Resources/PRIVACY.md""#)
+                },
+            "发布 app 必须从仓库唯一真相源复制开源许可和隐私说明")
+        expect(
             yaml.contains("APP_EXECUTABLE: claudi0-app"),
             "GUI bundle 可执行文件必须使用 claudi0-app，与内置 claudi0 helper 明确分开")
         expect(
@@ -402,6 +411,12 @@ func runReleaseLayoutSuites() {
             dev.contains(#"cp -R "$GUI_RESOURCE_BUNDLE""#)
                 && dev.contains(#"$APP/Contents/Resources/$(basename "$GUI_RESOURCE_BUNDLE")"#),
             "开发 app 必须把唯一 GUI resource bundle 复制到 Contents/Resources")
+        expect(
+            dev.contains(#"cp "$repo_root/LICENSE" "$APP/Contents/Resources/LICENSE""#)
+                && dev.contains(
+                    #"cp "$repo_root/PRIVACY.md" "$APP/Contents/Resources/PRIVACY.md""#)
+                && dev.contains("<key>ClaudioBrandName</key><string>Orbit Zero</string>"),
+            "开发 app 必须复制 About 许可/隐私资源并写入 Orbit Zero bundle identity")
         expect(
             release.contains("gui/.build/arm64-apple-macosx/release")
                 && release.contains("gui/.build/x86_64-apple-macosx/release")

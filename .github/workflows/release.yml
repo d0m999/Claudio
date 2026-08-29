@@ -329,6 +329,8 @@ jobs:
           cp dist/bin/claudio "$APP/Contents/Resources/bin/claudi0"
           ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
           bash scripts/copy-bundled-packs.sh packs "$APP/Contents/Resources/packs"
+          cp LICENSE "$APP/Contents/Resources/LICENSE"
+          cp PRIVACY.md "$APP/Contents/Resources/PRIVACY.md"
           cp assets/branding/claudi0.icns "$APP/Contents/Resources/claudi0.icns"
 
           cat > "$APP/Contents/Info.plist" <<PLIST
@@ -338,6 +340,7 @@ jobs:
           <dict>
             <key>CFBundleName</key><string>$APP_NAME</string>
             <key>CFBundleDisplayName</key><string>$APP_NAME</string>
+            <key>ClaudioBrandName</key><string>Orbit Zero</string>
             <key>CFBundleIdentifier</key><string>$BUNDLE_ID</string>
             <key>CFBundleVersion</key><string>$CLAUDIO_VERSION</string>
             <key>CFBundleShortVersionString</key><string>$CLAUDIO_VERSION</string>
