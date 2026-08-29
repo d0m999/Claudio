@@ -365,9 +365,31 @@ func runSettingsNavigationSuites() {
                 && SettingsWindowGeometry.minimumHeight == 640,
             "最小窗口尺寸必须匹配批准原型")
         expect(
+            settingsSidebarWidth(windowWidth: 960, interfaceTextSize: .standard) == 220
+                && settingsSidebarWidth(windowWidth: 1_240, interfaceTextSize: .standard) == 252
+                && settingsSidebarWidth(windowWidth: 1_240, interfaceTextSize: .maximum) == 276
+                && settingsSidebarWidth(windowWidth: 960, interfaceTextSize: .maximum) == 252,
+            "侧栏必须在最小窗口收紧，并为最大文字档保留额外阅读宽度")
+        let sidebarSections = settingsSidebarSections(
+            availableDestinations: SettingsDestination.allCases)
+        expect(
+            sidebarSections.map(\.id) == [.primary, .advanced, .product]
+                && sidebarSections.flatMap(\.destinations) == SettingsDestination.allCases,
+            "侧栏必须按主区、高级、claudi0 分组且保持固定目的页顺序")
+        expect(
+            settingsSidebarDestination(
+                moving: .next,
+                from: .usage,
+                availableDestinations: SettingsDestination.allCases) == .shortcuts
+                && settingsSidebarDestination(
+                    moving: .previous,
+                    from: .general,
+                    availableDestinations: SettingsDestination.allCases) == .general,
+            "方向键导航必须跨分组连续，并在首尾停住")
+        expect(
             settingsWindowFocusOrder(selectedDestination: .sounds)
                 == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
-                    + [.title(.sounds)],
+                + [.title(.sounds)],
             "Sounds 先走 sidebar 与标题，再把编辑器内焦点交给其独立 route coordinator")
         expect(
             settingsWindowFocusOrder(selectedDestination: .eventsAndSounds)
@@ -377,12 +399,12 @@ func runSettingsNavigationSuites() {
         expect(
             settingsWindowFocusOrder(selectedDestination: .general)
                 == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
-                    + [.title(.general), .firstAction(.general)],
+                + [.title(.general), .firstAction(.general)],
             "非嵌入目的页必须保留 sidebar、标题、首个动作焦点序")
         expect(
             settingsWindowFocusOrder(selectedDestination: .integrations)
                 == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
-                    + [.title(.integrations), .firstAction(.integrations)],
+                + [.title(.integrations), .firstAction(.integrations)],
             "Integrations 必须在嵌入 model 前保留 Settings 内部的管理事件动作")
 
         guard
@@ -493,10 +515,11 @@ func runSettingsNavigationSuites() {
                 && soundPacksOwner.contains("shouldAnnounceSelectionChange(to packID:"),
             "唯一 Settings 必须只由实际 key Sounds presentation 播报，并共享 status/suppression 消费")
         expect(
-            view.contains("ForEach(preferences.availableSettingsDestinations)")
+            view.contains("settingsSidebarSections(")
+                && view.contains("moveSidebarSelection(")
                 && view.contains("SettingsWindowFocusTarget.title")
                 && view.contains("SettingsWindowFocusTarget.firstAction"),
-            "shell 必须接线固定 sidebar → 标题 → 首个动作焦点序")
+            "shell 必须接线分组 sidebar、方向键移动、标题与首个动作焦点序")
         expect(
             view.contains("ForEach(ClaudioLanguageMode.allCases)")
                 && view.contains("preferences.setLanguageMode($0)")
@@ -525,6 +548,22 @@ func runSettingsNavigationSuites() {
                 && gallery.contains("ForEach(PreviewFixtures.settingsRouteScenarios)")
                 && gallery.contains("ForEach(PreviewFixtures.settingsRouteFailureScenarios)"),
             "DEBUG state gallery 必须遍历九个 route slot 与全部可见失败态")
+        expect(
+            gallery.contains("SettingsExperienceGalleryView()")
+                && gallery.contains("ForEach(ClaudioInterfaceTextSize.allCases)")
+                && gallery.contains("ForEach(PreviewFixtures.settingsExperienceScenarios)")
+                && gallery.contains("experienceScenario: scenario"),
+            "基础六页 gallery 必须用 production Settings view 覆盖双语与四档文字")
+        expect(
+            view.contains("SettingsSectionCard")
+                && view.contains("settingsSidebarWidth(")
+                && view.contains(".onMoveCommand")
+                && view.contains(".onExitCommand")
+                && view.contains("onAnnouncement")
+                && view.contains("onAnnouncement?(settingsFailureMessage(failure))")
+                && view.contains("model.retryFailedOperation()")
+                && view.contains("announceFailureIfPresent()"),
+            "#100 必须接线共享分组表面、自适应侧栏、键盘 Escape 与可见结果公告")
         expect(
             menuBar.contains("private let settingsWindowController: SettingsWindowController")
                 && menuBar.contains("let settingsWindowController = SettingsWindowController(")

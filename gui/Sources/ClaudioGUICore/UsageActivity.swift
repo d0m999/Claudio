@@ -418,6 +418,25 @@ public final class UsageSettingsModel: ObservableObject {
         self.operations = operations
     }
 
+    #if DEBUG
+    public convenience init(
+        previewPresentation: UsageActivityPresentation,
+        isRefreshing: Bool = false,
+        feedback: UsageSettingsFeedback? = nil
+    ) {
+        self.init(
+            initialPresentation: previewPresentation,
+            operations: UsageSettingsOperations(
+                load: { previewPresentation },
+                clearHistory: { .success(previewPresentation) },
+                clearLog: { .success(previewPresentation) },
+                revealLog: { true },
+                copyLogPath: { true }))
+        self.isRefreshing = isRefreshing
+        self.feedback = feedback
+    }
+    #endif
+
     public func refresh() {
         guard !isOperationActive else { return }
         presentationRevision &+= 1

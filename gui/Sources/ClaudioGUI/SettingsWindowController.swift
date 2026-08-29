@@ -259,6 +259,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             onEventPackSwitch: { [weak soundPacksEditorOwner] outcome in
                 soundPacksEditorOwner?.completePanelPackSwitch(outcome)
             },
+            onAnnouncement: { [weak self] sentence in
+                self?.announceBasicSettingsUpdate(sentence)
+            },
             onAdoptAICue: onAdoptAICue)
         let window = NSWindow(
             contentRect: NSRect(
@@ -285,6 +288,17 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     private func updateWindowTitle() {
         window?.title = ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)
+    }
+
+    private func announceBasicSettingsUpdate(_ sentence: String) {
+        guard let window, window.isKeyWindow, !sentence.isEmpty else { return }
+        NSAccessibility.post(
+            element: window,
+            notification: .announcementRequested,
+            userInfo: [
+                .announcement: sentence,
+                .priority: NSAccessibilityPriorityLevel.high.rawValue,
+            ])
     }
 
     /// In-window actions submit a typed route without creating or presenting another window.

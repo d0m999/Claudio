@@ -1,6 +1,7 @@
 import ClaudioGUIComponents
 import ClaudioGUICore
 import ClaudioLocalization
+import Combine
 import SwiftUI
 
 @MainActor
@@ -8,6 +9,7 @@ struct AboutSettingsView: View {
     @ObservedObject var model: AboutSettingsModel
     @ObservedObject var preferences: ClaudioPreferences
     let focusedTarget: FocusState<SettingsWindowFocusTarget?>.Binding
+    let onAnnouncement: (@MainActor (String) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
 
@@ -16,11 +18,9 @@ struct AboutSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            identity
-            Divider()
-            resources
-            Divider()
-            diagnostics
+            identity.settingsSectionSurface()
+            resources.settingsSectionSurface()
+            diagnostics.settingsSectionSurface()
 
             if let feedback = model.feedback {
                 Label {
@@ -39,6 +39,9 @@ struct AboutSettingsView: View {
         }
         .font(ClaudioTheme.font(.body))
         .frame(maxWidth: 620, alignment: .leading)
+        .onReceive(model.$feedback.dropFirst().compactMap { $0 }) { feedback in
+            onAnnouncement?(feedbackText(feedback))
+        }
     }
 
     private var identity: some View {

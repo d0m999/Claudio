@@ -9,6 +9,7 @@ struct ShortcutSettingsView: View {
     @ObservedObject var model: GlobalShortcutSettingsModel
     @ObservedObject var preferences: ClaudioPreferences
     let focusedTarget: FocusState<SettingsWindowFocusTarget?>.Binding
+    let onAnnouncement: (@MainActor (String) -> Void)?
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var recordingAction: GlobalShortcutAction?
@@ -40,6 +41,7 @@ struct ShortcutSettingsView: View {
                     recordingAction = nil
                     model.replace(action, keyCode: keyCode, modifiers: modifiers)
                     model.resumeAfterRecording(preservingFailureFor: action)
+                    announceState(action)
                     restoreRecordingButtonFocus(action)
                 },
                 onCancel: { stopRecording() }
@@ -77,6 +79,7 @@ struct ShortcutSettingsView: View {
                 Button(l10n.text(.settingsShortcutsClear)) {
                     stopRecording()
                     model.clear(action)
+                    announceState(action)
                 }
                 .disabled(state.shortcut == nil && state.failure != .invalidStoredValue)
                 .accessibilityLabel(
@@ -105,10 +108,8 @@ struct ShortcutSettingsView: View {
                 .accessibilityIdentifier("settings.shortcuts.\(action.rawValue).failure")
             }
         }
-        .padding(14)
         .font(ClaudioTheme.font(.body))
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 13))
+        .settingsSectionSurface()
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.shortcuts.\(action.rawValue)")
     }
@@ -137,6 +138,7 @@ struct ShortcutSettingsView: View {
                 recordingAction = action
             } else {
                 model.resumeAfterRecording()
+                announceState(action)
             }
         }
         .accessibilityLabel(
@@ -185,6 +187,17 @@ struct ShortcutSettingsView: View {
 
     private func currentValue(_ state: GlobalShortcutItemState) -> String {
         state.shortcut?.displayName ?? l10n.text(.settingsShortcutsUnassigned)
+    }
+
+    private func announceState(_ action: GlobalShortcutAction) {
+        let state = model.state(for: action)
+        let value = state.failure.map(shortcutFailureText) ?? currentValue(state)
+        onAnnouncement?(
+            l10n.format(
+                .settingsAnnouncementValue,
+                actionTitle(action) as NSString,
+                value as NSString)
+        )
     }
 
     private func shortcutFailureText(_ failure: GlobalShortcutOperationFailure) -> String {

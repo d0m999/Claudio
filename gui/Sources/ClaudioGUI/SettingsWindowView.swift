@@ -27,6 +27,7 @@ struct SettingsWindowView: View {
     let audioEnvironment: AudioImportEnvironment?
     let onEventAudibilityInputsChanged: (@MainActor () -> Void)?
     let onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)?
+    let onAnnouncement: (@MainActor (String) -> Void)?
     let onAdoptAICue:
         (
             @MainActor (AICueAdoptionRequest) async -> Result<
@@ -57,6 +58,7 @@ struct SettingsWindowView: View {
         audioEnvironment: AudioImportEnvironment? = nil,
         onEventAudibilityInputsChanged: (@MainActor () -> Void)? = nil,
         onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)? = nil,
+        onAnnouncement: (@MainActor (String) -> Void)? = nil,
         onAdoptAICue:
             (
                 @MainActor (AICueAdoptionRequest) async -> Result<
@@ -81,34 +83,48 @@ struct SettingsWindowView: View {
         self.audioEnvironment = audioEnvironment
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
         self.onEventPackSwitch = onEventPackSwitch
+        self.onAnnouncement = onAnnouncement
         self.onAdoptAICue = onAdoptAICue
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: 252)
-                .frame(maxHeight: .infinity)
-                .background(Color(nsColor: .windowBackgroundColor))
-            Divider()
-            routeSlot
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                sidebar
+                    .frame(
+                        width: CGFloat(
+                            settingsSidebarWidth(
+                                windowWidth: geometry.size.width,
+                                interfaceTextSize: preferences.interfaceTextSize))
+                    )
+                    .frame(maxHeight: .infinity)
+                    .background(Color(nsColor: .underPageBackgroundColor))
+                Divider()
+                routeSlot
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(nsColor: .windowBackgroundColor))
+            }
         }
         .frame(
             minWidth: SettingsWindowGeometry.minimumWidth,
-            minHeight: SettingsWindowGeometry.minimumHeight)
+            minHeight: SettingsWindowGeometry.minimumHeight
+        )
         .accessibilityElement(children: .contain)
         .accessibilityLabel(l10n.text(.settingsWindowTitle))
         .environment(\.dynamicTypeSize, preferences.interfaceTextSize.dynamicTypeSize)
+        .onExitCommand {
+            focusedTarget = SettingsWindowFocusTarget.sidebar(destination)
+        }
         .onReceive(model.$routeRequestRevision) { _ in
+            if let failure = model.resolution.failure {
+                focusedTarget = SettingsWindowFocusTarget.title(destination)
+                onAnnouncement?(settingsFailureMessage(failure))
+                return
+            }
             if destination == .integrations,
                 let integrationsModel,
                 let integrationsFocusCoordinator
             {
-                guard model.resolution.failure == nil else {
-                    focusedTarget = SettingsWindowFocusTarget.title(destination)
-                    return
-                }
                 if case .integrations(let surface) = model.resolution.route,
                     let host = HostID.productVisibleCases.first(where: {
                         $0.surfaceID == surface
@@ -124,10 +140,6 @@ struct SettingsWindowView: View {
                 let eventSettingsSelection,
                 let eventSettingsModel
             {
-                guard model.resolution.failure == nil else {
-                    focusedTarget = SettingsWindowFocusTarget.title(destination)
-                    return
-                }
                 if let route = eventSettingsRoute {
                     eventSettingsSelection.select(route)
                     eventSettingsModel.selectSoundSurface(route.surface)
@@ -140,39 +152,99 @@ struct SettingsWindowView: View {
     }
 
     private var sidebar: some View {
-        VStack(alignment: .leading, spacing: 5) {
+        VStack(alignment: .leading, spacing: 0) {
             Text("claudi0")
-                .font(.headline)
+                .font(.system(.headline, design: .rounded).weight(.semibold))
                 .padding(.horizontal, 14)
-                .padding(.bottom, 12)
+                .padding(.bottom, 16)
 
-            ForEach(preferences.availableSettingsDestinations) { item in
-                Button {
-                    model.request(.destination(item))
-                } label: {
-                    Label(
-                        item.localizedName(language: preferences.language),
-                        systemImage: icon(item))
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(
+                settingsSidebarSections(
+                    availableDestinations: preferences.availableSettingsDestinations)
+            ) { section in
+                if section.id != .primary {
+                    Divider()
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 12)
+                    Text(sidebarSectionName(section.id))
+                        .font(.caption.weight(.semibold))
+                        .foregroundColor(.secondary)
                         .padding(.horizontal, 10)
-                        .padding(.vertical, 7)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(
-                                    item == destination
-                                        ? Color.accentColor.opacity(0.16) : .clear))
+                        .padding(.bottom, 5)
                 }
-                .buttonStyle(.plain)
-                .focused($focusedTarget, equals: SettingsWindowFocusTarget.sidebar(item))
-                .accessibilityLabel(item.localizedName(language: preferences.language))
-                .accessibilitySortPriority(3)
-                .accessibilityIdentifier("settings.sidebar.\(item.rawValue)")
+
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(section.destinations) { item in
+                        sidebarButton(item)
+                    }
+                }
             }
 
             Spacer(minLength: 0)
+
+            Label(l10n.text(.settingsSidebarLocalFirst), systemImage: "lock.shield")
+                .font(.caption2.weight(.semibold))
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .accessibilityIdentifier("settings.sidebar.local-first")
         }
         .padding(.horizontal, 12)
         .padding(.top, 20)
+        .padding(.bottom, 12)
+    }
+
+    private func sidebarButton(_ item: SettingsDestination) -> some View {
+        Button {
+            model.request(.destination(item))
+        } label: {
+            HStack(spacing: 9) {
+                Image(systemName: icon(item))
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white)
+                    .frame(width: 25, height: 25)
+                    .background(sidebarIconColor(item))
+                    .clipShape(RoundedRectangle(cornerRadius: 7))
+                    .accessibilityHidden(true)
+
+                Text(item.localizedName(language: preferences.language))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+
+                Spacer(minLength: 4)
+
+                if item == destination {
+                    Image(systemName: "checkmark")
+                        .font(.caption.weight(.bold))
+                        .accessibilityHidden(true)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(item == destination ? Color.primary.opacity(0.1) : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .font(.system(.body, design: .rounded).weight(item == destination ? .semibold : .regular))
+        .focused($focusedTarget, equals: SettingsWindowFocusTarget.sidebar(item))
+        .onMoveCommand { direction in
+            switch direction {
+            case .up:
+                moveSidebarSelection(.previous, from: item)
+            case .down:
+                moveSidebarSelection(.next, from: item)
+            default:
+                break
+            }
+        }
+        .accessibilityLabel(item.localizedName(language: preferences.language))
+        .accessibilityAddTraits(item == destination ? .isSelected : [])
+        .accessibilitySortPriority(3)
+        .accessibilityIdentifier("settings.sidebar.\(item.rawValue)")
     }
 
     @ViewBuilder
@@ -261,17 +333,20 @@ struct SettingsWindowView: View {
                         UsageSettingsView(
                             model: usageSettings,
                             preferences: preferences,
-                            focusedTarget: $focusedTarget)
+                            focusedTarget: $focusedTarget,
+                            onAnnouncement: onAnnouncement)
                     } else if destination == .shortcuts {
                         ShortcutSettingsView(
                             model: globalShortcutSettings,
                             preferences: preferences,
-                            focusedTarget: $focusedTarget)
+                            focusedTarget: $focusedTarget,
+                            onAnnouncement: onAnnouncement)
                     } else if destination == .about {
                         AboutSettingsView(
                             model: aboutSettings,
                             preferences: preferences,
-                            focusedTarget: $focusedTarget)
+                            focusedTarget: $focusedTarget,
+                            onAnnouncement: onAnnouncement)
                     } else {
                         debugRouteContent
                     }
@@ -324,42 +399,50 @@ struct SettingsWindowView: View {
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Picker(
-                l10n.text(.settingsGeneralLanguageTitle),
-                selection: languageModeBinding
-            ) {
-                ForEach(ClaudioLanguageMode.allCases) { mode in
-                    Text(mode.localizedName(language: preferences.language))
-                        .tag(mode)
+            SettingsSectionCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    Picker(
+                        l10n.text(.settingsGeneralLanguageTitle),
+                        selection: languageModeBinding
+                    ) {
+                        ForEach(ClaudioLanguageMode.allCases) { mode in
+                            Text(mode.localizedName(language: preferences.language))
+                                .tag(mode)
+                        }
+                    }
+                    .pickerStyle(.radioGroup)
+                    .focused(
+                        $focusedTarget,
+                        equals: SettingsWindowFocusTarget.firstAction(.general)
+                    )
+                    .accessibilityLabel(l10n.text(.settingsGeneralLanguageTitle))
+                    .accessibilityValue(
+                        preferences.languageMode.localizedName(language: preferences.language)
+                    )
+                    .accessibilityHint(l10n.text(.settingsGeneralLanguageHint))
+                    .accessibilitySortPriority(1)
+                    .accessibilityIdentifier("settings.general.language")
+
+                    if preferences.languageMode == .system {
+                        Label(
+                            l10n.format(
+                                .settingsGeneralSystemProjection,
+                                preferences.language.selfName as NSString),
+                            systemImage: "globe"
+                        )
+                        .foregroundColor(.secondary)
+                        .accessibilityIdentifier(
+                            "settings.general.language.system-projection")
+                    }
                 }
             }
-            .pickerStyle(.radioGroup)
-            .focused(
-                $focusedTarget,
-                equals: SettingsWindowFocusTarget.firstAction(.general)
-            )
-            .accessibilityLabel(l10n.text(.settingsGeneralLanguageTitle))
-            .accessibilityValue(
-                preferences.languageMode.localizedName(language: preferences.language)
-            )
-            .accessibilityHint(l10n.text(.settingsGeneralLanguageHint))
-            .accessibilitySortPriority(1)
-            .accessibilityIdentifier("settings.general.language")
 
-            if preferences.languageMode == .system {
-                Label(
-                    l10n.format(
-                        .settingsGeneralSystemProjection,
-                        preferences.language.selfName as NSString),
-                    systemImage: "globe"
-                )
-                .foregroundColor(.secondary)
-                .accessibilityIdentifier("settings.general.language.system-projection")
+            SettingsSectionCard {
+                LoginItemSettingsSection(
+                    model: loginItemSettings,
+                    l10n: l10n,
+                    onAnnouncement: onAnnouncement)
             }
-
-            Divider()
-
-            LoginItemSettingsSection(model: loginItemSettings, l10n: l10n)
 
             if !preferences.recoveryIssues.isEmpty {
                 Label {
@@ -371,7 +454,7 @@ struct SettingsWindowView: View {
                 }
                 .padding(12)
                 .background(Color.red.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: 13))
                 .accessibilityIdentifier("settings.general.preference-recovery")
             }
         }
@@ -380,62 +463,71 @@ struct SettingsWindowView: View {
 
     private var displaySettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            InterfaceTextSizeStepperContent(
-                selection: interfaceTextSizeBinding,
-                managesFocus: false,
-                language: preferences.language
-            )
-            .focused(
-                $focusedTarget,
-                equals: SettingsWindowFocusTarget.firstAction(.display)
-            )
-            .accessibilityHint(l10n.text(.settingsDisplay.textSizeDescription))
-            .accessibilityIdentifier("settings.display.text-size")
+            SettingsSectionCard {
+                InterfaceTextSizeStepperContent(
+                    selection: interfaceTextSizeBinding,
+                    managesFocus: false,
+                    language: preferences.language
+                )
+                .focused(
+                    $focusedTarget,
+                    equals: SettingsWindowFocusTarget.firstAction(.display)
+                )
+                .accessibilityHint(l10n.text(.settingsDisplay.textSizeDescription))
+                .accessibilityIdentifier("settings.display.text-size")
+            }
 
-            Divider()
+            SettingsSectionCard {
+                VStack(alignment: .leading, spacing: 10) {
+                    Picker(
+                        l10n.text(.settingsDisplay.panelWidthTitle),
+                        selection: panelWidthPreferenceBinding
+                    ) {
+                        Text(
+                            ClaudioPanelWidthPreference.automatic.localizedDisplayName(
+                                preferences.language)
+                        )
+                        .tag(ClaudioPanelWidthPreference.automatic)
+                        Text(
+                            ClaudioPanelWidthPreference.compact.localizedDisplayName(
+                                preferences.language)
+                        )
+                        .tag(ClaudioPanelWidthPreference.compact)
+                        Text(
+                            ClaudioPanelWidthPreference.roomy.localizedDisplayName(
+                                preferences.language)
+                        )
+                        .tag(ClaudioPanelWidthPreference.roomy)
+                    }
+                    .accessibilityHint(l10n.text(.settingsDisplay.panelWidthDescription))
+                    .accessibilityIdentifier("settings.display.panel-width")
 
-            VStack(alignment: .leading, spacing: 10) {
-                Picker(
-                    l10n.text(.settingsDisplay.panelWidthTitle),
-                    selection: panelWidthPreferenceBinding
-                ) {
-                    Text(
-                        ClaudioPanelWidthPreference.automatic.localizedDisplayName(
-                            preferences.language)
-                    )
-                    .tag(ClaudioPanelWidthPreference.automatic)
-                    Text(
-                        ClaudioPanelWidthPreference.compact.localizedDisplayName(
-                            preferences.language)
-                    )
-                    .tag(ClaudioPanelWidthPreference.compact)
-                    Text(
-                        ClaudioPanelWidthPreference.roomy.localizedDisplayName(
-                            preferences.language)
-                    )
-                    .tag(ClaudioPanelWidthPreference.roomy)
-                }
-                .accessibilityHint(l10n.text(.settingsDisplay.panelWidthDescription))
-                .accessibilityIdentifier("settings.display.panel-width")
-
-                if panelWidthResolution.isClamped {
-                    Text(
-                        l10n.format(
-                            .settingsDisplay.panelWidthClamped,
-                            Int64(panelWidthResolution.effectiveWidth)))
+                    if panelWidthResolution.isClamped {
+                        Text(
+                            l10n.format(
+                                .settingsDisplay.panelWidthClamped,
+                                Int64(panelWidthResolution.effectiveWidth))
+                        )
                         .foregroundColor(.secondary)
                         .accessibilityIdentifier("settings.display.panel-width.clamped")
+                    }
                 }
             }
 
-            Divider()
-
-            Toggle(
-                l10n.text(.settingsDisplay.statusDotTitle),
-                isOn: menuBarStatusDotBinding
-            )
-            .accessibilityHint(l10n.text(.settingsDisplay.statusDotDescription))
-            .accessibilityIdentifier("settings.display.status-dot")
+            SettingsSectionCard {
+                Toggle(
+                    l10n.text(.settingsDisplay.statusDotTitle),
+                    isOn: menuBarStatusDotBinding
+                )
+                .accessibilityValue(
+                    l10n.text(
+                        preferences.showsMenuBarStatusDot
+                            ? .settingsDisplayStatusDotEnabled
+                            : .settingsDisplayStatusDotDisabled)
+                )
+                .accessibilityHint(l10n.text(.settingsDisplay.statusDotDescription))
+                .accessibilityIdentifier("settings.display.status-dot")
+            }
         }
         .frame(maxWidth: 560, alignment: .leading)
     }
@@ -469,56 +561,64 @@ struct SettingsWindowView: View {
 
     private var notificationsSettings: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Toggle(isOn: focusQuietBinding) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(l10n.text(.settingsNotificationsFocusTitle))
-                        .font(.headline)
-                    Text(l10n.text(.settingsNotificationsFocusDescription))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            SettingsSectionCard {
+                VStack(alignment: .leading, spacing: 18) {
+                    Toggle(isOn: focusQuietBinding) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(l10n.text(.settingsNotificationsFocusTitle))
+                                .font(.headline)
+                            Text(l10n.text(.settingsNotificationsFocusDescription))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .focused(
+                        $focusedTarget,
+                        equals: SettingsWindowFocusTarget.firstAction(.notifications)
+                    )
+                    .accessibilityIdentifier("settings.notifications.focus-toggle")
+
+                    Divider()
+
+                    Toggle(isOn: calendarQuietBinding) {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(l10n.text(.settingsNotificationsCalendarTitle))
+                                .font(.headline)
+                            Text(l10n.text(.settingsNotificationsCalendarDescription))
+                                .foregroundColor(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .toggleStyle(.switch)
+                    .accessibilityIdentifier("settings.notifications.calendar-toggle")
                 }
             }
-            .toggleStyle(.switch)
-            .focused(
-                $focusedTarget,
-                equals: SettingsWindowFocusTarget.firstAction(.notifications)
-            )
-            .accessibilityIdentifier("settings.notifications.focus-toggle")
 
-            Toggle(isOn: calendarQuietBinding) {
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(l10n.text(.settingsNotificationsCalendarTitle))
-                        .font(.headline)
-                    Text(l10n.text(.settingsNotificationsCalendarDescription))
-                        .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+            SettingsSectionCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    settingsStatusRow(
+                        title: l10n.text(.settingsNotificationsPermissionTitle),
+                        value: focusAuthorizationText)
+                    settingsStatusRow(
+                        title: l10n.text(.settingsNotificationsCalendarPermissionTitle),
+                        value: calendarAuthorizationText)
+                    if dynamicQuietPolicy.presentation.calendarAuthorization == .denied
+                        || dynamicQuietPolicy.presentation.calendarAuthorization == .restricted
+                    {
+                        Button(l10n.text(.settingsNotificationsOpenCalendarPrivacy)) {
+                            openCalendarPrivacySettings()
+                        }
+                        .accessibilityIdentifier("settings.notifications.calendar-privacy")
+                    }
+                    settingsStatusRow(
+                        title: l10n.text(.settingsNotificationsCurrentReasonTitle),
+                        value: dynamicQuietCurrentReasonText)
+                    settingsStatusRow(
+                        title: l10n.text(.settingsNotificationsSnapshotHealthTitle),
+                        value: snapshotHealthText)
                 }
             }
-            .toggleStyle(.switch)
-            .accessibilityIdentifier("settings.notifications.calendar-toggle")
-
-            Divider()
-
-            settingsStatusRow(
-                title: l10n.text(.settingsNotificationsPermissionTitle),
-                value: focusAuthorizationText)
-            settingsStatusRow(
-                title: l10n.text(.settingsNotificationsCalendarPermissionTitle),
-                value: calendarAuthorizationText)
-            if dynamicQuietPolicy.presentation.calendarAuthorization == .denied
-                || dynamicQuietPolicy.presentation.calendarAuthorization == .restricted
-            {
-                Button(l10n.text(.settingsNotificationsOpenCalendarPrivacy)) {
-                    openCalendarPrivacySettings()
-                }
-                .accessibilityIdentifier("settings.notifications.calendar-privacy")
-            }
-            settingsStatusRow(
-                title: l10n.text(.settingsNotificationsCurrentReasonTitle),
-                value: dynamicQuietCurrentReasonText)
-            settingsStatusRow(
-                title: l10n.text(.settingsNotificationsSnapshotHealthTitle),
-                value: snapshotHealthText)
 
             if dynamicQuietPolicy.presentation.hasObserverFailure,
                 dynamicQuietPolicy.presentation.currentReason != .observerFailure
@@ -543,7 +643,7 @@ struct SettingsWindowView: View {
                 }
                 .padding(12)
                 .background(Color.red.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .clipShape(RoundedRectangle(cornerRadius: 13))
                 .accessibilityIdentifier("settings.notifications.publication-failed")
             }
 
@@ -555,6 +655,9 @@ struct SettingsWindowView: View {
         .frame(maxWidth: 620, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("settings.notifications.dynamic-quiet-policy")
+        .onChange(of: dynamicQuietPolicy.presentation) { _ in
+            onAnnouncement?(dynamicQuietAnnouncement)
+        }
     }
 
     private var focusQuietBinding: Binding<Bool> {
@@ -566,19 +669,43 @@ struct SettingsWindowView: View {
     private var interfaceTextSizeBinding: Binding<ClaudioInterfaceTextSize> {
         Binding(
             get: { preferences.interfaceTextSize },
-            set: { preferences.setInterfaceTextSize($0) })
+            set: {
+                preferences.setInterfaceTextSize($0)
+                onAnnouncement?(
+                    l10n.format(
+                        .settingsAnnouncementValue,
+                        l10n.text(.interfaceTextSize) as NSString,
+                        $0.localizedDisplayName(preferences.language) as NSString)
+                )
+            })
     }
 
     private var panelWidthPreferenceBinding: Binding<ClaudioPanelWidthPreference> {
         Binding(
             get: { preferences.panelWidthPreference },
-            set: { preferences.setPanelWidthPreference($0) })
+            set: {
+                preferences.setPanelWidthPreference($0)
+                onAnnouncement?(
+                    l10n.format(
+                        .settingsAnnouncementValue,
+                        l10n.text(.settingsDisplay.panelWidthTitle) as NSString,
+                        $0.localizedDisplayName(preferences.language) as NSString)
+                )
+            })
     }
 
     private var menuBarStatusDotBinding: Binding<Bool> {
         Binding(
             get: { preferences.showsMenuBarStatusDot },
-            set: { preferences.setShowsMenuBarStatusDot($0) })
+            set: {
+                preferences.setShowsMenuBarStatusDot($0)
+                onAnnouncement?(
+                    l10n.text(
+                        $0
+                            ? .settingsDisplayStatusDotEnabled
+                            : .settingsDisplayStatusDotDisabled)
+                )
+            })
     }
 
     private var panelWidthResolution: (effectiveWidth: Double, isClamped: Bool) {
@@ -633,6 +760,15 @@ struct SettingsWindowView: View {
         }
     }
 
+    private var dynamicQuietAnnouncement: String {
+        l10n.format(
+            .settingsNotificationsAnnouncementSummary,
+            focusAuthorizationText as NSString,
+            calendarAuthorizationText as NSString,
+            dynamicQuietCurrentReasonText as NSString,
+            snapshotHealthText as NSString)
+    }
+
     private func openCalendarPrivacySettings() {
         guard
             let url = URL(
@@ -655,7 +791,15 @@ struct SettingsWindowView: View {
     private var languageModeBinding: Binding<ClaudioLanguageMode> {
         Binding(
             get: { preferences.languageMode },
-            set: { preferences.setLanguageMode($0) })
+            set: {
+                preferences.setLanguageMode($0)
+                onAnnouncement?(
+                    l10n.format(
+                        .settingsAnnouncementValue,
+                        l10n.text(.settingsGeneralLanguageTitle) as NSString,
+                        $0.localizedName(language: preferences.language) as NSString)
+                )
+            })
     }
 
     private func routeFailure(_ failure: SettingsRouteFailure) -> some View {
@@ -702,12 +846,48 @@ struct SettingsWindowView: View {
         case .about: "info.circle"
         }
     }
+
+    private func sidebarSectionName(_ section: SettingsSidebarSectionID) -> String {
+        switch section {
+        case .primary: ""
+        case .advanced: l10n.text(.settingsSidebarAdvanced)
+        case .product: l10n.text(.settingsSidebarProduct)
+        }
+    }
+
+    private func sidebarIconColor(_ destination: SettingsDestination) -> Color {
+        switch destination {
+        case .general: .gray
+        case .integrations: .cyan
+        case .eventsAndSounds: .red
+        case .notifications: .purple
+        case .display: .indigo
+        case .sounds: .green
+        case .usage: .pink
+        case .shortcuts: .purple
+        case .about: .blue
+        }
+    }
+
+    private func moveSidebarSelection(
+        _ direction: SettingsSidebarMoveDirection,
+        from current: SettingsDestination
+    ) {
+        let next = settingsSidebarDestination(
+            moving: direction,
+            from: current,
+            availableDestinations: preferences.availableSettingsDestinations)
+        guard next != current else { return }
+        model.request(.destination(next))
+        focusedTarget = .sidebar(next)
+    }
 }
 
 @MainActor
 private struct LoginItemSettingsSection: View {
     @ObservedObject var model: LoginItemSettingsModel
     let l10n: ClaudioL10n
+    let onAnnouncement: (@MainActor (String) -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -742,16 +922,23 @@ private struct LoginItemSettingsSection: View {
 
                     Button(l10n.text(.commonRetry)) {
                         model.retryFailedOperation()
+                        announceFailureIfPresent()
                     }
                 }
             }
+        }
+        .onChange(of: model.projection.registration) { _ in
+            onAnnouncement?(statusText)
         }
     }
 
     private var enabledBinding: Binding<Bool> {
         Binding(
             get: { model.projection.registration.isOn },
-            set: { model.setEnabled($0) })
+            set: {
+                model.setEnabled($0)
+                announceFailureIfPresent()
+            })
     }
 
     private var statusText: String {
@@ -775,6 +962,16 @@ private struct LoginItemSettingsSection: View {
                 requestedEnabled
                     ? .settingsGeneralLoginItem.failureEnable
                     : .settingsGeneralLoginItem.failureDisable)
+        }
+    }
+
+    private func announceFailureIfPresent() {
+        if let failure = model.projection.failure {
+            onAnnouncement?(
+                failureText(
+                    failure.reason,
+                    requestedEnabled: failure.requestedEnabled)
+            )
         }
     }
 }

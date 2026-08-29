@@ -49,7 +49,8 @@ public enum ClaudioLanguageMode: String, CaseIterable, Codable, Sendable, Identi
             return .english
         case .system:
             for identifier in preferredLanguageIdentifiers {
-                let languageCode = identifier
+                let languageCode =
+                    identifier
                     .replacingOccurrences(of: "_", with: "-")
                     .split(separator: "-", maxSplits: 1)
                     .first?
@@ -424,6 +425,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let settingsDestinationUsage: Self = "settings.destination.usage"
     public static let settingsDestinationShortcuts: Self = "settings.destination.shortcuts"
     public static let settingsDestinationAbout: Self = "settings.destination.about"
+    public static let settingsSidebarAdvanced: Self = "settings.sidebar.advanced"
+    public static let settingsSidebarProduct: Self = "settings.sidebar.product"
+    public static let settingsSidebarLocalFirst: Self = "settings.sidebar.local-first"
+    public static let settingsAnnouncementValue: Self = "settings.announcement.value"
     public static let settingsAboutUnknown: Self = "settings.about.unknown"
     public static let settingsAboutBrand: Self = "settings.about.brand"
     public static let settingsAboutProduct: Self = "settings.about.product"
@@ -473,6 +478,10 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         statusDotDescription: Self("settings.display.status-dot.description"),
         statusRunning: Self("menu-bar.status.running")
     )
+    public static let settingsDisplayStatusDotEnabled: Self =
+        "settings.display.status-dot.enabled"
+    public static let settingsDisplayStatusDotDisabled: Self =
+        "settings.display.status-dot.disabled"
     public static let settingsGeneralLanguageTitle: Self = "settings.general.language.title"
     public static let settingsGeneralLanguageDescription: Self =
         "settings.general.language.description"
@@ -550,6 +559,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.notifications.open-calendar-privacy"
     public static let settingsNotificationsOpenEvents: Self =
         "settings.notifications.open-events"
+    public static let settingsNotificationsAnnouncementSummary: Self =
+        "settings.notifications.announcement.summary"
     public static let settingsUsageDescription: Self = "settings.usage.description"
     public static let settingsUsageScopeNotice: Self = "settings.usage.scope-notice"
     public static let settingsUsageRefresh: Self = "settings.usage.refresh"
@@ -1079,6 +1090,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
         .settingsDestinationShortcuts, .settingsDestinationAbout,
+        .settingsSidebarAdvanced, .settingsSidebarProduct, .settingsSidebarLocalFirst,
+        .settingsAnnouncementValue,
         .settingsIntegrationsManageEvents, .settingsIntegrationsManageEventsHint,
         .settingsAboutUnknown, .settingsAboutBrand, .settingsAboutProduct,
         .settingsAboutVersion, .settingsAboutBuild, .settingsAboutArchitecture,
@@ -1097,6 +1110,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         settingsDisplay.panelWidthCompact, settingsDisplay.panelWidthRoomy,
         settingsDisplay.panelWidthClamped, settingsDisplay.statusDotTitle,
         settingsDisplay.statusDotDescription, settingsDisplay.statusRunning,
+        .settingsDisplayStatusDotEnabled, .settingsDisplayStatusDotDisabled,
         .settingsGeneralLanguageTitle,
         .settingsGeneralLanguageDescription, .settingsGeneralLanguageSystem,
         .settingsGeneralLanguageChinese, .settingsGeneralLanguageEnglish,
@@ -1125,6 +1139,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .settingsNotificationsSnapshotExpired,
         .settingsNotificationsPublicationFailed,
         .settingsNotificationsOpenCalendarPrivacy, .settingsNotificationsOpenEvents,
+        .settingsNotificationsAnnouncementSummary,
         .settingsShortcutsDescription, .settingsShortcutsRequirement,
         .settingsShortcutsActionTogglePanel, .settingsShortcutsActionTogglePanelDescription,
         .settingsShortcutsActionOpenSettings, .settingsShortcutsActionOpenSettingsDescription,

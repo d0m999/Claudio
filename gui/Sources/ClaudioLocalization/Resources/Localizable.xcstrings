@@ -3220,6 +3220,30 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "由宿主集成管理器提供" } }
       }
     },
+    "settings.sidebar.advanced" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Advanced" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高级" } }
+      }
+    },
+    "settings.sidebar.product" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0" } }
+      }
+    },
+    "settings.sidebar.local-first" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Local first" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本地优先" } }
+      }
+    },
+    "settings.announcement.value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@：%@" } }
+      }
+    },
     "settings.destination.about" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "About" } },
@@ -3586,6 +3610,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "前往事件与提示音" } }
       }
     },
+    "settings.notifications.announcement.summary" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus permission: %@. Calendar permission: %@. Current reason: %@. Snapshot status: %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "专注模式权限：%@。日历权限：%@。当前原因：%@。快照状态：%@。" } }
+      }
+    },
     "settings.display.panel-width.automatic" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic" } },
@@ -3626,6 +3656,18 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Changes only the Orbit Zero visual variant. claudi0 remains in the menu bar and VoiceOver still reports its complete status." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只改变 Orbit Zero 的视觉变体；claudi0 仍保留在菜单栏中，VoiceOver 仍会播报完整状态。" } }
+      }
+    },
+    "settings.display.status-dot.enabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity dot shown" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已显示活动状态点" } }
+      }
+    },
+    "settings.display.status-dot.disabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity dot hidden" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已隐藏活动状态点" } }
       }
     },
     "settings.display.status-dot.title" : {

@@ -95,6 +95,26 @@ func runPreviewFixturesSuites() {
             "settingsRouteFailure.stale-event",
             "settingsRouteFailure.invalid-sound-pack-id",
             "settingsRouteFailure.stale-sound-pack",
+            "settingsExperience.general.ready",
+            "settingsExperience.general.permission-required",
+            "settingsExperience.general.write-failed",
+            "settingsExperience.notifications.ready",
+            "settingsExperience.notifications.permission-required",
+            "settingsExperience.notifications.stale",
+            "settingsExperience.notifications.write-failed",
+            "settingsExperience.display.ready",
+            "settingsExperience.usage.loading",
+            "settingsExperience.usage.ready",
+            "settingsExperience.usage.empty",
+            "settingsExperience.usage.stale",
+            "settingsExperience.usage.unreadable",
+            "settingsExperience.usage.write-failed",
+            "settingsExperience.shortcuts.ready",
+            "settingsExperience.shortcuts.empty",
+            "settingsExperience.shortcuts.write-failed",
+            "settingsExperience.about.ready",
+            "settingsExperience.about.empty",
+            "settingsExperience.about.write-failed",
             // 第六族（PLAN-MASTER-VOLUME.md D33/D38）：主音量控件行的展示态。少了它，写失败之后的
             // 「行 + 错误行」组合帧——D16「音量 0 = 全局静音」这类最难手动复现的态——落地前零仓库内
             // 视觉验证，而这条断言仍会全绿（因为其余五族依然完美覆盖它们自己的 case）。
@@ -481,6 +501,33 @@ func runPreviewFixturesSuites() {
                 resolution.route == scenario.route,
                 "\(scenario.id) 必须原样保留请求路由而不回退")
         }
+    }
+
+    suite("PreviewFixtures.settingsExperienceScenarios pins six production destinations") {
+        let scenarios = PreviewFixtures.settingsExperienceScenarios
+        expect(
+            scenarios == PreviewFixtures.SettingsExperienceScenario.allCases,
+            "基础设置 gallery 必须由 enum roster 完整驱动")
+        expect(
+            Set(scenarios.map(\.destination))
+                == [.general, .notifications, .display, .usage, .shortcuts, .about],
+            "基础设置 gallery 必须覆盖通用、通知、显示、用量、快捷键、关于六页")
+        expect(
+            scenarios.map(\.rawValue).contains("usage.loading")
+                && scenarios.map(\.rawValue).contains("usage.empty")
+                && scenarios.map(\.rawValue).contains("usage.stale")
+                && scenarios.map(\.rawValue).contains("usage.unreadable")
+                && scenarios.map(\.rawValue).contains("notifications.permission-required")
+                && scenarios.map(\.rawValue).contains("notifications.stale")
+                && scenarios.map(\.rawValue).contains("about.write-failed"),
+            "gallery roster 必须保留 loading/empty/unreadable/permission/stale/write-failed 代表态")
+        expect(
+            PreviewFixtures.SettingsExperienceScenario.usageUnreadable.profile.usage
+                == .unreadable
+                && PreviewFixtures.SettingsExperienceScenario.usageStale.profile.usage == .stale
+                && PreviewFixtures.SettingsExperienceScenario.notificationsStale.profile
+                    .notifications == .stale,
+            "gallery scenario 名必须映射真实 fixture 语义，stale 必须保留旧快照而非冒充 unreadable")
     }
 
     // MARK: - All-product integration scenarios

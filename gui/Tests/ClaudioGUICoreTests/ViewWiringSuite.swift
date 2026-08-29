@@ -382,7 +382,7 @@ func runViewWiringSuites() {
                 + "**永久隐身**。要么把这个构造挪走，要么先教 `strippingComments` 认识它")
     }
 
-    suite("T17h 播报出口按 surface 唯一：Panel 与 retained IntegrationsWindow 各一个") {
+    suite("主动播报出口按 surface 唯一：Panel、Integrations 与统一 Settings 各一个") {
         let sources = guiSources()
         expect(
             sources.count >= 5,
@@ -403,9 +403,14 @@ func runViewWiringSuites() {
         }
 
         expect(
-            posts == ["PanelView.swift": 1, "IntegrationsWindowView.swift": 1],
-            "Panel 的面板句和 retained IntegrationsWindow 的动作反馈各有一个主动播报出口；"
-                + "其它 GUI 文件不得新增第三条通道。实得 \(posts)")
+            posts
+                == [
+                    "PanelView.swift": 1,
+                    "IntegrationsWindowView.swift": 1,
+                    "SettingsWindowController.swift": 1,
+                ],
+            "Panel、retained IntegrationsWindow 与统一 Settings 的基础页动作反馈各有一个"
+                + "窗口级主动播报出口；其它 GUI 文件不得新增平行通道。实得 \(posts)")
         expect(
             consumes == ["PanelView.swift": 1],
             "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
@@ -2639,7 +2644,7 @@ func runViewWiringSuites() {
             flatSettingsView.contains("EventSettingsWindowView(")
                 && !flatSettingsView.contains("presentationContext:")
                 && flatSettingsView.contains("onConfigureSound: { model.request(.sounds($0)) }")
-                && flatSettingsView.contains("guard model.resolution.failure == nil else")
+                && flatSettingsView.contains("if let failure = model.resolution.failure")
                 && flatSettingsView.contains("eventSettingsSelection.requestInitialFocus()")
                 && flatSettingsController.contains("eventSettingsModel: eventSettingsModel")
                 && flatSettingsController.contains("eventSettingsSelection: eventSettingsSelection")

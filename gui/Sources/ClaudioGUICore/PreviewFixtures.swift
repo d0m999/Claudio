@@ -304,6 +304,152 @@ public enum PreviewFixtures {
         }
     }
 
+    /// Production basic-destination states used by the unified Settings visual/AX matrix. Each
+    /// case names a real semantic state owned by the destination model; the gallery only injects
+    /// deterministic adapters and continues to render ``SettingsWindowView`` itself.
+    public enum SettingsGeneralGalleryState: Sendable, Equatable {
+        case ready
+        case permissionRequired
+        case writeFailed
+    }
+
+    public enum SettingsNotificationsGalleryState: Sendable, Equatable {
+        case ready
+        case permissionRequired
+        case stale
+        case writeFailed
+    }
+
+    public enum SettingsUsageGalleryState: Sendable, Equatable {
+        case loading
+        case ready
+        case empty
+        case stale
+        case unreadable
+        case writeFailed
+    }
+
+    public enum SettingsShortcutsGalleryState: Sendable, Equatable {
+        case ready
+        case empty
+        case writeFailed
+    }
+
+    public enum SettingsAboutGalleryState: Sendable, Equatable {
+        case ready
+        case empty
+        case writeFailed
+    }
+
+    /// One descriptor is the sole scenario-to-fixture dispatch point. Destination builders read
+    /// only their typed field instead of repeatedly switching on the scenario roster.
+    public struct SettingsExperienceProfile: Sendable, Equatable {
+        public let destination: SettingsDestination
+        public let general: SettingsGeneralGalleryState
+        public let notifications: SettingsNotificationsGalleryState
+        public let usage: SettingsUsageGalleryState
+        public let shortcuts: SettingsShortcutsGalleryState
+        public let about: SettingsAboutGalleryState
+
+        fileprivate init(
+            destination: SettingsDestination,
+            general: SettingsGeneralGalleryState = .ready,
+            notifications: SettingsNotificationsGalleryState = .ready,
+            usage: SettingsUsageGalleryState = .empty,
+            shortcuts: SettingsShortcutsGalleryState = .empty,
+            about: SettingsAboutGalleryState = .ready
+        ) {
+            self.destination = destination
+            self.general = general
+            self.notifications = notifications
+            self.usage = usage
+            self.shortcuts = shortcuts
+            self.about = about
+        }
+    }
+
+    public enum SettingsExperienceScenario: String, CaseIterable, Identifiable, Sendable {
+        case generalReady = "general.ready"
+        case generalPermissionRequired = "general.permission-required"
+        case generalWriteFailed = "general.write-failed"
+        case notificationsReady = "notifications.ready"
+        case notificationsPermissionRequired = "notifications.permission-required"
+        case notificationsStale = "notifications.stale"
+        case notificationsWriteFailed = "notifications.write-failed"
+        case displayReady = "display.ready"
+        case usageLoading = "usage.loading"
+        case usageReady = "usage.ready"
+        case usageEmpty = "usage.empty"
+        case usageStale = "usage.stale"
+        case usageUnreadable = "usage.unreadable"
+        case usageWriteFailed = "usage.write-failed"
+        case shortcutsReady = "shortcuts.ready"
+        case shortcutsEmpty = "shortcuts.empty"
+        case shortcutsWriteFailed = "shortcuts.write-failed"
+        case aboutReady = "about.ready"
+        case aboutEmpty = "about.empty"
+        case aboutWriteFailed = "about.write-failed"
+
+        public var id: String { rawValue }
+
+        public var profile: SettingsExperienceProfile {
+            switch self {
+            case .generalReady:
+                SettingsExperienceProfile(destination: .general)
+            case .generalPermissionRequired:
+                SettingsExperienceProfile(
+                    destination: .general,
+                    general: .permissionRequired)
+            case .generalWriteFailed:
+                SettingsExperienceProfile(destination: .general, general: .writeFailed)
+            case .notificationsReady:
+                SettingsExperienceProfile(destination: .notifications)
+            case .notificationsPermissionRequired:
+                SettingsExperienceProfile(
+                    destination: .notifications,
+                    notifications: .permissionRequired)
+            case .notificationsStale:
+                SettingsExperienceProfile(
+                    destination: .notifications,
+                    notifications: .stale)
+            case .notificationsWriteFailed:
+                SettingsExperienceProfile(
+                    destination: .notifications,
+                    notifications: .writeFailed)
+            case .displayReady:
+                SettingsExperienceProfile(destination: .display)
+            case .usageLoading:
+                SettingsExperienceProfile(destination: .usage, usage: .loading)
+            case .usageReady:
+                SettingsExperienceProfile(destination: .usage, usage: .ready)
+            case .usageEmpty:
+                SettingsExperienceProfile(destination: .usage)
+            case .usageStale:
+                SettingsExperienceProfile(destination: .usage, usage: .stale)
+            case .usageUnreadable:
+                SettingsExperienceProfile(destination: .usage, usage: .unreadable)
+            case .usageWriteFailed:
+                SettingsExperienceProfile(destination: .usage, usage: .writeFailed)
+            case .shortcutsReady:
+                SettingsExperienceProfile(destination: .shortcuts, shortcuts: .ready)
+            case .shortcutsEmpty:
+                SettingsExperienceProfile(destination: .shortcuts)
+            case .shortcutsWriteFailed:
+                SettingsExperienceProfile(destination: .shortcuts, shortcuts: .writeFailed)
+            case .aboutReady:
+                SettingsExperienceProfile(destination: .about)
+            case .aboutEmpty:
+                SettingsExperienceProfile(destination: .about, about: .empty)
+            case .aboutWriteFailed:
+                SettingsExperienceProfile(destination: .about, about: .writeFailed)
+            }
+        }
+
+        public var destination: SettingsDestination { profile.destination }
+    }
+
+    public static let settingsExperienceScenarios = SettingsExperienceScenario.allCases
+
     public static let settingsRouteAvailability = SettingsRouteAvailability(
         integrationSurfaces: Set(HostID.productVisibleCases.map(\.surfaceID)),
         eventScopes: Set(
@@ -981,6 +1127,9 @@ public enum PreviewFixtures {
         for scenario in settingsRouteFailureScenarios {
             visited.insert(
                 "settingsRouteFailure.\(settingsRouteFailureCoverage(scenario.expectedFailure))")
+        }
+        for scenario in settingsExperienceScenarios {
+            visited.insert("settingsExperience.\(scenario.rawValue)")
         }
         for state in masterVolumeStates {
             visited.insert("masterVolume.\(masterVolumeStateCoverage(state))")
