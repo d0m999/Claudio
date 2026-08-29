@@ -30,6 +30,7 @@ public struct QwenAICueProvider: AICueProvider, Sendable {
             profile.providerID == .qwen,
             profile.credentialValidationPolicy == .deferredUntilExplicitGeneration,
             profile.supportedModalities == [.speech],
+            profile.constraints.supportsInstructionControl,
             profile.routes[.speech]?.transport.isPCM == true
         else {
             throw AICueProviderError.invalidRequest
@@ -54,9 +55,11 @@ public struct QwenAICueProvider: AICueProvider, Sendable {
         else {
             throw AICueProviderError.deadlineExceeded
         }
+        let instructions = request.prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard
             request.profileID == profile.id,
             request.modality == .speech,
+            !instructions.isEmpty,
             let route = profile.routes[.speech],
             route.authentication == .bearerAPIKey,
             case .ssePCM(let pcmFormat) = route.transport,
@@ -83,6 +86,7 @@ public struct QwenAICueProvider: AICueProvider, Sendable {
 
         let body = try jsonBody([
             "input": [
+                "instructions": instructions,
                 "language_type": languageType,
                 "text": spokenContent,
                 "voice": voiceID,

@@ -288,6 +288,48 @@ func runQwenAICueProviderSuites() async {
         }
     }
 
+    await suite("Qwen adapter：三个候选保留同一台词并传递各自 instruction") {
+        let responseEvents = qwenParsedEvents(pcmFragments: [Data([0, 0, 1, 0])])
+        let transport = QwenSSETransportFixture(
+            AICueVariant.allCases.map { _ in .events(responseEvents) })
+        let provider = try! QwenAICueProvider(
+            profileID: .qwenSingapore,
+            sseTransport: transport)
+        let generationRequest = try! AICueGenerationRequest(
+            description: "用温和的声音说“可以继续”",
+            locale: "zh-Hans",
+            providerProfileID: .qwenSingapore)
+        let plan = try! AICueSoundPlanner().makePlan(for: generationRequest)
+        let compiledRequests = AICueVariant.allCases.map {
+            try! AICueProviderRequestCompiler().compile(
+                plan: plan,
+                profileID: generationRequest.providerProfileID,
+                variant: $0)
+        }
+
+        for request in compiledRequests {
+            _ = try! await provider.generateCandidate(
+                request: request,
+                credential: try! SensitiveCredentialInput("fixture-key"),
+                deadline: .startingNow())
+        }
+
+        let inputs = transport.requests().map {
+            let body = try! JSONSerialization.jsonObject(with: $0.body!) as! [String: Any]
+            return body["input"] as! [String: Any]
+        }
+        expect(
+            inputs.map { $0["text"] as? String } == Array(repeating: "可以继续", count: 3),
+            "Qwen A/B/C 的 text 必须只是同一明确台词")
+        expect(
+            inputs.map { $0["instructions"] as? String } == compiledRequests.map(\.prompt),
+            "Qwen A/B/C 必须逐条传递 provider-neutral compiler 的 instruction")
+        expect(
+            Set(inputs.compactMap { $0["instructions"] as? String }).count == 3
+                && inputs.allSatisfy { ($0["instructions"] as? String)?.contains("温和") == true },
+            "Qwen A/B/C 请求体必须有三条保留用户 style 的真实变体指令")
+    }
+
     await suite("Qwen adapter：能力、locale、台词、profile 与 deadline 在网络前失败") {
         let transport = QwenSSETransportFixture([])
         let provider = try! QwenAICueProvider(

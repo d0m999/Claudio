@@ -277,7 +277,6 @@ public struct AICueProviderRequestCompiler: Sendable {
                 modality: plan.modality,
                 prompt: speechPrompt(
                     plan: plan,
-                    spokenContent: spokenContent,
                     variant: variant),
                 spokenContent: spokenContent,
                 languageTag: languageTag,
@@ -301,7 +300,6 @@ public struct AICueProviderRequestCompiler: Sendable {
 
     private func speechPrompt(
         plan: AICueSoundPlan,
-        spokenContent: String,
         variant: AICueVariant
     ) -> String {
         let styleTag: String
@@ -310,9 +308,8 @@ public struct AICueProviderRequestCompiler: Sendable {
         case .brisk: styleTag = "[cheerful]"
         case .restrained: styleTag = "[calm]"
         }
-        let effectTag =
-            plan.modality == .mixed ? "[sound effect: \(plan.soundDescription)] " : ""
-        return "\(effectTag)\(styleTag) \(spokenContent)"
+        let userStyle = plan.styleDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        return [userStyle, styleTag].filter { !$0.isEmpty }.joined(separator: " ")
     }
 
     private func soundPrompt(plan: AICueSoundPlan, variant: AICueVariant) -> String {

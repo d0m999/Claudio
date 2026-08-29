@@ -184,7 +184,9 @@ public struct AICueSoundPlanner: Sendable {
             soundDescription: description,
             spokenContent: spokenContent,
             languageTag: speechIntent ? request.locale : nil,
-            styleDescription: description,
+            styleDescription: styleDescription(
+                in: description,
+                excluding: quotation.range),
             targetDurationMilliseconds: min(
                 duration,
                 request.maximumDurationMilliseconds),
@@ -211,7 +213,9 @@ public struct AICueSoundPlanner: Sendable {
         markers.contains(where: value.contains)
     }
 
-    private func quotedContent(in description: String) -> (content: String?, wasPresent: Bool) {
+    private func quotedContent(
+        in description: String
+    ) -> (content: String?, range: Range<String.Index>?, wasPresent: Bool) {
         let pairs: [(Character, Character)] = [
             ("“", "”"), ("‘", "’"), ("「", "」"), ("『", "』"), ("\"", "\""),
         ]
@@ -226,9 +230,28 @@ public struct AICueSoundPlanner: Sendable {
             else { continue }
             let content = description[contentStart..<closingIndex]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !content.isEmpty { return (content, true) }
+            if !content.isEmpty {
+                return (
+                    content,
+                    openingIndex..<description.index(after: closingIndex),
+                    true
+                )
+            }
         }
-        return (nil, sawOpening)
+        return (nil, nil, sawOpening)
+    }
+
+    private func styleDescription(
+        in description: String,
+        excluding spokenQuotationRange: Range<String.Index>?
+    ) -> String {
+        guard let spokenQuotationRange else { return description }
+        var style = description
+        style.removeSubrange(spokenQuotationRange)
+        return
+            style
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     private func suggestedName(

@@ -3,6 +3,29 @@ import Foundation
 
 @MainActor
 func runDynamicQuietPolicySuites() {
+    suite("Dynamic Quiet refresh timer：common mode 在事件跟踪期间仍执行") {
+        let trackingMode = RunLoop.Mode("DynamicQuietEventTrackingTestMode")
+        CFRunLoopAddCommonMode(
+            CFRunLoopGetMain(),
+            CFRunLoopMode(rawValue: trackingMode.rawValue as CFString))
+        let fireState = DynamicQuietTimerFireState()
+        let refreshTimer = Timer(timeInterval: 0.01, repeats: false) { _ in
+            MainActor.assumeIsolated {
+                fireState.didFire = true
+            }
+        }
+        let scheduledTimer = scheduleDynamicQuietRefreshTimer(refreshTimer)
+        let deadline = Date().addingTimeInterval(0.5)
+        repeat {
+            _ = RunLoop.main.run(mode: trackingMode, before: deadline)
+        } while !fireState.didFire && Date() < deadline
+        scheduledTimer.invalidate()
+
+        expect(
+            fireState.didFire,
+            "common-mode refresh timer 必须在事件跟踪 mode 中执行")
+    }
+
     suite("Dynamic Quiet policy：两项默认关闭且只有对应显式 toggle-on 请求权限") {
         withTemporaryDynamicQuietDefaults { defaults in
             let focus = FocusQuietSystemBox(
@@ -316,8 +339,10 @@ func runDynamicQuietPolicySuites() {
                 && owner.contains("NSWorkspace.didWakeNotification")
                 && owner.contains("NSSystemTimeZoneDidChange")
                 && owner.contains("NSApplication.didBecomeActiveNotification")
-                && owner.contains("Timer.scheduledTimer("),
-            "Calendar change、唤醒、时区、activation 与周期必须刷新或让短 TTL 过期")
+                && owner.contains("let refreshTimer = Timer(")
+                && owner.contains("timer = scheduleDynamicQuietRefreshTimer(refreshTimer)")
+                && !owner.contains("Timer.scheduledTimer("),
+            "Calendar change、唤醒、时区、activation 与 common-mode 周期必须持续刷新短 TTL")
         for forbidden in [
             "event.title", "event.location", "event.url", "event.attendees", "event.notes",
             "event.calendar",
@@ -416,6 +441,11 @@ private final class DynamicQuietOptionalDateBox {
     init(_ value: Date?) {
         self.value = value
     }
+}
+
+@MainActor
+private final class DynamicQuietTimerFireState {
+    var didFire = false
 }
 
 @MainActor

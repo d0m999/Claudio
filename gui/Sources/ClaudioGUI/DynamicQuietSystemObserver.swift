@@ -79,12 +79,13 @@ final class DynamicQuietSystemObserver: NSObject {
             })
         super.init()
 
-        timer = Timer.scheduledTimer(
+        let refreshTimer = Timer(
             timeInterval: 5,
             target: self,
             selector: #selector(refreshDynamicQuietState),
             userInfo: nil,
             repeats: true)
+        timer = scheduleDynamicQuietRefreshTimer(refreshTimer)
         installRefreshSignals()
         refreshDynamicQuietState()
     }

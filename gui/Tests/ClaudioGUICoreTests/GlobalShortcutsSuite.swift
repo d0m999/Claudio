@@ -4,6 +4,27 @@ import Foundation
 
 @MainActor
 func runGlobalShortcutsSuites() {
+    suite("Global shortcuts：Settings handback 在激活 Claudio 前选择外部前台 app") {
+        expect(
+            resolveGlobalShortcutHandbackApplication(
+                frontmostApplication: "External App",
+                previousApplication: "Previous App",
+                isCurrentApplication: { $0 == "Claudio" }) == "External App",
+            "外部 app 触发快捷键时必须直接捕获当前 frontmost app")
+        expect(
+            resolveGlobalShortcutHandbackApplication(
+                frontmostApplication: "Claudio",
+                previousApplication: "Previous App",
+                isCurrentApplication: { $0 == "Claudio" }) == "Previous App",
+            "Claudio 已在前台时必须保留现有 handback debt")
+        expect(
+            resolveGlobalShortcutHandbackApplication(
+                frontmostApplication: Optional<String>.none,
+                previousApplication: "Previous App",
+                isCurrentApplication: { $0 == "Claudio" }) == nil,
+            "无法读取 frontmost app 时不得猜测 handback target")
+    }
+
     suite("Global shortcuts：modifier normalization 与输入约束") {
         let normalized = GlobalShortcut(
             shortcutID: .togglePanel,
@@ -543,6 +564,13 @@ func runGlobalShortcutsSuites() {
                 && menu.contains("requestCurrentScopeEventsFromShortcut()")
                 && menu.contains("settingsWindowController.prepareEventSettingsRoute(route)"),
             "注册与三项 action 必须由 MenuBarController 生命周期持有")
+        expect(
+            menu.contains("private func globalShortcutHandbackApplication()")
+                && menu.contains("resolveGlobalShortcutHandbackApplication(")
+                && menu.components(
+                    separatedBy: "handbackApplication: globalShortcutHandbackApplication()"
+                ).count - 1 == 2,
+            "通用设置与当前 Sound Scope 两个入口必须接入同一已测试 handback 规则")
         expect(
             settingsController.contains("func prepareEventSettingsRoute(")
                 && settingsController.contains(".destination(.eventsAndSounds)"),

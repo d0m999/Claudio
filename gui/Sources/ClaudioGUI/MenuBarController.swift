@@ -610,6 +610,16 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         }
     }
 
+    private func globalShortcutHandbackApplication() -> NSRunningApplication? {
+        let frontmost = NSWorkspace.shared.frontmostApplication
+        return resolveGlobalShortcutHandbackApplication(
+            frontmostApplication: frontmost,
+            previousApplication: previousApp,
+            isCurrentApplication: {
+                $0.processIdentifier == ProcessInfo.processInfo.processIdentifier
+            })
+    }
+
     private func requestCurrentScopeEventsFromShortcut() {
         let scopes = panelSoundScopePresentations(
             sourceRows: hostIntegrations.content.sourceRows,
@@ -620,17 +630,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             storedValue: storedValue,
             scopes: scopes)
 
-        let frontmost = NSWorkspace.shared.frontmostApplication
-        let handback: NSRunningApplication?
-        if frontmost?.processIdentifier == ProcessInfo.processInfo.processIdentifier {
-            handback = previousApp
-        } else {
-            handback = frontmost
-        }
         requestSettingsPresentation(
             route: settingsWindowController.prepareEventSettingsRoute(route),
             returnFocusTo: nil,
-            handbackApplication: handback)
+            handbackApplication: globalShortcutHandbackApplication())
     }
 
     /// The Integrations destination follows the same close-before-show rule as other management
@@ -652,7 +655,10 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     /// Production generic Settings entry. No explicit route is supplied, so the retained owner
     /// restores the last legal top-level destination from the shared typed preferences.
     func requestSettingsWindowPresentation() {
-        requestSettingsPresentation(route: nil, returnFocusTo: nil)
+        requestSettingsPresentation(
+            route: nil,
+            returnFocusTo: nil,
+            handbackApplication: globalShortcutHandbackApplication())
     }
 
     /// Integrations recovery stays inside the one retained Settings window. It carries stable

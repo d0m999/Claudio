@@ -151,7 +151,7 @@ func runAICueProviderContractsSuites() {
             "两个 Qwen region 必须共享固定 model/voice/auth/PCM，不共享 endpoint 或 slot")
     }
 
-    suite("AI 提示音 request compiler：明确台词逐字保留且公共请求没有 Provider HTTP 字段") {
+    suite("AI 提示音 request compiler：台词与用户 style 分离且公共请求无 HTTP 字段") {
         let request = try! AICueGenerationRequest(
             description: "Say \"  Task  complete  \" in a calm voice",
             locale: "en",
@@ -163,7 +163,10 @@ func runAICueProviderContractsSuites() {
             variant: .restrained)
 
         expect(plan.spokenContent == "Task  complete", "台词只能 trim 边缘，内部原文必须逐字保留")
+        expect(plan.styleDescription == "Say in a calm voice", "style 必须排除完整台词引号范围")
         expect(compiled.spokenContent == "Task  complete", "provider-neutral request 必须保留明确台词")
+        expect(compiled.prompt.contains("calm voice"), "编译后 instruction 必须保留用户 style")
+        expect(!compiled.prompt.contains("Task  complete"), "instruction 不得重复引号内台词")
         expect(compiled.profileID == .elevenLabsGlobal, "request 必须冻结所选 profile identity")
         let labels = Set(Mirror(reflecting: compiled).children.compactMap(\.label))
         expect(
@@ -172,6 +175,30 @@ func runAICueProviderContractsSuites() {
                 "displayName",
             ]),
             "公共 request 不能携带 endpoint/model/voice/auth/secret/name")
+    }
+
+    suite("AI 提示音 request compiler：三个语音变体保留同一用户 style 且指令各异") {
+        let request = try! AICueGenerationRequest(
+            description: "用温和的声音说“可以继续”",
+            locale: "zh-Hans",
+            providerProfileID: .qwenSingapore)
+        let plan = try! AICueSoundPlanner().makePlan(for: request)
+        let compiled = AICueVariant.allCases.map {
+            try! AICueProviderRequestCompiler().compile(
+                plan: plan,
+                profileID: request.providerProfileID,
+                variant: $0)
+        }
+
+        expect(plan.styleDescription == "用温和的声音说", "中文 style 必须只移除台词引号范围")
+        expect(
+            compiled.allSatisfy {
+                $0.spokenContent == "可以继续"
+                    && $0.prompt.contains("温和")
+                    && !$0.prompt.contains("可以继续")
+            },
+            "A/B/C 必须共享明确台词与用户 style，且 instruction 不重复台词")
+        expect(Set(compiled.map(\.prompt)).count == 3, "clear/brisk/restrained 必须编译为三条不同指令")
     }
 
     suite("AI 提示音 request compiler：未知 profile、能力与 locale 在本地 fail closed") {

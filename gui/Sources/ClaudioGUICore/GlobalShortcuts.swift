@@ -157,6 +157,21 @@ public func globalShortcutDefaultsKey(_ action: GlobalShortcutAction) -> String 
     "Claudio.GlobalShortcut.\(action.rawValue)"
 }
 
+/// Selects the application that should regain activation after a Settings window opened by a
+/// global shortcut closes. The generic payload keeps AppKit out of `ClaudioGUICore` while making
+/// the pre-activation selection rule executable in the package harness.
+package func resolveGlobalShortcutHandbackApplication<Application>(
+    frontmostApplication: Application?,
+    previousApplication: Application?,
+    isCurrentApplication: (Application) -> Bool
+) -> Application? {
+    guard let frontmostApplication else { return nil }
+    if isCurrentApplication(frontmostApplication) {
+        return previousApplication
+    }
+    return frontmostApplication
+}
+
 public func validateGlobalShortcut(
     _ shortcut: GlobalShortcut,
     existing: [GlobalShortcut]

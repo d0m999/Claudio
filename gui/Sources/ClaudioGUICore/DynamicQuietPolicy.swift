@@ -170,6 +170,17 @@ public func calendarQuietIsBusy(
     }
 }
 
+/// Registers the app-lifetime refresh timer in common modes so menu and control tracking cannot
+/// suspend renewal of the short-lived Dynamic Quiet snapshot.
+@MainActor
+package func scheduleDynamicQuietRefreshTimer(
+    _ timer: Timer,
+    on runLoop: RunLoop = .main
+) -> Timer {
+    runLoop.add(timer, forMode: .common)
+    return timer
+}
+
 public enum DynamicQuietCurrentReason: String, Sendable, Equatable {
     case policiesDisabled = "policies_disabled"
     case permissionRequired = "permission_required"
