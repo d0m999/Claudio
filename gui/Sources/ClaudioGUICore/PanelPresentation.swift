@@ -292,13 +292,23 @@ public func panelSoundScopeMenuLayout(
             optionsHeight + diagnosticsHeight + chromeHeight))
 }
 
-/// Global 恒在；普通 Surface 只在“已配置或可用”时进入 popup。`.notConnected` 仍由
-/// IntegrationsWindow 完整呈现，不会因为 popup 过滤而丢失诊断入口。
+/// 面板与 Events 共用的 Sound Scope 身份。Global 恒在；普通 Surface 只在“已配置或可用”时
+/// 进入选择器。`.notConnected` 仍由 Integrations 完整呈现，不会因为 Sound Scope 过滤而丢失诊断入口。
+public func panelSoundScopeIDs(
+    sourceRows: [HostSourceRowPresentation]
+) -> [PanelSoundScopeID] {
+    let byHost = Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.host, $0) })
+    let surfaces = hostSurfacePresentationOrder().compactMap { host -> PanelSoundScopeID? in
+        guard let row = byHost[host], row.status != .notConnected else { return nil }
+        return .surface(host.surfaceID)
+    }
+    return [.global] + surfaces
+}
+
 public func panelSoundScopePresentations(
     sourceRows: [HostSourceRowPresentation],
     config: ClaudioConfig,
-    language: ClaudioAppLanguage,
-    includesDisconnected: Bool = false
+    language: ClaudioAppLanguage
 ) -> [PanelSoundScopePresentation] {
     let l10n = ClaudioL10n(language: language)
     let separator = language == .english ? ", " : "，"
@@ -322,10 +332,11 @@ public func panelSoundScopePresentations(
         accessibilityLabel: [globalName, globalSummary].joined(separator: separator))
 
     let byHost = Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.host, $0) })
+    let visibleSurfaces = Set(panelSoundScopeIDs(sourceRows: sourceRows).compactMap(\.surface))
     let surfaces = hostSurfacePresentationOrder().compactMap {
         host -> PanelSoundScopePresentation? in
         guard let raw = byHost[host] else { return nil }
-        guard includesDisconnected || raw.status != .notConnected else { return nil }
+        guard visibleSurfaces.contains(host.surfaceID) else { return nil }
         let hasOverride =
             config.surfaceOverrides[host.surfaceID.rawValue] != nil
             || config.invalidSurfaceOverrideKeys.contains(host.surfaceID.rawValue)

@@ -46,8 +46,7 @@ struct EventSettingsWindowView: View {
         panelSoundScopePresentations(
             sourceRows: hostIntegrations.content.sourceRows,
             config: model.configState.resolvedConfig,
-            language: languageStore.language,
-            includesDisconnected: true)
+            language: languageStore.language)
     }
     private var resolvedScope: PanelSoundScopeID {
         resolvedEventSettingsScope(route: selection.route, scopes: scopes)

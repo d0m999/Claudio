@@ -2657,7 +2657,7 @@ func runViewWiringSuites() {
             "统一设置必须嵌入同一事件事实/selection、预应用深链并内部路由 Sounds")
         expect(
             !flatView.contains("EventSettingsPresentationContext")
-                && flatView.contains("includesDisconnected: true")
+                && !flatView.contains("includesDisconnected")
                 && flatView.contains("eventSettingsShouldCloseAICueComposer(")
                 && flatView.contains("eventSettingsAICueComposerMatches(")
                 && !flatView.contains("showsAICueGeneration")

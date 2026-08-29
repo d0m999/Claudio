@@ -88,8 +88,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             availability: settingsRouteAvailability(
                 packIDs: Set(soundPacksEditorOwner.model.packCards.map(\.id)),
                 libraryState: soundPacksEditorOwner.model.libraryPresentationState,
-                publishedSurfaces: Set(
-                    hostIntegrations.content.sourceRows.map { $0.host.surfaceID })))
+                sourceRows: hostIntegrations.content.sourceRows))
         super.init()
 
         externalActivationCancellable = NSWorkspace.shared.notificationCenter
@@ -138,8 +137,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 settingsRouteAvailability(
                     packIDs: Set(cards.map(\.id)),
                     libraryState: libraryState,
-                    publishedSurfaces: Set(
-                        integrationContent.sourceRows.map { $0.host.surfaceID }))
+                    sourceRows: integrationContent.sourceRows)
             }
             .removeDuplicates()
             .sink { [weak self] availability in
@@ -462,16 +460,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 private func settingsRouteAvailability(
     packIDs: Set<String>,
     libraryState: SoundPackLibraryPresentationState,
-    publishedSurfaces: Set<HostSurfaceID>
+    sourceRows: [HostSourceRowPresentation]
 ) -> SettingsRouteAvailability {
+    let publishedSurfaces = Set(sourceRows.map { $0.host.surfaceID })
     let productScopes = HostID.productVisibleCases.map {
         PanelSoundScopeID.surface($0.surfaceID)
     }
     return SettingsRouteAvailability(
         integrationSurfaces: publishedSurfaces,
-        eventScopes: Set(
-            [PanelSoundScopeID.global]
-                + publishedSurfaces.map(PanelSoundScopeID.surface)),
+        eventScopes: Set(panelSoundScopeIDs(sourceRows: sourceRows)),
         soundScopes: Set([PanelSoundScopeID.global] + productScopes),
         soundPackIDs: packIDs,
         soundPackSnapshotIsFresh: libraryState == .ready,

@@ -193,28 +193,39 @@ func runPanelPresentationSuites() async {
         }
     }
 
-    suite("事件设置作用域：统一设置显示全部已发布 Surface，面板默认仍过滤未连接来源") {
+    suite("事件设置作用域：与面板同源过滤未连接 Surface，陈旧深链接保留可见失败") {
         let rows = [
             panelPresentationRow(.claudeCode, status: .notConnected, supported: 5),
             panelPresentationRow(.workBuddy, status: .ready, supported: 2),
         ]
+        let scopeIDs = panelSoundScopeIDs(sourceRows: rows)
         let panelScopes = panelSoundScopePresentations(
             sourceRows: rows,
             config: ClaudioConfig(selectedPack: "pack"),
             language: .zhHans)
-        let settingsScopes = panelSoundScopePresentations(
-            sourceRows: rows,
-            config: ClaudioConfig(selectedPack: "pack"),
-            language: .zhHans,
-            includesDisconnected: true)
 
         expect(
-            panelScopes.map(\.scope) == [.global, .surface(.workBuddy)],
-            "既有面板/standalone 默认必须继续过滤未连接来源")
+            scopeIDs == [.global, .surface(.workBuddy)]
+                && panelScopes.map(\.scope) == scopeIDs,
+            "面板与 Events route availability 必须消费同一份已配置/可用作用域真相")
+
+        let availability = SettingsRouteAvailability(
+            integrationSurfaces: [.claudeCode, .workBuddy],
+            eventScopes: Set(scopeIDs),
+            soundScopes: Set(scopeIDs),
+            soundPackIDs: [],
+            events: Set(Event.allCases))
+        let disconnected = resolveSettingsRoute(
+            .events(scope: .surface(.claudeCode), event: .stop),
+            availability: availability)
+        let available = resolveSettingsRoute(
+            .events(scope: .surface(.workBuddy), event: .stop),
+            availability: availability)
+
         expect(
-            settingsScopes.map(\.scope)
-                == [.global, .surface(.claudeCode), .surface(.workBuddy)],
-            "统一设置必须按 registry 顺序显示全部已发布 Surface")
+            disconnected.failure == .staleSurface(.claudeCode),
+            "未连接 Surface 不得出现在 Events 选择器，typed deep link 必须留下可见失败")
+        expect(available.failure == nil, "可用 Surface 的 typed deep link 必须继续正常解析")
     }
 
     await suite("试听全部：离主线程规划真实文件、保持公共事件顺序并可取消") {

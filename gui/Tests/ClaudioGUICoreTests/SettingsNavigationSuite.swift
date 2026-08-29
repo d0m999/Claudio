@@ -495,6 +495,10 @@ func runSettingsNavigationSuites() {
                 && controller.contains("integrationsModel.noteWindowVisibility(state.isVisible)"),
             "Integrations destination 必须复用完整 model/view、解析 Surface 深链并在窗口内路由 Events")
         expect(
+            controller.contains("eventScopes: Set(panelSoundScopeIDs(sourceRows: sourceRows))")
+                && controller.contains("integrationSurfaces: publishedSurfaces"),
+            "Events 与面板必须共享可用 Sound Scope 过滤，Integrations 仍保留全部已发布 Surface")
+        expect(
             controller.contains("soundPackSelectionAnnouncementCancellable")
                 && controller.contains("soundPackLibraryAnnouncementCancellable")
                 && controller.contains("soundPackStatusAnnouncementCancellable")
