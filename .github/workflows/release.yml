@@ -249,7 +249,7 @@ jobs:
             gui/.build/arm64-apple-macosx/release/ClaudioGUI \
             gui/.build/x86_64-apple-macosx/release/ClaudioGUI \
             -output dist/app-bin/ClaudioGUI
-          strip -x dist/app-bin/ClaudioGUI
+          strip dist/app-bin/ClaudioGUI
           chmod +x dist/app-bin/ClaudioGUI
 
       - name: Merge universal LoginItem

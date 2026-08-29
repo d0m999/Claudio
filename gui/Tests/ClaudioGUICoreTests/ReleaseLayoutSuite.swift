@@ -216,8 +216,11 @@ func runReleaseLayoutSuites() {
             "Info.plist 必须把 CFBundleExecutable 绑定到 APP_EXECUTABLE")
         expect(
             yaml.contains("strip -x dist/bin/claudio")
-                && yaml.contains("strip -x dist/app-bin/ClaudioGUI"),
-            "release workflow 必须在组装 app 前移除两个 Release Mach-O 的非导出符号")
+                && yaml.contains("strip dist/app-bin/ClaudioGUI")
+                && !yaml.contains("strip -x dist/app-bin/ClaudioGUI")
+                && yaml.contains("strip -x dist/app-bin/ClaudioLoginItem"),
+            "release workflow 必须完整移除 GUI 的 Swift 符号表，且不得改变 helper/LoginItem "
+                + "既有 strip 合同")
         expect(
             yaml.contains(#"ln -s claudi0 "$APP/Contents/Resources/bin/claudio""#),
             "legacy claudio bundle 入口必须链接到 claudi0，不能复制第二份 helper Mach-O")
@@ -449,6 +452,10 @@ func runReleaseLayoutSuites() {
             expect(false, "读不到内置包 manifest、许可证台账或 dev bundle 脚本")
             return
         }
+        let devCommands = logicalCommandLines(in: devBundle)
+        let helperLoginItemStripCommand =
+            #"strip -x "$APP/Contents/Resources/bin/claudi0" "#
+            + #""$LOGIN_ITEM_APP/Contents/MacOS/claudi0-login-item""#
 
         expect(manifest["schema"] as? Int == 1, "新增 task_start 不得升级 manifest schema")
         expect(manifest["version"] as? String == "1.1.0", "minimal-chime 必须以 1.1.0 分发")
@@ -489,10 +496,12 @@ func runReleaseLayoutSuites() {
                     #"codesign --force --sign - "$LOGIN_ITEM_APP""#),
             "dev bundle 必须显式构建、组装并在外层 app 前签名 LoginItem")
         expect(
-            devBundle.contains("strip -x")
+            devCommands.contains(#"strip "$APP/Contents/MacOS/claudi0-app""#)
+                && !devCommands.contains(#"strip -x "$APP/Contents/MacOS/claudi0-app""#)
+                && devCommands.contains(helperLoginItemStripCommand)
                 && devBundle.contains(#"bash "$repo_root/scripts/check-release-size.sh""#)
                 && devBundle.contains(#"ln -s claudi0 "$APP/Contents/Resources/bin/claudio""#),
-            "dev bundle 必须与正式发布一样 strip 并执行体积门禁")
+            "dev bundle 必须与正式发布一样完整 strip GUI、保留 helper/LoginItem 的 -x 合同并执行体积门禁")
     }
 
     suite("release-size 门禁：逐架构边界、别名、架构与 bundle 总量都 fail closed") {

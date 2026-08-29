@@ -149,8 +149,11 @@ PLIST
         "$LOGIN_ITEM_BINARY" "$APP" "$BUNDLE_VERSION"
     LOGIN_ITEM_APP="$APP/Contents/Library/LoginItems/claudi0 LoginItem.app"
 
+    # The SwiftUI executable exports a large Swift symbol table that the app never loads by name.
+    # Strip it completely before the size gate; helper/LoginItem keep their existing external
+    # symbols because they are separate release contracts with their own budgets.
+    strip "$APP/Contents/MacOS/claudi0-app"
     strip -x \
-        "$APP/Contents/MacOS/claudi0-app" \
         "$APP/Contents/Resources/bin/claudi0" \
         "$LOGIN_ITEM_APP/Contents/MacOS/claudi0-login-item"
     bash "$repo_root/scripts/check-release-size.sh" "$APP"
