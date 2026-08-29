@@ -1,16 +1,15 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
-import ClaudioLocalization
 import SwiftUI
 
 /// The real menu-bar app entry point (ENGINEERING.md T15 D2) — replaces T7's temporary
 /// `WindowGroup { OnboardingView(...) }` scaffolding, whose own doc comment already flagged
 /// it as disposable ("expected to be replaced wholesale once the menu bar skeleton lands").
 /// `Settings {}` remains the smallest legal placeholder `Scene` SwiftUI's `App` protocol
-/// requires; its command is redirected to the retained AppKit Settings owner. The app's UI is the
-/// `NSStatusItem`/`NSPopover` ``MenuBarController`` owns, driven entirely by
-/// ``ClaudioGUIAppDelegate``; this menu-bar-only app still has no document window.
+/// requires. Its process-wide command is removed because the accessory app may be active while a
+/// host still owns the visible menu bar; explicit panel and Carbon entries route to the retained
+/// AppKit owner instead. This menu-bar-only app still has no document window.
 ///
 /// ⚠️ COMPILE-ONLY here (see ``MenuBarController``'s doc comment): the actual menu-bar
 /// icon, popover open/close, and focus behavior are manual-verify on a real Mac.
@@ -22,27 +21,12 @@ struct ClaudioGUIApp: App {
         Settings {
             EmptyView()
         }
-        // Replace SwiftUI's blank Settings scene command with the retained, typed AppKit owner.
-        // The app is active while its popover is key, so ⌘, is the generic in-app entry; the
-        // controller closes the transient popover before showing Settings and preserves handback.
+        // SwiftUI synthesizes a process-wide ⌘, for every Settings scene. The popover activates
+        // this accessory process while the visible menu bar may still belong to a host, so keeping
+        // that key equivalent would steal the host's Settings shortcut. Only the synthesized item
+        // is removed; explicit panel routes and user-configured Carbon shortcuts remain available.
         .commands {
-            ClaudioSettingsCommands(
-                preferences: appDelegate.preferences,
-                showSettings: { appDelegate.showSettings() })
-        }
-    }
-}
-
-private struct ClaudioSettingsCommands: Commands {
-    @ObservedObject var preferences: ClaudioPreferences
-    let showSettings: @MainActor () -> Void
-
-    var body: some Commands {
-        CommandGroup(replacing: .appSettings) {
-            Button(
-                ClaudioL10n(language: preferences.language).text(.settingsWindowTitle) + "…",
-                action: showSettings)
-                .keyboardShortcut(",", modifiers: .command)
+            CommandGroup(replacing: .appSettings) {}
         }
     }
 }
@@ -191,10 +175,6 @@ final class ClaudioGUIAppDelegate: NSObject, NSApplicationDelegate {
         #endif
     }
 
-    @MainActor
-    func showSettings() {
-        menuBarController?.requestSettingsWindowPresentation()
-    }
 }
 
 #if CLAUDIO_NATIVE_HOST_CARD_PROBE

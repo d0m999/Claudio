@@ -3,9 +3,9 @@ import Foundation
 
 /// App-lifetime owner of the one writable sound-pack editor model.
 ///
-/// The legacy standalone window and unified Settings destination are presentations of this owner,
-/// not separate disk-backed models. Route application lives in the Foundation-only module so the
-/// embedded Scope/pack/Event contract can be exercised without constructing AppKit or SwiftUI.
+/// The unified Settings destination is the only production presentation of this owner. Route
+/// application lives in the Foundation-only module so the embedded Scope/pack/Event contract can
+/// be exercised without constructing AppKit or SwiftUI.
 @MainActor
 public final class SoundPacksEditorOwner {
     public let model: SoundPacksWindowModel
@@ -88,9 +88,18 @@ public final class SoundPacksEditorOwner {
         refreshCoordinator?.completePanelPackSwitch(outcome)
     }
 
-    /// Coordinates asynchronous status announcements across the Settings and legacy window
-    /// presentations. A revision posted by whichever window is actually key is consumed once for
-    /// both, so the other retained window cannot replay that status when it later becomes key.
+    /// Headless adoption entry used by the retained Events & Sounds destination. It reuses this
+    /// owner's disk-backed model and package-lock publication path without creating another window
+    /// or write owner.
+    public func adoptAICue(
+        _ request: AICueAdoptionRequest
+    ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
+        model.setManagedSurface(request.target.surface)
+        return await model.adoptAICue(request)
+    }
+
+    /// Coordinates asynchronous status announcements across retained Settings presentations. A
+    /// revision is consumed only after the actual key Sounds destination posts it successfully.
     public func beginStatusAnnouncementAttempt(revision: Int, isWindowKey: Bool) -> Bool {
         statusAnnouncementTracker.beginAttempt(
             revision: revision,

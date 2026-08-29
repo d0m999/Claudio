@@ -164,6 +164,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onClose restoration: @escaping @MainActor (NSRunningApplication?) -> Void
     ) {
         loginItemSettings.refresh()
+        if let route {
+            applyEmbeddedRoute(route)
+        }
         focusRestoration = restoration
         isPresentingWindow = true
         let wasVisible = window?.isVisible == true
@@ -186,25 +189,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         isPresentingWindow = false
     }
 
-    /// A global shortcut validates the persisted panel scope before crossing this owner. Unknown
-    /// or no-longer-published scopes still open the real Events destination on the safe fallback
-    /// carried by `route`, while the embedded destination retains the visible recovery reason.
-    func showEventSettingsFromGlobalShortcut(
-        _ route: EventSettingsWindowRoute,
-        returnFocusTo application: NSRunningApplication?,
-        onClose restoration: @escaping @MainActor (NSRunningApplication?) -> Void
-    ) {
+    /// Prepares a global-shortcut route before the shared close-before-show handoff. Unknown or
+    /// no-longer-published scopes still open the real Events destination on a safe fallback, while
+    /// the embedded selection retains the visible recovery reason.
+    func prepareEventSettingsRoute(_ route: EventSettingsWindowRoute) -> SettingsRoute {
         eventSettingsSelection.select(route)
-        let settingsRoute: SettingsRoute
         if route.unavailableRequestedScopeStoredValue == nil {
-            settingsRoute = .events(scope: route.scope, event: route.event)
-        } else {
-            settingsRoute = .destination(.eventsAndSounds)
+            return .events(scope: route.scope, event: route.event)
         }
-        showWindow(
-            route: settingsRoute,
-            returnFocusTo: application,
-            onClose: restoration)
+        return .destination(.eventsAndSounds)
     }
 
     func windowDidBecomeKey(_ notification: Notification) {
@@ -296,7 +289,24 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     /// In-window actions submit a typed route without creating or presenting another window.
     func request(_ route: SettingsRoute) {
+        applyEmbeddedRoute(route)
         model.request(route)
+    }
+
+    private func applyEmbeddedRoute(_ route: SettingsRoute) {
+        switch route {
+        case .integrations(let surface):
+            guard
+                let host = HostID.productVisibleCases.first(where: { $0.surfaceID == surface })
+            else { return }
+            integrationsModel.select(.host(host))
+        case .events(let scope, let event):
+            let eventRoute = EventSettingsWindowRoute(scope: scope, event: event)
+            eventSettingsSelection.select(eventRoute)
+            eventSettingsModel.selectSoundSurface(eventRoute.surface)
+        case .destination, .sounds:
+            break
+        }
     }
 
     private func updateIntegrationsPresentationState(

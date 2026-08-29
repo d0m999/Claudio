@@ -6,19 +6,9 @@ import ClaudioLocalization
 import SoundPacksWindow
 import SwiftUI
 
-enum EventSettingsPresentationContext: Equatable {
-    case standaloneWindow
-    case unifiedSettings
-
-    var includesAICueComposer: Bool { true }
-    var includesDisconnectedScopes: Bool { self == .unifiedSettings }
-    var groupsScopesByHostProduct: Bool { self == .unifiedSettings }
-    var includesPlaybackSettings: Bool { self == .unifiedSettings }
-}
-
 /// Production Events & Sounds surface corresponding to the prototype's scoped events page.
 /// It reuses the panel's manager-owned scope and event projections; full per-event file editing
-/// remains delegated to SoundPacksWindow.
+/// routes inside the same retained Settings window to the embedded Sounds editor.
 @MainActor
 struct EventSettingsWindowView: View {
     @ObservedObject var model: PanelConfigController
@@ -36,8 +26,6 @@ struct EventSettingsWindowView: View {
         @MainActor (AICueAdoptionRequest) async -> Result<
             AICueAdoptionOutcome, AICueAdoptionError
         >
-    let presentationContext: EventSettingsPresentationContext
-
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var previewPlayer = NSSoundAudioPreviewPlayer()
@@ -54,7 +42,7 @@ struct EventSettingsWindowView: View {
             sourceRows: hostIntegrations.content.sourceRows,
             config: model.configState.resolvedConfig,
             language: languageStore.language,
-            includesDisconnected: presentationContext.includesDisconnectedScopes)
+            includesDisconnected: true)
     }
     private var resolvedScope: PanelSoundScopeID {
         resolvedEventSettingsScope(route: selection.route, scopes: scopes)
@@ -94,7 +82,7 @@ struct EventSettingsWindowView: View {
             guard revision > handledFocusRequestRevision else { return }
             handledFocusRequestRevision = revision
             if eventSettingsShouldCloseAICueComposer(
-                includesAICueComposer: presentationContext.includesAICueComposer,
+                includesAICueComposer: true,
                 targetSurface: aiCueViewModel.target?.surface,
                 targetEvent: aiCueViewModel.target?.event,
                 selectedSurface: selectedScope.scope.surface,
@@ -107,30 +95,24 @@ struct EventSettingsWindowView: View {
                 scopes: scopes.map(\.scope))
         }
         .onAppear {
-            if presentationContext == .unifiedSettings {
-                model.reload()
-            }
+            model.reload()
             reconcileScopeSelection()
         }
         .onChange(of: selection.route) { _ in reconcileScopeSelection() }
         .onChange(of: scopes.map(\.scope)) { _ in reconcileScopeSelection() }
         .onChange(of: model.config.selectedPack) { _ in
-            if presentationContext.includesAICueComposer {
-                closeAICueComposer()
-            }
+            closeAICueComposer()
         }
         .onChange(of: aiCueViewModel.providerProfileID) { _ in
             stopCandidatePreview()
         }
         .onChange(of: aiCueViewModel.requiresCredentialConfiguration) { required in
-            if presentationContext.includesAICueComposer, required {
+            if required {
                 showsCredentialSheet = true
             }
         }
         .task {
-            if presentationContext.includesAICueComposer {
-                await aiCueViewModel.refreshCredentialStatus()
-            }
+            await aiCueViewModel.refreshCredentialStatus()
         }
         .sheet(isPresented: $showsCredentialSheet) {
             EventSettingsAICueCredentialSheet(
@@ -141,9 +123,7 @@ struct EventSettingsWindowView: View {
             stopAllPreviews()
             previewPlayer.stop()
             playingCandidateID = nil
-            if presentationContext.includesAICueComposer {
-                aiCueViewModel.endSession()
-            }
+            aiCueViewModel.endSession()
         }
     }
 
@@ -166,24 +146,18 @@ struct EventSettingsWindowView: View {
 
     @ViewBuilder
     private var scopeOptions: some View {
-        if presentationContext.groupsScopesByHostProduct {
-            if let global = scopes.first(where: { $0.scope == .global }) {
-                scopeButton(global)
-            }
-            ForEach(hostSourceProductGroups(from: hostIntegrations.content.sourceRows)) { group in
-                Text(group.title)
-                    .font(ClaudioTheme.font(.caption).weight(.semibold))
-                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 9)
-                    .accessibilityAddTraits(.isHeader)
-                ForEach(scopesForProduct(group.product)) { scope in
-                    scopeButton(scope)
-                }
-            }
-        } else {
-            ForEach(scopes) { scope in
+        if let global = scopes.first(where: { $0.scope == .global }) {
+            scopeButton(global)
+        }
+        ForEach(hostSourceProductGroups(from: hostIntegrations.content.sourceRows)) { group in
+            Text(group.title)
+                .font(ClaudioTheme.font(.caption).weight(.semibold))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.top, 9)
+                .accessibilityAddTraits(.isHeader)
+            ForEach(scopesForProduct(group.product)) { scope in
                 scopeButton(scope)
             }
         }
@@ -255,30 +229,26 @@ struct EventSettingsWindowView: View {
                 .padding(.bottom, 18)
                 .accessibilityIdentifier("event-settings.shortcut-scope-failure")
             }
-            if presentationContext.includesAICueComposer {
-                EventSettingsAICueServiceCard(
-                    viewModel: aiCueViewModel,
-                    languageStore: languageStore,
-                    onManageCredential: { showsCredentialSheet = true }
-                )
-                .padding(.horizontal, 24)
-                .padding(.bottom, 18)
-                if let eligibility = aiCuePageEligibility,
-                    case .ineligible = eligibility
-                {
-                    aiCueAvailabilityNotice(eligibility)
-                        .padding(.horizontal, 24)
-                        .padding(.bottom, 18)
-                }
+            EventSettingsAICueServiceCard(
+                viewModel: aiCueViewModel,
+                languageStore: languageStore,
+                onManageCredential: { showsCredentialSheet = true }
+            )
+            .padding(.horizontal, 24)
+            .padding(.bottom, 18)
+            if let eligibility = aiCuePageEligibility,
+                case .ineligible = eligibility
+            {
+                aiCueAvailabilityNotice(eligibility)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 18)
             }
             Divider()
             GeometryReader { geometry in
                 ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 20) {
                         eventRows(availableWidth: max(0, geometry.size.width - 48))
-                        if presentationContext.includesPlaybackSettings {
-                            playbackSettings
-                        }
+                        playbackSettings
                     }
                     .padding(24)
                 }
@@ -307,19 +277,17 @@ struct EventSettingsWindowView: View {
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("event-settings.header")
             Spacer(minLength: 8)
-            if presentationContext.includesPlaybackSettings {
-                Button {
-                    playAllPreviews()
-                } label: {
-                    Label(l10n.text(.eventSettingsPreviewAll), systemImage: "play.fill")
-                }
-                .buttonStyle(.bordered)
-                .disabled(!events.contains(where: { $0.controls.previewEnabled }))
-                .focused($focusedTarget, equals: .previewAll)
-                .accessibilityLabel(l10n.text(.eventSettingsPreviewAll))
-                .accessibilityHint(l10n.text(.eventSettingsPreviewAllHint))
-                .accessibilityIdentifier("event-settings.preview-all")
+            Button {
+                playAllPreviews()
+            } label: {
+                Label(l10n.text(.eventSettingsPreviewAll), systemImage: "play.fill")
             }
+            .buttonStyle(.bordered)
+            .disabled(!events.contains(where: { $0.controls.previewEnabled }))
+            .focused($focusedTarget, equals: .previewAll)
+            .accessibilityLabel(l10n.text(.eventSettingsPreviewAll))
+            .accessibilityHint(l10n.text(.eventSettingsPreviewAllHint))
+            .accessibilityIdentifier("event-settings.preview-all")
         }
     }
 
@@ -547,22 +515,17 @@ struct EventSettingsWindowView: View {
                                                     packID: model.config.selectedPack,
                                                     event: event.event))
                                     },
-                                    showsAICueGeneration:
-                                        presentationContext.includesAICueComposer,
-                                    usesAutomaticPlaybackToggle:
-                                        presentationContext == .unifiedSettings,
                                     inheritanceText: eventInheritanceText(event.event),
                                     aiCueGenerationEnabled: aiCueGenerationIsEnabled(eligibility),
                                     aiCueGenerationHint: aiCueEligibilityHint(eligibility),
                                     soundEditingEnabled: !model.config.selectedPack.isEmpty
                                         && model.surfaceSoundIssue == nil,
                                     writeDisabledReason: model.surfaceSoundIssue)
-                                if presentationContext.includesAICueComposer,
-                                    eventSettingsAICueComposerMatches(
-                                        targetSurface: aiCueViewModel.target?.surface,
-                                        targetEvent: aiCueViewModel.target?.event,
-                                        selectedSurface: selectedScope.scope.surface,
-                                        event: event.event)
+                                if eventSettingsAICueComposerMatches(
+                                    targetSurface: aiCueViewModel.target?.surface,
+                                    targetEvent: aiCueViewModel.target?.event,
+                                    selectedSurface: selectedScope.scope.surface,
+                                    event: event.event)
                                 {
                                     EventSettingsAICueComposerView(
                                         viewModel: aiCueViewModel,
@@ -679,9 +642,7 @@ struct EventSettingsWindowView: View {
 
     private func selectScope(_ scope: PanelSoundScopeID) {
         stopAllPreviews()
-        if presentationContext.includesAICueComposer {
-            closeAICueComposer()
-        }
+        closeAICueComposer()
         selection.select(EventSettingsWindowRoute(scope: scope))
         model.selectSoundSurface(scope.surface)
     }
@@ -689,7 +650,7 @@ struct EventSettingsWindowView: View {
     private func reconcileScopeSelection() {
         let scope = selectedScope.scope
         if eventSettingsShouldCloseAICueComposer(
-            includesAICueComposer: presentationContext.includesAICueComposer,
+            includesAICueComposer: true,
             targetSurface: aiCueViewModel.target?.surface,
             selectedSurface: scope.surface)
         {
@@ -797,8 +758,6 @@ private struct EventSettingsEventRow: View {
     let onPreview: () -> Void
     let onToggleMute: () -> Void
     let onConfigureSound: () -> Void
-    let showsAICueGeneration: Bool
-    let usesAutomaticPlaybackToggle: Bool
     let inheritanceText: String?
     let aiCueGenerationEnabled: Bool
     let aiCueGenerationHint: String
@@ -818,8 +777,6 @@ private struct EventSettingsEventRow: View {
         onPreview: @escaping () -> Void,
         onToggleMute: @escaping () -> Void,
         onConfigureSound: @escaping () -> Void,
-        showsAICueGeneration: Bool,
-        usesAutomaticPlaybackToggle: Bool,
         inheritanceText: String?,
         aiCueGenerationEnabled: Bool,
         aiCueGenerationHint: String,
@@ -834,8 +791,6 @@ private struct EventSettingsEventRow: View {
         self.onPreview = onPreview
         self.onToggleMute = onToggleMute
         self.onConfigureSound = onConfigureSound
-        self.showsAICueGeneration = showsAICueGeneration
-        self.usesAutomaticPlaybackToggle = usesAutomaticPlaybackToggle
         self.inheritanceText = inheritanceText
         self.aiCueGenerationEnabled = aiCueGenerationEnabled
         self.aiCueGenerationHint = aiCueGenerationHint
@@ -967,24 +922,22 @@ private struct EventSettingsEventRow: View {
 
     private var actions: some View {
         HStack(spacing: 5) {
-            if showsAICueGeneration {
-                Button(action: onGenerateAICue) {
-                    Label(
-                        ClaudioL10n(language: language).text(.aiCueGenerateAction),
-                        systemImage: "sparkles")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(!aiCueGenerationEnabled || controlsUnavailable)
-                .focused(focusedTarget, equals: .generateAICue(presentation.event))
-                .help(aiCueGenerationHint)
-                .accessibilityLabel(
-                    ClaudioL10n(language: language).text(.aiCueGenerateAction)
-                )
-                .accessibilityHint(aiCueGenerationHint)
-                .accessibilityIdentifier(
-                    "event-settings.event.\(presentation.event.rawValue).ai-cue")
+            Button(action: onGenerateAICue) {
+                Label(
+                    ClaudioL10n(language: language).text(.aiCueGenerateAction),
+                    systemImage: "sparkles")
             }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .disabled(!aiCueGenerationEnabled || controlsUnavailable)
+            .focused(focusedTarget, equals: .generateAICue(presentation.event))
+            .help(aiCueGenerationHint)
+            .accessibilityLabel(
+                ClaudioL10n(language: language).text(.aiCueGenerateAction)
+            )
+            .accessibilityHint(aiCueGenerationHint)
+            .accessibilityIdentifier(
+                "event-settings.event.\(presentation.event.rawValue).ai-cue")
 
             Button(action: onConfigureSound) {
                 Image(systemName: "slider.horizontal.3")
@@ -1017,60 +970,31 @@ private struct EventSettingsEventRow: View {
             .accessibilityIdentifier(
                 "event-settings.event.\(presentation.event.rawValue).preview")
 
-            if usesAutomaticPlaybackToggle {
-                Toggle(
-                    ClaudioL10n(language: language).text(.eventSettingsAutomaticPlayback),
-                    isOn: Binding(
-                        get: { presentation.enabled },
-                        set: { _ in onToggleMute() })
-                )
-                .toggleStyle(.switch)
-                .font(ClaudioTheme.font(.caption))
-                .controlSize(.small)
-                .disabled(!presentation.controls.muteEnabled)
-                .focused(focusedTarget, equals: .mute(presentation.event))
-                .help(muteHint)
-                .accessibilityLabel(
-                    ClaudioL10n(language: language).format(
-                        .eventSettingsAutomaticPlaybackFor,
-                        presentation.title as NSString)
-                )
-                .accessibilityValue(
-                    presentation.enabled
-                        ? ClaudioL10n(language: language).text(.eventEnabled)
-                        : ClaudioL10n(language: language).text(.eventMuted)
-                )
-                .accessibilityHint(muteHint)
-                .accessibilityIdentifier(
-                    "event-settings.event.\(presentation.event.rawValue).automatic-playback")
-            } else {
-                Button(action: onToggleMute) {
-                    EventMuteSpeakerIcon(
-                        isMuted: !presentation.enabled,
-                        color: presentation.enabled
-                            ? ClaudioTheme.secondaryText(colorScheme)
-                            : ClaudioTheme.clay(colorScheme)
-                    )
-                    .accessibilityHidden(true)
-                }
-                .buttonStyle(ClaudioIconButtonStyle())
-                .disabled(!presentation.controls.muteEnabled)
-                .focused(focusedTarget, equals: .mute(presentation.event))
-                .help(muteHint)
-                .accessibilityLabel(
-                    presentation.enabled
-                        ? ClaudioL10n(language: language).format(.eventMute, presentation.title)
-                        : ClaudioL10n(language: language).format(.eventUnmute, presentation.title)
-                )
-                .accessibilityValue(
-                    presentation.enabled
-                        ? ClaudioL10n(language: language).text(.eventEnabled)
-                        : ClaudioL10n(language: language).text(.eventMuted)
-                )
-                .accessibilityHint(muteHint)
-                .accessibilityIdentifier(
-                    "event-settings.event.\(presentation.event.rawValue).mute")
-            }
+            Toggle(
+                ClaudioL10n(language: language).text(.eventSettingsAutomaticPlayback),
+                isOn: Binding(
+                    get: { presentation.enabled },
+                    set: { _ in onToggleMute() })
+            )
+            .toggleStyle(.switch)
+            .font(ClaudioTheme.font(.caption))
+            .controlSize(.small)
+            .disabled(!presentation.controls.muteEnabled)
+            .focused(focusedTarget, equals: .mute(presentation.event))
+            .help(muteHint)
+            .accessibilityLabel(
+                ClaudioL10n(language: language).format(
+                    .eventSettingsAutomaticPlaybackFor,
+                    presentation.title as NSString)
+            )
+            .accessibilityValue(
+                presentation.enabled
+                    ? ClaudioL10n(language: language).text(.eventEnabled)
+                    : ClaudioL10n(language: language).text(.eventMuted)
+            )
+            .accessibilityHint(muteHint)
+            .accessibilityIdentifier(
+                "event-settings.event.\(presentation.event.rawValue).automatic-playback")
         }
         .fixedSize()
     }

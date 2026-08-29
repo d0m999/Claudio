@@ -541,10 +541,10 @@ func runGlobalShortcutsSuites() {
                 && menu.contains("NSWorkspace.willSleepNotification")
                 && menu.contains("NSWorkspace.didWakeNotification")
                 && menu.contains("requestCurrentScopeEventsFromShortcut()")
-                && menu.contains("settingsWindowController.showEventSettingsFromGlobalShortcut("),
+                && menu.contains("settingsWindowController.prepareEventSettingsRoute(route)"),
             "注册与三项 action 必须由 MenuBarController 生命周期持有")
         expect(
-            settingsController.contains("func showEventSettingsFromGlobalShortcut(")
+            settingsController.contains("func prepareEventSettingsRoute(")
                 && settingsController.contains(".destination(.eventsAndSounds)"),
             "快捷键必须进入唯一 retained Settings owner，非法 scope 仍落在 Events destination")
         expect(

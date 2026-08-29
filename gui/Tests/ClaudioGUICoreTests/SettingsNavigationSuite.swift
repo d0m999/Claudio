@@ -388,8 +388,6 @@ func runSettingsNavigationSuites() {
         guard
             let controller = settingsSource(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
-            let soundPacksController = settingsSource(
-                "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"),
             let soundPacksOwner = settingsSource(
                 "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
             let view = settingsSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
@@ -489,11 +487,11 @@ func runSettingsNavigationSuites() {
                 && controller.contains("status.severity == .failure")
                 && controller.contains("func windowDidBecomeKey")
                 && controller.contains("announceLatestSoundPackStatusIfNeeded(in: keyWindow)")
-                && soundPacksController.contains("editorOwner.beginStatusAnnouncementAttempt(")
-                && soundPacksController.contains("editorOwner.finishStatusAnnouncementAttempt(")
+                && controller.contains("soundPacksEditorOwner.beginStatusAnnouncementAttempt(")
+                && controller.contains("soundPacksEditorOwner.finishStatusAnnouncementAttempt(")
                 && soundPacksOwner.contains("private var statusAnnouncementTracker")
                 && soundPacksOwner.contains("shouldAnnounceSelectionChange(to packID:"),
-            "Settings/legacy 必须只由实际 key Sounds presentation 播报，并共享 status/suppression 消费")
+            "唯一 Settings 必须只由实际 key Sounds presentation 播报，并共享 status/suppression 消费")
         expect(
             view.contains("ForEach(preferences.availableSettingsDestinations)")
                 && view.contains("SettingsWindowFocusTarget.title")
@@ -532,24 +530,25 @@ func runSettingsNavigationSuites() {
                 && menuBar.contains("let settingsWindowController = SettingsWindowController(")
                 && menuBar.contains("requestSettingsWindowPresentation()")
                 && menuBar.contains("let soundPacksEditorOwner = SoundPacksEditorOwner(")
-                && menuBar.contains("editorOwner: soundPacksEditorOwner")
                 && menuBar.contains("soundPacksEditorOwner: soundPacksEditorOwner")
-                && menuBar.contains("SoundPacksWindowController")
-                && menuBar.contains("EventSettingsWindowController")
+                && !menuBar.contains("SoundPacksWindowController")
+                && !menuBar.contains("EventSettingsWindowController")
                 && menuBar.contains("integrationsModel: integrationsModel")
                 && !menuBar.contains(
-                    "let integrationsWindowController = IntegrationsWindowController("),
-            "production composition 必须让 Sounds 共享唯一 editor owner，并只把 Integrations model 注入统一窗口")
+                    "let integrationsWindowController = IntegrationsWindowController(")
+                && menuBar.contains("private var pendingSettingsPresentation:")
+                && !menuBar.contains("pendingSoundPacksWindowPresentation")
+                && !menuBar.contains("pendingEventSettingsWindowPresentation"),
+            "production composition 必须只保留一个 Settings window、一个声音写入 owner 与单一 typed pending")
         expect(
-            app.contains("appDelegate.showSettings()")
-                && app.contains("CommandGroup(replacing: .appSettings)")
-                && !app.contains("CommandGroup(replacing: .appSettings) {}"),
-            "generic Settings 命令必须打开 retained 通用设置窗口，不能再吞掉入口")
+            app.contains("CommandGroup(replacing: .appSettings) {}")
+                && !app.contains("keyboardShortcut(\",\", modifiers: .command)"),
+            "合成 appSettings 必须移除，popover 激活时不得抢占前台宿主的 Command-comma")
         expect(
-            app.contains(
-                "ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)")
-                && !app.contains("Button(\"Settings…\")"),
-            "generic Settings 命令标题必须消费共享 typed preference 的双语 catalog 投影")
+            menuBar.contains("func requestSettingsWindowPresentation()")
+                && menuBar.contains("case .openSettings:")
+                && menuBar.contains("requestSettingsWindowPresentation()"),
+            "显式面板入口和用户配置的 Carbon openSettings 仍必须进入 retained Settings")
         expect(
             controller.contains("preferences: preferences")
                 && controller.contains("preferences.$snapshot")

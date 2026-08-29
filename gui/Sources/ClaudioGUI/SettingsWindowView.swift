@@ -227,8 +227,7 @@ struct SettingsWindowView: View {
                 onConfigureSound: { model.request(.sounds($0)) },
                 onAudibilityInputsChanged: onEventAudibilityInputsChanged,
                 onPackSwitch: onEventPackSwitch,
-                onAdoptAICue: onAdoptAICue,
-                presentationContext: .unifiedSettings)
+                onAdoptAICue: onAdoptAICue)
         } else if destination == .sounds,
             model.resolution.failure == nil,
             let soundPacksEditorOwner

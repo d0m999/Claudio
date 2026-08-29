@@ -27,9 +27,9 @@ private struct FactoryPackRestoreRequest: Identifiable {
     var id: String { packID }
 }
 
-/// Unified Settings presentation of the same editor owner used by the legacy standalone window.
-/// Route/focus state is presentation-local; every disk/config mutation still goes through the
-/// owner's single ``SoundPacksWindowModel``.
+/// Unified Settings presentation of the app-lifetime editor owner. Route/focus state is local to
+/// the embedded destination; every disk/config mutation still goes through the owner's single
+/// ``SoundPacksWindowModel``.
 @MainActor
 public struct EmbeddedSoundPacksEditorView: View {
     private let editorOwner: SoundPacksEditorOwner

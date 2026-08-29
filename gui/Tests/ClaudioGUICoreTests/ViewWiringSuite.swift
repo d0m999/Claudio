@@ -2544,7 +2544,7 @@ func runViewWiringSuites() {
             "打开设置必须进入当前 Sound Scope 的事件与提示音窗口，不得继续打开声音包 overview")
     }
 
-    suite("事件与提示音：retained window 复用作用域/事件投影，编辑委托声音包窗口") {
+    suite("事件与提示音：统一 retained Settings 复用作用域/事件投影并内部路由 Sounds") {
         guard
             let view = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
@@ -2554,8 +2554,6 @@ func runViewWiringSuites() {
                 "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
             let aiViewWithStrings = codeOnly(
                 "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
-            let controller = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/EventSettingsWindowController.swift"),
             let settingsView = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
             let settingsController = codeWithoutStrings(
@@ -2571,7 +2569,6 @@ func runViewWiringSuites() {
         let flatViewWithStrings = collapsingWhitespace(viewWithStrings)
         let flatAIView = collapsingWhitespace(aiView)
         let flatAIViewWithStrings = collapsingWhitespace(aiViewWithStrings)
-        let flatController = collapsingWhitespace(controller)
         let flatSettingsView = collapsingWhitespace(settingsView)
         let flatSettingsController = collapsingWhitespace(settingsController)
         let flatPreviewSequence = collapsingWhitespace(previewSequence)
@@ -2613,13 +2610,12 @@ func runViewWiringSuites() {
                     ".accessibilityIdentifier(\"event-settings.write-failures\")"),
             "Global 与 Surface 的静音写失败必须在事件窗口就地可见")
         expect(
-            flatController.contains("private var window: NSWindow?")
-                && flatController.contains("window.isReleasedWhenClosed = false")
-                && flatController.contains("func showWindow( route: EventSettingsWindowRoute,")
-                && flatController.contains("func restoreKeyWindow() -> Bool")
-                && flatController.contains("RetainedWindowHandbackTracker<NSRunningApplication>")
-                && flatController.contains("selection.requestInitialFocus()"),
-            "事件设置必须由 app-lifetime retained window 所有并保留 handback 债务")
+            flatSettingsController.contains("private var window: NSWindow?")
+                && flatSettingsController.contains("window.isReleasedWhenClosed = false")
+                && flatSettingsController.contains("private let eventSettingsModel:")
+                && flatSettingsController.contains("private let eventSettingsSelection:")
+                && flatSettingsController.contains("applyEmbeddedRoute(route)"),
+            "事件设置必须由唯一 app-lifetime Settings window 承载并预应用 typed deep link")
         expect(
             flatView.contains(".onReceive(selection.$focusRequestRevision)")
                 && flatView.contains("eventSettingsRouteFocusTarget(")
@@ -2630,38 +2626,32 @@ func runViewWiringSuites() {
                 && flatView.contains(".accessibilityHint(muteHint)"),
             "事件设置窗口必须在每次路由时聚焦精确 scope/Event，并说明禁用动作的原因")
         expect(
-            flatMenu.contains("let eventSettingsWindowController = EventSettingsWindowController(")
-                && flatMenu.contains(
-                    "let legacyEventSettingsModel = makeEventSettingsConfigController(")
-                && flatMenu.contains(
-                    "let unifiedEventSettingsModel = makeEventSettingsConfigController(")
-                && flatMenu.contains(
-                    "let legacyEventSettingsSelection = EventSettingsWindowSelection()")
-                && flatMenu.contains(
-                    "let unifiedEventSettingsSelection = EventSettingsWindowSelection()")
-                && flatMenu.contains("model: legacyEventSettingsModel")
-                && flatMenu.contains("selection: legacyEventSettingsSelection")
-                && flatMenu.contains("eventSettingsModel: unifiedEventSettingsModel")
-                && flatMenu.contains("eventSettingsSelection: unifiedEventSettingsSelection")
+            flatMenu.components(separatedBy: "makeEventSettingsConfigController(").count - 1 == 1
+                && flatMenu.components(separatedBy: "EventSettingsWindowSelection()").count - 1
+                    == 1
+                && !flatMenu.contains("EventSettingsWindowController(")
+                && flatMenu.contains("eventSettingsModel: eventSettingsModel")
+                && flatMenu.contains("eventSettingsSelection: eventSettingsSelection")
                 && flatMenu.contains("onOpenEventSettings:")
-                && flatMenu.contains("requestEventSettingsWindow("),
-            "MenuBar composition root 必须隔离 legacy/unified route 投影并把面板入口接到 retained window")
+                && flatMenu.contains("requestEventsSettings("),
+            "MenuBar composition root 必须只保留一个事件写入/selection owner 并把面板入口接到 Settings")
         expect(
             flatSettingsView.contains("EventSettingsWindowView(")
-                && flatSettingsView.contains("presentationContext: .unifiedSettings")
+                && !flatSettingsView.contains("presentationContext:")
                 && flatSettingsView.contains("onConfigureSound: { model.request(.sounds($0)) }")
                 && flatSettingsView.contains("guard model.resolution.failure == nil else")
                 && flatSettingsView.contains("eventSettingsSelection.requestInitialFocus()")
                 && flatSettingsController.contains("eventSettingsModel: eventSettingsModel")
                 && flatSettingsController.contains("eventSettingsSelection: eventSettingsSelection")
-                && flatController.contains("presentationContext: .standaloneWindow"),
-            "统一设置必须嵌入同一事件事实/selection 并内部路由 Sounds，legacy window 保留 standalone context")
+                && flatSettingsController.contains("case .events(let scope, let event):"),
+            "统一设置必须嵌入同一事件事实/selection、预应用深链并内部路由 Sounds")
         expect(
-            flatView.contains("var includesAICueComposer: Bool { true }")
-                && flatView.contains("presentationContext.includesAICueComposer")
+            !flatView.contains("EventSettingsPresentationContext")
+                && flatView.contains("includesDisconnected: true")
                 && flatView.contains("eventSettingsShouldCloseAICueComposer(")
                 && flatView.contains("eventSettingsAICueComposerMatches(")
-                && flatView.contains("presentationContext.includesPlaybackSettings")
+                && !flatView.contains("showsAICueGeneration")
+                && !flatView.contains("usesAutomaticPlaybackToggle")
                 && flatView.contains("EventSettingsMasterVolumeControl(")
                 && flatView.contains("model.switchPack(to: packID)")
                 && flatView.contains("model.resetSelectedSurfaceOverrides()")
@@ -2676,7 +2666,6 @@ func runViewWiringSuites() {
                 && flatView.contains(".accessibilityValue(")
                 && flatPreviewSequence.contains("Task.detached(priority: .userInitiated)")
                 && flatPreviewSequence.contains("generation == runGeneration")
-                && flatView.contains("presentationContext == .unifiedSettings")
                 && flatViewWithStrings.contains(
                     ".accessibilityIdentifier(\"event-settings.preview-all\")")
                 && flatViewWithStrings.contains(
@@ -2731,16 +2720,15 @@ func runViewWiringSuites() {
             flatView.contains("stopCandidatePreview()")
                 && flatView.contains(
                     "aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)")
-                && flatController.contains("aiCueViewModel.endSession()")
                 && flatSettingsController.contains("aiCueViewModel.endSession()"),
-            "采用、离开页面、关闭任一 retained window 和作用域变化必须清理未采用候选")
+            "采用、离开页面、关闭唯一 retained Settings 和作用域变化必须清理未采用候选")
         expect(
             flatView.contains("let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
-                && flatController.contains(
+                && flatSettingsController.contains(
                     "private let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
                 && !flatView.contains(
                     "AICueCandidate, AICueDisplayName, AICueAdoptionTarget")
-                && !flatController.contains(
+                && !flatSettingsController.contains(
                     "AICueCandidate, AICueDisplayName, AICueAdoptionTarget"),
             "候选、名称和采用目标必须作为单一领域请求跨越 SwiftUI/AppKit 边界")
         expect(
@@ -2751,7 +2739,7 @@ func runViewWiringSuites() {
                 && flatMenu.contains("QwenAICueProvider( profileID: .qwenBeijing)")
                 && flatMenu.contains("AICueGenerationDispatcher(generators:")
                 && flatMenu.contains("AICueGenerationEngine(")
-                && flatMenu.contains("soundPacksWindowController.adoptAICue(request)"),
+                && flatMenu.contains("soundPacksEditorOwner.adoptAICue(request)"),
             "composition root 必须接通 Keychain、四个固定 profile/engine 与既有声音包采用链")
     }
 
@@ -3178,13 +3166,13 @@ func runViewWiringSuites() {
             let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift"),
             let window = codeWithoutStrings(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
-            let controller = codeWithoutStrings(
-                "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"),
+            let settingsController = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let editorOwner = codeWithoutStrings(
                 "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
             let package = source("gui/Package.swift")
         else {
-            expect(false, "读不到共享 AppKit 实现、两处消费者、窗口 controller 或 Package.swift")
+            expect(false, "读不到共享 AppKit 实现、两处消费者、Settings owner 或 Package.swift")
             return
         }
 
@@ -3247,8 +3235,9 @@ func runViewWiringSuites() {
             "侧栏语义标题、底部动作栏与空态主行动的用户标签必须全部真实可见")
         expect(
             window.contains("ForEach(model.windowStatuses)")
-                && controller.contains("model.$windowStatuses")
-                && controller.contains("shouldAnnounceSelectionChange(")
+                && settingsController.contains("let soundPackModel = soundPacksEditorOwner.model")
+                && settingsController.contains("soundPackModel.$windowStatuses")
+                && settingsController.contains("shouldAnnounceSelectionChange(")
                 && editorOwner.contains("consumeSelectionAnnouncementSuppression("),
             "窗口必须从统一 revision 状态投影渲染/播报，并消费 fork 程序化选中的单次公告抑制 token")
     }

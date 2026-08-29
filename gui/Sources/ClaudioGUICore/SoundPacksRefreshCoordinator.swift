@@ -57,21 +57,6 @@ public struct PanelConfigProjectionToken: Hashable, Sendable {
     }
 }
 
-/// Pure retained-window presentation policy. Model construction already performs the first
-/// hydration, so only a previously-created hidden window needs a fresh reload.
-public func shouldReloadSoundPacksWindowOnShow(
-    wasAlreadyCreated: Bool,
-    isVisible: Bool
-) -> Bool {
-    wasAlreadyCreated && !isVisible
-}
-
-/// Initial focus and the opened announcement belong to an actual hidden→visible transition.
-/// Re-invoking the menu action while the window is already visible must not disturb inspection.
-public func shouldPrepareSoundPacksWindowForPresentation(isVisible: Bool) -> Bool {
-    !isVisible
-}
-
 /// `SoundPacksWindow` 与 popover 的双向刷新路由。
 ///
 /// 这是 app 生命周期内的单实例，由 ``MenuBarController`` 创建并同时注入两个 UI 面：

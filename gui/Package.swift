@@ -5,7 +5,7 @@ import PackageDescription
 // host-config inspect/connect/disconnect operation to `ClaudioCore`'s integration manager and
 // adapters. Views only consume injected presentation state; they never parse host files themselves.
 //
-// The target split keeps the current menu-bar shell and retained management windows testable:
+// The target split keeps the menu-bar shell and retained unified Settings destinations testable:
 //   - `ClaudioGUICore`: pure Foundation state/view-model logic (no SwiftUI import), so it
 //     can be exercised by the same dependency-free test harness `helper/` uses.
 //   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
@@ -51,8 +51,8 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
-        // Small shared SwiftUI component/token surface. Both the executable panel and the standard
-        // management window depend on it, so failure presentation cannot drift into two hand-made
+        // Small shared SwiftUI component/token surface. Both the executable panel and unified
+        // Settings depend on it, so failure presentation cannot drift into two hand-made
         // copies while the Foundation-only `ClaudioGUICore` remains free of SwiftUI.
         .target(
             name: "ClaudioGUIComponents",
@@ -62,8 +62,8 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // Standard AppKit/SwiftUI window surface. This is a library target (no `@main`);
-        // `MenuBarController` owns its single lazy window for the app lifetime.
+        // Reusable Sounds editor view and AppKit accessibility bridge. This remains a library
+        // target (no `@main`); the only production NSWindow belongs to `SettingsWindowController`.
         .target(
             name: "SoundPacksWindow",
             dependencies: [

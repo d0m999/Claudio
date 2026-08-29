@@ -524,13 +524,12 @@ func runSoundPackLibrarySuites() async {
             source.contains(
                 "SoundPacksEditorOwner(\n            configFile: ClaudioPaths.configFile,\n            environment: audioEnvironment,\n            soundPackLibrary: soundPackLibrary"
             )
-                && source.contains("SoundPacksWindowController(\n            editorOwner: soundPacksEditorOwner")
                 && source.contains("soundPacksEditorOwner: soundPacksEditorOwner")
-                && source.contains("languageStore: languageStore")
+                && !source.contains("SoundPacksWindowController(")
                 && source.contains(
                     "PanelView(\n            audioEnvironment: audioEnvironment,\n            focusCoordinator: focusCoordinator,\n            hostIntegrations: hostIntegrations,\n            bootstrapReports: bootstrapReports,\n            languageStore: languageStore,\n            soundPackLibrary: soundPackLibrary"
                 ),
-            "同一个 library 必须注入面板与唯一 editor owner，Settings/legacy 再共享该 owner")
+            "同一个 library 必须注入面板与唯一 editor owner，并只由 Settings 共享该 owner")
         expect(
             source.contains("NSApplication.didBecomeActiveNotification")
                 && source.contains("soundPackLibrary.requestRefresh(")
