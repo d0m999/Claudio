@@ -471,6 +471,45 @@ func runAICueAdoptionSuites() async {
             expect(FileManager.default.fileExists(atPath: imported.destinationURL.path), "已导入的孤儿文件不能被假装回滚或静默删除")
         }
     }
+
+    await suite("AI 提示音采用闭环：导入期间 manifest 身份漂移时锁内拒绝绑定") {
+        await withTempDirectory { root in
+            let probe = AICueBlockingDurationProbe()
+            let fixture = aiCueAdoptionFixture(root: root, durationProbe: probe)
+            let target = try! fixture.model.captureAICueAdoptionTarget(for: .stop).get()
+            let task = Task { @MainActor in
+                await fixture.model.adoptAICue(
+                    AICueAdoptionRequest(
+                        candidate: aiCueCandidate(at: fixture.candidateFile),
+                        displayName: try! AICueDisplayName("身份竞态提示音"),
+                        target: target))
+            }
+            await Task.yield()
+            expect(probe.waitUntilEntered(), "采用必须到达注入的导入时长闸门")
+            let changedManifest = #"{"id":"other-pack","events":{"stop":"old.mp3"}}"#
+            writeFixture(changedManifest, to: fixture.targetManifest)
+            let changedBytes = try! Data(contentsOf: fixture.targetManifest)
+            probe.allowCompletion()
+
+            let result = await task.value
+            guard
+                case .failure(
+                    .importedButNotBound(
+                        let imported,
+                        .manifest(.manifestUnreadable(let reason)))) = result
+            else {
+                expect(false, "导入后身份漂移必须报告真实 partial state")
+                return
+            }
+            expect(reason.contains("workbuddy-pack"), "失败原因必须指明被拒绝的捕获包身份")
+            expect(
+                try! Data(contentsOf: fixture.targetManifest) == changedBytes,
+                "锁内身份拒绝不得改写漂移后 manifest 或旧事件绑定")
+            expect(
+                FileManager.default.fileExists(atPath: imported.destinationURL.path),
+                "已导入的孤儿文件必须继续如实返回")
+        }
+    }
 }
 
 @MainActor

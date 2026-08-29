@@ -2323,10 +2323,11 @@ func runSourceScannerSuites() {
         let collapsed = collapsingWhitespace(code)
         let lockedCall =
             "let outcome = withNonBlockingLock(path: lockFile.path) { "
-            + "performManifestMutation(at: packDirectory, transform) }"
+            + "performManifestMutation( at: packDirectory, expectedManifestID: "
+            + "expectedManifestID, transform) }"
         expect(
             collapsed.contains(lockedCall),
-            "`performManifestMutation(at:packDirectory,transform)` 必须逐字位于 "
+            "`performManifestMutation(at:packDirectory,expectedManifestID:transform)` 必须逐字位于 "
                 + "`withNonBlockingLock(path: lockFile.path)` 闭包内 —— 它封装的是从读取 manifest 到"
                 + "原子写回的完整临界区；把读取挪到锁外会重新打开丢更新窗口。实得代码：\n\(collapsed)")
 
