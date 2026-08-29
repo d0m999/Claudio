@@ -34,6 +34,15 @@ git diff --check
 
 `scripts/dev-bundle.sh` produces an ad-hoc signed, current-architecture app for local inspection only. It is not equivalent to the universal, Developer ID signed, notarized release artifact.
 
+For changes that affect the unified settings experience, run the fixed-baseline integration gate:
+
+```bash
+bash scripts/verify-settings-experience.sh <BASE_SHA>
+```
+
+Use [the unified settings acceptance checklist](docs/settings-experience-acceptance.md) to keep
+automated, native UI, real-system, Provider, architecture, signing, and release evidence separate.
+
 ## Change rules
 
 - Preserve existing host hooks, unknown JSON keys, user sound packs, configuration, backups, and receipts unless the issue explicitly defines a migration.

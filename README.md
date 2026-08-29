@@ -204,6 +204,9 @@ Local CLI/app builds report `0.0.0-dev`. A release workflow accepts only a stric
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Native macOS, VoiceOver, keyboard/focus, Apple Silicon/Intel, and real-host receipt checks remain manual release gates even when CI passes.
 
+Maintainers closing the nine-page unified settings chain should also run the
+[fixed-baseline integration gate and evidence checklist](docs/settings-experience-acceptance.md).
+
 ## Security and license
 
 Please report vulnerabilities privately as described in [SECURITY.md](SECURITY.md). Community participation follows [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
