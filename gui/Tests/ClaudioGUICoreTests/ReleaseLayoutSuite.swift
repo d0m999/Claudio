@@ -59,7 +59,8 @@ private func logicalCommandLines(in source: String) -> [String] {
     for rawLine in source.split(separator: "\n", omittingEmptySubsequences: false) {
         let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
         let continues = trimmed.hasSuffix("\\")
-        let fragment = continues
+        let fragment =
+            continues
             ? String(trimmed.dropLast()).trimmingCharacters(in: .whitespaces)
             : trimmed
         pending = pending.isEmpty ? fragment : "\(pending) \(fragment)"
@@ -284,8 +285,9 @@ func runReleaseLayoutSuites() {
                 swift build -Xswiftc -Osize -c release \
                     --product claudio --arch arm64
                 swift build --product ClaudioGUI -Xswiftc -Osize -c debug
-                """)
-            .filter(usesSwiftSizeOptimization)
+                """
+        )
+        .filter(usesSwiftSizeOptimization)
 
         guard commands.count == 3 else {
             expect(false, "fixture 的三条体积优化命令都必须被归一化，实得 \(commands)")
