@@ -6,6 +6,7 @@ set -euo pipefail
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(cd -- "$script_dir/.." && pwd -P)"
 format_base="${1:-}"
+source "$script_dir/settings-format-diagnostics.sh"
 
 if [[ -z "$format_base" || $# -ne 1 ]]; then
     echo "usage: $0 <format-baseline-commit>" >&2
@@ -23,6 +24,8 @@ if [[ -n "$(git status --porcelain=v1 --untracked-files=all)" ]]; then
     git status --short >&2
     exit 1
 fi
+
+bash scripts/test-settings-format-diagnostics.sh
 
 require_registration() {
     local harness="$1"
@@ -114,15 +117,8 @@ collect_format_diagnostics() {
         exit "$status"
     fi
 
-    LC_ALL=C awk \
-        '/^[^:]+:[0-9]+:[0-9]+: (error|warning|note): / { print }' \
-        "$raw_output" | LC_ALL=C sort -u >"$normalized_output"
-
-    if [[ $status -ne 0 && ! -s "$normalized_output" ]]; then
-        cat "$raw_output" >&2
-        echo "❌ swift format lint failed without parseable diagnostics" >&2
-        exit 1
-    fi
+    settings_format_normalize_diagnostics "$raw_output" "$normalized_output"
+    settings_format_validate_diagnostics "$status" "$raw_output" "$normalized_output"
 }
 
 baseline_raw="$temporary_root/baseline-format.txt"
@@ -133,11 +129,15 @@ new_diagnostics="$temporary_root/new-format-diagnostics.txt"
 
 collect_format_diagnostics "$baseline_root" "$baseline_raw" "$baseline_diagnostics"
 collect_format_diagnostics "$repo_root" "$head_raw" "$head_diagnostics"
-LC_ALL=C comm -13 "$baseline_diagnostics" "$head_diagnostics" >"$new_diagnostics"
+settings_format_compare_diagnostics \
+    "$baseline_diagnostics" \
+    "$head_diagnostics" \
+    "$new_diagnostics"
 
 if [[ -s "$new_diagnostics" ]]; then
-    echo "❌ strict format diagnostics added since $format_base:" >&2
-    cat "$new_diagnostics" >&2
+    new_diagnostic_count="$(wc -l <"$new_diagnostics" | tr -d ' ')"
+    echo "❌ $new_diagnostic_count strict format diagnostic occurrences added since $format_base:" >&2
+    LC_ALL=C uniq -c "$new_diagnostics" >&2
     exit 1
 fi
 

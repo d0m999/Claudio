@@ -18,10 +18,12 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 - GUI Debug build、localization JSON、开发 bundle 与 release-size 检查；
 - working tree 和 `<BASE_SHA>...HEAD` 的 `git diff --check`；
 - 全仓 `swift format lint --strict --recursive helper gui` 与基线快照的诊断差分；
+- strict-format 稳定身份、多重集计数和不可解析失败的聚焦回归；
 - #102 所要求的 suite 都仍在两个手工注册的 executable harness 中。
 
-基线和 `HEAD` 的 format 诊断按 `path:line:column:severity:rule` 精确比较。既有诊断会被报告为基线，
-但任何新增诊断都会使门禁失败；这不表示既有诊断已经修复。
+基线和 `HEAD` 的 format 诊断忽略会随周边编辑漂移的行列号，按
+`path:severity:rule/message` 归一为稳定身份，并保留相同身份的出现次数作多重集比较。纯行号漂移
+不算新增，但任何身份的新增出现仍会使门禁失败；这不表示既有诊断已经修复。
 
 ## 自动证据覆盖
 
