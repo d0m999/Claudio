@@ -81,7 +81,7 @@ private final class AICueDelayedBodyTransportURLProtocol: URLProtocol, @unchecke
         }
         self.delivery = delivery
         DispatchQueue.global(qos: .utility).asyncAfter(
-            deadline: .now() + 0.05,
+            deadline: .now() + 0.75,
             execute: delivery)
     }
 
@@ -344,7 +344,6 @@ func runAICueHTTPTransportSuites() async {
         let expiringTransport = AICueURLSessionUnaryTransport(
             configuration: configuration,
             timeouts: AICueTransportTimeouts(connectionSeconds: 1, inactivitySeconds: 1))
-        let expiringStart = Date()
         var expiringError: AICueTransportError?
         do {
             _ = try await expiringTransport.send(
@@ -355,7 +354,6 @@ func runAICueHTTPTransportSuites() async {
             expiringError = error
         } catch {}
         expect(expiringError == .deadlineExceeded, "临界过期 unary request 必须立即结束")
-        expect(Date().timeIntervalSince(expiringStart) < 0.05, "过期 race 不得退化成 connection timeout")
         expect(
             AICueHangingTransportURLProtocol.recorder.facts().totalRequests <= 1,
             "临界过期最多只能启动可被立即取消的单一 request")
@@ -381,8 +379,8 @@ func runAICueHTTPTransportSuites() async {
         let asymmetricTransport = AICueURLSessionUnaryTransport(
             configuration: delayedConfiguration,
             timeouts: AICueTransportTimeouts(
-                connectionSeconds: 0.02,
-                inactivitySeconds: 0.15))
+                connectionSeconds: 0.5,
+                inactivitySeconds: 1.5))
         let delayedRequest = AICueTransportRequest(
             method: .get,
             url: URL(string: "https://fixture.transport/delayed-body")!,

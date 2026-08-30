@@ -172,6 +172,7 @@ private actor GenerationIgnoringCancellationProviderFixture: AICueProvider {
     nonisolated let profile: AICueProviderProfile = try! AICueProviderRegistry().profile(
         for: .elevenLabsGlobal)
     private var completedResponseCount = 0
+    private var completionWaiters: [CheckedContinuation<Void, Never>] = []
 
     func validateCredential(_ credential: SensitiveCredentialInput) async throws {}
 
@@ -191,10 +192,18 @@ private actor GenerationIgnoringCancellationProviderFixture: AICueProvider {
             }
         }
         completedResponseCount += 1
+        let waiters = completionWaiters
+        completionWaiters.removeAll()
+        for waiter in waiters { waiter.resume() }
         return response
     }
 
     func completedResponses() -> Int { completedResponseCount }
+
+    func waitForResponseCompletion() async {
+        guard completedResponseCount == 0 else { return }
+        await withCheckedContinuation { completionWaiters.append($0) }
+    }
 }
 
 private final class GenerationSlowThirdDurationProbe: AudioDurationProbing, @unchecked Sendable {
@@ -526,7 +535,7 @@ func runAICueGenerationEngineSuites() async {
             expect(
                 await provider.completedResponses() == 0,
                 "deadline race 不得结构化等待失控 provider")
-            try? await Task.sleep(nanoseconds: 250_000_000)
+            await provider.waitForResponseCompletion()
             expect(await provider.completedResponses() == 1, "失控 provider fixture 必须最终返回迟到结果")
             expect(generationDirectories(in: providerRoot).isEmpty, "迟到 provider 结果不得发布")
         }
