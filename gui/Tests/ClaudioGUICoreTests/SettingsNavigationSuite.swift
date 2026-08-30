@@ -144,6 +144,49 @@ func runSettingsNavigationSuites() {
             "声音编辑的陈旧 Event 不得静默选择其他事件")
     }
 
+    suite("Settings Sounds route：只在共享库 fresh ready 后判定陈旧 pack") {
+        let route = SettingsRoute.sounds(
+            .editEvent(surface: .workBuddy, packID: "delayed-pack", event: .stop))
+        let loading = SettingsRouteAvailability(
+            integrationSurfaces: [],
+            eventScopes: [.global],
+            soundScopes: [.global, .surface(.workBuddy)],
+            soundPackIDs: [],
+            soundPackSnapshotIsFresh: false,
+            events: Set(Event.allCases))
+        expect(
+            resolveSettingsRoute(route, availability: loading).failure == nil,
+            "首次 hydration 的空投影不得把仍可能出现的 pack 判成陈旧")
+
+        let readyMissing = SettingsRouteAvailability(
+            integrationSurfaces: [],
+            eventScopes: [.global],
+            soundScopes: [.global, .surface(.workBuddy)],
+            soundPackIDs: [],
+            soundPackSnapshotIsFresh: true,
+            events: Set(Event.allCases))
+        expect(
+            resolveSettingsRoute(route, availability: readyMissing).failure
+                == .staleSoundPack("delayed-pack"),
+            "fresh ready 快照确认缺失后必须显示 stale pack 失败")
+
+        let model = SettingsWindowPresentationModel<String>(
+            initialRoute: route,
+            availability: loading)
+        var focusRevisions: [UInt64] = []
+        let cancellable = model.$routeRequestRevision.dropFirst().sink {
+            focusRevisions.append($0)
+        }
+        model.updateAvailability(readyMissing)
+        expect(
+            model.resolution.failure == .staleSoundPack("delayed-pack"),
+            "共享库发布 fresh ready 后 retained route 必须原位重解析")
+        expect(
+            focusRevisions.isEmpty,
+            "后台 availability 更新不得伪造显式路由请求或抢走键盘焦点")
+        withExtendedLifetime(cancellable) {}
+    }
+
     suite("Settings lifecycle：显示、覆盖、重复深链接、关闭与一次性 handback") {
         let availability = SettingsRouteAvailability(
             integrationSurfaces: [.workBuddy],
@@ -271,6 +314,47 @@ func runSettingsNavigationSuites() {
             "generic 重开必须恢复顶层页，而不是陈旧深链接")
     }
 
+    suite("Settings embedded lifecycle：使用 publisher 新目的页进入/离开 Integrations") {
+        let availability = SettingsRouteAvailability(
+            integrationSurfaces: [.workBuddy],
+            eventScopes: [.global, .surface(.workBuddy)],
+            soundScopes: [.global, .surface(.workBuddy)],
+            soundPackIDs: [],
+            events: Set(Event.allCases))
+        let model = SettingsWindowPresentationModel<String>(availability: availability)
+        var states: [SettingsEmbeddedDestinationState] = []
+        let cancellable = model.$resolution
+            .map(\.destination)
+            .dropFirst()
+            .sink { emittedDestination in
+                states.append(
+                    settingsEmbeddedDestinationState(
+                        selectedDestination: emittedDestination,
+                        embeddedDestination: .integrations,
+                        windowIsVisible: true,
+                        windowIsKey: true))
+            }
+
+        model.request(.integrations(surface: .workBuddy))
+        model.request(.destination(.general))
+        expect(
+            states
+                == [
+                    SettingsEmbeddedDestinationState(isVisible: true, isKey: true),
+                    SettingsEmbeddedDestinationState(isVisible: false, isKey: false),
+                ],
+            "publisher 的新 destination 必须让同一 retained 窗口进入时可见、离开时立即隐藏")
+        expect(
+            settingsEmbeddedDestinationState(
+                selectedDestination: .integrations,
+                embeddedDestination: .integrations,
+                windowIsVisible: true,
+                windowIsKey: false)
+                == SettingsEmbeddedDestinationState(isVisible: true, isKey: false),
+            "可见但非 key 的 Integrations 必须保留可见事实且关闭公告闸门")
+        withExtendedLifetime(cancellable) {}
+    }
+
     suite("Settings shell：尺寸、单滚动、焦点序、DEBUG gallery 与生产通用页") {
         expect(
             SettingsWindowGeometry.defaultWidth == 1_240
@@ -281,14 +365,53 @@ func runSettingsNavigationSuites() {
                 && SettingsWindowGeometry.minimumHeight == 640,
             "最小窗口尺寸必须匹配批准原型")
         expect(
+            settingsSidebarWidth(windowWidth: 960, interfaceTextSize: .standard) == 220
+                && settingsSidebarWidth(windowWidth: 1_240, interfaceTextSize: .standard) == 252
+                && settingsSidebarWidth(windowWidth: 1_240, interfaceTextSize: .maximum) == 276
+                && settingsSidebarWidth(windowWidth: 960, interfaceTextSize: .maximum) == 252,
+            "侧栏必须在最小窗口收紧，并为最大文字档保留额外阅读宽度")
+        let sidebarSections = settingsSidebarSections(
+            availableDestinations: SettingsDestination.allCases)
+        expect(
+            sidebarSections.map(\.id) == [.primary, .advanced, .product]
+                && sidebarSections.flatMap(\.destinations) == SettingsDestination.allCases,
+            "侧栏必须按主区、高级、claudi0 分组且保持固定目的页顺序")
+        expect(
+            settingsSidebarDestination(
+                moving: .next,
+                from: .usage,
+                availableDestinations: SettingsDestination.allCases) == .shortcuts
+                && settingsSidebarDestination(
+                    moving: .previous,
+                    from: .general,
+                    availableDestinations: SettingsDestination.allCases) == .general,
+            "方向键导航必须跨分组连续，并在首尾停住")
+        expect(
             settingsWindowFocusOrder(selectedDestination: .sounds)
                 == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
-                    + [.title(.sounds), .firstAction(.sounds)],
-            "焦点序必须稳定为全部 sidebar 项、当前标题、首个动作")
+                + [.title(.sounds)],
+            "Sounds 先走 sidebar 与标题，再把编辑器内焦点交给其独立 route coordinator")
+        expect(
+            settingsWindowFocusOrder(selectedDestination: .eventsAndSounds)
+                == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
+                + [.title(.eventsAndSounds)],
+            "Events 先走 sidebar 与标题，再把精确 scope/Event 焦点交给嵌入页")
+        expect(
+            settingsWindowFocusOrder(selectedDestination: .general)
+                == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
+                + [.title(.general), .firstAction(.general)],
+            "非嵌入目的页必须保留 sidebar、标题、首个动作焦点序")
+        expect(
+            settingsWindowFocusOrder(selectedDestination: .integrations)
+                == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
+                + [.title(.integrations), .firstAction(.integrations)],
+            "Integrations 必须在嵌入 model 前保留 Settings 内部的管理事件动作")
 
         guard
             let controller = settingsSource(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let soundPacksOwner = settingsSource(
+                "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
             let view = settingsSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
             let gallery = settingsSource("gui/Sources/ClaudioGUI/StateGalleryView.swift"),
             let menuBar = settingsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
@@ -308,17 +431,99 @@ func runSettingsNavigationSuites() {
             controller.contains("window.isReleasedWhenClosed = false"),
             "关闭后不得释放 retained window")
         expect(
+            controller.contains("private var isPresentingWindow = false")
+                && controller.contains("!isPresentingWindow"),
+            "Settings presentation 必须抑制 didBecomeKey 抢在窗口上下文前补播陈旧声音结果")
+        if let presenting = controller.range(of: "isPresentingWindow = true")?.lowerBound,
+            let modelPresent = controller.range(of: "let presentation = model.present")?.lowerBound,
+            let makeKey = controller.range(of: "presentedWindow.makeKeyAndOrderFront")?.lowerBound,
+            let announce = controller.range(of: "announceSoundsPresentationIfNeeded")?.lowerBound,
+            let presented = controller.range(
+                of: "isPresentingWindow = false",
+                range: makeKey..<controller.endIndex)?.lowerBound
+        {
+            expect(
+                presenting < modelPresent && modelPresent < makeKey && makeKey < announce
+                    && announce < presented,
+                "Settings 必须先门闩 didBecomeKey，再按窗口上下文→latest status 排队，最后解除门闩")
+        } else {
+            expect(false, "Settings showWindow 缺少声音公告 presentation 顺序锚点")
+        }
+        if let firstPresentationOnly = controller.range(
+            of: "if !presentation.wasAlreadyPresented"),
+            let announcementDebt = controller.range(of: "// The presentation latch"),
+            let announcement = controller.range(of: "announceSoundsPresentationIfNeeded"),
+            let presentationEnds = controller.range(
+                of: "isPresentingWindow = false",
+                range: announcement.lowerBound..<controller.endIndex)
+        {
+            let firstPresentationBody =
+                controller[firstPresentationOnly.lowerBound..<announcementDebt.lowerBound]
+            expect(
+                firstPresentationBody.contains("makeFirstResponder")
+                    && firstPresentationBody.hasSuffix("        }\n        "),
+                "首次展示只独占焦点设置；公告必须在条件外覆盖 retained deep link 与重新置前")
+            expect(
+                announcementDebt.lowerBound < announcement.lowerBound
+                    && announcement.lowerBound < presentationEnds.lowerBound,
+                "Settings 重新置前必须在解除门闩前补齐 Sounds 上下文与 latest status")
+        } else {
+            expect(false, "Settings retained presentation 缺少无条件声音公告顺序锚点")
+        }
+        expect(
             controller.contains("SettingsWindowGeometry.defaultWidth")
                 && controller.contains("SettingsWindowGeometry.minimumWidth"),
             "AppKit owner 必须消费同一个默认/最小尺寸合同")
         expect(
             view.components(separatedBy: "ScrollView(").count - 1 == 1,
-            "SwiftUI shell 只能有一层主滚动")
+            "SwiftUI shell 只能保留一层通用主滚动；嵌入编辑器不得再被外层滚动包裹")
         expect(
-            view.contains("ForEach(preferences.availableSettingsDestinations)")
+            view.contains("EmbeddedSoundPacksEditorView(")
+                && view.contains("soundPacksEditorOwner")
+                && controller.contains("soundPacksEditorOwner.model.$packCards")
+                && controller.contains(".combineLatest(")
+                && controller.contains("soundPackSnapshotIsFresh: libraryState == .ready"),
+            "Sounds destination 必须嵌入完整共享编辑器，并以 shared fresh-ready 快照重解析 route")
+        expect(
+            view.contains("IntegrationsWindowView(")
+                && view.contains("integrationsFocusCoordinator")
+                && view.contains("integrationsFocusCoordinator.cancelPendingRequest()")
+                && view.contains("settings.integrations.manage-events")
+                && view.contains("model.request(.events(scope: .surface(host.surfaceID)")
+                && controller.contains("integrationSurfaces: publishedSurfaces")
+                && controller.contains("selectedDestination: destination")
+                && controller.contains("integrationsModel.noteWindowVisibility(state.isVisible)"),
+            "Integrations destination 必须复用完整 model/view、解析 Surface 深链并在窗口内路由 Events")
+        expect(
+            controller.contains("eventScopes: Set(panelSoundScopeIDs(sourceRows: sourceRows))")
+                && controller.contains("integrationSurfaces: publishedSurfaces"),
+            "Events 与面板必须共享可用 Sound Scope 过滤，Integrations 仍保留全部已发布 Surface")
+        expect(
+            controller.contains("soundPackSelectionAnnouncementCancellable")
+                && controller.contains("soundPackLibraryAnnouncementCancellable")
+                && controller.contains("soundPackStatusAnnouncementCancellable")
+                && controller.contains("DispatchQueue.main.async { [weak self] in")
+                && controller.contains(
+                    "destination == .sounds,\n                        !self.isPresentingWindow")
+                && controller.contains("model.resolution.destination == .sounds")
+                && controller.contains("window.isKeyWindow")
+                && controller.contains("SoundPacksWindowAccessibilityBridge.post(")
+                && controller.contains(".selectionChanged")
+                && controller.contains(".libraryStateChanged")
+                && controller.contains("status.severity == .failure")
+                && controller.contains("func windowDidBecomeKey")
+                && controller.contains("announceLatestSoundPackStatusIfNeeded(in: keyWindow)")
+                && controller.contains("soundPacksEditorOwner.beginStatusAnnouncementAttempt(")
+                && controller.contains("soundPacksEditorOwner.finishStatusAnnouncementAttempt(")
+                && soundPacksOwner.contains("private var statusAnnouncementTracker")
+                && soundPacksOwner.contains("shouldAnnounceSelectionChange(to packID:"),
+            "唯一 Settings 必须只由实际 key Sounds presentation 播报，并共享 status/suppression 消费")
+        expect(
+            view.contains("settingsSidebarSections(")
+                && view.contains("moveSidebarSelection(")
                 && view.contains("SettingsWindowFocusTarget.title")
                 && view.contains("SettingsWindowFocusTarget.firstAction"),
-            "shell 必须接线固定 sidebar → 标题 → 首个动作焦点序")
+            "shell 必须接线分组 sidebar、方向键移动、标题与首个动作焦点序")
         expect(
             view.contains("ForEach(ClaudioLanguageMode.allCases)")
                 && view.contains("preferences.setLanguageMode($0)")
@@ -348,23 +553,55 @@ func runSettingsNavigationSuites() {
                 && gallery.contains("ForEach(PreviewFixtures.settingsRouteFailureScenarios)"),
             "DEBUG state gallery 必须遍历九个 route slot 与全部可见失败态")
         expect(
+            gallery.contains("SettingsExperienceGalleryView()")
+                && gallery.contains("ForEach(ClaudioInterfaceTextSize.allCases)")
+                && gallery.contains("ForEach(PreviewFixtures.settingsExperienceScenarios)")
+                && gallery.contains("experienceScenario: scenario"),
+            "基础六页 gallery 必须用 production Settings view 覆盖双语与四档文字")
+        expect(
+            gallery.contains("EventSettingsLayoutGalleryView()")
+                && gallery.contains("AICueExperienceGalleryView()")
+                && gallery.contains("ForEach(PreviewFixtures.aiCueGalleryScenarios)")
+                && gallery.contains("ForEach(SettingsGalleryAppearance.allCases)")
+                && gallery.contains("EventSettingsWindowView(")
+                && gallery.contains("EventSettingsAICueServiceCard(")
+                && gallery.contains("EventSettingsAICueCredentialSheet(")
+                && gallery.contains("EventSettingsAICueComposerView("),
+            "#101 复杂目的页 gallery 必须渲染生产 Events/AI 视图与完整 fixture roster")
+        expect(
+            view.contains("SettingsSectionCard")
+                && view.contains("settingsSidebarWidth(")
+                && view.contains(".onMoveCommand")
+                && view.contains(".onExitCommand")
+                && view.contains("onAnnouncement")
+                && view.contains("onAnnouncement?(settingsFailureMessage(failure))")
+                && view.contains("model.retryFailedOperation()")
+                && view.contains("announceFailureIfPresent()"),
+            "#100 必须接线共享分组表面、自适应侧栏、键盘 Escape 与可见结果公告")
+        expect(
             menuBar.contains("private let settingsWindowController: SettingsWindowController")
                 && menuBar.contains("let settingsWindowController = SettingsWindowController(")
                 && menuBar.contains("requestSettingsWindowPresentation()")
-                && menuBar.contains("SoundPacksWindowController")
-                && menuBar.contains("EventSettingsWindowController")
-                && menuBar.contains("IntegrationsWindowController"),
-            "production composition 必须接入通用设置，并保留现有三个已交付窗口")
+                && menuBar.contains("let soundPacksEditorOwner = SoundPacksEditorOwner(")
+                && menuBar.contains("soundPacksEditorOwner: soundPacksEditorOwner")
+                && !menuBar.contains("SoundPacksWindowController")
+                && !menuBar.contains("EventSettingsWindowController")
+                && menuBar.contains("integrationsModel: integrationsModel")
+                && !menuBar.contains(
+                    "let integrationsWindowController = IntegrationsWindowController(")
+                && menuBar.contains("private var pendingSettingsPresentation:")
+                && !menuBar.contains("pendingSoundPacksWindowPresentation")
+                && !menuBar.contains("pendingEventSettingsWindowPresentation"),
+            "production composition 必须只保留一个 Settings window、一个声音写入 owner 与单一 typed pending")
         expect(
-            app.contains("appDelegate.showSettings()")
-                && app.contains("CommandGroup(replacing: .appSettings)")
-                && !app.contains("CommandGroup(replacing: .appSettings) {}"),
-            "generic Settings 命令必须打开 retained 通用设置窗口，不能再吞掉入口")
+            app.contains("CommandGroup(replacing: .appSettings) {}")
+                && !app.contains("keyboardShortcut(\",\", modifiers: .command)"),
+            "合成 appSettings 必须移除，popover 激活时不得抢占前台宿主的 Command-comma")
         expect(
-            app.contains(
-                "ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)")
-                && !app.contains("Button(\"Settings…\")"),
-            "generic Settings 命令标题必须消费共享 typed preference 的双语 catalog 投影")
+            menuBar.contains("func requestSettingsWindowPresentation()")
+                && menuBar.contains("case .openSettings:")
+                && menuBar.contains("requestSettingsWindowPresentation()"),
+            "显式面板入口和用户配置的 Carbon openSettings 仍必须进入 retained Settings")
         expect(
             controller.contains("preferences: preferences")
                 && controller.contains("preferences.$snapshot")

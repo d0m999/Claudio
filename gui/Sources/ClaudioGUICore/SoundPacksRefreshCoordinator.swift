@@ -1,11 +1,14 @@
 import ClaudioCore
 import Combine
+import Foundation
 
 /// 一次声音包管理面与面板之间的可观察刷新效果。
 ///
-/// 两个 UI 面不互持彼此的 view-model：窗口写成功只发布 ``panelReloadRevision``；面板切包
+/// UI 面不互持彼此的 view-model：窗口写成功只发布 ``panelReloadRevision``；面板切包
 /// 成功发布 ``windowReloadRevision``（窗口跟随 active pack）；面板音频/import/manifest 或
 /// `master_volume` 等非切包 config 真变化发布 ``windowContentReloadRevision``（只重读窗口当前检查项）。
+/// 多个 `PanelConfigController` projection 通过 ``configFactRevision`` 共享 config 落盘事实，
+/// source token 只跳过已完成本地重读的写者，不合并各自的 Surface selection。
 /// 两侧在自己的 `@MainActor` 上重读 config 并投影同一个不可变 library snapshot；真正的包读取由
 /// app-lifetime ``SoundPackLibrary`` 在后台完成。写入仍同步留在 MainActor，没有后台写或第二份缓存。
 public enum SoundPacksRefreshEffect: Equatable, Sendable {
@@ -44,19 +47,14 @@ public enum PanelConfigChangeOutcome: Equatable, Sendable {
     case unchanged
 }
 
-/// Pure retained-window presentation policy. Model construction already performs the first
-/// hydration, so only a previously-created hidden window needs a fresh reload.
-public func shouldReloadSoundPacksWindowOnShow(
-    wasAlreadyCreated: Bool,
-    isVisible: Bool
-) -> Bool {
-    wasAlreadyCreated && !isVisible
-}
+/// Identity for one config projection subscribed to the app-lifetime refresh coordinator. The
+/// source skips its own revision while every peer reprojects the same config fact.
+public struct PanelConfigProjectionToken: Hashable, Sendable {
+    fileprivate let rawValue: UUID
 
-/// Initial focus and the opened announcement belong to an actual hidden→visible transition.
-/// Re-invoking the menu action while the window is already visible must not disturb inspection.
-public func shouldPrepareSoundPacksWindowForPresentation(isVisible: Bool) -> Bool {
-    !isVisible
+    public init() {
+        rawValue = UUID()
+    }
 }
 
 /// `SoundPacksWindow` 与 popover 的双向刷新路由。
@@ -69,6 +67,7 @@ public func shouldPrepareSoundPacksWindowForPresentation(isVisible: Bool) -> Boo
 ///   已因用户打开面板而取消，面板仍须重读 bootstrap 刚创建或修复的 config / packs。
 /// - 面板切包成功 → `windowReloadRevision` 前进；窗口重读 config 与包状态。
 /// - 面板包音频、manifest 或非切包 config 真变化 → `windowContentReloadRevision` 前进；窗口保持侧栏选择重读。
+/// - 任一 config projection 写成功 → `configFactRevision` 前进；source 跳过，所有 peer 重投影。
 /// - 没有落盘变化的失败 → revision 不动；失败前磁盘已经变化 → 两侧如实重读，但错误仍由调用面显示。
 ///
 /// `@MainActor` 不只是发布 UI 状态的要求，也是 manifest/config 写者的时序边界：调用方必须在
@@ -88,6 +87,9 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
     @Published public private(set) var windowContentReloadRevision = 0
     /// Read synchronously by the retained-window subscriber for the content revision being sent.
     public private(set) var windowContentReloadRequiresLibraryRefresh = false
+    @Published public private(set) var configFactRevision = 0
+    /// Read synchronously by config-projection subscribers for the revision being published.
+    public private(set) var configFactSource: PanelConfigProjectionToken?
 
     public init() {}
 
@@ -139,6 +141,20 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
         return .windowReload
     }
 
+    /// Publishes a config fact to sibling `PanelConfigController` projections. A pack switch uses
+    /// this directly because its management-window route is the separate active-pack revision;
+    /// ordinary Event/volume writes publish through ``completePanelConfigChange(_:source:)``.
+    @discardableResult
+    public func completeConfigFactChange(
+        _ outcome: PanelConfigChangeOutcome,
+        source: PanelConfigProjectionToken? = nil
+    ) -> Bool {
+        guard outcome == .changed else { return false }
+        configFactSource = source
+        configFactRevision += 1
+        return true
+    }
+
     /// Publishes a selected-pack content reload without changing which sidebar item the retained
     /// management window is inspecting.
     @discardableResult
@@ -156,9 +172,11 @@ public final class SoundPacksRefreshCoordinator: ObservableObject {
     /// deliberately never advances `panelReloadRevision`.
     @discardableResult
     public func completePanelConfigChange(
-        _ outcome: PanelConfigChangeOutcome
+        _ outcome: PanelConfigChangeOutcome,
+        source: PanelConfigProjectionToken? = nil
     ) -> SoundPacksRefreshEffect {
         guard outcome == .changed else { return .none }
+        completeConfigFactChange(outcome, source: source)
         windowContentReloadRequiresLibraryRefresh = false
         windowContentReloadRevision += 1
         return .windowReload

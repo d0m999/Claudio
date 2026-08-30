@@ -303,28 +303,6 @@ func runSoundPacksRefreshSuites() async {
             "复制、恢复、使用与重试必须同时禁用真实控件和对应键盘焦点")
     }
 
-    suite("SoundPacksWindow show policy：首开不 reload、隐藏重开 reload、已可见只前置") {
-        expect(
-            !shouldReloadSoundPacksWindowOnShow(
-                wasAlreadyCreated: false, isVisible: false),
-            "首次创建的 model init 已完成 hydration，不得立即再 reload")
-        expect(
-            shouldReloadSoundPacksWindowOnShow(
-                wasAlreadyCreated: true, isVisible: false),
-            "retained window 隐藏后重开必须重读外部磁盘变化")
-        expect(
-            !shouldReloadSoundPacksWindowOnShow(
-                wasAlreadyCreated: true, isVisible: true),
-            "已可见窗口再次 show 不得打断当前详情")
-
-        expect(
-            shouldPrepareSoundPacksWindowForPresentation(isVisible: false),
-            "隐藏→显示才应设置首焦点并播报 opened")
-        expect(
-            !shouldPrepareSoundPacksWindowForPresentation(isVisible: true),
-            "已可见窗口不得重置焦点或重播 opened")
-    }
-
     suite("SoundPacksRefreshCoordinator：窗口成功写只发 panel full reload") {
         let coordinator = SoundPacksRefreshCoordinator()
 
@@ -493,6 +471,66 @@ func runSoundPacksRefreshSuites() async {
         expect(coordinator.windowContentReloadRevision == 1, "config changed 必须推进内容 revision")
         expect(coordinator.windowReloadRevision == 0, "非切包 config 变化不得伪装成 active pack 切换")
         expect(coordinator.panelReloadRevision == 0, "panel 自己已重读，不得反向再刷一次")
+        expect(coordinator.configFactRevision == 1, "config changed 必须同步推进共享 config fact")
+        expect(coordinator.configFactSource == nil, "外部写者没有 projection token，所有 controller 都应刷新")
+    }
+
+    suite("共享 config fact：双 controller 同步 pack/Event/volume，Surface 投影保持隔离") {
+        withTempDirectory { root in
+            let configFile = root.appendingPathComponent("config.json")
+            let configLock = root.appendingPathComponent("config.lock")
+            let packs = root.appendingPathComponent("packs")
+            writeFixture(
+                #"{ "selected_pack": "pack-a", "master_volume": 0.5, "events": {} }"#,
+                to: configFile)
+            for packID in ["pack-a", "pack-b"] {
+                writeFixture(
+                    """
+                    { "id": "\(packID)", "events": { "stop": "stop.mp3" } }
+                    """,
+                    to: packs.appendingPathComponent("\(packID)/manifest.json"))
+                writeFixture(
+                    "audio",
+                    to: packs.appendingPathComponent("\(packID)/stop.mp3"))
+            }
+
+            let environment = soundPacksEnvironment(packs)
+            let library = SoundPackLibrary(environment: environment)
+            let coordinator = SoundPacksRefreshCoordinator()
+            let legacy = PanelConfigController(
+                configFile: configFile,
+                lockFile: configLock,
+                environment: environment,
+                soundPackLibrary: library,
+                soundPacksRefreshCoordinator: coordinator)
+            let unified = PanelConfigController(
+                configFile: configFile,
+                lockFile: configLock,
+                environment: environment,
+                soundPackLibrary: library,
+                soundPacksRefreshCoordinator: coordinator)
+
+            expect(legacy.switchPack(to: "pack-b") == .succeeded, "legacy 切包前提必须成功")
+            expect(
+                legacy.config.selectedPack == "pack-b" && unified.config.selectedPack == "pack-b",
+                "任一 projection 切包后，peer 必须同步同一 config fact")
+
+            legacy.toggleMute(.stop)
+            expect(
+                !legacy.config.isEnabled(.stop) && !unified.config.isEnabled(.stop),
+                "任一 projection 修改 Event 后，peer 必须同步 enabled 事实")
+
+            legacy.selectSoundSurface(.workBuddy)
+            unified.selectSoundSurface(.codex)
+            expect(legacy.setMasterVolume(0.35) == 0.35, "全局主音量写入前提必须成功")
+            expect(
+                legacy.config.masterVolume == 0.35 && unified.config.masterVolume == 0.35,
+                "唯一全局主音量必须同步到两个 projection")
+            expect(
+                legacy.selectedSurface == .workBuddy && unified.selectedSurface == .codex,
+                "共享 config 刷新不得合并或改写各窗口的 Surface projection")
+            expect(coordinator.configFactRevision == 3, "pack/Event/volume 必须各发布一次 config fact")
+        }
     }
 
     suite("集成取消静音：config-only revision 让保留的声音包窗口重读 enabled") {
@@ -2153,7 +2191,7 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
-    suite("SoundPacksWindow 是普通 library target，仓库仍只有一个 @main") {
+    suite("SoundPacksWindow 是普通 library target，只有两个 shipping executable 使用 @main") {
         guard let package = soundPacksCode("gui/Package.swift") else {
             expect(false, "读不到 gui/Package.swift")
             return
@@ -2189,122 +2227,96 @@ func runSoundPacksRefreshSuites() async {
             if code.contains("@main") { mainSites.append(name) }
         }
         expect(
-            mainSites == ["ClaudioGUI/ClaudioGUIApp.swift"],
-            "gui/Sources 下只许 shipping app 有一个 @main，实得 \(mainSites)")
+            mainSites.sorted()
+                == [
+                    "ClaudioGUI/ClaudioGUIApp.swift",
+                    "ClaudioLoginItem/main.swift",
+                ],
+            "gui/Sources 下只许主 app 与内嵌 LoginItem 两个 shipping @main，实得 \(mainSites)")
     }
 
-    suite("SoundPacksWindow owner：lazy 单窗口、关闭后复用、全体 MainActor") {
+    suite("SoundPacks editor owner：单写模型嵌入统一 Settings，standalone wiring 退役") {
         guard
-            let controller = soundPacksCode(
-                "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"),
+            let owner = soundPacksCode(
+                "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
             let view = soundPacksCode("gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let model = soundPacksCode(
-                "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift")
+                "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"),
+            let settingsController = soundPacksCode(
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let settingsView = soundPacksCode(
+                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+            let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift")
         else {
             expect(
                 false,
-                "读不到 SoundPacksWindowController.swift、SoundPacksWindowView.swift 或 SoundPacksWindowModel.swift")
+                "读不到 SoundPacks owner/model/view 或统一 Settings wiring")
             return
         }
-        let controllerFlat = collapsingWhitespace(controller)
+        let ownerFlat = collapsingWhitespace(owner)
+        let legacyControllerURL = soundPacksRepoRoot().appendingPathComponent(
+            "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift")
 
-        expect(controller.contains("@MainActor"), "NSWindow owner 必须显式 @MainActor")
+        expect(owner.contains("@MainActor"), "共享编辑 owner 必须显式 @MainActor")
         expect(model.contains("@MainActor"), "窗口 model 必须显式 @MainActor")
         expect(
-            controller.contains("private var window: NSWindow?"),
-            "owner 必须持有一个 optional NSWindow，按需创建")
+            !FileManager.default.fileExists(atPath: legacyControllerURL.path),
+            "cutover 后独立 SoundPacks window/autosave/title subscriptions 必须移除")
         expect(
-            controller.contains("private lazy var model: SoundPacksWindowModel"),
-            "管理窗口 model 必须延迟到首次展示时创建，启动时不得扫描声音包")
+            owner.contains("public final class SoundPacksEditorOwner")
+                && owner.contains("public let model: SoundPacksWindowModel")
+                && menu.components(separatedBy: "SoundPacksEditorOwner(").count - 1 == 1
+                && settingsView.contains("editorOwner: soundPacksEditorOwner")
+                && !settingsController.contains("model = SoundPacksWindowModel("),
+            "Foundation-only owner 必须是 production 唯一可写 model 来源")
         expect(
             view.contains("packRowMetaSlots(") && view.contains("case .modified:"),
             "管理窗口 license 必须复用 factoryIntegrity 的 modified 优先规则")
         expect(
-            controller.contains("window ?? makeWindow()"),
-            "showWindow 必须复用已有窗口，不能每点一次管理就 new 一扇")
-        let reloadPolicyCalls = callArguments(
-            of: "shouldReloadSoundPacksWindowOnShow", in: controller)
-        expect(
-            reloadPolicyCalls.count == 1,
-            "controller 必须恰好调用一次 show-time reload policy，实得 \(reloadPolicyCalls.count) 次")
-        if let arguments = reloadPolicyCalls.first {
-            expect(
-                argumentValue("wasAlreadyCreated", in: arguments) == "wasAlreadyCreated"
-                    && argumentValue("isVisible", in: arguments) == "wasVisible",
-                "show-time reload 的两个实参必须锚在同一处调用上并逐字转发 "
-                    + "`wasAlreadyCreated` / `wasVisible`，实得：\(arguments) —— 全文件 contains 会被"
-                    + "下面 focus policy 的 `isVisible: wasVisible` 诱饵喂饱")
-        }
-        expect(
-            controller.contains("shouldPrepareSoundPacksWindowForPresentation(isVisible: wasVisible)"),
-            "首焦点与 windowOpened 必须共用真实 hidden→visible 判定")
-        expect(
-            controllerFlat.contains(
-                "effectiveRoute = model.selectPackForInspection(packID) ? resolvedRoute : .overview(surface: resolvedRoute.surface)")
-                && controller.contains("pendingRoute = route")
-                && controller.contains("model.setManagedSurface(resolvedRoute.surface)")
-                && controller.contains("resolvePendingRouteIfPossible")
-                && controller.contains("requestInitialFocus(route: effectiveRoute)")
-                && controller.contains("focusCoordinator.requestRoute(effectiveRoute)"),
+            ownerFlat.contains(
+                "guard model.selectPackForInspection(packID) else { return .resolved(.overview(surface: resolvedRoute.surface)) }"
+            )
+                && owner.contains("model.setManagedSurface(route.surface)")
+                && view.contains("editorOwner.apply(route: route)")
+                && view.contains("focusCoordinator.requestInitialFocus(route: resolved)")
+                && view.contains("focusCoordinator.requestRoute(resolved)"),
             "editEvent 必须等待 library 证明目标存在后再选包；ready 缺失只能降级 overview")
         expect(
-            controller.contains("ClaudioL10n(language: languageStore.language).text(.soundPacksWindowTitle)"),
-            "后台标准窗口标题必须保留 claudi0 品牌锚点")
+            view.contains("@State private var isPerformingWrite = false")
+                && view.contains("soundPacksWritingChanges")
+                && view.contains("sound-packs.write-in-progress")
+                && view.contains("await Task.yield()")
+                && view.contains(".disabled(isPerformingWrite)"),
+            "同步 pack/config 写入必须先让可见进行中状态获得一个 MainActor 渲染机会，并禁用重入")
         expect(
-            controller.contains("isReleasedWhenClosed = false"),
-            "关闭后 owner 仍保留窗口，下一次复用同一实例")
+            settingsController.contains("window.isReleasedWhenClosed = false")
+                && settingsController.contains(
+                    "RetainedWindowHandbackTracker<NSRunningApplication>")
+                && settingsController.contains(
+                    "handbackTracker.consumeOnClose() ?? originalHandback")
+                && settingsController.contains("focusRestoration = nil"),
+            "Sounds 必须共享统一 retained 窗口，关闭一次消费最新 handback")
         expect(
-            controller.contains("private var handbackApplication: NSRunningApplication?"),
-            "window owner 必须接住 popover 的 previous-app handback 债务")
-        expect(
-            controller.contains("public func showWindow(")
-                && controller.contains("returnFocusTo application: NSRunningApplication?"),
-            "窗口展示入口必须显式接收 handback app，不能在 popover 关闭时把它丢掉")
-        guard
-            let closeBody = soundPacksFunctionBody(
-                after: "public func windowWillClose(_ notification: Notification)", in: controller)
-        else {
-            expect(false, "SoundPacksWindowController 必须在标准窗口关闭时偿还或清理 handback 债务")
-            return
-        }
-        expect(
-            closeBody.contains("handbackApplication = nil"),
-            "windowWillClose 必须先清 handback 债务，关闭/重开不得复用陈旧 app")
-        expect(
-            controller.contains(
-                "private var focusRestoration: (@MainActor (NSRunningApplication?) -> Bool)?")
-                && closeBody.contains("guard !restoration(previous) else { return }")
-                && closeBody.contains("self.completeCloseHandoff(to: previous)")
-                && controller.contains("private func completeCloseHandoff("),
-            "恢复闭包必须报告真实成功；目标窗口消失时仍要继续普通 handback/deactivate")
-        expect(
-            controller.contains("private func completeCloseHandoff(")
-                && controller.contains("guard NSApp.isActive else { return }"),
-            "用户已切到别处时，窗口关闭不得把旧 app 抢回前台")
-        expect(
-            controller.contains("NSApp.yieldActivation(to: previous)")
-                && controller.contains("NSApp.deactivate()"),
-            "windowWillClose 必须覆盖 macOS 14+ cooperative handback 与旧系统 deactivate")
-        expect(
-            controller.contains("NSWorkspace.didActivateApplicationNotification")
-                && controller.contains("[weak self]"),
-            "窗口后台停留期间必须弱订阅外部 app 激活，把 handback 更新为最近来源且不成环")
-        expect(
-            controller.contains("isClosingWindow"),
-            "窗口关闭时必须阻止 activation notification 把刚清掉的 handback 债务重新写回")
-        expect(
-            !controller.contains("Task.detached")
-                && !controller.contains("mutateManifestJSON")
-                && !controller.contains("setEventEnabled("),
+            settingsController.contains("let soundPackModel = soundPacksEditorOwner.model")
+                && settingsController.contains("soundPackModel.$windowStatuses")
+                && settingsController.contains(
+                    "soundPacksEditorOwner.beginStatusAnnouncementAttempt(")
+                && settingsController.contains(
+                    "soundPacksEditorOwner.finishStatusAnnouncementAttempt(")
+                && !settingsController.contains("Task.detached")
+                && !settingsController.contains("mutateManifestJSON")
+                && !settingsController.contains("setEventEnabled("),
             "窗口 owner 可延后焦点恢复，但不得自行启动后台 manifest/config 写路径")
     }
 
-    suite(".openSoundSettings：携带当前 Sound Scope，并通过 pending-close 展示事件设置窗口") {
+    suite(".openSoundSettings：携带当前 Sound Scope，并通过单一 pending-close 展示 Settings Events") {
         guard
             let panel = soundPacksCode("gui/Sources/ClaudioGUI/PanelView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let requestBody = soundPacksFunctionBody(
-                after: "fileprivate func requestEventSettingsWindowPresentation(", in: menu),
+                after: "fileprivate func requestEventsSettingsPresentation(", in: menu),
+            let sharedRequestBody = soundPacksFunctionBody(
+                after: "private func requestSettingsPresentation(", in: menu),
             let closeBody = soundPacksFunctionBody(
                 after: "func popoverDidClose(_ notification: Notification)", in: menu)
         else {
@@ -2326,17 +2338,19 @@ func runSoundPacksRefreshSuites() async {
             panel.contains(".focused($focusedTarget, equals: .openSoundSettings)"),
             "打开设置必须认领 .openSoundSettings 焦点契约")
         expect(
-            requestBody.contains("pendingEventSettingsWindowPresentation = (route, target)")
-                && requestBody.contains("popover.close()"),
-            "管理入口必须先记 pending，再强制关闭 transient popover；performClose 可能因 nested "
+            requestBody.contains("route: .events(scope: route.scope, event: route.event)")
+                && requestBody.contains("returnFocusTo: target")
+                && sharedRequestBody.contains("pendingSettingsPresentation = presentation")
+                && sharedRequestBody.contains("popover.close()"),
+            "管理入口必须提交 typed route 并先记单一 pending，再强制关闭 transient popover；performClose 可能因 nested "
                 + "popover/child window 失败并留下幽灵 pending")
         expect(
-            !requestBody.contains("popover.performClose"),
+            !sharedRequestBody.contains("popover.performClose"),
             "自家窗口导航不得用可拒绝的 performClose；失败后没有 didClose 可消费 pending")
-        if let pendingAt = requestBody.range(
-            of: "pendingEventSettingsWindowPresentation = (route, target)"
+        if let pendingAt = sharedRequestBody.range(
+            of: "pendingSettingsPresentation = presentation"
         )?.lowerBound,
-            let closeAt = requestBody.range(of: "popover.close()")?.lowerBound
+            let closeAt = sharedRequestBody.range(of: "popover.close()")?.lowerBound
         {
             expect(
                 pendingAt < closeAt,
@@ -2345,19 +2359,18 @@ func runSoundPacksRefreshSuites() async {
             expect(false, "管理入口必须同时包含 pending 与强制 close")
         }
         expect(
-            closeBody.contains("if let eventSettingsPresentation")
-                && closeBody.contains("route: eventSettingsPresentation.route")
-                && closeBody.contains("to: eventSettingsPresentation.focusTarget"),
-            "事件设置窗口关闭后必须重开面板并恢复精确触发控件")
+            closeBody.contains("if let settingsPresentation")
+                && closeBody.contains("presentSettings(settingsPresentation)"),
+            "popover 关闭后必须只展示统一 Settings；其关闭回调恢复精确触发控件")
         if let showAt = closeBody.range(
-            of: "eventSettingsWindowController.showWindow("
+            of: "presentSettings(settingsPresentation)"
         )?.lowerBound,
             let returnAt = closeBody[showAt...].range(of: "return")?.lowerBound,
             let handbackGuardAt = closeBody.range(of: "guard NSApp.isActive")?.lowerBound
         {
             expect(
                 showAt < returnAt && returnAt < handbackGuardAt,
-                "事件设置窗口 presentation 必须先于 previous-app handback guard 并直接 return")
+                "Settings presentation 必须先于 previous-app handback guard 并直接 return")
         } else {
             expect(
                 false,

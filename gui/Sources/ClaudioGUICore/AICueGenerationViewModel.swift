@@ -11,7 +11,9 @@ public enum AICueComposerPhase: Sendable, Equatable {
 
 public enum AICueCredentialActivity: Sendable, Equatable {
     case idle
-    case validating
+    case probing
+    case saving
+    case pendingReplacement
     case deleting
 }
 
@@ -34,6 +36,7 @@ public final class AICueGenerationViewModel: ObservableObject {
     @Published public private(set) var credentialStatus: AICueCredentialStatus?
     @Published public private(set) var credentialActivity: AICueCredentialActivity = .idle
     @Published public private(set) var credentialFailure: AICueCredentialFailure?
+    @Published public private(set) var providerProfileID: AICueProviderProfileID
     @Published public private(set) var phase: AICueComposerPhase = .editing
     @Published public private(set) var adoptingCandidateID: UUID?
     @Published public private(set) var soundDescription = ""
@@ -45,16 +48,64 @@ public final class AICueGenerationViewModel: ObservableObject {
 
     private let credentialManager: any AICueCredentialManaging
     private let generator: any AICueGenerating
+    private let registry: AICueProviderRegistry
+    private let providerPreferences: AICueProviderPreferences
     private var sessionRevision: UInt64 = 0
+    private var credentialStatusRevision: UInt64 = 0
     private var generationTask: Task<Void, Never>?
     private var adoptionTask: Task<Void, Never>?
 
     public init(
         credentialManager: any AICueCredentialManaging,
-        generator: any AICueGenerating
+        generator: any AICueGenerating,
+        providerProfileID: AICueProviderProfileID? = nil,
+        registry: AICueProviderRegistry = AICueProviderRegistry(),
+        providerPreferences: AICueProviderPreferences = AICueProviderPreferences()
     ) {
         self.credentialManager = credentialManager
         self.generator = generator
+        self.registry = registry
+        self.providerPreferences = providerPreferences
+        let preferredProfileID = providerProfileID ?? providerPreferences.selectedProfileID()
+        self.providerProfileID =
+            (try? registry.profile(for: preferredProfileID).id)
+            ?? providerPreferences.selectedProfileID()
+    }
+
+    #if DEBUG
+    /// Deterministic, side-effect-free state injection for the repository visual/AX gallery.
+    /// Production continues to reach these states only through the credential, generation and
+    /// adoption operations above; this initializer supplies no alternate production transition.
+    public convenience init(previewState: AICueGenerationPreviewState) {
+        self.init(
+            credentialManager: AICuePreviewCredentialManager(
+                status: previewState.credentialStatus ?? .missing),
+            generator: AICuePreviewGenerator(),
+            providerProfileID: previewState.providerProfileID,
+            providerPreferences: AICueProviderPreferences(defaults: UserDefaults()))
+        credentialStatus = previewState.credentialStatus
+        credentialActivity = previewState.credentialActivity
+        credentialFailure = previewState.credentialFailure
+        phase = previewState.phase
+        adoptingCandidateID = previewState.adoptingCandidateID
+        soundDescription = previewState.soundDescription
+        displayName = previewState.displayName
+        target = previewState.target
+        generation = previewState.generation
+        failure = previewState.failure
+        adoptionOutcome = previewState.adoptionOutcome
+    }
+    #endif
+
+    public var providerProfile: AICueProviderProfile {
+        guard let profile = try? registry.profile(for: providerProfileID) else {
+            preconditionFailure("Selected provider profile did not come from the registry")
+        }
+        return profile
+    }
+
+    public var availableProviderProfiles: [AICueProviderProfile] {
+        registry.profiles()
     }
 
     public var requiresCredentialConfiguration: Bool {
@@ -105,19 +156,54 @@ public final class AICueGenerationViewModel: ObservableObject {
     }
 
     public func refreshCredentialStatus() async {
-        credentialStatus = await credentialManager.status(for: .elevenLabs)
+        guard credentialActivity == .idle else { return }
+        let profileID = providerProfileID
+        credentialStatusRevision &+= 1
+        let revision = credentialStatusRevision
+        let status = await credentialManager.status(for: profileID)
+        guard
+            providerProfileID == profileID,
+            credentialStatusRevision == revision
+        else { return }
+        credentialStatus = status
+    }
+
+    /// A profile switch is an explicit region/provider choice. It persists only the allowlisted ID,
+    /// cancels the old generation and invalidates every unadopted candidate without touching an
+    /// already adopted sound.
+    public func selectProviderProfile(_ profileID: AICueProviderProfileID) throws {
+        guard
+            profileID != providerProfileID,
+            credentialActivity == .idle,
+            phase != .adopting
+        else { return }
+        _ = try registry.profile(for: profileID)
+        try providerPreferences.select(profileID)
+        credentialStatusRevision &+= 1
+        invalidateVisibleGeneration()
+        providerProfileID = profileID
+        credentialStatus = nil
+        credentialFailure = nil
     }
 
     /// Saving is never coupled to generation. A successful save clears only a credential-required
     /// message; the description and explicit second click remain intact.
-    public func validateAndSave(_ credential: SensitiveCredentialInput) async {
+    public func saveCredential(_ credential: SensitiveCredentialInput) async {
         guard credentialActivity == .idle else { return }
-        credentialActivity = .validating
+        credentialStatusRevision &+= 1
+        let profile = try? registry.profile(for: providerProfileID)
+        switch (profile?.credentialValidationPolicy, credentialStatus) {
+        case (.readOnlyProbe, _): credentialActivity = .probing
+        case (.deferredUntilExplicitGeneration, .stored):
+            credentialActivity = .pendingReplacement
+        default: credentialActivity = .saving
+        }
         credentialFailure = nil
         defer { credentialActivity = .idle }
         do {
-            try await credentialManager.validateAndSave(credential, for: .elevenLabs)
-            credentialStatus = await credentialManager.status(for: .elevenLabs)
+            credentialStatus = try await credentialManager.save(
+                credential,
+                for: providerProfileID)
             switch failure {
             case .generation(.credentialRequired), .generation(.credentialUnavailable):
                 failure = nil
@@ -125,10 +211,10 @@ public final class AICueGenerationViewModel: ObservableObject {
                 break
             }
         } catch let error as AICueProviderError {
-            credentialStatus = await credentialManager.status(for: .elevenLabs)
+            credentialStatus = await credentialManager.status(for: providerProfileID)
             credentialFailure = .provider(error)
         } catch {
-            credentialStatus = await credentialManager.status(for: .elevenLabs)
+            credentialStatus = await credentialManager.status(for: providerProfileID)
             credentialFailure = .storageUnavailable
         }
     }
@@ -137,20 +223,37 @@ public final class AICueGenerationViewModel: ObservableObject {
         guard credentialActivity == .idle, phase != .generating, phase != .adopting else {
             return
         }
+        credentialStatusRevision &+= 1
         credentialActivity = .deleting
         credentialFailure = nil
         defer { credentialActivity = .idle }
         do {
-            try await credentialManager.delete(for: .elevenLabs)
+            try await credentialManager.delete(for: providerProfileID)
             credentialStatus = .missing
         } catch {
-            credentialStatus = await credentialManager.status(for: .elevenLabs)
+            credentialStatus = await credentialManager.status(for: providerProfileID)
+            credentialFailure = .storageUnavailable
+        }
+    }
+
+    public func cancelPendingCredentialReplacement() async {
+        guard credentialActivity == .idle else { return }
+        credentialStatusRevision &+= 1
+        credentialActivity = .pendingReplacement
+        credentialFailure = nil
+        defer { credentialActivity = .idle }
+        do {
+            try await credentialManager.cancelPendingReplacement(for: providerProfileID)
+            credentialStatus = await credentialManager.status(for: providerProfileID)
+        } catch {
+            credentialStatus = await credentialManager.status(for: providerProfileID)
             credentialFailure = .storageUnavailable
         }
     }
 
     public func startGeneration(locale: String) {
         guard target != nil, phase != .generating, phase != .adopting else { return }
+        let deadline = AICueGenerationDeadline.startingNow()
 
         generationTask?.cancel()
         if let previous = generation {
@@ -166,12 +269,17 @@ public final class AICueGenerationViewModel: ObservableObject {
         let revision = sessionRevision
         let description = soundDescription
         let generator = self.generator
+        let providerProfileID = self.providerProfileID
 
         generationTask = Task { [weak self] in
             let result: Result<AICueGeneration, AICueGenerationError>
             do {
                 result = .success(
-                    try await generator.generate(description: description, locale: locale))
+                    try await generator.generate(
+                        description: description,
+                        locale: locale,
+                        providerProfileID: providerProfileID,
+                        deadline: deadline))
             } catch let error as AICueGenerationError {
                 result = .failure(error)
             } catch is CancellationError {
@@ -198,6 +306,7 @@ public final class AICueGenerationViewModel: ObservableObject {
                 self.generation = generation
                 self.displayName = generation.plan.suggestedDisplayName
                 self.phase = .candidatesReady
+                await self.refreshCredentialStatus()
             case .failure(let error):
                 if error == .credentialRequired {
                     self.credentialStatus = .missing
@@ -206,6 +315,7 @@ public final class AICueGenerationViewModel: ObservableObject {
                 }
                 self.phase = .editing
                 self.failure = .generation(error)
+                await self.refreshCredentialStatus()
             }
         }
     }
@@ -319,3 +429,85 @@ public final class AICueGenerationViewModel: ObservableObject {
         }
     }
 }
+
+#if DEBUG
+/// A complete render-state snapshot used only by ``PreviewFixtures`` and the DEBUG gallery.
+public struct AICueGenerationPreviewState: Sendable, Equatable {
+    public let providerProfileID: AICueProviderProfileID
+    public let credentialStatus: AICueCredentialStatus?
+    public let credentialActivity: AICueCredentialActivity
+    public let credentialFailure: AICueCredentialFailure?
+    public let phase: AICueComposerPhase
+    public let adoptingCandidateID: UUID?
+    public let soundDescription: String
+    public let displayName: String
+    public let target: AICueAdoptionTarget?
+    public let generation: AICueGeneration?
+    public let failure: AICueComposerFailure?
+    public let adoptionOutcome: AICueAdoptionOutcome?
+
+    public init(
+        providerProfileID: AICueProviderProfileID,
+        credentialStatus: AICueCredentialStatus?,
+        credentialActivity: AICueCredentialActivity = .idle,
+        credentialFailure: AICueCredentialFailure? = nil,
+        phase: AICueComposerPhase = .editing,
+        adoptingCandidateID: UUID? = nil,
+        soundDescription: String = "",
+        displayName: String = "",
+        target: AICueAdoptionTarget? = nil,
+        generation: AICueGeneration? = nil,
+        failure: AICueComposerFailure? = nil,
+        adoptionOutcome: AICueAdoptionOutcome? = nil
+    ) {
+        self.providerProfileID = providerProfileID
+        self.credentialStatus = credentialStatus
+        self.credentialActivity = credentialActivity
+        self.credentialFailure = credentialFailure
+        self.phase = phase
+        self.adoptingCandidateID = adoptingCandidateID
+        self.soundDescription = soundDescription
+        self.displayName = displayName
+        self.target = target
+        self.generation = generation
+        self.failure = failure
+        self.adoptionOutcome = adoptionOutcome
+    }
+}
+
+private actor AICuePreviewCredentialManager: AICueCredentialManaging {
+    let projectedStatus: AICueCredentialStatus
+
+    init(status: AICueCredentialStatus) {
+        projectedStatus = status
+    }
+
+    func status(for profileID: AICueProviderProfileID) -> AICueCredentialStatus {
+        projectedStatus
+    }
+
+    func save(
+        _ credential: SensitiveCredentialInput,
+        for profileID: AICueProviderProfileID
+    ) async throws -> AICueCredentialStatus {
+        projectedStatus
+    }
+
+    func delete(for profileID: AICueProviderProfileID) async throws {}
+    func cancelPendingReplacement(for profileID: AICueProviderProfileID) async throws {}
+}
+
+private actor AICuePreviewGenerator: AICueGenerating {
+    func generate(
+        description: String,
+        locale: String,
+        providerProfileID: AICueProviderProfileID,
+        deadline: AICueGenerationDeadline
+    ) async throws -> AICueGeneration {
+        throw AICueGenerationError.providerUnavailable
+    }
+
+    func discard(generationID: UUID) async {}
+    func discardAll() async {}
+}
+#endif

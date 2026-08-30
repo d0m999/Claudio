@@ -2,14 +2,14 @@ import AppKit
 import ClaudioGUICore
 import ClaudioLocalization
 
-/// The standard window's single AppKit announcement exit.
+/// The retained Settings Sounds destination's single AppKit announcement exit.
 ///
 /// This bridge intentionally lives in `SoundPacksWindow`, not the menu-bar panel target. Opening
-/// the window first closes the transient panel, so the two surfaces do not compete for a live
-/// announcement.
+/// Settings first closes the transient panel, so the surfaces do not compete for a live
+/// announcement. Callers must supply the retained Settings window while it is actually key.
 @MainActor
-enum SoundPacksWindowAccessibilityBridge {
-    static func post(
+public enum SoundPacksWindowAccessibilityBridge {
+    public static func post(
         _ moment: SoundPacksWindowAnnouncementMoment,
         facts: SoundPacksWindowAnnouncementFacts,
         language: ClaudioAppLanguage,

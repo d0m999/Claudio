@@ -1,6 +1,6 @@
 # PLAN — 描述式 AI 提示音（BYOK、多 Provider）执行计划
 
-> 状态：**ElevenLabs 单 Provider 基线的本地实现与自动验证已完成；多 Provider 扩展、迁入统一设置、真机无障碍、真实 Provider 与发布证据待单独验收**
+> 状态：**TTS-MP-0、allowlisted 多 Provider 实现与统一设置迁移的自动合同已落地；真机无障碍、真实 Provider 与发布证据待单独验收**
 >
 > 日期：2026-08-26
 >
@@ -17,12 +17,14 @@
 > 九个设置目的页、统一窗口、路由与视觉迁移的总规格见
 > `plan/PLAN-SETTINGS-EXPERIENCE.md`；本文件只拥有 AI 提示音子域合同。
 >
-> 本轮已完成 ElevenLabs 基线的本地 Swift 实现与 fixture 验证，并按 2026-08-26 官方文档冻结
-> MiniMax/Qwen 的首批 profile、凭据验证策略和 transport 合同；仍未授权输入真实 key、发真实
-> 供应商请求、付费探测、修改真实宿主配置、commit 或 push。
+> 当前实现已完成四个 allowlisted profile、provider-neutral registry/request compiler、hardened
+> transports、逐 profile credential policy、ElevenLabs/MiniMax/Qwen adapters 与统一设置投影的
+> deterministic fixture 验证。自动测试只使用假 key/fixture；未输入真实 key、未发真实供应商或
+> 付费请求，也未据此宣称音质、费用或正式发布验收。
 >
-> 兼容性说明：`docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md` 仍记录当前单
-> Provider 基线；多 Provider 目标只有在 TTS-MP-0 至 TTS-MP-5 和对应验收完成后才视为已实现。
+> 兼容性说明：`docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md` 与 TTS-MP-1 至
+> TTS-MP-5 的 Swift/fixture 合同已经按 allowlisted 多 Provider 目标落地；真实 Provider、原生 UI、
+> 双架构、签名、公证与发布仍保持独立的 `NOT VERIFIED` 证据层。
 
 ## 0. 目标与完成定义
 
@@ -79,10 +81,10 @@ profile。用户只选择 profile 并输入对应的 key；实现前必须重新
 
 | Provider/profile | 凭据策略与固定请求路线 | 固定 model / voice / 输出处理 | 初始能力 | 状态 |
 |---|---|---|---|---|
-| `elevenlabs-global` | `readOnlyProbe`：`GET https://api.elevenlabs.io/v1/models`；生成使用 `xi-api-key`；credential slot 固定为旧 account `elevenlabs` | speech：`eleven_v3` + voice `JBFqnCBsd6RMkjVDRZzb`；sound generation：`eleven_text_to_sound_v2`；直接 MP3 | `speech`、`mixed`、`animal`、`soundEffect` | 已有基线 adapter；迁入 registry 时保持 route、voice 和旧 key 回归兼容 |
+| `elevenlabs-global` | `readOnlyProbe`：`GET https://api.elevenlabs.io/v1/models`；`xi-api-key`；speech/mixed：`POST /v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb`；animal/soundEffect：`POST /v1/sound-generation`；credential slot 固定为旧 account `elevenlabs` | speech/mixed：`eleven_v3` + voice `JBFqnCBsd6RMkjVDRZzb`；animal/soundEffect：`eleven_text_to_sound_v2`；直接 MP3 | `speech`、`mixed`、`animal`、`soundEffect`；`zh` / `zh-Hans` / `en` | 已有基线 adapter；迁入 registry 时保持 route、voice 和旧 key 回归兼容 |
 | `minimax-global` | `readOnlyProbe`：`POST https://api.minimax.io/v1/get_voice`，body 固定为 `{"voice_type":"all"}`；生成使用 Bearer + `POST https://api.minimax.io/v1/t2a_v2` | `speech-2.8-hd` + voice `Chinese (Mandarin)_Reliable_Executive`；`output_format: hex`；32 kHz / 128 kbps / mono MP3；响应 `data.audio` 解 hex | 首批只开放 `speech` 和 `zh` / `zh-Hans`；sound tags / voice effects 不等价于纯音效生成 | 计划新增 unary adapter |
-| `qwen-singapore` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；`X-DashScope-SSE: enable` | `qwen3-tts-instruct-flash` + voice `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 首批只开放 `speech`；locale 仅映射 `zh* → Chinese`、`en* → English` | 计划新增 SSE adapter；保存 key 时不发可计费请求 |
-| `qwen-beijing` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；独立 region key | 与 Singapore 相同的 model、voice、SSE 和 PCM 合同 | 与 `qwen-singapore` 相同，必须单独做地区 smoke | 计划新增独立 profile；不得隐式自动切换 |
+| `qwen-singapore` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope-intl.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-singapore`；`X-DashScope-SSE: enable` | `qwen3-tts-instruct-flash` + voice `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 首批只开放 `speech`；locale 仅映射 `zh* → Chinese`、`en* → English` | 计划新增 SSE adapter；保存 key 时不发可计费请求 |
+| `qwen-beijing` | `deferredUntilExplicitGeneration`；Bearer + `POST https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation`；credential slot `qwen-beijing`；独立 region key | 与 Singapore 相同的 model、voice、SSE 和 PCM 合同 | 与 `qwen-singapore` 相同，必须单独做地区 smoke | 计划新增独立 profile；不得隐式自动切换 |
 
 能力规则：
 
@@ -149,11 +151,10 @@ Provider 只有在 `speech` 路线通过后才能显示为可用；纯音效、�
 4. GitHub #92 只承担统一设置中的 AI 提示音 UI 集成；provider-neutral foundation、credential policy、
    ElevenLabs 回归、MiniMax adapter、Qwen adapter 分成独立子 tickets，并按本计划依赖关系连接。
 
-截至 2026-08-26，设置计划仍写死 ElevenLabs，原型仍显示“固定一个首发服务”，#92 虽带
-`ready-for-agent` 但 body 仍是 ElevenLabs-only 的 `missing/configured/unavailable` 合同。本次授权只
-修改本计划，所以上述 ADR、设置计划、原型和 issue 尚未同步。在 TTS-MP-0 完成前，#92 的现有 label
-不得作为执行授权，也不得把 `TTS-MP-1...TTS-MP-5` 标记 ready-for-agent 或把单 Provider 原型描述成
-多 Provider 已设计。
+截至 2026-08-26，#103 已让 ADR 0006、`PLAN-SETTINGS-EXPERIENCE.md` 和当前 Events 原型与本合同
+一致；GitHub #92 及 TTS-MP-1...TTS-MP-5 tickets 的 ownership、验收和原生依赖也已在 issue tracker
+中对齐。该结果只解除文档与设计门禁，不代表任一多 Provider adapter、credential policy 或
+production UI 已实现，也不把 issue label、静态原型或本地文档升格为真实 Provider 证据。
 
 ### 0.3 共享事件边界
 
@@ -695,18 +696,18 @@ provider 输出不得绕过现有 `AudioImport`：
 | Task | 内容 | 主要依赖 | 当前状态 | 完成门槛 |
 |---|---|---|---|---|
 | TTS-0 | ElevenLabs 基线 provider/model、能力、隐私契约与本地 adapter | — | 已完成 | 原有 ElevenLabs 路线继续通过现有 fixture；其证据保留为回归基线 |
-| TTS-1 | `AICueDisplayName`、`AICueSoundPlan`、generation/adoption target、candidate/error 与双状态机 | TTS-0 | 单 Provider 基线已完成；需 provider-neutral 修订 | profile 选择不进入采用目标；名称不进入 provider request；3 候选契约稳定 |
-| TTS-2 | 单 Provider Keychain manager 与 adapter 基线 | TTS-0–TTS-1 | ElevenLabs fixture 已完成；多 profile 扩展待做 | 旧 key 可读；替换/删除 fail closed；无自定义 endpoint/model/voice |
-| TTS-MP-0 | 冻结官方 API/地区/voice/格式/验证策略，并同步 ADR 0006、设置计划、原型与 #92 拆分 | TTS-0 | 本计划合同已冻结；其余 SoT 尚未同步，未完成 | 四个 profile 有 exact route、credential policy、能力/语言/费用/隐私/错误矩阵；ADR、设置计划、原型和 tickets 无冲突 |
-| TTS-MP-1 | provider-neutral 领域类型、route-derived capability、registry、确定性语音文本语法与 request compiler | TTS-MP-0 | 待做 | 公共接口不依赖 `ElevenLabsAICueCompiledRequest`；profile 只能来自 registry；speech/mixed 无明确台词时本地失败 |
-| TTS-MP-1T | hardened unary/SSE transports、exact-origin auth injection、增量 SSE parser、wire/decoded ceilings 与 generation deadline | TTS-MP-1 | 待做 | transport 不保存 secret；Bearer/xi-api-key 正确隔离；SSE fragmentation/cancel/terminal 与 60 秒 deadline 全覆盖 |
-| TTS-MP-2 | registry-owned credential slots、read-only/deferred validation policy、Qwen pending replacement 与非敏感 profile/region 偏好 | TTS-MP-1 | 待做 | `elevenlabs-global → elevenlabs` 无迁移；region key 不混用；read-only/deferred 状态诚实；快照与日志无明文 |
-| TTS-MP-3 | ElevenLabs adapter 接入 registry 并实现统一 response/provenance 合同 | TTS-MP-1T | 已有 adapter 待重接 | 固定 endpoint/model/voice、read-only probe、四类 route 和 3 候选回归通过；旧 account 兼容由 MP-2 覆盖 |
-| TTS-MP-4 | MiniMax `speech-2.8-hd` unary T2A adapter | TTS-MP-1T | 待做 | Bearer、`get_voice` probe、固定 voice、JSON/hex、MP3、语言门禁、错误与 3 候选 fixture 全覆盖；只开放 `speech` |
-| TTS-MP-5 | Qwen `qwen3-tts-instruct-flash` SSE adapter 与 region profiles | TTS-MP-1T | 待做 | 固定 host/path/header/model/voice、SSE/Base64 PCM、合法 WAV、取消/大小/终态校验；只开放 `speech`，地区 smoke 分开 |
-| TTS-3 | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 单 Provider UI 已完成；多 Provider UI 待做；统一设置迁移与真机 AX 待验收 | 默认 ElevenLabs；切换不自动生成；不支持 modality 在网络前阻止；改名不重新生成；键盘/VoiceOver 可用 |
+| TTS-1 | `AICueDisplayName`、`AICueSoundPlan`、generation/adoption target、candidate/error 与双状态机 | TTS-0 | 已完成 provider-neutral 修订 | profile 选择不进入采用目标；名称不进入 provider request；3 候选契约稳定 |
+| TTS-2 | 单 Provider Keychain manager 与 adapter 基线 | TTS-0–TTS-1 | 已完成逐 profile 扩展 | 旧 key 可读；替换/删除 fail closed；无自定义 endpoint/model/voice |
+| TTS-MP-0 | 冻结官方 API/地区/voice/格式/验证策略，并同步 ADR 0006、设置计划、原型与 #92 拆分 | TTS-0 | 已完成（#103，本地文档/原型门禁） | 四个 profile 有 exact route、credential policy、能力/语言/费用/隐私/错误矩阵；ADR、设置计划、原型和 tickets 无冲突 |
+| TTS-MP-1 | provider-neutral 领域类型、route-derived capability、registry、确定性语音文本语法与 request compiler | TTS-MP-0 | 已完成（#104） | 公共接口不依赖 `ElevenLabsAICueCompiledRequest`；profile 只能来自 registry；speech/mixed 无明确台词时本地失败 |
+| TTS-MP-1T | hardened unary/SSE transports、exact-origin auth injection、增量 SSE parser、wire/decoded ceilings 与 generation deadline | TTS-MP-1 | 已完成（#105） | transport 不保存 secret；Bearer/xi-api-key 正确隔离；SSE fragmentation/cancel/terminal 与 60 秒 deadline 全覆盖 |
+| TTS-MP-2 | registry-owned credential slots、read-only/deferred validation policy、Qwen pending replacement 与非敏感 profile/region 偏好 | TTS-MP-1 | 已完成（#106） | `elevenlabs-global → elevenlabs` 无迁移；region key 不混用；read-only/deferred 状态诚实；快照与日志无明文 |
+| TTS-MP-3 | ElevenLabs adapter 接入 registry 并实现统一 response/provenance 合同 | TTS-MP-1T | 已完成（#107） | 固定 endpoint/model/voice、read-only probe、四类 route 和 3 候选回归通过；旧 account 兼容由 MP-2 覆盖 |
+| TTS-MP-4 | MiniMax `speech-2.8-hd` unary T2A adapter | TTS-MP-1T | 已完成（#108） | Bearer、`get_voice` probe、固定 voice、JSON/hex、MP3、语言门禁、错误与 3 候选 fixture 全覆盖；只开放 `speech` |
+| TTS-MP-5 | Qwen `qwen3-tts-instruct-flash` SSE adapter 与 region profiles | TTS-MP-1T | 已完成（#109） | 固定 host/path/header/model/voice、SSE/Base64 PCM、合法 WAV、取消/大小/终态校验；只开放 `speech`，地区 smoke 分开 |
+| TTS-3 | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 多 Provider production UI 与自动 fixture 已完成；真机 AX `NOT VERIFIED` | 默认 ElevenLabs；切换不自动生成；不支持 modality 在网络前阻止；改名不重新生成；键盘/VoiceOver 可用 |
 | TTS-4 | 临时候选 acquisition、`AudioImport`、manifest bind、名称投影和清理 | TTS-1–TTS-MP-1 | 已完成 fixture 验证 | 所有 adapter 输出走同一安全导入链；坏音频 fail closed；失败保留旧绑定；仅采用一个 |
-| TTS-5 | 文档、按 Provider 的隐私/费用披露、自动/手工/真实 provider 分层验收 | TTS-MP-0–TTS-4 | ElevenLabs 自动层完成；多 Provider、手工/真实层待验收 | 不含 key/内容；每个 profile 的能力/地区/费用证据清楚；所有对应门禁通过 |
+| TTS-5 | 文档、按 Provider 的隐私/费用披露、自动/手工/真实 provider 分层验收 | TTS-MP-0–TTS-4 | 多 Provider 文档与自动交接已完成；原生/真实 Provider/发布层 `NOT VERIFIED` | 不含 key/内容；每个 profile 的能力/地区/费用证据清楚；所有对应门禁通过 |
 
 依赖关系：
 
@@ -758,7 +759,7 @@ commit、push、release 或部署仍需分别授权。
 | `gui/Tests/ClaudioGUICoreTests/ViewWiringSuite.swift` | composition root、SecureField、provider selector、状态文案和禁止自定义 endpoint/model/voice |
 | `gui/Sources/ClaudioLocalization/ClaudioLocalization.swift` 与 `gui/Sources/ClaudioLocalization/Resources/Localizable.xcstrings` | 增加 provider、地区、验证策略、台词/能力/编码错误和隐私费用的 English / `zh-Hans` 文案 |
 | `docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md` | 在 TTS-MP-0 中更新为“allowlisted multi-provider、按能力路由”；保留 ElevenLabs 作为基线，不把任意 URL/model/voice 开放给用户 |
-| `plan/PLAN-SETTINGS-EXPERIENCE.md`、当前 HTML 原型、GitHub #92 | TTS-MP-0 对齐多 Provider 选择、状态和 ticket ownership；本次 plan-only 修改未触碰 |
+| `plan/PLAN-SETTINGS-EXPERIENCE.md`、当前 HTML 原型、GitHub #92 | TTS-MP-0 已由 #103 对齐多 Provider 选择与状态；#92 ownership 与原生依赖以当前 issue tracker 为准，不由本地文档替代 |
 | `plan/PLAN-CONSUMER-TTS-EXECUTION.md` | 本执行计划与验收合同；不把真实 key、prompt、响应或音频写入计划 |
 
 不修改 `AudioImport`、manifest bind、现有五个 `Event` 或非 TTS 宿主集成，除非后续发现 provider 输出
@@ -966,14 +967,19 @@ adapter/fixture 已验证，不能升级为真实生成或用户可接受音质�
 
 ## 12. 原型与复用边界
 
-当前 ElevenLabs 核心闭环交互参考：
+当前 allowlisted 多 Provider 核心闭环交互参考：
 
-`mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts&stage=applied&credential=ready`
+`mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts&profile=elevenlabs-global&stage=applied&credential=verified`
 
-原型状态在内存中；`credential=missing|ready` 只用于演示配置状态，不代表真实 Keychain。当前页面
-还没有体现多 Provider 选择、read-only/deferred 验证差异和 unsupported modality/locale，因此在
-TTS-MP-0 更新前，它不是多 Provider UI SoT。多 Provider 工程合同以本计划为准；视觉和交互验收需等
-原型与 `PLAN-SETTINGS-EXPERIENCE.md` 对齐后共同成立。原型不得接收真实 key 或冒充真实 provider 请求。
+原型状态在内存中；`profile` 和 `credential=missing|verified|deferred|rejected|pending|unavailable` 只
+用于演示四个 allowlisted profile、read-only/deferred 验证差异和状态，不代表真实 Keychain。用
+MiniMax/Qwen profile 输入非 speech 描述可演示 unsupported modality，MiniMax 的 English 台词可演示
+unsupported locale；也可用 `scenario=unsupported-modality|unsupported-locale` 直接固定对应状态。
+旧 `credential=ready` 只在缺省、显式或未知 `profile` 最终解析为 `elevenlabs-global` 时兼容为
+`verified`；MiniMax/Qwen 使用该旧值时保持各自固定 fixture 状态，不能借此伪造在线验证证据。
+多 Provider 工程合同以本计划为准；视觉和交互合同由当前原型与
+`PLAN-SETTINGS-EXPERIENCE.md` 共同投影。原型不得接收真实 key、联网、持久化或冒充真实 Provider
+请求。
 
 本计划继续复用现有：
 
@@ -991,6 +997,7 @@ capability registry、provider-neutral request、registry-owned credential slots
 transport、ElevenLabs/MiniMax/Qwen BYOK adapters 和对应 UI 接缝；不得在 UI 或 adapter 中复制
 `AudioImport`、包锁和 manifest 发布逻辑。
 
-文档类型：AI 提示音子域工程执行计划，兼具内部接口 reference 与架构 explanation。AI 子域本地 Swift
-实现与 ElevenLabs 基线已完成，但 provider-neutral 重构、MiniMax/Qwen adapter、统一设置视觉与窗口
-迁移尚未完成；真实 provider 探测、commit、push、release 和部署都需要后续单独授权。
+文档类型：AI 提示音子域工程执行计划，兼具内部接口 reference 与架构 explanation。AI 子域的
+provider-neutral registry、transports、逐 profile credential policy、ElevenLabs/MiniMax/Qwen adapters、
+统一设置 production UI、窗口迁移与 deterministic fixtures 已落地。原生 UI/VoiceOver、真实 Provider、
+双架构、签名、公证、push、release 和部署不由本地自动证据证明，均需要后续单独授权或验收。

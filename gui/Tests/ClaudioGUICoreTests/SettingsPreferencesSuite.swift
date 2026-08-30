@@ -92,13 +92,17 @@ func runSettingsPreferencesSuites() async {
             isolated.languageMode == .system && isolated.lastSettingsDestination == .general,
             "不同 defaults suite 不得互相泄漏偏好")
         expect(
-            isolated.availableSettingsDestinations == [.general],
-            "production owner 只能暴露已交付真实内容的通用 destination")
-        isolated.setLastSettingsDestination(.sounds)
+            isolated.availableSettingsDestinations
+                == [
+                    .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds,
+                    .usage, .shortcuts, .about,
+                ],
+            "production owner 只能暴露已交付真实内容的通用、集成、事件、通知、显示、声音、用量、快捷键与关于 destination")
+        isolated.setLastSettingsDestination(.usage)
         expect(
-            isolated.lastSettingsDestination == .general
-                && secondDefaults.object(forKey: SettingsDestination.defaultsKey) == nil,
-            "尚未交付的 destination 不得被 production owner 持久化")
+            isolated.lastSettingsDestination == .usage
+                && secondDefaults.string(forKey: SettingsDestination.defaultsKey) == "usage",
+            "已交付的 Usage destination 必须可由 production owner 持久化")
 
         firstDefaults.set(["broken"], forKey: ClaudioAppLanguage.defaultsKey)
         firstDefaults.set(87, forKey: SettingsDestination.defaultsKey)

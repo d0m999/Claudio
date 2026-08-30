@@ -337,8 +337,8 @@ func runSoundPacksWindowStarredPacksSuites() {
             "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"), encoding: .utf8)) ?? ""
         let view = (try? String(contentsOf: root.appendingPathComponent(
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"), encoding: .utf8)) ?? ""
-        let controller = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"), encoding: .utf8)) ?? ""
+        let settingsController = (try? String(contentsOf: root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI/SettingsWindowController.swift"), encoding: .utf8)) ?? ""
 
         expect(
             panel.contains("scope: .panelStarredDisplay")
@@ -364,9 +364,10 @@ func runSoundPacksWindowStarredPacksSuites() {
                 && model.contains(
                     "messageText = .literal(soundPacksWindowStarredPacksFailureReason(error))")
                 && model.contains("messageText = writesStoppedStatusText")
-                && controller.contains("model.$windowStatuses")
-                && controller.contains("status.action(language: languageStore.language)")
-                && controller.contains("status.message(language: languageStore.language)"),
+                && settingsController.contains("let soundPackModel = soundPacksEditorOwner.model")
+                && settingsController.contains("soundPackModel.$windowStatuses")
+                && settingsController.contains("status.action(language: preferences.language)")
+                && settingsController.contains("status.message(language: preferences.language)"),
             "兼容写入口失败仍须进入统一状态与唯一 VoiceOver bridge")
     }
 }

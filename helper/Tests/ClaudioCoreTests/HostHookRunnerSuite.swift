@@ -75,6 +75,81 @@ func runHostHookRunnerSuites() {
         }
     }
 
+    suite("host hook：有效 Dynamic Quiet 只抑制自动播放并保留既有 muted receipt 语义") {
+        withTempDirectory { root in
+            let id = UUID(uuidString: "77777777-8888-4999-8AAA-BBBBBBBBBBBB")!
+            let now = Date(timeIntervalSince1970: 3_000)
+            let spawner = HostHookRunnerSpawner()
+            let environment = makeHostHookRunnerEnvironment(
+                root: root,
+                host: .codex,
+                spawner: spawner,
+                fixtureIsReady: true,
+                now: now,
+                activeInstallationID: id)
+            let publisher = DynamicQuietSnapshotPublisher(
+                snapshotFile: environment.playEnvironment.dynamicQuietEnvironment.snapshotFile,
+                revisionStateFile:
+                    environment.playEnvironment.dynamicQuietEnvironment.revisionStateFile)
+            guard case .success = publisher.publish(focusActive: true, now: now) else {
+                expect(false, "测试 Focus 快照必须发布成功")
+                return
+            }
+
+            let outcome = handleHostHook(
+                host: .codex,
+                nativeEvent: "PermissionRequest",
+                installationID: id,
+                environment: environment)
+            expect(outcome?.playbackResult == .muted, "动态静默继续复用既有 muted receipt 语义")
+            expect(outcome?.receiptWritten == true, "动态静默不得吞掉真实 host callback 回执")
+            expect(spawner.callCount == 0, "Focus 生效时 automatic playback 不得 spawn")
+        }
+    }
+
+    suite("host hook：拒绝的 Dynamic Quiet 快照正常播放且只记录脱敏诊断码") {
+        withTempDirectory { root in
+            let id = UUID(uuidString: "88888888-9999-4AAA-8BBB-CCCCCCCCCCCC")!
+            let now = Date(timeIntervalSince1970: 3_100)
+            let spawner = HostHookRunnerSpawner()
+            let environment = makeHostHookRunnerEnvironment(
+                root: root,
+                host: .codex,
+                spawner: spawner,
+                fixtureIsReady: true,
+                now: now,
+                activeInstallationID: id)
+            let snapshot = environment.playEnvironment.dynamicQuietEnvironment.snapshotFile
+            let publisher = DynamicQuietSnapshotPublisher(
+                snapshotFile: snapshot,
+                revisionStateFile:
+                    environment.playEnvironment.dynamicQuietEnvironment.revisionStateFile)
+            guard case .success = publisher.publish(focusActive: false, now: now) else {
+                expect(false, "测试目录必须先以生产 publisher 建立私有权限")
+                return
+            }
+            let privateSentinel = "Focus: Secret Project"
+            writeFixture(#"{"focus_name":"\#(privateSentinel)"}"#, to: snapshot)
+
+            let outcome = handleHostHook(
+                host: .codex,
+                nativeEvent: "PermissionRequest",
+                installationID: id,
+                environment: environment)
+            expect(outcome?.playbackResult == .played, "拒绝快照必须 fail safe 为正常 automatic playback")
+            expect(spawner.callCount == 1, "损坏动态事实不得静默或阻止既有播放")
+
+            let logData = try? Data(contentsOf: environment.playEnvironment.logFile)
+            let log = logData.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            expect(
+                log.contains("dynamic_quiet_snapshot_malformed"),
+                "拒绝快照必须留下固定脱敏诊断码")
+            expect(
+                !log.contains(privateSentinel) && !log.contains(root.path),
+                "诊断不得包含快照内容或本机路径")
+        }
+    }
+
     suite("host hook：任务开始 250ms 与 lifecycle 1.5s 分轨，且宿主之间互不相吞") {
         withTempDirectory { root in
             let id = UUID()

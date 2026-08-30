@@ -101,6 +101,7 @@ public enum SoundPacksWindowStatusKind: String, Sendable, Equatable, Hashable {
     case starredPacks
     case packFork
     case packUse
+    case packDeletion
 }
 
 public enum SoundPacksWindowStatusRecovery: Sendable, Equatable {
@@ -270,6 +271,36 @@ public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
     }
 
     public var message: String { statusText.resolve(language: .zhHans) }
+}
+
+public enum SoundPacksWindowPackDeletionActionError: Error, Sendable, Equatable {
+    case writesStopped(statusText: SoundPacksWindowStatusText)
+    case noSelectedPack
+    case selectionChanged
+    case delete(UserSoundPackDeletionError)
+
+    public var statusText: SoundPacksWindowStatusText {
+        switch self {
+        case .writesStopped(let statusText): return statusText
+        case .noSelectedPack: return .localized(.soundPacksPackDeleteNoSelection)
+        case .selectionChanged: return .localized(.soundPacksPackDeleteSelectionChanged)
+        case .delete(.unsafePackID): return .localized(.soundPacksPackDeleteUnsafeID)
+        case .delete(.builtinReadOnly): return .localized(.soundPacksPackDeleteBuiltin)
+        case .delete(.activePack): return .localized(.soundPacksPackDeleteErrorActive)
+        case .delete(.configUnavailable): return .localized(.soundPacksPackDeleteConfigUnavailable)
+        case .delete(.packNotFound): return .localized(.soundPacksPackDeleteNotFound)
+        case .delete(.unsafePackEntry): return .localized(.soundPacksPackDeleteUnsafeEntry)
+        case .delete(.trashFailed(let reason)):
+            return .localized(.soundPacksPackDeleteFailed, reason)
+        case .delete(.isolationChangedRetained(let path)):
+            return .localized(.soundPacksPackDeleteIsolationRetained, path)
+        case .delete(.trashFailedRetained(let reason, let path)):
+            return .localized(.soundPacksPackDeleteTrashRetained, reason, path)
+        case .delete(.lockBusy): return .localized(.soundPacksPackDeleteLockBusy)
+        case .delete(.lockFailed(let errno)):
+            return .localized(.soundPacksPackDeleteLockFailed, "\(errno)")
+        }
+    }
 }
 
 public struct FactoryPackBatchRestoreFailure: Sendable, Equatable {
@@ -596,6 +627,11 @@ public final class SoundPacksWindowModel: ObservableObject {
         selectedPackID.map(builtinPackIDs.contains) ?? false
     }
 
+    public var selectedPackIsReferenced: Bool {
+        guard let selectedPackID else { return false }
+        return referencedSoundPackIDs(in: baseConfig).contains(selectedPackID)
+    }
+
     public var selectedPackIsMissingPlaceholder: Bool {
         guard let selectedPackID else { return false }
         return packCards.first(where: { $0.id == selectedPackID })?.availability
@@ -808,6 +844,8 @@ public final class SoundPacksWindowModel: ObservableObject {
         selectedAudioFiles: [PackAudioFile] = [],
         builtinPackIDs: Set<String> = [],
         starredPackIDs: [String] = [],
+        windowStatuses: [SoundPacksWindowStatus] = [],
+        factoryRestoreActionError: SoundPacksWindowFactoryRestoreActionError? = nil,
         libraryPresentationState: SoundPackLibraryPresentationState = .ready,
         environment: AudioImportEnvironment,
         refreshCoordinator: SoundPacksRefreshCoordinator
@@ -832,11 +870,11 @@ public final class SoundPacksWindowModel: ObservableObject {
         starredPacksError = nil
         audioActionError = nil
         factoryRestoreNotice = nil
-        factoryRestoreActionError = nil
+        self.factoryRestoreActionError = factoryRestoreActionError
         packForkNotice = nil
         packForkActionError = nil
         packUseActionError = nil
-        windowStatuses = []
+        self.windowStatuses = windowStatuses
         self.libraryPresentationState = libraryPresentationState
     }
     #endif
@@ -1329,18 +1367,9 @@ public final class SoundPacksWindowModel: ObservableObject {
 
     private func consumeLibraryState(_ state: SoundPackLibraryState) {
         if let currentRevision = librarySnapshot?.revision {
-            let incomingRevision: UInt64?
-            switch state {
-            case .unloaded:
-                incomingRevision = nil
-            case .loading(let previous):
-                incomingRevision = previous?.revision
-            case .ready(let snapshot):
-                incomingRevision = snapshot.revision
-            case .failed(let previous, _):
-                incomingRevision = previous?.revision
-            }
-            guard let incomingRevision, incomingRevision >= currentRevision else { return }
+            guard let incomingRevision = state.snapshotRevision,
+                incomingRevision >= currentRevision
+            else { return }
         }
 
         switch state {
@@ -1738,6 +1767,35 @@ public final class SoundPacksWindowModel: ObservableObject {
             return finishAudioAction(
                 .failure(.bind(error)), invalidatingPackID: selectedPackID)
         }
+    }
+
+    /// Moves the explicitly confirmed, inactive user pack to Trash through the shared packs lock.
+    /// The expected ID closes the confirmation-to-action selection race; active and built-in
+    /// packs remain fail-closed.
+    @discardableResult
+    public func deleteSelectedUserPackAfterConfirmation(
+        expectedPackID: String
+    ) -> Result<UserSoundPackDeletionOutcome, SoundPacksWindowPackDeletionActionError> {
+        guard writesAllowed else {
+            return finishPackDeletion(
+                .failure(.writesStopped(statusText: writesStoppedStatusText)))
+        }
+        guard let selectedPackID else {
+            return finishPackDeletion(.failure(.noSelectedPack))
+        }
+        guard selectedPackID == expectedPackID else {
+            return finishPackDeletion(.failure(.selectionChanged))
+        }
+
+        beginSoundPackMutation(packIDs: [selectedPackID])
+        let result = deleteUserSoundPack(
+            packID: selectedPackID,
+            configFile: configFile,
+            configLockFile: lockFile,
+            environment: environment
+        )
+        .mapError(SoundPacksWindowPackDeletionActionError.delete)
+        return finishPackDeletion(result, invalidatedPackID: selectedPackID)
     }
 
     /// Executes the irreversible deletion only after the SwiftUI confirmation has completed.
@@ -2267,6 +2325,40 @@ public final class SoundPacksWindowModel: ObservableObject {
         return result
     }
 
+    private func finishPackDeletion(
+        _ result: Result<
+            UserSoundPackDeletionOutcome,
+            SoundPacksWindowPackDeletionActionError
+        >,
+        invalidatedPackID: String? = nil
+    ) -> Result<UserSoundPackDeletionOutcome, SoundPacksWindowPackDeletionActionError> {
+        switch result {
+        case .success(let outcome):
+            let name = displayName(for: outcome.packID)
+            completeSynchronousWrite(
+                .succeeded,
+                invalidatingPackIDs: [outcome.packID])
+            setWindowStatus(
+                kind: .packDeletion,
+                severity: .notice,
+                actionText: .localized(.soundPacksStatusDeletePack),
+                messageText: .localized(.soundPacksStatusPackTrashed, name))
+        case .failure(let error):
+            setWindowStatus(
+                kind: .packDeletion,
+                severity: .failure,
+                actionText: .localized(.soundPacksStatusDeletePack),
+                messageText: error.statusText,
+                packID: selectedPackID)
+            completeSynchronousWrite(.failed)
+            if let invalidatedPackID {
+                finishSoundPackMutation(packIDs: [invalidatedPackID])
+                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
+            }
+        }
+        return result
+    }
+
     private func displayName(for packID: String) -> String {
         guard let card = packCards.first(where: { $0.id == packID }) else { return packID }
         return SelectedPackMetadata(id: card.id, name: card.name).displayName
@@ -2435,6 +2527,19 @@ public final class SoundPacksWindowModel: ObservableObject {
     private func finishSoundPackMutation(packIDs: Set<String>) {
         guard readSource.readsSharedSnapshot, !packIDs.isEmpty else { return }
         soundPackLibrary.invalidate(packIDs: packIDs)
+    }
+}
+
+extension SoundPackLibraryState {
+    fileprivate var snapshotRevision: UInt64? {
+        switch self {
+        case .unloaded:
+            nil
+        case .loading(let previous), .failed(let previous, _):
+            previous?.revision
+        case .ready(let snapshot):
+            snapshot.revision
+        }
     }
 }
 

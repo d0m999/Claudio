@@ -152,6 +152,7 @@ func runLocalPreRCSuites() {
         expect(
             script.contains("unset CLAUDIO_GUI_BYTES_PER_ARCH")
                 && script.contains("CLAUDIO_HELPER_BYTES_PER_ARCH")
+                && script.contains("CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH")
                 && script.contains("CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES")
                 && script.contains("CLAUDIO_LIPO_BIN")
                 && script.contains("CLAUDIO_VERSION"),
@@ -647,6 +648,7 @@ func runLocalPreRCSuites() {
             let fakeBin = fixture.fakeBin
             let guiBin = fixtureRoot.appendingPathComponent("gui-bin")
             let helperBin = fixtureRoot.appendingPathComponent("helper-bin")
+            let loginItemBin = fixtureRoot.appendingPathComponent("login-item-bin")
             let externalOutput = fixtureRoot.appendingPathComponent("external-output")
             let externalAppSentinel =
                 externalOutput
@@ -660,6 +662,9 @@ func runLocalPreRCSuites() {
             try? fileManager.createDirectory(at: guiBin, withIntermediateDirectories: true)
             try? fileManager.createDirectory(at: helperBin, withIntermediateDirectories: true)
             try? fileManager.createDirectory(
+                at: loginItemBin,
+                withIntermediateDirectories: true)
+            try? fileManager.createDirectory(
                 at: guiBin.appendingPathComponent("Fixture_ClaudioGUI.bundle"),
                 withIntermediateDirectories: true)
             try? fileManager.createDirectory(
@@ -668,14 +673,25 @@ func runLocalPreRCSuites() {
             try? fileManager.createDirectory(
                 at: repository.appendingPathComponent("packs"),
                 withIntermediateDirectories: true)
+            writeFixture(
+                "calendar privacy",
+                to: repository.appendingPathComponent(
+                    "gui/AppResources/en.lproj/InfoPlist.strings"))
+            writeFixture(
+                "日历隐私",
+                to: repository.appendingPathComponent(
+                    "gui/AppResources/zh-Hans.lproj/InfoPlist.strings"))
             fixture.copyProductionFiles(
-                ["dev-bundle.sh", "pinned-output-directory.sh"],
-                executableNames: ["dev-bundle.sh"])
+                ["assemble-login-item.sh", "dev-bundle.sh", "pinned-output-directory.sh"],
+                executableNames: ["assemble-login-item.sh", "dev-bundle.sh"])
 
             writeFixture("gui-binary", to: guiBin.appendingPathComponent("ClaudioGUI"))
             fixture.installExecutable(
                 "#!/bin/bash\necho 0.0.0-dev\n",
                 at: helperBin.appendingPathComponent("claudio"))
+            fixture.installExecutable(
+                "#!/bin/bash\nexit 0\n",
+                at: loginItemBin.appendingPathComponent("ClaudioLoginItem"))
             fixture.installExecutable(
                 "#!/bin/bash\nexit 0\n",
                 at: scripts.appendingPathComponent(
@@ -687,6 +703,8 @@ func runLocalPreRCSuites() {
             writeFixture(
                 Data("fixture-icon".utf8),
                 to: repository.appendingPathComponent("assets/branding/claudi0.icns"))
+            writeFixture("fixture-license", to: repository.appendingPathComponent("LICENSE"))
+            writeFixture("fixture-privacy", to: repository.appendingPathComponent("PRIVACY.md"))
             writeFixture(sentinel, to: externalAppSentinel)
             fixture.installExecutable(
                 #"""
@@ -700,6 +718,8 @@ func runLocalPreRCSuites() {
                 if [[ " $* " == *" --show-bin-path "* ]]; then
                     if [[ " $* " == *" --product ClaudioGUI "* ]]; then
                         echo "$GUI_BIN"
+                    elif [[ " $* " == *" --product ClaudioLoginItem "* ]]; then
+                        echo "$LOGIN_ITEM_BIN"
                     else
                         echo "$HELPER_BIN"
                     fi
@@ -725,6 +745,7 @@ func runLocalPreRCSuites() {
                     "FIXTURE_REPOSITORY": repository.path,
                     "GUI_BIN": guiBin.path,
                     "HELPER_BIN": helperBin.path,
+                    "LOGIN_ITEM_BIN": loginItemBin.path,
                     "SWAP_MARKER": swapMarker.path,
                 ]),
                 environmentKeysToRemove: [pinnedOutputIdentityEnvironmentKey])

@@ -23,13 +23,23 @@ public enum PanelSoundScopeID: Sendable, Equatable, Hashable, Identifiable {
     }
 }
 
-/// Retained“事件与提示音”窗口的显式入口。路由直接携带声音作用域，避免把展示名称或
-/// Host Product 重新解析成配置写入目标。
+public let panelSoundScopeDefaultsKey = "claudio.panel.selected-surface"
+
+/// “事件与提示音”表面的显式入口。路由直接携带声音作用域与可选公共事件，避免把展示
+/// 名称或 Host Product 重新解析成配置写入目标。
 public struct EventSettingsWindowRoute: Sendable, Equatable, Hashable {
     public let scope: PanelSoundScopeID
+    public let event: Event?
+    public let unavailableRequestedScopeStoredValue: String?
 
-    public init(scope: PanelSoundScopeID) {
+    public init(
+        scope: PanelSoundScopeID,
+        event: Event? = nil,
+        unavailableRequestedScopeStoredValue: String? = nil
+    ) {
         self.scope = scope
+        self.event = event
+        self.unavailableRequestedScopeStoredValue = unavailableRequestedScopeStoredValue
     }
 
     public var surface: HostSurfaceID? { scope.surface }
@@ -62,6 +72,11 @@ public func eventPreviewFileURL(
 /// view loop.
 public enum EventSettingsFocusTarget: Sendable, Equatable, Hashable {
     case scope(PanelSoundScopeID)
+    case event(Event)
+    case previewAll
+    case masterVolume
+    case packPicker
+    case retryLibrary
     case manageSoundPacks
     case generateAICue(Event)
     case configure(Event)
@@ -73,6 +88,99 @@ public func eventSettingsFirstFocusTarget(
     scopes: [PanelSoundScopeID]
 ) -> EventSettingsFocusTarget? {
     scopes.first.map(EventSettingsFocusTarget.scope)
+}
+
+/// Repeated typed deep links must focus the same stable event identity. A stale scope never leaves
+/// focus pointing at a row whose writes would target another Surface.
+public func eventSettingsRouteFocusTarget(
+    route: EventSettingsWindowRoute,
+    scopes: [PanelSoundScopeID],
+    events: Set<Event> = Set(Event.allCases)
+) -> EventSettingsFocusTarget? {
+    guard scopes.contains(route.scope) else {
+        return eventSettingsFirstFocusTarget(scopes: scopes)
+    }
+    if let event = route.event, events.contains(event) {
+        return .event(event)
+    }
+    return .scope(route.scope)
+}
+
+public enum EventSettingsInheritanceState: Sendable, Equatable {
+    case globalDefault
+    case inheritedGlobal
+    case surfaceOverride
+    case invalidSurfaceOverride
+}
+
+/// Pack inheritance is independent from per-event sparse overrides. An Event-only override must
+/// not make the pack appear overridden, and a malformed Surface still fails closed.
+public func eventSettingsPackInheritanceState(
+    config: ClaudioConfig,
+    scope: PanelSoundScopeID
+) -> EventSettingsInheritanceState {
+    guard let surface = scope.surface else { return .globalDefault }
+    switch config.resolveSoundProfile(for: surface) {
+    case .success(let profile):
+        return profile.inheritedPack ? .inheritedGlobal : .surfaceOverride
+    case .failure:
+        return .invalidSurfaceOverride
+    }
+}
+
+/// One composer belongs to an exact Surface/Event route. A different selected Surface, or an
+/// explicit route to a different Event, invalidates the old candidate session.
+public func eventSettingsShouldCloseAICueComposer(
+    includesAICueComposer: Bool,
+    targetSurface: HostSurfaceID?,
+    targetEvent: Event? = nil,
+    selectedSurface: HostSurfaceID?,
+    selectedEvent: Event? = nil
+) -> Bool {
+    guard includesAICueComposer else { return false }
+    if targetSurface != selectedSurface { return true }
+    guard let selectedEvent else { return false }
+    return targetEvent != selectedEvent
+}
+
+/// The composer appears only beneath its exact Surface/Event tuple.
+public func eventSettingsAICueComposerMatches(
+    targetSurface: HostSurfaceID?,
+    targetEvent: Event?,
+    selectedSurface: HostSurfaceID?,
+    event: Event
+) -> Bool {
+    guard let targetSurface, let targetEvent, let selectedSurface else { return false }
+    return targetSurface == selectedSurface && targetEvent == event
+}
+
+/// VoiceOver receives the same inheritance fact rendered beside an Event. Keeping the join in
+/// GUICore makes both the no-override and bilingual projections executable without mounting UI.
+public func eventSettingsIdentityAccessibilityLabel(
+    presentationLabel: String,
+    inheritanceText: String?,
+    language: ClaudioAppLanguage
+) -> String {
+    guard let inheritanceText, !inheritanceText.isEmpty else { return presentationLabel }
+    let separator = language == .english ? ", " : "，"
+    return [presentationLabel, inheritanceText].joined(separator: separator)
+}
+
+/// Per-event sparse-override projection for the unified Events page. It consumes the same
+/// `resolveSoundProfile` fail-closed boundary as writes and never infers inheritance from only the
+/// pack field.
+public func eventSettingsInheritanceState(
+    config: ClaudioConfig,
+    scope: PanelSoundScopeID,
+    event: Event
+) -> EventSettingsInheritanceState {
+    guard let surface = scope.surface else { return .globalDefault }
+    switch config.resolveSoundProfile(for: surface) {
+    case .success(let profile):
+        return profile.inheritedEvents.contains(event) ? .inheritedGlobal : .surfaceOverride
+    case .failure:
+        return .invalidSurfaceOverride
+    }
 }
 
 /// A standard window has its own width-driven degradation rules. Unlike
@@ -183,8 +291,19 @@ public func panelSoundScopeMenuLayout(
             optionsHeight + diagnosticsHeight + chromeHeight))
 }
 
-/// Global 恒在；普通 Surface 只在“已配置或可用”时进入 popup。`.notConnected` 仍由
-/// IntegrationsWindow 完整呈现，不会因为 popup 过滤而丢失诊断入口。
+/// 面板与 Events 共用的 Sound Scope 身份。Global 恒在；普通 Surface 只在“已配置或可用”时
+/// 进入选择器。`.notConnected` 仍由 Integrations 完整呈现，不会因为 Sound Scope 过滤而丢失诊断入口。
+public func panelSoundScopeIDs(
+    sourceRows: [HostSourceRowPresentation]
+) -> [PanelSoundScopeID] {
+    let byHost = Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.host, $0) })
+    let surfaces = hostSurfacePresentationOrder().compactMap { host -> PanelSoundScopeID? in
+        guard let row = byHost[host], row.status != .notConnected else { return nil }
+        return .surface(host.surfaceID)
+    }
+    return [.global] + surfaces
+}
+
 public func panelSoundScopePresentations(
     sourceRows: [HostSourceRowPresentation],
     config: ClaudioConfig,
@@ -212,10 +331,11 @@ public func panelSoundScopePresentations(
         accessibilityLabel: [globalName, globalSummary].joined(separator: separator))
 
     let byHost = Dictionary(uniqueKeysWithValues: sourceRows.map { ($0.host, $0) })
+    let visibleSurfaces = Set(panelSoundScopeIDs(sourceRows: sourceRows).compactMap(\.surface))
     let surfaces = hostSurfacePresentationOrder().compactMap {
         host -> PanelSoundScopePresentation? in
         guard let raw = byHost[host] else { return nil }
-        guard raw.status != .notConnected else { return nil }
+        guard visibleSurfaces.contains(host.surfaceID) else { return nil }
         let hasOverride =
             config.surfaceOverrides[host.surfaceID.rawValue] != nil
             || config.invalidSurfaceOverrideKeys.contains(host.surfaceID.rawValue)
@@ -273,14 +393,46 @@ public func resolvedPanelSoundScopeSelection(
     return scopes.first(where: { $0.scope.surface != nil })?.scope ?? .global
 }
 
-/// Keeps the retained Events & Sounds route on a currently visible sound scope. A Surface may
-/// disappear while the window remains open; resolving through the same rule as the panel prevents
-/// a fallback label from continuing to write to the stale Surface.
+/// Produces the typed Events route used by the global shortcut. Known Surface identities remain
+/// intact even when currently unavailable. Unknown persisted identities cannot be represented as a
+/// typed scope, so they retain the exact raw value beside a non-writable Global presentation.
+public func globalShortcutEventSettingsRoute(
+    storedValue: String?,
+    scopes: [PanelSoundScopePresentation]
+) -> EventSettingsWindowRoute {
+    if storedValue == PanelSoundScopeID.global.storedValue {
+        return EventSettingsWindowRoute(scope: .global)
+    }
+    if let storedValue, let surface = HostSurfaceID(rawValue: storedValue) {
+        let requestedScope = PanelSoundScopeID.surface(surface)
+        if scopes.contains(where: { $0.scope == requestedScope }) {
+            return EventSettingsWindowRoute(scope: requestedScope)
+        }
+        return EventSettingsWindowRoute(
+            scope: requestedScope,
+            unavailableRequestedScopeStoredValue: storedValue)
+    }
+    let resolved = resolvedPanelSoundScopeSelection(storedValue: storedValue, scopes: scopes)
+    let unavailableValue = storedValue == nil || storedValue == "unselected" ? nil : storedValue
+    return EventSettingsWindowRoute(
+        scope: resolved,
+        unavailableRequestedScopeStoredValue: unavailableValue)
+}
+
+/// Resolves a retained Events & Sounds route only when its exact typed scope is currently visible.
+/// A known unavailable Surface remains recoverable if it reappears; an unknown raw shortcut value
+/// never turns its Global presentation into a writable fallback.
 public func resolvedEventSettingsScope(
     route: EventSettingsWindowRoute,
     scopes: [PanelSoundScopePresentation]
-) -> PanelSoundScopeID {
-    resolvedPanelSoundScopeSelection(storedValue: route.scope.storedValue, scopes: scopes)
+) -> PanelSoundScopeID? {
+    if let unavailableValue = route.unavailableRequestedScopeStoredValue,
+        unavailableValue != route.scope.storedValue
+    {
+        return nil
+    }
+    guard scopes.contains(where: { $0.scope == route.scope }) else { return nil }
+    return route.scope
 }
 
 /// `unselected` / missing means the first host refresh has not yet established whether a Surface
@@ -380,10 +532,20 @@ public func panelEventPresentations(
         }
         let soundFileText: String
         switch row.coverage {
-        case .present(let fileName): soundFileText = row.audioDisplayName ?? fileName
+        case .present(let fileName):
+            if let displayName = row.audioDisplayName {
+                soundFileText = "\(fileName) · \(displayName)"
+            } else {
+                soundFileText = fileName
+            }
         case .unmapped: soundFileText = l10n.text(.panelNoSoundAssigned)
         case .broken(let fileName):
-            soundFileText = l10n.format(.panelMissingSound, fileName)
+            let missingSoundText = l10n.format(.panelMissingSound, fileName)
+            if let displayName = row.audioDisplayName {
+                soundFileText = "\(missingSoundText) · \(displayName)"
+            } else {
+                soundFileText = missingSoundText
+            }
         }
         let enabledText =
             row.enabled

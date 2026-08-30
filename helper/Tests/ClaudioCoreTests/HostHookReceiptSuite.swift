@@ -584,4 +584,360 @@ func runHostHookReceiptSuites() {
                 "清除历史不得删除 current 稳定回执")
         }
     }
+
+    suite("HostHookReceiptStore：历史快照有界、目录 no-follow，且 20 条外损坏仍可见") {
+        withTempDirectory { root in
+            let store = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
+            let installationID = UUID(uuidString: "05050505-5555-4555-8555-555555555555")!
+            let now = Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+            expect(
+                hostHookVoidResultSucceeded(
+                    store.activate(
+                        host: .workBuddy,
+                        installationID: installationID,
+                        scopeFingerprint: "history-snapshot")),
+                "测试前提：WorkBuddy installation 必须发布")
+            for index in 0..<HostHookReceiptStore.historyLimitPerSurface {
+                let receipt = HostHookReceipt(
+                    installationID: installationID,
+                    host: .workBuddy,
+                    nativeEvent: "UserPromptSubmit",
+                    semanticEvent: .taskStart,
+                    timestamp: now.addingTimeInterval(-Double(index)),
+                    playbackResult: .played)
+                expect(store.store(receipt) == .success(.written), "第 \(index) 条回执必须可写")
+            }
+            let history = store.historyRoot.appendingPathComponent(
+                HostSurfaceID.workBuddy.rawValue,
+                isDirectory: true)
+            writeFixture("{broken", to: history.appendingPathComponent("extra-broken.json"))
+            let snapshot = store.receiptHistorySnapshot(host: .workBuddy, now: now)
+            expect(
+                snapshot.receipts.count == HostHookReceiptStore.historyLimitPerSurface
+                    && snapshot.state == .damaged(skippedItemCount: 1),
+                "20 条有效回执外的损坏项必须独立计数，不能被 retained limit 遮蔽")
+
+            let externalStore = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("external/receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent("external/locks", isDirectory: true),
+                historyRoot: root.appendingPathComponent("external/history", isDirectory: true))
+            expect(
+                hostHookVoidResultSucceeded(
+                    externalStore.activate(
+                        host: .workBuddy,
+                        installationID: installationID,
+                        scopeFingerprint: "external")),
+                "测试前提：外部 fixture installation 必须发布")
+            let externalReceipt = HostHookReceipt(
+                installationID: installationID,
+                host: .workBuddy,
+                nativeEvent: "UserPromptSubmit",
+                semanticEvent: .taskStart,
+                timestamp: now,
+                playbackResult: .played)
+            expect(
+                externalStore.store(externalReceipt) == .success(.written),
+                "测试前提：外部目录必须含合法形状 receipt")
+
+            let symlinkHistoryRoot = root.appendingPathComponent(
+                "symlink-owner/history",
+                isDirectory: true)
+            try? FileManager.default.createDirectory(
+                at: symlinkHistoryRoot,
+                withIntermediateDirectories: true)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: symlinkHistoryRoot.path)
+            let symlinkSurface = symlinkHistoryRoot.appendingPathComponent(
+                HostSurfaceID.workBuddy.rawValue,
+                isDirectory: true)
+            let externalSurface = externalStore.historyRoot.appendingPathComponent(
+                HostSurfaceID.workBuddy.rawValue,
+                isDirectory: true)
+            do {
+                try FileManager.default.createSymbolicLink(
+                    at: symlinkSurface,
+                    withDestinationURL: externalSurface)
+            } catch {
+                expect(false, "测试前提：surface symlink 必须创建：\(error)")
+            }
+            let symlinkStore = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("symlink-owner/receipts"),
+                locksRoot: root.appendingPathComponent("symlink-owner/locks"),
+                historyRoot: symlinkHistoryRoot)
+            let symlinkSnapshot = symlinkStore.receiptHistorySnapshot(host: .workBuddy, now: now)
+            expect(
+                symlinkSnapshot.receipts.isEmpty
+                    && symlinkSnapshot.state == .damaged(skippedItemCount: 1),
+                "surface 目录 symlink 必须失败关闭且可见为 damaged，不得投影外部合法 JSON")
+
+            let symlinkRoot = root.appendingPathComponent("history-root-link", isDirectory: true)
+            do {
+                try FileManager.default.createSymbolicLink(
+                    at: symlinkRoot,
+                    withDestinationURL: externalStore.historyRoot)
+            } catch {
+                expect(false, "测试前提：history root symlink 必须创建：\(error)")
+            }
+            let symlinkRootStore = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("root-link-owner/receipts"),
+                locksRoot: root.appendingPathComponent("root-link-owner/locks"),
+                historyRoot: symlinkRoot)
+            let symlinkRootSnapshot = symlinkRootStore.receiptHistorySnapshot(
+                host: .workBuddy,
+                now: now)
+            expect(
+                symlinkRootSnapshot.receipts.isEmpty
+                    && symlinkRootSnapshot.state == .damaged(skippedItemCount: 1),
+                "historyRoot 本身是 symlink 时必须 no-follow 失败关闭，不得穿透到外部 Surface")
+
+            let hiddenFloodRoot = root.appendingPathComponent(
+                "hidden-flood/history/\(HostSurfaceID.workBuddy.rawValue)",
+                isDirectory: true)
+            for index in 0...HostHookReceiptStore.historyDirectoryEntryLimit {
+                writeFixture("hidden", to: hiddenFloodRoot.appendingPathComponent(".\(index)"))
+            }
+            let hiddenFloodStore = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("hidden-flood/receipts"),
+                locksRoot: root.appendingPathComponent("hidden-flood/locks"),
+                historyRoot: hiddenFloodRoot.deletingLastPathComponent())
+            makeHistoryRootPrivate(hiddenFloodStore)
+            let hiddenFloodSnapshot = hiddenFloodStore.receiptHistorySnapshot(
+                host: .workBuddy,
+                now: now)
+            expect(
+                hiddenFloodSnapshot.receipts.isEmpty
+                    && hiddenFloodSnapshot.state
+                        == .damaged(
+                            skippedItemCount: HostHookReceiptStore.historyDirectoryEntryLimit + 1),
+                "隐藏项也必须计入 128 项扫描上限，洪泛只能产生有界 damaged 快照")
+        }
+    }
+
+    suite("HostHookReceiptStore：批量历史清理中途失败会恢复已 staging 的 Surface") {
+        withTempDirectory { root in
+            let store = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent("receipt-locks", isDirectory: true))
+            for host in HostID.productVisibleCases {
+                let fixture = store.historyRoot
+                    .appendingPathComponent(host.surfaceID.rawValue, isDirectory: true)
+                    .appendingPathComponent("keep.json")
+                writeFixture("keep-\(host.rawValue)", to: fixture)
+            }
+            makeHistoryRootPrivate(store)
+
+            let failed = store.clearReceiptHistory(
+                hosts: HostID.productVisibleCases,
+                beforeStaging: { host in
+                    if host == .codex { throw CocoaError(.fileWriteUnknown) }
+                })
+            expect(
+                !hostHookVoidResultSucceeded(failed),
+                "第二个 Surface 前注入失败必须返回 failure")
+            for host in HostID.productVisibleCases {
+                let fixture = store.historyRoot
+                    .appendingPathComponent(host.surfaceID.rawValue, isDirectory: true)
+                    .appendingPathComponent("keep.json")
+                expect(
+                    (try? String(contentsOf: fixture, encoding: .utf8))
+                        == "keep-\(host.rawValue)",
+                    "失败后 \(host.rawValue) 历史必须逐字恢复，不能半清")
+            }
+
+            expect(
+                hostHookVoidResultSucceeded(
+                    store.clearReceiptHistory(hosts: HostID.productVisibleCases)),
+                "无注入失败时批量清理必须成功")
+            expect(
+                HostID.productVisibleCases.allSatisfy {
+                    !FileManager.default.fileExists(
+                        atPath: store.historyRoot
+                            .appendingPathComponent($0.surfaceID.rawValue, isDirectory: true).path)
+                },
+                "成功批量清理必须移除每个产品 Surface 的历史")
+        }
+    }
+
+    suite("HostHookReceiptStore：root 替换失败关闭，提交后删除失败保留可重试 tombstone") {
+        withTempDirectory { root in
+            let rootSwapStore = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("swap/receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent("swap/receipt-locks", isDirectory: true))
+            for host in HostID.productVisibleCases {
+                writeFixture(
+                    "swap-\(host.rawValue)",
+                    to: rootSwapStore.historyRoot
+                        .appendingPathComponent(host.surfaceID.rawValue, isDirectory: true)
+                        .appendingPathComponent("keep.json"))
+            }
+            makeHistoryRootPrivate(rootSwapStore)
+            let originalRoot = root.appendingPathComponent("swap/original-history")
+            var swappedRoot = false
+            let swapResult = rootSwapStore.clearReceiptHistory(
+                hosts: HostID.productVisibleCases,
+                beforeStaging: { _ in
+                    guard !swappedRoot else { return }
+                    swappedRoot = true
+                    try FileManager.default.moveItem(
+                        at: rootSwapStore.historyRoot,
+                        to: originalRoot)
+                    try FileManager.default.createDirectory(
+                        at: rootSwapStore.historyRoot,
+                        withIntermediateDirectories: true)
+                    writeFixture(
+                        "replacement-must-survive",
+                        to: rootSwapStore.historyRoot.appendingPathComponent("replacement.txt"))
+                })
+            expect(
+                !hostHookVoidResultSucceeded(swapResult),
+                "已打开 historyRoot 的公开路径被替换时必须在 commit 前失败关闭")
+            expect(
+                fixtureText(
+                    rootSwapStore.historyRoot.appendingPathComponent("replacement.txt"))
+                    == "replacement-must-survive",
+                "descriptor-bound 清理不得删除替换后的 historyRoot 内容")
+            for host in HostID.productVisibleCases {
+                expect(
+                    fixtureText(
+                        originalRoot
+                            .appendingPathComponent(host.surfaceID.rawValue, isDirectory: true)
+                            .appendingPathComponent("keep.json")) == "swap-\(host.rawValue)",
+                    "root swap 失败后原 descriptor 下的 \(host.rawValue) 历史必须保留")
+            }
+
+            let cleanupStore = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("cleanup/receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent(
+                    "cleanup/receipt-locks",
+                    isDirectory: true))
+            for host in HostID.productVisibleCases {
+                writeFixture(
+                    "cleanup-\(host.rawValue)",
+                    to: cleanupStore.historyRoot
+                        .appendingPathComponent(host.surfaceID.rawValue, isDirectory: true)
+                        .appendingPathComponent("keep.json"))
+            }
+            makeHistoryRootPrivate(cleanupStore)
+            let committed = cleanupStore.clearReceiptHistory(
+                hosts: HostID.productVisibleCases,
+                beforeCommittedCleanup: { removalIndex in
+                    if removalIndex == 1 { throw CocoaError(.fileWriteUnknown) }
+                })
+            expect(
+                hostHookVoidResultSucceeded(committed),
+                "全部 Surface rename 已提交后，部分 tombstone 回收失败不得伪报可回滚 failure")
+            expect(
+                HostID.productVisibleCases.allSatisfy {
+                    !FileManager.default.fileExists(
+                        atPath: cleanupStore.historyRoot
+                            .appendingPathComponent($0.surfaceID.rawValue, isDirectory: true).path)
+                },
+                "提交后的 live Surface 必须全部消失，不能暴露部分清除")
+            let retainedTombstones =
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: cleanupStore.historyRoot.path))?.filter { $0.hasPrefix(".clear-") }
+                ?? []
+            expect(
+                retainedTombstones.count == 1
+                    && UUID(
+                        uuidString: String(retainedTombstones[0].dropFirst(".clear-".count)))
+                        != nil,
+                "删除中途失败必须只留下 UUID 命名的私有可重试 tombstone")
+
+            expect(
+                hostHookVoidResultSucceeded(
+                    cleanupStore.clearReceiptHistory(hosts: HostID.productVisibleCases)),
+                "下一次清理必须先重试已提交 tombstone，再幂等返回成功")
+            let remainingTombstones =
+                (try? FileManager.default.contentsOfDirectory(
+                    atPath: cleanupStore.historyRoot.path))?.filter { $0.hasPrefix(".clear-") }
+                ?? []
+            expect(remainingTombstones.isEmpty, "重试必须回收上次部分删除留下的 tombstone")
+
+            let recoveryStore = HostHookReceiptStore(
+                receiptsRoot: root.appendingPathComponent("recovery/receipts", isDirectory: true),
+                locksRoot: root.appendingPathComponent(
+                    "recovery/receipt-locks",
+                    isDirectory: true))
+            let interruptedName = ".staging-\(UUID().uuidString.lowercased())"
+            writeFixture(
+                "interrupted-workbuddy",
+                to: recoveryStore.historyRoot
+                    .appendingPathComponent(interruptedName, isDirectory: true)
+                    .appendingPathComponent(
+                        HostSurfaceID.workBuddy.rawValue,
+                        isDirectory: true
+                    )
+                    .appendingPathComponent("keep.json"))
+            writeFixture(
+                "live-codex",
+                to: recoveryStore.historyRoot
+                    .appendingPathComponent(HostSurfaceID.codex.rawValue, isDirectory: true)
+                    .appendingPathComponent("keep.json"))
+            makeHistoryRootPrivate(recoveryStore)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o700],
+                ofItemAtPath: recoveryStore.historyRoot
+                    .appendingPathComponent(interruptedName, isDirectory: true).path)
+            let recoveredThenStopped = recoveryStore.clearReceiptHistory(
+                hosts: [.codex],
+                beforeStaging: { _ in throw CocoaError(.fileWriteUnknown) })
+            expect(
+                !hostHookVoidResultSucceeded(recoveredThenStopped),
+                "遗留 staging 恢复后、当前事务 commit 前注入失败必须返回 failure")
+            expect(
+                fixtureText(
+                    recoveryStore.historyRoot
+                        .appendingPathComponent(
+                            HostSurfaceID.workBuddy.rawValue,
+                            isDirectory: true
+                        )
+                        .appendingPathComponent("keep.json")) == "interrupted-workbuddy"
+                    && fixtureText(
+                        recoveryStore.historyRoot
+                            .appendingPathComponent(
+                                HostSurfaceID.codex.rawValue,
+                                isDirectory: true
+                            )
+                            .appendingPathComponent("keep.json")) == "live-codex",
+                "下次 lock owner 必须先回滚 `.staging-*`，且当前失败仍保留全部 live 历史")
+            expect(
+                !FileManager.default.fileExists(
+                    atPath: recoveryStore.historyRoot
+                        .appendingPathComponent(interruptedName, isDirectory: true).path),
+                "成功恢复后不得遗留未提交 staging marker")
+
+            let otherSurfaceLock = FileLock(
+                path: recoveryStore.installationLockFile(host: .workBuddy).path)
+            expect(otherSurfaceLock.attemptLock() == .acquired, "测试前提：WorkBuddy lock 必须占用")
+            let disjointClear = recoveryStore.clearReceiptHistory(hosts: [.codex])
+            expect(
+                hostHookVoidResultFailure(disjointClear) == .lockBusy,
+                "即使只清 Codex，也必须持有全产品锁域，不能并发扫描 WorkBuddy staging")
+            otherSurfaceLock.unlock()
+        }
+    }
+}
+
+private func hostHookVoidResultSucceeded<Failure>(_ result: Result<Void, Failure>) -> Bool {
+    if case .success = result { return true }
+    return false
+}
+
+private func hostHookVoidResultFailure<Failure>(_ result: Result<Void, Failure>) -> Failure? {
+    if case .failure(let failure) = result { return failure }
+    return nil
+}
+
+private func fixtureText(_ url: URL) -> String? {
+    try? String(contentsOf: url, encoding: .utf8)
+}
+
+private func makeHistoryRootPrivate(_ store: HostHookReceiptStore) {
+    try? FileManager.default.setAttributes(
+        [.posixPermissions: 0o700],
+        ofItemAtPath: store.historyRoot.path)
 }

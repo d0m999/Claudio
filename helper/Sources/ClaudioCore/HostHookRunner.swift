@@ -101,6 +101,7 @@ public func handleHostHook(
         now: base.now,
         logFile: base.logFile,
         logLockFile: base.logLockFile,
+        dynamicQuietEnvironment: base.dynamicQuietEnvironment,
         spawnResultObserver: { succeeded in capture.record(succeeded) })
     let outcome = playSoundEvent(event.cliName, environment: observedPlayEnvironment)
     let playbackResult = redactedPlaybackResult(
@@ -173,7 +174,7 @@ private func redactedPlaybackResult(
     switch outcome {
     case .played:
         return spawnSucceeded == false ? .playbackFailed : .played
-    case .disabled:
+    case .disabled, .dynamicQuiet:
         return .muted
     case .skippedDebounce, .skippedRecentPlay:
         return .debounced

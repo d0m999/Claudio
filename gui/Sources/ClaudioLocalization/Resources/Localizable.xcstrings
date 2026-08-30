@@ -243,14 +243,14 @@
     },
     "panel.capability.supported" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface supported" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口支持" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface supported · Implemented" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口支持 · 已实现" } }
       }
     },
     "panel.capability.partial" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface partially supported" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口部分支持" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Interface partially supported · Implemented" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接口部分支持 · 已实现" } }
       }
     },
     "panel.capability.unsupported" : {
@@ -1150,6 +1150,30 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为当前事件描述并生成语音、动物叫声、音效或混合提示音" } }
       }
     },
+    "ai-cue.provider-profile.elevenlabs-global" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs · Global" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs · 全球" } }
+      }
+    },
+    "ai-cue.provider-profile.minimax-global" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "MiniMax · Global" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "MiniMax · 全球" } }
+      }
+    },
+    "ai-cue.provider-profile.qwen-singapore" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · Singapore" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · 新加坡" } }
+      }
+    },
+    "ai-cue.provider-profile.qwen-beijing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · Beijing" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Qwen · 北京" } }
+      }
+    },
     "ai-cue.service.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "AI sound generation" } },
@@ -1158,8 +1182,8 @@
     },
     "ai-cue.service.subtitle" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs · bring your own API key" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs · 使用你自己的 API Key" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · bring your own API key" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · 使用你自己的 API Key" } }
       }
     },
     "ai-cue.service.checking" : {
@@ -1180,10 +1204,70 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已配置" } }
       }
     },
+    "ai-cue.service.stored-verified" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved · verified" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存 · 已验证" } }
+      }
+    },
+    "ai-cue.service.stored-deferred" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved · validation deferred" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存 · 待生成验证" } }
+      }
+    },
+    "ai-cue.service.stored-rejected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saved · rejected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已保存 · 验证被拒绝" } }
+      }
+    },
+    "ai-cue.service.pending-replacement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "New key pending first-generation validation" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新 Key 待首次生成验证" } }
+      }
+    },
     "ai-cue.service.unavailable" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Keychain unavailable" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "钥匙串不可用" } }
+      }
+    },
+    "ai-cue.provider.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Provider and region" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "生成服务与地区" } }
+      }
+    },
+    "ai-cue.provider.capabilities" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Capabilities: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "支持能力：%@" } }
+      }
+    },
+    "ai-cue.modality.speech" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "speech" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "语音" } }
+      }
+    },
+    "ai-cue.modality.animal" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "animal calls" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "动物叫声" } }
+      }
+    },
+    "ai-cue.modality.sound-effect" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "sound effects" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "纯音效" } }
+      }
+    },
+    "ai-cue.modality.mixed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "mixed sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "混合声音" } }
       }
     },
     "ai-cue.credential.configure" : {
@@ -1200,8 +1284,8 @@
     },
     "ai-cue.credential.title" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs API Key" } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs API Key" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ API Key" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ API Key" } }
       }
     },
     "ai-cue.credential.key-label" : {
@@ -1216,16 +1300,70 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述和生成指令会由本机直接发送给 ElevenLabs；生成可能由 ElevenLabs 向你的账户收费；数据留存及是否用于模型改进，以你的 ElevenLabs 账户设置和其条款为准。" } }
       }
     },
+    "ai-cue.credential.privacy.minimax" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description, Mandarin speech, and generation metadata are sent directly to MiniMax's global service. Generation may consume your MiniMax quota. Data retention and model-improvement use follow MiniMax's terms. Saving first runs a read-only voice-list probe and does not generate audio." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述、普通话台词和生成元数据会由本机直接发送给 MiniMax 全球服务；生成可能消耗你的 MiniMax 配额；数据留存及是否用于模型改进以 MiniMax 条款为准。保存前只执行不生成音频的 voice-list 只读检查。" } }
+      }
+    },
+    "ai-cue.credential.privacy.qwen-singapore" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description, speech, and generation metadata are sent directly to DashScope in Singapore under that region's data-processing, retention, and model-improvement terms. Saving makes no model request and costs no generation quota; the next explicit generation may consume quota and validates this region's separate key." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述、台词和生成元数据会由本机直接发送给新加坡地区的 DashScope，并适用该地区的数据处理、留存及模型改进条款。保存不发模型请求且不消耗生成配额；下一次显式生成可能消耗配额，并验证此地区的独立 Key。" } }
+      }
+    },
+    "ai-cue.credential.privacy.qwen-beijing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your sound description, speech, and generation metadata are sent directly to DashScope in Beijing under that region's data-processing, retention, and model-improvement terms. Saving makes no model request and costs no generation quota; the next explicit generation may consume quota and validates this region's separate key." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音描述、台词和生成元数据会由本机直接发送给北京地区的 DashScope，并适用该地区的数据处理、留存及模型改进条款。保存不发模型请求且不消耗生成配额；下一次显式生成可能消耗配额，并验证此地区的独立 Key。" } }
+      }
+    },
     "ai-cue.credential.keychain" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The key is stored only in this Mac's Keychain. Claudio cannot display or copy a saved key." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Key 仅保存在这台 Mac 的钥匙串中；claudi0 不会显示或复制已保存的 Key。" } }
       }
     },
+    "ai-cue.credential.probing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Validating before save…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在验证并保存…" } }
+      }
+    },
+    "ai-cue.credential.saving" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving to Keychain…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在保存到钥匙串…" } }
+      }
+    },
+    "ai-cue.credential.updating-replacement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Updating pending replacement…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在更新待验证替换 Key…" } }
+      }
+    },
+    "ai-cue.credential.deleting" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Deleting from Keychain…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在从钥匙串删除…" } }
+      }
+    },
     "ai-cue.credential.validate-save" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Validate & Save" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "验证并保存" } }
+      }
+    },
+    "ai-cue.credential.save" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Save API Key" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保存 API Key" } }
+      }
+    },
+    "ai-cue.credential.cancel-replacement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel replacement" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消替换" } }
       }
     },
     "ai-cue.credential.delete" : {
@@ -1366,6 +1504,42 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ 秒" } }
       }
     },
+    "ai-cue.candidate.play-action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Play candidate %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放候选 %@" } }
+      }
+    },
+    "ai-cue.candidate.stop-action" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop candidate %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止候选 %@" } }
+      }
+    },
+    "ai-cue.candidate.playback-started" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playing candidate %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在播放候选 %@。" } }
+      }
+    },
+    "ai-cue.candidate.playback-stopped" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stopped candidate %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已停止候选 %@。" } }
+      }
+    },
+    "ai-cue.composer.closed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "AI Cue composer closed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已关闭 AI 提示音编辑器。" } }
+      }
+    },
+    "ai-cue.composer.closed-candidates-cleared" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "AI Cue composer closed; unadopted candidates were cleared." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已关闭 AI 提示音编辑器，并清理未采用候选。" } }
+      }
+    },
     "ai-cue.use-for-event" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Use for this event" } },
@@ -1408,10 +1582,22 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请把需要说出的原文放在引号中，例如“任务完成”。" } }
       }
     },
+    "ai-cue.error.unsupported-modality" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider does not support this type of sound. Keep the description and choose a compatible Provider." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前生成服务不支持这类声音；描述已保留，请选择支持该能力的生成服务。" } }
+      }
+    },
+    "ai-cue.error.unsupported-locale" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider does not support the current language for this speech cue. The description was kept." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前生成服务不支持以当前语言生成这段语音；描述已保留。" } }
+      }
+    },
     "ai-cue.error.credential-required" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure an ElevenLabs API Key before generating." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先配置 ElevenLabs API Key，再生成候选。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configure an API Key for the selected Provider before generating." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "请先为当前生成服务配置 API Key，再生成候选。" } }
       }
     },
     "ai-cue.error.credential-invalid" : {
@@ -1428,14 +1614,14 @@
     },
     "ai-cue.error.credits" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "Your ElevenLabs account does not have enough credits for this generation." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "你的 ElevenLabs 账户额度不足，无法完成本次生成。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider reports insufficient quota for this generation." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前生成服务报告账户额度不足，无法完成本次生成。" } }
       }
     },
     "ai-cue.error.rate-limited" : {
       "localizations" : {
-        "en" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs is limiting requests. Wait a moment, then generate again explicitly." } },
-        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "ElevenLabs 正在限制请求；请稍后再手动生成。" } }
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The selected Provider is limiting requests. Wait a moment, then generate again explicitly." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前生成服务正在限制请求；请稍后再手动生成。" } }
       }
     },
     "ai-cue.error.audio-invalid" : {
@@ -2092,6 +2278,132 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · 文件丢失" } }
       }
     },
+    "sound-packs.pack-delete" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move to Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移到废纸篓" } }
+      }
+    },
+    "sound-packs.pack-delete.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move “%@” to Trash?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将「%@」移到废纸篓？" } }
+      }
+    },
+    "sound-packs.pack-delete.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The entire user sound pack will leave claudi0's library and can be recovered from Trash." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "整个用户声音包会从 claudi0 的库中移除，并可从废纸篓恢复。" } }
+      }
+    },
+    "sound-packs.pack-delete.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move user sound pack “%@” to Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将用户声音包「%@」移到废纸篓" } }
+      }
+    },
+    "sound-packs.pack-delete.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A confirmation appears first; the active or built-in pack cannot be removed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "会先显示确认；当前使用或内置声音包不能移除" } }
+      }
+    },
+    "sound-packs.pack-delete.active" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Currently in use; select another pack first" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前正在使用；请先改用其他声音包" } }
+      }
+    },
+    "sound-packs.pack-delete.available" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "User sound pack; recoverable from Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户声音包；可从废纸篓恢复" } }
+      }
+    },
+    "sound-packs.pack-delete.error.no-selection" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No sound pack is selected; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有选中的声音包，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.selection-changed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The inspected sound pack changed; nothing was removed. Confirm again on the current pack." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在查看的声音包已经改变，未移除任何内容；请在当前包上重新确认。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.unsafe-id" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack ID is unsafe; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包标识不安全，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.builtin" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Built-in sound packs are read-only and cannot be removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "内置声音包为只读，不能移除。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.active" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This sound pack is currently in use; choose another pack first." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个声音包当前正在使用；请先改用其他声音包。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.config-unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current sound settings could not be safely revalidated; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法安全复验当前声音设置，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.not-found" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The user sound pack no longer exists; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用户声音包已不存在，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.unsafe-entry" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack is not a safe, direct directory; nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包不是安全的直接目录，未移除任何内容。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not move the sound pack to Trash: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法将声音包移到废纸篓：%@" } }
+      }
+    },
+    "sound-packs.pack-delete.error.isolation-retained" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The sound pack entry changed during isolation. Nothing was sent to Trash; the suspicious entry remains at %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隔离时声音包目录发生变化，未将任何内容移到废纸篓；可疑条目保留在 %@。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.trash-retained" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Trash failed and claudi0 could not restore the original path (%@). The sound pack remains at %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移到废纸篓失败，且 claudi0 无法恢复原路径（%@）；声音包保留在 %@。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Another sound-settings operation is in progress; nothing was removed. Try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "另一个声音设置操作正在进行，未移除任何内容；请重试。" } }
+      }
+    },
+    "sound-packs.pack-delete.error.lock-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not acquire a required file lock (errno %@); nothing was removed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法取得所需文件锁（errno %@），未移除任何内容。" } }
+      }
+    },
+    "sound-packs.writing-changes" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Saving sound changes…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在保存声音更改…" } }
+      }
+    },
     "sound-packs.pack.active" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Currently in use" } },
@@ -2114,6 +2426,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound pack unavailable: %@" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音包不可用：%@" } }
+      }
+    },
+    "sound-packs.pack.manifest-identity-mismatch" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The manifest sound pack ID does not match its folder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "manifest 声音包 ID 与所在文件夹不一致" } }
       }
     },
     "sound-packs.pack.modified" : {
@@ -2458,6 +2776,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用这个包" } }
       }
     },
+    "sound-packs.status.action.delete-pack" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Move Sound Pack to Trash" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "将声音包移到废纸篓" } }
+      }
+    },
     "sound-packs.status.audio-imported" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Added %@ audio file(s) to “%@”; they start unused. Assign them from event menus." } },
@@ -2516,6 +2840,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Now using “%@”." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现在使用「%@」。" } }
+      }
+    },
+    "sound-packs.status.pack-trashed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Moved “%@” to Trash." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已将「%@」移到废纸篓。" } }
       }
     },
     "onboarding.claude-code-not-installed.title" : {
@@ -2788,6 +3118,66 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件与提示音" } }
       }
     },
+    "event-settings.preview-all" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Preview All" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "试听全部" } }
+      }
+    },
+    "event-settings.preview-all.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Play each currently audible event sound in order" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按顺序播放当前真正可听的事件声音" } }
+      }
+    },
+    "event-settings.preview-all.stop" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop Preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止试听" } }
+      }
+    },
+    "event-settings.preview-all.stop.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop the current preview sequence" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止当前试听序列" } }
+      }
+    },
+    "event-settings.preview-all.failure" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn’t preview %@ because its sound file is unavailable or unsafe. Playback stopped." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法试听 %@：声音文件不可用或不安全，播放已停止。" } }
+      }
+    },
+    "event-settings.automatic-playback" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic playback" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动播放" } }
+      }
+    },
+    "event-settings.automatic-playback-for" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic playback for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动播放：%@" } }
+      }
+    },
+    "event-settings.manage-sounds" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage Sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理声音" } }
+      }
+    },
+    "event-settings.manage-sounds.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the Sounds destination for this sound scope" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在同一设置窗口打开当前声音作用域的声音目的页" } }
+      }
+    },
+    "event-settings.shortcut-scope.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The shortcut's Sound Scope %@ is no longer available. Events opened on a safe available scope; choose a scope to continue." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快捷键指向的声音作用域 %@ 已不可用。事件页已在安全的可用作用域打开；请选择作用域后继续。" } }
+      }
+    },
     "window.event-settings.title" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 · Events & Sounds" } },
@@ -2890,10 +3280,184 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "由宿主集成管理器提供" } }
       }
     },
+    "settings.sidebar.advanced" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Advanced" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "高级" } }
+      }
+    },
+    "settings.sidebar.product" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0" } }
+      }
+    },
+    "settings.sidebar.local-first" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Local first" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "本地优先" } }
+      }
+    },
+    "settings.announcement.value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@：%@" } }
+      }
+    },
     "settings.destination.about" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "About" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "关于" } }
+      }
+    },
+    "settings.about.unknown" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unknown" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知" } }
+      }
+    },
+    "settings.about.brand" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Brand" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "品牌" } }
+      }
+    },
+    "settings.about.product" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "App" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "应用" } }
+      }
+    },
+    "settings.about.version" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Version" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "版本" } }
+      }
+    },
+    "settings.about.build" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Build" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "构建" } }
+      }
+    },
+    "settings.about.architecture" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Architecture" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "架构" } }
+      }
+    },
+    "settings.about.minimum-macos" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Minimum macOS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最低 macOS" } }
+      }
+    },
+    "settings.about.current-macos" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current macOS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前 macOS" } }
+      }
+    },
+    "settings.about.copy-version" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy Version Information" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制版本信息" } }
+      }
+    },
+    "settings.about.copy-version.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copies the displayed app and system facts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制当前显示的应用与系统事实" } }
+      }
+    },
+    "settings.about.resources.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Resources" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "资源" } }
+      }
+    },
+    "settings.about.resources.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the documents included with this copy of claudi0." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开这份 claudi0 实际随包附带的文档。" } }
+      }
+    },
+    "settings.about.resource.open-source-license" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open-Source License" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开源许可" } }
+      }
+    },
+    "settings.about.resource.sound-attribution" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Sound Attribution" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "声音归属" } }
+      }
+    },
+    "settings.about.resource.privacy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Privacy Statement" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐私说明" } }
+      }
+    },
+    "settings.about.resource.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ is missing from this app." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前应用缺少“%@”。" } }
+      }
+    },
+    "settings.about.resource.open.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Opens %@ from this app's bundled resources" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "从当前应用的随包资源中打开“%@”" } }
+      }
+    },
+    "settings.about.diagnostics.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Safe Diagnostics" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "安全诊断" } }
+      }
+    },
+    "settings.about.diagnostics.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Contains only version, architecture, macOS, published Surface states, and whether fixed app resources exist. It never includes path values or user content." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只包含版本、架构、macOS、已发布 Surface 的语义状态，以及固定应用资源是否存在；绝不包含路径值或用户内容。" } }
+      }
+    },
+    "settings.about.diagnostics.copy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy Safe Diagnostics" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制安全诊断" } }
+      }
+    },
+    "settings.about.diagnostics.copy.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copies exactly the redacted summary shown above" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只复制上方显示的脱敏摘要" } }
+      }
+    },
+    "settings.about.feedback.version-copied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Version information copied." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制版本信息。" } }
+      }
+    },
+    "settings.about.feedback.diagnostics-copied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Safe diagnostics copied." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制安全诊断。" } }
+      }
+    },
+    "settings.about.failure.clipboard" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not write to the clipboard." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法写入剪贴板。" } }
+      }
+    },
+    "settings.about.failure.open" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Could not open %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法打开“%@”。" } }
       }
     },
     "settings.destination.display" : {
@@ -2942,6 +3506,312 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Usage" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "用量" } }
+      }
+    },
+    "settings.integrations.manage-events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage Events" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理事件" } }
+      }
+    },
+    "settings.integrations.manage-events.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Opens Events & Sounds for the selected surface and event in this Settings window." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在当前设置窗口中打开所选事件来源和事件的“事件与提示音”。" } }
+      }
+    },
+    "settings.notifications.calendar.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "When enabled and authorized, only a current non-all-day busy event temporarily suppresses automatic playback. Event details are never retained." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启并授权后，只有当前非全天 busy 事件会临时抑制自动播放；事件详情不会被保留。" } }
+      }
+    },
+    "settings.notifications.calendar.permission.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Calendar permission" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日历权限" } }
+      }
+    },
+    "settings.notifications.calendar.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quiet automatic sounds while Calendar is busy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日历忙碌时静默自动提示音" } }
+      }
+    },
+    "settings.notifications.focus.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Quiet automatic sounds during Focus" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 生效时静默自动提示音" } }
+      }
+    },
+    "settings.notifications.focus.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "When enabled and authorized, Focus temporarily suppresses automatic playback. Manual preview always remains available." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "开启并授权后，Focus 会临时抑制自动播放；手工试听始终可用。" } }
+      }
+    },
+    "settings.notifications.permission.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus permission" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 权限" } }
+      }
+    },
+    "settings.notifications.permission.not-requested" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not requested" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未请求" } }
+      }
+    },
+    "settings.notifications.permission.authorized" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Authorized" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已授权" } }
+      }
+    },
+    "settings.notifications.permission.denied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Denied" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已拒绝" } }
+      }
+    },
+    "settings.notifications.permission.restricted" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Restricted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "受限制" } }
+      }
+    },
+    "settings.notifications.reason.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current reason" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前原因" } }
+      }
+    },
+    "settings.notifications.reason.disabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Policy off" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "策略已关闭" } }
+      }
+    },
+    "settings.notifications.reason.permission-required" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Permission required; automatic sounds continue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要权限；自动提示音继续播放" } }
+      }
+    },
+    "settings.notifications.reason.inactive" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No dynamic quiet reason" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前无动态静默原因" } }
+      }
+    },
+    "settings.notifications.reason.focus-active" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus is suppressing automatic sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 正在抑制自动提示音" } }
+      }
+    },
+    "settings.notifications.reason.calendar-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Calendar busy is suppressing automatic sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "日历忙碌正在抑制自动提示音" } }
+      }
+    },
+    "settings.notifications.reason.focus-and-calendar-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus and Calendar busy are suppressing automatic sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Focus 与日历忙碌正在共同抑制自动提示音" } }
+      }
+    },
+    "settings.notifications.reason.observer-failure" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A Dynamic Quiet State observer is unavailable; automatic sounds continue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Dynamic Quiet State observer 不可用；自动提示音继续播放" } }
+      }
+    },
+    "settings.notifications.snapshot-health.current" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前有效" } }
+      }
+    },
+    "settings.notifications.snapshot-health.expired" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expired; automatic sounds continue" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已过期；自动提示音继续播放" } }
+      }
+    },
+    "settings.notifications.snapshot-health.publication-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh failed; the previous snapshot remains short-lived" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新失败；之前的快照仍会按短有效期过期" } }
+      }
+    },
+    "settings.notifications.snapshot-health.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Snapshot status" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "快照状态" } }
+      }
+    },
+    "settings.notifications.publication-failed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Dynamic Quiet State could not be published. Automatic sounds continue after any previous snapshot expires." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法发布 Dynamic Quiet State；之前的快照过期后，自动提示音会继续播放。" } }
+      }
+    },
+    "settings.notifications.open-calendar-privacy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Calendar Privacy Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开日历隐私设置" } }
+      }
+    },
+    "settings.notifications.open-events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Events & Sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "前往事件与提示音" } }
+      }
+    },
+    "settings.notifications.announcement.summary" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Focus permission: %@. Calendar permission: %@. Current reason: %@. Snapshot status: %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "专注模式权限：%@。日历权限：%@。当前原因：%@。快照状态：%@。" } }
+      }
+    },
+    "settings.display.panel-width.automatic" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "自动" } }
+      }
+    },
+    "settings.display.panel-width.clamped" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expanded to %lld pt to keep the current language and text size visible." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已扩展到 %lld pt，避免当前语言和文字档被裁切。" } }
+      }
+    },
+    "settings.display.panel-width.compact" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Compact" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "紧凑" } }
+      }
+    },
+    "settings.display.panel-width.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Explicit widths expand when needed so localized content and controls remain visible." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显式宽度会在需要时扩展，确保本地化内容和控件保持可见。" } }
+      }
+    },
+    "settings.display.panel-width.roomy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Roomy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "宽松" } }
+      }
+    },
+    "settings.display.panel-width.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Panel width" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "面板宽度" } }
+      }
+    },
+    "settings.display.status-dot.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Changes only the Orbit Zero visual variant. claudi0 remains in the menu bar and VoiceOver still reports its complete status." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只改变 Orbit Zero 的视觉变体；claudi0 仍保留在菜单栏中，VoiceOver 仍会播报完整状态。" } }
+      }
+    },
+    "settings.display.status-dot.enabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity dot shown" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已显示活动状态点" } }
+      }
+    },
+    "settings.display.status-dot.disabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Activity dot hidden" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已隐藏活动状态点" } }
+      }
+    },
+    "settings.display.status-dot.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show activity dot in menu bar" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在菜单栏显示活动状态点" } }
+      }
+    },
+    "settings.display.text-size.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Applies immediately across every Claudio interface, including the Aa control in the panel." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "立即应用到所有 Claudio 界面，包括面板中的 Aa 控件。" } }
+      }
+    },
+    "settings.general.login-item.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Let macOS start claudi0 when you sign in. This control always reflects the current system service status." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "让 macOS 在你登录时启动 claudi0。此控件始终反映当前系统服务状态。" } }
+      }
+    },
+    "settings.general.login-item.failure.disable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS could not remove claudi0 from login items. The previous status is still shown; retry the operation." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "macOS 无法从登录项中移除 claudi0。当前仍显示原状态；请重试。" } }
+      }
+    },
+    "settings.general.login-item.failure.enable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS could not add claudi0 to login items. The previous status is still shown; retry or review Login Items in System Settings." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "macOS 无法将 claudi0 添加到登录项。当前仍显示原状态；请重试或在系统设置中检查登录项。" } }
+      }
+    },
+    "settings.general.login-item.failure.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The signed embedded LoginItem is missing or damaged. Reinstall claudi0 before changing this setting." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "签名内嵌 LoginItem 缺失或损坏。请重新安装 claudi0 后再更改此设置。" } }
+      }
+    },
+    "settings.general.login-item.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable or disable the macOS login service. The switch changes only after the system call succeeds." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用或停用 macOS 登录服务。只有系统调用成功后开关才会改变。" } }
+      }
+    },
+    "settings.general.login-item.open-settings" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Login Items Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开登录项设置" } }
+      }
+    },
+    "settings.general.login-item.open-settings.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the Login Items panel so you can approve claudi0." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开登录项面板，以便批准 claudi0。" } }
+      }
+    },
+    "settings.general.login-item.status.disabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not registered with macOS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未向 macOS 注册" } }
+      }
+    },
+    "settings.general.login-item.status.enabled" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enabled by macOS" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已由 macOS 启用" } }
+      }
+    },
+    "settings.general.login-item.status.requires-approval" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Registered, but macOS is waiting for your approval in Login Items settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已注册，但 macOS 正等待你在登录项设置中批准" } }
+      }
+    },
+    "settings.general.login-item.status.unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Login item service is unavailable in this installation. Reinstall claudi0." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "此安装中的登录项服务不可用。请重新安装 claudi0。" } }
+      }
+    },
+    "settings.general.login-item.toggle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open claudi0 at login" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "登录时打开 claudi0" } }
       }
     },
     "settings.general.language.chinese" : {
@@ -3044,6 +3914,468 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "The surface %@ is no longer available. No other surface was selected." } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Surface %@ 已不可用；未选择其他 Surface。" } }
+      }
+    },
+    "settings.shortcuts.action.open-current-scope-events" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Current Sound Scope Events" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开当前声音作用域的事件页" } }
+      }
+    },
+    "settings.shortcuts.action.open-current-scope-events.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Events & Sounds for the panel's current valid Sound Scope." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为面板当前合法的声音作用域打开「事件与提示音」。" } }
+      }
+    },
+    "settings.shortcuts.action.open-settings" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open Settings" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开设置" } }
+      }
+    },
+    "settings.shortcuts.action.open-settings.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open the retained unified Settings window." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开保留的统一设置窗口。" } }
+      }
+    },
+    "settings.shortcuts.action.toggle-panel" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show or Hide Panel" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "显示或隐藏面板" } }
+      }
+    },
+    "settings.shortcuts.action.toggle-panel.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Toggle the menu-bar panel without opening Settings." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "切换菜单栏面板，不打开设置。" } }
+      }
+    },
+    "settings.shortcuts.cancel-recording" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel Recording" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消录制" } }
+      }
+    },
+    "settings.shortcuts.cancel-recording.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Cancel recording for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "取消录制%@" } }
+      }
+    },
+    "settings.shortcuts.clear" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除" } }
+      }
+    },
+    "settings.shortcuts.clear.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear shortcut for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除%@的快捷键" } }
+      }
+    },
+    "settings.shortcuts.current-value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Current shortcut: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前快捷键：%@" } }
+      }
+    },
+    "settings.shortcuts.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Register three global shortcuts that remain active after this window closes." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "注册三项全局快捷键；关闭此窗口后仍保持有效。" } }
+      }
+    },
+    "settings.shortcuts.failure.conflict" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS or another app is already using that combination. Any previous shortcut remains unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "macOS 或其他应用已占用这个组合；原快捷键保持不变。" } }
+      }
+    },
+    "settings.shortcuts.failure.duplicate" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "That combination is already assigned to %@." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个组合已分配给%@。" } }
+      }
+    },
+    "settings.shortcuts.failure.invalid-stored-value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This saved shortcut is damaged or uses an unknown schema and has been disabled. Clear it before recording a replacement." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这项已保存快捷键已损坏或使用未知 schema，现已禁用。请先清除，再录制替代组合。" } }
+      }
+    },
+    "settings.shortcuts.failure.persistence" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The shortcut could not be saved. Any previous shortcut remains unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法保存快捷键；原快捷键保持不变。" } }
+      }
+    },
+    "settings.shortcuts.failure.persistence-cleanup" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The new shortcut is active for this app session but could not be saved or removed. Clear or replace it before continuing." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新快捷键在本次应用会话中仍有效，但无法保存或撤销。请先清除或替换。" } }
+      }
+    },
+    "settings.shortcuts.failure.primary-modifier" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Include Command or Control. Bare keys and Shift/Option-only combinations are not allowed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "组合必须包含 Command 或 Control；不允许裸键或仅 Shift/Option。" } }
+      }
+    },
+    "settings.shortcuts.failure.registration" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "macOS could not register that shortcut. Any previous shortcut remains unchanged; try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "macOS 无法注册该快捷键；原快捷键保持不变。请重试。" } }
+      }
+    },
+    "settings.shortcuts.failure.rollback" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The new shortcut failed and macOS could not restore the previous registration. Record another combination." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "新快捷键失败，且 macOS 无法恢复原注册。请录制其他组合。" } }
+      }
+    },
+    "settings.shortcuts.failure.system-reserved" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "That combination is reserved by macOS. Record another combination." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个组合由 macOS 保留。请录制其他组合。" } }
+      }
+    },
+    "settings.shortcuts.failure.unsupported-key" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "That hardware key is not supported for global shortcuts. Record another combination." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "该硬件按键不支持用于全局快捷键。请录制其他组合。" } }
+      }
+    },
+    "settings.shortcuts.failure.unregister" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The previous shortcut could not be unregistered, so no replacement was attempted." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法取消原快捷键注册，因此未尝试替换。" } }
+      }
+    },
+    "settings.shortcuts.record" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Record…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "录制…" } }
+      }
+    },
+    "settings.shortcuts.record.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reads one combination in this focused control. Press Escape to cancel." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只在当前聚焦控件内读取一个组合；按 Escape 取消。" } }
+      }
+    },
+    "settings.shortcuts.record.label" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Record shortcut for %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "为%@录制快捷键" } }
+      }
+    },
+    "settings.shortcuts.recording" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Press one shortcut combination now, or press Escape to cancel." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "现在按下一个快捷键组合，或按 Escape 取消。" } }
+      }
+    },
+    "settings.shortcuts.requirement" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Each shortcut must include Command or Control. Accessibility and Input Monitoring are not required." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每项快捷键必须包含 Command 或 Control；无需辅助功能或输入监控权限。" } }
+      }
+    },
+    "settings.shortcuts.unassigned" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not assigned" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未分配" } }
+      }
+    },
+    "settings.usage.action.history-cleared" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained receipt history was cleared. Current activation and stable receipts were not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除保留的回执历史；当前激活与稳定回执未改变。" } }
+      }
+    },
+    "settings.usage.action.in-progress" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Working…" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "处理中…" } }
+      }
+    },
+    "settings.usage.action.log-cleared" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log was cleared. Receipt history was not changed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已清除诊断日志；回执历史未改变。" } }
+      }
+    },
+    "settings.usage.action.log-path-copied" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log path copied." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已复制诊断日志路径。" } }
+      }
+    },
+    "settings.usage.action.log-revealed" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log revealed in Finder." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已在 Finder 中显示诊断日志。" } }
+      }
+    },
+    "settings.usage.clear.history" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear retained history" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除保留历史" } }
+      }
+    },
+    "settings.usage.clear.history.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes only the retained, redacted history for visible Host Surfaces. It does not change connection markers, Current Activation, stable receipts, sounds, Provider preferences, or Keychain credentials." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这只会永久移除可见 Host Surface 保留的脱敏历史；不会改变连接 marker、当前激活、稳定回执、声音、Provider 偏好或 Keychain 凭据。" } }
+      }
+    },
+    "settings.usage.clear.history.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear retained receipt history?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除保留的回执历史？" } }
+      }
+    },
+    "settings.usage.clear.log" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear diagnostic log" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除诊断日志" } }
+      }
+    },
+    "settings.usage.clear.log.message" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This permanently removes only the rolling diagnostic log. Retained receipt history and every connection, sound, Provider, and credential fact remain unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这只会永久移除滚动诊断日志；保留的回执历史以及所有连接、声音、Provider 与凭据事实均保持不变。" } }
+      }
+    },
+    "settings.usage.clear.log.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Clear diagnostic log?" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "清除诊断日志？" } }
+      }
+    },
+    "settings.usage.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "A limited local activity view derived only from retained, redacted receipts and the rolling diagnostic log." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只根据保留的脱敏回执与滚动诊断日志生成的有限本地活动视图。" } }
+      }
+    },
+    "settings.usage.failure.clipboard" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The log path could not be copied to the clipboard." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法将日志路径复制到剪贴板。" } }
+      }
+    },
+    "settings.usage.failure.finder" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Finder could not reveal the diagnostic log. The path may not exist." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Finder 无法显示诊断日志；路径可能不存在。" } }
+      }
+    },
+    "settings.usage.failure.history-clear" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained history could not be cleared. The last visible facts were preserved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法清除保留历史；已保留上次可见事实。" } }
+      }
+    },
+    "settings.usage.failure.history-lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Receipt history is busy. Nothing visible was changed; try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "回执历史锁正忙；可见事实未改变，请重试。" } }
+      }
+    },
+    "settings.usage.failure.log-clear" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log could not be cleared. The last visible facts were preserved." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法清除诊断日志；已保留上次可见事实。" } }
+      }
+    },
+    "settings.usage.failure.log-lock-busy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log is busy. Nothing visible was changed; try again." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志锁正忙；可见事实未改变，请重试。" } }
+      }
+    },
+    "settings.usage.history.damaged" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld damaged or unsafe history items were excluded." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已排除 %lld 条损坏或不安全的历史项。" } }
+      }
+    },
+    "settings.usage.history.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No retained-history path exists for this Surface." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这个 Surface 的保留历史路径不存在。" } }
+      }
+    },
+    "settings.usage.history.none" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No retained receipt proves local activity in this window." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前保留窗口内没有回执可证明本地活动。" } }
+      }
+    },
+    "settings.usage.history.result-count" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ %lld" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ %lld" } }
+      }
+    },
+    "settings.usage.history.surface-count" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%lld retained receipts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留 %lld 条回执" } }
+      }
+    },
+    "settings.usage.history.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained local activity" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留的本地活动" } }
+      }
+    },
+    "settings.usage.history.unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Retained history is unreadable; no activity was inferred." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "保留历史不可读；未推断任何活动。" } }
+      }
+    },
+    "settings.usage.log.available" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log exists · %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志存在 · %@" } }
+      }
+    },
+    "settings.usage.log.copy-path" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy path" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制路径" } }
+      }
+    },
+    "settings.usage.log.damaged" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log exists · %@ · %lld malformed lines excluded" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志存在 · %@ · 已排除 %lld 行损坏内容" } }
+      }
+    },
+    "settings.usage.log.description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Shows file existence, size, and at most five redacted failure categories. Raw reasons are not displayed." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只显示文件是否存在、大小和最多五条脱敏失败分类；不展示原始原因。" } }
+      }
+    },
+    "settings.usage.log.failure.other" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Other local failure" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "其他本地失败" } }
+      }
+    },
+    "settings.usage.log.failure.playback-launch" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playback process could not start" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放进程无法启动" } }
+      }
+    },
+    "settings.usage.log.failure.playback-lock" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Playback lock failed" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "播放锁失败" } }
+      }
+    },
+    "settings.usage.log.failure.receipt-write" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redacted receipt could not be written" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "脱敏回执无法写入" } }
+      }
+    },
+    "settings.usage.log.failure.summary" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@" } }
+      }
+    },
+    "settings.usage.log.failure.unknown-event" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Unknown event" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未知事件" } }
+      }
+    },
+    "settings.usage.log.missing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log path does not exist." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志路径不存在。" } }
+      }
+    },
+    "settings.usage.log.no-failures" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "No readable recent failure summary." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "没有可读的近期失败摘要。" } }
+      }
+    },
+    "settings.usage.log.reveal" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Reveal in Finder" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "在 Finder 中显示" } }
+      }
+    },
+    "settings.usage.log.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Diagnostic log" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志" } }
+      }
+    },
+    "settings.usage.log.unreadable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The diagnostic log is unreadable or unsafe; no failure detail was inferred." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "诊断日志不可读或不安全；未推断失败详情。" } }
+      }
+    },
+    "settings.usage.privacy.billing" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 does not display or estimate a unified bill. Review costs, quotas, retention, model-improvement use, and regional rules with the corresponding provider." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0 不展示或推算统一账单。费用、配额、留存、模型改进使用与地区规则需向对应供应商核对。" } }
+      }
+    },
+    "settings.usage.privacy.host" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Host prompts and responses are not stored in receipts and are not sent to AI cue providers by this activity view." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "宿主 prompt 与 response 不进入回执，本活动视图也不会把它们发送给 AI 提示音供应商。" } }
+      }
+    },
+    "settings.usage.privacy.provider" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only an explicit AI cue generation sends the user's sound description and required generation metadata to the selected allowlisted Provider/profile." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只有用户显式发起 AI 提示音生成，声音描述与必要生成元数据才会发往所选 allowlisted Provider/profile。" } }
+      }
+    },
+    "settings.usage.privacy.provider-disclosure" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@ · region %@ — review this provider's own costs, quota, retention, data-use, and regional terms; another profile's facts do not apply." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · %@ · 地区 %@ — 需单独查看该供应商的费用、配额、留存、数据使用与地区条款；其他 profile 的事实不适用。" } }
+      }
+    },
+    "settings.usage.privacy.title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Privacy and Provider boundaries" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "隐私与 Provider 边界" } }
+      }
+    },
+    "settings.usage.refresh" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Refresh local facts" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "刷新本地事实" } }
+      }
+    },
+    "settings.usage.scope-notice" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This is not complete usage or a weekly total. Each Host Surface contributes at most 20 receipts retained for at most 30 days." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "这不是完整用量或本周总量。每个 Host Surface 最多投影 20 条、最多 30 天的保留回执。" } }
+      }
+    },
+    "menu-bar.status.running" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "claudi0, application running" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "claudi0，应用正在运行" } }
       }
     },
     "window.settings.title" : {

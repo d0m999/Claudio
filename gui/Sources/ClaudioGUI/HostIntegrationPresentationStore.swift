@@ -9,6 +9,7 @@ import Foundation
 @MainActor
 public final class HostIntegrationPresentationStore: ObservableObject {
     @Published private(set) var content: IntegrationsWindowContent
+    @Published private(set) var safeSurfaceFacts: [AboutSurfaceFact]
 
     private let configurationSources: [HostID: String]
     private var state: HostIntegrationPresentationState
@@ -19,9 +20,11 @@ public final class HostIntegrationPresentationStore: ObservableObject {
     ) {
         self.state = state
         self.configurationSources = configurationSources
-        content = integrationWindowContent(
+        let initialContent = integrationWindowContent(
             state: state,
             configurationSources: configurationSources)
+        content = initialContent
+        safeSurfaceFacts = aboutSurfaceFacts(from: initialContent.sourceRows)
     }
 
     @discardableResult
@@ -33,11 +36,13 @@ public final class HostIntegrationPresentationStore: ObservableObject {
             state: replacementState,
             configurationSources: configurationSources)
         content = replacement
+        safeSurfaceFacts = aboutSurfaceFacts(from: replacement.sourceRows)
         return replacement
     }
 
     func replace(content replacement: IntegrationsWindowContent) {
         content = replacement
+        safeSurfaceFacts = aboutSurfaceFacts(from: replacement.sourceRows)
     }
 }
 

@@ -7,18 +7,37 @@ APP="${1:-dist/claudi0.app}"
 GUI_BINARY="$APP/Contents/MacOS/claudi0-app"
 HELPER_BINARY="$APP/Contents/Resources/bin/claudi0"
 LEGACY_HELPER_ALIAS="$APP/Contents/Resources/bin/claudio"
+LOGIN_ITEM_APP="$APP/Contents/Library/LoginItems/claudi0 LoginItem.app"
+LOGIN_ITEM_BINARY="$LOGIN_ITEM_APP/Contents/MacOS/claudi0-login-item"
+LOGIN_ITEM_PLIST="$LOGIN_ITEM_APP/Contents/Info.plist"
 
 GUI_BYTES_PER_ARCH="${CLAUDIO_GUI_BYTES_PER_ARCH:-5500000}"
 HELPER_BYTES_PER_ARCH="${CLAUDIO_HELPER_BYTES_PER_ARCH:-3250000}"
+LOGIN_ITEM_BYTES_PER_ARCH="${CLAUDIO_LOGIN_ITEM_BYTES_PER_ARCH:-500000}"
 NON_EXECUTABLE_BUNDLE_BYTES="${CLAUDIO_NON_EXECUTABLE_BUNDLE_BYTES:-1000000}"
 LIPO_BIN="${CLAUDIO_LIPO_BIN:-lipo}"
 
-for path in "$GUI_BINARY" "$HELPER_BINARY"; do
-  if [ ! -f "$path" ]; then
+for path in "$GUI_BINARY" "$HELPER_BINARY" "$LOGIN_ITEM_BINARY"; do
+  if [ ! -f "$path" ] || [ -L "$path" ]; then
     echo "❌ 缺少 Release 可执行文件：$path" >&2
     exit 1
   fi
 done
+
+if [ ! -d "$LOGIN_ITEM_APP" ] || [ -L "$LOGIN_ITEM_APP" ] \
+  || [ ! -f "$LOGIN_ITEM_PLIST" ] || [ -L "$LOGIN_ITEM_PLIST" ]; then
+  echo "❌ 缺少或损坏 LoginItem Info.plist：$LOGIN_ITEM_PLIST" >&2
+  exit 1
+fi
+if ! plutil -lint "$LOGIN_ITEM_PLIST" >/dev/null \
+  || [ "$(plutil -extract CFBundleIdentifier raw "$LOGIN_ITEM_PLIST")" \
+    != "com.claudio.app.login-item" ] \
+  || [ "$(plutil -extract CFBundleExecutable raw "$LOGIN_ITEM_PLIST")" \
+    != "claudi0-login-item" ] \
+  || [ "$(plutil -extract LSMinimumSystemVersion raw "$LOGIN_ITEM_PLIST")" != "12.0" ]; then
+  echo "❌ LoginItem Info.plist identity、executable 或 macOS 12 floor 无效：$LOGIN_ITEM_PLIST" >&2
+  exit 1
+fi
 
 if [ ! -L "$LEGACY_HELPER_ALIAS" ]; then
   echo "❌ legacy helper 必须是相对符号链接，不能再复制一份 Mach-O：$LEGACY_HELPER_ALIAS" >&2
@@ -31,8 +50,9 @@ fi
 
 GUI_ARCHS="$("$LIPO_BIN" -archs "$GUI_BINARY")"
 HELPER_ARCHS="$("$LIPO_BIN" -archs "$HELPER_BINARY")"
-if [ "$GUI_ARCHS" != "$HELPER_ARCHS" ]; then
-  echo "❌ GUI/helper 架构不一致：GUI=[$GUI_ARCHS] helper=[$HELPER_ARCHS]" >&2
+LOGIN_ITEM_ARCHS="$("$LIPO_BIN" -archs "$LOGIN_ITEM_BINARY")"
+if [ "$GUI_ARCHS" != "$HELPER_ARCHS" ] || [ "$GUI_ARCHS" != "$LOGIN_ITEM_ARCHS" ]; then
+  echo "❌ GUI/helper/LoginItem 架构不一致：GUI=[$GUI_ARCHS] helper=[$HELPER_ARCHS] LoginItem=[$LOGIN_ITEM_ARCHS]" >&2
   exit 1
 fi
 
@@ -68,18 +88,20 @@ trap 'rm -rf "$SLICE_DIR"' EXIT
 
 check_binary_budget "claudi0-app" "$GUI_BINARY" "$GUI_BYTES_PER_ARCH"
 check_binary_budget "claudi0 helper" "$HELPER_BINARY" "$HELPER_BYTES_PER_ARCH"
+check_binary_budget "claudi0 LoginItem" "$LOGIN_ITEM_BINARY" "$LOGIN_ITEM_BYTES_PER_ARCH"
 
 BUNDLE_BYTES="$(find "$APP" -type f -exec stat -f '%z' {} + | awk '{sum += $1} END {print sum + 0}')"
 GUI_FILE_BYTES="$(stat -f '%z' "$GUI_BINARY")"
 HELPER_FILE_BYTES="$(stat -f '%z' "$HELPER_BINARY")"
-NON_EXECUTABLE_BYTES=$((BUNDLE_BYTES - GUI_FILE_BYTES - HELPER_FILE_BYTES))
+LOGIN_ITEM_FILE_BYTES="$(stat -f '%z' "$LOGIN_ITEM_BINARY")"
+NON_EXECUTABLE_BYTES=$((BUNDLE_BYTES - GUI_FILE_BYTES - HELPER_FILE_BYTES - LOGIN_ITEM_FILE_BYTES))
 if [ "$NON_EXECUTABLE_BYTES" -gt "$NON_EXECUTABLE_BUNDLE_BYTES" ]; then
   echo "❌ 非可执行资源超出体积预算：${NON_EXECUTABLE_BYTES} B > ${NON_EXECUTABLE_BUNDLE_BYTES} B" >&2
   exit 1
 fi
 echo "✅ 非可执行资源：${NON_EXECUTABLE_BYTES} B / ${NON_EXECUTABLE_BUNDLE_BYTES} B"
 
-BUNDLE_MAXIMUM=$(((GUI_BYTES_PER_ARCH + HELPER_BYTES_PER_ARCH) * ARCH_COUNT + NON_EXECUTABLE_BUNDLE_BYTES))
+BUNDLE_MAXIMUM=$(((GUI_BYTES_PER_ARCH + HELPER_BYTES_PER_ARCH + LOGIN_ITEM_BYTES_PER_ARCH) * ARCH_COUNT + NON_EXECUTABLE_BUNDLE_BYTES))
 if [ "$BUNDLE_BYTES" -gt "$BUNDLE_MAXIMUM" ]; then
   echo "❌ app bundle 超出体积预算：${BUNDLE_BYTES} B > ${BUNDLE_MAXIMUM} B" >&2
   exit 1

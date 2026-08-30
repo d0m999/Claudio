@@ -37,8 +37,9 @@ public enum ManifestBindError: Error, Sendable, Equatable {
     /// `manifest.json` couldn't be read at all (see ``PackManifestLoadError``), its
     /// content isn't a top-level JSON *object*, its `events` field is present but isn't
     /// itself a JSON object (e.g. an array or string), its `events` object holds a
-    /// non-string value (e.g. `{"stop": 1}`), or it has no valid top-level `id` (missing /
-    /// not a string / empty) — every shape this read-modify-write requires to safely operate
+    /// non-string value (e.g. `{"stop": 1}`), it has no valid top-level `id` (missing /
+    /// not a string / empty), or a scoped writer required that id to match its captured pack
+    /// identity and it did not — every shape this read-modify-write requires to safely operate
     /// without silently coercing a malformed manifest into a fabricated one, PLUS every shape
     /// ``PackManifest`` itself must be able to decode afterwards (T16 review 修复④: a bind
     /// that "succeeds" into a manifest nothing can decode would leave the row rendering
@@ -129,6 +130,7 @@ public enum ManifestBindError: Error, Sendable, Equatable {
 public func mutateManifestJSON(
     at packDirectory: URL,
     lockFile: URL,
+    expectedManifestID: String? = nil,
     _ transform: (inout [String: Any]) -> Void
 ) -> Result<Void, ManifestBindError> {
     // 整段读-改-写都在锁里。**别把锁收窄到只包最后那次 `write`** —— 那样两个写者仍然可以各自
@@ -142,7 +144,8 @@ public func mutateManifestJSON(
     // 函数体」这个形状（`performManifestMutation` 是 `private`、只有这一个调用点），那是可读性
     // 保护，不是断言。见 TODOS。
     let outcome = withNonBlockingLock(path: lockFile.path) {
-        performManifestMutation(at: packDirectory, transform)
+        performManifestMutation(
+            at: packDirectory, expectedManifestID: expectedManifestID, transform)
     }
     switch outcome {
     case .ran(let result): return result
@@ -158,6 +161,7 @@ public func mutateManifestJSON(
 @MainActor
 private func performManifestMutation(
     at packDirectory: URL,
+    expectedManifestID: String?,
     _ transform: (inout [String: Any]) -> Void
 ) -> Result<Void, ManifestBindError> {
     let manifestData: Data
@@ -208,6 +212,12 @@ private func performManifestMutation(
     guard let id = json["id"] as? String, !id.isEmpty else {
         return .failure(
             .manifestUnreadable(reason: "manifest.json 缺少有效的顶层 id 字段（必须是非空字符串）"))
+    }
+    if let expectedManifestID, id != expectedManifestID {
+        return .failure(
+            .manifestUnreadable(
+                reason:
+                    "manifest.json 的 id「\(id)」与目标声音包「\(expectedManifestID)」不一致"))
     }
 
     transform(&json)
@@ -366,7 +376,8 @@ public func bindAICueToManifest(
     var finalDisplayName = displayName.value
     let result = mutateManifestJSON(
         at: userPackDirectory,
-        lockFile: environment.packsLockFile
+        lockFile: environment.packsLockFile,
+        expectedManifestID: packID
     ) { json in
         var events = (json["events"] as? [String: Any]) ?? [:]
         var audioNames = (json["audio_names"] as? [String: Any]) ?? [:]

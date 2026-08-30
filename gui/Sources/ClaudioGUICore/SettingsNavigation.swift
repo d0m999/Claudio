@@ -83,6 +83,10 @@ public struct SettingsRouteAvailability: Sendable, Equatable {
     public let eventScopes: Set<PanelSoundScopeID>
     public let soundScopes: Set<PanelSoundScopeID>
     public let soundPackIDs: Set<String>
+    /// A missing pack ID is stale only after the shared library has published a fresh ready
+    /// snapshot. During first hydration or a refresh failure the route remains pending so a
+    /// temporarily empty projection cannot reject a valid deep link.
+    public let soundPackSnapshotIsFresh: Bool
     public let events: Set<Event>
 
     public init(
@@ -90,12 +94,14 @@ public struct SettingsRouteAvailability: Sendable, Equatable {
         eventScopes: Set<PanelSoundScopeID>,
         soundScopes: Set<PanelSoundScopeID>,
         soundPackIDs: Set<String>,
+        soundPackSnapshotIsFresh: Bool = true,
         events: Set<Event>
     ) {
         self.integrationSurfaces = integrationSurfaces
         self.eventScopes = eventScopes
         self.soundScopes = soundScopes
         self.soundPackIDs = soundPackIDs
+        self.soundPackSnapshotIsFresh = soundPackSnapshotIsFresh
         self.events = events
     }
 
@@ -104,6 +110,7 @@ public struct SettingsRouteAvailability: Sendable, Equatable {
         eventScopes: [.global],
         soundScopes: [.global],
         soundPackIDs: [],
+        soundPackSnapshotIsFresh: false,
         events: Set(Event.allCases))
 }
 
@@ -164,7 +171,8 @@ public func resolveSettingsRoute(
             packID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         {
             failure = .invalidSoundPackID
-        } else if let packID = soundsRoute.editTarget?.packID,
+        } else if availability.soundPackSnapshotIsFresh,
+            let packID = soundsRoute.editTarget?.packID,
             !availability.soundPackIDs.contains(packID)
         {
             failure = .staleSoundPack(packID)
@@ -282,7 +290,7 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
     @Published public private(set) var resolution: SettingsRouteResolution
     @Published public private(set) var routeRequestRevision: UInt64 = 0
 
-    private let availability: SettingsRouteAvailability
+    private var availability: SettingsRouteAvailability
     private let preferences: ClaudioPreferences?
     private var lifecycle: SettingsWindowLifecycle<Handback>
 
@@ -293,7 +301,8 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
     ) {
         self.availability = availability
         self.preferences = preferences
-        let restoredRoute = initialRoute
+        let restoredRoute =
+            initialRoute
             ?? .destination(preferences?.lastSettingsDestination ?? .general)
         lifecycle = SettingsWindowLifecycle(initialRoute: restoredRoute)
         resolution = resolveSettingsRoute(restoredRoute, availability: availability)
@@ -304,7 +313,8 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
         route: SettingsRoute? = nil,
         handback: Handback? = nil
     ) -> SettingsWindowPresentation {
-        let restoredRoute = route == nil && !lifecycle.isPresented
+        let restoredRoute =
+            route == nil && !lifecycle.isPresented
             ? SettingsRoute.destination(preferences?.lastSettingsDestination ?? .general)
             : route
         let presentation = lifecycle.present(
@@ -321,6 +331,18 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
     public func request(_ route: SettingsRoute) {
         preferences?.setLastSettingsDestination(route.destination)
         publish(lifecycle.request(route: route, availability: availability))
+    }
+
+    /// Re-resolves the retained stable route against newly published app facts. This never
+    /// increments the explicit route-request revision, so a background library refresh cannot
+    /// steal keyboard focus; it only changes visible pending/failure state in place.
+    public func updateAvailability(_ availability: SettingsRouteAvailability) {
+        guard self.availability != availability else { return }
+        self.availability = availability
+        lifecycle.refresh(availability: availability)
+        if resolution != lifecycle.resolution {
+            resolution = lifecycle.resolution
+        }
     }
 
     public func close() -> Handback? {
@@ -342,17 +364,128 @@ public enum SettingsWindowGeometry {
     public static let defaultHeight: Double = 820
     public static let minimumWidth: Double = 960
     public static let minimumHeight: Double = 640
+    public static let compactSidebarWidth: Double = 220
+    public static let standardSidebarWidth: Double = 252
+    public static let expandedSidebarWidth: Double = 276
+    public static let compactSidebarWindowThreshold: Double = 1_040
+}
+
+public func settingsSidebarWidth(
+    windowWidth: Double,
+    interfaceTextSize: ClaudioInterfaceTextSize
+) -> Double {
+    if interfaceTextSize == .maximum {
+        return windowWidth <= SettingsWindowGeometry.compactSidebarWindowThreshold
+            ? SettingsWindowGeometry.standardSidebarWidth
+            : SettingsWindowGeometry.expandedSidebarWidth
+    }
+    return windowWidth <= SettingsWindowGeometry.compactSidebarWindowThreshold
+        ? SettingsWindowGeometry.compactSidebarWidth
+        : SettingsWindowGeometry.standardSidebarWidth
+}
+
+public enum SettingsSidebarSectionID: String, Sendable, CaseIterable, Identifiable {
+    case primary
+    case advanced
+    case product
+
+    public var id: String { rawValue }
+}
+
+public struct SettingsSidebarSection: Sendable, Equatable, Identifiable {
+    public let id: SettingsSidebarSectionID
+    public let destinations: [SettingsDestination]
+
+    public init(id: SettingsSidebarSectionID, destinations: [SettingsDestination]) {
+        self.id = id
+        self.destinations = destinations
+    }
+}
+
+public func settingsSidebarSections(
+    availableDestinations: [SettingsDestination]
+) -> [SettingsSidebarSection] {
+    let available = Set(availableDestinations)
+    return [
+        SettingsSidebarSection(
+            id: .primary,
+            destinations: [
+                .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds,
+                .usage,
+            ].filter(available.contains)),
+        SettingsSidebarSection(
+            id: .advanced,
+            destinations: [SettingsDestination.shortcuts].filter(available.contains)),
+        SettingsSidebarSection(
+            id: .product,
+            destinations: [SettingsDestination.about].filter(available.contains)),
+    ].filter { !$0.destinations.isEmpty }
+}
+
+public enum SettingsSidebarMoveDirection: Sendable {
+    case previous
+    case next
+}
+
+public func settingsSidebarDestination(
+    moving direction: SettingsSidebarMoveDirection,
+    from current: SettingsDestination,
+    availableDestinations: [SettingsDestination]
+) -> SettingsDestination {
+    let ordered = SettingsDestination.allCases.filter(Set(availableDestinations).contains)
+    guard let index = ordered.firstIndex(of: current), !ordered.isEmpty else {
+        return ordered.first ?? current
+    }
+    switch direction {
+    case .previous:
+        return ordered[max(ordered.startIndex, index - 1)]
+    case .next:
+        return ordered[min(ordered.index(before: ordered.endIndex), index + 1)]
+    }
+}
+
+/// Visibility facts for an editor embedded in the retained Settings window. Callers pass the
+/// destination emitted by the route publisher rather than synchronously reading an `@Published`
+/// property that may still contain its pre-publication value.
+public struct SettingsEmbeddedDestinationState: Sendable, Equatable {
+    public let isVisible: Bool
+    public let isKey: Bool
+
+    public init(isVisible: Bool, isKey: Bool) {
+        self.isVisible = isVisible
+        self.isKey = isKey
+    }
+}
+
+public func settingsEmbeddedDestinationState(
+    selectedDestination: SettingsDestination,
+    embeddedDestination: SettingsDestination,
+    windowIsVisible: Bool,
+    windowIsKey: Bool
+) -> SettingsEmbeddedDestinationState {
+    let isVisible = windowIsVisible && selectedDestination == embeddedDestination
+    return SettingsEmbeddedDestinationState(
+        isVisible: isVisible,
+        isKey: isVisible && windowIsKey)
 }
 
 public enum SettingsWindowFocusTarget: Sendable, Equatable, Hashable {
     case sidebar(SettingsDestination)
     case title(SettingsDestination)
     case firstAction(SettingsDestination)
+    case shortcutAction(GlobalShortcutAction)
 }
 
 public func settingsWindowFocusOrder(
     selectedDestination: SettingsDestination
 ) -> [SettingsWindowFocusTarget] {
-    SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
-        + [.title(selectedDestination), .firstAction(selectedDestination)]
+    var order = SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
+    order.append(.title(selectedDestination))
+    // Embedded editors own route-aware focus identity spaces. Inventing a Settings-shell first
+    // action for them would point at no rendered control and compete with their initial-focus
+    // requests. Integrations exposes one real shell-owned route action before its embedded model.
+    if selectedDestination != .eventsAndSounds && selectedDestination != .sounds {
+        order.append(.firstAction(selectedDestination))
+    }
+    return order
 }

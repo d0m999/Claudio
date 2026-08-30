@@ -49,7 +49,8 @@ public enum ClaudioLanguageMode: String, CaseIterable, Codable, Sendable, Identi
             return .english
         case .system:
             for identifier in preferredLanguageIdentifiers {
-                let languageCode = identifier
+                let languageCode =
+                    identifier
                     .replacingOccurrences(of: "_", with: "-")
                     .split(separator: "-", maxSplits: 1)
                     .first?
@@ -296,19 +297,52 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let actionConfigureSoundHint: Self = "action.configure-sound.hint"
     public static let aiCueGenerateAction: Self = "ai-cue.action.generate"
     public static let aiCueGenerateHint: Self = "ai-cue.action.generate.hint"
+    public static let aiCueProviderProfileElevenLabsGlobal: Self =
+        "ai-cue.provider-profile.elevenlabs-global"
+    public static let aiCueProviderProfileMiniMaxGlobal: Self =
+        "ai-cue.provider-profile.minimax-global"
+    public static let aiCueProviderProfileQwenSingapore: Self =
+        "ai-cue.provider-profile.qwen-singapore"
+    public static let aiCueProviderProfileQwenBeijing: Self =
+        "ai-cue.provider-profile.qwen-beijing"
     public static let aiCueServiceTitle: Self = "ai-cue.service.title"
     public static let aiCueServiceSubtitle: Self = "ai-cue.service.subtitle"
     public static let aiCueServiceChecking: Self = "ai-cue.service.checking"
     public static let aiCueServiceMissing: Self = "ai-cue.service.missing"
     public static let aiCueServiceConfigured: Self = "ai-cue.service.configured"
+    public static let aiCueServiceStoredVerified: Self = "ai-cue.service.stored-verified"
+    public static let aiCueServiceStoredDeferred: Self = "ai-cue.service.stored-deferred"
+    public static let aiCueServiceStoredRejected: Self = "ai-cue.service.stored-rejected"
+    public static let aiCueServicePendingReplacement: Self =
+        "ai-cue.service.pending-replacement"
     public static let aiCueServiceUnavailable: Self = "ai-cue.service.unavailable"
+    public static let aiCueProviderLabel: Self = "ai-cue.provider.label"
+    public static let aiCueProviderCapabilities: Self = "ai-cue.provider.capabilities"
+    public static let aiCueModalitySpeech: Self = "ai-cue.modality.speech"
+    public static let aiCueModalityAnimal: Self = "ai-cue.modality.animal"
+    public static let aiCueModalitySoundEffect: Self = "ai-cue.modality.sound-effect"
+    public static let aiCueModalityMixed: Self = "ai-cue.modality.mixed"
+    public static let aiCueCredentialProbing: Self = "ai-cue.credential.probing"
+    public static let aiCueCredentialSaving: Self = "ai-cue.credential.saving"
+    public static let aiCueCredentialUpdatingReplacement: Self =
+        "ai-cue.credential.updating-replacement"
+    public static let aiCueCredentialDeleting: Self = "ai-cue.credential.deleting"
     public static let aiCueConfigureKey: Self = "ai-cue.credential.configure"
     public static let aiCueManageKey: Self = "ai-cue.credential.manage"
     public static let aiCueCredentialTitle: Self = "ai-cue.credential.title"
     public static let aiCueCredentialKeyLabel: Self = "ai-cue.credential.key-label"
     public static let aiCueCredentialPrivacy: Self = "ai-cue.credential.privacy"
+    public static let aiCueCredentialPrivacyMiniMax: Self =
+        "ai-cue.credential.privacy.minimax"
+    public static let aiCueCredentialPrivacyQwenSingapore: Self =
+        "ai-cue.credential.privacy.qwen-singapore"
+    public static let aiCueCredentialPrivacyQwenBeijing: Self =
+        "ai-cue.credential.privacy.qwen-beijing"
     public static let aiCueCredentialKeychain: Self = "ai-cue.credential.keychain"
     public static let aiCueCredentialValidateSave: Self = "ai-cue.credential.validate-save"
+    public static let aiCueCredentialSave: Self = "ai-cue.credential.save"
+    public static let aiCueCredentialCancelReplacement: Self =
+        "ai-cue.credential.cancel-replacement"
     public static let aiCueCredentialDelete: Self = "ai-cue.credential.delete"
     public static let aiCueCredentialDeleteTitle: Self = "ai-cue.credential.delete-title"
     public static let aiCueCredentialDeleteMessage: Self = "ai-cue.credential.delete-message"
@@ -332,6 +366,13 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueCandidateBrisk: Self = "ai-cue.candidate.brisk"
     public static let aiCueCandidateRestrained: Self = "ai-cue.candidate.restrained"
     public static let aiCueCandidateDuration: Self = "ai-cue.candidate.duration"
+    public static let aiCueCandidatePlayAction: Self = "ai-cue.candidate.play-action"
+    public static let aiCueCandidateStopAction: Self = "ai-cue.candidate.stop-action"
+    public static let aiCueCandidatePlaybackStarted: Self = "ai-cue.candidate.playback-started"
+    public static let aiCueCandidatePlaybackStopped: Self = "ai-cue.candidate.playback-stopped"
+    public static let aiCueComposerClosed: Self = "ai-cue.composer.closed"
+    public static let aiCueComposerClosedCandidatesCleared: Self =
+        "ai-cue.composer.closed-candidates-cleared"
     public static let aiCueUseForEvent: Self = "ai-cue.use-for-event"
     public static let aiCueRegenerate: Self = "ai-cue.regenerate"
     public static let aiCueAppliedTitle: Self = "ai-cue.applied.title"
@@ -339,6 +380,9 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let aiCueErrorDescriptionRequired: Self = "ai-cue.error.description-required"
     public static let aiCueErrorDescriptionTooLong: Self = "ai-cue.error.description-too-long"
     public static let aiCueErrorSpeechNeedsText: Self = "ai-cue.error.speech-needs-text"
+    public static let aiCueErrorUnsupportedModality: Self =
+        "ai-cue.error.unsupported-modality"
+    public static let aiCueErrorUnsupportedLocale: Self = "ai-cue.error.unsupported-locale"
     public static let aiCueErrorCredentialRequired: Self = "ai-cue.error.credential-required"
     public static let aiCueErrorCredentialInvalid: Self = "ai-cue.error.credential-invalid"
     public static let aiCueErrorCredentialUnavailable: Self = "ai-cue.error.credential-unavailable"
@@ -363,7 +407,22 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksInvalidScope: Self = "window.sound-packs.invalid-scope"
     public static let soundPacksDamagedScope: Self = "window.sound-packs.damaged-scope"
     public static let eventSettingsTitle: Self = "event-settings.title"
+    public static let eventSettingsPreviewAll: Self = "event-settings.preview-all"
+    public static let eventSettingsPreviewAllHint: Self = "event-settings.preview-all.hint"
+    public static let eventSettingsStopPreviewAll: Self = "event-settings.preview-all.stop"
+    public static let eventSettingsStopPreviewAllHint: Self =
+        "event-settings.preview-all.stop.hint"
+    public static let eventSettingsPreviewAllFailure: Self =
+        "event-settings.preview-all.failure"
+    public static let eventSettingsAutomaticPlayback: Self =
+        "event-settings.automatic-playback"
+    public static let eventSettingsAutomaticPlaybackFor: Self =
+        "event-settings.automatic-playback-for"
+    public static let eventSettingsManageSounds: Self = "event-settings.manage-sounds"
+    public static let eventSettingsManageSoundsHint: Self = "event-settings.manage-sounds.hint"
     public static let eventSettingsWindowTitle: Self = "window.event-settings.title"
+    public static let eventSettingsUnavailableShortcutScope: Self =
+        "event-settings.shortcut-scope.unavailable"
     public static let integrationsWindowTitle: Self = "window.integrations.title"
     public static let settingsWindowTitle: Self = "window.settings.title"
     public static let settingsDestinationGeneral: Self = "settings.destination.general"
@@ -378,6 +437,63 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let settingsDestinationUsage: Self = "settings.destination.usage"
     public static let settingsDestinationShortcuts: Self = "settings.destination.shortcuts"
     public static let settingsDestinationAbout: Self = "settings.destination.about"
+    public static let settingsSidebarAdvanced: Self = "settings.sidebar.advanced"
+    public static let settingsSidebarProduct: Self = "settings.sidebar.product"
+    public static let settingsSidebarLocalFirst: Self = "settings.sidebar.local-first"
+    public static let settingsAnnouncementValue: Self = "settings.announcement.value"
+    public static let settingsAboutUnknown: Self = "settings.about.unknown"
+    public static let settingsAboutBrand: Self = "settings.about.brand"
+    public static let settingsAboutProduct: Self = "settings.about.product"
+    public static let settingsAboutVersion: Self = "settings.about.version"
+    public static let settingsAboutBuild: Self = "settings.about.build"
+    public static let settingsAboutArchitecture: Self = "settings.about.architecture"
+    public static let settingsAboutMinimumMacOS: Self = "settings.about.minimum-macos"
+    public static let settingsAboutCurrentMacOS: Self = "settings.about.current-macos"
+    public static let settingsAboutCopyVersion: Self = "settings.about.copy-version"
+    public static let settingsAboutCopyVersionHint: Self = "settings.about.copy-version.hint"
+    public static let settingsAboutResourcesTitle: Self = "settings.about.resources.title"
+    public static let settingsAboutResourcesDescription: Self =
+        "settings.about.resources.description"
+    public static let settingsAboutResourceOpenSourceLicense: Self =
+        "settings.about.resource.open-source-license"
+    public static let settingsAboutResourceSoundAttribution: Self =
+        "settings.about.resource.sound-attribution"
+    public static let settingsAboutResourcePrivacy: Self = "settings.about.resource.privacy"
+    public static let settingsAboutResourceMissing: Self = "settings.about.resource.missing"
+    public static let settingsAboutOpenResourceHint: Self = "settings.about.resource.open.hint"
+    public static let settingsAboutDiagnosticsTitle: Self = "settings.about.diagnostics.title"
+    public static let settingsAboutDiagnosticsDescription: Self =
+        "settings.about.diagnostics.description"
+    public static let settingsAboutCopyDiagnostics: Self = "settings.about.diagnostics.copy"
+    public static let settingsAboutCopyDiagnosticsHint: Self =
+        "settings.about.diagnostics.copy.hint"
+    public static let settingsAboutVersionCopied: Self = "settings.about.feedback.version-copied"
+    public static let settingsAboutDiagnosticsCopied: Self =
+        "settings.about.feedback.diagnostics-copied"
+    public static let settingsAboutClipboardFailed: Self = "settings.about.failure.clipboard"
+    public static let settingsAboutOpenFailed: Self = "settings.about.failure.open"
+    public static let settingsIntegrationsManageEvents: Self =
+        "settings.integrations.manage-events"
+    public static let settingsIntegrationsManageEventsHint: Self =
+        "settings.integrations.manage-events.hint"
+    /// One exported namespace avoids a separate public global for every Display leaf in the
+    /// size-constrained menu-bar executable.
+    public static let settingsDisplay = (
+        textSizeDescription: Self("settings.display.text-size.description"),
+        panelWidthTitle: Self("settings.display.panel-width.title"),
+        panelWidthDescription: Self("settings.display.panel-width.description"),
+        panelWidthAutomatic: Self("settings.display.panel-width.automatic"),
+        panelWidthCompact: Self("settings.display.panel-width.compact"),
+        panelWidthRoomy: Self("settings.display.panel-width.roomy"),
+        panelWidthClamped: Self("settings.display.panel-width.clamped"),
+        statusDotTitle: Self("settings.display.status-dot.title"),
+        statusDotDescription: Self("settings.display.status-dot.description"),
+        statusRunning: Self("menu-bar.status.running")
+    )
+    public static let settingsDisplayStatusDotEnabled: Self =
+        "settings.display.status-dot.enabled"
+    public static let settingsDisplayStatusDotDisabled: Self =
+        "settings.display.status-dot.disabled"
     public static let settingsGeneralLanguageTitle: Self = "settings.general.language.title"
     public static let settingsGeneralLanguageDescription: Self =
         "settings.general.language.description"
@@ -389,6 +505,182 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "settings.general.language.system-projection"
     public static let settingsGeneralPreferenceRecovery: Self =
         "settings.general.preference-recovery"
+    /// One exported namespace keeps this feature's catalog surface together without emitting a
+    /// separate public global symbol for every label in the size-constrained menu-bar executable.
+    public static let settingsGeneralLoginItem = (
+        description: Self("settings.general.login-item.description"),
+        toggle: Self("settings.general.login-item.toggle"),
+        hint: Self("settings.general.login-item.hint"),
+        disabled: Self("settings.general.login-item.status.disabled"),
+        enabled: Self("settings.general.login-item.status.enabled"),
+        requiresApproval: Self("settings.general.login-item.status.requires-approval"),
+        unavailable: Self("settings.general.login-item.status.unavailable"),
+        openSettings: Self("settings.general.login-item.open-settings"),
+        openSettingsHint: Self("settings.general.login-item.open-settings.hint"),
+        failureEnable: Self("settings.general.login-item.failure.enable"),
+        failureDisable: Self("settings.general.login-item.failure.disable"),
+        failureMissing: Self("settings.general.login-item.failure.missing")
+    )
+    public static let settingsNotificationsFocusTitle: Self =
+        "settings.notifications.focus.title"
+    public static let settingsNotificationsFocusDescription: Self =
+        "settings.notifications.focus.description"
+    public static let settingsNotificationsCalendarTitle: Self =
+        "settings.notifications.calendar.title"
+    public static let settingsNotificationsCalendarDescription: Self =
+        "settings.notifications.calendar.description"
+    public static let settingsNotificationsPermissionTitle: Self =
+        "settings.notifications.permission.title"
+    public static let settingsNotificationsCalendarPermissionTitle: Self =
+        "settings.notifications.calendar.permission.title"
+    public static let settingsNotificationsPermissionNotRequested: Self =
+        "settings.notifications.permission.not-requested"
+    public static let settingsNotificationsPermissionAuthorized: Self =
+        "settings.notifications.permission.authorized"
+    public static let settingsNotificationsPermissionDenied: Self =
+        "settings.notifications.permission.denied"
+    public static let settingsNotificationsPermissionRestricted: Self =
+        "settings.notifications.permission.restricted"
+    public static let settingsNotificationsCurrentReasonTitle: Self =
+        "settings.notifications.reason.title"
+    public static let settingsNotificationsReasonDisabled: Self =
+        "settings.notifications.reason.disabled"
+    public static let settingsNotificationsReasonPermissionRequired: Self =
+        "settings.notifications.reason.permission-required"
+    public static let settingsNotificationsReasonInactive: Self =
+        "settings.notifications.reason.inactive"
+    public static let settingsNotificationsReasonFocusActive: Self =
+        "settings.notifications.reason.focus-active"
+    public static let settingsNotificationsReasonCalendarBusy: Self =
+        "settings.notifications.reason.calendar-busy"
+    public static let settingsNotificationsReasonFocusAndCalendarBusy: Self =
+        "settings.notifications.reason.focus-and-calendar-busy"
+    public static let settingsNotificationsReasonObserverFailure: Self =
+        "settings.notifications.reason.observer-failure"
+    public static let settingsNotificationsSnapshotHealthTitle: Self =
+        "settings.notifications.snapshot-health.title"
+    public static let settingsNotificationsSnapshotCurrent: Self =
+        "settings.notifications.snapshot-health.current"
+    public static let settingsNotificationsSnapshotPublicationFailed: Self =
+        "settings.notifications.snapshot-health.publication-failed"
+    public static let settingsNotificationsSnapshotExpired: Self =
+        "settings.notifications.snapshot-health.expired"
+    public static let settingsNotificationsPublicationFailed: Self =
+        "settings.notifications.publication-failed"
+    public static let settingsNotificationsOpenCalendarPrivacy: Self =
+        "settings.notifications.open-calendar-privacy"
+    public static let settingsNotificationsOpenEvents: Self =
+        "settings.notifications.open-events"
+    public static let settingsNotificationsAnnouncementSummary: Self =
+        "settings.notifications.announcement.summary"
+    public static let settingsUsageDescription: Self = "settings.usage.description"
+    public static let settingsUsageScopeNotice: Self = "settings.usage.scope-notice"
+    public static let settingsUsageRefresh: Self = "settings.usage.refresh"
+    public static let settingsUsageHistoryTitle: Self = "settings.usage.history.title"
+    public static let settingsUsageSurfaceCount: Self = "settings.usage.history.surface-count"
+    public static let settingsUsageHistoryNone: Self = "settings.usage.history.none"
+    public static let settingsUsageHistoryMissing: Self = "settings.usage.history.missing"
+    public static let settingsUsageHistoryDamaged: Self = "settings.usage.history.damaged"
+    public static let settingsUsageHistoryUnreadable: Self = "settings.usage.history.unreadable"
+    public static let settingsUsageResultCount: Self = "settings.usage.history.result-count"
+    public static let settingsUsageLogTitle: Self = "settings.usage.log.title"
+    public static let settingsUsageLogDescription: Self = "settings.usage.log.description"
+    public static let settingsUsageLogAvailable: Self = "settings.usage.log.available"
+    public static let settingsUsageLogMissing: Self = "settings.usage.log.missing"
+    public static let settingsUsageLogDamaged: Self = "settings.usage.log.damaged"
+    public static let settingsUsageLogUnreadable: Self = "settings.usage.log.unreadable"
+    public static let settingsUsageLogNoFailures: Self = "settings.usage.log.no-failures"
+    public static let settingsUsageLogFailurePlaybackLaunch: Self =
+        "settings.usage.log.failure.playback-launch"
+    public static let settingsUsageLogFailurePlaybackLock: Self =
+        "settings.usage.log.failure.playback-lock"
+    public static let settingsUsageLogFailureReceiptWrite: Self =
+        "settings.usage.log.failure.receipt-write"
+    public static let settingsUsageLogFailureOther: Self = "settings.usage.log.failure.other"
+    public static let settingsUsageLogFailureUnknownEvent: Self =
+        "settings.usage.log.failure.unknown-event"
+    public static let settingsUsageLogFailureSummary: Self =
+        "settings.usage.log.failure.summary"
+    public static let settingsUsageRevealLog: Self = "settings.usage.log.reveal"
+    public static let settingsUsageCopyLogPath: Self = "settings.usage.log.copy-path"
+    public static let settingsUsageClearHistory: Self = "settings.usage.clear.history"
+    public static let settingsUsageClearLog: Self = "settings.usage.clear.log"
+    public static let settingsUsageClearHistoryTitle: Self =
+        "settings.usage.clear.history.title"
+    public static let settingsUsageClearHistoryMessage: Self =
+        "settings.usage.clear.history.message"
+    public static let settingsUsageClearLogTitle: Self = "settings.usage.clear.log.title"
+    public static let settingsUsageClearLogMessage: Self = "settings.usage.clear.log.message"
+    public static let settingsUsagePrivacyTitle: Self = "settings.usage.privacy.title"
+    public static let settingsUsagePrivacyHost: Self = "settings.usage.privacy.host"
+    public static let settingsUsagePrivacyProvider: Self = "settings.usage.privacy.provider"
+    public static let settingsUsagePrivacyBilling: Self = "settings.usage.privacy.billing"
+    public static let settingsUsageProviderDisclosure: Self =
+        "settings.usage.privacy.provider-disclosure"
+    public static let settingsUsageActionInProgress: Self = "settings.usage.action.in-progress"
+    public static let settingsUsageActionHistoryCleared: Self =
+        "settings.usage.action.history-cleared"
+    public static let settingsUsageActionLogCleared: Self = "settings.usage.action.log-cleared"
+    public static let settingsUsageActionLogRevealed: Self = "settings.usage.action.log-revealed"
+    public static let settingsUsageActionLogPathCopied: Self =
+        "settings.usage.action.log-path-copied"
+    public static let settingsUsageFailureHistoryLockBusy: Self =
+        "settings.usage.failure.history-lock-busy"
+    public static let settingsUsageFailureLogLockBusy: Self =
+        "settings.usage.failure.log-lock-busy"
+    public static let settingsUsageFailureHistoryClear: Self =
+        "settings.usage.failure.history-clear"
+    public static let settingsUsageFailureLogClear: Self = "settings.usage.failure.log-clear"
+    public static let settingsUsageFailureFinder: Self = "settings.usage.failure.finder"
+    public static let settingsUsageFailureClipboard: Self = "settings.usage.failure.clipboard"
+    public static let settingsShortcutsDescription: Self = "settings.shortcuts.description"
+    public static let settingsShortcutsRequirement: Self = "settings.shortcuts.requirement"
+    public static let settingsShortcutsActionTogglePanel: Self =
+        "settings.shortcuts.action.toggle-panel"
+    public static let settingsShortcutsActionTogglePanelDescription: Self =
+        "settings.shortcuts.action.toggle-panel.description"
+    public static let settingsShortcutsActionOpenSettings: Self =
+        "settings.shortcuts.action.open-settings"
+    public static let settingsShortcutsActionOpenSettingsDescription: Self =
+        "settings.shortcuts.action.open-settings.description"
+    public static let settingsShortcutsActionOpenCurrentScopeEvents: Self =
+        "settings.shortcuts.action.open-current-scope-events"
+    public static let settingsShortcutsActionOpenCurrentScopeEventsDescription: Self =
+        "settings.shortcuts.action.open-current-scope-events.description"
+    public static let settingsShortcutsUnassigned: Self = "settings.shortcuts.unassigned"
+    public static let settingsShortcutsCurrentValue: Self = "settings.shortcuts.current-value"
+    public static let settingsShortcutsRecord: Self = "settings.shortcuts.record"
+    public static let settingsShortcutsRecording: Self = "settings.shortcuts.recording"
+    public static let settingsShortcutsCancelRecording: Self =
+        "settings.shortcuts.cancel-recording"
+    public static let settingsShortcutsRecordLabel: Self = "settings.shortcuts.record.label"
+    public static let settingsShortcutsCancelRecordingLabel: Self =
+        "settings.shortcuts.cancel-recording.label"
+    public static let settingsShortcutsRecordHint: Self = "settings.shortcuts.record.hint"
+    public static let settingsShortcutsClear: Self = "settings.shortcuts.clear"
+    public static let settingsShortcutsClearLabel: Self = "settings.shortcuts.clear.label"
+    public static let settingsShortcutsFailureInvalidStoredValue: Self =
+        "settings.shortcuts.failure.invalid-stored-value"
+    public static let settingsShortcutsFailurePrimaryModifier: Self =
+        "settings.shortcuts.failure.primary-modifier"
+    public static let settingsShortcutsFailureUnsupportedKey: Self =
+        "settings.shortcuts.failure.unsupported-key"
+    public static let settingsShortcutsFailureSystemReserved: Self =
+        "settings.shortcuts.failure.system-reserved"
+    public static let settingsShortcutsFailureDuplicate: Self =
+        "settings.shortcuts.failure.duplicate"
+    public static let settingsShortcutsFailureConflict: Self =
+        "settings.shortcuts.failure.conflict"
+    public static let settingsShortcutsFailureRegistration: Self =
+        "settings.shortcuts.failure.registration"
+    public static let settingsShortcutsFailureUnregister: Self =
+        "settings.shortcuts.failure.unregister"
+    public static let settingsShortcutsFailurePersistence: Self =
+        "settings.shortcuts.failure.persistence"
+    public static let settingsShortcutsFailurePersistenceCleanup: Self =
+        "settings.shortcuts.failure.persistence-cleanup"
+    public static let settingsShortcutsFailureRollback: Self =
+        "settings.shortcuts.failure.rollback"
     public static let settingsRouteIdentity: Self = "settings.route.identity"
     public static let settingsRouteReady: Self = "settings.route.ready"
     public static let settingsRouteInvalidSurface: Self = "settings.route.invalid-surface"
@@ -491,9 +783,43 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksOriginalReadonly: Self = "sound-packs.original-readonly"
     public static let soundPacksAddAudio: Self = "sound-packs.add-audio"
     public static let soundPacksAddingAudio: Self = "sound-packs.adding-audio"
+    public static let soundPacksWritingChanges: Self = "sound-packs.writing-changes"
     public static let soundPacksAddAudioLabel: Self = "sound-packs.add-audio.label"
     public static let soundPacksImporting: Self = "sound-packs.importing"
     public static let soundPacksAddAudioHint: Self = "sound-packs.add-audio.hint"
+    public static let soundPacksPackDelete: Self = "sound-packs.pack-delete"
+    public static let soundPacksPackDeleteTitle: Self = "sound-packs.pack-delete.title"
+    public static let soundPacksPackDeleteMessage: Self = "sound-packs.pack-delete.message"
+    public static let soundPacksPackDeleteLabel: Self = "sound-packs.pack-delete.label"
+    public static let soundPacksPackDeleteHint: Self = "sound-packs.pack-delete.hint"
+    public static let soundPacksPackDeleteActive: Self = "sound-packs.pack-delete.active"
+    public static let soundPacksPackDeleteAvailable: Self = "sound-packs.pack-delete.available"
+    public static let soundPacksPackDeleteNoSelection: Self =
+        "sound-packs.pack-delete.error.no-selection"
+    public static let soundPacksPackDeleteSelectionChanged: Self =
+        "sound-packs.pack-delete.error.selection-changed"
+    public static let soundPacksPackDeleteUnsafeID: Self =
+        "sound-packs.pack-delete.error.unsafe-id"
+    public static let soundPacksPackDeleteBuiltin: Self =
+        "sound-packs.pack-delete.error.builtin"
+    public static let soundPacksPackDeleteErrorActive: Self =
+        "sound-packs.pack-delete.error.active"
+    public static let soundPacksPackDeleteConfigUnavailable: Self =
+        "sound-packs.pack-delete.error.config-unavailable"
+    public static let soundPacksPackDeleteNotFound: Self =
+        "sound-packs.pack-delete.error.not-found"
+    public static let soundPacksPackDeleteUnsafeEntry: Self =
+        "sound-packs.pack-delete.error.unsafe-entry"
+    public static let soundPacksPackDeleteFailed: Self =
+        "sound-packs.pack-delete.error.failed"
+    public static let soundPacksPackDeleteIsolationRetained: Self =
+        "sound-packs.pack-delete.error.isolation-retained"
+    public static let soundPacksPackDeleteTrashRetained: Self =
+        "sound-packs.pack-delete.error.trash-retained"
+    public static let soundPacksPackDeleteLockBusy: Self =
+        "sound-packs.pack-delete.error.lock-busy"
+    public static let soundPacksPackDeleteLockFailed: Self =
+        "sound-packs.pack-delete.error.lock-failed"
     public static let soundPacksUse: Self = "sound-packs.use"
     public static let soundPacksUseLabel: Self = "sound-packs.use.label"
     public static let soundPacksUseValue: Self = "sound-packs.use.value"
@@ -546,6 +872,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let soundPacksPackComplete: Self = "sound-packs.pack.complete"
     public static let soundPacksPackPartial: Self = "sound-packs.pack.partial"
     public static let soundPacksPackBroken: Self = "sound-packs.pack.broken"
+    public static let soundPacksPackManifestIdentityMismatch: Self =
+        "sound-packs.pack.manifest-identity-mismatch"
     public static let soundPacksPackModified: Self = "sound-packs.pack.modified"
     public static let soundPacksPanelVisible: Self = "sound-packs.pack.panel-visible"
     public static let soundPacksPackNotUsed: Self = "sound-packs.pack.not-used"
@@ -636,6 +964,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "sound-packs.status.action.restore-factory"
     public static let soundPacksStatusCopyPack: Self = "sound-packs.status.action.copy-pack"
     public static let soundPacksStatusUsePack: Self = "sound-packs.status.action.use-pack"
+    public static let soundPacksStatusDeletePack: Self = "sound-packs.status.action.delete-pack"
     public static let soundPacksStatusAudioImported: Self = "sound-packs.status.audio-imported"
     public static let soundPacksStatusAudioPartial: Self = "sound-packs.status.audio-partial"
     public static let soundPacksStatusBatchRestored: Self = "sound-packs.status.batch-restored"
@@ -649,6 +978,7 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "sound-packs.status.factory-restored.salvage"
     public static let soundPacksStatusPackCopied: Self = "sound-packs.status.pack-copied"
     public static let soundPacksStatusPackUsed: Self = "sound-packs.status.pack-used"
+    public static let soundPacksStatusPackTrashed: Self = "sound-packs.status.pack-trashed"
 
     public static let onboardingClaudeCodeNotInstalledTitle: Self =
         "onboarding.claude-code-not-installed.title"
@@ -731,36 +1061,122 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .panelCapabilityPartial, .panelCapabilityUnsupported,
         .panelCapabilitySupportedNotImplemented, .panelCapabilityPartialNotImplemented,
         .panelCapabilityUnsupportedNotImplemented, .hostDetailsHint,
-        .aiCueGenerateAction, .aiCueGenerateHint, .aiCueServiceTitle, .aiCueServiceSubtitle,
+        .aiCueGenerateAction, .aiCueGenerateHint, .aiCueProviderProfileElevenLabsGlobal,
+        .aiCueProviderProfileMiniMaxGlobal, .aiCueProviderProfileQwenSingapore,
+        .aiCueProviderProfileQwenBeijing, .aiCueServiceTitle, .aiCueServiceSubtitle,
         .aiCueServiceChecking, .aiCueServiceMissing, .aiCueServiceConfigured,
-        .aiCueServiceUnavailable, .aiCueConfigureKey, .aiCueManageKey, .aiCueCredentialTitle,
-        .aiCueCredentialKeyLabel, .aiCueCredentialPrivacy, .aiCueCredentialKeychain,
-        .aiCueCredentialValidateSave, .aiCueCredentialDelete, .aiCueCredentialDeleteTitle,
+        .aiCueServiceStoredVerified, .aiCueServiceStoredDeferred, .aiCueServiceStoredRejected,
+        .aiCueServicePendingReplacement, .aiCueServiceUnavailable, .aiCueProviderLabel,
+        .aiCueProviderCapabilities, .aiCueModalitySpeech, .aiCueModalityAnimal,
+        .aiCueModalitySoundEffect, .aiCueModalityMixed, .aiCueCredentialProbing,
+        .aiCueCredentialSaving, .aiCueCredentialUpdatingReplacement, .aiCueCredentialDeleting,
+        .aiCueConfigureKey,
+        .aiCueManageKey, .aiCueCredentialTitle,
+        .aiCueCredentialKeyLabel, .aiCueCredentialPrivacy, .aiCueCredentialPrivacyMiniMax,
+        .aiCueCredentialPrivacyQwenSingapore, .aiCueCredentialPrivacyQwenBeijing,
+        .aiCueCredentialKeychain, .aiCueCredentialValidateSave, .aiCueCredentialSave,
+        .aiCueCredentialCancelReplacement, .aiCueCredentialDelete,
+        .aiCueCredentialDeleteTitle,
         .aiCueCredentialDeleteMessage, .aiCueEligibilityGlobal, .aiCueEligibilityBuiltin,
         .aiCueEligibilityShared, .aiCueEligibilityUnavailable, .aiCueComposerTitle,
         .aiCueStageDescription, .aiCueStageCandidates, .aiCueDescriptionLabel,
         .aiCueDescriptionHelp, .aiCueDescriptionPlaceholder, .aiCueGenerateCandidates,
         .aiCueGenerating, .aiCueDescriptionSummary, .aiCueModifyDescription, .aiCueNameLabel,
         .aiCueNameHelp, .aiCueCandidateClear, .aiCueCandidateBrisk, .aiCueCandidateRestrained,
-        .aiCueCandidateDuration, .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle,
+        .aiCueCandidateDuration, .aiCueCandidatePlayAction, .aiCueCandidateStopAction,
+        .aiCueCandidatePlaybackStarted, .aiCueCandidatePlaybackStopped, .aiCueComposerClosed,
+        .aiCueComposerClosedCandidatesCleared,
+        .aiCueUseForEvent, .aiCueRegenerate, .aiCueAppliedTitle,
         .aiCueAppliedMessage,
         .aiCueErrorDescriptionRequired, .aiCueErrorDescriptionTooLong,
-        .aiCueErrorSpeechNeedsText, .aiCueErrorCredentialRequired,
+        .aiCueErrorSpeechNeedsText, .aiCueErrorUnsupportedModality,
+        .aiCueErrorUnsupportedLocale, .aiCueErrorCredentialRequired,
         .aiCueErrorCredentialInvalid, .aiCueErrorCredentialUnavailable, .aiCueErrorCredits,
         .aiCueErrorRateLimited, .aiCueErrorAudioInvalid, .aiCueErrorGeneration,
         .aiCueErrorNameRequired, .aiCueErrorNameInvalid, .aiCueErrorAdoptionTarget,
         .aiCueErrorAdoptionPartial, .aiCueErrorAdoption,
         .soundPacksWindowTitle, .soundPacksManagingScope, .soundPacksInvalidScope,
         .soundPacksDamagedScope,
-        .eventSettingsTitle, .eventSettingsWindowTitle, .integrationsWindowTitle,
+        .eventSettingsTitle, .eventSettingsPreviewAll, .eventSettingsPreviewAllHint,
+        .eventSettingsStopPreviewAll, .eventSettingsStopPreviewAllHint,
+        .eventSettingsPreviewAllFailure,
+        .eventSettingsAutomaticPlayback, .eventSettingsAutomaticPlaybackFor,
+        .eventSettingsManageSounds,
+        .eventSettingsManageSoundsHint, .eventSettingsWindowTitle,
+        .eventSettingsUnavailableShortcutScope,
+        .integrationsWindowTitle,
         .settingsWindowTitle, .settingsDestinationGeneral, .settingsDestinationIntegrations,
         .settingsDestinationEventsAndSounds, .settingsDestinationNotifications,
         .settingsDestinationDisplay, .settingsDestinationSounds, .settingsDestinationUsage,
-        .settingsDestinationShortcuts, .settingsDestinationAbout, .settingsGeneralLanguageTitle,
+        .settingsDestinationShortcuts, .settingsDestinationAbout,
+        .settingsSidebarAdvanced, .settingsSidebarProduct, .settingsSidebarLocalFirst,
+        .settingsAnnouncementValue,
+        .settingsIntegrationsManageEvents, .settingsIntegrationsManageEventsHint,
+        .settingsAboutUnknown, .settingsAboutBrand, .settingsAboutProduct,
+        .settingsAboutVersion, .settingsAboutBuild, .settingsAboutArchitecture,
+        .settingsAboutMinimumMacOS, .settingsAboutCurrentMacOS,
+        .settingsAboutCopyVersion, .settingsAboutCopyVersionHint,
+        .settingsAboutResourcesTitle, .settingsAboutResourcesDescription,
+        .settingsAboutResourceOpenSourceLicense, .settingsAboutResourceSoundAttribution,
+        .settingsAboutResourcePrivacy, .settingsAboutResourceMissing,
+        .settingsAboutOpenResourceHint, .settingsAboutDiagnosticsTitle,
+        .settingsAboutDiagnosticsDescription, .settingsAboutCopyDiagnostics,
+        .settingsAboutCopyDiagnosticsHint, .settingsAboutVersionCopied,
+        .settingsAboutDiagnosticsCopied, .settingsAboutClipboardFailed,
+        .settingsAboutOpenFailed,
+        settingsDisplay.textSizeDescription, settingsDisplay.panelWidthTitle,
+        settingsDisplay.panelWidthDescription, settingsDisplay.panelWidthAutomatic,
+        settingsDisplay.panelWidthCompact, settingsDisplay.panelWidthRoomy,
+        settingsDisplay.panelWidthClamped, settingsDisplay.statusDotTitle,
+        settingsDisplay.statusDotDescription, settingsDisplay.statusRunning,
+        .settingsDisplayStatusDotEnabled, .settingsDisplayStatusDotDisabled,
+        .settingsGeneralLanguageTitle,
         .settingsGeneralLanguageDescription, .settingsGeneralLanguageSystem,
         .settingsGeneralLanguageChinese, .settingsGeneralLanguageEnglish,
         .settingsGeneralLanguageHint, .settingsGeneralSystemProjection,
-        .settingsGeneralPreferenceRecovery, .settingsRouteIdentity,
+        .settingsGeneralPreferenceRecovery, settingsGeneralLoginItem.description,
+        settingsGeneralLoginItem.toggle,
+        settingsGeneralLoginItem.hint, settingsGeneralLoginItem.disabled,
+        settingsGeneralLoginItem.enabled, settingsGeneralLoginItem.requiresApproval,
+        settingsGeneralLoginItem.unavailable, settingsGeneralLoginItem.openSettings,
+        settingsGeneralLoginItem.openSettingsHint, settingsGeneralLoginItem.failureEnable,
+        settingsGeneralLoginItem.failureDisable, settingsGeneralLoginItem.failureMissing,
+        .settingsNotificationsFocusTitle,
+        .settingsNotificationsFocusDescription, .settingsNotificationsCalendarTitle,
+        .settingsNotificationsCalendarDescription, .settingsNotificationsPermissionTitle,
+        .settingsNotificationsCalendarPermissionTitle,
+        .settingsNotificationsPermissionNotRequested,
+        .settingsNotificationsPermissionAuthorized, .settingsNotificationsPermissionDenied,
+        .settingsNotificationsPermissionRestricted, .settingsNotificationsCurrentReasonTitle,
+        .settingsNotificationsReasonDisabled,
+        .settingsNotificationsReasonPermissionRequired, .settingsNotificationsReasonInactive,
+        .settingsNotificationsReasonFocusActive, .settingsNotificationsReasonCalendarBusy,
+        .settingsNotificationsReasonFocusAndCalendarBusy,
+        .settingsNotificationsReasonObserverFailure, .settingsNotificationsSnapshotHealthTitle,
+        .settingsNotificationsSnapshotCurrent,
+        .settingsNotificationsSnapshotPublicationFailed,
+        .settingsNotificationsSnapshotExpired,
+        .settingsNotificationsPublicationFailed,
+        .settingsNotificationsOpenCalendarPrivacy, .settingsNotificationsOpenEvents,
+        .settingsNotificationsAnnouncementSummary,
+        .settingsShortcutsDescription, .settingsShortcutsRequirement,
+        .settingsShortcutsActionTogglePanel, .settingsShortcutsActionTogglePanelDescription,
+        .settingsShortcutsActionOpenSettings, .settingsShortcutsActionOpenSettingsDescription,
+        .settingsShortcutsActionOpenCurrentScopeEvents,
+        .settingsShortcutsActionOpenCurrentScopeEventsDescription,
+        .settingsShortcutsUnassigned, .settingsShortcutsCurrentValue,
+        .settingsShortcutsRecord, .settingsShortcutsRecording,
+        .settingsShortcutsCancelRecording, .settingsShortcutsRecordLabel,
+        .settingsShortcutsCancelRecordingLabel, .settingsShortcutsRecordHint,
+        .settingsShortcutsClear, .settingsShortcutsClearLabel,
+        .settingsShortcutsFailureInvalidStoredValue,
+        .settingsShortcutsFailurePrimaryModifier, .settingsShortcutsFailureUnsupportedKey,
+        .settingsShortcutsFailureSystemReserved,
+        .settingsShortcutsFailureDuplicate, .settingsShortcutsFailureConflict,
+        .settingsShortcutsFailureRegistration, .settingsShortcutsFailureUnregister,
+        .settingsShortcutsFailurePersistence,
+        .settingsShortcutsFailurePersistenceCleanup, .settingsShortcutsFailureRollback,
+        .settingsRouteIdentity,
         .settingsRouteReady, .settingsRouteInvalidSurface, .settingsRouteStaleSurface,
         .settingsRouteStaleScope, .settingsRouteStaleEvent, .settingsRouteInvalidPack,
         .settingsRouteStalePack,
@@ -788,8 +1204,20 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksReveal, .soundPacksRevealLabel, .soundPacksRevealHint, .soundPacksRestore,
         .soundPacksRestorePackLabel, .soundPacksBuiltinValue, .soundPacksRestorePackHint,
         .soundPacksCopy, .soundPacksCopyLabel, .soundPacksOriginalReadonly,
-        .soundPacksAddAudio, .soundPacksAddingAudio, .soundPacksAddAudioLabel,
-        .soundPacksImporting, .soundPacksAddAudioHint, .soundPacksUse, .soundPacksUseLabel,
+        .soundPacksAddAudio, .soundPacksAddingAudio, .soundPacksWritingChanges,
+        .soundPacksAddAudioLabel,
+        .soundPacksImporting, .soundPacksAddAudioHint,
+        .soundPacksPackDelete, .soundPacksPackDeleteTitle, .soundPacksPackDeleteMessage,
+        .soundPacksPackDeleteLabel, .soundPacksPackDeleteHint,
+        .soundPacksPackDeleteActive, .soundPacksPackDeleteAvailable,
+        .soundPacksPackDeleteNoSelection, .soundPacksPackDeleteSelectionChanged,
+        .soundPacksPackDeleteUnsafeID, .soundPacksPackDeleteBuiltin,
+        .soundPacksPackDeleteErrorActive, .soundPacksPackDeleteConfigUnavailable,
+        .soundPacksPackDeleteNotFound, .soundPacksPackDeleteUnsafeEntry,
+        .soundPacksPackDeleteFailed, .soundPacksPackDeleteIsolationRetained,
+        .soundPacksPackDeleteTrashRetained, .soundPacksPackDeleteLockBusy,
+        .soundPacksPackDeleteLockFailed,
+        .soundPacksUse, .soundPacksUseLabel,
         .soundPacksUseValue, .soundPacksUseHint, .soundPacksEmptyLoadingMessage,
         .soundPacksEmptyLoadFailedMessage, .soundPacksEmptyFactoryMessage,
         .soundPacksEmptyRestore, .soundPacksEmptyRestoreLabel, .soundPacksEmptyRestoreValue,
@@ -806,7 +1234,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksOrphanAssignHint, .soundPacksOrphanDelete, .soundPacksOrphanDeleteLabel,
         .soundPacksOrphanDeleteValue, .soundPacksOrphanDeleteHint, .soundPacksCoverageUnmapped,
         .soundPacksCoverageBroken, .soundPacksPackActive, .soundPacksPackComplete,
-        .soundPacksPackPartial, .soundPacksPackBroken, .soundPacksPackModified,
+        .soundPacksPackPartial, .soundPacksPackBroken, .soundPacksPackManifestIdentityMismatch,
+        .soundPacksPackModified,
         .soundPacksPanelVisible, .soundPacksPackNotUsed, .soundPacksEventPresent,
         .soundPacksEventUnmapped, .soundPacksEventBroken, .soundPacksOperationFailed,
         .soundPacksActionFailed, .soundPacksAnnouncementWindowLoading,
@@ -832,12 +1261,13 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksBuiltinCopyHelp, .soundPacksCanChooseFile, .soundPacksStatusBackground,
         .soundPacksStatusAddAudio, .soundPacksStatusUpdateStars,
         .soundPacksStatusRestoreBuiltins, .soundPacksStatusRestoreFactory,
-        .soundPacksStatusCopyPack, .soundPacksStatusUsePack,
+        .soundPacksStatusCopyPack, .soundPacksStatusUsePack, .soundPacksStatusDeletePack,
         .soundPacksStatusAudioImported, .soundPacksStatusAudioPartial,
         .soundPacksStatusBatchRestored, .soundPacksStatusBatchRestoredWithSalvage,
         .soundPacksStatusBatchPartial, .soundPacksStatusBatchPartialWithSalvage,
         .soundPacksStatusFactoryRestored, .soundPacksStatusFactoryRestoredWithSalvage,
         .soundPacksStatusPackCopied, .soundPacksStatusPackUsed,
+        .soundPacksStatusPackTrashed,
         .hostReady, .hostConfigured, .hostLegacy, .hostNotConnected, .hostNeedsAttention,
         .hostCodexReadyDetail, .hostCodexAwaitingDetail,
         .hostClaudeAwaitingDetail, .hostClaudeLegacyDetail, .hostCodexLegacyDetail,
@@ -896,6 +1326,27 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .feedbackOperationFailed, .feedbackReceipt, .feedbackDisconnected,
         .feedbackConnectedReceipt, .feedbackAwaitingConfirmation, .feedbackRepairedWaiting,
         .feedbackConfiguredWaiting, .feedbackHostStateUpdated, .feedbackReceiptHistoryCleared,
+        .settingsUsageDescription, .settingsUsageScopeNotice, .settingsUsageRefresh,
+        .settingsUsageHistoryTitle, .settingsUsageSurfaceCount, .settingsUsageHistoryNone,
+        .settingsUsageHistoryMissing, .settingsUsageHistoryDamaged,
+        .settingsUsageHistoryUnreadable, .settingsUsageResultCount, .settingsUsageLogTitle,
+        .settingsUsageLogDescription, .settingsUsageLogAvailable, .settingsUsageLogMissing,
+        .settingsUsageLogDamaged, .settingsUsageLogUnreadable,
+        .settingsUsageLogNoFailures, .settingsUsageLogFailurePlaybackLaunch,
+        .settingsUsageLogFailurePlaybackLock, .settingsUsageLogFailureReceiptWrite,
+        .settingsUsageLogFailureOther, .settingsUsageLogFailureUnknownEvent,
+        .settingsUsageLogFailureSummary, .settingsUsageRevealLog,
+        .settingsUsageCopyLogPath, .settingsUsageClearHistory, .settingsUsageClearLog,
+        .settingsUsageClearHistoryTitle, .settingsUsageClearHistoryMessage,
+        .settingsUsageClearLogTitle, .settingsUsageClearLogMessage,
+        .settingsUsagePrivacyTitle, .settingsUsagePrivacyHost,
+        .settingsUsagePrivacyProvider, .settingsUsagePrivacyBilling,
+        .settingsUsageProviderDisclosure, .settingsUsageActionInProgress,
+        .settingsUsageActionHistoryCleared, .settingsUsageActionLogCleared,
+        .settingsUsageActionLogRevealed, .settingsUsageActionLogPathCopied,
+        .settingsUsageFailureHistoryLockBusy, .settingsUsageFailureLogLockBusy,
+        .settingsUsageFailureHistoryClear, .settingsUsageFailureLogClear,
+        .settingsUsageFailureFinder, .settingsUsageFailureClipboard,
     ]
 }
 

@@ -15,8 +15,6 @@ struct IntegrationsWindowView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.colorScheme) private var colorScheme
-    @AppStorage(ClaudioInterfaceTextSize.defaultsKey)
-    private var interfaceTextSizeRaw = ClaudioInterfaceTextSize.defaultValue.rawValue
     @FocusState private var focusedTarget: IntegrationsWindowFocusTarget?
     @State private var handledFocusRequestRevision = 0
     @State private var feedbackAnnouncer = IntegrationsFeedbackAnnouncementModel()
@@ -187,7 +185,10 @@ struct IntegrationsWindowView: View {
             Text(l10n.format(.integrationsClearReceiptHistoryMessage, host.displayName))
         }
         .onReceive(focusCoordinator.$requestRevision) { revision in
-            guard revision > handledFocusRequestRevision else { return }
+            guard
+                revision > handledFocusRequestRevision,
+                focusCoordinator.consumeRequest(revision)
+            else { return }
             handledFocusRequestRevision = revision
             applyInitialFocus()
         }
@@ -206,18 +207,19 @@ struct IntegrationsWindowView: View {
     private func sideBySideContent(width: CGFloat) -> some View {
         let inspectorWidth = max(300, width * 0.39)
         let capabilityWidth = max(0, width - inspectorWidth - 41)
-        return HStack(spacing: 0) {
-            ScrollView(.vertical, showsIndicators: true) {
-                capabilitySection(availableWidth: capabilityWidth).padding(20)
+        return ScrollView(.vertical, showsIndicators: true) {
+            HStack(alignment: .top, spacing: 0) {
+                capabilitySection(availableWidth: capabilityWidth)
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+                Divider()
+                inspectorSection
+                    .padding(20)
+                    .frame(width: inspectorWidth, alignment: .topLeading)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            ScrollView(.vertical, showsIndicators: true) {
-                inspectorSection.padding(20)
-            }
-            .frame(width: inspectorWidth)
-            .frame(maxHeight: .infinity)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .accessibilityIdentifier("integrations.main-scroll")
     }
 
     private func stackedContent(width: CGFloat) -> some View {
@@ -230,6 +232,7 @@ struct IntegrationsWindowView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(20)
         }
+        .accessibilityIdentifier("integrations.main-scroll")
     }
 
     private var sourceSummary: some View {
@@ -783,7 +786,14 @@ struct IntegrationsWindowView: View {
     }
 
     private func applyInitialFocus() {
-        focusedTarget = integrationsWindowFocusOrder(focusScope).first
+        let order = integrationsWindowFocusOrder(focusScope)
+        if let requestedTarget = focusCoordinator.requestedTarget,
+            order.contains(requestedTarget)
+        {
+            focusedTarget = requestedTarget
+        } else {
+            focusedTarget = order.first
+        }
     }
 
     private func reconcileFocusWithVisibleControls() {
@@ -793,9 +803,7 @@ struct IntegrationsWindowView: View {
         }
     }
 
-    private var interfaceTextSize: ClaudioInterfaceTextSize {
-        ClaudioInterfaceTextSize(storedValue: interfaceTextSizeRaw)
-    }
+    private var interfaceTextSize: ClaudioInterfaceTextSize { languageStore.interfaceTextSize }
 
     private var typeSizeTier: IntegrationsWindowTypeSizeTier {
         interfaceTextSize == .maximum ? .maximum : .standard

@@ -25,10 +25,15 @@ fi
 gui_build() {
     if [[ "$GUI_NATIVE_HOST_CARD_PROBE" == true ]]; then
         swift build -c release --package-path "$repo_root/gui" --product ClaudioGUI \
-            -Xswiftc -DCLAUDIO_NATIVE_HOST_CARD_PROBE "$@"
+            -Xswiftc -Osize -Xswiftc -DCLAUDIO_NATIVE_HOST_CARD_PROBE "$@"
     else
-        swift build -c release --package-path "$repo_root/gui" --product ClaudioGUI "$@"
+        swift build -c release --package-path "$repo_root/gui" --product ClaudioGUI \
+            -Xswiftc -Osize "$@"
     fi
+}
+
+login_item_build() {
+    swift build -c release --package-path "$repo_root/gui" --product ClaudioLoginItem "$@"
 }
 
 find_unique_gui_resource_bundle() {
@@ -65,6 +70,9 @@ assemble_dev_bundle() {
     local GUI_RESOURCE_BUNDLE
     local HELPER_BINARY
     local HELPER_BIN_DIR
+    local LOGIN_ITEM_APP
+    local LOGIN_ITEM_BIN_DIR
+    local LOGIN_ITEM_BINARY
     local LOCALIZATION_BUNDLE
 
     # 建之前先清旧 bundle：若下面任一 `swift build` 因编译错误退出（set -e），旧 app
@@ -74,6 +82,7 @@ assemble_dev_bundle() {
     # 两个 `--product` 都不是可省的修饰：裸 `swift build -c release` 会连各自的测试
     # executable 一起建，而测试会引用 `#if DEBUG` 门控的 fixture，Release 下编译不过。
     gui_build
+    login_item_build
     swift build -c release --package-path "$repo_root/helper" --product claudio
 
     GUI_BIN_DIR="$(gui_build --show-bin-path)"
@@ -85,6 +94,9 @@ assemble_dev_bundle() {
     cp "$GUI_BIN_DIR/ClaudioGUI" "$APP/Contents/MacOS/claudi0-app"
     cp -R "$GUI_RESOURCE_BUNDLE" "$APP/Contents/Resources/$(basename "$GUI_RESOURCE_BUNDLE")"
     cp -R "$LOCALIZATION_BUNDLE" "$APP/Contents/Resources/$(basename "$LOCALIZATION_BUNDLE")"
+    cp -R "$repo_root/gui/AppResources/en.lproj" "$APP/Contents/Resources/en.lproj"
+    cp -R "$repo_root/gui/AppResources/zh-Hans.lproj" \
+        "$APP/Contents/Resources/zh-Hans.lproj"
     HELPER_BIN_DIR="$(swift build -c release --package-path "$repo_root/helper" \
         --product claudio --show-bin-path)"
     HELPER_BINARY="$HELPER_BIN_DIR/claudio"
@@ -103,6 +115,8 @@ assemble_dev_bundle() {
     ln -s claudi0 "$APP/Contents/Resources/bin/claudio"
     bash "$repo_root/scripts/copy-bundled-packs.sh" "$repo_root/packs" \
         "$APP/Contents/Resources/packs"
+    cp "$repo_root/LICENSE" "$APP/Contents/Resources/LICENSE"
+    cp "$repo_root/PRIVACY.md" "$APP/Contents/Resources/PRIVACY.md"
     cp "$repo_root/assets/branding/claudi0.icns" "$APP/Contents/Resources/claudi0.icns"
 
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -112,6 +126,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <dict>
   <key>CFBundleName</key><string>claudi0</string>
   <key>CFBundleDisplayName</key><string>claudi0</string>
+  <key>ClaudioBrandName</key><string>Orbit Zero</string>
   <key>CFBundleIdentifier</key><string>com.claudio.app</string>
   <key>CFBundleVersion</key><string>$BUNDLE_VERSION</string>
   <key>CFBundleShortVersionString</key><string>$BUNDLE_VERSION</string>
@@ -119,17 +134,38 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIconFile</key><string>claudi0.icns</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>12.0</string>
+  <key>NSFocusStatusUsageDescription</key><string>claudi0 uses only whether Focus is active to temporarily quiet automatic sounds. It never stores the Focus name.</string>
+  <key>NSCalendarsUsageDescription</key><string>claudi0 checks only whether a non-all-day busy event is active to temporarily quiet automatic sounds. It never stores event details.</string>
+  <key>NSCalendarsFullAccessUsageDescription</key><string>claudi0 checks only whether a non-all-day busy event is active to temporarily quiet automatic sounds. It never stores event details.</string>
   <key>LSUIElement</key><true/>
 </dict>
 </plist>
 PLIST
     printf 'APPL????' > "$APP/Contents/PkgInfo"
 
-    strip -x "$APP/Contents/MacOS/claudi0-app" "$APP/Contents/Resources/bin/claudi0"
+    LOGIN_ITEM_BIN_DIR="$(login_item_build --show-bin-path)"
+    LOGIN_ITEM_BINARY="$LOGIN_ITEM_BIN_DIR/ClaudioLoginItem"
+    bash "$repo_root/scripts/assemble-login-item.sh" \
+        "$LOGIN_ITEM_BINARY" "$APP" "$BUNDLE_VERSION"
+    LOGIN_ITEM_APP="$APP/Contents/Library/LoginItems/claudi0 LoginItem.app"
+
+    # The SwiftUI executable exports a large Swift symbol table that the app never loads by name.
+    # Strip it completely before the size gate; helper/LoginItem keep their existing external
+    # symbols because they are separate release contracts with their own budgets.
+    strip "$APP/Contents/MacOS/claudi0-app"
+    strip -x \
+        "$APP/Contents/Resources/bin/claudi0" \
+        "$LOGIN_ITEM_APP/Contents/MacOS/claudi0-login-item"
     bash "$repo_root/scripts/check-release-size.sh" "$APP"
 
-    codesign --force --deep --sign - "$APP"
-    codesign --verify --verbose "$APP"
+    codesign --force --sign - "$APP/Contents/Resources/bin/claudi0"
+    codesign --force --sign - "$LOGIN_ITEM_APP"
+    codesign \
+        --force \
+        --entitlements "$repo_root/gui/ClaudioGUI.entitlements" \
+        --sign - \
+        "$APP"
+    codesign --verify --deep --strict --verbose "$APP"
     echo "✅ dist/${APP}（$(uname -m)）—— 用 open dist/${APP} 启动（菜单栏出现 Orbit Zero 图标）"
 }
 

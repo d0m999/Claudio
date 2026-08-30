@@ -72,6 +72,36 @@ func runLogSuites() {
         }
     }
 
+    suite("parseRecentLogEntries：复用调用方已完成 bounded read 的同一份字节快照") {
+        let data = Data(
+            ("broken\n"
+                + "2023-11-14T22:13:20Z\tstop\tafplay 启动失败：/private/path\n"
+                + "2023-11-14T22:13:21Z\ttask_start\t回执写入失败（lock_busy）\n").utf8)
+        let entries = parseRecentLogEntries(data, maxLines: 1)
+        expect(entries.count == 1, "bounded 字节 parser 仍须跳过损坏行并遵守 maxLines")
+        expect(
+            entries.first?.event == "task_start"
+                && entries.first?.reason == "回执写入失败（lock_busy）",
+            "bounded 字节 parser 必须返回最近一条完整记录，不得重新打开路径")
+    }
+
+    suite("LogEntry redaction：自由文本 reason 只投影固定失败分类") {
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        let entries = [
+            LogEntry(timestamp: timestamp, event: "stop", reason: "afplay 启动失败：/private/bin"),
+            LogEntry(timestamp: timestamp, event: "stop", reason: "play.lock 获取失败（errno 5）"),
+            LogEntry(timestamp: timestamp, event: "stop", reason: "回执写入失败（lock_busy）"),
+            LogEntry(
+                timestamp: timestamp,
+                event: "stop",
+                reason: "Authorization Bearer secret /Users/private/audio.wav"),
+        ]
+        expect(
+            entries.map(\.redactedFailureCategory)
+                == [.playbackLaunch, .playbackLock, .receiptWrite, .other],
+            "Usage 只能消费固定 category；未知或敏感 reason 必须收敛为 other")
+    }
+
     suite("readRecentLogEntries returns entries oldest-to-newest, capped at maxLines") {
         withTempDirectory { root in
             let logFile = root.appendingPathComponent("claudio.log")

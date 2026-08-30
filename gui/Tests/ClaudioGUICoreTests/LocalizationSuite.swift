@@ -1,3 +1,4 @@
+import ClaudioGUICore
 import ClaudioLocalization
 import Foundation
 
@@ -71,6 +72,15 @@ func runLocalizationSuites() {
             chinese.text(.soundPacksPackNotUsed) == "未使用"
                 && english.text(.soundPacksPackNotUsed) == "Not in use",
             "pack accessibility values must not expose removed pinning state")
+        expect(
+            localizedSoundPackLibraryReason(
+                "sound-pack-library.manifest-identity-mismatch",
+                language: .zhHans) == "manifest 声音包 ID 与所在文件夹不一致"
+                && localizedSoundPackLibraryReason(
+                    "sound-pack-library.manifest-identity-mismatch",
+                    language: .english)
+                    == "The manifest sound pack ID does not match its folder",
+            "manifest identity mismatch must use catalog copy in both product languages")
 
         let axUnavailableQualification = ClaudioL10nKey(
             rawValue: "qualification.accessibility-beta-unavailable")
@@ -91,6 +101,32 @@ func runLocalizationSuites() {
                 && english.text(.aiCueCredentialPrivacy)
                     == "Your sound description and generation instructions are sent directly to ElevenLabs. ElevenLabs may charge your account for generation. Retention and model-improvement use follow your ElevenLabs account and their terms.",
             "首次保存凭据前，两种语言必须同时披露直连、潜在费用与供应商数据边界")
+        expect(
+            !chinese.text(.aiCueCredentialPrivacyMiniMax).contains("ElevenLabs")
+                && !english.text(.aiCueCredentialPrivacyMiniMax).contains("ElevenLabs")
+                && chinese.text(.aiCueCredentialPrivacyQwenSingapore).contains("新加坡")
+                && english.text(.aiCueCredentialPrivacyQwenSingapore).contains("Singapore")
+                && chinese.text(.aiCueCredentialPrivacyQwenBeijing).contains("北京")
+                && english.text(.aiCueCredentialPrivacyQwenBeijing).contains("Beijing"),
+            "MiniMax/Qwen 必须逐 profile 披露供应商与 region，不能推广 ElevenLabs 条款")
+        expect(
+            chinese.format(
+                .aiCueProviderCapabilities,
+                "\(chinese.text(.aiCueModalitySpeech))，\(chinese.text(.aiCueModalityAnimal))")
+                == "支持能力：语音，动物叫声"
+                && english.format(
+                    .aiCueProviderCapabilities,
+                    "\(english.text(.aiCueModalitySpeech)), \(english.text(.aiCueModalityAnimal))")
+                    == "Capabilities: speech, animal calls",
+            "Provider 能力必须由可组合的双语 modality 文案和语言对应分隔符投影")
+        expect(
+            !chinese.text(.aiCueErrorCredentialRequired).contains("ElevenLabs")
+                && !english.text(.aiCueErrorCredentialRequired).contains("ElevenLabs")
+                && !chinese.text(.aiCueErrorCredits).contains("ElevenLabs")
+                && !english.text(.aiCueErrorCredits).contains("ElevenLabs")
+                && !chinese.text(.aiCueErrorRateLimited).contains("ElevenLabs")
+                && !english.text(.aiCueErrorRateLimited).contains("ElevenLabs"),
+            "共享 credential/额度/限流错误不得把一家供应商名称推广到其他 profile")
         expect(
             chinese.text(.aiCueEligibilityGlobal) == "请选择一个明确的事件来源，以隔离生成声音。"
                 && english.text(.aiCueEligibilityGlobal)

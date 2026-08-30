@@ -4,8 +4,9 @@
 
 - `claudi0-app`：每架构最多 `5,500,000 B`；
 - `claudi0` helper：每架构最多 `3,250,000 B`；
+- macOS 12 内嵌 `claudi0-login-item`：每架构最多 `500,000 B`；
 - app 内其余正规文件合计预留 `1,000,000 B`；
-- GUI 与 helper 必须包含相同架构；`Contents/Resources/bin/claudio` 必须是精确指向同目录 `claudi0` 的相对符号链接。
+- GUI、helper 与 LoginItem 必须包含相同架构；`Contents/Resources/bin/claudio` 必须是精确指向同目录 `claudi0` 的相对符号链接。LoginItem 的固定 bundle identity、executable 和 macOS 12 floor 也会在签名前失败关闭。
 
 ## 2026-08-06 基线
 

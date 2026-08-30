@@ -23,6 +23,24 @@ public struct LogEntry: Sendable, Equatable {
     }
 }
 
+/// The only diagnostic failure detail a UI may project. The free-form ``LogEntry/reason``
+/// remains a doctor/log implementation detail and must not cross into Usage presentation state.
+public enum LogFailureCategory: String, Sendable, Equatable, CaseIterable {
+    case playbackLaunch
+    case playbackLock
+    case receiptWrite
+    case other
+}
+
+extension LogEntry {
+    public var redactedFailureCategory: LogFailureCategory {
+        if reason.hasPrefix("afplay ") { return .playbackLaunch }
+        if reason.hasPrefix("play.lock ") { return .playbackLock }
+        if reason.hasPrefix("回执写入失败") { return .receiptWrite }
+        return .other
+    }
+}
+
 /// Tab-delimited so `doctor`'s tail-read never has to guess where the timestamp/event end
 /// and the free-form (possibly Chinese-prose) reason begins — a `reason` string is never
 /// expected to itself contain a literal tab.
@@ -122,8 +140,17 @@ private func rawAppend(_ line: String, to logFile: URL) -> Bool {
 /// `doctor`).
 public func readRecentLogEntries(from logFile: URL, maxLines: Int = 5) -> [LogEntry] {
     guard let data = try? Data(contentsOf: logFile),
-        let text = String(data: data, encoding: .utf8)
+        !data.isEmpty
     else { return [] }
+
+    return parseRecentLogEntries(data, maxLines: maxLines)
+}
+
+/// Parses an already bounded log snapshot. Usage settings calls this only after
+/// ``readRegularFileBounded(at:maxBytes:followSymlink:)`` has accepted one regular-file
+/// snapshot, so it can summarize diagnostics without reopening an unbounded or replaced path.
+public func parseRecentLogEntries(_ data: Data, maxLines: Int = 5) -> [LogEntry] {
+    guard maxLines > 0, let text = String(data: data, encoding: .utf8) else { return [] }
 
     let formatter = makeLogTimestampFormatter()
     let lines = text.split(separator: "\n", omittingEmptySubsequences: true)

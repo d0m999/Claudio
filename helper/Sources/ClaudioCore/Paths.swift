@@ -167,6 +167,28 @@ public enum ClaudioPaths {
         root.appendingPathComponent("bootstrap-journal.json")
     }
 
+    /// GUI 发布、helper 只消费的短期动态静默事实。目录与文件均不承载 Focus 名称、宿主内容或
+    /// 个人路径；独立目录使权限与跨进程 revision 水位不污染 config / receipt 语义。
+    public static var dynamicQuietDirectory: URL {
+        dynamicQuietPaths.directory
+    }
+
+    public static var dynamicQuietSnapshotFile: URL {
+        dynamicQuietPaths.snapshotFile
+    }
+
+    public static var dynamicQuietRevisionStateFile: URL {
+        dynamicQuietPaths.revisionStateFile
+    }
+
+    public static var dynamicQuietLockFile: URL {
+        dynamicQuietPaths.lockFile
+    }
+
+    private static var dynamicQuietPaths: DynamicQuietPaths {
+        DynamicQuietPaths(rootDirectory: root)
+    }
+
     public static var receiptLocksDirectory: URL {
         integrationsDirectory.appendingPathComponent("receipt-locks", isDirectory: true)
     }

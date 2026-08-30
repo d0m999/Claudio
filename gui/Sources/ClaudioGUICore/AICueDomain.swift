@@ -1,16 +1,6 @@
 import ClaudioCore
 import Foundation
 
-public struct AICueProviderID: RawRepresentable, Hashable, Codable, Sendable {
-    public let rawValue: String
-
-    public init(rawValue: String) {
-        self.rawValue = rawValue
-    }
-
-    public static let elevenLabs = AICueProviderID(rawValue: "elevenlabs")
-}
-
 public enum AICueValidationError: Error, Sendable, Equatable {
     case emptyDescription
     case descriptionTooLong(maximumCharacters: Int)
@@ -18,7 +8,7 @@ public enum AICueValidationError: Error, Sendable, Equatable {
     case emptyDisplayName
     case displayNameTooLong(maximumCharacters: Int)
     case displayNameContainsControlCharacters
-    case spokenContentRequiresQuotes
+    case spokenContentRequired(example: String)
     case unsafePackID
 }
 
@@ -31,9 +21,13 @@ public struct AICueGenerationRequest: Sendable, Equatable {
     public let locale: String
     public let candidateCount: Int
     public let maximumDurationMilliseconds: Int
-    public let providerID: AICueProviderID
+    public let providerProfileID: AICueProviderProfileID
 
-    public init(description: String, locale: String) throws {
+    public init(
+        description: String,
+        locale: String,
+        providerProfileID: AICueProviderProfileID
+    ) throws {
         let normalizedDescription = description.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedDescription.isEmpty else {
             throw AICueValidationError.emptyDescription
@@ -56,7 +50,7 @@ public struct AICueGenerationRequest: Sendable, Equatable {
         self.locale = normalizedLocale
         candidateCount = Self.candidateCount
         maximumDurationMilliseconds = Self.maximumDurationMilliseconds
-        providerID = .elevenLabs
+        self.providerProfileID = providerProfileID
     }
 }
 
@@ -140,24 +134,26 @@ public struct AICueSoundPlan: Sendable, Equatable {
 /// interpretation cannot silently add cost, and Event/surface/pack context never enters it.
 public struct AICueSoundPlanner: Sendable {
     public static let instructionVersion = "ai-cue-plan-v1"
+    public static let spokenContentExample = "清晰地说“任务完成”"
 
     public init() {}
 
     public func makePlan(for request: AICueGenerationRequest) throws -> AICueSoundPlan {
         let description = request.description
-        let spokenContent = quotedContent(in: description)
+        let quotation = quotedContent(in: description)
+        let spokenContent = quotation.content
         let lowered = description.lowercased()
-        let speechDetectionText = [
-            "不要人声", "无人声", "不要语音", "no voice", "without voice", "without speech",
-        ].reduce(lowered) { partial, marker in
+        let speechDetectionText = speechNegationMarkers.reduce(lowered) { partial, marker in
             partial.replacingOccurrences(of: marker, with: "")
         }
-        let speechIntent = spokenContent != nil || containsAny(speechDetectionText, speechMarkers)
+        let speechIntent =
+            quotation.wasPresent || containsAny(speechDetectionText, speechMarkers)
         let animalIntent = containsAny(lowered, animalMarkers)
         let effectIntent = containsAny(lowered, effectMarkers)
 
         if speechIntent && spokenContent == nil {
-            throw AICueValidationError.spokenContentRequiresQuotes
+            throw AICueValidationError.spokenContentRequired(
+                example: Self.spokenContentExample)
         }
 
         let modality: AICueModality
@@ -188,7 +184,9 @@ public struct AICueSoundPlanner: Sendable {
             soundDescription: description,
             spokenContent: spokenContent,
             languageTag: speechIntent ? request.locale : nil,
-            styleDescription: description,
+            styleDescription: styleDescription(
+                in: description,
+                excluding: quotation.range),
             targetDurationMilliseconds: min(
                 duration,
                 request.maximumDurationMilliseconds),
@@ -196,8 +194,11 @@ public struct AICueSoundPlanner: Sendable {
     }
 
     private let speechMarkers = [
-        "说“", "说\"", "说出", "朗读", "念出", "人声", "语音", "voice", "say ", "spoken",
-        "speech",
+        "说", "朗读", "念出", "人声", "语音", "voice", "say ", "spoken", "speech",
+    ]
+    private let speechNegationMarkers = [
+        "不要人声", "无人声", "不要语音", "不要说话", "不说话", "没有说话", "无需说话",
+        "no voice", "without voice", "without speech",
     ]
     private let animalMarkers = [
         "小猫", "猫叫", "猫咪", "小狗", "狗叫", "犬吠", "鸟叫", "鸟鸣", "动物", "meow", "bark",
@@ -212,10 +213,16 @@ public struct AICueSoundPlanner: Sendable {
         markers.contains(where: value.contains)
     }
 
-    private func quotedContent(in description: String) -> String? {
-        let pairs: [(Character, Character)] = [("“", "”"), ("「", "」"), ("『", "』"), ("\"", "\"")]
+    private func quotedContent(
+        in description: String
+    ) -> (content: String?, range: Range<String.Index>?, wasPresent: Bool) {
+        let pairs: [(Character, Character)] = [
+            ("“", "”"), ("‘", "’"), ("「", "」"), ("『", "』"), ("\"", "\""),
+        ]
+        var sawOpening = false
         for (opening, closing) in pairs {
             guard let openingIndex = description.firstIndex(of: opening) else { continue }
+            sawOpening = true
             let contentStart = description.index(after: openingIndex)
             guard
                 let closingIndex = description[contentStart...].firstIndex(of: closing),
@@ -223,9 +230,28 @@ public struct AICueSoundPlanner: Sendable {
             else { continue }
             let content = description[contentStart..<closingIndex]
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !content.isEmpty { return content }
+            if !content.isEmpty {
+                return (
+                    content,
+                    openingIndex..<description.index(after: closingIndex),
+                    true
+                )
+            }
         }
-        return nil
+        return (nil, nil, sawOpening)
+    }
+
+    private func styleDescription(
+        in description: String,
+        excluding spokenQuotationRange: Range<String.Index>?
+    ) -> String {
+        guard let spokenQuotationRange else { return description }
+        var style = description
+        style.removeSubrange(spokenQuotationRange)
+        return
+            style
+            .split(whereSeparator: \.isWhitespace)
+            .joined(separator: " ")
     }
 
     private func suggestedName(
@@ -253,93 +279,6 @@ public struct AICueSoundPlanner: Sendable {
     private func limitedName(_ value: String) -> String {
         let limit = min(16, AICueDisplayName.maximumCharacters)
         return String(value.prefix(limit))
-    }
-}
-
-public enum ElevenLabsAICueRoute: String, Sendable, Equatable {
-    case textToSpeech
-    case soundGeneration
-}
-
-public struct ElevenLabsAICueCompiledRequest: Sendable, Equatable {
-    public let route: ElevenLabsAICueRoute
-    public let modelID: String
-    public let voiceID: String?
-    public let prompt: String
-    public let targetDurationMilliseconds: Int
-    public let promptInfluence: Double?
-    public let variant: AICueVariant
-}
-
-public struct ElevenLabsAICueRequestCompiler: Sendable {
-    public static let speechModelID = "eleven_v3"
-    public static let soundEffectModelID = "eleven_text_to_sound_v2"
-    public static let speechVoiceID = "JBFqnCBsd6RMkjVDRZzb"
-
-    public init() {}
-
-    public func compile(
-        plan: AICueSoundPlan,
-        variant: AICueVariant
-    ) -> ElevenLabsAICueCompiledRequest {
-        switch plan.modality {
-        case .speech:
-            return speechRequest(plan: plan, variant: variant, includesEffect: false)
-        case .mixed:
-            return speechRequest(plan: plan, variant: variant, includesEffect: true)
-        case .animal, .soundEffect:
-            return soundEffectRequest(plan: plan, variant: variant)
-        }
-    }
-
-    private func speechRequest(
-        plan: AICueSoundPlan,
-        variant: AICueVariant,
-        includesEffect: Bool
-    ) -> ElevenLabsAICueCompiledRequest {
-        let speech = plan.spokenContent ?? ""
-        let styleTag: String
-        switch variant {
-        case .clear: styleTag = "[clear]"
-        case .brisk: styleTag = "[cheerful]"
-        case .restrained: styleTag = "[calm]"
-        }
-        let effectTag = includesEffect ? "[sound effect: \(plan.soundDescription)] " : ""
-        return ElevenLabsAICueCompiledRequest(
-            route: .textToSpeech,
-            modelID: Self.speechModelID,
-            voiceID: Self.speechVoiceID,
-            prompt: "\(effectTag)\(styleTag) \(speech)",
-            targetDurationMilliseconds: plan.targetDurationMilliseconds,
-            promptInfluence: nil,
-            variant: variant)
-    }
-
-    private func soundEffectRequest(
-        plan: AICueSoundPlan,
-        variant: AICueVariant
-    ) -> ElevenLabsAICueCompiledRequest {
-        let variation: String
-        let influence: Double
-        switch variant {
-        case .clear:
-            variation = "主体清晰，干净，无背景音乐"
-            influence = 0.8
-        case .brisk:
-            variation = "节奏稍轻快，起音明确，无背景音乐"
-            influence = 0.65
-        case .restrained:
-            variation = "克制、柔和、短促，无背景音乐"
-            influence = 0.9
-        }
-        return ElevenLabsAICueCompiledRequest(
-            route: .soundGeneration,
-            modelID: Self.soundEffectModelID,
-            voiceID: nil,
-            prompt: "\(plan.soundDescription)。\(variation)。总时长不超过 3 秒。",
-            targetDurationMilliseconds: plan.targetDurationMilliseconds,
-            promptInfluence: influence,
-            variant: variant)
     }
 }
 

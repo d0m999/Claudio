@@ -99,6 +99,9 @@ public struct PlayEnvironment: Sendable {
     /// so tests that redirect `logFile` to a temp directory can never fall through to the
     /// real `ClaudioPaths.logLockFile` on the host machine.
     public let logLockFile: URL
+    /// GUI 发布的短期动态静默事实。默认从 `configFile` 的 Claudio 根派生，使注入临时
+    /// config 的测试不会意外读取真实 `~/.claudio`；生产默认仍精确落到 `ClaudioPaths`。
+    public let dynamicQuietEnvironment: DynamicQuietReadEnvironment
     /// 新版双宿主 hook 的脱敏回执需要区分「已尝试且成功启动」与「启动失败」。legacy
     /// ``playSoundEvent`` 的公开 outcome 仍保持 `.played` 兼容语义；只有显式注入的观察者收到
     /// 这一位真实结果，且绝不接收音频路径、提示词或会话数据。
@@ -118,6 +121,7 @@ public struct PlayEnvironment: Sendable {
         now: @escaping @Sendable () -> Date = { Date() },
         logFile: URL = ClaudioPaths.logFile,
         logLockFile: URL = ClaudioPaths.logLockFile,
+        dynamicQuietEnvironment: DynamicQuietReadEnvironment? = nil,
         spawnResultObserver: (@Sendable (Bool) -> Void)? = nil
     ) {
         self.surfaceID = surfaceID
@@ -133,6 +137,15 @@ public struct PlayEnvironment: Sendable {
         self.now = now
         self.logFile = logFile
         self.logLockFile = logLockFile
+        let dynamicQuietPaths = DynamicQuietPaths(
+            rootDirectory: configFile.deletingLastPathComponent())
+        self.dynamicQuietEnvironment =
+            dynamicQuietEnvironment
+            ?? DynamicQuietReadEnvironment(
+                snapshotFile: dynamicQuietPaths.snapshotFile,
+                revisionStateFile: dynamicQuietPaths.revisionStateFile,
+                lockFile: dynamicQuietPaths.lockFile,
+                now: now)
         self.spawnResultObserver = spawnResultObserver
     }
 }
@@ -152,6 +165,9 @@ public enum PlayOutcome: Sendable, Equatable {
     case unknownEvent
     /// `ClaudioConfig.isEnabled(event) == false` — the user muted this event.
     case disabled(event: Event)
+    /// A valid, current Dynamic Quiet snapshot suppressed this automatic playback. Manual GUI
+    /// preview never calls this helper path and therefore cannot produce this outcome.
+    case dynamicQuiet(event: Event)
     /// Config missing/unreadable, pack unresolved, manifest unreadable/unmapped, or the
     /// declared audio file missing on disk — all silent "nothing to play yet" states
     /// (fresh install / incomplete pack), collapsed into one case because `play` reacts
@@ -194,23 +210,19 @@ public func playSoundEvent(
 ) -> PlayOutcome {
     guard let event = Event(cliName: eventName) else { return .unknownEvent }
     let preparation: PreparedPlay
-    if let config = loadPlayConfig(from: environment.configFile) {
-        switch config.resolveSoundProfile(for: environment.surfaceID) {
-        case .failure:
-            preparation = .silent(.notReady)
-        case .success(let profile):
-            if !profile.isEnabled(event) {
-                preparation = .silent(.disabled(event: event))
-            } else if let audioFile = resolveAudioFile(
-                for: event, packID: profile.selectedPack, environment: environment)
-            {
-                preparation = .ready(config: config, audioFile: audioFile)
-            } else {
-                preparation = .silent(.notReady)
-            }
-        }
-    } else {
-        preparation = .silent(.notReady)
+    switch dynamicQuietDecision(environment: environment.dynamicQuietEnvironment) {
+    case .quiet:
+        preparation = .silent(.dynamicQuiet(event: event))
+    case .rejected(let diagnostic):
+        appendLogLine(
+            event: event.cliName,
+            reason: "dynamic_quiet_snapshot_\(diagnostic.rawValue)",
+            timestamp: environment.now(),
+            to: environment.logFile,
+            lockFile: environment.logLockFile)
+        preparation = prepareConfiguredPlay(event: event, environment: environment)
+    case .inactive:
+        preparation = prepareConfiguredPlay(event: event, environment: environment)
     }
 
     if case .silent(let outcome) = preparation,
@@ -220,6 +232,29 @@ public func playSoundEvent(
     }
 
     return performDebouncedPlay(event: event, preparation: preparation, environment: environment)
+}
+
+private func prepareConfiguredPlay(
+    event: Event,
+    environment: PlayEnvironment
+) -> PreparedPlay {
+    if let config = loadPlayConfig(from: environment.configFile) {
+        switch config.resolveSoundProfile(for: environment.surfaceID) {
+        case .failure:
+            return .silent(.notReady)
+        case .success(let profile):
+            if !profile.isEnabled(event) {
+                return .silent(.disabled(event: event))
+            } else if let audioFile = resolveAudioFile(
+                for: event, packID: profile.selectedPack, environment: environment)
+            {
+                return .ready(config: config, audioFile: audioFile)
+            } else {
+                return .silent(.notReady)
+            }
+        }
+    }
+    return .silent(.notReady)
 }
 
 private enum PreparedPlay {

@@ -1,17 +1,20 @@
 # PLAN — 统一设置体验完整实施计划
 
-> 状态：**规格已完成；统一设置迁移的 Swift 实施尚未开始**
+> 状态：**统一设置迁移、allowlisted 多 Provider Swift 实现与自动合同已落地；原生 UI、VoiceOver、真实 Provider、双架构、签名、公证与发布仍未验证**
 >
 > 日期：2026-08-26
 >
 > 范围：把当前分散的集成、事件、声音包与零散偏好收口到一个原生 macOS 统一设置窗口，
 > 完整交付「通用、集成、事件与提示音、通知、显示、声音、用量、快捷键、关于」九个设置目的页。
+> 完整九页产品验收由 GitHub #85 及其子 tickets 拥有；#103 只拥有本文、ADR、执行计划与原型的
+> allowlisted 多 Provider SoT 对齐。Swift registry、transport、credentials、adapters 与 production UI
+> 分别由 #104–#109 及 #85 的设置子 tickets 拥有；任何真实凭据或 Provider smoke 仍需单独授权。
 >
 > 视觉原型 SoT：
-> `mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts&stage=applied&credential=ready`
+> `mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts&profile=elevenlabs-global&stage=applied&credential=verified`
 >
-> AI 提示音的 provider、凭据、候选与采用契约仍由
-> `plan/PLAN-CONSUMER-TTS-EXECUTION.md` 定义；本计划负责把它迁入统一设置体验，并完成周边页面。
+> AI 提示音的 Provider/profile、凭据、候选与采用领域合同由
+> `plan/PLAN-CONSUMER-TTS-EXECUTION.md` 定义；本计划固定其统一设置投影并完成周边页面。
 
 ## 0. 目标与完成定义
 
@@ -66,13 +69,13 @@
 
 | 原型内容 | 生产决议 | 原因 |
 |---|---|---|
-| 侧栏底部「本地优先 · 无网络客户端」 | 改为「本地优先」；AI 页另行披露 BYOK 直连 | ElevenLabs 生成会按用户动作联网，不能继续声称无网络客户端 |
+| 侧栏底部「本地优先 · 无网络客户端」 | 改为「本地优先」；AI 页按 profile 披露 BYOK 直连 | allowlisted Provider 会按用户动作联网，不能继续声称无网络客户端 |
 | 以 App/Agent 作为事件配置身份 | 按宿主产品分组，选择稳定事件来源 `HostSurfaceID` | 产品不直接拥有统一事件能力；Surface 才拥有协议、配置、授权和回执代次 |
 | 「全屏时隐藏」 | 从生产规格删除 | 没有可靠公开 API 判断其他 app 的全屏状态；引入 AX/屏幕读取不符合该偏好的价值与隐私成本 |
 | 「空闲时自动隐藏」状态项 | 从生产规格删除 | claudi0 是无 Dock 的菜单栏 app，隐藏唯一入口会让用户无法主动重新打开 |
 | 通知页重复任务开始/响应结束/待响应开关 | 事件开关只留在「事件与提示音」；通知页负责动态静默策略 | 避免同一事件出现两个表面相同、优先级不明的开关 |
 | 「会议期间静音」 | 精确改名为「日历忙碌时静音」 | 不读取标题猜测会议；只在授权后把当前非全天 busy 事件视为静默事实 |
-| 用量页「0 B 网络上传」 | 改为隐私边界说明，不显示伪精确字节数 | 宿主内容不上报，但用户显式 AI 生成会向 ElevenLabs 发送描述并接收音频 |
+| 用量页「0 B 网络上传」 | 改为隐私边界说明，不显示伪精确字节数 | 宿主内容不上报，但用户显式 AI 生成会与所选 Provider 交换描述和音频 |
 | 声音页两个演示包 | 显示完整声音包库与唯一映射编辑器 | 原型行只是视觉样例，不能取代真实库状态、错误和安全写入 |
 | 快捷键中的全局试听/静音 | v1 只提供目标明确的打开面板、打开设置、打开当前作用域事件页 | 全局试听没有稳定事件目标；全局静音曾被明确删除，不能借快捷键暗中复活 |
 | 快捷键/关于占位页 | 补齐下述真实规格 | 导航骨架不构成功能完成 |
@@ -249,18 +252,107 @@ Codex `4/5` 与 WorkBuddy `2/5` 是诚实正常能力，不得为了填满原型
 - 主音量保持唯一全局轴；Surface 只写稀疏 pack/event 覆盖；损坏覆盖 fail closed；
 - AI 入口只对明确 Surface、已实现事件和独立可编辑用户包开放；Global、内置/共享/陈旧包显示原因。
 
-AI 可见流程严格保持：
+AI 可见流程固定为：
 
-1. 页面级配置/替换/删除 ElevenLabs BYOK；
-2. 第一阶段只输入声音描述，不输入名称；
-3. 本地隐藏的 `AICueSoundPlan` 路由固定模型，顺序请求三个候选；
+~~~text
+选择 Provider/profile -> 描述 -> 显式生成 -> 3 个候选和命名 -> 显式采用
+~~~
+
+1. 页面级选择 allowlisted profile，并配置、替换或删除当前 profile 的 BYOK；
+2. 第一阶段只输入声音描述，不输入名称；保存或替换 API Key 后不自动生成；
+3. 本地隐藏的 `AICueSoundPlan` 按当前 profile 的固定 route 编译，顺序请求三个候选；
 4. 候选完整通过校验后一起显示，不自动播放；
 5. 候选阶段建议并允许修改一个最终名称；
 6. 用户明确采用后才进入现有 `AudioImport` + manifest bind；失败保留旧声音。
 
-验收：覆盖 prompt、interpreting、generating、candidates、playing、adopting、applied、credential missing、
-provider failure、validation failure、target drift 和 adoption rollback；原型 `stage=applied&credential=ready` 是视觉基准，
-不是真实 provider 证据。
+选择 profile、scope、Event 或离开页面会取消并清理未采用候选，已采用声音不受影响。保存凭据后返回
+原表单并保留描述与 profile；用户必须再次显式点击生成。
+
+#### 5.3.1 首批 Provider/profile 目录
+
+用户只能选择以下四个注册 profile；默认 `elevenlabs-global`。UI 不提供任意 endpoint、model、voice
+或 region 输入，不自动 fallback、跨区或跨 Provider 重试。`routes.keys` 是 capability 的唯一真相；
+界面能力标签和本地阻止逻辑都从它投影。
+
+| Profile | 固定 origin/path | Auth / credential slot | 固定 model、voice、输出 | `routes.keys` / locale | Validation |
+|---|---|---|---|---|---|
+| `elevenlabs-global` | `https://api.elevenlabs.io`；probe `GET /v1/models`；speech/mixed `POST /v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb`；animal/soundEffect `POST /v1/sound-generation` | `xi-api-key`；旧 account `elevenlabs` | `eleven_v3` + `JBFqnCBsd6RMkjVDRZzb`；`eleven_text_to_sound_v2`；直接 MP3 | `speech`、`mixed`、`animal`、`soundEffect`；`zh` / `zh-Hans` / `en` | `readOnlyProbe` |
+| `minimax-global` | `https://api.minimax.io`；probe `POST /v1/get_voice`；生成 `POST /v1/t2a_v2` | Bearer；`minimax-global` | `speech-2.8-hd` + `Chinese (Mandarin)_Reliable_Executive`；32 kHz / 128 kbps / mono MP3；JSON hex | 仅 `speech`；`zh` / `zh-Hans` | `readOnlyProbe` |
+| `qwen-singapore` | `https://dashscope-intl.aliyuncs.com`；生成 `POST /api/v1/services/aigc/multimodal-generation/generation`；`X-DashScope-SSE: enable` | Bearer；`qwen-singapore` | `qwen3-tts-instruct-flash` + `Cherry`；SSE Base64 PCM，24 kHz / 16-bit / mono / little-endian，封装 WAV | 仅 `speech`；`zh* -> Chinese`、`en* -> English` | `deferredUntilExplicitGeneration` |
+| `qwen-beijing` | `https://dashscope.aliyuncs.com`；path/header 同 Singapore | Bearer；`qwen-beijing` | 与 Singapore 相同 | 仅 `speech`；与 Singapore 相同 | `deferredUntilExplicitGeneration` |
+
+MiniMax/Qwen 不显示 animal、soundEffect 或 mixed 为可生成；不支持 modality/locale 时保留描述，在读取
+credential 或发网络前显示可修正错误。Qwen Singapore/Beijing 是两个独立 region profile 和 Keychain
+slot，不能交叉读取 key。
+
+#### 5.3.2 逐 profile 凭据状态与动作
+
+页面级服务卡同时投影 profile 选择与当前 profile 状态；不显示 key 内容。每个 profile 独立拥有：
+
+- `missing`；
+- `stored(verified | deferred | rejected)`；
+- `unavailable`；
+- activity：`probing`、`saving`、`pendingReplacement`、`deleting`。
+
+“Keychain 可读”“已保存”和“在线验证成功”是不同事实：
+
+| Policy | 首次保存 / 替换 | 成功文案 | 失败与旧 key |
+|---|---|---|---|
+| ElevenLabs/MiniMax `readOnlyProbe` | “验证并保存”/“验证并替换”；先调用只读 probe，再原子写 Keychain | “已验证并保存” | probe 或写入失败保留旧 active key，显示失败原因 |
+| Qwen `deferredUntilExplicitGeneration` | “保存 API Key”；首次保存写 stored-unverified active，已有 active 时替换才写 pending；均不发模型请求 | “已保存，待首次生成验证”；显式生成成功后首次 active 标记 verified 或 pending 提升为 active | pending replacement 可取消并恢复原 active 的验证状态；仅 pending 的明确 401 丢弃 pending 并保留旧 active，权限、额度、429/5xx、网络或取消不能伪装成 key 无效，也不自动用旧 key 重试 |
+
+未配置当前 profile 时点击生成，保留描述与 profile 选择并打开凭据界面；保存后返回原表单，用户必须
+再次点击生成。删除前二次确认，只删除当前 profile 的 active/pending credential；其他 profile 和已采用
+声音保持不变。ElevenLabs 继续直接使用 legacy account `elevenlabs`，没有迁移 UI。
+
+#### 5.3.3 逐 profile 披露
+
+首次配置每个 profile 前分别显示：
+
+| Profile | 本机直连、地区与数据 | 费用/配额与验证语义 |
+|---|---|---|
+| `elevenlabs-global` | 本机直连 ElevenLabs global origin；发送描述、隐藏规范化结果与生成元数据；供应商留存和模型改进规则适用 | 生成可能消耗 ElevenLabs 配额；list-models probe 不生成音频，成功只证明该 key 通过此次只读检查 |
+| `minimax-global` | 本机直连 MiniMax global origin；首批 Mandarin speech；供应商数据处理规则独立适用 | T2A 可能消耗 MiniMax 配额；get-voice probe 不生成音频，不能用 ElevenLabs 状态代替 |
+| `qwen-singapore` | 本机直连新加坡 DashScope origin；只使用此 region 的独立 key；供应商新加坡地区处理规则适用 | 保存 key 不发模型请求、生成费用为零；下一次显式生成才验证并可能计费 |
+| `qwen-beijing` | 本机直连北京 DashScope origin；不复用 Singapore key；供应商北京地区处理规则适用 | 与 Singapore 相同的 deferred 语义，但两地配额、权限和 smoke 证据互不替代 |
+
+Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算费用。API Key 只存 macOS Keychain；
+不得进入设置、日志、receipt、manifest、截图或仓库。描述、隐藏声音计划、provider 响应和候选音频也
+遵循 `PLAN-CONSUMER-TTS-EXECUTION.md` 的最小化与临时清理边界。
+
+#### 5.3.4 原型状态与证据分层
+
+多 Provider Events 原型路径为：
+
+`mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts`
+
+原型同时显示四个 profile，并允许用 `profile`、`credential` 和 `scenario` query 演示：
+
+- `profile=elevenlabs-global&credential=verified`
+- `profile=minimax-global&credential=missing`
+- `profile=qwen-singapore&credential=deferred`
+- `profile=qwen-beijing&credential=unavailable`
+- `credential=rejected|pending` 用于拒绝和 pending replacement 状态。
+- `profile=minimax-global&scenario=unsupported-modality|unsupported-locale` 用于能力/语言本地阻止状态。
+- 旧 `credential=ready` 只在缺省、显式或未知 `profile` 最终回落到 `elevenlabs-global` 时兼容为
+  `verified`；对 MiniMax/Qwen 忽略该旧别名并保留各自固定 fixture 状态。
+
+选择 MiniMax/Qwen 后用非 speech 描述可见地展示 unsupported modality；MiniMax 使用 English 台词时
+展示 unsupported locale。原型只模拟状态，不联网、不持久化，也不得接收真实 key。旧的单 Provider
+页面或截图只能作为 ElevenLabs 核心闭环历史参考，不是多 Provider UI SoT。
+
+验收必须覆盖 prompt、interpreting、generating、candidates、playing、adopting、applied、逐 profile
+credential missing/unavailable/rejected/pending、unsupported modality/locale、provider failure、validation
+failure、target drift 和 adoption rollback。文档与原型中的四个 profile 必须保持 exact origin/path、
+auth、model/voice、输出、locale、routes、credential slot 与 validation policy 一致；MiniMax/Qwen 只有
+`speech`，ElevenLabs 保留四类 route，所有 UI capability 从 `routes.keys` 派生。
+
+自动 fixture、静态原型和本地 bundle 只能证明相应合同与投影。真实 key、真实/付费 Provider smoke、
+真实音频质量、native macOS UI、键盘/焦点、VoiceOver、双架构、签名、公证和发布都需要分别授权和
+记录；一个 Provider 或地区的结果不能替代另一个。
+
+详细 AI 领域、transport 和音频安全合同见 `plan/PLAN-CONSUMER-TTS-EXECUTION.md`；决策摘要见
+`docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md`。
 
 ### 5.4 通知
 
@@ -328,7 +420,7 @@ adoption 和 route resolution；不得同时保留可写的 standalone 与 embed
 ### 5.7 用量
 
 用户结果：查看本机当前保留范围内的脱敏活动与诊断入口，准确理解这不是完整历史、云端遥测或
-ElevenLabs 账单。
+任一 Provider 的账单。
 
 内容与行为：
 
@@ -337,8 +429,8 @@ ElevenLabs 账单。
 - 按 Surface 与公共 `Event` 展示有限分组，不显示提示词、响应、项目、会话、日历或声音路径；
 - 诊断区显示滚动日志是否存在、大小、最近失败数量；提供在 Finder 显示与复制路径；
 - 清除历史/日志是显式破坏动作，分别确认、分别加锁，不能影响连接 marker、当前回执或声音配置；
-- 隐私说明区分：宿主内容不上传；用户点击 AI 生成时描述和音频与 ElevenLabs 交换；供应商费用和
-  配额必须去 ElevenLabs 查看，claudi0 不伪造成本。
+- 隐私说明区分：宿主内容不上传；用户点击 AI 生成时描述和音频与所选 Provider 交换；供应商费用和
+  配额必须去对应 Provider 查看，claudi0 不伪造成本。
 
 本页不新增完整 analytics ledger，不扩大回执保留量，也不从诊断日志反推成功事件。
 
@@ -429,7 +521,7 @@ S0 文档与契约锁定
 | S4 | S2、S3 | 通用页、macOS 12/13+ 登录项 adapter 与语言模式完整 |
 | S5 | S3 | 集成页迁入且 manager 行为、回执、恢复与 AX 等价 |
 | S6 | S3 | 声音页迁入且完整包编辑、单 owner 与 100 包回归等价 |
-| S7 | S3、S6、既有 TTS 子域 | 事件/AI 页迁入且 scope、候选、命名、采用与回滚等价 |
+| S7 | S3、S6、既有 TTS 子域 | 事件/AI 页迁入且 profile、scope、候选、命名、采用与回滚等价 |
 | S8 | S2 | 权限 reducer、动态静默快照与 helper 播放策略独立全绿 |
 | S9 | S3、S8 | 通知页及常驻 observer 完整，不复制事件开关 |
 | S10 | S2、S3 | 显示页和 panel 共同消费文字、宽度、状态点偏好 |
@@ -442,7 +534,7 @@ S0 文档与契约锁定
 
 ### S0 — 规格与领域合同
 
-- 接受本计划、ADR 0008/0009 和新增 glossary；
+- 接受本计划、ADR 0006/0008/0009 和新增 glossary；
 - 把原型修正表作为实现约束，不在代码中照抄演示常量；
 - 验收：文档无冲突，`git diff --check` 通过。
 
@@ -491,8 +583,9 @@ S0 文档与契约锁定
 
 - 把 `EventSettingsWindowView` 重构为 prototype hierarchy；嵌入页面级 BYOK card 和行内 composer；
 - manage sound 使用内部 Sounds route，采用继续走同一个 request；
-- 对齐所有 AI 阶段、命名位置、候选、失败与清理；
-- 视觉基准至少覆盖指定 SoT route 的 applied/ready 状态及 missing/generating/candidates/error。
+- 对齐 Provider/profile 选择、逐 profile 凭据策略、所有 AI 阶段、命名位置、候选、失败与清理；
+- 视觉基准覆盖四个 allowlisted profile、verified/missing/deferred/unavailable/rejected/pending、
+  unsupported modality/locale 以及 generating/candidates/applied/error。
 
 ### S8 — 动态静默领域与跨进程快照
 
@@ -550,7 +643,7 @@ S0 文档与契约锁定
 
 - 运行 helper/gui 全 harness、GUI debug build、xcstrings JSON、bundle、size、format baseline 和 diff check；
 - 真机完成九页视觉/键盘/VoiceOver/四文字档/明暗/Reduce Motion；
-- 单独验证签名 login item、Focus、Calendar、global hot key 和真实 ElevenLabs；
+- 单独验证签名 login item、Focus、Calendar、global hot key 和各 Provider/region 的真实 smoke；
 - 双架构、签名、公证、发布仍按 release 流程另行授权，不由本地 ad-hoc 证明。
 
 ## 8. 自动测试合同
@@ -649,7 +742,7 @@ git diff --check
 - AI 提示音维持描述 → 三候选与命名 → 显式采用，内部声音方案隐藏，BYOK 边界不退化；
 - 所有自动命令全绿，`git diff --check` 通过且无新增 format diagnostics；
 - 真机视觉、键盘、VoiceOver、登录项、Focus、Calendar、快捷键和音频分别有证据；
-- 真实 ElevenLabs、双架构、签名、公证、发布和正式验收继续单独报告与授权。
+- 真实 Provider/key/付费请求、双架构、签名、公证、发布和正式验收继续单独报告与授权。
 
 文档类型：统一设置体验的工程执行 spec、任务依赖图、测试 reference 与验收 explanation。本文件不授权
 自动实施、commit、push、创建/关闭 issue、真实权限请求、真实 provider 调用或发布。

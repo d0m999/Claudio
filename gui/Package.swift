@@ -5,7 +5,7 @@ import PackageDescription
 // host-config inspect/connect/disconnect operation to `ClaudioCore`'s integration manager and
 // adapters. Views only consume injected presentation state; they never parse host files themselves.
 //
-// The target split keeps the current menu-bar shell and retained management windows testable:
+// The target split keeps the menu-bar shell and retained unified Settings destinations testable:
 //   - `ClaudioGUICore`: pure Foundation state/view-model logic (no SwiftUI import), so it
 //     can be exercised by the same dependency-free test harness `helper/` uses.
 //   - `ClaudioGUI`: the executable — SwiftUI `App`/`View` layer, depends on `ClaudioGUICore`.
@@ -13,13 +13,14 @@ let package = Package(
     name: "claudio-gui",
     defaultLocalization: "zh-Hans",
     platforms: [.macOS(.v12)],  // ENGINEERING.md: macOS 12+ floor, matching helper/Package.swift.
-    // The release workflow ships only ClaudioGUI. Declaring it explicitly is what lets
-    // `.github/workflows/release.yml` build with `--product ClaudioGUI` instead of a bare
+    // The release workflow builds ClaudioGUI and its macOS 12 LoginItem explicitly. Declaring the
+    // main product lets `.github/workflows/release.yml` use `--product ClaudioGUI` instead of a bare
     // `swift build -c release`: the bare form also builds `claudio-gui-tests`, and that
     // target references `#if DEBUG`-gated symbols (`PreviewFixtures`), so it does not — and
     // is not meant to — compile in Release. Release must build the app, not the harness.
     products: [
         .executable(name: "ClaudioGUI", targets: ["ClaudioGUI"]),
+        .executable(name: "ClaudioLoginItem", targets: ["ClaudioLoginItem"]),
         // Developer-only native benchmark; no bundle/release step copies this product.
         .executable(
             name: "claudio-sound-pack-benchmark",
@@ -50,8 +51,8 @@ let package = Package(
                 .linkedFramework("Security")
             ]
         ),
-        // Small shared SwiftUI component/token surface. Both the executable panel and the standard
-        // management window depend on it, so failure presentation cannot drift into two hand-made
+        // Small shared SwiftUI component/token surface. Both the executable panel and unified
+        // Settings depend on it, so failure presentation cannot drift into two hand-made
         // copies while the Foundation-only `ClaudioGUICore` remains free of SwiftUI.
         .target(
             name: "ClaudioGUIComponents",
@@ -61,8 +62,8 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // Standard AppKit/SwiftUI window surface. This is a library target (no `@main`);
-        // `MenuBarController` owns its single lazy window for the app lifetime.
+        // Reusable Sounds editor view and AppKit accessibility bridge. This remains a library
+        // target (no `@main`); the only production NSWindow belongs to `SettingsWindowController`.
         .target(
             name: "SoundPacksWindow",
             dependencies: [
@@ -72,9 +73,9 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
-        // The SwiftUI app shell owns the status-item panel and the retained `IntegrationsWindow`.
-        // The latter consumes `ClaudioGUICore` presentation values and never opens host config
-        // itself, so adding the standard window does not create a second integration truth source.
+        // The SwiftUI app shell owns the status-item panel and one retained unified Settings
+        // window. Its embedded Integrations destination consumes `ClaudioGUICore` presentation
+        // values and never opens host config itself, so cutover creates no second truth source.
         //
         // Depends on `ClaudioCore` directly (not just transitively via `ClaudioGUICore`,
         // same reasoning as `claudio-gui-tests` below) since `EventRowView`/`DesignTokens`
@@ -94,6 +95,17 @@ let package = Package(
                 // Template PDFs keep the macOS 12 runtime independent of OS-version-specific
                 // SVG decoding. Bundle assembly must copy the generated *_ClaudioGUI.bundle.
                 .process("Resources/HostIcons"),
+            ],
+            linkerSettings: [
+                .linkedFramework("Carbon")
+            ]
+        ),
+        // macOS 12 compatibility helper. Packaging embeds this executable in a separately signed
+        // Contents/Library/LoginItems app; macOS 13+ registers the main app with SMAppService.
+        .executableTarget(
+            name: "ClaudioLoginItem",
+            linkerSettings: [
+                .linkedFramework("AppKit")
             ]
         ),
         // Tests run as a dependency-free executable harness, exactly like

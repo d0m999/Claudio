@@ -244,6 +244,34 @@ public enum PreviewFixtures {
     /// Claudio 专属界面文字的全部四档；gallery 用同一个动态字号映射渲染代表内容。
     public static let interfaceTextSizes = ClaudioInterfaceTextSize.allCases
 
+    // MARK: - About settings
+
+    public static let aboutBundleFacts = projectAboutBundleFacts(
+        AboutBundleFactsInput(
+            brandName: "Orbit Zero",
+            productName: "claudi0",
+            version: "0.1.0",
+            build: "42",
+            architecture: "arm64",
+            minimumSystemVersion: "12.0",
+            operatingSystemVersion: "15.6.1"))
+
+    public static let aboutBundledResources = AboutBundledResourceKind.allCases.map {
+        AboutBundledResource(
+            kind: $0,
+            url: URL(fileURLWithPath: "/preview/\($0.rawValue)"))
+    }
+
+    public static let aboutPathFacts = AboutPathKind.allCases.map {
+        AboutPathExistenceFact(kind: $0, exists: true)
+    }
+
+    public static let aboutSurfaceFacts = [
+        AboutSurfaceFact(host: .claudeCode, state: .ready),
+        AboutSurfaceFact(host: .codex, state: .awaitingActivation),
+        AboutSurfaceFact(host: .workBuddy, state: .legacy),
+    ].compactMap { $0 }
+
     // MARK: - Unified Settings routes (#86)
 
     public struct SettingsRouteScenario: Identifiable, Sendable, Equatable {
@@ -275,6 +303,421 @@ public enum PreviewFixtures {
             self.expectedFailure = expectedFailure
         }
     }
+
+    /// Production basic-destination states used by the unified Settings visual/AX matrix. Each
+    /// case names a real semantic state owned by the destination model; the gallery only injects
+    /// deterministic adapters and continues to render ``SettingsWindowView`` itself.
+    public enum SettingsGeneralGalleryState: Sendable, Equatable {
+        case ready
+        case permissionRequired
+        case writeFailed
+    }
+
+    public enum SettingsNotificationsGalleryState: Sendable, Equatable {
+        case ready
+        case permissionRequired
+        case stale
+        case writeFailed
+    }
+
+    public enum SettingsUsageGalleryState: Sendable, Equatable {
+        case loading
+        case ready
+        case empty
+        case stale
+        case unreadable
+        case writeFailed
+    }
+
+    public enum SettingsShortcutsGalleryState: Sendable, Equatable {
+        case ready
+        case empty
+        case writeFailed
+    }
+
+    public enum SettingsAboutGalleryState: Sendable, Equatable {
+        case ready
+        case empty
+        case writeFailed
+    }
+
+    /// One descriptor is the sole scenario-to-fixture dispatch point. Destination builders read
+    /// only their typed field instead of repeatedly switching on the scenario roster.
+    public struct SettingsExperienceProfile: Sendable, Equatable {
+        public let destination: SettingsDestination
+        public let general: SettingsGeneralGalleryState
+        public let notifications: SettingsNotificationsGalleryState
+        public let usage: SettingsUsageGalleryState
+        public let shortcuts: SettingsShortcutsGalleryState
+        public let about: SettingsAboutGalleryState
+
+        fileprivate init(
+            destination: SettingsDestination,
+            general: SettingsGeneralGalleryState = .ready,
+            notifications: SettingsNotificationsGalleryState = .ready,
+            usage: SettingsUsageGalleryState = .empty,
+            shortcuts: SettingsShortcutsGalleryState = .empty,
+            about: SettingsAboutGalleryState = .ready
+        ) {
+            self.destination = destination
+            self.general = general
+            self.notifications = notifications
+            self.usage = usage
+            self.shortcuts = shortcuts
+            self.about = about
+        }
+    }
+
+    public enum SettingsExperienceScenario: String, CaseIterable, Identifiable, Sendable {
+        case generalReady = "general.ready"
+        case generalPermissionRequired = "general.permission-required"
+        case generalWriteFailed = "general.write-failed"
+        case notificationsReady = "notifications.ready"
+        case notificationsPermissionRequired = "notifications.permission-required"
+        case notificationsStale = "notifications.stale"
+        case notificationsWriteFailed = "notifications.write-failed"
+        case displayReady = "display.ready"
+        case usageLoading = "usage.loading"
+        case usageReady = "usage.ready"
+        case usageEmpty = "usage.empty"
+        case usageStale = "usage.stale"
+        case usageUnreadable = "usage.unreadable"
+        case usageWriteFailed = "usage.write-failed"
+        case shortcutsReady = "shortcuts.ready"
+        case shortcutsEmpty = "shortcuts.empty"
+        case shortcutsWriteFailed = "shortcuts.write-failed"
+        case aboutReady = "about.ready"
+        case aboutEmpty = "about.empty"
+        case aboutWriteFailed = "about.write-failed"
+
+        public var id: String { rawValue }
+
+        public var profile: SettingsExperienceProfile {
+            switch self {
+            case .generalReady:
+                SettingsExperienceProfile(destination: .general)
+            case .generalPermissionRequired:
+                SettingsExperienceProfile(
+                    destination: .general,
+                    general: .permissionRequired)
+            case .generalWriteFailed:
+                SettingsExperienceProfile(destination: .general, general: .writeFailed)
+            case .notificationsReady:
+                SettingsExperienceProfile(destination: .notifications)
+            case .notificationsPermissionRequired:
+                SettingsExperienceProfile(
+                    destination: .notifications,
+                    notifications: .permissionRequired)
+            case .notificationsStale:
+                SettingsExperienceProfile(
+                    destination: .notifications,
+                    notifications: .stale)
+            case .notificationsWriteFailed:
+                SettingsExperienceProfile(
+                    destination: .notifications,
+                    notifications: .writeFailed)
+            case .displayReady:
+                SettingsExperienceProfile(destination: .display)
+            case .usageLoading:
+                SettingsExperienceProfile(destination: .usage, usage: .loading)
+            case .usageReady:
+                SettingsExperienceProfile(destination: .usage, usage: .ready)
+            case .usageEmpty:
+                SettingsExperienceProfile(destination: .usage)
+            case .usageStale:
+                SettingsExperienceProfile(destination: .usage, usage: .stale)
+            case .usageUnreadable:
+                SettingsExperienceProfile(destination: .usage, usage: .unreadable)
+            case .usageWriteFailed:
+                SettingsExperienceProfile(destination: .usage, usage: .writeFailed)
+            case .shortcutsReady:
+                SettingsExperienceProfile(destination: .shortcuts, shortcuts: .ready)
+            case .shortcutsEmpty:
+                SettingsExperienceProfile(destination: .shortcuts)
+            case .shortcutsWriteFailed:
+                SettingsExperienceProfile(destination: .shortcuts, shortcuts: .writeFailed)
+            case .aboutReady:
+                SettingsExperienceProfile(destination: .about)
+            case .aboutEmpty:
+                SettingsExperienceProfile(destination: .about, about: .empty)
+            case .aboutWriteFailed:
+                SettingsExperienceProfile(destination: .about, about: .writeFailed)
+            }
+        }
+
+        public var destination: SettingsDestination { profile.destination }
+    }
+
+    public static let settingsExperienceScenarios = SettingsExperienceScenario.allCases
+
+    /// Exhaustive visual/AX roster for the allowlisted AI Cue profiles, credential states,
+    /// composer lifecycle and the failure families required by the Settings acceptance matrix.
+    /// The gallery renders production service-card, credential-sheet and composer views directly.
+    public enum AICueGalleryScenario: String, CaseIterable, Identifiable, Sendable {
+        case elevenLabsMissing = "elevenlabs.missing"
+        case elevenLabsVerified = "elevenlabs.verified"
+        case miniMaxRejected = "minimax.rejected"
+        case qwenSingaporeDeferred = "qwen-singapore.deferred"
+        case qwenBeijingPendingReplacement = "qwen-beijing.pending-replacement"
+        case qwenBeijingUnavailable = "qwen-beijing.unavailable"
+        case elevenLabsProbing = "elevenlabs.probing"
+        case qwenSingaporeSaving = "qwen-singapore.saving"
+        case qwenBeijingUpdatingReplacement = "qwen-beijing.updating-replacement"
+        case miniMaxDeleting = "minimax.deleting"
+        case elevenLabsProbeFailure = "elevenlabs.probe-failure"
+        case qwenSingaporeSaveFailure = "qwen-singapore.save-failure"
+        case miniMaxDeleteFailure = "minimax.delete-failure"
+        case editing = "composer.editing"
+        case generating = "composer.generating"
+        case candidates = "composer.candidates"
+        case playing = "composer.playing"
+        case adopting = "composer.adopting"
+        case applied = "composer.applied"
+        case unsupportedModality = "composer.unsupported-modality"
+        case unsupportedLocale = "composer.unsupported-locale"
+        case credentialRequired = "composer.credential-required"
+        case providerFailure = "composer.provider-failure"
+        case validationFailure = "composer.validation-failure"
+        case displayNameFailure = "composer.display-name-failure"
+        case targetDrift = "composer.target-drift"
+        case adoptionRollback = "composer.adoption-rollback"
+
+        public var id: String { rawValue }
+
+        public var providerProfileID: AICueProviderProfileID { facts.providerProfileID }
+        public var rendersCredentialSheet: Bool { facts.rendersCredentialSheet }
+
+        public var playingCandidateID: UUID? {
+            self == .playing ? PreviewFixtures.aiCueCandidateIDs[0] : nil
+        }
+
+        public var previewState: AICueGenerationPreviewState {
+            let target = rendersCredentialSheet ? nil : PreviewFixtures.aiCueTarget
+            let generation = facts.needsGeneration ? PreviewFixtures.aiCueGeneration : nil
+            let outcome = self == .applied ? PreviewFixtures.aiCueAdoptionOutcome : nil
+            return AICueGenerationPreviewState(
+                providerProfileID: providerProfileID,
+                credentialStatus: facts.credentialStatus,
+                credentialActivity: facts.credentialActivity,
+                credentialFailure: facts.credentialFailure,
+                phase: facts.composerPhase,
+                adoptingCandidateID: self == .adopting
+                    ? PreviewFixtures.aiCueCandidateIDs[1] : nil,
+                soundDescription: target == nil ? "" : PreviewFixtures.aiCueDescription,
+                displayName: generation == nil ? "" : PreviewFixtures.aiCueDisplayName,
+                target: target,
+                generation: self == .applied ? nil : generation,
+                failure: facts.composerFailure,
+                adoptionOutcome: outcome)
+        }
+
+        private var facts: Facts {
+            switch self {
+            case .elevenLabsMissing:
+                Facts(rendersCredentialSheet: true, credentialStatus: .missing)
+            case .elevenLabsVerified:
+                Facts(rendersCredentialSheet: true)
+            case .miniMaxRejected:
+                Facts(
+                    providerProfileID: .miniMaxGlobal,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .stored(
+                        verification: .rejected,
+                        hasPendingReplacement: false))
+            case .qwenSingaporeDeferred:
+                Facts(
+                    providerProfileID: .qwenSingapore,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .stored(
+                        verification: .deferred,
+                        hasPendingReplacement: false))
+            case .qwenBeijingPendingReplacement:
+                Facts(
+                    providerProfileID: .qwenBeijing,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .stored(
+                        verification: .verified,
+                        hasPendingReplacement: true))
+            case .qwenBeijingUnavailable:
+                Facts(
+                    providerProfileID: .qwenBeijing,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .unavailable)
+            case .elevenLabsProbing:
+                Facts(rendersCredentialSheet: true, credentialActivity: .probing)
+            case .qwenSingaporeSaving:
+                Facts(
+                    providerProfileID: .qwenSingapore,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .stored(
+                        verification: .deferred,
+                        hasPendingReplacement: false),
+                    credentialActivity: .saving)
+            case .qwenBeijingUpdatingReplacement:
+                Facts(
+                    providerProfileID: .qwenBeijing,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .stored(
+                        verification: .verified,
+                        hasPendingReplacement: true),
+                    credentialActivity: .pendingReplacement)
+            case .miniMaxDeleting:
+                Facts(
+                    providerProfileID: .miniMaxGlobal,
+                    rendersCredentialSheet: true,
+                    credentialActivity: .deleting)
+            case .elevenLabsProbeFailure:
+                Facts(
+                    rendersCredentialSheet: true,
+                    credentialStatus: .missing,
+                    credentialFailure: .provider(.invalidCredential))
+            case .qwenSingaporeSaveFailure:
+                Facts(
+                    providerProfileID: .qwenSingapore,
+                    rendersCredentialSheet: true,
+                    credentialStatus: .missing,
+                    credentialFailure: .storageUnavailable)
+            case .miniMaxDeleteFailure:
+                Facts(
+                    providerProfileID: .miniMaxGlobal,
+                    rendersCredentialSheet: true,
+                    credentialFailure: .storageUnavailable)
+            case .editing:
+                Facts()
+            case .generating:
+                Facts(composerPhase: .generating)
+            case .candidates, .playing:
+                Facts(composerPhase: .candidatesReady, needsGeneration: true)
+            case .adopting:
+                Facts(composerPhase: .adopting, needsGeneration: true)
+            case .applied:
+                Facts(composerPhase: .applied)
+            case .unsupportedModality:
+                Facts(
+                    providerProfileID: .miniMaxGlobal,
+                    composerFailure: .generation(
+                        .requestCompilation(.unsupportedModality)))
+            case .unsupportedLocale:
+                Facts(
+                    providerProfileID: .miniMaxGlobal,
+                    composerFailure: .generation(
+                        .requestCompilation(.unsupportedLocale)))
+            case .credentialRequired:
+                Facts(
+                    credentialStatus: .missing,
+                    composerFailure: .generation(.credentialRequired))
+            case .providerFailure:
+                Facts(composerFailure: .generation(.provider(.serviceUnavailable)))
+            case .validationFailure:
+                Facts(composerFailure: .generation(.validation(.emptyDescription)))
+            case .displayNameFailure:
+                Facts(
+                    composerPhase: .candidatesReady,
+                    needsGeneration: true,
+                    composerFailure: .displayName(
+                        .displayNameTooLong(maximumCharacters: 40)))
+            case .targetDrift:
+                Facts(
+                    composerPhase: .candidatesReady,
+                    needsGeneration: true,
+                    composerFailure: .adoption(.ineligible(.targetChanged)))
+            case .adoptionRollback:
+                Facts(
+                    composerPhase: .candidatesReady,
+                    needsGeneration: true,
+                    composerFailure: .adoption(
+                        .importedButNotBound(
+                            imported: PreviewFixtures.sampleImportedAudioFile,
+                            reason: .manifest(.lockBusy))))
+            }
+        }
+
+        private struct Facts: Sendable {
+            let providerProfileID: AICueProviderProfileID
+            let rendersCredentialSheet: Bool
+            let credentialStatus: AICueCredentialStatus?
+            let credentialActivity: AICueCredentialActivity
+            let credentialFailure: AICueCredentialFailure?
+            let composerPhase: AICueComposerPhase
+            let needsGeneration: Bool
+            let composerFailure: AICueComposerFailure?
+
+            init(
+                providerProfileID: AICueProviderProfileID = .elevenLabsGlobal,
+                rendersCredentialSheet: Bool = false,
+                credentialStatus: AICueCredentialStatus? = .stored(
+                    verification: .verified,
+                    hasPendingReplacement: false),
+                credentialActivity: AICueCredentialActivity = .idle,
+                credentialFailure: AICueCredentialFailure? = nil,
+                composerPhase: AICueComposerPhase = .editing,
+                needsGeneration: Bool = false,
+                composerFailure: AICueComposerFailure? = nil
+            ) {
+                self.providerProfileID = providerProfileID
+                self.rendersCredentialSheet = rendersCredentialSheet
+                self.credentialStatus = credentialStatus
+                self.credentialActivity = credentialActivity
+                self.credentialFailure = credentialFailure
+                self.composerPhase = composerPhase
+                self.needsGeneration = needsGeneration
+                self.composerFailure = composerFailure
+            }
+        }
+    }
+
+    public static let aiCueGalleryScenarios = AICueGalleryScenario.allCases
+
+    private static let aiCueDescription = "清晰地说“任务完成”，语气温和"
+    private static let aiCueDisplayName = "任务完成"
+    private static let aiCueGenerationID = UUID(
+        uuidString: "A1000000-0000-0000-0000-000000000001")!
+    fileprivate static let aiCueCandidateIDs = [
+        UUID(uuidString: "A1000000-0000-0000-0000-000000000011")!,
+        UUID(uuidString: "A1000000-0000-0000-0000-000000000012")!,
+        UUID(uuidString: "A1000000-0000-0000-0000-000000000013")!,
+    ]
+    private static let aiCueTarget = try! AICueAdoptionTarget(
+        surface: .workBuddy,
+        event: .stop,
+        packID: "workbuddy-private")
+    private static let aiCuePlan = AICueSoundPlan(
+        suggestedDisplayName: aiCueDisplayName,
+        modality: .speech,
+        soundDescription: aiCueDescription,
+        spokenContent: "任务完成",
+        languageTag: "zh-Hans",
+        styleDescription: "温和、清晰、短促",
+        targetDurationMilliseconds: 1_800,
+        instructionVersion: AICueSoundPlanner.instructionVersion)
+    private static let aiCueGeneration = AICueGeneration(
+        id: aiCueGenerationID,
+        profileID: .elevenLabsGlobal,
+        plan: aiCuePlan,
+        candidates: zip(AICueVariant.allCases, aiCueCandidateIDs).map { variant, id in
+            AICueCandidate(
+                id: id,
+                variant: variant,
+                asset: AICueTemporaryAudioAsset(
+                    fileURL: URL(
+                        fileURLWithPath: "/dev/null/claudio-ai-cue-\(variant.rawValue).mp3"),
+                    byteCount: 128_000,
+                    sniffedFormat: .mp3),
+                durationMilliseconds: 1_600 + variant.ordinal * 100,
+                mediaType: "audio/mpeg",
+                provenance: AICueCandidateProvenance(
+                    providerID: .elevenLabs,
+                    profileID: .elevenLabsGlobal,
+                    modelID: "eleven_v3",
+                    generationID: aiCueGenerationID,
+                    requestOrdinal: variant.ordinal,
+                    providerRequestID: "gallery-\(variant.ordinal)"))
+        },
+        generatedAt: Date(timeIntervalSince1970: 1_700_000_000))
+    private static let aiCueAdoptionOutcome = AICueAdoptionOutcome(
+        target: aiCueTarget,
+        importedFile: sampleImportedAudioFile,
+        finalDisplayName: aiCueDisplayName)
 
     public static let settingsRouteAvailability = SettingsRouteAvailability(
         integrationSurfaces: Set(HostID.productVisibleCases.map(\.surfaceID)),
@@ -953,6 +1396,12 @@ public enum PreviewFixtures {
         for scenario in settingsRouteFailureScenarios {
             visited.insert(
                 "settingsRouteFailure.\(settingsRouteFailureCoverage(scenario.expectedFailure))")
+        }
+        for scenario in settingsExperienceScenarios {
+            visited.insert("settingsExperience.\(scenario.rawValue)")
+        }
+        for scenario in aiCueGalleryScenarios {
+            visited.insert("aiCueGallery.\(scenario.rawValue)")
         }
         for state in masterVolumeStates {
             visited.insert("masterVolume.\(masterVolumeStateCoverage(state))")

@@ -336,8 +336,9 @@ func runViewWiringSuites() {
             "运行面板与首次启动共享标题必须各调用同一份 Orbit Zero 字标，不能退回两份手写 Text logo")
 
         expect(
-            menuBarIcon.contains("drawOrbitZero()")
+            menuBarIcon.contains("drawOrbitZero(showsStatusDot: showsStatusDot)")
                 && menuBarIcon.contains("rotation.rotate(byDegrees: 16)")
+                && menuBarIcon.contains("if showsStatusDot")
                 && menuBarIcon.contains("image.isTemplate = true"),
             "菜单栏必须使用同源 Orbit Zero 减法几何，并保持 template image 自动适配亮暗菜单栏")
     }
@@ -381,7 +382,7 @@ func runViewWiringSuites() {
                 + "**永久隐身**。要么把这个构造挪走，要么先教 `strippingComments` 认识它")
     }
 
-    suite("T17h 播报出口按 surface 唯一：Panel 与 retained IntegrationsWindow 各一个") {
+    suite("主动播报出口按 surface 唯一：Panel、Integrations 与统一 Settings 各一个") {
         let sources = guiSources()
         expect(
             sources.count >= 5,
@@ -402,9 +403,14 @@ func runViewWiringSuites() {
         }
 
         expect(
-            posts == ["PanelView.swift": 1, "IntegrationsWindowView.swift": 1],
-            "Panel 的面板句和 retained IntegrationsWindow 的动作反馈各有一个主动播报出口；"
-                + "其它 GUI 文件不得新增第三条通道。实得 \(posts)")
+            posts
+                == [
+                    "PanelView.swift": 1,
+                    "IntegrationsWindowView.swift": 1,
+                    "SettingsWindowController.swift": 1,
+                ],
+            "Panel、retained IntegrationsWindow 与统一 Settings 的基础页动作反馈各有一个"
+                + "窗口级主动播报出口；其它 GUI 文件不得新增平行通道。实得 \(posts)")
         expect(
             consumes == ["PanelView.swift": 1],
             "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
@@ -496,7 +502,7 @@ func runViewWiringSuites() {
             let showStart = panel.range(
                 of: ".onChange(of: focusCoordinator.showCount)")?.lowerBound,
             let widthStart = panel.range(
-                of: ".onChange(of: layoutAdaptation.panelWidth)")?.lowerBound,
+                of: ".onChange(of: panelWidth)")?.lowerBound,
             showStart < widthStart
         else {
             expect(false, "无法定位面板打开 handler")
@@ -1929,12 +1935,17 @@ func runViewWiringSuites() {
         // 读 codeWithoutStrings：负向断言（「不许出现 X」）若读保留字符串内容的 codeOnly，任何一句
         // 恰好把 X 写进错误消息的代码都会让它**假红**；更要命的是正向那半（下面 closureBody 那几条）
         // 会被同一份字符串**假绿**。统一读这一路。
-        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
-            expect(false, "读不到 MasterVolumeRow.swift —— 这个 suite 唯一的价值就是读它")
+        guard
+            let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift"),
+            let shared = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+        else {
+            expect(false, "读不到 MasterVolumeRow/SharedMasterVolumeSlider.swift")
             return
         }
+        let sliderSources = row + shared
         expect(
-            !row.contains("step:"),
+            !sliderSources.contains("step:"),
             "MasterVolumeRow 不许使用 Slider(…, step:)（D24）—— 本机 key 窗口截图实证：`step: 0.05` 会被"
                 + "直译成 NSSlider.numberOfTickMarks = 21，在轨道下方画出一条 21 个灰点的刻度带，撑破"
                 + "DESIGN.md「控件行」的 ~28pt 行高。档位吸附交给 VolumeDragSession.snap()，视图侧只转发")
@@ -1955,7 +1966,7 @@ func runViewWiringSuites() {
         // 判据是「这两个入口一个都不许在」，任何一个命中即红。
         for entry in [".animation(", "withAnimation"] {
             expect(
-                !row.contains(entry),
+                !sliderSources.contains(entry),
                 "MasterVolumeRow 全行零动画（D18）—— 命中了 `\(entry)`。拖动跟手不加动画、失败回滚一律"
                     + "瞬跳；给控件行加动画 = 必须同批接上 accessibilityReduceMotion 门控，代价远大于收益"
                     + "（PanelView.swift 顶部那条「本视图树的动画绊线」记录着同一条纪律）")
@@ -1975,8 +1986,11 @@ func runViewWiringSuites() {
     // 一句写着 `flush()` 的错误消息在 `contains("flush()")` 眼里与一次真的调用完全同形。
 
     suite("MasterVolumeRow：diskVolume 变化必须下行同步进 session（D21，否则滑块永久显示磁盘上没有的值）") {
-        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
-            expect(false, "读不到 MasterVolumeRow.swift")
+        guard
+            let row = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+        else {
+            expect(false, "读不到 SharedMasterVolumeSlider.swift")
             return
         }
         let flat = collapsingWhitespace(row)
@@ -1997,17 +2011,24 @@ func runViewWiringSuites() {
     }
 
     suite("MasterVolumeRow：popover 隐藏必须冲刷（D22/D37，复用既有 hideCount 信号，不新增 closeCount）") {
-        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
-            expect(false, "读不到 MasterVolumeRow.swift")
+        guard
+            let wrapper = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift"),
+            let row = codeWithoutStrings("gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+        else {
+            expect(false, "读不到 MasterVolumeRow/SharedMasterVolumeSlider.swift")
             return
         }
         let flat = collapsingWhitespace(row)
         expect(
-            !flat.contains("closeCount"),
+            !flat.contains("closeCount") && !wrapper.contains("closeCount"),
             "不许新增 closeCount —— PanelFocusCoordinator 今天已经有 hideCount 且 "
                 + "MenuBarController.popoverDidClose 的第一条语句已经是 notePanelHidden()（T17d），语义"
                 + "与这里要的冲刷信号完全一致，复用它")
-        guard let body = closureBody(after: ".onChange(of: focusCoordinator.hideCount)", in: flat)
+        expect(
+            collapsingWhitespace(wrapper).contains(
+                "flushRevision: focusCoordinator.hideCount"),
+            "Panel wrapper 必须把既有 hideCount 交给共享 slider lifecycle")
+        guard let body = closureBody(after: ".onChange(of: flushRevision)", in: flat)
         else {
             expect(
                 false,
@@ -2032,8 +2053,11 @@ func runViewWiringSuites() {
         // 而本 suite 对 MasterVolumeRow 原有的 8 条断言里，**没有一条**读 accessibilityLabel/Value
         // （`/codex review 8771946` 完备性批评）：删掉 `.accessibilityValue`，1976 checks 全绿。
         // 一个「屏幕上没有、VO 里也没有」的值，就是压根不存在的值。
-        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
-            expect(false, "读不到 MasterVolumeRow.swift")
+        guard
+            let wrapper = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift"),
+            let row = codeWithoutStrings("gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+        else {
+            expect(false, "读不到 MasterVolumeRow/SharedMasterVolumeSlider.swift")
             return
         }
         let flat = collapsingWhitespace(row)
@@ -2056,14 +2080,17 @@ func runViewWiringSuites() {
         // Text("主音量") 必须对 VO 隐藏：它与 accessibilityLabel 同字，不隐藏 VO 会在这一行停两次
         // （一次念 Text、一次念 Slider 的 label）。
         expect(
-            flat.contains(".accessibilityHidden(true)"),
+            wrapper.contains(".accessibilityHidden(true)"),
             "MasterVolumeRow 的可视标签 Text(\"主音量\") 必须 .accessibilityHidden(true) —— 它与 Slider 的"
                 + " accessibilityLabel 同字，不隐藏 VO 会在这一行停两次、把同一个词念两遍")
     }
 
     suite("MasterVolumeRow：willTerminate 必须同步冲刷（D22-bis，且不得复用 hideCount 那套计数器机制）") {
-        guard let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift") else {
-            expect(false, "读不到 MasterVolumeRow.swift")
+        guard
+            let row = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+        else {
+            expect(false, "读不到 SharedMasterVolumeSlider.swift")
             return
         }
         let flat = collapsingWhitespace(row)
@@ -2183,7 +2210,7 @@ func runViewWiringSuites() {
             "共享组件必须保留 24×24、双声波、静音弱化与斜线几何")
     }
 
-    suite("全状态画廊：声音包窗口用生产视图覆盖内容与库可用性七态，且预览不读用户磁盘") {
+    suite("全状态画廊：声音包窗口用生产视图覆盖复杂库与失败态，且预览不读用户磁盘") {
         guard
             let gallery = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowStateGalleryView.swift"),
@@ -2203,8 +2230,13 @@ func runViewWiringSuites() {
                 && gallery.contains("libraryState: .refreshFailed")
                 && gallery.contains("loadingModel")
                 && gallery.contains("loadFailedModel")
-                && gallery.components(separatedBy: "galleryFrame(").count - 1 == 7,
-            "声音包画廊必须渲染生产窗口，并覆盖内置、自有、空库及四种非 ready 库状态")
+                && gallery.contains("largeLibraryModel")
+                && gallery.contains("brokenPackModel")
+                && gallery.contains("previewIsPerformingWrite: true")
+                && gallery.contains("restoreFailureStatus")
+                && gallery.contains("deletionFailureStatus")
+                && gallery.components(separatedBy: "galleryFrame(").count - 1 == 12,
+            "声音包画廊必须渲染生产窗口，并覆盖 100-pack、broken、写入中、恢复/删除失败及 SWR 状态")
         expect(
             rootGallery.contains("SoundPacksWindowStateGalleryView(language: language)"),
             "全产品根画廊必须实际挂入声音包窗口画廊")
@@ -2522,7 +2554,7 @@ func runViewWiringSuites() {
             "打开设置必须进入当前 Sound Scope 的事件与提示音窗口，不得继续打开声音包 overview")
     }
 
-    suite("事件与提示音：retained window 复用作用域/事件投影，编辑委托声音包窗口") {
+    suite("事件与提示音：统一 retained Settings 复用作用域/事件投影并内部路由 Sounds") {
         guard
             let view = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
@@ -2532,8 +2564,12 @@ func runViewWiringSuites() {
                 "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
             let aiViewWithStrings = codeOnly(
                 "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
-            let controller = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/EventSettingsWindowController.swift"),
+            let settingsView = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+            let settingsController = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let previewSequence = codeWithoutStrings(
+                "gui/Sources/ClaudioGUICore/EventPreviewSequence.swift"),
             let menu = codeWithoutStrings("gui/Sources/ClaudioGUI/MenuBarController.swift")
         else {
             expect(false, "读不到事件设置窗口或 MenuBarController 源码")
@@ -2543,7 +2579,9 @@ func runViewWiringSuites() {
         let flatViewWithStrings = collapsingWhitespace(viewWithStrings)
         let flatAIView = collapsingWhitespace(aiView)
         let flatAIViewWithStrings = collapsingWhitespace(aiViewWithStrings)
-        let flatController = collapsingWhitespace(controller)
+        let flatSettingsView = collapsingWhitespace(settingsView)
+        let flatSettingsController = collapsingWhitespace(settingsController)
+        let flatPreviewSequence = collapsingWhitespace(previewSequence)
         let flatMenu = collapsingWhitespace(menu)
         expect(
             flatView.contains("panelSoundScopePresentations(")
@@ -2558,10 +2596,13 @@ func runViewWiringSuites() {
             "逐事件文件编辑必须携带同一作用域委托 SoundPacksWindow")
         expect(
             flatView.contains("resolvedEventSettingsScope(route: selection.route, scopes: scopes)")
+                && flatView.contains("routeIsUnavailable")
                 && flatView.contains("scopeProjectionIsAligned")
                 && flatView.contains(".onChange(of: scopes.map(\\.scope))")
+                && flatView.contains("selection.markCurrentScopeUnavailable()")
+                && flatView.contains(".disabled(routeIsUnavailable)")
                 && flatView.contains("reconcileScopeSelection()"),
-            "Surface 动态消失时必须让 route、读模型与可操作内容共同规范化")
+            "Surface 动态消失时必须保留 route、停止可操作内容且不得写入 fallback")
         expect(
             flatView.contains("eventSettingsWindowLayout(")
                 && flatView.contains("windowLayout: EventSettingsWindowLayout")
@@ -2582,30 +2623,80 @@ func runViewWiringSuites() {
                     ".accessibilityIdentifier(\"event-settings.write-failures\")"),
             "Global 与 Surface 的静音写失败必须在事件窗口就地可见")
         expect(
-            flatController.contains("private var window: NSWindow?")
-                && flatController.contains("window.isReleasedWhenClosed = false")
-                && flatController.contains("func showWindow( route: EventSettingsWindowRoute,")
-                && flatController.contains("func restoreKeyWindow() -> Bool")
-                && flatController.contains("RetainedWindowHandbackTracker<NSRunningApplication>")
-                && flatController.contains("selection.requestInitialFocus()"),
-            "事件设置必须由 app-lifetime retained window 所有并保留 handback 债务")
+            flatSettingsController.contains("private var window: NSWindow?")
+                && flatSettingsController.contains("window.isReleasedWhenClosed = false")
+                && flatSettingsController.contains("private let eventSettingsModel:")
+                && flatSettingsController.contains("private let eventSettingsSelection:")
+                && flatSettingsController.contains("applyEmbeddedRoute(route)")
+                && flatSettingsController.contains(
+                    "eventSettingsSelection.leaveDestination()"),
+            "事件设置必须由唯一 app-lifetime Settings window 承载并预应用 typed deep link")
         expect(
             flatView.contains(".onReceive(selection.$focusRequestRevision)")
-                && flatView.contains("eventSettingsFirstFocusTarget(scopes: scopes.map(\\.scope))")
+                && flatView.contains("focusedTarget = selection.focusTarget")
                 && flatView.contains(".focused($focusedTarget, equals: .scope(scope.scope))")
+                && flatView.contains(".focused(focusedTarget, equals: .event(presentation.event))")
                 && flatView.contains(".accessibilityHint(configureSoundHint)")
                 && flatView.contains(".accessibilityHint(previewHint)")
                 && flatView.contains(".accessibilityHint(muteHint)"),
-            "事件设置窗口必须在每次保留式打开时把首焦点放到第一个 scope，并说明禁用动作的原因")
+            "事件设置窗口必须在每次路由时聚焦精确 scope/Event，并说明禁用动作的原因")
         expect(
-            flatMenu.contains("let eventSettingsWindowController = EventSettingsWindowController(")
+            flatMenu.components(separatedBy: "makeEventSettingsConfigController(").count - 1 == 1
+                && flatMenu.components(separatedBy: "EventSettingsWindowSelection()").count - 1
+                    == 1
+                && !flatMenu.contains("EventSettingsWindowController(")
+                && flatMenu.contains("eventSettingsModel: eventSettingsModel")
+                && flatMenu.contains("eventSettingsSelection: eventSettingsSelection")
                 && flatMenu.contains("onOpenEventSettings:")
-                && flatMenu.contains("requestEventSettingsWindow("),
-            "MenuBar composition root 必须构造 retained window 并把面板入口接到 router")
+                && flatMenu.contains("requestEventsSettings("),
+            "MenuBar composition root 必须只保留一个事件写入/selection owner 并把面板入口接到 Settings")
+        expect(
+            flatSettingsView.contains("EventSettingsWindowView(")
+                && !flatSettingsView.contains("presentationContext:")
+                && flatSettingsView.contains("onConfigureSound: { model.request(.sounds($0)) }")
+                && flatSettingsView.contains("if let failure = model.resolution.failure")
+                && flatSettingsView.contains("eventSettingsSelection.requestInitialFocus(scopes:")
+                && flatSettingsController.contains("eventSettingsModel: eventSettingsModel")
+                && flatSettingsController.contains("eventSettingsSelection: eventSettingsSelection")
+                && flatSettingsController.contains("case .events(let scope, let event):"),
+            "统一设置必须嵌入同一事件事实/selection、预应用深链并内部路由 Sounds")
+        expect(
+            !flatView.contains("EventSettingsPresentationContext")
+                && !flatView.contains("includesDisconnected")
+                && flatView.contains("eventSettingsShouldCloseAICueComposer(")
+                && flatView.contains("eventSettingsAICueComposerMatches(")
+                && !flatView.contains("showsAICueGeneration")
+                && !flatView.contains("usesAutomaticPlaybackToggle")
+                && flatView.contains("EventSettingsMasterVolumeControl(")
+                && flatView.contains("model.switchPack(to: packID)")
+                && flatView.contains("model.resetSelectedSurfaceOverrides()")
+                && flatView.contains("model.retrySoundPackLibraryRefresh()")
+                && flatView.contains("playAllPreviews()")
+                && flatView.contains("if previewAllTask != nil")
+                && flatView.contains("case .failed(let event):")
+                && flatView.contains("selection.$previewStopRequestRevision")
+                && flatView.contains("selection.$aiSessionEndRequestRevision")
+                && flatView.contains("soundPacksModel.packCards")
+                && flatView.contains("eventSettingsPackInheritanceState(")
+                && flatView.contains("eventSettingsInheritanceState(")
+                && flatView.contains(".accessibilityLabel(identityAccessibilityLabel)")
+                && flatView.contains("eventSettingsIdentityAccessibilityLabel(")
+                && flatView.contains(".eventSettingsAutomaticPlaybackFor")
+                && flatView.contains(".accessibilityValue(")
+                && flatPreviewSequence.contains("Task.detached(priority: .userInitiated)")
+                && flatPreviewSequence.contains("generation == runGeneration")
+                && flatPreviewSequence.contains("case failed(Event)")
+                && flatViewWithStrings.contains(
+                    ".accessibilityIdentifier(\"event-settings.preview-all\")")
+                && flatViewWithStrings.contains(
+                    ".accessibilityIdentifier( \"event-settings.event.")
+                && flatViewWithStrings.contains(".automatic-playback\")"),
+            "统一设置 Events 必须接入 AI composer、试听全部、逐事件自动播放、主音量、pack 与 reset seams")
         expect(
             flatView.contains("EventSettingsAICueServiceCard(")
                 && flatView.contains("EventSettingsAICueComposerView(")
-                && flatView.contains("model.aiCueAdoptionEligibility(for: event.event)")
+                && flatView.contains("model.aiCueAdoptionEligibility(")
+                && flatView.contains("for: event.event)")
                 && flatView.contains(".focused(focusedTarget, equals: .generateAICue(")
                 && flatViewWithStrings.contains(
                     ".accessibilityIdentifier( \"event-settings.event.")
@@ -2613,11 +2704,19 @@ func runViewWiringSuites() {
             "AI 提示音必须作为事件设置的页面级服务与逐事件动作接入，并消费 fail-closed 采用资格")
         expect(
             flatView.contains("EventSettingsAICueCredentialSheet(")
-                && flatView.contains(".onChange(of: aiCueViewModel.requiresCredentialConfiguration)")
+                && flatView.contains(
+                    ".onChange(of: aiCueViewModel.requiresCredentialConfiguration)")
+                && flatView.contains(".onChange(of: aiCueViewModel.providerProfileID)")
                 && flatAIView.contains("SecureField(")
+                && flatAIView.contains("viewModel.availableProviderProfiles")
+                && flatAIView.contains("viewModel.selectProviderProfile(profileID)")
+                && flatAIView.contains("aiCueCredentialActivityKey(")
+                && flatAIView.contains("viewModel.providerProfile.supportedModalities")
+                && flatAIViewWithStrings.contains(
+                    "languageStore.language == .english ? \", \" : \"，\"")
                 && !flatAIViewWithStrings.contains("Toggle(\"Show")
                 && !flatAIViewWithStrings.contains("Toggle(\"显示"),
-            "BYOK 必须使用 SecureField 和页面级凭据表单，缺 key 时保留表单并打开配置且不提供明文显示")
+            "BYOK 必须使用 registry profile、独立状态、route-derived 能力与 SecureField，且不提供明文显示")
         guard
             let descriptionBody = closureBody(after: "private var descriptionStep", in: flatAIView),
             let candidatesBody = closureBody(after: "private var candidatesStep", in: flatAIView)
@@ -2640,24 +2739,29 @@ func runViewWiringSuites() {
             "候选时长必须消费 localization catalog，不能在 SwiftUI 中按语言手工拼接单位")
         expect(
             flatView.contains("stopCandidatePreview()")
-                && flatView.contains("aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)")
-                && flatController.contains("aiCueViewModel.endSession()"),
-            "采用、关闭和作用域变化必须停止试听并清理未采用候选")
+                && flatView.contains(
+                    "aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)")
+                && flatSettingsController.contains("aiCueViewModel.endSession()"),
+            "采用、离开页面、关闭唯一 retained Settings 和作用域变化必须清理未采用候选")
         expect(
             flatView.contains("let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
-                && flatController.contains(
+                && flatSettingsController.contains(
                     "private let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
                 && !flatView.contains(
                     "AICueCandidate, AICueDisplayName, AICueAdoptionTarget")
-                && !flatController.contains(
+                && !flatSettingsController.contains(
                     "AICueCandidate, AICueDisplayName, AICueAdoptionTarget"),
             "候选、名称和采用目标必须作为单一领域请求跨越 SwiftUI/AppKit 边界")
         expect(
             flatMenu.contains("AICueKeychainCredentialVault(")
-                && flatMenu.contains("ElevenLabsAICueProvider(")
+                && flatMenu.contains("let aiCueElevenLabsProvider = ElevenLabsAICueProvider()")
+                && flatMenu.contains("let aiCueMiniMaxProvider = MiniMaxAICueProvider()")
+                && flatMenu.contains("QwenAICueProvider( profileID: .qwenSingapore)")
+                && flatMenu.contains("QwenAICueProvider( profileID: .qwenBeijing)")
+                && flatMenu.contains("AICueGenerationDispatcher(generators:")
                 && flatMenu.contains("AICueGenerationEngine(")
-                && flatMenu.contains("soundPacksWindowController.adoptAICue(request)"),
-            "composition root 必须接通 Keychain、固定 provider、生成引擎与既有声音包采用链")
+                && flatMenu.contains("soundPacksEditorOwner.adoptAICue(request)"),
+            "composition root 必须接通 Keychain、四个固定 profile/engine 与既有声音包采用链")
     }
 
     suite("声音包窗口：完整映射菜单列出已有音频并经窗口 model 绑定；面板不消费 inventory") {
@@ -3083,11 +3187,13 @@ func runViewWiringSuites() {
             let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift"),
             let window = codeWithoutStrings(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
-            let controller = codeWithoutStrings(
-                "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift"),
+            let settingsController = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let editorOwner = codeWithoutStrings(
+                "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
             let package = source("gui/Package.swift")
         else {
-            expect(false, "读不到共享 AppKit 实现、两处消费者、窗口 controller 或 Package.swift")
+            expect(false, "读不到共享 AppKit 实现、两处消费者、Settings owner 或 Package.swift")
             return
         }
 
@@ -3150,8 +3256,10 @@ func runViewWiringSuites() {
             "侧栏语义标题、底部动作栏与空态主行动的用户标签必须全部真实可见")
         expect(
             window.contains("ForEach(model.windowStatuses)")
-                && controller.contains("model.$windowStatuses")
-                && controller.contains("consumeSelectionAnnouncementSuppression("),
+                && settingsController.contains("let soundPackModel = soundPacksEditorOwner.model")
+                && settingsController.contains("soundPackModel.$windowStatuses")
+                && settingsController.contains("shouldAnnounceSelectionChange(")
+                && editorOwner.contains("consumeSelectionAnnouncementSuppression("),
             "窗口必须从统一 revision 状态投影渲染/播报，并消费 fork 程序化选中的单次公告抑制 token")
     }
 

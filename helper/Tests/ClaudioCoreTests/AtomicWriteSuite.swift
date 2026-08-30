@@ -225,10 +225,10 @@ private let byteWritingFunctions = [
 /// `moveItem` 豁免了，理由是「它们的原子性纪律是另一条（T17e 的 staging + rename）」—— 那句话对那个
 /// 调用点是**字面意义上的假话**。豁免的理由必须对**每一个**被豁免的调用点成立，否则它只是一句托词。
 private let pathPublishingMembers = [
-    "copyItem", "moveItem", "linkItem", "createSymbolicLink", "replaceItem",
+    "copyItem", "moveItem", "linkItem", "createSymbolicLink", "replaceItem", "trashItem",
 ]
 private let pathPublishingFunctions = [
-    "rename", "renameatx_np", "link", "symlink", "unlink",
+    "rename", "renameatx_np", "link", "symlink", "unlink", "mkdirat", "unlinkat",
 ]
 /// 一个子进程能写任何东西。它**出现**会被围栏逮住；它**写了什么**这条绊线看不见（台账里写理由）。
 private let subprocessMembers: [String] = []
@@ -529,8 +529,13 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": [".write(", "rename("],
     // 回执与 active installation 标记从 mkstemp(3) 创建瞬间就是 0600；完整 write(2) + fsync
     // 后才以 rename(2) 原子替换稳定路径。unlink(2) 清 staging 及精确匹配的断开代次标记。
+    // open/openat 仅以 O_RDONLY 绑定 history 身份，不获得写权限。批量历史清理持有全部产品
+    // installation locks：先以 `.staging-*` 隔离，失败反向 renameatx_np；全部 Surface 落位后
+    // 再以一次 renameatx_np 发布 `.clear-*` commit marker。commit 后 unlinkat 在 descriptor 下
+    // 有界递归回收文件/目录；中断 tombstone 留待下次重试，不再伪报可回滚 failure。
     "helper/Sources/ClaudioCore/HostHookReceipt.swift": [
-        "fchmod(", "mkstemp(", "rename(", "unlink(", "write(",
+        "fchmod(", "mkdirat(", "mkstemp(", "open(", "rename(", "renameatx_np(", "unlink(",
+        "unlinkat(", "write(",
     ],
     // 二进制与内置包的复制。**两处都是 staging + 同卷 rename**（`copyItem` 进暂存 → `moveItem` /
     // `replaceItemAt` 发布）。pristine minimal-chime 升级更严格：`renameatx_np(RENAME_SWAP)`
@@ -565,12 +570,23 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     ],
     // 星标删除：锁内重验后的单目录项 `unlink(2)`；不跟随 symlink，也不递归删除目录。
     "gui/Sources/ClaudioGUICore/PackGallery.swift": ["unlink("],
+    // Usage 日志清理：与 append/rotation 共用 log lock，只 unlink 固定日志叶路径；ENOENT 成功。
+    // History 清理由 ClaudioCore 的 HostHookReceiptStore 既有安全原语负责，不在这里重复登记。
+    "gui/Sources/ClaudioGUICore/UsageActivity.swift": ["unlink("],
     // T6 forkPack：出厂包整份目录拷进调用独占 staging（`.copyItem(`），成功后用
     // `renameatx_np(..., RENAME_EXCL)` 做同卷、原子、不可覆盖的目录发布。manifest 本身的写
     // 已记在 `ManifestBinding.swift`，这里不重复记。
     "gui/Sources/ClaudioGUICore/PackFork.swift": [".copyItem(", "renameatx_np("],
     // 恢复出厂包：完整 factory staging、旧安装 salvage 与同父目录发布。
     "gui/Sources/ClaudioGUICore/PackRestore.swift": [".copyItem(", ".moveItem("],
+    // 用户包移入废纸篓：`open(O_RDONLY | O_DIRECTORY | O_NOFOLLOW)` 只绑定受控 user-packs
+    // 父目录，不持有写意图；`mkdirat(0700)` 创建调用独占的隐藏隔离目录，descriptor-relative
+    // `renameatx_np(..., RENAME_EXCL)` 再把核验过的包原子、不可覆盖地移入其中。只有 device/inode
+    // 与父目录复验通过后才调用可恢复的 `.trashItem(`；Trash 失败及身份异常用同一 rename 原语
+    // 不可覆盖地回滚，`unlinkat(..., AT_REMOVEDIR)` 只清已经为空的隔离目录。
+    "gui/Sources/ClaudioGUICore/UserSoundPackDeletion.swift": [
+        ".trashItem(", "mkdirat(", "open(", "renameatx_np(", "unlinkat(",
+    ],
 ]
 
 /// **内容替换式写盘的调用点台账** —— 哪个文件里有几处 `.write(to:…)` / `.write(toFile:…)`。
@@ -882,7 +898,13 @@ func runAtomicWriteSuites() {
             ("let stream = OutputStream(url: f, append: false)", "OutputStream("),
             ("let h = FileHandle(forWritingTo: configFile)", "FileHandle("),
             ("try fileManager.copyItem(at: source, to: destination)", ".copyItem("),
+            (
+                "try fileManager.trashItem(at: source, resultingItemURL: &result)",
+                ".trashItem("
+            ),
+            ("_ = mkdirat(rootDescriptor, name, 0o700)", "mkdirat("),
             ("let result = Darwin.rename(source, destination)", "rename("),
+            ("_ = unlinkat(rootDescriptor, name, AT_REMOVEDIR)", "unlinkat("),
         ]
         for (source, token) in evasions {
             let tokens = diskWriteSurfaceTokens(in: pipeline(source))
