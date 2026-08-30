@@ -13,6 +13,11 @@ public struct EventPreviewSequenceItem: Sendable, Equatable {
     }
 }
 
+public enum EventPreviewSequencePlan: Sendable, Equatable {
+    case ready([EventPreviewSequenceItem])
+    case failed(Event)
+}
+
 /// Builds the ordered, fail-closed sequence consumed by “Preview All”. The retained view calls
 /// this only through ``EventPreviewSequenceCoordinator/run(makePlan:onPlay:)``, which executes the
 /// filesystem and duration work in a detached task rather than during SwiftUI body evaluation.
@@ -21,30 +26,36 @@ public func makeEventPreviewSequencePlan(
     rows: [EventRow],
     packID: String,
     environment: AudioImportEnvironment
-) -> [EventPreviewSequenceItem] {
+) -> EventPreviewSequencePlan {
     let rowsByEvent = Dictionary(uniqueKeysWithValues: rows.map { ($0.event, $0) })
-    return presentations.compactMap { presentation in
-        guard presentation.controls.previewEnabled,
+    var items: [EventPreviewSequenceItem] = []
+    for presentation in presentations where presentation.controls.previewEnabled {
+        guard
             let row = rowsByEvent[presentation.event],
             let fileURL = eventPreviewFileURL(
                 row: row,
                 packID: packID,
                 environment: environment)
-        else { return nil }
+        else {
+            return .failed(presentation.event)
+        }
         let probedDuration = environment.durationProbe.probeDuration(of: fileURL) ?? 3
         let duration = probedDuration.isFinite ? probedDuration : 3
         let boundedDuration = min(3, max(0.1, duration))
-        return EventPreviewSequenceItem(
-            event: presentation.event,
-            fileURL: fileURL,
-            delayNanoseconds: UInt64((boundedDuration + 0.15) * 1_000_000_000))
+        items.append(
+            EventPreviewSequenceItem(
+                event: presentation.event,
+                fileURL: fileURL,
+                delayNanoseconds: UInt64((boundedDuration + 0.15) * 1_000_000_000)))
     }
+    return .ready(items)
 }
 
 public enum EventPreviewSequenceRunResult: Sendable, Equatable {
     case completed
     case empty
     case cancelled
+    case failed(Event)
 }
 
 /// Cancellation-aware sequencing owner for the retained Settings destination. Each new run
@@ -61,15 +72,22 @@ public final class EventPreviewSequenceCoordinator {
     }
 
     public func run(
-        makePlan: @escaping @Sendable () -> [EventPreviewSequenceItem],
+        makePlan: @escaping @Sendable () -> EventPreviewSequencePlan,
         onPlay: @escaping @MainActor @Sendable (EventPreviewSequenceItem) -> Void
     ) async -> EventPreviewSequenceRunResult {
         generation &+= 1
         let runGeneration = generation
-        let items = await Task.detached(priority: .userInitiated) {
+        let plan = await Task.detached(priority: .userInitiated) {
             makePlan()
         }.value
         guard generation == runGeneration, !Task.isCancelled else { return .cancelled }
+        let items: [EventPreviewSequenceItem]
+        switch plan {
+        case .ready(let plannedItems):
+            items = plannedItems
+        case .failed(let event):
+            return .failed(event)
+        }
         guard !items.isEmpty else { return .empty }
 
         for item in items {

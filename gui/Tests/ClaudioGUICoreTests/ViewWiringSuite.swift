@@ -2596,10 +2596,13 @@ func runViewWiringSuites() {
             "逐事件文件编辑必须携带同一作用域委托 SoundPacksWindow")
         expect(
             flatView.contains("resolvedEventSettingsScope(route: selection.route, scopes: scopes)")
+                && flatView.contains("routeIsUnavailable")
                 && flatView.contains("scopeProjectionIsAligned")
                 && flatView.contains(".onChange(of: scopes.map(\\.scope))")
+                && flatView.contains("selection.markCurrentScopeUnavailable()")
+                && flatView.contains(".disabled(routeIsUnavailable)")
                 && flatView.contains("reconcileScopeSelection()"),
-            "Surface 动态消失时必须让 route、读模型与可操作内容共同规范化")
+            "Surface 动态消失时必须保留 route、停止可操作内容且不得写入 fallback")
         expect(
             flatView.contains("eventSettingsWindowLayout(")
                 && flatView.contains("windowLayout: EventSettingsWindowLayout")
@@ -2624,7 +2627,9 @@ func runViewWiringSuites() {
                 && flatSettingsController.contains("window.isReleasedWhenClosed = false")
                 && flatSettingsController.contains("private let eventSettingsModel:")
                 && flatSettingsController.contains("private let eventSettingsSelection:")
-                && flatSettingsController.contains("applyEmbeddedRoute(route)"),
+                && flatSettingsController.contains("applyEmbeddedRoute(route)")
+                && flatSettingsController.contains(
+                    "eventSettingsSelection.requestPreviewStop()"),
             "事件设置必须由唯一 app-lifetime Settings window 承载并预应用 typed deep link")
         expect(
             flatView.contains(".onReceive(selection.$focusRequestRevision)")
@@ -2667,6 +2672,9 @@ func runViewWiringSuites() {
                 && flatView.contains("model.resetSelectedSurfaceOverrides()")
                 && flatView.contains("model.retrySoundPackLibraryRefresh()")
                 && flatView.contains("playAllPreviews()")
+                && flatView.contains("if previewAllTask != nil")
+                && flatView.contains("case .failed(let event):")
+                && flatView.contains("selection.$previewStopRequestRevision")
                 && flatView.contains("soundPacksModel.packCards")
                 && flatView.contains("eventSettingsPackInheritanceState(")
                 && flatView.contains("eventSettingsInheritanceState(")
@@ -2676,6 +2684,7 @@ func runViewWiringSuites() {
                 && flatView.contains(".accessibilityValue(")
                 && flatPreviewSequence.contains("Task.detached(priority: .userInitiated)")
                 && flatPreviewSequence.contains("generation == runGeneration")
+                && flatPreviewSequence.contains("case failed(Event)")
                 && flatViewWithStrings.contains(
                     ".accessibilityIdentifier(\"event-settings.preview-all\")")
                 && flatViewWithStrings.contains(
@@ -2685,7 +2694,8 @@ func runViewWiringSuites() {
         expect(
             flatView.contains("EventSettingsAICueServiceCard(")
                 && flatView.contains("EventSettingsAICueComposerView(")
-                && flatView.contains("model.aiCueAdoptionEligibility(for: event.event)")
+                && flatView.contains("model.aiCueAdoptionEligibility(")
+                && flatView.contains("for: event.event)")
                 && flatView.contains(".focused(focusedTarget, equals: .generateAICue(")
                 && flatViewWithStrings.contains(
                     ".accessibilityIdentifier( \"event-settings.event.")

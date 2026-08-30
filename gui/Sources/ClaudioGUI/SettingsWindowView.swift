@@ -117,9 +117,13 @@ struct SettingsWindowView: View {
         }
         .onReceive(model.$routeRequestRevision) { _ in
             if let failure = model.resolution.failure {
+                eventSettingsSelection?.requestPreviewStop()
                 focusedTarget = SettingsWindowFocusTarget.title(destination)
                 onAnnouncement?(settingsFailureMessage(failure))
                 return
+            }
+            if destination != .eventsAndSounds {
+                eventSettingsSelection?.requestPreviewStop()
             }
             if destination == .integrations,
                 let integrationsModel,

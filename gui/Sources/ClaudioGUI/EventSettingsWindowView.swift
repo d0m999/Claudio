@@ -38,6 +38,8 @@ struct EventSettingsWindowView: View {
     @State private var playingCandidateTitle: String?
     @State private var showsCredentialSheet = false
     @State private var previewAllTask: Task<Void, Never>?
+    @State private var previewAllRunID: UUID?
+    @State private var previewAllFailureEvent: Event?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
@@ -48,14 +50,19 @@ struct EventSettingsWindowView: View {
             config: model.configState.resolvedConfig,
             language: languageStore.language)
     }
-    private var resolvedScope: PanelSoundScopeID {
+    private var resolvedScope: PanelSoundScopeID? {
         resolvedEventSettingsScope(route: selection.route, scopes: scopes)
     }
     private var selectedScope: PanelSoundScopePresentation {
-        scopes.first(where: { $0.scope == resolvedScope }) ?? scopes[0]
+        resolvedScope.flatMap { resolved in
+            scopes.first(where: { $0.scope == resolved })
+        } ?? scopes[0]
+    }
+    private var routeIsUnavailable: Bool {
+        resolvedScope == nil
     }
     private var scopeProjectionIsAligned: Bool {
-        selection.route.scope == selectedScope.scope
+        resolvedScope == selectedScope.scope
             && model.selectedSurface == selectedScope.scope.surface
     }
     private var events: [PanelEventPresentation] {
@@ -108,8 +115,17 @@ struct EventSettingsWindowView: View {
             #endif
             reconcileScopeSelection()
         }
-        .onChange(of: selection.route) { _ in reconcileScopeSelection() }
-        .onChange(of: scopes.map(\.scope)) { _ in reconcileScopeSelection() }
+        .onChange(of: selection.route) { _ in
+            stopAllPreviews()
+            reconcileScopeSelection()
+        }
+        .onChange(of: scopes.map(\.scope)) { _ in
+            stopAllPreviews()
+            reconcileScopeSelection()
+        }
+        .onReceive(selection.$previewStopRequestRevision) { _ in
+            stopAllPreviews()
+        }
         .onChange(of: model.config.selectedPack) { _ in
             closeAICueComposer()
         }
@@ -188,7 +204,7 @@ struct EventSettingsWindowView: View {
                         .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 }
                 Spacer(minLength: 4)
-                if scope.scope == selectedScope.scope {
+                if resolvedScope == scope.scope {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(ClaudioTheme.clay(colorScheme))
                         .accessibilityHidden(true)
@@ -200,7 +216,7 @@ struct EventSettingsWindowView: View {
             .background(
                 RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
                     .fill(
-                        scope.scope == selectedScope.scope
+                        resolvedScope == scope.scope
                             ? ClaudioTheme.clay(colorScheme).opacity(0.14)
                             : Color.clear))
         }
@@ -208,7 +224,7 @@ struct EventSettingsWindowView: View {
         .focused($focusedTarget, equals: .scope(scope.scope))
         .accessibilityLabel(scope.accessibilityLabel)
         .accessibilityValue(
-            scope.scope == selectedScope.scope
+            resolvedScope == scope.scope
                 ? l10n.text(.integrationsSelected)
                 : l10n.text(.integrationsNotSelected)
         )
@@ -237,6 +253,12 @@ struct EventSettingsWindowView: View {
                 .padding(.bottom, 18)
                 .accessibilityIdentifier("event-settings.shortcut-scope-failure")
             }
+            if let failedEvent = previewAllFailureEvent {
+                FailureRow(message: previewAllFailureMessage(for: failedEvent))
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 18)
+                    .accessibilityIdentifier("event-settings.preview-all-failure")
+            }
             EventSettingsAICueServiceCard(
                 viewModel: aiCueViewModel,
                 languageStore: languageStore,
@@ -261,6 +283,7 @@ struct EventSettingsWindowView: View {
                     .padding(24)
                 }
             }
+            .disabled(routeIsUnavailable)
         }
     }
 
@@ -270,17 +293,27 @@ struct EventSettingsWindowView: View {
                 Text(l10n.text(.eventSettingsTitle))
                     .font(ClaudioTheme.font(.productTitle).weight(.bold))
                     .foregroundColor(ClaudioTheme.text(colorScheme))
-                Text(selectedScope.name + " · " + selectedScope.summaryText)
+                if let unavailableScope = selection.unavailableRequestedScopeStoredValue {
+                    Text(
+                        l10n.format(
+                            .eventSettingsUnavailableShortcutScope,
+                            unavailableScope as NSString)
+                    )
                     .font(ClaudioTheme.font(.body))
+                    .foregroundColor(ClaudioTheme.error(colorScheme))
+                } else {
+                    Text(selectedScope.name + " · " + selectedScope.summaryText)
+                        .font(ClaudioTheme.font(.body))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    Text(
+                        l10n.text(.panelSoundPackLabel) + " · "
+                            + (model.selectedPackMetadata.displayName.isEmpty
+                                ? l10n.text(.panelSelectedPackNone)
+                                : model.selectedPackMetadata.displayName)
+                    )
+                    .font(ClaudioTheme.font(.caption))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                Text(
-                    l10n.text(.panelSoundPackLabel) + " · "
-                        + (model.selectedPackMetadata.displayName.isEmpty
-                            ? l10n.text(.panelSelectedPackNone)
-                            : model.selectedPackMetadata.displayName)
-                )
-                .font(ClaudioTheme.font(.caption))
-                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                }
             }
             .accessibilityElement(children: .combine)
             .accessibilityIdentifier("event-settings.header")
@@ -288,13 +321,28 @@ struct EventSettingsWindowView: View {
             Button {
                 playAllPreviews()
             } label: {
-                Label(l10n.text(.eventSettingsPreviewAll), systemImage: "play.fill")
+                Label(
+                    l10n.text(
+                        previewAllTask == nil
+                            ? .eventSettingsPreviewAll : .eventSettingsStopPreviewAll),
+                    systemImage: previewAllTask == nil ? "play.fill" : "stop.fill")
             }
             .buttonStyle(.bordered)
-            .disabled(!events.contains(where: { $0.controls.previewEnabled }))
+            .disabled(
+                routeIsUnavailable
+                    || !events.contains(where: { $0.controls.previewEnabled })
+            )
             .focused($focusedTarget, equals: .previewAll)
-            .accessibilityLabel(l10n.text(.eventSettingsPreviewAll))
-            .accessibilityHint(l10n.text(.eventSettingsPreviewAllHint))
+            .accessibilityLabel(
+                l10n.text(
+                    previewAllTask == nil
+                        ? .eventSettingsPreviewAll : .eventSettingsStopPreviewAll)
+            )
+            .accessibilityHint(
+                l10n.text(
+                    previewAllTask == nil
+                        ? .eventSettingsPreviewAllHint : .eventSettingsStopPreviewAllHint)
+            )
             .accessibilityIdentifier("event-settings.preview-all")
         }
     }
@@ -454,12 +502,18 @@ struct EventSettingsWindowView: View {
     }
 
     private func playAllPreviews() {
+        if previewAllTask != nil {
+            stopAllPreviews()
+            return
+        }
         stopAllPreviews()
         let presentations = events
         let rows = model.eventRows
         let packID = model.config.selectedPack
         let environment = audioEnvironment
         let volume = Float(previewVolume(for: model.config))
+        let runID = UUID()
+        previewAllRunID = runID
         previewAllTask = Task { @MainActor in
             let result = await previewAllCoordinator.run(
                 makePlan: {
@@ -472,9 +526,19 @@ struct EventSettingsWindowView: View {
                 onPlay: { item in
                     previewPlayer.play(fileAt: item.fileURL, volume: volume)
                 })
-            if result == .empty {
+            guard previewAllRunID == runID else { return }
+            switch result {
+            case .empty:
                 model.reload()
+            case .failed(let event):
+                previewPlayer.stop()
+                previewAllFailureEvent = event
+                onAnnouncement?(previewAllFailureMessage(for: event))
+                model.reload()
+            case .completed, .cancelled:
+                break
             }
+            previewAllRunID = nil
             previewAllTask = nil
         }
     }
@@ -482,8 +546,15 @@ struct EventSettingsWindowView: View {
     private func stopAllPreviews() {
         previewAllTask?.cancel()
         previewAllTask = nil
+        previewAllRunID = nil
+        previewAllFailureEvent = nil
         previewAllCoordinator.cancel()
         previewPlayer.stop()
+    }
+
+    private func previewAllFailureMessage(for event: Event) -> String {
+        let title = events.first(where: { $0.event == event })?.title ?? event.rawValue
+        return l10n.format(.eventSettingsPreviewAllFailure, title as NSString)
     }
 
     @ViewBuilder
@@ -491,91 +562,98 @@ struct EventSettingsWindowView: View {
         let windowLayout = eventSettingsWindowLayout(
             availableWidth: Double(availableWidth),
             typeScale: interfaceTextSize.scale)
-        switch model.configState.topContent {
-        case .events:
-            if scopeProjectionIsAligned {
-                if model.libraryPresentationState.hasUsableSnapshot {
-                    VStack(alignment: .leading, spacing: 12) {
-                        if case .refreshFailed(let reason) = model.libraryPresentationState {
-                            libraryFailure(reason)
-                        }
-                        if !writeFailureMessages.isEmpty {
-                            writeFailures
-                        }
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(events.enumerated()), id: \.element.id) { index, event in
-                                let eligibility = model.aiCueAdoptionEligibility(for: event.event)
-                                EventSettingsEventRow(
-                                    presentation: event,
-                                    windowLayout: windowLayout,
-                                    language: languageStore.language,
-                                    focusedTarget: $focusedTarget,
-                                    onGenerateAICue: { openAICueComposer(eligibility) },
-                                    onPreview: { playPreview(event.event) },
-                                    onToggleMute: {
-                                        model.toggleMute(event.event)
-                                        onAudibilityInputsChanged()
-                                    },
-                                    onConfigureSound: {
-                                        onConfigureSound(
-                                            EventSettingsWindowRoute(scope: selectedScope.scope)
-                                                .soundPacksRoute(
-                                                    packID: model.config.selectedPack,
-                                                    event: event.event))
-                                    },
-                                    inheritanceText: eventInheritanceText(event.event),
-                                    aiCueGenerationEnabled: aiCueGenerationIsEnabled(eligibility),
-                                    aiCueGenerationHint: aiCueEligibilityHint(eligibility),
-                                    soundEditingEnabled: !model.config.selectedPack.isEmpty
-                                        && model.surfaceSoundIssue == nil,
-                                    writeDisabledReason: model.surfaceSoundIssue)
-                                if eventSettingsAICueComposerMatches(
-                                    targetSurface: aiCueViewModel.target?.surface,
-                                    targetEvent: aiCueViewModel.target?.event,
-                                    selectedSurface: selectedScope.scope.surface,
-                                    event: event.event)
-                                {
-                                    EventSettingsAICueComposerView(
-                                        viewModel: aiCueViewModel,
-                                        languageStore: languageStore,
-                                        eventTitle: event.title,
-                                        playingCandidateID: playingCandidateID,
-                                        onConfigureCredential: { showsCredentialSheet = true },
-                                        onPreviewCandidate: previewAICueCandidate,
-                                        onAdoptCandidate: adoptAICueCandidate,
-                                        onClose: closeAICueComposer
-                                    )
-                                    .padding(.vertical, 10)
-                                }
-                                if index < events.count - 1 {
-                                    Divider().opacity(0.65)
+        if routeIsUnavailable {
+            EmptyView()
+        } else {
+            switch model.configState.topContent {
+            case .events:
+                if scopeProjectionIsAligned {
+                    if model.libraryPresentationState.hasUsableSnapshot {
+                        VStack(alignment: .leading, spacing: 12) {
+                            if case .refreshFailed(let reason) = model.libraryPresentationState {
+                                libraryFailure(reason)
+                            }
+                            if !writeFailureMessages.isEmpty {
+                                writeFailures
+                            }
+                            VStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(events.enumerated()), id: \.element.id) {
+                                    index, event in
+                                    let eligibility = model.aiCueAdoptionEligibility(
+                                        for: event.event)
+                                    EventSettingsEventRow(
+                                        presentation: event,
+                                        windowLayout: windowLayout,
+                                        language: languageStore.language,
+                                        focusedTarget: $focusedTarget,
+                                        onGenerateAICue: { openAICueComposer(eligibility) },
+                                        onPreview: { playPreview(event.event) },
+                                        onToggleMute: {
+                                            model.toggleMute(event.event)
+                                            onAudibilityInputsChanged()
+                                        },
+                                        onConfigureSound: {
+                                            onConfigureSound(
+                                                EventSettingsWindowRoute(scope: selectedScope.scope)
+                                                    .soundPacksRoute(
+                                                        packID: model.config.selectedPack,
+                                                        event: event.event))
+                                        },
+                                        inheritanceText: eventInheritanceText(event.event),
+                                        aiCueGenerationEnabled: aiCueGenerationIsEnabled(
+                                            eligibility),
+                                        aiCueGenerationHint: aiCueEligibilityHint(eligibility),
+                                        soundEditingEnabled: !model.config.selectedPack.isEmpty
+                                            && model.surfaceSoundIssue == nil,
+                                        writeDisabledReason: model.surfaceSoundIssue)
+                                    if eventSettingsAICueComposerMatches(
+                                        targetSurface: aiCueViewModel.target?.surface,
+                                        targetEvent: aiCueViewModel.target?.event,
+                                        selectedSurface: selectedScope.scope.surface,
+                                        event: event.event)
+                                    {
+                                        EventSettingsAICueComposerView(
+                                            viewModel: aiCueViewModel,
+                                            languageStore: languageStore,
+                                            eventTitle: event.title,
+                                            playingCandidateID: playingCandidateID,
+                                            onConfigureCredential: { showsCredentialSheet = true },
+                                            onPreviewCandidate: previewAICueCandidate,
+                                            onAdoptCandidate: adoptAICueCandidate,
+                                            onClose: closeAICueComposer
+                                        )
+                                        .padding(.vertical, 10)
+                                    }
+                                    if index < events.count - 1 {
+                                        Divider().opacity(0.65)
+                                    }
                                 }
                             }
                         }
+                        .accessibilityElement(children: .contain)
+                        .accessibilityIdentifier("event-settings.events")
+                    } else {
+                        libraryUnavailableSection
                     }
-                    .accessibilityElement(children: .contain)
-                    .accessibilityIdentifier("event-settings.events")
                 } else {
-                    libraryUnavailableSection
+                    ProgressView()
+                        .accessibilityLabel(l10n.text(.panelLoadingEvents))
                 }
-            } else {
-                ProgressView()
-                    .accessibilityLabel(l10n.text(.panelLoadingEvents))
-            }
-        case .needsPack:
-            VStack(alignment: .leading, spacing: 12) {
-                Text(l10n.text(.panelNeedsPackSettingsMessage))
-                    .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
-                Button(l10n.text(.panelManageSoundPacks)) {
-                    onConfigureSound(.overview(surface: selectedScope.scope.surface))
+            case .needsPack:
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(l10n.text(.panelNeedsPackSettingsMessage))
+                        .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
+                    Button(l10n.text(.panelManageSoundPacks)) {
+                        onConfigureSound(.overview(surface: selectedScope.scope.surface))
+                    }
+                    .focused($focusedTarget, equals: .manageSoundPacks)
+                    .help(l10n.text(.panelManageSoundPacksHint))
+                    .accessibilityHint(l10n.text(.panelManageSoundPacksHint))
+                    .accessibilityIdentifier("event-settings.manage-sound-packs")
                 }
-                .focused($focusedTarget, equals: .manageSoundPacks)
-                .help(l10n.text(.panelManageSoundPacksHint))
-                .accessibilityHint(l10n.text(.panelManageSoundPacksHint))
-                .accessibilityIdentifier("event-settings.manage-sound-packs")
+            case .configFailure(let reason):
+                FailureRow(message: reason)
             }
-        case .configFailure(let reason):
-            FailureRow(message: reason)
         }
     }
 
@@ -656,17 +734,21 @@ struct EventSettingsWindowView: View {
     }
 
     private func reconcileScopeSelection() {
-        let scope = selectedScope.scope
+        guard let scope = resolvedScope else {
+            stopAllPreviews()
+            closeAICueComposer()
+            selection.markCurrentScopeUnavailable()
+            return
+        }
+        if selection.unavailableRequestedScopeStoredValue != nil {
+            selection.clearUnavailableScope()
+        }
         if eventSettingsShouldCloseAICueComposer(
             includesAICueComposer: true,
             targetSurface: aiCueViewModel.target?.surface,
             selectedSurface: scope.surface)
         {
             closeAICueComposer()
-        }
-        if selection.route.scope != scope {
-            selection.resolveUnavailableScope(selection.route.scope, to: scope)
-            focusedTarget = .scope(scope)
         }
         if model.selectedSurface != scope.surface {
             model.selectSoundSurface(scope.surface)

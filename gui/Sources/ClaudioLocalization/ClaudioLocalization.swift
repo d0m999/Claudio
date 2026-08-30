@@ -409,6 +409,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let eventSettingsTitle: Self = "event-settings.title"
     public static let eventSettingsPreviewAll: Self = "event-settings.preview-all"
     public static let eventSettingsPreviewAllHint: Self = "event-settings.preview-all.hint"
+    public static let eventSettingsStopPreviewAll: Self = "event-settings.preview-all.stop"
+    public static let eventSettingsStopPreviewAllHint: Self =
+        "event-settings.preview-all.stop.hint"
+    public static let eventSettingsPreviewAllFailure: Self =
+        "event-settings.preview-all.failure"
     public static let eventSettingsAutomaticPlayback: Self =
         "event-settings.automatic-playback"
     public static let eventSettingsAutomaticPlaybackFor: Self =
@@ -1093,6 +1098,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksWindowTitle, .soundPacksManagingScope, .soundPacksInvalidScope,
         .soundPacksDamagedScope,
         .eventSettingsTitle, .eventSettingsPreviewAll, .eventSettingsPreviewAllHint,
+        .eventSettingsStopPreviewAll, .eventSettingsStopPreviewAllHint,
+        .eventSettingsPreviewAllFailure,
         .eventSettingsAutomaticPlayback, .eventSettingsAutomaticPlaybackFor,
         .eventSettingsManageSounds,
         .eventSettingsManageSoundsHint, .eventSettingsWindowTitle,

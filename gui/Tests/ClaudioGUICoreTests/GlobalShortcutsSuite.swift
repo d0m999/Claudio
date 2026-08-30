@@ -488,10 +488,10 @@ func runGlobalShortcutsSuites() {
             storedValue: PanelSoundScopeID.surface(.codex).storedValue,
             scopes: scopes)
         expect(
-            staleKnown.scope == .global
+            staleKnown.scope == .surface(.codex)
                 && staleKnown.unavailableRequestedScopeStoredValue
                     == PanelSoundScopeID.surface(.codex).storedValue,
-            "已知但当前不存在的 Surface 必须在 Events controller 调用前安全回退并带原因")
+            "已知但当前不存在的 Surface 必须保留 typed route 并带可见失败原因")
         let pending = globalShortcutEventSettingsRoute(
             storedValue: "unselected",
             scopes: scopes)

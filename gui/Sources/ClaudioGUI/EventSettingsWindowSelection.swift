@@ -6,6 +6,7 @@ import Combine
 final class EventSettingsWindowSelection: ObservableObject {
     @Published private(set) var route: EventSettingsWindowRoute
     @Published private(set) var focusRequestRevision = 0
+    @Published private(set) var previewStopRequestRevision = 0
 
     var unavailableRequestedScopeStoredValue: String? {
         route.unavailableRequestedScopeStoredValue
@@ -20,16 +21,24 @@ final class EventSettingsWindowSelection: ObservableObject {
         self.route = route
     }
 
-    func resolveUnavailableScope(
-        _ requestedScope: PanelSoundScopeID,
-        to fallback: PanelSoundScopeID
-    ) {
+    func markCurrentScopeUnavailable() {
+        guard route.unavailableRequestedScopeStoredValue == nil else { return }
         route = EventSettingsWindowRoute(
-            scope: fallback,
-            unavailableRequestedScopeStoredValue: requestedScope.storedValue)
+            scope: route.scope,
+            event: route.event,
+            unavailableRequestedScopeStoredValue: route.scope.storedValue)
+    }
+
+    func clearUnavailableScope() {
+        guard route.unavailableRequestedScopeStoredValue != nil else { return }
+        route = EventSettingsWindowRoute(scope: route.scope, event: route.event)
     }
 
     func requestInitialFocus() {
         focusRequestRevision += 1
+    }
+
+    func requestPreviewStop() {
+        previewStopRequestRevision += 1
     }
 }

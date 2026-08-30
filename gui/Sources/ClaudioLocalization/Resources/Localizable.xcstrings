@@ -3130,6 +3130,24 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "按顺序播放当前真正可听的事件声音" } }
       }
     },
+    "event-settings.preview-all.stop" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop Preview" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止试听" } }
+      }
+    },
+    "event-settings.preview-all.stop.hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Stop the current preview sequence" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停止当前试听序列" } }
+      }
+    },
+    "event-settings.preview-all.failure" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Couldn’t preview %@ because its sound file is unavailable or unsafe. Playback stopped." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "无法试听 %@：声音文件不可用或不安全，播放已停止。" } }
+      }
+    },
     "event-settings.automatic-playback" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Automatic playback" } },

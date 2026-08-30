@@ -91,8 +91,7 @@ public func eventSettingsFirstFocusTarget(
 }
 
 /// Repeated typed deep links must focus the same stable event identity. A stale scope never leaves
-/// focus pointing at a row whose writes would target that stale Surface; it falls back to the first
-/// visible scope and lets the caller present the route failure separately.
+/// focus pointing at a row whose writes would target another Surface.
 public func eventSettingsRouteFocusTarget(
     route: EventSettingsWindowRoute,
     scopes: [PanelSoundScopeID],
@@ -395,8 +394,8 @@ public func resolvedPanelSoundScopeSelection(
 }
 
 /// Produces the typed Events route used by the global shortcut. Known Surface identities remain
-/// intact so the retained Events page can detect a Surface that disappeared; unknown persisted
-/// identities use a safe current scope while preserving the exact value for a visible reason.
+/// intact even when currently unavailable. Unknown persisted identities cannot be represented as a
+/// typed scope, so they retain the exact raw value beside a non-writable Global presentation.
 public func globalShortcutEventSettingsRoute(
     storedValue: String?,
     scopes: [PanelSoundScopePresentation]
@@ -410,7 +409,7 @@ public func globalShortcutEventSettingsRoute(
             return EventSettingsWindowRoute(scope: requestedScope)
         }
         return EventSettingsWindowRoute(
-            scope: resolvedPanelSoundScopeSelection(storedValue: storedValue, scopes: scopes),
+            scope: requestedScope,
             unavailableRequestedScopeStoredValue: storedValue)
     }
     let resolved = resolvedPanelSoundScopeSelection(storedValue: storedValue, scopes: scopes)
@@ -420,14 +419,20 @@ public func globalShortcutEventSettingsRoute(
         unavailableRequestedScopeStoredValue: unavailableValue)
 }
 
-/// Keeps the retained Events & Sounds route on a currently visible sound scope. A Surface may
-/// disappear while the window remains open; resolving through the same rule as the panel prevents
-/// a fallback label from continuing to write to the stale Surface.
+/// Resolves a retained Events & Sounds route only when its exact typed scope is currently visible.
+/// A known unavailable Surface remains recoverable if it reappears; an unknown raw shortcut value
+/// never turns its Global presentation into a writable fallback.
 public func resolvedEventSettingsScope(
     route: EventSettingsWindowRoute,
     scopes: [PanelSoundScopePresentation]
-) -> PanelSoundScopeID {
-    resolvedPanelSoundScopeSelection(storedValue: route.scope.storedValue, scopes: scopes)
+) -> PanelSoundScopeID? {
+    if let unavailableValue = route.unavailableRequestedScopeStoredValue,
+        unavailableValue != route.scope.storedValue
+    {
+        return nil
+    }
+    guard scopes.contains(where: { $0.scope == route.scope }) else { return nil }
+    return route.scope
 }
 
 /// `unselected` / missing means the first host refresh has not yet established whether a Surface

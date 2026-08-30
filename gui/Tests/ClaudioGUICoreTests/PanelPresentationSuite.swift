@@ -250,7 +250,7 @@ func runPanelPresentationSuites() async {
                     enabled: true),
                 EventRow(
                     event: .subagentStop,
-                    coverage: .present(fileName: "vanished.aiff"),
+                    coverage: .unmapped,
                     enabled: true),
             ]
             let presentations = panelEventPresentations(
@@ -267,12 +267,34 @@ func runPanelPresentationSuites() async {
                 rows: rows,
                 packID: "pack",
                 environment: environment)
+            guard case .ready(let items) = plan else {
+                expect(false, "不可试听行必须被跳过，不得让合法序列失败")
+                return
+            }
+            expect(items.map(\.event) == [.taskStart, .stop], "规划必须保持公共事件顺序")
             expect(
-                plan.map(\.event) == [.taskStart, .stop],
-                "规划必须保持公共事件顺序，并在播放前剔除已失效文件")
-            expect(
-                plan.allSatisfy { $0.delayNanoseconds == 350_000_000 },
+                items.allSatisfy { $0.delayNanoseconds == 350_000_000 },
                 "每项等待必须消费注入时长并追加固定切换间隔")
+
+            let staleRows =
+                rows.dropLast() + [
+                    EventRow(
+                        event: .subagentStop,
+                        coverage: .present(fileName: "vanished.aiff"),
+                        enabled: true)
+                ]
+            let stalePresentations = panelEventPresentations(
+                rows: Array(staleRows),
+                scope: .global,
+                masterVolume: 0.8,
+                language: .english)
+            expect(
+                makeEventPreviewSequencePlan(
+                    presentations: stalePresentations,
+                    rows: Array(staleRows),
+                    packID: "pack",
+                    environment: environment) == .failed(.subagentStop),
+                "可试听行的文件若在运行前失效，序列必须携带对应 Event 失败")
         }
 
         let coordinator = EventPreviewSequenceCoordinator()
@@ -289,7 +311,7 @@ func runPanelPresentationSuites() async {
         var played: [Event] = []
         let run = Task { @MainActor in
             await coordinator.run(
-                makePlan: { items },
+                makePlan: { .ready(items) },
                 onPlay: { played.append($0.event) })
         }
         while played.isEmpty {
@@ -298,6 +320,10 @@ func runPanelPresentationSuites() async {
         coordinator.cancel()
         expect(await run.value == .cancelled, "scope/单项试听切换必须取消在途序列")
         expect(played == [.taskStart], "取消后不得继续播放下一公共事件")
+        expect(
+            await coordinator.run(makePlan: { .failed(.stop) }, onPlay: { _ in })
+                == .failed(.stop),
+            "运行时规划失败必须把对应 Event 交回可见错误层")
     }
 
     suite("事件与提示音窗口布局：按窗口可用宽度与文字缩放独立降级") {
@@ -433,13 +459,20 @@ func runPanelPresentationSuites() async {
         expect(
             resolvedEventSettingsScope(
                 route: EventSettingsWindowRoute(scope: .surface(.workBuddy)),
-                scopes: Array(scopes.prefix(2))) == .surface(.codex),
-            "窗口保留期间 WorkBuddy 消失时必须规范化到首个可用 Surface，不能继续写旧作用域")
+                scopes: Array(scopes.prefix(2))) == nil,
+            "窗口保留期间 WorkBuddy 消失时必须拒绝其他 Surface 作为写目标")
         expect(
             resolvedEventSettingsScope(
                 route: EventSettingsWindowRoute(scope: .surface(.workBuddy)),
-                scopes: [scopes[0]]) == .global,
-            "窗口保留期间所有 Surface 消失时必须让路由与写目标一起回退 Global")
+                scopes: [scopes[0]]) == nil,
+            "窗口保留期间所有 Surface 消失时不得把 Global 变成写入 fallback")
+        expect(
+            resolvedEventSettingsScope(
+                route: EventSettingsWindowRoute(
+                    scope: .global,
+                    unavailableRequestedScopeStoredValue: "future-surface"),
+                scopes: [scopes[0]]) == nil,
+            "未知 raw scope 只能借用 Global 展示目的页，不得获得 Global 写权限")
 
         let pendingFallback = resolvedPanelSoundScopeSelection(
             storedValue: "unselected",

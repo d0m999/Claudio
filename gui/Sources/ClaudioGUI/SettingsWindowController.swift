@@ -188,8 +188,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     /// Prepares a global-shortcut route before the shared close-before-show handoff. Unknown or
-    /// no-longer-published scopes still open the real Events destination on a safe fallback, while
-    /// the embedded selection retains the visible recovery reason.
+    /// no-longer-published scopes still open the real Events destination, while the embedded
+    /// selection retains the visible failure reason and never authorizes a fallback write target.
     func prepareEventSettingsRoute(_ route: EventSettingsWindowRoute) -> SettingsRoute {
         eventSettingsSelection.select(route)
         if route.unavailableRequestedScopeStoredValue == nil {
@@ -228,6 +228,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let handback = handbackTracker.consumeOnClose() ?? originalHandback
         let restoration = focusRestoration
         focusRestoration = nil
+        eventSettingsSelection.requestPreviewStop()
         aiCueViewModel.endSession()
         DispatchQueue.main.async {
             MainActor.assumeIsolated {
