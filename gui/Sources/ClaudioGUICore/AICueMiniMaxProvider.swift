@@ -8,10 +8,6 @@ import Foundation
 /// deadline.
 public struct MiniMaxAICueProvider: AICueProvider, Sendable {
     private static let voiceProbeURL = fixedURL("https://api.minimax.io/v1/get_voice")
-    private static let origin = try! AICueOrigin(
-        scheme: "https",
-        host: "api.minimax.io",
-        port: nil)
     private static let registeredProfile =
         try! AICueProviderRegistry().profile(for: .miniMaxGlobal)
     private static let acceptedJSONMediaTypes: Set<String> = ["application/json"]
@@ -38,11 +34,14 @@ public struct MiniMaxAICueProvider: AICueProvider, Sendable {
 
     public func validateCredential(_ credential: SensitiveCredentialInput) async throws {
         let body = try jsonBody(["voice_type": "all"])
+        guard let expectedOrigin = try? AICueOrigin(url: Self.voiceProbeURL) else {
+            throw AICueProviderError.requiredModelsUnavailable
+        }
         let request = AICueTransportRequest(
             method: .post,
             url: Self.voiceProbeURL,
-            expectedOrigin: Self.origin,
-            expectedPath: "/v1/get_voice",
+            expectedOrigin: expectedOrigin,
+            expectedPath: Self.voiceProbeURL.path,
             headers: ["accept": "application/json", "content-type": "application/json"],
             body: body,
             acceptedMediaTypes: Self.acceptedJSONMediaTypes,
@@ -106,6 +105,9 @@ public struct MiniMaxAICueProvider: AICueProvider, Sendable {
         else {
             throw AICueProviderError.invalidRequest
         }
+        guard let expectedOrigin = try? AICueOrigin(url: route.endpoint) else {
+            throw AICueProviderError.invalidRequest
+        }
 
         let body = try jsonBody([
             "audio_setting": [
@@ -129,7 +131,7 @@ public struct MiniMaxAICueProvider: AICueProvider, Sendable {
         let transportRequest = AICueTransportRequest(
             method: .post,
             url: route.endpoint,
-            expectedOrigin: Self.origin,
+            expectedOrigin: expectedOrigin,
             expectedPath: route.endpoint.path,
             headers: ["accept": "application/json", "content-type": "application/json"],
             body: body,

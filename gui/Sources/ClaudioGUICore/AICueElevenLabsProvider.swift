@@ -6,10 +6,6 @@ import Foundation
 /// redirect rejection, wire ceilings, cancellation and deadline handling.
 public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
     private static let modelsURL = fixedURL("https://api.elevenlabs.io/v1/models")
-    private static let origin = try! AICueOrigin(
-        scheme: "https",
-        host: "api.elevenlabs.io",
-        port: nil)
     private static let registeredProfile =
         try! AICueProviderRegistry().profile(for: .elevenLabsGlobal)
     private static let acceptedAudioMediaTypes: Set<String> = [
@@ -34,11 +30,14 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
     }
 
     public func validateCredential(_ credential: SensitiveCredentialInput) async throws {
+        guard let expectedOrigin = try? AICueOrigin(url: Self.modelsURL) else {
+            throw AICueProviderError.requiredModelsUnavailable
+        }
         let request = AICueTransportRequest(
             method: .get,
             url: Self.modelsURL,
-            expectedOrigin: Self.origin,
-            expectedPath: "/v1/models",
+            expectedOrigin: expectedOrigin,
+            expectedPath: Self.modelsURL.path,
             headers: ["accept": "application/json"],
             body: nil,
             acceptedMediaTypes: ["application/json"],
@@ -165,9 +164,8 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
             URLQueryItem(name: "output_format", value: "mp3_44100_128")
         ]
         guard let url = components.url else { throw AICueProviderError.invalidRequest }
-        return generationTransportRequest(
+        return try generationTransportRequest(
             url: url,
-            expectedPath: route.endpoint.path,
             body: body,
             deadline: deadline)
     }
@@ -196,24 +194,25 @@ public struct ElevenLabsAICueProvider: AICueProvider, Sendable {
             "prompt_influence": influence,
             "model_id": route.modelID,
         ])
-        return generationTransportRequest(
+        return try generationTransportRequest(
             url: route.endpoint,
-            expectedPath: route.endpoint.path,
             body: body,
             deadline: deadline)
     }
 
     private func generationTransportRequest(
         url: URL,
-        expectedPath: String,
         body: Data,
         deadline: AICueGenerationDeadline
-    ) -> AICueTransportRequest {
-        AICueTransportRequest(
+    ) throws -> AICueTransportRequest {
+        guard let expectedOrigin = try? AICueOrigin(url: url) else {
+            throw AICueProviderError.invalidRequest
+        }
+        return AICueTransportRequest(
             method: .post,
             url: url,
-            expectedOrigin: Self.origin,
-            expectedPath: expectedPath,
+            expectedOrigin: expectedOrigin,
+            expectedPath: url.path,
             headers: ["accept": "audio/mpeg", "content-type": "application/json"],
             body: body,
             acceptedMediaTypes: Self.acceptedAudioMediaTypes,

@@ -70,6 +70,12 @@ package struct AICueOrigin: Hashable, Sendable {
         self.effectivePort = effectivePort
     }
 
+    package init(url: URL) throws {
+        guard let scheme = url.scheme else { throw AICueOriginError.invalidScheme }
+        guard let host = url.host else { throw AICueOriginError.invalidHost }
+        try self.init(scheme: scheme, host: host, port: url.port)
+    }
+
     package func matches(_ url: URL) -> Bool {
         guard
             url.scheme?.lowercased() == scheme,

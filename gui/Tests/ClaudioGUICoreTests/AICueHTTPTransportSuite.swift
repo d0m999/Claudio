@@ -426,6 +426,20 @@ func runAICueHTTPTransportSuites() async {
         } catch {}
         expect(rejectedHTTPOrigin, "origin v1 只能是 HTTPS")
 
+        let derivedURL = URL(string: "https://FIXTURE.transport:8443/v1/generate")!
+        let derivedOrigin = try! AICueOrigin(url: derivedURL)
+        expect(
+            derivedOrigin.matches(derivedURL)
+                && !derivedOrigin.matches(URL(string: "https://fixture.transport/v1/generate")!),
+            "adapter 必须能从实际 allowlisted route 派生 scheme/host/port 信任边界")
+        var rejectedRelativeURL = false
+        do {
+            _ = try AICueOrigin(url: URL(string: "/v1/generate")!)
+        } catch AICueOriginError.invalidScheme {
+            rejectedRelativeURL = true
+        } catch {}
+        expect(rejectedRelativeURL, "没有 HTTPS origin 的相对 URL 必须 fail closed")
+
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [AICueUnaryTransportURLProtocol.self]
         let transport = AICueURLSessionUnaryTransport(configuration: configuration)
