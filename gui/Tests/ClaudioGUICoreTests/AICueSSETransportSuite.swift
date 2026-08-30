@@ -64,7 +64,7 @@ private final class AICueDelayedSSEURLProtocol: URLProtocol, @unchecked Sendable
         }
         self.delivery = delivery
         DispatchQueue.global(qos: .utility).asyncAfter(
-            deadline: .now() + 0.05,
+            deadline: .now() + 0.75,
             execute: delivery)
     }
 
@@ -269,8 +269,8 @@ func runAICueSSETransportSuites() async {
         let asymmetricTransport = AICueURLSessionSSETransport(
             configuration: delayedConfiguration,
             timeouts: AICueTransportTimeouts(
-                connectionSeconds: 0.02,
-                inactivitySeconds: 0.15))
+                connectionSeconds: 0.5,
+                inactivitySeconds: 1.5))
         var delayedEvents: [AICueSSEEvent] = []
         do {
             for try await event in asymmetricTransport.events(
