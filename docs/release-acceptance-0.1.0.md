@@ -55,9 +55,10 @@ bash scripts/check-release-size.sh dist/claudi0.app
 |---|---|---|
 | Automated | `passed` at `6fda317c59a217ec86fdf492a89ba4f50a62fc37` | harness、Debug build、localization 与静态 wiring/model contracts |
 | Local dev-bundle | `passed`；macOS `26.6.2`、`arm64`、ad-hoc | 只有当前架构开发包；universal 与 Developer ID 为 `not_satisfied` |
-| Real callback | Issue #15 历史闭环已记录；Disconnect 后 Current Activation 为 `none` | 真实回调不升级为 RC 或当前激活 |
+| Real callback | Issue #15 历史闭环已记录；2026-08-31 当前 installation 的 2/5 Current Activation 为 `recorded` | 当前回调只证明 WorkBuddy 2/5，不升级为 RC |
+| WorkBuddy 2/5 持久连接验收 | `passed`；保持连接 | 只批准本机当前 installation 的 2/5 连接与激活，不批准 5/5、RC 或发布 |
 | Signed RC | `not_evaluated`；Issue #18 `OPEN` | 未生成、下载或复验签名 universal RC |
-| Manual acceptance | `not_evaluated`；Issues #19–#22 `OPEN` | 双架构真机、视觉、键盘/VoiceOver 与正式批准均未完成 |
+| Release manual acceptance | `not_evaluated`；Issues #19–#22 `OPEN` | 双架构真机、视觉、键盘/VoiceOver 与发布批准均未完成 |
 
 Local dev-bundle 的 notarization、stapling、Gatekeeper、DMG checksum 与 Intel hardware 全部保持
 `not_evaluated`；它不提供 universal、Developer ID、notarized、stapled、Gatekeeper 或 Intel 证据。
@@ -193,6 +194,47 @@ Current Activation `none`，active installation marker 已移除；两条 bindin
 本闭环未发现需要放宽 receipt、scope、配置事务或 fail-closed 契约的缺陷。执行中一度使用了
 会把 JSON 布尔 `false` 错当回退条件的 `jq //` 诊断表达式；改用 `has(key)` 后确认 effective
 profile 与两个 `muted` receipt 一致，该诊断错误未修改任何产品代码或用户配置。
+
+## WorkBuddy 持久连接与 2/5 当前激活正式验收（2026-08-31）
+
+本节记录有权用户明确给出的本次窄范围正式验收：保持当前用户、当前 Mac 的 WorkBuddy 连接，
+并以当前 installation 下两条真实 binding 回执点亮 `WorkBuddy 2/5`。执行证据绑定
+`main@55919ca6fa0c3c3bcfcfa713311bb0768c640191`；验收记录不保存 installation UUID、scope
+fingerprint、回执时间、配置/备份路径、prompt、response、原始回执或日志。
+
+### 当前身份、连接与回执
+
+| 字段 | 验收结果 | 证据等级 |
+|---|---|---|
+| WorkBuddy | version/build `5.4.4`，bundle `com.tencent.workbuddy.mac` | static configuration |
+| Claudio | `0.0.0-dev`；已安装 CLI 与 `dist/claudi0.app` helper 字节一致 | local-only integrity |
+| 写入前 preflight | `available` / `ready` / `writable` / `not_configured` / `none`，两次观察一致 | static configuration |
+| Connect 后 | `configured` / `awaiting_receipt`；没有用静态配置伪造激活 | static configuration |
+| 最终 preflight | `available` / `ready` / `writable` / `configured` / `observed`，`current_activation=recorded`，WorkBuddy doctor `ok` | current activation |
+| `UserPromptSubmit` → `task_start` | schema 2；current installation、surface、binding、scope 与事件全部匹配；`muted` | current activation |
+| `Stop` → `stop` | schema 2；current installation、surface、binding、scope 与事件全部匹配；`muted` | current activation |
+
+两条真实回执由用户提交无敏感内容的测试任务并点击 `Stop` 形成；Claudio 未读取或记录 prompt、
+response。两次 `muted` 是当前有效声音配置的真实播放结果，不等于肉耳听音通过。
+
+### UI、保留性与正式结论
+
+在指定的 `dist/claudi0.app` 中，连接与诊断页经“重新检测”后显示
+`WorkBuddy 2/5 已就绪`，声音作用域显示 `WorkBuddy 2/5 · 已激活`。`StopFailure`、
+`Notification`、`SubagentStop` 继续显示当前版本未实现，没有把接口声明提升为 5/5。
+
+| 保留项 | 最终结果 |
+|---|---|
+| Git 外备份 | 独立备份为正规文件、mode `0600`，与 Connect 前 WorkBuddy 配置逐字节一致 |
+| WorkBuddy hooks | 写入前 9 条第三方、0 条自有；最终 9 条第三方、2 条自有，共 11 条 |
+| 未知字段与第三方 hooks | 去除两条 Claudio 自有条目后的规范化配置与写入前一致 |
+| 声音配置与其它宿主 | `~/.claudio/config.json`、其它宿主状态与连接前一致 |
+| Git 与仓库 | 验收执行结束时仍为 clean `main@55919ca6fa0c3c3bcfcfa713311bb0768c640191` |
+| 连接生命周期 | 保持连接；未执行 Disconnect |
+
+**正式结论：本机当前 WorkBuddy installation 的持久连接与 2/5 Current Activation 验收通过。**
+本结论不批准 WorkBuddy 5/5、肉耳听音、双架构、VoiceOver、签名、公证、RC、生产或发布；账本顶部
+`0.1.0` 整体状态继续为“未通过”，Issues #18–#22 继续保持开放和 `not_evaluated`。
 
 ## 自动化与分发门禁
 

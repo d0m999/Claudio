@@ -1,10 +1,11 @@
 # PLAN — WorkBuddy 正式集成与 surface 声音配置
 
-> 状态：**2/5 pre-RC 状态/可访问性自动化已收口；历史 callback 已闭环并 Disconnect；Current Activation 为 none**
+> 状态：**2/5 pre-RC 自动化已收口；当前持久连接与 Current Activation 已获本机窄验收；RC/发布未通过**
 >
-> 更新：2026-08-25
+> 更新：2026-08-31
 >
-> 不授权 commit、push、发布或修改真实 `~/.workbuddy/settings.json`。
+> 本文件本身不构成 commit、push、发布或真实宿主写入授权；2026-08-31 的连接、验收记录、
+> commit 与 push 均来自当次独立用户授权。
 
 ## 1. 用户结果
 
@@ -130,7 +131,7 @@ git diff --check
 完整 commit、命令、结果与证据分层只维护在
 [0.1.0 验收账本](../docs/release-acceptance-0.1.0.md#pre-rc-自动化基线issues-6466)，不创建第二份账本。
 
-## 5. 真实验收结果（Issue #15）
+## 5. 真实验收结果（Issue #15 历史闭环与当前持久连接）
 
 2026-08-24 在单独授权下已完成可逆 Connect → callback → GUI 核对 → Disconnect：
 
@@ -142,8 +143,20 @@ git diff --check
   第三方 hooks、未知字段、声音偏好、备份和脱敏历史按契约保留。
 - 本闭环是历史真实宿主证据，不是当前激活、RC、发布或正式验收。
 
+2026-08-31 在 WorkBuddy `5.4.4` 上再次完成 Connect 与真实回执验证，并按用户明确批准保持连接：
+
+- `UserPromptSubmit → task_start` 与 `Stop → stop` 均为当前 installation/scope 下的 schema 2
+  Current Activation；最终 preflight 为 `configured` / `observed`，WorkBuddy doctor 为 `ok`。
+- 两条声音结果均为 `muted`；这证明回调与播放策略执行，不构成肉耳听音通过。
+- 连接与诊断页显示 `WorkBuddy 2/5 已就绪`，声音作用域显示
+  `WorkBuddy 2/5 · 已激活`；其余三个事件继续为 `notImplemented`。
+- 第三方 hooks、未知字段、声音配置、其它宿主状态与 Git 外 `0600` 备份均按契约保留；
+  最终保留 9 条第三方 hook 与 2 条 Claudio 自有 hook，未执行 Disconnect。
+- 本机当前 installation 的 2/5 持久连接与 Current Activation 窄验收正式通过；该结论不批准
+  5/5、肉耳听音、双架构、VoiceOver、签名、公证、RC、生产或发布。
+
 完整脱敏证据与时间线只记录在
-[0.1.0 验收账本](../docs/release-acceptance-0.1.0.md#workbuddy-真实回调闭环issue-15)。
+[0.1.0 验收账本](../docs/release-acceptance-0.1.0.md#workbuddy-持久连接与-25-当前激活正式验收2026-08-31)。
 
 ## 6. 剩余三个事件的 evidence-first 门
 

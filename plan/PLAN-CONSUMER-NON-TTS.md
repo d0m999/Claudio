@@ -1,8 +1,8 @@
 # PLAN — 非 TTS 宿主提示音：状态与决策索引
 
-> 状态：**pre-RC 自动化基线已收口；AX 技术 no-go；WorkBuddy 2/5 历史闭环完成、当前已断开**
+> 状态：**pre-RC 自动化基线已收口；AX 技术 no-go；WorkBuddy 2/5 当前激活与持久连接窄验收通过**
 >
-> 更新：2026-08-25
+> 更新：2026-08-31
 >
 > 本文件只维护跨宿主结论、状态、决策门和权威证据入口。每个新 Host Surface 或剩余事件
 > 必须使用独立计划/Issue；不得在本索引里顺带授权实现、宿主写入或真实验收。
@@ -16,12 +16,14 @@
    ChatGPT 集成可用。
 3. Issue #17 在当前 ChatGPT `26.818.31338` / `6892` 上无法形成稳定 surface identity，
    observer 启动次数为 0，结论是 fail-closed 技术 no-go。AX 不进入可用、发布或生产阶段。
-4. WorkBuddy 已完成 `UserPromptSubmit → task_start`、`Stop → stop` 两条真实回调闭环，
-   随后已 Disconnect；历史回执保留，但 Current Activation 为 `none`。
+4. WorkBuddy 在 `5.4.4` 上保持连接；`UserPromptSubmit → task_start`、`Stop → stop` 两条
+   当前 binding 均有匹配当前 installation/scope 的 schema 2 回执，Current Activation 为
+   `recorded`。本机持久连接与 2/5 当前激活已获用户正式批准；未执行 Disconnect。
 5. WorkBuddy 剩余三个事件逐事件进入独立 evidence-first 计划/Issue；在真实宿主证据成立前，
    不实现、不接线，也不承诺 5/5。
-6. Issues #64–#66 的自动化、状态模型与 wiring 基线已聚合验证；结论仅为 `pre_rc_only`，
-   不改变 Issues #18–#22 的正式验收状态。精确 commit 与计数只维护在唯一验收账本。
+6. Issues #64–#66 的自动化、状态模型与 wiring 基线已聚合验证；结论仅为 `pre_rc_only`。
+   本次 2/5 持久连接窄验收不改变 Issues #18–#22 的 RC、双架构、视觉、VoiceOver 与发布状态；
+   精确 commit 与计数只维护在唯一验收账本。
 
 ## 2. 五轴状态矩阵
 
@@ -29,7 +31,7 @@
 |---|---|---|---|---|---|
 | Claude Code | 五个正式 hook 事件 | 5/5 native adapter | 本计划不重验，见发布验收账本 | 本计划未采集当前回执，不推断 | 未通过 |
 | Codex | 4/5；无 `StopFailure`，`PermissionRequest` 仅部分覆盖 Notification | 4/5 native adapter | 本计划不重验，见发布验收账本 | 本计划未采集当前回执，不推断 | 未通过 |
-| WorkBuddy | 五个事件已声明；Notification 为 partial | 2/5 native adapter | 2026-08-24 Issue #15：两条匹配当前 installation/scope 的真实回执 | Disconnect 后为 `none` | 未通过；不构成 RC 或正式验收 |
+| WorkBuddy | 五个事件已声明；Notification 为 partial | 2/5 native adapter | Issue #15 历史闭环；2026-08-31 当前 installation 再次取得两条真实回执 | `recorded`；保持连接 | 本机 2/5 持久连接窄验收通过；RC/生产未通过 |
 | ChatGPT Desktop AX | Issue #17 当前版本无法形成稳定 surface identity | 仅有隔离 `DEBUG` tracer；无 adapter、权限 UX 或生产声音链 | 无真实生命周期回执；其余场景 `not_evaluated` | 不适用 | 技术 no-go |
 | Claude Desktop AX | 本计划未验证任何可用接口 | 仅保留诊断 identity，无产品实现 | 无 | 无 | 未评估且不在路线图中 |
 
@@ -108,8 +110,9 @@ git diff --check
 ```
 
 2026-08-25 的聚合入口已在 clean checkout 上通过全部 gate。该结果只属于 automated / local
-dev-bundle；精确 commit 与计数见唯一验收账本。原生 SwiftUI、VoiceOver、键盘/焦点、
-Intel/Apple Silicon RC、真实宿主 callback 和正式批准仍属于独立证据。
+dev-bundle；精确 commit 与计数见唯一验收账本。2026-08-31 的 WorkBuddy 2/5 Current Activation
+与本机持久连接窄验收已另行记录；原生 SwiftUI 完整矩阵、VoiceOver、键盘/焦点、
+Intel/Apple Silicon RC 与发布批准仍属于独立证据。
 
 ### 6.1 正式验收 issue 链
 
