@@ -1,6 +1,6 @@
 # PLAN — 描述式 AI 提示音（BYOK、多 Provider）执行计划
 
-> 状态：**TTS-MP-0 跨文档设计门禁已完成；多 Provider 实现、迁入统一设置、真机无障碍、真实 Provider 与发布证据待单独验收**
+> 状态：**TTS-MP-0、allowlisted 多 Provider 实现与统一设置迁移的自动合同已落地；真机无障碍、真实 Provider 与发布证据待单独验收**
 >
 > 日期：2026-08-26
 >
@@ -17,12 +17,14 @@
 > 九个设置目的页、统一窗口、路由与视觉迁移的总规格见
 > `plan/PLAN-SETTINGS-EXPERIENCE.md`；本文件只拥有 AI 提示音子域合同。
 >
-> 本轮已完成 ElevenLabs 基线的本地 Swift 实现与 fixture 验证，并按 2026-08-26 官方文档冻结
-> MiniMax/Qwen 的首批 profile、凭据验证策略和 transport 合同；仍未授权输入真实 key、发真实
-> 供应商请求、付费探测、修改真实宿主配置、commit 或 push。
+> 当前实现已完成四个 allowlisted profile、provider-neutral registry/request compiler、hardened
+> transports、逐 profile credential policy、ElevenLabs/MiniMax/Qwen adapters 与统一设置投影的
+> deterministic fixture 验证。自动测试只使用假 key/fixture；未输入真实 key、未发真实供应商或
+> 付费请求，也未据此宣称音质、费用或正式发布验收。
 >
-> 兼容性说明：`docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md` 已记录 allowlisted
-> 多 Provider 目标；目标只有在后续 TTS-MP-1 至 TTS-MP-5 和对应验收完成后才视为已实现。
+> 兼容性说明：`docs/adr/0006-use-elevenlabs-byok-with-fixed-modality-routing.md` 与 TTS-MP-1 至
+> TTS-MP-5 的 Swift/fixture 合同已经按 allowlisted 多 Provider 目标落地；真实 Provider、原生 UI、
+> 双架构、签名、公证与发布仍保持独立的 `NOT VERIFIED` 证据层。
 
 ## 0. 目标与完成定义
 
@@ -694,18 +696,18 @@ provider 输出不得绕过现有 `AudioImport`：
 | Task | 内容 | 主要依赖 | 当前状态 | 完成门槛 |
 |---|---|---|---|---|
 | TTS-0 | ElevenLabs 基线 provider/model、能力、隐私契约与本地 adapter | — | 已完成 | 原有 ElevenLabs 路线继续通过现有 fixture；其证据保留为回归基线 |
-| TTS-1 | `AICueDisplayName`、`AICueSoundPlan`、generation/adoption target、candidate/error 与双状态机 | TTS-0 | 单 Provider 基线已完成；需 provider-neutral 修订 | profile 选择不进入采用目标；名称不进入 provider request；3 候选契约稳定 |
-| TTS-2 | 单 Provider Keychain manager 与 adapter 基线 | TTS-0–TTS-1 | ElevenLabs fixture 已完成；多 profile 扩展待做 | 旧 key 可读；替换/删除 fail closed；无自定义 endpoint/model/voice |
+| TTS-1 | `AICueDisplayName`、`AICueSoundPlan`、generation/adoption target、candidate/error 与双状态机 | TTS-0 | 已完成 provider-neutral 修订 | profile 选择不进入采用目标；名称不进入 provider request；3 候选契约稳定 |
+| TTS-2 | 单 Provider Keychain manager 与 adapter 基线 | TTS-0–TTS-1 | 已完成逐 profile 扩展 | 旧 key 可读；替换/删除 fail closed；无自定义 endpoint/model/voice |
 | TTS-MP-0 | 冻结官方 API/地区/voice/格式/验证策略，并同步 ADR 0006、设置计划、原型与 #92 拆分 | TTS-0 | 已完成（#103，本地文档/原型门禁） | 四个 profile 有 exact route、credential policy、能力/语言/费用/隐私/错误矩阵；ADR、设置计划、原型和 tickets 无冲突 |
-| TTS-MP-1 | provider-neutral 领域类型、route-derived capability、registry、确定性语音文本语法与 request compiler | TTS-MP-0 | 待做 | 公共接口不依赖 `ElevenLabsAICueCompiledRequest`；profile 只能来自 registry；speech/mixed 无明确台词时本地失败 |
-| TTS-MP-1T | hardened unary/SSE transports、exact-origin auth injection、增量 SSE parser、wire/decoded ceilings 与 generation deadline | TTS-MP-1 | 待做 | transport 不保存 secret；Bearer/xi-api-key 正确隔离；SSE fragmentation/cancel/terminal 与 60 秒 deadline 全覆盖 |
-| TTS-MP-2 | registry-owned credential slots、read-only/deferred validation policy、Qwen pending replacement 与非敏感 profile/region 偏好 | TTS-MP-1 | 待做 | `elevenlabs-global → elevenlabs` 无迁移；region key 不混用；read-only/deferred 状态诚实；快照与日志无明文 |
-| TTS-MP-3 | ElevenLabs adapter 接入 registry 并实现统一 response/provenance 合同 | TTS-MP-1T | 已有 adapter 待重接 | 固定 endpoint/model/voice、read-only probe、四类 route 和 3 候选回归通过；旧 account 兼容由 MP-2 覆盖 |
-| TTS-MP-4 | MiniMax `speech-2.8-hd` unary T2A adapter | TTS-MP-1T | 待做 | Bearer、`get_voice` probe、固定 voice、JSON/hex、MP3、语言门禁、错误与 3 候选 fixture 全覆盖；只开放 `speech` |
-| TTS-MP-5 | Qwen `qwen3-tts-instruct-flash` SSE adapter 与 region profiles | TTS-MP-1T | 待做 | 固定 host/path/header/model/voice、SSE/Base64 PCM、合法 WAV、取消/大小/终态校验；只开放 `speech`，地区 smoke 分开 |
-| TTS-3 | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 单 Provider UI 已完成；多 Provider UI 待做；统一设置迁移与真机 AX 待验收 | 默认 ElevenLabs；切换不自动生成；不支持 modality 在网络前阻止；改名不重新生成；键盘/VoiceOver 可用 |
+| TTS-MP-1 | provider-neutral 领域类型、route-derived capability、registry、确定性语音文本语法与 request compiler | TTS-MP-0 | 已完成（#104） | 公共接口不依赖 `ElevenLabsAICueCompiledRequest`；profile 只能来自 registry；speech/mixed 无明确台词时本地失败 |
+| TTS-MP-1T | hardened unary/SSE transports、exact-origin auth injection、增量 SSE parser、wire/decoded ceilings 与 generation deadline | TTS-MP-1 | 已完成（#105） | transport 不保存 secret；Bearer/xi-api-key 正确隔离；SSE fragmentation/cancel/terminal 与 60 秒 deadline 全覆盖 |
+| TTS-MP-2 | registry-owned credential slots、read-only/deferred validation policy、Qwen pending replacement 与非敏感 profile/region 偏好 | TTS-MP-1 | 已完成（#106） | `elevenlabs-global → elevenlabs` 无迁移；region key 不混用；read-only/deferred 状态诚实；快照与日志无明文 |
+| TTS-MP-3 | ElevenLabs adapter 接入 registry 并实现统一 response/provenance 合同 | TTS-MP-1T | 已完成（#107） | 固定 endpoint/model/voice、read-only probe、四类 route 和 3 候选回归通过；旧 account 兼容由 MP-2 覆盖 |
+| TTS-MP-4 | MiniMax `speech-2.8-hd` unary T2A adapter | TTS-MP-1T | 已完成（#108） | Bearer、`get_voice` probe、固定 voice、JSON/hex、MP3、语言门禁、错误与 3 候选 fixture 全覆盖；只开放 `speech` |
+| TTS-MP-5 | Qwen `qwen3-tts-instruct-flash` SSE adapter 与 region profiles | TTS-MP-1T | 已完成（#109） | 固定 host/path/header/model/voice、SSE/Base64 PCM、合法 WAV、取消/大小/终态校验；只开放 `speech`，地区 smoke 分开 |
+| TTS-3 | 事件页 Provider/profile 选择、逐 profile 配置/管理 key、能力不支持提示、候选试听/采用 | TTS-MP-2–TTS-MP-5 | 多 Provider production UI 与自动 fixture 已完成；真机 AX `NOT VERIFIED` | 默认 ElevenLabs；切换不自动生成；不支持 modality 在网络前阻止；改名不重新生成；键盘/VoiceOver 可用 |
 | TTS-4 | 临时候选 acquisition、`AudioImport`、manifest bind、名称投影和清理 | TTS-1–TTS-MP-1 | 已完成 fixture 验证 | 所有 adapter 输出走同一安全导入链；坏音频 fail closed；失败保留旧绑定；仅采用一个 |
-| TTS-5 | 文档、按 Provider 的隐私/费用披露、自动/手工/真实 provider 分层验收 | TTS-MP-0–TTS-4 | ElevenLabs 自动层完成；多 Provider、手工/真实层待验收 | 不含 key/内容；每个 profile 的能力/地区/费用证据清楚；所有对应门禁通过 |
+| TTS-5 | 文档、按 Provider 的隐私/费用披露、自动/手工/真实 provider 分层验收 | TTS-MP-0–TTS-4 | 多 Provider 文档与自动交接已完成；原生/真实 Provider/发布层 `NOT VERIFIED` | 不含 key/内容；每个 profile 的能力/地区/费用证据清楚；所有对应门禁通过 |
 
 依赖关系：
 
@@ -995,7 +997,7 @@ capability registry、provider-neutral request、registry-owned credential slots
 transport、ElevenLabs/MiniMax/Qwen BYOK adapters 和对应 UI 接缝；不得在 UI 或 adapter 中复制
 `AudioImport`、包锁和 manifest 发布逻辑。
 
-文档类型：AI 提示音子域工程执行计划，兼具内部接口 reference 与架构 explanation。AI 子域本地 Swift
-ElevenLabs 基线与 TTS-MP-0 文档/原型门禁已完成，但 provider-neutral 重构、MiniMax/Qwen adapter、
-统一设置 production UI 与窗口迁移尚未完成；真实 provider 探测、push、release 和部署都需要后续
-单独授权。
+文档类型：AI 提示音子域工程执行计划，兼具内部接口 reference 与架构 explanation。AI 子域的
+provider-neutral registry、transports、逐 profile credential policy、ElevenLabs/MiniMax/Qwen adapters、
+统一设置 production UI、窗口迁移与 deterministic fixtures 已落地。原生 UI/VoiceOver、真实 Provider、
+双架构、签名、公证、push、release 和部署不由本地自动证据证明，均需要后续单独授权或验收。

@@ -1,13 +1,14 @@
 # PLAN — 统一设置体验完整实施计划
 
-> 状态：**规格与 allowlisted 多 Provider SoT 已完成；统一设置迁移及多 Provider Swift 实施尚未开始**
+> 状态：**统一设置迁移、allowlisted 多 Provider Swift 实现与自动合同已落地；原生 UI、VoiceOver、真实 Provider、双架构、签名、公证与发布仍未验证**
 >
 > 日期：2026-08-26
 >
 > 范围：把当前分散的集成、事件、声音包与零散偏好收口到一个原生 macOS 统一设置窗口，
 > 完整交付「通用、集成、事件与提示音、通知、显示、声音、用量、快捷键、关于」九个设置目的页。
-> 完整九页产品验收由 GitHub #85 及其子 tickets 拥有；#103 只完成本文、ADR、执行计划与原型的
-> allowlisted 多 Provider SoT 对齐，不授权 adapter、真实凭据、production UI 或 Provider smoke。
+> 完整九页产品验收由 GitHub #85 及其子 tickets 拥有；#103 只拥有本文、ADR、执行计划与原型的
+> allowlisted 多 Provider SoT 对齐。Swift registry、transport、credentials、adapters 与 production UI
+> 分别由 #104–#109 及 #85 的设置子 tickets 拥有；任何真实凭据或 Provider smoke 仍需单独授权。
 >
 > 视觉原型 SoT：
 > `mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts&profile=elevenlabs-global&stage=applied&credential=verified`
