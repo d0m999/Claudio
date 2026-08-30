@@ -1,12 +1,6 @@
 import AppKit
+import ClaudioGUICore
 import Foundation
-
-/// Shared short-audio preview boundary for both GUI surfaces.
-@MainActor
-public protocol AudioPreviewPlaying: AnyObject {
-    func play(fileAt url: URL, volume: Float)
-    func stop()
-}
 
 /// Retains the active `NSSound`; a local value would deallocate immediately and cut playback off.
 @MainActor
@@ -15,12 +9,18 @@ public final class NSSoundAudioPreviewPlayer: AudioPreviewPlaying {
 
     public init() {}
 
-    public func play(fileAt url: URL, volume: Float) {
+    @discardableResult
+    public func play(fileAt url: URL, volume: Float) -> Bool {
         currentSound?.stop()
-        let sound = NSSound(contentsOf: url, byReference: true)
-        sound?.volume = volume
+        currentSound = nil
+        guard let sound = NSSound(contentsOf: url, byReference: true) else { return false }
+        sound.volume = volume
         currentSound = sound
-        sound?.play()
+        guard sound.play() else {
+            currentSound = nil
+            return false
+        }
+        return true
     }
 
     public func stop() {

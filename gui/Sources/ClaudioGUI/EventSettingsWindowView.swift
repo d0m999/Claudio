@@ -33,12 +33,11 @@ struct EventSettingsWindowView: View {
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var previewPlayer = NSSoundAudioPreviewPlayer()
-    @State private var handledFocusRequestRevision = 0
+    @State private var handledFocusRequestRevision: UInt64 = 0
     @State private var playingCandidateID: UUID?
     @State private var playingCandidateTitle: String?
     @State private var showsCredentialSheet = false
     @State private var previewAllTask: Task<Void, Never>?
-    @State private var previewAllRunID: UUID?
     @State private var previewAllFailureEvent: Event?
     @State private var previewAllCoordinator = EventPreviewSequenceCoordinator()
 
@@ -101,9 +100,7 @@ struct EventSettingsWindowView: View {
             {
                 closeAICueComposer()
             }
-            focusedTarget = eventSettingsRouteFocusTarget(
-                route: selection.route,
-                scopes: scopes.map(\.scope))
+            focusedTarget = selection.focusTarget
         }
         .onAppear {
             #if DEBUG
@@ -126,6 +123,9 @@ struct EventSettingsWindowView: View {
         .onReceive(selection.$previewStopRequestRevision) { _ in
             stopAllPreviews()
         }
+        .onReceive(selection.$aiSessionEndRequestRevision) { _ in
+            closeAICueComposer()
+        }
         .onChange(of: model.config.selectedPack) { _ in
             closeAICueComposer()
         }
@@ -146,6 +146,7 @@ struct EventSettingsWindowView: View {
                 languageStore: languageStore)
         }
         .onDisappear {
+            selection.leaveDestination()
             stopAllPreviews()
             closeAICueComposer()
         }
@@ -503,6 +504,7 @@ struct EventSettingsWindowView: View {
 
     private func playAllPreviews() {
         if previewAllTask != nil {
+            selection.requestPreviewStop()
             stopAllPreviews()
             return
         }
@@ -512,8 +514,7 @@ struct EventSettingsWindowView: View {
         let packID = model.config.selectedPack
         let environment = audioEnvironment
         let volume = Float(previewVolume(for: model.config))
-        let runID = UUID()
-        previewAllRunID = runID
+        let generation = selection.beginPreviewSequence()
         previewAllTask = Task { @MainActor in
             let result = await previewAllCoordinator.run(
                 makePlan: {
@@ -526,7 +527,7 @@ struct EventSettingsWindowView: View {
                 onPlay: { item in
                     previewPlayer.play(fileAt: item.fileURL, volume: volume)
                 })
-            guard previewAllRunID == runID else { return }
+            guard selection.completePreviewSequence(generation: generation) else { return }
             switch result {
             case .empty:
                 model.reload()
@@ -538,7 +539,6 @@ struct EventSettingsWindowView: View {
             case .completed, .cancelled:
                 break
             }
-            previewAllRunID = nil
             previewAllTask = nil
         }
     }
@@ -546,10 +546,10 @@ struct EventSettingsWindowView: View {
     private func stopAllPreviews() {
         previewAllTask?.cancel()
         previewAllTask = nil
-        previewAllRunID = nil
         previewAllFailureEvent = nil
         previewAllCoordinator.cancel()
         previewPlayer.stop()
+        selection.notePreviewStopped()
     }
 
     private func previewAllFailureMessage(for event: Event) -> String {
@@ -768,7 +768,15 @@ struct EventSettingsWindowView: View {
             model.reload()
             return
         }
-        previewPlayer.play(fileAt: file, volume: Float(previewVolume(for: model.config)))
+        guard
+            previewPlayer.play(
+                fileAt: file,
+                volume: Float(previewVolume(for: model.config))
+            )
+        else {
+            model.reload()
+            return
+        }
     }
 
     private func openAICueComposer(_ eligibility: AICueAdoptionEligibility) {
@@ -776,6 +784,7 @@ struct EventSettingsWindowView: View {
         previewPlayer.stop()
         playingCandidateID = nil
         playingCandidateTitle = nil
+        selection.beginAISession(scope: .surface(target.surface), event: target.event)
         aiCueViewModel.begin(target: target)
     }
 
@@ -784,6 +793,7 @@ struct EventSettingsWindowView: View {
         let clearedCandidates = aiCueViewModel.generation != nil
         stopCandidatePreview()
         aiCueViewModel.endSession()
+        selection.noteAISessionEnded()
         if hadSession {
             onAnnouncement?(
                 l10n.text(
@@ -804,9 +814,14 @@ struct EventSettingsWindowView: View {
             aiCueViewModel.reportCandidateUnavailable()
             return
         }
-        previewPlayer.play(
-            fileAt: candidate.asset.fileURL,
-            volume: Float(previewVolume(for: model.config)))
+        guard
+            previewPlayer.play(
+                fileAt: candidate.asset.fileURL,
+                volume: Float(previewVolume(for: model.config)))
+        else {
+            aiCueViewModel.reportCandidateUnavailable()
+            return
+        }
         playingCandidateID = candidate.id
         let title = localizedAICueCandidateTitle(
             candidate.variant,

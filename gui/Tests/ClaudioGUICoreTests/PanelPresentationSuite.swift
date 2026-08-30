@@ -24,6 +24,23 @@ private func panelPresentationEventRows(
 }
 
 @MainActor
+private final class FakeEventPreviewPlayer: AudioPreviewPlaying {
+    let failingURL: URL?
+    private(set) var playedURLs: [URL] = []
+
+    init(failingURL: URL? = nil) {
+        self.failingURL = failingURL
+    }
+
+    func play(fileAt url: URL, volume: Float) -> Bool {
+        playedURLs.append(url)
+        return url != failingURL
+    }
+
+    func stop() {}
+}
+
+@MainActor
 func runPanelPresentationSuites() async {
     suite("事件与提示音路由：保留 Global/Surface，并为声音编辑携带同一作用域") {
         let global = EventSettingsWindowRoute(scope: .global)
@@ -312,7 +329,10 @@ func runPanelPresentationSuites() async {
         let run = Task { @MainActor in
             await coordinator.run(
                 makePlan: { .ready(items) },
-                onPlay: { played.append($0.event) })
+                onPlay: {
+                    played.append($0.event)
+                    return true
+                })
         }
         while played.isEmpty {
             await Task.yield()
@@ -321,9 +341,33 @@ func runPanelPresentationSuites() async {
         expect(await run.value == .cancelled, "scope/单项试听切换必须取消在途序列")
         expect(played == [.taskStart], "取消后不得继续播放下一公共事件")
         expect(
-            await coordinator.run(makePlan: { .failed(.stop) }, onPlay: { _ in })
+            await coordinator.run(makePlan: { .failed(.stop) }, onPlay: { _ in true })
                 == .failed(.stop),
             "运行时规划失败必须把对应 Event 交回可见错误层")
+
+        let runtimeCoordinator = EventPreviewSequenceCoordinator()
+        let failingPlayer = FakeEventPreviewPlayer(failingURL: items[1].fileURL)
+        let runtimeItems =
+            items.map {
+                EventPreviewSequenceItem(
+                    event: $0.event,
+                    fileURL: $0.fileURL,
+                    delayNanoseconds: 1)
+            } + [
+                EventPreviewSequenceItem(
+                    event: .subagentStop,
+                    fileURL: URL(fileURLWithPath: "/fixture/subagent-stop.aiff"),
+                    delayNanoseconds: 1)
+            ]
+        let runtimeFailure = await runtimeCoordinator.run(
+            makePlan: { .ready(runtimeItems) },
+            onPlay: { item in
+                failingPlayer.play(fileAt: item.fileURL, volume: 0.8)
+            })
+        expect(runtimeFailure == .failed(.stop), "真实播放启动失败必须停止并返回对应 Event")
+        expect(
+            failingPlayer.playedURLs == Array(runtimeItems.prefix(2)).map(\.fileURL),
+            "fake player 失败后不得继续到后续试听项")
     }
 
     suite("事件与提示音窗口布局：按窗口可用宽度与文字缩放独立降级") {

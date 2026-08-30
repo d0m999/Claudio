@@ -39,6 +39,14 @@ struct SettingsWindowView: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: preferences.language) }
     private var destination: SettingsDestination { model.resolution.destination }
+    private var eventSettingsFocusScopes: [PanelSoundScopeID] {
+        guard let eventSettingsModel, let hostIntegrations else { return [.global] }
+        return panelSoundScopePresentations(
+            sourceRows: hostIntegrations.content.sourceRows,
+            config: eventSettingsModel.configState.resolvedConfig,
+            language: preferences.language
+        ).map(\.scope)
+    }
 
     init(
         model: SettingsWindowPresentationModel<NSRunningApplication>,
@@ -117,13 +125,13 @@ struct SettingsWindowView: View {
         }
         .onReceive(model.$routeRequestRevision) { _ in
             if let failure = model.resolution.failure {
-                eventSettingsSelection?.requestPreviewStop()
+                eventSettingsSelection?.leaveDestination()
                 focusedTarget = SettingsWindowFocusTarget.title(destination)
                 onAnnouncement?(settingsFailureMessage(failure))
                 return
             }
             if destination != .eventsAndSounds {
-                eventSettingsSelection?.requestPreviewStop()
+                eventSettingsSelection?.leaveDestination()
             }
             if destination == .integrations,
                 let integrationsModel,
@@ -148,7 +156,7 @@ struct SettingsWindowView: View {
                     eventSettingsSelection.select(route)
                     eventSettingsModel.selectSoundSurface(route.surface)
                 }
-                eventSettingsSelection.requestInitialFocus()
+                eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
             } else if destination != .sounds {
                 focusedTarget = SettingsWindowFocusTarget.title(destination)
             }

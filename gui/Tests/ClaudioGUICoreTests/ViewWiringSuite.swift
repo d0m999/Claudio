@@ -2629,11 +2629,11 @@ func runViewWiringSuites() {
                 && flatSettingsController.contains("private let eventSettingsSelection:")
                 && flatSettingsController.contains("applyEmbeddedRoute(route)")
                 && flatSettingsController.contains(
-                    "eventSettingsSelection.requestPreviewStop()"),
+                    "eventSettingsSelection.leaveDestination()"),
             "事件设置必须由唯一 app-lifetime Settings window 承载并预应用 typed deep link")
         expect(
             flatView.contains(".onReceive(selection.$focusRequestRevision)")
-                && flatView.contains("eventSettingsRouteFocusTarget(")
+                && flatView.contains("focusedTarget = selection.focusTarget")
                 && flatView.contains(".focused($focusedTarget, equals: .scope(scope.scope))")
                 && flatView.contains(".focused(focusedTarget, equals: .event(presentation.event))")
                 && flatView.contains(".accessibilityHint(configureSoundHint)")
@@ -2655,7 +2655,7 @@ func runViewWiringSuites() {
                 && !flatSettingsView.contains("presentationContext:")
                 && flatSettingsView.contains("onConfigureSound: { model.request(.sounds($0)) }")
                 && flatSettingsView.contains("if let failure = model.resolution.failure")
-                && flatSettingsView.contains("eventSettingsSelection.requestInitialFocus()")
+                && flatSettingsView.contains("eventSettingsSelection.requestInitialFocus(scopes:")
                 && flatSettingsController.contains("eventSettingsModel: eventSettingsModel")
                 && flatSettingsController.contains("eventSettingsSelection: eventSettingsSelection")
                 && flatSettingsController.contains("case .events(let scope, let event):"),
@@ -2675,6 +2675,7 @@ func runViewWiringSuites() {
                 && flatView.contains("if previewAllTask != nil")
                 && flatView.contains("case .failed(let event):")
                 && flatView.contains("selection.$previewStopRequestRevision")
+                && flatView.contains("selection.$aiSessionEndRequestRevision")
                 && flatView.contains("soundPacksModel.packCards")
                 && flatView.contains("eventSettingsPackInheritanceState(")
                 && flatView.contains("eventSettingsInheritanceState(")

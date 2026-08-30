@@ -79,6 +79,7 @@ for suite in \
     runUsageActivitySuites \
     runGlobalShortcutsSuites \
     runSettingsNavigationSuites \
+    runEventSettingsDestinationCoordinatorSuites \
     runPreviewFixturesSuites \
     runMultiProviderPrototypeContractSuites
 do

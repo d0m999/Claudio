@@ -228,7 +228,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let handback = handbackTracker.consumeOnClose() ?? originalHandback
         let restoration = focusRestoration
         focusRestoration = nil
-        eventSettingsSelection.requestPreviewStop()
+        eventSettingsSelection.leaveDestination()
         aiCueViewModel.endSession()
         DispatchQueue.main.async {
             MainActor.assumeIsolated {

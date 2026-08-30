@@ -1,6 +1,15 @@
 import ClaudioCore
 import Foundation
 
+/// Foundation-only short-audio playback seam shared by production surfaces and deterministic
+/// runtime-failure tests. `false` means playback did not start and must not be reported as success.
+@MainActor
+public protocol AudioPreviewPlaying: AnyObject {
+    @discardableResult
+    func play(fileAt url: URL, volume: Float) -> Bool
+    func stop()
+}
+
 public struct EventPreviewSequenceItem: Sendable, Equatable {
     public let event: Event
     public let fileURL: URL
@@ -73,7 +82,7 @@ public final class EventPreviewSequenceCoordinator {
 
     public func run(
         makePlan: @escaping @Sendable () -> EventPreviewSequencePlan,
-        onPlay: @escaping @MainActor @Sendable (EventPreviewSequenceItem) -> Void
+        onPlay: @escaping @MainActor @Sendable (EventPreviewSequenceItem) -> Bool
     ) async -> EventPreviewSequenceRunResult {
         generation &+= 1
         let runGeneration = generation
@@ -92,7 +101,7 @@ public final class EventPreviewSequenceCoordinator {
 
         for item in items {
             guard generation == runGeneration, !Task.isCancelled else { return .cancelled }
-            onPlay(item)
+            guard onPlay(item) else { return .failed(item.event) }
             do {
                 try await Task.sleep(nanoseconds: item.delayNanoseconds)
             } catch {
