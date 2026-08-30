@@ -23,14 +23,18 @@ private actor GenerationVaultFixture: AICueCredentialVault {
 }
 
 private actor GenerationSlowVaultFixture: AICueCredentialVault {
+    private var completedCredentialReads = 0
+
     func containsCredential(in slotID: AICueCredentialSlotID) async throws -> Bool { true }
 
     func credential(in slotID: AICueCredentialSlotID) async throws -> SensitiveCredentialInput? {
-        await withCheckedContinuation { continuation in
+        let credential = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.2) {
                 continuation.resume(returning: try! SensitiveCredentialInput("fixture-key"))
             }
         }
+        completedCredentialReads += 1
+        return credential
     }
 
     func replaceCredential(
@@ -39,6 +43,8 @@ private actor GenerationSlowVaultFixture: AICueCredentialVault {
     ) async throws {}
 
     func deleteCredential(in slotID: AICueCredentialSlotID) async throws {}
+
+    func completedReads() -> Int { completedCredentialReads }
 }
 
 private enum GenerationProviderStep: Sendable {
@@ -165,6 +171,7 @@ private actor GenerationBlockingProviderFixture: AICueProvider {
 private actor GenerationIgnoringCancellationProviderFixture: AICueProvider {
     nonisolated let profile: AICueProviderProfile = try! AICueProviderRegistry().profile(
         for: .elevenLabsGlobal)
+    private var completedResponseCount = 0
 
     func validateCredential(_ credential: SensitiveCredentialInput) async throws {}
 
@@ -173,7 +180,7 @@ private actor GenerationIgnoringCancellationProviderFixture: AICueProvider {
         credential: SensitiveCredentialInput,
         deadline: AICueGenerationDeadline
     ) async throws -> AICueProviderAudioResponse {
-        await withCheckedContinuation { continuation in
+        let response = await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.2) {
                 continuation.resume(
                     returning: AICueProviderAudioResponse(
@@ -183,7 +190,11 @@ private actor GenerationIgnoringCancellationProviderFixture: AICueProvider {
                         requestID: nil))
             }
         }
+        completedResponseCount += 1
+        return response
     }
+
+    func completedResponses() -> Int { completedResponseCount }
 }
 
 private final class GenerationSlowThirdDurationProbe: AudioDurationProbing, @unchecked Sendable {
@@ -474,12 +485,12 @@ func runAICueGenerationEngineSuites() async {
     await suite("AI 提示音生成：deadline 不等待失控 vault/provider 的迟到结果") {
         await withTempDirectory { root in
             let vaultRoot = root.appendingPathComponent("slow-vault", isDirectory: true)
+            let vault = GenerationSlowVaultFixture()
             let vaultEngine = AICueGenerationEngine(
-                vault: GenerationSlowVaultFixture(),
+                vault: vault,
                 provider: GenerationProviderFixture(steps: [.success(validMP3ID3Data())]),
                 temporaryRoot: vaultRoot,
                 durationProbe: StubDurationProbe(fixedDuration: 1))
-            let vaultStart = Date()
             var vaultDeadline = false
             do {
                 _ = try await vaultEngine.generate(
@@ -491,16 +502,16 @@ func runAICueGenerationEngineSuites() async {
                 vaultDeadline = true
             } catch {}
             expect(vaultDeadline, "credential read 也必须消耗点击时 deadline")
-            expect(Date().timeIntervalSince(vaultStart) < 0.1, "迟到 vault 不得拖长调用方预算")
+            expect(await vault.completedReads() == 0, "迟到 vault 不得拖长调用方预算")
             expect(generationDirectories(in: vaultRoot).isEmpty, "vault deadline 前不得建候选目录")
 
             let providerRoot = root.appendingPathComponent("stuck-provider", isDirectory: true)
+            let provider = GenerationIgnoringCancellationProviderFixture()
             let providerEngine = AICueGenerationEngine(
                 vault: GenerationVaultFixture(configured: true),
-                provider: GenerationIgnoringCancellationProviderFixture(),
+                provider: provider,
                 temporaryRoot: providerRoot,
                 durationProbe: StubDurationProbe(fixedDuration: 1))
-            let providerStart = Date()
             var providerDeadline = false
             do {
                 _ = try await providerEngine.generate(
@@ -513,9 +524,10 @@ func runAICueGenerationEngineSuites() async {
             } catch {}
             expect(providerDeadline, "不响应取消的 provider 仍必须在 deadline 结束")
             expect(
-                Date().timeIntervalSince(providerStart) < 0.1,
+                await provider.completedResponses() == 0,
                 "deadline race 不得结构化等待失控 provider")
             try? await Task.sleep(nanoseconds: 250_000_000)
+            expect(await provider.completedResponses() == 1, "失控 provider fixture 必须最终返回迟到结果")
             expect(generationDirectories(in: providerRoot).isEmpty, "迟到 provider 结果不得发布")
         }
     }
