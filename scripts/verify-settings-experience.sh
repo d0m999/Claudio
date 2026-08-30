@@ -79,7 +79,8 @@ for suite in \
     runUsageActivitySuites \
     runGlobalShortcutsSuites \
     runSettingsNavigationSuites \
-    runPreviewFixturesSuites
+    runPreviewFixturesSuites \
+    runMultiProviderPrototypeContractSuites
 do
     require_registration "$gui_main" "$suite"
 done

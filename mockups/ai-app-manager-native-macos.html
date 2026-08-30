@@ -404,6 +404,8 @@
      * Question: can the internal sound plan stay hidden while users describe
      * first, then name the chosen cue beside its candidates, with an allowlisted
      * Provider/profile selector and BYOK configuration outside the per-event form?
+     * Legacy credential=ready only aliases verified when profile resolution selects
+     * elevenlabs-global; other profiles retain their fixed fixture credential state.
      */
     .tts-prototype-mode .window,
     .tts-prototype-mode .sidebar,
@@ -904,8 +906,9 @@
     const ttsPendingReplacementPreviousStates = {};
     const initialTTSCredentialValue = initialQuery.get('credential');
     const allowedTTSCredentialStates = ['missing', 'verified', 'deferred', 'rejected', 'pending', 'unavailable'];
-    if (initialTTSCredentialValue === 'ready') ttsCredentialStates[selectedTTSProfileID] = 'verified';
-    else if (allowedTTSCredentialStates.includes(initialTTSCredentialValue)) {
+    if (initialTTSCredentialValue === 'ready' && selectedTTSProfileID === 'elevenlabs-global') {
+      ttsCredentialStates[selectedTTSProfileID] = 'verified';
+    } else if (allowedTTSCredentialStates.includes(initialTTSCredentialValue)) {
       ttsCredentialStates[selectedTTSProfileID] = initialTTSCredentialValue;
     }
     if (ttsCredentialStates[selectedTTSProfileID] === 'pending') {

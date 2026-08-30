@@ -23,6 +23,7 @@ import Foundation
 // `PanelTypeSizeSuite.swift`, `PanelAccessibilitySuite.swift`, `PanelConfigSuite.swift`,
 // `PanelFocusCoordinatorSuite.swift`,
 // `PreviewFixturesSuite.swift`, `OnboardingActionsSuite.swift`, `ReleaseLayoutSuite.swift`,
+// `MultiProviderPrototypeContractSuite.swift`,
 // `ReleaseCandidateArtifactSuite.swift`,
 // `ChatAXTracerSuite.swift`, `ChatAXTracerWiringSuite.swift`,
 // `WorkBuddyKeyboardAccessibilitySuite.swift`, `VolumeDragSessionSuite.swift`,
@@ -141,6 +142,7 @@ await runUsageActivitySuites()
 runGlobalShortcutsSuites()
 runSettingsNavigationSuites()
 runPreviewFixturesSuites()
+runMultiProviderPrototypeContractSuites()
 runVolumeDragSessionSuites()
 runPanelWriteFailuresSuites()
 

@@ -973,6 +973,8 @@ adapter/fixture 已验证，不能升级为真实生成或用户可接受音质�
 用于演示四个 allowlisted profile、read-only/deferred 验证差异和状态，不代表真实 Keychain。用
 MiniMax/Qwen profile 输入非 speech 描述可演示 unsupported modality，MiniMax 的 English 台词可演示
 unsupported locale；也可用 `scenario=unsupported-modality|unsupported-locale` 直接固定对应状态。
+旧 `credential=ready` 只在缺省、显式或未知 `profile` 最终解析为 `elevenlabs-global` 时兼容为
+`verified`；MiniMax/Qwen 使用该旧值时保持各自固定 fixture 状态，不能借此伪造在线验证证据。
 多 Provider 工程合同以本计划为准；视觉和交互合同由当前原型与
 `PLAN-SETTINGS-EXPERIENCE.md` 共同投影。原型不得接收真实 key、联网、持久化或冒充真实 Provider
 请求。

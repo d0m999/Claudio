@@ -333,6 +333,8 @@ Claudio 不承诺任何供应商 zero retention，不展示统一账单或推算
 - `profile=qwen-beijing&credential=unavailable`
 - `credential=rejected|pending` 用于拒绝和 pending replacement 状态。
 - `profile=minimax-global&scenario=unsupported-modality|unsupported-locale` 用于能力/语言本地阻止状态。
+- 旧 `credential=ready` 只在缺省、显式或未知 `profile` 最终回落到 `elevenlabs-global` 时兼容为
+  `verified`；对 MiniMax/Qwen 忽略该旧别名并保留各自固定 fixture 状态。
 
 选择 MiniMax/Qwen 后用非 speech 描述可见地展示 unsupported modality；MiniMax 使用 English 台词时
 展示 unsupported locale。原型只模拟状态，不联网、不持久化，也不得接收真实 key。旧的单 Provider
