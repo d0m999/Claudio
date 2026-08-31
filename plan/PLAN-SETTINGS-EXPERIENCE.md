@@ -13,6 +13,9 @@
 > 视觉原型 SoT：
 > `mockups/ai-app-manager-native-macos.html?page=events&app=workbuddy&prototype=tts&profile=elevenlabs-global&stage=applied&credential=verified`
 >
+> 本次「集成」目的页的批准原型 SoT：
+> `mockups/ai-app-manager-native-macos.html?page=apps&app=workbuddy&prototype=tts&stage=applied&credential=ready`
+>
 > AI 提示音的 Provider/profile、凭据、候选与采用领域合同由
 > `plan/PLAN-CONSUMER-TTS-EXECUTION.md` 定义；本计划固定其统一设置投影并完成周边页面。
 
@@ -47,14 +50,14 @@
 ## 1. 当前事实与逐页差距
 
 当前 `ClaudioGUIApp` 的 `Settings { EmptyView() }` 只为满足 SwiftUI `App` 协议存在，且合成的
-`appSettings` 命令被移除。生产 UI 由 `MenuBarController` 分别持有
-`IntegrationsWindowController`、`EventSettingsWindowController` 和
-`SoundPacksWindowController`；因此当前截图中的「事件与提示音」只是独立窗口，不是完整设置页面。
+`appSettings` 命令被移除。生产 UI 由 `MenuBarController` 持有一个 retained 的统一
+`SettingsWindowController`；集成目的页已经迁入该窗口，事件与声音包编辑仍按各自迁移阶段嵌入或保留其
+既有 owner，因此后续页面的差距不能通过新建并行窗口解决。
 
 | 设置目的页 | 原型承诺 | 当前可复用事实 | 主要缺口 |
 |---|---|---|---|
 | 通用 | 登录时打开、语言、窗口行为 | `ClaudioLanguageStore`、UserDefaults | 无统一页面；无系统语言模式；无登录项服务 |
-| 集成 | 来源列表、状态、开关、检测、回执 | 完整 `IntegrationsWindowModel/View` 与 manager bridge | 独立窗口；视觉结构不同；原型错误地以 App 代替 Surface |
+| 集成 | Agent 列表、状态、开关、检测、连接方式、事件能力与回执 | `IntegrationDestinationModel`、typed presentation、manager bridge/store | 已迁入统一设置；旧 matrix/Inspector 展示退役，原生视觉与真实宿主回调仍需人工门禁 |
 | 事件与提示音 | Surface、五事件、播放设置、BYOK AI 生成 | `EventSettingsWindowView`、`PanelConfigController`、AI cue 闭环 | 独立窗口；外壳、层级、行密度与原型差距大；路由仍跳声音包窗口 |
 | 通知 | 提醒开关、专注/会议静默 | 逐事件开关；暂无系统静默策略 | 原型前三个开关重复事件配置；Focus/Calendar 无权限与跨进程模型 |
 | 显示 | 面板宽度、菜单栏状态点 | 四档界面文字、固定/自适应面板宽度、模板图标 | 无页面；无用户宽度偏好与状态点开关 |
@@ -225,13 +228,22 @@ macOS 13+ 的主 app 登录项入口见 Apple 的
 
 内容与行为：
 
-- 按宿主产品分组显示全部已发布 Surface，不把 Claude、Codex view 或 WorkBuddy 合并成一个 App；
-- 每行显示连接状态、当前激活、`supported/total`、in-flight 状态和真实错误；
-- 右侧/下方检查器复用当前 capability matrix、配置来源、原生事件、最新回执、诊断与恢复动作；
-- 启用/停用调用 manager 的 connect/disconnect，不把 toggle 本地翻转冒充成功；
-- 「重新检测」刷新当前事实；「管理事件」内部路由到同 Surface 的事件页；
-- 清除脱敏回执历史必须确认，只清历史，不改连接、当前稳定回执或声音偏好；
-- 显式支持、当前实现和当前激活继续是三条独立事实。
+- Agent 固定消费 `HostID.productVisibleCases`，顺序为 Claude Code → Codex → WorkBuddy；不显示宿主 Logo，
+  名称选择与 Toggle 是两个独立控件。每行显示 manager 投影的五态 badge、`supported/total` 和真实 Toggle；
+  `4/5`、`2/5` 保持中性能力事实。
+- 选中 Agent 后只显示四行 typed connection section，顺序固定为「连接状态、接入方式、事件与提示音、
+  脱敏回执历史」。连接状态合并现有诊断与最新当前 installation receipt；无回执明确显示「暂无当前安装实例回执」。
+- 接入方式消费 `HostIntegrationDescriptor.mechanism`；配置来源不是 manager 提供时不渲染复制动作。
+  「管理事件」只路由 `.events(scope: .surface(selectedHost.surfaceID), event: nil)`，清除回执只在第四行确认。
+- Toggle 关闭统一进入已有 disconnect 确认，取消无副作用；`notConnected` 开启 Toggle 调用 connect。其余连接、
+  升级/修复和重新检测继续经既有 manager bridge，不添加第二个写入路径。
+- 五态连接动作纯投影：ready 重新检测；awaitingActivation 的 Codex 额外复制 `/hooks`；legacy 升级连接；
+  notConnected 重新检测；needsAttention 修复连接并重新检测。
+- in-flight 保留旧快照、不乐观翻转 Toggle、不显示 skeleton；只禁用冲突动作，允许切换 Agent，进度绑定原 action.host。
+  反馈保持 5 秒、代次保护、逐条回执与 Reduce Motion，改为右下 Toast，仅在目的页可见且窗口为 key 时播报。
+- `IntegrationDestinationModel`、`IntegrationDestinationContent`、四行 presentation、偏好恢复/重协调与 focus
+  coordinator 住在 Foundation-only `ClaudioGUICore`；GUI 仅注入 `NSPasteboard` adapter。共享
+  `HostCapabilityMatrixPresentation` 继续服务 Panel/Events/diagnostics，但不再由集成目的页渲染。
 
 验收：迁移前后 manager action、receipt transition、错误恢复和 accessibility label 保持等价；
 Codex `4/5` 与 WorkBuddy `2/5` 是诚实正常能力，不得为了填满原型显示假支持。
@@ -565,12 +577,16 @@ S0 文档与契约锁定
 - 更新 dev/release bundle、签名、双架构与 size 检查以包含 login helper；
 - 真实登录重启与等待系统批准状态列为人工门禁。
 
-### S5 — 集成页迁入
+### S5 — 集成页迁入（已完成实现，原生门禁未完成）
 
-- 从 `IntegrationsWindowView` 提取 destination content，保留 model/action/receipt seams；
-- 改成 prototype hierarchy，同时使用 Host Product → Surface 的领域身份；
-- 所有去 Events/Sounds 的动作改用内部 router；
-- 保持 capability、诊断、恢复、clear history、AX 和刷新测试。
+- 用 `IntegrationsSettingsDestinationView` 替换旧独立窗口展示，统一 Settings 直接挂载，保留 retained
+  window、manager bridge、receipt 与连接写入 owner；
+- 用 `IntegrationDestinationPresentation` / `IntegrationDestinationModel` 实现批准原型层级：固定三 Agent、
+  四行 connection contract、真实 Toggle、五态动作和 5 秒 Toast；
+- 所有去 Events 的动作通过 `.events(scope: .surface(selectedHost.surfaceID), event: nil)` 内部路由，配置来源
+  复制保留 GUI-only pasteboard adapter；
+- 保持 shared capability matrix、诊断、回执隐私、clear history、AX、刷新和 stale-route 边界测试；gallery
+  继续覆盖 WorkBuddy 七态，并新增可固定的 disconnect in-flight 帧。
 
 ### S6 — 声音页迁入
 

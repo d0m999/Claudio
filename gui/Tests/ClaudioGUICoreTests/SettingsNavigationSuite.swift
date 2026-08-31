@@ -404,8 +404,8 @@ func runSettingsNavigationSuites() {
         expect(
             settingsWindowFocusOrder(selectedDestination: .integrations)
                 == SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
-                + [.title(.integrations), .firstAction(.integrations)],
-            "Integrations 必须在嵌入 model 前保留 Settings 内部的管理事件动作")
+                + [.title(.integrations)],
+            "Integrations 的 destination focus coordinator 必须接管标题之后的焦点序")
 
         guard
             let controller = settingsSource(
@@ -485,11 +485,12 @@ func runSettingsNavigationSuites() {
                 && controller.contains("soundPackSnapshotIsFresh: libraryState == .ready"),
             "Sounds destination 必须嵌入完整共享编辑器，并以 shared fresh-ready 快照重解析 route")
         expect(
-            view.contains("IntegrationsWindowView(")
+            view.contains("IntegrationsSettingsDestinationView(")
                 && view.contains("integrationsFocusCoordinator")
-                && view.contains("integrationsFocusCoordinator.cancelPendingRequest()")
-                && view.contains("settings.integrations.manage-events")
-                && view.contains("model.request(.events(scope: .surface(host.surfaceID)")
+                && view.contains("integrationsFocusCoordinator.requestFocus(.agent(host))")
+                && view.contains("integrationsFocusCoordinator.requestFocus(.title)")
+                && view.contains("onManageEvents: { host in")
+                && view.contains(".events(scope: .surface(host.surfaceID), event: nil)")
                 && controller.contains("integrationSurfaces: publishedSurfaces")
                 && controller.contains("selectedDestination: destination")
                 && controller.contains("integrationsModel.noteWindowVisibility(state.isVisible)"),

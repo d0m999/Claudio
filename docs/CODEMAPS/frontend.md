@@ -12,10 +12,10 @@ ClaudioGUIApp (@main)
       │  ├─ PanelRows / EventRowView / MasterVolumeRow
       │  ├─ PanelPackSectionView / PackGalleryView
       │  └─ PanelQuitFooter / onboarding and state-driven notices
-      ├─ retained IntegrationsWindowController
-      │  └─ IntegrationsWindowView
-      └─ retained SoundPacksWindowController
-         └─ SoundPacksWindowView
+      └─ retained SettingsWindowController
+         ├─ SettingsWindowView
+         │  └─ IntegrationsSettingsDestinationView
+         └─ embedded SoundPacksWindow editor
 ```
 
 `ClaudioGUIComponents` supplies `ClaudioTheme`, branding, failure rows, audio preview, and text
@@ -30,13 +30,13 @@ composition root
   → stores/models/coordinators → SwiftUI/AppKit views
 ```
 
-- `HostIntegrationPresentationStore` publishes host rows; `IntegrationsWindowModel` owns actions,
-  feedback, recovery, and retained-window state.
+- `HostIntegrationPresentationStore` publishes host rows; `IntegrationDestinationModel` owns
+  destination actions, feedback, recovery, and retained-window lifecycle facts.
 - `SoundPacksRefreshCoordinator` coordinates panel/window projections after config or pack writes.
 - `PanelConfigController`, `MasterVolumeController`, `EventMuteController`, and onboarding models
   keep pure Foundation decisions outside SwiftUI.
-- `PanelFocusCoordinator` and the two window controllers own popover/window focus handoff; views do
-  not own the app lifetime of management windows.
+- `PanelFocusCoordinator` and the retained Settings/Sound Packs owners own popover/window focus
+  handoff; views do not own the app lifetime of management windows.
 
 ## Source boundaries
 

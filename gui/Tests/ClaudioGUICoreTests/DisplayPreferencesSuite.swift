@@ -147,7 +147,7 @@ func runDisplayPreferencesSuites() {
         let paths = [
             "gui/Sources/ClaudioGUI/PanelView.swift",
             "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift",
-            "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
+            "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift",
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift",
         ]
         for path in paths {

@@ -321,7 +321,7 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
             route: restoredRoute,
             availability: availability,
             handback: handback)
-        if let route {
+        if let route, presentation.resolution.failure == nil {
             preferences?.setLastSettingsDestination(route.destination)
         }
         publish(presentation)
@@ -329,8 +329,11 @@ public final class SettingsWindowPresentationModel<Handback>: ObservableObject {
     }
 
     public func request(_ route: SettingsRoute) {
-        preferences?.setLastSettingsDestination(route.destination)
-        publish(lifecycle.request(route: route, availability: availability))
+        let presentation = lifecycle.request(route: route, availability: availability)
+        if presentation.resolution.failure == nil {
+            preferences?.setLastSettingsDestination(route.destination)
+        }
+        publish(presentation)
     }
 
     /// Re-resolves the retained stable route against newly published app facts. This never
@@ -481,10 +484,13 @@ public func settingsWindowFocusOrder(
 ) -> [SettingsWindowFocusTarget] {
     var order = SettingsDestination.allCases.map(SettingsWindowFocusTarget.sidebar)
     order.append(.title(selectedDestination))
-    // Embedded editors own route-aware focus identity spaces. Inventing a Settings-shell first
-    // action for them would point at no rendered control and compete with their initial-focus
-    // requests. Integrations exposes one real shell-owned route action before its embedded model.
-    if selectedDestination != .eventsAndSounds && selectedDestination != .sounds {
+    // Embedded destinations own route-aware focus identity spaces. Inventing a Settings-shell
+    // first action for them would point at no rendered control and compete with their
+    // initial-focus requests.
+    if selectedDestination != .integrations
+        && selectedDestination != .eventsAndSounds
+        && selectedDestination != .sounds
+    {
         order.append(.firstAction(selectedDestination))
     }
     return order

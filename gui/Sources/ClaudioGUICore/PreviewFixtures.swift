@@ -1132,6 +1132,12 @@ public enum PreviewFixtures {
                     event: binding.event,
                     timestamp: Date(timeIntervalSince1970: 1_721_980_800),
                     playbackResult: .played))
+        let latestReceipt: HostReceiptEvidence?
+        if case .observed(let observed) = resolvedActivation {
+            latestReceipt = observed
+        } else {
+            latestReceipt = nil
+        }
         return HostIntegrationSnapshot(
             host: host,
             runtime: runtime,
@@ -1139,6 +1145,7 @@ public enum PreviewFixtures {
             configuration: configuration,
             writability: .writable,
             activation: resolvedActivation,
+            latestReceipt: latestReceipt,
             operation: operation,
             installationID: configuration == .notConfigured
                 ? nil : hostIntegrationInstallationID)

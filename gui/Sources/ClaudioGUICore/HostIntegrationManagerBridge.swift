@@ -99,7 +99,7 @@ public actor HostIntegrationManagerBridge {
     }
 
     public func perform(
-        _ action: IntegrationsWindowInspectorAction
+        _ action: HostIntegrationUserAction
     ) async throws -> HostIntegrationMutationOutcome {
         if case .clearReceiptHistory(let host) = action {
             if case .failure(let error) = receiptStore.clearReceiptHistory(host: host) {
@@ -204,7 +204,7 @@ public actor HostIntegrationManagerBridge {
 /// 动作反馈必须描述刷新后的事实，不是连接按钮在点击前预设的路径。
 /// 特别是 Codex：如果当前 installation 已经收到真实回执，不能还说“等待确认”。
 private func mutationFeedbackText(
-    action: IntegrationsWindowInspectorAction,
+    action: HostIntegrationUserAction,
     state: HostIntegrationPresentationState
 ) -> IntegrationsFeedbackText {
     guard let host = action.host else {
@@ -229,20 +229,4 @@ private func mutationFeedbackText(
         return .localized(key: .feedbackRepairedWaiting, arguments: [host.displayName])
     }
     return .localized(key: .feedbackConfiguredWaiting, arguments: [host.displayName])
-}
-
-extension IntegrationsWindowInspectorAction {
-    fileprivate var host: HostID? {
-        switch self {
-        case .connect(let host), .repair(let host), .disconnect(let host),
-            .clearReceiptHistory(let host):
-            host
-        case .copyHooksCommand, .redetect: nil
-        }
-    }
-
-    fileprivate var isDisconnect: Bool {
-        if case .disconnect = self { return true }
-        return false
-    }
 }

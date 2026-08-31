@@ -32,17 +32,13 @@ private final class MenuBarActionRouter {
         owner?.requestEventsSettingsPresentation(route: route, returnFocusTo: target)
     }
 
-    func requestEventsFromIntegrations(host: HostID, event: Event) {
-        owner?.requestEventsFromIntegrations(host: host, event: event)
-    }
-
     func audibilityInputsChanged() {
         owner?.requestHostIntegrationRefresh()
     }
 
     func publishHostIntegrationState(
         _ state: HostIntegrationPresentationState
-    ) -> IntegrationsWindowContent? {
+    ) -> IntegrationDestinationContent? {
         owner?.publishHostIntegrationState(state)
     }
 
@@ -82,7 +78,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     private let globalShortcutRegistrar: CarbonGlobalShortcutRegistrar
     private let globalShortcutSettings: GlobalShortcutSettingsModel
     private let languageStore: ClaudioPreferences
-    private let integrationsModel: IntegrationsWindowModel
+    private let integrationsModel: IntegrationDestinationModel
     private let actionRouter: MenuBarActionRouter
     private let hostIntegrations: HostIntegrationPresentationStore
     private let hostIntegrationMatrixProvider: HostIntegrationMatrixProvider
@@ -130,7 +126,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             soundPackLibrary: soundPackLibrary,
             refreshCoordinator: soundPacksRefreshCoordinator)
         let actionRouter = MenuBarActionRouter()
-        let integrationsMuteController = EventMuteController()
         let hostIntegrations = HostIntegrationPresentationStore(
             state: hostIntegrationState,
             configurationSources: [
@@ -139,9 +134,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 .workBuddy: ClaudioPaths.workBuddySettingsFile.path,
             ])
         let bootstrapReports = BootstrapReportPresentationStore()
-        let integrationsModel = IntegrationsWindowModel(
+        let integrationsModel = IntegrationDestinationModel(
             content: hostIntegrations.content,
-            refreshHandler: IntegrationsWindowRefreshHandler {
+            refreshHandler: IntegrationDestinationRefreshHandler {
                 [weak actionRouter, weak hostIntegrations] in
                 let state = try await integrationMatrixProvider()
                 guard let hostIntegrations else {
@@ -149,63 +144,26 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 }
                 let content = actionRouter?.publishHostIntegrationState(state)
                     ?? hostIntegrations.replace(state: state)
-                return IntegrationsWindowActionOutcome(
+                return IntegrationDestinationActionOutcome(
                     content: content,
                     feedbackKind: .information,
                     feedbackText: .localized(key: .feedbackRedetectedSources, arguments: []))
             },
-            actionHandler: IntegrationsWindowActionHandler {
+            actionHandler: IntegrationDestinationActionHandler {
                 [weak actionRouter, weak hostIntegrations] action in
-                let outcome = try await integrationActionProvider(action)
+                let managerOutcome = try await integrationActionProvider(action)
                 guard let hostIntegrations else {
                     throw HostIntegrationPresentationError.storeUnavailable
                 }
-                let content = actionRouter?.publishHostIntegrationState(outcome.state)
-                    ?? hostIntegrations.replace(state: outcome.state)
-                return IntegrationsWindowActionOutcome(
+                let content = actionRouter?.publishHostIntegrationState(managerOutcome.state)
+                    ?? hostIntegrations.replace(state: managerOutcome.state)
+                return IntegrationDestinationActionOutcome(
                     content: content,
-                    feedbackKind: outcome.feedbackKind,
-                    feedbackText: outcome.feedbackText)
+                    feedbackKind: managerOutcome.feedbackKind,
+                    feedbackText: managerOutcome.feedbackText)
             },
-            recoveryHandler: IntegrationsWindowRecoveryHandler {
-                [weak actionRouter, weak hostIntegrations, weak soundPacksRefreshCoordinator]
-                action in
-                guard let hostIntegrations else {
-                    throw HostIntegrationPresentationError.storeUnavailable
-                }
-                switch action {
-                case .unmute(_, let event):
-                    if integrationsMuteController.setEnabled(event, enabled: true) {
-                        soundPacksRefreshCoordinator?.completePanelConfigChange(.changed)
-                        let state = try await integrationMatrixProvider()
-                        let content = actionRouter?.publishHostIntegrationState(state)
-                            ?? hostIntegrations.replace(state: state)
-                        return IntegrationsWindowActionOutcome(
-                            content: content,
-                            feedbackKind: .success,
-                            feedbackText: .localized(
-                                key: .feedbackMuteCancelled,
-                                arguments: [event.displayName]))
-                    } else {
-                        throw HostIntegrationPresentationError.recoveryFailed(
-                            integrationsMuteController.lastError?.description
-                                ?? ClaudioL10n(language: .zhHans).text(
-                                    .integrationsMuteFallbackFailed))
-                    }
-                case .configureSound(let host, let event):
-                    actionRouter?.requestEventsFromIntegrations(host: host, event: event)
-                    return IntegrationsWindowActionOutcome(
-                        content: hostIntegrations.content,
-                        feedbackKind: .information,
-                        feedbackText: .localized(
-                            key: .feedbackOpenSoundMapping,
-                            arguments: [event.displayName]))
-                case .connect, .upgrade, .repair, .redetect, .explainMasterVolumeZero,
-                    .explainUnsupported, .none:
-                    throw HostIntegrationPresentationError.recoveryFailed(
-                        ClaudioL10n(language: .zhHans).text(.integrationsRecoveryUnavailable))
-                }
-            },
+            preferences: languageStore,
+            clipboardWriter: IntegrationDestinationClipboardAdapter.system,
             onContentChanged: { [weak hostIntegrations] content in
                 hostIntegrations?.replace(content: content)
             })
@@ -462,7 +420,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
     }
 
     /// 声音包、manifest 或静音配置变化后重算同一份可听矩阵。代次保护避免较慢的旧 refresh
-    /// 覆盖详情窗动作刚发布的新状态；失败时保留最后一份诚实状态，不伪造 ready。
+    /// 覆盖集成目的页动作刚发布的新状态；失败时保留最后一份诚实状态，不伪造 ready。
     fileprivate func requestHostIntegrationRefresh(
         bootstrapSharedRuntime: Bool = false
     ) {
@@ -492,17 +450,17 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 let content = self.hostIntegrations.replace(state: state)
                 self.integrationsModel.replaceExternalContent(content)
             } catch {
-                // IntegrationsWindow 的显式“重新检测”会显示错误反馈；后台/打开面板刷新只保留
+                // 集成目的页的显式“重新检测”会显示错误反馈；后台/打开面板刷新只保留
                 // 上一份事实，避免一次瞬时 I/O 失败把两条宿主行抹成伪造状态。
             }
         }
     }
 
-    /// IntegrationsWindow 的显式 refresh/action 赢过任何较早的后台刷新。发布与失效都在
+    /// 集成目的页的显式 refresh/action 赢过任何较早的后台刷新。发布与失效都在
     /// MainActor 上完成，因此 popover 与 retained window 永远同时切到同一份 content。
     fileprivate func publishHostIntegrationState(
         _ state: HostIntegrationPresentationState
-    ) -> IntegrationsWindowContent {
+    ) -> IntegrationDestinationContent {
         hostIntegrationRefreshRevision &+= 1
         hostIntegrationRefreshTask?.cancel()
         return hostIntegrations.replace(state: state)
@@ -644,9 +602,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         returnFocusTo target: PanelFocusTarget
     ) {
         if let host {
-            integrationsModel.select(.host(host))
+            _ = integrationsModel.selectHost(host)
         }
-        let selectedHost = host ?? integrationsModel.selection.host
+        let selectedHost = host ?? integrationsModel.selectedHost ?? .claudeCode
         requestSettingsPresentation(
             route: .integrations(surface: selectedHost.surfaceID),
             returnFocusTo: target)
@@ -659,13 +617,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             route: nil,
             returnFocusTo: nil,
             handbackApplication: globalShortcutHandbackApplication())
-    }
-
-    /// Integrations recovery stays inside the one retained Settings window. It carries stable
-    /// Surface/Event identities and leaves Events to resolve its existing sound/config owner.
-    fileprivate func requestEventsFromIntegrations(host: HostID, event: Event) {
-        settingsWindowController.request(
-            .events(scope: .surface(host.surfaceID), event: event))
     }
 
     private func requestSettingsPresentation(

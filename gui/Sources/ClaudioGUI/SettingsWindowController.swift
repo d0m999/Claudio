@@ -25,8 +25,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let eventSettingsModel: PanelConfigController
     private let eventSettingsSelection: EventSettingsWindowSelection
     private let hostIntegrations: HostIntegrationPresentationStore
-    private let integrationsModel: IntegrationsWindowModel
-    private let integrationsFocusCoordinator = IntegrationsWindowFocusCoordinator()
+    private let integrationsModel: IntegrationDestinationModel
+    private let integrationsFocusCoordinator = IntegrationDestinationFocusCoordinator()
     private let aiCueViewModel: AICueGenerationViewModel
     private let audioEnvironment: AudioImportEnvironment
     private let onEventAudibilityInputsChanged: @MainActor () -> Void
@@ -58,7 +58,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         eventSettingsModel: PanelConfigController,
         eventSettingsSelection: EventSettingsWindowSelection,
         hostIntegrations: HostIntegrationPresentationStore,
-        integrationsModel: IntegrationsWindowModel,
+        integrationsModel: IntegrationDestinationModel,
         aiCueViewModel: AICueGenerationViewModel,
         audioEnvironment: AudioImportEnvironment,
         onEventAudibilityInputsChanged: @escaping @MainActor () -> Void,
@@ -162,13 +162,13 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onClose restoration: @escaping @MainActor (NSRunningApplication?) -> Void
     ) {
         loginItemSettings.refresh()
-        if let route {
-            applyEmbeddedRoute(route)
-        }
         focusRestoration = restoration
         isPresentingWindow = true
         let wasVisible = window?.isVisible == true
         let presentation = model.present(route: route, handback: application)
+        if route != nil, presentation.resolution.failure == nil, let route {
+            applyEmbeddedRoute(route)
+        }
         let presentedWindow = window ?? makeWindow()
         if !wasVisible {
             handbackTracker.beginPresentation()
@@ -302,8 +302,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
 
     /// In-window actions submit a typed route without creating or presenting another window.
     func request(_ route: SettingsRoute) {
-        applyEmbeddedRoute(route)
         model.request(route)
+        guard model.resolution.failure == nil else { return }
+        applyEmbeddedRoute(route)
     }
 
     private func applyEmbeddedRoute(_ route: SettingsRoute) {
@@ -312,7 +313,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             guard
                 let host = HostID.productVisibleCases.first(where: { $0.surfaceID == surface })
             else { return }
-            integrationsModel.select(.host(host))
+            _ = integrationsModel.selectHost(host)
         case .events(let scope, let event):
             let eventRoute = EventSettingsWindowRoute(scope: scope, event: event)
             eventSettingsSelection.select(eventRoute)

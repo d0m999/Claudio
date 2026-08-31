@@ -3280,6 +3280,174 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "由宿主集成管理器提供" } }
       }
     },
+    "integrations.destination.subtitle" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage the apps Claudio connects to, how it connects, and which events it can hear." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理 Claudio 连接的应用、连接方式和事件能力。" } }
+      }
+    },
+    "integrations.destination.agent-section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Agent" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Agent" } }
+      }
+    },
+    "integrations.destination.agent-hint" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Manage how Claudio connects to each app. Event switches and sounds remain independently saved in Events & Sounds." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "管理 Claudio 与每个应用的连接方式。事件开关和提示音仍在“事件与提示音”中按 app 独立保存。" } }
+      }
+    },
+    "integrations.destination.connection-section" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · Connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "%@ · 连接" } }
+      }
+    },
+    "integrations.destination.coverage" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Coverage" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "覆盖能力" } }
+      }
+    },
+    "integrations.destination.enable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Enable %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "启用 %@" } }
+      }
+    },
+    "integrations.destination.disable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Disable %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "停用 %@" } }
+      }
+    },
+    "integrations.destination.status.ready" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Active" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已激活" } }
+      }
+    },
+    "integrations.destination.status.awaiting" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Awaiting receipt" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "待回执" } }
+      }
+    },
+    "integrations.destination.status.legacy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Legacy connection" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "旧版连接" } }
+      }
+    },
+    "integrations.destination.status.not-connected" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Not connected" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "未连接" } }
+      }
+    },
+    "integrations.destination.status.needs-attention" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Needs attention" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "需要处理" } }
+      }
+    },
+    "integrations.destination.mechanism" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Connection method" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "接入方式" } }
+      }
+    },
+    "integrations.destination.events-and-sounds" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Events & Sounds" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "事件与提示音" } }
+      }
+    },
+    "integrations.destination.receipt-history" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Redacted receipt history" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "脱敏回执历史" } }
+      }
+    },
+    "integrations.destination.latest-receipt" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Latest redacted receipt: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "最近脱敏回执：%@" } }
+      }
+    },
+    "integrations.destination.no-configuration-source" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configuration source unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置来源暂不可用" } }
+      }
+    },
+    "integrations.destination.configuration-source-value" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Configuration source: %@" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "配置来源：%@" } }
+      }
+    },
+    "integrations.destination.activated-description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The current installation has produced a real host event receipt." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前安装实例已取得真实宿主事件回执。" } }
+      }
+    },
+    "integrations.destination.configured-waiting-description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The current installation is configured and waiting for a real host event receipt." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前安装实例已配置，等待真实宿主事件回执。" } }
+      }
+    },
+    "integrations.destination.not-connected-description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "The current installation is not connected." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前安装实例尚未连接。" } }
+      }
+    },
+    "integrations.destination.needs-attention-description" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "This connection needs attention." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "当前安装实例需要处理。" } }
+      }
+    },
+    "integrations.destination.surface-events-caption" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Only %@ changes; other apps' event switches and sounds stay unchanged." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "只修改 %@；其他 app 的事件开关和声音保持不变" } }
+      }
+    },
+    "integrations.destination.receipt-policy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Up to 20 redacted receipts per source are retained for 30 days; clearing them does not affect the current connection or sound preferences." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "每个来源最多保留 20 条、30 天；清除不影响当前连接或声音偏好" } }
+      }
+    },
+    "integrations.destination.activation-callout" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "“Configured” does not mean “active”: the status becomes active only after the current installation produces a real receipt. Regular Chat does not inherit Codex view hooks." } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "“已配置”不等于“已激活”：只有当前安装实例产生真实 receipt，状态才会变为已激活。普通 Chat 不继承 Codex view 的 hooks。" } }
+      }
+    },
+    "integrations.destination.unavailable-title" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Integration status unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "集成状态暂不可用" } }
+      }
+    },
+    "integrations.destination.mechanism.native-hooks" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Native hooks" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "原生 hooks" } }
+      }
+    },
+    "integrations.destination.mechanism.accessibility-beta" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Accessibility Beta" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "Accessibility Beta" } }
+      }
+    },
     "settings.sidebar.advanced" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Advanced" } },

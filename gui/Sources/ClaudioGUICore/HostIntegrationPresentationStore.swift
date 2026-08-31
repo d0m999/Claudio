@@ -1,26 +1,25 @@
 import ClaudioCore
-import ClaudioGUICore
 import ClaudioLocalization
 import Combine
 import Foundation
 
-/// Main-actor presentation seam shared by the popover and the retained integrations window.
-/// It accepts already-composed Core facts and never opens either host's configuration itself.
+/// Main-actor presentation seam shared by the menu-bar panel, Events, About, and the retained
+/// Integrations destination. It accepts already-composed Core facts and never opens a host file.
 @MainActor
 public final class HostIntegrationPresentationStore: ObservableObject {
-    @Published private(set) var content: IntegrationsWindowContent
-    @Published private(set) var safeSurfaceFacts: [AboutSurfaceFact]
+    @Published public private(set) var content: IntegrationDestinationContent
+    @Published public private(set) var safeSurfaceFacts: [AboutSurfaceFact]
 
     private let configurationSources: [HostID: String]
     private var state: HostIntegrationPresentationState
 
-    init(
+    public init(
         state: HostIntegrationPresentationState,
-        configurationSources: [HostID: String]
+        configurationSources: [HostID: String] = [:]
     ) {
         self.state = state
         self.configurationSources = configurationSources
-        let initialContent = integrationWindowContent(
+        let initialContent = integrationDestinationContent(
             state: state,
             configurationSources: configurationSources)
         content = initialContent
@@ -28,11 +27,11 @@ public final class HostIntegrationPresentationStore: ObservableObject {
     }
 
     @discardableResult
-    func replace(state replacementState: HostIntegrationPresentationState)
-        -> IntegrationsWindowContent
+    public func replace(state replacementState: HostIntegrationPresentationState)
+        -> IntegrationDestinationContent
     {
         state = replacementState
-        let replacement = integrationWindowContent(
+        let replacement = integrationDestinationContent(
             state: replacementState,
             configurationSources: configurationSources)
         content = replacement
@@ -40,7 +39,7 @@ public final class HostIntegrationPresentationStore: ObservableObject {
         return replacement
     }
 
-    func replace(content replacement: IntegrationsWindowContent) {
+    public func replace(content replacement: IntegrationDestinationContent) {
         content = replacement
         safeSurfaceFacts = aboutSurfaceFacts(from: replacement.sourceRows)
     }
@@ -49,13 +48,13 @@ public final class HostIntegrationPresentationStore: ObservableObject {
 /// Async provider boundary for the non-observable manager bridge. Startup and ordinary refresh are
 /// deliberately separate so app launch can bootstrap shared runtime without ever auto-connecting a
 /// host; tests can inject two distinct operations and prove that separation.
-struct HostIntegrationMatrixProvider: Sendable {
+public struct HostIntegrationMatrixProvider: Sendable {
     private let refreshOperation:
         @Sendable () async throws -> HostIntegrationPresentationState
     private let bootstrapOperation:
         @Sendable () async throws -> HostIntegrationPresentationState
 
-    init(
+    public init(
         refresh: @escaping @Sendable () async throws -> HostIntegrationPresentationState,
         bootstrap: @escaping @Sendable () async throws -> HostIntegrationPresentationState
     ) {
@@ -63,43 +62,41 @@ struct HostIntegrationMatrixProvider: Sendable {
         bootstrapOperation = bootstrap
     }
 
-    func callAsFunction() async throws -> HostIntegrationPresentationState {
+    public func callAsFunction() async throws -> HostIntegrationPresentationState {
         try await refreshOperation()
     }
 
-    func bootstrapSharedRuntime() async throws -> HostIntegrationPresentationState {
+    public func bootstrapSharedRuntime() async throws -> HostIntegrationPresentationState {
         try await bootstrapOperation()
     }
 }
 
-/// Connect/repair/disconnect provider kept independent from the window model's content type. The
-/// bridge returns Core presentation state; `MenuBarController` publishes it on MainActor into the
-/// same store both UI surfaces observe.
-struct HostIntegrationActionProvider: Sendable {
+/// Connect/repair/disconnect provider kept independent from the destination model's content type.
+public struct HostIntegrationActionProvider: Sendable {
     private let operation:
-        @Sendable (IntegrationsWindowInspectorAction) async throws
+        @Sendable (HostIntegrationUserAction) async throws
             -> HostIntegrationMutationOutcome
 
-    init(
+    public init(
         _ operation: @escaping
-            @Sendable (IntegrationsWindowInspectorAction) async throws
+            @Sendable (HostIntegrationUserAction) async throws
                 -> HostIntegrationMutationOutcome
     ) {
         self.operation = operation
     }
 
-    func callAsFunction(
-        _ action: IntegrationsWindowInspectorAction
+    public func callAsFunction(
+        _ action: HostIntegrationUserAction
     ) async throws -> HostIntegrationMutationOutcome {
         try await operation(action)
     }
 }
 
-enum HostIntegrationPresentationError: LocalizedError {
+public enum HostIntegrationPresentationError: LocalizedError, Sendable, Equatable {
     case storeUnavailable
     case recoveryFailed(String)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .storeUnavailable:
             ClaudioL10n(language: .zhHans).text(.integrationsStoreUnavailable)
@@ -109,29 +106,30 @@ enum HostIntegrationPresentationError: LocalizedError {
     }
 }
 
-private func integrationWindowContent(
+/// Compose the destination facts from one manager refresh. Production never supplies demo state;
+/// tests and the State Gallery may inject a different manager snapshot through this same seam.
+public func integrationDestinationContent(
     state: HostIntegrationPresentationState,
-    configurationSources: [HostID: String]
-) -> IntegrationsWindowContent {
+    configurationSources: [HostID: String] = [:]
+) -> IntegrationDestinationContent {
     let sourceRows = hostSourceRowPresentations(from: state.matrix)
     let snapshots = Dictionary(uniqueKeysWithValues: state.snapshots.map { ($0.host, $0) })
-    let facts = Dictionary(
-        uniqueKeysWithValues: sourceRows.map { row in
-            (
-                row.host,
-                IntegrationsWindowHostInspectorFacts(
-                    host: row.host,
-                    configurationSource: configurationSources[row.host],
-                    latestReceiptText: snapshots[row.host].flatMap(hostLatestReceiptText),
-                    latestReceiptEvidence: snapshots[row.host].flatMap(hostLatestReceiptEvidence),
-                    actions: integrationsInspectorActions(for: row))
-            )
-        })
-    return IntegrationsWindowContent(
+    let facts = HostID.productVisibleCases.compactMap { host -> IntegrationDestinationHostFacts? in
+        guard let row = sourceRows.first(where: { $0.host == host }) else { return nil }
+        let snapshot = snapshots[host]
+        return IntegrationDestinationHostFacts(
+            host: host,
+            row: row,
+            configurationSource: configurationSources[host],
+            latestReceiptText: snapshot.flatMap(hostLatestReceiptText),
+            latestReceiptEvidence: snapshot.flatMap(hostLatestReceiptEvidence),
+            mechanism: host.descriptor.mechanism)
+    }
+    return IntegrationDestinationContent(
         sourceRows: sourceRows,
         matrix: hostCapabilityMatrixPresentation(
             from: state.matrix,
             mutedReason: state.masterVolumeIsZero ? .masterVolumeZero : .eventDisabled,
             hostOrder: hostSurfacePresentationOrder(from: sourceRows)),
-        inspectorFacts: facts)
+        hostFacts: facts)
 }

@@ -938,15 +938,16 @@ setup 与 doctor 的所有 packID 打印点统一走它。
 **Priority:** P2
 **Depends on:** None
 
-### state gallery 的 `.running(.disconnect)` 仍不是当前生产画面（旧 `PanelView.disconnectRow` 描述已过期）
+### state gallery 的旧 `.running(.disconnect)` 记录已由集成目的页替代
 
-**Status（2026-08-19）：** 部分完成。当前生产断开连接入口已位于 retained `IntegrationsWindow`；state gallery 仍用 `OnboardingView` 承载该状态，尚未补上真实生产 surface 的视觉帧。
+**Status（2026-08-31）：** 已关闭。集成连接动作已迁入统一 Settings 的
+`IntegrationsSettingsDestinationView`；生产状态由 `HostIntegrationUserAction.disconnect` 和
+`IntegrationDestinationModel` 投影，gallery 新增固定的 `workbuddy.disconnect-in-flight` production
+frame。旧 `OnboardingActionState` 的 `.running(.disconnect)` 仍保留在明确标注为 Legacy 的历史归档中，
+不再声称它是当前生产画面。
 
-**What:** `.running(.disconnect)` 那一帧用 `.installed` 承载，渲染的是 `OnboardingView`。但真实 app 在 `.installed` 时渲染的是 `operationalPanel`（`OnboardingView` 根本不出现）——真正 ship 的那颗「断开连接」按钮（在 `PanelView.disconnectRow` 里）**一帧都没有**。
-
-**Why:** T14 的意义是「仓库内 gallery = 视觉真相源」。这条不是新引入的（`.installed` 的 onboarding fixture 本来就渲染一个 app 里不出现的界面），但 T17 把一个**真的会 ship** 的控件加进了 operational 面板，于是这个缺口第一次有了实际代价：没有人看过那颗按钮长什么样，明暗两主题都没有。
-
-**Context:** 2026-07-12 T17b diff 评审。修法：给 gallery 加一个能 pin 状态的 `PanelView` 帧（需要 `PanelView` 支持 `#if DEBUG` 的 preview init），或把 `disconnectRow` 抽成一个独立的可预览小组件。
+**Boundary:** 本次保留 onboarding/Panel 的历史 fixture 与其穷举测试，不把已退役的 action enum 重新接回
+生产连接路径；新 frame 覆盖的是当前真实集成目的页的断开中状态。
 
 **Effort:** S
 **Priority:** P3

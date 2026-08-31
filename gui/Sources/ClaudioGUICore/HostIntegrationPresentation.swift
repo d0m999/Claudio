@@ -6,7 +6,7 @@ import Foundation
 
 /// 宿主行的语义状态。颜色只由视图把这些语义映射到 token；`ready` 不区分 5/5 与
 /// Codex 的正常 4/5，因此不会把能力差异误画成故障警告。
-public enum HostSourceRowStatus: Sendable, Equatable {
+public enum HostSourceRowStatus: Sendable, Equatable, Hashable {
     case ready
     case awaitingActivation
     case legacy
@@ -14,7 +14,7 @@ public enum HostSourceRowStatus: Sendable, Equatable {
     case needsAttention
 }
 
-/// 菜单栏与 IntegrationsWindow 共用的一条声音来源呈现。
+/// 菜单栏与集成目的页共用的一条声音来源呈现。
 public struct HostSourceRowPresentation: Identifiable, Sendable, Equatable {
     public var id: HostID { host }
     public let host: HostID
@@ -49,7 +49,7 @@ public struct HostSourceRowPresentation: Identifiable, Sendable, Equatable {
     }
 }
 
-/// IntegrationsWindow 的 Product → Surface 分组。产品只负责分组，选择、能力和回执仍以
+/// 共享诊断消费者使用的 Product → Surface 分组。产品只负责分组，选择、能力和回执仍以
 /// `HostID` / `HostSurfaceID` 为粒度。
 public struct HostSourceProductGroupPresentation: Identifiable, Sendable, Equatable {
     public var id: HostProductID { product }
@@ -68,8 +68,8 @@ public struct HostSourceProductGroupPresentation: Identifiable, Sendable, Equata
     }
 }
 
-/// Product → Surface 的唯一视觉顺序。正常产品 registry、产品分组、矩阵列、初始选择和
-/// 键盘遍历都必须消费这里的呈现顺序，不能分别推导或把诊断 identity 混入普通 UI。
+/// Product → Surface 的共享诊断顺序。集成目的页的 Agent 行另有明确的
+/// ``HostID/productVisibleCases`` 顺序，不能把这里的历史 Product 分组顺序误用到 Agent 行。
 public func hostSurfacePresentationOrder(
     hosts: [HostID] = HostID.productVisibleCases
 ) -> [HostID] {
@@ -507,7 +507,7 @@ private func eventHostIndicatorState(
     }
 }
 
-/// 检查器的真实回执摘要。只投影快照中已经通过 installation ID 校验的 `.observed` 证据；
+/// 集成目的页的真实回执摘要。只投影快照中已经通过 installation ID 校验的证据；
 /// 不包含提示词、会话、路径、音频文件或 installation ID。
 public func hostLatestReceiptText(
     snapshot: HostIntegrationSnapshot
@@ -566,66 +566,31 @@ private func hostCapabilityStatusText(
     }
 }
 
-// MARK: - Dynamic Type 重排
+// MARK: - 集成目的页动作
 
-/// IntegrationsWindow 只需要区分是否已进入必须重排的最大辅助字号区间；SwiftUI 层负责把系统
-/// `DynamicTypeSize` 归一化成这里的两档。
-public enum IntegrationsWindowTypeSizeTier: Sendable, Equatable, CaseIterable {
-    case standard
-    case maximum
-}
-
-public enum IntegrationsWindowLayoutMode: Sendable, Equatable {
-    case capabilityMatrix(eventRowCount: Int, hostColumnCount: Int)
-    case eventCards(cardCount: Int, hostRowsPerCard: Int)
-}
-
-public struct IntegrationsWindowLayoutAdaptation: Sendable, Equatable {
-    public let mode: IntegrationsWindowLayoutMode
-    public let allowsHorizontalScrolling: Bool
-
-    public init(mode: IntegrationsWindowLayoutMode, allowsHorizontalScrolling: Bool) {
-        self.mode = mode
-        self.allowsHorizontalScrolling = allowsHorizontalScrolling
-    }
-}
-
-/// 矩阵的 118pt 事件列之外，每个 Host Surface 至少需要 156pt 才能同时容纳状态 glyph、
-/// `UserPromptSubmit` 等原生事件和限定语。达不到时复用事件卡，不用横向滚动掩盖不可读列。
-public let integrationsWindowEventColumnWidth = 118.0
-public let integrationsWindowMinimumHostColumnWidth = 156.0
-
-public func integrationsWindowLayoutAdaptation(
-    for tier: IntegrationsWindowTypeSizeTier,
-    availableWidth: Double,
-    eventCount: Int = Event.allCases.count,
-    hostCount: Int = HostID.productVisibleCases.count
-) -> IntegrationsWindowLayoutAdaptation {
-    let mode: IntegrationsWindowLayoutMode
-    switch tier {
-    case .standard:
-        let requiredWidth =
-            integrationsWindowEventColumnWidth
-            + integrationsWindowMinimumHostColumnWidth * Double(hostCount)
-        mode =
-            availableWidth >= requiredWidth
-            ? .capabilityMatrix(eventRowCount: eventCount, hostColumnCount: hostCount)
-            : .eventCards(cardCount: eventCount, hostRowsPerCard: hostCount)
-    case .maximum:
-        mode = .eventCards(cardCount: eventCount, hostRowsPerCard: hostCount)
-    }
-    return IntegrationsWindowLayoutAdaptation(mode: mode, allowsHorizontalScrolling: false)
-}
-
-// MARK: - IntegrationsWindow 专用焦点序
-
-public enum IntegrationsWindowInspectorAction: Sendable, Hashable {
+/// 集成目的页唯一的宿主连接动作。连接、升级/修复、断开和回执清除仍委托给既有
+/// `HostIntegrationManager` bridge；此类型只描述用户意图，不持有配置或回执状态。
+public enum HostIntegrationUserAction: Sendable, Hashable {
     case copyHooksCommand
     case redetect
     case connect(HostID)
     case repair(HostID)
     case disconnect(HostID)
     case clearReceiptHistory(HostID)
+
+    public var host: HostID? {
+        switch self {
+        case .connect(let host), .repair(let host), .disconnect(let host),
+            .clearReceiptHistory(let host):
+            host
+        case .copyHooksCommand, .redetect: nil
+        }
+    }
+
+    public var isDisconnect: Bool {
+        if case .disconnect = self { return true }
+        return false
+    }
 
     fileprivate var isDestructive: Bool {
         switch self {
@@ -635,39 +600,29 @@ public enum IntegrationsWindowInspectorAction: Sendable, Hashable {
     }
 }
 
-/// 检查器动作完全由来源行状态投影。legacy 是“仍可听但没有当前代次真实回执”，因此不能与
-/// ready 合并成只允许重探/断开；它必须提供显式升级，把旧 `claudio play` hooks 换成带回执连接。
-public func integrationsInspectorActions(
+/// 连接状态行的附加动作完全由五态投影。Toggle 的连接/断开不出现在这个列表中，从而保持
+/// 选择控件与 Toggle 的交互独立；Codex 待回执额外提供 `/hooks` 复制动作。
+public func integrationConnectionStatusActions(
     for row: HostSourceRowPresentation
-) -> [IntegrationsWindowInspectorAction] {
+) -> [HostIntegrationUserAction] {
     switch row.status {
-    case .ready:
-        return [.redetect, .clearReceiptHistory(row.host), .disconnect(row.host)]
+    case .ready: return [.redetect]
     case .legacy:
-        return [
-            .repair(row.host), .redetect, .clearReceiptHistory(row.host), .disconnect(row.host),
-        ]
+        return [.repair(row.host), .redetect]
     case .awaitingActivation:
         if row.host == .codex {
-            return [
-                .copyHooksCommand, .redetect, .clearReceiptHistory(row.host),
-                .disconnect(row.host),
-            ]
+            return [.copyHooksCommand, .redetect]
         }
-        return [.redetect, .clearReceiptHistory(row.host), .disconnect(row.host)]
-    case .notConnected:
-        return [.connect(row.host), .clearReceiptHistory(row.host)]
-    case .needsAttention:
-        return [
-            .redetect, .repair(row.host), .clearReceiptHistory(row.host), .disconnect(row.host),
-        ]
+        return [.redetect]
+    case .notConnected: return [.redetect]
+    case .needsAttention: return [.repair(row.host), .redetect]
     }
 }
 
-/// 动作的稳定可见标题。`.repair` 在 legacy 上表达为产品动作“升级连接”，而真正损坏态仍叫
+/// 动作的稳定中文投影。`.repair` 在 legacy 上表达为产品动作“升级连接”，而真正损坏态仍叫
 /// “修复”；两者继续复用同一个 manager connect seam。
-public func integrationsInspectorActionTitle(
-    _ action: IntegrationsWindowInspectorAction,
+public func hostIntegrationUserActionTitle(
+    _ action: HostIntegrationUserAction,
     hostStatus: HostSourceRowStatus?
 ) -> String {
     switch action {
@@ -681,84 +636,9 @@ public func integrationsInspectorActionTitle(
     }
 }
 
-public enum IntegrationsWindowFocusTarget: Sendable, Hashable {
-    case hostCard(HostID)
-    case capabilityCell(host: HostID, event: Event)
-    case toolbarRedetect
-    case recoveryAction(IntegrationsRecoveryAction)
-    case copyConfigurationPath(HostID)
-    case dismissFeedback(revision: UInt64)
-    case inspectorAction(IntegrationsWindowInspectorAction)
-}
-
-/// 详情窗当前真实渲染的矩阵、检查器动作与反馈关闭按钮。它与菜单栏面板的焦点模型分离，避免
-/// retained window 的键盘环被 popover 的关闭/恢复规则污染。
-public struct IntegrationsWindowFocusScope: Sendable, Equatable {
-    public let matrix: HostCapabilityMatrixPresentation
-    public let hostOrder: [HostID]
-    public let inspectorActions: [IntegrationsWindowInspectorAction]
-    public let recoveryAction: IntegrationsRecoveryAction
-    public let configurationPathHost: HostID?
-    public let feedbackRevision: UInt64?
-
-    public init(
-        matrix: HostCapabilityMatrixPresentation,
-        hostOrder: [HostID]? = nil,
-        inspectorActions: [IntegrationsWindowInspectorAction],
-        recoveryAction: IntegrationsRecoveryAction = .none,
-        configurationPathHost: HostID? = nil,
-        feedbackRevision: UInt64? = nil
-    ) {
-        self.matrix = matrix
-        self.hostOrder = hostOrder ?? matrix.hostColumns
-        self.inspectorActions = inspectorActions
-        self.recoveryAction = recoveryAction
-        self.configurationPathHost = configurationPathHost
-        self.feedbackRevision = feedbackRevision
-    }
-}
-
-/// 从上到下按 Product → Surface 遍历来源摘要与矩阵，再进入工具栏与检查器。即使调用者把
-/// 断开动作夹在中间，函数也会把全部破坏性动作移到末尾；普通 Tab 流不能先撞上断开。
-public func integrationsWindowFocusOrder(
-    _ scope: IntegrationsWindowFocusScope
-) -> [IntegrationsWindowFocusTarget] {
-    let declaredHosts = scope.hostOrder.filter { scope.matrix.hostColumns.contains($0) }
-    let remainingHosts = scope.matrix.hostColumns.filter { !declaredHosts.contains($0) }
-    let orderedHosts = declaredHosts + remainingHosts
-    var order = orderedHosts.map(IntegrationsWindowFocusTarget.hostCard)
-    order.append(
-        contentsOf: scope.matrix.rows.flatMap { row in
-            orderedHosts.compactMap { host in
-                row.cells.first(where: { $0.host == host }).map {
-                    IntegrationsWindowFocusTarget.capabilityCell(host: $0.host, event: $0.event)
-                }
-            }
-        })
-    order.append(.toolbarRedetect)
-    if let host = scope.configurationPathHost {
-        order.append(.copyConfigurationPath(host))
-    }
-    if let revision = scope.feedbackRevision {
-        order.append(.dismissFeedback(revision: revision))
-    }
-    if scope.recoveryAction.title != nil {
-        order.append(.recoveryAction(scope.recoveryAction))
-    }
-    order.append(
-        contentsOf: scope.inspectorActions.filter { !$0.isDestructive }.map {
-            .inspectorAction($0)
-        })
-    order.append(
-        contentsOf: scope.inspectorActions.filter(\.isDestructive).map {
-            .inspectorAction($0)
-        })
-    return order
-}
-
 // MARK: - 短暂、可关闭反馈
 
-/// 详情窗反馈的固定可见时间。计时由 retained window 的视图生命周期驱动，模型只决定边界。
+/// 集成目的页反馈的固定可见时间。计时由 retained window 的视图生命周期驱动，模型只决定边界。
 public let integrationsFeedbackLifetime: TimeInterval = 5
 
 public enum IntegrationsFeedbackKind: Sendable, Equatable {
@@ -1026,7 +906,7 @@ public struct IntegrationsFeedbackModel: Sendable, Equatable {
     }
 }
 
-/// IntegrationsWindow 主动播报反馈的去重器。`nil`（关闭/到期）永远不产生播报，也不会重置
+/// 集成目的页主动播报反馈的去重器。`nil`（关闭/到期）永远不产生播报，也不会重置
 /// 已消费代次；只有一个从未播过的新 revision 才返回完整的宿主限定句。
 public struct IntegrationsFeedbackAnnouncementModel: Sendable, Equatable {
     private var lastAnnouncedRevision: UInt64?
@@ -1055,8 +935,8 @@ public struct IntegrationsFeedbackAnnouncementModel: Sendable, Equatable {
 
 /// 顶部宿主卡在一个真实异步动作进行中显示的状态。宿主与可见/无障碍文案同值返回，View 不再
 /// 根据按钮标题猜“这是谁的哪个操作”。
-public struct IntegrationsInFlightPresentation: Sendable, Equatable {
-    public let action: IntegrationsWindowInspectorAction
+public struct IntegrationDestinationInFlightPresentation: Sendable, Equatable {
+    public let action: HostIntegrationUserAction
     public let host: HostID
     public let statusText: String
     public let accessibilityLabel: String
@@ -1065,7 +945,7 @@ public struct IntegrationsInFlightPresentation: Sendable, Equatable {
     public let isUpgrade: Bool
 
     public init(
-        action: IntegrationsWindowInspectorAction,
+        action: HostIntegrationUserAction,
         host: HostID,
         statusText: String,
         accessibilityLabel: String,
@@ -1081,11 +961,11 @@ public struct IntegrationsInFlightPresentation: Sendable, Equatable {
 
 /// `copy /hooks` 是同步剪贴板动作，不进入 in-flight；其余动作都给目标宿主卡一个明确文字态。
 /// legacy repair 使用“升级中”，普通 repair 使用“修复中”。
-public func integrationsInFlightPresentation(
-    action: IntegrationsWindowInspectorAction,
+public func integrationDestinationInFlightPresentation(
+    action: HostIntegrationUserAction,
     selectedHost: HostID,
     hostStatus: HostSourceRowStatus?
-) -> IntegrationsInFlightPresentation? {
+) -> IntegrationDestinationInFlightPresentation? {
     let host: HostID
     let statusText: String
     let isUpgrade: Bool
@@ -1113,7 +993,7 @@ public func integrationsInFlightPresentation(
         statusText = "清除回执历史中"
         isUpgrade = false
     }
-    return IntegrationsInFlightPresentation(
+    return IntegrationDestinationInFlightPresentation(
         action: action,
         host: host,
         statusText: statusText,

@@ -1311,13 +1311,13 @@ private func packCardStateCaption(_ state: PackCardState) -> String {
 
 // MARK: - Host integrations (all-product + WorkBuddy pre-RC scenarios)
 
-/// 全部产品宿主展柜直接渲染生产 ``IntegrationsWindowView``：宿主卡、可听矩阵、检查器和
-/// Dynamic Type 重排全都走同一份视图，不在 gallery 复制第二套展示组件。
+/// 全部产品宿主展柜直接渲染生产 ``IntegrationsSettingsDestinationView``；WorkBuddy 的七态
+/// 继续进入同一份 production view，不在 gallery 复制第二套展示组件。
 struct HostIntegrationGalleryView: View {
     var body: some View {
         let scenarioCount =
             PreviewFixtures.hostIntegrationScenarios.count
-            + PreviewFixtures.workBuddyVisualScenarios.count
+            + PreviewFixtures.workBuddyVisualScenarios.count + 1
         GallerySection(
             title: "Host integrations · 2 languages (\(scenarioCount))"
         ) {
@@ -1353,6 +1353,25 @@ struct HostIntegrationGalleryView: View {
                                 .environment(\.colorScheme, appearance.colorScheme)
                             }
                         }
+                        if let disconnectScenario = PreviewFixtures.workBuddyVisualScenarios.first(
+                            where: { $0.phase == .taskStartCurrent })
+                        {
+                            GalleryFrame(
+                                caption:
+                                    "\(language.selfName) · \(textSize.rawValue) · \(appearance.rawValue) · workbuddy.disconnect-in-flight · WorkBuddy 断开中"
+                            ) {
+                                HostIntegrationStateFrame(
+                                    scenario: PreviewFixtures.HostIntegrationScenario(
+                                        id: "workbuddy.disconnect-in-flight",
+                                        title: "WorkBuddy 断开中",
+                                        state: disconnectScenario.state),
+                                    language: language,
+                                    textSize: textSize,
+                                    previewInFlightAction: .disconnect(.workBuddy)
+                                )
+                                .environment(\.colorScheme, appearance.colorScheme)
+                            }
+                        }
                     }
                 }
             }
@@ -1361,14 +1380,15 @@ struct HostIntegrationGalleryView: View {
 }
 
 private struct HostIntegrationStateFrame: View {
-    @StateObject private var model: IntegrationsWindowModel
-    @StateObject private var focusCoordinator = IntegrationsWindowFocusCoordinator()
+    @StateObject private var model: IntegrationDestinationModel
+    @StateObject private var focusCoordinator = IntegrationDestinationFocusCoordinator()
     @StateObject private var languageStore: ClaudioPreferences
 
     init(
         scenario: PreviewFixtures.HostIntegrationScenario,
         language: ClaudioAppLanguage,
-        textSize: ClaudioInterfaceTextSize = .standard
+        textSize: ClaudioInterfaceTextSize = .standard,
+        previewInFlightAction: HostIntegrationUserAction? = nil
     ) {
         let languageStore = ClaudioPreferences(defaults: UserDefaults())
         languageStore.setLanguage(language)
@@ -1382,25 +1402,31 @@ private struct HostIntegrationStateFrame: View {
                 .workBuddy: "~/.workbuddy/settings.json",
             ])
         let content = store.content
-        let unchanged = IntegrationsWindowActionOutcome(
+        let unchanged = IntegrationDestinationActionOutcome(
             content: content,
             feedbackKind: .information,
             feedbackMessage: "预览不会修改配置")
-        _model = StateObject(
-            wrappedValue: IntegrationsWindowModel(
-                content: content,
-                refreshHandler: IntegrationsWindowRefreshHandler { unchanged },
-                actionHandler: IntegrationsWindowActionHandler { _ in unchanged },
-                clipboardWriter: IntegrationsWindowClipboardWriter { _ in true }))
+        let model = IntegrationDestinationModel(
+            content: content,
+            refreshHandler: IntegrationDestinationRefreshHandler { unchanged },
+            actionHandler: IntegrationDestinationActionHandler { _ in unchanged },
+            preferences: languageStore,
+            clipboardWriter: IntegrationDestinationClipboardWriter { _ in true })
+        if let previewInFlightAction {
+            model.pinPreviewInFlight(previewInFlightAction)
+        }
+        _model = StateObject(wrappedValue: model)
     }
 
     var body: some View {
-        IntegrationsWindowView(
+        IntegrationsSettingsDestinationView(
             model: model,
             focusCoordinator: focusCoordinator,
-            languageStore: languageStore
+            languageStore: languageStore,
+            onManageEvents: nil,
+            onAnnouncement: nil
         )
-        .frame(width: 680, height: 640)
+        .frame(width: 820, height: 700)
     }
 }
 

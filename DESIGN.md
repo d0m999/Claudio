@@ -211,7 +211,7 @@
     **方法学**：同一探针在**离屏 / 非 key 窗口**下渲染成**灰色**（macOS 对非活跃窗口的强调色去饱和），会得出「`.tint` 无效」的错误结论。**任何控件视觉验证必须在 key + active 窗口下做。**
     **同时实证**：`Slider(…, step:)` 会被直译成 `NSSlider.numberOfTickMarks`，在轨道下方画出一条刻度带（`step: 0.05` → **21 个点**），撑破本节的「行高 ~28pt」。**控件行不得使用 `step:`** —— 档位吸附交给状态机，视图侧只转发。
   - **动效：控件行不加 `.animation()`**。连续拖拽必须跟手无动画；值的吸附 / 回滚一律**瞬跳**。理由是**手感与诚实**：滑块是直接操纵控件，任何补间都会让拇指与填充段脱钩；而写盘失败后的回滚若被动画柔化，用户会以为值还在路上，而它其实已经没了。
-    ⚠️ **（2026-08-01 双宿主覆盖）**：旧单宿主 Panel 曾含 `disconnectRow` / onboarding in-flight 动画并读取 `accessibilityReduceMotion`；现行双宿主 Panel 已移除这两类连接动作，视图树没有自定义动画，因此不再持有无消费者的 Reduce Motion 环境值。**规矩本身不变**：未来往 Panel 添加动画，必须在同一落点接入 Reduce Motion。retained `IntegrationsWindow` 的短暂反馈仍有 opacity transition，并已在开启 Reduce Motion 时改为瞬时替换。
+    ⚠️ **（2026-08-01 双宿主覆盖）**：旧单宿主 Panel 曾含 `disconnectRow` / onboarding in-flight 动画并读取 `accessibilityReduceMotion`；现行双宿主 Panel 已移除这两类连接动作，视图树没有自定义动画，因此不再持有无消费者的 Reduce Motion 环境值。**规矩本身不变**：未来往 Panel 添加动画，必须在同一落点接入 Reduce Motion。统一 Settings 的集成目的页仍有 opacity transition，并已在开启 Reduce Motion 时改为瞬时替换。
 
 - **界面文字步进调节（方案 C · 2026-08-05）**：面板标题栏右侧固定 `Aa⌄` 原生触发器（约 54×32pt），子 Popover 固定 280pt 宽；触发器不直接显示当前档位，当前值只经 VoiceOver value 暴露。内容依次为「界面文字」标题、分隔线、固定横向列的小 `A` / 当前档位 / 大 `A`，以及四个仅表达状态的圆点。两侧为原生中性 bordered 按钮，点击相邻档位后即时写入共享 `@AppStorage`，Popover 保持打开；紧凑档聚焦大 `A`，其余档位聚焦小 `A`，触达边界时焦点转移到仍可用的一侧。
   - 小 `A` 向前一步、大 `A` 向后一步；两端禁用、不循环、不 Toast、不自定义动画。当前档位使用 semibold，`第 n 档，共 4 档` 使用等宽数字；圆点同时用尺寸 / 外环和 clay 状态表达，且从 VoiceOver 树隐藏。
@@ -327,7 +327,7 @@ N 个已发布来源 · 5 个声音事件
 > 操作态视觉参照：面板与状态线框 artifact — https://claude.ai/code/artifact/8442c301-c3f6-4f17-b470-18e1a483cc86
 > 这些是 `/design-consultation` 首版未覆盖、由设计评审补入词汇表的组件。**全部由既有 token 派生，勿另立新色 / 新圆角。**
 
-- **空态卡**：面板内居中列 —— 44px（radius 12）图标块（态色 15% 底 + 态色字形）→ 标题 SF Pro semibold 15 → 正文 `text-2` 12.5 → 主 CTA（黏土实心 pill radius 9 全宽）+ 次 CTA（ghost：透明 + `hairline-strong` 描边）。**空态三要素：温度 + 主行动 + 上下文。** 旧版全屏宿主 onboarding 卡不再承担连接：双宿主连接状态始终留在两条来源行，解释与动作进入 `IntegrationsWindow`；空态卡继续用于声音包/配置等真正没有可操作内容的场景。
+- **空态卡**：面板内居中列 —— 44px（radius 12）图标块（态色 15% 底 + 态色字形）→ 标题 SF Pro semibold 15 → 正文 `text-2` 12.5 → 主 CTA（黏土实心 pill radius 9 全宽）+ 次 CTA（ghost：透明 + `hairline-strong` 描边）。**空态三要素：温度 + 主行动 + 上下文。** 旧版全屏宿主 onboarding 卡不再承担连接：双宿主连接状态始终留在菜单栏来源行与统一 Settings 集成目的页，解释与动作进入集成目的页；空态卡继续用于声音包/配置等真正没有可操作内容的场景。
 - **事件行三态 `CoverageState{present | unmapped | broken}`（与 ENGINEERING 决议① / T16、GUI 状态测 DoD 同源）**：面板以本地化事件名、只读宿主小标签、映射标签、试听与自动事件静音呈现三态；点击完整身份区进入对应映射编辑器。标签统一为 caption semibold、6/3pt 内边距、6pt 圆角：`present` 显 `Mapped / 已映射`，中性实底；`unmapped` 显 `Not configured / 未配置`，透明底 + 中性虚线；`broken` 显 `Needs repair / 需修复`，`error` 12% 浅底 + 实线 + 真红错误图标（正文仍用 `text-2`）。`present` 的试听资格继续由 `EventPreviewAvailability` 决定；`unmapped` / `broken` 试听禁用并在 help / VoiceOver 给出原因。静音与覆盖态正交。文件名、manifest ID、导入/拖放/清除绑定只在 Sound Packs Window 中出现。
 - **错误态用色（关键约束）**：app 自身错误（宿主配置不可读 / 写不进、已连接宿主的 helper 损坏）用 UI 语义 `error #FF453A`（真红）；**绝不用于声音事件层**（执行中断永远琥珀）。宿主未安装、未连接与 Codex 等待 `/hooks` 确认用 `surface-2` + `text-2`，不上真红或品牌黏土；Codex 已激活的正常 `4/5` 来源状态与 Claude Code `5/5` 同样用 `success`，只有不支持的 `StopFailure` 格用 `text-2`。
 - **拖入 drop-zone**（**⚠ 2026-07-15 起收窄存档 · 面板级 drop-zone 已拍板删除**，见 Decisions Log 与 PLAN-SOUND-MANAGER T1。本条样式自此只规范**事件行的行内拖放目标**，不再是任何全宽面板组件 —— 全宽虚线形制已让渡给「管理声音包…」入口的专属语义，见「面板显示集 · 星标」条。hover 配色拍板作为既有决议原样保留，仍被「控件行 · 对比度」引用为先例）：虚线 1.5px `hairline-strong` + radius 10 + `text-2`；hover 命中 → **边框** 转黏土 + `clay-soft` 底，**文案保持 `text-2` 不变**。
@@ -405,20 +405,39 @@ N 个已发布来源 · 5 个声音事件
 - **窗口的失败呈现（2026-07-17）**：窗口内每一条写路径（星标钮、「用这个包」、复制为我的包、恢复出厂）失败时必须**就地可见** —— 复用 `FailureRow` 的**组件与 token 层**（真红只上图标、文案 `text-2`、reason 可执行且与 `probeConfigRewritable` **逐字同句**）。⚠ 下一条「不许复用面板的」禁令，禁的是**焦点序 / Dynamic Type / VoiceOver 播报模型**，不禁组件与 token 复用 —— 在此显式划界，防读者把它读成「连 `FailureRow` 都要重造」（那才是又一份手抄副本的开端）。失败行的 VoiceOver 播报走窗口自己的播报策略（PLAN T9）。
 - **窗口的无障碍是一整个新面（不许复用面板的）**：`PanelFocusTarget` / `PanelLayoutAdaptation` / `PanelAnnouncement` 全部是**面板专用**的模型。窗口需要自己的焦点序、Dynamic Type 降级规则与 VoiceOver 播报策略。**别把面板那套硬套过来** —— 面板的规则（312pt、`rowWrapsToTwoLines`、`.maximum` 加宽到 360pt）是从「一个 popover」的约束里长出来的，窗口没有那个约束。
 
-## Integrations Window（历史窗口解剖；内容迁入「集成」目的页）
+## Integrations Destination（当前「集成」设置目的页）
 
-`IntegrationsWindow` 是按需创建、关闭后保留的标准 macOS 窗口：窗口对象复用、`isReleasedWhenClosed = false`。从 popover 打开时先记录精确的焦点恢复目标，再可靠关闭 transient popover；只在 `popoverDidClose` 后展示标准窗口，避免 key-window 竞态。它与 `SoundPacksWindow` 并列：前者解释「宿主 × 原生事件 × 连接证据」，后者管理「声音包 × 文件」。
+集成页挂载在 app-lifetime retained 的统一 `SettingsWindow` 中；旧的独立
+`IntegrationsWindow`、来源卡、能力矩阵和 Inspector 展示已退役。`HostIntegrationManager`、
+`HostIntegrationPresentationStore`、当前 installation receipt 与配置写入边界不变，窗口仍只拥有
+展示、路由和焦点，不拥有第二份宿主状态。
 
-- **尺寸 / 形制**：默认 840×620、最小 640×520；顶部只保留紧凑来源摘要和固定当前选择摘要，不重复窗口标题或来源计数。
-- **主体是原生能力矩阵**：标准宽度以 `Grid` 显示五事件 × 三个产品 Surface，并与检查器左右常驻；窄宽或最大文字档纵向重排。只有当前选择使用黏土强调，单元格靠 hairline 分隔，不套卡片。矩阵必须来自 `AudibilityMatrix`，并把声音包缺映射与事件静音一起算入「是否可听」。
-- **Codex 激活边界**：写入 hooks 后固定显示「**claudi0 已写好，等待 Codex 确认**」，提供「复制 `/hooks`」与「重新检测」。在 `/hooks` 中确认并再提交一次提示词、收到当前 installation ID 的 `UserPromptSubmit` 回执之前，不显示绿色已连接；`4/5` 本身仍是中性成功。
-- **真实回执**：`activation` 只认当前 installation ID 的 `UserPromptSubmit` 回执；`latestReceipt` 独立显示当前代次全部受支持事件中最新的一次诊断。检查器主文案只展示宿主、claudi0 语义、时间与脱敏播放结果，不把 CLI key 或宿主原生名当主文案；可访问性细节可补充原生事件。不得展示或暗示存储提示词、响应内容、项目路径、会话内容或音频绝对路径。旧 installation、断开后的迟到回调与损坏回执只能显示为无效证据，不能点亮连接。
-- **动作层级**：取消静音、配置声音、连接、升级或修复由当前矩阵状态纯派生；缺声会路由到声音包窗口并定位事件，不支持只解释。重新检测只在工具栏。「断开 Claude Code」或「断开 Codex」只位于检查器末尾，并在确认中写明另一个宿主、声音包和静音设置不受影响。
-- **最大 Dynamic Type**：矩阵改为五张事件卡，每张包含 Claude Code、Codex 两条宿主子行；禁止横向滚动、横向裁切或把限定语藏进 tooltip。辅助功能字号下动作纵向排列。
-- **可访问性**：VoiceOver label 至少包含「宿主、claudi0 语义、原生事件、连接状态、支持级别」；Codex 的待响应单元格必须在可见文案和 label 中同时出现「仅授权请求」。短暂状态播报必须可关闭，并尊重 Reduce Motion。
-- **State Gallery**：实现期视觉基线覆盖双未连、单宿主、双宿主、Codex 待确认、Claude legacy、Codex 正常 `4/5`、partial、单侧 degraded、共享 runtime 失败与单侧连接失败。画廊 fixture 与生产 adapter 能力数据同源；不得手写一个不存在的 Codex `StopFailure` 格。
+- **尺寸 / 形制**：统一设置窗口默认 1240×820、最小 960×640；目的页只有一层纵向
+  `ScrollView`，内容阅读宽度最大约 820pt，居中后允许行随界面文字增长，不产生横向滚动。
+- **页头与 Agent 组**：标题为「集成」，副标题为「管理 claudi0 连接的应用、连接方式和事件能力。」。
+  Agent 固定按 `HostID.productVisibleCases` 显示 Claude Code → Codex → WorkBuddy；不显示宿主 Logo。
+  每行独立提供名称选择、状态 badge、`supported/total` 覆盖率和真实 Toggle，选中背景只标识当前
+  Surface。`4/5`、`2/5` 是中性能力事实，不是错误。
+- **选中宿主的四行连接组**：严格按「连接状态 → 接入方式 → 事件与提示音 → 脱敏回执历史」渲染。
+  连接状态同时说明配置、当前 installation 回执和 manager 诊断；没有回执时明确显示「暂无当前安装实例
+  回执」。接入方式来自 `HostIntegrationDescriptor.mechanism`，只有 manager 提供配置来源时才显示
+  复制路径动作；「管理事件」只路由到同一 Surface 的 Events 目的页；清除回执只在第四行确认。
+- **五态动作投影**：`ready` 为「已激活」并提供重新检测；`awaitingActivation` 为「待回执」，Codex
+  额外提供复制 `/hooks`；`legacy` 提供升级连接；`notConnected` 关闭 Toggle 且重新检测，开启时调用
+  connect；`needsAttention` 提供修复连接和重新检测。关闭 Toggle 统一进入 disconnect 确认，取消无副作用。
+- **异步与反馈**：in-flight 保留旧 manager 快照，不乐观翻转 Toggle、不显示 skeleton；只禁用冲突动作，
+  允许切换 Agent，进度归属发起动作的宿主。成功、错误、回执变化沿用逐条回执、代次保护、5 秒反馈和
+  Reduce Motion 语义，视觉位置改为右下 Toast；只在目的页可见且窗口为 key 时主动播报。
+- **隐私与可访问性**：receipt 只展示脱敏的当前 installation 事实，不展示提示词、响应、项目路径、
+  会话内容或音频绝对路径。焦点和 deep-link 使用 typed `IntegrationDestinationFocusTarget`；自动门
+  覆盖固定 Agent 顺序、四行顺序、双语、Toggle/确认、Escape 与 stale route，原生 VoiceOver 和窗口
+  断点仍需人工走查。
+- **State Gallery**：生产视图消费与 app 相同的 Core presentation/model；覆盖全部产品状态与 WorkBuddy
+  七态，并包含可固定的 `disconnect in-flight` 帧。gallery、源码守卫和 harness 不能替代真实宿主回调、
+  双架构、签名/公证或正式验收。
 
-自动化结构检查不能替代真机：popover → window handoff、关闭后焦点恢复、实际 VoiceOver 顺序、完整键盘路径、最大 Dynamic Type、明暗模式与 Reduce Motion 必须另行人工走查；未走查不得标为完成。
+自动化结构检查不能替代真机：统一设置窗口 handoff、实际 VoiceOver 顺序、完整键盘路径、默认/最小窗口、
+四档界面文字、明暗/高对比度、Reduce Motion 与 Transparency 必须另行人工走查；未走查不得标为完成。
 
 ## App Icon（图标）
 

@@ -21,8 +21,8 @@ struct SettingsWindowView: View {
     let eventSettingsModel: PanelConfigController?
     let eventSettingsSelection: EventSettingsWindowSelection?
     let hostIntegrations: HostIntegrationPresentationStore?
-    let integrationsModel: IntegrationsWindowModel?
-    let integrationsFocusCoordinator: IntegrationsWindowFocusCoordinator?
+    let integrationsModel: IntegrationDestinationModel?
+    let integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator?
     let aiCueViewModel: AICueGenerationViewModel?
     let audioEnvironment: AudioImportEnvironment?
     let onEventAudibilityInputsChanged: (@MainActor () -> Void)?
@@ -60,8 +60,8 @@ struct SettingsWindowView: View {
         eventSettingsModel: PanelConfigController? = nil,
         eventSettingsSelection: EventSettingsWindowSelection? = nil,
         hostIntegrations: HostIntegrationPresentationStore? = nil,
-        integrationsModel: IntegrationsWindowModel? = nil,
-        integrationsFocusCoordinator: IntegrationsWindowFocusCoordinator? = nil,
+        integrationsModel: IntegrationDestinationModel? = nil,
+        integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator? = nil,
         aiCueViewModel: AICueGenerationViewModel? = nil,
         audioEnvironment: AudioImportEnvironment? = nil,
         onEventAudibilityInputsChanged: (@MainActor () -> Void)? = nil,
@@ -123,43 +123,53 @@ struct SettingsWindowView: View {
         .onExitCommand {
             focusedTarget = SettingsWindowFocusTarget.sidebar(destination)
         }
+        .onAppear {
+            synchronizeDestinationFocus()
+        }
         .onReceive(model.$routeRequestRevision) { _ in
-            if let failure = model.resolution.failure {
-                eventSettingsSelection?.leaveDestination()
-                focusedTarget = SettingsWindowFocusTarget.title(destination)
-                onAnnouncement?(settingsFailureMessage(failure))
-                return
-            }
-            if destination != .eventsAndSounds {
-                eventSettingsSelection?.leaveDestination()
-            }
-            if destination == .integrations,
-                let integrationsModel,
-                let integrationsFocusCoordinator
+            synchronizeDestinationFocus()
+        }
+    }
+
+    private func synchronizeDestinationFocus() {
+        if let failure = model.resolution.failure {
+            eventSettingsSelection?.leaveDestination()
+            focusedTarget = SettingsWindowFocusTarget.title(destination)
+            onAnnouncement?(settingsFailureMessage(failure))
+            return
+        }
+        if destination != .eventsAndSounds {
+            eventSettingsSelection?.leaveDestination()
+        }
+        if destination == .integrations,
+            let integrationsModel,
+            let integrationsFocusCoordinator
+        {
+            if case .integrations(let surface) = model.resolution.route,
+                let host = HostID.productVisibleCases.first(where: {
+                    $0.surfaceID == surface
+                })
             {
-                if case .integrations(let surface) = model.resolution.route,
-                    let host = HostID.productVisibleCases.first(where: {
-                        $0.surfaceID == surface
-                    })
-                {
-                    integrationsModel.select(.host(host))
-                    integrationsFocusCoordinator.requestFocus(.hostCard(host))
+                if integrationsModel.selectHost(host) {
+                    integrationsFocusCoordinator.requestFocus(.agent(host))
                 } else {
-                    integrationsFocusCoordinator.cancelPendingRequest()
-                    focusedTarget = SettingsWindowFocusTarget.title(destination)
+                    integrationsFocusCoordinator.requestFocus(.title)
                 }
-            } else if destination == .eventsAndSounds,
-                let eventSettingsSelection,
-                let eventSettingsModel
-            {
-                if let route = eventSettingsRoute {
-                    eventSettingsSelection.select(route)
-                    eventSettingsModel.selectSoundSurface(route.surface)
-                }
-                eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
-            } else if destination != .sounds {
-                focusedTarget = SettingsWindowFocusTarget.title(destination)
+            } else {
+                integrationsModel.restorePreferredHost()
+                integrationsFocusCoordinator.requestFocus(.title)
             }
+        } else if destination == .eventsAndSounds,
+            let eventSettingsSelection,
+            let eventSettingsModel
+        {
+            if let route = eventSettingsRoute {
+                eventSettingsSelection.select(route)
+                eventSettingsModel.selectSoundSurface(route.surface)
+            }
+            eventSettingsSelection.requestInitialFocus(scopes: eventSettingsFocusScopes)
+        } else if destination != .sounds {
+            focusedTarget = SettingsWindowFocusTarget.title(destination)
         }
     }
 
@@ -266,28 +276,14 @@ struct SettingsWindowView: View {
             let integrationsModel,
             let integrationsFocusCoordinator
         {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    destinationTitle
-                    Spacer(minLength: 16)
-                    Button(l10n.text(.settingsIntegrationsManageEvents)) {
-                        manageSelectedIntegrationEvents(in: integrationsModel)
-                    }
-                    .focused(
-                        $focusedTarget,
-                        equals: SettingsWindowFocusTarget.firstAction(.integrations)
-                    )
-                    .accessibilityHint(l10n.text(.settingsIntegrationsManageEventsHint))
-                    .accessibilityIdentifier("settings.integrations.manage-events")
-                }
-                .padding(.horizontal, 24)
-                .padding(.top, 20)
-
-                IntegrationsWindowView(
-                    model: integrationsModel,
-                    focusCoordinator: integrationsFocusCoordinator,
-                    languageStore: preferences)
-            }
+            IntegrationsSettingsDestinationView(
+                model: integrationsModel,
+                focusCoordinator: integrationsFocusCoordinator,
+                languageStore: preferences,
+                onManageEvents: { host in
+                    model.request(.events(scope: .surface(host.surfaceID), event: nil))
+                },
+                onAnnouncement: onAnnouncement)
         } else if destination == .eventsAndSounds,
             model.resolution.failure == nil,
             let soundPacksEditorOwner,
@@ -392,18 +388,6 @@ struct SettingsWindowView: View {
     private var eventSettingsRoute: EventSettingsWindowRoute? {
         guard case .events(let scope, let event) = model.resolution.route else { return nil }
         return EventSettingsWindowRoute(scope: scope, event: event)
-    }
-
-    private func manageSelectedIntegrationEvents(in integrationsModel: IntegrationsWindowModel) {
-        let host = integrationsModel.selection.host
-        let event: Event?
-        switch integrationsModel.selection {
-        case .host:
-            event = nil
-        case .capability(_, let selectedEvent):
-            event = selectedEvent
-        }
-        model.request(.events(scope: .surface(host.surfaceID), event: event))
     }
 
     private var generalSettings: some View {

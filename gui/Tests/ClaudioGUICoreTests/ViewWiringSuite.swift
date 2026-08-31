@@ -7,7 +7,7 @@ import Foundation
 // **executableTarget**，Swift 里没法 `import` 它。所以整棵 SwiftUI 视图树上的每一行接线，对这套
 // 测试都是**不可见的**。因此「Panel 不再探测 Claude-only onboarding」、
 // 「两条声音来源与运行控件恒显」、「每次打开请求共享 manager 刷新」和
-// 「连接/修复/断开只存在于 retained IntegrationsWindow」必须由本 suite 读生产源来守。
+// 「连接/修复/断开只存在于统一 Settings 集成 destination」必须由本 suite 读生产源来守。
 //
 // 真正的结构修法是把视图层拆成一个可被 import 的 library target（或引入 ViewInspector）—— 那是一次
 // 独立的重构，不该跟一次 bugfix 混在一起（已记入 TODOS）。在那之前，这个 suite 是**唯一存在的护栏**：
@@ -390,8 +390,10 @@ func runViewWiringSuites() {
                 + "这条断言存在的全部意义就是去数那些文件 —— 数不到，它就永远等不到 1，安静地绿下去")
         expect(
             sources.contains { $0.path.hasSuffix("PanelView.swift") }
-                && sources.contains { $0.path.hasSuffix("IntegrationsWindowView.swift") },
-            "Panel 与 retained IntegrationsWindow 两个独立 surface 都必须在普查名册里")
+                && sources.contains {
+                    $0.path.hasSuffix("IntegrationsSettingsDestinationView.swift")
+                },
+            "Panel 与统一 Settings 集成 destination 两个独立 surface 都必须在普查名册里")
 
         var posts: [String: Int] = [:]
         var consumes: [String: Int] = [:]
@@ -403,25 +405,23 @@ func runViewWiringSuites() {
         }
 
         expect(
-            posts
-                == [
-                    "PanelView.swift": 1,
-                    "IntegrationsWindowView.swift": 1,
-                    "SettingsWindowController.swift": 1,
-                ],
-            "Panel、retained IntegrationsWindow 与统一 Settings 的基础页动作反馈各有一个"
-                + "窗口级主动播报出口；其它 GUI 文件不得新增平行通道。实得 \(posts)")
+            posts == [
+                "PanelView.swift": 1,
+                "SettingsWindowController.swift": 1,
+            ],
+            "Panel 与统一 Settings 的基础页动作反馈各有一个窗口级主动播报出口；"
+                + "destination 通过注入 callback，不得新增 AppKit post。实得 \(posts)")
         expect(
             consumes == ["PanelView.swift": 1],
             "去重器也只许有一个调用点，理由一字不差 —— 绕过它 = 把「同一趟里 post 两条」放回来。"
                 + "实得 \(consumes)")
         let integrations =
             sources.first {
-                $0.path.hasSuffix("IntegrationsWindowView.swift")
+                $0.path.hasSuffix("IntegrationsSettingsDestinationView.swift")
             }?.code ?? ""
         expect(
             integrations.components(separatedBy: "feedbackAnnouncer.consume(").count - 1 == 1,
-            "IntegrationsWindow 的出口必须只经过一处 feedback revision 去重器")
+            "集成 destination 的出口必须只经过一处 feedback revision 去重器")
     }
 
     suite("PanelView 单作用域边界：无宿主探测，固定呈现 scope/报告/当前来源内容") {
@@ -431,11 +431,11 @@ func runViewWiringSuites() {
                 "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
             let menu = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let integrationsView = codeOnly(
-                "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
+                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
             let integrationsModel = codeOnly(
-                "gui/Sources/ClaudioGUI/IntegrationsWindowModel.swift")
+                "gui/Sources/ClaudioGUICore/IntegrationDestinationModel.swift")
         else {
-            expect(false, "读不到 Panel/MenuBar/IntegrationsWindow 生产源")
+            expect(false, "读不到 Panel/MenuBar/集成 destination 生产源")
             return
         }
         for forbidden in [
@@ -541,11 +541,10 @@ func runViewWiringSuites() {
                 "连接/修复/断开动作不得存在于 PanelView，命中：\(forbidden)")
         }
         expect(
-            integrationsView.contains("case .connect")
-                && integrationsView.contains("case .repair")
-                && integrationsView.contains("case .disconnect")
+            integrationsView.contains("model.requestToggle(for: agent.host)")
+                && integrationsView.contains("model.requestClearReceiptHistory(for: host)")
                 && integrationsModel.contains("func perform("),
-            "连接、升级/修复与破坏性断开只存在于 IntegrationsWindow")
+            "连接、修复与破坏性断开只存在于集成 destination model/view")
     }
     suite("PanelView 的 config.lock 只转发给声音控制写者，不再供给宿主连接") {
         guard
@@ -2254,7 +2253,6 @@ func runViewWiringSuites() {
             "gui/Sources/ClaudioGUIComponents/InterfaceTextSizeStepperContent.swift",
             "gui/Sources/ClaudioGUI/EventRowView.swift",
             "gui/Sources/ClaudioGUI/PackGalleryView.swift",
-            "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift",
             "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift",
         ]
         let interactivePattern = try! NSRegularExpression(
@@ -2292,7 +2290,7 @@ func runViewWiringSuites() {
             let scopePicker = codeOnly(
                 "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
             let integrations = codeOnly(
-                "gui/Sources/ClaudioGUI/IntegrationsWindowView.swift"),
+                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
             let packs = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let footer = codeOnly(
@@ -2330,11 +2328,15 @@ func runViewWiringSuites() {
                 "界面文字步进控件缺少稳定 AX identifier：\(identifier)")
         }
         for identifier in [
-            "integrations.redetect", #"integrations.host.\(row.host.rawValue)"#,
-            #"integrations.capability.\(cell.host.rawValue).\(cell.event.rawValue)"#,
-            "integrations.recovery.primary", #"integrations.disconnect.\(host.rawValue)"#,
+            "integrations.destination.scroll", "integrations.destination.agent-list",
+            #"integrations.destination.agent.\(agent.host.rawValue)"#,
+            #"integrations.destination.toggle.\(agent.host.rawValue)"#,
+            "integrations.destination.connection-group",
+            #"integrations.destination.row.\(row.kind.rawValue)"#,
+            "integrations.destination.feedback.toast",
+            "integrations.destination.feedback.dismiss",
         ] {
-            expect(integrations.contains(identifier), "集成窗口缺少稳定 AX identifier：\(identifier)")
+            expect(integrations.contains(identifier), "集成 destination 缺少稳定 AX identifier：\(identifier)")
         }
         for identifier in [
             "sound-packs.pack-list",

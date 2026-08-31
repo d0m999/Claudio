@@ -1,3 +1,4 @@
+import ClaudioCore
 import ClaudioLocalization
 import Combine
 import Foundation
@@ -19,6 +20,7 @@ public enum ClaudioPreferenceRecoveryIssue: String, Sendable, Hashable {
     case invalidInterfaceTextSize
     case invalidPanelWidthPreference
     case invalidMenuBarStatusDot
+    case invalidIntegrationSurface
 }
 
 /// One atomic projection of the Settings preferences currently owned by Claudio. New preference
@@ -28,6 +30,7 @@ public struct ClaudioPreferenceSnapshot: Sendable, Equatable {
     public fileprivate(set) var languageMode: ClaudioLanguageMode
     public fileprivate(set) var language: ClaudioAppLanguage
     public fileprivate(set) var lastSettingsDestination: SettingsDestination
+    public fileprivate(set) var lastIntegrationSurface: HostSurfaceID
     public fileprivate(set) var interfaceTextSize: ClaudioInterfaceTextSize
     public fileprivate(set) var panelWidthPreference: ClaudioPanelWidthPreference
     public fileprivate(set) var showsMenuBarStatusDot: Bool
@@ -37,6 +40,7 @@ public struct ClaudioPreferenceSnapshot: Sendable, Equatable {
         languageMode: ClaudioLanguageMode,
         language: ClaudioAppLanguage,
         lastSettingsDestination: SettingsDestination,
+        lastIntegrationSurface: HostSurfaceID = .claudeCode,
         interfaceTextSize: ClaudioInterfaceTextSize,
         panelWidthPreference: ClaudioPanelWidthPreference,
         showsMenuBarStatusDot: Bool,
@@ -45,6 +49,7 @@ public struct ClaudioPreferenceSnapshot: Sendable, Equatable {
         self.languageMode = languageMode
         self.language = language
         self.lastSettingsDestination = lastSettingsDestination
+        self.lastIntegrationSurface = lastIntegrationSurface
         self.interfaceTextSize = interfaceTextSize
         self.panelWidthPreference = panelWidthPreference
         self.showsMenuBarStatusDot = showsMenuBarStatusDot
@@ -65,6 +70,7 @@ public final class ClaudioPreferences: ObservableObject {
     public var lastSettingsDestination: SettingsDestination {
         snapshot.lastSettingsDestination
     }
+    public var lastIntegrationSurface: HostSurfaceID { snapshot.lastIntegrationSurface }
     public var interfaceTextSize: ClaudioInterfaceTextSize { snapshot.interfaceTextSize }
     public var panelWidthPreference: ClaudioPanelWidthPreference {
         snapshot.panelWidthPreference
@@ -101,6 +107,14 @@ public final class ClaudioPreferences: ObservableObject {
         let destination = parsedDestination.flatMap {
             legalDestinations.contains($0) ? $0 : nil
         } ?? .general
+        let integrationSurfaceObject = defaults.object(
+            forKey: Self.integrationSurfaceDefaultsKey)
+        let integrationSurfaceRawValue = integrationSurfaceObject as? String
+        let parsedIntegrationSurface = integrationSurfaceRawValue.flatMap(HostSurfaceID.init(rawValue:))
+        let legalIntegrationSurfaces = Set(HostID.productVisibleCases.map(\.surfaceID))
+        let integrationSurface = parsedIntegrationSurface.flatMap {
+            legalIntegrationSurfaces.contains($0) ? $0 : nil
+        } ?? .claudeCode
         let textSizeObject = defaults.object(forKey: ClaudioInterfaceTextSize.defaultsKey)
         let textSizeRawValue = textSizeObject as? String
         let interfaceTextSize = ClaudioInterfaceTextSize(storedValue: textSizeRawValue)
@@ -143,12 +157,22 @@ public final class ClaudioPreferences: ObservableObject {
         if statusDotObject != nil, statusDotObject is Bool == false {
             recoveryIssues.insert(.invalidMenuBarStatusDot)
         }
+        if integrationSurfaceObject != nil {
+            if integrationSurfaceRawValue != nil {
+                if parsedIntegrationSurface.map(legalIntegrationSurfaces.contains) != true {
+                    recoveryIssues.insert(.invalidIntegrationSurface)
+                }
+            } else {
+                recoveryIssues.insert(.invalidIntegrationSurface)
+            }
+        }
 
         snapshot = ClaudioPreferenceSnapshot(
             languageMode: languageMode,
             language: languageMode.resolvedLanguage(
                 preferredLanguageIdentifiers: preferredLanguageIdentifiers()),
             lastSettingsDestination: destination,
+            lastIntegrationSurface: integrationSurface,
             interfaceTextSize: interfaceTextSize,
             panelWidthPreference: panelWidthPreference,
             showsMenuBarStatusDot: showsMenuBarStatusDot,
@@ -206,6 +230,25 @@ public final class ClaudioPreferences: ObservableObject {
         snapshot = next
     }
 
+    /// Persist only a product-visible Surface. Unknown, AX-only, and future diagnostic values
+    /// fail closed and leave the stored value untouched; initialization likewise never repairs a
+    /// damaged defaults entry behind the user's back.
+    public func setLastIntegrationSurface(_ surface: HostSurfaceID) {
+        guard HostID.productVisibleCases.contains(where: { $0.surfaceID == surface }) else {
+            var next = snapshot
+            next.recoveryIssues.insert(.invalidIntegrationSurface)
+            guard next != snapshot else { return }
+            snapshot = next
+            return
+        }
+        var next = snapshot
+        next.lastIntegrationSurface = surface
+        next.recoveryIssues.remove(.invalidIntegrationSurface)
+        guard next != snapshot else { return }
+        defaults.set(surface.rawValue, forKey: Self.integrationSurfaceDefaultsKey)
+        snapshot = next
+    }
+
     public func setInterfaceTextSize(_ interfaceTextSize: ClaudioInterfaceTextSize) {
         var next = snapshot
         next.interfaceTextSize = interfaceTextSize
@@ -244,4 +287,5 @@ public final class ClaudioPreferences: ObservableObject {
     }
 
     public static let menuBarStatusDotDefaultsKey = "Claudio.MenuBarStatusDot"
+    public static let integrationSurfaceDefaultsKey = "Claudio.Settings.LastIntegrationSurface"
 }

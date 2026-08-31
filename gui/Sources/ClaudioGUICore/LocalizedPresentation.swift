@@ -120,10 +120,10 @@ public func localizedHostSourceRows(
     rows.map { localizedHostSourceRow($0, language: language) }
 }
 
-/// Integrations 检查器动作的唯一双语可见标题投影。SwiftUI 与自动化基线都消费这个 seam，
-/// 避免视图内的私有映射与 pre-RC 验收文案分叉。
-public func localizedIntegrationsInspectorActionTitle(
-    _ action: IntegrationsWindowInspectorAction,
+/// 集成目的页动作的唯一双语可见标题投影。SwiftUI 与自动化基线都消费这个 seam，
+/// 避免视图内的私有映射与生产状态文案分叉。
+public func localizedHostIntegrationUserActionTitle(
+    _ action: HostIntegrationUserAction,
     hostStatus: HostSourceRowStatus?,
     language: ClaudioAppLanguage
 ) -> String {

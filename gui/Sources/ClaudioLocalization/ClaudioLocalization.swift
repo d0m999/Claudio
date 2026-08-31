@@ -728,6 +728,54 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
     public static let integrationsMuteFallbackFailed: Self = "integrations.mute-fallback-failed"
     public static let integrationsManagerProvidedSource: Self =
         "integrations.manager-provided-source"
+    public static let integrationsDestinationSubtitle: Self =
+        "integrations.destination.subtitle"
+    public static let integrationsAgentSection: Self = "integrations.destination.agent-section"
+    public static let integrationsAgentHint: Self = "integrations.destination.agent-hint"
+    public static let integrationsConnectionSection: Self =
+        "integrations.destination.connection-section"
+    public static let integrationsCoverage: Self = "integrations.destination.coverage"
+    public static let integrationsEnable: Self = "integrations.destination.enable"
+    public static let integrationsDisable: Self = "integrations.destination.disable"
+    public static let integrationsStatusReady: Self = "integrations.destination.status.ready"
+    public static let integrationsStatusAwaiting: Self =
+        "integrations.destination.status.awaiting"
+    public static let integrationsStatusLegacy: Self = "integrations.destination.status.legacy"
+    public static let integrationsStatusNotConnected: Self =
+        "integrations.destination.status.not-connected"
+    public static let integrationsStatusNeedsAttention: Self =
+        "integrations.destination.status.needs-attention"
+    public static let integrationsMechanism: Self = "integrations.destination.mechanism"
+    public static let integrationsEventsAndSounds: Self =
+        "integrations.destination.events-and-sounds"
+    public static let integrationsReceiptHistory: Self =
+        "integrations.destination.receipt-history"
+    public static let integrationsLatestReceipt: Self =
+        "integrations.destination.latest-receipt"
+    public static let integrationsNoConfigurationSource: Self =
+        "integrations.destination.no-configuration-source"
+    public static let integrationsConfigurationSourceValue: Self =
+        "integrations.destination.configuration-source-value"
+    public static let integrationsActivatedDescription: Self =
+        "integrations.destination.activated-description"
+    public static let integrationsConfiguredWaitingDescription: Self =
+        "integrations.destination.configured-waiting-description"
+    public static let integrationsNotConnectedDescription: Self =
+        "integrations.destination.not-connected-description"
+    public static let integrationsNeedsAttentionDescription: Self =
+        "integrations.destination.needs-attention-description"
+    public static let integrationsSurfaceEventsCaption: Self =
+        "integrations.destination.surface-events-caption"
+    public static let integrationsReceiptPolicy: Self =
+        "integrations.destination.receipt-policy"
+    public static let integrationsActivationCallout: Self =
+        "integrations.destination.activation-callout"
+    public static let integrationsUnavailableTitle: Self =
+        "integrations.destination.unavailable-title"
+    public static let integrationsMechanismNativeHooks: Self =
+        "integrations.destination.mechanism.native-hooks"
+    public static let integrationsMechanismAccessibilityBeta: Self =
+        "integrations.destination.mechanism.accessibility-beta"
     public static let soundPacksTitle: Self = "sound-packs.title"
     public static let commonCancel: Self = "common.cancel"
     public static let commonConfirm: Self = "common.confirm"
@@ -1188,7 +1236,8 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .integrationsInspector, .integrationsConnection, .integrationsNativeEvent,
         .integrationsRecentReceipt, .integrationsChooseEvent, .integrationsConfigurationSource,
         .integrationsCopyPathHint, .integrationsCloseFeedback, .integrationsSelected,
-        .integrationsNotSelected, .integrationsCellHint, .soundPacksTitle, .commonCancel,
+        .integrationsNotSelected, .integrationsCellHint,
+        .soundPacksTitle, .commonCancel,
         .commonConfirm, .commonRestore, .commonDeletePermanently, .commonCopy, .commonRetry,
         .commonClose, .soundPacksDeleteTitle, .soundPacksDeleteButton, .soundPacksDeleteHint,
         .soundPacksDeleteMessage, .soundPacksRestoreTitle, .soundPacksRestoreButton,
@@ -1303,6 +1352,18 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .integrationsNoReceipt, .integrationsMasterVolumeZero, .integrationsUnsupported,
         .integrationsStoreUnavailable, .integrationsRecoveryUnavailable,
         .integrationsMuteFallbackFailed, .integrationsManagerProvidedSource,
+        .integrationsDestinationSubtitle, .integrationsAgentSection, .integrationsAgentHint,
+        .integrationsConnectionSection, .integrationsCoverage, .integrationsEnable,
+        .integrationsDisable, .integrationsStatusReady, .integrationsStatusAwaiting,
+        .integrationsStatusLegacy, .integrationsStatusNotConnected,
+        .integrationsStatusNeedsAttention, .integrationsMechanism,
+        .integrationsEventsAndSounds, .integrationsReceiptHistory, .integrationsLatestReceipt,
+        .integrationsNoConfigurationSource, .integrationsConfigurationSourceValue,
+        .integrationsActivatedDescription, .integrationsConfiguredWaitingDescription,
+        .integrationsNotConnectedDescription, .integrationsNeedsAttentionDescription,
+        .integrationsSurfaceEventsCaption, .integrationsReceiptPolicy,
+        .integrationsActivationCallout, .integrationsUnavailableTitle,
+        .integrationsMechanismNativeHooks, .integrationsMechanismAccessibilityBeta,
         .actionRedetectInProgress, .actionConnectInProgress, .actionUpgradeInProgress,
         .actionRepairInProgress, .actionDisconnectInProgress,
         .actionClearReceiptHistoryInProgress, .integrationsClearReceiptHistoryConfirm,
