@@ -48,8 +48,12 @@ private struct LocalPreRCScriptFixture {
         ]
         var executableNames: Set<String> = ["local-pre-rc.sh"]
         if devBundleScript == nil {
-            productionFiles.append("dev-bundle.sh")
-            executableNames.insert("dev-bundle.sh")
+            productionFiles.append(contentsOf: [
+                "dev-bundle.sh", "verify-dev-bundle-signature.sh",
+            ])
+            executableNames.formUnion([
+                "dev-bundle.sh", "verify-dev-bundle-signature.sh",
+            ])
         }
         copyProductionFiles(productionFiles, executableNames: executableNames)
         if let devBundleScript {
@@ -682,8 +686,14 @@ func runLocalPreRCSuites() {
                 to: repository.appendingPathComponent(
                     "gui/AppResources/zh-Hans.lproj/InfoPlist.strings"))
             fixture.copyProductionFiles(
-                ["assemble-login-item.sh", "dev-bundle.sh", "pinned-output-directory.sh"],
-                executableNames: ["assemble-login-item.sh", "dev-bundle.sh"])
+                [
+                    "assemble-login-item.sh", "dev-bundle.sh", "pinned-output-directory.sh",
+                    "verify-dev-bundle-signature.sh",
+                ],
+                executableNames: [
+                    "assemble-login-item.sh", "dev-bundle.sh",
+                    "verify-dev-bundle-signature.sh",
+                ])
 
             writeFixture("gui-binary", to: guiBin.appendingPathComponent("ClaudioGUI"))
             fixture.installExecutable(

@@ -198,4 +198,46 @@ func runIntegrationDestinationWiringSuites() {
                 && menu.contains("ClaudioPaths.workBuddySettingsFile.path"),
             "配置来源只能由 composition root 注入 manager 已知的生产路径")
     }
+
+    suite("固定基线门禁：脚本、harness 与文档使用当前 Integration Destination suites") {
+        guard
+            let gate = integrationDestinationSource("scripts/verify-settings-experience.sh"),
+            let harness = integrationDestinationSource(
+                "gui/Tests/ClaudioGUICoreTests/main.swift"),
+            let acceptance = integrationDestinationSource(
+                "docs/settings-experience-acceptance.md")
+        else {
+            expect(false, "缺少固定基线门、GUI harness 或验收文档")
+            return
+        }
+        let currentSuites = [
+            (
+                entrypoint: "runIntegrationDestinationPresentationSuites",
+                documented: "IntegrationDestinationPresentationSuite"
+            ),
+            (
+                entrypoint: "runIntegrationDestinationModelSuites",
+                documented: "IntegrationDestinationModelSuite"
+            ),
+            (
+                entrypoint: "runIntegrationDestinationWiringSuites",
+                documented: "IntegrationDestinationWiringSuite"
+            ),
+        ]
+        for suiteName in currentSuites {
+            expect(
+                gate.contains(suiteName.entrypoint),
+                "固定基线门必须要求 \(suiteName.entrypoint)")
+            expect(
+                harness.contains("\(suiteName.entrypoint)()"),
+                "GUI harness 必须注册 \(suiteName.entrypoint)")
+            expect(
+                acceptance.contains(suiteName.documented),
+                "验收文档必须列出 \(suiteName.documented)")
+        }
+        expect(
+            !gate.contains("runIntegrationsWindowWiringSuites")
+                && !acceptance.contains("IntegrationsWindowWiringSuite"),
+            "已删除的 Integration Window suite 不得残留在门禁或当前验收文档")
+    }
 }

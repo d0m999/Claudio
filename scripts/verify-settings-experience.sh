@@ -71,7 +71,9 @@ for suite in \
     runAICueGenerationViewModelSuites \
     runHostIntegrationPresentationSuites \
     runHostIntegrationManagerBridgeSuites \
-    runIntegrationsWindowWiringSuites \
+    runIntegrationDestinationPresentationSuites \
+    runIntegrationDestinationModelSuites \
+    runIntegrationDestinationWiringSuites \
     runSoundPacksEditorOwnerSuites \
     runSettingsPreferencesSuites \
     runDynamicQuietPolicySuites \

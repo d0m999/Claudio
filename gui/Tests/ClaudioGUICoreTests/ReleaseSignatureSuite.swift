@@ -27,8 +27,80 @@ private func runReleaseSignatureVerifier(
         ])
 }
 
+private func runDevBundleSignatureVerifier(
+    app: URL,
+    fakeCodesign: URL,
+    entitlements: String,
+    inspectStatus: Int = 0,
+    verifyStatus: Int = 0
+) -> TestProcessResult {
+    runTestProcess(
+        executableURL: URL(fileURLWithPath: "/bin/bash"),
+        arguments: [
+            guiTestRepositoryRoot().appendingPathComponent(
+                "scripts/verify-dev-bundle-signature.sh"
+            ).path,
+            app.path,
+        ],
+        environmentOverrides: [
+            "CLAUDIO_CODESIGN_BIN": fakeCodesign.path,
+            "FAKE_CODESIGN_ARTIFACT": app.path,
+            "FAKE_CODESIGN_ENTITLEMENTS": entitlements,
+            "FAKE_CODESIGN_INSPECT_STATUS": String(inspectStatus),
+            "FAKE_CODESIGN_VERIFY_STATUS": String(verifyStatus),
+        ])
+}
+
 @MainActor
 func runReleaseSignatureSuites() {
+    suite("dev bundle signature verifier 拒绝 entitlement 与不可验证产物") {
+        withTempDirectory { root in
+            let fakeCodesign = root.appendingPathComponent("fake-codesign.sh")
+            writeFixture(
+                #"""
+                #!/usr/bin/env bash
+                set -euo pipefail
+                if [[ "$1" == "-d" ]]; then
+                    [[ "$#" -eq 4 && "$2" == "--entitlements" && "$3" == ":-" \
+                        && "$4" == "$FAKE_CODESIGN_ARTIFACT" ]]
+                    printf '%s' "$FAKE_CODESIGN_ENTITLEMENTS"
+                    exit "$FAKE_CODESIGN_INSPECT_STATUS"
+                fi
+                [[ "$#" -eq 5 && "$1" == "--verify" && "$2" == "--deep" \
+                    && "$3" == "--strict" && "$4" == "--verbose=2" \
+                    && "$5" == "$FAKE_CODESIGN_ARTIFACT" ]]
+                exit "$FAKE_CODESIGN_VERIFY_STATUS"
+                """#,
+                to: fakeCodesign)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: fakeCodesign.path)
+
+            let app = root.appendingPathComponent("claudi0.app", isDirectory: true)
+            try? FileManager.default.createDirectory(at: app, withIntermediateDirectories: true)
+
+            let valid = runDevBundleSignatureVerifier(
+                app: app, fakeCodesign: fakeCodesign, entitlements: "")
+            expect(valid.status == 0, "无 entitlement 且严格签名有效的开发 app 必须通过")
+
+            let restricted = runDevBundleSignatureVerifier(
+                app: app,
+                fakeCodesign: fakeCodesign,
+                entitlements: "com.apple.developer.usernotifications.communication")
+            expect(
+                restricted.status != 0
+                    && restricted.output.contains("must not contain entitlements"),
+                "任意 entitlement 都必须让开发 app 失败关闭：\(restricted.output)")
+
+            let inspectionFailure = runDevBundleSignatureVerifier(
+                app: app, fakeCodesign: fakeCodesign, entitlements: "", inspectStatus: 1)
+            expect(inspectionFailure.status != 0, "无法读取 entitlement payload 时必须失败关闭")
+
+            let verificationFailure = runDevBundleSignatureVerifier(
+                app: app, fakeCodesign: fakeCodesign, entitlements: "", verifyStatus: 1)
+            expect(verificationFailure.status != 0, "严格 codesign 验证失败时必须失败关闭")
+        }
+    }
+
     suite("release signature verifier 统一核对 authority、team、runtime 与 timestamp") {
         withTempDirectory { root in
             let fakeCodesign = root.appendingPathComponent("fake-codesign.sh")

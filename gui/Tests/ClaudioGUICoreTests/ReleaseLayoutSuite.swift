@@ -701,6 +701,44 @@ func runReleaseLayoutSuites() {
         expect(icnsData?.prefix(4) == Data("icns".utf8), "claudi0.icns 必须是有效的 icns 容器")
     }
 
+    suite("开发 bundle 使用无 entitlement 的 ad-hoc 签名，release 保留生产 entitlement") {
+        let root = guiTestRepositoryRoot()
+        guard
+            let dev = try? String(
+                contentsOf: root.appendingPathComponent("scripts/dev-bundle.sh"), encoding: .utf8),
+            let release = loadReleaseWorkflowSource(root: root)
+        else {
+            expect(false, "读不到 dev 或 release 分发入口")
+            return
+        }
+
+        let devAppSignCommands = logicalCommandLines(in: dev).filter {
+            $0.hasPrefix("codesign ") && $0.contains("--sign ")
+                && $0.hasSuffix(#""$APP""#)
+        }
+        let releaseAppSignCommands = logicalCommandLines(in: release).filter {
+            $0.hasPrefix("codesign ") && $0.contains("--sign ")
+                && $0.hasSuffix(#""$APP""#)
+        }
+        expect(
+            devAppSignCommands.count == 1
+                && devAppSignCommands[0].contains("--sign -")
+                && !devAppSignCommands[0].contains("--entitlements")
+                && !devAppSignCommands[0].contains("ClaudioGUI.entitlements"),
+            "本地 inspection app 必须只使用无 entitlement 的 ad-hoc 签名，实得 \(devAppSignCommands)")
+        expect(
+            dev.contains(
+                #"bash "$repo_root/scripts/verify-dev-bundle-signature.sh" "$APP""#),
+            "本地组装必须把最终 app 交给可行为测试的开发签名 verifier")
+        expect(
+            releaseAppSignCommands.count == 1
+                && releaseAppSignCommands[0].contains("--entitlements gui/ClaudioGUI.entitlements")
+                && releaseAppSignCommands[0].contains(#"--sign "$SIGNING_IDENTITY""#)
+                && releaseAppSignCommands[0].contains("--options runtime")
+                && releaseAppSignCommands[0].contains("--timestamp"),
+            "正式 Release 必须继续以 Developer ID、runtime、timestamp 和生产 entitlement 签 app")
+    }
+
     suite("release.yml 必须 Developer ID 签名、公证并失败关闭，不能回退 ad-hoc") {
         guard let sources = ReleaseWorkflowSources() else {
             expect(false, "读不到 release workflow 或公证脚本")

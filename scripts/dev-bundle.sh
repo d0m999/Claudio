@@ -160,12 +160,8 @@ PLIST
 
     codesign --force --sign - "$APP/Contents/Resources/bin/claudi0"
     codesign --force --sign - "$LOGIN_ITEM_APP"
-    codesign \
-        --force \
-        --entitlements "$repo_root/gui/ClaudioGUI.entitlements" \
-        --sign - \
-        "$APP"
-    codesign --verify --deep --strict --verbose "$APP"
+    codesign --force --sign - "$APP"
+    bash "$repo_root/scripts/verify-dev-bundle-signature.sh" "$APP"
     echo "✅ dist/${APP}（$(uname -m)）—— 用 open dist/${APP} 启动（菜单栏出现 Orbit Zero 图标）"
 }
 

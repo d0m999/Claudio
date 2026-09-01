@@ -29,7 +29,7 @@ bash scripts/verify-settings-experience.sh <BASE_SHA>
 
 | 合同 | 主要 executable suite |
 |---|---|
-| 九个 destination 恰好一次、production 无 placeholder、唯一 retained window、旧三窗口不挂载、声音写入 owner 唯一 | `SettingsNavigationSuite`、`SoundPacksEditorOwnerSuite`、`IntegrationsWindowWiringSuite` |
+| 九个 destination 恰好一次、production 无 placeholder、唯一 retained window、旧三窗口不挂载、声音写入 owner 唯一 | `SettingsNavigationSuite`、`SoundPacksEditorOwnerSuite`、`IntegrationDestinationPresentationSuite`、`IntegrationDestinationModelSuite`、`IntegrationDestinationWiringSuite` |
 | Host Surface 能力、receipt/current activation、Sound Scope 与 Effective Profile | `HostIntegrationModelSuite`、`HostIntegrationPresentationSuite`、`HostHookReceiptSuite`、`SurfaceSoundPreferencesSuite` |
 | allowlisted registry、route-derived capability、slot/policy 与逐 profile 隔离 | `AICueProviderContractsSuite`、`AICueCredentialSuite`、`AICueGenerationDispatcherSuite` |
 | exact-origin 认证注入、redirect 拒绝、unary/SSE wire 与 decoded ceiling | `AICueHTTPTransportSuite`、`AICueSSETransportSuite`、`AICuePayloadDecodingSuite` |
