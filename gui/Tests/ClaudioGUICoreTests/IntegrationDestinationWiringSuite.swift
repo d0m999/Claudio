@@ -113,6 +113,40 @@ func runIntegrationDestinationWiringSuites() {
             "反馈必须使用原型式右下 Toast")
     }
 
+    suite("集成 destination typed focus：通用入口的 title 请求落到真实可聚焦标题") {
+        guard
+            let view = integrationDestinationSource(
+                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+            let settings = integrationDestinationSource(
+                "gui/Sources/ClaudioGUI/SettingsWindowView.swift")
+        else {
+            expect(false, "缺少 Integrations destination 或 Settings route source")
+            return
+        }
+        expect(
+            settings.components(
+                separatedBy: "integrationsFocusCoordinator.requestFocus(.title)"
+            ).count - 1 == 2,
+            "通用入口与失效 Surface 必须继续请求 typed Integration destination title")
+
+        let code = strippingComments(view).codeWithoutStringLiterals
+        guard
+            let headerStart = code.range(of: "private var pageHeader: some View"),
+            let nextFunction = code.range(
+                of: "private func sectionLabel(",
+                range: headerStart.upperBound..<code.endIndex)
+        else {
+            expect(false, "destination 必须保留可审查的 pageHeader 边界")
+            return
+        }
+        let headerRegion = String(code[headerStart.lowerBound..<nextFunction.lowerBound])
+        expect(
+            headerRegion.contains(".accessibilityAddTraits(.isHeader)")
+                && headerRegion.contains(".focusable()")
+                && headerRegion.contains(".focused($focusedTarget, equals: .title)"),
+            "typed .title 必须绑定同时具有 header 语义与 focusable key-view 能力的标题")
+    }
+
     suite("集成 destination action boundary：连接、清除、配置来源与 Events 各有唯一入口") {
         guard
             let view = integrationDestinationSource(
@@ -132,8 +166,33 @@ func runIntegrationDestinationWiringSuites() {
         expect(
             view.contains("confirmationDialog(")
                 && view.contains("role: .destructive")
-                && view.contains("model.confirmPendingAction()"),
+                && view.components(separatedBy: "submitConfirmation(confirmation)").count - 1 == 2,
             "断开与清除都必须统一走确认对话框和异步 action")
+        let code = strippingComments(view).codeWithoutStringLiterals
+        guard
+            let submitStart = code.range(
+                of:
+                    "private func submitConfirmation(\n        _ confirmation: IntegrationDestinationConfirmation\n    )"
+            ),
+            let nextFunction = code.range(
+                of: "private func confirmationMessage(",
+                range: submitStart.upperBound..<code.endIndex)
+        else {
+            expect(false, "destination 必须有可审查的同步 confirmation 提交边界")
+            return
+        }
+        let submitRegion = String(code[submitStart.lowerBound..<nextFunction.lowerBound])
+        guard
+            let consume = submitRegion.range(of: "model.consumePendingAction(confirmation)"),
+            let task = submitRegion.range(of: "Task {")
+        else {
+            expect(false, "confirmation 提交边界必须同时包含同步消费与异步 manager action")
+            return
+        }
+        expect(
+            consume.lowerBound < task.lowerBound
+                && submitRegion.contains("await model.perform(action)"),
+            "必须先同步消费 presenting confirmation，再创建执行已捕获 manager action 的 Task")
         expect(
             !view.contains("NSSound") && !view.contains("AVAudio") && !view.contains("playSound"),
             "destination action chain 不得获得自动试听能力")

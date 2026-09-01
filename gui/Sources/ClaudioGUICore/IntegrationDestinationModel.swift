@@ -258,12 +258,16 @@ public final class IntegrationDestinationModel: ObservableObject {
         pendingConfirmation = nil
     }
 
-    public func confirmPendingAction() async {
-        guard !isPerformingAction, let confirmation = pendingConfirmation else { return }
+    /// Consumes the exact confirmation presented to the user before its asynchronous manager
+    /// action is scheduled. A stale dialog cannot consume a newer pending action.
+    public func consumePendingAction(
+        _ confirmation: IntegrationDestinationConfirmation
+    ) -> HostIntegrationUserAction? {
+        guard !isPerformingAction, pendingConfirmation == confirmation else { return nil }
         pendingConfirmation = nil
         switch confirmation {
-        case .disconnect(let host): await perform(.disconnect(host))
-        case .clearReceiptHistory(let host): await perform(.clearReceiptHistory(host))
+        case .disconnect(let host): return .disconnect(host)
+        case .clearReceiptHistory(let host): return .clearReceiptHistory(host)
         }
     }
 

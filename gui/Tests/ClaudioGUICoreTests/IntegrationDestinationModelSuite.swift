@@ -206,8 +206,23 @@ func runIntegrationDestinationModelSuites() async {
         model.cancelPendingAction()
 
         model.requestToggle(for: .claudeCode)
+        let mismatchedAction = model.consumePendingAction(.disconnect(.workBuddy))
+        expect(
+            mismatchedAction == nil
+                && model.pendingConfirmation == .disconnect(.claudeCode),
+            "不匹配的 typed confirmation 不得消费当前断开动作")
+        let disconnectAction = model.consumePendingAction(.disconnect(.claudeCode))
+        expect(
+            disconnectAction == .disconnect(.claudeCode) && model.pendingConfirmation == nil,
+            "确认断开必须在异步执行前同步消费并捕获原 manager action")
+        let staleAction = model.consumePendingAction(.disconnect(.claudeCode))
+        let callsAfterStaleReplay = await calls.all()
+        expect(
+            staleAction == nil && callsAfterStaleReplay.isEmpty,
+            "已消费的 stale confirmation 不得再次生成或执行 manager action")
+        model.cancelPendingAction()
         let disconnectTask = Task { @MainActor in
-            await model.confirmPendingAction()
+            if let disconnectAction { await model.perform(disconnectAction) }
         }
         for _ in 0..<20 where model.inFlightOperation == nil {
             await Task.yield()
@@ -249,7 +264,7 @@ func runIntegrationDestinationModelSuites() async {
             },
             actionHandler: IntegrationDestinationActionHandler { action in
                 await calls.append(action)
-                await gate.wait()
+                if action == .connect(.workBuddy) { await gate.wait() }
                 return integrationDestinationTestOutcome(content: connected, message: "connected")
             })
         _ = model.selectHost(.workBuddy)
@@ -269,8 +284,17 @@ func runIntegrationDestinationModelSuites() async {
 
         model.requestClearReceiptHistory(for: .workBuddy)
         expect(model.pendingConfirmation == .clearReceiptHistory(.workBuddy), "清除历史必须归属 WorkBuddy")
+        let clearAction = model.consumePendingAction(.clearReceiptHistory(.workBuddy))
+        expect(
+            clearAction == .clearReceiptHistory(.workBuddy) && model.pendingConfirmation == nil,
+            "确认清除必须在异步执行前同步消费并捕获第四行 manager action")
         model.cancelPendingAction()
-        expect(model.pendingConfirmation == nil, "取消清除历史不得调用 action handler")
+        if let clearAction { await model.perform(clearAction) }
+        let callsAfterClear = await calls.all()
+        expect(
+            model.pendingConfirmation == nil
+                && callsAfterClear == [.connect(.workBuddy), .clearReceiptHistory(.workBuddy)],
+            "确认后对话框 dismiss 不得吞掉已捕获的清除回执动作")
     }
 
     await suite("集成 destination outcome/error：manager failure、throw、store unavailable 都保留可见失败事实") {

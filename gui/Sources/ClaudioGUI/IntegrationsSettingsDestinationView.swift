@@ -104,6 +104,7 @@ struct IntegrationsSettingsDestinationView: View {
                 .font(.system(size: 30, weight: .bold))
                 .foregroundColor(ClaudioTheme.text(colorScheme))
                 .accessibilityAddTraits(.isHeader)
+                .focusable()
                 .focused($focusedTarget, equals: .title)
                 .accessibilityIdentifier("integrations.destination.title")
             Text(l10n.text(.integrationsDestinationSubtitle))
@@ -377,19 +378,26 @@ struct IntegrationsSettingsDestinationView: View {
         switch confirmation {
         case .disconnect(let host):
             Button(l10n.format(.actionDisconnect, host.displayName), role: .destructive) {
-                Task { await model.confirmPendingAction() }
+                submitConfirmation(confirmation)
             }
             Button(l10n.text(.commonCancel), role: .cancel) {
                 model.cancelPendingAction()
             }
         case .clearReceiptHistory(let host):
             Button(l10n.format(.actionClearReceiptHistory, host.displayName), role: .destructive) {
-                Task { await model.confirmPendingAction() }
+                submitConfirmation(confirmation)
             }
             Button(l10n.text(.commonCancel), role: .cancel) {
                 model.cancelPendingAction()
             }
         }
+    }
+
+    private func submitConfirmation(
+        _ confirmation: IntegrationDestinationConfirmation
+    ) {
+        guard let action = model.consumePendingAction(confirmation) else { return }
+        Task { await model.perform(action) }
     }
 
     private func confirmationMessage(_ confirmation: IntegrationDestinationConfirmation) -> String {
