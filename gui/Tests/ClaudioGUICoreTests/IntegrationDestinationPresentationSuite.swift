@@ -22,16 +22,17 @@ func runIntegrationDestinationPresentationSuites() {
     }
 
     suite("集成 destination 五态投影：Toggle、Badge 与连接状态附加动作穷举") {
-        let expected: [
-            (IntegrationDestinationTestStatus, HostSourceRowStatus, String, Bool,
-                [IntegrationConnectionRowAction])
-        ] = [
-            (.ready, .ready, "已激活", true, [.redetect]),
-            (.awaitingActivation, .awaitingActivation, "待回执", true, [.redetect]),
-            (.legacy, .legacy, "旧版连接", true, [.repair(.workBuddy), .redetect]),
-            (.notConnected, .notConnected, "未连接", false, [.redetect]),
-            (.needsAttention, .needsAttention, "需要处理", true, [.repair(.workBuddy), .redetect]),
-        ]
+        let expected:
+            [(
+                IntegrationDestinationTestStatus, HostSourceRowStatus, String, Bool,
+                [IntegrationConnectionRowAction]
+            )] = [
+                (.ready, .ready, "已激活", true, [.redetect]),
+                (.awaitingActivation, .awaitingActivation, "待回执", true, [.redetect]),
+                (.legacy, .legacy, "旧版连接", true, [.repair(.workBuddy), .redetect]),
+                (.notConnected, .notConnected, "未连接", false, [.redetect]),
+                (.needsAttention, .needsAttention, "需要处理", true, [.repair(.workBuddy), .redetect]),
+            ]
 
         for (status, expectedStatus, badge, isOn, _) in expected {
             let content = integrationDestinationTestContent(
@@ -153,9 +154,15 @@ func runIntegrationDestinationPresentationSuites() {
             (.copyHooksCommand, .awaitingActivation, "Copy /hooks", "复制 /hooks"),
             (.connect(.workBuddy), .notConnected, "Connect WorkBuddy", "连接 WorkBuddy"),
             (.repair(.workBuddy), .legacy, "Upgrade connection", "升级连接"),
-            (.repair(.workBuddy), .needsAttention, "Repair WorkBuddy connection", "修复 WorkBuddy 连接"),
+            (
+                .repair(.workBuddy), .needsAttention, "Repair WorkBuddy connection",
+                "修复 WorkBuddy 连接"
+            ),
             (.disconnect(.workBuddy), .ready, "Disconnect WorkBuddy", "断开 WorkBuddy"),
-            (.clearReceiptHistory(.workBuddy), .ready, "Clear WorkBuddy receipt history", "清除 WorkBuddy 回执历史"),
+            (
+                .clearReceiptHistory(.workBuddy), .ready, "Clear WorkBuddy receipt history",
+                "清除 WorkBuddy 回执历史"
+            ),
         ]
         for (action, status, english, chinese) in cases {
             expect(
@@ -186,7 +193,8 @@ func runIntegrationDestinationPresentationSuites() {
             expect(operation?.host == host, "\(action) 必须归属真实 action.host")
             expect(operation?.statusText == text, "\(action) 必须显示 \(text)")
             expect(operation?.isUpgrade == isUpgrade, "legacy repair 的升级事实必须 typed")
-            expect(operation?.accessibilityLabel.contains(text) == true, "\(action) VoiceOver 必须包含状态")
+            expect(
+                operation?.accessibilityLabel.contains(text) == true, "\(action) VoiceOver 必须包含状态")
         }
         expect(
             integrationDestinationInFlightPresentation(
@@ -210,7 +218,8 @@ func runIntegrationDestinationPresentationSuites() {
             feedback.current?.expiresAt == now.addingTimeInterval(integrationsFeedbackLifetime),
             "反馈生命周期必须固定为五秒")
         expect(
-            feedback.activeFeedback(at: now.addingTimeInterval(integrationsFeedbackLifetime)) == nil,
+            feedback.activeFeedback(at: now.addingTimeInterval(integrationsFeedbackLifetime))
+                == nil,
             "五秒边界必须立即到期")
         expect(
             integrationsFeedbackTransition(reduceMotionEnabled: false) == .opacity
@@ -219,7 +228,8 @@ func runIntegrationDestinationPresentationSuites() {
 
         var sequence = IntegrationsFeedbackModel()
         let requests = [
-            IntegrationsFeedbackRequest(host: .claudeCode, kind: .information, message: "Claude receipt"),
+            IntegrationsFeedbackRequest(
+                host: .claudeCode, kind: .information, message: "Claude receipt"),
             IntegrationsFeedbackRequest(host: .codex, kind: .information, message: "Codex receipt"),
         ]
         let firstRevision = sequence.presentSequence(requests, now: now)

@@ -20,7 +20,8 @@ func runIntegrationDestinationModelSuites() async {
                 && !missing.recoveryIssues.contains(.invalidIntegrationSurface),
             "缺失集成 Surface 偏好必须默认 Claude Code 且不产生恢复错误")
 
-        defaults.set(HostSurfaceID.codex.rawValue, forKey: ClaudioPreferences.integrationSurfaceDefaultsKey)
+        defaults.set(
+            HostSurfaceID.codex.rawValue, forKey: ClaudioPreferences.integrationSurfaceDefaultsKey)
         let valid = ClaudioPreferences(
             defaults: defaults,
             notificationCenter: NotificationCenter(),
@@ -53,7 +54,9 @@ func runIntegrationDestinationModelSuites() async {
                     == "unknown-surface",
             "未知 Surface 必须 fail closed、记录 recovery issue 且不静默重写 defaults")
 
-        defaults.set(HostSurfaceID.chatGPTDesktopAX.rawValue, forKey: ClaudioPreferences.integrationSurfaceDefaultsKey)
+        defaults.set(
+            HostSurfaceID.chatGPTDesktopAX.rawValue,
+            forKey: ClaudioPreferences.integrationSurfaceDefaultsKey)
         let axOnly = ClaudioPreferences(
             defaults: defaults,
             notificationCenter: NotificationCenter(),
@@ -69,7 +72,8 @@ func runIntegrationDestinationModelSuites() async {
         let defaults = UserDefaults(suiteName: suiteName)!
         defaults.removePersistentDomain(forName: suiteName)
         defer { defaults.removePersistentDomain(forName: suiteName) }
-        defaults.set(HostSurfaceID.codex.rawValue, forKey: ClaudioPreferences.integrationSurfaceDefaultsKey)
+        defaults.set(
+            HostSurfaceID.codex.rawValue, forKey: ClaudioPreferences.integrationSurfaceDefaultsKey)
         let preferences = ClaudioPreferences(
             defaults: defaults,
             notificationCenter: NotificationCenter(),
@@ -162,7 +166,9 @@ func runIntegrationDestinationModelSuites() async {
         let invalid = resolveSettingsRoute(
             .integrations(surface: .chatGPTDesktopAX),
             availability: availability)
-        expect(invalid.failure == .invalidSurface(.chatGPTDesktopAX), "AX deep link 必须保持 invalid-route failure")
+        expect(
+            invalid.failure == .invalidSurface(.chatGPTDesktopAX),
+            "AX deep link 必须保持 invalid-route failure")
     }
 
     await suite("集成 destination Toggle/action lifecycle：确认取消、host 归属、in-flight 与无乐观翻转") {
@@ -174,7 +180,8 @@ func runIntegrationDestinationModelSuites() async {
             content: initial,
             refreshHandler: IntegrationDestinationRefreshHandler {
                 await gate.wait()
-                return integrationDestinationTestOutcome(content: initial, message: "refresh complete")
+                return integrationDestinationTestOutcome(
+                    content: initial, message: "refresh complete")
             },
             actionHandler: IntegrationDestinationActionHandler { action in
                 await calls.append(action)

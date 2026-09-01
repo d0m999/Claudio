@@ -142,7 +142,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 guard let hostIntegrations else {
                     throw HostIntegrationPresentationError.storeUnavailable
                 }
-                let content = actionRouter?.publishHostIntegrationState(state)
+                let content =
+                    actionRouter?.publishHostIntegrationState(state)
                     ?? hostIntegrations.replace(state: state)
                 return IntegrationDestinationActionOutcome(
                     content: content,
@@ -155,7 +156,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
                 guard let hostIntegrations else {
                     throw HostIntegrationPresentationError.storeUnavailable
                 }
-                let content = actionRouter?.publishHostIntegrationState(managerOutcome.state)
+                let content =
+                    actionRouter?.publishHostIntegrationState(managerOutcome.state)
                     ?? hostIntegrations.replace(state: managerOutcome.state)
                 return IntegrationDestinationActionOutcome(
                     content: content,
@@ -430,7 +432,9 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
         let provider = hostIntegrationMatrixProvider
         hostIntegrationRefreshTask = Task { @MainActor [weak self] in
             do {
-                let state = try await (bootstrapSharedRuntime
+                let state =
+                    try await
+                    (bootstrapSharedRuntime
                     ? provider.bootstrapSharedRuntime()
                     : provider())
                 // Bootstrap can create config/packs after PanelConfigController has already read
@@ -479,7 +483,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
 
     private func showPopover() {
         guard let button = statusItem.button else { return }
-        let visibleHeight = button.window?.screen?.visibleFrame.height
+        let visibleHeight =
+            button.window?.screen?.visibleFrame.height
             ?? NSScreen.main?.visibleFrame.height
             ?? 560
         popover.contentSize.height = min(560, max(400, visibleHeight - 32))

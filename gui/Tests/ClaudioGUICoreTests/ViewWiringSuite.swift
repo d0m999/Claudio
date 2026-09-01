@@ -2336,7 +2336,9 @@ func runViewWiringSuites() {
             "integrations.destination.feedback.toast",
             "integrations.destination.feedback.dismiss",
         ] {
-            expect(integrations.contains(identifier), "集成 destination 缺少稳定 AX identifier：\(identifier)")
+            expect(
+                integrations.contains(identifier), "集成 destination 缺少稳定 AX identifier：\(identifier)"
+            )
         }
         for identifier in [
             "sound-packs.pack-list",

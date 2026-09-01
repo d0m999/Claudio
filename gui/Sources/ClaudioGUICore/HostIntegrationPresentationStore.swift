@@ -49,10 +49,8 @@ public final class HostIntegrationPresentationStore: ObservableObject {
 /// deliberately separate so app launch can bootstrap shared runtime without ever auto-connecting a
 /// host; tests can inject two distinct operations and prove that separation.
 public struct HostIntegrationMatrixProvider: Sendable {
-    private let refreshOperation:
-        @Sendable () async throws -> HostIntegrationPresentationState
-    private let bootstrapOperation:
-        @Sendable () async throws -> HostIntegrationPresentationState
+    private let refreshOperation: @Sendable () async throws -> HostIntegrationPresentationState
+    private let bootstrapOperation: @Sendable () async throws -> HostIntegrationPresentationState
 
     public init(
         refresh: @escaping @Sendable () async throws -> HostIntegrationPresentationState,
@@ -78,9 +76,9 @@ public struct HostIntegrationActionProvider: Sendable {
             -> HostIntegrationMutationOutcome
 
     public init(
-        _ operation: @escaping
-            @Sendable (HostIntegrationUserAction) async throws
-                -> HostIntegrationMutationOutcome
+        _ operation:
+            @escaping @Sendable (HostIntegrationUserAction) async throws
+            -> HostIntegrationMutationOutcome
     ) {
         self.operation = operation
     }

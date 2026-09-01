@@ -10,7 +10,8 @@ private func hostPresentationSnapshot(
     _ host: HostID,
     activation: HostActivationEvidence? = nil
 ) -> HostIntegrationSnapshot {
-    guard let binding = HostCapabilityCatalog.bindings(for: host).first(where: \.isAudibleCapability)
+    guard
+        let binding = HostCapabilityCatalog.bindings(for: host).first(where: \.isAudibleCapability)
     else {
         return HostIntegrationSnapshot(
             host: host,
@@ -89,8 +90,9 @@ func runHostIntegrationPresentationSuites() {
         expect(
             hostSourceRowPresentations(
                 from: hostPresentationMatrix(
-                    snapshots: [hostPresentationSnapshot(.claudeCode)]))
-                .map(\.host) == [.codex, .claudeCode, .workBuddy],
+                    snapshots: [hostPresentationSnapshot(.claudeCode)])
+            )
+            .map(\.host) == [.codex, .claudeCode, .workBuddy],
             "缺少快照也不能隐藏其他产品宿主")
         expect(
             Set(rows.map(\.host)).isDisjoint(with: [.chatGPTDesktopAX, .claudeDesktopAX]),
@@ -197,7 +199,8 @@ func runHostIntegrationPresentationSuites() {
         for (result, title) in expected {
             expect(hostHookPlaybackResultDisplayName(result) == title, "\(result) 必须显示 \(title)")
             expect(
-                hostLatestReceiptText(snapshot: snapshot(at: 100, result: result))?.hasSuffix("· \(title)")
+                hostLatestReceiptText(snapshot: snapshot(at: 100, result: result))?.hasSuffix(
+                    "· \(title)")
                     == true,
                 "\(result) 回执摘要必须包含脱敏结果")
         }
@@ -227,6 +230,8 @@ func runHostIntegrationPresentationSuites() {
             "Reduce Motion 开启时必须立即更新")
         var announcer = IntegrationsFeedbackAnnouncementModel()
         expect(announcer.consume(model.current) != nil, "新代次必须可播报")
-        expect(announcer.consume(model.current) == nil && announcer.consume(nil) == nil, "去重不可被 nil 重置")
+        expect(
+            announcer.consume(model.current) == nil && announcer.consume(nil) == nil, "去重不可被 nil 重置"
+        )
     }
 }

@@ -27,7 +27,8 @@ func integrationDestinationTestSnapshot(
     host: HostID,
     status: IntegrationDestinationTestStatus
 ) -> HostIntegrationSnapshot {
-    guard let binding = HostCapabilityCatalog.bindings(for: host).first(where: \.isAudibleCapability)
+    guard
+        let binding = HostCapabilityCatalog.bindings(for: host).first(where: \.isAudibleCapability)
     else {
         return HostIntegrationSnapshot(
             host: host,

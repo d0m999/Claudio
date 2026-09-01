@@ -67,7 +67,7 @@ public struct IntegrationDestinationActionHandler: Sendable {
     public init(
         _ operation:
             @escaping @MainActor @Sendable (HostIntegrationUserAction) async throws
-                -> IntegrationDestinationActionOutcome
+            -> IntegrationDestinationActionOutcome
     ) {
         self.operation = operation
     }
@@ -99,7 +99,8 @@ public struct IntegrationDestinationClipboardWriter: Sendable {
 public final class IntegrationDestinationModel: ObservableObject {
     @Published public private(set) var content: IntegrationDestinationContent
     @Published public private(set) var feedback: IntegrationsFeedback?
-    @Published public private(set) var inFlightOperation: IntegrationDestinationInFlightPresentation?
+    @Published public private(set) var inFlightOperation:
+        IntegrationDestinationInFlightPresentation?
     @Published public private(set) var pendingConfirmation: IntegrationDestinationConfirmation?
     @Published public private(set) var isWindowVisible = false
     @Published public private(set) var isWindowKey = false
@@ -109,8 +110,7 @@ public final class IntegrationDestinationModel: ObservableObject {
     private let actionHandler: IntegrationDestinationActionHandler
     private let preferences: ClaudioPreferences?
     private let clipboardWriter: IntegrationDestinationClipboardWriter?
-    private let onContentChanged:
-        @MainActor @Sendable (IntegrationDestinationContent) -> Void
+    private let onContentChanged: @MainActor @Sendable (IntegrationDestinationContent) -> Void
     private var feedbackState = IntegrationsFeedbackModel()
     private var feedbackExpiryTask: Task<Void, Never>?
 
@@ -184,7 +184,8 @@ public final class IntegrationDestinationModel: ObservableObject {
         let preferredHost = preferredSurface.flatMap { surface in
             HostID.productVisibleCases.first(where: { $0.surfaceID == surface })
         }
-        let host = preferredHost.flatMap { content.facts(for: $0) != nil ? $0 : nil }
+        let host =
+            preferredHost.flatMap { content.facts(for: $0) != nil ? $0 : nil }
             ?? integrationAgentHostOrder().first(where: { content.facts(for: $0) != nil })
         selectedHost = host
         if let host, preferredHost != host {
@@ -307,10 +308,13 @@ public final class IntegrationDestinationModel: ObservableObject {
         defer { inFlightOperation = nil }
 
         do {
-            let outcome = try await (action == .redetect
+            let outcome =
+                try await
+                (action == .redetect
                 ? refreshHandler()
                 : actionHandler(action))
-            let receiptTransitions = action == .redetect
+            let receiptTransitions =
+                action == .redetect
                 ? integrationReceiptTransitions(from: content, to: outcome.content)
                 : []
             replaceContent(outcome.content)

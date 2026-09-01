@@ -152,7 +152,8 @@ struct IntegrationsSettingsDestinationView: View {
             .focused($focusedTarget, equals: .agent(agent.host))
             .accessibilityLabel(agent.title)
             .accessibilityValue(
-                "\(localizedAgentStatus(agent.status))，\(agent.coverageText)")
+                "\(localizedAgentStatus(agent.status))，\(agent.coverageText)"
+            )
             .accessibilityAddTraits(model.selectedHost == agent.host ? .isSelected : [])
             .accessibilityIdentifier("integrations.destination.agent.\(agent.host.rawValue)")
 
@@ -167,17 +168,19 @@ struct IntegrationsSettingsDestinationView: View {
                 "",
                 isOn: Binding(
                     get: { agent.isOn },
-                    set: { _ in model.requestToggle(for: agent.host) }))
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(ClaudioTheme.clay(colorScheme))
-                .disabled(!agent.isToggleEnabled)
-                .focused($focusedTarget, equals: .toggle(agent.host))
-                .accessibilityLabel(
-                    l10n.format(
-                        agent.isOn ? .integrationsDisable : .integrationsEnable,
-                        agent.title))
-                .accessibilityIdentifier("integrations.destination.toggle.\(agent.host.rawValue)")
+                    set: { _ in model.requestToggle(for: agent.host) })
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .tint(ClaudioTheme.clay(colorScheme))
+            .disabled(!agent.isToggleEnabled)
+            .focused($focusedTarget, equals: .toggle(agent.host))
+            .accessibilityLabel(
+                l10n.format(
+                    agent.isOn ? .integrationsDisable : .integrationsEnable,
+                    agent.title)
+            )
+            .accessibilityIdentifier("integrations.destination.toggle.\(agent.host.rawValue)")
 
             if agent.isInFlight, let operation = model.inFlightOperation {
                 ProgressView()
@@ -229,7 +232,8 @@ struct IntegrationsSettingsDestinationView: View {
 
             VStack(alignment: .trailing, spacing: 7) {
                 if row.kind == .connectionStatus {
-                    ClaudioStatusCapsule(localizedAgentStatus(facts.status), isEmphasized: facts.status == .ready)
+                    ClaudioStatusCapsule(
+                        localizedAgentStatus(facts.status), isEmphasized: facts.status == .ready)
                 } else if row.kind == .mechanism, let value = row.value {
                     Text(value)
                         .font(ClaudioTheme.font(.technical))
@@ -257,16 +261,19 @@ struct IntegrationsSettingsDestinationView: View {
             switch action {
             case .redetect:
                 Button(l10n.text(.actionRedetect)) { perform(.redetect) }
-                    .accessibilityIdentifier("integrations.destination.redetect.\(facts.host.rawValue)")
+                    .accessibilityIdentifier(
+                        "integrations.destination.redetect.\(facts.host.rawValue)")
             case .copyHooks:
                 Button(l10n.text(.actionCopyHooks)) { perform(.copyHooksCommand) }
-                    .accessibilityIdentifier("integrations.destination.copy-hooks.\(facts.host.rawValue)")
+                    .accessibilityIdentifier(
+                        "integrations.destination.copy-hooks.\(facts.host.rawValue)")
             case .repair(let host):
                 Button(
                     localizedHostIntegrationUserActionTitle(
                         .repair(host),
                         hostStatus: facts.status,
-                        language: languageStore.language)) { perform(.repair(host)) }
+                        language: languageStore.language)
+                ) { perform(.repair(host)) }
             case .copyConfigurationSource(let host):
                 Button(l10n.format(.integrationsCopyPathLabel, host.displayName)) {
                     _ = model.copyConfigurationSource(for: host)
@@ -405,10 +412,11 @@ struct IntegrationsSettingsDestinationView: View {
         case .connectionRow(let kind) where model.connectionSection?.row(kind) != nil:
             focusedTarget = .connectionRow(kind)
         case .copyConfigurationSource(let host)
-            where model.selectedHostFacts?.configurationSource != nil && model.selectedHost == host:
+        where model.selectedHostFacts?.configurationSource != nil && model.selectedHost == host:
             focusedTarget = .copyConfigurationSource(host)
         default:
-            focusedTarget = model.selectedHost.map(IntegrationDestinationFocusTarget.agent)
+            focusedTarget =
+                model.selectedHost.map(IntegrationDestinationFocusTarget.agent)
                 ?? model.agentControls.first.map { .agent($0.host) }
         }
     }
@@ -421,7 +429,9 @@ struct IntegrationsSettingsDestinationView: View {
         case .agent(let host), .toggle(let host):
             guard model.agent(for: host) != nil else { self.focusedTarget = nil; return }
         case .connectionRow(let kind):
-            guard model.connectionSection?.row(kind) != nil else { self.focusedTarget = nil; return }
+            guard model.connectionSection?.row(kind) != nil else {
+                self.focusedTarget = nil; return
+            }
         case .copyConfigurationSource(let host):
             guard model.selectedHostFacts?.configurationSource != nil,
                 model.selectedHost == host
@@ -474,7 +484,9 @@ struct IntegrationsSettingsDestinationView: View {
             } else {
                 switch facts.status {
                 case .notConnected: diagnosis = l10n.text(.integrationsNotConnectedDescription)
-                case .needsAttention: diagnosis = localizedRow.detailText ?? l10n.text(.integrationsNeedsAttentionDescription)
+                case .needsAttention:
+                    diagnosis =
+                        localizedRow.detailText ?? l10n.text(.integrationsNeedsAttentionDescription)
                 case .ready, .awaitingActivation, .legacy:
                     diagnosis = l10n.text(.integrationsConfiguredWaitingDescription)
                 }

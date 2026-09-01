@@ -257,7 +257,8 @@ public func integrationConnectionSectionPresentation(
 ) -> IntegrationConnectionSectionPresentation {
     let sourceCaption: String
     if let source = facts.configurationSource {
-        sourceCaption = "\(hostIntegrationMechanismDisplayName(facts.mechanism)) · 配置来源：\(abbreviatedConfigurationPath(source))"
+        sourceCaption =
+            "\(hostIntegrationMechanismDisplayName(facts.mechanism)) · 配置来源：\(abbreviatedConfigurationPath(source))"
     } else {
         sourceCaption = "\(hostIntegrationMechanismDisplayName(facts.mechanism)) · 配置来源暂不可用"
     }

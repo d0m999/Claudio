@@ -13,7 +13,8 @@ func runWorkBuddyVisualStateBaselineSuites() {
         expect(
             scenarios.map(\.id) == [
                 "workbuddy.disconnected", "workbuddy.awaiting", "workbuddy.task-start-current",
-                "workbuddy.two-bindings-current", "workbuddy.conflict", "workbuddy.repaired-awaiting",
+                "workbuddy.two-bindings-current", "workbuddy.conflict",
+                "workbuddy.repaired-awaiting",
                 "workbuddy.disconnected-after-action",
             ],
             "WorkBuddy fixture ID 和顺序必须稳定")
@@ -50,22 +51,28 @@ func runWorkBuddyVisualStateBaselineSuites() {
             (.disconnectedAfterAction, .notConnected, false),
         ]
         for (phase, status, isOn) in expected {
-            guard let scenario = PreviewFixtures.workBuddyVisualScenarios.first(where: { $0.phase == phase })
+            guard
+                let scenario = PreviewFixtures.workBuddyVisualScenarios.first(where: {
+                    $0.phase == phase
+                })
             else {
                 expect(false, "缺少 \(phase) fixture")
                 continue
             }
             let agent = integrationDestinationContent(state: scenario.state).agent(for: .workBuddy)
             expect(agent?.status == status, "\(phase) 必须投影为 \(status)")
-            expect(agent?.coverageText == "2/5" && agent?.isOn == isOn, "\(phase) Toggle/coverage 必须诚实")
+            expect(
+                agent?.coverageText == "2/5" && agent?.isOn == isOn, "\(phase) Toggle/coverage 必须诚实"
+            )
             expect(agent?.badgeText != "错误", "2/5 本身不得渲染成错误")
         }
     }
 
     suite("WorkBuddy 七态 localization：英文与 zh-Hans 保留能力覆盖和诊断 literal") {
         for scenario in PreviewFixtures.workBuddyVisualScenarios {
-            guard let row = hostSourceRowPresentations(from: scenario.state.matrix)
-                .first(where: { $0.host == .workBuddy })
+            guard
+                let row = hostSourceRowPresentations(from: scenario.state.matrix)
+                    .first(where: { $0.host == .workBuddy })
             else {
                 expect(false, "\(scenario.id) 缺少 WorkBuddy source row")
                 continue
@@ -88,7 +95,8 @@ func runWorkBuddyVisualStateBaselineSuites() {
                             status: .needsAttention,
                             supportedCount: 2,
                             totalCount: 5),
-                        language: .zhHans).detailText == detail
+                        language: .zhHans
+                    ).detailText == detail
                         || scenario.phase == .conflict,
                     "外部诊断 literal 不得被 GUI 猜测覆盖")
             }
@@ -99,7 +107,8 @@ func runWorkBuddyVisualStateBaselineSuites() {
         let root = guiTestRepositoryRoot()
         guard
             let gallery = try? String(
-                contentsOf: root.appendingPathComponent("gui/Sources/ClaudioGUI/StateGalleryView.swift"),
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/ClaudioGUI/StateGalleryView.swift"),
                 encoding: .utf8),
             let view = try? String(
                 contentsOf: root.appendingPathComponent(

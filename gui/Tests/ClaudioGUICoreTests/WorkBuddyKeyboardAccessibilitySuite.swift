@@ -81,7 +81,8 @@ func runWorkBuddyKeyboardAccessibilitySuites() {
             "Agent 行必须连接真实 manager-derived Toggle，不得本地乐观翻转")
         expect(
             view.contains("model.selectedHost == agent.host")
-                && view.contains(".accessibilityAddTraits(model.selectedHost == agent.host ? .isSelected : [])"),
+                && view.contains(
+                    ".accessibilityAddTraits(model.selectedHost == agent.host ? .isSelected : [])"),
             "选择控件必须独立表达 selected 语义")
         expect(
             view.contains("IntegrationConnectionRowKind.allCases")

@@ -3,12 +3,12 @@ import ClaudioLocalization
 import Combine
 import Foundation
 
-public extension SettingsDestination {
-    static let defaultsKey = "Claudio.Settings.LastDestination"
+extension SettingsDestination {
+    public static let defaultsKey = "Claudio.Settings.LastDestination"
 
     /// Top-level destinations with production content today. Later destination migrations extend
     /// this list when their real views ship; DEBUG galleries inject `allCases` explicitly.
-    static let availableCases: [SettingsDestination] = [
+    public static let availableCases: [SettingsDestination] = [
         .general, .integrations, .eventsAndSounds, .notifications, .display, .sounds, .usage,
         .shortcuts, .about,
     ]
@@ -94,7 +94,8 @@ public final class ClaudioPreferences: ObservableObject {
     ) {
         self.defaults = defaults
         self.preferredLanguageIdentifiers = preferredLanguageIdentifiers
-        let legalDestinations = availableSettingsDestinations.isEmpty
+        let legalDestinations =
+            availableSettingsDestinations.isEmpty
             ? [.general] : availableSettingsDestinations
         self.availableSettingsDestinations = legalDestinations
 
@@ -104,17 +105,20 @@ public final class ClaudioPreferences: ObservableObject {
         let destinationObject = defaults.object(forKey: SettingsDestination.defaultsKey)
         let destinationRawValue = destinationObject as? String
         let parsedDestination = destinationRawValue.flatMap(SettingsDestination.init(rawValue:))
-        let destination = parsedDestination.flatMap {
-            legalDestinations.contains($0) ? $0 : nil
-        } ?? .general
+        let destination =
+            parsedDestination.flatMap {
+                legalDestinations.contains($0) ? $0 : nil
+            } ?? .general
         let integrationSurfaceObject = defaults.object(
             forKey: Self.integrationSurfaceDefaultsKey)
         let integrationSurfaceRawValue = integrationSurfaceObject as? String
-        let parsedIntegrationSurface = integrationSurfaceRawValue.flatMap(HostSurfaceID.init(rawValue:))
+        let parsedIntegrationSurface = integrationSurfaceRawValue.flatMap(
+            HostSurfaceID.init(rawValue:))
         let legalIntegrationSurfaces = Set(HostID.productVisibleCases.map(\.surfaceID))
-        let integrationSurface = parsedIntegrationSurface.flatMap {
-            legalIntegrationSurfaces.contains($0) ? $0 : nil
-        } ?? .claudeCode
+        let integrationSurface =
+            parsedIntegrationSurface.flatMap {
+                legalIntegrationSurfaces.contains($0) ? $0 : nil
+            } ?? .claudeCode
         let textSizeObject = defaults.object(forKey: ClaudioInterfaceTextSize.defaultsKey)
         let textSizeRawValue = textSizeObject as? String
         let interfaceTextSize = ClaudioInterfaceTextSize(storedValue: textSizeRawValue)
@@ -178,7 +182,8 @@ public final class ClaudioPreferences: ObservableObject {
             showsMenuBarStatusDot: showsMenuBarStatusDot,
             recoveryIssues: recoveryIssues)
 
-        localeCancellable = notificationCenter
+        localeCancellable =
+            notificationCenter
             .publisher(for: NSLocale.currentLocaleDidChangeNotification)
             .sink { @Sendable [weak self] _ in
                 Task { @MainActor [weak self] in
