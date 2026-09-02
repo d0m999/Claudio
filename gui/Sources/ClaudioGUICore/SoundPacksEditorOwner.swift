@@ -540,6 +540,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         model.refreshEditorConfigProjection()
         let seed = model.editorProjectionSeed()
         if action.kind.requiresWritableScope, !seed.writesAllowed {
+            consumeConfirmationAttemptIfCurrent(action)
             publish(from: seed)
             return .rejected(.scopeUnavailable)
         }
@@ -679,6 +680,15 @@ public final class SoundPacksEditorOwner: ObservableObject {
             publish(from: seed)
             return .applied
         }
+    }
+
+    private func consumeConfirmationAttemptIfCurrent(_ action: SoundPackEditorAction) {
+        guard action.kind == .confirm,
+            let binding = actionLedger.removeValue(forKey: action.id),
+            case .confirm(let confirmationID) = binding.intent,
+            pendingConfirmationState?.id == confirmationID
+        else { return }
+        pendingConfirmationState = nil
     }
 
     private func requestConfirmation(

@@ -157,6 +157,138 @@ func runSoundPacksEditorMutationSuites() async {
                 "已 ack identity 不得重放")
         }
     }
+
+    await suite("Sound editor confirmation：scope failure 优先返回但仍单次消费") {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["pack-a"],
+                config: ClaudioConfig(
+                    selectedPack: "pack-a",
+                    surfaceOverrides: [
+                        HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                            selectedPack: "pack-a")
+                    ]))
+            let orphan = root.appendingPathComponent("packs/pack-a/orphan.mp3")
+            writeFixture("orphan", to: orphan)
+            let owner = fixture.owner
+            _ = owner.send(
+                .activate(
+                    .sounds(
+                        route: .overview(surface: .workBuddy),
+                        requestRevision: 4)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            await waitForSoundEditorInventory(owner)
+            guard case .sounds(let sounds) = owner.presentation.mode,
+                case .ready(let audio) = sounds.inventory,
+                let requestDelete = audio.first(where: { $0.fileName == "orphan.mp3" })?
+                    .deleteAction,
+                case .confirmation(let confirmation) = owner.send(.invoke(requestDelete))
+            else {
+                expect(false, "orphan 必须签发可确认的删除 capability")
+                return
+            }
+            let validConfig = try? Data(contentsOf: fixture.configFile)
+            writeFixture(
+                #"{"selected_pack":"pack-a","surface_overrides":{"workbuddy":"broken"}}"#,
+                to: fixture.configFile)
+            let invalidConfig = try? Data(contentsOf: fixture.configFile)
+            let scansBefore = fixture.recorder.requests.count
+
+            expect(
+                owner.send(.invoke(confirmation.confirmAction))
+                    == .rejected(.scopeUnavailable),
+                "latest scope failure 必须优先于 confirmation 执行结果")
+            expect(
+                owner.presentation.pendingConfirmation == nil,
+                "scope failure 的第一次 confirm 尝试仍必须同栈消费并清 UI")
+            if case .sounds(let failedScope) = owner.presentation.mode {
+                expect(
+                    failedScope.scope == .unavailable(.scopeUnavailable),
+                    "malformed Surface config 必须显式投影 unavailable，不得借 Global 回落恢复写权")
+            } else {
+                expect(false, "scope failure 后必须保持 Sounds failure slice")
+            }
+            expect(
+                regularFileExists(at: orphan)
+                    && (try? Data(contentsOf: fixture.configFile)) == invalidConfig
+                    && fixture.recorder.requests.count == scansBefore,
+                "scope failure 只读 latest config，不得改 bytes 或请求 scan")
+
+            if let validConfig { writeFixture(validConfig, to: fixture.configFile) }
+            expect(
+                owner.send(.invoke(confirmation.confirmAction))
+                    == .rejected(.staleConfirmation),
+                "scope 修复后同一 confirm token 仍必须 stale")
+            for _ in 0..<16 { await Task.yield() }
+            expect(
+                regularFileExists(at: orphan)
+                    && fixture.recorder.requests.count == scansBefore,
+                "scope 修复不得让旧 token 迟到写入或 refresh")
+        }
+    }
+
+    await suite("Sound editor confirmation：cancel 后 reissue 不复活旧 token") {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a"])
+            let orphan = root.appendingPathComponent("packs/pack-a/orphan.mp3")
+            writeFixture("orphan", to: orphan)
+            let owner = fixture.owner
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 5)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            await waitForSoundEditorInventory(owner)
+            guard case .sounds(let initial) = owner.presentation.mode,
+                case .ready(let initialAudio) = initial.inventory,
+                let firstRequest = initialAudio.first(where: { $0.fileName == "orphan.mp3" })?
+                    .deleteAction,
+                case .confirmation(let first) = owner.send(.invoke(firstRequest))
+            else {
+                expect(false, "第一次删除请求必须产生 confirmation")
+                return
+            }
+            let scansBefore = fixture.recorder.requests.count
+
+            expect(owner.send(.invoke(first.cancelAction)) == .applied, "cancel 必须同栈消费")
+            expect(owner.presentation.pendingConfirmation == nil, "cancel 后 UI 必须立即清除")
+            await waitForSoundEditorInventory(owner)
+            guard case .sounds(let afterCancel) = owner.presentation.mode else {
+                expect(false, "cancel 后必须保持 Sounds mode")
+                return
+            }
+            guard case .ready(let currentAudio) = afterCancel.inventory else {
+                expect(false, "cancel 后必须保持 settled inventory")
+                return
+            }
+            guard
+                let secondRequest = currentAudio.first(where: { $0.fileName == "orphan.mp3" })?
+                    .deleteAction
+            else {
+                expect(false, "cancel 后新 root 必须重签 delete capability")
+                return
+            }
+            let secondResult = owner.send(.invoke(secondRequest))
+            guard case .confirmation(let second) = secondResult else {
+                expect(false, "cancel 后必须能显式 reissue，实得 \(secondResult)")
+                return
+            }
+
+            expect(
+                owner.send(.invoke(first.confirmAction)) == .rejected(.staleConfirmation),
+                "reissue 后旧 confirm token 不得复活")
+            expect(
+                owner.send(.invoke(first.cancelAction)) == .rejected(.staleConfirmation),
+                "reissue 后旧 cancel token 不得清除新 confirmation")
+            expect(
+                owner.presentation.pendingConfirmation?.id == second.id,
+                "旧 token replay 后必须保留新 confirmation identity")
+            expect(owner.send(.invoke(second.cancelAction)) == .applied, "新 cancel token 必须可用")
+            expect(
+                owner.presentation.pendingConfirmation == nil
+                    && regularFileExists(at: orphan)
+                    && fixture.recorder.requests.count == scansBefore,
+                "cancel/reissue/replay 全程必须零 bytes 变化、零 scan")
+        }
+    }
 }
 
 struct SoundEditorFixture {

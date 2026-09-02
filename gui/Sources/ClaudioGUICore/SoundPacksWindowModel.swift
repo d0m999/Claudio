@@ -980,7 +980,14 @@ public final class SoundPacksWindowModel: ObservableObject {
     }
 
     func editorProjectionSeed() -> SoundPacksEditorModelSeed {
-        SoundPacksEditorModelSeed(
+        let configAllowsWrites: Bool
+        switch configState {
+        case .operational, .needsPack:
+            configAllowsWrites = true
+        case .malformed, .unwritable:
+            configAllowsWrites = false
+        }
+        return SoundPacksEditorModelSeed(
             library: editorLibraryPresentation,
             installedPackIDs: librarySnapshot.map { Set($0.facts.map(\.id)) }
                 ?? Set(
@@ -990,7 +997,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             snapshotRevision: librarySnapshot?.revision,
             selectionGeneration: UInt64(inspectionSelectionRevision),
             managedSurface: managedSurface,
-            writesAllowed: writesAllowed,
+            writesAllowed: writesAllowed && configAllowsWrites,
             config: config,
             packCards: packCards,
             selectedPackID: selectedPackID,
