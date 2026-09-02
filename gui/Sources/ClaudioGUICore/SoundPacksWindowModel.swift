@@ -679,6 +679,13 @@ public final class SoundPacksWindowModel: ObservableObject {
     private var factoryBatchRestoredCount = 0
     private var factoryBatchRetainedSalvages: [SalvagedPack] = []
     private var baseConfig: ClaudioConfig
+    /// Exact shared-library lifecycle used by the deep editor projection. The legacy
+    /// `libraryPresentationState` intentionally folds `.unloaded` into `.loading`; the new seam
+    /// must not lose that identity or infer freshness from cards.
+    private var editorLibraryPresentation: SoundPackLibraryPresentation
+    private var editorTransitionDepth = 0
+    private var editorSettlePending = false
+    var onEditorStateSettled: ((SoundPacksEditorModelSeed) -> Void)?
 
     private var factoryRestoreRetainedSalvages: [SalvagedPack] {
         guard case .restore(_, _, let retainedSalvages)? = factoryRestoreActionError
@@ -777,6 +784,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 selectedAudioInventoryState = .idle
             }
             libraryPresentationState = .ready
+            editorLibraryPresentation = .ready(snapshotRevision: nil)
         } else {
             packCards = []
             starredPackIDs = []
@@ -784,6 +792,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             selectedEventRows = []
             selectedAudioInventoryState = .idle
             libraryPresentationState = .loading
+            editorLibraryPresentation = .unloaded
         }
         audioActionError = nil
         starredPacksError = nil
@@ -876,6 +885,18 @@ public final class SoundPacksWindowModel: ObservableObject {
         packUseActionError = nil
         self.windowStatuses = windowStatuses
         self.libraryPresentationState = libraryPresentationState
+        switch libraryPresentationState {
+        case .loading:
+            editorLibraryPresentation = .loading(previousAvailable: false)
+        case .refreshing:
+            editorLibraryPresentation = .loading(previousAvailable: true)
+        case .ready:
+            editorLibraryPresentation = .ready(snapshotRevision: nil)
+        case .refreshFailed:
+            editorLibraryPresentation = .failed(previousAvailable: true)
+        case .loadFailed:
+            editorLibraryPresentation = .failed(previousAvailable: false)
+        }
     }
     #endif
 
@@ -937,6 +958,53 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard let packID, suppressedSelectionAnnouncementPackID == packID else { return false }
         suppressedSelectionAnnouncementPackID = nil
         return true
+    }
+
+    /// Coalesces every nested synchronous model change into one settled seed. The owner uses this
+    /// around its command implementations; library and inventory completions use it at their own
+    /// logical boundaries. It never spans an `await`.
+    func withEditorStateTransition<T>(_ body: () throws -> T) rethrows -> T {
+        editorTransitionDepth += 1
+        defer {
+            editorSettlePending = true
+            editorTransitionDepth -= 1
+            publishEditorStateIfSettled()
+        }
+        return try body()
+    }
+
+    func editorProjectionSeed() -> SoundPacksEditorModelSeed {
+        SoundPacksEditorModelSeed(
+            library: editorLibraryPresentation,
+            installedPackIDs: librarySnapshot.map { Set($0.facts.map(\.id)) }
+                ?? Set(
+                    packCards.compactMap { card in
+                        card.availability == .installed ? card.id : nil
+                    }),
+            snapshotRevision: librarySnapshot?.revision,
+            selectionGeneration: UInt64(inspectionSelectionRevision),
+            managedSurface: managedSurface,
+            writesAllowed: writesAllowed,
+            config: config,
+            packCards: packCards,
+            selectedPackID: selectedPackID,
+            selectedEventRows: selectedEventRows,
+            selectedAudioInventoryState: selectedAudioInventoryState,
+            starredPackIDs: starredPackIDs,
+            builtinPackIDs: builtinPackIDs,
+            factoryRestoreRetryPackIDs: factoryRestoreRetryPackIDs,
+            windowStatuses: windowStatuses)
+    }
+
+    private func markEditorStateSettled() {
+        editorSettlePending = true
+        publishEditorStateIfSettled()
+    }
+
+    private func publishEditorStateIfSettled() {
+        guard editorTransitionDepth == 0, editorSettlePending else { return }
+        editorSettlePending = false
+        onEditorStateSettled?(editorProjectionSeed())
     }
 
     @discardableResult
@@ -1366,6 +1434,12 @@ public final class SoundPacksWindowModel: ObservableObject {
     #endif
 
     private func consumeLibraryState(_ state: SoundPackLibraryState) {
+        editorTransitionDepth += 1
+        defer {
+            editorSettlePending = true
+            editorTransitionDepth -= 1
+            publishEditorStateIfSettled()
+        }
         if let currentRevision = librarySnapshot?.revision {
             guard let incomingRevision = state.snapshotRevision,
                 incomingRevision >= currentRevision
@@ -1374,19 +1448,23 @@ public final class SoundPacksWindowModel: ObservableObject {
 
         switch state {
         case .unloaded:
+            editorLibraryPresentation = .unloaded
             libraryPresentationState = .loading
         case .loading(let previous):
+            editorLibraryPresentation = .loading(previousAvailable: previous != nil)
             libraryPresentationState = previous == nil ? .loading : .refreshing
             if let previous {
                 librarySnapshot = previous
                 applySnapshot(previous, followActivePack: pendingFollowActivePack)
             }
         case .ready(let snapshot):
+            editorLibraryPresentation = .ready(snapshotRevision: snapshot.revision)
             librarySnapshot = snapshot
             applySnapshot(snapshot, followActivePack: pendingFollowActivePack)
             pendingFollowActivePack = false
             libraryPresentationState = .ready
         case .failed(let previous, let error):
+            editorLibraryPresentation = .failed(previousAvailable: previous != nil)
             if let previous {
                 librarySnapshot = previous
                 applySnapshot(previous, followActivePack: pendingFollowActivePack)
@@ -2478,6 +2556,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                         previous: previous,
                         error: .directoryUnreadable(reason: "音频清单尚未完成读取"))
                 }
+                self.markEditorStateSettled()
             }
             return
         }
