@@ -9,6 +9,8 @@ import Foundation
 /// be exercised without constructing AppKit or SwiftUI.
 @MainActor
 public final class SoundPacksEditorOwner: ObservableObject {
+    private static let maximumRetainedTerminalOperationCount = 32
+
     public let model: SoundPacksWindowModel
     public let userPacksDirectory: URL
     @Published package private(set) var presentation: SoundPacksEditorPresentation
@@ -30,7 +32,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private var operationTasks: [SoundPackEditorOperationID: Task<Void, Never>] = [:]
     private var operationCancellations:
         [SoundPackEditorOperationID: SoundPackAudioImportCancellation] = [:]
-    private var announcementQueue: [SoundPackEditorAnnouncement] = []
+    private var announcementQueue: [EditorAnnouncementDebt] = []
     private var seenStatusRevisions: Set<Int> = []
     private var isApplyingModelTransition = false
     private var deferredModelSeed: SoundPacksEditorModelSeed?
@@ -211,11 +213,14 @@ public final class SoundPacksEditorOwner: ObservableObject {
             completePanelPackSwitch(outcome)
             return outcome.refreshesEditor ? .applied : .unchanged
         case .acknowledgeAnnouncement(let id, let didPost):
-            guard announcementQueue.first?.id == id else {
+            guard let debt = announcementQueue.first, debt.announcement.id == id else {
                 return .rejected(.staleAction)
             }
             guard didPost else { return .unchanged }
             announcementQueue.removeFirst()
+            if let operationID = debt.operationID {
+                retireTerminalOperation(operationID)
+            }
             publish(from: model.editorProjectionSeed())
             return .applied
         }
@@ -441,7 +446,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     rejected: [],
                     boundEvent: nil,
                     completedInBackground: false,
-                    orphan: nil))
+                    orphan: nil,
+                    completion: .unchanged))
         }
 
         let cancellation = SoundPackAudioImportCancellation()
@@ -507,7 +513,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     rejected: batch.rejected,
                     boundEvent: nil,
                     completedInBackground: false,
-                    orphan: nil))
+                    orphan: nil,
+                    completion: .failed(.importRejected)))
         }
 
         model.refreshEditorConfigProjection()
@@ -569,14 +576,21 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 changedDespiteFailure: failure != nil)
         }
         let phase: SoundPackEditorActivityPhase
+        let completion: SoundPackEditorOperationCompletion
         if let orphan, let failure {
             phase = .orphan(fileName: orphan.fileName, failure: failure)
+            completion = .orphan(failure)
         } else if failure == .cancelled {
             phase = .cancelled(changedOnDisk: true)
+            completion = .cancelled(changedOnDisk: true)
         } else if !batch.rejected.isEmpty {
             phase = .partial(accepted: batch.accepted.count, rejected: batch.rejected.count)
+            completion = .partial(
+                accepted: batch.accepted.count,
+                rejected: batch.rejected.count)
         } else {
             phase = .succeeded
+            completion = .succeeded
         }
         settleAsyncOperation(operationID, phase: phase, seed: settledSeed)
         return .imported(
@@ -585,7 +599,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 rejected: batch.rejected,
                 boundEvent: boundEvent,
                 completedInBackground: completedInBackground,
-                orphan: orphan))
+                orphan: orphan,
+                completion: completion))
     }
 
     private func beginAsyncOperation(
@@ -614,6 +629,13 @@ public final class SoundPacksEditorOwner: ObservableObject {
         operationCancellations.removeValue(forKey: operationID)
         guard let state = operationStates[operationID] else { return }
         operationStates[operationID] = state.withPhase(phase)
+        if let completion = phase.announcementCompletion {
+            enqueueOperationAnnouncement(
+                state.kind,
+                completion: completion,
+                operationID: operationID)
+        }
+        trimTerminalOperationHistory()
         publish(from: seed)
     }
 
@@ -927,8 +949,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
         guard let state = operationStates[operationID] else { return }
         operationStates[operationID] = state.withPhase(phase)
         if case .deleteOrphan = successfulWork {
-            enqueueOperationAnnouncement(.deleteOrphan)
+            enqueueOperationAnnouncement(
+                .deleteOrphan,
+                completion: .succeeded,
+                operationID: operationID)
         }
+        trimTerminalOperationHistory()
         publish(from: seed)
     }
 
@@ -976,7 +1002,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             mode: makeMode(from: seed),
             activities: makeActivities(seed: seed),
             pendingConfirmation: makeConfirmation(seed: seed),
-            pendingAnnouncement: announcementQueue.first)
+            pendingAnnouncement: announcementQueue.first?.announcement)
         lastCommittedModelSeed = seed
         presentation = nextPresentation
     }
@@ -1278,22 +1304,53 @@ public final class SoundPacksEditorOwner: ObservableObject {
         where seenStatusRevisions.insert(status.revision).inserted {
             nextCapabilityID &+= 1
             announcementQueue.append(
-                SoundPackEditorAnnouncement(
-                    id: SoundPackEditorAnnouncement.ID(rawValue: nextCapabilityID),
-                    kind: .windowStatus(status.kind),
-                    actionText: status.actionText,
-                    messageText: status.messageText))
+                EditorAnnouncementDebt(
+                    announcement: SoundPackEditorAnnouncement(
+                        id: SoundPackEditorAnnouncement.ID(rawValue: nextCapabilityID),
+                        kind: .windowStatus(status.kind),
+                        actionText: status.actionText,
+                        messageText: status.messageText),
+                    operationID: nil))
         }
     }
 
-    private func enqueueOperationAnnouncement(_ kind: SoundPackEditorActivityKind) {
+    private func enqueueOperationAnnouncement(
+        _ kind: SoundPackEditorActivityKind,
+        completion: SoundPackEditorOperationCompletion,
+        operationID: SoundPackEditorOperationID
+    ) {
         nextCapabilityID &+= 1
         announcementQueue.append(
-            SoundPackEditorAnnouncement(
-                id: SoundPackEditorAnnouncement.ID(rawValue: nextCapabilityID),
-                kind: .operationSucceeded(kind),
-                actionText: nil,
-                messageText: nil))
+            EditorAnnouncementDebt(
+                announcement: SoundPackEditorAnnouncement(
+                    id: SoundPackEditorAnnouncement.ID(rawValue: nextCapabilityID),
+                    kind: .operation(kind: kind, completion: completion),
+                    actionText: nil,
+                    messageText: nil),
+                operationID: operationID))
+    }
+
+    private func retireTerminalOperation(_ operationID: SoundPackEditorOperationID) {
+        guard let state = operationStates[operationID], state.phase != .busy else { return }
+        operationStates.removeValue(forKey: operationID)
+        operationOrder.removeAll { $0 == operationID }
+        operationTasks.removeValue(forKey: operationID)
+        operationCancellations.removeValue(forKey: operationID)
+    }
+
+    private func trimTerminalOperationHistory() {
+        let terminalIDs = operationOrder.filter { operationID in
+            operationStates[operationID]?.phase != .busy
+        }
+        guard terminalIDs.count > Self.maximumRetainedTerminalOperationCount else { return }
+        // Announcement debt remains FIFO and unbounded by this presentation-history safeguard.
+        // A later successful acknowledgement still consumes its semantic fact even if the visual
+        // activity aged out before it reached the queue head.
+        for operationID in terminalIDs.prefix(
+            terminalIDs.count - Self.maximumRetainedTerminalOperationCount)
+        {
+            retireTerminalOperation(operationID)
+        }
     }
 
     private func makeAction(
@@ -1468,6 +1525,30 @@ private struct EditorOperationState {
 
     func withPhase(_ phase: SoundPackEditorActivityPhase) -> Self {
         Self(kind: kind, phase: phase, packID: packID, event: event)
+    }
+}
+
+private struct EditorAnnouncementDebt {
+    let announcement: SoundPackEditorAnnouncement
+    let operationID: SoundPackEditorOperationID?
+}
+
+extension SoundPackEditorActivityPhase {
+    fileprivate var announcementCompletion: SoundPackEditorOperationCompletion? {
+        switch self {
+        case .busy:
+            return nil
+        case .succeeded:
+            return .succeeded
+        case .failed(let failure):
+            return .failed(failure)
+        case .partial(let accepted, let rejected):
+            return .partial(accepted: accepted, rejected: rejected)
+        case .orphan(_, let failure):
+            return .orphan(failure)
+        case .cancelled(let changedOnDisk):
+            return .cancelled(changedOnDisk: changedOnDisk)
+        }
     }
 }
 

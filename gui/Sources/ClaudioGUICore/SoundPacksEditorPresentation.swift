@@ -263,7 +263,9 @@ package struct SoundPackEditorConfirmation: Identifiable, Equatable {
 
 package enum SoundPackEditorAnnouncementKind: Equatable, Sendable {
     case windowStatus(SoundPacksWindowStatusKind)
-    case operationSucceeded(SoundPackEditorActivityKind)
+    case operation(
+        kind: SoundPackEditorActivityKind,
+        completion: SoundPackEditorOperationCompletion)
 }
 
 package struct SoundPackEditorAnnouncement: Identifiable, Equatable {
@@ -328,12 +330,32 @@ package enum SoundPacksEditorOperationResult: Equatable, Sendable {
     case rejected(SoundPackEditorFailure)
 }
 
+package enum SoundPackEditorOperationCompletion: Equatable, Sendable {
+    case unchanged
+    case succeeded
+    case partial(accepted: Int, rejected: Int)
+    case failed(SoundPackEditorFailure)
+    case cancelled(changedOnDisk: Bool)
+    case orphan(SoundPackEditorFailure)
+}
+
 package struct SoundPackEditorImportOutcome: Equatable, Sendable {
     package let accepted: [ImportedAudioFile]
     package let rejected: [RejectedAudioFile]
     package let boundEvent: Event?
     package let completedInBackground: Bool
     package let orphan: ImportedAudioFile?
+    package let completion: SoundPackEditorOperationCompletion
+
+    package var allowsForegroundFollowUp: Bool {
+        guard !completedInBackground, !accepted.isEmpty else { return false }
+        switch completion {
+        case .succeeded, .partial:
+            return true
+        case .unchanged, .failed, .cancelled, .orphan:
+            return false
+        }
+    }
 }
 
 package enum SoundPackEditorFailure: Error, Equatable, Sendable {

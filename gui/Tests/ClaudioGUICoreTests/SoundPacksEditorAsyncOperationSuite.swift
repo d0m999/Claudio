@@ -35,6 +35,9 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                     && outcome.rejected.isEmpty && outcome.boundEvent == .stop,
                 "compound import 必须导入并只绑定请求 Event")
             expect(
+                outcome.completion == .succeeded && outcome.allowsForegroundFollowUp,
+                "foreground success 必须允许 native adapter 执行显式 follow-up")
+            expect(
                 regularFileExists(at: root.appendingPathComponent("packs/pack-a/picked.mp3")),
                 "accepted bytes 必须落入 permit 捕获的 pack")
             let manifest =
@@ -54,6 +57,11 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 fixture.recorder.requests.count == scansBefore + 1
                     && fixture.recorder.requests.last?.invalidatedPackIDs == ["pack-a"],
                 "compound import+bind 必须 exact invalidation 且只请求一次 shared refresh")
+            expectSoundEditorAnnouncementDebt(
+                owner: owner,
+                kind: .importAudio,
+                completion: .succeeded,
+                acknowledge: true)
 
             expect(
                 await owner.perform(
@@ -127,6 +135,10 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                     && outcome.rejected.map(\.sourceFileName) == ["rejected.mp3"],
                 "partial outcome 必须同时保留 accepted 与逐项 rejected")
             expect(
+                outcome.completion == .partial(accepted: 1, rejected: 1)
+                    && outcome.allowsForegroundFollowUp,
+                "foreground partial 必须用 typed completion 形成 cancel 的正向对照")
+            expect(
                 owner.presentation.activities.contains {
                     $0.kind == .importAudio
                         && $0.phase == .partial(accepted: 1, rejected: 1)
@@ -137,6 +149,10 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 fixture.recorder.requests.count == scansBefore + 1
                     && fixture.recorder.requests.last?.invalidatedPackIDs == ["pack-a"],
                 "partial accepted bytes 仍必须 exact refresh 一次")
+            expectSoundEditorAnnouncementDebt(
+                owner: owner,
+                kind: .importAudio,
+                completion: .partial(accepted: 1, rejected: 1))
         }
     }
 
@@ -489,6 +505,10 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 fixture.recorder.requests.count == scansBefore + 1
                     && fixture.recorder.requests.last?.invalidatedPackIDs == ["workbuddy-pack"],
                 "adoption import+bind 必须只有一次 exact shared refresh")
+            expectSoundEditorAnnouncementDebt(
+                owner: owner,
+                kind: .adoptAICue,
+                completion: .succeeded)
             expect(
                 await owner.perform(
                     .adoptAICue(
@@ -1034,6 +1054,87 @@ func runSoundPacksEditorAsyncOperationSuites() async {
         }
     }
 
+    await suite("Sound editor perform：generic post-write cancel 的 typed outcome 禁止前台 follow-up") {
+        await withTempDirectory { root in
+            let gate = SoundEditorPostSampleGate()
+            defer { gate.release() }
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["pack-a"],
+                afterFinalImportCancellationSampleForTesting: { gate.pauseWorker() })
+            let owner = fixture.owner
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 239)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard let permit = soundEditorImportPermit(owner: owner, bindTo: nil) else {
+                expect(false, "generic cancel fixture 必须取得 import permit")
+                return
+            }
+
+            let source = root.appendingPathComponent("generic-post-write-cancel.mp3")
+            let sourceBytes = validMP3ID3Data()
+            writeFixture(sourceBytes, to: source)
+            let target = root.appendingPathComponent("packs/pack-a/generic-post-write-cancel.mp3")
+            let manifest = root.appendingPathComponent("packs/pack-a/manifest.json")
+            let manifestBefore = try? Data(contentsOf: manifest)
+            let scansBefore = fixture.recorder.requests.count
+            let task = Task { @MainActor in
+                await owner.perform(
+                    .importAudio(permit: permit, sources: [source], bindTo: nil))
+            }
+
+            let reachedGate = await gate.waitUntilEntered()
+            let busyActivity = owner.presentation.activities.last { activity in
+                guard activity.kind == .importAudio else { return false }
+                guard activity.event == nil else { return false }
+                return activity.phase == .busy
+            }
+            guard reachedGate, let activity = busyActivity, let cancel = activity.cancelAction
+            else {
+                gate.release()
+                _ = await task.value
+                expect(false, "generic import 必须在 post-sample gate 暴露 busy cancel action")
+                return
+            }
+            expect((try? Data(contentsOf: target)) == sourceBytes, "gate 前 bytes 必须已落盘")
+            expect(
+                (try? Data(contentsOf: manifest)) == manifestBefore,
+                "generic import 不得改写 manifest")
+            expect(fixture.recorder.requests.count == scansBefore, "gate 必须位于 refresh 之前")
+            expect(owner.send(.invoke(cancel)) == .applied, "late cancel 必须命中 live operation")
+            gate.release()
+
+            guard case .imported(let outcome) = await task.value else {
+                expect(false, "post-write cancel 必须保留真实 imported facts")
+                return
+            }
+            expect(
+                outcome.completion == .cancelled(changedOnDisk: true),
+                "awaited result 必须直接表达 cancelled + changedOnDisk")
+            expect(
+                !outcome.allowsForegroundFollowUp,
+                "native adapter 仅看 awaited result 就必须禁止 preview/focus")
+            expect(
+                outcome.accepted.map(\.fileName) == ["generic-post-write-cancel.mp3"]
+                    && outcome.orphan == nil && outcome.boundEvent == nil,
+                "generic cancel 保留 accepted facts，但不伪造 Event orphan")
+            expect(
+                owner.presentation.activities.contains {
+                    $0.operationID == activity.operationID
+                        && $0.phase == .cancelled(changedOnDisk: true)
+                },
+                "同一 stable ID 必须 settle 为 changed-on-disk cancellation")
+            await waitForSoundEditorScan(fixture, after: scansBefore)
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs == ["pack-a"],
+                "generic post-write cancel 必须只有一次 exact refresh")
+            expectSoundEditorAnnouncementDebt(
+                owner: owner,
+                kind: .importAudio,
+                completion: .cancelled(changedOnDisk: true))
+        }
+    }
+
     await suite("Sound editor perform：post-sample cancel 阻止 Event final bind") {
         await withTempDirectory { root in
             let gate = SoundEditorPostSampleGate()
@@ -1126,6 +1227,10 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 fixture.recorder.requests.count == scansBefore + 1
                     && fixture.recorder.requests.last?.invalidatedPackIDs == ["pack-a"],
                 "post-sample changed truth 必须只有一次 exact pack refresh")
+            expectSoundEditorAnnouncementDebt(
+                owner: owner,
+                kind: .importAudio,
+                completion: .orphan(.cancelled))
         }
     }
 
@@ -1242,6 +1347,142 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                     && fixture.recorder.requests.last?.invalidatedPackIDs
                         == ["workbuddy-pack"],
                 "late-cancel adoption 必须只有一次 exact target refresh")
+            expectSoundEditorAnnouncementDebt(
+                owner: owner,
+                kind: .adoptAICue,
+                completion: .orphan(.cancelled))
+        }
+    }
+
+    await suite("Sound editor operation：乱序完成保持 stable ID、mode 与 announcement FIFO") {
+        await withTempDirectory { root in
+            let orphan = root.appendingPathComponent("packs/pack-a/fast-delete.mp3")
+            writeFixture("orphan", to: orphan)
+            let gate = GatedSoundEditorDurationProbe(duration: 1)
+            defer { gate.release() }
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["pack-a"],
+                durationProbe: gate)
+            let owner = fixture.owner
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 242)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            await waitForSoundEditorInventory(owner)
+            guard let importPermit = soundEditorImportPermit(owner: owner, bindTo: nil) else {
+                expect(false, "out-of-order fixture 必须取得 import permit")
+                return
+            }
+
+            let slowSource = root.appendingPathComponent("slow-first.mp3")
+            writeFixture(validMP3ID3Data(), to: slowSource)
+            let slowTask = Task { @MainActor in
+                await owner.perform(
+                    .importAudio(permit: importPermit, sources: [slowSource], bindTo: nil))
+            }
+            guard await gate.waitUntilEntered(),
+                let slowActivity = owner.presentation.activities.last(where: {
+                    $0.kind == .importAudio && $0.phase == .busy
+                })
+            else {
+                expect(false, "first import 必须先发布 stable busy ID 并停在 gate")
+                return
+            }
+
+            guard case .sounds(let busySounds) = owner.presentation.mode,
+                case .ready(let audio) = busySounds.inventory,
+                let deleteAction = audio.first(where: { $0.fileName == "fast-delete.mp3" })?
+                    .deleteAction,
+                case .confirmation(let confirmation) = owner.send(.invoke(deleteAction)),
+                case .accepted(let fastOperationID) =
+                    owner.send(.invoke(confirmation.confirmAction))
+            else {
+                expect(false, "newer delete operation 必须在 slow import 悬挂时被接受")
+                return
+            }
+            await waitForSoundEditorOperation(owner, operationID: fastOperationID)
+            guard let fastAnnouncement = owner.presentation.pendingAnnouncement else {
+                expect(false, "先完成的 newer operation 必须成为 announcement queue head")
+                return
+            }
+            expect(
+                slowActivity.operationID != fastOperationID
+                    && owner.presentation.activities.contains {
+                        $0.operationID == slowActivity.operationID && $0.phase == .busy
+                    }
+                    && owner.presentation.activities.contains {
+                        $0.operationID == fastOperationID && $0.phase == .succeeded
+                    },
+                "newer operation 必须先 settle 自己的 ID，older ID 仍保持 busy")
+            expect(
+                fastAnnouncement.kind
+                    == .operation(kind: .deleteOrphan, completion: .succeeded),
+                "先完成 operation 的 semantic debt 必须占 FIFO head")
+            expect(!regularFileExists(at: orphan), "newer delete 的磁盘事实必须已经完成")
+
+            let currentRoute = EventSettingsWindowRoute(scope: .global, event: .stop)
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: currentRoute,
+                        requestRevision: 243,
+                        candidateGenerationID: nil)))
+            gate.release()
+            guard case .imported(let slowOutcome) = await slowTask.value else {
+                expect(false, "older import 后完成时必须返回 typed facts")
+                return
+            }
+            expect(
+                slowOutcome.completedInBackground
+                    && slowOutcome.completion == .succeeded
+                    && !slowOutcome.allowsForegroundFollowUp,
+                "older completion 必须留在 background，不能恢复 preview/focus")
+            expect(
+                regularFileExists(at: root.appendingPathComponent("packs/pack-a/slow-first.mp3")),
+                "older operation 的 captured-target bytes 必须诚实保留")
+            expect(
+                owner.presentation.activities.contains {
+                    $0.operationID == slowActivity.operationID && $0.phase == .succeeded
+                }
+                    && owner.presentation.activities.contains {
+                        $0.operationID == fastOperationID && $0.phase == .succeeded
+                    },
+                "乱序 completion 必须分别 settle stable ID，不能互相覆盖")
+            if case .events(let events) = owner.presentation.mode {
+                expect(events.route == currentRoute, "older completion 不得覆盖当前 Events mode")
+            } else {
+                expect(false, "older completion 后必须保持当前 Events mode")
+            }
+            expect(
+                owner.presentation.pendingAnnouncement?.id == fastAnnouncement.id,
+                "older completion 只能排到队尾，不能覆盖 newer queue head")
+
+            expect(
+                owner.send(
+                    .acknowledgeAnnouncement(id: fastAnnouncement.id, didPost: true)) == .applied,
+                "ack 必须消费先完成 operation 的 debt")
+            guard let slowAnnouncement = owner.presentation.pendingAnnouncement else {
+                expect(false, "FIFO head 消费后必须暴露 older completion debt")
+                return
+            }
+            expect(
+                slowAnnouncement.kind
+                    == .operation(kind: .importAudio, completion: .succeeded),
+                "第二个 debt 必须属于后完成的 older import")
+            expect(
+                !owner.presentation.activities.contains { $0.operationID == fastOperationID }
+                    && owner.presentation.activities.contains {
+                        $0.operationID == slowActivity.operationID
+                    },
+                "成功 ack 必须只退休关联 terminal activity")
+            expect(
+                owner.send(
+                    .acknowledgeAnnouncement(id: slowAnnouncement.id, didPost: true)) == .applied,
+                "older completion debt 也必须可单次消费")
+            expect(
+                !owner.presentation.activities.contains {
+                    $0.operationID == slowActivity.operationID
+                },
+                "所有 debt ack 后不得在 app-lifetime operation state 中继续累积")
         }
     }
 
@@ -1301,6 +1542,39 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             }
         }
     }
+}
+
+@MainActor
+private func expectSoundEditorAnnouncementDebt(
+    owner: SoundPacksEditorOwner,
+    kind: SoundPackEditorActivityKind,
+    completion: SoundPackEditorOperationCompletion,
+    acknowledge: Bool = false
+) {
+    guard let announcement = owner.presentation.pendingAnnouncement else {
+        expect(false, "async terminal 必须形成 semantic announcement debt")
+        return
+    }
+    expect(
+        announcement.kind == .operation(kind: kind, completion: completion),
+        "announcement 必须携带 exact semantic kind/completion")
+    expect(
+        announcement.actionText == nil && announcement.messageText == nil,
+        "operation announcement 不得携带 raw path/result 文本")
+    guard acknowledge else { return }
+
+    expect(
+        owner.send(.acknowledgeAnnouncement(id: announcement.id, didPost: false)) == .unchanged
+            && owner.presentation.pendingAnnouncement?.id == announcement.id,
+        "didPost=false 必须保留同一 announcement identity")
+    expect(
+        owner.send(.acknowledgeAnnouncement(id: announcement.id, didPost: true)) == .applied
+            && owner.presentation.pendingAnnouncement?.id != announcement.id,
+        "didPost=true 必须单次消费 exact announcement identity")
+    expect(
+        owner.send(.acknowledgeAnnouncement(id: announcement.id, didPost: true))
+            == .rejected(.staleAction),
+        "已消费 announcement identity 不得 replay")
 }
 
 @MainActor
