@@ -16,6 +16,9 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private let importEnvironment: AudioImportEnvironment
     private let audioImportExecutor = SoundPackAudioImportExecutor()
     private var context: SoundPacksEditorContext = .inactive
+    private var actionEpoch: UInt64 = 0
+    private var candidateGenerationEpoch: UInt64 = 0
+    private var currentCandidateGenerationID: UUID?
     private var presentationRevision: UInt64 = 0
     private var nextCapabilityID: UInt64 = 0
     private var actionLedger: [SoundPackEditorAction.ID: EditorActionBinding] = [:]
@@ -139,6 +142,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
     ) -> SoundPacksEditorCommandResult {
         switch command {
         case .activate(let nextContext):
+            actionEpoch &+= 1
+            advanceCandidateGeneration(for: nextContext)
             context = nextContext
             switch nextContext {
             case .inactive:
@@ -176,6 +181,21 @@ public final class SoundPacksEditorOwner: ObservableObject {
         }
     }
 
+    private func advanceCandidateGeneration(for nextContext: SoundPacksEditorContext) {
+        let nextGenerationID: UUID?
+        switch nextContext {
+        case .inactive:
+            return
+        case .sounds:
+            nextGenerationID = nil
+        case .events(_, _, let candidateGenerationID):
+            nextGenerationID = candidateGenerationID
+        }
+        guard nextGenerationID != currentCandidateGenerationID else { return }
+        candidateGenerationEpoch &+= 1
+        currentCandidateGenerationID = nextGenerationID
+    }
+
     package func perform(
         _ operation: SoundPacksEditorOperation
     ) async -> SoundPacksEditorOperationResult {
@@ -202,6 +222,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return .rejected(.stalePermit)
         }
         guard binding.context == context,
+            binding.actionEpoch == actionEpoch,
+            binding.candidateGenerationEpoch == candidateGenerationEpoch,
             binding.selectionGeneration == seed.selectionGeneration,
             binding.snapshotRevision == seed.snapshotRevision,
             binding.candidateGenerationID == candidate.provenance.generationID,
@@ -281,6 +303,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         let current = model.editorProjectionSeed()
         let targetRemainsValid: Bool
         if binding.context == context,
+            binding.candidateGenerationEpoch == candidateGenerationEpoch,
             binding.selectionGeneration == current.selectionGeneration,
             current.library.isFresh,
             current.installedPackIDs.contains(binding.target.packID),
@@ -353,6 +376,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return .rejected(.stalePermit)
         }
         guard binding.context == context,
+            binding.actionEpoch == actionEpoch,
             binding.selectionGeneration == seed.selectionGeneration,
             binding.snapshotRevision == seed.snapshotRevision,
             binding.bindTo == bindTo,
@@ -562,6 +586,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return .rejected(.scopeUnavailable)
         }
         guard let binding = actionLedger[action.id], binding.context == context,
+            binding.actionEpoch == actionEpoch,
             binding.selectionGeneration == seed.selectionGeneration,
             binding.snapshotRevision == seed.snapshotRevision
         else {
@@ -725,6 +750,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             fileName: fileName,
             target: target,
             context: binding.context,
+            actionEpoch: binding.actionEpoch,
             selectionGeneration: binding.selectionGeneration,
             snapshotRevision: binding.snapshotRevision)
         publish(from: seed)
@@ -747,6 +773,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         // cross this synchronous MainActor boundary.
         pendingConfirmationState = nil
         guard confirmation.context == context,
+            confirmation.actionEpoch == actionEpoch,
             confirmation.selectionGeneration == seed.selectionGeneration,
             confirmation.snapshotRevision == seed.snapshotRevision
         else {
@@ -760,6 +787,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             binding: EditorActionBinding(
                 intent: .confirm(confirmationID),
                 context: confirmation.context,
+                actionEpoch: confirmation.actionEpoch,
                 selectionGeneration: confirmation.selectionGeneration,
                 snapshotRevision: confirmation.snapshotRevision),
             work: confirmation.target)
@@ -1181,6 +1209,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             packID: packID,
             bindTo: bindTo,
             context: context,
+            actionEpoch: actionEpoch,
             selectionGeneration: seed.selectionGeneration,
             snapshotRevision: seed.snapshotRevision)
         return permit
@@ -1189,11 +1218,14 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private func prunePermits(using seed: SoundPacksEditorModelSeed) {
         importPermitLedger = importPermitLedger.filter { _, binding in
             binding.context == context
+                && binding.actionEpoch == actionEpoch
                 && binding.selectionGeneration == seed.selectionGeneration
                 && binding.snapshotRevision == seed.snapshotRevision
         }
         adoptionPermitLedger = adoptionPermitLedger.filter { _, binding in
             binding.context == context
+                && binding.actionEpoch == actionEpoch
+                && binding.candidateGenerationEpoch == candidateGenerationEpoch
                 && binding.selectionGeneration == seed.selectionGeneration
                 && binding.snapshotRevision == seed.snapshotRevision
         }
@@ -1232,6 +1264,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         actionLedger[action.id] = EditorActionBinding(
             intent: intent,
             context: context,
+            actionEpoch: actionEpoch,
             selectionGeneration: seed.selectionGeneration,
             snapshotRevision: seed.snapshotRevision)
         return action
@@ -1248,6 +1281,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
             target: target,
             candidateGenerationID: candidateGenerationID,
             context: context,
+            actionEpoch: actionEpoch,
+            candidateGenerationEpoch: candidateGenerationEpoch,
             selectionGeneration: seed.selectionGeneration,
             snapshotRevision: seed.snapshotRevision)
         return permit
@@ -1347,6 +1382,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
 private struct EditorActionBinding {
     let intent: EditorActionIntent
     let context: SoundPacksEditorContext
+    let actionEpoch: UInt64
     let selectionGeneration: UInt64
     let snapshotRevision: UInt64?
 }
@@ -1355,6 +1391,7 @@ private struct EditorPermitBinding {
     let packID: String
     let bindTo: Event?
     let context: SoundPacksEditorContext
+    let actionEpoch: UInt64
     let selectionGeneration: UInt64
     let snapshotRevision: UInt64?
 }
@@ -1363,6 +1400,8 @@ private struct EditorAdoptionBinding {
     let target: AICueAdoptionTarget
     let candidateGenerationID: UUID
     let context: SoundPacksEditorContext
+    let actionEpoch: UInt64
+    let candidateGenerationEpoch: UInt64
     let selectionGeneration: UInt64
     let snapshotRevision: UInt64?
 }
@@ -1374,6 +1413,7 @@ private struct EditorConfirmationState {
     let fileName: String?
     let target: EditorScheduledWork
     let context: SoundPacksEditorContext
+    let actionEpoch: UInt64
     let selectionGeneration: UInt64
     let snapshotRevision: UInt64?
 }
