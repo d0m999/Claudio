@@ -1097,7 +1097,6 @@ public final class SoundPacksWindowModel: ObservableObject {
                 return finishPackFork(.success(outcome), publishCompletion: false)
             case .failure(.destinationAlreadyExists):
                 finishSoundPackMutation(packIDs: [newPackID])
-                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
                 occupied.insert(newPackID)
                 if attempt == attemptLimit {
                     return finishPackFork(
@@ -1213,7 +1212,6 @@ public final class SoundPacksWindowModel: ObservableObject {
                 invalidatingPackIDs: [expectedPackID])
         } else {
             finishSoundPackMutation(packIDs: [expectedPackID])
-            reload(followActivePack: false)
         }
 
         if isLatestAction {
@@ -1935,7 +1933,9 @@ public final class SoundPacksWindowModel: ObservableObject {
             return finishAudioAction(.success(()), invalidatingPackID: packID)
         case .failure(let error):
             return finishAudioAction(
-                .failure(.bind(error)), invalidatingPackID: packID)
+                .failure(.bind(error)),
+                invalidatingPackID: packID,
+                refreshAfterFailure: manifestBindFailureInvalidatesWindowReadModel(error))
         }
     }
 
@@ -1968,7 +1968,9 @@ public final class SoundPacksWindowModel: ObservableObject {
             return finishAudioAction(.success(()), invalidatingPackID: selectedPackID)
         case .failure(let error):
             return finishAudioAction(
-                .failure(.bind(error)), invalidatingPackID: selectedPackID)
+                .failure(.bind(error)),
+                invalidatingPackID: selectedPackID,
+                refreshAfterFailure: manifestBindFailureInvalidatesWindowReadModel(error))
         }
     }
 
@@ -2033,12 +2035,6 @@ public final class SoundPacksWindowModel: ObservableObject {
         case .success:
             return finishAudioAction(.success(()), invalidatingPackID: selectedPackID)
         case .failure(let error):
-            if deleteFailureInvalidatesWindowReadModel(error) {
-                // The lock-time check has disproved the confirmation-time snapshot. Re-read every
-                // window-owned projection (cards, event rows, and inventory) without publishing a
-                // fake local write completion to the panel.
-                reload(followActivePack: false)
-            }
             return finishAudioAction(
                 .failure(.delete(error)),
                 invalidatingPackID: selectedPackID,
@@ -2156,7 +2152,6 @@ public final class SoundPacksWindowModel: ObservableObject {
                 invalidatingPackIDs: Set(ids))
         } else {
             finishSoundPackMutation(packIDs: Set(ids))
-            if readSource.readsSharedSnapshot { reload(followActivePack: false) }
             completeSynchronousWrite(.failed)
         }
 
@@ -2198,7 +2193,6 @@ public final class SoundPacksWindowModel: ObservableObject {
                 invalidatingPackIDs: diskChangedDespiteFailure ? [packID] : [])
             if !diskChangedDespiteFailure {
                 finishSoundPackMutation(packIDs: [packID])
-                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
             }
             if let index = factoryBatchRestoreFailures.firstIndex(where: {
                 $0.packID == packID
@@ -2366,7 +2360,7 @@ public final class SoundPacksWindowModel: ObservableObject {
     private func finishAudioAction(
         _ result: Result<Void, SoundPacksWindowAudioActionError>,
         invalidatingPackID: String? = nil,
-        refreshAfterFailure: Bool = true
+        refreshAfterFailure: Bool = false
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
         switch result {
         case .success:
@@ -2384,9 +2378,9 @@ public final class SoundPacksWindowModel: ObservableObject {
                 messageText: error.statusText,
                 packID: selectedPackID)
             completeSynchronousWrite(.failed)
-            if refreshAfterFailure, let invalidatingPackID {
+            if let invalidatingPackID {
                 finishSoundPackMutation(packIDs: [invalidatingPackID])
-                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
+                if refreshAfterFailure { reload(followActivePack: false) }
             }
         }
         return result
@@ -2464,7 +2458,6 @@ public final class SoundPacksWindowModel: ObservableObject {
                 completeSynchronousWrite(outcome)
                 if let packID = factoryRestorePackID(in: visibleError) {
                     finishSoundPackMutation(packIDs: [packID])
-                    if readSource.readsSharedSnapshot { reload(followActivePack: false) }
                 }
             }
             return .failure(visibleError)
@@ -2553,10 +2546,20 @@ public final class SoundPacksWindowModel: ObservableObject {
                 actionText: .localized(.soundPacksStatusDeletePack),
                 messageText: error.statusText,
                 packID: selectedPackID)
-            completeSynchronousWrite(.failed)
             if let invalidatedPackID {
-                finishSoundPackMutation(packIDs: [invalidatedPackID])
-                if readSource.readsSharedSnapshot { reload(followActivePack: false) }
+                if packDeletionFailureChangedDisk(error) {
+                    completeSynchronousWrite(
+                        .changedDespiteFailure,
+                        invalidatingPackIDs: [invalidatedPackID])
+                } else {
+                    completeSynchronousWrite(.failed)
+                    finishSoundPackMutation(packIDs: [invalidatedPackID])
+                    if packDeletionFailureInvalidatesWindowReadModel(error) {
+                        reload(followActivePack: false)
+                    }
+                }
+            } else {
+                completeSynchronousWrite(.failed)
             }
         }
         return result
@@ -2649,6 +2652,39 @@ public final class SoundPacksWindowModel: ObservableObject {
             .stillReferenced:
             return true
         case .builtinReadOnly, .unsafeFileName, .deleteFailed, .lockBusy, .lockFailed:
+            return false
+        }
+    }
+
+    private func manifestBindFailureInvalidatesWindowReadModel(
+        _ error: ManifestBindError
+    ) -> Bool {
+        switch error {
+        case .packNotFound, .fileNotFound, .manifestUnreadable:
+            return true
+        case .unsafeFileName, .writeFailed, .lockBusy, .lockFailed:
+            return false
+        }
+    }
+
+    private func packDeletionFailureChangedDisk(
+        _ error: SoundPacksWindowPackDeletionActionError
+    ) -> Bool {
+        switch error {
+        case .delete(.isolationChangedRetained), .delete(.trashFailedRetained):
+            return true
+        case .writesStopped, .noSelectedPack, .selectionChanged, .delete:
+            return false
+        }
+    }
+
+    private func packDeletionFailureInvalidatesWindowReadModel(
+        _ error: SoundPacksWindowPackDeletionActionError
+    ) -> Bool {
+        switch error {
+        case .delete(.packNotFound), .delete(.unsafePackEntry):
+            return true
+        case .writesStopped, .noSelectedPack, .selectionChanged, .delete:
             return false
         }
     }

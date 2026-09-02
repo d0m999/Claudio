@@ -675,14 +675,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
             let applied = withModelTransition { model.selectPackForInspection(packID) }
             return applied ? .applied : .rejected(.packUnavailable)
         case .use(let packID):
-            let result = withModelTransition {
-                () -> Result<UseOutcome, SoundPacksWindowPackUseActionError> in
-                guard model.selectPackForInspection(packID) else {
-                    return .failure(.noSelectedPack)
-                }
-                return model.useSelectedPack()
-            }
-            return result.isSuccess ? .applied : .rejected(.mutationFailed)
+            return acceptScheduledOperation(
+                kind: .use,
+                packID: packID,
+                event: nil,
+                binding: binding,
+                work: .use(packID: packID))
         case .toggleStar(let packID):
             let result = withModelTransition { model.toggleStarredPack(packID) }
             return result.isSuccess ? .applied : .rejected(.mutationFailed)
@@ -697,12 +695,20 @@ public final class SoundPacksEditorOwner: ObservableObject {
             publish(from: seed)
             let permit = makeImportPermit(packID: packID, bindTo: bindTo, seed: seed)
             return .nativeEffect(.selectAudioFiles(permit: permit, bindTo: bindTo))
-        case .assign(let fileName, let event):
-            let result = withModelTransition { model.assignSelectedAudioFile(fileName, to: event) }
-            return result.isSuccess ? .applied : .rejected(.mutationFailed)
-        case .clear(let event):
-            let result = withModelTransition { model.clearSelectedEventBinding(event) }
-            return result.isSuccess ? .applied : .rejected(.mutationFailed)
+        case .assign(let packID, let fileName, let event):
+            return acceptScheduledOperation(
+                kind: .assign,
+                packID: packID,
+                event: event,
+                binding: binding,
+                work: .assign(packID: packID, fileName: fileName, event: event))
+        case .clear(let packID, let event):
+            return acceptScheduledOperation(
+                kind: .clear,
+                packID: packID,
+                event: event,
+                binding: binding,
+                work: .clear(packID: packID, event: event))
         case .preview(let fileURL):
             publish(from: seed)
             return .nativeEffect(
@@ -767,9 +773,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
             guard let state = operationStates[operationID], state.phase == .busy else {
                 return .rejected(.staleAction)
             }
-            operationTasks[operationID]?.cancel()
+            operationTasks.removeValue(forKey: operationID)?.cancel()
             operationCancellations[operationID]?.cancel()
             operationStates[operationID] = state.withPhase(.cancelled(changedOnDisk: false))
+            trimTerminalOperationHistory()
             publish(from: seed)
             return .applied
         case .confirm(let confirmationID):
@@ -893,6 +900,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         model.refreshEditorConfigProjection()
         let current = model.editorProjectionSeed()
         guard current.library.isFresh, current.writesAllowed, binding.context == context,
+            binding.actionEpoch == actionEpoch,
             binding.selectionGeneration == current.selectionGeneration,
             binding.snapshotRevision == current.snapshotRevision
         else {
@@ -904,35 +912,64 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return
         }
 
-        let (succeeded, settledSeed) = captureModelTransition {
+        let (phase, settledSeed) = captureModelTransition {
+            () -> SoundPackEditorActivityPhase in
             switch work {
+            case .use(let packID):
+                guard model.selectPackForInspection(packID) else {
+                    return .failed(.staleAction)
+                }
+                return model.useSelectedPack().isSuccess
+                    ? .succeeded : .failed(.mutationFailed)
+            case .assign(let packID, let fileName, let event):
+                guard model.selectedPackID == packID else {
+                    return .failed(.staleAction)
+                }
+                return model.assignSelectedAudioFile(fileName, to: event).isSuccess
+                    ? .succeeded : .failed(.mutationFailed)
+            case .clear(let packID, let event):
+                guard model.selectedPackID == packID else {
+                    return .failed(.staleAction)
+                }
+                return model.clearSelectedEventBinding(event).isSuccess
+                    ? .succeeded : .failed(.mutationFailed)
             case .fork(let packID):
-                guard model.selectedPackID == packID else { return false }
+                guard model.selectedPackID == packID else {
+                    return .failed(.staleAction)
+                }
                 return model.forkSelectedFactoryPack().isSuccess
+                    ? .succeeded : .failed(.mutationFailed)
             case .deletePack(let packID):
                 return model.deleteSelectedUserPackAfterConfirmation(expectedPackID: packID)
-                    .isSuccess
+                    .isSuccess ? .succeeded : .failed(.mutationFailed)
             case .deleteOrphan(let packID, let fileName):
                 return model.deleteSelectedOrphanAudioFileAfterConfirmation(
                     fileName,
                     expectedPackID: packID
-                ).isSuccess
+                ).isSuccess ? .succeeded : .failed(.mutationFailed)
             case .restoreFactory(let packID):
                 return model.restoreSelectedFactoryPackAfterConfirmation(expectedPackID: packID)
-                    .isSuccess
+                    .isSuccess ? .succeeded : .failed(.mutationFailed)
             case .retryRestore(let packID):
                 return model.retryFailedFactoryPackRestoreAfterConfirmation(
                     expectedPackID: packID
-                ).isSuccess
+                ).isSuccess ? .succeeded : .failed(.mutationFailed)
             case .restoreAllFactory:
-                return model.restoreAllFactoryPacksAfterConfirmation().failures.isEmpty
+                let outcome = model.restoreAllFactoryPacksAfterConfirmation()
+                if outcome.failures.isEmpty { return .succeeded }
+                if !outcome.restoredPacks.isEmpty {
+                    return .partial(
+                        accepted: outcome.restoredPacks.count,
+                        rejected: outcome.failures.count)
+                }
+                return .failed(.mutationFailed)
             }
         }
         finishOperation(
             operationID,
-            phase: succeeded ? .succeeded : .failed(.mutationFailed),
+            phase: phase,
             seed: settledSeed,
-            successfulWork: succeeded ? work : nil)
+            successfulWork: phase == .succeeded ? work : nil)
     }
 
     private func finishOperation(
@@ -1054,6 +1091,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 seed.library.isFresh && !$0.isBuiltinReadOnly
                     && $0.availability == .installed && seed.writesAllowed
             } ?? false
+        let writablePackID = selectedIsWritable ? selectedPack?.id : nil
         let selectedNativeTargets = selectedPack.flatMap {
             seed.nativeTargetsByPackID[$0.id]
         }
@@ -1090,11 +1128,17 @@ public final class SoundPacksEditorOwner: ObservableObject {
                             seed: seed)
                         : nil,
                     previewAction: previewAction,
-                    clearAction: selectedIsWritable && row.coverage.hasManifestBinding
-                        ? makeAction(.clear, binding: .clear(event: row.event), seed: seed)
-                        : nil)
+                    clearAction: row.coverage.hasManifestBinding
+                        ? writablePackID.map { packID in
+                            makeAction(
+                                .clear,
+                                binding: .clear(packID: packID, event: row.event),
+                                seed: seed)
+                        } : nil)
             },
-            inventory: makeInventory(seed: seed, isWritable: selectedIsWritable),
+            inventory: makeInventory(
+                seed: seed,
+                writablePackID: writablePackID),
             requestImportAction: selectedIsWritable
                 ? selectedPack.map {
                     makeAction(
@@ -1174,6 +1218,16 @@ public final class SoundPacksEditorOwner: ObservableObject {
         let isBuiltin = seed.builtinPackIDs.contains(card.id)
         let isAvailable = card.availability == .installed
         let writesAllowed = seed.library.isFresh && seed.writesAllowed && isAvailable
+        let isBroken: Bool
+        if case .broken = card.state {
+            isBroken = true
+        } else {
+            isBroken = false
+        }
+        let starControl = soundPacksWindowStarControl(
+            packID: card.id,
+            rawStarredPackIDs: Array(seed.starredPackIDs),
+            isPackBroken: isBroken)
         return SoundPackEditorPackPresentation(
             id: card.id,
             name: card.name,
@@ -1189,7 +1243,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             inspectAction: makeAction(.inspect, binding: .inspect(packID: card.id), seed: seed),
             useAction: writesAllowed && !isActiveForScope
                 ? makeAction(.use, binding: .use(packID: card.id), seed: seed) : nil,
-            toggleStarAction: writesAllowed
+            toggleStarAction: writesAllowed && starControl.isEnabled
                 ? makeAction(.toggleStar, binding: .toggleStar(packID: card.id), seed: seed) : nil,
             forkAction: writesAllowed && isBuiltin && isInspected
                 ? makeAction(.fork, binding: .fork(packID: card.id), seed: seed) : nil,
@@ -1213,29 +1267,41 @@ public final class SoundPacksEditorOwner: ObservableObject {
 
     private func makeInventory(
         seed: SoundPacksEditorModelSeed,
-        isWritable: Bool
+        writablePackID: String?
     ) -> SoundPackEditorInventoryPresentation {
         let canTargetInventory = seed.library.isFresh
         func rows(_ files: [PackAudioFile]) -> [SoundPackEditorAudioPresentation] {
             files.map { file in
-                SoundPackEditorAudioPresentation(
-                    fileName: file.fileName,
-                    isOrphan: file.isOrphan,
-                    assignments: canTargetInventory && isWritable
-                        ? Event.allCases.map { event in
-                            SoundPackEditorAssignmentPresentation(
-                                event: event,
-                                action: makeAction(
-                                    .assign,
-                                    binding: .assign(fileName: file.fileName, event: event),
-                                    seed: seed))
-                        } : [],
-                    deleteAction: canTargetInventory && isWritable && file.isOrphan
+                let assignments: [SoundPackEditorAssignmentPresentation]
+                let deleteAction: SoundPackEditorAction?
+                if canTargetInventory, let writablePackID {
+                    assignments = Event.allCases.map { event in
+                        SoundPackEditorAssignmentPresentation(
+                            event: event,
+                            action: makeAction(
+                                .assign,
+                                binding: .assign(
+                                    packID: writablePackID,
+                                    fileName: file.fileName,
+                                    event: event),
+                                seed: seed))
+                    }
+                    deleteAction =
+                        file.isOrphan
                         ? makeAction(
                             .deleteOrphan,
                             binding: .requestDeleteOrphan(fileName: file.fileName),
                             seed: seed)
-                        : nil,
+                        : nil
+                } else {
+                    assignments = []
+                    deleteAction = nil
+                }
+                return SoundPackEditorAudioPresentation(
+                    fileName: file.fileName,
+                    isOrphan: file.isOrphan,
+                    assignments: assignments,
+                    deleteAction: deleteAction,
                     revealAction: canTargetInventory
                         ? file.nativeTargetURL.map {
                             makeAction(
@@ -1597,6 +1663,9 @@ extension SoundPackEditorActivityPhase {
 }
 
 private enum EditorScheduledWork {
+    case use(packID: String)
+    case assign(packID: String, fileName: String, event: Event)
+    case clear(packID: String, event: Event)
     case fork(packID: String)
     case deletePack(packID: String)
     case deleteOrphan(packID: String, fileName: String)
@@ -1606,6 +1675,9 @@ private enum EditorScheduledWork {
 
     var activityKind: SoundPackEditorActivityKind {
         switch self {
+        case .use: .use
+        case .assign: .assign
+        case .clear: .clear
         case .fork: .fork
         case .deletePack: .deletePack
         case .deleteOrphan: .deleteOrphan
@@ -1614,7 +1686,14 @@ private enum EditorScheduledWork {
         }
     }
 
-    var event: Event? { nil }
+    var event: Event? {
+        switch self {
+        case .assign(_, _, let event), .clear(_, let event): event
+        case .use, .fork, .deletePack, .deleteOrphan, .restoreFactory, .retryRestore,
+            .restoreAllFactory:
+            nil
+        }
+    }
 }
 
 private enum EditorActionIntent {
@@ -1623,8 +1702,8 @@ private enum EditorActionIntent {
     case toggleStar(packID: String)
     case fork(packID: String)
     case requestImport(packID: String, bindTo: Event?)
-    case assign(fileName: String, event: Event)
-    case clear(event: Event)
+    case assign(packID: String, fileName: String, event: Event)
+    case clear(packID: String, event: Event)
     case preview(fileURL: URL)
     case stopPreview
     case reveal(fileURL: URL)
