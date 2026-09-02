@@ -25,6 +25,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private var operationStates: [SoundPackEditorOperationID: EditorOperationState] = [:]
     private var operationOrder: [SoundPackEditorOperationID] = []
     private var operationTasks: [SoundPackEditorOperationID: Task<Void, Never>] = [:]
+    private var operationCancellations:
+        [SoundPackEditorOperationID: SoundPackAudioImportCancellation] = [:]
     private var announcementQueue: [SoundPackEditorAnnouncement] = []
     private var seenStatusRevisions: Set<Int> = []
     private var isApplyingModelTransition = false
@@ -215,10 +217,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return .rejected(.targetChanged)
         }
 
+        let cancellation = SoundPackAudioImportCancellation()
         let operationID = beginAsyncOperation(
             kind: .adoptAICue,
             packID: binding.target.packID,
-            event: binding.target.event)
+            event: binding.target.event,
+            cancellation: cancellation)
         let (_, startedSeed) = captureModelTransition {
             model.beginEditorCompoundMutation(packID: binding.target.packID)
         }
@@ -232,7 +236,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
             SoundPackAudioImportJob(
                 requests: [request],
                 packID: binding.target.packID,
-                environment: importEnvironment))
+                environment: importEnvironment),
+            cancellation: cancellation)
         switch execution {
         case .cancelledBeforeWrite:
             let (_, settledSeed) = captureModelTransition {
@@ -244,15 +249,17 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 seed: settledSeed)
             return .rejected(.cancelled)
         case .completed(let batch, let cancellationRequested):
+            let cancellationRequested = cancellationRequested || cancellation.isCancelled
             guard let imported = batch.accepted.first else {
                 let (_, settledSeed) = captureModelTransition {
                     model.finishEditorCompoundMutationWithoutChange(packID: binding.target.packID)
                 }
                 settleAsyncOperation(
                     operationID,
-                    phase: .failed(.importRejected),
+                    phase: cancellationRequested
+                        ? .cancelled(changedOnDisk: false) : .failed(.importRejected),
                     seed: settledSeed)
-                return .rejected(.importRejected)
+                return .rejected(cancellationRequested ? .cancelled : .importRejected)
             }
             return finishAdoption(
                 operationID: operationID,
@@ -371,10 +378,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     orphan: nil))
         }
 
+        let cancellation = SoundPackAudioImportCancellation()
         let operationID = beginAsyncOperation(
             kind: .importAudio,
             packID: binding.packID,
-            event: bindTo)
+            event: bindTo,
+            cancellation: cancellation)
         let (_, startedSeed) = captureModelTransition {
             model.beginEditorCompoundMutation(packID: binding.packID)
         }
@@ -387,7 +396,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
             SoundPackAudioImportJob(
                 requests: requests,
                 packID: binding.packID,
-                environment: importEnvironment))
+                environment: importEnvironment),
+            cancellation: cancellation)
         switch execution {
         case .cancelledBeforeWrite:
             let (_, settledSeed) = captureModelTransition {
@@ -403,7 +413,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 operationID: operationID,
                 binding: binding,
                 batch: batch,
-                cancellationRequested: cancellationRequested)
+                cancellationRequested: cancellationRequested || cancellation.isCancelled)
         }
     }
 
@@ -417,10 +427,14 @@ public final class SoundPacksEditorOwner: ObservableObject {
             let (_, seed) = captureModelTransition {
                 model.finishEditorCompoundMutationWithoutChange(packID: binding.packID)
             }
-            let phase: SoundPackEditorActivityPhase =
-                batch.rejected.isEmpty
-                ? .succeeded : .failed(.importRejected)
+            let phase: SoundPackEditorActivityPhase
+            if cancellationRequested {
+                phase = .cancelled(changedOnDisk: false)
+            } else {
+                phase = batch.rejected.isEmpty ? .succeeded : .failed(.importRejected)
+            }
             settleAsyncOperation(operationID, phase: phase, seed: seed)
+            if cancellationRequested { return .rejected(.cancelled) }
             return .imported(
                 SoundPackEditorImportOutcome(
                     accepted: [],
@@ -511,7 +525,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private func beginAsyncOperation(
         kind: SoundPackEditorActivityKind,
         packID: String,
-        event: Event?
+        event: Event?,
+        cancellation: SoundPackAudioImportCancellation
     ) -> SoundPackEditorOperationID {
         nextCapabilityID &+= 1
         let operationID = SoundPackEditorOperationID(rawValue: nextCapabilityID)
@@ -521,6 +536,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             packID: packID,
             event: event)
         operationOrder.append(operationID)
+        operationCancellations[operationID] = cancellation
         return operationID
     }
 
@@ -529,6 +545,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         phase: SoundPackEditorActivityPhase,
         seed: SoundPacksEditorModelSeed
     ) {
+        operationCancellations.removeValue(forKey: operationID)
         guard let state = operationStates[operationID] else { return }
         operationStates[operationID] = state.withPhase(phase)
         publish(from: seed)
@@ -667,6 +684,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 return .rejected(.staleAction)
             }
             operationTasks[operationID]?.cancel()
+            operationCancellations[operationID]?.cancel()
             operationStates[operationID] = state.withPhase(.cancelled(changedOnDisk: false))
             publish(from: seed)
             return .applied

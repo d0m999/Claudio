@@ -10,6 +10,13 @@ struct SoundPackAudioImportExecutor: Sendable {
 
     func execute(_ job: SoundPackAudioImportJob) async -> SoundPackAudioImportExecution {
         let cancellation = SoundPackAudioImportCancellation()
+        return await execute(job, cancellation: cancellation)
+    }
+
+    func execute(
+        _ job: SoundPackAudioImportJob,
+        cancellation: SoundPackAudioImportCancellation
+    ) async -> SoundPackAudioImportExecution {
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 Self.queue.async {
@@ -44,7 +51,7 @@ enum SoundPackAudioImportExecution: Sendable {
     case completed(AudioImportBatchResult, cancellationRequested: Bool)
 }
 
-private final class SoundPackAudioImportCancellation: @unchecked Sendable {
+final class SoundPackAudioImportCancellation: @unchecked Sendable {
     private let lock = NSLock()
     private var cancelled = false
 
