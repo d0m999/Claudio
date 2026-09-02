@@ -5,6 +5,7 @@ import Foundation
 
 private enum SoundEditorInjectedMutationFailure: Error, Sendable {
     case restorePublish
+    case trash
 }
 
 private final class SoundEditorFailSelectedRestorePublishCalls: @unchecked Sendable {
@@ -164,6 +165,7 @@ func runSoundPacksEditorMutationSuites() async {
             }
             let configBefore = try? Data(contentsOf: fixture.configFile)
             let scansBefore = fixture.recorder.requests.count
+            let panelRevisionBefore = fixture.refreshCoordinator.panelReloadRevision
 
             guard case .accepted(let cancelledID) = owner.send(.invoke(useB)) else {
                 expect(false, "use 必须由 owner 同栈接受为 scheduled operation")
@@ -198,6 +200,15 @@ func runSoundPacksEditorMutationSuites() async {
                 (try? Data(contentsOf: fixture.configFile)) == configBefore
                     && fixture.recorder.requests.count == scansBefore,
                 "cancel 同栈返回时必须尚未写 config 或请求 scan")
+            // Package-internal DEBUG seam: join only the already-owned scheduled task. It must
+            // not add a second executor, advance presentation, or alter production scheduling.
+            await owner.waitForScheduledOperationExitForTesting(cancelledID)
+            await fixture.library.waitUntilIdleForTesting()
+            expect(
+                (try? Data(contentsOf: fixture.configFile)) == configBefore
+                    && fixture.recorder.requests.count == scansBefore
+                    && fixture.refreshCoordinator.panelReloadRevision == panelRevisionBefore,
+                "cancelled Task join 后必须最终零写、零 scan、零 projection refresh")
         }
 
         await withTempDirectory { root in
@@ -835,6 +846,188 @@ func runSoundPacksEditorMutationSuites() async {
                 owner.presentation.pendingAnnouncement?.kind
                     != .operation(kind: .deleteOrphan, completion: .succeeded),
                 "stale orphan failure 不得伪造 success announcement")
+        }
+    }
+
+    await suite("Sound editor delete user：成功保留完整 tree 并只刷新 exact inactive pack") {
+        await withTempDirectory { root in
+            let trash = root.appendingPathComponent("Trash", isDirectory: true)
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["active", "delete-me"],
+                starred: ["delete-me"],
+                manifestJSONByPackID: [
+                    "delete-me":
+                        #"{"id":"delete-me","name":"Delete Me","events":{"stop":"stop.mp3"},"future":{"keep":true}}"#
+                ],
+                moveUserPackToTrashForTesting: { isolated in
+                    try FileManager.default.createDirectory(
+                        at: trash,
+                        withIntermediateDirectories: true)
+                    let destination = trash.appendingPathComponent(
+                        isolated.lastPathComponent,
+                        isDirectory: true)
+                    try FileManager.default.moveItem(at: isolated, to: destination)
+                    return destination
+                })
+            let deletePack = root.appendingPathComponent("packs/delete-me", isDirectory: true)
+            writeFixture("personal", to: deletePack.appendingPathComponent("personal.wav"))
+            let owner = fixture.owner
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 35)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .sounds(let initial) = owner.presentation.mode,
+                let inspect = initial.packs.first(where: { $0.id == "delete-me" })?.inspectAction
+            else {
+                expect(false, "inactive user pack 必须可被 inspect")
+                return
+            }
+            expect(owner.send(.invoke(inspect)) == .applied, "inspect delete-me 必须同步应用")
+            guard case .sounds(let inspected) = owner.presentation.mode,
+                let delete = inspected.selectedPack?.deleteAction,
+                case .confirmation(let confirmation) = owner.send(.invoke(delete))
+            else {
+                expect(false, "inspected inactive user pack 必须签发 delete confirmation")
+                return
+            }
+            let configBefore = try? Data(contentsOf: fixture.configFile)
+            let scansBefore = fixture.recorder.requests.count
+            let panelRevisionBefore = fixture.refreshCoordinator.panelReloadRevision
+            guard case .accepted(let operationID) = owner.send(.invoke(confirmation.confirmAction))
+            else {
+                expect(false, "user delete confirm 必须接受 scheduled operation")
+                return
+            }
+
+            await waitForSoundEditorOperation(owner, operationID: operationID)
+            await waitForSoundEditorScanCount(fixture.recorder, atLeast: scansBefore + 1)
+            await fixture.library.waitUntilIdleForTesting()
+            await waitForSoundEditorPackAbsence(owner, packID: "delete-me")
+            let trashed = trash.appendingPathComponent("delete-me", isDirectory: true)
+            expect(
+                owner.presentation.activities.first(where: { $0.operationID == operationID })?
+                    .phase == .succeeded,
+                "user delete success 必须以 typed success settle")
+            expect(
+                !FileManager.default.fileExists(atPath: deletePack.path)
+                    && (try? Data(contentsOf: trashed.appendingPathComponent("personal.wav")))
+                        == Data("personal".utf8)
+                    && (soundEditorJSONObject(
+                        at: trashed.appendingPathComponent("manifest.json"))?["future"]
+                        as? [String: Bool])?["keep"] == true,
+                "user delete 必须把完整 tree 移到可恢复目标且不重写 unknown bytes")
+            expect(
+                (try? Data(contentsOf: fixture.configFile)) == configBefore,
+                "删除 inactive pack 不得改 active selection、stars 或 unknown config")
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs == ["delete-me"]
+                    && fixture.recorder.requests.last?.invalidatesAll == false,
+                "user delete success 必须只请求一次 exact pack refresh")
+            expect(
+                fixture.refreshCoordinator.panelReloadRevision == panelRevisionBefore + 1,
+                "user delete changed 必须发布一次 panel refresh")
+        }
+    }
+
+    await suite("Sound editor delete user：rollback 失败保留 tree 并报告 changedDespiteFailure") {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["active", "delete-me"],
+                manifestJSONByPackID: [
+                    "delete-me":
+                        #"{"id":"delete-me","name":"Original","events":{"stop":"stop.mp3"},"future":{"keep":true}}"#
+                ],
+                moveUserPackToTrashForTesting: { isolated in
+                    let packs = isolated.deletingLastPathComponent().deletingLastPathComponent()
+                    writeFixture(
+                        "external-occupier",
+                        to: packs.appendingPathComponent("delete-me/external.txt"))
+                    throw SoundEditorInjectedMutationFailure.trash
+                })
+            let deletePack = root.appendingPathComponent("packs/delete-me", isDirectory: true)
+            writeFixture("only-copy", to: deletePack.appendingPathComponent("personal.wav"))
+            let owner = fixture.owner
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 36)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .sounds(let initial) = owner.presentation.mode,
+                let inspect = initial.packs.first(where: { $0.id == "delete-me" })?.inspectAction
+            else {
+                expect(false, "retained delete fixture 必须可 inspect")
+                return
+            }
+            expect(owner.send(.invoke(inspect)) == .applied, "inspect delete-me 必须同步应用")
+            guard case .sounds(let inspected) = owner.presentation.mode,
+                let delete = inspected.selectedPack?.deleteAction,
+                case .confirmation(let confirmation) = owner.send(.invoke(delete))
+            else {
+                expect(false, "retained delete fixture 必须签发 confirmation")
+                return
+            }
+            let configBefore = try? Data(contentsOf: fixture.configFile)
+            let scansBefore = fixture.recorder.requests.count
+            let panelRevisionBefore = fixture.refreshCoordinator.panelReloadRevision
+            guard case .accepted(let operationID) = owner.send(.invoke(confirmation.confirmAction))
+            else {
+                expect(false, "retained delete confirm 必须接受 scheduled operation")
+                return
+            }
+
+            await waitForSoundEditorOperation(owner, operationID: operationID)
+            await waitForSoundEditorScanCount(fixture.recorder, atLeast: scansBefore + 1)
+            await fixture.library.waitUntilIdleForTesting()
+            let packs = root.appendingPathComponent("packs", isDirectory: true)
+            let isolationNames =
+                ((try? FileManager.default.contentsOfDirectory(atPath: packs.path)) ?? []).filter {
+                    $0.hasPrefix(".claudio-trash-")
+                }
+            let retained = isolationNames.first.map {
+                packs.appendingPathComponent($0, isDirectory: true)
+                    .appendingPathComponent("delete-me", isDirectory: true)
+            }
+            expect(
+                owner.presentation.activities.first(where: { $0.operationID == operationID })?
+                    .phase == .failed(.mutationFailed),
+                "trash + rollback failure 必须保留 typed failure，不能因 bytes changed 报 success")
+            expect(
+                isolationNames.count == 1
+                    && retained.map {
+                        (try? Data(contentsOf: $0.appendingPathComponent("personal.wav")))
+                            == Data("only-copy".utf8)
+                            && (soundEditorJSONObject(
+                                at: $0.appendingPathComponent("manifest.json"))?["future"]
+                                as? [String: Bool])?["keep"] == true
+                    } == true,
+                "changedDespiteFailure 必须把用户唯一 tree 完整保留在可报告 isolation path")
+            expect(
+                (try? Data(contentsOf: deletePack.appendingPathComponent("external.txt")))
+                    == Data("external-occupier".utf8)
+                    && (try? Data(contentsOf: fixture.configFile)) == configBefore,
+                "rollback 不得覆盖 concurrent occupier，也不得修改 config")
+            if case .sounds(let settled) = owner.presentation.mode,
+                let replacement = settled.packs.first(where: { $0.id == "delete-me" })
+            {
+                if case .broken = replacement.state {
+                    expect(true, "shared presentation 必须投影 concurrent broken replacement")
+                } else {
+                    expect(false, "retained original 不得冒充 visible replacement 的健康状态")
+                }
+            } else {
+                expect(false, "retained delete settle 后必须投影 replacement disk fact")
+            }
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs == ["delete-me"]
+                    && fixture.recorder.requests.last?.invalidatesAll == false,
+                "user delete changedDespiteFailure 必须一次 exact refresh")
+            expect(
+                fixture.refreshCoordinator.panelReloadRevision == panelRevisionBefore + 1,
+                "user delete changedDespiteFailure 必须通知 panel 收敛")
+            expect(
+                owner.presentation.pendingAnnouncement?.kind == .windowStatus(.packDeletion)
+                    && owner.presentation.pendingAnnouncement?.kind
+                        != .operationSucceeded(.deletePack),
+                "retained failure 必须保留 status debt 且不能伪造 delete success")
         }
     }
 
@@ -1574,6 +1767,7 @@ func makeSoundEditorFixture(
     builtinPackIDs: Set<String> = [],
     beforeForkPackPublish: (@Sendable (URL) throws -> Void)? = nil,
     beforeFactoryPackRestorePublish: (@Sendable () throws -> Void)? = nil,
+    moveUserPackToTrashForTesting: (@MainActor @Sendable (URL) throws -> URL?)? = nil,
     afterFinalImportCancellationSampleForTesting: (@Sendable () -> Void)? = nil,
     beforeReadyPublication: @escaping @Sendable () -> Void = {},
     onScanRequestForTesting: @escaping @Sendable (SoundPackLibraryScanRequest) -> Void = { _ in }
@@ -1620,6 +1814,9 @@ func makeSoundEditorFixture(
             factoryPacksDirectory: builtinPackIDs.isEmpty ? nil : factoryPacks)
     configuredEnvironment.beforeForkPackPublish = beforeForkPackPublish
     configuredEnvironment.beforeFactoryPackRestorePublish = beforeFactoryPackRestorePublish
+    // Package-internal DEBUG-only writer seam. The production default remains the system Trash;
+    // tests replace only that terminal adapter and still execute the real lock/isolation writer.
+    configuredEnvironment.moveUserPackToTrashForTesting = moveUserPackToTrashForTesting
     let environment = configuredEnvironment
     let recorder = SoundEditorScanRecorder()
     let scanner = SoundPackLibraryScanner.testingLive(
@@ -1762,6 +1959,24 @@ func waitForSoundEditorSelectionChange(
         await Task.yield()
     }
     expect(false, "等待 selection 离开 \(packID) 超时")
+    return false
+}
+
+@MainActor
+@discardableResult
+func waitForSoundEditorPackAbsence(
+    _ owner: SoundPacksEditorOwner,
+    packID: String
+) async -> Bool {
+    for _ in 0..<512 {
+        if case .sounds(let sounds) = owner.presentation.mode,
+            !sounds.packs.contains(where: { $0.id == packID })
+        {
+            return true
+        }
+        await Task.yield()
+    }
+    expect(false, "等待 pack \(packID) 从 presentation 消失超时")
     return false
 }
 
