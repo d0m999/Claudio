@@ -13,6 +13,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
     public let userPacksDirectory: URL
     @Published package private(set) var presentation: SoundPacksEditorPresentation
     private let refreshCoordinator: SoundPacksRefreshCoordinator?
+    private let importEnvironment: AudioImportEnvironment
+    private let audioImportExecutor = SoundPackAudioImportExecutor()
     private var context: SoundPacksEditorContext = .inactive
     private var presentationRevision: UInt64 = 0
     private var nextCapabilityID: UInt64 = 0
@@ -45,6 +47,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             refreshCoordinator: refreshCoordinator)
         self.model = model
         self.userPacksDirectory = environment.userPacksDirectory
+        self.importEnvironment = environment
         self.refreshCoordinator = refreshCoordinator
         presentation = Self.initialPresentation(from: model.editorProjectionSeed())
         connectSettledModel(model)
@@ -65,6 +68,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             refreshCoordinator: refreshCoordinator)
         self.model = model
         self.userPacksDirectory = environment.userPacksDirectory
+        self.importEnvironment = environment
         self.refreshCoordinator = refreshCoordinator
         presentation = Self.initialPresentation(from: model.editorProjectionSeed())
         connectSettledModel(model)
@@ -74,6 +78,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     public init(model: SoundPacksWindowModel, userPacksDirectory: URL) {
         self.model = model
         self.userPacksDirectory = userPacksDirectory
+        self.importEnvironment = model.editorImportEnvironment
         refreshCoordinator = nil
         presentation = Self.initialPresentation(from: model.editorProjectionSeed())
         connectSettledModel(model)
@@ -159,6 +164,217 @@ public final class SoundPacksEditorOwner: ObservableObject {
             publish(from: model.editorProjectionSeed())
             return .applied
         }
+    }
+
+    package func perform(
+        _ operation: SoundPacksEditorOperation
+    ) async -> SoundPacksEditorOperationResult {
+        switch operation {
+        case .importAudio(let permit, let sources, let bindTo):
+            return await performImport(permit: permit, sources: sources, bindTo: bindTo)
+        case .adoptAICue:
+            return .rejected(.actionUnavailable)
+        }
+    }
+
+    private func performImport(
+        permit: SoundPackImportPermit,
+        sources: [URL],
+        bindTo: Event?
+    ) async -> SoundPacksEditorOperationResult {
+        model.refreshEditorConfigProjection()
+        let seed = model.editorProjectionSeed()
+        guard seed.writesAllowed else { return .rejected(.scopeUnavailable) }
+        guard let binding = importPermitLedger.removeValue(forKey: permit.id) else {
+            return .rejected(.stalePermit)
+        }
+        guard binding.context == context,
+            binding.selectionGeneration == seed.selectionGeneration,
+            binding.snapshotRevision == seed.snapshotRevision,
+            binding.bindTo == bindTo,
+            seed.library.isFresh
+        else {
+            return .rejected(.stalePermit)
+        }
+        guard seed.selectedPackID == binding.packID,
+            seed.installedPackIDs.contains(binding.packID)
+        else {
+            return .rejected(.packUnavailable)
+        }
+        guard !seed.builtinPackIDs.contains(binding.packID) else {
+            return .rejected(.builtinReadOnly)
+        }
+        guard !sources.isEmpty else {
+            return .imported(
+                SoundPackEditorImportOutcome(
+                    accepted: [],
+                    rejected: [],
+                    boundEvent: nil,
+                    completedInBackground: false,
+                    orphan: nil))
+        }
+
+        let operationID = beginAsyncOperation(
+            kind: .importAudio,
+            packID: binding.packID,
+            event: bindTo)
+        let (_, startedSeed) = captureModelTransition {
+            model.beginEditorCompoundMutation(packID: binding.packID)
+        }
+        publish(from: startedSeed)
+
+        let requests = sources.map {
+            AudioImportRequest(sourceURL: $0, suggestedFileName: $0.lastPathComponent)
+        }
+        let execution = await audioImportExecutor.execute(
+            SoundPackAudioImportJob(
+                requests: requests,
+                packID: binding.packID,
+                environment: importEnvironment))
+        switch execution {
+        case .cancelledBeforeWrite:
+            let (_, settledSeed) = captureModelTransition {
+                model.finishEditorCompoundMutationWithoutChange(packID: binding.packID)
+            }
+            settleAsyncOperation(
+                operationID,
+                phase: .cancelled(changedOnDisk: false),
+                seed: settledSeed)
+            return .rejected(.cancelled)
+        case .completed(let batch, let cancellationRequested):
+            return finishImport(
+                operationID: operationID,
+                binding: binding,
+                batch: batch,
+                cancellationRequested: cancellationRequested)
+        }
+    }
+
+    private func finishImport(
+        operationID: SoundPackEditorOperationID,
+        binding: EditorPermitBinding,
+        batch: AudioImportBatchResult,
+        cancellationRequested: Bool
+    ) -> SoundPacksEditorOperationResult {
+        guard !batch.accepted.isEmpty else {
+            let (_, seed) = captureModelTransition {
+                model.finishEditorCompoundMutationWithoutChange(packID: binding.packID)
+            }
+            let phase: SoundPackEditorActivityPhase =
+                batch.rejected.isEmpty
+                ? .succeeded : .failed(.importRejected)
+            settleAsyncOperation(operationID, phase: phase, seed: seed)
+            return .imported(
+                SoundPackEditorImportOutcome(
+                    accepted: [],
+                    rejected: batch.rejected,
+                    boundEvent: nil,
+                    completedInBackground: false,
+                    orphan: nil))
+        }
+
+        model.refreshEditorConfigProjection()
+        let current = model.editorProjectionSeed()
+        let remainsForeground =
+            binding.context == context
+            && binding.selectionGeneration == current.selectionGeneration
+            && current.library.isFresh
+            && current.installedPackIDs.contains(binding.packID)
+            && current.selectedPackID == binding.packID
+            && current.writesAllowed
+        var boundEvent: Event?
+        var orphan: ImportedAudioFile?
+        var failure: SoundPackEditorFailure?
+
+        if cancellationRequested {
+            orphan = binding.bindTo == nil ? nil : batch.accepted.last
+            failure = .cancelled
+        } else if let event = binding.bindTo, let imported = batch.accepted.last {
+            if remainsForeground {
+                switch model.bindEditorImportedAudioFile(
+                    imported,
+                    to: event,
+                    packID: binding.packID)
+                {
+                case .success:
+                    boundEvent = event
+                case .failure:
+                    orphan = imported
+                    failure = .mutationFailed
+                }
+            } else {
+                orphan = imported
+                failure = .targetChanged
+            }
+        }
+        return completeImport(
+            operationID: operationID,
+            binding: binding,
+            batch: batch,
+            boundEvent: boundEvent,
+            completedInBackground: !remainsForeground,
+            orphan: orphan,
+            failure: failure)
+    }
+
+    private func completeImport(
+        operationID: SoundPackEditorOperationID,
+        binding: EditorPermitBinding,
+        batch: AudioImportBatchResult,
+        boundEvent: Event?,
+        completedInBackground: Bool,
+        orphan: ImportedAudioFile?,
+        failure: SoundPackEditorFailure?
+    ) -> SoundPacksEditorOperationResult {
+        let (_, settledSeed) = captureModelTransition {
+            model.finishEditorCompoundMutation(
+                packID: binding.packID,
+                changedDespiteFailure: failure != nil)
+        }
+        let phase: SoundPackEditorActivityPhase
+        if let orphan, let failure {
+            phase = .orphan(fileName: orphan.fileName, failure: failure)
+        } else if failure == .cancelled {
+            phase = .cancelled(changedOnDisk: true)
+        } else if !batch.rejected.isEmpty {
+            phase = .partial(accepted: batch.accepted.count, rejected: batch.rejected.count)
+        } else {
+            phase = .succeeded
+        }
+        settleAsyncOperation(operationID, phase: phase, seed: settledSeed)
+        return .imported(
+            SoundPackEditorImportOutcome(
+                accepted: batch.accepted,
+                rejected: batch.rejected,
+                boundEvent: boundEvent,
+                completedInBackground: completedInBackground,
+                orphan: orphan))
+    }
+
+    private func beginAsyncOperation(
+        kind: SoundPackEditorActivityKind,
+        packID: String,
+        event: Event?
+    ) -> SoundPackEditorOperationID {
+        nextCapabilityID &+= 1
+        let operationID = SoundPackEditorOperationID(rawValue: nextCapabilityID)
+        operationStates[operationID] = EditorOperationState(
+            kind: kind,
+            phase: .busy,
+            packID: packID,
+            event: event)
+        operationOrder.append(operationID)
+        return operationID
+    }
+
+    private func settleAsyncOperation(
+        _ operationID: SoundPackEditorOperationID,
+        phase: SoundPackEditorActivityPhase,
+        seed: SoundPacksEditorModelSeed
+    ) {
+        guard let state = operationStates[operationID] else { return }
+        operationStates[operationID] = state.withPhase(phase)
+        publish(from: seed)
     }
 
     private func invoke(_ action: SoundPackEditorAction) -> SoundPacksEditorCommandResult {
@@ -542,6 +758,14 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     coverage: row.coverage,
                     enabled: row.enabled,
                     audioDisplayName: row.audioDisplayName,
+                    importAction: selectedIsWritable
+                        ? makeAction(
+                            .requestImport,
+                            binding: .requestImport(
+                                packID: selectedPack?.id ?? "",
+                                bindTo: row.event),
+                            seed: seed)
+                        : nil,
                     previewAction: row.coverage.previewEnabled
                         ? makeAction(.preview, binding: .preview(event: row.event), seed: seed)
                         : nil,

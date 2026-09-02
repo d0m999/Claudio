@@ -654,6 +654,7 @@ public final class SoundPacksWindowModel: ObservableObject {
     private let configFile: URL
     private let lockFile: URL
     private let environment: AudioImportEnvironment
+    private let audioImportExecutor = SoundPackAudioImportExecutor()
     /// Factory contents are app-bundle-static for this model's lifetime. Cache the one derivation
     /// so SwiftUI body evaluation never turns a read-only check into repeated factory `readdir`.
     private var builtinPackIDs: Set<String>
@@ -1164,7 +1165,6 @@ public final class SoundPacksWindowModel: ObservableObject {
         audioImportActionRevision += 1
         let actionRevision = audioImportActionRevision
         let expectedSelectionRevision = inspectionSelectionRevision
-        let environment = self.environment
         let targetName =
             packCards.first(where: { $0.id == expectedPackID }).map {
                 SelectedPackMetadata(id: $0.id, name: $0.name).displayName
@@ -1173,9 +1173,19 @@ public final class SoundPacksWindowModel: ObservableObject {
         audioActionError = nil
         beginSoundPackMutation(packIDs: [expectedPackID])
 
-        let batch = await Task.detached {
-            importAudioFiles(requests, packID: expectedPackID, environment: environment)
-        }.value
+        let execution = await audioImportExecutor.execute(
+            SoundPackAudioImportJob(
+                requests: requests,
+                packID: expectedPackID,
+                environment: environment))
+        let batch: AudioImportBatchResult
+        switch execution {
+        case .cancelledBeforeWrite:
+            finishSoundPackMutation(packIDs: [expectedPackID])
+            return .failure(.importRejected(message: "导入已取消，未添加任何音频。"))
+        case .completed(let result, _):
+            batch = result
+        }
         let isLatestAction = actionRevision == audioImportActionRevision
         let isStillInspectingTarget =
             selectedPackID == expectedPackID
@@ -1254,6 +1264,65 @@ public final class SoundPacksWindowModel: ObservableObject {
             return nil
         }
         return resolvedFile
+    }
+
+    var editorImportEnvironment: AudioImportEnvironment { environment }
+
+    /// Opens the existing two-sided invalidation fence for one editor-owned compound mutation.
+    /// The async executor receives only immutable import values; writer coordination stays here.
+    func beginEditorCompoundMutation(packID: String) {
+        audioImportActionRevision += 1
+        clearWindowStatus(.audio)
+        audioActionError = nil
+        beginSoundPackMutation(packIDs: [packID])
+    }
+
+    /// Closes a compound mutation without asking the shared library to scan when no bytes landed.
+    func finishEditorCompoundMutationWithoutChange(packID: String) {
+        finishSoundPackMutation(packIDs: [packID])
+    }
+
+    /// Completes one compound import/bind envelope with exactly one shared-library refresh.
+    func finishEditorCompoundMutation(
+        packID: String,
+        changedDespiteFailure: Bool
+    ) {
+        completeSynchronousWrite(
+            changedDespiteFailure ? .changedDespiteFailure : .succeeded,
+            invalidatingPackIDs: [packID])
+    }
+
+    /// Uses the existing lock-time manifest writer without opening or completing a second refresh.
+    func bindEditorImportedAudioFile(
+        _ importedFile: ImportedAudioFile,
+        to event: Event,
+        packID: String
+    ) -> Result<Void, ManifestBindError> {
+        guard importedFile.packID == packID else {
+            return .failure(.packNotFound(packID: packID))
+        }
+        return bindEventToManifest(
+            event: event,
+            fileName: importedFile.fileName,
+            packID: packID,
+            environment: environment)
+    }
+
+    /// Uses the atomic name+Event manifest primitive inside the caller's compound refresh envelope.
+    func bindEditorAICue(
+        _ importedFile: ImportedAudioFile,
+        displayName: AICueDisplayName,
+        target: AICueAdoptionTarget
+    ) -> Result<AICueManifestBindingOutcome, ManifestBindError> {
+        guard importedFile.packID == target.packID else {
+            return .failure(.packNotFound(packID: target.packID))
+        }
+        return bindAICueToManifest(
+            event: target.event,
+            fileName: importedFile.fileName,
+            displayName: displayName,
+            packID: target.packID,
+            environment: environment)
     }
 
     /// The star state for one full-library sidebar row. Existing stars stay removable even when a

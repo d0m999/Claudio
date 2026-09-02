@@ -159,14 +159,14 @@ func runSoundPacksEditorMutationSuites() async {
     }
 }
 
-private struct SoundEditorFixture {
+struct SoundEditorFixture {
     let owner: SoundPacksEditorOwner
     let library: SoundPackLibrary
     let recorder: SoundEditorScanRecorder
     let configFile: URL
 }
 
-private final class SoundEditorScanRecorder: @unchecked Sendable {
+final class SoundEditorScanRecorder: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [SoundPackLibraryScanRequest] = []
 
@@ -184,7 +184,7 @@ private final class SoundEditorScanRecorder: @unchecked Sendable {
 }
 
 @MainActor
-private func makeSoundEditorFixture(
+func makeSoundEditorFixture(
     root: URL,
     packIDs: [String],
     starred: [String] = []
@@ -233,7 +233,7 @@ private func makeSoundEditorFixture(
 }
 
 @MainActor
-private func waitForSoundEditorReady(
+func waitForSoundEditorReady(
     _ owner: SoundPacksEditorOwner,
     library: SoundPackLibrary
 ) async {
@@ -246,7 +246,7 @@ private func waitForSoundEditorReady(
 }
 
 @MainActor
-private func waitForSoundEditorInventory(_ owner: SoundPacksEditorOwner) async {
+func waitForSoundEditorInventory(_ owner: SoundPacksEditorOwner) async {
     for _ in 0..<512 {
         if case .sounds(let sounds) = owner.presentation.mode,
             case .ready = sounds.inventory
@@ -258,7 +258,7 @@ private func waitForSoundEditorInventory(_ owner: SoundPacksEditorOwner) async {
 }
 
 @MainActor
-private func waitForSoundEditorOperation(
+func waitForSoundEditorOperation(
     _ owner: SoundPacksEditorOwner,
     operationID: SoundPackEditorOperationID
 ) async {

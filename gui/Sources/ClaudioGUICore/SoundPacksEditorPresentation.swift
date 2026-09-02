@@ -90,6 +90,7 @@ package struct SoundPackEditorEventPresentation: Identifiable, Equatable {
     package let coverage: CoverageState
     package let enabled: Bool
     package let audioDisplayName: String?
+    package let importAction: SoundPackEditorAction?
     package let previewAction: SoundPackEditorAction?
     package let clearAction: SoundPackEditorAction?
 }
