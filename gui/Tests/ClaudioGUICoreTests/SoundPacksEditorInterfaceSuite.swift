@@ -647,7 +647,8 @@ private func makePresentationEditorFixture(
         owner: owner,
         library: library,
         recorder: recorder,
-        configFile: configFile)
+        configFile: configFile,
+        packsLockFile: environment.packsLockFile)
 }
 
 @MainActor
