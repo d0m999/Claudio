@@ -147,16 +147,14 @@ func runSoundPacksEditorInterfaceSuites() async {
             expect(emissions.isEmpty, "完全相同的 library terminal 不得再发布")
             expect(owner.presentation == before, "duplicate terminal 不得虚增 revision 或换 capability")
 
-            guard
-                case .ready(let refreshedSnapshot) =
-                    await fixture.library.refreshSnapshot(trigger: .retry)
-            else {
+            let beforeRefreshRevision = owner.presentation.revision
+            guard case .ready = await fixture.library.refreshSnapshot(trigger: .retry) else {
                 expect(false, "fixture 必须产生更新的 ready generation")
                 return
             }
             for _ in 0..<512 {
-                if owner.presentation.library
-                    == .ready(snapshotRevision: refreshedSnapshot.revision)
+                if case .ready = owner.presentation.library,
+                    owner.presentation.revision > beforeRefreshRevision
                 {
                     break
                 }
@@ -171,6 +169,16 @@ func runSoundPacksEditorInterfaceSuites() async {
                 expect(false, "新一代 ready root 必须重签 capability")
                 return
             }
+            expect(
+                afterRefresh.library == .ready,
+                "package interface 的 ready status 不得暴露 snapshot revision")
+            expect(
+                afterRefresh.revision > beforeRefreshRevision
+                    && refreshedInspectB != oldInspectB,
+                "新 library generation 必须通过 root revision 与新 capability identity 可观察")
+            expect(
+                owner.send(.invoke(oldInspectB)) == .rejected(.staleAction),
+                "旧 library generation 的 capability 必须失效")
             emissions.removeAll()
 
             await fixture.library.replayStateForTesting(staleLibraryState)
@@ -191,7 +199,7 @@ func runSoundPacksEditorInterfaceSuites() async {
                     && newInspectB != refreshedInspectB,
                 "显式 activate 必须换代，不能被 semantic no-op 吞掉")
             expect(
-                owner.send(.invoke(oldInspectB)) == .rejected(.staleAction),
+                owner.send(.invoke(refreshedInspectB)) == .rejected(.staleAction),
                 "reactivate 前 capability 必须失效")
             expect(owner.send(.invoke(newInspectB)) == .applied, "reactivate 新 capability 必须可用")
         }
@@ -260,6 +268,53 @@ func runSoundPacksEditorInterfaceSuites() async {
             expect(packA.deleteAction == nil, "active pack 不得因未被 inspect 就变成可删除")
             expect(packB.useAction != nil, "非 active 的 inspected pack 必须可 Use")
             expect(packB.deleteAction != nil, "未被任何 scope 引用的 inspected pack 必须可删除")
+        }
+    }
+
+    await suite("Sound editor presentation：Surface active、Global reference 与 inspection 分离") {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["pack-a", "pack-b"],
+                config: ClaudioConfig(
+                    selectedPack: "pack-a",
+                    surfaceOverrides: [
+                        HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                            selectedPack: "pack-b")
+                    ]))
+            let owner = fixture.owner
+            let route = SoundPacksWindowRoute.overview(surface: .workBuddy)
+            _ = owner.send(.activate(.sounds(route: route, requestRevision: 29)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .sounds(let initial) = owner.presentation.mode,
+                let inspectA = initial.packs.first(where: { $0.id == "pack-a" })?.inspectAction
+            else {
+                expect(false, "Surface fixture 必须可 inspect Global 引用的 pack-a")
+                return
+            }
+
+            expect(owner.send(.invoke(inspectA)) == .applied, "inspect pack-a 必须应用")
+            guard case .sounds(let inspected) = owner.presentation.mode,
+                let packA = inspected.packs.first(where: { $0.id == "pack-a" }),
+                let packB = inspected.packs.first(where: { $0.id == "pack-b" })
+            else {
+                expect(false, "inspect 后必须保留 Global A 与 Surface B presentation")
+                return
+            }
+
+            expect(inspected.selectedPack?.id == "pack-a", "inspection selection 必须指向 pack-a")
+            expect(
+                packA.isInspected && !packA.isActiveForScope,
+                "Global A 可被 inspect，但不是 Surface active")
+            expect(packA.isReferencedByAnyScope, "Global selected_pack 必须计入跨 scope reference")
+            expect(packA.useAction != nil, "被 Global 引用不妨碍将 A 用于当前 Surface")
+            expect(packA.deleteAction == nil, "被任一 scope 引用的 A 不得签 Delete")
+
+            expect(
+                !packB.isInspected && packB.isActiveForScope, "Surface B 仍 active，但不是 inspection")
+            expect(packB.isReferencedByAnyScope, "Surface override 必须计入跨 scope reference")
+            expect(packB.useAction == nil, "当前 Surface active B 不得签冗余 Use")
+            expect(packB.deleteAction == nil, "当前 Surface 引用的 B 不得签 Delete")
         }
     }
 
@@ -359,15 +414,20 @@ func runSoundPacksEditorInterfaceSuites() async {
             expect(
                 observed.contains(.loading(previousAvailable: true)),
                 "refresh 必须保留 loading(previous: true) 语义")
-            guard case .failed(previousAvailable: true) = owner.presentation.library else {
+            guard
+                case .failed(
+                    previousAvailable: true,
+                    reason: let failureReason
+                ) = owner.presentation.library
+            else {
                 expect(false, "refresh failure 必须保留 failed(previous: true) 语义")
                 return
             }
             expect(
-                owner.presentation.library.failureReason == .locationUnavailable,
+                failureReason == .locationUnavailable,
                 "root 不再是目录时必须投影稳定 semantic reason")
             expect(
-                !String(describing: owner.presentation.library.failureReason).contains(root.path),
+                !String(describing: failureReason).contains(root.path),
                 "library failure reason 不得泄露临时目录绝对路径")
         }
 
@@ -381,15 +441,20 @@ func runSoundPacksEditorInterfaceSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 24)))
             await waitForSoundEditorLibraryFailure(owner, library: fixture.library)
-            guard case .failed(previousAvailable: false) = owner.presentation.library else {
+            guard
+                case .failed(
+                    previousAvailable: false,
+                    reason: let failureReason
+                ) = owner.presentation.library
+            else {
                 expect(false, "首次加载失败必须是 failed(previous: false)")
                 return
             }
             expect(
-                owner.presentation.library.failureReason == .locationUnavailable,
+                failureReason == .locationUnavailable,
                 "首次加载失败也必须给出 semantic reason")
             expect(
-                !String(describing: owner.presentation.library.failureReason).contains(root.path),
+                !String(describing: failureReason).contains(root.path),
                 "首次加载 failure reason 不得泄露绝对路径")
         }
     }
@@ -414,17 +479,20 @@ func runSoundPacksEditorInterfaceSuites() async {
                 owner.send(.invoke(inspectB)) == .applied, "inspect pack-b 必须开始真实 inventory read")
             await waitForSoundEditorInventoryFailure(owner)
             guard case .sounds(let failed) = owner.presentation.mode,
-                case .failed(let previous) = failed.inventory
+                case .failed(
+                    previous: let previous,
+                    reason: let failureReason
+                ) = failed.inventory
             else {
                 expect(false, "消失的 pack directory 必须投影 inventory failed")
                 return
             }
             expect(previous == nil, "pack-b 首次 inventory failure 不得借用 pack-a 的 previous rows")
             expect(
-                failed.inventory.failureReason == .packUnavailable,
+                failureReason == .packUnavailable,
                 "inventory failure 必须投影稳定 semantic reason")
             expect(
-                !String(describing: failed.inventory.failureReason).contains(root.path),
+                !String(describing: failureReason).contains(root.path),
                 "inventory failure reason 不得泄露临时目录绝对路径")
         }
     }
@@ -469,11 +537,21 @@ func runSoundPacksEditorInterfaceSuites() async {
                 expect(false, "fresh fixture 必须先签发 write capability")
                 return
             }
+            let freshAssignmentActions: [SoundPackEditorAction] = soundEditorAudioRows(
+                in: fresh.inventory
+            ).flatMap(\.assignments).map(\.action)
+            expect(
+                !freshAssignmentActions.isEmpty,
+                "fresh inventory 必须签发 nonoptional assignment action")
 
             replaceDirectoryWithRegularFile(packs)
             _ = await fixture.library.refreshSnapshot(trigger: .retry)
             await waitForSoundEditorLibraryFailure(owner, library: fixture.library)
-            guard case .failed(previousAvailable: true) = owner.presentation.library,
+            guard
+                case .failed(
+                    previousAvailable: true,
+                    reason: .locationUnavailable
+                ) = owner.presentation.library,
                 case .sounds(let stale) = owner.presentation.mode
             else {
                 expect(false, "失败 refresh 必须保留 non-fresh previous presentation")
@@ -503,12 +581,9 @@ func runSoundPacksEditorInterfaceSuites() async {
                 "non-fresh root 不得签 restore write capability")
 
             let audioRows = soundEditorAudioRows(in: stale.inventory)
-            let assignments = audioRows.flatMap(\.assignments)
-            expect(!assignments.isEmpty, "previous inventory 必须保留可渲染 assignment facts")
-            let assignmentActions: [SoundPackEditorAction?] = assignments.map(\.action)
             expect(
-                assignmentActions.allSatisfy { $0 == nil },
-                "non-fresh assignment facts 不得携带 write capability")
+                audioRows.allSatisfy { $0.assignments.isEmpty },
+                "non-fresh previous inventory 不得保留 assignment affordance")
             expect(
                 audioRows.allSatisfy { $0.deleteAction == nil && $0.revealAction == nil },
                 "non-fresh inventory facts 不得携带 delete/reveal capability")
@@ -614,7 +689,9 @@ private func soundEditorAudioRows(
     switch inventory {
     case .idle:
         return []
-    case .loading(let previous), .failed(let previous):
+    case .loading(let previous):
+        return previous ?? []
+    case .failed(previous: let previous, reason: _):
         return previous ?? []
     case .ready(let rows):
         return rows
