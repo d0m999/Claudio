@@ -189,9 +189,16 @@ func makeSoundEditorFixture(
     packIDs: [String],
     starred: [String] = [],
     durationProbe: (any AudioDurationProbing)? = nil,
-    config: ClaudioConfig? = nil
+    config: ClaudioConfig? = nil,
+    builtinPackIDs: Set<String> = []
 ) -> SoundEditorFixture {
     let packs = root.appendingPathComponent("packs", isDirectory: true)
+    let factoryPacks = root.appendingPathComponent("factory-packs", isDirectory: true)
+    for packID in builtinPackIDs {
+        try! FileManager.default.createDirectory(
+            at: factoryPacks.appendingPathComponent(packID, isDirectory: true),
+            withIntermediateDirectories: true)
+    }
     for packID in packIDs {
         writeFixture(
             """
@@ -215,9 +222,13 @@ func makeSoundEditorFixture(
         durationProbe.map {
             AudioImportEnvironment(
                 userPacksDirectory: packs,
+                factoryPacksDirectory: builtinPackIDs.isEmpty ? nil : factoryPacks,
                 durationProbe: $0,
                 packsLockFile: injectedPacksLock(under: root))
-        } ?? makeAudioImportEnvironment(userPacksDirectory: packs)
+        }
+        ?? makeAudioImportEnvironment(
+            userPacksDirectory: packs,
+            factoryPacksDirectory: builtinPackIDs.isEmpty ? nil : factoryPacks)
     let recorder = SoundEditorScanRecorder()
     let scanner = SoundPackLibraryScanner.testingLive(
         environment: environment,
