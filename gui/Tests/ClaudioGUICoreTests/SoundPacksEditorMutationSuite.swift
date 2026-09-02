@@ -187,7 +187,8 @@ final class SoundEditorScanRecorder: @unchecked Sendable {
 func makeSoundEditorFixture(
     root: URL,
     packIDs: [String],
-    starred: [String] = []
+    starred: [String] = [],
+    durationProbe: (any AudioDurationProbing)? = nil
 ) -> SoundEditorFixture {
     let packs = root.appendingPathComponent("packs", isDirectory: true)
     for packID in packIDs {
@@ -205,7 +206,13 @@ func makeSoundEditorFixture(
         {"selected_pack":"\(packIDs.first ?? "")","master_volume":0.37,"events":{"stop":true},"starred_packs":[\(starredJSON)],"future":{"keep":true}}
         """,
         to: configFile)
-    let environment = makeAudioImportEnvironment(userPacksDirectory: packs)
+    let environment =
+        durationProbe.map {
+            AudioImportEnvironment(
+                userPacksDirectory: packs,
+                durationProbe: $0,
+                packsLockFile: injectedPacksLock(under: root))
+        } ?? makeAudioImportEnvironment(userPacksDirectory: packs)
     let recorder = SoundEditorScanRecorder()
     let scanner = SoundPackLibraryScanner.testingLive(
         environment: environment,
