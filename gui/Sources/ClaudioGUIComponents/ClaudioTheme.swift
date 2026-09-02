@@ -228,3 +228,24 @@ public struct ClaudioIconButtonStyle: ButtonStyle {
             .contentShape(Rectangle())
     }
 }
+
+/// A full-width button contract for rows whose entire visible surface represents one action.
+/// The label owns its visual content; this style supplies the minimum target, rectangular hit
+/// testing, and pressed feedback without introducing domain state or selection semantics.
+public struct ClaudioFullRowButtonStyle: ButtonStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(
+                maxWidth: .infinity,
+                minHeight: ClaudioTheme.Metrics.compactControlHeight,
+                alignment: .leading
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: ClaudioTheme.Radius.control)
+                    .fill(Color.primary.opacity(configuration.isPressed ? 0.08 : 0))
+            )
+            .contentShape(Rectangle())
+    }
+}

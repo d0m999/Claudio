@@ -221,7 +221,7 @@ struct EventSettingsWindowView: View {
                             ? ClaudioTheme.clay(colorScheme).opacity(0.14)
                             : Color.clear))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ClaudioFullRowButtonStyle())
         .focused($focusedTarget, equals: .scope(scope.scope))
         .accessibilityLabel(scope.accessibilityLabel)
         .accessibilityValue(

@@ -27,7 +27,7 @@ import Foundation
 // `ReleaseCandidateArtifactSuite.swift`,
 // `ChatAXTracerSuite.swift`, `ChatAXTracerWiringSuite.swift`,
 // `WorkBuddyKeyboardAccessibilitySuite.swift`, `VolumeDragSessionSuite.swift`,
-// `PanelWriteFailuresSuite.swift`).
+// `PanelWriteFailuresSuite.swift`, `HitTargetSuite.swift`).
 
 var totalChecks = 0
 var failures = 0
@@ -83,6 +83,7 @@ runReleaseCandidateArtifactSuites()
 runReleaseSignatureSuites()
 runSourceScannerSuites()
 runViewWiringSuites()
+runHitTargetSuites()
 runChatAXTracerWiringSuites()
 await runChatAXTracerSuites()
 runAudioFormatSniffSuites()

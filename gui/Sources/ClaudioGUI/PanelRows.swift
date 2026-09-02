@@ -145,12 +145,8 @@ struct ActionFailureRow: View {
                     FailureRow(
                         message: message,
                         disclosure: isShowingDetail ? .expanded : .collapsed)
-                    // ≥24×24 命中区（a11y-architect FIX 6）—— 只有可点的那一态需要它。不可点的失败行
-                    // （另外三个调用点）是纯文本，给它撑一个 24pt 命中区没有任何意义，只会白占垂直空间。
-                    .frame(minHeight: 24)
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(ClaudioFullRowButtonStyle())
                 .accessibilityLabel(message)
                 .accessibilityHint(
                     ClaudioL10n(language: language).text(

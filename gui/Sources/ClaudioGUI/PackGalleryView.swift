@@ -147,7 +147,7 @@ private struct PackCardView: View {
                         lineWidth: card.isSelected ? 2 : 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ClaudioFullRowButtonStyle())
         .accessibilityLabel(accessibilityLabel)
         .accessibilityValue(card.isSelected
             ? ClaudioL10n(language: language).text(.soundPacksUsing)

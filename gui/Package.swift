@@ -108,9 +108,11 @@ let package = Package(
                 .linkedFramework("AppKit")
             ]
         ),
-        // Tests run as a dependency-free executable harness, exactly like
-        // `helper/Tests/ClaudioCoreTests`: this machine has CommandLineTools only (no
-        // Xcode), so neither XCTest nor Swift Testing is available to `swift test`.
+        // Tests run as an executable harness, exactly like `helper/Tests/ClaudioCoreTests`: this
+        // machine has CommandLineTools only (no Xcode), so neither XCTest nor Swift Testing is
+        // available to `swift test`. The native hit-target suite additionally imports AppKit and
+        // the shared SwiftUI component target so it can dispatch synthetic NSEvents to an
+        // NSHostingView.
         // Green signal: `swift run --package-path gui claudio-gui-tests` (exit 0).
         //
         // Depends on `ClaudioCore` directly (not just transitively via `ClaudioGUICore`)
@@ -122,6 +124,7 @@ let package = Package(
             dependencies: [
                 "ClaudioLocalization",
                 "ClaudioGUICore",
+                "ClaudioGUIComponents",
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             path: "Tests/ClaudioGUICoreTests"
