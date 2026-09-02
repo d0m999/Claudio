@@ -328,6 +328,109 @@ func runSoundPacksEditorAsyncOperationSuites() async {
         }
     }
 
+    await suite("Sound editor activity：cancelAction 必须取消真实 queued import") {
+        await withTempDirectory { root in
+            let gate = GatedSoundEditorDurationProbe(duration: 1)
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["pack-a"],
+                durationProbe: gate)
+            let owner = fixture.owner
+            let context = SoundPacksEditorContext.sounds(
+                route: .overview,
+                requestRevision: 16)
+            _ = owner.send(.activate(context))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard let occupyingPermit = soundEditorImportPermit(owner: owner, bindTo: nil),
+                let cancelledPermit = soundEditorImportPermit(owner: owner, bindTo: .stop)
+            else {
+                expect(false, "UI cancel fixture 必须取得两个独立 permit")
+                return
+            }
+
+            let occupyingSource = root.appendingPathComponent("occupying.mp3")
+            let cancelledSource = root.appendingPathComponent("ui-cancelled.mp3")
+            writeFixture(validMP3ID3Data(), to: occupyingSource)
+            writeFixture(validMP3ID3Data(), to: cancelledSource)
+            let manifestURL = root.appendingPathComponent("packs/pack-a/manifest.json")
+            let manifestBefore = try? Data(contentsOf: manifestURL)
+            let scansBefore = fixture.recorder.requests.count
+
+            let occupyingTask = Task { @MainActor in
+                await owner.perform(
+                    .importAudio(
+                        permit: occupyingPermit,
+                        sources: [occupyingSource],
+                        bindTo: nil))
+            }
+            expect(
+                await gate.waitUntilEntered(),
+                "首个 import 必须占用 deterministic serial executor gate")
+            let cancelledTask = Task { @MainActor in
+                await owner.perform(
+                    .importAudio(
+                        permit: cancelledPermit,
+                        sources: [cancelledSource],
+                        bindTo: .stop))
+            }
+            for _ in 0..<512 {
+                if owner.presentation.activities.filter({ $0.phase == .busy }).count == 2 {
+                    break
+                }
+                await Task.yield()
+            }
+            guard
+                let activity = owner.presentation.activities.last(where: {
+                    $0.kind == .importAudio && $0.event == .stop && $0.phase == .busy
+                }), let cancelAction = activity.cancelAction
+            else {
+                gate.release()
+                _ = await occupyingTask.value
+                _ = await cancelledTask.value
+                expect(false, "queued import 必须同步发布可调用的 activity.cancelAction")
+                return
+            }
+
+            expect(
+                owner.send(.invoke(cancelAction)) == .applied,
+                "presentation cancelAction 必须在同一 MainActor stack 消费")
+            expect(
+                owner.presentation.activities.contains {
+                    $0.operationID == activity.operationID
+                        && $0.phase == .cancelled(changedOnDisk: false)
+                        && $0.cancelAction == nil
+                },
+                "UI cancel 必须立即撤销 capability 并发布 no-change cancellation")
+            gate.release()
+
+            _ = await occupyingTask.value
+            let cancelledResult = await cancelledTask.value
+            await waitForSoundEditorScan(fixture, after: scansBefore)
+            expect(
+                cancelledResult == .rejected(.cancelled),
+                "UI cancel 必须传到真实 async operation，不能只改 presentation")
+            expect(
+                regularFileExists(
+                    at: root.appendingPathComponent("packs/pack-a/occupying.mp3"))
+                    && !regularFileExists(
+                        at: root.appendingPathComponent("packs/pack-a/ui-cancelled.mp3")),
+                "queued UI cancel 只能保留 occupier bytes，不能开始被取消的写入")
+            expect(
+                (try? Data(contentsOf: manifestURL)) == manifestBefore,
+                "queued UI cancel 不得继续执行 late Event bind")
+            expect(
+                owner.presentation.activities.contains {
+                    $0.operationID == activity.operationID
+                        && $0.phase == .cancelled(changedOnDisk: false)
+                },
+                "async completion 不得把已取消 activity 改写为 success")
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs == ["pack-a"],
+                "唯一 scan payload 必须来自 occupier；queued cancel 不得制造第二次 refresh")
+        }
+    }
+
     await suite("Sound editor perform：AI adoption 绑定 candidate generation 并 compound 刷新一次") {
         await withTempDirectory { root in
             let config = ClaudioConfig(
@@ -396,6 +499,107 @@ func runSoundPacksEditorAsyncOperationSuites() async {
         }
     }
 
+    await suite("Sound editor activity：in-flight cancelAction 保留 adoption orphan 且不继续 bind") {
+        await withTempDirectory { root in
+            let gate = GatedSoundEditorDurationProbe(duration: 1)
+            let fixture = makeIsolatedAdoptionFixture(root: root, durationProbe: gate)
+            let owner = fixture.owner
+            let generationID = UUID()
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: fixture.route,
+                        requestRevision: 201,
+                        candidateGenerationID: generationID)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .events(let events) = owner.presentation.mode,
+                let permit = events.adoptionPermit
+            else {
+                expect(false, "in-flight cancel fixture 必须取得 adoption permit")
+                return
+            }
+
+            let source = root.appendingPathComponent("in-flight-cancel-candidate.mp3")
+            let sourceBytes = validMP3ID3Data()
+            writeFixture(sourceBytes, to: source)
+            let candidate = soundEditorCandidate(at: source, generationID: generationID)
+            let targetDirectory = fixture.manifest.deletingLastPathComponent()
+            let entriesBefore = soundEditorDirectoryEntries(targetDirectory)
+            let manifestBefore = try? Data(contentsOf: fixture.manifest)
+            let scansBefore = fixture.recorder.requests.count
+
+            let task = Task { @MainActor in
+                await owner.perform(
+                    .adoptAICue(
+                        candidate: candidate,
+                        displayName: try! AICueDisplayName("取消候选"),
+                        permit: permit))
+            }
+            expect(
+                await gate.waitUntilEntered(),
+                "adoption 必须先进入真实 importer，再触发 presentation cancel")
+            guard
+                let activity = owner.presentation.activities.last(where: {
+                    $0.kind == .adoptAICue && $0.phase == .busy
+                }), let cancelAction = activity.cancelAction
+            else {
+                gate.release()
+                _ = await task.value
+                expect(false, "in-flight adoption 必须同步发布 cancelAction")
+                return
+            }
+            expect(
+                owner.send(.invoke(cancelAction)) == .applied,
+                "in-flight cancelAction 必须同步命中当前 operation identity")
+            gate.release()
+
+            let result = await task.value
+            var imported: ImportedAudioFile?
+            var isCancelledOrphan = false
+            switch result {
+            case .adoptionOrphan(let file, let failure):
+                imported = file
+                isCancelledOrphan = failure == .cancelled
+            case .adopted(let outcome):
+                imported = outcome.importedFile
+            default:
+                break
+            }
+            await waitForSoundEditorScan(fixture.base, after: scansBefore)
+
+            expect(
+                isCancelledOrphan,
+                "in-flight UI cancel 必须到达 operation，并返回 changedDespiteFailure orphan")
+            if let imported {
+                expect(
+                    (try? Data(
+                        contentsOf: targetDirectory.appendingPathComponent(imported.fileName)))
+                        == sourceBytes,
+                    "取消不伪造 rollback：已经导入的 candidate bytes 必须可恢复")
+                expect(
+                    owner.presentation.activities.contains {
+                        $0.operationID == activity.operationID
+                            && $0.phase
+                                == .orphan(fileName: imported.fileName, failure: .cancelled)
+                            && $0.cancelAction == nil
+                    },
+                    "presentation 必须用同一 identity settle exact cancelled orphan")
+            } else {
+                expect(false, "in-flight cancellation 必须报告落盘文件 identity")
+            }
+            expect(
+                soundEditorDirectoryEntries(targetDirectory).subtracting(entriesBefore).count == 1,
+                "in-flight cancel 只能留下一个 recoverable orphan，不得产生额外 pack bytes")
+            expect(
+                (try? Data(contentsOf: fixture.manifest)) == manifestBefore,
+                "in-flight cancel 不得继续写 Event/display-name binding")
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs == ["workbuddy-pack"],
+                "in-flight cancel 的 changed bytes 必须只有一次 exact refresh payload")
+        }
+    }
+
     await suite("Sound editor perform：AI generation 在 import 前漂移时零 I/O 且 permit 已消费") {
         await withTempDirectory { root in
             let fixture = makeIsolatedAdoptionFixture(root: root)
@@ -450,6 +654,71 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                         displayName: try! AICueDisplayName("过期候选"),
                         permit: stalePermit)) == .rejected(.stalePermit),
                 "被拒绝的旧 generation permit 同样必须 single-use")
+        }
+    }
+
+    await suite("Sound editor perform：AI generation A→B→A 在 import 前不能复活旧 permit") {
+        await withTempDirectory { root in
+            let fixture = makeIsolatedAdoptionFixture(root: root)
+            let owner = fixture.owner
+            let generationA = UUID()
+            let generationB = UUID()
+            let contextA = SoundPacksEditorContext.events(
+                route: fixture.route,
+                requestRevision: 211,
+                candidateGenerationID: generationA)
+            _ = owner.send(.activate(contextA))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .events(let initial) = owner.presentation.mode,
+                let oldPermit = initial.adoptionPermit
+            else {
+                expect(false, "generation A 必须签发 adoption permit")
+                return
+            }
+
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: fixture.route,
+                        requestRevision: 211,
+                        candidateGenerationID: generationB)))
+            _ = owner.send(.activate(contextA))
+            guard case .events(let returnedA) = owner.presentation.mode,
+                let currentPermit = returnedA.adoptionPermit
+            else {
+                expect(false, "返回 generation A 后必须签发当前 generation 的新 permit")
+                return
+            }
+
+            let source = root.appendingPathComponent("pre-import-aba.mp3")
+            writeFixture(validMP3ID3Data(), to: source)
+            let candidate = soundEditorCandidate(at: source, generationID: generationA)
+            let targetDirectory = fixture.manifest.deletingLastPathComponent()
+            let entriesBefore = soundEditorDirectoryEntries(targetDirectory)
+            let manifestBefore = try? Data(contentsOf: fixture.manifest)
+            let scansBefore = fixture.recorder.requests.count
+
+            let result = await owner.perform(
+                .adoptAICue(
+                    candidate: candidate,
+                    displayName: try! AICueDisplayName("往返候选"),
+                    permit: oldPermit))
+            expect(
+                result == .rejected(.stalePermit),
+                "candidate UUID 回到 A 也不能复活第一次 A 的 permit")
+            expect(
+                currentPermit != oldPermit,
+                "coherent Events presentation 必须只携带返回后新签发的 permit")
+            expect(
+                soundEditorDirectoryEntries(targetDirectory) == entriesBefore,
+                "pre-import A→B→A stale 必须零 pack bytes")
+            expect(
+                (try? Data(contentsOf: fixture.manifest)) == manifestBefore,
+                "pre-import A→B→A stale 必须零 manifest mutation")
+            expect(
+                !owner.presentation.activities.contains { $0.kind == .adoptAICue }
+                    && fixture.recorder.requests.count == scansBefore,
+                "pre-import stale 不得发布假 activity 或 scan payload")
         }
     }
 
@@ -529,6 +798,239 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 fixture.recorder.requests.count == scansBefore + 1
                     && fixture.recorder.requests.last?.invalidatedPackIDs == ["workbuddy-pack"],
                 "post-import adoption drift 是 changedDespiteFailure，只能 exact refresh 一次")
+        }
+    }
+
+    await suite("Sound editor perform：AI generation A→B→A 在 final bind 前仍是 orphan") {
+        await withTempDirectory { root in
+            let gate = GatedSoundEditorDurationProbe(duration: 1)
+            let fixture = makeIsolatedAdoptionFixture(root: root, durationProbe: gate)
+            let owner = fixture.owner
+            let generationA = UUID()
+            let generationB = UUID()
+            let contextA = SoundPacksEditorContext.events(
+                route: fixture.route,
+                requestRevision: 221,
+                candidateGenerationID: generationA)
+            _ = owner.send(.activate(contextA))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .events(let initial) = owner.presentation.mode,
+                let permit = initial.adoptionPermit
+            else {
+                expect(false, "generation A 必须签发 in-flight adoption permit")
+                return
+            }
+
+            let source = root.appendingPathComponent("pre-bind-aba.mp3")
+            let sourceBytes = validMP3ID3Data()
+            writeFixture(sourceBytes, to: source)
+            let candidate = soundEditorCandidate(at: source, generationID: generationA)
+            let targetDirectory = fixture.manifest.deletingLastPathComponent()
+            let entriesBefore = soundEditorDirectoryEntries(targetDirectory)
+            let manifestBefore = try? Data(contentsOf: fixture.manifest)
+            let scansBefore = fixture.recorder.requests.count
+            let task = Task { @MainActor in
+                await owner.perform(
+                    .adoptAICue(
+                        candidate: candidate,
+                        displayName: try! AICueDisplayName("绑定前往返"),
+                        permit: permit))
+            }
+            expect(
+                await gate.waitUntilEntered(),
+                "A operation 必须到达 deterministic pre-bind gate")
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: fixture.route,
+                        requestRevision: 221,
+                        candidateGenerationID: generationB)))
+            _ = owner.send(.activate(contextA))
+            gate.release()
+
+            let result = await task.value
+            var imported: ImportedAudioFile?
+            var isTargetChangedOrphan = false
+            switch result {
+            case .adoptionOrphan(let file, let failure):
+                imported = file
+                isTargetChangedOrphan = failure == .targetChanged
+            case .adopted(let outcome):
+                imported = outcome.importedFile
+            default:
+                break
+            }
+            await waitForSoundEditorScan(fixture.base, after: scansBefore)
+
+            expect(
+                isTargetChangedOrphan,
+                "final bind 必须校验 candidate generation epoch，不能因 UUID 回到 A 而成功")
+            expect(
+                (try? Data(contentsOf: fixture.manifest)) == manifestBefore,
+                "pre-bind A→B→A 不得覆盖旧 Event binding 或未知 manifest sibling")
+            if let imported {
+                expect(
+                    (try? Data(
+                        contentsOf: targetDirectory.appendingPathComponent(imported.fileName)))
+                        == sourceBytes
+                        && soundEditorDirectoryEntries(targetDirectory)
+                            .subtracting(entriesBefore) == [imported.fileName],
+                    "已落盘 candidate 必须作为唯一 recoverable orphan 留存")
+                expect(
+                    owner.presentation.activities.contains {
+                        $0.kind == .adoptAICue
+                            && $0.phase
+                                == .orphan(fileName: imported.fileName, failure: .targetChanged)
+                    },
+                    "presentation 必须用 exact targetChanged reason settle orphan")
+            } else {
+                expect(false, "pre-bind drift 必须返回 imported orphan identity")
+            }
+            if case .events(let current) = owner.presentation.mode {
+                expect(
+                    current.adoptionPermit != nil && current.adoptionPermit != permit,
+                    "返回 A 的 foreground presentation 必须保留自己的新 permit")
+            } else {
+                expect(false, "background completion 不得覆盖当前 Events mode")
+            }
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs == ["workbuddy-pack"],
+                "pre-bind orphan 是 changedDespiteFailure，只能 exact refresh 一次")
+        }
+    }
+
+    await suite("Sound editor perform：scope failure 首次调用也必须消费 permit") {
+        await withTempDirectory { root in
+            let validConfig = ClaudioConfig(
+                selectedPack: "pack-a",
+                surfaceOverrides: [
+                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                        selectedPack: "pack-a")
+                ])
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["pack-a"],
+                config: validConfig)
+            let owner = fixture.owner
+            let context = SoundPacksEditorContext.sounds(
+                route: .overview(surface: .workBuddy),
+                requestRevision: 231)
+            _ = owner.send(.activate(context))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard let permit = soundEditorImportPermit(owner: owner, bindTo: .stop) else {
+                expect(false, "健康 Surface scope 必须签发 Event-bound import permit")
+                return
+            }
+
+            let source = root.appendingPathComponent("scope-replay.mp3")
+            writeFixture(validMP3ID3Data(), to: source)
+            let targetDirectory = root.appendingPathComponent("packs/pack-a")
+            let entriesBefore = soundEditorDirectoryEntries(targetDirectory)
+            let manifestURL = targetDirectory.appendingPathComponent("manifest.json")
+            let manifestBefore = try? Data(contentsOf: manifestURL)
+            let validConfigBytes = try? Data(contentsOf: fixture.configFile)
+            let scansBefore = fixture.recorder.requests.count
+
+            writeFixture(
+                #"{"selected_pack":"pack-a","surface_overrides":"broken","future":{"keep":true}}"#,
+                to: fixture.configFile)
+            let firstResult = await owner.perform(
+                .importAudio(permit: permit, sources: [source], bindTo: .stop))
+            expect(
+                firstResult == .rejected(.scopeUnavailable),
+                "最新损坏 scope 必须优先 fail closed")
+            expect(
+                soundEditorDirectoryEntries(targetDirectory) == entriesBefore
+                    && (try? Data(contentsOf: manifestURL)) == manifestBefore
+                    && fixture.recorder.requests.count == scansBefore,
+                "scope rejection 必须同时保持 bytes/manifest/scan payload 不变")
+
+            if let validConfigBytes {
+                writeFixture(validConfigBytes, to: fixture.configFile)
+            } else {
+                expect(false, "fixture 必须可恢复有效 config bytes")
+                return
+            }
+            let replayResult = await owner.perform(
+                .importAudio(permit: permit, sources: [source], bindTo: .stop))
+            await waitForSoundEditorScan(fixture, after: scansBefore)
+
+            expect(
+                replayResult == .rejected(.stalePermit),
+                "scope failure 也必须在首个 perform 同步消费 permit，修复 config 后不能 replay")
+            expect(
+                soundEditorDirectoryEntries(targetDirectory) == entriesBefore,
+                "被 scope failure 消费的 permit 不得在 replay 时写入 bytes")
+            expect(
+                (try? Data(contentsOf: manifestURL)) == manifestBefore,
+                "被消费 permit 的 replay 不得写 Event binding")
+            if case .sounds(let sounds) = owner.presentation.mode {
+                expect(
+                    sounds.route == .overview(surface: .workBuddy)
+                        && sounds.selectedPack?.id == "pack-a"
+                        && !owner.presentation.activities.contains { $0.kind == .importAudio },
+                    "no-change rejection 必须保留当前 Sounds presentation 且不伪造 activity")
+            } else {
+                expect(false, "scope replay 不得改变当前 Sounds mode")
+            }
+            expect(
+                fixture.recorder.requests.count == scansBefore,
+                "两次 no-change rejection 都不得发布 SoundPackLibrary scan payload")
+        }
+    }
+
+    await suite("Sound editor perform：identical activate 也必须使旧 permit stale") {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a"])
+            let owner = fixture.owner
+            let context = SoundPacksEditorContext.sounds(
+                route: .overview,
+                requestRevision: 232)
+            _ = owner.send(.activate(context))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard let oldPermit = soundEditorImportPermit(owner: owner, bindTo: .stop) else {
+                expect(false, "初次 activation 必须签发 import permit")
+                return
+            }
+
+            _ = owner.send(.activate(context))
+            guard let replacementPermit = soundEditorImportPermit(owner: owner, bindTo: .stop)
+            else {
+                expect(false, "identical reactivation 必须签发当前 epoch 的 replacement permit")
+                return
+            }
+            let source = root.appendingPathComponent("reactivated.mp3")
+            writeFixture(validMP3ID3Data(), to: source)
+            let targetDirectory = root.appendingPathComponent("packs/pack-a")
+            let entriesBefore = soundEditorDirectoryEntries(targetDirectory)
+            let manifestURL = targetDirectory.appendingPathComponent("manifest.json")
+            let manifestBefore = try? Data(contentsOf: manifestURL)
+            let scansBefore = fixture.recorder.requests.count
+
+            let result = await owner.perform(
+                .importAudio(permit: oldPermit, sources: [source], bindTo: .stop))
+            await waitForSoundEditorScan(fixture, after: scansBefore)
+            expect(
+                replacementPermit != oldPermit && result == .rejected(.stalePermit),
+                "每次 activate 都是新 action epoch；旧 permit 不能因 context 值相同而存活")
+            expect(
+                soundEditorDirectoryEntries(targetDirectory) == entriesBefore,
+                "identical-reactivation stale 必须零 pack bytes")
+            expect(
+                (try? Data(contentsOf: manifestURL)) == manifestBefore,
+                "identical-reactivation stale 必须零 manifest mutation")
+            if case .sounds(let sounds) = owner.presentation.mode {
+                expect(
+                    sounds.selectedPack?.id == "pack-a"
+                        && !owner.presentation.activities.contains { $0.kind == .importAudio },
+                    "stale replay 必须保持当前 presentation 且不发布假 activity")
+            } else {
+                expect(false, "identical activation 不得改变 Sounds mode")
+            }
+            expect(
+                fixture.recorder.requests.count == scansBefore,
+                "identical-reactivation stale 不得产生 scan payload")
         }
     }
 
@@ -622,6 +1124,10 @@ private func waitForSoundEditorScan(_ fixture: SoundEditorFixture, after count: 
 private func soundEditorManifest(_ url: URL) -> [String: Any]? {
     guard let data = try? Data(contentsOf: url) else { return nil }
     return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+}
+
+private func soundEditorDirectoryEntries(_ directory: URL) -> Set<String> {
+    Set((try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? [])
 }
 
 private func soundEditorCandidate(at fileURL: URL, generationID: UUID) -> AICueCandidate {
