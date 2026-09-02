@@ -326,10 +326,12 @@ public struct SoundPackLibraryScanner: Sendable {
     /// Production scanner with one deterministic observation point for atomic-replacement tests.
     public static func testingLive(
         environment: AudioImportEnvironment,
+        onRequest: @escaping @Sendable (SoundPackLibraryScanRequest) -> Void = { _ in },
         afterManifestRead: @escaping @Sendable (String) -> Void
     ) -> SoundPackLibraryScanner {
         SoundPackLibraryScanner(outputOperation: { request in
-            scanSoundPackLibrary(
+            onRequest(request)
+            return scanSoundPackLibrary(
                 environment: environment,
                 request: request,
                 afterManifestRead: afterManifestRead)

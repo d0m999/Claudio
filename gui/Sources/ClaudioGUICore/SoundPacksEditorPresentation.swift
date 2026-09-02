@@ -54,6 +54,7 @@ package struct SoundsEditorPresentation: Equatable {
     package let stopPreviewAction: SoundPackEditorAction
     package let retryLibraryAction: SoundPackEditorAction?
     package let restoreAllFactoryPacksAction: SoundPackEditorAction?
+    package let recoveryActions: [SoundPackEditorRecoveryPresentation]
 }
 
 package struct EventsSoundPackPresentation: Equatable {
@@ -115,9 +116,19 @@ package struct SoundPackEditorAssignmentPresentation: Identifiable, Equatable, S
     package let action: SoundPackEditorAction
 }
 
+package struct SoundPackEditorRecoveryPresentation: Identifiable, Equatable, Sendable {
+    package var id: String { packID }
+    package let packID: String
+    package let retryAction: SoundPackEditorAction
+}
+
 package struct SoundPackEditorAction: Hashable, Sendable {
     package struct ID: Hashable, Sendable {
         fileprivate let rawValue: UInt64
+
+        init(rawValue: UInt64) {
+            self.rawValue = rawValue
+        }
     }
 
     package enum Kind: String, Hashable, Sendable {
@@ -154,6 +165,10 @@ package struct SoundPackEditorAction: Hashable, Sendable {
 package struct SoundPackImportPermit: Hashable, Sendable {
     package struct ID: Hashable, Sendable {
         fileprivate let rawValue: UInt64
+
+        init(rawValue: UInt64) {
+            self.rawValue = rawValue
+        }
     }
 
     package let id: ID
@@ -166,6 +181,10 @@ package struct SoundPackImportPermit: Hashable, Sendable {
 package struct SoundPackAdoptionPermit: Hashable, Sendable {
     package struct ID: Hashable, Sendable {
         fileprivate let rawValue: UInt64
+
+        init(rawValue: UInt64) {
+            self.rawValue = rawValue
+        }
     }
 
     package let id: ID
@@ -219,6 +238,10 @@ package struct SoundPackEditorActivityPresentation: Identifiable, Equatable {
 package struct SoundPackEditorConfirmation: Identifiable, Equatable {
     package struct ID: Hashable, Sendable {
         fileprivate let rawValue: UInt64
+
+        init(rawValue: UInt64) {
+            self.rawValue = rawValue
+        }
     }
 
     package enum Kind: String, Equatable, Sendable {
@@ -237,15 +260,24 @@ package struct SoundPackEditorConfirmation: Identifiable, Equatable {
     package let cancelAction: SoundPackEditorAction
 }
 
+package enum SoundPackEditorAnnouncementKind: Equatable, Sendable {
+    case windowStatus(SoundPacksWindowStatusKind)
+    case operationSucceeded(SoundPackEditorActivityKind)
+}
+
 package struct SoundPackEditorAnnouncement: Identifiable, Equatable {
     package struct ID: Hashable, Sendable {
         fileprivate let rawValue: UInt64
+
+        init(rawValue: UInt64) {
+            self.rawValue = rawValue
+        }
     }
 
     package let id: ID
-    package let kind: SoundPacksWindowStatusKind
-    package let actionText: SoundPacksWindowStatusText
-    package let messageText: SoundPacksWindowStatusText
+    package let kind: SoundPackEditorAnnouncementKind
+    package let actionText: SoundPacksWindowStatusText?
+    package let messageText: SoundPacksWindowStatusText?
 }
 
 package enum SoundPacksEditorContext: Equatable, Sendable {

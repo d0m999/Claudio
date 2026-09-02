@@ -808,10 +808,12 @@ public final class SoundPacksWindowModel: ObservableObject {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.reload(
-                        followActivePack: true,
-                        refreshSoundPackLibrary:
-                            self.refreshCoordinator.windowReloadRequiresLibraryRefresh)
+                    self.withEditorStateTransition {
+                        self.reload(
+                            followActivePack: true,
+                            refreshSoundPackLibrary:
+                                self.refreshCoordinator.windowReloadRequiresLibraryRefresh)
+                    }
                 }
             }
         windowContentRefreshCancellable = refreshCoordinator.$windowContentReloadRevision
@@ -819,10 +821,12 @@ public final class SoundPacksWindowModel: ObservableObject {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated {
                     guard let self else { return }
-                    self.reload(
-                        followActivePack: false,
-                        refreshSoundPackLibrary:
-                            self.refreshCoordinator.windowContentReloadRequiresLibraryRefresh)
+                    self.withEditorStateTransition {
+                        self.reload(
+                            followActivePack: false,
+                            refreshSoundPackLibrary:
+                                self.refreshCoordinator.windowContentReloadRequiresLibraryRefresh)
+                    }
                 }
             }
 
@@ -1372,6 +1376,41 @@ public final class SoundPacksWindowModel: ObservableObject {
             return
         }
         Task { await soundPackLibrary.requestRefresh(trigger: .retry) }
+    }
+
+    /// Re-reads only configuration and reprojects the currently retained library facts. The
+    /// owner calls this before validating a capability so a malformed or changed scope wins over
+    /// stale UI identity without inventing a sound-pack scan.
+    func refreshEditorConfigProjection() {
+        #if DEBUG
+        guard readSource.readsSharedSnapshot else {
+            reloadSynchronously(followActivePack: false)
+            return
+        }
+        #endif
+        configState = loadPanelConfig(from: configFile)
+        baseConfig = configState.resolvedConfig
+        applyManagedScopeConfig()
+        if let librarySnapshot {
+            applySnapshot(librarySnapshot, followActivePack: false)
+        }
+    }
+
+    func editorSafePackDirectory(packID: String) -> URL? {
+        guard packCards.contains(where: { $0.id == packID && $0.availability == .installed })
+        else { return nil }
+        return resolvePackDirectory(
+            id: packID,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory)
+    }
+
+    func editorSafeAudioFile(packID: String, fileName: String) -> URL? {
+        guard let directory = editorSafePackDirectory(packID: packID),
+            let file = safePackFileURL(fileName, in: directory),
+            nonEmptyRegularFileExists(at: file)
+        else { return nil }
+        return file
     }
 
     #if DEBUG
@@ -2540,11 +2579,14 @@ public final class SoundPacksWindowModel: ObservableObject {
         if readSource.readsSharedSnapshot {
             audioInventoryTask?.cancel()
             let previous = selectedAudioInventoryPackID == packID ? selectedAudioFiles : nil
+            let selectionGeneration = inspectionSelectionRevision
             selectedAudioInventoryPackID = packID
             selectedAudioInventoryState = .loading(previous: previous)
             audioInventoryTask = Task { @MainActor [weak self, soundPackLibrary] in
                 let inventory = await soundPackLibrary.audioInventory(packID: packID)
-                guard !Task.isCancelled, let self, self.selectedPackID == packID else { return }
+                guard !Task.isCancelled, let self, self.selectedPackID == packID,
+                    self.inspectionSelectionRevision == selectionGeneration
+                else { return }
                 switch inventory {
                 case .available(let files):
                     self.selectedAudioInventoryState = .ready(files)
