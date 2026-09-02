@@ -825,7 +825,7 @@ func runSoundPacksEditorMutationSuites() async {
                 "partial/changedDespiteFailure 整批只能请求一次 exact affected-set refresh")
             expect(
                 owner.presentation.pendingAnnouncement?.kind
-                    != .operationSucceeded(.restoreAllFactory),
+                    != .operation(kind: .restoreAllFactory, completion: .succeeded),
                 "changedDespiteFailure 不得伪造 restore-all success announcement")
         }
     }
@@ -904,7 +904,8 @@ func runSoundPacksEditorMutationSuites() async {
                 fixture.recorder.requests.count == scansBefore,
                 "EEXIST 仅证明外部 occupancy，owner 不得为失败候选发布 fake refresh")
             expect(
-                owner.presentation.pendingAnnouncement?.kind != .operationSucceeded(.fork),
+                owner.presentation.pendingAnnouncement?.kind
+                    != .operation(kind: .fork, completion: .succeeded),
                 "fork exhaustion 不得进入 success announcement queue")
         }
     }
