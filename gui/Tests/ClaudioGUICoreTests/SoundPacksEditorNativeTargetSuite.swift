@@ -70,7 +70,7 @@ private func inventoryRows(
     switch inventory {
     case .idle:
         return []
-    case .loading(let previous), .failed(let previous):
+    case .loading(let previous), .failed(previous: let previous, reason: _):
         return previous ?? []
     case .ready(let rows):
         return rows
