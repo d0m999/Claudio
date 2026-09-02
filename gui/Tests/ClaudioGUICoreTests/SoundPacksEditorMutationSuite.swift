@@ -322,7 +322,8 @@ func makeSoundEditorFixture(
     starred: [String] = [],
     durationProbe: (any AudioDurationProbing)? = nil,
     config: ClaudioConfig? = nil,
-    builtinPackIDs: Set<String> = []
+    builtinPackIDs: Set<String> = [],
+    afterFinalImportCancellationSampleForTesting: (@Sendable () -> Void)? = nil
 ) -> SoundEditorFixture {
     let packs = root.appendingPathComponent("packs", isDirectory: true)
     let factoryPacks = root.appendingPathComponent("factory-packs", isDirectory: true)
@@ -374,12 +375,24 @@ func makeSoundEditorFixture(
             case .failure(let error): return .unavailable(error)
             }
         })
-    let owner = SoundPacksEditorOwner(
-        configFile: configFile,
-        lockFile: root.appendingPathComponent("config.lock"),
-        environment: environment,
-        soundPackLibrary: library,
-        refreshCoordinator: SoundPacksRefreshCoordinator())
+    let owner: SoundPacksEditorOwner
+    if let afterFinalImportCancellationSampleForTesting {
+        owner = SoundPacksEditorOwner(
+            configFile: configFile,
+            lockFile: root.appendingPathComponent("config.lock"),
+            environment: environment,
+            soundPackLibrary: library,
+            refreshCoordinator: SoundPacksRefreshCoordinator(),
+            afterFinalImportCancellationSampleForTesting:
+                afterFinalImportCancellationSampleForTesting)
+    } else {
+        owner = SoundPacksEditorOwner(
+            configFile: configFile,
+            lockFile: root.appendingPathComponent("config.lock"),
+            environment: environment,
+            soundPackLibrary: library,
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+    }
     return SoundEditorFixture(
         owner: owner,
         library: library,

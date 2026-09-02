@@ -1034,6 +1034,217 @@ func runSoundPacksEditorAsyncOperationSuites() async {
         }
     }
 
+    await suite("Sound editor perform：post-sample cancel 阻止 Event final bind") {
+        await withTempDirectory { root in
+            let gate = SoundEditorPostSampleGate()
+            defer { gate.release() }
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["pack-a"],
+                afterFinalImportCancellationSampleForTesting: { gate.pauseWorker() })
+            let owner = fixture.owner
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 240)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard let permit = soundEditorImportPermit(owner: owner, bindTo: .stop) else {
+                expect(false, "post-sample import fixture 必须取得 Event-bound permit")
+                return
+            }
+
+            let source = root.appendingPathComponent("post-sample-import.mp3")
+            let sourceBytes = validMP3ID3Data()
+            writeFixture(sourceBytes, to: source)
+            let targetDirectory = root.appendingPathComponent("packs/pack-a")
+            let importedURL = targetDirectory.appendingPathComponent(source.lastPathComponent)
+            let entriesBefore = soundEditorDirectoryEntries(targetDirectory)
+            let manifestURL = targetDirectory.appendingPathComponent("manifest.json")
+            let manifestBefore = try? Data(contentsOf: manifestURL)
+            let scansBefore = fixture.recorder.requests.count
+
+            let task = Task { @MainActor in
+                await owner.perform(
+                    .importAudio(permit: permit, sources: [source], bindTo: .stop))
+            }
+            guard await gate.waitUntilEntered() else {
+                gate.release()
+                _ = await task.value
+                expect(false, "executor 必须进入 post-sample finalize gate")
+                return
+            }
+            guard
+                let activity = owner.presentation.activities.last(where: {
+                    $0.kind == .importAudio && $0.event == .stop && $0.phase == .busy
+                }), let cancelAction = activity.cancelAction
+            else {
+                gate.release()
+                _ = await task.value
+                expect(false, "post-sample gate 期间必须保持同一 busy/cancel identity")
+                return
+            }
+            expect(
+                (try? Data(contentsOf: importedURL)) == sourceBytes,
+                "gate 必须位于 accepted pack bytes 发布之后")
+            expect(
+                (try? Data(contentsOf: manifestURL)) == manifestBefore,
+                "gate 必须位于 Event final bind 之前")
+            expect(
+                fixture.recorder.requests.count == scansBefore,
+                "gate 必须位于唯一 post-write refresh 之前")
+            expect(owner.send(.invoke(cancelAction)) == .applied, "late cancel 必须命中 live token")
+            expect(
+                owner.send(.invoke(cancelAction)) == .rejected(.staleAction),
+                "post-sample cancel capability 必须 single-use")
+            gate.release()
+
+            let result = await task.value
+            guard case .imported(let outcome) = result,
+                let imported = outcome.accepted.last
+            else {
+                expect(false, "post-write cancel 必须返回真实 imported facts")
+                return
+            }
+            await waitForSoundEditorScan(fixture, after: scansBefore)
+            expect(
+                outcome.boundEvent == nil && outcome.orphan == imported,
+                "live token revalidation 必须把 accepted file 投影为 cancelled orphan")
+            expect(
+                soundEditorDirectoryEntries(targetDirectory).subtracting(entriesBefore)
+                    == [imported.fileName]
+                    && (try? Data(contentsOf: importedURL)) == sourceBytes,
+                "late cancel 不伪造 rollback，但只能保留唯一 recoverable orphan")
+            expect(
+                (try? Data(contentsOf: manifestURL)) == manifestBefore,
+                "post-sample cancel 不得继续 Event bind 或改写未知 sibling")
+            expect(
+                owner.presentation.activities.contains {
+                    $0.operationID == activity.operationID
+                        && $0.phase
+                            == .orphan(fileName: imported.fileName, failure: .cancelled)
+                        && $0.cancelAction == nil
+                },
+                "activity 必须以同一 ID settle 为 exact cancelled orphan")
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs == ["pack-a"],
+                "post-sample changed truth 必须只有一次 exact pack refresh")
+        }
+    }
+
+    await suite("Sound editor perform：post-sample cancel 阻止 AI adoption final bind") {
+        await withTempDirectory { root in
+            let gate = SoundEditorPostSampleGate()
+            defer { gate.release() }
+            let fixture = makeIsolatedAdoptionFixture(
+                root: root,
+                afterFinalImportCancellationSampleForTesting: { gate.pauseWorker() })
+            let owner = fixture.owner
+            let generationID = UUID()
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: fixture.route,
+                        requestRevision: 241,
+                        candidateGenerationID: generationID)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .events(let events) = owner.presentation.mode,
+                let permit = events.adoptionPermit
+            else {
+                expect(false, "post-sample adoption fixture 必须取得 permit")
+                return
+            }
+
+            writeFixture(
+                #"{"id":"workbuddy-pack","name":"workbuddy-pack","events":{"stop":"stop.mp3"},"audio_names":{"stop.mp3":"旧声音"},"future":{"keep":true}}"#,
+                to: fixture.manifest)
+            let source = root.appendingPathComponent("post-sample-candidate.mp3")
+            let sourceBytes = validMP3ID3Data()
+            writeFixture(sourceBytes, to: source)
+            let candidate = soundEditorCandidate(at: source, generationID: generationID)
+            let targetDirectory = fixture.manifest.deletingLastPathComponent()
+            let entriesBefore = soundEditorDirectoryEntries(targetDirectory)
+            let manifestBefore = try? Data(contentsOf: fixture.manifest)
+            let scansBefore = fixture.recorder.requests.count
+
+            let task = Task { @MainActor in
+                await owner.perform(
+                    .adoptAICue(
+                        candidate: candidate,
+                        displayName: try! AICueDisplayName("迟到取消"),
+                        permit: permit))
+            }
+            guard await gate.waitUntilEntered() else {
+                gate.release()
+                _ = await task.value
+                expect(false, "adoption executor 必须进入 post-sample gate")
+                return
+            }
+            let newEntries = soundEditorDirectoryEntries(targetDirectory).subtracting(entriesBefore)
+            guard
+                let activity = owner.presentation.activities.last(where: {
+                    $0.kind == .adoptAICue && $0.phase == .busy
+                }), let cancelAction = activity.cancelAction,
+                newEntries.count == 1, let importedFileName = newEntries.first
+            else {
+                gate.release()
+                _ = await task.value
+                expect(false, "adoption gate 期间必须有 busy identity 与唯一 imported file")
+                return
+            }
+            expect(
+                (try? Data(contentsOf: targetDirectory.appendingPathComponent(importedFileName)))
+                    == sourceBytes,
+                "adoption gate 必须在 candidate bytes 发布后")
+            expect(
+                (try? Data(contentsOf: fixture.manifest)) == manifestBefore,
+                "adoption gate 必须在 Event/display-name atomic bind 前")
+            expect(
+                fixture.recorder.requests.count == scansBefore,
+                "adoption gate 必须在唯一 refresh 之前")
+            expect(owner.send(.invoke(cancelAction)) == .applied, "adoption late cancel 必须命中")
+            expect(
+                owner.send(.invoke(cancelAction)) == .rejected(.staleAction),
+                "adoption cancel capability 必须 single-use")
+            gate.release()
+
+            let result = await task.value
+            guard case .adoptionOrphan(let imported, let failure) = result else {
+                expect(false, "late-cancel adoption 必须返回 typed orphan")
+                return
+            }
+            await waitForSoundEditorScan(fixture.base, after: scansBefore)
+            expect(
+                failure == .cancelled && imported.fileName == importedFileName,
+                "adoption live token revalidation 必须保留 exact cancelled orphan identity")
+            expect(
+                soundEditorDirectoryEntries(targetDirectory).subtracting(entriesBefore)
+                    == [imported.fileName]
+                    && (try? Data(
+                        contentsOf: targetDirectory.appendingPathComponent(imported.fileName)))
+                        == sourceBytes,
+                "late-cancel adoption 只能留一个可恢复 candidate file")
+            expect(
+                (try? Data(contentsOf: fixture.manifest)) == manifestBefore,
+                "late-cancel adoption 必须保留旧 binding、audio_names 与 future sibling")
+            expect(
+                owner.presentation.activities.contains {
+                    $0.operationID == activity.operationID
+                        && $0.phase
+                            == .orphan(fileName: imported.fileName, failure: .cancelled)
+                        && $0.cancelAction == nil
+                },
+                "adoption activity 必须以同一 ID settle exact cancelled orphan")
+            if case .events(let current) = owner.presentation.mode {
+                expect(current.route == fixture.route, "background completion 不得覆盖当前 Events slice")
+            } else {
+                expect(false, "late-cancel adoption 后必须保持 Events mode")
+            }
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs
+                        == ["workbuddy-pack"],
+                "late-cancel adoption 必须只有一次 exact target refresh")
+        }
+    }
+
     await suite("Sound editor presentation：built-in 与 shared user pack 不签 adoption permit") {
         await withTempDirectory { root in
             let sharedConfig = ClaudioConfig(
@@ -1162,7 +1373,8 @@ private struct IsolatedAdoptionFixture {
 @MainActor
 private func makeIsolatedAdoptionFixture(
     root: URL,
-    durationProbe: (any AudioDurationProbing)? = nil
+    durationProbe: (any AudioDurationProbing)? = nil,
+    afterFinalImportCancellationSampleForTesting: (@Sendable () -> Void)? = nil
 ) -> IsolatedAdoptionFixture {
     let base = makeSoundEditorFixture(
         root: root,
@@ -1173,7 +1385,9 @@ private func makeIsolatedAdoptionFixture(
             surfaceOverrides: [
                 HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
                     selectedPack: "workbuddy-pack")
-            ]))
+            ]),
+        afterFinalImportCancellationSampleForTesting:
+            afterFinalImportCancellationSampleForTesting)
     return IsolatedAdoptionFixture(
         base: base,
         route: EventSettingsWindowRoute(scope: .surface(.workBuddy), event: .stop),
@@ -1200,6 +1414,42 @@ private final class GatedSoundEditorDurationProbe: AudioDurationProbing, @unchec
     }
 
     var hasEntered: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return entered
+    }
+
+    @MainActor
+    func waitUntilEntered() async -> Bool {
+        for _ in 0..<4_096 {
+            if hasEntered { return true }
+            await Task.yield()
+        }
+        return false
+    }
+
+    func release() {
+        condition.lock()
+        released = true
+        condition.broadcast()
+        condition.unlock()
+    }
+}
+
+private final class SoundEditorPostSampleGate: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var entered = false
+    private var released = false
+
+    func pauseWorker() {
+        condition.lock()
+        entered = true
+        condition.broadcast()
+        while !released { condition.wait() }
+        condition.unlock()
+    }
+
+    private var hasEntered: Bool {
         condition.lock()
         defer { condition.unlock() }
         return entered

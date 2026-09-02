@@ -8,6 +8,16 @@ struct SoundPackAudioImportExecutor: Sendable {
         label: "com.claudio.sound-pack-editor.import",
         qos: .userInitiated)
 
+    #if DEBUG
+    private let afterFinalCancellationSampleForTesting: (@Sendable () -> Void)?
+
+    init(afterFinalCancellationSampleForTesting: (@Sendable () -> Void)? = nil) {
+        self.afterFinalCancellationSampleForTesting = afterFinalCancellationSampleForTesting
+    }
+    #else
+    init() {}
+    #endif
+
     func execute(_ job: SoundPackAudioImportJob) async -> SoundPackAudioImportExecution {
         let cancellation = SoundPackAudioImportCancellation()
         return await execute(job, cancellation: cancellation)
@@ -17,6 +27,9 @@ struct SoundPackAudioImportExecutor: Sendable {
         _ job: SoundPackAudioImportJob,
         cancellation: SoundPackAudioImportCancellation
     ) async -> SoundPackAudioImportExecution {
+        #if DEBUG
+        let afterFinalCancellationSampleForTesting = afterFinalCancellationSampleForTesting
+        #endif
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 Self.queue.async {
@@ -28,10 +41,13 @@ struct SoundPackAudioImportExecutor: Sendable {
                         job.requests,
                         packID: job.packID,
                         environment: job.environment)
-                    continuation.resume(
-                        returning: .completed(
-                            result,
-                            cancellationRequested: cancellation.isCancelled))
+                    let execution = SoundPackAudioImportExecution.completed(
+                        result,
+                        cancellationRequested: cancellation.isCancelled)
+                    #if DEBUG
+                    afterFinalCancellationSampleForTesting?()
+                    #endif
+                    continuation.resume(returning: execution)
                 }
             }
         } onCancel: {

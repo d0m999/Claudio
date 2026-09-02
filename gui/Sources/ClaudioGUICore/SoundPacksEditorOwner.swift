@@ -14,7 +14,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     @Published package private(set) var presentation: SoundPacksEditorPresentation
     private let refreshCoordinator: SoundPacksRefreshCoordinator?
     private let importEnvironment: AudioImportEnvironment
-    private let audioImportExecutor = SoundPackAudioImportExecutor()
+    private let audioImportExecutor: SoundPackAudioImportExecutor
     private var context: SoundPacksEditorContext = .inactive
     private var actionEpoch: UInt64 = 0
     private var candidateGenerationEpoch: UInt64 = 0
@@ -44,7 +44,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
     private var lastSelectionAnnouncementDecision: (packID: String?, shouldAnnounce: Bool)?
 
-    public init(
+    public convenience init(
         configFile: URL,
         lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
@@ -57,17 +57,33 @@ public final class SoundPacksEditorOwner: ObservableObject {
             environment: environment,
             soundPackLibrary: soundPackLibrary,
             refreshCoordinator: refreshCoordinator)
+        self.init(
+            model: model,
+            userPacksDirectory: environment.userPacksDirectory,
+            importEnvironment: environment,
+            refreshCoordinator: refreshCoordinator,
+            audioImportExecutor: SoundPackAudioImportExecutor())
+    }
+
+    private init(
+        model: SoundPacksWindowModel,
+        userPacksDirectory: URL,
+        importEnvironment: AudioImportEnvironment,
+        refreshCoordinator: SoundPacksRefreshCoordinator?,
+        audioImportExecutor: SoundPackAudioImportExecutor
+    ) {
         self.model = model
-        self.userPacksDirectory = environment.userPacksDirectory
-        self.importEnvironment = environment
+        self.userPacksDirectory = userPacksDirectory
+        self.importEnvironment = importEnvironment
         self.refreshCoordinator = refreshCoordinator
+        self.audioImportExecutor = audioImportExecutor
         presentation = Self.initialPresentation(from: model.editorProjectionSeed())
         connectSettledModel(model)
     }
 
     #if DEBUG
     /// Deterministic route-test seam that uses the harness's synchronous disk-backed model.
-    public init(
+    public convenience init(
         configFile: URL,
         lockFile: URL,
         environment: AudioImportEnvironment,
@@ -78,22 +94,46 @@ public final class SoundPacksEditorOwner: ObservableObject {
             lockFile: lockFile,
             environment: environment,
             refreshCoordinator: refreshCoordinator)
-        self.model = model
-        self.userPacksDirectory = environment.userPacksDirectory
-        self.importEnvironment = environment
-        self.refreshCoordinator = refreshCoordinator
-        presentation = Self.initialPresentation(from: model.editorProjectionSeed())
-        connectSettledModel(model)
+        self.init(
+            model: model,
+            userPacksDirectory: environment.userPacksDirectory,
+            importEnvironment: environment,
+            refreshCoordinator: refreshCoordinator,
+            audioImportExecutor: SoundPackAudioImportExecutor())
     }
 
     /// Deterministic pending/ready route seam for model fixtures that do not touch user disk.
-    public init(model: SoundPacksWindowModel, userPacksDirectory: URL) {
-        self.model = model
-        self.userPacksDirectory = userPacksDirectory
-        self.importEnvironment = model.editorImportEnvironment
-        refreshCoordinator = nil
-        presentation = Self.initialPresentation(from: model.editorProjectionSeed())
-        connectSettledModel(model)
+    public convenience init(model: SoundPacksWindowModel, userPacksDirectory: URL) {
+        self.init(
+            model: model,
+            userPacksDirectory: userPacksDirectory,
+            importEnvironment: model.editorImportEnvironment,
+            refreshCoordinator: nil,
+            audioImportExecutor: SoundPackAudioImportExecutor())
+    }
+
+    package convenience init(
+        configFile: URL,
+        lockFile: URL,
+        environment: AudioImportEnvironment,
+        soundPackLibrary: SoundPackLibrary,
+        refreshCoordinator: SoundPacksRefreshCoordinator,
+        afterFinalImportCancellationSampleForTesting: @escaping @Sendable () -> Void
+    ) {
+        let model = SoundPacksWindowModel(
+            configFile: configFile,
+            lockFile: lockFile,
+            environment: environment,
+            soundPackLibrary: soundPackLibrary,
+            refreshCoordinator: refreshCoordinator)
+        self.init(
+            model: model,
+            userPacksDirectory: environment.userPacksDirectory,
+            importEnvironment: environment,
+            refreshCoordinator: refreshCoordinator,
+            audioImportExecutor: SoundPackAudioImportExecutor(
+                afterFinalCancellationSampleForTesting:
+                    afterFinalImportCancellationSampleForTesting))
     }
     #endif
 
