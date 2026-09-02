@@ -786,7 +786,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 selectedAudioInventoryState = .idle
             }
             libraryPresentationState = .ready
-            editorLibraryPresentation = .ready(snapshotRevision: nil)
+            editorLibraryPresentation = .ready
         } else {
             packCards = []
             starredPackIDs = []
@@ -897,11 +897,15 @@ public final class SoundPacksWindowModel: ObservableObject {
         case .refreshing:
             editorLibraryPresentation = .loading(previousAvailable: true)
         case .ready:
-            editorLibraryPresentation = .ready(snapshotRevision: nil)
+            editorLibraryPresentation = .ready
         case .refreshFailed:
-            editorLibraryPresentation = .failed(previousAvailable: true)
+            editorLibraryPresentation = .failed(
+                previousAvailable: true,
+                reason: .scanFailed)
         case .loadFailed:
-            editorLibraryPresentation = .failed(previousAvailable: false)
+            editorLibraryPresentation = .failed(
+                previousAvailable: false,
+                reason: .scanFailed)
         }
     }
     #endif
@@ -1000,6 +1004,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             writesAllowed: writesAllowed && configAllowsWrites,
             config: config,
             packCards: packCards,
+            referencedPackIDs: referencedSoundPackIDs(in: baseConfig),
             selectedPackID: selectedPackID,
             selectedEventRows: selectedEventRows,
             selectedAudioInventoryState: selectedAudioInventoryState,
@@ -1582,13 +1587,22 @@ public final class SoundPacksWindowModel: ObservableObject {
                 applySnapshot(previous, followActivePack: pendingFollowActivePack)
             }
         case .ready(let snapshot):
-            editorLibraryPresentation = .ready(snapshotRevision: snapshot.revision)
+            editorLibraryPresentation = .ready
             librarySnapshot = snapshot
             applySnapshot(snapshot, followActivePack: pendingFollowActivePack)
             pendingFollowActivePack = false
             libraryPresentationState = .ready
         case .failed(let previous, let error):
-            editorLibraryPresentation = .failed(previousAvailable: previous != nil)
+            let reason: SoundPackEditorLibraryFailureReason
+            switch error {
+            case .rootNotDirectory, .rootUnreadable:
+                reason = .locationUnavailable
+            case .scanFailed:
+                reason = .scanFailed
+            }
+            editorLibraryPresentation = .failed(
+                previousAvailable: previous != nil,
+                reason: reason)
             if let previous {
                 librarySnapshot = previous
                 applySnapshot(previous, followActivePack: pendingFollowActivePack)

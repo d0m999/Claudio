@@ -6,6 +6,7 @@ import Foundation
 package struct SoundPacksEditorPresentation: Equatable {
     package let revision: UInt64
     package let library: SoundPackLibraryPresentation
+    package let installedPackIDs: Set<String>
     package let mode: SoundPacksEditorModePresentation
     package let activities: [SoundPackEditorActivityPresentation]
     package let pendingConfirmation: SoundPackEditorConfirmation?
@@ -15,13 +16,18 @@ package struct SoundPacksEditorPresentation: Equatable {
 package enum SoundPackLibraryPresentation: Equatable, Sendable {
     case unloaded
     case loading(previousAvailable: Bool)
-    case ready(snapshotRevision: UInt64?)
-    case failed(previousAvailable: Bool)
+    case ready
+    case failed(previousAvailable: Bool, reason: SoundPackEditorLibraryFailureReason)
 
     package var isFresh: Bool {
         if case .ready = self { return true }
         return false
     }
+}
+
+package enum SoundPackEditorLibraryFailureReason: Equatable, Sendable {
+    case locationUnavailable
+    case scanFailed
 }
 
 package enum SoundPacksEditorModePresentation: Equatable {
@@ -72,9 +78,13 @@ package struct SoundPackEditorPackPresentation: Identifiable, Equatable {
     package let name: String?
     package let state: PackCardState
     package let availability: PackCardAvailability
-    package let isSelected: Bool
+    package let isInspected: Bool
+    package let isActiveForScope: Bool
+    package let isReferencedByAnyScope: Bool
     package let isStarred: Bool
     package let isBuiltinReadOnly: Bool
+    package let isCC0: Bool
+    package let factoryIntegrity: Bool?
     package let inspectAction: SoundPackEditorAction
     package let useAction: SoundPackEditorAction?
     package let toggleStarAction: SoundPackEditorAction?
@@ -99,7 +109,15 @@ package enum SoundPackEditorInventoryPresentation: Equatable, Sendable {
     case idle
     case loading(previous: [SoundPackEditorAudioPresentation]?)
     case ready([SoundPackEditorAudioPresentation])
-    case failed(previous: [SoundPackEditorAudioPresentation]?)
+    case failed(
+        previous: [SoundPackEditorAudioPresentation]?,
+        reason: SoundPackEditorInventoryFailureReason)
+}
+
+package enum SoundPackEditorInventoryFailureReason: Equatable, Sendable {
+    case packUnavailable
+    case manifestUnreadable
+    case directoryUnavailable
 }
 
 package struct SoundPackEditorAudioPresentation: Identifiable, Equatable, Sendable {
@@ -387,6 +405,7 @@ struct SoundPacksEditorModelSeed: Equatable {
     let writesAllowed: Bool
     let config: ClaudioConfig
     let packCards: [PackCard]
+    let referencedPackIDs: Set<String>
     let selectedPackID: String?
     let selectedEventRows: [EventRow]
     let selectedAudioInventoryState: SoundPackAudioInventoryPresentationState

@@ -145,6 +145,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         SoundPacksEditorPresentation(
             revision: 0,
             library: seed.library,
+            installedPackIDs: seed.installedPackIDs,
             mode: .inactive,
             activities: [],
             pendingConfirmation: nil,
@@ -649,6 +650,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
             publish(from: seed)
             return .rejected(.scopeUnavailable)
         }
+        if action.kind.requiresFreshLibrary, !seed.library.isFresh {
+            consumeConfirmationAttemptIfCurrent(action)
+            publish(from: seed)
+            return action.kind == .confirm
+                ? .rejected(.staleConfirmation) : .rejected(.staleAction)
+        }
         guard let binding = actionLedger[action.id], binding.context == context,
             binding.actionEpoch == actionEpoch,
             binding.selectionGeneration == seed.selectionGeneration,
@@ -836,7 +843,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
         // Consume and clear before any Task can be scheduled. Replaying either action can never
         // cross this synchronous MainActor boundary.
         pendingConfirmationState = nil
-        guard confirmation.context == context,
+        guard seed.library.isFresh,
+            confirmation.context == context,
             confirmation.actionEpoch == actionEpoch,
             confirmation.selectionGeneration == seed.selectionGeneration,
             confirmation.snapshotRevision == seed.snapshotRevision
@@ -896,7 +904,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     ) {
         model.refreshEditorConfigProjection()
         let current = model.editorProjectionSeed()
-        guard current.writesAllowed, binding.context == context,
+        guard current.library.isFresh, current.writesAllowed, binding.context == context,
             binding.selectionGeneration == current.selectionGeneration,
             binding.snapshotRevision == current.snapshotRevision
         else {
@@ -992,6 +1000,9 @@ public final class SoundPacksEditorOwner: ObservableObject {
         forcingCapabilityGeneration: Bool
     ) {
         guard forcingCapabilityGeneration || seed != lastCommittedModelSeed else { return }
+        if !seed.library.isFresh {
+            pendingConfirmationState = nil
+        }
         presentationRevision &+= 1
         actionLedger.removeAll(keepingCapacity: true)
         prunePermits(using: seed)
@@ -999,6 +1010,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         let nextPresentation = SoundPacksEditorPresentation(
             revision: presentationRevision,
             library: seed.library,
+            installedPackIDs: seed.installedPackIDs,
             mode: makeMode(from: seed),
             activities: makeActivities(seed: seed),
             pendingConfirmation: makeConfirmation(seed: seed),
@@ -1051,7 +1063,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
         }
         let selectedIsWritable =
             selectedPack.map {
-                !$0.isBuiltinReadOnly && $0.availability == .installed && seed.writesAllowed
+                seed.library.isFresh && !$0.isBuiltinReadOnly
+                    && $0.availability == .installed && seed.writesAllowed
             } ?? false
         return SoundsEditorPresentation(
             route: route,
@@ -1074,10 +1087,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
                                 bindTo: row.event),
                             seed: seed)
                         : nil,
-                    previewAction: row.coverage.previewEnabled
+                    previewAction: seed.library.isFresh && row.coverage.previewEnabled
                         ? makeAction(.preview, binding: .preview(event: row.event), seed: seed)
                         : nil,
-                    clearAction: selectedIsWritable && row.coverage.previewEnabled
+                    clearAction: selectedIsWritable && row.coverage.hasManifestBinding
                         ? makeAction(.clear, binding: .clear(event: row.event), seed: seed)
                         : nil)
             },
@@ -1094,20 +1107,22 @@ public final class SoundPacksEditorOwner: ObservableObject {
             retryLibraryAction: seed.library.canRetryEditorLibrary
                 ? makeAction(.retryLibrary, binding: .retryLibrary, seed: seed)
                 : nil,
-            restoreAllFactoryPacksAction: seed.writesAllowed && !seed.builtinPackIDs.isEmpty
+            restoreAllFactoryPacksAction: seed.library.isFresh && seed.writesAllowed
+                && !seed.builtinPackIDs.isEmpty
                 ? makeAction(
                     .restoreAllFactory,
                     binding: .requestRestoreAllFactory,
                     seed: seed)
                 : nil,
-            recoveryActions: seed.factoryRestoreRetryPackIDs.map { packID in
-                SoundPackEditorRecoveryPresentation(
-                    packID: packID,
-                    retryAction: makeAction(
-                        .retryRestore,
-                        binding: .requestRetryRestore(packID: packID),
-                        seed: seed))
-            })
+            recoveryActions: seed.library.isFresh && seed.writesAllowed
+                ? seed.factoryRestoreRetryPackIDs.map { packID in
+                    SoundPackEditorRecoveryPresentation(
+                        packID: packID,
+                        retryAction: makeAction(
+                            .retryRestore,
+                            binding: .requestRetryRestore(packID: packID),
+                            seed: seed))
+                } : [])
     }
 
     private func makeEventsPresentation(
@@ -1153,35 +1168,41 @@ public final class SoundPacksEditorOwner: ObservableObject {
         card: PackCard,
         seed: SoundPacksEditorModelSeed
     ) -> SoundPackEditorPackPresentation {
-        let isSelected = card.id == seed.selectedPackID
+        let isInspected = card.id == seed.selectedPackID
+        let isActiveForScope = card.isSelected
+        let isReferencedByAnyScope = seed.referencedPackIDs.contains(card.id)
         let isBuiltin = seed.builtinPackIDs.contains(card.id)
         let isAvailable = card.availability == .installed
-        let writesAllowed = seed.writesAllowed && isAvailable
+        let writesAllowed = seed.library.isFresh && seed.writesAllowed && isAvailable
         return SoundPackEditorPackPresentation(
             id: card.id,
             name: card.name,
             state: card.state,
             availability: card.availability,
-            isSelected: isSelected,
+            isInspected: isInspected,
+            isActiveForScope: isActiveForScope,
+            isReferencedByAnyScope: isReferencedByAnyScope,
             isStarred: seed.starredPackIDs.contains(card.id),
             isBuiltinReadOnly: isBuiltin,
+            isCC0: card.isCC0,
+            factoryIntegrity: card.factoryIntegrity,
             inspectAction: makeAction(.inspect, binding: .inspect(packID: card.id), seed: seed),
-            useAction: writesAllowed
+            useAction: writesAllowed && !isActiveForScope
                 ? makeAction(.use, binding: .use(packID: card.id), seed: seed) : nil,
             toggleStarAction: writesAllowed
                 ? makeAction(.toggleStar, binding: .toggleStar(packID: card.id), seed: seed) : nil,
-            forkAction: writesAllowed && isBuiltin && isSelected
+            forkAction: writesAllowed && isBuiltin && isInspected
                 ? makeAction(.fork, binding: .fork(packID: card.id), seed: seed) : nil,
-            deleteAction: writesAllowed && !isBuiltin && isSelected
+            deleteAction: writesAllowed && !isBuiltin && isInspected && !isReferencedByAnyScope
                 ? makeAction(.deletePack, binding: .requestDeletePack(packID: card.id), seed: seed)
                 : nil,
-            restoreAction: writesAllowed && isBuiltin && isSelected
+            restoreAction: writesAllowed && isBuiltin && isInspected
                 ? makeAction(
                     .restoreFactory,
                     binding: .requestRestoreFactory(packID: card.id),
                     seed: seed)
                 : nil,
-            revealAction: isAvailable
+            revealAction: seed.library.isFresh && isAvailable
                 ? makeAction(.reveal, binding: .revealPack(packID: card.id), seed: seed) : nil)
     }
 
@@ -1189,12 +1210,13 @@ public final class SoundPacksEditorOwner: ObservableObject {
         seed: SoundPacksEditorModelSeed,
         isWritable: Bool
     ) -> SoundPackEditorInventoryPresentation {
+        let canTargetInventory = seed.library.isFresh
         func rows(_ files: [PackAudioFile]) -> [SoundPackEditorAudioPresentation] {
             files.map { file in
                 SoundPackEditorAudioPresentation(
                     fileName: file.fileName,
                     isOrphan: file.isOrphan,
-                    assignments: isWritable
+                    assignments: canTargetInventory && isWritable
                         ? Event.allCases.map { event in
                             SoundPackEditorAssignmentPresentation(
                                 event: event,
@@ -1203,16 +1225,18 @@ public final class SoundPacksEditorOwner: ObservableObject {
                                     binding: .assign(fileName: file.fileName, event: event),
                                     seed: seed))
                         } : [],
-                    deleteAction: isWritable && file.isOrphan
+                    deleteAction: canTargetInventory && isWritable && file.isOrphan
                         ? makeAction(
                             .deleteOrphan,
                             binding: .requestDeleteOrphan(fileName: file.fileName),
                             seed: seed)
                         : nil,
-                    revealAction: makeAction(
-                        .reveal,
-                        binding: .revealAudio(fileName: file.fileName),
-                        seed: seed))
+                    revealAction: canTargetInventory
+                        ? makeAction(
+                            .reveal,
+                            binding: .revealAudio(fileName: file.fileName),
+                            seed: seed)
+                        : nil)
             }
         }
         switch seed.selectedAudioInventoryState {
@@ -1222,8 +1246,17 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return .loading(previous: previous.map(rows))
         case .ready(let files):
             return .ready(rows(files))
-        case .failed(let previous, _):
-            return .failed(previous: previous.map(rows))
+        case .failed(let previous, let error):
+            let reason: SoundPackEditorInventoryFailureReason
+            switch error {
+            case .packNotFound:
+                reason = .packUnavailable
+            case .manifestUnreadable:
+                reason = .manifestUnreadable
+            case .directoryUnreadable:
+                reason = .directoryUnavailable
+            }
+            return .failed(previous: previous.map(rows), reason: reason)
         }
     }
 
@@ -1284,6 +1317,11 @@ public final class SoundPacksEditorOwner: ObservableObject {
     }
 
     private func prunePermits(using seed: SoundPacksEditorModelSeed) {
+        guard seed.library.isFresh else {
+            importPermitLedger.removeAll(keepingCapacity: true)
+            adoptionPermitLedger.removeAll(keepingCapacity: true)
+            return
+        }
         importPermitLedger = importPermitLedger.filter { _, binding in
             binding.context == context
                 && binding.actionEpoch == actionEpoch
@@ -1618,6 +1656,28 @@ extension SoundPackEditorAction.Kind {
             true
         case .inspect, .preview, .stopPreview, .reveal, .retryLibrary, .cancelOperation,
             .cancelConfirmation:
+            false
+        }
+    }
+
+    fileprivate var requiresFreshLibrary: Bool {
+        switch self {
+        case .use, .toggleStar, .fork, .requestImport, .assign, .clear, .preview, .reveal,
+            .deletePack, .deleteOrphan, .restoreFactory, .retryRestore, .restoreAllFactory,
+            .confirm:
+            true
+        case .inspect, .stopPreview, .retryLibrary, .cancelOperation, .cancelConfirmation:
+            false
+        }
+    }
+}
+
+extension CoverageState {
+    fileprivate var hasManifestBinding: Bool {
+        switch self {
+        case .present, .broken:
+            true
+        case .unmapped:
             false
         }
     }
