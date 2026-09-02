@@ -29,6 +29,13 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private var seenStatusRevisions: Set<Int> = []
     private var isApplyingModelTransition = false
     private var deferredModelSeed: SoundPacksEditorModelSeed?
+    private var isPublishingPresentation = false
+    private var pendingPublication:
+        (
+            seed: SoundPacksEditorModelSeed,
+            forcesCapabilityGeneration: Bool
+        )?
+    private var lastCommittedModelSeed: SoundPacksEditorModelSeed?
     private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
     private var lastSelectionAnnouncementDecision: (packID: String?, shouldAnnounce: Bool)?
 
@@ -98,6 +105,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     }
 
     private func connectSettledModel(_ model: SoundPacksWindowModel) {
+        lastCommittedModelSeed = model.editorProjectionSeed()
         model.onEditorStateSettled = { [weak self] seed in
             self?.receiveSettledModel(seed)
         }
@@ -108,7 +116,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             deferredModelSeed = seed
             return
         }
-        publish(from: seed)
+        publish(from: seed, forcingCapabilityGeneration: false)
     }
 
     @discardableResult
@@ -835,18 +843,44 @@ public final class SoundPacksEditorOwner: ObservableObject {
         return (result, seed)
     }
 
-    private func publish(from seed: SoundPacksEditorModelSeed) {
+    private func publish(
+        from seed: SoundPacksEditorModelSeed,
+        forcingCapabilityGeneration: Bool = true
+    ) {
+        let force =
+            forcingCapabilityGeneration
+            || (pendingPublication?.forcesCapabilityGeneration ?? false)
+        pendingPublication = (seed: seed, forcesCapabilityGeneration: force)
+        guard !isPublishingPresentation else { return }
+        isPublishingPresentation = true
+        defer { isPublishingPresentation = false }
+
+        while let next = pendingPublication {
+            pendingPublication = nil
+            publishImmediately(
+                from: next.seed,
+                forcingCapabilityGeneration: next.forcesCapabilityGeneration)
+        }
+    }
+
+    private func publishImmediately(
+        from seed: SoundPacksEditorModelSeed,
+        forcingCapabilityGeneration: Bool
+    ) {
+        guard forcingCapabilityGeneration || seed != lastCommittedModelSeed else { return }
         presentationRevision &+= 1
         actionLedger.removeAll(keepingCapacity: true)
         prunePermits(using: seed)
         ingestAnnouncements(from: seed.windowStatuses)
-        presentation = SoundPacksEditorPresentation(
+        let nextPresentation = SoundPacksEditorPresentation(
             revision: presentationRevision,
             library: seed.library,
             mode: makeMode(from: seed),
             activities: makeActivities(seed: seed),
             pendingConfirmation: makeConfirmation(seed: seed),
             pendingAnnouncement: announcementQueue.first)
+        lastCommittedModelSeed = seed
+        presentation = nextPresentation
     }
 
     private func makeMode(

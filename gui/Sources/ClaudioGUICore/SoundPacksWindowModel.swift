@@ -684,6 +684,7 @@ public final class SoundPacksWindowModel: ObservableObject {
     /// `libraryPresentationState` intentionally folds `.unloaded` into `.loading`; the new seam
     /// must not lose that identity or infer freshness from cards.
     private var editorLibraryPresentation: SoundPackLibraryPresentation
+    private var lastAcceptedEditorLibraryState: SoundPackLibraryState?
     private var editorTransitionDepth = 0
     private var editorSettlePending = false
     var onEditorStateSettled: ((SoundPacksEditorModelSeed) -> Void)?
@@ -1542,16 +1543,24 @@ public final class SoundPacksWindowModel: ObservableObject {
     #endif
 
     private func consumeLibraryState(_ state: SoundPackLibraryState) {
+        guard state != lastAcceptedEditorLibraryState else { return }
+        if let currentRevision = librarySnapshot?.revision {
+            guard let incomingRevision = state.snapshotRevision,
+                incomingRevision >= currentRevision
+            else { return }
+            if case .ready(let snapshot) = state,
+                snapshot.revision == currentRevision
+            {
+                return
+            }
+        }
+        lastAcceptedEditorLibraryState = state
+
         editorTransitionDepth += 1
         defer {
             editorSettlePending = true
             editorTransitionDepth -= 1
             publishEditorStateIfSettled()
-        }
-        if let currentRevision = librarySnapshot?.revision {
-            guard let incomingRevision = state.snapshotRevision,
-                incomingRevision >= currentRevision
-            else { return }
         }
 
         switch state {

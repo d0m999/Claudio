@@ -550,6 +550,21 @@ public actor SoundPackLibrary {
         inventoryCache.count
     }
 
+    /// Returns the actor's state so a harness can retain an older generation for replay.
+    public func stateForTesting() -> SoundPackLibraryState {
+        state
+    }
+
+    /// Replays a state through the production observation stream without changing the actor's
+    /// actual state. This proves consumer-side duplicate/stale suppression without inventing a
+    /// second callback or bypassing the app-lifetime library owner.
+    public func replayStateForTesting(_ replayedState: SoundPackLibraryState? = nil) {
+        let replayedState = replayedState ?? state
+        for continuation in continuations.values {
+            continuation.yield(replayedState)
+        }
+    }
+
     /// Suspends on the actor until a `refreshSnapshot` caller has installed its continuation and
     /// requested the in-flight follow-up. This is synchronization, not a wall-clock delay.
     public func waitUntilRefreshWaiterIsRegisteredForTesting() async {

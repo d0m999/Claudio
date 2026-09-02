@@ -356,7 +356,7 @@ package enum SoundPackEditorFailure: Error, Equatable, Sendable {
 /// One settled implementation snapshot. This is deliberately `internal`: the owner consumes it
 /// synchronously to build the package presentation, while callers can observe only that final
 /// immutable value.
-struct SoundPacksEditorModelSeed {
+struct SoundPacksEditorModelSeed: Equatable {
     let library: SoundPackLibraryPresentation
     let installedPackIDs: Set<String>
     let snapshotRevision: UInt64?
