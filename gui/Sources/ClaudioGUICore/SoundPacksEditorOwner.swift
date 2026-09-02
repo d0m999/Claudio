@@ -217,8 +217,9 @@ public final class SoundPacksEditorOwner: ObservableObject {
     ) async -> SoundPacksEditorOperationResult {
         model.refreshEditorConfigProjection()
         let seed = model.editorProjectionSeed()
+        let binding = adoptionPermitLedger.removeValue(forKey: permit.id)
         guard seed.writesAllowed else { return .rejected(.scopeUnavailable) }
-        guard let binding = adoptionPermitLedger.removeValue(forKey: permit.id) else {
+        guard let binding else {
             return .rejected(.stalePermit)
         }
         guard binding.context == context,
@@ -371,8 +372,9 @@ public final class SoundPacksEditorOwner: ObservableObject {
     ) async -> SoundPacksEditorOperationResult {
         model.refreshEditorConfigProjection()
         let seed = model.editorProjectionSeed()
+        let binding = importPermitLedger.removeValue(forKey: permit.id)
         guard seed.writesAllowed else { return .rejected(.scopeUnavailable) }
-        guard let binding = importPermitLedger.removeValue(forKey: permit.id) else {
+        guard let binding else {
             return .rejected(.stalePermit)
         }
         guard binding.context == context,
