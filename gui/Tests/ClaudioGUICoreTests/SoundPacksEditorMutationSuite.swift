@@ -188,7 +188,8 @@ func makeSoundEditorFixture(
     root: URL,
     packIDs: [String],
     starred: [String] = [],
-    durationProbe: (any AudioDurationProbing)? = nil
+    durationProbe: (any AudioDurationProbing)? = nil,
+    config: ClaudioConfig? = nil
 ) -> SoundEditorFixture {
     let packs = root.appendingPathComponent("packs", isDirectory: true)
     for packID in packIDs {
@@ -200,12 +201,16 @@ func makeSoundEditorFixture(
         writeFixture("audio", to: packs.appendingPathComponent("\(packID)/stop.mp3"))
     }
     let configFile = root.appendingPathComponent("config.json")
-    let starredJSON = starred.map { "\"\($0)\"" }.joined(separator: ",")
-    writeFixture(
-        """
-        {"selected_pack":"\(packIDs.first ?? "")","master_volume":0.37,"events":{"stop":true},"starred_packs":[\(starredJSON)],"future":{"keep":true}}
-        """,
-        to: configFile)
+    if let config {
+        writeFixture(try! JSONEncoder().encode(config), to: configFile)
+    } else {
+        let starredJSON = starred.map { "\"\($0)\"" }.joined(separator: ",")
+        writeFixture(
+            """
+            {"selected_pack":"\(packIDs.first ?? "")","master_volume":0.37,"events":{"stop":true},"starred_packs":[\(starredJSON)],"future":{"keep":true}}
+            """,
+            to: configFile)
+    }
     let environment =
         durationProbe.map {
             AudioImportEnvironment(
