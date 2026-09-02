@@ -43,12 +43,15 @@ private func makeSoundEditorNativeTargetFixture(
 @MainActor
 private func activateNativeTargetFixture(
     _ fixture: SoundEditorNativeTargetFixture,
-    requestRevision: UInt64
+    requestRevision: UInt64,
+    waitsForInventory: Bool = true
 ) async -> SoundsEditorPresentation? {
     _ = fixture.owner.send(
         .activate(.sounds(route: .overview, requestRevision: requestRevision)))
     await waitForSoundEditorReady(fixture.owner, library: fixture.library)
-    await waitForSoundEditorInventory(fixture.owner)
+    if waitsForInventory {
+        await waitForSoundEditorInventory(fixture.owner)
+    }
     guard case .sounds(let sounds) = fixture.owner.presentation.mode else { return nil }
     return sounds
 }
@@ -56,11 +59,16 @@ private func activateNativeTargetFixture(
 @MainActor
 private func waitForNativeTargetLibraryFailure(
     _ owner: SoundPacksEditorOwner
-) async {
+) async -> Bool {
     for _ in 0..<512 {
-        if case .failed = owner.presentation.library { return }
+        if case .failed(previousAvailable: true, reason: .locationUnavailable) =
+            owner.presentation.library
+        {
+            return true
+        }
         await Task.yield()
     }
+    return false
 }
 
 @MainActor
@@ -217,7 +225,10 @@ func runSoundPacksEditorNativeTargetSuites() async {
                 selectedPackID: "missing-pack")
 
             guard
-                let sounds = await activateNativeTargetFixture(fixture, requestRevision: 45),
+                let sounds = await activateNativeTargetFixture(
+                    fixture,
+                    requestRevision: 45,
+                    waitsForInventory: false),
                 let missing = sounds.packs.first(where: { $0.id == "missing-pack" })
             else {
                 expect(false, "fresh snapshot 必须保留 selected missing placeholder")
@@ -230,7 +241,7 @@ func runSoundPacksEditorNativeTargetSuites() async {
         }
     }
 
-    await suite("Sound editor native target：refresh 发布前消费旧 immutable fact，不做 click-time stat") {
+    await suite("Sound editor native target：下一次 observation 前消费旧 immutable fact") {
         for (offset, kind) in StaleNativeTargetKind.allCases.enumerated() {
             await withTempDirectory { root in
                 let packDirectory = root.appendingPathComponent("packs/pack-a", isDirectory: true)
@@ -293,7 +304,6 @@ func runSoundPacksEditorNativeTargetSuites() async {
                 }
 
                 let signedRevision = fixture.owner.presentation.revision
-                fixture.library.invalidate(packIDs: ["pack-a"])
                 let movedTarget = root.appendingPathComponent("moved-\(kind.rawValue)")
                 do {
                     try FileManager.default.moveItem(at: targetToMove, to: movedTarget)
@@ -312,11 +322,6 @@ func runSoundPacksEditorNativeTargetSuites() async {
                     fixture.owner.send(.invoke(action)) == .nativeEffect(expectedEffect),
                     "\(kind.rawValue) invoke 必须消费签发 generation 的 immutable URL fact；"
                         + "这是 stale-while-refresh，不是 click-time stat")
-
-                // 旧实现的 preview fallback 会自行请求 refresh；等它结束再销毁 temp tree，避免
-                // 预期 RED 的后台读取越过 fixture 生命周期。正确实现这里不会发起额外 scan。
-                await Task.yield()
-                await fixture.library.waitUntilIdleForTesting()
             }
         }
     }
@@ -360,7 +365,12 @@ func runSoundPacksEditorNativeTargetSuites() async {
                 expect(false, "真实非目录 packs root 必须发布 failed(previous) terminal")
                 return
             }
-            await waitForNativeTargetLibraryFailure(fixture.owner)
+            guard await waitForNativeTargetLibraryFailure(fixture.owner) else {
+                expect(
+                    false,
+                    "owner 必须及时投影 failed(previous: true, reason: locationUnavailable)")
+                return
+            }
 
             guard case .sounds(let failed) = fixture.owner.presentation.mode else {
                 expect(false, "shared failure 后必须保留 Sounds value slice")
@@ -389,36 +399,47 @@ func runSoundPacksEditorNativeTargetSuites() async {
         }
     }
 
-    suite("Sound editor native target：MainActor owner/model 不调用同步 filesystem resolver") {
+    suite("Sound editor native target：新 owner seam 不复用 legacy 同步 resolver") {
         let sourceRoot = guiTestRepositoryRoot().appendingPathComponent(
             "gui/Sources/ClaudioGUICore",
             isDirectory: true)
-        let files = ["SoundPacksEditorOwner.swift", "SoundPacksWindowModel.swift"]
-        let forbiddenResolvers = [
-            "resolvePackDirectory",
-            "safePackFileURL",
-            "regularFileExists",
-            "nonEmptyRegularFileExists",
-        ]
-
-        for file in files {
-            let url = sourceRoot.appendingPathComponent(file)
-            guard let source = try? String(contentsOf: url, encoding: .utf8) else {
-                expect(false, "必须能读取 \(file) 才能验证线程合同")
-                continue
-            }
-            let scanned = strippingComments(source)
-            expect(scanned.unmodeledConstructs.isEmpty, "\(file) source guard 必须完整解析")
-            expect(
-                scanned.codeWithoutStringLiterals.contains("@MainActor\npublic final class"),
-                "\(file) guard 必须先正向证明被审类型仍由 MainActor 隔离")
-            let hits = forbiddenResolvers.filter { resolver in
-                !callArguments(of: resolver, in: scanned.codeWithoutStringLiterals).isEmpty
-            }
-            expect(
-                hits.isEmpty,
-                "\(file) 的 MainActor 路径只能消费 immutable shared facts，不得同步调用："
-                    + hits.joined(separator: ", "))
+        let ownerURL = sourceRoot.appendingPathComponent("SoundPacksEditorOwner.swift")
+        guard let ownerSource = try? String(contentsOf: ownerURL, encoding: .utf8) else {
+            expect(false, "必须能读取 SoundPacksEditorOwner.swift 才能验证线程合同")
+            return
         }
+        let scannedOwner = strippingComments(ownerSource)
+        expect(
+            scannedOwner.unmodeledConstructs.isEmpty,
+            "SoundPacksEditorOwner.swift source guard 必须完整解析")
+        let legacyModelResolvers = [
+            "previewFileForSelectedEvent",
+            "editorSafePackDirectory",
+            "editorSafeAudioFile",
+        ]
+        let ownerHits = legacyModelResolvers.filter { resolver in
+            !callArguments(of: resolver, in: scannedOwner.codeWithoutStringLiterals).isEmpty
+        }
+        expect(
+            ownerHits.isEmpty,
+            "新 owner seam 只能消费 immutable shared facts，不得调用 legacy model resolver："
+                + ownerHits.joined(separator: ", "))
+
+        let legacyViewURL = sourceRoot.deletingLastPathComponent()
+            .appendingPathComponent("SoundPacksWindow/SoundPacksWindowView.swift")
+        guard let legacyViewSource = try? String(contentsOf: legacyViewURL, encoding: .utf8) else {
+            expect(false, "必须能读取 legacy SoundPacksWindowView.swift 才能冻结 callsite")
+            return
+        }
+        let scannedLegacyView = strippingComments(legacyViewSource)
+        expect(
+            scannedLegacyView.unmodeledConstructs.isEmpty,
+            "legacy SoundPacksWindowView.swift source guard 必须完整解析")
+        expect(
+            callArguments(
+                of: "previewFileForSelectedEvent",
+                in: scannedLegacyView.codeWithoutStringLiterals
+            ).count == 2,
+            "迁移前 legacy view 的同步 preview resolver 必须保持精确两处，不能扩散到新 seam")
     }
 }
