@@ -200,13 +200,8 @@ struct EventSettingsAICueComposerView: View {
                     .foregroundColor(ClaudioTheme.text(colorScheme))
                 Spacer(minLength: 8)
                 Button(l10n.text(.commonClose), action: onClose)
-                    .buttonStyle(.plain)
+                    .buttonStyle(ClaudioCompactButtonStyle())
                     .foregroundColor(ClaudioTheme.clay(colorScheme))
-                    .frame(
-                        minWidth: ClaudioTheme.Metrics.iconTarget,
-                        minHeight: ClaudioTheme.Metrics.compactControlHeight
-                    )
-                    .contentShape(Rectangle())
                     .accessibilityLabel(l10n.text(.commonClose))
                     .accessibilityIdentifier("event-settings.ai-cue.close")
             }

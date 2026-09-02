@@ -87,7 +87,7 @@ func runHitTargetSuites() {
         defer { targetProbe.close() }
 
         expect(targetProbe.click(x: 36, yFromTop: 36), "28×28 图标按钮的右下边界应可点击")
-        expect(targetProbe.click(x: 52, yFromTop: 36), "28pt 紧凑纯文本动作的边界应可点击")
+        expect(targetProbe.click(x: 76, yFromTop: 36), "28pt 紧凑纯文本动作的边界应可点击")
         expect(
             targetRecorder.actions == ["icon", "compact"],
             "图标与紧凑动作都只能触发自身，实得 \(targetRecorder.actions)")
@@ -109,10 +109,8 @@ func runHitTargetSuites() {
             panelRows?.contains(".buttonStyle(ClaudioFullRowButtonStyle())") == true,
             "onboarding 可展开失败行必须使用至少 28pt 的共享整行合同")
         expect(
-            aiCue?.contains("minWidth: ClaudioTheme.Metrics.iconTarget") == true
-                && aiCue?.contains("minHeight: ClaudioTheme.Metrics.compactControlHeight") == true
-                && aiCue?.contains(".contentShape(Rectangle())") == true,
-            "AI composer 的 plain 关闭动作必须有至少 28pt 高度和明确命中形状")
+            aiCue?.contains(".buttonStyle(ClaudioCompactButtonStyle())") == true,
+            "AI composer 的 plain 关闭动作必须复用经过原生点击验证的紧凑命中合同")
     }
 }
 
@@ -277,21 +275,13 @@ private struct CompactTargetsFixture: View {
             }
             .buttonStyle(ClaudioIconButtonStyle())
 
-            Button {
+            Button("×") {
                 recorder.record("compact")
-            } label: {
-                Text("Close")
-                    .frame(
-                        maxWidth: .infinity,
-                        minHeight: ClaudioTheme.Metrics.compactControlHeight,
-                        alignment: .center
-                    )
-                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ClaudioCompactButtonStyle())
         }
         .padding(10)
-        .frame(width: 160, height: 48, alignment: .center)
+        .frame(width: 160, height: 48, alignment: .topLeading)
     }
 }
 

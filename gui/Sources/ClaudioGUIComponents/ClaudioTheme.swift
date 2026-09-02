@@ -229,6 +229,20 @@ public struct ClaudioIconButtonStyle: ButtonStyle {
     }
 }
 
+/// A plain compact button contract whose label owns the complete minimum hit target.
+public struct ClaudioCompactButtonStyle: ButtonStyle {
+    public init() {}
+
+    public func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(
+                minWidth: ClaudioTheme.Metrics.iconTarget,
+                minHeight: ClaudioTheme.Metrics.compactControlHeight
+            )
+            .contentShape(Rectangle())
+    }
+}
+
 /// A full-width button contract for rows whose entire visible surface represents one action.
 /// The label owns its visual content; this style supplies the minimum target, rectangular hit
 /// testing, and pressed feedback without introducing domain state or selection semantics.
