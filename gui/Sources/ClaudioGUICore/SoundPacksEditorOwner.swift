@@ -144,7 +144,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
                         _ = model.selectPackForInspection(packID)
                     }
                 }
-            case .events(let route, _):
+            case .events(let route, _, _):
                 withModelTransition {
                     model.setManagedSurface(route.surface)
                 }
@@ -172,9 +172,158 @@ public final class SoundPacksEditorOwner: ObservableObject {
         switch operation {
         case .importAudio(let permit, let sources, let bindTo):
             return await performImport(permit: permit, sources: sources, bindTo: bindTo)
-        case .adoptAICue:
-            return .rejected(.actionUnavailable)
+        case .adoptAICue(let candidate, let displayName, let permit):
+            return await performAdoption(
+                candidate: candidate,
+                displayName: displayName,
+                permit: permit)
         }
+    }
+
+    private func performAdoption(
+        candidate: AICueCandidate,
+        displayName: AICueDisplayName,
+        permit: SoundPackAdoptionPermit
+    ) async -> SoundPacksEditorOperationResult {
+        model.refreshEditorConfigProjection()
+        let seed = model.editorProjectionSeed()
+        guard seed.writesAllowed else { return .rejected(.scopeUnavailable) }
+        guard let binding = adoptionPermitLedger.removeValue(forKey: permit.id) else {
+            return .rejected(.stalePermit)
+        }
+        guard binding.context == context,
+            binding.selectionGeneration == seed.selectionGeneration,
+            binding.snapshotRevision == seed.snapshotRevision,
+            binding.candidateGenerationID == candidate.provenance.generationID,
+            seed.library.isFresh
+        else {
+            return .rejected(.stalePermit)
+        }
+        guard
+            case .success(let currentTarget) = model.captureAICueAdoptionTarget(
+                for: binding.target.event),
+            currentTarget == binding.target
+        else {
+            return .rejected(.targetChanged)
+        }
+
+        let operationID = beginAsyncOperation(
+            kind: .adoptAICue,
+            packID: binding.target.packID,
+            event: binding.target.event)
+        let (_, startedSeed) = captureModelTransition {
+            model.beginEditorCompoundMutation(packID: binding.target.packID)
+        }
+        publish(from: startedSeed)
+        let request = AudioImportRequest(
+            sourceURL: candidate.asset.fileURL,
+            suggestedFileName:
+                "ai-cue-\(candidate.id.uuidString.lowercased())."
+                + candidate.asset.sniffedFormat.rawValue)
+        let execution = await audioImportExecutor.execute(
+            SoundPackAudioImportJob(
+                requests: [request],
+                packID: binding.target.packID,
+                environment: importEnvironment))
+        switch execution {
+        case .cancelledBeforeWrite:
+            let (_, settledSeed) = captureModelTransition {
+                model.finishEditorCompoundMutationWithoutChange(packID: binding.target.packID)
+            }
+            settleAsyncOperation(
+                operationID,
+                phase: .cancelled(changedOnDisk: false),
+                seed: settledSeed)
+            return .rejected(.cancelled)
+        case .completed(let batch, let cancellationRequested):
+            guard let imported = batch.accepted.first else {
+                let (_, settledSeed) = captureModelTransition {
+                    model.finishEditorCompoundMutationWithoutChange(packID: binding.target.packID)
+                }
+                settleAsyncOperation(
+                    operationID,
+                    phase: .failed(.importRejected),
+                    seed: settledSeed)
+                return .rejected(.importRejected)
+            }
+            return finishAdoption(
+                operationID: operationID,
+                binding: binding,
+                imported: imported,
+                displayName: displayName,
+                cancellationRequested: cancellationRequested)
+        }
+    }
+
+    private func finishAdoption(
+        operationID: SoundPackEditorOperationID,
+        binding: EditorAdoptionBinding,
+        imported: ImportedAudioFile,
+        displayName: AICueDisplayName,
+        cancellationRequested: Bool
+    ) -> SoundPacksEditorOperationResult {
+        model.refreshEditorConfigProjection()
+        let current = model.editorProjectionSeed()
+        let targetRemainsValid: Bool
+        if binding.context == context,
+            binding.selectionGeneration == current.selectionGeneration,
+            current.library.isFresh,
+            current.installedPackIDs.contains(binding.target.packID),
+            current.writesAllowed,
+            case .success(let currentTarget) = model.captureAICueAdoptionTarget(
+                for: binding.target.event),
+            currentTarget == binding.target
+        {
+            targetRemainsValid = true
+        } else {
+            targetRemainsValid = false
+        }
+
+        let failure: SoundPackEditorFailure?
+        var bindingOutcome: AICueManifestBindingOutcome?
+        if cancellationRequested {
+            failure = .cancelled
+        } else if !targetRemainsValid {
+            failure = .targetChanged
+        } else {
+            switch model.bindEditorAICue(
+                imported,
+                displayName: displayName,
+                target: binding.target)
+            {
+            case .success(let outcome):
+                bindingOutcome = outcome
+                failure = nil
+            case .failure:
+                failure = .mutationFailed
+            }
+        }
+
+        let (_, settledSeed) = captureModelTransition {
+            model.finishEditorCompoundMutation(
+                packID: binding.target.packID,
+                changedDespiteFailure: failure != nil)
+        }
+        if let failure {
+            settleAsyncOperation(
+                operationID,
+                phase: .orphan(fileName: imported.fileName, failure: failure),
+                seed: settledSeed)
+            return .adoptionOrphan(imported: imported, failure: failure)
+        }
+        guard let bindingOutcome else {
+            settleAsyncOperation(
+                operationID,
+                phase: .orphan(fileName: imported.fileName, failure: .mutationFailed),
+                seed: settledSeed)
+            return .adoptionOrphan(imported: imported, failure: .mutationFailed)
+        }
+        settleAsyncOperation(operationID, phase: .succeeded, seed: settledSeed)
+        return .adopted(
+            AICueAdoptionOutcome(
+                target: binding.target,
+                importedFile: imported,
+                finalDisplayName: bindingOutcome.finalDisplayName))
     }
 
     private func performImport(
@@ -712,11 +861,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     route: route,
                     requestRevision: requestRevision,
                     seed: seed))
-        case .events(let route, let requestRevision):
+        case .events(let route, let requestRevision, let candidateGenerationID):
             return .events(
                 makeEventsPresentation(
                     route: route,
                     requestRevision: requestRevision,
+                    candidateGenerationID: candidateGenerationID,
                     seed: seed))
         }
     }
@@ -805,14 +955,20 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private func makeEventsPresentation(
         route: EventSettingsWindowRoute,
         requestRevision: UInt64,
+        candidateGenerationID: UUID?,
         seed: SoundPacksEditorModelSeed
     ) -> EventsSoundPackPresentation {
         let packs = seed.packCards.map { makePackPresentation(card: $0, seed: seed) }
         var adoptionPermit: SoundPackAdoptionPermit?
-        if let event = route.event,
+        if seed.library.isFresh,
+            let candidateGenerationID,
+            let event = route.event,
             case .eligible(let target) = model.aiCueAdoptionEligibility(for: event)
         {
-            adoptionPermit = makeAdoptionPermit(target: target, seed: seed)
+            adoptionPermit = makeAdoptionPermit(
+                target: target,
+                candidateGenerationID: candidateGenerationID,
+                seed: seed)
         }
         return EventsSoundPackPresentation(
             route: route,
@@ -1021,12 +1177,14 @@ public final class SoundPacksEditorOwner: ObservableObject {
 
     private func makeAdoptionPermit(
         target: AICueAdoptionTarget,
+        candidateGenerationID: UUID,
         seed: SoundPacksEditorModelSeed
     ) -> SoundPackAdoptionPermit {
         nextCapabilityID &+= 1
         let permit = SoundPackAdoptionPermit(id: nextCapabilityID)
         adoptionPermitLedger[permit.id] = EditorAdoptionBinding(
             target: target,
+            candidateGenerationID: candidateGenerationID,
             context: context,
             selectionGeneration: seed.selectionGeneration,
             snapshotRevision: seed.snapshotRevision)
@@ -1141,6 +1299,7 @@ private struct EditorPermitBinding {
 
 private struct EditorAdoptionBinding {
     let target: AICueAdoptionTarget
+    let candidateGenerationID: UUID
     let context: SoundPacksEditorContext
     let selectionGeneration: UInt64
     let snapshotRevision: UInt64?

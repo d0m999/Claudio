@@ -284,7 +284,10 @@ package struct SoundPackEditorAnnouncement: Identifiable, Equatable {
 package enum SoundPacksEditorContext: Equatable, Sendable {
     case inactive
     case sounds(route: SoundPacksWindowRoute, requestRevision: UInt64)
-    case events(route: EventSettingsWindowRoute, requestRevision: UInt64)
+    case events(
+        route: EventSettingsWindowRoute,
+        requestRevision: UInt64,
+        candidateGenerationID: UUID? = nil)
 }
 
 package enum SoundPacksEditorCommand: Equatable, Sendable {
@@ -321,6 +324,7 @@ package enum SoundPacksEditorOperation: Equatable, Sendable {
 package enum SoundPacksEditorOperationResult: Equatable, Sendable {
     case imported(SoundPackEditorImportOutcome)
     case adopted(AICueAdoptionOutcome)
+    case adoptionOrphan(imported: ImportedAudioFile, failure: SoundPackEditorFailure)
     case rejected(SoundPackEditorFailure)
 }
 

@@ -313,6 +313,74 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 "唯一 refresh 必须只来自 firstTask；queued cancel 不得新增 fake refresh")
         }
     }
+
+    await suite("Sound editor perform：AI adoption 绑定 candidate generation 并 compound 刷新一次") {
+        await withTempDirectory { root in
+            let config = ClaudioConfig(
+                selectedPack: "global-pack",
+                surfaceOverrides: [
+                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                        selectedPack: "workbuddy-pack")
+                ])
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["global-pack", "workbuddy-pack"],
+                config: config)
+            let owner = fixture.owner
+            let generationID = UUID()
+            let route = EventSettingsWindowRoute(
+                scope: .surface(.workBuddy),
+                event: .stop)
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: route,
+                        requestRevision: 20,
+                        candidateGenerationID: generationID)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .events(let events) = owner.presentation.mode,
+                let permit = events.adoptionPermit
+            else {
+                expect(false, "fresh isolated user pack + active generation 必须签发 adoption permit")
+                return
+            }
+            let source = root.appendingPathComponent("candidate.mp3")
+            writeFixture(validMP3ID3Data(), to: source)
+            let candidate = soundEditorCandidate(at: source, generationID: generationID)
+            let scansBefore = fixture.recorder.requests.count
+
+            let result = await owner.perform(
+                .adoptAICue(
+                    candidate: candidate,
+                    displayName: try! AICueDisplayName("木琴完成"),
+                    permit: permit))
+            guard case .adopted(let outcome) = result else {
+                expect(false, "matching candidate generation 必须返回 adopted outcome")
+                return
+            }
+            let manifest = soundEditorManifest(
+                root.appendingPathComponent("packs/workbuddy-pack/manifest.json"))
+            expect(
+                (manifest?["events"] as? [String: String])?["stop"]
+                    == outcome.importedFile.fileName
+                    && (manifest?["audio_names"] as? [String: String])?[
+                        outcome.importedFile.fileName
+                    ] == "木琴完成",
+                "adoption 必须在一个原子 manifest writer 中提交 Event 与 display name")
+            await waitForSoundEditorScan(fixture, after: scansBefore)
+            expect(
+                fixture.recorder.requests.count == scansBefore + 1
+                    && fixture.recorder.requests.last?.invalidatedPackIDs == ["workbuddy-pack"],
+                "adoption import+bind 必须只有一次 exact shared refresh")
+            expect(
+                await owner.perform(
+                    .adoptAICue(
+                        candidate: candidate,
+                        displayName: try! AICueDisplayName("木琴完成"),
+                        permit: permit)) == .rejected(.stalePermit),
+                "adoption permit 必须 single-use")
+        }
+    }
 }
 
 @MainActor
@@ -347,6 +415,25 @@ private func waitForSoundEditorScan(_ fixture: SoundEditorFixture, after count: 
 private func soundEditorManifest(_ url: URL) -> [String: Any]? {
     guard let data = try? Data(contentsOf: url) else { return nil }
     return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+}
+
+private func soundEditorCandidate(at fileURL: URL, generationID: UUID) -> AICueCandidate {
+    AICueCandidate(
+        id: UUID(),
+        variant: .clear,
+        asset: AICueTemporaryAudioAsset(
+            fileURL: fileURL,
+            byteCount: validMP3ID3Data().count,
+            sniffedFormat: .mp3),
+        durationMilliseconds: 1_000,
+        mediaType: "audio/mpeg",
+        provenance: AICueCandidateProvenance(
+            providerID: .elevenLabs,
+            profileID: .elevenLabsGlobal,
+            modelID: "eleven_text_to_sound_v2",
+            generationID: generationID,
+            requestOrdinal: 1,
+            providerRequestID: nil))
 }
 
 private final class GatedSoundEditorDurationProbe: AudioDurationProbing, @unchecked Sendable {
