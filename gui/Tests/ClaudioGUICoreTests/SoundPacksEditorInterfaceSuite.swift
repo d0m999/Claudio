@@ -455,7 +455,7 @@ func runSoundPacksEditorInterfaceSuites() async {
         }
     }
 
-    await suite("Sound editor presentation：non-fresh previous 不签 write 或 native capability") {
+    await suite("Sound editor presentation：non-fresh previous 只签 target-free stop/retry") {
         await withTempDirectory { root in
             let packs = root.appendingPathComponent("packs", isDirectory: true)
             let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a", "pack-b"])
@@ -494,8 +494,10 @@ func runSoundPacksEditorInterfaceSuites() async {
                 },
                 "non-fresh Event facts 不得携带 import/preview/clear capability")
             expect(stale.requestImportAction == nil, "non-fresh root 不得签 open-panel capability")
-            let stopPreviewAction: SoundPackEditorAction? = stale.stopPreviewAction
-            expect(stopPreviewAction == nil, "non-fresh root 不得签 native preview capability")
+            let stopPreviewAction = stale.stopPreviewAction
+            expect(
+                stopPreviewAction.kind == .stopPreview,
+                "target-free stop 必须保留，供 refresh failure 或 destination switch 安全清理音频")
             expect(
                 stale.restoreAllFactoryPacksAction == nil && stale.recoveryActions.isEmpty,
                 "non-fresh root 不得签 restore write capability")
@@ -510,6 +512,9 @@ func runSoundPacksEditorInterfaceSuites() async {
             expect(
                 audioRows.allSatisfy { $0.deleteAction == nil && $0.revealAction == nil },
                 "non-fresh inventory facts 不得携带 delete/reveal capability")
+            expect(
+                owner.send(.invoke(stopPreviewAction)) == .nativeEffect(.stopAudio),
+                "non-fresh stop 只能产生 target-free stopAudio effect")
             expect(
                 owner.send(.invoke(oldUse)) == .rejected(.staleAction),
                 "上一 fresh generation 的 write capability 必须失效")
