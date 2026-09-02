@@ -11,6 +11,14 @@ public enum SoundPackAudioInventory: Sendable, Equatable {
     case unavailable(PackAudioInventoryError)
 }
 
+/// Native targets validated during the same stable scan interval as their render facts.
+/// Callers consume these immutable URLs through owner-signed actions; they never reconstruct
+/// paths or repeat blocking filesystem checks on `MainActor`.
+package struct SoundPackNativeTargets: Sendable, Equatable {
+    package let directoryURL: URL
+    package let eventAudioURLs: [Event: URL]
+}
+
 /// Immutable facts read from one installed sound pack. User configuration is deliberately absent:
 /// selection, stars, mute flags, and panel placement are projections of a snapshot at consumption
 /// time, not cache entries.
@@ -23,6 +31,7 @@ public struct SoundPackFacts: Sendable, Equatable {
     public let eventAudioDisplayNames: [Event: String]
     public let cardState: PackCardState
     public let audioInventory: SoundPackAudioInventory
+    package let nativeTargets: SoundPackNativeTargets?
 
     fileprivate let declaredAudioFileNames: [String]
     fileprivate let factoryDeclaredAudioFileNames: [String]
@@ -47,6 +56,7 @@ public struct SoundPackFacts: Sendable, Equatable {
             eventAudioDisplayNames: eventAudioDisplayNames,
             cardState: cardState,
             audioInventory: audioInventory,
+            nativeTargets: nil,
             declaredAudioFileNames: [],
             factoryDeclaredAudioFileNames: [],
             fingerprint: nil)
@@ -61,6 +71,7 @@ public struct SoundPackFacts: Sendable, Equatable {
         eventAudioDisplayNames: [Event: String],
         cardState: PackCardState,
         audioInventory: SoundPackAudioInventory,
+        nativeTargets: SoundPackNativeTargets?,
         declaredAudioFileNames: [String],
         factoryDeclaredAudioFileNames: [String],
         fingerprint: SoundPackFingerprint?
@@ -73,6 +84,7 @@ public struct SoundPackFacts: Sendable, Equatable {
         self.eventAudioDisplayNames = eventAudioDisplayNames
         self.cardState = cardState
         self.audioInventory = audioInventory
+        self.nativeTargets = nativeTargets
         self.declaredAudioFileNames = declaredAudioFileNames
         self.factoryDeclaredAudioFileNames = factoryDeclaredAudioFileNames
         self.fingerprint = fingerprint
@@ -88,6 +100,7 @@ public struct SoundPackFacts: Sendable, Equatable {
             eventAudioDisplayNames: eventAudioDisplayNames,
             cardState: cardState,
             audioInventory: audioInventory,
+            nativeTargets: nativeTargets,
             declaredAudioFileNames: declaredAudioFileNames,
             factoryDeclaredAudioFileNames: factoryDeclaredAudioFileNames,
             fingerprint: fingerprint)
@@ -956,6 +969,7 @@ private func readSoundPackFacts(
         eventAudioDisplayNames: [:],
         cardState: .broken(reason: reason),
         audioInventory: .unavailable(.manifestUnreadable(reason: reason)),
+        nativeTargets: nil,
         declaredAudioFileNames: [],
         factoryDeclaredAudioFileNames: [],
         fingerprint: nil)
@@ -1048,6 +1062,13 @@ private func readSoundPackFactsOnce(
     let metadata = packMetadata(manifestData: manifestData)
     let factoryDeclaredAudioFileNames = factoryDeclaredFileNames(
         id: id, environment: environment, factoryPackIDs: factoryPackIDs)
+    let eventAudioURLs = Dictionary(
+        uniqueKeysWithValues: coverageRows.compactMap { row -> (Event, URL)? in
+            guard case .present(let fileName) = row.coverage,
+                let target = safePackFileURL(fileName, in: packDirectory)
+            else { return nil }
+            return (row.event, target)
+        })
     return SoundPackFacts(
         id: id,
         name: metadata.name,
@@ -1062,6 +1083,9 @@ private func readSoundPackFactsOnce(
         eventAudioDisplayNames: eventAudioDisplayNames,
         cardState: cardState,
         audioInventory: .deferred,
+        nativeTargets: SoundPackNativeTargets(
+            directoryURL: packDirectory.standardizedFileURL,
+            eventAudioURLs: eventAudioURLs),
         declaredAudioFileNames: declaredAudioFileNames,
         factoryDeclaredAudioFileNames: factoryDeclaredAudioFileNames,
         fingerprint: nil)
@@ -1091,6 +1115,11 @@ private func brokenSoundPackFacts(
         eventAudioDisplayNames: [:],
         cardState: .broken(reason: reason),
         audioInventory: .unavailable(inventoryError),
+        nativeTargets: packDirectory.map {
+            SoundPackNativeTargets(
+                directoryURL: $0.standardizedFileURL,
+                eventAudioURLs: [:])
+        },
         declaredAudioFileNames: [],
         factoryDeclaredAudioFileNames: factoryNames,
         fingerprint: nil)

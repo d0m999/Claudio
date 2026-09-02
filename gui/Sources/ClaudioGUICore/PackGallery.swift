@@ -491,12 +491,25 @@ public func starredPackDisplayIDs(
 public struct PackAudioFile: Sendable, Equatable, Identifiable {
     public let fileName: String
     public let isOrphan: Bool
+    package let nativeTargetURL: URL?
 
     public var id: String { fileName }
 
     public init(fileName: String, isOrphan: Bool) {
         self.fileName = fileName
         self.isOrphan = isOrphan
+        nativeTargetURL = nil
+    }
+
+    package init(fileName: String, isOrphan: Bool, nativeTargetURL: URL) {
+        self.fileName = fileName
+        self.isOrphan = isOrphan
+        self.nativeTargetURL = nativeTargetURL
+    }
+
+    /// The package-only URL is execution metadata, not part of this public inventory row's value.
+    public static func == (lhs: PackAudioFile, rhs: PackAudioFile) -> Bool {
+        lhs.fileName == rhs.fileName && lhs.isOrphan == rhs.isOrphan
     }
 }
 
@@ -612,7 +625,8 @@ func packAudioFiles(
         let canonicalPath = canonicalPackAudioPath(safeEntry)
         return PackAudioFile(
             fileName: fileName,
-            isOrphan: !referencedPaths.contains(canonicalPath))
+            isOrphan: !referencedPaths.contains(canonicalPath),
+            nativeTargetURL: safeEntry)
     }
     return .success(files.sorted { $0.fileName < $1.fileName })
 }

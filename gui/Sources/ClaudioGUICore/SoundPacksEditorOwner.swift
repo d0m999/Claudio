@@ -703,30 +703,18 @@ public final class SoundPacksEditorOwner: ObservableObject {
         case .clear(let event):
             let result = withModelTransition { model.clearSelectedEventBinding(event) }
             return result.isSuccess ? .applied : .rejected(.mutationFailed)
-        case .preview(let event):
-            let file = withModelTransition { model.previewFileForSelectedEvent(event) }
-            guard let file else { return .rejected(.unsafeTarget) }
+        case .preview(let fileURL):
+            publish(from: seed)
             return .nativeEffect(
-                .playAudio(fileURL: file, volume: AfplayVolume.clamped(model.config.masterVolume)))
+                .playAudio(
+                    fileURL: fileURL,
+                    volume: AfplayVolume.clamped(seed.config.masterVolume)))
         case .stopPreview:
             publish(from: seed)
             return .nativeEffect(.stopAudio)
-        case .revealPack(let packID):
-            guard let target = model.editorSafePackDirectory(packID: packID) else {
-                publish(from: seed)
-                return .rejected(.unsafeTarget)
-            }
+        case .reveal(let fileURL):
             publish(from: seed)
-            return .nativeEffect(.reveal(fileURL: target))
-        case .revealAudio(let fileName):
-            guard let packID = seed.selectedPackID,
-                let target = model.editorSafeAudioFile(packID: packID, fileName: fileName)
-            else {
-                publish(from: seed)
-                return .rejected(.unsafeTarget)
-            }
-            publish(from: seed)
-            return .nativeEffect(.reveal(fileURL: target))
+            return .nativeEffect(.reveal(fileURL: fileURL))
         case .requestDeletePack(let packID):
             return requestConfirmation(
                 kind: .deletePack,
@@ -1066,6 +1054,9 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 seed.library.isFresh && !$0.isBuiltinReadOnly
                     && $0.availability == .installed && seed.writesAllowed
             } ?? false
+        let selectedNativeTargets = selectedPack.flatMap {
+            seed.nativeTargetsByPackID[$0.id]
+        }
         return SoundsEditorPresentation(
             route: route,
             requestRevision: requestRevision,
@@ -1074,7 +1065,18 @@ public final class SoundPacksEditorOwner: ObservableObject {
             packs: packs,
             selectedPack: selectedPack,
             eventRows: seed.selectedEventRows.map { row in
-                SoundPackEditorEventPresentation(
+                let previewAction: SoundPackEditorAction?
+                if seed.library.isFresh, row.coverage.previewEnabled,
+                    let target = selectedNativeTargets?.eventAudioURLs[row.event]
+                {
+                    previewAction = makeAction(
+                        .preview,
+                        binding: .preview(fileURL: target),
+                        seed: seed)
+                } else {
+                    previewAction = nil
+                }
+                return SoundPackEditorEventPresentation(
                     event: row.event,
                     coverage: row.coverage,
                     enabled: row.enabled,
@@ -1087,9 +1089,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
                                 bindTo: row.event),
                             seed: seed)
                         : nil,
-                    previewAction: seed.library.isFresh && row.coverage.previewEnabled
-                        ? makeAction(.preview, binding: .preview(event: row.event), seed: seed)
-                        : nil,
+                    previewAction: previewAction,
                     clearAction: selectedIsWritable && row.coverage.hasManifestBinding
                         ? makeAction(.clear, binding: .clear(event: row.event), seed: seed)
                         : nil)
@@ -1203,7 +1203,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     seed: seed)
                 : nil,
             revealAction: seed.library.isFresh && isAvailable
-                ? makeAction(.reveal, binding: .revealPack(packID: card.id), seed: seed) : nil)
+                ? seed.nativeTargetsByPackID[card.id].map {
+                    makeAction(
+                        .reveal,
+                        binding: .reveal(fileURL: $0.directoryURL),
+                        seed: seed)
+                } : nil)
     }
 
     private func makeInventory(
@@ -1232,11 +1237,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
                             seed: seed)
                         : nil,
                     revealAction: canTargetInventory
-                        ? makeAction(
-                            .reveal,
-                            binding: .revealAudio(fileName: file.fileName),
-                            seed: seed)
-                        : nil)
+                        ? file.nativeTargetURL.map {
+                            makeAction(
+                                .reveal,
+                                binding: .reveal(fileURL: $0),
+                                seed: seed)
+                        } : nil)
             }
         }
         switch seed.selectedAudioInventoryState {
@@ -1619,10 +1625,9 @@ private enum EditorActionIntent {
     case requestImport(packID: String, bindTo: Event?)
     case assign(fileName: String, event: Event)
     case clear(event: Event)
-    case preview(event: Event)
+    case preview(fileURL: URL)
     case stopPreview
-    case revealPack(packID: String)
-    case revealAudio(fileName: String)
+    case reveal(fileURL: URL)
     case requestDeletePack(packID: String)
     case requestDeleteOrphan(fileName: String)
     case requestRestoreFactory(packID: String)

@@ -405,6 +405,7 @@ struct SoundPacksEditorModelSeed: Equatable {
     let writesAllowed: Bool
     let config: ClaudioConfig
     let packCards: [PackCard]
+    let nativeTargetsByPackID: [String: SoundPackNativeTargets]
     let referencedPackIDs: Set<String>
     let selectedPackID: String?
     let selectedEventRows: [EventRow]

@@ -1004,6 +1004,10 @@ public final class SoundPacksWindowModel: ObservableObject {
             writesAllowed: writesAllowed && configAllowsWrites,
             config: config,
             packCards: packCards,
+            nativeTargetsByPackID: Dictionary(
+                uniqueKeysWithValues: (librarySnapshot?.facts ?? []).compactMap { fact in
+                    fact.nativeTargets.map { (fact.id, $0) }
+                }),
             referencedPackIDs: referencedSoundPackIDs(in: baseConfig),
             selectedPackID: selectedPackID,
             selectedEventRows: selectedEventRows,
@@ -1476,23 +1480,6 @@ public final class SoundPacksWindowModel: ObservableObject {
         if let librarySnapshot {
             applySnapshot(librarySnapshot, followActivePack: false)
         }
-    }
-
-    func editorSafePackDirectory(packID: String) -> URL? {
-        guard packCards.contains(where: { $0.id == packID && $0.availability == .installed })
-        else { return nil }
-        return resolvePackDirectory(
-            id: packID,
-            userPacksDirectory: environment.userPacksDirectory,
-            bundledPacksDirectory: environment.bundledPacksDirectory)
-    }
-
-    func editorSafeAudioFile(packID: String, fileName: String) -> URL? {
-        guard let directory = editorSafePackDirectory(packID: packID),
-            let file = safePackFileURL(fileName, in: directory),
-            nonEmptyRegularFileExists(at: file)
-        else { return nil }
-        return file
     }
 
     #if DEBUG
