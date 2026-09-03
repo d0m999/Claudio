@@ -17,7 +17,6 @@ import SwiftUI
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
-    private let loginItemSettings: LoginItemSettingsModel
     private let settingsPresentationSession: SettingsPresentationSession
     private let usageSettings: UsageSettingsModel
     private let globalShortcutSettings: GlobalShortcutSettingsModel
@@ -63,7 +62,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onEventAudibilityInputsChanged: @escaping @MainActor () -> Void
     ) {
         self.preferences = preferences
-        self.loginItemSettings = loginItemSettings
         settingsPresentationSession = SettingsPresentationSession(
             dependencies: SettingsPresentationDependencies(
                 preferences: preferences,
@@ -174,7 +172,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         returnFocusTo application: NSRunningApplication?,
         onClose restoration: @escaping @MainActor (NSRunningApplication?) -> Void
     ) {
-        loginItemSettings.refresh()
+        settingsPresentationSession.refreshLoginItem()
         focusRestoration = restoration
         isPresentingWindow = true
         let wasVisible = window?.isVisible == true
@@ -217,7 +215,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             let keyWindow = notification.object as? NSWindow,
             keyWindow === window
         else { return }
-        loginItemSettings.refresh()
+        settingsPresentationSession.refreshLoginItem()
         updateIntegrationsPresentationState()
         announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)
     }

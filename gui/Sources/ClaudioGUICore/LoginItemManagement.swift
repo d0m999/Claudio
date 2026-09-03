@@ -58,8 +58,8 @@ package struct LoginItemServiceAdapter {
     }
 }
 
-/// Result-level Settings fact. A failure is one optional tuple so requested operation and reason
-/// cannot become independently nil while the previously read registration fact stays unchanged.
+/// Result-level Settings fact. A failure is one optional value so requested operation and reason
+/// cannot become independently absent while the previously read registration fact stays unchanged.
 package func makeLoginItemSettingsProjection(
     registration: LoginItemRegistrationState
 ) -> LoginItemSettingsProjection {
