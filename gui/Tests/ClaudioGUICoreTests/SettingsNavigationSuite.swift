@@ -261,6 +261,54 @@ func runSettingsNavigationSuites() {
         }
     }
 
+    suite("Settings sound shell：无关 editor publication 不重复唤醒订阅") {
+        withTempDirectory { root in
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
+            let editorModel = SoundPacksWindowModel(
+                previewConfig: ClaudioConfig(selectedPack: "pack-a"),
+                packCards: [
+                    PackCard(
+                        id: "pack-a",
+                        name: "Pack A",
+                        isCC0: true,
+                        presentEvents: [.stop],
+                        state: .complete,
+                        isSelected: true)
+                ],
+                selectedPackID: "pack-a",
+                selectedEventRows: [],
+                libraryPresentationState: .ready,
+                environment: environment,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            let editor = SoundPacksEditorOwner(
+                model: editorModel,
+                userPacksDirectory: environment.userPacksDirectory)
+            let hostIntegrations = HostIntegrationPresentationStore(
+                state: integrationDestinationTestState())
+            var emissions: [SettingsSoundPackShellProjection] = []
+            let cancellable = settingsSoundPackShellProjections(
+                editor: editor,
+                hostIntegrations: hostIntegrations
+            ).sink { emissions.append($0) }
+
+            expect(emissions.count == 1, "订阅必须先同步交付初始 projection")
+            expect(
+                editor.send(
+                    .activate(
+                        .events(
+                            route: EventSettingsWindowRoute(
+                                scope: .surface(.workBuddy),
+                                event: .stop),
+                            requestRevision: 132))) == .applied,
+                "fixture 必须触发 mode/revision 改变但不改变 Settings shell 事实")
+            expect(
+                emissions.count == 1,
+                "activity/mode/revision 等无关 editor publication 不得重复唤醒 Settings shell")
+            withExtendedLifetime(cancellable) {}
+        }
+    }
+
     suite("Settings lifecycle：显示、覆盖、重复深链接、关闭与一次性 handback") {
         let availability = SettingsRouteAvailability(
             integrationSurfaces: [.workBuddy],
