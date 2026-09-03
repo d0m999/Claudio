@@ -30,7 +30,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let integrationsModel: IntegrationDestinationModel
     private let integrationsFocusCoordinator = IntegrationDestinationFocusCoordinator()
     private let aiCueViewModel: AICueGenerationViewModel
-    private let audioEnvironment: AudioImportEnvironment
     private let onEventAudibilityInputsChanged: @MainActor () -> Void
     private let dynamicQuietObserver: DynamicQuietSystemObserver
     private var window: NSWindow?
@@ -59,7 +58,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hostIntegrations: HostIntegrationPresentationStore,
         integrationsModel: IntegrationDestinationModel,
         aiCueViewModel: AICueGenerationViewModel,
-        audioEnvironment: AudioImportEnvironment,
         onEventAudibilityInputsChanged: @escaping @MainActor () -> Void
     ) {
         self.preferences = preferences
@@ -75,7 +73,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.hostIntegrations = hostIntegrations
         self.integrationsModel = integrationsModel
         self.aiCueViewModel = aiCueViewModel
-        self.audioEnvironment = audioEnvironment
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
         dynamicQuietObserver = DynamicQuietSystemObserver()
         aboutSettings = makeSystemAboutSettingsModel(
@@ -253,11 +250,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             integrationsModel: integrationsModel,
             integrationsFocusCoordinator: integrationsFocusCoordinator,
             aiCueViewModel: aiCueViewModel,
-            audioEnvironment: audioEnvironment,
             onEventAudibilityInputsChanged: onEventAudibilityInputsChanged,
-            onEventPackSwitch: { [weak soundPacksEditorOwner] outcome in
-                _ = soundPacksEditorOwner?.send(.completePanelPackSwitch(outcome))
-            },
             onAnnouncement: { [weak self] sentence in
                 self?.announceBasicSettingsUpdate(sentence)
             })

@@ -111,4 +111,30 @@ public final class EventPreviewSequenceCoordinator {
         guard generation == runGeneration else { return .cancelled }
         return .completed
     }
+
+    /// Runs already-authorized Event capabilities. Native playback returns duration while the
+    /// sequence owner keeps ordering/cancellation; neither layer exposes or derives pack paths.
+    public func run(
+        events: [Event],
+        onPlay: @escaping @MainActor @Sendable (Event) -> TimeInterval?
+    ) async -> EventPreviewSequenceRunResult {
+        generation &+= 1
+        let runGeneration = generation
+        guard !events.isEmpty else { return .empty }
+
+        for event in events {
+            guard generation == runGeneration, !Task.isCancelled else { return .cancelled }
+            guard let probedDuration = onPlay(event) else { return .failed(event) }
+            let duration = probedDuration.isFinite ? probedDuration : 3
+            let boundedDuration = min(3, max(0.1, duration))
+            do {
+                try await Task.sleep(
+                    nanoseconds: UInt64((boundedDuration + 0.15) * 1_000_000_000))
+            } catch {
+                return .cancelled
+            }
+        }
+        guard generation == runGeneration else { return .cancelled }
+        return .completed
+    }
 }

@@ -250,7 +250,8 @@ private struct EventSettingsLayoutFrame: View {
     @StateObject private var aiCueViewModel: AICueGenerationViewModel
     @StateObject private var soundPacksEditorOwner: SoundPacksEditorOwner
     @StateObject private var panelModel: PanelConfigController
-    private let galleryRoot: URL
+    @StateObject private var soundPacksEditorNativeEffects:
+        SoundPacksEditorNativeEffectsDispatcher
     private let width: CGFloat
 
     init(
@@ -289,9 +290,11 @@ private struct EventSettingsLayoutFrame: View {
                     eventsEnabled: [Event.notification.cliName: true])
             ])
         let fixture = EventSettingsGalleryFixture(config: baseConfig)
-        galleryRoot = fixture.root
         _panelModel = StateObject(wrappedValue: fixture.panel)
         _soundPacksEditorOwner = StateObject(wrappedValue: fixture.owner)
+        _soundPacksEditorNativeEffects = StateObject(
+            wrappedValue: SoundPacksEditorNativeEffectsDispatcher(
+                adapter: SettingsGallerySoundPacksEditorNativeEffectsAdapter()))
         _aiCueViewModel = StateObject(
             wrappedValue: AICueGenerationViewModel(
                 previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState))
@@ -304,12 +307,10 @@ private struct EventSettingsLayoutFrame: View {
             hostIntegrations: hostIntegrations,
             languageStore: languageStore,
             aiCueViewModel: aiCueViewModel,
-            soundPacksModel: soundPacksEditorOwner.model,
             soundPacksEditorOwner: soundPacksEditorOwner,
-            audioEnvironment: previewAudioImportEnvironment,
+            soundPacksEditorNativeEffects: soundPacksEditorNativeEffects,
             onConfigureSound: { _ in },
             onAudibilityInputsChanged: {},
-            onPackSwitch: { _ in },
             onAnnouncement: { _ in }
         )
         .frame(width: width, height: 640)
@@ -318,12 +319,11 @@ private struct EventSettingsLayoutFrame: View {
 
 @MainActor
 private struct EventSettingsGalleryFixture {
-    let root: URL
     let panel: PanelConfigController
     let owner: SoundPacksEditorOwner
 
     init(config: ClaudioConfig) {
-        root = previewStateGalleryRoot.appendingPathComponent(
+        let root = previewStateGalleryRoot.appendingPathComponent(
             "event-settings-\(UUID().uuidString)",
             isDirectory: true)
         let environment = previewAudioImportEnvironment
@@ -707,7 +707,7 @@ private final class SettingsGallerySoundPacksEditorNativeEffectsAdapter:
     SoundPacksEditorNativeEffectsAdapter
 {
     func selectAudioFiles(allowsMultipleSelection: Bool) -> [URL] { [] }
-    func playAudio(fileURL: URL, volume: Double) {}
+    func playAudio(fileURL: URL, volume: Double) -> TimeInterval? { nil }
     func stopAudio() {}
     func revealInFinder(fileURL: URL) {}
 }

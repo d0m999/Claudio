@@ -284,8 +284,8 @@ func runSoundPacksEditorNativeEffectsSuites() async {
                 "迟到的 Sounds disappear 不得停用已经接管同一 owner 的 Events context")
             dispatcher.handleLifecycle(.settingsWindowWillClose, owner: owner)
             expect(
-                owner.presentation.mode == .inactive && adapter.stopCount == 1,
-                "Settings close 必须停用 Events context，但不得伪造第二次 Sounds stop")
+                owner.presentation.mode == .inactive && adapter.stopCount == 2,
+                "Settings close 必须消费 Events 自己的 stop capability 后停用 context")
         }
     }
 

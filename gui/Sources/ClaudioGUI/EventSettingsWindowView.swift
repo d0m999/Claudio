@@ -16,13 +16,11 @@ struct EventSettingsWindowView: View {
     @ObservedObject var hostIntegrations: HostIntegrationPresentationStore
     @ObservedObject var languageStore: ClaudioPreferences
     @ObservedObject var aiCueViewModel: AICueGenerationViewModel
-    @ObservedObject var soundPacksModel: SoundPacksWindowModel
     @ObservedObject var soundPacksEditorOwner: SoundPacksEditorOwner
 
-    let audioEnvironment: AudioImportEnvironment
+    let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
     let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
     let onAudibilityInputsChanged: @MainActor () -> Void
-    let onPackSwitch: @MainActor (PanelPackSwitchOutcome) -> Void
     let onAnnouncement: (@MainActor (String) -> Void)?
     #if DEBUG
     var reloadsOnAppear = true
@@ -58,10 +56,22 @@ struct EventSettingsWindowView: View {
         resolvedScope == nil
     }
     private var eventsEditorPresentation: EventsSoundPackPresentation? {
-        guard case .events(let presentation) = soundPacksEditorOwner.presentation.mode else {
+        guard case .events(let presentation) = soundPacksEditorOwner.presentation.mode,
+            presentation.route == selection.route,
+            presentation.requestRevision == selection.routeRequestRevision
+        else {
             return nil
         }
         return presentation
+    }
+    private var editorLibraryHasUsableSnapshot: Bool {
+        switch soundPacksEditorOwner.presentation.library {
+        case .ready, .loading(previousAvailable: true), .failed(previousAvailable: true, _):
+            return true
+        case .unloaded, .loading(previousAvailable: false),
+            .failed(previousAvailable: false, _):
+            return false
+        }
     }
     private var scopeProjectionIsAligned: Bool {
         resolvedScope == selectedScope.scope
@@ -155,7 +165,10 @@ struct EventSettingsWindowView: View {
         }
         .onDisappear {
             selection.leaveDestination()
-            stopAllPreviews()
+            cancelPreviewSequenceState()
+            soundPacksEditorNativeEffects.handleLifecycle(
+                .eventsViewDisappeared,
+                owner: soundPacksEditorOwner)
             closeAICueComposer()
         }
     }
@@ -356,17 +369,20 @@ struct EventSettingsWindowView: View {
         }
     }
 
-    private var aiCuePageEligibility: AICueAdoptionEligibility? {
+    private var aiCuePageEligibility: SoundPackEditorAdoptionAvailability? {
         guard
             scopeProjectionIsAligned,
             case .events = model.configState.topContent,
-            model.libraryPresentationState.hasUsableSnapshot
+            editorLibraryHasUsableSnapshot,
+            let access = eventsEditorPresentation?.eventAccess.first(where: {
+                $0.event == .stop
+            })
         else { return nil }
-        return model.aiCueAdoptionEligibility(for: .stop)
+        return access.adoptionAvailability
     }
 
     private func aiCueAvailabilityNotice(
-        _ eligibility: AICueAdoptionEligibility
+        _ eligibility: SoundPackEditorAdoptionAvailability
     ) -> some View {
         HStack(alignment: .center, spacing: 10) {
             Image(systemName: "info.circle.fill")
@@ -405,7 +421,7 @@ struct EventSettingsWindowView: View {
             VStack(alignment: .leading, spacing: 14) {
                 EventSettingsMasterVolumeControl(
                     diskVolume: model.config.masterVolume,
-                    isEnabled: model.libraryPresentationState.hasUsableSnapshot,
+                    isEnabled: editorLibraryHasUsableSnapshot,
                     language: languageStore.language,
                     focusedTarget: $focusedTarget
                 ) { volume in
@@ -419,22 +435,22 @@ struct EventSettingsWindowView: View {
                 VStack(alignment: .leading, spacing: 7) {
                     Picker(l10n.text(.panelSoundPackLabel), selection: selectedPackBinding) {
                         if !model.config.selectedPack.isEmpty,
-                            !soundPacksModel.packCards.contains(where: {
+                            !(eventsEditorPresentation?.packs ?? []).contains(where: {
                                 $0.id == model.config.selectedPack
                             })
                         {
                             Text(model.selectedPackMetadata.displayName)
                                 .tag(model.config.selectedPack)
                         }
-                        ForEach(soundPacksModel.packCards, id: \.id) { card in
+                        ForEach(eventsEditorPresentation?.packs ?? [], id: \.id) { card in
                             Text(SelectedPackMetadata(id: card.id, name: card.name).displayName)
                                 .tag(card.id)
                         }
                     }
                     .disabled(
-                        !soundPacksModel.libraryPresentationState.hasUsableSnapshot
+                        !editorLibraryHasUsableSnapshot
                             || model.surfaceSoundIssue != nil
-                            || soundPacksModel.packCards.isEmpty
+                            || (eventsEditorPresentation?.packs.isEmpty ?? true)
                     )
                     .focused($focusedTarget, equals: .packPicker)
                     .accessibilityIdentifier("event-settings.sound-pack-picker")
@@ -486,7 +502,7 @@ struct EventSettingsWindowView: View {
                 guard packID != model.config.selectedPack else { return }
                 stopAllPreviews()
                 let outcome = model.switchPack(to: packID)
-                onPackSwitch(outcome)
+                _ = soundPacksEditorOwner.send(.completePanelPackSwitch(outcome))
                 if outcome == .succeeded {
                     onAudibilityInputsChanged()
                 }
@@ -517,33 +533,37 @@ struct EventSettingsWindowView: View {
             return
         }
         stopAllPreviews()
-        let presentations = events
-        let rows = model.eventRows
-        let packID = model.config.selectedPack
-        let environment = audioEnvironment
-        let volume = Float(previewVolume(for: model.config))
+        let previewEvents = events.compactMap { presentation -> Event? in
+            guard presentation.controls.previewEnabled,
+                eventsEditorPresentation?.eventAccess.first(where: {
+                    $0.event == presentation.event
+                })?.previewAction != nil
+            else { return nil }
+            return presentation.event
+        }
         let generation = selection.beginPreviewSequence()
         previewAllTask = Task { @MainActor in
             let result = await previewAllCoordinator.run(
-                makePlan: {
-                    makeEventPreviewSequencePlan(
-                        presentations: presentations,
-                        rows: rows,
-                        packID: packID,
-                        environment: environment)
-                },
-                onPlay: { item in
-                    previewPlayer.play(fileAt: item.fileURL, volume: volume)
+                events: previewEvents,
+                onPlay: { event in
+                    guard
+                        let action = eventsEditorPresentation?.eventAccess.first(where: {
+                            $0.event == event
+                        })?.previewAction
+                    else { return nil }
+                    return soundPacksEditorNativeEffects.playPreview(
+                        action,
+                        owner: soundPacksEditorOwner)
                 })
             guard selection.completePreviewSequence(generation: generation) else { return }
             switch result {
             case .empty:
-                model.reload()
+                activateEventsEditor()
             case .failed(let event):
                 previewPlayer.stop()
                 previewAllFailureEvent = event
                 onAnnouncement?(previewAllFailureMessage(for: event))
-                model.reload()
+                activateEventsEditor()
             case .completed, .cancelled:
                 break
             }
@@ -552,12 +572,21 @@ struct EventSettingsWindowView: View {
     }
 
     private func stopAllPreviews() {
+        cancelPreviewSequenceState()
+        if let stopAction = eventsEditorPresentation?.stopPreviewAction {
+            soundPacksEditorNativeEffects.consume(
+                soundPacksEditorOwner.send(.invoke(stopAction)),
+                owner: soundPacksEditorOwner)
+        }
+        previewPlayer.stop()
+        selection.notePreviewStopped()
+    }
+
+    private func cancelPreviewSequenceState() {
         previewAllTask?.cancel()
         previewAllTask = nil
         previewAllFailureEvent = nil
         previewAllCoordinator.cancel()
-        previewPlayer.stop()
-        selection.notePreviewStopped()
     }
 
     private func previewAllFailureMessage(for event: Event) -> String {
@@ -576,10 +605,12 @@ struct EventSettingsWindowView: View {
             switch model.configState.topContent {
             case .events:
                 if scopeProjectionIsAligned {
-                    if model.libraryPresentationState.hasUsableSnapshot {
+                    if editorLibraryHasUsableSnapshot {
                         VStack(alignment: .leading, spacing: 12) {
-                            if case .refreshFailed(let reason) = model.libraryPresentationState {
-                                libraryFailure(reason)
+                            if case .failed(previousAvailable: true, let reason) =
+                                soundPacksEditorOwner.presentation.library
+                            {
+                                libraryFailure(reason, previousAvailable: true)
                             }
                             if !writeFailureMessages.isEmpty {
                                 writeFailures
@@ -587,14 +618,20 @@ struct EventSettingsWindowView: View {
                             VStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(events.enumerated()), id: \.element.id) {
                                     index, event in
-                                    let eligibility = model.aiCueAdoptionEligibility(
-                                        for: event.event)
+                                    let eligibility =
+                                        eventsEditorPresentation?.eventAccess.first(where: {
+                                            $0.event == event.event
+                                        })?.adoptionAvailability ?? .ineligible(.writesStopped)
                                     EventSettingsEventRow(
                                         presentation: event,
                                         windowLayout: windowLayout,
                                         language: languageStore.language,
                                         focusedTarget: $focusedTarget,
-                                        onGenerateAICue: { openAICueComposer(eligibility) },
+                                        onGenerateAICue: {
+                                            openAICueComposer(
+                                                eligibility,
+                                                event: event.event)
+                                        },
                                         onPreview: { playPreview(event.event) },
                                         onToggleMute: {
                                             model.toggleMute(event.event)
@@ -667,31 +704,53 @@ struct EventSettingsWindowView: View {
 
     @ViewBuilder
     private var libraryUnavailableSection: some View {
-        switch model.libraryPresentationState {
-        case .loading:
+        switch soundPacksEditorOwner.presentation.library {
+        case .unloaded, .loading(previousAvailable: false):
             HStack(spacing: 8) {
                 ProgressView().controlSize(.small).accessibilityHidden(true)
                 Text(l10n.text(.panelLoadingEvents))
                     .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
             }
             .accessibilityIdentifier("event-settings.library.loading")
-        case .loadFailed(let reason):
-            libraryFailure(reason)
-        case .ready, .refreshing, .refreshFailed:
+        case .failed(previousAvailable: false, let reason):
+            libraryFailure(reason, previousAvailable: false)
+        case .ready, .loading(previousAvailable: true), .failed(previousAvailable: true, _):
             EmptyView()
         }
     }
 
-    private func libraryFailure(_ reason: String) -> some View {
+    private func libraryFailure(
+        _ reason: SoundPackEditorLibraryFailureReason,
+        previousAvailable: Bool
+    ) -> some View {
         VStack(alignment: .leading, spacing: 7) {
-            FailureRow(message: reason)
+            FailureRow(
+                message: previousAvailable
+                    ? l10n.format(
+                        .soundPacksLibraryRefreshFailed,
+                        localizedLibraryFailure(reason))
+                    : localizedLibraryFailure(reason))
             Button(l10n.text(.panelRetry)) {
-                model.retrySoundPackLibraryRefresh()
+                guard let action = eventsEditorPresentation?.retryLibraryAction else { return }
+                soundPacksEditorNativeEffects.consume(
+                    soundPacksEditorOwner.send(.invoke(action)),
+                    owner: soundPacksEditorOwner)
             }
             .focused($focusedTarget, equals: .retryLibrary)
             .accessibilityLabel(l10n.text(.panelRetry))
             .accessibilityHint(l10n.text(.panelRetryHint))
             .accessibilityIdentifier("event-settings.library.retry")
+        }
+    }
+
+    private func localizedLibraryFailure(
+        _ reason: SoundPackEditorLibraryFailureReason
+    ) -> String {
+        switch reason {
+        case .locationUnavailable:
+            return l10n.text(.soundPacksEmptyLoadFailedMessage)
+        case .scanFailed:
+            return l10n.text(.panelPacksReadFailed)
         }
     }
 
@@ -766,34 +825,28 @@ struct EventSettingsWindowView: View {
     private func playPreview(_ event: Event) {
         stopCandidatePreview()
         stopAllPreviews()
-        guard
-            let row = model.eventRows.first(where: { $0.event == event }),
-            let file = eventPreviewFileURL(
-                row: row,
-                packID: model.config.selectedPack,
-                environment: audioEnvironment)
+        guard let action = eventsEditorPresentation?.eventAccess.first(where: {
+            $0.event == event
+        })?.previewAction,
+            soundPacksEditorNativeEffects.playPreview(
+                action,
+                owner: soundPacksEditorOwner) != nil
         else {
-            model.reload()
-            return
-        }
-        guard
-            previewPlayer.play(
-                fileAt: file,
-                volume: Float(previewVolume(for: model.config))
-            )
-        else {
-            model.reload()
+            activateEventsEditor()
             return
         }
     }
 
-    private func openAICueComposer(_ eligibility: AICueAdoptionEligibility) {
-        guard case .eligible(let target) = eligibility else { return }
+    private func openAICueComposer(
+        _ eligibility: SoundPackEditorAdoptionAvailability,
+        event: Event
+    ) {
+        guard case .eligible = eligibility else { return }
         previewPlayer.stop()
         playingCandidateID = nil
         playingCandidateTitle = nil
-        selection.beginAISession(scope: .surface(target.surface), event: target.event)
-        aiCueViewModel.begin(scope: .surface(target.surface), event: target.event)
+        selection.beginAISession(scope: selectedScope.scope, event: event)
+        aiCueViewModel.begin(scope: selectedScope.scope, event: event)
         activateEventsEditor()
     }
 
@@ -887,12 +940,16 @@ struct EventSettingsWindowView: View {
         }
     }
 
-    private func aiCueGenerationIsEnabled(_ eligibility: AICueAdoptionEligibility) -> Bool {
+    private func aiCueGenerationIsEnabled(
+        _ eligibility: SoundPackEditorAdoptionAvailability
+    ) -> Bool {
         if case .eligible = eligibility { return true }
         return false
     }
 
-    private func aiCueEligibilityHint(_ eligibility: AICueAdoptionEligibility) -> String {
+    private func aiCueEligibilityHint(
+        _ eligibility: SoundPackEditorAdoptionAvailability
+    ) -> String {
         switch eligibility {
         case .eligible:
             return l10n.text(.aiCueGenerateHint)

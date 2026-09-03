@@ -11,16 +11,21 @@ public final class NSSoundAudioPreviewPlayer: AudioPreviewPlaying {
 
     @discardableResult
     public func play(fileAt url: URL, volume: Float) -> Bool {
+        playWithDuration(fileAt: url, volume: volume) != nil
+    }
+
+    @discardableResult
+    public func playWithDuration(fileAt url: URL, volume: Float) -> TimeInterval? {
         currentSound?.stop()
         currentSound = nil
-        guard let sound = NSSound(contentsOf: url, byReference: true) else { return false }
+        guard let sound = NSSound(contentsOf: url, byReference: true) else { return nil }
         sound.volume = volume
         currentSound = sound
         guard sound.play() else {
             currentSound = nil
-            return false
+            return nil
         }
-        return true
+        return sound.duration
     }
 
     public func stop() {

@@ -240,7 +240,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             hostIntegrations: hostIntegrations,
             integrationsModel: integrationsModel,
             aiCueViewModel: aiCueViewModel,
-            audioEnvironment: audioEnvironment,
             onEventAudibilityInputsChanged: { [weak actionRouter] in
                 actionRouter?.audibilityInputsChanged()
             })

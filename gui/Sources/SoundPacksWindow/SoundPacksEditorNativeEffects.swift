@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 @MainActor
 package protocol SoundPacksEditorNativeEffectsAdapter: AnyObject {
     func selectAudioFiles(allowsMultipleSelection: Bool) -> [URL]
-    func playAudio(fileURL: URL, volume: Double)
+    func playAudio(fileURL: URL, volume: Double) -> TimeInterval?
     func stopAudio()
     func revealInFinder(fileURL: URL)
 }
@@ -20,6 +20,7 @@ package protocol SoundPacksEditorNativeEffectsAdapter: AnyObject {
 package enum SoundPacksEditorNativeLifecycleEvent: Sendable {
     case settingsWindowWillClose
     case soundsViewDisappeared
+    case eventsViewDisappeared
 }
 
 /// Exhaustively translates the Foundation-only owner effect into one native side effect. Picker
@@ -42,7 +43,7 @@ package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject {
                 allowsMultipleSelection: bindTo == nil)
             return .importAudio(permit: permit, sources: sources, bindTo: bindTo)
         case .playAudio(let fileURL, let volume):
-            adapter.playAudio(fileURL: fileURL, volume: volume)
+            _ = adapter.playAudio(fileURL: fileURL, volume: volume)
             return nil
         case .stopAudio:
             adapter.stopAudio()
@@ -51,6 +52,18 @@ package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject {
             adapter.revealInFinder(fileURL: fileURL)
             return nil
         }
+    }
+
+    /// Resolves one opaque action through the owner and executes only an exact audio effect. The
+    /// caller receives playback duration for sequencing but never gains filesystem identity.
+    package func playPreview(
+        _ action: SoundPackEditorAction,
+        owner: SoundPacksEditorOwner
+    ) -> TimeInterval? {
+        guard case .nativeEffect(.playAudio(let fileURL, let volume)) =
+            owner.send(.invoke(action))
+        else { return nil }
+        return adapter.playAudio(fileURL: fileURL, volume: volume)
     }
 
     /// Consumes only the instantaneous native-effect branch. Async owner operations are retained
@@ -77,14 +90,18 @@ package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject {
             guard case .sounds(let sounds) = owner.presentation.mode else { return }
             consume(owner.send(.invoke(sounds.stopPreviewAction)), owner: owner)
             _ = owner.send(.activate(.inactive))
+        case .eventsViewDisappeared:
+            guard case .events(let events) = owner.presentation.mode else { return }
+            consume(owner.send(.invoke(events.stopPreviewAction)), owner: owner)
+            _ = owner.send(.activate(.inactive))
         case .settingsWindowWillClose:
             switch owner.presentation.mode {
             case .inactive:
                 return
             case .sounds(let sounds):
                 consume(owner.send(.invoke(sounds.stopPreviewAction)), owner: owner)
-            case .events:
-                break
+            case .events(let events):
+                consume(owner.send(.invoke(events.stopPreviewAction)), owner: owner)
             }
             _ = owner.send(.activate(.inactive))
         }
@@ -178,8 +195,8 @@ package final class SystemSoundPacksEditorNativeEffectsAdapter:
         runAudioOpenPanel(allowsMultipleSelection: allowsMultipleSelection)
     }
 
-    package func playAudio(fileURL: URL, volume: Double) {
-        previewPlayer.play(fileAt: fileURL, volume: Float(volume))
+    package func playAudio(fileURL: URL, volume: Double) -> TimeInterval? {
+        previewPlayer.playWithDuration(fileAt: fileURL, volume: Float(volume))
     }
 
     package func stopAudio() {
