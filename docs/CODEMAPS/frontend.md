@@ -1,6 +1,6 @@
 # Frontend Architecture
 
-<!-- Generated: 2026-08-22 | Files scanned: 286 | Token estimate: ~680 -->
+<!-- Updated: 2026-09-04 -->
 
 ## Page / window tree
 
@@ -14,20 +14,29 @@ ClaudioGUIApp (@main)
       │  └─ PanelQuitFooter / onboarding and state-driven notices
       └─ retained SettingsWindowController
          ├─ SettingsWindowView
+         │  ├─ ClaudioSettingsPresentation.LoginItemSettingsSection
          │  ├─ IntegrationsSettingsDestinationView
          │  ├─ EventSettingsWindowView
          │  └─ embedded SoundPacksWindowView
+         ├─ SettingsPresentationSession (General/Login projection and typed actions)
          └─ one app-lifetime SoundPacksEditorOwner
 ```
 
 `ClaudioGUIComponents` supplies `ClaudioTheme`, branding, failure rows, audio preview, and text
-size controls. `ClaudioLocalization` owns the string catalog and explicit language store.
+size controls, including the two-caller `SharedMasterVolumeSlider`. `ClaudioLocalization` owns the
+string catalog and explicit language store. `ClaudioSettingsPresentation.SettingsRootView` is the
+importable production-shape General/Login root used by the compiled harness; the retained
+nine-destination production shell stays in `ClaudioGUI` until its later cutover.
 
 ## State flow
 
 ```text
 composition root
   → HostIntegrationManagerBridge (actor) → HostIntegrationPresentationState
+  → ClaudioPreferences + LoginItemSettingsModel
+    → SettingsPresentationSession.state
+      → LoginItemSettingsSection / SettingsRootView
+      → SettingsPlatformAction → ClaudioGUI native adapter
   → SoundPackLibrary (actor) → SoundPackLibrarySnapshot
     → SoundPacksWindowModel (package implementation, owner-private)
       → SoundPacksEditorOwner.presentation
@@ -44,6 +53,9 @@ composition root
   owner implementation.
 - `PanelConfigController`, `MasterVolumeController`, `EventMuteController`, and onboarding models
   keep pure Foundation decisions outside SwiftUI.
+- `SettingsPresentationSession` projects the real General/Login slice from non-optional existing
+  owners. It owns neither Settings routing/window handback nor duplicate preference/login facts;
+  native Login Items and Calendar effects are a closed typed action handled in `ClaudioGUI`.
 - `PanelFocusCoordinator` and the retained Settings owner own popover/window focus handoff; views
   do not own the app lifetime of management windows.
 
@@ -52,7 +64,10 @@ composition root
 - `ClaudioGUICore`: testable state, presentation, accessibility, pack import/restore, and layout
   decisions; no SwiftUI dependency.
 - `ClaudioGUIComponents`: reusable SwiftUI visual primitives.
-- `ClaudioGUI` / `SoundPacksWindow`: AppKit/SwiftUI rendering and lifecycle wiring only.
+- `ClaudioSettingsPresentation`: resource-free SwiftUI presentation for the real General/Login
+  slice, with no AppKit, ServiceManagement, system workspace, route, or window ownership.
+- `ClaudioGUI` / `SoundPacksWindow`: executable native adapters plus AppKit/SwiftUI rendering and
+  lifecycle wiring.
 - Native menu-bar, VoiceOver, keyboard, audio, and focus behavior requires real macOS manual evidence
   in addition to executable harness checks.
 
@@ -66,5 +81,10 @@ composition root
   command/operation boundary.
 - `gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift`: package-local owner implementation for
   sound-pack projection and writes.
+- `gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift`: General/Login
+  projection, typed actions, and semantic announcement debt.
+- `gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift`: importable real-slice root.
+- `gui/Sources/ClaudioGUI/SettingsPlatformActionsAdapter.swift`: exhaustive native adapter for the
+  two Settings-only system effects.
 - `gui/Sources/ClaudioGUI/SettingsWindowController.swift`: retained settings lifecycle and native
   semantic announcement acknowledgement.
