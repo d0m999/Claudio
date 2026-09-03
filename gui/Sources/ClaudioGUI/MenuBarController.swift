@@ -1,8 +1,8 @@
 import AppKit
 import ClaudioCore
 import ClaudioGUICore
-import ClaudioSettingsPresentation
 import ClaudioLocalization
+import ClaudioSettingsPresentation
 import Combine
 import SoundPacksWindow
 import SwiftUI
