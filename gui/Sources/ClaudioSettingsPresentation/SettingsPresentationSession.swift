@@ -18,6 +18,8 @@ package final class SettingsPresentationSession: ObservableObject {
     private var pendingAnnouncement: SettingsPresentationAnnouncement?
     private var nextAnnouncementID: UInt64 = 0
     private var presentationRevision: UInt64 = 0
+    private var isPublishingProjection = false
+    private var projectionRepublishRequested = false
     private var cancellables: Set<AnyCancellable> = []
 
     package init(
@@ -116,20 +118,31 @@ package final class SettingsPresentationSession: ObservableObject {
     }
 
     private func publishProjection() {
-        let candidate = Self.makeState(
-            preferenceSnapshot: preferenceSnapshot,
-            loginProjection: loginProjection,
-            platformActionFailure: platformActionFailure,
-            pendingAnnouncement: pendingAnnouncement,
-            presentationRevision: presentationRevision)
-        guard candidate != state else { return }
-        presentationRevision &+= 1
-        state = Self.makeState(
-            preferenceSnapshot: preferenceSnapshot,
-            loginProjection: loginProjection,
-            platformActionFailure: platformActionFailure,
-            pendingAnnouncement: pendingAnnouncement,
-            presentationRevision: presentationRevision)
+        guard !isPublishingProjection else {
+            projectionRepublishRequested = true
+            return
+        }
+        isPublishingProjection = true
+        defer { isPublishingProjection = false }
+
+        repeat {
+            projectionRepublishRequested = false
+            let candidate = Self.makeState(
+                preferenceSnapshot: preferenceSnapshot,
+                loginProjection: loginProjection,
+                platformActionFailure: platformActionFailure,
+                pendingAnnouncement: pendingAnnouncement,
+                presentationRevision: presentationRevision)
+            if candidate != state {
+                presentationRevision &+= 1
+                state = Self.makeState(
+                    preferenceSnapshot: preferenceSnapshot,
+                    loginProjection: loginProjection,
+                    platformActionFailure: platformActionFailure,
+                    pendingAnnouncement: pendingAnnouncement,
+                    presentationRevision: presentationRevision)
+            }
+        } while projectionRepublishRequested
     }
 
     private static func makeState(
