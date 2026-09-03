@@ -9,38 +9,47 @@ import SwiftUI
 func runSettingsPresentationTargetSuites() {
     suite("Settings presentation target：依赖方向、资源与导入边界固定") {
         let root = guiTestRepositoryRoot()
-        let packageURL = root.appendingPathComponent("gui/Package.swift")
         let appURL = root.appendingPathComponent("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift")
         let suiteURL = root.appendingPathComponent(
             "gui/Tests/ClaudioGUICoreTests/SettingsPresentationTargetSuite.swift")
-        guard let package = try? String(contentsOf: packageURL, encoding: .utf8),
+        guard let targets = dumpedSettingsPackageTargets(repositoryRoot: root),
+            let settings = targets.first(where: { $0.name == "ClaudioSettingsPresentation" }),
+            let appTarget = targets.first(where: { $0.name == "ClaudioGUI" }),
+            let harnessTarget = targets.first(where: { $0.name == "claudio-gui-tests" }),
             let app = try? String(contentsOf: appURL, encoding: .utf8),
-            let suiteSource = try? String(contentsOf: suiteURL, encoding: .utf8),
-            let targetStart = package.range(
-                of:
-                    ".target(\n            name: \"ClaudioSettingsPresentation\""),
-            let targetEnd = package.range(
-                of: "\n        ),\n        // The SwiftUI app",
-                range: targetStart.lowerBound..<package.endIndex)
+            let suiteSource = try? String(contentsOf: suiteURL, encoding: .utf8)
         else {
-            expect(false, "读不到 Package、production composition 或 target suite")
+            expect(false, "读不到 SwiftPM dump、production composition 或 target suite")
             return
         }
-        let targetDeclaration = String(package[targetStart.lowerBound..<targetEnd.upperBound])
+        let expectedDependencies = [
+            "ClaudioCore",
+            "ClaudioGUIComponents",
+            "ClaudioGUICore",
+            "ClaudioLocalization",
+            "SoundPacksWindow",
+        ]
 
         expect(
-            package.contains("name: \"ClaudioSettingsPresentation\"")
-                && package.contains("\"ClaudioSettingsPresentation\","),
-            "Package 必须声明 ClaudioSettingsPresentation 并让 composition roots 直接依赖")
+            targets.filter { $0.name == "ClaudioSettingsPresentation" }.count == 1
+                && settings.dependencies.sorted() == expectedDependencies
+                && settings.resourcesCount == 0,
+            "SwiftPM graph 必须恰有一个 Settings target、五个精确 direct dependencies 且零资源")
         expect(
-            targetDeclaration.contains("\"ClaudioLocalization\"")
-                && targetDeclaration.contains("\"ClaudioGUICore\"")
-                && targetDeclaration.contains("\"ClaudioGUIComponents\"")
-                && targetDeclaration.contains("\"SoundPacksWindow\"")
-                && targetDeclaration.contains(
-                    ".product(name: \"ClaudioCore\", package: \"helper\")")
-                && !targetDeclaration.contains("resources:"),
-            "Settings target 必须直接声明五个既有下游依赖且不拥有资源")
+            appTarget.dependencies.filter { $0 == "ClaudioSettingsPresentation" }.count == 1
+                && harnessTarget.dependencies.filter {
+                    $0 == "ClaudioSettingsPresentation"
+                }.count == 1,
+            "ClaudioGUI 与 harness 必须分别且仅一次 direct-depend Settings target")
+        let lowerTargetNames = [
+            "ClaudioLocalization", "ClaudioGUICore", "ClaudioGUIComponents", "SoundPacksWindow",
+        ]
+        expect(
+            targets.filter { lowerTargetNames.contains($0.name) }.count == lowerTargetNames.count
+                && targets.filter { lowerTargetNames.contains($0.name) }.allSatisfy {
+                    !$0.dependencies.contains("ClaudioSettingsPresentation")
+                },
+            "四个下层 target 必须全部存在且零回指，保持 graph acyclic")
         expect(
             app.contains("import ClaudioSettingsPresentation")
                 && suiteSource.contains("import ClaudioSettingsPresentation"),
@@ -395,4 +404,60 @@ private func settingsBracedBlock(after marker: String, in source: String) -> Str
         index = source.index(after: index)
     }
     return nil
+}
+
+private struct DumpedSettingsPackageTarget {
+    let name: String
+    let dependencies: [String]
+    let resourcesCount: Int
+}
+
+private func dumpedSettingsPackageTargets(
+    repositoryRoot: URL
+) -> [DumpedSettingsPackageTarget]? {
+    let output = Pipe()
+    let errors = Pipe()
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    process.arguments = [
+        "swift", "package", "dump-package", "--package-path",
+        repositoryRoot.appendingPathComponent("gui", isDirectory: true).path,
+    ]
+    process.standardOutput = output
+    process.standardError = errors
+    do {
+        try process.run()
+    } catch {
+        return nil
+    }
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    guard process.terminationStatus == EXIT_SUCCESS,
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let targets = object["targets"] as? [[String: Any]]
+    else {
+        return nil
+    }
+
+    return targets.compactMap { target in
+        guard let name = target["name"] as? String,
+            let rawDependencies = target["dependencies"] as? [[String: Any]]
+        else {
+            return nil
+        }
+        let dependencies = rawDependencies.compactMap { dependency -> String? in
+            if let byName = dependency["byName"] as? [Any] {
+                return byName.first as? String
+            }
+            if let product = dependency["product"] as? [Any] {
+                return product.first as? String
+            }
+            return nil
+        }
+        let resources = target["resources"] as? [Any] ?? []
+        return DumpedSettingsPackageTarget(
+            name: name,
+            dependencies: dependencies,
+            resourcesCount: resources.count)
+    }
 }
