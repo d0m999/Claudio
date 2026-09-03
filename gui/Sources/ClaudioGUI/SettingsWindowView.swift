@@ -3,6 +3,7 @@ import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
 import ClaudioLocalization
+import ClaudioSettingsPresentation
 import SoundPacksWindow
 import SwiftUI
 

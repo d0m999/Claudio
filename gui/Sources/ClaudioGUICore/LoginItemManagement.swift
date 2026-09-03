@@ -22,18 +22,48 @@ package enum LoginItemOperationFailureReason: Error, Equatable, Sendable {
     case systemRejected
 }
 
+package struct LoginItemOperationFailure: Equatable, Sendable {
+    package let requestedEnabled: Bool
+    package let reason: LoginItemOperationFailureReason
+
+    package init(requestedEnabled: Bool, reason: LoginItemOperationFailureReason) {
+        self.requestedEnabled = requestedEnabled
+        self.reason = reason
+    }
+}
+
+package struct LoginItemSettingsProjection: Equatable, Sendable {
+    package let registration: LoginItemRegistrationState
+    package let failure: LoginItemOperationFailure?
+
+    package init(
+        registration: LoginItemRegistrationState,
+        failure: LoginItemOperationFailure?
+    ) {
+        self.registration = registration
+        self.failure = failure
+    }
+}
+
+package struct LoginItemServiceAdapter {
+    package let status: @MainActor () -> LoginItemRegistrationState
+    package let setEnabled: @MainActor (Bool) throws -> LoginItemRegistrationState
+
+    package init(
+        status: @escaping @MainActor () -> LoginItemRegistrationState,
+        setEnabled: @escaping @MainActor (Bool) throws -> LoginItemRegistrationState
+    ) {
+        self.status = status
+        self.setEnabled = setEnabled
+    }
+}
+
 /// Result-level Settings fact. A failure is one optional tuple so requested operation and reason
 /// cannot become independently nil while the previously read registration fact stays unchanged.
 package func makeLoginItemSettingsProjection(
     registration: LoginItemRegistrationState
-) -> (
-    registration: LoginItemRegistrationState,
-    failure: (
-        requestedEnabled: Bool,
-        reason: LoginItemOperationFailureReason
-    )?
-) {
-    (registration, nil)
+) -> LoginItemSettingsProjection {
+    LoginItemSettingsProjection(registration: registration, failure: nil)
 }
 
 /// Injectable ServiceManagement boundary. Production supplies SMAppService/legacy calls while
@@ -41,14 +71,9 @@ package func makeLoginItemSettingsProjection(
 @MainActor
 package func makeLoginItemServiceAdapter(
     status: @escaping () -> LoginItemRegistrationState,
-    setEnabled: @escaping (Bool) throws -> LoginItemRegistrationState,
-    openSystemSettings: (() -> Void)? = nil
-) -> (
-    status: () -> LoginItemRegistrationState,
-    setEnabled: (Bool) throws -> LoginItemRegistrationState,
-    openSystemSettings: (() -> Void)?
-) {
-    (status, setEnabled, openSystemSettings)
+    setEnabled: @escaping (Bool) throws -> LoginItemRegistrationState
+) -> LoginItemServiceAdapter {
+    LoginItemServiceAdapter(status: status, setEnabled: setEnabled)
 }
 
 package func projectModernLoginItemStatus(
@@ -73,13 +98,8 @@ package func makeModernLoginItemServiceAdapter(
     requiresApprovalValue: Int,
     notFoundValue: Int,
     register: @escaping () throws -> Void,
-    unregister: @escaping () throws -> Void,
-    openSystemSettings: @escaping () -> Void
-) -> (
-    status: () -> LoginItemRegistrationState,
-    setEnabled: (Bool) throws -> LoginItemRegistrationState,
-    openSystemSettings: (() -> Void)?
-) {
+    unregister: @escaping () throws -> Void
+) -> LoginItemServiceAdapter {
     func projectedStatus() -> LoginItemRegistrationState {
         projectModernLoginItemStatus(
             rawValue: status(),
@@ -102,8 +122,7 @@ package func makeModernLoginItemServiceAdapter(
                 throw LoginItemOperationFailureReason.systemRejected
             }
             return projectedStatus()
-        },
-        openSystemSettings: openSystemSettings)
+        })
 }
 
 @MainActor
@@ -111,11 +130,7 @@ package func makeLegacyLoginItemServiceAdapter(
     embeddedBundleURL: URL,
     registrationIsEnabled: @escaping (String) -> Bool?,
     setEnabled: @escaping (String, Bool) -> Bool
-) -> (
-    status: () -> LoginItemRegistrationState,
-    setEnabled: (Bool) throws -> LoginItemRegistrationState,
-    openSystemSettings: (() -> Void)?
-) {
+) -> LoginItemServiceAdapter {
     func projectedStatus() -> LoginItemRegistrationState {
         guard embeddedLegacyLoginItemIsUsable(at: embeddedBundleURL) else {
             return .unavailable
@@ -148,25 +163,9 @@ package func makeLegacyLoginItemServiceAdapter(
 @MainActor
 package func projectLoginItemRequest(
     _ enabled: Bool,
-    from current: (
-        registration: LoginItemRegistrationState,
-        failure: (
-            requestedEnabled: Bool,
-            reason: LoginItemOperationFailureReason
-        )?
-    ),
-    using adapter: (
-        status: () -> LoginItemRegistrationState,
-        setEnabled: (Bool) throws -> LoginItemRegistrationState,
-        openSystemSettings: (() -> Void)?
-    )
-) -> (
-    registration: LoginItemRegistrationState,
-    failure: (
-        requestedEnabled: Bool,
-        reason: LoginItemOperationFailureReason
-    )?
-) {
+    from current: LoginItemSettingsProjection,
+    using adapter: LoginItemServiceAdapter
+) -> LoginItemSettingsProjection {
     guard current.registration.canToggle, current.registration.isOn != enabled else {
         return current
     }
@@ -180,7 +179,9 @@ package func projectLoginItemRequest(
             } else {
                 .systemRejected
             }
-        return (current.registration, (enabled, reason))
+        return LoginItemSettingsProjection(
+            registration: current.registration,
+            failure: LoginItemOperationFailure(requestedEnabled: enabled, reason: reason))
     }
 }
 

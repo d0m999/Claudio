@@ -1948,7 +1948,7 @@ func runViewWiringSuites() {
         guard
             let row = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift"),
             let shared = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+                "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift")
         else {
             expect(false, "读不到 MasterVolumeRow/SharedMasterVolumeSlider.swift")
             return
@@ -1998,7 +1998,7 @@ func runViewWiringSuites() {
     suite("MasterVolumeRow：diskVolume 变化必须下行同步进 session（D21，否则滑块永久显示磁盘上没有的值）") {
         guard
             let row = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+                "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift")
         else {
             expect(false, "读不到 SharedMasterVolumeSlider.swift")
             return
@@ -2023,7 +2023,8 @@ func runViewWiringSuites() {
     suite("MasterVolumeRow：popover 隐藏必须冲刷（D22/D37，复用既有 hideCount 信号，不新增 closeCount）") {
         guard
             let wrapper = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift"),
-            let row = codeWithoutStrings("gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+            let row = codeWithoutStrings(
+                "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift")
         else {
             expect(false, "读不到 MasterVolumeRow/SharedMasterVolumeSlider.swift")
             return
@@ -2065,7 +2066,8 @@ func runViewWiringSuites() {
         // 一个「屏幕上没有、VO 里也没有」的值，就是压根不存在的值。
         guard
             let wrapper = codeWithoutStrings("gui/Sources/ClaudioGUI/MasterVolumeRow.swift"),
-            let row = codeWithoutStrings("gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+            let row = codeWithoutStrings(
+                "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift")
         else {
             expect(false, "读不到 MasterVolumeRow/SharedMasterVolumeSlider.swift")
             return
@@ -2098,7 +2100,7 @@ func runViewWiringSuites() {
     suite("MasterVolumeRow：willTerminate 必须同步冲刷（D22-bis，且不得复用 hideCount 那套计数器机制）") {
         guard
             let row = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/SharedMasterVolumeSlider.swift")
+                "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift")
         else {
             expect(false, "读不到 SharedMasterVolumeSlider.swift")
             return

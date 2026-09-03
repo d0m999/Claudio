@@ -1,9 +1,7 @@
 import ClaudioGUICore
 import ClaudioLocalization
-import Foundation
-#if canImport(ClaudioSettingsPresentation)
 import ClaudioSettingsPresentation
-#endif
+import Foundation
 
 // Dependency-free test harness — mirrors `helper/Tests/ClaudioCoreTests/main.swift`
 // exactly (down to comment wording), for the same reason: this machine has

@@ -30,26 +30,22 @@ func runLoginItemManagementSuites() {
     suite("Login item adapter：首次读取和刷新只投影系统事实") {
         var status = LoginItemRegistrationState.disabled
         var setCalls: [Bool] = []
-        var settingsOpenCount = 0
         let adapter = makeLoginItemServiceAdapter(
             status: { status },
             setEnabled: { enabled in
                 setCalls.append(enabled)
                 return enabled ? .enabled : .disabled
-            },
-            openSystemSettings: { settingsOpenCount += 1 })
+            })
         var projection = makeLoginItemSettingsProjection(registration: adapter.status())
 
         expect(projection.registration == .disabled, "初始化必须只读未注册事实")
-        expect(setCalls.isEmpty && settingsOpenCount == 0, "首次进入不得注册或打开系统设置")
+        expect(setCalls.isEmpty, "首次进入不得注册")
         status = .requiresApproval
         projection = makeLoginItemSettingsProjection(registration: adapter.status())
         expect(
             projection.registration == .requiresApproval
-                && setCalls.isEmpty && settingsOpenCount == 0,
+                && setCalls.isEmpty,
             "刷新必须投影等待批准且无副作用")
-        adapter.openSystemSettings?()
-        expect(settingsOpenCount == 1, "系统设置只能由明确用户动作打开")
     }
 
     suite("Login item adapter：成功后采用返回事实，失败保留旧状态并可重试") {
@@ -111,7 +107,6 @@ func runLoginItemManagementSuites() {
         var status = notRegisteredValue
         var registerCalls = 0
         var unregisterCalls = 0
-        var settingsCalls = 0
         var shouldReject = false
         let adapter = makeModernLoginItemServiceAdapter(
             status: { status },
@@ -128,17 +123,13 @@ func runLoginItemManagementSuites() {
                 unregisterCalls += 1
                 if shouldReject { throw LoginItemOperationFailureReason.systemRejected }
                 status = notRegisteredValue
-            },
-            openSystemSettings: { settingsCalls += 1 })
+            })
         var projection = makeLoginItemSettingsProjection(registration: adapter.status())
 
         projection = projectLoginItemRequest(true, from: projection, using: adapter)
         expect(
             registerCalls == 1 && projection.registration == .requiresApproval,
             "modern register 成功后必须重读 requiresApproval 系统状态")
-        adapter.openSystemSettings?()
-        expect(settingsCalls == 1, "modern 恢复动作必须调用注入的系统设置入口")
-
         shouldReject = true
         projection = projectLoginItemRequest(false, from: projection, using: adapter)
         expect(

@@ -8,7 +8,7 @@ import SwiftUI
 /// ``VolumeDragSession`` so drag coalescing, rollback, external rebase, close flush, and
 /// termination flush cannot drift between the panel and unified Settings.
 @MainActor
-struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
+package struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
     let diskVolume: Double
     let isEnabled: Bool
     let language: ClaudioAppLanguage
@@ -24,7 +24,7 @@ struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
     @Environment(\.colorScheme) private var colorScheme
     @ScaledMetric(relativeTo: .body) private var typeScale: CGFloat = 1
 
-    init(
+    package init(
         diskVolume: Double,
         isEnabled: Bool,
         language: ClaudioAppLanguage,
@@ -49,7 +49,7 @@ struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
         _session = State(initialValue: VolumeDragSession(baseline: diskVolume))
     }
 
-    var body: some View {
+    package var body: some View {
         HStack(spacing: 7) {
             Slider(
                 value: Binding(
@@ -71,11 +71,11 @@ struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
                 })
             Text("\(Int((session.draft * 100).rounded()))%")
                 .font(.system(size: 10.5 * typeScale, design: .monospaced))
-                .foregroundColor(ClaudioColor.textSecondary(colorScheme))
+                .foregroundColor(ClaudioTheme.secondaryText(colorScheme))
                 .frame(width: percentageWidth, alignment: .trailing)
                 .accessibilityHidden(true)
         }
-        .tint(ClaudioColor.clay(colorScheme))
+        .tint(ClaudioTheme.clay(colorScheme))
         .focused(focusedTarget, equals: focusIdentity)
         .accessibilityLabel(ClaudioL10n(language: language).text(.panelMasterVolume))
         .accessibilityValue("\(Int((session.draft * 100).rounded()))%")
