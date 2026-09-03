@@ -381,6 +381,38 @@ func runSettingsPresentationSliceSuites() {
             "两个 Settings-only system effect 必须走穷尽 typed dispatcher")
     }
 
+    suite("Settings presentation Login refresh：同一 registration 仍清除旧失败") {
+        let preferences = ClaudioPreferences(defaults: UserDefaults())
+        let adapterState = SettingsLoginAdapterState()
+        let login = LoginItemSettingsModel(
+            adapter: makeLoginItemServiceAdapter(
+                status: { adapterState.registration },
+                setEnabled: { _ in
+                    throw LoginItemOperationFailureReason.systemRejected
+                }))
+        let session = SettingsPresentationSession(
+            dependencies: SettingsPresentationDependencies(
+                preferences: preferences,
+                loginItemSettings: login),
+            actions: SettingsPresentationActions { _ in .performed })
+
+        session.setLoginItemEnabled(true)
+        expect(
+            session.state.loginItemRegistration == .disabled
+                && session.state.loginItemFailure?.reason == .systemRejected,
+            "失败请求必须保留旧 registration 并公开 failure")
+        if let failureAnnouncement = session.state.pendingAnnouncement {
+            session.acknowledgeAnnouncement(id: failureAnnouncement.id, didPost: true)
+        }
+
+        session.refreshLoginItem()
+        expect(
+            session.state.loginItemRegistration == .disabled
+                && session.state.loginItemFailure == nil
+                && session.state.pendingAnnouncement == nil,
+            "同一 registration 的系统 refresh 必须清除旧 failure，且不得产生 status announcement")
+    }
+
     suite("Settings presentation announcement：稳定 ID 只接受 exact-head 成功确认") {
         let preferences = ClaudioPreferences(defaults: UserDefaults())
         let login = LoginItemSettingsModel(
