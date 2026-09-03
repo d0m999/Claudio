@@ -258,6 +258,46 @@ func runSettingsNavigationSuites() {
                 ).failure == .staleSoundPack("missing"),
                 "只有同一 projection 的 fresh root 才能确认 missing pack 已陈旧")
             withExtendedLifetime(cancellable) {}
+
+            let staleModel = SoundPacksWindowModel(
+                previewConfig: ClaudioConfig(selectedPack: packID),
+                packCards: [
+                    PackCard(
+                        id: packID,
+                        name: "Previous Pack A",
+                        isCC0: true,
+                        presentEvents: [.stop],
+                        state: .complete,
+                        isSelected: true)
+                ],
+                selectedPackID: packID,
+                selectedEventRows: [],
+                libraryPresentationState: .refreshFailed(reason: "fixture failure"),
+                environment: environment,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            let staleEditor = SoundPacksEditorOwner(
+                model: staleModel,
+                userPacksDirectory: environment.userPacksDirectory)
+            var staleProjection: SettingsSoundPackShellProjection?
+            let staleCancellable = settingsSoundPackShellProjections(
+                editor: staleEditor,
+                hostIntegrations: hostIntegrations
+            ).sink { staleProjection = $0 }
+            expect(
+                staleProjection?.availability.soundPackIDs == [packID]
+                    && staleProjection?.availability.soundPackSnapshotIsFresh == false,
+                "refresh failure 必须保留 previous installed identity，但不能冒充 fresh")
+            expect(
+                resolveSettingsRoute(
+                    .sounds(
+                        .editEvent(
+                            surface: nil,
+                            packID: "still-unknown",
+                            event: .stop)),
+                    availability: staleProjection?.availability ?? .empty
+                ).failure == nil,
+                "non-fresh previous 不得永久否定尚未出现的 pack deep link")
+            withExtendedLifetime(staleCancellable) {}
         }
     }
 
@@ -301,6 +341,115 @@ func runSettingsNavigationSuites() {
                 "activity/mode/revision 等无关 editor publication 不得重复唤醒 Settings shell，实得 "
                     + "\(emissions.count) 次")
             withExtendedLifetime(cancellable) {}
+        }
+    }
+
+    suite("Settings sound shell：host/editor transaction 与 announcement queue 保持同一投影") {
+        withTempDirectory { root in
+            let packID = "pack-a"
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
+            let editorModel = SoundPacksWindowModel(
+                previewConfig: ClaudioConfig(selectedPack: packID),
+                packCards: [
+                    PackCard(
+                        id: packID,
+                        name: "Pack A",
+                        isCC0: true,
+                        presentEvents: [.stop],
+                        state: .complete,
+                        isSelected: true)
+                ],
+                selectedPackID: packID,
+                selectedEventRows: [],
+                libraryPresentationState: .ready,
+                environment: environment,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            let editor = SoundPacksEditorOwner(
+                model: editorModel,
+                userPacksDirectory: environment.userPacksDirectory)
+            let hostIntegrations = HostIntegrationPresentationStore(
+                state: integrationDestinationTestState())
+            let missingRoute = SettingsRoute.sounds(
+                .editEvent(surface: nil, packID: "missing-pack", event: .stop))
+            let routeModel = SettingsWindowPresentationModel<String>(
+                initialRoute: missingRoute,
+                availability: .empty)
+            var focusRevisions: [UInt64] = []
+            let focusCancellable = routeModel.$routeRequestRevision.dropFirst().sink {
+                focusRevisions.append($0)
+            }
+            var emissions: [SettingsSoundPackShellProjection] = []
+            let projectionCancellable = settingsSoundPackShellProjections(
+                editor: editor,
+                hostIntegrations: hostIntegrations
+            ).sink { projection in
+                emissions.append(projection)
+                routeModel.updateAvailability(projection.availability)
+            }
+
+            expect(
+                emissions.count == 1
+                    && routeModel.resolution.failure == .staleSoundPack("missing-pack")
+                    && focusRevisions.isEmpty,
+                "初始 coherent availability 必须原位重解析 retained route，且不制造 focus revision")
+
+            hostIntegrations.replace(
+                state: integrationDestinationTestState(
+                    statuses: [.workBuddy: .notConnected]))
+            guard emissions.count == 2 else {
+                expect(false, "host-only route 事实变化必须只交付一个新 projection")
+                return
+            }
+            let hostOnly = emissions[1]
+            expect(
+                hostOnly.availability.eventScopes
+                    == [.global, .surface(.claudeCode), .surface(.codex)]
+                    && hostOnly.availability.soundPackIDs == [packID]
+                    && hostOnly.availability.soundPackSnapshotIsFresh
+                    && hostOnly.pendingAnnouncement == nil,
+                "host-only publication 不得重建或损坏 editor identity/freshness/debt")
+
+            expect(
+                editor.send(
+                    .activate(
+                        .sounds(
+                            route: .overview(surface: nil),
+                            requestRevision: 132))) == .applied,
+                "fixture 必须产生一个 owner semantic announcement head")
+            guard let pending = emissions.last?.pendingAnnouncement else {
+                expect(false, "editor-only debt 变化必须穿过同一个 shell projection")
+                return
+            }
+            expect(
+                emissions.last?.availability == hostOnly.availability,
+                "editor-only debt 变化必须保留最新 host-derived availability")
+            let countBeforeFailedPost = emissions.count
+            expect(
+                editor.send(.acknowledgeAnnouncement(id: pending.id, didPost: false)) == .unchanged
+                    && editor.presentation.pendingAnnouncement?.id == pending.id
+                    && emissions.count == countBeforeFailedPost,
+                "native post 失败不得消费 queue head 或制造同义 shell publication")
+            expect(
+                editor.send(.acknowledgeAnnouncement(id: pending.id, didPost: true)) == .applied
+                    && editor.presentation.pendingAnnouncement == nil
+                    && emissions.last?.pendingAnnouncement == nil,
+                "成功 ack 必须且只能消费 exact queue head，并通过同一 projection 交付")
+
+            editorModel.consumeSoundPackLibraryStateForTesting(
+                .failed(previous: nil, error: .scanFailed(reason: "fixture failure")))
+            expect(
+                emissions.last?.availability.soundPackIDs.isEmpty == true
+                    && emissions.last?.availability.soundPackSnapshotIsFresh == false,
+                "一次 owner publication 必须同时交付匹配的新 installed IDs 与 freshness")
+            expect(
+                !emissions.contains {
+                    $0.availability.soundPackIDs.isEmpty
+                        && $0.availability.soundPackSnapshotIsFresh
+                },
+                "订阅不得观察到 old/new 两组 raw publisher 撕裂出的不可能组合")
+            expect(focusRevisions.isEmpty, "所有后台 projection 更新都不得伪造路由请求")
+            withExtendedLifetime((focusCancellable, projectionCancellable)) {}
         }
     }
 
@@ -527,6 +676,8 @@ func runSettingsNavigationSuites() {
         guard
             let controller = settingsSource(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let navigation = settingsSource(
+                "gui/Sources/ClaudioGUICore/SettingsNavigation.swift"),
             let view = settingsSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
             let gallery = settingsSource("gui/Sources/ClaudioGUI/StateGalleryView.swift"),
             let menuBar = settingsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
@@ -597,9 +748,10 @@ func runSettingsNavigationSuites() {
         expect(
             view.contains("EmbeddedSoundPacksEditorView(")
                 && view.contains("soundPacksEditorOwner")
-                && controller.contains("soundPacksEditorOwner.model.$packCards")
-                && controller.contains(".combineLatest(")
-                && controller.contains("soundPackSnapshotIsFresh: libraryState == .ready"),
+                && controller.components(
+                    separatedBy: "settingsSoundPackShellProjections(").count - 1 == 1
+                && !controller.contains("soundPacksEditorOwner.model")
+                && !controller.contains("SoundPackLibraryPresentationState"),
             "Sounds destination 必须嵌入完整共享编辑器，并以 shared fresh-ready 快照重解析 route")
         expect(
             view.contains("IntegrationsSettingsDestinationView(")
@@ -608,18 +760,12 @@ func runSettingsNavigationSuites() {
                 && view.contains("integrationsFocusCoordinator.requestFocus(.title)")
                 && view.contains("onManageEvents: { host in")
                 && view.contains(".events(scope: .surface(host.surfaceID), event: nil)")
-                && controller.contains("integrationSurfaces: publishedSurfaces")
                 && controller.contains("selectedDestination: destination")
                 && controller.contains("integrationsModel.noteWindowVisibility(state.isVisible)"),
             "Integrations destination 必须复用完整 model/view、解析 Surface 深链并在窗口内路由 Events")
         expect(
-            controller.contains("eventScopes: Set(panelSoundScopeIDs(sourceRows: sourceRows))")
-                && controller.contains("integrationSurfaces: publishedSurfaces"),
-            "Events 与面板必须共享可用 Sound Scope 过滤，Integrations 仍保留全部已发布 Surface")
-        expect(
-            controller.contains("soundPackPresentationAnnouncementCancellable")
-                && controller.contains("soundPacksEditorOwner.$presentation")
-                && controller.contains(".map(\\.pendingAnnouncement)")
+            navigation.contains("package struct SettingsSoundPackShellProjection")
+                && controller.contains("soundPackPresentationCancellable")
                 && controller.contains("DispatchQueue.main.async { [weak self] in")
                 && controller.contains(
                     "destination == .sounds,\n                        !self.isPresentingWindow")
@@ -633,6 +779,10 @@ func runSettingsNavigationSuites() {
                     "announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)")
                 && controller.contains(
                     ".acknowledgeAnnouncement(id: id, didPost: didPost)")
+                && !controller.contains("soundPackAvailabilityCancellable")
+                && !controller.contains("soundPackPresentationAnnouncementCancellable")
+                && !controller.contains("soundPacksEditorOwner.$presentation")
+                && !controller.contains("soundPacksEditorOwner.model")
                 && !controller.contains("soundPackSelectionAnnouncementCancellable")
                 && !controller.contains("soundPackLibraryAnnouncementCancellable")
                 && !controller.contains("soundPackStatusAnnouncementCancellable")
