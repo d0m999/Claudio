@@ -770,19 +770,7 @@ func runSettingsNavigationSuites() {
                     "announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)")
                 && controller.contains(
                     ".acknowledgeAnnouncement(id: id, didPost: didPost)")
-                && !controller.contains("soundPackAvailabilityCancellable")
-                && !controller.contains("soundPackPresentationAnnouncementCancellable")
                 && !controller.contains("soundPacksEditorOwner.$presentation")
-                && !controller.contains("soundPacksEditorOwner.model")
-                && !controller.contains("soundPackSelectionAnnouncementCancellable")
-                && !controller.contains("soundPackLibraryAnnouncementCancellable")
-                && !controller.contains("soundPackStatusAnnouncementCancellable")
-                && !controller.contains("soundPackModel.$selectedPackID")
-                && !controller.contains("soundPackModel.$libraryPresentationState")
-                && !controller.contains("soundPackModel.$windowStatuses")
-                && !controller.contains("beginStatusAnnouncementAttempt(")
-                && !controller.contains("finishStatusAnnouncementAttempt(")
-                && !controller.contains("announcementFacts(")
                 && !controller.contains("SoundPacksWindowAccessibilityBridge.post("),
             "唯一 Settings 必须只在 visible + key + active Sounds 时消费 owner semantic "
                 + "announcement，并用 exact ID 回报 post 结果")

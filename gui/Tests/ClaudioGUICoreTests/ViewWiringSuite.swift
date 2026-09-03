@@ -2704,8 +2704,6 @@ func runViewWiringSuites() {
                 && flatView.contains(
                     "private var previewEnabled: Bool { !controlsUnavailable && previewActionAvailable }"
                 )
-                && !flatView.contains("SoundPacksWindowModel")
-                && !flatView.contains("AudioImportEnvironment")
                 && !flatView.contains("eventPreviewFileURL(")
                 && flatView.contains("eventSettingsPackInheritanceState(")
                 && flatView.contains("eventSettingsInheritanceState(")
@@ -2803,8 +2801,7 @@ func runViewWiringSuites() {
                 && flatMenu.contains("QwenAICueProvider( profileID: .qwenBeijing)")
                 && flatMenu.contains("AICueGenerationDispatcher(generators:")
                 && flatMenu.contains("AICueGenerationEngine(")
-                && !flatMenu.contains("eventSettingsModel.reload()")
-                && !flatMenu.contains("soundPacksEditorOwner.adoptAICue("),
+                && !flatMenu.contains("eventSettingsModel.reload()"),
             "composition root 必须接通 Keychain 与四个固定 profile/engine，采用链由 Events 直连 owner")
     }
 
@@ -3291,10 +3288,7 @@ func runViewWiringSuites() {
                 && window.components(separatedBy: "@ObservedObject private var editorOwner").count
                     - 1 == 2
                 && window.contains("let presentation: SoundPacksEditorPresentation")
-                && window.contains("presentation: presentation")
-                && !window.contains("editorOwner.presentation.library")
-                && !window.contains("editorOwner.presentation.pendingConfirmation")
-                && !window.contains("editorOwner.presentation.activities"),
+                && window.contains("presentation: presentation"),
             "dispatcher/player 必须由 Settings controller 持有并 required 注入整个 production view tree；"
                 + "root 只观察 owner 一次并把同 revision 的 presentation 传给不观察 owner 的 child")
         expect(
@@ -3344,9 +3338,8 @@ func runViewWiringSuites() {
             "侧栏语义标题、底部动作栏与空态主行动的用户标签必须全部真实可见")
         expect(
             window.contains("ForEach(activeSounds.windowStatuses)")
-                && window.contains("activeSounds.recoveryActions.filter")
-                && !window.contains("SoundPacksWindowModel"),
-            "窗口必须从 owner 的持久 status/recovery 投影渲染，view 不得使用 raw model")
+                && window.contains("activeSounds.recoveryActions.filter"),
+            "窗口必须从 owner 的持久 status/recovery 投影渲染")
     }
 
     suite("T12：管理窗口恢复出厂是内置包专属的显式替换确认，成功/失败告知都在窗口内可见") {

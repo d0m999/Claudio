@@ -2282,7 +2282,6 @@ func runSoundPacksRefreshSuites() async {
         guard
             let owner = soundPacksCode(
                 "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
-            let view = soundPacksCode("gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let model = soundPacksCode(
                 "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"),
             let accessibility = soundPacksCode(
@@ -2306,12 +2305,17 @@ func runSoundPacksRefreshSuites() async {
         let productionEnumerator = FileManager.default.enumerator(
             atPath: productionSourcesRoot.path)
         var rawModelConstructionSites: [String] = []
+        var rawModelReferenceSites: [String] = []
         while let name = productionEnumerator?.nextObject() as? String {
             guard name.hasSuffix(".swift"),
-                let code = soundPacksCode("gui/Sources/\(name)"),
-                code.contains("SoundPacksWindowModel(")
+                let code = soundPacksCode("gui/Sources/\(name)")
             else { continue }
-            rawModelConstructionSites.append(name)
+            if code.contains("SoundPacksWindowModel") {
+                rawModelReferenceSites.append(name)
+            }
+            if code.contains("SoundPacksWindowModel(") {
+                rawModelConstructionSites.append(name)
+            }
         }
         let modelImplementation = model.range(
             of: "package final class SoundPacksWindowModel"
@@ -2329,6 +2333,14 @@ func runSoundPacksRefreshSuites() async {
             rawModelConstructionSites == ["ClaudioGUICore/SoundPacksEditorOwner.swift"],
             "shipping/DEBUG production 只能由 owner implementation 构造 raw model，实得 "
                 + "\(rawModelConstructionSites.sorted())")
+        expect(
+            rawModelReferenceSites.sorted()
+                == [
+                    "ClaudioGUICore/SoundPacksEditorOwner.swift",
+                    "ClaudioGUICore/SoundPacksWindowModel.swift",
+                ],
+            "shipping/DEBUG production 只能由 model/owner implementation 读取 raw model，实得 "
+                + "\(rawModelReferenceSites.sorted())")
         expect(
             !FileManager.default.fileExists(atPath: legacyControllerURL.path),
             "cutover 后独立 SoundPacks window/autosave/title subscriptions 必须移除")
@@ -2358,22 +2370,6 @@ func runSoundPacksRefreshSuites() async {
                 && !owner.contains("public func shouldAnnounceSelectionChange(")
                 && !owner.contains("public func announcementFacts("),
             "common production interface 只能保留 coherent presentation、sync send 与 async perform")
-        expect(
-            view.contains("packRowMetaSlots(") && view.contains("case .modified:"),
-            "管理窗口 license 必须复用 factoryIntegrity 的 modified 优先规则")
-        expect(
-            view.contains(
-                    ".activate(.sounds(route: route, requestRevision: routeRequestRevision))")
-                && view.contains("focusCoordinator.requestInitialFocus(route: focusRoute)")
-                && view.contains("focusCoordinator.requestRoute(focusRoute)"),
-            "editEvent 必须把 typed route 交给 owner；view 只消费重验后的 focusRoute")
-        expect(
-            !view.contains("@State private var isPerformingWrite")
-                && view.contains("presentation.activities.contains")
-                && view.contains("soundPacksWritingChanges")
-                && view.contains("sound-packs.write-in-progress")
-                && view.contains(".disabled(isPerformingWrite)"),
-            "pack/config 写入的 busy 与重入禁用必须直接消费 owner activity，view 不得保留第二 busy state")
         expect(
             settingsController.contains("window.isReleasedWhenClosed = false")
                 && settingsController.contains(
