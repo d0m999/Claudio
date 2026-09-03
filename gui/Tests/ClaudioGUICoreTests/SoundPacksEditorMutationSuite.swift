@@ -45,9 +45,8 @@ private final class SoundEditorForkCollisionOccupier: @unchecked Sendable {
     }
 }
 
-/// Coordinates the exact M-07 window without sleeping: an old scan is held immediately before
-/// terminal publication, while the restore writer is held immediately before publishing its new
-/// pack tree. The library must defer that rejected terminal until the mutation closes.
+/// Coordinates exact mutation-publication windows without sleeping. It can hold a scan immediately
+/// before terminal publication and, for M-07, hold the restore writer before publishing its tree.
 private final class SoundEditorMutationPublicationGate: @unchecked Sendable {
     private let lock = NSLock()
     private let oldPublicationEntered = DispatchSemaphore(value: 0)
@@ -76,7 +75,7 @@ private final class SoundEditorMutationPublicationGate: @unchecked Sendable {
         lock.unlock()
     }
 
-    func pauseArmedOldPublication() {
+    func pauseArmedPublication() {
         lock.lock()
         let shouldPause = armedRequestCount != nil && !didPauseOldPublication
         if shouldPause { didPauseOldPublication = true }
@@ -86,13 +85,23 @@ private final class SoundEditorMutationPublicationGate: @unchecked Sendable {
         _ = oldPublicationResume.wait(timeout: .now() + 5)
     }
 
-    func waitUntilOldPublicationIsPaused() -> Bool {
+    func waitUntilPublicationIsPaused() -> Bool {
         oldPublicationEntered.wait(timeout: .now() + 5) == .success
+    }
+
+    func resumePublication() {
+        oldPublicationResume.signal()
+    }
+
+    func waitUntilLibraryIsIdle(_ libraryIdle: DispatchSemaphore) -> Bool {
+        // This synchronous boundary intentionally keeps MainActor observation pending after the
+        // library has published its terminal state; the owner quiescence join must settle it.
+        libraryIdle.wait(timeout: .now() + 5) == .success
     }
 
     /// Runs on the synchronous restore writer's MainActor hook.
     func releaseOldPublicationAndAwaitDeferredTerminal() {
-        oldPublicationResume.signal()
+        resumePublication()
         let deferred = rejectedTerminalDeferred.wait(timeout: .now() + 5) == .success
         lock.lock()
         oldTerminalDeferredBeforeWriterPublishStorage = deferred
@@ -928,6 +937,7 @@ func runSoundPacksEditorMutationSuites() async {
 
     await suite("Sound editor delete user：rollback 失败保留 tree 并报告 changedDespiteFailure") {
         await withTempDirectory { root in
+            let gate = SoundEditorMutationPublicationGate()
             let fixture = makeSoundEditorFixture(
                 root: root,
                 packIDs: ["active", "delete-me"],
@@ -941,7 +951,9 @@ func runSoundPacksEditorMutationSuites() async {
                         "external-occupier",
                         to: packs.appendingPathComponent("delete-me/external.txt"))
                     throw SoundEditorInjectedMutationFailure.trash
-                })
+                },
+                beforeReadyPublication: { gate.pauseArmedPublication() },
+                onScanRequestForTesting: { _ in gate.observeScanRequest() })
             let deletePack = root.appendingPathComponent("packs/delete-me", isDirectory: true)
             writeFixture("only-copy", to: deletePack.appendingPathComponent("personal.wav"))
             let owner = fixture.owner
@@ -964,6 +976,7 @@ func runSoundPacksEditorMutationSuites() async {
             let configBefore = try? Data(contentsOf: fixture.configFile)
             let scansBefore = fixture.recorder.requests.count
             let panelRevisionBefore = fixture.refreshCoordinator.panelReloadRevision
+            gate.arm(afterRequestCount: scansBefore)
             guard case .accepted(let operationID) = owner.send(.invoke(confirmation.confirmAction))
             else {
                 expect(false, "retained delete confirm 必须接受 scheduled operation")
@@ -972,7 +985,22 @@ func runSoundPacksEditorMutationSuites() async {
 
             await waitForSoundEditorOperation(owner, operationID: operationID)
             await waitForSoundEditorScanCount(fixture.recorder, atLeast: scansBefore + 1)
-            await fixture.library.waitUntilIdleForTesting()
+            guard gate.waitUntilPublicationIsPaused() else {
+                expect(false, "retained delete refresh 必须到达 terminal publication gate")
+                return
+            }
+            let libraryIdle = DispatchSemaphore(value: 0)
+            let library = fixture.library
+            Task.detached {
+                gate.resumePublication()
+                await library.waitUntilIdleForTesting()
+                libraryIdle.signal()
+            }
+            guard gate.waitUntilLibraryIsIdle(libraryIdle) else {
+                expect(false, "retained delete refresh 必须在 MainActor observation 前完成")
+                return
+            }
+            await owner.waitForMutationTransactionsToQuiesceForTesting()
             let packs = root.appendingPathComponent("packs", isDirectory: true)
             let isolationNames =
                 ((try? FileManager.default.contentsOfDirectory(atPath: packs.path)) ?? []).filter {
@@ -1188,7 +1216,7 @@ func runSoundPacksEditorMutationSuites() async {
                 beforeFactoryPackRestorePublish: {
                     gate.releaseOldPublicationAndAwaitDeferredTerminal()
                 },
-                beforeReadyPublication: { gate.pauseArmedOldPublication() },
+                beforeReadyPublication: { gate.pauseArmedPublication() },
                 onRejectedTerminalDeferred: { gate.observeRejectedTerminalDeferred() },
                 onScanRequestForTesting: { _ in gate.observeScanRequest() })
             let factoryPack = root.appendingPathComponent("factory-packs/factory-a")
@@ -1224,7 +1252,7 @@ func runSoundPacksEditorMutationSuites() async {
             gate.arm(afterRequestCount: scansBefore)
 
             await fixture.library.requestRefresh(trigger: .retry)
-            guard gate.waitUntilOldPublicationIsPaused() else {
+            guard gate.waitUntilPublicationIsPaused() else {
                 expect(false, "旧 scan 必须确定性停在 terminal publication 前")
                 return
             }
