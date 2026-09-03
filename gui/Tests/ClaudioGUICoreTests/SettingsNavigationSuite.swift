@@ -192,7 +192,7 @@ func runSettingsNavigationSuites() {
             let packID = "pack-a"
             let environment = makeAudioImportEnvironment(
                 userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
-            let editorModel = SoundPacksWindowModel(
+            let editor = SoundPacksEditorOwner.stateGalleryFixture(
                 previewConfig: ClaudioConfig(selectedPack: packID),
                 packCards: [
                     PackCard(
@@ -207,10 +207,7 @@ func runSettingsNavigationSuites() {
                 selectedEventRows: [],
                 libraryPresentationState: .ready,
                 environment: environment,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let editor = SoundPacksEditorOwner(
-                model: editorModel,
-                userPacksDirectory: environment.userPacksDirectory)
+                activation: nil)
             let hostIntegrations = HostIntegrationPresentationStore(
                 state: integrationDestinationTestState(
                     statuses: [.workBuddy: .notConnected]))
@@ -259,7 +256,7 @@ func runSettingsNavigationSuites() {
                 "只有同一 projection 的 fresh root 才能确认 missing pack 已陈旧")
             withExtendedLifetime(cancellable) {}
 
-            let staleModel = SoundPacksWindowModel(
+            let staleEditor = SoundPacksEditorOwner.stateGalleryFixture(
                 previewConfig: ClaudioConfig(selectedPack: packID),
                 packCards: [
                     PackCard(
@@ -274,10 +271,7 @@ func runSettingsNavigationSuites() {
                 selectedEventRows: [],
                 libraryPresentationState: .refreshFailed(reason: "fixture failure"),
                 environment: environment,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let staleEditor = SoundPacksEditorOwner(
-                model: staleModel,
-                userPacksDirectory: environment.userPacksDirectory)
+                activation: nil)
             var staleProjection: SettingsSoundPackShellProjection?
             let staleCancellable = settingsSoundPackShellProjections(
                 editor: staleEditor,
@@ -305,7 +299,7 @@ func runSettingsNavigationSuites() {
         withTempDirectory { root in
             let environment = makeAudioImportEnvironment(
                 userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
-            let editorModel = SoundPacksWindowModel(
+            let editor = SoundPacksEditorOwner.stateGalleryFixture(
                 previewConfig: ClaudioConfig(selectedPack: "pack-a"),
                 packCards: [
                     PackCard(
@@ -320,10 +314,7 @@ func runSettingsNavigationSuites() {
                 selectedEventRows: [],
                 libraryPresentationState: .ready,
                 environment: environment,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let editor = SoundPacksEditorOwner(
-                model: editorModel,
-                userPacksDirectory: environment.userPacksDirectory)
+                activation: nil)
             let hostIntegrations = HostIntegrationPresentationStore(
                 state: integrationDestinationTestState())
             var emissions: [SettingsSoundPackShellProjection] = []
@@ -349,7 +340,7 @@ func runSettingsNavigationSuites() {
             let packID = "pack-a"
             let environment = makeAudioImportEnvironment(
                 userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
-            let editorModel = SoundPacksWindowModel(
+            let editor = SoundPacksEditorOwner.stateGalleryFixture(
                 previewConfig: ClaudioConfig(selectedPack: packID),
                 packCards: [
                     PackCard(
@@ -364,10 +355,7 @@ func runSettingsNavigationSuites() {
                 selectedEventRows: [],
                 libraryPresentationState: .ready,
                 environment: environment,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let editor = SoundPacksEditorOwner(
-                model: editorModel,
-                userPacksDirectory: environment.userPacksDirectory)
+                activation: nil)
             let hostIntegrations = HostIntegrationPresentationStore(
                 state: integrationDestinationTestState())
             let missingRoute = SettingsRoute.sounds(
@@ -436,7 +424,7 @@ func runSettingsNavigationSuites() {
                     && emissions.last?.pendingAnnouncement == nil,
                 "成功 ack 必须且只能消费 exact queue head，并通过同一 projection 交付")
 
-            editorModel.consumeSoundPackLibraryStateForTesting(
+            editor.publishLibraryStateForTesting(
                 .failed(previous: nil, error: .scanFailed(reason: "fixture failure")))
             expect(
                 emissions.last?.availability.soundPackIDs.isEmpty == true
@@ -752,9 +740,7 @@ func runSettingsNavigationSuites() {
                 && view.contains("soundPacksEditorOwner")
                 && controller.components(
                     separatedBy: "settingsSoundPackShellProjections("
-                ).count - 1 == 1
-                && !controller.contains("soundPacksEditorOwner.model")
-                && !controller.contains("SoundPackLibraryPresentationState"),
+                ).count - 1 == 1,
             "Sounds destination 必须嵌入完整共享编辑器，并以 shared fresh-ready 快照重解析 route")
         expect(
             view.contains("IntegrationsSettingsDestinationView(")
@@ -782,19 +768,7 @@ func runSettingsNavigationSuites() {
                     "announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)")
                 && controller.contains(
                     ".acknowledgeAnnouncement(id: id, didPost: didPost)")
-                && !controller.contains("soundPackAvailabilityCancellable")
-                && !controller.contains("soundPackPresentationAnnouncementCancellable")
                 && !controller.contains("soundPacksEditorOwner.$presentation")
-                && !controller.contains("soundPacksEditorOwner.model")
-                && !controller.contains("soundPackSelectionAnnouncementCancellable")
-                && !controller.contains("soundPackLibraryAnnouncementCancellable")
-                && !controller.contains("soundPackStatusAnnouncementCancellable")
-                && !controller.contains("soundPackModel.$selectedPackID")
-                && !controller.contains("soundPackModel.$libraryPresentationState")
-                && !controller.contains("soundPackModel.$windowStatuses")
-                && !controller.contains("beginStatusAnnouncementAttempt(")
-                && !controller.contains("finishStatusAnnouncementAttempt(")
-                && !controller.contains("announcementFacts(")
                 && !controller.contains("SoundPacksWindowAccessibilityBridge.post("),
             "唯一 Settings 必须只在 visible + key + active Sounds 时消费 owner semantic "
                 + "announcement，并用 exact ID 回报 post 结果")

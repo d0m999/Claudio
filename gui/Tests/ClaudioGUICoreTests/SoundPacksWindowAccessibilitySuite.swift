@@ -120,31 +120,6 @@ func runSoundPacksWindowAccessibilitySuites() {
             "相同 editEvent 重复请求也必须推进独立代次，不能依赖 route 值变化")
     }
 
-    suite("SoundPacksWindow a11y：status revision 只在 NSAccessibility.post 真成功后消费") {
-        var tracker = SoundPacksWindowStatusAnnouncementTracker()
-
-        expect(!tracker.beginAttempt(revision: 1, isWindowKey: false), "非 key 窗口不得开始公告")
-        expect(tracker.beginAttempt(revision: 1, isWindowKey: true), "key 窗口应开始首次公告")
-        expect(
-            !tracker.beginAttempt(revision: 1, isWindowKey: true),
-            "同 revision in-flight 期间不得重复 post")
-
-        tracker.finishAttempt(revision: 1, didPost: false)
-        expect(tracker.lastPostedRevision == 0, "bridge 异步后失去 key 不得假装已播")
-        expect(
-            tracker.beginAttempt(revision: 1, isWindowKey: true),
-            "未实际 post 的 revision 必须允许回到 key 后重试")
-        tracker.finishAttempt(revision: 1, didPost: true)
-        expect(tracker.lastPostedRevision == 1, "真实 post 成功才能推进已播 revision")
-        expect(!tracker.beginAttempt(revision: 1, isWindowKey: true), "已播 revision 不得重播")
-
-        expect(tracker.beginAttempt(revision: 2, isWindowKey: true), "更新 revision 应正常开始")
-        expect(tracker.beginAttempt(revision: 3, isWindowKey: true), "更新结果不得被旧 in-flight 堵住")
-        tracker.finishAttempt(revision: 3, didPost: true)
-        tracker.finishAttempt(revision: 2, didPost: true)
-        expect(tracker.lastPostedRevision == 3, "异步乱序完成不得让 revision 倒退")
-    }
-
     suite("SoundPacksWindow a11y：包级动作栏、空态 CTA 与视觉顺序完全一致") {
         let builtin = SoundPacksWindowFocusScope(
             packIDs: ["builtin"],

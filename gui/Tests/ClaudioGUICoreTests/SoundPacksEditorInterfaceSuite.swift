@@ -95,17 +95,14 @@ func runSoundPacksEditorInterfaceSuites() async {
                 expect(false, "fixture 必须产生 ready snapshot")
                 return
             }
-            let model = SoundPacksWindowModel(
+            let owner = SoundPacksEditorOwner.stateGalleryFixture(
                 previewConfig: ClaudioConfig(selectedPack: "pack-a"),
                 packCards: [],
                 selectedPackID: nil,
                 selectedEventRows: [],
                 libraryPresentationState: .loading,
                 environment: environment,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let owner = SoundPacksEditorOwner(
-                model: model,
-                userPacksDirectory: environment.userPacksDirectory)
+                activation: nil)
 
             expect(owner.presentation.mode == .inactive, "owner 初始必须是 inactive slice")
             expect(
@@ -132,7 +129,7 @@ func runSoundPacksEditorInterfaceSuites() async {
                 pending.routeState == .pendingFreshSnapshot,
                 "fresh ready 前 deep link 必须保持 pending")
 
-            model.consumeSoundPackLibraryStateForTesting(.ready(snapshot))
+            owner.publishLibraryStateForTesting(.ready(snapshot))
             expect(emissions.count == 2, "library settle 必须只再发布一个完整 root")
             guard case .sounds(let ready) = owner.presentation.mode else {
                 expect(false, "ready 后仍必须是 sounds slice")
@@ -284,17 +281,14 @@ func runSoundPacksEditorInterfaceSuites() async {
     suite("Sound editor interface：fresh missing 保留 typed route 并显示 stale failure") {
         let environment = makeAudioImportEnvironment(
             userPacksDirectory: URL(fileURLWithPath: "/dev/null/editor-interface-packs"))
-        let model = SoundPacksWindowModel(
+        let owner = SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: ClaudioConfig(selectedPack: "pack-a"),
             packCards: [],
             selectedPackID: nil,
             selectedEventRows: [],
             libraryPresentationState: .ready,
             environment: environment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
-        let owner = SoundPacksEditorOwner(
-            model: model,
-            userPacksDirectory: environment.userPacksDirectory)
+            activation: nil)
         let route = SoundPacksWindowRoute.editEvent(
             surface: nil,
             packID: "missing-pack",
@@ -736,7 +730,7 @@ func runSoundPacksEditorInterfaceSuites() async {
                 action: "Restore",
                 message: "Retained failure",
                 recovery: .retryFactoryRestores(packIDs: [packID]))
-            let model = SoundPacksWindowModel(
+            let owner = SoundPacksEditorOwner.stateGalleryFixture(
                 previewConfig: ClaudioConfig(selectedPack: packID),
                 packCards: [
                     PackCard(
@@ -752,12 +746,7 @@ func runSoundPacksEditorInterfaceSuites() async {
                 builtinPackIDs: [packID],
                 windowStatuses: [status],
                 environment: makeAudioImportEnvironment(
-                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)),
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let owner = SoundPacksEditorOwner(
-                model: model,
-                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
-            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 701)))
+                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)))
 
             guard case .sounds(let beforeAck) = owner.presentation.mode,
                 beforeAck.windowStatuses == [status],

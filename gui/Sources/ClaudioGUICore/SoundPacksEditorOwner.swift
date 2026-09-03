@@ -8,11 +8,10 @@ import Foundation
 /// application lives in the Foundation-only module so the embedded Scope/pack/Event contract can
 /// be exercised without constructing AppKit or SwiftUI.
 @MainActor
-public final class SoundPacksEditorOwner: ObservableObject {
+package final class SoundPacksEditorOwner: ObservableObject {
     private static let maximumRetainedTerminalOperationCount = 32
 
-    public let model: SoundPacksWindowModel
-    public let userPacksDirectory: URL
+    private let model: SoundPacksWindowModel
     @Published package private(set) var presentation: SoundPacksEditorPresentation
     private let refreshCoordinator: SoundPacksRefreshCoordinator?
     private let importEnvironment: AudioImportEnvironment
@@ -45,12 +44,11 @@ public final class SoundPacksEditorOwner: ObservableObject {
             forcesCapabilityGeneration: Bool
         )?
     private var lastCommittedModelSeed: SoundPacksEditorModelSeed?
-    private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
     private var lastSelectionAnnouncementDecision: (packID: String?, shouldAnnounce: Bool)?
     private var suppressesNextForkLibraryObservationCycle = false
     private var interfaceHasActivated = false
 
-    public convenience init(
+    package convenience init(
         configFile: URL,
         lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
@@ -65,7 +63,6 @@ public final class SoundPacksEditorOwner: ObservableObject {
             refreshCoordinator: refreshCoordinator)
         self.init(
             model: model,
-            userPacksDirectory: environment.userPacksDirectory,
             importEnvironment: environment,
             refreshCoordinator: refreshCoordinator,
             audioImportExecutor: SoundPackAudioImportExecutor())
@@ -73,13 +70,11 @@ public final class SoundPacksEditorOwner: ObservableObject {
 
     private init(
         model: SoundPacksWindowModel,
-        userPacksDirectory: URL,
         importEnvironment: AudioImportEnvironment,
         refreshCoordinator: SoundPacksRefreshCoordinator?,
         audioImportExecutor: SoundPackAudioImportExecutor
     ) {
         self.model = model
-        self.userPacksDirectory = userPacksDirectory
         self.importEnvironment = importEnvironment
         self.refreshCoordinator = refreshCoordinator
         self.audioImportExecutor = audioImportExecutor
@@ -89,7 +84,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
 
     #if DEBUG
     /// Deterministic route-test seam that uses the harness's synchronous disk-backed model.
-    public convenience init(
+    package convenience init(
         configFile: URL,
         lockFile: URL,
         environment: AudioImportEnvironment,
@@ -102,20 +97,59 @@ public final class SoundPacksEditorOwner: ObservableObject {
             refreshCoordinator: refreshCoordinator)
         self.init(
             model: model,
-            userPacksDirectory: environment.userPacksDirectory,
             importEnvironment: environment,
             refreshCoordinator: refreshCoordinator,
             audioImportExecutor: SoundPackAudioImportExecutor())
     }
 
-    /// Deterministic pending/ready route seam for model fixtures that do not touch user disk.
-    public convenience init(model: SoundPacksWindowModel, userPacksDirectory: URL) {
-        self.init(
+    /// Builds a no-I/O owner fixture for the production-shape DEBUG gallery. Raw model state stays
+    /// inside the owner implementation, and the injected environment must point at the gallery's
+    /// random temporary root rather than any Claudio user path.
+    package static func stateGalleryFixture(
+        previewConfig: ClaudioConfig,
+        packCards: [PackCard],
+        selectedPackID: String?,
+        selectedEventRows: [EventRow],
+        selectedAudioFiles: [PackAudioFile] = [],
+        builtinPackIDs: Set<String> = [],
+        starredPackIDs: [String] = [],
+        windowStatuses: [SoundPacksWindowStatus] = [],
+        factoryRestoreActionError: SoundPacksWindowFactoryRestoreActionError? = nil,
+        libraryPresentationState: SoundPackLibraryPresentationState = .ready,
+        environment: AudioImportEnvironment,
+        activation: SoundPacksEditorContext? = .sounds(
+            route: .overview,
+            requestRevision: 1),
+        startsBusy: Bool = false
+    ) -> SoundPacksEditorOwner {
+        let model = SoundPacksWindowModel(
+            previewConfig: previewConfig,
+            packCards: packCards,
+            selectedPackID: selectedPackID,
+            selectedEventRows: selectedEventRows,
+            selectedAudioFiles: selectedAudioFiles,
+            builtinPackIDs: builtinPackIDs,
+            starredPackIDs: starredPackIDs,
+            windowStatuses: windowStatuses,
+            factoryRestoreActionError: factoryRestoreActionError,
+            libraryPresentationState: libraryPresentationState,
+            environment: environment,
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+        let owner = SoundPacksEditorOwner(
             model: model,
-            userPacksDirectory: userPacksDirectory,
-            importEnvironment: model.editorImportEnvironment,
+            importEnvironment: environment,
             refreshCoordinator: nil,
             audioImportExecutor: SoundPackAudioImportExecutor())
+        if let activation {
+            _ = owner.send(.activate(activation))
+        }
+        if startsBusy,
+            case .sounds(let sounds) = owner.presentation.mode,
+            let action = sounds.packs.first(where: { $0.useAction != nil })?.useAction
+        {
+            _ = owner.freezeAcceptedOperationForStateGalleryFixture(action)
+        }
+        return owner
     }
 
     package convenience init(
@@ -134,7 +168,6 @@ public final class SoundPacksEditorOwner: ObservableObject {
             refreshCoordinator: refreshCoordinator)
         self.init(
             model: model,
-            userPacksDirectory: environment.userPacksDirectory,
             importEnvironment: environment,
             refreshCoordinator: refreshCoordinator,
             audioImportExecutor: SoundPackAudioImportExecutor(
@@ -245,7 +278,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             }
             return invoke(action, importSource: .drop)
         case .completePanelPackSwitch(let outcome):
-            completePanelPackSwitch(outcome)
+            refreshCoordinator?.completePanelPackSwitch(outcome)
             return outcome.refreshesEditor ? .applied : .unchanged
         case .acknowledgeAnnouncement(let id, let didPost):
             guard let index = announcementQueue.firstIndex(where: { $0.announcement.id == id })
@@ -1415,10 +1448,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     } ?? .none
             } else {
                 emptyLibraryRecovery = .revealRoot(
-                    displayValue: userPacksDirectory.path,
+                    displayValue: importEnvironment.userPacksDirectory.path,
                     action: makeAction(
                         .reveal,
-                        binding: .reveal(fileURL: userPacksDirectory),
+                        binding: .reveal(fileURL: importEnvironment.userPacksDirectory),
                         seed: seed))
             }
         } else {
@@ -1881,7 +1914,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             }
         }
         guard previous.selectedPackID != seed.selectedPackID,
-            shouldAnnounceSelectionChange(to: seed.selectedPackID)
+            selectionAnnouncementDecision(for: seed.selectedPackID)
         else { return }
         enqueueSemanticAnnouncement(
             .selectionChanged(announcementFacts(from: seed)),
@@ -2018,60 +2051,6 @@ public final class SoundPacksEditorOwner: ObservableObject {
         return permit
     }
 
-    /// Applies one typed route to the shared inspection/write model. Missing targets remain
-    /// pending until the shared library can prove a fresh ready snapshot; only then may the
-    /// presentation degrade to overview.
-    @discardableResult
-    public func apply(
-        route: SoundPacksWindowRoute
-    ) -> SoundPacksWindowRouteResolution {
-        model.setManagedSurface(route.surface)
-        switch resolveSoundPacksWindowRoute(
-            route,
-            availablePackIDs: Set(model.packCards.map(\.id)),
-            libraryState: model.libraryPresentationState)
-        {
-        case .pending:
-            return .pending(route)
-        case .resolved(let resolvedRoute):
-            guard let packID = resolvedRoute.editTarget?.packID else {
-                return .resolved(resolvedRoute)
-            }
-            guard model.selectPackForInspection(packID) else {
-                return .resolved(.overview(surface: resolvedRoute.surface))
-            }
-            return .resolved(resolvedRoute)
-        }
-    }
-
-    /// A pack selected from Events still uses the established panel-to-editor refresh contract.
-    /// The Settings shell does not retain a second coordinator or ask the editor to infer writes.
-    public func completePanelPackSwitch(_ outcome: PanelPackSwitchOutcome) {
-        refreshCoordinator?.completePanelPackSwitch(outcome)
-    }
-
-    /// Headless adoption entry used by the retained Events & Sounds destination. It reuses this
-    /// owner's disk-backed model and package-lock publication path without creating another window
-    /// or write owner.
-    public func adoptAICue(
-        _ request: AICueAdoptionRequest
-    ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
-        model.setManagedSurface(request.target.surface)
-        return await model.adoptAICue(request)
-    }
-
-    /// Coordinates asynchronous status announcements across retained Settings presentations. A
-    /// revision is consumed only after the actual key Sounds destination posts it successfully.
-    public func beginStatusAnnouncementAttempt(revision: Int, isWindowKey: Bool) -> Bool {
-        statusAnnouncementTracker.beginAttempt(
-            revision: revision,
-            isWindowKey: isWindowKey)
-    }
-
-    public func finishStatusAnnouncementAttempt(revision: Int, didPost: Bool) {
-        statusAnnouncementTracker.finishAttempt(revision: revision, didPost: didPost)
-    }
-
     #if DEBUG
     /// Joins the task already owned by this editor without scheduling work or changing state.
     package func waitForScheduledOperationExitForTesting(
@@ -2090,13 +2069,19 @@ public final class SoundPacksEditorOwner: ObservableObject {
         }
         await model.waitForMutationTransactionsToQuiesceForTesting()
     }
+
+    /// Drives the owner's existing model callback from a deterministic library fixture without
+    /// exposing the raw implementation model to higher-level interface tests.
+    package func publishLibraryStateForTesting(_ state: SoundPackLibraryState) {
+        model.consumeSoundPackLibraryStateForTesting(state)
+    }
     #endif
 
     /// Returns one shared suppression decision to every retained presentation observing the same
     /// `@Published` selection emission. This prevents an inactive window from consuming the fork
     /// suppression token before the key presentation sees it, while a later A→B→A emission still
     /// computes a fresh decision after the intervening pack ID.
-    public func shouldAnnounceSelectionChange(to packID: String?) -> Bool {
+    private func selectionAnnouncementDecision(for packID: String?) -> Bool {
         if let lastSelectionAnnouncementDecision,
             lastSelectionAnnouncementDecision.packID == packID
         {
@@ -2107,26 +2092,6 @@ public final class SoundPacksEditorOwner: ObservableObject {
         return shouldAnnounce
     }
 
-    /// Projects announcement facts from the shared read model for whichever retained window is
-    /// currently key. `@Published` emits before storing, so callers may pass the emitted selection
-    /// or library state to describe the transition rather than the previous property value.
-    public func announcementFacts(
-        selectedPackID: String? = nil,
-        usesEmittedSelection: Bool = false,
-        libraryPresentationState: SoundPackLibraryPresentationState? = nil
-    ) -> SoundPacksWindowAnnouncementFacts {
-        let effectiveSelectedPackID = usesEmittedSelection ? selectedPackID : model.selectedPackID
-        let selectedName = effectiveSelectedPackID.flatMap { packID in
-            model.packCards.first(where: { $0.id == packID }).map {
-                SelectedPackMetadata(id: $0.id, name: $0.name).displayName
-            }
-        }
-        return SoundPacksWindowAnnouncementFacts(
-            packCount: model.packCards.count,
-            selectedPackName: selectedName,
-            libraryPresentationState:
-                libraryPresentationState ?? model.libraryPresentationState)
-    }
 }
 
 private struct EditorActionBinding {
