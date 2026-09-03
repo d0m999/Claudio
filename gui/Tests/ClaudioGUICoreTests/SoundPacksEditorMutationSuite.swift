@@ -239,7 +239,7 @@ func runSoundPacksEditorMutationSuites() async {
             if case .sounds(let settled) = owner.presentation.mode {
                 expect(
                     settled.selectedPack?.id == "pack-c"
-                        && settled.selectedPack?.isSelected == true,
+                        && settled.selectedPack?.isActiveForScope == true,
                     "use typed success 后 presentation 必须选择 pack-c")
             } else {
                 expect(false, "use settle 后必须保留 Sounds presentation")
@@ -833,7 +833,7 @@ func runSoundPacksEditorMutationSuites() async {
                 "stale orphan noChange 不得发布 mutation completion 到 panel")
             expect(
                 owner.presentation.pendingAnnouncement?.kind
-                    != .operationSucceeded(.deleteOrphan),
+                    != .operation(kind: .deleteOrphan, completion: .succeeded),
                 "stale orphan failure 不得伪造 success announcement")
         }
     }
@@ -1216,7 +1216,7 @@ func runSoundPacksEditorMutationSuites() async {
             expect(
                 (try? Data(contentsOf: fixture.configFile)) == configBefore
                     && owner.presentation.pendingAnnouncement?.kind
-                        != .operationSucceeded(.restoreFactory),
+                        != .operation(kind: .restoreFactory, completion: .succeeded),
                 "restore failure 必须保留 config/stars 且不能伪造 operation success")
 
             guard case .sounds(let failedSlice) = owner.presentation.mode,
@@ -1445,7 +1445,8 @@ func runSoundPacksEditorMutationSuites() async {
                 fixture.refreshCoordinator.panelReloadRevision == panelRevisionBefore + 1,
                 "fork changed 必须发布一次 panel refresh")
             expect(
-                owner.presentation.pendingAnnouncement?.kind == .operationSucceeded(.fork),
+                owner.presentation.pendingAnnouncement?.kind
+                    == .operation(kind: .fork, completion: .succeeded),
                 "fork success 必须排入一个 compound semantic announcement")
         }
     }

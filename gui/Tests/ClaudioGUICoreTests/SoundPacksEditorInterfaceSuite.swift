@@ -637,16 +637,18 @@ private func makePresentationEditorFixture(
             case .failure(let error): return .unavailable(error)
             }
         })
+    let refreshCoordinator = SoundPacksRefreshCoordinator()
     let owner = SoundPacksEditorOwner(
         configFile: configFile,
         lockFile: root.appendingPathComponent("config.lock"),
         environment: environment,
         soundPackLibrary: library,
-        refreshCoordinator: SoundPacksRefreshCoordinator())
+        refreshCoordinator: refreshCoordinator)
     return SoundEditorFixture(
         owner: owner,
         library: library,
         recorder: recorder,
+        refreshCoordinator: refreshCoordinator,
         configFile: configFile,
         packsLockFile: environment.packsLockFile)
 }
