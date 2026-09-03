@@ -161,8 +161,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         settingsPresentationCancellable = settingsPresentationSession.$state
             .map(\.pendingAnnouncement)
             .removeDuplicates()
-            .sink { [weak self] _ in
+            .sink { [weak self] announcement in
                 MainActor.assumeIsolated {
+                    guard announcement != nil else { return }
                     self?.scheduleSettingsPresentationAnnouncementDelivery()
                 }
             }
