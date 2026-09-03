@@ -1,5 +1,6 @@
 import AppKit
 import ClaudioGUICore
+import ClaudioLocalization
 import ClaudioSettingsPresentation
 import Combine
 import Foundation
@@ -80,11 +81,133 @@ func runSettingsPresentationTargetSuites() {
         }
         expect(
             model.contains("final class LoginItemSettingsModel")
+                && !model.contains("ObservableObject")
+                && !model.contains("@Published")
+                && !model.contains("import Combine")
                 && !model.contains("import AppKit")
                 && !model.contains("import ServiceManagement")
                 && !model.contains("SMAppService")
                 && !model.contains("SMLoginItemSetEnabled"),
             "Login model 必须保持纯 presentation，不得泄漏 system adapter")
+    }
+
+    suite("Settings presentation deletion：caller 持有 focus，session 持有 Login 发布") {
+        let root = guiTestRepositoryRoot()
+        let paths = [
+            "component": "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift",
+            "panel": "gui/Sources/ClaudioGUI/MasterVolumeRow.swift",
+            "events": "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift",
+            "session":
+                "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift",
+            "gallery": "gui/Sources/ClaudioGUI/StateGalleryView.swift",
+        ]
+        var code: [String: String] = [:]
+        for (name, path) in paths {
+            let url = root.appendingPathComponent(path)
+            guard let source = try? String(contentsOf: url, encoding: .utf8) else {
+                expect(false, "读不到 \(path)")
+                return
+            }
+            code[name] = strippingComments(source).codeWithoutStringLiterals
+        }
+        guard let component = code["component"], let panel = code["panel"],
+            let events = code["events"], let session = code["session"],
+            let gallery = code["gallery"],
+            let refresh = settingsBracedBlock(after: "package func refreshLoginItem", in: session),
+            let setEnabled = settingsBracedBlock(
+                after: "package func setLoginItemEnabled", in: session),
+            let retry = settingsBracedBlock(
+                after: "package func retryLoginItemOperation", in: session)
+        else {
+            expect(false, "必须能解析 slider/Login deletion wiring")
+            return
+        }
+        let flatComponent = collapsingWhitespace(component)
+        let flatPanel = collapsingWhitespace(panel)
+        let flatEvents = collapsingWhitespace(events)
+
+        expect(
+            flatComponent.contains("package struct SharedMasterVolumeSlider: View")
+                && !flatComponent.contains("SharedMasterVolumeSlider<")
+                && !component.contains("FocusState<")
+                && !component.contains("focusedTarget")
+                && !component.contains("focusIdentity")
+                && !component.contains(".focused("),
+            "共享 slider 必须非泛型且不拥有 caller 的 focus identity")
+        expect(
+            flatPanel.contains(
+                "onCommit: onCommit) .focused(focusedTarget, equals: .masterVolume)")
+                && flatEvents.contains(
+                    "onCommit: onCommit ) .focused(focusedTarget, equals: .masterVolume)"),
+            "Panel 与 Events caller 必须各自把原 exact focus identity 接回共享 slider")
+        expect(
+            !session.contains("loginItemSettings.$projection")
+                && !session.contains("Set<AnyCancellable>")
+                && session.contains("preferenceCancellable: AnyCancellable?"),
+            "session 的固定依赖不得保留冗余 Login Combine stream 或 cancellable collection")
+        for (name, command) in [
+            ("refresh", refresh), ("setEnabled", setEnabled), ("retry", retry),
+        ] {
+            guard let invocation = command.range(of: "dependencies.loginItemSettings."),
+                let adoption = command.range(
+                    of: "loginProjection = dependencies.loginItemSettings.projection")
+            else {
+                expect(false, "\(name) 必须在 command 后同步采纳 Login projection")
+                continue
+            }
+            expect(
+                invocation.lowerBound < adoption.lowerBound,
+                "\(name) 必须先执行 model command，再同步采纳同一 model projection")
+        }
+        expect(
+            !gallery.contains("@StateObject private var loginItemSettings")
+                && !gallery.contains("_loginItemSettings = StateObject"),
+            "DEBUG gallery 已由 session 强持有 Login model，不得再保留第二个 StateObject owner")
+    }
+
+    suite("Settings presentation deletion：语义 announcement 唯一拥有本地化与 UInt64 head") {
+        let root = guiTestRepositoryRoot()
+        let announcementURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationAnnouncement.swift")
+        let sectionURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/LoginItemSettingsSection.swift")
+        let controllerURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
+        guard
+            let announcementSource = try? String(
+                contentsOf: announcementURL, encoding: .utf8),
+            let sectionSource = try? String(contentsOf: sectionURL, encoding: .utf8),
+            let controllerSource = try? String(contentsOf: controllerURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 announcement/section/controller source")
+            return
+        }
+        let announcement = strippingComments(announcementSource).codeWithoutStringLiterals
+        let section = strippingComments(sectionSource).codeWithoutStringLiterals
+        let controller = strippingComments(controllerSource).codeWithoutStringLiterals
+        guard
+            let delivery = settingsBracedBlock(
+                after: "private func deliverPendingSettingsPresentationAnnouncement",
+                in: controller)
+        else {
+            expect(false, "解析不到 Settings announcement delivery")
+            return
+        }
+
+        expect(
+            announcement.contains("package let id: UInt64")
+                && !announcement.contains("Identifiable")
+                && !announcement.contains("RawRepresentable")
+                && !announcement.contains("struct ID"),
+            "exact-head 只需要 UInt64，不得保留无 consumer 的 collection identity witness")
+        expect(
+            announcement.contains("package func localizedSentence(")
+                && section.contains(".localizedSentence(")
+                && delivery.contains("announcement.meaning.localizedSentence(")
+                && !delivery.contains("settingsGeneralLoginItem")
+                && !section.contains("switch session.state.loginItemRegistration")
+                && !section.contains("switch failure.reason"),
+            "status、failure 与 native announcement 必须复用 Meaning 的单一本地化 owner")
     }
 
     suite("Settings native announcement：延迟后重验 current head 且窗口恢复会重试") {
@@ -122,10 +245,12 @@ func runSettingsPresentationTargetSuites() {
         }
 
         expect(
-            subscription.contains("guard announcement != nil")
+            subscription.contains("guard state.pendingAnnouncement != nil")
                 && subscription.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+                && !subscription.contains(".map(")
+                && !subscription.contains(".removeDuplicates(")
                 && !subscription.contains("acknowledgeAnnouncement"),
-            "$state synchronous sink 必须忽略 nil emission，且只能调度、不能同步 post/ack")
+            "$state synchronous sink 必须直接读 emitted state，且只能调度、不能同步 post/ack")
         expect(
             scheduler.contains("settingsPresentationAnnouncementDeliveryScheduled")
                 && !scheduler[..<deferredTurn.lowerBound].contains(
@@ -148,6 +273,50 @@ func runSettingsPresentationTargetSuites() {
 
 @MainActor
 func runSettingsPresentationSliceSuites() {
+    suite("Settings presentation announcement：语义在单一 owner 穷尽本地化") {
+        let english = ClaudioAppLanguage.english
+        let zhHans = ClaudioAppLanguage.zhHans
+        let englishL10n = ClaudioL10n(language: english)
+        let zhHansL10n = ClaudioL10n(language: zhHans)
+        let cases: [(SettingsPresentationAnnouncement.Meaning, ClaudioL10nKey)] = [
+            (.loginItemStatus(.disabled), .settingsGeneralLoginItem.disabled),
+            (.loginItemStatus(.enabled), .settingsGeneralLoginItem.enabled),
+            (.loginItemStatus(.requiresApproval), .settingsGeneralLoginItem.requiresApproval),
+            (.loginItemStatus(.unavailable), .settingsGeneralLoginItem.unavailable),
+            (
+                .loginItemFailure(
+                    LoginItemOperationFailure(
+                        requestedEnabled: true, reason: .embeddedLoginItemMissing)),
+                .settingsGeneralLoginItem.failureMissing
+            ),
+            (
+                .loginItemFailure(
+                    LoginItemOperationFailure(requestedEnabled: true, reason: .systemRejected)),
+                .settingsGeneralLoginItem.failureEnable
+            ),
+            (
+                .loginItemFailure(
+                    LoginItemOperationFailure(requestedEnabled: false, reason: .systemRejected)),
+                .settingsGeneralLoginItem.failureDisable
+            ),
+            (
+                .platformAction(.openLoginItemsSettings, .unavailable),
+                .settingsGeneralLoginItem.unavailable
+            ),
+            (
+                .platformAction(.openCalendarPrivacySettings, .failed),
+                .settingsNotificationsOpenCalendarPrivacy
+            ),
+        ]
+
+        for (meaning, key) in cases {
+            expect(
+                meaning.localizedSentence(language: english) == englishL10n.text(key)
+                    && meaning.localizedSentence(language: zhHans) == zhHansL10n.text(key),
+                "每种 semantic announcement 必须在两种语言下映射到同一 catalog key")
+        }
+    }
+
     suite("Settings presentation slice：非可选依赖与 Login 失败/重试形成同一 session") {
         let preferences = ClaudioPreferences(defaults: UserDefaults())
         let adapterState = SettingsLoginAdapterState()
@@ -234,7 +403,7 @@ func runSettingsPresentationSliceSuites() {
             session.state.pendingAnnouncement?.id == announcement.id,
             "native post 失败不得消费 announcement debt")
         session.acknowledgeAnnouncement(
-            id: SettingsPresentationAnnouncement.ID(rawValue: announcement.id.rawValue + 1),
+            id: announcement.id + 1,
             didPost: true)
         expect(
             session.state.pendingAnnouncement?.id == announcement.id,
@@ -252,7 +421,7 @@ func runSettingsPresentationSliceSuites() {
                         status: { .disabled },
                         setEnabled: { enabled in enabled ? .enabled : .disabled }))),
             actions: SettingsPresentationActions { _ in .unavailable })
-        var synchronouslyAcknowledgedIDs: [SettingsPresentationAnnouncement.ID] = []
+        var synchronouslyAcknowledgedIDs: [UInt64] = []
         let cancellable = session.$state.sink { state in
             MainActor.assumeIsolated {
                 guard let announcement = state.pendingAnnouncement else { return }
@@ -263,7 +432,7 @@ func runSettingsPresentationSliceSuites() {
 
         expect(session.perform(.openLoginItemsSettings) == .unavailable, "先产生一条真实 debt")
         expect(
-            synchronouslyAcknowledgedIDs.map(\.rawValue) == [1]
+            synchronouslyAcknowledgedIDs == [1]
                 && session.state.pendingAnnouncement == nil
                 && session.state.presentationRevision >= 2,
             "@Published willSet 内同步 ack 后 public projection 不得被外层 stale state 覆盖")
