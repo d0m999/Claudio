@@ -395,7 +395,7 @@ func runSoundPacksEditorMutationSuites() async {
                 let row = settled.eventRows.first(where: { $0.event == .notification })
             {
                 expect(
-                    row.audioDisplayName == "stop.mp3",
+                    row.coverage == .present(fileName: "stop.mp3"),
                     "assign shared settle 后 presentation 必须投影 notification binding")
             } else {
                 expect(false, "assign settle 后必须保留 notification presentation row")
@@ -509,7 +509,8 @@ func runSoundPacksEditorMutationSuites() async {
                 let stop = settled.eventRows.first(where: { $0.event == .stop })
                 let notification = settled.eventRows.first(where: { $0.event == .notification })
                 expect(
-                    stop?.audioDisplayName == nil && notification?.audioDisplayName == "stop.mp3",
+                    stop?.coverage == .unmapped
+                        && notification?.coverage == .present(fileName: "stop.mp3"),
                     "clear settle 后 presentation 只清 stop 并保留 sibling")
             } else {
                 expect(false, "clear settle 后必须保留 Sounds presentation")
