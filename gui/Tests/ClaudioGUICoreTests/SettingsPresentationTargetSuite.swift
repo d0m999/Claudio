@@ -32,11 +32,15 @@ func runSettingsPresentationTargetSuites() {
 
         expect(
             targets.filter { $0.name == "ClaudioSettingsPresentation" }.count == 1
+                && settings.dependencyCount == expectedDependencies.count
+                && !settings.hasUnparsedDependencies
                 && settings.dependencies.sorted() == expectedDependencies
                 && settings.resourcesCount == 0,
             "SwiftPM graph 必须恰有一个 Settings target、五个精确 direct dependencies 且零资源")
         expect(
-            appTarget.dependencies.filter { $0 == "ClaudioSettingsPresentation" }.count == 1
+            !appTarget.hasUnparsedDependencies
+                && !harnessTarget.hasUnparsedDependencies
+                && appTarget.dependencies.filter { $0 == "ClaudioSettingsPresentation" }.count == 1
                 && harnessTarget.dependencies.filter {
                     $0 == "ClaudioSettingsPresentation"
                 }.count == 1,
@@ -47,7 +51,8 @@ func runSettingsPresentationTargetSuites() {
         expect(
             targets.filter { lowerTargetNames.contains($0.name) }.count == lowerTargetNames.count
                 && targets.filter { lowerTargetNames.contains($0.name) }.allSatisfy {
-                    !$0.dependencies.contains("ClaudioSettingsPresentation")
+                    !$0.hasUnparsedDependencies
+                        && !$0.dependencies.contains("ClaudioSettingsPresentation")
                 },
             "四个下层 target 必须全部存在且零回指，保持 graph acyclic")
         expect(
@@ -421,6 +426,8 @@ private func settingsBracedBlock(after marker: String, in source: String) -> Str
 private struct DumpedSettingsPackageTarget {
     let name: String
     let dependencies: [String]
+    let dependencyCount: Int
+    let hasUnparsedDependencies: Bool
     let resourcesCount: Int
 }
 
@@ -464,12 +471,17 @@ private func dumpedSettingsPackageTargets(
             if let product = dependency["product"] as? [Any] {
                 return product.first as? String
             }
+            if let target = dependency["target"] as? [Any] {
+                return target.first as? String
+            }
             return nil
         }
         let resources = target["resources"] as? [Any] ?? []
         return DumpedSettingsPackageTarget(
             name: name,
             dependencies: dependencies,
+            dependencyCount: rawDependencies.count,
+            hasUnparsedDependencies: dependencies.count != rawDependencies.count,
             resourcesCount: resources.count)
     }
 }
