@@ -54,7 +54,7 @@ public enum PackForkError: Error, Sendable, Equatable {
 /// read-modify-write primitive (``mutateManifestJSON(at:lockFile:_:)``) directly — never
 /// `bindEventToManifest` — so only the four cases that primitive itself can actually produce
 /// (`.manifestUnreadable`, `.writeFailed`, `.lockBusy`, `.lockFailed`) are reachable here in
-/// practice; the other three are `bindEventToManifest`'s own file-level pre-check cases (see
+/// practice; the other four are `bindEventToManifest`'s own file-level/CAS pre-check cases (see
 /// ``ManifestBindError``'s doc comment) and are handled below defensively, never expected to
 /// fire from this call site.
 private func manifestRewriteReason(_ error: ManifestBindError) -> String {
