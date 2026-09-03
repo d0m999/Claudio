@@ -17,6 +17,7 @@ struct EventSettingsWindowView: View {
     @ObservedObject var languageStore: ClaudioPreferences
     @ObservedObject var aiCueViewModel: AICueGenerationViewModel
     @ObservedObject var soundPacksModel: SoundPacksWindowModel
+    @ObservedObject var soundPacksEditorOwner: SoundPacksEditorOwner
 
     let audioEnvironment: AudioImportEnvironment
     let onConfigureSound: @MainActor (SoundPacksWindowRoute) -> Void
@@ -26,10 +27,6 @@ struct EventSettingsWindowView: View {
     #if DEBUG
     var reloadsOnAppear = true
     #endif
-    let onAdoptAICue:
-        @MainActor (AICueAdoptionRequest) async -> Result<
-            AICueAdoptionOutcome, AICueAdoptionError
-        >
     @Environment(\.colorScheme) private var colorScheme
     @FocusState private var focusedTarget: EventSettingsFocusTarget?
     @State private var previewPlayer = NSSoundAudioPreviewPlayer()
@@ -59,6 +56,12 @@ struct EventSettingsWindowView: View {
     }
     private var routeIsUnavailable: Bool {
         resolvedScope == nil
+    }
+    private var eventsEditorPresentation: EventsSoundPackPresentation? {
+        guard case .events(let presentation) = soundPacksEditorOwner.presentation.mode else {
+            return nil
+        }
+        return presentation
     }
     private var scopeProjectionIsAligned: Bool {
         resolvedScope == selectedScope.scope
@@ -93,8 +96,8 @@ struct EventSettingsWindowView: View {
             handledFocusRequestRevision = revision
             if eventSettingsShouldCloseAICueComposer(
                 includesAICueComposer: true,
-                targetSurface: aiCueViewModel.target?.surface,
-                targetEvent: aiCueViewModel.target?.event,
+                targetSurface: aiCueViewModel.session?.scope.surface,
+                targetEvent: aiCueViewModel.session?.event,
                 selectedSurface: selectedScope.scope.surface,
                 selectedEvent: selection.route.event)
             {
@@ -111,10 +114,12 @@ struct EventSettingsWindowView: View {
             model.reload()
             #endif
             reconcileScopeSelection()
+            activateEventsEditor()
         }
         .onChange(of: selection.route) { _ in
             stopAllPreviews()
             reconcileScopeSelection()
+            activateEventsEditor()
         }
         .onChange(of: scopes.map(\.scope)) { _ in
             stopAllPreviews()
@@ -131,6 +136,9 @@ struct EventSettingsWindowView: View {
         }
         .onChange(of: aiCueViewModel.providerProfileID) { _ in
             stopCandidatePreview()
+        }
+        .onChange(of: aiCueViewModel.generation?.id) { _ in
+            activateEventsEditor()
         }
         .onChange(of: aiCueViewModel.requiresCredentialConfiguration) { required in
             if required {
@@ -607,8 +615,8 @@ struct EventSettingsWindowView: View {
                                             && model.surfaceSoundIssue == nil,
                                         writeDisabledReason: model.surfaceSoundIssue)
                                     if eventSettingsAICueComposerMatches(
-                                        targetSurface: aiCueViewModel.target?.surface,
-                                        targetEvent: aiCueViewModel.target?.event,
+                                        targetSurface: aiCueViewModel.session?.scope.surface,
+                                        targetEvent: aiCueViewModel.session?.event,
                                         selectedSurface: selectedScope.scope.surface,
                                         event: event.event)
                                     {
@@ -745,7 +753,7 @@ struct EventSettingsWindowView: View {
         }
         if eventSettingsShouldCloseAICueComposer(
             includesAICueComposer: true,
-            targetSurface: aiCueViewModel.target?.surface,
+            targetSurface: aiCueViewModel.session?.scope.surface,
             selectedSurface: scope.surface)
         {
             closeAICueComposer()
@@ -785,11 +793,12 @@ struct EventSettingsWindowView: View {
         playingCandidateID = nil
         playingCandidateTitle = nil
         selection.beginAISession(scope: .surface(target.surface), event: target.event)
-        aiCueViewModel.begin(target: target)
+        aiCueViewModel.begin(scope: .surface(target.surface), event: target.event)
+        activateEventsEditor()
     }
 
     private func closeAICueComposer() {
-        let hadSession = aiCueViewModel.target != nil
+        let hadSession = aiCueViewModel.session != nil
         let clearedCandidates = aiCueViewModel.generation != nil
         stopCandidatePreview()
         aiCueViewModel.endSession()
@@ -841,7 +850,28 @@ struct EventSettingsWindowView: View {
 
     private func adoptAICueCandidate(_ candidateID: UUID) {
         stopCandidatePreview()
-        aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)
+        guard let permit = eventsEditorPresentation?.adoptionPermit else { return }
+        aiCueViewModel.adopt(candidateID: candidateID, permit: permit) {
+            candidate, displayName, permit in
+            let result = await soundPacksEditorOwner.perform(
+                .adoptAICue(
+                    candidate: candidate,
+                    displayName: displayName,
+                    permit: permit))
+            if case .adopted = result {
+                onAudibilityInputsChanged()
+            }
+            return result
+        }
+    }
+
+    private func activateEventsEditor() {
+        _ = soundPacksEditorOwner.send(
+            .activate(
+                .events(
+                    route: selection.route,
+                    requestRevision: selection.routeRequestRevision,
+                    candidateGenerationID: aiCueViewModel.generation?.id)))
     }
 
     private func stopCandidatePreview() {

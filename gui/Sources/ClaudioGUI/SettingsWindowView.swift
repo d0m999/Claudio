@@ -29,12 +29,6 @@ struct SettingsWindowView: View {
     let onEventAudibilityInputsChanged: (@MainActor () -> Void)?
     let onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)?
     let onAnnouncement: (@MainActor (String) -> Void)?
-    let onAdoptAICue:
-        (
-            @MainActor (AICueAdoptionRequest) async -> Result<
-                AICueAdoptionOutcome, AICueAdoptionError
-            >
-        )?
 
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
 
@@ -68,13 +62,7 @@ struct SettingsWindowView: View {
         audioEnvironment: AudioImportEnvironment? = nil,
         onEventAudibilityInputsChanged: (@MainActor () -> Void)? = nil,
         onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)? = nil,
-        onAnnouncement: (@MainActor (String) -> Void)? = nil,
-        onAdoptAICue:
-            (
-                @MainActor (AICueAdoptionRequest) async -> Result<
-                    AICueAdoptionOutcome, AICueAdoptionError
-                >
-            )? = nil
+        onAnnouncement: (@MainActor (String) -> Void)? = nil
     ) {
         self.model = model
         self.preferences = preferences
@@ -95,7 +83,6 @@ struct SettingsWindowView: View {
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
         self.onEventPackSwitch = onEventPackSwitch
         self.onAnnouncement = onAnnouncement
-        self.onAdoptAICue = onAdoptAICue
     }
 
     var body: some View {
@@ -296,8 +283,7 @@ struct SettingsWindowView: View {
             let aiCueViewModel,
             let audioEnvironment,
             let onEventAudibilityInputsChanged,
-            let onEventPackSwitch,
-            let onAdoptAICue
+            let onEventPackSwitch
         {
             EventSettingsWindowView(
                 model: eventSettingsModel,
@@ -306,12 +292,12 @@ struct SettingsWindowView: View {
                 languageStore: preferences,
                 aiCueViewModel: aiCueViewModel,
                 soundPacksModel: soundPacksEditorOwner.model,
+                soundPacksEditorOwner: soundPacksEditorOwner,
                 audioEnvironment: audioEnvironment,
                 onConfigureSound: { model.request(.sounds($0)) },
                 onAudibilityInputsChanged: onEventAudibilityInputsChanged,
                 onPackSwitch: onEventPackSwitch,
-                onAnnouncement: onAnnouncement,
-                onAdoptAICue: onAdoptAICue)
+                onAnnouncement: onAnnouncement)
         } else if destination == .sounds,
             model.resolution.failure == nil,
             let soundPacksEditorOwner

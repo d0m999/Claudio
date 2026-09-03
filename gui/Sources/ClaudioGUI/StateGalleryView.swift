@@ -248,8 +248,9 @@ private struct EventSettingsLayoutFrame: View {
     @StateObject private var hostIntegrations: HostIntegrationPresentationStore
     @StateObject private var languageStore: ClaudioPreferences
     @StateObject private var aiCueViewModel: AICueGenerationViewModel
-    @StateObject private var soundPacksModel: SoundPacksWindowModel
-    private let panelModel: PanelConfigController
+    @StateObject private var soundPacksEditorOwner: SoundPacksEditorOwner
+    @StateObject private var panelModel: PanelConfigController
+    private let galleryRoot: URL
     private let width: CGFloat
 
     init(
@@ -287,51 +288,10 @@ private struct EventSettingsLayoutFrame: View {
                     selectedPack: "workbuddy-private",
                     eventsEnabled: [Event.notification.cliName: true])
             ])
-        let effectiveConfig = ClaudioConfig(
-            selectedPack: "workbuddy-private",
-            masterVolume: 0.75,
-            eventsEnabled: Dictionary(
-                uniqueKeysWithValues: Event.allCases.map { ($0.cliName, true) }))
-        let packCards = [
-            PackCard(
-                id: "global-pack",
-                name: "Global Signals",
-                isCC0: false,
-                presentEvents: Set(Event.allCases),
-                state: .complete,
-                isSelected: false),
-            PackCard(
-                id: "workbuddy-private",
-                name: "WorkBuddy Private",
-                isCC0: false,
-                presentEvents: Set(Event.allCases),
-                state: .complete,
-                isSelected: true),
-        ]
-        let rows = Event.allCases.map {
-            EventRow(
-                event: $0,
-                coverage: .present(fileName: "\($0.cliName).mp3"),
-                enabled: true)
-        }
-        panelModel = PanelConfigController(
-            previewConfigState: .operational(baseConfig),
-            effectiveConfig: effectiveConfig,
-            selectedSurface: .workBuddy,
-            eventRows: rows,
-            packCards: packCards,
-            selectedPackMetadata: SelectedPackMetadata(
-                id: "workbuddy-private",
-                name: "WorkBuddy Private"),
-            environment: previewAudioImportEnvironment)
-        _soundPacksModel = StateObject(
-            wrappedValue: SoundPacksWindowModel(
-                previewConfig: baseConfig,
-                packCards: packCards,
-                selectedPackID: "workbuddy-private",
-                selectedEventRows: rows,
-                environment: previewAudioImportEnvironment,
-                refreshCoordinator: SoundPacksRefreshCoordinator()))
+        let fixture = EventSettingsGalleryFixture(config: baseConfig)
+        galleryRoot = fixture.root
+        _panelModel = StateObject(wrappedValue: fixture.panel)
+        _soundPacksEditorOwner = StateObject(wrappedValue: fixture.owner)
         _aiCueViewModel = StateObject(
             wrappedValue: AICueGenerationViewModel(
                 previewState: PreviewFixtures.AICueGalleryScenario.editing.previewState))
@@ -344,16 +304,78 @@ private struct EventSettingsLayoutFrame: View {
             hostIntegrations: hostIntegrations,
             languageStore: languageStore,
             aiCueViewModel: aiCueViewModel,
-            soundPacksModel: soundPacksModel,
+            soundPacksModel: soundPacksEditorOwner.model,
+            soundPacksEditorOwner: soundPacksEditorOwner,
             audioEnvironment: previewAudioImportEnvironment,
             onConfigureSound: { _ in },
             onAudibilityInputsChanged: {},
             onPackSwitch: { _ in },
-            onAnnouncement: { _ in },
-            reloadsOnAppear: false,
-            onAdoptAICue: { _ in .failure(.ineligible(.targetChanged)) }
+            onAnnouncement: { _ in }
         )
         .frame(width: width, height: 640)
+    }
+}
+
+@MainActor
+private struct EventSettingsGalleryFixture {
+    let root: URL
+    let panel: PanelConfigController
+    let owner: SoundPacksEditorOwner
+
+    init(config: ClaudioConfig) {
+        root = previewStateGalleryRoot.appendingPathComponent(
+            "event-settings-\(UUID().uuidString)",
+            isDirectory: true)
+        let environment = previewAudioImportEnvironment
+        let configFile = root.appendingPathComponent("config.json")
+        let configLock = root.appendingPathComponent("config.lock")
+        let coordinator = SoundPacksRefreshCoordinator()
+
+        do {
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try JSONEncoder().encode(config).write(to: configFile, options: .atomic)
+            for (packID, name) in [
+                ("global-pack", "Global Signals"),
+                ("workbuddy-private", "WorkBuddy Private"),
+            ] {
+                let pack = environment.userPacksDirectory.appendingPathComponent(
+                    packID,
+                    isDirectory: true)
+                try FileManager.default.createDirectory(at: pack, withIntermediateDirectories: true)
+                var events: [String: String] = [:]
+                for event in Event.allCases {
+                    let fileName = "\(event.cliName).mp3"
+                    events[event.cliName] = fileName
+                    try Data("gallery-audio".utf8).write(
+                        to: pack.appendingPathComponent(fileName))
+                }
+                let manifest: [String: Any] = [
+                    "id": packID,
+                    "name": name,
+                    "events": events,
+                ]
+                try JSONSerialization.data(withJSONObject: manifest).write(
+                    to: pack.appendingPathComponent("manifest.json"),
+                    options: .atomic)
+            }
+        } catch {
+            preconditionFailure("Unable to build isolated Events gallery fixture: \(error)")
+        }
+
+        let library = SoundPackLibrary(environment: environment)
+        panel = PanelConfigController(
+            configFile: configFile,
+            lockFile: configLock,
+            environment: environment,
+            soundPackLibrary: library,
+            soundPacksRefreshCoordinator: coordinator)
+        panel.selectSoundSurface(.workBuddy)
+        owner = SoundPacksEditorOwner(
+            configFile: configFile,
+            lockFile: configLock,
+            environment: environment,
+            soundPackLibrary: library,
+            refreshCoordinator: coordinator)
     }
 }
 
@@ -1519,16 +1541,17 @@ private struct PreviewDurationProbe: AudioDurationProbing {
     func probeDuration(of fileURL: URL) -> TimeInterval? { 1.0 }
 }
 
-/// `userPacksDirectory` is a placeholder, never-resolved path — mirrors
-/// `OnboardingViewModel(previewState:)`'s own placeholder `environment`; nothing in this
-/// gallery ever performs a real import, so nothing ever reads it.
+/// One isolated temporary root backs every DEBUG gallery dependency. Production initializers can
+/// therefore exercise their normal scan/refresh contracts without reading Claudio's user data.
+private let previewStateGalleryRoot = FileManager.default.temporaryDirectory
+    .appendingPathComponent("claudio-state-gallery-\(UUID().uuidString)", isDirectory: true)
+
 private let previewAudioImportEnvironment = AudioImportEnvironment(
-    userPacksDirectory: URL(fileURLWithPath: "/dev/null/claudio-preview-packs"),
+    userPacksDirectory: previewStateGalleryRoot.appendingPathComponent(
+        "packs",
+        isDirectory: true),
     durationProbe: PreviewDurationProbe(),
-    // 与 `userPacksDirectory` 同一个理由：一条**永不解析**的占位路径。gallery 从不写 manifest，
-    // 所以这把锁从不会被打开 —— 但它必须显式写出来（形参没有默认值），而写出来的绝不能是
-    // 真实路径：一个 preview 不该有能力去碰用户 home 上的锁。
-    packsLockFile: URL(fileURLWithPath: "/dev/null/claudio-preview-packs.lock")
+    packsLockFile: previewStateGalleryRoot.appendingPathComponent("packs.lock")
 )
 
 // MARK: - Preview providers (classic `PreviewProvider` ONLY — `#Preview` does not

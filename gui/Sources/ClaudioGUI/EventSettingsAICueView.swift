@@ -768,7 +768,7 @@ private func aiCueFailureText(
         return l10n.text(.aiCueErrorNameInvalid)
     case .adoption(.importedButNotBound):
         return l10n.text(.aiCueErrorAdoptionPartial)
-    case .adoption(.ineligible):
+    case .adoption(.targetChanged):
         return l10n.text(.aiCueErrorAdoptionTarget)
     case .adoption:
         return l10n.text(.aiCueErrorAdoption)

@@ -227,24 +227,6 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             credentialManager: aiCueCredentialManager,
             generator: aiCueGenerator)
         let eventSettingsSelection = EventSettingsWindowSelection()
-        let adoptAICue:
-            @MainActor (AICueAdoptionRequest) async -> Result<
-                AICueAdoptionOutcome, AICueAdoptionError
-            > = {
-                [
-                    weak soundPacksEditorOwner, weak eventSettingsModel, weak actionRouter,
-                ]
-                request in
-                guard let soundPacksEditorOwner else {
-                    return .failure(.ineligible(.writesStopped))
-                }
-                let result = await soundPacksEditorOwner.adoptAICue(request)
-                if case .success = result {
-                    eventSettingsModel?.reload()
-                    actionRouter?.audibilityInputsChanged()
-                }
-                return result
-            }
         let settingsWindowController = SettingsWindowController(
             preferences: languageStore,
             loginItemSettings: loginItemSettings,
@@ -261,8 +243,7 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             audioEnvironment: audioEnvironment,
             onEventAudibilityInputsChanged: { [weak actionRouter] in
                 actionRouter?.audibilityInputsChanged()
-            },
-            onAdoptAICue: adoptAICue)
+            })
 
         // Built BEFORE the panel so the panel's width callback can capture it (the callback can't
         // capture `self` — we're still pre-`super.init()` here).
