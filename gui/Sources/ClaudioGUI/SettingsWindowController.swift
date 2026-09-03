@@ -7,6 +7,15 @@ import Combine
 import SoundPacksWindow
 import SwiftUI
 
+@MainActor
+private final class SettingsPresentationNativeCallbacks {
+    weak var controller: SettingsWindowController?
+
+    func announce(_ sentence: String) {
+        controller?.announceBasicSettingsUpdate(sentence)
+    }
+}
+
 /// App-lifetime owner of the single retained unified Settings window.
 ///
 /// Its one lazy `NSWindow` survives close, and every close consumes at most one
@@ -29,10 +38,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let eventSettingsSelection: EventSettingsWindowSelection
     private let hostIntegrations: HostIntegrationPresentationStore
     private let integrationsModel: IntegrationDestinationModel
-    private let integrationsFocusCoordinator = IntegrationDestinationFocusCoordinator()
+    private let integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator
     private let aiCueViewModel: AICueGenerationViewModel
     private let onEventAudibilityInputsChanged: @MainActor () -> Void
     private let dynamicQuietObserver: DynamicQuietSystemObserver
+    private let presentationCallbacks: SettingsPresentationNativeCallbacks
     private var window: NSWindow?
     private var isPresentingWindow = false
     private var focusRestoration: (@MainActor (NSRunningApplication?) -> Void)?
@@ -63,11 +73,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onEventAudibilityInputsChanged: @escaping @MainActor () -> Void
     ) {
         self.preferences = preferences
-        settingsPresentationSession = SettingsPresentationSession(
-            dependencies: SettingsPresentationDependencies(
-                preferences: preferences,
-                loginItemSettings: loginItemSettings),
-            actions: makeSystemSettingsPresentationActions())
         self.usageSettings = usageSettings
         self.globalShortcutSettings = globalShortcutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
@@ -78,18 +83,46 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.eventSettingsSelection = eventSettingsSelection
         self.hostIntegrations = hostIntegrations
         self.integrationsModel = integrationsModel
+        let integrationsFocusCoordinator = IntegrationDestinationFocusCoordinator()
+        self.integrationsFocusCoordinator = integrationsFocusCoordinator
         self.aiCueViewModel = aiCueViewModel
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
-        dynamicQuietObserver = DynamicQuietSystemObserver()
-        aboutSettings = makeSystemAboutSettingsModel(
+        let dynamicQuietObserver = DynamicQuietSystemObserver()
+        self.dynamicQuietObserver = dynamicQuietObserver
+        let aboutSettings = makeSystemAboutSettingsModel(
             surfaceFacts: hostIntegrations.safeSurfaceFacts)
+        self.aboutSettings = aboutSettings
         let initialSoundPackProjection = SettingsSoundPackShellProjection(
             editorPresentation: soundPacksEditorOwner.presentation,
             sourceRows: hostIntegrations.content.sourceRows)
-        model = SettingsWindowPresentationModel(
+        let model = SettingsWindowPresentationModel<NSRunningApplication>(
             preferences: preferences,
             availability: initialSoundPackProjection.availability)
+        self.model = model
+        let presentationCallbacks = SettingsPresentationNativeCallbacks()
+        self.presentationCallbacks = presentationCallbacks
+        settingsPresentationSession = SettingsPresentationSession(
+            dependencies: SettingsPresentationDependencies(
+                navigation: model,
+                preferences: preferences,
+                loginItemSettings: loginItemSettings,
+                dynamicQuietPolicy: dynamicQuietObserver.policy,
+                usageSettings: usageSettings,
+                globalShortcutSettings: globalShortcutSettings,
+                aboutSettings: aboutSettings,
+                soundPacksEditorOwner: soundPacksEditorOwner,
+                soundPacksEditorNativeEffects: soundPacksEditorNativeEffects,
+                eventSettingsModel: eventSettingsModel,
+                eventSettingsSelection: eventSettingsSelection,
+                hostIntegrations: hostIntegrations,
+                integrationsModel: integrationsModel,
+                integrationsFocusCoordinator: integrationsFocusCoordinator,
+                aiCueViewModel: aiCueViewModel),
+            actions: makeSystemSettingsPresentationActions(
+                onEventAudibilityInputsChanged: onEventAudibilityInputsChanged,
+                announce: { sentence in presentationCallbacks.announce(sentence) }))
         super.init()
+        presentationCallbacks.controller = self
 
         externalActivationCancellable = NSWorkspace.shared.notificationCenter
             .publisher(for: NSWorkspace.didActivateApplicationNotification)
@@ -253,26 +286,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func makeWindow() -> NSWindow {
-        let content = SettingsWindowView(
-            model: model,
-            preferences: preferences,
-            dynamicQuietPolicy: dynamicQuietObserver.policy,
-            settingsPresentationSession: settingsPresentationSession,
-            usageSettings: usageSettings,
-            globalShortcutSettings: globalShortcutSettings,
-            aboutSettings: aboutSettings,
-            soundPacksEditorNativeEffects: soundPacksEditorNativeEffects,
-            soundPacksEditorOwner: soundPacksEditorOwner,
-            eventSettingsModel: eventSettingsModel,
-            eventSettingsSelection: eventSettingsSelection,
-            hostIntegrations: hostIntegrations,
-            integrationsModel: integrationsModel,
-            integrationsFocusCoordinator: integrationsFocusCoordinator,
-            aiCueViewModel: aiCueViewModel,
-            onEventAudibilityInputsChanged: onEventAudibilityInputsChanged,
-            onAnnouncement: { [weak self] sentence in
-                self?.announceBasicSettingsUpdate(sentence)
-            })
+        let content = SettingsRootView(session: settingsPresentationSession)
         let window = NSWindow(
             contentRect: NSRect(
                 x: 0,
@@ -301,7 +315,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     @discardableResult
-    private func announceBasicSettingsUpdate(_ sentence: String) -> Bool {
+    fileprivate func announceBasicSettingsUpdate(_ sentence: String) -> Bool {
         guard let window, window.isVisible, window.isKeyWindow, !sentence.isEmpty else {
             return false
         }

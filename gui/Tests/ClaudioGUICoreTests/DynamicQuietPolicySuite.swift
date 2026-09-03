@@ -292,7 +292,8 @@ func runDynamicQuietPolicySuites() {
 
     suite("Notifications wiring：单一组合 owner、跨版本 EventKit 与 privacy boundary") {
         guard
-            let view = dynamicQuietSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+            let view = dynamicQuietSource(
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let owner = dynamicQuietSource(
                 "gui/Sources/ClaudioGUI/DynamicQuietSystemObserver.swift"),
             let settingsController = dynamicQuietSource(

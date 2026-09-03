@@ -398,11 +398,11 @@ func runUsageActivitySuites() async {
         let root = guiTestRepositoryRoot()
         let view = try? String(
             contentsOf: root.appendingPathComponent(
-                "gui/Sources/ClaudioGUI/UsageSettingsView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/UsageSettingsView.swift"),
             encoding: .utf8)
         let settings = try? String(
             contentsOf: root.appendingPathComponent(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             encoding: .utf8)
         let adapter = try? String(
             contentsOf: root.appendingPathComponent(
@@ -415,7 +415,7 @@ func runUsageActivitySuites() async {
                 && view?.contains("settings.usage.clear-log") == true,
             "历史与日志必须有两个独立确认入口和稳定 AX 标识")
         expect(
-            settings?.contains("else if destination == .usage") == true
+            settings?.contains("case .usage:") == true
                 && settings?.contains("UsageSettingsView(") == true,
             "Usage destination 必须渲染 production 内容而非 debug route")
         expect(

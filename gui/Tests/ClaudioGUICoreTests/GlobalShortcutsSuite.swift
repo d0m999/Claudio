@@ -505,13 +505,13 @@ func runGlobalShortcutsSuites() {
         let carbonURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/CarbonGlobalShortcutAdapter.swift")
         let recorderURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioGUI/ShortcutSettingsView.swift")
+            "gui/Sources/ClaudioSettingsPresentation/ShortcutSettingsView.swift")
         let menuURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/MenuBarController.swift")
         let settingsControllerURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
         let eventsURL = root.appendingPathComponent(
-            "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift")
+            "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift")
         let coreURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUICore/GlobalShortcuts.swift")
         guard let carbon = try? String(contentsOf: carbonURL, encoding: .utf8),

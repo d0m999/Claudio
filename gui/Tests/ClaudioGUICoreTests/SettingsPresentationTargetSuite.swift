@@ -96,7 +96,8 @@ func runSettingsPresentationTargetSuites() {
         let paths = [
             "component": "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift",
             "panel": "gui/Sources/ClaudioGUI/MasterVolumeRow.swift",
-            "events": "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift",
+            "events":
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift",
             "session":
                 "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift",
             "gallery": "gui/Sources/ClaudioGUI/StateGalleryView.swift",
@@ -392,6 +393,7 @@ func runSettingsPresentationTargetSuites() {
             "AboutSettingsView.swift",
             "SettingsVisualComponents.swift",
             "EventSettingsWindowSelection.swift",
+            "SettingsStateGalleryView.swift",
         ]
         let legacyFiles = migratedFiles.map { filename in
             filename == "SettingsRootView.swift" ? "SettingsWindowView.swift" : filename
@@ -412,16 +414,20 @@ func runSettingsPresentationTargetSuites() {
         let rootURL = presentationDirectory.appendingPathComponent("SettingsRootView.swift")
         let controllerURL = executableDirectory.appendingPathComponent(
             "SettingsWindowController.swift")
+        let galleryURL = executableDirectory.appendingPathComponent("StateGalleryView.swift")
         guard let rootSource = try? String(contentsOf: rootURL, encoding: .utf8),
-            let controllerSource = try? String(contentsOf: controllerURL, encoding: .utf8)
+            let controllerSource = try? String(contentsOf: controllerURL, encoding: .utf8),
+            let gallerySource = try? String(contentsOf: galleryURL, encoding: .utf8)
         else {
             expect(false, "读不到 production Settings root 或 controller wiring")
             return
         }
         let rootScan = strippingComments(rootSource)
         let controllerScan = strippingComments(controllerSource)
+        let galleryScan = strippingComments(gallerySource)
         guard rootScan.unmodeledConstructs.isEmpty,
             controllerScan.unmodeledConstructs.isEmpty,
+            galleryScan.unmodeledConstructs.isEmpty,
             let routeSlot = settingsBracedBlock(after: "private var routeSlot", in: rootScan.code)
         else {
             expect(false, "production Settings root source audit 必须 fail closed")
@@ -429,6 +435,7 @@ func runSettingsPresentationTargetSuites() {
         }
         let normalizedRouteSlot = collapsingWhitespace(routeSlot)
         let normalizedController = collapsingWhitespace(controllerScan.code)
+        let normalizedGallery = collapsingWhitespace(galleryScan.code)
         let destinationCases = [
             ".general", ".integrations", ".eventsAndSounds", ".notifications", ".display",
             ".sounds", ".usage", ".shortcuts", ".about",
@@ -447,6 +454,11 @@ func runSettingsPresentationTargetSuites() {
                 "SettingsRootView(session: settingsPresentationSession)")
                 && !normalizedController.contains("SettingsWindowView("),
             "production controller 必须只挂载与 harness 相同的 SettingsRootView(session:) interface")
+        expect(
+            normalizedGallery.contains("SettingsStateGalleryView(")
+                && !normalizedGallery.contains("SettingsRootView(")
+                && !normalizedGallery.contains("SettingsPresentationDependencies("),
+            "executable gallery 只能挂载 target-owned Settings gallery，不得复制 fixture composition")
     }
 }
 
@@ -703,6 +715,28 @@ func runSettingsPresentationSliceSuites() {
     }
 
     #if DEBUG
+    suite("Settings presentation root：九个 destination 都经同一 compiled production root 挂载") {
+        var mountedDestinations = Set<SettingsDestination>()
+        for scenario in PreviewFixtures.settingsRouteScenarios {
+            let fixture = SettingsPresentationFixtures.generalLogin(
+                route: scenario.route,
+                availability: PreviewFixtures.settingsRouteAvailability)
+            let hostingView = NSHostingView(rootView: fixture.rootView)
+            hostingView.frame = NSRect(x: 0, y: 0, width: 980, height: 720)
+            hostingView.layoutSubtreeIfNeeded()
+            if hostingView.fittingSize.width > 0 && hostingView.fittingSize.height > 0,
+                fixture.selectedDestination == scenario.destination
+            {
+                mountedDestinations.insert(scenario.destination)
+            }
+        }
+
+        expect(
+            mountedDestinations == Set(SettingsDestination.allCases)
+                && mountedDestinations.count == 9,
+            "固定九个 destination 必须全部由 fixture 与 production 共用的 SettingsRootView(session:) 挂载")
+    }
+
     suite("Settings presentation fixture：DEBUG seam 随机隔离且只暴露真实 owner") {
         withTempDirectory { fixtureParent in
             let sentinel = fixtureParent.appendingPathComponent("user-path-sentinel")

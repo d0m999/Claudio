@@ -134,7 +134,7 @@ func runAboutInformationSuites() {
             "gui/Sources/ClaudioGUICore/AboutInformation.swift",
             "gui/Sources/ClaudioGUICore/AboutSettingsModel.swift",
             "gui/Sources/ClaudioGUI/AboutSettingsModel.swift",
-            "gui/Sources/ClaudioGUI/AboutSettingsView.swift",
+            "gui/Sources/ClaudioSettingsPresentation/AboutSettingsView.swift",
         ]
         let sources = sourcePaths.compactMap {
             try? String(contentsOf: root.appendingPathComponent($0), encoding: .utf8)
@@ -289,7 +289,7 @@ func runAboutInformationSuites() {
         let view =
             (try? String(
                 contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioGUI/AboutSettingsView.swift"),
+                    "gui/Sources/ClaudioSettingsPresentation/AboutSettingsView.swift"),
                 encoding: .utf8)) ?? ""
         let model =
             (try? String(
@@ -299,10 +299,10 @@ func runAboutInformationSuites() {
         let settings =
             (try? String(
                 contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                    "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
                 encoding: .utf8)) ?? ""
         expect(
-            settings.contains("destination == .about")
+            settings.contains("case .about:")
                 && settings.contains("AboutSettingsView("),
             "About destination must render production content instead of the debug route")
         expect(

@@ -2017,7 +2017,7 @@ func runSoundPacksRefreshSuites() async {
             let settingsController = soundPacksCode(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let settingsView = soundPacksCode(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let gallery = soundPacksCode(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowStateGalleryView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift")

@@ -112,7 +112,8 @@ func runWorkBuddyVisualStateBaselineSuites() {
                 encoding: .utf8),
             let view = try? String(
                 contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                    "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"
+                ),
                 encoding: .utf8)
         else {
             expect(false, "读不到 production destination/gallery source")

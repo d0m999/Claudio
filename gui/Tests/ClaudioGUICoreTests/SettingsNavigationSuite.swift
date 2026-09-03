@@ -666,7 +666,8 @@ func runSettingsNavigationSuites() {
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let navigation = settingsSource(
                 "gui/Sources/ClaudioGUICore/SettingsNavigation.swift"),
-            let view = settingsSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+            let view = settingsSource(
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let loginSection = settingsSource(
                 "gui/Sources/ClaudioSettingsPresentation/LoginItemSettingsSection.swift"),
             let presentationSession = settingsSource(
@@ -832,7 +833,7 @@ func runSettingsNavigationSuites() {
                 && view.contains(".onMoveCommand")
                 && view.contains(".onExitCommand")
                 && view.contains("onAnnouncement")
-                && view.contains("onAnnouncement?(settingsFailureMessage(failure))")
+                && view.contains("onAnnouncement(settingsFailureMessage(failure))")
                 && loginSection.contains("session.retryLoginItemOperation()")
                 && presentationSession.contains("enqueueLoginItemResult()"),
             "#100 必须接线共享分组表面、自适应侧栏、键盘 Escape 与可见结果公告")

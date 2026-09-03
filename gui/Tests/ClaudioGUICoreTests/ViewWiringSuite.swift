@@ -383,10 +383,11 @@ func runViewWiringSuites() {
     }
 
     suite("主动播报出口按 surface 唯一：Panel、Integrations 与统一 Settings 各一个") {
-        let sources = guiSources()
+        let sources = guiSources() + sourcesUnder("gui/Sources/ClaudioSettingsPresentation")
         expect(
             sources.count >= 5,
-            "在 gui/Sources/ClaudioGUI 下一个 Swift 文件都没数到（实得 \(sources.count)）。"
+            "在 executable 与 Settings presentation targets 下一个 Swift 文件都没数到"
+                + "（实得 \(sources.count)）。"
                 + "这条断言存在的全部意义就是去数那些文件 —— 数不到，它就永远等不到 1，安静地绿下去")
         expect(
             sources.contains { $0.path.hasSuffix("PanelView.swift") }
@@ -431,7 +432,7 @@ func runViewWiringSuites() {
                 "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
             let menu = codeOnly("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let integrationsView = codeOnly(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"),
             let integrationsModel = codeOnly(
                 "gui/Sources/ClaudioGUICore/IntegrationDestinationModel.swift")
         else {
@@ -2309,7 +2310,7 @@ func runViewWiringSuites() {
             let scopePicker = codeOnly(
                 "gui/Sources/ClaudioGUI/PanelSoundScopePicker.swift"),
             let integrations = codeOnly(
-                "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"),
             let packs = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let footer = codeOnly(
@@ -2580,15 +2581,15 @@ func runViewWiringSuites() {
     suite("事件与提示音：统一 retained Settings 复用作用域/事件投影并内部路由 Sounds") {
         guard
             let view = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift"),
             let viewWithStrings = codeOnly(
-                "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsWindowView.swift"),
             let aiView = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsAICueView.swift"),
             let aiViewWithStrings = codeOnly(
-                "gui/Sources/ClaudioGUI/EventSettingsAICueView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/EventSettingsAICueView.swift"),
             let settingsView = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let settingsController = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let previewSequence = codeWithoutStrings(
@@ -3235,7 +3236,7 @@ func runViewWiringSuites() {
             let settingsController = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let settingsView = codeWithoutStrings(
-                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+                "gui/Sources/ClaudioSettingsPresentation/SettingsRootView.swift"),
             let menuBar = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let package = source("gui/Package.swift")

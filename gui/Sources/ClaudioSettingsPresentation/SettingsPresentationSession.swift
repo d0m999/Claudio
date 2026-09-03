@@ -2,16 +2,16 @@ import ClaudioGUICore
 import ClaudioLocalization
 import Combine
 
-/// Presentation transaction owner for the General/Login slice. It retains references to the two
-/// existing fact owners without copying their write paths or taking over Settings route/window
-/// lifecycle; those mature responsibilities remain in the executable until the later cutover.
+/// Presentation transaction owner for the unified Settings tree. It retains existing fact owners
+/// without copying their write paths or taking over Settings route/window lifecycle; those mature
+/// responsibilities remain in the executable until the later cutover.
 @MainActor
 package final class SettingsPresentationSession: ObservableObject {
     @Published
     package private(set) var state: SettingsPresentationState
 
-    private let dependencies: SettingsPresentationDependencies
-    private let actions: SettingsPresentationActions
+    let dependencies: SettingsPresentationDependencies
+    let actions: SettingsPresentationActions
     private var preferenceSnapshot: ClaudioPreferenceSnapshot
     private var loginProjection: LoginItemSettingsProjection
     private var platformActionFailure: SettingsPlatformActionFailure?

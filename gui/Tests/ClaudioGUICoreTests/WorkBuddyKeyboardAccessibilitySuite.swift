@@ -62,7 +62,8 @@ func runWorkBuddyKeyboardAccessibilitySuites() {
         guard
             let view = try? String(
                 contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioGUI/IntegrationsSettingsDestinationView.swift"),
+                    "gui/Sources/ClaudioSettingsPresentation/IntegrationsSettingsDestinationView.swift"
+                ),
                 encoding: .utf8),
             let controller = try? String(
                 contentsOf: root.appendingPathComponent(

@@ -5,7 +5,7 @@ import Foundation
 import SwiftUI
 
 @MainActor
-struct EventSettingsAICueServiceCard: View {
+package struct EventSettingsAICueServiceCard: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
     @ObservedObject var languageStore: ClaudioPreferences
     let onManageCredential: () -> Void
@@ -14,7 +14,17 @@ struct EventSettingsAICueServiceCard: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
-    var body: some View {
+    package init(
+        viewModel: AICueGenerationViewModel,
+        languageStore: ClaudioPreferences,
+        onManageCredential: @escaping () -> Void
+    ) {
+        self.viewModel = viewModel
+        self.languageStore = languageStore
+        self.onManageCredential = onManageCredential
+    }
+
+    package var body: some View {
         let status = statusPresentation
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
@@ -178,7 +188,7 @@ struct EventSettingsAICueServiceCard: View {
 }
 
 @MainActor
-struct EventSettingsAICueComposerView: View {
+package struct EventSettingsAICueComposerView: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
     @ObservedObject var languageStore: ClaudioPreferences
     let eventTitle: String
@@ -194,7 +204,31 @@ struct EventSettingsAICueComposerView: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
-    var body: some View {
+    package init(
+        viewModel: AICueGenerationViewModel,
+        languageStore: ClaudioPreferences,
+        eventTitle: String,
+        playingCandidateID: UUID?,
+        adoptionEnabled: Bool,
+        adoptionUnavailableHint: String,
+        onConfigureCredential: @escaping () -> Void,
+        onPreviewCandidate: @escaping (AICueCandidate) -> Void,
+        onAdoptCandidate: @escaping (UUID) -> Void,
+        onClose: @escaping () -> Void
+    ) {
+        self.viewModel = viewModel
+        self.languageStore = languageStore
+        self.eventTitle = eventTitle
+        self.playingCandidateID = playingCandidateID
+        self.adoptionEnabled = adoptionEnabled
+        self.adoptionUnavailableHint = adoptionUnavailableHint
+        self.onConfigureCredential = onConfigureCredential
+        self.onPreviewCandidate = onPreviewCandidate
+        self.onAdoptCandidate = onAdoptCandidate
+        self.onClose = onClose
+    }
+
+    package var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(l10n.format(.aiCueComposerTitle, eventTitle))
@@ -510,7 +544,7 @@ struct EventSettingsAICueComposerView: View {
 }
 
 @MainActor
-struct EventSettingsAICueCredentialSheet: View {
+package struct EventSettingsAICueCredentialSheet: View {
     @ObservedObject var viewModel: AICueGenerationViewModel
     @ObservedObject var languageStore: ClaudioPreferences
 
@@ -522,7 +556,15 @@ struct EventSettingsAICueCredentialSheet: View {
 
     private var l10n: ClaudioL10n { ClaudioL10n(language: languageStore.language) }
 
-    var body: some View {
+    package init(
+        viewModel: AICueGenerationViewModel,
+        languageStore: ClaudioPreferences
+    ) {
+        self.viewModel = viewModel
+        self.languageStore = languageStore
+    }
+
+    package var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(credentialTitle)
                 .font(ClaudioTheme.font(.sectionTitle).weight(.bold))
