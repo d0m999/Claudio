@@ -116,9 +116,10 @@ func runSettingsPresentationTargetSuites() {
         }
 
         expect(
-            subscription.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+            subscription.contains("guard announcement != nil")
+                && subscription.contains("scheduleSettingsPresentationAnnouncementDelivery()")
                 && !subscription.contains("acknowledgeAnnouncement"),
-            "$state synchronous sink 只能调度，不能在 @Published willSet 内 post/ack")
+            "$state synchronous sink 必须忽略 nil emission，且只能调度、不能同步 post/ack")
         expect(
             scheduler.contains("settingsPresentationAnnouncementDeliveryScheduled")
                 && scheduler.contains("DispatchQueue.main.async"),
