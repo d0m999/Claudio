@@ -608,6 +608,24 @@ public actor SoundPackLibrary {
         for _ in 0..<3 { await Task.yield() }
     }
 
+    /// Joins the synchronous mutation mailbox and the actor-owned scan as one deterministic test
+    /// boundary. Calling `receiveMutationEnd` here only drains the existing single-owner state;
+    /// it does not create a second refresh path.
+    func waitForMutationTransactionsToQuiesceForTesting() async -> SoundPackLibraryState {
+        while true {
+            receiveMutationEnd()
+            let invalidation = invalidationMailbox.snapshot()
+            if !invalidation.mutationOpen,
+                !invalidation.mutationRefreshRequired,
+                !refreshInFlight,
+                !followUpRequired
+            {
+                return state
+            }
+            await Task.yield()
+        }
+    }
+
     public func inventoryCacheCountForTesting() -> Int {
         inventoryCache.count
     }

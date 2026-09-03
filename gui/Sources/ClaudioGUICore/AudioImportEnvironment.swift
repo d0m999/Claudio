@@ -185,6 +185,11 @@ public struct AudioImportEnvironment: Sendable {
     /// Replaces only the final system-Trash adapter in deletion tests. The real config/packs
     /// locks, isolation rename, identity checks, rollback, and typed outcome remain unchanged.
     package var moveUserPackToTrashForTesting: (@MainActor @Sendable (URL) throws -> URL?)?
+
+    /// Runs after the locked isolation rename and immediately before the descriptor identity is
+    /// revalidated. This narrow seam makes the retained-on-identity-drift branch deterministic
+    /// without replacing the filesystem writer or either production lock.
+    package var afterUserPackIsolationForTesting: (@MainActor @Sendable (URL) throws -> Void)?
     #endif
 
     public init(
@@ -211,6 +216,7 @@ public struct AudioImportEnvironment: Sendable {
         self.beforeFactoryPackRestoreSalvage = beforeFactoryPackRestoreSalvage
         #if DEBUG
         moveUserPackToTrashForTesting = nil
+        afterUserPackIsolationForTesting = nil
         #endif
     }
 }

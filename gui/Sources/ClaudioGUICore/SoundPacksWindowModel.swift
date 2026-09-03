@@ -1519,6 +1519,16 @@ public final class SoundPacksWindowModel: ObservableObject {
     }
 
     #if DEBUG
+    /// Waits until the shared library has finished the transaction and this model has consumed
+    /// that exact terminal stream value. The second half prevents tests from mistaking scan-idle
+    /// for a settled owner presentation.
+    func waitForMutationTransactionsToQuiesceForTesting() async {
+        let terminal = await soundPackLibrary.waitForMutationTransactionsToQuiesceForTesting()
+        while lastAcceptedEditorLibraryState != terminal {
+            await Task.yield()
+        }
+    }
+
     private func reloadSynchronously(followActivePack: Bool) {
         let previousSelection = selectedPackID
         let loadedState = loadPanelConfig(from: configFile)

@@ -1869,6 +1869,16 @@ public final class SoundPacksEditorOwner: ObservableObject {
         guard let task = operationTasks[operationID] else { return }
         await task.value
     }
+
+    /// Joins every scheduled writer, the shared-library mutation fence/scan, and the model's
+    /// terminal observation. This is a test-only synchronization seam, not another state owner.
+    package func waitForMutationTransactionsToQuiesceForTesting() async {
+        while !operationTasks.isEmpty {
+            let tasks = Array(operationTasks.values)
+            for task in tasks { await task.value }
+        }
+        await model.waitForMutationTransactionsToQuiesceForTesting()
+    }
     #endif
 
     /// Returns one shared suppression decision to every retained presentation observing the same

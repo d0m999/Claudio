@@ -435,8 +435,9 @@ func runSoundPacksEditorMutationImpactGapRedSuites() async {
             let salvageBefore = soundEditorImpactSalvages(in: root, packID: "factory-a")
             let scansBeforeRetry = fixture.recorder.requests.count
             let panelBeforeRetry = fixture.refreshCoordinator.panelReloadRevision
-            guard case .accepted(let retryID) = owner.send(
-                .invoke(retryConfirmation.confirmAction))
+            guard
+                case .accepted(let retryID) = owner.send(
+                    .invoke(retryConfirmation.confirmAction))
             else {
                 expect(false, "retry restore 必须 accepted")
                 return
@@ -513,8 +514,9 @@ func runSoundPacksEditorMutationImpactGapRedSuites() async {
             }
             let scansBeforeRetry = fixture.recorder.requests.count
             let panelBeforeRetry = fixture.refreshCoordinator.panelReloadRevision
-            guard case .accepted(let retryID) = owner.send(
-                .invoke(retryConfirmation.confirmAction))
+            guard
+                case .accepted(let retryID) = owner.send(
+                    .invoke(retryConfirmation.confirmAction))
             else {
                 expect(false, "retry with concurrent tree 必须 accepted")
                 return
@@ -563,8 +565,10 @@ func runSoundPacksEditorMutationImpactGapRedSuites() async {
                 writeFixture(
                     #"{"id":"\#(id)","name":"\#(id)","events":{"stop":"stop.mp3"}}"#,
                     to: factoryPacks.appendingPathComponent("\(id)/manifest.json"))
-                writeFixture("factory-\(id)", to: factoryPacks.appendingPathComponent("\(id)/stop.mp3"))
-                writeFixture("user-\(id)", to: userPacks.appendingPathComponent("\(id)/personal.wav"))
+                writeFixture(
+                    "factory-\(id)", to: factoryPacks.appendingPathComponent("\(id)/stop.mp3"))
+                writeFixture(
+                    "user-\(id)", to: userPacks.appendingPathComponent("\(id)/personal.wav"))
             }
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 107)))
@@ -619,7 +623,8 @@ func runSoundPacksEditorMutationImpactGapRedSuites() async {
                 writeFixture(
                     #"{"id":"\#(id)","name":"\#(id)","events":{"stop":"stop.mp3"}}"#,
                     to: factoryPacks.appendingPathComponent("\(id)/manifest.json"))
-                writeFixture("factory-\(id)", to: factoryPacks.appendingPathComponent("\(id)/stop.mp3"))
+                writeFixture(
+                    "factory-\(id)", to: factoryPacks.appendingPathComponent("\(id)/stop.mp3"))
             }
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 108)))
