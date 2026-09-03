@@ -35,8 +35,22 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                     && outcome.rejected.isEmpty && outcome.boundEvent == .stop,
                 "compound import 必须导入并只绑定请求 Event")
             expect(
-                outcome.completion == .succeeded && outcome.allowsForegroundFollowUp,
-                "foreground success 必须允许 native adapter 执行显式 follow-up")
+                outcome.completion == .succeeded && outcome.allowsForegroundFollowUp
+                    && outcome.previewAction != nil,
+                "foreground success 必须返回 owner-signed preview capability")
+            if let previewAction = outcome.previewAction,
+                case .nativeEffect(.playAudio(let previewURL, let volume)) =
+                    owner.send(.invoke(previewAction))
+            {
+                expect(
+                    previewURL == outcome.accepted.last?.destinationURL && volume == 0.37,
+                    "preview capability 必须在 invoke 时产生 accepted target 与最新音量 effect")
+                expect(
+                    owner.send(.invoke(previewAction)) == .rejected(.staleAction),
+                    "outcome preview capability 必须 single-use")
+            } else {
+                expect(false, "foreground preview capability 必须可由 owner invoke")
+            }
             expect(
                 regularFileExists(at: root.appendingPathComponent("packs/pack-a/picked.mp3")),
                 "accepted bytes 必须落入 permit 捕获的 pack")
@@ -185,6 +199,40 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 expect(false, "busy root 必须仍带 B inspection capability")
                 return
             }
+            let busyActivity = owner.presentation.activities.first(where: { $0.phase == .busy })
+            let busyInventoryRows: [SoundPackEditorAudioPresentation]
+            switch atA.inventory {
+            case .idle:
+                busyInventoryRows = []
+            case .loading(let previous), .failed(previous: let previous, reason: _):
+                busyInventoryRows = previous ?? []
+            case .ready(let rows):
+                busyInventoryRows = rows
+            }
+            expect(
+                atA.requestImportAction == nil
+                    && atA.eventRows.allSatisfy {
+                        $0.importAction == nil && $0.clearAction == nil
+                    }
+                    && atA.packs.allSatisfy {
+                        $0.useAction == nil && $0.toggleStarAction == nil
+                            && $0.forkAction == nil && $0.deleteAction == nil
+                            && $0.restoreAction == nil
+                    }
+                    && busyInventoryRows.allSatisfy {
+                        $0.assignments.isEmpty && $0.deleteAction == nil
+                    }
+                    && atA.restoreAllFactoryPacksAction == nil
+                    && atA.recoveryActions.isEmpty,
+                "任一 import/mutation busy 时 presentation 不得重签 write/import capability")
+            expect(
+                inspectB.kind == .inspect
+                    && atA.selectedPack?.revealAction?.kind == .reveal
+                    && atA.eventRows.first(where: { $0.event == .stop })?.previewAction?.kind
+                        == .preview
+                    && atA.stopPreviewAction.kind == .stopPreview
+                    && busyActivity?.cancelAction?.kind == .cancelOperation,
+                "busy gate 必须保留 inspect/reveal/preview/stop/cancel 等只读或恢复 capability")
             _ = owner.send(.invoke(inspectB))
             guard case .sounds(let atB) = owner.presentation.mode,
                 let inspectA = atB.packs.first(where: { $0.id == "pack-a" })?.inspectAction
@@ -491,6 +539,17 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 expect(false, "matching candidate generation 必须返回 adopted outcome")
                 return
             }
+            guard let previewAction = outcome.previewAction,
+                case .nativeEffect(.playAudio(let previewURL, let volume)) =
+                    owner.send(.invoke(previewAction))
+            else {
+                expect(false, "foreground adoption 必须返回可执行的 owner-signed preview")
+                return
+            }
+            expect(
+                previewURL == outcome.importedFile.destinationURL
+                    && volume == ClaudioConfig.defaultMasterVolume,
+                "adoption preview 必须只播放 owner 验证后的 accepted bytes")
             let manifest = soundEditorManifest(
                 root.appendingPathComponent("packs/workbuddy-pack/manifest.json"))
             expect(
@@ -1111,7 +1170,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
                 outcome.completion == .cancelled(changedOnDisk: true),
                 "awaited result 必须直接表达 cancelled + changedOnDisk")
             expect(
-                !outcome.allowsForegroundFollowUp,
+                !outcome.allowsForegroundFollowUp && outcome.previewAction == nil,
                 "native adapter 仅看 awaited result 就必须禁止 preview/focus")
             expect(
                 outcome.accepted.map(\.fileName) == ["generic-post-write-cancel.mp3"]
@@ -1370,7 +1429,31 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             await waitForSoundEditorInventory(owner)
             drainSoundEditorObservationAnnouncements(owner)
             guard let importPermit = soundEditorImportPermit(owner: owner, bindTo: nil) else {
-                expect(false, "out-of-order fixture 必须取得 import permit")
+                expect(false, "out-of-order fixture 必须先取得 import permit")
+                return
+            }
+            guard case .sounds(let beforeBusy) = owner.presentation.mode else {
+                expect(false, "签发 import permit 后必须仍是 Sounds presentation")
+                return
+            }
+            let beforeBusyAudio: [SoundPackEditorAudioPresentation]
+            switch beforeBusy.inventory {
+            case .idle:
+                beforeBusyAudio = []
+            case .loading(let previous), .failed(previous: let previous, reason: _):
+                beforeBusyAudio = previous ?? []
+            case .ready(let rows):
+                beforeBusyAudio = rows
+            }
+            guard
+                let deleteAction = beforeBusyAudio.first(where: {
+                    $0.fileName == "fast-delete.mp3"
+                })?.deleteAction
+            else {
+                expect(
+                    false,
+                    "import permit 的新 generation 必须预签 orphan delete capability；inventory="
+                        + String(describing: beforeBusy.inventory))
                 return
             }
 
@@ -1390,14 +1473,14 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             }
 
             guard case .sounds(let busySounds) = owner.presentation.mode,
-                case .ready(let audio) = busySounds.inventory,
-                let deleteAction = audio.first(where: { $0.fileName == "fast-delete.mp3" })?
-                    .deleteAction,
+                case .ready(let busyAudio) = busySounds.inventory,
+                busyAudio.first(where: { $0.fileName == "fast-delete.mp3" })?
+                    .deleteAction == nil,
                 case .confirmation(let confirmation) = owner.send(.invoke(deleteAction)),
                 case .accepted(let fastOperationID) =
                     owner.send(.invoke(confirmation.confirmAction))
             else {
-                expect(false, "newer delete operation 必须在 slow import 悬挂时被接受")
+                expect(false, "busy presentation 不重签，但预签 delete 仍必须支持 owner 并发排序")
                 return
             }
             await waitForSoundEditorOperation(owner, operationID: fastOperationID)
@@ -1435,7 +1518,8 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             expect(
                 slowOutcome.completedInBackground
                     && slowOutcome.completion == .succeeded
-                    && !slowOutcome.allowsForegroundFollowUp,
+                    && !slowOutcome.allowsForegroundFollowUp
+                    && slowOutcome.previewAction == nil,
                 "older completion 必须留在 background，不能恢复 preview/focus")
             expect(
                 regularFileExists(at: root.appendingPathComponent("packs/pack-a/slow-first.mp3")),
@@ -1635,6 +1719,16 @@ private func expectSoundEditorAnnouncementDebt(
     expect(
         announcement.kind == .operation(kind: kind, completion: completion),
         "announcement 必须携带 exact semantic kind/completion")
+    let expectedPriority: SoundPackEditorAnnouncementPriority
+    switch completion {
+    case .failed, .orphan:
+        expectedPriority = .failure
+    case .unchanged, .succeeded, .partial, .cancelled:
+        expectedPriority = .notice
+    }
+    expect(
+        announcement.priority == expectedPriority,
+        "failed/orphan operation 必须是 failure priority，其余 terminal 必须是 notice")
     expect(
         announcement.actionText == nil && announcement.messageText == nil,
         "operation announcement 不得携带 raw path/result 文本")

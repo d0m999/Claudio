@@ -143,13 +143,15 @@ func runSoundPacksRefreshSuites() async {
 
             expect(model.managedSurface == nil, "窗口默认必须明确管理 Global")
             expect(model.selectPackForInspection("pack-b"), "前提：pack-b 必须可选")
-            expect(model.useSelectedPack() == .success(.selected(packID: "pack-b")),
+            expect(
+                model.useSelectedPack() == .success(.selected(packID: "pack-b")),
                 "Global 的用这个包必须成功")
 
             model.setManagedSurface(.codex)
             expect(model.selectedPackID == "pack-b", "Codex 未覆盖 selected_pack 时必须继承 Global")
             expect(model.selectPackForInspection("pack-a"), "前提：pack-a 必须可选")
-            expect(model.useSelectedPack() == .success(.selected(packID: "pack-a")),
+            expect(
+                model.useSelectedPack() == .success(.selected(packID: "pack-a")),
                 "Surface 的用这个包必须写稀疏覆盖")
 
             let beforeInvalid = try! Data(contentsOf: configFile)
@@ -206,7 +208,8 @@ func runSoundPacksRefreshSuites() async {
                 return
             }
             guard
-                case .failure(.writesStopped) = model
+                case .failure(.writesStopped) =
+                    model
                     .restoreSelectedFactoryPackAfterConfirmation(expectedPackID: "pack-b")
             else {
                 expect(false, "错误 scope 下恢复声音包必须在资格检查前被拒绝")
@@ -219,25 +222,31 @@ func runSoundPacksRefreshSuites() async {
                 invalidScopeStatus?.message(language: .english)
                     == "Unknown sound scope chatgpt-desktop-ax. Writes are stopped; Global and Surface settings were not changed.",
                 "错误 scope 的窗口状态与 VoiceOver 文案必须按当前语言解析，不能冻结为中文 literal")
-            expect(try! Data(contentsOf: configFile) == beforeInvalid,
+            expect(
+                try! Data(contentsOf: configFile) == beforeInvalid,
                 "错误 scope 的写入尝试不得改变任何 config 字节")
-            expect(try! Data(contentsOf: manifestFile) == beforeManifest,
+            expect(
+                try! Data(contentsOf: manifestFile) == beforeManifest,
                 "错误 scope 的写入尝试不得改变任何声音包 manifest 字节")
 
-            let object = try! JSONSerialization.jsonObject(
-                with: Data(contentsOf: configFile)) as! [String: Any]
+            let object =
+                try! JSONSerialization.jsonObject(
+                    with: Data(contentsOf: configFile)) as! [String: Any]
             let future = object["future"] as! [String: Any]
             let surfaces = object["surface_overrides"] as! [String: Any]
             let codex = surfaces[HostSurfaceID.codex.rawValue] as! [String: Any]
             let events = codex["events"] as! [String: Any]
-            expect(object["selected_pack"] as? String == "pack-b",
+            expect(
+                object["selected_pack"] as? String == "pack-b",
                 "Surface 写不得改回 Global selected_pack")
-            expect(codex["selected_pack"] as? String == "pack-a",
+            expect(
+                codex["selected_pack"] as? String == "pack-a",
                 "Codex 必须只物化自己的 selected_pack")
             expect(events["stop"] as? Bool == false, "Surface sibling events 必须保留")
             expect(codex["future_surface"] as? Int == 7, "Surface 未知字段必须保留")
             expect(future["keep"] as? Bool == true, "顶层未知字段必须保留")
-            expect(surfaces[HostSurfaceID.chatGPTDesktopAX.rawValue] == nil,
+            expect(
+                surfaces[HostSurfaceID.chatGPTDesktopAX.rawValue] == nil,
                 "错误 scope 不得制造 AX override")
         }
     }
@@ -259,7 +268,8 @@ func runSoundPacksRefreshSuites() async {
             surface: .workBuddy,
             packID: "missing",
             event: .stop)
-        expect(route.surface == .workBuddy && route.editTarget?.event == .stop,
+        expect(
+            route.surface == .workBuddy && route.editTarget?.event == .stop,
             "editEvent 路由必须同时携带 scope 与事件")
         expect(
             resolveSoundPacksWindowRoute(
@@ -287,20 +297,20 @@ func runSoundPacksRefreshSuites() async {
         }
         let flat = collapsingWhitespace(view)
         expect(
-            flat.contains(
-                "selectedCard?.availability == .installed && !model.selectedPackIsBuiltinReadOnly && model.writesAllowed"
-            ),
-            "映射、导入、拖放与孤儿文件写控件必须共同消费 model.writesAllowed")
+            flat.contains("private var canEditSelectedPack:")
+                && flat.contains("selectedCard?.deleteAction != nil")
+                && flat.contains("row.importAction")
+                && flat.contains("file.assignments")
+                && flat.contains("file.deleteAction")
+                && !flat.contains("model.writesAllowed"),
+            "映射、导入、拖放与孤儿写控件必须共同消费 owner 签发的 action availability")
         expect(
-            flat.contains(".disabled(!model.writesAllowed)")
-                && flat.contains("canForkFactoryPack: model.writesAllowed")
-                && flat.contains("canRestoreFactoryPack: model.writesAllowed")
-                && flat.contains("canUseSelectedPack: model.writesAllowed")
-                && flat.contains("canRestoreAllFactoryPacks: model.writesAllowed")
-                && flat.contains(
-                    "retryFactoryRestorePackIDs: model.writesAllowed ? model.factoryRestoreRetryPackIDs : []"
-                ),
-            "复制、恢复、使用与重试必须同时禁用真实控件和对应键盘焦点")
+            flat.contains("canForkFactoryPack: selectedCard?.forkAction != nil")
+                && flat.contains("canRestoreFactoryPack: selectedCard?.restoreAction != nil")
+                && flat.contains("canUseSelectedPack: selectedCard?.useAction != nil")
+                && flat.contains("retryFactoryRestorePackIDs: activeSounds.recoveryActions.map")
+                && flat.contains(".disabled(card.restoreAction == nil)"),
+            "复制、恢复、使用与重试的真控件/焦点必须由同一 owner capability 投影驱动")
     }
 
     suite("SoundPacksRefreshCoordinator：窗口成功写只发 panel full reload") {
@@ -1406,7 +1416,8 @@ func runSoundPacksRefreshSuites() async {
                 return
             }
             expect(outcome.newPackID == "builtin-copy", "first finite candidate must be -copy")
-            expect(model.selectedPackID == "builtin-copy", "reload must precede selecting the new id")
+            expect(
+                model.selectedPackID == "builtin-copy", "reload must precede selecting the new id")
             expect(
                 model.consumeSelectionAnnouncementSuppression(for: "builtin-copy"),
                 "programmatic fork selection must carry exactly one suppression token")
@@ -1422,7 +1433,9 @@ func runSoundPacksRefreshSuites() async {
                 "fork must leave config.json byte-for-byte unchanged")
             expect(model.config.selectedPack == "builtin", "fork must not activate the copy")
             expect(model.starredPackIDs == ["builtin"], "fork must not add a star")
-            expect(coordinator.panelReloadRevision == 1, "successful fork must publish one panel full reload")
+            expect(
+                coordinator.panelReloadRevision == 1,
+                "successful fork must publish one panel full reload")
             expect(
                 model.windowStatuses.first?.kind == .packFork
                     && model.windowStatuses.first?.message.contains("已创建并选中") == true,
@@ -1458,11 +1471,15 @@ func runSoundPacksRefreshSuites() async {
                 return
             }
             expect(attempts == 3, "error must report the actual finite attempt cap")
-            let entries = Set((try? FileManager.default.contentsOfDirectory(atPath: packs.path)) ?? [])
+            let entries = Set(
+                (try? FileManager.default.contentsOfDirectory(atPath: packs.path)) ?? [])
             expect(
                 entries == ["builtin", "builtin-copy", "builtin-copy-2", "builtin-copy-3"],
-                "must preserve exactly three occupiers and create no fourth candidate/staging, got \(entries)")
-            expect(coordinator.panelReloadRevision == 0, "collision-only failure changed no Claudio bytes")
+                "must preserve exactly three occupiers and create no fourth candidate/staging, got \(entries)"
+            )
+            expect(
+                coordinator.panelReloadRevision == 0,
+                "collision-only failure changed no Claudio bytes")
         }
     }
 
@@ -1492,7 +1509,9 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
-    suite("SoundPacksWindowModel use：only explicit action changes selected_pack and preserves stars") {
+    suite(
+        "SoundPacksWindowModel use：only explicit action changes selected_pack and preserves stars"
+    ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let packs = root.appendingPathComponent("packs")
@@ -1511,14 +1530,17 @@ func runSoundPacksRefreshSuites() async {
                 environment: soundPacksEnvironment(packs),
                 refreshCoordinator: coordinator)
             model.selectPackForInspection("pack-b")
-            expect(model.config.selectedPack == "pack-a", "inspection alone must not activate pack-b")
+            expect(
+                model.config.selectedPack == "pack-a", "inspection alone must not activate pack-b")
 
             let result = model.useSelectedPack()
             guard case .success(.selected(let packID)) = result else {
                 expect(false, "explicit use should succeed, got \(result)")
                 return
             }
-            expect(packID == "pack-b" && model.config.selectedPack == "pack-b", "use must activate pack-b")
+            expect(
+                packID == "pack-b" && model.config.selectedPack == "pack-b",
+                "use must activate pack-b")
             expect(model.starredPackIDs == ["pack-a"], "use must not mutate starred_packs")
             expect(coordinator.panelReloadRevision == 1, "use must publish one full panel reload")
             expect(
@@ -1570,7 +1592,8 @@ func runSoundPacksRefreshSuites() async {
         }
         expect(completion.completedInBackground, "selection change must mark background completion")
         expect(completion.previewFile == nil, "later-selected pack must never preview pack-a audio")
-        expect(model.selectedPackID == "pack-b", "completion must not pull inspection back to pack-a")
+        expect(
+            model.selectedPackID == "pack-b", "completion must not pull inspection back to pack-a")
         expect(
             FileManager.default.fileExists(
                 atPath: packs.appendingPathComponent("pack-a/picked.wav").path),
@@ -1763,7 +1786,9 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
-    suite("SoundPacksWindowModel empty restore：all factory IDs attempted，partial failure aggregated，one refresh") {
+    suite(
+        "SoundPacksWindowModel empty restore：all factory IDs attempted，partial failure aggregated，one refresh"
+    ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let packs = root.appendingPathComponent("packs")
@@ -1801,8 +1826,12 @@ func runSoundPacksRefreshSuites() async {
                         && model.windowStatuses.first?.message.contains("一个文件都没删") == true,
                     "partial status must expose successful salvage path and no-delete truth")
             }
-            expect(coordinator.panelReloadRevision == 1, "batch must publish exactly one final refresh")
-            expect(model.packCards.map(\.id) == ["good", "missing"], "successful partial result and placeholder must be visible")
+            expect(
+                coordinator.panelReloadRevision == 1, "batch must publish exactly one final refresh"
+            )
+            expect(
+                model.packCards.map(\.id) == ["good", "missing"],
+                "successful partial result and placeholder must be visible")
             expect(
                 model.windowStatuses.first?.severity == .failure
                     && model.windowStatuses.first?.message.contains("broken") == true,
@@ -1815,7 +1844,9 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
-    suite("SoundPacksWindowModel batch restore：success sibling cannot hide salvaged publish failure retry") {
+    suite(
+        "SoundPacksWindowModel batch restore：success sibling cannot hide salvaged publish failure retry"
+    ) {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let packs = root.appendingPathComponent("packs")
@@ -1843,7 +1874,9 @@ func runSoundPacksRefreshSuites() async {
                 lockFile: root.appendingPathComponent("config.lock"),
                 environment: environment,
                 refreshCoordinator: coordinator)
-            expect(model.packCards.map(\.id) == ["missing"], "precondition: batch restore starts with the selected placeholder")
+            expect(
+                model.packCards.map(\.id) == ["missing"],
+                "precondition: batch restore starts with the selected placeholder")
 
             let outcome = model.restoreAllFactoryPacksAfterConfirmation()
             guard
@@ -1853,18 +1886,23 @@ func runSoundPacksRefreshSuites() async {
                 failure.packID == "a-failed",
                 case .publishFailed(_, let salvage?) = failure.error
             else {
-                expect(false, "first sorted pack must fail after salvage while its sibling succeeds: \(outcome)")
+                expect(
+                    false,
+                    "first sorted pack must fail after salvage while its sibling succeeds: \(outcome)"
+                )
                 return
             }
             expect(
                 failure.retainedSalvages == [salvage]
                     && (try? String(contentsOfFile: salvage.movedTo, encoding: .utf8))
                         == "user-only",
-                "batch failure state must retain the exact salvage that contains the displaced bytes")
+                "batch failure state must retain the exact salvage that contains the displaced bytes"
+            )
             expect(
                 model.packCards.map(\.id) == ["b-good", "missing"]
                     && model.factoryRestoreRetryPackIDs == ["a-failed"],
-                "successful sibling makes the library nonempty, but must not hide the failed pack retry")
+                "successful sibling makes the library nonempty, but must not hide the failed pack retry"
+            )
             let failureStatus = model.windowStatuses.first(where: {
                 $0.kind == .factoryBatchRestore
             })
@@ -1873,7 +1911,8 @@ func runSoundPacksRefreshSuites() async {
                     && failureStatus?.message.contains(salvage.movedTo) == true
                     && failureStatus?.recovery
                         == .retryFactoryRestores(packIDs: ["a-failed"]),
-                "visible batch failure must expose salvage truth and an executable recovery payload")
+                "visible batch failure must expose salvage truth and an executable recovery payload"
+            )
             expect(
                 model.factoryRestoreActionError == nil,
                 "batch retry state must not masquerade as the selected-pack restore error")
@@ -1910,7 +1949,9 @@ func runSoundPacksRefreshSuites() async {
             let retry = model.retryFailedFactoryPackRestoreAfterConfirmation(
                 expectedPackID: "a-failed")
             guard case .success(let retryOutcome) = retry else {
-                expect(false, "batch publish failure must be retryable after its card disappeared: \(retry)")
+                expect(
+                    false,
+                    "batch publish failure must be retryable after its card disappeared: \(retry)")
                 return
             }
             expect(
@@ -1920,7 +1961,8 @@ func runSoundPacksRefreshSuites() async {
             expect(
                 model.packCards.map(\.id) == ["a-failed", "b-good", "missing"]
                     && model.factoryRestoreRetryPackIDs.isEmpty,
-                "successful retry must restore the missing card and clear only the completed recovery")
+                "successful retry must restore the missing card and clear only the completed recovery"
+            )
             let successStatus = model.windowStatuses.first(where: {
                 $0.kind == .factoryBatchRestore
             })
@@ -2187,7 +2229,8 @@ func runSoundPacksRefreshSuites() async {
                             .retryFactoryRestore(packID: "a-batch"),
                             .retryFactoryRestore(packID: "b-single"),
                         ],
-                "A 重试后成为第一条视觉状态，焦点投影必须同步变为 A→B，不能固定单包优先；visible=\(visibleRecoveryIDs) retry=\(model.factoryRestoreRetryPackIDs) cards=\(model.packCards.map(\.id))")
+                "A 重试后成为第一条视觉状态，焦点投影必须同步变为 A→B，不能固定单包优先；visible=\(visibleRecoveryIDs) retry=\(model.factoryRestoreRetryPackIDs) cards=\(model.packCards.map(\.id))"
+            )
         }
     }
 
@@ -2277,17 +2320,18 @@ func runSoundPacksRefreshSuites() async {
                 "guard model.selectPackForInspection(packID) else { return .resolved(.overview(surface: resolvedRoute.surface)) }"
             )
                 && owner.contains("model.setManagedSurface(route.surface)")
-                && view.contains("editorOwner.apply(route: route)")
-                && view.contains("focusCoordinator.requestInitialFocus(route: resolved)")
-                && view.contains("focusCoordinator.requestRoute(resolved)"),
-            "editEvent 必须等待 library 证明目标存在后再选包；ready 缺失只能降级 overview")
+                && view.contains(
+                    ".activate(.sounds(route: route, requestRevision: routeRequestRevision))")
+                && view.contains("focusCoordinator.requestInitialFocus(route: focusRoute)")
+                && view.contains("focusCoordinator.requestRoute(focusRoute)"),
+            "editEvent 必须把 typed route 交给 owner 等待 library 证明；view 只消费重验后的 focusRoute")
         expect(
-            view.contains("@State private var isPerformingWrite = false")
+            !view.contains("@State private var isPerformingWrite")
+                && view.contains("presentation.activities.contains")
                 && view.contains("soundPacksWritingChanges")
                 && view.contains("sound-packs.write-in-progress")
-                && view.contains("await Task.yield()")
                 && view.contains(".disabled(isPerformingWrite)"),
-            "同步 pack/config 写入必须先让可见进行中状态获得一个 MainActor 渲染机会，并禁用重入")
+            "pack/config 写入的 busy 与重入禁用必须直接消费 owner activity，view 不得保留第二 busy state")
         expect(
             settingsController.contains("window.isReleasedWhenClosed = false")
                 && settingsController.contains(
@@ -2297,12 +2341,13 @@ func runSoundPacksRefreshSuites() async {
                 && settingsController.contains("focusRestoration = nil"),
             "Sounds 必须共享统一 retained 窗口，关闭一次消费最新 handback")
         expect(
-            settingsController.contains("let soundPackModel = soundPacksEditorOwner.model")
-                && settingsController.contains("soundPackModel.$windowStatuses")
+            settingsController.contains("soundPacksEditorOwner.$presentation")
+                && settingsController.contains(".map(\\.pendingAnnouncement)")
                 && settingsController.contains(
-                    "soundPacksEditorOwner.beginStatusAnnouncementAttempt(")
-                && settingsController.contains(
-                    "soundPacksEditorOwner.finishStatusAnnouncementAttempt(")
+                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
+                && !settingsController.contains("soundPackModel.$windowStatuses")
+                && !settingsController.contains("beginStatusAnnouncementAttempt(")
+                && !settingsController.contains("finishStatusAnnouncementAttempt(")
                 && !settingsController.contains("Task.detached")
                 && !settingsController.contains("mutateManifestJSON")
                 && !settingsController.contains("setEventEnabled("),
@@ -2327,7 +2372,8 @@ func runSoundPacksRefreshSuites() async {
         let panelFlat = collapsingWhitespace(panel)
         expect(
             panelFlat.contains(
-                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"),
+                "onOpenEventSettings( EventSettingsWindowRoute(scope: selectedScope.scope), .openSoundSettings)"
+            ),
             "打开设置必须把当前 Sound Scope 与精确返回焦点交给事件设置窗口")
         expect(
             !panel.contains(

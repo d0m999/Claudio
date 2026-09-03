@@ -956,6 +956,20 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         "sound-packs.announcement.selection.none"
     public static let soundPacksAnnouncementSelectionSelected: Self =
         "sound-packs.announcement.selection.selected"
+    public static let soundPacksAnnouncementOperationUnchanged: Self =
+        "sound-packs.announcement.operation.unchanged"
+    public static let soundPacksAnnouncementOperationSucceeded: Self =
+        "sound-packs.announcement.operation.succeeded"
+    public static let soundPacksAnnouncementOperationPartial: Self =
+        "sound-packs.announcement.operation.partial"
+    public static let soundPacksAnnouncementOperationFailed: Self =
+        "sound-packs.announcement.operation.failed"
+    public static let soundPacksAnnouncementOperationCancelled: Self =
+        "sound-packs.announcement.operation.cancelled"
+    public static let soundPacksAnnouncementOperationCancelledAfterChanges: Self =
+        "sound-packs.announcement.operation.cancelled-after-changes"
+    public static let soundPacksAnnouncementOperationOrphan: Self =
+        "sound-packs.announcement.operation.orphan"
     public static let soundPacksAudioErrorNoSelectedPack: Self =
         "sound-packs.audio-error.no-selected-pack"
     public static let soundPacksAudioErrorSelectionChanged: Self =
@@ -1294,6 +1308,11 @@ public struct ClaudioL10nKey: RawRepresentable, Hashable, Sendable, ExpressibleB
         .soundPacksAnnouncementLibraryLoadFailed, .soundPacksAnnouncementLibraryRefreshFailed,
         .soundPacksAnnouncementLibraryReadyEmpty, .soundPacksAnnouncementLibraryReadyCount,
         .soundPacksAnnouncementSelectionNone, .soundPacksAnnouncementSelectionSelected,
+        .soundPacksAnnouncementOperationUnchanged, .soundPacksAnnouncementOperationSucceeded,
+        .soundPacksAnnouncementOperationPartial, .soundPacksAnnouncementOperationFailed,
+        .soundPacksAnnouncementOperationCancelled,
+        .soundPacksAnnouncementOperationCancelledAfterChanges,
+        .soundPacksAnnouncementOperationOrphan,
         .soundPacksAudioErrorNoSelectedPack, .soundPacksAudioErrorSelectionChanged,
         .soundPacksAudioErrorBuiltinReadOnly, .soundPacksAudioErrorNotInInventory,
         .soundPacksBindErrorPackNotFound, .soundPacksBindErrorUnsafeFileName,

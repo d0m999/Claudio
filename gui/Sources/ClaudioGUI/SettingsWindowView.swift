@@ -18,6 +18,7 @@ struct SettingsWindowView: View {
     @ObservedObject var globalShortcutSettings: GlobalShortcutSettingsModel
     @ObservedObject var aboutSettings: AboutSettingsModel
     let soundPacksEditorOwner: SoundPacksEditorOwner?
+    let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
     let eventSettingsModel: PanelConfigController?
     let eventSettingsSelection: EventSettingsWindowSelection?
     let hostIntegrations: HostIntegrationPresentationStore?
@@ -56,6 +57,7 @@ struct SettingsWindowView: View {
         usageSettings: UsageSettingsModel,
         globalShortcutSettings: GlobalShortcutSettingsModel,
         aboutSettings: AboutSettingsModel,
+        soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher,
         soundPacksEditorOwner: SoundPacksEditorOwner? = nil,
         eventSettingsModel: PanelConfigController? = nil,
         eventSettingsSelection: EventSettingsWindowSelection? = nil,
@@ -81,6 +83,7 @@ struct SettingsWindowView: View {
         self.usageSettings = usageSettings
         self.globalShortcutSettings = globalShortcutSettings
         self.aboutSettings = aboutSettings
+        self.soundPacksEditorNativeEffects = soundPacksEditorNativeEffects
         self.soundPacksEditorOwner = soundPacksEditorOwner
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
@@ -320,7 +323,8 @@ struct SettingsWindowView: View {
                     editorOwner: soundPacksEditorOwner,
                     route: soundsRoute,
                     routeRequestRevision: model.routeRequestRevision,
-                    languageStore: preferences)
+                    languageStore: preferences,
+                    nativeEffects: soundPacksEditorNativeEffects)
             }
             .padding(.horizontal, 28)
             .padding(.top, 28)

@@ -45,7 +45,7 @@ let package = Package(
             name: "ClaudioGUICore",
             dependencies: [
                 "ClaudioLocalization",
-                .product(name: "ClaudioCore", package: "helper")
+                .product(name: "ClaudioCore", package: "helper"),
             ],
             linkerSettings: [
                 .linkedFramework("Security")
@@ -94,7 +94,7 @@ let package = Package(
             resources: [
                 // Template PDFs keep the macOS 12 runtime independent of OS-version-specific
                 // SVG decoding. Bundle assembly must copy the generated *_ClaudioGUI.bundle.
-                .process("Resources/HostIcons"),
+                .process("Resources/HostIcons")
             ],
             linkerSettings: [
                 .linkedFramework("Carbon")
@@ -125,6 +125,7 @@ let package = Package(
                 "ClaudioLocalization",
                 "ClaudioGUICore",
                 "ClaudioGUIComponents",
+                "SoundPacksWindow",
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             path: "Tests/ClaudioGUICoreTests"

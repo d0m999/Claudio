@@ -44,7 +44,7 @@ package enum SoundPacksEditorRouteState: Equatable, Sendable {
 
 package enum SoundPackEditorScopeAvailability: Equatable, Sendable {
     case available(PanelSoundScopeID)
-    case unavailable(SoundPackEditorFailure)
+    case unavailable(scope: PanelSoundScopeID, reason: SoundPackEditorFailure)
 }
 
 package struct SoundsEditorPresentation: Equatable {
@@ -60,7 +60,20 @@ package struct SoundsEditorPresentation: Equatable {
     package let stopPreviewAction: SoundPackEditorAction
     package let retryLibraryAction: SoundPackEditorAction?
     package let restoreAllFactoryPacksAction: SoundPackEditorAction?
+    package let emptyLibraryRecovery: SoundPackEditorEmptyLibraryRecoveryPresentation
+    /// Durable visual feedback from the model. Announcement acknowledgement never consumes this
+    /// slice; recovery capabilities are projected separately and re-signed on each publication.
+    package let windowStatuses: [SoundPacksWindowStatus]
     package let recoveryActions: [SoundPackEditorRecoveryPresentation]
+}
+
+/// Empty-state recovery is explicit so a view cannot infer filesystem or factory facts. The
+/// reveal target remains sealed in its owner capability; a display-only path crosses separately
+/// so native accessibility can preserve the Finder destination without reconstructing a URL.
+package enum SoundPackEditorEmptyLibraryRecoveryPresentation: Equatable, Sendable {
+    case none
+    case restoreFactory(action: SoundPackEditorAction)
+    case revealRoot(displayValue: String, action: SoundPackEditorAction)
 }
 
 package struct EventsSoundPackPresentation: Equatable {
@@ -92,6 +105,7 @@ package struct SoundPackEditorPackPresentation: Identifiable, Equatable {
     package let deleteAction: SoundPackEditorAction?
     package let restoreAction: SoundPackEditorAction?
     package let revealAction: SoundPackEditorAction?
+    package let revealDisplayValue: String?
 }
 
 package struct SoundPackEditorEventPresentation: Identifiable, Equatable {
@@ -100,6 +114,7 @@ package struct SoundPackEditorEventPresentation: Identifiable, Equatable {
     package let coverage: CoverageState
     package let enabled: Bool
     package let audioDisplayName: String?
+    package let previewAvailability: EventPreviewAvailability
     package let importAction: SoundPackEditorAction?
     package let previewAction: SoundPackEditorAction?
     package let clearAction: SoundPackEditorAction?
@@ -289,6 +304,11 @@ package enum SoundPackEditorAnnouncementKind: Equatable, Sendable {
         completion: SoundPackEditorOperationCompletion)
 }
 
+package enum SoundPackEditorAnnouncementPriority: Int, Equatable, Sendable {
+    case failure
+    case notice
+}
+
 package struct SoundPackEditorAnnouncement: Identifiable, Equatable {
     package struct ID: Hashable, Sendable {
         fileprivate let rawValue: UInt64
@@ -300,6 +320,7 @@ package struct SoundPackEditorAnnouncement: Identifiable, Equatable {
 
     package let id: ID
     package let kind: SoundPackEditorAnnouncementKind
+    package let priority: SoundPackEditorAnnouncementPriority
     package let actionText: SoundPacksWindowStatusText?
     package let messageText: SoundPacksWindowStatusText?
 }
@@ -316,6 +337,7 @@ package enum SoundPacksEditorContext: Equatable, Sendable {
 package enum SoundPacksEditorCommand: Equatable, Sendable {
     case activate(SoundPacksEditorContext)
     case invoke(SoundPackEditorAction)
+    case prepareDrop(SoundPackEditorAction)
     case completePanelPackSwitch(PanelPackSwitchOutcome)
     case acknowledgeAnnouncement(id: SoundPackEditorAnnouncement.ID, didPost: Bool)
 }
@@ -325,6 +347,7 @@ package enum SoundPacksEditorCommandResult: Equatable, Sendable {
     case applied
     case accepted(SoundPackEditorOperationID)
     case confirmation(SoundPackEditorConfirmation)
+    case importPermit(permit: SoundPackImportPermit, bindTo: Event?)
     case nativeEffect(SoundPackEditorNativeEffect)
     case rejected(SoundPackEditorFailure)
 }
@@ -346,9 +369,25 @@ package enum SoundPacksEditorOperation: Equatable, Sendable {
 
 package enum SoundPacksEditorOperationResult: Equatable, Sendable {
     case imported(SoundPackEditorImportOutcome)
-    case adopted(AICueAdoptionOutcome)
+    case adopted(SoundPackEditorAdoptionOutcome)
     case adoptionOrphan(imported: ImportedAudioFile, failure: SoundPackEditorFailure)
     case rejected(SoundPackEditorFailure)
+}
+
+/// A successful foreground adoption plus the only native follow-up the caller may request.
+/// Filesystem identity remains sealed in the owner-signed action rather than becoming view state.
+package struct SoundPackEditorAdoptionOutcome: Equatable, Sendable {
+    private let outcome: AICueAdoptionOutcome
+    package let previewAction: SoundPackEditorAction?
+
+    package var target: AICueAdoptionTarget { outcome.target }
+    package var importedFile: ImportedAudioFile { outcome.importedFile }
+    package var finalDisplayName: String { outcome.finalDisplayName }
+
+    init(outcome: AICueAdoptionOutcome, previewAction: SoundPackEditorAction?) {
+        self.outcome = outcome
+        self.previewAction = previewAction
+    }
 }
 
 package enum SoundPackEditorOperationCompletion: Equatable, Sendable {
@@ -367,15 +406,10 @@ package struct SoundPackEditorImportOutcome: Equatable, Sendable {
     package let completedInBackground: Bool
     package let orphan: ImportedAudioFile?
     package let completion: SoundPackEditorOperationCompletion
+    package let previewAction: SoundPackEditorAction?
 
     package var allowsForegroundFollowUp: Bool {
-        guard !completedInBackground, !accepted.isEmpty else { return false }
-        switch completion {
-        case .succeeded, .partial:
-            return true
-        case .unchanged, .failed, .cancelled, .orphan:
-            return false
-        }
+        previewAction != nil
     }
 }
 

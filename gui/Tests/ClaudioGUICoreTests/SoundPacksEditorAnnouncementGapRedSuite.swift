@@ -38,6 +38,7 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
                             selectedPackName: "pack-a",
                             libraryPresentationState: .ready)),
                 "[129-ANN-RED] window-open debt 必须携带 exact semantic kind/facts")
+            expect(opened.priority == .notice, "window-open semantic debt 必须显式标记 notice")
             expect(
                 fixture.owner.send(
                     .acknowledgeAnnouncement(id: opened.id, didPost: false)) == .unchanged
@@ -193,6 +194,9 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
                 return
             }
             expect(
+                notice.priority == .notice && failure.priority == .failure,
+                "controller 必须直接消费 semantic priority，不能反查 raw window status")
+            expect(
                 owner.send(
                     .acknowledgeAnnouncement(id: notice.id, didPost: false)) == .unchanged
                     && owner.presentation.pendingAnnouncement?.id == failure.id,
@@ -285,7 +289,7 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
         }
     }
 
-    await suite("[129-ANN-RED] fork 只产生 compound debt，不重复 selection debt") {
+    await suite("[129-ANN-RED] fork 保留精确成功信息且不重复 selection debt") {
         await withTempDirectory { root in
             let factory = root.appendingPathComponent("factory-packs/factory-a")
             writeFixture(
@@ -314,14 +318,110 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
                 expect(false, "[129-ANN-RED] fork success 必须形成 compound debt")
                 return
             }
+            guard case .sounds(let settled) = owner.presentation.mode,
+                let preciseStatus = settled.windowStatuses.first(where: { $0.kind == .packFork })
+            else {
+                expect(false, "[129-ANN-RED] fork model 必须保留精确信息型 visible status")
+                return
+            }
             expect(
-                compound.kind == .operation(kind: .fork, completion: .succeeded),
-                "[129-ANN-RED] fork queue head 必须是单一 compound semantic outcome")
+                compound.kind == .windowStatus(.packFork)
+                    && compound.actionText == preciseStatus.actionText
+                    && compound.messageText == preciseStatus.messageText
+                    && compound.actionText?.resolve(language: .zhHans) == "复制为我的包"
+                    && compound.messageText?.resolve(language: .zhHans)
+                        == "已创建并选中「factory-a」。原内置包未更改；需要时可点「用这个包」。"
+                    && compound.messageText?.resolve(language: .english)
+                        == "Created and selected “factory-a”. The built-in pack is unchanged; choose Use This Pack when needed."
+                    && compound.messageText?.resolve(language: .zhHans).contains(root.path)
+                        == false,
+                "[129-ANN-RED] fork queue head 必须保留双语 pack 名称与原精确信息，且不泄露绝对路径")
+            expect(
+                owner.send(
+                    .acknowledgeAnnouncement(id: compound.id, didPost: false)) == .unchanged
+                    && owner.presentation.pendingAnnouncement?.id == compound.id,
+                "[129-ANN-RED] 未真实 post 的精确信息 debt 必须保留 exact head")
             expect(
                 owner.send(
                     .acknowledgeAnnouncement(id: compound.id, didPost: true)) == .applied
                     && owner.presentation.pendingAnnouncement == nil,
                 "[129-ANN-RED] fork compound ack 后不得残留 programmatic selection debt")
+            expect(
+                owner.send(
+                    .acknowledgeAnnouncement(id: compound.id, didPost: true))
+                    == .rejected(.staleAction),
+                "[129-ANN-RED] 已 post 的 fork 精确信息不得 replay")
+        }
+    }
+
+    await suite("[129-ANN-RED] restore success 保留既有 salvage 去向且不扩散其它路径") {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["factory-a"],
+                builtinPackIDs: ["factory-a"])
+            let installed = root.appendingPathComponent("packs/factory-a", isDirectory: true)
+            let factory = root.appendingPathComponent(
+                "factory-packs/factory-a", isDirectory: true)
+            writeFixture("personal", to: installed.appendingPathComponent("personal.wav"))
+            writeFixture(
+                #"{"id":"factory-a","name":"Factory Exact","events":{"stop":"stop.mp3"}}"#,
+                to: factory.appendingPathComponent("manifest.json"))
+            writeFixture("factory", to: factory.appendingPathComponent("stop.mp3"))
+            let owner = fixture.owner
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 406)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            announcementGapDrain(owner)
+            guard case .sounds(let sounds) = owner.presentation.mode,
+                let restore = sounds.selectedPack?.restoreAction,
+                case .confirmation(let confirmation) = owner.send(.invoke(restore)),
+                case .accepted(let operationID) = owner.send(.invoke(confirmation.confirmAction))
+            else {
+                expect(false, "[129-ANN-RED] installed built-in 必须签发并接受 restore")
+                return
+            }
+
+            await owner.waitForScheduledOperationExitForTesting(operationID)
+            await fixture.library.waitUntilIdleForTesting()
+            let salvagePaths =
+                ((try? FileManager.default.contentsOfDirectory(
+                    at: root.appendingPathComponent("packs", isDirectory: true),
+                    includingPropertiesForKeys: nil)) ?? [])
+                .filter { $0.lastPathComponent.hasPrefix(".factory-a.pre-restore-") }
+                .map(\.path)
+            guard salvagePaths.count == 1,
+                let announcement = await announcementGapWait(owner),
+                case .sounds(let settled) = owner.presentation.mode,
+                let preciseStatus = settled.windowStatuses.first(where: {
+                    $0.kind == .factoryRestore
+                })
+            else {
+                expect(false, "[129-ANN-RED] restore 必须保留唯一 salvage 与 semantic debt")
+                return
+            }
+            let salvageName = URL(fileURLWithPath: salvagePaths[0]).lastPathComponent
+            expect(
+                announcement.kind == .windowStatus(.factoryRestore)
+                    && announcement.actionText == preciseStatus.actionText
+                    && announcement.messageText == preciseStatus.messageText
+                    && announcement.actionText?.resolve(language: .zhHans) == "恢复出厂声音"
+                    && announcement.messageText?.resolve(language: .zhHans).contains(
+                        salvageName) == true
+                    && announcement.messageText?.resolve(language: .english).contains(
+                        salvageName) == true,
+                "[129-ANN-RED] restore VoiceOver 必须逐字复用 visible status 的 pack 与 movedTo 信息")
+            let rendered = announcement.messageText?.resolve(language: .zhHans) ?? ""
+            expect(
+                !rendered.contains(factory.path) && !rendered.contains("personal.wav"),
+                "[129-ANN-RED] 精确 status 不得额外扩散 factory source 或内部文件名")
+            expect(
+                owner.send(
+                    .acknowledgeAnnouncement(id: announcement.id, didPost: true)) == .applied
+                    && owner.presentation.pendingAnnouncement?.id != announcement.id
+                    && owner.send(
+                        .acknowledgeAnnouncement(id: announcement.id, didPost: true))
+                        == .rejected(.staleAction),
+                "[129-ANN-RED] restore 精确信息只允许 exact-once ack，不得 replay")
         }
     }
 
