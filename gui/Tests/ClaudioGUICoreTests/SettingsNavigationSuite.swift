@@ -220,7 +220,7 @@ func runSettingsNavigationSuites() {
                 hostIntegrations: hostIntegrations
             ).sink { emissions.append($0) }
 
-            guard let projection = emissions.only else {
+            guard emissions.count == 1, let projection = emissions.first else {
                 expect(false, "订阅必须同步交付且只交付一个初始 Settings shell projection")
                 return
             }

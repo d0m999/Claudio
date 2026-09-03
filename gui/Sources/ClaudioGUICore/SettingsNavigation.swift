@@ -114,6 +114,49 @@ public struct SettingsRouteAvailability: Sendable, Equatable {
         events: Set(Event.allCases))
 }
 
+/// The Settings shell's immutable projection of Sound Pack editor and host presentation facts.
+/// It carries no cache or mutable ownership: route resolution and native announcement delivery
+/// consume the same coherent editor root through this package-local adapter.
+package struct SettingsSoundPackShellProjection: Equatable {
+    package let availability: SettingsRouteAvailability
+    package let pendingAnnouncement: SoundPackEditorAnnouncement?
+
+    package init(
+        editorPresentation: SoundPacksEditorPresentation,
+        sourceRows: [HostSourceRowPresentation]
+    ) {
+        let publishedSurfaces = Set(sourceRows.map { $0.host.surfaceID })
+        let productScopes = HostID.productVisibleCases.map {
+            PanelSoundScopeID.surface($0.surfaceID)
+        }
+        availability = SettingsRouteAvailability(
+            integrationSurfaces: publishedSurfaces,
+            eventScopes: Set(panelSoundScopeIDs(sourceRows: sourceRows)),
+            soundScopes: Set([PanelSoundScopeID.global] + productScopes),
+            soundPackIDs: editorPresentation.installedPackIDs,
+            soundPackSnapshotIsFresh: editorPresentation.library.isFresh,
+            events: Set(Event.allCases))
+        pendingAnnouncement = editorPresentation.pendingAnnouncement
+    }
+}
+
+/// One production publisher seam for every Sound Pack fact the retained Settings shell consumes.
+/// Both upstreams already publish immutable presentation values on the main actor.
+@MainActor
+package func settingsSoundPackShellProjections(
+    editor: SoundPacksEditorOwner,
+    hostIntegrations: HostIntegrationPresentationStore
+) -> AnyPublisher<SettingsSoundPackShellProjection, Never> {
+    editor.$presentation
+        .combineLatest(hostIntegrations.$content)
+        .map { editorPresentation, integrationContent in
+            SettingsSoundPackShellProjection(
+                editorPresentation: editorPresentation,
+                sourceRows: integrationContent.sourceRows)
+        }
+        .eraseToAnyPublisher()
+}
+
 public enum SettingsRouteFailure: Sendable, Equatable {
     case invalidSurface(HostSurfaceID)
     case staleSurface(HostSurfaceID)
