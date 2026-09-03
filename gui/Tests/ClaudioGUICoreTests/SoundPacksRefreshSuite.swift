@@ -2329,6 +2329,11 @@ func runSoundPacksRefreshSuites() async {
                 && !modelImplementation.contains("\n    @Published public "),
             "raw window model 及其 state/method/init 必须降为 package implementation")
         expect(
+            !modelImplementation.contains("ObservableObject")
+                && !modelImplementation.contains("@Published"),
+            "raw window model 只能经 owner settled callback 发布 coherent projection，"
+                + "不得保留独立 observation seam")
+        expect(
             rawModelConstructionSites == ["ClaudioGUICore/SoundPacksEditorOwner.swift"],
             "shipping/DEBUG production 只能由 owner implementation 构造 raw model，实得 "
                 + "\(rawModelConstructionSites.sorted())")
