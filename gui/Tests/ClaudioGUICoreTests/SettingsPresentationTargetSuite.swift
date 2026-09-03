@@ -172,4 +172,61 @@ func runSettingsPresentationSliceSuites() {
                     == "settings.general.login-item.toggle",
             "root 与真实 Login 控件必须暴露稳定、非 test-only 的 accessibility identity")
     }
+
+    suite("Settings presentation fixture：DEBUG seam 随机隔离且只暴露真实 owner") {
+        withTempDirectory { sentinelRoot in
+            let sentinel = sentinelRoot.appendingPathComponent("user-path-sentinel")
+            let sentinelBytes = Data("do-not-touch".utf8)
+            try? sentinelBytes.write(to: sentinel)
+
+            let first = SettingsPresentationFixtures.generalLogin(
+                language: .english,
+                loginItemRegistration: .requiresApproval,
+                platformActionResult: .performed)
+            let second = SettingsPresentationFixtures.generalLogin()
+            let temporaryRoot = FileManager.default.temporaryDirectory.standardizedFileURL.path
+
+            expect(
+                first.temporaryRoot.standardizedFileURL.path.hasPrefix(temporaryRoot)
+                    && first.temporaryRoot != second.temporaryRoot,
+                "每个 fixture 必须使用唯一的系统临时根")
+            expect(
+                first.session.state.loginItemRegistration == .requiresApproval
+                    && first.session.perform(.openCalendarPrivacySettings) == .performed
+                    && first.actionRecorder.actions == [.openCalendarPrivacySettings],
+                "fixture 必须通过真实 session 与 recording typed action seam 工作")
+            expect(
+                first.soundPacksEditor.presentation.mode != .inactive,
+                "fixture 必须只交付 SoundPacksEditorOwner/presentation seam")
+
+            let hostingView = NSHostingView(rootView: first.rootView)
+            hostingView.frame = NSRect(x: 0, y: 0, width: 620, height: 520)
+            hostingView.layoutSubtreeIfNeeded()
+            expect(
+                hostingView.fittingSize.width > 0 && hostingView.fittingSize.height > 0,
+                "fixture 必须挂载同一个 production SettingsRootView")
+            expect(
+                (try? Data(contentsOf: sentinel)) == sentinelBytes,
+                "fixture construction 与 mount 不得访问 supplied sentinel user path")
+        }
+    }
+
+    suite("Settings presentation fixture：整文件 DEBUG 且无 raw/user-path 逃逸") {
+        let fixtureURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationFixtures.swift")
+        guard let fixture = try? String(contentsOf: fixtureURL, encoding: .utf8) else {
+            expect(false, "读不到 SettingsPresentationFixtures.swift")
+            return
+        }
+        expect(
+            fixture.hasPrefix("#if DEBUG\n") && fixture.hasSuffix("#endif\n"),
+            "fixture source 必须从首行到末行由 DEBUG guard 包住")
+        expect(
+            fixture.contains("SoundPacksEditorOwner.stateGalleryFixture(")
+                && !fixture.contains("SoundPacksWindowModel")
+                && !fixture.contains("homeDirectoryForCurrentUser")
+                && !fixture.contains("~/.claudio")
+                && !fixture.contains("/Users/"),
+            "fixture 必须复用 owner factory，且不得暴露 raw model 或用户路径")
+    }
 }
