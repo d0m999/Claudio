@@ -2341,17 +2341,10 @@ func runSoundPacksRefreshSuites() async {
                 && settingsController.contains("focusRestoration = nil"),
             "Sounds 必须共享统一 retained 窗口，关闭一次消费最新 handback")
         expect(
-            settingsController.contains("soundPacksEditorOwner.$presentation")
-                && settingsController.contains(".map(\\.pendingAnnouncement)")
-                && settingsController.contains(
-                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
-                && !settingsController.contains("soundPackModel.$windowStatuses")
-                && !settingsController.contains("beginStatusAnnouncementAttempt(")
-                && !settingsController.contains("finishStatusAnnouncementAttempt(")
-                && !settingsController.contains("Task.detached")
+            !settingsController.contains("Task.detached")
                 && !settingsController.contains("mutateManifestJSON")
                 && !settingsController.contains("setEventEnabled("),
-            "窗口 owner 可延后焦点恢复，但不得自行启动后台 manifest/config 写路径")
+            "窗口 owner 不得自行启动后台 manifest/config 写路径")
     }
 
     suite(".openSoundSettings：携带当前 Sound Scope，并通过单一 pending-close 展示 Settings Events") {

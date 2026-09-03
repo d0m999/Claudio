@@ -39,9 +39,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var externalActivationCancellable: AnyCancellable?
     private var languageCancellable: AnyCancellable?
     private var integrationsRouteCancellable: AnyCancellable?
-    private var soundPackAvailabilityCancellable: AnyCancellable?
+    private var soundPackPresentationCancellable: AnyCancellable?
     private var soundsRouteAnnouncementCancellable: AnyCancellable?
-    private var soundPackPresentationAnnouncementCancellable: AnyCancellable?
     private var aboutSurfaceCancellable: AnyCancellable?
 
     init(
@@ -77,12 +76,12 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         dynamicQuietObserver = DynamicQuietSystemObserver()
         aboutSettings = makeSystemAboutSettingsModel(
             surfaceFacts: hostIntegrations.safeSurfaceFacts)
+        let initialSoundPackProjection = SettingsSoundPackShellProjection(
+            editorPresentation: soundPacksEditorOwner.presentation,
+            sourceRows: hostIntegrations.content.sourceRows)
         model = SettingsWindowPresentationModel(
             preferences: preferences,
-            availability: settingsRouteAvailability(
-                packIDs: Set(soundPacksEditorOwner.model.packCards.map(\.id)),
-                libraryState: soundPacksEditorOwner.model.libraryPresentationState,
-                sourceRows: hostIntegrations.content.sourceRows))
+            availability: initialSoundPackProjection.availability)
         super.init()
 
         externalActivationCancellable = NSWorkspace.shared.notificationCenter
@@ -122,23 +121,27 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 }
             }
 
-        soundPackAvailabilityCancellable = soundPacksEditorOwner.model.$packCards
-            .combineLatest(
-                soundPacksEditorOwner.model.$libraryPresentationState,
-                hostIntegrations.$content
-            )
-            .map { cards, libraryState, integrationContent in
-                settingsRouteAvailability(
-                    packIDs: Set(cards.map(\.id)),
-                    libraryState: libraryState,
-                    sourceRows: integrationContent.sourceRows)
-            }
-            .removeDuplicates()
-            .sink { [weak self] availability in
-                MainActor.assumeIsolated {
-                    self?.model.updateAvailability(availability)
+        soundPackPresentationCancellable = settingsSoundPackShellProjections(
+            editor: soundPacksEditorOwner,
+            hostIntegrations: hostIntegrations
+        ).sink { [weak self] projection in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.model.updateAvailability(projection.availability)
+                guard projection.pendingAnnouncement != nil, !self.isPresentingWindow else {
+                    return
+                }
+                // `@Published` emits before storing `presentation`. Availability consumes the
+                // emitted coherent value immediately, but native delivery waits one main turn so
+                // its exact-head eligibility closure reads the landed owner presentation.
+                DispatchQueue.main.async { [weak self] in
+                    MainActor.assumeIsolated {
+                        guard let self, let window = self.activeSoundsWindow else { return }
+                        self.announcePendingSoundPackEditorAnnouncementIfNeeded(in: window)
+                    }
                 }
             }
+        }
 
         installSoundPackAnnouncementObservers()
         aboutSurfaceCancellable = hostIntegrations.$safeSurfaceFacts
@@ -350,22 +353,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                     }
                 }
             }
-        soundPackPresentationAnnouncementCancellable = soundPacksEditorOwner.$presentation
-            .map(\.pendingAnnouncement)
-            .removeDuplicates()
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated {
-                    guard let self, !self.isPresentingWindow else { return }
-                    // `@Published` emits before storing `presentation`. Defer one main turn so the
-                    // exact-head eligibility closure observes the landed semantic debt.
-                    DispatchQueue.main.async { [weak self] in
-                        MainActor.assumeIsolated {
-                            guard let self, let window = self.activeSoundsWindow else { return }
-                            self.announcePendingSoundPackEditorAnnouncementIfNeeded(in: window)
-                        }
-                    }
-                }
-            }
     }
 
     private var activeSoundsWindow: NSWindow? {
@@ -402,22 +389,4 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 }
             })
     }
-}
-
-private func settingsRouteAvailability(
-    packIDs: Set<String>,
-    libraryState: SoundPackLibraryPresentationState,
-    sourceRows: [HostSourceRowPresentation]
-) -> SettingsRouteAvailability {
-    let publishedSurfaces = Set(sourceRows.map { $0.host.surfaceID })
-    let productScopes = HostID.productVisibleCases.map {
-        PanelSoundScopeID.surface($0.surfaceID)
-    }
-    return SettingsRouteAvailability(
-        integrationSurfaces: publishedSurfaces,
-        eventScopes: Set(panelSoundScopeIDs(sourceRows: sourceRows)),
-        soundScopes: Set([PanelSoundScopeID.global] + productScopes),
-        soundPackIDs: packIDs,
-        soundPackSnapshotIsFresh: libraryState == .ready,
-        events: Set(Event.allCases))
 }

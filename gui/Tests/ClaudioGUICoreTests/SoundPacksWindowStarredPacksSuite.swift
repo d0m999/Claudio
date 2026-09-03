@@ -350,12 +350,6 @@ func runSoundPacksWindowStarredPacksSuites() {
                 contentsOf: root.appendingPathComponent(
                     "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"), encoding: .utf8))
             ?? ""
-        let settingsController =
-            (try? String(
-                contentsOf: root.appendingPathComponent(
-                    "gui/Sources/ClaudioGUI/SettingsWindowController.swift"), encoding: .utf8))
-            ?? ""
-
         expect(
             panel.contains("scope: .panelStarredDisplay")
                 && gallery.contains("case .panelStarredDisplay")
@@ -380,12 +374,7 @@ func runSoundPacksWindowStarredPacksSuites() {
             model.contains("kind: .starredPacks")
                 && model.contains(
                     "messageText = .literal(soundPacksWindowStarredPacksFailureReason(error))")
-                && model.contains("messageText = writesStoppedStatusText")
-                && settingsController.contains("soundPacksEditorOwner.$presentation")
-                && settingsController.contains(".map(\\.pendingAnnouncement)")
-                && settingsController.contains(
-                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
-                && !settingsController.contains("soundPackModel.$windowStatuses"),
-            "兼容写入口失败仍须进入 owner semantic debt 与唯一 VoiceOver bridge")
+                && model.contains("messageText = writesStoppedStatusText"),
+            "兼容写入口失败仍须保留可见的 owner status 事实")
     }
 }

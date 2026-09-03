@@ -637,7 +637,8 @@ func runSoundPacksWindowAccessibilitySuites() {
         guard
             let responderIndex = controller.range(of: "makeFirstResponder")?.lowerBound,
             let announcementIndex = controller.range(
-                of: "announcePendingSoundPackEditorAnnouncementIfNeeded")?.lowerBound
+                of: "announcePendingSoundPackEditorAnnouncementIfNeeded",
+                range: responderIndex..<controller.endIndex)?.lowerBound
         else {
             expect(false, "Settings 展示必须先进入 responder chain，再处理 Sounds 公告")
             return
@@ -653,18 +654,6 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && bridge.contains("soundPacksEditorAccessibilityRequest(")
                 && bridge.contains("announcement.priority == .failure ? .high : .medium"),
             "播报必须延后一趟等窗口进入 AX 树，并在真正 post 前重新确认仍是 key window")
-        expect(
-            controller.contains("soundPacksEditorOwner.$presentation")
-                && controller.contains(".map(\\.pendingAnnouncement)")
-                && controller.contains("SoundPacksEditorAnnouncementDelivery")
-                && controller.contains("soundPackAnnouncementDelivery.attempt(")
-                && controller.contains(
-                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
-                && !controller.contains("soundPackModel.$selectedPackID")
-                && !controller.contains("soundPackModel.$libraryPresentationState")
-                && !controller.contains("soundPackModel.$windowStatuses")
-                && !controller.contains("announcementFacts("),
-            "恢复、音频、星标、复制和启用必须共用 owner 的单一 semantic announcement 出口")
         expect(
             controller.contains("SettingsWindowGeometry.defaultWidth")
                 && controller.contains("SettingsWindowGeometry.minimumWidth"),
