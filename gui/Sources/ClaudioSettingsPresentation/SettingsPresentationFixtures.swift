@@ -38,11 +38,12 @@ package struct SettingsPresentationFixture {
 @MainActor
 package enum SettingsPresentationFixtures {
     package static func generalLogin(
+        temporaryParent: URL = FileManager.default.temporaryDirectory,
         language: ClaudioAppLanguage = .zhHans,
         loginItemRegistration: LoginItemRegistrationState = .disabled,
         platformActionResult: SettingsPlatformActionResult = .performed
     ) -> SettingsPresentationFixture {
-        let temporaryRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+        let temporaryRoot = temporaryParent.appendingPathComponent(
             "claudio-settings-presentation-fixture-\(UUID().uuidString)",
             isDirectory: true)
         let actionRecorder = SettingsPresentationActionRecorder(result: platformActionResult)
