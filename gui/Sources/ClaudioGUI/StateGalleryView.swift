@@ -3,6 +3,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUIComponents
 import ClaudioGUICore
+import ClaudioSettingsPresentation
 import ClaudioLocalization
 import SoundPacksWindow
 import SwiftUI
@@ -467,6 +468,7 @@ private struct SettingsWindowRouteFrame: View {
     @StateObject private var languageStore: ClaudioPreferences
     @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
     @StateObject private var loginItemSettings: LoginItemSettingsModel
+    @StateObject private var settingsPresentationSession: SettingsPresentationSession
     @StateObject private var usageSettings: UsageSettingsModel
     @StateObject private var globalShortcutSettings: GlobalShortcutSettingsModel
     @StateObject private var aboutSettings: AboutSettingsModel
@@ -490,8 +492,14 @@ private struct SettingsWindowRouteFrame: View {
         _languageStore = StateObject(wrappedValue: preferences)
         _dynamicQuietPolicy = StateObject(
             wrappedValue: Self.makeDynamicQuietPolicy(for: experienceProfile))
-        _loginItemSettings = StateObject(
-            wrappedValue: Self.makeLoginItemSettings(for: experienceProfile))
+        let loginItemSettings = Self.makeLoginItemSettings(for: experienceProfile)
+        _loginItemSettings = StateObject(wrappedValue: loginItemSettings)
+        _settingsPresentationSession = StateObject(
+            wrappedValue: SettingsPresentationSession(
+                dependencies: SettingsPresentationDependencies(
+                    preferences: preferences,
+                    loginItemSettings: loginItemSettings),
+                actions: SettingsPresentationActions { _ in .performed }))
         _usageSettings = StateObject(
             wrappedValue: Self.makeUsageSettings(for: experienceProfile))
         _globalShortcutSettings = StateObject(
@@ -508,7 +516,7 @@ private struct SettingsWindowRouteFrame: View {
             model: model,
             preferences: languageStore,
             dynamicQuietPolicy: dynamicQuietPolicy,
-            loginItemSettings: loginItemSettings,
+            settingsPresentationSession: settingsPresentationSession,
             usageSettings: usageSettings,
             globalShortcutSettings: globalShortcutSettings,
             aboutSettings: aboutSettings,
@@ -533,8 +541,7 @@ private struct SettingsWindowRouteFrame: View {
                         throw LoginItemOperationFailureReason.systemRejected
                     }
                     return enabled ? .enabled : .disabled
-                },
-                openSystemSettings: {}))
+                }))
         if state == .writeFailed {
             model.setEnabled(true)
         }

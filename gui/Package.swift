@@ -73,6 +73,18 @@ let package = Package(
                 .product(name: "ClaudioCore", package: "helper"),
             ]
         ),
+        // Importable Settings presentation seam. It owns no resources or native system APIs;
+        // production and the compiled harness mount the same concrete presentation types.
+        .target(
+            name: "ClaudioSettingsPresentation",
+            dependencies: [
+                "ClaudioLocalization",
+                "ClaudioGUICore",
+                "ClaudioGUIComponents",
+                "SoundPacksWindow",
+                .product(name: "ClaudioCore", package: "helper"),
+            ]
+        ),
         // The SwiftUI app shell owns the status-item panel and one retained unified Settings
         // window. Its embedded Integrations destination consumes `ClaudioGUICore` presentation
         // values and never opens host config itself, so cutover creates no second truth source.
@@ -89,6 +101,7 @@ let package = Package(
                 "ClaudioGUICore",
                 "ClaudioGUIComponents",
                 "SoundPacksWindow",
+                "ClaudioSettingsPresentation",
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             resources: [
@@ -126,6 +139,7 @@ let package = Package(
                 "ClaudioGUICore",
                 "ClaudioGUIComponents",
                 "SoundPacksWindow",
+                "ClaudioSettingsPresentation",
                 .product(name: "ClaudioCore", package: "helper"),
             ],
             path: "Tests/ClaudioGUICoreTests"

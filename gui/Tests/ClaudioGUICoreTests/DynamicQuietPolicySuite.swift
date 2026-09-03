@@ -297,6 +297,8 @@ func runDynamicQuietPolicySuites() {
                 "gui/Sources/ClaudioGUI/DynamicQuietSystemObserver.swift"),
             let settingsController = dynamicQuietSource(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
+            let settingsActions = dynamicQuietSource(
+                "gui/Sources/ClaudioGUI/SettingsPlatformActionsAdapter.swift"),
             let preview = dynamicQuietSource(
                 "gui/Sources/ClaudioGUIComponents/AudioPreviewPlayer.swift"),
             let play = dynamicQuietSource("helper/Sources/ClaudioCore/Play.swift"),
@@ -317,7 +319,9 @@ func runDynamicQuietPolicySuites() {
                 && view.contains("settings.notifications.calendar-toggle")
                 && view.contains("dynamicQuietPolicy.setCalendarEnabled($0)")
                 && view.contains("settings.notifications.calendar-privacy")
-                && view.contains("Privacy_Calendars")
+                && view.contains("openCalendarPrivacySettings")
+                && settingsActions.contains("Privacy_Calendars")
+                && settingsActions.contains("NSWorkspace.shared.open")
                 && !view.contains("ForEach(Event.allCases)"),
             "通知页必须提供两条策略与 Calendar 恢复动作，不得复制 Event 开关")
         expect(

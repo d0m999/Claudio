@@ -1,5 +1,6 @@
 import ClaudioGUICore
 import ClaudioLocalization
+import ClaudioSettingsPresentation
 import Foundation
 
 // Dependency-free test harness — mirrors `helper/Tests/ClaudioCoreTests/main.swift`
@@ -157,6 +158,8 @@ await runUsageActivitySuites()
 runGlobalShortcutsSuites()
 runSettingsNavigationSuites()
 runSettingsPresentationCharacterizationSuites()
+runSettingsPresentationTargetSuites()
+runSettingsPresentationSliceSuites()
 runPreviewFixturesSuites()
 runMultiProviderPrototypeContractSuites()
 runVolumeDragSessionSuites()

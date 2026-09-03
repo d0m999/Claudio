@@ -2,6 +2,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
+import ClaudioSettingsPresentation
 import Combine
 import SoundPacksWindow
 import SwiftUI

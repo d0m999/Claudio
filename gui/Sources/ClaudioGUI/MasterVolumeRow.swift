@@ -1,4 +1,5 @@
 import ClaudioCore
+import ClaudioGUIComponents
 import ClaudioGUICore
 import ClaudioLocalization
 import SwiftUI

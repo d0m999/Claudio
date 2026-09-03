@@ -2,6 +2,7 @@ import AppKit
 import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
+import ClaudioSettingsPresentation
 import Combine
 import SoundPacksWindow
 import SwiftUI
@@ -16,7 +17,7 @@ import SwiftUI
 @MainActor
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
-    private let loginItemSettings: LoginItemSettingsModel
+    private let settingsPresentationSession: SettingsPresentationSession
     private let usageSettings: UsageSettingsModel
     private let globalShortcutSettings: GlobalShortcutSettingsModel
     private let aboutSettings: AboutSettingsModel
@@ -42,6 +43,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var soundPackPresentationCancellable: AnyCancellable?
     private var soundsRouteAnnouncementCancellable: AnyCancellable?
     private var aboutSurfaceCancellable: AnyCancellable?
+    private var settingsPresentationCancellable: AnyCancellable?
+    private var settingsPresentationAnnouncementDeliveryScheduled = false
 
     init(
         preferences: ClaudioPreferences,
@@ -60,7 +63,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         onEventAudibilityInputsChanged: @escaping @MainActor () -> Void
     ) {
         self.preferences = preferences
-        self.loginItemSettings = loginItemSettings
+        settingsPresentationSession = SettingsPresentationSession(
+            dependencies: SettingsPresentationDependencies(
+                preferences: preferences,
+                loginItemSettings: loginItemSettings),
+            actions: makeSystemSettingsPresentationActions())
         self.usageSettings = usageSettings
         self.globalShortcutSettings = globalShortcutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
@@ -151,6 +158,15 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                     self?.aboutSettings.replaceSurfaceFacts(surfaceFacts)
                 }
             }
+        settingsPresentationCancellable = settingsPresentationSession.$state
+            .map(\.pendingAnnouncement)
+            .removeDuplicates()
+            .sink { [weak self] announcement in
+                MainActor.assumeIsolated {
+                    guard announcement != nil else { return }
+                    self?.scheduleSettingsPresentationAnnouncementDelivery()
+                }
+            }
     }
 
     func showWindow(
@@ -158,7 +174,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         returnFocusTo application: NSRunningApplication?,
         onClose restoration: @escaping @MainActor (NSRunningApplication?) -> Void
     ) {
-        loginItemSettings.refresh()
+        settingsPresentationSession.refreshLoginItem()
         focusRestoration = restoration
         isPresentingWindow = true
         let wasVisible = window?.isVisible == true
@@ -182,6 +198,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // already-retained General → Sounds deep link or non-key reactivation cannot lose it.
         announcePendingSoundPackEditorAnnouncementIfNeeded(in: presentedWindow)
         isPresentingWindow = false
+        scheduleSettingsPresentationAnnouncementDelivery()
     }
 
     /// Prepares a global-shortcut route before the shared close-before-show handoff. Unknown or
@@ -201,9 +218,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             let keyWindow = notification.object as? NSWindow,
             keyWindow === window
         else { return }
-        loginItemSettings.refresh()
+        settingsPresentationSession.refreshLoginItem()
         updateIntegrationsPresentationState()
         announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)
+        scheduleSettingsPresentationAnnouncementDelivery()
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -241,7 +259,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             model: model,
             preferences: preferences,
             dynamicQuietPolicy: dynamicQuietObserver.policy,
-            loginItemSettings: loginItemSettings,
+            settingsPresentationSession: settingsPresentationSession,
             usageSettings: usageSettings,
             globalShortcutSettings: globalShortcutSettings,
             aboutSettings: aboutSettings,
@@ -284,8 +302,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.title = ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)
     }
 
-    private func announceBasicSettingsUpdate(_ sentence: String) {
-        guard let window, window.isKeyWindow, !sentence.isEmpty else { return }
+    @discardableResult
+    private func announceBasicSettingsUpdate(_ sentence: String) -> Bool {
+        guard let window, window.isVisible, window.isKeyWindow, !sentence.isEmpty else {
+            return false
+        }
         NSAccessibility.post(
             element: window,
             notification: .announcementRequested,
@@ -293,6 +314,62 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 .announcement: sentence,
                 .priority: NSAccessibilityPriorityLevel.high.rawValue,
             ])
+        return true
+    }
+
+    private func scheduleSettingsPresentationAnnouncementDelivery() {
+        guard !settingsPresentationAnnouncementDeliveryScheduled else { return }
+        settingsPresentationAnnouncementDeliveryScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.settingsPresentationAnnouncementDeliveryScheduled = false
+                self.deliverPendingSettingsPresentationAnnouncement()
+            }
+        }
+    }
+
+    private func deliverPendingSettingsPresentationAnnouncement() {
+        guard
+            !isPresentingWindow,
+            let announcement = settingsPresentationSession.state.pendingAnnouncement,
+            let window,
+            window.isVisible,
+            window.isKeyWindow
+        else { return }
+        let l10n = ClaudioL10n(language: preferences.language)
+        let sentence: String
+        switch announcement.meaning {
+        case .loginItemStatus(let registration):
+            switch registration {
+            case .disabled: sentence = l10n.text(.settingsGeneralLoginItem.disabled)
+            case .enabled: sentence = l10n.text(.settingsGeneralLoginItem.enabled)
+            case .requiresApproval:
+                sentence = l10n.text(.settingsGeneralLoginItem.requiresApproval)
+            case .unavailable: sentence = l10n.text(.settingsGeneralLoginItem.unavailable)
+            }
+        case .loginItemFailure(let failure):
+            switch failure.reason {
+            case .embeddedLoginItemMissing:
+                sentence = l10n.text(.settingsGeneralLoginItem.failureMissing)
+            case .systemRejected:
+                sentence = l10n.text(
+                    failure.requestedEnabled
+                        ? .settingsGeneralLoginItem.failureEnable
+                        : .settingsGeneralLoginItem.failureDisable)
+            }
+        case .platformAction(let action, _):
+            switch action {
+            case .openLoginItemsSettings:
+                sentence = l10n.text(.settingsGeneralLoginItem.unavailable)
+            case .openCalendarPrivacySettings:
+                sentence = l10n.text(.settingsNotificationsOpenCalendarPrivacy)
+            }
+        }
+        guard announceBasicSettingsUpdate(sentence) else { return }
+        settingsPresentationSession.acknowledgeAnnouncement(
+            id: announcement.id,
+            didPost: true)
     }
 
     /// In-window actions submit a typed route without creating or presenting another window.
