@@ -2821,23 +2821,21 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// 成功或失败前已经改变磁盘时，先刷新窗口自己的读模型，再发布面板 full reload；没有落盘变化
     /// 的失败两边都不假刷新。未来 T11/T12/T17 的每个写者都应收口到这里，而不是各自选择
     /// `reloadConfigOnly()`。
-    @discardableResult
     package func completeSynchronousWrite(
         _ outcome: SoundPacksWindowWriteOutcome,
         invalidatingPackIDs: Set<String> = []
-    ) -> SoundPacksRefreshEffect {
+    ) {
         completeSynchronousWrite(
             outcome,
             invalidatingPackIDs: invalidatingPackIDs,
             mutation: nil)
     }
 
-    @discardableResult
     private func completeSynchronousWrite(
         _ outcome: SoundPacksWindowWriteOutcome,
         invalidatingPackIDs: Set<String> = [],
         mutation: SoundPackLibraryMutation?
-    ) -> SoundPacksRefreshEffect {
+    ) {
         var needsLegacyRefresh = false
         if let mutation {
             if !soundPackLibrary.endMutation(mutation, changed: outcome != .failed),
@@ -2871,7 +2869,7 @@ package final class SoundPacksWindowModel: ObservableObject {
                 }
             }
         }
-        return refreshCoordinator.completeWindowWrite(outcome)
+        refreshCoordinator.completeWindowWrite(outcome)
     }
 
     private func beginSoundPackMutation(packIDs: Set<String>) -> SoundPackLibraryMutation? {

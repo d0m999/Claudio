@@ -327,7 +327,8 @@ func runSoundPacksRefreshSuites() async {
         expect(
             !coordinator.contains("SoundPacksRefreshEffect")
                 && !model.contains("SoundPacksRefreshEffect"),
-            "revision 与 requires-refresh facts 已完整表达刷新语义；legacy caller effect enum/return seam 必须删除")
+            "revision 与 requires-refresh facts 已完整表达刷新语义；legacy caller effect "
+                + "enum/return seam 必须删除")
     }
 
     suite("SoundPacksRefreshCoordinator：窗口成功写只发 panel full reload") {
@@ -337,9 +338,8 @@ func runSoundPacksRefreshSuites() async {
         expect(coordinator.windowReloadRevision == 0, "初始不应欠窗口刷新")
         expect(coordinator.windowContentReloadRevision == 0, "初始不应欠窗口内容刷新")
 
-        let effect = coordinator.completeWindowWrite(.succeeded)
+        coordinator.completeWindowWrite(.succeeded)
 
-        expect(effect == .panelFullReload, "窗口成功写必须选择 panel full reload，得到 \(effect)")
         expect(coordinator.panelReloadRevision == 1, "窗口成功写必须发布一次面板刷新")
         expect(
             !coordinator.panelReloadRequiresLibraryRefresh,
@@ -351,9 +351,8 @@ func runSoundPacksRefreshSuites() async {
     suite("SoundPacksRefreshCoordinator：config-only 窗口写只重投影，不要求扫描包库") {
         let coordinator = SoundPacksRefreshCoordinator()
 
-        let effect = coordinator.completeWindowWrite(.succeeded)
+        coordinator.completeWindowWrite(.succeeded)
 
-        expect(effect == .panelFullReload, "config-only 写仍须让面板重读 config 与投影")
         expect(coordinator.panelReloadRevision == 1, "config-only 写必须发布一次面板刷新")
         expect(
             !coordinator.panelReloadRequiresLibraryRefresh,
@@ -382,9 +381,8 @@ func runSoundPacksRefreshSuites() async {
     suite("SoundPacksRefreshCoordinator：窗口失败写不发布任何刷新") {
         let coordinator = SoundPacksRefreshCoordinator()
 
-        let effect = coordinator.completeWindowWrite(.failed)
+        coordinator.completeWindowWrite(.failed)
 
-        expect(effect == .none, "失败写没有落盘事实，不得发布刷新，得到 \(effect)")
         expect(coordinator.panelReloadRevision == 0, "失败写不得让面板假装落盘成功")
         expect(coordinator.windowReloadRevision == 0, "失败写不得让窗口假装落盘成功")
         expect(coordinator.windowContentReloadRevision == 0, "失败写不得发布窗口内容刷新")
@@ -393,9 +391,8 @@ func runSoundPacksRefreshSuites() async {
     suite("SoundPacksRefreshCoordinator：失败前已改变磁盘仍发布真实 full reload") {
         let coordinator = SoundPacksRefreshCoordinator()
 
-        let effect = coordinator.completeWindowWrite(.changedDespiteFailure)
+        coordinator.completeWindowWrite(.changedDespiteFailure)
 
-        expect(effect == .panelFullReload, "部分失败必须让面板重读磁盘真实状态，得到 \(effect)")
         expect(coordinator.panelReloadRevision == 1, "部分失败必须发布一次面板刷新")
         expect(coordinator.windowReloadRevision == 0, "窗口自己的部分失败不得伪装成 panel 切包")
         expect(coordinator.windowContentReloadRevision == 0, "窗口自己的部分失败不得反向再刷自己")
@@ -423,9 +420,8 @@ func runSoundPacksRefreshSuites() async {
             writeFixture(
                 "audio", to: packsDirectory.appendingPathComponent("bootstrapped/stop.mp3"))
 
-            let effect = coordinator.completeSharedRuntimeBootstrap()
+            coordinator.completeSharedRuntimeBootstrap()
 
-            expect(effect == .panelFullReload, "bootstrap 完成必须选择 panel full reload")
             expect(coordinator.panelReloadRevision == 1, "bootstrap 完成必须发布一次面板刷新")
             expect(
                 coordinator.panelReloadRequiresLibraryRefresh,
@@ -446,8 +442,7 @@ func runSoundPacksRefreshSuites() async {
 
     suite("app activation：保留窗口重投影外部 config，且包扫描由生命周期入口单独负责") {
         let coordinator = SoundPacksRefreshCoordinator()
-        let effect = coordinator.refreshWindowConfigProjection()
-        expect(effect == .windowReload, "激活必须发布窗口 config projection")
+        coordinator.refreshWindowConfigProjection()
         expect(coordinator.windowContentReloadRevision == 1, "激活必须推进一次内容 revision")
         expect(
             !coordinator.windowContentReloadRequiresLibraryRefresh,
@@ -458,12 +453,10 @@ func runSoundPacksRefreshSuites() async {
     suite("SoundPacksRefreshCoordinator：面板切包仅成功时通知窗口") {
         let coordinator = SoundPacksRefreshCoordinator()
 
-        let failedEffect = coordinator.completePanelPackSwitch(.failed(.lockBusy))
-        expect(failedEffect == .none, "失败切包不得刷新窗口，得到 \(failedEffect)")
+        coordinator.completePanelPackSwitch(.failed(.lockBusy))
         expect(coordinator.windowReloadRevision == 0, "失败切包不得推进窗口 revision")
 
-        let succeededEffect = coordinator.completePanelPackSwitch(.succeeded)
-        expect(succeededEffect == .windowReload, "成功切包必须通知窗口 reload，得到 \(succeededEffect)")
+        coordinator.completePanelPackSwitch(.succeeded)
         expect(coordinator.windowReloadRevision == 1, "成功切包必须推进窗口 revision")
         expect(coordinator.windowContentReloadRevision == 0, "切包不得伪装成普通内容变化")
         expect(coordinator.panelReloadRevision == 0, "panel 自己已完成 reload，不得反向再刷一次")
@@ -472,14 +465,10 @@ func runSoundPacksRefreshSuites() async {
     suite("SoundPacksRefreshCoordinator：面板包音频真实变化只刷新窗口内容，不强迫侧栏跟随 active pack") {
         let coordinator = SoundPacksRefreshCoordinator()
 
-        expect(
-            coordinator.completePanelPackAudioChange(.unchanged) == .none,
-            "没有磁盘变化不得发布假刷新")
+        coordinator.completePanelPackAudioChange(.unchanged)
         expect(coordinator.windowContentReloadRevision == 0, "unchanged 不得推进内容 revision")
 
-        expect(
-            coordinator.completePanelPackAudioChange(.changed) == .windowReload,
-            "包音频或 manifest 真变化必须通知管理窗口重读")
+        coordinator.completePanelPackAudioChange(.changed)
         expect(coordinator.windowContentReloadRevision == 1, "changed 必须推进内容 revision")
         expect(coordinator.windowReloadRevision == 0, "内容变化不得复用切包 revision")
     }
@@ -487,14 +476,10 @@ func runSoundPacksRefreshSuites() async {
     suite("SoundPacksRefreshCoordinator：面板 config 真实变化只刷新窗口读模型") {
         let coordinator = SoundPacksRefreshCoordinator()
 
-        expect(
-            coordinator.completePanelConfigChange(.unchanged) == .none,
-            "没有 config 落盘变化不得发布假刷新")
+        coordinator.completePanelConfigChange(.unchanged)
         expect(coordinator.windowContentReloadRevision == 0, "unchanged 不得推进窗口 revision")
 
-        expect(
-            coordinator.completePanelConfigChange(.changed) == .windowReload,
-            "master_volume 等非切包 config 变化必须通知管理窗口重读")
+        coordinator.completePanelConfigChange(.changed)
         expect(coordinator.windowContentReloadRevision == 1, "config changed 必须推进内容 revision")
         expect(coordinator.windowReloadRevision == 0, "非切包 config 变化不得伪装成 active pack 切换")
         expect(coordinator.panelReloadRevision == 0, "panel 自己已重读，不得反向再刷一次")
@@ -602,7 +587,7 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
-    suite("窗口写后：configOnly 负控保持 stale，full effect 重算真实 PanelConfigController.packCards") {
+    suite("窗口写后：configOnly 负控保持 stale，full revision 重算真实 PanelConfigController.packCards") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
             let packsDirectory = root.appendingPathComponent("packs")
@@ -679,15 +664,11 @@ func runSoundPacksRefreshSuites() async {
             let coordinator = SoundPacksRefreshCoordinator()
 
             let failed = panel.switchPack(to: "missing-pack")
-            expect(
-                coordinator.completePanelPackSwitch(failed) == .none,
-                "失败切包的 outcome 不得推进窗口刷新")
+            coordinator.completePanelPackSwitch(failed)
             expect(coordinator.windowReloadRevision == 0, "失败切包不得让窗口假装跟随")
 
             let succeeded = panel.switchPack(to: "pack-b")
-            expect(
-                coordinator.completePanelPackSwitch(succeeded) == .windowReload,
-                "成功切包的 outcome 必须发布窗口刷新")
+            coordinator.completePanelPackSwitch(succeeded)
             expect(coordinator.windowReloadRevision == 1, "成功切包必须恰好推进一次窗口 revision")
             expect(panel.config.selectedPack == "pack-b", "前提：成功 outcome 必须对应真实落盘的 pack-b")
         }
