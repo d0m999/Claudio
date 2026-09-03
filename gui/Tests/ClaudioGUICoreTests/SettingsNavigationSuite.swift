@@ -294,17 +294,12 @@ func runSettingsNavigationSuites() {
 
             expect(emissions.count == 1, "订阅必须先同步交付初始 projection")
             expect(
-                editor.send(
-                    .activate(
-                        .events(
-                            route: EventSettingsWindowRoute(
-                                scope: .surface(.workBuddy),
-                                event: .stop),
-                            requestRevision: 132))) == .applied,
-                "fixture 必须触发 mode/revision 改变但不改变 Settings shell 事实")
+                editor.send(.activate(.inactive)) == .applied,
+                "fixture 必须触发 revision 改变但不改变 Settings shell 事实")
             expect(
                 emissions.count == 1,
-                "activity/mode/revision 等无关 editor publication 不得重复唤醒 Settings shell")
+                "activity/mode/revision 等无关 editor publication 不得重复唤醒 Settings shell，实得 "
+                    + "\(emissions.count) 次")
             withExtendedLifetime(cancellable) {}
         }
     }

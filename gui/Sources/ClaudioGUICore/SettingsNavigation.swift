@@ -154,6 +154,7 @@ package func settingsSoundPackShellProjections(
                 editorPresentation: editorPresentation,
                 sourceRows: integrationContent.sourceRows)
         }
+        .removeDuplicates()
         .eraseToAnyPublisher()
 }
 
