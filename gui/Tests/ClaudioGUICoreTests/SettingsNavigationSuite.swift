@@ -410,8 +410,6 @@ func runSettingsNavigationSuites() {
         guard
             let controller = settingsSource(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
-            let soundPacksOwner = settingsSource(
-                "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
             let view = settingsSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
             let gallery = settingsSource("gui/Sources/ClaudioGUI/StateGalleryView.swift"),
             let menuBar = settingsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
@@ -437,7 +435,8 @@ func runSettingsNavigationSuites() {
         if let presenting = controller.range(of: "isPresentingWindow = true")?.lowerBound,
             let modelPresent = controller.range(of: "let presentation = model.present")?.lowerBound,
             let makeKey = controller.range(of: "presentedWindow.makeKeyAndOrderFront")?.lowerBound,
-            let announce = controller.range(of: "announceSoundsPresentationIfNeeded")?.lowerBound,
+            let announce = controller.range(
+                of: "announcePendingSoundPackEditorAnnouncementIfNeeded")?.lowerBound,
             let presented = controller.range(
                 of: "isPresentingWindow = false",
                 range: makeKey..<controller.endIndex)?.lowerBound
@@ -452,7 +451,8 @@ func runSettingsNavigationSuites() {
         if let firstPresentationOnly = controller.range(
             of: "if !presentation.wasAlreadyPresented"),
             let announcementDebt = controller.range(of: "// The presentation latch"),
-            let announcement = controller.range(of: "announceSoundsPresentationIfNeeded"),
+            let announcement = controller.range(
+                of: "announcePendingSoundPackEditorAnnouncementIfNeeded"),
             let presentationEnds = controller.range(
                 of: "isPresentingWindow = false",
                 range: announcement.lowerBound..<controller.endIndex)
@@ -500,25 +500,34 @@ func runSettingsNavigationSuites() {
                 && controller.contains("integrationSurfaces: publishedSurfaces"),
             "Events 与面板必须共享可用 Sound Scope 过滤，Integrations 仍保留全部已发布 Surface")
         expect(
-            controller.contains("soundPackSelectionAnnouncementCancellable")
-                && controller.contains("soundPackLibraryAnnouncementCancellable")
-                && controller.contains("soundPackStatusAnnouncementCancellable")
+            controller.contains("soundPackPresentationAnnouncementCancellable")
+                && controller.contains("soundPacksEditorOwner.$presentation")
+                && controller.contains(".map(\\.pendingAnnouncement)")
                 && controller.contains("DispatchQueue.main.async { [weak self] in")
                 && controller.contains(
                     "destination == .sounds,\n                        !self.isPresentingWindow")
                 && controller.contains("model.resolution.destination == .sounds")
+                && controller.contains("window.isVisible")
                 && controller.contains("window.isKeyWindow")
-                && controller.contains("SoundPacksWindowAccessibilityBridge.post(")
-                && controller.contains(".selectionChanged")
-                && controller.contains(".libraryStateChanged")
-                && controller.contains("status.severity == .failure")
+                && controller.contains("SoundPacksEditorAnnouncementDelivery")
+                && controller.contains("SystemSoundPacksEditorAccessibilityPoster")
                 && controller.contains("func windowDidBecomeKey")
-                && controller.contains("announceLatestSoundPackStatusIfNeeded(in: keyWindow)")
-                && controller.contains("soundPacksEditorOwner.beginStatusAnnouncementAttempt(")
-                && controller.contains("soundPacksEditorOwner.finishStatusAnnouncementAttempt(")
-                && soundPacksOwner.contains("private var statusAnnouncementTracker")
-                && soundPacksOwner.contains("shouldAnnounceSelectionChange(to packID:"),
-            "唯一 Settings 必须只由实际 key Sounds presentation 播报，并共享 status/suppression 消费")
+                && controller.contains(
+                    "announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)")
+                && controller.contains(
+                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
+                && !controller.contains("soundPackSelectionAnnouncementCancellable")
+                && !controller.contains("soundPackLibraryAnnouncementCancellable")
+                && !controller.contains("soundPackStatusAnnouncementCancellable")
+                && !controller.contains("soundPackModel.$selectedPackID")
+                && !controller.contains("soundPackModel.$libraryPresentationState")
+                && !controller.contains("soundPackModel.$windowStatuses")
+                && !controller.contains("beginStatusAnnouncementAttempt(")
+                && !controller.contains("finishStatusAnnouncementAttempt(")
+                && !controller.contains("announcementFacts(")
+                && !controller.contains("SoundPacksWindowAccessibilityBridge.post("),
+            "唯一 Settings 必须只在 visible + key + active Sounds 时消费 owner semantic "
+                + "announcement，并用 exact ID 回报 post 结果")
         expect(
             view.contains("settingsSidebarSections(")
                 && view.contains("moveSidebarSelection(")

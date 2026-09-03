@@ -38,6 +38,7 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
                             selectedPackName: "pack-a",
                             libraryPresentationState: .ready)),
                 "[129-ANN-RED] window-open debt 必须携带 exact semantic kind/facts")
+            expect(opened.priority == .notice, "window-open semantic debt 必须显式标记 notice")
             expect(
                 fixture.owner.send(
                     .acknowledgeAnnouncement(id: opened.id, didPost: false)) == .unchanged
@@ -192,6 +193,9 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
                 expect(false, "[129-ANN-RED] 后到 failure 必须抢占未 ack 的 notice")
                 return
             }
+            expect(
+                notice.priority == .notice && failure.priority == .failure,
+                "controller 必须直接消费 semantic priority，不能反查 raw window status")
             expect(
                 owner.send(
                     .acknowledgeAnnouncement(id: notice.id, didPost: false)) == .unchanged

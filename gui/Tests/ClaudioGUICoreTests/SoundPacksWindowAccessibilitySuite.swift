@@ -520,8 +520,10 @@ func runSoundPacksWindowAccessibilitySuites() {
             let source = String(data: data, encoding: .utf8)
         {
             scannedSources.append(
-                (name: "ClaudioGUICore/SoundPacksWindowAccessibility.swift",
-                 code: strippingComments(source).code))
+                (
+                    name: "ClaudioGUICore/SoundPacksWindowAccessibility.swift",
+                    code: strippingComments(source).code
+                ))
         } else {
             expect(false, "读不到窗口专用的 Core a11y 设施")
         }
@@ -531,8 +533,10 @@ func runSoundPacksWindowAccessibilitySuites() {
             let source = String(data: data, encoding: .utf8)
         {
             scannedSources.append(
-                (name: "ClaudioGUICore/SoundPacksEditorOwner.swift",
-                    code: strippingComments(source).code))
+                (
+                    name: "ClaudioGUICore/SoundPacksEditorOwner.swift",
+                    code: strippingComments(source).code
+                ))
         } else {
             expect(false, "读不到共享 editor owner")
         }
@@ -542,8 +546,10 @@ func runSoundPacksWindowAccessibilitySuites() {
             let source = String(data: data, encoding: .utf8)
         {
             scannedSources.append(
-                (name: "ClaudioGUI/SettingsWindowController.swift",
-                    code: strippingComments(source).code))
+                (
+                    name: "ClaudioGUI/SettingsWindowController.swift",
+                    code: strippingComments(source).code
+                ))
         } else {
             expect(false, "读不到统一 Settings window owner")
         }
@@ -591,8 +597,6 @@ func runSoundPacksWindowAccessibilitySuites() {
             let view = sourceByName["SoundPacksWindow/SoundPacksWindowView.swift"],
             let controller = sourceByName[
                 "ClaudioGUI/SettingsWindowController.swift"],
-            let editorOwner = sourceByName[
-                "ClaudioGUICore/SoundPacksEditorOwner.swift"],
             let bridge = sourceByName[
                 "SoundPacksWindow/SoundPacksWindowAccessibilityBridge.swift"]
         else {
@@ -601,10 +605,11 @@ func runSoundPacksWindowAccessibilitySuites() {
         }
 
         expect(
-            view.contains(".focusable(!model.packCards.isEmpty)")
+            view.contains(".focusable(!activeSounds.packs.isEmpty)")
                 && view.contains(".focused($focusedTarget, equals: .packList)")
-                && view.contains(".focused($focusedTarget, equals: .revealSelectedPack)"),
-            "纯焦点序必须绑到列表与 Finder 真控件，空列表必须明确不可聚焦")
+                && view.contains(".focused($focusedTarget, equals: .revealSelectedPack)")
+                && view.contains("card.revealAction"),
+            "纯焦点序必须绑到 owner 投影的列表与 Finder capability，空列表不可聚焦")
         expect(
             view.contains("soundPacksWindowFocusOrder(focusScope)")
                 && view.contains("soundPacksWindowFirstFocusTarget(focusScope)"),
@@ -631,8 +636,8 @@ func runSoundPacksWindowAccessibilitySuites() {
 
         guard
             let responderIndex = controller.range(of: "makeFirstResponder")?.lowerBound,
-            let announcementIndex = controller.range(of: "announceSoundsPresentationIfNeeded")?
-                .lowerBound
+            let announcementIndex = controller.range(
+                of: "announcePendingSoundPackEditorAnnouncementIfNeeded")?.lowerBound
         else {
             expect(false, "Settings 展示必须先进入 responder chain，再处理 Sounds 公告")
             return
@@ -645,34 +650,36 @@ func runSoundPacksWindowAccessibilitySuites() {
                 && bridge.contains("window.isKeyWindow")
                 && bridge.contains("NSAccessibility.post")
                 && bridge.contains("language: ClaudioAppLanguage")
-                && bridge.contains("soundPacksWindowAnnouncement(\n            moment,\n            facts: facts,\n            language: language)"),
+                && bridge.contains("soundPacksEditorAccessibilityRequest(")
+                && bridge.contains("announcement.priority == .failure ? .high : .medium"),
             "播报必须延后一趟等窗口进入 AX 树，并在真正 post 前重新确认仍是 key window")
         expect(
-            controller.contains("let soundPackModel = soundPacksEditorOwner.model")
-                && controller.contains("soundPackModel.$windowStatuses")
-                && controller.contains("status.severity == .failure")
+            controller.contains("soundPacksEditorOwner.$presentation")
+                && controller.contains(".map(\\.pendingAnnouncement)")
+                && controller.contains("SoundPacksEditorAnnouncementDelivery")
+                && controller.contains("soundPackAnnouncementDelivery.attempt(")
                 && controller.contains(
-                    ".writeSucceeded(message: status.message(language: preferences.language))")
-                && controller.contains("facts: soundPacksEditorOwner.announcementFacts()")
-                && controller.contains("facts: self.soundPacksEditorOwner.announcementFacts(")
-                && controller.contains("usesEmittedSelection: true")
-                && controller.contains("libraryPresentationState: libraryState")
-                && editorOwner.contains("public func announcementFacts("),
-            "恢复、音频、星标、复制和启用必须共用一个 revision 驱动的 VoiceOver 出口")
+                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
+                && !controller.contains("soundPackModel.$selectedPackID")
+                && !controller.contains("soundPackModel.$libraryPresentationState")
+                && !controller.contains("soundPackModel.$windowStatuses")
+                && !controller.contains("announcementFacts("),
+            "恢复、音频、星标、复制和启用必须共用 owner 的单一 semantic announcement 出口")
         expect(
             controller.contains("SettingsWindowGeometry.defaultWidth")
                 && controller.contains("SettingsWindowGeometry.minimumWidth"),
             "Sounds 必须使用统一 Settings 窗口尺寸合同")
         expect(
             controller.contains("func windowDidBecomeKey")
-                && controller.contains("announceLatestSoundPackStatusIfNeeded(in: keyWindow)")
-                && controller.contains("soundPacksEditorOwner.beginStatusAnnouncementAttempt(")
-                && controller.contains("soundPacksEditorOwner.finishStatusAnnouncementAttempt(")
-                && editorOwner.contains("private var statusAnnouncementTracker"),
-            "窗口非 key 期间完成的全局结果必须在重新成为 key 时补播且 revision 去重")
+                && controller.contains(
+                    "announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)")
+                && controller.contains("soundPackAnnouncementDelivery")
+                && controller.contains("window.isVisible")
+                && controller.contains("window.isKeyWindow"),
+            "窗口非 key 期间不得消费 semantic debt，重新成为 key 时必须补播且防止同一 ID 并发双播")
         expect(
-            bridge.contains("completion?(false)")
-                && bridge.contains("completion?(true)"),
+            bridge.contains("completion(false)")
+                && bridge.contains("completion(true)"),
             "bridge 必须把异步 key-window 复核后的真实 post 结果回传，不能提前消费 revision")
     }
 }

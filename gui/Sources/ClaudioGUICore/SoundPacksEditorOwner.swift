@@ -141,6 +141,22 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 afterFinalCancellationSampleForTesting:
                     afterFinalImportCancellationSampleForTesting))
     }
+
+    /// Creates a real accepted/busy owner transition for the no-I/O state gallery, then cancels
+    /// its not-yet-started scheduled writer while retaining that immutable presentation frame.
+    /// The MainActor synchronous boundary guarantees the task cannot reach its first yield before
+    /// cancellation. Production builds do not expose this static-fixture seam.
+    @discardableResult
+    package func freezeAcceptedOperationForStateGalleryFixture(
+        _ action: SoundPackEditorAction
+    ) -> Bool {
+        guard case .accepted(let operationID) = send(.invoke(action)),
+            let task = operationTasks.removeValue(forKey: operationID)
+        else { return false }
+        task.cancel()
+        operationCancellations.removeValue(forKey: operationID)
+        return operationStates[operationID]?.phase == .busy
+    }
     #endif
 
     private static func initialPresentation(
@@ -223,6 +239,11 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return .applied
         case .invoke(let action):
             return invoke(action)
+        case .prepareDrop(let action):
+            guard action.kind == .requestImport else {
+                return .rejected(.actionUnavailable)
+            }
+            return invoke(action, importSource: .drop)
         case .completePanelPackSwitch(let outcome):
             completePanelPackSwitch(outcome)
             return outcome.refreshesEditor ? .applied : .unchanged
@@ -475,11 +496,16 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return .adoptionOrphan(imported: imported, failure: .mutationFailed)
         }
         settleAsyncOperation(operationID, phase: .succeeded, seed: settledSeed)
+        let previewAction = makeForegroundPreviewAction(
+            imported,
+            seed: settledSeed)
         return .adopted(
-            AICueAdoptionOutcome(
-                target: binding.target,
-                importedFile: imported,
-                finalDisplayName: bindingOutcome.finalDisplayName))
+            SoundPackEditorAdoptionOutcome(
+                outcome: AICueAdoptionOutcome(
+                    target: binding.target,
+                    importedFile: imported,
+                    finalDisplayName: bindingOutcome.finalDisplayName),
+                previewAction: previewAction))
     }
 
     private func performImport(
@@ -514,14 +540,11 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return .rejected(.builtinReadOnly)
         }
         guard !sources.isEmpty else {
-            return .imported(
-                SoundPackEditorImportOutcome(
-                    accepted: [],
-                    rejected: [],
-                    boundEvent: nil,
-                    completedInBackground: false,
-                    orphan: nil,
-                    completion: .unchanged))
+            // The picker/drop capability was consumed, so publish a fresh generation even
+            // though no domain fact changed. This keeps a cancelled UI affordance retryable
+            // without inventing activity, status, announcement, disk work, or a shared scan.
+            publish(from: seed)
+            return .rejected(.cancelled)
         }
         let eventBinding = bindTo.flatMap { eventBindingExpectation(for: $0, in: seed) }
         if bindTo != nil, eventBinding == nil {
@@ -634,7 +657,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     boundEvent: nil,
                     completedInBackground: false,
                     orphan: nil,
-                    completion: .failed(.importRejected)))
+                    completion: .failed(.importRejected),
+                    previewAction: nil))
         }
 
         model.refreshEditorConfigProjection()
@@ -722,6 +746,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
             completion = .succeeded
         }
         settleAsyncOperation(operationID, phase: phase, seed: settledSeed)
+        let previewAction: SoundPackEditorAction?
+        if !completedInBackground, failure == nil, let imported = batch.accepted.last {
+            previewAction = makeForegroundPreviewAction(imported, seed: settledSeed)
+        } else {
+            previewAction = nil
+        }
         return .imported(
             SoundPackEditorImportOutcome(
                 accepted: batch.accepted,
@@ -729,7 +759,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 boundEvent: boundEvent,
                 completedInBackground: completedInBackground,
                 orphan: orphan,
-                completion: completion))
+                completion: completion,
+                previewAction: previewAction))
     }
 
     private func eventBindingExpectation(
@@ -807,6 +838,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
         return operationID
     }
 
+    private var hasBusyOperation: Bool {
+        operationStates.values.contains { $0.phase == .busy }
+    }
+
     private func settleAsyncOperation(
         _ operationID: SoundPackEditorOperationID,
         phase: SoundPackEditorActivityPhase,
@@ -825,7 +860,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
         publish(from: seed)
     }
 
-    private func invoke(_ action: SoundPackEditorAction) -> SoundPacksEditorCommandResult {
+    private func invoke(
+        _ action: SoundPackEditorAction,
+        importSource: EditorImportSource = .picker
+    ) -> SoundPacksEditorCommandResult {
         // Latest config/scope has precedence over capability identity. This is a config-only read
         // and deliberately does not ask the shared library to scan.
         model.refreshEditorConfigProjection()
@@ -835,7 +873,11 @@ public final class SoundPacksEditorOwner: ObservableObject {
             publish(from: seed)
             return .rejected(.scopeUnavailable)
         }
-        if action.kind.requiresFreshLibrary, !seed.library.isFresh {
+        let candidateBinding = actionLedger[action.id]
+        if action.kind.requiresFreshLibrary,
+            candidateBinding?.intent.allowsNonFreshLibrary != true,
+            !seed.library.isFresh
+        {
             consumeConfirmationAttemptIfCurrent(action)
             publish(from: seed)
             return action.kind == .confirm
@@ -844,7 +886,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
         guard let binding = actionLedger[action.id], binding.context == context,
             binding.actionEpoch == actionEpoch,
             binding.selectionGeneration == seed.selectionGeneration,
-            binding.snapshotRevision == seed.snapshotRevision
+            binding.intent.allowsSnapshotAdvance
+                || binding.snapshotRevision == seed.snapshotRevision
         else {
             switch action.kind {
             case .confirm, .cancelConfirmation:
@@ -879,7 +922,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
         case .requestImport(let packID, let bindTo):
             publish(from: seed)
             let permit = makeImportPermit(packID: packID, bindTo: bindTo, seed: seed)
-            return .nativeEffect(.selectAudioFiles(permit: permit, bindTo: bindTo))
+            switch importSource {
+            case .picker:
+                return .nativeEffect(.selectAudioFiles(permit: permit, bindTo: bindTo))
+            case .drop:
+                return .importPermit(permit: permit, bindTo: bindTo)
+            }
         case .assign(let packID, let fileName, let event):
             return acceptScheduledOperation(
                 kind: .assign,
@@ -895,6 +943,19 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 binding: binding,
                 work: .clear(packID: packID, event: event))
         case .preview(let fileURL):
+            publish(from: seed)
+            return .nativeEffect(
+                .playAudio(
+                    fileURL: fileURL,
+                    volume: AfplayVolume.clamped(seed.config.masterVolume)))
+        case .previewForegroundImport(let fileURL, let packID):
+            guard seed.installedPackIDs.contains(packID),
+                seed.selectedPackID == packID,
+                !seed.builtinPackIDs.contains(packID)
+            else {
+                publish(from: seed)
+                return .rejected(.staleAction)
+            }
             publish(from: seed)
             return .nativeEffect(
                 .playAudio(
@@ -1249,7 +1310,22 @@ public final class SoundPacksEditorOwner: ObservableObject {
             clearPendingConfirmation()
         }
         presentationRevision &+= 1
-        actionLedger.removeAll(keepingCapacity: true)
+        let preservesPreBusyCapabilities = hasBusyOperation
+        actionLedger = actionLedger.filter { _, binding in
+            if preservesPreBusyCapabilities {
+                return binding.context == context
+                    && binding.actionEpoch == actionEpoch
+                    && binding.selectionGeneration == seed.selectionGeneration
+                    && (binding.intent.allowsSnapshotAdvance
+                        || binding.snapshotRevision == seed.snapshotRevision)
+            }
+            guard let packID = binding.intent.foregroundPreviewPackID else { return false }
+            return binding.context == context
+                && binding.actionEpoch == actionEpoch
+                && binding.selectionGeneration == seed.selectionGeneration
+                && seed.installedPackIDs.contains(packID)
+                && !seed.builtinPackIDs.contains(packID)
+        }
         prunePermits(using: seed)
         if interfaceHasActivated {
             ingestAnnouncements(from: seed.windowStatuses)
@@ -1293,7 +1369,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
         requestRevision: UInt64,
         seed: SoundPacksEditorModelSeed
     ) -> SoundsEditorPresentation {
-        let packs = seed.packCards.map { makePackPresentation(card: $0, seed: seed) }
+        let packs = seed.packCards.map {
+            makePackPresentation(
+                card: $0,
+                seed: seed,
+                signsWriteActions: !hasBusyOperation)
+        }
         let selectedPack = packs.first(where: { $0.id == seed.selectedPackID })
         let routeState: SoundPacksEditorRouteState
         if case .ready = seed.library {
@@ -1312,21 +1393,66 @@ public final class SoundPacksEditorOwner: ObservableObject {
             selectedPack.map {
                 seed.library.isFresh && !$0.isBuiltinReadOnly
                     && $0.availability == .installed && seed.writesAllowed
+                    && !hasBusyOperation
             } ?? false
         let writablePackID = selectedIsWritable ? selectedPack?.id : nil
         let selectedNativeTargets = selectedPack.flatMap {
             seed.nativeTargetsByPackID[$0.id]
         }
+        let restoreAllFactoryPacksAction =
+            seed.library.isFresh && seed.writesAllowed && !hasBusyOperation
+                && !seed.builtinPackIDs.isEmpty
+            ? makeAction(
+                .restoreAllFactory,
+                binding: .requestRestoreAllFactory,
+                seed: seed)
+            : nil
+        let emptyLibraryRecovery: SoundPackEditorEmptyLibraryRecoveryPresentation
+        if seed.library.isFresh, packs.isEmpty {
+            if !seed.builtinPackIDs.isEmpty {
+                emptyLibraryRecovery =
+                    restoreAllFactoryPacksAction.map {
+                        .restoreFactory(action: $0)
+                    } ?? .none
+            } else {
+                emptyLibraryRecovery = .revealRoot(
+                    displayValue: userPacksDirectory.path,
+                    action: makeAction(
+                        .reveal,
+                        binding: .reveal(fileURL: userPacksDirectory),
+                        seed: seed))
+            }
+        } else {
+            emptyLibraryRecovery = .none
+        }
         return SoundsEditorPresentation(
             route: route,
             requestRevision: requestRevision,
             routeState: routeState,
-            scope: scopeAvailability(seed),
+            scope: scopeAvailability(
+                seed,
+                requestedScope: route.surface.map(PanelSoundScopeID.surface) ?? .global),
             packs: packs,
             selectedPack: selectedPack,
             eventRows: seed.selectedEventRows.map { row in
+                let derivedPreviewAvailability = eventPreviewAvailability(
+                    coverage: row.coverage,
+                    masterVolume: seed.config.masterVolume)
+                let previewAvailability: EventPreviewAvailability
+                if derivedPreviewAvailability.isAvailable,
+                    selectedNativeTargets?.eventAudioURLs[row.event] == nil
+                {
+                    switch row.coverage {
+                    case .present(let fileName), .broken(let fileName):
+                        previewAvailability = .missingOrDamaged(fileName: fileName)
+                    case .unmapped:
+                        previewAvailability = .unmapped
+                    }
+                } else {
+                    previewAvailability = derivedPreviewAvailability
+                }
                 let previewAction: SoundPackEditorAction?
-                if seed.library.isFresh, row.coverage.previewEnabled,
+                if seed.library.isFresh, previewAvailability.isAvailable,
                     let target = selectedNativeTargets?.eventAudioURLs[row.event]
                 {
                     previewAction = makeAction(
@@ -1341,6 +1467,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     coverage: row.coverage,
                     enabled: row.enabled,
                     audioDisplayName: row.audioDisplayName,
+                    previewAvailability: previewAvailability,
                     importAction: selectedIsWritable
                         ? makeAction(
                             .requestImport,
@@ -1373,14 +1500,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
             retryLibraryAction: seed.library.canRetryEditorLibrary
                 ? makeAction(.retryLibrary, binding: .retryLibrary, seed: seed)
                 : nil,
-            restoreAllFactoryPacksAction: seed.library.isFresh && seed.writesAllowed
-                && !seed.builtinPackIDs.isEmpty
-                ? makeAction(
-                    .restoreAllFactory,
-                    binding: .requestRestoreAllFactory,
-                    seed: seed)
-                : nil,
-            recoveryActions: seed.library.isFresh && seed.writesAllowed
+            restoreAllFactoryPacksAction: restoreAllFactoryPacksAction,
+            emptyLibraryRecovery: emptyLibraryRecovery,
+            windowStatuses: seed.windowStatuses,
+            recoveryActions: seed.library.isFresh && seed.writesAllowed && !hasBusyOperation
                 ? seed.factoryRestoreRetryPackIDs.map { packID in
                     SoundPackEditorRecoveryPresentation(
                         packID: packID,
@@ -1412,7 +1535,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         return EventsSoundPackPresentation(
             route: route,
             requestRevision: requestRevision,
-            scope: scopeAvailability(seed),
+            scope: scopeAvailability(seed, requestedScope: route.scope),
             packs: packs,
             selectedPack: packs.first(where: { $0.id == seed.selectedPackID }),
             adoptionPermit: adoptionPermit,
@@ -1422,24 +1545,28 @@ public final class SoundPacksEditorOwner: ObservableObject {
     }
 
     private func scopeAvailability(
-        _ seed: SoundPacksEditorModelSeed
+        _ seed: SoundPacksEditorModelSeed,
+        requestedScope: PanelSoundScopeID
     ) -> SoundPackEditorScopeAvailability {
         guard isValidSoundPacksWindowSurface(seed.managedSurface), seed.writesAllowed else {
-            return .unavailable(.scopeUnavailable)
+            return .unavailable(scope: requestedScope, reason: .scopeUnavailable)
         }
         return .available(seed.managedSurface.map(PanelSoundScopeID.surface) ?? .global)
     }
 
     private func makePackPresentation(
         card: PackCard,
-        seed: SoundPacksEditorModelSeed
+        seed: SoundPacksEditorModelSeed,
+        signsWriteActions: Bool = true
     ) -> SoundPackEditorPackPresentation {
         let isInspected = card.id == seed.selectedPackID
         let isActiveForScope = card.isSelected
         let isReferencedByAnyScope = seed.referencedPackIDs.contains(card.id)
         let isBuiltin = seed.builtinPackIDs.contains(card.id)
         let isAvailable = card.availability == .installed
-        let writesAllowed = seed.library.isFresh && seed.writesAllowed && isAvailable
+        let writesAllowed =
+            seed.library.isFresh && seed.writesAllowed && isAvailable && signsWriteActions
+        let nativeTarget = seed.nativeTargetsByPackID[card.id]
         let isBroken: Bool
         if case .broken = card.state {
             isBroken = true
@@ -1479,12 +1606,14 @@ public final class SoundPacksEditorOwner: ObservableObject {
                     seed: seed)
                 : nil,
             revealAction: seed.library.isFresh && isAvailable
-                ? seed.nativeTargetsByPackID[card.id].map {
+                ? nativeTarget.map {
                     makeAction(
                         .reveal,
                         binding: .reveal(fileURL: $0.directoryURL),
                         seed: seed)
-                } : nil)
+                } : nil,
+            revealDisplayValue: seed.library.isFresh && isAvailable
+                ? nativeTarget?.directoryURL.path : nil)
     }
 
     private func makeInventory(
@@ -1718,7 +1847,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
 
     private func announcementPriority(
         for state: SoundPackLibraryPresentationState
-    ) -> EditorAnnouncementPriority {
+    ) -> SoundPackEditorAnnouncementPriority {
         switch state {
         case .loadFailed, .refreshFailed:
             return .failure
@@ -1729,7 +1858,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
 
     private func enqueueSemanticAnnouncement(
         _ kind: SoundPackEditorAnnouncementKind,
-        priority: EditorAnnouncementPriority
+        priority: SoundPackEditorAnnouncementPriority
     ) {
         enqueueAnnouncement(
             kind: kind,
@@ -1744,13 +1873,14 @@ public final class SoundPacksEditorOwner: ObservableObject {
         actionText: SoundPacksWindowStatusText?,
         messageText: SoundPacksWindowStatusText?,
         operationID: SoundPackEditorOperationID?,
-        priority: EditorAnnouncementPriority
+        priority: SoundPackEditorAnnouncementPriority
     ) {
         nextCapabilityID &+= 1
         let debt = EditorAnnouncementDebt(
             announcement: SoundPackEditorAnnouncement(
                 id: SoundPackEditorAnnouncement.ID(rawValue: nextCapabilityID),
                 kind: kind,
+                priority: priority,
                 actionText: actionText,
                 messageText: messageText),
             operationID: operationID,
@@ -1799,6 +1929,18 @@ public final class SoundPacksEditorOwner: ObservableObject {
             selectionGeneration: seed.selectionGeneration,
             snapshotRevision: seed.snapshotRevision)
         return action
+    }
+
+    private func makeForegroundPreviewAction(
+        _ imported: ImportedAudioFile,
+        seed: SoundPacksEditorModelSeed
+    ) -> SoundPackEditorAction {
+        makeAction(
+            .preview,
+            binding: .previewForegroundImport(
+                fileURL: imported.destinationURL,
+                packID: imported.packID),
+            seed: seed)
     }
 
     private func makeAdoptionPermit(
@@ -1993,12 +2135,7 @@ private struct EditorOperationState {
 private struct EditorAnnouncementDebt {
     let announcement: SoundPackEditorAnnouncement
     let operationID: SoundPackEditorOperationID?
-    let priority: EditorAnnouncementPriority
-}
-
-private enum EditorAnnouncementPriority: Int {
-    case failure
-    case notice
+    let priority: SoundPackEditorAnnouncementPriority
 }
 
 extension SoundPackEditorActivityPhase {
@@ -2021,7 +2158,7 @@ extension SoundPackEditorActivityPhase {
 }
 
 extension SoundPackEditorOperationCompletion {
-    fileprivate var announcementPriority: EditorAnnouncementPriority {
+    fileprivate var announcementPriority: SoundPackEditorAnnouncementPriority {
         switch self {
         case .failed, .orphan:
             return .failure
@@ -2120,6 +2257,11 @@ private enum EditorScheduledWork {
 
 }
 
+private enum EditorImportSource {
+    case picker
+    case drop
+}
+
 private enum EditorActionIntent {
     case inspect(packID: String)
     case use(packID: String)
@@ -2129,6 +2271,7 @@ private enum EditorActionIntent {
     case assign(packID: String, fileName: String, event: Event)
     case clear(packID: String, event: Event)
     case preview(fileURL: URL)
+    case previewForegroundImport(fileURL: URL, packID: String)
     case stopPreview
     case reveal(fileURL: URL)
     case requestDeletePack(packID: String)
@@ -2140,6 +2283,21 @@ private enum EditorActionIntent {
     case cancelOperation(SoundPackEditorOperationID)
     case confirm(SoundPackEditorConfirmation.ID)
     case cancelConfirmation(SoundPackEditorConfirmation.ID)
+}
+
+extension EditorActionIntent {
+    fileprivate var foregroundPreviewPackID: String? {
+        if case .previewForegroundImport(_, let packID) = self { return packID }
+        return nil
+    }
+
+    fileprivate var allowsNonFreshLibrary: Bool {
+        foregroundPreviewPackID != nil
+    }
+
+    fileprivate var allowsSnapshotAdvance: Bool {
+        foregroundPreviewPackID != nil
+    }
 }
 
 extension SoundPackLibraryPresentation {

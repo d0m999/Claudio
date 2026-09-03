@@ -1082,8 +1082,11 @@ func runSoundPacksEditorMutationSuites() async {
                 "scope failure 的第一次 confirm 尝试仍必须同栈消费并清 UI")
             if case .sounds(let failedScope) = owner.presentation.mode {
                 expect(
-                    failedScope.scope == .unavailable(.scopeUnavailable),
-                    "malformed Surface config 必须显式投影 unavailable，不得借 Global 回落恢复写权")
+                    failedScope.scope
+                        == .unavailable(
+                            scope: .surface(.workBuddy),
+                            reason: .scopeUnavailable),
+                    "malformed Surface config 必须保留 requested Surface 显示身份，且不得借 Global 回落恢复写权")
             } else {
                 expect(false, "scope failure 后必须保持 Sounds failure slice")
             }
@@ -1523,6 +1526,7 @@ func runSoundPacksEditorMutationSuites() async {
             await waitForSoundEditorOperation(owner, operationID: operationID)
             await waitForSoundEditorScanCount(fixture.recorder, atLeast: scansBefore + 1)
             await fixture.library.waitUntilIdleForTesting()
+            await owner.waitForMutationTransactionsToQuiesceForTesting()
             expect(
                 owner.presentation.activities.first(where: {
                     $0.operationID == operationID

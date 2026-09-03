@@ -392,8 +392,16 @@ func runSoundPacksEditorInterfaceSuites() async {
                 config: ClaudioConfig(selectedPack: "pack-a"))
             let owner = fixture.owner
             var observed = [owner.presentation.library]
+            var loadingPreviousSounds: SoundsEditorPresentation?
             var cancellables = Set<AnyCancellable>()
-            owner.$presentation.sink { observed.append($0.library) }.store(in: &cancellables)
+            owner.$presentation.sink { presentation in
+                observed.append(presentation.library)
+                if presentation.library == .loading(previousAvailable: true),
+                    case .sounds(let sounds) = presentation.mode
+                {
+                    loadingPreviousSounds = sounds
+                }
+            }.store(in: &cancellables)
 
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 23)))
             await waitForSoundEditorReady(owner, library: fixture.library)
@@ -414,6 +422,12 @@ func runSoundPacksEditorInterfaceSuites() async {
             expect(
                 observed.contains(.loading(previousAvailable: true)),
                 "refresh 必须保留 loading(previous: true) 语义")
+            expect(
+                loadingPreviousSounds?.eventRows.first(where: { $0.event == .stop })?
+                    .previewAvailability.isAvailable == true
+                    && loadingPreviousSounds?.eventRows.first(where: { $0.event == .stop })?
+                        .previewAction == nil,
+                "refreshing(previous) 可保留 mapped 语义，但不得签发 no-op preview capability")
             guard
                 case .failed(
                     previousAvailable: true,
@@ -612,6 +626,132 @@ func runSoundPacksEditorInterfaceSuites() async {
             expect(
                 owner.presentation.library.isFresh,
                 "installed identity 必须与同一 coherent root 的 freshness 一起可观察")
+        }
+    }
+
+    await suite("Sound editor presentation：视觉 status 与 announcement debt 生命周期分离") {
+        withTempDirectory { root in
+            let packID = "factory-a"
+            let status = SoundPacksWindowStatus(
+                kind: .factoryRestore,
+                severity: .failure,
+                revision: 701,
+                action: "Restore",
+                message: "Retained failure",
+                recovery: .retryFactoryRestores(packIDs: [packID]))
+            let model = SoundPacksWindowModel(
+                previewConfig: ClaudioConfig(selectedPack: packID),
+                packCards: [
+                    PackCard(
+                        id: packID,
+                        name: "Factory A",
+                        isCC0: true,
+                        presentEvents: Set(Event.allCases),
+                        state: .complete,
+                        isSelected: true)
+                ],
+                selectedPackID: packID,
+                selectedEventRows: [],
+                builtinPackIDs: [packID],
+                windowStatuses: [status],
+                environment: makeAudioImportEnvironment(
+                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)),
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            let owner = SoundPacksEditorOwner(
+                model: model,
+                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 701)))
+
+            guard case .sounds(let beforeAck) = owner.presentation.mode,
+                beforeAck.windowStatuses == [status],
+                let oldRetry = beforeAck.recoveryActions.first?.retryAction
+            else {
+                expect(false, "render-ready slice 必须携带持久 status 与 owner-signed recovery")
+                return
+            }
+
+            for _ in 0..<4 {
+                guard let announcement = owner.presentation.pendingAnnouncement else { break }
+                expect(
+                    owner.send(.acknowledgeAnnouncement(id: announcement.id, didPost: true))
+                        == .applied,
+                    "测试必须消费可访问性 announcement debt")
+            }
+            guard case .sounds(let afterAck) = owner.presentation.mode,
+                afterAck.windowStatuses == [status],
+                let currentRetry = afterAck.recoveryActions.first?.retryAction
+            else {
+                expect(false, "AX ack 后视觉 status/recovery 必须继续持久显示")
+                return
+            }
+            expect(
+                currentRetry != oldRetry,
+                "当前 recovery capability 必须在 AX ack publication 后重新签发")
+            expect(
+                owner.send(.invoke(oldRetry)) == .rejected(.staleAction),
+                "旧 recovery capability 必须随 owner publication 失效")
+        }
+    }
+
+    await suite("Sound editor presentation：空库明确区分 factory restore 与安全 root reveal") {
+        await withTempDirectory { root in
+            let factoryFixture = makeSoundEditorFixture(
+                root: root.appendingPathComponent("factory-case"),
+                packIDs: [],
+                builtinPackIDs: ["factory-a"])
+            _ = factoryFixture.owner.send(
+                .activate(.sounds(route: .overview, requestRevision: 702)))
+            await waitForSoundEditorReady(factoryFixture.owner, library: factoryFixture.library)
+            guard case .sounds(let factorySounds) = factoryFixture.owner.presentation.mode,
+                case .restoreFactory(let restoreAction) =
+                    factorySounds.emptyLibraryRecovery,
+                case .confirmation(let confirmation) =
+                    factoryFixture.owner.send(.invoke(restoreAction))
+            else {
+                expect(false, "有 factory 的空库必须只投影 owner-signed restore recovery")
+                return
+            }
+            expect(
+                confirmation.kind == .restoreAllFactory,
+                "empty factory recovery 必须复用现有 restore-all confirmation seam")
+
+            let revealCaseRoot = root.appendingPathComponent("reveal-case")
+            let revealRoot = revealCaseRoot.appendingPathComponent("packs", isDirectory: true)
+            let revealFixture = makeSoundEditorFixture(
+                root: revealCaseRoot,
+                packIDs: [])
+            _ = revealFixture.owner.send(
+                .activate(.sounds(route: .overview, requestRevision: 703)))
+            await waitForSoundEditorReady(revealFixture.owner, library: revealFixture.library)
+            guard case .sounds(let revealSounds) = revealFixture.owner.presentation.mode,
+                case .revealRoot(let displayValue, let revealAction) =
+                    revealSounds.emptyLibraryRecovery,
+                case .nativeEffect(.reveal(let revealedURL)) =
+                    revealFixture.owner.send(.invoke(revealAction))
+            else {
+                expect(false, "无 factory 的空库必须提供 owner-signed safe-root reveal")
+                return
+            }
+            expect(
+                revealedURL == revealRoot
+                    && displayValue == revealRoot.path,
+                "空库 Finder AX Value 必须由 owner 投影 display-only path；typed URL 留在 invoke effect")
+
+            let populatedFixture = makeSoundEditorFixture(
+                root: root.appendingPathComponent("populated-case"),
+                packIDs: ["pack-a"])
+            _ = populatedFixture.owner.send(
+                .activate(.sounds(route: .overview, requestRevision: 704)))
+            await waitForSoundEditorReady(
+                populatedFixture.owner,
+                library: populatedFixture.library)
+            guard case .sounds(let populated) = populatedFixture.owner.presentation.mode else {
+                expect(false, "populated fixture 必须进入 Sounds mode")
+                return
+            }
+            expect(
+                populated.emptyLibraryRecovery == .none,
+                "非空库不得携带 empty-state restore/reveal capability")
         }
     }
 }

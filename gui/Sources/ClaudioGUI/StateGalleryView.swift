@@ -443,6 +443,7 @@ private struct SettingsWindowRouteFrame: View {
     @StateObject private var usageSettings: UsageSettingsModel
     @StateObject private var globalShortcutSettings: GlobalShortcutSettingsModel
     @StateObject private var aboutSettings: AboutSettingsModel
+    @StateObject private var soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
 
     init(
         route: SettingsRoute,
@@ -470,6 +471,9 @@ private struct SettingsWindowRouteFrame: View {
             wrappedValue: Self.makeShortcutSettings(for: experienceProfile))
         _aboutSettings = StateObject(
             wrappedValue: Self.makeAboutSettings(for: experienceProfile))
+        _soundPacksEditorNativeEffects = StateObject(
+            wrappedValue: SoundPacksEditorNativeEffectsDispatcher(
+                adapter: SettingsGallerySoundPacksEditorNativeEffectsAdapter()))
     }
 
     var body: some View {
@@ -480,7 +484,8 @@ private struct SettingsWindowRouteFrame: View {
             loginItemSettings: loginItemSettings,
             usageSettings: usageSettings,
             globalShortcutSettings: globalShortcutSettings,
-            aboutSettings: aboutSettings
+            aboutSettings: aboutSettings,
+            soundPacksEditorNativeEffects: soundPacksEditorNativeEffects
         )
         .frame(
             width: SettingsWindowGeometry.minimumWidth,
@@ -673,6 +678,16 @@ private struct SettingsWindowRouteFrame: View {
         }
         return model
     }
+}
+
+@MainActor
+private final class SettingsGallerySoundPacksEditorNativeEffectsAdapter:
+    SoundPacksEditorNativeEffectsAdapter
+{
+    func selectAudioFiles(allowsMultipleSelection: Bool) -> [URL] { [] }
+    func playAudio(fileURL: URL, volume: Double) {}
+    func stopAudio() {}
+    func revealInFinder(fileURL: URL) {}
 }
 
 @MainActor

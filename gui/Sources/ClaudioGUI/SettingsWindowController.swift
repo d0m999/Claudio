@@ -22,6 +22,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let aboutSettings: AboutSettingsModel
     private let model: SettingsWindowPresentationModel<NSRunningApplication>
     private let soundPacksEditorOwner: SoundPacksEditorOwner
+    private let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher
+    private let soundPackAnnouncementDelivery: SoundPacksEditorAnnouncementDelivery
     private let eventSettingsModel: PanelConfigController
     private let eventSettingsSelection: EventSettingsWindowSelection
     private let hostIntegrations: HostIntegrationPresentationStore
@@ -44,9 +46,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var integrationsRouteCancellable: AnyCancellable?
     private var soundPackAvailabilityCancellable: AnyCancellable?
     private var soundsRouteAnnouncementCancellable: AnyCancellable?
-    private var soundPackSelectionAnnouncementCancellable: AnyCancellable?
-    private var soundPackLibraryAnnouncementCancellable: AnyCancellable?
-    private var soundPackStatusAnnouncementCancellable: AnyCancellable?
+    private var soundPackPresentationAnnouncementCancellable: AnyCancellable?
     private var aboutSurfaceCancellable: AnyCancellable?
 
     init(
@@ -55,6 +55,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         usageSettings: UsageSettingsModel,
         globalShortcutSettings: GlobalShortcutSettingsModel,
         soundPacksEditorOwner: SoundPacksEditorOwner,
+        soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher,
+        soundPackAccessibilityPoster: any SoundPacksEditorAccessibilityPosting =
+            SystemSoundPacksEditorAccessibilityPoster(),
         eventSettingsModel: PanelConfigController,
         eventSettingsSelection: EventSettingsWindowSelection,
         hostIntegrations: HostIntegrationPresentationStore,
@@ -72,6 +75,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.usageSettings = usageSettings
         self.globalShortcutSettings = globalShortcutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
+        self.soundPacksEditorNativeEffects = soundPacksEditorNativeEffects
+        soundPackAnnouncementDelivery = SoundPacksEditorAnnouncementDelivery(
+            poster: soundPackAccessibilityPoster)
         self.eventSettingsModel = eventSettingsModel
         self.eventSettingsSelection = eventSettingsSelection
         self.hostIntegrations = hostIntegrations
@@ -183,7 +189,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // The presentation latch suppresses both the synchronous route publisher and
         // `windowDidBecomeKey`. Pay that announcement debt after the final route has landed so an
         // already-retained General → Sounds deep link or non-key reactivation cannot lose it.
-        announceSoundsPresentationIfNeeded(in: presentedWindow)
+        announcePendingSoundPackEditorAnnouncementIfNeeded(in: presentedWindow)
         isPresentingWindow = false
     }
 
@@ -206,7 +212,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         else { return }
         loginItemSettings.refresh()
         updateIntegrationsPresentationState()
-        announceLatestSoundPackStatusIfNeeded(in: keyWindow)
+        announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -223,6 +229,8 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             closingWindow === window
         else { return }
 
+        soundPacksEditorNativeEffects.handleLifecycle(
+            .settingsWindowWillClose, owner: soundPacksEditorOwner)
         integrationsModel.noteWindowVisibility(false)
         let originalHandback = model.close()
         let handback = handbackTracker.consumeOnClose() ?? originalHandback
@@ -246,6 +254,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             usageSettings: usageSettings,
             globalShortcutSettings: globalShortcutSettings,
             aboutSettings: aboutSettings,
+            soundPacksEditorNativeEffects: soundPacksEditorNativeEffects,
             soundPacksEditorOwner: soundPacksEditorOwner,
             eventSettingsModel: eventSettingsModel,
             eventSettingsSelection: eventSettingsSelection,
@@ -336,7 +345,6 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func installSoundPackAnnouncementObservers() {
-        let soundPackModel = soundPacksEditorOwner.model
         soundsRouteAnnouncementCancellable = model.$resolution
             .map(\.destination)
             .removeDuplicates()
@@ -354,50 +362,25 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                     DispatchQueue.main.async { [weak self] in
                         MainActor.assumeIsolated {
                             guard let self, let window = self.activeSoundsWindow else { return }
-                            self.announceSoundsPresentationIfNeeded(in: window)
+                            self.announcePendingSoundPackEditorAnnouncementIfNeeded(in: window)
                         }
                     }
                 }
             }
-        soundPackSelectionAnnouncementCancellable = soundPackModel.$selectedPackID
-            .dropFirst()
-            .sink { [weak self] selectedPackID in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    let shouldAnnounce = self.soundPacksEditorOwner
-                        .shouldAnnounceSelectionChange(to: selectedPackID)
-                    guard shouldAnnounce, let window = self.activeSoundsWindow else { return }
-                    SoundPacksWindowAccessibilityBridge.post(
-                        .selectionChanged,
-                        facts: self.soundPacksEditorOwner.announcementFacts(
-                            selectedPackID: selectedPackID,
-                            usesEmittedSelection: true),
-                        language: self.preferences.language,
-                        window: window)
-                }
-            }
-        soundPackLibraryAnnouncementCancellable = soundPackModel.$libraryPresentationState
-            .dropFirst()
+        soundPackPresentationAnnouncementCancellable = soundPacksEditorOwner.$presentation
+            .map(\.pendingAnnouncement)
             .removeDuplicates()
-            .sink { [weak self] libraryState in
+            .sink { [weak self] _ in
                 MainActor.assumeIsolated {
-                    guard let self, let window = self.activeSoundsWindow else { return }
-                    SoundPacksWindowAccessibilityBridge.post(
-                        .libraryStateChanged,
-                        facts: self.soundPacksEditorOwner.announcementFacts(
-                            libraryPresentationState: libraryState),
-                        language: self.preferences.language,
-                        window: window)
-                }
-            }
-        soundPackStatusAnnouncementCancellable = soundPackModel.$windowStatuses
-            .dropFirst()
-            .map { statuses in statuses.max { $0.revision < $1.revision } }
-            .compactMap { $0 }
-            .sink { [weak self] status in
-                MainActor.assumeIsolated {
-                    guard let self, let window = self.activeSoundsWindow else { return }
-                    self.announceSoundPackStatusIfNeeded(status, in: window)
+                    guard let self, !self.isPresentingWindow else { return }
+                    // `@Published` emits before storing `presentation`. Defer one main turn so the
+                    // exact-head eligibility closure observes the landed semantic debt.
+                    DispatchQueue.main.async { [weak self] in
+                        MainActor.assumeIsolated {
+                            guard let self, let window = self.activeSoundsWindow else { return }
+                            self.announcePendingSoundPackEditorAnnouncementIfNeeded(in: window)
+                        }
+                    }
                 }
             }
     }
@@ -406,56 +389,35 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         guard
             model.resolution.destination == .sounds,
             let window,
+            window.isVisible,
             window.isKeyWindow
         else { return nil }
         return window
     }
 
-    private func announceSoundsPresentationIfNeeded(in window: NSWindow) {
-        guard activeSoundsWindow === window else { return }
-        SoundPacksWindowAccessibilityBridge.post(
-            .windowOpened,
-            facts: soundPacksEditorOwner.announcementFacts(),
-            language: preferences.language,
-            window: window)
-        announceLatestSoundPackStatusIfNeeded(in: window)
-    }
-
-    private func announceLatestSoundPackStatusIfNeeded(in window: NSWindow) {
+    private func announcePendingSoundPackEditorAnnouncementIfNeeded(in window: NSWindow) {
         guard
             activeSoundsWindow === window,
-            let status = soundPacksEditorOwner.model.windowStatuses.max(by: {
-                $0.revision < $1.revision
-            })
+            let announcement = soundPacksEditorOwner.presentation.pendingAnnouncement
         else { return }
-        announceSoundPackStatusIfNeeded(status, in: window)
-    }
-
-    private func announceSoundPackStatusIfNeeded(
-        _ status: SoundPacksWindowStatus,
-        in window: NSWindow
-    ) {
-        guard
-            soundPacksEditorOwner.beginStatusAnnouncementAttempt(
-                revision: status.revision,
-                isWindowKey: window.isKeyWindow)
-        else { return }
-        let moment: SoundPacksWindowAnnouncementMoment =
-            status.severity == .failure
-            ? .writeFailed(
-                action: status.action(language: preferences.language),
-                reason: status.message(language: preferences.language))
-            : .writeSucceeded(message: status.message(language: preferences.language))
-        SoundPacksWindowAccessibilityBridge.post(
-            moment,
-            facts: soundPacksEditorOwner.announcementFacts(),
+        soundPackAnnouncementDelivery.attempt(
+            announcement,
             language: preferences.language,
-            window: window
-        ) { [weak self] didPost in
-            self?.soundPacksEditorOwner.finishStatusAnnouncementAttempt(
-                revision: status.revision,
-                didPost: didPost)
-        }
+            window: window,
+            isEligible: { [weak self, weak window] in
+                guard let self, let window else { return false }
+                return self.activeSoundsWindow === window
+                    && self.soundPacksEditorOwner.presentation.pendingAnnouncement?.id
+                        == announcement.id
+            },
+            acknowledge: { [weak self] id, didPost in
+                guard let self else { return }
+                _ = self.soundPacksEditorOwner.send(
+                    .acknowledgeAnnouncement(id: id, didPost: didPost))
+                if let window = self.activeSoundsWindow {
+                    self.announcePendingSoundPackEditorAnnouncementIfNeeded(in: window)
+                }
+            })
     }
 }
 

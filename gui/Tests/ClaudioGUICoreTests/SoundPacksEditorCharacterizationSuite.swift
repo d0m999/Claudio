@@ -167,7 +167,7 @@ func runSoundPacksEditorCharacterizationSuites() async {
         }
     }
 
-    suite("Sound editor baseline：当前 view confirmation 在确认、取消与 dismiss 后丢弃请求") {
+    suite("Sound editor baseline：view confirmation 只消费 owner 的 opaque capability") {
         guard
             let source = soundEditorCharacterizationSource(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift")
@@ -176,17 +176,16 @@ func runSoundPacksEditorCharacterizationSuites() async {
             return
         }
 
-        for state in [
-            "pendingPermanentDeletion",
-            "pendingUserPackDeletion",
-            "pendingFactoryPackRestore",
-        ] {
-            let resetCount = source.components(separatedBy: "\(state) = nil").count - 1
-            expect(
-                resetCount >= 3,
-                "\(state) 必须在 Binding dismiss、confirm 与 cancel 三条路径全部清除")
-        }
-        for action in [
+        expect(
+            source.contains("presentation.pendingConfirmation")
+                && source.contains("invoke(confirmation.confirmAction)")
+                && source.contains("invoke(confirmation.cancelAction)")
+                && source.contains("cancelConfirmation("),
+            "dismiss、confirm 与 cancel 必须统一回送 owner 签发的 confirmation capability")
+        for forbidden in [
+            "@State private var pendingPermanentDeletion",
+            "@State private var pendingUserPackDeletion",
+            "@State private var pendingFactoryPackRestore",
             "deleteSelectedOrphanAudioFileAfterConfirmation(",
             "deleteSelectedUserPackAfterConfirmation(",
             "restoreSelectedFactoryPackAfterConfirmation(",
@@ -194,8 +193,8 @@ func runSoundPacksEditorCharacterizationSuites() async {
             "restoreAllFactoryPacksAfterConfirmation()",
         ] {
             expect(
-                source.components(separatedBy: action).count - 1 == 1,
-                "当前破坏性 action 只能从唯一 confirmation closure 调用：\(action)")
+                !source.contains(forbidden),
+                "view 不得保留本地 confirmation 状态或直调 raw model 写入：\(forbidden)")
         }
     }
 

@@ -3,6 +3,7 @@ import ClaudioCore
 import ClaudioGUICore
 import ClaudioLocalization
 import Combine
+import SoundPacksWindow
 import SwiftUI
 
 /// Breaks the pre-`super.init()` construction cycle: `PanelView` needs an action closure before
@@ -250,6 +251,8 @@ final class MenuBarController: NSObject, NSPopoverDelegate {
             usageSettings: makeUsageSettingsModel(),
             globalShortcutSettings: globalShortcutSettings,
             soundPacksEditorOwner: soundPacksEditorOwner,
+            soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher(
+                adapter: SystemSoundPacksEditorNativeEffectsAdapter()),
             eventSettingsModel: eventSettingsModel,
             eventSettingsSelection: eventSettingsSelection,
             hostIntegrations: hostIntegrations,

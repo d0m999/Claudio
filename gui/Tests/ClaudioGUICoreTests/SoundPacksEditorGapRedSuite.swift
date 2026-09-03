@@ -20,22 +20,21 @@ func runSoundPacksEditorGapRedSuites() async {
             let manifestBefore = try? Data(contentsOf: manifestURL)
             let treeBefore = gapDirectoryEntries(manifestURL.deletingLastPathComponent())
             let presentationBefore = owner.presentation
+            let statusesBefore = soundEditorWindowStatuses(in: presentationBefore)
             let scansBefore = fixture.recorder.requests.count
 
             let emptyResult = await owner.perform(
                 .importAudio(permit: emptyPermit, sources: [], bindTo: nil))
-            guard case .imported(let empty) = emptyResult else {
-                expect(false, "[129-GAP-RED] empty picker cancel 必须返回 typed unchanged")
-                return
-            }
             expect(
-                empty.accepted.isEmpty && empty.rejected.isEmpty && empty.boundEvent == nil
-                    && empty.orphan == nil && empty.completion == .unchanged
-                    && !empty.allowsForegroundFollowUp,
-                "[129-GAP-RED] empty operation 的 typed plane 必须是 exact unchanged")
+                emptyResult == .rejected(.cancelled),
+                "[130] empty picker 必须在消费 permit 后返回 typed cancelled")
             expect(
-                owner.presentation == presentationBefore,
-                "[129-GAP-RED] empty operation 不得制造 activity/status/announcement publication")
+                owner.presentation.revision > presentationBefore.revision
+                    && owner.presentation.activities == presentationBefore.activities
+                    && owner.presentation.pendingAnnouncement
+                        == presentationBefore.pendingAnnouncement
+                    && soundEditorWindowStatuses(in: owner.presentation) == statusesBefore,
+                "[130] empty cancel 只可重签 capability，不得制造 activity/status/announcement")
             expect(
                 (try? Data(contentsOf: fixture.configFile)) == configBefore
                     && (try? Data(contentsOf: manifestURL)) == manifestBefore
@@ -556,6 +555,14 @@ func runSoundPacksEditorGapRedSuites() async {
                 "[129-GAP-RED] stale config-only sync operation 必须零 invalidation/scan")
         }
     }
+}
+
+@MainActor
+private func soundEditorWindowStatuses(
+    in presentation: SoundPacksEditorPresentation
+) -> [SoundPacksWindowStatus] {
+    guard case .sounds(let sounds) = presentation.mode else { return [] }
+    return sounds.windowStatuses
 }
 
 @MainActor

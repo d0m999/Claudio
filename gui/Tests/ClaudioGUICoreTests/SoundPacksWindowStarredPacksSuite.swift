@@ -250,7 +250,8 @@ func runSoundPacksWindowStarredPacksSuites() {
                 #"{ "selected_pack": "a", "starred_packs": "不是数组" }"#,
                 to: configFile)
 
-            guard case .malformed(let probeReason) = probeConfigRewritable(configFile: configFile) else {
+            guard case .malformed(let probeReason) = probeConfigRewritable(configFile: configFile)
+            else {
                 expect(false, "测试前提：畸形 starred_packs 必须被 probe 拦下")
                 return
             }
@@ -312,8 +313,9 @@ func runSoundPacksWindowStarredPacksSuites() {
                 environment: starredWindowEnvironment(packsDirectory),
                 refreshCoordinator: SoundPacksRefreshCoordinator())
 
-            guard case .failure(.tooManyStarredPacks(max: maxStarredPacks)) =
-                model.updateStarredPacks(to: ids)
+            guard
+                case .failure(.tooManyStarredPacks(max: maxStarredPacks)) =
+                    model.updateStarredPacks(to: ids)
             else {
                 expect(false, "绕过 UI 传入第五颗星时，T16 写者仍必须拒绝")
                 return
@@ -329,22 +331,37 @@ func runSoundPacksWindowStarredPacksSuites() {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-        let panel = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/ClaudioGUICore/PanelConfigController.swift"), encoding: .utf8)) ?? ""
-        let gallery = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/ClaudioGUICore/PackGallery.swift"), encoding: .utf8)) ?? ""
-        let model = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"), encoding: .utf8)) ?? ""
-        let view = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"), encoding: .utf8)) ?? ""
-        let settingsController = (try? String(contentsOf: root.appendingPathComponent(
-            "gui/Sources/ClaudioGUI/SettingsWindowController.swift"), encoding: .utf8)) ?? ""
+        let panel =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/ClaudioGUICore/PanelConfigController.swift"), encoding: .utf8))
+            ?? ""
+        let gallery =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/ClaudioGUICore/PackGallery.swift"), encoding: .utf8)) ?? ""
+        let model =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"), encoding: .utf8))
+            ?? ""
+        let view =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"), encoding: .utf8))
+            ?? ""
+        let settingsController =
+            (try? String(
+                contentsOf: root.appendingPathComponent(
+                    "gui/Sources/ClaudioGUI/SettingsWindowController.swift"), encoding: .utf8))
+            ?? ""
 
         expect(
             panel.contains("scope: .panelStarredDisplay")
                 && gallery.contains("case .panelStarredDisplay")
                 && gallery.contains("var cards = displayedIDs.map"),
-            "≤4 过滤必须在 PanelConfigController.reloadConfigReadModel 的 availablePacks 调用生效，并先于 buildPackCard")
+            "≤4 过滤必须在 PanelConfigController.reloadConfigReadModel 的 availablePacks 调用生效，并先于 buildPackCard"
+        )
         expect(
             !view.contains("starredPackDisplayIDs(")
                 && !view.contains("starButton")
@@ -364,10 +381,11 @@ func runSoundPacksWindowStarredPacksSuites() {
                 && model.contains(
                     "messageText = .literal(soundPacksWindowStarredPacksFailureReason(error))")
                 && model.contains("messageText = writesStoppedStatusText")
-                && settingsController.contains("let soundPackModel = soundPacksEditorOwner.model")
-                && settingsController.contains("soundPackModel.$windowStatuses")
-                && settingsController.contains("status.action(language: preferences.language)")
-                && settingsController.contains("status.message(language: preferences.language)"),
-            "兼容写入口失败仍须进入统一状态与唯一 VoiceOver bridge")
+                && settingsController.contains("soundPacksEditorOwner.$presentation")
+                && settingsController.contains(".map(\\.pendingAnnouncement)")
+                && settingsController.contains(
+                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
+                && !settingsController.contains("soundPackModel.$windowStatuses"),
+            "兼容写入口失败仍须进入 owner semantic debt 与唯一 VoiceOver bridge")
     }
 }

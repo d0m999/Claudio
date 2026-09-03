@@ -2178,9 +2178,9 @@ func runViewWiringSuites() {
             "生产面板事件行只能试听/静音，所有映射编辑统一由下方打开设置进入")
         expect(
             window.contains("Button(l10n.text(.soundPacksClearBinding), role: .destructive)")
-                && window.contains("model.clearSelectedEventBinding(row.event)")
-                && window.contains(".disabled(!hasBinding(row.coverage))"),
-            "窗口必须允许 present/broken 清除绑定，并经唯一窗口 model 写路径落地")
+                && window.contains("invoke(row.clearAction)")
+                && !window.contains("model."),
+            "窗口必须把 owner 签发的 clear capability 回送唯一 interface，不得旁路调用 raw model")
     }
 
     suite("生产面板事件行：复用批准的 24pt 双波纹静音图标，不回退 SF Symbols") {
@@ -2231,19 +2231,27 @@ func runViewWiringSuites() {
                 && gallery.contains("loadFailedModel")
                 && gallery.contains("largeLibraryModel")
                 && gallery.contains("brokenPackModel")
-                && gallery.contains("previewIsPerformingWrite: true")
+                && gallery.contains("writingModel")
+                && gallery.contains("startsBusy: true")
                 && gallery.contains("restoreFailureStatus")
                 && gallery.contains("deletionFailureStatus")
                 && gallery.components(separatedBy: "galleryFrame(").count - 1 == 12,
-            "声音包画廊必须渲染生产窗口，并覆盖 100-pack、broken、写入中、恢复/删除失败及 SWR 状态")
+            "声音包画廊必须通过生产 owner/view 渲染 100-pack、broken、busy、恢复/删除失败及 SWR 状态")
         expect(
             rootGallery.contains("SoundPacksWindowStateGalleryView(language: language)"),
             "全产品根画廊必须实际挂入声音包窗口画廊")
         expect(
             flatModel.contains("public init( previewConfig:")
-                && model.contains("/dev/null/claudio-preview-config.json")
-                && gallery.contains("/dev/null/claudio-preview-packs"),
-            "画廊模型必须走显式 DEBUG 注入与不可写占位路径，不能扫描 ~/.claudio")
+                && gallery.contains("@StateObject private var owner")
+                && gallery.contains("makeSoundPacksWindowGalleryOwner")
+                && gallery.contains("makeModel: @escaping @MainActor () -> SoundPacksWindowModel")
+                && gallery.contains(#"id: "\(id)-default""#)
+                && gallery.contains(#"id: "\(id)-minimum""#)
+                && gallery.contains("model: makeModel()")
+                && gallery.contains("UUID().uuidString")
+                && !gallery.contains("/dev/null")
+                && !gallery.contains("~/.claudio"),
+            "画廊每个尺寸必须在独立 StateObject autoclosure 内预建 model/owner，并使用唯一 temp root 做零用户盘 I/O fixture")
     }
 
     suite("三界面无障碍护栏：每个交互构造都有显式非空 Name 与稳定 identifier") {
@@ -2778,12 +2786,14 @@ func runViewWiringSuites() {
             return
         }
         expect(
-            window.contains("ForEach(model.selectedAudioFiles)")
-                && window.contains("l10n.format(.soundPacksOrphanUnused, file.fileName)")
-                && window.contains("model.assignSelectedAudioFile(file.fileName, to: row.event)"),
-            "窗口映射菜单必须列出包内音频、标识孤儿并经窗口 model 绑定")
+            window.contains("ForEach(inventoryFiles)")
+                && window.contains("file.isOrphan")
+                && window.contains("invoke(")
+                && window.contains("file.assignments.first(where:"),
+            "窗口映射菜单必须列出 owner inventory、标识孤儿并回送签发的 assign capability")
         expect(
-            window.contains("model.selectedAudioInventoryState.isLoading")
+            window.contains("if inventoryIsLoading")
+                && window.contains("case .loading = activeSounds.inventory")
                 && window.contains("ProgressView()")
                 && window.contains("l10n.text(.soundPacksAudioLoading)"),
             "按需清单未完成时必须显示真 loading，不能把临时空数组说成空包")
@@ -2841,12 +2851,13 @@ func runViewWiringSuites() {
         }
         let flat = collapsingWhitespace(view)
         expect(
-            flat.contains("model.selectedAudioFiles.filter(\\.isOrphan)")
+            flat.contains("inventoryFiles.filter(\\.isOrphan)")
                 && flat.contains("l10n.format(.soundPacksOrphanUnused, file.fileName)"),
             "窗口必须只把未引用项列进孤儿区，并逐字点名文件")
         expect(
-            flat.contains("model.assignSelectedAudioFile(file.fileName, to: event)"),
-            "孤儿分配菜单必须接到窗口 model 的 T3 bind 路由")
+            flat.contains("ForEach(file.assignments)")
+                && flat.contains("invoke(assignment.action)"),
+            "孤儿分配菜单必须回送 owner 签发的 T3 bind capability")
         expect(
             flat.contains(".accessibilityElement(children: .contain)"),
             "事件行必须保留 Menu/试听的 VoiceOver 子节点；内置只读行也有真实试听控件")
@@ -2856,9 +2867,10 @@ func runViewWiringSuites() {
                 && flat.contains("l10n.format(.soundPacksDeleteMessage"),
             "删除必须是 destructive confirmation，并明确告知不可撤销")
         expect(
-            flat.contains("deleteSelectedOrphanAudioFileAfterConfirmation(")
-                && flat.contains("expectedPackID: request.packID"),
-            "只有确认对话框的 destructive action 才能触发永久删除")
+            flat.contains("invoke(confirmation.confirmAction)")
+                && flat.contains("confirmation.kind == .deleteOrphan")
+                && !flat.contains("deleteSelectedOrphanAudioFileAfterConfirmation("),
+            "只有 owner confirmation 签发的 destructive capability 才能触发永久删除")
         guard
             let detailBody = closureBody(
                 after: "private var detail: some View",
@@ -2866,7 +2878,7 @@ func runViewWiringSuites() {
                     codeWithoutStrings(
                         "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift") ?? "")),
             let selectedCardAt = detailBody.range(of: "if let card = selectedCard")?.lowerBound,
-            let statusRegionAt = detailBody.range(of: "model.windowStatuses")?.lowerBound
+            let statusRegionAt = detailBody.range(of: "activeSounds.windowStatuses")?.lowerBound
         else {
             expect(false, "必须能切出详情体中的统一窗口状态区与 selected-card 分支")
             return
@@ -3191,10 +3203,14 @@ func runViewWiringSuites() {
             let panel = codeWithoutStrings("gui/Sources/ClaudioGUI/EventRowView.swift"),
             let window = codeWithoutStrings(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
+            let nativeEffects = codeWithoutStrings(
+                "gui/Sources/SoundPacksWindow/SoundPacksEditorNativeEffects.swift"),
             let settingsController = codeWithoutStrings(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
-            let editorOwner = codeWithoutStrings(
-                "gui/Sources/ClaudioGUICore/SoundPacksEditorOwner.swift"),
+            let settingsView = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+            let menuBar = codeWithoutStrings(
+                "gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let package = source("gui/Package.swift")
         else {
             expect(false, "读不到共享 AppKit 实现、两处消费者、Settings owner 或 Package.swift")
@@ -3214,43 +3230,79 @@ func runViewWiringSuites() {
             package.contains("name: \"ClaudioGUIComponents\"")
                 && package.contains("\"ClaudioGUIComponents\"")
                 && !panel.contains("runAudioOpenPanel")
-                && window.contains("runAudioOpenPanel(allowsMultipleSelection: false)")
-                && window.contains("runAudioOpenPanel(allowsMultipleSelection: true)"),
-            "映射 picker 只能由 SoundPacksWindow 经共享 ClaudioGUIComponents API 使用；"
+                && !window.contains("runAudioOpenPanel")
+                && nativeEffects.contains("runAudioOpenPanel(")
+                && nativeEffects.contains("allowsMultipleSelection:"),
+            "picker 只能由 SoundPacksWindow native-effects adapter 经共享 ClaudioGUIComponents API 使用；"
                 + "逐事件绑定单选，批量添加多选")
         expect(
-            window.contains("expectedPackID: expectedPackID")
-                && window.contains("await model.importSelectedAudioFiles(")
-                && window.contains("let previewFile = completion.previewFile")
-                && window.contains("previewPlayer.play("),
-            "管理窗口导入必须捕获 expectedPackID，经异步 model action 返回可试听文件后才播放；"
+            window.contains("nativeEffects.consume(")
+                && nativeEffects.contains("await owner.perform(operation)")
+                && nativeEffects.contains("outcome.previewAction")
+                && nativeEffects.contains("owner.send(.invoke(action))"),
+            "管理窗口导入必须经 typed operation 返回 owner-signed preview follow-up 后才播放；"
                 + "不能按回调时的新选择串包反馈/试听")
-        guard let importAndBindBody = closureBody(after: "private func importAndBind(", in: window)
-        else {
-            expect(false, "必须能切出逐事件导入并绑定的异步完成处理")
-            return
-        }
-        let normalizedImportAndBindBody = collapsingWhitespace(importAndBindBody)
         expect(
-            normalizedImportAndBindBody.contains("!completion.completedInBackground")
-                && normalizedImportAndBindBody.contains(
-                    "completion.targetPackID == model.selectedPackID")
-                && normalizedImportAndBindBody.contains(
-                    "model.assignImportedAudioFile(imported, to: event)"),
-            "逐事件绑定必须同时要求目标包仍匹配且 completion 仍属于前台检查会话；"
-                + "A→B→A 的后台导入结果不得改写当前事件或触发试听")
+            nativeEffects.contains(
+                "package final class SoundPacksEditorNativeEffectsDispatcher: ObservableObject")
+                && !window.contains("@StateObject private var nativeEffects")
+                && !window.contains("SystemSoundPacksEditorNativeEffectsAdapter()")
+                && settingsController.contains(
+                    "private let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher"
+                )
+                && settingsController.contains(
+                    "soundPacksEditorNativeEffects: soundPacksEditorNativeEffects")
+                && settingsView.contains(
+                    "let soundPacksEditorNativeEffects: SoundPacksEditorNativeEffectsDispatcher")
+                && settingsView.contains("nativeEffects: soundPacksEditorNativeEffects")
+                && menuBar.contains("SystemSoundPacksEditorNativeEffectsAdapter()")
+                && window.components(separatedBy: "@ObservedObject private var editorOwner").count
+                    - 1 == 2
+                && window.contains("let presentation: SoundPacksEditorPresentation")
+                && window.contains("presentation: presentation")
+                && !window.contains("editorOwner.presentation.library")
+                && !window.contains("editorOwner.presentation.pendingConfirmation")
+                && !window.contains("editorOwner.presentation.activities"),
+            "dispatcher/player 必须由 Settings controller 持有并 required 注入整个 production view tree；"
+                + "root 只观察 owner 一次并把同 revision 的 presentation 传给不观察 owner 的 child")
         expect(
-            window.contains("model.previewFileForSelectedEvent(")
-                && window.contains(".eventPreview(row.event)")
-                && window.contains("previewAvailability(for: row)")
-                && window.contains(".disabled(!availability.isAvailable)")
+            settingsController.contains(
+                "soundPacksEditorNativeEffects.handleLifecycle(")
+                && settingsController.contains(
+                    ".settingsWindowWillClose, owner: soundPacksEditorOwner)")
+                && window.contains(
+                    "nativeEffects.handleLifecycle(.soundsViewDisappeared, owner: editorOwner)")
+                && nativeEffects.contains("case settingsWindowWillClose")
+                && nativeEffects.contains("case soundsViewDisappeared"),
+            "retained NSWindow close 与 SwiftUI disappear 必须进入同一 compiled lifecycle seam，"
+                + "由同一 dispatcher 消费 owner-signed stop")
+        expect(
+            !window.contains(".onChange(of: editorOwner.presentation.revision)")
+                && window.contains(".onChange(of: focusProjection)")
+                && window.contains("requestRevision: sounds.requestRevision")
+                && window.contains("routeState: sounds.routeState"),
+            "普通 inventory/activity/status publication 不得触发 route focus；"
+                + "只观察 request identity/route state")
+        expect(
+            window.contains("row.previewAvailability")
+                && window.contains("invoke(row.previewAction)")
+                && window.contains(".disabled(row.previewAction == nil)")
+                && window.contains("previewableEvents: activeSounds.eventRows.filter")
+                && window.contains("$0.previewAction != nil")
                 && window.contains("l10n.text(.soundPacksPreview)"),
-            "管理窗口每条事件必须把安全解析、共享 player、可操作态与独立焦点槽接成真实试听按钮")
+            "preview enabled 与 focus eligibility 必须同取 owner-signed capability；availability 只提供语义文案")
         expect(
-            window.contains("model.forkSelectedFactoryPack()")
-                && window.contains("model.useSelectedPack()")
-                && window.contains("model.restoreAllFactoryPacksAfterConfirmation()"),
-            "复制、显式启用与空态全部恢复必须接到各自的 model action")
+            window.contains(".accessibilityValue(card.revealDisplayValue ?? \"\")")
+                && window.contains(".accessibilityValue(displayValue)")
+                && !window.contains(".accessibilityValue(card.id)")
+                && !window.contains("displayValue.resolve("),
+            "selected pack 与 empty root 的 Finder AX Value 必须直接渲染 owner-projected display path")
+        expect(
+            window.contains("invoke(card.forkAction)")
+                && window.contains("invoke(card.useAction)")
+                && window.contains("case .restoreFactory(let action)")
+                && window.contains("invoke(confirmation.confirmAction)"),
+            "复制、显式启用与空态恢复必须只回送 owner-signed actions")
         expect(
             window.contains("l10n.text(.soundPacksCopy)")
                 && window.contains("l10n.text(.soundPacksAddAudio)")
@@ -3259,12 +3311,16 @@ func runViewWiringSuites() {
                 && !window.contains("l10n.text(.soundPacksPanelVisible)"),
             "侧栏语义标题、底部动作栏与空态主行动的用户标签必须全部真实可见")
         expect(
-            window.contains("ForEach(model.windowStatuses)")
-                && settingsController.contains("let soundPackModel = soundPacksEditorOwner.model")
-                && settingsController.contains("soundPackModel.$windowStatuses")
-                && settingsController.contains("shouldAnnounceSelectionChange(")
-                && editorOwner.contains("consumeSelectionAnnouncementSuppression("),
-            "窗口必须从统一 revision 状态投影渲染/播报，并消费 fork 程序化选中的单次公告抑制 token")
+            window.contains("ForEach(activeSounds.windowStatuses)")
+                && window.contains("activeSounds.recoveryActions.filter")
+                && settingsController.contains("soundPacksEditorOwner.$presentation")
+                && settingsController.contains(".map(\\.pendingAnnouncement)")
+                && settingsController.contains(
+                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
+                && !settingsController.contains("soundPackModel.$windowStatuses")
+                && !settingsController.contains("shouldAnnounceSelectionChange(")
+                && !window.contains("SoundPacksWindowModel"),
+            "窗口必须从 owner 的持久 status/recovery 投影渲染，并只由 semantic queue 播报；view 不得使用 raw model")
     }
 
     suite("T12：管理窗口恢复出厂是内置包专属的显式替换确认，成功/失败告知都在窗口内可见") {
@@ -3277,27 +3333,29 @@ func runViewWiringSuites() {
         }
         let flat = collapsingWhitespace(view)
         expect(
-            flat.contains("if model.selectedPackIsBuiltinReadOnly")
-                && flat.contains("Button(l10n.text(.soundPacksRestore))"),
-            "恢复入口必须只在内置包详情中出现，并用带省略号的明确动作标签预告后续确认")
+            flat.contains("if card.restoreAction != nil")
+                && flat.contains("Button(l10n.text(.soundPacksRestore))")
+                && flat.contains("invoke(card.restoreAction)"),
+            "恢复入口必须只由 owner 对真实可恢复包签发 capability，并用带省略号的动作标签")
         expect(
             flat.contains(".confirmationDialog(")
                 && flat.contains("Button(l10n.text(.soundPacksRestoreButton), role: .destructive)")
-                && flat.contains("factoryRestoreConfirmationMessage(request)"),
+                && flat.contains("factoryRestoreConfirmationMessage(confirmation)"),
             "替换必须有 destructive confirmation，并在执行前说清旧目录会搬走、零删除和路径告知")
         expect(
-            flat.contains("restoreSelectedFactoryPackAfterConfirmation(")
-                && flat.contains("expectedPackID: request.packID"),
-            "只有确认对话框的 destructive action 才能触发 restore，且必须带确认时的包 id 防陈旧选择")
+            flat.contains("case .restoreFactory, .retryRestore, .restoreAllFactory:")
+                && flat.contains("invoke(confirmation.confirmAction)")
+                && !flat.contains("restoreSelectedFactoryPackAfterConfirmation("),
+            "只有 owner confirmation 内签发且最终重验的 destructive capability 才能触发 restore")
         expect(
             flat.contains("l10n.format(.soundPacksRetryRestore, displayName)")
-                && flat.contains("retryFailedFactoryPackRestoreAfterConfirmation(")
-                && flat.contains(#"ForEach(packIDs, id: \.self)"#)
+                && flat.contains("invoke(recovery.retryAction)")
+                && flat.contains("activeSounds.recoveryActions.filter")
                 && flat.contains("equals: .retryFactoryRestore(packID: packID)"),
             "单包或批量 publish 失败移除原包后，每个窗口级失败项都必须保留经过确认的重试入口，"
                 + "并接入可区分的真实焦点序")
         expect(
-            flat.contains("ForEach(model.windowStatuses)")
+            flat.contains("ForEach(activeSounds.windowStatuses)")
                 && flat.contains("private func windowStatusRow(")
                 && flat.contains("status.recovery"),
             "恢复成功/失败必须进入统一状态投影，并保留可执行 retry recovery")
@@ -3325,12 +3383,12 @@ func runViewWiringSuites() {
         expect(
             statusRegionAt < selectedBranchAt
                 && scrollBody.contains("emptyState")
-                && statusRegionBody.contains("ForEach(model.windowStatuses)")
+                && statusRegionBody.contains("ForEach(activeSounds.windowStatuses)")
                 && statusRegionBody.contains("windowStatusRow(status)"),
             "统一状态与每包重试必须位于共享 ScrollView 的最前面，并在有包/空态两条路径都可见")
         expect(
             braceDepth(
-                of: "if !model.windowStatuses.isEmpty", in: scrollContentBody) == 0
+                of: "if !activeSounds.windowStatuses.isEmpty", in: scrollContentBody) == 0
                 && braceDepth(
                     of: "if let card = selectedCard", in: scrollContentBody) == 0,
             "状态区与 selected/empty 分支必须同为滚动内容的无条件顶层结构；若外包 selectedCard "

@@ -107,6 +107,9 @@ func runSoundPacksEditorNativeTargetSuites() async {
             }
             expect(pack.availability == .installed, "empty pack 必须是已安装事实而非 missing placeholder")
             expect(
+                pack.revealDisplayValue == packDirectory.standardizedFileURL.path,
+                "Finder reveal 的 AX Value 必须由 owner 投影已验证目录的 display-only path")
+            expect(
                 fixture.owner.send(.invoke(reveal))
                     == .nativeEffect(.reveal(fileURL: packDirectory.standardizedFileURL)),
                 "empty pack reveal 必须原样返回 shared snapshot 已验证的目录 URL")
@@ -425,21 +428,24 @@ func runSoundPacksEditorNativeTargetSuites() async {
             "新 owner seam 只能消费 immutable shared facts，不得调用 legacy model resolver："
                 + ownerHits.joined(separator: ", "))
 
-        let legacyViewURL = sourceRoot.deletingLastPathComponent()
+        let viewURL = sourceRoot.deletingLastPathComponent()
             .appendingPathComponent("SoundPacksWindow/SoundPacksWindowView.swift")
-        guard let legacyViewSource = try? String(contentsOf: legacyViewURL, encoding: .utf8) else {
-            expect(false, "必须能读取 legacy SoundPacksWindowView.swift 才能冻结 callsite")
+        guard let viewSource = try? String(contentsOf: viewURL, encoding: .utf8) else {
+            expect(false, "必须能读取 SoundPacksWindowView.swift 验证 native target 边界")
             return
         }
-        let scannedLegacyView = strippingComments(legacyViewSource)
+        let scannedView = strippingComments(viewSource)
         expect(
-            scannedLegacyView.unmodeledConstructs.isEmpty,
-            "legacy SoundPacksWindowView.swift source guard 必须完整解析")
+            scannedView.unmodeledConstructs.isEmpty,
+            "SoundPacksWindowView.swift source guard 必须完整解析")
+        let viewHits = legacyModelResolvers.filter { resolver in
+            !callArguments(of: resolver, in: scannedView.codeWithoutStringLiterals).isEmpty
+        }
         expect(
-            callArguments(
-                of: "previewFileForSelectedEvent",
-                in: scannedLegacyView.codeWithoutStringLiterals
-            ).count == 2,
-            "迁移前 legacy view 的同步 preview resolver 必须保持精确两处，不能扩散到新 seam")
+            viewHits.isEmpty
+                && viewSource.contains("row.previewAction")
+                && viewSource.contains("nativeEffects.consume("),
+            "迁移后 view 只能消费 owner-signed native effect，不得保留同步 resolver："
+                + viewHits.joined(separator: ", "))
     }
 }
