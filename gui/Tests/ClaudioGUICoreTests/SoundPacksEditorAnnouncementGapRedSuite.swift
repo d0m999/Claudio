@@ -180,14 +180,24 @@ func runSoundPacksEditorAnnouncementGapRedSuites() async {
             }
             expect(
                 owner.send(
-                    .acknowledgeAnnouncement(id: failure.id, didPost: true)) == .applied
-                    && owner.presentation.pendingAnnouncement?.id == notice.id,
-                "[129-ANN-RED] high-priority failure ack 后必须恢复原 notice head")
+                    .acknowledgeAnnouncement(id: notice.id, didPost: false)) == .unchanged
+                    && owner.presentation.pendingAnnouncement?.id == failure.id,
+                "[129-ANN-RED] post 失败不得消费被 failure 插队的 exact notice")
             expect(
                 owner.send(
                     .acknowledgeAnnouncement(id: notice.id, didPost: true)) == .applied
+                    && owner.presentation.pendingAnnouncement?.id == failure.id,
+                "[129-ANN-RED] 已成功 post 的旧 ID 必须精确移除且不能吞掉新 failure head")
+            expect(
+                owner.send(
+                    .acknowledgeAnnouncement(id: notice.id, didPost: true))
+                    == .rejected(.staleAction),
+                "[129-ANN-RED] 被精确消费的旧 notice 不得 replay")
+            expect(
+                owner.send(
+                    .acknowledgeAnnouncement(id: failure.id, didPost: true)) == .applied
                     && owner.presentation.pendingAnnouncement == nil,
-                "[129-ANN-RED] 两个不同 priority debt 必须各消费一次")
+                "[129-ANN-RED] failure head 必须保持独立并只消费一次")
         }
     }
 

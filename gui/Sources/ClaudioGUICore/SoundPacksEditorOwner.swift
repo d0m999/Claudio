@@ -47,6 +47,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private var lastCommittedModelSeed: SoundPacksEditorModelSeed?
     private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
     private var lastSelectionAnnouncementDecision: (packID: String?, shouldAnnounce: Bool)?
+    private var suppressesNextForkLibraryObservationCycle = false
 
     public convenience init(
         configFile: URL,
@@ -224,11 +225,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
             completePanelPackSwitch(outcome)
             return outcome.refreshesEditor ? .applied : .unchanged
         case .acknowledgeAnnouncement(let id, let didPost):
-            guard let debt = announcementQueue.first, debt.announcement.id == id else {
+            guard let index = announcementQueue.firstIndex(where: { $0.announcement.id == id })
+            else {
                 return .rejected(.staleAction)
             }
             guard didPost else { return .unchanged }
-            announcementQueue.removeFirst()
+            let debt = announcementQueue.remove(at: index)
             if let operationID = debt.operationID {
                 retireTerminalOperation(operationID)
             }
@@ -1124,8 +1126,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 guard model.selectedPackID == packID else {
                     return .failed(.staleAction)
                 }
-                return model.forkSelectedFactoryPack().isSuccess
-                    ? .succeeded : .failed(.mutationFailed)
+                suppressesNextForkLibraryObservationCycle = true
+                let succeeded = model.forkSelectedFactoryPack().isSuccess
+                if !succeeded {
+                    suppressesNextForkLibraryObservationCycle = false
+                }
+                return succeeded ? .succeeded : .failed(.mutationFailed)
             case .deletePack(let packID):
                 return model.deleteSelectedUserPackAfterConfirmation(expectedPackID: packID)
                     .isSuccess ? .succeeded : .failed(.mutationFailed)
@@ -1176,6 +1182,15 @@ public final class SoundPacksEditorOwner: ObservableObject {
             enqueueOperationAnnouncement(
                 state.kind,
                 completion: .succeeded,
+                operationID: operationID)
+        } else if let completion = phase.announcementCompletion,
+            !ingestAnnouncements(from: seed.windowStatuses, operationID: operationID)
+        {
+            // Pre-writer rejections do not necessarily create a legacy window status. They still
+            // need one retryable semantic debt tied to the terminal activity.
+            enqueueOperationAnnouncement(
+                state.kind,
+                completion: completion,
                 operationID: operationID)
         }
         trimTerminalOperationHistory()
@@ -1606,16 +1621,23 @@ public final class SoundPacksEditorOwner: ObservableObject {
         }
     }
 
-    private func ingestAnnouncements(from statuses: [SoundPacksWindowStatus]) {
-        for status in statuses.sorted(by: { $0.revision < $1.revision })
-        where seenStatusRevisions.insert(status.revision).inserted {
+    @discardableResult
+    private func ingestAnnouncements(
+        from statuses: [SoundPacksWindowStatus],
+        operationID: SoundPackEditorOperationID? = nil
+    ) -> Bool {
+        var inserted = false
+        for status in statuses.sorted(by: { $0.revision < $1.revision }) {
+            guard seenStatusRevisions.insert(status.revision).inserted else { continue }
+            inserted = true
             enqueueAnnouncement(
                 kind: .windowStatus(status.kind),
                 actionText: status.actionText,
                 messageText: status.messageText,
-                operationID: nil,
+                operationID: operationID,
                 priority: status.severity == .failure ? .failure : .notice)
         }
+        return inserted
     }
 
     private func enqueueOperationAnnouncement(
@@ -1635,13 +1657,30 @@ public final class SoundPacksEditorOwner: ObservableObject {
         from previous: SoundPacksEditorModelSeed?,
         to seed: SoundPacksEditorModelSeed
     ) {
-        guard context.isSounds, let previous,
-            !announcementQueue.contains(where: { !$0.isTransientObservation })
-        else { return }
+        guard context.isSounds, let previous else { return }
         if previous.announcementLibraryState != seed.announcementLibraryState {
-            enqueueSemanticAnnouncement(
-                .libraryStateChanged(announcementFacts(from: seed)),
-                priority: announcementPriority(for: seed.announcementLibraryState))
+            let suppressesThisObservation: Bool
+            if suppressesNextForkLibraryObservationCycle {
+                switch seed.announcementLibraryState {
+                case .loading, .refreshing:
+                    suppressesThisObservation = true
+                case .ready:
+                    suppressesNextForkLibraryObservationCycle = false
+                    suppressesThisObservation = true
+                case .loadFailed, .refreshFailed:
+                    // A scan failure is not equivalent to the successful fork receipt and must
+                    // still preempt notices with its own failure announcement.
+                    suppressesNextForkLibraryObservationCycle = false
+                    suppressesThisObservation = false
+                }
+            } else {
+                suppressesThisObservation = false
+            }
+            if !suppressesThisObservation {
+                enqueueSemanticAnnouncement(
+                    .libraryStateChanged(announcementFacts(from: seed)),
+                    priority: announcementPriority(for: seed.announcementLibraryState))
+            }
         }
         guard previous.selectedPackID != seed.selectedPackID,
             shouldAnnounceSelectionChange(to: seed.selectedPackID)
@@ -1685,8 +1724,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             actionText: nil,
             messageText: nil,
             operationID: nil,
-            priority: priority,
-            isTransientObservation: true)
+            priority: priority)
     }
 
     private func enqueueAnnouncement(
@@ -1694,12 +1732,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
         actionText: SoundPacksWindowStatusText?,
         messageText: SoundPacksWindowStatusText?,
         operationID: SoundPackEditorOperationID?,
-        priority: EditorAnnouncementPriority,
-        isTransientObservation: Bool = false
+        priority: EditorAnnouncementPriority
     ) {
-        if !isTransientObservation {
-            announcementQueue.removeAll(where: \.isTransientObservation)
-        }
         nextCapabilityID &+= 1
         let debt = EditorAnnouncementDebt(
             announcement: SoundPackEditorAnnouncement(
@@ -1708,8 +1742,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 actionText: actionText,
                 messageText: messageText),
             operationID: operationID,
-            priority: priority,
-            isTransientObservation: isTransientObservation)
+            priority: priority)
         let insertionIndex =
             announcementQueue.firstIndex {
                 $0.priority.rawValue > priority.rawValue
@@ -1939,7 +1972,6 @@ private struct EditorAnnouncementDebt {
     let announcement: SoundPackEditorAnnouncement
     let operationID: SoundPackEditorOperationID?
     let priority: EditorAnnouncementPriority
-    let isTransientObservation: Bool
 }
 
 private enum EditorAnnouncementPriority: Int {

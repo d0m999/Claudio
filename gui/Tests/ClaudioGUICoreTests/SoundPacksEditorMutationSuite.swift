@@ -1568,6 +1568,7 @@ func runSoundPacksEditorMutationSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 34)))
             await waitForSoundEditorReady(owner, library: fixture.library)
+            drainSoundEditorMutationAnnouncements(owner)
             guard case .sounds(let sounds) = owner.presentation.mode,
                 let fork = sounds.packs.first(where: { $0.id == "factory-a" })?.forkAction
             else {
@@ -1654,6 +1655,7 @@ func runSoundPacksEditorMutationSuites() async {
             let owner = fixture.owner
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 31)))
             await waitForSoundEditorReady(owner, library: fixture.library)
+            drainSoundEditorMutationAnnouncements(owner)
             guard case .sounds(let sounds) = owner.presentation.mode,
                 let fork = sounds.packs.first(where: { $0.id == "factory-a" })?.forkAction
             else {
@@ -1719,6 +1721,19 @@ func runSoundPacksEditorMutationSuites() async {
                 owner.presentation.pendingAnnouncement?.kind
                     != .operation(kind: .fork, completion: .succeeded),
                 "fork exhaustion 不得进入 success announcement queue")
+        }
+    }
+}
+
+@MainActor
+private func drainSoundEditorMutationAnnouncements(_ owner: SoundPacksEditorOwner) {
+    while let announcement = owner.presentation.pendingAnnouncement {
+        switch announcement.kind {
+        case .windowOpened, .libraryStateChanged, .selectionChanged:
+            _ = owner.send(
+                .acknowledgeAnnouncement(id: announcement.id, didPost: true))
+        case .operation, .windowStatus:
+            return
         }
     }
 }

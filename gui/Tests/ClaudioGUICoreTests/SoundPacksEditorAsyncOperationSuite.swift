@@ -1368,6 +1368,7 @@ func runSoundPacksEditorAsyncOperationSuites() async {
             _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 242)))
             await waitForSoundEditorReady(owner, library: fixture.library)
             await waitForSoundEditorInventory(owner)
+            drainSoundEditorObservationAnnouncements(owner)
             guard let importPermit = soundEditorImportPermit(owner: owner, bindTo: nil) else {
                 expect(false, "out-of-order fixture 必须取得 import permit")
                 return
@@ -1551,6 +1552,7 @@ private func expectSoundEditorAnnouncementDebt(
     completion: SoundPackEditorOperationCompletion,
     acknowledge: Bool = false
 ) {
+    drainSoundEditorObservationAnnouncements(owner)
     guard let announcement = owner.presentation.pendingAnnouncement else {
         expect(false, "async terminal 必须形成 semantic announcement debt")
         return
@@ -1575,6 +1577,19 @@ private func expectSoundEditorAnnouncementDebt(
         owner.send(.acknowledgeAnnouncement(id: announcement.id, didPost: true))
             == .rejected(.staleAction),
         "已消费 announcement identity 不得 replay")
+}
+
+@MainActor
+private func drainSoundEditorObservationAnnouncements(_ owner: SoundPacksEditorOwner) {
+    while let announcement = owner.presentation.pendingAnnouncement {
+        switch announcement.kind {
+        case .windowOpened, .libraryStateChanged, .selectionChanged:
+            _ = owner.send(
+                .acknowledgeAnnouncement(id: announcement.id, didPost: true))
+        case .operation, .windowStatus:
+            return
+        }
+    }
 }
 
 @MainActor
