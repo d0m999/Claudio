@@ -187,6 +187,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     ) -> SoundPacksEditorCommandResult {
         switch command {
         case .activate(let nextContext):
+            let wasSoundsActive = context.isSounds
             actionEpoch &+= 1
             advanceCandidateGeneration(for: nextContext)
             context = nextContext
@@ -194,7 +195,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             case .inactive:
                 publish(from: model.editorProjectionSeed())
             case .sounds(let route, _):
-                withModelTransition {
+                let (_, seed) = captureModelTransition {
                     model.setManagedSurface(route.surface)
                     let seed = model.editorProjectionSeed()
                     if case .ready = seed.library,
@@ -204,10 +205,17 @@ public final class SoundPacksEditorOwner: ObservableObject {
                         _ = model.selectPackForInspection(packID)
                     }
                 }
+                if !wasSoundsActive {
+                    enqueueSemanticAnnouncement(
+                        .windowOpened(announcementFacts(from: seed)),
+                        priority: announcementPriority(for: seed.announcementLibraryState))
+                }
+                publish(from: seed)
             case .events(let route, _, _):
-                withModelTransition {
+                let (_, seed) = captureModelTransition {
                     model.setManagedSurface(route.surface)
                 }
+                publish(from: seed)
             }
             return .applied
         case .invoke(let action):
@@ -1208,6 +1216,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         forcingCapabilityGeneration: Bool
     ) {
         guard forcingCapabilityGeneration || seed != lastCommittedModelSeed else { return }
+        ingestPresentationTransition(from: lastCommittedModelSeed, to: seed)
         if !seed.library.isFresh {
             // Loading may be the observation refresh that raced with an operation already
             // accepted from the same fresh snapshot. Keep that accepted confirmation consumed,
@@ -1600,15 +1609,12 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private func ingestAnnouncements(from statuses: [SoundPacksWindowStatus]) {
         for status in statuses.sorted(by: { $0.revision < $1.revision })
         where seenStatusRevisions.insert(status.revision).inserted {
-            nextCapabilityID &+= 1
-            announcementQueue.append(
-                EditorAnnouncementDebt(
-                    announcement: SoundPackEditorAnnouncement(
-                        id: SoundPackEditorAnnouncement.ID(rawValue: nextCapabilityID),
-                        kind: .windowStatus(status.kind),
-                        actionText: status.actionText,
-                        messageText: status.messageText),
-                    operationID: nil))
+            enqueueAnnouncement(
+                kind: .windowStatus(status.kind),
+                actionText: status.actionText,
+                messageText: status.messageText,
+                operationID: nil,
+                priority: status.severity == .failure ? .failure : .notice)
         }
     }
 
@@ -1617,15 +1623,98 @@ public final class SoundPacksEditorOwner: ObservableObject {
         completion: SoundPackEditorOperationCompletion,
         operationID: SoundPackEditorOperationID
     ) {
+        enqueueAnnouncement(
+            kind: .operation(kind: kind, completion: completion),
+            actionText: nil,
+            messageText: nil,
+            operationID: operationID,
+            priority: completion.announcementPriority)
+    }
+
+    private func ingestPresentationTransition(
+        from previous: SoundPacksEditorModelSeed?,
+        to seed: SoundPacksEditorModelSeed
+    ) {
+        guard context.isSounds, let previous,
+            !announcementQueue.contains(where: { !$0.isTransientObservation })
+        else { return }
+        if previous.announcementLibraryState != seed.announcementLibraryState {
+            enqueueSemanticAnnouncement(
+                .libraryStateChanged(announcementFacts(from: seed)),
+                priority: announcementPriority(for: seed.announcementLibraryState))
+        }
+        guard previous.selectedPackID != seed.selectedPackID,
+            shouldAnnounceSelectionChange(to: seed.selectedPackID)
+        else { return }
+        enqueueSemanticAnnouncement(
+            .selectionChanged(announcementFacts(from: seed)),
+            priority: .notice)
+    }
+
+    private func announcementFacts(
+        from seed: SoundPacksEditorModelSeed
+    ) -> SoundPacksWindowAnnouncementFacts {
+        let selectedName = seed.selectedPackID.flatMap { packID in
+            seed.packCards.first(where: { $0.id == packID }).map {
+                SelectedPackMetadata(id: $0.id, name: $0.name).displayName
+            }
+        }
+        return SoundPacksWindowAnnouncementFacts(
+            packCount: seed.packCards.count,
+            selectedPackName: selectedName,
+            libraryPresentationState: seed.announcementLibraryState)
+    }
+
+    private func announcementPriority(
+        for state: SoundPackLibraryPresentationState
+    ) -> EditorAnnouncementPriority {
+        switch state {
+        case .loadFailed, .refreshFailed:
+            return .failure
+        case .loading, .refreshing, .ready:
+            return .notice
+        }
+    }
+
+    private func enqueueSemanticAnnouncement(
+        _ kind: SoundPackEditorAnnouncementKind,
+        priority: EditorAnnouncementPriority
+    ) {
+        enqueueAnnouncement(
+            kind: kind,
+            actionText: nil,
+            messageText: nil,
+            operationID: nil,
+            priority: priority,
+            isTransientObservation: true)
+    }
+
+    private func enqueueAnnouncement(
+        kind: SoundPackEditorAnnouncementKind,
+        actionText: SoundPacksWindowStatusText?,
+        messageText: SoundPacksWindowStatusText?,
+        operationID: SoundPackEditorOperationID?,
+        priority: EditorAnnouncementPriority,
+        isTransientObservation: Bool = false
+    ) {
+        if !isTransientObservation {
+            announcementQueue.removeAll(where: \.isTransientObservation)
+        }
         nextCapabilityID &+= 1
-        announcementQueue.append(
-            EditorAnnouncementDebt(
-                announcement: SoundPackEditorAnnouncement(
-                    id: SoundPackEditorAnnouncement.ID(rawValue: nextCapabilityID),
-                    kind: .operation(kind: kind, completion: completion),
-                    actionText: nil,
-                    messageText: nil),
-                operationID: operationID))
+        let debt = EditorAnnouncementDebt(
+            announcement: SoundPackEditorAnnouncement(
+                id: SoundPackEditorAnnouncement.ID(rawValue: nextCapabilityID),
+                kind: kind,
+                actionText: actionText,
+                messageText: messageText),
+            operationID: operationID,
+            priority: priority,
+            isTransientObservation: isTransientObservation)
+        let insertionIndex =
+            announcementQueue.firstIndex {
+                $0.priority.rawValue > priority.rawValue
+            } ?? announcementQueue.endIndex
+        announcementQueue.insert(debt, at: insertionIndex)
     }
 
     private func retireTerminalOperation(_ operationID: SoundPackEditorOperationID) {
@@ -1849,6 +1938,13 @@ private struct EditorOperationState {
 private struct EditorAnnouncementDebt {
     let announcement: SoundPackEditorAnnouncement
     let operationID: SoundPackEditorOperationID?
+    let priority: EditorAnnouncementPriority
+    let isTransientObservation: Bool
+}
+
+private enum EditorAnnouncementPriority: Int {
+    case failure
+    case notice
 }
 
 extension SoundPackEditorActivityPhase {
@@ -1867,6 +1963,24 @@ extension SoundPackEditorActivityPhase {
         case .cancelled(let changedOnDisk):
             return .cancelled(changedOnDisk: changedOnDisk)
         }
+    }
+}
+
+extension SoundPackEditorOperationCompletion {
+    fileprivate var announcementPriority: EditorAnnouncementPriority {
+        switch self {
+        case .failed, .orphan:
+            return .failure
+        case .unchanged, .succeeded, .partial, .cancelled:
+            return .notice
+        }
+    }
+}
+
+extension SoundPacksEditorContext {
+    fileprivate var isSounds: Bool {
+        if case .sounds = self { return true }
+        return false
     }
 }
 

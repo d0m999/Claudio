@@ -280,6 +280,9 @@ package struct SoundPackEditorConfirmation: Identifiable, Equatable {
 }
 
 package enum SoundPackEditorAnnouncementKind: Equatable, Sendable {
+    case windowOpened(SoundPacksWindowAnnouncementFacts)
+    case libraryStateChanged(SoundPacksWindowAnnouncementFacts)
+    case selectionChanged(SoundPacksWindowAnnouncementFacts)
     case windowStatus(SoundPacksWindowStatusKind)
     case operation(
         kind: SoundPackEditorActivityKind,
@@ -398,6 +401,7 @@ package enum SoundPackEditorFailure: Error, Equatable, Sendable {
 /// immutable value.
 struct SoundPacksEditorModelSeed: Equatable {
     let library: SoundPackLibraryPresentation
+    let announcementLibraryState: SoundPackLibraryPresentationState
     let installedPackIDs: Set<String>
     let snapshotRevision: UInt64?
     let selectionGeneration: UInt64

@@ -995,6 +995,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         }
         return SoundPacksEditorModelSeed(
             library: editorLibraryPresentation,
+            announcementLibraryState: libraryPresentationState,
             installedPackIDs: librarySnapshot.map { Set($0.facts.map(\.id)) }
                 ?? Set(
                     packCards.compactMap { card in
