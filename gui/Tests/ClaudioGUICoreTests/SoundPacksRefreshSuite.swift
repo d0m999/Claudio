@@ -54,23 +54,6 @@ private final class SoundPacksForkCollisionInjector: @unchecked Sendable {
     }
 }
 
-private final class SoundPacksBlockingDurationProbe: AudioDurationProbing, @unchecked Sendable {
-    private let entered = DispatchSemaphore(value: 0)
-    private let resume = DispatchSemaphore(value: 0)
-
-    func probeDuration(of fileURL: URL) -> TimeInterval? {
-        entered.signal()
-        resume.wait()
-        return 1
-    }
-
-    func waitUntilEntered() -> DispatchTimeoutResult {
-        entered.wait(timeout: .now() + 5)
-    }
-
-    func allowCompletion() { resume.signal() }
-}
-
 private func soundPacksRepoRoot(file: StaticString = #filePath) -> URL {
     URL(fileURLWithPath: "\(file)")
         .deletingLastPathComponent().deletingLastPathComponent()
@@ -187,20 +170,6 @@ func runSoundPacksRefreshSuites() async {
                         expectedPackID: "pack-b")
             else {
                 expect(false, "错误 scope 下删除音频必须由 model 显式拒绝")
-                return
-            }
-            let importedSource = root.appendingPathComponent("import.aiff")
-            writeFixture("import", to: importedSource)
-            guard
-                case .failure(.writesStopped) = await model.importSelectedAudioFiles(
-                    [
-                        AudioImportRequest(
-                            sourceURL: importedSource,
-                            suggestedFileName: "import.aiff")
-                    ],
-                    expectedPackID: "pack-b")
-            else {
-                expect(false, "错误 scope 下导入音频必须由 model 显式拒绝")
                 return
             }
             guard case .failure(.writesStopped) = model.forkSelectedFactoryPack() else {
@@ -584,63 +553,6 @@ func runSoundPacksRefreshSuites() async {
                     == true,
                 "保留窗口必须立即重读 config，VoiceOver 不得继续播报已静音")
             expect(window.selectedPackID == "pack-a", "config-only 刷新不得改变检查中的包")
-        }
-    }
-
-    suite("窗口写后：configOnly 负控保持 stale，full revision 重算真实 PanelConfigController.packCards") {
-        withTempDirectory { root in
-            let configFile = root.appendingPathComponent("config.json")
-            let packsDirectory = root.appendingPathComponent("packs")
-            let manifest = packsDirectory.appendingPathComponent("pack-a/manifest.json")
-            writeFixture(
-                #"{ "selected_pack": "pack-a", "master_volume": 0.42, "events": {}, "starred_packs": ["pack-a"] }"#,
-                to: configFile)
-            writeFixture(
-                #"{ "id": "pack-a", "events": { "stop": "stop.mp3" } }"#,
-                to: manifest)
-            writeFixture("audio", to: packsDirectory.appendingPathComponent("pack-a/stop.mp3"))
-
-            let coordinator = SoundPacksRefreshCoordinator()
-            let panel = PanelConfigController(
-                configFile: configFile, lockFile: root.appendingPathComponent("config.lock"),
-                environment: soundPacksEnvironment(packsDirectory),
-                soundPacksRefreshCoordinator: coordinator)
-            let window = SoundPacksWindowModel(
-                configFile: configFile,
-                environment: soundPacksEnvironment(packsDirectory),
-                refreshCoordinator: coordinator)
-            expect(
-                panel.packCards.first?.presentEvents == [.stop],
-                "前提：面板初始卡片只能看见 stop")
-            expect(
-                window.selectedEventRows.first(where: { $0.event == .stop })?.coverage
-                    == .present(fileName: "stop.mp3"),
-                "前提：窗口初始也必须从同一份 pack-a manifest 读到 stop")
-
-            // 模拟窗口里的同步 manifest 写已经成功落盘。
-            writeFixture(
-                #"{ "id": "pack-a", "events": { "stop": "stop.mp3", "notification": "notification.mp3" } }"#,
-                to: manifest)
-            writeFixture(
-                "audio",
-                to: packsDirectory.appendingPathComponent("pack-a/notification.mp3"))
-
-            panel.reloadConfigOnly()
-            expect(
-                panel.packCards.first?.presentEvents == [.stop],
-                "负控：selected_pack 未变时 reloadConfigOnly 不重算 packCards，必须保持 stale，"
-                    + "否则这条测试没有证明 full 路由的必要性")
-
-            window.completeSynchronousWrite(.succeeded)
-
-            expect(
-                panel.packCards.first?.presentEvents == [.stop, .notification],
-                "窗口成功写发布的 revision 必须直接触发 PanelConfigController.reload()，让 packCards "
-                    + "重读 manifest；得到 \(String(describing: panel.packCards.first?.presentEvents))")
-            expect(
-                window.selectedEventRows.first(where: { $0.event == .notification })?.coverage
-                    == .present(fileName: "notification.mp3"),
-                "窗口成功写也必须重读自己的事件映射，不能只刷 popover")
         }
     }
 
@@ -1548,157 +1460,6 @@ func runSoundPacksRefreshSuites() async {
         }
     }
 
-    await suite("SoundPacksWindowModel add audio：改选期间按原包落盘但禁止串包反馈与试听") {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "claudio-window-import-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let configFile = root.appendingPathComponent("config.json")
-        let packs = root.appendingPathComponent("packs")
-        writeFixture(#"{ "selected_pack": "pack-a", "events": {} }"#, to: configFile)
-        for id in ["pack-a", "pack-b"] {
-            writeFixture(
-                "{ \"id\": \"\(id)\", \"name\": \"\(id)\", \"events\": {} }",
-                to: packs.appendingPathComponent("\(id)/manifest.json"))
-        }
-        let source = root.appendingPathComponent("picked.wav")
-        try? validWAVData().write(to: source)
-        let probe = SoundPacksBlockingDurationProbe()
-        let environment = AudioImportEnvironment(
-            userPacksDirectory: packs,
-            durationProbe: probe,
-            packsLockFile: injectedPacksLock(under: root))
-        let model = SoundPacksWindowModel(
-            configFile: configFile,
-            lockFile: root.appendingPathComponent("config.lock"),
-            environment: environment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
-
-        let operation = Task {
-            await model.importSelectedAudioFiles(
-                [AudioImportRequest(sourceURL: source, suggestedFileName: "picked.wav")],
-                expectedPackID: "pack-a")
-        }
-        await Task.yield()
-        expect(probe.waitUntilEntered() == .success, "detached import must reach duration probe")
-        model.selectPackForInspection("pack-b")
-        probe.allowCompletion()
-        let result = await operation.value
-        guard case .success(let completion) = result else {
-            expect(false, "import should complete for original pack, got \(result)")
-            return
-        }
-        expect(completion.completedInBackground, "selection change must mark background completion")
-        expect(completion.previewFile == nil, "later-selected pack must never preview pack-a audio")
-        expect(
-            model.selectedPackID == "pack-b", "completion must not pull inspection back to pack-a")
-        expect(
-            FileManager.default.fileExists(
-                atPath: packs.appendingPathComponent("pack-a/picked.wav").path),
-            "bytes must still land in the pack that started the action")
-        expect(
-            model.windowStatuses.first?.message.contains("后台操作") == true
-                && model.windowStatuses.first?.message.contains("pack-a") == true,
-            "global result must explicitly name the real background target")
-    }
-
-    await suite("SoundPacksWindowModel add audio：A→B→A 不得重新继承旧操作的前台身份") {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "claudio-window-import-aba-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let configFile = root.appendingPathComponent("config.json")
-        let packs = root.appendingPathComponent("packs")
-        writeFixture(#"{ "selected_pack": "pack-a", "events": {} }"#, to: configFile)
-        for id in ["pack-a", "pack-b"] {
-            writeFixture(
-                "{ \"id\": \"\(id)\", \"name\": \"\(id)\", \"events\": {} }",
-                to: packs.appendingPathComponent("\(id)/manifest.json"))
-        }
-        let source = root.appendingPathComponent("picked.wav")
-        try? validWAVData().write(to: source)
-        let probe = SoundPacksBlockingDurationProbe()
-        let model = SoundPacksWindowModel(
-            configFile: configFile,
-            lockFile: root.appendingPathComponent("config.lock"),
-            environment: AudioImportEnvironment(
-                userPacksDirectory: packs,
-                durationProbe: probe,
-                packsLockFile: injectedPacksLock(under: root)),
-            refreshCoordinator: SoundPacksRefreshCoordinator())
-
-        let operation = Task {
-            await model.importSelectedAudioFiles(
-                [AudioImportRequest(sourceURL: source, suggestedFileName: "picked.wav")],
-                expectedPackID: "pack-a")
-        }
-        await Task.yield()
-        expect(probe.waitUntilEntered() == .success, "detached import 必须进入 duration probe")
-        model.selectPackForInspection("pack-b")
-        model.selectPackForInspection("pack-a")
-        probe.allowCompletion()
-
-        guard case .success(let completion) = await operation.value else {
-            expect(false, "导入应继续完成并落到原目标包")
-            return
-        }
-        expect(completion.completedInBackground, "选择身份一旦改变，返回原包也必须是后台结果")
-        expect(completion.previewFile == nil, "A→B→A 不得自动播放旧操作的音频")
-        expect(
-            model.windowStatuses.first?.message.contains("后台操作") == true,
-            "A→B→A 完成状态必须明确标成后台结果")
-    }
-
-    await suite("SoundPacksWindowModel add audio：隐藏期间完成的结果必须跨 follow-active 重开存活") {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "claudio-window-hidden-import-\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let configFile = root.appendingPathComponent("config.json")
-        let packs = root.appendingPathComponent("packs")
-        writeFixture(#"{ "selected_pack": "pack-b", "events": {} }"#, to: configFile)
-        for id in ["pack-a", "pack-b"] {
-            writeFixture(
-                "{ \"id\": \"\(id)\", \"name\": \"\(id)\", \"events\": {} }",
-                to: packs.appendingPathComponent("\(id)/manifest.json"))
-        }
-        let source = root.appendingPathComponent("picked.wav")
-        try? validWAVData().write(to: source)
-        let probe = SoundPacksBlockingDurationProbe()
-        let model = SoundPacksWindowModel(
-            configFile: configFile,
-            lockFile: root.appendingPathComponent("config.lock"),
-            environment: AudioImportEnvironment(
-                userPacksDirectory: packs,
-                durationProbe: probe,
-                packsLockFile: injectedPacksLock(under: root)),
-            refreshCoordinator: SoundPacksRefreshCoordinator())
-        model.selectPackForInspection("pack-a")
-
-        let operation = Task {
-            await model.importSelectedAudioFiles(
-                [AudioImportRequest(sourceURL: source, suggestedFileName: "picked.wav")],
-                expectedPackID: "pack-a")
-        }
-        await Task.yield()
-        expect(probe.waitUntilEntered() == .success, "hidden import 必须进入 duration probe")
-        probe.allowCompletion()
-        _ = await operation.value
-        let completedRevision = model.windowStatuses.first?.revision
-        expect(model.windowStatuses.first?.kind == .audio, "隐藏期间完成必须先产生音频结果")
-
-        model.reload(followActivePack: true)
-
-        let retained = model.windowStatuses.first(where: { $0.kind == .audio })
-        expect(model.selectedPackID == "pack-b", "重开仍必须跟随真实 active pack")
-        expect(retained?.revision == completedRevision, "提升为后台状态不得伪造一次新操作 revision")
-        expect(retained?.packID == nil, "重开后的异步结果必须是窗口级，不得错挂到 active pack")
-        expect(
-            retained?.message.contains("后台操作") == true
-                && retained?.message.contains("pack-a") == true,
-            "重开后仍必须公告真实原目标，不得在播报前清除")
-    }
-
     suite("Panel master volume：成功落盘后及时刷新保留窗口的 preview config") {
         withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -1729,37 +1490,6 @@ func runSoundPacksRefreshSuites() async {
             expect(coordinator.windowContentReloadRevision == 1, "主音量成功必须发布一次定向窗口刷新")
             expect(previewVolume(for: window.config) == 1.0, "窗口下一次试听必须使用最新落盘音量")
             expect(coordinator.panelReloadRevision == 0, "面板自己的写不得形成反向刷新环")
-        }
-    }
-
-    suite("SoundPacksWindowModel preview：只返回当前映射的包内正规文件，陈旧时刷成 broken") {
-        withTempDirectory { root in
-            let configFile = root.appendingPathComponent("config.json")
-            let packs = root.appendingPathComponent("packs")
-            let sound = packs.appendingPathComponent("pack-a/stop.wav")
-            writeFixture(
-                #"{ "selected_pack": "pack-a", "events": {} }"#,
-                to: configFile)
-            writeFixture(
-                #"{ "id": "pack-a", "events": { "stop": "stop.wav" } }"#,
-                to: packs.appendingPathComponent("pack-a/manifest.json"))
-            writeFixture("audio", to: sound)
-            let model = SoundPacksWindowModel(
-                configFile: configFile,
-                environment: soundPacksEnvironment(packs),
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-
-            expect(
-                model.previewFileForSelectedEvent(.stop) == sound,
-                "present 事件必须解析到当前包内的真文件")
-            try? FileManager.default.removeItem(at: sound)
-            expect(
-                model.previewFileForSelectedEvent(.stop) == nil,
-                "外部删除后试听必须 fail closed，不得播放陈旧路径")
-            expect(
-                model.selectedEventRows.first(where: { $0.event == .stop })?.coverage
-                    == .broken(fileName: "stop.wav"),
-                "解析失败必须立即刷新为 broken，不得静默无反馈")
         }
     }
 
@@ -2304,6 +2034,13 @@ func runSoundPacksRefreshSuites() async {
             atPath: productionSourcesRoot.path)
         var rawModelConstructionSites: [String] = []
         var rawModelReferenceSites: [String] = []
+        let retiredCompatibilityTypes = [
+            "SoundPacksWindowAudioImportCompletion",
+            "AICueAdoptionRequest",
+            "AICueAdoptionError",
+            "AICuePostImportFailure",
+        ]
+        var retiredCompatibilityTypeSites: [String: [String]] = [:]
         while let name = productionEnumerator?.nextObject() as? String {
             guard name.hasSuffix(".swift"),
                 let code = soundPacksCode("gui/Sources/\(name)")
@@ -2313,6 +2050,9 @@ func runSoundPacksRefreshSuites() async {
             }
             if code.contains("SoundPacksWindowModel(") {
                 rawModelConstructionSites.append(name)
+            }
+            for type in retiredCompatibilityTypes where code.contains(type) {
+                retiredCompatibilityTypeSites[type, default: []].append(name)
             }
         }
         let modelImplementation =
@@ -2333,6 +2073,28 @@ func runSoundPacksRefreshSuites() async {
                 && !modelImplementation.contains("@Published"),
             "raw window model 只能经 owner settled callback 发布 coherent projection，"
                 + "不得保留独立 observation seam")
+        expect(
+            !model.contains("audioImportExecutor")
+                && !model.contains("func importSelectedAudioFiles(")
+                && !model.contains("func previewFileForSelectedEvent(")
+                && !model.contains("func assignImportedAudioFile(")
+                && !model.contains("func adoptAICue(")
+                && !model.contains("func refreshAICueAdoptionSnapshot("),
+            "raw model 的 import/preview/direct-bind/AI adoption compatibility interface 必须完整删除")
+        expect(
+            retiredCompatibilityTypeSites.isEmpty,
+            "owner interface 替代后不得继续 shipping 专用 raw-model DTO/error，实得 "
+                + "\(retiredCompatibilityTypeSites)")
+        expect(
+            !model.contains("package var managedScopeIsInvalid")
+                && !model.contains("package var managedSurfaceProfileIsMalformed")
+                && !model.contains("package var audioInventoryError")
+                && !model.contains("package var selectedPackIsReferenced")
+                && !model.contains("package var selectedPackCanRestoreFactory")
+                && !model.contains("package var hasFactoryPacks")
+                && !model.contains("package var starredPacksFailureReason")
+                && !model.contains("package func completeSynchronousWrite("),
+            "raw model 只供旧测试使用的 getter/wrapper 必须删除，保留行为应经 owner interface 验证")
         expect(
             rawModelConstructionSites == ["ClaudioGUICore/SoundPacksEditorOwner.swift"],
             "shipping/DEBUG production 只能由 owner implementation 构造 raw model，实得 "

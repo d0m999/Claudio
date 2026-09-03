@@ -265,12 +265,14 @@ func runSoundPacksWindowStarredPacksSuites() {
                 expect(false, "畸形 config 的星标写必须 fail closed，实得 \(result)")
                 return
             }
+            let failureReason = model.starredPacksError.map(
+                soundPacksWindowStarredPacksFailureReason)
             expect(
-                model.starredPacksFailureReason == probeReason,
+                failureReason == probeReason,
                 "窗口 FailureRow 的 config reason 必须与 probeConfigRewritable 逐字同句")
             expect(
                 soundPacksWindowAnnouncement(
-                    .writeFailed(action: "更新星标", reason: model.starredPacksFailureReason ?? ""),
+                    .writeFailed(action: "更新星标", reason: failureReason ?? ""),
                     facts: SoundPacksWindowAnnouncementFacts(packCount: 1, selectedPackName: "a")
                 ) == "更新星标失败：\(probeReason)",
                 "窗口 VoiceOver 必须复用可见 FailureRow 的同一句可执行 reason")
@@ -296,7 +298,8 @@ func runSoundPacksWindowStarredPacksSuites() {
                 return
             }
             expect(
-                model.starredPacksFailureReason == SetStarredPacksError.lockBusy.description,
+                model.starredPacksError.map(soundPacksWindowStarredPacksFailureReason)
+                    == SetStarredPacksError.lockBusy.description,
                 "lock busy 必须在窗口 FailureRow 中显示写者的可执行原句")
         }
 
@@ -321,7 +324,7 @@ func runSoundPacksWindowStarredPacksSuites() {
                 return
             }
             expect(
-                model.starredPacksFailureReason
+                model.starredPacksError.map(soundPacksWindowStarredPacksFailureReason)
                     == SetStarredPacksError.tooManyStarredPacks(max: maxStarredPacks).description,
                 ">4 拒绝必须进入同一个窗口 FailureRow/VoiceOver reason 通道")
         }
