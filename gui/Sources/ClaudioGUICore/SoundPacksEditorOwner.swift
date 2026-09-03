@@ -1244,9 +1244,9 @@ public final class SoundPacksEditorOwner: ObservableObject {
         let phase = receipt.phase
         operationStates[operationID] = state.withPhase(phase)
         if case .succeeded = phase {
-            // Preserve the model's exact informational status (pack identity, retained salvage,
-            // and other user-facing facts) as the single operation debt. A successful receipt
-            // without a status still needs the privacy-preserving generic fallback.
+            // Preserve every exact informational status debt produced by the model transition,
+            // including pack identity, retained salvage, and other user-facing facts. Only a
+            // successful receipt with no status receives one privacy-preserving generic fallback.
             if !ingestAnnouncements(from: seed.windowStatuses, operationID: operationID) {
                 enqueueOperationAnnouncement(
                     state.kind,
