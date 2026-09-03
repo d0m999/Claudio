@@ -375,6 +375,79 @@ func runSettingsPresentationTargetSuites() {
                 && !settingsAnnouncementSchedulerHasLatchContract(lateResetScheduler),
             "latch 审计必须接受正确顺序，并拒绝缺 set 或 delivery 后才 reset 的 mutation")
     }
+
+    suite("Settings production tree：九个 typed destination 由唯一 root 穷尽挂载") {
+        let root = guiTestRepositoryRoot()
+        let presentationDirectory = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation", isDirectory: true)
+        let executableDirectory = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI", isDirectory: true)
+        let migratedFiles = [
+            "SettingsRootView.swift",
+            "EventSettingsWindowView.swift",
+            "EventSettingsAICueView.swift",
+            "IntegrationsSettingsDestinationView.swift",
+            "UsageSettingsView.swift",
+            "ShortcutSettingsView.swift",
+            "AboutSettingsView.swift",
+            "SettingsVisualComponents.swift",
+            "EventSettingsWindowSelection.swift",
+        ]
+        let legacyFiles = migratedFiles.map { filename in
+            filename == "SettingsRootView.swift" ? "SettingsWindowView.swift" : filename
+        }
+        expect(
+            migratedFiles.allSatisfy {
+                FileManager.default.fileExists(
+                    atPath: presentationDirectory.appendingPathComponent($0).path)
+            },
+            "完整 production Settings view tree 必须由 ClaudioSettingsPresentation module 拥有")
+        expect(
+            legacyFiles.allSatisfy {
+                !FileManager.default.fileExists(
+                    atPath: executableDirectory.appendingPathComponent($0).path)
+            },
+            "ClaudioGUI 不得保留迁移后 source 或 duplicate SettingsWindowView")
+
+        let rootURL = presentationDirectory.appendingPathComponent("SettingsRootView.swift")
+        let controllerURL = executableDirectory.appendingPathComponent(
+            "SettingsWindowController.swift")
+        guard let rootSource = try? String(contentsOf: rootURL, encoding: .utf8),
+            let controllerSource = try? String(contentsOf: controllerURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 production Settings root 或 controller wiring")
+            return
+        }
+        let rootScan = strippingComments(rootSource)
+        let controllerScan = strippingComments(controllerSource)
+        guard rootScan.unmodeledConstructs.isEmpty,
+            controllerScan.unmodeledConstructs.isEmpty,
+            let routeSlot = settingsBracedBlock(after: "private var routeSlot", in: rootScan.code)
+        else {
+            expect(false, "production Settings root source audit 必须 fail closed")
+            return
+        }
+        let normalizedRouteSlot = collapsingWhitespace(routeSlot)
+        let normalizedController = collapsingWhitespace(controllerScan.code)
+        let destinationCases = [
+            ".general", ".integrations", ".eventsAndSounds", ".notifications", ".display",
+            ".sounds", ".usage", ".shortcuts", ".about",
+        ]
+        expect(
+            normalizedRouteSlot.contains("switch destination")
+                && destinationCases.allSatisfy {
+                    normalizedRouteSlot.contains("case \($0):")
+                }
+                && !normalizedRouteSlot.contains("default:")
+                && !normalizedRouteSlot.contains("AnyView")
+                && !normalizedRouteSlot.contains("rawValue"),
+            "root 必须用无 default/String/AnyView 的 exhaustive typed switch 穷尽九个 destination")
+        expect(
+            normalizedController.contains(
+                "SettingsRootView(session: settingsPresentationSession)")
+                && !normalizedController.contains("SettingsWindowView("),
+            "production controller 必须只挂载与 harness 相同的 SettingsRootView(session:) interface")
+    }
 }
 
 @MainActor
