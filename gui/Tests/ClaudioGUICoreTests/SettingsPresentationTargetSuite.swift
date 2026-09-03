@@ -103,6 +103,21 @@ func runSettingsPresentationSliceSuites() {
             session.state.loginItemRegistration == .disabled
                 && session.state.language == preferences.language,
             "session 初始投影必须来自两个必填 owner，而不是 placeholder")
+        adapterState.registration = .requiresApproval
+        session.refreshLoginItem()
+        expect(
+            session.state.loginItemRegistration == .requiresApproval
+                && session.state.pendingAnnouncement?.meaning
+                    == .loginItemStatus(.requiresApproval),
+            "重获 key 后的 refresh 必须投影最新系统事实并留下语义 announcement debt")
+        if let announcement = session.state.pendingAnnouncement {
+            session.acknowledgeAnnouncement(id: announcement.id, didPost: true)
+        }
+        adapterState.registration = .disabled
+        session.refreshLoginItem()
+        if let announcement = session.state.pendingAnnouncement {
+            session.acknowledgeAnnouncement(id: announcement.id, didPost: true)
+        }
         session.setLoginItemEnabled(true)
         expect(
             adapterState.requests == [true]
