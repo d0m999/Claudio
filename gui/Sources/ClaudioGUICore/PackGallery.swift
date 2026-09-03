@@ -321,7 +321,8 @@ func factoryIntegrity(
     else {
         return false
     }
-    let factoryDirectory = factoryRoot
+    let factoryDirectory =
+        factoryRoot
         .appendingPathComponent(packID, isDirectory: true)
         .standardizedFileURL
 
@@ -413,7 +414,8 @@ public func availablePacks(
 ) -> [PackCard] {
     var seenIDs: Set<String> = []
     var orderedIDs: [String] = []
-    for id in packDirectoryIDs(in: environment.userPacksDirectory) where seenIDs.insert(id).inserted {
+    for id in packDirectoryIDs(in: environment.userPacksDirectory) where seenIDs.insert(id).inserted
+    {
         orderedIDs.append(id)
     }
     if let bundledPacksDirectory = environment.bundledPacksDirectory {
@@ -752,7 +754,8 @@ private func deleteOrphanAudioFileWhileLocked(
     }
     guard unlinkResult == 0 else {
         return .failure(
-            .deleteFailed(reason: "unlink errno \(unlinkErrno): \(String(cString: strerror(unlinkErrno)))"))
+            .deleteFailed(
+                reason: "unlink errno \(unlinkErrno): \(String(cString: strerror(unlinkErrno)))"))
     }
     return .success(())
 }
