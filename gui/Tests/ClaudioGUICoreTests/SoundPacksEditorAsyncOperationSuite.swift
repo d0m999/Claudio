@@ -578,6 +578,86 @@ func runSoundPacksEditorAsyncOperationSuites() async {
         }
     }
 
+    await suite("Sound editor perform：AI adoption 经共享 coordinator 自动刷新现有 Panel") {
+        await withTempDirectory { root in
+            let config = ClaudioConfig(
+                selectedPack: "global-pack",
+                surfaceOverrides: [
+                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                        selectedPack: "workbuddy-pack")
+                ])
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["global-pack", "workbuddy-pack"],
+                config: config)
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
+            let panel = PanelConfigController(
+                configFile: fixture.configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                soundPackLibrary: fixture.library,
+                soundPacksRefreshCoordinator: fixture.refreshCoordinator)
+            panel.selectSoundSurface(.workBuddy)
+            let owner = fixture.owner
+            let generationID = UUID()
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(
+                            scope: .surface(.workBuddy),
+                            event: .stop),
+                        requestRevision: 21,
+                        candidateGenerationID: generationID)))
+            _ = await waitForSoundEditorReady(owner, library: fixture.library)
+            for _ in 0..<512 {
+                if panel.eventRows.first(where: { $0.event == .stop })?.coverage
+                    == .present(fileName: "stop.mp3")
+                {
+                    break
+                }
+                await Task.yield()
+            }
+            guard case .events(let events) = owner.presentation.mode,
+                let permit = events.adoptionPermit
+            else {
+                expect(false, "共享 Panel fixture 必须取得 owner-signed adoption permit")
+                return
+            }
+            let source = root.appendingPathComponent("panel-refresh-candidate.mp3")
+            writeFixture(validMP3ID3Data(), to: source)
+            let candidate = soundEditorCandidate(at: source, generationID: generationID)
+            let panelRevisionBefore = fixture.refreshCoordinator.panelReloadRevision
+
+            let result = await owner.perform(
+                .adoptAICue(
+                    candidate: candidate,
+                    displayName: try! AICueDisplayName("Panel 自动更新"),
+                    permit: permit))
+            guard case .adopted(let outcome) = result else {
+                expect(false, "adoption fixture 必须成功")
+                return
+            }
+            await fixture.library.waitUntilIdleForTesting()
+            for _ in 0..<512 {
+                if panel.eventRows.first(where: { $0.event == .stop })?.coverage
+                    == .present(fileName: outcome.importedFile.fileName)
+                {
+                    break
+                }
+                await Task.yield()
+            }
+
+            expect(
+                fixture.refreshCoordinator.panelReloadRevision == panelRevisionBefore + 1,
+                "owner adoption 必须只发布一次 Panel full-reload revision")
+            expect(
+                panel.eventRows.first(where: { $0.event == .stop })?.coverage
+                    == .present(fileName: outcome.importedFile.fileName),
+                "已存在的 Panel 必须仅凭共享 library/coordinator 自动看到新 Event binding")
+        }
+    }
+
     await suite("Sound editor activity：in-flight cancelAction 保留 adoption orphan 且不继续 bind") {
         await withTempDirectory { root in
             let gate = GatedSoundEditorDurationProbe(duration: 1)
