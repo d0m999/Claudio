@@ -82,8 +82,25 @@ package struct EventsSoundPackPresentation: Equatable {
     package let scope: SoundPackEditorScopeAvailability
     package let packs: [SoundPackEditorPackPresentation]
     package let selectedPack: SoundPackEditorPackPresentation?
+    package let eventAccess: [SoundPackEditorEventAccessPresentation]
     package let adoptionPermit: SoundPackAdoptionPermit?
+    package let stopPreviewAction: SoundPackEditorAction
     package let retryLibraryAction: SoundPackEditorAction?
+}
+
+/// Render-ready capabilities for one Event row. The adoption projection deliberately carries no
+/// target: Surface, pack and generation identity remain sealed in the owner's optional permit.
+package struct SoundPackEditorEventAccessPresentation: Identifiable, Equatable {
+    package var id: Event { event }
+    package let event: Event
+    package let previewAvailability: EventPreviewAvailability
+    package let previewAction: SoundPackEditorAction?
+    package let adoptionAvailability: SoundPackEditorAdoptionAvailability
+}
+
+package enum SoundPackEditorAdoptionAvailability: Equatable, Sendable {
+    case eligible
+    case ineligible(AICueAdoptionIneligibility)
 }
 
 package struct SoundPackEditorPackPresentation: Identifiable, Equatable {

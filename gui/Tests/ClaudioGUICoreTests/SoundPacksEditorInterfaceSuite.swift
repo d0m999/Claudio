@@ -43,7 +43,8 @@ func runSoundPacksEditorInterfaceSuites() async {
                 stop.adoptionAvailability == .eligible && events.adoptionPermit == nil,
                 "合格目标尚无 generation 时必须显示 eligible，但不能提前签发 permit")
             expect(
-                stop.previewAvailability == .available && stop.previewAction != nil,
+                stop.previewAvailability == .available(fileName: "stop.mp3")
+                    && stop.previewAction != nil,
                 "现有安全映射必须只通过 owner-signed preview action 暴露")
 
             guard let previewAction = stop.previewAction,
