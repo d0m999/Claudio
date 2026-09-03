@@ -115,50 +115,6 @@ func runSoundPacksEditorOwnerSuites() {
         }
     }
 
-    suite("SoundPacks editor owner：两个 retained presentation 共享公告消费代次") {
-        withTempDirectory { root in
-            let environment = makeAudioImportEnvironment(
-                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
-            let model = SoundPacksWindowModel(
-                previewConfig: ClaudioConfig(selectedPack: "global-pack"),
-                packCards: [],
-                selectedPackID: nil,
-                selectedEventRows: [],
-                environment: environment,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let owner = SoundPacksEditorOwner(
-                model: model,
-                userPacksDirectory: environment.userPacksDirectory)
-
-            expect(
-                owner.beginStatusAnnouncementAttempt(revision: 41, isWindowKey: true),
-                "实际 key presentation 必须取得首次公告代次")
-            expect(
-                !owner.beginStatusAnnouncementAttempt(revision: 41, isWindowKey: true),
-                "另一 retained presentation 不得并发取得同一代次")
-            owner.finishStatusAnnouncementAttempt(revision: 41, didPost: true)
-            expect(
-                !owner.beginStatusAnnouncementAttempt(revision: 41, isWindowKey: true),
-                "Settings 已播的结果不得在 legacy 以后成为 key 时陈旧补播")
-
-            expect(
-                owner.beginStatusAnnouncementAttempt(revision: 42, isWindowKey: true),
-                "新代次必须仍可公告")
-            owner.finishStatusAnnouncementAttempt(revision: 42, didPost: false)
-            expect(
-                owner.beginStatusAnnouncementAttempt(revision: 42, isWindowKey: true),
-                "异步 post 前失去 key 的代次必须交给实际 presentation 重试")
-            owner.finishStatusAnnouncementAttempt(revision: 42, didPost: true)
-
-            expect(
-                owner.shouldAnnounceSelectionChange(to: "pack-a")
-                    && owner.shouldAnnounceSelectionChange(to: "pack-a")
-                    && owner.shouldAnnounceSelectionChange(to: "pack-b")
-                    && owner.shouldAnnounceSelectionChange(to: "pack-a"),
-                "同一 emission 的两个 observer 必须共享决定，A→B→A 则重新计算")
-        }
-    }
-
     suite("SoundPacks gallery restore failure：retry status 与 model lifecycle 共享身份") {
         let packID = "minimal-chime"
         let retryStatus = SoundPacksWindowStatus(

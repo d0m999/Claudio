@@ -198,35 +198,6 @@ func runSoundPacksEditorCharacterizationSuites() async {
         }
     }
 
-    suite("Sound editor baseline：非 key 与失败 post 不消费 owner announcement revision") {
-        let environment = makeAudioImportEnvironment(
-            userPacksDirectory: URL(fileURLWithPath: "/dev/null/characterization-packs"))
-        let model = SoundPacksWindowModel(
-            previewConfig: ClaudioConfig(selectedPack: "pack-a"),
-            packCards: [],
-            selectedPackID: nil,
-            selectedEventRows: [],
-            environment: environment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
-        let owner = SoundPacksEditorOwner(
-            model: model,
-            userPacksDirectory: environment.userPacksDirectory)
-
-        expect(
-            !owner.beginStatusAnnouncementAttempt(revision: 70, isWindowKey: false),
-            "hidden/non-key presentation 不得取得公告")
-        expect(
-            owner.beginStatusAnnouncementAttempt(revision: 70, isWindowKey: true),
-            "成为 key 后同一 revision 必须仍可公告")
-        owner.finishStatusAnnouncementAttempt(revision: 70, didPost: false)
-        expect(
-            owner.beginStatusAnnouncementAttempt(revision: 70, isWindowKey: true),
-            "bridge 未实际 post 时不得消费 revision")
-        owner.finishStatusAnnouncementAttempt(revision: 70, didPost: true)
-        expect(
-            !owner.beginStatusAnnouncementAttempt(revision: 70, isWindowKey: true),
-            "只有实际 post 成功才永久 acknowledgement")
-    }
 }
 
 private func soundEditorCharacterizationSource(_ relativePath: String) -> String? {

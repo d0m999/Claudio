@@ -45,7 +45,6 @@ public final class SoundPacksEditorOwner: ObservableObject {
             forcesCapabilityGeneration: Bool
         )?
     private var lastCommittedModelSeed: SoundPacksEditorModelSeed?
-    private var statusAnnouncementTracker = SoundPacksWindowStatusAnnouncementTracker()
     private var lastSelectionAnnouncementDecision: (packID: String?, shouldAnnounce: Bool)?
     private var suppressesNextForkLibraryObservationCycle = false
     private var interfaceHasActivated = false
@@ -2101,18 +2100,6 @@ public final class SoundPacksEditorOwner: ObservableObject {
     ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
         model.setManagedSurface(request.target.surface)
         return await model.adoptAICue(request)
-    }
-
-    /// Coordinates asynchronous status announcements across retained Settings presentations. A
-    /// revision is consumed only after the actual key Sounds destination posts it successfully.
-    public func beginStatusAnnouncementAttempt(revision: Int, isWindowKey: Bool) -> Bool {
-        statusAnnouncementTracker.beginAttempt(
-            revision: revision,
-            isWindowKey: isWindowKey)
-    }
-
-    public func finishStatusAnnouncementAttempt(revision: Int, didPost: Bool) {
-        statusAnnouncementTracker.finishAttempt(revision: revision, didPost: didPost)
     }
 
     #if DEBUG

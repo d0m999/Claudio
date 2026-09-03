@@ -211,7 +211,7 @@ func runSettingsPresentationCharacterizationSuites() {
         }
     }
 
-    suite("Settings characterization：embedded phase 与 Sounds 公告消费使用同一 active gate") {
+    suite("Settings characterization：destination、visibility 与 key 共同决定 embedded phase") {
         let inactive = settingsEmbeddedDestinationState(
             selectedDestination: .eventsAndSounds,
             embeddedDestination: .sounds,
@@ -240,23 +240,6 @@ func runSettingsPresentationCharacterizationSuites() {
                 && active == SettingsEmbeddedDestinationState(isVisible: true, isKey: true),
             "destination、window visibility 与 key phase 必须共同决定 active presentation")
 
-        var tracker = SoundPacksWindowStatusAnnouncementTracker()
-        expect(
-            !tracker.beginAttempt(revision: 7, isWindowKey: inactive.isKey)
-                && !tracker.beginAttempt(revision: 7, isWindowKey: hidden.isKey)
-                && !tracker.beginAttempt(revision: 7, isWindowKey: visibleNonKey.isKey),
-            "非 active+visible+key 的 Sounds presentation 不得取得公告代次")
-        expect(
-            tracker.beginAttempt(revision: 7, isWindowKey: active.isKey),
-            "active+visible+key 的 Sounds presentation 必须能取得公告代次")
-        tracker.finishAttempt(revision: 7, didPost: false)
-        expect(
-            tracker.beginAttempt(revision: 7, isWindowKey: active.isKey),
-            "bridge 未成功 post 时不得消费公告代次")
-        tracker.finishAttempt(revision: 7, didPost: true)
-        expect(
-            !tracker.beginAttempt(revision: 7, isWindowKey: active.isKey),
-            "只有成功 post 才能消费公告代次并阻止重播")
     }
 }
 
