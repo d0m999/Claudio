@@ -187,6 +187,80 @@ func runSettingsNavigationSuites() {
         withExtendedLifetime(cancellable) {}
     }
 
+    suite("Settings sound shell：inactive editor 通过一个 coherent projection 提供 route 事实") {
+        withTempDirectory { root in
+            let packID = "pack-a"
+            let environment = makeAudioImportEnvironment(
+                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
+            let editorModel = SoundPacksWindowModel(
+                previewConfig: ClaudioConfig(selectedPack: packID),
+                packCards: [
+                    PackCard(
+                        id: packID,
+                        name: "Pack A",
+                        isCC0: true,
+                        presentEvents: Set(Event.allCases),
+                        state: .complete,
+                        isSelected: true)
+                ],
+                selectedPackID: packID,
+                selectedEventRows: [],
+                libraryPresentationState: .ready,
+                environment: environment,
+                refreshCoordinator: SoundPacksRefreshCoordinator())
+            let editor = SoundPacksEditorOwner(
+                model: editorModel,
+                userPacksDirectory: environment.userPacksDirectory)
+            let hostIntegrations = HostIntegrationPresentationStore(
+                state: integrationDestinationTestState(
+                    statuses: [.workBuddy: .notConnected]))
+            var emissions: [SettingsSoundPackShellProjection] = []
+            let cancellable = settingsSoundPackShellProjections(
+                editor: editor,
+                hostIntegrations: hostIntegrations
+            ).sink { emissions.append($0) }
+
+            guard let projection = emissions.only else {
+                expect(false, "订阅必须同步交付且只交付一个初始 Settings shell projection")
+                return
+            }
+            let allSurfaceScopes = Set(
+                [PanelSoundScopeID.global]
+                    + HostID.productVisibleCases.map {
+                        PanelSoundScopeID.surface($0.surfaceID)
+                    })
+            expect(editor.presentation.mode == .inactive, "fixture 必须证明未挂载 Sounds view")
+            expect(
+                projection.availability.soundPackIDs == [packID]
+                    && projection.availability.soundPackSnapshotIsFresh,
+                "inactive editor 必须从同一 root 交付 installed identity 与 fresh 事实")
+            expect(
+                projection.availability.integrationSurfaces
+                    == Set(HostID.productVisibleCases.map(\.surfaceID))
+                    && projection.availability.eventScopes
+                        == [.global, .surface(.claudeCode), .surface(.codex)]
+                    && projection.availability.soundScopes == allSurfaceScopes,
+                "host rows 必须保留全部 Integrations Surface，只过滤 Events scope")
+            expect(
+                projection.availability.events == Set(Event.allCases)
+                    && projection.pendingAnnouncement == nil,
+                "projection 必须提供完整 Event identity，且不得制造 announcement debt")
+            expect(
+                resolveSettingsRoute(
+                    .sounds(.editEvent(surface: nil, packID: packID, event: .stop)),
+                    availability: projection.availability
+                ).failure == nil,
+                "inactive owner 的已安装 pack deep link 必须立即解析")
+            expect(
+                resolveSettingsRoute(
+                    .sounds(.editEvent(surface: nil, packID: "missing", event: .stop)),
+                    availability: projection.availability
+                ).failure == .staleSoundPack("missing"),
+                "只有同一 projection 的 fresh root 才能确认 missing pack 已陈旧")
+            withExtendedLifetime(cancellable) {}
+        }
+    }
+
     suite("Settings lifecycle：显示、覆盖、重复深链接、关闭与一次性 handback") {
         let availability = SettingsRouteAvailability(
             integrationSurfaces: [.workBuddy],
