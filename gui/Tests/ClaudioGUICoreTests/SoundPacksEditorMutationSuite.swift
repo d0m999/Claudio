@@ -1026,7 +1026,7 @@ func runSoundPacksEditorMutationSuites() async {
             expect(
                 owner.presentation.pendingAnnouncement?.kind == .windowStatus(.packDeletion)
                     && owner.presentation.pendingAnnouncement?.kind
-                        != .operationSucceeded(.deletePack),
+                        != .operation(kind: .deletePack, completion: .succeeded),
                 "retained failure 必须保留 status debt 且不能伪造 delete success")
         }
     }
