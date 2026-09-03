@@ -2289,6 +2289,8 @@ func runSoundPacksRefreshSuites() async {
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let settingsView = soundPacksCode(
                 "gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+            let gallery = soundPacksCode(
+                "gui/Sources/SoundPacksWindow/SoundPacksWindowStateGalleryView.swift"),
             let menu = soundPacksCode("gui/Sources/ClaudioGUI/MenuBarController.swift")
         else {
             expect(
@@ -2305,6 +2307,10 @@ func runSoundPacksRefreshSuites() async {
         expect(
             !FileManager.default.fileExists(atPath: legacyControllerURL.path),
             "cutover 后独立 SoundPacks window/autosave/title subscriptions 必须移除")
+        expect(
+            !gallery.contains("SoundPacksWindowModel")
+                && gallery.contains("SoundPacksEditorOwner.stateGalleryFixture("),
+            "DEBUG gallery 必须经 owner-owned deterministic fixture seam 构造，不得读取或构造 raw model")
         expect(
             owner.contains("public final class SoundPacksEditorOwner")
                 && owner.contains("public let model: SoundPacksWindowModel")
