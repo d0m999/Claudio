@@ -118,6 +118,49 @@ public final class SoundPacksEditorOwner: ObservableObject {
             audioImportExecutor: SoundPackAudioImportExecutor())
     }
 
+    /// Builds a no-I/O owner fixture for the production-shape DEBUG gallery. Raw model state stays
+    /// inside the owner implementation, and the injected environment must point at the gallery's
+    /// random temporary root rather than any Claudio user path.
+    package static func stateGalleryFixture(
+        previewConfig: ClaudioConfig,
+        packCards: [PackCard],
+        selectedPackID: String?,
+        selectedEventRows: [EventRow],
+        selectedAudioFiles: [PackAudioFile] = [],
+        builtinPackIDs: Set<String> = [],
+        starredPackIDs: [String] = [],
+        windowStatuses: [SoundPacksWindowStatus] = [],
+        factoryRestoreActionError: SoundPacksWindowFactoryRestoreActionError? = nil,
+        libraryPresentationState: SoundPackLibraryPresentationState = .ready,
+        environment: AudioImportEnvironment,
+        startsBusy: Bool = false
+    ) -> SoundPacksEditorOwner {
+        let model = SoundPacksWindowModel(
+            previewConfig: previewConfig,
+            packCards: packCards,
+            selectedPackID: selectedPackID,
+            selectedEventRows: selectedEventRows,
+            selectedAudioFiles: selectedAudioFiles,
+            builtinPackIDs: builtinPackIDs,
+            starredPackIDs: starredPackIDs,
+            windowStatuses: windowStatuses,
+            factoryRestoreActionError: factoryRestoreActionError,
+            libraryPresentationState: libraryPresentationState,
+            environment: environment,
+            refreshCoordinator: SoundPacksRefreshCoordinator())
+        let owner = SoundPacksEditorOwner(
+            model: model,
+            userPacksDirectory: environment.userPacksDirectory)
+        _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 1)))
+        if startsBusy,
+            case .sounds(let sounds) = owner.presentation.mode,
+            let action = sounds.packs.first(where: { $0.useAction != nil })?.useAction
+        {
+            _ = owner.freezeAcceptedOperationForStateGalleryFixture(action)
+        }
+        return owner
+    }
+
     package convenience init(
         configFile: URL,
         lockFile: URL,

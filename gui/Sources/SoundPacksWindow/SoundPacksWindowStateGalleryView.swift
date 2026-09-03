@@ -26,49 +26,49 @@ public struct SoundPacksWindowStateGalleryView: View {
     public var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             galleryFrame("内置包 · 正在查看 · 显示在面板 · 使用中") {
-                window(id: "builtin") { builtinModel() }
+                window(id: "builtin") { builtinOwner() }
             }
             galleryFrame("自有包 · 可编辑 · 缺失映射 · 孤儿音频") {
-                window(id: "custom") { customModel() }
+                window(id: "custom") { customOwner() }
             }
             galleryFrame("磁盘没有声音包 · 恢复入口") {
-                window(id: "empty") { emptyModel }
+                window(id: "empty") { emptyOwner }
             }
             galleryFrame("首次读取中 · 未知事实不冒充空库") {
-                window(id: "loading") { loadingModel }
+                window(id: "loading") { loadingOwner }
             }
             galleryFrame("后台刷新 · 继续显示上次结果") {
                 window(id: "refreshing") {
-                    customModel(libraryState: .refreshing)
+                    customOwner(libraryState: .refreshing)
                 }
             }
             galleryFrame("刷新失败 · 保留上次结果 · 可重试") {
                 window(id: "refresh-failed") {
-                    customModel(libraryState: .refreshFailed(reason: "磁盘暂不可用"))
+                    customOwner(libraryState: .refreshFailed(reason: "磁盘暂不可用"))
                 }
             }
             galleryFrame("首次读取失败 · 无伪造空态 · 可重试") {
-                window(id: "load-failed") { loadFailedModel }
+                window(id: "load-failed") { loadFailedOwner }
             }
             galleryFrame("100 个声音包 · 侧栏密度与稳定滚动") {
-                window(id: "large") { largeLibraryModel }
+                window(id: "large") { largeLibraryOwner }
             }
             galleryFrame("损坏声音包 · 包级错误与损坏映射保持区分") {
-                window(id: "broken") { brokenPackModel }
+                window(id: "broken") { brokenPackOwner }
             }
             galleryFrame("写入中 · owner activity 禁用重入写操作") {
-                window(id: "writing", startsBusy: true) { writingModel() }
+                window(id: "writing") { writingOwner() }
             }
             galleryFrame("恢复失败 · 保留当前内容与可重试说明") {
                 window(id: "restore-failed") {
-                    builtinModel(
+                    builtinOwner(
                         windowStatuses: [restoreFailureStatus],
                         factoryRestoreActionError: restoreFailureError)
                 }
             }
             galleryFrame("删除失败 · 保留声音包与失败结果") {
                 window(id: "delete-failed") {
-                    customModel(windowStatuses: [deletionFailureStatus])
+                    customOwner(windowStatuses: [deletionFailureStatus])
                 }
             }
         }
@@ -76,24 +76,21 @@ public struct SoundPacksWindowStateGalleryView: View {
 
     private func window(
         id: String,
-        startsBusy: Bool = false,
-        makeModel: @escaping @MainActor () -> SoundPacksWindowModel
+        makeOwner: @escaping @MainActor () -> SoundPacksEditorOwner
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Default window · 760×560")
                 .font(ClaudioTheme.font(.technical))
             productionWindow(
                 id: "\(id)-default",
-                startsBusy: startsBusy,
-                makeModel: makeModel
+                makeOwner: makeOwner
             )
             .frame(width: 760, height: 560)
             Text("Minimum window · 640×480")
                 .font(ClaudioTheme.font(.technical))
             productionWindow(
                 id: "\(id)-minimum",
-                startsBusy: startsBusy,
-                makeModel: makeModel
+                makeOwner: makeOwner
             )
             .frame(width: 640, height: 480)
         }
@@ -102,14 +99,11 @@ public struct SoundPacksWindowStateGalleryView: View {
     @ViewBuilder
     private func productionWindow(
         id: String,
-        startsBusy: Bool,
-        makeModel: @escaping @MainActor () -> SoundPacksWindowModel
+        makeOwner: @escaping @MainActor () -> SoundPacksEditorOwner
     ) -> some View {
         SoundPacksWindowGalleryScene(
             id: id,
-            makeModel: makeModel,
-            startsBusy: startsBusy,
-            root: fixture.root,
+            makeOwner: makeOwner,
             languageStore: languageStore,
             nativeEffects: fixture.nativeEffects)
     }
@@ -125,15 +119,15 @@ public struct SoundPacksWindowStateGalleryView: View {
         }
     }
 
-    private func builtinModel(
+    private func builtinOwner(
         windowStatuses: [SoundPacksWindowStatus] = [],
         factoryRestoreActionError: SoundPacksWindowFactoryRestoreActionError? = nil
-    ) -> SoundPacksWindowModel {
+    ) -> SoundPacksEditorOwner {
         let config = ClaudioConfig(
             selectedPack: "minimal-chime",
             masterVolume: 0.8,
             starredPacks: ["minimal-chime"])
-        return SoundPacksWindowModel(
+        return SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: config,
             packCards: [
                 PackCard(
@@ -151,16 +145,16 @@ public struct SoundPacksWindowStateGalleryView: View {
             starredPackIDs: ["minimal-chime"],
             windowStatuses: windowStatuses,
             factoryRestoreActionError: factoryRestoreActionError,
-            environment: previewEnvironment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
+            environment: previewEnvironment)
     }
 
-    private func customModel(
+    private func customOwner(
         libraryState: SoundPackLibraryPresentationState = .ready,
-        windowStatuses: [SoundPacksWindowStatus] = []
-    ) -> SoundPacksWindowModel {
+        windowStatuses: [SoundPacksWindowStatus] = [],
+        startsBusy: Bool = false
+    ) -> SoundPacksEditorOwner {
         let config = ClaudioConfig(selectedPack: "my-long-pack", masterVolume: 0.7)
-        return SoundPacksWindowModel(
+        return SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: config,
             packCards: [
                 PackCard(
@@ -196,46 +190,43 @@ public struct SoundPacksWindowStateGalleryView: View {
             windowStatuses: windowStatuses,
             libraryPresentationState: libraryState,
             environment: previewEnvironment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
+            startsBusy: startsBusy)
     }
 
-    private func writingModel() -> SoundPacksWindowModel {
-        customModel()
+    private func writingOwner() -> SoundPacksEditorOwner {
+        customOwner(startsBusy: true)
     }
 
-    private var emptyModel: SoundPacksWindowModel {
-        SoundPacksWindowModel(
+    private var emptyOwner: SoundPacksEditorOwner {
+        SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: ClaudioConfig(selectedPack: ""),
             packCards: [],
             selectedPackID: nil,
             selectedEventRows: [],
-            environment: previewEnvironment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
+            environment: previewEnvironment)
     }
 
-    private var loadingModel: SoundPacksWindowModel {
-        SoundPacksWindowModel(
+    private var loadingOwner: SoundPacksEditorOwner {
+        SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: ClaudioConfig(selectedPack: ""),
             packCards: [],
             selectedPackID: nil,
             selectedEventRows: [],
             libraryPresentationState: .loading,
-            environment: previewEnvironment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
+            environment: previewEnvironment)
     }
 
-    private var loadFailedModel: SoundPacksWindowModel {
-        SoundPacksWindowModel(
+    private var loadFailedOwner: SoundPacksEditorOwner {
+        SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: ClaudioConfig(selectedPack: ""),
             packCards: [],
             selectedPackID: nil,
             selectedEventRows: [],
             libraryPresentationState: .loadFailed(reason: "声音包目录没有读取权限"),
-            environment: previewEnvironment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
+            environment: previewEnvironment)
     }
 
-    private var largeLibraryModel: SoundPacksWindowModel {
+    private var largeLibraryOwner: SoundPacksEditorOwner {
         let cards = (0..<100).map { index in
             PackCard(
                 id: "gallery-pack-\(index)",
@@ -245,7 +236,7 @@ public struct SoundPacksWindowStateGalleryView: View {
                 state: .complete,
                 isSelected: index == 0)
         }
-        return SoundPacksWindowModel(
+        return SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: ClaudioConfig(selectedPack: cards[0].id),
             packCards: cards,
             selectedPackID: cards[0].id,
@@ -255,12 +246,11 @@ public struct SoundPacksWindowStateGalleryView: View {
                     coverage: .present(fileName: "\($0.cliName).mp3"),
                     enabled: true)
             },
-            environment: previewEnvironment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
+            environment: previewEnvironment)
     }
 
-    private var brokenPackModel: SoundPacksWindowModel {
-        SoundPacksWindowModel(
+    private var brokenPackOwner: SoundPacksEditorOwner {
+        SoundPacksEditorOwner.stateGalleryFixture(
             previewConfig: ClaudioConfig(selectedPack: "broken-pack"),
             packCards: [
                 PackCard(
@@ -278,8 +268,7 @@ public struct SoundPacksWindowStateGalleryView: View {
                     coverage: .broken(fileName: "\($0.cliName).mp3"),
                     enabled: true)
             },
-            environment: previewEnvironment,
-            refreshCoordinator: SoundPacksRefreshCoordinator())
+            environment: previewEnvironment)
     }
 
     private var restoreFailureStatus: SoundPacksWindowStatus {
@@ -345,18 +334,12 @@ private struct SoundPacksWindowGalleryScene: View {
 
     init(
         id: String,
-        makeModel: @escaping @MainActor () -> SoundPacksWindowModel,
-        startsBusy: Bool,
-        root: URL,
+        makeOwner: @escaping @MainActor () -> SoundPacksEditorOwner,
         languageStore: ClaudioPreferences,
         nativeEffects: SoundPacksEditorNativeEffectsDispatcher
     ) {
         self.id = id
-        _owner = StateObject(
-            wrappedValue: makeSoundPacksWindowGalleryOwner(
-                model: makeModel(),
-                root: root,
-                startsBusy: startsBusy))
+        _owner = StateObject(wrappedValue: makeOwner())
         self.languageStore = languageStore
         self.nativeEffects = nativeEffects
     }
@@ -370,25 +353,6 @@ private struct SoundPacksWindowGalleryScene: View {
         )
         .id(id)
     }
-}
-
-@MainActor
-private func makeSoundPacksWindowGalleryOwner(
-    model: SoundPacksWindowModel,
-    root: URL,
-    startsBusy: Bool
-) -> SoundPacksEditorOwner {
-    let owner = SoundPacksEditorOwner(
-        model: model,
-        userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
-    _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 1)))
-    if startsBusy,
-        case .sounds(let sounds) = owner.presentation.mode,
-        let action = sounds.packs.first(where: { $0.useAction != nil })?.useAction
-    {
-        _ = owner.freezeAcceptedOperationForStateGalleryFixture(action)
-    }
-    return owner
 }
 
 @MainActor

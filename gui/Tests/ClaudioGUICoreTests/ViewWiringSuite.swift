@@ -2224,25 +2224,23 @@ func runViewWiringSuites() {
         guard
             let gallery = codeOnly(
                 "gui/Sources/SoundPacksWindow/SoundPacksWindowStateGalleryView.swift"),
-            let rootGallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift"),
-            let model = codeOnly("gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift")
+            let rootGallery = codeOnly("gui/Sources/ClaudioGUI/StateGalleryView.swift")
         else {
-            expect(false, "读不到声音包窗口画廊、根画廊或 preview model 接线")
+            expect(false, "读不到声音包窗口画廊或根画廊接线")
             return
         }
-        let flatModel = collapsingWhitespace(model)
         expect(
             gallery.contains("SoundPacksWindowView(")
-                && gallery.contains("builtinModel")
-                && gallery.contains("customModel")
-                && gallery.contains("emptyModel")
+                && gallery.contains("builtinOwner")
+                && gallery.contains("customOwner")
+                && gallery.contains("emptyOwner")
                 && gallery.contains("libraryState: .refreshing")
                 && gallery.contains("libraryState: .refreshFailed")
-                && gallery.contains("loadingModel")
-                && gallery.contains("loadFailedModel")
-                && gallery.contains("largeLibraryModel")
-                && gallery.contains("brokenPackModel")
-                && gallery.contains("writingModel")
+                && gallery.contains("loadingOwner")
+                && gallery.contains("loadFailedOwner")
+                && gallery.contains("largeLibraryOwner")
+                && gallery.contains("brokenPackOwner")
+                && gallery.contains("writingOwner")
                 && gallery.contains("startsBusy: true")
                 && gallery.contains("restoreFailureStatus")
                 && gallery.contains("deletionFailureStatus")
@@ -2252,17 +2250,18 @@ func runViewWiringSuites() {
             rootGallery.contains("SoundPacksWindowStateGalleryView(language: language)"),
             "全产品根画廊必须实际挂入声音包窗口画廊")
         expect(
-            flatModel.contains("public init( previewConfig:")
-                && gallery.contains("@StateObject private var owner")
-                && gallery.contains("makeSoundPacksWindowGalleryOwner")
-                && gallery.contains("makeModel: @escaping @MainActor () -> SoundPacksWindowModel")
+            gallery.contains("@StateObject private var owner")
+                && gallery.contains("SoundPacksEditorOwner.stateGalleryFixture(")
+                && gallery.contains(
+                    "makeOwner: @escaping @MainActor () -> SoundPacksEditorOwner")
                 && gallery.contains(#"id: "\(id)-default""#)
                 && gallery.contains(#"id: "\(id)-minimum""#)
-                && gallery.contains("model: makeModel()")
+                && gallery.contains("_owner = StateObject(wrappedValue: makeOwner())")
                 && gallery.contains("UUID().uuidString")
+                && !gallery.contains("SoundPacksWindowModel")
                 && !gallery.contains("/dev/null")
                 && !gallery.contains("~/.claudio"),
-            "画廊每个尺寸必须在独立 StateObject autoclosure 内预建 model/owner，并使用唯一 temp root 做零用户盘 I/O fixture")
+            "画廊每个尺寸必须在独立 StateObject autoclosure 内预建 owner，并使用唯一 temp root 做零用户盘 I/O fixture")
     }
 
     suite("三界面无障碍护栏：每个交互构造都有显式非空 Name 与稳定 identifier") {
