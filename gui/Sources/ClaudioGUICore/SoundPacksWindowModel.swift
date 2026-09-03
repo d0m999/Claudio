@@ -352,6 +352,8 @@ private func soundPacksWindowBindErrorText(
         return .localized(.soundPacksBindErrorLockBusy)
     case .lockFailed(let errno):
         return .localized(.soundPacksBindErrorLockFailed, "\(errno)")
+    case .targetChanged:
+        return .literal("目标事件在操作期间已改变；已保留导入文件，未覆盖现有绑定。")
     }
 }
 
@@ -1286,6 +1288,30 @@ public final class SoundPacksWindowModel: ObservableObject {
 
     var editorImportEnvironment: AudioImportEnvironment { environment }
 
+    /// Re-observes a target that the off-main import boundary found missing before any duration
+    /// probe or destination write. The shared library remains the sole publisher of disk facts;
+    /// this waiter only settles that observation into the editor projection.
+    func refreshEditorObservationForMutation() async -> SoundPacksEditorModelSeed {
+        #if DEBUG
+        guard readSource.readsSharedSnapshot else {
+            reloadSynchronously(followActivePack: false)
+            return editorProjectionSeed()
+        }
+        #endif
+
+        let refreshed = await soundPackLibrary.refreshSnapshot(trigger: .windowPresentation)
+        configState = loadPanelConfig(from: configFile)
+        baseConfig = configState.resolvedConfig
+        applyManagedScopeConfig()
+        switch refreshed {
+        case .ready(let snapshot):
+            _ = applyReadySnapshot(snapshot, followActivePack: false)
+        case .unloaded, .loading, .failed:
+            consumeLibraryState(refreshed)
+        }
+        return editorProjectionSeed()
+    }
+
     /// Opens the existing two-sided invalidation fence for one editor-owned compound mutation.
     /// The async executor receives only immutable import values; writer coordination stays here.
     func beginEditorCompoundMutation(packID: String) -> SoundPackLibraryMutation? {
@@ -1318,7 +1344,8 @@ public final class SoundPacksWindowModel: ObservableObject {
     func bindEditorImportedAudioFile(
         _ importedFile: ImportedAudioFile,
         to event: Event,
-        packID: String
+        packID: String,
+        expectedEventBinding: ManifestEventBindingExpectation?
     ) -> Result<Void, ManifestBindError> {
         guard importedFile.packID == packID else {
             return .failure(.packNotFound(packID: packID))
@@ -1327,14 +1354,16 @@ public final class SoundPacksWindowModel: ObservableObject {
             event: event,
             fileName: importedFile.fileName,
             packID: packID,
-            environment: environment)
+            environment: environment,
+            expectedEventBinding: expectedEventBinding)
     }
 
     /// Uses the atomic name+Event manifest primitive inside the caller's compound refresh envelope.
     func bindEditorAICue(
         _ importedFile: ImportedAudioFile,
         displayName: AICueDisplayName,
-        target: AICueAdoptionTarget
+        target: AICueAdoptionTarget,
+        expectedEventBinding: ManifestEventBindingExpectation
     ) -> Result<AICueManifestBindingOutcome, ManifestBindError> {
         guard importedFile.packID == target.packID else {
             return .failure(.packNotFound(packID: target.packID))
@@ -1344,7 +1373,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             fileName: importedFile.fileName,
             displayName: displayName,
             packID: target.packID,
-            environment: environment)
+            environment: environment,
+            expectedEventBinding: expectedEventBinding)
     }
 
     /// The star state for one full-library sidebar row. Existing stars stay removable even when a
@@ -1891,23 +1921,25 @@ public final class SoundPacksWindowModel: ObservableObject {
         baseConfig = configState.resolvedConfig
         applyManagedScopeConfig()
         guard case .ready(let snapshot) = refreshed else { return false }
-        return applyReadySnapshotForAICueAdoption(snapshot)
+        return applyReadySnapshot(snapshot, followActivePack: true)
     }
 
     /// The observation stream may apply a later library state before the refresh waiter resumes on
     /// MainActor. Never let that older waiter result roll the model back. A later refresh/failure at
     /// the same or a higher revision is also a reason to stop instead of reviving stale ready UI.
-    private func applyReadySnapshotForAICueAdoption(
-        _ refreshedSnapshot: SoundPackLibrarySnapshot
+    private func applyReadySnapshot(
+        _ refreshedSnapshot: SoundPackLibrarySnapshot,
+        followActivePack: Bool
     ) -> Bool {
         if let currentSnapshot = librarySnapshot,
             currentSnapshot.revision >= refreshedSnapshot.revision
         {
             guard libraryPresentationState == .ready else { return false }
-            applySnapshot(currentSnapshot, followActivePack: pendingFollowActivePack)
-            pendingFollowActivePack = false
+            applySnapshot(currentSnapshot, followActivePack: followActivePack)
+            if followActivePack { pendingFollowActivePack = false }
             return true
         }
+        if followActivePack { pendingFollowActivePack = true }
         consumeLibraryState(.ready(refreshedSnapshot))
         return true
     }
@@ -1918,7 +1950,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         _ snapshot: SoundPackLibrarySnapshot
     ) -> Bool {
         pendingFollowActivePack = true
-        return applyReadySnapshotForAICueAdoption(snapshot)
+        return applyReadySnapshot(snapshot, followActivePack: true)
     }
 
     public func consumeSoundPackLibraryStateForTesting(_ state: SoundPackLibraryState) {
@@ -2698,7 +2730,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         _ error: ManifestBindError
     ) -> Bool {
         switch error {
-        case .packNotFound, .fileNotFound, .manifestUnreadable:
+        case .packNotFound, .fileNotFound, .manifestUnreadable, .targetChanged:
             return true
         case .unsafeFileName, .writeFailed, .lockBusy, .lockFailed:
             return false

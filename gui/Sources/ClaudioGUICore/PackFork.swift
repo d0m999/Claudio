@@ -66,6 +66,7 @@ private func manifestRewriteReason(_ error: ManifestBindError) -> String {
     case .packNotFound(let packID): return "包目录未找到：\(packID)"
     case .unsafeFileName: return "文件名不安全"
     case .fileNotFound(let fileName): return "文件不存在：\(fileName)"
+    case .targetChanged: return "目标事件在操作期间已改变"
     }
 }
 
@@ -121,7 +122,9 @@ public func occupiedPackBasenames(in directory: URL) throws -> Set<String> {
     }
 }
 
-private func makeForkStagingRoot(in userPacksDirectory: URL, newID: String) -> Result<URL, PackForkError> {
+private func makeForkStagingRoot(in userPacksDirectory: URL, newID: String) -> Result<
+    URL, PackForkError
+> {
     let templateURL = userPacksDirectory.appendingPathComponent(".\(newID).tmp-XXXXXX")
     var template = Array(templateURL.path.utf8CString)
     let created = template.withUnsafeMutableBufferPointer { buffer in

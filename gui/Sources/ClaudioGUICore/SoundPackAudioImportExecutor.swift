@@ -1,3 +1,4 @@
+import ClaudioCore
 import Dispatch
 import Foundation
 
@@ -54,6 +55,33 @@ struct SoundPackAudioImportExecutor: Sendable {
             cancellation.cancel()
         }
     }
+
+    func validateTarget(
+        _ job: SoundPackAudioImportJob,
+        cancellation: SoundPackAudioImportCancellation
+    ) async -> SoundPackAudioImportTargetValidation {
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                Self.queue.async {
+                    guard !cancellation.isCancelled else {
+                        continuation.resume(returning: .cancelled)
+                        return
+                    }
+                    guard
+                        editorImportTargetIsCurrent(
+                            packID: job.packID,
+                            environment: job.environment)
+                    else {
+                        continuation.resume(returning: .unavailable)
+                        return
+                    }
+                    continuation.resume(returning: .available)
+                }
+            }
+        } onCancel: {
+            cancellation.cancel()
+        }
+    }
 }
 
 struct SoundPackAudioImportJob: Sendable {
@@ -62,9 +90,33 @@ struct SoundPackAudioImportJob: Sendable {
     let environment: AudioImportEnvironment
 }
 
+enum SoundPackAudioImportTargetValidation: Sendable {
+    case cancelled
+    case unavailable
+    case available
+}
+
 enum SoundPackAudioImportExecution: Sendable {
     case cancelledBeforeWrite
     case completed(AudioImportBatchResult, cancellationRequested: Bool)
+}
+
+/// Cheap off-main rejection at the async ownership boundary. This does not publish a second disk
+/// fact: a miss is handed back to the owner, which asks the one shared `SoundPackLibrary` to
+/// observe and publish the authoritative result before returning a typed refusal.
+private func editorImportTargetIsCurrent(
+    packID: String,
+    environment: AudioImportEnvironment
+) -> Bool {
+    guard
+        let resolved = resolvePackDirectory(
+            id: packID,
+            userPacksDirectory: environment.userPacksDirectory,
+            bundledPacksDirectory: environment.bundledPacksDirectory)
+    else { return false }
+    let expected = environment.userPacksDirectory.appendingPathComponent(
+        packID, isDirectory: true)
+    return resolved.standardizedFileURL.path == expected.standardizedFileURL.path
 }
 
 final class SoundPackAudioImportCancellation: @unchecked Sendable {
