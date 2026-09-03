@@ -530,7 +530,7 @@ public func soundPacksWindowScopeFailureStatusText(
 /// 完成落盘，再调用 ``completeSynchronousWrite(_:invalidatingPackIDs:)``；这个 API 不接受 async
 /// closure，因而不会把「刷新已发布」与「字节尚未落盘」拆成两个时刻。
 @MainActor
-public final class SoundPacksWindowModel: ObservableObject {
+package final class SoundPacksWindowModel: ObservableObject {
     @Published public private(set) var configState: PanelConfigState
     @Published public private(set) var config: ClaudioConfig
     /// `nil` 明确表示正在管理 Global；非 nil 只有产品 registry Surface 才能获得写权限。
