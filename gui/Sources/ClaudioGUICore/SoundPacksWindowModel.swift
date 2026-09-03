@@ -530,12 +530,12 @@ public func soundPacksWindowScopeFailureStatusText(
 /// 完成落盘，再调用 ``completeSynchronousWrite(_:invalidatingPackIDs:)``；这个 API 不接受 async
 /// closure，因而不会把「刷新已发布」与「字节尚未落盘」拆成两个时刻。
 @MainActor
-package final class SoundPacksWindowModel: ObservableObject {
-    @Published package private(set) var configState: PanelConfigState
-    @Published package private(set) var config: ClaudioConfig
+package final class SoundPacksWindowModel {
+    package private(set) var configState: PanelConfigState
+    package private(set) var config: ClaudioConfig
     /// `nil` 明确表示正在管理 Global；非 nil 只有产品 registry Surface 才能获得写权限。
-    @Published package private(set) var managedSurface: HostSurfaceID?
-    @Published package private(set) var managedScopeFailureReason: String?
+    package private(set) var managedSurface: HostSurfaceID?
+    package private(set) var managedScopeFailureReason: String?
     package var managedScopeIsInvalid: Bool {
         !isValidSoundPacksWindowSurface(managedSurface)
     }
@@ -559,12 +559,11 @@ package final class SoundPacksWindowModel: ObservableObject {
         return baseConfig.surfaceOverridesMalformed
             || baseConfig.invalidSurfaceOverrideKeys.contains(managedSurface.rawValue)
     }
-    @Published package private(set) var packCards: [PackCard]
-    @Published package private(set) var selectedPackID: String?
-    @Published package private(set) var selectedEventRows: [EventRow]
+    package private(set) var packCards: [PackCard]
+    package private(set) var selectedPackID: String?
+    package private(set) var selectedEventRows: [EventRow]
     /// Selected pack only: one shared, on-demand shallow `readdir`, never one scan per pack card.
-    @Published package private(set) var selectedAudioInventoryState:
-        SoundPackAudioInventoryPresentationState
+    package private(set) var selectedAudioInventoryState: SoundPackAudioInventoryPresentationState
 
     package var selectedAudioFiles: [PackAudioFile] { selectedAudioInventoryState.files }
     package var audioInventoryError: PackAudioInventoryError? {
@@ -573,25 +572,24 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// The full, uncapped window-side star selection (`starred_packs ∩ disk`). This deliberately
     /// does not reuse the panel's four-row display set: a manually written fifth star must remain
     /// visible here so the user can remove it without silently truncating config.json.
-    @Published package private(set) var starredPackIDs: [String]
+    package private(set) var starredPackIDs: [String]
     /// A rejected T16 star write remains visible at window level even if the selected pack changes
     /// or the panel has zero rows. The View renders the exact reason through the shared FailureRow.
-    @Published package private(set) var starredPacksError: SetStarredPacksError?
+    package private(set) var starredPacksError: SetStarredPacksError?
     /// The most recent assignment/deletion failure. The window renders this in-place and clears it
     /// only after a later successful audio action or a different pack selection.
-    @Published package private(set) var audioActionError: SoundPacksWindowAudioActionError?
+    package private(set) var audioActionError: SoundPacksWindowAudioActionError?
     /// A successful restore remains visible until the user selects a different pack or starts a
     /// later restore. It carries the exact salvage path whenever an old tree was moved.
-    @Published package private(set) var factoryRestoreNotice: FactoryPackRestoreOutcome?
+    package private(set) var factoryRestoreNotice: FactoryPackRestoreOutcome?
     /// Restore has its own failure surface so a failed replacement never masquerades as an audio
     /// assignment/deletion error.
-    @Published package private(set) var factoryRestoreActionError:
-        SoundPacksWindowFactoryRestoreActionError?
-    @Published package private(set) var packForkNotice: PackForkOutcome?
-    @Published package private(set) var packForkActionError: SoundPacksWindowPackForkActionError?
-    @Published package private(set) var packUseActionError: SoundPacksWindowPackUseActionError?
-    @Published package private(set) var windowStatuses: [SoundPacksWindowStatus]
-    @Published package private(set) var libraryPresentationState: SoundPackLibraryPresentationState
+    package private(set) var factoryRestoreActionError: SoundPacksWindowFactoryRestoreActionError?
+    package private(set) var packForkNotice: PackForkOutcome?
+    package private(set) var packForkActionError: SoundPacksWindowPackForkActionError?
+    package private(set) var packUseActionError: SoundPacksWindowPackUseActionError?
+    package private(set) var windowStatuses: [SoundPacksWindowStatus]
+    package private(set) var libraryPresentationState: SoundPackLibraryPresentationState
 
     /// The built-in id whose restore lifecycle can be retried even when its visible installed
     /// directory no longer exists and therefore cannot appear in ``packCards``. After the first
@@ -2821,23 +2819,21 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// 成功或失败前已经改变磁盘时，先刷新窗口自己的读模型，再发布面板 full reload；没有落盘变化
     /// 的失败两边都不假刷新。未来 T11/T12/T17 的每个写者都应收口到这里，而不是各自选择
     /// `reloadConfigOnly()`。
-    @discardableResult
     package func completeSynchronousWrite(
         _ outcome: SoundPacksWindowWriteOutcome,
         invalidatingPackIDs: Set<String> = []
-    ) -> SoundPacksRefreshEffect {
+    ) {
         completeSynchronousWrite(
             outcome,
             invalidatingPackIDs: invalidatingPackIDs,
             mutation: nil)
     }
 
-    @discardableResult
     private func completeSynchronousWrite(
         _ outcome: SoundPacksWindowWriteOutcome,
         invalidatingPackIDs: Set<String> = [],
         mutation: SoundPackLibraryMutation?
-    ) -> SoundPacksRefreshEffect {
+    ) {
         var needsLegacyRefresh = false
         if let mutation {
             if !soundPackLibrary.endMutation(mutation, changed: outcome != .failed),
@@ -2871,7 +2867,7 @@ package final class SoundPacksWindowModel: ObservableObject {
                 }
             }
         }
-        return refreshCoordinator.completeWindowWrite(outcome)
+        refreshCoordinator.completeWindowWrite(outcome)
     }
 
     private func beginSoundPackMutation(packIDs: Set<String>) -> SoundPackLibraryMutation? {
