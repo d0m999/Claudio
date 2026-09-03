@@ -318,10 +318,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     }
 
     private func scheduleSettingsPresentationAnnouncementDelivery() {
-        guard
-            settingsPresentationSession.state.pendingAnnouncement != nil,
-            !settingsPresentationAnnouncementDeliveryScheduled
-        else { return }
+        guard !settingsPresentationAnnouncementDeliveryScheduled else { return }
         settingsPresentationAnnouncementDeliveryScheduled = true
         DispatchQueue.main.async { [weak self] in
             MainActor.assumeIsolated {
