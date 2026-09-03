@@ -70,8 +70,8 @@ package func makeLoginItemSettingsProjection(
 /// tests own deterministic system status and errors without registering a real login item.
 @MainActor
 package func makeLoginItemServiceAdapter(
-    status: @escaping () -> LoginItemRegistrationState,
-    setEnabled: @escaping (Bool) throws -> LoginItemRegistrationState
+    status: @escaping @MainActor () -> LoginItemRegistrationState,
+    setEnabled: @escaping @MainActor (Bool) throws -> LoginItemRegistrationState
 ) -> LoginItemServiceAdapter {
     LoginItemServiceAdapter(status: status, setEnabled: setEnabled)
 }
@@ -92,13 +92,13 @@ package func projectModernLoginItemStatus(
 
 @MainActor
 package func makeModernLoginItemServiceAdapter(
-    status: @escaping () -> Int,
+    status: @escaping @MainActor () -> Int,
     notRegisteredValue: Int,
     enabledValue: Int,
     requiresApprovalValue: Int,
     notFoundValue: Int,
-    register: @escaping () throws -> Void,
-    unregister: @escaping () throws -> Void
+    register: @escaping @MainActor () throws -> Void,
+    unregister: @escaping @MainActor () throws -> Void
 ) -> LoginItemServiceAdapter {
     func projectedStatus() -> LoginItemRegistrationState {
         projectModernLoginItemStatus(
@@ -128,8 +128,8 @@ package func makeModernLoginItemServiceAdapter(
 @MainActor
 package func makeLegacyLoginItemServiceAdapter(
     embeddedBundleURL: URL,
-    registrationIsEnabled: @escaping (String) -> Bool?,
-    setEnabled: @escaping (String, Bool) -> Bool
+    registrationIsEnabled: @escaping @MainActor (String) -> Bool?,
+    setEnabled: @escaping @MainActor (String, Bool) -> Bool
 ) -> LoginItemServiceAdapter {
     func projectedStatus() -> LoginItemRegistrationState {
         guard embeddedLegacyLoginItemIsUsable(at: embeddedBundleURL) else {
