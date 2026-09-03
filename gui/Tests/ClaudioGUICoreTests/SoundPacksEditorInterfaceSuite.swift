@@ -5,6 +5,81 @@ import Foundation
 
 @MainActor
 func runSoundPacksEditorInterfaceSuites() async {
+    await suite("Sound editor Events interface：投影语义资格与 opaque 试听 capability") {
+        await withTempDirectory { root in
+            let config = ClaudioConfig(
+                selectedPack: "global-pack",
+                masterVolume: 0.42,
+                surfaceOverrides: [
+                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                        selectedPack: "workbuddy-pack")
+                ])
+            let fixture = makeSoundEditorFixture(
+                root: root,
+                packIDs: ["global-pack", "workbuddy-pack"],
+                config: config)
+            let owner = fixture.owner
+            let route = EventSettingsWindowRoute(
+                scope: .surface(.workBuddy),
+                event: .stop)
+
+            expect(
+                owner.send(
+                    .activate(
+                        .events(
+                            route: route,
+                            requestRevision: 131,
+                            candidateGenerationID: nil))) == .applied,
+                "Events activation 必须同步应用")
+            await waitForSoundEditorReady(owner, library: fixture.library)
+
+            guard case .events(let events) = owner.presentation.mode,
+                let stop = events.eventAccess.first(where: { $0.event == .stop })
+            else {
+                expect(false, "ready Events root 必须投影逐事件 access")
+                return
+            }
+            expect(
+                stop.adoptionAvailability == .eligible && events.adoptionPermit == nil,
+                "合格目标尚无 generation 时必须显示 eligible，但不能提前签发 permit")
+            expect(
+                stop.previewAvailability == .available && stop.previewAction != nil,
+                "现有安全映射必须只通过 owner-signed preview action 暴露")
+
+            guard let previewAction = stop.previewAction,
+                case .nativeEffect(.playAudio(let fileURL, let volume)) =
+                    owner.send(.invoke(previewAction))
+            else {
+                expect(false, "逐事件试听 action 必须返回 exact native effect")
+                return
+            }
+            expect(
+                fileURL
+                    == root.appendingPathComponent("packs/workbuddy-pack/stop.mp3")
+                    && volume == 0.42,
+                "native effect 必须携带 owner 复核后的文件与全局 master_volume")
+            expect(
+                owner.send(.invoke(previewAction)) == .rejected(.staleAction),
+                "试听 capability 必须 single-use")
+
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(scope: .global, event: .stop),
+                        requestRevision: 132,
+                        candidateGenerationID: nil)))
+            guard case .events(let global) = owner.presentation.mode,
+                let globalStop = global.eventAccess.first(where: { $0.event == .stop })
+            else {
+                expect(false, "Global Events root 必须保持逐事件语义投影")
+                return
+            }
+            expect(
+                globalStop.adoptionAvailability == .ineligible(.surfaceRequired),
+                "Global 必须由 owner 明确投影为不合格，不能与 nil generation 混淆")
+        }
+    }
+
     await suite("Sound editor interface：一次 transition 只发布一个 coherent root") {
         await withTempDirectory { root in
             let packs = root.appendingPathComponent("packs", isDirectory: true)
