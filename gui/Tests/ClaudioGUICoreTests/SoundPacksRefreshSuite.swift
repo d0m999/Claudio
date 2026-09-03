@@ -2313,13 +2313,18 @@ func runSoundPacksRefreshSuites() async {
             else { continue }
             rawModelConstructionSites.append(name)
         }
+        let modelImplementation = model.range(
+            of: "package final class SoundPacksWindowModel"
+        ).map { String(model[$0.lowerBound...]) } ?? ""
 
         expect(owner.contains("@MainActor"), "共享编辑 owner 必须显式 @MainActor")
         expect(
             model.contains("@MainActor")
                 && model.contains("package final class SoundPacksWindowModel")
-                && !model.contains("public final class SoundPacksWindowModel"),
-            "raw window model 必须降为 package implementation")
+                && !model.contains("public final class SoundPacksWindowModel")
+                && !modelImplementation.contains("\n    public ")
+                && !modelImplementation.contains("\n    @Published public "),
+            "raw window model 及其 state/method/init 必须降为 package implementation")
         expect(
             rawModelConstructionSites == ["ClaudioGUICore/SoundPacksEditorOwner.swift"],
             "shipping/DEBUG production 只能由 owner implementation 构造 raw model，实得 "

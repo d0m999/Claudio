@@ -531,18 +531,18 @@ public func soundPacksWindowScopeFailureStatusText(
 /// closure，因而不会把「刷新已发布」与「字节尚未落盘」拆成两个时刻。
 @MainActor
 package final class SoundPacksWindowModel: ObservableObject {
-    @Published public private(set) var configState: PanelConfigState
-    @Published public private(set) var config: ClaudioConfig
+    @Published package private(set) var configState: PanelConfigState
+    @Published package private(set) var config: ClaudioConfig
     /// `nil` 明确表示正在管理 Global；非 nil 只有产品 registry Surface 才能获得写权限。
-    @Published public private(set) var managedSurface: HostSurfaceID?
-    @Published public private(set) var managedScopeFailureReason: String?
-    public var managedScopeIsInvalid: Bool {
+    @Published package private(set) var managedSurface: HostSurfaceID?
+    @Published package private(set) var managedScopeFailureReason: String?
+    package var managedScopeIsInvalid: Bool {
         !isValidSoundPacksWindowSurface(managedSurface)
     }
     /// Every production mutation consumes this one fail-closed scope decision. Browsing, preview,
     /// Finder reveal, and route changes remain read-only and available when writes are stopped.
-    public var writesAllowed: Bool { managedScopeFailureReason == nil }
-    public var managedScopeFailureStatusText: SoundPacksWindowStatusText? {
+    package var writesAllowed: Bool { managedScopeFailureReason == nil }
+    package var managedScopeFailureStatusText: SoundPacksWindowStatusText? {
         soundPacksWindowScopeFailureStatusText(
             managedSurface: managedSurface,
             config: baseConfig)
@@ -554,49 +554,49 @@ package final class SoundPacksWindowModel: ObservableObject {
     private var writesStoppedReason: String {
         writesStoppedStatusText.resolve(language: .zhHans)
     }
-    public var managedSurfaceProfileIsMalformed: Bool {
+    package var managedSurfaceProfileIsMalformed: Bool {
         guard let managedSurface else { return false }
         return baseConfig.surfaceOverridesMalformed
             || baseConfig.invalidSurfaceOverrideKeys.contains(managedSurface.rawValue)
     }
-    @Published public private(set) var packCards: [PackCard]
-    @Published public private(set) var selectedPackID: String?
-    @Published public private(set) var selectedEventRows: [EventRow]
+    @Published package private(set) var packCards: [PackCard]
+    @Published package private(set) var selectedPackID: String?
+    @Published package private(set) var selectedEventRows: [EventRow]
     /// Selected pack only: one shared, on-demand shallow `readdir`, never one scan per pack card.
-    @Published public private(set) var selectedAudioInventoryState:
+    @Published package private(set) var selectedAudioInventoryState:
         SoundPackAudioInventoryPresentationState
 
-    public var selectedAudioFiles: [PackAudioFile] { selectedAudioInventoryState.files }
-    public var audioInventoryError: PackAudioInventoryError? {
+    package var selectedAudioFiles: [PackAudioFile] { selectedAudioInventoryState.files }
+    package var audioInventoryError: PackAudioInventoryError? {
         selectedAudioInventoryState.error
     }
     /// The full, uncapped window-side star selection (`starred_packs ∩ disk`). This deliberately
     /// does not reuse the panel's four-row display set: a manually written fifth star must remain
     /// visible here so the user can remove it without silently truncating config.json.
-    @Published public private(set) var starredPackIDs: [String]
+    @Published package private(set) var starredPackIDs: [String]
     /// A rejected T16 star write remains visible at window level even if the selected pack changes
     /// or the panel has zero rows. The View renders the exact reason through the shared FailureRow.
-    @Published public private(set) var starredPacksError: SetStarredPacksError?
+    @Published package private(set) var starredPacksError: SetStarredPacksError?
     /// The most recent assignment/deletion failure. The window renders this in-place and clears it
     /// only after a later successful audio action or a different pack selection.
-    @Published public private(set) var audioActionError: SoundPacksWindowAudioActionError?
+    @Published package private(set) var audioActionError: SoundPacksWindowAudioActionError?
     /// A successful restore remains visible until the user selects a different pack or starts a
     /// later restore. It carries the exact salvage path whenever an old tree was moved.
-    @Published public private(set) var factoryRestoreNotice: FactoryPackRestoreOutcome?
+    @Published package private(set) var factoryRestoreNotice: FactoryPackRestoreOutcome?
     /// Restore has its own failure surface so a failed replacement never masquerades as an audio
     /// assignment/deletion error.
-    @Published public private(set) var factoryRestoreActionError:
+    @Published package private(set) var factoryRestoreActionError:
         SoundPacksWindowFactoryRestoreActionError?
-    @Published public private(set) var packForkNotice: PackForkOutcome?
-    @Published public private(set) var packForkActionError: SoundPacksWindowPackForkActionError?
-    @Published public private(set) var packUseActionError: SoundPacksWindowPackUseActionError?
-    @Published public private(set) var windowStatuses: [SoundPacksWindowStatus]
-    @Published public private(set) var libraryPresentationState: SoundPackLibraryPresentationState
+    @Published package private(set) var packForkNotice: PackForkOutcome?
+    @Published package private(set) var packForkActionError: SoundPacksWindowPackForkActionError?
+    @Published package private(set) var packUseActionError: SoundPacksWindowPackUseActionError?
+    @Published package private(set) var windowStatuses: [SoundPacksWindowStatus]
+    @Published package private(set) var libraryPresentationState: SoundPackLibraryPresentationState
 
     /// The built-in id whose restore lifecycle can be retried even when its visible installed
     /// directory no longer exists and therefore cannot appear in ``packCards``. After the first
     /// partial publish failure, later failures remain retryable while the retained salvage is live.
-    public var factoryRestoreRetryPackID: String? {
+    package var factoryRestoreRetryPackID: String? {
         guard
             case .restore(let packID, let error, let retainedSalvages)? =
                 factoryRestoreActionError
@@ -614,7 +614,7 @@ package final class SoundPacksWindowModel: ObservableObject {
 
     /// Every failed restore that still has a window-level retry action. Batch failures are kept
     /// independently from the selected card so a successful sibling cannot hide their recovery.
-    public var factoryRestoreRetryPackIDs: [String] {
+    package var factoryRestoreRetryPackIDs: [String] {
         var ids: [String] = []
         for status in windowStatuses {
             guard case .retryFactoryRestores(let packIDs)? = status.recovery else { continue }
@@ -625,31 +625,31 @@ package final class SoundPacksWindowModel: ObservableObject {
         return ids
     }
 
-    public var selectedPackIsBuiltinReadOnly: Bool {
+    package var selectedPackIsBuiltinReadOnly: Bool {
         selectedPackID.map(builtinPackIDs.contains) ?? false
     }
 
-    public var selectedPackIsReferenced: Bool {
+    package var selectedPackIsReferenced: Bool {
         guard let selectedPackID else { return false }
         return referencedSoundPackIDs(in: baseConfig).contains(selectedPackID)
     }
 
-    public var selectedPackIsMissingPlaceholder: Bool {
+    package var selectedPackIsMissingPlaceholder: Bool {
         guard let selectedPackID else { return false }
         return packCards.first(where: { $0.id == selectedPackID })?.availability
             == .missingSelectedPlaceholder
     }
 
-    public var selectedPackCanRestoreFactory: Bool {
+    package var selectedPackCanRestoreFactory: Bool {
         guard let selectedPackID else { return false }
         return builtinPackIDs.contains(selectedPackID)
     }
 
-    public var factoryPackIDs: [String] { builtinPackIDs.sorted() }
+    package var factoryPackIDs: [String] { builtinPackIDs.sorted() }
 
-    public var hasFactoryPacks: Bool { !builtinPackIDs.isEmpty }
+    package var hasFactoryPacks: Bool { !builtinPackIDs.isEmpty }
 
-    public var starredPacksFailureReason: String? {
+    package var starredPacksFailureReason: String? {
         starredPacksError.map(soundPacksWindowStarredPacksFailureReason)
     }
 
@@ -699,7 +699,7 @@ package final class SoundPacksWindowModel: ObservableObject {
         return retainedSalvages
     }
 
-    public convenience init(
+    package convenience init(
         configFile: URL,
         lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
@@ -718,7 +718,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     #if DEBUG
     /// Synchronous compatibility path for the existing disk mutation harness. The shipped target
     /// has no initializer that can omit the app-lifetime shared library.
-    public convenience init(
+    package convenience init(
         configFile: URL,
         lockFile: URL = ClaudioPaths.configLockFile,
         environment: AudioImportEnvironment,
@@ -853,7 +853,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     #if DEBUG
     /// Deterministic, disk-free construction for the repository state gallery. The injected
     /// environment is retained only to satisfy action seams; gallery frames never execute them.
-    public init(
+    package init(
         previewConfig: ClaudioConfig,
         packCards: [PackCard],
         selectedPackID: String?,
@@ -914,12 +914,12 @@ package final class SoundPacksWindowModel: ObservableObject {
 
     /// 侧栏只改变窗口正在查看的包，不写 config，也不改变面板当前包。
     @discardableResult
-    public func selectPackForInspection(_ packID: String) -> Bool {
+    package func selectPackForInspection(_ packID: String) -> Bool {
         selectPackForInspection(packID, selectionAnnouncementSuppression: nil)
     }
 
     /// 窗口路由先调用此方法再选择包。未知/诊断 Surface 保留为显式错误态，绝不降级到 Global。
-    public func setManagedSurface(_ surface: HostSurfaceID?) {
+    package func setManagedSurface(_ surface: HostSurfaceID?) {
         guard managedSurface != surface || managedScopeFailureReason != nil else { return }
         managedSurface = surface
         let loadedState = loadPanelConfig(from: configFile)
@@ -963,10 +963,9 @@ package final class SoundPacksWindowModel: ObservableObject {
         return true
     }
 
-    /// The controller calls this from the `selectedPackID` publisher before posting a normal
-    /// selection announcement. A fork consumes exactly one matching token, then its compound
-    /// success status becomes the sole announcement.
-    public func consumeSelectionAnnouncementSuppression(for packID: String?) -> Bool {
+    /// The owner consumes this while projecting one settled selection transition. A fork consumes
+    /// exactly one matching token, then its compound success status becomes the sole announcement.
+    package func consumeSelectionAnnouncementSuppression(for packID: String?) -> Bool {
         guard let packID, suppressedSelectionAnnouncementPackID == packID else { return false }
         suppressedSelectionAnnouncementPackID = nil
         return true
@@ -1033,7 +1032,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     }
 
     @discardableResult
-    public func forkSelectedFactoryPack(
+    package func forkSelectedFactoryPack(
         maximumPublishCollisions: Int = 8
     ) -> Result<PackForkOutcome, SoundPacksWindowPackForkActionError> {
         packForkNotice = nil
@@ -1116,7 +1115,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     }
 
     @discardableResult
-    public func useSelectedPack() -> Result<UseOutcome, SoundPacksWindowPackUseActionError> {
+    package func useSelectedPack() -> Result<UseOutcome, SoundPacksWindowPackUseActionError> {
         packUseActionError = nil
         clearWindowStatus(.packUse)
         guard let selectedPackID else {
@@ -1158,7 +1157,7 @@ package final class SoundPacksWindowModel: ObservableObject {
 
     /// Imports picked files off the MainActor while binding completion to the pack and action that
     /// started it. A later selection never inherits this result or its automatic preview.
-    public func importSelectedAudioFiles(
+    package func importSelectedAudioFiles(
         _ requests: [AudioImportRequest],
         expectedPackID: String
     ) async -> Result<SoundPacksWindowAudioImportCompletion, SoundPacksWindowAudioActionError> {
@@ -1269,7 +1268,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// Resolves a preview from the current read model through the same audited pack/file gates as
     /// runtime playback. A stale `.present` row triggers an immediate read-model refresh so the
     /// window visibly becomes `.broken` instead of accepting a click with no explanation.
-    public func previewFileForSelectedEvent(_ event: Event) -> URL? {
+    package func previewFileForSelectedEvent(_ event: Event) -> URL? {
         guard
             let selectedPackID,
             let row = selectedEventRows.first(where: { $0.event == event }),
@@ -1380,7 +1379,7 @@ package final class SoundPacksWindowModel: ObservableObject {
 
     /// The star state for one full-library sidebar row. Existing stars stay removable even when a
     /// malformed hand edit exceeds four, while new stars are explicitly disabled at the shared cap.
-    public func starControl(for card: PackCard) -> SoundPacksWindowStarControl {
+    package func starControl(for card: PackCard) -> SoundPacksWindowStarControl {
         soundPacksWindowStarControl(
             packID: card.id,
             rawStarredPackIDs: starredPackIDs,
@@ -1393,7 +1392,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// Toggle one sidebar star. SwiftUI calls this only for an enabled `★` / `☆` button; the
     /// writer remains the authoritative >4 guard for stale or programmatic callers.
     @discardableResult
-    public func toggleStarredPack(
+    package func toggleStarredPack(
         _ packID: String
     ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
         guard writesAllowed else {
@@ -1413,7 +1412,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// Exact replacement remains only as a disk-harness seam. The shipped UI exposes the atomic
     /// membership writer above, so a retained model can never overwrite an external sibling star.
     @discardableResult
-    public func updateStarredPacks(
+    package func updateStarredPacks(
         to ids: [String]
     ) -> Result<SetStarredPacksOutcome, SetStarredPacksError> {
         guard writesAllowed else {
@@ -1461,7 +1460,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     ///
     /// `followActivePack == true` 只用于「popover 刚成功切包」与首次展示；普通窗口内写保留用户
     /// 正在查看的侧栏项，不把一次 manifest 编辑误当成选包动作。
-    public func reload(followActivePack: Bool) {
+    package func reload(followActivePack: Bool) {
         reload(followActivePack: followActivePack, refreshSoundPackLibrary: true)
     }
 
@@ -1492,7 +1491,7 @@ package final class SoundPacksWindowModel: ObservableObject {
         }
     }
 
-    public func retrySoundPackLibraryRefresh() {
+    package func retrySoundPackLibraryRefresh() {
         guard readSource.readsSharedSnapshot else {
             reload(followActivePack: false)
             return
@@ -1763,7 +1762,7 @@ package final class SoundPacksWindowModel: ObservableObject {
 
     /// Assigns one already-enumerated pack audio file via T3's sole bind primitive.
     @discardableResult
-    public func assignSelectedAudioFile(
+    package func assignSelectedAudioFile(
         _ fileName: String,
         to event: Event
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
@@ -1789,7 +1788,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// inventory may still be projecting the pre-import directory, so this path trusts the
     /// import result's pack identity and lets the audited manifest primitive re-check the file.
     @discardableResult
-    public func assignImportedAudioFile(
+    package func assignImportedAudioFile(
         _ importedFile: ImportedAudioFile,
         to event: Event
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
@@ -1811,7 +1810,7 @@ package final class SoundPacksWindowModel: ObservableObject {
         return bindSelectedAudioFile(importedFile.fileName, to: event, packID: selectedPackID)
     }
 
-    public func aiCueAdoptionEligibility(for event: Event) -> AICueAdoptionEligibility {
+    package func aiCueAdoptionEligibility(for event: Event) -> AICueAdoptionEligibility {
         guard writesAllowed else { return .ineligible(.writesStopped) }
         return ClaudioGUICore.aiCueAdoptionEligibility(
             surface: managedSurface,
@@ -1822,7 +1821,7 @@ package final class SoundPacksWindowModel: ObservableObject {
             builtinPackIDs: builtinPackIDs)
     }
 
-    public func captureAICueAdoptionTarget(
+    package func captureAICueAdoptionTarget(
         for event: Event
     ) -> Result<AICueAdoptionTarget, AICueAdoptionIneligibility> {
         switch aiCueAdoptionEligibility(for: event) {
@@ -1834,7 +1833,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// Imports the chosen private candidate first, then re-proves the explicit target immediately
     /// before one atomic name+event manifest mutation. A failed second phase leaves the old event
     /// mapping untouched and reports the already-imported file honestly as an orphan.
-    public func adoptAICue(
+    package func adoptAICue(
         _ request: AICueAdoptionRequest
     ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
         let candidate = request.candidate
@@ -1957,14 +1956,14 @@ package final class SoundPacksWindowModel: ObservableObject {
 
     #if DEBUG
     /// Deterministic seam for proving that a delayed refresh waiter cannot replace a newer state.
-    public func applyAICueAdoptionSnapshotForTesting(
+    package func applyAICueAdoptionSnapshotForTesting(
         _ snapshot: SoundPackLibrarySnapshot
     ) -> Bool {
         pendingFollowActivePack = true
         return applyReadySnapshot(snapshot, followActivePack: true)
     }
 
-    public func consumeSoundPackLibraryStateForTesting(_ state: SoundPackLibraryState) {
+    package func consumeSoundPackLibraryStateForTesting(_ state: SoundPackLibraryState) {
         consumeLibraryState(state)
     }
     #endif
@@ -2001,7 +2000,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// former panel editor. Built-in packs remain read-only and every outcome refreshes the
     /// window-owned read model through ``finishAudioAction(_:)``.
     @discardableResult
-    public func clearSelectedEventBinding(
+    package func clearSelectedEventBinding(
         _ event: Event
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
         guard writesAllowed else {
@@ -2040,7 +2039,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// The expected ID closes the confirmation-to-action selection race; active and built-in
     /// packs remain fail-closed.
     @discardableResult
-    public func deleteSelectedUserPackAfterConfirmation(
+    package func deleteSelectedUserPackAfterConfirmation(
         expectedPackID: String
     ) -> Result<UserSoundPackDeletionOutcome, SoundPacksWindowPackDeletionActionError> {
         guard writesAllowed else {
@@ -2081,7 +2080,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// function re-reads the manifest under `packs.lock`, so confirmation against a stale row still
     /// cannot delete a file that became referenced in the meantime.
     @discardableResult
-    public func deleteSelectedOrphanAudioFileAfterConfirmation(
+    package func deleteSelectedOrphanAudioFileAfterConfirmation(
         _ fileName: String,
         expectedPackID: String
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
@@ -2124,7 +2123,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// success path publishes the returned salvage outcome after the shared full reload, so a
     /// selection repaired by that reload cannot clear the user-visible path.
     @discardableResult
-    public func restoreSelectedFactoryPackAfterConfirmation(
+    package func restoreSelectedFactoryPackAfterConfirmation(
         expectedPackID: String
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
         guard writesAllowed else {
@@ -2151,7 +2150,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// selectable `PackCard`. The pending failure identity is revalidated at confirmation time so a
     /// stale dialog cannot restore an unrelated pack.
     @discardableResult
-    public func retryFailedFactoryPackRestoreAfterConfirmation(
+    package func retryFailedFactoryPackRestoreAfterConfirmation(
         expectedPackID: String
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
         guard writesAllowed else {
@@ -2180,7 +2179,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// Empty-library recovery means all factory IDs, never an arbitrary `Set.first`. Each core
     /// restore remains independently fail-closed; UI refresh is emitted once after the batch.
     @discardableResult
-    public func restoreAllFactoryPacksAfterConfirmation() -> FactoryPackBatchRestoreOutcome {
+    package func restoreAllFactoryPacksAfterConfirmation() -> FactoryPackBatchRestoreOutcome {
         let ids = factoryPackIDs
         guard writesAllowed else {
             let failures = ids.map {
@@ -2823,7 +2822,7 @@ package final class SoundPacksWindowModel: ObservableObject {
     /// 的失败两边都不假刷新。未来 T11/T12/T17 的每个写者都应收口到这里，而不是各自选择
     /// `reloadConfigOnly()`。
     @discardableResult
-    public func completeSynchronousWrite(
+    package func completeSynchronousWrite(
         _ outcome: SoundPacksWindowWriteOutcome,
         invalidatingPackIDs: Set<String> = []
     ) -> SoundPacksRefreshEffect {
@@ -2853,7 +2852,7 @@ package final class SoundPacksWindowModel: ObservableObject {
         } else if outcome != .failed, readSource.readsSharedSnapshot,
             !invalidatingPackIDs.isEmpty
         {
-            // Compatibility for callers that only use the pre-transaction public completion API.
+            // Compatibility for lower-level callers that use the pre-transaction package API.
             soundPackLibrary.invalidate(packIDs: invalidatingPackIDs)
             needsLegacyRefresh = true
         }
