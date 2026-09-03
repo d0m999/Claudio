@@ -1777,6 +1777,7 @@ func makeSoundEditorFixture(
     beforeForkPackPublish: (@Sendable (URL) throws -> Void)? = nil,
     beforeFactoryPackRestorePublish: (@Sendable () throws -> Void)? = nil,
     moveUserPackToTrashForTesting: (@MainActor @Sendable (URL) throws -> URL?)? = nil,
+    afterUserPackIsolationForTesting: (@MainActor @Sendable (URL) throws -> Void)? = nil,
     afterFinalImportCancellationSampleForTesting: (@Sendable () -> Void)? = nil,
     beforeReadyPublication: @escaping @Sendable () -> Void = {},
     onRejectedTerminalDeferred: @escaping @Sendable () -> Void = {},
@@ -1827,6 +1828,7 @@ func makeSoundEditorFixture(
     // Package-internal DEBUG-only writer seam. The production default remains the system Trash;
     // tests replace only that terminal adapter and still execute the real lock/isolation writer.
     configuredEnvironment.moveUserPackToTrashForTesting = moveUserPackToTrashForTesting
+    configuredEnvironment.afterUserPackIsolationForTesting = afterUserPackIsolationForTesting
     let environment = configuredEnvironment
     let recorder = SoundEditorScanRecorder()
     let scanner = SoundPackLibraryScanner.testingLive(
