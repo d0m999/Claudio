@@ -99,11 +99,16 @@ func runSoundPacksEditorOwnerSuites() {
                 environment: environment,
                 refreshCoordinator: coordinator)
 
-            owner.completePanelPackSwitch(.failed(.invalidPackID("bad")))
+            expect(
+                owner.send(.completePanelPackSwitch(.failed(.invalidPackID("bad"))))
+                    == .unchanged,
+                "失败 typed completion 必须明确返回 unchanged")
             expect(
                 coordinator.windowReloadRevision == 0,
                 "失败的 Events pack 选择不得发布虚假 editor refresh")
-            owner.completePanelPackSwitch(.succeeded)
+            expect(
+                owner.send(.completePanelPackSwitch(.succeeded)) == .applied,
+                "成功 typed completion 必须明确返回 applied")
             expect(
                 coordinator.windowReloadRevision == 1,
                 "成功的 Events pack 选择必须通知同一 Settings Sounds editor")

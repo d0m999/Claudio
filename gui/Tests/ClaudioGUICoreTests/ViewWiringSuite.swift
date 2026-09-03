@@ -269,11 +269,11 @@ private let expectedProductionLocks:
                 + "`mutateManifestJSON`）就不再是同一把 `flock`，跨进程互斥当场断开"
         ),
         (
-            "StateGalleryView.swift", "URL(fileURLWithPath: \"\")",
-            "/dev/null/claudio-preview-packs.lock",
-            "preview 用一条**永不解析**的占位路径（`/dev/null/…`，字符串内容由下面那条单独钉）。"
-                + "它若变成 `ClaudioPaths.packsLockFile`，一个 SwiftUI preview 就有了去碰用户 home "
-                + "上那把锁的能力 —— 而 preview 是 `#if DEBUG` 里的代码，没有任何行为测试跑它"
+            "StateGalleryView.swift",
+            "previewStateGalleryRoot.appendingPathComponent(\"\")", "packs.lock",
+            "preview 必须从单一随机临时根派生包锁。它若变成 `ClaudioPaths.packsLockFile`，一个 "
+                + "SwiftUI preview 就有了去碰用户 home 上那把锁的能力；若另算第二个根，gallery 的 "
+                + "production owner 与 manifest writer 就不再共享同一把锁"
         ),
     ]
 
@@ -1022,7 +1022,7 @@ func runViewWiringSuites() {
             }
             // 用实参**自己的文本**算出该文件应有的命中数，不写死一个数字：写死的数字与实参一起
             // 漂移时不会有人喊，而这里两者是同一个来源。多出来的每一个 token 都是第三处锁。
-            let accounted =
+            let packageLocksAccounted =
                 calls
                 .compactMap { argumentValue("packsLockFile", in: $0) }
                 .map {
@@ -1030,6 +1030,17 @@ func runViewWiringSuites() {
                         - 1
                 }
                 .reduce(0, +)
+            let sharedGalleryConfigLockUses =
+                expected.file == "StateGalleryView.swift"
+                ? code.components(separatedBy: "lockFile: configLock").count - 1
+                : 0
+            if expected.file == "StateGalleryView.swift" {
+                expect(
+                    sharedGalleryConfigLockUses == 2
+                        && code.contains("let configLock = root.appendingPathComponent(\"\")"),
+                    "Events gallery 的 production Panel/owner 必须共用随机临时根下同一 config.lock")
+            }
+            let accounted = packageLocksAccounted + sharedGalleryConfigLockUses
             let actual = code.lowercased().components(separatedBy: "lockfile").count - 1
             expect(
                 actual == accounted,
@@ -2681,21 +2692,30 @@ func runViewWiringSuites() {
                 && !flatView.contains("usesAutomaticPlaybackToggle")
                 && flatView.contains("EventSettingsMasterVolumeControl(")
                 && flatView.contains("model.switchPack(to: packID)")
+                && flatView.contains(".completePanelPackSwitch(outcome)")
                 && flatView.contains("model.resetSelectedSurfaceOverrides()")
-                && flatView.contains("model.retrySoundPackLibraryRefresh()")
+                && flatView.contains("eventsEditorPresentation?.retryLibraryAction")
                 && flatView.contains("playAllPreviews()")
                 && flatView.contains("if previewAllTask != nil")
                 && flatView.contains("case .failed(let event):")
                 && flatView.contains("selection.$previewStopRequestRevision")
                 && flatView.contains("selection.$aiSessionEndRequestRevision")
-                && flatView.contains("soundPacksModel.packCards")
+                && flatView.contains("eventsEditorPresentation?.packs")
+                && flatView.contains("previewActionAvailable: editorAccess?.previewAction != nil")
+                && flatView.contains(
+                    "private var previewEnabled: Bool { !controlsUnavailable && previewActionAvailable }"
+                )
+                && !flatView.contains("SoundPacksWindowModel")
+                && !flatView.contains("AudioImportEnvironment")
+                && !flatView.contains("eventPreviewFileURL(")
                 && flatView.contains("eventSettingsPackInheritanceState(")
                 && flatView.contains("eventSettingsInheritanceState(")
                 && flatView.contains(".accessibilityLabel(identityAccessibilityLabel)")
                 && flatView.contains("eventSettingsIdentityAccessibilityLabel(")
                 && flatView.contains(".eventSettingsAutomaticPlaybackFor")
                 && flatView.contains(".accessibilityValue(")
-                && flatPreviewSequence.contains("Task.detached(priority: .userInitiated)")
+                && flatPreviewSequence.contains("events: [Event]")
+                && flatView.contains("soundPacksEditorNativeEffects.playPreview(")
                 && flatPreviewSequence.contains("generation == runGeneration")
                 && flatPreviewSequence.contains("case failed(Event)")
                 && flatViewWithStrings.contains(
@@ -2707,13 +2727,26 @@ func runViewWiringSuites() {
         expect(
             flatView.contains("EventSettingsAICueServiceCard(")
                 && flatView.contains("EventSettingsAICueComposerView(")
-                && flatView.contains("model.aiCueAdoptionEligibility(")
-                && flatView.contains("for: event.event)")
+                && flatView.contains(
+                    "adoptionEnabled: eventsEditorPresentation?.adoptionPermit != nil")
+                && flatView.contains("route: editorRoute")
+                && flatView.contains("eventAccess.first(where:")
+                && flatView.contains("?.adoptionAvailability")
+                && !flatView.contains("AICueAdoptionTarget")
+                && !flatView.contains("AICueAdoptionRequest")
                 && flatView.contains(".focused(focusedTarget, equals: .generateAICue(")
                 && flatViewWithStrings.contains(
                     ".accessibilityIdentifier( \"event-settings.event.")
                 && flatViewWithStrings.contains(".ai-cue\")"),
             "AI 提示音必须作为事件设置的页面级服务与逐事件动作接入，并消费 fail-closed 采用资格")
+        expect(
+            !flatView.contains("NSSoundAudioPreviewPlayer")
+                && flatView.contains("soundPacksEditorNativeEffects.playAICueCandidate(")
+                && flatView.contains("soundPacksEditorNativeEffects.stopPreview(owner:")
+                && flatAIView.contains("let adoptionEnabled: Bool")
+                && flatAIView.contains("viewModel.phase == .adopting || !adoptionEnabled"),
+            "Event/AI preview 必须共用 retained native dispatcher；preview/adoption 按 capability presence 禁用"
+        )
         expect(
             flatView.contains("EventSettingsAICueCredentialSheet(")
                 && flatView.contains(
@@ -2752,18 +2785,17 @@ func runViewWiringSuites() {
         expect(
             flatView.contains("stopCandidatePreview()")
                 && flatView.contains(
-                    "aiCueViewModel.adopt(candidateID: candidateID, using: onAdoptAICue)")
+                    "aiCueViewModel.adopt(candidateID: candidateID, permit: permit)")
                 && flatSettingsController.contains("aiCueViewModel.endSession()"),
             "采用、离开页面、关闭唯一 retained Settings 和作用域变化必须清理未采用候选")
         expect(
-            flatView.contains("let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
-                && flatSettingsController.contains(
-                    "private let onAdoptAICue: @MainActor (AICueAdoptionRequest)")
-                && !flatView.contains(
-                    "AICueCandidate, AICueDisplayName, AICueAdoptionTarget")
-                && !flatSettingsController.contains(
-                    "AICueCandidate, AICueDisplayName, AICueAdoptionTarget"),
-            "候选、名称和采用目标必须作为单一领域请求跨越 SwiftUI/AppKit 边界")
+            flatView.contains("soundPacksEditorOwner.perform( .adoptAICue(")
+                && flatView.contains("candidate: candidate")
+                && flatView.contains("displayName: displayName")
+                && flatView.contains("permit: permit")
+                && !flatView.contains("AICueAdoptionRequest")
+                && !flatSettingsController.contains("AICueAdoptionRequest"),
+            "候选与名称必须连同 owner 签发的 opaque permit 直接返回 owner operation")
         expect(
             flatMenu.contains("AICueKeychainCredentialVault(")
                 && flatMenu.contains("let aiCueElevenLabsProvider = ElevenLabsAICueProvider()")
@@ -2772,8 +2804,9 @@ func runViewWiringSuites() {
                 && flatMenu.contains("QwenAICueProvider( profileID: .qwenBeijing)")
                 && flatMenu.contains("AICueGenerationDispatcher(generators:")
                 && flatMenu.contains("AICueGenerationEngine(")
-                && flatMenu.contains("soundPacksEditorOwner.adoptAICue(request)"),
-            "composition root 必须接通 Keychain、四个固定 profile/engine 与既有声音包采用链")
+                && !flatMenu.contains("eventSettingsModel.reload()")
+                && !flatMenu.contains("soundPacksEditorOwner.adoptAICue("),
+            "composition root 必须接通 Keychain 与四个固定 profile/engine，采用链由 Events 直连 owner")
     }
 
     suite("声音包窗口：完整映射菜单列出已有音频并经窗口 model 绑定；面板不消费 inventory") {

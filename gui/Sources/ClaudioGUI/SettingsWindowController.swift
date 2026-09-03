@@ -30,12 +30,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let integrationsModel: IntegrationDestinationModel
     private let integrationsFocusCoordinator = IntegrationDestinationFocusCoordinator()
     private let aiCueViewModel: AICueGenerationViewModel
-    private let audioEnvironment: AudioImportEnvironment
     private let onEventAudibilityInputsChanged: @MainActor () -> Void
-    private let onAdoptAICue:
-        @MainActor (AICueAdoptionRequest) async -> Result<
-            AICueAdoptionOutcome, AICueAdoptionError
-        >
     private let dynamicQuietObserver: DynamicQuietSystemObserver
     private var window: NSWindow?
     private var isPresentingWindow = false
@@ -63,12 +58,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         hostIntegrations: HostIntegrationPresentationStore,
         integrationsModel: IntegrationDestinationModel,
         aiCueViewModel: AICueGenerationViewModel,
-        audioEnvironment: AudioImportEnvironment,
-        onEventAudibilityInputsChanged: @escaping @MainActor () -> Void,
-        onAdoptAICue:
-            @escaping @MainActor (AICueAdoptionRequest) async -> Result<
-                AICueAdoptionOutcome, AICueAdoptionError
-            >
+        onEventAudibilityInputsChanged: @escaping @MainActor () -> Void
     ) {
         self.preferences = preferences
         self.loginItemSettings = loginItemSettings
@@ -83,9 +73,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         self.hostIntegrations = hostIntegrations
         self.integrationsModel = integrationsModel
         self.aiCueViewModel = aiCueViewModel
-        self.audioEnvironment = audioEnvironment
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
-        self.onAdoptAICue = onAdoptAICue
         dynamicQuietObserver = DynamicQuietSystemObserver()
         aboutSettings = makeSystemAboutSettingsModel(
             surfaceFacts: hostIntegrations.safeSurfaceFacts)
@@ -262,15 +250,10 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             integrationsModel: integrationsModel,
             integrationsFocusCoordinator: integrationsFocusCoordinator,
             aiCueViewModel: aiCueViewModel,
-            audioEnvironment: audioEnvironment,
             onEventAudibilityInputsChanged: onEventAudibilityInputsChanged,
-            onEventPackSwitch: { [weak soundPacksEditorOwner] outcome in
-                soundPacksEditorOwner?.completePanelPackSwitch(outcome)
-            },
             onAnnouncement: { [weak self] sentence in
                 self?.announceBasicSettingsUpdate(sentence)
-            },
-            onAdoptAICue: onAdoptAICue)
+            })
         let window = NSWindow(
             contentRect: NSRect(
                 x: 0,

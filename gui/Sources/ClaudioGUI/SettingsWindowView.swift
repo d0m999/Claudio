@@ -25,16 +25,8 @@ struct SettingsWindowView: View {
     let integrationsModel: IntegrationDestinationModel?
     let integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator?
     let aiCueViewModel: AICueGenerationViewModel?
-    let audioEnvironment: AudioImportEnvironment?
     let onEventAudibilityInputsChanged: (@MainActor () -> Void)?
-    let onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)?
     let onAnnouncement: (@MainActor (String) -> Void)?
-    let onAdoptAICue:
-        (
-            @MainActor (AICueAdoptionRequest) async -> Result<
-                AICueAdoptionOutcome, AICueAdoptionError
-            >
-        )?
 
     @FocusState private var focusedTarget: SettingsWindowFocusTarget?
 
@@ -65,16 +57,8 @@ struct SettingsWindowView: View {
         integrationsModel: IntegrationDestinationModel? = nil,
         integrationsFocusCoordinator: IntegrationDestinationFocusCoordinator? = nil,
         aiCueViewModel: AICueGenerationViewModel? = nil,
-        audioEnvironment: AudioImportEnvironment? = nil,
         onEventAudibilityInputsChanged: (@MainActor () -> Void)? = nil,
-        onEventPackSwitch: (@MainActor (PanelPackSwitchOutcome) -> Void)? = nil,
-        onAnnouncement: (@MainActor (String) -> Void)? = nil,
-        onAdoptAICue:
-            (
-                @MainActor (AICueAdoptionRequest) async -> Result<
-                    AICueAdoptionOutcome, AICueAdoptionError
-                >
-            )? = nil
+        onAnnouncement: (@MainActor (String) -> Void)? = nil
     ) {
         self.model = model
         self.preferences = preferences
@@ -91,11 +75,8 @@ struct SettingsWindowView: View {
         self.integrationsModel = integrationsModel
         self.integrationsFocusCoordinator = integrationsFocusCoordinator
         self.aiCueViewModel = aiCueViewModel
-        self.audioEnvironment = audioEnvironment
         self.onEventAudibilityInputsChanged = onEventAudibilityInputsChanged
-        self.onEventPackSwitch = onEventPackSwitch
         self.onAnnouncement = onAnnouncement
-        self.onAdoptAICue = onAdoptAICue
     }
 
     var body: some View {
@@ -294,10 +275,7 @@ struct SettingsWindowView: View {
             let eventSettingsSelection,
             let hostIntegrations,
             let aiCueViewModel,
-            let audioEnvironment,
-            let onEventAudibilityInputsChanged,
-            let onEventPackSwitch,
-            let onAdoptAICue
+            let onEventAudibilityInputsChanged
         {
             EventSettingsWindowView(
                 model: eventSettingsModel,
@@ -305,13 +283,11 @@ struct SettingsWindowView: View {
                 hostIntegrations: hostIntegrations,
                 languageStore: preferences,
                 aiCueViewModel: aiCueViewModel,
-                soundPacksModel: soundPacksEditorOwner.model,
-                audioEnvironment: audioEnvironment,
+                soundPacksEditorOwner: soundPacksEditorOwner,
+                soundPacksEditorNativeEffects: soundPacksEditorNativeEffects,
                 onConfigureSound: { model.request(.sounds($0)) },
                 onAudibilityInputsChanged: onEventAudibilityInputsChanged,
-                onPackSwitch: onEventPackSwitch,
-                onAnnouncement: onAnnouncement,
-                onAdoptAICue: onAdoptAICue)
+                onAnnouncement: onAnnouncement)
         } else if destination == .sounds,
             model.resolution.failure == nil,
             let soundPacksEditorOwner

@@ -285,7 +285,119 @@ func runSoundPacksEditorNativeEffectsSuites() async {
             dispatcher.handleLifecycle(.settingsWindowWillClose, owner: owner)
             expect(
                 owner.presentation.mode == .inactive && adapter.stopCount == 1,
-                "Settings close 必须停用 Events context，但不得伪造第二次 Sounds stop")
+                "Settings close 必须停用 Events context，但不得伪造不存在的第二次 playback stop")
+        }
+    }
+
+    await suite("Sound editor native effects：Events 只执行 owner-signed preview 且生命周期有序") {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a"])
+            let owner = fixture.owner
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(scope: .global, event: .stop),
+                        requestRevision: 608)))
+            _ = await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .events(let events) = owner.presentation.mode,
+                let previewAction = events.eventAccess.first(where: { $0.event == .stop })?
+                    .previewAction
+            else {
+                expect(false, "fresh Events presentation 必须提供 owner-signed preview action")
+                return
+            }
+            let adapter = RecordingSoundPacksEditorNativeEffectsAdapter(playbackDuration: 0.25)
+            let dispatcher = SoundPacksEditorNativeEffectsDispatcher(adapter: adapter)
+
+            expect(
+                dispatcher.playPreview(previewAction, owner: owner) == 0.25,
+                "Events preview 必须由 native adapter 回传真实播放时长")
+            expect(
+                adapter.playRequests.map(\.fileURL) == [
+                    root.appendingPathComponent("packs/pack-a/stop.mp3")
+                ],
+                "view 不得派生 URL；dispatcher 只能执行 owner action 产生的 exact target")
+            expect(
+                dispatcher.playPreview(previewAction, owner: owner) == nil,
+                "Events preview action 必须 single-use")
+
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(
+                            scope: .global,
+                            event: .notification),
+                        requestRevision: 609)))
+            dispatcher.stopPreview(owner: owner)
+            expect(
+                adapter.stopCount == 1,
+                "同页 route/Event 已切换后仍必须由 retained dispatcher 停掉旧试听")
+            expect(
+                {
+                    guard case .events(let current) = owner.presentation.mode else { return false }
+                    return current.route.event == .notification
+                }(),
+                "route 切换 stop 不得 retire 已接管的新 Events context")
+
+            dispatcher.handleLifecycle(.eventsViewDisappeared, owner: owner)
+            expect(
+                adapter.stopCount == 1 && owner.presentation.mode == .inactive,
+                "Events disappear 必须先消费自己的 stop action 再停用 context")
+
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(scope: .global, event: .stop),
+                        requestRevision: 609)))
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 610)))
+            dispatcher.handleLifecycle(.eventsViewDisappeared, owner: owner)
+            expect(
+                {
+                    if case .sounds = owner.presentation.mode { return true }
+                    return false
+                }() && adapter.stopCount == 1,
+                "迟到的 Events disappear 不得 clobber 已接管 owner 的 Sounds context")
+        }
+    }
+
+    await suite("Sound editor native effects：AI candidate 与 Events 共用 retained playback lifecycle")
+    {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a"])
+            let candidateURL = root.appendingPathComponent("candidate.mp3")
+            let generationID = UUID()
+            let candidate = AICueCandidate(
+                id: UUID(),
+                variant: .clear,
+                asset: AICueTemporaryAudioAsset(
+                    fileURL: candidateURL,
+                    byteCount: 12,
+                    sniffedFormat: .mp3),
+                durationMilliseconds: 250,
+                mediaType: "audio/mpeg",
+                provenance: AICueCandidateProvenance(
+                    providerID: .elevenLabs,
+                    profileID: .elevenLabsGlobal,
+                    modelID: "fixture",
+                    generationID: generationID,
+                    requestOrdinal: 1,
+                    providerRequestID: nil))
+            let adapter = RecordingSoundPacksEditorNativeEffectsAdapter(playbackDuration: 0.25)
+            let dispatcher = SoundPacksEditorNativeEffectsDispatcher(adapter: adapter)
+
+            expect(
+                dispatcher.playAICueCandidate(candidate, volume: 0.6) == 0.25,
+                "candidate 必须经同一 native adapter 开始播放并返回时长")
+            expect(
+                adapter.playRequests
+                    == [.init(fileURL: candidateURL, volume: 0.6)],
+                "candidate URL/volume 必须原样进入 retained playback adapter")
+
+            dispatcher.handleLifecycle(.settingsWindowWillClose, owner: fixture.owner)
+            dispatcher.handleLifecycle(.settingsWindowWillClose, owner: fixture.owner)
+            expect(
+                adapter.stopCount == 1,
+                "即使 editor context 已 inactive，Settings close 也必须 exact once 停止 candidate")
         }
     }
 }
@@ -305,8 +417,11 @@ private final class RecordingSoundPacksEditorNativeEffectsAdapter:
     private(set) var stopCount = 0
     private(set) var revealRequests: [URL] = []
 
-    init(pickerResults: [[URL]] = []) {
+    private let playbackDuration: TimeInterval?
+
+    init(pickerResults: [[URL]] = [], playbackDuration: TimeInterval? = 1) {
         self.pickerResults = pickerResults
+        self.playbackDuration = playbackDuration
     }
 
     func selectAudioFiles(allowsMultipleSelection: Bool) -> [URL] {
@@ -314,8 +429,9 @@ private final class RecordingSoundPacksEditorNativeEffectsAdapter:
         return pickerResults.isEmpty ? [] : pickerResults.removeFirst()
     }
 
-    func playAudio(fileURL: URL, volume: Double) {
+    func playAudio(fileURL: URL, volume: Double) -> TimeInterval? {
         playRequests.append(PlayRequest(fileURL: fileURL, volume: volume))
+        return playbackDuration
     }
 
     func stopAudio() {

@@ -1520,6 +1520,27 @@ public final class SoundPacksEditorOwner: ObservableObject {
         seed: SoundPacksEditorModelSeed
     ) -> EventsSoundPackPresentation {
         let packs = seed.packCards.map { makePackPresentation(card: $0, seed: seed) }
+        let selectedNativeTargets = seed.selectedPackID.flatMap {
+            seed.nativeTargetsByPackID[$0]
+        }
+        let eventAccess = seed.selectedEventRows.map { row in
+            let preview = makePreviewAccess(
+                row: row,
+                nativeTargets: selectedNativeTargets,
+                seed: seed)
+            let adoptionAvailability: SoundPackEditorAdoptionAvailability
+            switch model.aiCueAdoptionEligibility(for: row.event) {
+            case .eligible:
+                adoptionAvailability = .eligible
+            case .ineligible(let reason):
+                adoptionAvailability = .ineligible(reason)
+            }
+            return SoundPackEditorEventAccessPresentation(
+                event: row.event,
+                previewAvailability: preview.availability,
+                previewAction: preview.action,
+                adoptionAvailability: adoptionAvailability)
+        }
         var adoptionPermit: SoundPackAdoptionPermit?
         if seed.library.isFresh,
             let candidateGenerationID,
@@ -1537,10 +1558,47 @@ public final class SoundPacksEditorOwner: ObservableObject {
             scope: scopeAvailability(seed, requestedScope: route.scope),
             packs: packs,
             selectedPack: packs.first(where: { $0.id == seed.selectedPackID }),
+            eventAccess: eventAccess,
             adoptionPermit: adoptionPermit,
+            stopPreviewAction: makeAction(.stopPreview, binding: .stopPreview, seed: seed),
             retryLibraryAction: seed.library.canRetryEditorLibrary
                 ? makeAction(.retryLibrary, binding: .retryLibrary, seed: seed)
                 : nil)
+    }
+
+    private func makePreviewAccess(
+        row: EventRow,
+        nativeTargets: SoundPackNativeTargets?,
+        seed: SoundPacksEditorModelSeed
+    ) -> (availability: EventPreviewAvailability, action: SoundPackEditorAction?) {
+        let derivedAvailability = eventPreviewAvailability(
+            coverage: row.coverage,
+            masterVolume: seed.config.masterVolume)
+        let availability: EventPreviewAvailability
+        if derivedAvailability.isAvailable,
+            nativeTargets?.eventAudioURLs[row.event] == nil
+        {
+            switch row.coverage {
+            case .present(let fileName), .broken(let fileName):
+                availability = .missingOrDamaged(fileName: fileName)
+            case .unmapped:
+                availability = .unmapped
+            }
+        } else {
+            availability = derivedAvailability
+        }
+        guard seed.library.isFresh, availability.isAvailable,
+            let target = nativeTargets?.eventAudioURLs[row.event]
+        else {
+            return (availability, nil)
+        }
+        return (
+            availability,
+            makeAction(
+                .preview,
+                binding: .preview(fileURL: target),
+                seed: seed)
+        )
     }
 
     private func scopeAvailability(

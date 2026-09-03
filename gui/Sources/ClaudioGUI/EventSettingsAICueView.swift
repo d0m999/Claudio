@@ -183,6 +183,8 @@ struct EventSettingsAICueComposerView: View {
     @ObservedObject var languageStore: ClaudioPreferences
     let eventTitle: String
     let playingCandidateID: UUID?
+    let adoptionEnabled: Bool
+    let adoptionUnavailableHint: String
     let onConfigureCredential: () -> Void
     let onPreviewCandidate: (AICueCandidate) -> Void
     let onAdoptCandidate: (UUID) -> Void
@@ -436,8 +438,11 @@ struct EventSettingsAICueComposerView: View {
                 onAdoptCandidate(candidate.id)
             }
             .buttonStyle(.borderedProminent)
-            .disabled(viewModel.phase == .adopting)
+            .disabled(viewModel.phase == .adopting || !adoptionEnabled)
             .accessibilityLabel(l10n.text(.aiCueUseForEvent))
+            .accessibilityHint(
+                adoptionEnabled ? l10n.text(.aiCueUseForEvent) : adoptionUnavailableHint
+            )
             .accessibilityIdentifier(
                 "event-settings.ai-cue.candidate.\(candidate.variant.rawValue).use")
         }
@@ -768,7 +773,7 @@ private func aiCueFailureText(
         return l10n.text(.aiCueErrorNameInvalid)
     case .adoption(.importedButNotBound):
         return l10n.text(.aiCueErrorAdoptionPartial)
-    case .adoption(.ineligible):
+    case .adoption(.targetChanged):
         return l10n.text(.aiCueErrorAdoptionTarget)
     case .adoption:
         return l10n.text(.aiCueErrorAdoption)
