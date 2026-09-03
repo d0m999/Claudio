@@ -24,6 +24,8 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private var presentationRevision: UInt64 = 0
     private var nextCapabilityID: UInt64 = 0
     private var actionLedger: [SoundPackEditorAction.ID: EditorActionBinding] = [:]
+    private var confirmationAttemptLedger:
+        [SoundPackEditorAction.ID: SoundPackEditorConfirmation.ID] = [:]
     private var importPermitLedger: [SoundPackImportPermit.ID: EditorPermitBinding] = [:]
     private var adoptionPermitLedger: [SoundPackAdoptionPermit.ID: EditorAdoptionBinding] = [:]
     private var pendingConfirmationState: EditorConfirmationState?
@@ -785,7 +787,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             guard pendingConfirmationState?.id == confirmationID else {
                 return .rejected(.staleConfirmation)
             }
-            pendingConfirmationState = nil
+            clearPendingConfirmation()
             publish(from: seed)
             return .applied
         }
@@ -793,11 +795,15 @@ public final class SoundPacksEditorOwner: ObservableObject {
 
     private func consumeConfirmationAttemptIfCurrent(_ action: SoundPackEditorAction) {
         guard action.kind == .confirm,
-            let binding = actionLedger.removeValue(forKey: action.id),
-            case .confirm(let confirmationID) = binding.intent,
+            let confirmationID = confirmationAttemptLedger.removeValue(forKey: action.id),
             pendingConfirmationState?.id == confirmationID
         else { return }
+        clearPendingConfirmation()
+    }
+
+    private func clearPendingConfirmation() {
         pendingConfirmationState = nil
+        confirmationAttemptLedger.removeAll(keepingCapacity: true)
     }
 
     private func requestConfirmation(
@@ -809,6 +815,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         seed: SoundPacksEditorModelSeed
     ) -> SoundPacksEditorCommandResult {
         nextCapabilityID &+= 1
+        confirmationAttemptLedger.removeAll(keepingCapacity: true)
         pendingConfirmationState = EditorConfirmationState(
             id: SoundPackEditorConfirmation.ID(rawValue: nextCapabilityID),
             kind: kind,
@@ -837,7 +844,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         }
         // Consume and clear before any Task can be scheduled. Replaying either action can never
         // cross this synchronous MainActor boundary.
-        pendingConfirmationState = nil
+        clearPendingConfirmation()
         guard seed.library.isFresh,
             confirmation.context == context,
             confirmation.actionEpoch == actionEpoch,
@@ -900,7 +907,11 @@ public final class SoundPacksEditorOwner: ObservableObject {
     ) {
         model.refreshEditorConfigProjection()
         let current = model.editorProjectionSeed()
-        guard current.library.isFresh, current.writesAllowed, binding.context == context,
+        let libraryPermitsExecution =
+            current.library.isFresh
+            || (current.library == .loading(previousAvailable: true)
+                && current.snapshotRevision == binding.snapshotRevision)
+        guard libraryPermitsExecution, current.writesAllowed, binding.context == context,
             binding.actionEpoch == actionEpoch,
             binding.selectionGeneration == current.selectionGeneration,
             binding.snapshotRevision == current.snapshotRevision
@@ -969,22 +980,26 @@ public final class SoundPacksEditorOwner: ObservableObject {
         finishOperation(
             operationID,
             phase: phase,
-            seed: settledSeed,
-            successfulWork: phase == .succeeded ? work : nil)
+            seed: settledSeed)
     }
 
     private func finishOperation(
         _ operationID: SoundPackEditorOperationID,
         phase: SoundPackEditorActivityPhase,
-        seed: SoundPacksEditorModelSeed,
-        successfulWork: EditorScheduledWork? = nil
+        seed: SoundPacksEditorModelSeed
     ) {
         operationTasks.removeValue(forKey: operationID)
         guard let state = operationStates[operationID] else { return }
         operationStates[operationID] = state.withPhase(phase)
-        if case .deleteOrphan = successfulWork {
+        if case .succeeded = phase {
+            // The operation receipt is the semantic debt for this synchronous transition.
+            // Retain legacy model statuses for direct model consumers, but do not enqueue a
+            // second owner debt describing the same completed mutation.
+            for status in seed.windowStatuses {
+                seenStatusRevisions.insert(status.revision)
+            }
             enqueueOperationAnnouncement(
-                .deleteOrphan,
+                state.kind,
                 completion: .succeeded,
                 operationID: operationID)
         }
@@ -1027,7 +1042,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
     ) {
         guard forcingCapabilityGeneration || seed != lastCommittedModelSeed else { return }
         if !seed.library.isFresh {
-            pendingConfirmationState = nil
+            // Loading may be the observation refresh that raced with an operation already
+            // accepted from the same fresh snapshot. Keep that accepted confirmation consumed,
+            // while any still-pending confirmation remains fail-closed.
+            clearPendingConfirmation()
         }
         presentationRevision &+= 1
         actionLedger.removeAll(keepingCapacity: true)
@@ -1357,15 +1375,17 @@ public final class SoundPacksEditorOwner: ObservableObject {
         seed: SoundPacksEditorModelSeed
     ) -> SoundPackEditorConfirmation? {
         guard let pendingConfirmationState else { return nil }
+        let confirmAction = makeAction(
+            .confirm,
+            binding: .confirm(pendingConfirmationState.id),
+            seed: seed)
+        confirmationAttemptLedger[confirmAction.id] = pendingConfirmationState.id
         return SoundPackEditorConfirmation(
             id: pendingConfirmationState.id,
             kind: pendingConfirmationState.kind,
             packID: pendingConfirmationState.packID,
             fileName: pendingConfirmationState.fileName,
-            confirmAction: makeAction(
-                .confirm,
-                binding: .confirm(pendingConfirmationState.id),
-                seed: seed),
+            confirmAction: confirmAction,
             cancelAction: makeAction(
                 .cancelConfirmation,
                 binding: .cancelConfirmation(pendingConfirmationState.id),
