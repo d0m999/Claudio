@@ -773,7 +773,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             guard let state = operationStates[operationID], state.phase == .busy else {
                 return .rejected(.staleAction)
             }
-            operationTasks.removeValue(forKey: operationID)?.cancel()
+            operationTasks[operationID]?.cancel()
             operationCancellations[operationID]?.cancel()
             operationStates[operationID] = state.withPhase(.cancelled(changedOnDisk: false))
             trimTerminalOperationHistory()
@@ -880,6 +880,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         let task = Task { @MainActor [weak self] in
             await Task.yield()
             guard let self else { return }
+            defer { self.operationTasks.removeValue(forKey: operationID) }
             guard !Task.isCancelled,
                 self.operationStates[operationID]?.phase == .busy
             else { return }
@@ -1550,6 +1551,16 @@ public final class SoundPacksEditorOwner: ObservableObject {
     public func finishStatusAnnouncementAttempt(revision: Int, didPost: Bool) {
         statusAnnouncementTracker.finishAttempt(revision: revision, didPost: didPost)
     }
+
+    #if DEBUG
+    /// Joins the task already owned by this editor without scheduling work or changing state.
+    package func waitForScheduledOperationExitForTesting(
+        _ operationID: SoundPackEditorOperationID
+    ) async {
+        guard let task = operationTasks[operationID] else { return }
+        await task.value
+    }
+    #endif
 
     /// Returns one shared suppression decision to every retained presentation observing the same
     /// `@Published` selection emission. This prevents an inactive window from consuming the fork

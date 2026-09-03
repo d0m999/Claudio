@@ -181,6 +181,12 @@ public struct AudioImportEnvironment: Sendable {
     /// 用户原目录，并且不会发布一次假刷新。
     public var beforeFactoryPackRestoreSalvage: (@Sendable () throws -> Void)?
 
+    #if DEBUG
+    /// Replaces only the final system-Trash adapter in deletion tests. The real config/packs
+    /// locks, isolation rename, identity checks, rollback, and typed outcome remain unchanged.
+    package var moveUserPackToTrashForTesting: (@MainActor @Sendable (URL) throws -> URL?)?
+    #endif
+
     public init(
         userPacksDirectory: URL = ClaudioPaths.packsDirectory,
         bundledPacksDirectory: URL? = nil,
@@ -203,5 +209,8 @@ public struct AudioImportEnvironment: Sendable {
         self.beforeForkPackPublish = beforeForkPackPublish
         self.beforeFactoryPackRestorePublish = beforeFactoryPackRestorePublish
         self.beforeFactoryPackRestoreSalvage = beforeFactoryPackRestoreSalvage
+        #if DEBUG
+        moveUserPackToTrashForTesting = nil
+        #endif
     }
 }

@@ -1993,11 +1993,18 @@ public final class SoundPacksWindowModel: ObservableObject {
         }
 
         beginSoundPackMutation(packIDs: [selectedPackID])
+        #if DEBUG
+        let moveToTrash =
+            environment.moveUserPackToTrashForTesting ?? moveUserSoundPackToTrash
+        #else
+        let moveToTrash = moveUserSoundPackToTrash
+        #endif
         let result = deleteUserSoundPack(
             packID: selectedPackID,
             configFile: configFile,
             configLockFile: lockFile,
-            environment: environment
+            environment: environment,
+            moveToTrash: moveToTrash
         )
         .mapError(SoundPacksWindowPackDeletionActionError.delete)
         return finishPackDeletion(result, invalidatedPackID: selectedPackID)
