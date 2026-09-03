@@ -44,6 +44,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var soundsRouteAnnouncementCancellable: AnyCancellable?
     private var aboutSurfaceCancellable: AnyCancellable?
     private var settingsPresentationCancellable: AnyCancellable?
+    private var settingsPresentationAnnouncementDeliveryScheduled = false
 
     init(
         preferences: ClaudioPreferences,
@@ -160,9 +161,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         settingsPresentationCancellable = settingsPresentationSession.$state
             .map(\.pendingAnnouncement)
             .removeDuplicates()
-            .sink { [weak self] announcement in
+            .sink { [weak self] _ in
                 MainActor.assumeIsolated {
-                    self?.announceSettingsPresentationUpdateIfNeeded(announcement)
+                    self?.scheduleSettingsPresentationAnnouncementDelivery()
                 }
             }
     }
@@ -196,6 +197,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         // already-retained General → Sounds deep link or non-key reactivation cannot lose it.
         announcePendingSoundPackEditorAnnouncementIfNeeded(in: presentedWindow)
         isPresentingWindow = false
+        scheduleSettingsPresentationAnnouncementDelivery()
     }
 
     /// Prepares a global-shortcut route before the shared close-before-show handoff. Unknown or
@@ -218,6 +220,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         settingsPresentationSession.refreshLoginItem()
         updateIntegrationsPresentationState()
         announcePendingSoundPackEditorAnnouncementIfNeeded(in: keyWindow)
+        scheduleSettingsPresentationAnnouncementDelivery()
     }
 
     func windowDidResignKey(_ notification: Notification) {
@@ -298,8 +301,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         window?.title = ClaudioL10n(language: preferences.language).text(.settingsWindowTitle)
     }
 
-    private func announceBasicSettingsUpdate(_ sentence: String) {
-        guard let window, window.isKeyWindow, !sentence.isEmpty else { return }
+    @discardableResult
+    private func announceBasicSettingsUpdate(_ sentence: String) -> Bool {
+        guard let window, window.isVisible, window.isKeyWindow, !sentence.isEmpty else {
+            return false
+        }
         NSAccessibility.post(
             element: window,
             notification: .announcementRequested,
@@ -307,12 +313,32 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 .announcement: sentence,
                 .priority: NSAccessibilityPriorityLevel.high.rawValue,
             ])
+        return true
     }
 
-    private func announceSettingsPresentationUpdateIfNeeded(
-        _ announcement: SettingsPresentationAnnouncement?
-    ) {
-        guard let announcement, let window, window.isKeyWindow else { return }
+    private func scheduleSettingsPresentationAnnouncementDelivery() {
+        guard
+            settingsPresentationSession.state.pendingAnnouncement != nil,
+            !settingsPresentationAnnouncementDeliveryScheduled
+        else { return }
+        settingsPresentationAnnouncementDeliveryScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.settingsPresentationAnnouncementDeliveryScheduled = false
+                self.deliverPendingSettingsPresentationAnnouncement()
+            }
+        }
+    }
+
+    private func deliverPendingSettingsPresentationAnnouncement() {
+        guard
+            !isPresentingWindow,
+            let announcement = settingsPresentationSession.state.pendingAnnouncement,
+            let window,
+            window.isVisible,
+            window.isKeyWindow
+        else { return }
         let l10n = ClaudioL10n(language: preferences.language)
         let sentence: String
         switch announcement.meaning {
@@ -342,7 +368,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 sentence = l10n.text(.settingsNotificationsOpenCalendarPrivacy)
             }
         }
-        announceBasicSettingsUpdate(sentence)
+        guard announceBasicSettingsUpdate(sentence) else { return }
         settingsPresentationSession.acknowledgeAnnouncement(
             id: announcement.id,
             didPost: true)
