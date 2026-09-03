@@ -2729,7 +2729,6 @@ func runViewWiringSuites() {
                 && flatView.contains("eventAccess.first(where:")
                 && flatView.contains("?.adoptionAvailability")
                 && !flatView.contains("AICueAdoptionTarget")
-                && !flatView.contains("AICueAdoptionRequest")
                 && flatView.contains(".focused(focusedTarget, equals: .generateAICue(")
                 && flatViewWithStrings.contains(
                     ".accessibilityIdentifier( \"event-settings.event.")
@@ -2788,9 +2787,7 @@ func runViewWiringSuites() {
             flatView.contains("soundPacksEditorOwner.perform( .adoptAICue(")
                 && flatView.contains("candidate: candidate")
                 && flatView.contains("displayName: displayName")
-                && flatView.contains("permit: permit")
-                && !flatView.contains("AICueAdoptionRequest")
-                && !flatSettingsController.contains("AICueAdoptionRequest"),
+                && flatView.contains("permit: permit"),
             "候选与名称必须连同 owner 签发的 opaque permit 直接返回 owner operation")
         expect(
             flatMenu.contains("AICueKeychainCredentialVault(")

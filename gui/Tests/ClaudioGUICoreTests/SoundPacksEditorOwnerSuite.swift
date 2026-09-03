@@ -67,7 +67,7 @@ func runSoundPacksEditorOwnerSuites() {
         expect(
             model.factoryRestoreRetryPackID == packID
                 && model.factoryRestoreRetryPackIDs == [packID]
-                && model.selectedPackCanRestoreFactory,
+                && model.selectedPackIsBuiltinReadOnly,
             "可见 Retry、失败 lifecycle 与 builtin selection 必须指向同一 pack")
     }
 }

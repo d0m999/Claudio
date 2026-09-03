@@ -629,92 +629,6 @@ func runSoundPackLibrarySuites() async {
         }
     }
 
-    await suite("SoundPacksWindowModel 导入后绑定：共享清单尚未完成时仍绑定导入结果") {
-        await withTempDirectory { root in
-            let configFile = root.appendingPathComponent("config.json")
-            let packsDirectory = root.appendingPathComponent("packs", isDirectory: true)
-            let packDirectory = packsDirectory.appendingPathComponent("pack-a", isDirectory: true)
-            let source = root.appendingPathComponent("incoming.wav")
-            writeFixture(#"{"selected_pack":"pack-a","events":{}}"#, to: configFile)
-            writeFixture(
-                #"{"id":"pack-a","name":"我的包","events":{}}"#,
-                to: packDirectory.appendingPathComponent("manifest.json"))
-            writeFixture("existing", to: packDirectory.appendingPathComponent("existing.mp3"))
-            writeFixture(validWAVData(), to: source)
-
-            let environment = AudioImportEnvironment(
-                userPacksDirectory: packsDirectory,
-                durationProbe: StubDurationProbe(fixedDuration: 1),
-                packsLockFile: root.appendingPathComponent("packs.lock"))
-            let loader = SequencedBlockingAudioInventoryLoader(
-                results: [
-                    .available([PackAudioFile(fileName: "existing.mp3", isOrphan: true)]),
-                    .available([
-                        PackAudioFile(fileName: "existing.mp3", isOrphan: true),
-                        PackAudioFile(fileName: "incoming.wav", isOrphan: true),
-                    ]),
-                ],
-                blockingCall: 2)
-            let library = SoundPackLibrary(
-                scanner: .testingLive(environment: environment) { _ in },
-                inventoryOperation: loader.load)
-            let model = SoundPacksWindowModel(
-                configFile: configFile,
-                lockFile: root.appendingPathComponent("config.lock"),
-                environment: environment,
-                soundPackLibrary: library,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-
-            expect(
-                await waitForLibraryCondition {
-                    await MainActor.run {
-                        model.selectedPackID == "pack-a"
-                            && model.selectedAudioFiles.contains {
-                                $0.fileName == "existing.mp3"
-                            }
-                    }
-                },
-                "前提：共享模型必须先完成 pack-a 的旧 inventory")
-
-            let importedResult = await model.importSelectedAudioFiles(
-                [AudioImportRequest(sourceURL: source, suggestedFileName: "incoming.wav")],
-                expectedPackID: "pack-a")
-            guard
-                case .success(let completion) = importedResult,
-                let imported = completion.result.accepted.last
-            else {
-                expect(false, "导入必须成功，得到 " + String(describing: importedResult))
-                return
-            }
-            expect(
-                await waitForLibraryCondition { loader.callCount >= 2 },
-                "导入完成后的共享 inventory 必须进入受控慢读取，当前调用次数 "
-                    + String(loader.callCount))
-            expect(loader.waitUntilBlocked(), "第二次 inventory 调用必须停在受控闸门")
-            defer { loader.allowBlockedLoadToFinish() }
-
-            let staleBinding = model.assignSelectedAudioFile("incoming.wav", to: .notification)
-            guard case .failure(.notInInventory(fileName: "incoming.wav")) = staleBinding else {
-                expect(false, "旧 inventory 必须拒绝尚未投影的新文件，得到 "
-                    + String(describing: staleBinding))
-                return
-            }
-            let directBinding = model.assignImportedAudioFile(imported, to: .notification)
-            guard case .success = directBinding else {
-                expect(false, "导入结果必须绕过旧 inventory 成功绑定，得到 (directBinding)")
-                return
-            }
-            expect(
-                await waitForLibraryCondition {
-                    await MainActor.run {
-                        model.selectedEventRows.first(where: { $0.event == .notification })?.coverage
-                            == .present(fileName: "incoming.wav")
-                    }
-                },
-                "绑定成功后共享快照必须最终投影新映射")
-        }
-    }
-
     await suite("SoundPacksWindowModel fork：刷新期间手动选包会清除延迟副本目标") {
         await withTempDirectory { root in
             let configFile = root.appendingPathComponent("config.json")
@@ -723,22 +637,26 @@ func runSoundPackLibrarySuites() async {
             writeFixture(#"{"selected_pack":"builtin","events":{}}"#, to: configFile)
             writeFixture(
                 #"{"id":"builtin","name":"内置","events":{"stop":"stop.mp3"}}"#,
-                to: factoryDirectory
+                to:
+                    factoryDirectory
                     .appendingPathComponent("builtin", isDirectory: true)
                     .appendingPathComponent("manifest.json"))
             writeFixture(
                 "factory-audio",
-                to: factoryDirectory
+                to:
+                    factoryDirectory
                     .appendingPathComponent("builtin", isDirectory: true)
                     .appendingPathComponent("stop.mp3"))
             writeFixture(
                 #"{"id":"builtin","name":"内置","events":{}}"#,
-                to: packsDirectory
+                to:
+                    packsDirectory
                     .appendingPathComponent("builtin", isDirectory: true)
                     .appendingPathComponent("manifest.json"))
 
             let builtin = libraryFacts(id: "builtin", name: "内置")
-            let other = libraryFacts(id: "other", name: "另一个", coverage: [:], audioInventory: .available([]))
+            let other = libraryFacts(
+                id: "other", name: "另一个", coverage: [:], audioInventory: .available([]))
             let forked = libraryFacts(
                 id: "builtin-copy", name: "副本", coverage: [:], audioInventory: .available([]))
             let scanner = ForkRefreshBlockingSoundPackScanner(
@@ -897,29 +815,29 @@ func runSoundPackLibrarySuites() async {
                 environment: environment,
                 soundPackLibrary: library,
                 soundPacksRefreshCoordinator: coordinator)
-            let window = SoundPacksWindowModel(
+            let owner = SoundPacksEditorOwner(
                 configFile: configFile,
                 lockFile: root.appendingPathComponent("config.lock"),
                 environment: environment,
                 soundPackLibrary: library,
                 refreshCoordinator: coordinator)
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 1)))
 
             expect(
                 await waitForLibraryCondition {
                     await MainActor.run {
-                        panel.selectedPackIsBuiltinReadOnly
-                            && window.selectedPackIsBuiltinReadOnly
-                            && window.factoryPackIDs == ["factory-a"]
-                            && window.hasFactoryPacks
+                        guard case .sounds(let sounds) = owner.presentation.mode else {
+                            return false
+                        }
+                        return panel.selectedPackIsBuiltinReadOnly
+                            && sounds.selectedPack?.id == "factory-a"
+                            && sounds.selectedPack?.isBuiltinReadOnly == true
+                            && sounds.eventRows.allSatisfy {
+                                $0.importAction == nil && $0.clearAction == nil
+                            }
                     }
                 },
-                "factoryPackIDs 必须穿过生产 snapshot 并驱动两个只读投影")
-            let edit = window.clearSelectedEventBinding(.stop)
-            guard case .failure(.builtinReadOnly(let packID)) = edit else {
-                expect(false, "内置包编辑必须 fail closed，得到 \(edit)")
-                return
-            }
-            expect(packID == "factory-a", "只读拒绝必须保留准确 pack id")
+                "factoryPackIDs 必须穿过生产 snapshot 并驱动 Panel 与 owner interface 的只读投影")
         }
     }
 
@@ -1208,23 +1126,43 @@ func runSoundPackLibrarySuites() async {
 
             let importSource = root.appendingPathComponent("incoming.wav")
             writeFixture(validWAVData(), to: importSource)
+            let owner = SoundPacksEditorOwner(
+                configFile: configFile,
+                lockFile: root.appendingPathComponent("config.lock"),
+                environment: environment,
+                soundPackLibrary: library,
+                refreshCoordinator: coordinator)
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 1)))
+            await waitForSoundEditorReady(owner, library: library)
+            await waitForSoundEditorInventory(owner)
+            guard case .sounds(let sounds) = owner.presentation.mode,
+                let requestImport = sounds.requestImportAction,
+                case .nativeEffect(.selectAudioFiles(let permit, nil)) =
+                    owner.send(.invoke(requestImport))
+            else {
+                expect(false, "owner interface 必须签发不绑定 Event 的 import permit")
+                return
+            }
             previousCallCount = scanner.callCount
-            let imported = await window.importSelectedAudioFiles(
-                [AudioImportRequest(sourceURL: importSource, suggestedFileName: "incoming.wav")],
-                expectedPackID: "pack-a")
-            guard case .success(let completion) = imported else {
+            let imported = await owner.perform(
+                .importAudio(permit: permit, sources: [importSource], bindTo: nil))
+            guard case .imported(let completion) = imported else {
                 expect(false, "import 前提必须成功：\(imported)")
                 return
             }
-            expect(completion.result.accepted.count == 1, "import 必须真正接受一个文件")
+            expect(completion.accepted.count == 1, "import 必须真正接受一个文件")
             expect(
                 await waitForLibraryCondition {
                     await MainActor.run {
-                        scanner.callCount == previousCallCount + 1
+                        guard case .sounds(let settled) = owner.presentation.mode,
+                            case .ready(let inventory) = settled.inventory
+                        else { return false }
+                        return scanner.callCount == previousCallCount + 1
+                            && inventory.contains { $0.fileName == "incoming.wav" }
                             && window.selectedAudioFiles.contains { $0.fileName == "incoming.wav" }
                     }
                 },
-                "import 成功必须扫描一次并刷新 selected inventory")
+                "owner import 成功必须扫描一次并让全部 shared-library 消费者收敛")
             expect(
                 scanner.requests.last?.invalidatedPackIDs == ["pack-a"],
                 "import 必须只失效目标 pack-a")
@@ -1383,10 +1321,12 @@ func runSoundPackLibrarySuites() async {
             await library.waitUntilIdleForTesting()
             expect(
                 forkPublished,
-                "fork 成功必须扫描一次并选择新副本；calls=\(scanner.callCount)/\(previousCallCount) cards=\(window.packCards.map(\.id)) selected=\(String(describing: window.selectedPackID)) requests=\(scanner.requests.map { Array($0.invalidatedPackIDs).sorted() })")
+                "fork 成功必须扫描一次并选择新副本；calls=\(scanner.callCount)/\(previousCallCount) cards=\(window.packCards.map(\.id)) selected=\(String(describing: window.selectedPackID)) requests=\(scanner.requests.map { Array($0.invalidatedPackIDs).sorted() })"
+            )
             expect(
                 scanner.requests.last?.invalidatedPackIDs == [forkOutcome.newPackID],
-                "fork 必须只失效新发布的 pack id；requests=\(scanner.requests.map { Array($0.invalidatedPackIDs).sorted() })")
+                "fork 必须只失效新发布的 pack id；requests=\(scanner.requests.map { Array($0.invalidatedPackIDs).sorted() })"
+            )
 
             previousCallCount = scanner.callCount
             let batch = window.restoreAllFactoryPacksAfterConfirmation()

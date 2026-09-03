@@ -244,13 +244,6 @@ public func packForkNoticeMessage(_ outcome: PackForkOutcome) -> String {
     "已创建并选中「\(outcome.displayName)」。原内置包未更改；需要时可点「用这个包」。"
 }
 
-public struct SoundPacksWindowAudioImportCompletion: Sendable, Equatable {
-    public let targetPackID: String
-    public let result: AudioImportBatchResult
-    public let previewFile: ImportedAudioFile?
-    public let completedInBackground: Bool
-}
-
 public enum SoundPacksWindowPackUseActionError: Error, Sendable, Equatable {
     case noSelectedPack
     case invalidScope(HostSurfaceID)
@@ -536,9 +529,6 @@ package final class SoundPacksWindowModel {
     /// `nil` 明确表示正在管理 Global；非 nil 只有产品 registry Surface 才能获得写权限。
     package private(set) var managedSurface: HostSurfaceID?
     package private(set) var managedScopeFailureReason: String?
-    package var managedScopeIsInvalid: Bool {
-        !isValidSoundPacksWindowSurface(managedSurface)
-    }
     /// Every production mutation consumes this one fail-closed scope decision. Browsing, preview,
     /// Finder reveal, and route changes remain read-only and available when writes are stopped.
     package var writesAllowed: Bool { managedScopeFailureReason == nil }
@@ -554,11 +544,6 @@ package final class SoundPacksWindowModel {
     private var writesStoppedReason: String {
         writesStoppedStatusText.resolve(language: .zhHans)
     }
-    package var managedSurfaceProfileIsMalformed: Bool {
-        guard let managedSurface else { return false }
-        return baseConfig.surfaceOverridesMalformed
-            || baseConfig.invalidSurfaceOverrideKeys.contains(managedSurface.rawValue)
-    }
     package private(set) var packCards: [PackCard]
     package private(set) var selectedPackID: String?
     package private(set) var selectedEventRows: [EventRow]
@@ -566,9 +551,6 @@ package final class SoundPacksWindowModel {
     package private(set) var selectedAudioInventoryState: SoundPackAudioInventoryPresentationState
 
     package var selectedAudioFiles: [PackAudioFile] { selectedAudioInventoryState.files }
-    package var audioInventoryError: PackAudioInventoryError? {
-        selectedAudioInventoryState.error
-    }
     /// The full, uncapped window-side star selection (`starred_packs ∩ disk`). This deliberately
     /// does not reuse the panel's four-row display set: a manually written fifth star must remain
     /// visible here so the user can remove it without silently truncating config.json.
@@ -627,34 +609,17 @@ package final class SoundPacksWindowModel {
         selectedPackID.map(builtinPackIDs.contains) ?? false
     }
 
-    package var selectedPackIsReferenced: Bool {
-        guard let selectedPackID else { return false }
-        return referencedSoundPackIDs(in: baseConfig).contains(selectedPackID)
-    }
-
     package var selectedPackIsMissingPlaceholder: Bool {
         guard let selectedPackID else { return false }
         return packCards.first(where: { $0.id == selectedPackID })?.availability
             == .missingSelectedPlaceholder
     }
 
-    package var selectedPackCanRestoreFactory: Bool {
-        guard let selectedPackID else { return false }
-        return builtinPackIDs.contains(selectedPackID)
-    }
-
     package var factoryPackIDs: [String] { builtinPackIDs.sorted() }
-
-    package var hasFactoryPacks: Bool { !builtinPackIDs.isEmpty }
-
-    package var starredPacksFailureReason: String? {
-        starredPacksError.map(soundPacksWindowStarredPacksFailureReason)
-    }
 
     private let configFile: URL
     private let lockFile: URL
     private let environment: AudioImportEnvironment
-    private let audioImportExecutor = SoundPackAudioImportExecutor()
     /// Factory contents are app-bundle-static for this model's lifetime. Cache the one derivation
     /// so SwiftUI body evaluation never turns a read-only check into repeated factory `readdir`.
     private var builtinPackIDs: Set<String>
@@ -671,7 +636,6 @@ package final class SoundPacksWindowModel {
     private var windowContentRefreshCancellable: AnyCancellable?
     private var statusRevision = 0
     private var statusByKind: [SoundPacksWindowStatusKind: SoundPacksWindowStatus] = [:]
-    private var audioImportActionRevision = 0
     /// Monotonic identity for the inspection session, not merely its current pack ID. Returning
     /// A→B→A must not let an operation started in the first A session inherit foreground status.
     private var inspectionSelectionRevision = 0
@@ -1153,137 +1117,6 @@ package final class SoundPacksWindowModel {
         }
     }
 
-    /// Imports picked files off the MainActor while binding completion to the pack and action that
-    /// started it. A later selection never inherits this result or its automatic preview.
-    package func importSelectedAudioFiles(
-        _ requests: [AudioImportRequest],
-        expectedPackID: String
-    ) async -> Result<SoundPacksWindowAudioImportCompletion, SoundPacksWindowAudioActionError> {
-        guard writesAllowed else {
-            return .failure(.writesStopped(statusText: writesStoppedStatusText))
-        }
-        guard selectedPackID == expectedPackID else {
-            return .failure(.selectionChanged)
-        }
-        guard !selectedPackIsMissingPlaceholder else {
-            return .failure(.packUnavailable(packID: expectedPackID))
-        }
-        guard !builtinPackIDs.contains(expectedPackID) else {
-            return .failure(.builtinReadOnly(packID: expectedPackID))
-        }
-        guard !requests.isEmpty else {
-            return .success(
-                SoundPacksWindowAudioImportCompletion(
-                    targetPackID: expectedPackID,
-                    result: AudioImportBatchResult(accepted: [], rejected: []),
-                    previewFile: nil,
-                    completedInBackground: false))
-        }
-
-        audioImportActionRevision += 1
-        let actionRevision = audioImportActionRevision
-        let expectedSelectionRevision = inspectionSelectionRevision
-        let targetName =
-            packCards.first(where: { $0.id == expectedPackID }).map {
-                SelectedPackMetadata(id: $0.id, name: $0.name).displayName
-            } ?? expectedPackID
-        clearWindowStatus(.audio)
-        audioActionError = nil
-        let mutation = beginSoundPackMutation(packIDs: [expectedPackID])
-
-        let execution = await audioImportExecutor.execute(
-            SoundPackAudioImportJob(
-                requests: requests,
-                packID: expectedPackID,
-                environment: environment))
-        let batch: AudioImportBatchResult
-        switch execution {
-        case .cancelledBeforeWrite:
-            finishSoundPackMutation(mutation)
-            return .failure(.importRejected(message: "导入已取消，未添加任何音频。"))
-        case .completed(let result, _):
-            batch = result
-        }
-        let isLatestAction = actionRevision == audioImportActionRevision
-        let isStillInspectingTarget =
-            selectedPackID == expectedPackID
-            && inspectionSelectionRevision == expectedSelectionRevision
-        if !batch.accepted.isEmpty {
-            completeSynchronousWrite(
-                .succeeded,
-                invalidatingPackIDs: [expectedPackID],
-                mutation: mutation)
-        } else {
-            finishSoundPackMutation(mutation)
-        }
-
-        if isLatestAction {
-            if batch.rejected.isEmpty {
-                setWindowStatus(
-                    kind: .audio,
-                    severity: .notice,
-                    actionText: .localized(.soundPacksStatusAddAudio),
-                    messageText: .localized(
-                        .soundPacksStatusAudioImported,
-                        targetName,
-                        "\(batch.accepted.count)",
-                        background: !isStillInspectingTarget),
-                    packID: isStillInspectingTarget ? expectedPackID : nil,
-                    actionID: actionRevision)
-            } else {
-                let rejectionDetails = batch.rejected.map {
-                    "\($0.sourceFileName)：\($0.reason.message)"
-                }.joined(separator: "；")
-                let message =
-                    "「\(targetName)」已导入 \(batch.accepted.count) 个，"
-                    + "另有 \(batch.rejected.count) 个未导入：\(rejectionDetails)"
-                audioActionError = .importRejected(message: message)
-                setWindowStatus(
-                    kind: .audio,
-                    severity: .failure,
-                    actionText: .localized(.soundPacksStatusAddAudio),
-                    messageText: .localized(
-                        .soundPacksStatusAudioPartial,
-                        targetName,
-                        "\(batch.accepted.count)",
-                        "\(batch.rejected.count)",
-                        rejectionDetails,
-                        background: !isStillInspectingTarget),
-                    packID: isStillInspectingTarget ? expectedPackID : nil,
-                    actionID: actionRevision)
-            }
-        }
-
-        return .success(
-            SoundPacksWindowAudioImportCompletion(
-                targetPackID: expectedPackID,
-                result: batch,
-                previewFile: isLatestAction && isStillInspectingTarget
-                    ? batch.accepted.last : nil,
-                completedInBackground: !isStillInspectingTarget))
-    }
-
-    /// Resolves a preview from the current read model through the same audited pack/file gates as
-    /// runtime playback. A stale `.present` row triggers an immediate read-model refresh so the
-    /// window visibly becomes `.broken` instead of accepting a click with no explanation.
-    package func previewFileForSelectedEvent(_ event: Event) -> URL? {
-        guard
-            let selectedPackID,
-            let row = selectedEventRows.first(where: { $0.event == event }),
-            case .present(let fileName) = row.coverage,
-            let packDirectory = resolvePackDirectory(
-                id: selectedPackID,
-                userPacksDirectory: environment.userPacksDirectory,
-                bundledPacksDirectory: environment.bundledPacksDirectory),
-            let resolvedFile = safePackFileURL(fileName, in: packDirectory),
-            nonEmptyRegularFileExists(at: resolvedFile)
-        else {
-            reload(followActivePack: false)
-            return nil
-        }
-        return resolvedFile
-    }
-
     var editorImportEnvironment: AudioImportEnvironment { environment }
 
     /// Re-observes a target that the off-main import boundary found missing before any duration
@@ -1313,7 +1146,6 @@ package final class SoundPacksWindowModel {
     /// Opens the existing two-sided invalidation fence for one editor-owned compound mutation.
     /// The async executor receives only immutable import values; writer coordination stays here.
     func beginEditorCompoundMutation(packID: String) -> SoundPackLibraryMutation? {
-        audioImportActionRevision += 1
         clearWindowStatus(.audio)
         audioActionError = nil
         return beginSoundPackMutation(packIDs: [packID])
@@ -1782,32 +1614,6 @@ package final class SoundPacksWindowModel {
         return bindSelectedAudioFile(fileName, to: event, packID: selectedPackID)
     }
 
-    /// Binds a file returned by the immediately preceding import. The async shared-library
-    /// inventory may still be projecting the pre-import directory, so this path trusts the
-    /// import result's pack identity and lets the audited manifest primitive re-check the file.
-    @discardableResult
-    package func assignImportedAudioFile(
-        _ importedFile: ImportedAudioFile,
-        to event: Event
-    ) -> Result<Void, SoundPacksWindowAudioActionError> {
-        guard writesAllowed else {
-            return finishAudioAction(.failure(.writesStopped(statusText: writesStoppedStatusText)))
-        }
-        guard let selectedPackID else {
-            return finishAudioAction(.failure(.noSelectedPack))
-        }
-        guard !selectedPackIsMissingPlaceholder else {
-            return finishAudioAction(.failure(.packUnavailable(packID: selectedPackID)))
-        }
-        guard selectedPackID == importedFile.packID else {
-            return finishAudioAction(.failure(.selectionChanged))
-        }
-        guard !builtinPackIDs.contains(selectedPackID) else {
-            return finishAudioAction(.failure(.builtinReadOnly(packID: selectedPackID)))
-        }
-        return bindSelectedAudioFile(importedFile.fileName, to: event, packID: selectedPackID)
-    }
-
     package func aiCueAdoptionEligibility(for event: Event) -> AICueAdoptionEligibility {
         guard writesAllowed else { return .ineligible(.writesStopped) }
         return ClaudioGUICore.aiCueAdoptionEligibility(
@@ -1826,110 +1632,6 @@ package final class SoundPacksWindowModel {
         case .eligible(let target): return .success(target)
         case .ineligible(let reason): return .failure(reason)
         }
-    }
-
-    /// Imports the chosen private candidate first, then re-proves the explicit target immediately
-    /// before one atomic name+event manifest mutation. A failed second phase leaves the old event
-    /// mapping untouched and reports the already-imported file honestly as an orphan.
-    package func adoptAICue(
-        _ request: AICueAdoptionRequest
-    ) async -> Result<AICueAdoptionOutcome, AICueAdoptionError> {
-        let candidate = request.candidate
-        let displayName = request.displayName
-        let target = request.target
-        guard await refreshAICueAdoptionSnapshot() else {
-            return .failure(.ineligible(.configurationUnavailable))
-        }
-        switch captureAICueAdoptionTarget(for: target.event) {
-        case .success(let current) where current == target:
-            break
-        case .success:
-            return .failure(.ineligible(.targetChanged))
-        case .failure(let reason):
-            return .failure(.ineligible(reason))
-        }
-
-        let importRequest = AudioImportRequest(
-            sourceURL: candidate.asset.fileURL,
-            suggestedFileName:
-                "ai-cue-\(candidate.id.uuidString.lowercased())."
-                + candidate.asset.sniffedFormat.rawValue)
-        let completion: SoundPacksWindowAudioImportCompletion
-        switch await importSelectedAudioFiles([importRequest], expectedPackID: target.packID) {
-        case .failure(let error):
-            return .failure(.importUnavailable(error))
-        case .success(let result):
-            completion = result
-        }
-        guard let imported = completion.result.accepted.first else {
-            if let rejection = completion.result.rejected.first {
-                return .failure(.importRejected(rejection.reason))
-            }
-            return .failure(
-                .importUnavailable(
-                    .importRejected(message: "生成候选未能导入，当前声音未改变。")))
-        }
-
-        switch captureAICueAdoptionTarget(for: target.event) {
-        case .success(let current) where current == target:
-            break
-        case .success:
-            return .failure(
-                .importedButNotBound(
-                    imported: imported,
-                    reason: .ineligible(.targetChanged)))
-        case .failure(let reason):
-            return .failure(
-                .importedButNotBound(
-                    imported: imported,
-                    reason: .ineligible(reason)))
-        }
-
-        let mutation = beginSoundPackMutation(packIDs: [target.packID])
-        switch bindAICueToManifest(
-            event: target.event,
-            fileName: imported.fileName,
-            displayName: displayName,
-            packID: target.packID,
-            environment: environment)
-        {
-        case .success(let binding):
-            _ = finishAudioAction(
-                .success(()),
-                invalidatingPackID: target.packID,
-                mutation: mutation)
-            return .success(
-                AICueAdoptionOutcome(
-                    target: target,
-                    importedFile: imported,
-                    finalDisplayName: binding.finalDisplayName))
-        case .failure(let error):
-            _ = finishAudioAction(
-                .failure(.bind(error)),
-                invalidatingPackID: target.packID,
-                mutation: mutation)
-            return .failure(
-                .importedButNotBound(
-                    imported: imported,
-                    reason: .manifest(error)))
-        }
-    }
-
-    private func refreshAICueAdoptionSnapshot() async -> Bool {
-        #if DEBUG
-        guard readSource.readsSharedSnapshot else {
-            reloadSynchronously(followActivePack: true)
-            return true
-        }
-        #endif
-
-        pendingFollowActivePack = true
-        let refreshed = await soundPackLibrary.refreshSnapshot(trigger: .windowPresentation)
-        configState = loadPanelConfig(from: configFile)
-        baseConfig = configState.resolvedConfig
-        applyManagedScopeConfig()
-        guard case .ready(let snapshot) = refreshed else { return false }
-        return applyReadySnapshot(snapshot, followActivePack: true)
     }
 
     /// The observation stream may apply a later library state before the refresh waiter resumes on
@@ -2819,7 +2521,7 @@ package final class SoundPacksWindowModel {
     /// 成功或失败前已经改变磁盘时，先刷新窗口自己的读模型，再发布面板 full reload；没有落盘变化
     /// 的失败两边都不假刷新。未来 T11/T12/T17 的每个写者都应收口到这里，而不是各自选择
     /// `reloadConfigOnly()`。
-    package func completeSynchronousWrite(
+    private func completeSynchronousWrite(
         _ outcome: SoundPacksWindowWriteOutcome,
         invalidatingPackIDs: Set<String> = []
     ) {
