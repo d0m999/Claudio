@@ -18,6 +18,7 @@ import SwiftUI
 final class SettingsWindowController: NSObject, NSWindowDelegate {
     private let preferences: ClaudioPreferences
     private let loginItemSettings: LoginItemSettingsModel
+    private let settingsPresentationSession: SettingsPresentationSession
     private let usageSettings: UsageSettingsModel
     private let globalShortcutSettings: GlobalShortcutSettingsModel
     private let aboutSettings: AboutSettingsModel
@@ -43,6 +44,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     private var soundPackPresentationCancellable: AnyCancellable?
     private var soundsRouteAnnouncementCancellable: AnyCancellable?
     private var aboutSurfaceCancellable: AnyCancellable?
+    private var settingsPresentationCancellable: AnyCancellable?
 
     init(
         preferences: ClaudioPreferences,
@@ -62,6 +64,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     ) {
         self.preferences = preferences
         self.loginItemSettings = loginItemSettings
+        settingsPresentationSession = SettingsPresentationSession(
+            dependencies: SettingsPresentationDependencies(
+                preferences: preferences,
+                loginItemSettings: loginItemSettings),
+            actions: makeSystemSettingsPresentationActions())
         self.usageSettings = usageSettings
         self.globalShortcutSettings = globalShortcutSettings
         self.soundPacksEditorOwner = soundPacksEditorOwner
@@ -150,6 +157,14 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             .sink { [weak self] surfaceFacts in
                 MainActor.assumeIsolated {
                     self?.aboutSettings.replaceSurfaceFacts(surfaceFacts)
+                }
+            }
+        settingsPresentationCancellable = settingsPresentationSession.$state
+            .map(\.pendingAnnouncement)
+            .removeDuplicates()
+            .sink { [weak self] announcement in
+                MainActor.assumeIsolated {
+                    self?.announceSettingsPresentationUpdateIfNeeded(announcement)
                 }
             }
     }
@@ -242,7 +257,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             model: model,
             preferences: preferences,
             dynamicQuietPolicy: dynamicQuietObserver.policy,
-            loginItemSettings: loginItemSettings,
+            settingsPresentationSession: settingsPresentationSession,
             usageSettings: usageSettings,
             globalShortcutSettings: globalShortcutSettings,
             aboutSettings: aboutSettings,
@@ -294,6 +309,45 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 .announcement: sentence,
                 .priority: NSAccessibilityPriorityLevel.high.rawValue,
             ])
+    }
+
+    private func announceSettingsPresentationUpdateIfNeeded(
+        _ announcement: SettingsPresentationAnnouncement?
+    ) {
+        guard let announcement, let window, window.isKeyWindow else { return }
+        let l10n = ClaudioL10n(language: preferences.language)
+        let sentence: String
+        switch announcement.meaning {
+        case .loginItemStatus(let registration):
+            switch registration {
+            case .disabled: sentence = l10n.text(.settingsGeneralLoginItem.disabled)
+            case .enabled: sentence = l10n.text(.settingsGeneralLoginItem.enabled)
+            case .requiresApproval:
+                sentence = l10n.text(.settingsGeneralLoginItem.requiresApproval)
+            case .unavailable: sentence = l10n.text(.settingsGeneralLoginItem.unavailable)
+            }
+        case .loginItemFailure(let failure):
+            switch failure.reason {
+            case .embeddedLoginItemMissing:
+                sentence = l10n.text(.settingsGeneralLoginItem.failureMissing)
+            case .systemRejected:
+                sentence = l10n.text(
+                    failure.requestedEnabled
+                        ? .settingsGeneralLoginItem.failureEnable
+                        : .settingsGeneralLoginItem.failureDisable)
+            }
+        case .platformAction(let action, _):
+            switch action {
+            case .openLoginItemsSettings:
+                sentence = l10n.text(.settingsGeneralLoginItem.unavailable)
+            case .openCalendarPrivacySettings:
+                sentence = l10n.text(.settingsNotificationsOpenCalendarPrivacy)
+            }
+        }
+        announceBasicSettingsUpdate(sentence)
+        settingsPresentationSession.acknowledgeAnnouncement(
+            id: announcement.id,
+            didPost: true)
     }
 
     /// In-window actions submit a typed route without creating or presenting another window.

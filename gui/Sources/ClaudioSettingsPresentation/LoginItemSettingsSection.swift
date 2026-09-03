@@ -1,0 +1,94 @@
+import ClaudioGUIComponents
+import ClaudioGUICore
+import ClaudioLocalization
+import SwiftUI
+
+package enum SettingsPresentationAccessibilityID {
+    package static let root = "settings.presentation.root"
+    package static let general = "settings.presentation.general"
+    package static let loginItemToggle = "settings.general.login-item.toggle"
+}
+
+/// The real Login Item section shared by the transitional nine-destination shell and the new
+/// importable Settings root. All mutations and system effects return through the session seam.
+@MainActor
+package struct LoginItemSettingsSection: View {
+    @ObservedObject private var session: SettingsPresentationSession
+
+    package init(session: SettingsPresentationSession) {
+        self.session = session
+    }
+
+    package var body: some View {
+        let l10n = ClaudioL10n(language: session.state.language)
+        VStack(alignment: .leading, spacing: 10) {
+            Text(l10n.text(.settingsGeneralLoginItem.description))
+                .foregroundColor(.secondary)
+
+            Toggle(
+                l10n.text(.settingsGeneralLoginItem.toggle),
+                isOn: enabledBinding
+            )
+            .disabled(!session.state.loginItemRegistration.canToggle)
+            .accessibilityHint(l10n.text(.settingsGeneralLoginItem.hint))
+            .accessibilityValue(statusText)
+            .accessibilityIdentifier(SettingsPresentationAccessibilityID.loginItemToggle)
+
+            Text(statusText)
+                .foregroundColor(.secondary)
+
+            if session.state.loginItemRegistration == .requiresApproval {
+                Button(l10n.text(.settingsGeneralLoginItem.openSettings)) {
+                    session.perform(.openLoginItemsSettings)
+                }
+                .accessibilityHint(l10n.text(.settingsGeneralLoginItem.openSettingsHint))
+                .accessibilityIdentifier("settings.general.login-item.open-settings")
+            }
+
+            if let failure = session.state.loginItemFailure {
+                VStack(alignment: .leading, spacing: 8) {
+                    FailureRow(message: failureText(failure))
+
+                    Button(l10n.text(.commonRetry)) {
+                        session.retryLoginItemOperation()
+                    }
+                    .accessibilityIdentifier("settings.general.login-item.retry")
+                }
+            }
+
+            if session.state.platformActionFailure?.action == .openLoginItemsSettings {
+                FailureRow(message: l10n.text(.settingsGeneralLoginItem.unavailable))
+                    .accessibilityIdentifier("settings.general.login-item.settings-failure")
+            }
+        }
+    }
+
+    private var enabledBinding: Binding<Bool> {
+        Binding(
+            get: { session.state.loginItemRegistration.isOn },
+            set: { session.setLoginItemEnabled($0) })
+    }
+
+    private var statusText: String {
+        let l10n = ClaudioL10n(language: session.state.language)
+        return switch session.state.loginItemRegistration {
+        case .disabled: l10n.text(.settingsGeneralLoginItem.disabled)
+        case .enabled: l10n.text(.settingsGeneralLoginItem.enabled)
+        case .requiresApproval: l10n.text(.settingsGeneralLoginItem.requiresApproval)
+        case .unavailable: l10n.text(.settingsGeneralLoginItem.unavailable)
+        }
+    }
+
+    private func failureText(_ failure: LoginItemOperationFailure) -> String {
+        let l10n = ClaudioL10n(language: session.state.language)
+        return switch failure.reason {
+        case .embeddedLoginItemMissing:
+            l10n.text(.settingsGeneralLoginItem.failureMissing)
+        case .systemRejected:
+            l10n.text(
+                failure.requestedEnabled
+                    ? .settingsGeneralLoginItem.failureEnable
+                    : .settingsGeneralLoginItem.failureDisable)
+        }
+    }
+}

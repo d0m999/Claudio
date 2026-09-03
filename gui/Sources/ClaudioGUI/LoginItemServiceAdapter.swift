@@ -3,10 +3,7 @@ import ClaudioGUICore
 import ServiceManagement
 
 @MainActor
-func makeSystemLoginItemServiceAdapter(bundle: Bundle = .main) -> (
-    status: () -> LoginItemRegistrationState,
-    setEnabled: (Bool) throws -> LoginItemRegistrationState
-) {
+func makeSystemLoginItemServiceAdapter(bundle: Bundle = .main) -> LoginItemServiceAdapter {
     if #available(macOS 13.0, *) {
         let service = SMAppService.mainApp
         return makeModernLoginItemServiceAdapter(

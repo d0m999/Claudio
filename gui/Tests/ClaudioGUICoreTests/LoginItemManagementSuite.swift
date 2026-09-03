@@ -232,10 +232,13 @@ func runLoginItemManagementSuites() {
         let root = guiTestRepositoryRoot()
         let adapterURL = root.appendingPathComponent(
             "gui/Sources/ClaudioGUI/LoginItemServiceAdapter.swift")
+        let actionsURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI/SettingsPlatformActionsAdapter.swift")
         let packageURL = root.appendingPathComponent("gui/Package.swift")
         let helperURL = root.appendingPathComponent(
             "gui/Sources/ClaudioLoginItem/main.swift")
         guard let adapter = try? String(contentsOf: adapterURL, encoding: .utf8),
+            let actions = try? String(contentsOf: actionsURL, encoding: .utf8),
             let package = try? String(contentsOf: packageURL, encoding: .utf8),
             let helper = try? String(contentsOf: helperURL, encoding: .utf8)
         else {
@@ -248,13 +251,13 @@ func runLoginItemManagementSuites() {
                 && adapter.contains("makeModernLoginItemServiceAdapter")
                 && adapter.contains("register: { try service.register() }")
                 && adapter.contains("unregister: { try service.unregister() }")
-                && adapter.contains("SMAppService.openSystemSettingsLoginItems()")
+                && actions.contains("SMAppService.openSystemSettingsLoginItems()")
                 && adapter.contains("service.status.rawValue")
                 && adapter.contains("SMAppService.Status.notRegistered.rawValue")
                 && adapter.contains("SMAppService.Status.enabled.rawValue")
                 && adapter.contains("SMAppService.Status.requiresApproval.rawValue")
                 && adapter.contains("SMAppService.Status.notFound.rawValue"),
-            "macOS 13+ 必须投影 mainApp 全状态并提供正确系统设置恢复动作")
+            "macOS 13+ 必须投影 mainApp 全状态，恢复动作由 Settings native adapter 拥有")
         expect(
             adapter.contains("makeLegacyLoginItemServiceAdapter")
                 && adapter.contains("SMLoginItemSetEnabled")

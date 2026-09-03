@@ -667,6 +667,10 @@ func runSettingsNavigationSuites() {
             let navigation = settingsSource(
                 "gui/Sources/ClaudioGUICore/SettingsNavigation.swift"),
             let view = settingsSource("gui/Sources/ClaudioGUI/SettingsWindowView.swift"),
+            let loginSection = settingsSource(
+                "gui/Sources/ClaudioSettingsPresentation/LoginItemSettingsSection.swift"),
+            let presentationSession = settingsSource(
+                "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift"),
             let gallery = settingsSource("gui/Sources/ClaudioGUI/StateGalleryView.swift"),
             let menuBar = settingsSource("gui/Sources/ClaudioGUI/MenuBarController.swift"),
             let app = settingsSource("gui/Sources/ClaudioGUI/ClaudioGUIApp.swift")
@@ -829,8 +833,8 @@ func runSettingsNavigationSuites() {
                 && view.contains(".onExitCommand")
                 && view.contains("onAnnouncement")
                 && view.contains("onAnnouncement?(settingsFailureMessage(failure))")
-                && view.contains("model.retryFailedOperation()")
-                && view.contains("announceFailureIfPresent()"),
+                && loginSection.contains("session.retryLoginItemOperation()")
+                && presentationSession.contains("enqueueLoginItemResult()"),
             "#100 必须接线共享分组表面、自适应侧栏、键盘 Escape 与可见结果公告")
         expect(
             menuBar.contains("private let settingsWindowController: SettingsWindowController")
