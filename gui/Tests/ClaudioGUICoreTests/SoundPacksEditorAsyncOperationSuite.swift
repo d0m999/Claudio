@@ -1487,6 +1487,81 @@ func runSoundPacksEditorAsyncOperationSuites() async {
         }
     }
 
+    await suite("Sound editor perform：已签 permit 在 user pack 变为 shared 后 fail closed") {
+        await withTempDirectory { root in
+            let fixture = makeIsolatedAdoptionFixture(root: root)
+            let owner = fixture.owner
+            let generationID = UUID()
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: fixture.route,
+                        requestRevision: 231,
+                        candidateGenerationID: generationID)))
+            await waitForSoundEditorReady(owner, library: fixture.library)
+            drainSoundEditorObservationAnnouncements(owner)
+            guard case .events(let initial) = owner.presentation.mode,
+                let permit = initial.adoptionPermit
+            else {
+                expect(false, "isolated user pack 必须先签发 adoption permit")
+                return
+            }
+
+            let manifestBefore = try? Data(contentsOf: fixture.manifest)
+            let entriesBefore = soundEditorDirectoryEntries(
+                fixture.manifest.deletingLastPathComponent())
+            let scansBefore = fixture.recorder.requests.count
+            let sharedConfig = ClaudioConfig(
+                selectedPack: "global-pack",
+                surfaceOverrides: [
+                    HostSurfaceID.workBuddy.rawValue: SurfaceSoundOverride(
+                        selectedPack: "workbuddy-pack"),
+                    HostSurfaceID.codex.rawValue: SurfaceSoundOverride(
+                        selectedPack: "workbuddy-pack"),
+                ])
+            writeFixture(try! JSONEncoder().encode(sharedConfig), to: fixture.base.configFile)
+            let source = root.appendingPathComponent("private-candidate-name.mp3")
+            writeFixture(validMP3ID3Data(), to: source)
+            let candidate = soundEditorCandidate(at: source, generationID: generationID)
+
+            expect(
+                await owner.perform(
+                    .adoptAICue(
+                        candidate: candidate,
+                        displayName: try! AICueDisplayName("private candidate display"),
+                        permit: permit)) == .rejected(.targetChanged),
+                "外部共享同一 user pack 后，旧 permit 必须在 import 前拒绝")
+            expect(
+                await owner.perform(
+                    .adoptAICue(
+                        candidate: candidate,
+                        displayName: try! AICueDisplayName("private candidate display"),
+                        permit: permit)) == .rejected(.stalePermit),
+                "即使 target 漂移，adoption permit 仍必须 single-use")
+            expect(
+                (try? Data(contentsOf: fixture.manifest)) == manifestBefore
+                    && soundEditorDirectoryEntries(
+                        fixture.manifest.deletingLastPathComponent()) == entriesBefore,
+                "shared drift 必须零 candidate bytes、零 manifest mutation")
+            expect(
+                fixture.recorder.requests.count == scansBefore
+                    && !owner.presentation.activities.contains { $0.kind == .adoptAICue },
+                "pre-import shared drift 不得伪造 scan 或 operation activity")
+            if case .events(let current) = owner.presentation.mode {
+                expect(current.adoptionPermit == nil, "shared user pack 不得重签 adoption permit")
+            } else {
+                expect(false, "shared drift 后必须保持同一 Events mode")
+            }
+            let announcement = owner.presentation.pendingAnnouncement
+            let announcementText = [announcement?.actionText, announcement?.messageText]
+                .compactMap { $0?.resolve(language: .english) }
+                .joined(separator: " ")
+            expect(
+                !announcementText.contains("private"),
+                "失败 presentation 不得泄露 candidate 文件名或 display name")
+        }
+    }
+
     await suite("Sound editor presentation：built-in 与 shared user pack 不签 adoption permit") {
         await withTempDirectory { root in
             let sharedConfig = ClaudioConfig(

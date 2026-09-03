@@ -275,8 +275,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
         displayName: AICueDisplayName,
         permit: SoundPackAdoptionPermit
     ) async -> SoundPacksEditorOperationResult {
-        model.refreshEditorConfigProjection()
-        let seed = model.editorProjectionSeed()
+        let (_, seed) = captureModelTransition {
+            model.refreshEditorConfigProjection()
+        }
+        publish(from: seed, forcingCapabilityGeneration: false)
         let binding = adoptionPermitLedger.removeValue(forKey: permit.id)
         guard seed.writesAllowed else { return .rejected(.scopeUnavailable) }
         guard let binding else {
@@ -485,8 +487,10 @@ public final class SoundPacksEditorOwner: ObservableObject {
         sources: [URL],
         bindTo: Event?
     ) async -> SoundPacksEditorOperationResult {
-        model.refreshEditorConfigProjection()
-        let seed = model.editorProjectionSeed()
+        let (_, seed) = captureModelTransition {
+            model.refreshEditorConfigProjection()
+        }
+        publish(from: seed, forcingCapabilityGeneration: false)
         let binding = importPermitLedger.removeValue(forKey: permit.id)
         guard seed.writesAllowed else { return .rejected(.scopeUnavailable) }
         guard let binding else {
