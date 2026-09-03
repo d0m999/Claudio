@@ -288,6 +288,59 @@ func runSoundPacksEditorNativeEffectsSuites() async {
                 "Settings close 必须停用 Events context，但不得伪造第二次 Sounds stop")
         }
     }
+
+    await suite("Sound editor native effects：Events 只执行 owner-signed preview 且生命周期有序") {
+        await withTempDirectory { root in
+            let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a"])
+            let owner = fixture.owner
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(scope: .global, event: .stop),
+                        requestRevision: 608)))
+            _ = await waitForSoundEditorReady(owner, library: fixture.library)
+            guard case .events(let events) = owner.presentation.mode,
+                let previewAction = events.eventAccess.first(where: { $0.event == .stop })?
+                    .previewAction
+            else {
+                expect(false, "fresh Events presentation 必须提供 owner-signed preview action")
+                return
+            }
+            let adapter = RecordingSoundPacksEditorNativeEffectsAdapter(playbackDuration: 0.25)
+            let dispatcher = SoundPacksEditorNativeEffectsDispatcher(adapter: adapter)
+
+            expect(
+                dispatcher.playPreview(previewAction, owner: owner) == 0.25,
+                "Events preview 必须由 native adapter 回传真实播放时长")
+            expect(
+                adapter.playRequests.map(\.fileURL) == [
+                    root.appendingPathComponent("packs/pack-a/stop.mp3")
+                ],
+                "view 不得派生 URL；dispatcher 只能执行 owner action 产生的 exact target")
+            expect(
+                dispatcher.playPreview(previewAction, owner: owner) == nil,
+                "Events preview action 必须 single-use")
+
+            dispatcher.handleLifecycle(.eventsViewDisappeared, owner: owner)
+            expect(
+                adapter.stopCount == 1 && owner.presentation.mode == .inactive,
+                "Events disappear 必须先消费自己的 stop action 再停用 context")
+
+            _ = owner.send(
+                .activate(
+                    .events(
+                        route: EventSettingsWindowRoute(scope: .global, event: .stop),
+                        requestRevision: 609)))
+            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 610)))
+            dispatcher.handleLifecycle(.eventsViewDisappeared, owner: owner)
+            expect(
+                {
+                    if case .sounds = owner.presentation.mode { return true }
+                    return false
+                }() && adapter.stopCount == 1,
+                "迟到的 Events disappear 不得 clobber 已接管 owner 的 Sounds context")
+        }
+    }
 }
 
 @MainActor
@@ -305,8 +358,11 @@ private final class RecordingSoundPacksEditorNativeEffectsAdapter:
     private(set) var stopCount = 0
     private(set) var revealRequests: [URL] = []
 
-    init(pickerResults: [[URL]] = []) {
+    private let playbackDuration: TimeInterval?
+
+    init(pickerResults: [[URL]] = [], playbackDuration: TimeInterval? = 1) {
         self.pickerResults = pickerResults
+        self.playbackDuration = playbackDuration
     }
 
     func selectAudioFiles(allowsMultipleSelection: Bool) -> [URL] {
@@ -314,8 +370,9 @@ private final class RecordingSoundPacksEditorNativeEffectsAdapter:
         return pickerResults.isEmpty ? [] : pickerResults.removeFirst()
     }
 
-    func playAudio(fileURL: URL, volume: Double) {
+    func playAudio(fileURL: URL, volume: Double) -> TimeInterval? {
         playRequests.append(PlayRequest(fileURL: fileURL, volume: volume))
+        return playbackDuration
     }
 
     func stopAudio() {
