@@ -72,6 +72,61 @@ func runSettingsPresentationTargetSuites() {
                 && !model.contains("SMLoginItemSetEnabled"),
             "Login model 必须保持纯 presentation，不得泄漏 system adapter")
     }
+
+    suite("Settings native announcement：延迟后重验 current head 且窗口恢复会重试") {
+        let controllerURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
+        guard let controller = try? String(contentsOf: controllerURL, encoding: .utf8) else {
+            expect(false, "读不到 SettingsWindowController native wiring")
+            return
+        }
+        let scanned = strippingComments(controller)
+        let code = scanned.codeWithoutStringLiterals
+        guard scanned.unmodeledConstructs.isEmpty,
+            let subscription = settingsBracedBlock(
+                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                in: code),
+            let scheduler = settingsBracedBlock(
+                after: "private func scheduleSettingsPresentationAnnouncementDelivery",
+                in: code),
+            let delivery = settingsBracedBlock(
+                after: "private func deliverPendingSettingsPresentationAnnouncement",
+                in: code),
+            let showWindow = settingsBracedBlock(after: "func showWindow", in: code),
+            let didBecomeKey = settingsBracedBlock(after: "func windowDidBecomeKey", in: code),
+            let unlatch = showWindow.range(of: "isPresentingWindow = false"),
+            let showRetry = showWindow.range(
+                of: "scheduleSettingsPresentationAnnouncementDelivery()"),
+            let currentHead = delivery.range(
+                of: "settingsPresentationSession.state.pendingAnnouncement"),
+            let post = delivery.range(of: "announceBasicSettingsUpdate(sentence)"),
+            let acknowledgement = delivery.range(of: "acknowledgeAnnouncement")
+        else {
+            expect(false, "必须能完整解析 Settings semantic announcement native delivery")
+            return
+        }
+
+        expect(
+            subscription.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+                && !subscription.contains("acknowledgeAnnouncement"),
+            "$state synchronous sink 只能调度，不能在 @Published willSet 内 post/ack")
+        expect(
+            scheduler.contains("settingsPresentationAnnouncementDeliveryScheduled")
+                && scheduler.contains("DispatchQueue.main.async"),
+            "native delivery 必须延后一轮 MainActor，并用单一 in-flight 标记去重")
+        expect(
+            delivery.contains("!isPresentingWindow")
+                && delivery.contains("window.isVisible")
+                && delivery.contains("window.isKeyWindow")
+                && currentHead.lowerBound < post.lowerBound
+                && post.lowerBound < acknowledgement.lowerBound,
+            "实际 post 前必须重读 exact current head 与 key/visible window，成功后才能 ack")
+        expect(
+            unlatch.lowerBound < showRetry.lowerBound
+                && didBecomeKey.contains("settingsPresentationSession.refreshLoginItem()")
+                && didBecomeKey.contains("scheduleSettingsPresentationAnnouncementDelivery()"),
+            "pre-key debt 必须在 showWindow 清 latch 后及真实 didBecomeKey 中显式重试")
+    }
 }
 
 @MainActor
@@ -315,4 +370,29 @@ private final class SettingsLoginAdapterState {
     var registration = LoginItemRegistrationState.disabled
     var shouldFail = true
     var requests: [Bool] = []
+}
+
+private func settingsBracedBlock(after marker: String, in source: String) -> String? {
+    guard let markerRange = source.range(of: marker),
+        let openingBrace = source[markerRange.upperBound...].firstIndex(of: "{")
+    else {
+        return nil
+    }
+    var depth = 0
+    var index = openingBrace
+    while index < source.endIndex {
+        switch source[index] {
+        case "{":
+            depth += 1
+        case "}":
+            depth -= 1
+            if depth == 0 {
+                return String(source[openingBrace...index])
+            }
+        default:
+            break
+        }
+        index = source.index(after: index)
+    }
+    return nil
 }
