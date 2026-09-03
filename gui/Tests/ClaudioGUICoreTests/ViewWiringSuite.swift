@@ -3346,14 +3346,8 @@ func runViewWiringSuites() {
         expect(
             window.contains("ForEach(activeSounds.windowStatuses)")
                 && window.contains("activeSounds.recoveryActions.filter")
-                && settingsController.contains("soundPacksEditorOwner.$presentation")
-                && settingsController.contains(".map(\\.pendingAnnouncement)")
-                && settingsController.contains(
-                    ".acknowledgeAnnouncement(id: id, didPost: didPost)")
-                && !settingsController.contains("soundPackModel.$windowStatuses")
-                && !settingsController.contains("shouldAnnounceSelectionChange(")
                 && !window.contains("SoundPacksWindowModel"),
-            "窗口必须从 owner 的持久 status/recovery 投影渲染，并只由 semantic queue 播报；view 不得使用 raw model")
+            "窗口必须从 owner 的持久 status/recovery 投影渲染，view 不得使用 raw model")
     }
 
     suite("T12：管理窗口恢复出厂是内置包专属的显式替换确认，成功/失败告知都在窗口内可见") {

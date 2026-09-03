@@ -704,7 +704,8 @@ func runSettingsNavigationSuites() {
             let modelPresent = controller.range(of: "let presentation = model.present")?.lowerBound,
             let makeKey = controller.range(of: "presentedWindow.makeKeyAndOrderFront")?.lowerBound,
             let announce = controller.range(
-                of: "announcePendingSoundPackEditorAnnouncementIfNeeded")?.lowerBound,
+                of: "announcePendingSoundPackEditorAnnouncementIfNeeded",
+                range: makeKey..<controller.endIndex)?.lowerBound,
             let presented = controller.range(
                 of: "isPresentingWindow = false",
                 range: makeKey..<controller.endIndex)?.lowerBound
@@ -720,7 +721,8 @@ func runSettingsNavigationSuites() {
             of: "if !presentation.wasAlreadyPresented"),
             let announcementDebt = controller.range(of: "// The presentation latch"),
             let announcement = controller.range(
-                of: "announcePendingSoundPackEditorAnnouncementIfNeeded"),
+                of: "announcePendingSoundPackEditorAnnouncementIfNeeded",
+                range: announcementDebt.lowerBound..<controller.endIndex),
             let presentationEnds = controller.range(
                 of: "isPresentingWindow = false",
                 range: announcement.lowerBound..<controller.endIndex)
@@ -749,7 +751,8 @@ func runSettingsNavigationSuites() {
             view.contains("EmbeddedSoundPacksEditorView(")
                 && view.contains("soundPacksEditorOwner")
                 && controller.components(
-                    separatedBy: "settingsSoundPackShellProjections(").count - 1 == 1
+                    separatedBy: "settingsSoundPackShellProjections("
+                ).count - 1 == 1
                 && !controller.contains("soundPacksEditorOwner.model")
                 && !controller.contains("SoundPackLibraryPresentationState"),
             "Sounds destination 必须嵌入完整共享编辑器，并以 shared fresh-ready 快照重解析 route")
