@@ -1,6 +1,7 @@
 import AppKit
 import ClaudioGUICore
 import ClaudioSettingsPresentation
+import Combine
 import Foundation
 import SwiftUI
 
@@ -168,6 +169,60 @@ func runSettingsPresentationSliceSuites() {
             "陈旧 acknowledgement 不得消费当前 head")
         session.acknowledgeAnnouncement(id: announcement.id, didPost: true)
         expect(session.state.pendingAnnouncement == nil, "只有 exact-head 成功回执可消费 debt")
+    }
+
+    suite("Settings presentation announcement：同步 subscriber ack 后 projection 保持一致") {
+        let session = SettingsPresentationSession(
+            dependencies: SettingsPresentationDependencies(
+                preferences: ClaudioPreferences(defaults: UserDefaults()),
+                loginItemSettings: LoginItemSettingsModel(
+                    adapter: makeLoginItemServiceAdapter(
+                        status: { .disabled },
+                        setEnabled: { enabled in enabled ? .enabled : .disabled }))),
+            actions: SettingsPresentationActions { _ in .unavailable })
+        var synchronouslyAcknowledgedIDs: [SettingsPresentationAnnouncement.ID] = []
+        let cancellable = session.$state.sink { state in
+            MainActor.assumeIsolated {
+                guard let announcement = state.pendingAnnouncement else { return }
+                synchronouslyAcknowledgedIDs.append(announcement.id)
+                session.acknowledgeAnnouncement(id: announcement.id, didPost: true)
+            }
+        }
+
+        expect(session.perform(.openLoginItemsSettings) == .unavailable, "先产生一条真实 debt")
+        expect(
+            synchronouslyAcknowledgedIDs.map(\.rawValue) == [1]
+                && session.state.pendingAnnouncement == nil
+                && session.state.presentationRevision >= 2,
+            "@Published willSet 内同步 ack 后 public projection 不得被外层 stale state 覆盖")
+        cancellable.cancel()
+
+        _ = session.perform(.openLoginItemsSettings)
+        let replacedID = session.state.pendingAnnouncement?.id
+        _ = session.perform(.openCalendarPrivacySettings)
+        guard let current = session.state.pendingAnnouncement else {
+            expect(false, "head replacement 后必须保留最新 debt")
+            return
+        }
+        expect(
+            replacedID != nil && current.id != replacedID
+                && current.meaning
+                    == .platformAction(.openCalendarPrivacySettings, .unavailable),
+            "新 debt 必须以新稳定 ID 替换旧 head")
+        if let replacedID {
+            session.acknowledgeAnnouncement(id: replacedID, didPost: true)
+        }
+        expect(
+            session.state.pendingAnnouncement?.id == current.id,
+            "旧 head 的成功回执不得消费 replacement")
+        session.acknowledgeAnnouncement(id: current.id, didPost: false)
+        expect(
+            session.state.pendingAnnouncement?.id == current.id,
+            "post false 不得消费 exact current head")
+        session.acknowledgeAnnouncement(id: current.id, didPost: true)
+        expect(
+            session.state.pendingAnnouncement == nil,
+            "只有成功的 exact-current acknowledgement 才能清空最终 projection")
     }
 
     suite("Settings presentation root：compiled harness 挂载 production General/Login slice") {
