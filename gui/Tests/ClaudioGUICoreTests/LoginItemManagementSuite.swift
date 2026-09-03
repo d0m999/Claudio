@@ -288,7 +288,7 @@ func runLoginItemManagementSuites() {
             scanned.unmodeledConstructs.isEmpty,
             let keyHandler = bracedBlock(after: "func windowDidBecomeKey", in: code),
             let identityGuard = keyHandler.range(of: "keyWindow === window"),
-            let refresh = keyHandler.range(of: "loginItemSettings.refresh()")
+            let refresh = keyHandler.range(of: "settingsPresentationSession.refreshLoginItem()")
         else {
             expect(false, "必须能完整解析 Settings 重获 key 状态后的刷新接线")
             return
