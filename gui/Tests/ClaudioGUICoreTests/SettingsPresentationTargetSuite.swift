@@ -111,6 +111,7 @@ func runSettingsPresentationTargetSuites() {
             let unlatch = showWindow.range(of: "isPresentingWindow = false"),
             let showRetry = showWindow.range(
                 of: "scheduleSettingsPresentationAnnouncementDelivery()"),
+            let deferredTurn = scheduler.range(of: "DispatchQueue.main.async"),
             let currentHead = delivery.range(
                 of: "settingsPresentationSession.state.pendingAnnouncement"),
             let post = delivery.range(of: "announceBasicSettingsUpdate(sentence)"),
@@ -127,8 +128,9 @@ func runSettingsPresentationTargetSuites() {
             "$state synchronous sink 必须忽略 nil emission，且只能调度、不能同步 post/ack")
         expect(
             scheduler.contains("settingsPresentationAnnouncementDeliveryScheduled")
-                && scheduler.contains("DispatchQueue.main.async"),
-            "native delivery 必须延后一轮 MainActor，并用单一 in-flight 标记去重")
+                && !scheduler[..<deferredTurn.lowerBound].contains(
+                    "settingsPresentationSession.state.pendingAnnouncement"),
+            "scheduler 在 async 前只能去重，不得读取仍处于 @Published willSet 的旧 head")
         expect(
             delivery.contains("!isPresentingWindow")
                 && delivery.contains("window.isVisible")
