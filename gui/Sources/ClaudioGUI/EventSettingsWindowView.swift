@@ -1303,12 +1303,11 @@ private struct EventSettingsMasterVolumeControl: View {
                 diskVolume: diskVolume,
                 isEnabled: isEnabled,
                 language: language,
-                focusedTarget: focusedTarget,
-                focusIdentity: .masterVolume,
                 accessibilityIdentifier: "event-settings.master-volume",
                 flushesOnDisappear: true,
                 onCommit: onCommit
             )
+            .focused(focusedTarget, equals: .masterVolume)
             .frame(maxWidth: 302)
         }
     }

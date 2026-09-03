@@ -136,7 +136,7 @@ func runSettingsPresentationTargetSuites() {
             "共享 slider 必须非泛型且不拥有 caller 的 focus identity")
         expect(
             flatPanel.contains(
-                "onCommit: onCommit) .focused(focusedTarget, equals: .masterVolume)")
+                "onCommit: onCommit ) .focused(focusedTarget, equals: .masterVolume)")
                 && flatEvents.contains(
                     "onCommit: onCommit ) .focused(focusedTarget, equals: .masterVolume)"),
             "Panel 与 Events caller 必须各自把原 exact focus identity 接回共享 slider")

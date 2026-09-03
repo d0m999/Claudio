@@ -8,12 +8,10 @@ import SwiftUI
 /// ``VolumeDragSession`` so drag coalescing, rollback, external rebase, close flush, and
 /// termination flush cannot drift between the panel and unified Settings.
 @MainActor
-package struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
+package struct SharedMasterVolumeSlider: View {
     let diskVolume: Double
     let isEnabled: Bool
     let language: ClaudioAppLanguage
-    let focusedTarget: FocusState<FocusTarget?>.Binding
-    let focusIdentity: FocusTarget
     let accessibilityIdentifier: String
     let percentageWidth: CGFloat
     let flushRevision: Int?
@@ -28,8 +26,6 @@ package struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
         diskVolume: Double,
         isEnabled: Bool,
         language: ClaudioAppLanguage,
-        focusedTarget: FocusState<FocusTarget?>.Binding,
-        focusIdentity: FocusTarget,
         accessibilityIdentifier: String,
         percentageWidth: CGFloat = 42,
         flushRevision: Int? = nil,
@@ -39,8 +35,6 @@ package struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
         self.diskVolume = diskVolume
         self.isEnabled = isEnabled
         self.language = language
-        self.focusedTarget = focusedTarget
-        self.focusIdentity = focusIdentity
         self.accessibilityIdentifier = accessibilityIdentifier
         self.percentageWidth = percentageWidth
         self.flushRevision = flushRevision
@@ -76,7 +70,6 @@ package struct SharedMasterVolumeSlider<FocusTarget: Hashable>: View {
                 .accessibilityHidden(true)
         }
         .tint(ClaudioTheme.clay(colorScheme))
-        .focused(focusedTarget, equals: focusIdentity)
         .accessibilityLabel(ClaudioL10n(language: language).text(.panelMasterVolume))
         .accessibilityValue("\(Int((session.draft * 100).rounded()))%")
         .accessibilityIdentifier(accessibilityIdentifier)

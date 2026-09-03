@@ -115,11 +115,11 @@ public struct MasterVolumeRow: View {
             diskVolume: diskVolume,
             isEnabled: isEnabled,
             language: language,
-            focusedTarget: focusedTarget,
-            focusIdentity: .masterVolume,
             accessibilityIdentifier: "panel.master-volume",
             percentageWidth: 38,
             flushRevision: focusCoordinator.hideCount,
-            onCommit: onCommit)
+            onCommit: onCommit
+        )
+        .focused(focusedTarget, equals: .masterVolume)
     }
 }
