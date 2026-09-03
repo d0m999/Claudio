@@ -281,7 +281,11 @@ func runAICueGenerationViewModelSuites() async {
             .stored(verification: .verified, hasPendingReplacement: false))
 
         viewModel.startGeneration(locale: "zh-Hans")
-        await waitForAICueViewModel { viewModel.phase == .candidatesReady }
+        await waitForAICueViewModel {
+            viewModel.phase == .candidatesReady
+                && viewModel.credentialStatus
+                    == .stored(verification: .verified, hasPendingReplacement: false)
+        }
         expect(viewModel.generation == generation, "必须一次性发布完整 generation")
         expect(viewModel.displayName == generation.plan.suggestedDisplayName, "名称建议只在候选阶段出现")
 
@@ -679,7 +683,7 @@ private func waitForSuspendedCredentialStatus(
 ) async {
     for _ in 0..<2_000 {
         if await credentialManager.hasSuspendedStatusRequest { return }
-        await Task.yield()
+        try? await Task.sleep(nanoseconds: 1_000_000)
     }
     await MainActor.run {
         expect(false, "等待悬挂 credential status 读取超时")
