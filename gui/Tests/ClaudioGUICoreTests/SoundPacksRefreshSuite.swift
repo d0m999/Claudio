@@ -2285,6 +2285,8 @@ func runSoundPacksRefreshSuites() async {
             let view = soundPacksCode("gui/Sources/SoundPacksWindow/SoundPacksWindowView.swift"),
             let model = soundPacksCode(
                 "gui/Sources/ClaudioGUICore/SoundPacksWindowModel.swift"),
+            let accessibility = soundPacksCode(
+                "gui/Sources/ClaudioGUICore/SoundPacksWindowAccessibility.swift"),
             let settingsController = soundPacksCode(
                 "gui/Sources/ClaudioGUI/SettingsWindowController.swift"),
             let settingsView = soundPacksCode(
@@ -2311,6 +2313,12 @@ func runSoundPacksRefreshSuites() async {
             !gallery.contains("SoundPacksWindowModel")
                 && gallery.contains("SoundPacksEditorOwner.stateGalleryFixture("),
             "DEBUG gallery 必须经 owner-owned deterministic fixture seam 构造，不得读取或构造 raw model")
+        expect(
+            !owner.contains("SoundPacksWindowStatusAnnouncementTracker")
+                && !owner.contains("beginStatusAnnouncementAttempt")
+                && !owner.contains("finishStatusAnnouncementAttempt")
+                && !accessibility.contains("SoundPacksWindowStatusAnnouncementTracker"),
+            "旧 revision announcement tracker 必须由 semantic queue + exact-ID acknowledgement 完整替代并删除")
         expect(
             owner.contains("public final class SoundPacksEditorOwner")
                 && owner.contains("public let model: SoundPacksWindowModel")
