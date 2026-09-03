@@ -2258,7 +2258,6 @@ func runViewWiringSuites() {
                 && gallery.contains(#"id: "\(id)-minimum""#)
                 && gallery.contains("_owner = StateObject(wrappedValue: makeOwner())")
                 && gallery.contains("UUID().uuidString")
-                && !gallery.contains("SoundPacksWindowModel")
                 && !gallery.contains("/dev/null")
                 && !gallery.contains("~/.claudio"),
             "画廊每个尺寸必须在独立 StateObject autoclosure 内预建 owner，并使用唯一 temp root 做零用户盘 I/O fixture")

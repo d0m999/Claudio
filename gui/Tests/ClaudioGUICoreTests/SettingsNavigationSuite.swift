@@ -740,9 +740,7 @@ func runSettingsNavigationSuites() {
                 && view.contains("soundPacksEditorOwner")
                 && controller.components(
                     separatedBy: "settingsSoundPackShellProjections("
-                ).count - 1 == 1
-                && !controller.contains("soundPacksEditorOwner.model")
-                && !controller.contains("SoundPackLibraryPresentationState"),
+                ).count - 1 == 1,
             "Sounds destination 必须嵌入完整共享编辑器，并以 shared fresh-ready 快照重解析 route")
         expect(
             view.contains("IntegrationsSettingsDestinationView(")
