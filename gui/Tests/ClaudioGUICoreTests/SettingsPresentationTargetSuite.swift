@@ -14,23 +14,32 @@ func runSettingsPresentationTargetSuites() {
             "gui/Tests/ClaudioGUICoreTests/SettingsPresentationTargetSuite.swift")
         guard let package = try? String(contentsOf: packageURL, encoding: .utf8),
             let app = try? String(contentsOf: appURL, encoding: .utf8),
-            let suiteSource = try? String(contentsOf: suiteURL, encoding: .utf8)
+            let suiteSource = try? String(contentsOf: suiteURL, encoding: .utf8),
+            let targetStart = package.range(
+                of:
+                    ".target(\n            name: \"ClaudioSettingsPresentation\""),
+            let targetEnd = package.range(
+                of: "\n        ),\n        // The SwiftUI app",
+                range: targetStart.lowerBound..<package.endIndex)
         else {
             expect(false, "读不到 Package、production composition 或 target suite")
             return
         }
+        let targetDeclaration = String(package[targetStart.lowerBound..<targetEnd.upperBound])
 
         expect(
             package.contains("name: \"ClaudioSettingsPresentation\"")
                 && package.contains("\"ClaudioSettingsPresentation\","),
             "Package 必须声明 ClaudioSettingsPresentation 并让 composition roots 直接依赖")
         expect(
-            package.contains("\"ClaudioLocalization\"")
-                && package.contains("\"ClaudioGUICore\"")
-                && package.contains("\"ClaudioGUIComponents\"")
-                && package.contains("\"SoundPacksWindow\"")
-                && package.contains(".product(name: \"ClaudioCore\", package: \"helper\")"),
-            "Settings target 必须直接声明五个既有下游依赖")
+            targetDeclaration.contains("\"ClaudioLocalization\"")
+                && targetDeclaration.contains("\"ClaudioGUICore\"")
+                && targetDeclaration.contains("\"ClaudioGUIComponents\"")
+                && targetDeclaration.contains("\"SoundPacksWindow\"")
+                && targetDeclaration.contains(
+                    ".product(name: \"ClaudioCore\", package: \"helper\")")
+                && !targetDeclaration.contains("resources:"),
+            "Settings target 必须直接声明五个既有下游依赖且不拥有资源")
         expect(
             app.contains("import ClaudioSettingsPresentation")
                 && suiteSource.contains("import ClaudioSettingsPresentation"),
@@ -68,19 +77,17 @@ func runSettingsPresentationTargetSuites() {
 func runSettingsPresentationSliceSuites() {
     suite("Settings presentation slice：非可选依赖与 Login 失败/重试形成同一 session") {
         let preferences = ClaudioPreferences(defaults: UserDefaults())
-        var registration = LoginItemRegistrationState.disabled
-        var shouldFail = true
-        var requests: [Bool] = []
+        let adapterState = SettingsLoginAdapterState()
         let login = LoginItemSettingsModel(
             adapter: makeLoginItemServiceAdapter(
-                status: { registration },
+                status: { adapterState.registration },
                 setEnabled: { enabled in
-                    requests.append(enabled)
-                    if shouldFail {
+                    adapterState.requests.append(enabled)
+                    if adapterState.shouldFail {
                         throw LoginItemOperationFailureReason.systemRejected
                     }
-                    registration = enabled ? .requiresApproval : .disabled
-                    return registration
+                    adapterState.registration = enabled ? .requiresApproval : .disabled
+                    return adapterState.registration
                 }))
         var platformActions: [SettingsPlatformAction] = []
         let session = SettingsPresentationSession(
@@ -98,14 +105,14 @@ func runSettingsPresentationSliceSuites() {
             "session 初始投影必须来自两个必填 owner，而不是 placeholder")
         session.setLoginItemEnabled(true)
         expect(
-            requests == [true]
+            adapterState.requests == [true]
                 && session.state.loginItemRegistration == .disabled
                 && session.state.loginItemFailure?.reason == .systemRejected,
             "失败必须保留旧系统事实并在同一 presentation state 可见")
-        shouldFail = false
+        adapterState.shouldFail = false
         session.retryLoginItemOperation()
         expect(
-            requests == [true, true]
+            adapterState.requests == [true, true]
                 && session.state.loginItemRegistration == .requiresApproval
                 && session.state.loginItemFailure == nil,
             "重试必须重复精确意图并采用 adapter 重读的系统事实")
@@ -173,6 +180,7 @@ func runSettingsPresentationSliceSuites() {
             "root 与真实 Login 控件必须暴露稳定、非 test-only 的 accessibility identity")
     }
 
+    #if DEBUG
     suite("Settings presentation fixture：DEBUG seam 随机隔离且只暴露真实 owner") {
         withTempDirectory { sentinelRoot in
             let sentinel = sentinelRoot.appendingPathComponent("user-path-sentinel")
@@ -229,4 +237,12 @@ func runSettingsPresentationSliceSuites() {
                 && !fixture.contains("/Users/"),
             "fixture 必须复用 owner factory，且不得暴露 raw model 或用户路径")
     }
+    #endif
+}
+
+@MainActor
+private final class SettingsLoginAdapterState {
+    var registration = LoginItemRegistrationState.disabled
+    var shouldFail = true
+    var requests: [Bool] = []
 }
