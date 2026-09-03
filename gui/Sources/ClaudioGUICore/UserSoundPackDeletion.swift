@@ -87,10 +87,12 @@ public func deleteUserSoundPack(
 
         let packsOutcome = withNonBlockingLock(path: environment.packsLockFile.path) {
             #if DEBUG
-            let afterIsolation =
+            let afterIsolation: @MainActor @Sendable (URL) throws -> Void =
                 environment.afterUserPackIsolationForTesting ?? { (_: URL) throws in }
             #else
-            let afterIsolation = { (_: URL) throws in }
+            let afterIsolation: @MainActor @Sendable (URL) throws -> Void = {
+                (_: URL) throws in
+            }
             #endif
             return deleteUserSoundPackWhileLocked(
                 packID: packID,
@@ -155,7 +157,7 @@ private func deleteUserSoundPackWhileLocked(
     userPacksDirectory: URL,
     expected: URL,
     beforeIsolation: @MainActor (URL) throws -> Void,
-    afterIsolation: @MainActor (URL) throws -> Void,
+    afterIsolation: @MainActor @Sendable (URL) throws -> Void,
     moveToTrash: @MainActor (URL) throws -> URL?
 ) -> Result<UserSoundPackDeletionOutcome, UserSoundPackDeletionError> {
     let rootDescriptor = userPacksDirectory.withUnsafeFileSystemRepresentation { path in
