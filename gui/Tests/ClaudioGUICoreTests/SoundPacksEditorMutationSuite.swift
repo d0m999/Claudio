@@ -1251,16 +1251,34 @@ func runSoundPacksEditorMutationSuites() async {
             let panelRevisionBefore = fixture.refreshCoordinator.panelReloadRevision
             gate.arm(afterRequestCount: scansBefore)
 
-            await fixture.library.requestRefresh(trigger: .retry)
+            let library = fixture.library
+            // Start the actor-owned observation scan without yielding MainActor. The synchronous
+            // terminal gate below keeps the owner's AsyncStream consumer from observing loading
+            // before this already-issued confirmation is consumed. The restore writer then opens
+            // the mutation fence and releases the old terminal through its existing hook.
+            let oldScanRequest = Task.detached {
+                await library.requestRefresh(trigger: .retry)
+            }
             guard gate.waitUntilPublicationIsPaused() else {
+                gate.resumePublication()
+                await oldScanRequest.value
                 expect(false, "旧 scan 必须确定性停在 terminal publication 前")
+                return
+            }
+            guard owner.presentation.library.isFresh else {
+                gate.resumePublication()
+                await oldScanRequest.value
+                expect(false, "terminal gate 前 MainActor owner 必须仍持有 fresh presentation")
                 return
             }
             guard case .accepted(let operationID) = owner.send(.invoke(confirmation.confirmAction))
             else {
+                gate.resumePublication()
+                await oldScanRequest.value
                 expect(false, "restore confirmation 必须接受 scheduled operation")
                 return
             }
+            await oldScanRequest.value
             await waitForSoundEditorOperation(owner, operationID: operationID)
             expect(
                 gate.oldTerminalDeferredBeforeWriterPublish,
