@@ -1099,75 +1099,69 @@ public final class SoundPacksEditorOwner: ObservableObject {
                 current.writesAllowed ? .staleAction : .scopeUnavailable
             finishOperation(
                 operationID,
-                receipt: .rejected(failure, footprint: work.noChangeFootprint),
+                receipt: .rejected(failure),
                 seed: current)
             return
         }
 
         let (receipt, settledSeed) = captureModelTransition {
             () -> EditorMutationReceipt in
-            let outcome: EditorScheduledMutationOutcome
+            let receipt: EditorMutationReceipt
             switch work {
             case .use(let packID):
                 guard model.selectPackForInspection(packID) else {
-                    return .rejected(.staleAction, footprint: .configOnly)
+                    return .rejected(.staleAction)
                 }
-                outcome = .use(model.useSelectedPack())
+                receipt = .use(model.useSelectedPack())
             case .assign(let packID, let fileName, let event):
                 guard model.selectedPackID == packID else {
-                    return .rejected(
-                        .staleAction,
-                        footprint: .packs(fenced: [packID], actuallyChanged: [], observedStale: []))
+                    return .rejected(.staleAction)
                 }
-                outcome = .assign(
+                receipt = .assign(
                     packID: packID,
                     result: model.assignSelectedAudioFile(fileName, to: event))
             case .clear(let packID, let event):
                 guard model.selectedPackID == packID else {
-                    return .rejected(
-                        .staleAction,
-                        footprint: .packs(fenced: [packID], actuallyChanged: [], observedStale: []))
+                    return .rejected(.staleAction)
                 }
-                outcome = .clear(
+                receipt = .clear(
                     packID: packID,
                     result: model.clearSelectedEventBinding(event))
             case .fork(let packID):
                 guard model.selectedPackID == packID else {
-                    return .rejected(
-                        .staleAction,
-                        footprint: .packs(fenced: [], actuallyChanged: [], observedStale: []))
+                    return .rejected(.staleAction)
                 }
                 suppressesNextForkLibraryObservationCycle = true
                 let result = model.forkSelectedFactoryPack()
                 if case .failure = result {
                     suppressesNextForkLibraryObservationCycle = false
                 }
-                outcome = .fork(result)
+                receipt = .fork(result)
             case .deletePack(let packID):
-                outcome = .deletePack(
+                receipt = .deletePack(
                     packID: packID,
                     result: model.deleteSelectedUserPackAfterConfirmation(
                         expectedPackID: packID))
             case .deleteOrphan(let packID, let fileName):
-                outcome = .deleteOrphan(
+                receipt = .deleteOrphan(
                     packID: packID,
                     result: model.deleteSelectedOrphanAudioFileAfterConfirmation(
                         fileName,
                         expectedPackID: packID))
             case .restoreFactory(let packID):
-                outcome = .restoreFactory(
+                receipt = .restoreFactory(
                     packID: packID,
                     result: model.restoreSelectedFactoryPackAfterConfirmation(
                         expectedPackID: packID))
             case .retryRestore(let packID):
-                outcome = .retryRestore(
+                receipt = .retryRestore(
                     packID: packID,
                     result: model.retryFailedFactoryPackRestoreAfterConfirmation(
                         expectedPackID: packID))
             case .restoreAllFactory:
-                outcome = .restoreAllFactory(model.restoreAllFactoryPacksAfterConfirmation())
+                receipt = .restoreAllFactory(model.restoreAllFactoryPacksAfterConfirmation())
             }
-            return EditorMutationReceipt(outcome: outcome)
+            return receipt
         }
         finishOperation(
             operationID,
@@ -2040,17 +2034,30 @@ extension SoundPacksEditorContext {
     }
 }
 
-/// The editor's concrete mutation receipt keeps the writer's typed result intact while making its
-/// disk effect explicit. It is deliberately private: callers act through capabilities and render
-/// the settled presentation; they never choose refresh policy or reinterpret a low-level error.
-private struct EditorMutationReceipt {
-    let typedOutcome: EditorScheduledMutationOutcome
-    let impact: EditorMutationImpact
-    let footprint: EditorMutationFootprint
+/// The editor keeps each writer's typed result intact until it projects the terminal activity.
+/// Disk impact and refresh policy remain owned by the existing model writer's
+/// `SoundPacksWindowWriteOutcome`; duplicating those facts here would create a second policy seam.
+private enum EditorMutationReceipt {
+    case rejected(SoundPackEditorFailure)
+    case use(Result<UseOutcome, SoundPacksWindowPackUseActionError>)
+    case assign(packID: String, result: Result<Void, SoundPacksWindowAudioActionError>)
+    case clear(packID: String, result: Result<Void, SoundPacksWindowAudioActionError>)
+    case fork(Result<PackForkOutcome, SoundPacksWindowPackForkActionError>)
+    case deletePack(
+        packID: String,
+        result: Result<UserSoundPackDeletionOutcome, SoundPacksWindowPackDeletionActionError>)
+    case deleteOrphan(packID: String, result: Result<Void, SoundPacksWindowAudioActionError>)
+    case restoreFactory(
+        packID: String,
+        result: Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError>)
+    case retryRestore(
+        packID: String,
+        result: Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError>)
+    case restoreAllFactory(FactoryPackBatchRestoreOutcome)
 
     var phase: SoundPackEditorActivityPhase {
-        switch typedOutcome {
-        case .rejected(let failure, _):
+        switch self {
+        case .rejected(let failure):
             return .failed(failure)
         case .use(let result):
             return result.isSuccess ? .succeeded : .failed(.mutationFailed)
@@ -2071,214 +2078,6 @@ private struct EditorMutationReceipt {
             }
             return .failed(.mutationFailed)
         }
-    }
-
-    init(outcome: EditorScheduledMutationOutcome) {
-        typedOutcome = outcome
-        (impact, footprint) = outcome.mutationFacts
-        assert(Self.factsAreCoherent(impact: impact, footprint: footprint))
-    }
-
-    static func rejected(
-        _ failure: SoundPackEditorFailure,
-        footprint: EditorMutationFootprint
-    ) -> Self {
-        Self(outcome: .rejected(failure, footprint: footprint))
-    }
-
-    private static func factsAreCoherent(
-        impact: EditorMutationImpact,
-        footprint: EditorMutationFootprint
-    ) -> Bool {
-        switch (impact, footprint) {
-        case (.noChange, .configOnly), (.changed, .configOnly):
-            return true
-        case (.noChange, .packs(_, let actuallyChanged, _)):
-            return actuallyChanged.isEmpty
-        case (.changed, .packs(_, let actuallyChanged, _)),
-            (.changedDespiteFailure, .packs(_, let actuallyChanged, _)):
-            return !actuallyChanged.isEmpty
-        case (.changedDespiteFailure, .configOnly):
-            return false
-        }
-    }
-}
-
-private enum EditorMutationImpact {
-    case noChange
-    case changed
-    case changedDespiteFailure
-}
-
-private enum EditorMutationFootprint {
-    case configOnly
-    case packs(fenced: Set<String>, actuallyChanged: Set<String>, observedStale: Set<String>)
-}
-
-private enum EditorScheduledMutationOutcome {
-    case rejected(SoundPackEditorFailure, footprint: EditorMutationFootprint)
-    case use(Result<UseOutcome, SoundPacksWindowPackUseActionError>)
-    case assign(packID: String, result: Result<Void, SoundPacksWindowAudioActionError>)
-    case clear(packID: String, result: Result<Void, SoundPacksWindowAudioActionError>)
-    case fork(Result<PackForkOutcome, SoundPacksWindowPackForkActionError>)
-    case deletePack(
-        packID: String,
-        result: Result<UserSoundPackDeletionOutcome, SoundPacksWindowPackDeletionActionError>)
-    case deleteOrphan(packID: String, result: Result<Void, SoundPacksWindowAudioActionError>)
-    case restoreFactory(
-        packID: String,
-        result: Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError>)
-    case retryRestore(
-        packID: String,
-        result: Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError>)
-    case restoreAllFactory(FactoryPackBatchRestoreOutcome)
-
-    var mutationFacts: (EditorMutationImpact, EditorMutationFootprint) {
-        switch self {
-        case .rejected(_, let footprint):
-            return (.noChange, footprint)
-        case .use(let result):
-            return (result.isSuccess ? .changed : .noChange, .configOnly)
-        case .assign(let packID, let result), .clear(let packID, let result):
-            return audioMutationFacts(packID: packID, result: result)
-        case .fork(.success(let outcome)):
-            return (
-                .changed,
-                .packs(
-                    fenced: [outcome.newPackID],
-                    actuallyChanged: [outcome.newPackID],
-                    observedStale: [])
-            )
-        case .fork(.failure):
-            return (.noChange, .packs(fenced: [], actuallyChanged: [], observedStale: []))
-        case .deletePack(let packID, .success):
-            return (
-                .changed,
-                .packs(fenced: [packID], actuallyChanged: [packID], observedStale: [])
-            )
-        case .deletePack(let packID, .failure(let error)):
-            let changed = deletionChangedDespiteFailure(error) ? Set([packID]) : []
-            return (
-                changed.isEmpty ? .noChange : .changedDespiteFailure,
-                .packs(
-                    fenced: [packID],
-                    actuallyChanged: changed,
-                    observedStale: deletionObservedStale(error) ? [packID] : [])
-            )
-        case .deleteOrphan(let packID, let result):
-            return audioMutationFacts(packID: packID, result: result)
-        case .restoreFactory(let packID, let result), .retryRestore(let packID, let result):
-            return restoreMutationFacts(packID: packID, result: result)
-        case .restoreAllFactory(let outcome):
-            let restored = Set(outcome.restoredPackIDs)
-            let changedFailures = Set(
-                outcome.failures.compactMap { failure in
-                    restoreFailureChangedDisk(failure.error) ? failure.packID : nil
-                })
-            let changed = restored.union(changedFailures)
-            let fenced = Set(outcome.failures.map(\.packID)).union(restored)
-            let impact: EditorMutationImpact
-            if changed.isEmpty {
-                impact = .noChange
-            } else if outcome.failures.isEmpty {
-                impact = .changed
-            } else {
-                impact = .changedDespiteFailure
-            }
-            return (
-                impact,
-                .packs(fenced: fenced, actuallyChanged: changed, observedStale: [])
-            )
-        }
-    }
-
-    private func audioMutationFacts(
-        packID: String,
-        result: Result<Void, SoundPacksWindowAudioActionError>
-    ) -> (EditorMutationImpact, EditorMutationFootprint) {
-        switch result {
-        case .success:
-            return (
-                .changed,
-                .packs(fenced: [packID], actuallyChanged: [packID], observedStale: [])
-            )
-        case .failure(let error):
-            return (
-                .noChange,
-                .packs(
-                    fenced: [packID],
-                    actuallyChanged: [],
-                    observedStale: audioFailureObservedStale(error) ? [packID] : [])
-            )
-        }
-    }
-
-    private func restoreMutationFacts(
-        packID: String,
-        result: Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError>
-    ) -> (EditorMutationImpact, EditorMutationFootprint) {
-        switch result {
-        case .success:
-            return (
-                .changed,
-                .packs(fenced: [packID], actuallyChanged: [packID], observedStale: [])
-            )
-        case .failure(let error):
-            let changed = restoreActionFailureChangedDisk(error) ? Set([packID]) : []
-            return (
-                changed.isEmpty ? .noChange : .changedDespiteFailure,
-                .packs(
-                    fenced: [packID],
-                    actuallyChanged: changed,
-                    observedStale: [])
-            )
-        }
-    }
-
-    private func audioFailureObservedStale(_ error: SoundPacksWindowAudioActionError) -> Bool {
-        switch error {
-        case .bind(.packNotFound), .bind(.fileNotFound), .bind(.manifestUnreadable),
-            .bind(.targetChanged), .delete(.packNotFound), .delete(.manifestUnreadable),
-            .delete(.directoryUnreadable), .delete(.fileNotFound), .delete(.stillReferenced):
-            return true
-        case .writesStopped, .noSelectedPack, .selectionChanged, .builtinReadOnly,
-            .packUnavailable, .notInInventory, .importRejected, .bind, .delete:
-            return false
-        }
-    }
-
-    private func deletionChangedDespiteFailure(
-        _ error: SoundPacksWindowPackDeletionActionError
-    ) -> Bool {
-        switch error {
-        case .delete(.isolationChangedRetained), .delete(.trashFailedRetained):
-            return true
-        case .writesStopped, .noSelectedPack, .selectionChanged, .delete:
-            return false
-        }
-    }
-
-    private func deletionObservedStale(
-        _ error: SoundPacksWindowPackDeletionActionError
-    ) -> Bool {
-        switch error {
-        case .delete(.packNotFound), .delete(.unsafePackEntry):
-            return true
-        case .writesStopped, .noSelectedPack, .selectionChanged, .delete:
-            return false
-        }
-    }
-
-    private func restoreActionFailureChangedDisk(
-        _ error: SoundPacksWindowFactoryRestoreActionError
-    ) -> Bool {
-        guard case .restore(_, let error, _) = error else { return false }
-        return restoreFailureChangedDisk(error)
-    }
-
-    private func restoreFailureChangedDisk(_ error: FactoryPackRestoreError) -> Bool {
-        if case .publishFailed(_, let salvaged) = error { return salvaged != nil }
-        return false
     }
 }
 
@@ -2315,18 +2114,6 @@ private enum EditorScheduledWork {
         }
     }
 
-    var noChangeFootprint: EditorMutationFootprint {
-        switch self {
-        case .use:
-            return .configOnly
-        case .assign(let packID, _, _), .clear(let packID, _),
-            .deletePack(let packID), .deleteOrphan(let packID, _),
-            .restoreFactory(let packID), .retryRestore(let packID):
-            return .packs(fenced: [packID], actuallyChanged: [], observedStale: [])
-        case .fork, .restoreAllFactory:
-            return .packs(fenced: [], actuallyChanged: [], observedStale: [])
-        }
-    }
 }
 
 private enum EditorActionIntent {
