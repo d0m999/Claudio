@@ -331,7 +331,7 @@ private struct EventSettingsGalleryFixture {
 
         do {
             try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-            try JSONEncoder().encode(config).write(to: configFile, options: .atomic)
+            try writeStateGalleryFixture(JSONEncoder().encode(config), to: configFile)
             for (packID, name) in [
                 ("global-pack", "Global Signals"),
                 ("workbuddy-private", "WorkBuddy Private"),
@@ -344,7 +344,8 @@ private struct EventSettingsGalleryFixture {
                 for event in Event.allCases {
                     let fileName = "\(event.cliName).mp3"
                     events[event.cliName] = fileName
-                    try Data("gallery-audio".utf8).write(
+                    try writeStateGalleryFixture(
+                        Data("gallery-audio".utf8),
                         to: pack.appendingPathComponent(fileName))
                 }
                 let manifest: [String: Any] = [
@@ -352,9 +353,9 @@ private struct EventSettingsGalleryFixture {
                     "name": name,
                     "events": events,
                 ]
-                try JSONSerialization.data(withJSONObject: manifest).write(
-                    to: pack.appendingPathComponent("manifest.json"),
-                    options: .atomic)
+                try writeStateGalleryFixture(
+                    JSONSerialization.data(withJSONObject: manifest),
+                    to: pack.appendingPathComponent("manifest.json"))
             }
         } catch {
             preconditionFailure("Unable to build isolated Events gallery fixture: \(error)")
@@ -374,6 +375,10 @@ private struct EventSettingsGalleryFixture {
             soundPackLibrary: previewStateGallerySoundPackLibrary,
             refreshCoordinator: previewStateGalleryRefreshCoordinator)
     }
+}
+
+private func writeStateGalleryFixture(_ data: Data, to file: URL) throws {
+    try data.write(to: file, options: .atomic)
 }
 
 struct AICueExperienceGalleryView: View {

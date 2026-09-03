@@ -552,6 +552,9 @@ private let diskWriteSurfaceLedger: [String: Set<String>] = [
     "helper/Sources/ClaudioCore/VersionCompatibility.swift": ["Process("],
 
     // —— gui ——
+    // DEBUG state gallery 的 config、audio 与 manifest fixture 全部位于进程级 UUID 临时 root，
+    // 并共用一个 `.atomic` helper；不会解析或替换用户声音包路径。
+    "gui/Sources/ClaudioGUI/StateGalleryView.swift": [".write("],
     // 导入音频：探测文件走一次 `.atomic`，最终音频走 `mkstemp` 私有 staging fd + 完整 `write(2)`
     // + `fsync` + `link(2)` 的不可覆盖发布，最后 `unlink(2)` 清 staging。源文件的 `open(O_RDONLY |
     // O_NOFOLLOW | O_NONBLOCK)` 仍只是有界只读；这里逐字记录的是整个受审计表面，不把低层安全
@@ -598,6 +601,7 @@ private let contentReplacingWriteSites: [String: Int] = [
     "helper/Sources/ClaudioCore/Log.swift": 2,
     "helper/Sources/ClaudioCore/Play.swift": 1,
     "helper/Sources/ClaudioCore/ConcreteHostIntegrationAdapters.swift": 1,
+    "gui/Sources/ClaudioGUI/StateGalleryView.swift": 1,
     "gui/Sources/ClaudioGUICore/AudioImport.swift": 1,
     "gui/Sources/ClaudioGUICore/ManifestBinding.swift": 1,
 ]
