@@ -2317,9 +2317,10 @@ func runSoundPacksRefreshSuites() async {
                 rawModelConstructionSites.append(name)
             }
         }
-        let modelImplementation = model.range(
-            of: "package final class SoundPacksWindowModel"
-        ).map { String(model[$0.lowerBound...]) } ?? ""
+        let modelImplementation =
+            model.range(
+                of: "package final class SoundPacksWindowModel"
+            ).map { String(model[$0.lowerBound...]) } ?? ""
 
         expect(owner.contains("@MainActor"), "共享编辑 owner 必须显式 @MainActor")
         expect(
