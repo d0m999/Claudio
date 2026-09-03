@@ -60,7 +60,10 @@ package final class SettingsPresentationSession: ObservableObject {
     }
 
     package func refreshLoginItem() {
+        let previousRegistration = loginProjection.registration
         dependencies.loginItemSettings.refresh()
+        guard loginProjection.registration != previousRegistration else { return }
+        enqueueAnnouncement(.loginItemStatus(loginProjection.registration))
     }
 
     package func setLoginItemEnabled(_ enabled: Bool) {
