@@ -294,7 +294,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             packID: binding.target.packID,
             event: binding.target.event,
             cancellation: cancellation)
-        let (_, startedSeed) = captureModelTransition {
+        let (mutation, startedSeed) = captureModelTransition {
             model.beginEditorCompoundMutation(packID: binding.target.packID)
         }
         publish(from: startedSeed)
@@ -312,7 +312,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         switch execution {
         case .cancelledBeforeWrite:
             let (_, settledSeed) = captureModelTransition {
-                model.finishEditorCompoundMutationWithoutChange(packID: binding.target.packID)
+                model.finishEditorCompoundMutationWithoutChange(mutation)
             }
             settleAsyncOperation(
                 operationID,
@@ -323,7 +323,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             let cancellationRequested = cancellationRequested || cancellation.isCancelled
             guard let imported = batch.accepted.first else {
                 let (_, settledSeed) = captureModelTransition {
-                    model.finishEditorCompoundMutationWithoutChange(packID: binding.target.packID)
+                    model.finishEditorCompoundMutationWithoutChange(mutation)
                 }
                 settleAsyncOperation(
                     operationID,
@@ -335,6 +335,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return finishAdoption(
                 operationID: operationID,
                 binding: binding,
+                mutation: mutation,
                 imported: imported,
                 displayName: displayName,
                 cancellationRequested: cancellationRequested)
@@ -344,6 +345,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private func finishAdoption(
         operationID: SoundPackEditorOperationID,
         binding: EditorAdoptionBinding,
+        mutation: SoundPackLibraryMutation?,
         imported: ImportedAudioFile,
         displayName: AICueDisplayName,
         cancellationRequested: Bool
@@ -389,6 +391,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         let (_, settledSeed) = captureModelTransition {
             model.finishEditorCompoundMutation(
                 packID: binding.target.packID,
+                mutation: mutation,
                 changedDespiteFailure: failure != nil)
         }
         if let failure {
@@ -459,7 +462,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             packID: binding.packID,
             event: bindTo,
             cancellation: cancellation)
-        let (_, startedSeed) = captureModelTransition {
+        let (mutation, startedSeed) = captureModelTransition {
             model.beginEditorCompoundMutation(packID: binding.packID)
         }
         publish(from: startedSeed)
@@ -476,7 +479,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         switch execution {
         case .cancelledBeforeWrite:
             let (_, settledSeed) = captureModelTransition {
-                model.finishEditorCompoundMutationWithoutChange(packID: binding.packID)
+                model.finishEditorCompoundMutationWithoutChange(mutation)
             }
             settleAsyncOperation(
                 operationID,
@@ -487,6 +490,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
             return finishImport(
                 operationID: operationID,
                 binding: binding,
+                mutation: mutation,
                 batch: batch,
                 cancellationRequested: cancellationRequested || cancellation.isCancelled)
         }
@@ -495,12 +499,13 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private func finishImport(
         operationID: SoundPackEditorOperationID,
         binding: EditorPermitBinding,
+        mutation: SoundPackLibraryMutation?,
         batch: AudioImportBatchResult,
         cancellationRequested: Bool
     ) -> SoundPacksEditorOperationResult {
         guard !batch.accepted.isEmpty else {
             let (_, seed) = captureModelTransition {
-                model.finishEditorCompoundMutationWithoutChange(packID: binding.packID)
+                model.finishEditorCompoundMutationWithoutChange(mutation)
             }
             let phase: SoundPackEditorActivityPhase
             if cancellationRequested {
@@ -557,6 +562,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         return completeImport(
             operationID: operationID,
             binding: binding,
+            mutation: mutation,
             batch: batch,
             boundEvent: boundEvent,
             completedInBackground: !remainsForeground,
@@ -567,6 +573,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
     private func completeImport(
         operationID: SoundPackEditorOperationID,
         binding: EditorPermitBinding,
+        mutation: SoundPackLibraryMutation?,
         batch: AudioImportBatchResult,
         boundEvent: Event?,
         completedInBackground: Bool,
@@ -576,6 +583,7 @@ public final class SoundPacksEditorOwner: ObservableObject {
         let (_, settledSeed) = captureModelTransition {
             model.finishEditorCompoundMutation(
                 packID: binding.packID,
+                mutation: mutation,
                 changedDespiteFailure: failure != nil)
         }
         let phase: SoundPackEditorActivityPhase

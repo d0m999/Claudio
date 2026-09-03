@@ -1064,7 +1064,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             case .failure(let error): return finishPackFork(.failure(.allocation(error)))
             }
 
-            beginSoundPackMutation(packIDs: [newPackID])
+            let mutation = beginSoundPackMutation(packIDs: [newPackID])
             switch forkPack(fromID: sourcePackID, newID: newPackID, environment: environment) {
             case .success:
                 if readSource.readsSharedSnapshot {
@@ -1076,10 +1076,11 @@ public final class SoundPacksWindowModel: ObservableObject {
                         displayName: displayName(for: sourcePackID))
                     completeSynchronousWrite(
                         .succeeded,
-                        invalidatingPackIDs: [newPackID])
+                        invalidatingPackIDs: [newPackID],
+                        mutation: mutation)
                     return finishPackFork(.success(outcome), publishCompletion: false)
                 }
-                completeSynchronousWrite(.succeeded)
+                completeSynchronousWrite(.succeeded, mutation: mutation)
                 guard
                     let card = packCards.first(where: { $0.id == newPackID })
                 else {
@@ -1096,13 +1097,14 @@ public final class SoundPacksWindowModel: ObservableObject {
                     displayName: SelectedPackMetadata(id: card.id, name: card.name).displayName)
                 return finishPackFork(.success(outcome), publishCompletion: false)
             case .failure(.destinationAlreadyExists):
-                finishSoundPackMutation(packIDs: [newPackID])
+                finishSoundPackMutation(mutation)
                 occupied.insert(newPackID)
                 if attempt == attemptLimit {
                     return finishPackFork(
                         .failure(.destinationAllocationExhausted(attempts: attemptLimit)))
                 }
             case .failure(let error):
+                finishSoundPackMutation(mutation)
                 return finishPackFork(.failure(.fork(error)))
             }
         }
@@ -1187,7 +1189,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             } ?? expectedPackID
         clearWindowStatus(.audio)
         audioActionError = nil
-        beginSoundPackMutation(packIDs: [expectedPackID])
+        let mutation = beginSoundPackMutation(packIDs: [expectedPackID])
 
         let execution = await audioImportExecutor.execute(
             SoundPackAudioImportJob(
@@ -1197,7 +1199,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         let batch: AudioImportBatchResult
         switch execution {
         case .cancelledBeforeWrite:
-            finishSoundPackMutation(packIDs: [expectedPackID])
+            finishSoundPackMutation(mutation)
             return .failure(.importRejected(message: "导入已取消，未添加任何音频。"))
         case .completed(let result, _):
             batch = result
@@ -1209,9 +1211,10 @@ public final class SoundPacksWindowModel: ObservableObject {
         if !batch.accepted.isEmpty {
             completeSynchronousWrite(
                 .succeeded,
-                invalidatingPackIDs: [expectedPackID])
+                invalidatingPackIDs: [expectedPackID],
+                mutation: mutation)
         } else {
-            finishSoundPackMutation(packIDs: [expectedPackID])
+            finishSoundPackMutation(mutation)
         }
 
         if isLatestAction {
@@ -1285,26 +1288,30 @@ public final class SoundPacksWindowModel: ObservableObject {
 
     /// Opens the existing two-sided invalidation fence for one editor-owned compound mutation.
     /// The async executor receives only immutable import values; writer coordination stays here.
-    func beginEditorCompoundMutation(packID: String) {
+    func beginEditorCompoundMutation(packID: String) -> SoundPackLibraryMutation? {
         audioImportActionRevision += 1
         clearWindowStatus(.audio)
         audioActionError = nil
-        beginSoundPackMutation(packIDs: [packID])
+        return beginSoundPackMutation(packIDs: [packID])
     }
 
     /// Closes a compound mutation without asking the shared library to scan when no bytes landed.
-    func finishEditorCompoundMutationWithoutChange(packID: String) {
-        finishSoundPackMutation(packIDs: [packID])
+    func finishEditorCompoundMutationWithoutChange(
+        _ mutation: SoundPackLibraryMutation?
+    ) {
+        finishSoundPackMutation(mutation)
     }
 
     /// Completes one compound import/bind envelope with exactly one shared-library refresh.
     func finishEditorCompoundMutation(
         packID: String,
+        mutation: SoundPackLibraryMutation?,
         changedDespiteFailure: Bool
     ) {
         completeSynchronousWrite(
             changedDespiteFailure ? .changedDespiteFailure : .succeeded,
-            invalidatingPackIDs: [packID])
+            invalidatingPackIDs: [packID],
+            mutation: mutation)
     }
 
     /// Uses the existing lock-time manifest writer without opening or completing a second refresh.
@@ -1840,7 +1847,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                     reason: .ineligible(reason)))
         }
 
-        beginSoundPackMutation(packIDs: [target.packID])
+        let mutation = beginSoundPackMutation(packIDs: [target.packID])
         switch bindAICueToManifest(
             event: target.event,
             fileName: imported.fileName,
@@ -1849,7 +1856,10 @@ public final class SoundPacksWindowModel: ObservableObject {
             environment: environment)
         {
         case .success(let binding):
-            _ = finishAudioAction(.success(()), invalidatingPackID: target.packID)
+            _ = finishAudioAction(
+                .success(()),
+                invalidatingPackID: target.packID,
+                mutation: mutation)
             return .success(
                 AICueAdoptionOutcome(
                     target: target,
@@ -1858,7 +1868,8 @@ public final class SoundPacksWindowModel: ObservableObject {
         case .failure(let error):
             _ = finishAudioAction(
                 .failure(.bind(error)),
-                invalidatingPackID: target.packID)
+                invalidatingPackID: target.packID,
+                mutation: mutation)
             return .failure(
                 .importedButNotBound(
                     imported: imported,
@@ -1921,7 +1932,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         to event: Event,
         packID: String
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
-        beginSoundPackMutation(packIDs: [packID])
+        let mutation = beginSoundPackMutation(packIDs: [packID])
 
         switch bindEventToManifest(
             event: event,
@@ -1930,12 +1941,16 @@ public final class SoundPacksWindowModel: ObservableObject {
             environment: environment)
         {
         case .success:
-            return finishAudioAction(.success(()), invalidatingPackID: packID)
+            return finishAudioAction(
+                .success(()),
+                invalidatingPackID: packID,
+                mutation: mutation)
         case .failure(let error):
             return finishAudioAction(
                 .failure(.bind(error)),
                 invalidatingPackID: packID,
-                refreshAfterFailure: manifestBindFailureInvalidatesWindowReadModel(error))
+                refreshAfterFailure: manifestBindFailureInvalidatesWindowReadModel(error),
+                mutation: mutation)
         }
     }
 
@@ -1958,19 +1973,23 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard !builtinPackIDs.contains(selectedPackID) else {
             return finishAudioAction(.failure(.builtinReadOnly(packID: selectedPackID)))
         }
-        beginSoundPackMutation(packIDs: [selectedPackID])
+        let mutation = beginSoundPackMutation(packIDs: [selectedPackID])
         switch clearEventBinding(
             event: event,
             packID: selectedPackID,
             environment: environment)
         {
         case .success:
-            return finishAudioAction(.success(()), invalidatingPackID: selectedPackID)
+            return finishAudioAction(
+                .success(()),
+                invalidatingPackID: selectedPackID,
+                mutation: mutation)
         case .failure(let error):
             return finishAudioAction(
                 .failure(.bind(error)),
                 invalidatingPackID: selectedPackID,
-                refreshAfterFailure: manifestBindFailureInvalidatesWindowReadModel(error))
+                refreshAfterFailure: manifestBindFailureInvalidatesWindowReadModel(error),
+                mutation: mutation)
         }
     }
 
@@ -1992,7 +2011,7 @@ public final class SoundPacksWindowModel: ObservableObject {
             return finishPackDeletion(.failure(.selectionChanged))
         }
 
-        beginSoundPackMutation(packIDs: [selectedPackID])
+        let mutation = beginSoundPackMutation(packIDs: [selectedPackID])
         #if DEBUG
         let moveToTrash =
             environment.moveUserPackToTrashForTesting ?? moveUserSoundPackToTrash
@@ -2007,7 +2026,10 @@ public final class SoundPacksWindowModel: ObservableObject {
             moveToTrash: moveToTrash
         )
         .mapError(SoundPacksWindowPackDeletionActionError.delete)
-        return finishPackDeletion(result, invalidatedPackID: selectedPackID)
+        return finishPackDeletion(
+            result,
+            invalidatedPackID: selectedPackID,
+            mutation: mutation)
     }
 
     /// Executes the irreversible deletion only after the SwiftUI confirmation has completed.
@@ -2032,7 +2054,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         guard selectedPackID == expectedPackID else {
             return finishAudioAction(.failure(.selectionChanged))
         }
-        beginSoundPackMutation(packIDs: [selectedPackID])
+        let mutation = beginSoundPackMutation(packIDs: [selectedPackID])
 
         switch deleteOrphanAudioFile(
             fileName: fileName,
@@ -2040,12 +2062,16 @@ public final class SoundPacksWindowModel: ObservableObject {
             environment: environment)
         {
         case .success:
-            return finishAudioAction(.success(()), invalidatingPackID: selectedPackID)
+            return finishAudioAction(
+                .success(()),
+                invalidatingPackID: selectedPackID,
+                mutation: mutation)
         case .failure(let error):
             return finishAudioAction(
                 .failure(.delete(error)),
                 invalidatingPackID: selectedPackID,
-                refreshAfterFailure: deleteFailureInvalidatesWindowReadModel(error))
+                refreshAfterFailure: deleteFailureInvalidatesWindowReadModel(error),
+                mutation: mutation)
         }
     }
 
@@ -2131,7 +2157,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         factoryBatchRestoredCount = 0
         factoryBatchRetainedSalvages = []
         clearWindowStatus(.factoryBatchRestore)
-        beginSoundPackMutation(packIDs: Set(ids))
+        let mutation = beginSoundPackMutation(packIDs: Set(ids))
         var restored: [FactoryPackRestoreOutcome] = []
         var failures: [FactoryPackBatchRestoreFailure] = []
         var diskChanged = false
@@ -2156,10 +2182,10 @@ public final class SoundPacksWindowModel: ObservableObject {
         if diskChanged {
             completeSynchronousWrite(
                 failures.isEmpty ? .succeeded : .changedDespiteFailure,
-                invalidatingPackIDs: Set(ids))
+                invalidatingPackIDs: Set(ids),
+                mutation: mutation)
         } else {
-            finishSoundPackMutation(packIDs: Set(ids))
-            completeSynchronousWrite(.failed)
+            completeSynchronousWrite(.failed, mutation: mutation)
         }
 
         let outcome = FactoryPackBatchRestoreOutcome(
@@ -2183,11 +2209,14 @@ public final class SoundPacksWindowModel: ObservableObject {
             return .failure(.selectionChanged)
         }
 
-        beginSoundPackMutation(packIDs: [packID])
+        let mutation = beginSoundPackMutation(packIDs: [packID])
         switch restoreFactoryPack(id: packID, environment: environment) {
         case .success(let outcome):
             let visibleOutcome = resolveFactoryBatchRestoreFailure(with: outcome).outcome
-            completeSynchronousWrite(.succeeded, invalidatingPackIDs: [packID])
+            completeSynchronousWrite(
+                .succeeded,
+                invalidatingPackIDs: [packID],
+                mutation: mutation)
             publishFactoryBatchRestoreStatus()
             return .success(visibleOutcome)
         case .failure(let error):
@@ -2197,10 +2226,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             let diskChangedDespiteFailure = factoryPackRestoreSalvage(in: error) != nil
             completeSynchronousWrite(
                 diskChangedDespiteFailure ? .changedDespiteFailure : .failed,
-                invalidatingPackIDs: diskChangedDespiteFailure ? [packID] : [])
-            if !diskChangedDespiteFailure {
-                finishSoundPackMutation(packIDs: [packID])
-            }
+                invalidatingPackIDs: diskChangedDespiteFailure ? [packID] : [],
+                mutation: mutation)
             if let index = factoryBatchRestoreFailures.firstIndex(where: {
                 $0.packID == packID
             }) {
@@ -2340,7 +2367,7 @@ public final class SoundPacksWindowModel: ObservableObject {
         packID: String,
         retainedSalvages: [SalvagedPack] = []
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
-        beginSoundPackMutation(packIDs: [packID])
+        let mutation = beginSoundPackMutation(packIDs: [packID])
         switch restoreFactoryPack(id: packID, environment: environment) {
         case .success(let outcome):
             let visibleOutcome = FactoryPackRestoreOutcome(
@@ -2349,7 +2376,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                 retainedSalvages: appendingFactoryPackRestoreSalvage(
                     outcome.salvaged,
                     to: retainedSalvages))
-            return finishFactoryRestore(.success(visibleOutcome))
+            return finishFactoryRestore(.success(visibleOutcome), mutation: mutation)
         case .failure(let error):
             let diskChangedDespiteFailure = factoryPackRestoreSalvage(in: error) != nil
             return finishFactoryRestore(
@@ -2360,14 +2387,16 @@ public final class SoundPacksWindowModel: ObservableObject {
                         retainedSalvages: appendingFactoryPackRestoreSalvage(
                             factoryPackRestoreSalvage(in: error),
                             to: retainedSalvages))),
-                diskChangedDespiteFailure: diskChangedDespiteFailure)
+                diskChangedDespiteFailure: diskChangedDespiteFailure,
+                mutation: mutation)
         }
     }
 
     private func finishAudioAction(
         _ result: Result<Void, SoundPacksWindowAudioActionError>,
         invalidatingPackID: String? = nil,
-        refreshAfterFailure: Bool = false
+        refreshAfterFailure: Bool = false,
+        mutation: SoundPackLibraryMutation? = nil
     ) -> Result<Void, SoundPacksWindowAudioActionError> {
         switch result {
         case .success:
@@ -2375,7 +2404,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             clearWindowStatus(.audio)
             completeSynchronousWrite(
                 .succeeded,
-                invalidatingPackIDs: invalidatingPackID.map { [$0] } ?? [])
+                invalidatingPackIDs: invalidatingPackID.map { [$0] } ?? [],
+                mutation: mutation)
         case .failure(let error):
             audioActionError = error
             setWindowStatus(
@@ -2384,10 +2414,9 @@ public final class SoundPacksWindowModel: ObservableObject {
                 actionText: .localized(.soundPacksStatusAddAudio),
                 messageText: error.statusText,
                 packID: selectedPackID)
-            completeSynchronousWrite(.failed)
-            if let invalidatingPackID {
-                finishSoundPackMutation(packIDs: [invalidatingPackID])
-                if refreshAfterFailure { reload(followActivePack: false) }
+            completeSynchronousWrite(.failed, mutation: mutation)
+            if invalidatingPackID != nil, refreshAfterFailure {
+                reload(followActivePack: false)
             }
         }
         return result
@@ -2398,7 +2427,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             FactoryPackRestoreOutcome,
             SoundPacksWindowFactoryRestoreActionError
         >,
-        diskChangedDespiteFailure: Bool = false
+        diskChangedDespiteFailure: Bool = false,
+        mutation: SoundPackLibraryMutation? = nil
     ) -> Result<FactoryPackRestoreOutcome, SoundPacksWindowFactoryRestoreActionError> {
         switch result {
         case .success(let outcome):
@@ -2407,7 +2437,8 @@ public final class SoundPacksWindowModel: ObservableObject {
             factoryRestoreActionError = nil
             completeSynchronousWrite(
                 .succeeded,
-                invalidatingPackIDs: [outcome.restoredPackID])
+                invalidatingPackIDs: [outcome.restoredPackID],
+                mutation: mutation)
             if batchResolution.didResolve {
                 publishFactoryBatchRestoreStatus()
             }
@@ -2444,7 +2475,8 @@ public final class SoundPacksWindowModel: ObservableObject {
                 outcome = .changedDespiteFailure
                 completeSynchronousWrite(
                     outcome,
-                    invalidatingPackIDs: factoryRestorePackID(in: visibleError).map { [$0] } ?? [])
+                    invalidatingPackIDs: factoryRestorePackID(in: visibleError).map { [$0] } ?? [],
+                    mutation: mutation)
             } else {
                 outcome = .failed
             }
@@ -2462,10 +2494,7 @@ public final class SoundPacksWindowModel: ObservableObject {
                     .retryFactoryRestores(packIDs: [$0])
                 })
             if outcome == .failed {
-                completeSynchronousWrite(outcome)
-                if let packID = factoryRestorePackID(in: visibleError) {
-                    finishSoundPackMutation(packIDs: [packID])
-                }
+                completeSynchronousWrite(outcome, mutation: mutation)
             }
             return .failure(visibleError)
         }
@@ -2533,14 +2562,16 @@ public final class SoundPacksWindowModel: ObservableObject {
             UserSoundPackDeletionOutcome,
             SoundPacksWindowPackDeletionActionError
         >,
-        invalidatedPackID: String? = nil
+        invalidatedPackID: String? = nil,
+        mutation: SoundPackLibraryMutation? = nil
     ) -> Result<UserSoundPackDeletionOutcome, SoundPacksWindowPackDeletionActionError> {
         switch result {
         case .success(let outcome):
             let name = displayName(for: outcome.packID)
             completeSynchronousWrite(
                 .succeeded,
-                invalidatingPackIDs: [outcome.packID])
+                invalidatingPackIDs: [outcome.packID],
+                mutation: mutation)
             setWindowStatus(
                 kind: .packDeletion,
                 severity: .notice,
@@ -2557,16 +2588,16 @@ public final class SoundPacksWindowModel: ObservableObject {
                 if packDeletionFailureChangedDisk(error) {
                     completeSynchronousWrite(
                         .changedDespiteFailure,
-                        invalidatingPackIDs: [invalidatedPackID])
+                        invalidatingPackIDs: [invalidatedPackID],
+                        mutation: mutation)
                 } else {
-                    completeSynchronousWrite(.failed)
-                    finishSoundPackMutation(packIDs: [invalidatedPackID])
+                    completeSynchronousWrite(.failed, mutation: mutation)
                     if packDeletionFailureInvalidatesWindowReadModel(error) {
                         reload(followActivePack: false)
                     }
                 }
             } else {
-                completeSynchronousWrite(.failed)
+                completeSynchronousWrite(.failed, mutation: mutation)
             }
         }
         return result
@@ -2753,9 +2784,38 @@ public final class SoundPacksWindowModel: ObservableObject {
         _ outcome: SoundPacksWindowWriteOutcome,
         invalidatingPackIDs: Set<String> = []
     ) -> SoundPacksRefreshEffect {
+        completeSynchronousWrite(
+            outcome,
+            invalidatingPackIDs: invalidatingPackIDs,
+            mutation: nil)
+    }
+
+    @discardableResult
+    private func completeSynchronousWrite(
+        _ outcome: SoundPacksWindowWriteOutcome,
+        invalidatingPackIDs: Set<String> = [],
+        mutation: SoundPackLibraryMutation?
+    ) -> SoundPacksRefreshEffect {
+        var needsLegacyRefresh = false
+        if let mutation {
+            if !soundPackLibrary.endMutation(mutation, changed: outcome != .failed),
+                outcome != .failed,
+                !invalidatingPackIDs.isEmpty
+            {
+                // A replayed or foreign token cannot release a mutation fence. Preserve the
+                // current library's read-model safety without crashing production.
+                soundPackLibrary.invalidate(packIDs: invalidatingPackIDs)
+                needsLegacyRefresh = true
+            }
+        } else if outcome != .failed, readSource.readsSharedSnapshot,
+            !invalidatingPackIDs.isEmpty
+        {
+            // Compatibility for callers that only use the pre-transaction public completion API.
+            soundPackLibrary.invalidate(packIDs: invalidatingPackIDs)
+            needsLegacyRefresh = true
+        }
         if outcome != .failed {
-            finishSoundPackMutation(packIDs: invalidatingPackIDs)
-            if !readSource.readsSharedSnapshot || !invalidatingPackIDs.isEmpty {
+            if !readSource.readsSharedSnapshot {
                 reload(followActivePack: false)
             } else {
                 configState = loadPanelConfig(from: configFile)
@@ -2764,19 +2824,22 @@ public final class SoundPacksWindowModel: ObservableObject {
                 if let librarySnapshot {
                     applySnapshot(librarySnapshot, followActivePack: false)
                 }
+                if needsLegacyRefresh {
+                    Task { await soundPackLibrary.requestRefresh(trigger: .write) }
+                }
             }
         }
         return refreshCoordinator.completeWindowWrite(outcome)
     }
 
-    private func beginSoundPackMutation(packIDs: Set<String>) {
-        guard readSource.readsSharedSnapshot, !packIDs.isEmpty else { return }
-        soundPackLibrary.invalidate(packIDs: packIDs)
+    private func beginSoundPackMutation(packIDs: Set<String>) -> SoundPackLibraryMutation? {
+        guard readSource.readsSharedSnapshot, !packIDs.isEmpty else { return nil }
+        return soundPackLibrary.beginMutation(packIDs: packIDs)
     }
 
-    private func finishSoundPackMutation(packIDs: Set<String>) {
-        guard readSource.readsSharedSnapshot, !packIDs.isEmpty else { return }
-        soundPackLibrary.invalidate(packIDs: packIDs)
+    private func finishSoundPackMutation(_ mutation: SoundPackLibraryMutation?) {
+        guard let mutation else { return }
+        _ = soundPackLibrary.endMutation(mutation, changed: false)
     }
 }
 

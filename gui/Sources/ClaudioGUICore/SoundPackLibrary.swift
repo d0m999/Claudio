@@ -389,6 +389,12 @@ private struct SoundPackLibraryInvalidation: Sendable {
     let revision: UInt64
     let packIDs: Set<String>
     let invalidatesAll: Bool
+    let mutationOpen: Bool
+    let mutationRefreshRequired: Bool
+}
+
+struct SoundPackLibraryMutation: Sendable {
+    fileprivate let id: UUID
 }
 
 /// Synchronous mailbox used only at the write boundary. Incrementing this clock before a disk
@@ -399,17 +405,30 @@ private final class SoundPackLibraryInvalidationMailbox: @unchecked Sendable {
     private var revision: UInt64 = 0
     private var invalidatedPackIDs: Set<String> = []
     private var invalidatesAll = false
+    private var openMutations: [UUID: Set<String>] = [:]
+    private var mutationRefreshRequired = false
 
     func invalidate(packIDs: Set<String>) {
         lock.lock()
-        revision &+= 1
-        if packIDs.isEmpty {
-            invalidatesAll = true
-            invalidatedPackIDs.removeAll()
-        } else if !invalidatesAll {
-            invalidatedPackIDs.formUnion(packIDs)
-        }
+        recordInvalidation(packIDs: packIDs)
         lock.unlock()
+    }
+
+    func beginMutation(packIDs: Set<String>) -> SoundPackLibraryMutation {
+        lock.lock()
+        defer { lock.unlock() }
+        recordInvalidation(packIDs: packIDs)
+        let mutation = SoundPackLibraryMutation(id: UUID())
+        openMutations[mutation.id] = packIDs
+        return mutation
+    }
+
+    func endMutation(_ mutation: SoundPackLibraryMutation, changed: Bool) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard openMutations.removeValue(forKey: mutation.id) != nil else { return false }
+        mutationRefreshRequired = mutationRefreshRequired || changed
+        return true
     }
 
     func snapshot() -> SoundPackLibraryInvalidation {
@@ -418,7 +437,22 @@ private final class SoundPackLibraryInvalidationMailbox: @unchecked Sendable {
         return SoundPackLibraryInvalidation(
             revision: revision,
             packIDs: invalidatesAll ? [] : invalidatedPackIDs,
-            invalidatesAll: invalidatesAll)
+            invalidatesAll: invalidatesAll,
+            mutationOpen: !openMutations.isEmpty,
+            mutationRefreshRequired: mutationRefreshRequired)
+    }
+
+    func snapshotForRefreshStart() -> SoundPackLibraryInvalidation? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard openMutations.isEmpty else { return nil }
+        mutationRefreshRequired = false
+        return SoundPackLibraryInvalidation(
+            revision: revision,
+            packIDs: invalidatesAll ? [] : invalidatedPackIDs,
+            invalidatesAll: invalidatesAll,
+            mutationOpen: false,
+            mutationRefreshRequired: false)
     }
 
     func isCurrent(_ candidateRevision: UInt64) -> Bool {
@@ -439,6 +473,7 @@ private final class SoundPackLibraryInvalidationMailbox: @unchecked Sendable {
         guard revision == candidateRevision else { return false }
         invalidatedPackIDs.removeAll()
         invalidatesAll = false
+        mutationRefreshRequired = false
         body()
         return true
     }
@@ -456,6 +491,16 @@ private final class SoundPackLibraryInvalidationMailbox: @unchecked Sendable {
         body()
         return true
     }
+
+    private func recordInvalidation(packIDs: Set<String>) {
+        revision &+= 1
+        if packIDs.isEmpty {
+            invalidatesAll = true
+            invalidatedPackIDs.removeAll()
+        } else if !invalidatesAll {
+            invalidatedPackIDs.formUnion(packIDs)
+        }
+    }
 }
 
 /// App-lifetime owner of sound-pack scanning, incremental fingerprints, refresh coalescing, and the
@@ -466,6 +511,7 @@ public actor SoundPackLibrary {
     #if DEBUG
     private let beforeReadyPublication: @Sendable () -> Void
     private let beforeFailurePublication: @Sendable () -> Void
+    private let onRejectedTerminalDeferred: @Sendable () -> Void
     #endif
     private nonisolated let invalidationMailbox = SoundPackLibraryInvalidationMailbox()
     private var state: SoundPackLibraryState = .unloaded
@@ -486,6 +532,7 @@ public actor SoundPackLibrary {
         #if DEBUG
         beforeReadyPublication = {}
         beforeFailurePublication = {}
+        onRejectedTerminalDeferred = {}
         #endif
     }
 
@@ -496,12 +543,14 @@ public actor SoundPackLibrary {
         scanner: SoundPackLibraryScanner,
         inventoryOperation: (@Sendable (String) -> SoundPackAudioInventory)? = nil,
         beforeReadyPublication: @escaping @Sendable () -> Void = {},
-        beforeFailurePublication: @escaping @Sendable () -> Void = {}
+        beforeFailurePublication: @escaping @Sendable () -> Void = {},
+        onRejectedTerminalDeferred: @escaping @Sendable () -> Void = {}
     ) {
         self.scanner = scanner
         inventoryLoader = inventoryOperation.map { SoundPackAudioInventoryLoader(operation: $0) }
         self.beforeReadyPublication = beforeReadyPublication
         self.beforeFailurePublication = beforeFailurePublication
+        self.onRejectedTerminalDeferred = onRejectedTerminalDeferred
     }
     #endif
 
@@ -594,6 +643,31 @@ public actor SoundPackLibrary {
         }
     }
 
+    /// Opens a synchronous or owner-tracked mutation fence before any bytes can change. The
+    /// opaque token permits independent async editor operations to overlap without conflating
+    /// their completion or exact invalidation sets.
+    nonisolated func beginMutation(packIDs: Set<String>) -> SoundPackLibraryMutation {
+        let mutation = invalidationMailbox.beginMutation(packIDs: packIDs)
+        Task { [weak self] in
+            await self?.receiveInvalidation()
+        }
+        return mutation
+    }
+
+    /// Closes exactly one mutation fence. A mismatched or replayed token changes no state and
+    /// therefore fails closed instead of releasing another operation's publication barrier.
+    @discardableResult
+    nonisolated func endMutation(
+        _ mutation: SoundPackLibraryMutation,
+        changed: Bool
+    ) -> Bool {
+        guard invalidationMailbox.endMutation(mutation, changed: changed) else { return false }
+        Task { [weak self] in
+            await self?.receiveMutationEnd()
+        }
+        return true
+    }
+
     /// Loads the shallow inventory only for the pack a consumer is actually presenting. Results
     /// are shared by both UI surfaces and retained in a four-entry fingerprint-keyed LRU.
     public func audioInventory(packID: String) async -> SoundPackAudioInventory {
@@ -641,15 +715,32 @@ public actor SoundPackLibrary {
         }
     }
 
+    private func receiveMutationEnd() {
+        let invalidation = invalidationMailbox.snapshot()
+        guard !invalidation.mutationOpen else { return }
+        if refreshInFlight {
+            if activeInvalidationRevision != invalidation.revision {
+                followUpRequired = true
+            }
+            return
+        }
+        guard followUpRequired || invalidation.mutationRefreshRequired else { return }
+        followUpRequired = false
+        startRefresh()
+    }
+
     private func startRefresh() {
         guard !refreshInFlight else { return }
+        guard let invalidation = invalidationMailbox.snapshotForRefreshStart() else {
+            followUpRequired = true
+            return
+        }
         refreshInFlight = true
         followUpRequired = false
         publish(.loading(previous: snapshot))
 
         let scanner = self.scanner
         let previous = snapshot
-        let invalidation = invalidationMailbox.snapshot()
         activeInvalidationRevision = invalidation.revision
         let request = SoundPackLibraryScanRequest(
             previous: previous,
@@ -669,8 +760,7 @@ public actor SoundPackLibrary {
         activeInvalidationRevision = nil
 
         guard invalidationMailbox.isCurrent(invalidation.revision) else {
-            followUpRequired = false
-            startRefresh()
+            deferRejectedTerminalUntilMutationsClose()
             return
         }
 
@@ -702,8 +792,7 @@ public actor SoundPackLibrary {
                         publish(readyState)
                     })
             else {
-                followUpRequired = false
-                startRefresh()
+                deferRejectedTerminalUntilMutationsClose()
                 return
             }
             terminalState = readyState
@@ -727,11 +816,22 @@ public actor SoundPackLibrary {
         }
 
         if followUpRequired {
-            followUpRequired = false
-            startRefresh()
+            deferRejectedTerminalUntilMutationsClose()
             return
         }
         resumeRefreshWaiters(with: terminalState)
+    }
+
+    private func deferRejectedTerminalUntilMutationsClose() {
+        followUpRequired = true
+        guard !invalidationMailbox.snapshot().mutationOpen else {
+            #if DEBUG
+            onRejectedTerminalDeferred()
+            #endif
+            return
+        }
+        followUpRequired = false
+        startRefresh()
     }
 
     private func publish(_ next: SoundPackLibraryState) {

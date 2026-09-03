@@ -47,22 +47,21 @@ private final class SoundEditorForkCollisionOccupier: @unchecked Sendable {
 
 /// Coordinates the exact M-07 window without sleeping: an old scan is held immediately before
 /// terminal publication, while the restore writer is held immediately before publishing its new
-/// pack tree. The follow-up scan is then held until the writer has returned.
+/// pack tree. The library must defer that rejected terminal until the mutation closes.
 private final class SoundEditorMutationPublicationGate: @unchecked Sendable {
     private let lock = NSLock()
     private let oldPublicationEntered = DispatchSemaphore(value: 0)
     private let oldPublicationResume = DispatchSemaphore(value: 0)
-    private let followUpRequestEntered = DispatchSemaphore(value: 0)
-    private let followUpRequestResume = DispatchSemaphore(value: 0)
+    private let rejectedTerminalDeferred = DispatchSemaphore(value: 0)
     private var armedRequestCount: Int?
     private var requestCount = 0
     private var didPauseOldPublication = false
-    private var followUpArrivedBeforeWriterPublishStorage = false
+    private var oldTerminalDeferredBeforeWriterPublishStorage = false
 
-    var followUpArrivedBeforeWriterPublish: Bool {
+    var oldTerminalDeferredBeforeWriterPublish: Bool {
         lock.lock()
         defer { lock.unlock() }
-        return followUpArrivedBeforeWriterPublishStorage
+        return oldTerminalDeferredBeforeWriterPublishStorage
     }
 
     func arm(afterRequestCount requestCount: Int) {
@@ -74,11 +73,7 @@ private final class SoundEditorMutationPublicationGate: @unchecked Sendable {
     func observeScanRequest() {
         lock.lock()
         requestCount += 1
-        let shouldPause = armedRequestCount.map { requestCount == $0 + 2 } ?? false
         lock.unlock()
-        guard shouldPause else { return }
-        followUpRequestEntered.signal()
-        _ = followUpRequestResume.wait(timeout: .now() + 5)
     }
 
     func pauseArmedOldPublication() {
@@ -96,16 +91,16 @@ private final class SoundEditorMutationPublicationGate: @unchecked Sendable {
     }
 
     /// Runs on the synchronous restore writer's MainActor hook.
-    func releaseOldPublicationAndAwaitFollowUp() {
+    func releaseOldPublicationAndAwaitDeferredTerminal() {
         oldPublicationResume.signal()
-        let arrived = followUpRequestEntered.wait(timeout: .now() + 5) == .success
+        let deferred = rejectedTerminalDeferred.wait(timeout: .now() + 5) == .success
         lock.lock()
-        followUpArrivedBeforeWriterPublishStorage = arrived
+        oldTerminalDeferredBeforeWriterPublishStorage = deferred
         lock.unlock()
     }
 
-    func allowFollowUpScan() {
-        followUpRequestResume.signal()
+    func observeRejectedTerminalDeferred() {
+        rejectedTerminalDeferred.signal()
     }
 }
 
@@ -1187,9 +1182,10 @@ func runSoundPacksEditorMutationSuites() async {
                 ],
                 builtinPackIDs: ["factory-a"],
                 beforeFactoryPackRestorePublish: {
-                    gate.releaseOldPublicationAndAwaitFollowUp()
+                    gate.releaseOldPublicationAndAwaitDeferredTerminal()
                 },
                 beforeReadyPublication: { gate.pauseArmedOldPublication() },
+                onRejectedTerminalDeferred: { gate.observeRejectedTerminalDeferred() },
                 onScanRequestForTesting: { _ in gate.observeScanRequest() })
             let factoryPack = root.appendingPathComponent("factory-packs/factory-a")
             writeFixture(
@@ -1226,20 +1222,17 @@ func runSoundPacksEditorMutationSuites() async {
             await fixture.library.requestRefresh(trigger: .retry)
             guard gate.waitUntilOldPublicationIsPaused() else {
                 expect(false, "旧 scan 必须确定性停在 terminal publication 前")
-                gate.allowFollowUpScan()
                 return
             }
             guard case .accepted(let operationID) = owner.send(.invoke(confirmation.confirmAction))
             else {
                 expect(false, "restore confirmation 必须接受 scheduled operation")
-                gate.allowFollowUpScan()
                 return
             }
             await waitForSoundEditorOperation(owner, operationID: operationID)
             expect(
-                gate.followUpArrivedBeforeWriterPublish,
-                "writer publish 前必须先由 invalidation fence 拒绝旧 terminal 并排入 follow-up")
-            gate.allowFollowUpScan()
+                gate.oldTerminalDeferredBeforeWriterPublish,
+                "writer publish 前必须先由 invalidation fence 拒绝旧 terminal 并 defer follow-up")
             await waitForSoundEditorScanCount(fixture.recorder, atLeast: scansBefore + 2)
             await fixture.library.waitUntilIdleForTesting()
             await waitForSoundEditorSelectedPackName(owner, expected: "factory-new")
@@ -1771,6 +1764,7 @@ func makeSoundEditorFixture(
     moveUserPackToTrashForTesting: (@MainActor @Sendable (URL) throws -> URL?)? = nil,
     afterFinalImportCancellationSampleForTesting: (@Sendable () -> Void)? = nil,
     beforeReadyPublication: @escaping @Sendable () -> Void = {},
+    onRejectedTerminalDeferred: @escaping @Sendable () -> Void = {},
     onScanRequestForTesting: @escaping @Sendable (SoundPackLibraryScanRequest) -> Void = { _ in }
 ) -> SoundEditorFixture {
     let packs = root.appendingPathComponent("packs", isDirectory: true)
@@ -1835,7 +1829,8 @@ func makeSoundEditorFixture(
             case .failure(let error): return .unavailable(error)
             }
         },
-        beforeReadyPublication: beforeReadyPublication)
+        beforeReadyPublication: beforeReadyPublication,
+        onRejectedTerminalDeferred: onRejectedTerminalDeferred)
     let refreshCoordinator = SoundPacksRefreshCoordinator()
     let owner: SoundPacksEditorOwner
     if let afterFinalImportCancellationSampleForTesting {
