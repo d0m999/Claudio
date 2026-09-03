@@ -2302,9 +2302,28 @@ func runSoundPacksRefreshSuites() async {
         }
         let legacyControllerURL = soundPacksRepoRoot().appendingPathComponent(
             "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift")
+        let productionSourcesRoot = soundPacksRepoRoot().appendingPathComponent("gui/Sources")
+        let productionEnumerator = FileManager.default.enumerator(
+            atPath: productionSourcesRoot.path)
+        var rawModelConstructionSites: [String] = []
+        while let name = productionEnumerator?.nextObject() as? String {
+            guard name.hasSuffix(".swift"),
+                let code = soundPacksCode("gui/Sources/\(name)"),
+                code.contains("SoundPacksWindowModel(")
+            else { continue }
+            rawModelConstructionSites.append(name)
+        }
 
         expect(owner.contains("@MainActor"), "共享编辑 owner 必须显式 @MainActor")
-        expect(model.contains("@MainActor"), "窗口 model 必须显式 @MainActor")
+        expect(
+            model.contains("@MainActor")
+                && model.contains("package final class SoundPacksWindowModel")
+                && !model.contains("public final class SoundPacksWindowModel"),
+            "raw window model 必须降为 package implementation")
+        expect(
+            rawModelConstructionSites == ["ClaudioGUICore/SoundPacksEditorOwner.swift"],
+            "shipping/DEBUG production 只能由 owner implementation 构造 raw model，实得 "
+                + "\(rawModelConstructionSites.sorted())")
         expect(
             !FileManager.default.fileExists(atPath: legacyControllerURL.path),
             "cutover 后独立 SoundPacks window/autosave/title subscriptions 必须移除")
