@@ -100,7 +100,7 @@ package func makeModernLoginItemServiceAdapter(
     register: @escaping @MainActor () throws -> Void,
     unregister: @escaping @MainActor () throws -> Void
 ) -> LoginItemServiceAdapter {
-    func projectedStatus() -> LoginItemRegistrationState {
+    let projectedStatus: @MainActor @Sendable () -> LoginItemRegistrationState = {
         projectModernLoginItemStatus(
             rawValue: status(),
             notRegisteredValue: notRegisteredValue,
@@ -131,7 +131,7 @@ package func makeLegacyLoginItemServiceAdapter(
     registrationIsEnabled: @escaping @MainActor (String) -> Bool?,
     setEnabled: @escaping @MainActor (String, Bool) -> Bool
 ) -> LoginItemServiceAdapter {
-    func projectedStatus() -> LoginItemRegistrationState {
+    let projectedStatus: @MainActor @Sendable () -> LoginItemRegistrationState = {
         guard embeddedLegacyLoginItemIsUsable(at: embeddedBundleURL) else {
             return .unavailable
         }

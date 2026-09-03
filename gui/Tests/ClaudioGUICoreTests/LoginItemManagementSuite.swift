@@ -238,8 +238,10 @@ func runLoginItemManagementSuites() {
         let scanned = strippingComments(source)
         let code = scanned.codeWithoutStringLiterals
         guard scanned.unmodeledConstructs.isEmpty,
-            let modern = bracedBlock(after: "package func makeModernLoginItemServiceAdapter", in: code),
-            let legacy = bracedBlock(after: "package func makeLegacyLoginItemServiceAdapter", in: code)
+            let modern = bracedBlock(
+                after: "package func makeModernLoginItemServiceAdapter", in: code),
+            let legacy = bracedBlock(
+                after: "package func makeLegacyLoginItemServiceAdapter", in: code)
         else {
             expect(false, "必须能完整解析 modern/legacy Login item factories")
             return
