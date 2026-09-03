@@ -1,6 +1,9 @@
 import ClaudioGUICore
 import ClaudioLocalization
 import Foundation
+#if canImport(ClaudioSettingsPresentation)
+import ClaudioSettingsPresentation
+#endif
 
 // Dependency-free test harness — mirrors `helper/Tests/ClaudioCoreTests/main.swift`
 // exactly (down to comment wording), for the same reason: this machine has
@@ -157,6 +160,7 @@ await runUsageActivitySuites()
 runGlobalShortcutsSuites()
 runSettingsNavigationSuites()
 runSettingsPresentationCharacterizationSuites()
+runSettingsPresentationTargetSuites()
 runPreviewFixturesSuites()
 runMultiProviderPrototypeContractSuites()
 runVolumeDragSessionSuites()
