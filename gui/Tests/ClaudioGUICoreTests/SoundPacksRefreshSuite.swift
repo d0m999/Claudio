@@ -2300,7 +2300,6 @@ func runSoundPacksRefreshSuites() async {
                 "读不到 SoundPacks owner/model/view 或统一 Settings wiring")
             return
         }
-        let ownerFlat = collapsingWhitespace(owner)
         let legacyControllerURL = soundPacksRepoRoot().appendingPathComponent(
             "gui/Sources/SoundPacksWindow/SoundPacksWindowController.swift")
 
@@ -2320,25 +2319,30 @@ func runSoundPacksRefreshSuites() async {
                 && !accessibility.contains("SoundPacksWindowStatusAnnouncementTracker"),
             "旧 revision announcement tracker 必须由 semantic queue + exact-ID acknowledgement 完整替代并删除")
         expect(
-            owner.contains("public final class SoundPacksEditorOwner")
-                && owner.contains("public let model: SoundPacksWindowModel")
+            owner.contains("package final class SoundPacksEditorOwner")
+                && owner.contains("private let model: SoundPacksWindowModel")
+                && !owner.contains("public let model: SoundPacksWindowModel")
+                && !owner.contains("public let userPacksDirectory: URL")
                 && menu.components(separatedBy: "SoundPacksEditorOwner(").count - 1 == 1
                 && settingsView.contains("editorOwner: soundPacksEditorOwner")
                 && !settingsController.contains("model = SoundPacksWindowModel("),
-            "Foundation-only owner 必须是 production 唯一可写 model 来源")
+            "package-local owner 必须隐藏 raw model/directory，并保持 production 唯一可写来源")
+        expect(
+            !owner.contains("public func apply(")
+                && !owner.contains("public func completePanelPackSwitch(")
+                && !owner.contains("public func adoptAICue(")
+                && !owner.contains("public func shouldAnnounceSelectionChange(")
+                && !owner.contains("public func announcementFacts("),
+            "common production interface 只能保留 coherent presentation、sync send 与 async perform")
         expect(
             view.contains("packRowMetaSlots(") && view.contains("case .modified:"),
             "管理窗口 license 必须复用 factoryIntegrity 的 modified 优先规则")
         expect(
-            ownerFlat.contains(
-                "guard model.selectPackForInspection(packID) else { return .resolved(.overview(surface: resolvedRoute.surface)) }"
-            )
-                && owner.contains("model.setManagedSurface(route.surface)")
-                && view.contains(
+            view.contains(
                     ".activate(.sounds(route: route, requestRevision: routeRequestRevision))")
                 && view.contains("focusCoordinator.requestInitialFocus(route: focusRoute)")
                 && view.contains("focusCoordinator.requestRoute(focusRoute)"),
-            "editEvent 必须把 typed route 交给 owner 等待 library 证明；view 只消费重验后的 focusRoute")
+            "editEvent 必须把 typed route 交给 owner；view 只消费重验后的 focusRoute")
         expect(
             !view.contains("@State private var isPerformingWrite")
                 && view.contains("presentation.activities.contains")
