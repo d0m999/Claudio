@@ -228,6 +228,34 @@ func runLoginItemManagementSuites() {
         }
     }
 
+    suite("Login item projector：跨 Xcode toolchain 保持显式 MainActor Sendable closure") {
+        let sourceURL = guiTestRepositoryRoot().appendingPathComponent(
+            "gui/Sources/ClaudioGUICore/LoginItemManagement.swift")
+        guard let source = try? String(contentsOf: sourceURL, encoding: .utf8) else {
+            expect(false, "读不到 LoginItemManagement.swift")
+            return
+        }
+        let scanned = strippingComments(source)
+        let code = scanned.codeWithoutStringLiterals
+        guard scanned.unmodeledConstructs.isEmpty,
+            let modern = bracedBlock(
+                after: "package func makeModernLoginItemServiceAdapter", in: code),
+            let legacy = bracedBlock(
+                after: "package func makeLegacyLoginItemServiceAdapter", in: code)
+        else {
+            expect(false, "必须能完整解析 modern/legacy Login item factories")
+            return
+        }
+        let typedProjector =
+            "let projectedStatus: @MainActor @Sendable () -> LoginItemRegistrationState = {"
+        expect(
+            modern.contains(typedProjector)
+                && legacy.contains(typedProjector)
+                && !modern.contains("func projectedStatus")
+                && !legacy.contains("func projectedStatus"),
+            "两处 projector 必须显式 typed 为 @MainActor @Sendable closure，禁止退回 nested func")
+    }
+
     suite("Production login item wiring：modern/legacy API 与 macOS 12 floor 完整") {
         let root = guiTestRepositoryRoot()
         let adapterURL = root.appendingPathComponent(
