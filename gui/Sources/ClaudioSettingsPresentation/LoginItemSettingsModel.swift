@@ -1,12 +1,10 @@
 import ClaudioGUICore
-import Combine
 
 /// Pure presentation owner for ServiceManagement facts supplied by the executable adapter.
 /// Registration remains a system fact: failed requests preserve the last observed value and retry
 /// repeats the exact failed intent rather than optimistically changing the toggle.
 @MainActor
-package final class LoginItemSettingsModel: ObservableObject {
-    @Published
+package final class LoginItemSettingsModel {
     package private(set) var projection: LoginItemSettingsProjection
 
     private let adapter: LoginItemServiceAdapter

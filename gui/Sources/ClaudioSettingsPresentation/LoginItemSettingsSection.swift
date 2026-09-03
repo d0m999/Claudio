@@ -21,6 +21,9 @@ package struct LoginItemSettingsSection: View {
 
     package var body: some View {
         let l10n = ClaudioL10n(language: session.state.language)
+        let loginItemStatusText = SettingsPresentationAnnouncement.Meaning.loginItemStatus(
+            session.state.loginItemRegistration
+        ).localizedSentence(language: session.state.language)
         VStack(alignment: .leading, spacing: 10) {
             Text(l10n.text(.settingsGeneralLoginItem.description))
                 .foregroundColor(.secondary)
@@ -31,10 +34,10 @@ package struct LoginItemSettingsSection: View {
             )
             .disabled(!session.state.loginItemRegistration.canToggle)
             .accessibilityHint(l10n.text(.settingsGeneralLoginItem.hint))
-            .accessibilityValue(statusText)
+            .accessibilityValue(loginItemStatusText)
             .accessibilityIdentifier(SettingsPresentationAccessibilityID.loginItemToggle)
 
-            Text(statusText)
+            Text(loginItemStatusText)
                 .foregroundColor(.secondary)
 
             if session.state.loginItemRegistration == .requiresApproval {
@@ -47,7 +50,11 @@ package struct LoginItemSettingsSection: View {
 
             if let failure = session.state.loginItemFailure {
                 VStack(alignment: .leading, spacing: 8) {
-                    FailureRow(message: failureText(failure))
+                    FailureRow(
+                        message: SettingsPresentationAnnouncement.Meaning.loginItemFailure(
+                            failure
+                        ).localizedSentence(language: session.state.language)
+                    )
 
                     Button(l10n.text(.commonRetry)) {
                         session.retryLoginItemOperation()
@@ -69,26 +76,4 @@ package struct LoginItemSettingsSection: View {
             set: { session.setLoginItemEnabled($0) })
     }
 
-    private var statusText: String {
-        let l10n = ClaudioL10n(language: session.state.language)
-        return switch session.state.loginItemRegistration {
-        case .disabled: l10n.text(.settingsGeneralLoginItem.disabled)
-        case .enabled: l10n.text(.settingsGeneralLoginItem.enabled)
-        case .requiresApproval: l10n.text(.settingsGeneralLoginItem.requiresApproval)
-        case .unavailable: l10n.text(.settingsGeneralLoginItem.unavailable)
-        }
-    }
-
-    private func failureText(_ failure: LoginItemOperationFailure) -> String {
-        let l10n = ClaudioL10n(language: session.state.language)
-        return switch failure.reason {
-        case .embeddedLoginItemMissing:
-            l10n.text(.settingsGeneralLoginItem.failureMissing)
-        case .systemRejected:
-            l10n.text(
-                failure.requestedEnabled
-                    ? .settingsGeneralLoginItem.failureEnable
-                    : .settingsGeneralLoginItem.failureDisable)
-        }
-    }
 }

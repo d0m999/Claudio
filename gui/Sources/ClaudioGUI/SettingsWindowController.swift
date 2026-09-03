@@ -159,11 +159,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
                 }
             }
         settingsPresentationCancellable = settingsPresentationSession.$state
-            .map(\.pendingAnnouncement)
-            .removeDuplicates()
-            .sink { [weak self] announcement in
+            .sink { [weak self] state in
                 MainActor.assumeIsolated {
-                    guard announcement != nil else { return }
+                    guard state.pendingAnnouncement != nil else { return }
                     self?.scheduleSettingsPresentationAnnouncementDelivery()
                 }
             }
@@ -337,35 +335,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             window.isVisible,
             window.isKeyWindow
         else { return }
-        let l10n = ClaudioL10n(language: preferences.language)
-        let sentence: String
-        switch announcement.meaning {
-        case .loginItemStatus(let registration):
-            switch registration {
-            case .disabled: sentence = l10n.text(.settingsGeneralLoginItem.disabled)
-            case .enabled: sentence = l10n.text(.settingsGeneralLoginItem.enabled)
-            case .requiresApproval:
-                sentence = l10n.text(.settingsGeneralLoginItem.requiresApproval)
-            case .unavailable: sentence = l10n.text(.settingsGeneralLoginItem.unavailable)
-            }
-        case .loginItemFailure(let failure):
-            switch failure.reason {
-            case .embeddedLoginItemMissing:
-                sentence = l10n.text(.settingsGeneralLoginItem.failureMissing)
-            case .systemRejected:
-                sentence = l10n.text(
-                    failure.requestedEnabled
-                        ? .settingsGeneralLoginItem.failureEnable
-                        : .settingsGeneralLoginItem.failureDisable)
-            }
-        case .platformAction(let action, _):
-            switch action {
-            case .openLoginItemsSettings:
-                sentence = l10n.text(.settingsGeneralLoginItem.unavailable)
-            case .openCalendarPrivacySettings:
-                sentence = l10n.text(.settingsNotificationsOpenCalendarPrivacy)
-            }
-        }
+        let sentence = announcement.meaning.localizedSentence(language: preferences.language)
         guard announceBasicSettingsUpdate(sentence) else { return }
         settingsPresentationSession.acknowledgeAnnouncement(
             id: announcement.id,

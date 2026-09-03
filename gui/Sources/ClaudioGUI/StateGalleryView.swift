@@ -467,7 +467,6 @@ private struct SettingsWindowRouteFrame: View {
     @StateObject private var model: SettingsWindowPresentationModel<NSRunningApplication>
     @StateObject private var languageStore: ClaudioPreferences
     @StateObject private var dynamicQuietPolicy: DynamicQuietPolicyController
-    @StateObject private var loginItemSettings: LoginItemSettingsModel
     @StateObject private var settingsPresentationSession: SettingsPresentationSession
     @StateObject private var usageSettings: UsageSettingsModel
     @StateObject private var globalShortcutSettings: GlobalShortcutSettingsModel
@@ -493,7 +492,6 @@ private struct SettingsWindowRouteFrame: View {
         _dynamicQuietPolicy = StateObject(
             wrappedValue: Self.makeDynamicQuietPolicy(for: experienceProfile))
         let loginItemSettings = Self.makeLoginItemSettings(for: experienceProfile)
-        _loginItemSettings = StateObject(wrappedValue: loginItemSettings)
         _settingsPresentationSession = StateObject(
             wrappedValue: SettingsPresentationSession(
                 dependencies: SettingsPresentationDependencies(

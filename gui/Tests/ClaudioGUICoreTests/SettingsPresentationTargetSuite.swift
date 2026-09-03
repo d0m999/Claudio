@@ -1,5 +1,6 @@
 import AppKit
 import ClaudioGUICore
+import ClaudioLocalization
 import ClaudioSettingsPresentation
 import Combine
 import Foundation
@@ -80,11 +81,159 @@ func runSettingsPresentationTargetSuites() {
         }
         expect(
             model.contains("final class LoginItemSettingsModel")
+                && !model.contains("ObservableObject")
+                && !model.contains("@Published")
+                && !model.contains("import Combine")
                 && !model.contains("import AppKit")
                 && !model.contains("import ServiceManagement")
                 && !model.contains("SMAppService")
                 && !model.contains("SMLoginItemSetEnabled"),
             "Login model 必须保持纯 presentation，不得泄漏 system adapter")
+    }
+
+    suite("Settings presentation deletion：caller 持有 focus，session 持有 Login 发布") {
+        let root = guiTestRepositoryRoot()
+        let paths = [
+            "component": "gui/Sources/ClaudioGUIComponents/SharedMasterVolumeSlider.swift",
+            "panel": "gui/Sources/ClaudioGUI/MasterVolumeRow.swift",
+            "events": "gui/Sources/ClaudioGUI/EventSettingsWindowView.swift",
+            "session":
+                "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationSession.swift",
+            "gallery": "gui/Sources/ClaudioGUI/StateGalleryView.swift",
+        ]
+        var code: [String: String] = [:]
+        for (name, path) in paths {
+            let url = root.appendingPathComponent(path)
+            guard let source = try? String(contentsOf: url, encoding: .utf8) else {
+                expect(false, "读不到 \(path)")
+                return
+            }
+            let scanned = strippingComments(source)
+            guard scanned.unmodeledConstructs.isEmpty else {
+                expect(false, "\(path) 含 source audit 无法建模的构造")
+                return
+            }
+            code[name] = scanned.codeWithoutStringLiterals
+        }
+        guard let component = code["component"], let panel = code["panel"],
+            let events = code["events"], let session = code["session"],
+            let gallery = code["gallery"],
+            let panelSliderScope = settingsBracedBlock(
+                after: "private var slider: some View", in: panel),
+            let eventSliderScope = settingsBracedBlock(
+                after: "private struct EventSettingsMasterVolumeControl: View", in: events),
+            let refresh = settingsBracedBlock(after: "package func refreshLoginItem", in: session),
+            let setEnabled = settingsBracedBlock(
+                after: "package func setLoginItemEnabled", in: session),
+            let retry = settingsBracedBlock(
+                after: "package func retryLoginItemOperation", in: session)
+        else {
+            expect(false, "必须能解析 slider/Login deletion wiring")
+            return
+        }
+        let flatComponent = collapsingWhitespace(component)
+        let flatPanelSliderScope = collapsingWhitespace(panelSliderScope)
+        let flatEventSliderScope = collapsingWhitespace(eventSliderScope)
+
+        expect(
+            flatComponent.contains("package struct SharedMasterVolumeSlider: View")
+                && !flatComponent.contains("SharedMasterVolumeSlider<")
+                && !component.contains("FocusState<")
+                && !component.contains("focusedTarget")
+                && !component.contains("focusIdentity")
+                && !component.contains(".focused("),
+            "共享 slider 必须非泛型且不拥有 caller 的 focus identity")
+        for (name, scope) in [
+            ("Panel", flatPanelSliderScope), ("Events", flatEventSliderScope),
+        ] {
+            guard let slider = scope.range(of: "SharedMasterVolumeSlider("),
+                let focus = scope.range(of: ".focused(focusedTarget, equals: .masterVolume)")
+            else {
+                expect(false, "\(name) caller 必须同时包含 slider 与 exact focus identity")
+                continue
+            }
+            expect(
+                slider.lowerBound < focus.lowerBound,
+                "\(name) caller 必须在共享 slider 后接回原 exact focus identity")
+        }
+        expect(
+            !session.contains("loginItemSettings.$projection")
+                && !session.contains("Set<AnyCancellable>")
+                && session.contains("preferenceCancellable: AnyCancellable?"),
+            "session 的固定依赖不得保留冗余 Login Combine stream 或 cancellable collection")
+        for (name, command) in [
+            ("refresh", refresh), ("setEnabled", setEnabled), ("retry", retry),
+        ] {
+            guard let invocation = command.range(of: "dependencies.loginItemSettings."),
+                let adoption = command.range(
+                    of: "loginProjection = dependencies.loginItemSettings.projection")
+            else {
+                expect(false, "\(name) 必须在 command 后同步采纳 Login projection")
+                continue
+            }
+            expect(
+                invocation.lowerBound < adoption.lowerBound,
+                "\(name) 必须先执行 model command，再同步采纳同一 model projection")
+        }
+        expect(
+            !gallery.contains("@StateObject private var loginItemSettings")
+                && !gallery.contains("_loginItemSettings = StateObject"),
+            "DEBUG gallery 已由 session 强持有 Login model，不得再保留第二个 StateObject owner")
+    }
+
+    suite("Settings presentation deletion：语义 announcement 唯一拥有本地化与 UInt64 head") {
+        let root = guiTestRepositoryRoot()
+        let announcementURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/SettingsPresentationAnnouncement.swift")
+        let sectionURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioSettingsPresentation/LoginItemSettingsSection.swift")
+        let controllerURL = root.appendingPathComponent(
+            "gui/Sources/ClaudioGUI/SettingsWindowController.swift")
+        guard
+            let announcementSource = try? String(
+                contentsOf: announcementURL, encoding: .utf8),
+            let sectionSource = try? String(contentsOf: sectionURL, encoding: .utf8),
+            let controllerSource = try? String(contentsOf: controllerURL, encoding: .utf8)
+        else {
+            expect(false, "读不到 announcement/section/controller source")
+            return
+        }
+        let announcementScan = strippingComments(announcementSource)
+        let sectionScan = strippingComments(sectionSource)
+        let controllerScan = strippingComments(controllerSource)
+        guard announcementScan.unmodeledConstructs.isEmpty,
+            sectionScan.unmodeledConstructs.isEmpty,
+            controllerScan.unmodeledConstructs.isEmpty
+        else {
+            expect(false, "announcement/section/controller source audit 遇到无法建模的构造")
+            return
+        }
+        let announcement = announcementScan.codeWithoutStringLiterals
+        let section = sectionScan.codeWithoutStringLiterals
+        let controller = controllerScan.codeWithoutStringLiterals
+        guard
+            let delivery = settingsBracedBlock(
+                after: "private func deliverPendingSettingsPresentationAnnouncement",
+                in: controller)
+        else {
+            expect(false, "解析不到 Settings announcement delivery")
+            return
+        }
+
+        expect(
+            announcement.contains("package let id: UInt64")
+                && !announcement.contains("Identifiable")
+                && !announcement.contains("RawRepresentable")
+                && !announcement.contains("struct ID"),
+            "exact-head 只需要 UInt64，不得保留无 consumer 的 collection identity witness")
+        expect(
+            announcement.contains("package func localizedSentence(")
+                && section.contains(".localizedSentence(")
+                && delivery.contains("announcement.meaning.localizedSentence(")
+                && !delivery.contains("settingsGeneralLoginItem")
+                && !section.contains("switch session.state.loginItemRegistration")
+                && !section.contains("switch failure.reason"),
+            "status、failure 与 native announcement 必须复用 Meaning 的单一本地化 owner")
     }
 
     suite("Settings native announcement：延迟后重验 current head 且窗口恢复会重试") {
@@ -97,7 +246,10 @@ func runSettingsPresentationTargetSuites() {
         let scanned = strippingComments(controller)
         let code = scanned.codeWithoutStringLiterals
         guard scanned.unmodeledConstructs.isEmpty,
-            let subscription = settingsBracedBlock(
+            let subscriptionBody = settingsBracedBlock(
+                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                in: code),
+            let subscriptionPrefix = settingsSinkStatementPrefix(
                 after: "settingsPresentationCancellable = settingsPresentationSession.$state",
                 in: code),
             let scheduler = settingsBracedBlock(
@@ -112,6 +264,16 @@ func runSettingsPresentationTargetSuites() {
             let showRetry = showWindow.range(
                 of: "scheduleSettingsPresentationAnnouncementDelivery()"),
             let deferredTurn = scheduler.range(of: "DispatchQueue.main.async"),
+            let latchGuard = scheduler.range(
+                of: "guard !settingsPresentationAnnouncementDeliveryScheduled"),
+            let latchSet = scheduler.range(
+                of: "settingsPresentationAnnouncementDeliveryScheduled = true"),
+            let deferredBody = settingsBracedBlock(
+                after: "DispatchQueue.main.async", in: scheduler),
+            let latchReset = deferredBody.range(
+                of: "settingsPresentationAnnouncementDeliveryScheduled = false"),
+            let deferredDelivery = deferredBody.range(
+                of: "deliverPendingSettingsPresentationAnnouncement()"),
             let currentHead = delivery.range(
                 of: "settingsPresentationSession.state.pendingAnnouncement"),
             let post = delivery.range(of: "announceBasicSettingsUpdate(sentence)"),
@@ -122,15 +284,19 @@ func runSettingsPresentationTargetSuites() {
         }
 
         expect(
-            subscription.contains("guard announcement != nil")
-                && subscription.contains("scheduleSettingsPresentationAnnouncementDelivery()")
-                && !subscription.contains("acknowledgeAnnouncement"),
-            "$state synchronous sink 必须忽略 nil emission，且只能调度、不能同步 post/ack")
+            subscriptionBody.contains("guard state.pendingAnnouncement != nil")
+                && subscriptionBody.contains("scheduleSettingsPresentationAnnouncementDelivery()")
+                && !subscriptionBody.contains("acknowledgeAnnouncement")
+                && !subscriptionPrefix.contains(".map(")
+                && !subscriptionPrefix.contains(".removeDuplicates("),
+            "$state synchronous sink 必须直接读 emitted state，且只能调度、不能同步 post/ack")
         expect(
-            scheduler.contains("settingsPresentationAnnouncementDeliveryScheduled")
+            latchGuard.lowerBound < latchSet.lowerBound
+                && latchSet.lowerBound < deferredTurn.lowerBound
+                && latchReset.lowerBound < deferredDelivery.lowerBound
                 && !scheduler[..<deferredTurn.lowerBound].contains(
                     "settingsPresentationSession.state.pendingAnnouncement"),
-            "scheduler 在 async 前只能去重，不得读取仍处于 @Published willSet 的旧 head")
+            "scheduler 必须先 guard/set latch，deferred 内先清 latch 再 delivery，且 async 前不读旧 head")
         expect(
             delivery.contains("!isPresentingWindow")
                 && delivery.contains("window.isVisible")
@@ -144,10 +310,119 @@ func runSettingsPresentationTargetSuites() {
                 && didBecomeKey.contains("scheduleSettingsPresentationAnnouncementDelivery()"),
             "pre-key debt 必须在 showWindow 清 latch 后及真实 didBecomeKey 中显式重试")
     }
+
+    suite("Settings native announcement source audit：operator prefix 解析自证有牙") {
+        let direct = """
+            settingsPresentationCancellable = settingsPresentationSession.$state
+                .sink { state in consume(state) }
+            """
+        let staleChain = """
+            settingsPresentationCancellable = settingsPresentationSession.$state
+                .map(\\.pendingAnnouncement)
+                .removeDuplicates()
+                .sink { state in consume(state) }
+            """
+        guard
+            let directPrefix = settingsSinkStatementPrefix(
+                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                in: direct),
+            let stalePrefix = settingsSinkStatementPrefix(
+                after: "settingsPresentationCancellable = settingsPresentationSession.$state",
+                in: staleChain)
+        else {
+            expect(false, "sink statement prefix 解析失败必须 fail closed")
+            return
+        }
+        expect(
+            !directPrefix.contains(".map(") && !directPrefix.contains(".removeDuplicates("),
+            "direct sink 正控不得伪造旧 operator chain")
+        expect(
+            stalePrefix.contains(".map(") && stalePrefix.contains(".removeDuplicates("),
+            "旧 map/removeDuplicates chain 必须落入被审计的 sink statement prefix")
+
+        let coordinatedScheduler = """
+            {
+                guard !settingsPresentationAnnouncementDeliveryScheduled else { return }
+                settingsPresentationAnnouncementDeliveryScheduled = true
+                DispatchQueue.main.async {
+                    settingsPresentationAnnouncementDeliveryScheduled = false
+                    deliverPendingSettingsPresentationAnnouncement()
+                }
+            }
+            """
+        let missingSetScheduler = """
+            {
+                guard !settingsPresentationAnnouncementDeliveryScheduled else { return }
+                DispatchQueue.main.async {
+                    settingsPresentationAnnouncementDeliveryScheduled = false
+                    deliverPendingSettingsPresentationAnnouncement()
+                }
+            }
+            """
+        let lateResetScheduler = """
+            {
+                guard !settingsPresentationAnnouncementDeliveryScheduled else { return }
+                settingsPresentationAnnouncementDeliveryScheduled = true
+                DispatchQueue.main.async {
+                    deliverPendingSettingsPresentationAnnouncement()
+                    settingsPresentationAnnouncementDeliveryScheduled = false
+                }
+            }
+            """
+        expect(
+            settingsAnnouncementSchedulerHasLatchContract(coordinatedScheduler)
+                && !settingsAnnouncementSchedulerHasLatchContract(missingSetScheduler)
+                && !settingsAnnouncementSchedulerHasLatchContract(lateResetScheduler),
+            "latch 审计必须接受正确顺序，并拒绝缺 set 或 delivery 后才 reset 的 mutation")
+    }
 }
 
 @MainActor
 func runSettingsPresentationSliceSuites() {
+    suite("Settings presentation announcement：语义在单一 owner 穷尽本地化") {
+        let english = ClaudioAppLanguage.english
+        let zhHans = ClaudioAppLanguage.zhHans
+        let englishL10n = ClaudioL10n(language: english)
+        let zhHansL10n = ClaudioL10n(language: zhHans)
+        let cases: [(SettingsPresentationAnnouncement.Meaning, ClaudioL10nKey)] = [
+            (.loginItemStatus(.disabled), .settingsGeneralLoginItem.disabled),
+            (.loginItemStatus(.enabled), .settingsGeneralLoginItem.enabled),
+            (.loginItemStatus(.requiresApproval), .settingsGeneralLoginItem.requiresApproval),
+            (.loginItemStatus(.unavailable), .settingsGeneralLoginItem.unavailable),
+            (
+                .loginItemFailure(
+                    LoginItemOperationFailure(
+                        requestedEnabled: true, reason: .embeddedLoginItemMissing)),
+                .settingsGeneralLoginItem.failureMissing
+            ),
+            (
+                .loginItemFailure(
+                    LoginItemOperationFailure(requestedEnabled: true, reason: .systemRejected)),
+                .settingsGeneralLoginItem.failureEnable
+            ),
+            (
+                .loginItemFailure(
+                    LoginItemOperationFailure(requestedEnabled: false, reason: .systemRejected)),
+                .settingsGeneralLoginItem.failureDisable
+            ),
+            (
+                .platformAction(.openLoginItemsSettings, .unavailable),
+                .settingsGeneralLoginItem.unavailable
+            ),
+            (
+                .platformAction(.openCalendarPrivacySettings, .failed),
+                .settingsNotificationsOpenCalendarPrivacy
+            ),
+        ]
+
+        for (meaning, key) in cases {
+            expect(
+                meaning.localizedSentence(language: english) == englishL10n.text(key)
+                    && meaning.localizedSentence(language: zhHans) == zhHansL10n.text(key),
+                "每种 semantic announcement 必须在两种语言下映射到同一 catalog key")
+        }
+    }
+
     suite("Settings presentation slice：非可选依赖与 Login 失败/重试形成同一 session") {
         let preferences = ClaudioPreferences(defaults: UserDefaults())
         let adapterState = SettingsLoginAdapterState()
@@ -212,6 +487,38 @@ func runSettingsPresentationSliceSuites() {
             "两个 Settings-only system effect 必须走穷尽 typed dispatcher")
     }
 
+    suite("Settings presentation Login refresh：同一 registration 仍清除旧失败") {
+        let preferences = ClaudioPreferences(defaults: UserDefaults())
+        let adapterState = SettingsLoginAdapterState()
+        let login = LoginItemSettingsModel(
+            adapter: makeLoginItemServiceAdapter(
+                status: { adapterState.registration },
+                setEnabled: { _ in
+                    throw LoginItemOperationFailureReason.systemRejected
+                }))
+        let session = SettingsPresentationSession(
+            dependencies: SettingsPresentationDependencies(
+                preferences: preferences,
+                loginItemSettings: login),
+            actions: SettingsPresentationActions { _ in .performed })
+
+        session.setLoginItemEnabled(true)
+        expect(
+            session.state.loginItemRegistration == .disabled
+                && session.state.loginItemFailure?.reason == .systemRejected,
+            "失败请求必须保留旧 registration 并公开 failure")
+        if let failureAnnouncement = session.state.pendingAnnouncement {
+            session.acknowledgeAnnouncement(id: failureAnnouncement.id, didPost: true)
+        }
+
+        session.refreshLoginItem()
+        expect(
+            session.state.loginItemRegistration == .disabled
+                && session.state.loginItemFailure == nil
+                && session.state.pendingAnnouncement == nil,
+            "同一 registration 的系统 refresh 必须清除旧 failure，且不得产生 status announcement")
+    }
+
     suite("Settings presentation announcement：稳定 ID 只接受 exact-head 成功确认") {
         let preferences = ClaudioPreferences(defaults: UserDefaults())
         let login = LoginItemSettingsModel(
@@ -234,7 +541,7 @@ func runSettingsPresentationSliceSuites() {
             session.state.pendingAnnouncement?.id == announcement.id,
             "native post 失败不得消费 announcement debt")
         session.acknowledgeAnnouncement(
-            id: SettingsPresentationAnnouncement.ID(rawValue: announcement.id.rawValue + 1),
+            id: announcement.id + 1,
             didPost: true)
         expect(
             session.state.pendingAnnouncement?.id == announcement.id,
@@ -252,7 +559,7 @@ func runSettingsPresentationSliceSuites() {
                         status: { .disabled },
                         setEnabled: { enabled in enabled ? .enabled : .disabled }))),
             actions: SettingsPresentationActions { _ in .unavailable })
-        var synchronouslyAcknowledgedIDs: [SettingsPresentationAnnouncement.ID] = []
+        var synchronouslyAcknowledgedIDs: [UInt64] = []
         let cancellable = session.$state.sink { state in
             MainActor.assumeIsolated {
                 guard let announcement = state.pendingAnnouncement else { return }
@@ -263,7 +570,7 @@ func runSettingsPresentationSliceSuites() {
 
         expect(session.perform(.openLoginItemsSettings) == .unavailable, "先产生一条真实 debt")
         expect(
-            synchronouslyAcknowledgedIDs.map(\.rawValue) == [1]
+            synchronouslyAcknowledgedIDs == [1]
                 && session.state.pendingAnnouncement == nil
                 && session.state.presentationRevision >= 2,
             "@Published willSet 内同步 ack 后 public projection 不得被外层 stale state 覆盖")
@@ -423,6 +730,37 @@ private func settingsBracedBlock(after marker: String, in source: String) -> Str
         index = source.index(after: index)
     }
     return nil
+}
+
+private func settingsSinkStatementPrefix(after marker: String, in source: String) -> String? {
+    guard let markerRange = source.range(of: marker),
+        let sinkRange = source.range(
+            of: ".sink",
+            range: markerRange.upperBound..<source.endIndex),
+        let openingBrace = source[sinkRange.upperBound...].firstIndex(of: "{")
+    else {
+        return nil
+    }
+    return String(source[markerRange.lowerBound..<openingBrace])
+}
+
+private func settingsAnnouncementSchedulerHasLatchContract(_ source: String) -> Bool {
+    guard let deferredTurn = source.range(of: "DispatchQueue.main.async"),
+        let latchGuard = source.range(
+            of: "guard !settingsPresentationAnnouncementDeliveryScheduled"),
+        let latchSet = source.range(
+            of: "settingsPresentationAnnouncementDeliveryScheduled = true"),
+        let deferredBody = settingsBracedBlock(after: "DispatchQueue.main.async", in: source),
+        let latchReset = deferredBody.range(
+            of: "settingsPresentationAnnouncementDeliveryScheduled = false"),
+        let delivery = deferredBody.range(
+            of: "deliverPendingSettingsPresentationAnnouncement()")
+    else {
+        return false
+    }
+    return latchGuard.lowerBound < latchSet.lowerBound
+        && latchSet.lowerBound < deferredTurn.lowerBound
+        && latchReset.lowerBound < delivery.lowerBound
 }
 
 private struct DumpedSettingsPackageTarget {

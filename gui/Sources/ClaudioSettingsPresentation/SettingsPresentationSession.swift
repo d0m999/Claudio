@@ -20,7 +20,7 @@ package final class SettingsPresentationSession: ObservableObject {
     private var presentationRevision: UInt64 = 0
     private var isPublishingProjection = false
     private var projectionRepublishRequested = false
-    private var cancellables: Set<AnyCancellable> = []
+    private var preferenceCancellable: AnyCancellable?
 
     package init(
         dependencies: SettingsPresentationDependencies,
@@ -37,7 +37,7 @@ package final class SettingsPresentationSession: ObservableObject {
             pendingAnnouncement: nil,
             presentationRevision: 0)
 
-        dependencies.preferences.$snapshot
+        preferenceCancellable = dependencies.preferences.$snapshot
             .sink { [weak self] snapshot in
                 MainActor.assumeIsolated {
                     guard let self else { return }
@@ -45,16 +45,6 @@ package final class SettingsPresentationSession: ObservableObject {
                     self.publishProjection()
                 }
             }
-            .store(in: &cancellables)
-        dependencies.loginItemSettings.$projection
-            .sink { [weak self] projection in
-                MainActor.assumeIsolated {
-                    guard let self else { return }
-                    self.loginProjection = projection
-                    self.publishProjection()
-                }
-            }
-            .store(in: &cancellables)
     }
 
     package func setLanguageMode(_ languageMode: ClaudioLanguageMode) {
@@ -62,19 +52,26 @@ package final class SettingsPresentationSession: ObservableObject {
     }
 
     package func refreshLoginItem() {
-        let previousRegistration = loginProjection.registration
+        let previousProjection = loginProjection
         dependencies.loginItemSettings.refresh()
-        guard loginProjection.registration != previousRegistration else { return }
+        loginProjection = dependencies.loginItemSettings.projection
+        guard loginProjection != previousProjection else { return }
+        guard loginProjection.registration != previousProjection.registration else {
+            publishProjection()
+            return
+        }
         enqueueAnnouncement(.loginItemStatus(loginProjection.registration))
     }
 
     package func setLoginItemEnabled(_ enabled: Bool) {
         dependencies.loginItemSettings.setEnabled(enabled)
+        loginProjection = dependencies.loginItemSettings.projection
         enqueueLoginItemResult()
     }
 
     package func retryLoginItemOperation() {
         dependencies.loginItemSettings.retryFailedOperation()
+        loginProjection = dependencies.loginItemSettings.projection
         enqueueLoginItemResult()
     }
 
@@ -93,7 +90,7 @@ package final class SettingsPresentationSession: ObservableObject {
     }
 
     package func acknowledgeAnnouncement(
-        id: SettingsPresentationAnnouncement.ID,
+        id: UInt64,
         didPost: Bool
     ) {
         guard didPost, pendingAnnouncement?.id == id else { return }
@@ -112,7 +109,7 @@ package final class SettingsPresentationSession: ObservableObject {
     private func enqueueAnnouncement(_ meaning: SettingsPresentationAnnouncement.Meaning) {
         nextAnnouncementID &+= 1
         pendingAnnouncement = SettingsPresentationAnnouncement(
-            id: .init(rawValue: nextAnnouncementID),
+            id: nextAnnouncementID,
             meaning: meaning)
         publishProjection()
     }
