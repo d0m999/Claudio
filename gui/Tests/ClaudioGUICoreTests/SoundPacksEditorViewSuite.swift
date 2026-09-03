@@ -16,7 +16,7 @@ func runSoundPacksEditorViewSuites() async {
                 action: "Restore",
                 message: "Retained",
                 recovery: .retryFactoryRestores(packIDs: ["pack-a"]))
-            let model = SoundPacksWindowModel(
+            let owner = SoundPacksEditorOwner.stateGalleryFixture(
                 previewConfig: ClaudioConfig(selectedPack: "pack-a", masterVolume: 0.4),
                 packCards: [
                     PackCard(
@@ -37,12 +37,7 @@ func runSoundPacksEditorViewSuites() async {
                 },
                 windowStatuses: [status],
                 environment: makeAudioImportEnvironment(
-                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)),
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let owner = SoundPacksEditorOwner(
-                model: model,
-                userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
-            _ = owner.send(.activate(.sounds(route: .overview, requestRevision: 701)))
+                    userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true)))
 
             guard case .sounds(let sounds) = owner.presentation.mode else {
                 expect(false, "owner 必须发布 Sounds presentation")

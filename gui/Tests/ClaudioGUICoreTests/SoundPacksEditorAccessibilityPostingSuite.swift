@@ -6,7 +6,7 @@ import Foundation
 import SoundPacksWindow
 
 @MainActor
-func runSoundPacksEditorAccessibilityPostingSuites() {
+func runSoundPacksEditorAccessibilityPostingSuites() async {
     suite("SoundPacks editor accessibility：operation semantic renderer 穷尽动作且不泄露目标") {
         let kinds: [SoundPackEditorActivityKind] = [
             .use, .toggleStar, .fork, .importAudio, .assign, .clear, .deletePack,
@@ -65,25 +65,24 @@ func runSoundPacksEditorAccessibilityPostingSuites() {
             "unchanged/failed/cancelled 必须穷尽 changed-on-disk 事实且不暴露内部 failure case")
     }
 
-    suite("SoundPacks editor accessibility：visible/key/active gate 与 exact-ID ack 保持原子") {
-        withTempDirectory { root in
+    await suite("SoundPacks editor accessibility：visible/key/active gate 与 exact-ID ack 保持原子") {
+        await withTempDirectory { root in
             let environment = makeAudioImportEnvironment(
                 userPacksDirectory: root.appendingPathComponent("packs", isDirectory: true))
-            let model = SoundPacksWindowModel(
+            let owner = SoundPacksEditorOwner.stateGalleryFixture(
                 previewConfig: ClaudioConfig(selectedPack: "global-pack"),
-                packCards: [],
+                packCards: [
+                    PackCard(
+                        id: "pack-a",
+                        name: "Pack A",
+                        isCC0: true,
+                        presentEvents: [],
+                        state: .complete,
+                        isSelected: false)
+                ],
                 selectedPackID: nil,
                 selectedEventRows: [],
-                environment: environment,
-                refreshCoordinator: SoundPacksRefreshCoordinator())
-            let owner = SoundPacksEditorOwner(
-                model: model,
-                userPacksDirectory: environment.userPacksDirectory)
-            _ = owner.send(
-                .activate(
-                    .sounds(
-                        route: .overview(surface: nil),
-                        requestRevision: 1)))
+                environment: environment)
             guard let opened = owner.presentation.pendingAnnouncement else {
                 expect(false, "Sounds activate 必须产生 window-opened semantic debt")
                 return
@@ -138,12 +137,14 @@ func runSoundPacksEditorAccessibilityPostingSuites() {
                         == NSAccessibilityPriorityLevel.medium.rawValue,
                 "window-opened notice 只能发起一次 medium-priority post")
 
-            _ = owner.model.useSelectedPack()
-            _ = owner.send(
-                .activate(
-                    .sounds(
-                        route: .overview(surface: nil),
-                        requestRevision: 2)))
+            guard case .sounds(let sounds) = owner.presentation.mode,
+                let useAction = sounds.packs.first?.useAction,
+                case .accepted(let operationID) = owner.send(.invoke(useAction))
+            else {
+                expect(false, "owner fixture 必须签发可失败的 use capability")
+                return
+            }
+            await owner.waitForScheduledOperationExitForTesting(operationID)
             guard
                 let failure = owner.presentation.pendingAnnouncement,
                 failure.id != opened.id
@@ -153,7 +154,7 @@ func runSoundPacksEditorAccessibilityPostingSuites() {
             }
             expect(
                 poster.attempts[0].request.sentence
-                    == "声音包管理窗口。没有可管理的声音包。",
+                    == "声音包管理窗口。共 1 个声音包。尚未选择要检查的声音包。",
                 "已签发的 window-opened request 必须是完整语义句")
 
             poster.completeFirstAttempt()
@@ -180,7 +181,7 @@ func runSoundPacksEditorAccessibilityPostingSuites() {
                     && poster.attempts[0].request.priority
                         == NSAccessibilityPriorityLevel.high.rawValue
                     && poster.attempts[0].request.sentence
-                        == "用这个包失败：没有选中的声音包，当前使用项未改变。",
+                        == "用这个包失败。",
                 "failure head 必须以 exact semantic sentence 和 high priority 进入 adapter，实得 "
                     + "\(poster.attempts.map(\.request))")
             poster.completeFirstAttempt()

@@ -4,20 +4,6 @@ import Foundation
 
 @MainActor
 func runSoundPacksEditorAnnouncementGapRedSuites() async {
-    await suite("[129-ANN-RED] legacy caller 未激活新 interface 时不积累 shadow debt") {
-        await withTempDirectory { root in
-            let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a"])
-            await fixture.library.waitUntilIdleForTesting()
-            _ = fixture.owner.model.selectPackForInspection("pack-a")
-            _ = fixture.owner.model.useSelectedPack()
-            await Task.yield()
-
-            expect(
-                fixture.owner.presentation.pendingAnnouncement == nil,
-                "[129-ANN-RED] Phase 1 旧 production caller 尚未迁移时不能让新 queue 无界积累")
-        }
-    }
-
     await suite("[129-ANN-RED] window open 形成可重试 semantic debt") {
         await withTempDirectory { root in
             let fixture = makeSoundEditorFixture(root: root, packIDs: ["pack-a"])
